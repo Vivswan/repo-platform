@@ -1,0 +1,60 @@
+# Weekly: regenerate template/.gitignore.jinja from the latest github/gitignore
+# and open a PR when upstream changed anything we consume.
+
+name: Refresh gitignore
+
+on:
+  schedule:
+    - cron: "7 5 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # Base the refresh on the default branch regardless of trigger ref.
+          ref: ${{ github.event.repository.default_branch }}
+          token: ${{ secrets.REPO_PLATFORM_TOKEN || github.token }}
+
+      - name: Regenerate from latest upstream
+        run: python3 scripts/build_gitignore.py
+
+      - name: Detect changes
+        id: changes
+        run: |
+          if git diff --quiet; then
+            echo "gitignore templates are up to date."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Commit, push, and open PR
+        if: steps.changes.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN || github.token }}
+          BASE_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          sha="$(cat scripts/gitignore.lock)"
+          branch="automation/gitignore-refresh"
+          git config user.name "repo-platform-sync"
+          git config user.email "repo-platform-sync@users.noreply.github.com"
+          git checkout -B "$branch"
+          git add scripts/gitignore.lock template/.gitignore.jinja .gitignore
+          git commit -m "chore: refresh gitignore templates from github/gitignore@${sha:0:12}"
+          git push --force origin "$branch"
+
+          existing="$(gh pr list --head "$branch" --json number --jq '.[0].number // empty')"
+          if [ -z "$existing" ]; then
+            gh pr create \
+              --base "$BASE_BRANCH" \
+              --head "$branch" \
+              --title "chore: refresh gitignore templates from github/gitignore" \
+              --body "Automated regeneration of \`template/.gitignore.jinja\` from [github/gitignore@\`${sha:0:12}\`](https://github.com/github/gitignore/tree/${sha}). Merging this and cutting a release propagates it to managed repos on their next sync."
+          fi

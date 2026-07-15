@@ -1,0 +1,231 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  actionlint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Download actionlint
+        run: bash <(curl -sSL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
+      - name: Lint workflows
+        run: ./actionlint -color
+
+  yamllint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install yamllint
+        run: pip install --quiet yamllint
+      - name: Lint YAML
+        run: yamllint -s .
+
+  biome:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+      - name: Install tooling
+        run: bun install --frozen-lockfile --silent
+      - name: Biome (lint + format check)
+        run: bun x biome ci .
+
+  ruff:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v5
+      - name: Ruff lint
+        run: uvx ruff check .
+      - name: Ruff format check
+        run: uvx ruff format --check .
+
+  typography:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./actions/check-typography
+
+  commit-names:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: ./actions/validate-commit-names
+
+  typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+      - name: Typecheck action scripts
+        run: |
+          for dir in actions/check-typography actions/validate-commit-names; do
+            echo "::group::$dir"
+            (cd "$dir" && bun install --frozen-lockfile --silent && bun x tsc -p .)
+            echo "::endgroup::"
+          done
+
+  gitignore-fresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Verify template/.gitignore.jinja matches the lock
+        run: python3 scripts/build_gitignore.py --check
+
+  validate-template:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install pyyaml
+        run: pip install --quiet pyyaml
+      - name: Validate repo-platform against its own conventions
+        run: python3 actions/validate-template/validate_generated_files.py --self .
+
+  smoke-generate:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - stack: bun-ts
+            profile: full
+            private: "false"
+          - stack: bun-ts
+            profile: minimal
+            private: "false"
+          - stack: python-uv
+            profile: full
+            private: "false"
+          - stack: python-uv
+            profile: minimal
+            private: "true"
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Install copier + pyyaml
+        run: |
+          pipx install copier
+          pip install --quiet pyyaml
+      - name: Generate ${{ matrix.stack }}/${{ matrix.profile }}
+        env:
+          STACK: ${{ matrix.stack }}
+          PROFILE: ${{ matrix.profile }}
+          PRIVATE: ${{ matrix.private }}
+        run: |
+          copier copy "$GITHUB_WORKSPACE" /tmp/smoke \
+            --vcs-ref HEAD --defaults --trust \
+            -d project_name="Smoke Test" \
+            -d description="Smoke-test project" \
+            -d stack="$STACK" \
+            -d profile="$PROFILE" \
+            -d private="$PRIVATE"
+      - name: Validate generated output
+        run: python3 actions/validate-template/validate_generated_files.py /tmp/smoke
+      - name: Verify agent-file symlinks
+        run: |
+          test -L /tmp/smoke/CLAUDE.md
+          test -L /tmp/smoke/.github/copilot-instructions.md
+          test -L /tmp/smoke/.github/agents.md
+          test "$(readlink /tmp/smoke/CLAUDE.md)" = "AGENTS.md"
+          test -f /tmp/smoke/AGENTS.md
+      - name: Verify profile/visibility gating
+        env:
+          PROFILE: ${{ matrix.profile }}
+          PRIVATE: ${{ matrix.private }}
+        run: |
+          if [ "$PROFILE" = "full" ]; then
+            test -f /tmp/smoke/.github/workflows/pr-title.yml
+            test -f /tmp/smoke/.github/workflows/auto-assign.yml
+            test -d /tmp/smoke/.github/ISSUE_TEMPLATE
+          else
+            test ! -e /tmp/smoke/.github/workflows/pr-title.yml
+            test ! -e /tmp/smoke/.github/workflows/auto-assign.yml
+            test ! -e /tmp/smoke/.github/ISSUE_TEMPLATE
+          fi
+          if [ "$PRIVATE" = "true" ]; then
+            test ! -e /tmp/smoke/SECURITY.md
+            test ! -e /tmp/smoke/.github/workflows/codeql.yml
+          else
+            test -f /tmp/smoke/SECURITY.md
+            test -f /tmp/smoke/.github/workflows/codeql.yml
+          fi
+          test -f /tmp/smoke/.github/workflows/template-sync.yml
+
+  # Generate from the previous release, then `copier update` to HEAD - the
+  # path every managed repo actually takes. Exits cleanly when no previous
+  # release tag exists yet (first release).
+  upgrade-path:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Install copier + pyyaml
+        run: |
+          pipx install copier
+          pip install --quiet pyyaml
+      - name: Update from previous release to HEAD
+        run: |
+          prev="$(git tag --list 'v*' --sort=-v:refname | head -1)"
+          if [ -z "$prev" ]; then
+            echo "No previous release tag; skipping upgrade-path test."
+            exit 0
+          fi
+          echo "Testing upgrade path ${prev} -> HEAD"
+          copier copy "$GITHUB_WORKSPACE" /tmp/upgrade \
+            --vcs-ref "$prev" --defaults --trust \
+            -d project_name="Upgrade Test" \
+            -d description="Upgrade-path project" \
+            -d stack="python-uv" \
+            -d profile="full" \
+            -d private="false"
+          cd /tmp/upgrade
+          git init -b main
+          git add --all
+          git -c user.name=ci -c user.email=ci@localhost commit -q -m "chore: init"
+          copier update --vcs-ref HEAD --defaults --trust
+          python3 "$GITHUB_WORKSPACE/actions/validate-template/validate_generated_files.py" /tmp/upgrade
+
+  all-green:
+    name: all-green
+    if: always()
+    needs:
+      - actionlint
+      - yamllint
+      - biome
+      - ruff
+      - typography
+      - commit-names
+      - typecheck
+      - gitignore-fresh
+      - validate-template
+      - smoke-generate
+      - upgrade-path
+    runs-on: ubuntu-latest
+    steps:
+      - name: All jobs green
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "results: $RESULTS"
+          for result in $RESULTS; do
+            if [ "$result" != "success" ]; then
+              echo "::error::a required job did not succeed"
+              exit 1
+            fi
+          done

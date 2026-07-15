@@ -1,0 +1,25 @@
+# Cuts releases via release-please: merging to main accumulates conventional
+# commits into a release PR; merging that PR tags vX.Y.Z and publishes the
+# GitHub release, which managed repos pick up on their next template sync.
+#
+# Same token fallback as template-sync: with REPO_PLATFORM_TOKEN the release
+# PR triggers CI normally; with the default GITHUB_TOKEN it needs a
+# close/reopen to run checks.
+
+name: Release Please
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: googleapis/release-please-action@v4
+        with:
+          token: ${{ secrets.REPO_PLATFORM_TOKEN || github.token }}
