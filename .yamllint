@@ -1,0 +1,15 @@
+# This repo's copy of the template's shared yamllint configuration.
+extends: default
+
+ignore:
+  - .venv
+  - node_modules
+  - template # .jinja files are not valid YAML pre-render
+
+rules:
+  document-start: disable # no --- preamble required
+  line-length: disable # workflow `if:` expressions run long
+  truthy:
+    check-keys: false # GitHub workflows' `on:` key is fine
+  comments:
+    min-spaces-from-content: 1

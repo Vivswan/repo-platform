@@ -1,0 +1,110 @@
+# Reusable auto-assign. Callers trigger on issues/pull_request (and, on
+# CodeQL-enabled repos, workflow_run + schedule for code scanning alerts);
+# the caller's event context flows through.
+
+name: Reusable Auto Assign
+
+on:
+  workflow_call: {}
+
+jobs:
+  assign:
+    # Dependabot PR runs get a read-only GITHUB_TOKEN; the write calls below
+    # would fail, so skip them (Dependabot PRs are labeled by dependabot.yml).
+    if: >-
+      (github.event_name == 'issues' || github.event_name == 'pull_request') &&
+      github.actor != 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      pull-requests: write
+    steps:
+      - name: Assign issue to owner
+        if: github.event_name == 'issues'
+        uses: actions/github-script@v9
+        with:
+          script: |
+            await github.rest.issues.addAssignees({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              assignees: [context.repo.owner]
+            });
+
+      - name: Assign PR to owner
+        if: github.event_name == 'pull_request' && github.event.action == 'opened' && github.event.pull_request.head.repo.full_name == github.repository
+        uses: actions/github-script@v9
+        with:
+          script: |
+            await github.rest.issues.addAssignees({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.pull_request.number,
+              assignees: [context.repo.owner]
+            });
+
+      # CODEOWNERS auto-requests the owner on protected-branch PRs, but not on
+      # every PR (and never when this workflow itself didn't fire). Request the
+      # code owner as a reviewer too, skipping owner-authored PRs -- GitHub
+      # rejects a self-review request with 422.
+      - name: Request review from code owner
+        if: github.event_name == 'pull_request' && github.event.action == 'opened' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login != github.repository_owner
+        uses: actions/github-script@v9
+        with:
+          script: |
+            await github.rest.pulls.requestReviewers({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.payload.pull_request.number,
+              reviewers: [context.repo.owner]
+            });
+
+      - name: Add fix-lint label to same-repo PRs
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        uses: actions/github-script@v9
+        with:
+          script: |
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.pull_request.number,
+              labels: ['fix-lint']
+            });
+
+  # Assign open, currently-unassigned code scanning alerts to the repo owner.
+  # No Actions trigger exists for alert creation, so this polls after CodeQL
+  # completes (workflow_run) and weekly (schedule). Idempotent: alerts that
+  # already have an assignee are skipped. Code scanning only exists on a
+  # public repo (or GHAS), matching the codeql workflow's private guard.
+  assign-code-scanning:
+    if: >-
+      github.event.repository.private == false &&
+      github.event_name != 'issues' &&
+      github.event_name != 'pull_request' &&
+      (github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success')
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+    steps:
+      - name: Assign open alerts to owner
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const assignee = context.repo.owner;
+            const alerts = await github.paginate(
+              github.rest.codeScanning.listAlertsForRepo,
+              { owner, repo, state: 'open', per_page: 100 }
+            );
+            let assigned = 0;
+            for (const alert of alerts) {
+              if (alert.assignees && alert.assignees.length > 0) continue;
+              await github.request(
+                'PATCH /repos/{owner}/{repo}/code-scanning/alerts/{alert_number}',
+                { owner, repo, alert_number: alert.number, assignees: [assignee] }
+              );
+              core.info(`assigned alert #${alert.number} to ${assignee}`);
+              assigned++;
+            }
+            core.info(`assigned ${assigned} of ${alerts.length} open alert(s)`);

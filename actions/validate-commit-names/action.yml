@@ -1,0 +1,16 @@
+name: Validate Commit Names
+description: >-
+  Fails when any commit subject in the push/PR range is not a Conventional
+  Commit (feat/fix/chore/docs/...). Merge commits are skipped. Requires the
+  repository to be checked out with fetch-depth: 0 so the base..head range
+  is resolvable on pull_request events.
+
+runs:
+  using: composite
+  steps:
+    - name: Set up bun
+      uses: oven-sh/setup-bun@v2
+
+    - name: Validate commit subjects
+      shell: bash
+      run: bun "${{ github.action_path }}/validate-commit-names.ts"

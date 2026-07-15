@@ -1,0 +1,14 @@
+# Caller of this repo's own reusable PR title check (local reference).
+
+name: PR Title
+
+on:
+  pull_request_target:
+    types: [opened, edited, reopened, synchronize]
+
+permissions:
+  pull-requests: read
+
+jobs:
+  conventional-title:
+    uses: ./.github/workflows/reusable-pr-title.yml

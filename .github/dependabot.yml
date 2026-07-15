@@ -1,0 +1,36 @@
+# This repo's counterpart of the template's dependabot.yml.
+
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    cooldown:
+      default-days: 7
+
+  # Root tooling manifest (biome, husky).
+  - package-ecosystem: "bun"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    cooldown:
+      default-days: 7
+
+  # monaco-editor dependency of the check-typography action. The action dir
+  # commits bun.lock, so the bun ecosystem keeps both manifest and lockfile
+  # current.
+  - package-ecosystem: "bun"
+    directory: "/actions/check-typography"
+    schedule:
+      interval: "monthly"
+    cooldown:
+      default-days: 7
+
+  # Dev-only manifest (@types/node, typescript) for the commit-names action.
+  - package-ecosystem: "bun"
+    directory: "/actions/validate-commit-names"
+    schedule:
+      interval: "monthly"
+    cooldown:
+      default-days: 7

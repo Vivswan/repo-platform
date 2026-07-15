@@ -1,0 +1,9 @@
+{
+  "name": "validate-commit-names",
+  "private": true,
+  "description": "Dev-only manifest for editor/typecheck support; the action itself has no runtime dependencies.",
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.0"
+  }
+}

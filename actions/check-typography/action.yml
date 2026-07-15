@@ -1,0 +1,31 @@
+name: Check Typography
+description: >-
+  Fails on typographic look-alike and invisible unicode characters (curly
+  quotes, dash look-alikes, Trojan-Source bidi controls, VS Code's ambiguous
+  confusables). Per-repo exemptions via a .typography-allow file listing
+  relative path prefixes to skip.
+
+inputs:
+  path:
+    description: Directory to scan
+    required: false
+    default: "."
+
+runs:
+  using: composite
+  steps:
+    - name: Set up bun
+      uses: oven-sh/setup-bun@v2
+
+    - name: Install character tables (monaco-editor)
+      shell: bash
+      working-directory: ${{ github.action_path }}
+      # --production: dev deps (@types/node, typescript) are editor/typecheck
+      # tooling, not needed to run the check.
+      run: bun install --frozen-lockfile --production --silent
+
+    - name: Check typography
+      shell: bash
+      env:
+        SCAN_PATH: ${{ inputs.path }}
+      run: bun "${{ github.action_path }}/check-typography.ts" "$SCAN_PATH"

@@ -1,0 +1,35 @@
+# Caller of this repo's own reusable CodeQL workflow (local reference).
+# Two languages: python (scripts, template validator) and
+# javascript-typescript (composite-action scripts).
+
+name: CodeQL
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "23 4 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  codeql-python:
+    uses: ./.github/workflows/reusable-codeql.yml
+    with:
+      language: python
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+
+  codeql-javascript:
+    uses: ./.github/workflows/reusable-codeql.yml
+    with:
+      language: javascript-typescript
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
