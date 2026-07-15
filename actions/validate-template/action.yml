@@ -1,0 +1,24 @@
+name: Validate Template
+description: >-
+  Runs repo-platform's validate_generated_files.py against the repository:
+  managed/local markers appear exactly once, YAML parses, no unresolved
+  conflict markers, and ci.yml follows the all-green + typography convention.
+
+inputs:
+  path:
+    description: Directory to validate
+    required: false
+    default: "."
+
+runs:
+  using: composite
+  steps:
+    - name: Set up uv
+      uses: astral-sh/setup-uv@v5
+
+    - name: Validate
+      shell: bash
+      env:
+        SCAN_PATH: ${{ inputs.path }}
+      # uv reads the script's PEP 723 metadata and provisions pyyaml itself.
+      run: uv run "${{ github.action_path }}/validate_generated_files.py" "$SCAN_PATH"

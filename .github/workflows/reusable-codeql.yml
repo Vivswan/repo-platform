@@ -1,0 +1,41 @@
+# Reusable CodeQL analysis, parameterized by language.
+
+name: Reusable CodeQL
+
+on:
+  workflow_call:
+    inputs:
+      language:
+        description: CodeQL language (javascript-typescript or python)
+        required: true
+        type: string
+      config:
+        description: Optional inline CodeQL config (e.g. paths-ignore)
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    name: analyze (${{ inputs.language }})
+    # Code scanning requires a public repo (or GHAS); skip gracefully if private.
+    if: github.event.repository.private == false
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ inputs.language }}
+          config: ${{ inputs.config }}
+
+      - uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:${{ inputs.language }}"

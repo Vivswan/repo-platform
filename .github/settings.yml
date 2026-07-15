@@ -1,0 +1,89 @@
+---
+# Repository settings managed by the Probot "Settings" GitHub App
+# (https://github.com/apps/settings). This file is inert unless that app is
+# installed on the repo. The `rulesets` block below is an experimental upstream
+# feature (repository-settings/app) -- its schema may still change.
+
+repository:
+  description: Copier template + reusable workflows managing standards across Vivswan's repositories
+  topics: copier, template, github-actions, reusable-workflows, standards
+  has_issues: true
+  has_wiki: false
+  has_projects: false
+  has_discussions: false
+  default_branch: main
+  allow_squash_merge: true
+  allow_merge_commit: false
+  allow_rebase_merge: false
+  delete_branch_on_merge: true
+  allow_auto_merge: true
+  enable_vulnerability_alerts: true
+  enable_automated_security_fixes: true
+
+labels:
+  - name: dependencies
+    color: "0366d6"
+    description: Dependency updates
+  - name: bug
+    color: "d73a4a"
+    description: Something isn't working
+  - name: enhancement
+    color: "a2eeef"
+    description: New feature or request
+  - name: fix-lint
+    color: "fbca04"
+    description: Lint / formatting fixes
+  # release-please manages these two; listing them here keeps the settings
+  # sync from deleting them (it removes any label not declared in this file).
+  - name: "autorelease: pending"
+    color: "ededed"
+    description: release-please release PR awaiting merge/tag
+  - name: "autorelease: tagged"
+    color: "ededed"
+    description: release-please release PR has been tagged
+
+# Branch ruleset for the default branch. Admins (RepositoryRole id 5) are in
+# the bypass list, so direct pushes to main still work. The single required
+# status check is `all-green` (ci.yml), which `needs:` every CI job.
+rulesets:
+  - name: main
+    target: branch
+    enforcement: active
+    conditions:
+      ref_name:
+        include:
+          - "~DEFAULT_BRANCH"
+        exclude: []
+    rules:
+      - type: deletion
+      - type: non_fast_forward
+      - type: required_linear_history
+      - type: required_status_checks
+        parameters:
+          strict_required_status_checks_policy: false
+          do_not_enforce_on_create: true
+          required_status_checks:
+            - context: all-green
+      - type: code_scanning
+        parameters:
+          code_scanning_tools:
+            - tool: CodeQL
+              security_alerts_threshold: high_or_higher
+              alerts_threshold: errors
+      - type: pull_request
+        parameters:
+          required_approving_review_count: 0
+          dismiss_stale_reviews_on_push: false
+          require_code_owner_review: true
+          require_last_push_approval: false
+          required_review_thread_resolution: false
+          allowed_merge_methods:
+            - squash
+      - type: copilot_code_review
+        parameters:
+          review_on_push: true
+          review_draft_pull_requests: true
+    bypass_actors:
+      - actor_id: 5
+        actor_type: RepositoryRole
+        bypass_mode: always
