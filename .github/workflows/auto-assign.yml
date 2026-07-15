@@ -1,0 +1,28 @@
+# Caller of this repo's own reusable auto-assign (local reference).
+
+name: Auto Assign
+
+on:
+  workflow_dispatch:
+  issues:
+    types: [opened]
+  pull_request:
+    types: [opened, synchronize]
+  # Code scanning alerts have no creation trigger for Actions, so assign them
+  # after each CodeQL run completes, with a weekly cron as a catch-up.
+  workflow_run:
+    workflows: ["CodeQL"]
+    types: [completed]
+  schedule:
+    - cron: "23 6 * * 1"
+
+permissions:
+  issues: write
+  pull-requests: write
+  # workflow_dispatch activates the code-scanning-alert assignment job in the
+  # reusable workflow (public repo), which needs this.
+  security-events: write
+
+jobs:
+  auto-assign:
+    uses: ./.github/workflows/reusable-auto-assign.yml

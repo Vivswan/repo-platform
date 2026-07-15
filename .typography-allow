@@ -1,0 +1,6 @@
+# Path prefixes exempt from the check-typography action.
+
+# github/gitignore's macOS template intentionally contains a literal
+# carriage return (the `Icon[\r]` pattern - the macOS Icon file really has
+# a CR in its filename). The generated template must preserve it.
+template/.gitignore.jinja

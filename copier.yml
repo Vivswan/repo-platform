@@ -1,0 +1,76 @@
+# Copier template configuration for Vivswan/repo-platform.
+# Downstream repos are generated/updated from the template/ subdirectory.
+
+_min_copier_version: "9.2.0"
+_subdirectory: template
+_answers_file: .copier-answers.yml
+_templates_suffix: .jinja
+_preserve_symlinks: true
+
+# Migrations use FROM-version naming (see migrations/run.py): each script in
+# migrations/ is named for the release it migrates away from, so authoring
+# never requires predicting the next release number. Copier invokes the
+# runner once per update; selection happens inside it.
+_migrations:
+  - command: python3 "{{ _copier_conf.src_path }}/migrations/run.py"
+    when: "{{ _stage == 'after' }}"
+
+project_name:
+  type: str
+  help: Human-readable project name
+
+project_slug:
+  type: str
+  help: Repository / package identifier (kebab-case)
+  default: "{{ project_name | lower | replace(' ', '-') }}"
+
+description:
+  type: str
+  help: One-line repository description (used in settings.yml)
+
+homepage:
+  type: str
+  help: Homepage URL (optional, used in settings.yml)
+  default: ""
+
+topics:
+  type: str
+  help: Comma-separated GitHub topics (used in settings.yml)
+  default: ""
+
+stack:
+  type: str
+  help: Primary toolchain
+  choices:
+    - bun-ts
+    - python-uv
+
+profile:
+  type: str
+  help: full = all managed files; minimal = sync/settings/gitignore/agent files only
+  choices:
+    - full
+    - minimal
+  default: full
+
+private:
+  type: bool
+  help: Is the repository private?
+  default: false
+
+enable_release_please:
+  type: bool
+  help: Repo uses release-please (kept repo-owned; this only gates related conventions)
+  default: "{{ profile == 'full' }}"
+
+github_username:
+  type: str
+  help: GitHub username owning the repository
+  default: Vivswan
+
+# Computed - never asked. CodeQL code scanning is available on public repos
+# only for personal accounts.
+enable_codeql:
+  type: bool
+  default: "{{ not private }}"
+  when: false
