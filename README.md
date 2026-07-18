@@ -3,7 +3,8 @@
 Pull-based standards management for [@Vivswan](https://github.com/Vivswan)'s
 repositories: a [Copier](https://copier.readthedocs.io/) template plus
 reusable GitHub Actions workflows and composite actions. Managed repos pull
-template updates themselves; this repo never pushes to them.
+template updates themselves; this repo never pushes commits to them (a
+release only *dispatches* each repo's own sync workflow).
 
 ## How it works
 
@@ -12,11 +13,14 @@ template updates themselves; this repo never pushes to them.
 - Each managed repo carries a `template-sync.yml` workflow (weekly cron +
   manual dispatch). When a new release of this repo exists, it runs
   `copier update`, validates the result, and opens a PR **in its own repo**.
+- Publishing a release also **pushes**: `propagate.yml` dispatches every
+  managed repo's template-sync immediately (registry: `repos.yml`), so the
+  weekly pull is only the catch-all. Selective manual push:
+  `gh workflow run propagate.yml -f repo=Vivswan/skills`.
 - With a `REPO_PLATFORM_TOKEN` secret (fine-grained PAT, Contents:RW +
   Pull requests:RW on that repo) the sync PR triggers CI normally; without
   it, the PR is created with the default `GITHUB_TOKEN` and carries a
   close/reopen note.
-- Publishing a release here is passive: repos notice on their next sync.
 
 ## Layout
 
@@ -48,6 +52,7 @@ instructions.
 
 Releases are cut by release-please: conventional commits on `main`
 accumulate into a release PR; merging it tags `vX.Y.Z`, publishes the GitHub
-release, and updates `CHANGELOG.md`. Managed repos pick the release up on
-their next weekly sync, or immediately via
+release, and updates `CHANGELOG.md`. Publishing the release pushes to all
+managed repos via `propagate.yml`; they also pull on their weekly sync as a
+catch-all, or immediately via
 `gh workflow run template-sync.yml -R Vivswan/<repo>`.

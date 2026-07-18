@@ -1,0 +1,105 @@
+# Push propagation: fan out template-sync dispatches to every managed repo.
+#
+# Push = centrally-triggered pull. Each managed repo's template-sync.yml is
+# workflow_dispatch-able with a `version` input; this workflow just triggers
+# it, so all update logic stays in reusable-template-sync.yml. Repos also
+# pull weekly on their own cron - push only removes the wait.
+#
+# Requires REPO_PLATFORM_TOKEN (fine-grained PAT, Actions:RW + Metadata:R on
+# the managed repos): the default GITHUB_TOKEN cannot dispatch cross-repo.
+# Note the release trigger itself also depends on that PAT being used by
+# release-please - releases created by the default GITHUB_TOKEN do not
+# trigger workflows.
+
+name: Propagate
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release tag to push (defaults to latest release)
+        required: false
+        type: string
+      repo:
+        description: Single owner/name to push to (defaults to all managed repos)
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  propagate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require dispatch token
+        env:
+          PAT: ${{ secrets.REPO_PLATFORM_TOKEN }}
+        run: |
+          if [ -z "$PAT" ]; then
+            echo "::error::REPO_PLATFORM_TOKEN is not set. Push propagation needs a fine-grained PAT (Actions:RW on managed repos). Repos still pull on their weekly cron."
+            exit 1
+          fi
+
+      - uses: actions/checkout@v7
+
+      - name: Resolve target version
+        id: version
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          REQUESTED: ${{ inputs.version }}
+        run: |
+          if [ -n "$RELEASE_TAG" ]; then
+            version="$RELEASE_TAG"
+          elif [ -n "$REQUESTED" ]; then
+            version="$REQUESTED"
+          else
+            version="$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq .tag_name)"
+          fi
+          echo "Propagating ${version}"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+
+      - name: Dispatch template-sync in managed repos
+        env:
+          GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
+          VERSION: ${{ steps.version.outputs.version }}
+          ONLY_REPO: ${{ inputs.repo }}
+        run: |
+          pip install --quiet pyyaml
+          repos="$(python3 -c '
+          import yaml
+          for repo in yaml.safe_load(open("repos.yml"))["managed"]:
+              print(repo)
+          ')"
+
+          failed=""
+          matched=0
+          for repo in $repos; do
+            if [ -n "$ONLY_REPO" ] && [ "$repo" != "$ONLY_REPO" ]; then
+              continue
+            fi
+            matched=$((matched + 1))
+            echo "::group::${repo}"
+            if output="$(gh workflow run template-sync.yml -R "$repo" -f version="$VERSION" 2>&1)"; then
+              echo "dispatched template-sync (${VERSION})"
+            elif echo "$output" | grep -qiE "could not find any workflows|404|Not Found"; then
+              # No template-sync.yml on the default branch: repo not adopted yet.
+              echo "::warning::${repo}: not adopted yet (no template-sync.yml); skipped"
+            else
+              echo "::error::${repo}: dispatch failed: ${output}"
+              failed="${failed} ${repo}"
+            fi
+            echo "::endgroup::"
+          done
+
+          if [ "$matched" -eq 0 ]; then
+            echo "::error::no registry entry matched '${ONLY_REPO}' - check repos.yml (entries are owner/name)"
+            exit 1
+          fi
+          if [ -n "$failed" ]; then
+            echo "::error::dispatch failed for:${failed}"
+            exit 1
+          fi
