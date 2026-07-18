@@ -94,6 +94,18 @@ jobs:
         run: pip install --quiet pyyaml
       - name: Validate repo-platform against its own conventions
         run: python3 actions/validate-template/validate_generated_files.py --self .
+      - name: Validate managed-repos registry
+        run: |
+          python3 -c '
+          import re, sys, yaml
+          repos = yaml.safe_load(open("repos.yml"))["managed"]
+          if not isinstance(repos, list):
+              sys.exit("repos.yml: `managed` must be a list")
+          bad = [r for r in repos if not re.fullmatch(r"[\w.-]+/[\w.-]+", str(r))]
+          if bad:
+              sys.exit(f"repos.yml: invalid entries: {bad}")
+          print(f"repos.yml: {len(repos)} managed repo(s) OK")
+          '
 
   smoke-generate:
     runs-on: ubuntu-latest
