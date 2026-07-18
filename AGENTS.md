@@ -9,7 +9,8 @@ symlinks to this file, so edit only here.
 repo-platform: a Copier template plus reusable GitHub Actions workflows and
 composite actions that manage standards files across Vivswan's repositories.
 Managed repos pull updates themselves (template-sync workflow); this repo
-never pushes to them.
+never pushes commits to them - a release only dispatches each repo's own
+sync (propagate.yml).
 
 ## Layout
 
@@ -23,6 +24,8 @@ never pushes to them.
   this repo's own `.gitignore` from the latest github/gitignore;
   `scripts/gitignore.lock` records the SHA.
 - `migrations/` holds copier `_migrations` scripts for breaking changes.
+- `repos.yml` lists managed repos; `.github/workflows/propagate.yml`
+  dispatches their template-sync on each release (push side of sync).
 
 ## Editing rules
 
