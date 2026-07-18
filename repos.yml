@@ -1,0 +1,10 @@
+# Managed repositories the propagate workflow dispatches template-sync to.
+# Adding a repo here is one line in a PR; the repo must already be adopted
+# (carry .github/workflows/template-sync.yml on its default branch), or the
+# dispatch is skipped with a warning until it is.
+managed:
+  - Vivswan/cloud-speech
+  - Vivswan/litellm-vscode-chat
+  - Vivswan/skills
+  - Vivswan/copilot-env
+  - Vivswan/dotfiles
