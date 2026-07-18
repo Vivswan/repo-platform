@@ -3,9 +3,10 @@
   "private": true,
   "description": "Tooling manifest for repo-platform (biome, husky); the template and actions carry their own dependencies.",
   "scripts": {
-    "check": "bun run lint && bun run typecheck && bun run typography && bun run lint:yaml && bun run validate && bun run gitignore:check",
+    "check": "bun run lint && bun run lint:actions && bun run typecheck && bun run typography && bun run lint:yaml && bun run validate && bun run gitignore:check",
     "check:fix": "bun x biome check --write . && uvx ruff check --fix . && uvx ruff format .",
     "lint": "bun x biome ci . && uvx ruff check . && uvx ruff format --check .",
+    "lint:actions": "if command -v actionlint >/dev/null; then actionlint; else echo 'actionlint not installed locally; CI runs it (brew install actionlint)'; fi",
     "typecheck": "(cd actions/check-typography && bun x tsc -p .) && (cd actions/validate-commit-names && bun x tsc -p .)",
     "typography": "bun actions/check-typography/check-typography.ts .",
     "lint:yaml": "uvx yamllint -s .",
