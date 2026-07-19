@@ -1,0 +1,41 @@
+# This file is managed by {{ github_username }}/repo-platform.
+# Local edits may be replaced during template updates.
+
+{#- The reusable workflow lives on main, not on the build branches: strip a
+    templates/vX.Y.Z build-tag _commit to the same-version release tag on
+    main; anything else (staging describe/sha strings, fresh copies) pins
+    main. -#}
+{%- set tpl_ref = _copier_answers._commit | default('', true) -%}
+{%- set release_pin = tpl_ref | regex_replace('^templates/(v[0-9]+\\.[0-9]+\\.[0-9]+)$', '\\1') -%}
+{%- set uses_ref = release_pin if (release_pin and release_pin != tpl_ref) else 'main' %}
+name: Auto Assign
+
+on:
+  workflow_dispatch:
+  issues:
+    types: [opened]
+  pull_request:
+    types: [opened, synchronize]
+{% if enable_codeql %}  # Code scanning alerts have no creation trigger for Actions, so assign them
+  # after each CodeQL run completes, with a weekly cron as a catch-up.
+  workflow_run:
+    workflows: ["CodeQL"]
+    types: [completed]
+  schedule:
+    - cron: "23 6 * * 1"
+{% endif %}
+# security-events is granted unconditionally: a reusable-workflow call is
+# statically validated against the permissions of EVERY job in the called
+# file regardless of each job's `if:`, so the alert-assignment job's
+# permissions must be grantable even where code scanning is disabled. The
+# code_scanning input below keeps that job from actually running there.
+permissions:
+  issues: write
+  pull-requests: write
+  security-events: write
+
+jobs:
+  auto-assign:
+    uses: {{ github_username }}/repo-platform/.github/workflows/reusable-auto-assign.yml@{{ uses_ref }}
+    with:
+      code_scanning: {{ 'true' if enable_codeql else 'false' }}

@@ -1,0 +1,138 @@
+# Copier template configuration for Vivswan/repo-platform.
+# Downstream repos are generated/updated from the template/ subdirectory,
+# which exists only on the generated staging/latest build branches (on main
+# it is a local gitignored build artifact; sources live in templates/).
+
+_min_copier_version: "9.8.0"
+_subdirectory: template
+_answers_file: .copier-answers.yml
+_templates_suffix: .jinja
+_preserve_symlinks: true
+
+# Migrations use FROM-version naming (see migrations/run.py): each script in
+# migrations/ is named for the release it migrates away from, so authoring
+# never requires predicting the next release number. Copier invokes the
+# runner once per update; selection happens inside it.
+_migrations:
+  - command: python3 "{{ _copier_conf.src_path }}/migrations/run.py"
+    when: "{{ _stage == 'after' }}"
+
+project_name:
+  type: str
+  help: Human-readable project name
+
+project_slug:
+  type: str
+  help: Repository / package identifier (kebab-case)
+  default: "{{ project_name | lower | replace(' ', '-') }}"
+
+description:
+  type: str
+  help: One-line repository description (used in settings.yml)
+
+homepage:
+  type: str
+  help: Homepage URL (optional, used in settings.yml)
+  default: ""
+
+topics:
+  type: str
+  help: Comma-separated GitHub topics (used in settings.yml)
+  default: ""
+
+# Which generated build branch this repo follows. Vivswan's own managed
+# repos follow staging; latest is the stable default for everything else.
+channel:
+  type: str
+  help: Template update channel this repo follows
+  choices:
+    latest - released template versions (templates/vX.Y.Z tags): latest
+    staging - main HEAD builds (testing; migrations are skipped): staging
+  default: latest
+
+# Feature modules: any combination. Each module gates the files/config it
+# owns; per-module parameters below are asked only when the module is
+# selected. Serialized multiselect answers (-d 'modules=[...]', and loading
+# recorded list answers on update) require copier >= 9.8.0 - the floor above.
+modules:
+  type: str
+  help: Feature modules (space toggles, enter confirms; any combination)
+  multiselect: true
+  choices:
+    agents - AGENTS.md agent instructions + CLAUDE.md/copilot symlinks: agents
+    bun - TypeScript/bun toolchain (gitignore, dependabot, CodeQL JS): bun
+    uv - Python/uv toolchain (gitignore, dependabot, CodeQL Python): uv
+    pages - GitHub Pages deploy (root = latest release, /staging/ = main): pages
+    release-please - autorelease labels + versioning conventions: release-please
+    issue-templates - bug/feature issue forms: issue-templates
+    pr-title - Conventional Commit PR title check: pr-title
+    auto-assign - auto-assign issues/PRs/alerts to owner: auto-assign
+  default: [agents, release-please, issue-templates, pr-title, auto-assign]
+
+# --- pages module parameters (asked only when pages is selected) ---
+
+pages_setup:
+  type: str
+  help: Toolchain installed on the Pages build runner
+  choices:
+    - bun
+    - uv
+    - none
+  default: "{{ 'bun' if 'bun' in modules else ('uv' if 'uv' in modules else 'none') }}"
+  when: "{{ 'pages' in modules }}"
+
+pages_install_command:
+  type: str
+  help: Dependency install command run before each build (empty to skip)
+  default: "{{ 'bun install --frozen-lockfile' if pages_setup == 'bun' else ('uv sync' if pages_setup == 'uv' else '') }}"
+  when: "{{ 'pages' in modules }}"
+
+pages_build_command:
+  type: str
+  help: Build command; PAGES_BASE_PATH, PAGES_ORIGIN, PAGES_STAGING are exported
+  default: "{{ 'bun run build' if pages_setup == 'bun' else ('uv run mkdocs build --site-dir dist' if pages_setup == 'uv' else '') }}"
+  validator: "{% if not pages_build_command %}A build command is required for the pages module{% endif %}"
+  when: "{{ 'pages' in modules }}"
+
+pages_dist_dir:
+  type: str
+  help: Build output directory (relative to repo root)
+  default: dist
+  # An empty/"."/absolute/traversing value (in any spelling: "./", "a/../b",
+  # trailing or doubled slashes) would make the deploy publish the whole
+  # checkout (including .git) as the Pages artifact. Segment-wise check:
+  # empty segments catch absolute/doubled/trailing slashes.
+  validator: "{% set parts = pages_dist_dir.split('/') %}{% if not pages_dist_dir or '' in parts or '.' in parts or '..' in parts %}pages_dist_dir must be a plain relative path inside the repo (no leading/trailing/doubled slashes, no '.' or '..' segments){% endif %}"
+  when: "{{ 'pages' in modules }}"
+
+pages_production:
+  type: str
+  help: What the production Pages root is built from
+  choices:
+    latest release tag (staging preview from main): release
+    main HEAD (no separate staging): main
+  default: release
+  when: "{{ 'pages' in modules }}"
+
+pages_staging:
+  type: bool
+  help: Also publish main HEAD under /staging/
+  default: true
+  when: "{{ 'pages' in modules and pages_production == 'release' }}"
+
+private:
+  type: bool
+  help: Is the repository private?
+  default: false
+
+github_username:
+  type: str
+  help: GitHub username owning the repository
+  default: Vivswan
+
+# Computed - never asked. CodeQL code scanning is available on public repos
+# only for personal accounts, and needs at least one analyzable toolchain.
+enable_codeql:
+  type: bool
+  default: "{{ not private and ('bun' in modules or 'uv' in modules) }}"
+  when: false
