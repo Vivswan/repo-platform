@@ -15,7 +15,9 @@ sync (propagate.yml).
 ## Layout
 
 - `copier.yml` + `template/` are rendered into downstream repos. Files end
-  in `.jinja`; conditional filenames gate emission by profile/visibility.
+  in `.jinja`; conditional filenames gate emission by the `modules`
+  multiselect answer and visibility. Per-module parameters (pages_*) are
+  asked only when their module is selected.
 - `.github/workflows/reusable-*.yml` are called cross-repo by thin
   downstream callers pinned to release tags.
 - `actions/` holds composite actions (check-typography, validate-template,
@@ -47,9 +49,10 @@ sync (propagate.yml).
 - `uv run actions/validate-template/validate_generated_files.py --self .` validates this repo
   against its own conventions.
 - Smoke-generate locally:
-  `copier copy . /tmp/out --vcs-ref HEAD --defaults --trust -d project_name=X -d description=Y -d stack=python-uv -d profile=full -d private=false`
-  then run the validator on `/tmp/out`. CI does this for all four
-  stack/profile combos plus an upgrade-path test from the previous release.
+  `copier copy . /tmp/out --vcs-ref HEAD --defaults --trust -d project_name=X -d description=Y -d 'modules=[uv]' -d private=false`
+  then run the validator on `/tmp/out`. CI does this for five module
+  combos plus an upgrade-path test from the previous release. The
+  multiselect value must be a YAML list in ONE `-d` argument.
 
 ## Conventions
 

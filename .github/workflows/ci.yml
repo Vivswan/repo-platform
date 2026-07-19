@@ -113,39 +113,64 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - stack: bun-ts
-            profile: full
+          # Module combos covering the risky branches. `modules` is a YAML
+          # STRING here (quoted) and parsed by copier as a YAML list.
+          - name: everything
+            modules: "[bun, uv, pages, release-please, issue-templates, pr-title, auto-assign]"
             private: "false"
-          - stack: bun-ts
-            profile: minimal
+            expect_in_pages: |
+              bun install --frozen-lockfile
+              bun run build
+          - name: bun-typical
+            modules: "[bun, release-please, issue-templates, pr-title, auto-assign]"
             private: "false"
-          - stack: python-uv
-            profile: full
-            private: "false"
-          - stack: python-uv
-            profile: minimal
+          - name: uv-pages-private
+            modules: "[uv, pages, auto-assign]"
             private: "true"
+            expect_in_pages: |
+              uv sync
+              uv run mkdocs build --site-dir dist
+          - name: pages-bare
+            modules: "[pages, auto-assign]"
+            private: "false"
+            extra_data: "-d pages_setup=none -d pages_build_command=./build.sh -d pages_production=main"
+            expect_in_pages: |
+              ./build.sh
+              production: main
+              staging: false
+          # Proves the declared _min_copier_version still supports the
+          # multiselect + when features the template uses (serialized
+          # multiselect answers landed in copier 9.8.0).
+          - name: none
+            modules: "[]"
+            private: "false"
+            copier_spec: "copier==9.8.0"
     steps:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - name: Install copier + pyyaml
-        run: |
-          pipx install copier
-          pip install --quiet pyyaml
-      - name: Generate ${{ matrix.stack }}/${{ matrix.profile }}
         env:
-          STACK: ${{ matrix.stack }}
-          PROFILE: ${{ matrix.profile }}
-          PRIVATE: ${{ matrix.private }}
+          COPIER_SPEC: ${{ matrix.copier_spec || 'copier' }}
         run: |
+          pipx install "$COPIER_SPEC"
+          pip install --quiet pyyaml
+      - name: Generate ${{ matrix.name }}
+        env:
+          MODULES: ${{ matrix.modules }}
+          PRIVATE: ${{ matrix.private }}
+          EXTRA_DATA: ${{ matrix.extra_data }}
+        run: |
+          # shellcheck disable=SC2086 # EXTRA_DATA is a list of extra -d args;
+          # values must stay whitespace-free (word splitting) - add a matrix
+          # field instead for anything that needs spaces.
           copier copy "$GITHUB_WORKSPACE" /tmp/smoke \
             --vcs-ref HEAD --defaults --trust \
             -d project_name="Smoke Test" \
             -d description="Smoke-test project" \
-            -d stack="$STACK" \
-            -d profile="$PROFILE" \
-            -d private="$PRIVATE"
+            -d "modules=$MODULES" \
+            -d private="$PRIVATE" \
+            $EXTRA_DATA
       - name: Validate generated output
         run: python3 actions/validate-template/validate_generated_files.py /tmp/smoke
       - name: Verify agent-file symlinks
@@ -155,28 +180,78 @@ jobs:
           test -L /tmp/smoke/.github/agents.md
           test "$(readlink /tmp/smoke/CLAUDE.md)" = "AGENTS.md"
           test -f /tmp/smoke/AGENTS.md
-      - name: Verify profile/visibility gating
+      - name: Verify module/visibility gating
         env:
-          PROFILE: ${{ matrix.profile }}
+          MODULES: ${{ matrix.modules }}
           PRIVATE: ${{ matrix.private }}
+          EXPECT_IN_PAGES: ${{ matrix.expect_in_pages }}
         run: |
-          if [ "$PROFILE" = "full" ]; then
-            test -f /tmp/smoke/.github/workflows/pr-title.yml
-            test -f /tmp/smoke/.github/workflows/auto-assign.yml
-            test -d /tmp/smoke/.github/ISSUE_TEMPLATE
-          else
-            test ! -e /tmp/smoke/.github/workflows/pr-title.yml
-            test ! -e /tmp/smoke/.github/workflows/auto-assign.yml
-            test ! -e /tmp/smoke/.github/ISSUE_TEMPLATE
+          wf=/tmp/smoke/.github/workflows
+          mods=",$(echo "$MODULES" | tr -d '[] '),"
+          has() { case "$mods" in *",$1,"*) return 0 ;; *) return 1 ;; esac; }
+          present() { grep -qF -- "$1" "$2" || { echo "::error::missing '$1' in $2"; exit 1; }; }
+          absent() { if grep -qF -- "$1" "$2"; then echo "::error::unexpected '$1' in $2"; exit 1; fi; }
+
+          if has pr-title; then test -f "$wf/pr-title.yml"; else test ! -e "$wf/pr-title.yml"; fi
+          if has auto-assign; then test -f "$wf/auto-assign.yml"; else test ! -e "$wf/auto-assign.yml"; fi
+          if has issue-templates; then test -d /tmp/smoke/.github/ISSUE_TEMPLATE; else test ! -e /tmp/smoke/.github/ISSUE_TEMPLATE; fi
+          if has pages; then test -f "$wf/pages.yml"; else test ! -e "$wf/pages.yml"; fi
+
+          # auto-assign: security-events is always granted (static validation of
+          # the reusable call); the CodeQL-driven triggers and the code_scanning
+          # input follow enable_codeql (= public AND a toolchain module).
+          if has auto-assign; then
+            present "security-events: write" "$wf/auto-assign.yml"
+            if [ "$PRIVATE" != "true" ] && { has bun || has uv; }; then
+              present "workflow_run:" "$wf/auto-assign.yml"
+              present "code_scanning: true" "$wf/auto-assign.yml"
+            else
+              absent "workflow_run:" "$wf/auto-assign.yml"
+              present "code_scanning: false" "$wf/auto-assign.yml"
+            fi
           fi
-          if [ "$PRIVATE" = "true" ]; then
-            test ! -e /tmp/smoke/SECURITY.md
-            test ! -e /tmp/smoke/.github/workflows/codeql.yml
+
+          # CodeQL: public AND at least one analyzable toolchain; one job per language.
+          if [ "$PRIVATE" != "true" ] && { has bun || has uv; }; then
+            test -f "$wf/codeql.yml"
+            if has bun; then present "language: javascript-typescript" "$wf/codeql.yml"; else absent "language: javascript-typescript" "$wf/codeql.yml"; fi
+            if has uv; then present "language: python" "$wf/codeql.yml"; else absent "language: python" "$wf/codeql.yml"; fi
           else
-            test -f /tmp/smoke/SECURITY.md
-            test -f /tmp/smoke/.github/workflows/codeql.yml
+            test ! -e "$wf/codeql.yml"
           fi
-          test -f /tmp/smoke/.github/workflows/template-sync.yml
+
+          if [ "$PRIVATE" = "true" ]; then test ! -e /tmp/smoke/SECURITY.md; else test -f /tmp/smoke/SECURITY.md; fi
+
+          # gitignore toolchain sections; the four markers are asserted by the validator.
+          if has bun; then present "## Node " /tmp/smoke/.gitignore; else absent "## Node " /tmp/smoke/.gitignore; fi
+          if has uv; then present "## Python " /tmp/smoke/.gitignore; else absent "## Python " /tmp/smoke/.gitignore; fi
+
+          # dependabot ecosystems follow the toolchain modules.
+          present 'package-ecosystem: "github-actions"' /tmp/smoke/.github/dependabot.yml
+          if has bun; then present 'package-ecosystem: "bun"' /tmp/smoke/.github/dependabot.yml; else absent 'package-ecosystem: "bun"' /tmp/smoke/.github/dependabot.yml; fi
+          if has uv; then present 'package-ecosystem: "uv"' /tmp/smoke/.github/dependabot.yml; else absent 'package-ecosystem: "uv"' /tmp/smoke/.github/dependabot.yml; fi
+
+          # AGENTS.md toolchain section only when a toolchain module is selected.
+          if has bun || has uv; then present "## Toolchain" /tmp/smoke/AGENTS.md; else absent "## Toolchain" /tmp/smoke/AGENTS.md; fi
+
+          # release-please module gates the autorelease labels in settings.yml.
+          if has release-please; then present "autorelease: pending" /tmp/smoke/.github/settings.yml; else absent "autorelease: pending" /tmp/smoke/.github/settings.yml; fi
+
+          # Row-specific expectations for the rendered pages caller.
+          if [ -n "$EXPECT_IN_PAGES" ]; then
+            while IFS= read -r pattern; do
+              [ -z "$pattern" ] && continue
+              present "$pattern" "$wf/pages.yml"
+            done <<< "$EXPECT_IN_PAGES"
+          fi
+
+          test -f "$wf/template-sync.yml"
+      # Rendered workflows are invisible to the repo-level actionlint job
+      # (.jinja files are not YAML pre-render), so lint the smoke output.
+      - name: actionlint rendered workflows
+        run: |
+          bash <(curl -sSL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
+          ./actionlint -color /tmp/smoke/.github/workflows/*.yml
 
   # Generate from the previous release, then `copier update` to HEAD - the
   # path every managed repo actually takes. Exits cleanly when no previous
@@ -199,19 +274,36 @@ jobs:
             exit 0
           fi
           echo "Testing upgrade path ${prev} -> HEAD"
+          # The previous release may predate the modules schema (stack/profile
+          # questions); pass whichever data shape that tag expects on COPY.
+          if git show "${prev}:copier.yml" | grep -q '^modules:'; then
+            copy_data=(-d 'modules=[uv, release-please, issue-templates, pr-title, auto-assign]')
+          else
+            copy_data=(-d stack=python-uv -d profile=full)
+          fi
           copier copy "$GITHUB_WORKSPACE" /tmp/upgrade \
             --vcs-ref "$prev" --defaults --trust \
             -d project_name="Upgrade Test" \
             -d description="Upgrade-path project" \
-            -d stack="python-uv" \
-            -d profile="full" \
+            "${copy_data[@]}" \
             -d private="false"
           cd /tmp/upgrade
           git init -b main
           git add --all
           git -c user.name=ci -c user.email=ci@localhost commit -q -m "chore: init"
+          # NO -d flags here: this is exactly what reusable-template-sync runs
+          # downstream, so it must exercise the recorded-answer round-trip (and
+          # the legacy stack/profile -> modules bridge for pre-modules tags).
           copier update --vcs-ref HEAD --defaults --trust
           python3 "$GITHUB_WORKSPACE/actions/validate-template/validate_generated_files.py" /tmp/upgrade
+          # The update must PRESERVE the repo's configuration, not reset it to
+          # the question default (which would drop the uv toolchain here).
+          grep -qF -- "## Python " .gitignore
+          grep -qF -- 'package-ecosystem: "uv"' .github/dependabot.yml
+          grep -qF -- "language: python" .github/workflows/codeql.yml
+          test -f .github/workflows/pr-title.yml
+          test -f .github/workflows/auto-assign.yml
+          echo "upgrade preserved the module configuration"
 
   all-green:
     name: all-green

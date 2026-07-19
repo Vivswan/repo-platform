@@ -1,0 +1,260 @@
+# Reusable GitHub Pages deploy: ONE Pages deployment composed of a production
+# root and an optional /staging/ path.
+#   production: release -> root built from the LATEST release tag (before the
+#     first release there is no tag: only staging publishes and the root
+#     returns GitHub's default 404 - intended); staging (main HEAD) refreshes
+#     on every call.
+#   production: main -> root built from main HEAD, no staging path.
+# The build command runs with PAGES_BASE_PATH, PAGES_ORIGIN, and PAGES_STAGING
+# exported; the command maps them onto its tool (e.g. Astro:
+# ASTRO_BASE="$PAGES_BASE_PATH" ASTRO_SITE="$PAGES_ORIGIN" bun run build).
+# A custom domain needs DNS + Pages settings + the CUSTOM_DOMAIN repo
+# variable together (see repo-platform's docs/pages.md); when the variable is
+# set, the root moves from /<repo>/ to /, and _site/CNAME is written.
+# Callers own `concurrency: pages`; this workflow does not declare one.
+
+name: Reusable Pages
+
+on:
+  workflow_call:
+    inputs:
+      setup:
+        description: Toolchain installed on the build runner (bun, uv, or none)
+        required: false
+        type: string
+        default: none
+      install_command:
+        description: Dependency install command run before each build ("" skips)
+        required: false
+        type: string
+        default: ""
+      build_command:
+        description: Build command; PAGES_BASE_PATH/PAGES_ORIGIN/PAGES_STAGING are exported
+        required: true
+        type: string
+      dist_dir:
+        description: Build output directory, relative to the repo root
+        required: false
+        type: string
+        default: dist
+      production:
+        description: What the production root is built from (release or main)
+        required: false
+        type: string
+        default: release
+      staging:
+        description: Also publish main HEAD under /staging/ (production=release only)
+        required: false
+        type: boolean
+        default: true
+      custom_domain:
+        description: Custom domain ("" = <owner>.github.io/<repo>); pass vars.CUSTOM_DOMAIN
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    steps:
+      # `required: true` only means the caller passed SOMETHING; an empty
+      # build command would otherwise fail late with a missing dist dir, and
+      # a bad dist_dir would publish the whole checkout (including .git).
+      - name: Validate inputs
+        env:
+          SETUP: ${{ inputs.setup }}
+          BUILD_COMMAND: ${{ inputs.build_command }}
+          PRODUCTION: ${{ inputs.production }}
+          DIST_DIR: ${{ inputs.dist_dir }}
+        run: |
+          case "$SETUP" in
+            bun|uv|none) ;;
+            *) echo "::error::setup must be bun, uv, or none (got '$SETUP')"; exit 1 ;;
+          esac
+          case "$PRODUCTION" in
+            release|main) ;;
+            *) echo "::error::production must be release or main (got '$PRODUCTION')"; exit 1 ;;
+          esac
+          if [ -z "$BUILD_COMMAND" ]; then
+            echo "::error::build_command must not be empty"; exit 1
+          fi
+          # Segment-wise: wrapping in slashes makes every "."/".."/empty
+          # segment (absolute, doubled, trailing slashes) match a pattern, so
+          # spellings like "./" or "a/../b" cannot resolve to the repo root.
+          if [ -z "$DIST_DIR" ]; then
+            echo "::error::dist_dir must not be empty"; exit 1
+          fi
+          case "/$DIST_DIR/" in
+            *//*|*/./*|*/../*)
+              echo "::error::dist_dir must be a plain relative path inside the repo (got '$DIST_DIR')"; exit 1 ;;
+          esac
+
+      # Resolve URLs and source refs before any checkout. main HEAD is the
+      # pushed commit only on a default-branch push; on release events
+      # github.sha is the TAG commit and on workflow_dispatch it is the chosen
+      # ref, so both pin to the default branch instead.
+      - name: Resolve URLs and refs
+        id: cfg
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CUSTOM_DOMAIN: ${{ inputs.custom_domain }}
+          PRODUCTION: ${{ inputs.production }}
+          STAGING: ${{ inputs.staging }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_REF: ${{ github.ref }}
+          EVENT_SHA: ${{ github.sha }}
+        run: |
+          owner="$(printf '%s' "${GITHUB_REPOSITORY%%/*}" | tr '[:upper:]' '[:lower:]')"
+          repo="${GITHUB_REPOSITORY#*/}"
+          if [ -n "$CUSTOM_DOMAIN" ]; then
+            origin="https://$CUSTOM_DOMAIN"
+            root_base="/"
+            staging_base="/staging/"
+          else
+            origin="https://${owner}.github.io"
+            root_base="/${repo}/"
+            staging_base="/${repo}/staging/"
+          fi
+
+          default_branch="${DEFAULT_BRANCH:-main}"
+          if [ "$EVENT_NAME" = "push" ] && [ "$EVENT_REF" = "refs/heads/${default_branch}" ]; then
+            main_ref="$EVENT_SHA"
+          else
+            main_ref="$default_branch"
+          fi
+
+          if [ "$PRODUCTION" = "release" ]; then
+            prod_ref="$(gh release list -R "$GITHUB_REPOSITORY" --limit 1 \
+              --exclude-drafts --exclude-pre-releases \
+              --json tagName -q '.[0].tagName // empty')"
+            if [ -n "$prod_ref" ]; then
+              echo "Production root builds from release tag: $prod_ref"
+            else
+              echo "No release yet; publishing staging only, the production root will 404."
+            fi
+          else
+            prod_ref="$main_ref"
+          fi
+
+          build_staging=false
+          if [ "$PRODUCTION" = "release" ] && [ "$STAGING" = "true" ]; then
+            build_staging=true
+          fi
+          # Nothing to publish (no release yet, staging disabled) is a normal
+          # pre-first-release state, not an error: skip the deploy quietly so
+          # pushes to main stay green until the first release exists.
+          publish=true
+          if [ -z "$prod_ref" ] && [ "$build_staging" = "false" ]; then
+            echo "::notice::nothing to publish yet (no release exists and staging is disabled); skipping deploy"
+            publish=false
+          fi
+
+          {
+            echo "origin=$origin"
+            echo "root_base=$root_base"
+            echo "staging_base=$staging_base"
+            echo "prod_ref=$prod_ref"
+            echo "main_ref=$main_ref"
+            echo "build_staging=$build_staging"
+            echo "publish=$publish"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Checkout production source
+        if: steps.cfg.outputs.prod_ref != ''
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ steps.cfg.outputs.prod_ref }}
+          path: production
+
+      - name: Checkout staging source (main HEAD)
+        if: steps.cfg.outputs.build_staging == 'true'
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ steps.cfg.outputs.main_ref }}
+          path: staging
+
+      - name: Setup bun
+        if: inputs.setup == 'bun' && steps.cfg.outputs.publish == 'true'
+        uses: oven-sh/setup-bun@v2
+
+      - name: Setup uv
+        if: inputs.setup == 'uv' && steps.cfg.outputs.publish == 'true'
+        uses: astral-sh/setup-uv@v7
+
+      - name: Build production root
+        if: steps.cfg.outputs.prod_ref != ''
+        working-directory: production
+        env:
+          INSTALL_COMMAND: ${{ inputs.install_command }}
+          BUILD_COMMAND: ${{ inputs.build_command }}
+          PAGES_BASE_PATH: ${{ steps.cfg.outputs.root_base }}
+          PAGES_ORIGIN: ${{ steps.cfg.outputs.origin }}
+          PAGES_STAGING: ""
+        run: |
+          if [ -n "$INSTALL_COMMAND" ]; then eval "$INSTALL_COMMAND"; fi
+          eval "$BUILD_COMMAND"
+
+      - name: Build staging (main HEAD)
+        if: steps.cfg.outputs.build_staging == 'true'
+        working-directory: staging
+        env:
+          INSTALL_COMMAND: ${{ inputs.install_command }}
+          BUILD_COMMAND: ${{ inputs.build_command }}
+          PAGES_BASE_PATH: ${{ steps.cfg.outputs.staging_base }}
+          PAGES_ORIGIN: ${{ steps.cfg.outputs.origin }}
+          PAGES_STAGING: "1"
+        run: |
+          if [ -n "$INSTALL_COMMAND" ]; then eval "$INSTALL_COMMAND"; fi
+          eval "$BUILD_COMMAND"
+
+      # A trailing `/.` copies directory CONTENTS, not the directory itself.
+      - name: Compose _site
+        if: steps.cfg.outputs.publish == 'true'
+        env:
+          DIST_DIR: ${{ inputs.dist_dir }}
+          CUSTOM_DOMAIN: ${{ inputs.custom_domain }}
+          PROD_REF: ${{ steps.cfg.outputs.prod_ref }}
+          BUILD_STAGING: ${{ steps.cfg.outputs.build_staging }}
+        run: |
+          rm -rf _site
+          mkdir -p _site
+          if [ -n "$PROD_REF" ]; then
+            if [ ! -d "production/$DIST_DIR" ]; then
+              echo "::error::production build did not produce '$DIST_DIR'"; exit 1
+            fi
+            cp -R "production/$DIST_DIR/." _site/
+          fi
+          if [ "$BUILD_STAGING" = "true" ]; then
+            if [ ! -d "staging/$DIST_DIR" ]; then
+              echo "::error::staging build did not produce '$DIST_DIR'"; exit 1
+            fi
+            mkdir -p _site/staging
+            cp -R "staging/$DIST_DIR/." _site/staging/
+          fi
+          if [ -n "$CUSTOM_DOMAIN" ]; then
+            echo "$CUSTOM_DOMAIN" > _site/CNAME
+            echo "Wrote _site/CNAME -> $CUSTOM_DOMAIN"
+          fi
+
+      - uses: actions/configure-pages@v6
+        if: steps.cfg.outputs.publish == 'true'
+
+      - uses: actions/upload-pages-artifact@v5
+        if: steps.cfg.outputs.publish == 'true'
+        with:
+          path: _site
+
+      - id: deployment
+        if: steps.cfg.outputs.publish == 'true'
+        uses: actions/deploy-pages@v5

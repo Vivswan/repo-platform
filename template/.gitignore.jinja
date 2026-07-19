@@ -112,7 +112,7 @@ tmbootpicker.efi
 # Log files created by default by the nohup command
 nohup.out
 
-{% if stack == 'bun-ts' %}
+{% if 'bun' in modules %}
 ## Node (github/gitignore Node.gitignore)
 # Logs
 logs
@@ -258,7 +258,7 @@ vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vite/
 {% endif %}
-{% if stack == 'python-uv' %}
+{% if 'uv' in modules %}
 ## Python (github/gitignore Python.gitignore)
 # Byte-compiled / optimized / DLL files
 __pycache__/

@@ -4,8 +4,7 @@
 
 template:
   repository: {{ github_username }}/repo-platform
-  stack: {{ stack }}
-  profile: {{ profile }}
+  modules: {{ modules | tojson }}
 
 update:
   enabled: true

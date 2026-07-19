@@ -8,8 +8,10 @@ release only *dispatches* each repo's own sync workflow).
 
 ## How it works
 
-- `template/` is rendered into downstream repos by Copier
-  (`stack: bun-ts | python-uv`, `profile: full | minimal`).
+- `template/` is rendered into downstream repos by Copier. A repo picks any
+  combination of feature **modules** (`bun`, `uv`, `pages`, `release-please`,
+  `issue-templates`, `pr-title`, `auto-assign`); modules with parameters
+  (like `pages`) ask follow-up questions only when selected.
 - Each managed repo carries a `template-sync.yml` workflow (weekly cron +
   manual dispatch). When a new release of this repo exists, it runs
   `copier update`, validates the result, and opens a PR **in its own repo**.
@@ -27,13 +29,13 @@ release only *dispatches* each repo's own sync workflow).
 | Path | Purpose |
 |---|---|
 | `copier.yml` + `template/` | The Copier template (standards-only; project skeletons come from `uv init` / `bun init`) |
-| `.github/workflows/reusable-*.yml` | Reusable workflows: template-sync, pr-title, auto-assign, codeql |
+| `.github/workflows/reusable-*.yml` | Reusable workflows: template-sync, pr-title, auto-assign, codeql, pages ([docs](docs/pages.md)) |
 | `actions/check-typography` | Blocks look-alike/invisible unicode (vendored from cloud-speech, config via `.typography-allow`) |
 | `actions/validate-template` | Enforces markers, YAML validity, and the all-green convention |
 | `actions/validate-commit-names` | Conventional Commit subjects on every push/PR commit |
-| `scripts/build_gitignore.py` | Regenerates `template/.gitignore.jinja` from the latest [github/gitignore](https://github.com/github/gitignore) (Windows + macOS + Linux always, Node/Python by stack) |
+| `scripts/build_gitignore.py` | Regenerates `template/.gitignore.jinja` from the latest [github/gitignore](https://github.com/github/gitignore) (Windows + macOS + Linux always, Node/Python by bun/uv module) |
 | `migrations/` | Copier `_migrations` scripts for future breaking changes |
-| `docs/` | [all-green convention](docs/all-green.md), [new repo](docs/new-repo.md), [eject](docs/eject.md) |
+| `docs/` | [all-green convention](docs/all-green.md), [new repo](docs/new-repo.md), [pages module](docs/pages.md), [eject](docs/eject.md) |
 
 ## File ownership in managed repos
 

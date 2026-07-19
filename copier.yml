@@ -1,7 +1,7 @@
 # Copier template configuration for Vivswan/repo-platform.
 # Downstream repos are generated/updated from the template/ subdirectory.
 
-_min_copier_version: "9.2.0"
+_min_copier_version: "9.8.0"
 _subdirectory: template
 _answers_file: .copier-answers.yml
 _templates_suffix: .jinja
@@ -38,30 +38,86 @@ topics:
   help: Comma-separated GitHub topics (used in settings.yml)
   default: ""
 
-stack:
+# Feature modules: any combination. Each module gates the files/config it
+# owns; per-module parameters below are asked only when the module is
+# selected. Serialized multiselect answers (-d 'modules=[...]', and loading
+# recorded list answers on update) require copier >= 9.8.0 - the floor above.
+#
+# The default doubles as the legacy-schema bridge: repos generated before the
+# modules schema recorded `stack` / `profile` / `enable_release_please`
+# answers. Those legacy names are deliberately NOT re-declared as questions
+# (a declared question shadows the recorded answer with its own default), so
+# on `copier update --defaults` they flow into this expression and map the
+# old combo onto the equivalent module set instead of silently resetting it.
+modules:
   type: str
-  help: Primary toolchain
+  help: Feature modules (space toggles, enter confirms; any combination)
+  multiselect: true
   choices:
-    - bun-ts
-    - python-uv
+    bun - TypeScript/bun toolchain (gitignore, dependabot, CodeQL JS): bun
+    uv - Python/uv toolchain (gitignore, dependabot, CodeQL Python): uv
+    pages - GitHub Pages deploy (root = latest release, /staging/ = main): pages
+    release-please - autorelease labels + versioning conventions: release-please
+    issue-templates - bug/feature issue forms: issue-templates
+    pr-title - Conventional Commit PR title check: pr-title
+    auto-assign - auto-assign issues/PRs/alerts to owner: auto-assign
+  default: "{% set s = stack | default('') %}{% set p = profile | default('') %}{% if s or p %}{% set legacy = [] %}{% if s == 'bun-ts' %}{% set _ = legacy.append('bun') %}{% endif %}{% if s == 'python-uv' %}{% set _ = legacy.append('uv') %}{% endif %}{% if enable_release_please | default(p == 'full') %}{% set _ = legacy.append('release-please') %}{% endif %}{% if p == 'full' %}{% set _ = legacy.append('issue-templates') %}{% set _ = legacy.append('pr-title') %}{% set _ = legacy.append('auto-assign') %}{% endif %}{{ legacy | tojson }}{% else %}[release-please, issue-templates, pr-title, auto-assign]{% endif %}"
 
-profile:
+# --- pages module parameters (asked only when pages is selected) ---
+
+pages_setup:
   type: str
-  help: full = all managed files; minimal = sync/settings/gitignore/agent files only
+  help: Toolchain installed on the Pages build runner
   choices:
-    - full
-    - minimal
-  default: full
+    - bun
+    - uv
+    - none
+  default: "{{ 'bun' if 'bun' in modules else ('uv' if 'uv' in modules else 'none') }}"
+  when: "{{ 'pages' in modules }}"
+
+pages_install_command:
+  type: str
+  help: Dependency install command run before each build (empty to skip)
+  default: "{{ 'bun install --frozen-lockfile' if pages_setup == 'bun' else ('uv sync' if pages_setup == 'uv' else '') }}"
+  when: "{{ 'pages' in modules }}"
+
+pages_build_command:
+  type: str
+  help: Build command; PAGES_BASE_PATH, PAGES_ORIGIN, PAGES_STAGING are exported
+  default: "{{ 'bun run build' if pages_setup == 'bun' else ('uv run mkdocs build --site-dir dist' if pages_setup == 'uv' else '') }}"
+  validator: "{% if not pages_build_command %}A build command is required for the pages module{% endif %}"
+  when: "{{ 'pages' in modules }}"
+
+pages_dist_dir:
+  type: str
+  help: Build output directory (relative to repo root)
+  default: dist
+  # An empty/"."/absolute/traversing value (in any spelling: "./", "a/../b",
+  # trailing or doubled slashes) would make the deploy publish the whole
+  # checkout (including .git) as the Pages artifact. Segment-wise check:
+  # empty segments catch absolute/doubled/trailing slashes.
+  validator: "{% set parts = pages_dist_dir.split('/') %}{% if not pages_dist_dir or '' in parts or '.' in parts or '..' in parts %}pages_dist_dir must be a plain relative path inside the repo (no leading/trailing/doubled slashes, no '.' or '..' segments){% endif %}"
+  when: "{{ 'pages' in modules }}"
+
+pages_production:
+  type: str
+  help: What the production Pages root is built from
+  choices:
+    latest release tag (staging preview from main): release
+    main HEAD (no separate staging): main
+  default: release
+  when: "{{ 'pages' in modules }}"
+
+pages_staging:
+  type: bool
+  help: Also publish main HEAD under /staging/
+  default: true
+  when: "{{ 'pages' in modules and pages_production == 'release' }}"
 
 private:
   type: bool
   help: Is the repository private?
   default: false
-
-enable_release_please:
-  type: bool
-  help: Repo uses release-please (kept repo-owned; this only gates related conventions)
-  default: "{{ profile == 'full' }}"
 
 github_username:
   type: str
@@ -69,8 +125,8 @@ github_username:
   default: Vivswan
 
 # Computed - never asked. CodeQL code scanning is available on public repos
-# only for personal accounts.
+# only for personal accounts, and needs at least one analyzable toolchain.
 enable_codeql:
   type: bool
-  default: "{{ not private }}"
+  default: "{{ not private and ('bun' in modules or 'uv' in modules) }}"
   when: false
