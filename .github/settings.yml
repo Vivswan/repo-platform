@@ -88,3 +88,35 @@ rulesets:
       - actor_id: 5
         actor_type: RepositoryRole
         bypass_mode: always
+
+  # The generated build branches are append-only: the builder's plain pushes
+  # are fast-forwards and pass; force-pushes and deletion are blocked for
+  # everyone (no bypass actors on purpose).
+  - name: build-branches
+    target: branch
+    enforcement: active
+    conditions:
+      ref_name:
+        include:
+          - staging
+          - latest
+        exclude: []
+    rules:
+      - type: deletion
+      - type: non_fast_forward
+
+  # templates/vX.Y.Z build tags are the anchors downstream latest-channel
+  # repos record as _commit; deleting or moving one breaks their
+  # copier-update three-way merge, so protect them like the branches.
+  - name: build-tags
+    target: tag
+    enforcement: active
+    conditions:
+      ref_name:
+        include:
+          - templates/*
+        exclude: []
+    rules:
+      - type: deletion
+      - type: non_fast_forward
+      - type: update

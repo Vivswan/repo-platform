@@ -2,6 +2,9 @@
 # BEGIN REPOSITORY LOCAL
 # Add repository-specific ignore patterns in this section only.
 
+# Local compose/build output (published trees live on the staging/latest branches).
+/template/
+
 # Smoke-test output from local copier runs
 /.smoke/
 

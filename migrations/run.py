@@ -18,8 +18,10 @@ Contract for migrations/<X.Y.Z>.py scripts:
   an otherwise-successful update
 
 Invoked by copier with VERSION_FROM / VERSION_TO / STAGE in the environment
-(positional args override: run.py <from> <to>). Versions may carry a
-leading "v".
+(positional args override: run.py <from> <to>). Versions arrive as git refs
+of the build branches: `templates/vX.Y.Z` build tags on the latest channel
+(the prefix is stripped here), or describe/sha strings on the staging
+channel, which do not parse as semver - staging updates run no migrations.
 """
 
 import argparse
@@ -34,7 +36,8 @@ SEMVER = re.compile(r"^(\d+)\.(\d+)\.(\d+)$")
 
 
 def parse(version: str):
-    match = SEMVER.match(version.strip().lstrip("v"))
+    v = version.strip().removeprefix("templates/").removeprefix("v")
+    match = SEMVER.match(v)
     return tuple(int(g) for g in match.groups()) if match else None
 
 

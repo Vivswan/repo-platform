@@ -1,5 +1,7 @@
-# Reusable template sync: pulls the latest repo-platform release into the
-# calling repository via `copier update` and opens a PR to itself.
+# Reusable template sync: pulls the calling repository's channel of
+# repo-platform's generated build branches (latest = templates/vX.Y.Z build
+# tags, staging = the staging branch head) via `copier update` and opens a
+# PR to itself.
 #
 # Token model: uses REPO_PLATFORM_TOKEN when the caller passes it (PR is
 # authored by the user and triggers CI normally); falls back to the run's
@@ -12,7 +14,7 @@ on:
   workflow_call:
     inputs:
       version:
-        description: Template release tag to sync to (empty = latest release)
+        description: Release to sync to (latest channel only; empty = newest release)
         required: false
         type: string
         default: ""
@@ -67,20 +69,67 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REQUESTED: ${{ inputs.version }}
         run: |
+          channel="$(awk '$1 == "channel:" { print $2 }' .copier-answers.yml)"
+          channel="${channel:-latest}"
           current="$(awk '$1 == "_commit:" { print $2 }' .copier-answers.yml)"
-          if [ -n "$REQUESTED" ]; then
-            target="$REQUESTED"
+          # copier's to_nice_yaml quotes ambiguous scalars (a digit-only short
+          # sha renders as '1234567'); strip the quotes before comparing.
+          current="${current#\'}"; current="${current%\'}"
+          current="${current#\"}"; current="${current%\"}"
+
+          if [ "$channel" = "staging" ]; then
+            target="$(git ls-remote "https://github.com/${TEMPLATE_REPO}" refs/heads/staging | cut -f1)"
+            if [ -z "$target" ]; then
+              echo "::error::${TEMPLATE_REPO} has no staging branch (dispatch its build-branches workflow)"
+              exit 1
+            fi
+            # The recorded _commit is a git-describe string: either a bare
+            # short sha or templates/vX.Y.Z-N-g<short sha>; the trailing
+            # -g<sha> (or the whole value) identifies the build commit.
+            case "$current" in
+              *-g*) cur_sha="${current##*-g}" ;;
+              *) cur_sha="$current" ;;
+            esac
+            if [ -n "$cur_sha" ] && case "$target" in "$cur_sha"*) true ;; *) false ;; esac; then
+              up_to_date=true
+            else
+              up_to_date=false
+            fi
+            validate_ref="main"
+            branch="automation/repo-platform-staging"
+            display="staging@${target:0:12}"
           else
-            target="$(gh api "repos/${TEMPLATE_REPO}/releases/latest" --jq .tag_name)"
+            if [ -n "$REQUESTED" ]; then
+              ver="${REQUESTED#templates/}"
+              ver="v${ver#v}"
+            else
+              ver="$(gh api "repos/${TEMPLATE_REPO}/releases/latest" --jq .tag_name)"
+            fi
+            target="templates/${ver}"
+            if ! git ls-remote --exit-code "https://github.com/${TEMPLATE_REPO}" "refs/tags/${target}" >/dev/null; then
+              echo "::error::${target} does not exist - the ${ver} build may not have run yet (dispatch build-branches in ${TEMPLATE_REPO})"
+              exit 1
+            fi
+            [ "$current" = "$target" ] && up_to_date=true || up_to_date=false
+            # The build tag holds no actions/; validation code lives on main
+            # at the release tag of the same version.
+            validate_ref="$ver"
+            branch="automation/repo-platform-${ver}"
+            display="$target"
           fi
-          echo "current=${current}" >> "$GITHUB_OUTPUT"
-          echo "target=${target}" >> "$GITHUB_OUTPUT"
-          if [ "$current" = "$target" ]; then
-            echo "Already on ${current}; nothing to do."
-            echo "up_to_date=true" >> "$GITHUB_OUTPUT"
+
+          {
+            echo "current=${current}"
+            echo "target=${target}"
+            echo "up_to_date=${up_to_date}"
+            echo "validate_ref=${validate_ref}"
+            echo "branch=${branch}"
+            echo "display=${display}"
+          } >> "$GITHUB_OUTPUT"
+          if [ "$up_to_date" = "true" ]; then
+            echo "Already on ${display}; nothing to do."
           else
-            echo "Updating ${current} -> ${target}"
-            echo "up_to_date=false" >> "$GITHUB_OUTPUT"
+            echo "Updating ${current:-<unknown>} -> ${display}"
           fi
 
       - name: Install copier
@@ -90,8 +139,8 @@ jobs:
       - name: Create update branch
         if: steps.versions.outputs.up_to_date == 'false'
         env:
-          TARGET: ${{ steps.versions.outputs.target }}
-        run: git checkout -B "automation/repo-platform-${TARGET}"
+          BRANCH: ${{ steps.versions.outputs.branch }}
+        run: git checkout -B "$BRANCH"
 
       - name: Apply copier update
         if: steps.versions.outputs.up_to_date == 'false'
@@ -105,14 +154,27 @@ jobs:
         uses: actions/checkout@v7
         with:
           repository: Vivswan/repo-platform
-          ref: ${{ steps.versions.outputs.target }}
+          # NOT the copier target: build refs carry no actions/. The release
+          # tag of the same version (or main, for staging) has the validator.
+          ref: ${{ steps.versions.outputs.validate_ref }}
           path: .repo-platform-src
 
+      # A failed validation does NOT abort the run: copier renders overlapping
+      # local edits as inline conflict markers, which the validator flags, and
+      # the PR is exactly where a human resolves them. The failure is surfaced
+      # in the PR body instead (and the repo's own CI will stay red until
+      # resolved).
       - name: Validate generated files
         if: steps.versions.outputs.up_to_date == 'false'
+        id: validate
         run: |
           pip install --quiet pyyaml
-          python3 .repo-platform-src/actions/validate-template/validate_generated_files.py .
+          if python3 .repo-platform-src/actions/validate-template/validate_generated_files.py .; then
+            echo "result=ok" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::validation failed - likely copier conflict markers that need manual resolution in the PR"
+            echo "result=failed" >> "$GITHUB_OUTPUT"
+          fi
           rm -rf .repo-platform-src
 
       - name: Detect changes
@@ -130,36 +192,52 @@ jobs:
       - name: Commit and push
         if: steps.versions.outputs.up_to_date == 'false' && steps.changes.outputs.changed == 'true'
         env:
-          TARGET: ${{ steps.versions.outputs.target }}
+          BRANCH: ${{ steps.versions.outputs.branch }}
+          DISPLAY: ${{ steps.versions.outputs.display }}
         run: |
           git config user.name "repo-platform-sync"
           git config user.email "repo-platform-sync@users.noreply.github.com"
           git add --all
-          git commit -m "chore: update repo-platform template to ${TARGET}"
-          git push --force origin "automation/repo-platform-${TARGET}"
+          git commit -m "chore: update repo-platform template to ${DISPLAY}"
+          # --force: per-version branches are recreated on retries, and the
+          # staging channel reuses one rolling branch across builds.
+          git push --force origin "$BRANCH"
 
-      - name: Create pull request
+      - name: Create or refresh pull request
         if: steps.versions.outputs.up_to_date == 'false' && steps.changes.outputs.changed == 'true'
         env:
           GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN || github.token }}
           TARGET: ${{ steps.versions.outputs.target }}
           CURRENT: ${{ steps.versions.outputs.current }}
+          DISPLAY: ${{ steps.versions.outputs.display }}
+          BRANCH: ${{ steps.versions.outputs.branch }}
           TOKEN_MODE: ${{ steps.token.outputs.mode }}
+          VALIDATION: ${{ steps.validate.outputs.result }}
           BASE_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
-          branch="automation/repo-platform-${TARGET}"
-          existing="$(gh pr list --head "$branch" --json number --jq '.[0].number // empty')"
-          if [ -n "$existing" ]; then
-            echo "PR #${existing} already exists for ${branch}; branch was updated."
-            exit 0
+          if [ "$BRANCH" = "automation/repo-platform-staging" ]; then
+            source_line="[\`${TEMPLATE_REPO}\`](https://github.com/${TEMPLATE_REPO}/tree/staging) (staging channel)"
+          else
+            ver="${TARGET#templates/}"
+            source_line="[\`${TEMPLATE_REPO}\`](https://github.com/${TEMPLATE_REPO}/releases/tag/${ver})"
           fi
 
-          body="Automated template update from [\`${TEMPLATE_REPO}\`](https://github.com/${TEMPLATE_REPO}/releases/tag/${TARGET}).
+          title="chore: update repo-platform template to ${DISPLAY}"
+          body="Automated template update from ${source_line}.
 
           - Previous: \`${CURRENT}\`
-          - New: \`${TARGET}\`
+          - New: \`${DISPLAY}\`
 
           Review any merge conflicts and confirm repository-local sections were preserved before merging."
+
+          if [ "$VALIDATION" = "failed" ]; then
+            body="${body}
+
+          > [!WARNING]
+          > Validation failed on the updated tree - most likely copier wrote
+          > inline conflict markers where local edits overlap template changes.
+          > Resolve them in this PR before merging."
+          fi
 
           if [ "$TOKEN_MODE" = "github-token" ]; then
             body="${body}
@@ -169,8 +247,16 @@ jobs:
           > Close and reopen this PR (or push to the branch) to run checks."
           fi
 
+          existing="$(gh pr list --head "$BRANCH" --json number --jq '.[0].number // empty')"
+          if [ -n "$existing" ]; then
+            # Rolling staging PRs are force-pushed over; keep title/body honest.
+            gh pr edit "$existing" --title "$title" --body "$body"
+            echo "PR #${existing} already exists for ${BRANCH}; refreshed."
+            exit 0
+          fi
+
           gh pr create \
             --base "$BASE_BRANCH" \
-            --head "$branch" \
-            --title "chore: update repo-platform template to ${TARGET}" \
+            --head "$BRANCH" \
+            --title "$title" \
             --body "$body"

@@ -62,6 +62,27 @@ jobs:
           echo "Propagating ${version}"
           echo "version=${version}" >> "$GITHUB_OUTPUT"
 
+      # build-branches also triggers on release:published, with no ordering
+      # between the two runs; latest-channel syncs need the templates/v* tag
+      # it creates. Wait for it (bounded) before fanning out - on timeout,
+      # dispatch anyway: the sync's own guard fails with a clear message and
+      # the weekly cron heals.
+      - name: Wait for the templates build tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          tag="templates/${VERSION}"
+          for _ in $(seq 1 30); do
+            if git ls-remote --exit-code "https://github.com/${GITHUB_REPOSITORY}" "refs/tags/${tag}" >/dev/null 2>&1; then
+              echo "${tag} exists."
+              exit 0
+            fi
+            echo "waiting for ${tag}..."
+            sleep 10
+          done
+          echo "::warning::${tag} still missing after 5 minutes; dispatching anyway (latest-channel syncs will fail with a clear error until build-branches finishes)"
+
       - name: Dispatch template-sync in managed repos
         env:
           GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}

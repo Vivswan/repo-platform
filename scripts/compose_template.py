@@ -25,11 +25,10 @@ hoisting the file to base/ with an explicit gate or by adding an anchor.
 
 All I/O is bytes (template/.gitignore.jinja carries an intentional CR) and
 symlinks are copied as symlinks. Output is deterministic: sorted walks plus
-the fixed MODULE_ORDER, so `--check` can compare template/ byte-for-byte.
+the fixed MODULE_ORDER (CI builds twice and diffs to prove it).
 
 Usage:
-  uv run scripts/compose_template.py           # regenerate template/
-  uv run scripts/compose_template.py --check   # exit 1 if template/ drifted
+  uv run scripts/compose_template.py   # regenerate the local template/ artifact
 """
 
 import argparse
@@ -324,61 +323,26 @@ def build() -> dict[str, Entry]:
     return output
 
 
-def existing_output() -> dict[str, Entry]:
-    found: dict[str, Entry] = {}
-    if not OUT.is_dir():
-        return found
-    for path in sorted(OUT.rglob("*")):
-        if path.is_symlink() or path.is_file():
-            found[str(path.relative_to(OUT))] = Entry("template", path)
-    return found
-
-
-def main() -> int:
-    parser = argparse.ArgumentParser(
-        description="Compose template/ from the templates/ per-module sources.",
-    )
-    parser.add_argument(
-        "--check",
-        action="store_true",
-        help="exit 1 if template/ does not match the composed sources",
-    )
-    args = parser.parse_args()
-
-    composed = build()
-
-    if args.check:
-        current = existing_output()
-        drift: list[str] = []
-        for path in sorted(set(composed) | set(current)):
-            want, have = composed.get(path), current.get(path)
-            if want is None:
-                drift.append(f"template/{path}: unexpected (not produced by compose)")
-            elif have is None:
-                drift.append(f"template/{path}: missing")
-            elif want.is_symlink != have.is_symlink:
-                drift.append(f"template/{path}: symlink-ness differs")
-            elif want.is_symlink:
-                if want.target != have.target:
-                    drift.append(f"template/{path}: symlink target differs")
-            elif want.data != have.data:
-                drift.append(f"template/{path}: content differs")
-        if drift:
-            for line in drift:
-                print(f"{line}; run scripts/compose_template.py", file=sys.stderr)
-            return 1
-        print("template/ matches templates/ sources")
-        return 0
-
-    if OUT.exists():
-        shutil.rmtree(OUT)
+def write_output(composed: dict[str, Entry], out: Path) -> None:
+    """Write the composed map into `out`, replacing it entirely."""
+    if out.exists():
+        shutil.rmtree(out)
     for path, entry in sorted(composed.items()):
-        dest = OUT / path
+        dest = out / path
         dest.parent.mkdir(parents=True, exist_ok=True)
         if entry.is_symlink:
             os.symlink(entry.target, dest)
         else:
             dest.write_bytes(entry.data)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        description="Compose the local template/ artifact from the templates/ sources.",
+    )
+    parser.parse_args()
+    composed = build()
+    write_output(composed, OUT)
     print(f"composed {len(composed)} file(s) into template/")
     return 0
 

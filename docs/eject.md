@@ -2,8 +2,8 @@
 
 Detaching is cheap by design: managed repos degrade to normal repos, not
 broken ones. Nothing at runtime depends on repo-platform except workflow
-`uses:` references, which keep working as long as repo-platform exists (they
-are pinned to release tags).
+`uses:` references, which keep working as long as repo-platform exists
+(latest-channel repos pin release tags; staging-channel repos pin `main`).
 
 ## Full eject
 
@@ -24,7 +24,8 @@ are pinned to release tags).
    of the corresponding `reusable-*.yml` job from repo-platform, and replace
    `uses: Vivswan/repo-platform/actions/...` steps with vendored copies of
    the action scripts. Skip this if repo-platform continues to exist; the
-   pinned references keep working unchanged.
+   pinned references (release tags on the latest channel, `main` on
+   staging) keep working unchanged.
 
 4. (Optional) Strip the marker comments from `.gitignore`. The content keeps
    working either way.
