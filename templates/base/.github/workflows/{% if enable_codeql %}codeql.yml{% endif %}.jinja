@@ -1,0 +1,37 @@
+# This file is managed by {{ github_username }}/repo-platform.
+# Local edits may be replaced during template updates.
+
+name: CodeQL
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "23 4 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+{%- if 'bun' in modules %}
+  codeql-javascript:
+    uses: {{ github_username }}/repo-platform/.github/workflows/reusable-codeql.yml@{{ _copier_answers._commit | default('main', true) }}
+    with:
+      language: javascript-typescript
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+{%- endif %}
+{%- if 'uv' in modules %}
+  codeql-python:
+    uses: {{ github_username }}/repo-platform/.github/workflows/reusable-codeql.yml@{{ _copier_answers._commit | default('main', true) }}
+    with:
+      language: python
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+{%- endif %}

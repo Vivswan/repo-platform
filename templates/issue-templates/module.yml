@@ -1,0 +1,5 @@
+# Composer manifest (optional per module folder; every key optional).
+# gate_dirs: output directories gated ONCE at the directory name instead of
+# per-file leaf, matching how copier skips a whole subtree.
+gate_dirs:
+  - .github/ISSUE_TEMPLATE
