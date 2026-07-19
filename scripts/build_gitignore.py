@@ -3,9 +3,11 @@
 
 Generates two outputs from the official github/gitignore templates:
 
-- template/.gitignore.jinja: what downstream repos receive. OS templates
-  (Windows, macOS, Linux) always; toolchain templates (Node, Python) as
-  jinja conditionals on the bun/uv entries in the `modules` answer.
+- templates/base/.gitignore.jinja: what downstream repos receive (via the
+  composed template/ tree; run scripts/compose_template.py after this).
+  OS templates (Windows, macOS, Linux) always; toolchain templates (Node,
+  Python) as jinja conditionals on the bun/uv entries in the `modules`
+  answer.
 - .gitignore (this repo's own): same OS templates plus BOTH toolchain
   templates (this repo carries Python scripts and bun/TS actions). The
   REPOSITORY LOCAL section's existing content is preserved across
@@ -28,7 +30,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 LOCK_FILE = REPO_ROOT / "scripts" / "gitignore.lock"
-OUTPUT_TEMPLATE = REPO_ROOT / "template" / ".gitignore.jinja"
+OUTPUT_TEMPLATE = REPO_ROOT / "templates" / "base" / ".gitignore.jinja"
 OUTPUT_SELF = REPO_ROOT / ".gitignore"
 
 ALWAYS = ["Global/Windows.gitignore", "Global/macOS.gitignore", "Global/Linux.gitignore"]
@@ -118,7 +120,7 @@ def build_self(sha: str, sections: dict[str, str], local_body: str) -> str:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Compose template/.gitignore.jinja and this repo's .gitignore from github/gitignore.",
+        description="Generate templates/base/.gitignore.jinja and this repo's .gitignore from github/gitignore.",
     )
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument(
