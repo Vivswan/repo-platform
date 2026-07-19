@@ -20,8 +20,8 @@ are pinned to release tags).
    ```
 
 3. (Optional) Inline the reusable workflows. Replace each thin caller
-   (`pr-title.yml`, `auto-assign.yml`, `codeql.yml`) with a copy of the
-   corresponding `reusable-*.yml` job from repo-platform, and replace
+   (`pr-title.yml`, `auto-assign.yml`, `codeql.yml`, `pages.yml`) with a copy
+   of the corresponding `reusable-*.yml` job from repo-platform, and replace
    `uses: Vivswan/repo-platform/actions/...` steps with vendored copies of
    the action scripts. Skip this if repo-platform continues to exist; the
    pinned references keep working unchanged.

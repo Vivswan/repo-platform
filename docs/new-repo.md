@@ -16,6 +16,8 @@ mkdir my-project && cd my-project && bun init
 
 ## 2. Apply the template
 
+Requires copier >= 9.8.0 (serialized multiselect answers).
+
 ```bash
 git init -b main
 copier copy gh:Vivswan/repo-platform . --vcs-ref v0.0.1
@@ -23,8 +25,10 @@ git add --all
 git commit -m "chore: initialize from repo-platform"
 ```
 
-Copier asks for project name, description, stack (`bun-ts` / `python-uv`),
-profile (`full` / `minimal`), and visibility. Answers are recorded in
+Copier asks for project name, description, a `modules` multiselect (any
+combination of `bun`, `uv`, `pages`, `release-please`, `issue-templates`,
+`pr-title`, `auto-assign`), follow-up parameters for modules that have them
+(see [docs/pages.md](pages.md)), and visibility. Answers are recorded in
 `.copier-answers.yml`. Never delete that file; template sync depends on it.
 
 ## 3. Add a ci.yml
