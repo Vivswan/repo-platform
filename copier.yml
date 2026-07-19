@@ -42,13 +42,6 @@ topics:
 # owns; per-module parameters below are asked only when the module is
 # selected. Serialized multiselect answers (-d 'modules=[...]', and loading
 # recorded list answers on update) require copier >= 9.8.0 - the floor above.
-#
-# The default doubles as the legacy-schema bridge: repos generated before the
-# modules schema recorded `stack` / `profile` / `enable_release_please`
-# answers. Those legacy names are deliberately NOT re-declared as questions
-# (a declared question shadows the recorded answer with its own default), so
-# on `copier update --defaults` they flow into this expression and map the
-# old combo onto the equivalent module set instead of silently resetting it.
 modules:
   type: str
   help: Feature modules (space toggles, enter confirms; any combination)
@@ -61,7 +54,7 @@ modules:
     issue-templates - bug/feature issue forms: issue-templates
     pr-title - Conventional Commit PR title check: pr-title
     auto-assign - auto-assign issues/PRs/alerts to owner: auto-assign
-  default: "{% set s = stack | default('') %}{% set p = profile | default('') %}{% if s or p %}{% set legacy = [] %}{% if s == 'bun-ts' %}{% set _ = legacy.append('bun') %}{% endif %}{% if s == 'python-uv' %}{% set _ = legacy.append('uv') %}{% endif %}{% if enable_release_please | default(p == 'full') %}{% set _ = legacy.append('release-please') %}{% endif %}{% if p == 'full' %}{% set _ = legacy.append('issue-templates') %}{% set _ = legacy.append('pr-title') %}{% set _ = legacy.append('auto-assign') %}{% endif %}{{ legacy | tojson }}{% else %}[release-please, issue-templates, pr-title, auto-assign]{% endif %}"
+  default: [release-please, issue-templates, pr-title, auto-assign]
 
 # --- pages module parameters (asked only when pages is selected) ---
 
