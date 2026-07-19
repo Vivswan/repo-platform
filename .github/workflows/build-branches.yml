@@ -1,0 +1,160 @@
+# Publishes the generated build branches copier consumes:
+#   staging -> minimal build tree from the LATEST main commit (every push)
+#   latest  -> minimal build tree from the LATEST release, tagged templates/vX.Y.Z
+# Both are ORPHAN, APPEND-ONLY branches: each build commit parents the
+# previous build commit, never a main commit, so a main history rewrite can
+# never invalidate them and old build commits (downstream repos' recorded
+# _commit, needed by copier update's three-way merge) stay reachable forever.
+# The weekly schedule is a self-heal net: releases published with the default
+# GITHUB_TOKEN do not fire the `release` trigger (same caveat as propagate).
+# GITHUB_TOKEN pushes trigger no workflows - intended; nothing may run on the
+# build branches (their trees carry no .github/).
+
+name: Build Branches
+
+on:
+  push:
+    branches: [main]
+  release:
+    types: [published]
+  schedule:
+    - cron: "37 5 * * 1"
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: Which build branch(es) to rebuild
+        required: false
+        type: choice
+        options: [both, staging, latest]
+        default: both
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-branches
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Install pyyaml
+        run: pip install --quiet pyyaml
+
+      - name: Plan builds
+        id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          DISPATCH_CHANNEL: ${{ inputs.channel }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          build_staging=false
+          build_latest=false
+          latest_ver=""
+          case "$EVENT_NAME" in
+            push|schedule) build_staging=true ;;
+            workflow_dispatch)
+              case "${DISPATCH_CHANNEL:-both}" in
+                both) build_staging=true ;;
+                staging) build_staging=true ;;
+              esac ;;
+          esac
+          if [ "$EVENT_NAME" = "release" ]; then
+            build_latest=true
+            latest_ver="$RELEASE_TAG"
+          elif [ "$EVENT_NAME" = "workflow_dispatch" ] && [ "${DISPATCH_CHANNEL:-both}" != "staging" ]; then
+            # Manual dispatch rebuilds latest unconditionally (idempotent:
+            # unchanged content appends nothing, existing tags are kept).
+            latest_ver="$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name 2>/dev/null || true)"
+            if [ -n "$latest_ver" ]; then
+              build_latest=true
+            else
+              echo "No release yet; latest branch not built."
+            fi
+          elif [ "$EVENT_NAME" != "workflow_dispatch" ]; then
+            # Self-heal: rebuild latest when its build tag or branch is missing.
+            latest_ver="$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name 2>/dev/null || true)"
+            if [ -n "$latest_ver" ]; then
+              if ! git ls-remote --exit-code origin "refs/tags/templates/${latest_ver}" >/dev/null 2>&1 \
+                 || ! git ls-remote --exit-code origin refs/heads/latest >/dev/null 2>&1; then
+                build_latest=true
+              fi
+            else
+              echo "No release yet; latest branch not built."
+            fi
+          fi
+          {
+            echo "staging=$build_staging"
+            echo "latest=$build_latest"
+            echo "version=$latest_ver"
+          } >> "$GITHUB_OUTPUT"
+          echo "plan: staging=$build_staging latest=$build_latest version=$latest_ver"
+
+      - name: Build and publish
+        if: steps.plan.outputs.staging == 'true' || steps.plan.outputs.latest == 'true'
+        env:
+          BUILD_STAGING: ${{ steps.plan.outputs.staging }}
+          BUILD_LATEST: ${{ steps.plan.outputs.latest }}
+          VERSION: ${{ steps.plan.outputs.version }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          git config user.name "repo-platform-build"
+          git config user.email "repo-platform-build@users.noreply.github.com"
+
+          publish() { # channel source_sha [version]
+            ch="$1"; src="$2"; ver="${3:-}"
+            echo "::group::build $ch from ${src:0:12} ${ver:+($ver)}"
+            rm -rf "/tmp/src-$ch" "/tmp/tree-$ch" "/tmp/pub-$ch"
+            # Compose with the SOURCE ref's own script + sources, so a rebuild
+            # of an old tag reproduces that tag's composition.
+            git worktree add --detach "/tmp/src-$ch" "$src"
+            if [ -n "$ver" ]; then
+              python3 "/tmp/src-$ch/.github/scripts/build_branch_tree.py" \
+                --dest "/tmp/tree-$ch" --channel "$ch" --version "$ver"
+            else
+              python3 "/tmp/src-$ch/.github/scripts/build_branch_tree.py" \
+                --dest "/tmp/tree-$ch" --channel "$ch"
+            fi
+            if git ls-remote --exit-code origin "refs/heads/$ch" >/dev/null 2>&1; then
+              git fetch --quiet origin "$ch"
+              git worktree add --detach "/tmp/pub-$ch" "origin/$ch"
+            else
+              git worktree add --detach "/tmp/pub-$ch" "$src"
+              git -C "/tmp/pub-$ch" switch --orphan "build-$ch"
+            fi
+            rsync -a --delete --exclude=.git "/tmp/tree-$ch/" "/tmp/pub-$ch/"
+            git -C "/tmp/pub-$ch" add -A
+            if git -C "/tmp/pub-$ch" diff --cached --quiet; then
+              echo "$ch: no content change"
+            else
+              git -C "/tmp/pub-$ch" commit -q \
+                -m "build($ch): ${ver:-main} from ${src:0:12}" \
+                -m "source: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/commit/$src" \
+                -m "run: $RUN_URL"
+              # Plain push, never force: the branches are append-only.
+              git -C "/tmp/pub-$ch" push origin "HEAD:refs/heads/$ch"
+              echo "$ch: pushed $(git -C "/tmp/pub-$ch" rev-parse --short HEAD)"
+            fi
+            if [ -n "$ver" ] && ! git ls-remote --exit-code origin "refs/tags/templates/$ver" >/dev/null 2>&1; then
+              git fetch --quiet origin "$ch"
+              git tag "templates/$ver" "origin/$ch"
+              git push origin "refs/tags/templates/$ver"
+              echo "$ch: tagged templates/$ver"
+            fi
+            echo "::endgroup::"
+          }
+
+          if [ "$BUILD_STAGING" = "true" ]; then
+            publish staging "$(git rev-parse origin/main)"
+          fi
+          if [ "$BUILD_LATEST" = "true" ]; then
+            git fetch --quiet --tags origin
+            src="$(git rev-list -n1 "refs/tags/$VERSION")"
+            publish latest "$src" "$VERSION"
+          fi

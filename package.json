@@ -13,7 +13,7 @@
     "validate": "uv run actions/validate-template/validate_generated_files.py --self .",
     "gitignore:check": "python3 scripts/build_gitignore.py --check",
     "compose": "uv run scripts/compose_template.py",
-    "compose:check": "uv run scripts/compose_template.py --check",
+    "compose:check": "uv run .github/scripts/build_branch_tree.py --dest /tmp/repo-platform-compose-check --channel staging && rm -rf /tmp/repo-platform-compose-check",
     "prepare": "husky"
   },
   "devDependencies": {

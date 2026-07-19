@@ -3,9 +3,9 @@
 
 Generates two outputs from the official github/gitignore templates:
 
-- templates/base/.gitignore.jinja: what downstream repos receive (via the
-  composed template/ tree; run scripts/compose_template.py after this).
-  OS templates (Windows, macOS, Linux) always; toolchain templates (Node,
+- templates/base/.gitignore.jinja: what downstream repos receive (published
+  onto the staging/latest build branches by build-branches.yml). OS
+  templates (Windows, macOS, Linux) always; toolchain templates (Node,
   Python) as jinja conditionals on the bun/uv entries in the `modules`
   answer.
 - .gitignore (this repo's own): same OS templates plus BOTH toolchain

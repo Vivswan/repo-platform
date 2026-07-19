@@ -10,6 +10,12 @@ the release PR merges.
 No migrations exist yet; `run.py` is wired into `copier.yml`'s `_migrations`
 and no-ops until the first `<X.Y.Z>.py` script lands.
 
+Version parsing: copier passes the git refs of the build branches, so the
+runner strips the `templates/` build-tag prefix (`templates/v0.2.4` ->
+`0.2.4`). Staging-channel updates carry describe/sha strings that do not
+parse as semver, so **migrations never run on the staging channel** - they
+apply when a repo moves between released `templates/vX.Y.Z` versions.
+
 ## Writing a migration
 
 Say v0.3.0 renames `.yamllint` and the rename needs a fixup in existing
