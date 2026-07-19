@@ -7,22 +7,23 @@ symlinks to this file, so edit only here.
 ## Project
 
 {{ project_name }}: {{ description }}
-
+{% if 'bun' in modules or 'uv' in modules %}
 ## Toolchain
 
-{% if stack == 'bun-ts' -%}
+{% if 'bun' in modules -%}
 - Runtime and package manager: bun (`bun install`, `bun test`, `bun run <script>`)
 - See `package.json` scripts for the available commands.
-{%- else -%}
+{% endif -%}
+{% if 'uv' in modules -%}
 - Python managed with uv (`uv sync`, `uv run <command>`)
 - See `pyproject.toml` for project metadata and dependencies.
-{%- endif %}
-
+{% endif -%}
+{% endif %}
 ## Conventions
 
 - PR titles and commit subjects must be Conventional Commits (`feat:`, `fix:`,
   `feat!:`, `chore:`, ...). PRs are squash-merged, so the PR title becomes the
-  commit subject{% if enable_release_please %} and drives release-please versioning{% endif %}.{% if profile == 'full' %} CI validates both
+  commit subject{% if 'release-please' in modules %} and drives release-please versioning{% endif %}.{% if 'pr-title' in modules %} CI validates both
   (pr-title workflow + validate-commit-names).{% endif %}
 - CI gates on a single required check named `all-green`, which `needs:` every
   other job in `.github/workflows/ci.yml`. When adding a CI job, add it to

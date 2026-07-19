@@ -4,11 +4,12 @@
 Generates two outputs from the official github/gitignore templates:
 
 - template/.gitignore.jinja: what downstream repos receive. OS templates
-  (Windows, macOS, Linux) always; the stack template (Node or Python) as a
-  jinja conditional on the `stack` answer.
-- .gitignore (this repo's own): same OS templates plus BOTH stack templates
-  (this repo carries Python scripts and bun/TS actions). The REPOSITORY
-  LOCAL section's existing content is preserved across regenerations.
+  (Windows, macOS, Linux) always; toolchain templates (Node, Python) as
+  jinja conditionals on the bun/uv entries in the `modules` answer.
+- .gitignore (this repo's own): same OS templates plus BOTH toolchain
+  templates (this repo carries Python scripts and bun/TS actions). The
+  REPOSITORY LOCAL section's existing content is preserved across
+  regenerations.
 
 By default the script fetches upstream HEAD and records the commit SHA in
 scripts/gitignore.lock (provenance, and what CI verifies against).
@@ -31,7 +32,7 @@ OUTPUT_TEMPLATE = REPO_ROOT / "template" / ".gitignore.jinja"
 OUTPUT_SELF = REPO_ROOT / ".gitignore"
 
 ALWAYS = ["Global/Windows.gitignore", "Global/macOS.gitignore", "Global/Linux.gitignore"]
-BY_STACK = {"bun-ts": "Node.gitignore", "python-uv": "Python.gitignore"}
+BY_MODULE = {"bun": "Node.gitignore", "uv": "Python.gitignore"}
 
 LOCAL_BEGIN = "# BEGIN REPOSITORY LOCAL"
 LOCAL_END = "# END REPOSITORY LOCAL"
@@ -94,8 +95,8 @@ def build_template(sha: str, sections: dict[str, str]) -> str:
     for path in ALWAYS:
         parts.append(sections[path])
         parts.append("\n")
-    for stack, path in BY_STACK.items():
-        parts.append("{% if stack == '" + stack + "' %}\n")
+    for module, path in BY_MODULE.items():
+        parts.append("{% if '" + module + "' in modules %}\n")
         parts.append(sections[path])
         parts.append("{% endif %}\n")
     parts.append("# END REPO-PLATFORM MANAGED\n")
@@ -108,7 +109,7 @@ def build_self(sha: str, sections: dict[str, str], local_body: str) -> str:
         local_section(local_body),
         managed_header(sha),
     ]
-    for path in [*ALWAYS, *BY_STACK.values()]:
+    for path in [*ALWAYS, *BY_MODULE.values()]:
         parts.append(sections[path])
         parts.append("\n")
     parts.append("# END REPO-PLATFORM MANAGED\n")
@@ -134,12 +135,12 @@ def main() -> int:
 
     if args.locked or args.check:
         sha = LOCK_FILE.read_text().strip()
-        sections = {p: section(sha, p) for p in [*ALWAYS, *BY_STACK.values()]}
+        sections = {p: section(sha, p) for p in [*ALWAYS, *BY_MODULE.values()]}
     else:
         # Build first, write the lock only after every fetch succeeded - a
         # failed fetch must not advance the lock past the generated files.
         sha = upstream_head()
-        sections = {p: section(sha, p) for p in [*ALWAYS, *BY_STACK.values()]}
+        sections = {p: section(sha, p) for p in [*ALWAYS, *BY_MODULE.values()]}
         LOCK_FILE.write_text(sha + "\n")
         print(f"lock updated to {sha}")
 

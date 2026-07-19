@@ -38,7 +38,7 @@ labels:
   - name: fix-lint
     color: "fbca04"
     description: Lint / formatting fixes
-{% if enable_release_please %}  # release-please manages these two; listing them here keeps the settings
+{% if 'release-please' in modules %}  # release-please manages these two; listing them here keeps the settings
   # sync from deleting them (it removes any label not declared in this file).
   - name: "autorelease: pending"
     color: "ededed"
