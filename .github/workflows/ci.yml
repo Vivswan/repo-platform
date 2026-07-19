@@ -274,26 +274,18 @@ jobs:
             exit 0
           fi
           echo "Testing upgrade path ${prev} -> HEAD"
-          # The previous release may predate the modules schema (stack/profile
-          # questions); pass whichever data shape that tag expects on COPY.
-          if git show "${prev}:copier.yml" | grep -q '^modules:'; then
-            copy_data=(-d 'modules=[uv, release-please, issue-templates, pr-title, auto-assign]')
-          else
-            copy_data=(-d stack=python-uv -d profile=full)
-          fi
           copier copy "$GITHUB_WORKSPACE" /tmp/upgrade \
             --vcs-ref "$prev" --defaults --trust \
             -d project_name="Upgrade Test" \
             -d description="Upgrade-path project" \
-            "${copy_data[@]}" \
+            -d 'modules=[uv, release-please, issue-templates, pr-title, auto-assign]' \
             -d private="false"
           cd /tmp/upgrade
           git init -b main
           git add --all
           git -c user.name=ci -c user.email=ci@localhost commit -q -m "chore: init"
           # NO -d flags here: this is exactly what reusable-template-sync runs
-          # downstream, so it must exercise the recorded-answer round-trip (and
-          # the legacy stack/profile -> modules bridge for pre-modules tags).
+          # downstream, so it must exercise the recorded-answer round-trip.
           copier update --vcs-ref HEAD --defaults --trust
           python3 "$GITHUB_WORKSPACE/actions/validate-template/validate_generated_files.py" /tmp/upgrade
           # The update must PRESERVE the repo's configuration, not reset it to
