@@ -71,7 +71,9 @@ jobs:
           elif [ "$EVENT_NAME" = "workflow_dispatch" ] && [ "${DISPATCH_CHANNEL:-both}" != "staging" ]; then
             # Manual dispatch rebuilds latest unconditionally (idempotent:
             # unchanged content appends nothing, existing tags are kept).
-            latest_ver="$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name 2>/dev/null || true)"
+            # gh api prints the error body to stdout on 404; only keep
+            # output from a successful call.
+            latest_ver="$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name 2>/dev/null)" || latest_ver=""
             if [ -n "$latest_ver" ]; then
               build_latest=true
             else
@@ -79,7 +81,9 @@ jobs:
             fi
           elif [ "$EVENT_NAME" != "workflow_dispatch" ]; then
             # Self-heal: rebuild latest when its build tag or branch is missing.
-            latest_ver="$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name 2>/dev/null || true)"
+            # gh api prints the error body to stdout on 404; only keep
+            # output from a successful call.
+            latest_ver="$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name 2>/dev/null)" || latest_ver=""
             if [ -n "$latest_ver" ]; then
               if ! git ls-remote --exit-code origin "refs/tags/templates/${latest_ver}" >/dev/null 2>&1 \
                  || ! git ls-remote --exit-code origin refs/heads/latest >/dev/null 2>&1; then
