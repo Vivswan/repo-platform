@@ -17,11 +17,18 @@ on:
   schedule:
     - cron: "23 6 * * 1"
 {% endif %}
+# security-events is granted unconditionally: a reusable-workflow call is
+# statically validated against the permissions of EVERY job in the called
+# file regardless of each job's `if:`, so the alert-assignment job's
+# permissions must be grantable even where code scanning is disabled. The
+# code_scanning input below keeps that job from actually running there.
 permissions:
   issues: write
   pull-requests: write
-{% if enable_codeql %}  security-events: write
-{% endif %}
+  security-events: write
+
 jobs:
   auto-assign:
     uses: {{ github_username }}/repo-platform/.github/workflows/reusable-auto-assign.yml@{{ _copier_answers._commit | default('main', true) }}
+    with:
+      code_scanning: {{ 'true' if enable_codeql else 'false' }}

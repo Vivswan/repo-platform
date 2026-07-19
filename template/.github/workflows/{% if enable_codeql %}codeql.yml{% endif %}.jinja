@@ -15,11 +15,23 @@ permissions:
   contents: read
 
 jobs:
-  codeql:
+{%- if 'bun' in modules %}
+  codeql-javascript:
     uses: {{ github_username }}/repo-platform/.github/workflows/reusable-codeql.yml@{{ _copier_answers._commit | default('main', true) }}
     with:
-      language: {% if stack == 'bun-ts' %}javascript-typescript{% else %}python{% endif %}
+      language: javascript-typescript
     permissions:
       contents: read
       security-events: write
       actions: read
+{%- endif %}
+{%- if 'uv' in modules %}
+  codeql-python:
+    uses: {{ github_username }}/repo-platform/.github/workflows/reusable-codeql.yml@{{ _copier_answers._commit | default('main', true) }}
+    with:
+      language: python
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+{%- endif %}

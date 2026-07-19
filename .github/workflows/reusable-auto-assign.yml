@@ -1,11 +1,19 @@
 # Reusable auto-assign. Callers trigger on issues/pull_request (and, on
 # CodeQL-enabled repos, workflow_run + schedule for code scanning alerts);
-# the caller's event context flows through.
+# the caller's event context flows through. Callers on repos WITHOUT code
+# scanning pass code_scanning: false so a manual dispatch never selects the
+# alert-assignment job there.
 
 name: Reusable Auto Assign
 
 on:
-  workflow_call: {}
+  workflow_call:
+    inputs:
+      code_scanning:
+        description: Repo has CodeQL code scanning (gates the alert-assignment job)
+        required: false
+        type: boolean
+        default: true
 
 jobs:
   assign:
@@ -78,6 +86,7 @@ jobs:
   # public repo (or GHAS), matching the codeql workflow's private guard.
   assign-code-scanning:
     if: >-
+      inputs.code_scanning &&
       github.event.repository.private == false &&
       github.event_name != 'issues' &&
       github.event_name != 'pull_request' &&
