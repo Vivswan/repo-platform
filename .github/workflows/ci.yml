@@ -83,8 +83,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - name: Verify template/.gitignore.jinja matches the lock
+      - name: Verify templates/base/.gitignore.jinja matches the lock
         run: python3 scripts/build_gitignore.py --check
+
+  compose-fresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install pyyaml
+        run: pip install --quiet pyyaml
+      - name: Verify template/ matches templates/ sources
+        run: python3 scripts/compose_template.py --check
 
   validate-template:
     runs-on: ubuntu-latest
@@ -116,13 +125,13 @@ jobs:
           # Module combos covering the risky branches. `modules` is a YAML
           # STRING here (quoted) and parsed by copier as a YAML list.
           - name: everything
-            modules: "[bun, uv, pages, release-please, issue-templates, pr-title, auto-assign]"
+            modules: "[agents, bun, uv, pages, release-please, issue-templates, pr-title, auto-assign]"
             private: "false"
             expect_in_pages: |
               bun install --frozen-lockfile
               bun run build
           - name: bun-typical
-            modules: "[bun, release-please, issue-templates, pr-title, auto-assign]"
+            modules: "[agents, bun, release-please, issue-templates, pr-title, auto-assign]"
             private: "false"
           - name: uv-pages-private
             modules: "[uv, pages, auto-assign]"
@@ -173,13 +182,6 @@ jobs:
             $EXTRA_DATA
       - name: Validate generated output
         run: python3 actions/validate-template/validate_generated_files.py /tmp/smoke
-      - name: Verify agent-file symlinks
-        run: |
-          test -L /tmp/smoke/CLAUDE.md
-          test -L /tmp/smoke/.github/copilot-instructions.md
-          test -L /tmp/smoke/.github/agents.md
-          test "$(readlink /tmp/smoke/CLAUDE.md)" = "AGENTS.md"
-          test -f /tmp/smoke/AGENTS.md
       - name: Verify module/visibility gating
         env:
           MODULES: ${{ matrix.modules }}
@@ -231,8 +233,24 @@ jobs:
           if has bun; then present 'package-ecosystem: "bun"' /tmp/smoke/.github/dependabot.yml; else absent 'package-ecosystem: "bun"' /tmp/smoke/.github/dependabot.yml; fi
           if has uv; then present 'package-ecosystem: "uv"' /tmp/smoke/.github/dependabot.yml; else absent 'package-ecosystem: "uv"' /tmp/smoke/.github/dependabot.yml; fi
 
-          # AGENTS.md toolchain section only when a toolchain module is selected.
-          if has bun || has uv; then present "## Toolchain" /tmp/smoke/AGENTS.md; else absent "## Toolchain" /tmp/smoke/AGENTS.md; fi
+          # agents module: AGENTS.md plus the three agent-file symlinks. The
+          # rows without it also prove conditional filenames work on symlinks.
+          if has agents; then
+            test -f /tmp/smoke/AGENTS.md
+            test -L /tmp/smoke/CLAUDE.md
+            test "$(readlink /tmp/smoke/CLAUDE.md)" = "AGENTS.md"
+            test -L /tmp/smoke/.github/copilot-instructions.md
+            test -L /tmp/smoke/.github/agents.md
+            # AGENTS.md toolchain section only when a toolchain module is selected.
+            if has bun || has uv; then present "## Toolchain" /tmp/smoke/AGENTS.md; else absent "## Toolchain" /tmp/smoke/AGENTS.md; fi
+          else
+            # `test ! -e` follows symlinks (a dangling one passes), so also
+            # assert not-a-symlink for the three link paths.
+            test ! -e /tmp/smoke/AGENTS.md
+            test ! -e /tmp/smoke/CLAUDE.md && test ! -L /tmp/smoke/CLAUDE.md
+            test ! -e /tmp/smoke/.github/agents.md && test ! -L /tmp/smoke/.github/agents.md
+            test ! -e /tmp/smoke/.github/copilot-instructions.md && test ! -L /tmp/smoke/.github/copilot-instructions.md
+          fi
 
           # release-please module gates the autorelease labels in settings.yml.
           if has release-please; then present "autorelease: pending" /tmp/smoke/.github/settings.yml; else absent "autorelease: pending" /tmp/smoke/.github/settings.yml; fi
@@ -309,6 +327,7 @@ jobs:
       - commit-names
       - typecheck
       - gitignore-fresh
+      - compose-fresh
       - validate-template
       - smoke-generate
       - upgrade-path

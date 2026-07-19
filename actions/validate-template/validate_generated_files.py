@@ -89,6 +89,7 @@ TEXT_SUFFIXES = {
 ADVISORY_JOBS = ["actionlint", "yamllint", "commit-names"]
 
 KNOWN_MODULES = {
+    "agents",
     "bun",
     "uv",
     "pages",

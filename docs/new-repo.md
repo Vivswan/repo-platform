@@ -26,10 +26,11 @@ git commit -m "chore: initialize from repo-platform"
 ```
 
 Copier asks for project name, description, a `modules` multiselect (any
-combination of `bun`, `uv`, `pages`, `release-please`, `issue-templates`,
-`pr-title`, `auto-assign`), follow-up parameters for modules that have them
-(see [docs/pages.md](pages.md)), and visibility. Answers are recorded in
-`.copier-answers.yml`. Never delete that file; template sync depends on it.
+combination of `agents`, `bun`, `uv`, `pages`, `release-please`,
+`issue-templates`, `pr-title`, `auto-assign`), follow-up parameters for
+modules that have them (see [docs/pages.md](pages.md)), and visibility.
+Answers are recorded in `.copier-answers.yml`. Never delete that file;
+template sync depends on it.
 
 ## 3. Add a ci.yml
 
