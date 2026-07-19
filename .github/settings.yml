@@ -15,6 +15,10 @@ repository:
   allow_squash_merge: true
   allow_merge_commit: false
   allow_rebase_merge: false
+  # The squash subject must ALWAYS be the PR title (release-please derives
+  # versions from it); GitHub only defaults to that for single-commit PRs.
+  squash_merge_commit_title: PR_TITLE
+  squash_merge_commit_message: PR_BODY
   allow_update_branch: true
   delete_branch_on_merge: true
   allow_auto_merge: true
@@ -106,8 +110,9 @@ rulesets:
       - type: non_fast_forward
 
   # templates/vX.Y.Z build tags are the anchors downstream latest-channel
-  # repos record as _commit; deleting or moving one breaks their
-  # copier-update three-way merge, so protect them like the branches.
+  # repos record as _commit, and vX.Y.Z release tags are what their workflow
+  # `uses:` pins and sync validation checkouts reference; deleting or moving
+  # either breaks downstream repos, so both are immutable.
   - name: build-tags
     target: tag
     enforcement: active
@@ -115,6 +120,7 @@ rulesets:
       ref_name:
         include:
           - templates/*
+          - v*
         exclude: []
     rules:
       - type: deletion
