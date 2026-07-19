@@ -11,3 +11,4 @@ Consume with copier, e.g.:
 
     copier copy gh:Vivswan/repo-platform . --vcs-ref templates/vX.Y.Z   # latest
     copier copy gh:Vivswan/repo-platform . --vcs-ref staging            # staging
+test
