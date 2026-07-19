@@ -47,6 +47,7 @@ modules:
   help: Feature modules (space toggles, enter confirms; any combination)
   multiselect: true
   choices:
+    agents - AGENTS.md agent instructions + CLAUDE.md/copilot symlinks: agents
     bun - TypeScript/bun toolchain (gitignore, dependabot, CodeQL JS): bun
     uv - Python/uv toolchain (gitignore, dependabot, CodeQL Python): uv
     pages - GitHub Pages deploy (root = latest release, /staging/ = main): pages
@@ -54,7 +55,7 @@ modules:
     issue-templates - bug/feature issue forms: issue-templates
     pr-title - Conventional Commit PR title check: pr-title
     auto-assign - auto-assign issues/PRs/alerts to owner: auto-assign
-  default: [release-please, issue-templates, pr-title, auto-assign]
+  default: [agents, release-please, issue-templates, pr-title, auto-assign]
 
 # --- pages module parameters (asked only when pages is selected) ---
 

@@ -2,5 +2,7 @@
 
 # github/gitignore's macOS template intentionally contains a literal
 # carriage return (the `Icon[\r]` pattern - the macOS Icon file really has
-# a CR in its filename). The generated template must preserve it.
+# a CR in its filename). The generated files must preserve it (source in
+# templates/base/, composed copy in template/).
+templates/base/.gitignore.jinja
 template/.gitignore.jinja
