@@ -1,0 +1,30 @@
+# Auto-close pull requests targeting the generated build branches. staging
+# and latest are append-only outputs of build-branches.yml; nothing merges
+# into them - changes go to templates/ on main. pull_request_target (not
+# pull_request) so fork PRs are handled too; safe because the PR's code is
+# never checked out or executed here.
+
+name: Protect Build Branches
+
+on:
+  pull_request_target:
+    # edited fires when a PR is RETARGETED onto a build branch after opening.
+    types: [opened, reopened, edited]
+
+permissions:
+  pull-requests: write
+
+jobs:
+  close:
+    if: contains(fromJSON('["staging", "latest"]'), github.event.pull_request.base.ref)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Comment and close
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          BASE: ${{ github.event.pull_request.base.ref }}
+        run: |
+          gh pr comment "$PR" -R "$GITHUB_REPOSITORY" --body \
+            "\`$BASE\` is a generated build branch (append-only output of the build-branches workflow); nothing merges into it. Template changes go to \`templates/\` on \`main\`. Closing."
+          gh pr close "$PR" -R "$GITHUB_REPOSITORY"

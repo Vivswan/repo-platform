@@ -1,5 +1,7 @@
 # Copier template configuration for Vivswan/repo-platform.
-# Downstream repos are generated/updated from the template/ subdirectory.
+# Downstream repos are generated/updated from the template/ subdirectory,
+# which exists only on the generated staging/latest build branches (on main
+# it is a local gitignored build artifact; sources live in templates/).
 
 _min_copier_version: "9.8.0"
 _subdirectory: template
@@ -37,6 +39,16 @@ topics:
   type: str
   help: Comma-separated GitHub topics (used in settings.yml)
   default: ""
+
+# Which generated build branch this repo follows. Vivswan's own managed
+# repos follow staging; latest is the stable default for everything else.
+channel:
+  type: str
+  help: Template update channel this repo follows
+  choices:
+    latest - released template versions (templates/vX.Y.Z tags): latest
+    staging - main HEAD builds (testing; migrations are skipped): staging
+  default: latest
 
 # Feature modules: any combination. Each module gates the files/config it
 # owns; per-module parameters below are asked only when the module is

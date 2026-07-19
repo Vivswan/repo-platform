@@ -1,8 +1,17 @@
 # This file is managed by {{ github_username }}/repo-platform.
 # Local edits may be replaced during template updates.
 #
-# Pulls template updates from {{ github_username }}/repo-platform: when a new
-# release is available, opens a PR in this repository applying `copier update`.
+# Pulls template updates from {{ github_username }}/repo-platform's generated
+# build branches: opens a PR in this repository applying `copier update` to
+# this repo's channel (latest = templates/vX.Y.Z build tags, staging = the
+# staging branch head).
+{#- The reusable workflow lives on main, not on the build branches, so the
+    uses: ref cannot be the recorded _commit verbatim: for a latest-channel
+    repo the _commit is a templates/vX.Y.Z build tag whose release tag
+    vX.Y.Z exists on main at the same version - strip the prefix; anything
+    else (staging describe/sha strings, fresh copies) pins main. -#}
+{%- set tpl_ref = _copier_answers._commit | default('', true) -%}
+{%- set release_pin = tpl_ref | regex_replace('^templates/(v[0-9]+\\.[0-9]+\\.[0-9]+)$', '\\1') %}
 
 name: Template Sync
 
@@ -12,7 +21,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: Template release to sync to (defaults to latest)
+        description: Template release to sync to (latest channel only; defaults to newest)
         required: false
         type: string
   workflow_call:
@@ -27,7 +36,7 @@ permissions:
 
 jobs:
   sync:
-    uses: {{ github_username }}/repo-platform/.github/workflows/reusable-template-sync.yml@{{ _copier_answers._commit | default('main', true) }}
+    uses: {{ github_username }}/repo-platform/.github/workflows/reusable-template-sync.yml@{% if release_pin and release_pin != tpl_ref %}{{ release_pin }}{% else %}main{% endif %}
     with:
       version: {% raw %}${{ inputs.version || '' }}{% endraw %}
     secrets:

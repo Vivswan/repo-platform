@@ -6,6 +6,13 @@
 # PAGES_ORIGIN, PAGES_STAGING) and the CUSTOM_DOMAIN repo variable cutover.
 # One-time setup: repo Settings -> Pages -> Source: GitHub Actions.
 
+{#- The reusable workflow lives on main, not on the build branches: strip a
+    templates/vX.Y.Z build-tag _commit to the same-version release tag on
+    main; anything else (staging describe/sha strings, fresh copies) pins
+    main. -#}
+{%- set tpl_ref = _copier_answers._commit | default('', true) -%}
+{%- set release_pin = tpl_ref | regex_replace('^templates/(v[0-9]+\\.[0-9]+\\.[0-9]+)$', '\\1') -%}
+{%- set uses_ref = release_pin if (release_pin and release_pin != tpl_ref) else 'main' %}
 name: Pages
 
 on:
@@ -24,7 +31,7 @@ concurrency:
 
 jobs:
   deploy:
-    uses: {{ github_username }}/repo-platform/.github/workflows/reusable-pages.yml@{{ _copier_answers._commit | default('main', true) }}
+    uses: {{ github_username }}/repo-platform/.github/workflows/reusable-pages.yml@{{ uses_ref }}
     with:
       setup: {{ pages_setup }}
       install_command: {{ pages_install_command | tojson }}
