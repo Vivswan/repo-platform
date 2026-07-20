@@ -1,14 +1,14 @@
 ---
 {% if 'settings-sync' in modules -%}
 # Repository settings applied by the settings-sync workflow (via
-# {{ github_username }}/settings-as-code) when this file changes, plus a
+# {{ github_username }}/repo-settings-as-code) when this file changes, plus a
 # monthly heal run; without the REPO_PLATFORM_TOKEN secret the workflow
 # skips with a notice. Undeclared labels are deleted; undeclared rulesets
 # are left alone.
 {%- else -%}
 # Declarative repository settings. INERT until the settings-sync module is
 # enabled (copier update -d 'modules=[..., settings-sync]') or the file is
-# applied manually via {{ github_username }}/settings-as-code.
+# applied manually via {{ github_username }}/repo-settings-as-code.
 {%- endif %}
 # Baseline managed by {{ github_username }}/repo-platform; repo-specific
 # additions survive template updates via three-way merge.

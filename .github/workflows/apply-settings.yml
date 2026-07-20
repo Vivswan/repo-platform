@@ -1,4 +1,4 @@
-# Applies this repo's own .github/settings.yml via settings-as-code (the
+# Applies this repo's own .github/settings.yml via repo-settings-as-code (the
 # same machinery downstream repos get from the settings-sync module).
 
 name: Apply Settings
