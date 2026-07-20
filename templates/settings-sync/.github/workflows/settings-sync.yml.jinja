@@ -1,0 +1,40 @@
+# This file is managed by {{ github_username }}/repo-platform.
+# Local edits may be replaced during template updates.
+#
+# Applies this repository's .github/settings.yml via settings-as-code.
+# Needs the REPO_PLATFORM_TOKEN secret (Administration + Issues write);
+# without it, runs skip with a notice.
+{#- The reusable workflow lives on main, not on the build branches: strip a
+    templates/vX.Y.Z build-tag _commit to the same-version release tag on
+    main; anything else (staging describe/sha strings, fresh copies) pins
+    main. -#}
+{%- set tpl_ref = _copier_answers._commit | default('', true) -%}
+{%- set release_pin = tpl_ref | regex_replace('^templates/(v[0-9]+\\.[0-9]+\\.[0-9]+)$', '\\1') -%}
+{%- set uses_ref = release_pin if (release_pin and release_pin != tpl_ref) else 'main' %}
+
+name: Settings Sync
+
+on:
+  push:
+    branches: [main]
+    paths: [.github/settings.yml]
+  schedule:
+    - cron: "11 6 3 * *"
+  workflow_dispatch:
+    inputs:
+      check_only:
+        description: Report drift without writing
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  apply:
+    uses: {{ github_username }}/repo-platform/.github/workflows/reusable-apply-settings.yml@{{ uses_ref }}
+    with:
+      check_only: {% raw %}${{ inputs.check_only || false }}{% endraw %}
+    secrets:
+      REPO_PLATFORM_TOKEN: {% raw %}${{ secrets.REPO_PLATFORM_TOKEN }}{% endraw %}
