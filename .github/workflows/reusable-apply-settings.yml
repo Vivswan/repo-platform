@@ -23,6 +23,26 @@ on:
         required: false
         type: boolean
         default: false
+      on_missing_permission:
+        description: fail (default) or warn - partial success on missing permissions
+        required: false
+        type: string
+        default: fail
+      required_sections:
+        description: Sections that must apply even under warn
+        required: false
+        type: string
+        default: ""
+      sections:
+        description: Optional allowlist of sections to process
+        required: false
+        type: string
+        default: ""
+      api_version:
+        description: X-GitHub-Api-Version override
+        required: false
+        type: string
+        default: "2022-11-28"
     secrets:
       REPO_PLATFORM_TOKEN:
         required: false
@@ -62,8 +82,13 @@ jobs:
 
       - name: Apply repository settings
         if: steps.token.outputs.proceed == 'true'
-        uses: Vivswan/settings-as-code@main
+        # Pinned to an immutable commit; bump to @v1 once settings-as-code
+        # cuts its first release.
+        uses: Vivswan/settings-as-code@34f108a30e5f925e783e17279be8abeadbb42c4d
         with:
           token: ${{ secrets.REPO_PLATFORM_TOKEN }}
           mode: ${{ inputs.check_only && 'check' || 'apply' }}
-          on-missing-permission: fail
+          on-missing-permission: ${{ inputs.on_missing_permission }}
+          required-sections: ${{ inputs.required_sections }}
+          sections: ${{ inputs.sections }}
+          api-version: ${{ inputs.api_version }}
