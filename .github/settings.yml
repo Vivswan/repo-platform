@@ -1,8 +1,8 @@
 ---
-# Repository settings managed by the Probot "Settings" GitHub App
-# (https://github.com/apps/settings). This file is inert unless that app is
-# installed on the repo. The `rulesets` block below is an experimental upstream
-# feature (repository-settings/app) -- its schema may still change.
+# Repository settings applied by the apply-settings workflow (via
+# Vivswan/settings-as-code) on every change to this file, plus a weekly
+# heal run. Undeclared labels are deleted; undeclared rulesets are left
+# alone. Schema: Probot settings.yml superset (see settings-as-code README).
 
 repository:
   description: Copier template + reusable workflows managing standards across Vivswan's repositories

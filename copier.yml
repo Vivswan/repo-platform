@@ -67,7 +67,8 @@ modules:
     issue-templates - bug/feature issue forms: issue-templates
     pr-title - Conventional Commit PR title check: pr-title
     auto-assign - auto-assign issues/PRs/alerts to owner: auto-assign
-  default: [agents, release-please, issue-templates, pr-title, auto-assign]
+    settings-sync - apply .github/settings.yml via settings-as-code: settings-sync
+  default: [agents, release-please, issue-templates, pr-title, auto-assign, settings-sync]
 
 # --- pages module parameters (asked only when pages is selected) ---
 
