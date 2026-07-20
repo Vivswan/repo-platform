@@ -36,7 +36,7 @@ Notes:
 - The strict `join(needs.*.result)` gate treats `skipped` as failure. If a
   job may legitimately skip, make it exit successfully with a message
   instead of using a job-level `if:`.
-- Jobs that must run only after CI passes (e.g. release-please) should
+- Jobs that must run only after CI passes (e.g. [release-please](https://github.com/googleapis/release-please)) should
   `needs: all-green`; the validator exempts them from the needs-list check.
 - `Vivswan/repo-platform/actions/validate-template` enforces this shape:
   all-green must exist and `needs:` every other job, and a `typography` job

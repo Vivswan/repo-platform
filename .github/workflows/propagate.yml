@@ -39,7 +39,7 @@ jobs:
           PAT: ${{ secrets.REPO_PLATFORM_TOKEN }}
         run: |
           if [ -z "$PAT" ]; then
-            echo "::error::REPO_PLATFORM_TOKEN is not set. Push propagation needs a fine-grained PAT (Actions:RW on managed repos). Repos still pull on their weekly cron."
+            echo "::error::push propagation cannot dispatch: the REPO_PLATFORM_TOKEN secret is not set, and the default GITHUB_TOKEN cannot trigger workflows in other repos. Add a fine-grained PAT with Actions (read and write) and Metadata (read) on the managed repos as an Actions secret named REPO_PLATFORM_TOKEN in this repo's settings. Until then, repos still pull on their weekly cron."
             exit 1
           fi
 
@@ -81,7 +81,7 @@ jobs:
             echo "waiting for ${tag}..."
             sleep 10
           done
-          echo "::warning::${tag} still missing after 5 minutes; dispatching anyway (latest-channel syncs will fail with a clear error until build-branches finishes)"
+          echo "::warning::${tag} is still missing after 5 minutes of waiting because build-branches has not finished (or did not trigger). Dispatching anyway - latest-channel syncs will fail with a clear error until the tag exists. If it stays missing, dispatch the Build Branches workflow manually."
 
       - name: Dispatch template-sync in managed repos
         env:
@@ -108,19 +108,19 @@ jobs:
               echo "dispatched template-sync (${VERSION})"
             elif echo "$output" | grep -qiE "could not find any workflows|404|Not Found"; then
               # No template-sync.yml on the default branch: repo not adopted yet.
-              echo "::warning::${repo}: not adopted yet (no template-sync.yml); skipped"
+              echo "::warning::${repo}: skipped - template-sync.yml was not found, which means the repo has not adopted the template (no template-sync.yml on its default branch) OR the REPO_PLATFORM_TOKEN cannot access the repo. If it is adopted, grant the PAT Actions (read and write) and Metadata (read) on it; otherwise generate the repo with copier (see repo-platform README) or remove it from repos.yml."
             else
-              echo "::error::${repo}: dispatch failed: ${output}"
+              echo "::error::${repo}: could not dispatch template-sync.yml: ${output}. Check that REPO_PLATFORM_TOKEN grants Actions (read and write) on ${repo}, then re-run this workflow."
               failed="${failed} ${repo}"
             fi
             echo "::endgroup::"
           done
 
           if [ "$matched" -eq 0 ]; then
-            echo "::error::no registry entry matched '${ONLY_REPO}' - check repos.yml (entries are owner/name)"
+            echo "::error::nothing dispatched: no entry in repos.yml matches '${ONLY_REPO}'. Entries are owner/name - fix the repo input or add the repo to repos.yml."
             exit 1
           fi
           if [ -n "$failed" ]; then
-            echo "::error::dispatch failed for:${failed}"
+            echo "::error::template-sync dispatch failed for:${failed} - see the per-repo errors above for the API responses. Fix the cause (usually REPO_PLATFORM_TOKEN permissions), then re-run this workflow with the repo input to retry one repo at a time."
             exit 1
           fi

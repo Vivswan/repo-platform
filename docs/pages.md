@@ -10,7 +10,7 @@ Pages deployment carries up to two environments:
 
 Staging refreshes on every push to main; the root changes only when a new
 release is published. Before the first release there is no tag, so only
-staging publishes and the root returns GitHub's default 404 - this is
+staging publishes and the root returns GitHub's default 404. This is
 intended, not a failure. With `pages_staging: false` there is nothing to
 publish at all before the first release; those runs skip the deploy with a
 notice and stay green.
@@ -19,9 +19,9 @@ notice and stay green.
 
 In the repository:
 
-1. Settings -> Pages -> Source: **GitHub Actions**.
+1. Settings -> Pages -> Source: GitHub Actions.
 2. Settings -> Environments -> `github-pages` (created by the first deploy
-   run) -> Deployment branches and tags -> add a **tag** rule `v*`. GitHub
+   run) -> Deployment branches and tags -> add a tag rule `v*`. GitHub
    restricts the auto-created environment to the default branch, so without
    this rule the `release: published` trigger (which runs on the tag ref) is
    rejected with "not allowed to deploy to github-pages due to environment
@@ -44,11 +44,11 @@ In the repository:
 The build command runs with three environment variables exported; map them
 onto whatever your tool expects:
 
-- `PAGES_BASE_PATH` - the base path the site is served under (`/<repo>/`,
+- `PAGES_BASE_PATH`: the base path the site is served under (`/<repo>/`,
   `/<repo>/staging/`, or `/` with a custom domain)
-- `PAGES_ORIGIN` - the absolute origin (`https://<owner>.github.io` or
+- `PAGES_ORIGIN`: the absolute origin (`https://<owner>.github.io` or
   `https://<domain>`), for sitemaps/canonical/og URLs
-- `PAGES_STAGING` - `1` for the staging build, empty for production
+- `PAGES_STAGING`: `1` for the staging build, empty for production
 
 Examples:
 
@@ -62,13 +62,13 @@ Examples:
 
 Three pieces have to agree; the repo variable only flips the build side:
 
-1. **DNS**: point the domain at GitHub Pages (CNAME record to
+1. DNS: point the domain at [GitHub Pages](https://docs.github.com/en/pages/configuring-a-custom-domain-for-your-github-pages-site) (CNAME record to
    `<owner>.github.io` for a subdomain, or the Pages A/AAAA records for an
    apex domain).
-2. **Pages settings**: Settings -> Pages -> Custom domain -> enter the
+2. Pages settings: Settings -> Pages -> Custom domain -> enter the
    domain (GitHub verifies DNS and provisions TLS here; the `CNAME` file in
    the artifact alone does not configure this for Actions-based deploys).
-3. **Repo variable**: set `CUSTOM_DOMAIN` (Settings -> Secrets and variables
+3. Repo variable: set `CUSTOM_DOMAIN` (Settings -> Secrets and variables
    -> Actions -> Variables), e.g. `example.com`. The next deploy then builds
    with the matching URLs: root moves from `/<repo>/` to `/`, staging to
    `/staging/`, `PAGES_ORIGIN` becomes `https://example.com`, and
@@ -79,9 +79,9 @@ custom domain in Pages settings together, or URLs and routing will disagree).
 
 ## Caveats
 
-- Releases published by the default `GITHUB_TOKEN` (e.g. release-please
-  without a PAT) do **not** fire `pages.yml`'s `release:` trigger - the same
-  token caveat as propagate.yml. The next push to main or a manual
+- Releases published by the default `GITHUB_TOKEN` (e.g. [release-please](https://github.com/googleapis/release-please)
+  without a PAT) do not fire `pages.yml`'s `release:` trigger (the same
+  token caveat as propagate.yml). The next push to main or a manual
   `workflow_dispatch` picks the release up, since the root is re-resolved
   from the latest release on every run.
 - Serving Pages from a private repository requires a paid GitHub plan; the
