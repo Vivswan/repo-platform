@@ -16,7 +16,7 @@ mkdir my-project && cd my-project && bun init
 
 ## 2. Apply the template
 
-Requires copier >= 9.8.0 (serialized multiselect answers). `main` holds only
+Requires [copier](https://copier.readthedocs.io) >= 9.8.0 (serialized multiselect answers). `main` holds only
 sources; consume the GENERATED build refs, and match the initial `--vcs-ref`
 to the channel you pick when asked:
 
@@ -82,7 +82,7 @@ jobs:
 gh repo create Vivswan/my-project --public --source . --push
 ```
 
-Optionally add `REPO_PLATFORM_TOKEN` (a fine-grained PAT with Contents:RW,
+Optionally add `REPO_PLATFORM_TOKEN` (a [fine-grained PAT](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens#creating-a-fine-grained-personal-access-token) with Contents:RW,
 Pull requests:RW, Administration:RW, and Issues:RW on this repo) as an
 Actions secret so template-sync PRs trigger CI automatically and the
 settings-sync module can apply `.github/settings.yml`. Without it, sync

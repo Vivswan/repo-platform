@@ -10,12 +10,12 @@ release only *dispatches* each repo's own sync workflow).
 
 | Branch | Contents |
 |---|---|
-| `main` | Sources only (`templates/`, workflows, actions, scripts) - NOT consumable by copier |
+| `main` | Sources only (`templates/`, workflows, actions, scripts); NOT consumable by copier |
 | `staging` | Generated build of the latest `main` commit (rebuilt on every push) |
 | `latest` | Generated build of the latest release, tagged `templates/vX.Y.Z` |
 
 `staging` and `latest` are orphan, append-only branches published by the
-build-branches workflow; PRs against them are closed automatically, and a
+[build-branches workflow](.github/workflows/build-branches.yml); PRs against them are closed automatically, and a
 `main` history rewrite cannot invalidate them.
 
 - `templates/` on main holds the sources; the composed tree copier renders
@@ -29,12 +29,12 @@ build-branches workflow; PRs against them are closed automatically, and a
   Vivswan's own managed repos follow `staging`.
 - Each managed repo carries a `template-sync.yml` workflow (weekly cron +
   manual dispatch). When its channel moved, it runs `copier update`,
-  validates the result, and opens a PR **in its own repo**.
-- Publishing a release also **pushes**: `propagate.yml` dispatches every
+  validates the result, and opens a PR in its own repo.
+- Publishing a release also pushes: `propagate.yml` dispatches every
   managed repo's template-sync immediately (registry: `repos.yml`), so the
   weekly pull is only the catch-all. Selective manual push:
   `gh workflow run propagate.yml -f repo=Vivswan/skills`.
-- With a `REPO_PLATFORM_TOKEN` secret (fine-grained PAT: Contents:RW,
+- With a `REPO_PLATFORM_TOKEN` secret ([fine-grained PAT](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens#creating-a-fine-grained-personal-access-token): Contents:RW,
   Pull requests:RW, plus Administration:RW and Issues:RW for the
   settings-sync module) the sync PR triggers CI normally and settings
   apply; without it, sync PRs carry a close/reopen note and settings-sync
@@ -69,7 +69,8 @@ source of truth for agent instructions.
 
 ## Releasing
 
-Releases are cut by release-please: conventional commits on `main`
+Releases are cut by [release-please](https://github.com/googleapis/release-please):
+[conventional commits](https://www.conventionalcommits.org) on `main`
 accumulate into a release PR; merging it tags `vX.Y.Z`, publishes the GitHub
 release, and updates `CHANGELOG.md`. Publishing the release rebuilds the
 `latest` branch (tagged `templates/vX.Y.Z`) and pushes to all managed repos

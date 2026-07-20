@@ -161,7 +161,12 @@ def main() -> int:
         ]
         if stale:
             for rel in stale:
-                print(f"{rel} is stale; run scripts/build_gitignore.py")
+                print(
+                    f"{rel} is stale: it does not match the output generated from "
+                    f"the locked github/gitignore SHA ({sha[:12]}); run "
+                    "python3 scripts/build_gitignore.py --locked to regenerate it "
+                    "(drop --locked to also advance the lock)"
+                )
             return 1
         print("gitignore outputs are up to date")
         return 0

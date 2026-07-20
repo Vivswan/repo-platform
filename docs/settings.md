@@ -2,8 +2,8 @@
 
 Selecting `settings-sync` gives a repository a managed `settings-sync.yml`
 workflow that applies `.github/settings.yml` through
-[settings-as-code](https://github.com/Vivswan/settings-as-code) - the
-replacement for the Probot Settings app. Every apply is a visible workflow
+[settings-as-code](https://github.com/Vivswan/repo-settings-as-code), the
+replacement for the [Probot Settings app](https://github.com/repository-settings/app). Every apply is a visible workflow
 run that fails loudly; no more silent drift.
 
 ## When it runs
@@ -19,11 +19,11 @@ caller (weekly heal).
 
 Stateless, declared-keys-only, upsert-by-name:
 
-- **Labels**: declared labels are synced; **undeclared labels are deleted**
-  (loudly) - list every label the repo should keep, including tool-managed
-  ones like release-please's `autorelease: *` pair.
-- **Rulesets**: upserted by name (branch and tag targets); **never deleted**
-  when undeclared - removing protection stays a human action.
+- Labels: declared labels are synced; undeclared labels are deleted
+  (loudly). List every label the repo should keep, including tool-managed
+  ones like [release-please](https://github.com/googleapis/release-please)'s `autorelease: *` pair.
+- Rulesets: upserted by name (branch and tag targets); never deleted
+  when undeclared, since removing protection stays a human action.
 - Repository fields, topics, and security toggles are applied only when
   declared; omitting a key leaves the live value alone.
 - Short ref names in ruleset conditions are auto-prefixed (`staging` ->
@@ -33,7 +33,7 @@ Stateless, declared-keys-only, upsert-by-name:
 ## Token
 
 The workflow needs the `REPO_PLATFORM_TOKEN` secret in the repository, with
-these fine-grained permissions on it:
+these [fine-grained permissions](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens#creating-a-fine-grained-personal-access-token) on it:
 
 | Permission | Why |
 |---|---|
@@ -41,7 +41,7 @@ these fine-grained permissions on it:
 | Issues: read & write | labels |
 | (plus the existing Contents/Pull requests/Actions scopes from the sync machinery) | |
 
-Without the secret, runs skip with a notice - the module is safe to have
+Without the secret, runs skip with a notice, so the module is safe to have
 enabled before the token exists.
 
 ## Opting in an existing repo

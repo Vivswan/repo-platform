@@ -1,8 +1,8 @@
 ---
 # Repository settings applied by the apply-settings workflow (via
-# Vivswan/settings-as-code) on every change to this file, plus a weekly
+# Vivswan/repo-settings-as-code) on every change to this file, plus a weekly
 # heal run. Undeclared labels are deleted; undeclared rulesets are left
-# alone. Schema: Probot settings.yml superset (see settings-as-code README).
+# alone. Schema: Probot settings.yml superset (see repo-settings-as-code README).
 
 repository:
   description: Copier template + reusable workflows managing standards across Vivswan's repositories

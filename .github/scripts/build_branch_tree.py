@@ -75,13 +75,22 @@ def main() -> int:
     args = parser.parse_args()
 
     if args.channel == "latest" and not args.version:
-        parser.error("--version is required with --channel latest")
+        parser.error(
+            "--channel latest builds a release tree and needs --version; "
+            "pass the release tag, e.g. --version v1.2.3"
+        )
     if args.channel == "staging" and args.version:
-        parser.error("--version only applies to --channel latest")
+        parser.error(
+            f"--version {args.version} does not apply to --channel staging "
+            "(staging always builds from main HEAD); drop --version or use --channel latest"
+        )
 
     dest = Path(args.dest).resolve()
     if dest == REPO_ROOT or REPO_ROOT in dest.parents:
-        parser.error("--dest must be outside the repository")
+        parser.error(
+            f"--dest {dest} is inside the repository and would be wiped along "
+            "with the checkout; pass a path outside it, e.g. --dest /tmp/build-tree"
+        )
     if dest.exists():
         shutil.rmtree(dest)
     dest.mkdir(parents=True)

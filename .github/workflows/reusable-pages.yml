@@ -79,24 +79,24 @@ jobs:
         run: |
           case "$SETUP" in
             bun|uv|none) ;;
-            *) echo "::error::setup must be bun, uv, or none (got '$SETUP')"; exit 1 ;;
+            *) echo "::error::invalid setup input '$SETUP': it selects the build toolchain and must be bun, uv, or none. Fix the setup value in the workflow that calls reusable-pages.yml."; exit 1 ;;
           esac
           case "$PRODUCTION" in
             release|main) ;;
-            *) echo "::error::production must be release or main (got '$PRODUCTION')"; exit 1 ;;
+            *) echo "::error::invalid production input '$PRODUCTION': it selects what the production root builds from and must be release or main. Fix the production value in the workflow that calls reusable-pages.yml."; exit 1 ;;
           esac
           if [ -z "$BUILD_COMMAND" ]; then
-            echo "::error::build_command must not be empty"; exit 1
+            echo "::error::build_command is empty, so there is no command to build the site with. Set build_command in the calling workflow to the command that writes dist_dir (e.g. bun run build)."; exit 1
           fi
           # Segment-wise: wrapping in slashes makes every "."/".."/empty
           # segment (absolute, doubled, trailing slashes) match a pattern, so
           # spellings like "./" or "a/../b" cannot resolve to the repo root.
           if [ -z "$DIST_DIR" ]; then
-            echo "::error::dist_dir must not be empty"; exit 1
+            echo "::error::dist_dir is empty, so the deploy cannot locate the build output. Set dist_dir in the calling workflow to the build output directory relative to the repo root (default: dist)."; exit 1
           fi
           case "/$DIST_DIR/" in
             *//*|*/./*|*/../*)
-              echo "::error::dist_dir must be a plain relative path inside the repo (got '$DIST_DIR')"; exit 1 ;;
+              echo "::error::invalid dist_dir '$DIST_DIR': it contains empty, '.', or '..' segments, which could resolve to the repo root and publish the whole checkout. Set dist_dir in the calling workflow to a plain relative path inside the repo (e.g. dist)."; exit 1 ;;
           esac
 
       # Resolve URLs and source refs before any checkout. main HEAD is the
@@ -156,7 +156,7 @@ jobs:
           # pushes to main stay green until the first release exists.
           publish=true
           if [ -z "$prod_ref" ] && [ "$build_staging" = "false" ]; then
-            echo "::notice::nothing to publish yet (no release exists and staging is disabled); skipping deploy"
+            echo "::notice::deploy skipped: no release exists yet and the staging input is false, so there is nothing to publish. Publish a first release (or set staging to true) to make this workflow deploy."
             publish=false
           fi
 
@@ -231,13 +231,13 @@ jobs:
           mkdir -p _site
           if [ -n "$PROD_REF" ]; then
             if [ ! -d "production/$DIST_DIR" ]; then
-              echo "::error::production build did not produce '$DIST_DIR'"; exit 1
+              echo "::error::cannot compose the site: the production build (ref '$PROD_REF') did not create '$DIST_DIR'. Point dist_dir at the directory build_command actually writes, or fix build_command to produce it."; exit 1
             fi
             cp -R "production/$DIST_DIR/." _site/
           fi
           if [ "$BUILD_STAGING" = "true" ]; then
             if [ ! -d "staging/$DIST_DIR" ]; then
-              echo "::error::staging build did not produce '$DIST_DIR'"; exit 1
+              echo "::error::cannot compose the site: the staging build (main HEAD) did not create '$DIST_DIR'. Point dist_dir at the directory build_command actually writes, or fix build_command to produce it."; exit 1
             fi
             mkdir -p _site/staging
             cp -R "staging/$DIST_DIR/." _site/staging/

@@ -80,11 +80,17 @@ def load_manifest(folder: Path) -> dict:
         return {}
     data = yaml.safe_load(manifest.read_text(encoding="utf-8")) or {}
     if not isinstance(data, dict):
-        raise SystemExit(f"error: {manifest.relative_to(REPO_ROOT)} must be a mapping")
+        raise SystemExit(
+            f"error: {manifest.relative_to(REPO_ROOT)} must be a YAML mapping "
+            "(it parsed as something else); rewrite it as 'key: value' lines "
+            "using only the gate / gate_dirs keys"
+        )
     unknown = set(data) - {"gate", "gate_dirs"}
     if unknown:
         raise SystemExit(
-            f"error: {manifest.relative_to(REPO_ROOT)}: unknown key(s): {', '.join(sorted(unknown))}"
+            f"error: {manifest.relative_to(REPO_ROOT)}: unknown key(s): "
+            f"{', '.join(sorted(unknown))} - only gate and gate_dirs are "
+            "recognized; remove or rename the extra keys"
         )
     gate = data.get("gate")
     if gate is not None and not isinstance(gate, str):
@@ -97,7 +103,9 @@ def load_manifest(folder: Path) -> dict:
         not isinstance(gate_dirs, list) or not all(isinstance(d, str) for d in gate_dirs)
     ):
         raise SystemExit(
-            f"error: {manifest.relative_to(REPO_ROOT)}: gate_dirs must be a list of strings"
+            f"error: {manifest.relative_to(REPO_ROOT)}: gate_dirs must be a list of "
+            "strings naming directories in this module; write it as e.g. "
+            'gate_dirs: [".github/ISSUE_TEMPLATE"]'
         )
     return data
 
@@ -124,7 +132,11 @@ def collect_fragments(folder: Path) -> dict[str, bytes]:
         if not path.is_file():
             continue
         if path.suffix != JINJA_SUFFIX:
-            raise SystemExit(f"error: {path.relative_to(REPO_ROOT)}: fragments must end in .jinja")
+            raise SystemExit(
+                f"error: {path.relative_to(REPO_ROOT)}: fragment files must end in "
+                f"{JINJA_SUFFIX} (the composer strips it to get the anchor name); "
+                f"rename the file to <anchor>{JINJA_SUFFIX} or move it out of {FRAGMENTS_DIR}/"
+            )
         fragments[path.name.removesuffix(JINJA_SUFFIX)] = path.read_bytes()
     return fragments
 
@@ -179,7 +191,9 @@ def splice_fragments(
                 other = anchor_owner[anchor]
                 errors.append(
                     f"duplicate anchor '{anchor}' in templates/{source}/{logical} "
-                    f"and templates/{other[0]}/{other[1]}"
+                    f"and templates/{other[0]}/{other[1]} - each anchor may appear "
+                    "in exactly one skeleton file; rename one anchor (and any "
+                    f"fragments/{anchor}.jinja files that feed it) or remove the duplicate marker"
                 )
             anchor_owner[anchor] = (source, logical)
 
@@ -188,7 +202,9 @@ def splice_fragments(
             for module, _ in contributions:
                 errors.append(
                     f"templates/{module}/{FRAGMENTS_DIR}/{anchor}{JINJA_SUFFIX}: no "
-                    f"anchor {{# compose:{anchor} #}} found in any source file"
+                    f"anchor {{# compose:{anchor} #}} found in any source file - the "
+                    "fragment has nowhere to splice; add the marker line to a "
+                    "skeleton file or delete the fragment"
                 )
     for anchor, (source, logical) in sorted(anchor_owner.items()):
         if anchor not in fragments:
@@ -226,7 +242,8 @@ def build() -> dict[str, Entry]:
     if not base.is_dir() or not any(base.iterdir()):
         raise SystemExit(
             "error: templates/base is missing or empty; refusing to compose "
-            "(a broken checkout must not wipe template/)"
+            "(a broken checkout must not wipe template/). Restore templates/base/ "
+            "with git checkout before rerunning."
         )
     folders = sorted(p.name for p in SRC.iterdir() if p.is_dir() and p.name != "base")
     unknown = [f for f in folders if f not in MODULE_ORDER]
@@ -264,12 +281,14 @@ def build() -> dict[str, Entry]:
             if prefix in module_files:
                 errors.append(
                     f"templates/{module}/{MANIFEST_NAME}: gate_dirs entry "
-                    f"'{gated_dir}' is a file, not a directory"
+                    f"'{gated_dir}' is a file, not a directory - leaf files are "
+                    "gated automatically; remove the entry"
                 )
             elif not any(p.startswith(prefix + "/") for p in module_files):
                 errors.append(
                     f"templates/{module}/{MANIFEST_NAME}: gate_dirs entry "
-                    f"'{gated_dir}' matches none of the module's files"
+                    f"'{gated_dir}' matches none of the module's files - likely a "
+                    "typo; fix the path or remove the entry"
                 )
         for logical, entry in module_files.items():
             if "{%" in logical:
