@@ -21,8 +21,8 @@ build-branches workflow; PRs against them are closed automatically, and a
 - `templates/` on main holds the sources; the composed tree copier renders
   lands on the build branches. A repo picks any combination of feature
   **modules** (`agents`, `bun`, `uv`, `pages`, `release-please`,
-  `issue-templates`, `pr-title`, `auto-assign`); modules with parameters
-  (like `pages`) ask follow-up questions only when selected.
+  `issue-templates`, `pr-title`, `auto-assign`, `settings-sync`); modules
+  with parameters (like `pages`) ask follow-up questions only when selected.
 - Each repo also picks a **channel**: `latest` follows released
   `templates/vX.Y.Z` build tags (migrations run between releases);
   `staging` follows the staging branch head (migrations are skipped).
@@ -34,10 +34,11 @@ build-branches workflow; PRs against them are closed automatically, and a
   managed repo's template-sync immediately (registry: `repos.yml`), so the
   weekly pull is only the catch-all. Selective manual push:
   `gh workflow run propagate.yml -f repo=Vivswan/skills`.
-- With a `REPO_PLATFORM_TOKEN` secret (fine-grained PAT, Contents:RW +
-  Pull requests:RW on that repo) the sync PR triggers CI normally; without
-  it, the PR is created with the default `GITHUB_TOKEN` and carries a
-  close/reopen note.
+- With a `REPO_PLATFORM_TOKEN` secret (fine-grained PAT: Contents:RW,
+  Pull requests:RW, plus Administration:RW and Issues:RW for the
+  settings-sync module) the sync PR triggers CI normally and settings
+  apply; without it, sync PRs carry a close/reopen note and settings-sync
+  runs skip with a notice.
 
 ## Layout
 
@@ -45,13 +46,13 @@ build-branches workflow; PRs against them are closed automatically, and a
 |---|---|
 | `templates/` | SOURCE of the template: one folder per module plus `base/`; shared files composed via `{# compose:<anchor> #}` markers + per-module `fragments/` |
 | `copier.yml` | Questions + module choices (hand-maintained; standards-only, project skeletons come from `uv init` / `bun init`) |
-| `.github/workflows/reusable-*.yml` | Reusable workflows: template-sync, pr-title, auto-assign, codeql, pages ([docs](docs/pages.md)) |
+| `.github/workflows/reusable-*.yml` | Reusable workflows: template-sync, pr-title, auto-assign, codeql, pages ([docs](docs/pages.md)), apply-settings ([docs](docs/settings.md)) |
 | `actions/check-typography` | Blocks look-alike/invisible unicode (vendored from cloud-speech, config via `.typography-allow`) |
 | `actions/validate-template` | Enforces markers, YAML validity, and the all-green convention |
 | `actions/validate-commit-names` | Conventional Commit subjects on every push/PR commit |
 | `scripts/build_gitignore.py` | Regenerates `templates/base/.gitignore.jinja` from the latest [github/gitignore](https://github.com/github/gitignore) (Windows + macOS + Linux always, Node/Python by bun/uv module) |
 | `migrations/` | Copier `_migrations` scripts for future breaking changes |
-| `docs/` | [all-green convention](docs/all-green.md), [new repo](docs/new-repo.md), [pages module](docs/pages.md), [eject](docs/eject.md) |
+| `docs/` | [all-green convention](docs/all-green.md), [new repo](docs/new-repo.md), [pages module](docs/pages.md), [settings-sync](docs/settings.md), [eject](docs/eject.md) |
 
 ## File ownership in managed repos
 
