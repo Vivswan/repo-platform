@@ -331,7 +331,13 @@ def write_output(composed: dict[str, Entry], out: Path) -> None:
         dest = out / path
         dest.parent.mkdir(parents=True, exist_ok=True)
         if entry.is_symlink:
-            os.symlink(entry.target, dest)
+            # Source symlinks target the .jinja file so they are never
+            # dangling in git (GitHub's action downloader refuses tarballs
+            # with broken links); emitted links target the RENDERED name.
+            target = entry.target
+            if target is not None and target.endswith(JINJA_SUFFIX):
+                target = target.removesuffix(JINJA_SUFFIX)
+            os.symlink(target, dest)
         else:
             dest.write_bytes(entry.data)
 
