@@ -16,7 +16,7 @@ sync (propagate.yml).
 
 - `templates/` is the SOURCE OF TRUTH: one folder per module (`agents`,
   `bun`, `uv`, `pages`, `release-please`, `issue-templates`, `pr-title`,
-  `auto-assign`) plus `base/` (unconditional files; explicit conditional
+  `auto-assign`, `settings-sync`) plus `base/` (unconditional files; explicit conditional
   filenames like SECURITY.md's `not private` gate live only here).
 - The composed `template/` tree is NOT committed on main: the `staging`
   and `latest` branches are generated, orphan, append-only build outputs

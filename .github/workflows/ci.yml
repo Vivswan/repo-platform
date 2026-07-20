@@ -131,13 +131,13 @@ jobs:
           # Module combos covering the risky branches. `modules` is a YAML
           # STRING here (quoted) and parsed by copier as a YAML list.
           - name: everything
-            modules: "[agents, bun, uv, pages, release-please, issue-templates, pr-title, auto-assign]"
+            modules: "[agents, bun, uv, pages, release-please, issue-templates, pr-title, auto-assign, settings-sync]"
             private: "false"
             expect_in_pages: |
               bun install --frozen-lockfile
               bun run build
           - name: bun-typical
-            modules: "[agents, bun, release-please, issue-templates, pr-title, auto-assign]"
+            modules: "[agents, bun, release-please, issue-templates, pr-title, auto-assign, settings-sync]"
             private: "false"
           - name: uv-pages-private
             modules: "[uv, pages, auto-assign]"
@@ -211,6 +211,12 @@ jobs:
           if has auto-assign; then test -f "$wf/auto-assign.yml"; else test ! -e "$wf/auto-assign.yml"; fi
           if has issue-templates; then test -d /tmp/smoke/.github/ISSUE_TEMPLATE; else test ! -e /tmp/smoke/.github/ISSUE_TEMPLATE; fi
           if has pages; then test -f "$wf/pages.yml"; else test ! -e "$wf/pages.yml"; fi
+          if has settings-sync; then
+            test -f "$wf/settings-sync.yml"
+            present "reusable-apply-settings.yml@main" "$wf/settings-sync.yml"
+          else
+            test ! -e "$wf/settings-sync.yml"
+          fi
 
           # auto-assign: security-events is always granted (static validation of
           # the reusable call); the CodeQL-driven triggers and the code_scanning

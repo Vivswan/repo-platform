@@ -55,6 +55,7 @@ MODULE_ORDER = [
     "issue-templates",
     "pr-title",
     "auto-assign",
+    "settings-sync",
 ]
 
 ANCHOR_RE = re.compile(rb"^\{# compose:([a-z0-9][a-z0-9-]*) #\}$")

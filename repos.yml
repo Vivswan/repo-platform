@@ -3,6 +3,7 @@
 # (carry .github/workflows/template-sync.yml on its default branch), or the
 # dispatch is skipped with a warning until it is.
 managed:
+  - Vivswan/settings-as-code
   - Vivswan/cloud-speech
   - Vivswan/litellm-vscode-chat
   - Vivswan/skills

@@ -37,7 +37,8 @@ Copier asks for project name, description, an update **channel** (`latest`
 follows released `templates/vX.Y.Z` build tags and runs migrations;
 `staging` follows every main merge, migrations skipped), a `modules`
 multiselect (any combination of `agents`, `bun`, `uv`, `pages`,
-`release-please`, `issue-templates`, `pr-title`, `auto-assign`), follow-up
+`release-please`, `issue-templates`, `pr-title`, `auto-assign`,
+`settings-sync`), follow-up
 parameters for modules that have them (see [docs/pages.md](pages.md)), and
 visibility. Answers are recorded in `.copier-answers.yml`. Never delete
 that file; template sync depends on it.
@@ -81,7 +82,9 @@ jobs:
 gh repo create Vivswan/my-project --public --source . --push
 ```
 
-Optionally add `REPO_PLATFORM_TOKEN` (a fine-grained PAT with Contents:RW +
-Pull requests:RW on this repo) as an Actions secret so template-sync PRs
-trigger CI automatically. Without it, sync still works: close/reopen the PR
-to run checks.
+Optionally add `REPO_PLATFORM_TOKEN` (a fine-grained PAT with Contents:RW,
+Pull requests:RW, Administration:RW, and Issues:RW on this repo) as an
+Actions secret so template-sync PRs trigger CI automatically and the
+settings-sync module can apply `.github/settings.yml`. Without it, sync
+still works (close/reopen the PR to run checks) and settings-sync skips
+with a notice.

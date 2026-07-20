@@ -97,6 +97,7 @@ KNOWN_MODULES = {
     "issue-templates",
     "pr-title",
     "auto-assign",
+    "settings-sync",
 }
 
 
