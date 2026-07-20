@@ -204,8 +204,8 @@ jobs:
           wf=/tmp/smoke/.github/workflows
           mods=",$(echo "$MODULES" | tr -d '[] '),"
           has() { case "$mods" in *",$1,"*) return 0 ;; *) return 1 ;; esac; }
-          present() { grep -qF -- "$1" "$2" || { echo "::error::missing '$1' in $2"; exit 1; }; }
-          absent() { if grep -qF -- "$1" "$2"; then echo "::error::unexpected '$1' in $2"; exit 1; fi; }
+          present() { grep -qF -- "$1" "$2" || { echo "::error::gating check failed: '$1' is missing from $2, so the template did not emit it for modules=$MODULES private=$PRIVATE. Fix the gate in templates/ (or this expectation in ci.yml)."; exit 1; }; }
+          absent() { if grep -qF -- "$1" "$2"; then echo "::error::gating check failed: '$1' appears in $2 but modules=$MODULES private=$PRIVATE should not emit it. Fix the gate in templates/ (or this expectation in ci.yml)."; exit 1; fi; }
 
           if has pr-title; then test -f "$wf/pr-title.yml"; else test ! -e "$wf/pr-title.yml"; fi
           if has auto-assign; then test -f "$wf/auto-assign.yml"; else test ! -e "$wf/auto-assign.yml"; fi
@@ -382,7 +382,7 @@ jobs:
           echo "results: $RESULTS"
           for result in $RESULTS; do
             if [ "$result" != "success" ]; then
-              echo "::error::a required job did not succeed"
+              echo "::error::all-green failed: at least one required job did not succeed (results: $RESULTS). Open the failing job's log in this run, fix the failure, and push again."
               exit 1
             fi
           done

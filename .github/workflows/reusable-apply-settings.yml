@@ -1,4 +1,4 @@
-# Reusable settings apply: runs Vivswan/settings-as-code against the calling
+# Reusable settings apply: runs Vivswan/repo-settings-as-code against the calling
 # repository's .github/settings.yml. Replaces the Probot Settings app - every
 # apply is a visible run that fails loudly instead of drifting silently.
 #
@@ -6,7 +6,8 @@
 # which GITHUB_TOKEN can never hold - the caller passes REPO_PLATFORM_TOKEN
 # (fine-grained PAT). Without it the run SKIPS with a notice unless the
 # caller sets require_token (repo-platform's own caller does).
-# Pinned @main until settings-as-code cuts v1; switch the pin then.
+# Pinned to an immutable commit sha; switch to @v1 once
+# repo-settings-as-code cuts its first release.
 
 name: Reusable Apply Settings
 
@@ -67,10 +68,10 @@ jobs:
           if [ -n "$PAT" ]; then
             echo "proceed=true" >> "$GITHUB_OUTPUT"
           elif [ "$REQUIRE" = "true" ]; then
-            echo "::error::REPO_PLATFORM_TOKEN is not set; settings cannot be applied (needs Administration + Issues write)"
+            echo "::error::settings apply cannot run: the REPO_PLATFORM_TOKEN secret is not set and this caller requires it (require_token: true) - GITHUB_TOKEN can never hold Administration write. Add a fine-grained PAT with Administration (read and write) and Issues (read and write) on this repo as an Actions secret named REPO_PLATFORM_TOKEN."
             exit 1
           else
-            echo "::notice::REPO_PLATFORM_TOKEN is not set; settings apply skipped (add the secret to opt in)"
+            echo "::notice::settings apply skipped: the REPO_PLATFORM_TOKEN secret is not set, and GITHUB_TOKEN cannot mutate repo settings. To opt in, add a fine-grained PAT with Administration (read and write) and Issues (read and write) on this repo as an Actions secret named REPO_PLATFORM_TOKEN."
             echo "proceed=false" >> "$GITHUB_OUTPUT"
           fi
 
@@ -82,9 +83,9 @@ jobs:
 
       - name: Apply repository settings
         if: steps.token.outputs.proceed == 'true'
-        # Pinned to an immutable commit; bump to @v1 once settings-as-code
+        # Pinned to an immutable commit; bump to @v1 once repo-settings-as-code
         # cuts its first release.
-        uses: Vivswan/settings-as-code@34f108a30e5f925e783e17279be8abeadbb42c4d
+        uses: Vivswan/repo-settings-as-code@34f108a30e5f925e783e17279be8abeadbb42c4d
         with:
           token: ${{ secrets.REPO_PLATFORM_TOKEN }}
           mode: ${{ inputs.check_only && 'check' || 'apply' }}
