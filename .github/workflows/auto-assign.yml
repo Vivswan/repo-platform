@@ -17,6 +17,8 @@ on:
     - cron: "23 6 * * 1"
 
 permissions:
+  # CODEOWNERS resolution in the reusable workflow.
+  contents: read
   issues: write
   pull-requests: write
   # workflow_dispatch activates the code-scanning-alert assignment job in the

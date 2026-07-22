@@ -38,10 +38,13 @@ commits to them; a release only dispatches each repo's own sync workflow.
 
 - Every managed repo carries `template-sync.yml` (weekly cron plus manual
   dispatch): it runs `copier update`, validates the result, and opens a PR
-  in the repo itself.
+  in the repo itself. With a PAT set, the repo's own auto-assign workflow
+  assigns the PR (the CODEOWNERS `*` entry decides who; fallback is the
+  repo owner).
 - Conflicts (local edits overlapping template changes) resolve in the
-  template's favor: the dropped local lines are listed in the PR body, and
-  every sync run fails until that PR is reviewed and merged.
+  template's favor: the PR lists the dropped local lines for review. The
+  run stays green (auto-resolution is normal operation); validation
+  failures still turn it red.
 - A release pushes too: `propagate.yml` dispatches every managed repo's
   sync immediately (registry: `repos.yml`), so the weekly pull is only the
   catch-all.
