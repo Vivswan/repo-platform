@@ -82,9 +82,20 @@ jobs:
 gh repo create Vivswan/my-project --public --source . --push
 ```
 
-Optionally add `REPO_PLATFORM_TOKEN` (a [fine-grained PAT](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens#creating-a-fine-grained-personal-access-token) with Contents:RW,
-Pull requests:RW, Administration:RW, and Issues:RW on this repo) as an
-Actions secret so template-sync PRs trigger CI automatically and the
-settings-sync module can apply `.github/settings.yml`. Without it, sync
-still works (close/reopen the PR to run checks) and settings-sync skips
-with a notice.
+Optionally add `REPO_PLATFORM_TOKEN` as an Actions secret: a
+[fine-grained PAT](https://github.com/settings/personal-access-tokens/new?name=REPO_PLATFORM_TOKEN&description=repo-platform+template+sync+and+settings-sync&contents=write&pull_requests=write&workflows=write&administration=write&issues=write)
+with Contents:RW, Pull requests:RW, Workflows:RW, Administration:RW, and
+Issues:RW on this repo (the link pre-selects all five permissions).
+
+With it:
+
+- template-sync PRs trigger CI automatically
+- the settings-sync module can apply `.github/settings.yml`
+
+Without it:
+
+- sync still works for most updates (close/reopen the PR to run checks)
+- settings-sync skips with a notice
+- template updates that change workflow files fail with an error: GitHub
+  never lets the default GITHUB_TOKEN push changes under
+  `.github/workflows/`

@@ -46,6 +46,9 @@ sync (propagate.yml).
   and this repo's own `.gitignore` from the latest github/gitignore;
   `scripts/gitignore.lock` records the SHA.
 - `migrations/` holds copier `_migrations` scripts for breaking changes.
+- `docs/` holds the human-facing guides: all-green convention, new-repo
+  setup, pages module, settings-sync (token permissions), and eject. Update
+  the matching doc when changing the behavior it describes.
 - `repos.yml` lists managed repos; `.github/workflows/propagate.yml`
   dispatches their template-sync on each release (push side of sync).
 

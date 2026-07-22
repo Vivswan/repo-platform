@@ -39,7 +39,10 @@ these [fine-grained permissions](https://docs.github.com/en/authentication/keepi
 |---|---|
 | Administration: read & write | repository fields, rulesets |
 | Issues: read & write | labels |
-| (plus the existing Contents/Pull requests/Actions scopes from the sync machinery) | |
+| (plus Contents:RW, Pull requests:RW, Workflows:RW from template sync; Actions:RW as well if the same PAT drives propagation from repo-platform) | |
+
+[Create the token with all sync + settings permissions pre-selected](https://github.com/settings/personal-access-tokens/new?name=REPO_PLATFORM_TOKEN&description=repo-platform+template+sync+and+settings-sync&contents=write&pull_requests=write&workflows=write&administration=write&issues=write),
+then grant it access to the managed repositories.
 
 Without the secret, runs skip with a notice, so the module is safe to have
 enabled before the token exists.
