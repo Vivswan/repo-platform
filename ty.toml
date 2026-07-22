@@ -1,0 +1,6 @@
+# Configuration for ty, the Python type checker (run via bun run typecheck:py).
+[environment]
+# Match the scripts' PEP 723 requires-python and ruff's target version.
+python-version = "3.10"
+# build_branch_tree.py imports compose_template from here at runtime via sys.path.
+extra-paths = ["scripts"]

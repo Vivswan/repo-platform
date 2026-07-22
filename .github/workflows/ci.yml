@@ -52,6 +52,14 @@ jobs:
       - name: Ruff format check
         run: uvx ruff format --check .
 
+  ty:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+      - name: Type check Python scripts
+        run: uvx --with pyyaml ty check .
+
   typography:
     runs-on: ubuntu-latest
     steps:
@@ -205,6 +213,7 @@ jobs:
       - yamllint
       - biome
       - ruff
+      - ty
       - typography
       - commit-names
       - typecheck
