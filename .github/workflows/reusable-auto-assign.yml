@@ -1,7 +1,9 @@
 # Reusable auto-assign. Callers trigger on issues/pull_request (and, on
 # CodeQL-enabled repos, workflow_run + schedule for code scanning alerts);
-# the caller's event context flows through. Callers on repos WITHOUT code
-# scanning pass code_scanning: false so a manual dispatch never selects the
+# the caller's event context flows through. A workflow_dispatch with an
+# `issue` input assigns that one issue, for issues whose creation event
+# fired no workflow. Callers on repos WITHOUT code scanning pass
+# code_scanning: false so a manual dispatch never selects the
 # alert-assignment job there.
 
 name: Reusable Auto Assign
@@ -14,6 +16,11 @@ on:
         required: false
         type: boolean
         default: true
+      issue:
+        description: Issue number to assign to the owner (dispatch only)
+        required: false
+        type: string
+        default: ""
 
 jobs:
   assign:
@@ -78,6 +85,37 @@ jobs:
               issue_number: context.payload.pull_request.number,
               labels: ['fix-lint']
             });
+
+  # Assign one named issue to the repo owner. GitHub fires no workflow for
+  # events created with a workflow's own GITHUB_TOKEN, so an issue filed by
+  # another workflow never triggers the `issues: opened` path above; the filing
+  # workflow dispatches this one with the issue number instead. Only the named
+  # issue is touched, so unassigning yourself later sticks.
+  assign-dispatched-issue:
+    if: github.event_name == 'workflow_dispatch' && inputs.issue != ''
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - name: Assign the dispatched issue to owner
+        uses: actions/github-script@v9
+        env:
+          ISSUE: ${{ inputs.issue }}
+        with:
+          script: |
+            const raw = process.env.ISSUE ?? "";
+            if (!/^\d+$/.test(raw) || !Number.isSafeInteger(Number(raw)) || Number(raw) <= 0) {
+              core.setFailed(`issue input is not a positive integer: ${raw}`);
+              return;
+            }
+            const issueNumber = Number(raw);
+            await github.rest.issues.addAssignees({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issueNumber,
+              assignees: [context.repo.owner]
+            });
+            core.info(`assigned issue #${issueNumber} to ${context.repo.owner}`);
 
   # Assign open, currently-unassigned code scanning alerts to the repo owner.
   # No Actions trigger exists for alert creation, so this polls after CodeQL
