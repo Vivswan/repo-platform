@@ -1,10 +1,19 @@
 # Reusable auto-assign. Callers trigger on issues/pull_request (and, on
 # CodeQL-enabled repos, workflow_run + schedule for code scanning alerts);
 # the caller's event context flows through. A workflow_dispatch with an
-# `issue` input assigns that one issue, for issues whose creation event
-# fired no workflow. Callers on repos WITHOUT code scanning pass
-# code_scanning: false so a manual dispatch never selects the
+# `issue` input assigns that one issue (or PR - PRs are issues), for items
+# whose creation event fired no workflow. Callers on repos WITHOUT code
+# scanning pass code_scanning: false so a manual dispatch never selects the
 # alert-assignment job there.
+#
+# Who gets assigned: the users on the last `*` entry of the repo's own
+# CODEOWNERS (teams cannot be assignees), falling back to the repo owner.
+# Each repo controls its policy by editing CODEOWNERS.
+#
+# Each job declares the minimum permissions it needs. A called job can only
+# downgrade the caller's token, so every scope below must also appear in the
+# caller template's permissions block - adding a scope here breaks callers
+# that have not synced the matching caller update yet.
 
 name: Reusable Auto Assign
 
@@ -17,7 +26,7 @@ on:
         type: boolean
         default: true
       issue:
-        description: Issue number to assign to the owner (dispatch only)
+        description: Issue or PR number to assign (dispatch only)
         required: false
         type: string
         default: ""
@@ -31,11 +40,52 @@ jobs:
       github.actor != 'dependabot[bot]'
     runs-on: ubuntu-latest
     permissions:
+      contents: read # CODEOWNERS resolution
       issues: write
       pull-requests: write
     steps:
-      - name: Assign issue to owner
+      - name: Resolve assignees from CODEOWNERS
+        id: who
+        uses: actions/github-script@v9
+        with:
+          script: |
+            // Users on the last `*` entry of CODEOWNERS; the repo owner when
+            // there is no usable entry or no file.
+            async function resolveAssignees() {
+              for (const path of ['.github/CODEOWNERS', 'CODEOWNERS', 'docs/CODEOWNERS']) {
+                let data;
+                try {
+                  ({ data } = await github.rest.repos.getContent({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    path,
+                  }));
+                } catch (error) {
+                  if (error.status === 404) continue;
+                  throw error;
+                }
+                const text = Buffer.from(data.content, 'base64').toString('utf8');
+                let owners = null;
+                for (const line of text.split('\n')) {
+                  const entry = line.trim();
+                  if (!entry || entry.startsWith('#')) continue;
+                  const [pattern, ...rest] = entry.split(/\s+/);
+                  if (pattern === '*') owners = rest; // last * entry wins
+                }
+                const users = (owners ?? [])
+                  .filter((o) => /^@[A-Za-z0-9-]+$/.test(o))
+                  .map((o) => o.slice(1));
+                if (users.length) return users;
+                break;
+              }
+              return [context.repo.owner];
+            }
+            core.setOutput('assignees', JSON.stringify(await resolveAssignees()));
+
+      - name: Assign issue to code owners
         if: github.event_name == 'issues'
+        env:
+          ASSIGNEES: ${{ steps.who.outputs.assignees }}
         uses: actions/github-script@v9
         with:
           script: |
@@ -43,11 +93,13 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.issue.number,
-              assignees: [context.repo.owner]
+              assignees: JSON.parse(process.env.ASSIGNEES)
             });
 
-      - name: Assign PR to owner
+      - name: Assign PR to code owners
         if: github.event_name == 'pull_request' && github.event.action == 'opened' && github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          ASSIGNEES: ${{ steps.who.outputs.assignees }}
         uses: actions/github-script@v9
         with:
           script: |
@@ -55,23 +107,29 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.payload.pull_request.number,
-              assignees: [context.repo.owner]
+              assignees: JSON.parse(process.env.ASSIGNEES)
             });
 
-      # CODEOWNERS auto-requests the owner on protected-branch PRs, but not on
-      # every PR (and never when this workflow itself didn't fire). Request the
-      # code owner as a reviewer too, skipping owner-authored PRs -- GitHub
-      # rejects a self-review request with 422.
-      - name: Request review from code owner
-        if: github.event_name == 'pull_request' && github.event.action == 'opened' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login != github.repository_owner
+      # CODEOWNERS auto-requests reviews on protected-branch PRs, but not on
+      # every PR (and never when this workflow itself didn't fire). Request
+      # the resolved code owners as reviewers too; GitHub rejects a
+      # self-review request with 422, so the PR author is dropped.
+      - name: Request review from code owners
+        if: github.event_name == 'pull_request' && github.event.action == 'opened' && github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          ASSIGNEES: ${{ steps.who.outputs.assignees }}
         uses: actions/github-script@v9
         with:
           script: |
+            const author = context.payload.pull_request.user.login.toLowerCase();
+            const reviewers = JSON.parse(process.env.ASSIGNEES)
+              .filter((user) => user.toLowerCase() !== author);
+            if (reviewers.length === 0) return;
             await github.rest.pulls.requestReviewers({
               owner: context.repo.owner,
               repo: context.repo.repo,
               pull_number: context.payload.pull_request.number,
-              reviewers: [context.repo.owner]
+              reviewers
             });
 
       - name: Add fix-lint label to same-repo PRs
@@ -86,18 +144,20 @@ jobs:
               labels: ['fix-lint']
             });
 
-  # Assign one named issue to the repo owner. GitHub fires no workflow for
-  # events created with a workflow's own GITHUB_TOKEN, so an issue filed by
-  # another workflow never triggers the `issues: opened` path above; the filing
-  # workflow dispatches this one with the issue number instead. Only the named
-  # issue is touched, so unassigning yourself later sticks.
+  # Assign one named issue or PR per the CODEOWNERS policy. GitHub fires no
+  # workflow for events created with a workflow's own GITHUB_TOKEN, so an
+  # issue or PR created by another workflow never triggers the paths above;
+  # the creating workflow dispatches this one with the number instead. Only
+  # the named item is touched, so unassigning yourself later sticks.
   assign-dispatched-issue:
     if: github.event_name == 'workflow_dispatch' && inputs.issue != ''
     runs-on: ubuntu-latest
     permissions:
+      contents: read # CODEOWNERS resolution
       issues: write
+      pull-requests: write # the dispatched number may be a PR
     steps:
-      - name: Assign the dispatched issue to owner
+      - name: Assign the dispatched issue to code owners
         uses: actions/github-script@v9
         env:
           ISSUE: ${{ inputs.issue }}
@@ -109,18 +169,50 @@ jobs:
               return;
             }
             const issueNumber = Number(raw);
+            // Users on the last `*` entry of CODEOWNERS; the repo owner when
+            // there is no usable entry or no file.
+            async function resolveAssignees() {
+              for (const path of ['.github/CODEOWNERS', 'CODEOWNERS', 'docs/CODEOWNERS']) {
+                let data;
+                try {
+                  ({ data } = await github.rest.repos.getContent({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    path,
+                  }));
+                } catch (error) {
+                  if (error.status === 404) continue;
+                  throw error;
+                }
+                const text = Buffer.from(data.content, 'base64').toString('utf8');
+                let owners = null;
+                for (const line of text.split('\n')) {
+                  const entry = line.trim();
+                  if (!entry || entry.startsWith('#')) continue;
+                  const [pattern, ...rest] = entry.split(/\s+/);
+                  if (pattern === '*') owners = rest; // last * entry wins
+                }
+                const users = (owners ?? [])
+                  .filter((o) => /^@[A-Za-z0-9-]+$/.test(o))
+                  .map((o) => o.slice(1));
+                if (users.length) return users;
+                break;
+              }
+              return [context.repo.owner];
+            }
+            const assignees = await resolveAssignees();
             await github.rest.issues.addAssignees({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: issueNumber,
-              assignees: [context.repo.owner]
+              assignees
             });
-            core.info(`assigned issue #${issueNumber} to ${context.repo.owner}`);
+            core.info(`assigned #${issueNumber} to ${assignees.join(', ')}`);
 
-  # Assign open, currently-unassigned code scanning alerts to the repo owner.
-  # No Actions trigger exists for alert creation, so this polls after CodeQL
-  # completes (workflow_run) and weekly (schedule). Idempotent: alerts that
-  # already have an assignee are skipped. Code scanning only exists on a
+  # Assign open, currently-unassigned code scanning alerts per the CODEOWNERS
+  # policy. No Actions trigger exists for alert creation, so this polls after
+  # CodeQL completes (workflow_run) and weekly (schedule). Idempotent: alerts
+  # that already have an assignee are skipped. Code scanning only exists on a
   # public repo (or GHAS), matching the codeql workflow's private guard.
   assign-code-scanning:
     if: >-
@@ -131,15 +223,43 @@ jobs:
       (github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success')
     runs-on: ubuntu-latest
     permissions:
+      contents: read # CODEOWNERS resolution
       security-events: write
     steps:
-      - name: Assign open alerts to owner
+      - name: Assign open alerts to code owners
         uses: actions/github-script@v9
         with:
           script: |
             const owner = context.repo.owner;
             const repo = context.repo.repo;
-            const assignee = context.repo.owner;
+            // Users on the last `*` entry of CODEOWNERS; the repo owner when
+            // there is no usable entry or no file.
+            async function resolveAssignees() {
+              for (const path of ['.github/CODEOWNERS', 'CODEOWNERS', 'docs/CODEOWNERS']) {
+                let data;
+                try {
+                  ({ data } = await github.rest.repos.getContent({ owner, repo, path }));
+                } catch (error) {
+                  if (error.status === 404) continue;
+                  throw error;
+                }
+                const text = Buffer.from(data.content, 'base64').toString('utf8');
+                let owners = null;
+                for (const line of text.split('\n')) {
+                  const entry = line.trim();
+                  if (!entry || entry.startsWith('#')) continue;
+                  const [pattern, ...rest] = entry.split(/\s+/);
+                  if (pattern === '*') owners = rest; // last * entry wins
+                }
+                const users = (owners ?? [])
+                  .filter((o) => /^@[A-Za-z0-9-]+$/.test(o))
+                  .map((o) => o.slice(1));
+                if (users.length) return users;
+                break;
+              }
+              return [owner];
+            }
+            const assignees = await resolveAssignees();
             const alerts = await github.paginate(
               github.rest.codeScanning.listAlertsForRepo,
               { owner, repo, state: 'open', per_page: 100 }
@@ -149,9 +269,9 @@ jobs:
               if (alert.assignees && alert.assignees.length > 0) continue;
               await github.request(
                 'PATCH /repos/{owner}/{repo}/code-scanning/alerts/{alert_number}',
-                { owner, repo, alert_number: alert.number, assignees: [assignee] }
+                { owner, repo, alert_number: alert.number, assignees }
               );
-              core.info(`assigned alert #${alert.number} to ${assignee}`);
+              core.info(`assigned alert #${alert.number} to ${assignees.join(', ')}`);
               assigned++;
             }
             core.info(`assigned ${assigned} of ${alerts.length} open alert(s)`);
