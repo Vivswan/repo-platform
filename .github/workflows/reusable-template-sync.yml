@@ -3,10 +3,17 @@
 # tags, staging = the staging branch head) via `copier update` and opens a
 # PR to itself.
 #
+# Conflict model: overlapping local edits resolve in the template's favor;
+# the dropped local lines land in the PR body, and the run fails so the
+# auto-resolution cannot land unreviewed (every re-sync fails the same way
+# until the PR is merged).
+#
 # Token model: uses REPO_PLATFORM_TOKEN when the caller passes it (PR is
 # authored by the user and triggers CI normally); falls back to the run's
 # GITHUB_TOKEN otherwise (PR is created but CI won't auto-trigger - the PR
-# body carries a close/reopen note).
+# body carries a close/reopen note). GITHUB_TOKEN can never push changes
+# under .github/workflows/, so updates touching workflow files require the
+# PAT (with Workflows:RW) and fail with instructions without it.
 
 name: Reusable Template Sync
 
@@ -159,11 +166,22 @@ jobs:
           ref: ${{ steps.versions.outputs.validate_ref }}
           path: .repo-platform-src
 
-      # A failed validation does NOT abort the run: copier renders overlapping
-      # local edits as inline conflict markers, which the validator flags, and
-      # the PR is exactly where a human resolves them. The failure is surfaced
-      # in the PR body instead (and the repo's own CI will stay red until
-      # resolved).
+      # Conflicts (local edits overlapping template changes) resolve in the
+      # template's favor so the tree stays valid; the dropped local lines go
+      # into the PR body and the job fails at the end until reviewed.
+      - name: Resolve copier conflicts toward the template
+        if: steps.versions.outputs.up_to_date == 'false'
+        id: conflicts
+        run: |
+          python3 .repo-platform-src/.github/scripts/resolve_copier_conflicts.py --summary "$RUNNER_TEMP/dropped-local-hunks.md"
+          if [ -s "$RUNNER_TEMP/dropped-local-hunks.md" ]; then
+            echo "resolved=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "resolved=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # A failed validation still opens the PR (that is where a human fixes
+      # the tree); the job fails at the end.
       - name: Validate generated files
         if: steps.versions.outputs.up_to_date == 'false'
         id: validate
@@ -172,7 +190,6 @@ jobs:
           if python3 .repo-platform-src/actions/validate-template/validate_generated_files.py .; then
             echo "result=ok" >> "$GITHUB_OUTPUT"
           else
-            echo "::warning::validation of the updated tree failed - copier likely wrote inline conflict markers where local edits overlap template changes (details in this step's log). Resolve the markers in the sync PR before merging."
             echo "result=failed" >> "$GITHUB_OUTPUT"
           fi
           rm -rf .repo-platform-src
@@ -189,6 +206,17 @@ jobs:
             echo "changed=true" >> "$GITHUB_OUTPUT"
           fi
 
+      # GitHub rejects any push touching .github/workflows/ unless the token
+      # carries the workflows permission, which GITHUB_TOKEN can never hold.
+      - name: Require a workflow-capable token
+        if: steps.versions.outputs.up_to_date == 'false' && steps.changes.outputs.changed == 'true' && steps.token.outputs.mode == 'github-token'
+        run: |
+          changed_workflows="$(git status --porcelain -- '.github/workflows')"
+          [ -z "$changed_workflows" ] && exit 0
+          echo "$changed_workflows"
+          echo "::error::template sync cannot push this update: it changes the workflow files listed above, and GitHub refuses workflow-file pushes from the default GITHUB_TOKEN. Add a REPO_PLATFORM_TOKEN secret to this repository (fine-grained PAT with Contents:RW, Pull requests:RW, Workflows:RW; create one with the permissions pre-selected at https://github.com/settings/personal-access-tokens/new?name=REPO_PLATFORM_TOKEN&contents=write&pull_requests=write&workflows=write), then re-run the sync."
+          exit 1
+
       - name: Commit and push
         if: steps.versions.outputs.up_to_date == 'false' && steps.changes.outputs.changed == 'true'
         env:
@@ -201,10 +229,19 @@ jobs:
           git commit -m "chore: update repo-platform template to ${DISPLAY}"
           # --force: per-version branches are recreated on retries, and the
           # staging channel reuses one rolling branch across builds.
-          git push --force origin "$BRANCH"
+          if ! push_output="$(git push --force origin "$BRANCH" 2>&1)"; then
+            echo "$push_output"
+            case "$push_output" in
+              *"create or update workflow"*)
+                echo "::error::push rejected: the REPO_PLATFORM_TOKEN cannot update workflow files. Regenerate the PAT with the Workflows:RW permission, update the secret, then re-run the sync." ;;
+            esac
+            exit 1
+          fi
+          echo "$push_output"
 
       - name: Create or refresh pull request
         if: steps.versions.outputs.up_to_date == 'false' && steps.changes.outputs.changed == 'true'
+        id: pr
         env:
           GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN || github.token }}
           TARGET: ${{ steps.versions.outputs.target }}
@@ -213,6 +250,8 @@ jobs:
           BRANCH: ${{ steps.versions.outputs.branch }}
           TOKEN_MODE: ${{ steps.token.outputs.mode }}
           VALIDATION: ${{ steps.validate.outputs.result }}
+          RESOLVED: ${{ steps.conflicts.outputs.resolved }}
+          SUMMARY_FILE: ${{ runner.temp }}/dropped-local-hunks.md
           BASE_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
           if [ "$BRANCH" = "automation/repo-platform-staging" ]; then
@@ -230,13 +269,24 @@ jobs:
 
           Review any merge conflicts and confirm repository-local sections were preserved before merging."
 
+          if [ "$RESOLVED" = "true" ]; then
+            body="${body}
+
+          > [!WARNING]
+          > copier hit merge conflicts, resolved below in favor of the
+          > template where possible. Restore any dropped local lines that
+          > should stay, and hand-edit anything marked unresolved, before
+          > merging.
+
+          $(cat "$SUMMARY_FILE")"
+          fi
+
           if [ "$VALIDATION" = "failed" ]; then
             body="${body}
 
           > [!WARNING]
-          > Validation failed on the updated tree - most likely copier wrote
-          > inline conflict markers where local edits overlap template changes.
-          > Resolve them in this PR before merging."
+          > Validation failed on the updated tree (details in the sync run
+          > log). Fix it in this PR before merging."
           fi
 
           if [ "$TOKEN_MODE" = "github-token" ]; then
@@ -252,11 +302,35 @@ jobs:
             # Rolling staging PRs are force-pushed over; keep title/body honest.
             gh pr edit "$existing" --title "$title" --body "$body"
             echo "PR #${existing} already exists for ${BRANCH}; refreshed."
+            url="$(gh pr view "$existing" --json url --jq .url)"
+            echo "url=${url}" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
-          gh pr create \
+          url="$(gh pr create \
             --base "$BASE_BRANCH" \
             --head "$BRANCH" \
             --title "$title" \
-            --body "$body"
+            --body "$body")"
+          echo "Created ${url}"
+          echo "url=${url}" >> "$GITHUB_OUTPUT"
+
+      - name: Fail on validation errors
+        if: steps.versions.outputs.up_to_date == 'false' && steps.validate.outputs.result == 'failed'
+        env:
+          PR_URL: ${{ steps.pr.outputs.url }}
+        run: |
+          if [ -n "$PR_URL" ]; then
+            echo "::error::the update was pushed but validation of the resulting tree failed (details in the 'Validate generated files' step log). Fix the tree in ${PR_URL} before merging."
+          else
+            echo "::error::the update produced no changes, yet validation failed, so the default branch itself does not validate (details in the 'Validate generated files' step log). Fix the tree on the default branch, then re-run the sync."
+          fi
+          exit 1
+
+      - name: Require review of auto-resolved conflicts
+        if: steps.versions.outputs.up_to_date == 'false' && steps.conflicts.outputs.resolved == 'true'
+        env:
+          PR_URL: ${{ steps.pr.outputs.url }}
+        run: |
+          echo "::error::copier hit merge conflicts; where possible they were resolved in favor of the template, and the dropped local lines are listed in the PR body and in the 'Resolve copier conflicts' step log. Review ${PR_URL}, restore anything that should stay local, then merge."
+          exit 1
