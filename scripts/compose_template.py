@@ -64,14 +64,28 @@ MANIFEST_NAME = "module.yml"
 FRAGMENTS_DIR = "fragments"
 
 
-class Entry:
-    """One collected source file: regular bytes or a symlink target."""
+class SymlinkEntry:
+    """A collected symlink, copied as a link (target rewritten on emit)."""
 
-    def __init__(self, source: str, path: Path):
-        self.source = source
-        self.is_symlink = path.is_symlink()
-        self.target = os.readlink(path) if self.is_symlink else None
-        self.data = None if self.is_symlink else path.read_bytes()
+    def __init__(self, target: str):
+        self.target = target
+
+
+class FileEntry:
+    """A collected regular file's raw bytes."""
+
+    def __init__(self, data: bytes):
+        self.data = data
+
+
+# One collected source file: regular bytes or a symlink target.
+Entry = SymlinkEntry | FileEntry
+
+
+def read_entry(path: Path) -> Entry:
+    if path.is_symlink():
+        return SymlinkEntry(os.readlink(path))
+    return FileEntry(path.read_bytes())
 
 
 def load_manifest(folder: Path) -> dict:
@@ -118,7 +132,7 @@ def collect_files(folder: Path) -> dict[str, Entry]:
         if rel.parts[0] == FRAGMENTS_DIR or str(rel) == MANIFEST_NAME:
             continue
         if path.is_symlink() or path.is_file():
-            files[str(rel)] = Entry(folder.name, path)
+            files[str(rel)] = read_entry(path)
     return files
 
 
@@ -172,7 +186,7 @@ def splice_fragments(
     errors: list[str] = []
     anchor_owner: dict[str, tuple[str, str]] = {}  # anchor -> (source, logical)
     for logical, (source, entry) in sorted(files.items()):
-        if entry.is_symlink:
+        if isinstance(entry, SymlinkEntry):
             continue
         for line in entry.data.split(b"\n"):
             if b"{# compose:" in line and not ANCHOR_RE.match(line):
@@ -217,7 +231,7 @@ def splice_fragments(
         return errors
 
     for _logical, (_source, entry) in files.items():
-        if entry.is_symlink or b"{# compose:" not in entry.data:
+        if isinstance(entry, SymlinkEntry) or b"{# compose:" not in entry.data:
             continue
         lines = entry.data.split(b"\n")
         rebuilt: list[bytes] = []
@@ -350,12 +364,12 @@ def write_output(composed: dict[str, Entry], out: Path) -> None:
     for path, entry in sorted(composed.items()):
         dest = out / path
         dest.parent.mkdir(parents=True, exist_ok=True)
-        if entry.is_symlink:
+        if isinstance(entry, SymlinkEntry):
             # Source symlinks target the .jinja file so they are never
             # dangling in git (GitHub's action downloader refuses tarballs
             # with broken links); emitted links target the RENDERED name.
             target = entry.target
-            if target is not None and target.endswith(JINJA_SUFFIX):
+            if target.endswith(JINJA_SUFFIX):
                 target = target.removesuffix(JINJA_SUFFIX)
             os.symlink(target, dest)
         else:
