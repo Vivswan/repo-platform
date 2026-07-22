@@ -4,9 +4,10 @@
 # PR to itself.
 #
 # Conflict model: overlapping local edits resolve in the template's favor;
-# the dropped local lines land in the PR body, and the run fails so the
-# auto-resolution cannot land unreviewed (every re-sync fails the same way
-# until the PR is merged).
+# the dropped local lines land in the PR body for review. With a PAT the
+# PR-opened event fires the repo's auto-assign (CODEOWNERS decides who).
+# Auto-resolution is normal operation, so it does not fail the run;
+# validation failures still do.
 #
 # Token model: uses REPO_PLATFORM_TOKEN when the caller passes it (PR is
 # authored by the user and triggers CI normally); falls back to the run's
@@ -29,6 +30,10 @@ on:
       REPO_PLATFORM_TOKEN:
         required: false
 
+# The minimum permissions this workflow needs; the caller template grants
+# exactly these. New scopes can never be added here without a migration
+# plan: a caller that fails permission validation cannot run the very sync
+# that would deliver its updated caller file.
 permissions:
   contents: write
   pull-requests: write
@@ -168,7 +173,7 @@ jobs:
 
       # Conflicts (local edits overlapping template changes) resolve in the
       # template's favor so the tree stays valid; the dropped local lines go
-      # into the PR body and the job fails at the end until reviewed.
+      # into the PR body for review.
       - name: Resolve copier conflicts toward the template
         if: steps.versions.outputs.up_to_date == 'false'
         id: conflicts
@@ -327,10 +332,9 @@ jobs:
           fi
           exit 1
 
-      - name: Require review of auto-resolved conflicts
+      - name: Flag auto-resolved conflicts for review
         if: steps.versions.outputs.up_to_date == 'false' && steps.conflicts.outputs.resolved == 'true'
         env:
           PR_URL: ${{ steps.pr.outputs.url }}
         run: |
-          echo "::error::copier hit merge conflicts; where possible they were resolved in favor of the template, and the dropped local lines are listed in the PR body and in the 'Resolve copier conflicts' step log. Review ${PR_URL}, restore anything that should stay local, then merge."
-          exit 1
+          echo "::warning::copier hit merge conflicts; where possible they were resolved in favor of the template. The dropped local lines are listed in the PR body and in the 'Resolve copier conflicts' step log. Review ${PR_URL}, restore anything that should stay local, then merge."
