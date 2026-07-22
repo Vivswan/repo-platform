@@ -110,17 +110,7 @@ jobs:
       - name: Validate repo-platform against its own conventions
         run: python3 actions/validate-template/validate_generated_files.py --self .
       - name: Validate managed-repos registry
-        run: |
-          python3 -c '
-          import re, sys, yaml
-          repos = yaml.safe_load(open("repos.yml"))["managed"]
-          if not isinstance(repos, list):
-              sys.exit("repos.yml: managed must be a list")
-          bad = [r for r in repos if not re.fullmatch(r"[\w.-]+/[\w.-]+", str(r))]
-          if bad:
-              sys.exit(f"repos.yml: invalid entries: {bad}")
-          print(f"repos.yml: {len(repos)} managed repo(s) OK")
-          '
+        run: python3 .github/scripts/validate_repos_registry.py
 
   smoke-generate:
     runs-on: ubuntu-latest
@@ -175,23 +165,7 @@ jobs:
           MODULES: ${{ matrix.modules }}
           PRIVATE: ${{ matrix.private }}
           EXTRA_DATA: ${{ matrix.extra_data }}
-        run: |
-          # main carries only templates/ sources; assemble the consumable
-          # build tree (what the staging/latest branches hold) and render it.
-          python3 .github/scripts/build_branch_tree.py --dest /tmp/build-tree --channel staging
-          git -C /tmp/build-tree init -q -b build
-          git -C /tmp/build-tree add -A
-          git -C /tmp/build-tree -c user.name=ci -c user.email=ci@localhost commit -q -m "chore: build"
-          # shellcheck disable=SC2086 # EXTRA_DATA is a list of extra -d args;
-          # values must stay whitespace-free (word splitting) - add a matrix
-          # field instead for anything that needs spaces.
-          copier copy /tmp/build-tree /tmp/smoke \
-            --vcs-ref HEAD --defaults --trust \
-            -d project_name="Smoke Test" \
-            -d description="Smoke-test project" \
-            -d "modules=$MODULES" \
-            -d private="$PRIVATE" \
-            $EXTRA_DATA
+        run: .github/scripts/smoke_generate.sh
       - name: Validate generated output
         run: python3 actions/validate-template/validate_generated_files.py /tmp/smoke
       - name: Verify module/visibility gating
@@ -200,98 +174,7 @@ jobs:
           PRIVATE: ${{ matrix.private }}
           EXPECT_IN_PAGES: ${{ matrix.expect_in_pages }}
           EXTRA_DATA: ${{ matrix.extra_data }}
-        run: |
-          wf=/tmp/smoke/.github/workflows
-          mods=",$(echo "$MODULES" | tr -d '[] '),"
-          has() { case "$mods" in *",$1,"*) return 0 ;; *) return 1 ;; esac; }
-          present() { grep -qF -- "$1" "$2" || { echo "::error::gating check failed: '$1' is missing from $2, so the template did not emit it for modules=$MODULES private=$PRIVATE. Fix the gate in templates/ (or this expectation in ci.yml)."; exit 1; }; }
-          absent() { if grep -qF -- "$1" "$2"; then echo "::error::gating check failed: '$1' appears in $2 but modules=$MODULES private=$PRIVATE should not emit it. Fix the gate in templates/ (or this expectation in ci.yml)."; exit 1; fi; }
-
-          if has pr-title; then test -f "$wf/pr-title.yml"; else test ! -e "$wf/pr-title.yml"; fi
-          if has auto-assign; then test -f "$wf/auto-assign.yml"; else test ! -e "$wf/auto-assign.yml"; fi
-          if has issue-templates; then test -d /tmp/smoke/.github/ISSUE_TEMPLATE; else test ! -e /tmp/smoke/.github/ISSUE_TEMPLATE; fi
-          if has pages; then test -f "$wf/pages.yml"; else test ! -e "$wf/pages.yml"; fi
-          if has settings-sync; then
-            test -f "$wf/settings-sync.yml"
-            present "reusable-apply-settings.yml@main" "$wf/settings-sync.yml"
-          else
-            test ! -e "$wf/settings-sync.yml"
-          fi
-
-          # auto-assign: security-events is always granted (static validation of
-          # the reusable call); the CodeQL-driven triggers and the code_scanning
-          # input follow enable_codeql (= public AND a toolchain module).
-          if has auto-assign; then
-            present "security-events: write" "$wf/auto-assign.yml"
-            if [ "$PRIVATE" != "true" ] && { has bun || has uv; }; then
-              present "workflow_run:" "$wf/auto-assign.yml"
-              present "code_scanning: true" "$wf/auto-assign.yml"
-            else
-              absent "workflow_run:" "$wf/auto-assign.yml"
-              present "code_scanning: false" "$wf/auto-assign.yml"
-            fi
-          fi
-
-          # CodeQL: public AND at least one analyzable toolchain; one job per language.
-          if [ "$PRIVATE" != "true" ] && { has bun || has uv; }; then
-            test -f "$wf/codeql.yml"
-            if has bun; then present "language: javascript-typescript" "$wf/codeql.yml"; else absent "language: javascript-typescript" "$wf/codeql.yml"; fi
-            if has uv; then present "language: python" "$wf/codeql.yml"; else absent "language: python" "$wf/codeql.yml"; fi
-          else
-            test ! -e "$wf/codeql.yml"
-          fi
-
-          if [ "$PRIVATE" = "true" ]; then test ! -e /tmp/smoke/SECURITY.md; else test -f /tmp/smoke/SECURITY.md; fi
-
-          # gitignore toolchain sections; the four markers are asserted by the validator.
-          if has bun; then present "## Node " /tmp/smoke/.gitignore; else absent "## Node " /tmp/smoke/.gitignore; fi
-          if has uv; then present "## Python " /tmp/smoke/.gitignore; else absent "## Python " /tmp/smoke/.gitignore; fi
-
-          # dependabot ecosystems follow the toolchain modules.
-          present 'package-ecosystem: "github-actions"' /tmp/smoke/.github/dependabot.yml
-          if has bun; then present 'package-ecosystem: "bun"' /tmp/smoke/.github/dependabot.yml; else absent 'package-ecosystem: "bun"' /tmp/smoke/.github/dependabot.yml; fi
-          if has uv; then present 'package-ecosystem: "uv"' /tmp/smoke/.github/dependabot.yml; else absent 'package-ecosystem: "uv"' /tmp/smoke/.github/dependabot.yml; fi
-
-          # agents module: AGENTS.md plus the three agent-file symlinks. The
-          # rows without it also prove conditional filenames work on symlinks.
-          if has agents; then
-            test -f /tmp/smoke/AGENTS.md
-            test -L /tmp/smoke/CLAUDE.md
-            test "$(readlink /tmp/smoke/CLAUDE.md)" = "AGENTS.md"
-            test -L /tmp/smoke/.github/copilot-instructions.md
-            test -L /tmp/smoke/.github/agents.md
-            # AGENTS.md toolchain section only when a toolchain module is selected.
-            if has bun || has uv; then present "## Toolchain" /tmp/smoke/AGENTS.md; else absent "## Toolchain" /tmp/smoke/AGENTS.md; fi
-          else
-            # `test ! -e` follows symlinks (a dangling one passes), so also
-            # assert not-a-symlink for the three link paths.
-            test ! -e /tmp/smoke/AGENTS.md
-            test ! -e /tmp/smoke/CLAUDE.md && test ! -L /tmp/smoke/CLAUDE.md
-            test ! -e /tmp/smoke/.github/agents.md && test ! -L /tmp/smoke/.github/agents.md
-            test ! -e /tmp/smoke/.github/copilot-instructions.md && test ! -L /tmp/smoke/.github/copilot-instructions.md
-          fi
-
-          # release-please module gates the autorelease labels in settings.yml.
-          if has release-please; then present "autorelease: pending" /tmp/smoke/.github/settings.yml; else absent "autorelease: pending" /tmp/smoke/.github/settings.yml; fi
-
-          # Row-specific expectations for the rendered pages caller.
-          if [ -n "$EXPECT_IN_PAGES" ]; then
-            while IFS= read -r pattern; do
-              [ -z "$pattern" ] && continue
-              present "$pattern" "$wf/pages.yml"
-            done <<< "$EXPECT_IN_PAGES"
-          fi
-
-          test -f "$wf/template-sync.yml"
-          # The reusable-workflow pin must fall back to main here: the scratch
-          # build tree's _commit is a bare sha, not a templates/vX.Y.Z tag.
-          present "reusable-template-sync.yml@main" "$wf/template-sync.yml"
-          # Channel is recorded in the registration file (pages-bare row
-          # overrides to staging; every other row takes the latest default).
-          case "$EXTRA_DATA" in
-            *channel=staging*) present "channel: staging" /tmp/smoke/.repo-platform.yml ;;
-            *) present "channel: latest" /tmp/smoke/.repo-platform.yml ;;
-          esac
+        run: .github/scripts/verify_smoke_gating.sh
       # Rendered workflows are invisible to the repo-level actionlint job
       # (.jinja files are not YAML pre-render), so lint the smoke output.
       - name: actionlint rendered workflows
@@ -299,11 +182,8 @@ jobs:
           bash <(curl -sSL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
           ./actionlint -color /tmp/smoke/.github/workflows/*.yml
 
-  # Generate from the previous build tag, then `copier update` to a freshly
-  # assembled build tree - the path every managed repo actually takes. Both
-  # refs must live in ONE clone (copier re-renders the old version from
-  # _src_path), so the new tree is committed to a local orphan ref + tag.
-  # Exits cleanly when no templates/v* tag exists yet (first release).
+  # Generate from the previous build tag, then `copier update` to a fresh
+  # build - the path every managed repo takes (details in the script).
   upgrade-path:
     runs-on: ubuntu-latest
     steps:
@@ -315,47 +195,7 @@ jobs:
           pipx install copier
           pip install --quiet pyyaml
       - name: Update from previous build tag to a fresh build
-        run: |
-          git fetch --tags --quiet origin
-          prev="$(git tag --list 'templates/v*' --sort=-v:refname | head -1)"
-          if [ -z "$prev" ]; then
-            echo "No previous templates/v* build tag; skipping upgrade-path test."
-            exit 0
-          fi
-          echo "Testing upgrade path ${prev} -> fresh build"
-          copier copy "$GITHUB_WORKSPACE" /tmp/upgrade \
-            --vcs-ref "$prev" --defaults --trust \
-            -d project_name="Upgrade Test" \
-            -d description="Upgrade-path project" \
-            -d 'modules=[agents, uv, release-please, issue-templates, pr-title, auto-assign]' \
-            -d private="false"
-          cd /tmp/upgrade
-          git init -b main
-          git add --all
-          git -c user.name=ci -c user.email=ci@localhost commit -q -m "chore: init"
-          # Assemble the would-be next release INTO THE WORKSPACE CLONE as an
-          # orphan commit + local templates/v* tag.
-          cd "$GITHUB_WORKSPACE"
-          python3 .github/scripts/build_branch_tree.py --dest /tmp/next --channel latest --version v99.99.99
-          git worktree add --detach /tmp/wt HEAD
-          git -C /tmp/wt switch --orphan ci-build
-          rsync -a --delete --exclude=.git /tmp/next/ /tmp/wt/
-          git -C /tmp/wt add -A
-          git -C /tmp/wt -c user.name=ci -c user.email=ci@localhost commit -q -m "build(ci): v99.99.99"
-          git tag templates/v99.99.99 "$(git -C /tmp/wt rev-parse HEAD)"
-          # NO -d flags: exactly what reusable-template-sync runs downstream.
-          cd /tmp/upgrade
-          copier update --vcs-ref templates/v99.99.99 --defaults --trust
-          python3 "$GITHUB_WORKSPACE/actions/validate-template/validate_generated_files.py" /tmp/upgrade
-          # _commit must record the build tag (git describe lands exactly on it).
-          grep -qF "_commit: templates/v99.99.99" .copier-answers.yml
-          # The update must PRESERVE the repo's configuration, not reset it.
-          grep -qF -- "## Python " .gitignore
-          grep -qF -- 'package-ecosystem: "uv"' .github/dependabot.yml
-          grep -qF -- "language: python" .github/workflows/codeql.yml
-          test -f .github/workflows/pr-title.yml
-          test -f AGENTS.md
-          echo "upgrade preserved the module configuration"
+        run: .github/scripts/upgrade_path_test.sh
 
   all-green:
     name: all-green
