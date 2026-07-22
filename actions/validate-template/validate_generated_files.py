@@ -28,6 +28,7 @@ Usage: uv run actions/validate-template/validate_generated_files.py [--self] [ta
 import argparse
 import re
 import sys
+from collections.abc import Iterator
 from pathlib import Path
 
 import yaml
@@ -101,7 +102,7 @@ KNOWN_MODULES = {
 }
 
 
-def walk(root: Path):
+def walk(root: Path) -> Iterator[Path]:
     for path in sorted(root.rglob("*")):
         if any(part in SKIP_DIRS for part in path.relative_to(root).parts):
             continue
