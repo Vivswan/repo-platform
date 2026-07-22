@@ -12,6 +12,11 @@ name: Auto Assign
 
 on:
   workflow_dispatch:
+    inputs:
+      issue:
+        description: Issue number to assign to the owner (for issues whose creation fired no workflow)
+        required: false
+        default: ""
   issues:
     types: [opened]
   pull_request:
@@ -39,3 +44,4 @@ jobs:
     uses: {{ github_username }}/repo-platform/.github/workflows/reusable-auto-assign.yml@{{ uses_ref }}
     with:
       code_scanning: {{ 'true' if enable_codeql else 'false' }}
+      issue: {% raw %}${{ inputs.issue || '' }}{% endraw %}
