@@ -191,7 +191,7 @@ describe("select", () => {
 
 describe("CLI", () => {
   const script = new URL("./repos_registry.ts", import.meta.url).pathname;
-  const repoRoot = new URL("../..", import.meta.url).pathname;
+  const repoRoot = new URL("../../..", import.meta.url).pathname;
 
   function run(args: string[]): { exitCode: number; stdout: string; stderr: string } {
     const proc = Bun.spawnSync(["bun", script, ...args], { cwd: repoRoot });

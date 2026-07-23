@@ -11,7 +11,7 @@
 // for review.
 //
 // Usage:
-//   bun .github/scripts/retired_paths.ts --old-render <dir> --new-render <dir>
+//   bun .github/scripts/sync/retired_paths.ts --old-render <dir> --new-render <dir>
 //     --old-copier <copier.yml> --new-copier <copier.yml>
 //
 // Prints the candidate paths (relative to the render roots) as a sorted
