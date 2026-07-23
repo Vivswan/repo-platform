@@ -1,0 +1,118 @@
+{#- Composite actions live on main, not on the build branches: strip a
+    templates/vX.Y.Z build-tag _commit to the same-version release tag on
+    main; anything else (staging describe/sha strings, fresh copies) pins
+    main. -#}
+{%- set tpl_ref = _copier_answers._commit | default('', true) -%}
+{%- set release_pin = tpl_ref | regex_replace('^templates/(v[0-9]+\\.[0-9]+\\.[0-9]+)$', '\\1') -%}
+{%- set uses_ref = release_pin if (release_pin and release_pin != tpl_ref) else 'main' -%}
+# This file is managed by {{ github_username }}/repo-platform.
+# Local edits may be replaced during template updates.
+#
+# The all-green convention: branch protection requires only the `all-green`
+# check, which needs every other job here, so the required-checks list never
+# changes as jobs come and go. This repository's own test and lint jobs live
+# in checks.yml (repo-owned, never overwritten by sync) and run inside the
+# gate through the `checks` job.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: {% raw %}${{ github.workflow }}-${{ github.ref }}{% endraw %}
+  cancel-in-progress: {% raw %}${{ github.event_name == 'pull_request' }}{% endraw %}
+
+jobs:
+  # Repo-owned checks: edit .github/workflows/checks.yml, not this file. No
+  # secrets are passed and permissions cap at contents: read; a check that
+  # needs either belongs in its own workflow (see docs/all-green.md).
+  checks:
+    uses: ./.github/workflows/checks.yml
+
+  typography:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: {{ github_username }}/repo-platform/actions/check-typography@{{ uses_ref }}
+
+  commit-names:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: {{ github_username }}/repo-platform/actions/validate-commit-names@{{ uses_ref }}
+
+  validate-template:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: {{ github_username }}/repo-platform/actions/validate-template@{{ uses_ref }}
+
+  actionlint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: raven-actions/actionlint@v2
+
+  yamllint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install yamllint
+        run: pip install --quiet yamllint
+      - name: Lint YAML
+        run: yamllint -s .
+
+  all-green:
+    name: all-green
+    if: always()
+    needs:
+      - checks
+      - typography
+      - commit-names
+      - validate-template
+      - actionlint
+      - yamllint
+    runs-on: ubuntu-latest
+    steps:
+      - name: All jobs green
+        env:
+          RESULTS: {% raw %}${{ join(needs.*.result, ' ') }}{% endraw %}
+        run: |
+          echo "results: $RESULTS"
+          for result in $RESULTS; do
+            if [ "$result" != "success" ]; then
+              echo "::error::all-green failed: at least one required job did not succeed (results: $RESULTS). Open the failing job's log in this run, fix the failure, and push again."
+              exit 1
+            fi
+          done
+{% if 'release-please' in modules %}
+  # Release from a green main only: the repo-owned release.yml pipeline
+  # (which runs the managed release-please.yml machinery, plus any of this
+  # repository's pre/post-release jobs) runs downstream of all-green, so a
+  # red commit can never cut a release or refresh the release PR.
+  # Deliberately NOT in all-green's needs: it depends on the gate, it is not
+  # gated by it. Secrets are inherited deliberately: publish steps need
+  # them, and this never runs for pull requests.
+  release:
+    needs: [all-green]
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    # The publishing ceiling for the repo-owned release.yml jobs (release
+    # assets, ghcr, npm/PyPI trusted publishing); nested jobs can only
+    # narrow it, never raise it.
+    permissions:
+      contents: write
+      pull-requests: write
+      packages: write
+      id-token: write
+    uses: ./.github/workflows/release.yml
+    secrets: inherit
+{% endif %}

@@ -9,6 +9,21 @@ _answers_file: .copier-answers.yml
 _templates_suffix: .jinja
 _preserve_symlinks: true
 
+# Repo-owned starters: generated when absent, never overwritten by template
+# sync. checks.yml holds each repo's own CI jobs (the managed ci.yml calls
+# it inside the all-green gate); release.yml is the repo's release pipeline
+# around the managed release-please machinery (pre/post jobs); auto-format
+# and copilot-setup-steps run repo-specific commands; the release-please
+# config/manifest are release state (release-please bumps the manifest via
+# release PRs).
+_skip_if_exists:
+  - .github/workflows/checks.yml
+  - .github/workflows/release.yml
+  - .github/workflows/auto-format.yml
+  - .github/workflows/copilot-setup-steps.yml
+  - release-please-config.json
+  - .release-please-manifest.json
+
 # Migrations use FROM-version naming (see migrations/run.py): each script in
 # migrations/ is named for the release it migrates away from, so authoring
 # never requires predicting the next release number. Copier invokes the
@@ -59,11 +74,11 @@ modules:
   help: Feature modules (space toggles, enter confirms; any combination)
   multiselect: true
   choices:
-    agents - AGENTS.md agent instructions + CLAUDE.md/copilot symlinks: agents
+    agents - AGENTS.md agent instructions, agent-file symlinks, Copilot setup: agents
     bun - TypeScript/bun toolchain (gitignore, dependabot, CodeQL JS): bun
     uv - Python/uv toolchain (gitignore, dependabot, CodeQL Python): uv
     pages - GitHub Pages deploy (root = latest release, /staging/ = main): pages
-    release-please - autorelease labels + versioning conventions: release-please
+    release-please - release job on top of all-green + autorelease labels: release-please
     issue-templates - bug/feature issue forms: issue-templates
     pr-title - Conventional Commit PR title check: pr-title
     auto-assign - auto-assign issues/PRs/alerts to owner: auto-assign
@@ -74,24 +89,21 @@ modules:
 
 pages_setup:
   type: str
-  help: Toolchain installed on the Pages build runner
-  choices:
-    - bun
-    - uv
-    - none
-  default: "{{ 'bun' if 'bun' in modules else ('uv' if 'uv' in modules else 'none') }}"
+  help: Toolchain(s) installed on the Pages build runner (comma-separated bun/uv, or none)
+  default: "{{ ((['bun'] if 'bun' in modules else []) + (['uv'] if 'uv' in modules else [])) | join(',') or 'none' }}"
+  validator: "{% set ts = pages_setup.split(',') %}{% if '' in ts or ts | map('trim') | list != ts %}pages_setup must be comma-separated with no spaces or empty tokens{% elif ts | reject('in', ['bun', 'uv', 'none']) | list %}pages_setup tokens must be bun, uv, or none{% elif ts | unique | list | length != ts | length %}pages_setup tokens must be unique{% elif 'none' in ts and ts | length > 1 %}pages_setup 'none' cannot be combined with toolchains{% endif %}"
   when: "{{ 'pages' in modules }}"
 
 pages_install_command:
   type: str
   help: Dependency install command run before each build (empty to skip)
-  default: "{{ 'bun install --frozen-lockfile' if pages_setup == 'bun' else ('uv sync' if pages_setup == 'uv' else '') }}"
+  default: "{{ 'bun install --frozen-lockfile' if 'bun' in pages_setup.split(',') else ('uv sync' if 'uv' in pages_setup.split(',') else '') }}"
   when: "{{ 'pages' in modules }}"
 
 pages_build_command:
   type: str
   help: Build command; PAGES_BASE_PATH, PAGES_ORIGIN, PAGES_STAGING are exported
-  default: "{{ 'bun run build' if pages_setup == 'bun' else ('uv run mkdocs build --site-dir dist' if pages_setup == 'uv' else '') }}"
+  default: "{{ 'bun run build' if 'bun' in pages_setup.split(',') else ('uv run mkdocs build --site-dir dist' if 'uv' in pages_setup.split(',') else '') }}"
   validator: "{% if not pages_build_command %}A build command is required for the pages module{% endif %}"
   when: "{{ 'pages' in modules }}"
 
@@ -131,9 +143,17 @@ github_username:
   help: GitHub username owning the repository
   default: Vivswan
 
+# Computed - never asked. The single place that defines which modules count
+# as language toolchains: gates the auto-format starter and feeds
+# enable_codeql. Extend this expression when adding a language module.
+has_toolchain:
+  type: bool
+  default: "{{ 'bun' in modules or 'uv' in modules }}"
+  when: false
+
 # Computed - never asked. CodeQL code scanning is available on public repos
 # only for personal accounts, and needs at least one analyzable toolchain.
 enable_codeql:
   type: bool
-  default: "{{ not private and ('bun' in modules or 'uv' in modules) }}"
+  default: "{{ not private and has_toolchain }}"
   when: false

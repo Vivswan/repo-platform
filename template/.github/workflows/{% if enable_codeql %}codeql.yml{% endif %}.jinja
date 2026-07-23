@@ -22,7 +22,7 @@ permissions:
   contents: read
 
 jobs:
-{%- if 'bun' in modules %}
+{% if 'bun' in modules %}
   codeql-javascript:
     uses: {{ github_username }}/repo-platform/.github/workflows/reusable-codeql.yml@{{ uses_ref }}
     with:
@@ -31,8 +31,7 @@ jobs:
       contents: read
       security-events: write
       actions: read
-{%- endif %}
-{%- if 'uv' in modules %}
+{% endif %}{% if 'uv' in modules %}
   codeql-python:
     uses: {{ github_username }}/repo-platform/.github/workflows/reusable-codeql.yml@{{ uses_ref }}
     with:
@@ -41,4 +40,4 @@ jobs:
       contents: read
       security-events: write
       actions: read
-{%- endif %}
+{% endif %}
