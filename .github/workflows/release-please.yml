@@ -2,6 +2,9 @@
 # commits into a release PR; merging that PR tags vX.Y.Z and publishes the
 # GitHub release, which managed repos pick up on their next template sync.
 #
+# Called by ci.yml's release-please job, downstream of the all-green gate, so
+# releases and release-PR refreshes only happen on a green main.
+#
 # Same token fallback as template-sync: with REPO_PLATFORM_TOKEN the release
 # PR triggers CI normally; with the default GITHUB_TOKEN it needs a
 # close/reopen to run checks.
@@ -9,9 +12,10 @@
 name: Release Please
 
 on:
-  push:
-    branches: [main]
+  workflow_call:
 
+# The effective token comes from the calling job; declaring the needs here
+# documents them and caps a caller that grants more.
 permissions:
   contents: write
   pull-requests: write
@@ -20,6 +24,21 @@ jobs:
   release-please:
     runs-on: ubuntu-latest
     steps:
+      # A green run releases only the head it tested: if main moved on, skip
+      # and let the newer push's own run release (after its CI passes).
+      - name: Check this run tested the current head
+        id: head
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          head="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)"
+          if [ "$head" = "$GITHUB_SHA" ]; then
+            echo "current=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::main moved to ${head:0:7} since this run started; the newer run releases"
+            echo "current=false" >> "$GITHUB_OUTPUT"
+          fi
       - uses: googleapis/release-please-action@v5
+        if: steps.head.outputs.current == 'true'
         with:
           token: ${{ secrets.REPO_PLATFORM_TOKEN || github.token }}

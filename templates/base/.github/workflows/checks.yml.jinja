@@ -1,0 +1,26 @@
+# Repo-owned CI checks, called by the managed ci.yml inside the all-green
+# gate: every job here must pass before all-green goes green. Generated once
+# by {{ github_username }}/repo-platform and never overwritten by template
+# sync, so edit freely: multiple jobs, matrices, and further local reusable
+# workflows all work.
+#
+# Two limits from running inside the `checks` caller: jobs here get no
+# secrets and are capped at the caller's permissions (contents: read), and
+# all-green only sees the aggregate result, so a job skipped by its own
+# `if:` does not fail the gate. A check that needs secrets, more
+# permissions, or must never be skippable, belongs in its own workflow wired
+# into the ruleset via .github/settings.yml.
+
+name: Checks
+
+on:
+  workflow_call:
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+{# compose:checks-examples #}
+      - name: No repository checks yet
+        run: echo "add this repository's test and lint jobs to checks.yml"

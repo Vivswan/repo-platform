@@ -1,0 +1,9 @@
+
+  codeql-javascript:
+    uses: {{ github_username }}/repo-platform/.github/workflows/reusable-codeql.yml@{{ uses_ref }}
+    with:
+      language: javascript-typescript
+    permissions:
+      contents: read
+      security-events: write
+      actions: read

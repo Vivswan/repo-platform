@@ -19,7 +19,7 @@ on:
   workflow_call:
     inputs:
       setup:
-        description: Toolchain installed on the build runner (bun, uv, or none)
+        description: Toolchain(s) installed on the build runner (comma-separated bun/uv, or none)
         required: false
         type: string
         default: none
@@ -78,8 +78,27 @@ jobs:
           DIST_DIR: ${{ inputs.dist_dir }}
         run: |
           case "$SETUP" in
-            bun|uv|none) ;;
-            *) echo "::error::invalid setup input '$SETUP': it selects the build toolchain and must be bun, uv, or none. Fix the setup value in the workflow that calls reusable-pages.yml."; exit 1 ;;
+            ''|*[!a-z,]*|,*|*,|*,,*)
+              echo "::error::invalid setup input '$SETUP': it must be a comma-separated list of bun/uv, or none (no spaces or empty tokens). Fix the setup value in the workflow that calls reusable-pages.yml."; exit 1 ;;
+          esac
+          seen=,
+          IFS=','
+          for tool in $SETUP; do
+            case "$tool" in
+              bun|uv|none) ;;
+              *) echo "::error::invalid setup token '$tool': setup selects the build toolchain(s) and each token must be bun, uv, or none. Fix the setup value in the workflow that calls reusable-pages.yml."; exit 1 ;;
+            esac
+            case "$seen" in
+              *",$tool,"*) echo "::error::duplicate setup token '$tool'. Fix the setup value in the workflow that calls reusable-pages.yml."; exit 1 ;;
+            esac
+            seen="$seen$tool,"
+          done
+          unset IFS
+          case ",$SETUP," in
+            *,none,*)
+              if [ "$SETUP" != "none" ]; then
+                echo "::error::setup 'none' cannot be combined with toolchain tokens. Fix the setup value in the workflow that calls reusable-pages.yml."; exit 1
+              fi ;;
           esac
           case "$PRODUCTION" in
             release|main) ;;
@@ -184,12 +203,14 @@ jobs:
           ref: ${{ steps.cfg.outputs.main_ref }}
           path: staging
 
+      # Delimiter-aware token match, so future tokens sharing a prefix (e.g.
+      # a hypothetical bunx) cannot false-positive a plain contains().
       - name: Setup bun
-        if: inputs.setup == 'bun' && steps.cfg.outputs.publish == 'true'
+        if: contains(format(',{0},', inputs.setup), ',bun,') && steps.cfg.outputs.publish == 'true'
         uses: oven-sh/setup-bun@v2
 
       - name: Setup uv
-        if: inputs.setup == 'uv' && steps.cfg.outputs.publish == 'true'
+        if: contains(format(',{0},', inputs.setup), ',uv,') && steps.cfg.outputs.publish == 'true'
         uses: astral-sh/setup-uv@v7
 
       - name: Build production root
