@@ -45,6 +45,9 @@ jobs:
       repos: ${{ steps.select.outputs.repos }}
       version: ${{ steps.version.outputs.version }}
     steps:
+      # A missing token is a misconfiguration of this repo: fail loudly. A
+      # deliberately NARROWED token still works - see the reusable sync's
+      # adaptive handling of missing scopes.
       - name: Require the fleet token
         env:
           PAT: ${{ secrets.REPO_PLATFORM_TOKEN }}
