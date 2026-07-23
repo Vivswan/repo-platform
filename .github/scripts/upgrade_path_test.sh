@@ -47,6 +47,9 @@ grep -qF "_commit: templates/v99.99.99" .copier-answers.yml
 grep -qF -- "## Python " .gitignore
 grep -qF -- 'package-ecosystem: "uv"' .github/dependabot.yml
 grep -qF -- "language: python" .github/workflows/codeql.yml
-test -f .github/workflows/pr-title.yml
+# The pr-title check lives inside ci.yml's gate; updating from a build that
+# still shipped the standalone workflow must delete the old file.
+test ! -e .github/workflows/pr-title.yml
+grep -qF -- "pr-title:" .github/workflows/ci.yml
 test -f AGENTS.md
 echo "upgrade preserved the module configuration"

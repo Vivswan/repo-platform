@@ -20,12 +20,13 @@ broken ones. Nothing at runtime depends on repo-platform except workflow
    ```
 
 3. (Optional) Inline the reusable workflows. Replace each thin caller
-   (`pr-title.yml`, `auto-assign.yml`, `codeql.yml`, `pages.yml`) with a copy
-   of the corresponding `reusable-*.yml` job from repo-platform, and replace
+   (`auto-assign.yml`, `codeql.yml`, `pages.yml`) with a copy of the
+   corresponding `reusable-*.yml` job from repo-platform, and replace
    `uses: Vivswan/repo-platform/actions/...` steps with vendored copies of
-   the action scripts. Skip this if repo-platform continues to exist; the
-   pinned references (release tags on the latest channel, `main` on
-   staging) keep working unchanged.
+   the action scripts. The `pr-title` job inside ci.yml needs nothing: it
+   uses a public action directly. Skip this if repo-platform continues to
+   exist; the pinned references (release tags on the latest channel,
+   `main` on staging) keep working unchanged.
 
 4. (Optional) Strip the marker comments from `.gitignore`. The content keeps
    working either way.
