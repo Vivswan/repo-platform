@@ -2,8 +2,9 @@
 # Local edits may be replaced during template updates.
 #
 # Applies this repository's .github/settings.yml via repo-settings-as-code.
-# Needs the REPO_PLATFORM_TOKEN secret (Administration + Issues write);
-# without it, runs skip with a notice. No heal cron here on purpose:
+# Without the REPO_PLATFORM_TOKEN secret the run warns and skips; with
+# one, it needs Administration + Issues write, and a section the token
+# cannot reach fails the run. No heal cron here on purpose:
 # {{ github_username }}/repo-platform's central settings-repos run applies this
 # repository's settings.yml regardless of this workflow.
 {#- The reusable workflow lives on main, not on the build branches: strip a
