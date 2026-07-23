@@ -12,15 +12,27 @@
 # check, which needs every other job here, so the required-checks list never
 # changes as jobs come and go. This repository's own test and lint jobs live
 # in checks.yml (repo-owned, never overwritten by sync) and run inside the
-# gate through the `checks` job.
+# gate through the `checks` job. Module checks (the pr-title title check,
+# CodeQL analysis) run inside the gate too, so branch protection blocks on
+# them without extra required checks.
 
 name: CI
 
 on:
   push:
     branches: [main]
+  # `edited` on top of the default three: a PR title edit must re-run the
+  # gate so title-sensitive checks (the pr-title module) stay honest. The
+  # cancel-in-progress concurrency below bounds the extra runs.
   pull_request:
+    types: [opened, edited, reopened, synchronize]
   workflow_dispatch:
+{%- if enable_codeql %}
+  # Weekly CodeQL re-scan with refreshed query packs; every other gate job
+  # is event-agnostic or skips its work cleanly on non-PR events.
+  schedule:
+    - cron: "23 4 * * 1"
+{%- endif %}
 
 permissions:
   contents: read
@@ -70,7 +82,36 @@ jobs:
         run: pip install --quiet yamllint
       - name: Lint YAML
         run: yamllint -s .
+{%- if enable_codeql %}
 
+  # CodeQL runs inside the gate: this thin job calls the analysis workflow,
+  # and a caller job's permissions are the ceiling for every job in the
+  # called workflow, so the scan permissions are granted here.
+  codeql:
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+    uses: ./.github/workflows/codeql.yml
+{%- endif %}
+{% if 'pr-title' in modules %}
+  # Conventional Commit PR title, checked inside the gate so branch
+  # protection blocks on it. PRs are squash-merged, so the PR title becomes
+  # the commit subject and drives release-please versioning: `feat:` (minor),
+  # `fix:` (patch), `feat!:` (major), `chore:`/`docs:` (no release). The
+  # skip lives on the STEP, not the job: all-green treats a skipped needed
+  # job as failure, and ci.yml also runs on push/dispatch/schedule events.
+  pr-title:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: read
+    steps:
+      - name: Validate PR title is a Conventional Commit
+        if: github.event_name == 'pull_request'
+        uses: amannn/action-semantic-pull-request@v6
+        env:
+          GITHUB_TOKEN: {% raw %}${{ secrets.GITHUB_TOKEN }}{% endraw %}
+{% endif %}
   all-green:
     name: all-green
     if: always()
@@ -81,6 +122,10 @@ jobs:
       - validate-template
       - actionlint
       - yamllint
+{%- if enable_codeql %}
+      - codeql
+{%- endif %}
+{% if 'pr-title' in modules %}      - pr-title{% endif %}
     runs-on: ubuntu-latest
     steps:
       - name: All jobs green
@@ -100,11 +145,15 @@ jobs:
   # repository's pre/post-release jobs) runs downstream of all-green, so a
   # red commit can never cut a release or refresh the release PR.
   # Deliberately NOT in all-green's needs: it depends on the gate, it is not
-  # gated by it. Secrets are inherited deliberately: publish steps need
-  # them, and this never runs for pull requests.
+  # gated by it. Only push/dispatch runs release: pull requests must never
+  # reach the publish pipeline, and the weekly scheduled CodeQL re-scan has
+  # no business refreshing release state. Secrets are inherited
+  # deliberately: publish steps need them.
   release:
     needs: [all-green]
-    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    if: >-
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+      && github.ref == 'refs/heads/main'
     # The publishing ceiling for the repo-owned release.yml jobs (release
     # assets, ghcr, npm/PyPI trusted publishing); nested jobs can only
     # narrow it, never raise it.

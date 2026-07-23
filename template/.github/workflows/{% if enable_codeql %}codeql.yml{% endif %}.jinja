@@ -1,5 +1,9 @@
 # This file is managed by {{ github_username }}/repo-platform.
 # Local edits may be replaced during template updates.
+#
+# Called from ci.yml's all-green gate (one analysis job per language), so a
+# failed scan blocks merges. The caller job in ci.yml grants the scan
+# permissions and the weekly re-scan schedule lives on ci.yml's triggers.
 
 {#- The reusable workflow lives on main, not on the build branches: strip a
     templates/vX.Y.Z build-tag _commit to the same-version release tag on
@@ -11,15 +15,7 @@
 name: CodeQL
 
 on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
-  schedule:
-    - cron: "23 4 * * 1"
-
-permissions:
-  contents: read
+  workflow_call: {}
 
 jobs:
 {% if 'bun' in modules %}
