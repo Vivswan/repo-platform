@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
-# Creates or refreshes the sync PR in the target and arms (or disarms)
-# squash auto-merge. Invoked by reusable-template-sync.yml's "Create or
-# refresh pull request" step.
+# Creates or refreshes the sync PR in the target and arms squash
+# auto-merge on clean revisions (needs-review ones stay disarmed by the
+# earlier disarm_pr.sh step). Invoked by reusable-template-sync.yml's
+# "Create or refresh pull request" step.
 #
 # Env: TARGET, TARGET_REF, OLD_COMMIT, DISPLAY, BRANCH, BASE_BRANCH,
-# VALIDATION, RESOLVED, SUMMARY_FILE, RETIRED_MODULES_FILE,
+# VALIDATION, RESOLVED, RECOVER, SUMMARY_FILE, RETIRED_MODULES_FILE,
 # REMOVED_PATHS_FILE, WITHHELD_FILE, GH_TOKEN, GITHUB_REPOSITORY,
 # GITHUB_OUTPUT, RUNNER_TEMP.
 set -euo pipefail
@@ -28,6 +29,18 @@ Review any merge conflicts and confirm repository-local sections were preserved 
 > This branch is regenerated on every sync run; manual commits
 > pushed to it are overwritten. Make fixes in a separate branch or
 > after merging."
+
+if [ "$RECOVER" = "recopy" ]; then
+  body="${body}
+
+> [!WARNING]
+> RECOVERY RE-RENDER: this update was dispatched with recover=recopy
+> because the recorded template base was unusable. There was no
+> three-way merge - local edits to template-managed files are
+> overwritten in this diff (repo-owned generated-once files and
+> settings.yml survive), and retired-file cleanup was skipped.
+> Review the whole diff before merging."
+fi
 
 if [ -s "$RETIRED_MODULES_FILE" ]; then
   body="${body}
@@ -74,8 +87,19 @@ if [ "$VALIDATION" = "failed" ]; then
 > log). Fix it in this PR before merging."
 fi
 
+# Anything that needs human review - dropped local hunks, withheld
+# workflow files, failed validation, a recovery re-render - stays manual;
+# a clean update arms squash auto-merge below.
+needs_review=false
+if [ "$RESOLVED" = "true" ] || [ "$VALIDATION" = "failed" ] ||
+  [ "$RECOVER" = "recopy" ] || [ -s "$WITHHELD_FILE" ]; then
+  needs_review=true
+fi
+
 existing="$(gh pr list -R "$TARGET" --head "$BRANCH" --json number --jq '.[0].number // empty')"
 if [ -n "$existing" ]; then
+  # Auto-merge was disarmed BEFORE the push (disarm_pr.sh); this step
+  # only refreshes the PR and re-arms clean revisions below.
   # The rolling branch is force-pushed over; keep title/body honest.
   gh pr edit "$existing" -R "$TARGET" --title "$title" --body "$body"
   url="$(gh pr view "$existing" -R "$TARGET" --json url --jq .url)"
@@ -91,19 +115,14 @@ fi
 echo "url=${url}" >>"$GITHUB_OUTPUT"
 
 # Squash auto-merge on the CLEAN path: the PR merges itself once the
-# target's required checks (all-green) pass. Anything that needs human
-# review - dropped local hunks, withheld workflow files, failed
-# validation - stays manual, and a previously armed auto-merge is
-# DISARMED (the rolling branch may have been clean on an earlier run).
-if [ "$RESOLVED" != "true" ] && [ "$VALIDATION" != "failed" ] &&
-  [ ! -s "$WITHHELD_FILE" ]; then
+# target's required checks (all-green) pass. Needs-review revisions stay
+# disarmed (disarm_pr.sh ran before the push; a fresh PR is never armed).
+if [ "$needs_review" = false ]; then
   if gh pr merge "$url" -R "$TARGET" --squash --auto 2>"$RUNNER_TEMP/automerge.err"; then
     echo "auto-merge armed for ${url}"
   else
     echo "::warning::${TARGET}: could not enable auto-merge on ${url}: $(cat "$RUNNER_TEMP/automerge.err"). Merge it manually; to fix this, allow auto-merge in the repo settings and keep a required check on the default branch."
   fi
 else
-  gh pr merge "$url" -R "$TARGET" --disable-auto 2>/dev/null &&
-    echo "auto-merge disarmed: this revision needs review" ||
-    echo "auto-merge left off: this PR needs review (conflicts, withheld files, or failed validation)."
+  echo "auto-merge left off: this PR needs review (conflicts, withheld files, failed validation, or a recovery re-render)."
 fi
