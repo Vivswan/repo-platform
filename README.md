@@ -52,7 +52,9 @@ self-apply of a repo's own settings file.
   manual: auto-resolved conflicts, withheld workflow files, or failed
   validation.
 - `repos.yml` decides which repos: a quoted `"*"` wildcard auto-discovers
-  every owned, non-archived repo the PAT can see, `exclude:` opts repos
+  every owned, non-archived repo the PAT can WRITE to (granting the
+  fleet PAT a repository is what enrolls it; fine-grained PATs can read
+  every public repo, so read access alone means nothing), `exclude:` opts repos
   out, and a discovered repo is synced only once it carries
   `.repo-platform.yml` (unadopted repos are skipped with a notice).
 - Conflicts (local edits overlapping template changes) resolve in the

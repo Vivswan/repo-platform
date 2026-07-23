@@ -126,9 +126,11 @@ jobs:
           done
           echo "::warning::no successful Build Branches push-event run found for main HEAD ${main_sha} after 5 minutes; staging-channel syncs may apply the previous staging tree. The weekly cron heals this on its next run."
 
-      # user/repos with the PAT sees everything the token can act on;
-      # --paginate emits concatenated page arrays, so --slurp + add makes
-      # one array before filtering to owned, non-archived repos.
+      # user/repos with the PAT sees every public repo (fine-grained PATs
+      # always read public resources), so membership is WRITE access: only
+      # repos the token can push to are candidates - granting the PAT a
+      # repo is what enrolls it. --paginate emits concatenated page
+      # arrays, so --slurp + add makes one array first.
       - name: Discover repos
         env:
           GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
@@ -136,9 +138,9 @@ jobs:
           login="$(gh api user --jq .login)"
           gh api user/repos --paginate --slurp \
             | jq -c --arg login "$login" \
-                '[add[] | select((.archived | not) and .owner.login == $login) | .full_name]' \
+                '[add[] | select((.archived | not) and .owner.login == $login and .permissions.push) | .full_name]' \
             > "$RUNNER_TEMP/discovered.json"
-          echo "discovered $(jq 'length' "$RUNNER_TEMP/discovered.json") repos for ${login}"
+          echo "discovered $(jq 'length' "$RUNNER_TEMP/discovered.json") writable repos for ${login}"
 
       - name: Select repos and check adoption
         id: select

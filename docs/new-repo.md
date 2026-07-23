@@ -93,9 +93,11 @@ See the [all-green convention](all-green.md) for how the gate works.
 gh repo create Vivswan/my-project --public --source . --push
 ```
 
-That is the whole repo-side setup. repo-platform's `repos.yml` wildcard
-auto-discovers the repo, and the presence of `.repo-platform.yml` opts it
-into push sync; update PRs start arriving on releases and the weekly cron
+That is the whole repo-side setup, plus one grant: give the fleet PAT
+access to the new repository (its repository access list) - discovery
+only enrolls repos the token can write to. The `repos.yml` wildcard then
+picks it up, `.repo-platform.yml` opts it into push sync, and update PRs
+start arriving on releases and the weekly cron
 (`gh workflow run sync-repos.yml -f repo=Vivswan/my-project -R Vivswan/repo-platform`
 syncs it immediately).
 

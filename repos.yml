@@ -2,7 +2,8 @@
 # Validated and resolved by .github/scripts/repos_registry.ts.
 #
 # - managed: owner/name slugs, or one quoted "*" wildcard. The wildcard
-#   auto-discovers every owned, non-archived repo the PAT can see
+#   auto-discovers every owned, non-archived repo the PAT can WRITE to
+#   (granting the fleet PAT a repository is what enrolls it)
 #   (quoted because a bare * is YAML alias syntax).
 # - exclude: discovered repos that must NOT be synced (opt-outs).
 # - Channel precedence: config.<repo>.channel > defaults.channel > the
