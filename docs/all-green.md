@@ -1,17 +1,19 @@
 # The all-green convention
 
 Every managed repository's `.github/workflows/ci.yml` defines a single
-aggregate job named `all-green` that `needs:` every other job in the
-workflow. Branch protection (via `.github/settings.yml`) requires exactly one
-status check: `all-green`. The required-checks list never changes when CI
-jobs are added, renamed, or turned into matrices.
+aggregate job named `all-green` that `needs:` every gating job in the
+workflow (release jobs run on top of the gate instead - see the notes).
+Branch protection (applied from the repo's settings home, central
+or in-repo - see docs/settings.md) requires exactly one status check:
+`all-green`. The required-checks list never changes when CI jobs are added,
+renamed, or turned into matrices.
 
 The template generates ci.yml with this shape and keeps managing it: sync
 updates the standard jobs and the gate. Module checks run inside the gate
 too: the pr-title module contributes a `pr-title` job (Conventional Commit
-title check), and public repos with a toolchain get a `codeql` job that
-calls the CodeQL analysis workflow - so branch protection blocks on both
-without any extra required checks. Repo-specific jobs live in the
+title check), and public repos with a toolchain get per-language `codeql-*`
+jobs calling the reusable CodeQL analysis - so branch protection blocks on
+both without any extra required checks. Repo-specific jobs live in the
 repo-owned `.github/workflows/checks.yml` (`_skip_if_exists`), which the
 managed ci.yml calls inside the gate through its `checks` job. all-green
 sees only that job's aggregate result, so the skipped-is-failure rule below
@@ -55,11 +57,12 @@ Notes:
   carries `if: github.event_name == 'pull_request'` instead of a job-level
   skip. In the repo-owned checks.yml, exit successfully with a message
   instead.
-- A job that calls a reusable workflow gates on that whole workflow: the
-  managed `codeql` job calls `.github/workflows/codeql.yml`, and all-green
-  sees the aggregate result of every analysis job in it. The caller job
-  grants the permissions the analysis needs (`security-events: write`);
-  a caller job's permissions are the ceiling for the called workflow.
+- A job that calls a reusable workflow gates on every job in it: the managed
+  `codeql-javascript` / `codeql-python` jobs each call repo-platform's
+  reusable CodeQL analysis, and all-green sees each call's result. The
+  caller job grants the permissions the scan needs (`security-events:
+  write`); a caller job's permissions are the ceiling for the called
+  workflow.
 - Jobs that must run only after CI passes should `needs: all-green`; the
   validator exempts them from the needs-list check. The release-please module
   ships one: a thin ci.yml `release` job gated this way that calls the
@@ -67,5 +70,5 @@ Notes:
   machinery plus any repo pre/post-release jobs), so a release only ever
   happens once the whole gate is green on main.
 - `Vivswan/repo-platform/actions/validate-template` enforces this shape:
-  all-green must exist and `needs:` every other job, and a `typography` job
-  must exist.
+  all-green must exist and `needs:` every gating job, and a `typography`
+  job must exist.
