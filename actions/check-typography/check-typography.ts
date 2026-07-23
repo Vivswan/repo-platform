@@ -3,7 +3,8 @@
 // Guards against typographic look-alike and invisible characters that sneak
 // in via copy-paste or generated text. Vendored into Vivswan/repo-platform
 // from cloud-speech and generalized: scans the directory given as argv[2]
-// (default: cwd) and reads optional path exemptions from .typography-allow.
+// (default: cwd) and reads optional path exemptions from .typography-allow
+// and .typography-allow.local.
 //
 // Forbidden everywhere:
 //   - curly quotes (U+2018..201F), guillemets, primes, modifier apostrophes

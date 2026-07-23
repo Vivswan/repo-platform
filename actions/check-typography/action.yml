@@ -2,8 +2,8 @@ name: Check Typography
 description: >-
   Fails on typographic look-alike and invisible unicode characters (curly
   quotes, dash look-alikes, Trojan-Source bidi controls, VS Code's ambiguous
-  confusables). Per-repo exemptions via a .typography-allow file listing
-  relative path prefixes to skip.
+  confusables). Per-repo exemptions via .typography-allow and
+  .typography-allow.local files listing relative path prefixes to skip.
 
 inputs:
   path:
