@@ -110,7 +110,7 @@ central apply covers the repo).
 | `.github/workflows/sync-repos.yml` | Push sync fan-out: release + weekly cron + dispatch, one serialized run per repo |
 | `.github/workflows/settings-repos.yml` | Central settings apply across the fleet |
 | `.github/workflows/reusable-*.yml` | Reusable workflows: template-sync (the push-sync engine), auto-assign, codeql, pages ([docs](docs/pages.md)), apply-settings ([docs](docs/settings.md)) |
-| `actions/check-typography` | Blocks look-alike/invisible unicode (vendored from cloud-speech, config via `.typography-allow`) |
+| `actions/check-typography` | Blocks look-alike/invisible unicode (vendored from cloud-speech, config via `.typography-allow` + repo-owned `.typography-allow.local`) |
 | `actions/validate-template` | Enforces markers, YAML validity, and the all-green convention |
 | `actions/validate-commit-names` | Conventional Commit subjects on every push/PR commit |
 | `scripts/build_gitignore.ts` | Regenerates `templates/base/.gitignore.jinja` from the latest [github/gitignore](https://github.com/github/gitignore) (Windows + macOS + Linux always, Node/Python by bun/uv module) |
@@ -126,7 +126,7 @@ central apply covers the repo).
 | Managed + local sections | `.gitignore` (LOCAL section is yours) |
 | Mergeable (three-way) | `.github/settings.yml` (settings-sync module only), `.github/CODEOWNERS`, `AGENTS.md`, `.editorconfig`, `.gitattributes` |
 | Generated once, then repo-owned | `checks.yml` (your CI jobs, called inside the all-green gate), `release.yml` (your release pipeline around the managed release-please machinery), `auto-format.yml`, `copilot-setup-steps.yml`, `release-please-config.json`, `.release-please-manifest.json` |
-| Repo-owned (never touched) | source code, release tooling, everything else |
+| Repo-owned (never touched) | source code, release tooling, `.typography-allow.local`, everything else |
 
 `CLAUDE.md`, `.github/copilot-instructions.md`, and `.github/agents.md` are
 symlinks to the repo's `AGENTS.md` (the `agents` module, on by default): one
