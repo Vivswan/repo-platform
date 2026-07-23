@@ -70,6 +70,11 @@ jobs:
 
       - name: Check out repo-platform
         uses: actions/checkout@v7
+        with:
+          # Full history: repos generated before the build-branch
+          # architecture record a main-history _commit, which must resolve
+          # for the update base and the cleanup's old render.
+          fetch-depth: 0
 
       - uses: oven-sh/setup-bun@v2
 
