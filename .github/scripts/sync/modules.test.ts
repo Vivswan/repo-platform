@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { parse } from "yaml";
-import { filterModules, readModuleChoices, readModules } from "./sync_modules";
+import { filterModules, readModuleChoices, readModules } from "./modules";
 
 const CHOICES: ReadonlySet<string> = new Set(["agents", "bun", "uv", "settings-sync"]);
 

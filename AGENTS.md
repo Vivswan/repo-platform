@@ -62,8 +62,11 @@ secret; the single REPO_PLATFORM_TOKEN PAT lives only here.
   baseline, deep-merged under every target) + `repos/<name>.yml` per repo.
 - `actions/` holds composite actions (check-typography, validate-template,
   validate-commit-names).
-- Repo scripts are TypeScript run directly with bun (the shell scripts in
-  `.github/scripts/` are CI test harnesses).
+- Repo scripts are TypeScript run directly with bun. `.github/scripts/`
+  holds CI/CD-only code, organized by owner workflow: `fleet/` (registry
+  + target selection for sync-repos/settings-repos), `sync/`
+  (reusable-template-sync step scripts and helpers), `build-branches/`
+  (the branch builder), and `ci/` (CI test harnesses).
   `scripts/build_gitignore.ts` generates `templates/base/.gitignore.jinja`
   and this repo's own `.gitignore` from the latest github/gitignore;
   `scripts/gitignore.lock` records the SHA.
@@ -81,6 +84,11 @@ secret; the single REPO_PLATFORM_TOKEN PAT lives only here.
 - Never hand-edit `templates/base/.gitignore.jinja` (generated); run
   `bun scripts/build_gitignore.ts` (or `--locked`). CI fails on drift.
   Scripts used only by CI/CD live in `.github/scripts/`.
+- Workflow run blocks longer than a few lines are extracted to bash
+  scripts under `.github/scripts/<owner>/` so shellcheck can lint them
+  (the CI `shellcheck` job and `bun run lint:sh` gate them). Exception:
+  the cross-repo `reusable-*` workflows run in the CALLER's checkout,
+  where this repo's scripts do not exist - their steps stay inline.
 - Symlinks in `templates/agents/` (CLAUDE.md and friends) must stay
   symlinks; `.gitattributes` marks them (and their composed copies) `-text`
   and copier preserves them via `_preserve_symlinks`.
@@ -98,7 +106,7 @@ secret; the single REPO_PLATFORM_TOKEN PAT lives only here.
 - Smoke-generate locally (main is not directly copier-consumable - build a
   scratch tree first; copier needs bun on PATH because `_migrations` runs
   with bun):
-  `bun .github/scripts/build_branch_tree.ts --dest /tmp/bt --channel staging`,
+  `bun .github/scripts/build-branches/branch_tree.ts --dest /tmp/bt --channel staging`,
   `git -C /tmp/bt init -b build && git -C /tmp/bt add -A && git -C /tmp/bt commit -m build`,
   `copier copy /tmp/bt /tmp/out --vcs-ref HEAD --defaults --trust -d project_name=X -d description=Y -d 'modules=[uv]' -d private=false`
   then run the validator on `/tmp/out`. CI does this for five module
