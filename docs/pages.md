@@ -81,7 +81,7 @@ custom domain in Pages settings together, or URLs and routing will disagree).
 
 - Releases published by the default `GITHUB_TOKEN` (e.g. [release-please](https://github.com/googleapis/release-please)
   without a PAT) do not fire `pages.yml`'s `release:` trigger (the same
-  token caveat as propagate.yml). The next push to main or a manual
+  token caveat as repo-platform's sync-repos.yml). The next push to main or a manual
   `workflow_dispatch` picks the release up, since the root is re-resolved
   from the latest release on every run.
 - Serving Pages from a private repository requires a paid GitHub plan; the

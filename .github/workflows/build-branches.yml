@@ -6,7 +6,7 @@
 # never invalidate them and old build commits (downstream repos' recorded
 # _commit, needed by copier update's three-way merge) stay reachable forever.
 # The weekly schedule is a self-heal net: releases published with the default
-# GITHUB_TOKEN do not fire the `release` trigger (same caveat as propagate).
+# GITHUB_TOKEN do not fire the `release` trigger (same caveat as sync-repos).
 # GITHUB_TOKEN pushes trigger no workflows - intended; nothing may run on the
 # build branches (their trees carry no .github/).
 
@@ -43,8 +43,8 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Install pyyaml
-        run: pip install --quiet pyyaml
+      - name: Set up bun
+        uses: oven-sh/setup-bun@v2
 
       - name: Plan builds
         id: plan
@@ -116,13 +116,15 @@ jobs:
             echo "::group::build $ch from ${src:0:12} ${ver:+($ver)}"
             rm -rf "/tmp/src-$ch" "/tmp/tree-$ch" "/tmp/pub-$ch"
             # Compose with the SOURCE ref's own script + sources, so a rebuild
-            # of an old tag reproduces that tag's composition.
+            # of an old tag reproduces that tag's composition. The script's
+            # dependencies must resolve from that tree, not this checkout.
             git worktree add --detach "/tmp/src-$ch" "$src"
+            bun install --frozen-lockfile --cwd "/tmp/src-$ch"
             if [ -n "$ver" ]; then
-              python3 "/tmp/src-$ch/.github/scripts/build_branch_tree.py" \
+              bun "/tmp/src-$ch/.github/scripts/build_branch_tree.ts" \
                 --dest "/tmp/tree-$ch" --channel "$ch" --version "$ver"
             else
-              python3 "/tmp/src-$ch/.github/scripts/build_branch_tree.py" \
+              bun "/tmp/src-$ch/.github/scripts/build_branch_tree.ts" \
                 --dest "/tmp/tree-$ch" --channel "$ch"
             fi
             if git ls-remote --exit-code origin "refs/heads/$ch" >/dev/null 2>&1; then

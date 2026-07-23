@@ -8,9 +8,11 @@ symlinks to this file, so edit only here.
 
 repo-platform: a Copier template plus reusable GitHub Actions workflows and
 composite actions that manage standards files across Vivswan's repositories.
-Managed repos pull updates themselves (template-sync workflow); this repo
-never pushes commits to them - a release only dispatches each repo's own
-sync (propagate.yml).
+This repo is the push-only operator: sync-repos.yml runs copier against each
+managed repo and pushes a branch + PR into it, and settings-repos.yml
+applies repository settings (from central `settings/` files, or a module
+repo's own settings.yml). Managed repos carry no sync workflow and no sync
+secret; the single REPO_PLATFORM_TOKEN PAT lives only here.
 
 ## Layout
 
@@ -42,44 +44,61 @@ sync (propagate.yml).
   anchor. Exception: `templates/agents/AGENTS.md.jinja` keeps inline
   module gates (sub-line gates and a two-module wrapper that fragments
   cannot express).
-- `.github/workflows/reusable-*.yml` are called cross-repo by thin
-  downstream callers pinned to release tags.
+- `.github/workflows/sync-repos.yml` is the push sync fan-out (release +
+  weekly cron + dispatch): it resolves the fleet from `repos.yml`, then
+  calls `reusable-template-sync.yml` per repo, serially. Its sibling
+  `settings-repos.yml` applies the `settings/` files (central home) plus
+  module repos' own settings.yml in one repo-settings-as-code run.
+- The remaining `.github/workflows/reusable-*.yml` (auto-assign, codeql,
+  pages, apply-settings) are called cross-repo by thin downstream callers
+  pinned to release tags. The `settings-sync` module is the in-repo
+  settings home: it renders `.github/settings.yml` plus a caller that
+  self-applies it on push via `reusable-apply-settings.yml`.
+- `repos.yml` is the fleet config: a quoted `"*"` wildcard auto-discovers
+  owned repos, `exclude:` opts them out, and `defaults.channel` /
+  `config.<repo>.channel` pick channels. Module selection is NOT fleet
+  config; each repo keeps it in its own `.repo-platform.yml`.
+- `settings/` is the central settings home: `defaults.yml` (shared
+  baseline, deep-merged under every target) + `repos/<name>.yml` per repo.
 - `actions/` holds composite actions (check-typography, validate-template,
   validate-commit-names).
-- `scripts/build_gitignore.py` generates `templates/base/.gitignore.jinja`
+- Repo scripts are TypeScript run directly with bun (the shell scripts in
+  `.github/scripts/` are CI test harnesses).
+  `scripts/build_gitignore.ts` generates `templates/base/.gitignore.jinja`
   and this repo's own `.gitignore` from the latest github/gitignore;
   `scripts/gitignore.lock` records the SHA.
-- `migrations/` holds copier `_migrations` scripts for breaking changes.
+- `migrations/` holds copier `_migrations` scripts (TypeScript, executed
+  with bun) for breaking changes; every environment that runs
+  `copier copy/update` needs bun on PATH.
 - `docs/` holds the human-facing guides: all-green convention, new-repo
-  setup, pages module, settings-sync (token permissions), and eject. Update
-  the matching doc when changing the behavior it describes.
-- `repos.yml` lists managed repos; `.github/workflows/propagate.yml`
-  dispatches their template-sync on each release (push side of sync).
+  setup, pages module, settings (central vs in-repo homes), and eject.
+  Update the matching doc when changing the behavior it describes.
 
 ## Editing rules
 
 - GitHub Actions expressions inside `.jinja` workflow files must be wrapped
   in `{% raw %}...{% endraw %}` or jinja eats the `{{ }}`.
 - Never hand-edit `templates/base/.gitignore.jinja` (generated); run
-  `python3 scripts/build_gitignore.py` (or `--locked`). CI fails on drift.
+  `bun scripts/build_gitignore.ts` (or `--locked`). CI fails on drift.
   Scripts used only by CI/CD live in `.github/scripts/`.
 - Symlinks in `templates/agents/` (CLAUDE.md and friends) must stay
   symlinks; `.gitattributes` marks them (and their composed copies) `-text`
   and copier preserves them via `_preserve_symlinks`.
 - The macOS gitignore section contains an intentional literal carriage
   return (`Icon[\r]`); `.typography-allow` exempts both gitignore paths.
-- Template changes reach staging-channel repos on every merge to main (the
-  build-branches workflow rebuilds `staging`); latest-channel repos only
-  through a release: release-please cuts vX.Y.Z, the builder tags
-  `templates/vX.Y.Z`, repos pick it up on their next sync.
+- Every merge to main rebuilds the `staging` build branch; a release
+  rebuilds `latest` (release-please cuts vX.Y.Z, the builder tags
+  `templates/vX.Y.Z`). Repos receive either build only when sync-repos
+  runs: immediately on a release, weekly via its cron, or on dispatch.
 
 ## Verification
 
-- `uv run actions/validate-template/validate_generated_files.py --self .` validates this repo
-  against its own conventions.
+- `bun actions/validate-template/validate_generated_files.ts --self .`
+  validates this repo against its own conventions.
 - Smoke-generate locally (main is not directly copier-consumable - build a
-  scratch tree first):
-  `uv run .github/scripts/build_branch_tree.py --dest /tmp/bt --channel staging`,
+  scratch tree first; copier needs bun on PATH because `_migrations` runs
+  with bun):
+  `bun .github/scripts/build_branch_tree.ts --dest /tmp/bt --channel staging`,
   `git -C /tmp/bt init -b build && git -C /tmp/bt add -A && git -C /tmp/bt commit -m build`,
   `copier copy /tmp/bt /tmp/out --vcs-ref HEAD --defaults --trust -d project_name=X -d description=Y -d 'modules=[uv]' -d private=false`
   then run the validator on `/tmp/out`. CI does this for five module
@@ -94,7 +113,10 @@ sync (propagate.yml).
   squash-merged and drive release-please versioning.
 - CI gates on a single required check named `all-green`, which `needs:`
   every other job in `ci.yml`. When adding a CI job, add it to all-green's
-  `needs` list. Exception: the `release-please` job runs on top of the gate
+  `needs` list. The gate is strict: a skipped needed job counts as failure,
+  so event-conditional jobs (like the template's pr-title check) stay
+  unconditional at the job level and put the `if:` on their steps.
+  Exception: the `release-please` job runs on top of the gate
   (`needs: all-green`), so releases only cut from a green main.
 - No typographic look-alike characters (curly quotes, em-dashes, invisible
   unicode); use plain ASCII punctuation. The check-typography action

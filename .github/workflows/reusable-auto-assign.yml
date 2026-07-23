@@ -1,7 +1,7 @@
 # Reusable auto-assign. Callers trigger on issues/pull_request (and, on
-# CodeQL-enabled repos, workflow_run + schedule for code scanning alerts);
-# the caller's event context flows through. A workflow_dispatch with an
-# `issue` input assigns that one issue (or PR - PRs are issues), for items
+# CodeQL-enabled repos, workflow_run watching CI + schedule for code scanning
+# alerts); the caller's event context flows through. A workflow_dispatch with
+# an `issue` input assigns that one issue (or PR - PRs are issues), for items
 # whose creation event fired no workflow. Callers on repos WITHOUT code
 # scanning pass code_scanning: false so a manual dispatch never selects the
 # alert-assignment job there.
@@ -211,16 +211,23 @@ jobs:
 
   # Assign open, currently-unassigned code scanning alerts per the CODEOWNERS
   # policy. No Actions trigger exists for alert creation, so this polls after
-  # CodeQL completes (workflow_run) and weekly (schedule). Idempotent: alerts
-  # that already have an assignee are skipped. Code scanning only exists on a
-  # public repo (or GHAS), matching the codeql workflow's private guard.
+  # CI completes (workflow_run - CodeQL analyzes inside CI's gate) and weekly
+  # (schedule). CI completes on every push, PR, and dispatch run, but only
+  # default-branch pushes and scheduled re-scans produce new alerts, so other
+  # workflow_run deliveries are filtered out. Idempotent: alerts that already
+  # have an assignee are skipped. Code scanning only exists on a public repo
+  # (or GHAS), matching the codeql workflow's private guard.
   assign-code-scanning:
     if: >-
       inputs.code_scanning &&
       github.event.repository.private == false &&
       github.event_name != 'issues' &&
       github.event_name != 'pull_request' &&
-      (github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success')
+      (github.event_name != 'workflow_run' ||
+        (github.event.workflow_run.conclusion == 'success' &&
+          ((github.event.workflow_run.event == 'push' &&
+            github.event.workflow_run.head_branch == github.event.repository.default_branch) ||
+            github.event.workflow_run.event == 'schedule')))
     runs-on: ubuntu-latest
     permissions:
       contents: read # CODEOWNERS resolution

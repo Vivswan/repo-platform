@@ -1,278 +1,428 @@
-# Reusable template sync: pulls the calling repository's channel of
-# repo-platform's generated build branches (latest = templates/vX.Y.Z build
-# tags, staging = the staging branch head) via `copier update` and opens a
-# PR to itself.
+# Push-only template sync: runs in repo-platform and pushes a template
+# update into one managed repo - target checkout in a subdirectory, `copier
+# update` against the target's channel (staging head or a templates/vX.Y.Z
+# build tag), then a branch + PR opened in the target with the
+# REPO_PLATFORM_TOKEN PAT stored here. Called only by sync-repos.yml.
 #
-# Conflict model: overlapping local edits resolve in the template's favor;
-# the dropped local lines land in the PR body for review. With a PAT the
-# PR-opened event fires the repo's auto-assign (CODEOWNERS decides who).
-# Auto-resolution is normal operation, so it does not fail the run;
-# validation failures still do.
-#
-# Token model: uses REPO_PLATFORM_TOKEN when the caller passes it (PR is
-# authored by the user and triggers CI normally); falls back to the run's
-# GITHUB_TOKEN otherwise (PR is created but CI won't auto-trigger - the PR
-# body carries a close/reopen note). GITHUB_TOKEN can never push changes
-# under .github/workflows/, so updates touching workflow files require the
-# PAT (with Workflows:RW) and fail with instructions without it.
+# The rolling per-channel branch (automation/repo-platform-staging|latest)
+# is regenerated on every run: sync-repos.yml's concurrency group is the
+# only automated writer, and the push uses --force-with-lease so an
+# out-of-band push racing this run surfaces instead of vanishing. Manual
+# commits on the branch are overwritten by design; the PR body says so.
+# Conflicts resolve toward the template with the dropped local lines in
+# the PR body - auto-resolution warns; only validation failures (and
+# broken inputs) go red.
 
 name: Reusable Template Sync
 
 on:
   workflow_call:
     inputs:
+      target_repo:
+        description: owner/name of the managed repo to sync
+        required: true
+        type: string
       version:
         description: Release to sync to (latest channel only; empty = newest release)
         required: false
         type: string
         default: ""
+      channel:
+        description: Channel to sync (empty = the target's recorded copier answer)
+        required: false
+        type: string
+        default: ""
     secrets:
       REPO_PLATFORM_TOKEN:
-        required: false
+        required: true
 
-# The minimum permissions this workflow needs; the caller template grants
-# exactly these. New scopes can never be added here without a migration
-# plan: a caller that fails permission validation cannot run the very sync
-# that would deliver its updated caller file.
+# The workflow's own token only reads this repo; every target-repo write
+# (checkout, push, PR) uses the REPO_PLATFORM_TOKEN PAT.
 permissions:
-  contents: write
-  pull-requests: write
-
-concurrency:
-  group: template-sync-${{ github.repository }}
-  cancel-in-progress: false
+  contents: read
 
 env:
-  TEMPLATE_REPO: Vivswan/repo-platform
+  # Single knob for pinning copier (pipx spec, e.g. "copier==9.10.1").
+  COPIER_SPEC: copier
 
 jobs:
   sync:
     runs-on: ubuntu-latest
+    env:
+      TARGET: ${{ inputs.target_repo }}
     steps:
-      - name: Resolve token mode
-        id: token
+      - name: Require the fleet token
         env:
           PAT: ${{ secrets.REPO_PLATFORM_TOKEN }}
         run: |
-          if [ -n "$PAT" ]; then
-            echo "mode=pat" >> "$GITHUB_OUTPUT"
-          else
-            echo "mode=github-token" >> "$GITHUB_OUTPUT"
+          if [ -z "$PAT" ]; then
+            echo "::error::push sync cannot run: the REPO_PLATFORM_TOKEN secret is empty. Create a fine-grained PAT with the permissions pre-selected at https://github.com/settings/personal-access-tokens/new?name=REPO_PLATFORM_TOKEN&description=repo-platform+fleet%3A+push+sync+and+central+settings&contents=write&pull_requests=write&workflows=write&administration=write&issues=write scoped to the managed repos, then store it with 'gh secret set REPO_PLATFORM_TOKEN' in this repo."
+            exit 1
           fi
 
-      - name: Check out repository
+      - name: Check out repo-platform
+        uses: actions/checkout@v7
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Install script dependencies
+        run: bun install --frozen-lockfile --silent
+
+      - name: Read live target repo data
+        id: target
+        env:
+          GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
+        run: |
+          if ! info="$(gh api "repos/${TARGET}")"; then
+            echo "::error::cannot read ${TARGET}: the REPO_PLATFORM_TOKEN cannot access it. Grant the PAT access to ${TARGET} (repository access list) with Contents and Pull requests read/write, then re-run."
+            exit 1
+          fi
+          {
+            echo "default_branch=$(jq -r .default_branch <<<"$info")"
+            echo "private=$(jq -r .private <<<"$info")"
+            echo "description<<DESCRIPTION_EOF"
+            jq -r '.description // ""' <<<"$info"
+            echo "DESCRIPTION_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Check out the target repo
         uses: actions/checkout@v7
         with:
-          # Always base the update on the default branch, not the triggering
-          # ref - a dispatch from a feature branch must not leak its commits
-          # into the automation PR.
-          ref: ${{ github.event.repository.default_branch }}
+          repository: ${{ inputs.target_repo }}
+          ref: ${{ steps.target.outputs.default_branch }}
+          token: ${{ secrets.REPO_PLATFORM_TOKEN }}
+          path: target
           fetch-depth: 0
-          token: ${{ secrets.REPO_PLATFORM_TOKEN || github.token }}
+          # copier --trust executes template tasks in this tree; the PAT must
+          # not sit in .git/config while they run. Pushes authenticate at
+          # push time instead.
+          persist-credentials: false
 
       - name: Require registration files
         run: |
-          test -f .repo-platform.yml || { echo "::error::template sync cannot start: .repo-platform.yml is missing from the default branch, so this repo is not registered with repo-platform. Restore the file from git history, or regenerate the repo with 'copier copy gh:${TEMPLATE_REPO} . --vcs-ref staging' (or a templates/vX.Y.Z tag)"; exit 1; }
-          test -f .copier-answers.yml || { echo "::error::template sync cannot start: .copier-answers.yml is missing, so copier has no recorded answers to update from. Restore the file from git history, or regenerate the repo with 'copier copy gh:${TEMPLATE_REPO} . --vcs-ref staging' (or a templates/vX.Y.Z tag)"; exit 1; }
+          test -f target/.repo-platform.yml || { echo "::error::${TARGET} is not registered with repo-platform: .repo-platform.yml is missing from its default branch. Restore the file from git history, or regenerate the repo with 'copier copy gh:${GITHUB_REPOSITORY} . --vcs-ref staging' (or a templates/vX.Y.Z tag)."; exit 1; }
+          test -f target/.copier-answers.yml || { echo "::error::${TARGET} has no .copier-answers.yml on its default branch, so copier has no recorded answers to update from. Restore the file from git history, or regenerate the repo with 'copier copy gh:${GITHUB_REPOSITORY} . --vcs-ref staging' (or a templates/vX.Y.Z tag)."; exit 1; }
 
-      - name: Determine current and target versions
+      # copier update and the cleanup renders fetch the template from the
+      # TARGET's recorded _src_path and execute its tasks with --trust. A
+      # compromised target could point it at a hostile template, so only
+      # this repository is accepted as the source.
+      - name: Validate the recorded template source
+        id: src
+        run: |
+          src_path="$(bun -e '
+            const { readFileSync } = require("node:fs");
+            const { parse } = require("yaml");
+            const answers = parse(readFileSync("target/.copier-answers.yml", "utf-8"));
+            console.log(answers._src_path ?? "");
+          ')"
+          case "$src_path" in
+            "gh:${GITHUB_REPOSITORY}" | "gh:${GITHUB_REPOSITORY}.git" | \
+            "https://github.com/${GITHUB_REPOSITORY}" | "https://github.com/${GITHUB_REPOSITORY}.git")
+              ;;
+            *)
+              echo "::error::${TARGET}'s .copier-answers.yml records _src_path '${src_path}', which is not ${GITHUB_REPOSITORY}. Refusing to run copier against an unexpected template source; fix _src_path on the target's default branch first."
+              exit 1
+              ;;
+          esac
+          echo "src_path=${src_path}" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve channel, refs, and template copier configs
         id: versions
         env:
           GH_TOKEN: ${{ github.token }}
           REQUESTED: ${{ inputs.version }}
+          CHANNEL_INPUT: ${{ inputs.channel }}
         run: |
-          channel="$(awk '$1 == "channel:" { print $2 }' .copier-answers.yml)"
+          # Build refs live only on origin; the default checkout is main-only.
+          git fetch --quiet origin "+refs/tags/templates/*:refs/tags/templates/*"
+          git fetch --quiet origin "+refs/heads/staging:refs/remotes/origin/staging" || true
+          git fetch --quiet origin "+refs/heads/latest:refs/remotes/origin/latest" || true
+
+          channel="$CHANNEL_INPUT"
+          if [ -z "$channel" ]; then
+            channel="$(awk '$1 == "channel:" { print $2 }' target/.copier-answers.yml)"
+          fi
           channel="${channel:-latest}"
-          current="$(awk '$1 == "_commit:" { print $2 }' .copier-answers.yml)"
+          case "$channel" in
+            staging|latest) ;;
+            *) echo "::error::unknown channel '${channel}' for ${TARGET}: it must be staging or latest. Fix the channel in repos.yml (or the repo's recorded copier answer)."; exit 1 ;;
+          esac
+
+          old_commit="$(awk '$1 == "_commit:" { print $2 }' target/.copier-answers.yml)"
           # copier's to_nice_yaml quotes ambiguous scalars (a digit-only short
-          # sha renders as '1234567'); strip the quotes before comparing.
-          current="${current#\'}"; current="${current%\'}"
-          current="${current#\"}"; current="${current%\"}"
+          # sha renders as '1234567'); strip the quotes.
+          old_commit="${old_commit#\'}"; old_commit="${old_commit%\'}"
+          old_commit="${old_commit#\"}"; old_commit="${old_commit%\"}"
 
           if [ "$channel" = "staging" ]; then
-            target="$(git ls-remote "https://github.com/${TEMPLATE_REPO}" refs/heads/staging | cut -f1)"
-            if [ -z "$target" ]; then
-              echo "::error::cannot resolve the staging target: ${TEMPLATE_REPO} has no staging branch, so there is nothing to sync from. Dispatch the Build Branches workflow in ${TEMPLATE_REPO}, then re-run this sync."
+            if ! target_sha="$(git rev-parse --verify --quiet refs/remotes/origin/staging)"; then
+              echo "::error::cannot resolve the staging target: ${GITHUB_REPOSITORY} has no staging branch, so there is nothing to sync from. Dispatch the Build Branches workflow, then re-run."
               exit 1
             fi
-            # The recorded _commit is a git-describe string: either a bare
-            # short sha or templates/vX.Y.Z-N-g<short sha>; the trailing
-            # -g<sha> (or the whole value) identifies the build commit.
-            case "$current" in
-              *-g*) cur_sha="${current##*-g}" ;;
-              *) cur_sha="$current" ;;
-            esac
-            if [ -n "$cur_sha" ] && case "$target" in "$cur_sha"*) true ;; *) false ;; esac; then
-              up_to_date=true
-            else
-              up_to_date=false
-            fi
-            validate_ref="main"
-            branch="automation/repo-platform-staging"
-            display="staging@${target:0:12}"
+            target_ref="staging"
+            # Staging validates with the SOURCE commit the staging build was
+            # assembled from (stamped in its commit message), so validator
+            # rules match the rendered tree even when main moved since.
+            validate_ref="$(git log -1 --format=%B "$target_sha" | sed -n 's|^source: .*/commit/||p' | head -1)"
+            validate_ref="${validate_ref:-$GITHUB_SHA}"
+            display="staging@${target_sha:0:12}"
           else
             if [ -n "$REQUESTED" ]; then
               ver="${REQUESTED#templates/}"
               ver="v${ver#v}"
-            else
-              ver="$(gh api "repos/${TEMPLATE_REPO}/releases/latest" --jq .tag_name)"
-            fi
-            target="templates/${ver}"
-            if ! git ls-remote --exit-code "https://github.com/${TEMPLATE_REPO}" "refs/tags/${target}" >/dev/null; then
-              echo "::error::cannot sync to ${target}: the tag does not exist in ${TEMPLATE_REPO} because the ${ver} build has not run yet (or failed). Dispatch the Build Branches workflow in ${TEMPLATE_REPO}, then re-run this sync."
+            elif ! ver="$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq .tag_name)"; then
+              echo "::error::cannot sync ${TARGET} on the latest channel: ${GITHUB_REPOSITORY} has no release yet. Cut a release (or pass a version input), then re-run."
               exit 1
             fi
-            [ "$current" = "$target" ] && up_to_date=true || up_to_date=false
+            target_ref="templates/${ver}"
+            if ! target_sha="$(git rev-parse --verify --quiet "refs/tags/${target_ref}")"; then
+              echo "::error::cannot sync to ${target_ref}: the tag does not exist because the ${ver} build has not run yet (or failed). Dispatch the Build Branches workflow, then re-run."
+              exit 1
+            fi
             # The build tag holds no actions/; validation code lives on main
-            # at the release tag of the same version.
+            # history at the release tag of the same version.
             validate_ref="$ver"
-            branch="automation/repo-platform-${ver}"
-            display="$target"
+            display="$target_ref"
           fi
 
+          if ! old_sha="$(git rev-parse --verify --quiet "${old_commit}^{commit}")"; then
+            echo "::error::${TARGET}'s recorded _commit '${old_commit}' does not resolve on ${GITHUB_REPOSITORY}'s build branches, so there is no base to update from. If the build branches were rebuilt from scratch, regenerate the repo with copier copy."
+            exit 1
+          fi
+          git show "${target_sha}:copier.yml" > "$RUNNER_TEMP/copier-new.yml"
+          git show "${old_sha}:copier.yml" > "$RUNNER_TEMP/copier-old.yml"
+
           {
-            echo "current=${current}"
-            echo "target=${target}"
-            echo "up_to_date=${up_to_date}"
+            echo "channel=${channel}"
+            echo "old_commit=${old_commit}"
+            echo "old_sha=${old_sha}"
+            echo "target_ref=${target_ref}"
             echo "validate_ref=${validate_ref}"
-            echo "branch=${branch}"
+            echo "branch=automation/repo-platform-${channel}"
             echo "display=${display}"
           } >> "$GITHUB_OUTPUT"
-          if [ "$up_to_date" = "true" ]; then
-            echo "Already on ${display}; nothing to do."
-          else
-            echo "Updating ${current:-<unknown>} -> ${display}"
+          echo "Updating ${TARGET} (${channel}) from ${old_commit} to ${display}"
+
+      - name: Select modules
+        id: modules
+        run: |
+          modules="$(bun .github/scripts/sync_modules.ts \
+            --repo-file target/.repo-platform.yml \
+            --template-copier "$RUNNER_TEMP/copier-new.yml" \
+            --retired-summary "$RUNNER_TEMP/retired-modules.txt")"
+          echo "modules=${modules}" >> "$GITHUB_OUTPUT"
+          echo "selected modules: ${modules}"
+          if [ -s "$RUNNER_TEMP/retired-modules.txt" ]; then
+            while IFS= read -r name; do
+              echo "::notice::${TARGET}: retired module '${name}' dropped from the selection; its files leave the render with this update."
+            done < "$RUNNER_TEMP/retired-modules.txt"
           fi
 
       - name: Install copier
-        if: steps.versions.outputs.up_to_date == 'false'
-        run: pipx install copier
+        run: pipx install "$COPIER_SPEC"
 
       - name: Create update branch
-        if: steps.versions.outputs.up_to_date == 'false'
         env:
           BRANCH: ${{ steps.versions.outputs.branch }}
-        run: git checkout -B "$BRANCH"
+        run: git -C target checkout -B "$BRANCH"
 
+      # No up-to-date shortcut: modules, channel, private, and description
+      # are live inputs that must re-render even at an unchanged template
+      # ref, and a no-op render is cheap. The no-changes case exits with a
+      # notice after diffing.
       - name: Apply copier update
-        if: steps.versions.outputs.up_to_date == 'false'
+        working-directory: target
         env:
-          TARGET: ${{ steps.versions.outputs.target }}
+          TARGET_REF: ${{ steps.versions.outputs.target_ref }}
+          MODULES: ${{ steps.modules.outputs.modules }}
+          CHANNEL: ${{ steps.versions.outputs.channel }}
+          PRIVATE: ${{ steps.target.outputs.private }}
+          DESCRIPTION: ${{ steps.target.outputs.description }}
         run: |
-          copier update --vcs-ref "$TARGET" --defaults --trust
-
-      - name: Check out repo-platform for validation
-        if: steps.versions.outputs.up_to_date == 'false'
-        uses: actions/checkout@v7
-        with:
-          repository: Vivswan/repo-platform
-          # NOT the copier target: build refs carry no actions/. The release
-          # tag of the same version (or main, for staging) has the validator.
-          ref: ${{ steps.versions.outputs.validate_ref }}
-          path: .repo-platform-src
+          copier update --vcs-ref "$TARGET_REF" --defaults --trust \
+            -d "modules=${MODULES}" \
+            -d "channel=${CHANNEL}" \
+            -d "private=${PRIVATE}" \
+            -d "description=${DESCRIPTION}"
 
       # Conflicts (local edits overlapping template changes) resolve in the
       # template's favor so the tree stays valid; the dropped local lines go
       # into the PR body for review.
       - name: Resolve copier conflicts toward the template
-        if: steps.versions.outputs.up_to_date == 'false'
         id: conflicts
         run: |
-          python3 .repo-platform-src/.github/scripts/resolve_copier_conflicts.py --summary "$RUNNER_TEMP/dropped-local-hunks.md"
+          bun .github/scripts/resolve_copier_conflicts.ts \
+            --summary "$RUNNER_TEMP/dropped-local-hunks.md" --root target
           if [ -s "$RUNNER_TEMP/dropped-local-hunks.md" ]; then
             echo "resolved=true" >> "$GITHUB_OUTPUT"
           else
             echo "resolved=false" >> "$GITHUB_OUTPUT"
           fi
 
+      # A locally modified file that leaves the render survives copier
+      # update as a conflict leftover. Deletion candidates come only from
+      # the difference of two clean renders minus both versions'
+      # _skip_if_exists lists (see retired_paths.ts): paths never rendered
+      # by either version cannot appear. A formerly rendered path the repo
+      # repurposed after the template retired it IS deleted - the PR body
+      # lists every removal for review.
+      - name: Remove files the template retired
+        id: cleanup
+        env:
+          OLD_SHA: ${{ steps.versions.outputs.old_sha }}
+          TARGET_REF: ${{ steps.versions.outputs.target_ref }}
+          MODULES: ${{ steps.modules.outputs.modules }}
+          CHANNEL: ${{ steps.versions.outputs.channel }}
+          PRIVATE: ${{ steps.target.outputs.private }}
+          DESCRIPTION: ${{ steps.target.outputs.description }}
+          SRC_PATH: ${{ steps.src.outputs.src_path }}
+        run: |
+          # The old render uses the answers recorded BEFORE this update
+          # (HEAD still points at the pre-update commit); the new render
+          # applies the live module/channel/private/description data on top.
+          git -C target show HEAD:.copier-answers.yml > "$RUNNER_TEMP/answers-old.yml"
+          bun -e '
+            const { readFileSync, writeFileSync } = require("node:fs");
+            const { parse, stringify } = require("yaml");
+            const temp = process.env.RUNNER_TEMP;
+            const answers = parse(readFileSync(temp + "/answers-old.yml", "utf-8"));
+            const data = Object.fromEntries(
+              Object.entries(answers).filter(([key]) => !key.startsWith("_")),
+            );
+            writeFileSync(temp + "/data-old.yml", stringify(data));
+            writeFileSync(temp + "/data-new.yml", stringify({
+              ...data,
+              modules: JSON.parse(process.env.MODULES),
+              channel: process.env.CHANNEL,
+              private: process.env.PRIVATE === "true",
+              description: process.env.DESCRIPTION,
+            }));
+          '
+          copier copy --vcs-ref "$OLD_SHA" --defaults --trust \
+            --data-file "$RUNNER_TEMP/data-old.yml" "$SRC_PATH" "$RUNNER_TEMP/render-old"
+          copier copy --vcs-ref "$TARGET_REF" --defaults --trust \
+            --data-file "$RUNNER_TEMP/data-new.yml" "$SRC_PATH" "$RUNNER_TEMP/render-new"
+          bun .github/scripts/retired_paths.ts \
+            --old-render "$RUNNER_TEMP/render-old" \
+            --new-render "$RUNNER_TEMP/render-new" \
+            --old-copier "$RUNNER_TEMP/copier-old.yml" \
+            --new-copier "$RUNNER_TEMP/copier-new.yml" > "$RUNNER_TEMP/retired-paths.json"
+          : > "$RUNNER_TEMP/removed-paths.txt"
+          while IFS= read -r path; do
+            if [ -e "target/${path}" ] || [ -L "target/${path}" ]; then
+              rm -f "target/${path}"
+              printf '%s\n' "$path" >> "$RUNNER_TEMP/removed-paths.txt"
+              echo "removed retired file: ${path}"
+            fi
+          done < <(jq -r '.[]' "$RUNNER_TEMP/retired-paths.json")
+
+      # Version-aligned validation: a templates/vX.Y.Z target is judged by
+      # the validator at that release tag, never by main's unreleased rules;
+      # staging is judged by the source commit its build was assembled from.
+      - name: Check out the version-aligned validator
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ steps.versions.outputs.validate_ref }}
+          path: validator
+
       # A failed validation still opens the PR (that is where a human fixes
       # the tree); the job fails at the end.
-      - name: Validate generated files
-        if: steps.versions.outputs.up_to_date == 'false'
+      - name: Validate the updated tree
         id: validate
         run: |
-          pip install --quiet pyyaml
-          if python3 .repo-platform-src/actions/validate-template/validate_generated_files.py .; then
+          (cd validator/actions/validate-template && bun install --frozen-lockfile --silent)
+          if bun validator/actions/validate-template/validate_generated_files.ts target; then
             echo "result=ok" >> "$GITHUB_OUTPUT"
           else
             echo "result=failed" >> "$GITHUB_OUTPUT"
           fi
-          rm -rf .repo-platform-src
 
       - name: Detect changes
-        if: steps.versions.outputs.up_to_date == 'false'
         id: changes
+        env:
+          DISPLAY: ${{ steps.versions.outputs.display }}
         run: |
-          rm -rf .repo-platform-src
-          if [ -z "$(git status --porcelain)" ]; then
-            echo "No changes produced by the update."
+          if [ -z "$(git -C target status --porcelain)" ]; then
+            echo "::notice::${TARGET}: already matches ${DISPLAY}; no sync PR needed."
             echo "changed=false" >> "$GITHUB_OUTPUT"
           else
             echo "changed=true" >> "$GITHUB_OUTPUT"
           fi
 
-      # GitHub rejects any push touching .github/workflows/ unless the token
-      # carries the workflows permission, which GITHUB_TOKEN can never hold.
-      - name: Require a workflow-capable token
-        if: steps.versions.outputs.up_to_date == 'false' && steps.changes.outputs.changed == 'true' && steps.token.outputs.mode == 'github-token'
-        run: |
-          changed_workflows="$(git status --porcelain -- '.github/workflows')"
-          [ -z "$changed_workflows" ] && exit 0
-          echo "$changed_workflows"
-          echo "::error::template sync cannot push this update: it changes the workflow files listed above, and GitHub refuses workflow-file pushes from the default GITHUB_TOKEN. Add a REPO_PLATFORM_TOKEN secret to this repository (fine-grained PAT with Contents:RW, Pull requests:RW, Workflows:RW; create one with the permissions pre-selected at https://github.com/settings/personal-access-tokens/new?name=REPO_PLATFORM_TOKEN&contents=write&pull_requests=write&workflows=write), then re-run the sync."
-          exit 1
-
       - name: Commit and push
-        if: steps.versions.outputs.up_to_date == 'false' && steps.changes.outputs.changed == 'true'
+        if: steps.changes.outputs.changed == 'true'
         env:
           BRANCH: ${{ steps.versions.outputs.branch }}
           DISPLAY: ${{ steps.versions.outputs.display }}
+          PAT: ${{ secrets.REPO_PLATFORM_TOKEN }}
         run: |
-          git config user.name "repo-platform-sync"
-          git config user.email "repo-platform-sync@users.noreply.github.com"
-          git add --all
-          git commit -m "chore: update repo-platform template to ${DISPLAY}"
-          # --force: per-version branches are recreated on retries, and the
-          # staging channel reuses one rolling branch across builds.
-          if ! push_output="$(git push --force origin "$BRANCH" 2>&1)"; then
-            echo "$push_output"
-            case "$push_output" in
-              *"create or update workflow"*)
-                echo "::error::push rejected: the REPO_PLATFORM_TOKEN cannot update workflow files. Regenerate the PAT with the Workflows:RW permission, update the secret, then re-run the sync." ;;
-            esac
-            exit 1
+          git -C target config user.name "repo-platform-sync"
+          git -C target config user.email "repo-platform-sync@users.noreply.github.com"
+          git -C target add --all
+          git -C target commit -m "chore: update repo-platform template to ${DISPLAY}"
+          # The checkout kept no credentials (see above); authenticate this
+          # push alone. The lease pins the remote branch to what it held a
+          # moment ago: the branch is regenerated every run, so remote
+          # commits are overwritten by design, but a push racing this exact
+          # run fails loudly instead of vanishing.
+          push_url="https://x-access-token:${PAT}@github.com/${TARGET}.git"
+          remote_sha="$(git -C target ls-remote "$push_url" "refs/heads/${BRANCH}" | cut -f1)"
+          if [ -n "$remote_sha" ]; then
+            git -C target push --force-with-lease="${BRANCH}:${remote_sha}" "$push_url" "$BRANCH"
+          else
+            git -C target push "$push_url" "$BRANCH"
           fi
-          echo "$push_output"
 
       - name: Create or refresh pull request
-        if: steps.versions.outputs.up_to_date == 'false' && steps.changes.outputs.changed == 'true'
+        if: steps.changes.outputs.changed == 'true'
         id: pr
         env:
-          GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN || github.token }}
-          TARGET: ${{ steps.versions.outputs.target }}
-          CURRENT: ${{ steps.versions.outputs.current }}
+          GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
+          TARGET_REF: ${{ steps.versions.outputs.target_ref }}
+          OLD_COMMIT: ${{ steps.versions.outputs.old_commit }}
           DISPLAY: ${{ steps.versions.outputs.display }}
           BRANCH: ${{ steps.versions.outputs.branch }}
-          TOKEN_MODE: ${{ steps.token.outputs.mode }}
+          BASE_BRANCH: ${{ steps.target.outputs.default_branch }}
           VALIDATION: ${{ steps.validate.outputs.result }}
           RESOLVED: ${{ steps.conflicts.outputs.resolved }}
           SUMMARY_FILE: ${{ runner.temp }}/dropped-local-hunks.md
-          BASE_BRANCH: ${{ github.event.repository.default_branch }}
+          RETIRED_MODULES_FILE: ${{ runner.temp }}/retired-modules.txt
+          REMOVED_PATHS_FILE: ${{ runner.temp }}/removed-paths.txt
         run: |
-          if [ "$BRANCH" = "automation/repo-platform-staging" ]; then
-            source_line="[\`${TEMPLATE_REPO}\`](https://github.com/${TEMPLATE_REPO}/tree/staging) (staging channel)"
+          if [ "$TARGET_REF" = "staging" ]; then
+            source_line="[\`${GITHUB_REPOSITORY}\`](https://github.com/${GITHUB_REPOSITORY}/tree/staging) (staging channel)"
           else
-            ver="${TARGET#templates/}"
-            source_line="[\`${TEMPLATE_REPO}\`](https://github.com/${TEMPLATE_REPO}/releases/tag/${ver})"
+            ver="${TARGET_REF#templates/}"
+            source_line="[\`${GITHUB_REPOSITORY}\`](https://github.com/${GITHUB_REPOSITORY}/releases/tag/${ver})"
           fi
 
           title="chore: update repo-platform template to ${DISPLAY}"
           body="Automated template update from ${source_line}.
 
-          - Previous: \`${CURRENT}\`
+          - Previous: \`${OLD_COMMIT}\`
           - New: \`${DISPLAY}\`
 
-          Review any merge conflicts and confirm repository-local sections were preserved before merging."
+          Review any merge conflicts and confirm repository-local sections were preserved before merging.
+
+          > [!NOTE]
+          > This branch is regenerated on every sync run; manual commits
+          > pushed to it are overwritten. Make fixes in a separate branch or
+          > after merging."
+
+          if [ -s "$RETIRED_MODULES_FILE" ]; then
+            body="${body}
+
+          Retired modules dropped from the selection: $(paste -sd ', ' "$RETIRED_MODULES_FILE")"
+          fi
+
+          if [ -s "$REMOVED_PATHS_FILE" ]; then
+            body="${body}
+
+          The template retired these files; this update deletes them:
+
+          $(sed 's/^/- /' "$REMOVED_PATHS_FILE")"
+          fi
 
           if [ "$RESOLVED" = "true" ]; then
             body="${body}
@@ -294,47 +444,37 @@ jobs:
           > log). Fix it in this PR before merging."
           fi
 
-          if [ "$TOKEN_MODE" = "github-token" ]; then
-            body="${body}
-
-          > [!NOTE]
-          > Created with the default GITHUB_TOKEN, so CI did not auto-trigger.
-          > Close and reopen this PR (or push to the branch) to run checks."
-          fi
-
-          existing="$(gh pr list --head "$BRANCH" --json number --jq '.[0].number // empty')"
+          existing="$(gh pr list -R "$TARGET" --head "$BRANCH" --json number --jq '.[0].number // empty')"
           if [ -n "$existing" ]; then
-            # Rolling staging PRs are force-pushed over; keep title/body honest.
-            gh pr edit "$existing" --title "$title" --body "$body"
-            echo "PR #${existing} already exists for ${BRANCH}; refreshed."
-            url="$(gh pr view "$existing" --json url --jq .url)"
-            echo "url=${url}" >> "$GITHUB_OUTPUT"
-            exit 0
+            # The rolling branch is force-pushed over; keep title/body honest.
+            gh pr edit "$existing" -R "$TARGET" --title "$title" --body "$body"
+            url="$(gh pr view "$existing" -R "$TARGET" --json url --jq .url)"
+            echo "PR already exists for ${BRANCH}; refreshed ${url}"
+          else
+            url="$(gh pr create -R "$TARGET" \
+              --base "$BASE_BRANCH" \
+              --head "$BRANCH" \
+              --title "$title" \
+              --body "$body")"
+            echo "Created ${url}"
           fi
-
-          url="$(gh pr create \
-            --base "$BASE_BRANCH" \
-            --head "$BRANCH" \
-            --title "$title" \
-            --body "$body")"
-          echo "Created ${url}"
           echo "url=${url}" >> "$GITHUB_OUTPUT"
 
       - name: Fail on validation errors
-        if: steps.versions.outputs.up_to_date == 'false' && steps.validate.outputs.result == 'failed'
+        if: steps.validate.outputs.result == 'failed'
         env:
           PR_URL: ${{ steps.pr.outputs.url }}
         run: |
           if [ -n "$PR_URL" ]; then
-            echo "::error::the update was pushed but validation of the resulting tree failed (details in the 'Validate generated files' step log). Fix the tree in ${PR_URL} before merging."
+            echo "::error::the update was pushed but validation of the resulting tree failed (details in the 'Validate the updated tree' step log). Fix the tree in ${PR_URL} before merging."
           else
-            echo "::error::the update produced no changes, yet validation failed, so the default branch itself does not validate (details in the 'Validate generated files' step log). Fix the tree on the default branch, then re-run the sync."
+            echo "::error::the update produced no changes, yet validation failed, so ${TARGET}'s default branch itself does not validate (details in the 'Validate the updated tree' step log). Fix the tree on its default branch, then re-run the sync."
           fi
           exit 1
 
       - name: Flag auto-resolved conflicts for review
-        if: steps.versions.outputs.up_to_date == 'false' && steps.conflicts.outputs.resolved == 'true'
+        if: steps.conflicts.outputs.resolved == 'true'
         env:
           PR_URL: ${{ steps.pr.outputs.url }}
         run: |
-          echo "::warning::copier hit merge conflicts; where possible they were resolved in favor of the template. The dropped local lines are listed in the PR body and in the 'Resolve copier conflicts' step log. Review ${PR_URL}, restore anything that should stay local, then merge."
+          echo "::warning::copier hit merge conflicts in ${TARGET}; where possible they were resolved in favor of the template. The dropped local lines are listed in the PR body and in the 'Resolve copier conflicts' step log. Review ${PR_URL}, restore anything that should stay local, then merge."

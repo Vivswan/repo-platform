@@ -1,15 +1,10 @@
 ---
-{% if 'settings-sync' in modules -%}
 # Repository settings applied by the settings-sync workflow (via
-# {{ github_username }}/repo-settings-as-code) when this file changes, plus a
-# monthly heal run; without the REPO_PLATFORM_TOKEN secret the workflow
-# skips with a notice. Undeclared labels are deleted; undeclared rulesets
-# are left alone.
-{%- else -%}
-# Declarative repository settings. INERT until the settings-sync module is
-# enabled (copier update -d 'modules=[..., settings-sync]') or the file is
-# applied manually via {{ github_username }}/repo-settings-as-code.
-{%- endif %}
+# {{ github_username }}/repo-settings-as-code) when this file changes;
+# without the REPO_PLATFORM_TOKEN secret the workflow skips with a notice,
+# and {{ github_username }}/repo-platform's central settings-repos run heals this
+# repo either way. Undeclared labels are deleted; undeclared rulesets are
+# left alone.
 # Baseline managed by {{ github_username }}/repo-platform; repo-specific
 # additions survive template updates via three-way merge.
 
@@ -104,8 +99,8 @@ rulesets:
         actor_type: RepositoryRole
         bypass_mode: always
 {% if 'release-please' in modules %}
-  # vX.Y.Z release tags are immutable: template-sync workflow pins and
-  # release artifacts reference them.
+  # vX.Y.Z release tags are immutable: repo-platform's push sync pins
+  # against them and release artifacts reference them.
   - name: release-tags
     target: tag
     enforcement: active

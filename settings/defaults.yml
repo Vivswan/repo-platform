@@ -1,0 +1,31 @@
+---
+# Shared settings baseline for every repository this repo manages. The
+# settings-repos workflow passes this file as `defaults-file`, so it is
+# deep-merged UNDER every target - central settings/repos/<name>.yml files
+# and in-repo .github/settings.yml (settings-sync module) alike. Target keys
+# win; objects merge, arrays REPLACE (so list-valued sections like labels
+# and rulesets live in each repo's own file, never here); a target section
+# set to null opts that repository out of that defaults section.
+#
+# Per-repo identity (description, topics, homepage, private) also stays in
+# the per-repo files - only the field block every repo shares belongs here.
+
+repository:
+  has_issues: true
+  has_wiki: false
+  has_projects: false
+  has_discussions: false
+  default_branch: main
+  allow_squash_merge: true
+  allow_merge_commit: false
+  allow_rebase_merge: false
+  # The squash subject must ALWAYS be the PR title (the pr-title check and
+  # release-please rely on it); GitHub only defaults to that for
+  # single-commit PRs.
+  squash_merge_commit_title: PR_TITLE
+  squash_merge_commit_message: PR_BODY
+  allow_update_branch: true
+  delete_branch_on_merge: true
+  allow_auto_merge: true
+  enable_vulnerability_alerts: true
+  enable_automated_security_fixes: true

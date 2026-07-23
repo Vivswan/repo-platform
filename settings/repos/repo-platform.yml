@@ -1,0 +1,112 @@
+---
+# Central settings for Vivswan/repo-platform, applied by the settings-repos
+# workflow via Vivswan/repo-settings-as-code. settings/defaults.yml is
+# deep-merged under this file (this file wins; arrays replace). Undeclared
+# labels are deleted; undeclared rulesets are left alone. Schema: Probot
+# settings.yml superset (see repo-settings-as-code README).
+
+repository:
+  description: Copier template + reusable workflows managing standards across Vivswan's repositories
+  topics: copier, template, github-actions, reusable-workflows, standards
+
+labels:
+  - name: dependencies
+    color: "0366d6"
+    description: Dependency updates
+  - name: bug
+    color: "d73a4a"
+    description: Something isn't working
+  - name: enhancement
+    color: "a2eeef"
+    description: New feature or request
+  - name: fix-lint
+    color: "fbca04"
+    description: Lint / formatting fixes
+  # release-please manages these two; listing them here keeps the settings
+  # sync from deleting them (it removes any label not declared in this file).
+  - name: "autorelease: pending"
+    color: "ededed"
+    description: release-please release PR awaiting merge/tag
+  - name: "autorelease: tagged"
+    color: "ededed"
+    description: release-please release PR has been tagged
+
+# Branch ruleset for the default branch. Admins (RepositoryRole id 5) are in
+# the bypass list, so direct pushes to main still work. The single required
+# status check is `all-green` (ci.yml), which `needs:` every gating CI job.
+rulesets:
+  - name: main
+    target: branch
+    enforcement: active
+    conditions:
+      ref_name:
+        include:
+          - "~DEFAULT_BRANCH"
+        exclude: []
+    rules:
+      - type: deletion
+      - type: non_fast_forward
+      - type: required_linear_history
+      - type: required_status_checks
+        parameters:
+          strict_required_status_checks_policy: false
+          do_not_enforce_on_create: true
+          required_status_checks:
+            - context: all-green
+      - type: code_scanning
+        parameters:
+          code_scanning_tools:
+            - tool: CodeQL
+              security_alerts_threshold: high_or_higher
+              alerts_threshold: errors
+      - type: pull_request
+        parameters:
+          required_approving_review_count: 0
+          dismiss_stale_reviews_on_push: false
+          require_code_owner_review: true
+          require_last_push_approval: false
+          required_review_thread_resolution: false
+          allowed_merge_methods:
+            - squash
+      - type: copilot_code_review
+        parameters:
+          review_on_push: true
+          review_draft_pull_requests: true
+    bypass_actors:
+      - actor_id: 5
+        actor_type: RepositoryRole
+        bypass_mode: always
+
+  # The generated build branches are append-only: the builder's plain pushes
+  # are fast-forwards and pass; force-pushes and deletion are blocked for
+  # everyone (no bypass actors on purpose).
+  - name: build-branches
+    target: branch
+    enforcement: active
+    conditions:
+      ref_name:
+        include:
+          - staging
+          - latest
+        exclude: []
+    rules:
+      - type: deletion
+      - type: non_fast_forward
+
+  # templates/vX.Y.Z build tags are the anchors downstream latest-channel
+  # repos record as _commit, and vX.Y.Z release tags are what their workflow
+  # `uses:` pins and sync validation checkouts reference; deleting or moving
+  # either breaks downstream repos, so both are immutable.
+  - name: build-tags
+    target: tag
+    enforcement: active
+    conditions:
+      ref_name:
+        include:
+          - templates/*
+          - v*
+        exclude: []
+    rules:
+      - type: deletion
+      - type: non_fast_forward
+      - type: update

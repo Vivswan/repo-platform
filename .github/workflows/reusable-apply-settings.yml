@@ -1,11 +1,14 @@
-# Reusable settings apply: runs Vivswan/repo-settings-as-code against the calling
-# repository's .github/settings.yml. Replaces the Probot Settings app - every
-# apply is a visible run that fails loudly instead of drifting silently.
+# Reusable settings apply for the IN-REPO settings home: a settings-sync
+# module repo's thin caller runs Vivswan/repo-settings-as-code against its
+# own .github/settings.yml on push. The central home (settings/repos/ files
+# here, plus a remote pass over the module repos) is settings-repos.yml.
+# Replaces the Probot Settings app - every apply is a visible run that fails
+# loudly instead of drifting silently.
 #
 # Token model: settings mutation needs Administration (and Issues) write,
-# which GITHUB_TOKEN can never hold - the caller passes REPO_PLATFORM_TOKEN
-# (fine-grained PAT). Without it the run SKIPS with a notice unless the
-# caller sets require_token (repo-platform's own caller does).
+# which GITHUB_TOKEN can never hold - the caller passes its own
+# REPO_PLATFORM_TOKEN (fine-grained PAT). Without it the run SKIPS with a
+# notice; repo-platform's central settings-repos run heals the repo either way.
 # Pinned to an immutable commit sha; switch to @v1 once
 # repo-settings-as-code cuts its first release.
 
@@ -16,11 +19,6 @@ on:
     inputs:
       check_only:
         description: Report drift without writing (exit 1 on drift)
-        required: false
-        type: boolean
-        default: false
-      require_token:
-        description: Fail (instead of skip) when REPO_PLATFORM_TOKEN is absent
         required: false
         type: boolean
         default: false
@@ -63,15 +61,11 @@ jobs:
         id: token
         env:
           PAT: ${{ secrets.REPO_PLATFORM_TOKEN }}
-          REQUIRE: ${{ inputs.require_token }}
         run: |
           if [ -n "$PAT" ]; then
             echo "proceed=true" >> "$GITHUB_OUTPUT"
-          elif [ "$REQUIRE" = "true" ]; then
-            echo "::error::settings apply cannot run: the REPO_PLATFORM_TOKEN secret is not set and this caller requires it (require_token: true) - GITHUB_TOKEN can never hold Administration write. Add a fine-grained PAT with Administration (read and write) and Issues (read and write) on this repo as an Actions secret named REPO_PLATFORM_TOKEN."
-            exit 1
           else
-            echo "::notice::settings apply skipped: the REPO_PLATFORM_TOKEN secret is not set, and GITHUB_TOKEN cannot mutate repo settings. To opt in, add a fine-grained PAT with Administration (read and write) and Issues (read and write) on this repo as an Actions secret named REPO_PLATFORM_TOKEN."
+            echo "::notice::settings apply skipped: the REPO_PLATFORM_TOKEN secret is not set, and GITHUB_TOKEN cannot mutate repo settings. To opt in to self-apply on push, add a fine-grained PAT with Administration (read and write) and Issues (read and write) on this repo as an Actions secret named REPO_PLATFORM_TOKEN. The central settings-repos run in repo-platform applies this repository's settings either way."
             echo "proceed=false" >> "$GITHUB_OUTPUT"
           fi
 
@@ -84,8 +78,8 @@ jobs:
       - name: Apply repository settings
         if: steps.token.outputs.proceed == 'true'
         # Pinned to an immutable commit; bump to @v1 once repo-settings-as-code
-        # cuts its first release.
-        uses: Vivswan/repo-settings-as-code@34f108a30e5f925e783e17279be8abeadbb42c4d
+        # cuts its first release. Bump together with settings-repos.yml.
+        uses: Vivswan/repo-settings-as-code@7c023fc1c7e63502d45ee8b17c6bf0db14faf0e8
         with:
           token: ${{ secrets.REPO_PLATFORM_TOKEN }}
           mode: ${{ inputs.check_only && 'check' || 'apply' }}

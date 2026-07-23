@@ -1,29 +1,14 @@
 ---
-# Repository settings applied by the apply-settings workflow (via
-# Vivswan/repo-settings-as-code) on every change to this file, plus a weekly
-# heal run. Undeclared labels are deleted; undeclared rulesets are left
-# alone. Schema: Probot settings.yml superset (see repo-settings-as-code README).
+# Central settings for Vivswan/repo-settings-as-code, applied by the
+# settings-repos workflow (this repo's settings moved here from its own
+# .github/settings.yml). settings/defaults.yml is deep-merged under this
+# file (this file wins; arrays replace). Undeclared labels are deleted;
+# undeclared rulesets are left alone. Schema: Probot settings.yml superset
+# (see repo-settings-as-code README).
 
 repository:
-  description: Copier template + reusable workflows managing standards across Vivswan's repositories
-  topics: copier, template, github-actions, reusable-workflows, standards
-  has_issues: true
-  has_wiki: false
-  has_projects: false
-  has_discussions: false
-  default_branch: main
-  allow_squash_merge: true
-  allow_merge_commit: false
-  allow_rebase_merge: false
-  # The squash subject must ALWAYS be the PR title (release-please derives
-  # versions from it); GitHub only defaults to that for single-commit PRs.
-  squash_merge_commit_title: PR_TITLE
-  squash_merge_commit_message: PR_BODY
-  allow_update_branch: true
-  delete_branch_on_merge: true
-  allow_auto_merge: true
-  enable_vulnerability_alerts: true
-  enable_automated_security_fixes: true
+  description: "GitHub Action applying declarative repository settings: rulesets, labels, branch protection, and more. A loud, stateless Probot Settings replacement."
+  topics: github-action, repository-settings, settings-as-code, configuration-as-code, probot-settings, rulesets, branch-protection, labels
 
 labels:
   - name: dependencies
@@ -49,7 +34,9 @@ labels:
 
 # Branch ruleset for the default branch. Admins (RepositoryRole id 5) are in
 # the bypass list, so direct pushes to main still work. The single required
-# status check is `all-green` (ci.yml), which `needs:` every gating CI job.
+# status check is `all-green` (ci.yml), which `needs:` every CI job except
+# the downstream release job - the list stays stable when jobs are added or
+# renamed.
 rulesets:
   - name: main
     target: branch
@@ -79,11 +66,16 @@ rulesets:
         parameters:
           required_approving_review_count: 0
           dismiss_stale_reviews_on_push: false
+          # Require an approving review from a CODEOWNER before merge.
+          # Admins in bypass_actors can still merge without one.
           require_code_owner_review: true
           require_last_push_approval: false
           required_review_thread_resolution: false
+          # Squash-only merges (enforced by the ruleset, not just repo settings).
           allowed_merge_methods:
             - squash
+      # Automatically request Copilot code review on PRs to main, including on
+      # each new push and on draft PRs.
       - type: copilot_code_review
         parameters:
           review_on_push: true
@@ -93,34 +85,17 @@ rulesets:
         actor_type: RepositoryRole
         bypass_mode: always
 
-  # The generated build branches are append-only: the builder's plain pushes
-  # are fast-forwards and pass; force-pushes and deletion are blocked for
-  # everyone (no bypass actors on purpose).
-  - name: build-branches
-    target: branch
-    enforcement: active
-    conditions:
-      ref_name:
-        include:
-          - staging
-          - latest
-        exclude: []
-    rules:
-      - type: deletion
-      - type: non_fast_forward
-
-  # templates/vX.Y.Z build tags are the anchors downstream latest-channel
-  # repos record as _commit, and vX.Y.Z release tags are what their workflow
-  # `uses:` pins and sync validation checkouts reference; deleting or moving
-  # either breaks downstream repos, so both are immutable.
-  - name: build-tags
+  # vX.Y.Z release tags are immutable: repo-platform's push sync pins
+  # against them and release artifacts reference them. The bare moving
+  # major tag (v1) is deliberately NOT matched; the release workflow
+  # force-moves it.
+  - name: release-tags
     target: tag
     enforcement: active
     conditions:
       ref_name:
         include:
-          - templates/*
-          - v*
+          - v*.*.*
         exclude: []
     rules:
       - type: deletion

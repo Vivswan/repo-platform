@@ -1,6 +1,6 @@
 name: Validate Template
 description: >-
-  Runs repo-platform's validate_generated_files.py against the repository:
+  Runs repo-platform's validate_generated_files.ts against the repository:
   managed/local markers appear exactly once, YAML parses, no unresolved
   conflict markers, and ci.yml follows the all-green + typography convention.
 
@@ -13,12 +13,18 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Set up uv
-      uses: astral-sh/setup-uv@v5
+    - name: Set up bun
+      uses: oven-sh/setup-bun@v2
+
+    - name: Install dependencies (yaml)
+      shell: bash
+      working-directory: ${{ github.action_path }}
+      # --production: dev deps (@types/bun, typescript) are editor/typecheck
+      # tooling, not needed to run the validator.
+      run: bun install --frozen-lockfile --production --silent
 
     - name: Validate
       shell: bash
       env:
         SCAN_PATH: ${{ inputs.path }}
-      # uv reads the script's PEP 723 metadata and provisions pyyaml itself.
-      run: uv run "${{ github.action_path }}/validate_generated_files.py" "$SCAN_PATH"
+      run: bun "${{ github.action_path }}/validate_generated_files.ts" "$SCAN_PATH"

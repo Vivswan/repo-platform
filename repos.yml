@@ -1,11 +1,27 @@
-# Managed repositories the propagate workflow dispatches template-sync to.
-# Adding a repo here is one line in a PR; the repo must already be adopted
-# (carry .github/workflows/template-sync.yml on its default branch), or the
-# dispatch is skipped with a warning until it is.
+# Fleet config for the push sync: which repos, which channel.
+# Validated and resolved by .github/scripts/repos_registry.ts.
+#
+# - managed: owner/name slugs, or one quoted "*" wildcard. The wildcard
+#   auto-discovers every owned, non-archived repo the PAT can see
+#   (quoted because a bare * is YAML alias syntax).
+# - exclude: discovered repos that must NOT be synced (opt-outs).
+# - Channel precedence: config.<repo>.channel > defaults.channel > the
+#   repo's recorded copier answer.
+# - Modules are NOT fleet config: each repo selects them in its own
+#   .repo-platform.yml.
+# - Settings home: settings/repos/<name>.yml here (central) or the
+#   repo's own .github/settings.yml (settings-sync module).
+
 managed:
-  - Vivswan/repo-settings-as-code
-  - Vivswan/cloud-speech
-  - Vivswan/litellm-vscode-chat
-  - Vivswan/skills
-  - Vivswan/copilot-env
-  - Vivswan/dotfiles
+  - "*"
+
+exclude: []
+
+# Fleet defaults - what auto-discovered repos use without a config entry.
+defaults:
+  channel: staging
+
+# Per-repo overrides of the defaults.
+config:
+  Vivswan/repo-settings-as-code:
+    channel: staging
