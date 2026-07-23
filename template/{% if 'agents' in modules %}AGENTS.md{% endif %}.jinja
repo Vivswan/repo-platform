@@ -43,10 +43,9 @@ symlinks to this file, so edit only here.
   change them in {{ github_username }}/repo-platform and let the next sync
   PR deliver the update.
 - Repository settings (description, topics, labels, rulesets, merge policy)
-  are applied from {{ github_username }}/repo-platform: {% if 'settings-sync' in modules %}this repository
-  declares them in its own `.github/settings.yml` (the settings-sync
-  module){% else %}they live centrally in its `settings/repos/` file named after this
-  repository{% endif %}. Do not
+  are applied from {{ github_username }}/repo-platform: by the
+  `settings/repos/` file named after this repository over there when one
+  exists, otherwise by this repository's own `.github/settings.yml`. Do not
   change settings by hand in the GitHub UI; edit the settings file.
 - Repo-owned escape hatches stay local: `.github/workflows/checks.yml`{% if 'release-please' in modules %} and
   `.github/workflows/release.yml`{% endif %}, `.gitignore`'s marked LOCAL section, and the
