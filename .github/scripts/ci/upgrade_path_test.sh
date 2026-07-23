@@ -6,7 +6,8 @@
 # retired-file cleanup via retired_paths.ts. Asserts that files the template
 # dropped are deleted while repo-owned content survives - including
 # settings.yml, which is repo-owned wherever it exists (protected from
-# cleanup and restored if copier de-renders it).
+# cleanup and restored if copier de-renders it). A final leg proves the
+# recover=recopy semantics on a corrupted _commit.
 #
 # Both template refs must live in ONE clone (copier re-renders the old
 # version from _src_path), so build trees are committed to local orphan
@@ -149,16 +150,13 @@ export CHANNEL=latest
 export PRIVATE=false
 export DESCRIPTION="Upgraded description"
 
-# The -d data mirrors reusable-template-sync: filtered modules plus live
-# channel/private/description, so drift in any of them re-renders.
-cd "$PROJECT"
-copier update --vcs-ref templates/v99.99.99 --defaults --trust \
-  -d "modules=${MODULES}" \
-  -d "channel=${CHANNEL}" \
-  -d "private=${PRIVATE}" \
-  -d "description=${DESCRIPTION}"
-
-cd "$GITHUB_WORKSPACE"
+# The -d data mirrors reusable-template-sync: the update runs through the
+# same apply_update.sh wrapper the workflow uses, with the filtered
+# modules plus live channel/private/description, so drift in any of them
+# re-renders.
+export TARGET_DIR="$PROJECT"
+export TARGET_REF=templates/v99.99.99
+RECOVER="" bash .github/scripts/sync/apply_update.sh
 bun .github/scripts/sync/resolve_copier_conflicts.ts \
   --summary "$WORK/dropped-local-hunks.md" --root "$PROJECT"
 
@@ -273,3 +271,44 @@ if find . -name '*.rej' -not -path './.git/*' | grep -q .; then
   fail "copier left .rej files behind"
 fi
 echo "upgrade path OK: retired files deleted, sentinels preserved, configuration kept"
+
+# --- Recovery mode (recover=recopy) -----------------------------------
+# A repo whose recorded _commit is unusable gets a full re-render via
+# sync/apply_update.sh. Prove the copier semantics that path relies on:
+# `copier recopy --overwrite` runs without a resolvable _commit, respects
+# _skip_if_exists (generated-once files keep local edits), deletes
+# nothing, overwrites template-managed files, and re-records _commit.
+git add --all
+git -c user.name=ci -c user.email=ci@localhost commit -q -m "chore: template update"
+
+# Corrupt the recorded base the way a lost build branch would, and add a
+# local edit to a template-managed file (recovery legitimately drops it).
+sed 's/^_commit: .*/_commit: deadbeef/' .copier-answers.yml > .copier-answers.yml.tmp
+mv .copier-answers.yml.tmp .copier-answers.yml
+echo "# local ci note" >> .github/workflows/ci.yml
+git add --all
+git -c user.name=ci -c user.email=ci@localhost commit -q -m "chore: corrupt the base"
+
+# The recovery leg also runs through the workflow's wrapper (TARGET_DIR
+# is still exported), proving its RECOVER routing along with the copier
+# semantics.
+RECOVER=recopy bash "$GITHUB_WORKSPACE/.github/scripts/sync/apply_update.sh"
+# Mirror the workflow's preserve step in recovery mode: settings.yml is
+# repo-owned, so it is restored outright after the re-render.
+if git cat-file -e "HEAD:.github/settings.yml" 2>/dev/null; then
+  git checkout HEAD -- .github/settings.yml
+fi
+
+grep -qF "_commit: templates/v99.99.99" .copier-answers.yml \
+  || fail "recovery did not re-record _commit as templates/v99.99.99"
+grep -qF "# local checks note" .github/workflows/checks.yml \
+  || fail "recovery overwrote the generated-once checks.yml (_skip_if_exists must hold under recopy --overwrite)"
+[ "$(cat src/keep_me.txt)" = "repo-owned sentinel" ] \
+  || fail "recovery touched the repo-owned src/keep_me.txt"
+grep -qF "# local settings note" .github/settings.yml \
+  || fail "recovery lost the repo-owned settings.yml edit (preserve step)"
+if grep -qF "# local ci note" .github/workflows/ci.yml; then
+  fail "recovery kept a local edit in the template-managed ci.yml (recopy must overwrite it)"
+fi
+bun "$GITHUB_WORKSPACE/actions/validate-template/validate_generated_files.ts" "$PROJECT"
+echo "recovery recopy OK: skip_if_exists and repo-owned files preserved, managed files re-rendered"

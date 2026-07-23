@@ -61,6 +61,13 @@ self-apply of a repo's own settings file.
   template's favor: the PR lists the dropped local lines for review. The
   run stays green (auto-resolution is normal operation); validation
   failures still turn it red.
+- Recovery: when a repo's recorded `_commit` base is unusable (the sync
+  fails with "no base to update from"), dispatch sync-repos with
+  `repo=<owner/name>` and `recover=recopy`. That performs a full
+  re-render with no three-way merge - local edits to template-managed
+  files are overwritten (generated-once files and `.github/settings.yml`
+  survive) - so it is single-repo only and the PR always stays
+  manual-review.
 
 ### Repository settings
 

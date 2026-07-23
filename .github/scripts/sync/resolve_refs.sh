@@ -4,9 +4,17 @@
 # channel, refs, and template copier configs" step from the repo-platform
 # checkout root (the target repo is checked out under target/).
 #
-# Env: TARGET, CHANNEL_INPUT, REQUESTED, GH_TOKEN, GITHUB_REPOSITORY,
-# GITHUB_OUTPUT, RUNNER_TEMP.
+# Env: TARGET, CHANNEL_INPUT, REQUESTED, RECOVER, GH_TOKEN,
+# GITHUB_REPOSITORY, GITHUB_OUTPUT, RUNNER_TEMP.
 set -euo pipefail
+
+case "$RECOVER" in
+  "" | recopy) ;;
+  *)
+    echo "::error::unknown recover mode '${RECOVER}': the only supported value is 'recopy' (full re-render through a manual-review PR)."
+    exit 1
+    ;;
+esac
 
 # Build refs live only on origin; the default checkout is main-only.
 git fetch --quiet origin "+refs/tags/templates/*:refs/tags/templates/*"
@@ -73,12 +81,21 @@ else
   display="$target_ref"
 fi
 
+# Recovery exists precisely because the recorded base may be unusable:
+# resolve it best-effort there, and hard-error everywhere else - the
+# update has no base without it.
 if ! old_sha="$(git rev-parse --verify --quiet "${old_commit}^{commit}")"; then
-  echo "::error::${TARGET}'s recorded _commit '${old_commit}' does not resolve on ${GITHUB_REPOSITORY}'s build branches, so there is no base to update from. If the build branches were rebuilt from scratch, regenerate the repo with copier copy."
-  exit 1
+  if [ "$RECOVER" = "recopy" ]; then
+    old_sha=""
+  else
+    echo "::error::${TARGET}'s recorded _commit '${old_commit}' does not resolve on ${GITHUB_REPOSITORY}'s build branches, so there is no base to update from. Fix the _commit in its .copier-answers.yml, or dispatch Sync Repos with repo=${TARGET} and recover=recopy to regenerate the repo through a manual-review PR."
+    exit 1
+  fi
 fi
 git show "${target_sha}:copier.yml" >"$RUNNER_TEMP/copier-new.yml"
-git show "${old_sha}:copier.yml" >"$RUNNER_TEMP/copier-old.yml"
+if [ -n "$old_sha" ]; then
+  git show "${old_sha}:copier.yml" >"$RUNNER_TEMP/copier-old.yml"
+fi
 
 {
   echo "channel=${channel}"

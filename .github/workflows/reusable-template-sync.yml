@@ -40,6 +40,14 @@ on:
         required: false
         type: string
         default: ""
+      recover:
+        description: >-
+          "recopy" = full re-render with no three-way merge, for a repo
+          whose recorded _commit base is unusable. The PR is forced onto
+          the manual-review path (auto-merge disarmed).
+        required: false
+        type: string
+        default: ""
     secrets:
       REPO_PLATFORM_TOKEN:
         required: true
@@ -144,6 +152,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REQUESTED: ${{ inputs.version }}
           CHANNEL_INPUT: ${{ inputs.channel }}
+          RECOVER: ${{ inputs.recover }}
         run: bash .github/scripts/sync/resolve_refs.sh
 
       - name: Select modules
@@ -174,19 +183,14 @@ jobs:
       # ref, and a no-op render is cheap. The no-changes case exits with a
       # notice after diffing.
       - name: Apply copier update
-        working-directory: target
         env:
           TARGET_REF: ${{ steps.versions.outputs.target_ref }}
           MODULES: ${{ steps.modules.outputs.modules }}
           CHANNEL: ${{ steps.versions.outputs.channel }}
           PRIVATE: ${{ steps.target.outputs.private }}
           DESCRIPTION: ${{ steps.target.outputs.description }}
-        run: |
-          copier update --vcs-ref "$TARGET_REF" --defaults --trust \
-            -d "modules=${MODULES}" \
-            -d "channel=${CHANNEL}" \
-            -d "private=${PRIVATE}" \
-            -d "description=${DESCRIPTION}"
+          RECOVER: ${{ inputs.recover }}
+        run: bash .github/scripts/sync/apply_update.sh
 
       # Conflicts (local edits overlapping template changes) resolve in the
       # template's favor so the tree stays valid; the dropped local lines go
@@ -208,8 +212,10 @@ jobs:
       # _skip_if_exists lists (see retired_paths.ts): paths never rendered
       # by either version cannot appear. A formerly rendered path the repo
       # repurposed after the template retired it IS deleted - the PR body
-      # lists every removal for review.
+      # lists every removal for review. Recovery mode has no trustworthy
+      # old render to diff against, so cleanup is skipped there.
       - name: Remove files the template retired
+        if: inputs.recover != 'recopy'
         id: cleanup
         env:
           OLD_SHA: ${{ steps.versions.outputs.old_sha }}
@@ -225,10 +231,19 @@ jobs:
       # settings-sync module de-renders it, but the sync must never delete
       # a repo's settings file - repo-platform's settings-repos run applies
       # it remotely (a central settings/repos/<name>.yml wins over it).
+      # A recovery re-render has no three-way merge to protect local
+      # content, so there it is restored outright.
       - name: Preserve the repo-owned settings file
+        env:
+          RECOVER: ${{ inputs.recover }}
         run: |
-          if git -C target cat-file -e "HEAD:.github/settings.yml" 2>/dev/null \
-              && [ ! -e target/.github/settings.yml ]; then
+          if ! git -C target cat-file -e "HEAD:.github/settings.yml" 2>/dev/null; then
+            exit 0
+          fi
+          if [ "$RECOVER" = "recopy" ]; then
+            git -C target checkout HEAD -- .github/settings.yml
+            echo "::notice::${TARGET}: .github/settings.yml is repo-owned; restored as-is after the recovery re-render."
+          elif [ ! -e target/.github/settings.yml ]; then
             git -C target checkout HEAD -- .github/settings.yml
             echo "::notice::${TARGET}: .github/settings.yml left the template render but is repo-owned; kept as-is."
           fi
@@ -273,6 +288,16 @@ jobs:
       # The push authenticates with the PAT at push time (the checkout kept
       # no credentials) and withholds workflow files when the token lacks
       # the Workflows scope - see the script for the fallback rules.
+      # Unconditional and BEFORE the push: whatever this run delivers
+      # (needs-review, nothing at all, or a failed push), an auto-merge
+      # armed by an earlier clean run must never fire on it. open_pr.sh
+      # re-arms clean revisions.
+      - name: Disarm auto-merge before the branch changes
+        env:
+          GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
+          BRANCH: ${{ steps.versions.outputs.branch }}
+        run: bash .github/scripts/sync/disarm_pr.sh
+
       - name: Commit and push
         if: steps.changes.outputs.changed == 'true'
         id: push
@@ -301,6 +326,7 @@ jobs:
           RETIRED_MODULES_FILE: ${{ runner.temp }}/retired-modules.txt
           REMOVED_PATHS_FILE: ${{ runner.temp }}/removed-paths.txt
           WITHHELD_FILE: ${{ runner.temp }}/withheld-workflows.txt
+          RECOVER: ${{ inputs.recover }}
         run: bash .github/scripts/sync/open_pr.sh
 
       - name: Fail on validation errors
