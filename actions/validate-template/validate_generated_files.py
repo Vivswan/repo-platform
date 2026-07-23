@@ -11,8 +11,9 @@ Checks (errors fail the run):
   2. .gitignore managed/local marker sections appear exactly once
   3. Every .yml/.yaml file parses
   4. No unresolved merge-conflict markers in text files
-  5. If .github/workflows/ci.yml exists: an `all-green` job exists and its
-     `needs:` lists every other job, and a `typography` job exists
+  5. .github/workflows/ci.yml exists (the template always generates and
+     manages it), an `all-green` job exists and its `needs:` lists every
+     other job, and a `typography` job exists
 
 Advisories (printed, never fail): missing actionlint / yamllint /
 commit-names jobs in ci.yml.
@@ -207,10 +208,17 @@ def main() -> int:
                     "copier or git; edit the file and resolve each conflict block"
                 )
 
-    # 5. all-green convention in ci.yml (the file itself is repo-owned and
-    # optional, but if it exists it must parse and follow the convention)
+    # 5. all-green convention in ci.yml. The file is template-managed and
+    # always generated (repo-specific jobs live in the repo-owned checks.yml
+    # it calls), so a missing ci.yml means the repo is damaged.
     ci_path = root / ".github" / "workflows" / "ci.yml"
-    if ci_path.is_file():
+    if not ci_path.is_file():
+        errors.append(
+            ".github/workflows/ci.yml is missing - the template always "
+            "generates and manages it; restore the file from git history or "
+            "run a template sync"
+        )
+    else:
         try:
             ci = yaml.safe_load(ci_path.read_text(encoding="utf-8")) or {}
         except yaml.YAMLError:
@@ -219,7 +227,7 @@ def main() -> int:
         if not jobs:
             errors.append(
                 "ci.yml: exists but defines no jobs - the file is empty or failed "
-                "to parse as YAML; fix the workflow or delete the file"
+                "to parse as YAML; restore the managed file via a template sync"
             )
         else:
             if "all-green" not in jobs:

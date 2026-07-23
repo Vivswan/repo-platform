@@ -17,7 +17,11 @@ sync (propagate.yml).
 - `templates/` is the SOURCE OF TRUTH: one folder per module (`agents`,
   `bun`, `uv`, `pages`, `release-please`, `issue-templates`, `pr-title`,
   `auto-assign`, `settings-sync`) plus `base/` (unconditional files; explicit conditional
-  filenames like SECURITY.md's `not private` gate live only here).
+  filenames like SECURITY.md's `not private` gate live only here). Files
+  listed in copier.yml `_skip_if_exists` (checks.yml, release.yml,
+  auto-format.yml, copilot-setup-steps.yml, the release-please
+  config/manifest) are generated once and then repo-owned; everything else,
+  including ci.yml, stays template-managed so sync can upgrade it.
 - The composed `template/` tree is NOT committed on main: the `staging`
   and `latest` branches are generated, orphan, append-only build outputs
   (published by build-branches.yml, tagged `templates/vX.Y.Z` on latest;
@@ -90,7 +94,8 @@ sync (propagate.yml).
   squash-merged and drive release-please versioning.
 - CI gates on a single required check named `all-green`, which `needs:`
   every other job in `ci.yml`. When adding a CI job, add it to all-green's
-  `needs` list.
+  `needs` list. Exception: the `release-please` job runs on top of the gate
+  (`needs: all-green`), so releases only cut from a green main.
 - No typographic look-alike characters (curly quotes, em-dashes, invisible
   unicode); use plain ASCII punctuation. The check-typography action
   enforces this.

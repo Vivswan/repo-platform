@@ -87,10 +87,11 @@ Without the token, sync falls back to the default GITHUB_TOKEN:
 
 | Category | Files |
 |---|---|
-| Fully managed (template wins) | `.copier-answers.yml`, `.repo-platform.yml`, workflow callers, `dependabot.yml`, issue templates, `SECURITY.md`, `.yamllint`, agent-file symlinks |
+| Fully managed (template wins) | `.copier-answers.yml`, `.repo-platform.yml`, `ci.yml`, `release-please.yml`, workflow callers, `dependabot.yml`, issue templates, `SECURITY.md`, `.yamllint`, agent-file symlinks |
 | Managed + local sections | `.gitignore` (LOCAL section is yours) |
 | Mergeable (three-way) | `.github/settings.yml`, `.github/CODEOWNERS`, `AGENTS.md`, `.editorconfig`, `.gitattributes` |
-| Repo-owned (never touched) | `ci.yml` internals, source code, release tooling, everything else |
+| Generated once, then repo-owned | `checks.yml` (your CI jobs, called inside the all-green gate), `release.yml` (your release pipeline around the managed release-please machinery), `auto-format.yml`, `copilot-setup-steps.yml`, `release-please-config.json`, `.release-please-manifest.json` |
+| Repo-owned (never touched) | source code, release tooling, everything else |
 
 `CLAUDE.md`, `.github/copilot-instructions.md`, and `.github/agents.md` are
 symlinks to the repo's `AGENTS.md` (the `agents` module, on by default): one
