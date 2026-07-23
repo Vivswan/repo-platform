@@ -68,10 +68,10 @@ jobs:
           GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
           OWNER: ${{ github.repository_owner }}
         run: |
-          # -F alone would flip gh api to POST; this is a read. Membership
-          # is WRITE access (fine-grained PATs read every public repo, so
-          # visibility alone means nothing): only repos the token can push
-          # to are candidates.
+          # -F alone would flip gh api to POST; this is a read. The
+          # permissions field reflects the USER, not the token; settings
+          # applies are strict, so an ungranted repo with a central file
+          # fails the apply loudly rather than being silently skipped.
           gh api user/repos --method GET --paginate --slurp -F per_page=100 \
             | jq --arg owner "$OWNER" \
                 'add | [.[] | select(.owner.login == $owner and (.archived | not) and .permissions.push) | .full_name]' \

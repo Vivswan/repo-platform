@@ -127,10 +127,11 @@ jobs:
           echo "::warning::no successful Build Branches push-event run found for main HEAD ${main_sha} after 5 minutes; staging-channel syncs may apply the previous staging tree. The weekly cron heals this on its next run."
 
       # user/repos with the PAT sees every public repo (fine-grained PATs
-      # always read public resources), so membership is WRITE access: only
-      # repos the token can push to are candidates - granting the PAT a
-      # repo is what enrolls it. --paginate emits concatenated page
-      # arrays, so --slurp + add makes one array first.
+      # always read public resources) and its permissions field reflects
+      # the USER, not the token - so this only pre-filters to owned,
+      # non-archived, user-writable repos; the TOKEN's actual grant is
+      # probed per repo in the next step. --paginate emits concatenated
+      # page arrays, so --slurp + add makes one array first.
       - name: Discover repos
         env:
           GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
@@ -146,6 +147,7 @@ jobs:
         id: select
         env:
           GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
+          PAT: ${{ secrets.REPO_PLATFORM_TOKEN }}
           ONLY_REPO: ${{ inputs.repo }}
         run: |
           bun .github/scripts/repos_registry.ts select \
@@ -155,6 +157,17 @@ jobs:
           repos='[]'
           while IFS= read -r row; do
             slug="$(jq -r '.repo' <<<"$row")"
+            # Fine-grained PATs read every public repo and user/repos reports
+            # the USER's permissions, so the token's actual grant is probed
+            # via git's push-service advertisement: 200 only with push
+            # permission. Read-only, no side effects.
+            probe_code="$(curl -s -o /dev/null -w '%{http_code}' \
+              -u "x-access-token:${PAT}" \
+              "https://github.com/${slug}.git/info/refs?service=git-receive-pack")"
+            if [ "$probe_code" != "200" ]; then
+              echo "::notice::${slug}: skipped - the fleet token has no write access (push probe HTTP ${probe_code}). Grant the REPO_PLATFORM_TOKEN access to this repository to enroll it, or add it to repos.yml's exclude list to silence this."
+              continue
+            fi
             # Only a 404 means "not adopted"; any other API failure (auth,
             # rate limit, outage) fails the plan instead of silently
             # skipping repos.
