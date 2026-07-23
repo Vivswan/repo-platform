@@ -1,5 +1,5 @@
 # Fleet config for the push sync: which repos, which channel.
-# Validated and resolved by .github/scripts/repos_registry.ts.
+# Validated and resolved by .github/scripts/fleet/repos_registry.ts.
 #
 # - managed: owner/name slugs, or one quoted "*" wildcard. The wildcard
 #   auto-discovers every owned, non-archived repo the PAT can WRITE to

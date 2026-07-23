@@ -10,7 +10,7 @@ set -euo pipefail
 EXTRA_DATA="${EXTRA_DATA:-}"
 
 bun install --frozen-lockfile
-bun .github/scripts/build_branch_tree.ts --dest /tmp/build-tree --channel staging
+bun .github/scripts/build-branches/branch_tree.ts --dest /tmp/build-tree --channel staging
 git -C /tmp/build-tree init -q -b build
 git -C /tmp/build-tree add -A
 git -C /tmp/build-tree -c user.name=ci -c user.email=ci@localhost commit -q -m "chore: build"

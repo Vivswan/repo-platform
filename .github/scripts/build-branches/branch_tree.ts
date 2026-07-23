@@ -17,8 +17,8 @@
 // is included: nothing may trigger on the build branches.
 //
 // Usage:
-//   bun .github/scripts/build_branch_tree.ts --dest DIR --channel staging
-//   bun .github/scripts/build_branch_tree.ts --dest DIR --channel latest --version vX.Y.Z
+//   bun .github/scripts/build-branches/branch_tree.ts --dest DIR --channel staging
+//   bun .github/scripts/build-branches/branch_tree.ts --dest DIR --channel latest --version vX.Y.Z
 
 import {
   existsSync,
@@ -30,9 +30,9 @@ import {
   writeFileSync,
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import { build, writeOutput } from "../../scripts/compose_template.ts";
+import { build, writeOutput } from "../../../scripts/compose_template.ts";
 
-const REPO_ROOT = resolve(import.meta.dir, "..", "..");
+const REPO_ROOT = resolve(import.meta.dir, "..", "..", "..");
 
 const README = (channel: string) => `\
 # repo-platform build branch (${channel})
