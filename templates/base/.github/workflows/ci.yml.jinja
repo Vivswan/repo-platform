@@ -44,7 +44,8 @@ concurrency:
 jobs:
   # Repo-owned checks: edit .github/workflows/checks.yml, not this file. No
   # secrets are passed and permissions cap at contents: read; a check that
-  # needs either belongs in its own workflow (see docs/all-green.md).
+  # needs either belongs in its own workflow (see
+  # https://github.com/{{ github_username }}/repo-platform/blob/main/docs/all-green.md).
   checks:
     uses: ./.github/workflows/checks.yml
 
@@ -79,7 +80,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Install yamllint
-        run: pip install --quiet yamllint
+        run: python3 -m pip install --quiet yamllint
       - name: Lint YAML
         run: yamllint -s .
 {%- if enable_codeql %}

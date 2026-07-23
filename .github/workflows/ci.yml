@@ -33,7 +33,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Install yamllint
-        run: pip install --quiet yamllint
+        run: python3 -m pip install --quiet yamllint
       - name: Lint YAML
         run: yamllint -s .
 
@@ -211,7 +211,7 @@ jobs:
       - name: Install copier + pyyaml
         run: |
           pipx install copier
-          pip install --quiet pyyaml
+          python3 -m pip install --quiet pyyaml
       - name: Update from previous build tag to a fresh build
         run: .github/scripts/upgrade_path_test.sh
 
