@@ -54,8 +54,10 @@ own checks:
 
 - `.github/workflows/ci.yml` is template-managed: the standard jobs
   (`typography`, `commit-names`, `validate-template`, `actionlint`,
-  `yamllint`), the aggregate `all-green` gate, and a `checks` job that calls
-  checks.yml. Sync updates it; don't edit it directly.
+  `yamllint`), module checks (`pr-title` with that module, `codeql` on
+  public repos with a toolchain), the aggregate `all-green` gate, and a
+  `checks` job that calls checks.yml. Sync updates it; don't edit it
+  directly.
 - `.github/workflows/checks.yml` is repo-owned (`_skip_if_exists`): put the
   repository's test and lint jobs there (multiple jobs, matrices, and
   further local reusable workflows all work). They run inside the gate

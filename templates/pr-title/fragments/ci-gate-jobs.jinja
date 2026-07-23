@@ -1,0 +1,17 @@
+
+  # Conventional Commit PR title, checked inside the gate so branch
+  # protection blocks on it. PRs are squash-merged, so the PR title becomes
+  # the commit subject and drives release-please versioning: `feat:` (minor),
+  # `fix:` (patch), `feat!:` (major), `chore:`/`docs:` (no release). The
+  # skip lives on the STEP, not the job: all-green treats a skipped needed
+  # job as failure, and ci.yml also runs on push/dispatch/schedule events.
+  pr-title:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: read
+    steps:
+      - name: Validate PR title is a Conventional Commit
+        if: github.event_name == 'pull_request'
+        uses: amannn/action-semantic-pull-request@v6
+        env:
+          GITHUB_TOKEN: {% raw %}${{ secrets.GITHUB_TOKEN }}{% endraw %}
