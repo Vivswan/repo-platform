@@ -1,0 +1,189 @@
+# Push sync fan-out: resolves which managed repos to sync (repos.yml
+# registry x live discovery) and runs reusable-template-sync.yml against
+# each one, serially. Replaces the old propagate.yml dispatch model -
+# managed repos carry no sync workflow and no sync secret; their update
+# PRs are pushed from here with the REPO_PLATFORM_TOKEN PAT.
+#
+# The `sync-repos` concurrency group plus max-parallel 1 make this the
+# single automated writer of every target's automation branch; the sync's
+# lease-guarded force-push regenerates that branch each run. The weekly
+# cron is the catch-all: staging-channel repos pick up main merges through
+# it, and it heals any release whose sync run was missed.
+
+name: Sync Repos
+
+on:
+  release:
+    types: [published]
+  schedule:
+    - cron: "19 6 * * 2"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release tag to sync latest-channel repos to (defaults to newest release)
+        required: false
+        type: string
+      repo:
+        description: Single owner/name to sync (defaults to all managed repos)
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sync-repos
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      repos: ${{ steps.select.outputs.repos }}
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Require the fleet token
+        env:
+          PAT: ${{ secrets.REPO_PLATFORM_TOKEN }}
+        run: |
+          if [ -z "$PAT" ]; then
+            echo "::error::push sync cannot run: the REPO_PLATFORM_TOKEN secret is not set, and the default GITHUB_TOKEN cannot write to other repos. Create a fine-grained PAT with the permissions pre-selected at https://github.com/settings/personal-access-tokens/new?name=REPO_PLATFORM_TOKEN&description=repo-platform+fleet%3A+push+sync+and+central+settings&contents=write&pull_requests=write&workflows=write&administration=write&issues=write scoped to the managed repos, then store it with 'gh secret set REPO_PLATFORM_TOKEN' in this repo."
+            exit 1
+          fi
+
+      - uses: actions/checkout@v7
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Install script dependencies
+        run: bun install --frozen-lockfile --silent
+
+      - name: Resolve target version
+        id: version
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          REQUESTED: ${{ inputs.version }}
+        run: |
+          if [ -n "$RELEASE_TAG" ]; then
+            version="$RELEASE_TAG"
+          elif [ -n "$REQUESTED" ]; then
+            version="$REQUESTED"
+          elif ! version="$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq .tag_name 2>/dev/null)"; then
+            # No release yet: fine for a staging-only fleet; a latest-channel
+            # sync leg fails with its own actionable error.
+            version=""
+            echo "No release yet; syncing without a version."
+          fi
+          echo "version=${version}"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+
+      # build-branches also triggers on release:published, with no ordering
+      # between the two runs; latest-channel syncs need the templates/v* tag
+      # it creates. Wait for it (bounded) - on timeout, sync anyway: the
+      # sync's own guard fails with a clear message and the cron heals.
+      - name: Wait for the templates build tag
+        if: steps.version.outputs.version != ''
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          tag="templates/${VERSION}"
+          for _ in $(seq 1 30); do
+            if git ls-remote --exit-code origin "refs/tags/${tag}" >/dev/null 2>&1; then
+              echo "${tag} exists."
+              exit 0
+            fi
+            echo "waiting for ${tag}..."
+            sleep 10
+          done
+          echo "::warning::${tag} is still missing after 5 minutes because Build Branches has not finished (or did not trigger). Syncing anyway - latest-channel legs will fail with a clear error until the tag exists. If it stays missing, dispatch the Build Branches workflow manually."
+
+      # Build Branches rebuilds staging asynchronously after each main
+      # merge; a sync dispatched right after a merge could consume the
+      # previous staging tree. Wait (bounded) for a successful push-event
+      # run at main's HEAD - the only run kind that provably rebuilt
+      # staging (a no-op rebuild creates no staging commit to wait for).
+      - name: Wait for a fresh staging build
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          main_sha="$(git ls-remote origin HEAD | cut -f1)"
+          for _ in $(seq 1 30); do
+            built="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/build-branches.yml/runs?event=push&status=success&per_page=20" \
+              --jq '.workflow_runs[].head_sha' 2>/dev/null || true)"
+            if grep -qx "$main_sha" <<<"$built"; then
+              echo "staging is built from main HEAD ${main_sha}."
+              exit 0
+            fi
+            echo "waiting for a successful Build Branches push run at ${main_sha}..."
+            sleep 10
+          done
+          echo "::warning::no successful Build Branches push-event run found for main HEAD ${main_sha} after 5 minutes; staging-channel syncs may apply the previous staging tree. The weekly cron heals this on its next run."
+
+      # user/repos with the PAT sees everything the token can act on;
+      # --paginate emits concatenated page arrays, so --slurp + add makes
+      # one array before filtering to owned, non-archived repos.
+      - name: Discover repos
+        env:
+          GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
+        run: |
+          login="$(gh api user --jq .login)"
+          gh api user/repos --paginate --slurp \
+            | jq -c --arg login "$login" \
+                '[add[] | select((.archived | not) and .owner.login == $login) | .full_name]' \
+            > "$RUNNER_TEMP/discovered.json"
+          echo "discovered $(jq 'length' "$RUNNER_TEMP/discovered.json") repos for ${login}"
+
+      - name: Select repos and check adoption
+        id: select
+        env:
+          GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
+          ONLY_REPO: ${{ inputs.repo }}
+        run: |
+          bun .github/scripts/repos_registry.ts select \
+            ${ONLY_REPO:+--repo "$ONLY_REPO"} \
+            --discovered "$RUNNER_TEMP/discovered.json" > "$RUNNER_TEMP/selection.json"
+
+          repos='[]'
+          while IFS= read -r row; do
+            slug="$(jq -r '.repo' <<<"$row")"
+            # Only a 404 means "not adopted"; any other API failure (auth,
+            # rate limit, outage) fails the plan instead of silently
+            # skipping repos.
+            if probe="$(gh api "repos/${slug}/contents/.repo-platform.yml" --silent 2>&1)"; then
+              repos="$(jq -c --argjson row "$row" '. + [$row | .channel //= ""]' <<<"$repos")"
+            elif grep -q "HTTP 404" <<<"$probe"; then
+              echo "::notice::${slug}: skipped - no .repo-platform.yml on its default branch, so it has not adopted the template. Generate it with copier (see the repo-platform README) to opt in, or add it to repos.yml's exclude list to silence this."
+            else
+              echo "::error::adoption check failed for ${slug}: ${probe}"
+              exit 1
+            fi
+          done < <(jq -c '.[]' "$RUNNER_TEMP/selection.json")
+
+          echo "repos=${repos}" >> "$GITHUB_OUTPUT"
+          if [ "$repos" = "[]" ]; then
+            echo "::notice::no adopted repos selected; nothing to sync."
+          else
+            echo "syncing: $(jq -r 'map(.repo) | join(", ")' <<<"$repos")"
+          fi
+
+  sync:
+    needs: plan
+    if: needs.plan.outputs.repos != '[]'
+    strategy:
+      fail-fast: false
+      # One writer at a time, matching the concurrency group's guarantee.
+      max-parallel: 1
+      matrix:
+        include: ${{ fromJSON(needs.plan.outputs.repos) }}
+    name: sync (${{ matrix.repo }})
+    uses: ./.github/workflows/reusable-template-sync.yml
+    with:
+      target_repo: ${{ matrix.repo }}
+      version: ${{ needs.plan.outputs.version }}
+      channel: ${{ matrix.channel }}
+    secrets:
+      REPO_PLATFORM_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}

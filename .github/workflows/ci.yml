@@ -3,8 +3,16 @@ name: CI
 on:
   push:
     branches: [main]
+  # `edited` on top of the default three: a PR title edit must re-run the
+  # gate so the pr-title check stays honest. The cancel-in-progress
+  # concurrency below bounds the extra runs.
   pull_request:
+    types: [opened, edited, reopened, synchronize]
   workflow_dispatch:
+  # Weekly CodeQL re-scan with refreshed query packs; every other gate job
+  # is event-agnostic or skips its work cleanly on non-PR events.
+  schedule:
+    - cron: "23 4 * * 1"
 
 permissions:
   contents: read
@@ -39,24 +47,6 @@ jobs:
       - name: Biome (lint + format check)
         run: bun x biome ci .
 
-  ruff:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v7
-      - name: Ruff lint
-        run: uvx ruff check .
-      - name: Ruff format check
-        run: uvx ruff format --check .
-
-  ty:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v7
-      - name: Type check Python scripts
-        run: uvx --with pyyaml ty check .
-
   typography:
     runs-on: ubuntu-latest
     steps:
@@ -76,9 +66,9 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: oven-sh/setup-bun@v2
-      - name: Typecheck action scripts
+      - name: Typecheck repo and action scripts
         run: |
-          for dir in actions/check-typography actions/validate-commit-names; do
+          for dir in . actions/check-typography actions/validate-commit-names actions/validate-template; do
             echo "::group::$dir"
             (cd "$dir" && bun install --frozen-lockfile --silent && bun x tsc -p .)
             echo "::endgroup::"
@@ -88,8 +78,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
       - name: Verify templates/base/.gitignore.jinja matches the lock
-        run: python3 scripts/build_gitignore.py --check
+        run: bun scripts/build_gitignore.ts --check
 
   # template/ is no longer committed; prove composition succeeds (collisions,
   # orphan anchors, manifest errors all hard-fail) and is deterministic.
@@ -97,12 +88,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - name: Install pyyaml
-        run: pip install --quiet pyyaml
+      - uses: oven-sh/setup-bun@v2
+      - name: Install dependencies
+        run: bun install --frozen-lockfile --silent
       - name: Build twice and compare
         run: |
-          python3 .github/scripts/build_branch_tree.py --dest /tmp/tree-a --channel staging
-          python3 .github/scripts/build_branch_tree.py --dest /tmp/tree-b --channel staging
+          bun .github/scripts/build_branch_tree.ts --dest /tmp/tree-a --channel staging
+          bun .github/scripts/build_branch_tree.ts --dest /tmp/tree-b --channel staging
           diff -r --no-dereference /tmp/tree-a /tmp/tree-b
           echo "build tree is deterministic"
 
@@ -110,12 +102,25 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - name: Install pyyaml
-        run: pip install --quiet pyyaml
+      - uses: oven-sh/setup-bun@v2
+      - name: Install dependencies
+        run: |
+          bun install --frozen-lockfile --silent
+          bun install --frozen-lockfile --silent --cwd actions/validate-template
       - name: Validate repo-platform against its own conventions
-        run: python3 actions/validate-template/validate_generated_files.py --self .
+        run: bun actions/validate-template/validate_generated_files.ts --self .
       - name: Validate managed-repos registry
-        run: python3 .github/scripts/validate_repos_registry.py
+        run: bun .github/scripts/repos_registry.ts validate
+
+  script-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+      - name: Install dependencies
+        run: bun install --frozen-lockfile --silent
+      - name: Run .github/scripts tests
+        run: bun test ./.github/scripts
 
   smoke-generate:
     runs-on: ubuntu-latest
@@ -160,12 +165,12 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - name: Install copier + pyyaml
+      # copier invokes migrations/run.ts with bun during copy/update.
+      - uses: oven-sh/setup-bun@v2
+      - name: Install copier
         env:
           COPIER_SPEC: ${{ matrix.copier_spec || 'copier' }}
-        run: |
-          pipx install "$COPIER_SPEC"
-          pip install --quiet pyyaml
+        run: pipx install "$COPIER_SPEC"
       - name: Generate ${{ matrix.name }}
         env:
           MODULES: ${{ matrix.modules }}
@@ -173,7 +178,9 @@ jobs:
           EXTRA_DATA: ${{ matrix.extra_data }}
         run: .github/scripts/smoke_generate.sh
       - name: Validate generated output
-        run: python3 actions/validate-template/validate_generated_files.py /tmp/smoke
+        run: |
+          bun install --frozen-lockfile --silent --cwd actions/validate-template
+          bun actions/validate-template/validate_generated_files.ts /tmp/smoke
       - name: Verify module/visibility gating
         env:
           MODULES: ${{ matrix.modules }}
@@ -196,12 +203,46 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
+      # copier invokes migrations/run.ts with bun during copy/update.
+      - uses: oven-sh/setup-bun@v2
+      # pyyaml: the synthetic old-fixture tree is built with the pre-port
+      # python composer pinned inside the script; both go away once a real
+      # templates/v* release tag exists.
       - name: Install copier + pyyaml
         run: |
           pipx install copier
           pip install --quiet pyyaml
       - name: Update from previous build tag to a fresh build
         run: .github/scripts/upgrade_path_test.sh
+
+  # Conventional Commit PR title, checked inside the gate so branch
+  # protection blocks on it. The skip lives on the STEP, not the job:
+  # all-green treats a skipped needed job as failure, and CI also runs on
+  # push/dispatch/schedule events.
+  pr-title:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: read
+    steps:
+      - name: Validate PR title is a Conventional Commit
+        if: github.event_name == 'pull_request'
+        uses: amannn/action-semantic-pull-request@v6
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # CodeQL runs inside the gate: this thin job calls the analysis workflow,
+  # and a caller job's permissions are the ceiling for every job in the
+  # called workflow, so the scan permissions are granted here. This repo is
+  # TypeScript-only (the actions, scripts, and template tooling), so one
+  # language leg suffices; the name matches the template's per-language jobs.
+  codeql-javascript:
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+    uses: ./.github/workflows/reusable-codeql.yml
+    with:
+      language: javascript-typescript
 
   all-green:
     name: all-green
@@ -210,16 +251,17 @@ jobs:
       - actionlint
       - yamllint
       - biome
-      - ruff
-      - ty
       - typography
       - commit-names
       - typecheck
       - gitignore-fresh
       - compose
       - validate-template
+      - script-tests
       - smoke-generate
       - upgrade-path
+      - pr-title
+      - codeql-javascript
     runs-on: ubuntu-latest
     steps:
       - name: All jobs green
@@ -237,10 +279,14 @@ jobs:
   # Release from a green main only: release-please runs downstream of
   # all-green (in release-please.yml, via workflow_call), so a red commit can
   # never cut a release or refresh the release PR. Deliberately NOT in
-  # all-green's needs: it depends on the gate, it is not gated by it.
+  # all-green's needs: it depends on the gate, it is not gated by it. Only
+  # push/dispatch runs release: pull requests must never reach it, and the
+  # weekly scheduled CodeQL re-scan has no business refreshing release state.
   release-please:
     needs: [all-green]
-    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    if: >-
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+      && github.ref == 'refs/heads/main'
     permissions:
       contents: write
       pull-requests: write

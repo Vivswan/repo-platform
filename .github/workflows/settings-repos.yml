@@ -1,0 +1,137 @@
+# Central settings apply: runs Vivswan/repo-settings-as-code once against
+# every managed repository, from this repo. Central targets are the
+# settings/repos/<name>.yml files (settings/defaults.yml deep-merged under
+# each); in-repo targets (settings-sync module repos with their own
+# .github/settings.yml) are passed via the action's `repos:` remote mode.
+# A central file for the same repository wins. The in-repo self-apply path
+# is reusable-apply-settings.yml, called from each module repo's
+# settings-sync workflow.
+#
+# DISPATCH-ONLY for now: the nightly cron and the push-to-main trigger on
+# settings/** arrive in a follow-up PR after the first check_only dispatch
+# reports clean - a heal run must not apply before the first manual dry run.
+
+name: Settings Repos
+
+on:
+  workflow_dispatch:
+    inputs:
+      check_only:
+        description: Report drift without writing
+        required: false
+        type: boolean
+        # Defaults to a dry run during bootstrap; the follow-up PR that adds
+        # the cron and push triggers flips this to false.
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: settings-repos
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require REPO_PLATFORM_TOKEN
+        env:
+          PAT: ${{ secrets.REPO_PLATFORM_TOKEN }}
+        run: |
+          if [ -z "$PAT" ]; then
+            echo "::error::settings apply cannot run: the REPO_PLATFORM_TOKEN secret is not set - GITHUB_TOKEN can never hold the Administration write that settings mutation needs. Create a fine-grained PAT for the fleet via https://github.com/settings/personal-access-tokens/new?name=REPO_PLATFORM_TOKEN&description=repo-platform+fleet%3A+push+sync+and+central+settings&contents=write&pull_requests=write&workflows=write&administration=write&issues=write and add it as an Actions secret named REPO_PLATFORM_TOKEN in this repository."
+            exit 1
+          fi
+
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      # In-repo targets = managed repos on the settings-sync module: selected
+      # by the registry, adopted (.repo-platform.yml on the default branch
+      # with settings-sync in its modules), carrying .github/settings.yml,
+      # and WITHOUT a central settings/repos/<name>.yml (file presence alone
+      # must not apply an unrelated repo's settings under the wildcard; a
+      # central file wins anyway).
+      - name: Discover in-repo settings targets
+        id: targets
+        env:
+          GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          # -F alone would flip gh api to POST; this is a read.
+          gh api user/repos --method GET --paginate --slurp -F per_page=100 \
+            | jq --arg owner "$OWNER" \
+                'add | [.[] | select(.owner.login == $owner and (.archived | not)) | .full_name]' \
+            > "$RUNNER_TEMP/discovered.json"
+          bun .github/scripts/repos_registry.ts select \
+            --discovered "$RUNNER_TEMP/discovered.json" > "$RUNNER_TEMP/selected.json"
+
+          repos=""
+          while IFS=$'\t' read -r repo name; do
+            [ -f "settings/repos/$name.yml" ] && continue
+            # Only a 404 means "not adopted"; other API failures must not
+            # silently drop a repo from this run.
+            if ! manifest=$(gh api "repos/$repo/contents/.repo-platform.yml" \
+                --jq .content 2>"$RUNNER_TEMP/probe.err" | base64 -d); then
+              if grep -q "HTTP 404" "$RUNNER_TEMP/probe.err"; then
+                continue  # not adopted
+              fi
+              echo "::error::adoption check failed for $repo: $(cat "$RUNNER_TEMP/probe.err")"
+              exit 1
+            fi
+            verdict=$(bun -e '
+              import { parse } from "yaml";
+              let modules;
+              try {
+                const doc = parse(await Bun.stdin.text()) ?? {};
+                modules = doc.modules ?? doc.template?.modules;
+              } catch {
+                console.log("unparsable");
+                process.exit(0);
+              }
+              const on = Array.isArray(modules) && modules.includes("settings-sync");
+              console.log(on ? "yes" : "no");
+            ' <<<"$manifest")
+            if [ "$verdict" = "unparsable" ]; then
+              echo "::warning::$repo: .repo-platform.yml is not valid YAML; skipping its in-repo settings"
+              continue
+            fi
+            [ "$verdict" = "yes" ] || continue
+            # Same 404-vs-failure split: a transient error must not leave
+            # the run green while silently dropping a repo.
+            if ! gh api "repos/$repo/contents/.github/settings.yml" --jq .sha \
+                >/dev/null 2>"$RUNNER_TEMP/probe.err"; then
+              if grep -q "HTTP 404" "$RUNNER_TEMP/probe.err"; then
+                echo "::warning::$repo: settings-sync module is on but .github/settings.yml is missing from the default branch; skipping"
+                continue
+              fi
+              echo "::error::settings.yml check failed for $repo: $(cat "$RUNNER_TEMP/probe.err")"
+              exit 1
+            fi
+            repos="$repos$repo"$'\n'
+          done < <(jq -r '.[] | [.repo, .name] | @tsv' "$RUNNER_TEMP/selected.json")
+
+          {
+            echo "repos<<REPOS_EOF"
+            printf '%s' "$repos"
+            echo "REPOS_EOF"
+          } >> "$GITHUB_OUTPUT"
+          echo "in-repo targets:"
+          printf '%s' "$repos"
+
+      - name: Apply repository settings
+        # Pinned to an immutable commit; bump to @v1 once repo-settings-as-code
+        # cuts its first release. Bump together with reusable-apply-settings.yml.
+        uses: Vivswan/repo-settings-as-code@7c023fc1c7e63502d45ee8b17c6bf0db14faf0e8
+        with:
+          token: ${{ secrets.REPO_PLATFORM_TOKEN }}
+          mode: ${{ inputs.check_only && 'check' || 'apply' }}
+          repos-dir: settings/repos
+          defaults-file: settings/defaults.yml
+          repos: ${{ steps.targets.outputs.repos }}

@@ -1,12 +1,12 @@
 # Cuts releases via release-please: merging to main accumulates conventional
 # commits into a release PR; merging that PR tags vX.Y.Z and publishes the
-# GitHub release, which managed repos pick up on their next template sync.
+# GitHub release, which sync-repos pushes to managed repos.
 #
 # Called by ci.yml's release-please job, downstream of the all-green gate, so
 # releases and release-PR refreshes only happen on a green main.
 #
-# Same token fallback as template-sync: with REPO_PLATFORM_TOKEN the release
-# PR triggers CI normally; with the default GITHUB_TOKEN it needs a
+# With REPO_PLATFORM_TOKEN (the fleet PAT stored here) the release PR
+# triggers CI normally; with the default GITHUB_TOKEN it needs a
 # close/reopen to run checks.
 
 name: Release Please
