@@ -8,7 +8,7 @@
 # Token model: settings mutation needs Administration (and Issues) write,
 # which GITHUB_TOKEN can never hold - the caller passes its own
 # REPO_PLATFORM_TOKEN (fine-grained PAT). Without it the run SKIPS with a
-# notice; repo-platform's central settings-repos run heals the repo either way.
+# warning; repo-platform's central settings-repos run heals the repo either way.
 # Pinned to an immutable commit sha; switch to @v1 once
 # repo-settings-as-code cuts its first release.
 
@@ -65,7 +65,7 @@ jobs:
           if [ -n "$PAT" ]; then
             echo "proceed=true" >> "$GITHUB_OUTPUT"
           else
-            echo "::notice::settings apply skipped: the REPO_PLATFORM_TOKEN secret is not set, and GITHUB_TOKEN cannot mutate repo settings. To opt in to self-apply on push, add a fine-grained PAT with Administration (read and write) and Issues (read and write) on this repo as an Actions secret named REPO_PLATFORM_TOKEN. The central settings-repos run in repo-platform applies this repository's settings either way."
+            echo "::warning::settings apply skipped: the REPO_PLATFORM_TOKEN secret is not set, and GITHUB_TOKEN cannot mutate repo settings. To opt in to self-apply on push, add a fine-grained PAT with Administration (read and write) and Issues (read and write) on this repo as an Actions secret named REPO_PLATFORM_TOKEN. The central settings-repos run in repo-platform applies this repository's settings either way."
             echo "proceed=false" >> "$GITHUB_OUTPUT"
           fi
 

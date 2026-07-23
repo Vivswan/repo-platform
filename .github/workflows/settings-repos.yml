@@ -6,23 +6,23 @@
 # A central file for the same repository wins. The in-repo self-apply path
 # is reusable-apply-settings.yml, called from each module repo's
 # settings-sync workflow.
-#
-# DISPATCH-ONLY for now: the nightly cron and the push-to-main trigger on
-# settings/** arrive in a follow-up PR after the first check_only dispatch
-# reports clean - a heal run must not apply before the first manual dry run.
 
 name: Settings Repos
 
 on:
+  push:
+    branches: [main]
+    paths: [settings/**]
+  schedule:
+    # Nightly heal at an offbeat minute.
+    - cron: "47 3 * * *"
   workflow_dispatch:
     inputs:
       check_only:
         description: Report drift without writing
         required: false
         type: boolean
-        # Defaults to a dry run during bootstrap; the follow-up PR that adds
-        # the cron and push triggers flips this to false.
-        default: true
+        default: false
 
 permissions:
   contents: read
@@ -35,7 +35,11 @@ jobs:
   apply:
     runs-on: ubuntu-latest
     steps:
-      - name: Require REPO_PLATFORM_TOKEN
+      # A missing token is a misconfiguration of this repo: fail loudly.
+      # So is a narrowed one here: settings need Administration + Issues
+      # write, and unreachable sections fail the run (see
+      # on-missing-permission below).
+      - name: Require the fleet token
         env:
           PAT: ${{ secrets.REPO_PLATFORM_TOKEN }}
         run: |
@@ -135,3 +139,7 @@ jobs:
           repos-dir: settings/repos
           defaults-file: settings/defaults.yml
           repos: ${{ steps.targets.outputs.repos }}
+          # Strict: a token that cannot reach a declared section fails the
+          # run (the action's default) - settings drift must not hide
+          # behind a green run.
+          on-missing-permission: fail

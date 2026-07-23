@@ -136,9 +136,9 @@ rulesets:
 ```
 
 The easiest start is copying `settings/repos/repo-platform.yml` and
-trimming it. Dispatch `gh workflow run settings-repos.yml` for a drift
-report (`check_only` defaults to true), then apply with
-`gh workflow run settings-repos.yml -f check_only=false`.
+trimming it. Merging the file to main applies it (settings-repos.yml runs
+on pushes to `settings/**`); for a drift report first, dispatch
+`gh workflow run settings-repos.yml -f check_only=true`.
 
 In-repo (opt-in): select the `settings-sync` module instead and skip the
 central file. The repo then carries its own `.github/settings.yml`, which

@@ -4,14 +4,22 @@
 # build tag), then a branch + PR opened in the target with the
 # REPO_PLATFORM_TOKEN PAT stored here. Called only by sync-repos.yml.
 #
+# Permission-adaptive token model: the token itself is REQUIRED (a missing
+# secret is a misconfiguration and fails loudly), but a deliberately
+# narrowed token adapts: without the Workflows scope, workflow-file
+# changes are withheld from the PR with a warning; Contents + Pull
+# requests write are the core the sync cannot work without.
+#
 # The rolling per-channel branch (automation/repo-platform-staging|latest)
 # is regenerated on every run: sync-repos.yml's concurrency group is the
 # only automated writer, and the push uses --force-with-lease so an
 # out-of-band push racing this run surfaces instead of vanishing. Manual
 # commits on the branch are overwritten by design; the PR body says so.
-# Conflicts resolve toward the template with the dropped local lines in
-# the PR body - auto-resolution warns; only validation failures (and
-# broken inputs) go red.
+# Clean updates arm squash auto-merge (the target's all-green check gates
+# the actual merge); conflicts resolve toward the template with the
+# dropped local lines in the PR body and stay MANUAL, as do withheld
+# workflow files and failed validation - auto-resolution warns; only
+# validation failures (and broken inputs) go red.
 
 name: Reusable Template Sync
 
@@ -352,30 +360,94 @@ jobs:
 
       - name: Commit and push
         if: steps.changes.outputs.changed == 'true'
+        id: push
         env:
           BRANCH: ${{ steps.versions.outputs.branch }}
           DISPLAY: ${{ steps.versions.outputs.display }}
+          BASE_BRANCH: ${{ steps.target.outputs.default_branch }}
           PAT: ${{ secrets.REPO_PLATFORM_TOKEN }}
         run: |
           git -C target config user.name "repo-platform-sync"
           git -C target config user.email "repo-platform-sync@users.noreply.github.com"
           git -C target add --all
           git -C target commit -m "chore: update repo-platform template to ${DISPLAY}"
+
           # The checkout kept no credentials (see above); authenticate this
-          # push alone. The lease pins the remote branch to what it held a
-          # moment ago: the branch is regenerated every run, so remote
-          # commits are overwritten by design, but a push racing this exact
-          # run fails loudly instead of vanishing.
+          # push alone. The lease is captured ONCE and reused on the retry:
+          # the branch is regenerated every run, so remote commits are
+          # overwritten by design, but any push racing this run - including
+          # one landing between the two attempts - fails the lease loudly
+          # instead of vanishing.
           push_url="https://x-access-token:${PAT}@github.com/${TARGET}.git"
-          remote_sha="$(git -C target ls-remote "$push_url" "refs/heads/${BRANCH}" | cut -f1)"
-          if [ -n "$remote_sha" ]; then
-            git -C target push --force-with-lease="${BRANCH}:${remote_sha}" "$push_url" "$BRANCH"
-          else
-            git -C target push "$push_url" "$BRANCH"
+          lease_sha="$(git -C target ls-remote "$push_url" "refs/heads/${BRANCH}" | cut -f1)"
+          do_push() {
+            # An empty lease sha means "expect the ref to be absent", so a
+            # branch created concurrently also fails the lease.
+            git -C target push --force-with-lease="${BRANCH}:${lease_sha}" "$push_url" "$BRANCH"
+          }
+
+          : > "$RUNNER_TEMP/withheld-workflows.txt"
+          if do_push 2>"$RUNNER_TEMP/push.err"; then
+            cat "$RUNNER_TEMP/push.err"
+            echo "pushed=true" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
+          cat "$RUNNER_TEMP/push.err"
+
+          # Permission-adaptive fallback: a token without the Workflows
+          # scope cannot create or update .github/workflows files. Withhold
+          # those changes, deliver the rest, and say so in the PR - the
+          # scope is optional by design, not an error.
+          if ! grep -qi "create or update workflow" "$RUNNER_TEMP/push.err"; then
+            echo "::error::pushing to ${TARGET}#${BRANCH} failed (see the log above). The REPO_PLATFORM_TOKEN needs Contents read/write on ${TARGET}; grant it and re-run."
+            exit 1
+          fi
+          base_sha="$(git -C target rev-parse "origin/${BASE_BRANCH}")"
+          # --no-renames: a rename into .github/workflows must count as an
+          # addition here, or its destination file would survive the restore
+          # and the retry would be rejected again.
+          git -C target diff --name-only --no-renames "$base_sha" HEAD -- .github/workflows \
+            > "$RUNNER_TEMP/withheld-workflows.txt"
+          # Restore the workflow dir to the base state: modified/deleted
+          # files come back via checkout, newly added ones are removed.
+          git -C target checkout "$base_sha" -- .github/workflows 2>/dev/null || true
+          git -C target diff --name-only --no-renames --diff-filter=A "$base_sha" HEAD -- .github/workflows \
+            | while IFS= read -r f; do rm -f "target/$f"; done
+          # Retired workflow files were restored too - drop them from the
+          # PR body's deleted list so it stays truthful.
+          if [ -s "$RUNNER_TEMP/removed-paths.txt" ]; then
+            grep -v '^\.github/workflows/' "$RUNNER_TEMP/removed-paths.txt" \
+              > "$RUNNER_TEMP/removed-paths.filtered" || true
+            mv "$RUNNER_TEMP/removed-paths.filtered" "$RUNNER_TEMP/removed-paths.txt"
+          fi
+          git -C target add --all
+          if git -C target diff --quiet "$base_sha"; then
+            echo "::warning::${TARGET}: this update only changes .github/workflows files, and the REPO_PLATFORM_TOKEN lacks the Workflows scope, so nothing can be delivered. Grant Workflows read/write to sync workflow files, or ignore this if that is intentional."
+            echo "pushed=false" >> "$GITHUB_OUTPUT"
+            # The full-tree validation verdict no longer applies to anything
+            # pushed; re-validate the restored tree (== the default branch)
+            # so a real default-branch problem still surfaces.
+            if bun validator/actions/validate-template/validate_generated_files.ts target; then
+              echo "validation=ok" >> "$GITHUB_OUTPUT"
+            else
+              echo "validation=failed" >> "$GITHUB_OUTPUT"
+            fi
+            exit 0
+          fi
+          git -C target commit --amend --no-edit
+          do_push
+          echo "pushed=true" >> "$GITHUB_OUTPUT"
+          # The earlier validation judged the full tree including the
+          # withheld files; re-validate what was actually pushed.
+          if bun validator/actions/validate-template/validate_generated_files.ts target; then
+            echo "validation=ok" >> "$GITHUB_OUTPUT"
+          else
+            echo "validation=failed" >> "$GITHUB_OUTPUT"
+          fi
+          echo "::warning::${TARGET}: workflow-file changes were withheld because the REPO_PLATFORM_TOKEN lacks the Workflows scope (listed in the PR body). Grant Workflows read/write to include them; this is otherwise working as configured."
 
       - name: Create or refresh pull request
-        if: steps.changes.outputs.changed == 'true'
+        if: steps.push.outputs.pushed == 'true'
         id: pr
         env:
           GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
@@ -384,11 +456,14 @@ jobs:
           DISPLAY: ${{ steps.versions.outputs.display }}
           BRANCH: ${{ steps.versions.outputs.branch }}
           BASE_BRANCH: ${{ steps.target.outputs.default_branch }}
-          VALIDATION: ${{ steps.validate.outputs.result }}
+          # The push step re-validates when it rewrites the tree (withheld
+          # workflow files); its verdict supersedes the full-tree one.
+          VALIDATION: ${{ steps.push.outputs.validation || steps.validate.outputs.result }}
           RESOLVED: ${{ steps.conflicts.outputs.resolved }}
           SUMMARY_FILE: ${{ runner.temp }}/dropped-local-hunks.md
           RETIRED_MODULES_FILE: ${{ runner.temp }}/retired-modules.txt
           REMOVED_PATHS_FILE: ${{ runner.temp }}/removed-paths.txt
+          WITHHELD_FILE: ${{ runner.temp }}/withheld-workflows.txt
         run: |
           if [ "$TARGET_REF" = "staging" ]; then
             source_line="[\`${GITHUB_REPOSITORY}\`](https://github.com/${GITHUB_REPOSITORY}/tree/staging) (staging channel)"
@@ -422,6 +497,17 @@ jobs:
           The template retired these files; this update deletes them:
 
           $(sed 's/^/- /' "$REMOVED_PATHS_FILE")"
+          fi
+
+          if [ -s "$WITHHELD_FILE" ]; then
+            body="${body}
+
+          > [!WARNING]
+          > Workflow-file changes were WITHHELD from this update: the sync
+          > token lacks the Workflows scope. Grant Workflows read/write to
+          > the REPO_PLATFORM_TOKEN and re-run the sync to include them.
+
+          $(sed 's/^/- /' "$WITHHELD_FILE")"
           fi
 
           if [ "$RESOLVED" = "true" ]; then
@@ -460,15 +546,42 @@ jobs:
           fi
           echo "url=${url}" >> "$GITHUB_OUTPUT"
 
+          # Squash auto-merge on the CLEAN path: the PR merges itself once
+          # the target's required checks (all-green) pass. Anything that
+          # needs human review - dropped local hunks, withheld workflow
+          # files, failed validation - stays manual, and a previously armed
+          # auto-merge is DISARMED (the rolling branch may have been clean
+          # on an earlier run).
+          if [ "$RESOLVED" != "true" ] && [ "$VALIDATION" != "failed" ] \
+              && [ ! -s "$WITHHELD_FILE" ]; then
+            if gh pr merge "$url" -R "$TARGET" --squash --auto 2>"$RUNNER_TEMP/automerge.err"; then
+              echo "auto-merge armed for ${url}"
+            else
+              echo "::warning::${TARGET}: could not enable auto-merge on ${url}: $(cat "$RUNNER_TEMP/automerge.err"). Merge it manually; to fix this, allow auto-merge in the repo settings and keep a required check on the default branch."
+            fi
+          else
+            gh pr merge "$url" -R "$TARGET" --disable-auto 2>/dev/null \
+              && echo "auto-merge disarmed: this revision needs review" \
+              || echo "auto-merge left off: this PR needs review (conflicts, withheld files, or failed validation)."
+          fi
+
       - name: Fail on validation errors
-        if: steps.validate.outputs.result == 'failed'
+        # The push step's re-validation (after withholding workflow files)
+        # supersedes the full-tree verdict when present.
+        if: (steps.push.outputs.validation || steps.validate.outputs.result) == 'failed'
         env:
           PR_URL: ${{ steps.pr.outputs.url }}
+          PUSH_VALIDATION: ${{ steps.push.outputs.validation }}
         run: |
-          if [ -n "$PR_URL" ]; then
-            echo "::error::the update was pushed but validation of the resulting tree failed (details in the 'Validate the updated tree' step log). Fix the tree in ${PR_URL} before merging."
+          if [ -n "$PUSH_VALIDATION" ]; then
+            where="the 'Commit and push' step log - the tree was re-validated after workflow files were withheld"
           else
-            echo "::error::the update produced no changes, yet validation failed, so ${TARGET}'s default branch itself does not validate (details in the 'Validate the updated tree' step log). Fix the tree on its default branch, then re-run the sync."
+            where="the 'Validate the updated tree' step log"
+          fi
+          if [ -n "$PR_URL" ]; then
+            echo "::error::the update was pushed but validation of the resulting tree failed (details in ${where}). Fix the tree in ${PR_URL} before merging."
+          else
+            echo "::error::the update produced no changes to deliver, yet validation failed, so ${TARGET}'s default branch itself does not validate (details in ${where}). Fix the tree on its default branch, then re-run the sync."
           fi
           exit 1
 

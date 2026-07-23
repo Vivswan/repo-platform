@@ -47,6 +47,10 @@ self-apply of a repo's own settings file.
   repo it runs `copier update`, validates the result, and pushes a branch +
   PR into the repo with the fleet PAT. PRs opened by a PAT trigger the
   target repo's CI and auto-assign normally.
+- Clean updates arm squash auto-merge on the PR, so it merges itself once
+  the repo's `all-green` check passes. A PR that needs review stays
+  manual: auto-resolved conflicts, withheld workflow files, or failed
+  validation.
 - `repos.yml` decides which repos: a quoted `"*"` wildcard auto-discovers
   every owned, non-archived repo the PAT can see, `exclude:` opts repos
   out, and a discovered repo is synced only once it carries
@@ -78,17 +82,22 @@ the `REPO_PLATFORM_TOKEN` Actions secret
 granted access to the managed repositories. Store it with
 `gh secret set REPO_PLATFORM_TOKEN`.
 
-| Permission | Needed for |
-|---|---|
-| Contents:RW, Pull requests:RW | pushing sync branches and opening their PRs |
-| Workflows:RW | updates that change `.github/workflows/` files |
-| Administration:RW, Issues:RW | applying repository settings (fields, rulesets, labels) |
+Workflows RW is the only scope the machinery adapts to; the others are
+hard requirements:
 
-Without the secret, sync-repos and settings-repos fail early with an
-actionable error; nothing degrades silently. Managed repos need no secret
-(the one exception: a settings-sync module repo that wants to self-apply
-its settings on push carries its own PAT; without one those runs skip with
-a notice and the central apply covers the repo).
+| Permission | Used for | Removing it |
+|---|---|---|
+| Contents:RW, Pull requests:RW | pushing sync branches and opening their PRs | sync legs fail with an actionable error |
+| Workflows:RW | sync updates that change `.github/workflows/` files | workflow-file changes are withheld from the sync PR and listed in its body with a warning; everything else still lands |
+| Administration:RW, Issues:RW | settings runs (fields, rulesets, labels) | settings runs fail: a section the token cannot reach must not hide drift behind a green run |
+
+A missing secret is a misconfiguration of this repo: sync and settings
+runs fail loudly with an error that carries the setup link. Dropping the
+Workflows scope is the one supported narrowing; dropping anything else
+turns runs red. Managed repos need no secret (the one exception: a
+settings-sync module repo that wants to self-apply its settings on push
+carries its own PAT; without one those runs skip with a warning and the
+central apply covers the repo).
 
 ## Layout
 

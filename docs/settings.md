@@ -4,7 +4,8 @@ Managed repos get their settings (repository fields, topics, labels,
 rulesets) applied through
 [repo-settings-as-code](https://github.com/Vivswan/repo-settings-as-code),
 the replacement for the [Probot Settings app](https://github.com/repository-settings/app). Every apply is a visible
-workflow run that fails loudly; no more silent drift.
+workflow run whose problems surface as loud warnings and errors; no
+more silent drift.
 
 A repo's settings live in ONE of two homes:
 
@@ -19,15 +20,12 @@ central files and the action's `repos:` remote mode reads each module
 repo's own settings.yml from its default branch. When both exist for the
 same repository, the central file wins.
 
-`settings-repos.yml` is dispatch-only for now, and its `check_only` input
-defaults to true, so a plain dispatch is always a dry run:
+`settings-repos.yml` runs on three triggers:
 
-- Drift report: `gh workflow run settings-repos.yml`
-- Apply (after a clean check):
-  `gh workflow run settings-repos.yml -f check_only=false`
-
-A nightly heal cron and a push trigger on `settings/**` land in a
-follow-up once the first check run reports clean.
+- Push to main touching `settings/**`: merging a settings change applies it.
+- Nightly heal cron: reverts out-of-band drift and applies in-repo files.
+- Manual dispatch: a plain dispatch applies; pass `-f check_only=true` for
+  a drift report without writing.
 
 ## The defaults baseline
 
@@ -67,7 +65,7 @@ dispatch) that self-applies it through `reusable-apply-settings.yml`.
 Self-apply needs the repo's OWN `REPO_PLATFORM_TOKEN` Actions secret: a
 fine-grained PAT with Administration (read and write) and Issues (read and
 write) on that repository. Without the secret, self-apply runs skip with a
-notice - the module stays safe to enable before any token exists, and the
+warning - the module stays safe to enable before any token exists, and the
 central `settings-repos.yml` run applies the repo's settings.yml
 regardless. The per-repo PAT only buys apply-on-push immediacy.
 
@@ -93,9 +91,15 @@ Central to in-repo:
 
 The fleet-level token model lives in the
 [README's Credentials section](../README.md#credentials): one PAT stored
-only in repo-platform drives sync and central settings. A per-repo PAT is
-only needed for the module's self-apply-on-push, and only needs
-Administration and Issues on that one repository
+only in repo-platform drives sync and central settings, and it is
+required there - the central runs fail without it. Settings applies are
+strict about permissions: a token that cannot reach a declared section
+fails the run (`on-missing-permission: fail`), so drift never hides
+behind a green run. Administration and Issues write are required
+wherever settings are applied.
+
+A per-repo PAT is only needed for the module's self-apply-on-push, and
+only needs Administration and Issues on that one repository
 ([create a module-only PAT with those pre-selected](https://github.com/settings/personal-access-tokens/new?name=REPO_PLATFORM_TOKEN&description=settings-sync+self-apply&administration=write&issues=write));
 the fleet link's extra scopes (Contents, Pull requests, Workflows) are for
 push sync and are not needed here.
