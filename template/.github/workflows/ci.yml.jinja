@@ -63,6 +63,9 @@ jobs:
           fetch-depth: 0
       - uses: {{ github_username }}/repo-platform/actions/validate-commit-names@{{ uses_ref }}
 
+  # Informational, deliberately NOT in all-green's needs: a red run flags
+  # template-convention drift (usually local edits to managed files), but
+  # it never blocks this repository's merges - the next sync PR heals it.
   validate-template:
     runs-on: ubuntu-latest
     steps:
@@ -134,7 +137,6 @@ jobs:
       - checks
       - typography
       - commit-names
-      - validate-template
       - actionlint
       - yamllint
 {% if 'bun' in modules %}{% if enable_codeql %}      - codeql-javascript
