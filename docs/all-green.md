@@ -7,7 +7,11 @@ status check: `all-green`. The required-checks list never changes when CI
 jobs are added, renamed, or turned into matrices.
 
 The template generates ci.yml with this shape and keeps managing it: sync
-updates the standard jobs and the gate. Repo-specific jobs live in the
+updates the standard jobs and the gate. Module checks run inside the gate
+too: the pr-title module contributes a `pr-title` job (Conventional Commit
+title check), and public repos with a toolchain get a `codeql` job that
+calls the CodeQL analysis workflow - so branch protection blocks on both
+without any extra required checks. Repo-specific jobs live in the
 repo-owned `.github/workflows/checks.yml` (`_skip_if_exists`), which the
 managed ci.yml calls inside the gate through its `checks` job. all-green
 sees only that job's aggregate result, so the skipped-is-failure rule below
@@ -44,8 +48,18 @@ Notes:
   failed or was skipped. Without it a failed dependency leaves all-green
   skipped, and a skipped check does not block the merge.
 - The strict `join(needs.*.result)` gate treats `skipped` as failure. If a
-  job may legitimately skip, make it exit successfully with a message
-  instead of using a job-level `if:`.
+  job may legitimately skip, keep the job itself unconditional and put the
+  `if:` on its steps: a job whose steps all skip still counts as `success`.
+  The managed `pr-title` job works this way - ci.yml also runs on push,
+  dispatch, and (with CodeQL) schedule events, so its validation step
+  carries `if: github.event_name == 'pull_request'` instead of a job-level
+  skip. In the repo-owned checks.yml, exit successfully with a message
+  instead.
+- A job that calls a reusable workflow gates on that whole workflow: the
+  managed `codeql` job calls `.github/workflows/codeql.yml`, and all-green
+  sees the aggregate result of every analysis job in it. The caller job
+  grants the permissions the analysis needs (`security-events: write`);
+  a caller job's permissions are the ceiling for the called workflow.
 - Jobs that must run only after CI passes should `needs: all-green`; the
   validator exempts them from the needs-list check. The release-please module
   ships one: a thin ci.yml `release` job gated this way that calls the
