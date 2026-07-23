@@ -69,6 +69,10 @@ Notes:
   repo-owned release.yml pipeline (which runs the managed release-please.yml
   machinery plus any repo pre/post-release jobs), so a release only ever
   happens once the whole gate is green on main.
+- One job is informational by design: `validate-template` runs in every
+  managed repo's ci.yml but is deliberately NOT in all-green's needs. A red
+  run flags template-convention drift without blocking the repo's merges;
+  the next sync PR heals the drift.
 - `Vivswan/repo-platform/actions/validate-template` enforces this shape:
-  all-green must exist and `needs:` every gating job, and a `typography`
-  job must exist.
+  all-green must exist and `needs:` every gating job (downstream and
+  informational jobs exempt), and a `typography` job must exist.
