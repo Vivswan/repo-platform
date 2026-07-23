@@ -139,6 +139,11 @@ jobs:
             writeFileSync(path, text.replace(/^_src_path:.*$/m, "_src_path: " + process.env.CANONICAL));
           ')"
           if [ "$recorded" != "$canonical" ]; then
+            # copier update refuses a dirty tree, so the rewrite is
+            # committed; it rides the update branch into the sync PR.
+            git -C target -c user.name="repo-platform-sync" \
+              -c user.email="repo-platform-sync@users.noreply.github.com" \
+              commit -qam "chore: normalize the copier template source to ${canonical}"
             echo "::notice::${TARGET}: _src_path was '${recorded}'; rewritten to '${canonical}' (the canonical template source) for this and future updates."
           fi
           echo "src_path=${canonical}" >> "$GITHUB_OUTPUT"
@@ -358,8 +363,12 @@ jobs:
         id: changes
         env:
           DISPLAY: ${{ steps.versions.outputs.display }}
+          BASE_BRANCH: ${{ steps.target.outputs.default_branch }}
         run: |
-          if [ -z "$(git -C target status --porcelain)" ]; then
+          # Uncommitted copier output OR commits already on the branch (the
+          # _src_path normalization commits itself) both count as changes.
+          ahead="$(git -C target rev-list --count "origin/${BASE_BRANCH}..HEAD")"
+          if [ -z "$(git -C target status --porcelain)" ] && [ "$ahead" -eq 0 ]; then
             echo "::notice::${TARGET}: already matches ${DISPLAY}; no sync PR needed."
             echo "changed=false" >> "$GITHUB_OUTPUT"
           else
@@ -378,7 +387,11 @@ jobs:
           git -C target config user.name "repo-platform-sync"
           git -C target config user.email "repo-platform-sync@users.noreply.github.com"
           git -C target add --all
-          git -C target commit -m "chore: update repo-platform template to ${DISPLAY}"
+          # The tree can be clean when the only change is the committed
+          # _src_path normalization; there is still a branch to push.
+          if [ -n "$(git -C target status --porcelain)" ]; then
+            git -C target commit -qm "chore: update repo-platform template to ${DISPLAY}"
+          fi
 
           # The checkout kept no credentials (see above); authenticate this
           # push alone. The lease is captured ONCE and reused on the retry:
