@@ -2,7 +2,10 @@
 
 The template is standards-only: the native toolchain owns the project
 skeleton, repo-platform layers CI conventions, settings, gitignore, and
-agent instructions on top.
+agent instructions on top. There is nothing to configure in the new repo
+itself: no sync workflow, no secrets. Once the repo exists on GitHub with
+`.repo-platform.yml` on its default branch, repo-platform's push sync
+picks it up.
 
 ## 1. Scaffold with the native tool
 
@@ -16,9 +19,10 @@ mkdir my-project && cd my-project && bun init
 
 ## 2. Apply the template
 
-Requires [copier](https://copier.readthedocs.io) >= 9.8.0 (serialized multiselect answers). `main` holds only
-sources; consume the GENERATED build refs, and match the initial `--vcs-ref`
-to the channel you pick when asked:
+Requires [copier](https://copier.readthedocs.io) >= 9.8.0 (serialized multiselect answers) and
+[bun](https://bun.sh) on PATH (copier's `_migrations` hook runs a bun script). `main` holds
+only sources; consume the GENERATED build refs, and match the initial
+`--vcs-ref` to the channel you pick when asked:
 
 ```bash
 git init -b main
@@ -40,12 +44,15 @@ multiselect (any combination of `agents`, `bun`, `uv`, `pages`,
 `release-please`, `issue-templates`, `pr-title`, `auto-assign`,
 `settings-sync`), follow-up
 parameters for modules that have them (see [docs/pages.md](pages.md)), and
-visibility. Answers are recorded in `.copier-answers.yml`. Never delete
-that file; template sync depends on it.
+visibility. Answers are recorded in `.copier-answers.yml`; never delete
+that file, `copier update` depends on it.
 
-To switch channels later:
-`copier update --vcs-ref templates/vX.Y.Z -d channel=latest` (or
-`--vcs-ref staging -d channel=staging`).
+The chosen modules also land in `.repo-platform.yml`, and that file is the
+selection's home from then on: edit its `modules:` list and the next sync
+PR applies the change. Its presence is what marks the repo as managed.
+
+To switch channels later, change the repo's entry under `config:` in
+repo-platform's `repos.yml` (see step 4).
 
 ## 3. Add checks to checks.yml
 
@@ -54,10 +61,10 @@ own checks:
 
 - `.github/workflows/ci.yml` is template-managed: the standard jobs
   (`typography`, `commit-names`, `validate-template`, `actionlint`,
-  `yamllint`), module checks (`pr-title` with that module, `codeql` on
-  public repos with a toolchain), the aggregate `all-green` gate, and a
-  `checks` job that calls checks.yml. Sync updates it; don't edit it
-  directly.
+  `yamllint`), module checks (`pr-title` with that module, per-language
+  `codeql-*` jobs on public repos with a toolchain), the aggregate
+  `all-green` gate, and a `checks` job that calls checks.yml. Sync updates
+  it; don't edit it directly.
 - `.github/workflows/checks.yml` is repo-owned (`_skip_if_exists`): put the
   repository's test and lint jobs there (multiple jobs, matrices, and
   further local reusable workflows all work). They run inside the gate
@@ -80,26 +87,60 @@ own checks:
 
 See the [all-green convention](all-green.md) for how the gate works.
 
-## 4. Publish
+## 4. Publish and register
 
 ```bash
 gh repo create Vivswan/my-project --public --source . --push
 ```
 
-Optionally add `REPO_PLATFORM_TOKEN` as an Actions secret: a
-[fine-grained PAT](https://github.com/settings/personal-access-tokens/new?name=REPO_PLATFORM_TOKEN&description=repo-platform+template+sync+and+settings-sync&contents=write&pull_requests=write&workflows=write&administration=write&issues=write)
-with Contents:RW, Pull requests:RW, Workflows:RW, Administration:RW, and
-Issues:RW on this repo (the link pre-selects all five permissions).
+That is the whole repo-side setup. repo-platform's `repos.yml` wildcard
+auto-discovers the repo, and the presence of `.repo-platform.yml` opts it
+into push sync; update PRs start arriving on releases and the weekly cron
+(`gh workflow run sync-repos.yml -f repo=Vivswan/my-project -R Vivswan/repo-platform`
+syncs it immediately).
 
-With it:
+In repo-platform, two optional registrations:
 
-- template-sync PRs trigger CI automatically
-- the settings-sync module can apply `.github/settings.yml`
+- `config:` entry in `repos.yml`: only when the repo deviates from
+  `defaults.channel` (staging). Auto-discovered repos need no entry
+  otherwise.
+- `exclude:` list in `repos.yml`: only for opting a discovered repo OUT of
+  management; a new managed repo does not touch it.
 
-Without it:
+## 5. Pick a settings home
 
-- sync still works for most updates (close/reopen the PR to run checks)
-- settings-sync skips with a notice
-- template updates that change workflow files fail with an error: GitHub
-  never lets the default GITHUB_TOKEN push changes under
-  `.github/workflows/`
+Repository settings are applied from repo-platform (see
+[docs/settings.md](settings.md)). Pick one of the two homes:
+
+Central (the default): add `settings/repos/my-project.yml` in
+repo-platform. `settings/defaults.yml` already supplies the shared
+`repository:` field block, so the file only carries repo specifics plus
+the list-valued sections (arrays do not merge with defaults):
+
+```yaml
+# settings/repos/my-project.yml
+repository:
+  description: One-line description (match the copier answer)
+  topics: comma, separated, topics
+
+labels:
+  - name: bug
+    color: "d73a4a"
+    description: Something isn't working
+  # ...every label the repo should keep; undeclared labels are deleted
+
+rulesets:
+  - name: main
+    # ...branch protection; copy a sibling file in settings/repos/ as the
+    # starting point
+```
+
+The easiest start is copying `settings/repos/repo-platform.yml` and
+trimming it. Dispatch `gh workflow run settings-repos.yml` for a drift
+report (`check_only` defaults to true), then apply with
+`gh workflow run settings-repos.yml -f check_only=false`.
+
+In-repo (opt-in): select the `settings-sync` module instead and skip the
+central file. The repo then carries its own `.github/settings.yml`, which
+the central run applies; add a repo-scoped PAT only if you want
+self-apply on push ([docs/settings.md](settings.md#the-in-repo-home-the-settings-sync-module)).

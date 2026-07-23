@@ -23,8 +23,14 @@ jobs:
           ref: ${{ github.event.repository.default_branch }}
           token: ${{ secrets.REPO_PLATFORM_TOKEN || github.token }}
 
+      - name: Set up bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
       - name: Regenerate from latest upstream
-        run: python3 scripts/build_gitignore.py
+        run: bun scripts/build_gitignore.ts
 
       - name: Detect changes
         id: changes
@@ -57,5 +63,5 @@ jobs:
               --base "$BASE_BRANCH" \
               --head "$branch" \
               --title "chore: refresh gitignore templates from github/gitignore" \
-              --body "Automated regeneration of \`templates/base/.gitignore.jinja\` from [github/gitignore@\`${sha:0:12}\`](https://github.com/github/gitignore/tree/${sha}). Merging this rebuilds the staging branch; cutting a release propagates it to latest-channel repos on their next sync."
+              --body "Automated regeneration of \`templates/base/.gitignore.jinja\` from [github/gitignore@\`${sha:0:12}\`](https://github.com/github/gitignore/tree/${sha}). Merging this rebuilds the staging branch; cutting a release makes sync-repos push it to latest-channel repos."
           fi

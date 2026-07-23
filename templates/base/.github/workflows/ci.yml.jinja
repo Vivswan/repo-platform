@@ -84,15 +84,11 @@ jobs:
         run: yamllint -s .
 {%- if enable_codeql %}
 
-  # CodeQL runs inside the gate: this thin job calls the analysis workflow,
-  # and a caller job's permissions are the ceiling for every job in the
-  # called workflow, so the scan permissions are granted here.
-  codeql:
-    permissions:
-      contents: read
-      security-events: write
-      actions: read
-    uses: ./.github/workflows/codeql.yml
+  # CodeQL analysis runs inside the gate (one job per language), so a failed
+  # scan blocks merges. Each job grants the scan permissions - a caller
+  # job's permissions are the ceiling for the called workflow - and the
+  # weekly re-scan schedule lives on this workflow's triggers.
+{# compose:codeql-languages #}
 {%- endif %}
 {# compose:ci-gate-jobs #}
   all-green:
@@ -105,9 +101,6 @@ jobs:
       - validate-template
       - actionlint
       - yamllint
-{%- if enable_codeql %}
-      - codeql
-{%- endif %}
 {# compose:ci-gate-needs #}
     runs-on: ubuntu-latest
     steps:
