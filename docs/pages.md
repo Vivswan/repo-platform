@@ -32,7 +32,7 @@ In the repository:
 
 | Question | Meaning | Default |
 |---|---|---|
-| `pages_setup` | Toolchain installed on the build runner (`bun`, `uv`, `none`) | `bun` if the bun module is selected, else `uv` if uv, else `none` |
+| `pages_setup` | Toolchain(s) installed on the build runner (comma-separated `bun`/`uv`, or `none`) | every selected toolchain module joined with commas (e.g. `bun,uv`), else `none` |
 | `pages_install_command` | Install step before each build (empty skips) | `bun install --frozen-lockfile` / `uv sync` / empty |
 | `pages_build_command` | The build; must not be empty | `bun run build` / `uv run mkdocs build --site-dir dist` |
 | `pages_dist_dir` | Build output directory | `dist` |

@@ -22,23 +22,4 @@ permissions:
   contents: read
 
 jobs:
-{%- if 'bun' in modules %}
-  codeql-javascript:
-    uses: {{ github_username }}/repo-platform/.github/workflows/reusable-codeql.yml@{{ uses_ref }}
-    with:
-      language: javascript-typescript
-    permissions:
-      contents: read
-      security-events: write
-      actions: read
-{%- endif %}
-{%- if 'uv' in modules %}
-  codeql-python:
-    uses: {{ github_username }}/repo-platform/.github/workflows/reusable-codeql.yml@{{ uses_ref }}
-    with:
-      language: python
-    permissions:
-      contents: read
-      security-events: write
-      actions: read
-{%- endif %}
+{# compose:codeql-languages #}
