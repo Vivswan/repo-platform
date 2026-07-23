@@ -13,8 +13,9 @@ there.
 
 In `repos.yml`:
 
-1. Add the repo to the `exclude:` list (the wildcard would otherwise keep
-   discovering it; this stops sync PRs).
+1. Add the repo to the `exclude:` list, or revoke the fleet PAT's access
+   to the repo (discovery only enrolls repos the token can write to);
+   either stops sync PRs.
 2. Remove its `config:` entry, if it has one.
 
 Then delete `settings/repos/<name>.yml`, if the repo uses the central
