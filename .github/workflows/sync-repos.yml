@@ -136,6 +136,9 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
         run: |
+          # The implicit runner shell has no pipefail; without it a gh api
+          # failure would vanish into jq's success.
+          set -o pipefail
           login="$(gh api user --jq .login)"
           gh api user/repos --paginate --slurp \
             | jq -c --arg login "$login" \
@@ -164,10 +167,17 @@ jobs:
             probe_code="$(curl -s -o /dev/null -w '%{http_code}' \
               -u "x-access-token:${PAT}" \
               "https://github.com/${slug}.git/info/refs?service=git-receive-pack")"
-            if [ "$probe_code" != "200" ]; then
-              echo "::notice::${slug}: skipped - the fleet token has no write access (push probe HTTP ${probe_code}). Grant the REPO_PLATFORM_TOKEN access to this repository to enroll it, or add it to repos.yml's exclude list to silence this."
-              continue
-            fi
+            case "$probe_code" in
+              200) ;;
+              401 | 403 | 404)
+                echo "::notice::${slug}: skipped - the fleet token has no write access (push probe HTTP ${probe_code}). Grant the REPO_PLATFORM_TOKEN access to this repository to enroll it, or add it to repos.yml's exclude list to silence this."
+                continue
+                ;;
+              *)
+                echo "::error::push-permission probe for ${slug} failed with HTTP ${probe_code}; not a permission answer, refusing to guess."
+                exit 1
+                ;;
+            esac
             # Only a 404 means "not adopted"; any other API failure (auth,
             # rate limit, outage) fails the plan instead of silently
             # skipping repos.

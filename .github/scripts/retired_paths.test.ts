@@ -34,6 +34,11 @@ describe("retiredPaths", () => {
     expect(retiredPaths(oldPaths, newPaths, [])).not.toContain("README.md");
   });
 
+  test("the protected settings.yml never appears even when de-rendered", () => {
+    const withSettings = new Set([...oldPaths, ".github/settings.yml"]);
+    expect(retiredPaths(withSettings, newPaths, [])).not.toContain(".github/settings.yml");
+  });
+
   test("a file outside both renders never appears (repo-owned by construction)", () => {
     const candidates = retiredPaths(oldPaths, newPaths, []);
     expect(candidates).not.toContain("src/index.ts");

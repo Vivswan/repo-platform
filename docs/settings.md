@@ -11,14 +11,23 @@ A repo's settings live in ONE of two homes:
 
 | Home | Settings file | How to pick it |
 |---|---|---|
-| Central (the default) | `settings/repos/<name>.yml` in repo-platform | add the file here |
-| In-repo (opt-in) | the repo's own `.github/settings.yml` | select the `settings-sync` module |
+| Central | `settings/repos/<name>.yml` in repo-platform | add the file here |
+| In-repo | the repo's own `.github/settings.yml` | carry the file (that is the whole opt-in) |
 
 Both homes are applied from repo-platform by the `settings-repos.yml`
 workflow, in one repo-settings-as-code invocation: `repos-dir` covers the
-central files and the action's `repos:` remote mode reads each module
-repo's own settings.yml from its default branch. When both exist for the
-same repository, the central file wins.
+central files and the action's `repos:` remote mode reads each in-repo
+file from its repo's default branch (enrolled and adopted repos only).
+When both exist for the same repository, the central file wins.
+
+Two guarantees for the in-repo home:
+
+- The file is repo-owned wherever it exists: template sync never deletes
+  it, even when a module change removes it from the render.
+- The `settings-sync` module is optional sugar, not the opt-in: it seeds
+  the file with the template baseline and adds a push-time self-apply
+  workflow (which needs the repo's own PAT and warns and skips without
+  one).
 
 `settings-repos.yml` runs on three triggers:
 
@@ -56,11 +65,15 @@ Stateless, declared-keys-only, upsert-by-name:
   `refs/heads/staging`, `templates/*` -> `refs/tags/templates/*`);
   `~DEFAULT_BRANCH` passes through.
 
-## The in-repo home: the settings-sync module
+## The in-repo home
 
-Selecting `settings-sync` renders `.github/settings.yml` in the repo plus
-a managed `settings-sync.yml` workflow (push on that file + manual
-dispatch) that self-applies it through `reusable-apply-settings.yml`.
+Carrying `.github/settings.yml` in the repo is the whole opt-in: the
+central `settings-repos.yml` run reads and applies it remotely, and
+template sync never deletes the file. The `settings-sync` module is
+optional sugar on top: it seeds the file with the template baseline
+(three-way merged on updates) and renders a managed `settings-sync.yml`
+workflow (push on that file + manual dispatch) that self-applies it
+through `reusable-apply-settings.yml`.
 
 Self-apply needs the repo's OWN `REPO_PLATFORM_TOKEN` Actions secret: a
 fine-grained PAT with Administration (read and write) and Issues (read and
@@ -76,8 +89,9 @@ In-repo to central:
 1. Copy the repo's rendered `.github/settings.yml` content to
    `settings/repos/<name>.yml` here (bare name, same owner).
 2. Remove `settings-sync` from the `modules:` list in the repo's
-   `.repo-platform.yml`; the next sync PR deletes `settings.yml` and the
-   `settings-sync.yml` caller from the repo.
+   `.repo-platform.yml`; the next sync PR deletes the `settings-sync.yml`
+   caller. The repo's `settings.yml` stays (sync never deletes it) -
+   remove it in the same PR, since the central file now wins over it.
 
 Central to in-repo:
 

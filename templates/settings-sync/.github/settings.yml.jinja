@@ -1,12 +1,13 @@
 ---
-# Repository settings applied by the settings-sync workflow (via
-# {{ github_username }}/repo-settings-as-code) when this file changes;
-# without the REPO_PLATFORM_TOKEN secret the workflow skips with a warning,
-# and {{ github_username }}/repo-platform's central settings-repos run heals this
-# repo either way. Undeclared labels are deleted; undeclared rulesets are
-# left alone.
-# Baseline managed by {{ github_username }}/repo-platform; repo-specific
-# additions survive template updates via three-way merge.
+# Repository settings, applied by {{ github_username }}/repo-platform's
+# central settings-repos run (and, when this file changes, by the
+# settings-sync workflow if the repo carries its own REPO_PLATFORM_TOKEN;
+# without one it skips with a warning). Undeclared labels are deleted;
+# undeclared rulesets are left alone.
+# Rendered by the settings-sync module: template updates keep the
+# baseline current via three-way merge (repo additions survive), and sync
+# NEVER deletes this file - it stays even if the module is deselected. A
+# central settings/repos/<name>.yml in repo-platform wins over it.
 
 repository:
   description: {{ description | tojson }}
