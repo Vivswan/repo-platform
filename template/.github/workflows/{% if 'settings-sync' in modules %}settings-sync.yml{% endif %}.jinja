@@ -3,7 +3,9 @@
 #
 # Applies this repository's .github/settings.yml via repo-settings-as-code.
 # Needs the REPO_PLATFORM_TOKEN secret (Administration + Issues write);
-# without it, runs skip with a notice.
+# without it, runs skip with a notice. No heal cron here on purpose:
+# {{ github_username }}/repo-platform's central settings-repos run applies this
+# repository's settings.yml regardless of this workflow.
 {#- The reusable workflow lives on main, not on the build branches: strip a
     templates/vX.Y.Z build-tag _commit to the same-version release tag on
     main; anything else (staging describe/sha strings, fresh copies) pins
@@ -18,8 +20,6 @@ on:
   push:
     branches: [main]
     paths: [.github/settings.yml]
-  schedule:
-    - cron: "11 6 3 * *"
   workflow_dispatch:
     inputs:
       check_only:

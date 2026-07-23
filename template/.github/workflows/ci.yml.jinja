@@ -84,15 +84,29 @@ jobs:
         run: yamllint -s .
 {%- if enable_codeql %}
 
-  # CodeQL runs inside the gate: this thin job calls the analysis workflow,
-  # and a caller job's permissions are the ceiling for every job in the
-  # called workflow, so the scan permissions are granted here.
-  codeql:
+  # CodeQL analysis runs inside the gate (one job per language), so a failed
+  # scan blocks merges. Each job grants the scan permissions - a caller
+  # job's permissions are the ceiling for the called workflow - and the
+  # weekly re-scan schedule lives on this workflow's triggers.
+{% if 'bun' in modules %}
+  codeql-javascript:
+    uses: {{ github_username }}/repo-platform/.github/workflows/reusable-codeql.yml@{{ uses_ref }}
+    with:
+      language: javascript-typescript
     permissions:
       contents: read
       security-events: write
       actions: read
-    uses: ./.github/workflows/codeql.yml
+{% endif %}{% if 'uv' in modules %}
+  codeql-python:
+    uses: {{ github_username }}/repo-platform/.github/workflows/reusable-codeql.yml@{{ uses_ref }}
+    with:
+      language: python
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+{% endif %}
 {%- endif %}
 {% if 'pr-title' in modules %}
   # Conventional Commit PR title, checked inside the gate so branch
@@ -122,10 +136,9 @@ jobs:
       - validate-template
       - actionlint
       - yamllint
-{%- if enable_codeql %}
-      - codeql
-{%- endif %}
-{% if 'pr-title' in modules %}      - pr-title{% endif %}
+{% if 'bun' in modules %}{% if enable_codeql %}      - codeql-javascript
+{% endif %}{% endif %}{% if 'uv' in modules %}{% if enable_codeql %}      - codeql-python
+{% endif %}{% endif %}{% if 'pr-title' in modules %}      - pr-title{% endif %}
     runs-on: ubuntu-latest
     steps:
       - name: All jobs green

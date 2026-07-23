@@ -1,0 +1,5 @@
+# Managed by {{ github_username }}/repo-platform. Path prefixes exempt from
+# the check-typography action, one per line, relative to the repository root.
+{% if 'release-please' in modules %}# release-please writes CHANGELOG.md from commit and PR text, which is not
+# ASCII-guaranteed.
+CHANGELOG.md{% endif %}

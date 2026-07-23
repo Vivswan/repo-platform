@@ -24,12 +24,12 @@ _skip_if_exists:
   - release-please-config.json
   - .release-please-manifest.json
 
-# Migrations use FROM-version naming (see migrations/run.py): each script in
+# Migrations use FROM-version naming (see migrations/run.ts): each script in
 # migrations/ is named for the release it migrates away from, so authoring
 # never requires predicting the next release number. Copier invokes the
 # runner once per update; selection happens inside it.
 _migrations:
-  - command: python3 "{{ _copier_conf.src_path }}/migrations/run.py"
+  - command: bun "{{ _copier_conf.src_path }}/migrations/run.ts"
     when: "{{ _stage == 'after' }}"
 
 project_name:
@@ -44,16 +44,6 @@ project_slug:
 description:
   type: str
   help: One-line repository description (used in settings.yml)
-
-homepage:
-  type: str
-  help: Homepage URL (optional, used in settings.yml)
-  default: ""
-
-topics:
-  type: str
-  help: Comma-separated GitHub topics (used in settings.yml)
-  default: ""
 
 # Which generated build branch this repo follows. Vivswan's own managed
 # repos follow staging; latest is the stable default for everything else.
@@ -82,8 +72,25 @@ modules:
     issue-templates - bug/feature issue forms: issue-templates
     pr-title - Conventional Commit PR title check in the all-green gate: pr-title
     auto-assign - auto-assign issues/PRs/alerts to owner: auto-assign
-    settings-sync - apply .github/settings.yml via repo-settings-as-code: settings-sync
-  default: [agents, release-please, issue-templates, pr-title, auto-assign, settings-sync]
+    settings-sync - in-repo .github/settings.yml applied with the repo's own PAT: settings-sync
+  # settings-sync is deliberately NOT a default: central settings
+  # (settings/repos/<name>.yml in repo-platform) are the default home.
+  default: [agents, release-please, issue-templates, pr-title, auto-assign]
+
+# --- settings-sync module parameters (asked only when it is selected) ---
+# Both feed the module's rendered .github/settings.yml.
+
+homepage:
+  type: str
+  help: Homepage URL (optional, used in settings.yml)
+  default: ""
+  when: "{{ 'settings-sync' in modules }}"
+
+topics:
+  type: str
+  help: Comma-separated GitHub topics (used in settings.yml)
+  default: ""
+  when: "{{ 'settings-sync' in modules }}"
 
 # --- pages module parameters (asked only when pages is selected) ---
 
