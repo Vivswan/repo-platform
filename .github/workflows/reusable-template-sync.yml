@@ -184,9 +184,18 @@ jobs:
             target_ref="staging"
             # Staging validates with the SOURCE commit the staging build was
             # assembled from (stamped in its commit message), so validator
-            # rules match the rendered tree even when main moved since.
+            # rules match the rendered tree even when main moved since. A
+            # main history rewrite can orphan that commit; the builder
+            # re-stamps staging on its next run, so refuse to guess here.
+            # GITHUB_SHA is not main on release events, hence the explicit
+            # resolve for the no-stamp fallback.
+            main_sha="$(git rev-parse refs/remotes/origin/main)"
             validate_ref="$(git log -1 --format=%B "$target_sha" | sed -n 's|^source: .*/commit/||p' | head -1)"
-            validate_ref="${validate_ref:-$GITHUB_SHA}"
+            if [ -n "$validate_ref" ] && ! git rev-parse --verify --quiet "${validate_ref}^{commit}" >/dev/null; then
+              echo "::error::staging's stamped source commit ${validate_ref} is unreachable (main history rewrite). Dispatch the Build Branches workflow - it re-stamps staging - then re-run."
+              exit 1
+            fi
+            validate_ref="${validate_ref:-$main_sha}"
             display="staging@${target_sha:0:12}"
           else
             if [ -n "$REQUESTED" ]; then
