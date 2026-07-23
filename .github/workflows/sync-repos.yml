@@ -27,6 +27,15 @@ on:
         description: Single owner/name to sync (defaults to all managed repos)
         required: false
         type: string
+      recover:
+        description: >-
+          Recovery mode - "recopy" regenerates the repo with a full
+          re-render (no three-way merge) when its recorded _commit base
+          is unusable. Single-repo only; the PR stays manual-review.
+        required: false
+        type: choice
+        options: [none, recopy]
+        default: none
 
 permissions:
   contents: read
@@ -54,6 +63,18 @@ jobs:
         run: |
           if [ -z "$PAT" ]; then
             echo "::error::push sync cannot run: the REPO_PLATFORM_TOKEN secret is not set, and the default GITHUB_TOKEN cannot write to other repos. Create a fine-grained PAT with the permissions pre-selected at https://github.com/settings/personal-access-tokens/new?name=REPO_PLATFORM_TOKEN&description=repo-platform+fleet%3A+push+sync+and+central+settings&contents=write&pull_requests=write&workflows=write&administration=write&issues=write scoped to the managed repos, then store it with 'gh secret set REPO_PLATFORM_TOKEN' in this repo."
+            exit 1
+          fi
+
+      # A recovery re-render clobbers local edits in template-managed
+      # files; it must never fan out across the fleet by accident.
+      - name: Require a single-repo scope for recovery
+        if: inputs.recover == 'recopy'
+        env:
+          ONLY_REPO: ${{ inputs.repo }}
+        run: |
+          if [ -z "$ONLY_REPO" ]; then
+            echo "::error::recover=recopy is a single-repo operation: pass the repo input (owner/name) with it, so a full re-render can never fan out across the fleet."
             exit 1
           fi
 
@@ -169,5 +190,8 @@ jobs:
       target_repo: ${{ matrix.repo }}
       version: ${{ needs.plan.outputs.version }}
       channel: ${{ matrix.channel }}
+      # The dispatch default is the literal "none"; only "recopy" means
+      # recovery downstream.
+      recover: ${{ inputs.recover == 'recopy' && 'recopy' || '' }}
     secrets:
       REPO_PLATFORM_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
