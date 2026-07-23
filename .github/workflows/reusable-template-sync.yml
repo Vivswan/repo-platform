@@ -112,28 +112,31 @@ jobs:
           test -f target/.copier-answers.yml || { echo "::error::${TARGET} has no .copier-answers.yml on its default branch, so copier has no recorded answers to update from. Restore the file from git history, or regenerate the repo with 'copier copy gh:${GITHUB_REPOSITORY} . --vcs-ref staging' (or a templates/vX.Y.Z tag)."; exit 1; }
 
       # copier update and the cleanup renders fetch the template from the
-      # TARGET's recorded _src_path and execute its tasks with --trust. A
-      # compromised target could point it at a hostile template, so only
-      # this repository is accepted as the source.
-      - name: Validate the recorded template source
+      # answers file's _src_path and execute its tasks with --trust. That
+      # value is target-controlled (and repos generated from a local
+      # checkout record a filesystem path), so it is never trusted OR
+      # required to be right: it is rewritten to the canonical source
+      # before any copier command, and the rewrite lands in the PR diff.
+      - name: Normalize the recorded template source
         id: src
         run: |
-          src_path="$(bun -e '
-            const { readFileSync } = require("node:fs");
-            const { parse } = require("yaml");
-            const answers = parse(readFileSync("target/.copier-answers.yml", "utf-8"));
-            console.log(answers._src_path ?? "");
+          canonical="gh:${GITHUB_REPOSITORY}"
+          recorded="$(CANONICAL="$canonical" bun -e '
+            const { readFileSync, writeFileSync } = require("node:fs");
+            const path = "target/.copier-answers.yml";
+            const text = readFileSync(path, "utf-8");
+            const match = text.match(/^_src_path:.*$/m);
+            if (!match) {
+              console.error("::error::no _src_path line in .copier-answers.yml");
+              process.exit(1);
+            }
+            console.log(match[0].replace(/^_src_path:\s*/, ""));
+            writeFileSync(path, text.replace(/^_src_path:.*$/m, "_src_path: " + process.env.CANONICAL));
           ')"
-          case "$src_path" in
-            "gh:${GITHUB_REPOSITORY}" | "gh:${GITHUB_REPOSITORY}.git" | \
-            "https://github.com/${GITHUB_REPOSITORY}" | "https://github.com/${GITHUB_REPOSITORY}.git")
-              ;;
-            *)
-              echo "::error::${TARGET}'s .copier-answers.yml records _src_path '${src_path}', which is not ${GITHUB_REPOSITORY}. Refusing to run copier against an unexpected template source; fix _src_path on the target's default branch first."
-              exit 1
-              ;;
-          esac
-          echo "src_path=${src_path}" >> "$GITHUB_OUTPUT"
+          if [ "$recorded" != "$canonical" ]; then
+            echo "::notice::${TARGET}: _src_path was '${recorded}'; rewritten to '${canonical}' (the canonical template source) for this and future updates."
+          fi
+          echo "src_path=${canonical}" >> "$GITHUB_OUTPUT"
 
       - name: Resolve channel, refs, and template copier configs
         id: versions
