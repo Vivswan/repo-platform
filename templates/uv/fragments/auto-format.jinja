@@ -1,0 +1,6 @@
+
+      - uses: astral-sh/setup-uv@v7
+      - name: Format (ruff)
+        run: |
+          uvx ruff check --fix .
+          uvx ruff format .

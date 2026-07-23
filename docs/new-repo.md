@@ -47,34 +47,36 @@ To switch channels later:
 `copier update --vcs-ref templates/vX.Y.Z -d channel=latest` (or
 `--vcs-ref staging -d channel=staging`).
 
-## 3. Add a ci.yml
+## 3. Add checks to checks.yml
 
-`ci.yml` is repo-owned. Start from the [all-green convention](all-green.md)
-and include the standard jobs:
+CI is split so the template can keep improving it while each repo keeps its
+own checks:
 
-```yaml
-jobs:
-  typography:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: Vivswan/repo-platform/actions/check-typography@vX.Y.Z
-  validate-template:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: Vivswan/repo-platform/actions/validate-template@vX.Y.Z
-  commit-names:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-      - uses: Vivswan/repo-platform/actions/validate-commit-names@vX.Y.Z
-  # ...your test/lint jobs...
-  all-green:
-    # see docs/all-green.md
-```
+- `.github/workflows/ci.yml` is template-managed: the standard jobs
+  (`typography`, `commit-names`, `validate-template`, `actionlint`,
+  `yamllint`), the aggregate `all-green` gate, and a `checks` job that calls
+  checks.yml. Sync updates it; don't edit it directly.
+- `.github/workflows/checks.yml` is repo-owned (`_skip_if_exists`): put the
+  repository's test and lint jobs there (multiple jobs, matrices, and
+  further local reusable workflows all work). They run inside the gate
+  through the `checks` job.
+- with the release-please module: a `release` job runs on top of the gate
+  (`needs: all-green`), calling the repo-owned
+  `.github/workflows/release.yml` pipeline. By default that pipeline just
+  runs the managed `release-please.yml` machinery; add repo jobs before the
+  release (make `release-please` `needs:` them) or after it (gated on its
+  `release_created`/`tag_name` outputs: packaging, publishing). Everything
+  runs in one workflow run, so no PAT is needed to chain the steps. The
+  `release-please-config.json` and `.release-please-manifest.json` starters
+  are repo-owned too (release-please updates the manifest via release PRs).
+- with the bun or uv module: a repo-owned `auto-format.yml` starter (label a
+  PR `fix-lint` to get a formatting commit pushed to it), prefilled with each
+  selected toolchain's formatter.
+- with the agents module: a repo-owned `copilot-setup-steps.yml` starter
+  (environment setup for the Copilot coding agent), prefilled with installs
+  for the selected toolchains.
+
+See the [all-green convention](all-green.md) for how the gate works.
 
 ## 4. Publish
 

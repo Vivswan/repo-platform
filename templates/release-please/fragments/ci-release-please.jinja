@@ -1,0 +1,21 @@
+
+  # Release from a green main only: the repo-owned release.yml pipeline
+  # (which runs the managed release-please.yml machinery, plus any of this
+  # repository's pre/post-release jobs) runs downstream of all-green, so a
+  # red commit can never cut a release or refresh the release PR.
+  # Deliberately NOT in all-green's needs: it depends on the gate, it is not
+  # gated by it. Secrets are inherited deliberately: publish steps need
+  # them, and this never runs for pull requests.
+  release:
+    needs: [all-green]
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    # The publishing ceiling for the repo-owned release.yml jobs (release
+    # assets, ghcr, npm/PyPI trusted publishing); nested jobs can only
+    # narrow it, never raise it.
+    permissions:
+      contents: write
+      pull-requests: write
+      packages: write
+      id-token: write
+    uses: ./.github/workflows/release.yml
+    secrets: inherit

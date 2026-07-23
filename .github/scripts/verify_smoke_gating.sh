@@ -81,8 +81,54 @@ else
   test ! -e /tmp/smoke/.github/copilot-instructions.md && test ! -L /tmp/smoke/.github/copilot-instructions.md
 fi
 
-# release-please module gates the autorelease labels in settings.yml.
+# release-please module gates the autorelease labels in settings.yml, the
+# managed release-please.yml machinery, the repo-owned release.yml pipeline
+# plus its thin caller job in the managed ci.yml, and the config files.
 if has release-please; then present "autorelease: pending" /tmp/smoke/.github/settings.yml; else absent "autorelease: pending" /tmp/smoke/.github/settings.yml; fi
+if has release-please; then
+  test -f "$wf/release-please.yml"
+  test -f "$wf/release.yml"
+  present "uses: ./.github/workflows/release.yml" "$wf/ci.yml"
+  test -f /tmp/smoke/release-please-config.json
+  test -f /tmp/smoke/.release-please-manifest.json
+else
+  test ! -e "$wf/release-please.yml"
+  test ! -e "$wf/release.yml"
+  absent "uses: ./.github/workflows/release.yml" "$wf/ci.yml"
+  test ! -e /tmp/smoke/release-please-config.json
+  test ! -e /tmp/smoke/.release-please-manifest.json
+fi
+
+# auto-format follows the toolchain modules; its formatter steps, like the
+# checks.yml example comments, are spliced from the bun/uv module fragments.
+if has bun; then present "Example bun checks" "$wf/checks.yml"; else absent "Example bun checks" "$wf/checks.yml"; fi
+if has uv; then present "Example uv checks" "$wf/checks.yml"; else absent "Example uv checks" "$wf/checks.yml"; fi
+if has bun || has uv; then
+  test -f "$wf/auto-format.yml"
+  if has bun; then present "biome" "$wf/auto-format.yml"; else absent "biome" "$wf/auto-format.yml"; fi
+  if has uv; then present "ruff" "$wf/auto-format.yml"; else absent "ruff" "$wf/auto-format.yml"; fi
+else
+  test ! -e "$wf/auto-format.yml"
+fi
+
+# copilot-setup-steps belongs to the agents module; the toolchain installs
+# inside it splice from the bun/uv fragments.
+if has agents; then
+  test -f "$wf/copilot-setup-steps.yml"
+  if has bun; then present "oven-sh/setup-bun" "$wf/copilot-setup-steps.yml"; else absent "oven-sh/setup-bun" "$wf/copilot-setup-steps.yml"; fi
+  if has uv; then present "astral-sh/setup-uv" "$wf/copilot-setup-steps.yml"; else absent "astral-sh/setup-uv" "$wf/copilot-setup-steps.yml"; fi
+else
+  test ! -e "$wf/copilot-setup-steps.yml"
+fi
+
+# Managed ci.yml is always generated (repo checks live in the repo-owned
+# checks.yml it calls); the validator asserts the all-green shape, so only
+# check the wiring and the composite-action pin falling back to main here
+# (scratch build tree, same as the template-sync pin below).
+test -f "$wf/ci.yml"
+test -f "$wf/checks.yml"
+present "uses: ./.github/workflows/checks.yml" "$wf/ci.yml"
+present "actions/check-typography@main" "$wf/ci.yml"
 
 # Row-specific expectations for the rendered pages caller.
 if [ -n "$EXPECT_IN_PAGES" ]; then
