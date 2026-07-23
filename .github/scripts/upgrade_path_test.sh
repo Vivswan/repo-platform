@@ -4,8 +4,9 @@
 # freshly assembled build tree the way reusable-template-sync does - module
 # selection via sync_modules.ts, live -d data, conflict resolution, and
 # retired-file cleanup via retired_paths.ts. Asserts that files the template
-# dropped are deleted (including a locally MODIFIED settings.yml - the
-# modify/delete case) while repo-owned sentinels survive.
+# dropped are deleted while repo-owned content survives - including
+# settings.yml, which is repo-owned wherever it exists (protected from
+# cleanup and restored if copier de-renders it).
 #
 # Both template refs must live in ONE clone (copier re-renders the old
 # version from _src_path), so build trees are committed to local orphan
@@ -40,10 +41,20 @@ git tag -d templates/v99.99.99 2>/dev/null || true
 
 bun install --frozen-lockfile
 
-# Commit a build tree as an orphan commit + local tag in the workspace clone.
-commit_build_tree() { # <tree-dir> <tag>
-  git worktree add --detach --quiet /tmp/wt HEAD
-  git -C /tmp/wt switch --quiet --orphan ci-build
+# Commit a build tree as a commit + local tag in the workspace clone. With
+# a parent ref the commit CHAINS onto it, mirroring the real append-only
+# build branches; without one it starts an orphan line. The chain matters:
+# copier versions our unparseable refs by dunamai's commit-count fallback
+# (0.0.0.postN+hash), so the new build must have a higher count than the
+# old or copier's downgrade check trips on hash ordering.
+commit_build_tree() { # <tree-dir> <tag> [parent-ref]
+  if [ -n "${3:-}" ]; then
+    git worktree add --detach --quiet /tmp/wt "$3"
+    git -C /tmp/wt switch --quiet -c ci-build
+  else
+    git worktree add --detach --quiet /tmp/wt HEAD
+    git -C /tmp/wt switch --quiet --orphan ci-build
+  fi
   rsync -a --delete --exclude=.git "$1/" /tmp/wt/
   git -C /tmp/wt add -A
   git -C /tmp/wt -c user.name=ci -c user.email=ci@localhost commit -q -m "build(ci): $2"
@@ -96,11 +107,13 @@ git add --all
 git -c user.name=ci -c user.email=ci@localhost commit -q -m "chore: init"
 
 # Local modifications a real repo carries into a sync:
-# - settings.yml gains a line, then leaves the render (modify/delete case)
+# - settings.yml gains a line AND leaves the render (module deselected):
+#   it is repo-owned and must SURVIVE with the edit (protected in
+#   retired_paths.ts plus the preserve step below)
 # - checks.yml is generated-once (_skip_if_exists): local edits must survive
 # - src/keep_me.txt is repo-owned content the template never rendered
 # - .repo-platform.yml drops settings-sync (the module-deselection edit a
-#   repo merges before the sync; central settings take over)
+#   repo merges before the sync)
 echo "# local settings note" >> .github/settings.yml
 echo "# local checks note" >> .github/workflows/checks.yml
 mkdir -p src
@@ -113,11 +126,11 @@ fi
 git add --all
 git -c user.name=ci -c user.email=ci@localhost commit -q -m "chore: local modifications"
 
-# Assemble the would-be next release INTO THE WORKSPACE CLONE as an orphan
-# commit + local templates/v* tag.
+# Assemble the would-be next release INTO THE WORKSPACE CLONE, chained
+# onto the previous build tag (see commit_build_tree) + a local tag.
 cd "$GITHUB_WORKSPACE"
 bun .github/scripts/build_branch_tree.ts --dest /tmp/next --channel latest --version v99.99.99
-commit_build_tree /tmp/next templates/v99.99.99
+commit_build_tree /tmp/next templates/v99.99.99 "$prev"
 git show "${prev}:copier.yml" > "$WORK/copier-old.yml"
 git show templates/v99.99.99:copier.yml > "$WORK/copier-new.yml"
 
@@ -185,8 +198,9 @@ bun .github/scripts/retired_paths.ts \
   --new-render "$WORK/render-new" \
   --old-copier "$WORK/copier-old.yml" \
   --new-copier "$WORK/copier-new.yml" > "$WORK/retired-paths.json"
-grep -qF '.github/settings.yml' "$WORK/retired-paths.json" \
-  || fail "retired_paths must list .github/settings.yml (modify/delete case)"
+if grep -qF '.github/settings.yml' "$WORK/retired-paths.json"; then
+  fail "retired_paths must never list the repo-owned settings.yml (PROTECTED_PATHS)"
+fi
 if grep -qF 'checks.yml' "$WORK/retired-paths.json"; then
   fail "retired_paths must never list the generated-once checks.yml"
 fi
@@ -197,6 +211,14 @@ while IFS= read -r path; do
   fi
 done < <(jq -r '.[]' "$WORK/retired-paths.json")
 
+# Mirror the workflow's preserve step: settings.yml is repo-owned; if the
+# update de-rendered and deleted it, it comes back from the base commit.
+if git -C "$PROJECT" cat-file -e "HEAD:.github/settings.yml" 2>/dev/null \
+    && [ ! -e "$PROJECT/.github/settings.yml" ]; then
+  git -C "$PROJECT" checkout HEAD -- .github/settings.yml
+  echo "preserved repo-owned .github/settings.yml"
+fi
+
 bun install --frozen-lockfile --cwd "$GITHUB_WORKSPACE/actions/validate-template"
 bun "$GITHUB_WORKSPACE/actions/validate-template/validate_generated_files.ts" "$PROJECT"
 
@@ -204,17 +226,21 @@ cd "$PROJECT"
 # _commit must record the build tag (git describe lands exactly on it).
 grep -qF "_commit: templates/v99.99.99" .copier-answers.yml \
   || fail ".copier-answers.yml does not record templates/v99.99.99"
-# Files the template retired must be gone - settings.yml despite its local
-# modification (deleted by the cleanup above, not by copier itself).
+# Files the template retired must be gone.
 for f in \
   .github/workflows/template-sync.yml \
   .github/workflows/settings-sync.yml \
-  .github/settings.yml \
   .github/workflows/pr-title.yml \
   .github/workflows/codeql.yml
 do
   test ! -e "$f" || fail "retired file survived the update: $f"
 done
+# settings.yml is repo-owned (PROTECTED_PATHS + the preserve step):
+# deselecting the module
+# must leave the file AND its local edit alone.
+test -f .github/settings.yml || fail "repo-owned settings.yml was deleted"
+grep -qF "# local settings note" .github/settings.yml \
+  || fail "repo-owned settings.yml lost its local modification"
 # .repo-platform.yml is rewritten to the slimmed shape without settings-sync.
 grep -q '^modules:' .repo-platform.yml \
   || fail ".repo-platform.yml has no top-level modules key"
