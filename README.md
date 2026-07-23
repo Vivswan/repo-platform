@@ -69,12 +69,14 @@ A repo's settings live in one of two homes, both applied from here by the
 [repo-settings-as-code](https://github.com/Vivswan/repo-settings-as-code)
 (details in [docs/settings.md](docs/settings.md)):
 
-- Central (the default): `settings/repos/<name>.yml` in this repo, with
+- Central: `settings/repos/<name>.yml` in this repo, with
   `settings/defaults.yml` deep-merged under every target.
-- In-repo (the `settings-sync` module): the repo's own
-  `.github/settings.yml`, which the repo can also self-apply on push.
+- In-repo: the repo's own `.github/settings.yml` - carrying the file is
+  the whole opt-in. The `settings-sync` module is optional sugar on top:
+  it seeds the file and adds push-time self-apply.
 
-A central file wins when both exist for the same repo.
+A central file wins when both exist for the same repo, and the sync never
+deletes a repo's `.github/settings.yml`.
 
 ### Credentials
 
@@ -126,7 +128,7 @@ central apply covers the repo).
 | Fully managed (template wins) | `.copier-answers.yml`, `ci.yml`, `release-please.yml`, workflow callers, `dependabot.yml`, issue templates, `SECURITY.md`, `.yamllint`, `.typography-allow`, agent-file symlinks |
 | Managed shape, repo-owned selection | `.repo-platform.yml`: its presence marks the repo as participating in push sync, and its `modules:` list is the repo's own module selection (edit it; the next sync applies the change) |
 | Managed + local sections | `.gitignore` (LOCAL section is yours) |
-| Mergeable (three-way) | `.github/settings.yml` (settings-sync module only), `.github/CODEOWNERS`, `AGENTS.md`, `.editorconfig`, `.gitattributes` |
+| Mergeable (three-way) | `.github/settings.yml` (seeded by the settings-sync module; never deleted by sync), `.github/CODEOWNERS`, `AGENTS.md`, `.editorconfig`, `.gitattributes` |
 | Generated once, then repo-owned | `checks.yml` (your CI jobs, called inside the all-green gate), `release.yml` (your release pipeline around the managed release-please machinery), `auto-format.yml`, `copilot-setup-steps.yml`, `release-please-config.json`, `.release-please-manifest.json` |
 | Repo-owned (never touched) | source code, release tooling, `.typography-allow.local`, everything else |
 

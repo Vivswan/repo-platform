@@ -142,7 +142,9 @@ trimming it. Merging the file to main applies it (settings-repos.yml runs
 on pushes to `settings/**`); for a drift report first, dispatch
 `gh workflow run settings-repos.yml -f check_only=true`.
 
-In-repo (opt-in): select the `settings-sync` module instead and skip the
-central file. The repo then carries its own `.github/settings.yml`, which
-the central run applies; add a repo-scoped PAT only if you want
-self-apply on push ([docs/settings.md](settings.md#the-in-repo-home-the-settings-sync-module)).
+In-repo: skip the central file and carry `.github/settings.yml` in the
+repo itself - the file is the whole opt-in, and the central run applies
+it remotely. Selecting the `settings-sync` module is optional sugar: it
+seeds the file with the template baseline and adds push-time self-apply
+(which needs a repo-scoped PAT and warns and skips without one); see
+[docs/settings.md](settings.md).

@@ -48,7 +48,7 @@ secret; the single REPO_PLATFORM_TOKEN PAT lives only here.
   weekly cron + dispatch): it resolves the fleet from `repos.yml`, then
   calls `reusable-template-sync.yml` per repo, serially. Its sibling
   `settings-repos.yml` applies the `settings/` files (central home) plus
-  module repos' own settings.yml in one repo-settings-as-code run.
+  repos' own in-repo settings.yml files in one repo-settings-as-code run.
 - The remaining `.github/workflows/reusable-*.yml` (auto-assign, codeql,
   pages, apply-settings) are called cross-repo by thin downstream callers
   pinned to release tags. The `settings-sync` module is the in-repo

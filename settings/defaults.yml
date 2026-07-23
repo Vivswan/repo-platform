@@ -2,7 +2,7 @@
 # Shared settings baseline for every repository this repo manages. The
 # settings-repos workflow passes this file as `defaults-file`, so it is
 # deep-merged UNDER every target - central settings/repos/<name>.yml files
-# and in-repo .github/settings.yml (settings-sync module) alike. Target keys
+# and repos' own in-repo .github/settings.yml files alike. Target keys
 # win; objects merge, arrays REPLACE (so list-valued sections like labels
 # and rulesets live in each repo's own file, never here); a target section
 # set to null opts that repository out of that defaults section.

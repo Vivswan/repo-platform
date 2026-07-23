@@ -338,6 +338,18 @@ jobs:
             fi
           done < <(jq -r '.[]' "$RUNNER_TEMP/retired-paths.json")
 
+      # settings.yml is repo-owned wherever it exists: deselecting the
+      # settings-sync module de-renders it, but the sync must never delete
+      # a repo's settings file - repo-platform's settings-repos run applies
+      # it remotely (a central settings/repos/<name>.yml wins over it).
+      - name: Preserve the repo-owned settings file
+        run: |
+          if git -C target cat-file -e "HEAD:.github/settings.yml" 2>/dev/null \
+              && [ ! -e target/.github/settings.yml ]; then
+            git -C target checkout HEAD -- .github/settings.yml
+            echo "::notice::${TARGET}: .github/settings.yml left the template render but is repo-owned; kept as-is."
+          fi
+
       # Version-aligned validation: a templates/vX.Y.Z target is judged by
       # the validator at that release tag, never by main's unreleased rules;
       # staging is judged by the source commit its build was assembled from.
