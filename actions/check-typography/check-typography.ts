@@ -35,7 +35,9 @@
 // Per-repo exemptions: a .typography-allow file at the scanned root lists
 // relative path prefixes (one per line, # comments) that are skipped
 // entirely - for files that deliberately carry functional glyphs (UI icons,
-// arrows in guides, emoji fixtures).
+// arrows in guides, emoji fixtures). In template-managed repos that file is
+// owned by the template, so repo-specific exemptions go in
+// .typography-allow.local (same format, repo-owned, never synced).
 //
 // Runs under bun (which executes TypeScript natively) so it can import the
 // monaco-editor ESM modules directly.
@@ -103,14 +105,18 @@ function isCheckable(name: string): boolean {
   return EXTENSIONS.has(name.slice(dot));
 }
 
-// Optional per-repo exemption list: relative path prefixes to skip.
-const ALLOW_FILE = join(ROOT, ".typography-allow");
-const ALLOWED_PREFIXES = existsSync(ALLOW_FILE)
-  ? readFileSync(ALLOW_FILE, "utf-8")
-      .split("\n")
-      .map((line) => line.trim())
-      .filter((line) => line.length > 0 && !line.startsWith("#"))
-  : [];
+// Optional per-repo exemption lists: relative path prefixes to skip.
+// .typography-allow is template-managed in synced repos;
+// .typography-allow.local is repo-owned and never synced.
+const ALLOW_FILES = [join(ROOT, ".typography-allow"), join(ROOT, ".typography-allow.local")];
+const ALLOWED_PREFIXES = ALLOW_FILES.flatMap((file) =>
+  existsSync(file)
+    ? readFileSync(file, "utf-8")
+        .split("\n")
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0 && !line.startsWith("#"))
+    : [],
+);
 
 function isExempt(relPath: string): boolean {
   return ALLOWED_PREFIXES.some((prefix) => relPath === prefix || relPath.startsWith(prefix));
