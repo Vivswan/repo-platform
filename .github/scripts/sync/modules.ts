@@ -4,7 +4,7 @@
 // the selected template version does not know.
 //
 // Usage:
-//   bun .github/scripts/sync_modules.ts --repo-file <.repo-platform.yml>
+//   bun .github/scripts/sync/modules.ts --repo-file <.repo-platform.yml>
 //     --template-copier <copier.yml> [--retired-summary <file>]
 //
 // Prints the filtered selection as a JSON array on stdout. Retired module

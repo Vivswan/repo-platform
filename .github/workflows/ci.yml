@@ -28,6 +28,15 @@ jobs:
       - uses: actions/checkout@v7
       - uses: raven-actions/actionlint@v2
 
+  # The workflows' large steps live as scripts in .github/scripts/ exactly
+  # so they can be linted; actionlint only sees inline run blocks.
+  shellcheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Shellcheck the workflow step scripts
+        run: find .github/scripts -name '*.sh' -print0 | xargs -0 shellcheck
+
   yamllint:
     runs-on: ubuntu-latest
     steps:
@@ -93,8 +102,8 @@ jobs:
         run: bun install --frozen-lockfile --silent
       - name: Build twice and compare
         run: |
-          bun .github/scripts/build_branch_tree.ts --dest /tmp/tree-a --channel staging
-          bun .github/scripts/build_branch_tree.ts --dest /tmp/tree-b --channel staging
+          bun .github/scripts/build-branches/branch_tree.ts --dest /tmp/tree-a --channel staging
+          bun .github/scripts/build-branches/branch_tree.ts --dest /tmp/tree-b --channel staging
           diff -r --no-dereference /tmp/tree-a /tmp/tree-b
           echo "build tree is deterministic"
 
@@ -110,7 +119,7 @@ jobs:
       - name: Validate repo-platform against its own conventions
         run: bun actions/validate-template/validate_generated_files.ts --self .
       - name: Validate managed-repos registry
-        run: bun .github/scripts/repos_registry.ts validate
+        run: bun .github/scripts/fleet/repos_registry.ts validate
 
   script-tests:
     runs-on: ubuntu-latest
@@ -176,7 +185,7 @@ jobs:
           MODULES: ${{ matrix.modules }}
           PRIVATE: ${{ matrix.private }}
           EXTRA_DATA: ${{ matrix.extra_data }}
-        run: .github/scripts/smoke_generate.sh
+        run: .github/scripts/ci/smoke_generate.sh
       - name: Validate generated output
         run: |
           bun install --frozen-lockfile --silent --cwd actions/validate-template
@@ -187,7 +196,7 @@ jobs:
           PRIVATE: ${{ matrix.private }}
           EXPECT_IN_PAGES: ${{ matrix.expect_in_pages }}
           EXTRA_DATA: ${{ matrix.extra_data }}
-        run: .github/scripts/verify_smoke_gating.sh
+        run: .github/scripts/ci/verify_smoke_gating.sh
       # Rendered workflows are invisible to the repo-level actionlint job
       # (.jinja files are not YAML pre-render), so lint the smoke output.
       - name: actionlint rendered workflows
@@ -213,7 +222,7 @@ jobs:
           pipx install copier
           python3 -m pip install --quiet pyyaml
       - name: Update from previous build tag to a fresh build
-        run: .github/scripts/upgrade_path_test.sh
+        run: .github/scripts/ci/upgrade_path_test.sh
 
   # Conventional Commit PR title, checked inside the gate so branch
   # protection blocks on it. The skip lives on the STEP, not the job:
@@ -249,6 +258,7 @@ jobs:
     if: always()
     needs:
       - actionlint
+      - shellcheck
       - yamllint
       - biome
       - typography

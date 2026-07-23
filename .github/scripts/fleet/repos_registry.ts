@@ -3,8 +3,8 @@
 // repos to target and which channel each one follows.
 //
 // Usage:
-//   bun .github/scripts/repos_registry.ts validate [--file repos.yml]
-//   bun .github/scripts/repos_registry.ts select [--repo owner/name]
+//   bun .github/scripts/fleet/repos_registry.ts validate [--file repos.yml]
+//   bun .github/scripts/fleet/repos_registry.ts select [--repo owner/name]
 //     [--discovered discovered.json] [--file repos.yml]
 //
 // `select` prints a JSON array of {repo, owner, name, channel} on stdout;

@@ -2,7 +2,7 @@
 # Upgrade-path test: generate a project from the previous templates/v* build
 # tag, add the local modifications a real repo carries, then update it to a
 # freshly assembled build tree the way reusable-template-sync does - module
-# selection via sync_modules.ts, live -d data, conflict resolution, and
+# selection via sync/modules.ts, live -d data, conflict resolution, and
 # retired-file cleanup via retired_paths.ts. Asserts that files the template
 # dropped are deleted while repo-owned content survives - including
 # settings.yml, which is repo-owned wherever it exists (protected from
@@ -129,20 +129,20 @@ git -c user.name=ci -c user.email=ci@localhost commit -q -m "chore: local modifi
 # Assemble the would-be next release INTO THE WORKSPACE CLONE, chained
 # onto the previous build tag (see commit_build_tree) + a local tag.
 cd "$GITHUB_WORKSPACE"
-bun .github/scripts/build_branch_tree.ts --dest /tmp/next --channel latest --version v99.99.99
+bun .github/scripts/build-branches/branch_tree.ts --dest /tmp/next --channel latest --version v99.99.99
 commit_build_tree /tmp/next templates/v99.99.99 "$prev"
 git show "${prev}:copier.yml" > "$WORK/copier-old.yml"
 git show templates/v99.99.99:copier.yml > "$WORK/copier-new.yml"
 
 # Module selection exactly as reusable-template-sync computes it: the
 # target's .repo-platform.yml filtered against the new template's choices.
-MODULES="$(bun .github/scripts/sync_modules.ts \
+MODULES="$(bun .github/scripts/sync/modules.ts \
   --repo-file "$PROJECT/.repo-platform.yml" \
   --template-copier "$WORK/copier-new.yml" \
   --retired-summary "$WORK/retired-modules.txt")"
 echo "selected modules: ${MODULES}"
 case "$MODULES" in
-  *settings-sync*) fail "sync_modules kept settings-sync after the deselection" ;;
+  *settings-sync*) fail "sync/modules.ts kept settings-sync after the deselection" ;;
 esac
 export MODULES
 export CHANNEL=latest
@@ -159,7 +159,7 @@ copier update --vcs-ref templates/v99.99.99 --defaults --trust \
   -d "description=${DESCRIPTION}"
 
 cd "$GITHUB_WORKSPACE"
-bun .github/scripts/resolve_copier_conflicts.ts \
+bun .github/scripts/sync/resolve_copier_conflicts.ts \
   --summary "$WORK/dropped-local-hunks.md" --root "$PROJECT"
 
 # Retired-file cleanup, mirroring the workflow's invocation: render the old
@@ -193,7 +193,7 @@ copier copy --vcs-ref "$old_sha" --defaults --trust \
   --data-file "$WORK/data-old.yml" "$src_path" "$WORK/render-old"
 copier copy --vcs-ref templates/v99.99.99 --defaults --trust \
   --data-file "$WORK/data-new.yml" "$src_path" "$WORK/render-new"
-bun .github/scripts/retired_paths.ts \
+bun .github/scripts/sync/retired_paths.ts \
   --old-render "$WORK/render-old" \
   --new-render "$WORK/render-new" \
   --old-copier "$WORK/copier-old.yml" \
