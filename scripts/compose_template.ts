@@ -19,7 +19,7 @@
 // by two folders (or a module file colliding with base) must be resolved by
 // hoisting the file to base/ with an explicit gate or by adding an anchor.
 //
-// All I/O is bytes (template/.gitignore.jinja carries an intentional CR) and
+// All I/O is bytes (source files are copied verbatim, never re-encoded) and
 // symlinks are copied as symlinks. Output is deterministic: sorted walks plus
 // the fixed MODULE_ORDER (CI builds twice and diffs to prove it).
 //

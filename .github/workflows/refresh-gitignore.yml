@@ -1,5 +1,6 @@
-# Weekly: regenerate templates/base/.gitignore.jinja from the latest
-# github/gitignore and open a PR when upstream changed anything we consume.
+# Weekly: regenerate the gitignore outputs (base skeleton, toolchain
+# fragments, this repo's own .gitignore) from the latest github/gitignore and
+# open a PR when upstream changed anything we consume.
 # Merging the PR reaches the staging branch automatically via build-branches.
 
 name: Refresh gitignore
@@ -53,7 +54,9 @@ jobs:
           git config user.name "repo-platform-sync"
           git config user.email "repo-platform-sync@users.noreply.github.com"
           git checkout -B "$branch"
-          git add scripts/gitignore.lock templates/base/.gitignore.jinja .gitignore
+          # The checkout was clean before regeneration, so the dirty set is
+          # exactly the script's outputs (plus the lock).
+          git add -A
           git commit -m "chore: refresh gitignore templates from github/gitignore@${sha:0:12}"
           git push --force origin "$branch"
 
@@ -63,5 +66,5 @@ jobs:
               --base "$BASE_BRANCH" \
               --head "$branch" \
               --title "chore: refresh gitignore templates from github/gitignore" \
-              --body "Automated regeneration of \`templates/base/.gitignore.jinja\` from [github/gitignore@\`${sha:0:12}\`](https://github.com/github/gitignore/tree/${sha}). Merging this rebuilds the staging branch; cutting a release makes sync-repos push it to latest-channel repos."
+              --body "Automated regeneration of the gitignore outputs (base skeleton, toolchain fragments, this repo's own \`.gitignore\`) from [github/gitignore@\`${sha:0:12}\`](https://github.com/github/gitignore/tree/${sha}). Merging this rebuilds the staging branch; cutting a release makes sync-repos push it to latest-channel repos."
           fi
