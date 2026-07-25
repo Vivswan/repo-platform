@@ -112,11 +112,14 @@ git -c user.name=ci -c user.email=ci@localhost commit -q -m "chore: init"
 #   it is repo-owned and must SURVIVE with the edit (protected in
 #   retired_paths.ts plus the preserve step below)
 # - checks.yml is generated-once (_skip_if_exists): local edits must survive
+# - bug_report.yml is generated-once as of the NEW template (the transition
+#   from template-managed): local tailoring must survive the update
 # - src/keep_me.txt is repo-owned content the template never rendered
 # - .repo-platform.yml drops settings-sync (the module-deselection edit a
 #   repo merges before the sync)
 echo "# local settings note" >> .github/settings.yml
 echo "# local checks note" >> .github/workflows/checks.yml
+echo "# local issue form note" >> .github/ISSUE_TEMPLATE/bug_report.yml
 mkdir -p src
 echo "repo-owned sentinel" > src/keep_me.txt
 sed 's/, "settings-sync"//' .repo-platform.yml > .repo-platform.yml.tmp
@@ -253,6 +256,8 @@ fi
   || fail "repo-owned src/keep_me.txt was modified"
 grep -qF "# local checks note" .github/workflows/checks.yml \
   || fail "generated-once checks.yml lost its local modification"
+grep -qF "# local issue form note" .github/ISSUE_TEMPLATE/bug_report.yml \
+  || fail "generated-once bug_report.yml lost its local modification (ownership transition to _skip_if_exists must hold)"
 # The update must PRESERVE the repo's configuration, not reset it.
 grep -qF -- "## Python " .gitignore || fail ".gitignore lost the uv module section"
 grep -qF -- 'package-ecosystem: "uv"' .github/dependabot.yml \
@@ -303,6 +308,8 @@ grep -qF "_commit: templates/v99.99.99" .copier-answers.yml \
   || fail "recovery did not re-record _commit as templates/v99.99.99"
 grep -qF "# local checks note" .github/workflows/checks.yml \
   || fail "recovery overwrote the generated-once checks.yml (_skip_if_exists must hold under recopy --overwrite)"
+grep -qF "# local issue form note" .github/ISSUE_TEMPLATE/bug_report.yml \
+  || fail "recovery overwrote the generated-once bug_report.yml (_skip_if_exists must hold under recopy --overwrite)"
 [ "$(cat src/keep_me.txt)" = "repo-owned sentinel" ] \
   || fail "recovery touched the repo-owned src/keep_me.txt"
 grep -qF "# local settings note" .github/settings.yml \

@@ -15,12 +15,15 @@ _preserve_symlinks: true
 # around the managed release-please machinery (pre/post jobs); auto-format
 # and copilot-setup-steps run repo-specific commands; the release-please
 # config/manifest are release state (release-please bumps the manifest via
-# release PRs).
+# release PRs); issue forms and the chooser config start from the generic
+# starters and are then tailored to each repository (dropdowns for its
+# components, labels, contact links, etc.).
 _skip_if_exists:
   - .github/workflows/checks.yml
   - .github/workflows/release.yml
   - .github/workflows/auto-format.yml
   - .github/workflows/copilot-setup-steps.yml
+  - .github/ISSUE_TEMPLATE/*.yml
   - release-please-config.json
   - .release-please-manifest.json
 

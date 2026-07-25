@@ -27,7 +27,7 @@ else
   absent "- pr-title" "$wf/ci.yml"
 fi
 if has auto-assign; then test -f "$wf/auto-assign.yml"; else test ! -e "$wf/auto-assign.yml"; fi
-if has issue-templates; then test -d /tmp/smoke/.github/ISSUE_TEMPLATE; else test ! -e /tmp/smoke/.github/ISSUE_TEMPLATE; fi
+if has issue-templates; then test -f /tmp/smoke/.github/ISSUE_TEMPLATE/config.yml; else test ! -e /tmp/smoke/.github/ISSUE_TEMPLATE; fi
 if has pages; then test -f "$wf/pages.yml"; else test ! -e "$wf/pages.yml"; fi
 if has settings-sync; then
   test -f /tmp/smoke/.github/settings.yml
