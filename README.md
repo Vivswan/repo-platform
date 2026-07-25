@@ -132,11 +132,11 @@ central apply covers the repo).
 
 | Category | Files |
 |---|---|
-| Fully managed (template wins) | `.copier-answers.yml`, `ci.yml`, `release-please.yml`, workflow callers, `dependabot.yml`, issue templates, `SECURITY.md`, `.yamllint`, `.typography-allow`, agent-file symlinks |
+| Fully managed (template wins) | `.copier-answers.yml`, `ci.yml`, `release-please.yml`, workflow callers, `dependabot.yml`, `SECURITY.md`, `.yamllint`, `.typography-allow`, agent-file symlinks |
 | Managed shape, repo-owned selection | `.repo-platform.yml`: its presence marks the repo as participating in push sync, and its `modules:` list is the repo's own module selection (edit it; the next sync applies the change) |
 | Managed + local sections | `.gitignore` (LOCAL section is yours) |
 | Mergeable (three-way) | `.github/settings.yml` (seeded by the settings-sync module; never deleted by sync), `.github/CODEOWNERS`, `AGENTS.md`, `.editorconfig`, `.gitattributes` |
-| Generated once, then repo-owned | `checks.yml` (your CI jobs, called inside the all-green gate), `release.yml` (your release pipeline around the managed release-please machinery), `auto-format.yml`, `copilot-setup-steps.yml`, `release-please-config.json`, `.release-please-manifest.json` |
+| Generated once, then repo-owned | `checks.yml` (your CI jobs, called inside the all-green gate), `release.yml` (your release pipeline around the managed release-please machinery), `auto-format.yml`, `copilot-setup-steps.yml`, issue forms and chooser config (starters you tailor to the repo), `release-please-config.json`, `.release-please-manifest.json` |
 | Repo-owned (never touched) | source code, release tooling, `.typography-allow.local`, everything else |
 
 `CLAUDE.md`, `.github/copilot-instructions.md`, and `.github/agents.md` are
