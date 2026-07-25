@@ -67,7 +67,8 @@ secret; the single REPO_PLATFORM_TOKEN PAT lives only here.
   + target selection for sync-repos/settings-repos), `sync/`
   (reusable-template-sync step scripts and helpers), `build-branches/`
   (the branch builder), and `ci/` (CI test harnesses).
-  `scripts/build_gitignore.ts` generates `templates/base/.gitignore.jinja`
+  `scripts/build_gitignore.ts` generates `templates/base/.gitignore.jinja`,
+  the toolchain fragments `templates/{bun,uv}/fragments/gitignore.jinja`,
   and this repo's own `.gitignore` from the latest github/gitignore;
   `scripts/gitignore.lock` records the SHA.
 - `migrations/` holds copier `_migrations` scripts (TypeScript, executed
@@ -81,7 +82,8 @@ secret; the single REPO_PLATFORM_TOKEN PAT lives only here.
 
 - GitHub Actions expressions inside `.jinja` workflow files must be wrapped
   in `{% raw %}...{% endraw %}` or jinja eats the `{{ }}`.
-- Never hand-edit `templates/base/.gitignore.jinja` (generated); run
+- Never hand-edit `templates/base/.gitignore.jinja` or the
+  `templates/{bun,uv}/fragments/gitignore.jinja` fragments (generated); run
   `bun scripts/build_gitignore.ts` (or `--locked`). CI fails on drift.
   Scripts used only by CI/CD live in `.github/scripts/`.
 - Workflow run blocks longer than a few lines are extracted to bash
@@ -92,8 +94,9 @@ secret; the single REPO_PLATFORM_TOKEN PAT lives only here.
 - Symlinks in `templates/agents/` (CLAUDE.md and friends) must stay
   symlinks; `.gitattributes` marks them (and their composed copies) `-text`
   and copier preserves them via `_preserve_symlinks`.
-- The macOS gitignore section contains an intentional literal carriage
-  return (`Icon[\r]`); `.typography-allow` exempts both gitignore paths.
+- The macOS gitignore section's CR-suffixed filename patterns (`Icon[\r]`
+  upstream) are rewritten to the ASCII `?` glob by build_gitignore.ts, so
+  the generated files carry no literal carriage returns.
 - Every merge to main rebuilds the `staging` build branch; a release
   rebuilds `latest` (release-please cuts vX.Y.Z, the builder tags
   `templates/vX.Y.Z`). Repos receive either build only when sync-repos
