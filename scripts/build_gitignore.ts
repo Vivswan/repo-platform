@@ -1,16 +1,19 @@
 #!/usr/bin/env bun
 // Compose .gitignore files from the latest github/gitignore.
 //
-// Generates two outputs from the official github/gitignore templates:
+// Generates from the official github/gitignore templates:
 //
-// - templates/base/.gitignore.jinja: what downstream repos receive (published
-//   onto the staging/latest build branches by build-branches.yml). OS
-//   templates (Windows, macOS, Linux) always; toolchain templates (Node,
-//   Python) as jinja conditionals on the bun/uv entries in the `modules`
-//   answer.
-// - .gitignore (this repo's own): same OS templates plus BOTH toolchain
-//   templates (downstream repos may carry either). The REPOSITORY LOCAL
-//   section's existing content is preserved across regenerations.
+// - templates/base/.gitignore.jinja: the skeleton downstream repos receive
+//   (published onto the staging/latest build branches by build-branches.yml):
+//   OS templates (Windows, macOS, Linux) plus a {# compose:gitignore #}
+//   anchor where the composer splices the toolchain fragments below, each
+//   wrapped in its module's gate.
+// - templates/<module>/fragments/gitignore.jinja: the toolchain templates
+//   (bun: Node + bun; uv: Python, which carries upstream's uv section - there
+//   is no standalone uv template) as module fragments.
+// - .gitignore (this repo's own): same OS templates plus ALL toolchain
+//   templates (downstream repos may carry any combination). The REPOSITORY
+//   LOCAL section's existing content is preserved across regenerations.
 //
 // By default the script fetches upstream HEAD and records the commit SHA in
 // scripts/gitignore.lock (provenance, and what CI verifies against).
@@ -29,7 +32,12 @@ const OUTPUT_TEMPLATE = join(REPO_ROOT, "templates", "base", ".gitignore.jinja")
 const OUTPUT_SELF = join(REPO_ROOT, ".gitignore");
 
 const ALWAYS = ["Global/Windows.gitignore", "Global/macOS.gitignore", "Global/Linux.gitignore"];
-const BY_MODULE: Record<string, string> = { bun: "Node.gitignore", uv: "Python.gitignore" };
+const BY_MODULE: Record<string, string[]> = {
+  bun: ["Node.gitignore", "bun.gitignore"],
+  uv: ["Python.gitignore"],
+};
+
+const ANCHOR = "gitignore";
 
 const LOCAL_BEGIN = "# BEGIN REPOSITORY LOCAL";
 const LOCAL_END = "# END REPOSITORY LOCAL";
@@ -37,6 +45,10 @@ const DEFAULT_LOCAL_BODY = "# Add repository-specific ignore patterns in this se
 
 const RAW = "https://raw.githubusercontent.com/github/gitignore";
 const HEAD_API = "https://api.github.com/repos/github/gitignore/commits/main";
+
+function fragmentOutput(module: string): string {
+  return join(REPO_ROOT, "templates", module, "fragments", `${ANCHOR}.jinja`);
+}
 
 async function fetchText(url: string, headers?: Record<string, string>): Promise<string> {
   const resp = await fetch(url, { headers, signal: AbortSignal.timeout(30_000) });
@@ -51,8 +63,14 @@ async function upstreamHead(): Promise<string> {
 
 async function section(sha: string, path: string): Promise<string> {
   const name = (path.split("/").pop() as string).replace(/\.gitignore$/, "");
-  // Upstream files may carry CRLF line endings (Windows.gitignore does).
-  const body = (await fetchText(`${RAW}/${sha}/${path}`)).replaceAll("\r\n", "\n").trim();
+  // Upstream files may carry CRLF line endings (Windows.gitignore does), and
+  // macOS.gitignore spells CR-suffixed filename patterns as a character
+  // class holding a raw CR byte (`Icon[\r]`); normalize to LF and rewrite
+  // those classes to the CR-free `?` glob so outputs stay ASCII.
+  const body = (await fetchText(`${RAW}/${sha}/${path}`))
+    .replaceAll("\r\n", "\n")
+    .replaceAll("[\r]", "?")
+    .trim();
   return `## ${name} (github/gitignore ${path})\n${body}\n`;
 }
 
@@ -89,11 +107,14 @@ function buildTemplate(sha: string, sections: Record<string, string>): string {
   for (const path of ALWAYS) {
     parts.push(sections[path], "\n");
   }
-  for (const [module, path] of Object.entries(BY_MODULE)) {
-    parts.push(`{% if '${module}' in modules %}\n`, sections[path], "{% endif %}\n");
-  }
-  parts.push("# END REPO-PLATFORM MANAGED\n");
+  parts.push(`{# compose:${ANCHOR} #}\n`, "# END REPO-PLATFORM MANAGED\n");
   return parts.join("");
+}
+
+/** A module's fragment: its sections, leading newline owned per the
+ *  composer's fragment whitespace convention. */
+function buildFragment(sections: Record<string, string>, paths: string[]): string {
+  return `\n${paths.map((path) => sections[path]).join("\n")}`;
 }
 
 function buildSelf(sha: string, sections: Record<string, string>, localBody: string): string {
@@ -102,7 +123,7 @@ function buildSelf(sha: string, sections: Record<string, string>, localBody: str
     localSection(localBody),
     managedHeader(sha),
   ];
-  for (const path of [...ALWAYS, ...Object.values(BY_MODULE)]) {
+  for (const path of [...ALWAYS, ...Object.values(BY_MODULE).flat()]) {
     parts.push(sections[path], "\n");
   }
   parts.push("# END REPO-PLATFORM MANAGED\n");
@@ -123,7 +144,7 @@ async function main(): Promise<number> {
     return 2;
   }
 
-  const paths = [...ALWAYS, ...Object.values(BY_MODULE)];
+  const paths = [...ALWAYS, ...Object.values(BY_MODULE).flat()];
   let sha: string;
   if (locked || check) {
     sha = readFileSync(LOCK_FILE, "utf-8").trim();
@@ -141,12 +162,14 @@ async function main(): Promise<number> {
 
   const outputs: [string, string][] = [
     [OUTPUT_TEMPLATE, buildTemplate(sha, sections)],
+    ...Object.entries(BY_MODULE).map(([module, modulePaths]): [string, string] => [
+      fragmentOutput(module),
+      buildFragment(sections, modulePaths),
+    ]),
     [OUTPUT_SELF, buildSelf(sha, sections, existingLocalBody(OUTPUT_SELF))],
   ];
 
   if (check) {
-    // Bytes, not text: the intentional CR in macOS.gitignore's `Icon[\r]`
-    // pattern must survive the comparison.
     const stale = outputs
       .filter(
         ([out, content]) =>
