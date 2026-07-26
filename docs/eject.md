@@ -29,10 +29,11 @@ settings home, so settings stop being applied.
    git rm .copier-answers.yml .repo-platform.yml
    ```
 
-2. Edit `.github/workflows/ci.yml`: remove the `validate-template` job and
-   its entry in all-green's `needs` list. That job enforces the managed-file
-   conventions and fails once `.copier-answers.yml` and `.repo-platform.yml`
-   are gone. With sync PRs stopped, ci.yml is yours to edit; the remaining
+2. Edit `.github/workflows/ci.yml`: remove the `validate-template` job
+   (it is informational only and not in all-green's `needs` list). That
+   job enforces the managed-file conventions and fails once
+   `.copier-answers.yml` and `.repo-platform.yml` are gone. With sync PRs
+   stopped, ci.yml is yours to edit; the remaining
    jobs (typography, commit-names, actionlint, yamllint, checks, module
    jobs) keep working standalone.
 
