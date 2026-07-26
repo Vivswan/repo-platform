@@ -131,6 +131,18 @@ fi
 if has settings-sync; then
   if has release-please; then present "autorelease: pending" /tmp/smoke/.github/settings.yml; else absent "autorelease: pending" /tmp/smoke/.github/settings.yml; fi
 fi
+
+# Toolchain modules gate dependabot's default per-ecosystem labels in the
+# settings-sync module's settings.yml (dependabot recreates them when
+# missing, so the settings apply must declare them or loop on deletion).
+# github_actions is unconditional: the base dependabot.yml always carries
+# the github-actions ecosystem.
+if has settings-sync; then
+  present "name: github_actions" /tmp/smoke/.github/settings.yml
+  if has bun; then present "name: javascript" /tmp/smoke/.github/settings.yml; else absent "name: javascript" /tmp/smoke/.github/settings.yml; fi
+  if has uv; then present 'name: "python:uv"' /tmp/smoke/.github/settings.yml; else absent 'name: "python:uv"' /tmp/smoke/.github/settings.yml; fi
+  if has rust; then present "name: rust" /tmp/smoke/.github/settings.yml; else absent "name: rust" /tmp/smoke/.github/settings.yml; fi
+fi
 if has release-please; then
   test -f "$wf/release-please.yml"
   test -f "$wf/release.yml"
