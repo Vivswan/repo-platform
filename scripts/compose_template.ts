@@ -50,6 +50,7 @@ export const MODULE_ORDER = [
   "agents",
   "bun",
   "uv",
+  "rust",
   "pages",
   "release-please",
   "issue-templates",
