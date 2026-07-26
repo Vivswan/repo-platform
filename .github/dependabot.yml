@@ -8,6 +8,11 @@ updates:
       interval: "monthly"
     cooldown:
       default-days: 7
+    # Conventional PR titles so the commit-names/pr-title gates pass; action
+    # bumps are workflow changes, hence ci (the bun entries use build).
+    commit-message:
+      prefix: "ci"
+      include: "scope"
 
   # Root tooling manifest (biome, husky).
   - package-ecosystem: "bun"
@@ -16,6 +21,9 @@ updates:
       interval: "monthly"
     cooldown:
       default-days: 7
+    commit-message:
+      prefix: "build"
+      include: "scope"
 
   # monaco-editor dependency of the check-typography action. The action dir
   # commits bun.lock, so the bun ecosystem keeps both manifest and lockfile
@@ -26,6 +34,9 @@ updates:
       interval: "monthly"
     cooldown:
       default-days: 7
+    commit-message:
+      prefix: "build"
+      include: "scope"
 
   # Dev-only manifest (@types/node, typescript) for the commit-names action.
   - package-ecosystem: "bun"
@@ -34,3 +45,6 @@ updates:
       interval: "monthly"
     cooldown:
       default-days: 7
+    commit-message:
+      prefix: "build"
+      include: "scope"
