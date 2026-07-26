@@ -137,6 +137,15 @@ rulesets:
     # starting point
 ```
 
+Since undeclared labels are deleted, the list must include the labels
+dependabot auto-creates, or the two sides loop forever: every apply
+deletes them, dependabot recreates them on its next run. That means
+`dependencies` (color `0366d6`) and `github_actions` (`000000`) always,
+plus one label per toolchain the repo's dependabot.yml covers:
+`javascript` (`168700`) for bun, `python:uv` (`2b67c6`) for uv, `rust`
+(`000000`) for cargo. The exact descriptions are in
+`templates/settings-sync/.github/settings.yml.jinja`.
+
 The easiest start is copying `settings/repos/repo-platform.yml` and
 trimming it. Merging the file to main applies it (settings-repos.yml runs
 on pushes to `settings/**`); for a drift report first, dispatch
