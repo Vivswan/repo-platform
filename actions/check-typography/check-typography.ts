@@ -62,6 +62,12 @@ const SKIP_DIRS = new Set([
   "build",
   "coverage",
   "htmlcov",
+  // Cargo build output: gitignored in CI checkouts, but local runs would
+  // otherwise scan extensionless build binaries as text.
+  "target",
+  // VS Code extension test downloads: gitignored, but a local run would
+  // scan the downloaded app bundle's extensionless binaries.
+  ".vscode-test",
   ".venv",
   "__pycache__",
   ".pytest_cache",
@@ -93,8 +99,21 @@ const EXTENSIONS = new Set([
   ".txt",
   ".template",
   ".sh",
+  ".bashrc",
+  ".zsh",
+  ".zshrc",
+  ".zprofile",
+  ".profile",
+  ".ps1",
+  ".psm1",
+  ".psd1",
+  ".rs",
+  ".mts",
+  ".cts",
   ".svg",
   ".xml",
+  ".plist",
+  ".entitlements",
   ".lock",
 ]);
 
