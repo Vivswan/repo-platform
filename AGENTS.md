@@ -36,7 +36,7 @@ sync secret; the single REPO_PLATFORM_TOKEN PAT lives only here.
 - GitHub Actions expressions inside `.jinja` workflow files must be wrapped
   in `{% raw %}...{% endraw %}` or jinja eats the `{{ }}`.
 - Never hand-edit generated files (templates/base/.gitignore.jinja, the
-  `templates/{bun,uv}/fragments/gitignore.jinja` fragments); run
+  `templates/{bun,uv,rust}/fragments/gitignore.jinja` fragments); run
   `bun scripts/build_gitignore.ts`. CI fails on drift.
 - Workflow run blocks longer than a few lines are extracted to bash
   scripts under `.github/scripts/<owner>/` so shellcheck can lint them.

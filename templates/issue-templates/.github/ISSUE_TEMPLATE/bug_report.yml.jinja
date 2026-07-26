@@ -5,24 +5,39 @@ body:
   - type: textarea
     id: what-happened
     attributes:
-      label: What happened?
-      description: What did you do, what did you expect, and what happened instead?
-      placeholder: |
-        1. ...
-        2. Expected ..., got ...
+      label: What happened
+      description: Actual vs expected behavior.
     validations:
       required: true
   - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. ...
+        2. ...
+        3. ...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Release version or commit.
+    validations:
+      required: true
+  - type: input
     id: environment
     attributes:
       label: Environment
-      description: Version, OS, and anything else relevant.
+      description: OS, runtime versions, and anything else relevant.
     validations:
       required: false
   - type: textarea
     id: logs
     attributes:
-      label: Logs or screenshots (optional)
-      description: Redact anything that looks like a credential or key.
+      label: Logs (optional)
+      description: Relevant log output. **Redact anything that looks like a credential or key.**
+      render: text
     validations:
       required: false
