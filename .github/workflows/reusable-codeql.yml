@@ -35,6 +35,13 @@ jobs:
         with:
           languages: ${{ inputs.language }}
           config: ${{ inputs.config }}
+          # Advanced setup does not run the alert-suppression queries by
+          # default, so inline `codeql[query-id]` comments are inert without
+          # this: append the language's suppression query to the default
+          # suite (the pack prefix is the language part of the input). The
+          # `packs` input only works in single-language analyses - callers
+          # must keep fanning out one call per language.
+          packs: "+codeql/${{ inputs.language == 'javascript-typescript' && 'javascript' || inputs.language }}-queries:AlertSuppression.ql"
 
       - uses: github/codeql-action/analyze@v4
         with:
