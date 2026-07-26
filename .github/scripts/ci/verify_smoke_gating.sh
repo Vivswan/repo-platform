@@ -94,11 +94,16 @@ if [ "$PRIVATE" = "true" ]; then test ! -e /tmp/smoke/SECURITY.md; else test -f 
 # gitignore toolchain sections; the four markers are asserted by the validator.
 if has bun; then present "## Node " /tmp/smoke/.gitignore; else absent "## Node " /tmp/smoke/.gitignore; fi
 if has uv; then present "## Python " /tmp/smoke/.gitignore; else absent "## Python " /tmp/smoke/.gitignore; fi
+if has rust; then present "## Rust " /tmp/smoke/.gitignore; else absent "## Rust " /tmp/smoke/.gitignore; fi
 
-# dependabot ecosystems follow the toolchain modules.
+# dependabot ecosystems follow the toolchain modules; every entry carries a
+# commit-message prefix so dependabot PR titles are Conventional Commits.
 present 'package-ecosystem: "github-actions"' /tmp/smoke/.github/dependabot.yml
+present 'prefix: "ci"' /tmp/smoke/.github/dependabot.yml
 if has bun; then present 'package-ecosystem: "bun"' /tmp/smoke/.github/dependabot.yml; else absent 'package-ecosystem: "bun"' /tmp/smoke/.github/dependabot.yml; fi
 if has uv; then present 'package-ecosystem: "uv"' /tmp/smoke/.github/dependabot.yml; else absent 'package-ecosystem: "uv"' /tmp/smoke/.github/dependabot.yml; fi
+if has rust; then present 'package-ecosystem: "cargo"' /tmp/smoke/.github/dependabot.yml; else absent 'package-ecosystem: "cargo"' /tmp/smoke/.github/dependabot.yml; fi
+if has bun || has uv || has rust; then present 'prefix: "build"' /tmp/smoke/.github/dependabot.yml; else absent 'prefix: "build"' /tmp/smoke/.github/dependabot.yml; fi
 
 # agents module: AGENTS.md plus the three agent-file symlinks. The
 # rows without it also prove conditional filenames work on symlinks.
@@ -109,7 +114,7 @@ if has agents; then
   test -L /tmp/smoke/.github/copilot-instructions.md
   test -L /tmp/smoke/.github/agents.md
   # AGENTS.md toolchain section only when a toolchain module is selected.
-  if has bun || has uv; then present "## Toolchain" /tmp/smoke/AGENTS.md; else absent "## Toolchain" /tmp/smoke/AGENTS.md; fi
+  if has bun || has uv || has rust; then present "## Toolchain" /tmp/smoke/AGENTS.md; else absent "## Toolchain" /tmp/smoke/AGENTS.md; fi
 else
   # `test ! -e` follows symlinks (a dangling one passes), so also
   # assert not-a-symlink for the three link paths.

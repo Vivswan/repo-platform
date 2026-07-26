@@ -7,7 +7,7 @@ symlinks to this file, so edit only here.
 ## Project
 
 {{ project_name }}: {{ description }}
-{% if 'bun' in modules or 'uv' in modules %}
+{% if 'bun' in modules or 'uv' in modules or 'rust' in modules %}
 ## Toolchain
 
 {% if 'bun' in modules -%}
@@ -17,6 +17,10 @@ symlinks to this file, so edit only here.
 {% if 'uv' in modules -%}
 - Python managed with uv (`uv sync`, `uv run <command>`)
 - See `pyproject.toml` for project metadata and dependencies.
+{% endif -%}
+{% if 'rust' in modules -%}
+- Rust managed with cargo (`cargo build`, `cargo test`, `cargo clippy`)
+- See `Cargo.toml` for the workspace/crate layout and dependencies.
 {% endif -%}
 {% endif %}
 ## Conventions
