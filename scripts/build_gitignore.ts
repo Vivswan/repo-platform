@@ -10,7 +10,7 @@
 //   wrapped in its module's gate.
 // - templates/<module>/fragments/gitignore.jinja: the toolchain templates
 //   (bun: Node + bun; uv: Python, which carries upstream's uv section - there
-//   is no standalone uv template) as module fragments.
+//   is no standalone uv template; rust: Rust) as module fragments.
 // - .gitignore (this repo's own): same OS templates plus ALL toolchain
 //   templates (downstream repos may carry any combination). The REPOSITORY
 //   LOCAL section's existing content is preserved across regenerations.
@@ -35,6 +35,7 @@ const ALWAYS = ["Global/Windows.gitignore", "Global/macOS.gitignore", "Global/Li
 const BY_MODULE: Record<string, string[]> = {
   bun: ["Node.gitignore", "bun.gitignore"],
   uv: ["Python.gitignore"],
+  rust: ["Rust.gitignore"],
 };
 
 const ANCHOR = "gitignore";

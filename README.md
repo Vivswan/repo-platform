@@ -27,7 +27,7 @@ self-apply of a repo's own settings file.
 
 ### Modules and channels
 
-- Modules (pick any combination): `agents`, `bun`, `uv`, `pages`,
+- Modules (pick any combination): `agents`, `bun`, `uv`, `rust`, `pages`,
   `release-please`, `issue-templates`, `pr-title`, `auto-assign`,
   `settings-sync`. Modules with parameters (like `pages`) ask follow-up
   questions only when selected. After generation, module selection lives in
@@ -124,7 +124,7 @@ central apply covers the repo).
 | `actions/check-typography` | Blocks look-alike/invisible unicode (vendored from cloud-speech, config via `.typography-allow` + repo-owned `.typography-allow.local`) |
 | `actions/validate-template` | Enforces markers, YAML validity, and the all-green convention |
 | `actions/validate-commit-names` | Conventional Commit subjects on every push/PR commit |
-| `scripts/build_gitignore.ts` | Regenerates the gitignore outputs (`templates/base/.gitignore.jinja`, the bun/uv toolchain fragments, this repo's `.gitignore`) from the latest [github/gitignore](https://github.com/github/gitignore) (Windows + macOS + Linux always, Node + bun / Python by bun/uv module) |
+| `scripts/build_gitignore.ts` | Regenerates the gitignore outputs (`templates/base/.gitignore.jinja`, the bun/uv/rust toolchain fragments, this repo's `.gitignore`) from the latest [github/gitignore](https://github.com/github/gitignore) (Windows + macOS + Linux always, Node + bun / Python / Rust by bun/uv/rust module) |
 | `migrations/` | Copier `_migrations` scripts (TypeScript, run with bun) for breaking changes |
 | `docs/` | [all-green convention](docs/all-green.md), [new repo](docs/new-repo.md), [pages module](docs/pages.md), [settings](docs/settings.md), [eject](docs/eject.md) |
 

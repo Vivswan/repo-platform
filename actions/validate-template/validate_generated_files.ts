@@ -83,6 +83,7 @@ const KNOWN_MODULES = new Set([
   "agents",
   "bun",
   "uv",
+  "rust",
   "pages",
   "release-please",
   "issue-templates",

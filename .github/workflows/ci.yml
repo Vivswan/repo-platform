@@ -140,7 +140,7 @@ jobs:
           # Module combos covering the risky branches. `modules` is a YAML
           # STRING here (quoted) and parsed by copier as a YAML list.
           - name: everything
-            modules: "[agents, bun, uv, pages, release-please, issue-templates, pr-title, auto-assign, settings-sync]"
+            modules: "[agents, bun, uv, rust, pages, release-please, issue-templates, pr-title, auto-assign, settings-sync]"
             private: "false"
             expect_in_pages: |
               setup: bun,uv
@@ -148,6 +148,14 @@ jobs:
               bun run build
           - name: bun-typical
             modules: "[agents, bun, release-please, issue-templates, pr-title, auto-assign, settings-sync]"
+            private: "false"
+          # rust alone must render cargo dependabot + the Rust gitignore and
+          # nothing toolchain-gated (no CodeQL block, no auto-format starter):
+          # rust is deliberately outside has_toolchain. agents rides along so
+          # the AGENTS.md Toolchain section is exercised with rust as the
+          # only toolchain module.
+          - name: rust-only
+            modules: "[agents, rust]"
             private: "false"
           - name: uv-pages-private
             modules: "[uv, pages, auto-assign]"

@@ -40,7 +40,7 @@ git commit -m "chore: initialize from repo-platform"
 Copier asks for project name, description, an update **channel** (`latest`
 follows released `templates/vX.Y.Z` build tags and runs migrations;
 `staging` follows every main merge, migrations skipped), a `modules`
-multiselect (any combination of `agents`, `bun`, `uv`, `pages`,
+multiselect (any combination of `agents`, `bun`, `uv`, `rust`, `pages`,
 `release-please`, `issue-templates`, `pr-title`, `auto-assign`,
 `settings-sync`), follow-up
 parameters for modules that have them (see [docs/pages.md](pages.md)), and
