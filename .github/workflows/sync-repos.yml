@@ -1,6 +1,6 @@
 # Push sync fan-out: resolves which managed repos to sync (repos.yml
 # registry x live discovery) and runs reusable-template-sync.yml against
-# each one, serially. Replaces the old propagate.yml dispatch model -
+# each one, in parallel. Replaces the old propagate.yml dispatch model -
 # managed repos carry no sync workflow and no sync secret; their update
 # PRs are pushed from here with the REPO_PLATFORM_TOKEN PAT.
 #
