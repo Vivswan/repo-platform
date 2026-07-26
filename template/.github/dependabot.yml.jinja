@@ -9,6 +9,11 @@ updates:
       interval: "monthly"
     cooldown:
       default-days: 7
+    # Conventional PR titles so the commit-names/pr-title gates pass; action
+    # bumps are workflow changes, hence ci (toolchain fragments use build).
+    commit-message:
+      prefix: "ci"
+      include: "scope"
 {% if 'bun' in modules %}
   - package-ecosystem: "bun"
     directory: "/"
@@ -16,6 +21,9 @@ updates:
       interval: "monthly"
     cooldown:
       default-days: 7
+    commit-message:
+      prefix: "build"
+      include: "scope"
 {% endif %}{% if 'uv' in modules %}
   - package-ecosystem: "uv"
     directory: "/"
@@ -23,4 +31,17 @@ updates:
       interval: "monthly"
     cooldown:
       default-days: 7
+    commit-message:
+      prefix: "build"
+      include: "scope"
+{% endif %}{% if 'rust' in modules %}
+  - package-ecosystem: "cargo"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: "build"
+      include: "scope"
 {% endif %}
