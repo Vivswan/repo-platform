@@ -118,7 +118,7 @@ central apply covers the repo).
 | `copier.yml` | Questions + module choices (hand-maintained; standards-only, project skeletons come from `uv init` / `bun init`) |
 | `repos.yml` | Fleet config: which repos are managed (wildcard + exclude) and which channel each follows |
 | `settings/` | Central settings home: `defaults.yml` (shared baseline) + `repos/<name>.yml` per repo ([docs](docs/settings.md)) |
-| `.github/workflows/sync-repos.yml` | Push sync fan-out: release + weekly cron + dispatch, one serialized run per repo |
+| `.github/workflows/sync-repos.yml` | Push sync fan-out: release + weekly cron + dispatch, parallel matrix legs, one per repo |
 | `.github/workflows/settings-repos.yml` | Central settings apply across the fleet |
 | `.github/workflows/reusable-*.yml` | Reusable workflows: template-sync (the push-sync engine), auto-assign, codeql, pages ([docs](docs/pages.md)), apply-settings ([docs](docs/settings.md)) |
 | `actions/check-typography` | Blocks look-alike/invisible unicode (vendored from cloud-speech, config via `.typography-allow` + repo-owned `.typography-allow.local`) |

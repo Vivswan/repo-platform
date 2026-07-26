@@ -4,11 +4,13 @@
 # managed repos carry no sync workflow and no sync secret; their update
 # PRs are pushed from here with the REPO_PLATFORM_TOKEN PAT.
 #
-# The `sync-repos` concurrency group plus max-parallel 1 make this the
-# single automated writer of every target's automation branch; the sync's
-# lease-guarded force-push regenerates that branch each run. The weekly
-# cron is the catch-all: staging-channel repos pick up main merges through
-# it, and it heals any release whose sync run was missed.
+# The `sync-repos` concurrency group makes this the single automated
+# writer of every target's automation branch: legs fan out in parallel,
+# but each writes to a different repo, so the per-branch single-writer
+# guarantee holds; the sync's lease-guarded force-push regenerates that
+# branch each run. The weekly cron is the catch-all: staging-channel
+# repos pick up main merges through it, and it heals any release whose
+# sync run was missed.
 
 name: Sync Repos
 
@@ -180,8 +182,6 @@ jobs:
     if: needs.plan.outputs.repos != '[]'
     strategy:
       fail-fast: false
-      # One writer at a time, matching the concurrency group's guarantee.
-      max-parallel: 1
       matrix:
         include: ${{ fromJSON(needs.plan.outputs.repos) }}
     name: sync (${{ matrix.repo }})
