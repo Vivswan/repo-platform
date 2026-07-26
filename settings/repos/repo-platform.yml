@@ -13,6 +13,16 @@ labels:
   - name: dependencies
     color: "0366d6"
     description: Dependency updates
+  # Dependabot's default labels (this repo runs the github-actions and bun
+  # ecosystems): dependabot recreates them when missing, so leaving them
+  # undeclared would make every settings apply delete what dependabot
+  # re-adds on its next run. Values match what dependabot creates.
+  - name: github_actions
+    color: "000000"
+    description: Pull requests that update GitHub Actions code
+  - name: javascript
+    color: "168700"
+    description: Pull requests that update javascript code
   - name: bug
     color: "d73a4a"
     description: Something isn't working
