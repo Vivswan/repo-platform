@@ -62,7 +62,12 @@ Stateless, declared-keys-only, upsert-by-name:
   `javascript` (`168700`) for bun, `python:uv` (`2b67c6`) for uv, `rust`
   (`000000`) for cargo. Dependabot recreates missing labels on its next
   run, so an undeclared one is deleted and recreated forever; exact values
-  are in `templates/settings-sync/.github/settings.yml.jinja`.
+  are in `templates/settings-sync/.github/settings.yml.jinja`. Repos with
+  the fuzzer module must likewise declare their `fuzzer_label` (default
+  `fuzz-nightly`, color `B60205`): the settings-sync module's settings.yml
+  does it automatically, central settings files must carry it by hand, or
+  the label sync strips it from the open tracking issue and the auto-close
+  loses the issue.
 - Rulesets: upserted by name (branch and tag targets); never deleted
   when undeclared, since removing protection stays a human action.
 - Repository fields, topics, and security toggles are applied only when

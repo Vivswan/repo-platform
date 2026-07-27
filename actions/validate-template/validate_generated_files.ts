@@ -89,6 +89,7 @@ const KNOWN_MODULES = new Set([
   "issue-templates",
   "pr-title",
   "auto-assign",
+  "fuzzer",
   "settings-sync",
 ]);
 
