@@ -23,6 +23,9 @@ _skip_if_exists:
   - .github/workflows/release.yml
   - .github/workflows/auto-format.yml
   - .github/workflows/copilot-setup-steps.yml
+  # The fuzzer module's starter: the fuzz/toolchain steps are repo-specific,
+  # so only the first sync generates it (docs/fuzzer.md has the contract).
+  - .github/workflows/nightly-fuzz.yml
   - .github/ISSUE_TEMPLATE/*.yml
   - release-please-config.json
   - .release-please-manifest.json
@@ -76,6 +79,7 @@ modules:
     issue-templates - bug/feature issue forms: issue-templates
     pr-title - Conventional Commit PR title check in the all-green gate: pr-title
     auto-assign - auto-assign issues/PRs/alerts to owner: auto-assign
+    fuzzer - nightly fuzz starter with issue filing, replay inputs, auto-close: fuzzer
     settings-sync - in-repo .github/settings.yml applied with the repo's own PAT: settings-sync
   # settings-sync is deliberately NOT a default: central settings
   # (settings/repos/<name>.yml in repo-platform) are the default home.
@@ -143,6 +147,23 @@ pages_staging:
   help: Also publish main HEAD under /staging/
   default: true
   when: "{{ 'pages' in modules and pages_production == 'release' }}"
+
+# --- fuzzer module parameter (asked only when it is selected) ---
+# The label is the tracking-issue stream's identity: the report and resolve
+# steps both key on it, so it is asked once here rather than edited in two
+# places in the repo-owned starter.
+
+fuzzer_label:
+  type: str
+  help: Label for the deduplicated nightly-fuzz tracking issue
+  default: fuzz-nightly
+  # The value lands in gh args (a leading dash would parse as a flag), in the
+  # rendered workflow's YAML, and in the settings-sync label list, so keep it
+  # to plain label characters within GitHub's 50-char limit. The fuzz-issue
+  # action enforces the same shape. \Z (not $) so a trailing newline in a
+  # piped-in answer cannot sneak past Python's regex semantics.
+  validator: "{% if not (fuzzer_label | regex_search('^[A-Za-z0-9._][A-Za-z0-9._: -]{0,49}\\Z')) %}fuzzer_label must be a plain label: letters, digits, ._:- and spaces, not starting with a dash, at most 50 characters{% endif %}"
+  when: "{{ 'fuzzer' in modules }}"
 
 private:
   type: bool

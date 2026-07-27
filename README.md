@@ -28,7 +28,7 @@ self-apply of a repo's own settings file.
 ### Modules and channels
 
 - Modules (pick any combination): `agents`, `bun`, `uv`, `rust`, `pages`,
-  `release-please`, `issue-templates`, `pr-title`, `auto-assign`,
+  `release-please`, `issue-templates`, `pr-title`, `auto-assign`, `fuzzer`,
   `settings-sync`. Modules with parameters (like `pages`) ask follow-up
   questions only when selected. After generation, module selection lives in
   each repo's own `.repo-platform.yml`: edit its `modules:` list and the
@@ -124,9 +124,10 @@ central apply covers the repo).
 | `actions/check-typography` | Blocks look-alike/invisible unicode (vendored from cloud-speech, config via `.typography-allow` + repo-owned `.typography-allow.local`) |
 | `actions/validate-template` | Enforces markers, YAML validity, and the all-green convention |
 | `actions/validate-commit-names` | Conventional Commit subjects on every push/PR commit |
+| `actions/fuzz-issue` | Files/updates the label-deduplicated nightly-fuzz tracking issue, closes it on green (used by the fuzzer module's starter, [docs](docs/fuzzer.md)) |
 | `scripts/build_gitignore.ts` | Regenerates the gitignore outputs (`templates/base/.gitignore.jinja`, the bun/uv/rust toolchain fragments, this repo's `.gitignore`) from the latest [github/gitignore](https://github.com/github/gitignore) (Windows + macOS + Linux always, Node + bun / Python / Rust by bun/uv/rust module) |
 | `migrations/` | Copier `_migrations` scripts (TypeScript, run with bun) for breaking changes |
-| `docs/` | [all-green convention](docs/all-green.md), [new repo](docs/new-repo.md), [pages module](docs/pages.md), [settings](docs/settings.md), [eject](docs/eject.md) |
+| `docs/` | [all-green convention](docs/all-green.md), [new repo](docs/new-repo.md), [pages module](docs/pages.md), [fuzzer module](docs/fuzzer.md), [settings](docs/settings.md), [eject](docs/eject.md) |
 
 ## File ownership in managed repos
 
@@ -136,7 +137,7 @@ central apply covers the repo).
 | Managed shape, repo-owned selection | `.repo-platform.yml`: its presence marks the repo as participating in push sync, and its `modules:` list is the repo's own module selection (edit it; the next sync applies the change) |
 | Managed + local sections | `.gitignore` (LOCAL section is yours) |
 | Mergeable (three-way) | `.github/settings.yml` (seeded by the settings-sync module; never deleted by sync), `.github/CODEOWNERS`, `AGENTS.md`, `.editorconfig`, `.gitattributes` |
-| Generated once, then repo-owned | `checks.yml` (your CI jobs, called inside the all-green gate), `release.yml` (your release pipeline around the managed release-please machinery), `auto-format.yml`, `copilot-setup-steps.yml`, issue forms and chooser config (starters you tailor to the repo), `release-please-config.json`, `.release-please-manifest.json` |
+| Generated once, then repo-owned | `checks.yml` (your CI jobs, called inside the all-green gate), `release.yml` (your release pipeline around the managed release-please machinery), `auto-format.yml`, `copilot-setup-steps.yml`, `nightly-fuzz.yml` (the fuzzer module's starter, [docs](docs/fuzzer.md)), issue forms and chooser config (starters you tailor to the repo), `release-please-config.json`, `.release-please-manifest.json` |
 | Repo-owned (never touched) | source code, release tooling, `.typography-allow.local`, everything else |
 
 `CLAUDE.md`, `.github/copilot-instructions.md`, and `.github/agents.md` are

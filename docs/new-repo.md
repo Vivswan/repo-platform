@@ -41,9 +41,10 @@ Copier asks for project name, description, an update **channel** (`latest`
 follows released `templates/vX.Y.Z` build tags and runs migrations;
 `staging` follows every main merge, migrations skipped), a `modules`
 multiselect (any combination of `agents`, `bun`, `uv`, `rust`, `pages`,
-`release-please`, `issue-templates`, `pr-title`, `auto-assign`,
+`release-please`, `issue-templates`, `pr-title`, `auto-assign`, `fuzzer`,
 `settings-sync`), follow-up
-parameters for modules that have them (see [docs/pages.md](pages.md)), and
+parameters for modules that have them (see [docs/pages.md](pages.md) and
+[docs/fuzzer.md](fuzzer.md)), and
 visibility. Answers are recorded in `.copier-answers.yml`; never delete
 that file, `copier update` depends on it.
 
@@ -84,6 +85,11 @@ own checks:
 - with the agents module: a repo-owned `copilot-setup-steps.yml` starter
   (environment setup for the Copilot coding agent), prefilled with installs
   for the selected toolchains.
+- with the fuzzer module: a repo-owned `nightly-fuzz.yml` starter that runs a
+  placeholder fuzz step nightly and wires up seeded replay inputs, failure
+  artifact upload, tracking-issue filing, and auto-close on green. Replace
+  the placeholder with your fuzzer; see [docs/fuzzer.md](fuzzer.md) for the
+  failure-report contract it must write.
 
 See the [all-green convention](all-green.md) for how the gate works.
 
