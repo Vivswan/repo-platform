@@ -56,6 +56,7 @@ export const MODULE_ORDER = [
   "issue-templates",
   "pr-title",
   "auto-assign",
+  "fuzzer",
   "settings-sync",
 ];
 

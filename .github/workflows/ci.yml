@@ -77,7 +77,7 @@ jobs:
       - uses: oven-sh/setup-bun@v2
       - name: Typecheck repo and action scripts
         run: |
-          for dir in . actions/check-typography actions/validate-commit-names actions/validate-template; do
+          for dir in . actions/check-typography actions/fuzz-issue actions/validate-commit-names actions/validate-template; do
             echo "::group::$dir"
             (cd "$dir" && bun install --frozen-lockfile --silent && bun x tsc -p .)
             echo "::endgroup::"
@@ -128,8 +128,8 @@ jobs:
       - uses: oven-sh/setup-bun@v2
       - name: Install dependencies
         run: bun install --frozen-lockfile --silent
-      - name: Run .github/scripts tests
-        run: bun test ./.github/scripts
+      - name: Run .github/scripts and action tests
+        run: bun test ./.github/scripts ./actions/fuzz-issue
 
   smoke-generate:
     runs-on: ubuntu-latest
@@ -140,7 +140,7 @@ jobs:
           # Module combos covering the risky branches. `modules` is a YAML
           # STRING here (quoted) and parsed by copier as a YAML list.
           - name: everything
-            modules: "[agents, bun, uv, rust, pages, release-please, issue-templates, pr-title, auto-assign, settings-sync]"
+            modules: "[agents, bun, uv, rust, pages, release-please, issue-templates, pr-title, auto-assign, fuzzer, settings-sync]"
             private: "false"
             expect_in_pages: |
               setup: bun,uv
@@ -149,13 +149,15 @@ jobs:
           - name: bun-typical
             modules: "[agents, bun, release-please, issue-templates, pr-title, auto-assign, settings-sync]"
             private: "false"
-          # rust alone must render cargo dependabot + the Rust gitignore and
+          # rust + fuzzer must render cargo dependabot + the Rust gitignore and
           # nothing toolchain-gated (no CodeQL block, no auto-format starter):
-          # rust is deliberately outside has_toolchain. agents rides along so
-          # the AGENTS.md Toolchain section is exercised with rust as the
-          # only toolchain module.
-          - name: rust-only
-            modules: "[agents, rust]"
+          # rust is deliberately outside has_toolchain, and the fuzzer module
+          # adds nothing toolchain-gated. agents rides along so the AGENTS.md
+          # Toolchain section is exercised with rust as the only toolchain
+          # module; without auto-assign, the fuzzer starter must render no
+          # auto-assign dispatch (the everything row covers the with branch).
+          - name: rust-fuzzer
+            modules: "[agents, rust, fuzzer]"
             private: "false"
           - name: uv-pages-private
             modules: "[uv, pages, auto-assign]"

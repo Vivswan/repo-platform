@@ -29,6 +29,28 @@ fi
 if has auto-assign; then test -f "$wf/auto-assign.yml"; else test ! -e "$wf/auto-assign.yml"; fi
 if has issue-templates; then test -f /tmp/smoke/.github/ISSUE_TEMPLATE/config.yml; else test ! -e /tmp/smoke/.github/ISSUE_TEMPLATE; fi
 if has pages; then test -f "$wf/pages.yml"; else test ! -e "$wf/pages.yml"; fi
+
+# fuzzer: the repo-owned nightly-fuzz starter with the fuzz-issue action in
+# both modes and the dispatch replay inputs; the auto-assign dispatch step
+# follows that module (scratch build tree pins the action to main, like
+# check-typography below).
+if has fuzzer; then
+  test -f "$wf/nightly-fuzz.yml"
+  present "actions/fuzz-issue@main" "$wf/nightly-fuzz.yml"
+  present "mode: report" "$wf/nightly-fuzz.yml"
+  present "mode: resolve" "$wf/nightly-fuzz.yml"
+  present "workflow_dispatch:" "$wf/nightly-fuzz.yml"
+  if has auto-assign; then
+    present "auto-assign.yml" "$wf/nightly-fuzz.yml"
+    present "actions: write" "$wf/nightly-fuzz.yml"
+  else
+    absent "auto-assign.yml" "$wf/nightly-fuzz.yml"
+    absent "actions: write" "$wf/nightly-fuzz.yml"
+  fi
+else
+  test ! -e "$wf/nightly-fuzz.yml"
+fi
+
 if has settings-sync; then
   test -f /tmp/smoke/.github/settings.yml
   test -f "$wf/settings-sync.yml"
@@ -128,8 +150,10 @@ fi
 # module's settings.yml (only rendered when that module is on), the
 # managed release-please.yml machinery, the repo-owned release.yml pipeline
 # plus its thin caller job in the managed ci.yml, and the config files.
+# The fuzzer module's tracking label splices into settings.yml the same way.
 if has settings-sync; then
   if has release-please; then present "autorelease: pending" /tmp/smoke/.github/settings.yml; else absent "autorelease: pending" /tmp/smoke/.github/settings.yml; fi
+  if has fuzzer; then present "Automated nightly fuzz failure" /tmp/smoke/.github/settings.yml; else absent "Automated nightly fuzz failure" /tmp/smoke/.github/settings.yml; fi
 fi
 
 # Toolchain modules gate dependabot's default per-ecosystem labels in the
