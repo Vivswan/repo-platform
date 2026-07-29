@@ -40,6 +40,9 @@ const MAX_BODY = 60_000;
 const MAX_BLOCK_CHARS = 8_000;
 /** Contract v1: failure directory names are plain identifiers. */
 const DIR_NAME = /^[A-Za-z0-9._-]+$/;
+/** Title for a newly created tracking issue; must match the `title` input
+ *  default in action.yml (the test asserts it). */
+export const DEFAULT_TITLE = "Nightly fuzz failures";
 
 /** Runs a `gh` subcommand and returns stdout; throws on a non-zero exit. */
 export type GhRunner = (args: string[]) => Promise<string>;
@@ -335,7 +338,7 @@ async function main(): Promise<number> {
     console.error("error: ARTIFACTS_DIR is required in report mode");
     return 1;
   }
-  const title = process.env.TITLE || "Nightly fuzz failures";
+  const title = process.env.TITLE || DEFAULT_TITLE;
   const dirs = failureDirs(artifactsDir);
   const body = buildBody(dirs, process.env, process.env.ARTIFACT_NAME || "");
   const number = await fileIssue(gh, body, label, title);
