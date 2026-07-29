@@ -7,6 +7,9 @@
 # GITHUB_REPOSITORY.
 set -euo pipefail
 
+# shellcheck source=.github/scripts/shared/commit_stamp.sh
+. "$(dirname "$0")/../shared/commit_stamp.sh"
+
 git config user.name "repo-platform-build"
 git config user.email "repo-platform-build@users.noreply.github.com"
 
@@ -43,7 +46,7 @@ publish() { # channel source_sha [version]
     # A main history rewrite can orphan the previous stamp's source while
     # leaving the tree identical. Downstream validation resolves that
     # stamp, so re-stamp with an empty commit instead of skipping.
-    prev_src="$(git -C "/tmp/pub-$ch" log -1 --format=%B | sed -n 's|^source: .*/commit/||p' | head -1)"
+    prev_src="$(git -C "/tmp/pub-$ch" log -1 --format=%B | commit_stamp_parse)"
     if [ -n "$prev_src" ] && ! git rev-parse --verify --quiet "${prev_src}^{commit}" >/dev/null; then
       note="re-stamp: previous source ${prev_src:0:12} unreachable"
     else
@@ -53,7 +56,7 @@ publish() { # channel source_sha [version]
   if [ -n "$note" ]; then
     git -C "/tmp/pub-$ch" commit -q --allow-empty \
       -m "build($ch): ${ver:-main} from ${src:0:12}" \
-      -m "source: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/commit/$src" \
+      -m "$(commit_stamp_write "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$src")" \
       -m "run: $RUN_URL"
     # Plain push, never force: the branches are append-only.
     git -C "/tmp/pub-$ch" push origin "HEAD:refs/heads/$ch"

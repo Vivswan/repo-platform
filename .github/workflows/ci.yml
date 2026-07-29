@@ -35,7 +35,9 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Shellcheck the workflow step scripts
-        run: find .github/scripts -name '*.sh' -print0 | xargs -0 shellcheck
+        # -x follows the `# shellcheck source=` directives into the
+        # sourced shared helpers (paths resolve from the checkout root).
+        run: find .github/scripts -name '*.sh' -print0 | xargs -0 shellcheck -x
 
   yamllint:
     runs-on: ubuntu-latest
@@ -226,13 +228,8 @@ jobs:
           fetch-depth: 0
       # copier invokes migrations/run.ts with bun during copy/update.
       - uses: oven-sh/setup-bun@v2
-      # pyyaml: the synthetic old-fixture tree is built with the pre-port
-      # python composer pinned inside the script; both go away once a real
-      # templates/v* release tag exists.
-      - name: Install copier + pyyaml
-        run: |
-          pipx install copier
-          python3 -m pip install --quiet pyyaml
+      - name: Install copier
+        run: pipx install copier
       - name: Update from previous build tag to a fresh build
         run: .github/scripts/ci/upgrade_path_test.sh
 
