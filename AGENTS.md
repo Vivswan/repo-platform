@@ -40,9 +40,10 @@ sync secret; the single REPO_PLATFORM_TOKEN PAT lives only here.
   `bun scripts/build_gitignore.ts`. CI fails on drift.
 - Workflow run blocks longer than a few lines are extracted to bash
   scripts under `.github/scripts/<owner>/` so shellcheck can lint them.
-  Exception: the cross-repo `reusable-*` workflows run in the CALLER's
-  checkout, where this repo's scripts do not exist - their steps stay
-  inline.
+  Exception: `reusable-*` workflows whose primary checkout is the CALLER's
+  repository, where this repo's scripts do not exist - their steps stay
+  inline. reusable-template-sync checks out repo-platform itself (the
+  target repo sits in a subdirectory), so it calls repo scripts normally.
 - Symlinks in `templates/agents/` must stay symlinks (`.gitattributes`
   marks them `-text`; copier preserves them via `_preserve_symlinks`).
 - Update the matching `docs/` guide when changing behavior it describes.
