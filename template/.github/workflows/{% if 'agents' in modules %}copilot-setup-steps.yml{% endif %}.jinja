@@ -29,7 +29,7 @@ jobs:
       - name: Install dependencies (bun)
         run: bun install --frozen-lockfile
 {% endif %}{% if 'uv' in modules %}
-      - uses: astral-sh/setup-uv@v7
+      - uses: astral-sh/setup-uv@v8.3.2
       - name: Install dependencies (uv)
         run: uv sync
 {% endif %}
