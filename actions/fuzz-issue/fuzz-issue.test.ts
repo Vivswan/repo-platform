@@ -7,13 +7,14 @@
  */
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   blockTitle,
   buildBody,
   capChars,
+  DEFAULT_TITLE,
   failureDirs,
   fileIssue,
   type GhRunner,
@@ -213,11 +214,11 @@ function fakeGh(openNumber?: number, labelTaken = false): { run: GhRunner; calls
 describe("fileIssue", () => {
   test("create path opens a labeled issue with the body and title", async () => {
     const { run, calls } = fakeGh(undefined);
-    await fileIssue(run, "body", "fuzz-nightly", "Nightly fuzz failures");
+    await fileIssue(run, "body", "fuzz-nightly", DEFAULT_TITLE);
     const create = calls.find((c) => c[0] === "issue" && c[1] === "create");
     expect(create).toBeDefined();
     expect(create?.[create.indexOf("--label") + 1]).toBe("fuzz-nightly");
-    expect(create?.[create.indexOf("--title") + 1]).toBe("Nightly fuzz failures");
+    expect(create?.[create.indexOf("--title") + 1]).toBe(DEFAULT_TITLE);
     expect(create?.[create.indexOf("--body") + 1]).toBe("body");
   });
 
@@ -341,5 +342,15 @@ describe("issueNumberFromUrl", () => {
 
   test("returns undefined when the URL has no trailing number", () => {
     expect(issueNumberFromUrl("not a url")).toBeUndefined();
+  });
+});
+
+describe("DEFAULT_TITLE", () => {
+  test("matches the title input default declared in action.yml", () => {
+    // No yaml dependency in this package: the default is a plain one-line
+    // scalar, so line extraction is exact enough.
+    const actionYml = readFileSync(join(import.meta.dir, "action.yml"), "utf-8");
+    const match = actionYml.match(/^ {2}title:\n(?: {4}.+\n)*? {4}default: (.+)$/m);
+    expect(match?.[1]).toBe(DEFAULT_TITLE);
   });
 });
