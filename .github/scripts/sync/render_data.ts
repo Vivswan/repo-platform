@@ -12,6 +12,7 @@
 
 import { readFileSync, writeFileSync } from "node:fs";
 import { parse, stringify } from "yaml";
+import { parseFlags } from "../shared/flags.ts";
 
 const FLAGS = [
   "--answers-old",
@@ -28,27 +29,10 @@ function fail(message: string): never {
   process.exit(1);
 }
 
-function parseFlags(args: string[], allowed: readonly string[]): Map<string, string> {
-  const flags = new Map<string, string>();
-  for (let i = 0; i < args.length; i += 2) {
-    const flag = args[i];
-    const value = args[i + 1];
-    if (!allowed.includes(flag) || value === undefined) {
-      fail(`unknown or valueless argument "${flag}" - allowed flags: ${allowed.join(", ")}`);
-    }
-    flags.set(flag, value);
-  }
-  return flags;
-}
-
 function main(args: string[]): void {
   const flags = parseFlags(args, FLAGS);
-  const missing = FLAGS.filter((flag) => !flags.has(flag));
-  if (missing.length > 0) {
-    fail(`missing required flags: ${missing.join(", ")}`);
-  }
 
-  const answersPath = flags.get("--answers-old")!;
+  const answersPath = flags["--answers-old"];
   let answers: unknown;
   try {
     answers = parse(readFileSync(answersPath, "utf-8"));
@@ -62,9 +46,9 @@ function main(args: string[]): void {
 
   let modules: unknown;
   try {
-    modules = JSON.parse(flags.get("--modules")!);
+    modules = JSON.parse(flags["--modules"]);
   } catch {
-    fail(`--modules is not valid JSON: ${flags.get("--modules")}`);
+    fail(`--modules is not valid JSON: ${flags["--modules"]}`);
   }
   if (!Array.isArray(modules) || !modules.every((entry) => typeof entry === "string")) {
     fail("--modules must be a JSON list of strings");
@@ -73,15 +57,15 @@ function main(args: string[]): void {
   const data = Object.fromEntries(
     Object.entries(answers as Record<string, unknown>).filter(([key]) => !key.startsWith("_")),
   );
-  writeFileSync(flags.get("--out-old")!, stringify(data));
+  writeFileSync(flags["--out-old"], stringify(data));
   writeFileSync(
-    flags.get("--out-new")!,
+    flags["--out-new"],
     stringify({
       ...data,
       modules,
-      channel: flags.get("--channel")!,
-      private: flags.get("--private") === "true",
-      description: flags.get("--description")!,
+      channel: flags["--channel"],
+      private: flags["--private"] === "true",
+      description: flags["--description"],
     }),
   );
 }

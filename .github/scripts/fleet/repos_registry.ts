@@ -17,6 +17,7 @@
 
 import { readFileSync } from "node:fs";
 import { parse } from "yaml";
+import { parseFlags } from "../shared/flags.ts";
 
 const SLUG_RE = /^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?\/[A-Za-z0-9._-]+$/;
 const WILDCARD = "*";
@@ -26,7 +27,7 @@ const TOP_LEVEL_KEYS = ["managed", "exclude", "defaults", "config"];
 type Channel = (typeof CHANNELS)[number];
 
 export interface Registry {
-  managed: string[];
+  managed: { wildcard: boolean; repos: string[] };
   exclude: string[];
   defaultChannel: Channel | null;
   config: Map<string, { channel: Channel }>;
@@ -91,31 +92,31 @@ export function validateRegistry(
   }
 
   // managed
-  const managed: string[] = [];
-  let wildcardCount = 0;
+  let wildcard = false;
+  const repos: string[] = [];
   if (!Array.isArray(data.managed)) {
     errors.push(`${label}: managed must be a list of owner/name slugs or the "*" wildcard`);
   } else {
     const seen = new Set<string>();
     for (const entry of data.managed) {
       if (entry === WILDCARD) {
-        wildcardCount += 1;
-        if (wildcardCount > 1) {
+        if (wildcard) {
           errors.push(`${label}: managed contains more than one "*" wildcard`);
-          continue;
         }
-      } else if (!isSlug(entry)) {
+        wildcard = true;
+        continue;
+      }
+      if (!isSlug(entry)) {
         errors.push(
           `${label}: managed entry ${JSON.stringify(entry)} is not an owner/name slug or "*"`,
         );
         continue;
       }
-      const slug = entry as string;
-      if (seen.has(slug)) {
-        errors.push(`${label}: duplicate managed entry "${slug}"`);
+      if (seen.has(entry)) {
+        errors.push(`${label}: duplicate managed entry "${entry}"`);
       }
-      seen.add(slug);
-      managed.push(slug);
+      seen.add(entry);
+      repos.push(entry);
     }
   }
 
@@ -137,7 +138,7 @@ export function validateRegistry(
         seen.add(entry);
         exclude.push(entry);
       }
-      if (exclude.length > 0 && wildcardCount === 0) {
+      if (exclude.length > 0 && !wildcard) {
         errors.push(
           `${label}: exclude has entries but managed has no "*" wildcard - ` +
             `nothing is auto-discovered, so exclusions are dead config; ` +
@@ -214,7 +215,10 @@ export function validateRegistry(
   if (errors.length > 0) {
     return { registry: null, errors };
   }
-  return { registry: { managed, exclude, defaultChannel, config }, errors: [] };
+  return {
+    registry: { managed: { wildcard, repos }, exclude, defaultChannel, config },
+    errors: [],
+  };
 }
 
 // Resolve the selection: (wildcard x discovered) union explicit slugs,
@@ -226,17 +230,16 @@ export function selectRepos(
 ): { selection: Selected[]; errors: string[] } {
   const errors: string[] = [];
   const discovered = options.discovered ?? null;
-  const hasWildcard = registry.managed.includes(WILDCARD);
 
-  if (hasWildcard && discovered === null) {
+  if (registry.managed.wildcard && discovered === null) {
     errors.push(
       'repos.yml: managed contains "*" but no --discovered file was provided - ' +
         "pass the caller's discovery output (a JSON array of owner/name strings)",
     );
   }
 
-  const pool = new Set<string>(registry.managed.filter((slug) => slug !== WILDCARD));
-  if (hasWildcard && discovered !== null) {
+  const pool = new Set<string>(registry.managed.repos);
+  if (registry.managed.wildcard && discovered !== null) {
     for (const slug of discovered) {
       if (!isSlug(slug)) {
         errors.push(`discovered list entry ${JSON.stringify(slug)} is not an owner/name slug`);
@@ -280,19 +283,6 @@ function fail(errors: string[]): never {
   process.exit(1);
 }
 
-function parseFlags(args: string[], allowed: string[]): Map<string, string> {
-  const flags = new Map<string, string>();
-  for (let i = 0; i < args.length; i += 2) {
-    const flag = args[i];
-    const value = args[i + 1];
-    if (!allowed.includes(flag) || value === undefined) {
-      fail([`unknown or valueless argument "${flag}" - allowed flags: ${allowed.join(", ")}`]);
-    }
-    flags.set(flag, value);
-  }
-  return flags;
-}
-
 function readRegistryFile(path: string): Registry {
   let text: string;
   try {
@@ -311,22 +301,21 @@ function main(args: string[]): void {
   const [command, ...rest] = args;
   switch (command) {
     case "validate": {
-      const flags = parseFlags(rest, ["--file"]);
-      const path = flags.get("--file") ?? "repos.yml";
+      const flags = parseFlags(rest, [], ["--file"]);
+      const path = flags["--file"] ?? "repos.yml";
       const registry = readRegistryFile(path);
-      const explicit = registry.managed.filter((slug) => slug !== WILDCARD).length;
-      const wildcard = registry.managed.length - explicit;
       console.log(
-        `${path}: OK - explicit repos: ${explicit}, wildcard: ${wildcard ? "yes" : "no"}, ` +
+        `${path}: OK - explicit repos: ${registry.managed.repos.length}, ` +
+          `wildcard: ${registry.managed.wildcard ? "yes" : "no"}, ` +
           `excluded: ${registry.exclude.length}, config entries: ${registry.config.size}`,
       );
       return;
     }
     case "select": {
-      const flags = parseFlags(rest, ["--file", "--repo", "--discovered"]);
-      const registry = readRegistryFile(flags.get("--file") ?? "repos.yml");
+      const flags = parseFlags(rest, [], ["--file", "--repo", "--discovered"]);
+      const registry = readRegistryFile(flags["--file"] ?? "repos.yml");
       let discovered: string[] | null = null;
-      const discoveredPath = flags.get("--discovered");
+      const discoveredPath = flags["--discovered"];
       if (discoveredPath !== undefined) {
         let parsed: unknown;
         try {
@@ -341,7 +330,7 @@ function main(args: string[]): void {
         discovered = parsed;
       }
       const { selection, errors } = selectRepos(registry, {
-        repo: flags.get("--repo"),
+        repo: flags["--repo"],
         discovered,
       });
       if (errors.length > 0) {

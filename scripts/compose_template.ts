@@ -45,7 +45,8 @@ const SRC = join(REPO_ROOT, "templates");
 const OUT = join(REPO_ROOT, "template");
 
 // Fixed, deterministic fragment/collision order (bun before uv preserves the
-// dependabot ecosystem order). A templates/ folder not listed here is an error.
+// dependabot ecosystem order). A templates/ folder not listed here is an
+// error, and so is an entry here without a templates/ folder.
 export const MODULE_ORDER = [
   "agents",
   "bun",
@@ -245,7 +246,13 @@ function sortedByKey<V>(map: Map<string, V>): [string, V][] {
   return [...map.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
 }
 
-type SourcedEntry = { source: string; entry: Entry };
+type SourcedEntry =
+  | { origin: "base"; entry: Entry }
+  | { origin: "module"; module: string; gate: string; gateDirs: string[]; entry: Entry };
+
+function sourceName(sourced: SourcedEntry): string {
+  return sourced.origin === "base" ? "base" : sourced.module;
+}
 
 /** Replace anchor lines in-place; returns error strings. */
 function spliceFragments(
@@ -255,12 +262,13 @@ function spliceFragments(
 ): string[] {
   const errors: string[] = [];
   const anchorOwner = new Map<string, [string, string]>(); // anchor -> [source, logical]
-  for (const [logical, { source, entry }] of sortedByKey(files)) {
+  for (const [logical, sourced] of sortedByKey(files)) {
+    const { entry } = sourced;
     if (entry.kind === "symlink") continue;
     for (const line of splitLines(entry.data)) {
       if (line.includes(ANCHOR_HINT) && matchAnchor(line) === null) {
         errors.push(
-          `templates/${source}/${logical}: malformed anchor line ` +
+          `templates/${sourceName(sourced)}/${logical}: malformed anchor line ` +
             `'${line.toString("utf-8").trim()}' - anchors must be a ` +
             "full line exactly matching '{# compose:<name> #}' (no " +
             "indentation, trailing whitespace, or CRLF)",
@@ -272,13 +280,13 @@ function spliceFragments(
       const other = anchorOwner.get(anchor);
       if (other) {
         errors.push(
-          `duplicate anchor '${anchor}' in templates/${source}/${logical} ` +
+          `duplicate anchor '${anchor}' in templates/${sourceName(sourced)}/${logical} ` +
             `and templates/${other[0]}/${other[1]} - each anchor may appear ` +
             "in exactly one skeleton file; rename one anchor (and any " +
             `fragments/${anchor}.jinja files that feed it) or remove the duplicate marker`,
         );
       }
-      anchorOwner.set(anchor, [source, logical]);
+      anchorOwner.set(anchor, [sourceName(sourced), logical]);
     }
   }
 
@@ -349,15 +357,29 @@ export function build(): Map<string, Entry> {
         "MODULE_ORDER in scripts/compose_template.ts",
     );
   }
+  const missing = MODULE_ORDER.filter((m) => !folders.includes(m));
+  if (missing.length > 0) {
+    die(
+      `error: MODULE_ORDER lists '${missing[0]}' but templates/${missing[0]}/ ` +
+        "does not exist; remove it from MODULE_ORDER in " +
+        "scripts/compose_template.ts or restore the folder",
+    );
+  }
+  const duplicate = MODULE_ORDER.find((m, i) => MODULE_ORDER.indexOf(m) !== i);
+  if (duplicate !== undefined) {
+    die(
+      `error: MODULE_ORDER lists '${duplicate}' more than once; a duplicate ` +
+        "entry splices its fragments twice",
+    );
+  }
 
   const errors: string[] = [];
   const files = new Map<string, SourcedEntry>();
   const fragments = new Map<string, [string, Buffer][]>();
   const gates = new Map<string, string>();
-  const gateDirs = new Map<string, string[]>();
 
   for (const [logical, entry] of collectFiles(base)) {
-    files.set(logical, { source: "base", entry });
+    files.set(logical, { origin: "base", entry });
   }
   try {
     lstatSync(join(base, FRAGMENTS_DIR));
@@ -369,12 +391,12 @@ export function build(): Map<string, Entry> {
     // No fragments/ entry under base - the expected state.
   }
 
-  for (const module of MODULE_ORDER.filter((m) => folders.includes(m))) {
+  for (const module of MODULE_ORDER) {
     const folder = join(SRC, module);
     const manifest = loadManifest(folder);
-    gates.set(module, gateExpression(module, manifest));
+    const gate = gateExpression(module, manifest);
+    gates.set(module, gate);
     const dirs = [...(manifest.gate_dirs ?? [])];
-    gateDirs.set(module, dirs);
     const moduleFiles = collectFiles(folder);
     // Every gate_dirs entry must name a DIRECTORY holding at least one of
     // this module's files - a typo would otherwise silently fall back to
@@ -407,7 +429,7 @@ export function build(): Map<string, Entry> {
       const existing = files.get(logical);
       if (existing) {
         errors.push(
-          `collision: templates/${existing.source}/${logical} and ` +
+          `collision: templates/${sourceName(existing)}/${logical} and ` +
             `templates/${module}/${logical} both provide ${logical}. Additive ` +
             "content must go through an anchor ({# compose:<name> #} plus " +
             `${FRAGMENTS_DIR}/<name>${JINJA_SUFFIX}); otherwise hoist the file ` +
@@ -415,7 +437,7 @@ export function build(): Map<string, Entry> {
         );
         continue;
       }
-      files.set(logical, { source: module, entry });
+      files.set(logical, { origin: "module", module, gate, gateDirs: dirs, entry });
     }
     for (const [anchor, body] of collectFragments(folder)) {
       const contributions = fragments.get(anchor) ?? [];
@@ -432,11 +454,9 @@ export function build(): Map<string, Entry> {
 
   const output = new Map<string, Entry>();
   const emittedErrors: string[] = [];
-  for (const [logical, { source, entry }] of files) {
+  for (const [logical, sourced] of files) {
     const emitted =
-      source === "base"
-        ? logical
-        : gatedPath(logical, gates.get(source) as string, gateDirs.get(source) as string[]);
+      sourced.origin === "base" ? logical : gatedPath(logical, sourced.gate, sourced.gateDirs);
     if (output.has(emitted)) {
       // Distinct logical paths can still emit the same name (e.g. a
       // hand-gated base filename plus the module's plain copy).
@@ -447,7 +467,7 @@ export function build(): Map<string, Entry> {
       );
       continue;
     }
-    output.set(emitted, entry);
+    output.set(emitted, sourced.entry);
   }
   if (emittedErrors.length > 0) {
     for (const error of emittedErrors) console.error(`error: ${error}`);
