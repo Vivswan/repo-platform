@@ -9,7 +9,7 @@ updates:
     cooldown:
       default-days: 7
     # Conventional PR titles so the commit-names/pr-title gates pass; action
-    # bumps are workflow changes, hence ci (the bun entries use build).
+    # bumps are workflow changes, hence ci (package-manifest entries use build).
     commit-message:
       prefix: "ci"
       include: "scope"
@@ -41,6 +41,30 @@ updates:
   # Dev-only manifest (@types/node, typescript) for the commit-names action.
   - package-ecosystem: "bun"
     directory: "/actions/validate-commit-names"
+    schedule:
+      interval: "monthly"
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: "build"
+      include: "scope"
+
+  # Dev-only manifest (@types/bun, typescript) for the fuzz-issue action.
+  - package-ecosystem: "bun"
+    directory: "/actions/fuzz-issue"
+    schedule:
+      interval: "monthly"
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: "build"
+      include: "scope"
+
+  # yaml runtime dependency of the validate-template action. The action dir
+  # commits bun.lock, so the bun ecosystem keeps both manifest and lockfile
+  # current.
+  - package-ecosystem: "bun"
+    directory: "/actions/validate-template"
     schedule:
       interval: "monthly"
     cooldown:

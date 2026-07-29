@@ -86,11 +86,12 @@ fuzz step communicates failures to it through a directory with this layout:
 - Any other files in the subdirectory (the crashing input, logs) ride along
   in the uploaded workflow artifact; the action never reads them.
 
-The whole issue body stays under GitHub's 65,536-character cap: failures are
-included oldest-first (by directory mtime) until the budget runs out, and
-the body then says how many were omitted. Note that re-extracting artifacts
-(the shard aggregation below) stamps fresh mtimes, so the ordering only
-means something when the reports are read where they were written.
+The whole issue body is capped at 60,000 characters (comfortably inside
+GitHub's limit): failures are included oldest-first (by directory mtime)
+until the budget runs out, and the body then says how many were omitted.
+Note that re-extracting artifacts (the shard aggregation below) stamps fresh
+mtimes, so the ordering only means something when the reports are read where
+they were written.
 
 ## Issue lifecycle
 
