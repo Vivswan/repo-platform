@@ -131,6 +131,8 @@ function buildSelf(sha: string, sections: Record<string, string>, localBody: str
   return parts.join("");
 }
 
+type Mode = "fetch" | "locked" | "check";
+
 async function main(): Promise<number> {
   const args = process.argv.slice(2);
   const locked = args.includes("--locked");
@@ -144,17 +146,18 @@ async function main(): Promise<number> {
     );
     return 2;
   }
+  const mode: Mode = locked ? "locked" : check ? "check" : "fetch";
 
   const paths = [...ALWAYS, ...Object.values(BY_MODULE).flat()];
   let sha: string;
-  if (locked || check) {
-    sha = readFileSync(LOCK_FILE, "utf-8").trim();
-  } else {
+  if (mode === "fetch") {
     sha = await upstreamHead();
+  } else {
+    sha = readFileSync(LOCK_FILE, "utf-8").trim();
   }
   const sections: Record<string, string> = {};
   for (const path of paths) sections[path] = await section(sha, path);
-  if (!locked && !check) {
+  if (mode === "fetch") {
     // The lock is written only after every fetch succeeded - a failed fetch
     // must not advance the lock past the generated files.
     writeFileSync(LOCK_FILE, `${sha}\n`);
@@ -170,7 +173,7 @@ async function main(): Promise<number> {
     [OUTPUT_SELF, buildSelf(sha, sections, existingLocalBody(OUTPUT_SELF))],
   ];
 
-  if (check) {
+  if (mode === "check") {
     const stale = outputs
       .filter(
         ([out, content]) =>

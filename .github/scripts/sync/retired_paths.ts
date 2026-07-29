@@ -21,6 +21,7 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { parse } from "yaml";
+import { parseFlags } from "../shared/flags.ts";
 
 // Relative paths of every file and symlink under root (directories are
 // implicit); symlinks are never followed.
@@ -121,33 +122,14 @@ function requireDir(path: string): string {
   fail([`${path}: not a directory`]);
 }
 
-function parseFlags(args: string[], allowed: string[]): Map<string, string> {
-  const flags = new Map<string, string>();
-  for (let i = 0; i < args.length; i += 2) {
-    const flag = args[i];
-    const value = args[i + 1];
-    if (!allowed.includes(flag) || value === undefined) {
-      fail([`unknown or valueless argument "${flag}" - allowed flags: ${allowed.join(", ")}`]);
-    }
-    flags.set(flag, value);
-  }
-  return flags;
-}
-
 function main(args: string[]): void {
   const flags = parseFlags(args, ["--old-render", "--new-render", "--old-copier", "--new-copier"]);
-  const missing = ["--old-render", "--new-render", "--old-copier", "--new-copier"].filter(
-    (flag) => !flags.has(flag),
-  );
-  if (missing.length > 0) {
-    fail([`missing required flags: ${missing.join(", ")}`]);
-  }
 
-  const oldPaths = listRenderPaths(requireDir(flags.get("--old-render")!));
-  const newPaths = listRenderPaths(requireDir(flags.get("--new-render")!));
+  const oldPaths = listRenderPaths(requireDir(flags["--old-render"]));
+  const newPaths = listRenderPaths(requireDir(flags["--new-render"]));
   const skipPatterns = [
-    ...skipPatternsFrom(flags.get("--old-copier")!),
-    ...skipPatternsFrom(flags.get("--new-copier")!),
+    ...skipPatternsFrom(flags["--old-copier"]),
+    ...skipPatternsFrom(flags["--new-copier"]),
   ];
   console.log(JSON.stringify(retiredPaths(oldPaths, newPaths, skipPatterns)));
 }
