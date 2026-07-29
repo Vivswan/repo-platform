@@ -8,6 +8,11 @@
 # GITHUB_REPOSITORY, GITHUB_OUTPUT, RUNNER_TEMP.
 set -euo pipefail
 
+# shellcheck source=.github/scripts/shared/commit_stamp.sh
+. "$(dirname "$0")/../shared/commit_stamp.sh"
+# shellcheck source=.github/scripts/sync/resolve_channel.sh
+. "$(dirname "$0")/resolve_channel.sh"
+
 case "$RECOVER" in
   "" | recopy) ;;
   *)
@@ -21,11 +26,7 @@ git fetch --quiet origin "+refs/tags/templates/*:refs/tags/templates/*"
 git fetch --quiet origin "+refs/heads/staging:refs/remotes/origin/staging" || true
 git fetch --quiet origin "+refs/heads/latest:refs/remotes/origin/latest" || true
 
-channel="$CHANNEL_INPUT"
-if [ -z "$channel" ]; then
-  channel="$(awk '$1 == "channel:" { print $2 }' target/.copier-answers.yml)"
-fi
-channel="${channel:-latest}"
+channel="$(resolve_channel "$CHANNEL_INPUT" target/.copier-answers.yml)"
 case "$channel" in
   staging | latest) ;;
   *)
@@ -55,7 +56,7 @@ if [ "$channel" = "staging" ]; then
   # next run, so refuse to guess here. GITHUB_SHA is not main on release
   # events, hence the explicit resolve for the no-stamp fallback.
   main_sha="$(git rev-parse refs/remotes/origin/main)"
-  validate_ref="$(git log -1 --format=%B "$target_sha" | sed -n 's|^source: .*/commit/||p' | head -1)"
+  validate_ref="$(git log -1 --format=%B "$target_sha" | commit_stamp_parse)"
   if [ -n "$validate_ref" ] && ! git rev-parse --verify --quiet "${validate_ref}^{commit}" >/dev/null; then
     echo "::error::staging's stamped source commit ${validate_ref} is unreachable (main history rewrite). Dispatch the Build Branches workflow - it re-stamps staging - then re-run."
     exit 1
