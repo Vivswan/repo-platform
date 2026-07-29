@@ -22,7 +22,9 @@ const vars = { username: "Vivswan", slug: "repo-platform" };
 
 describe("normalizeJinja", () => {
   test("strips raw/endraw markers but keeps the expression", () => {
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: literal GitHub Actions expression fixture
     expect(normalizeJinja("a: {% raw %}${{ github.ref }}{% endraw %}", vars)).toBe(
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: literal GitHub Actions expression fixture
       "a: ${{ github.ref }}",
     );
   });
@@ -58,7 +60,9 @@ describe("normalizeJinja", () => {
 
 describe("placeholderJinja", () => {
   test("replaces leftover jinja expressions but keeps GitHub expressions", () => {
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: literal GitHub Actions expression fixture
     expect(placeholderJinja("a: {{ description | tojson }} b: ${{ github.ref }}")).toBe(
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: literal GitHub Actions expression fixture
       'a: "JINJA" b: ${{ github.ref }}',
     );
   });
