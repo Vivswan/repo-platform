@@ -9,3 +9,13 @@ CLAUDE.md -text
 templates/agents/CLAUDE.md -text
 templates/agents/.github/copilot-instructions.md -text
 templates/agents/.github/agents.md -text
+
+# Keep binary assets byte-for-byte unchanged.
+*.ico binary
+*.jpg binary
+*.jpeg binary
+*.png binary
+*.gif binary
+*.webp binary
+*.pdf binary
+*.zip binary
