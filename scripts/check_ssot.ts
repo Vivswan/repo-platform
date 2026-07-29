@@ -705,6 +705,34 @@ const rules: Rule[] = [
           }
         }
       }
+      // The reverse direction, for the gates whose only CI home is a step in
+      // a needed job: trimming the step out of ci.yml would silently stop
+      // them running anywhere in CI while the chain (and this rule's forward
+      // pass) stayed green. Line-anchored equality, so an echoed or
+      // commented copy of the command cannot satisfy it.
+      const gatingLines = new Set(
+        needs.flatMap((jobName) => {
+          const job = asRecord(jobs[jobName], jobName);
+          return ((job.steps as Record<string, unknown>[] | undefined) ?? []).flatMap((step) =>
+            String(step.run ?? "")
+              .split("\n")
+              .map((line) => line.trim()),
+          );
+        }),
+      );
+      for (const required of [
+        "bun run ssot:check",
+        "bun .github/scripts/fleet/repos_registry.ts validate",
+        "bun actions/validate-template/validate_generated_files.ts --self .",
+      ]) {
+        if (!gatingLines.has(required)) {
+          mismatches.push({
+            file: "ci.yml",
+            expected: `'${required}' as a run line of an all-green-needed job`,
+            got: "missing",
+          });
+        }
+      }
       return mismatches;
     },
   },
@@ -793,20 +821,33 @@ const rules: Rule[] = [
   {
     name: "dependabot-actions-block",
     run: () => {
-      const actionsEntries = (rel: string, text: string) => {
+      // The repo entry covers "/" plus its composite actions/ dirs (which
+      // downstream repos do not have), so compare the shared shape with the
+      // directory coverage held out, and pin each side's coverage of "/".
+      // groups is held out too: cross-directory grouping is only meaningful
+      // for this repo's multi-directory entry.
+      const rootActionsEntry = (rel: string, text: string, wantDirs: (d: unknown) => boolean) => {
         const doc = asRecord(parseYaml(text), rel);
         const entries = (doc.updates as Record<string, unknown>[]).filter(
           (entry) => entry["package-ecosystem"] === "github-actions",
         );
-        if (entries.length === 0)
-          throw new Error(`${rel}: no github-actions dependabot entry - anchor lost`);
-        return entries;
+        if (entries.length !== 1)
+          throw new Error(`${rel}: expected exactly one github-actions dependabot entry`);
+        const { directory, directories, groups, ...shape } = entries[0];
+        if (!wantDirs(directory ?? directories))
+          throw new Error(`${rel}: github-actions entry does not cover "/"`);
+        return shape;
       };
-      const expected = actionsEntries(
+      const expected = rootActionsEntry(
         "templates/base/.github/dependabot.yml.jinja",
         normalizeJinja(read("templates/base/.github/dependabot.yml.jinja"), jinjaVars()),
+        (d) => d === "/",
       );
-      const got = actionsEntries(".github/dependabot.yml", read(".github/dependabot.yml"));
+      const got = rootActionsEntry(
+        ".github/dependabot.yml",
+        read(".github/dependabot.yml"),
+        (d) => d === "/" || (Array.isArray(d) && d.includes("/")),
+      );
       if (canonical(expected) === canonical(got)) return [];
       return [
         { file: ".github/dependabot.yml", expected: canonical(expected), got: canonical(got) },
