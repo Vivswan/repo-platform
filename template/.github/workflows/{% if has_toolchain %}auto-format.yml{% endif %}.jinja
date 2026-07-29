@@ -33,7 +33,7 @@ jobs:
       - name: Format (biome)
         run: bun x @biomejs/biome check --write .
 {% endif %}{% if 'uv' in modules %}
-      - uses: astral-sh/setup-uv@v8.3.2
+      - uses: astral-sh/setup-uv@v9.0.0
       - name: Format (ruff)
         run: |
           uvx ruff check --fix .
