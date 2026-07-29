@@ -5,7 +5,7 @@ import { loadRegistry, type Registry, selectRepos, validateRegistry } from "./re
 
 function registry(overrides: Partial<Registry> = {}): Registry {
   return {
-    managed: [],
+    managed: { wildcard: false, repos: [] },
     exclude: [],
     defaultChannel: null,
     config: new Map(),
@@ -24,7 +24,7 @@ describe("validate", () => {
       ].join("\n"),
     );
     expect(errors).toEqual([]);
-    expect(parsed?.managed).toEqual(["*", "Vivswan/dotfiles"]);
+    expect(parsed?.managed).toEqual({ wildcard: true, repos: ["Vivswan/dotfiles"] });
     expect(parsed?.defaultChannel).toBe("staging");
     expect(parsed?.config.get("Vivswan/repo-settings-as-code")).toEqual({ channel: "latest" });
   });
@@ -120,20 +120,22 @@ describe("validate", () => {
 
 describe("select", () => {
   test("wildcard without --discovered is an error", () => {
-    const { errors } = selectRepos(registry({ managed: ["*"] }));
+    const { errors } = selectRepos(registry({ managed: { wildcard: true, repos: [] } }));
     expect(errors).toHaveLength(1);
     expect(errors[0]).toContain("--discovered");
   });
 
   test("explicit slugs work without --discovered", () => {
-    const { selection, errors } = selectRepos(registry({ managed: ["a/b", "c/d"] }));
+    const { selection, errors } = selectRepos(
+      registry({ managed: { wildcard: false, repos: ["a/b", "c/d"] } }),
+    );
     expect(errors).toEqual([]);
     expect(selection.map((s) => s.repo)).toEqual(["a/b", "c/d"]);
   });
 
   test("wildcard unions discovered with explicit slugs, minus exclude", () => {
     const { selection, errors } = selectRepos(
-      registry({ managed: ["*", "x/explicit"], exclude: ["a/skipped"] }),
+      registry({ managed: { wildcard: true, repos: ["x/explicit"] }, exclude: ["a/skipped"] }),
       { discovered: ["a/skipped", "a/kept", "x/explicit"] },
     );
     expect(errors).toEqual([]);
@@ -141,7 +143,9 @@ describe("select", () => {
   });
 
   test("splits owner and name in the output", () => {
-    const { selection } = selectRepos(registry({ managed: ["Vivswan/dotfiles"] }));
+    const { selection } = selectRepos(
+      registry({ managed: { wildcard: false, repos: ["Vivswan/dotfiles"] } }),
+    );
     expect(selection).toEqual([
       { repo: "Vivswan/dotfiles", owner: "Vivswan", name: "dotfiles", channel: null },
     ]);
@@ -149,7 +153,7 @@ describe("select", () => {
 
   test("channel precedence: config beats defaults beats null", () => {
     const base = registry({
-      managed: ["a/config", "a/default", "a/none"],
+      managed: { wildcard: false, repos: ["a/config", "a/default", "a/none"] },
       defaultChannel: "staging",
       config: new Map([["a/config", { channel: "latest" as const }]]),
     });
@@ -158,32 +162,45 @@ describe("select", () => {
     expect(channels["a/config"]).toBe("latest");
     expect(channels["a/default"]).toBe("staging");
 
-    const noDefaults = registry({ managed: ["a/none"] });
+    const noDefaults = registry({ managed: { wildcard: false, repos: ["a/none"] } });
     expect(selectRepos(noDefaults).selection[0].channel).toBeNull();
   });
 
   test("--repo filters to one repo", () => {
-    const { selection } = selectRepos(registry({ managed: ["a/b", "c/d"] }), { repo: "c/d" });
+    const { selection } = selectRepos(
+      registry({ managed: { wildcard: false, repos: ["a/b", "c/d"] } }),
+      { repo: "c/d" },
+    );
     expect(selection.map((s) => s.repo)).toEqual(["c/d"]);
   });
 
   test("--repo miss is an error mentioning exclude", () => {
-    const { errors } = selectRepos(registry({ managed: ["*"], exclude: ["a/b"] }), {
-      repo: "a/b",
-      discovered: ["a/b"],
-    });
+    const { errors } = selectRepos(
+      registry({ managed: { wildcard: true, repos: [] }, exclude: ["a/b"] }),
+      {
+        repo: "a/b",
+        discovered: ["a/b"],
+      },
+    );
     expect(errors).toHaveLength(1);
     expect(errors[0]).toContain("exclude");
   });
 
   test("empty selection is [] not an error", () => {
-    const { selection, errors } = selectRepos(registry({ managed: ["*"] }), { discovered: [] });
+    const { selection, errors } = selectRepos(
+      registry({ managed: { wildcard: true, repos: [] } }),
+      {
+        discovered: [],
+      },
+    );
     expect(errors).toEqual([]);
     expect(selection).toEqual([]);
   });
 
   test("garbage in the discovered list is an error", () => {
-    const { errors } = selectRepos(registry({ managed: ["*"] }), { discovered: ["not a slug"] });
+    const { errors } = selectRepos(registry({ managed: { wildcard: true, repos: [] } }), {
+      discovered: ["not a slug"],
+    });
     expect(errors).toHaveLength(1);
     expect(errors[0]).toContain("discovered list entry");
   });

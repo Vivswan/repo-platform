@@ -65,11 +65,7 @@ function stripCr(line: Buffer): Buffer {
   return line.subarray(0, end);
 }
 
-interface Resolution {
-  resolved: Buffer;
-  dropped: Buffer[];
-  malformed: boolean;
-}
+type Resolution = { kind: "malformed" } | { kind: "resolved"; resolved: Buffer; dropped: Buffer[] };
 
 /** Keep the template side of every conflict block.
  *
@@ -80,7 +76,7 @@ function resolveConflicts(data: Buffer): Resolution {
   const lines = splitLines(data);
   const out: Buffer[] = [];
   const dropped: Buffer[] = [];
-  const malformed = { resolved: data, dropped: [], malformed: true };
+  const malformed: Resolution = { kind: "malformed" };
   let i = 0;
   while (i < lines.length) {
     const stripped = stripCr(lines[i]);
@@ -107,7 +103,7 @@ function resolveConflicts(data: Buffer): Resolution {
     out.push(...lines.slice(j + 1, k));
     i = k + 1;
   }
-  return { resolved: joinLines(out), dropped, malformed: false };
+  return { kind: "resolved", resolved: joinLines(out), dropped };
 }
 
 function fenceFor(text: string): string {
@@ -120,16 +116,16 @@ function fenceFor(text: string): string {
   return "`".repeat(Math.max(4, longest + 1));
 }
 
-function summarize(rel: string, dropped: Buffer[], malformed: boolean): string {
+function summarize(rel: string, resolution: Resolution): string {
   const lines = [`#### \`${rel}\``, ""];
-  if (malformed) {
+  if (resolution.kind === "malformed") {
     lines.push(
       "Malformed or out-of-order conflict markers; left unresolved for manual editing.",
       "",
     );
     return lines.join("\n");
   }
-  dropped.forEach((hunk, index) => {
+  resolution.dropped.forEach((hunk, index) => {
     const text = hunk.toString("utf-8");
     lines.push(`Conflict ${index + 1}: dropped local lines (template version kept):`, "");
     if (text.trim()) {
@@ -228,17 +224,19 @@ function main(): number {
     const data = readFileSync(path);
     if (!data.includes(START)) continue;
     const printedRel = relative(root, path);
-    const { resolved, dropped, malformed } = resolveConflicts(data);
-    if (malformed) {
+    const resolution = resolveConflicts(data);
+    if (resolution.kind === "malformed") {
       console.log(`${printedRel}: malformed or out-of-order conflict markers, left untouched`);
-    } else if (dropped.length > 0) {
-      writeFileSync(path, resolved);
-      console.log(`${printedRel}: resolved ${dropped.length} conflict(s) toward the template`);
+    } else if (resolution.dropped.length > 0) {
+      writeFileSync(path, resolution.resolved);
+      console.log(
+        `${printedRel}: resolved ${resolution.dropped.length} conflict(s) toward the template`,
+      );
     } else {
       // Marker bytes appear only mid-line (not a conflict); skip.
       continue;
     }
-    sections.push(summarize(printedRel, malformed ? [] : dropped, malformed));
+    sections.push(summarize(printedRel, resolution));
   }
 
   const full = sections.join("\n");

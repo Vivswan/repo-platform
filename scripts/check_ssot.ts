@@ -473,7 +473,7 @@ const rules: Rule[] = [
       const branchTree = read(".github/scripts/build-branches/branch_tree.ts");
       const union = mustMatch(
         branchTree,
-        /channel: "([a-z]+)" \| "([a-z]+)";/,
+        /\{ channel: "([a-z]+)" \} \| \{ channel: "([a-z]+)";/,
         "branch_tree.ts",
         "channel type",
       );

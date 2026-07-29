@@ -11,32 +11,17 @@
 // Errors go to stderr as ::error:: workflow commands with a nonzero exit.
 
 import { readFileSync, writeFileSync } from "node:fs";
+import { parseFlags } from "../shared/flags.ts";
 
 function fail(message: string): never {
   console.error(`::error::${message}`);
   process.exit(1);
 }
 
-function parseFlags(args: string[], allowed: string[]): Map<string, string> {
-  const flags = new Map<string, string>();
-  for (let i = 0; i < args.length; i += 2) {
-    const flag = args[i];
-    const value = args[i + 1];
-    if (!allowed.includes(flag) || value === undefined) {
-      fail(`unknown or valueless argument "${flag}" - allowed flags: ${allowed.join(", ")}`);
-    }
-    flags.set(flag, value);
-  }
-  return flags;
-}
-
 function main(args: string[]): void {
   const flags = parseFlags(args, ["--answers", "--canonical"]);
-  const answersPath = flags.get("--answers");
-  const canonical = flags.get("--canonical");
-  if (answersPath === undefined || canonical === undefined) {
-    fail("both --answers and --canonical are required");
-  }
+  const answersPath = flags["--answers"];
+  const canonical = flags["--canonical"];
 
   const text = readFileSync(answersPath, "utf-8");
   const match = text.match(/^_src_path:.*$/m);
