@@ -73,11 +73,7 @@ function copyMigrations(dest: string): void {
   copyDir("");
 }
 
-interface Args {
-  dest: string;
-  channel: "staging" | "latest";
-  version?: string;
-}
+type Args = { dest: string } & ({ channel: "staging" } | { channel: "latest"; version: string });
 
 function parseArgs(argv: string[]): Args {
   let dest: string | undefined;
@@ -100,24 +96,26 @@ function parseArgs(argv: string[]): Args {
   if (channel !== "staging" && channel !== "latest") {
     usageError(`argument --channel: invalid choice: '${channel}' (choose from staging, latest)`);
   }
-  return { dest, channel, version };
+  if (channel === "latest") {
+    if (!version) {
+      usageError(
+        "--channel latest builds a release tree and needs --version; " +
+          "pass the release tag, e.g. --version v1.2.3",
+      );
+    }
+    return { dest, channel, version };
+  }
+  if (version) {
+    usageError(
+      `--version ${version} does not apply to --channel staging ` +
+        "(staging always builds from main HEAD); drop --version or use --channel latest",
+    );
+  }
+  return { dest, channel };
 }
 
 function main(): number {
   const args = parseArgs(process.argv.slice(2));
-
-  if (args.channel === "latest" && !args.version) {
-    usageError(
-      "--channel latest builds a release tree and needs --version; " +
-        "pass the release tag, e.g. --version v1.2.3",
-    );
-  }
-  if (args.channel === "staging" && args.version) {
-    usageError(
-      `--version ${args.version} does not apply to --channel staging ` +
-        "(staging always builds from main HEAD); drop --version or use --channel latest",
-    );
-  }
 
   const dest = resolve(args.dest);
   if (dest === REPO_ROOT || REPO_ROOT.startsWith(`${dest}/`) || dest.startsWith(`${REPO_ROOT}/`)) {
@@ -135,7 +133,7 @@ function main(): number {
   copyMigrations(dest);
   writeFileSync(join(dest, "README.md"), README(args.channel));
   let info = `channel: ${args.channel}\n`;
-  if (args.version) info += `version: ${args.version}\n`;
+  if (args.channel === "latest") info += `version: ${args.version}\n`;
   writeFileSync(join(dest, "BUILD_INFO.yml"), info);
 
   console.log(`assembled ${args.channel} build tree into ${dest}`);

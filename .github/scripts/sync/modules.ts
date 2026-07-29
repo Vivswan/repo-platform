@@ -17,6 +17,7 @@
 
 import { readFileSync, writeFileSync } from "node:fs";
 import { parse } from "yaml";
+import { parseFlags } from "../shared/flags.ts";
 
 // Modules the template has deliberately retired: a repo still listing one
 // gets it dropped with a notice instead of a hard failure. Empty today;
@@ -144,26 +145,10 @@ function parseYamlFile(path: string): unknown {
   }
 }
 
-function parseFlags(args: string[], allowed: string[]): Map<string, string> {
-  const flags = new Map<string, string>();
-  for (let i = 0; i < args.length; i += 2) {
-    const flag = args[i];
-    const value = args[i + 1];
-    if (!allowed.includes(flag) || value === undefined) {
-      fail([`unknown or valueless argument "${flag}" - allowed flags: ${allowed.join(", ")}`]);
-    }
-    flags.set(flag, value);
-  }
-  return flags;
-}
-
 function main(args: string[]): void {
-  const flags = parseFlags(args, ["--repo-file", "--template-copier", "--retired-summary"]);
-  const repoFile = flags.get("--repo-file");
-  const copierFile = flags.get("--template-copier");
-  if (repoFile === undefined || copierFile === undefined) {
-    fail(["--repo-file and --template-copier are both required"]);
-  }
+  const flags = parseFlags(args, ["--repo-file", "--template-copier"], ["--retired-summary"]);
+  const repoFile = flags["--repo-file"];
+  const copierFile = flags["--template-copier"];
 
   const { modules, errors: moduleErrors } = readModules(parseYamlFile(repoFile), repoFile);
   if (modules === null) {
@@ -181,7 +166,7 @@ function main(args: string[]): void {
   if (errors.length > 0) {
     fail(errors.map((message) => `${repoFile}: ${message}`));
   }
-  const summaryPath = flags.get("--retired-summary");
+  const summaryPath = flags["--retired-summary"];
   if (summaryPath !== undefined) {
     writeFileSync(summaryPath, dropped.map((name) => `${name}\n`).join(""));
   }
