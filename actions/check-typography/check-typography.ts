@@ -45,10 +45,7 @@
 
 import { existsSync, lstatSync, readdirSync, readFileSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
-import {
-  AmbiguousCharacters,
-  InvisibleCharacters,
-} from "monaco-editor/esm/vs/base/common/strings.js";
+import { AmbiguousCharacters, InvisibleCharacters } from "monaco-editor/base/common/strings.js";
 
 const ROOT = resolve(process.argv[2] ?? ".");
 const SKIP_DIRS = new Set([
