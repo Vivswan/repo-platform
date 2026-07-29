@@ -120,6 +120,8 @@ jobs:
         run: bun actions/validate-template/validate_generated_files.ts --self .
       - name: Validate managed-repos registry
         run: bun .github/scripts/fleet/repos_registry.ts validate
+      - name: Check single-source-of-truth invariants
+        run: bun run ssot:check
 
   script-tests:
     runs-on: ubuntu-latest
@@ -129,7 +131,7 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile --silent
       - name: Run .github/scripts and action tests
-        run: bun test ./.github/scripts ./actions/fuzz-issue
+        run: bun test ./.github/scripts ./actions/fuzz-issue ./scripts
 
   smoke-generate:
     runs-on: ubuntu-latest
