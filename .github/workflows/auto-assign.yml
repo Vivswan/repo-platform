@@ -4,6 +4,11 @@ name: Auto Assign
 
 on:
   workflow_dispatch:
+    inputs:
+      issue:
+        description: Issue or PR number to assign (for items whose creation fired no workflow)
+        required: false
+        default: ""
   issues:
     types: [opened]
   pull_request:
@@ -30,3 +35,6 @@ permissions:
 jobs:
   auto-assign:
     uses: ./.github/workflows/reusable-auto-assign.yml
+    with:
+      code_scanning: true
+      issue: ${{ inputs.issue || '' }}
