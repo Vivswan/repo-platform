@@ -1,3 +1,7 @@
 # Path prefixes exempt from the check-typography action, one per line,
 # relative to the repository root. Repository-specific exemptions belong
 # in .typography-allow.local (same format).
+
+# release-please writes CHANGELOG.md from commit and PR text, which is not
+# ASCII-guaranteed.
+CHANGELOG.md
