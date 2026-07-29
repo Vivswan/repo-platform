@@ -1,17 +1,20 @@
 #!/usr/bin/env bash
 # Deletes files the template retired from the target's working tree.
-# Invoked by reusable-template-sync.yml's "Remove files the template
-# retired" step from the repo-platform checkout root; deletion candidates
-# come from retired_paths.ts (see its header for the safety rules).
+# Invoked from the repo-platform checkout root by reusable-template-sync.yml's
+# "Remove files the template retired" step and by ci/upgrade_path_test.sh;
+# deletion candidates come from retired_paths.ts (see its header for the
+# safety rules).
 #
 # Env: OLD_SHA, TARGET_REF, MODULES, CHANNEL, PRIVATE, DESCRIPTION,
-# SRC_PATH, RUNNER_TEMP.
+# SRC_PATH, RUNNER_TEMP; TARGET_DIR (default target).
 set -euo pipefail
+
+target_dir="${TARGET_DIR:-target}"
 
 # The old render uses the answers recorded BEFORE this update (HEAD still
 # points at the pre-update commit); the new render applies the live
 # module/channel/private/description data on top.
-git -C target show HEAD:.copier-answers.yml >"$RUNNER_TEMP/answers-old.yml"
+git -C "$target_dir" show HEAD:.copier-answers.yml >"$RUNNER_TEMP/answers-old.yml"
 bun .github/scripts/sync/render_data.ts \
   --answers-old "$RUNNER_TEMP/answers-old.yml" \
   --out-old "$RUNNER_TEMP/data-old.yml" \
@@ -33,8 +36,8 @@ bun .github/scripts/sync/retired_paths.ts \
 
 : >"$RUNNER_TEMP/removed-paths.txt"
 while IFS= read -r path; do
-  if [ -e "target/${path}" ] || [ -L "target/${path}" ]; then
-    rm -f "target/${path}"
+  if [ -e "$target_dir/${path}" ] || [ -L "$target_dir/${path}" ]; then
+    rm -f "$target_dir/${path}"
     printf '%s\n' "$path" >>"$RUNNER_TEMP/removed-paths.txt"
     echo "removed retired file: ${path}"
   fi
