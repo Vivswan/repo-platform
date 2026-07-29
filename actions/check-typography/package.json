@@ -3,7 +3,7 @@
   "private": true,
   "description": "Dependency manifest for the check-typography action (monaco-editor supplies VS Code's unicode-highlight character sets).",
   "dependencies": {
-    "monaco-editor": "^0.55.1"
+    "monaco-editor": "^0.56.0"
   },
   "devDependencies": {
     "@types/node": "^26.1.1",
