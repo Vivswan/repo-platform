@@ -72,6 +72,17 @@ Stateless, declared-keys-only, upsert-by-name:
   when undeclared, since removing protection stays a human action.
 - Repository fields, topics, and security toggles are applied only when
   declared; omitting a key leaves the live value alone.
+- Visibility is managed like any other declared field: the settings-sync
+  template renders `private:` unconditionally (false included), so for
+  repos whose settings file declares the key, the nightly heal reverts
+  an out-of-band flip in either direction - a repo made private in the
+  GitHub UI is public again by the next morning. To change visibility on
+  purpose, edit `private:` in the settings file and let the apply flip
+  the repo. Flipping a bun or uv repo to private must also delete the
+  ruleset's `code_scanning` rule in the same commit: GitHub rejects that
+  rule on a private personal repo, so every apply fails until it is
+  gone. The next template sync reads the live visibility and re-renders
+  everything that follows it (SECURITY.md, the CodeQL jobs, that rule).
 - Short ref names in ruleset conditions are auto-prefixed (`staging` ->
   `refs/heads/staging`, `templates/*` -> `refs/tags/templates/*`);
   `~DEFAULT_BRANCH` passes through.

@@ -164,7 +164,10 @@ jobs:
             modules: "[agents, rust, fuzzer]"
             private: "false"
           - name: uv-pages-private
-            modules: "[uv, pages, auto-assign]"
+            # settings-sync rides along so the private: true render of
+            # settings.yml is exercised (every other settings-sync row is
+            # public).
+            modules: "[uv, pages, auto-assign, settings-sync]"
             private: "true"
             expect_in_pages: |
               uv sync
