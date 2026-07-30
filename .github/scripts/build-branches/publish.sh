@@ -121,7 +121,11 @@ publish() { # channel source_sha [version]
     git worktree add --detach "/tmp/pub-$ch" "$src"
     git -C "/tmp/pub-$ch" switch --orphan "build-$ch"
   fi
-  rsync -a --delete --exclude=.git "/tmp/tree-$ch/" "/tmp/pub-$ch/"
+  # --checksum: the quick size+mtime check can miss a changed file when
+  # both trees were written in the same second and the content is
+  # same-size (BUILD_INFO.yml's version line across releases) - and every
+  # decision below trusts this tree, including what gets tagged.
+  rsync -a --delete --checksum --exclude=.git "/tmp/tree-$ch/" "/tmp/pub-$ch/"
   git -C "/tmp/pub-$ch" add -A
   if ! git -C "/tmp/pub-$ch" diff --cached --quiet; then
     note="content change"
@@ -139,11 +143,32 @@ publish() { # channel source_sha [version]
   else
     echo "$ch: no content change"
   fi
-  if [ -n "$ver" ] && ! git ls-remote --exit-code origin "refs/tags/templates/$ver" >/dev/null 2>&1; then
-    git fetch --quiet origin "$ch"
-    git tag "templates/$ver" "origin/$ch"
-    git push origin "refs/tags/templates/$ver"
-    echo "$ch: tagged templates/$ver"
+  # The build-tags ruleset freezes templates/* tags once they exist
+  # (update/delete/non-fast-forward are blocked for everyone), but tag
+  # CREATION is open to any writer. A tag that already exists here is
+  # therefore either this build re-run (fine, skip) or a pre-created
+  # impostor that the ruleset would freeze forever - so prove which by
+  # tree hash before skipping, and never skip silently.
+  if [ -n "$ver" ]; then
+    if git ls-remote --exit-code origin "refs/tags/templates/$ver" >/dev/null 2>&1; then
+      git fetch --quiet origin "+refs/tags/templates/$ver:refs/tags/templates/$ver"
+      tag_tree="$(git rev-parse "refs/tags/templates/${ver}^{tree}")"
+      built_tree="$(git -C "/tmp/pub-$ch" write-tree)"
+      if [ "$tag_tree" = "$built_tree" ]; then
+        echo "$ch: tag templates/$ver already carries this build's tree ${built_tree}; skipping (idempotent re-run)"
+      else
+        echo "::error::tag templates/$ver already exists with tree ${tag_tree}, but building ${ver} from ${src:0:12} produces tree ${built_tree} - the tag is not this builder's output, and the build-tags ruleset has frozen it. Have an admin delete the tag (the ruleset blocks tag deletion for everyone, so temporarily disable build-tags under Settings > Rules > Rulesets, delete it, re-enable), then re-run this build."
+        exit 1
+      fi
+    else
+      # Tag the exact commit this run built or verified (the pub tree's
+      # HEAD). Re-resolving origin/$ch here would tag whatever the branch
+      # points at NOW - a fast-forward pushed into that window would be
+      # frozen by the ruleset under this version's name.
+      git tag "templates/$ver" "$(git -C "/tmp/pub-$ch" rev-parse HEAD)"
+      git push origin "refs/tags/templates/$ver"
+      echo "$ch: tagged templates/$ver"
+    fi
   fi
   echo "::endgroup::"
 }
