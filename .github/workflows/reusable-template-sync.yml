@@ -18,8 +18,10 @@
 # Clean updates arm squash auto-merge (the target's all-green check gates
 # the actual merge); conflicts resolve toward the template with the
 # dropped local lines in the PR body and stay MANUAL, as do withheld
-# workflow files and failed validation - auto-resolution warns; only
-# validation failures (and broken inputs) go red.
+# workflow files, failed validation, and out-of-band settings drift
+# (live visibility or description differing from the recorded copier
+# answers) - auto-resolution warns; only validation failures (and broken
+# inputs) go red.
 
 name: Reusable Template Sync
 
@@ -123,6 +125,29 @@ jobs:
         run: |
           test -f target/.repo-platform.yml || { echo "::error::${TARGET} is not registered with repo-platform: .repo-platform.yml is missing from its default branch. Restore the file from git history, or regenerate the repo with 'copier copy gh:${GITHUB_REPOSITORY} . --vcs-ref staging' (or a templates/vX.Y.Z tag)."; exit 1; }
           test -f target/.copier-answers.yml || { echo "::error::${TARGET} has no .copier-answers.yml on its default branch, so copier has no recorded answers to update from. Restore the file from git history, or regenerate the repo with 'copier copy gh:${GITHUB_REPOSITORY} . --vcs-ref staging' (or a templates/vX.Y.Z tag)."; exit 1; }
+
+      # Live visibility and description feed the render on purpose (adopt
+      # semantics: SECURITY.md and the CodeQL jobs must follow the repo's
+      # real state), so a value changed out-of-band in the GitHub UI would
+      # otherwise auto-merge into declared truth. Drift against the
+      # recorded answers warns here and forces the PR onto the
+      # manual-review path (open_pr.sh), with the details prepended to
+      # its body. MUST stay ahead of "Apply copier update": that step
+      # passes the live values to copier, which rewrites the answers file
+      # with them, and the comparison would find nothing ever after.
+      - name: Detect out-of-band settings drift
+        env:
+          PRIVATE: ${{ steps.target.outputs.private }}
+          DESCRIPTION: ${{ steps.target.outputs.description }}
+        run: |
+          bun .github/scripts/sync/settings_drift.ts \
+            --answers target/.copier-answers.yml \
+            --repo "$TARGET" \
+            --central-dir settings/repos \
+            --in-repo-settings target/.github/settings.yml \
+            --live-private "$PRIVATE" \
+            --live-description "$DESCRIPTION" \
+            --summary "$RUNNER_TEMP/settings-drift.md"
 
       # copier update and the cleanup renders fetch the template from the
       # answers file's _src_path and execute its tasks with --trust. That
@@ -310,6 +335,7 @@ jobs:
           # workflow files); its verdict supersedes the full-tree one.
           VALIDATION: ${{ steps.push.outputs.validation || steps.validate.outputs.result }}
           RESOLVED: ${{ steps.conflicts.outputs.resolved }}
+          DRIFT_FILE: ${{ runner.temp }}/settings-drift.md
           SUMMARY_FILE: ${{ runner.temp }}/dropped-local-hunks.md
           RETIRED_MODULES_FILE: ${{ runner.temp }}/retired-modules.txt
           REMOVED_PATHS_FILE: ${{ runner.temp }}/removed-paths.txt
