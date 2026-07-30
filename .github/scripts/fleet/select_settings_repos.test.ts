@@ -14,9 +14,10 @@ import { join } from "node:path";
 //   flaky        - push probe 500s once then 200s; adoption 502s once
 //                  then succeeds (both must be healed by the retries)
 //   steady       - every probe answers first try
-// The heal must select flaky and steady, warn about deadapi and
-// deadprobe (skipped this run, retried nightly), and exit 0; only an
-// unreadable registry or a failed discovery still exits 1.
+// The heal must select flaky and steady (plus central-home's central
+// file), warn about deadapi and deadprobe (skipped this run, retried
+// nightly), and exit 0; only an unreadable registry or a failed
+// discovery still exits 1.
 describe("select_settings_repos.sh", () => {
   const repoRoot = join(import.meta.dir, "..", "..", "..");
   const script = join(import.meta.dir, "select_settings_repos.sh");
@@ -156,11 +157,17 @@ describe("select_settings_repos.sh", () => {
     expect(main.exitCode).toBe(0);
   });
 
+  function targetsOf(result: Run): { repo: string; name: string; home: string }[] {
+    const line = result.output.split("\n").find((l) => l.startsWith("targets="));
+    if (line === undefined) throw new Error(`no targets= line in: ${result.output}`);
+    return JSON.parse(line.slice("targets=".length));
+  }
+
   test("a probe that flakes once is retried and the repo stays selected", () => {
     expect(main.stdout).toContain("Vivswan/flaky: push-permission probe failed (attempt 1/3");
     expect(main.stdout).toContain("Vivswan/flaky: adoption check failed (attempt 1/3");
     expect(main.stdout).not.toContain("::warning::Vivswan/flaky");
-    expect(main.output).toContain("Vivswan/flaky\n");
+    expect(targetsOf(main).map((t) => t.repo)).toContain("Vivswan/flaky");
   });
 
   test("a persistently failing repo is skipped with a warning naming repo, probe, and error", () => {
@@ -180,8 +187,12 @@ describe("select_settings_repos.sh", () => {
     }
   });
 
-  test("the rest of the list is intact: skips never drop their neighbors", () => {
-    expect(main.output).toBe("repos<<REPOS_EOF\nVivswan/flaky\nVivswan/steady\nREPOS_EOF\n");
+  test("the matrix is intact: skips never drop their neighbors, homes are carried", () => {
+    expect(targetsOf(main)).toEqual([
+      { repo: "Vivswan/central-home", name: "central-home", home: "central" },
+      { repo: "Vivswan/flaky", name: "flaky", home: "in-repo" },
+      { repo: "Vivswan/steady", name: "steady", home: "in-repo" },
+    ]);
   });
 
   test("an unreadable registry still fails the whole run", () => {
