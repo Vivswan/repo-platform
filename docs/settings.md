@@ -71,8 +71,11 @@ Stateless, declared-keys-only, upsert-by-name:
   the apply, `settings-repos.yml` compares each central file that declares
   labels against its repo's recorded module selection and fails the run on
   a missing required label instead of starting the loop. A file with no
-  labels section leaves labels unmanaged and is skipped; a repo that
-  carries no `.repo-platform.yml` only gets a warning.
+  labels section leaves labels unmanaged and is skipped. A repo that
+  carries no `.repo-platform.yml`, or one whose files could not be
+  fetched this run, draws a warning instead of an error: that file's
+  labels go unverified until the next nightly, and one unreadable repo
+  never blocks the heal for everyone else.
 - Rulesets: upserted by name (branch and tag targets); never deleted
   when undeclared, since removing protection stays a human action.
 - Repository fields, topics, and security toggles are applied only when
