@@ -94,6 +94,12 @@ Stateless, declared-keys-only, upsert-by-name:
   rule on a private personal repo, so every apply fails until it is
   gone. The next template sync reads the live visibility and re-renders
   everything that follows it (SECURITY.md, the CodeQL jobs, that rule).
+  A flip the heal has not reverted by the time that sync runs is not
+  ratified silently: the sync compares the live visibility and
+  description against the repo's recorded copier answers, and on a
+  mismatch the PR arrives review-required (auto-merge off) with the
+  drift called out at the top of its body, including how to revert
+  instead of merging.
 - Short ref names in ruleset conditions are auto-prefixed (`staging` ->
   `refs/heads/staging`, `templates/*` -> `refs/tags/templates/*`);
   `~DEFAULT_BRANCH` passes through.

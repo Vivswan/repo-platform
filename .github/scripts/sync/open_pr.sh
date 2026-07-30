@@ -5,9 +5,9 @@
 # "Create or refresh pull request" step.
 #
 # Env: TARGET, TARGET_REF, OLD_COMMIT, DISPLAY, BRANCH, BASE_BRANCH,
-# VALIDATION, RESOLVED, RECOVER, SUMMARY_FILE, RETIRED_MODULES_FILE,
-# REMOVED_PATHS_FILE, WITHHELD_FILE, GH_TOKEN, GITHUB_REPOSITORY,
-# GITHUB_OUTPUT, RUNNER_TEMP.
+# VALIDATION, RESOLVED, RECOVER, DRIFT_FILE, SUMMARY_FILE,
+# RETIRED_MODULES_FILE, REMOVED_PATHS_FILE, WITHHELD_FILE, GH_TOKEN,
+# GITHUB_REPOSITORY, GITHUB_OUTPUT, RUNNER_TEMP.
 set -euo pipefail
 
 if [ "$TARGET_REF" = "staging" ]; then
@@ -29,6 +29,15 @@ Review any merge conflicts and confirm repository-local sections were preserved 
 > This branch is regenerated on every sync run; manual commits
 > pushed to it are overwritten. Make fixes in a separate branch or
 > after merging."
+
+# Out-of-band settings drift goes on TOP of the body: merging ratifies
+# live values no human declared, so the reader must see that before
+# anything else.
+if [ -s "$DRIFT_FILE" ]; then
+  body="$(cat "$DRIFT_FILE")
+
+${body}"
+fi
 
 if [ "$RECOVER" = "recopy" ]; then
   body="${body}
@@ -88,11 +97,13 @@ if [ "$VALIDATION" = "failed" ]; then
 fi
 
 # Anything that needs human review - dropped local hunks, withheld
-# workflow files, failed validation, a recovery re-render - stays manual;
-# a clean update arms squash auto-merge below.
+# workflow files, failed validation, a recovery re-render, out-of-band
+# settings drift - stays manual; a clean update arms squash auto-merge
+# below.
 needs_review=false
 if [ "$RESOLVED" = "true" ] || [ "$VALIDATION" = "failed" ] ||
-  [ "$RECOVER" = "recopy" ] || [ -s "$WITHHELD_FILE" ]; then
+  [ "$RECOVER" = "recopy" ] || [ -s "$WITHHELD_FILE" ] ||
+  [ -s "$DRIFT_FILE" ]; then
   needs_review=true
 fi
 
@@ -124,5 +135,5 @@ if [ "$needs_review" = false ]; then
     echo "::warning::${TARGET}: could not enable auto-merge on ${url}: $(cat "$RUNNER_TEMP/automerge.err"). Merge it manually; to fix this, allow auto-merge in the repo settings and keep a required check on the default branch."
   fi
 else
-  echo "auto-merge left off: this PR needs review (conflicts, withheld files, failed validation, or a recovery re-render)."
+  echo "auto-merge left off: this PR needs review (conflicts, withheld files, failed validation, out-of-band settings drift, or a recovery re-render)."
 fi
