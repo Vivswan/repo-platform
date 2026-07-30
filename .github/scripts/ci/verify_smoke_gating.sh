@@ -59,6 +59,11 @@ if has settings-sync; then
   # Visibility is declared even when public; the whole-line match keeps
   # the explanatory comment above the key from satisfying the check.
   present_line "  private: $PRIVATE" /tmp/smoke/.github/settings.yml
+  # homepage and topics are declared even when empty (declare-and-clear);
+  # no row passes either answer, so every row must render the empty form.
+  # A re-gated key would vanish and its drift would go unmanaged again.
+  present_line '  homepage: ""' /tmp/smoke/.github/settings.yml
+  present_line '  topics: ""' /tmp/smoke/.github/settings.yml
   # The ruleset's code_scanning rule follows enable_codeql (public AND a
   # toolchain): GitHub 422s that rule on a private personal repo, so a
   # private render must never emit it.
