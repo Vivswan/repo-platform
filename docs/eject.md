@@ -65,4 +65,6 @@ content, CI jobs) is plain configuration that works standalone.
 To stop receiving sync PRs without detaching, either add the repo to
 `repos.yml`'s `exclude:` list (fleet side) or delete `.repo-platform.yml`
 from the repo (the sync skips repos without it, with a notice). Undo
-either one to resume updates.
+either one to resume updates. Both pauses also stop the central nightly
+settings heal for a repo using the in-repo settings home; the settings
+run reports this each night.
