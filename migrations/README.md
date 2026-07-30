@@ -15,11 +15,13 @@ the runner instead: copier invokes `run.ts` on every update, and the runner
 strips the `templates/` prefix (`templates/v0.2.4` -> `0.2.4`) before
 comparing. Staging-channel updates carry describe/sha strings that do not
 parse as semver, so **migrations never run while a repo stays on staging**:
-an unparseable target version means none apply. Switching a repo from
-staging to latest is the one case where the base is unparseable but the
-target is a released version. The runner cannot know which migrations the
-staging stint already covered, so it runs ALL of them up to the target and
-logs that it is doing so - the idempotence rule below is what makes the
+an unparseable target version means none apply. An unparseable base under a
+released target has two intended causes: switching a repo from staging to
+latest, and updating a legacy repo whose recorded `_commit` is a plain
+main-history sha (copier versions it with dunamai's fallback, which fails
+the semver parse). In both, the runner cannot know which migrations the
+repo already covered, so it runs ALL of them up to the target and logs
+that it is doing so - the idempotence rule below is what makes the
 over-run harmless. The end-to-end version handoff has only been exercised
 with no migrations present; verify it live when the first real migration
 script lands.
