@@ -46,7 +46,10 @@ while IFS=$'\t' read -r repo name; do
     "https://github.com/${repo}.git/info/refs?service=git-receive-pack")"
   case "$probe_code" in
     200) ;;
-    401 | 403 | 404) continue ;;
+    401 | 403 | 404)
+      echo "::notice::${repo}: skipped - the fleet token has no write access (push probe HTTP ${probe_code}). Grant the REPO_PLATFORM_TOKEN access to this repository to enroll it, or add it to repos.yml's exclude list to silence this."
+      continue
+      ;;
     *)
       echo "::error::push-permission probe for $repo failed with HTTP ${probe_code}; not a permission answer, refusing to guess."
       exit 1
@@ -57,7 +60,8 @@ while IFS=$'\t' read -r repo name; do
   if ! gh api "repos/$repo/contents/.repo-platform.yml" --silent \
     2>"$RUNNER_TEMP/probe.err"; then
     if grep -q "HTTP 404" "$RUNNER_TEMP/probe.err"; then
-      continue # not adopted
+      echo "::notice::${repo}: skipped - no .repo-platform.yml on its default branch, so it has not adopted the template. If it carries .github/settings.yml, the central nightly heal no longer applies it. Generate it with copier (see the repo-platform README) to opt in, or add the repo to repos.yml's exclude list to silence this."
+      continue
     fi
     echo "::error::adoption check failed for $repo: $(cat "$RUNNER_TEMP/probe.err")"
     exit 1
