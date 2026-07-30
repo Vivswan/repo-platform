@@ -67,7 +67,12 @@ Stateless, declared-keys-only, upsert-by-name:
   `fuzz-nightly`, color `B60205`): the settings-sync module's settings.yml
   does it automatically, central settings files must carry it by hand, or
   the label sync strips it from the open tracking issue and the auto-close
-  loses the issue.
+  loses the issue. The by-hand requirement is checked, not trusted: before
+  the apply, `settings-repos.yml` compares each central file that declares
+  labels against its repo's recorded module selection and fails the run on
+  a missing required label instead of starting the loop. A file with no
+  labels section leaves labels unmanaged and is skipped; a repo that
+  carries no `.repo-platform.yml` only gets a warning.
 - Rulesets: upserted by name (branch and tag targets); never deleted
   when undeclared, since removing protection stays a human action.
 - Repository fields, topics, and security toggles are applied only when
