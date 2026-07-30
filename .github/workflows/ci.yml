@@ -133,7 +133,7 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile --silent
       - name: Run .github/scripts and action tests
-        run: bun test ./.github/scripts ./actions/fuzz-issue ./scripts
+        run: bun test ./.github/scripts ./actions/fuzz-issue ./scripts ./migrations
 
   smoke-generate:
     runs-on: ubuntu-latest
