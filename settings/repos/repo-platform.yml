@@ -113,6 +113,14 @@ rulesets:
   # repos record as _commit, and vX.Y.Z release tags are what their workflow
   # `uses:` pins and sync validation checkouts reference; deleting or moving
   # either breaks downstream repos, so both are immutable.
+  # No creation rule on purpose: build-branches creates templates/* tags
+  # with the workflow's GITHUB_TOKEN and release-please creates v* tags,
+  # and with no bypass actors a creation rule would block both. A
+  # RepositoryRole admin bypass would not cover GITHUB_TOKEN (an app, not
+  # a role), and an Integration bypass for github-actions would let ANY
+  # workflow create these tags. Pre-created impostor tags are caught in
+  # code instead: publish.sh refuses to skip a wrong existing tag, and
+  # sync/verify_build_provenance.sh proves every tag before it ships.
   - name: build-tags
     target: tag
     enforcement: active

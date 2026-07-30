@@ -1,7 +1,7 @@
 # shellcheck shell=bash
 # Provenance stamp lines on build-branch commits. publish.sh writes both
 # lines into every build commit message; publish.sh (re-stamp check) and
-# sync/resolve_refs.sh + sync/verify_staging_provenance.sh parse them back,
+# sync/resolve_refs.sh + sync/verify_build_provenance.sh parse them back,
 # so the exact line shapes live here alone. Source this file; it defines:
 #
 #   commit_stamp_write <server-url> <repository> <sha>
@@ -22,8 +22,11 @@ commit_stamp_write() {
   printf 'source: %s/%s/commit/%s\n' "$1" "$2" "$3"
 }
 
+# Only a full 40-hex sha parses as a stamp: the line is plain text anyone
+# can write, and a smuggled revspec (refs/remotes/origin/main) would
+# otherwise re-resolve to a different commit on every verification run.
 commit_stamp_parse_all() {
-  sed -n 's|^source: .*/commit/||p'
+  sed -n 's|^source: .*/commit/\([0-9a-f]\{40\}\)$|\1|p'
 }
 
 # awk consumes all input where `head -1` would close the pipe early and
