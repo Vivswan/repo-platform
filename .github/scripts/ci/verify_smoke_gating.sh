@@ -193,6 +193,18 @@ else
   test ! -e "$wf/auto-format.yml"
 fi
 
+# The bun module's Dependabot lockfile fixer is managed machinery (always
+# overwritten by sync, unlike the repo-owned auto-format starter above): it
+# regenerates bun.lock on Dependabot PRs and pushes the fix.
+if has bun; then
+  test -f "$wf/dependabot-bun-lockfile.yml"
+  present "bun install --lockfile-only" "$wf/dependabot-bun-lockfile.yml"
+  present "github.actor == 'dependabot[bot]'" "$wf/dependabot-bun-lockfile.yml"
+  present "REPO_PLATFORM_TOKEN || github.token" "$wf/dependabot-bun-lockfile.yml"
+else
+  test ! -e "$wf/dependabot-bun-lockfile.yml"
+fi
+
 # copilot-setup-steps belongs to the agents module; the toolchain installs
 # inside it splice from the bun/uv fragments.
 if has agents; then

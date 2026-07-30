@@ -771,6 +771,11 @@ const rules: Rule[] = [
           tpl: "templates/auto-assign/.github/workflows/auto-assign.yml.jinja",
           mode: "semantic",
         },
+        {
+          repo: ".github/workflows/dependabot-bun-lockfile.yml",
+          tpl: "templates/bun/.github/workflows/dependabot-bun-lockfile.yml.jinja",
+          mode: "semantic",
+        },
       ];
       for (const pair of pairs) {
         const expected = normalizeJinja(read(pair.tpl), vars);
