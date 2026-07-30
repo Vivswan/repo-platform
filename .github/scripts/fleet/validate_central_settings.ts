@@ -17,11 +17,14 @@
 // label roster is well-formed) run first and never touch the network; the
 // remote module comparison runs only for files that declare a labels
 // section - an undeclared section is never applied, so there is nothing
-// to compare and no reason for an API hiccup to block the run. A target
-// repo without .repo-platform.yml is the existing not-registered case: a
-// ::warning::, not a failure. Everything else that blocks validation, and
-// every missing label, is reported as ::error:: - all of them at once -
-// and the exit code is nonzero.
+// to compare and no reason for an API hiccup to block the run. Failures
+// split by class: a missing required label, a missing identity key, or an
+// unreadable fuzzer answer is a real violation, reported as ::error:: -
+// all of them at once - with a nonzero exit (the apply deletes labels, so
+// this fails closed). A target repo without .repo-platform.yml (not
+// adopted) and a non-404 fetch failure are ::warning::s instead: that
+// file's labels go unverified this run and the next nightly retries,
+// rather than one unreadable repo skipping the apply for the whole fleet.
 
 import { readdirSync, readFileSync } from "node:fs";
 import { basename, join } from "node:path";
@@ -48,10 +51,12 @@ const TOOLCHAIN_LABELS: [module: string, label: string][] = [
 ];
 
 /** The label names a repo's settings file must declare so the apply's
- *  delete-undeclared pass does not fight the tools that recreate them. */
+ *  delete-undeclared pass does not fight the tools that recreate them.
+ *  `fuzzerLabel` is null when the repo's recorded label could not be
+ *  fetched this run: the fuzzer requirement is dropped, never guessed. */
 export function requiredLabels(
   modules: string[],
-  fuzzerLabel: string,
+  fuzzerLabel: string | null,
 ): { name: string; why: string }[] {
   const required = [
     // The base dependabot.yml always carries the github-actions ecosystem,
@@ -69,7 +74,7 @@ export function requiredLabels(
       required.push({ name, why: "release-please manages it on release PRs" });
     }
   }
-  if (modules.includes("fuzzer")) {
+  if (modules.includes("fuzzer") && fuzzerLabel !== null) {
     required.push({
       name: fuzzerLabel,
       why: "the fuzzer module's tracking issue keys on it (stripping it breaks the auto-close)",
@@ -204,9 +209,9 @@ export function checkCentralFileRemote(
 
   const registration = fetchFile(".repo-platform.yml");
   if (registration.status === "failed") {
-    errors.push(
-      `${repo}/.repo-platform.yml: fetch failed (${registration.detail}) - not a ` +
-        `yes/no answer, refusing to guess`,
+    warnings.push(
+      `${repo}/.repo-platform.yml: fetch failed (${registration.detail}), so ` +
+        `${file}'s labels are unverified this run; the next nightly retries the read`,
     );
     return { errors, warnings };
   }
@@ -231,30 +236,34 @@ export function checkCentralFileRemote(
   }
 
   // The fuzzer label is the tracking-issue identity: guessing a default
-  // here could pass while the repo's real label loops on delete/recreate,
-  // so an unreadable answer is an error, never a fallback.
-  let fuzzerLabel = "";
+  // could pass while the repo's real label loops on delete/recreate, so
+  // an unreadable answer is an error, never a fallback. A failed fetch is
+  // no answer at all: warn, leave the label null (requiredLabels drops
+  // the requirement), and still check the other labels.
+  let fuzzerLabel: string | null = null;
   if (modules.includes("fuzzer")) {
     const answers = fetchFile(".copier-answers.yml");
     if (answers.status === "failed") {
-      errors.push(
-        `${repo}/.copier-answers.yml: fetch failed (${answers.detail}) - not a ` +
-          `yes/no answer, refusing to guess`,
+      warnings.push(
+        `${repo}/.copier-answers.yml: fetch failed (${answers.detail}), so ` +
+          `${file}'s fuzzer tracking label is unverified this run; the next ` +
+          `nightly retries the read`,
       );
-      return { errors, warnings };
+    } else {
+      const recorded =
+        answers.status === "ok" ? parseMapping(answers.text, ".copier-answers.yml") : null;
+      const value =
+        recorded !== null && typeof recorded !== "string" ? recorded.fuzzer_label : null;
+      if (typeof value !== "string" || value === "") {
+        errors.push(
+          `${file}: the target repo has the fuzzer module but no fuzzer_label answer ` +
+            `is readable from its .copier-answers.yml, so the tracking label cannot ` +
+            `be verified - fix the answers file`,
+        );
+        return { errors, warnings };
+      }
+      fuzzerLabel = value;
     }
-    const recorded =
-      answers.status === "ok" ? parseMapping(answers.text, ".copier-answers.yml") : null;
-    const value = recorded !== null && typeof recorded !== "string" ? recorded.fuzzer_label : null;
-    if (typeof value !== "string" || value === "") {
-      errors.push(
-        `${file}: the target repo has the fuzzer module but no fuzzer_label answer ` +
-          `is readable from its .copier-answers.yml, so the tracking label cannot ` +
-          `be verified - fix the answers file`,
-      );
-      return { errors, warnings };
-    }
-    fuzzerLabel = value;
   }
 
   for (const { name, why } of requiredLabels(modules, fuzzerLabel)) {
@@ -277,8 +286,9 @@ function fail(errors: string[]): never {
 }
 
 /** Raw file content from the repo's default branch. HTTP 404 is a real
- *  answer (`missing`); anything else is `failed` and becomes an error at
- *  the call site, collected with the rest instead of aborting the scan. */
+ *  answer (`missing`); anything else is `failed` and downgraded to a
+ *  ::warning:: at the call site, so an unreadable target never blocks
+ *  the apply. */
 function fetchRepoFile(repo: string, path: string): Fetched {
   const proc = Bun.spawnSync([
     "gh",
