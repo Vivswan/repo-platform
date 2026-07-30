@@ -7,6 +7,9 @@
 
 repository:
   description: Copier template + reusable workflows managing standards across Vivswan's repositories
+  # Declared empty so the apply owns the field: an out-of-band homepage
+  # URL is cleared on the next run.
+  homepage: ""
   topics: copier, template, github-actions, reusable-workflows, standards
   # Declared so the apply manages visibility; without it an out-of-band
   # flip to private would never be healed.
