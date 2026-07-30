@@ -7,8 +7,10 @@
 # and the settings preserve step via sync/preserve_settings.sh. Asserts
 # that files the template dropped are deleted while repo-owned content
 # survives - including settings.yml, which is repo-owned wherever it exists
-# (protected from cleanup and restored if copier de-renders it). A final
-# leg proves the recover=recopy semantics on a corrupted _commit.
+# (protected from cleanup and restored if copier de-renders it). A second
+# leg proves the recover=recopy semantics on a corrupted _commit, and a
+# third runs an update where visibility flips public -> private (its own
+# fixture, so this leg's settings-sync deselection coverage stays intact).
 #
 # Both template refs must live in ONE clone (copier re-renders the old
 # version from _src_path), so build trees are committed to local orphan
@@ -27,7 +29,7 @@ fail() {
 }
 
 # Idempotent local reruns: drop the artifacts of a previous run.
-rm -rf "$PROJECT" "$WORK" /tmp/next /tmp/old-tree
+rm -rf "$PROJECT" "$WORK" /tmp/next /tmp/old-tree /tmp/upgrade-vis /tmp/upgrade-vis-work
 mkdir -p "$WORK"
 git worktree remove --force /tmp/wt 2>/dev/null || true
 git worktree prune
@@ -305,3 +307,107 @@ if grep -qF "# local ci note" .github/workflows/ci.yml; then
 fi
 bun "$GITHUB_WORKSPACE/actions/validate-template/validate_generated_files.ts" "$PROJECT"
 echo "recovery recopy OK: skip_if_exists and repo-owned files preserved, managed files re-rendered"
+
+# --- Visibility flip (public -> private) --------------------------------
+# The transition machinery issue #25's fix leans on: an update where the
+# live visibility changed between syncs must drop the conditional-filename
+# SECURITY.md render, flip settings.yml's private line through the
+# three-way merge (dropping the code_scanning ruleset rule with it), and
+# strip the codeql machinery from ci.yml. Runs on a fresh public fixture
+# through the same workflow scripts as the main leg, with settings-sync
+# KEPT selected - only the visibility changes.
+VIS=/tmp/upgrade-vis
+VIS_WORK=/tmp/upgrade-vis-work
+mkdir -p "$VIS_WORK"
+
+cd "$GITHUB_WORKSPACE"
+copier copy "$GITHUB_WORKSPACE" "$VIS" \
+  --vcs-ref "$prev" --defaults --trust \
+  -d project_name="Visibility Flip" \
+  -d description="Visibility-flip project" \
+  -d 'modules=[bun, settings-sync]' \
+  -d channel="latest" \
+  -d private="false"
+
+# The fixture must carry the public-only machinery whose removal is under
+# test.
+cd "$VIS"
+test -f SECURITY.md || fail "public fixture render is missing SECURITY.md"
+grep -qxF "  private: false" .github/settings.yml \
+  || fail "public fixture settings.yml does not declare private: false"
+grep -qF "type: code_scanning" .github/settings.yml \
+  || fail "public fixture settings.yml is missing the code_scanning rule"
+grep -qF "codeql-javascript" .github/workflows/ci.yml \
+  || fail "public fixture ci.yml is missing the codeql-javascript job"
+git init -q -b main
+git add --all
+git -c user.name=ci -c user.email=ci@localhost commit -q -m "chore: init"
+
+# Same pipeline as the main leg, but the live data says PRIVATE=true while
+# the recorded answers still say false - the drift the sync re-renders.
+cd "$GITHUB_WORKSPACE"
+git show "${prev}:copier.yml" > "$VIS_WORK/copier-old.yml"
+git show templates/v99.99.99:copier.yml > "$VIS_WORK/copier-new.yml"
+MODULES="$(bun .github/scripts/sync/modules.ts \
+  --repo-file "$VIS/.repo-platform.yml" \
+  --template-copier "$VIS_WORK/copier-new.yml" \
+  --retired-summary "$VIS_WORK/retired-modules.txt")"
+export MODULES
+export CHANNEL=latest
+export PRIVATE=true
+export DESCRIPTION="Visibility-flip project"
+export TARGET_DIR="$VIS"
+export TARGET_REF=templates/v99.99.99
+RECOVER="" bash .github/scripts/sync/apply_update.sh
+bun .github/scripts/sync/resolve_copier_conflicts.ts \
+  --summary "$VIS_WORK/dropped-local-hunks.md" --root "$VIS"
+
+# Current copier already deletes the de-rendered SECURITY.md during the
+# update; resurrect it (the sentinel trick above) so retired_cleanup's
+# data-driven old/new render diff - old render private=false from the
+# recorded answers, new render private=true from the live data - must
+# really flag and delete it.
+echo "# Security policy" > "$VIS/SECURITY.md"
+answers_vis="$(git -C "$VIS" show HEAD:.copier-answers.yml)"
+src_path_vis="$(sed -n 's/^_src_path: //p' <<<"$answers_vis")"
+test -n "$src_path_vis" || fail "visibility fixture records no _src_path"
+RUNNER_TEMP="$VIS_WORK" SRC_PATH="$src_path_vis" \
+  OLD_SHA="$(git rev-parse "${prev}^{commit}")" \
+  bash .github/scripts/sync/retired_cleanup.sh
+grep -qF '"SECURITY.md"' "$VIS_WORK/retired-paths.json" \
+  || fail "retired_paths did not flag SECURITY.md on the public->private flip"
+grep -qxF "SECURITY.md" "$VIS_WORK/removed-paths.txt" \
+  || fail "retired_cleanup's rm loop did not delete the resurrected SECURITY.md"
+RECOVER="" bash .github/scripts/sync/preserve_settings.sh
+
+bun "$GITHUB_WORKSPACE/actions/validate-template/validate_generated_files.ts" "$VIS"
+
+cd "$VIS"
+test ! -e SECURITY.md || fail "SECURITY.md survived the flip to private"
+grep -qxF "  private: true" .github/settings.yml \
+  || fail "settings.yml's private line did not flip to true"
+# The other always-declared identity keys must survive the three-way merge
+# with their empty declare-and-clear values intact.
+grep -qxF '  homepage: ""' .github/settings.yml \
+  || fail "settings.yml lost the empty homepage declaration across the update"
+grep -qxF '  topics: ""' .github/settings.yml \
+  || fail "settings.yml lost the empty topics declaration across the update"
+if grep -qF "type: code_scanning" .github/settings.yml; then
+  fail "settings.yml kept the code_scanning rule after the flip to private"
+fi
+# The unconditional header comment mentions CodeQL by name, so assert on
+# the machinery: the job (and its reusable-workflow call) and the gate's
+# needs entry all carry the codeql-javascript identifier.
+if grep -qF "codeql-javascript" .github/workflows/ci.yml; then
+  fail "ci.yml kept the codeql-javascript job after the flip to private"
+fi
+if grep -qF "reusable-codeql" .github/workflows/ci.yml; then
+  fail "ci.yml kept the reusable-codeql call after the flip to private"
+fi
+if grep -rIqF "$marker" . --exclude-dir=.git; then
+  fail "the visibility flip left unresolved copier conflict markers"
+fi
+if find . -name '*.rej' -not -path './.git/*' | grep -q .; then
+  fail "the visibility flip left .rej files behind"
+fi
+echo "visibility flip OK: SECURITY.md retired, private declared true, codeql stripped"
