@@ -53,7 +53,11 @@ selection's home from then on: edit its `modules:` list and the next sync
 PR applies the change. Its presence is what marks the repo as managed.
 
 To switch channels later, change the repo's entry under `config:` in
-repo-platform's `repos.yml` (see step 4).
+repo-platform's `repos.yml` (see step 4). A repo moving from staging to
+latest gets every migration up to the target release on its first sync
+after the switch - the staging history says nothing about which ones
+already applied, and migrations are idempotent, so the runner over-runs
+rather than skips (see [migrations/README.md](../migrations/README.md)).
 
 ## 3. Add checks to checks.yml
 

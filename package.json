@@ -17,7 +17,7 @@
     "gitignore:check": "bun scripts/build_gitignore.ts --check",
     "compose": "bun scripts/compose_template.ts",
     "compose:check": "bun .github/scripts/build-branches/branch_tree.ts --dest /tmp/repo-platform-compose-check --channel staging && rm -rf /tmp/repo-platform-compose-check",
-    "test": "bun test ./.github/scripts ./actions/fuzz-issue ./scripts",
+    "test": "bun test ./.github/scripts ./actions/fuzz-issue ./scripts ./migrations",
     "prepare": "husky"
   },
   "devDependencies": {
