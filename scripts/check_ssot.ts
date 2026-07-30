@@ -17,6 +17,7 @@
 import { existsSync, lstatSync, readdirSync, readFileSync, readlinkSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
+import { centralIdentityIssues } from "../.github/scripts/fleet/validate_central_settings.ts";
 import { MODULE_ORDER } from "./compose_template.ts";
 
 const REPO_ROOT = resolve(import.meta.dir, "..");
@@ -289,6 +290,39 @@ function centralLabelRoster(): Label[] {
   return parseLabels(read("settings/repos/repo-platform.yml"), "settings/repos/repo-platform.yml");
 }
 
+/** The identity keys the settings-sync template renders unconditionally
+ *  for module repos; the key list lives in the fleet preflight
+ *  (centralIdentityIssues), which checks every central file - this wrapper
+ *  applies the same contract to repo-platform's own file so the two
+ *  checkers cannot drift apart. */
+export function centralIdentityMismatches(repository: Record<string, unknown>): Mismatch[] {
+  return centralIdentityIssues(repository).map((issue) => ({
+    file: `settings/repos/repo-platform.yml repository.${issue.key}`,
+    expected: issue.expected,
+    got: issue.got,
+  }));
+}
+
+/** True when verify_smoke_gating.sh CONDITIONS on the module through its
+ *  `has` helper - an executable shell-condition use (`if has X`, `elif has
+ *  X`, `&& has X`, `|| has X`, `{ has X`, `! has X`). Comment lines and
+ *  trailing comments are stripped first, and a condition keyword/operator
+ *  must immediately precede `has`, so a mention in a comment or an
+ *  unrelated substring (e.g. "bun" inside setup-bun) cannot satisfy it. */
+export function gatesOnModule(script: string, module: string): boolean {
+  const executable = script
+    .split("\n")
+    .filter((line) => !line.trimStart().startsWith("#"))
+    .map((line) => line.replace(/\s#.*$/, ""))
+    .join("\n");
+  const escaped = module.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const condition = new RegExp(
+    `(?:^|[\\s;{])(?:if|elif|&&|\\|\\||\\{|!|;)\\s+has\\s+${escaped}(?=$|[\\s;])`,
+    "m",
+  );
+  return condition.test(executable);
+}
+
 // --- check-chain expansion --------------------------------------------------
 
 /** Transitively expand a package.json script through its `bun run X` calls;
@@ -436,11 +470,11 @@ const rules: Rule[] = [
       }
       const gating = read(".github/scripts/ci/verify_smoke_gating.sh");
       for (const module of reference) {
-        if (!gating.includes(module)) {
+        if (!gatesOnModule(gating, module)) {
           mismatches.push({
             file: ".github/scripts/ci/verify_smoke_gating.sh",
-            expected: `a mention of module '${module}'`,
-            got: "no mention",
+            expected: `an executable 'has ${module}' condition gating an assertion`,
+            got: "none (comments and unrelated substrings do not count)",
           });
         }
       }
@@ -1054,6 +1088,19 @@ const rules: Rule[] = [
       if (Object.keys(sharedFields).length === 0) {
         throw new Error("settings/defaults.yml: repository block is empty - anchor lost");
       }
+      // List-valued sections live per repo, never in defaults (arrays
+      // REPLACE on merge), and the central preflight treats an absent
+      // labels section as unmanaged - a labels or rulesets block here
+      // would silently break both.
+      for (const section of ["labels", "rulesets"]) {
+        if (section in defaults) {
+          mismatches.push({
+            file: "settings/defaults.yml",
+            expected: `no ${section} section (list sections live in each repo's own settings file)`,
+            got: "declared",
+          });
+        }
+      }
       const jinjaRepository = asRecord(jinja.repository, "settings.yml.jinja repository");
       for (const [key, value] of Object.entries(sharedFields)) {
         if (canonical(jinjaRepository[key]) !== canonical(value)) {
@@ -1064,6 +1111,14 @@ const rules: Rule[] = [
           });
         }
       }
+
+      // Template-only repository keys (private, description) have no
+      // defaults.yml counterpart, so the loop above never sees them; assert
+      // the central file declares them the way the template guarantees
+      // them for module repos.
+      mismatches.push(
+        ...centralIdentityMismatches(asRecord(central.repository, "repo-platform.yml repository")),
+      );
 
       const mainRuleset = (doc: Record<string, unknown>, where: string) => {
         const ruleset = (doc.rulesets as Record<string, unknown>[]).find((r) => r.name === "main");

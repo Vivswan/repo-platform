@@ -5,9 +5,11 @@
 import { describe, expect, test } from "bun:test";
 import {
   canonical,
+  centralIdentityMismatches,
   expandCheckChain,
   extractUsesPins,
   firstDiff,
+  gatesOnModule,
   mustMatch,
   normalizeJinja,
   parseLabels,
@@ -196,6 +198,78 @@ describe("expandCheckChain", () => {
   test("a command outside the chain is not reachable", () => {
     const { text } = expandCheckChain(scripts, "lint");
     expect(text).not.toContain("bun scripts/x.ts");
+  });
+});
+
+describe("gatesOnModule", () => {
+  const script = [
+    "#!/usr/bin/env bash",
+    "# if has fuzzer; then a comment must never count",
+    'has() { case "$mods" in *",$1,"*) return 0 ;; *) return 1 ;; esac; }',
+    'if has bun; then present "## Node " /tmp/smoke/.gitignore; fi',
+    "elif has pr-title; then",
+    'if [ "$PRIVATE" != "true" ] && { has rust || has uv; }; then',
+    "if ! has agents; then",
+    "  - uses: oven-sh/setup-bun@v2",
+    "echo done # has pages would be a trailing-comment spoof",
+  ].join("\n");
+
+  test("matches if and elif conditions", () => {
+    expect(gatesOnModule(script, "bun")).toBe(true);
+    expect(gatesOnModule(script, "pr-title")).toBe(true);
+  });
+
+  test("matches brace-group, ||, and negated forms", () => {
+    expect(gatesOnModule(script, "rust")).toBe(true);
+    expect(gatesOnModule(script, "uv")).toBe(true);
+    expect(gatesOnModule(script, "agents")).toBe(true);
+  });
+
+  test("a comment mention does not count", () => {
+    expect(gatesOnModule(script, "fuzzer")).toBe(false);
+  });
+
+  test("a trailing comment does not count", () => {
+    expect(gatesOnModule(script, "pages")).toBe(false);
+  });
+
+  test("an unrelated substring does not count", () => {
+    expect(gatesOnModule("uses: oven-sh/setup-bun@v2\nbun install", "bun")).toBe(false);
+  });
+
+  test("a longer module name is not satisfied by its prefix", () => {
+    expect(gatesOnModule("if has pr-title; then", "pr")).toBe(false);
+  });
+});
+
+describe("centralIdentityMismatches", () => {
+  const identity = { description: "x", homepage: "", topics: "", private: false };
+
+  test("passes when all four identity keys are declared, empty strings included", () => {
+    expect(centralIdentityMismatches(identity)).toEqual([]);
+    expect(centralIdentityMismatches({ ...identity, private: true, topics: "a, b" })).toEqual([]);
+  });
+
+  test("flags a missing or stringly-typed private key", () => {
+    const { private: _, ...rest } = identity;
+    expect(centralIdentityMismatches(rest)).toHaveLength(1);
+    const [mismatch] = centralIdentityMismatches({ ...identity, private: "false" });
+    expect(mismatch.file).toContain("repository.private");
+  });
+
+  test("flags a missing or empty description", () => {
+    const { description: _, ...rest } = identity;
+    expect(centralIdentityMismatches(rest)).toHaveLength(1);
+    const [mismatch] = centralIdentityMismatches({ ...identity, description: "" });
+    expect(mismatch.file).toContain("repository.description");
+  });
+
+  test("flags undeclared homepage and topics keys", () => {
+    const mismatches = centralIdentityMismatches({ description: "x", private: false });
+    expect(mismatches.map((m) => m.file)).toEqual([
+      "settings/repos/repo-platform.yml repository.homepage",
+      "settings/repos/repo-platform.yml repository.topics",
+    ]);
   });
 });
 
