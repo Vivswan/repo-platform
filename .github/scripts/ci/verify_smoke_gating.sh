@@ -15,6 +15,7 @@ wf=/tmp/smoke/.github/workflows
 mods=",$(echo "$MODULES" | tr -d '[] '),"
 has() { case "$mods" in *",$1,"*) return 0 ;; *) return 1 ;; esac; }
 present() { grep -qF -- "$1" "$2" || { echo "::error::gating check failed: '$1' is missing from $2, so the template did not emit it for modules=$MODULES private=$PRIVATE. Fix the gate in templates/ (or this expectation in verify_smoke_gating.sh)."; exit 1; }; }
+present_line() { grep -qxF -- "$1" "$2" || { echo "::error::gating check failed: no line is exactly '$1' in $2, so the template did not emit it for modules=$MODULES private=$PRIVATE. Fix the gate in templates/ (or this expectation in verify_smoke_gating.sh)."; exit 1; }; }
 absent() { if grep -qF -- "$1" "$2"; then echo "::error::gating check failed: '$1' appears in $2 but modules=$MODULES private=$PRIVATE should not emit it. Fix the gate in templates/ (or this expectation in verify_smoke_gating.sh)."; exit 1; fi; }
 
 # pr-title runs inside the managed ci.yml gate (no standalone workflow).
@@ -55,6 +56,17 @@ if has settings-sync; then
   test -f /tmp/smoke/.github/settings.yml
   test -f "$wf/settings-sync.yml"
   present "reusable-apply-settings.yml@main" "$wf/settings-sync.yml"
+  # Visibility is declared even when public; the whole-line match keeps
+  # the explanatory comment above the key from satisfying the check.
+  present_line "  private: $PRIVATE" /tmp/smoke/.github/settings.yml
+  # The ruleset's code_scanning rule follows enable_codeql (public AND a
+  # toolchain): GitHub 422s that rule on a private personal repo, so a
+  # private render must never emit it.
+  if [ "$PRIVATE" != "true" ] && { has bun || has uv; }; then
+    present "type: code_scanning" /tmp/smoke/.github/settings.yml
+  else
+    absent "type: code_scanning" /tmp/smoke/.github/settings.yml
+  fi
 else
   test ! -e /tmp/smoke/.github/settings.yml
   test ! -e "$wf/settings-sync.yml"
