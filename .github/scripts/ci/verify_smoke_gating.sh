@@ -164,12 +164,15 @@ else
 fi
 
 # release-please module gates the autorelease labels in the settings-sync
-# module's settings.yml (only rendered when that module is on), the
-# managed release-please.yml machinery, the repo-owned release.yml pipeline
-# plus its thin caller job in the managed ci.yml, and the config files.
-# The fuzzer module's tracking label splices into settings.yml the same way.
+# module's settings.yml (only rendered when that module is on) and the
+# release-tags tag-immutability ruleset there (sync pins against v-tags),
+# the managed release-please.yml machinery, the repo-owned release.yml
+# pipeline plus its thin caller job in the managed ci.yml, and the config
+# files. The fuzzer module's tracking label splices into settings.yml the
+# same way.
 if has settings-sync; then
   if has release-please; then present "autorelease: pending" /tmp/smoke/.github/settings.yml; else absent "autorelease: pending" /tmp/smoke/.github/settings.yml; fi
+  if has release-please; then present "name: release-tags" /tmp/smoke/.github/settings.yml; else absent "name: release-tags" /tmp/smoke/.github/settings.yml; fi
   if has fuzzer; then present "Automated nightly fuzz failure" /tmp/smoke/.github/settings.yml; else absent "Automated nightly fuzz failure" /tmp/smoke/.github/settings.yml; fi
 fi
 
