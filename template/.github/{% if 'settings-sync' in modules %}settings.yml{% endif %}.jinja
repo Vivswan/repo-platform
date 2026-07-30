@@ -13,8 +13,10 @@ repository:
   description: {{ description | tojson }}
 {% if homepage %}  homepage: {{ homepage | tojson }}
 {% endif %}{% if topics %}  topics: {{ topics | tojson }}
-{% endif %}{% if private %}  private: true
-{% endif %}  has_issues: true
+{% endif %}  # Always declared, even for a public repo, so the settings apply
+  # manages visibility and reverts out-of-band flips.
+  private: {{ private | tojson }}
+  has_issues: true
   has_wiki: false
   has_projects: false
   has_discussions: false
