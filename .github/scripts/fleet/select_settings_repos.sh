@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
-# Discovers the in-repo settings targets: enrolled repos (the fleet token
-# can push - probed, since user/repos' permissions field reflects the
-# USER, not the token), adopted (.repo-platform.yml on the default
+# Discovers the settings targets and builds the per-repo apply matrix
+# for settings-repos.yml. In-repo targets are enrolled repos (the fleet
+# token can push - probed, since user/repos' permissions field reflects
+# the USER, not the token), adopted (.repo-platform.yml on the default
 # branch), and carrying their own .github/settings.yml - no module
 # required, the file is the signal. A central settings/repos/<name>.yml
-# wins and drops the repo from the remote list. Invoked by
-# settings-repos.yml.
+# wins and drops the repo from the remote list; the matrix carries both
+# homes, one entry per repo (build_settings_matrix.ts).
 #
 # One repo's flaky probe must never block the heal for the rest of the
 # fleet: every probe is retried, and a repo whose probes still return no
@@ -150,10 +151,11 @@ while IFS= read -r repo; do
   fi
 done < <(jq -r '.[]' "$RUNNER_TEMP/excluded.json")
 
-{
-  echo "repos<<REPOS_EOF"
-  printf '%s' "$repos"
-  echo "REPOS_EOF"
-} >>"$GITHUB_OUTPUT"
-echo "in-repo targets:"
-printf '%s' "$repos"
+# The matrix joins the probed in-repo list with the central files; a
+# builder failure (unreadable dir, a central file the per-repo scoping
+# cannot represent) invalidates the whole selection and exits 1.
+printf '%s' "$repos" >"$RUNNER_TEMP/in_repo_targets.txt"
+targets="$(bun .github/scripts/fleet/build_settings_matrix.ts \
+  --owner "$OWNER" --in-repo "$RUNNER_TEMP/in_repo_targets.txt")"
+echo "targets=${targets}" >>"$GITHUB_OUTPUT"
+echo "settings targets: $(jq -r 'if length == 0 then "(none)" else map(.repo + " [" + .home + "]") | join(", ") end' <<<"$targets")"
