@@ -6,14 +6,18 @@
 //   bun .github/scripts/fleet/repos_registry.ts validate [--file repos.yml]
 //   bun .github/scripts/fleet/repos_registry.ts select [--repo owner/name]
 //     [--discovered discovered.json] [--file repos.yml]
+//   bun .github/scripts/fleet/repos_registry.ts excluded [--file repos.yml]
 //
 // `select` prints a JSON array of {repo, owner, name, channel} on stdout;
 // channel is null when the registry resolves none (the sync then falls
 // back to the repo's recorded copier answer). `--discovered` names a JSON
 // file holding an array of "owner/name" strings (already filtered for
 // archived repos by the caller); it is required whenever `managed`
-// contains the "*" wildcard. Errors go to stderr as ::error:: workflow
-// commands, all of them at once, and the exit code is nonzero.
+// contains the "*" wildcard. `excluded` prints the exclude list as a JSON
+// array of slugs (select_settings_repos.sh uses it to report paused repos
+// that still carry an in-repo settings file). Errors go to stderr as
+// ::error:: workflow commands, all of them at once, and the exit code is
+// nonzero.
 
 import { readFileSync } from "node:fs";
 import { parse } from "yaml";
@@ -339,10 +343,16 @@ function main(args: string[]): void {
       console.log(JSON.stringify(selection));
       return;
     }
+    case "excluded": {
+      const flags = parseFlags(rest, [], ["--file"]);
+      const registry = readRegistryFile(flags["--file"] ?? "repos.yml");
+      console.log(JSON.stringify(registry.exclude));
+      return;
+    }
     default:
       fail([
         `unknown subcommand ${JSON.stringify(command ?? "")} - ` +
-          `usage: repos_registry.ts validate|select [--file repos.yml] ` +
+          `usage: repos_registry.ts validate|select|excluded [--file repos.yml] ` +
           `[--repo owner/name] [--discovered discovered.json]`,
       ]);
   }

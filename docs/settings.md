@@ -97,7 +97,9 @@ Stateless, declared-keys-only, upsert-by-name:
 
 Carrying `.github/settings.yml` in the repo is the whole opt-in: the
 central `settings-repos.yml` run reads and applies it remotely, and
-template sync never deletes the file. The `settings-sync` module is
+template sync never deletes the file. Excluding a repo from sync in
+`repos.yml` also pauses its nightly heal, so the settings run warns
+when an excluded repo still carries the file. The `settings-sync` module is
 optional sugar on top: it seeds the file with the template baseline
 (three-way merged on updates) and renders a managed `settings-sync.yml`
 workflow (push on that file + manual dispatch) that self-applies it

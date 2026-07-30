@@ -247,4 +247,12 @@ describe("CLI", () => {
     expect(stderr).toContain("::error::");
     expect(stderr.match(/::error::/g)?.length).toBe(2);
   });
+
+  test("excluded prints the exclude list as a JSON array", async () => {
+    const file = join(tmpdir(), "repos-registry-test-excluded.yml");
+    await Bun.write(file, 'managed:\n  - "*"\nexclude:\n  - a/b\n  - a/c\n');
+    const { exitCode, stdout } = run(["excluded", "--file", file]);
+    expect(exitCode).toBe(0);
+    expect(JSON.parse(stdout)).toEqual(["a/b", "a/c"]);
+  });
 });
