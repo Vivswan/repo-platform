@@ -1,11 +1,13 @@
-# Central settings apply: runs Vivswan/repo-settings-as-code once against
-# every managed repository, from this repo. Central targets are the
-# settings/repos/<name>.yml files (settings/defaults.yml deep-merged under
-# each); in-repo targets (enrolled, adopted repos carrying their own
-# .github/settings.yml - the file is the opt-in, no module needed) are
-# passed via the action's `repos:` remote mode. A central file for the
-# same repository wins. The optional settings-sync module adds push-time
-# self-apply via reusable-apply-settings.yml.
+# Central settings apply: resolves every managed settings target -
+# central settings/repos/<name>.yml files (settings/defaults.yml
+# deep-merged under each) plus in-repo targets (enrolled, adopted repos
+# carrying their own .github/settings.yml - the file is the opt-in, no
+# module needed; a central file for the same repository wins) - and runs
+# Vivswan/repo-settings-as-code once per repository in a fail-fast-free
+# matrix. Repos heal independently: one target's failure is its own red
+# "apply (<repo>)" job and never blocks the others. The optional
+# settings-sync module adds push-time self-apply via
+# reusable-apply-settings.yml.
 
 name: Settings Repos
 
@@ -32,8 +34,10 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  apply:
+  select:
     runs-on: ubuntu-latest
+    outputs:
+      targets: ${{ steps.targets.outputs.targets }}
     steps:
       # A missing token is a misconfiguration of this repo: fail loudly.
       # So is a narrowed one here: settings need Administration + Issues
@@ -56,13 +60,12 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      # In-repo targets: enrolled repos (the fleet token can push - probed,
-      # since user/repos' permissions field reflects the USER, not the
-      # token), adopted (.repo-platform.yml on the default branch), and
-      # carrying their own .github/settings.yml - no module required, the
-      # file is the signal. A central settings/repos/<name>.yml wins and
-      # drops the repo from the remote list.
-      - name: Discover in-repo settings targets
+      # One matrix entry per target repo, each carrying its settings
+      # home. Probes retry and then warn-and-skip a repo they cannot
+      # answer for; only selection-infrastructure failures (unreadable
+      # registry, failed discovery, a central file the per-repo scoping
+      # cannot represent) fail this job.
+      - name: Select settings targets
         id: targets
         env:
           GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
@@ -70,17 +73,62 @@ jobs:
           OWNER: ${{ github.repository_owner }}
         run: bash .github/scripts/fleet/select_settings_repos.sh
 
+  apply:
+    needs: select
+    # fromJSON on an empty list would create a matrix with no jobs, which
+    # GitHub rejects; an empty fleet is a no-op, not a failure.
+    if: needs.select.outputs.targets != '[]'
+    strategy:
+      # Independence between repos lives HERE: one repo's failed apply
+      # stays a red job but never cancels or blocks its siblings. Within
+      # a job everything stays strict - no continue-on-error, no
+      # softened exit codes. (GitHub caps a matrix at 256 jobs; the
+      # fleet is far smaller.)
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.select.outputs.targets) }}
+    name: apply (${{ matrix.repo }})
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      # bun is only needed for the central-file preflight below.
+      - uses: oven-sh/setup-bun@v2
+        if: matrix.home == 'central'
+
+      - name: Install dependencies
+        if: matrix.home == 'central'
+        run: bun install --frozen-lockfile
+
+      # The action's central mode reads a whole directory and has no
+      # per-target filter, so scoping this job to one repository means a
+      # scratch dir holding just its file. (Single-repo `repository:`
+      # mode is no alternative: it rejects defaults-file.)
+      - name: Scope the central file to this repository
+        if: matrix.home == 'central'
+        env:
+          NAME: ${{ matrix.name }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/central-scope"
+          cp "settings/repos/${NAME}.yml" "$RUNNER_TEMP/central-scope/"
+
       # Central files are hand-maintained, but the labels they must declare
-      # follow each target repo's module selection (its .repo-platform.yml)
+      # follow the target repo's module selection (its .repo-platform.yml)
       # and fuzzer label (its .copier-answers.yml). A stale roster fails
-      # here, loudly, instead of starting the nightly delete/recreate loop;
-      # a failed fetch only warns, so this step never blocks the apply
-      # over a target it could not read.
-      - name: Validate central settings against target modules
+      # this repo's apply, loudly, instead of starting the nightly
+      # delete/recreate loop; a failed fetch only warns, so this step
+      # never blocks the apply over a file it could not read. It runs
+      # here, scoped to this job's file, rather than in select: one bad
+      # central file must fail one apply job, never the whole heal.
+      - name: Validate the central file against target modules
+        if: matrix.home == 'central'
         env:
           GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
           OWNER: ${{ github.repository_owner }}
-        run: bun .github/scripts/fleet/validate_central_settings.ts --owner "$OWNER"
+        run: >-
+          bun .github/scripts/fleet/validate_central_settings.ts
+          --owner "$OWNER" --dir "$RUNNER_TEMP/central-scope"
 
       - name: Apply repository settings
         # Pinned to an immutable commit; bump to @v1 once repo-settings-as-code
@@ -89,10 +137,13 @@ jobs:
         with:
           token: ${{ secrets.REPO_PLATFORM_TOKEN }}
           mode: ${{ inputs.check_only && 'check' || 'apply' }}
-          repos-dir: settings/repos
+          # Exactly one of the two multi-repo modes carries this job's
+          # single repository: the scoped scratch dir for a central
+          # home, the action's remote mode for an in-repo home.
+          repos-dir: ${{ matrix.home == 'central' && format('{0}/central-scope', runner.temp) || '' }}
+          repos: ${{ matrix.home == 'in-repo' && matrix.repo || '' }}
           defaults-file: settings/defaults.yml
-          repos: ${{ steps.targets.outputs.repos }}
-          # Strict: a token that cannot reach a declared section fails the
-          # run (the action's default) - settings drift must not hide
-          # behind a green run.
+          # Strict: a token that cannot reach a declared section fails
+          # this repo's job (the action's default) - settings drift must
+          # not hide behind a green run.
           on-missing-permission: fail

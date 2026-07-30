@@ -15,10 +15,16 @@ A repo's settings live in ONE of two homes:
 | In-repo | the repo's own `.github/settings.yml` | carry the file (that is the whole opt-in) |
 
 Both homes are applied from repo-platform by the `settings-repos.yml`
-workflow, in one repo-settings-as-code invocation: `repos-dir` covers the
-central files and the action's `repos:` remote mode reads each in-repo
-file from its repo's default branch (enrolled and adopted repos only).
-When both exist for the same repository, the central file wins.
+workflow: a select job resolves the target list (the central files, plus
+enrolled and adopted repos carrying the in-repo file), then a
+fail-fast-free matrix runs one repo-settings-as-code invocation per
+repository - `repos-dir` scoped to that repo's central file, or the
+action's `repos:` remote mode reading its in-repo file from the default
+branch. Repos heal independently: a failed apply is that repo's own red
+`apply (<repo>)` job and never blocks the others, and a repo whose
+selection probes keep failing (after retries) is skipped for the run
+with a warning and picked up again the next night. When both homes exist
+for the same repository, the central file wins.
 
 Two guarantees for the in-repo home:
 
@@ -68,8 +74,9 @@ Stateless, declared-keys-only, upsert-by-name:
   does it automatically, central settings files must carry it by hand, or
   the label sync strips it from the open tracking issue and the auto-close
   loses the issue. The by-hand requirement is checked, not trusted: before
-  the apply, `settings-repos.yml` compares each central file that declares
-  labels against its repo's recorded module selection and fails the run on
+  the apply, a central repo's matrix job compares its file (when it
+  declares labels) against the repo's recorded module selection and fails
+  that repo's apply on
   a missing required label instead of starting the loop. A file with no
   labels section leaves labels unmanaged and is skipped. A repo that
   carries no `.repo-platform.yml`, or one whose files could not be
@@ -161,7 +168,8 @@ The fleet-level token model lives in the
 only in repo-platform drives sync and central settings, and it is
 required there - the central runs fail without it. Settings applies are
 strict about permissions: a token that cannot reach a declared section
-fails the run (`on-missing-permission: fail`), so drift never hides
+fails that repository's apply job (`on-missing-permission: fail`), so
+drift never hides
 behind a green run. Administration and Issues write are required
 wherever settings are applied.
 
