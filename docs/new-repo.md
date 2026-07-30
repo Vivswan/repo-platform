@@ -82,6 +82,16 @@ own checks:
 - with the bun or uv module: a repo-owned `auto-format.yml` starter (label a
   PR `fix-lint` to get a formatting commit pushed to it), prefilled with each
   selected toolchain's formatter.
+- with the bun module: a managed `dependabot-bun-lockfile.yml` that
+  regenerates `bun.lock` from scratch on Dependabot's PRs and pushes the fix
+  to the PR branch (Dependabot's own lockfile edits can leave stale nested
+  entries that fail `bun install --frozen-lockfile`; the regeneration also
+  refreshes every in-range pin, so most Dependabot PRs get a fix commit).
+  Registering `REPO_PLATFORM_TOKEN` as a *Dependabot* secret is recommended:
+  it lets the fix commit re-run CI (a fine-grained token scoped to that one
+  repo's Contents:RW is enough; do not put the fleet PAT in a downstream
+  repo). Without the secret every fixed PR needs a close/reopen for its
+  checks to appear.
 - with the agents module: a repo-owned `copilot-setup-steps.yml` starter
   (environment setup for the Copilot coding agent), prefilled with installs
   for the selected toolchains.
