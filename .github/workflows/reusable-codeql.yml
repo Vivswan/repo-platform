@@ -21,14 +21,22 @@ permissions:
 jobs:
   analyze:
     name: analyze (${{ inputs.language }})
-    # Code scanning requires a public repo (or GHAS); skip gracefully if private.
-    if: github.event.repository.private == false
     runs-on: ubuntu-latest
     permissions:
       contents: read
       security-events: write
       actions: read
     steps:
+      # Code scanning needs a public repo (or GitHub Code Security), and
+      # these jobs only exist because the repo was public at generation
+      # time. A silent skip here would report success with zero scanning,
+      # so a private repo fails loudly instead.
+      - name: Fail if the repository is private
+        if: github.event.repository.private
+        run: |
+          echo "::error::CodeQL cannot run: this repository is private, but its CI still carries CodeQL jobs from when it was public (private repositories get no CodeQL without GitHub Code Security). Either restore public visibility (if the repo carries .github/settings.yml declaring 'private: false', the settings heal does this on its next run), or merge the template-sync visibility-drift PR so the CodeQL jobs are removed. CI stays red until one of those lands."
+          exit 1
+
       - uses: actions/checkout@v7
 
       - uses: github/codeql-action/init@v4.37.3
