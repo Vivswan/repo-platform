@@ -178,6 +178,8 @@ jobs:
             expect_in_pages: |
               uv sync
               uv run mkdocs build --site-dir dist
+              production: release
+              staging: true
           # The only row where bun renders private: the bun fragments'
           # enable_codeql=false branches must emit no CodeQL wiring in
           # ci.yml, no SECURITY.md, and settings.yml must still declare
