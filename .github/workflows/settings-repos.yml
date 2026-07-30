@@ -73,7 +73,9 @@ jobs:
       # Central files are hand-maintained, but the labels they must declare
       # follow each target repo's module selection (its .repo-platform.yml)
       # and fuzzer label (its .copier-answers.yml). A stale roster fails
-      # here, loudly, instead of starting the nightly delete/recreate loop.
+      # here, loudly, instead of starting the nightly delete/recreate loop;
+      # a failed fetch only warns, so this step never blocks the apply
+      # over a target it could not read.
       - name: Validate central settings against target modules
         env:
           GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}

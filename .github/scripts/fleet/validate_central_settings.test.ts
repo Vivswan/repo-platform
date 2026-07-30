@@ -1,4 +1,7 @@
-import { describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   centralIdentityIssues,
   checkCentralFileLocal,
@@ -37,7 +40,12 @@ function registration(modules: string[]): Fetched {
 
 describe("requiredLabels", () => {
   test("always requires the unconditional dependabot pair", () => {
-    const names = requiredLabels([], "").map((l) => l.name);
+    const names = requiredLabels([], null).map((l) => l.name);
+    expect(names).toEqual(["dependencies", "github_actions"]);
+  });
+
+  test("a null fuzzer label drops that requirement instead of demanding an empty name", () => {
+    const names = requiredLabels(["fuzzer"], null).map((l) => l.name);
     expect(names).toEqual(["dependencies", "github_actions"]);
   });
 
@@ -204,17 +212,45 @@ describe("checkCentralFileRemote", () => {
     expect(result.warnings[0]).toContain(".repo-platform.yml");
   });
 
-  test("a fetch failure is an error naming the repo, not a warning or a pass", () => {
+  test("a registration fetch failure warns and skips, never fails", () => {
     const { errors, warnings } = checkCentralFileRemote(
       FILE,
       REPO,
       declared(["dependencies"]),
       fetcher({ ".repo-platform.yml": failed }),
     );
-    expect(warnings).toEqual([]);
-    expect(errors).toHaveLength(1);
-    expect(errors[0]).toContain("HTTP 502");
-    expect(errors[0]).toContain(REPO);
+    expect(errors).toEqual([]);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain("HTTP 502");
+    expect(warnings[0]).toContain(REPO);
+    expect(warnings[0]).toContain("unverified this run");
+  });
+
+  test("an answers fetch failure warns but the other labels still count", () => {
+    const flaky = fetcher({
+      ".repo-platform.yml": registration(["bun", "fuzzer"]),
+      ".copier-answers.yml": failed,
+    });
+    const covered = checkCentralFileRemote(
+      FILE,
+      REPO,
+      declared(["dependencies", "github_actions", "javascript"]),
+      flaky,
+    );
+    expect(covered.errors).toEqual([]);
+    expect(covered.warnings).toHaveLength(1);
+    expect(covered.warnings[0]).toContain(".copier-answers.yml");
+    expect(covered.warnings[0]).toContain("unverified this run");
+
+    const violating = checkCentralFileRemote(
+      FILE,
+      REPO,
+      declared(["dependencies", "github_actions"]),
+      flaky,
+    );
+    expect(violating.warnings).toHaveLength(1);
+    expect(violating.errors).toHaveLength(1);
+    expect(violating.errors[0]).toContain('"javascript"');
   });
 
   test("every missing label is reported, not just the first", () => {
@@ -236,5 +272,102 @@ describe("checkCentralFileRemote", () => {
     );
     expect(errors).toHaveLength(1);
     expect(errors[0]).toContain("modules");
+  });
+});
+
+// The exit-code split lives in main(), so these run the script itself
+// with a gh stub on PATH: a flake on one file must warn without blocking
+// the apply, while a real violation anywhere still fails the run.
+describe("CLI exit codes", () => {
+  const script = join(import.meta.dir, "validate_central_settings.ts");
+  const root = mkdtempSync(join(tmpdir(), "validate-central-"));
+  const bin = join(root, "bin");
+  afterAll(() => rmSync(root, { recursive: true, force: true }));
+
+  // The flaky repo's fetches fail with a non-404; fuzzflaky registers
+  // with the fuzzer module but its answers fetch fails; the violating
+  // repo registers with no modules; every other repo is a 404.
+  beforeAll(() => {
+    mkdirSync(bin);
+    writeFileSync(
+      join(bin, "gh"),
+      [
+        "#!/usr/bin/env bash",
+        'case "$2" in',
+        '  repos/Vivswan/flaky/*) echo "HTTP 502 from stub" >&2; exit 1 ;;',
+        "  repos/Vivswan/fuzzflaky/contents/.repo-platform.yml) printf 'modules: [fuzzer]\\n' ;;",
+        '  repos/Vivswan/fuzzflaky/contents/.copier-answers.yml) echo "HTTP 502 from stub" >&2; exit 1 ;;',
+        "  repos/Vivswan/violating/contents/.repo-platform.yml) printf 'modules: []\\n' ;;",
+        '  *) echo "HTTP 404 from stub" >&2; exit 1 ;;',
+        "esac",
+        "",
+      ].join("\n"),
+      { mode: 0o755 },
+    );
+    writeFileSync(join(root, "package.json"), JSON.stringify({ name: "repo-platform" }));
+  });
+
+  function caseDir(name: string, files: Record<string, string>): string {
+    const dir = join(root, name);
+    mkdirSync(dir);
+    for (const [file, text] of Object.entries(files)) writeFileSync(join(dir, file), text);
+    return dir;
+  }
+
+  function run(dir: string): { exitCode: number; stdout: string; stderr: string } {
+    const proc = Bun.spawnSync(["bun", script, "--owner", "Vivswan", "--dir", dir], {
+      cwd: root,
+      env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
+    });
+    return {
+      exitCode: proc.exitCode,
+      stdout: proc.stdout.toString(),
+      stderr: proc.stderr.toString(),
+    };
+  }
+
+  test("a registration fetch failure alone warns and exits 0", () => {
+    const dir = caseDir("transient", { "flaky.yml": central(["dependencies", "github_actions"]) });
+    const { exitCode, stdout, stderr } = run(dir);
+    expect(stdout).toContain("::warning::");
+    expect(stdout).toContain("Vivswan/flaky");
+    expect(stdout).toContain("unverified this run");
+    expect(stderr).not.toContain("::error::");
+    expect(exitCode).toBe(0);
+  });
+
+  test("an answers fetch failure alone warns and exits 0", () => {
+    const dir = caseDir("fuzz-transient", {
+      "fuzzflaky.yml": central(["dependencies", "github_actions"]),
+    });
+    const { exitCode, stdout, stderr } = run(dir);
+    expect(stdout).toContain("Vivswan/fuzzflaky/.copier-answers.yml");
+    expect(stdout).toContain("unverified this run");
+    expect(stderr).not.toContain("::error::");
+    expect(exitCode).toBe(0);
+  });
+
+  test("a flake on one file does not mask a violation on another", () => {
+    const dir = caseDir("mixed", {
+      "flaky.yml": central(["dependencies", "github_actions"]),
+      "violating.yml": central(["dependencies"]),
+    });
+    const { exitCode, stdout, stderr } = run(dir);
+    expect(stdout).toContain("Vivswan/flaky");
+    expect(stderr).toContain("::error::");
+    expect(stderr).toContain("violating.yml");
+    expect(stderr).toContain('"github_actions"');
+    expect(stderr).not.toContain("flaky");
+    expect(exitCode).toBe(1);
+  });
+
+  test("a 404 keeps its meaning: not adopted, warned, exit 0", () => {
+    const dir = caseDir("unadopted", {
+      "unadopted.yml": central(["dependencies", "github_actions"]),
+    });
+    const { exitCode, stdout } = run(dir);
+    expect(stdout).toContain("::warning::");
+    expect(stdout).toContain("no .repo-platform.yml");
+    expect(exitCode).toBe(0);
   });
 });
