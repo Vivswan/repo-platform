@@ -66,5 +66,7 @@ To stop receiving sync PRs without detaching, either add the repo to
 `repos.yml`'s `exclude:` list (fleet side) or delete `.repo-platform.yml`
 from the repo (the sync skips repos without it, with a notice). Undo
 either one to resume updates. Both pauses also stop the central nightly
-settings heal for a repo using the in-repo settings home; the settings
-run reports this each night.
+settings heal for a repo using the in-repo settings home, but only the
+exclusion is reported loudly: the settings run warns nightly, with a
+step-summary bullet. The deleted-file pause only leaves a notice in the
+run log, so check there if you forget which repos are paused.
