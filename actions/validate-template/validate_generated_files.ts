@@ -5,7 +5,8 @@
 //   1. .copier-answers.yml and .repo-platform.yml exist, and the latter
 //      records a valid top-level `modules` list
 //   2. .gitignore managed/local marker sections appear exactly once
-//   3. Every .yml/.yaml file parses
+//   3. Every .yml/.yaml file parses; duplicate mapping keys are errors
+//      under .github/ and in the registration files, advisories elsewhere
 //   4. No unresolved merge-conflict markers in text files
 //   5. .github/workflows/ci.yml exists (the template always generates and
 //      manages it), an `all-green` job exists with `if: always()`, a step
@@ -13,7 +14,8 @@
 //      job, and a `typography` job exists
 //
 // Advisories (printed, never fail): missing actionlint / yamllint /
-// commit-names jobs in ci.yml.
+// commit-names jobs in ci.yml; duplicate mapping keys in YAML outside
+// .github/ and the registration files.
 //
 // Usage: bun actions/validate-template/validate_generated_files.ts [--self] [target-dir]
 //
@@ -112,6 +114,32 @@ function safeLoadYaml(text: string): unknown {
   return parseYaml(text, { uniqueKeys: true });
 }
 
+/** Re-read for the structural checks below, which need the file's shape
+ *  rather than its verdict. The walk already reports any duplicate key, so
+ *  tolerating duplicates here avoids a second, wrong diagnostic (a ci.yml
+ *  with one duplicate line is not an empty file needing a template sync). */
+function shapeOfYaml(text: string): unknown {
+  return parseYaml(text, { uniqueKeys: false });
+}
+
+/** Whether a duplicate mapping key in this path is an error rather than an
+ *  advisory. The must-stay-strict file is .github/settings.yml: a
+ *  three-way merge can duplicate the unconditional identity keys
+ *  (homepage/topics/private) and the later value would silently win at
+ *  apply time. The rule generalizes to all of .github/ plus the two root
+ *  registration files - not because the template owns every such file (the
+ *  _skip_if_exists ones are generated once then repo-owned), but because
+ *  GitHub's own parsers reject duplicate keys there, so flagging one
+ *  surfaces a break that would bite anyway. Elsewhere in the tree a
+ *  duplicate can be deliberate (a parser fixture, a vendored config), and
+ *  during a sync the walked tree is the whole target repo - failing on
+ *  those would make every sync PR permanently red with no exemption. */
+function isStrictYaml(rel: string): boolean {
+  return (
+    rel === ".copier-answers.yml" || rel === ".repo-platform.yml" || rel.startsWith(".github/")
+  );
+}
+
 function isRegularFile(path: string): boolean {
   try {
     const stat = lstatSync(path);
@@ -175,7 +203,7 @@ function main(): number {
     if (isRegularFile(registration)) {
       let data: unknown = {};
       try {
-        data = safeLoadYaml(readFileSync(registration, "utf-8")) ?? {};
+        data = shapeOfYaml(readFileSync(registration, "utf-8")) ?? {};
       } catch {
         data = {};
       }
@@ -234,18 +262,41 @@ function main(): number {
     const path = join(root, rel);
     const suffix = extname(rel);
     if (suffix === ".yml" || suffix === ".yaml") {
+      const text = readFileSync(path, "utf-8");
       try {
-        safeLoadYaml(readFileSync(path, "utf-8"));
+        safeLoadYaml(text);
       } catch (exc) {
         const message = exc instanceof Error ? exc.message.split("\n")[0] : String(exc);
-        // Duplicate keys are syntactically valid YAML, so "fix the syntax"
-        // would mislead; name the real problem.
-        errors.push(
-          (exc as { code?: string }).code === "DUPLICATE_KEY"
-            ? `${rel}: duplicate mapping key (${message}) - the later value silently ` +
-                "wins at consumption time; remove or rename the duplicate"
-            : `${rel}: does not parse as YAML (${message}); fix the syntax at the position shown`,
-        );
+        const syntaxError = (m: string) =>
+          `${rel}: does not parse as YAML (${m}); fix the syntax at the position shown`;
+        if ((exc as { code?: string }).code !== "DUPLICATE_KEY") {
+          errors.push(syntaxError(message));
+        } else {
+          // Duplicate keys are syntactically valid YAML, so "fix the syntax"
+          // would mislead; name the real problem.
+          const report =
+            `${rel}: duplicate mapping key (${message}) - the later value silently ` +
+            "wins at consumption time; remove or rename the duplicate";
+          if (isStrictYaml(rel)) {
+            errors.push(report);
+          } else {
+            // Duplicates here are only an advisory, but re-parse tolerantly
+            // so a further real syntax error (masked above because parse
+            // throws its first error) still fails.
+            try {
+              shapeOfYaml(text);
+              advisories.push(report);
+            } catch (tolerantExc) {
+              errors.push(
+                syntaxError(
+                  tolerantExc instanceof Error
+                    ? tolerantExc.message.split("\n")[0]
+                    : String(tolerantExc),
+                ),
+              );
+            }
+          }
+        }
       }
     }
     if (TEXT_SUFFIXES.has(suffix) || suffix === "") {
@@ -277,7 +328,7 @@ function main(): number {
   } else {
     let ci: unknown = {};
     try {
-      ci = safeLoadYaml(readFileSync(ciPath, "utf-8")) ?? {};
+      ci = shapeOfYaml(readFileSync(ciPath, "utf-8")) ?? {};
     } catch {
       ci = {};
     }
