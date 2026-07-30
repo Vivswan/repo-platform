@@ -71,8 +71,8 @@ if [ "$channel" = "staging" ]; then
   # the staging ruleset allows fast-forward pushes from any writer - so
   # prove the tip is really the builder's output of that source before it
   # is templated fleet-wide.
-  STAGING_SHA="$target_sha" SOURCE_SHA="$validate_ref" \
-    bash "$(dirname "$0")/verify_staging_provenance.sh"
+  CHANNEL=staging TIP_SHA="$target_sha" SOURCE_SHA="$validate_ref" \
+    bash "$(dirname "$0")/verify_build_provenance.sh"
   # copier consumes target_ref, and the branch name would be re-resolved
   # from origin AFTER this verification - a push in that window would ship
   # unverified content. Pin copier to the verified commit itself.
@@ -86,15 +86,38 @@ else
     echo "::error::cannot sync ${TARGET} on the latest channel: ${GITHUB_REPOSITORY} has no release yet. Cut a release (or pass a version input), then re-run."
     exit 1
   fi
-  target_ref="templates/${ver}"
-  if ! target_sha="$(git rev-parse --verify --quiet "refs/tags/${target_ref}")"; then
-    echo "::error::cannot sync to ${target_ref}: the tag does not exist because the ${ver} build has not run yet (or failed). Dispatch the Build Branches workflow, then re-run."
+  tag_ref="templates/${ver}"
+  if ! target_sha="$(git rev-parse --verify --quiet "refs/tags/${tag_ref}")"; then
+    echo "::error::cannot sync to ${tag_ref}: the tag does not exist because the ${ver} build has not run yet (or failed). Dispatch the Build Branches workflow, then re-run."
     exit 1
   fi
   # The build tag holds no actions/; validation code lives on main
   # history at the release tag of the same version.
   validate_ref="$ver"
-  display="$target_ref"
+  # The build-tags ruleset freezes templates/* tags once they exist, but
+  # tag CREATION is open to any writer - a pre-created tag would resolve
+  # here looking exactly like the builder's. Same proof as staging: the
+  # tagged commit must carry the builder's stamp (here, exactly the
+  # release tag's commit) and its tree must rebuild from it. The release
+  # tag is fetched first (best-effort - the verifier's own check owns the
+  # missing-tag error); the verifier compares the stamp against it.
+  git fetch --quiet origin "+refs/tags/${ver}:refs/tags/${ver}" 2>/dev/null || true
+  source_sha="$(git log -1 --format=%B "$target_sha" | commit_stamp_parse)"
+  if [ -z "$source_sha" ]; then
+    echo "::error::${tag_ref} points at ${target_sha:0:12}, which carries no source stamp, so the Build Branches workflow did not build it and the sync will not ship it. Have an admin delete the tag (temporarily disable the build-tags ruleset - it blocks tag deletion), dispatch Build Branches for ${ver}, then re-run."
+    exit 1
+  fi
+  if ! git rev-parse --verify --quiet "${source_sha}^{commit}" >/dev/null; then
+    echo "::error::${tag_ref}'s stamped source commit ${source_sha} is unreachable, so the tag cannot be verified as the builder's output. Have an admin delete the tag (temporarily disable the build-tags ruleset - it blocks tag deletion), dispatch Build Branches for ${ver}, then re-run."
+    exit 1
+  fi
+  CHANNEL=latest TIP_SHA="$target_sha" SOURCE_SHA="$source_sha" VERSION="$ver" \
+    bash "$(dirname "$0")/verify_build_provenance.sh"
+  # Pin copier to the verified commit itself, as on staging. The ruleset
+  # stops the tag from moving, but the pin costs nothing and keeps both
+  # channels shipping exactly what was verified.
+  target_ref="$target_sha"
+  display="$tag_ref"
 fi
 
 # Recovery exists precisely because the recorded base may be unusable:

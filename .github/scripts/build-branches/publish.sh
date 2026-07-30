@@ -19,9 +19,11 @@ git config user.email "repo-platform-build@users.noreply.github.com"
 # empty stamp commit from here is the ONLY way to heal a tip whose stamp
 # is broken - without this, "dispatch Build Branches" could never clear a
 # rejected tip. Staging gets the full battery its sync verification
-# (sync/verify_staging_provenance.sh) enforces, including one rebuild of
+# (sync/verify_build_provenance.sh) enforces, including one rebuild of
 # the stamped source when it lags the current one; latest is consumed via
-# immutable templates/vX.Y.Z tags and only heals unparseable stamps.
+# immutable templates/vX.Y.Z tags (each verified the same way at sync
+# time against the commit it points at) and only heals unparseable
+# stamps here: a version build always tags a fresh, fully stamped commit.
 restamp_reason() { # channel current-source-sha
   tip_msg="$(git -C "/tmp/pub-$1" log -1 --format=%B)"
   prev_src="$(commit_stamp_parse <<<"$tip_msg")"
