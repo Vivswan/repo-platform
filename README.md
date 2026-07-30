@@ -105,10 +105,14 @@ hard requirements:
 A missing secret is a misconfiguration of this repo: sync and settings
 runs fail loudly with an error that carries the setup link. Dropping the
 Workflows scope is the one supported narrowing; dropping anything else
-turns runs red. Managed repos need no secret (the one exception: a
-settings-sync module repo that wants to self-apply its settings on push
-carries its own PAT; without one those runs skip with a warning and the
-central apply covers the repo).
+turns runs red. Managed repos need no secret, with two optional
+exceptions: a settings-sync module repo that wants to self-apply its
+settings on push carries its own PAT (without one those runs skip with a
+warning and the central apply covers the repo), and a bun repo should
+carry a PAT as a *Dependabot* secret named `REPO_PLATFORM_TOKEN` so the
+Dependabot lockfile fixer's push re-runs CI (a fine-grained token scoped
+to that one repo's Contents:RW is enough; without any, the fix lands but
+each fixed PR needs a close/reopen for its checks to appear).
 
 ## Layout
 
@@ -133,7 +137,7 @@ central apply covers the repo).
 
 | Category | Files |
 |---|---|
-| Fully managed (template wins) | `.copier-answers.yml`, `ci.yml`, `release-please.yml`, workflow callers, `dependabot.yml`, `SECURITY.md`, `.yamllint`, `.typography-allow`, agent-file symlinks |
+| Fully managed (template wins) | `.copier-answers.yml`, `ci.yml`, `release-please.yml`, `dependabot-bun-lockfile.yml` (bun module), workflow callers, `dependabot.yml`, `SECURITY.md`, `.yamllint`, `.typography-allow`, agent-file symlinks |
 | Managed shape, repo-owned selection | `.repo-platform.yml`: its presence marks the repo as participating in push sync, and its `modules:` list is the repo's own module selection (edit it; the next sync applies the change) |
 | Managed + local sections | `.gitignore` (LOCAL section is yours) |
 | Mergeable (three-way) | `.github/settings.yml` (seeded by the settings-sync module; never deleted by sync), `.github/CODEOWNERS`, `AGENTS.md`, `.editorconfig`, `.gitattributes` |
