@@ -11,10 +11,11 @@
 
 repository:
   description: {{ description | tojson }}
-{% if homepage %}  homepage: {{ homepage | tojson }}
-{% endif %}{% if topics %}  topics: {{ topics | tojson }}
-{% endif %}  # Always declared, even for a public repo, so the settings apply
-  # manages visibility and reverts out-of-band flips.
+  # homepage, topics, and private are always declared, even when empty or
+  # public: the apply manages only declared keys, so this keeps it healing
+  # out-of-band edits (an empty value declares-and-clears).
+  homepage: {{ homepage | tojson }}
+  topics: {{ topics | tojson }}
   private: {{ private | tojson }}
   has_issues: true
   has_wiki: false
