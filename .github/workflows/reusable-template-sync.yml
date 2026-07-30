@@ -55,9 +55,12 @@ on:
         required: true
 
 # The workflow's own token only reads this repo; every target-repo write
-# (checkout, push, PR) uses the REPO_PLATFORM_TOKEN PAT.
+# (checkout, push, PR) uses the REPO_PLATFORM_TOKEN PAT. Actions read is
+# for the staging provenance check: resolve_refs.sh verifies the staging
+# tip's stamped build run before shipping the tip.
 permissions:
   contents: read
+  actions: read
 
 env:
   # Single knob for pinning copier (pipx spec, e.g. "copier==9.10.1").
@@ -327,6 +330,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
           TARGET_REF: ${{ steps.versions.outputs.target_ref }}
+          CHANNEL: ${{ steps.versions.outputs.channel }}
           OLD_COMMIT: ${{ steps.versions.outputs.old_commit }}
           DISPLAY: ${{ steps.versions.outputs.display }}
           BRANCH: ${{ steps.versions.outputs.branch }}

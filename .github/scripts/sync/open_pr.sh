@@ -4,13 +4,15 @@
 # earlier disarm_pr.sh step). Invoked by reusable-template-sync.yml's
 # "Create or refresh pull request" step.
 #
-# Env: TARGET, TARGET_REF, OLD_COMMIT, DISPLAY, BRANCH, BASE_BRANCH,
+# Env: TARGET, TARGET_REF, CHANNEL, OLD_COMMIT, DISPLAY, BRANCH, BASE_BRANCH,
 # VALIDATION, RESOLVED, RECOVER, DRIFT_FILE, SUMMARY_FILE,
 # RETIRED_MODULES_FILE, REMOVED_PATHS_FILE, WITHHELD_FILE, GH_TOKEN,
 # GITHUB_REPOSITORY, GITHUB_OUTPUT, RUNNER_TEMP.
 set -euo pipefail
 
-if [ "$TARGET_REF" = "staging" ]; then
+# On the staging channel TARGET_REF is the verified tip commit (pinned by
+# resolve_refs.sh), so the channel drives the source line.
+if [ "$CHANNEL" = "staging" ]; then
   source_line="[\`${GITHUB_REPOSITORY}\`](https://github.com/${GITHUB_REPOSITORY}/tree/staging) (staging channel)"
 else
   ver="${TARGET_REF#templates/}"

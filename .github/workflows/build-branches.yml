@@ -28,8 +28,11 @@ on:
         options: [both, staging, latest]
         default: both
 
+# Contents write publishes the build branches and tags; actions read lets
+# publish.sh's re-stamp check read the run stamped on the current tip.
 permissions:
   contents: write
+  actions: read
 
 concurrency:
   group: build-branches
@@ -58,6 +61,7 @@ jobs:
       - name: Build and publish
         if: steps.plan.outputs.staging == 'true' || steps.plan.outputs.latest == 'true'
         env:
+          GH_TOKEN: ${{ github.token }}
           BUILD_STAGING: ${{ steps.plan.outputs.staging }}
           BUILD_LATEST: ${{ steps.plan.outputs.latest }}
           VERSION: ${{ steps.plan.outputs.version }}
