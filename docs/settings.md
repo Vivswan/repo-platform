@@ -71,7 +71,13 @@ Stateless, declared-keys-only, upsert-by-name:
 - Rulesets: upserted by name (branch and tag targets); never deleted
   when undeclared, since removing protection stays a human action.
 - Repository fields, topics, and security toggles are applied only when
-  declared; omitting a key leaves the live value alone.
+  declared; omitting a key leaves the live value alone. The settings-sync
+  template therefore renders `homepage:` and `topics:` unconditionally,
+  like `private:` below: an empty answer declares-and-clears (empty
+  topics normalize to no topics) instead of leaving the field unmanaged.
+  A homepage or topics set only in the GitHub UI is cleared by the next
+  heal once a sync lands - copy values you want to keep into the settings
+  file (or the copier answer) before merging the sync PR.
 - Visibility is managed like any other declared field: the settings-sync
   template renders `private:` unconditionally (false included), so for
   repos whose settings file declares the key, the nightly heal reverts
