@@ -153,6 +153,13 @@ jobs:
           - name: bun-typical
             modules: "[agents, bun, release-please, issue-templates, pr-title, auto-assign, settings-sync]"
             private: "false"
+          # The only public row where uv is the sole toolchain: CodeQL must
+          # gate ci.yml with the python leg and WITHOUT the javascript leg,
+          # and AGENTS.md's Toolchain section must render the uv bullet
+          # alone (every other agents+uv row pairs uv with bun).
+          - name: uv-typical
+            modules: "[agents, uv]"
+            private: "false"
           # rust + fuzzer must render cargo dependabot + the Rust gitignore and
           # nothing toolchain-gated (no CodeQL block, no auto-format starter):
           # rust is deliberately outside has_toolchain, and the fuzzer module
@@ -165,13 +172,19 @@ jobs:
             private: "false"
           - name: uv-pages-private
             # settings-sync rides along so the private: true render of
-            # settings.yml is exercised (every other settings-sync row is
-            # public).
+            # settings.yml is exercised for uv (bun-private covers bun).
             modules: "[uv, pages, auto-assign, settings-sync]"
             private: "true"
             expect_in_pages: |
               uv sync
               uv run mkdocs build --site-dir dist
+          # The only row where bun renders private: the bun fragments'
+          # enable_codeql=false branches must emit no CodeQL wiring in
+          # ci.yml, no SECURITY.md, and settings.yml must still declare
+          # `private: true` (uv-pages-private covers the uv side).
+          - name: bun-private
+            modules: "[bun, settings-sync]"
+            private: "true"
           - name: pages-bare
             modules: "[pages, auto-assign]"
             private: "false"
