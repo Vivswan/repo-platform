@@ -107,9 +107,9 @@ function hasConflictMarker(content: string): boolean {
 }
 
 function safeLoadYaml(text: string): unknown {
-  // uniqueKeys: false mirrors the previous parser's tolerance of duplicate
-  // mapping keys; strictness here would change what counts as "parses".
-  return parseYaml(text, { uniqueKeys: false });
+  // Duplicate mapping keys are a real defect (the last value silently wins
+  // at consumption time), so a file carrying them does not count as parsing.
+  return parseYaml(text, { uniqueKeys: true });
 }
 
 function isRegularFile(path: string): boolean {
@@ -238,8 +238,13 @@ function main(): number {
         safeLoadYaml(readFileSync(path, "utf-8"));
       } catch (exc) {
         const message = exc instanceof Error ? exc.message.split("\n")[0] : String(exc);
+        // Duplicate keys are syntactically valid YAML, so "fix the syntax"
+        // would mislead; name the real problem.
         errors.push(
-          `${rel}: does not parse as YAML (${message}); fix the syntax at the position shown`,
+          (exc as { code?: string }).code === "DUPLICATE_KEY"
+            ? `${rel}: duplicate mapping key (${message}) - the later value silently ` +
+                "wins at consumption time; remove or rename the duplicate"
+            : `${rel}: does not parse as YAML (${message}); fix the syntax at the position shown`,
         );
       }
     }
