@@ -6,6 +6,7 @@
 # Inputs (env): MODULES, PRIVATE (the matrix row that produced the tree),
 # EXPECT_IN_PAGES (optional per-row patterns for pages.yml), EXTRA_DATA
 # (optional extra -d args the row passed to copier).
+# shellcheck disable=SC2016  # assertion strings carry literal backticks
 set -euo pipefail
 : "${MODULES:?}" "${PRIVATE:?}"
 EXPECT_IN_PAGES="${EXPECT_IN_PAGES:-}"
@@ -152,8 +153,12 @@ if has agents; then
   test "$(readlink /tmp/smoke/CLAUDE.md)" = "AGENTS.md"
   test -L /tmp/smoke/.github/copilot-instructions.md
   test -L /tmp/smoke/.github/agents.md
-  # AGENTS.md toolchain section only when a toolchain module is selected.
+  # AGENTS.md toolchain section only when a toolchain module is selected,
+  # with exactly the selected toolchains' bullets inside it.
   if has bun || has uv || has rust; then present "## Toolchain" /tmp/smoke/AGENTS.md; else absent "## Toolchain" /tmp/smoke/AGENTS.md; fi
+  if has bun; then present_line '- Runtime and package manager: bun (`bun install`, `bun test`, `bun run <script>`)' /tmp/smoke/AGENTS.md; else absent "Runtime and package manager: bun" /tmp/smoke/AGENTS.md; fi
+  if has uv; then present_line '- Python managed with uv (`uv sync`, `uv run <command>`)' /tmp/smoke/AGENTS.md; else absent "Python managed with uv" /tmp/smoke/AGENTS.md; fi
+  if has rust; then present_line '- Rust managed with cargo (`cargo build`, `cargo test`, `cargo clippy`)' /tmp/smoke/AGENTS.md; else absent "Rust managed with cargo" /tmp/smoke/AGENTS.md; fi
 else
   # `test ! -e` follows symlinks (a dangling one passes), so also
   # assert not-a-symlink for the three link paths.
