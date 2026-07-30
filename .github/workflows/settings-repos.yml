@@ -70,6 +70,16 @@ jobs:
           OWNER: ${{ github.repository_owner }}
         run: bash .github/scripts/fleet/select_settings_repos.sh
 
+      # Central files are hand-maintained, but the labels they must declare
+      # follow each target repo's module selection (its .repo-platform.yml)
+      # and fuzzer label (its .copier-answers.yml). A stale roster fails
+      # here, loudly, instead of starting the nightly delete/recreate loop.
+      - name: Validate central settings against target modules
+        env:
+          GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
+          OWNER: ${{ github.repository_owner }}
+        run: bun .github/scripts/fleet/validate_central_settings.ts --owner "$OWNER"
+
       - name: Apply repository settings
         # Pinned to an immutable commit; bump to @v1 once repo-settings-as-code
         # cuts its first release. Bump together with reusable-apply-settings.yml.
