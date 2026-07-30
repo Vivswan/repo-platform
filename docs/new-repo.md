@@ -143,7 +143,12 @@ the list-valued sections (arrays do not merge with defaults):
 # settings/repos/my-project.yml
 repository:
   description: One-line description (match the copier answer)
+  # Declare all four identity keys, empty included: the apply manages
+  # only declared keys, so an omitted key's drift is never healed. The
+  # settings preflight fails a central file that drops one of them.
+  homepage: ""
   topics: comma, separated, topics
+  private: false
 
 labels:
   - name: bug
