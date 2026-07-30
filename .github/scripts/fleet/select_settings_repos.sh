@@ -7,8 +7,24 @@
 # wins and drops the repo from the remote list. Invoked by
 # settings-repos.yml.
 #
-# Env: PAT, GH_TOKEN, OWNER, RUNNER_TEMP, GITHUB_OUTPUT.
+# Env: PAT, GH_TOKEN, OWNER, RUNNER_TEMP, GITHUB_OUTPUT;
+# GITHUB_STEP_SUMMARY (optional) receives a copy of every warning.
 set -euo pipefail
+
+# A drop that leaves a repo without settings management is announced: a
+# workflow warning, plus a step-summary bullet (under a heading written
+# once) when running in Actions. Routine skips stay at notice level and
+# out of the summary.
+warn() {
+  echo "::warning::$1"
+  if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+    if [ -z "${summary_headed:-}" ]; then
+      echo "### Settings heal warnings" >>"$GITHUB_STEP_SUMMARY"
+      summary_headed=1
+    fi
+    echo "- $1" >>"$GITHUB_STEP_SUMMARY"
+  fi
+}
 
 # -F alone would flip gh api to POST; this is a read.
 gh api user/repos --method GET --paginate --slurp -F per_page=100 |
@@ -50,7 +66,10 @@ while IFS=$'\t' read -r repo name; do
   if ! gh api "repos/$repo/contents/.github/settings.yml" --jq .sha \
     >/dev/null 2>"$RUNNER_TEMP/probe.err"; then
     if grep -q "HTTP 404" "$RUNNER_TEMP/probe.err"; then
-      continue # no in-repo settings; central covers it or nothing does
+      # The central file was already ruled out above, so at this point
+      # nothing manages the repo's settings.
+      warn "$repo is enrolled and adopted but has no settings home: no settings/repos/$name.yml here and no .github/settings.yml in the repo. Its settings are unmanaged - nothing installs or heals the main ruleset (so all-green may not be a required check) and labels are never reconciled. Pick a home per docs/settings.md."
+      continue
     fi
     echo "::error::settings.yml check failed for $repo: $(cat "$RUNNER_TEMP/probe.err")"
     exit 1
