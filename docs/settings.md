@@ -82,7 +82,11 @@ Stateless, declared-keys-only, upsert-by-name:
   topics normalize to no topics) instead of leaving the field unmanaged.
   A homepage or topics set only in the GitHub UI is cleared by the next
   heal once a sync lands - copy values you want to keep into the settings
-  file (or the copier answer) before merging the sync PR.
+  file (or the copier answer) before merging the sync PR. The same
+  clearing hits a value that WAS in the settings file when sync's
+  conflict resolution drops it toward the template: the dropped-hunk
+  warning in the PR body is the tell. Restore the hunk before merging,
+  or the key is declared empty and the next heal clears the live value.
 - Visibility is managed like any other declared field: the settings-sync
   template renders `private:` unconditionally (false included), so for
   repos whose settings file declares the key, the nightly heal reverts
@@ -92,8 +96,13 @@ Stateless, declared-keys-only, upsert-by-name:
   the repo. Flipping a bun or uv repo to private must also delete the
   ruleset's `code_scanning` rule in the same commit: GitHub rejects that
   rule on a private personal repo, so every apply fails until it is
-  gone. The next template sync reads the live visibility and re-renders
-  everything that follows it (SECURITY.md, the CodeQL jobs, that rule).
+  gone. The heal of an out-of-band private flip dodges that rejection
+  only because the pinned repo-settings-as-code applies the repository
+  field block before rulesets (SECTION_KEYS order in its schema.ts):
+  the repo is public again before the code_scanning rule is upserted.
+  Check a pin bump keeps that order. The next template sync reads the
+  live visibility and re-renders everything that follows it
+  (SECURITY.md, the CodeQL jobs, that rule).
   A flip the heal has not reverted by the time that sync runs is not
   ratified silently: the sync compares the live visibility and
   description against the repo's recorded copier answers, and on a
