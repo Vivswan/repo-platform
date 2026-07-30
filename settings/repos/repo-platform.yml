@@ -8,6 +8,9 @@
 repository:
   description: Copier template + reusable workflows managing standards across Vivswan's repositories
   topics: copier, template, github-actions, reusable-workflows, standards
+  # Declared so the apply manages visibility; without it an out-of-band
+  # flip to private would never be healed.
+  private: false
 
 labels:
   - name: dependencies
