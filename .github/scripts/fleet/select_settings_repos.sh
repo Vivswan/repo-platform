@@ -81,6 +81,27 @@ while IFS=$'\t' read -r repo name; do
   repos="$repos$repo"$'\n'
 done < <(jq -r '.[] | [.repo, .name] | @tsv' "$RUNNER_TEMP/selected.json")
 
+# repos.yml's exclude: pauses the sync AND this heal - the registry drops
+# excluded repos before the loop above ever sees them. When such a repo
+# still carries an in-repo settings.yml (and no central file has taken
+# over), say that the heal stopped instead of going quiet. Materialized
+# first so a registry failure fails the run instead of silently
+# skipping every exclusion warning.
+bun .github/scripts/fleet/repos_registry.ts excluded >"$RUNNER_TEMP/excluded.json"
+while IFS= read -r repo; do
+  name="${repo##*/}"
+  [ -f "settings/repos/$name.yml" ] && continue
+  if gh api "repos/$repo/contents/.github/settings.yml" --silent \
+    2>"$RUNNER_TEMP/probe.err"; then
+    warn "$repo is excluded in repos.yml but still carries .github/settings.yml - the exclusion also pauses the central nightly heal for that file, so its settings can drift. If the pause is deliberate, this is the reminder that healing is off; otherwise remove the exclusion, or move the settings to settings/repos/$name.yml here (central files are applied regardless of exclude)."
+  elif ! grep -q "HTTP 404" "$RUNNER_TEMP/probe.err"; then
+    # A 404 also covers repos the token cannot read; those skip
+    # silently. Anything else: this check is purely informational, so
+    # report it without killing the apply for the selected repos.
+    echo "::warning::settings.yml check for excluded repo $repo failed: $(cat "$RUNNER_TEMP/probe.err") - cannot tell whether its pause left an in-repo settings file behind; continuing."
+  fi
+done < <(jq -r '.[]' "$RUNNER_TEMP/excluded.json")
+
 {
   echo "repos<<REPOS_EOF"
   printf '%s' "$repos"
