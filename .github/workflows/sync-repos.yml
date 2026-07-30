@@ -180,6 +180,11 @@ jobs:
   sync:
     needs: plan
     if: needs.plan.outputs.repos != '[]'
+    # Actions read flows to the called workflow's token: its staging
+    # provenance check reads the build run stamped on the staging tip.
+    permissions:
+      contents: read
+      actions: read
     strategy:
       fail-fast: false
       matrix:

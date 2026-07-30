@@ -22,6 +22,9 @@ case "$RECOVER" in
 esac
 
 # Build refs live only on origin; the default checkout is main-only.
+# main is refreshed too: a build published after the checkout can stamp a
+# main commit the checkout has not seen yet.
+git fetch --quiet origin "+refs/heads/main:refs/remotes/origin/main"
 git fetch --quiet origin "+refs/tags/templates/*:refs/tags/templates/*"
 git fetch --quiet origin "+refs/heads/staging:refs/remotes/origin/staging" || true
 git fetch --quiet origin "+refs/heads/latest:refs/remotes/origin/latest" || true
@@ -48,20 +51,32 @@ if [ "$channel" = "staging" ]; then
     echo "::error::cannot resolve the staging target: ${GITHUB_REPOSITORY} has no staging branch, so there is nothing to sync from. Dispatch the Build Branches workflow, then re-run."
     exit 1
   fi
-  target_ref="staging"
   # Staging validates with the SOURCE commit the staging build was
   # assembled from (stamped in its commit message), so validator rules
-  # match the rendered tree even when main moved since. A main history
-  # rewrite can orphan that commit; the builder re-stamps staging on its
-  # next run, so refuse to guess here. GITHUB_SHA is not main on release
-  # events, hence the explicit resolve for the no-stamp fallback.
-  main_sha="$(git rev-parse refs/remotes/origin/main)"
+  # match the rendered tree even when main moved since. The stamp is
+  # required: only the builder writes it, and an unstamped tip is a
+  # hand-pushed one. A main history rewrite can orphan the stamped
+  # commit; the builder re-stamps staging on its next run, so refuse to
+  # guess here.
   validate_ref="$(git log -1 --format=%B "$target_sha" | commit_stamp_parse)"
-  if [ -n "$validate_ref" ] && ! git rev-parse --verify --quiet "${validate_ref}^{commit}" >/dev/null; then
+  if [ -z "$validate_ref" ]; then
+    echo "::error::staging's tip ${target_sha:0:12} carries no source stamp, so the Build Branches workflow did not push it and the sync will not ship it. Dispatch Build Branches to rebuild staging from main, then re-run."
+    exit 1
+  fi
+  if ! git rev-parse --verify --quiet "${validate_ref}^{commit}" >/dev/null; then
     echo "::error::staging's stamped source commit ${validate_ref} is unreachable (main history rewrite). Dispatch the Build Branches workflow - it re-stamps staging - then re-run."
     exit 1
   fi
-  validate_ref="${validate_ref:-$main_sha}"
+  # The stamp lines are plain text anyone with push access can write, and
+  # the staging ruleset allows fast-forward pushes from any writer - so
+  # prove the tip is really the builder's output of that source before it
+  # is templated fleet-wide.
+  STAGING_SHA="$target_sha" SOURCE_SHA="$validate_ref" \
+    bash "$(dirname "$0")/verify_staging_provenance.sh"
+  # copier consumes target_ref, and the branch name would be re-resolved
+  # from origin AFTER this verification - a push in that window would ship
+  # unverified content. Pin copier to the verified commit itself.
+  target_ref="$target_sha"
   display="staging@${target_sha:0:12}"
 else
   if [ -n "$REQUESTED" ]; then
