@@ -16,7 +16,7 @@
 //   LOCAL section's existing content is preserved across regenerations.
 //
 // The template and self outputs open their managed block with one section
-// that has no upstream source: Claude Code local state.
+// that has no upstream source: agent local state.
 //
 // By default the script fetches upstream HEAD and records the commit SHA in
 // scripts/gitignore.lock (provenance, and what CI verifies against).
@@ -47,13 +47,16 @@ const LOCAL_BEGIN = "# BEGIN REPOSITORY LOCAL";
 const LOCAL_END = "# END REPOSITORY LOCAL";
 const DEFAULT_LOCAL_BODY = "# Add repository-specific ignore patterns in this section only.\n";
 
-// Not from github/gitignore: Claude Code local state - worktree directories
-// (the documented .claude/worktrees/ location plus the dotted variant) and
+// Not from github/gitignore: agent local state - Claude Code worktree
+// directories (the documented .claude/worktrees/ location plus the dotted
+// variant), Codex worktrees, bare .worktrees/ directories at any depth, and
 // the machine-local settings file.
 const AGENT_SECTION =
-  "## Claude Code local state (repo-platform)\n" +
+  "## Agent local state (repo-platform)\n" +
   ".claude/worktrees/\n" +
   ".claude/.worktrees/\n" +
+  ".codex/worktrees/\n" +
+  ".worktrees/\n" +
   ".claude/settings.local.json\n";
 
 const RAW = "https://raw.githubusercontent.com/github/gitignore";
