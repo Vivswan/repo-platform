@@ -4,9 +4,25 @@
 # channel, refs, and template copier configs" step from the repo-platform
 # checkout root (the target repo is checked out under target/).
 #
-# Env: TARGET, CHANNEL_INPUT, REQUESTED, RECOVER, GH_TOKEN,
+# Env: TARGET, TARGET_DISPLAY (log label; falls back to TARGET),
+# HIDE_DETAILS, CHANNEL_INPUT, REQUESTED, RECOVER, GH_TOKEN,
 # GITHUB_REPOSITORY, GITHUB_OUTPUT, RUNNER_TEMP.
 set -euo pipefail
+
+target_display="${TARGET_DISPLAY:-$TARGET}"
+
+# Values read from the target's files are target-controlled: printable
+# for a public repo, withheld for a hide-details one unless they match
+# the shape of a safe template identifier (a sha or a templates/v tag).
+hide_unless_ref_shaped() {
+  if [ "${HIDE_DETAILS:-false}" != "true" ]; then
+    printf '%s' "$1"
+  elif [[ "$1" =~ ^[0-9a-fA-F]{6,40}$ || "$1" =~ ^templates/v[0-9][0-9.]*$ ]]; then
+    printf '%s' "$1"
+  else
+    printf '%s' "(value hidden: private repository)"
+  fi
+}
 
 # shellcheck source=.github/scripts/shared/commit_stamp.sh
 . "$(dirname "$0")/../shared/commit_stamp.sh"
@@ -33,7 +49,13 @@ channel="$(resolve_channel "$CHANNEL_INPUT" target/.copier-answers.yml)"
 case "$channel" in
   staging | latest) ;;
   *)
-    echo "::error::unknown channel '${channel}' for ${TARGET}: it must be staging or latest. Fix the channel in repos.yml (or the repo's recorded copier answer)."
+    # The bad value came from the target's recorded answer (or repos.yml)
+    # and can be arbitrary text.
+    if [ "${HIDE_DETAILS:-false}" = "true" ]; then
+      echo "::error::unknown channel for ${target_display} (value hidden: private repository): it must be staging or latest. Fix the channel in repos.yml (or the repo's recorded copier answer)."
+    else
+      echo "::error::unknown channel '${channel}' for ${target_display}: it must be staging or latest. Fix the channel in repos.yml (or the repo's recorded copier answer)."
+    fi
     exit 1
     ;;
 esac
@@ -83,7 +105,7 @@ else
     ver="${REQUESTED#templates/}"
     ver="v${ver#v}"
   elif ! ver="$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq .tag_name)"; then
-    echo "::error::cannot sync ${TARGET} on the latest channel: ${GITHUB_REPOSITORY} has no release yet. Cut a release (or pass a version input), then re-run."
+    echo "::error::cannot sync ${target_display} on the latest channel: ${GITHUB_REPOSITORY} has no release yet. Cut a release (or pass a version input), then re-run."
     exit 1
   fi
   tag_ref="templates/${ver}"
@@ -127,10 +149,14 @@ if ! old_sha="$(git rev-parse --verify --quiet "${old_commit}^{commit}")"; then
   if [ "$RECOVER" = "recopy" ]; then
     old_sha=""
   else
-    echo "::error::${TARGET}'s recorded _commit '${old_commit}' does not resolve on ${GITHUB_REPOSITORY}'s build branches, so there is no base to update from. Fix the _commit in its .copier-answers.yml, or dispatch Sync Repos with repo=${TARGET} and recover=recopy to regenerate the repo through a manual-review PR."
+    echo "::error::${target_display}'s recorded _commit '$(hide_unless_ref_shaped "$old_commit")' does not resolve on ${GITHUB_REPOSITORY}'s build branches, so there is no base to update from. Fix the _commit in its .copier-answers.yml, or dispatch Sync Repos with repo=<the repository's real owner/name> (shown here as ${target_display}) and recover=recopy to regenerate the repo through a manual-review PR."
     exit 1
   fi
 fi
+# The recorded _commit hands off through a file, not a step output: an
+# output would surface in the PR step's env-group print, and the value is
+# target-controlled (a hand-edited answer can be any resolvable ref).
+printf '%s' "$old_commit" >"$RUNNER_TEMP/old_commit.txt"
 git show "${target_sha}:copier.yml" >"$RUNNER_TEMP/copier-new.yml"
 if [ -n "$old_sha" ]; then
   git show "${old_sha}:copier.yml" >"$RUNNER_TEMP/copier-old.yml"
@@ -138,11 +164,10 @@ fi
 
 {
   echo "channel=${channel}"
-  echo "old_commit=${old_commit}"
   echo "old_sha=${old_sha}"
   echo "target_ref=${target_ref}"
   echo "validate_ref=${validate_ref}"
   echo "branch=automation/repo-platform-${channel}"
   echo "display=${display}"
 } >>"$GITHUB_OUTPUT"
-echo "Updating ${TARGET} (${channel}) from ${old_commit} to ${display}"
+echo "Updating ${target_display} (${channel}) from $(hide_unless_ref_shaped "$old_commit") to ${display}"

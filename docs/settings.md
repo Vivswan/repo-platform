@@ -24,7 +24,11 @@ branch. Repos heal independently: a failed apply is that repo's own red
 `apply (<repo>)` job and never blocks the others, and a repo whose
 selection probes keep failing (after retries) is skipped for the run
 with a warning and picked up again the next night. When both homes exist
-for the same repository, the central file wins.
+for the same repository, the central file wins. A private in-repo target
+shows up as a name hint (`apply (h**-s**r)`) rather than its slug, and
+its details stay out of the public log - see
+[docs/private-repos.md](private-repos.md); central targets are named by
+their committed files, so only their details are hidden.
 
 Two guarantees for the in-repo home:
 

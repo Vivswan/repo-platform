@@ -29,9 +29,27 @@ on:
   workflow_call:
     inputs:
       target_repo:
-        description: owner/name of the managed repo to sync
+        description: >-
+          owner/name of the managed repo to sync - or its redaction hint
+          when target_redact_name is true (the resolve step recovers the
+          real repository from target_verify; docs/private-repos.md)
         required: true
         type: string
+      target_redact_name:
+        description: target_repo is a hint, not a slug
+        required: false
+        type: boolean
+        default: false
+      target_hide_details:
+        description: hide target-derived values from this public log
+        required: false
+        type: boolean
+        default: false
+      target_verify:
+        description: HMAC resolution tag for a redacted target_repo
+        required: false
+        type: string
+        default: ""
       version:
         description: Release to sync to (latest channel only; empty = newest release)
         required: false
@@ -70,7 +88,7 @@ jobs:
   sync:
     runs-on: ubuntu-latest
     env:
-      TARGET: ${{ inputs.target_repo }}
+      HIDE_DETAILS: ${{ inputs.target_hide_details }}
     steps:
       - name: Require the fleet token
         env:
@@ -89,32 +107,40 @@ jobs:
           # for the update base and the cleanup's old render.
           fetch-depth: 0
 
+      # Sets TARGET (the real slug) and TARGET_DISPLAY for every later
+      # step. For a redacted target it re-discovers the fleet, matches the
+      # HMAC tag, and registers the slug with the runner's masker FIRST -
+      # so later env-group prints, the target checkout's own log, and API
+      # error bodies all render it as ***.
+      - name: Resolve the target repository
+        env:
+          TARGET_INPUT: ${{ inputs.target_repo }}
+          REDACT_NAME: ${{ inputs.target_redact_name }}
+          VERIFY: ${{ inputs.target_verify }}
+          GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
+          PAT: ${{ secrets.REPO_PLATFORM_TOKEN }}
+        run: bash .github/scripts/fleet/resolve_private_repo.sh
+
       - uses: oven-sh/setup-bun@v2
 
       - name: Install script dependencies
         run: bun install --frozen-lockfile --silent
 
+      # The description lands in a RUNNER_TEMP file, not a step output:
+      # step outputs ride into later steps' env-group prints, and a
+      # hidden target's description must not. Masks for the description
+      # and a non-default branch name register before either value is
+      # written anywhere.
       - name: Read live target repo data
         id: target
         env:
           GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
-        run: |
-          if ! info="$(gh api "repos/${TARGET}")"; then
-            echo "::error::cannot read ${TARGET}: the REPO_PLATFORM_TOKEN cannot access it. Grant the PAT access to ${TARGET} (repository access list) with Contents and Pull requests read/write, then re-run."
-            exit 1
-          fi
-          {
-            echo "default_branch=$(jq -r .default_branch <<<"$info")"
-            echo "private=$(jq -r .private <<<"$info")"
-            echo "description<<DESCRIPTION_EOF"
-            jq -r '.description // ""' <<<"$info"
-            echo "DESCRIPTION_EOF"
-          } >> "$GITHUB_OUTPUT"
+        run: bash .github/scripts/sync/read_target.sh
 
       - name: Check out the target repo
         uses: actions/checkout@v7
         with:
-          repository: ${{ inputs.target_repo }}
+          repository: ${{ env.TARGET }}
           ref: ${{ steps.target.outputs.default_branch }}
           token: ${{ secrets.REPO_PLATFORM_TOKEN }}
           path: target
@@ -126,8 +152,8 @@ jobs:
 
       - name: Require registration files
         run: |
-          test -f target/.repo-platform.yml || { echo "::error::${TARGET} is not registered with repo-platform: .repo-platform.yml is missing from its default branch. Restore the file from git history, or regenerate the repo with 'copier copy gh:${GITHUB_REPOSITORY} . --vcs-ref staging' (or a templates/vX.Y.Z tag)."; exit 1; }
-          test -f target/.copier-answers.yml || { echo "::error::${TARGET} has no .copier-answers.yml on its default branch, so copier has no recorded answers to update from. Restore the file from git history, or regenerate the repo with 'copier copy gh:${GITHUB_REPOSITORY} . --vcs-ref staging' (or a templates/vX.Y.Z tag)."; exit 1; }
+          test -f target/.repo-platform.yml || { echo "::error::${TARGET_DISPLAY} is not registered with repo-platform: .repo-platform.yml is missing from its default branch. Restore the file from git history, or regenerate the repo with 'copier copy gh:${GITHUB_REPOSITORY} . --vcs-ref staging' (or a templates/vX.Y.Z tag)."; exit 1; }
+          test -f target/.copier-answers.yml || { echo "::error::${TARGET_DISPLAY} has no .copier-answers.yml on its default branch, so copier has no recorded answers to update from. Restore the file from git history, or regenerate the repo with 'copier copy gh:${GITHUB_REPOSITORY} . --vcs-ref staging' (or a templates/vX.Y.Z tag)."; exit 1; }
 
       # Live visibility and description feed the render on purpose (adopt
       # semantics: SECURITY.md and the CodeQL jobs must follow the repo's
@@ -141,15 +167,16 @@ jobs:
       - name: Detect out-of-band settings drift
         env:
           PRIVATE: ${{ steps.target.outputs.private }}
-          DESCRIPTION: ${{ steps.target.outputs.description }}
         run: |
           bun .github/scripts/sync/settings_drift.ts \
             --answers target/.copier-answers.yml \
             --repo "$TARGET" \
+            --display "$TARGET_DISPLAY" \
+            --hide-details "$HIDE_DETAILS" \
             --central-dir settings/repos \
             --in-repo-settings target/.github/settings.yml \
             --live-private "$PRIVATE" \
-            --live-description "$DESCRIPTION" \
+            --live-description "$(cat "$RUNNER_TEMP/description.txt")" \
             --summary "$RUNNER_TEMP/settings-drift.md"
 
       # copier update and the cleanup renders fetch the template from the
@@ -160,19 +187,7 @@ jobs:
       # before any copier command, and the rewrite lands in the PR diff.
       - name: Normalize the recorded template source
         id: src
-        run: |
-          canonical="gh:${GITHUB_REPOSITORY}"
-          recorded="$(bun .github/scripts/sync/normalize_src_path.ts \
-            --answers target/.copier-answers.yml --canonical "$canonical")"
-          if [ "$recorded" != "$canonical" ]; then
-            # copier update refuses a dirty tree, so the rewrite is
-            # committed; it rides the update branch into the sync PR.
-            git -C target -c user.name="repo-platform-sync" \
-              -c user.email="repo-platform-sync@users.noreply.github.com" \
-              commit -qam "chore: normalize the copier template source to ${canonical}"
-            echo "::notice::${TARGET}: _src_path was '${recorded}'; rewritten to '${canonical}' (the canonical template source) for this and future updates."
-          fi
-          echo "src_path=${canonical}" >> "$GITHUB_OUTPUT"
+        run: bash .github/scripts/sync/normalize_src.sh
 
       - name: Resolve channel, refs, and template copier configs
         id: versions
@@ -183,20 +198,11 @@ jobs:
           RECOVER: ${{ inputs.recover }}
         run: bash .github/scripts/sync/resolve_refs.sh
 
+      # The selection lands in a RUNNER_TEMP file, not a step output: the
+      # module list is a target-derived fact, and step outputs ride into
+      # later steps' env-group prints.
       - name: Select modules
-        id: modules
-        run: |
-          modules="$(bun .github/scripts/sync/modules.ts \
-            --repo-file target/.repo-platform.yml \
-            --template-copier "$RUNNER_TEMP/copier-new.yml" \
-            --retired-summary "$RUNNER_TEMP/retired-modules.txt")"
-          echo "modules=${modules}" >> "$GITHUB_OUTPUT"
-          echo "selected modules: ${modules}"
-          if [ -s "$RUNNER_TEMP/retired-modules.txt" ]; then
-            while IFS= read -r name; do
-              echo "::notice::${TARGET}: retired module '${name}' dropped from the selection; its files leave the render with this update."
-            done < "$RUNNER_TEMP/retired-modules.txt"
-          fi
+        run: bash .github/scripts/sync/select_modules.sh
 
       - name: Install copier
         run: pipx install "$COPIER_SPEC"
@@ -209,25 +215,32 @@ jobs:
       # No up-to-date shortcut: modules, channel, private, and description
       # are live inputs that must re-render even at an unchanged template
       # ref, and a no-op render is cheap. The no-changes case exits with a
-      # notice after diffing.
+      # notice after diffing. MODULES and DESCRIPTION come from files via
+      # the shell, not step env, so the env-group print never carries
+      # them; run_hidden.sh captures copier's own output for a hidden
+      # target (it prints target paths and merge detail).
       - name: Apply copier update
         env:
           TARGET_REF: ${{ steps.versions.outputs.target_ref }}
-          MODULES: ${{ steps.modules.outputs.modules }}
           CHANNEL: ${{ steps.versions.outputs.channel }}
           PRIVATE: ${{ steps.target.outputs.private }}
-          DESCRIPTION: ${{ steps.target.outputs.description }}
           RECOVER: ${{ inputs.recover }}
-        run: bash .github/scripts/sync/apply_update.sh
+        run: |
+          MODULES="$(cat "$RUNNER_TEMP/modules.json")" \
+          DESCRIPTION="$(cat "$RUNNER_TEMP/description.txt")" \
+            bash .github/scripts/sync/run_hidden.sh "copier update" -- \
+            bash .github/scripts/sync/apply_update.sh
 
       # Conflicts (local edits overlapping template changes) resolve in the
       # template's favor so the tree stays valid; the dropped local lines go
-      # into the PR body for review.
+      # into the PR body for review - and, for a hidden target, ONLY there
+      # (the step-log dump is target file content).
       - name: Resolve copier conflicts toward the template
         id: conflicts
         run: |
           bun .github/scripts/sync/resolve_copier_conflicts.ts \
-            --summary "$RUNNER_TEMP/dropped-local-hunks.md" --root target
+            --summary "$RUNNER_TEMP/dropped-local-hunks.md" --root target \
+            --hide-details "$HIDE_DETAILS"
           if [ -s "$RUNNER_TEMP/dropped-local-hunks.md" ]; then
             echo "resolved=true" >> "$GITHUB_OUTPUT"
           else
@@ -248,12 +261,17 @@ jobs:
         env:
           OLD_SHA: ${{ steps.versions.outputs.old_sha }}
           TARGET_REF: ${{ steps.versions.outputs.target_ref }}
-          MODULES: ${{ steps.modules.outputs.modules }}
           CHANNEL: ${{ steps.versions.outputs.channel }}
           PRIVATE: ${{ steps.target.outputs.private }}
-          DESCRIPTION: ${{ steps.target.outputs.description }}
           SRC_PATH: ${{ steps.src.outputs.src_path }}
-        run: bash .github/scripts/sync/retired_cleanup.sh
+        run: |
+          MODULES="$(cat "$RUNNER_TEMP/modules.json")" \
+          DESCRIPTION="$(cat "$RUNNER_TEMP/description.txt")" \
+            bash .github/scripts/sync/run_hidden.sh "retired-file cleanup" -- \
+            bash .github/scripts/sync/retired_cleanup.sh
+          if [ "$HIDE_DETAILS" = "true" ] && [ -s "$RUNNER_TEMP/removed-paths.txt" ]; then
+            echo "removed $(wc -l <"$RUNNER_TEMP/removed-paths.txt" | tr -d ' ') retired file(s) (paths hidden: private repository; listed in the PR body)"
+          fi
 
       # settings.yml is repo-owned wherever it exists: deselecting the
       # settings-sync module de-renders it, but the sync must never delete
@@ -274,12 +292,15 @@ jobs:
           path: validator
 
       # A failed validation still opens the PR (that is where a human fixes
-      # the tree); the job fails at the end.
+      # the tree); the job fails at the end. The validator's diagnostics
+      # name target paths and values, so a hidden target's run is captured
+      # by run_hidden.sh.
       - name: Validate the updated tree
         id: validate
         run: |
           (cd validator/actions/validate-template && bun install --frozen-lockfile --silent)
-          if bun validator/actions/validate-template/validate_generated_files.ts target; then
+          if bash .github/scripts/sync/run_hidden.sh "template validation" -- \
+            bun validator/actions/validate-template/validate_generated_files.ts target; then
             echo "result=ok" >> "$GITHUB_OUTPUT"
           else
             echo "result=failed" >> "$GITHUB_OUTPUT"
@@ -295,7 +316,7 @@ jobs:
           # _src_path normalization commits itself) both count as changes.
           ahead="$(git -C target rev-list --count "origin/${BASE_BRANCH}..HEAD")"
           if [ -z "$(git -C target status --porcelain)" ] && [ "$ahead" -eq 0 ]; then
-            echo "::notice::${TARGET}: already matches ${DISPLAY}; no sync PR needed."
+            echo "::notice::${TARGET_DISPLAY}: already matches ${DISPLAY}; no sync PR needed."
             echo "changed=false" >> "$GITHUB_OUTPUT"
           else
             echo "changed=true" >> "$GITHUB_OUTPUT"
@@ -330,7 +351,6 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
           CHANNEL: ${{ steps.versions.outputs.channel }}
-          OLD_COMMIT: ${{ steps.versions.outputs.old_commit }}
           DISPLAY: ${{ steps.versions.outputs.display }}
           BRANCH: ${{ steps.versions.outputs.branch }}
           BASE_BRANCH: ${{ steps.target.outputs.default_branch }}
@@ -354,7 +374,14 @@ jobs:
           PR_URL: ${{ steps.pr.outputs.url }}
           PUSH_VALIDATION: ${{ steps.push.outputs.validation }}
         run: |
-          if [ -n "$PUSH_VALIDATION" ]; then
+          if [ "$HIDE_DETAILS" = "true" ] && [ -n "$PR_URL" ]; then
+            # run_hidden.sh withheld the diagnostics from this log;
+            # open_pr.sh appended them to the PR body instead.
+            where="the PR body - this public log hides them (private repository)"
+          elif [ "$HIDE_DETAILS" = "true" ]; then
+            # No PR exists to carry them (the update delivered nothing).
+            where="hidden from this public log (private repository); reproduce validation locally per docs/private-repos.md"
+          elif [ -n "$PUSH_VALIDATION" ]; then
             where="the 'Commit and push' step log - the tree was re-validated after workflow files were withheld"
           else
             where="the 'Validate the updated tree' step log"
@@ -362,7 +389,7 @@ jobs:
           if [ -n "$PR_URL" ]; then
             echo "::error::the update was pushed but validation of the resulting tree failed (details in ${where}). Fix the tree in ${PR_URL} before merging."
           else
-            echo "::error::the update produced no changes to deliver, yet validation failed, so ${TARGET}'s default branch itself does not validate (details in ${where}). Fix the tree on its default branch, then re-run the sync."
+            echo "::error::the update produced no changes to deliver, yet validation failed, so ${TARGET_DISPLAY}'s default branch itself does not validate (details in ${where}). Fix the tree on its default branch, then re-run the sync."
           fi
           exit 1
 
@@ -371,4 +398,8 @@ jobs:
         env:
           PR_URL: ${{ steps.pr.outputs.url }}
         run: |
-          echo "::warning::copier hit merge conflicts in ${TARGET}; where possible they were resolved in favor of the template. The dropped local lines are listed in the PR body and in the 'Resolve copier conflicts' step log. Review ${PR_URL}, restore anything that should stay local, then merge."
+          if [ "$HIDE_DETAILS" = "true" ]; then
+            echo "::warning::copier hit merge conflicts in ${TARGET_DISPLAY}; where possible they were resolved in favor of the template. The dropped local lines are listed in the PR body ONLY (this log hides them: private repository). Review the PR, restore anything that should stay local, then merge."
+          else
+            echo "::warning::copier hit merge conflicts in ${TARGET_DISPLAY}; where possible they were resolved in favor of the template. The dropped local lines are listed in the PR body and in the 'Resolve copier conflicts' step log. Review ${PR_URL}, restore anything that should stay local, then merge."
+          fi

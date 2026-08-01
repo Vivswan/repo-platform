@@ -5,14 +5,20 @@
 //
 // Usage:
 //   bun .github/scripts/fleet/build_settings_matrix.ts --owner Vivswan
-//     --in-repo in_repo_targets.txt [--dir settings/repos]
+//     --in-repo in_repo_targets.json [--dir settings/repos]
 //
 // Central targets come from the <name>.yml files in --dir (bare names,
 // same owner - the layout docs/settings.md documents); in-repo targets
-// from --in-repo, a file of newline-separated owner/name slugs (the
-// selector's probed list). Prints a JSON array of {repo, name, home}
-// entries, home = "central" | "in-repo", sorted by repo; a repository
-// with both homes gets one central entry (the central file wins).
+// from --in-repo, a JSON array of the selector's enriched rows
+// ({repo, redact_name, hide_details, display, verify, ...}). Prints a
+// JSON array of {repo, name, home, redact_name, verify}
+// entries, home = "central" | "in-repo", sorted by the emitted repo; a
+// repository with both homes gets one central entry (the central file
+// wins - matched on the REAL slug, which a redacted row then drops:
+// `repo`/`name` carry its display hint so the matrix, the job name it
+// becomes, and the called steps never see the slug; the apply leg
+// re-resolves it from `verify`). Central names are committed filenames,
+// self-disclosed by definition, and always print plainly.
 // Errors are selection-infrastructure failures and exit 1: unlike a
 // flaky per-repo probe, a central file the matrix cannot represent
 // (.yaml suffix, an owner subdirectory) would otherwise silently fall
@@ -22,10 +28,23 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseFlags } from "../shared/flags.ts";
 
+// No hide_details here: unlike the sync matrix, the apply leg has no
+// consumer for it (the action's own private-repos redaction covers its
+// output, and the central preflight probes visibility itself).
 export interface Target {
   repo: string;
   name: string;
   home: "central" | "in-repo";
+  redact_name: boolean;
+  verify: string;
+}
+
+export interface InRepoRow {
+  repo: string;
+  redact_name: boolean;
+  hide_details: boolean;
+  display: string;
+  verify: string;
 }
 
 /** Central targets from a repos-dir listing. Entries that would never
@@ -57,22 +76,37 @@ export function centralTargets(
     }
     if (!entry.name.endsWith(".yml")) continue;
     const name = entry.name.slice(0, -".yml".length);
-    targets.push({ repo: `${owner}/${name}`, name, home: "central" });
+    targets.push({
+      repo: `${owner}/${name}`,
+      name,
+      home: "central",
+      redact_name: false,
+      verify: "",
+    });
   }
   return { targets, errors };
 }
 
 /** Merge central and in-repo targets into the matrix: central wins on a
  *  duplicate slug (the selector already drops such repos from its list,
- *  but the matrix must hold the invariant on its own). */
-export function buildMatrix(central: Target[], inRepoSlugs: string[]): Target[] {
+ *  but the matrix must hold the invariant on its own; the comparison
+ *  uses each in-repo row's REAL slug, before a redacted row swaps its
+ *  display in). */
+export function buildMatrix(central: Target[], inRepo: InRepoRow[]): Target[] {
   const centralRepos = new Set(central.map((t) => t.repo));
   const targets = [...central];
   const seen = new Set<string>();
-  for (const slug of inRepoSlugs) {
-    if (centralRepos.has(slug) || seen.has(slug)) continue;
-    seen.add(slug);
-    targets.push({ repo: slug, name: slug.split("/").pop() ?? slug, home: "in-repo" });
+  for (const row of inRepo) {
+    if (centralRepos.has(row.repo) || seen.has(row.repo)) continue;
+    seen.add(row.repo);
+    const emitted = row.redact_name ? row.display : row.repo;
+    targets.push({
+      repo: emitted,
+      name: row.redact_name ? row.display : (row.repo.split("/").pop() ?? row.repo),
+      home: "in-repo",
+      redact_name: row.redact_name,
+      verify: row.redact_name ? row.verify : "",
+    });
   }
   return targets.sort((a, b) => (a.repo < b.repo ? -1 : a.repo > b.repo ? 1 : 0));
 }
@@ -82,6 +116,34 @@ function fail(errors: string[]): never {
     console.error(`::error::${message}`);
   }
   process.exit(1);
+}
+
+function loadInRepoRows(path: string): InRepoRow[] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(readFileSync(path, "utf-8"));
+  } catch {
+    fail([`${path}: cannot read the in-repo target list`]);
+  }
+  if (
+    !Array.isArray(parsed) ||
+    !parsed.every(
+      (v) =>
+        typeof v === "object" &&
+        v !== null &&
+        typeof (v as InRepoRow).repo === "string" &&
+        typeof (v as InRepoRow).redact_name === "boolean" &&
+        typeof (v as InRepoRow).hide_details === "boolean" &&
+        typeof (v as InRepoRow).display === "string" &&
+        typeof (v as InRepoRow).verify === "string",
+    )
+  ) {
+    fail([
+      `${path}: the in-repo target list must be a JSON array of ` +
+        `{repo, redact_name, hide_details, display, verify} rows`,
+    ]);
+  }
+  return parsed as InRepoRow[];
 }
 
 function main(args: string[]): void {
@@ -97,20 +159,10 @@ function main(args: string[]): void {
   } catch {
     fail([`${dir}: cannot read the central settings directory`]);
   }
-  let inRepoText: string;
-  try {
-    inRepoText = readFileSync(flags["--in-repo"], "utf-8");
-  } catch {
-    fail([`${flags["--in-repo"]}: cannot read the in-repo target list`]);
-  }
 
   const { targets: central, errors } = centralTargets(flags["--owner"], listing, dir);
   if (errors.length > 0) fail(errors);
-  const slugs = inRepoText
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line !== "");
-  console.log(JSON.stringify(buildMatrix(central, slugs)));
+  console.log(JSON.stringify(buildMatrix(central, loadInRepoRows(flags["--in-repo"]))));
 }
 
 if (import.meta.main) {
