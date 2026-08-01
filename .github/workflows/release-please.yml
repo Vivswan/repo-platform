@@ -1,6 +1,11 @@
 # Cuts releases via release-please: merging to main accumulates conventional
-# commits into a release PR; merging that PR tags vX.Y.Z and publishes the
-# GitHub release, which sync-repos pushes to managed repos.
+# commits into a release PR. GitHub releases are immutable once published
+# (the tag and assets freeze), so release-please-config.json carries
+# `draft` + `force-tag-creation`: merging the release PR creates a DRAFT
+# release with its vX.Y.Z tag already forced at the merge SHA, and ci.yml's
+# publish-release job flips it live. Publishing fires build-branches, which
+# tags templates/vX.Y.Z and rebuilds the latest channel sync-repos pushes to
+# managed repos.
 #
 # Called by ci.yml's release-please job, downstream of the all-green gate, so
 # releases and release-PR refreshes only happen on a green main.
@@ -15,10 +20,10 @@ on:
   workflow_call:
     outputs:
       release_created:
-        description: "'true' when this run just published a release"
+        description: "'true' when this run just cut a release"
         value: ${{ jobs.release-please.outputs.release_created }}
       tag_name:
-        description: The tag of the release that was just published
+        description: The tag of the release that was just cut (a draft-flow config forces the tag at creation, so it is checkout-able before publication)
         value: ${{ jobs.release-please.outputs.tag_name }}
 
 # The effective token comes from the calling job; declaring the needs here

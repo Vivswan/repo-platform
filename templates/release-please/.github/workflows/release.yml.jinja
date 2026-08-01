@@ -1,11 +1,20 @@
 # Repo-owned release pipeline, called by the managed ci.yml on top of the
 # all-green gate. Generated once by {{ github_username }}/repo-platform and
-# never overwritten by template sync: by default it just runs the managed
-# release-please machinery, and this file is where jobs BEFORE the release
-# (make release-please `needs:` them) and AFTER it (gated on its outputs,
-# e.g. packaging and publishing) go. Everything runs in the same workflow
-# run, so it works with the default GITHUB_TOKEN too, which cannot trigger
-# `on: release` workflows.
+# never overwritten by template sync.
+#
+# GitHub releases are immutable once published: the tag and assets freeze,
+# and a post-publication `gh release upload` gets HTTP 422. release-please
+# therefore cuts every release as a DRAFT with its tag already forced
+# (`draft` + `force-tag-creation` in release-please-config.json). Jobs that
+# mutate the release (uploading assets, editing notes) run after
+# release-please and before the job that publishes the draft, which must
+# stay last: list every mutating job in the publishing job's `needs`. If
+# the pipeline dies after the draft exists, a rerun cannot recreate it
+# (release-please sees the forced tag); finish by hand:
+#   gh release upload <tag> <assets> --clobber
+#   gh release edit <tag> --draft=false
+# Everything runs in the same workflow run, so it works with the default
+# GITHUB_TOKEN too, which cannot trigger `on: release` workflows.
 
 name: Release
 
@@ -16,18 +25,41 @@ jobs:
   release-please:
     uses: ./.github/workflows/release-please.yml
     secrets: inherit
+{%- if release_auto_publish %}
 
-# Example post-release job:
+  publish-release:
+    needs: [release-please]
+    if: needs.release-please.outputs.release_created == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Publish the GitHub release
+        env:
+          GH_TOKEN: {% raw %}${{ secrets.REPO_PLATFORM_TOKEN || github.token }}{% endraw %}
+          GH_REPO: {% raw %}${{ github.repository }}{% endraw %}
+          TAG: {% raw %}${{ needs.release-please.outputs.tag_name }}{% endraw %}
+        run: gh release edit "$TAG" --draft=false
+{%- else %}
+
+# Generated with release_auto_publish=false: this repository publishes the
+# draft itself. Run `gh release edit <tag> --draft=false` as the final step
+# of your own pipeline once the release is ready to freeze.
+{%- endif %}
+
+# Example job mutating the draft (add its name to the publishing job's needs):
 #
-#   publish:
+#   build-assets:
 #     needs: release-please
 #     if: needs.release-please.outputs.release_created == 'true'
 #     runs-on: ubuntu-latest
+#     permissions:
+#       contents: write # also what makes the draft visible to gh
 #     steps:
 #       - uses: actions/checkout@v7
 #         with:
 #           ref: {% raw %}${{ needs.release-please.outputs.tag_name }}{% endraw %}
-#       - name: Build and upload
+#       - name: Build and attach to the draft release
 #         env:
 #           GH_TOKEN: {% raw %}${{ github.token }}{% endraw %}
 #           RELEASE_TAG: {% raw %}${{ needs.release-please.outputs.tag_name }}{% endraw %}

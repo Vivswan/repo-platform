@@ -6,7 +6,9 @@
   "packages": {
     ".": {
       "release-type": "simple",
-      "initial-version": "0.0.1"
+      "initial-version": "0.0.1",
+      "draft": true,
+      "force-tag-creation": true
     }
   }
 }

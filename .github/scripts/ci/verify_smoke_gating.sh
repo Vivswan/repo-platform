@@ -198,6 +198,12 @@ if has release-please; then
   present "uses: ./.github/workflows/release.yml" "$wf/ci.yml"
   test -f /tmp/smoke/release-please-config.json
   test -f /tmp/smoke/.release-please-manifest.json
+  # The starter publishes the draft release itself unless the row opts out
+  # via release_auto_publish=false.
+  case "$EXTRA_DATA" in
+    *release_auto_publish=false*) absent "publish-release:" "$wf/release.yml" ;;
+    *) present "publish-release:" "$wf/release.yml" ;;
+  esac
 else
   test ! -e "$wf/release-please.yml"
   test ! -e "$wf/release.yml"

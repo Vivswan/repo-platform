@@ -152,8 +152,9 @@ source of truth for agent instructions.
 
 - [release-please](https://github.com/googleapis/release-please) accumulates
   [conventional commits](https://www.conventionalcommits.org) on `main` into
-  a release PR; merging it tags `vX.Y.Z`, publishes the GitHub release, and
-  updates `CHANGELOG.md`.
+  a release PR; merging it forces the `vX.Y.Z` tag, updates `CHANGELOG.md`,
+  and creates the GitHub release as a draft (published releases are
+  immutable), which ci.yml's `publish-release` job then flips live.
 - Publishing the release rebuilds the `latest` branch (tagged
   `templates/vX.Y.Z`) and triggers `sync-repos.yml`, which pushes an update
   PR into every managed repo.

@@ -76,13 +76,16 @@ own checks:
   through the `checks` job.
 - with the release-please module: a `release` job runs on top of the gate
   (`needs: all-green`), calling the repo-owned
-  `.github/workflows/release.yml` pipeline. By default that pipeline just
-  runs the managed `release-please.yml` machinery; add repo jobs before the
-  release (make `release-please` `needs:` them) or after it (gated on its
-  `release_created`/`tag_name` outputs: packaging, publishing). Everything
-  runs in one workflow run, so no PAT is needed to chain the steps. The
-  `release-please-config.json` and `.release-please-manifest.json` starters
-  are repo-owned too (release-please updates the manifest via release PRs).
+  `.github/workflows/release.yml` pipeline. GitHub releases are immutable
+  once published, so release-please cuts each release as a draft with its
+  tag already forced; jobs that mutate the release (packaging, asset
+  uploads, note edits) go between `release-please` and the starter's final
+  `publish-release` job, which flips the draft live (answer
+  `release_auto_publish=false` at generation to keep publication in the
+  repo's own hands instead). Everything runs in one workflow run, so no PAT
+  is needed to chain the steps. The `release-please-config.json` and
+  `.release-please-manifest.json` starters are repo-owned too
+  (release-please updates the manifest via release PRs).
 - with the bun or uv module: a repo-owned `auto-format.yml` starter (label a
   PR `fix-lint` to get a formatting commit pushed to it), prefilled with each
   selected toolchain's formatter.
