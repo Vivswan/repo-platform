@@ -4,11 +4,17 @@
 # earlier disarm_pr.sh step). Invoked by reusable-template-sync.yml's
 # "Create or refresh pull request" step.
 #
-# Env: TARGET, CHANNEL, OLD_COMMIT, DISPLAY, BRANCH, BASE_BRANCH,
+# Env: TARGET, TARGET_DISPLAY (log label; falls back to TARGET),
+# HIDE_DETAILS, CHANNEL, DISPLAY, BRANCH, BASE_BRANCH,
 # VALIDATION, RESOLVED, RECOVER, DRIFT_FILE, SUMMARY_FILE,
 # RETIRED_MODULES_FILE, REMOVED_PATHS_FILE, WITHHELD_FILE, GH_TOKEN,
 # GITHUB_REPOSITORY, GITHUB_OUTPUT, RUNNER_TEMP.
 set -euo pipefail
+
+# From resolve_refs.sh via file (not a step output: the value is
+# target-controlled and step outputs surface in env-group prints). This
+# body ships to the private repo, so the raw value is fine HERE.
+OLD_COMMIT="$(cat "$RUNNER_TEMP/old_commit.txt")"
 
 # TARGET_REF is the verified commit on both channels (pinned by
 # resolve_refs.sh), so the channel and DISPLAY (staging@<sha> or
@@ -92,11 +98,42 @@ $(cat "$SUMMARY_FILE")"
 fi
 
 if [ "$VALIDATION" = "failed" ]; then
+  validation_where="details in the sync run log"
+  validation_extra=""
+  if [ "${HIDE_DETAILS:-false}" = "true" ]; then
+    # run_hidden.sh withheld the diagnostics from the public log; this
+    # body ships to the private repo, so they belong here instead. The
+    # post-withhold re-validation supersedes the full-tree run. The
+    # filenames derive from the run_hidden labels - a check_ssot rule
+    # pins the two sides. The promise of diagnostics below is only made
+    # once a non-empty capture is actually in hand.
+    validation_where="the public sync log hides the diagnostics (private repository); reproduce validation locally per docs/private-repos.md"
+    for f in "$RUNNER_TEMP/hidden-post-withhold-re-validation.log" \
+      "$RUNNER_TEMP/hidden-template-validation.log"; do
+      if [ -s "$f" ]; then
+        validation_where="the public sync log hides the diagnostics (private repository); they are below"
+        # GitHub caps PR bodies at 64 KiB and gh fails outright past it,
+        # which would strand the pushed branch with no PR - keep the
+        # excerpt bounded like the conflicts summary.
+        note=""
+        if [ "$(wc -c <"$f")" -gt 20000 ]; then
+          note="
+(truncated; reproduce validation locally for the rest - docs/private-repos.md)"
+        fi
+        validation_extra="
+
+\`\`\`\`text
+$(head -c 20000 "$f")${note}
+\`\`\`\`"
+        break
+      fi
+    done
+  fi
   body="${body}
 
 > [!WARNING]
-> Validation failed on the updated tree (details in the sync run
-> log). Fix it in this PR before merging."
+> Validation failed on the updated tree (${validation_where}). Fix it
+> in this PR before merging.${validation_extra}"
 fi
 
 # Anything that needs human review - dropped local hunks, withheld
@@ -135,7 +172,12 @@ if [ "$needs_review" = false ]; then
   if gh pr merge "$url" -R "$TARGET" --squash --auto 2>"$RUNNER_TEMP/automerge.err"; then
     echo "auto-merge armed for ${url}"
   else
-    echo "::warning::${TARGET}: could not enable auto-merge on ${url}: $(cat "$RUNNER_TEMP/automerge.err"). Merge it manually; to fix this, allow auto-merge in the repo settings and keep a required check on the default branch."
+    # gh's error text can name the target's rulesets and required checks.
+    detail="$(cat "$RUNNER_TEMP/automerge.err")"
+    if [ "${HIDE_DETAILS:-false}" = "true" ]; then
+      detail="detail hidden: private repository"
+    fi
+    echo "::warning::${TARGET_DISPLAY:-$TARGET}: could not enable auto-merge on ${url}: ${detail}. Merge it manually; to fix this, allow auto-merge in the repo settings and keep a required check on the default branch."
   fi
 else
   echo "auto-merge left off: this PR needs review (conflicts, withheld files, failed validation, out-of-band settings drift, or a recovery re-render)."

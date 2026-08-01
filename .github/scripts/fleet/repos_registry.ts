@@ -11,9 +11,9 @@
 // `select` prints a JSON array of {repo, owner, name, channel} on stdout;
 // channel is null when the registry resolves none (the sync then falls
 // back to the repo's recorded copier answer). `--discovered` names a JSON
-// file holding an array of "owner/name" strings (already filtered for
-// archived repos by the caller); it is required whenever `managed`
-// contains the "*" wildcard. `excluded` prints the exclude list as a JSON
+// file holding an array of "owner/name" strings or {repo, ...} objects
+// (already filtered for archived repos by the caller); it is required
+// whenever `managed` contains the "*" wildcard. `excluded` prints the exclude list as a JSON
 // array of slugs (select_settings_repos.sh uses it to report paused repos
 // that still carry an in-repo settings file). Errors go to stderr as
 // ::error:: workflow commands, all of them at once, and the exit code is
@@ -244,13 +244,15 @@ export function selectRepos(
 
   const pool = new Set<string>(registry.managed.repos);
   if (registry.managed.wildcard && discovered !== null) {
-    for (const slug of discovered) {
+    discovered.forEach((slug, index) => {
       if (!isSlug(slug)) {
-        errors.push(`discovered list entry ${JSON.stringify(slug)} is not an owner/name slug`);
-        continue;
+        // Index only, never the value: a malformed entry may still be a
+        // private repo's name, and this print is publicly readable.
+        errors.push(`discovered list entry at index ${index} is not an owner/name slug`);
+        return;
       }
       pool.add(slug);
-    }
+    });
   }
   for (const slug of registry.exclude) {
     pool.delete(slug);
@@ -328,10 +330,27 @@ function main(args: string[]): void {
           const detail = err instanceof Error ? err.message : String(err);
           fail([`${discoveredPath}: cannot read discovered list: ${detail}`]);
         }
-        if (!Array.isArray(parsed) || !parsed.every((v) => typeof v === "string")) {
-          fail([`${discoveredPath}: discovered list must be a JSON array of "owner/name" strings`]);
+        // Two accepted shapes: plain "owner/name" strings, or the
+        // discovery objects the redaction-aware callers write
+        // ({repo, private, ...} - only repo matters here; visibility is
+        // the enricher's concern, keeping registry logic pure).
+        if (!Array.isArray(parsed)) {
+          fail([`${discoveredPath}: discovered list must be a JSON array`]);
         }
-        discovered = parsed;
+        discovered = parsed.map((entry, index): string => {
+          if (typeof entry === "string") return entry;
+          if (
+            typeof entry === "object" &&
+            entry !== null &&
+            typeof (entry as { repo: unknown }).repo === "string"
+          ) {
+            return (entry as { repo: string }).repo;
+          }
+          return fail([
+            `${discoveredPath}: entry at index ${index} is neither an "owner/name" ` +
+              `string nor a {repo, ...} object`,
+          ]);
+        });
       }
       const { selection, errors } = selectRepos(registry, {
         repo: flags["--repo"],
