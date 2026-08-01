@@ -273,6 +273,53 @@ describe("checkCentralFileRemote", () => {
     expect(errors).toHaveLength(1);
     expect(errors[0]).toContain("modules");
   });
+
+  // hideDetails: the file's NAME is self-disclosed (committed here), but
+  // the target's module facts, label values, and parse detail are not.
+  test("hideDetails reduces missing labels to a count without naming them", () => {
+    const { errors } = checkCentralFileRemote(
+      FILE,
+      REPO,
+      declared(["dependencies"]),
+      fetcher({ ".repo-platform.yml": registration(["bun"]) }),
+      true,
+    );
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain("missing 2 entries");
+    expect(errors[0]).toContain("names hidden: private repository");
+    expect(errors[0]).not.toContain("javascript");
+    expect(errors[0]).not.toContain("github_actions");
+    expect(errors[0]).not.toContain("bun");
+  });
+
+  test("hideDetails withholds registration parse detail", () => {
+    const { errors } = checkCentralFileRemote(
+      FILE,
+      REPO,
+      declared(["dependencies"]),
+      fetcher({ ".repo-platform.yml": ok("just a string\n") }),
+      true,
+    );
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain("detail hidden: private repository");
+    expect(errors[0]).not.toContain("mapping");
+  });
+
+  test("hideDetails keeps the fuzzer-answer failure module-free", () => {
+    const { errors } = checkCentralFileRemote(
+      FILE,
+      REPO,
+      declared(["dependencies", "github_actions"]),
+      fetcher({
+        ".repo-platform.yml": registration(["fuzzer"]),
+        ".copier-answers.yml": ok("fuzzer_label: ''\n"),
+      }),
+      true,
+    );
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).not.toContain("fuzzer");
+    expect(errors[0]).toContain("detail hidden: private repository");
+  });
 });
 
 // The exit-code split lives in main(), so these run the script itself
@@ -298,6 +345,13 @@ describe("CLI exit codes", () => {
         "  repos/Vivswan/fuzzflaky/contents/.repo-platform.yml) printf 'modules: [fuzzer]\\n' ;;",
         '  repos/Vivswan/fuzzflaky/contents/.copier-answers.yml) echo "HTTP 502 from stub" >&2; exit 1 ;;',
         "  repos/Vivswan/violating/contents/.repo-platform.yml) printf 'modules: []\\n' ;;",
+        "  repos/Vivswan/shy/contents/.repo-platform.yml) printf 'modules: [bun]\\n' ;;",
+        // The visibility probe (gh api repos/<slug> --jq .private): only
+        // "shy" is private; every other persona proves public so the
+        // pre-redaction test expectations keep their detailed messages.
+        '  repos/Vivswan/shy) echo "true" ;;',
+        '  repos/*/contents/*) echo "HTTP 404 from stub" >&2; exit 1 ;;',
+        '  repos/*) echo "false" ;;',
         '  *) echo "HTTP 404 from stub" >&2; exit 1 ;;',
         "esac",
         "",

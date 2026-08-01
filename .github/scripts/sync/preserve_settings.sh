@@ -8,12 +8,12 @@
 # outright. Invoked by reusable-template-sync.yml's "Preserve the
 # repo-owned settings file" step and by ci/upgrade_path_test.sh.
 #
-# Env: RECOVER; TARGET_DIR (default target); TARGET (log label, default
-# TARGET_DIR).
+# Env: RECOVER; TARGET_DIR (default target); TARGET_DISPLAY / TARGET (log
+# label, in that order; defaults to TARGET_DIR).
 set -euo pipefail
 
 target_dir="${TARGET_DIR:-target}"
-label="${TARGET:-$target_dir}"
+label="${TARGET_DISPLAY:-${TARGET:-$target_dir}}"
 if ! git -C "$target_dir" cat-file -e "HEAD:.github/settings.yml" 2>/dev/null; then
   exit 0
 fi

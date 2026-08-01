@@ -87,11 +87,27 @@ jobs:
       fail-fast: false
       matrix:
         include: ${{ fromJSON(needs.select.outputs.targets) }}
+    # matrix.repo is the redaction hint for a private in-repo target - the
+    # real slug never enters the matrix or this job name; the resolve step
+    # recovers it. Central names are committed filenames, self-disclosed.
     name: apply (${{ matrix.repo }})
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
+
+      # Recovers the real slug for a redacted target and registers it with
+      # the runner's masker before anything else prints; public and
+      # central rows pass straight through.
+      - name: Resolve the target repository
+        id: resolve
+        env:
+          TARGET_INPUT: ${{ matrix.repo }}
+          REDACT_NAME: ${{ matrix.redact_name }}
+          VERIFY: ${{ matrix.verify }}
+          GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
+          PAT: ${{ secrets.REPO_PLATFORM_TOKEN }}
+        run: bash .github/scripts/fleet/resolve_private_repo.sh
 
       # bun is only needed for the central-file preflight below.
       - uses: oven-sh/setup-bun@v2
@@ -139,10 +155,17 @@ jobs:
           mode: ${{ inputs.check_only && 'check' || 'apply' }}
           # Exactly one of the two multi-repo modes carries this job's
           # single repository: the scoped scratch dir for a central
-          # home, the action's remote mode for an in-repo home.
+          # home, the action's remote mode for an in-repo home (the
+          # resolved slug - already masked when the row is redacted, so
+          # this with: line renders *** in the log).
           repos-dir: ${{ matrix.home == 'central' && format('{0}/central-scope', runner.temp) || '' }}
-          repos: ${{ matrix.home == 'in-repo' && matrix.repo || '' }}
+          repos: ${{ matrix.home == 'in-repo' && steps.resolve.outputs.repo || '' }}
           defaults-file: settings/defaults.yml
+          # The action's own private-target redaction (its default,
+          # pinned here on purpose): it placeholders private slugs and
+          # values in ITS output - the second layer under this
+          # workflow's hint-based matrix redaction.
+          private-repos: redact
           # Strict: a token that cannot reach a declared section fails
           # this repo's job (the action's default) - settings drift must
           # not hide behind a green run.

@@ -45,6 +45,13 @@ const FLAGS = [
   "--summary",
 ] as const;
 
+// Optional redaction flags: --display is the name this public log may
+// print (the repo's hint when its name is redacted), --hide-details
+// suppresses recorded/live VALUES from warnings and errors - the summary
+// file keeps them, because it ships in the PR body to the target repo
+// itself, whose access control is the right one.
+const OPTIONAL_FLAGS = ["--display", "--hide-details"] as const;
+
 export interface Drift {
   field: "private" | "description";
   recorded: string;
@@ -156,25 +163,41 @@ function escapeData(message: string): string {
 // The log line deliberately does not say what merging ratifies: that
 // depends on the settings home, and driftSummary is the one place that
 // decides it. Two descriptions would drift apart.
-export function driftWarnings(repo: string, drifts: Drift[]): string[] {
-  return drifts.map(
-    (d) =>
-      `::warning::${escapeData(
-        `${repo}: ${d.field} changed out of band: ${show(d.recorded)} -> ${show(d.live)}. ` +
-          "Auto-merge is disabled; the PR body explains what merging does " +
-          "and how to revert.",
-      )}`,
+export function driftWarnings(repo: string, drifts: Drift[], hideDetails = false): string[] {
+  return drifts.map((d) =>
+    hideDetails
+      ? `::warning::${escapeData(
+          `${repo}: ${d.field} changed out of band (values hidden: private repository; ` +
+            "details in the PR body). Auto-merge is disabled; the PR body explains " +
+            "what merging does and how to revert.",
+        )}`
+      : `::warning::${escapeData(
+          `${repo}: ${d.field} changed out of band: ${show(d.recorded)} -> ${show(d.live)}. ` +
+            "Auto-merge is disabled; the PR body explains what merging does " +
+            "and how to revert.",
+        )}`,
   );
 }
 
 function main(args: string[]): void {
-  const flags = parseFlags(args, FLAGS);
+  const flags = parseFlags(args, FLAGS, OPTIONAL_FLAGS);
+  const repo = flags["--repo"];
+  const display = flags["--display"] ?? repo;
+  const hideDetails = flags["--hide-details"] === "true";
 
   const answersPath = flags["--answers"];
   let answers: unknown;
   try {
     answers = parse(readFileSync(answersPath, "utf-8"));
   } catch (err) {
+    // The parser's message can quote target file content; a hidden
+    // target gets the detail-free version.
+    if (hideDetails) {
+      fail(
+        `${display}: the recorded answers file cannot be read as YAML (detail hidden: ` +
+          "private repository). Reproduce the sync locally - see docs/private-repos.md.",
+      );
+    }
     const detail = err instanceof Error ? err.message.split("\n")[0] : String(err);
     fail(`${answersPath}: cannot read as YAML: ${detail}`);
   }
@@ -182,7 +205,6 @@ function main(args: string[]): void {
     fail(`${answersPath}: top level must be a mapping`);
   }
 
-  const repo = flags["--repo"];
   const { drifts, errors } = detectDrift(
     answers as Record<string, unknown>,
     flags["--live-private"],
@@ -190,7 +212,13 @@ function main(args: string[]): void {
   );
   if (errors.length > 0) {
     for (const error of errors) {
-      console.error(`::error::${repo}: ${error}`);
+      // The error text embeds the malformed recorded value; a hidden
+      // target gets the field-free version.
+      console.error(
+        hideDetails
+          ? `::error::${display}: a recorded answer is malformed, so drift cannot be detected (detail hidden: private repository). Reproduce the sync locally - see docs/private-repos.md.`
+          : `::error::${repo}: ${error}`,
+      );
     }
     process.exit(1);
   }
@@ -203,10 +231,10 @@ function main(args: string[]): void {
 
   writeFileSync(flags["--summary"], driftSummary(repo, drifts, home));
   if (drifts.length === 0) {
-    console.log(`${repo}: live settings match the recorded answers; no out-of-band drift.`);
+    console.log(`${display}: live settings match the recorded answers; no out-of-band drift.`);
     return;
   }
-  for (const warning of driftWarnings(repo, drifts)) {
+  for (const warning of driftWarnings(display, drifts, hideDetails)) {
     console.log(warning);
   }
 }

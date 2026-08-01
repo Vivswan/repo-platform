@@ -154,7 +154,10 @@ jobs:
       # the USER, not the token - so this only pre-filters to owned,
       # non-archived, user-writable repos; the TOKEN's actual grant is
       # probed per repo in the next step. --paginate emits concatenated
-      # page arrays, so --slurp + add makes one array first.
+      # page arrays, so --slurp + add makes one array first. Visibility
+      # rides along, fail-closed (anything but private: false is treated
+      # as private): the selector redacts private repos from this public
+      # run's logs and matrix (docs/private-repos.md).
       - name: Discover repos
         env:
           GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
@@ -165,7 +168,7 @@ jobs:
           login="$(gh api user --jq .login)"
           gh api user/repos --paginate --slurp \
             | jq -c --arg login "$login" \
-                '[add[] | select((.archived | not) and .owner.login == $login and .permissions.push) | .full_name]' \
+                '[add[] | select((.archived | not) and .owner.login == $login and .permissions.push) | {repo: .full_name, private: (.private != false)}]' \
             > "$RUNNER_TEMP/discovered.json"
           echo "discovered $(jq 'length' "$RUNNER_TEMP/discovered.json") writable repos for ${login}"
 
@@ -190,10 +193,16 @@ jobs:
       fail-fast: false
       matrix:
         include: ${{ fromJSON(needs.plan.outputs.repos) }}
+    # matrix.repo is the redaction hint for a private repo - the real slug
+    # must never reach this job name or the called workflow's auto-printed
+    # inputs; the leg resolves it from matrix.verify.
     name: sync (${{ matrix.repo }})
     uses: ./.github/workflows/reusable-template-sync.yml
     with:
       target_repo: ${{ matrix.repo }}
+      target_redact_name: ${{ matrix.redact_name }}
+      target_hide_details: ${{ matrix.hide_details }}
+      target_verify: ${{ matrix.verify }}
       version: ${{ needs.plan.outputs.version }}
       channel: ${{ matrix.channel }}
       # The dispatch default is the literal "none"; only "recopy" means
