@@ -8,16 +8,17 @@
 # Smoke-test output from local copier runs
 /.smoke/
 
-# Agent worktrees
-.worktrees/
-.claude/
-
 # END REPOSITORY LOCAL
 
 # BEGIN REPO-PLATFORM MANAGED
 # Generated from github/gitignore @ 57286c3887203259752b747db94e6c3ad10ec53d - do not edit; local
 # patterns go in the REPOSITORY LOCAL section above. Managed patterns
 # deliberately come last: last-match-wins makes them non-overridable.
+
+## Claude Code local state (repo-platform)
+.claude/worktrees/
+.claude/.worktrees/
+.claude/settings.local.json
 
 ## Windows (github/gitignore Global/Windows.gitignore)
 # Windows thumbnail cache files
