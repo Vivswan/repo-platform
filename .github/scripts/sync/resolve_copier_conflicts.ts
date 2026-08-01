@@ -140,19 +140,28 @@ function summarize(rel: string, resolution: Resolution): string {
 
 /** Assemble the summary, dropping whole sections past the byte budget.
  *
- * Cutting at section boundaries keeps the markdown fences balanced.
+ * Cutting at section boundaries keeps the markdown fences balanced. The
+ * omitted-count note must tell the truth about where the rest lives:
+ * hidden mode suppresses the run-log copy, so there the only recovery is
+ * reproducing the update locally.
  */
-function truncate(sections: string[], limit: number): string {
+function truncate(sections: string[], limit: number, hideDetails: boolean): string {
   const full = sections.join("\n");
   if (Buffer.byteLength(full, "utf-8") <= limit) return full;
-  const budget = limit - 100; // room for the omitted-count note
+  const budget = limit - 200; // room for the omitted-count note
   const kept: string[] = [];
   let size = 0;
   for (let index = 0; index < sections.length; index++) {
     const sectionSize = Buffer.byteLength(sections[index], "utf-8") + 1;
     if (size + sectionSize > budget) {
       const omitted = sections.length - index;
-      kept.push(`(${omitted} file(s) omitted; the full list is in this sync run's log)`);
+      kept.push(
+        hideDetails
+          ? `(${omitted} file(s) omitted; the public sync log hides conflict content for ` +
+              "this private repository - reproduce the update locally for the full list, " +
+              "see docs/private-repos.md)"
+          : `(${omitted} file(s) omitted; the full list is in this sync run's log)`,
+      );
       break;
     }
     kept.push(sections[index]);
@@ -186,12 +195,14 @@ interface Args {
   summary: string;
   root: string;
   limit: number;
+  hideDetails: boolean;
 }
 
 function parseArgs(argv: string[]): Args {
   let summary: string | undefined;
   let root = ".";
   let limit = 20000;
+  let hideDetails = false;
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     const value = () => {
@@ -201,6 +212,7 @@ function parseArgs(argv: string[]): Args {
     };
     if (arg === "--summary") summary = value();
     else if (arg === "--root") root = value();
+    else if (arg === "--hide-details") hideDetails = value() === "true";
     else if (arg === "--limit") {
       const raw = value();
       limit = Number.parseInt(raw, 10);
@@ -211,7 +223,7 @@ function parseArgs(argv: string[]): Args {
   }
   if (!summary) usageError("the following arguments are required: --summary");
   if (limit < 200) usageError("--limit must be at least 200");
-  return { summary, root, limit };
+  return { summary, root, limit, hideDetails };
 }
 
 function main(): number {
@@ -225,12 +237,21 @@ function main(): number {
     if (!data.includes(START)) continue;
     const printedRel = relative(root, path);
     const resolution = resolveConflicts(data);
+    // Paths and hunk content are target file data: a hide-details target
+    // gets counts here and the full detail only in the PR body, which
+    // lives in the private repo.
     if (resolution.kind === "malformed") {
-      console.log(`${printedRel}: malformed or out-of-order conflict markers, left untouched`);
+      console.log(
+        args.hideDetails
+          ? "a file carries malformed or out-of-order conflict markers, left untouched (path hidden: private repository)"
+          : `${printedRel}: malformed or out-of-order conflict markers, left untouched`,
+      );
     } else if (resolution.dropped.length > 0) {
       writeFileSync(path, resolution.resolved);
       console.log(
-        `${printedRel}: resolved ${resolution.dropped.length} conflict(s) toward the template`,
+        args.hideDetails
+          ? `resolved ${resolution.dropped.length} conflict(s) toward the template (path hidden: private repository)`
+          : `${printedRel}: resolved ${resolution.dropped.length} conflict(s) toward the template`,
       );
     } else {
       // Marker bytes appear only mid-line (not a conflict); skip.
@@ -240,8 +261,20 @@ function main(): number {
   }
 
   const full = sections.join("\n");
-  if (full) console.log(full);
-  writeFileSync(args.summary, truncate(sections, args.limit), "utf-8");
+  if (full) {
+    if (args.hideDetails) {
+      // "Affected", not "resolved": a malformed-marker file is left
+      // untouched, and the PR body's copy may itself be truncated.
+      console.log(
+        `${sections.length} conflict-affected file(s) (content hidden: private repository; ` +
+          "details in the PR body, which may truncate - reproduce the update locally " +
+          "for everything).",
+      );
+    } else {
+      console.log(full);
+    }
+  }
+  writeFileSync(args.summary, truncate(sections, args.limit, args.hideDetails), "utf-8");
   return 0;
 }
 

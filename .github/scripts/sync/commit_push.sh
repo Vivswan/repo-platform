@@ -4,9 +4,11 @@
 # the Workflows scope. Invoked by reusable-template-sync.yml's "Commit and
 # push" step from the repo-platform checkout root.
 #
-# Env: TARGET, BRANCH, DISPLAY, BASE_BRANCH, PAT, RUNNER_TEMP,
-# GITHUB_OUTPUT.
+# Env: TARGET, TARGET_DISPLAY (log label; falls back to TARGET), BRANCH,
+# DISPLAY, BASE_BRANCH, PAT, HIDE_DETAILS, RUNNER_TEMP, GITHUB_OUTPUT.
 set -euo pipefail
+
+target_display="${TARGET_DISPLAY:-$TARGET}"
 
 git -C target config user.name "repo-platform-sync"
 git -C target config user.email "repo-platform-sync@users.noreply.github.com"
@@ -31,8 +33,21 @@ do_push() {
   git -C target push --force-with-lease="${BRANCH}:${lease_sha}" "$push_url" "$BRANCH"
 }
 
+# Remote push messages can carry the target's settings detail (ruleset
+# names, required checks); a hidden target's stay captured.
+show_push_err() {
+  if [ "${HIDE_DETAILS:-false}" = "true" ]; then
+    echo "(push output hidden: private repository)"
+  else
+    cat "$RUNNER_TEMP/push.err"
+  fi
+}
+
 revalidate() {
-  if bun validator/actions/validate-template/validate_generated_files.ts target; then
+  # The validator's diagnostics name target paths and values; for a
+  # hidden target run_hidden.sh captures them.
+  if bash "$(dirname "$0")/run_hidden.sh" "post-withhold re-validation" -- \
+    bun validator/actions/validate-template/validate_generated_files.ts target; then
     echo "validation=ok" >>"$GITHUB_OUTPUT"
   else
     echo "validation=failed" >>"$GITHUB_OUTPUT"
@@ -41,18 +56,18 @@ revalidate() {
 
 : >"$RUNNER_TEMP/withheld-workflows.txt"
 if do_push 2>"$RUNNER_TEMP/push.err"; then
-  cat "$RUNNER_TEMP/push.err"
+  show_push_err
   echo "pushed=true" >>"$GITHUB_OUTPUT"
   exit 0
 fi
-cat "$RUNNER_TEMP/push.err"
+show_push_err
 
 # Permission-adaptive fallback: a token without the Workflows scope cannot
 # create or update .github/workflows files. Withhold those changes,
 # deliver the rest, and say so in the PR - the scope is optional by
 # design, not an error.
 if ! grep -qi "create or update workflow" "$RUNNER_TEMP/push.err"; then
-  echo "::error::pushing to ${TARGET}#${BRANCH} failed (see the log above). The REPO_PLATFORM_TOKEN needs Contents read/write on ${TARGET}; grant it and re-run."
+  echo "::error::pushing to ${target_display}#${BRANCH} failed (see the log above). The REPO_PLATFORM_TOKEN needs Contents read/write on ${target_display}; grant it and re-run."
   exit 1
 fi
 base_sha="$(git -C target rev-parse "origin/${BASE_BRANCH}")"
@@ -75,7 +90,7 @@ if [ -s "$RUNNER_TEMP/removed-paths.txt" ]; then
 fi
 git -C target add --all
 if git -C target diff --quiet "$base_sha"; then
-  echo "::warning::${TARGET}: this update only changes .github/workflows files, and the REPO_PLATFORM_TOKEN lacks the Workflows scope, so nothing can be delivered. Grant Workflows read/write to sync workflow files, or ignore this if that is intentional."
+  echo "::warning::${target_display}: this update only changes .github/workflows files, and the REPO_PLATFORM_TOKEN lacks the Workflows scope, so nothing can be delivered. Grant Workflows read/write to sync workflow files, or ignore this if that is intentional."
   echo "pushed=false" >>"$GITHUB_OUTPUT"
   # The full-tree validation verdict no longer applies to anything pushed;
   # re-validate the restored tree (== the default branch) so a real
@@ -83,10 +98,16 @@ if git -C target diff --quiet "$base_sha"; then
   revalidate
   exit 0
 fi
-git -C target commit --amend --no-edit
-do_push
+# --quiet: a non-quiet amend prints created/deleted paths of the target.
+git -C target commit --amend --no-edit --quiet
+if ! do_push 2>"$RUNNER_TEMP/push.err"; then
+  show_push_err
+  echo "::error::pushing to ${target_display}#${BRANCH} failed even after withholding workflow files. The REPO_PLATFORM_TOKEN needs Contents read/write on ${target_display}; grant it and re-run."
+  exit 1
+fi
+show_push_err
 echo "pushed=true" >>"$GITHUB_OUTPUT"
 # The earlier validation judged the full tree including the withheld
 # files; re-validate what was actually pushed.
 revalidate
-echo "::warning::${TARGET}: workflow-file changes were withheld because the REPO_PLATFORM_TOKEN lacks the Workflows scope (listed in the PR body). Grant Workflows read/write to include them; this is otherwise working as configured."
+echo "::warning::${target_display}: workflow-file changes were withheld because the REPO_PLATFORM_TOKEN lacks the Workflows scope (listed in the PR body). Grant Workflows read/write to include them; this is otherwise working as configured."

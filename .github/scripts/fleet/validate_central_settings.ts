@@ -197,20 +197,29 @@ export function checkCentralFileLocal(
 
 /** The module-derived label comparison, run only for files whose local
  *  check produced a roster. `fetchFile` reads a path from the target
- *  repo's default branch (injected so tests never touch the network). */
+ *  repo's default branch (injected so tests never touch the network).
+ *  `hideDetails` is the private-target mode: a central file's NAME is
+ *  self-disclosed by being committed here, but the repo's module facts,
+ *  recorded label values, and file-content parse detail are not - those
+ *  reduce to counts and field names, with HTTP statuses kept. */
 export function checkCentralFileRemote(
   file: string,
   repo: string,
   declared: Set<string>,
   fetchFile: (path: string) => Fetched,
+  hideDetails = false,
 ): CheckResult {
   const errors: string[] = [];
   const warnings: string[] = [];
+  // Captured gh stderr can carry more than a status line; a hidden
+  // target's warnings keep only the HTTP code.
+  const shownDetail = (detail: string) =>
+    hideDetails ? (/HTTP [0-9]+/.exec(detail)?.[0] ?? "detail hidden: private repository") : detail;
 
   const registration = fetchFile(".repo-platform.yml");
   if (registration.status === "failed") {
     warnings.push(
-      `${repo}/.repo-platform.yml: fetch failed (${registration.detail}), so ` +
+      `${repo}/.repo-platform.yml: fetch failed (${shownDetail(registration.detail)}), so ` +
         `${file}'s labels are unverified this run; the next nightly retries the read`,
     );
     return { errors, warnings };
@@ -229,8 +238,13 @@ export function checkCentralFileRemote(
   if (!Array.isArray(modules) || !modules.every((m) => typeof m === "string")) {
     errors.push(
       `${file}: the target repo's .repo-platform.yml has no readable top-level ` +
-        `modules list${typeof parsed === "string" ? ` (${parsed})` : ""} - ` +
-        `fix that file; the central settings cannot be validated against it`,
+        `modules list${
+          typeof parsed === "string" && !hideDetails
+            ? ` (${parsed})`
+            : hideDetails
+              ? " (detail hidden: private repository)"
+              : ""
+        } - fix that file; the central settings cannot be validated against it`,
     );
     return { errors, warnings };
   }
@@ -245,9 +259,9 @@ export function checkCentralFileRemote(
     const answers = fetchFile(".copier-answers.yml");
     if (answers.status === "failed") {
       warnings.push(
-        `${repo}/.copier-answers.yml: fetch failed (${answers.detail}), so ` +
-          `${file}'s fuzzer tracking label is unverified this run; the next ` +
-          `nightly retries the read`,
+        `${repo}/.copier-answers.yml: fetch failed (${shownDetail(answers.detail)}), so ` +
+          `${file}'s ${hideDetails ? "module-required labels are" : "fuzzer tracking label is"} ` +
+          `unverified this run; the next nightly retries the read`,
       );
     } else {
       const recorded =
@@ -256,9 +270,13 @@ export function checkCentralFileRemote(
         recorded !== null && typeof recorded !== "string" ? recorded.fuzzer_label : null;
       if (typeof value !== "string" || value === "") {
         errors.push(
-          `${file}: the target repo has the fuzzer module but no fuzzer_label answer ` +
-            `is readable from its .copier-answers.yml, so the tracking label cannot ` +
-            `be verified - fix the answers file`,
+          hideDetails
+            ? `${file}: a module-required label cannot be verified because the target ` +
+                `repo's recorded answers are unreadable (detail hidden: private ` +
+                `repository) - fix its .copier-answers.yml`
+            : `${file}: the target repo has the fuzzer module but no fuzzer_label answer ` +
+                `is readable from its .copier-answers.yml, so the tracking label cannot ` +
+                `be verified - fix the answers file`,
         );
         return { errors, warnings };
       }
@@ -266,8 +284,18 @@ export function checkCentralFileRemote(
     }
   }
 
-  for (const { name, why } of requiredLabels(modules, fuzzerLabel)) {
-    if (!declared.has(name)) {
+  const missing = requiredLabels(modules, fuzzerLabel).filter(({ name }) => !declared.has(name));
+  if (hideDetails && missing.length > 0) {
+    // Label names and their reasons are module facts of a private repo;
+    // the count keeps the failure actionable without them.
+    errors.push(
+      `${file}: labels are missing ${missing.length} entr${missing.length === 1 ? "y" : "ies"} ` +
+        `required by the target repository's module selection (names hidden: private ` +
+        `repository) - compare the file against the repo's modules from a private ` +
+        `context (docs/private-repos.md)`,
+    );
+  } else {
+    for (const { name, why } of missing) {
       errors.push(
         `${file}: labels must declare ${JSON.stringify(name)} - ${why}, and the apply ` +
           `deletes undeclared labels, so leaving it out loops delete/recreate nightly; ` +
@@ -301,6 +329,25 @@ function fetchRepoFile(repo: string, path: string): Fetched {
   const stderr = proc.stderr.toString();
   if (stderr.includes("HTTP 404")) return { status: "missing" };
   return { status: "failed", detail: stderr.trim().split("\n")[0] || "unknown error" };
+}
+
+/** Whether the target must be treated as private for detail purposes.
+ *  Fails closed - only an explicit private: false proves it public - and
+ *  says so when the probe itself failed, because failing closed on a
+ *  PUBLIC repo silently strips its actionable error detail otherwise.
+ *  The name itself is self-disclosed (a committed central filename);
+ *  this only decides whether its module facts and values may print. */
+function fetchRepoIsPrivate(repo: string): boolean {
+  const proc = Bun.spawnSync(["gh", "api", `repos/${repo}`, "--jq", ".private"]);
+  if (proc.exitCode !== 0) {
+    console.log(
+      `::warning::the visibility probe for ${repo} failed; treating it as private ` +
+        `for this run, so any error detail below is reduced (transient API failure - ` +
+        `the next nightly retries)`,
+    );
+    return true;
+  }
+  return proc.stdout.toString().trim() !== "false";
 }
 
 function main(args: string[]): void {
@@ -349,8 +396,12 @@ function main(args: string[]): void {
       continue;
     }
     const repo = `${owner}/${name}`;
-    const remote = checkCentralFileRemote(file, repo, local.declared, (path) =>
-      fetchRepoFile(repo, path),
+    const remote = checkCentralFileRemote(
+      file,
+      repo,
+      local.declared,
+      (path) => fetchRepoFile(repo, path),
+      fetchRepoIsPrivate(repo),
     );
     for (const warning of remote.warnings) console.log(`::warning::${warning}`);
     errors.push(...remote.errors);

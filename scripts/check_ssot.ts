@@ -1312,7 +1312,7 @@ const rules: Rule[] = [
       };
       const identityFiles = [
         ".github/workflows/refresh-gitignore.yml",
-        ".github/workflows/reusable-template-sync.yml",
+        ".github/scripts/sync/normalize_src.sh",
         ".github/scripts/sync/commit_push.sh",
       ];
       const referenceIdentity = identity(identityFiles[0]);
@@ -1593,6 +1593,107 @@ const rules: Rule[] = [
       }
       if (!sawExpected)
         throw new Error(`no '${username}/${slug}' literal found anywhere - anchor lost`);
+      return mismatches;
+    },
+  },
+
+  {
+    // The redaction verifier is computed twice: redact.ts (plan-side, TS)
+    // and resolve_private_repo.sh (leg-side, bash+openssl). The lockstep
+    // test in redact.test.ts proves the bytes agree; this rule pins the
+    // two spellable constants - truncation length and key-derivation
+    // label - so an edit to one side fails CI before the tags stop
+    // matching at runtime.
+    name: "redact-hmac-lockstep",
+    run: () => {
+      const ts = read(".github/scripts/fleet/redact.ts");
+      const sh = read(".github/scripts/fleet/resolve_private_repo.sh");
+      const mismatches: Mismatch[] = [];
+      const tsLen = mustMatch(
+        ts,
+        /export const VERIFY_HEX_LENGTH = (\d+);/,
+        "redact.ts",
+        "verify truncation length",
+      )[1];
+      // Anchor to the tag pipeline itself (hexkey ... cut), not any
+      // stray cut elsewhere in the script.
+      const shLen = mustMatch(
+        sh,
+        /hexkey:\$\{key_hex\}[\s\S]{0,120}?cut -c1-(\d+)/,
+        "resolve_private_repo.sh",
+        "verify truncation length",
+      )[1];
+      if (tsLen !== shLen) {
+        mismatches.push({
+          file: ".github/scripts/fleet/resolve_private_repo.sh",
+          expected: `HMAC truncation to ${tsLen} hex chars (redact.ts VERIFY_HEX_LENGTH)`,
+          got: `cut -c1-${shLen}`,
+        });
+      }
+      const label = mustMatch(
+        ts,
+        /export const KEY_DERIVATION_LABEL = "([^"]+)";/,
+        "redact.ts",
+        "key-derivation label",
+      )[1];
+      // The label must sit in the actual key derivation (printf into the
+      // PAT-keyed HMAC), not merely appear somewhere in the file.
+      const derivation = /printf '%s' "([^"]+)" \|\s*\n\s*openssl dgst -sha256 -hmac "\$PAT"/;
+      const shLabel = mustMatch(
+        sh,
+        derivation,
+        "resolve_private_repo.sh",
+        "key-derivation label",
+      )[1];
+      if (shLabel !== label) {
+        mismatches.push({
+          file: ".github/scripts/fleet/resolve_private_repo.sh",
+          expected: `the key-derivation label ${JSON.stringify(label)} (redact.ts)`,
+          got: JSON.stringify(shLabel),
+        });
+      }
+      return mismatches;
+    },
+  },
+
+  {
+    // open_pr.sh reads run_hidden.sh capture files by name to put hidden
+    // validation diagnostics into the PR body; the names derive from the
+    // labels at the run_hidden call sites. Rewording a label would
+    // silently break that hand-off, so every referenced capture name
+    // must match a label-derived one.
+    name: "hidden-capture-names",
+    run: () => {
+      const mismatches: Mismatch[] = [];
+      // Mirrors run_hidden.sh's slug transform (tr -c 'A-Za-z0-9' '-'
+      // squeezed and trimmed).
+      const slugify = (label: string) =>
+        label.replace(/[^A-Za-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+      const labels = [
+        ...read(".github/workflows/reusable-template-sync.yml").matchAll(
+          /run_hidden\.sh "([^"]+)" --/g,
+        ),
+        ...read(".github/scripts/sync/commit_push.sh").matchAll(/run_hidden\.sh" "([^"]+)" --/g),
+      ].map((m) => m[1]);
+      if (labels.length === 0) {
+        throw new Error("no run_hidden labels found in the sync call sites - anchor lost");
+      }
+      const derived = new Set(labels.map((l) => `hidden-${slugify(l)}.log`));
+      const referenced = [
+        ...read(".github/scripts/sync/open_pr.sh").matchAll(/hidden-[A-Za-z0-9-]+\.log/g),
+      ].map((m) => m[0]);
+      if (referenced.length === 0) {
+        throw new Error("open_pr.sh references no hidden capture files - anchor lost");
+      }
+      for (const name of referenced) {
+        if (!derived.has(name)) {
+          mismatches.push({
+            file: ".github/scripts/sync/open_pr.sh",
+            expected: `a capture name derived from a run_hidden label (${[...derived].join(", ")})`,
+            got: name,
+          });
+        }
+      }
       return mismatches;
     },
   },

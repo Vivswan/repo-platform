@@ -175,4 +175,22 @@ describe("driftWarnings", () => {
     ]);
     expect(warning).toContain("50%25 done");
   });
+
+  test("hideDetails names the field but never the values", () => {
+    const warnings = driftWarnings(
+      "h**-s**r",
+      [
+        { field: "private", recorded: "false", live: "true" },
+        { field: "description", recorded: "secret words", live: "other secret words" },
+      ],
+      true,
+    );
+    expect(warnings).toHaveLength(2);
+    for (const warning of warnings) {
+      expect(warning).toStartWith("::warning::h**-s**r: ");
+      expect(warning).toContain("values hidden: private repository");
+      expect(warning).not.toContain("secret words");
+    }
+    expect(warnings[1]).toContain("description changed out of band");
+  });
 });

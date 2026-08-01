@@ -8,16 +8,24 @@ import { join } from "node:path";
 // and `curl` binaries on PATH (plus a no-op `sleep`, so the retry loop
 // costs no wall time). Personas, all enrolled/adopted unless probed
 // otherwise:
-//   central-home - has settings/repos/central-home.yml, never probed
-//   deadapi      - settings.yml check fails with HTTP 502 every attempt
-//   deadprobe    - push probe answers HTTP 500 every attempt
-//   flaky        - push probe 500s once then 200s; adoption 502s once
-//                  then succeeds (both must be healed by the retries)
-//   steady       - every probe answers first try
-// The heal must select flaky and steady (plus central-home's central
-// file), warn about deadapi and deadprobe (skipped this run, retried
-// nightly), and exit 0; only an unreadable registry or a failed
-// discovery still exits 1.
+//   central-home  - has settings/repos/central-home.yml, never probed
+//   deadapi       - settings.yml check fails with HTTP 502 every attempt
+//   deadprobe     - push probe answers HTTP 500 every attempt
+//   flaky         - push probe 500s once then 200s; adoption 502s once
+//                   then succeeds (both must be healed by the retries)
+//   steady        - every probe answers first try
+//   hidden-server - PRIVATE, wildcard-discovered: healthy, must reach the
+//                   matrix as its hint with a verify tag, never as a slug
+//   hidden-nohome - PRIVATE, wildcard-discovered: no settings home, so
+//                   its warning and summary line must carry the hint
+// The explicit managed personas are absent from discovery, so the
+// fail-closed rule marks them private - but their names are committed in
+// repos.yml (self-disclosed), so they still print plainly with
+// hide_details riding the matrix row.
+// The heal must select flaky, steady, and hidden-server (plus
+// central-home's central file), warn about deadapi and deadprobe
+// (skipped this run, retried nightly), and exit 0; only an unreadable
+// registry or a failed discovery still exits 1.
 describe("select_settings_repos.sh", () => {
   const repoRoot = join(import.meta.dir, "..", "..", "..");
   const script = join(import.meta.dir, "select_settings_repos.sh");
@@ -36,7 +44,10 @@ describe("select_settings_repos.sh", () => {
         '    echo "HTTP 500 from stub" >&2',
         "    exit 1",
         "  fi",
-        "  echo '[[]]'",
+        // Two wildcard-discovered private repos; every explicit managed
+        // persona is deliberately absent (fail-closed => private, but
+        // self-disclosed by their repos.yml entries).
+        `  echo '[[{"full_name":"Vivswan/hidden-server","private":true,"archived":false,"owner":{"login":"Vivswan"},"permissions":{"push":true}},{"full_name":"Vivswan/hidden-nohome","private":true,"archived":false,"owner":{"login":"Vivswan"},"permissions":{"push":true}}]]'`,
         "  exit 0",
         "fi",
         'case "$2" in',
@@ -48,6 +59,10 @@ describe("select_settings_repos.sh", () => {
         "    ;;",
         "  repos/Vivswan/deadapi/contents/.github/settings.yml)",
         '    echo "HTTP 502 from stub" >&2',
+        "    exit 1",
+        "    ;;",
+        "  repos/Vivswan/hidden-nohome/contents/.github/settings.yml)",
+        '    echo "HTTP 404 from stub" >&2',
         "    exit 1",
         "    ;;",
         "  repos/*/contents/.repo-platform.yml) exit 0 ;;",
@@ -95,6 +110,7 @@ describe("select_settings_repos.sh", () => {
       join(fixture, "repos.yml"),
       [
         "managed:",
+        '  - "*"',
         "  - Vivswan/central-home",
         "  - Vivswan/deadapi",
         "  - Vivswan/deadprobe",
@@ -129,6 +145,7 @@ describe("select_settings_repos.sh", () => {
         PATH: `${bin}:${process.env.PATH}`,
         PAT: "stub-token",
         GH_TOKEN: "stub-token",
+        GITHUB_RUN_ID: "8675309",
         OWNER: "Vivswan",
         RUNNER_TEMP: join(work, "temp"),
         GITHUB_OUTPUT: outputFile,
@@ -157,7 +174,7 @@ describe("select_settings_repos.sh", () => {
     expect(main.exitCode).toBe(0);
   });
 
-  function targetsOf(result: Run): { repo: string; name: string; home: string }[] {
+  function targetsOf(result: Run): Record<string, unknown>[] {
     const line = result.output.split("\n").find((l) => l.startsWith("targets="));
     if (line === undefined) throw new Error(`no targets= line in: ${result.output}`);
     return JSON.parse(line.slice("targets=".length));
@@ -188,11 +205,55 @@ describe("select_settings_repos.sh", () => {
   });
 
   test("the matrix is intact: skips never drop their neighbors, homes are carried", () => {
+    // Explicit personas are absent from discovery, so fail-closed marks
+    // them private - self-disclosed names stay, hide_details rides along.
     expect(targetsOf(main)).toEqual([
-      { repo: "Vivswan/central-home", name: "central-home", home: "central" },
-      { repo: "Vivswan/flaky", name: "flaky", home: "in-repo" },
-      { repo: "Vivswan/steady", name: "steady", home: "in-repo" },
+      {
+        repo: "Vivswan/central-home",
+        name: "central-home",
+        home: "central",
+        redact_name: false,
+        verify: "",
+      },
+      {
+        repo: "Vivswan/flaky",
+        name: "flaky",
+        home: "in-repo",
+        redact_name: false,
+        verify: "",
+      },
+      {
+        repo: "Vivswan/steady",
+        name: "steady",
+        home: "in-repo",
+        redact_name: false,
+        verify: "",
+      },
+      {
+        repo: "h**-s**r",
+        name: "h**-s**r",
+        home: "in-repo",
+        redact_name: true,
+        verify: expect.stringMatching(/^[0-9a-f]{32}$/),
+      },
     ]);
+  });
+
+  test("a discovered private repo never leaks its slug anywhere public", () => {
+    // Job log, GITHUB_OUTPUT (the matrix), and the step summary are all
+    // world-readable; the hint is the only permitted spelling.
+    for (const channel of [main.stdout, main.stderr, main.output, main.summary]) {
+      expect(channel).not.toContain("hidden-server");
+      expect(channel).not.toContain("hidden-nohome");
+    }
+    expect(main.output).toContain("h**-s**r");
+  });
+
+  test("a hinted repo's no-settings-home warning and summary carry the hint", () => {
+    const warning = main.stdout.split("\n").find((line) => line.startsWith("::warning::h**-n**e"));
+    expect(warning).toBeDefined();
+    expect(warning).toContain("no settings/repos/<name>.yml here");
+    expect(main.summary).toContain("- h**-n**e");
   });
 
   test("an unreadable registry still fails the whole run", () => {
