@@ -79,7 +79,7 @@ jobs:
         if: steps.token.outputs.proceed == 'true'
         # Pinned to an immutable commit; bump to @v1 once repo-settings-as-code
         # cuts its first release. Bump together with settings-repos.yml.
-        uses: Vivswan/repo-settings-as-code@7c023fc1c7e63502d45ee8b17c6bf0db14faf0e8
+        uses: Vivswan/repo-settings-as-code@24eabe39cb9ab82777fe7bb884d5d43cd5eaa018
         with:
           token: ${{ secrets.REPO_PLATFORM_TOKEN }}
           mode: ${{ inputs.check_only && 'check' || 'apply' }}
