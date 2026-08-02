@@ -79,7 +79,7 @@ const TEXT_SUFFIXES = new Set([
   ".template",
 ]);
 
-const ADVISORY_JOBS = ["actionlint", "yamllint", "commit-names"];
+const ADVISORY_JOBS = ["actionlint", "gitleaks", "yamllint", "commit-names"];
 
 const KNOWN_MODULES = new Set([
   "agents",

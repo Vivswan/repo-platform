@@ -34,8 +34,8 @@ settings home, so settings stop being applied.
    job enforces the managed-file conventions and fails once
    `.copier-answers.yml` and `.repo-platform.yml` are gone. With sync PRs
    stopped, ci.yml is yours to edit; the remaining
-   jobs (typography, commit-names, actionlint, yamllint, checks, module
-   jobs) keep working standalone.
+   jobs (typography, commit-names, actionlint, gitleaks, yamllint, checks,
+   module jobs) keep working standalone.
 
 3. (Optional) Inline the reusable workflows. Replace each thin caller
    (`auto-assign.yml`, `pages.yml`, `settings-sync.yml`) with a copy of the
