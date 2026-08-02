@@ -266,9 +266,12 @@ export function selectRepos(
   if (options.repo !== undefined) {
     repos = repos.filter((slug) => slug === options.repo);
     if (repos.length === 0) {
+      // The requested value is withheld: this print is publicly readable
+      // and the operator-typed slug may name a private repository.
       errors.push(
-        `--repo ${options.repo} matched no selected repository - it is not in ` +
-          `managed (or the discovered list), or it is listed in exclude`,
+        "--repo matched no selected repository (value withheld - it may be a private " +
+          "slug): the repo you dispatched with is not in managed (or the discovered " +
+          "list), or it is listed in exclude; check the spelling and its case",
       );
       return { selection: [], errors };
     }
