@@ -12,8 +12,17 @@
 # No ::add-mask:: here: the runner silently drops a job output containing
 # a masked substring, which would kill the matrix.
 #
-# Env: PAT, GH_TOKEN, GITHUB_RUN_ID, ONLY_REPO, RUNNER_TEMP, GITHUB_OUTPUT.
+# Env: PAT, GH_TOKEN, GITHUB_RUN_ID, RUNNER_TEMP, GITHUB_OUTPUT;
+# GITHUB_EVENT_PATH supplies the single-repo dispatch input (a non-empty
+# ONLY_REPO env overrides it - the test harness and local runs use that).
 set -euo pipefail
+
+# The typed dispatch input may be a private slug, so it must not ride in
+# as step env: the runner prints step env values into the public log
+# group. The event payload on the runner's disk is not logged.
+if [ -z "${ONLY_REPO:-}" ] && [ -n "${GITHUB_EVENT_PATH:-}" ]; then
+  ONLY_REPO="$(jq -r '.inputs.repo // empty' "$GITHUB_EVENT_PATH")"
+fi
 
 bun .github/scripts/fleet/repos_registry.ts select \
   ${ONLY_REPO:+--repo "$ONLY_REPO"} \
