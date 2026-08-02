@@ -69,13 +69,15 @@ jobs:
           fi
 
       # A recovery re-render clobbers local edits in template-managed
-      # files; it must never fan out across the fleet by accident.
+      # files; it must never fan out across the fleet by accident. Only
+      # the PRESENCE of the repo input is tested - its value may be a
+      # private slug, and step env values print into this public log.
       - name: Require a single-repo scope for recovery
         if: inputs.recover == 'recopy'
         env:
-          ONLY_REPO: ${{ inputs.repo }}
+          REPO_SET: ${{ inputs.repo != '' }}
         run: |
-          if [ -z "$ONLY_REPO" ]; then
+          if [ "$REPO_SET" != "true" ]; then
             echo "::error::recover=recopy is a single-repo operation: pass the repo input (owner/name) with it, so a full re-render can never fan out across the fleet."
             exit 1
           fi
@@ -172,12 +174,14 @@ jobs:
             > "$RUNNER_TEMP/discovered.json"
           echo "discovered $(jq 'length' "$RUNNER_TEMP/discovered.json") writable repos for ${login}"
 
+      # No ONLY_REPO env on purpose: the typed dispatch input may be a
+      # private slug, and the runner prints step env values into this
+      # public log - the script reads it from the event payload instead.
       - name: Select repos and check adoption
         id: select
         env:
           GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
           PAT: ${{ secrets.REPO_PLATFORM_TOKEN }}
-          ONLY_REPO: ${{ inputs.repo }}
         run: bash .github/scripts/fleet/select_sync_repos.sh
 
   sync:

@@ -114,9 +114,12 @@ just the failed job.
 
 - Run logs from BEFORE this redaction still contain slugs; delete old
   runs if that matters.
-- The `repo=` input you type into a workflow dispatch is visible in the
-  run's metadata. That is your own disclosure, and the run still hints
-  everything it prints.
+- The `repo=` input you type into a workflow dispatch stays out of the
+  public log: the plan job reads it from the runner's event payload
+  rather than step env (which the runner would print), and GitHub's
+  workflow-run API does not return dispatch inputs. A dispatched private
+  repo appears only as its hint - even a mistyped one is withheld from
+  the no-match error.
 - A repo flipped private after a run started (or after years of being
   public) cannot retract what earlier runs already published.
 - The masker is substring-based: a private repo's bare name is only
