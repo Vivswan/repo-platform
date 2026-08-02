@@ -28,7 +28,7 @@ workflow.
   all-green:
     name: all-green
     if: always()
-    needs: [typography, actionlint, yamllint, commit-names, test]  # every other job
+    needs: [typography, actionlint, gitleaks, yamllint, commit-names, test]  # every other job
     runs-on: ubuntu-latest
     steps:
       - name: All jobs green
