@@ -92,6 +92,9 @@ describe("select_sync_repos.sh", () => {
         GH_TOKEN: "stub-token",
         GITHUB_RUN_ID: "8675309",
         ONLY_REPO: "",
+        // Neutralize the real event payload CI runs carry; the dispatch
+        // tests set their own.
+        GITHUB_EVENT_PATH: "",
         RUNNER_TEMP: join(work, "temp"),
         GITHUB_OUTPUT: outputFile,
         ...env,
@@ -154,5 +157,29 @@ describe("select_sync_repos.sh", () => {
 
   test("the roster line lists hints, not slugs", () => {
     expect(main.stdout).toContain("syncing: h**-s**r, Vivswan/steady");
+  });
+
+  test("a private dispatch input arrives via the event payload and never prints", () => {
+    // The workflow passes no ONLY_REPO env (the runner would print it);
+    // the script reads the typed input from GITHUB_EVENT_PATH instead.
+    const eventFile = join(root, "dispatch-event.json");
+    writeFileSync(eventFile, JSON.stringify({ inputs: { repo: "Vivswan/hidden-server" } }));
+    const r = run("dispatch", { ONLY_REPO: "", GITHUB_EVENT_PATH: eventFile });
+    expect(r.exitCode).toBe(0);
+    for (const channel of [r.stdout, r.stderr, r.output]) {
+      expect(channel).not.toContain("hidden-server");
+    }
+    expect(reposOf(r).map((row) => row.repo)).toEqual(["h**-s**r"]);
+  });
+
+  test("a mistyped private dispatch input is withheld from the no-match error", () => {
+    const eventFile = join(root, "dispatch-miss-event.json");
+    writeFileSync(eventFile, JSON.stringify({ inputs: { repo: "Vivswan/hidden-servr" } }));
+    const r = run("dispatch-miss", { ONLY_REPO: "", GITHUB_EVENT_PATH: eventFile });
+    expect(r.exitCode).not.toBe(0);
+    expect(r.stderr).toContain("matched no selected repository");
+    for (const channel of [r.stdout, r.stderr, r.output]) {
+      expect(channel).not.toContain("hidden-servr");
+    }
   });
 });
