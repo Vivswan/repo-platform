@@ -72,6 +72,16 @@ labels:
   - name: fix-lint
     color: "fbca04"
     description: Lint / formatting fixes
+{% if private %}  # repo-platform's central settings run delivers this repo's private
+  # settings report as an issue carrying this marker label. The central
+  # (redacted) apply injects the label into its managed set automatically;
+  # the self-apply here is never redacted and injects nothing, so without
+  # this declaration every self-apply deletes the label and the next
+  # central run recreates it.
+  - name: settings-as-code-report
+    color: "0e2a47"
+    description: managed by settings-as-code private reporting - do not remove
+{% endif -%}
 {# compose:settings-labels #}
 
 # Branch ruleset for the default branch. Admins (RepositoryRole id 5) are in
