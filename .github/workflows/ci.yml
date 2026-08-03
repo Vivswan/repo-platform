@@ -48,6 +48,22 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITLEAKS_ENABLE_COMMENTS: "false"
 
+  # Fails when a PR introduces dependencies with known vulnerabilities, by
+  # diffing the dependency graph between base and head. Only PR events have
+  # a diff to review, so the skip lives on the steps: all-green treats a
+  # skipped needed job as failure, so the job itself stays unconditional.
+  dependency-review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        if: github.event_name == 'pull_request'
+      - uses: actions/dependency-review-action@v5
+        if: github.event_name == 'pull_request'
+        with:
+          # Deliberate strictest threshold (also the action's default,
+          # pinned so a default change cannot loosen the gate silently).
+          fail-on-severity: low
+
   # The workflows' large steps live as scripts in .github/scripts/ exactly
   # so they can be linted; actionlint only sees inline run blocks.
   shellcheck:
@@ -330,6 +346,7 @@ jobs:
     needs:
       - actionlint
       - gitleaks
+      - dependency-review
       - shellcheck
       - yamllint
       - biome
