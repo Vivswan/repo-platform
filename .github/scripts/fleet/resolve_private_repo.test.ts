@@ -6,9 +6,9 @@ import { verifyTag } from "./redact.ts";
 
 // End-to-end harness for the leg-side resolver, stub-gh style (see
 // select_settings_repos.test.ts). Running the real script against tags
-// computed by redact.ts's verifyTag is also the bash/TS HMAC lockstep
+// computed by redact.ts's verifyTag is also the shell/TS HMAC lockstep
 // proof: resolution only succeeds when both sides derive the same key and
-// tag - openssl is real here, only `gh` is stubbed.
+// tag - python3 and openssl are real here, only `gh` is stubbed.
 describe("resolve_private_repo.sh", () => {
   const script = join(import.meta.dir, "resolve_private_repo.sh");
   const root = mkdtempSync(join(tmpdir(), "resolve-private-"));
@@ -77,6 +77,17 @@ describe("resolve_private_repo.sh", () => {
     expect(r.env).toContain("TARGET_DISPLAY=Vivswan/pub-repo");
     expect(r.output).toContain("repo=Vivswan/pub-repo");
     expect(r.stdout).not.toContain("::add-mask::");
+  });
+
+  test("an empty PAT fails closed before any derivation", () => {
+    const r = run("empty-pat", {
+      TARGET_INPUT: "hidden-x",
+      REDACT_NAME: "true",
+      VERIFY: "deadbeef",
+      PAT: "",
+    });
+    expect(r.exitCode).not.toBe(0);
+    expect(r.stdout).toContain("PAT is empty or unset");
   });
 
   test("resolves a redacted row by tag and masks before anything else", () => {

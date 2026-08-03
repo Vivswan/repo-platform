@@ -7,12 +7,10 @@
 # any other output, so later steps' env prints, checkout logs, and API
 # error bodies render it as ***.
 #
-# The tag key is derived from the PAT (never the raw PAT; openssl receives
-# only the derived key, though the derivation itself passes the PAT on
-# argv - accepted on a single-tenant ephemeral runner where the PAT
-# already sits in the step env). Everything fails closed: an empty tag, a
-# zero-match (repo renamed/deleted, grant revoked, or PAT rotated since
-# the plan job), or an ambiguous match errors out naming only the hint.
+# The tag key is derived from the PAT, never the raw PAT. Everything
+# fails closed: an empty tag, a zero-match (repo renamed/deleted,
+# grant revoked, or PAT rotated since the plan job), or an ambiguous
+# match errors out naming only the hint.
 #
 # Env in: TARGET_INPUT (slug, or hint when REDACT_NAME=true), REDACT_NAME,
 # VERIFY, PAT, GITHUB_RUN_ID, GITHUB_ENV, GITHUB_OUTPUT, RUNNER_TEMP.
@@ -33,10 +31,19 @@ if [ -z "${VERIFY:-}" ]; then
   exit 1
 fi
 
+# An empty key would be publicly known: HMAC(key="") is computable by
+# anyone, so an unset or empty PAT must fail before any derivation.
+if [ -z "${PAT:-}" ]; then
+  echo "::error::PAT is empty or unset - cannot derive the resolution key; check the REPO_PLATFORM_TOKEN wiring."
+  exit 1
+fi
+
 # Same key derivation as redact.ts verifyTag; the lockstep test in
 # redact.test.ts and a check_ssot rule keep the two sides identical.
-key_hex="$(printf '%s' "repo-platform-redact-key-v1" |
-  openssl dgst -sha256 -hmac "$PAT" -hex | awk '{print $NF}')"
+# python3 reads the PAT from the environment, so the secret never rides
+# any process argv; the tag HMAC below receives only the derived key.
+key_hex="$(python3 -c 'import hashlib, hmac, os
+print(hmac.new(os.environb[b"PAT"], b"repo-platform-redact-key-v1", hashlib.sha256).hexdigest())')"
 
 tag_for() {
   printf '%s\0%s' "$GITHUB_RUN_ID" "$(tr '[:upper:]' '[:lower:]' <<<"$1")" |

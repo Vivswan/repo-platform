@@ -1686,9 +1686,11 @@ const rules: Rule[] = [
         "redact.ts",
         "key-derivation label",
       )[1];
-      // The label must sit in the actual key derivation (printf into the
-      // PAT-keyed HMAC), not merely appear somewhere in the file.
-      const derivation = /printf '%s' "([^"]+)" \|\s*\n\s*openssl dgst -sha256 -hmac "\$PAT"/;
+      // The label must sit in the actual key_hex derivation: both lines
+      // are anchored start-to-end (multiline), so a commented-out or
+      // decorated copy cannot satisfy the rule.
+      const derivation =
+        /^key_hex="\$\(python3 -c 'import hashlib, hmac, os\nprint\(hmac\.new\(os\.environb\[b"PAT"\], b"([^"]+)", hashlib\.sha256\)\.hexdigest\(\)\)'\)"$/m;
       const shLabel = mustMatch(
         sh,
         derivation,
