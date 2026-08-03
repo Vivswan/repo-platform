@@ -96,7 +96,6 @@ export function validateRegistry(
     }
   }
 
-  // managed
   let wildcard = false;
   const repos: string[] = [];
   if (!Array.isArray(data.managed)) {
@@ -125,7 +124,6 @@ export function validateRegistry(
     }
   }
 
-  // exclude
   const exclude: string[] = [];
   if (data.exclude !== undefined) {
     if (!Array.isArray(data.exclude)) {
@@ -153,7 +151,6 @@ export function validateRegistry(
     }
   }
 
-  // defaults
   let defaultChannel: Channel | null = null;
   if (data.defaults !== undefined) {
     if (!isPlainObject(data.defaults)) {
@@ -177,7 +174,6 @@ export function validateRegistry(
     }
   }
 
-  // config
   const config = new Map<string, { channel: Channel }>();
   if (data.config !== undefined) {
     if (!isPlainObject(data.config)) {
