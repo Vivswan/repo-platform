@@ -102,33 +102,23 @@ if [ "$CHANNEL" = "staging" ]; then
     fi
   done < <(git log --format=%B "$TIP_SHA" | commit_stamp_parse_all)
 else
-  # publish.sh builds a version from the commit its vX.Y.Z release tag
-  # points at, and stamps exactly that sha. The release tag sits in the
-  # build-tags ruleset's include, so once it exists it cannot be moved:
-  # requiring equality anchors the templates tag to its own version's
-  # source and rules out replaying any other build under this tag name.
+  # Header check 2 (latest anchor): the stamp must equal the frozen
+  # vX.Y.Z release tag's commit, so no other build can replay under
+  # this tag name.
   if ! release_sha="$(git rev-parse --verify --quiet "refs/tags/${VERSION}^{commit}")"; then
     fail "${subject} cannot be verified: release tag ${VERSION} does not resolve, so there is no release commit to check the stamp against. ${rebuild_hint}"
   fi
   if [ "$SOURCE_SHA" != "$release_sha" ]; then
     fail "${subject} is stamped with source ${SOURCE_SHA:0:12}, but release ${VERSION} tagged ${release_sha:0:12} - the builder only stamps templates/${VERSION} with that release's commit, so this tag is not its output. ${rebuild_hint}"
   fi
-  # Staging's rollback rule, in tag form. Anchoring the stamp to the
-  # release tag is not enough: a writer can mint BOTH tags for an unused
-  # version (above OR below the real ones) from an OLD main commit and
-  # rebuild that source's tree under the new version - every other proof
-  # passes, because the tree really is the builder's output of that
-  # source - and ship a fleet-wide downgrade as a "new release". So the
-  # shipped tag must sit at the source frontier: no templates tag
-  # anywhere in the namespace may stamp a strictly NEWER on-main source
-  # than this one. Genuine releases always move the frontier forward
-  # (release-please cuts them from main's advancing tip), so they pass;
-  # a planted tag can only ever stamp a source that already exists, so
-  # it cannot reject the genuine releases that follow. Unparseable,
+  # Header check 2 (frontier - staging's rollback rule in tag form):
+  # anchoring alone is not enough - a writer can mint BOTH tags for an
+  # unused version from an OLD main commit and pass every other proof,
+  # shipping a fleet-wide downgrade. Genuine releases always move the
+  # frontier forward, and a planted tag can only stamp a source that
+  # already exists, so neither rejects the other. Unparseable,
   # unresolvable, or off-main stamps are skipped so junk tags cannot
-  # brick verification. The flip side is deliberate: an old release
-  # cannot be re-shipped, not even on purpose - downgrades go forward,
-  # by reverting the template change on main and cutting a new release.
+  # brick verification.
   while IFS= read -r other_tag; do
     [ "$other_tag" != "templates/${VERSION}" ] || continue
     other_tip="$(git rev-list -n1 "refs/tags/${other_tag}" 2>/dev/null)" || continue

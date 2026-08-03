@@ -33,8 +33,6 @@ elif [ "$EVENT_NAME" = "workflow_dispatch" ] && [ "${DISPATCH_CHANNEL:-both}" !=
   fi
 elif [ "$EVENT_NAME" != "workflow_dispatch" ]; then
   # Self-heal: rebuild latest when its build tag or branch is missing.
-  # gh api prints the error body to stdout on 404; only keep output from
-  # a successful call.
   latest_ver="$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name 2>/dev/null)" || latest_ver=""
   if [ -n "$latest_ver" ]; then
     if ! git ls-remote --exit-code origin "refs/tags/templates/${latest_ver}" >/dev/null 2>&1 ||

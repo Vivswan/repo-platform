@@ -168,9 +168,7 @@ fuzzer_label:
 # --- release-please module parameter (asked only when it is selected) ---
 # GitHub releases are immutable once published, so release-please cuts every
 # release as a draft; this decides who flips it live. The answer only shapes
-# the generated release.yml starter (repo-owned afterwards): saying yes puts
-# a publish-release job at the end of the pipeline, saying no leaves
-# publication to the repository's own final job.
+# the generated release.yml starter (repo-owned afterwards).
 
 release_auto_publish:
   type: bool

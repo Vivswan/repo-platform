@@ -105,9 +105,8 @@ export function head(text: string, limit: number): string {
 }
 
 /**
- * Truncate `text` to at most `max` characters, appending a marker when cut, so
- * a single very long line (which line truncation cannot shorten) can never blow
- * the body budget. The marker itself is counted, so the return is always <= max.
+ * Truncate `text` to at most `max` characters, appending a marker when cut.
+ * The marker is counted, so the return is always <= max.
  */
 export function capChars(text: string, max: number): string {
   if (text.length <= max) {
@@ -175,10 +174,9 @@ export function buildBody(dirs: string[], env: NodeJS.ProcessEnv, artifactName: 
     `\n${count} more failure report(s) omitted to stay under the GitHub body limit; see the attached artifacts.`;
   const noticeReserve = omissionNotice(dirs.length).length;
 
-  // Append per-failure blocks while each fits the remaining budget; then stop
-  // and say how many were omitted. Every block (including the first) is both
-  // character-capped and budget-checked, so no single report can push the
-  // body past GitHub's limit and break the filing itself.
+  // Every block (including the first) is character-capped and
+  // budget-checked, so no single report can push the body past GitHub's
+  // limit and break the filing itself.
   const budget = MAX_BODY - header.length - footer.length - artifactsNote.length - noticeReserve;
   const blocks: string[] = [];
   let used = 0;
@@ -194,7 +192,7 @@ export function buildBody(dirs: string[], env: NodeJS.ProcessEnv, artifactName: 
       [`## ${title}`, "", ...(rest ? [head(rest, REPORT_LINES), ""] : [])].join("\n"),
       MAX_BLOCK_CHARS,
     );
-    // +1 for the "\n" join between blocks. Stop before overflowing the budget.
+    // +1 for the "\n" join between blocks.
     if (used + block.length + 1 > budget) {
       break;
     }
@@ -247,11 +245,9 @@ async function labelExists(run: GhRunner, label: string): Promise<boolean> {
 }
 
 /**
- * File the failure: comment on the open labeled issue if one exists, else
- * create a new one. Assignment is left to the caller (auto-assign dispatch).
- * Returns the issue number (existing or newly created) so the caller can
- * dispatch auto-assign at it; undefined only if gh's create URL could not be
- * parsed. `run` is injected so this is testable.
+ * Comment on the open labeled issue if one exists, else create it. Returns
+ * the issue number so the caller can dispatch auto-assign at it (assignment
+ * never happens here); undefined only when gh's create URL fails to parse.
  */
 export async function fileIssue(
   run: GhRunner,

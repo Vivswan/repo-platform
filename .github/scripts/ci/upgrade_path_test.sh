@@ -171,9 +171,7 @@ RECOVER="" bash .github/scripts/sync/apply_update.sh
 bun .github/scripts/sync/resolve_copier_conflicts.ts \
   --summary "$WORK/dropped-local-hunks.md" --root "$PROJECT"
 
-# Retired-file cleanup runs the workflow's own script - it builds the
-# render data via render_data.ts, renders both template versions, computes
-# candidates via retired_paths.ts, and deletes them - pointed at the
+# Retired-file cleanup runs the workflow's own script, pointed at the
 # project through TARGET_DIR, with RUNNER_TEMP set to $WORK where the
 # copier.yml snapshots already sit (resolve_refs.sh writes them there in
 # the workflow).
@@ -227,8 +225,7 @@ for f in "${retired_files[@]}"; do
   test ! -e "$f" || fail "retired file survived the update: $f"
 done
 # settings.yml is repo-owned (PROTECTED_PATHS + the preserve step):
-# deselecting the module
-# must leave the file AND its local edit alone.
+# deselecting the module must leave the file AND its local edit alone.
 test -f .github/settings.yml || fail "repo-owned settings.yml was deleted"
 grep -qF "# local settings note" .github/settings.yml \
   || fail "repo-owned settings.yml lost its local modification"
