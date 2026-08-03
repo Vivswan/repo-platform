@@ -123,17 +123,12 @@ function shapeOfYaml(text: string): unknown {
 }
 
 /** Whether a duplicate mapping key in this path is an error rather than an
- *  advisory. The must-stay-strict file is .github/settings.yml: a
- *  three-way merge can duplicate the unconditional identity keys
- *  (homepage/topics/private) and the later value would silently win at
- *  apply time. The rule generalizes to all of .github/ plus the two root
- *  registration files - not because the template owns every such file (the
- *  _skip_if_exists ones are generated once then repo-owned), but because
- *  GitHub's own parsers reject duplicate keys there, so flagging one
- *  surfaces a break that would bite anyway. Elsewhere in the tree a
- *  duplicate can be deliberate (a parser fixture, a vendored config), and
- *  during a sync the walked tree is the whole target repo - failing on
- *  those would make every sync PR permanently red with no exemption. */
+ *  advisory. Strict for .github/ plus the two root registration files:
+ *  GitHub's own parsers reject duplicate keys there anyway, and a three-way
+ *  merge can duplicate settings.yml's identity keys, where the later value
+ *  silently wins at apply time. Elsewhere a duplicate can be deliberate (a
+ *  parser fixture, a vendored config) - and a sync walks the whole target
+ *  repo, so erroring there would make every sync PR permanently red. */
 function isStrictYaml(rel: string): boolean {
   return (
     rel === ".copier-answers.yml" || rel === ".repo-platform.yml" || rel.startsWith(".github/")
@@ -389,10 +384,6 @@ function main(): number {
               "merges; add them to the all-green job's needs list",
           );
         }
-        // The gate's shape, not just its coverage: without `if: always()` a
-        // failed dependency leaves all-green skipped (and a skipped check
-        // does not block merges), and the step must fail on every
-        // non-success result so failure/cancelled/skipped all gate.
         const ifValue = typeof allGreen.if === "string" ? allGreen.if.trim() : "";
         if (ifValue !== "always()") {
           errors.push(

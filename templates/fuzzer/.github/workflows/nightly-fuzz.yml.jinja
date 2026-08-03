@@ -49,13 +49,10 @@ jobs:
     # (wall-clock flag, `timeout` wrapper) below this value so a hang
     # surfaces as a failure.
     timeout-minutes: 60
-    # Sharding multiplies nightly coverage at the same wall-clock cost: give
-    # each shard its own seed and slice of the work. BUT with a matrix the
-    # issue-filing and resolve steps below must move to a separate
-    # `needs: fuzz` job with `if: always()` that first downloads every
-    # shard's failure artifact - as steps of a matrixed job they race, and
-    # shard 1's green resolve step can close the issue shard 2 just filed.
-    # See docs/fuzzer.md before enabling:
+    # Sharding multiplies nightly coverage at the same wall-clock cost, BUT
+    # the issue-filing and resolve steps below then race across shards and
+    # must move to a separate `needs: fuzz` job. See the Sharding section of
+    # repo-platform's docs/fuzzer.md before enabling:
     # strategy:
     #   fail-fast: false
     #   matrix:

@@ -147,8 +147,8 @@ jobs:
           --owner "$OWNER" --dir "$RUNNER_TEMP/central-scope"
 
       - name: Apply repository settings
-        # Pinned to an immutable commit; bump to @v1 once repo-settings-as-code
-        # cuts its first release. Bump together with reusable-apply-settings.yml.
+        # Pinned to an immutable commit; bump to @v1 once the action cuts
+        # its first release. Bump together with reusable-apply-settings.yml.
         uses: Vivswan/repo-settings-as-code@24eabe39cb9ab82777fe7bb884d5d43cd5eaa018
         with:
           token: ${{ secrets.REPO_PLATFORM_TOKEN }}
