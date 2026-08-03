@@ -29,6 +29,9 @@ _skip_if_exists:
   - .github/ISSUE_TEMPLATE/*.yml
   - release-please-config.json
   - .release-please-manifest.json
+  # Repos accumulate their own allowlists in it; sync must never reset
+  # what a repo has excused.
+  - .gitleaks.toml
   # A repository may already carry a different license; sync must never
   # overwrite a legal document, so it is generated only when absent.
   - LICENSE
