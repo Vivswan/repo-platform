@@ -21,7 +21,9 @@ on:
   workflow_dispatch:
     inputs:
       check_only:
-        description: Report drift without writing
+        description: >-
+          Report drift without settings writes (a private target's
+          report issue is still delivered)
         required: false
         type: boolean
         default: false
@@ -161,11 +163,11 @@ jobs:
           repos-dir: ${{ matrix.home == 'central' && format('{0}/central-scope', runner.temp) || '' }}
           repos: ${{ matrix.home == 'in-repo' && steps.resolve.outputs.repo || '' }}
           defaults-file: settings/defaults.yml
-          # The action's own private-target redaction (its default,
-          # pinned here on purpose): it placeholders private slugs and
-          # values in ITS output - the second layer under this
-          # workflow's hint-based matrix redaction.
           private-repos: redact
+          # A redacted target's failure/drift details cannot appear in
+          # this public log; they land as a reused issue on the target
+          # repo instead. Needs the PAT's Issues write.
+          private-report: issue
           # Strict: a token that cannot reach a declared section fails
           # this repo's job (the action's default) - settings drift must
           # not hide behind a green run.
