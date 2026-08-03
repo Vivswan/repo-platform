@@ -29,6 +29,9 @@ _skip_if_exists:
   - .github/ISSUE_TEMPLATE/*.yml
   - release-please-config.json
   - .release-please-manifest.json
+  # A repository may already carry a different license; sync must never
+  # overwrite a legal document, so it is generated only when absent.
+  - LICENSE
 
 # Migrations use FROM-version naming (see migrations/run.ts): each script in
 # migrations/ is named for the release it migrates away from, so authoring

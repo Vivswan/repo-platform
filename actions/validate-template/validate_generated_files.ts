@@ -14,8 +14,10 @@
 //      job, and a `typography` job exists
 //
 // Advisories (printed, never fail): missing actionlint / yamllint /
-// commit-names jobs in ci.yml; duplicate mapping keys in YAML outside
-// .github/ and the registration files.
+// commit-names / gitleaks jobs in ci.yml (older renders predate the newer
+// jobs), plus dependency-review on public renders only (private renders
+// never get that job, so their answers silence the advisory); duplicate
+// mapping keys in YAML outside .github/ and the registration files.
 //
 // Usage: bun actions/validate-template/validate_generated_files.ts [--self] [target-dir]
 //
@@ -79,7 +81,7 @@ const TEXT_SUFFIXES = new Set([
   ".template",
 ]);
 
-const ADVISORY_JOBS = ["actionlint", "gitleaks", "yamllint", "commit-names"];
+const ADVISORY_JOBS = ["actionlint", "gitleaks", "yamllint", "commit-names", "dependency-review"];
 
 const KNOWN_MODULES = new Set([
   "agents",
@@ -416,7 +418,15 @@ function main(): number {
             "Vivswan/repo-platform/actions/check-typography",
         );
       }
+      // dependency-review renders only on public repos (the dependency
+      // graph behind it is free just there), so a private render's answers
+      // silence that advisory instead of nagging about a job it must not
+      // have. Self mode has no answers file and is public anyway.
+      const answersPath = join(root, ".copier-answers.yml");
+      const isPrivateRender =
+        isRegularFile(answersPath) && /^private: true\b/m.test(readFileSync(answersPath, "utf-8"));
       for (const advisory of ADVISORY_JOBS) {
+        if (advisory === "dependency-review" && isPrivateRender) continue;
         if (!(advisory in jobs)) {
           advisories.push(`ci.yml: consider adding a \`${advisory}\` job`);
         }
