@@ -28,7 +28,16 @@ for the same repository, the central file wins. A private in-repo target
 shows up as a name hint (`apply (h**-s**r)`) rather than its slug, and
 its details stay out of the public log - see
 [docs/private-repos.md](private-repos.md); central targets are named by
-their committed files, so only their details are hidden.
+their committed files, so only their details are hidden. The hidden
+details are not lost: for a redacted target the action's visibility
+probe proves private or internal, the full failure/drift report is
+delivered as a marker-labelled issue on that repository itself
+(`private-report: issue`). The issue exists for every such target and
+is reused forever: open means the apply failed or drifted, closed means
+healthy with the latest report inside (prior reports stay in the
+body's edit history). Delivery is best-effort: a target whose
+visibility the probe cannot prove stays redacted without an issue, and
+a failed delivery warns without changing the run's result.
 
 Two guarantees for the in-repo home:
 
@@ -44,7 +53,11 @@ Two guarantees for the in-repo home:
 - Push to main touching `settings/**`: merging a settings change applies it.
 - Nightly heal cron: reverts out-of-band drift and applies in-repo files.
 - Manual dispatch: a plain dispatch applies; pass `-f check_only=true` for
-  a drift report without writing.
+  a drift report without settings writes. A private target's report issue
+  is still delivered even then, and the very first check on a private
+  target can flag the report's marker label itself as drift - the label
+  does not exist until that same run's delivery creates it, so the next
+  run is clean.
 
 ## The defaults baseline
 
@@ -92,7 +105,14 @@ Stateless, declared-keys-only, upsert-by-name:
   carries no `.repo-platform.yml`, or one whose files could not be
   fetched this run, draws a warning instead of an error: that file's
   labels go unverified until the next nightly, and one unreadable repo
-  never blocks the heal for everyone else.
+  never blocks the heal for everyone else. Private repos declaring labels
+  carry one more: the `settings-as-code-report` marker label (color
+  `0e2a47`) that private reporting pins its report issue with. The
+  central apply redacts private targets and injects the marker into the
+  managed set itself, but the settings-sync module's self-apply runs
+  unredacted and injects nothing - so the module's template declares the
+  label for private repos, keeping the self-apply from deleting what the
+  next central run recreates.
 - Rulesets: upserted by name (branch and tag targets); never deleted
   when undeclared, since removing protection stays a human action.
 - Repository fields, topics, and security toggles are applied only when
