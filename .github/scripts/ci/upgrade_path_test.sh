@@ -116,6 +116,9 @@ git -c user.name=ci -c user.email=ci@localhost commit -q -m "chore: init"
 # - checks.yml is generated-once (_skip_if_exists): local edits must survive
 # - bug_report.yml is generated-once (_skip_if_exists issue forms): local
 #   tailoring must survive the update
+# - LICENSE is generated-once (_skip_if_exists): a repo may carry its own
+#   license, which no sync may ever overwrite (created here when the old
+#   fixture predates the file - the divergence must survive either way)
 # - retired-sentinel.txt (synthetic fixture) left the render between the
 #   builds; it is resurrected after the update so its deletion provably
 #   comes from retired_cleanup.sh
@@ -125,6 +128,7 @@ git -c user.name=ci -c user.email=ci@localhost commit -q -m "chore: init"
 echo "# local settings note" >> .github/settings.yml
 echo "# local checks note" >> .github/workflows/checks.yml
 echo "# local issue form note" >> .github/ISSUE_TEMPLATE/bug_report.yml
+echo "Divergent local license" > LICENSE
 if [ "$synthetic" = true ]; then
   echo "# local sentinel note" >> .github/retired-sentinel.txt
 fi
@@ -242,6 +246,17 @@ grep -qF "# local checks note" .github/workflows/checks.yml \
   || fail "generated-once checks.yml lost its local modification"
 grep -qF "# local issue form note" .github/ISSUE_TEMPLATE/bug_report.yml \
   || fail "generated-once bug_report.yml lost its local modification (_skip_if_exists must hold)"
+[ "$(cat LICENSE)" = "Divergent local license" ] \
+  || fail "the divergent LICENSE was modified by the update (_skip_if_exists must hold)"
+# Public-only community files and the dependency-review gate must be in the
+# updated render (they arrive via the update when the old fixture predates
+# them).
+test -f CONTRIBUTING.md || fail "CONTRIBUTING.md is missing after the public update"
+test -f CODE_OF_CONDUCT.md || fail "CODE_OF_CONDUCT.md is missing after the public update"
+grep -qF -- "dependency-review:" .github/workflows/ci.yml \
+  || fail "ci.yml is missing the dependency-review gate job"
+grep -qF -- "- dependency-review" .github/workflows/ci.yml \
+  || fail "ci.yml's all-green does not need dependency-review"
 # The update must PRESERVE the repo's configuration, not reset it.
 grep -qF -- "## Python " .gitignore || fail ".gitignore lost the uv module section"
 grep -qF -- 'package-ecosystem: "uv"' .github/dependabot.yml \
@@ -295,6 +310,8 @@ grep -qF "# local checks note" .github/workflows/checks.yml \
   || fail "recovery overwrote the generated-once checks.yml (_skip_if_exists must hold under recopy --overwrite)"
 grep -qF "# local issue form note" .github/ISSUE_TEMPLATE/bug_report.yml \
   || fail "recovery overwrote the generated-once bug_report.yml (_skip_if_exists must hold under recopy --overwrite)"
+[ "$(cat LICENSE)" = "Divergent local license" ] \
+  || fail "recovery overwrote the divergent LICENSE (_skip_if_exists must hold under recopy --overwrite)"
 [ "$(cat src/keep_me.txt)" = "repo-owned sentinel" ] \
   || fail "recovery touched the repo-owned src/keep_me.txt"
 grep -qF "# local settings note" .github/settings.yml \
@@ -330,6 +347,17 @@ copier copy "$GITHUB_WORKSPACE" "$VIS" \
 # test.
 cd "$VIS"
 test -f SECURITY.md || fail "public fixture render is missing SECURITY.md"
+# The newer public-only artifacts exist in the old fixture only once the
+# previous release ships them; key their preconditions on the tag's tree so
+# the flip assertions below stop being vacuous exactly when they can.
+if git -C "$GITHUB_WORKSPACE" ls-tree -r --name-only "$prev" | grep -qF "CONTRIBUTING.md"; then
+  test -f CONTRIBUTING.md || fail "public fixture render is missing CONTRIBUTING.md"
+  test -f CODE_OF_CONDUCT.md || fail "public fixture render is missing CODE_OF_CONDUCT.md"
+  grep -qF "dependency-review:" .github/workflows/ci.yml \
+    || fail "public fixture ci.yml is missing the dependency-review job"
+  grep -qF "security_and_analysis:" .github/settings.yml \
+    || fail "public fixture settings.yml is missing security_and_analysis"
+fi
 grep -qxF "  private: false" .github/settings.yml \
   || fail "public fixture settings.yml does not declare private: false"
 grep -qF "type: code_scanning" .github/settings.yml \
@@ -381,6 +409,17 @@ bun "$GITHUB_WORKSPACE/actions/validate-template/validate_generated_files.ts" "$
 
 cd "$VIS"
 test ! -e SECURITY.md || fail "SECURITY.md survived the flip to private"
+# The other public-only base files and gates must retire with it; the
+# ungated generated-once LICENSE must stay.
+test ! -e CONTRIBUTING.md || fail "CONTRIBUTING.md survived the flip to private"
+test ! -e CODE_OF_CONDUCT.md || fail "CODE_OF_CONDUCT.md survived the flip to private"
+test -f LICENSE || fail "LICENSE is missing after the flip to private (it is visibility-independent)"
+if grep -qF "dependency-review" .github/workflows/ci.yml; then
+  fail "ci.yml kept the dependency-review job after the flip to private"
+fi
+if grep -qF "security_and_analysis" .github/settings.yml; then
+  fail "settings.yml kept security_and_analysis after the flip to private"
+fi
 grep -qxF "  private: true" .github/settings.yml \
   || fail "settings.yml's private line did not flip to true"
 # The other always-declared identity keys must survive the three-way merge

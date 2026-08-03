@@ -60,6 +60,12 @@ target, central and in-repo alike:
 - A target section set to `null` opts that repo out of that defaults
   section.
 
+Visibility-dependent keys stay OUT of defaults: `security_and_analysis`
+(secret scanning + push protection) is rejected with a 422 by private
+repos without Advanced Security, so the settings-sync template renders it
+only for public repos (and repo-platform's own central file declares it).
+Defaults reach private repos too and would break their applies.
+
 ## Apply semantics
 
 Stateless, declared-keys-only, upsert-by-name:

@@ -137,11 +137,11 @@ each fixed PR needs a close/reopen for its checks to appear).
 
 | Category | Files |
 |---|---|
-| Fully managed (template wins) | `.copier-answers.yml`, `ci.yml`, `release-please.yml`, `dependabot-bun-lockfile.yml` (bun module), workflow callers, `dependabot.yml`, `SECURITY.md`, `.yamllint`, `.typography-allow`, agent-file symlinks |
+| Fully managed (template wins) | `.copier-answers.yml`, `ci.yml`, `release-please.yml`, `dependabot-bun-lockfile.yml` (bun module), workflow callers, `dependabot.yml`, `SECURITY.md`, `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, `.yamllint`, `.typography-allow`, agent-file symlinks |
 | Managed shape, repo-owned selection | `.repo-platform.yml`: its presence marks the repo as participating in push sync, and its `modules:` list is the repo's own module selection (edit it; the next sync applies the change) |
 | Managed + local sections | `.gitignore` (LOCAL section is yours) |
 | Mergeable (three-way) | `.github/settings.yml` (seeded by the settings-sync module; never deleted by sync), `.github/CODEOWNERS`, `AGENTS.md`, `.editorconfig`, `.gitattributes` |
-| Generated once, then repo-owned | `checks.yml` (your CI jobs, called inside the all-green gate), `release.yml` (your release pipeline around the managed release-please machinery), `auto-format.yml`, `copilot-setup-steps.yml`, `nightly-fuzz.yml` (the fuzzer module's starter, [docs](docs/fuzzer.md)), issue forms and chooser config (starters you tailor to the repo), `release-please-config.json`, `.release-please-manifest.json` |
+| Generated once, then repo-owned | `checks.yml` (your CI jobs, called inside the all-green gate), `release.yml` (your release pipeline around the managed release-please machinery), `auto-format.yml`, `copilot-setup-steps.yml`, `nightly-fuzz.yml` (the fuzzer module's starter, [docs](docs/fuzzer.md)), issue forms and chooser config (starters you tailor to the repo), `release-please-config.json`, `.release-please-manifest.json`, `LICENSE` (never overwrites an existing license; a deleted one is re-generated on the next sync, so a repo opting out of Apache-2.0 should carry its own license instead) |
 | Repo-owned (never touched) | source code, release tooling, `.typography-allow.local`, everything else |
 
 `CLAUDE.md`, `.github/copilot-instructions.md`, and `.github/agents.md` are

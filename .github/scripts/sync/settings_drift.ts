@@ -1,7 +1,9 @@
 // Guards the sync's adopt semantics: live visibility and description feed
-// the render on purpose (SECURITY.md, the CodeQL jobs, and settings.yml
-// must follow the repo's real state), so a value changed out-of-band in
-// the GitHub UI would ride a clean sync PR into the rendered files and
+// the render on purpose (the visibility-gated renders - SECURITY.md,
+// CONTRIBUTING.md, CODE_OF_CONDUCT.md, the CodeQL and dependency-review
+// jobs - and settings.yml must follow the repo's real state), so a value
+// changed out-of-band in the GitHub UI would ride a clean sync PR into
+// the rendered files and
 // auto-merge into declared truth: exactly the drift the nightly settings
 // heal exists to revert. This script compares the live values against the
 // answers recorded in the target's .copier-answers.yml. On a mismatch it
