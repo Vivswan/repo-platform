@@ -1,8 +1,8 @@
 # Push sync fan-out: resolves which managed repos to sync (repos.yml
 # registry x live discovery) and runs reusable-template-sync.yml against
-# each one, in parallel. Replaces the old propagate.yml dispatch model -
-# managed repos carry no sync workflow and no sync secret; their update
-# PRs are pushed from here with the REPO_PLATFORM_TOKEN PAT.
+# each one, in parallel. Managed repos carry no sync workflow and no
+# sync secret; their update PRs are pushed from here with the
+# REPO_PLATFORM_TOKEN PAT.
 #
 # The `sync-repos` concurrency group makes this the single automated
 # writer of every target's automation branch: legs fan out in parallel,

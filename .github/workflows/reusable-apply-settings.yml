@@ -2,13 +2,11 @@
 # module repo's thin caller runs Vivswan/repo-settings-as-code against its
 # own .github/settings.yml on push. The central home (settings/repos/ files
 # here, plus a remote pass over the module repos) is settings-repos.yml.
-# Replaces the Probot Settings app - every apply is a visible run that fails
-# loudly instead of drifting silently.
 #
 # Token model: settings mutation needs Administration (and Issues) write,
 # which GITHUB_TOKEN can never hold - the caller passes its own
 # REPO_PLATFORM_TOKEN (fine-grained PAT). Without it the run SKIPS with a
-# warning; repo-platform's central settings-repos run heals the repo either way.
+# warning; repo-platform's central settings-repos run heals it either way.
 # Pinned to an immutable commit sha; switch to @v1 once
 # repo-settings-as-code cuts its first release.
 
@@ -77,8 +75,8 @@ jobs:
 
       - name: Apply repository settings
         if: steps.token.outputs.proceed == 'true'
-        # Pinned to an immutable commit; bump to @v1 once repo-settings-as-code
-        # cuts its first release. Bump together with settings-repos.yml.
+        # Pinned to an immutable commit; bump to @v1 once the action cuts
+        # its first release. Bump together with settings-repos.yml.
         uses: Vivswan/repo-settings-as-code@24eabe39cb9ab82777fe7bb884d5d43cd5eaa018
         with:
           token: ${{ secrets.REPO_PLATFORM_TOKEN }}

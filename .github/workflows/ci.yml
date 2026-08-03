@@ -28,13 +28,12 @@ jobs:
       - uses: actions/checkout@v7
       - uses: raven-actions/actionlint@v2
 
-  # Secret scanning: a committed credential fails the gate. The action
-  # scans the event's commit range (fetch-depth: 0 so any range
-  # resolves). Same job the base template ships to every managed repo;
-  # `bun run lint:secrets` covers history and staged changes locally.
-  # pull-requests read: the action lists the PR's commits to build the
-  # scan range. Comments off keeps that scope at read; leaks still land
-  # in the job summary and SARIF artifact.
+  # The action scans the event's commit range (fetch-depth: 0 so any
+  # range resolves). Same job the base template ships to every managed
+  # repo; `bun run lint:secrets` covers history and staged changes
+  # locally. pull-requests read: the action lists the PR's commits to
+  # build the scan range. Comments off keeps that scope at read; leaks
+  # still land in the job summary and SARIF artifact.
   gitleaks:
     runs-on: ubuntu-latest
     permissions:
@@ -382,10 +381,10 @@ jobs:
   # Nothing here mutates the draft in between - repo-platform ships no
   # release assets. Publishing with the fleet PAT keeps the release event
   # firing build-branches (the default GITHUB_TOKEN cannot trigger it),
-  # which tags templates/vX.Y.Z and rebuilds the latest channel. If this
-  # job fails, the release stays a draft and a full rerun cannot recreate
-  # it (release-please sees the forced tag): re-run just this job, or
-  # publish by hand with `gh release edit <tag> --draft=false`.
+  # which tags templates/vX.Y.Z and rebuilds the latest channel.
+  # If this job fails the release stays a draft; re-run just this job
+  # (a full rerun cannot recreate it - release-please sees the forced
+  # tag) or `gh release edit <tag> --draft=false`.
   publish-release:
     needs: [all-green, release-please]
     if: needs.release-please.outputs.release_created == 'true'

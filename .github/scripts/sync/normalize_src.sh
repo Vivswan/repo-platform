@@ -22,8 +22,7 @@ if ! recorded="$(bun .github/scripts/sync/normalize_src_path.ts \
   exit 1
 fi
 if [ "$recorded" != "$canonical" ]; then
-  # copier update refuses a dirty tree, so the rewrite is committed; it
-  # rides the update branch into the sync PR.
+  # copier update refuses a dirty tree, so the rewrite is committed.
   git -C target -c user.name="repo-platform-sync" \
     -c user.email="repo-platform-sync@users.noreply.github.com" \
     commit -qam "chore: normalize the copier template source to ${canonical}"
