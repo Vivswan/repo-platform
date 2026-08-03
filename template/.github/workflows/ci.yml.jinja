@@ -108,6 +108,26 @@ jobs:
         run: python3 -m pip install --quiet yamllint
       - name: Lint YAML
         run: yamllint -s .
+{%- if not private %}
+
+  # Fails when a PR introduces dependencies with known vulnerabilities, by
+  # diffing the dependency graph between base and head. Public renders only:
+  # the dependency-graph API behind it is free just for public repositories.
+  # Only PR events have a diff to review, so the skip lives on the steps:
+  # all-green treats a skipped needed job as failure, so the job itself
+  # stays unconditional.
+  dependency-review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        if: github.event_name == 'pull_request'
+      - uses: actions/dependency-review-action@v5
+        if: github.event_name == 'pull_request'
+        with:
+          # Deliberate strictest threshold (also the action's default,
+          # pinned so a default change cannot loosen the gate silently).
+          fail-on-severity: low
+{%- endif %}
 {%- if enable_codeql %}
 
   # CodeQL analysis runs inside the gate (one job per language), so a failed
@@ -190,6 +210,9 @@ jobs:
       - actionlint
       - gitleaks
       - yamllint
+{%- if not private %}
+      - dependency-review
+{%- endif %}
 {% if 'bun' in modules %}{% if enable_codeql %}      - codeql-javascript
 {% endif %}{% endif %}{% if 'uv' in modules %}{% if enable_codeql %}      - codeql-python
 {% endif %}{% endif %}{% if 'release-please' in modules %}      - release-freshness
