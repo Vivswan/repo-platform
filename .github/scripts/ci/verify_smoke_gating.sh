@@ -196,6 +196,10 @@ if has release-please; then
   test -f "$wf/release-please.yml"
   test -f "$wf/release.yml"
   present "uses: ./.github/workflows/release.yml" "$wf/ci.yml"
+  # The freshness gate must render as a job AND sit in all-green's needs;
+  # losing either fragment would fail open silently.
+  present "release-freshness:" "$wf/ci.yml"
+  present "      - release-freshness" "$wf/ci.yml"
   test -f /tmp/smoke/release-please-config.json
   test -f /tmp/smoke/.release-please-manifest.json
   # The starter publishes the draft release itself unless the row opts out
@@ -208,6 +212,7 @@ else
   test ! -e "$wf/release-please.yml"
   test ! -e "$wf/release.yml"
   absent "uses: ./.github/workflows/release.yml" "$wf/ci.yml"
+  absent "release-freshness" "$wf/ci.yml"
   test ! -e /tmp/smoke/release-please-config.json
   test ! -e /tmp/smoke/.release-please-manifest.json
 fi
