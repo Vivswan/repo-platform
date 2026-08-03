@@ -101,19 +101,54 @@ just the failed job.
 - The sync PR in the target repo carries everything the public log hides:
   dropped conflict hunks, removed paths, drift values, withheld workflow
   files. Its checks run in the private repo, where logs are private.
-- A hidden step failure ("output hidden: private repository") is
-  reproduced locally: check out the target repo and run the same copier
-  update against `gh:Vivswan/repo-platform` (docs/new-repo.md has the
-  copier invocations), or re-run the failing script from this repo with
-  the target checked out under `target/`. One exception routes itself:
-  failed validation diagnostics are appended to the sync PR body, which
-  lives in the private repo.
+- A private target's settings apply report has its own channel:
+  `settings-repos.yml` runs repo-settings-as-code with
+  `private-report: issue`, so for a redacted target the action's
+  visibility probe proves private or internal, the full unredacted
+  failure/drift report becomes a marker-labelled issue on the target
+  repo itself - reused forever, open while the apply fails or drifts,
+  closed (latest report inside) when healthy. Best-effort: an unproven
+  visibility stays redacted without an issue, and a failed delivery
+  warns without failing the run.
+- A hidden sync step failure ("output hidden: private repository")
+  routes its captured output privately. When the run has a sync PR,
+  failed validation diagnostics are appended to the PR body; when no PR
+  carries them (a copier or cleanup crash, or a validation failure with
+  nothing delivered), a bounded excerpt of each capture (the body notes
+  any truncation) becomes the body of a reused issue on the target repo
+  titled
+  `[automated] repo-platform sync: private failure report` - found by
+  that exact title, not a marker label, because the settings apply
+  deletes undeclared labels. One issue per repo, forever: each delivery
+  replaces the body (earlier reports stay in the edit history), open
+  means the sync needs attention, and the next fully healthy run closes
+  it. Unlike the settings channel, delivery does not wait for a proven
+  private visibility: hide-details is fail-closed, so a public repo
+  missing from discovery can get its excerpt posted to its own public
+  issue tracker - which never widens access, since the issue's readers
+  are exactly the repo's readers, the same audience an un-hidden run
+  log would have had. Delivery is best-effort; if it warns instead,
+  reproduce locally:
+  check out the target repo and run the same copier update against
+  `gh:Vivswan/repo-platform` (docs/new-repo.md has the copier
+  invocations), or re-run the failing script from this repo with the
+  target checked out under `target/`.
 - The `hint` subcommand above answers "which repo is this job?".
 
 ## Limits, stated plainly
 
 - Run logs from BEFORE this redaction still contain slugs; delete old
   runs if that matters.
+- Both report-issue channels (settings and sync) are write-forward: a
+  report delivered while the repo was private stays in the issue body
+  and its edit history forever - closing or replacing the issue removes
+  nothing. Flipping the repo public publishes all of it, so delete the
+  report issues before a deliberate visibility flip.
+- The settings action decides report delivery from the pre-apply
+  visibility, so the heal that reverts an out-of-band private flip (the
+  settings file declares `private: false`) can deliver that run's full
+  report into the repo it just made public again. Reverting such flips
+  promptly, or deleting the report issue after one, bounds the exposure.
 - The `repo=` input you type into a workflow dispatch stays out of the
   public log: the plan job reads it from the runner's event payload
   rather than step env (which the runner would print), and GitHub's

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -39,6 +39,7 @@ describe("run_hidden.sh", () => {
     const captured = readFileSync(join(r.temp, "hidden-leak-test.log"), "utf-8");
     expect(captured).toContain("target-secret");
     expect(captured).toContain("err-secret");
+    expect(existsSync(join(r.temp, "hidden-failures.tsv"))).toBe(false);
   });
 
   test("hidden failures keep the exit code and stay generic", () => {
@@ -46,5 +47,7 @@ describe("run_hidden.sh", () => {
     expect(r.exitCode).toBe(7);
     expect(r.stdout + r.stderr).not.toContain("failing-detail");
     expect(r.stdout).toContain("failed with exit 7 (output hidden: private repository)");
+    const manifest = readFileSync(join(r.temp, "hidden-failures.tsv"), "utf-8");
+    expect(manifest).toBe(`leak test\t7\t${join(r.temp, "hidden-leak-test.log")}\n`);
   });
 });
