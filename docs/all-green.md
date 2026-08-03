@@ -13,7 +13,9 @@ updates the standard jobs and the gate. Module checks run inside the gate
 too: the pr-title module contributes a `pr-title` job (Conventional Commit
 title check), the release-please module contributes a `release-freshness`
 job (the release PR must contain main's tip when the gate runs; other
-PRs may merge while behind), and public repos with a toolchain get
+PRs may merge while behind), public repos get a `dependency-review` job
+(its steps run on PR events only - the dependency graph behind it is free
+just for public repos), and public repos with a toolchain get
 per-language `codeql-*` jobs calling the reusable CodeQL analysis - so
 branch protection blocks on all of them without any extra required
 checks. Repo-specific jobs live in the
