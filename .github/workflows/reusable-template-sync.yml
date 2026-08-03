@@ -381,8 +381,10 @@ jobs:
             # open_pr.sh appended them to the PR body instead.
             where="the PR body - this public log hides them (private repository)"
           elif [ "$HIDE_DETAILS" = "true" ]; then
-            # No PR exists to carry them (the update delivered nothing).
-            where="hidden from this public log (private repository); reproduce validation locally per docs/private-repos.md"
+            # No PR exists to carry them (the update delivered nothing);
+            # the deliver step below routes the capture to the target's
+            # failure-report issue instead.
+            where="hidden from this public log (private repository); delivered to the target's failure-report issue, or reproduce validation locally per docs/private-repos.md"
           elif [ -n "$PUSH_VALIDATION" ]; then
             where="the 'Commit and push' step log - the tree was re-validated after workflow files were withheld"
           else
@@ -405,3 +407,30 @@ jobs:
           else
             echo "::warning::copier hit merge conflicts in ${TARGET_DISPLAY}; where possible they were resolved in favor of the template. The dropped local lines are listed in the PR body and in the 'Resolve copier conflicts' step log. Review ${PR_URL}, restore anything that should stay local, then merge."
           fi
+
+      # A hidden step failure with no PR to carry its captured diagnostics
+      # (copier or cleanup crash, validation failure with nothing
+      # delivered) would otherwise die with the runner. Deliver the
+      # capture to a reused issue on the target repo - its issues are as
+      # private as the repo. When a PR exists, open_pr.sh already routed
+      # the detail into its body and the script skips itself. Best-effort:
+      # the script warns generically and exits 0 on delivery problems.
+      # env.TARGET != '' keeps both tail steps off runs that died before
+      # the checkout and target resolution. Both gates read env
+      # (strings): the boolean input itself never == 'true' in an
+      # expression (mismatched types coerce to number, true -> 1,
+      # 'true' -> NaN).
+      - name: Deliver hidden failure diagnostics
+        if: failure() && env.HIDE_DETAILS == 'true' && env.TARGET != ''
+        env:
+          GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
+          PR_URL: ${{ steps.pr.outputs.url }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: bash .github/scripts/sync/failure_issue.sh deliver
+
+      - name: Resolve the failure-report issue
+        if: success() && env.HIDE_DETAILS == 'true' && env.TARGET != ''
+        env:
+          GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: bash .github/scripts/sync/failure_issue.sh resolve
