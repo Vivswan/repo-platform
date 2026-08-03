@@ -73,6 +73,14 @@ if has settings-sync; then
   else
     absent "type: code_scanning" /tmp/smoke/.github/settings.yml
   fi
+  # security_and_analysis follows visibility alone: private repos without
+  # Advanced Security reject the block (422), so it must never render there.
+  if [ "$PRIVATE" != "true" ]; then
+    present "security_and_analysis:" /tmp/smoke/.github/settings.yml
+    present "secret_scanning_push_protection:" /tmp/smoke/.github/settings.yml
+  else
+    absent "security_and_analysis:" /tmp/smoke/.github/settings.yml
+  fi
 else
   test ! -e /tmp/smoke/.github/settings.yml
   test ! -e "$wf/settings-sync.yml"
@@ -129,7 +137,25 @@ else
   absent "actions: read" "$wf/ci.yml"
 fi
 
-if [ "$PRIVATE" = "true" ]; then test ! -e /tmp/smoke/SECURITY.md; else test -f /tmp/smoke/SECURITY.md; fi
+# Base community files: LICENSE ships to every render (generated-once,
+# _skip_if_exists); the other three are public-only. Job and needs entry
+# are asserted separately as a cheap render-time cross-check (the validator
+# independently hard-errors on a present job missing from all-green's
+# needs).
+test -f /tmp/smoke/LICENSE
+if [ "$PRIVATE" = "true" ]; then
+  test ! -e /tmp/smoke/SECURITY.md
+  test ! -e /tmp/smoke/CONTRIBUTING.md
+  test ! -e /tmp/smoke/CODE_OF_CONDUCT.md
+  absent "dependency-review:" "$wf/ci.yml"
+  absent "- dependency-review" "$wf/ci.yml"
+else
+  test -f /tmp/smoke/SECURITY.md
+  test -f /tmp/smoke/CONTRIBUTING.md
+  test -f /tmp/smoke/CODE_OF_CONDUCT.md
+  present "dependency-review:" "$wf/ci.yml"
+  present "      - dependency-review" "$wf/ci.yml"
+fi
 
 # gitignore toolchain sections; the four markers are asserted by the validator.
 if has bun; then present "## Node " /tmp/smoke/.gitignore; else absent "## Node " /tmp/smoke/.gitignore; fi

@@ -14,6 +14,15 @@ repository:
   # Declared so the apply manages visibility; without it an out-of-band
   # flip to private would never be healed.
   private: false
+  # Declared so the apply heals out-of-band disables (GitHub enables both
+  # by default on public repositories). Lives here and in the settings-sync
+  # template's public branch, never in defaults.yml: private repositories
+  # without Advanced Security reject this block (422).
+  security_and_analysis:
+    secret_scanning:
+      status: enabled
+    secret_scanning_push_protection:
+      status: enabled
 
 labels:
   - name: dependencies

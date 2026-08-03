@@ -810,6 +810,19 @@ const rules: Rule[] = [
           tpl: "templates/bun/.github/workflows/dependabot-bun-lockfile.yml.jinja",
           mode: "semantic",
         },
+        { repo: "LICENSE", tpl: "templates/base/LICENSE", mode: "exact" },
+        {
+          // Same marker semantics as SECURITY.md: repo-specific contributing
+          // docs live below the marker.
+          repo: "CONTRIBUTING.md",
+          tpl: "templates/base/{% if not private %}CONTRIBUTING.md{% endif %}.jinja",
+          mode: "prefix",
+        },
+        {
+          repo: "CODE_OF_CONDUCT.md",
+          tpl: "templates/base/{% if not private %}CODE_OF_CONDUCT.md{% endif %}.jinja",
+          mode: "exact",
+        },
       ];
       for (const pair of pairs) {
         const expected = normalizeJinja(read(pair.tpl), vars);
@@ -1116,9 +1129,25 @@ const rules: Rule[] = [
       // defaults.yml counterpart, so the loop above never sees them; assert
       // the central file declares them the way the template guarantees
       // them for module repos.
-      mismatches.push(
-        ...centralIdentityMismatches(asRecord(central.repository, "repo-platform.yml repository")),
-      );
+      const centralRepository = asRecord(central.repository, "repo-platform.yml repository");
+      mismatches.push(...centralIdentityMismatches(centralRepository));
+
+      // security_and_analysis is template-only too (public-only: defaults
+      // reach private repos, which reject the block), so it needs the same
+      // template<->central lock as the identity keys.
+      if (jinjaRepository.security_and_analysis === undefined) {
+        throw new Error("settings.yml.jinja: security_and_analysis block missing - anchor lost");
+      }
+      if (
+        canonical(jinjaRepository.security_and_analysis) !==
+        canonical(centralRepository.security_and_analysis)
+      ) {
+        mismatches.push({
+          file: "settings/repos/repo-platform.yml repository.security_and_analysis",
+          expected: canonical(jinjaRepository.security_and_analysis),
+          got: canonical(centralRepository.security_and_analysis),
+        });
+      }
 
       const mainRuleset = (doc: Record<string, unknown>, where: string) => {
         const ruleset = (doc.rulesets as Record<string, unknown>[]).find((r) => r.name === "main");
