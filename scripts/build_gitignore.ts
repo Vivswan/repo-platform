@@ -1,7 +1,5 @@
 #!/usr/bin/env bun
-// Compose .gitignore files from the latest github/gitignore.
-//
-// Generates from the official github/gitignore templates:
+// Compose .gitignore files from the latest github/gitignore templates:
 //
 // - templates/base/.gitignore.jinja: the skeleton downstream repos receive
 //   (published onto the staging/latest build branches by build-branches.yml):
@@ -47,10 +45,9 @@ const LOCAL_BEGIN = "# BEGIN REPOSITORY LOCAL";
 const LOCAL_END = "# END REPOSITORY LOCAL";
 const DEFAULT_LOCAL_BODY = "# Add repository-specific ignore patterns in this section only.\n";
 
-// Not from github/gitignore: agent local state - Claude Code worktree
-// directories (the documented .claude/worktrees/ location plus the dotted
-// variant), Codex worktrees, bare .worktrees/ directories at any depth, and
-// the machine-local settings file.
+// Not from github/gitignore: agent local state (worktree directories and
+// the machine-local settings file). Both .claude spellings are deliberate:
+// the documented .claude/worktrees/ location plus the dotted variant.
 const AGENT_SECTION =
   "## Agent local state (repo-platform)\n" +
   ".claude/worktrees/\n" +

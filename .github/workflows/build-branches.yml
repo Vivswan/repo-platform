@@ -1,6 +1,7 @@
 # Publishes the generated build branches copier consumes:
 #   staging -> minimal build tree from the LATEST main commit (every push)
-#   latest  -> minimal build tree from the LATEST release, tagged templates/vX.Y.Z
+#   latest  -> minimal build tree from the LATEST release, tagged
+#              templates/vX.Y.Z
 # Both are ORPHAN, APPEND-ONLY branches: each build commit parents the
 # previous build commit, never a main commit, so a main history rewrite can
 # never invalidate them and old build commits (downstream repos' recorded

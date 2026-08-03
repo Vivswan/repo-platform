@@ -13,9 +13,10 @@
 // back to the repo's recorded copier answer). `--discovered` names a JSON
 // file holding an array of "owner/name" strings or {repo, ...} objects
 // (already filtered for archived repos by the caller); it is required
-// whenever `managed` contains the "*" wildcard. `excluded` prints the exclude list as a JSON
-// array of slugs (select_settings_repos.sh uses it to report paused repos
-// that still carry an in-repo settings file). Errors go to stderr as
+// whenever `managed` contains the "*" wildcard. `excluded` prints the
+// exclude list as a JSON array of slugs (select_settings_repos.sh uses it
+// to report paused repos that still carry an in-repo settings file).
+// Errors go to stderr as
 // ::error:: workflow commands, all of them at once, and the exit code is
 // nonzero.
 

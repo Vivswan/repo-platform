@@ -1,9 +1,7 @@
 /**
- * Unit test for the fuzz-issue action's pure helpers: line/char truncation,
- * the run-link builder, failure-dir discovery, body assembly over failure
- * directories built in a temp dir (contract v1), and the issue lifecycle
- * (create/comment/resolve) through an injected fake gh runner. The real gh
- * calls are not tested here (they need a live GitHub).
+ * Unit tests for the fuzz-issue action's pure helpers and the issue
+ * lifecycle (create/comment/resolve) through an injected fake gh runner.
+ * The real gh calls are not tested here (they need a live GitHub).
  */
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";

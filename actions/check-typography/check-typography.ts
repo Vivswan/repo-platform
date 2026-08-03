@@ -1,47 +1,22 @@
 #!/usr/bin/env bun
 
-// Guards against typographic look-alike and invisible characters that sneak
-// in via copy-paste or generated text. Vendored into Vivswan/repo-platform
-// from cloud-speech and generalized: scans the directory given as argv[2]
-// (default: cwd) and reads optional path exemptions from .typography-allow
-// and .typography-allow.local.
+// Guards against typographic look-alike and invisible characters that
+// sneak in via copy-paste or generated text. Vendored from cloud-speech
+// and generalized: scans the directory given as argv[2] (default: cwd),
+// with path-prefix exemptions read from .typography-allow
+// (template-managed in synced repos) and .typography-allow.local
+// (repo-owned, never synced).
 //
-// Forbidden everywhere:
-//   - curly quotes (U+2018..201F), guillemets, primes, modifier apostrophes
-//   - the ellipsis U+2026 - use "..."
-//   - every dash/minus look-alike (U+2010..2015, U+2212) - use "-"
-//   - multiplication/division signs U+00D7 U+00F7 - use "x" and "/"
-//   - typographic spaces (U+2000..200A, NBSP U+00A0, narrow NBSP U+202F,
-//     figure space U+2007, ideographic space U+3000) - use a regular space
-//   - invisible & bidi control characters (zero-width family U+200B..200F,
-//     word joiner U+2060, BOM U+FEFF, soft hyphen U+00AD, bidi embeddings/
-//     overrides/isolates U+202A..202E U+2066..2069 - the "Trojan Source"
-//     class - and line/paragraph separators U+2028 U+2029)
-//   - full-width ASCII variants U+FF01..U+FF5E (use the ASCII form)
-//   - everything VS Code's unicode-highlight feature treats as invisible or
-//     ambiguous, imported directly from the monaco-editor package (VS Code's
-//     editor on npm): the InvisibleCharacters set plus the AmbiguousCharacters
-//     confusables, e.g. Cyrillic "a" for Latin "a", mathematical
-//     alphanumerics, Ogham spaces
+// The forbidden set is the union of the explicit tables below (RANGES,
+// NAMES, FORBIDDEN) and VS Code's unicode-highlight data imported from
+// the monaco-editor package (InvisibleCharacters plus the
+// AmbiguousCharacters confusables). Context exemptions mirror VS Code's
+// "allowed locales": CJK sentence punctuation is allowed only in files
+// carrying CJK text, Devanagari only in files carrying Devanagari text;
+// the full-width comma U+FF0C is banned everywhere (use ", ").
 //
-// Context-dependent (mirrors VS Code's "allowed locales" concept):
-//   - CJK sentence punctuation with no sensible ASCII twin (U+3001 U+3002
-//     U+300C U+300D) is allowed in files that contain CJK text and flagged
-//     everywhere else. The full-width comma U+FF0C is NOT exempt: use ", "
-//     (comma + space) everywhere.
-//   - Devanagari characters (some are in the ambiguous set, e.g. the visarga
-//     U+0903 which resembles ":") are allowed in files containing Devanagari
-//     text
-//
-// Per-repo exemptions: a .typography-allow file at the scanned root lists
-// relative path prefixes (one per line, # comments) that are skipped
-// entirely - for files that deliberately carry functional glyphs (UI icons,
-// arrows in guides, emoji fixtures). In template-managed repos that file is
-// owned by the template, so repo-specific exemptions go in
-// .typography-allow.local (same format, repo-owned, never synced).
-//
-// Runs under bun (which executes TypeScript natively) so it can import the
-// monaco-editor ESM modules directly.
+// Runs under bun (which executes TypeScript natively) so it can import
+// the monaco-editor ESM modules directly.
 
 import { existsSync, lstatSync, readdirSync, readFileSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
