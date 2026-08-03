@@ -1598,8 +1598,58 @@ const rules: Rule[] = [
   },
 
   {
+    // The release-freshness ancestor check exists twice: this repo's
+    // ci.yml runs .github/scripts/ci/release_freshness.sh, while the
+    // release-please fragment inlines the same logic (downstream repos do
+    // not carry this repo's scripts). Pin the core lines so a fix to one
+    // side cannot silently leave the other behind.
+    name: "release-freshness-parity",
+    run: () => {
+      const mismatches: Mismatch[] = [];
+      const script = ".github/scripts/ci/release_freshness.sh";
+      const fragment = "templates/release-please/fragments/ci-gate-jobs.jinja";
+      const workflow = ".github/workflows/ci.yml";
+      const pins: { line: string; files: string[] }[] = [
+        {
+          // biome-ignore lint/suspicious/noTemplateCurlyInString: literal shell line pinned in both copies
+          line: 'tip="$(git rev-parse "origin/${GITHUB_BASE_REF}")"',
+          files: [script, fragment],
+        },
+        {
+          line: 'if git merge-base --is-ancestor "$tip" HEAD; then',
+          files: [script, fragment],
+        },
+        {
+          // The release-PR predicate: a renamed release-please branch
+          // prefix would make every step skip and the gate silently fail
+          // open, so the exact condition is pinned in both workflows.
+          line: "if: github.event_name == 'pull_request' && startsWith(github.head_ref, 'release-please--')",
+          files: [workflow, fragment],
+        },
+      ];
+      for (const pin of pins) {
+        for (const rel of pin.files) {
+          // Whole-line (trimmed) equality: a decorated copy ("|| true") or
+          // a commented-out line must not satisfy the pin.
+          const hit = read(rel)
+            .split("\n")
+            .some((l) => l.trim() === pin.line);
+          if (!hit) {
+            mismatches.push({
+              file: rel,
+              expected: `the pinned release-freshness line ${JSON.stringify(pin.line)}`,
+              got: "missing - the twin copies drifted",
+            });
+          }
+        }
+      }
+      return mismatches;
+    },
+  },
+
+  {
     // The redaction verifier is computed twice: redact.ts (plan-side, TS)
-    // and resolve_private_repo.sh (leg-side, bash+openssl). The lockstep
+    // and resolve_private_repo.sh (leg-side, python3+openssl). The lockstep
     // test in redact.test.ts proves the bytes agree; this rule pins the
     // two spellable constants - truncation length and key-derivation
     // label - so an edit to one side fails CI before the tags stop

@@ -11,9 +11,12 @@ renamed, or turned into matrices.
 The template generates ci.yml with this shape and keeps managing it: sync
 updates the standard jobs and the gate. Module checks run inside the gate
 too: the pr-title module contributes a `pr-title` job (Conventional Commit
-title check), and public repos with a toolchain get per-language `codeql-*`
-jobs calling the reusable CodeQL analysis - so branch protection blocks on
-both without any extra required checks. Repo-specific jobs live in the
+title check), the release-please module contributes a `release-freshness`
+job (the release PR must contain main's tip when the gate runs; other
+PRs may merge while behind), and public repos with a toolchain get
+per-language `codeql-*` jobs calling the reusable CodeQL analysis - so
+branch protection blocks on all of them without any extra required
+checks. Repo-specific jobs live in the
 repo-owned `.github/workflows/checks.yml` (`_skip_if_exists`), which the
 managed ci.yml calls inside the gate through its `checks` job. all-green
 sees only that job's aggregate result, so the skipped-is-failure rule below
