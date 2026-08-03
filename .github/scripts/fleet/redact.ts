@@ -105,6 +105,8 @@ export function assignHints(slugs: string[]): Map<string, string> {
  * the same way.
  */
 export function verifyTag(pat: string, runId: string, slug: string): string {
+  // HMAC(key="") is publicly computable; never derive from an empty PAT.
+  if (pat === "") throw new Error("verifyTag: refusing to derive the tag key from an empty PAT");
   const key = createHmac("sha256", pat).update(KEY_DERIVATION_LABEL).digest();
   return createHmac("sha256", key)
     .update(`${runId}\0${slug.toLowerCase()}`)

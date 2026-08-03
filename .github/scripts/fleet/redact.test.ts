@@ -58,29 +58,35 @@ describe("verifyTag", () => {
     expect(verifyTag("pat-value", "12345", "owner/other")).not.toBe(tag);
   });
 
-  test("matches the resolver's openssl pipeline byte for byte", () => {
-    // The one twinned computation: resolve_private_repo.sh re-derives the
-    // tag in bash+openssl. Run that exact pipeline here and compare.
-    const pat = "lockstep-test-pat";
-    const runId = "424242";
-    const slug = "Vivswan/Hidden-Server";
+  // The one twinned computation: resolve_private_repo.sh re-derives the
+  // tag in python3+openssl (the PAT rides the environment, never argv).
+  // Run that exact pipeline and compare.
+  function resolverPipelineTag(pat: string, runId: string, slug: string): string {
     const script = [
-      `key_hex="$(printf '%s' "repo-platform-redact-key-v1" | openssl dgst -sha256 -hmac "$1" -hex | awk '{print $NF}')"`,
-      `printf '%s\\0%s' "$2" "$(tr '[:upper:]' '[:lower:]' <<<"$3")" | openssl dgst -sha256 -mac HMAC -macopt "hexkey:\${key_hex}" -hex | awk '{print $NF}' | cut -c1-32`,
+      `key_hex="$(python3 -c 'import hashlib, hmac, os`,
+      `print(hmac.new(os.environb[b"PAT"], b"repo-platform-redact-key-v1", hashlib.sha256).hexdigest())')"`,
+      `printf '%s\\0%s' "$1" "$(tr '[:upper:]' '[:lower:]' <<<"$2")" | openssl dgst -sha256 -mac HMAC -macopt "hexkey:\${key_hex}" -hex | awk '{print $NF}' | cut -c1-32`,
     ].join("\n");
-    const proc = Bun.spawnSync([
-      "bash",
-      "-euo",
-      "pipefail",
-      "-c",
-      script,
-      "bash",
-      pat,
-      runId,
-      slug,
-    ]);
+    const proc = Bun.spawnSync(["bash", "-euo", "pipefail", "-c", script, "bash", runId, slug], {
+      env: { ...process.env, PAT: pat },
+    });
     expect(proc.exitCode).toBe(0);
-    expect(proc.stdout.toString().trim()).toBe(verifyTag(pat, runId, slug));
+    return proc.stdout.toString().trim();
+  }
+
+  test("matches the resolver's derivation pipeline byte for byte", () => {
+    const tag = resolverPipelineTag("lockstep-test-pat", "424242", "Vivswan/Hidden-Server");
+    expect(tag).toBe(verifyTag("lockstep-test-pat", "424242", "Vivswan/Hidden-Server"));
+  });
+
+  test("lockstep holds for a non-ASCII PAT (env bytes = UTF-8 string)", () => {
+    const pat = "p\u00e4t-\u{1f511}-value";
+    const tag = resolverPipelineTag(pat, "424242", "Vivswan/Hidden-Server");
+    expect(tag).toBe(verifyTag(pat, "424242", "Vivswan/Hidden-Server"));
+  });
+
+  test("rejects an empty PAT instead of deriving a publicly known key", () => {
+    expect(() => verifyTag("", "424242", "o/r")).toThrow(/empty PAT/);
   });
 });
 
