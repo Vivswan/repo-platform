@@ -13,7 +13,10 @@
 // This script keeps the "after updating" (template) side of every block and
 // collects the dropped local lines into a markdown summary, which the template
 // sync workflow embeds in the PR body so a human can restore anything that
-// should stay local. The full summary goes to stdout; the --summary file drops
+// should stay local. When the kept side carries the repo-local-section
+// sentinel line (templated docs place it at the end of their managed half),
+// local hunks are instead appended below it and the summary says so. The
+// full summary goes to stdout; the --summary file drops
 // whole trailing sections past --limit bytes so it fits a PR body with its
 // markdown fences intact.
 //
@@ -33,9 +36,19 @@ const START = Buffer.from(`${"<".repeat(7)} before updating`);
 const SEP = Buffer.from("=".repeat(7));
 const END = Buffer.from(`${">".repeat(7)} after updating`);
 
+// Repo-local-section sentinel: templated docs with a repository-owned tail
+// (templates/base CONTRIBUTING.md and SECURITY.md, templates/agents AGENTS.md)
+// close their managed half with this exact comment line; everything below it
+// is repository-owned and runs to end of file. When the kept template side of
+// a resolved file carries the sentinel, dropped local hunks are appended below
+// it instead of being discarded to the PR body. Detection is the exact line,
+// never prose, so ordinary template wording cannot trigger it.
+const LOCAL_SECTION_SENTINEL = Buffer.from("<!-- repo-platform:local-section -->");
+
 const SKIP_DIRS = new Set([".git", ".repo-platform-src", "node_modules", ".venv", "__pycache__"]);
 
 const NEWLINE = Buffer.from("\n");
+const CRLF = Buffer.from("\r\n");
 
 function splitLines(data: Buffer): Buffer[] {
   const lines: Buffer[] = [];
@@ -66,6 +79,52 @@ function stripCr(line: Buffer): Buffer {
 }
 
 type Resolution = { kind: "malformed" } | { kind: "resolved"; resolved: Buffer; dropped: Buffer[] };
+
+/** How each dropped hunk was handled, parallel to Resolution.dropped. */
+type HunkDisposition = "dropped" | "moved" | "moved-tail";
+
+function isSentinelLine(line: Buffer): boolean {
+  return stripCr(line).equals(LOCAL_SECTION_SENTINEL);
+}
+
+function hasLocalSectionSentinel(data: Buffer): boolean {
+  return splitLines(data).some(isSentinelLine);
+}
+
+/** Content after the hunk's own last sentinel line: a hunk carrying a stale
+ * copy of the managed half contributes only its repository-owned tail, so the
+ * output file keeps a single sentinel and a single managed half. */
+function localTailOf(hunk: Buffer): Buffer {
+  const lines = splitLines(hunk);
+  let last = -1;
+  for (let i = 0; i < lines.length; i++) {
+    if (isSentinelLine(lines[i])) last = i;
+  }
+  return last === -1 ? hunk : joinLines(lines.slice(last + 1));
+}
+
+/** Append hunks to the end of the file (below the sentinel, whose local
+ * section runs to end of file), separated by exactly one blank line each,
+ * matching the file's dominant line-ending style. Hunks are trimmed of blank
+ * lines at both ends: they often start with one (the blank that separated
+ * them from the text above, or the slice point after their own sentinel). */
+function appendBelowSentinel(resolved: Buffer, hunks: Buffer[]): Buffer {
+  const newline = resolved.includes(CRLF) ? CRLF : NEWLINE;
+  const trimEnd = (data: Buffer): Buffer => {
+    let end = data.length;
+    while (end > 0 && (data[end - 1] === 0x0a || data[end - 1] === 0x0d)) end--;
+    return data.subarray(0, end);
+  };
+  const trimBlankLines = (data: Buffer): Buffer => {
+    let start = 0;
+    while (start < data.length && (data[start] === 0x0a || data[start] === 0x0d)) start++;
+    return trimEnd(data.subarray(start));
+  };
+  const parts: Buffer[] = [trimEnd(resolved)];
+  for (const hunk of hunks) parts.push(newline, newline, trimBlankLines(hunk));
+  parts.push(newline);
+  return Buffer.concat(parts);
+}
 
 /** Keep the template side of every conflict block.
  *
@@ -116,7 +175,7 @@ function fenceFor(text: string): string {
   return "`".repeat(Math.max(4, longest + 1));
 }
 
-function summarize(rel: string, resolution: Resolution): string {
+function summarize(rel: string, resolution: Resolution, dispositions: HunkDisposition[]): string {
   const lines = [`#### \`${rel}\``, ""];
   if (resolution.kind === "malformed") {
     lines.push(
@@ -127,7 +186,13 @@ function summarize(rel: string, resolution: Resolution): string {
   }
   resolution.dropped.forEach((hunk, index) => {
     const text = hunk.toString("utf-8");
-    lines.push(`Conflict ${index + 1}: dropped local lines (template version kept):`, "");
+    const heading =
+      dispositions[index] === "moved"
+        ? `Conflict ${index + 1}: local lines moved below the repository-specific marker (template side kept in place):`
+        : dispositions[index] === "moved-tail"
+          ? `Conflict ${index + 1}: the local tail after the marker was moved below the repository-specific marker; the stale local copy of the managed half above it was dropped:`
+          : `Conflict ${index + 1}: dropped local lines (template version kept):`;
+    lines.push(heading, "");
     if (text.trim()) {
       const fence = fenceFor(text);
       lines.push(fence, text, fence, "");
@@ -237,6 +302,7 @@ function main(): number {
     if (!data.includes(START)) continue;
     const printedRel = relative(root, path);
     const resolution = resolveConflicts(data);
+    let dispositions: HunkDisposition[] = [];
     // Paths and hunk content are target file data: a hide-details target
     // gets counts here and the full detail only in the PR body, which
     // lives in the private repo.
@@ -247,17 +313,33 @@ function main(): number {
           : `${printedRel}: malformed or out-of-order conflict markers, left untouched`,
       );
     } else if (resolution.dropped.length > 0) {
-      writeFileSync(path, resolution.resolved);
+      const hasSentinel = hasLocalSectionSentinel(resolution.resolved);
+      const tails = resolution.dropped.map((hunk) => (hasSentinel ? localTailOf(hunk) : hunk));
+      dispositions = resolution.dropped.map((hunk, index) => {
+        if (!hasSentinel || tails[index].toString("utf-8").trim().length === 0) return "dropped";
+        return tails[index].length === hunk.length ? "moved" : "moved-tail";
+      });
+      const appended = tails.filter((_, index) => dispositions[index] !== "dropped");
+      writeFileSync(
+        path,
+        appended.length > 0
+          ? appendBelowSentinel(resolution.resolved, appended)
+          : resolution.resolved,
+      );
+      const moved =
+        appended.length > 0
+          ? `; moved ${appended.length} local hunk(s) below the repository-specific marker`
+          : "";
       console.log(
         args.hideDetails
-          ? `resolved ${resolution.dropped.length} conflict(s) toward the template (path hidden: private repository)`
-          : `${printedRel}: resolved ${resolution.dropped.length} conflict(s) toward the template`,
+          ? `resolved ${resolution.dropped.length} conflict(s) toward the template${moved} (path hidden: private repository)`
+          : `${printedRel}: resolved ${resolution.dropped.length} conflict(s) toward the template${moved}`,
       );
     } else {
       // Marker bytes appear only mid-line (not a conflict); skip.
       continue;
     }
-    sections.push(summarize(printedRel, resolution));
+    sections.push(summarize(printedRel, resolution, dispositions));
   }
 
   const full = sections.join("\n");
