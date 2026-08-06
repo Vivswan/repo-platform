@@ -137,12 +137,13 @@ else
   absent "actions: read" "$wf/ci.yml"
 fi
 
-# Base community files: LICENSE ships to every render (generated-once,
-# _skip_if_exists); the other three are public-only. Job and needs entry
+# Base community files: the fleet LICENSE ships to every render unless the
+# repo opts out via the custom-license module; the other three are
+# public-only. Job and needs entry
 # are asserted separately as a cheap render-time cross-check (the validator
 # independently hard-errors on a present job missing from all-green's
 # needs).
-test -f /tmp/smoke/LICENSE
+if has custom-license; then test ! -e /tmp/smoke/LICENSE; else test -f /tmp/smoke/LICENSE; fi
 if [ "$PRIVATE" = "true" ]; then
   test ! -e /tmp/smoke/SECURITY.md
   test ! -e /tmp/smoke/CONTRIBUTING.md

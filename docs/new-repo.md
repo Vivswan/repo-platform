@@ -42,7 +42,7 @@ follows released `templates/vX.Y.Z` build tags and runs migrations;
 `staging` follows every main merge, migrations skipped), a `modules`
 multiselect (any combination of `agents`, `bun`, `uv`, `rust`, `pages`,
 `release-please`, `issue-templates`, `pr-title`, `auto-assign`, `fuzzer`,
-`settings-sync`), follow-up
+`settings-sync`, `custom-license`), follow-up
 parameters for modules that have them (see [docs/pages.md](pages.md) and
 [docs/fuzzer.md](fuzzer.md)), and
 visibility. Answers are recorded in `.copier-answers.yml`; never delete
