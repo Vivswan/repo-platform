@@ -26,6 +26,7 @@ a key.
 <!-- Repository-specific security documentation (scope, threat model, review
      expectations for security-relevant changes) goes below this line. It
      survives template updates via three-way merge. -->
+<!-- repo-platform:local-section -->
 
 Scope note: this repository's reusable workflows and composite actions run
 inside other repositories' CI with write tokens. Anything that lets template
