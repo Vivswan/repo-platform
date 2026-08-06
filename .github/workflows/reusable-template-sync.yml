@@ -234,9 +234,9 @@ jobs:
             bash .github/scripts/sync/apply_update.sh
 
       # Conflicts (local edits overlapping template changes) resolve in the
-      # template's favor so the tree stays valid. In docs carrying the
-      # repo-platform:local-section marker the local lines move below the
-      # marker; everywhere else the dropped local lines go
+      # template's favor so the tree stays valid; in docs carrying the
+      # repo-platform:local-section marker the local lines also move below
+      # the marker instead of being lost. Either way the local lines go
       # into the PR body for review - and, for a hidden target, ONLY there
       # (the step-log dump is target file content).
       - name: Resolve copier conflicts toward the template
