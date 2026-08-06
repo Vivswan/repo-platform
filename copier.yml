@@ -32,9 +32,6 @@ _skip_if_exists:
   # Repos accumulate their own allowlists in it; sync must never reset
   # what a repo has excused.
   - .gitleaks.toml
-  # A repository may already carry a different license; sync must never
-  # overwrite a legal document, so it is generated only when absent.
-  - LICENSE
 
 # Migrations use FROM-version naming (see migrations/run.ts): each script in
 # migrations/ is named for the release it migrates away from, so authoring
@@ -87,6 +84,7 @@ modules:
     auto-assign - auto-assign issues/PRs/alerts to owner: auto-assign
     fuzzer - nightly fuzz starter with issue filing, replay inputs, auto-close: fuzzer
     settings-sync - in-repo .github/settings.yml applied with the repo's own PAT: settings-sync
+    custom-license - repo carries its own LICENSE; the fleet license is not rendered: custom-license
   # settings-sync is deliberately NOT a default: central settings
   # (settings/repos/<name>.yml in repo-platform) are the default home.
   default: [agents, release-please, issue-templates, pr-title, auto-assign]
