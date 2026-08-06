@@ -40,6 +40,7 @@ Participation in this project is governed by the
 <!-- Repository-specific contributing documentation (dev setup, build and
      test commands, review expectations) goes below this line. It survives
      template updates via three-way merge. -->
+<!-- repo-platform:local-section -->
 
 This repository is the template source itself: `bun run check` chains every
 local gate, and `CLAUDE.md` documents the editing rules and smoke-generate
