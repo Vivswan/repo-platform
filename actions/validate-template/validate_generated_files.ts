@@ -95,6 +95,7 @@ const KNOWN_MODULES = new Set([
   "auto-assign",
   "fuzzer",
   "settings-sync",
+  "custom-license",
 ]);
 
 const STRICT_UTF8 = new TextDecoder("utf-8", { fatal: true });

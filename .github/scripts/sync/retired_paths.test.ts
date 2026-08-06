@@ -39,6 +39,11 @@ describe("retiredPaths", () => {
     expect(retiredPaths(withSettings, newPaths, [])).not.toContain(".github/settings.yml");
   });
 
+  test("the protected LICENSE never appears even when the custom-license module de-renders it", () => {
+    const withLicense = new Set([...oldPaths, "LICENSE"]);
+    expect(retiredPaths(withLicense, newPaths, [])).not.toContain("LICENSE");
+  });
+
   test("a file outside both renders never appears (repo-owned by construction)", () => {
     const candidates = retiredPaths(oldPaths, newPaths, []);
     expect(candidates).not.toContain("src/index.ts");

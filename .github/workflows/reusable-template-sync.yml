@@ -234,7 +234,9 @@ jobs:
             bash .github/scripts/sync/apply_update.sh
 
       # Conflicts (local edits overlapping template changes) resolve in the
-      # template's favor so the tree stays valid; the dropped local lines go
+      # template's favor so the tree stays valid. In docs carrying the
+      # repo-platform:local-section marker the local lines move below the
+      # marker; everywhere else the dropped local lines go
       # into the PR body for review - and, for a hidden target, ONLY there
       # (the step-log dump is target file content).
       - name: Resolve copier conflicts toward the template
@@ -275,14 +277,17 @@ jobs:
             echo "removed $(wc -l <"$RUNNER_TEMP/removed-paths.txt" | tr -d ' ') retired file(s) (paths hidden: private repository; listed in the PR body)"
           fi
 
-      # settings.yml is repo-owned wherever it exists: deselecting the
-      # settings-sync module de-renders it, but the sync must never delete
-      # a repo's settings file (see the script's header for the full
-      # rules and the recovery-mode behavior).
-      - name: Preserve the repo-owned settings file
+      # settings.yml and (for repos on the custom-license module) LICENSE
+      # are repo-owned wherever they exist: a module change de-renders
+      # them, but the sync must never delete them (see the script's header
+      # for the full rules and the recovery-mode behavior).
+      - name: Preserve repo-owned files
         env:
           RECOVER: ${{ inputs.recover }}
-        run: bash .github/scripts/sync/preserve_settings.sh
+          TARGET_REF: ${{ steps.versions.outputs.target_ref }}
+        run: |
+          MODULES="$(cat "$RUNNER_TEMP/modules.json")" \
+            bash .github/scripts/sync/preserve_repo_owned.sh
 
       # Version-aligned validation: a templates/vX.Y.Z target is judged by
       # the validator at that release tag, never by main's unreleased rules;

@@ -29,10 +29,10 @@ self-apply of a repo's own settings file.
 
 - Modules (pick any combination): `agents`, `bun`, `uv`, `rust`, `pages`,
   `release-please`, `issue-templates`, `pr-title`, `auto-assign`, `fuzzer`,
-  `settings-sync`. Modules with parameters (like `pages`) ask follow-up
-  questions only when selected. After generation, module selection lives in
-  each repo's own `.repo-platform.yml`: edit its `modules:` list and the
-  next sync applies the change.
+  `settings-sync`, `custom-license`. Modules with parameters (like `pages`)
+  ask follow-up questions only when selected. After generation, module
+  selection lives in each repo's own `.repo-platform.yml`: edit its
+  `modules:` list and the next sync applies the change.
 - Channel `latest`: follows released `templates/vX.Y.Z` build tags;
   migrations run between releases.
 - Channel `staging`: follows the staging branch head; migrations are
@@ -137,11 +137,11 @@ each fixed PR needs a close/reopen for its checks to appear).
 
 | Category | Files |
 |---|---|
-| Fully managed (template wins) | `.copier-answers.yml`, `ci.yml`, `release-please.yml`, `dependabot-bun-lockfile.yml` (bun module), workflow callers, `dependabot.yml`, `SECURITY.md`, `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, `.yamllint`, `.typography-allow`, agent-file symlinks |
+| Fully managed (template wins) | `.copier-answers.yml`, `ci.yml`, `release-please.yml`, `dependabot-bun-lockfile.yml` (bun module), workflow callers, `dependabot.yml`, `CODE_OF_CONDUCT.md`, `LICENSE` (the fleet license, [PolyForm Noncommercial 1.0.0](https://polyformproject.org/licenses/noncommercial/1.0.0); select the `custom-license` module to carry your own license instead - the file then becomes repo-owned and sync never touches it), `.yamllint`, `.typography-allow`, agent-file symlinks |
 | Managed shape, repo-owned selection | `.repo-platform.yml`: its presence marks the repo as participating in push sync, and its `modules:` list is the repo's own module selection (edit it; the next sync applies the change) |
-| Managed + local sections | `.gitignore` (LOCAL section is yours) |
-| Mergeable (three-way) | `.github/settings.yml` (seeded by the settings-sync module; never deleted by sync), `.github/CODEOWNERS`, `AGENTS.md`, `.editorconfig`, `.gitattributes` |
-| Generated once, then repo-owned | `checks.yml` (your CI jobs, called inside the all-green gate), `release.yml` (your release pipeline around the managed release-please machinery), `auto-format.yml`, `copilot-setup-steps.yml`, `nightly-fuzz.yml` (the fuzzer module's starter, [docs](docs/fuzzer.md)), issue forms and chooser config (starters you tailor to the repo), `release-please-config.json`, `.release-please-manifest.json`, `LICENSE` (never overwrites an existing license; a deleted one is re-generated on the next sync, so a repo opting out of Apache-2.0 should carry its own license instead) |
+| Managed + local sections | `.gitignore` (LOCAL section is yours), `SECURITY.md`, `CONTRIBUTING.md` (everything below the `<!-- repo-platform:local-section -->` line is yours; conflict resolution moves overlapping local edits below it instead of dropping them) |
+| Mergeable (three-way) | `.github/settings.yml` (seeded by the settings-sync module; never deleted by sync), `.github/CODEOWNERS`, `AGENTS.md` (also carries the `<!-- repo-platform:local-section -->` marker: conflicting local edits move below it), `.editorconfig`, `.gitattributes` |
+| Generated once, then repo-owned | `checks.yml` (your CI jobs, called inside the all-green gate), `release.yml` (your release pipeline around the managed release-please machinery), `auto-format.yml`, `copilot-setup-steps.yml`, `nightly-fuzz.yml` (the fuzzer module's starter, [docs](docs/fuzzer.md)), issue forms and chooser config (starters you tailor to the repo), `release-please-config.json`, `.release-please-manifest.json` |
 | Repo-owned (never touched) | source code, release tooling, `.typography-allow.local`, everything else |
 
 `CLAUDE.md`, `.github/copilot-instructions.md`, and `.github/agents.md` are
