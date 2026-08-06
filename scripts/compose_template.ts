@@ -59,6 +59,7 @@ export const MODULE_ORDER = [
   "auto-assign",
   "fuzzer",
   "settings-sync",
+  "custom-license",
 ];
 
 const ANCHOR_RE = /^\{# compose:([a-z0-9][a-z0-9-]*) #\}$/;

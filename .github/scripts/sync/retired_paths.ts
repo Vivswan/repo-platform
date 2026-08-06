@@ -45,9 +45,11 @@ export function listRenderPaths(root: string): Set<string> {
 }
 
 // Repo-owned wherever they exist: never deletion candidates even when a
-// module deselection removes them from the render. settings.yml is applied
-// remotely by settings-repos regardless of who renders it.
-export const PROTECTED_PATHS: ReadonlySet<string> = new Set([".github/settings.yml"]);
+// module selection removes them from the render. settings.yml is applied
+// remotely by settings-repos regardless of who renders it; LICENSE leaves
+// the render when a repo selects the custom-license module, and deleting
+// it would take out the repo's own replacement license.
+export const PROTECTED_PATHS: ReadonlySet<string> = new Set([".github/settings.yml", "LICENSE"]);
 
 // Candidate deletions: in the old render, gone from the new render, not
 // protected, and not matched by any `_skip_if_exists` pattern from either

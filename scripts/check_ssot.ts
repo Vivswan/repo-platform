@@ -810,7 +810,11 @@ const rules: Rule[] = [
           tpl: "templates/bun/.github/workflows/dependabot-bun-lockfile.yml.jinja",
           mode: "semantic",
         },
-        { repo: "LICENSE", tpl: "templates/base/LICENSE", mode: "exact" },
+        {
+          repo: "LICENSE",
+          tpl: "templates/base/{% if 'custom-license' not in modules %}LICENSE{% endif %}",
+          mode: "exact",
+        },
         {
           // Same marker semantics as SECURITY.md: repo-specific contributing
           // docs live below the marker.

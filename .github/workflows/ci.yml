@@ -183,8 +183,11 @@ jobs:
         include:
           # Module combos covering the risky branches. `modules` is a YAML
           # STRING here (quoted) and parsed by copier as a YAML list.
+          # custom-license rides on the everything row so the LICENSE
+          # opt-out (no fleet license rendered) is exercised; every other
+          # row covers the default fleet-license render.
           - name: everything
-            modules: "[agents, bun, uv, rust, pages, release-please, issue-templates, pr-title, auto-assign, fuzzer, settings-sync]"
+            modules: "[agents, bun, uv, rust, pages, release-please, issue-templates, pr-title, auto-assign, fuzzer, settings-sync, custom-license]"
             private: "false"
             expect_in_pages: |
               setup: bun,uv
