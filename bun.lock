@@ -6,6 +6,7 @@
       "name": "repo-platform",
       "dependencies": {
         "yaml": "^2.9.0",
+        "zod": "^4.4.3",
       },
       "devDependencies": {
         "@biomejs/biome": "2.5.5",
@@ -87,5 +88,7 @@
     "undici-types": ["undici-types@8.3.0", "https://ms-feed-25.pkgs.visualstudio.com/1es-public/_packaging/npm-public/npm/registry/undici-types/-/undici-types-8.3.0.tgz", {}, "sha1-ROn8nzJEZIzeo15Pm7LWgelBCAk="],
 
     "yaml": ["yaml@2.9.0", "https://ms-feed-12.pkgs.visualstudio.com/1es-public/_packaging/npm-public/npm/registry/yaml/-/yaml-2.9.0.tgz", { "bin": { "yaml": "./bin.mjs" } }, "sha1-eCdK/ZNZih391hMN9qVm3vy/mqQ="],
+
+    "zod": ["zod@4.4.3", "", {}, "sha512-ytENFjIJFl2UwYglde2jchW2Hwm4GJFLDiSXWdTrJQBIN9Fcyp7n4DhxJEiWNAJMV1/BqWfW/kkg71UDcHJyTQ=="],
   }
 }
