@@ -182,7 +182,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
           PAT: ${{ secrets.REPO_PLATFORM_TOKEN }}
-        run: bash .github/scripts/fleet/select_sync_repos.sh
+        run: bun .github/scripts/fleet/select_sync_repos.ts
 
   sync:
     needs: plan

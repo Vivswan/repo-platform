@@ -8,7 +8,7 @@
 // heal exists to revert. This script compares the live values against the
 // answers recorded in the target's .copier-answers.yml. On a mismatch it
 // emits one ::warning:: per drifted field and writes a PR-body section;
-// open_pr.sh prepends that section and keeps auto-merge off, so ratifying
+// open_pr.ts prepends that section and keeps auto-merge off, so ratifying
 // the change stays a human decision. A field the answers file does not
 // record is skipped (nothing to drift from; the sync adopts it), but a
 // recorded value of the wrong type fails the step rather than skipping:
@@ -28,7 +28,7 @@
 // enforcing its settings at all.
 //
 // The summary file is written empty when nothing drifted, and its size is
-// the single source of truth for "this PR needs review" (open_pr.sh tests
+// the single source of truth for "this PR needs review" (open_pr.ts tests
 // it). Errors go to stderr as ::error:: workflow commands with a nonzero
 // exit.
 

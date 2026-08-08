@@ -73,7 +73,7 @@ jobs:
           GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
           PAT: ${{ secrets.REPO_PLATFORM_TOKEN }}
           OWNER: ${{ github.repository_owner }}
-        run: bash .github/scripts/fleet/select_settings_repos.sh
+        run: bun .github/scripts/fleet/select_settings_repos.ts
 
   apply:
     needs: select
@@ -98,6 +98,13 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v7
 
+      - uses: oven-sh/setup-bun@v2
+
+      # Before the resolve step: the resolver is a bun script and imports
+      # the registry/redaction modules, which need the yaml dependency.
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
       # Recovers the real slug for a redacted target and registers it with
       # the runner's masker before anything else prints; public and
       # central rows pass straight through.
@@ -109,15 +116,7 @@ jobs:
           VERIFY: ${{ matrix.verify }}
           GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
           PAT: ${{ secrets.REPO_PLATFORM_TOKEN }}
-        run: bash .github/scripts/fleet/resolve_private_repo.sh
-
-      # bun is only needed for the central-file preflight below.
-      - uses: oven-sh/setup-bun@v2
-        if: matrix.home == 'central'
-
-      - name: Install dependencies
-        if: matrix.home == 'central'
-        run: bun install --frozen-lockfile
+        run: bun .github/scripts/fleet/resolve_private_repo.ts
 
       # The action's central mode reads a whole directory and has no
       # per-target filter, so scoping this job to one repository means a

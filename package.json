@@ -18,7 +18,7 @@
     "gitignore:check": "bun scripts/build_gitignore.ts --check",
     "compose": "bun scripts/compose_template.ts",
     "compose:check": "bun .github/scripts/build-branches/branch_tree.ts --dest /tmp/repo-platform-compose-check --channel staging && rm -rf /tmp/repo-platform-compose-check",
-    "test": "bun test ./.github/scripts ./actions/fuzz-issue ./actions/validate-template ./scripts ./migrations",
+    "test": "bun test ./tests ./actions/fuzz-issue ./actions/validate-template",
     "prepare": "husky"
   },
   "devDependencies": {
@@ -28,6 +28,7 @@
     "typescript": "^7.0.2"
   },
   "dependencies": {
-    "yaml": "^2.9.0"
+    "yaml": "^2.9.0",
+    "zod": "^4.4.3"
   }
 }
