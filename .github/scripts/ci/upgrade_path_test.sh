@@ -2,9 +2,9 @@
 # Upgrade-path test: generate a project from the previous templates/v* build
 # tag, add the local modifications a real repo carries, then update it to a
 # freshly assembled build tree the way reusable-template-sync does - module
-# selection via sync/modules.ts, live -d data via sync/apply_update.sh,
-# conflict resolution, retired-file cleanup via sync/retired_cleanup.sh,
-# and the settings preserve step via sync/preserve_repo_owned.sh. Asserts
+# selection via sync/modules.ts, live -d data via sync/apply_update.ts,
+# conflict resolution, retired-file cleanup via sync/retired_cleanup.ts,
+# and the settings preserve step via sync/preserve_repo_owned.ts. Asserts
 # that files the template dropped are deleted while repo-owned content
 # survives - including settings.yml, which is repo-owned wherever it exists
 # (protected from cleanup and restored if copier de-renders it). A second
@@ -81,7 +81,7 @@ if [ -z "$prev" ]; then
   echo "No templates/v* build tag yet; building synthetic old fixture ${prev}"
   # Same templates, same tooling: the fixture is the current tree assembled
   # at v0.0.0, plus one extra template-managed file the new build does not
-  # render. It is the retirement case retired_cleanup.sh exists for; the
+  # render. It is the retirement case retired_cleanup.ts exists for; the
   # test resurrects it after the update (see below) so the deletion loop
   # runs against a real file regardless of copier's own delete behavior.
   bun .github/scripts/build-branches/branch_tree.ts --dest /tmp/old-tree --channel latest --version v0.0.0
@@ -134,7 +134,7 @@ git -c user.name=ci -c user.email=ci@localhost commit -q -m "chore: init"
 #   retired-file cleanup (PROTECTED_PATHS)
 # - retired-sentinel.txt (synthetic fixture) left the render between the
 #   builds; it is resurrected after the update so its deletion provably
-#   comes from retired_cleanup.sh
+#   comes from retired_cleanup.ts
 # - src/keep_me.txt is repo-owned content the template never rendered
 # - .repo-platform.yml drops settings-sync (the module-deselection edit a
 #   repo merges before the sync)
@@ -186,18 +186,18 @@ export PRIVATE=false
 export DESCRIPTION="Upgraded description"
 
 # The -d data mirrors reusable-template-sync: the update runs through the
-# same apply_update.sh wrapper the workflow uses, with the filtered
+# same apply_update.ts wrapper the workflow uses, with the filtered
 # modules plus live channel/private/description, so drift in any of them
 # re-renders.
 export TARGET_DIR="$PROJECT"
 export TARGET_REF=templates/v99.99.99
-RECOVER="" bash .github/scripts/sync/apply_update.sh
+RECOVER="" bun .github/scripts/sync/apply_update.ts
 bun .github/scripts/sync/resolve_copier_conflicts.ts \
   --summary "$WORK/dropped-local-hunks.md" --root "$PROJECT"
 
 # Retired-file cleanup runs the workflow's own script, pointed at the
 # project through TARGET_DIR, with RUNNER_TEMP set to $WORK where the
-# copier.yml snapshots already sit (resolve_refs.sh writes them there in
+# copier.yml snapshots already sit (resolve_refs.ts writes them there in
 # the workflow).
 answers_old="$(git -C "$PROJECT" show HEAD:.copier-answers.yml)"
 src_path="$(sed -n 's/^_src_path: //p' <<<"$answers_old")"
@@ -213,7 +213,7 @@ if [ "$synthetic" = true ]; then
 fi
 RUNNER_TEMP="$WORK" SRC_PATH="$src_path" \
   OLD_SHA="$(git rev-parse "${prev}^{commit}")" \
-  bash .github/scripts/sync/retired_cleanup.sh
+  bun .github/scripts/sync/retired_cleanup.ts
 if grep -qF '.github/settings.yml' "$WORK/retired-paths.json"; then
   fail "retired_paths must never list the repo-owned settings.yml (PROTECTED_PATHS)"
 fi
@@ -233,7 +233,7 @@ fi
 # The workflow's preserve step: settings.yml and the opted-out LICENSE are
 # repo-owned; if the update de-rendered and deleted either, it comes back
 # from the base commit.
-RECOVER="" bash .github/scripts/sync/preserve_repo_owned.sh
+RECOVER="" bun .github/scripts/sync/preserve_repo_owned.ts
 
 bun install --frozen-lockfile --cwd "$GITHUB_WORKSPACE/actions/validate-template"
 bun "$GITHUB_WORKSPACE/actions/validate-template/validate_generated_files.ts" "$PROJECT"
@@ -309,7 +309,7 @@ echo "upgrade path OK: retired files deleted, sentinels preserved, configuration
 
 # --- Recovery mode (recover=recopy) -----------------------------------
 # A repo whose recorded _commit is unusable gets a full re-render via
-# sync/apply_update.sh. Prove the copier semantics that path relies on:
+# sync/apply_update.ts. Prove the copier semantics that path relies on:
 # `copier recopy --overwrite` runs without a resolvable _commit, respects
 # _skip_if_exists (generated-once files keep local edits), deletes
 # nothing, overwrites template-managed files, and re-records _commit.
@@ -327,8 +327,8 @@ git -c user.name=ci -c user.email=ci@localhost commit -q -m "chore: corrupt the 
 # The recovery leg also runs through the workflow's wrapper and preserve
 # step (TARGET_DIR is still exported), proving their RECOVER routing along
 # with the copier semantics.
-RECOVER=recopy bash "$GITHUB_WORKSPACE/.github/scripts/sync/apply_update.sh"
-RECOVER=recopy bash "$GITHUB_WORKSPACE/.github/scripts/sync/preserve_repo_owned.sh"
+RECOVER=recopy bun "$GITHUB_WORKSPACE/.github/scripts/sync/apply_update.ts"
+RECOVER=recopy bun "$GITHUB_WORKSPACE/.github/scripts/sync/preserve_repo_owned.ts"
 
 grep -qF "_commit: templates/v99.99.99" .copier-answers.yml \
   || fail "recovery did not re-record _commit as templates/v99.99.99"
@@ -422,7 +422,7 @@ export PRIVATE=true
 export DESCRIPTION="Visibility-flip project"
 export TARGET_DIR="$VIS"
 export TARGET_REF=templates/v99.99.99
-RECOVER="" bash .github/scripts/sync/apply_update.sh
+RECOVER="" bun .github/scripts/sync/apply_update.ts
 bun .github/scripts/sync/resolve_copier_conflicts.ts \
   --summary "$VIS_WORK/dropped-local-hunks.md" --root "$VIS"
 
@@ -437,12 +437,12 @@ src_path_vis="$(sed -n 's/^_src_path: //p' <<<"$answers_vis")"
 test -n "$src_path_vis" || fail "visibility fixture records no _src_path"
 RUNNER_TEMP="$VIS_WORK" SRC_PATH="$src_path_vis" \
   OLD_SHA="$(git rev-parse "${prev}^{commit}")" \
-  bash .github/scripts/sync/retired_cleanup.sh
+  bun .github/scripts/sync/retired_cleanup.ts
 grep -qF '"SECURITY.md"' "$VIS_WORK/retired-paths.json" \
   || fail "retired_paths did not flag SECURITY.md on the public->private flip"
 grep -qxF "SECURITY.md" "$VIS_WORK/removed-paths.txt" \
   || fail "retired_cleanup's rm loop did not delete the resurrected SECURITY.md"
-RECOVER="" bash .github/scripts/sync/preserve_repo_owned.sh
+RECOVER="" bun .github/scripts/sync/preserve_repo_owned.ts
 
 bun "$GITHUB_WORKSPACE/actions/validate-template/validate_generated_files.ts" "$VIS"
 
@@ -521,10 +521,10 @@ export PRIVATE=false
 export DESCRIPTION="License-deletion project"
 export TARGET_DIR="$DEL"
 export TARGET_REF=templates/v99.99.99
-RECOVER="" bash .github/scripts/sync/apply_update.sh
+RECOVER="" bun .github/scripts/sync/apply_update.ts
 bun .github/scripts/sync/resolve_copier_conflicts.ts \
   --summary /tmp/upgrade-del-hunks.md --root "$DEL"
-RECOVER="" bash .github/scripts/sync/preserve_repo_owned.sh
+RECOVER="" bun .github/scripts/sync/preserve_repo_owned.ts
 cmp -s "$DEL/LICENSE" "$GITHUB_WORKSPACE/templates/base/{% if 'custom-license' not in modules %}LICENSE{% endif %}" \
   || fail "a committed LICENSE deletion did not re-converge to the mandatory fleet license"
 echo "license deletion OK: fleet license re-seeded"

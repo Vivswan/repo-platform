@@ -531,38 +531,42 @@ const rules: Rule[] = [
         ),
       );
 
-      const plan = read(".github/scripts/build-branches/plan.sh");
+      const plan = read(".github/scripts/build-branches/plan.ts");
       for (const channel of reference) {
-        if (!plan.includes(`build_${channel}=true`)) {
+        // The camelCase twin of the old build_<channel>=true anchor: the
+        // rule must fail when a channel loses its build leg, not merely
+        // when its output line disappears.
+        const leg = `build${channel[0].toUpperCase()}${channel.slice(1)} = true`;
+        if (!plan.includes(leg)) {
           mismatches.push({
-            file: ".github/scripts/build-branches/plan.sh",
-            expected: `a build_${channel}=true leg`,
+            file: ".github/scripts/build-branches/plan.ts",
+            expected: `a '${leg}' leg`,
+            got: "no such leg",
+          });
+        }
+        if (!plan.includes(`setOutput("${channel}"`)) {
+          mismatches.push({
+            file: ".github/scripts/build-branches/plan.ts",
+            expected: `a setOutput("${channel}", ...) leg`,
             got: "no such leg",
           });
         }
       }
 
-      const resolveRefs = read(".github/scripts/sync/resolve_refs.sh");
-      // Anchor on the channel case block: resolve_refs.sh has other case
-      // statements whose arms fit the same shape.
-      const channelCase = mustMatch(
+      const resolveRefs = read(".github/scripts/sync/resolve_refs.ts");
+      // Anchor on the channel validation guard, the same shape as
+      // branch_tree.ts's.
+      const guardArm = mustMatch(
         resolveRefs,
-        /case "\$channel" in([\s\S]*?)esac/,
-        "resolve_refs.sh",
-        "channel case block",
-      )[1];
-      const arm = mustMatch(
-        channelCase,
-        /^\s*([a-z]+(?: \| [a-z]+)+)\) ;;$/m,
-        "resolve_refs.sh",
-        "channel case arm",
+        /channel !== "([a-z]+)" && channel !== "([a-z]+)"/,
+        "resolve_refs.ts",
+        "channel validation",
       );
       mismatches.push(
-        ...setMismatch(
-          ".github/scripts/sync/resolve_refs.sh case arm",
-          reference,
-          arm[1].split(" | "),
-        ),
+        ...setMismatch(".github/scripts/sync/resolve_refs.ts channel validation", reference, [
+          guardArm[1],
+          guardArm[2],
+        ]),
       );
 
       const protect = read(".github/workflows/protect-build-branches.yml");
@@ -713,6 +717,11 @@ const rules: Rule[] = [
           for (const line of String(step.run ?? "").split("\n")) {
             const command = line.trim();
             if (!command.startsWith("bun ") || command.startsWith("bun install")) continue;
+            // The ci/ scripts are CI-only by design (they need workflow
+            // context: matrix rows, PR refs) and never belong in the local
+            // chain - their bash predecessors never matched this rule's
+            // "bun " prefix either.
+            if (command.startsWith("bun .github/scripts/ci/")) continue;
             const words = command.split(/\s+/);
             let reachable: boolean;
             let wanted: string;
@@ -1339,14 +1348,17 @@ const rules: Rule[] = [
 
       const identity = (rel: string) => {
         const text = read(rel);
-        const name = mustMatch(text, /user\.name[ =]+"([^"]+)"/, rel, "git user.name")[1];
-        const email = mustMatch(text, /user\.email[ =]+"([^"]+)"/, rel, "git user.email")[1];
+        // Covers the shell shape (user.name "x"), the single-arg config
+        // shape ("user.name=x"), and the argv-array shape ("user.name",
+        // "x").
+        const name = mustMatch(text, /user\.name["', =]+([^\s"',]+)/, rel, "git user.name")[1];
+        const email = mustMatch(text, /user\.email["', =]+([^\s"',]+)/, rel, "git user.email")[1];
         return `${name} <${email}>`;
       };
       const identityFiles = [
         ".github/workflows/refresh-gitignore.yml",
-        ".github/scripts/sync/normalize_src.sh",
-        ".github/scripts/sync/commit_push.sh",
+        ".github/scripts/sync/normalize_src.ts",
+        ".github/scripts/sync/commit_push.ts",
       ];
       const referenceIdentity = identity(identityFiles[0]);
       for (const rel of identityFiles.slice(1)) {
@@ -1563,16 +1575,19 @@ const rules: Rule[] = [
     name: "agents-recipe",
     run: () => {
       const mismatches: Mismatch[] = [];
-      const smoke = read(".github/scripts/ci/smoke_generate.sh");
-      const flags = mustMatch(
+      const smoke = read(".github/scripts/ci/smoke_generate.ts");
+      // The copier invocation is an argv array; reassemble the flag string
+      // AGENTS.md's recipe carries.
+      const vcsRef = mustMatch(
         smoke,
-        /--vcs-ref \S+ --defaults --trust/,
-        "smoke_generate.sh",
+        /"--vcs-ref",\s*"([^"]+)",\s*"--defaults",\s*"--trust",/,
+        "smoke_generate.ts",
         "copier flags",
-      )[0];
-      const keys = [...smoke.matchAll(/-d "?([a-z_]+)=/g)].map((m) => m[1]);
+      )[1];
+      const flags = `--vcs-ref ${vcsRef} --defaults --trust`;
+      const keys = [...smoke.matchAll(/"-d",\s*[`"]([a-z_]+)=/g)].map((m) => m[1]);
       if (keys.length === 0)
-        throw new Error("smoke_generate.sh: no -d answers found - anchor lost");
+        throw new Error("smoke_generate.ts: no -d answers found - anchor lost");
       const agents = read("AGENTS.md");
       if (!agents.includes(flags)) {
         mismatches.push({
@@ -1681,68 +1696,7 @@ const rules: Rule[] = [
   },
 
   {
-    // The redaction verifier is computed twice: redact.ts (plan-side, TS)
-    // and resolve_private_repo.sh (leg-side, python3+openssl). The lockstep
-    // test in redact.test.ts proves the bytes agree; this rule pins the
-    // two spellable constants - truncation length and key-derivation
-    // label - so an edit to one side fails CI before the tags stop
-    // matching at runtime.
-    name: "redact-hmac-lockstep",
-    run: () => {
-      const ts = read(".github/scripts/fleet/redact.ts");
-      const sh = read(".github/scripts/fleet/resolve_private_repo.sh");
-      const mismatches: Mismatch[] = [];
-      const tsLen = mustMatch(
-        ts,
-        /export const VERIFY_HEX_LENGTH = (\d+);/,
-        "redact.ts",
-        "verify truncation length",
-      )[1];
-      // Anchor to the tag pipeline itself (hexkey ... cut), not any
-      // stray cut elsewhere in the script.
-      const shLen = mustMatch(
-        sh,
-        /hexkey:\$\{key_hex\}[\s\S]{0,120}?cut -c1-(\d+)/,
-        "resolve_private_repo.sh",
-        "verify truncation length",
-      )[1];
-      if (tsLen !== shLen) {
-        mismatches.push({
-          file: ".github/scripts/fleet/resolve_private_repo.sh",
-          expected: `HMAC truncation to ${tsLen} hex chars (redact.ts VERIFY_HEX_LENGTH)`,
-          got: `cut -c1-${shLen}`,
-        });
-      }
-      const label = mustMatch(
-        ts,
-        /export const KEY_DERIVATION_LABEL = "([^"]+)";/,
-        "redact.ts",
-        "key-derivation label",
-      )[1];
-      // The label must sit in the actual key_hex derivation: both lines
-      // are anchored start-to-end (multiline), so a commented-out or
-      // decorated copy cannot satisfy the rule.
-      const derivation =
-        /^key_hex="\$\(python3 -c 'import hashlib, hmac, os\nprint\(hmac\.new\(os\.environb\[b"PAT"\], b"([^"]+)", hashlib\.sha256\)\.hexdigest\(\)\)'\)"$/m;
-      const shLabel = mustMatch(
-        sh,
-        derivation,
-        "resolve_private_repo.sh",
-        "key-derivation label",
-      )[1];
-      if (shLabel !== label) {
-        mismatches.push({
-          file: ".github/scripts/fleet/resolve_private_repo.sh",
-          expected: `the key-derivation label ${JSON.stringify(label)} (redact.ts)`,
-          got: JSON.stringify(shLabel),
-        });
-      }
-      return mismatches;
-    },
-  },
-
-  {
-    // open_pr.sh reads run_hidden.sh capture files by name to put hidden
+    // open_pr.ts reads run_hidden.ts capture files by name to put hidden
     // validation diagnostics into the PR body; the names derive from the
     // labels at the run_hidden call sites. Rewording a label would
     // silently break that hand-off, so every referenced capture name
@@ -1750,30 +1704,34 @@ const rules: Rule[] = [
     name: "hidden-capture-names",
     run: () => {
       const mismatches: Mismatch[] = [];
-      // Mirrors run_hidden.sh's slug transform (tr -c 'A-Za-z0-9' '-'
-      // squeezed and trimmed).
+      // Mirrors run_hidden.ts's slug transform (non-alphanumeric runs
+      // squeezed to '-' and trimmed).
       const slugify = (label: string) =>
         label.replace(/[^A-Za-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
       const labels = [
         ...read(".github/workflows/reusable-template-sync.yml").matchAll(
-          /run_hidden\.sh "([^"]+)" --/g,
+          /run_hidden\.ts "([^"]+)" --/g,
         ),
-        ...read(".github/scripts/sync/commit_push.sh").matchAll(/run_hidden\.sh" "([^"]+)" --/g),
+        // commit_push.ts passes the label as the argv element after the
+        // script path, with "--" next.
+        ...read(".github/scripts/sync/commit_push.ts").matchAll(
+          /run_hidden\.ts"\),\s*"([^"]+)",\s*"--",/g,
+        ),
       ].map((m) => m[1]);
       if (labels.length === 0) {
         throw new Error("no run_hidden labels found in the sync call sites - anchor lost");
       }
       const derived = new Set(labels.map((l) => `hidden-${slugify(l)}.log`));
       const referenced = [
-        ...read(".github/scripts/sync/open_pr.sh").matchAll(/hidden-[A-Za-z0-9-]+\.log/g),
+        ...read(".github/scripts/sync/open_pr.ts").matchAll(/hidden-[A-Za-z0-9-]+\.log/g),
       ].map((m) => m[0]);
       if (referenced.length === 0) {
-        throw new Error("open_pr.sh references no hidden capture files - anchor lost");
+        throw new Error("open_pr.ts references no hidden capture files - anchor lost");
       }
       for (const name of referenced) {
         if (!derived.has(name)) {
           mismatches.push({
-            file: ".github/scripts/sync/open_pr.sh",
+            file: ".github/scripts/sync/open_pr.ts",
             expected: `a capture name derived from a run_hidden label (${[...derived].join(", ")})`,
             got: name,
           });

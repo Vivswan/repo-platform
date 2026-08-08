@@ -74,7 +74,7 @@ on:
 
 # The workflow's own token only reads this repo; every target-repo write
 # (checkout, push, PR) uses the REPO_PLATFORM_TOKEN PAT. Actions read is
-# for the build provenance check: resolve_refs.sh verifies the build run
+# for the build provenance check: resolve_refs.ts verifies the build run
 # stamped on the shipped ref (staging tip or templates/vX.Y.Z tag).
 permissions:
   contents: read
@@ -107,6 +107,13 @@ jobs:
           # for the update base and the cleanup's old render.
           fetch-depth: 0
 
+      - uses: oven-sh/setup-bun@v2
+
+      # Before the resolve step: the resolver is a bun script and imports
+      # the registry/redaction modules, which need the yaml dependency.
+      - name: Install script dependencies
+        run: bun install --frozen-lockfile --silent
+
       # Sets TARGET (the real slug) and TARGET_DISPLAY for every later
       # step. For a redacted target it re-discovers the fleet, matches the
       # HMAC tag, and registers the slug with the runner's masker FIRST -
@@ -119,12 +126,7 @@ jobs:
           VERIFY: ${{ inputs.target_verify }}
           GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
           PAT: ${{ secrets.REPO_PLATFORM_TOKEN }}
-        run: bash .github/scripts/fleet/resolve_private_repo.sh
-
-      - uses: oven-sh/setup-bun@v2
-
-      - name: Install script dependencies
-        run: bun install --frozen-lockfile --silent
+        run: bun .github/scripts/fleet/resolve_private_repo.ts
 
       # The description lands in a RUNNER_TEMP file, not a step output:
       # step outputs ride into later steps' env-group prints, and a
@@ -135,7 +137,7 @@ jobs:
         id: target
         env:
           GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
-        run: bash .github/scripts/sync/read_target.sh
+        run: bun .github/scripts/sync/read_target.ts
 
       - name: Check out the target repo
         uses: actions/checkout@v7
@@ -161,7 +163,7 @@ jobs:
       # follow the repo's real state), so a value changed out-of-band in
       # the GitHub UI would otherwise auto-merge into declared truth.
       # Drift against the recorded answers warns here and forces the PR
-      # onto the manual-review path (open_pr.sh), with the details
+      # onto the manual-review path (open_pr.ts), with the details
       # prepended to its body. MUST stay ahead of "Apply copier update":
       # that step
       # passes the live values to copier, which rewrites the answers file
@@ -189,7 +191,7 @@ jobs:
       # before any copier command, and the rewrite lands in the PR diff.
       - name: Normalize the recorded template source
         id: src
-        run: bash .github/scripts/sync/normalize_src.sh
+        run: bun .github/scripts/sync/normalize_src.ts
 
       - name: Resolve channel, refs, and template copier configs
         id: versions
@@ -198,13 +200,13 @@ jobs:
           REQUESTED: ${{ inputs.version }}
           CHANNEL_INPUT: ${{ inputs.channel }}
           RECOVER: ${{ inputs.recover }}
-        run: bash .github/scripts/sync/resolve_refs.sh
+        run: bun .github/scripts/sync/resolve_refs.ts
 
       # The selection lands in a RUNNER_TEMP file, not a step output: the
       # module list is a target-derived fact, and step outputs ride into
       # later steps' env-group prints.
       - name: Select modules
-        run: bash .github/scripts/sync/select_modules.sh
+        run: bun .github/scripts/sync/select_modules.ts
 
       - name: Install copier
         run: pipx install "$COPIER_SPEC"
@@ -219,7 +221,7 @@ jobs:
       # ref, and a no-op render is cheap. The no-changes case exits with a
       # notice after diffing. MODULES and DESCRIPTION come from files via
       # the shell, not step env, so the env-group print never carries
-      # them; run_hidden.sh captures copier's own output for a hidden
+      # them; run_hidden.ts captures copier's own output for a hidden
       # target (it prints target paths and merge detail).
       - name: Apply copier update
         env:
@@ -230,8 +232,8 @@ jobs:
         run: |
           MODULES="$(cat "$RUNNER_TEMP/modules.json")" \
           DESCRIPTION="$(cat "$RUNNER_TEMP/description.txt")" \
-            bash .github/scripts/sync/run_hidden.sh "copier update" -- \
-            bash .github/scripts/sync/apply_update.sh
+            bun .github/scripts/sync/run_hidden.ts "copier update" -- \
+            bun .github/scripts/sync/apply_update.ts
 
       # Conflicts (local edits overlapping template changes) resolve in the
       # template's favor so the tree stays valid; in docs carrying the
@@ -271,8 +273,8 @@ jobs:
         run: |
           MODULES="$(cat "$RUNNER_TEMP/modules.json")" \
           DESCRIPTION="$(cat "$RUNNER_TEMP/description.txt")" \
-            bash .github/scripts/sync/run_hidden.sh "retired-file cleanup" -- \
-            bash .github/scripts/sync/retired_cleanup.sh
+            bun .github/scripts/sync/run_hidden.ts "retired-file cleanup" -- \
+            bun .github/scripts/sync/retired_cleanup.ts
           if [ "$HIDE_DETAILS" = "true" ] && [ -s "$RUNNER_TEMP/removed-paths.txt" ]; then
             echo "removed $(wc -l <"$RUNNER_TEMP/removed-paths.txt" | tr -d ' ') retired file(s) (paths hidden: private repository; listed in the PR body)"
           fi
@@ -287,7 +289,7 @@ jobs:
           TARGET_REF: ${{ steps.versions.outputs.target_ref }}
         run: |
           MODULES="$(cat "$RUNNER_TEMP/modules.json")" \
-            bash .github/scripts/sync/preserve_repo_owned.sh
+            bun .github/scripts/sync/preserve_repo_owned.ts
 
       # Version-aligned validation: a templates/vX.Y.Z target is judged by
       # the validator at that release tag, never by main's unreleased rules;
@@ -301,12 +303,12 @@ jobs:
       # A failed validation still opens the PR (that is where a human fixes
       # the tree); the job fails at the end. The validator's diagnostics
       # name target paths and values, so a hidden target's run is captured
-      # by run_hidden.sh.
+      # by run_hidden.ts.
       - name: Validate the updated tree
         id: validate
         run: |
           (cd validator/actions/validate-template && bun install --frozen-lockfile --silent)
-          if bash .github/scripts/sync/run_hidden.sh "template validation" -- \
+          if bun .github/scripts/sync/run_hidden.ts "template validation" -- \
             bun validator/actions/validate-template/validate_generated_files.ts target; then
             echo "result=ok" >> "$GITHUB_OUTPUT"
           else
@@ -334,13 +336,13 @@ jobs:
       # the Workflows scope - see the script for the fallback rules.
       # Unconditional and BEFORE the push: whatever this run delivers
       # (needs-review, nothing at all, or a failed push), an auto-merge
-      # armed by an earlier clean run must never fire on it. open_pr.sh
+      # armed by an earlier clean run must never fire on it. open_pr.ts
       # re-arms clean revisions.
       - name: Disarm auto-merge before the branch changes
         env:
           GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
           BRANCH: ${{ steps.versions.outputs.branch }}
-        run: bash .github/scripts/sync/disarm_pr.sh
+        run: bun .github/scripts/sync/disarm_pr.ts
 
       - name: Commit and push
         if: steps.changes.outputs.changed == 'true'
@@ -350,7 +352,7 @@ jobs:
           DISPLAY: ${{ steps.versions.outputs.display }}
           BASE_BRANCH: ${{ steps.target.outputs.default_branch }}
           PAT: ${{ secrets.REPO_PLATFORM_TOKEN }}
-        run: bash .github/scripts/sync/commit_push.sh
+        run: bun .github/scripts/sync/commit_push.ts
 
       - name: Create or refresh pull request
         if: steps.push.outputs.pushed == 'true'
@@ -371,7 +373,7 @@ jobs:
           REMOVED_PATHS_FILE: ${{ runner.temp }}/removed-paths.txt
           WITHHELD_FILE: ${{ runner.temp }}/withheld-workflows.txt
           RECOVER: ${{ inputs.recover }}
-        run: bash .github/scripts/sync/open_pr.sh
+        run: bun .github/scripts/sync/open_pr.ts
 
       - name: Fail on validation errors
         # The push step's re-validation (after withholding workflow files)
@@ -382,8 +384,8 @@ jobs:
           PUSH_VALIDATION: ${{ steps.push.outputs.validation }}
         run: |
           if [ "$HIDE_DETAILS" = "true" ] && [ -n "$PR_URL" ]; then
-            # run_hidden.sh withheld the diagnostics from this log;
-            # open_pr.sh appended them to the PR body instead.
+            # run_hidden.ts withheld the diagnostics from this log;
+            # open_pr.ts appended them to the PR body instead.
             where="the PR body - this public log hides them (private repository)"
           elif [ "$HIDE_DETAILS" = "true" ]; then
             # No PR exists to carry them (the update delivered nothing);
@@ -417,7 +419,7 @@ jobs:
       # (copier or cleanup crash, validation failure with nothing
       # delivered) would otherwise die with the runner. Deliver the
       # capture to a reused issue on the target repo - its issues are as
-      # private as the repo. When a PR exists, open_pr.sh already routed
+      # private as the repo. When a PR exists, open_pr.ts already routed
       # the detail into its body and the script skips itself. Best-effort:
       # the script warns generically and exits 0 on delivery problems.
       # env.TARGET != '' keeps both tail steps off runs that died before
@@ -431,11 +433,11 @@ jobs:
           GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
           PR_URL: ${{ steps.pr.outputs.url }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: bash .github/scripts/sync/failure_issue.sh deliver
+        run: bun .github/scripts/sync/failure_issue.ts deliver
 
       - name: Resolve the failure-report issue
         if: success() && env.HIDE_DETAILS == 'true' && env.TARGET != ''
         env:
           GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: bash .github/scripts/sync/failure_issue.sh resolve
+        run: bun .github/scripts/sync/failure_issue.ts resolve

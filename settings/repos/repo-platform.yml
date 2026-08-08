@@ -128,8 +128,8 @@ rulesets:
   # RepositoryRole admin bypass would not cover GITHUB_TOKEN (an app, not
   # a role), and an Integration bypass for github-actions would let ANY
   # workflow create these tags. Pre-created impostor tags are caught in
-  # code instead: publish.sh refuses to skip a wrong existing tag, and
-  # sync/verify_build_provenance.sh proves every tag before it ships.
+  # code instead: publish.ts refuses to skip a wrong existing tag, and
+  # sync/verify_build_provenance.ts proves every tag before it ships.
   - name: build-tags
     target: tag
     enforcement: active

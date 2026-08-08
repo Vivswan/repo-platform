@@ -173,7 +173,7 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile --silent
       - name: Run .github/scripts and action tests
-        run: bun test ./.github/scripts ./actions/fuzz-issue ./actions/validate-template ./scripts ./migrations
+        run: bun test ./tests ./actions/fuzz-issue ./actions/validate-template
 
   smoke-generate:
     runs-on: ubuntu-latest
@@ -263,7 +263,7 @@ jobs:
           MODULES: ${{ matrix.modules }}
           PRIVATE: ${{ matrix.private }}
           EXTRA_DATA: ${{ matrix.extra_data }}
-        run: .github/scripts/ci/smoke_generate.sh
+        run: bun .github/scripts/ci/smoke_generate.ts
       - name: Validate generated output
         run: |
           bun install --frozen-lockfile --silent --cwd actions/validate-template

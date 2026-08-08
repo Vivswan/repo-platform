@@ -30,7 +30,7 @@ on:
         default: both
 
 # Contents write publishes the build branches and tags; actions read lets
-# publish.sh's re-stamp check read the run stamped on the current tip.
+# publish.ts's re-stamp check read the run stamped on the current tip.
 permissions:
   contents: write
   actions: read
@@ -57,7 +57,7 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           DISPATCH_CHANNEL: ${{ inputs.channel }}
           RELEASE_TAG: ${{ github.event.release.tag_name }}
-        run: bash .github/scripts/build-branches/plan.sh
+        run: bun .github/scripts/build-branches/plan.ts
 
       - name: Build and publish
         if: steps.plan.outputs.staging == 'true' || steps.plan.outputs.latest == 'true'
@@ -67,4 +67,4 @@ jobs:
           BUILD_LATEST: ${{ steps.plan.outputs.latest }}
           VERSION: ${{ steps.plan.outputs.version }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: bash .github/scripts/build-branches/publish.sh
+        run: bun .github/scripts/build-branches/publish.ts

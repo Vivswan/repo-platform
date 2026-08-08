@@ -38,8 +38,13 @@ sync secret; the single REPO_PLATFORM_TOKEN PAT lives only here.
 - Never hand-edit generated files (templates/base/.gitignore.jinja, the
   `templates/{bun,uv,rust}/fragments/gitignore.jinja` fragments); run
   `bun scripts/build_gitignore.ts`. CI fails on drift.
-- Workflow run blocks longer than a few lines are extracted to bash
-  scripts under `.github/scripts/<owner>/` so shellcheck can lint them.
+- Workflow run blocks longer than a few lines are extracted to TypeScript
+  scripts under `.github/scripts/<owner>/`, run with bun; subprocesses use
+  argv arrays via `shared/proc.ts`, never shell strings. Three scripts stay
+  bash and shellcheck-linted: the ci/ test harnesses (upgrade_path_test,
+  verify_smoke_gating), which must stay independent of the code they
+  verify, and release_freshness.sh, pinned line-for-line to its inline
+  template twin.
   Exception: `reusable-*` workflows whose primary checkout is the CALLER's
   repository, where this repo's scripts do not exist - their steps stay
   inline. reusable-template-sync checks out repo-platform itself (the

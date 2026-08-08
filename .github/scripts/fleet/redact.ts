@@ -12,7 +12,7 @@
 //   names and reusable-workflow inputs are auto-printed, so a redacted
 //   row carries the hint plus an HMAC tag instead of the slug; the leg
 //   re-discovers the fleet and picks the unique tag match
-//   (resolve_private_repo.sh). Keyed by a value derived from the fleet
+//   (resolve_private_repo.ts). Keyed by a value derived from the fleet
 //   PAT (domain-separated, never the raw PAT) and bound to GITHUB_RUN_ID,
 //   the tag is safe to print: without the PAT it cannot be brute-forced
 //   into a name, and it fingerprints nothing across runs.
@@ -45,8 +45,9 @@ import { join } from "node:path";
 import { parseFlags } from "../shared/flags.ts";
 import { loadRegistry } from "./repos_registry.ts";
 
-// Pinned against resolve_private_repo.sh by a check_ssot rule and the
-// lockstep test in redact.test.ts: both sides must truncate identically.
+// One implementation for both sides: the plan job tags rows here and the
+// per-repo legs import verifyTag (fleet/resolve_private_repo.ts), so the
+// truncation length lives in this file alone.
 export const VERIFY_HEX_LENGTH = 32;
 
 // Domain-separation label for deriving the tag key from the fleet PAT, so
