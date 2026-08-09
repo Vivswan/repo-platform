@@ -274,8 +274,9 @@ function main(): number {
     errors.push(
       "LICENSE and LICENSE.md both exist - a repo must not carry both " +
         "spellings; keep the current license (fleet repos: LICENSE.md) " +
-        "and delete the other, moving any notice worth keeping below the " +
-        "license's local-section marker",
+        "and delete the other (git history remains the record of prior " +
+        "licensing; third-party notices can move below the license's " +
+        "local-section marker)",
     );
   } else if (licenseSpellings[0] === "LICENSE") {
     advisories.push(

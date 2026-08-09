@@ -150,7 +150,7 @@ if (
 
 // A license file this update deletes never reaches the PR as a conflict:
 // copier resolves delete-vs-modify by dropping the file, so content below
-// its local-section marker (prior-license notices) silently leaves the
+// its local-section marker (third-party notices) silently leaves the
 // repo, and the update can otherwise look clean. The deletion is flagged
 // for open_pr.ts, which holds the PR for human review however the run was
 // dispatched - the restore and re-seed blocks above have already put back
@@ -165,6 +165,6 @@ writeFileSync(
 );
 if (transitions.length > 0) {
   notice(
-    `${label}: this update deletes ${transitions.join(" and ")}; the PR stays manual-review so below-marker notices can be ported from git history.`,
+    `${label}: this update deletes ${transitions.join(" and ")}; the PR stays manual-review so a human can check the deleted file for local notices worth keeping (prior licensing needs none - git history is the record).`,
   );
 }

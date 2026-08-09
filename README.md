@@ -50,10 +50,10 @@ self-apply of a repo's own settings file.
 - Clean updates arm squash auto-merge on the PR, so it merges itself once
   the repo's `all-green` check passes. A PR that needs review stays
   manual: auto-resolved conflicts, withheld workflow files, failed
-  validation, an update that deletes a license file (below-marker notices
-  do not survive a delete-vs-modify merge, so a human ports them), or a
-  dispatch with `manual=true`, which holds every PR in the run for human
-  review.
+  validation, an update that deletes a license file (below-marker content
+  does not survive a delete-vs-modify merge, so a human checks whether
+  the deleted file held anything worth keeping), or a dispatch with
+  `manual=true`, which holds every PR in the run for human review.
 - `repos.yml` decides which repos: a quoted `"*"` wildcard auto-discovers
   every owned, non-archived repo the PAT can WRITE to (granting the
   fleet PAT a repository is what enrolls it; fine-grained PATs can read
@@ -143,7 +143,7 @@ each fixed PR needs a close/reopen for its checks to appear).
 |---|---|
 | Fully managed (template wins) | `.copier-answers.yml`, `ci.yml`, `release-please.yml`, `dependabot-bun-lockfile.yml` (bun module), workflow callers, `dependabot.yml`, `CODE_OF_CONDUCT.md`, `.yamllint`, `.typography-allow`, agent-file symlinks |
 | Managed shape, repo-owned selection | `.repo-platform.yml`: its presence marks the repo as participating in push sync, and its `modules:` list is the repo's own module selection (edit it; the next sync applies the change) |
-| Managed + local sections | `.gitignore` (LOCAL section is yours), `SECURITY.md`, `CONTRIBUTING.md`, `LICENSE.md` (everything below the `<!-- repo-platform:local-section -->` line is yours; conflict resolution moves overlapping local edits below it - where there is local content to move - instead of dropping them, and they still appear in the PR body for review; CONTRIBUTING.md is a public-only render, so a flip to private retires that file, local section included, while SECURITY.md and LICENSE.md are visibility-independent). LICENSE.md carries the fleet license, the Individual and Small Organization License - free for individuals, internal-use-only for small organizations, everyone else licenses from the licensor; local notices (earlier versions' licensing, third-party components) go below its marker, and selecting the `custom-license` module carries your own license instead, still at `LICENSE.md` - the file then becomes repo-owned and sync never touches it |
+| Managed + local sections | `.gitignore` (LOCAL section is yours), `SECURITY.md`, `CONTRIBUTING.md`, `LICENSE.md` (everything below the `<!-- repo-platform:local-section -->` line is yours; conflict resolution moves overlapping local edits below it - where there is local content to move - instead of dropping them, and they still appear in the PR body for review; CONTRIBUTING.md is a public-only render, so a flip to private retires that file, local section included, while SECURITY.md and LICENSE.md are visibility-independent). LICENSE.md carries the fleet license, the Individual and Small Organization License - free for individuals, internal-use-only for small organizations, everyone else licenses from the licensor; local notices (third-party components; prior licensing needs no notice - git history is the record) go below its marker, and selecting the `custom-license` module carries your own license instead, still at `LICENSE.md` - the file then becomes repo-owned and sync never touches it |
 | Mergeable (three-way) | `.github/settings.yml` (seeded by the settings-sync module; never deleted by sync), `.github/CODEOWNERS`, `AGENTS.md` (also carries the `<!-- repo-platform:local-section -->` marker: conflicting local edits move below it), `.editorconfig`, `.gitattributes` (carries a `# repo-platform:local-section` marker: repository-specific attributes below it are yours) |
 | Generated once, then repo-owned | `checks.yml` (your CI jobs, called inside the all-green gate), `release.yml` (your release pipeline around the managed release-please machinery), `auto-format.yml`, `copilot-setup-steps.yml`, `nightly-fuzz.yml` (the fuzzer module's starter, [docs](docs/fuzzer.md)), issue forms and chooser config (starters you tailor to the repo), `release-please-config.json`, `.release-please-manifest.json` |
 | Repo-owned (never touched) | source code, release tooling, `.typography-allow.local`, everything else |
