@@ -79,10 +79,13 @@ async function section(sha: string, path: string): Promise<string> {
   // Upstream files may carry CRLF line endings (Windows.gitignore does), and
   // macOS.gitignore spells CR-suffixed filename patterns as a character
   // class holding a raw CR byte (`Icon[\r]`); normalize to LF and rewrite
-  // those classes to the CR-free `?` glob so outputs stay ASCII.
+  // those classes to the CR-free `?` glob so outputs stay ASCII. Upstream
+  // comment lines also carry trailing spaces, which fail downstream repos'
+  // whitespace linters; strip them.
   const body = (await fetchText(`${RAW}/${sha}/${path}`))
     .replaceAll("\r\n", "\n")
     .replaceAll("[\r]", "?")
+    .replace(/[ \t]+$/gm, "")
     .trim();
   return `## ${name} (github/gitignore ${path})\n${body}\n`;
 }
