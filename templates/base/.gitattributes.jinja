@@ -7,12 +7,6 @@ CLAUDE.md -text
 .github/copilot-instructions.md -text
 .github/agents.md -text
 
-{%- if 'custom-license' not in modules %}
-# Render the extensionless LICENSE as Markdown on GitHub (the fleet
-# license is markdown; a custom-license repo's own LICENSE may not be).
-LICENSE linguist-language=Markdown
-{%- endif %}
-
 # Keep binary assets byte-for-byte unchanged.
 *.ico binary
 *.jpg binary

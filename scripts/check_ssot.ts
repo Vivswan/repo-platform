@@ -836,8 +836,8 @@ const rules: Rule[] = [
           // The template ends with a repo-specific-notices marker (prior
           // versions' licensing, third-party components); everything a
           // repo appends after it is its own, hence prefix semantics.
-          repo: "LICENSE",
-          tpl: "templates/base/{% if 'custom-license' not in modules %}LICENSE{% endif %}.jinja",
+          repo: "LICENSE.md",
+          tpl: "templates/base/{% if 'custom-license' not in modules %}LICENSE.md{% endif %}.jinja",
           mode: "prefix",
         },
         {

@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parse } from "yaml";
 import {
+  customLicenseFlipError,
   listRenderPaths,
   readSkipIfExists,
   retiredPaths,
@@ -29,27 +30,42 @@ describe("retiredPaths", () => {
   const newPaths = new Set([".github/workflows/ci.yml", "README.md"]);
 
   test("a path in the old render but not the new one is a candidate", () => {
-    expect(retiredPaths(oldPaths, newPaths, [".github/workflows/checks.yml"])).toEqual([
+    expect(retiredPaths(oldPaths, newPaths, [".github/workflows/checks.yml"], [])).toEqual([
       ".github/workflows/template-sync.yml",
     ]);
   });
 
   test("a path in both renders is never a candidate", () => {
-    expect(retiredPaths(oldPaths, newPaths, [])).not.toContain("README.md");
+    expect(retiredPaths(oldPaths, newPaths, [], [])).not.toContain("README.md");
   });
 
   test("the protected settings.yml never appears even when de-rendered", () => {
     const withSettings = new Set([...oldPaths, ".github/settings.yml"]);
-    expect(retiredPaths(withSettings, newPaths, [])).not.toContain(".github/settings.yml");
+    expect(retiredPaths(withSettings, newPaths, [], [])).not.toContain(".github/settings.yml");
   });
 
-  test("the protected LICENSE never appears even when the custom-license module de-renders it", () => {
+  test("both license spellings are protected only on the custom-license module", () => {
+    const withLicense = new Set([...oldPaths, "LICENSE", "LICENSE.md"]);
+    const custom = retiredPaths(withLicense, newPaths, [], ["custom-license"]);
+    expect(custom).not.toContain("LICENSE");
+    expect(custom).not.toContain("LICENSE.md");
+    // Without the module the license is template-managed: both spellings
+    // are deletable, so the extensionless LICENSE retires across the
+    // LICENSE.md rename.
+    const fleet = retiredPaths(withLicense, newPaths, [], []);
+    expect(fleet).toContain("LICENSE");
+    expect(fleet).toContain("LICENSE.md");
+  });
+
+  test("module membership is exact, not a substring match", () => {
     const withLicense = new Set([...oldPaths, "LICENSE"]);
-    expect(retiredPaths(withLicense, newPaths, [])).not.toContain("LICENSE");
+    expect(retiredPaths(withLicense, newPaths, [], ["my-custom-license-fork"])).toContain(
+      "LICENSE",
+    );
   });
 
   test("a file outside both renders never appears (repo-owned by construction)", () => {
-    const candidates = retiredPaths(oldPaths, newPaths, []);
+    const candidates = retiredPaths(oldPaths, newPaths, [], []);
     expect(candidates).not.toContain("src/index.ts");
     for (const path of candidates) {
       expect(oldPaths.has(path)).toBe(true);
@@ -58,7 +74,7 @@ describe("retiredPaths", () => {
 
   test("a _skip_if_exists path from the OLD version's list never appears", () => {
     const skip = [".github/workflows/template-sync.yml"];
-    expect(retiredPaths(oldPaths, newPaths, skip)).toEqual([".github/workflows/checks.yml"]);
+    expect(retiredPaths(oldPaths, newPaths, skip, [])).toEqual([".github/workflows/checks.yml"]);
   });
 
   test("a _skip_if_exists path from the NEW version's list never appears", () => {
@@ -66,16 +82,39 @@ describe("retiredPaths", () => {
     // declares it generated-once.
     const oldSkip: string[] = [];
     const newSkip = [".github/workflows/checks.yml", ".github/workflows/template-sync.yml"];
-    expect(retiredPaths(oldPaths, newPaths, [...oldSkip, ...newSkip])).toEqual([]);
+    expect(retiredPaths(oldPaths, newPaths, [...oldSkip, ...newSkip], [])).toEqual([]);
   });
 
   test("glob-shaped skip patterns match", () => {
-    expect(retiredPaths(oldPaths, newPaths, [".github/workflows/*.yml"])).toEqual([]);
+    expect(retiredPaths(oldPaths, newPaths, [".github/workflows/*.yml"], [])).toEqual([]);
   });
 
   test("output is sorted", () => {
-    const candidates = retiredPaths(oldPaths, newPaths, []);
+    const candidates = retiredPaths(oldPaths, newPaths, [], []);
     expect(candidates).toEqual([...candidates].sort());
+  });
+});
+
+describe("customLicenseFlipError", () => {
+  test("fires when the module is dropped and the old extensionless LICENSE remains", () => {
+    const message = customLicenseFlipError(["agents", "custom-license"], ["agents"], ["LICENSE"]);
+    expect(message).toContain("LICENSE");
+    expect(message).toContain(".repo-platform.yml");
+  });
+
+  test("fires for a remaining LICENSE.md and names every leftover spelling", () => {
+    const message = customLicenseFlipError(["custom-license"], [], ["LICENSE", "LICENSE.md"]);
+    expect(message).toContain("LICENSE and LICENSE.md");
+  });
+
+  test("silent when the module is kept, was never selected, or is newly added", () => {
+    expect(customLicenseFlipError(["custom-license"], ["custom-license"], ["LICENSE"])).toBeNull();
+    expect(customLicenseFlipError(["agents"], ["agents"], ["LICENSE"])).toBeNull();
+    expect(customLicenseFlipError(["agents"], ["custom-license"], ["LICENSE"])).toBeNull();
+  });
+
+  test("silent when no license file survived the flip", () => {
+    expect(customLicenseFlipError(["custom-license"], [], [])).toBeNull();
   });
 });
 
@@ -100,7 +139,7 @@ describe("listRenderPaths", () => {
     const oldRoot = makeRender({ "AGENTS.md": "agents" });
     symlinkSync("AGENTS.md", join(oldRoot, "copilot.md"));
     const newRoot = makeRender({ "AGENTS.md": "agents" });
-    expect(retiredPaths(listRenderPaths(oldRoot), listRenderPaths(newRoot), [])).toEqual([
+    expect(retiredPaths(listRenderPaths(oldRoot), listRenderPaths(newRoot), [], [])).toEqual([
       "copilot.md",
     ]);
   });

@@ -143,7 +143,7 @@ fi
 # are asserted separately as a cheap render-time cross-check (the validator
 # independently hard-errors on a present job missing from all-green's
 # needs).
-if has custom-license; then test ! -e /tmp/smoke/LICENSE; else test -f /tmp/smoke/LICENSE; fi
+if has custom-license; then test ! -e /tmp/smoke/LICENSE.md; else test -f /tmp/smoke/LICENSE.md; fi
 # SECURITY.md is visibility-independent (private collaborators need the
 # reporting route too); the contributor-facing files stay public-only.
 test -f /tmp/smoke/SECURITY.md

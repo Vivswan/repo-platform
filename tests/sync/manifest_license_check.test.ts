@@ -10,11 +10,11 @@ describe("checkManifests", () => {
     const problems = checkManifests({ packageJson: '{"license": "MIT"}' });
     expect(problems).toHaveLength(1);
     expect(problems[0]).toContain('"MIT"');
-    expect(problems[0]).toContain("SEE LICENSE IN LICENSE");
+    expect(problems[0]).toContain("SEE LICENSE IN LICENSE.md");
   });
 
   test("accepts the npm custom-license convention", () => {
-    expect(checkManifests({ packageJson: '{"license": "SEE LICENSE IN LICENSE"}' })).toEqual([]);
+    expect(checkManifests({ packageJson: '{"license": "SEE LICENSE IN LICENSE.md"}' })).toEqual([]);
   });
 
   test("a package.json without a license field makes no false claim", () => {
@@ -40,7 +40,7 @@ describe("checkManifests", () => {
       checkManifests({ cargoToml: '[package]\nname = "x"\nlicense = "Apache-2.0"\n' }),
     ).toHaveLength(1);
     expect(
-      checkManifests({ cargoToml: '[package]\nname = "x"\nlicense-file = "LICENSE"\n' }),
+      checkManifests({ cargoToml: '[package]\nname = "x"\nlicense-file = "LICENSE.md"\n' }),
     ).toEqual([]);
   });
 
@@ -82,7 +82,7 @@ describe("checkManifests", () => {
       }),
     ).toEqual([]);
     expect(
-      checkManifests({ pyprojectToml: '[project]\nlicense = { file = "LICENSE" }\n' }),
+      checkManifests({ pyprojectToml: '[project]\nlicense = { file = "LICENSE.md" }\n' }),
     ).toEqual([]);
   });
 
