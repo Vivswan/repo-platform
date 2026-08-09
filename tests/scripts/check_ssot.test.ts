@@ -20,7 +20,11 @@ import {
   zToDollar,
 } from "../../scripts/check_ssot";
 
-const vars = { username: "Vivswan", slug: "repo-platform" };
+const vars = {
+  username: "Vivswan",
+  slug: "repo-platform",
+  copyrightHolder: "Vivswan Shah (https://github.com/Vivswan)",
+};
 
 describe("normalizeJinja", () => {
   test("strips raw/endraw markers but keeps the expression", () => {
@@ -55,6 +59,20 @@ describe("normalizeJinja", () => {
     // model; the tag text alone is dropped so parity comparison fails loudly.
     const text = "A\n{%- if c -%}\nB\n{%- endif -%}\nC";
     expect(normalizeJinja(text, vars)).toBe("A\n\nB\n\nC");
+  });
+
+  test("substitutes the copyright holder", () => {
+    const text = "Required Notice: Copyright {{ copyright_holder }}";
+    expect(normalizeJinja(text, vars)).toBe(
+      "Required Notice: Copyright Vivswan Shah (https://github.com/Vivswan)",
+    );
+  });
+
+  test("substitutes a copyright holder containing $ sequences literally", () => {
+    const dollarVars = { ...vars, copyrightHolder: "Smith & Sons ($$ '$&' LLC)" };
+    expect(normalizeJinja("Copyright {{ copyright_holder }}", dollarVars)).toBe(
+      "Copyright Smith & Sons ($$ '$&' LLC)",
+    );
   });
 
   test("substitutes the identity expressions", () => {
