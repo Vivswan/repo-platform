@@ -20,6 +20,10 @@ on:
     - cron: "47 3 * * *"
   workflow_dispatch:
     inputs:
+      repo:
+        description: Single owner/name to heal (defaults to every settings target)
+        required: false
+        type: string
       check_only:
         description: >-
           Report drift without settings writes (a private target's
@@ -67,6 +71,9 @@ jobs:
       # answer for; only selection-infrastructure failures (unreadable
       # registry, failed discovery, a central file the per-repo scoping
       # cannot represent) fail this job.
+      # No ONLY_REPO env on purpose: the typed dispatch input may be a
+      # private slug, and the runner prints step env values into this
+      # public log - the script reads it from the event payload instead.
       - name: Select settings targets
         id: targets
         env:

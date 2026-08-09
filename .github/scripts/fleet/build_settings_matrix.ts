@@ -6,6 +6,7 @@
 // Usage:
 //   bun .github/scripts/fleet/build_settings_matrix.ts --owner Vivswan
 //     --in-repo in_repo_targets.json [--dir settings/repos]
+//     [--only owner/name]
 //
 // Central targets come from the <name>.yml files in --dir (bare names,
 // same owner - the layout docs/settings.md documents); in-repo targets
@@ -93,12 +94,14 @@ export function centralTargets(
  *  uses each in-repo row's REAL slug, before a redacted row swaps its
  *  display in). */
 export function buildMatrix(central: Target[], inRepo: InRepoRow[]): Target[] {
-  const centralRepos = new Set(central.map((t) => t.repo));
+  // Slug comparisons are case-insensitive, like GitHub's.
+  const centralRepos = new Set(central.map((t) => t.repo.toLowerCase()));
   const targets = [...central];
   const seen = new Set<string>();
   for (const row of inRepo) {
-    if (centralRepos.has(row.repo) || seen.has(row.repo)) continue;
-    seen.add(row.repo);
+    const key = row.repo.toLowerCase();
+    if (centralRepos.has(key) || seen.has(key)) continue;
+    seen.add(key);
     const emitted = row.redact_name ? row.display : row.repo;
     targets.push({
       repo: emitted,
@@ -109,6 +112,22 @@ export function buildMatrix(central: Target[], inRepo: InRepoRow[]): Target[] {
     });
   }
   return targets.sort((a, b) => (a.repo < b.repo ? -1 : a.repo > b.repo ? 1 : 0));
+}
+
+/** Scope both target lists to one repository (real owner/name slug,
+ *  case-insensitive) for single-repo dispatch runs. Redaction has not
+ *  happened yet - in-repo rows still carry the real slug - so a private
+ *  target is matchable here and redacted as usual afterwards. */
+export function applyOnly(
+  central: Target[],
+  inRepo: InRepoRow[],
+  only: string,
+): { central: Target[]; inRepo: InRepoRow[] } {
+  const wanted = only.toLowerCase();
+  return {
+    central: central.filter((t) => t.repo.toLowerCase() === wanted),
+    inRepo: inRepo.filter((r) => r.repo.toLowerCase() === wanted),
+  };
 }
 
 function fail(errors: string[]): never {
@@ -147,7 +166,7 @@ function loadInRepoRows(path: string): InRepoRow[] {
 }
 
 function main(args: string[]): void {
-  const flags = parseFlags(args, ["--owner", "--in-repo"], ["--dir"]);
+  const flags = parseFlags(args, ["--owner", "--in-repo"], ["--dir", "--only"]);
   const dir = flags["--dir"] ?? "settings/repos";
 
   let listing: { name: string; isDirectory: boolean }[];
@@ -160,9 +179,16 @@ function main(args: string[]): void {
     fail([`${dir}: cannot read the central settings directory`]);
   }
 
-  const { targets: central, errors } = centralTargets(flags["--owner"], listing, dir);
-  if (errors.length > 0) fail(errors);
-  console.log(JSON.stringify(buildMatrix(central, loadInRepoRows(flags["--in-repo"]))));
+  let central: Target[];
+  {
+    const result = centralTargets(flags["--owner"], listing, dir);
+    if (result.errors.length > 0) fail(result.errors);
+    central = result.targets;
+  }
+  let inRepo = loadInRepoRows(flags["--in-repo"]);
+  const only = flags["--only"] ?? "";
+  if (only !== "") ({ central, inRepo } = applyOnly(central, inRepo, only));
+  console.log(JSON.stringify(buildMatrix(central, inRepo)));
 }
 
 if (import.meta.main) {

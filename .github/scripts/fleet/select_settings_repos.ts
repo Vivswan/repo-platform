@@ -23,9 +23,11 @@
 // repos.yml-excluded repos keep their committed (self-disclosed) names.
 //
 // Env: PAT, GH_TOKEN, GITHUB_RUN_ID, OWNER, RUNNER_TEMP, GITHUB_OUTPUT;
-// GITHUB_STEP_SUMMARY (optional) receives a copy of every warning.
+// GITHUB_STEP_SUMMARY (optional) receives a copy of every warning;
+// GITHUB_EVENT_PATH supplies the single-repo dispatch input (a non-empty
+// ONLY_REPO env overrides it - the test harness and local runs use that).
 
-import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
 import { env, notice, requireEnv, setOutput } from "../shared/gha.ts";
@@ -36,6 +38,21 @@ import { pushProbeStatus } from "./push_probe.ts";
 const runnerTemp = requireEnv("RUNNER_TEMP");
 const pat = requireEnv("PAT");
 const owner = requireEnv("OWNER");
+
+// The typed dispatch input may be a private slug, so it must not ride in
+// as step env: the runner prints step env values into the public log
+// group. The event payload on the runner's disk is not logged. A bare
+// name gets the fleet owner prefixed; matching is case-insensitive.
+let onlyRepo = env("ONLY_REPO");
+if (onlyRepo === "" && env("GITHUB_EVENT_PATH") !== "") {
+  const event = JSON.parse(readFileSync(env("GITHUB_EVENT_PATH"), "utf-8")) as {
+    inputs?: { repo?: string };
+  };
+  onlyRepo = event.inputs?.repo ?? "";
+}
+onlyRepo = onlyRepo.trim();
+if (onlyRepo !== "" && !onlyRepo.includes("/")) onlyRepo = `${owner}/${onlyRepo}`;
+onlyRepo = onlyRepo.toLowerCase();
 
 // A drop that leaves a repo without settings management is announced: a
 // workflow warning, plus a step-summary bullet (under a heading written
@@ -227,12 +244,16 @@ const enriched = JSON.parse(readFileSync(join(runnerTemp, "enriched.json"), "utf
   rows: EnrichedRow[];
 };
 
+// Central filenames matched case-insensitively, like GitHub slugs (the
+// checkout's filesystem may or may not fold case itself).
+const centralNames = new Set(readdirSync("settings/repos").map((entry) => entry.toLowerCase()));
 const inRepoTargets: EnrichedRow[] = [];
 for (const row of enriched.rows) {
+  if (onlyRepo !== "" && row.repo.toLowerCase() !== onlyRepo) continue;
   const { repo, display } = row;
   const name = repo.split("/").pop() ?? repo;
   const centralRef = row.redact_name ? "settings/repos/<name>.yml" : `settings/repos/${name}.yml`;
-  if (existsSync(`settings/repos/${name}.yml`)) continue;
+  if (centralNames.has(`${name.toLowerCase()}.yml`)) continue;
   if (!(await probe("push-permission probe", probePush, repo, display, centralRef))) continue;
   if (!(await probe("adoption check", probeAdoption, repo, display, centralRef))) continue;
   if (!(await probe("settings.yml check", probeSettings, repo, display, centralRef))) continue;
@@ -252,7 +273,10 @@ runStage(
   join(runnerTemp, "excluded.json"),
 );
 const excluded = JSON.parse(readFileSync(join(runnerTemp, "excluded.json"), "utf-8")) as string[];
-for (const repo of excluded) {
+// A single-repo dispatch is a scoped heal; the fleet-wide exclusion
+// reminders belong to the full runs.
+const sweepable = onlyRepo === "" ? excluded : [];
+for (const repo of sweepable) {
   const name = repo.split("/").pop() ?? repo;
   if (existsSync(`settings/repos/${name}.yml`)) continue;
   const probeResult = capture([
@@ -295,6 +319,7 @@ const matrix = Bun.spawnSync(
     owner,
     "--in-repo",
     join(runnerTemp, "in_repo_targets.json"),
+    ...(onlyRepo === "" ? [] : ["--only", onlyRepo]),
   ],
   { stdout: "pipe", stderr: "inherit" },
 );
@@ -302,6 +327,14 @@ if (matrix.exitCode !== 0) process.exit(matrix.exitCode ?? 1);
 const targets = matrix.stdout.toString().replace(/\n$/, "");
 setOutput("targets", targets);
 const parsed = JSON.parse(targets) as { repo: string; home: string }[];
+if (onlyRepo !== "" && parsed.length === 0) {
+  // The input is echoed nowhere: the dispatcher typed it, and it may be
+  // a private slug this public log must not print.
+  console.log(
+    "::error::the repo input matches no settings target (matching ignores case): it must be an enrolled repo carrying .github/settings.yml or have a central settings/repos/<name>.yml file, and a repos.yml exclude pauses this heal for it",
+  );
+  process.exit(1);
+}
 console.log(
   `settings targets: ${parsed.length === 0 ? "(none)" : parsed.map((t) => `${t.repo} [${t.home}]`).join(", ")}`,
 );
