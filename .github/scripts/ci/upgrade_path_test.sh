@@ -428,7 +428,7 @@ else
   # A repo-local notice below the LICENSE.md marker is repo-owned content
   # and must ride through the sync (prefix pairing, like CONTRIBUTING's
   # local section).
-  printf '\nPrior releases of this repository were MIT-licensed.\n' >> LICENSE.md
+  printf '\nBundled vendor components are licensed separately; see vendor/.\n' >> LICENSE.md
   git add --all
   git -c user.name=ci -c user.email=ci@localhost commit -q -m "chore: local license notice"
 fi
@@ -501,7 +501,7 @@ case "$(cat LICENSE.md)" in
   *) fail "the fleet license is not a prefix of LICENSE.md after the flip to private" ;;
 esac
 if [ "$synthetic" != true ]; then
-  grep -qF "Prior releases of this repository were MIT-licensed." LICENSE.md \
+  grep -qF "Bundled vendor components are licensed separately; see vendor/." LICENSE.md \
     || fail "the repo-local license notice below the marker did not survive the sync"
 fi
 if [ "$synthetic" = true ]; then
@@ -509,9 +509,9 @@ if [ "$synthetic" = true ]; then
   # custom-license module: the rename must delete it. Copier resolves the
   # delete-vs-modify by dropping the file, so divergent local content
   # survives only in the target's git history and the PR's own file
-  # diff - which is why the rename sync is dispatched with manual=true
-  # and ports license notices explicitly instead of relying on the
-  # merge.
+  # diff - which is why a license deletion always holds the PR for human
+  # review (git history stays the record of prior licensing; nothing is
+  # ported into LICENSE.md).
   test ! -e LICENSE || fail "the old extensionless LICENSE survived the rename"
   # No pipe into grep -q: under pipefail its early exit SIGPIPEs git log.
   [ -n "$(git log --all --format=%H -- LICENSE)" ] \

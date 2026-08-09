@@ -127,9 +127,11 @@ if (nonEmpty(licenseTransitionFile)) {
 > [!WARNING]
 > This update DELETES ${lines(licenseTransitionFile).join(" and ")}. Copier
 > resolves delete-vs-modify by dropping the file, so content below its
-> local-section marker (prior-license notices) is not in this diff -
-> recover it from the base branch or git history and port it below
-> LICENSE.md's marker on this branch before merging.`;
+> local-section marker is not in this diff. Prior licensing needs no
+> notice - git history is the record - but if the old file (see it on the
+> base branch or in git history) carried other local notices such as
+> third-party components, move them below LICENSE.md's marker on this
+> branch before merging.`;
 }
 
 if (resolved === "true") {

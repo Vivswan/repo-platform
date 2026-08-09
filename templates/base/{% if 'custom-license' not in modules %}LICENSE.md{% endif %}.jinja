@@ -340,7 +340,7 @@ expression.
 **Use** means anything you do with the software requiring one of your
 licenses.
 
-<!-- Repository-specific license notices (licensing of earlier versions,
-     third-party components, differently licensed paths) go below this
-     line. They survive template updates via three-way merge. -->
+<!-- Repository-specific license notices (third-party components,
+     differently licensed paths) go below this line. They survive
+     template updates via three-way merge. -->
 <!-- repo-platform:local-section -->
