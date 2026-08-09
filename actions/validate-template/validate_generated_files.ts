@@ -12,6 +12,8 @@
 //      manages it), an `all-green` job exists with `if: always()`, a step
 //      failing on any non-success result, and `needs:` listing every other
 //      job, and a `typography` job exists
+//   6. LICENSE and LICENSE.md never coexist - a repo carries exactly one
+//      license file
 //
 // Advisories (printed, never fail): missing actionlint / yamllint /
 // commit-names / gitleaks jobs in ci.yml (older renders predate the newer
@@ -253,6 +255,33 @@ function main(): number {
         );
       }
     }
+  }
+
+  // 6. One license file. GitHub, registries, and the fleet sync all pick
+  // a single license per repo: LICENSE next to LICENSE.md means a stale
+  // spelling survived the rename or a custom license collided with the
+  // fleet one. lstat presence (not isRegularFile) so a symlinked license
+  // still counts.
+  const licenseSpellings = ["LICENSE", "LICENSE.md"].filter((name) => {
+    try {
+      lstatSync(join(root, name));
+      return true;
+    } catch {
+      return false;
+    }
+  });
+  if (licenseSpellings.length > 1) {
+    errors.push(
+      "LICENSE and LICENSE.md both exist - a repo must not carry both " +
+        "spellings; keep the current license (fleet repos: LICENSE.md) " +
+        "and delete the other, moving any notice worth keeping below the " +
+        "license's local-section marker",
+    );
+  } else if (licenseSpellings[0] === "LICENSE") {
+    advisories.push(
+      "LICENSE: the fleet convention is LICENSE.md for every repo, custom " +
+        "licenses included - rename it (GitHub detects both spellings)",
+    );
   }
 
   // 3 + 4. YAML parses; no conflict markers
