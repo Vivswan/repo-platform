@@ -83,6 +83,13 @@ export function normalizeJinja(text: string, vars: JinjaVars): string {
   // appearance means this normalizer needs real branch handling.
   const branchTag = /\{%-?\s*(?:else|elif)\b[^%]*?-?%\}/.exec(out);
   if (branchTag) throw new Error(`normalizeJinja cannot handle ${branchTag[0]}`);
+  // A whitespace-controlled ({%- ... %}) statement tag on its own line
+  // disappears with its line, matching what rendering produces; a plain
+  // tag leaves its blank line, and an inline tag loses just the tag text.
+  // A trailing-control close (-%}) also strips the newline that follows,
+  // which line removal does not model, so that form is left unnormalized
+  // for the dogfood-parity comparison to reject loudly.
+  out = out.replace(/^[ \t]*\{%-\s*(?:if|endif)\b[^%]*?(?<!-)%\}[ \t]*\r?\n/gm, "");
   out = out.replace(/\{%-?\s*(?:if|endif)\b[^%]*?-?%\}/g, "");
   out = out.replace(/\{\{ '([^']*)' if [^}]*? else '[^']*' \}\}/g, "$1");
   out = out.replace(
