@@ -18,7 +18,10 @@ PRs may merge while behind), public repos get a `dependency-review` job
 just for public repos), and public repos with a toolchain get
 per-language `codeql-*` jobs calling the reusable CodeQL analysis - so
 branch protection blocks on all of them without any extra required
-checks. Repo-specific jobs live in the
+checks. A repo tunes its own scan (paths-ignore, extra queries, packs)
+through the repo-owned `.github/codeql/codeql-config.yml`, the standard
+CodeQL config file, picked up automatically when present - the managed
+ci.yml carries no per-repo scan parameters. Repo-specific jobs live in the
 repo-owned `.github/workflows/checks.yml` (`_skip_if_exists`), which the
 managed ci.yml calls inside the gate through its `checks` job. all-green
 sees only that job's aggregate result, so the skipped-is-failure rule below
