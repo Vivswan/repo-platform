@@ -36,15 +36,20 @@ const START = Buffer.from(`${"<".repeat(7)} before updating`);
 const SEP = Buffer.from("=".repeat(7));
 const END = Buffer.from(`${">".repeat(7)} after updating`);
 
-// Repo-local-section sentinel: templated docs with a repository-owned tail
-// (templates/base CONTRIBUTING.md, SECURITY.md, and LICENSE, templates/agents
-// AGENTS.md)
+// Repo-local-section sentinel: templated files with a repository-owned tail
+// (templates/base CONTRIBUTING.md, SECURITY.md, LICENSE, and .gitattributes,
+// templates/agents AGENTS.md)
 // close their managed half with this exact comment line; everything below it
 // is repository-owned and runs to end of file. When the kept template side of
 // a resolved file carries the sentinel, dropped local hunks are appended below
 // it instead of being discarded to the PR body. Detection is the exact line,
-// never prose, so ordinary template wording cannot trigger it.
-const LOCAL_SECTION_SENTINEL = Buffer.from("<!-- repo-platform:local-section -->");
+// never prose, so ordinary template wording cannot trigger it. Two spellings:
+// the HTML comment for markdown-family files, the hash comment for files
+// whose comment character is # (.gitattributes).
+const LOCAL_SECTION_SENTINELS = [
+  Buffer.from("<!-- repo-platform:local-section -->"),
+  Buffer.from("# repo-platform:local-section"),
+];
 
 const SKIP_DIRS = new Set([".git", ".repo-platform-src", "node_modules", ".venv", "__pycache__"]);
 
@@ -85,7 +90,8 @@ type Resolution = { kind: "malformed" } | { kind: "resolved"; resolved: Buffer; 
 type HunkDisposition = "dropped" | "moved" | "moved-tail";
 
 function isSentinelLine(line: Buffer): boolean {
-  return stripCr(line).equals(LOCAL_SECTION_SENTINEL);
+  const stripped = stripCr(line);
+  return LOCAL_SECTION_SENTINELS.some((sentinel) => stripped.equals(sentinel));
 }
 
 function hasLocalSectionSentinel(data: Buffer): boolean {

@@ -809,7 +809,7 @@ const rules: Rule[] = [
           // The template ends with a repo-specific-docs marker; everything a
           // repo appends after it is its own, hence prefix semantics.
           repo: "SECURITY.md",
-          tpl: "templates/base/{% if not private %}SECURITY.md{% endif %}.jinja",
+          tpl: "templates/base/SECURITY.md.jinja",
           mode: "prefix",
         },
         {
@@ -889,13 +889,23 @@ const rules: Rule[] = [
       if (expected.length === 0)
         throw new Error(".gitattributes.jinja: no shared lines found - anchor lost");
       const got = new Set(semanticLines(read(".gitattributes")));
-      return expected
+      const mismatches = expected
         .filter((line) => !got.has(line))
         .map((line) => ({
           file: ".gitattributes",
           expected: `line ${JSON.stringify(line)} (from templates/base/.gitattributes.jinja)`,
           got: "missing",
         }));
+      // semanticLines drops # lines, so the repo-local-section marker needs
+      // its own presence check or its loss would go unnoticed.
+      if (!read(".gitattributes").split("\n").includes("# repo-platform:local-section")) {
+        mismatches.push({
+          file: ".gitattributes",
+          expected: "the '# repo-platform:local-section' marker line",
+          got: "missing",
+        });
+      }
+      return mismatches;
     },
   },
 
