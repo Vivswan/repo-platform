@@ -131,3 +131,27 @@ describe("duplicate mapping keys", () => {
     expect(stderr).toContain("vendor/bad.yml: does not parse as YAML");
   });
 });
+
+describe("one license file", () => {
+  test("LICENSE.md alone passes (fleet repos)", () => {
+    const { exitCode, stderr } = runValidator({ "LICENSE.md": "# License\n" });
+    expect(stderr).toBe("");
+    expect(exitCode).toBe(0);
+  });
+
+  test("LICENSE alone passes with a rename advisory (custom-license repos)", () => {
+    const { exitCode, stdout, stderr } = runValidator({ LICENSE: "MIT License\n" });
+    expect(stderr).toBe("");
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain("advisory: LICENSE: the fleet convention is LICENSE.md");
+  });
+
+  test("both spellings together fail", () => {
+    const { exitCode, stderr } = runValidator({
+      LICENSE: "MIT License\n",
+      "LICENSE.md": "# License\n",
+    });
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain("LICENSE and LICENSE.md both exist");
+  });
+});
