@@ -8,7 +8,11 @@
 # writer of every target's automation branch: legs fan out in parallel,
 # but each writes to a different repo, so the per-branch single-writer
 # guarantee holds; the sync's lease-guarded force-push regenerates that
-# branch each run. The weekly cron is the catch-all: staging-channel
+# branch each run. GitHub keeps only ONE pending run per group and
+# cancels the rest ("a higher priority waiting request exists"), so
+# batch operations - a fleet-wide recover=recopy, for one - must
+# dispatch serially, waiting for each run to finish before the next.
+# The weekly cron is the catch-all: staging-channel
 # repos pick up main merges through it, and it heals any release whose
 # sync run was missed.
 
