@@ -63,6 +63,7 @@ export function mustMatch(text: string, re: RegExp, where: string, what: string)
 export interface JinjaVars {
   username: string;
   slug: string;
+  copyrightHolder: string;
 }
 
 /**
@@ -96,6 +97,7 @@ export function normalizeJinja(text: string, vars: JinjaVars): string {
     new RegExp(`\\{\\{ github_username \\}\\}/${vars.slug}/([^\\s@]+)@\\{\\{ uses_ref \\}\\}`, "g"),
     "./$1",
   );
+  out = out.replace(/\{\{ copyright_holder \}\}/g, () => vars.copyrightHolder);
   out = out.replace(/\{\{ github_username \| lower \}\}/g, vars.username.toLowerCase());
   out = out.replace(/\{\{ github_username \}\}/g, vars.username);
   out = out.replace(/\{\{ project_slug \}\}/g, vars.slug);
@@ -214,8 +216,12 @@ function jinjaVars(): JinjaVars {
   if (typeof username !== "string" || username === "") {
     throw new Error("copier.yml: github_username has no string default");
   }
+  const holder = asRecord(copierConfig().copyright_holder, "copier.yml copyright_holder").default;
+  if (typeof holder !== "string" || holder === "") {
+    throw new Error("copier.yml: copyright_holder has no string default");
+  }
   const pkg = asRecord(JSON.parse(read("package.json")), "package.json");
-  return { username, slug: String(pkg.name) };
+  return { username, slug: String(pkg.name), copyrightHolder: holder };
 }
 
 function packageScripts(): Record<string, string> {
@@ -827,9 +833,12 @@ const rules: Rule[] = [
           mode: "semantic",
         },
         {
+          // The template ends with a repo-specific-notices marker (prior
+          // versions' licensing, third-party components); everything a
+          // repo appends after it is its own, hence prefix semantics.
           repo: "LICENSE",
-          tpl: "templates/base/{% if 'custom-license' not in modules %}LICENSE{% endif %}",
-          mode: "exact",
+          tpl: "templates/base/{% if 'custom-license' not in modules %}LICENSE{% endif %}.jinja",
+          mode: "prefix",
         },
         {
           // Same marker semantics as SECURITY.md: repo-specific contributing

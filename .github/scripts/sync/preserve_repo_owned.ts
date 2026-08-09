@@ -31,9 +31,10 @@
 // the fleet-license re-seed); TARGET_DISPLAY / TARGET (log label, in that
 // order; defaults to TARGET_DIR).
 
-import { existsSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { env, notice } from "../shared/gha.ts";
+import { parse } from "yaml";
+import { env, error, notice } from "../shared/gha.ts";
 
 const targetDir = env("TARGET_DIR", "target");
 const label = env("TARGET_DISPLAY") || env("TARGET") || targetDir;
@@ -79,7 +80,7 @@ if (!recover && inHead("LICENSE") && !existsSync(join(targetDir, "LICENSE"))) {
   );
 }
 
-const fleetLicense = "template/{% if 'custom-license' not in modules %}LICENSE{% endif %}";
+const fleetLicense = "template/{% if 'custom-license' not in modules %}LICENSE{% endif %}.jinja";
 if (
   !recover &&
   !existsSync(join(targetDir, "LICENSE")) &&
@@ -95,7 +96,38 @@ if (
       stderr: "inherit",
     });
     if (show.exitCode !== 0) process.exit(show.exitCode ?? 1);
-    writeFileSync(join(targetDir, "LICENSE"), show.stdout);
+    // The template carries the Required Notice as a jinja variable; render
+    // it from the repo's recorded answer rather than seeding template text.
+    const answersPath = join(targetDir, ".copier-answers.yml");
+    let answers: Record<string, unknown> = {};
+    if (existsSync(answersPath)) {
+      let doc: unknown;
+      try {
+        doc = parse(readFileSync(answersPath, "utf-8"));
+      } catch {
+        doc = undefined;
+      }
+      if (doc === undefined || doc === null || typeof doc !== "object" || Array.isArray(doc)) {
+        error(`${label}: cannot re-seed the fleet license; .copier-answers.yml is unreadable`);
+        process.exit(1);
+      }
+      answers = doc as Record<string, unknown>;
+    }
+    const holder = answers.copyright_holder;
+    if (typeof holder !== "string" || holder === "") {
+      error(
+        `${label}: cannot re-seed the fleet license; .copier-answers.yml records no copyright_holder`,
+      );
+      process.exit(1);
+    }
+    // Callback replacement: a literal holder string would have its $
+    // sequences expanded.
+    const rendered = show.stdout.toString().replaceAll("{{ copyright_holder }}", () => holder);
+    if (rendered.includes("{{") || rendered.includes("{%")) {
+      error(`${label}: cannot re-seed the fleet license; unrendered template expressions remain`);
+      process.exit(1);
+    }
+    writeFileSync(join(targetDir, "LICENSE"), rendered);
     notice(
       `${label}: LICENSE was deleted but the fleet license is mandatory without the custom-license module; re-seeded from ${targetRef}.`,
     );

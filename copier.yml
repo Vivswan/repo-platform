@@ -179,6 +179,17 @@ github_username:
   help: GitHub username owning the repository
   default: Vivswan
 
+# The fleet LICENSE's Required Notice names the licensor and how to
+# reach them. A repo whose rights belong to someone else gets their name
+# and contact here; repos with a different license entirely select the
+# custom-license module instead (the question is skipped there because
+# LICENSE is not rendered).
+copyright_holder:
+  type: str
+  help: Copyright holder and contact for the fleet LICENSE's Required Notice (the licensor)
+  default: Vivswan Shah (https://github.com/Vivswan)
+  when: "{{ 'custom-license' not in modules }}"
+
 # Computed - never asked. The single place that defines which modules count
 # as language toolchains: gates the auto-format starter and feeds
 # enable_codeql. Extend this expression when adding a language module.

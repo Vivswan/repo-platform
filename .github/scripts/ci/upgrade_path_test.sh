@@ -23,6 +23,15 @@ GITHUB_WORKSPACE="${GITHUB_WORKSPACE:-$(pwd)}"
 PROJECT=/tmp/upgrade
 WORK=/tmp/upgrade-work
 
+# The fleet LICENSE template carries its Required Notice as a jinja
+# variable; comparisons against rendered projects substitute the copier
+# default (independent of the code under test, like the rest of this
+# harness).
+rendered_fleet_license() {
+  sed 's|{{ copyright_holder }}|Vivswan Shah (https://github.com/Vivswan)|g' \
+    "$GITHUB_WORKSPACE/templates/base/{% if 'custom-license' not in modules %}LICENSE{% endif %}.jinja"
+}
+
 fail() {
   echo "FAIL: $*" >&2
   exit 1
@@ -91,7 +100,7 @@ if [ -z "$prev" ]; then
   # _skip_if_exists. Without this the synthetic fixture would already carry
   # the current license and the transition assertions below would be
   # vacuous.
-  rm "/tmp/old-tree/template/{% if 'custom-license' not in modules %}LICENSE{% endif %}"
+  rm "/tmp/old-tree/template/{% if 'custom-license' not in modules %}LICENSE{% endif %}.jinja"
   echo "Old fleet license (pre-relicense fixture)" > /tmp/old-tree/template/LICENSE
   awk '{print} /^_skip_if_exists:/{print "  - LICENSE"}' /tmp/old-tree/copier.yml \
     > /tmp/old-tree/copier.yml.tmp
@@ -397,8 +406,9 @@ git add --all
 git -c user.name=ci -c user.email=ci@localhost commit -q -m "chore: init"
 
 # A divergent license WITHOUT the custom-license opt-out: the fleet
-# relicense must win the three-way merge - the conflict is auto-resolved to
-# the template side and recorded in the dropped-hunks summary. The old and
+# relicense must win the three-way merge - the fleet text leads the file,
+# with the local content either kept below the trailing notices marker or
+# dropped and recorded in the dropped-hunks summary. The old and
 # new fixture licenses only differ in synthetic mode (a real prev release
 # already ships the current fleet license, and copier re-applies a local
 # diff cleanly when the template side did not change), so the divergence is
@@ -407,6 +417,13 @@ if [ "$synthetic" = true ]; then
   echo "Divergent unopted license" > LICENSE
   git add --all
   git -c user.name=ci -c user.email=ci@localhost commit -q -m "chore: divergent license"
+else
+  # A repo-local notice below the LICENSE marker is repo-owned content and
+  # must ride through the sync (prefix pairing, like CONTRIBUTING's local
+  # section).
+  printf '\nPrior releases of this repository were MIT-licensed.\n' >> LICENSE
+  git add --all
+  git -c user.name=ci -c user.email=ci@localhost commit -q -m "chore: local license notice"
 fi
 
 # Same pipeline as the main leg, but the live data says PRIVATE=true while
@@ -456,11 +473,22 @@ test ! -e SECURITY.md || fail "SECURITY.md survived the flip to private"
 # migration path a relicensing takes through a real sync.
 test ! -e CONTRIBUTING.md || fail "CONTRIBUTING.md survived the flip to private"
 test ! -e CODE_OF_CONDUCT.md || fail "CODE_OF_CONDUCT.md survived the flip to private"
-cmp -s LICENSE "$GITHUB_WORKSPACE/templates/base/{% if 'custom-license' not in modules %}LICENSE{% endif %}" \
-  || fail "LICENSE does not match the fleet license after the flip to private"
+# Assign first: a failed substitution inside a case WORD does not trip
+# errexit, and an empty pattern would collapse to a match-everything *.
+fleet_license="$(rendered_fleet_license)"
+[ -n "$fleet_license" ] || fail "could not render the fleet license"
+case "$(cat LICENSE)" in
+  "$fleet_license"*) ;;
+  *) fail "the fleet license is not a prefix of LICENSE after the flip to private" ;;
+esac
+if [ "$synthetic" != true ]; then
+  grep -qF "Prior releases of this repository were MIT-licensed." LICENSE \
+    || fail "the repo-local license notice below the marker did not survive the sync"
+fi
 if [ "$synthetic" = true ]; then
-  grep -qF "LICENSE" "$VIS_WORK/dropped-local-hunks.md" \
-    || fail "the dropped-hunks summary does not record the overwritten divergent LICENSE"
+  grep -qF "Divergent unopted license" LICENSE \
+    || grep -qF "LICENSE" "$VIS_WORK/dropped-local-hunks.md" \
+    || fail "the divergent license was neither kept below the marker nor recorded as dropped"
 fi
 if grep -qF "dependency-review" .github/workflows/ci.yml; then
   fail "ci.yml kept the dependency-review job after the flip to private"
@@ -527,6 +555,6 @@ RECOVER="" bun .github/scripts/sync/apply_update.ts
 bun .github/scripts/sync/resolve_copier_conflicts.ts \
   --summary /tmp/upgrade-del-hunks.md --root "$DEL"
 RECOVER="" bun .github/scripts/sync/preserve_repo_owned.ts
-cmp -s "$DEL/LICENSE" "$GITHUB_WORKSPACE/templates/base/{% if 'custom-license' not in modules %}LICENSE{% endif %}" \
+rendered_fleet_license | cmp -s "$DEL/LICENSE" - \
   || fail "a committed LICENSE deletion did not re-converge to the mandatory fleet license"
 echo "license deletion OK: fleet license re-seeded"
