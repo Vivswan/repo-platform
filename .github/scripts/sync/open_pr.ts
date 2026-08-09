@@ -7,7 +7,8 @@
 // Env: TARGET, TARGET_DISPLAY (log label; falls back to TARGET),
 // HIDE_DETAILS, CHANNEL, DISPLAY, BRANCH, BASE_BRANCH,
 // VALIDATION, RESOLVED, RECOVER, DRIFT_FILE, SUMMARY_FILE,
-// RETIRED_MODULES_FILE, REMOVED_PATHS_FILE, WITHHELD_FILE, GH_TOKEN,
+// RETIRED_MODULES_FILE, REMOVED_PATHS_FILE, WITHHELD_FILE,
+// MANIFEST_LICENSE_FILE, GH_TOKEN,
 // GITHUB_REPOSITORY, GITHUB_OUTPUT, RUNNER_TEMP.
 
 import { existsSync, readFileSync, statSync } from "node:fs";
@@ -112,6 +113,11 @@ if (nonEmpty(withheldFile)) {
 ${lines(withheldFile)
   .map((path) => `- ${path}`)
   .join("\n")}`;
+}
+
+const manifestLicenseFile = requireEnv("MANIFEST_LICENSE_FILE");
+if (nonEmpty(manifestLicenseFile)) {
+  body += `\n\n${slurp(manifestLicenseFile)}`;
 }
 
 if (resolved === "true") {

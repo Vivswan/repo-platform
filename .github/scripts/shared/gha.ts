@@ -30,6 +30,10 @@ export function notice(message: string): void {
   console.log(`::notice::${escapeData(message)}`);
 }
 
+export function warning(message: string): void {
+  console.log(`::warning::${escapeData(message)}`);
+}
+
 export function error(message: string): void {
   console.log(`::error::${escapeData(message)}`);
 }

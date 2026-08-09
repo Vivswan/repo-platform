@@ -291,6 +291,15 @@ jobs:
           MODULES="$(cat "$RUNNER_TEMP/modules.json")" \
             bun .github/scripts/sync/preserve_repo_owned.ts
 
+      # Registries publish the manifest's license claim, not the LICENSE
+      # file: a repo adopting the fleet license with package.json still
+      # saying "MIT" publishes a false grant. Flags conflicting claims in
+      # the PR body (status-only in this log; values are target-derived).
+      - name: Check manifest license metadata
+        run: |
+          MODULES="$(cat "$RUNNER_TEMP/modules.json")" \
+            bun .github/scripts/sync/manifest_license_check.ts
+
       # Version-aligned validation: a templates/vX.Y.Z target is judged by
       # the validator at that release tag, never by main's unreleased rules;
       # staging is judged by the source commit its build was assembled from.
@@ -372,6 +381,7 @@ jobs:
           RETIRED_MODULES_FILE: ${{ runner.temp }}/retired-modules.txt
           REMOVED_PATHS_FILE: ${{ runner.temp }}/removed-paths.txt
           WITHHELD_FILE: ${{ runner.temp }}/withheld-workflows.txt
+          MANIFEST_LICENSE_FILE: ${{ runner.temp }}/manifest-license-warnings.md
           RECOVER: ${{ inputs.recover }}
         run: bun .github/scripts/sync/open_pr.ts
 
