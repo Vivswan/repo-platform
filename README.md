@@ -49,8 +49,11 @@ self-apply of a repo's own settings file.
   target repo's CI and auto-assign normally.
 - Clean updates arm squash auto-merge on the PR, so it merges itself once
   the repo's `all-green` check passes. A PR that needs review stays
-  manual: auto-resolved conflicts, withheld workflow files, or failed
-  validation.
+  manual: auto-resolved conflicts, withheld workflow files, failed
+  validation, an update that deletes a license file (below-marker notices
+  do not survive a delete-vs-modify merge, so a human ports them), or a
+  dispatch with `manual=true`, which holds every PR in the run for human
+  review.
 - `repos.yml` decides which repos: a quoted `"*"` wildcard auto-discovers
   every owned, non-archived repo the PAT can WRITE to (granting the
   fleet PAT a repository is what enrolls it; fine-grained PATs can read

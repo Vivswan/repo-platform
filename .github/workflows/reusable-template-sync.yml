@@ -68,6 +68,11 @@ on:
         required: false
         type: string
         default: ""
+      force_manual:
+        description: Never arm auto-merge - the PR waits for human review
+        required: false
+        type: boolean
+        default: false
     secrets:
       REPO_PLATFORM_TOKEN:
         required: true
@@ -383,7 +388,9 @@ jobs:
           REMOVED_PATHS_FILE: ${{ runner.temp }}/removed-paths.txt
           WITHHELD_FILE: ${{ runner.temp }}/withheld-workflows.txt
           MANIFEST_LICENSE_FILE: ${{ runner.temp }}/manifest-license-warnings.md
+          LICENSE_TRANSITION_FILE: ${{ runner.temp }}/license-transition.txt
           RECOVER: ${{ inputs.recover }}
+          FORCE_MANUAL: ${{ inputs.force_manual }}
         run: bun .github/scripts/sync/open_pr.ts
 
       - name: Fail on validation errors

@@ -42,6 +42,13 @@ on:
         type: choice
         options: [none, recopy]
         default: none
+      manual:
+        description: >-
+          Never arm auto-merge - every PR this run delivers waits for
+          human review, clean updates included
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -216,5 +223,7 @@ jobs:
       # The dispatch default is the literal "none"; only "recopy" means
       # recovery downstream.
       recover: ${{ inputs.recover == 'recopy' && 'recopy' || '' }}
+      # Scheduled and release runs have no inputs context: default false.
+      force_manual: ${{ inputs.manual || false }}
     secrets:
       REPO_PLATFORM_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}

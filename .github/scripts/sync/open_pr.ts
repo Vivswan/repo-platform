@@ -6,9 +6,9 @@
 //
 // Env: TARGET, TARGET_DISPLAY (log label; falls back to TARGET),
 // HIDE_DETAILS, CHANNEL, DISPLAY, BRANCH, BASE_BRANCH,
-// VALIDATION, RESOLVED, RECOVER, DRIFT_FILE, SUMMARY_FILE,
+// VALIDATION, RESOLVED, RECOVER, FORCE_MANUAL, DRIFT_FILE, SUMMARY_FILE,
 // RETIRED_MODULES_FILE, REMOVED_PATHS_FILE, WITHHELD_FILE,
-// MANIFEST_LICENSE_FILE, GH_TOKEN,
+// MANIFEST_LICENSE_FILE, LICENSE_TRANSITION_FILE, GH_TOKEN,
 // GITHUB_REPOSITORY, GITHUB_OUTPUT, RUNNER_TEMP.
 
 import { existsSync, readFileSync, statSync } from "node:fs";
@@ -120,6 +120,18 @@ if (nonEmpty(manifestLicenseFile)) {
   body += `\n\n${slurp(manifestLicenseFile)}`;
 }
 
+const licenseTransitionFile = requireEnv("LICENSE_TRANSITION_FILE");
+if (nonEmpty(licenseTransitionFile)) {
+  body += `
+
+> [!WARNING]
+> This update DELETES ${lines(licenseTransitionFile).join(" and ")}. Copier
+> resolves delete-vs-modify by dropping the file, so content below its
+> local-section marker (prior-license notices) is not in this diff -
+> recover it from the base branch or git history and port it below
+> LICENSE.md's marker on this branch before merging.`;
+}
+
 if (resolved === "true") {
   body += `
 
@@ -173,13 +185,16 @@ if (validation === "failed") {
 }
 
 // Anything that needs human review - dropped local hunks, withheld
-// workflow files, failed validation, a recovery re-render, out-of-band
+// workflow files, failed validation, a recovery re-render, a dispatch
+// that forced manual review, a deleted license file, out-of-band
 // settings drift - stays manual; a clean update arms squash auto-merge
 // below.
 const needsReview =
   resolved === "true" ||
   validation === "failed" ||
   recover === "recopy" ||
+  env("FORCE_MANUAL") === "true" ||
+  nonEmpty(licenseTransitionFile) ||
   nonEmpty(withheldFile) ||
   nonEmpty(driftFile);
 
@@ -243,6 +258,6 @@ if (!needsReview) {
   }
 } else {
   console.log(
-    "auto-merge left off: this PR needs review (conflicts, withheld files, failed validation, out-of-band settings drift, or a recovery re-render).",
+    "auto-merge left off: this PR needs review (conflicts, withheld files, failed validation, out-of-band settings drift, a recovery re-render, a forced-manual dispatch, or a deleted license file).",
   );
 }
