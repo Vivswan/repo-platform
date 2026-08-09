@@ -152,6 +152,9 @@ describe("select_settings_repos.ts", () => {
         GITHUB_OUTPUT: outputFile,
         GITHUB_STEP_SUMMARY: summaryFile,
         STUB_STATE: join(work, "state"),
+        // The spread above carries CI's real event file; the dispatch
+        // tests supply their own.
+        GITHUB_EVENT_PATH: "",
         ...options.env,
       },
     });
@@ -255,6 +258,41 @@ describe("select_settings_repos.ts", () => {
     expect(warning).toBeDefined();
     expect(warning).toContain("no settings/repos/<name>.yml here");
     expect(main.summary).toContain("- h**-n**e");
+  });
+
+  test("a private dispatch input arrives via the event payload and never prints", () => {
+    // The workflow passes no ONLY_REPO env (the runner would print it);
+    // the script reads the typed input from GITHUB_EVENT_PATH instead.
+    const eventFile = join(root, "dispatch-event.json");
+    writeFileSync(eventFile, JSON.stringify({ inputs: { repo: "Vivswan/hidden-server" } }));
+    const r = run("dispatch", { env: { GITHUB_EVENT_PATH: eventFile } });
+    expect(r.exitCode).toBe(0);
+    for (const channel of [r.stdout, r.stderr, r.output, r.summary]) {
+      expect(channel).not.toContain("hidden-server");
+    }
+    const targets = targetsOf(r);
+    expect(targets).toHaveLength(1);
+    expect(targets[0].home).toBe("in-repo");
+    expect(targets[0].redact_name).toBe(true);
+  });
+
+  test("a bare central-file name scopes the heal to its central row", () => {
+    const r = run("dispatch-central", { env: { ONLY_REPO: "central-home" } });
+    expect(r.exitCode).toBe(0);
+    expect(targetsOf(r)).toEqual([
+      expect.objectContaining({ repo: "Vivswan/central-home", home: "central" }),
+    ]);
+  });
+
+  test("a mistyped dispatch input fails loudly without echoing the input", () => {
+    const eventFile = join(root, "dispatch-miss-event.json");
+    writeFileSync(eventFile, JSON.stringify({ inputs: { repo: "Vivswan/hidden-servr" } }));
+    const r = run("dispatch-miss", { env: { GITHUB_EVENT_PATH: eventFile } });
+    expect(r.exitCode).not.toBe(0);
+    expect(r.stdout + r.stderr).toContain("matches no settings target");
+    for (const channel of [r.stdout, r.stderr, r.output, r.summary]) {
+      expect(channel).not.toContain("hidden-servr");
+    }
   });
 
   test("an unreadable registry still fails the whole run", () => {

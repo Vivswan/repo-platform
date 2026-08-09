@@ -53,7 +53,10 @@ Two guarantees for the in-repo home:
 - Push to main touching `settings/**`: merging a settings change applies it.
 - Nightly heal cron: reverts out-of-band drift and applies in-repo files.
 - Manual dispatch: a plain dispatch applies; pass `-f check_only=true` for
-  a drift report without settings writes. A private target's report issue
+  a drift report without settings writes, and `-f repo=owner/name` (or a
+  bare name, same owner) to heal a single target instead of the whole
+  fleet - the run fails loudly when that repo is not a settings target.
+  A private target's report issue
   is still delivered even then, and the very first check on a private
   target can flag the report's marker label itself as drift - the label
   does not exist until that same run's delivery creates it, so the next

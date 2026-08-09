@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  applyOnly,
   buildMatrix,
   centralTargets,
   type InRepoRow,
@@ -129,5 +130,77 @@ describe("buildMatrix", () => {
 
   test("no targets is an empty matrix, not an error", () => {
     expect(buildMatrix([], [])).toEqual([]);
+  });
+});
+
+describe("buildMatrix case folding", () => {
+  test("central wins over an in-repo row differing only by case", () => {
+    const central = [
+      {
+        repo: "Vivswan/alpha",
+        name: "alpha",
+        home: "central" as const,
+        redact_name: false,
+        verify: "",
+      },
+    ];
+    const inRepo = [
+      {
+        repo: "VIVSWAN/Alpha",
+        redact_name: false,
+        hide_details: false,
+        display: "VIVSWAN/Alpha",
+        verify: "",
+      },
+    ];
+    const matrix = buildMatrix(central, inRepo);
+    expect(matrix).toHaveLength(1);
+    expect(matrix[0].home).toBe("central");
+  });
+});
+
+describe("applyOnly", () => {
+  const central = [
+    {
+      repo: "Vivswan/alpha",
+      name: "alpha",
+      home: "central" as const,
+      redact_name: false,
+      verify: "",
+    },
+  ];
+  const inRepo = [
+    {
+      repo: "Vivswan/beta",
+      redact_name: false,
+      hide_details: false,
+      display: "Vivswan/beta",
+      verify: "",
+    },
+    {
+      repo: "Vivswan/gamma",
+      redact_name: true,
+      hide_details: true,
+      display: "private repo #1",
+      verify: "v",
+    },
+  ];
+
+  test("keeps only the requested central target", () => {
+    const scoped = applyOnly(central, inRepo, "Vivswan/alpha");
+    expect(scoped.central).toHaveLength(1);
+    expect(scoped.inRepo).toHaveLength(0);
+  });
+
+  test("matches in-repo rows case-insensitively on the real slug", () => {
+    const scoped = applyOnly(central, inRepo, "vivswan/GAMMA");
+    expect(scoped.central).toHaveLength(0);
+    expect(scoped.inRepo.map((r) => r.repo)).toEqual(["Vivswan/gamma"]);
+  });
+
+  test("an unknown repo scopes both lists to empty", () => {
+    const scoped = applyOnly(central, inRepo, "Vivswan/nope");
+    expect(scoped.central).toHaveLength(0);
+    expect(scoped.inRepo).toHaveLength(0);
   });
 });
