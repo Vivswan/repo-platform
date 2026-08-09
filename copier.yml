@@ -169,17 +169,6 @@ fuzzer_label:
   validator: "{% if not (fuzzer_label | regex_search('^[A-Za-z0-9._][A-Za-z0-9._: -]{0,49}\\Z')) %}fuzzer_label must be a plain label: letters, digits, ._:- and spaces, not starting with a dash, at most 50 characters{% endif %}"
   when: "{{ 'fuzzer' in modules }}"
 
-# --- release-please module parameter (asked only when it is selected) ---
-# GitHub releases are immutable once published, so release-please cuts every
-# release as a draft; this decides who flips it live. The answer only shapes
-# the generated release.yml starter (repo-owned afterwards).
-
-release_auto_publish:
-  type: bool
-  help: Publish the draft GitHub release at the end of release.yml (no = this repo runs `gh release edit --draft=false` itself)
-  default: true
-  when: "{{ 'release-please' in modules }}"
-
 private:
   type: bool
   help: Is the repository private?
