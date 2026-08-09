@@ -222,7 +222,7 @@ jobs:
               staging: true
           # The only row where bun renders private: the bun fragments'
           # enable_codeql=false branches must emit no CodeQL wiring in
-          # ci.yml, no SECURITY.md, and settings.yml must still declare
+          # ci.yml, and settings.yml must still declare
           # `private: true` (uv-pages-private covers the uv side).
           - name: bun-private
             modules: "[bun, settings-sync]"

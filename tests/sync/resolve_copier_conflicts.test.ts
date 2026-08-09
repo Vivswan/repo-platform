@@ -13,6 +13,7 @@ const SEP = "=".repeat(7);
 const END = `${">".repeat(7)} after updating`;
 
 const SENTINEL = "<!-- repo-platform:local-section -->";
+const HASH_SENTINEL = "# repo-platform:local-section";
 
 const PROSE_MARKER = [
   "<!-- Repository-specific contributing documentation (dev setup, build and",
@@ -134,6 +135,17 @@ describe("resolve_copier_conflicts", () => {
     expect(result.summary).toContain("dropped local lines");
   });
 
+  test("the hash-comment sentinel spelling moves hunks the same way", () => {
+    const template = ["*.png binary", "", HASH_SENTINEL];
+    const local = ["*.png binary", "", HASH_SENTINEL, "", "*.vsix binary"];
+    const result = run({ ".gitattributes": `${conflict(local, template)}\n` });
+    expect(result.exitCode).toBe(0);
+    const resolved = result.file(".gitattributes");
+    expect(resolved.split(HASH_SENTINEL).length - 1).toBe(1);
+    expect(resolved.endsWith("*.vsix binary\n")).toBe(true);
+    expect(result.stdout).toContain("moved 1 local hunk(s)");
+  });
+
   test("handles a kept side without a trailing newline", () => {
     const template = ["Template body.", "", SENTINEL];
     const result = run({ "CONTRIBUTING.md": conflict(["local tail"], template) });
@@ -198,17 +210,29 @@ describe("resolve_copier_conflicts", () => {
   });
 
   test("the templates with repository-owned tails end with the exact sentinel line", () => {
-    const templated = [
-      join(templatesDir, "base", "{% if not private %}CONTRIBUTING.md{% endif %}.jinja"),
-      join(templatesDir, "base", "{% if not private %}SECURITY.md{% endif %}.jinja"),
-      join(templatesDir, "agents", "AGENTS.md.jinja"),
+    const templated: [string, string][] = [
+      [
+        join(templatesDir, "base", "{% if not private %}CONTRIBUTING.md{% endif %}.jinja"),
+        SENTINEL,
+      ],
+      [join(templatesDir, "base", "SECURITY.md.jinja"), SENTINEL],
+      [
+        join(
+          templatesDir,
+          "base",
+          "{% if 'custom-license' not in modules %}LICENSE{% endif %}.jinja",
+        ),
+        SENTINEL,
+      ],
+      [join(templatesDir, "base", ".gitattributes.jinja"), HASH_SENTINEL],
+      [join(templatesDir, "agents", "AGENTS.md.jinja"), SENTINEL],
     ];
-    for (const path of templated) {
+    for (const [path, sentinel] of templated) {
       const lines = readFileSync(path, "utf-8").split("\n");
       const lastNonEmpty = lines.filter((line) => line.trim().length > 0).at(-1);
       // Last line, not just present: appendBelowSentinel writes at end of
       // file, so managed content below the sentinel would swallow moved hunks.
-      expect(lastNonEmpty).toBe(SENTINEL);
+      expect(lastNonEmpty).toBe(sentinel);
     }
   });
 

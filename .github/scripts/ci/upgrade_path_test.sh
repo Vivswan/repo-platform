@@ -362,7 +362,7 @@ echo "recovery recopy OK: skip_if_exists and repo-owned files preserved, managed
 # --- Visibility flip (public -> private) --------------------------------
 # The transition machinery issue #25's fix leans on: an update where the
 # live visibility changed between syncs must drop the conditional-filename
-# SECURITY.md render, flip settings.yml's private line through the
+# CONTRIBUTING.md render, flip settings.yml's private line through the
 # three-way merge (dropping the code_scanning ruleset rule with it), and
 # strip the codeql machinery from ci.yml. Runs on a fresh public fixture
 # through the same workflow scripts as the main leg, with settings-sync
@@ -445,29 +445,36 @@ RECOVER="" bun .github/scripts/sync/apply_update.ts
 bun .github/scripts/sync/resolve_copier_conflicts.ts \
   --summary "$VIS_WORK/dropped-local-hunks.md" --root "$VIS"
 
-# Current copier already deletes the de-rendered SECURITY.md during the
-# update; resurrect it (the sentinel trick above) so retired_cleanup's
+# Current copier already deletes the de-rendered CONTRIBUTING.md during
+# the update; resurrect it (the sentinel trick above) so retired_cleanup's
 # data-driven old/new render diff - old render private=false from the
 # recorded answers, new render private=true from the live data - must
-# really flag and delete it.
-echo "# Security policy" > "$VIS/SECURITY.md"
+# really flag and delete it. Guarded like the precondition block above:
+# CONTRIBUTING.md only exists in builds that shipped it.
+if git -C "$GITHUB_WORKSPACE" ls-tree -r --name-only "$prev" | grep -qF "CONTRIBUTING.md"; then
+  echo "# Contributing" > "$VIS/CONTRIBUTING.md"
+fi
 answers_vis="$(git -C "$VIS" show HEAD:.copier-answers.yml)"
 src_path_vis="$(sed -n 's/^_src_path: //p' <<<"$answers_vis")"
 test -n "$src_path_vis" || fail "visibility fixture records no _src_path"
 RUNNER_TEMP="$VIS_WORK" SRC_PATH="$src_path_vis" \
   OLD_SHA="$(git rev-parse "${prev}^{commit}")" \
   bun .github/scripts/sync/retired_cleanup.ts
-grep -qF '"SECURITY.md"' "$VIS_WORK/retired-paths.json" \
-  || fail "retired_paths did not flag SECURITY.md on the public->private flip"
-grep -qxF "SECURITY.md" "$VIS_WORK/removed-paths.txt" \
-  || fail "retired_cleanup's rm loop did not delete the resurrected SECURITY.md"
+if git -C "$GITHUB_WORKSPACE" ls-tree -r --name-only "$prev" | grep -qF "CONTRIBUTING.md"; then
+  grep -qF '"CONTRIBUTING.md"' "$VIS_WORK/retired-paths.json" \
+    || fail "retired_paths did not flag CONTRIBUTING.md on the public->private flip"
+  grep -qxF "CONTRIBUTING.md" "$VIS_WORK/removed-paths.txt" \
+    || fail "retired_cleanup's rm loop did not delete the resurrected CONTRIBUTING.md"
+fi
 RECOVER="" bun .github/scripts/sync/preserve_repo_owned.ts
 
 bun "$GITHUB_WORKSPACE/actions/validate-template/validate_generated_files.ts" "$VIS"
 
 cd "$VIS"
-test ! -e SECURITY.md || fail "SECURITY.md survived the flip to private"
-# The other public-only base files and gates must retire with it; LICENSE
+# SECURITY.md is visibility-independent since the ungating: it must
+# survive the flip.
+test -f SECURITY.md || fail "SECURITY.md did not survive the flip to private"
+# The public-only base files and gates must retire on the flip; LICENSE
 # is visibility-independent and (without custom-license) template-managed,
 # so it must converge to the fleet license byte-for-byte - this is the
 # migration path a relicensing takes through a real sync.
@@ -522,7 +529,7 @@ fi
 if find . -name '*.rej' -not -path './.git/*' | grep -q .; then
   fail "the visibility flip left .rej files behind"
 fi
-echo "visibility flip OK: SECURITY.md retired, private declared true, codeql stripped"
+echo "visibility flip OK: CONTRIBUTING.md retired, private declared true, codeql stripped"
 
 # --- Committed LICENSE deletion (fleet license mandatory) ----------------
 # A repo still on the fleet license that committed a LICENSE deletion:

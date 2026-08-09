@@ -158,8 +158,8 @@ jobs:
           test -f target/.copier-answers.yml || { echo "::error::${TARGET_DISPLAY} has no .copier-answers.yml on its default branch, so copier has no recorded answers to update from. Restore the file from git history, or regenerate the repo with 'copier copy gh:${GITHUB_REPOSITORY} . --vcs-ref staging' (or a templates/vX.Y.Z tag)."; exit 1; }
 
       # Live visibility and description feed the render on purpose (adopt
-      # semantics: the visibility-gated renders - SECURITY.md and the other
-      # public-only files, the CodeQL and dependency-review jobs - must
+      # semantics: the visibility-gated renders - CONTRIBUTING.md and the
+      # other public-only files, the CodeQL and dependency-review jobs - must
       # follow the repo's real state), so a value changed out-of-band in
       # the GitHub UI would otherwise auto-merge into declared truth.
       # Drift against the recorded answers warns here and forces the PR

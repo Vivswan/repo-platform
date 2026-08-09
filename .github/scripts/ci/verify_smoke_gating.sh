@@ -144,14 +144,15 @@ fi
 # independently hard-errors on a present job missing from all-green's
 # needs).
 if has custom-license; then test ! -e /tmp/smoke/LICENSE; else test -f /tmp/smoke/LICENSE; fi
+# SECURITY.md is visibility-independent (private collaborators need the
+# reporting route too); the contributor-facing files stay public-only.
+test -f /tmp/smoke/SECURITY.md
 if [ "$PRIVATE" = "true" ]; then
-  test ! -e /tmp/smoke/SECURITY.md
   test ! -e /tmp/smoke/CONTRIBUTING.md
   test ! -e /tmp/smoke/CODE_OF_CONDUCT.md
   absent "dependency-review:" "$wf/ci.yml"
   absent "- dependency-review" "$wf/ci.yml"
 else
-  test -f /tmp/smoke/SECURITY.md
   test -f /tmp/smoke/CONTRIBUTING.md
   test -f /tmp/smoke/CODE_OF_CONDUCT.md
   present "dependency-review:" "$wf/ci.yml"
