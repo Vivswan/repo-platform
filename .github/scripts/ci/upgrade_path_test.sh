@@ -294,6 +294,8 @@ grep -qF -- "pr-title:" .github/workflows/ci.yml \
 # pin the composite actions there, never at main.
 grep -qF -- "repo-platform/actions/check-typography@v99.99.99" .github/workflows/ci.yml \
   || fail "ci.yml does not pin check-typography at the v99.99.99 release tag"
+grep -qF -- "repo-platform/actions/dependency-review@v99.99.99" .github/workflows/ci.yml \
+  || fail "ci.yml does not pin dependency-review at the v99.99.99 release tag"
 test -f AGENTS.md || fail "AGENTS.md is missing"
 grep -qF "description: Upgraded description" .copier-answers.yml \
   || fail "the live description was not applied"

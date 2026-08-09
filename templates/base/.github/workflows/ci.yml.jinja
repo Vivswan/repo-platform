@@ -126,12 +126,9 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         if: github.event_name == 'pull_request'
-      - uses: actions/dependency-review-action@v5
+      # The severity threshold and the upstream pin live in the wrapper.
+      - uses: {{ github_username }}/repo-platform/actions/dependency-review@{{ uses_ref }}
         if: github.event_name == 'pull_request'
-        with:
-          # Deliberate strictest threshold (also the action's default,
-          # pinned so a default change cannot loosen the gate silently).
-          fail-on-severity: low
 {%- endif %}
 {%- if enable_codeql %}
 

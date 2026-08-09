@@ -12,6 +12,7 @@ updates:
     directories:
       - "/"
       - "/actions/check-typography"
+      - "/actions/dependency-review"
       - "/actions/fuzz-issue"
       - "/actions/validate-commit-names"
       - "/actions/validate-template"

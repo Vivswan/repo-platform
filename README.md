@@ -126,6 +126,7 @@ each fixed PR needs a close/reopen for its checks to appear).
 | `.github/workflows/settings-repos.yml` | Central settings apply across the fleet |
 | `.github/workflows/reusable-*.yml` | Reusable workflows: template-sync (the push-sync engine), auto-assign, codeql, pages ([docs](docs/pages.md)), apply-settings ([docs](docs/settings.md)) |
 | `actions/check-typography` | Blocks look-alike/invisible unicode (vendored from cloud-speech, config via `.typography-allow` + repo-owned `.typography-allow.local`) |
+| `actions/dependency-review` | The fleet's dependency-review gate: one home for the upstream pin and severity threshold |
 | `actions/validate-template` | Enforces markers, YAML validity, and the all-green convention |
 | `actions/validate-commit-names` | Conventional Commit subjects on every push/PR commit |
 | `actions/fuzz-issue` | Files/updates the label-deduplicated nightly-fuzz tracking issue, closes it on green (used by the fuzzer module's starter, [docs](docs/fuzzer.md)) |
