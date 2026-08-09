@@ -92,7 +92,7 @@ if [ -z "$prev" ]; then
   # the current license and the transition assertions below would be
   # vacuous.
   rm "/tmp/old-tree/template/{% if 'custom-license' not in modules %}LICENSE{% endif %}"
-  echo "Old fleet license (pre-PolyForm fixture)" > /tmp/old-tree/template/LICENSE
+  echo "Old fleet license (pre-relicense fixture)" > /tmp/old-tree/template/LICENSE
   awk '{print} /^_skip_if_exists:/{print "  - LICENSE"}' /tmp/old-tree/copier.yml \
     > /tmp/old-tree/copier.yml.tmp
   mv /tmp/old-tree/copier.yml.tmp /tmp/old-tree/copier.yml
@@ -114,7 +114,7 @@ test -f .github/settings.yml || fail "fixture render is missing .github/settings
 test -f .github/workflows/settings-sync.yml || fail "fixture render is missing settings-sync.yml"
 if [ "$synthetic" = true ]; then
   test -f .github/retired-sentinel.txt || fail "synthetic fixture is missing the retired sentinel"
-  [ "$(cat LICENSE)" = "Old fleet license (pre-PolyForm fixture)" ] \
+  [ "$(cat LICENSE)" = "Old fleet license (pre-relicense fixture)" ] \
     || fail "synthetic fixture did not render the old fleet license"
 fi
 git init -q -b main
