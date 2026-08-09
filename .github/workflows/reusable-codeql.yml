@@ -39,10 +39,30 @@ jobs:
 
       - uses: actions/checkout@v7
 
+      # Repo-owned CodeQL tuning: a .github/codeql/codeql-config.yml in
+      # the calling repository - the standard CodeQL config file
+      # (paths-ignore, queries, packs, query-filters) - is picked up
+      # automatically. The managed ci.yml cannot carry per-repo scan
+      # parameters, so the file is how a repository customizes its scan;
+      # the inline config input wins when a caller passes both.
+      - name: Detect the repository's CodeQL config
+        id: config
+        env:
+          INLINE: ${{ inputs.config }}
+        run: |
+          file=""
+          if [ -z "$INLINE" ]; then
+            for candidate in .github/codeql/codeql-config.yml .github/codeql/codeql-config.yaml; do
+              if [ -f "$candidate" ]; then file="./$candidate"; break; fi
+            done
+          fi
+          echo "file=$file" >> "$GITHUB_OUTPUT"
+
       - uses: github/codeql-action/init@v4.37.4
         with:
           languages: ${{ inputs.language }}
           config: ${{ inputs.config }}
+          config-file: ${{ steps.config.outputs.file }}
           # Advanced setup does not run the alert-suppression queries by
           # default, so inline `codeql[query-id]` comments are inert without
           # this: append the language's suppression query to the default
