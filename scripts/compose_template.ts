@@ -4,7 +4,7 @@
 // templates/ is the source of truth, one folder per module plus base/:
 //
 // - templates/base/: passed through verbatim, filenames included (explicit
-//   conditional filenames like SECURITY.md's `not private` gate live here).
+//   conditional filenames like CONTRIBUTING.md's `not private` gate live here).
 // - templates/<module>/: whole files owned by that module. The composer adds
 //   the module's filename gate automatically ({% if '<module>' in modules %}),
 //   wrapping the leaf name (keeping any .jinja suffix outside), or a whole

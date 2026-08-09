@@ -145,7 +145,7 @@ Stateless, declared-keys-only, upsert-by-name:
   the repo is public again before the code_scanning rule is upserted.
   Check a pin bump keeps that order. The next template sync reads the
   live visibility and re-renders everything that follows it
-  (SECURITY.md, the CodeQL jobs, that rule).
+  (CONTRIBUTING.md, the CodeQL jobs, that rule).
   A flip the heal has not reverted by the time that sync runs is not
   ratified silently: the sync compares the live visibility and
   description against the repo's recorded copier answers, and on a
