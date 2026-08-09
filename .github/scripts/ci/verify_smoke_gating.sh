@@ -156,6 +156,9 @@ else
   test -f /tmp/smoke/CODE_OF_CONDUCT.md
   present "dependency-review:" "$wf/ci.yml"
   present "      - dependency-review" "$wf/ci.yml"
+  # The wrapper pin, falling back to main on the scratch build tree; the
+  # upgrade test proves the release-tag form.
+  present "repo-platform/actions/dependency-review@main" "$wf/ci.yml"
 fi
 
 # gitignore toolchain sections; the four markers are asserted by the validator.

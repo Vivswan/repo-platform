@@ -921,6 +921,36 @@ const rules: Rule[] = [
   },
 
   {
+    // Every composite-action package must sit in the github-actions
+    // block's directories list, or its upstream pins quietly stop
+    // receiving dependabot bumps. Nothing else guards the list: the
+    // dogfood comparison above deliberately holds directories out
+    // (downstream repos have no actions/ dirs).
+    name: "dependabot-action-dirs",
+    run: () => {
+      const mismatches: Mismatch[] = [];
+      const dirs = readdirSync(join(REPO_ROOT, "actions")).filter((name) =>
+        lstatSync(join(REPO_ROOT, "actions", name)).isDirectory(),
+      );
+      const doc = asRecord(parseYaml(read(".github/dependabot.yml")), "dependabot.yml");
+      const updates = (doc.updates as Record<string, unknown>[] | undefined) ?? [];
+      const block = updates.find((entry) => entry["package-ecosystem"] === "github-actions");
+      if (!block) throw new Error("dependabot.yml: no github-actions block - anchor lost");
+      const covered = new Set(((block.directories as unknown[] | undefined) ?? []).map(String));
+      for (const dir of dirs) {
+        if (!covered.has(`/actions/${dir}`)) {
+          mismatches.push({
+            file: ".github/dependabot.yml",
+            expected: `"/actions/${dir}" in the github-actions directories list`,
+            got: "missing - the package's upstream pins receive no dependabot bumps",
+          });
+        }
+      }
+      return mismatches;
+    },
+  },
+
+  {
     name: "ci-skeleton",
     run: () => {
       const mismatches: Mismatch[] = [];

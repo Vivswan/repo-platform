@@ -61,12 +61,9 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         if: github.event_name == 'pull_request'
-      - uses: actions/dependency-review-action@v5
+      # The severity threshold and the upstream pin live in the wrapper.
+      - uses: ./actions/dependency-review
         if: github.event_name == 'pull_request'
-        with:
-          # Deliberate strictest threshold (also the action's default,
-          # pinned so a default change cannot loosen the gate silently).
-          fail-on-severity: low
 
   # The workflows' large steps live as scripts in .github/scripts/ exactly
   # so they can be linted; actionlint only sees inline run blocks.
