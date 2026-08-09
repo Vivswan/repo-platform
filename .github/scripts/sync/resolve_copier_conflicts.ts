@@ -37,7 +37,7 @@ const SEP = Buffer.from("=".repeat(7));
 const END = Buffer.from(`${">".repeat(7)} after updating`);
 
 // Repo-local-section sentinel: templated files with a repository-owned tail
-// (templates/base CONTRIBUTING.md, SECURITY.md, LICENSE, and .gitattributes,
+// (templates/base CONTRIBUTING.md, SECURITY.md, LICENSE.md, and .gitattributes,
 // templates/agents AGENTS.md)
 // close their managed half with this exact comment line; everything below it
 // is repository-owned and runs to end of file. When the kept template side of

@@ -13,6 +13,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { parse, stringify } from "yaml";
 import { parseFlags } from "../shared/flags.ts";
+import { parseModules } from "../shared/modules.ts";
 
 const FLAGS = [
   "--answers-old",
@@ -44,14 +45,9 @@ function main(args: string[]): void {
     fail(`${answersPath}: top level must be a mapping`);
   }
 
-  let modules: unknown;
-  try {
-    modules = JSON.parse(flags["--modules"]);
-  } catch {
-    fail(`--modules is not valid JSON: ${flags["--modules"]}`);
-  }
-  if (!Array.isArray(modules) || !modules.every((entry) => typeof entry === "string")) {
-    fail("--modules must be a JSON list of strings");
+  const modules = parseModules(flags["--modules"]);
+  if (modules === null) {
+    fail(`--modules must be a JSON list of strings: ${flags["--modules"]}`);
   }
 
   const data = Object.fromEntries(

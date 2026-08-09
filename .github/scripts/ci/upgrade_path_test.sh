@@ -29,7 +29,7 @@ WORK=/tmp/upgrade-work
 # harness).
 rendered_fleet_license() {
   sed 's|{{ copyright_holder }}|Vivswan Shah (https://github.com/Vivswan)|g' \
-    "$GITHUB_WORKSPACE/templates/base/{% if 'custom-license' not in modules %}LICENSE{% endif %}.jinja"
+    "$GITHUB_WORKSPACE/templates/base/{% if 'custom-license' not in modules %}LICENSE.md{% endif %}.jinja"
 }
 
 fail() {
@@ -100,7 +100,7 @@ if [ -z "$prev" ]; then
   # _skip_if_exists. Without this the synthetic fixture would already carry
   # the current license and the transition assertions below would be
   # vacuous.
-  rm "/tmp/old-tree/template/{% if 'custom-license' not in modules %}LICENSE{% endif %}.jinja"
+  rm "/tmp/old-tree/template/{% if 'custom-license' not in modules %}LICENSE.md{% endif %}.jinja"
   echo "Old fleet license (pre-relicense fixture)" > /tmp/old-tree/template/LICENSE
   awk '{print} /^_skip_if_exists:/{print "  - LICENSE"}' /tmp/old-tree/copier.yml \
     > /tmp/old-tree/copier.yml.tmp
@@ -137,10 +137,10 @@ git -c user.name=ci -c user.email=ci@localhost commit -q -m "chore: init"
 # - checks.yml is generated-once (_skip_if_exists): local edits must survive
 # - bug_report.yml is generated-once (_skip_if_exists issue forms): local
 #   tailoring must survive the update
-# - LICENSE swaps to a repo-owned license and .repo-platform.yml gains the
-#   custom-license module (the opt-out a repo merges before the sync): the
-#   divergent content must survive the update, the de-render, and the
-#   retired-file cleanup (PROTECTED_PATHS)
+# - LICENSE.md swaps to a repo-owned license and .repo-platform.yml gains
+#   the custom-license module (the opt-out a repo merges before the sync):
+#   the divergent content must survive the update, the de-render, and the
+#   retired-file cleanup (protectedPaths)
 # - retired-sentinel.txt (synthetic fixture) left the render between the
 #   builds; it is resurrected after the update so its deletion provably
 #   comes from retired_cleanup.ts
@@ -151,6 +151,13 @@ echo "# local settings note" >> .github/settings.yml
 echo "# local checks note" >> .github/workflows/checks.yml
 echo "# local issue form note" >> .github/ISSUE_TEMPLATE/bug_report.yml
 echo "Repo-owned custom license" > LICENSE
+# Adopting custom-license REPLACES the fleet license: a repo drops the
+# rendered LICENSE.md in the same commit (the one-license rule; the
+# synthetic old build renders the extensionless spelling, which the echo
+# above already overwrote).
+if [ -e LICENSE.md ]; then
+  git rm -q LICENSE.md
+fi
 if [ "$synthetic" = true ]; then
   echo "# local sentinel note" >> .github/retired-sentinel.txt
 fi
@@ -224,13 +231,13 @@ RUNNER_TEMP="$WORK" SRC_PATH="$src_path" \
   OLD_SHA="$(git rev-parse "${prev}^{commit}")" \
   bun .github/scripts/sync/retired_cleanup.ts
 if grep -qF '.github/settings.yml' "$WORK/retired-paths.json"; then
-  fail "retired_paths must never list the repo-owned settings.yml (PROTECTED_PATHS)"
+  fail "retired_paths must never list the repo-owned settings.yml (protectedPaths)"
 fi
 if grep -qF 'checks.yml' "$WORK/retired-paths.json"; then
   fail "retired_paths must never list the generated-once checks.yml"
 fi
 if grep -qF '"LICENSE"' "$WORK/retired-paths.json"; then
-  fail "retired_paths must never list the repo-owned LICENSE (PROTECTED_PATHS)"
+  fail "retired_paths must never list the repo-owned LICENSE (protectedPaths)"
 fi
 if [ "$synthetic" = true ] && ! grep -qF '.github/retired-sentinel.txt' "$WORK/retired-paths.json"; then
   fail "retired_paths did not flag the sentinel that left the render"
@@ -242,7 +249,7 @@ fi
 # The workflow's preserve step: settings.yml and the opted-out LICENSE are
 # repo-owned; if the update de-rendered and deleted either, it comes back
 # from the base commit.
-RECOVER="" bun .github/scripts/sync/preserve_repo_owned.ts
+RECOVER="" RUNNER_TEMP="$WORK" bun .github/scripts/sync/preserve_repo_owned.ts
 
 bun install --frozen-lockfile --cwd "$GITHUB_WORKSPACE/actions/validate-template"
 bun "$GITHUB_WORKSPACE/actions/validate-template/validate_generated_files.ts" "$PROJECT"
@@ -339,7 +346,7 @@ git -c user.name=ci -c user.email=ci@localhost commit -q -m "chore: corrupt the 
 # step (TARGET_DIR is still exported), proving their RECOVER routing along
 # with the copier semantics.
 RECOVER=recopy bun "$GITHUB_WORKSPACE/.github/scripts/sync/apply_update.ts"
-RECOVER=recopy bun "$GITHUB_WORKSPACE/.github/scripts/sync/preserve_repo_owned.ts"
+RECOVER=recopy RUNNER_TEMP="$WORK" bun "$GITHUB_WORKSPACE/.github/scripts/sync/preserve_repo_owned.ts"
 
 grep -qF "_commit: templates/v99.99.99" .copier-answers.yml \
   || fail "recovery did not re-record _commit as templates/v99.99.99"
@@ -418,10 +425,10 @@ if [ "$synthetic" = true ]; then
   git add --all
   git -c user.name=ci -c user.email=ci@localhost commit -q -m "chore: divergent license"
 else
-  # A repo-local notice below the LICENSE marker is repo-owned content and
-  # must ride through the sync (prefix pairing, like CONTRIBUTING's local
-  # section).
-  printf '\nPrior releases of this repository were MIT-licensed.\n' >> LICENSE
+  # A repo-local notice below the LICENSE.md marker is repo-owned content
+  # and must ride through the sync (prefix pairing, like CONTRIBUTING's
+  # local section).
+  printf '\nPrior releases of this repository were MIT-licensed.\n' >> LICENSE.md
   git add --all
   git -c user.name=ci -c user.email=ci@localhost commit -q -m "chore: local license notice"
 fi
@@ -466,7 +473,11 @@ if git -C "$GITHUB_WORKSPACE" ls-tree -r --name-only "$prev" | grep -qF "CONTRIB
   grep -qxF "CONTRIBUTING.md" "$VIS_WORK/removed-paths.txt" \
     || fail "retired_cleanup's rm loop did not delete the resurrected CONTRIBUTING.md"
 fi
-RECOVER="" bun .github/scripts/sync/preserve_repo_owned.ts
+RECOVER="" RUNNER_TEMP="$VIS_WORK" bun .github/scripts/sync/preserve_repo_owned.ts
+if [ "$synthetic" = true ]; then
+  grep -qxF "LICENSE" "$VIS_WORK/license-transition.txt" \
+    || fail "the license rename did not raise the license-transition flag that holds the PR for review"
+fi
 
 bun "$GITHUB_WORKSPACE/actions/validate-template/validate_generated_files.ts" "$VIS"
 
@@ -474,28 +485,37 @@ cd "$VIS"
 # SECURITY.md is visibility-independent since the ungating: it must
 # survive the flip.
 test -f SECURITY.md || fail "SECURITY.md did not survive the flip to private"
-# The public-only base files and gates must retire on the flip; LICENSE
-# is visibility-independent and (without custom-license) template-managed,
-# so it must converge to the fleet license byte-for-byte - this is the
-# migration path a relicensing takes through a real sync.
+# The public-only base files and gates must retire on the flip; the
+# license is visibility-independent and (without custom-license)
+# template-managed, so LICENSE.md must converge to the fleet license -
+# this is the migration path a relicensing (and the LICENSE -> LICENSE.md
+# rename) takes through a real sync, deleting the old spelling.
 test ! -e CONTRIBUTING.md || fail "CONTRIBUTING.md survived the flip to private"
 test ! -e CODE_OF_CONDUCT.md || fail "CODE_OF_CONDUCT.md survived the flip to private"
 # Assign first: a failed substitution inside a case WORD does not trip
 # errexit, and an empty pattern would collapse to a match-everything *.
 fleet_license="$(rendered_fleet_license)"
 [ -n "$fleet_license" ] || fail "could not render the fleet license"
-case "$(cat LICENSE)" in
+case "$(cat LICENSE.md)" in
   "$fleet_license"*) ;;
-  *) fail "the fleet license is not a prefix of LICENSE after the flip to private" ;;
+  *) fail "the fleet license is not a prefix of LICENSE.md after the flip to private" ;;
 esac
 if [ "$synthetic" != true ]; then
-  grep -qF "Prior releases of this repository were MIT-licensed." LICENSE \
+  grep -qF "Prior releases of this repository were MIT-licensed." LICENSE.md \
     || fail "the repo-local license notice below the marker did not survive the sync"
 fi
 if [ "$synthetic" = true ]; then
-  grep -qF "Divergent unopted license" LICENSE \
-    || grep -qF "LICENSE" "$VIS_WORK/dropped-local-hunks.md" \
-    || fail "the divergent license was neither kept below the marker nor recorded as dropped"
+  # The old extensionless spelling is template-managed without the
+  # custom-license module: the rename must delete it. Copier resolves the
+  # delete-vs-modify by dropping the file, so divergent local content
+  # survives only in the target's git history and the PR's own file
+  # diff - which is why the rename sync is dispatched with manual=true
+  # and ports license notices explicitly instead of relying on the
+  # merge.
+  test ! -e LICENSE || fail "the old extensionless LICENSE survived the rename"
+  # No pipe into grep -q: under pipefail its early exit SIGPIPEs git log.
+  [ -n "$(git log --all --format=%H -- LICENSE)" ] \
+    || fail "the deleted LICENSE left no history to recover the divergent content from"
 fi
 if grep -qF "dependency-review" .github/workflows/ci.yml; then
   fail "ci.yml kept the dependency-review job after the flip to private"
@@ -534,12 +554,17 @@ echo "visibility flip OK: CONTRIBUTING.md retired, private declared true, codeql
 # --- Committed LICENSE deletion (fleet license mandatory) ----------------
 # A repo still on the fleet license that committed a LICENSE deletion:
 # copier honors the deletion when it re-applies the local diff, cleanup
-# protects the path, and HEAD has no copy to restore - the preserve step
+# never lists the path (LICENSE.md is in both renders), and HEAD has no
+# copy to restore - the preserve step
 # must re-seed the fleet license from the target build ref.
 DEL=/tmp/upgrade-del
 cd "$GITHUB_WORKSPACE"
+# Rendered from the NEW build: the re-seed hole only exists when the base
+# already carried LICENSE.md and the local diff deletes it (a fixture on
+# the old build gets LICENSE.md as a fresh render, which never needs the
+# re-seed).
 copier copy "$GITHUB_WORKSPACE" "$DEL" \
-  --vcs-ref "$prev" --defaults --trust \
+  --vcs-ref templates/v99.99.99 --defaults --trust \
   -d project_name="License Deletion" \
   -d description="License-deletion project" \
   -d 'modules=[agents]' \
@@ -549,8 +574,8 @@ cd "$DEL"
 git init -q -b main
 git add --all
 git -c user.name=ci -c user.email=ci@localhost commit -q -m "chore: init"
-git rm -q LICENSE
-git -c user.name=ci -c user.email=ci@localhost commit -q -m "chore: delete LICENSE"
+git rm -q LICENSE.md
+git -c user.name=ci -c user.email=ci@localhost commit -q -m "chore: delete LICENSE.md"
 cd "$GITHUB_WORKSPACE"
 export MODULES='["agents"]'
 export CHANNEL=latest
@@ -561,7 +586,7 @@ export TARGET_REF=templates/v99.99.99
 RECOVER="" bun .github/scripts/sync/apply_update.ts
 bun .github/scripts/sync/resolve_copier_conflicts.ts \
   --summary /tmp/upgrade-del-hunks.md --root "$DEL"
-RECOVER="" bun .github/scripts/sync/preserve_repo_owned.ts
-rendered_fleet_license | cmp -s "$DEL/LICENSE" - \
+RECOVER="" RUNNER_TEMP=/tmp bun .github/scripts/sync/preserve_repo_owned.ts
+rendered_fleet_license | cmp -s "$DEL/LICENSE.md" - \
   || fail "a committed LICENSE deletion did not re-converge to the mandatory fleet license"
 echo "license deletion OK: fleet license re-seeded"

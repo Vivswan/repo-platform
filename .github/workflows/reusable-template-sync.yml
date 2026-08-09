@@ -279,10 +279,11 @@ jobs:
             echo "removed $(wc -l <"$RUNNER_TEMP/removed-paths.txt" | tr -d ' ') retired file(s) (paths hidden: private repository; listed in the PR body)"
           fi
 
-      # settings.yml and (for repos on the custom-license module) LICENSE
-      # are repo-owned wherever they exist: a module change de-renders
-      # them, but the sync must never delete them (see the script's header
-      # for the full rules and the recovery-mode behavior).
+      # settings.yml and (for repos on the custom-license module) the
+      # repo's own license file are repo-owned wherever they exist: a
+      # module change de-renders them, but the sync must never delete them
+      # (see the script's header for the full rules and the recovery-mode
+      # behavior).
       - name: Preserve repo-owned files
         env:
           RECOVER: ${{ inputs.recover }}

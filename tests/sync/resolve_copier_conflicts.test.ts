@@ -220,7 +220,7 @@ describe("resolve_copier_conflicts", () => {
         join(
           templatesDir,
           "base",
-          "{% if 'custom-license' not in modules %}LICENSE{% endif %}.jinja",
+          "{% if 'custom-license' not in modules %}LICENSE.md{% endif %}.jinja",
         ),
         SENTINEL,
       ],

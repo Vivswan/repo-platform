@@ -84,7 +84,7 @@ modules:
     auto-assign - auto-assign issues/PRs/alerts to owner: auto-assign
     fuzzer - nightly fuzz starter with issue filing, replay inputs, auto-close: fuzzer
     settings-sync - in-repo .github/settings.yml applied with the repo's own PAT: settings-sync
-    custom-license - repo carries its own LICENSE; the fleet license is not rendered: custom-license
+    custom-license - repo carries its own license in LICENSE.md; the fleet license is not rendered: custom-license
   # settings-sync is deliberately NOT a default: central settings
   # (settings/repos/<name>.yml in repo-platform) are the default home.
   default: [agents, release-please, issue-templates, pr-title, auto-assign]
@@ -179,14 +179,14 @@ github_username:
   help: GitHub username owning the repository
   default: Vivswan
 
-# The fleet LICENSE's Required Notice names the licensor and how to
+# The fleet LICENSE.md's Required Notice names the licensor and how to
 # reach them. A repo whose rights belong to someone else gets their name
 # and contact here; repos with a different license entirely select the
 # custom-license module instead (the question is skipped there because
-# LICENSE is not rendered).
+# the fleet LICENSE.md is not rendered).
 copyright_holder:
   type: str
-  help: Copyright holder and contact for the fleet LICENSE's Required Notice (the licensor)
+  help: Copyright holder and contact for the fleet license's Required Notice (the licensor)
   default: Vivswan Shah (https://github.com/Vivswan)
   when: "{{ 'custom-license' not in modules }}"
 

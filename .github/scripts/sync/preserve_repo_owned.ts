@@ -8,7 +8,8 @@
 // re-render has no three-way merge to protect local content, so there it
 // is restored outright.
 //
-// LICENSE leaves the render when a repo selects the custom-license module;
+// The license (LICENSE.md, or a custom repo's own spelling) leaves the
+// render when a repo selects the custom-license module;
 // copier deletes the de-rendered file when it was unmodified, which would
 // leave the repo with no license at all, so it is restored from the base
 // commit. Unlike settings.yml it is NOT restored on recovery: without the
@@ -19,7 +20,8 @@
 //
 // A committed LICENSE deletion in a repo still on the fleet license is the
 // remaining hole: copier honors the deletion (it re-applies the local
-// diff), cleanup protects the path, and there is no HEAD copy to restore -
+// diff), retired cleanup never lists the path (LICENSE.md is in both
+// renders), and there is no HEAD copy to restore -
 // but the fleet license is mandatory without the custom-license module, so
 // it is re-seeded from the target build ref (which must be resolvable in
 // the cwd's git repository).
@@ -28,17 +30,20 @@
 // and by ci/upgrade_path_test.sh.
 //
 // Env: RECOVER; TARGET_DIR (default target); TARGET_REF and MODULES (for
-// the fleet-license re-seed); TARGET_DISPLAY / TARGET (log label, in that
-// order; defaults to TARGET_DIR).
+// the fleet-license re-seed); RUNNER_TEMP (license-transition flag file);
+// TARGET_DISPLAY / TARGET (log label, in that order; defaults to
+// TARGET_DIR).
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse } from "yaml";
-import { env, error, notice } from "../shared/gha.ts";
+import { env, error, notice, requireEnv } from "../shared/gha.ts";
+import { parseModules } from "../shared/modules.ts";
 
 const targetDir = env("TARGET_DIR", "target");
 const label = env("TARGET_DISPLAY") || env("TARGET") || targetDir;
 const recover = env("RECOVER") === "recopy";
+const modules = parseModules(env("MODULES")) ?? [];
 
 function git(args: string[]): { exitCode: number; stdout: string } {
   const proc = Bun.spawnSync(["git", "-C", targetDir, ...args], {
@@ -73,19 +78,28 @@ if (inHead(".github/settings.yml")) {
   }
 }
 
-if (!recover && inHead("LICENSE") && !existsSync(join(targetDir, "LICENSE"))) {
-  restoreFromHead("LICENSE");
-  notice(
-    `${label}: LICENSE left the template render (custom-license module) but is repo-owned; kept as-is.`,
-  );
+// Only on the custom-license module: there the repo's own license is
+// repo-owned - LICENSE.md by convention, with the extensionless spelling
+// tolerated until every repo's rename lands. Without the module the
+// license is template-managed, and a de-rendered old spelling (the
+// extensionless LICENSE before the LICENSE.md rename) must stay deleted.
+if (!recover && modules.includes("custom-license")) {
+  for (const name of ["LICENSE", "LICENSE.md"]) {
+    if (inHead(name) && !existsSync(join(targetDir, name))) {
+      restoreFromHead(name);
+      notice(
+        `${label}: ${name} left the template render (custom-license module) but is repo-owned; kept as-is.`,
+      );
+    }
+  }
 }
 
-const fleetLicense = "template/{% if 'custom-license' not in modules %}LICENSE{% endif %}.jinja";
+const fleetLicense = "template/{% if 'custom-license' not in modules %}LICENSE.md{% endif %}.jinja";
 if (
   !recover &&
-  !existsSync(join(targetDir, "LICENSE")) &&
-  !inHead("LICENSE") &&
-  !env("MODULES").includes("custom-license")
+  !existsSync(join(targetDir, "LICENSE.md")) &&
+  !inHead("LICENSE.md") &&
+  !modules.includes("custom-license")
 ) {
   const targetRef = env("TARGET_REF");
   if (
@@ -127,9 +141,30 @@ if (
       error(`${label}: cannot re-seed the fleet license; unrendered template expressions remain`);
       process.exit(1);
     }
-    writeFileSync(join(targetDir, "LICENSE"), rendered);
+    writeFileSync(join(targetDir, "LICENSE.md"), rendered);
     notice(
-      `${label}: LICENSE was deleted but the fleet license is mandatory without the custom-license module; re-seeded from ${targetRef}.`,
+      `${label}: LICENSE.md was deleted but the fleet license is mandatory without the custom-license module; re-seeded from ${targetRef}.`,
     );
   }
+}
+
+// A license file this update deletes never reaches the PR as a conflict:
+// copier resolves delete-vs-modify by dropping the file, so content below
+// its local-section marker (prior-license notices) silently leaves the
+// repo, and the update can otherwise look clean. The deletion is flagged
+// for open_pr.ts, which holds the PR for human review however the run was
+// dispatched - the restore and re-seed blocks above have already put back
+// every license the sync preserves, so anything still missing here is a
+// real deletion.
+const transitions = ["LICENSE", "LICENSE.md"].filter(
+  (name) => inHead(name) && !existsSync(join(targetDir, name)),
+);
+writeFileSync(
+  join(requireEnv("RUNNER_TEMP"), "license-transition.txt"),
+  transitions.map((name) => `${name}\n`).join(""),
+);
+if (transitions.length > 0) {
+  notice(
+    `${label}: this update deletes ${transitions.join(" and ")}; the PR stays manual-review so below-marker notices can be ported from git history.`,
+  );
 }

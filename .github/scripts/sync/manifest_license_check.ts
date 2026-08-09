@@ -1,9 +1,9 @@
-// The fleet LICENSE must not ship alongside registry metadata still
+// The fleet LICENSE.md must not ship alongside registry metadata still
 // claiming a different license: npm, crates.io, PyPI, and the VS Code
-// Marketplace all display the manifest's claim, not the LICENSE file, so
+// Marketplace all display the manifest's claim, not the license file, so
 // a repo that adopts the fleet license while its package.json says "MIT"
 // publishes a false grant under the licensor's name. When the sync
-// renders the fleet LICENSE (custom-license module not selected), this
+// renders the fleet LICENSE.md (custom-license module not selected), this
 // script scans the target's manifests and writes a PR-body section for
 // every conflicting claim; open_pr.ts appends it. Repos on the
 // custom-license module keep their own license, so their metadata is
@@ -11,10 +11,10 @@
 //
 // Allowed forms (LicenseRef expressions are valid SPDX and the correct
 // custom-license spelling; a listed identifier like MIT is the error):
-//   package.json   "license": "SEE LICENSE IN LICENSE"
-//   Cargo.toml     license-file = "LICENSE" and no license key
+//   package.json   "license": "SEE LICENSE IN LICENSE.md"
+//   Cargo.toml     license-file = "LICENSE.md" and no license key
 //   pyproject.toml license = "LicenseRef-..." (a single expression) or
-//                  license = { file = "LICENSE" }, and no "License ::"
+//                  license = { file = "LICENSE.md" }, and no "License ::"
 //                  trove classifier
 //
 // Manifest values are target-derived, so the log line names only the
@@ -26,8 +26,9 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { env, requireEnv, warning } from "../shared/gha.ts";
+import { parseModules } from "../shared/modules.ts";
 
-const FLEET_NPM_LICENSE = "SEE LICENSE IN LICENSE";
+const FLEET_NPM_LICENSE = "SEE LICENSE IN LICENSE.md";
 
 export type ManifestTexts = {
   packageJson?: string;
@@ -87,13 +88,13 @@ export function checkManifests(texts: ManifestTexts): string[] {
         if (!section) continue;
         if (section.license !== undefined) {
           problems.push(
-            `\`Cargo.toml\`: \`[${name}]\` has a \`license\` key - delete it and set \`license-file = "LICENSE"\``,
+            `\`Cargo.toml\`: \`[${name}]\` has a \`license\` key - delete it and set \`license-file = "LICENSE.md"\``,
           );
         }
         const licenseFile = section["license-file"];
-        if (licenseFile !== undefined && licenseFile !== "LICENSE") {
+        if (licenseFile !== undefined && licenseFile !== "LICENSE.md") {
           problems.push(
-            `\`Cargo.toml\`: \`[${name}] license-file\` points at ${JSON.stringify(licenseFile)} - point it at \`"LICENSE"\``,
+            `\`Cargo.toml\`: \`[${name}] license-file\` points at ${JSON.stringify(licenseFile)} - point it at \`"LICENSE.md"\``,
           );
         }
       }
@@ -110,14 +111,14 @@ export function checkManifests(texts: ManifestTexts): string[] {
       if (typeof license === "string") {
         if (!/^LicenseRef-\S+$/.test(license)) {
           problems.push(
-            '`pyproject.toml`: `license =` claims an SPDX license - use a single `LicenseRef-` expression or `{ file = "LICENSE" }`',
+            '`pyproject.toml`: `license =` claims an SPDX license - use a single `LicenseRef-` expression or `{ file = "LICENSE.md" }`',
           );
         }
       } else if (license !== undefined) {
         const licenseTable = table(license);
-        if (licenseTable?.file !== "LICENSE" || Object.keys(licenseTable).length !== 1) {
+        if (licenseTable?.file !== "LICENSE.md" || Object.keys(licenseTable).length !== 1) {
           problems.push(
-            '`pyproject.toml`: the `license` table claims something other than the LICENSE file - use `{ file = "LICENSE" }`',
+            '`pyproject.toml`: the `license` table claims something other than the LICENSE.md file - use `{ file = "LICENSE.md" }`',
           );
         }
       }
@@ -140,7 +141,7 @@ export function manifestSummary(problems: string[]): string {
   if (problems.length === 0) return "";
   return `> [!WARNING]
 > Registry metadata still claims a different license than the fleet
-> LICENSE this update delivers. Registries publish the manifest's
+> LICENSE.md this update delivers. Registries publish the manifest's
 > claim, so fix these on this branch or right after merging:
 
 ${problems.map((problem) => `- ${problem}`).join("\n")}
@@ -150,7 +151,7 @@ ${problems.map((problem) => `- ${problem}`).join("\n")}
 if (import.meta.main) {
   const targetDir = env("TARGET_DIR", "target");
   const outFile = join(requireEnv("RUNNER_TEMP"), "manifest-license-warnings.md");
-  if (env("MODULES").includes("custom-license")) {
+  if ((parseModules(env("MODULES")) ?? []).includes("custom-license")) {
     writeFileSync(outFile, "");
     process.exit(0);
   }
@@ -168,7 +169,7 @@ if (import.meta.main) {
   if (problems.length > 0) {
     const files = [...new Set(problems.map((problem) => problem.split("`")[1]))].join(", ");
     warning(
-      `license claims in ${files} conflict with the fleet LICENSE; details in the sync PR body`,
+      `license claims in ${files} conflict with the fleet LICENSE.md; details in the sync PR body`,
     );
   }
 }

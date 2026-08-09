@@ -10,7 +10,14 @@
 
 import { appendFileSync, existsSync, lstatSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { parse } from "yaml";
 import { env, requireEnv } from "../shared/gha.ts";
+import { parseModules } from "../shared/modules.ts";
+import { customLicenseFlipError } from "./retired_paths.ts";
+
+function isStringList(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((entry) => typeof entry === "string");
+}
 
 const runnerTemp = requireEnv("RUNNER_TEMP");
 const targetDir = env("TARGET_DIR", "target");
@@ -26,10 +33,44 @@ function run(command: string[], options: { stdout?: "pipe" } = {}): string {
 // The old render uses the answers recorded BEFORE this update (HEAD still
 // points at the pre-update commit); the new render applies the live
 // module/channel/private/description data on top.
-writeFileSync(
-  join(runnerTemp, "answers-old.yml"),
-  run(["git", "-C", targetDir, "show", "HEAD:.copier-answers.yml"], { stdout: "pipe" }),
+const answersOldText = run(["git", "-C", targetDir, "show", "HEAD:.copier-answers.yml"], {
+  stdout: "pipe",
+});
+writeFileSync(join(runnerTemp, "answers-old.yml"), answersOldText);
+
+// Dropping the custom-license module leaves the repo's own license file
+// behind (see customLicenseFlipError); the guard needs the pre-update
+// module answer, so an unparseable answers file falls through to
+// render_data.ts's canonical error just below.
+const newModules = parseModules(requireEnv("MODULES"));
+if (newModules === null) {
+  console.error("::error::MODULES must be a JSON list of strings");
+  process.exit(1);
+}
+let answersOld: unknown;
+try {
+  answersOld = parse(answersOldText);
+} catch {
+  answersOld = undefined;
+}
+const recordedModules = (answersOld as Record<string, unknown> | null | undefined)?.modules;
+if (recordedModules !== undefined && !isStringList(recordedModules)) {
+  console.error(
+    "::error::HEAD:.copier-answers.yml records a malformed modules list; cannot check the custom-license flip",
+  );
+  process.exit(1);
+}
+const oldModules = isStringList(recordedModules) ? recordedModules : [];
+const presentLicenses = ["LICENSE", "LICENSE.md"].filter(
+  (name) =>
+    Bun.spawnSync(["git", "-C", targetDir, "cat-file", "-e", `HEAD:${name}`]).exitCode === 0,
 );
+const flipError = customLicenseFlipError(oldModules, newModules, presentLicenses);
+if (flipError !== null) {
+  console.error(`::error::${flipError}`);
+  process.exit(1);
+}
+
 run([
   "bun",
   ".github/scripts/sync/render_data.ts",
@@ -88,6 +129,8 @@ writeFileSync(
       join(runnerTemp, "copier-old.yml"),
       "--new-copier",
       join(runnerTemp, "copier-new.yml"),
+      "--modules",
+      requireEnv("MODULES"),
     ],
     { stdout: "pipe" },
   ),
