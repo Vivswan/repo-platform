@@ -121,15 +121,16 @@ rulesets:
   # templates/vX.Y.Z build tags are the anchors downstream latest-channel
   # repos record as _commit, and vX.Y.Z release tags are what their workflow
   # `uses:` pins and sync validation checkouts reference; deleting or moving
-  # either breaks downstream repos, so both are immutable.
+  # either breaks downstream repos, so both are immutable. Admins bypass,
+  # so deliberate tag cleanup doesn't require disabling the ruleset.
   # No creation rule on purpose: build-branches creates templates/* tags
   # with the workflow's GITHUB_TOKEN and release-please creates v* tags,
-  # and with no bypass actors a creation rule would block both. A
-  # RepositoryRole admin bypass would not cover GITHUB_TOKEN (an app, not
-  # a role), and an Integration bypass for github-actions would let ANY
-  # workflow create these tags. Pre-created impostor tags are caught in
-  # code instead: publish.ts refuses to skip a wrong existing tag, and
-  # sync/verify_build_provenance.ts proves every tag before it ships.
+  # and the admin bypass would not cover GITHUB_TOKEN (an app, not a
+  # role), so a creation rule would block both; an Integration bypass for
+  # github-actions would let ANY workflow create these tags. Pre-created
+  # impostor tags are caught in code instead: publish.ts refuses to skip a
+  # wrong existing tag, and sync/verify_build_provenance.ts proves every
+  # tag before it ships.
   - name: build-tags
     target: tag
     enforcement: active
@@ -143,3 +144,7 @@ rulesets:
       - type: deletion
       - type: non_fast_forward
       - type: update
+    bypass_actors:
+      - actor_id: 5
+        actor_type: RepositoryRole
+        bypass_mode: always
