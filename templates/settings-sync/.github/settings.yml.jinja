@@ -135,9 +135,10 @@ rulesets:
       - actor_id: 5
         actor_type: RepositoryRole
         bypass_mode: always
-{% if 'release-please' in modules %}
+{%- if 'release-please' in modules %}
   # vX.Y.Z release tags are immutable: repo-platform's push sync pins
-  # against them and release artifacts reference them.
+  # against them and release artifacts reference them. Admins bypass, so
+  # deliberate tag cleanup doesn't require disabling the ruleset.
   - name: release-tags
     target: tag
     enforcement: active
@@ -150,4 +151,8 @@ rulesets:
       - type: deletion
       - type: non_fast_forward
       - type: update
-{% endif %}
+    bypass_actors:
+      - actor_id: 5
+        actor_type: RepositoryRole
+        bypass_mode: always
+{%- endif %}
