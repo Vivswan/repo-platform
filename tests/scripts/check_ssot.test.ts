@@ -37,9 +37,24 @@ describe("normalizeJinja", () => {
   });
 
   test("removes set statements and if/endif tags while keeping bodies", () => {
+    // A whitespace-controlled tag on its own line disappears with its
+    // line, matching what rendering produces; an inline tag loses just
+    // the tag text.
     const text =
       "{%- set tpl_ref = x -%}\n{%- if enable_codeql %}\n  schedule: []\n{%- endif %}\n{% endif %}  - name: bug";
-    expect(normalizeJinja(text, vars)).toBe("\n\n  schedule: []\n\n  - name: bug");
+    expect(normalizeJinja(text, vars)).toBe("\n  schedule: []\n  - name: bug");
+  });
+
+  test("a plain own-line if/endif tag keeps its blank line, as rendering does", () => {
+    const text = "A\n{% if c %}\nB\n{% endif %}\nC";
+    expect(normalizeJinja(text, vars)).toBe("A\n\nB\n\nC");
+  });
+
+  test("a trailing-control own-line tag ({%- ... -%}) is not line-removed", () => {
+    // -%} also strips the newline after the tag, which line removal does not
+    // model; the tag text alone is dropped so parity comparison fails loudly.
+    const text = "A\n{%- if c -%}\nB\n{%- endif -%}\nC";
+    expect(normalizeJinja(text, vars)).toBe("A\n\nB\n\nC");
   });
 
   test("substitutes the identity expressions", () => {
