@@ -73,13 +73,14 @@ Notes:
   ships one: a thin ci.yml `release` job gated this way that calls the
   repo-owned release.yml pipeline (which runs the managed release-please.yml
   machinery plus any repo pre/post-release jobs), so a release only ever
-  happens once the whole gate is green on main. Releases are cut draft-first
-  because published GitHub releases are immutable: release-please creates a
-  draft with its tag already forced, release.yml's jobs mutate the draft
-  (assets, notes), and its final publish-release job flips it live - or the
-  repository does that itself, when generated with
-  `release_auto_publish=false`. Config and pipeline are repo-owned, so repos
-  generated before the draft flow keep publishing directly.
+  happens once the whole gate is green on main. Releases are cut
+  draft-first because published GitHub releases are immutable:
+  release-please creates a draft with its tag already forced, the
+  starter's update-release job mutates the draft (assets, notes), and
+  its final publish-release job flips it live - the same three steps in
+  every newly generated repository, never direct publishing. Config and
+  pipeline are repo-owned, so repos generated before the draft flow keep
+  publishing directly.
 - One job is informational by design: `validate-template` runs in every
   managed repo's ci.yml but is deliberately NOT in all-green's needs. A red
   run flags template-convention drift without blocking the repo's merges;

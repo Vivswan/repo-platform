@@ -232,12 +232,13 @@ if has release-please; then
   present "      - release-freshness" "$wf/ci.yml"
   test -f /tmp/smoke/release-please-config.json
   test -f /tmp/smoke/.release-please-manifest.json
-  # The starter publishes the draft release itself unless the row opts out
-  # via release_auto_publish=false.
-  case "$EXTRA_DATA" in
-    *release_auto_publish=false*) absent "publish-release:" "$wf/release.yml" ;;
-    *) present "publish-release:" "$wf/release.yml" ;;
-  esac
+  # Every render carries the full three-step draft flow: the update hook
+  # between the draft and the publish, and the publish job last, each
+  # needing everything before it.
+  present "update-release:" "$wf/release.yml"
+  present "publish-release:" "$wf/release.yml"
+  present "needs: [release-please]" "$wf/release.yml"
+  present "needs: [release-please, update-release]" "$wf/release.yml"
 else
   test ! -e "$wf/release-please.yml"
   test ! -e "$wf/release.yml"

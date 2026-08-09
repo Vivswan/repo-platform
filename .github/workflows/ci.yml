@@ -193,9 +193,6 @@ jobs:
           - name: bun-typical
             modules: "[agents, bun, release-please, issue-templates, pr-title, auto-assign, settings-sync]"
             private: "false"
-            # The one row generating release.yml's no-auto-publish branch
-            # (every other release-please row exercises the default).
-            extra_data: "-d release_auto_publish=false"
           # The only public row where uv is the sole toolchain: CodeQL must
           # gate ci.yml with the python leg and WITHOUT the javascript leg,
           # and AGENTS.md's Toolchain section must render the uv bullet
