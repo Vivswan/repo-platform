@@ -1,0 +1,67 @@
+# AGENTS.md
+
+This file provides guidance to AI coding agents working in this repository.
+`CLAUDE.md`, `.github/copilot-instructions.md`, and `.github/agents.md` are
+symlinks to this file, so edit only here.
+
+## Project
+
+{{ project_name }}: {{ description }}
+{% if 'bun' in modules or 'uv' in modules or 'rust' in modules %}
+## Toolchain
+
+{% if 'bun' in modules -%}
+- Runtime and package manager: bun (`bun install`, `bun test`, `bun run <script>`)
+- See `package.json` scripts for the available commands.
+{% endif -%}
+{% if 'uv' in modules -%}
+- Python managed with uv (`uv sync`, `uv run <command>`)
+- See `pyproject.toml` for project metadata and dependencies.
+{% endif -%}
+{% if 'rust' in modules -%}
+- Rust managed with cargo (`cargo build`, `cargo test`, `cargo clippy`)
+- See `Cargo.toml` for the workspace/crate layout and dependencies.
+{% endif -%}
+{% endif %}
+## Conventions
+
+- PR titles and commit subjects must be Conventional Commits (`feat:`, `fix:`,
+  `feat!:`, `chore:`, ...). PRs are squash-merged, so the PR title becomes the
+  commit subject{% if 'release-please' in modules %} and drives release-please versioning{% endif %}.{% if 'pr-title' in modules %} CI validates both
+  (the ci.yml pr-title job + validate-commit-names).{% endif %}
+- CI gates on a single required check named `all-green` in the managed
+  `.github/workflows/ci.yml`. This repository's own test/lint jobs belong in
+  `.github/workflows/checks.yml` (repo-owned, called inside the gate); do not
+  edit ci.yml, template sync overwrites it.{% if 'release-please' in modules %} The `release` job runs on top
+  of the gate (`needs: all-green`); the release pipeline is repo-owned in
+  `.github/workflows/release.yml` (pre/post-release jobs go there, around the
+  managed release-please machinery).{% endif %}
+- No typographic look-alike characters (curly quotes, em-dashes, invisible
+  unicode). CI enforces this with the check-typography action; use plain ASCII
+  punctuation.
+
+## Managed by repo-platform
+
+- Files whose header says "managed by {{ github_username }}/repo-platform"
+  arrive via sync PRs pushed by that repository. Do not edit them here;
+  change them in {{ github_username }}/repo-platform and let the next sync
+  PR deliver the update.
+- Repository settings (description, topics, labels, rulesets, merge policy)
+  are applied from {{ github_username }}/repo-platform: by the
+  `settings/repos/` file named after this repository over there when one
+  exists, otherwise by this repository's own `.github/settings.yml`. Do not
+  change settings by hand in the GitHub UI; edit the settings file.
+- Repo-owned escape hatches stay local:
+  `.github/workflows/checks.yml`{% if 'release-please' in modules %},
+  `.github/workflows/release.yml`{% endif %}, `.gitleaks.toml`,
+  `.gitignore`'s marked LOCAL section, `.typography-allow.local`
+  (typography exemptions; the managed `.typography-allow` is overwritten
+  by sync), and the repository-specific section below.
+- Module selection is this repository's own: edit the `modules` list in
+  `.repo-platform.yml` and the next sync PR applies the change.
+
+## Repository-specific guidance
+
+<!-- Add project-specific instructions below. This section survives template
+     updates via three-way merge. -->
+<!-- repo-platform:local-section -->

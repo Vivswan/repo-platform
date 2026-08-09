@@ -1,0 +1,264 @@
+{#- Composite actions live on main, not on the build branches: strip a
+    templates/vX.Y.Z build-tag _commit to the same-version release tag on
+    main; anything else (staging describe/sha strings, fresh copies) pins
+    main. -#}
+{%- set tpl_ref = _copier_answers._commit | default('', true) -%}
+{%- set release_pin = tpl_ref | regex_replace('^templates/(v[0-9]+\\.[0-9]+\\.[0-9]+)$', '\\1') -%}
+{%- set uses_ref = release_pin if (release_pin and release_pin != tpl_ref) else 'main' -%}
+# This file is managed by {{ github_username }}/repo-platform.
+# Local edits may be replaced during template updates.
+#
+# The all-green convention: branch protection requires only the `all-green`
+# check, which needs every other job here, so the required-checks list never
+# changes as jobs come and go. This repository's own test and lint jobs live
+# in checks.yml (repo-owned, never overwritten by sync) and run inside the
+# gate through the `checks` job. Module checks (the pr-title title check,
+# CodeQL analysis) run inside the gate too, so branch protection blocks on
+# them without extra required checks.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  # `edited` on top of the default three: a PR title edit must re-run the
+  # gate so title-sensitive checks (the pr-title module) stay honest. The
+  # cancel-in-progress concurrency below bounds the extra runs.
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+  workflow_dispatch:
+{%- if enable_codeql %}
+  # Weekly CodeQL re-scan with refreshed query packs; every other gate job
+  # is event-agnostic or skips its work cleanly on non-PR events.
+  schedule:
+    - cron: "23 4 * * 1"
+{%- endif %}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: {% raw %}${{ github.workflow }}-${{ github.ref }}{% endraw %}
+  cancel-in-progress: {% raw %}${{ github.event_name == 'pull_request' }}{% endraw %}
+
+jobs:
+  # Repo-owned checks: edit .github/workflows/checks.yml, not this file. No
+  # secrets are passed and permissions cap at contents: read; a check that
+  # needs either belongs in its own workflow (see
+  # https://github.com/{{ github_username }}/repo-platform/blob/main/docs/all-green.md).
+  checks:
+    uses: ./.github/workflows/checks.yml
+
+  typography:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: {{ github_username }}/repo-platform/actions/check-typography@{{ uses_ref }}
+
+  commit-names:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: {{ github_username }}/repo-platform/actions/validate-commit-names@{{ uses_ref }}
+
+  # Informational, deliberately NOT in all-green's needs: a red run flags
+  # template-convention drift (usually local edits to managed files), but
+  # it never blocks this repository's merges - the next sync PR heals it.
+  validate-template:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: {{ github_username }}/repo-platform/actions/validate-template@{{ uses_ref }}
+
+  actionlint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: raven-actions/actionlint@v2
+
+  # Secret scanning: a committed credential fails the gate. The action
+  # scans the event's commit range (fetch-depth: 0 so any range
+  # resolves); audit the OLD history once with a local `gitleaks git`.
+  # Personal-account repos need no GITLEAKS_LICENSE; allowlist false
+  # positives in the repo-owned .gitleaks.toml at the repository root
+  # (seeded by the template, never overwritten by sync).
+  # pull-requests read: the action lists the PR's commits to build the
+  # scan range. Comments off keeps that scope at read; leaks still land
+  # in the job summary and SARIF artifact.
+  gitleaks:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v3
+        env:
+          GITHUB_TOKEN: {% raw %}${{ secrets.GITHUB_TOKEN }}{% endraw %}
+          GITLEAKS_ENABLE_COMMENTS: "false"
+          # The action's default binary (8.24.3) predates .gitleaks.toml's
+          # minVersion floor AND skips that check silently; pin one meeting
+          # the floor so CI honors the same config local runs do.
+          GITLEAKS_VERSION: "8.30.1"
+
+  yamllint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install yamllint
+        run: python3 -m pip install --quiet yamllint
+      - name: Lint YAML
+        run: yamllint -s .
+{%- if not private %}
+
+  # Fails when a PR introduces dependencies with known vulnerabilities, by
+  # diffing the dependency graph between base and head. Public renders only:
+  # the dependency-graph API behind it is free just for public repositories.
+  # Only PR events have a diff to review, so the skip lives on the steps:
+  # all-green treats a skipped needed job as failure, so the job itself
+  # stays unconditional.
+  dependency-review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        if: github.event_name == 'pull_request'
+      # The severity threshold and the upstream pin live in the wrapper.
+      - uses: {{ github_username }}/repo-platform/actions/dependency-review@{{ uses_ref }}
+        if: github.event_name == 'pull_request'
+{%- endif %}
+{%- if enable_codeql %}
+
+  # CodeQL analysis runs inside the gate (one job per language), so a failed
+  # scan blocks merges. Each job grants the scan permissions - a caller
+  # job's permissions are the ceiling for the called workflow - and the
+  # weekly re-scan schedule lives on this workflow's triggers.
+  # Repo-specific scan tuning (paths-ignore, extra queries, packs) goes in
+  # the repo-owned .github/codeql/codeql-config.yml - the standard CodeQL
+  # config file, picked up automatically when present.
+{% if 'bun' in modules %}
+  codeql-javascript:
+    uses: {{ github_username }}/repo-platform/.github/workflows/reusable-codeql.yml@{{ uses_ref }}
+    with:
+      language: javascript-typescript
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+{% endif %}{% if 'uv' in modules %}
+  codeql-python:
+    uses: {{ github_username }}/repo-platform/.github/workflows/reusable-codeql.yml@{{ uses_ref }}
+    with:
+      language: python
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+{% endif %}
+{%- endif %}
+{% if 'release-please' in modules %}
+  # Fails when the release-please PR head lacks main's tip at CHECK time:
+  # a stale release PR cuts a release whose version and changelog miss
+  # commits already on main. A main push after this run is only caught by
+  # release-please's refresh re-running CI. Other PRs stay mergeable while
+  # behind (required checks are not strict). The skip lives on the STEPS:
+  # all-green treats a skipped needed job as failure.
+  release-freshness:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        if: github.event_name == 'pull_request' && startsWith(github.head_ref, 'release-please--')
+        with:
+          # Full history: the ancestor check needs origin/main.
+          fetch-depth: 0
+          # PR head, not the default merge ref - the merge ref already
+          # contains main's tip, so it would always pass.
+          ref: {% raw %}${{ github.event.pull_request.head.sha }}{% endraw %}
+      - name: Require the release PR to contain the tip of main
+        if: github.event_name == 'pull_request' && startsWith(github.head_ref, 'release-please--')
+        run: |
+          tip="$(git rev-parse "origin/${GITHUB_BASE_REF}")"
+          if git merge-base --is-ancestor "$tip" HEAD; then
+            echo "release PR contains the ${GITHUB_BASE_REF} tip (${tip})"
+          else
+            echo "::error::Release PR is behind ${GITHUB_BASE_REF} (tip ${tip}); its version and changelog would miss commits already on ${GITHUB_BASE_REF}. Do not merge; release-please refreshes the PR after the next green run on ${GITHUB_BASE_REF}."
+            exit 1
+          fi
+{% endif %}{% if 'pr-title' in modules %}
+  # Conventional Commit PR title, checked inside the gate so branch
+  # protection blocks on it. PRs are squash-merged, so the PR title becomes
+  # the commit subject and drives release-please versioning: `feat:` (minor),
+  # `fix:` (patch), `feat!:` (major), `chore:`/`docs:` (no release). The
+  # skip lives on the STEP, not the job: all-green treats a skipped needed
+  # job as failure, and ci.yml also runs on push/dispatch/schedule events.
+  pr-title:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: read
+    steps:
+      - name: Validate PR title is a Conventional Commit
+        if: github.event_name == 'pull_request'
+        uses: amannn/action-semantic-pull-request@v6
+        env:
+          GITHUB_TOKEN: {% raw %}${{ secrets.GITHUB_TOKEN }}{% endraw %}
+{% endif %}
+  all-green:
+    name: all-green
+    if: always()
+    needs:
+      - checks
+      - typography
+      - commit-names
+      - actionlint
+      - gitleaks
+      - yamllint
+{%- if not private %}
+      - dependency-review
+{%- endif %}
+{% if 'bun' in modules %}{% if enable_codeql %}      - codeql-javascript
+{% endif %}{% endif %}{% if 'uv' in modules %}{% if enable_codeql %}      - codeql-python
+{% endif %}{% endif %}{% if 'release-please' in modules %}      - release-freshness
+{% endif %}{% if 'pr-title' in modules %}      - pr-title{% endif %}
+    runs-on: ubuntu-latest
+    steps:
+      - name: All jobs green
+        env:
+          RESULTS: {% raw %}${{ join(needs.*.result, ' ') }}{% endraw %}
+        run: |
+          echo "results: $RESULTS"
+          for result in $RESULTS; do
+            if [ "$result" != "success" ]; then
+              echo "::error::all-green failed: at least one required job did not succeed (results: $RESULTS). Open the failing job's log in this run, fix the failure, and push again."
+              exit 1
+            fi
+          done
+{% if 'release-please' in modules %}
+  # Release from a green main only: the repo-owned release.yml pipeline
+  # (which runs the managed release-please.yml machinery, plus any of this
+  # repository's pre/post-release jobs) runs downstream of all-green, so a
+  # red commit can never cut a release or refresh the release PR.
+  # Deliberately NOT in all-green's needs: it depends on the gate, it is not
+  # gated by it. Only push/dispatch runs release: pull requests must never
+  # reach the publish pipeline, and the weekly scheduled CodeQL re-scan has
+  # no business refreshing release state. Secrets are inherited
+  # deliberately: publish steps need them.
+  release:
+    needs: [all-green]
+    if: >-
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+      && github.ref == 'refs/heads/main'
+    # The publishing ceiling for the repo-owned release.yml jobs (release
+    # assets and their build provenance, ghcr, npm/PyPI trusted publishing);
+    # nested jobs can only narrow it, never raise it.
+    permissions:
+      contents: write
+      pull-requests: write
+      packages: write
+      id-token: write
+      attestations: write
+    uses: ./.github/workflows/release.yml
+    secrets: inherit
+{% endif %}
