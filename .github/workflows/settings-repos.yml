@@ -150,7 +150,7 @@ jobs:
       - name: Apply repository settings
         # Pinned to an immutable commit; bump to @v1 once the action cuts
         # its first release. Bump together with reusable-apply-settings.yml.
-        uses: Vivswan/repo-settings-as-code@24eabe39cb9ab82777fe7bb884d5d43cd5eaa018
+        uses: Vivswan/repo-settings-as-code@ac83fb48219309e2249294ef37fb55310bd45fb3
         with:
           token: ${{ secrets.REPO_PLATFORM_TOKEN }}
           mode: ${{ inputs.check_only && 'check' || 'apply' }}
