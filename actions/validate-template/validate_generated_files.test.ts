@@ -8,7 +8,8 @@ const VALIDATOR = join(import.meta.dir, "validate_generated_files.ts");
 // The smallest tree the validator accepts: registration files, the marked
 // .gitignore, and a ci.yml carrying the all-green + typography convention.
 const BASELINE: Record<string, string> = {
-  ".copier-answers.yml": "_commit: templates/v1.0.0\n_src_path: gh:Vivswan/repo-platform\n",
+  ".copier-answers.yml":
+    "_commit: templates/v1.0.0\n_src_path: gh:Vivswan/repo-platform\ngithub_username: Vivswan\n",
   ".repo-platform.yml": "modules: [uv]\n",
   ".gitignore": [
     "# BEGIN REPOSITORY LOCAL",
@@ -41,8 +42,11 @@ afterAll(() => {
 });
 
 /** Writes BASELINE plus `extra` into a fresh temp repo and runs the
- *  validator against it. */
-function runValidator(extra: Record<string, string> = {}): {
+ *  validator against it, with any extra CLI `args` (e.g. --self). */
+function runValidator(
+  extra: Record<string, string> = {},
+  args: string[] = [],
+): {
   exitCode: number;
   stdout: string;
   stderr: string;
@@ -53,7 +57,7 @@ function runValidator(extra: Record<string, string> = {}): {
     mkdirSync(join(root, dirname(rel)), { recursive: true });
     writeFileSync(join(root, rel), content);
   }
-  const result = Bun.spawnSync([process.execPath, VALIDATOR, root]);
+  const result = Bun.spawnSync([process.execPath, VALIDATOR, ...args, root]);
   return {
     exitCode: result.exitCode,
     stdout: result.stdout.toString(),
@@ -129,6 +133,232 @@ describe("duplicate mapping keys", () => {
     const { exitCode, stderr } = runValidator({ "vendor/bad.yml": "a: [1, 2\n" });
     expect(exitCode).toBe(1);
     expect(stderr).toContain("vendor/bad.yml: does not parse as YAML");
+  });
+});
+
+describe("base checks shape", () => {
+  // private: true in the answers also silences the dependency-review
+  // advisory, like a real private render's answers do; github_username pins
+  // the owner the fleet's composite actions must come from.
+  const PRIVATE_ANSWERS =
+    "_commit: templates/v1.0.0\n_src_path: gh:Vivswan/repo-platform\n" +
+    "github_username: Vivswan\nprivate: true\n";
+
+  /** A private merged render: base-checks carries the base checks as
+   *  guarded steps, and all-green gates on it (unless `needs` says
+   *  otherwise). */
+  const mergedCi = (steps: string[], needs = "[base-checks]") =>
+    [
+      "name: CI",
+      "jobs:",
+      "  base-checks:",
+      "    runs-on: ubuntu-latest",
+      "    steps:",
+      "      - uses: actions/checkout@v7",
+      ...steps,
+      "  all-green:",
+      "    if: always()",
+      `    needs: ${needs}`,
+      "    runs-on: ubuntu-latest",
+      "    steps:",
+      "      - run: |",
+      '          if [ "$RESULT" != "success" ]; then exit 1; fi',
+      "",
+    ].join("\n");
+
+  const MERGED_STEPS = [
+    "      - uses: Vivswan/repo-platform/actions/check-typography@main",
+    "        if: '!cancelled()'",
+    "      - uses: Vivswan/repo-platform/actions/validate-commit-names@main",
+    "        if: '!cancelled()'",
+    "      - uses: raven-actions/actionlint@v2",
+    "        if: '!cancelled()'",
+    "      - name: Lint YAML",
+    "        if: '!cancelled()'",
+    "        run: yamllint -s .",
+    "      - uses: gitleaks/gitleaks-action@v3",
+    "        if: '!cancelled()'",
+  ];
+
+  test("a full private merged ci.yml passes with no advisories", () => {
+    const { exitCode, stdout, stderr } = runValidator({
+      ".copier-answers.yml": PRIVATE_ANSWERS,
+      ".github/workflows/ci.yml": mergedCi(MERGED_STEPS),
+    });
+    expect(stderr).toBe("");
+    expect(exitCode).toBe(0);
+    expect(stdout).not.toContain("consider adding");
+  });
+
+  test("each check missing from the merged job gets its own advisory", () => {
+    // Steps 0-3: check-typography and validate-commit-names only.
+    const { exitCode, stdout, stderr } = runValidator({
+      ".copier-answers.yml": PRIVATE_ANSWERS,
+      ".github/workflows/ci.yml": mergedCi(MERGED_STEPS.slice(0, 4)),
+    });
+    expect(stderr).toBe("");
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain("base-checks is missing the actionlint check");
+    expect(stdout).toContain("base-checks is missing the yamllint check");
+    expect(stdout).toContain("base-checks is missing the gitleaks check");
+    expect(stdout).not.toContain("missing the commit-names check");
+  });
+
+  test("a check-typography step disabled by if: false fails", () => {
+    const steps = [
+      "      - uses: Vivswan/repo-platform/actions/check-typography@main",
+      "        if: false",
+      ...MERGED_STEPS.slice(2),
+    ];
+    const { exitCode, stderr } = runValidator({
+      ".copier-answers.yml": PRIVATE_ANSWERS,
+      ".github/workflows/ci.yml": mergedCi(steps),
+    });
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain("no unconditional check-typography step");
+  });
+
+  test("a look-alike action name does not satisfy the typography check", () => {
+    const steps = [
+      "      - uses: Vivswan/repo-platform/actions/check-typography-disabled@main",
+      ...MERGED_STEPS.slice(2),
+    ];
+    const { exitCode, stderr } = runValidator({
+      ".copier-answers.yml": PRIVATE_ANSWERS,
+      ".github/workflows/ci.yml": mergedCi(steps),
+    });
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain("no unconditional check-typography step");
+  });
+
+  test("check-typography from another repository does not count", () => {
+    const steps = [
+      "      - uses: attacker/repo/actions/check-typography@v1",
+      ...MERGED_STEPS.slice(2),
+    ];
+    const { exitCode, stderr } = runValidator({
+      ".copier-answers.yml": PRIVATE_ANSWERS,
+      ".github/workflows/ci.yml": mergedCi(steps),
+    });
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain("no unconditional check-typography step");
+  });
+
+  test("check-typography from another owner does not count", () => {
+    const steps = [
+      "      - uses: attacker/repo-platform/actions/check-typography@v1",
+      ...MERGED_STEPS.slice(2),
+    ];
+    const { exitCode, stderr } = runValidator({
+      ".copier-answers.yml": PRIVATE_ANSWERS,
+      ".github/workflows/ci.yml": mergedCi(steps),
+    });
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain("no unconditional check-typography step");
+  });
+
+  test("a managed render missing github_username in its answers fails", () => {
+    const { exitCode, stderr } = runValidator({
+      ".copier-answers.yml": "_commit: templates/v1.0.0\n_src_path: gh:Vivswan/repo-platform\n",
+    });
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain("`github_username` is missing or not a GitHub username");
+  });
+
+  test("a malformed github_username (regex metacharacters, slashes) fails", () => {
+    const { exitCode, stderr } = runValidator({
+      ".copier-answers.yml":
+        "_commit: templates/v1.0.0\n_src_path: gh:Vivswan/repo-platform\n" +
+        "github_username: attacker/repo.*\n",
+    });
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain("`github_username` is missing or not a GitHub username");
+  });
+
+  test("self mode accepts any well-formed owner without answers to pin from", () => {
+    const steps = [
+      "      - uses: SomeFork/repo-platform/actions/check-typography@main",
+      "        if: '!cancelled()'",
+      ...MERGED_STEPS.slice(2),
+    ];
+    const { exitCode, stderr } = runValidator(
+      {
+        ".copier-answers.yml": "_commit: abc\n_src_path: /tmp/src\n",
+        ".github/workflows/ci.yml": mergedCi(steps),
+      },
+      ["--self"],
+    );
+    expect(stderr).toBe("");
+    expect(exitCode).toBe(0);
+  });
+
+  test("the wrapped expression form of the guard counts as unconditional", () => {
+    const steps = [
+      ...MERGED_STEPS.slice(0, MERGED_STEPS.length - 1),
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: literal GitHub Actions expression fixture
+      "        if: ${{ !cancelled() }}",
+    ];
+    const { exitCode, stdout, stderr } = runValidator({
+      ".copier-answers.yml": PRIVATE_ANSWERS,
+      ".github/workflows/ci.yml": mergedCi(steps),
+    });
+    expect(stderr).toBe("");
+    expect(exitCode).toBe(0);
+    expect(stdout).not.toContain("missing the gitleaks check");
+  });
+
+  test("look-alike or disabled marker steps still draw their advisories", () => {
+    const steps = [
+      ...MERGED_STEPS.slice(0, 4),
+      "      - uses: raven-actions/actionlint-disabled@v2",
+      "        if: '!cancelled()'",
+      "      - name: Lint YAML",
+      "        if: '!cancelled()'",
+      "        run: yamllint -s .",
+      "      - uses: gitleaks/gitleaks-action@v3",
+      "        if: false",
+    ];
+    const { exitCode, stdout, stderr } = runValidator({
+      ".copier-answers.yml": PRIVATE_ANSWERS,
+      ".github/workflows/ci.yml": mergedCi(steps),
+    });
+    expect(stderr).toBe("");
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain("base-checks is missing the actionlint check");
+    expect(stdout).toContain("base-checks is missing the gitleaks check");
+    expect(stdout).not.toContain("missing the yamllint check");
+  });
+
+  test("base-checks outside all-green's needs fails", () => {
+    const { exitCode, stderr } = runValidator({
+      ".copier-answers.yml": PRIVATE_ANSWERS,
+      ".github/workflows/ci.yml": mergedCi(MERGED_STEPS, "[]"),
+    });
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain("all-green `needs:` is missing job(s): base-checks");
+  });
+
+  test("a ci.yml with neither a typography job nor a merged shape fails", () => {
+    const { exitCode, stderr } = runValidator({
+      ".github/workflows/ci.yml": [
+        "name: CI",
+        "jobs:",
+        "  lint:",
+        "    runs-on: ubuntu-latest",
+        "    steps:",
+        "      - run: echo ok",
+        "  all-green:",
+        "    if: always()",
+        "    needs: [lint]",
+        "    runs-on: ubuntu-latest",
+        "    steps:",
+        "      - run: |",
+        '          if [ "$RESULT" != "success" ]; then exit 1; fi',
+        "",
+      ].join("\n"),
+    });
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain("no `typography` job");
   });
 });
 

@@ -2,8 +2,9 @@
 // Validate a repo generated/managed by Vivswan/repo-platform.
 //
 // Checks (errors fail the run):
-//   1. .copier-answers.yml and .repo-platform.yml exist, and the latter
-//      records a valid top-level `modules` list
+//   1. .copier-answers.yml and .repo-platform.yml exist, the latter records
+//      a valid top-level `modules` list, and the former pins a well-formed
+//      `github_username` (the owner whose composite actions ci.yml must use)
 //   2. .gitignore managed/local marker sections appear exactly once
 //   3. Every .yml/.yaml file parses; duplicate mapping keys are errors
 //      under .github/ and in the registration files, advisories elsewhere
@@ -11,15 +12,19 @@
 //   5. .github/workflows/ci.yml exists (the template always generates and
 //      manages it), an `all-green` job exists with `if: always()`, a step
 //      failing on any non-success result, and `needs:` listing every other
-//      job, and a `typography` job exists
+//      job, and the typography check renders for the shape: a `typography`
+//      job on public renders, an unconditional check-typography step inside
+//      `base-checks` on private renders (which merge the base checks there)
 //   6. LICENSE and LICENSE.md never coexist - a repo carries exactly one
 //      license file
 //
 // Advisories (printed, never fail): missing actionlint / yamllint /
-// commit-names / gitleaks jobs in ci.yml (older renders predate the newer
-// jobs), plus dependency-review on public renders only (private renders
-// never get that job, so their answers silence the advisory); duplicate
-// mapping keys in YAML outside .github/ and the registration files.
+// commit-names / gitleaks checks in ci.yml (older renders predate the newer
+// checks) - matched as jobs on public renders and as base-checks steps on
+// private ones - plus dependency-review on public renders only (private
+// renders never get that job, so their answers silence the advisory);
+// duplicate mapping keys in YAML outside .github/ and the registration
+// files.
 //
 // Usage: bun actions/validate-template/validate_generated_files.ts [--self] [target-dir]
 //
@@ -84,6 +89,36 @@ const TEXT_SUFFIXES = new Set([
 ]);
 
 const ADVISORY_JOBS = ["actionlint", "gitleaks", "yamllint", "commit-names", "dependency-review"];
+
+/** A step in the private merged shape counts only when nothing can disable
+ *  it: no `if`, or exactly the shape's run-even-after-failure guard (bare
+ *  or wrapped - GitHub treats `!cancelled()` and its expression form
+ *  identically). */
+function stepUnconditional(step: Record<string, unknown>): boolean {
+  if (!("if" in step)) return true;
+  if (typeof step.if !== "string") return false;
+  const guard = step.if.trim();
+  const inner = /^\$\{\{([\s\S]*)\}\}$/.exec(guard)?.[1]?.trim() ?? guard;
+  return inner === "!cancelled()";
+}
+
+/** How each advisory check appears as a base-checks step in the private
+ *  merged shape (dependency-review never renders there). The uses matchers
+ *  are anchored to the full action identity, so a look-alike name from
+ *  another owner or repository does not count; `ownedAction` matches this
+ *  fleet's own composite actions. */
+function mergedStepMarkers(
+  ownedAction: (name: string) => RegExp,
+): Record<string, (step: Record<string, unknown>) => boolean> {
+  const uses = (step: Record<string, unknown>, action: RegExp) =>
+    typeof step.uses === "string" && action.test(step.uses);
+  return {
+    actionlint: (step) => uses(step, /^raven-actions\/actionlint@/),
+    gitleaks: (step) => uses(step, /^gitleaks\/gitleaks-action@/),
+    yamllint: (step) => typeof step.run === "string" && step.run.includes("yamllint"),
+    "commit-names": (step) => uses(step, ownedAction("validate-commit-names")),
+  };
+}
 
 const KNOWN_MODULES = new Set([
   "agents",
@@ -378,6 +413,17 @@ function main(): number {
         if (typeof needs === "string") return [needs];
         return Array.isArray(needs) ? needs.map(String) : [];
       };
+      const jobSteps = (job: unknown): Record<string, unknown>[] => {
+        const steps =
+          typeof job === "object" && job !== null && !Array.isArray(job)
+            ? (job as Record<string, unknown>).steps
+            : null;
+        if (!Array.isArray(steps)) return [];
+        return steps.filter(
+          (step): step is Record<string, unknown> =>
+            typeof step === "object" && step !== null && !Array.isArray(step),
+        );
+      };
       if (!("all-green" in jobs)) {
         errors.push(
           "ci.yml: no `all-green` job - branch protection gates on that " +
@@ -442,7 +488,65 @@ function main(): number {
           );
         }
       }
-      if (!("typography" in jobs)) {
+      // The template renders this fleet's composite actions as
+      // <github_username>/repo-platform/actions/<name>@<ref>. A managed
+      // render's answers must pin that owner (another owner's look-alike
+      // action must not satisfy a check): a missing or malformed
+      // github_username is a hard error, never a permissive fallback. Self
+      // mode validates repo-platform itself, which has no answers file to
+      // pin from, so any well-formed owner counts there. null = the error
+      // below is already recorded and the owner-dependent checks stand
+      // down until the answers are healed.
+      const answersPath = join(root, ".copier-answers.yml");
+      const hasAnswers = isRegularFile(answersPath);
+      const answersText = hasAnswers ? readFileSync(answersPath, "utf-8") : "";
+      const isPrivateRender = /^private: true\b/m.test(answersText);
+      const username = (/^github_username: (.*)$/m.exec(answersText)?.[1] ?? "").trim();
+      const owner: string | null = selfMode
+        ? "[A-Za-z0-9-]+"
+        : /^[A-Za-z0-9-]+$/.test(username)
+          ? username
+          : null;
+      // A missing answers file already errored above; no second diagnostic
+      // on the same root cause.
+      if (owner === null && hasAnswers) {
+        errors.push(
+          ".copier-answers.yml: `github_username` is missing or not a " +
+            "GitHub username - it pins which owner's composite actions " +
+            "ci.yml must use; restore the field or re-run a template sync",
+        );
+      }
+      const ownedActionFor =
+        (pinned: string) =>
+        (name: string): RegExp =>
+          new RegExp(`^${pinned}/repo-platform/actions/${name}@`);
+      // The render shape decides what the remaining checks require: a
+      // base-checks job means the private merged shape (the five base
+      // checks are its steps), anything else is the public fan-out.
+      // Resolved once so no check mixes expectations from both shapes.
+      const shape =
+        "base-checks" in jobs
+          ? ({ kind: "private-merged", steps: jobSteps(jobs["base-checks"]) } as const)
+          : ({ kind: "public-fanout" } as const);
+      if (shape.kind === "private-merged") {
+        if (owner !== null) {
+          const action = ownedActionFor(owner)("check-typography");
+          const enforced = shape.steps.some(
+            (step) =>
+              typeof step.uses === "string" && action.test(step.uses) && stepUnconditional(step),
+          );
+          // base-checks itself must gate the merge, which the all-green
+          // needs check above already errors on - no separate check here.
+          if (!enforced) {
+            errors.push(
+              "ci.yml: base-checks has no unconditional check-typography step " +
+                "(private renders carry the typography check there) - the " +
+                "no-look-alike-characters rule is unenforced; add a step using " +
+                "Vivswan/repo-platform/actions/check-typography",
+            );
+          }
+        }
+      } else if (!("typography" in jobs)) {
         errors.push(
           "ci.yml: no `typography` job - the no-look-alike-characters rule " +
             "is unenforced; add a job using " +
@@ -453,12 +557,22 @@ function main(): number {
       // graph behind it is free just there), so a private render's answers
       // silence that advisory instead of nagging about a job it must not
       // have. Self mode has no answers file and is public anyway.
-      const answersPath = join(root, ".copier-answers.yml");
-      const isPrivateRender =
-        isRegularFile(answersPath) && /^private: true\b/m.test(readFileSync(answersPath, "utf-8"));
+      const stepMarkers = owner === null ? null : mergedStepMarkers(ownedActionFor(owner));
       for (const advisory of ADVISORY_JOBS) {
-        if (advisory === "dependency-review" && isPrivateRender) continue;
-        if (!(advisory in jobs)) {
+        if (advisory === "dependency-review") {
+          if (!isPrivateRender && !(advisory in jobs)) {
+            advisories.push(`ci.yml: consider adding a \`${advisory}\` job`);
+          }
+          continue;
+        }
+        if (shape.kind === "private-merged") {
+          const marker = stepMarkers?.[advisory];
+          if (marker && !shape.steps.some((step) => marker(step) && stepUnconditional(step))) {
+            advisories.push(
+              `ci.yml: base-checks is missing the ${advisory} check - consider adding its step`,
+            );
+          }
+        } else if (!(advisory in jobs)) {
           advisories.push(`ci.yml: consider adding a \`${advisory}\` job`);
         }
       }

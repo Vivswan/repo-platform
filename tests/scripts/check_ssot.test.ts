@@ -91,6 +91,29 @@ describe("normalizeJinja", () => {
       "code_scanning: true",
     );
   });
+
+  test("a context drops the false branch's body and keeps the true one", () => {
+    const text = "A\n{%- if private %}\nP\n{%- endif %}\n{%- if not private %}\nQ\n{%- endif %}\nZ";
+    expect(normalizeJinja(text, vars, { private: false })).toBe("A\nQ\nZ");
+    expect(normalizeJinja(text, vars, { private: true })).toBe("A\nP\nZ");
+  });
+
+  test("an outer false branch drops its nested blocks whole", () => {
+    const text =
+      "A\n{%- if private %}\nP\n{%- if enable_codeql %}\nS\n{%- endif %}\nP2\n{%- endif %}\nZ";
+    expect(normalizeJinja(text, vars, { private: false })).toBe("A\nZ");
+  });
+
+  test("a condition the context cannot resolve keeps its body, as without one", () => {
+    const text = "A\n{%- if enable_codeql %}\nB\n{%- endif %}\nZ";
+    expect(normalizeJinja(text, vars, { private: false })).toBe("A\nB\nZ");
+    expect(normalizeJinja(text, vars)).toBe("A\nB\nZ");
+  });
+
+  test("an else inside a dropped branch still fails loudly", () => {
+    const text = "A\n{%- if private %}\nP\n{%- else %}\nQ\n{%- endif %}\nZ";
+    expect(() => normalizeJinja(text, vars, { private: false })).toThrow("cannot handle");
+  });
 });
 
 describe("placeholderJinja", () => {

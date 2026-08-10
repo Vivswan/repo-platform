@@ -66,19 +66,77 @@ export interface JinjaVars {
   copyrightHolder: string;
 }
 
+/** Drop every if/endif block whose condition is false in `context`: a
+ *  condition that is exactly a context variable (or `not <variable>`)
+ *  evaluates; any other condition keeps its body for the tag stripping in
+ *  normalizeJinja. if/endif pairs are matched with a depth counter, so an
+ *  outer false branch drops its nested blocks whole. else/elif are rejected
+ *  here too - the no-else invariant must hold even inside a dropped branch,
+ *  which the downstream guard would never see. */
+function evaluateIfBranches(text: string, context: Record<string, boolean>): string {
+  const resolve = (expr: string): boolean | null => {
+    const trimmed = expr.trim();
+    const negated = trimmed.startsWith("not ");
+    const name = (negated ? trimmed.slice(4) : trimmed).trim();
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) return null;
+    const value = context[name];
+    if (value === undefined) return null;
+    return negated ? !value : value;
+  };
+  let out = "";
+  let cursor = 0;
+  let dropDepth = 0;
+  for (const tag of text.matchAll(/\{%-?\s*(if|endif|else|elif)\b([^%]*?)-?%\}/g)) {
+    const [tagText, kind, expr] = tag;
+    if (kind === "else" || kind === "elif") {
+      throw new Error(`normalizeJinja cannot handle ${tagText}`);
+    }
+    const start = tag.index ?? 0;
+    if (dropDepth === 0) {
+      if (kind === "if" && resolve(expr) === false) {
+        // Drop from the tag's line start (its {%- also eats the preceding
+        // newline when rendered, but the line-removal step models that).
+        let lineStart = start;
+        while (lineStart > 0 && (text[lineStart - 1] === " " || text[lineStart - 1] === "\t")) {
+          lineStart--;
+        }
+        out += text.slice(cursor, lineStart);
+        dropDepth = 1;
+      }
+    } else if (kind === "if") {
+      dropDepth++;
+    } else {
+      dropDepth--;
+      if (dropDepth === 0) {
+        const trailing = /^[ \t]*\r?\n/.exec(text.slice(start + tagText.length));
+        cursor = start + tagText.length + (trailing ? trailing[0].length : 0);
+      }
+    }
+  }
+  if (dropDepth > 0) throw new Error("evaluateIfBranches: a dropped if block has no endif");
+  return out + text.slice(cursor);
+}
+
 /**
  * Reduce a template file to the text this repo's own copy should carry:
- * strip raw markers, jinja comments and set/if/endif tags (bodies are kept -
- * repo-platform is public with a toolchain, so every gate is true for it),
- * substitute the identity expressions, and map remote
+ * strip raw markers, jinja comments and set/if/endif tags, substitute the
+ * identity expressions, and map remote
  * `<owner>/repo-platform/<path>@{{ uses_ref }}` references to their local
- * `./<path>` form.
+ * `./<path>` form. Without a `context`, every if/endif body is kept (fine
+ * while the kept bodies never contradict each other); with one, false
+ * branches are dropped and only conditions the context cannot resolve keep
+ * their bodies.
  */
-export function normalizeJinja(text: string, vars: JinjaVars): string {
+export function normalizeJinja(
+  text: string,
+  vars: JinjaVars,
+  context?: Record<string, boolean>,
+): string {
   let out = text;
   out = out.replace(/\{%-?\s*(?:raw|endraw)\s*-?%\}/g, "");
   out = out.replace(/\{#-?[\s\S]*?-?#\}/g, "");
   out = out.replace(/\{%-?\s*set\b[\s\S]*?%\}/g, "");
+  if (context) out = evaluateIfBranches(out, context);
   // Keeping both branches of an if/else would concatenate mutually exclusive
   // content; no processed template uses statement-level else today, so its
   // appearance means this normalizer needs real branch handling.
@@ -234,7 +292,12 @@ function repoCi(): Record<string, unknown> {
 }
 
 function templateCi(): Record<string, unknown> {
-  const text = normalizeJinja(read("templates/base/.github/workflows/ci.yml.jinja"), jinjaVars());
+  // { private: false }: the ssot rules compare this against repo-platform's
+  // own (public) ci.yml, and keep-both would model an impossible hybrid
+  // carrying the private base-checks job next to the public fan-out.
+  const text = normalizeJinja(read("templates/base/.github/workflows/ci.yml.jinja"), jinjaVars(), {
+    private: false,
+  });
   return asRecord(parseYaml(text), "ci.yml.jinja");
 }
 

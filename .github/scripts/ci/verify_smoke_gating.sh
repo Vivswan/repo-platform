@@ -18,6 +18,7 @@ has() { case "$mods" in *",$1,"*) return 0 ;; *) return 1 ;; esac; }
 present() { grep -qF -- "$1" "$2" || { echo "::error::gating check failed: '$1' is missing from $2, so the template did not emit it for modules=$MODULES private=$PRIVATE. Fix the gate in templates/ (or this expectation in verify_smoke_gating.sh)."; exit 1; }; }
 present_line() { grep -qxF -- "$1" "$2" || { echo "::error::gating check failed: no line is exactly '$1' in $2, so the template did not emit it for modules=$MODULES private=$PRIVATE. Fix the gate in templates/ (or this expectation in verify_smoke_gating.sh)."; exit 1; }; }
 absent() { if grep -qF -- "$1" "$2"; then echo "::error::gating check failed: '$1' appears in $2 but modules=$MODULES private=$PRIVATE should not emit it. Fix the gate in templates/ (or this expectation in verify_smoke_gating.sh)."; exit 1; fi; }
+absent_line() { if grep -qxF -- "$1" "$2"; then echo "::error::gating check failed: a line is exactly '$1' in $2 but modules=$MODULES private=$PRIVATE should not emit it. Fix the gate in templates/ (or this expectation in verify_smoke_gating.sh)."; exit 1; fi; }
 
 # pr-title runs inside the managed ci.yml gate (no standalone workflow).
 test ! -e "$wf/pr-title.yml"
@@ -160,6 +161,48 @@ else
   # The wrapper pin, falling back to main on the scratch build tree; the
   # upgrade test proves the release-tag form.
   present "repo-platform/actions/dependency-review@main" "$wf/ci.yml"
+fi
+
+# Base checks: private renders merge the five tiny jobs into one
+# base-checks job (a standalone job bills a rounded-up minute per run on
+# private repos); public renders keep the one-job-per-check fan-out. Job
+# keys and needs entries are matched as whole lines at their exact
+# indentation: a bare 'typography' pattern would also hit
+# 'actions/check-typography@main'.
+base_check_jobs=(typography commit-names actionlint gitleaks yamllint)
+if [ "$PRIVATE" = "true" ]; then
+  present_line "  base-checks:" "$wf/ci.yml"
+  present_line "      - base-checks" "$wf/ci.yml"
+  for job in "${base_check_jobs[@]}"; do
+    absent_line "  $job:" "$wf/ci.yml"
+    absent_line "      - $job" "$wf/ci.yml"
+  done
+  # Every check's tool steps must survive the merge (check-typography is
+  # asserted for both shapes below).
+  present "actions/validate-commit-names@main" "$wf/ci.yml"
+  present "raven-actions/actionlint" "$wf/ci.yml"
+  present "gitleaks/gitleaks-action" "$wf/ci.yml"
+  present "yamllint -s ." "$wf/ci.yml"
+  # ...and keep their run-even-after-an-earlier-failure guard: one per
+  # check step (five checks, yamllint contributing two steps).
+  guard="        if: '!cancelled()'"
+  guards="$(grep -cxF -- "$guard" "$wf/ci.yml" || true)"
+  if [ "$guards" -ne 6 ]; then
+    echo "::error::gating check failed: expected exactly 6 lines \"$guard\" in $wf/ci.yml but found $guards for modules=$MODULES private=$PRIVATE. Fix the gate in templates/ (or this expectation in verify_smoke_gating.sh)."
+    exit 1
+  fi
+else
+  # Exact lines, not a substring: the header comment describing the two
+  # shapes names base-checks in every render.
+  absent_line "  base-checks:" "$wf/ci.yml"
+  absent_line "      - base-checks" "$wf/ci.yml"
+  # The guard belongs to the merged shape alone; public fan-out jobs fail
+  # independently without it.
+  absent "!cancelled()" "$wf/ci.yml"
+  for job in "${base_check_jobs[@]}"; do
+    present_line "  $job:" "$wf/ci.yml"
+    present_line "      - $job" "$wf/ci.yml"
+  done
 fi
 
 # gitignore toolchain sections; the four markers are asserted by the validator.
