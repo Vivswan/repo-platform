@@ -35,6 +35,7 @@ jobs:
     needs: [release-please]
     if: needs.release-please.outputs.release_created == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       contents: write # also what makes the draft visible to gh
     steps:
@@ -55,6 +56,7 @@ jobs:
     needs: [release-please, update-release]
     if: needs.release-please.outputs.release_created == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     permissions:
       contents: write
     steps:
