@@ -42,6 +42,7 @@ concurrency:
 jobs:
   select:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     outputs:
       targets: ${{ steps.targets.outputs.targets }}
     steps:
@@ -101,6 +102,7 @@ jobs:
     # recovers it. Central names are committed filenames, self-disclosed.
     name: apply (${{ matrix.repo }})
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - name: Check out repository
         uses: actions/checkout@v7

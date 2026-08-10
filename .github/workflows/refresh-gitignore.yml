@@ -14,9 +14,16 @@ permissions:
   contents: write
   pull-requests: write
 
+# Schedule and dispatch both force-push the same PR branch; queue runs,
+# never cancel one mid-push.
+concurrency:
+  group: refresh-gitignore
+  cancel-in-progress: false
+
 jobs:
   refresh:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
         with:

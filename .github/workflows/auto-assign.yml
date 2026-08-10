@@ -32,6 +32,8 @@ permissions:
   # reusable workflow (public repo), which needs this.
   security-events: write
 
+# Concurrency is deliberately absent: each event carries a distinct payload,
+# and cancelling a superseded run would drop its assignments.
 jobs:
   auto-assign:
     uses: ./.github/workflows/reusable-auto-assign.yml

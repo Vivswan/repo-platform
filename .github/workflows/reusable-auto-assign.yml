@@ -39,6 +39,7 @@ jobs:
       (github.event_name == 'issues' || github.event_name == 'pull_request') &&
       github.actor != 'dependabot[bot]'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: read # CODEOWNERS resolution
       issues: write
@@ -152,6 +153,7 @@ jobs:
   assign-dispatched-issue:
     if: github.event_name == 'workflow_dispatch' && inputs.issue != ''
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: read # CODEOWNERS resolution
       issues: write
@@ -229,6 +231,7 @@ jobs:
             github.event.workflow_run.head_branch == github.event.repository.default_branch) ||
             github.event.workflow_run.event == 'schedule')))
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: read # CODEOWNERS resolution
       security-events: write

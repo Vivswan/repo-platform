@@ -18,6 +18,7 @@ jobs:
   close:
     if: contains(fromJSON('["staging", "latest"]'), github.event.pull_request.base.ref)
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - name: Comment and close
         env:

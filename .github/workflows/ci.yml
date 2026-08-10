@@ -24,6 +24,7 @@ concurrency:
 jobs:
   actionlint:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
       - uses: raven-actions/actionlint@v2
@@ -36,6 +37,7 @@ jobs:
   # still land in the job summary and SARIF artifact.
   gitleaks:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: read
       pull-requests: read
@@ -58,6 +60,7 @@ jobs:
   # skipped needed job as failure, so the job itself stays unconditional.
   dependency-review:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
         if: github.event_name == 'pull_request'
@@ -69,6 +72,7 @@ jobs:
   # so they can be linted; actionlint only sees inline run blocks.
   shellcheck:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
       - name: Shellcheck the workflow step scripts
@@ -78,6 +82,7 @@ jobs:
 
   yamllint:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
       - name: Install yamllint
@@ -87,6 +92,7 @@ jobs:
 
   biome:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
       - uses: oven-sh/setup-bun@v2
@@ -97,12 +103,14 @@ jobs:
 
   typography:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
       - uses: ./actions/check-typography
 
   commit-names:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
         with:
@@ -111,6 +119,7 @@ jobs:
 
   typecheck:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
       - uses: oven-sh/setup-bun@v2
@@ -124,6 +133,7 @@ jobs:
 
   gitignore-fresh:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
       - uses: oven-sh/setup-bun@v2
@@ -134,6 +144,7 @@ jobs:
   # orphan anchors, manifest errors all hard-fail) and is deterministic.
   compose:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
       - uses: oven-sh/setup-bun@v2
@@ -148,6 +159,7 @@ jobs:
 
   validate-template:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
       - uses: oven-sh/setup-bun@v2
@@ -164,6 +176,7 @@ jobs:
 
   script-tests:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
       - uses: oven-sh/setup-bun@v2
@@ -174,6 +187,7 @@ jobs:
 
   smoke-generate:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -222,10 +236,11 @@ jobs:
               staging: true
           # The only row where bun renders private: the bun fragments'
           # enable_codeql=false branches must emit no CodeQL wiring in
-          # ci.yml, and settings.yml must still declare
-          # `private: true` (uv-pages-private covers the uv side).
+          # ci.yml, settings.yml must still declare `private: true`
+          # (uv-pages-private covers the uv side), and pr-title proves a
+          # fragment gate job renders beside the merged base-checks job.
           - name: bun-private
-            modules: "[bun, settings-sync]"
+            modules: "[bun, settings-sync, pr-title]"
             private: "true"
           - name: pages-bare
             modules: "[pages, auto-assign]"
@@ -280,6 +295,7 @@ jobs:
   # build - the path every managed repo takes (details in the script).
   upgrade-path:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
         with:
@@ -297,6 +313,7 @@ jobs:
   # push/dispatch/schedule events.
   pr-title:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     permissions:
       pull-requests: read
     steps:
@@ -314,6 +331,7 @@ jobs:
   # all-green treats a skipped needed job as failure.
   release-freshness:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
         if: github.event_name == 'pull_request' && startsWith(github.head_ref, 'release-please--')
@@ -364,6 +382,7 @@ jobs:
       - release-freshness
       - codeql-javascript
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - name: All jobs green
         env:
@@ -407,6 +426,7 @@ jobs:
     needs: [all-green, release-please]
     if: needs.release-please.outputs.release_created == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     permissions:
       contents: write
     steps:
