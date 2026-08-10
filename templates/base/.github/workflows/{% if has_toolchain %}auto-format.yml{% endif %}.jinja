@@ -10,6 +10,12 @@ on:
   pull_request:
     types: [labeled]
 
+# Per-label group: unrelated labels skip in their own group, while
+# re-adding fix-lint cancels the older fix-lint run in favor of the newest.
+concurrency:
+  group: auto-format-{% raw %}${{ github.event.pull_request.number }}-${{ github.event.label.name }}{% endraw %}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
@@ -20,6 +26,7 @@ jobs:
     # credentials (checkout below persists none; the push step scopes them).
     if: github.event.label.name == 'fix-lint' && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: write
       pull-requests: write

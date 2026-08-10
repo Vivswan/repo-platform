@@ -66,7 +66,9 @@ own checks:
 
 - `.github/workflows/ci.yml` is template-managed: the standard jobs
   (`typography`, `commit-names`, `validate-template`, `actionlint`,
-  `gitleaks`, `yamllint`), module checks (`pr-title` with that module,
+  `gitleaks`, `yamllint` - on private repositories all but
+  `validate-template` run as a single combined `base-checks` job),
+  module checks (`pr-title` with that module,
   `dependency-review` and per-language `codeql-*` jobs on public repos -
   CodeQL also needs a toolchain), the aggregate `all-green` gate, and a
   `checks` job that calls checks.yml. Sync updates it; don't edit it

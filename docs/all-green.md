@@ -90,4 +90,21 @@ Notes:
   the next sync PR heals the drift.
 - `Vivswan/repo-platform/actions/validate-template` enforces this shape:
   all-green must exist and `needs:` every gating job (downstream and
-  informational jobs exempt), and a `typography` job must exist.
+  informational jobs exempt), and the typography check must be present
+  (a `typography` job, or the check-typography step inside `base-checks`).
+
+## Private repositories: the merged base-checks job
+
+On private repositories the five base check jobs (`typography`,
+`commit-names`, `actionlint`, `yamllint`, `gitleaks`) run as one
+`base-checks` job - each tiny job would otherwise bill a rounded-up
+minute per push. Public repos keep the per-check fan-out.
+
+- Every check step in the merged job carries `if: '!cancelled()'`, so
+  all checks still run when an earlier one fails, exactly as in the
+  fan-out shape.
+- all-green `needs:` `base-checks` instead of the five jobs. Gate
+  strictness is unchanged: a failed or skipped `base-checks` still
+  blocks the merge.
+- Module gate jobs (`pr-title`, `release-freshness`) stay separate jobs
+  in both shapes.

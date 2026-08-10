@@ -35,7 +35,9 @@ settings home, so settings stop being applied.
    `.copier-answers.yml` and `.repo-platform.yml` are gone. With sync PRs
    stopped, ci.yml is yours to edit; the remaining
    jobs (typography, commit-names, actionlint, gitleaks, yamllint,
-   dependency-review, checks, module jobs) keep working standalone.
+   dependency-review, checks, module jobs - on private repositories the
+   five base checks run as a single combined `base-checks` job) keep
+   working standalone.
 
 3. (Optional) Inline the reusable workflows. Replace each thin caller
    (`auto-assign.yml`, `pages.yml`, `settings-sync.yml`) with a copy of the
