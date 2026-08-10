@@ -1,6 +1,6 @@
 /**
  * File, update, or resolve the nightly-fuzz tracking issue for a repository.
- * Generalized from repo-settings-as-code's file-fuzz-issue.ts: this version
+ * Generalized from github-settings-as-code's file-fuzz-issue.ts: this version
  * knows nothing about any repo's fuzzer. It reads failure reports from a
  * directory whose layout is a small contract (docs/fuzzer.md, "failure-report
  * contract v1"): each immediate subdirectory is one failure and carries a

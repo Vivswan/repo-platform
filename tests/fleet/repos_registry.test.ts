@@ -25,13 +25,13 @@ describe("validate", () => {
         'managed:\n  - "*"\n  - Vivswan/dotfiles',
         "exclude:\n  - Vivswan/scratch",
         "defaults:\n  channel: staging",
-        "config:\n  Vivswan/repo-settings-as-code:\n    channel: latest",
+        "config:\n  Vivswan/github-settings-as-code:\n    channel: latest",
       ].join("\n"),
     );
     expect(errors).toEqual([]);
     expect(parsed?.managed).toEqual({ wildcard: true, repos: ["Vivswan/dotfiles"] });
     expect(parsed?.defaultChannel).toBe("staging");
-    expect(parsed?.config.get("Vivswan/repo-settings-as-code")).toEqual({ channel: "latest" });
+    expect(parsed?.config.get("Vivswan/github-settings-as-code")).toEqual({ channel: "latest" });
   });
 
   test("rejects a bad slug", () => {

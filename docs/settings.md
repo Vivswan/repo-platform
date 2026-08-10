@@ -2,7 +2,7 @@
 
 Managed repos get their settings (repository fields, topics, labels,
 rulesets) applied through
-[repo-settings-as-code](https://github.com/Vivswan/repo-settings-as-code),
+[github-settings-as-code](https://github.com/Vivswan/github-settings-as-code),
 the replacement for the [Probot Settings app](https://github.com/repository-settings/app). Every apply is a visible
 workflow run whose problems surface as loud warnings and errors; no
 more silent drift.
@@ -17,7 +17,7 @@ A repo's settings live in ONE of two homes:
 Both homes are applied from repo-platform by the `settings-repos.yml`
 workflow: a select job resolves the target list (the central files, plus
 enrolled and adopted repos carrying the in-repo file), then a
-fail-fast-free matrix runs one repo-settings-as-code invocation per
+fail-fast-free matrix runs one github-settings-as-code invocation per
 repository - `repos-dir` scoped to that repo's central file, or the
 action's `repos:` remote mode reading its in-repo file from the default
 branch. Repos heal independently: a failed apply is that repo's own red
@@ -140,7 +140,7 @@ Stateless, declared-keys-only, upsert-by-name:
   ruleset's `code_scanning` rule in the same commit: GitHub rejects that
   rule on a private personal repo, so every apply fails until it is
   gone. The heal of an out-of-band private flip dodges that rejection
-  only because the pinned repo-settings-as-code applies the repository
+  only because the pinned github-settings-as-code applies the repository
   field block before rulesets (SECTION_KEYS order in its schema.ts):
   the repo is public again before the code_scanning rule is upserted.
   Check a pin bump keeps that order. The next template sync reads the

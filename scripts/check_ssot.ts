@@ -1455,14 +1455,19 @@ const rules: Rule[] = [
       const mismatches: Mismatch[] = [];
 
       const settingsActionRef = (rel: string) =>
-        mustMatch(read(rel), /\/repo-settings-as-code@(\S+)/, rel, "repo-settings-as-code pin")[1];
+        mustMatch(
+          read(rel),
+          /\/github-settings-as-code@(\S+)/,
+          rel,
+          "github-settings-as-code pin",
+        )[1];
       const applyRef = settingsActionRef(".github/workflows/settings-repos.yml");
       const reusableRef = settingsActionRef(".github/workflows/reusable-apply-settings.yml");
       if (applyRef !== reusableRef) {
         mismatches.push({
           file: ".github/workflows/reusable-apply-settings.yml",
-          expected: `repo-settings-as-code@${applyRef} (settings-repos.yml)`,
-          got: `repo-settings-as-code@${reusableRef}`,
+          expected: `github-settings-as-code@${applyRef} (settings-repos.yml)`,
+          got: `github-settings-as-code@${reusableRef}`,
         });
       }
 

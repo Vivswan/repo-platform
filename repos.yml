@@ -25,5 +25,5 @@ defaults:
 
 # Per-repo overrides of the defaults.
 config:
-  Vivswan/repo-settings-as-code:
+  Vivswan/github-settings-as-code:
     channel: staging

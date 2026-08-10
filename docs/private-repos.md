@@ -8,7 +8,7 @@ the job list itself (`sync (Vivswan/hidden-server)`) - along with its
 description, module selection, file paths, and whatever a failing tool
 dumped. This page covers the redaction that closes that leak, what a
 redacted run still shows, and how to work with it as the operator. The
-design mirrors repo-settings-as-code's `private-repos: redact`, with one
+design mirrors github-settings-as-code's `private-repos: redact`, with one
 difference: instead of anonymous `private repository #N` placeholders,
 repo-platform shows a name hint, so you can tell the jobs apart.
 
@@ -102,7 +102,7 @@ just the failed job.
   dropped conflict hunks, removed paths, drift values, withheld workflow
   files. Its checks run in the private repo, where logs are private.
 - A private target's settings apply report has its own channel:
-  `settings-repos.yml` runs repo-settings-as-code with
+  `settings-repos.yml` runs github-settings-as-code with
   `private-report: issue`, so for a redacted target the action's
   visibility probe proves private or internal, the full unredacted
   failure/drift report becomes a marker-labelled issue on the target

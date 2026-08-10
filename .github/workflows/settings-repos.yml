@@ -3,7 +3,7 @@
 # deep-merged under each) plus in-repo targets (enrolled, adopted repos
 # carrying their own .github/settings.yml - the file is the opt-in, no
 # module needed; a central file for the same repository wins) - and runs
-# Vivswan/repo-settings-as-code once per repository in a fail-fast-free
+# Vivswan/github-settings-as-code once per repository in a fail-fast-free
 # matrix. Repos heal independently: one target's failure is its own red
 # "apply (<repo>)" job and never blocks the others. The optional
 # settings-sync module adds push-time self-apply via
@@ -159,7 +159,7 @@ jobs:
       - name: Apply repository settings
         # Pinned to an immutable commit; bump to @v1 once the action cuts
         # its first release. Bump together with reusable-apply-settings.yml.
-        uses: Vivswan/repo-settings-as-code@ac83fb48219309e2249294ef37fb55310bd45fb3
+        uses: Vivswan/github-settings-as-code@ac83fb48219309e2249294ef37fb55310bd45fb3
         with:
           token: ${{ secrets.REPO_PLATFORM_TOKEN }}
           mode: ${{ inputs.check_only && 'check' || 'apply' }}

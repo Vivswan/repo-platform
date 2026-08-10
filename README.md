@@ -76,7 +76,7 @@ self-apply of a repo's own settings file.
 
 A repo's settings live in one of two homes, both applied from here by the
 [settings-repos workflow](.github/workflows/settings-repos.yml) through
-[repo-settings-as-code](https://github.com/Vivswan/repo-settings-as-code)
+[github-settings-as-code](https://github.com/Vivswan/github-settings-as-code)
 (details in [docs/settings.md](docs/settings.md)):
 
 - Central: `settings/repos/<name>.yml` in this repo, with

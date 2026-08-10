@@ -1,9 +1,9 @@
 ---
 # Central settings for Vivswan/repo-platform, applied by the settings-repos
-# workflow via Vivswan/repo-settings-as-code. settings/defaults.yml is
+# workflow via Vivswan/github-settings-as-code. settings/defaults.yml is
 # deep-merged under this file (this file wins; arrays replace). Undeclared
 # labels are deleted; undeclared rulesets are left alone. Schema: Probot
-# settings.yml superset (see repo-settings-as-code README).
+# settings.yml superset (see github-settings-as-code README).
 
 repository:
   description: Copier template + reusable workflows managing standards across Vivswan's repositories
