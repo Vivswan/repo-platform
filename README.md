@@ -133,6 +133,7 @@ each fixed PR needs a close/reopen for its checks to appear).
 | `actions/validate-template` | Enforces markers, YAML validity, and the all-green convention |
 | `actions/validate-commit-names` | Conventional Commit subjects on every push/PR commit |
 | `actions/fuzz-issue` | Files/updates the label-deduplicated nightly-fuzz tracking issue, closes it on green (used by the fuzzer module's starter, [docs](docs/fuzzer.md)) |
+| `actions/release-health` | Gates releases: open fuzz/blocker issues and open Dependabot alerts block, an override label on the release PR bypasses with warnings |
 | `scripts/build_gitignore.ts` | Regenerates the gitignore outputs (`templates/base/.gitignore.jinja`, the bun/uv/rust toolchain fragments, this repo's `.gitignore`) from the latest [github/gitignore](https://github.com/github/gitignore) (Windows + macOS + Linux always, Node + bun / Python / Rust by bun/uv/rust module) |
 | `migrations/` | Copier `_migrations` scripts (TypeScript, run with bun) for breaking changes |
 | `docs/` | [all-green convention](docs/all-green.md), [new repo](docs/new-repo.md), [pages module](docs/pages.md), [fuzzer module](docs/fuzzer.md), [settings](docs/settings.md), [eject](docs/eject.md) |

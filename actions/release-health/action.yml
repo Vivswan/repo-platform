@@ -1,0 +1,49 @@
+name: Release Health
+description: >-
+  Gates releases in managed repos: fails when an open fuzz tracking issue,
+  an open release-blocker issue, or an open Dependabot alert at or above
+  the severity threshold says the repository is not release-worthy. Two
+  modes: pull-request (on a release-please PR's CI) and release (on the
+  main-push release path; a push that is not a release-PR merge is not
+  gated). The override label on the release PR turns failures into
+  warnings. Needs GH_TOKEN in the environment with issues read,
+  pull-requests read, and vulnerability-alerts read (the security gate
+  degrades to a notice where alerts are unreadable or disabled) and gh on
+  the runner (preinstalled on GitHub-hosted runners).
+
+inputs:
+  mode:
+    description: pull-request (on the release PR's CI) or release (on the main-push release path)
+    required: true
+  fuzz-label:
+    description: Label of the nightly-fuzz tracking issue; empty disables the fuzz gate
+    required: false
+    default: ""
+  blocker-label:
+    description: An open issue carrying this label blocks the release
+    required: false
+    default: release-blocker
+  override-label:
+    description: This label on the release PR bypasses all gates (failures become warnings)
+    required: false
+    default: release-override
+  security-severity:
+    description: Minimum severity of an open Dependabot alert that blocks; off|low|medium|high|critical
+    required: false
+    default: high
+
+runs:
+  using: composite
+  steps:
+    - name: Set up bun
+      uses: oven-sh/setup-bun@v2
+
+    - name: Check release health
+      shell: bash
+      env:
+        MODE: ${{ inputs.mode }}
+        FUZZ_LABEL: ${{ inputs.fuzz-label }}
+        BLOCKER_LABEL: ${{ inputs.blocker-label }}
+        OVERRIDE_LABEL: ${{ inputs.override-label }}
+        SECURITY_SEVERITY: ${{ inputs.security-severity }}
+      run: bun "${{ github.action_path }}/release-health.ts"

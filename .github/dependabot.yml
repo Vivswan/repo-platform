@@ -14,6 +14,7 @@ updates:
       - "/actions/check-typography"
       - "/actions/dependency-review"
       - "/actions/fuzz-issue"
+      - "/actions/release-health"
       - "/actions/validate-commit-names"
       - "/actions/validate-template"
     groups:
@@ -67,6 +68,17 @@ updates:
   # Dev-only manifest (@types/bun, typescript) for the fuzz-issue action.
   - package-ecosystem: "bun"
     directory: "/actions/fuzz-issue"
+    schedule:
+      interval: "monthly"
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: "build"
+      include: "scope"
+
+  # Dev-only manifest (@types/bun, typescript) for the release-health action.
+  - package-ecosystem: "bun"
+    directory: "/actions/release-health"
     schedule:
       interval: "monthly"
     cooldown:
