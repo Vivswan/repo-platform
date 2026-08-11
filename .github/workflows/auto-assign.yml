@@ -1,5 +1,5 @@
-# Caller of this repo's own reusable auto-assign (local reference).
-
+# This file is managed by Vivswan/repo-platform.
+# Local edits may be replaced during template updates.
 name: Auto Assign
 
 on:
@@ -14,26 +14,28 @@ on:
   pull_request:
     types: [opened, synchronize]
   # Code scanning alerts have no creation trigger for Actions, so assign them
-  # after each CI run completes (CodeQL analyzes inside CI's gate), with a
-  # weekly cron as a catch-up. The reusable workflow only acts on runs whose
-  # triggering event was a default-branch push or a schedule.
+  # after each CI run completes (CodeQL analyzes inside CI's gate, and a
+  # reusable-workflow call creates no separate run to watch), with a weekly
+  # cron as a catch-up. The code_scanning input gates the actual alert job.
   workflow_run:
     workflows: ["CI"]
     types: [completed]
   schedule:
     - cron: "23 6 * * 1"
 
+# security-events is granted unconditionally: a reusable-workflow call is
+# statically validated against the permissions of EVERY job in the called
+# file regardless of each job's `if:`, so the alert-assignment job's
+# permissions must be grantable even where code scanning is disabled. The
+# code_scanning input below keeps that job from actually running there.
+# contents:read lets the reusable workflow read CODEOWNERS to decide who
+# gets assigned (falling back to the repo owner).
 permissions:
-  # CODEOWNERS resolution in the reusable workflow.
   contents: read
   issues: write
   pull-requests: write
-  # workflow_dispatch activates the code-scanning-alert assignment job in the
-  # reusable workflow (public repo), which needs this.
   security-events: write
 
-# Concurrency is deliberately absent: each event carries a distinct payload,
-# and cancelling a superseded run would drop its assignments.
 jobs:
   auto-assign:
     uses: ./.github/workflows/reusable-auto-assign.yml

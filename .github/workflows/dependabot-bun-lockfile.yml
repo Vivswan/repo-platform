@@ -1,16 +1,25 @@
-# This repo's counterpart of the bun module's dependabot-bun-lockfile.yml
-# template (the dogfood-parity check keeps the code lines identical).
+# This file is managed by Vivswan/repo-platform.
+# Local edits may be replaced during template updates.
 #
-# Dependabot edits bun.lock conservatively and can leave stale nested
-# entries that fail `bun install --frozen-lockfile` in CI. This workflow
-# regenerates every committed bun.lock (the root plus each composite
-# action's directory) on Dependabot's own PRs and pushes the fix to the PR
-# branch. `--lockfile-only` runs no lifecycle scripts, so no PR-controlled
-# code executes next to the write credential.
+# Dependabot edits bun.lock conservatively: it bumps the target package but
+# leaves stale nested entries behind (a dependency's pinned copy of a package
+# the hoisted entry already moved past), so `bun install --frozen-lockfile`
+# and typecheck fail with mixed-version errors even when every manifest
+# accepts the update. This workflow regenerates the lockfile on Dependabot's
+# own PRs, which dedupes those entries, and pushes the fix back to the PR
+# branch; an already-clean lockfile gets no commit.
 #
-# With REPO_PLATFORM_TOKEN registered as a Dependabot secret the fix commit
-# re-runs CI; with the default token the fix lands but the PR needs a
-# close/reopen for its checks to appear.
+# `bun install --lockfile-only` rewrites bun.lock without installing packages
+# or running lifecycle scripts, so no PR-controlled code runs next to the
+# write credential.
+#
+# Two Dependabot token subtleties. Dependabot-triggered runs read the
+# Dependabot secrets store, not the Actions one, and their default token is
+# read-only, but the job-level permissions below are honored. And a push made
+# with github.token starts no workflows, so without the REPO_PLATFORM_TOKEN
+# secret the fix lands but the PR needs a close/reopen for its checks to
+# appear; register the token as a Dependabot secret to re-run CI
+# automatically.
 
 name: Dependabot Bun Lockfile
 

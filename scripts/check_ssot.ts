@@ -7,8 +7,10 @@
 // Structure: a flat list of named rules, each returning mismatches. Every
 // grep-shaped extraction goes through mustMatch(), so a rule whose anchor
 // text disappears fails loudly instead of passing vacuously. Template
-// (.jinja) inputs are compared modulo jinja via normalizeJinja(); recorded,
-// intentional divergences live in RECORDED_DIVERGENCES with a reason.
+// (.jinja) inputs are compared modulo jinja via normalizeJinja() (from
+// scripts/jinja_subset.ts, shared with scripts/render_dogfood.ts);
+// recorded, intentional divergences live in RECORDED_DIVERGENCES with a
+// reason.
 //
 // Usage:
 //   bun scripts/check_ssot.ts   # prints "rule: file -> expected X, got Y"
@@ -19,6 +21,7 @@ import { join, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { centralIdentityIssues } from "../.github/scripts/fleet/validate_central_settings.ts";
 import { dependabotLabels, MODULE_ORDER } from "./compose_template.ts";
+import { type JinjaVars, normalizeJinja, placeholderJinja } from "./jinja_subset.ts";
 import { loadManifests } from "./module_manifests.ts";
 
 const REPO_ROOT = resolve(import.meta.dir, "..");
@@ -80,142 +83,7 @@ export function mustMatch(text: string, re: RegExp, where: string, what: string)
   return match;
 }
 
-// --- jinja normalization -------------------------------------------------
-
-export interface JinjaVars {
-  username: string;
-  slug: string;
-  copyrightHolder: string;
-}
-
-/** Drop every if/endif block whose condition is false in `context`: a
- *  condition that is exactly a context variable (or `not <variable>`)
- *  evaluates, a non-variable condition (module membership) evaluates when
- *  the context carries its exact trimmed text as a key; any other condition
- *  keeps its body for the tag stripping in normalizeJinja. if/endif pairs
- *  are matched with a depth counter, so an outer false branch drops its
- *  nested blocks whole. else/elif are rejected here too - the no-else
- *  invariant must hold even inside a dropped branch, which the downstream
- *  guard would never see. */
-function evaluateIfBranches(
-  text: string,
-  context: Record<string, boolean>,
-  used?: Set<string>,
-): string {
-  const resolve = (expr: string): boolean | null => {
-    const trimmed = expr.trim();
-    if (Object.hasOwn(context, trimmed)) {
-      used?.add(trimmed);
-      return context[trimmed];
-    }
-    const negated = trimmed.startsWith("not ");
-    const name = (negated ? trimmed.slice(4) : trimmed).trim();
-    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) return null;
-    const value = context[name];
-    if (value === undefined) return null;
-    used?.add(name);
-    return negated ? !value : value;
-  };
-  let out = "";
-  let cursor = 0;
-  let dropDepth = 0;
-  for (const tag of text.matchAll(/\{%-?\s*(if|endif|else|elif)\b([^%]*?)-?%\}/g)) {
-    const [tagText, kind, expr] = tag;
-    if (kind === "else" || kind === "elif") {
-      throw new Error(`normalizeJinja cannot handle ${tagText}`);
-    }
-    const start = tag.index ?? 0;
-    if (dropDepth === 0) {
-      if (kind === "if" && resolve(expr) === false) {
-        // Drop from the tag's line start (its {%- also eats the preceding
-        // newline when rendered, but the line-removal step models that).
-        let lineStart = start;
-        while (lineStart > 0 && (text[lineStart - 1] === " " || text[lineStart - 1] === "\t")) {
-          lineStart--;
-        }
-        out += text.slice(cursor, lineStart);
-        dropDepth = 1;
-      }
-    } else if (kind === "if") {
-      dropDepth++;
-    } else {
-      dropDepth--;
-      if (dropDepth === 0) {
-        const trailing = /^[ \t]*\r?\n/.exec(text.slice(start + tagText.length));
-        cursor = start + tagText.length + (trailing ? trailing[0].length : 0);
-      }
-    }
-  }
-  if (dropDepth > 0) throw new Error("evaluateIfBranches: a dropped if block has no endif");
-  return out + text.slice(cursor);
-}
-
-/**
- * Reduce a template file to the text this repo's own copy should carry:
- * strip raw markers, jinja comments and set/if/endif tags, substitute the
- * identity expressions, and map remote
- * `<owner>/repo-platform/<path>@{{ uses_ref }}` references to their local
- * `./<path>` form. Without a `context`, every if/endif body is kept (fine
- * while the kept bodies never contradict each other); with one, false
- * branches are dropped and only conditions the context cannot resolve keep
- * their bodies.
- */
-export function normalizeJinja(
-  text: string,
-  vars: JinjaVars,
-  context?: Record<string, boolean>,
-): string {
-  let out = text;
-  out = out.replace(/\{%-?\s*(?:raw|endraw)\s*-?%\}/g, "");
-  out = out.replace(/\{#-?[\s\S]*?-?#\}/g, "");
-  out = out.replace(/\{%-?\s*set\b[\s\S]*?%\}/g, "");
-  if (context) {
-    const used = new Set<string>();
-    out = evaluateIfBranches(out, context, used);
-    // Mirror RECORDED_DIVERGENCES staleness: a context key no condition
-    // consulted is dead configuration and must fail loudly, not linger.
-    for (const key of Object.keys(context)) {
-      if (!used.has(key)) {
-        throw new Error(
-          `normalizeJinja: context key ${JSON.stringify(key)} matched no condition (stale - remove it)`,
-        );
-      }
-    }
-  }
-  // Keeping both branches of an if/else would concatenate mutually exclusive
-  // content; no processed template uses statement-level else today, so its
-  // appearance means this normalizer needs real branch handling.
-  const branchTag = /\{%-?\s*(?:else|elif)\b[^%]*?-?%\}/.exec(out);
-  if (branchTag) throw new Error(`normalizeJinja cannot handle ${branchTag[0]}`);
-  // A whitespace-controlled ({%- ... %}) statement tag on its own line
-  // disappears with its line, matching what rendering produces; a plain
-  // tag leaves its blank line, and an inline tag loses just the tag text.
-  // A trailing-control close (-%}) also strips the newline that follows,
-  // which line removal does not model, so that form is left unnormalized
-  // for the dogfood-parity comparison to reject loudly.
-  out = out.replace(/^[ \t]*\{%-\s*(?:if|endif)\b[^%]*?(?<!-)%\}[ \t]*\r?\n/gm, "");
-  out = out.replace(/\{%-?\s*(?:if|endif)\b[^%]*?-?%\}/g, "");
-  out = out.replace(/\{\{ '([^']*)' if [^}]*? else '[^']*' \}\}/g, "$1");
-  out = out.replace(
-    new RegExp(`\\{\\{ github_username \\}\\}/${vars.slug}/([^\\s@]+)@\\{\\{ uses_ref \\}\\}`, "g"),
-    "./$1",
-  );
-  out = out.replace(/\{\{ copyright_holder \}\}/g, () => vars.copyrightHolder);
-  out = out.replace(/\{\{ github_username \| lower \}\}/g, vars.username.toLowerCase());
-  out = out.replace(/\{\{ github_username \}\}/g, vars.username);
-  out = out.replace(/\{\{ project_slug \}\}/g, vars.slug);
-  // A surviving statement tag ({% for %}, an if whose expression contains %,
-  // ...) would silently corrupt the comparison text; fail loudly instead.
-  const leftover = /\{%[^}]*%\}/.exec(out);
-  if (leftover) throw new Error(`normalizeJinja left ${leftover[0]} unhandled`);
-  return out;
-}
-
-/** Replace leftover jinja expressions with a parseable placeholder so the
- *  result can be YAML-parsed. `${{ ... }}` GitHub expressions are kept. */
-export function placeholderJinja(text: string): string {
-  return text.replace(/(?<!\$)\{\{[^}]*\}\}/g, '"JINJA"');
-}
+// --- comparison shaping ----------------------------------------------------
 
 /** Non-blank, non-comment lines (right-trimmed) - the shape compared for
  *  workflow/dotfile parity, where comments are where copies legitimately
@@ -924,6 +792,7 @@ const rules: Rule[] = [
       for (const required of [
         "bun run ssot:check",
         "bun run generate:check",
+        "bun run dogfood:check",
         "bun .github/scripts/fleet/repos_registry.ts validate",
         "bun actions/validate-template/validate_generated_files.ts --self .",
       ]) {
@@ -940,6 +809,15 @@ const rules: Rule[] = [
   },
 
   {
+    // Most dogfooded copies (.editorconfig, release-please-config.json,
+    // CODE_OF_CONDUCT.md, CODEOWNERS, auto-assign.yml,
+    // dependabot-bun-lockfile.yml) are GENERATED from their templates by
+    // scripts/render_dogfood.ts and byte-checked by `bun run dogfood:check`,
+    // so they need no comparison here. This rule keeps only the pairs
+    // generation cannot own: the prefix files, whose repo-specific tails
+    // live below the template's marker, and release-please.yml, whose one
+    // recorded divergence (the dogfooded ./actions/release-health checkout)
+    // needs semantic comparison with an excuse.
     name: "dogfood-parity",
     run: () => {
       const vars = jinjaVars();
@@ -947,15 +825,9 @@ const rules: Rule[] = [
       const pairs: {
         repo: string;
         tpl: string;
-        mode: "exact" | "prefix" | "semantic";
+        mode: "prefix" | "semantic";
         context?: Record<string, boolean>;
       }[] = [
-        { repo: ".editorconfig", tpl: "templates/base/.editorconfig.jinja", mode: "exact" },
-        {
-          repo: "release-please-config.json",
-          tpl: "templates/release-please/release-please-config.json",
-          mode: "exact",
-        },
         {
           // The template ends with a repo-specific-docs marker; everything a
           // repo appends after it is its own, hence prefix semantics.
@@ -964,27 +836,12 @@ const rules: Rule[] = [
           mode: "prefix",
         },
         {
-          repo: ".github/CODEOWNERS",
-          tpl: "templates/base/.github/CODEOWNERS.jinja",
-          mode: "semantic",
-        },
-        {
           repo: ".github/workflows/release-please.yml",
           tpl: "templates/release-please/.github/workflows/release-please.yml.jinja",
           mode: "semantic",
           // This repository selects no fuzzer module, so the fuzz-label
           // branch must evaluate to what this repo really renders: absent.
           context: { "'fuzzer' in modules": false },
-        },
-        {
-          repo: ".github/workflows/auto-assign.yml",
-          tpl: "templates/auto-assign/.github/workflows/auto-assign.yml.jinja",
-          mode: "semantic",
-        },
-        {
-          repo: ".github/workflows/dependabot-bun-lockfile.yml",
-          tpl: "templates/bun/.github/workflows/dependabot-bun-lockfile.yml.jinja",
-          mode: "semantic",
         },
         {
           // The template ends with a repo-specific-notices marker
@@ -1002,20 +859,11 @@ const rules: Rule[] = [
           tpl: "templates/base/{% if not private %}CONTRIBUTING.md{% endif %}.jinja",
           mode: "prefix",
         },
-        {
-          repo: "CODE_OF_CONDUCT.md",
-          tpl: "templates/base/{% if not private %}CODE_OF_CONDUCT.md{% endif %}.jinja",
-          mode: "exact",
-        },
       ];
       for (const pair of pairs) {
         const expected = normalizeJinja(read(pair.tpl), vars, pair.context);
         const got = read(pair.repo);
-        if (pair.mode === "exact" && expected !== got) {
-          mismatches.push(
-            ...lineDiffMismatch(pair.repo, pair.tpl, expected.split("\n"), got.split("\n")),
-          );
-        } else if (pair.mode === "prefix" && !got.startsWith(expected)) {
+        if (pair.mode === "prefix" && !got.startsWith(expected)) {
           mismatches.push(
             ...lineDiffMismatch(pair.repo, pair.tpl, expected.split("\n"), got.split("\n")),
           );

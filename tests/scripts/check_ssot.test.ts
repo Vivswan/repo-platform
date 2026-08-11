@@ -1,6 +1,8 @@
-// Unit tests for the SSOT checker's pure helpers: the jinja normalizer and
-// the comparison/extraction primitives each rule class is built from. The
-// rules themselves run against the live repo (bun scripts/check_ssot.ts).
+// Unit tests for the SSOT checker's pure helpers: the comparison and
+// extraction primitives each rule class is built from (the jinja
+// normalizer's tests live in tests/scripts/jinja_subset.test.ts with the
+// helper). The rules themselves run against the live repo
+// (bun scripts/check_ssot.ts).
 
 import { describe, expect, test } from "bun:test";
 import {
@@ -12,125 +14,14 @@ import {
   firstDiff,
   gatesOnModule,
   mustMatch,
-  normalizeJinja,
   parseLabels,
   pinMismatches,
-  placeholderJinja,
   RECORDED_DIVERGENCES,
   semanticLines,
   setMismatch,
   zToDollar,
 } from "../../scripts/check_ssot";
-
-const vars = {
-  username: "Vivswan",
-  slug: "repo-platform",
-  copyrightHolder: "Vivswan Shah (https://github.com/Vivswan)",
-};
-
-describe("normalizeJinja", () => {
-  test("strips raw/endraw markers but keeps the expression", () => {
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: literal GitHub Actions expression fixture
-    expect(normalizeJinja("a: {% raw %}${{ github.ref }}{% endraw %}", vars)).toBe(
-      // biome-ignore lint/suspicious/noTemplateCurlyInString: literal GitHub Actions expression fixture
-      "a: ${{ github.ref }}",
-    );
-  });
-
-  test("removes jinja comments, including multi-line dashed ones", () => {
-    const text = "{#- one\n    two -#}\nkept\n{# compose:anchor #}\n";
-    expect(normalizeJinja(text, vars)).toBe("\nkept\n\n");
-  });
-
-  test("removes set statements and if/endif tags while keeping bodies", () => {
-    // A whitespace-controlled tag on its own line disappears with its
-    // line, matching what rendering produces; an inline tag loses just
-    // the tag text.
-    const text =
-      "{%- set tpl_ref = x -%}\n{%- if enable_codeql %}\n  schedule: []\n{%- endif %}\n{% endif %}  - name: bug";
-    expect(normalizeJinja(text, vars)).toBe("\n  schedule: []\n  - name: bug");
-  });
-
-  test("a plain own-line if/endif tag keeps its blank line, as rendering does", () => {
-    const text = "A\n{% if c %}\nB\n{% endif %}\nC";
-    expect(normalizeJinja(text, vars)).toBe("A\n\nB\n\nC");
-  });
-
-  test("a trailing-control own-line tag ({%- ... -%}) is not line-removed", () => {
-    // -%} also strips the newline after the tag, which line removal does not
-    // model; the tag text alone is dropped so parity comparison fails loudly.
-    const text = "A\n{%- if c -%}\nB\n{%- endif -%}\nC";
-    expect(normalizeJinja(text, vars)).toBe("A\n\nB\n\nC");
-  });
-
-  test("substitutes the copyright holder", () => {
-    const text = "Required Notice: Copyright {{ copyright_holder }}";
-    expect(normalizeJinja(text, vars)).toBe(
-      "Required Notice: Copyright Vivswan Shah (https://github.com/Vivswan)",
-    );
-  });
-
-  test("substitutes a copyright holder containing $ sequences literally", () => {
-    const dollarVars = { ...vars, copyrightHolder: "Smith & Sons ($$ '$&' LLC)" };
-    expect(normalizeJinja("Copyright {{ copyright_holder }}", dollarVars)).toBe(
-      "Copyright Smith & Sons ($$ '$&' LLC)",
-    );
-  });
-
-  test("substitutes the identity expressions", () => {
-    const text = "* @{{ github_username | lower }} by {{ github_username }} in {{ project_slug }}";
-    expect(normalizeJinja(text, vars)).toBe("* @vivswan by Vivswan in repo-platform");
-  });
-
-  test("maps remote uses_ref references to the local workflow form", () => {
-    const text =
-      "uses: {{ github_username }}/repo-platform/.github/workflows/reusable-x.yml@{{ uses_ref }}";
-    expect(normalizeJinja(text, vars)).toBe("uses: ./.github/workflows/reusable-x.yml");
-  });
-
-  test("evaluates string conditionals on the true leg", () => {
-    expect(normalizeJinja("code_scanning: {{ 'true' if enable_codeql else 'false' }}", vars)).toBe(
-      "code_scanning: true",
-    );
-  });
-
-  test("a context drops the false branch's body and keeps the true one", () => {
-    const text = "A\n{%- if private %}\nP\n{%- endif %}\n{%- if not private %}\nQ\n{%- endif %}\nZ";
-    expect(normalizeJinja(text, vars, { private: false })).toBe("A\nQ\nZ");
-    expect(normalizeJinja(text, vars, { private: true })).toBe("A\nP\nZ");
-  });
-
-  test("an outer false branch drops its nested blocks whole", () => {
-    const text =
-      "A\n{%- if private %}\nP\n{%- if enable_codeql %}\nS\n{%- endif %}\nP2\n{%- endif %}\nZ";
-    expect(normalizeJinja(text, vars, { private: false })).toBe("A\nZ");
-  });
-
-  test("a condition the context cannot resolve keeps its body, as without one", () => {
-    const text =
-      "A\n{%- if private %}\nP\n{%- endif %}\n{%- if enable_codeql %}\nB\n{%- endif %}\nZ";
-    expect(normalizeJinja(text, vars, { private: true })).toBe("A\nP\nB\nZ");
-    expect(normalizeJinja(text, vars)).toBe("A\nP\nB\nZ");
-  });
-
-  test("a non-variable condition resolves through an exact-text context key", () => {
-    const text = "A\n{%- if 'fuzzer' in modules %}\nF\n{%- endif %}\nZ";
-    expect(normalizeJinja(text, vars, { "'fuzzer' in modules": false })).toBe("A\nZ");
-    expect(normalizeJinja(text, vars, { "'fuzzer' in modules": true })).toBe("A\nF\nZ");
-  });
-
-  test("a context key no condition consulted fails loudly as stale", () => {
-    const text = "A\n{%- if private %}\nP\n{%- endif %}\nZ";
-    expect(() =>
-      normalizeJinja(text, vars, { private: false, "'fuzzer' in modules": false }),
-    ).toThrow("context key \"'fuzzer' in modules\" matched no condition");
-  });
-
-  test("an else inside a dropped branch still fails loudly", () => {
-    const text = "A\n{%- if private %}\nP\n{%- else %}\nQ\n{%- endif %}\nZ";
-    expect(() => normalizeJinja(text, vars, { private: false })).toThrow("cannot handle");
-  });
-});
+import { placeholderJinja } from "../../scripts/jinja_subset";
 
 describe("applyDivergences", () => {
   const entry = {
@@ -191,16 +82,6 @@ describe("applyDivergences", () => {
     expect(
       applyDivergences(entry0.file, [health], [health, checkout], [entry0], new Set()).actual,
     ).toEqual([health, checkout]);
-  });
-});
-
-describe("placeholderJinja", () => {
-  test("replaces leftover jinja expressions but keeps GitHub expressions", () => {
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: literal GitHub Actions expression fixture
-    expect(placeholderJinja("a: {{ description | tojson }} b: ${{ github.ref }}")).toBe(
-      // biome-ignore lint/suspicious/noTemplateCurlyInString: literal GitHub Actions expression fixture
-      'a: "JINJA" b: ${{ github.ref }}',
-    );
   });
 });
 
