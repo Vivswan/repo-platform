@@ -26,6 +26,9 @@ _skip_if_exists:
   # The fuzzer module's starter: the fuzz/toolchain steps are repo-specific,
   # so only the first sync generates it (docs/fuzzer.md has the contract).
   - .github/workflows/nightly-fuzz.yml
+  # The nightly module's starter: same story for the repo's nightly checks
+  # (docs/nightly.md).
+  - .github/workflows/nightly.yml
   - .github/ISSUE_TEMPLATE/*.yml
   - release-please-config.json
   - .release-please-manifest.json
@@ -88,6 +91,7 @@ modules:
     pr-title - Conventional Commit PR title check in the all-green gate: pr-title
     auto-assign - auto-assign issues/PRs/alerts to owner: auto-assign
     fuzzer - nightly fuzz starter with issue filing, replay inputs, auto-close: fuzzer
+    nightly - nightly CI starter with failure issue filing and auto-close: nightly
     settings-sync - in-repo .github/settings.yml applied with the repo's own PAT: settings-sync
     custom-license - repo carries its own license in LICENSE.md; the fleet license is not rendered: custom-license
   # END GENERATED: module-choices
@@ -180,6 +184,24 @@ fuzzer_label:
   # piped-in answer cannot sneak past Python's regex semantics.
   validator: "{% if not (fuzzer_label | regex_search('^[A-Za-z0-9._][A-Za-z0-9._: -]{0,49}\\Z')) %}fuzzer_label must be a plain label: letters, digits, ._:- and spaces, not starting with a dash, at most 50 characters{% endif %}"
   when: "{{ 'fuzzer' in modules }}"
+
+# --- nightly module parameter (asked only when it is selected) ---
+# Same story as fuzzer_label: the tracking-issue stream's identity, shared
+# by the starter's report and resolve steps.
+
+nightly_label:
+  type: str
+  help: Label for the deduplicated nightly-CI tracking issue
+  default: nightly-failure
+  # Same shape constraints (and the same \Z rationale) as fuzzer_label
+  # above, plus stream independence: both streams dedup AND auto-close by
+  # label, so sharing one label would let either stream's green night close
+  # the other's active failure issue (and lift a release-health hold keyed
+  # on the fuzz label), while settings.yml would declare two same-name
+  # labels whose colors fight on every apply. Compared lowercased: GitHub
+  # deduplicates label names case-insensitively.
+  validator: "{% if not (nightly_label | regex_search('^[A-Za-z0-9._][A-Za-z0-9._: -]{0,49}\\Z')) %}nightly_label must be a plain label: letters, digits, ._:- and spaces, not starting with a dash, at most 50 characters{% elif 'fuzzer' in modules and nightly_label | lower == fuzzer_label | lower %}nightly_label must differ from fuzzer_label (GitHub label names are case-insensitive): each stream needs its own tracking label or a green night in one closes the other's open issue{% endif %}"
+  when: "{{ 'nightly' in modules }}"
 
 private:
   type: bool

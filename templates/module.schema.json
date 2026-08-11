@@ -44,6 +44,34 @@
       ],
       "additionalProperties": false
     },
+    "tracking_label": {
+      "type": "object",
+      "properties": {
+        "answer": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$"
+        },
+        "default": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._][A-Za-z0-9._: -]{0,49}$"
+        },
+        "color": {
+          "type": "string",
+          "pattern": "^[0-9A-Fa-f]{6}$"
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "answer",
+        "default",
+        "color",
+        "description"
+      ],
+      "additionalProperties": false
+    },
     "gitignore_sources": {
       "minItems": 1,
       "type": "array",

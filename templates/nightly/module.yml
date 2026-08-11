@@ -1,0 +1,8 @@
+# yaml-language-server: $schema=../module.schema.json
+# Module manifest (schema and loader: scripts/module_manifests.ts).
+description: nightly CI starter with failure issue filing and auto-close
+tracking_label:
+  answer: nightly_label
+  default: nightly-failure
+  color: "D93F0B"
+  description: Automated nightly CI failure

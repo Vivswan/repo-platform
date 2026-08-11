@@ -289,8 +289,8 @@ export function readmeModuleRoster(manifests: ModuleManifest[]): string[] {
 export function newRepoModuleRoster(manifests: ModuleManifest[]): string[] {
   return wrapProse(
     `multiselect (any combination of ${moduleRoster(manifests)}), follow-up ` +
-      "parameters for modules that have them (see [docs/pages.md](pages.md) and " +
-      "[docs/fuzzer.md](fuzzer.md)), and visibility.",
+      "parameters for modules that have them (see [docs/pages.md](pages.md), " +
+      "[docs/fuzzer.md](fuzzer.md), and [docs/nightly.md](nightly.md)), and visibility.",
   );
 }
 

@@ -17,7 +17,9 @@ The issue filing and closing come from the `fuzz-issue` composite action in
 this repository (`actions/fuzz-issue`), pinned like every other managed
 action: released repos pin the matching `vX.Y.Z` tag, staging-channel repos
 pin `main`. The action needs `gh` on the runner, which GitHub-hosted runners
-preinstall; self-hosted runners must provide it.
+preinstall; self-hosted runners must provide it. The same action serves the
+nightly module's plain-CI stream (docs/nightly.md); the artifacts contract
+below is what sets the fuzz stream apart.
 
 ## Module parameter (copier question)
 

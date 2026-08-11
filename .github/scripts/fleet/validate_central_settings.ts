@@ -2,12 +2,12 @@
 // actual module selections. The apply deletes undeclared labels, so a
 // settings/repos/<name>.yml missing a label its repo's modules need
 // (dependabot's per-ecosystem defaults, release-please's autorelease pair,
-// the fuzzer tracking label) starts a silent nightly loop: the apply
-// deletes the label, the tool recreates it, every run stays green. Module
-// selection lives in each target repo's own .repo-platform.yml and its
-// fuzzer label in its .copier-answers.yml, so the label comparison cannot
-// run offline - settings-repos.yml invokes this with the fleet PAT before
-// the apply.
+// the fuzzer/nightly tracking labels) starts a silent nightly loop: the
+// apply deletes the label, the tool recreates it, every run stays green.
+// Module selection lives in each target repo's own .repo-platform.yml and
+// its tracking labels in its .copier-answers.yml, so the label comparison
+// cannot run offline - settings-repos.yml invokes this with the fleet PAT
+// before the apply.
 //
 // Usage:
 //   bun .github/scripts/fleet/validate_central_settings.ts --owner Vivswan
@@ -19,10 +19,10 @@
 // section - an undeclared section is never applied, so there is nothing
 // to compare and no reason for an API hiccup to block the run. Failures
 // split by class: a missing required label, a missing identity key, or an
-// unreadable fuzzer answer is a real violation, reported as ::error:: -
-// all of them at once - with a nonzero exit (the apply deletes labels, so
-// this fails closed). A target repo without .repo-platform.yml (not
-// adopted) and a non-404 fetch failure are ::warning::s instead: that
+// unreadable tracking-label answer is a real violation, reported as
+// ::error:: - all of them at once - with a nonzero exit (the apply deletes
+// labels, so this fails closed). A target repo without .repo-platform.yml
+// (not adopted) and a non-404 fetch failure are ::warning::s instead: that
 // file's labels go unverified this run and the next nightly retries,
 // rather than one unreadable repo skipping the apply for the whole fleet.
 
@@ -58,16 +58,31 @@ export function moduleLabelPairs(): [module: string, label: string][] {
 // once per central settings file.
 let cachedModuleLabels: [module: string, label: string][] | undefined;
 
+/** The nightly-stream modules whose tracking label is a recorded copier
+ *  answer, derived from the module manifests' tracking_label blocks (the
+ *  single source of stream identity), in MODULE_ORDER. The label is the
+ *  tracking issue's identity, so the apply must keep it declared. */
+export function trackingLabelAnswers(): { module: string; answer: string }[] {
+  cachedTrackingAnswers ??= loadManifests().flatMap((m) =>
+    m.tracking_label ? [{ module: m.module, answer: m.tracking_label.answer }] : [],
+  );
+  return cachedTrackingAnswers;
+}
+
+let cachedTrackingAnswers: { module: string; answer: string }[] | undefined;
+
 /** The label names a repo's settings file must declare so the apply's
  *  delete-undeclared pass does not fight the tools that recreate them.
  *  Deduplicated by name: two modules sharing a dependabot label (the PR
  *  label follows the language, not the ecosystem) require it once.
- *  `fuzzerLabel` is null when the repo's recorded label could not be
- *  fetched this run: the fuzzer requirement is dropped, never guessed. */
+ *  `trackingLabels` carries the resolved module->label pairs for the
+ *  selected nightly-stream modules; a pair whose recorded label could not
+ *  be fetched this run is simply absent - the requirement is dropped,
+ *  never guessed. */
 export function requiredLabelsFrom(
   moduleLabels: [module: string, label: string][],
   modules: string[],
-  fuzzerLabel: string | null,
+  trackingLabels: [module: string, label: string][],
 ): { name: string; why: string }[] {
   const required: { name: string; why: string }[] = [];
   const require = (name: string, why: string) => {
@@ -90,8 +105,10 @@ export function requiredLabelsFrom(
       require(name, "the release-health gate keys on it (stripping it un-blocks or un-overrides a release)");
     }
   }
-  if (modules.includes("fuzzer") && fuzzerLabel !== null) {
-    require(fuzzerLabel, "the fuzzer module's tracking issue keys on it (stripping it breaks the auto-close)");
+  for (const [module, name] of trackingLabels) {
+    if (modules.includes(module)) {
+      require(name, `the ${module} module's tracking issue keys on it (stripping it breaks the auto-close)`);
+    }
   }
   return required;
 }
@@ -99,10 +116,10 @@ export function requiredLabelsFrom(
 /** requiredLabelsFrom over the manifests' module->label pairs. */
 export function requiredLabels(
   modules: string[],
-  fuzzerLabel: string | null,
+  trackingLabels: [module: string, label: string][],
 ): { name: string; why: string }[] {
   cachedModuleLabels ??= moduleLabelPairs();
-  return requiredLabelsFrom(cachedModuleLabels, modules, fuzzerLabel);
+  return requiredLabelsFrom(cachedModuleLabels, modules, trackingLabels);
 }
 
 export interface IdentityIssue {
@@ -271,42 +288,78 @@ export function checkCentralFileRemote(
     return { errors, warnings };
   }
 
-  // The fuzzer label is the tracking-issue identity: guessing a default
-  // could pass while the repo's real label loops on delete/recreate, so
-  // an unreadable answer is an error, never a fallback. A failed fetch is
-  // no answer at all: warn, leave the label null (requiredLabels drops
-  // the requirement), and still check the other labels.
-  let fuzzerLabel: string | null = null;
-  if (modules.includes("fuzzer")) {
+  // A tracking label is the module's issue-stream identity: guessing a
+  // default could pass while the repo's real label loops on
+  // delete/recreate, so an unreadable answer is an error, never a
+  // fallback - every unreadable answer is reported, and the label
+  // comparison still runs on whatever resolved. A failed fetch is no
+  // answer at all: warn, leave the pairs out (requiredLabels drops the
+  // requirements), and still check the other labels.
+  const trackingLabels: [module: string, label: string][] = [];
+  const trackingModules = trackingLabelAnswers().filter(({ module }) => modules.includes(module));
+  if (trackingModules.length > 0) {
     const answers = fetchFile(".copier-answers.yml");
     if (answers.status === "failed") {
       warnings.push(
         `${repo}/.copier-answers.yml: fetch failed (${shownDetail(answers.detail)}), so ` +
-          `${file}'s ${hideDetails ? "module-required labels are" : "fuzzer tracking label is"} ` +
+          `${file}'s ${hideDetails ? "module-required labels are" : "module tracking labels are"} ` +
           `unverified this run; the next nightly retries the read`,
       );
     } else {
       const recorded =
         answers.status === "ok" ? parseMapping(answers.text, ".copier-answers.yml") : null;
-      const value =
-        recorded !== null && typeof recorded !== "string" ? recorded.fuzzer_label : null;
-      if (typeof value !== "string" || value === "") {
-        errors.push(
-          hideDetails
-            ? `${file}: a module-required label cannot be verified because the target ` +
-                `repo's recorded answers are unreadable (detail hidden: private ` +
-                `repository) - fix its .copier-answers.yml`
-            : `${file}: the target repo has the fuzzer module but no fuzzer_label answer ` +
+      let unreadable = 0;
+      for (const { module, answer } of trackingModules) {
+        const value = recorded !== null && typeof recorded !== "string" ? recorded[answer] : null;
+        if (typeof value !== "string" || value === "") {
+          unreadable++;
+          if (!hideDetails) {
+            errors.push(
+              `${file}: the target repo has the ${module} module but no ${answer} answer ` +
                 `is readable from its .copier-answers.yml, so the tracking label cannot ` +
                 `be verified - fix the answers file`,
-        );
-        return { errors, warnings };
+            );
+          }
+          continue;
+        }
+        trackingLabels.push([module, value]);
       }
-      fuzzerLabel = value;
+      if (hideDetails && unreadable > 0) {
+        // One counted message: the per-answer texts would be identical
+        // with the module facts hidden.
+        errors.push(
+          `${file}: ${unreadable} module-required label${unreadable === 1 ? "" : "s"} cannot ` +
+            `be verified because the target repo's recorded answers are unreadable ` +
+            `(detail hidden: private repository) - fix its .copier-answers.yml`,
+        );
+      }
+      // Cross-stream uniqueness: dedup and auto-close are label-keyed, so
+      // two streams recording the same label would close each other's open
+      // issues (a green nightly lifting a fuzz-keyed release-health hold),
+      // and settings.yml cannot declare one name with two tuples. Keyed
+      // lowercased: GitHub deduplicates label names case-insensitively.
+      const byLabel = new Map<string, string>();
+      for (const [module, value] of trackingLabels) {
+        const prior = byLabel.get(value.toLowerCase());
+        if (prior) {
+          errors.push(
+            hideDetails
+              ? `${file}: two of the target repository's tracking-label answers record ` +
+                  `the same label (values hidden: private repository) - each stream needs ` +
+                  `its own label, or a green night in one closes the other's open issue`
+              : `${file}: the target repo records the same tracking label ` +
+                  `${JSON.stringify(value)} (GitHub label names are case-insensitive) for ` +
+                  `both the ${prior} and ${module} modules - each stream needs its own ` +
+                  `label, or a green night in one closes the other's open issue`,
+          );
+        } else {
+          byLabel.set(value.toLowerCase(), module);
+        }
+      }
     }
   }
 
-  const missing = requiredLabels(modules, fuzzerLabel).filter(({ name }) => !declared.has(name));
+  const missing = requiredLabels(modules, trackingLabels).filter(({ name }) => !declared.has(name));
   if (hideDetails && missing.length > 0) {
     // Label names and their reasons are module facts of a private repo;
     // the count keeps the failure actionable without them.

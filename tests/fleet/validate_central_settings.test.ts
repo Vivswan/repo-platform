@@ -42,19 +42,22 @@ function registration(modules: string[]): Fetched {
 
 describe("requiredLabels", () => {
   test("always requires the unconditional dependabot pair", () => {
-    const names = requiredLabels([], null).map((l) => l.name);
+    const names = requiredLabels([], []).map((l) => l.name);
     expect(names).toEqual(["dependencies", "github_actions"]);
   });
 
-  test("a null fuzzer label drops that requirement instead of demanding an empty name", () => {
-    const names = requiredLabels(["fuzzer"], null).map((l) => l.name);
+  test("an unresolved tracking label drops that requirement instead of demanding an empty name", () => {
+    const names = requiredLabels(["fuzzer", "nightly"], []).map((l) => l.name);
     expect(names).toEqual(["dependencies", "github_actions"]);
   });
 
-  test("adds each toolchain ecosystem label, the autorelease pair, and the fuzz label", () => {
+  test("adds each toolchain ecosystem label, the autorelease pair, and the tracking labels", () => {
     const names = requiredLabels(
-      ["agents", "bun", "uv", "rust", "release-please", "fuzzer"],
-      "my-fuzz",
+      ["agents", "bun", "uv", "rust", "release-please", "fuzzer", "nightly"],
+      [
+        ["fuzzer", "my-fuzz"],
+        ["nightly", "my-nightly"],
+      ],
     ).map((l) => l.name);
     expect(names).toEqual([
       "dependencies",
@@ -67,7 +70,13 @@ describe("requiredLabels", () => {
       "release-blocker",
       "release-override",
       "my-fuzz",
+      "my-nightly",
     ]);
+  });
+
+  test("a tracking label pair for an unselected module is ignored", () => {
+    const names = requiredLabels(["fuzzer"], [["nightly", "my-nightly"]]).map((l) => l.name);
+    expect(names).toEqual(["dependencies", "github_actions"]);
   });
 
   test("the module->label pairs come from the manifests, in MODULE_ORDER", () => {
@@ -87,7 +96,7 @@ describe("requiredLabels", () => {
         ["node", "javascript"],
       ],
       ["bun", "node"],
-      null,
+      [],
     ).map((l) => l.name);
     expect(names).toEqual(["dependencies", "github_actions", "javascript"]);
   });
@@ -229,6 +238,137 @@ describe("checkCentralFileRemote", () => {
       expect(errors).toHaveLength(1);
       expect(errors[0]).toContain("fuzzer_label");
     }
+  });
+
+  test("the nightly module keys on its own recorded nightly_label answer", () => {
+    const files = {
+      ".repo-platform.yml": registration(["nightly"]),
+      ".copier-answers.yml": ok("nightly_label: custom-nightly\n"),
+    };
+    const violating = checkCentralFileRemote(
+      FILE,
+      REPO,
+      declared(["dependencies", "github_actions"]),
+      fetcher(files),
+    );
+    expect(violating.errors).toHaveLength(1);
+    expect(violating.errors[0]).toContain('"custom-nightly"');
+    const covered = checkCentralFileRemote(
+      FILE,
+      REPO,
+      declared(["dependencies", "github_actions", "custom-nightly"]),
+      fetcher(files),
+    );
+    expect(covered.errors).toEqual([]);
+  });
+
+  test("fuzzer and nightly together require both labels from one answers read", () => {
+    const { errors } = checkCentralFileRemote(
+      FILE,
+      REPO,
+      declared(["dependencies", "github_actions"]),
+      fetcher({
+        ".repo-platform.yml": registration(["fuzzer", "nightly"]),
+        ".copier-answers.yml": ok("fuzzer_label: my-fuzz\nnightly_label: my-nightly\n"),
+      }),
+    );
+    expect(errors).toHaveLength(2);
+    expect(errors[0]).toContain('"my-fuzz"');
+    expect(errors[1]).toContain('"my-nightly"');
+  });
+
+  test("nightly with no nightly_label answer is an error naming the answer key", () => {
+    const { errors } = checkCentralFileRemote(
+      FILE,
+      REPO,
+      declared(["dependencies", "github_actions", "nightly-failure"]),
+      fetcher({
+        ".repo-platform.yml": registration(["nightly"]),
+        ".copier-answers.yml": ok("project_name: x\n"),
+      }),
+    );
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain("nightly_label");
+  });
+
+  test("every unreadable tracking answer is reported, and the label comparison still runs", () => {
+    const { errors } = checkCentralFileRemote(
+      FILE,
+      REPO,
+      declared(["dependencies"]),
+      fetcher({
+        ".repo-platform.yml": registration(["fuzzer", "nightly"]),
+        ".copier-answers.yml": ok("project_name: x\n"),
+      }),
+    );
+    // Two unreadable answers plus the missing github_actions label: the
+    // first unreadable answer must not short-circuit the rest.
+    expect(errors).toHaveLength(3);
+    expect(errors[0]).toContain("fuzzer_label");
+    expect(errors[1]).toContain("nightly_label");
+    expect(errors[2]).toContain('"github_actions"');
+  });
+
+  test("hideDetails counts unreadable tracking answers into one module-free error", () => {
+    const { errors } = checkCentralFileRemote(
+      FILE,
+      REPO,
+      declared(["dependencies", "github_actions"]),
+      fetcher({
+        ".repo-platform.yml": registration(["fuzzer", "nightly"]),
+        ".copier-answers.yml": ok("project_name: x\n"),
+      }),
+      true,
+    );
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain("2 module-required labels");
+    expect(errors[0]).toContain("detail hidden: private repository");
+    expect(errors[0]).not.toContain("fuzzer");
+    expect(errors[0]).not.toContain("nightly");
+  });
+
+  test("two streams recording the same tracking label is an error naming both modules", () => {
+    const shared = fetcher({
+      ".repo-platform.yml": registration(["fuzzer", "nightly"]),
+      ".copier-answers.yml": ok("fuzzer_label: same-label\nnightly_label: same-label\n"),
+    });
+    const { errors } = checkCentralFileRemote(
+      FILE,
+      REPO,
+      declared(["dependencies", "github_actions", "same-label"]),
+      shared,
+    );
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain('"same-label"');
+    expect(errors[0]).toContain("fuzzer");
+    expect(errors[0]).toContain("nightly");
+
+    const hidden = checkCentralFileRemote(
+      FILE,
+      REPO,
+      declared(["dependencies", "github_actions", "same-label"]),
+      shared,
+      true,
+    );
+    expect(hidden.errors).toHaveLength(1);
+    expect(hidden.errors[0]).not.toContain("same-label");
+    expect(hidden.errors[0]).toContain("values hidden: private repository");
+  });
+
+  test("tracking labels differing only in case still collide (GitHub dedups case-insensitively)", () => {
+    const { errors } = checkCentralFileRemote(
+      FILE,
+      REPO,
+      declared(["dependencies", "github_actions", "Fuzz-Nightly", "fuzz-nightly"]),
+      fetcher({
+        ".repo-platform.yml": registration(["fuzzer", "nightly"]),
+        ".copier-answers.yml": ok("fuzzer_label: Fuzz-Nightly\nnightly_label: fuzz-nightly\n"),
+      }),
+    );
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain("case-insensitive");
+    expect(errors[0]).toContain("fuzzer");
+    expect(errors[0]).toContain("nightly");
   });
 
   test("an unregistered repo warns and does not fail", () => {

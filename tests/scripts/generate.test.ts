@@ -271,7 +271,9 @@ describe("docs region builders", () => {
       "bun",
       "rust",
     ]);
-    expect(text).toEndWith("and visibility.");
+    // Wrap-insensitive: the greedy wrapper may break inside the closing
+    // phrase, but the sentence itself must still end the region.
+    expect(text.replace(/\n/g, " ")).toEndWith("and visibility.");
   });
 
   test("gitignoreUpstreamMap maps each module's upstream templates", () => {

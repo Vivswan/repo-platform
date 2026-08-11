@@ -11,7 +11,10 @@ import { join } from "node:path";
 import {
   blockTitle,
   buildBody,
+  buildGenericBody,
   capChars,
+  DEFAULT_LABEL_COLOR,
+  DEFAULT_LABEL_DESCRIPTION,
   DEFAULT_TITLE,
   failureDirs,
   fileIssue,
@@ -186,6 +189,36 @@ describe("buildBody", () => {
   });
 });
 
+describe("buildGenericBody", () => {
+  const genericEnv = {
+    ...env,
+    GITHUB_WORKFLOW: "Nightly",
+    GITHUB_SHA: "abc1234def",
+  } as NodeJS.ProcessEnv;
+
+  test("names the workflow, the date, the commit, and the run", () => {
+    const body = buildGenericBody(genericEnv);
+    expect(body).toContain("`Nightly` failed on");
+    expect(body).toMatch(/failed on \d{4}-\d{2}-\d{2}\./);
+    expect(body).toContain("Commit: abc1234def");
+    expect(body).toContain("Run: https://github.com/o/r/actions/runs/42");
+  });
+
+  test("points at the run log, never at artifacts", () => {
+    const body = buildGenericBody(genericEnv);
+    expect(body).toContain("run log");
+    expect(body).not.toContain("artifact");
+  });
+
+  test("missing context degrades to prose, not to broken markdown", () => {
+    const body = buildGenericBody({} as NodeJS.ProcessEnv);
+    expect(body).toContain("The nightly workflow failed on");
+    expect(body).not.toContain("Commit:");
+    expect(body).not.toContain("Run:");
+    expect(body).not.toContain("``");
+  });
+});
+
 /**
  * A recording gh runner: captures every command, answers the label-list
  * query from `labelTaken`, and the issue-list query from `openNumber` (a
@@ -256,6 +289,22 @@ describe("fileIssue", () => {
     const create = calls.find((c) => c[0] === "label" && c[1] === "create");
     expect(create).toBeDefined();
     expect(create).not.toContain("--force");
+  });
+
+  test("label creation defaults to the fuzz tuple when no override is given", async () => {
+    const { run, calls } = fakeGh(undefined, false);
+    await fileIssue(run, "body", "fuzz-nightly", "t");
+    const create = calls.find((c) => c[0] === "label" && c[1] === "create");
+    expect(create?.[create.indexOf("--color") + 1]).toBe(DEFAULT_LABEL_COLOR);
+    expect(create?.[create.indexOf("--description") + 1]).toBe(DEFAULT_LABEL_DESCRIPTION);
+  });
+
+  test("a caller-supplied label tuple reaches the create call", async () => {
+    const { run, calls } = fakeGh(undefined, false);
+    await fileIssue(run, "body", "nightly-failure", "t", "D93F0B", "Automated nightly CI failure");
+    const create = calls.find((c) => c[0] === "label" && c[1] === "create");
+    expect(create?.[create.indexOf("--color") + 1]).toBe("D93F0B");
+    expect(create?.[create.indexOf("--description") + 1]).toBe("Automated nightly CI failure");
   });
 
   test("never touches a pre-existing label (no create, no repaint)", async () => {
@@ -331,6 +380,62 @@ describe("resolveIssue", () => {
     expect(calls.some((c) => c[0] === "issue" && c[1] === "comment")).toBe(false);
     expect(calls.some((c) => c[0] === "issue" && c[1] === "close")).toBe(false);
   });
+
+  test("the default (fuzz) close comment is pinned verbatim - fleet starters must see zero change", async () => {
+    const { run, calls } = fakeGh(5);
+    await resolveIssue(run, "fuzz-nightly", env);
+    const comment = calls.find((c) => c[0] === "issue" && c[1] === "comment");
+    const date = new Date().toISOString().slice(0, 10);
+    expect(comment?.[comment.indexOf("--body") + 1]).toBe(
+      [
+        `Nightly fuzz passed on ${date}. Run: https://github.com/o/r/actions/runs/42`,
+        "",
+        "Closing. If the crashing inputs reported here were pinned as regression",
+        "seeds, this pass replayed them; for anything not pinned, a green night is",
+        "weaker evidence, and the next red night opens a fresh issue.",
+      ].join("\n"),
+    );
+  });
+
+  test("the generic close comment names the run and carries no fuzz notions", async () => {
+    const { run, calls } = fakeGh(5);
+    await resolveIssue(run, "nightly-failure", env, "generic");
+    const comment = calls.find((c) => c[0] === "issue" && c[1] === "comment");
+    const body = comment?.[comment.indexOf("--body") + 1] ?? "";
+    expect(body).toContain("Nightly run passed on");
+    expect(body).toContain("Run: https://github.com/o/r/actions/runs/42");
+    expect(body).not.toContain("fuzz");
+    expect(body).not.toContain("regression");
+    expect(body).not.toContain("seeds");
+    expect(calls.some((c) => c[0] === "issue" && c[1] === "close" && c[2] === "5")).toBe(true);
+  });
+});
+
+describe("no-artifacts lifecycle", () => {
+  const body = buildGenericBody({ ...env, GITHUB_WORKFLOW: "Nightly" } as NodeJS.ProcessEnv);
+
+  test("a first red night creates the labeled issue with the generic body", async () => {
+    const { run, calls } = fakeGh(undefined);
+    expect(await fileIssue(run, body, "nightly-failure", "Nightly CI failures")).toBe(7);
+    const create = calls.find((c) => c[0] === "issue" && c[1] === "create");
+    expect(create?.[create.indexOf("--label") + 1]).toBe("nightly-failure");
+    expect(create?.[create.indexOf("--title") + 1]).toBe("Nightly CI failures");
+    expect(create?.[create.indexOf("--body") + 1]).toContain("`Nightly` failed on");
+  });
+
+  test("a repeat red night dedups onto the open issue", async () => {
+    const { run, calls } = fakeGh(9, true);
+    expect(await fileIssue(run, body, "nightly-failure", "Nightly CI failures")).toBe(9);
+    expect(calls.some((c) => c[0] === "issue" && c[1] === "comment" && c[2] === "9")).toBe(true);
+    expect(calls.some((c) => c[0] === "issue" && c[1] === "create")).toBe(false);
+  });
+
+  test("a green night resolves the stream with the generic wording", async () => {
+    const { run, calls } = fakeGh(9, true);
+    await resolveIssue(run, "nightly-failure", env, "generic");
+    expect(calls.some((c) => c[0] === "issue" && c[1] === "comment" && c[2] === "9")).toBe(true);
+    expect(calls.some((c) => c[0] === "issue" && c[1] === "close" && c[2] === "9")).toBe(true);
+  });
 });
 
 describe("issueNumberFromUrl", () => {
@@ -350,5 +455,21 @@ describe("DEFAULT_TITLE", () => {
     const actionYml = readFileSync(join(import.meta.dir, "action.yml"), "utf-8");
     const match = actionYml.match(/^ {2}title:\n(?: {4}.+\n)*? {4}default: (.+)$/m);
     expect(match?.[1]).toBe(DEFAULT_TITLE);
+  });
+});
+
+describe("label tuple defaults", () => {
+  const inputDefault = (name: string): string | undefined => {
+    const actionYml = readFileSync(join(import.meta.dir, "action.yml"), "utf-8");
+    const re = new RegExp(`^ {2}${name}:\\n(?: {4}.+\\n)*? {4}default: (.+)$`, "m");
+    return actionYml.match(re)?.[1];
+  };
+
+  test("DEFAULT_LABEL_COLOR matches the label-color input default in action.yml", () => {
+    expect(inputDefault("label-color")).toBe(`"${DEFAULT_LABEL_COLOR}"`);
+  });
+
+  test("DEFAULT_LABEL_DESCRIPTION matches the label-description input default in action.yml", () => {
+    expect(inputDefault("label-description")).toBe(DEFAULT_LABEL_DESCRIPTION);
   });
 });

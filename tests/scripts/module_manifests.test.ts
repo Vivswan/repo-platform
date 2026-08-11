@@ -10,6 +10,7 @@ import { join } from "node:path";
 import { MODULE_ORDER } from "../../scripts/compose_template";
 import {
   assertDependabotLabelConsistency,
+  assertTrackingLabelUniqueness,
   loadManifests,
   type ModuleManifest,
   parseManifest,
@@ -224,6 +225,55 @@ describe("assertDependabotLabelConsistency", () => {
         manifest("node", { ecosystem: "npm", label: "javascript", color: "000000" }),
       ]),
     ).toThrow("templates/bun/module.yml");
+  });
+});
+
+describe("assertTrackingLabelUniqueness", () => {
+  const manifest = (
+    module: string,
+    tracking_label: NonNullable<ModuleManifest["tracking_label"]>,
+  ): ModuleManifest => ({ module, description: `${module} module`, tracking_label });
+  const tracking = (answer: string, def: string) => ({
+    answer,
+    default: def,
+    color: "B60205",
+    description: "x",
+  });
+
+  test("distinct answers and defaults pass", () => {
+    expect(() =>
+      assertTrackingLabelUniqueness([
+        manifest("fuzzer", tracking("fuzzer_label", "fuzz-nightly")),
+        manifest("nightly", tracking("nightly_label", "nightly-failure")),
+      ]),
+    ).not.toThrow();
+  });
+
+  test("a shared default throws, naming both files", () => {
+    expect(() =>
+      assertTrackingLabelUniqueness([
+        manifest("fuzzer", tracking("fuzzer_label", "nightly")),
+        manifest("nightly", tracking("nightly_label", "nightly")),
+      ]),
+    ).toThrow("templates/fuzzer/module.yml");
+  });
+
+  test("defaults differing only in case still collide (GitHub dedups labels case-insensitively)", () => {
+    expect(() =>
+      assertTrackingLabelUniqueness([
+        manifest("fuzzer", tracking("fuzzer_label", "Fuzz-Nightly")),
+        manifest("nightly", tracking("nightly_label", "fuzz-nightly")),
+      ]),
+    ).toThrow("case-insensitive");
+  });
+
+  test("a shared answer key throws", () => {
+    expect(() =>
+      assertTrackingLabelUniqueness([
+        manifest("fuzzer", tracking("shared_label", "a")),
+        manifest("nightly", tracking("shared_label", "b")),
+      ]),
+    ).toThrow("answer 'shared_label'");
   });
 });
 

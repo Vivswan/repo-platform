@@ -29,9 +29,9 @@ self-apply of a repo's own settings file.
 
 - Modules (pick any combination): `agents`, `bun`, `node`, `deno`, `uv`,
   `rust`, `pages`, `release-please`, `issue-templates`, `pr-title`,
-  `auto-assign`, `fuzzer`, `settings-sync`, `custom-license`. Modules with
-  parameters (like `pages`) ask follow-up questions only when selected.
-  After generation, module selection lives in each repo's own
+  `auto-assign`, `fuzzer`, `nightly`, `settings-sync`, `custom-license`.
+  Modules with parameters (like `pages`) ask follow-up questions only when
+  selected. After generation, module selection lives in each repo's own
   `.repo-platform.yml`: edit its `modules:` list and the next sync applies
   the change.<!-- END GENERATED: module-roster -->
 - Channel `latest`: follows released `templates/vX.Y.Z` build tags;
@@ -133,11 +133,11 @@ each fixed PR needs a close/reopen for its checks to appear).
 | `actions/dependency-review` | The fleet's dependency-review gate: one home for the upstream pin and severity threshold |
 | `actions/validate-template` | Enforces markers, YAML validity, and the all-green convention |
 | `actions/validate-commit-names` | Conventional Commit subjects on every push/PR commit |
-| `actions/fuzz-issue` | Files/updates the label-deduplicated nightly-fuzz tracking issue, closes it on green (used by the fuzzer module's starter, [docs](docs/fuzzer.md)) |
+| `actions/fuzz-issue` | Files/updates the label-deduplicated nightly tracking issue (fuzz failure reports or a generic nightly-failure body), closes it on green (used by the fuzzer and nightly starters, [fuzzer docs](docs/fuzzer.md), [nightly docs](docs/nightly.md)) |
 | `actions/release-health` | Gates releases: open fuzz/blocker issues and open Dependabot alerts block, an override label on the release PR bypasses with warnings |
 | `scripts/build_gitignore.ts` | <!-- BEGIN GENERATED: gitignore-upstream-map (scripts/generate.ts - edit module.yml manifests, not this block) -->Regenerates the gitignore outputs (`templates/base/.gitignore.jinja`, the bun/node/deno/uv/rust toolchain fragments, this repo's `.gitignore`) from the latest [github/gitignore](https://github.com/github/gitignore) (Windows + macOS + Linux always, Node + bun / Deno / Python / Rust by bun/node/deno/uv/rust module)<!-- END GENERATED: gitignore-upstream-map --> |
 | `migrations/` | Copier `_migrations` scripts (TypeScript, run with bun) for breaking changes |
-| `docs/` | [all-green convention](docs/all-green.md), [new repo](docs/new-repo.md), [pages module](docs/pages.md), [fuzzer module](docs/fuzzer.md), [settings](docs/settings.md), [eject](docs/eject.md) |
+| `docs/` | [all-green convention](docs/all-green.md), [new repo](docs/new-repo.md), [pages module](docs/pages.md), [fuzzer module](docs/fuzzer.md), [nightly module](docs/nightly.md), [settings](docs/settings.md), [eject](docs/eject.md) |
 
 ## File ownership in managed repos
 
@@ -147,7 +147,7 @@ each fixed PR needs a close/reopen for its checks to appear).
 | Managed shape, repo-owned selection | `.repo-platform.yml`: its presence marks the repo as participating in push sync, and its `modules:` list is the repo's own module selection (edit it; the next sync applies the change) |
 | Managed + local sections | `.gitignore` (LOCAL section is yours), `SECURITY.md`, `CONTRIBUTING.md`, `LICENSE.md` (everything below the `<!-- repo-platform:local-section -->` line is yours; conflict resolution moves overlapping local edits below it - where there is local content to move - instead of dropping them, and they still appear in the PR body for review; CONTRIBUTING.md is a public-only render, so a flip to private retires that file, local section included, while SECURITY.md and LICENSE.md are visibility-independent). LICENSE.md carries the fleet license, the Individual and Small Organization License - free for individuals, internal-use-only for small organizations, everyone else licenses from the licensor; local notices (third-party components; prior licensing needs no notice - git history is the record) go below its marker, and selecting the `custom-license` module carries your own license instead, still at `LICENSE.md` - the file then becomes repo-owned and sync never touches it |
 | Mergeable (three-way) | `.github/settings.yml` (seeded by the settings-sync module; never deleted by sync), `.github/CODEOWNERS`, `AGENTS.md` (also carries the `<!-- repo-platform:local-section -->` marker: conflicting local edits move below it), `.editorconfig`, `.gitattributes` (carries a `# repo-platform:local-section` marker: repository-specific attributes below it are yours) |
-| Generated once, then repo-owned | `checks.yml` (your CI jobs, called inside the all-green gate), `release.yml` (your release pipeline around the managed release-please machinery), `auto-format.yml`, `copilot-setup-steps.yml`, `nightly-fuzz.yml` (the fuzzer module's starter, [docs](docs/fuzzer.md)), issue forms and chooser config (starters you tailor to the repo), `release-please-config.json`, `.release-please-manifest.json` |
+| Generated once, then repo-owned | `checks.yml` (your CI jobs, called inside the all-green gate), `release.yml` (your release pipeline around the managed release-please machinery), `auto-format.yml`, `copilot-setup-steps.yml`, `nightly-fuzz.yml` (the fuzzer module's starter, [docs](docs/fuzzer.md)), `nightly.yml` (the nightly module's starter, [docs](docs/nightly.md)), issue forms and chooser config (starters you tailor to the repo), `release-please-config.json`, `.release-please-manifest.json` |
 | Repo-owned (never touched) | source code, release tooling, `.typography-allow.local`, everything else |
 
 `CLAUDE.md`, `.github/copilot-instructions.md`, and `.github/agents.md` are

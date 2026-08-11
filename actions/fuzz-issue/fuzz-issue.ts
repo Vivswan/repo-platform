@@ -1,23 +1,29 @@
 /**
- * File, update, or resolve the nightly-fuzz tracking issue for a repository.
+ * File, update, or resolve a repository's nightly tracking issue.
  * Generalized from github-settings-as-code's file-fuzz-issue.ts: this version
- * knows nothing about any repo's fuzzer. It reads failure reports from a
- * directory whose layout is a small contract (docs/fuzzer.md, "failure-report
- * contract v1"): each immediate subdirectory is one failure and carries a
- * report.md whose first line is a `# title` heading and whose body contains
- * the replay command. The producer writes the replay command; this script
- * only assembles the issue.
+ * knows nothing about any repo's fuzzer - or about fuzzing at all when the
+ * stream carries no artifacts. With ARTIFACTS_DIR set it reads failure
+ * reports from a directory whose layout is a small contract (docs/fuzzer.md,
+ * "failure-report contract v1"): each immediate subdirectory is one failure
+ * and carries a report.md whose first line is a `# title` heading and whose
+ * body contains the replay command. The producer writes the replay command;
+ * this script only assembles the issue. With ARTIFACTS_DIR empty the issue
+ * body is a generic nightly-failure report (workflow, date, commit, run
+ * link) - the shape the nightly module's plain-CI starter uses.
  *
  * Two modes, selected by MODE:
- * - report: build a body from the failure reports and comment on the open
- *   labeled issue, or create it if none is open. One open issue per label.
+ * - report: build a body (from the failure reports, or the generic one) and
+ *   comment on the open labeled issue, or create it if none is open. One
+ *   open issue per label.
  * - resolve: after a green run, comment on and close the open labeled issue;
  *   a silent no-op when none is open.
  *
  * Configuration from the environment (set by action.yml): MODE, LABEL,
- * TITLE, ARTIFACTS_DIR, ARTIFACT_NAME. Context: GH_TOKEN (gh auth),
- * GITHUB_SERVER_URL / GITHUB_REPOSITORY / GITHUB_RUN_ID (the run link),
- * GITHUB_OUTPUT (the issue-number step output).
+ * TITLE, ARTIFACTS_DIR, ARTIFACT_NAME, LABEL_COLOR, LABEL_DESCRIPTION,
+ * STREAM (resolve-comment wording; report bodies key on ARTIFACTS_DIR).
+ * Context: GH_TOKEN (gh auth), GITHUB_SERVER_URL / GITHUB_REPOSITORY /
+ * GITHUB_RUN_ID (the run link), GITHUB_WORKFLOW / GITHUB_SHA (the generic
+ * body), GITHUB_OUTPUT (the issue-number step output).
  */
 
 import { appendFileSync, existsSync, readdirSync, readFileSync, statSync } from "node:fs";
@@ -43,6 +49,12 @@ const DIR_NAME = /^[A-Za-z0-9._-]+$/;
 /** Title for a newly created tracking issue; must match the `title` input
  *  default in action.yml (the test asserts it). */
 export const DEFAULT_TITLE = "Nightly fuzz failures";
+/** Label tuple used only when report mode has to CREATE the label; each
+ *  must match its input default in action.yml (the test asserts it), and
+ *  the fuzzer module's settings-labels fragment carries the same values
+ *  (check_ssot's labels rule pins that). */
+export const DEFAULT_LABEL_COLOR = "B60205";
+export const DEFAULT_LABEL_DESCRIPTION = "Automated nightly fuzz failure";
 
 /** Runs a `gh` subcommand and returns stdout; throws on a non-zero exit. */
 export type GhRunner = (args: string[]) => Promise<string>;
@@ -206,6 +218,32 @@ export function buildBody(dirs: string[], env: NodeJS.ProcessEnv, artifactName: 
   return `${header}\n${blocks.join("\n")}${truncation}${artifactsNote}${footer}`;
 }
 
+/**
+ * The no-artifacts report body: a stream without a failure-report directory
+ * (the nightly module's plain-CI starter) gets a generic notice naming the
+ * workflow, the date, the failing commit, and the run, and points readers
+ * at the run log instead of at artifacts.
+ */
+export function buildGenericBody(env: NodeJS.ProcessEnv): string {
+  const date = new Date().toISOString().slice(0, 10);
+  const workflow = env.GITHUB_WORKFLOW ? `\`${env.GITHUB_WORKFLOW}\`` : "The nightly workflow";
+  const url = runUrl(env);
+  const parts = [
+    `${workflow} failed on ${date}.`,
+    "",
+    "This stream writes no failure reports; the run log names the failing",
+    "step(s). Repeat failures update this issue until a green night closes it.",
+  ];
+  const facts = [
+    ...(env.GITHUB_SHA ? [`Commit: ${env.GITHUB_SHA}`] : []),
+    ...(url ? [`Run: ${url}`] : []),
+  ];
+  if (facts.length > 0) {
+    parts.push("", ...facts);
+  }
+  return parts.join("\n");
+}
+
 /** The number of the open issue carrying the label, or undefined when none. */
 async function openIssueNumber(run: GhRunner, label: string): Promise<number | undefined> {
   const json = await run([
@@ -254,21 +292,15 @@ export async function fileIssue(
   body: string,
   label: string,
   title: string,
+  labelColor: string = DEFAULT_LABEL_COLOR,
+  labelDescription: string = DEFAULT_LABEL_DESCRIPTION,
 ): Promise<number | undefined> {
   // Create the label only when it is missing (checked by listing, not by
   // sniffing create-failure messages): creating with --force would silently
   // repaint a pre-existing label the repo owns (someone pointing this at
   // `bug`), and any real create failure must propagate.
   if (!(await labelExists(run, label))) {
-    await run([
-      "label",
-      "create",
-      label,
-      "--color",
-      "B60205",
-      "--description",
-      "Automated nightly fuzz failure",
-    ]);
+    await run(["label", "create", label, "--color", labelColor, "--description", labelDescription]);
   }
 
   const existing = await openIssueNumber(run, label);
@@ -282,16 +314,24 @@ export async function fileIssue(
   return issueNumberFromUrl(url);
 }
 
+/** Which nightly stream an issue tracks. Only resolve-comment wording keys
+ *  on it (report bodies key on ARTIFACTS_DIR); the default must stay fuzz -
+ *  fleet fuzzer starters predate the input and pass nothing. */
+export type Stream = "fuzz" | "generic";
+
 /**
  * After a green run: comment on and close the open labeled issue, or do
- * nothing when none is open. One green night is only evidence for crashes
- * whose inputs were pinned as regression seeds - the comment says so rather
- * than overclaiming.
+ * nothing when none is open. The fuzz-stream comment (the default - fleet
+ * fuzzer starters predate the STREAM input and must keep seeing the exact
+ * wording they always got; a test pins it verbatim) hedges on unpinned
+ * crashes: one green night is only evidence for inputs pinned as
+ * regression seeds. The generic-stream comment carries no fuzz notions.
  */
 export async function resolveIssue(
   run: GhRunner,
   label: string,
   env: NodeJS.ProcessEnv,
+  stream: Stream = "fuzz",
 ): Promise<void> {
   const existing = await openIssueNumber(run, label);
   if (existing === undefined) {
@@ -300,13 +340,20 @@ export async function resolveIssue(
   }
   const date = new Date().toISOString().slice(0, 10);
   const url = runUrl(env);
-  const body = [
-    `Nightly fuzz passed on ${date}.${url ? ` Run: ${url}` : ""}`,
-    "",
-    "Closing. If the crashing inputs reported here were pinned as regression",
-    "seeds, this pass replayed them; for anything not pinned, a green night is",
-    "weaker evidence, and the next red night opens a fresh issue.",
-  ].join("\n");
+  const body =
+    stream === "generic"
+      ? [
+          `Nightly run passed on ${date}.${url ? ` Run: ${url}` : ""}`,
+          "",
+          "Closing; the next failing night opens a fresh issue.",
+        ].join("\n")
+      : [
+          `Nightly fuzz passed on ${date}.${url ? ` Run: ${url}` : ""}`,
+          "",
+          "Closing. If the crashing inputs reported here were pinned as regression",
+          "seeds, this pass replayed them; for anything not pinned, a green night is",
+          "weaker evidence, and the next red night opens a fresh issue.",
+        ].join("\n");
   await run(["issue", "comment", String(existing), "--body", body]);
   await run(["issue", "close", String(existing), "--reason", "completed"]);
   console.log(`closed #${existing}`);
@@ -321,23 +368,36 @@ async function main(): Promise<number> {
     );
     return 1;
   }
+  // Validated in every mode, symmetric with MODE itself; only resolve
+  // wording consumes it (report bodies key on ARTIFACTS_DIR).
+  const stream = process.env.STREAM || "fuzz";
+  if (stream !== "fuzz" && stream !== "generic") {
+    console.error(`error: unknown STREAM '${stream}' (expected fuzz or generic)`);
+    return 1;
+  }
   if (mode === "resolve") {
-    await resolveIssue(gh, label, process.env);
+    await resolveIssue(gh, label, process.env, stream);
     return 0;
   }
   if (mode !== "report") {
     console.error(`error: unknown MODE '${mode}' (expected report or resolve)`);
     return 1;
   }
-  const artifactsDir = process.env.ARTIFACTS_DIR;
-  if (!artifactsDir) {
-    console.error("error: ARTIFACTS_DIR is required in report mode");
-    return 1;
-  }
   const title = process.env.TITLE || DEFAULT_TITLE;
-  const dirs = failureDirs(artifactsDir);
-  const body = buildBody(dirs, process.env, process.env.ARTIFACT_NAME || "");
-  const number = await fileIssue(gh, body, label, title);
+  // An artifacts directory means the fuzz stream's failure-report contract;
+  // without one the stream is plain nightly CI and gets the generic body.
+  const artifactsDir = process.env.ARTIFACTS_DIR;
+  const body = artifactsDir
+    ? buildBody(failureDirs(artifactsDir), process.env, process.env.ARTIFACT_NAME || "")
+    : buildGenericBody(process.env);
+  const number = await fileIssue(
+    gh,
+    body,
+    label,
+    title,
+    process.env.LABEL_COLOR || DEFAULT_LABEL_COLOR,
+    process.env.LABEL_DESCRIPTION || DEFAULT_LABEL_DESCRIPTION,
+  );
   const outputFile = process.env.GITHUB_OUTPUT;
   if (number !== undefined && outputFile) {
     appendFileSync(outputFile, `issue-number=${number}\n`);

@@ -141,7 +141,7 @@ jobs:
 
       # Central files are hand-maintained, but the labels they must declare
       # follow the target repo's module selection (its .repo-platform.yml)
-      # and fuzzer label (its .copier-answers.yml). A stale roster fails
+      # and tracking labels (its .copier-answers.yml). A stale roster fails
       # this repo's apply, loudly, instead of starting the nightly
       # delete/recreate loop; a failed fetch only warns, so this step
       # never blocks the apply over a file it could not read. It runs

@@ -59,6 +59,34 @@ else
   test ! -e "$wf/nightly-fuzz.yml"
 fi
 
+# nightly: the repo-owned plain-CI starter with the fuzz-issue action in
+# both modes but NO artifacts contract (the action files the generic
+# nightly-failure report). The report job must treat a cancelled checks
+# job (a timeout) as red, and the auto-assign dispatch step follows that
+# module, like the fuzzer starter's. Exact-line matches so the header
+# comments (or a commented-out step) cannot satisfy them. The fuzzer
+# else-leg above already proves stream independence the other way: a
+# fuzzer-free nightly row must render no nightly-fuzz.yml.
+if has nightly; then
+  test -f "$wf/nightly.yml"
+  present "actions/fuzz-issue@main" "$wf/nightly.yml"
+  present_line "          mode: report" "$wf/nightly.yml"
+  present_line "          mode: resolve" "$wf/nightly.yml"
+  present_line "          stream: generic" "$wf/nightly.yml"
+  present_line "  workflow_dispatch:" "$wf/nightly.yml"
+  present "needs.checks.result == 'cancelled'" "$wf/nightly.yml"
+  absent "artifacts-dir" "$wf/nightly.yml"
+  if has auto-assign; then
+    present "auto-assign.yml" "$wf/nightly.yml"
+    present_line "      actions: write" "$wf/nightly.yml"
+  else
+    absent "auto-assign.yml" "$wf/nightly.yml"
+    absent "actions: write" "$wf/nightly.yml"
+  fi
+else
+  test ! -e "$wf/nightly.yml"
+fi
+
 if has settings-sync; then
   test -f /tmp/smoke/.github/settings.yml
   test -f "$wf/settings-sync.yml"
@@ -287,12 +315,13 @@ fi
 # release-tags tag-immutability ruleset there (sync pins against v-tags),
 # the managed release-please.yml machinery, the repo-owned release.yml
 # pipeline plus its thin caller job in the managed ci.yml, and the config
-# files. The fuzzer module's tracking label splices into settings.yml the
-# same way.
+# files. The fuzzer and nightly modules' tracking labels splice into
+# settings.yml the same way.
 if has settings-sync; then
   if has release-please; then present "autorelease: pending" /tmp/smoke/.github/settings.yml; else absent "autorelease: pending" /tmp/smoke/.github/settings.yml; fi
   if has release-please; then present "name: release-tags" /tmp/smoke/.github/settings.yml; else absent "name: release-tags" /tmp/smoke/.github/settings.yml; fi
   if has fuzzer; then present "Automated nightly fuzz failure" /tmp/smoke/.github/settings.yml; else absent "Automated nightly fuzz failure" /tmp/smoke/.github/settings.yml; fi
+  if has nightly; then present "Automated nightly CI failure" /tmp/smoke/.github/settings.yml; else absent "Automated nightly CI failure" /tmp/smoke/.github/settings.yml; fi
 fi
 
 # Toolchain modules gate dependabot's default per-ecosystem labels in the

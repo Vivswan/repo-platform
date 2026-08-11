@@ -217,7 +217,7 @@ jobs:
           # opt-out (no fleet license rendered) is exercised; every other
           # row covers the default fleet-license render.
           - name: everything
-            modules: "[agents, bun, node, deno, uv, rust, pages, release-please, issue-templates, pr-title, auto-assign, fuzzer, settings-sync, custom-license]"
+            modules: "[agents, bun, node, deno, uv, rust, pages, release-please, issue-templates, pr-title, auto-assign, fuzzer, nightly, settings-sync, custom-license]"
             private: "false"
             expect_in_pages: |
               setup: bun,node,deno,uv
@@ -251,9 +251,11 @@ jobs:
           # The only public row where uv is the sole toolchain: CodeQL must
           # gate ci.yml with the python leg and WITHOUT the javascript leg,
           # and AGENTS.md's Toolchain section must render the uv bullet
-          # alone (every other agents+uv row pairs uv with bun).
+          # alone (every other agents+uv row pairs uv with bun). nightly
+          # rides along as the only fuzzer-free nightly render: stream
+          # independence means the fuzz starter must not render here.
           - name: uv-typical
-            modules: "[agents, uv]"
+            modules: "[agents, uv, nightly]"
             private: "false"
           # rust + fuzzer must render cargo dependabot + the Rust gitignore and
           # nothing toolchain-gated (no CodeQL block, no auto-format starter):
@@ -262,6 +264,9 @@ jobs:
           # Toolchain section is exercised with rust as the only toolchain
           # module; without auto-assign, the fuzzer starter must render no
           # auto-assign dispatch (the everything row covers the with branch).
+          # Deliberately nightly-free: the fuzzer-present/nightly-absent leg
+          # (no nightly.yml renders) - uv-typical covers the mirror leg and
+          # the everything row the co-selection.
           - name: rust-fuzzer
             modules: "[agents, rust, fuzzer]"
             private: "false"

@@ -1,11 +1,13 @@
-name: Fuzz Issue
+name: Nightly Issue
 description: >-
-  Files or updates a label-deduplicated tracking issue from a directory of
-  nightly-fuzz failure reports (report mode), or comments on and closes the
-  open issue after a green run (resolve mode). The failure-report contract
-  the artifacts directory must follow is documented in repo-platform's
-  docs/fuzzer.md. Needs issues: write and gh on the runner (preinstalled on
-  GitHub-hosted runners).
+  Files or updates a label-deduplicated tracking issue for any nightly
+  stream - fuzz or plain CI - (report mode), or comments on and closes the
+  open issue after a green run (resolve mode). With an artifacts-dir the
+  issue body is built from nightly-fuzz failure reports (the contract is
+  documented in repo-platform's docs/fuzzer.md); without one it is a
+  generic nightly-failure report (workflow, commit, run link). Needs
+  issues: write and gh on the runner (preinstalled on GitHub-hosted
+  runners).
 
 inputs:
   mode:
@@ -20,13 +22,32 @@ inputs:
     required: false
     default: Nightly fuzz failures
   artifacts-dir:
-    description: Directory of per-failure subdirectories (contract v1); required in report mode
+    description: >-
+      Directory of per-failure subdirectories (contract v1). Empty means the
+      stream has no failure artifacts: report mode files a generic
+      nightly-failure report instead.
     required: false
     default: ""
   artifact-name:
     description: Name of the uploaded workflow artifact to point readers at (optional)
     required: false
     default: ""
+  label-color:
+    description: Color used only when report mode creates the label (existing labels are never repainted)
+    required: false
+    default: "B60205"
+  label-description:
+    description: Description used only when report mode creates the label
+    required: false
+    default: Automated nightly fuzz failure
+  stream:
+    description: >-
+      Which nightly stream the issue tracks - shapes the resolve comment's
+      wording only (report bodies key on artifacts-dir). fuzz (the default,
+      what pre-existing fuzz starters get) hedges on unpinned regression
+      seeds; generic carries no fuzz notions.
+    required: false
+    default: fuzz
   token:
     description: Token used by gh; needs issues write
     required: false
@@ -53,4 +74,7 @@ runs:
         TITLE: ${{ inputs.title }}
         ARTIFACTS_DIR: ${{ inputs.artifacts-dir }}
         ARTIFACT_NAME: ${{ inputs.artifact-name }}
+        LABEL_COLOR: ${{ inputs.label-color }}
+        LABEL_DESCRIPTION: ${{ inputs.label-description }}
+        STREAM: ${{ inputs.stream }}
       run: bun "${{ github.action_path }}/fuzz-issue.ts"

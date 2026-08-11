@@ -134,6 +134,7 @@ const KNOWN_MODULES = new Set([
   "pr-title",
   "auto-assign",
   "fuzzer",
+  "nightly",
   "settings-sync",
   "custom-license",
 ]);

@@ -41,6 +41,7 @@ export const MODULE_ORDER = [
   "pr-title",
   "auto-assign",
   "fuzzer",
+  "nightly",
   "settings-sync",
   "custom-license",
 ];
@@ -106,6 +107,27 @@ export const manifestSchema = z.strictObject({
       ecosystem: z.string().regex(/^[a-z0-9-]+$/, "must be a lowercase dependabot ecosystem id"),
       label: z.string().regex(/^[a-z0-9:_-]+$/, "must be a plain lowercase label name"),
       color: z.string().regex(/^[0-9a-f]{6}$/, "must be a 6-digit lowercase hex color"),
+    })
+    .optional(),
+  // A nightly-stream module's tracking label: the copier answer recording
+  // it (the question and settings-labels fragment stay hand-written; the
+  // ssot rules anchor them here), the answer's default, and the tuple the
+  // stream's starter/action creates the label with. The fleet preflight
+  // derives its answer keys from this, so a third stream module cannot
+  // silently miss it.
+  tracking_label: z
+    .strictObject({
+      answer: z
+        .string()
+        .regex(/^[a-z][a-z0-9_]*$/, "must be a lowercase copier answer key (snake_case)"),
+      default: z
+        .string()
+        .regex(
+          /^[A-Za-z0-9._][A-Za-z0-9._: -]{0,49}$/,
+          "must be a plain label (the shape the fuzz-issue action enforces)",
+        ),
+      color: z.string().regex(/^[0-9A-Fa-f]{6}$/, "must be a 6-digit hex color"),
+      description: singleLine("the tracking-label description"),
     })
     .optional(),
   gitignore_sources: z
@@ -180,6 +202,34 @@ export function assertDependabotLabelConsistency(manifests: ModuleManifest[]): v
   }
 }
 
+/** Tracking-label streams are keyed by answer and by label: two modules
+ *  sharing either would let one stream read (or close) the other's - the
+ *  copier validator rejects equal ANSWER VALUES at generation time, but
+ *  equal answer keys or equal defaults must never exist to begin with.
+ *  Defaults compare lowercased: GitHub deduplicates label names
+ *  case-insensitively. */
+export function assertTrackingLabelUniqueness(manifests: ModuleManifest[]): void {
+  const seen = new Map<string, string>();
+  for (const manifest of manifests) {
+    if (!manifest.tracking_label) continue;
+    for (const [what, value] of [
+      ["answer", manifest.tracking_label.answer],
+      ["default", manifest.tracking_label.default],
+    ] as const) {
+      const key = `${what}:${value.toLowerCase()}`;
+      const prior = seen.get(key);
+      if (prior) {
+        throw new Error(
+          `tracking_label ${what} '${value}' is declared by both templates/${prior}/module.yml ` +
+            `and templates/${manifest.module}/module.yml - every tracking stream needs its own ` +
+            "answer key and default label (label names are case-insensitive on GitHub)",
+        );
+      }
+      seen.set(key, manifest.module);
+    }
+  }
+}
+
 /** Read and validate templates/<module>/module.yml. */
 export function readManifest(module: string, templatesDir: string = TEMPLATES_DIR): ModuleManifest {
   if (!/^[a-z][a-z0-9-]*$/.test(module)) {
@@ -207,9 +257,10 @@ export function readManifest(module: string, templatesDir: string = TEMPLATES_DI
 }
 
 /** Every module's manifest, in MODULE_ORDER, cross-checked for
- *  dependabot-label consistency. */
+ *  dependabot-label consistency and tracking-label uniqueness. */
 export function loadManifests(templatesDir: string = TEMPLATES_DIR): ModuleManifest[] {
   const manifests = MODULE_ORDER.map((module) => readManifest(module, templatesDir));
   assertDependabotLabelConsistency(manifests);
+  assertTrackingLabelUniqueness(manifests);
   return manifests;
 }

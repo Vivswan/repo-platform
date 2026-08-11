@@ -28,7 +28,7 @@ import { centralIdentityIssues } from "../.github/scripts/fleet/validate_central
 import { dependabotLabels } from "./compose_template.ts";
 import { MARKER_TOKENS } from "./generate.ts";
 import { type JinjaVars, normalizeJinja, placeholderJinja } from "./jinja_subset.ts";
-import { loadManifests } from "./module_manifests.ts";
+import { loadManifests, type ModuleManifest } from "./module_manifests.ts";
 import { ANSWERS_FILE, parseAnswers } from "./render_dogfood.ts";
 
 const REPO_ROOT = resolve(import.meta.dir, "..");
@@ -289,6 +289,23 @@ function copierChoices(question: string): string[] {
   const q = asRecord(copierConfig()[question], `copier.yml ${question}`);
   const choices = asRecord(q.choices, `copier.yml ${question}.choices`);
   return Object.values(choices).map(String);
+}
+
+/** The manifests' tracking_label streams (fuzzer, nightly, ...): the single
+ *  source the hand-written copier questions, settings-labels fragments, and
+ *  doc constants are anchored to. Throws when none declares one, so every
+ *  rule keyed on this fails loudly rather than passing vacuously. */
+function trackingManifests(): {
+  module: string;
+  tracking: NonNullable<ModuleManifest["tracking_label"]>;
+}[] {
+  const found = loadManifests().flatMap((m) =>
+    m.tracking_label ? [{ module: m.module, tracking: m.tracking_label }] : [],
+  );
+  if (found.length === 0) {
+    throw new Error("no module manifest declares tracking_label - anchor lost");
+  }
+  return found;
 }
 
 function jinjaVars(): JinjaVars {
@@ -1376,24 +1393,114 @@ const rules: Rule[] = [
         }
       }
 
-      // The fuzzer fragment's tuple must match what the action creates.
-      const fragment = parseLabels(
-        `labels:\n${placeholderJinja(normalizeJinja(read("templates/fuzzer/fragments/settings-labels.jinja"), jinjaVars()))}`,
-        "fuzzer settings-labels.jinja",
-      )[0];
+      // Tracking-label streams: each manifest's tracking_label block is the
+      // single source; the hand-written copier question and settings-labels
+      // fragment are anchored back to it here, and the create-tuple
+      // carriers (the action's defaults for the fuzz stream, the starter's
+      // overrides for the nightly stream) below.
+      for (const { module, tracking } of trackingManifests()) {
+        const question = asRecord(copierConfig()[tracking.answer], `copier.yml ${tracking.answer}`);
+        if (String(question.default) !== tracking.default) {
+          mismatches.push({
+            file: `copier.yml ${tracking.answer} default`,
+            expected: `${tracking.default} (templates/${module}/module.yml tracking_label)`,
+            got: String(question.default),
+          });
+        }
+        const fragment = parseLabels(
+          `labels:\n${placeholderJinja(normalizeJinja(read(`templates/${module}/fragments/settings-labels.jinja`), jinjaVars()))}`,
+          `${module} settings-labels.jinja`,
+        )[0];
+        if (fragment.color !== tracking.color || fragment.description !== tracking.description) {
+          mismatches.push({
+            file: `templates/${module}/fragments/settings-labels.jinja`,
+            expected: `${tracking.color} / ${tracking.description} (templates/${module}/module.yml tracking_label)`,
+            got: `${fragment.color} / ${fragment.description}`,
+          });
+        }
+      }
+
+      // The fuzz stream's create tuple lives in the action's DEFAULTS, so
+      // the fuzz starter must pass no override - asserted, so adding one
+      // later fails this rule instead of silently orphaning its premise.
+      const fuzzTracking = trackingManifests().find((m) => m.module === "fuzzer")?.tracking;
+      if (!fuzzTracking) throw new Error("templates/fuzzer/module.yml lost tracking_label");
       const action = read("actions/fuzz-issue/fuzz-issue.ts");
-      const color = mustMatch(action, /"--color",\s*"([^"]+)"/, "fuzz-issue.ts", "label color")[1];
+      const color = mustMatch(
+        action,
+        /DEFAULT_LABEL_COLOR = "([^"]+)"/,
+        "fuzz-issue.ts",
+        "label color",
+      )[1];
       const description = mustMatch(
         action,
-        /"--description",\s*"([^"]+)"/,
+        /DEFAULT_LABEL_DESCRIPTION = "([^"]+)"/,
         "fuzz-issue.ts",
         "label description",
       )[1];
-      if (fragment.color !== color || fragment.description !== description) {
+      if (color !== fuzzTracking.color || description !== fuzzTracking.description) {
         mismatches.push({
-          file: "templates/fuzzer/fragments/settings-labels.jinja",
-          expected: `${color} / ${description} (actions/fuzz-issue/fuzz-issue.ts)`,
-          got: `${fragment.color} / ${fragment.description}`,
+          file: "actions/fuzz-issue/fuzz-issue.ts label defaults",
+          expected: `${fuzzTracking.color} / ${fuzzTracking.description} (templates/fuzzer/module.yml tracking_label)`,
+          got: `${color} / ${description}`,
+        });
+      }
+      const fuzzStarter = read("templates/fuzzer/.github/workflows/nightly-fuzz.yml.jinja");
+      if (/label-(?:color|description):/.test(fuzzStarter)) {
+        mismatches.push({
+          file: "templates/fuzzer/.github/workflows/nightly-fuzz.yml.jinja",
+          expected:
+            "no label-color/label-description override (the fuzz tuple is anchored to the action's defaults)",
+          got: "an override - anchor this rule to it instead",
+        });
+      }
+      // The fuzz starter's explicit title must stay the action's title
+      // default: already-rendered fleet starters omit the input and depend
+      // on the default (the action's own test pins DEFAULT_TITLE to it).
+      const titleDefault = mustMatch(
+        read("actions/fuzz-issue/action.yml"),
+        /^ {2}title:\n(?: {4}.+\n)*? {4}default: (.+)$/m,
+        "actions/fuzz-issue/action.yml",
+        "title default",
+      )[1];
+      const starterTitle = mustMatch(
+        fuzzStarter,
+        /^ {10}title: (.+)$/m,
+        "nightly-fuzz.yml.jinja",
+        "title input",
+      )[1];
+      if (starterTitle !== titleDefault) {
+        mismatches.push({
+          file: "templates/fuzzer/.github/workflows/nightly-fuzz.yml.jinja title",
+          expected: `${titleDefault} (actions/fuzz-issue/action.yml title default)`,
+          got: starterTitle,
+        });
+      }
+
+      // The nightly stream's create tuple is passed by its starter.
+      const nightlyTracking = trackingManifests().find((m) => m.module === "nightly")?.tracking;
+      if (!nightlyTracking) throw new Error("templates/nightly/module.yml lost tracking_label");
+      const starter = read("templates/nightly/.github/workflows/nightly.yml.jinja");
+      const starterColor = mustMatch(
+        starter,
+        /label-color: "([^"]+)"/,
+        "nightly.yml.jinja",
+        "label-color input",
+      )[1];
+      const starterDescription = mustMatch(
+        starter,
+        /label-description: (.+)/,
+        "nightly.yml.jinja",
+        "label-description input",
+      )[1];
+      if (
+        starterColor !== nightlyTracking.color ||
+        starterDescription !== nightlyTracking.description
+      ) {
+        mismatches.push({
+          file: "templates/nightly/.github/workflows/nightly.yml.jinja label overrides",
+          expected: `${nightlyTracking.color} / ${nightlyTracking.description} (templates/nightly/module.yml tracking_label)`,
+          got: `${starterColor} / ${starterDescription}`,
         });
       }
       return mismatches;
@@ -1578,18 +1685,16 @@ const rules: Rule[] = [
   },
 
   {
-    name: "fuzzer-label-regex",
+    // Every tracking-label copier question (one per manifest tracking_label
+    // stream) must validate exactly the shape the fuzz-issue action
+    // enforces, and every later stream's validator must carry the
+    // case-insensitive cross-answer collision clause against each earlier
+    // answer - the validator is the ONLY collision boundary for
+    // settings-sync repos (the fleet preflight covers central ones), so
+    // deleting the clause must fail here.
+    name: "tracking-label-regex",
     run: () => {
-      const question = asRecord(copierConfig().fuzzer_label, "copier.yml fuzzer_label");
-      const validator = String(question.validator ?? "");
-      const copierRe = zToDollar(
-        mustMatch(
-          validator,
-          /regex_search\('([^']+)'\)/,
-          "copier.yml fuzzer_label validator",
-          "pattern",
-        )[1],
-      );
+      const mismatches: Mismatch[] = [];
       const action = read("actions/fuzz-issue/fuzz-issue.ts");
       const labelRe = mustMatch(
         action,
@@ -1597,10 +1702,37 @@ const rules: Rule[] = [
         "fuzz-issue.ts",
         "LABEL_RE",
       )[1];
-      if (copierRe === labelRe) return [];
-      return [
-        { file: "actions/fuzz-issue/fuzz-issue.ts LABEL_RE", expected: copierRe, got: labelRe },
-      ];
+      const streams = trackingManifests();
+      for (const [index, { tracking }] of streams.entries()) {
+        const question = asRecord(copierConfig()[tracking.answer], `copier.yml ${tracking.answer}`);
+        const validator = String(question.validator ?? "");
+        const copierRe = zToDollar(
+          mustMatch(
+            validator,
+            /regex_search\('([^']+)'\)/,
+            `copier.yml ${tracking.answer} validator`,
+            "pattern",
+          )[1],
+        );
+        if (copierRe !== labelRe) {
+          mismatches.push({
+            file: `copier.yml ${tracking.answer} validator`,
+            expected: `${labelRe} (actions/fuzz-issue/fuzz-issue.ts LABEL_RE)`,
+            got: copierRe,
+          });
+        }
+        for (const earlier of streams.slice(0, index)) {
+          const clause = `${tracking.answer} | lower == ${earlier.tracking.answer} | lower`;
+          if (!validator.includes(clause)) {
+            mismatches.push({
+              file: `copier.yml ${tracking.answer} validator`,
+              expected: `the collision clause '${clause}' (streams sharing a label close each other's issues)`,
+              got: "missing",
+            });
+          }
+        }
+      }
+      return mismatches;
     },
   },
 
@@ -1695,17 +1827,6 @@ const rules: Rule[] = [
         });
       }
 
-      const fuzzDefault = String(asRecord(copierConfig().fuzzer_label, "fuzzer_label").default);
-      for (const doc of ["docs/fuzzer.md", "docs/settings.md"]) {
-        if (!handProse(doc).includes(`\`${fuzzDefault}\``)) {
-          mismatches.push({
-            file: doc,
-            expected: `the fuzzer_label default \`${fuzzDefault}\``,
-            got: "missing",
-          });
-        }
-      }
-
       const settingsProse = handProse("docs/settings.md");
       // Only the two labels the hand prose quotes: the per-toolchain
       // dependabot labels sit in generated dependabot-labels regions
@@ -1726,16 +1847,28 @@ const rules: Rule[] = [
           });
         }
       }
-      const fuzzColor = parseLabels(
-        `labels:\n${placeholderJinja(normalizeJinja(read("templates/fuzzer/fragments/settings-labels.jinja"), jinjaVars()))}`,
-        "fuzzer settings-labels.jinja",
-      )[0].color;
-      if (!settingsProse.includes(`\`${fuzzColor}\``)) {
-        mismatches.push({
-          file: "docs/settings.md",
-          expected: `the fuzz label color \`${fuzzColor}\``,
-          got: "missing",
-        });
+
+      // Every tracking stream's copier default is quoted in its module doc
+      // and in docs/settings.md, whose hand prose also quotes the label
+      // color (the manifest is the fragments' anchor, so the docs follow
+      // the same source).
+      for (const { module, tracking } of trackingManifests()) {
+        for (const doc of [`docs/${module}.md`, "docs/settings.md"]) {
+          if (!handProse(doc).includes(`\`${tracking.default}\``)) {
+            mismatches.push({
+              file: doc,
+              expected: `the ${tracking.answer} default \`${tracking.default}\``,
+              got: "missing",
+            });
+          }
+        }
+        if (!settingsProse.includes(`\`${tracking.color}\``)) {
+          mismatches.push({
+            file: "docs/settings.md",
+            expected: `the ${module} tracking label color \`${tracking.color}\``,
+            got: "missing",
+          });
+        }
       }
       return mismatches;
     },

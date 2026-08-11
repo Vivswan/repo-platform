@@ -98,6 +98,10 @@ jobs:
         with:
           mode: report
           label: {{ fuzzer_label | tojson }}
+          # Explicit even though it matches the action's default: repos
+          # rendered before the action served multiple streams rely on the
+          # default, so it can never change - new renders should not.
+          title: Nightly fuzz failures
           artifacts-dir: .fuzz-failures
           artifact-name: fuzz-failures-{% raw %}${{ github.run_attempt }}{% endraw %}
 

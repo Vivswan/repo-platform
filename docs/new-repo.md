@@ -42,9 +42,10 @@ follows released `templates/vX.Y.Z` build tags and runs migrations;
 `staging` follows every main merge, migrations skipped), a `modules`<!-- BEGIN GENERATED: module-roster (scripts/generate.ts - edit module.yml manifests, not this block) -->
 multiselect (any combination of `agents`, `bun`, `node`, `deno`, `uv`,
 `rust`, `pages`, `release-please`, `issue-templates`, `pr-title`,
-`auto-assign`, `fuzzer`, `settings-sync`, `custom-license`), follow-up
-parameters for modules that have them (see [docs/pages.md](pages.md) and
-[docs/fuzzer.md](fuzzer.md)), and visibility.<!-- END GENERATED: module-roster -->
+`auto-assign`, `fuzzer`, `nightly`, `settings-sync`, `custom-license`),
+follow-up parameters for modules that have them (see
+[docs/pages.md](pages.md), [docs/fuzzer.md](fuzzer.md), and
+[docs/nightly.md](nightly.md)), and visibility.<!-- END GENERATED: module-roster -->
 Answers are recorded in `.copier-answers.yml`; never delete that file,
 `copier update` depends on it.
 
@@ -112,6 +113,11 @@ own checks:
   artifact upload, tracking-issue filing, and auto-close on green. Replace
   the placeholder with your fuzzer; see [docs/fuzzer.md](fuzzer.md) for the
   failure-report contract it must write.
+- with the nightly module: a repo-owned `nightly.yml` starter that runs a
+  placeholder step nightly and files (or updates) a label-deduplicated
+  tracking issue on failure, closing it on the next green night. Move the
+  repository's slow nightly checks into it; see
+  [docs/nightly.md](nightly.md).
 
 See the [all-green convention](all-green.md) for how the gate works.
 
