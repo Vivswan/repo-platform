@@ -11,10 +11,11 @@
 // on missing folders/manifests, unknown keys, or invalid values, so a typo
 // in a manifest fails whichever consumer touches it first.
 //
-// Manifest strings are interpolated into YAML and Jinja by generate.ts, so
-// the schema refuses (rather than escapes) anything that would change
-// meaning there: newlines anywhere, YAML comment/mapping metacharacters in
-// descriptions, single quotes in Jinja-quoted commands.
+// Manifest strings are interpolated into YAML, Jinja, and markdown by
+// generate.ts, so the schema refuses (rather than escapes) anything that
+// would change meaning there: newlines anywhere, YAML comment/mapping
+// metacharacters in descriptions, single quotes in Jinja-quoted commands,
+// and pipes or backticks in strings that land inside markdown table cells.
 
 import { existsSync, lstatSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -57,6 +58,13 @@ const jinjaQuoted = (what: string) =>
     message: `${what} must not contain ', ", or \\ (it lands inside Jinja quotes within a YAML double-quoted scalar)`,
   });
 
+// Lands inside a markdown table cell in the generated docs: "|" would end
+// the cell early and a backtick would open or close a code span around it.
+const mdCellSafe = <T extends z.ZodType<string>>(schema: T, what: string) =>
+  schema.refine((value) => !/[|`]/.test(value), {
+    message: `${what} must not contain "|" or a backtick (it lands inside a markdown table cell in the generated docs)`,
+  });
+
 // The copier choice text: generate.ts renders it as the YAML mapping line
 // `<module> - <description>: <module>`, where ": " would end the key early
 // and "#" would start a comment.
@@ -96,7 +104,10 @@ const manifestSchema = z.strictObject({
       color: z.string().regex(/^[0-9a-f]{6}$/, "must be a 6-digit lowercase hex color"),
     })
     .optional(),
-  gitignore_sources: z.array(singleLine("each gitignore source")).min(1).optional(),
+  gitignore_sources: z
+    .array(mdCellSafe(singleLine("each gitignore source"), "each gitignore source"))
+    .min(1)
+    .optional(),
   // Patterns land inside a Jinja '...' literal in the generated gitleaks
   // allowlist line, so a single quote would end that literal early.
   lockfiles: z
@@ -110,8 +121,8 @@ const manifestSchema = z.strictObject({
     .optional(),
   pages: z
     .strictObject({
-      install: jinjaQuoted("the install command"),
-      build: jinjaQuoted("the build command"),
+      install: mdCellSafe(jinjaQuoted("the install command"), "the install command"),
+      build: mdCellSafe(jinjaQuoted("the build command"), "the build command"),
     })
     .optional(),
   gate: z.string().min(1).optional(),
@@ -167,6 +178,12 @@ export function assertDependabotLabelConsistency(manifests: ModuleManifest[]): v
 
 /** Read and validate templates/<module>/module.yml. */
 export function readManifest(module: string, templatesDir: string = TEMPLATES_DIR): ModuleManifest {
+  if (!/^[a-z][a-z0-9-]*$/.test(module)) {
+    throw new Error(
+      `module name '${module}' must match ^[a-z][a-z0-9-]*$ - it is embedded ` +
+        "in jinja gates, YAML keys, and markdown table cells",
+    );
+  }
   const where = `templates/${module}/module.yml`;
   const folder = join(templatesDir, module);
   if (!existsSync(folder) || !lstatSync(folder).isDirectory()) {

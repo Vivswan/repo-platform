@@ -39,14 +39,14 @@ git commit -m "chore: initialize from repo-platform"
 
 Copier asks for project name, description, an update **channel** (`latest`
 follows released `templates/vX.Y.Z` build tags and runs migrations;
-`staging` follows every main merge, migrations skipped), a `modules`
+`staging` follows every main merge, migrations skipped), a `modules`<!-- BEGIN GENERATED: module-roster (scripts/generate.ts - edit module.yml manifests, not this block) -->
 multiselect (any combination of `agents`, `bun`, `uv`, `rust`, `pages`,
 `release-please`, `issue-templates`, `pr-title`, `auto-assign`, `fuzzer`,
-`settings-sync`, `custom-license`), follow-up
-parameters for modules that have them (see [docs/pages.md](pages.md) and
-[docs/fuzzer.md](fuzzer.md)), and
-visibility. Answers are recorded in `.copier-answers.yml`; never delete
-that file, `copier update` depends on it.
+`settings-sync`, `custom-license`), follow-up parameters for modules that
+have them (see [docs/pages.md](pages.md) and [docs/fuzzer.md](fuzzer.md)),
+and visibility.<!-- END GENERATED: module-roster -->
+Answers are recorded in `.copier-answers.yml`; never delete that file,
+`copier update` depends on it.
 
 The chosen modules also land in `.repo-platform.yml`, and that file is the
 selection's home from then on: edit its `modules:` list and the next sync
@@ -172,9 +172,10 @@ Since undeclared labels are deleted, the list must include the labels
 dependabot auto-creates, or the two sides loop forever: every apply
 deletes them, dependabot recreates them on its next run. That means
 `dependencies` (color `0366d6`) and `github_actions` (`000000`) always,
-plus one label per toolchain the repo's dependabot.yml covers:
+plus one label per toolchain the repo's dependabot.yml covers:<!-- BEGIN GENERATED: dependabot-labels (scripts/generate.ts - edit module.yml manifests, not this block) -->
 `javascript` (`168700`) for bun, `python:uv` (`2b67c6`) for uv, `rust`
-(`000000`) for cargo. The exact descriptions are in
+(`000000`) for cargo.<!-- END GENERATED: dependabot-labels -->
+The exact descriptions are in
 `templates/settings-sync/.github/settings.yml.jinja`.
 
 The easiest start is copying `settings/repos/repo-platform.yml` and

@@ -4,16 +4,29 @@
 
 import { describe, expect, test } from "bun:test";
 import {
+  dependabotLabelGroups,
+  gitignoreUpstreamMap,
   hasToolchainDefault,
   knownModules,
   markerLines,
+  mdMarkers,
   moduleChoices,
+  newRepoDependabotLabels,
+  newRepoModuleRoster,
   type PagesManifest,
   pagesBuildCommand,
+  pagesBuildRow,
   pagesInstallCommand,
+  pagesInstallRow,
   pagesManifests,
   pagesSetup,
+  pagesSetupDefault,
+  pagesSetupMeaning,
+  readmeModuleRoster,
+  settingsDependabotLabels,
+  spliceInlineRegion,
   spliceRegion,
+  wrapProse,
 } from "../../scripts/generate";
 import type { ModuleManifest } from "../../scripts/module_manifests";
 
@@ -24,14 +37,22 @@ function manifest(module: string, extra: Partial<ModuleManifest> = {}): ModuleMa
 const BUN = manifest("bun", {
   description: "TypeScript/bun toolchain",
   toolchain: { codeql_language: "javascript-typescript" },
+  dependabot: { ecosystem: "bun", label: "javascript", color: "168700" },
+  gitignore_sources: ["Node.gitignore", "bun.gitignore"],
   pages: { install: "bun install --frozen-lockfile", build: "bun run build" },
 }) as PagesManifest;
 const UV = manifest("uv", {
   description: "Python/uv toolchain",
   toolchain: { codeql_language: "python" },
+  dependabot: { ecosystem: "uv", label: "python:uv", color: "2b67c6" },
+  gitignore_sources: ["Python.gitignore"],
   pages: { install: "uv sync", build: "uv run mkdocs build --site-dir dist" },
 }) as PagesManifest;
-const RUST = manifest("rust", { description: "Rust/cargo toolchain" });
+const RUST = manifest("rust", {
+  description: "Rust/cargo toolchain",
+  dependabot: { ecosystem: "cargo", label: "rust", color: "000000" },
+  gitignore_sources: ["Rust.gitignore"],
+});
 
 describe("spliceRegion", () => {
   const { begin, end } = markerLines("demo", "#");
@@ -68,6 +89,10 @@ describe("spliceRegion", () => {
   test("a marker with trailing prose does not count as the marker", () => {
     const decorated = text.replace(`  ${end}`, `  ${end} (moved)`);
     expect(() => spliceRegion(decorated, "f.yml", "demo", "#", [])).toThrow("exactly one");
+  });
+
+  test("a body smuggling its own marker text throws", () => {
+    expect(() => spliceRegion(text, "f.yml", "demo", "#", [`x ${end} y`])).toThrow("marker text");
   });
 });
 
@@ -130,5 +155,200 @@ describe("region builders", () => {
       '  "rust",',
       "]);",
     ]);
+  });
+});
+
+describe("mdMarkers", () => {
+  test("wraps each marker in an HTML comment", () => {
+    expect(mdMarkers("roster")).toEqual({
+      begin:
+        "<!-- BEGIN GENERATED: roster (scripts/generate.ts - edit module.yml manifests, not this block) -->",
+      end: "<!-- END GENERATED: roster -->",
+    });
+  });
+});
+
+describe("spliceInlineRegion", () => {
+  const { begin, end } = mdMarkers("cell");
+  const row = `| a | ${begin}old body${end} |`;
+
+  test("a string body replaces a table-cell substring, keeping the markers", () => {
+    expect(spliceInlineRegion(row, "f.md", "cell", "new body")).toBe(
+      `| a | ${begin}new body${end} |`,
+    );
+  });
+
+  test("a string[] body is a span starting on a fresh line after BEGIN", () => {
+    const span = mdMarkers("span");
+    const text = `lead-in,${span.begin}\nold one\nold two${span.end}\ntail`;
+    expect(spliceInlineRegion(text, "f.md", "span", ["new one", "new two", "new three"])).toBe(
+      `lead-in,${span.begin}\nnew one\nnew two\nnew three${span.end}\ntail`,
+    );
+  });
+
+  test("is idempotent for both body shapes", () => {
+    const onceCell = spliceInlineRegion(row, "f.md", "cell", "x");
+    expect(spliceInlineRegion(onceCell, "f.md", "cell", "x")).toBe(onceCell);
+    const span = mdMarkers("span");
+    const text = `lead,${span.begin}\nbody${span.end}`;
+    const onceSpan = spliceInlineRegion(text, "f.md", "span", ["a", "b"]);
+    expect(spliceInlineRegion(onceSpan, "f.md", "span", ["a", "b"])).toBe(onceSpan);
+  });
+
+  test("a missing marker throws, naming file and region", () => {
+    expect(() => spliceInlineRegion("| a | b |", "f.md", "cell", "x")).toThrow("f.md");
+    expect(() => spliceInlineRegion("| a | b |", "f.md", "cell", "x")).toThrow("'cell'");
+  });
+
+  test("a duplicated marker throws", () => {
+    expect(() => spliceInlineRegion(`${row}${begin}`, "f.md", "cell", "x")).toThrow("exactly one");
+  });
+
+  test("an END before BEGIN throws", () => {
+    expect(() => spliceInlineRegion(`${end}body${begin}`, "f.md", "cell", "x")).toThrow(
+      "before BEGIN",
+    );
+  });
+
+  test("a newline in a table-cell body throws", () => {
+    expect(() => spliceInlineRegion(row, "f.md", "cell", "a\nb")).toThrow("single line");
+  });
+
+  test("a body smuggling its own marker text throws", () => {
+    expect(() => spliceInlineRegion(row, "f.md", "cell", `x ${end} y`)).toThrow("marker text");
+    expect(() => spliceInlineRegion(row, "f.md", "cell", `x ${begin} y`)).toThrow("marker text");
+  });
+});
+
+describe("wrapProse", () => {
+  test("greedy-wraps at the width, prefixing and indenting", () => {
+    expect(wrapProse("one two three", { firstPrefix: "- ", indent: "  ", width: 9 })).toEqual([
+      "- one two",
+      "  three",
+    ]);
+  });
+
+  test("keeps a word longer than the width on its own line", () => {
+    expect(wrapProse("aa unbreakable bb", { width: 4 })).toEqual(["aa", "unbreakable", "bb"]);
+  });
+
+  test("collapses runs of whitespace", () => {
+    expect(wrapProse("a  b\n c", { width: 75 })).toEqual(["a b c"]);
+  });
+
+  test("empty text wraps to no lines", () => {
+    expect(wrapProse("  ")).toEqual([]);
+  });
+});
+
+describe("docs region builders", () => {
+  test("readmeModuleRoster keeps the module-list rule's sentence anchor", () => {
+    const text = readmeModuleRoster([BUN, UV, RUST]).join("\n");
+    // The same extraction check_ssot's module-list rule performs.
+    const region = text.match(/Modules \(pick any combination\):([\s\S]*?)\. /);
+    expect(region).not.toBeNull();
+    expect([...(region as RegExpMatchArray)[1].matchAll(/`([a-z-]+)`/g)].map((m) => m[1])).toEqual([
+      "bun",
+      "uv",
+      "rust",
+    ]);
+    expect(text).toContain("ask follow-up questions only when selected.");
+  });
+
+  test("readmeModuleRoster opens with the heading-separating blank line, then a 75-column bullet", () => {
+    const lines = readmeModuleRoster([BUN, UV, RUST]);
+    expect(lines[0]).toBe("");
+    expect(lines[1]).toStartWith("- Modules (pick any combination): `bun`,");
+    for (const line of lines.slice(2)) expect(line).toStartWith("  ");
+    for (const line of lines) expect(line.length).toBeLessThanOrEqual(75);
+  });
+
+  test("newRepoModuleRoster keeps the module-list rule's paren anchor and ends its sentence", () => {
+    const text = newRepoModuleRoster([BUN, RUST]).join("\n");
+    const region = text.match(/any combination of([\s\S]*?)\)/);
+    expect(region).not.toBeNull();
+    expect([...(region as RegExpMatchArray)[1].matchAll(/`([a-z-]+)`/g)].map((m) => m[1])).toEqual([
+      "bun",
+      "rust",
+    ]);
+    expect(text).toEndWith("and visibility.");
+  });
+
+  test("gitignoreUpstreamMap maps each module's upstream templates", () => {
+    const cell = gitignoreUpstreamMap([BUN, UV, RUST]);
+    expect(cell).toContain("the bun/uv/rust toolchain fragments");
+    expect(cell).toContain(
+      "(Windows + macOS + Linux always, Node + bun / Python / Rust by bun/uv/rust module)",
+    );
+    expect(() => gitignoreUpstreamMap([manifest("agents")])).toThrow("gitignore_sources");
+  });
+
+  test("gitignoreUpstreamMap names a shared upstream once, under its first declaring module", () => {
+    const node = manifest("node", { gitignore_sources: ["Node.gitignore"] });
+    expect(gitignoreUpstreamMap([BUN, node, UV])).toContain(
+      "(Windows + macOS + Linux always, Node + bun / Python by bun/node/uv module)",
+    );
+  });
+
+  test("dependabotLabelGroups dedupes labels AND repeated ecosystems", () => {
+    const node = manifest("node", {
+      dependabot: { ecosystem: "npm", label: "javascript", color: "168700" },
+    });
+    const npmTwin = manifest("npm-twin", {
+      dependabot: { ecosystem: "npm", label: "javascript", color: "168700" },
+    });
+    expect(dependabotLabelGroups([BUN, node, npmTwin, UV])).toEqual([
+      { label: "javascript", color: "168700", ecosystems: ["bun", "npm"] },
+      { label: "python:uv", color: "2b67c6", ecosystems: ["uv"] },
+    ]);
+    expect(() => dependabotLabelGroups([manifest("agents")])).toThrow("dependabot");
+  });
+
+  test("the label prose lists ecosystems with and/serial-comma grammar", () => {
+    const node = manifest("node", {
+      dependabot: { ecosystem: "npm", label: "javascript", color: "168700" },
+    });
+    const yarn = manifest("yarn", {
+      dependabot: { ecosystem: "yarn", label: "javascript", color: "168700" },
+    });
+    expect(newRepoDependabotLabels([BUN, UV]).join("\n")).toContain(
+      "`javascript` (`168700`) for bun, `python:uv` (`2b67c6`) for uv.",
+    );
+    expect(newRepoDependabotLabels([BUN, node, UV]).join("\n")).toContain(
+      "for bun and npm, `python:uv`",
+    );
+    expect(newRepoDependabotLabels([BUN, node, yarn]).join("\n")).toContain(
+      "for bun, npm, and yarn.",
+    );
+  });
+
+  test("settingsDependabotLabels indents into the docs bullet and ends its sentence", () => {
+    const lines = settingsDependabotLabels([BUN, UV, RUST]);
+    expect(lines[0]).toStartWith("  `javascript` (`168700`) for bun");
+    expect(lines[lines.length - 1]).toEndWith("for cargo.");
+    for (const line of lines) {
+      expect(line).toStartWith("  ");
+      expect(line.length).toBeLessThanOrEqual(75);
+    }
+  });
+
+  test("pages cells render token list, example, and command defaults", () => {
+    expect(pagesSetupMeaning([BUN, UV])).toBe(
+      "Toolchain(s) installed on the build runner (comma-separated `bun`/`uv`, or `none`)",
+    );
+    expect(pagesSetupDefault([BUN, UV])).toBe(
+      "every selected toolchain module joined with commas (e.g. `bun,uv`), else `none`",
+    );
+    expect(pagesInstallRow([BUN, UV])).toBe("`bun install --frozen-lockfile` / `uv sync` / empty");
+    expect(pagesBuildRow([BUN, UV])).toBe(
+      "`bun run build` / `uv run mkdocs build --site-dir dist`",
+    );
+  });
+
+  test("a single pages module drops the comma-separated phrasing", () => {
+    expect(pagesSetupMeaning([BUN])).toBe(
+      "Toolchain installed on the build runner (`bun` or `none`)",
+    );
+    expect(pagesSetupDefault([BUN])).toBe("`bun` when that module is selected, else `none`");
   });
 });

@@ -165,6 +165,27 @@ describe("parseManifest", () => {
     ).toThrow("Jinja quotes");
   });
 
+  test("strings that land in markdown table cells reject pipes and backticks", () => {
+    const withPages = (install: string, build = "demo build") =>
+      `description: x\npages:\n  install: ${install}\n  build: ${build}\n`;
+    expect(() => parseManifest("demo", withPages("demo install | tee log"), WHERE)).toThrow(
+      "markdown table cell",
+    );
+    expect(() =>
+      parseManifest("demo", withPages("demo install", "demo build `sub`"), WHERE),
+    ).toThrow("markdown table cell");
+    expect(() =>
+      parseManifest("demo", 'description: x\ngitignore_sources:\n  - "we|rd.gitignore"\n', WHERE),
+    ).toThrow("markdown table cell");
+    expect(() =>
+      parseManifest(
+        "demo",
+        'description: x\ngitignore_sources:\n  - "back`tick.gitignore"\n',
+        WHERE,
+      ),
+    ).toThrow("markdown table cell");
+  });
+
   test("an unquoted gate that parses as a boolean fails the string type", () => {
     expect(() => parseManifest("demo", "description: x\ngate: true\n", WHERE)).toThrow("gate");
   });
@@ -226,6 +247,12 @@ describe("readManifest", () => {
 
   test("a folder without module.yml fails loudly", () => {
     expect(() => readManifest("bare", templates)).toThrow("templates/bare/module.yml is missing");
+  });
+
+  test("a module name unsafe for gates, YAML, or table cells fails loudly", () => {
+    for (const name of ["Demo", "de|mo", "de mo", "3demo", "de`mo"]) {
+      expect(() => readManifest(name, templates)).toThrow("must match");
+    }
   });
 });
 

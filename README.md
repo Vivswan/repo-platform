@@ -25,14 +25,14 @@ self-apply of a repo's own settings file.
 - `templates/` on main holds the sources; the composed tree that copier
   renders lands on the build branches.
 
-### Modules and channels
+### Modules and channels<!-- BEGIN GENERATED: module-roster (scripts/generate.ts - edit module.yml manifests, not this block) -->
 
 - Modules (pick any combination): `agents`, `bun`, `uv`, `rust`, `pages`,
   `release-please`, `issue-templates`, `pr-title`, `auto-assign`, `fuzzer`,
   `settings-sync`, `custom-license`. Modules with parameters (like `pages`)
   ask follow-up questions only when selected. After generation, module
   selection lives in each repo's own `.repo-platform.yml`: edit its
-  `modules:` list and the next sync applies the change.
+  `modules:` list and the next sync applies the change.<!-- END GENERATED: module-roster -->
 - Channel `latest`: follows released `templates/vX.Y.Z` build tags;
   migrations run between releases.
 - Channel `staging`: follows the staging branch head; migrations are
@@ -134,7 +134,7 @@ each fixed PR needs a close/reopen for its checks to appear).
 | `actions/validate-commit-names` | Conventional Commit subjects on every push/PR commit |
 | `actions/fuzz-issue` | Files/updates the label-deduplicated nightly-fuzz tracking issue, closes it on green (used by the fuzzer module's starter, [docs](docs/fuzzer.md)) |
 | `actions/release-health` | Gates releases: open fuzz/blocker issues and open Dependabot alerts block, an override label on the release PR bypasses with warnings |
-| `scripts/build_gitignore.ts` | Regenerates the gitignore outputs (`templates/base/.gitignore.jinja`, the bun/uv/rust toolchain fragments, this repo's `.gitignore`) from the latest [github/gitignore](https://github.com/github/gitignore) (Windows + macOS + Linux always, Node + bun / Python / Rust by bun/uv/rust module) |
+| `scripts/build_gitignore.ts` | <!-- BEGIN GENERATED: gitignore-upstream-map (scripts/generate.ts - edit module.yml manifests, not this block) -->Regenerates the gitignore outputs (`templates/base/.gitignore.jinja`, the bun/uv/rust toolchain fragments, this repo's `.gitignore`) from the latest [github/gitignore](https://github.com/github/gitignore) (Windows + macOS + Linux always, Node + bun / Python / Rust by bun/uv/rust module)<!-- END GENERATED: gitignore-upstream-map --> |
 | `migrations/` | Copier `_migrations` scripts (TypeScript, run with bun) for breaking changes |
 | `docs/` | [all-green convention](docs/all-green.md), [new repo](docs/new-repo.md), [pages module](docs/pages.md), [fuzzer module](docs/fuzzer.md), [settings](docs/settings.md), [eject](docs/eject.md) |
 
