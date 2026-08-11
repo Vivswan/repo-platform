@@ -74,6 +74,7 @@ modules:
   type: str
   help: Feature modules (space toggles, enter confirms; any combination)
   multiselect: true
+  # BEGIN GENERATED: module-choices (scripts/generate.ts - edit module.yml manifests, not this block)
   choices:
     agents - AGENTS.md agent instructions, agent-file symlinks, Copilot setup: agents
     bun - TypeScript/bun toolchain (gitignore, dependabot, CodeQL JS): bun
@@ -87,6 +88,7 @@ modules:
     fuzzer - nightly fuzz starter with issue filing, replay inputs, auto-close: fuzzer
     settings-sync - in-repo .github/settings.yml applied with the repo's own PAT: settings-sync
     custom-license - repo carries its own license in LICENSE.md; the fleet license is not rendered: custom-license
+  # END GENERATED: module-choices
   # settings-sync is deliberately NOT a default: central settings
   # (settings/repos/<name>.yml in repo-platform) are the default home.
   default: [agents, release-please, issue-templates, pr-title, auto-assign]
@@ -111,20 +113,26 @@ topics:
 pages_setup:
   type: str
   help: Toolchain(s) installed on the Pages build runner (comma-separated bun/uv, or none)
+  # BEGIN GENERATED: pages-setup (scripts/generate.ts - edit module.yml manifests, not this block)
   default: "{{ ((['bun'] if 'bun' in modules else []) + (['uv'] if 'uv' in modules else [])) | join(',') or 'none' }}"
   validator: "{% set ts = pages_setup.split(',') %}{% if '' in ts or ts | map('trim') | list != ts %}pages_setup must be comma-separated with no spaces or empty tokens{% elif ts | reject('in', ['bun', 'uv', 'none']) | list %}pages_setup tokens must be bun, uv, or none{% elif ts | unique | list | length != ts | length %}pages_setup tokens must be unique{% elif 'none' in ts and ts | length > 1 %}pages_setup 'none' cannot be combined with toolchains{% endif %}"
+  # END GENERATED: pages-setup
   when: "{{ 'pages' in modules }}"
 
 pages_install_command:
   type: str
   help: Dependency install command run before each build (empty to skip)
+  # BEGIN GENERATED: pages-install-command (scripts/generate.ts - edit module.yml manifests, not this block)
   default: "{{ 'bun install --frozen-lockfile' if 'bun' in pages_setup.split(',') else ('uv sync' if 'uv' in pages_setup.split(',') else '') }}"
+  # END GENERATED: pages-install-command
   when: "{{ 'pages' in modules }}"
 
 pages_build_command:
   type: str
   help: Build command; PAGES_BASE_PATH, PAGES_ORIGIN, PAGES_STAGING are exported
+  # BEGIN GENERATED: pages-build-command (scripts/generate.ts - edit module.yml manifests, not this block)
   default: "{{ 'bun run build' if 'bun' in pages_setup.split(',') else ('uv run mkdocs build --site-dir dist' if 'uv' in pages_setup.split(',') else '') }}"
+  # END GENERATED: pages-build-command
   validator: "{% if not pages_build_command %}A build command is required for the pages module{% endif %}"
   when: "{{ 'pages' in modules }}"
 
@@ -192,15 +200,17 @@ copyright_holder:
   default: Vivswan Shah (https://github.com/Vivswan)
   when: "{{ 'custom-license' not in modules }}"
 
-# Computed - never asked. The single place that defines which modules count
-# as language toolchains: gates the auto-format starter and feeds
-# enable_codeql. Extend this expression when adding a language module.
-# rust is deliberately NOT counted: it contributes no CodeQL language and no
-# auto-format command, so counting it would render an empty codeql block (and
-# a pointless weekly cron) for a public rust-only repo.
+# Computed - never asked. Which modules count as language toolchains comes
+# from each module.yml manifest's `toolchain` key: it gates the auto-format
+# starter and feeds enable_codeql. rust deliberately omits the key: it
+# contributes no CodeQL language and no auto-format command, so counting it
+# would render an empty codeql block (and a pointless weekly cron) for a
+# public rust-only repo.
 has_toolchain:
   type: bool
+  # BEGIN GENERATED: has-toolchain-default (scripts/generate.ts - edit module.yml manifests, not this block)
   default: "{{ 'bun' in modules or 'uv' in modules }}"
+  # END GENERATED: has-toolchain-default
   when: false
 
 # Computed - never asked. CodeQL code scanning is available on public repos
