@@ -19,7 +19,7 @@ on:
   workflow_call:
     inputs:
       setup:
-        description: Toolchain(s) installed on the build runner (comma-separated bun/uv, or none)
+        description: Toolchain(s) installed on the build runner (comma-separated bun/node/deno/uv, or none)
         required: false
         type: string
         default: none
@@ -80,14 +80,14 @@ jobs:
         run: |
           case "$SETUP" in
             ''|*[!a-z,]*|,*|*,|*,,*)
-              echo "::error::invalid setup input '$SETUP': it must be a comma-separated list of bun/uv, or none (no spaces or empty tokens). Fix the setup value in the workflow that calls reusable-pages.yml."; exit 1 ;;
+              echo "::error::invalid setup input '$SETUP': it must be a comma-separated list of bun/node/deno/uv, or none (no spaces or empty tokens). Fix the setup value in the workflow that calls reusable-pages.yml."; exit 1 ;;
           esac
           seen=,
           IFS=','
           for tool in $SETUP; do
             case "$tool" in
-              bun|uv|none) ;;
-              *) echo "::error::invalid setup token '$tool': setup selects the build toolchain(s) and each token must be bun, uv, or none. Fix the setup value in the workflow that calls reusable-pages.yml."; exit 1 ;;
+              bun|node|deno|uv|none) ;;
+              *) echo "::error::invalid setup token '$tool': setup selects the build toolchain(s) and each token must be bun, node, deno, uv, or none. Fix the setup value in the workflow that calls reusable-pages.yml."; exit 1 ;;
             esac
             case "$seen" in
               *",$tool,"*) echo "::error::duplicate setup token '$tool'. Fix the setup value in the workflow that calls reusable-pages.yml."; exit 1 ;;
@@ -217,6 +217,20 @@ jobs:
           path: ~/.bun/install/cache
           key: bun-${{ runner.os }}-${{ hashFiles('**/bun.lock') }}
           restore-keys: bun-${{ runner.os }}-
+
+      # No cache steps for node/deno (mirrors uv). setup-node's own
+      # package-manager-cache is switched off: it defaults on, and when
+      # package.json declares a package manager it hard-fails unless the
+      # lockfile sits at the workspace root.
+      - name: Setup node
+        if: contains(format(',{0},', inputs.setup), ',node,') && steps.cfg.outputs.publish == 'true'
+        uses: actions/setup-node@v6
+        with:
+          package-manager-cache: false
+
+      - name: Setup deno
+        if: contains(format(',{0},', inputs.setup), ',deno,') && steps.cfg.outputs.publish == 'true'
+        uses: denoland/setup-deno@v2
 
       - name: Setup uv
         if: contains(format(',{0},', inputs.setup), ',uv,') && steps.cfg.outputs.publish == 'true'

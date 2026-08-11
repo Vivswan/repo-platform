@@ -31,6 +31,8 @@ const TEMPLATES_DIR = resolve(import.meta.dir, "..", "templates");
 export const MODULE_ORDER = [
   "agents",
   "bun",
+  "node",
+  "deno",
   "uv",
   "rust",
   "pages",
@@ -82,7 +84,9 @@ const description = z
     message: 'must not contain ": " (it would end the copier choice key early)',
   });
 
-const manifestSchema = z.strictObject({
+/** Exported for scripts/generate.ts, which derives the editor-facing
+ *  templates/module.schema.json from it. */
+export const manifestSchema = z.strictObject({
   description,
   // A toolchain always analyzes as SOME CodeQL language; a module that has
   // none (rust) omits the key entirely, so "toolchain without a language"

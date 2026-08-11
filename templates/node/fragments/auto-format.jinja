@@ -1,0 +1,6 @@
+
+      - uses: actions/setup-node@v6
+        with:
+          package-manager-cache: false
+      - name: Format (biome via npm)
+        run: npx --yes @biomejs/biome@2 check --write .

@@ -32,9 +32,9 @@ In the repository:
 
 | Question | Meaning | Default |
 |---|---|---|
-| `pages_setup` | <!-- BEGIN GENERATED: pages-setup-meaning (scripts/generate.ts - edit module.yml manifests, not this block) -->Toolchain(s) installed on the build runner (comma-separated `bun`/`uv`, or `none`)<!-- END GENERATED: pages-setup-meaning --> | <!-- BEGIN GENERATED: pages-setup-default (scripts/generate.ts - edit module.yml manifests, not this block) -->every selected toolchain module joined with commas (e.g. `bun,uv`), else `none`<!-- END GENERATED: pages-setup-default --> |
-| `pages_install_command` | Install step before each build (empty skips) | <!-- BEGIN GENERATED: pages-install-default (scripts/generate.ts - edit module.yml manifests, not this block) -->`bun install --frozen-lockfile` / `uv sync` / empty<!-- END GENERATED: pages-install-default --> |
-| `pages_build_command` | The build; must not be empty | <!-- BEGIN GENERATED: pages-build-default (scripts/generate.ts - edit module.yml manifests, not this block) -->`bun run build` / `uv run mkdocs build --site-dir dist`<!-- END GENERATED: pages-build-default --> |
+| `pages_setup` | <!-- BEGIN GENERATED: pages-setup-meaning (scripts/generate.ts - edit module.yml manifests, not this block) -->Toolchain(s) installed on the build runner (comma-separated `bun`/`node`/`deno`/`uv`, or `none`)<!-- END GENERATED: pages-setup-meaning --> | <!-- BEGIN GENERATED: pages-setup-default (scripts/generate.ts - edit module.yml manifests, not this block) -->every selected toolchain module joined with commas (e.g. `bun,node,deno,uv`), else `none`<!-- END GENERATED: pages-setup-default --> |
+| `pages_install_command` | Install step before each build (empty skips) | <!-- BEGIN GENERATED: pages-install-default (scripts/generate.ts - edit module.yml manifests, not this block) -->`bun install --frozen-lockfile` / `npm ci` / `deno install --frozen` / `uv sync` / empty<!-- END GENERATED: pages-install-default --> |
+| `pages_build_command` | The build; must not be empty | <!-- BEGIN GENERATED: pages-build-default (scripts/generate.ts - edit module.yml manifests, not this block) -->`bun run build` / `npm run build` / `deno task build` / `uv run mkdocs build --site-dir dist`<!-- END GENERATED: pages-build-default --> |
 | `pages_dist_dir` | Build output directory | `dist` |
 | `pages_production` | Root built from `release` (latest tag) or `main` (HEAD, no staging) | `release` |
 | `pages_staging` | Publish main HEAD under `/staging/` | `true` |

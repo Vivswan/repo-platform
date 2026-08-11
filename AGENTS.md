@@ -45,10 +45,11 @@ sync secret; the single REPO_PLATFORM_TOKEN PAT lives only here.
 - Never hand-edit generated content; edit its source and rerun its
   generator (CI fails on drift). From the module manifests via
   `bun run generate`: the marker-fenced regions in copier.yml,
-  validate_generated_files.ts, and the docs. From the templates +
-  `.repo-platform-answers.yml` via `bun run dogfood`: this repo's copies
-  of the files it dogfoods (the pair list is in scripts/render_dogfood.ts).
-  From the manifests' `gitignore_sources` via
+  validate_generated_files.ts, and the docs, plus the whole
+  templates/module.schema.json (the manifests' editor schema). From the
+  templates + `.repo-platform-answers.yml` via `bun run dogfood`: this
+  repo's copies of the files it dogfoods (the pair list is in
+  scripts/render_dogfood.ts). From the manifests' `gitignore_sources` via
   `bun scripts/build_gitignore.ts`: templates/base/.gitignore.jinja, the
   per-module `fragments/gitignore.jinja`, and this repo's `.gitignore`.
 - Workflow run blocks longer than a few lines are extracted to TypeScript

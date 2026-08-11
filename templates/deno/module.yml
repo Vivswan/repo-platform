@@ -1,0 +1,16 @@
+# yaml-language-server: $schema=../module.schema.json
+# Module manifest (schema and loader: scripts/module_manifests.ts).
+description: Deno toolchain (deno fmt/lint, deno dependabot, CodeQL JS)
+toolchain:
+  codeql_language: javascript-typescript
+dependabot:
+  ecosystem: deno
+  label: deno
+  color: "70ffaf"
+gitignore_sources:
+  - Deno.gitignore
+lockfiles:
+  - 'deno\.lock'
+pages:
+  install: deno install --frozen
+  build: deno task build

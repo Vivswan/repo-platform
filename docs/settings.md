@@ -91,8 +91,8 @@ Stateless, declared-keys-only, upsert-by-name:
   ones like [release-please](https://github.com/googleapis/release-please)'s `autorelease: *` pair. Repos running
   dependabot must declare `dependencies` (color `0366d6`) and the
   per-ecosystem defaults its PRs carry: `github_actions` (`000000`) always,<!-- BEGIN GENERATED: dependabot-labels (scripts/generate.ts - edit module.yml manifests, not this block) -->
-  `javascript` (`168700`) for bun, `python:uv` (`2b67c6`) for uv, `rust`
-  (`000000`) for cargo.<!-- END GENERATED: dependabot-labels -->
+  `javascript` (`168700`) for bun and npm, `deno` (`70ffaf`) for deno,
+  `python:uv` (`2b67c6`) for uv, `rust` (`000000`) for cargo.<!-- END GENERATED: dependabot-labels -->
   Dependabot recreates missing labels on its next run, so an undeclared
   one is deleted and recreated forever; exact values are in
   `templates/settings-sync/.github/settings.yml.jinja`. Repos with
@@ -141,7 +141,8 @@ Stateless, declared-keys-only, upsert-by-name:
   an out-of-band flip in either direction - a repo made private in the
   GitHub UI is public again by the next morning. To change visibility on
   purpose, edit `private:` in the settings file and let the apply flip
-  the repo. Flipping a bun or uv repo to private must also delete the
+  the repo. Flipping a repo with a CodeQL-analyzed toolchain to private
+  must also delete the
   ruleset's `code_scanning` rule in the same commit: GitHub rejects that
   rule on a private personal repo, so every apply fails until it is
   gone. The heal of an out-of-band private flip dodges that rejection

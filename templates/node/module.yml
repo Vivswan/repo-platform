@@ -1,18 +1,16 @@
 # yaml-language-server: $schema=../module.schema.json
 # Module manifest (schema and loader: scripts/module_manifests.ts).
-description: TypeScript/bun toolchain (gitignore, dependabot, CodeQL JS)
+description: JavaScript/Node.js toolchain (gitignore, npm dependabot, CodeQL JS)
 toolchain:
   codeql_language: javascript-typescript
 dependabot:
-  ecosystem: bun
+  ecosystem: npm
   label: javascript
   color: "168700"
 gitignore_sources:
   - Node.gitignore
-  - bun.gitignore
 lockfiles:
-  - 'bun\.lock'
-  - 'bun\.lockb'
+  - 'package-lock\.json'
 pages:
-  install: bun install --frozen-lockfile
-  build: bun run build
+  install: npm ci
+  build: npm run build

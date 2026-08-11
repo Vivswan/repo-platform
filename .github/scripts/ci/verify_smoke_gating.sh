@@ -15,6 +15,11 @@ EXTRA_DATA="${EXTRA_DATA:-}"
 wf=/tmp/smoke/.github/workflows
 mods=",$(echo "$MODULES" | tr -d '[] '),"
 has() { case "$mods" in *",$1,"*) return 0 ;; *) return 1 ;; esac; }
+# The toolchain rosters, spelled once: CodeQL-analyzable toolchains drive
+# enable_codeql and the auto-format starter; rust joins only the
+# any-toolchain gates (dependabot prefix, the AGENTS.md Toolchain section).
+has_codeql_toolchain() { has bun || has node || has deno || has uv; }
+has_any_toolchain() { has_codeql_toolchain || has rust; }
 present() { grep -qF -- "$1" "$2" || { echo "::error::gating check failed: '$1' is missing from $2, so the template did not emit it for modules=$MODULES private=$PRIVATE. Fix the gate in templates/ (or this expectation in verify_smoke_gating.sh)."; exit 1; }; }
 present_line() { grep -qxF -- "$1" "$2" || { echo "::error::gating check failed: no line is exactly '$1' in $2, so the template did not emit it for modules=$MODULES private=$PRIVATE. Fix the gate in templates/ (or this expectation in verify_smoke_gating.sh)."; exit 1; }; }
 absent() { if grep -qF -- "$1" "$2"; then echo "::error::gating check failed: '$1' appears in $2 but modules=$MODULES private=$PRIVATE should not emit it. Fix the gate in templates/ (or this expectation in verify_smoke_gating.sh)."; exit 1; fi; }
@@ -69,7 +74,7 @@ if has settings-sync; then
   # The ruleset's code_scanning rule follows enable_codeql (public AND a
   # toolchain): GitHub 422s that rule on a private personal repo, so a
   # private render must never emit it.
-  if [ "$PRIVATE" != "true" ] && { has bun || has uv; }; then
+  if [ "$PRIVATE" != "true" ] && has_codeql_toolchain; then
     present "type: code_scanning" /tmp/smoke/.github/settings.yml
   else
     absent "type: code_scanning" /tmp/smoke/.github/settings.yml
@@ -92,7 +97,7 @@ fi
 # input follow enable_codeql (= public AND a toolchain module).
 if has auto-assign; then
   present "security-events: write" "$wf/auto-assign.yml"
-  if [ "$PRIVATE" != "true" ] && { has bun || has uv; }; then
+  if [ "$PRIVATE" != "true" ] && has_codeql_toolchain; then
     present "workflow_run:" "$wf/auto-assign.yml"
     # Alert assignment watches CI completions (the CodeQL jobs run inside
     # CI's gate; a reusable-workflow call creates no separate run to watch).
@@ -108,7 +113,7 @@ fi
 # analysis jobs are spliced straight into ci.yml's gate (no standalone
 # workflow), and the weekly re-scan schedule lives on ci.yml's triggers.
 test ! -e "$wf/codeql.yml"
-if [ "$PRIVATE" != "true" ] && { has bun || has uv; }; then
+if [ "$PRIVATE" != "true" ] && has_codeql_toolchain; then
   present "reusable-codeql.yml@main" "$wf/ci.yml"
   present "schedule:" "$wf/ci.yml"
   present 'cron: "23 4 * * 1"' "$wf/ci.yml"
@@ -117,9 +122,17 @@ if [ "$PRIVATE" != "true" ] && { has bun || has uv; }; then
   present "contents: read" "$wf/ci.yml"
   present "security-events: write" "$wf/ci.yml"
   present "actions: read" "$wf/ci.yml"
-  if has bun; then
+  if has bun || has node || has deno; then
     present "codeql-javascript:" "$wf/ci.yml"
     present "- codeql-javascript" "$wf/ci.yml"
+    # bun, node, and deno all analyze as javascript-typescript; the composer
+    # must group them into ONE job under co-selection. A duplicate YAML job
+    # key would not fail YAML parsers, so count the exact job-key line.
+    js_jobs="$(grep -cxF -- "  codeql-javascript:" "$wf/ci.yml" || true)"
+    if [ "$js_jobs" -ne 1 ]; then
+      echo "::error::gating check failed: expected exactly 1 line \"  codeql-javascript:\" in $wf/ci.yml but found $js_jobs for modules=$MODULES private=$PRIVATE - the shared javascript-typescript CodeQL group must emit one job, never per-module duplicates. Fix the codeql-languages generator in scripts/compose_template.ts (or this expectation in verify_smoke_gating.sh)."
+      exit 1
+    fi
   else
     absent "codeql-javascript" "$wf/ci.yml"
   fi
@@ -206,7 +219,20 @@ else
 fi
 
 # gitignore toolchain sections; the four markers are asserted by the validator.
-if has bun; then present "## Node " /tmp/smoke/.gitignore; else absent "## Node " /tmp/smoke/.gitignore; fi
+# bun and node share upstream Node.gitignore: the shared section must appear
+# under either module and exactly once under co-selection (the node fragment
+# suppresses its guarded copy when bun is also selected). The count matches
+# the full header line, so a reworded near-miss cannot satisfy it.
+if has bun || has node; then
+  node_sections="$(grep -cxF -- "## Node (github/gitignore Node.gitignore)" /tmp/smoke/.gitignore || true)"
+  if [ "$node_sections" -ne 1 ]; then
+    echo "::error::gating check failed: expected exactly 1 line '## Node (github/gitignore Node.gitignore)' in /tmp/smoke/.gitignore but found $node_sections for modules=$MODULES private=$PRIVATE - the shared Node.gitignore source must render once, never per-module duplicates. Fix the fragment guards emitted by scripts/build_gitignore.ts (or this expectation in verify_smoke_gating.sh)."
+    exit 1
+  fi
+else
+  absent "## Node " /tmp/smoke/.gitignore
+fi
+if has deno; then present_line "## Deno (github/gitignore Deno.gitignore)" /tmp/smoke/.gitignore; else absent "## Deno " /tmp/smoke/.gitignore; fi
 if has uv; then present "## Python " /tmp/smoke/.gitignore; else absent "## Python " /tmp/smoke/.gitignore; fi
 if has rust; then present "## Rust " /tmp/smoke/.gitignore; else absent "## Rust " /tmp/smoke/.gitignore; fi
 
@@ -215,9 +241,11 @@ if has rust; then present "## Rust " /tmp/smoke/.gitignore; else absent "## Rust
 present 'package-ecosystem: "github-actions"' /tmp/smoke/.github/dependabot.yml
 present 'prefix: "ci"' /tmp/smoke/.github/dependabot.yml
 if has bun; then present 'package-ecosystem: "bun"' /tmp/smoke/.github/dependabot.yml; else absent 'package-ecosystem: "bun"' /tmp/smoke/.github/dependabot.yml; fi
+if has node; then present 'package-ecosystem: "npm"' /tmp/smoke/.github/dependabot.yml; else absent 'package-ecosystem: "npm"' /tmp/smoke/.github/dependabot.yml; fi
+if has deno; then present 'package-ecosystem: "deno"' /tmp/smoke/.github/dependabot.yml; else absent 'package-ecosystem: "deno"' /tmp/smoke/.github/dependabot.yml; fi
 if has uv; then present 'package-ecosystem: "uv"' /tmp/smoke/.github/dependabot.yml; else absent 'package-ecosystem: "uv"' /tmp/smoke/.github/dependabot.yml; fi
 if has rust; then present 'package-ecosystem: "cargo"' /tmp/smoke/.github/dependabot.yml; else absent 'package-ecosystem: "cargo"' /tmp/smoke/.github/dependabot.yml; fi
-if has bun || has uv || has rust; then present 'prefix: "build"' /tmp/smoke/.github/dependabot.yml; else absent 'prefix: "build"' /tmp/smoke/.github/dependabot.yml; fi
+if has_any_toolchain; then present 'prefix: "build"' /tmp/smoke/.github/dependabot.yml; else absent 'prefix: "build"' /tmp/smoke/.github/dependabot.yml; fi
 
 # agents module: AGENTS.md plus the three agent-file symlinks. The
 # rows without it also prove conditional filenames work on symlinks.
@@ -229,8 +257,10 @@ if has agents; then
   test -L /tmp/smoke/.github/agents.md
   # AGENTS.md toolchain section only when a toolchain module is selected,
   # with exactly the selected toolchains' bullets inside it.
-  if has bun || has uv || has rust; then present "## Toolchain" /tmp/smoke/AGENTS.md; else absent "## Toolchain" /tmp/smoke/AGENTS.md; fi
+  if has_any_toolchain; then present "## Toolchain" /tmp/smoke/AGENTS.md; else absent "## Toolchain" /tmp/smoke/AGENTS.md; fi
   if has bun; then present_line '- Runtime and package manager: bun (`bun install`, `bun test`, `bun run <script>`)' /tmp/smoke/AGENTS.md; else absent "Runtime and package manager: bun" /tmp/smoke/AGENTS.md; fi
+  if has node; then present_line '- Node.js with npm (`npm install`, `npm test`, `npm run <script>`)' /tmp/smoke/AGENTS.md; else absent "Node.js with npm" /tmp/smoke/AGENTS.md; fi
+  if has deno; then present_line '- Deno runtime (`deno install`, `deno test`, `deno task <task>`)' /tmp/smoke/AGENTS.md; else absent "Deno runtime" /tmp/smoke/AGENTS.md; fi
   if has uv; then present_line '- Python managed with uv (`uv sync`, `uv run <command>`)' /tmp/smoke/AGENTS.md; else absent "Python managed with uv" /tmp/smoke/AGENTS.md; fi
   if has rust; then present_line '- Rust managed with cargo (`cargo build`, `cargo test`, `cargo clippy`)' /tmp/smoke/AGENTS.md; else absent "Rust managed with cargo" /tmp/smoke/AGENTS.md; fi
 else
@@ -261,10 +291,11 @@ fi
 # github_actions is unconditional: the base dependabot.yml always carries
 # the github-actions ecosystem.
 if has settings-sync; then
-  present "name: github_actions" /tmp/smoke/.github/settings.yml
-  if has bun; then present "name: javascript" /tmp/smoke/.github/settings.yml; else absent "name: javascript" /tmp/smoke/.github/settings.yml; fi
-  if has uv; then present 'name: "python:uv"' /tmp/smoke/.github/settings.yml; else absent 'name: "python:uv"' /tmp/smoke/.github/settings.yml; fi
-  if has rust; then present "name: rust" /tmp/smoke/.github/settings.yml; else absent "name: rust" /tmp/smoke/.github/settings.yml; fi
+  present_line "  - name: github_actions" /tmp/smoke/.github/settings.yml
+  if has bun || has node; then present_line "  - name: javascript" /tmp/smoke/.github/settings.yml; else absent "name: javascript" /tmp/smoke/.github/settings.yml; fi
+  if has deno; then present_line "  - name: deno" /tmp/smoke/.github/settings.yml; else absent "name: deno" /tmp/smoke/.github/settings.yml; fi
+  if has uv; then present_line '  - name: "python:uv"' /tmp/smoke/.github/settings.yml; else absent 'name: "python:uv"' /tmp/smoke/.github/settings.yml; fi
+  if has rust; then present_line "  - name: rust" /tmp/smoke/.github/settings.yml; else absent "name: rust" /tmp/smoke/.github/settings.yml; fi
 fi
 if has release-please; then
   test -f "$wf/release-please.yml"
@@ -316,12 +347,18 @@ else
 fi
 
 # auto-format follows the toolchain modules; its formatter steps, like the
-# checks.yml example comments, are spliced from the bun/uv module fragments.
+# checks.yml example comments, are spliced from the toolchain module
+# fragments. Formatter markers are command-specific: a bare "biome" would
+# false-positive between the bun and node steps.
 if has bun; then present "Example bun checks" "$wf/checks.yml"; else absent "Example bun checks" "$wf/checks.yml"; fi
+if has node; then present "Example node checks" "$wf/checks.yml"; else absent "Example node checks" "$wf/checks.yml"; fi
+if has deno; then present "Example deno checks" "$wf/checks.yml"; else absent "Example deno checks" "$wf/checks.yml"; fi
 if has uv; then present "Example uv checks" "$wf/checks.yml"; else absent "Example uv checks" "$wf/checks.yml"; fi
-if has bun || has uv; then
+if has_codeql_toolchain; then
   test -f "$wf/auto-format.yml"
-  if has bun; then present "biome" "$wf/auto-format.yml"; else absent "biome" "$wf/auto-format.yml"; fi
+  if has bun; then present "bun x @biomejs/biome" "$wf/auto-format.yml"; else absent "bun x @biomejs/biome" "$wf/auto-format.yml"; fi
+  if has node; then present "npx --yes @biomejs/biome" "$wf/auto-format.yml"; else absent "npx --yes @biomejs/biome" "$wf/auto-format.yml"; fi
+  if has deno; then present "deno fmt" "$wf/auto-format.yml"; else absent "deno fmt" "$wf/auto-format.yml"; fi
   if has uv; then present "ruff" "$wf/auto-format.yml"; else absent "ruff" "$wf/auto-format.yml"; fi
 else
   test ! -e "$wf/auto-format.yml"
@@ -340,10 +377,12 @@ else
 fi
 
 # copilot-setup-steps belongs to the agents module; the toolchain installs
-# inside it splice from the bun/uv fragments.
+# inside it splice from the toolchain module fragments.
 if has agents; then
   test -f "$wf/copilot-setup-steps.yml"
   if has bun; then present "oven-sh/setup-bun" "$wf/copilot-setup-steps.yml"; else absent "oven-sh/setup-bun" "$wf/copilot-setup-steps.yml"; fi
+  if has node; then present "actions/setup-node" "$wf/copilot-setup-steps.yml"; else absent "actions/setup-node" "$wf/copilot-setup-steps.yml"; fi
+  if has deno; then present "denoland/setup-deno" "$wf/copilot-setup-steps.yml"; else absent "denoland/setup-deno" "$wf/copilot-setup-steps.yml"; fi
   if has uv; then present "astral-sh/setup-uv" "$wf/copilot-setup-steps.yml"; else absent "astral-sh/setup-uv" "$wf/copilot-setup-steps.yml"; fi
 else
   test ! -e "$wf/copilot-setup-steps.yml"

@@ -1,0 +1,6 @@
+
+      - uses: denoland/setup-deno@v2
+      - name: Format (deno)
+        run: |
+          deno lint --fix || true
+          deno fmt

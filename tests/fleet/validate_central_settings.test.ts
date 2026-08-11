@@ -73,6 +73,8 @@ describe("requiredLabels", () => {
   test("the module->label pairs come from the manifests, in MODULE_ORDER", () => {
     expect(dependabotLabels()).toEqual([
       ["bun", "javascript"],
+      ["node", "javascript"],
+      ["deno", "deno"],
       ["uv", "python:uv"],
       ["rust", "rust"],
     ]);

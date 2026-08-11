@@ -1,3 +1,4 @@
+# yaml-language-server: $schema=../module.schema.json
 # Module manifest (schema and loader: scripts/module_manifests.ts).
 description: Python/uv toolchain (gitignore, dependabot, CodeQL Python)
 toolchain:

@@ -6,7 +6,7 @@
     "useIgnoreFile": true
   },
   "files": {
-    "includes": ["**", "!template"]
+    "includes": ["**", "!template", "!templates/module.schema.json"]
   },
   "formatter": {
     "enabled": true,

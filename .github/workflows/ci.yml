@@ -217,14 +217,36 @@ jobs:
           # opt-out (no fleet license rendered) is exercised; every other
           # row covers the default fleet-license render.
           - name: everything
-            modules: "[agents, bun, uv, rust, pages, release-please, issue-templates, pr-title, auto-assign, fuzzer, settings-sync, custom-license]"
+            modules: "[agents, bun, node, deno, uv, rust, pages, release-please, issue-templates, pr-title, auto-assign, fuzzer, settings-sync, custom-license]"
             private: "false"
             expect_in_pages: |
-              setup: bun,uv
+              setup: bun,node,deno,uv
               bun install --frozen-lockfile
               bun run build
           - name: bun-typical
             modules: "[agents, bun, release-please, issue-templates, pr-title, auto-assign, settings-sync]"
+            private: "false"
+          # node and deno each as the sole toolchain: codeql-javascript and
+          # the javascript/deno labels must render from the module alone,
+          # without bun in the selection.
+          - name: node-typical
+            modules: "[agents, node, settings-sync]"
+            private: "false"
+          # pages rides along as the only real render of a non-bun pages
+          # chain end-to-end (the everything row's chain heads with bun).
+          - name: deno-typical
+            modules: "[agents, deno, pages, settings-sync]"
+            private: "false"
+            expect_in_pages: |
+              setup: deno
+              deno install --frozen
+              deno task build
+          # bun + node co-selected: the only render exercising the shared
+          # javascript label or-gate, the shared javascript-typescript CodeQL
+          # group (the exact-count check must see one job), and the shared
+          # Node.gitignore guard (one section, the node copy suppressed).
+          - name: bun-node
+            modules: "[agents, bun, node, settings-sync]"
             private: "false"
           # The only public row where uv is the sole toolchain: CodeQL must
           # gate ci.yml with the python leg and WITHOUT the javascript leg,

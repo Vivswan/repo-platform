@@ -124,6 +124,8 @@ function mergedStepMarkers(
 const KNOWN_MODULES = new Set([
   "agents",
   "bun",
+  "node",
+  "deno",
   "uv",
   "rust",
   "pages",

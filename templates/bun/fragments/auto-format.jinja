@@ -6,4 +6,4 @@
           key: {% raw %}bun-${{ runner.os }}-${{ hashFiles('**/bun.lock') }}{% endraw %}
           restore-keys: {% raw %}bun-${{ runner.os }}-{% endraw %}
       - name: Format (biome)
-        run: bun x @biomejs/biome check --write .
+        run: bun x @biomejs/biome@2 check --write .

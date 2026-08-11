@@ -40,11 +40,11 @@ git commit -m "chore: initialize from repo-platform"
 Copier asks for project name, description, an update **channel** (`latest`
 follows released `templates/vX.Y.Z` build tags and runs migrations;
 `staging` follows every main merge, migrations skipped), a `modules`<!-- BEGIN GENERATED: module-roster (scripts/generate.ts - edit module.yml manifests, not this block) -->
-multiselect (any combination of `agents`, `bun`, `uv`, `rust`, `pages`,
-`release-please`, `issue-templates`, `pr-title`, `auto-assign`, `fuzzer`,
-`settings-sync`, `custom-license`), follow-up parameters for modules that
-have them (see [docs/pages.md](pages.md) and [docs/fuzzer.md](fuzzer.md)),
-and visibility.<!-- END GENERATED: module-roster -->
+multiselect (any combination of `agents`, `bun`, `node`, `deno`, `uv`,
+`rust`, `pages`, `release-please`, `issue-templates`, `pr-title`,
+`auto-assign`, `fuzzer`, `settings-sync`, `custom-license`), follow-up
+parameters for modules that have them (see [docs/pages.md](pages.md) and
+[docs/fuzzer.md](fuzzer.md)), and visibility.<!-- END GENERATED: module-roster -->
 Answers are recorded in `.copier-answers.yml`; never delete that file,
 `copier update` depends on it.
 
@@ -89,9 +89,10 @@ own checks:
   `release-please-config.json` and `.release-please-manifest.json`
   starters are repo-owned too (release-please updates the manifest via
   release PRs).
-- with the bun or uv module: a repo-owned `auto-format.yml` starter (label a
-  PR `fix-lint` to get a formatting commit pushed to it), prefilled with each
-  selected toolchain's formatter.
+- with any toolchain module that ships a formatter (every one except
+  rust): a repo-owned `auto-format.yml` starter (label a PR `fix-lint` to
+  get a formatting commit pushed to it), prefilled with each selected
+  toolchain's formatter.
 - with the bun module: a managed `dependabot-bun-lockfile.yml` that
   regenerates `bun.lock` from scratch on Dependabot's PRs and pushes the fix
   to the PR branch (Dependabot's own lockfile edits can leave stale nested
@@ -173,8 +174,8 @@ dependabot auto-creates, or the two sides loop forever: every apply
 deletes them, dependabot recreates them on its next run. That means
 `dependencies` (color `0366d6`) and `github_actions` (`000000`) always,
 plus one label per toolchain the repo's dependabot.yml covers:<!-- BEGIN GENERATED: dependabot-labels (scripts/generate.ts - edit module.yml manifests, not this block) -->
-`javascript` (`168700`) for bun, `python:uv` (`2b67c6`) for uv, `rust`
-(`000000`) for cargo.<!-- END GENERATED: dependabot-labels -->
+`javascript` (`168700`) for bun and npm, `deno` (`70ffaf`) for deno,
+`python:uv` (`2b67c6`) for uv, `rust` (`000000`) for cargo.<!-- END GENERATED: dependabot-labels -->
 The exact descriptions are in
 `templates/settings-sync/.github/settings.yml.jinja`.
 
