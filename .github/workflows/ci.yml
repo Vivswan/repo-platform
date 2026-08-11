@@ -204,6 +204,35 @@ jobs:
       - name: Run .github/scripts and action tests
         run: bun test ./tests ./actions/fuzz-issue ./actions/release-health ./actions/validate-skills ./actions/validate-template
 
+  # Structural validation of this repository's own hosted agent skills
+  # (skills/ plus the repo-owned .claude-plugin manifests), dogfooding the
+  # composite action the skills module pins fleet-wide. Offline and cheap;
+  # `bun run validate:skills` is the local twin.
+  validate-skills:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./actions/validate-skills
+        with:
+          skills-dir: skills
+
+  # CLI discovery for the same catalog. Fleet repos get this as the
+  # advisory validate-skills.yml (npx needs the npm registry, and managed
+  # repos must not block on a registry hiccup); here it GATES, per this
+  # repo's all-jobs-gate convention - CI is not network-shy (smoke-generate
+  # already downloads copier and actionlint) and a listing regression in
+  # the action this repo ships should block its own merges.
+  skills-discovery:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./actions/validate-skills
+        with:
+          skills-dir: skills
+          mode: discovery
+
   smoke-generate:
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -315,7 +344,7 @@ jobs:
           # description stays the harness default - EXTRA_DATA cannot carry
           # whitespace and no generated pair renders it.
           - name: dogfood-oracle
-            modules: "[agents, bun, release-please, pr-title, auto-assign]"
+            modules: "[agents, bun, release-please, skills, pr-title, auto-assign]"
             private: "false"
             extra_data: "-d project_name=repo-platform"
     steps:
@@ -472,6 +501,8 @@ jobs:
       - compose
       - validate-template
       - script-tests
+      - validate-skills
+      - skills-discovery
       - smoke-generate
       - upgrade-path
       - pr-title

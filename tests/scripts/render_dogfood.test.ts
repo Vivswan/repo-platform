@@ -31,7 +31,8 @@ const answers: Answers = {
   github_username: "Vivswan",
   copyright_holder: "Vivswan Shah",
   private: false,
-  modules: new Set(["agents", "bun", "release-please", "pr-title", "auto-assign"]),
+  modules: new Set(["agents", "bun", "release-please", "skills", "pr-title", "auto-assign"]),
+  skills_dir: "skills",
 };
 
 const manifests: ModuleManifest[] = [
@@ -39,6 +40,7 @@ const manifests: ModuleManifest[] = [
   { module: "bun", description: "b", toolchain: { codeql_language: "javascript-typescript" } },
   { module: "uv", description: "u", toolchain: { codeql_language: "python" } },
   { module: "release-please", description: "r" },
+  { module: "skills", description: "s" },
   { module: "pr-title", description: "p" },
   { module: "auto-assign", description: "aa" },
 ];
@@ -47,6 +49,7 @@ const sources: AnswerSources = {
   packageName: "repo-platform",
   usernameDefault: "Vivswan",
   copyrightDefault: "Vivswan Shah",
+  skillsDirDefault: "skills",
   centralDescription: "d",
   centralPrivate: false,
   moduleNames: new Set(manifests.map((m) => m.module)),
@@ -189,5 +192,18 @@ describe("answerMismatches", () => {
     const withoutBun = new Set([...answers.modules].filter((m) => m !== "bun"));
     const missing = answerMismatches({ ...answers, modules: withoutBun }, sources);
     expect(missing.some((p) => p.includes("dependabot-bun-lockfile.yml"))).toBe(true);
+  });
+
+  test("skills_dir must exist exactly while the skills module is selected", () => {
+    const withoutDir = answerMismatches({ ...answers, skills_dir: undefined }, sources);
+    expect(withoutDir.some((p) => p.includes("skills_dir: missing"))).toBe(true);
+    const withoutSkills = new Set([...answers.modules].filter((m) => m !== "skills"));
+    const stale = answerMismatches({ ...answers, modules: withoutSkills }, sources);
+    expect(stale.some((p) => p.includes("skills_dir: set but"))).toBe(true);
+  });
+
+  test("flags a skills_dir that drifted from the copier.yml default", () => {
+    const drift = answerMismatches({ ...answers, skills_dir: "lib/skills" }, sources);
+    expect(drift.some((p) => p.includes("copier.yml skills_dir default"))).toBe(true);
   });
 });

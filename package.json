@@ -3,7 +3,7 @@
   "private": true,
   "description": "Tooling manifest for repo-platform (biome, husky, the bun scripts' yaml parser and zod schemas); the actions carry their own dependencies.",
   "scripts": {
-    "check": "bun run lint && bun run lint:actions && bun run lint:sh && bun run lint:secrets && bun run typecheck && bun run typography && bun run lint:yaml && bun run validate && bun run validate:registry && bun run ssot:check && bun run generate:check && bun run dogfood:check && bun run gitignore:check && bun run compose:check && bun run test",
+    "check": "bun run lint && bun run lint:actions && bun run lint:sh && bun run lint:secrets && bun run typecheck && bun run typography && bun run lint:yaml && bun run validate && bun run validate:registry && bun run validate:skills && bun run ssot:check && bun run generate:check && bun run dogfood:check && bun run gitignore:check && bun run compose:check && bun run test",
     "check:fix": "bun x biome check --write .",
     "lint": "bun x biome ci .",
     "lint:actions": "if command -v actionlint >/dev/null; then actionlint; else echo 'actionlint not installed locally; CI runs it (brew install actionlint)'; fi",
@@ -14,6 +14,7 @@
     "lint:yaml": "uvx yamllint -s .",
     "validate": "bun actions/validate-template/validate_generated_files.ts --self .",
     "validate:registry": "bun .github/scripts/fleet/repos_registry.ts validate",
+    "validate:skills": "bun actions/validate-skills/validate_skills.ts",
     "ssot:check": "bun scripts/check_ssot.ts",
     "generate": "bun scripts/generate.ts",
     "generate:check": "bun scripts/generate.ts --check",

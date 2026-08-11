@@ -59,6 +59,8 @@ function main(): number {
   expectRecorded("project_name", answers.project_name);
   expectRecorded("github_username", answers.github_username);
   expectRecorded("private", answers.private);
+  // Asked (and recorded) only while the skills module is selected.
+  if (answers.skills_dir !== undefined) expectRecorded("skills_dir", answers.skills_dir);
   const recordedModules = Array.isArray(recorded.modules) ? recorded.modules.map(String) : [];
   if (
     recordedModules.length !== answers.modules.size ||

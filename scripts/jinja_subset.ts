@@ -12,6 +12,10 @@ export interface JinjaVars {
   username: string;
   slug: string;
   copyrightHolder: string;
+  /** The repo's skills_dir answer; only set while the skills module is
+   *  selected (copier asks the question only then), enabling the
+   *  `{{ skills_dir | tojson }}` substitutions below. */
+  skillsDir?: string;
 }
 
 /** Resolve one if-condition against `context`: a condition that is exactly
@@ -140,6 +144,15 @@ export function normalizeJinja(
   out = out.replace(/\{\{ github_username \| lower \}\}/g, vars.username.toLowerCase());
   out = out.replace(/\{\{ github_username \}\}/g, vars.username);
   out = out.replace(/\{\{ project_slug \}\}/g, vars.slug);
+  if (vars.skillsDir !== undefined) {
+    const dir = vars.skillsDir;
+    // The two shapes the skills templates use; JSON.stringify matches
+    // jinja's tojson for plain strings.
+    out = out.replace(/\{\{ \(skills_dir ~ "([^"]*)"\) \| tojson \}\}/g, (_whole, tail: string) =>
+      JSON.stringify(dir + tail),
+    );
+    out = out.replace(/\{\{ skills_dir \| tojson \}\}/g, () => JSON.stringify(dir));
+  }
   // A surviving statement tag ({% for %}, an if whose expression contains %,
   // ...) would silently corrupt the comparison text; fail loudly instead.
   const leftover = /\{%[^}]*%\}/.exec(out);
@@ -195,7 +208,9 @@ export function renderJinjaFile(
   // in.
   const sentinel = String.fromCharCode(0);
   if (
-    [text, vars.username, vars.slug, vars.copyrightHolder].some((value) => value.includes(sentinel))
+    [text, vars.username, vars.slug, vars.copyrightHolder, vars.skillsDir ?? ""].some((value) =>
+      value.includes(sentinel),
+    )
   ) {
     throw new Error("renderJinjaFile: the template or a variable value contains a NUL byte");
   }

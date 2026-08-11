@@ -929,7 +929,8 @@ const rules: Rule[] = [
   {
     // Most dogfooded copies (.editorconfig, release-please-config.json,
     // CODE_OF_CONDUCT.md, CODEOWNERS, auto-assign.yml,
-    // dependabot-bun-lockfile.yml) are GENERATED from their templates by
+    // dependabot-bun-lockfile.yml, validate-skills.yml) are GENERATED from
+    // their templates by
     // scripts/render_dogfood.ts, byte-checked by `bun run dogfood:check`,
     // and byte-compared against a REAL copier render by ci.yml's
     // dogfood-oracle smoke row (verify_dogfood_oracle.ts), so they need no

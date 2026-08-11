@@ -54,6 +54,10 @@ export const PAIRS: { repo: string; tpl: string }[] = [
     repo: ".github/workflows/dependabot-bun-lockfile.yml",
     tpl: "templates/bun/.github/workflows/dependabot-bun-lockfile.yml.jinja",
   },
+  {
+    repo: ".github/workflows/validate-skills.yml",
+    tpl: "templates/skills/.github/workflows/validate-skills.yml.jinja",
+  },
 ];
 
 const answersSchema = z.strictObject({
@@ -70,6 +74,21 @@ const answersSchema = z.strictObject({
       message: "modules must be unique",
     })
     .transform((modules): ReadonlySet<string> => new Set(modules)),
+  // Asked by copier only while the skills module is selected;
+  // answerMismatches enforces the same presence rule here. The shape
+  // mirrors copier.yml's skills_dir validator (plain relative segments,
+  // no . or ..), so a value copier would reject cannot render here.
+  skills_dir: z
+    .string()
+    .regex(/^[A-Za-z0-9._-]+(\/[A-Za-z0-9._-]+)*$/, {
+      message:
+        "must be relative path segments of letters, digits, dots, underscores, " +
+        "or dashes joined by single slashes (copier.yml's skills_dir validator)",
+    })
+    .refine((value) => !value.split("/").some((part) => part === "." || part === ".."), {
+      message: "must not contain . or .. segments (copier.yml's skills_dir validator)",
+    })
+    .optional(),
 });
 
 export type Answers = z.infer<typeof answersSchema>;
@@ -172,6 +191,7 @@ export interface AnswerSources {
   packageName: string;
   usernameDefault: string;
   copyrightDefault: string;
+  skillsDirDefault: string;
   centralDescription: string;
   centralPrivate: boolean;
   moduleNames: Set<string>;
@@ -226,6 +246,30 @@ export function answerMismatches(answers: Answers, sources: AnswerSources): stri
       problems.push(`modules: '${module}' has no templates/ module manifest`);
     }
   }
+  // Mirror copier.yml's `when` on the skills_dir question: the answer
+  // exists exactly while the skills module is selected, and - like the
+  // identity answers above - it must match the copier.yml default this
+  // repository renders with.
+  if (answers.modules.has("skills") && answers.skills_dir === undefined) {
+    problems.push(
+      "skills_dir: missing - the skills module is selected, so the skills " +
+        "pairs need the directory copier.yml asks for",
+    );
+  }
+  if (!answers.modules.has("skills") && answers.skills_dir !== undefined) {
+    problems.push(
+      "skills_dir: set but the skills module is not selected - copier " +
+        "never asks the question then; remove the stale answer",
+    );
+  }
+  if (answers.skills_dir !== undefined) {
+    expect(
+      "skills_dir",
+      sources.skillsDirDefault,
+      answers.skills_dir,
+      "copier.yml skills_dir default",
+    );
+  }
   for (const pair of PAIRS) {
     const module = moduleOfPair(pair.tpl);
     if (module !== null && !answers.modules.has(module)) {
@@ -273,6 +317,7 @@ function loadSources(manifests: ModuleManifest[]): AnswerSources {
     packageName: String(pkg.name),
     usernameDefault: stringDefault(copier, "github_username"),
     copyrightDefault: stringDefault(copier, "copyright_holder"),
+    skillsDirDefault: stringDefault(copier, "skills_dir"),
     centralDescription: central.description,
     centralPrivate: central.private,
     moduleNames: new Set(manifests.map((m) => m.module)),
@@ -305,6 +350,7 @@ function main(): number {
       username: answers.github_username,
       slug: answers.project_slug,
       copyrightHolder: answers.copyright_holder,
+      skillsDir: answers.skills_dir,
     };
     const context = renderContext(answers, manifests);
     stale = PAIRS.flatMap((pair): { path: string; repo: string; next: string | null }[] => {
@@ -313,6 +359,8 @@ function main(): number {
         return pathExists(path) ? [{ path, repo: pair.repo, next: null }] : [];
       }
       const next = renderJinjaFile(read(pair.tpl), vars, context);
+      // A missing copy (a pair adopted for the first time) is stale too.
+      if (!pathExists(path)) return [{ path, repo: pair.repo, next }];
       return next === read(pair.repo) ? [] : [{ path, repo: pair.repo, next }];
     });
   } catch (error) {
@@ -321,13 +369,16 @@ function main(): number {
   }
 
   if (check) {
-    for (const { repo, next } of stale) {
+    for (const { path, repo, next } of stale) {
       console.log(
         next === null
           ? `${repo} should be absent (its template's filename gate is false); ` +
               "run bun run dogfood to remove it"
-          : `${repo} is stale: it does not match its rendered template twin; ` +
-              "run bun run dogfood to rewrite it",
+          : pathExists(path)
+            ? `${repo} is stale: it does not match its rendered template twin; ` +
+              "run bun run dogfood to rewrite it"
+            : `${repo} is missing: its template twin renders it; ` +
+              "run bun run dogfood to write it",
       );
     }
     if (stale.length > 0) return 1;

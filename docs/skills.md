@@ -70,6 +70,18 @@ The validation is split by what a failure means:
 An empty catalog (`"skills": []`, the seeded state) passes both: a freshly
 adopted repo publishes nothing yet.
 
+repo-platform dogfoods the module on itself: it selects `skills` in
+`.repo-platform-answers.yml` (its two fleet-operations skills live under
+`skills/`, and its `.claude-plugin/` manifests are its own, repo-owned
+like any starter), carries the managed discovery workflow as a generated
+dogfood copy, and runs both modes from its hand-written ci.yml - there the
+discovery job gates through all-green too, per this repository's
+all-jobs-gate convention, because a listing regression in the action it
+ships should block its own merges. A PR touching `skills/` therefore runs
+discovery twice - advisory via the dogfooded workflow, gating via ci.yml -
+an intended overlap. `bun run validate:skills` is the local
+structure check.
+
 ## Publishing a skill
 
 Each published skill is a direct child of the skills directory:
