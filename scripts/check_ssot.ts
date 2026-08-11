@@ -1058,8 +1058,7 @@ const rules: Rule[] = [
       // The repo entry covers "/" plus its composite actions/ dirs (which
       // downstream repos do not have), so compare the shared shape with the
       // directory coverage held out, and pin each side's coverage of "/".
-      // groups is held out too: cross-directory grouping is only meaningful
-      // for this repo's multi-directory entry.
+      // groups IS compared: one-PR-per-cycle grouping is shared policy.
       const rootActionsEntry = (rel: string, text: string, wantDirs: (d: unknown) => boolean) => {
         const doc = asRecord(parseYaml(text), rel);
         const entries = (doc.updates as Record<string, unknown>[]).filter(
@@ -1067,7 +1066,7 @@ const rules: Rule[] = [
         );
         if (entries.length !== 1)
           throw new Error(`${rel}: expected exactly one github-actions dependabot entry`);
-        const { directory, directories, groups, ...shape } = entries[0];
+        const { directory, directories, ...shape } = entries[0];
         if (!wantDirs(directory ?? directories))
           throw new Error(`${rel}: github-actions entry does not cover "/"`);
         return shape;

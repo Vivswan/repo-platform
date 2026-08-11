@@ -4,10 +4,11 @@ version: 2
 updates:
   # One entry covering the workflows AND the composite actions' action.yml
   # files: the ssot action-pins rule requires one ref per action repo-wide,
-  # and grouping by dependency name makes dependabot bump every listed
-  # directory in the same PR (multi-directory alone still opens one PR per
-  # directory). Pins inside templates/**.jinja are invisible to dependabot
-  # and must be bumped BY HAND in that PR before all-green passes.
+  # and the catch-all group folds every action bump across every listed
+  # directory into ONE PR per cycle (multi-directory alone still opens one
+  # PR per directory). Pins inside templates/**.jinja are invisible to
+  # dependabot and must be bumped BY HAND in that PR before all-green
+  # passes.
   - package-ecosystem: "github-actions"
     directories:
       - "/"
@@ -19,7 +20,7 @@ updates:
       - "/actions/validate-template"
     groups:
       actions:
-        group-by: dependency-name
+        patterns: ["*"]
     schedule:
       interval: "monthly"
     cooldown:
