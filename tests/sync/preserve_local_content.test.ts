@@ -313,9 +313,24 @@ describe("carryLocalContent", () => {
   });
 });
 
+function gitFreeEnv(): Record<string, string> {
+  // Hook-driven runs (husky pre-commit) export GIT_DIR/GIT_INDEX_FILE, which
+  // would redirect every git subprocess these tests spawn away from their
+  // scratch repositories.
+  const env = { ...process.env } as Record<string, string>;
+  for (const key of Object.keys(env)) {
+    if (key.startsWith("GIT_")) delete env[key];
+  }
+  return env;
+}
+
 function initGitRepo(dir: string): void {
   const run = (...args: string[]) => {
-    const proc = Bun.spawnSync(["git", "-C", dir, ...args], { stdout: "pipe", stderr: "pipe" });
+    const proc = Bun.spawnSync(["git", "-C", dir, ...args], {
+      env: gitFreeEnv(),
+      stdout: "pipe",
+      stderr: "pipe",
+    });
     if (proc.exitCode !== 0) {
       throw new Error(`git ${args.join(" ")} failed: ${proc.stderr.toString()}`);
     }
@@ -334,7 +349,7 @@ function runScript(
   const summaryPath = join(root, "..", "local-carryover.md");
   const proc = Bun.spawnSync(
     ["bun", script, "--summary", summaryPath, "--root", root, ...extraArgs],
-    { stdout: "pipe", stderr: "pipe" },
+    { env: gitFreeEnv(), stdout: "pipe", stderr: "pipe" },
   );
   return {
     exitCode: proc.exitCode,
@@ -464,7 +479,7 @@ describe.skipIf(!hasCopier)("preserve_local_content end-to-end (copier recopy)",
       const tree = join(base, "bt");
       const target = join(base, "out");
       const run = (cmd: string[], cwd?: string) => {
-        const proc = Bun.spawnSync(cmd, { cwd, stdout: "pipe", stderr: "pipe" });
+        const proc = Bun.spawnSync(cmd, { cwd, env: gitFreeEnv(), stdout: "pipe", stderr: "pipe" });
         if (proc.exitCode !== 0) {
           throw new Error(
             `${cmd.join(" ")} failed:\n${proc.stdout.toString()}\n${proc.stderr.toString()}`,
