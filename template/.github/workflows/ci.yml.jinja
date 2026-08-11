@@ -330,8 +330,8 @@ jobs:
 {% endif %}{% endif %}{% if 'release-please' in modules %}      - release-freshness
       - release-health
 {% endif %}{% if 'skills' in modules %}      - validate-skills
-{% endif %}{% if 'pr-title' in modules %}      - pr-title{% endif %}
-    runs-on: ubuntu-latest
+{% endif %}{% if 'pr-title' in modules %}      - pr-title
+{% endif %}    runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - name: All jobs green
