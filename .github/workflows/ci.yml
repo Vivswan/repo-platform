@@ -140,6 +140,21 @@ jobs:
       - name: Verify the generated gitignore outputs match the lock
         run: bun scripts/build_gitignore.ts --check
 
+  # Network gate, deliberately outside `bun run check`: proves every
+  # third-party action pin resolves to a real upstream ref (a dangling
+  # pin like a retired moving-major tag passes every offline gate and
+  # then fails at job start, fleet-wide once synced).
+  action-refs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+      - name: Resolve every pinned action ref
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bun .github/scripts/ci/resolve_action_refs.ts
+
   # template/ is no longer committed; prove composition succeeds (collisions,
   # orphan anchors, manifest errors all hard-fail) and is deterministic.
   compose:
@@ -401,6 +416,7 @@ jobs:
       - commit-names
       - typecheck
       - gitignore-fresh
+      - action-refs
       - compose
       - validate-template
       - script-tests
