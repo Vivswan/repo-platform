@@ -7,7 +7,7 @@
 // Env: TARGET, TARGET_DISPLAY (log label; falls back to TARGET),
 // HIDE_DETAILS, CHANNEL, DISPLAY, BRANCH, BASE_BRANCH,
 // VALIDATION, RESOLVED, RECOVER, FORCE_MANUAL, DRIFT_FILE, SUMMARY_FILE,
-// RETIRED_MODULES_FILE, REMOVED_PATHS_FILE, WITHHELD_FILE,
+// CARRIED_FILE, RETIRED_MODULES_FILE, REMOVED_PATHS_FILE, WITHHELD_FILE,
 // MANIFEST_LICENSE_FILE, LICENSE_TRANSITION_FILE, GH_TOKEN,
 // GITHUB_REPOSITORY, GITHUB_OUTPUT, RUNNER_TEMP.
 
@@ -82,9 +82,20 @@ if (recover === "recopy") {
 > RECOVERY RE-RENDER: this update was dispatched with recover=recopy
 > because the recorded template base was unusable. There was no
 > three-way merge - local edits to template-managed files are
-> overwritten in this diff (repo-owned generated-once files and
-> settings.yml survive), and retired-file cleanup was skipped.
+> overwritten in this diff (repo-owned generated-once files,
+> settings.yml, and the marked repository-local sections survive; a
+> previous copy that could not be split cleanly is preserved IN FULL
+> below a repo-platform:recovery-appendix comment and needs manual
+> deduplication), and retired-file cleanup was skipped.
 > Review the whole diff before merging.`;
+  // preserve_local_content.ts carried the sanctioned repository-local
+  // regions (local-section tails, the .gitignore LOCAL section, the
+  // prefix docs' repo tails) back over the re-render; its summary names
+  // each carried file for review.
+  const carriedFile = requireEnv("CARRIED_FILE");
+  if (nonEmpty(carriedFile)) {
+    body += `\n\n${slurp(carriedFile)}`;
+  }
 }
 
 const retiredModulesFile = requireEnv("RETIRED_MODULES_FILE");

@@ -68,10 +68,15 @@ self-apply of a repo's own settings file.
 - Recovery: when a repo's recorded `_commit` base is unusable (the sync
   fails with "no base to update from"), dispatch sync-repos with
   `repo=<owner/name>` and `recover=recopy`. That performs a full
-  re-render with no three-way merge - local edits to template-managed
-  files are overwritten (generated-once files and `.github/settings.yml`
-  survive) - so it is single-repo only and the PR always stays
-  manual-review.
+  re-render with no three-way merge, so local edits to template-managed
+  files are overwritten; generated-once files and `.github/settings.yml`
+  survive, and the sanctioned repository-local regions (the docs'
+  local-section tails, `.gitignore`'s LOCAL section, the prefix docs'
+  repo-specific tails) are carried back from the repo's previous copies
+  and listed in the PR body. A previous copy that cannot be split
+  cleanly is kept in full below a marked recovery-appendix comment for
+  manual reconciliation. Recovery is single-repo only and the PR always
+  stays manual-review.
 
 ### Repository settings
 

@@ -339,13 +339,30 @@ git -c user.name=ci -c user.email=ci@localhost commit -q -m "chore: template upd
 sed 's/^_commit: .*/_commit: deadbeef/' .copier-answers.yml > .copier-answers.yml.tmp
 mv .copier-answers.yml.tmp .copier-answers.yml
 echo "# local ci note" >> .github/workflows/ci.yml
+# Sanctioned repository-local content the local-content carry must bring
+# back over the re-render (unlike the ci.yml edit above, which must drop):
+# a tail below AGENTS.md's local-section marker, a CONTRIBUTING.md
+# repository tail, and a .gitignore REPOSITORY LOCAL entry.
+echo "recovery-local agents note" >> AGENTS.md
+echo "recovery-local contributing note" >> CONTRIBUTING.md
+awk '/^# END REPOSITORY LOCAL$/ { print "recovery-local-cache/" } { print }' .gitignore > .gitignore.tmp
+mv .gitignore.tmp .gitignore
+# ... and the appendix path: strip .gitattributes' sentinel (a legacy copy
+# that predates the marker), so the carry cannot split it and must keep
+# the whole previous copy below a marked recovery-appendix comment.
+echo "recovery-local-attr binary" >> .gitattributes
+sed '/^# repo-platform:local-section$/d' .gitattributes > .gitattributes.tmp
+mv .gitattributes.tmp .gitattributes
 git add --all
 git -c user.name=ci -c user.email=ci@localhost commit -q -m "chore: corrupt the base"
 
-# The recovery leg also runs through the workflow's wrapper and preserve
-# step (TARGET_DIR is still exported), proving their RECOVER routing along
-# with the copier semantics.
+# The recovery leg also runs through the workflow's wrapper, the
+# local-content carry, and the repo-owned preserve step (TARGET_DIR is
+# still exported), in the workflow's order, proving their RECOVER routing
+# along with the copier semantics.
 RECOVER=recopy bun "$GITHUB_WORKSPACE/.github/scripts/sync/apply_update.ts"
+bun "$GITHUB_WORKSPACE/.github/scripts/sync/preserve_local_content.ts" \
+  --summary "$WORK/local-carryover.md" --root .
 RECOVER=recopy RUNNER_TEMP="$WORK" bun "$GITHUB_WORKSPACE/.github/scripts/sync/preserve_repo_owned.ts"
 
 grep -qF "_commit: templates/v99.99.99" .copier-answers.yml \
@@ -363,8 +380,22 @@ grep -qF "# local settings note" .github/settings.yml \
 if grep -qF "# local ci note" .github/workflows/ci.yml; then
   fail "recovery kept a local edit in the template-managed ci.yml (recopy must overwrite it)"
 fi
+grep -qF "recovery-local agents note" AGENTS.md \
+  || fail "recovery lost AGENTS.md's local section (local-content carry)"
+grep -qF "recovery-local contributing note" CONTRIBUTING.md \
+  || fail "recovery lost CONTRIBUTING.md's repository tail (local-content carry)"
+grep -qF "recovery-local-cache/" .gitignore \
+  || fail "recovery lost .gitignore's REPOSITORY LOCAL entry (local-content carry)"
+grep -qF "# repo-platform:recovery-appendix" .gitattributes \
+  || fail "recovery did not mark .gitattributes' unsplittable previous copy with the appendix"
+grep -qF "recovery-local-attr binary" .gitattributes \
+  || fail "recovery lost .gitattributes' local attribute (appendix carry)"
+for carried in AGENTS.md CONTRIBUTING.md .gitignore .gitattributes; do
+  grep -qF "$carried" "$WORK/local-carryover.md" \
+    || fail "the local-content carry summary does not list $carried"
+done
 bun "$GITHUB_WORKSPACE/actions/validate-template/validate_generated_files.ts" "$PROJECT"
-echo "recovery recopy OK: skip_if_exists and repo-owned files preserved, managed files re-rendered"
+echo "recovery recopy OK: skip_if_exists, repo-owned files, and repo-local content preserved, managed files re-rendered"
 
 # --- Visibility flip (public -> private) --------------------------------
 # The transition machinery issue #25's fix leans on: an update where the
