@@ -225,6 +225,8 @@ describe("resolve_copier_conflicts", () => {
         SENTINEL,
       ],
       [join(templatesDir, "base", ".gitattributes.jinja"), HASH_SENTINEL],
+      [join(templatesDir, "base", ".editorconfig.jinja"), HASH_SENTINEL],
+      [join(templatesDir, "base", ".github", "CODEOWNERS.jinja"), HASH_SENTINEL],
       [join(templatesDir, "agents", "AGENTS.md.jinja"), SENTINEL],
     ];
     for (const [path, sentinel] of templated) {

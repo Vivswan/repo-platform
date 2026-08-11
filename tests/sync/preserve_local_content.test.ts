@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import {
   carryGitignoreLocal,
   carryLocalContent,
@@ -29,6 +29,12 @@ const gitignoreTarget = `${LOCAL_BEGIN}\n/repo-local-cache/\nsecret.env\n\n${LOC
 const contributingRender = `# Contributing\n\nfresh managed prefix\n\n${SENTINEL}\n`;
 const contributingTarget = `# Contributing\n\nold managed prefix\n\n${SENTINEL}\n\n## Local dev setup\n\nrun the local thing\n`;
 
+const editorconfigRender = `root = true\n\n[*]\ncharset = utf-8\n\n${HASH_SENTINEL}\n`;
+const editorconfigTarget = `root = true\n\n[*]\nend_of_line = lf\n\n${HASH_SENTINEL}\n\n[legacy/**.js]\nindent_size = 3\n`;
+
+const codeownersRender = `* @vivswan\n\n${HASH_SENTINEL}\n`;
+const codeownersTarget = `* @oldname\n\n${HASH_SENTINEL}\n\n/security/ @security-team\n`;
+
 describe("carryManagedTail", () => {
   test("unchanged managed content keeps the target whole", () => {
     const target = `${contributingRender}\n## Local dev setup\n\nrepo tail\n`;
@@ -36,6 +42,7 @@ describe("carryManagedTail", () => {
       content: target,
       disposition: "kept-whole",
       extraSentinels: false,
+      managedHalfDiffers: false,
     });
   });
 
@@ -44,6 +51,7 @@ describe("carryManagedTail", () => {
       content: `${contributingRender}\n## Local dev setup\n\nrun the local thing\n`,
       disposition: "tail-appended",
       extraSentinels: false,
+      managedHalfDiffers: true,
     });
   });
 
@@ -79,6 +87,7 @@ describe("carryManagedTail", () => {
       content: `${agentsRender}between the markers\n${SENTINEL}\nafter the last\n`,
       disposition: "tail-appended",
       extraSentinels: true,
+      managedHalfDiffers: true,
     });
   });
 
@@ -89,6 +98,7 @@ describe("carryManagedTail", () => {
       content: `${render}*.dat binary\n`,
       disposition: "tail-appended",
       extraSentinels: false,
+      managedHalfDiffers: true,
     });
   });
 
@@ -106,6 +116,7 @@ describe("carryManagedTail", () => {
       content: `docs\n${SENTINEL}\nrepo tail\n`,
       disposition: "tail-appended",
       extraSentinels: false,
+      managedHalfDiffers: true,
     });
   });
 
@@ -119,6 +130,7 @@ describe("carryManagedTail", () => {
       content: target,
       disposition: "kept-whole",
       extraSentinels: true,
+      managedHalfDiffers: false,
     });
   });
 
@@ -147,6 +159,19 @@ describe("carryManagedTail", () => {
       content: `${render}repo tail\r\n`,
       disposition: "tail-appended",
       extraSentinels: false,
+      managedHalfDiffers: true,
+    });
+  });
+
+  test("a pristine managed half above the sentinel is not flagged", () => {
+    // Blank lines below the render's sentinel keep the target from being a
+    // plain prefix match, but the halves above the marker are identical.
+    const render = `docs\n${SENTINEL}\n\n`;
+    expect(carryManagedTail(render, `docs\n${SENTINEL}\nrepo tail\n`)).toEqual({
+      content: `${render}repo tail\n`,
+      disposition: "tail-appended",
+      extraSentinels: false,
+      managedHalfDiffers: false,
     });
   });
 });
@@ -298,6 +323,51 @@ describe("carryLocalContent", () => {
     );
   });
 
+  test("routes a customized-below-sentinel .editorconfig to the managed-tail carry", () => {
+    const carried = carryLocalContent(".editorconfig", editorconfigRender, editorconfigTarget);
+    expect(carried?.note).toContain("repository tail re-appended");
+    expect(carried?.content).toBe(`${editorconfigRender}\n[legacy/**.js]\nindent_size = 3\n`);
+  });
+
+  test("routes a customized-below-sentinel CODEOWNERS to the managed-tail carry", () => {
+    const carried = carryLocalContent(".github/CODEOWNERS", codeownersRender, codeownersTarget);
+    expect(carried?.note).toContain("repository tail re-appended");
+    expect(carried?.content).toBe(`${codeownersRender}\n/security/ @security-team\n`);
+  });
+
+  test("an edited managed half is flagged as not carried on the tail carry", () => {
+    // codeownersTarget's above-marker half differs from the render: the
+    // tail is carried, the managed-half edit is dropped, and the drop is
+    // loud in the summary.
+    const carried = carryLocalContent(".github/CODEOWNERS", codeownersRender, codeownersTarget);
+    expect(carried?.note).toContain("managed half above the marker differed");
+  });
+
+  test("a pristine managed half gets no managed-half note", () => {
+    const render = `docs\n${SENTINEL}\n\n`;
+    const carried = carryLocalContent("AGENTS.md", render, `docs\n${SENTINEL}\nrepo tail\n`);
+    expect(carried?.note).toContain("repository tail re-appended");
+    expect(carried?.note).not.toContain("managed half");
+  });
+
+  test("legacy sentinel-less .editorconfig takes a hash-comment appendix", () => {
+    const legacy = "root = true\n\n[*]\nindent_size = 3\n";
+    const carried = carryLocalContent(".editorconfig", editorconfigRender, legacy);
+    expect(carried?.note).toContain("recovery-appendix");
+    expect(carried?.content).toContain("# repo-platform:recovery-appendix");
+    expect(carried?.content).not.toContain("<!--");
+    expect(carried?.content).toEndWith(legacy);
+  });
+
+  test("legacy sentinel-less CODEOWNERS takes a hash-comment appendix", () => {
+    const legacy = "* @oldname\n/security/ @security-team\n";
+    const carried = carryLocalContent(".github/CODEOWNERS", codeownersRender, legacy);
+    expect(carried?.note).toContain("recovery-appendix");
+    expect(carried?.content).toContain("# repo-platform:recovery-appendix");
+    expect(carried?.content).not.toContain("<!--");
+    expect(carried?.content).toEndWith(legacy);
+  });
+
   test("legacy sentinel-less target gets the appendix note", () => {
     const target = "old file, marker predates it\nrepo-local notes\n";
     expect(carryLocalContent("AGENTS.md", agentsRender, target)?.note).toContain(
@@ -364,6 +434,7 @@ function makeTarget(files: Record<string, string>): string {
   const root = join(base, "target");
   mkdirSync(root);
   for (const [rel, content] of Object.entries(files)) {
+    mkdirSync(dirname(join(root, rel)), { recursive: true });
     writeFileSync(join(root, rel), content);
   }
   return root;
@@ -377,6 +448,8 @@ describe("preserve_local_content script", () => {
       ".gitignore": gitignoreTarget,
       "CONTRIBUTING.md": contributingTarget,
       "SECURITY.md": `old security prefix\n${SENTINEL}\n\n`,
+      ".editorconfig": editorconfigTarget,
+      ".github/CODEOWNERS": codeownersTarget,
       ".typography-allow.local": "docs/legacy/\n",
     });
     initGitRepo(root);
@@ -385,6 +458,8 @@ describe("preserve_local_content script", () => {
     writeFileSync(join(root, ".gitignore"), gitignoreRender);
     writeFileSync(join(root, "CONTRIBUTING.md"), contributingRender);
     writeFileSync(join(root, "SECURITY.md"), `fresh security prefix\n${SENTINEL}\n`);
+    writeFileSync(join(root, ".editorconfig"), editorconfigRender);
+    writeFileSync(join(root, ".github/CODEOWNERS"), codeownersRender);
 
     const result = runScript(root);
     expect(result.exitCode).toBe(0);
@@ -396,6 +471,14 @@ describe("preserve_local_content script", () => {
     expect(readFileSync(join(root, "CONTRIBUTING.md"), "utf-8")).toBe(
       `${contributingRender}\n## Local dev setup\n\nrun the local thing\n`,
     );
+    // The hash-sentinel pair from the live incident: local indent rules
+    // and the security-critical owners block survive under fresh renders.
+    expect(readFileSync(join(root, ".editorconfig"), "utf-8")).toBe(
+      `${editorconfigRender}\n[legacy/**.js]\nindent_size = 3\n`,
+    );
+    expect(readFileSync(join(root, ".github/CODEOWNERS"), "utf-8")).toBe(
+      `${codeownersRender}\n/security/ @security-team\n`,
+    );
     // Never customized below the marker: the fresh render stands.
     expect(readFileSync(join(root, "SECURITY.md"), "utf-8")).toBe(
       `fresh security prefix\n${SENTINEL}\n`,
@@ -405,6 +488,8 @@ describe("preserve_local_content script", () => {
     expect(result.summary).toContain("- `AGENTS.md`:");
     expect(result.summary).toContain("- `.gitignore`:");
     expect(result.summary).toContain("- `CONTRIBUTING.md`:");
+    expect(result.summary).toContain("- `.editorconfig`:");
+    expect(result.summary).toContain("- `.github/CODEOWNERS`:");
     expect(result.summary).not.toContain("SECURITY.md");
   });
 
@@ -520,6 +605,8 @@ describe.skipIf(!hasCopier)("preserve_local_content end-to-end (copier recopy)",
         "SECURITY.md": "\n## Scope\n\nrepo-local threat model\n",
         "LICENSE.md": "\nThird-party components: repo-local notice\n",
         ".gitattributes": "*.repo-local binary\n",
+        ".editorconfig": "\n[legacy/**.js]\nindent_size = 3\n",
+        ".github/CODEOWNERS": "\n/security/ @security-team\n",
       };
       for (const [rel, tail] of Object.entries(tails)) {
         const path = join(target, rel);

@@ -6,7 +6,8 @@
 // sanctioned repository-local regions a normal update's merge preserves:
 //
 // - everything below the repo-platform:local-section sentinel in any
-//   rendered file that carries one (AGENTS.md, .gitattributes),
+//   rendered file that carries one (AGENTS.md, .gitattributes,
+//   .editorconfig, .github/CODEOWNERS),
 // - .gitignore's "# BEGIN/END REPOSITORY LOCAL" section,
 // - the repository tails of the prefix docs (SECURITY.md, CONTRIBUTING.md,
 //   LICENSE.md), whose managed half ends at the sentinel and whose tail
@@ -146,7 +147,8 @@ function withTrailingNewline(content: string): string {
 /** The keep-both fallback: render, then the previous copy in full below a
  * marked comment. Hash-comment spelling for files whose sentinel is the
  * hash form (.gitattributes - an HTML comment there would parse as
- * attribute patterns), the HTML comment otherwise. */
+ * attribute patterns - .editorconfig, and .github/CODEOWNERS), the HTML
+ * comment otherwise. */
 function withAppendix(renderNl: string, target: string): string {
   const hashStyle = splitLines(renderNl).some((line) => stripCr(line.text) === HASH_SENTINEL);
   const explanation = [
@@ -169,6 +171,11 @@ export interface TailCarry {
   /** The target carried more than one sentinel line; everything after the
    * first was kept, so the tail may hold a stale duplicate to review. */
   extraSentinels: boolean;
+  /** Tail-appended only: the target's managed half (above its sentinel)
+   * differed from the fresh render's, so in-place edits there were NOT
+   * carried - recovery legitimately resets the managed half, but the drop
+   * must be loud, not silent. Kept-whole is identical by definition. */
+  managedHalfDiffers: boolean;
 }
 
 /** Managed-content carry, shared by the sentinel files and the prefix
@@ -184,6 +191,7 @@ export function carryManagedTail(render: string, target: string): TailCarry | nu
       content: target,
       disposition: "kept-whole",
       extraSentinels: splitAtFirstSentinel(target)?.extraSentinels ?? false,
+      managedHalfDiffers: false,
     };
   }
   // The render is usable as the managed half only when it ENDS at a
@@ -201,6 +209,7 @@ export function carryManagedTail(render: string, target: string): TailCarry | nu
         content: renderNl + split.tail,
         disposition: "tail-appended",
         extraSentinels: split.extraSentinels,
+        managedHalfDiffers: splitAtFirstSentinel(renderNl)?.head !== split.head,
       };
     }
   }
@@ -212,6 +221,7 @@ export function carryManagedTail(render: string, target: string): TailCarry | nu
     content: withAppendix(renderNl, target),
     disposition: "appendix",
     extraSentinels: false,
+    managedHalfDiffers: false,
   };
 }
 
@@ -327,6 +337,10 @@ const EXTRA_SENTINELS_NOTE =
   "; the previous copy carried more than one local-section marker, and everything " +
   "after its first marker was kept - review the tail for stale duplicates";
 
+const MANAGED_HALF_NOTE =
+  "; the managed half above the marker differed from the fresh render; those " +
+  "differences are not carried - review the diff";
+
 const GITIGNORE_NOTES: Record<GitignoreCarry["disposition"], string> = {
   spliced: "REPOSITORY LOCAL section restored from the repository's copy",
   appendix:
@@ -351,7 +365,10 @@ export function carryLocalContent(rel: string, render: string, target: string): 
     if (carry !== null) {
       carried = {
         content: carry.content,
-        note: TAIL_NOTES[carry.disposition] + (carry.extraSentinels ? EXTRA_SENTINELS_NOTE : ""),
+        note:
+          TAIL_NOTES[carry.disposition] +
+          (carry.extraSentinels ? EXTRA_SENTINELS_NOTE : "") +
+          (carry.managedHalfDiffers ? MANAGED_HALF_NOTE : ""),
       };
     }
   }

@@ -342,9 +342,12 @@ echo "# local ci note" >> .github/workflows/ci.yml
 # Sanctioned repository-local content the local-content carry must bring
 # back over the re-render (unlike the ci.yml edit above, which must drop):
 # a tail below AGENTS.md's local-section marker, a CONTRIBUTING.md
-# repository tail, and a .gitignore REPOSITORY LOCAL entry.
+# repository tail, a .gitignore REPOSITORY LOCAL entry, and tails below
+# the hash-comment sentinels of .editorconfig and .github/CODEOWNERS.
 echo "recovery-local agents note" >> AGENTS.md
 echo "recovery-local contributing note" >> CONTRIBUTING.md
+printf '[recovery-local/**.js]\nindent_size = 3\n' >> .editorconfig
+echo "/recovery-local/ @recovery-local-owner" >> .github/CODEOWNERS
 awk '/^# END REPOSITORY LOCAL$/ { print "recovery-local-cache/" } { print }' .gitignore > .gitignore.tmp
 mv .gitignore.tmp .gitignore
 # ... and the appendix path: strip .gitattributes' sentinel (a legacy copy
@@ -386,11 +389,15 @@ grep -qF "recovery-local contributing note" CONTRIBUTING.md \
   || fail "recovery lost CONTRIBUTING.md's repository tail (local-content carry)"
 grep -qF "recovery-local-cache/" .gitignore \
   || fail "recovery lost .gitignore's REPOSITORY LOCAL entry (local-content carry)"
+grep -qF "[recovery-local/**.js]" .editorconfig \
+  || fail "recovery lost .editorconfig's local section (local-content carry)"
+grep -qF "/recovery-local/ @recovery-local-owner" .github/CODEOWNERS \
+  || fail "recovery lost CODEOWNERS' local owner rules (local-content carry)"
 grep -qF "# repo-platform:recovery-appendix" .gitattributes \
   || fail "recovery did not mark .gitattributes' unsplittable previous copy with the appendix"
 grep -qF "recovery-local-attr binary" .gitattributes \
   || fail "recovery lost .gitattributes' local attribute (appendix carry)"
-for carried in AGENTS.md CONTRIBUTING.md .gitignore .gitattributes; do
+for carried in AGENTS.md CONTRIBUTING.md .gitignore .gitattributes .editorconfig .github/CODEOWNERS; do
   grep -qF "$carried" "$WORK/local-carryover.md" \
     || fail "the local-content carry summary does not list $carried"
 done

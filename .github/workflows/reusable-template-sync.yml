@@ -264,7 +264,8 @@ jobs:
       # A recovery re-render has no three-way merge, so it resets the
       # sanctioned repository-local regions a normal update preserves: the
       # content below the repo-platform:local-section sentinel (AGENTS.md,
-      # .gitattributes), .gitignore's REPOSITORY LOCAL section, and the
+      # .gitattributes, .editorconfig, .github/CODEOWNERS), .gitignore's
+      # REPOSITORY LOCAL section, and the
       # repository tails of the prefix docs (SECURITY.md, CONTRIBUTING.md,
       # LICENSE.md). Carry them back from the pre-render HEAD before the
       # tree is validated and diffed; the carried files are listed in the

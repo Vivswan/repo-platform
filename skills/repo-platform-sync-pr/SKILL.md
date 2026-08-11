@@ -107,10 +107,11 @@ this pass catches what it does not.
 4. For each file, verify no repository-local content is being removed.
    Tell-tale patterns:
    - `+0/-N` (or any large-deletion-dominant diff) on AGENTS.md,
-     `.gitignore`, CONTRIBUTING.md, SECURITY.md, LICENSE.md, or
-     `.gitattributes` means local-section content loss - read the full
-     diff for that file and restore what is below the marker (or inside
-     the gitignore LOCAL section) before merging.
+     `.gitignore`, CONTRIBUTING.md, SECURITY.md, LICENSE.md,
+     `.gitattributes`, `.editorconfig`, or `.github/CODEOWNERS` means
+     local-section content loss - read the full diff for that file and
+     restore what is below the marker (or inside the gitignore LOCAL
+     section) before merging.
    - A generated-once starter (checks.yml, release.yml, nightly-fuzz.yml,
      issue forms, release-please config, .gitleaks.toml, ...) being
      MODIFIED or DELETED is suspicious: `_skip_if_exists` files are never
@@ -138,11 +139,11 @@ then post-processes every block before pushing, so what you see is:
   operation).
 - Managed-tail sentinel files (`repo-platform:local-section` in
   AGENTS.md, SECURITY.md, CONTRIBUTING.md, fleet LICENSE.md,
-  .gitattributes): dropped local hunks with content are MOVED below the
-  marker instead of discarded, and the body heading says "moved below
-  the repository-specific marker". A hunk that was a stale copy of the
-  managed half contributes only its tail. Verify the moved lines ended
-  up where you want them.
+  .gitattributes, .editorconfig, .github/CODEOWNERS): dropped local
+  hunks with content are MOVED below the marker instead of discarded,
+  and the body heading says "moved below the repository-specific
+  marker". A hunk that was a stale copy of the managed half contributes
+  only its tail. Verify the moved lines ended up where you want them.
 - `.gitignore` is the exception: its LOCAL section uses BEGIN/END
   REPOSITORY LOCAL markers, not the sentinel, so the resolver does NOT
   move its hunks - a true .gitignore conflict is resolved with the local
@@ -174,9 +175,10 @@ full table is in [references/file-ownership.md](references/file-ownership.md)):
   explained by the modules diff; modifications or deletions are not -
   stop and look.
 - Managed-tail sentinel files (AGENTS.md, SECURITY.md, CONTRIBUTING.md,
-  LICENSE.md, .gitattributes below the marker): local content belongs
-  BELOW the marker. If a dropped hunk was above the marker, re-add it
-  below instead of restoring it in place.
+  LICENSE.md, .gitattributes, .editorconfig, .github/CODEOWNERS below
+  the marker): local content belongs BELOW the marker. If a dropped
+  hunk was above the marker, re-add it below instead of restoring it in
+  place.
 - `.gitignore`: local entries belong inside the BEGIN/END REPOSITORY
   LOCAL section; conflict hunks there come back via the PR body, not a
   move (see above).

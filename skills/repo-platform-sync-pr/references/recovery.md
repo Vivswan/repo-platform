@@ -78,7 +78,8 @@ the recovery for that repo heals it.
 `copier recopy --overwrite` - a full re-render with NO three-way merge -
 followed by a carry step that splices repository-local content back:
 
-- Managed-tail sentinel files (AGENTS.md, `.gitattributes`, SECURITY.md,
+- Managed-tail sentinel files (AGENTS.md, `.gitattributes`,
+  `.editorconfig`, `.github/CODEOWNERS`, SECURITY.md,
   CONTRIBUTING.md, fleet LICENSE.md) all take ONE carry path with three
   possible dispositions, each reported in the PR body's carry summary:
   - kept-whole: the repo's copy starts with the fresh render, so it is
@@ -98,7 +99,16 @@ followed by a carry step that splices repository-local content back:
     files like `.gitattributes`, `<!-- repo-platform:recovery-appendix ... -->`
     otherwise - and needs manual deduplication. Loud over lossy: an
     appendix in AGENTS.md or `.gitattributes` is expected behavior, not
-    a bug.
+    a bug. `.editorconfig` and `.github/CODEOWNERS` carry the newest
+    sentinels, so during the transition window (repos not yet synced
+    past the sentinel's introduction) they are the most likely appendix
+    producers. And unlike `.gitignore`'s appendix, which is commented
+    out and inert, an `.editorconfig` or CODEOWNERS appendix is LIVE:
+    both formats apply the LAST match, so the duplicated previous copy
+    below the appendix comment governs until you dedupe it. That is the
+    conservative-correct behavior (the repo's previous rules keep
+    winning, exactly as before the recovery) - just do not expect the
+    .gitignore-style "nothing applies until restored" promise here.
 - The `.gitignore` BEGIN/END REPOSITORY LOCAL section body is carried
   over. When the repo copy's LOCAL markers are mangled, duplicated, or
   missing, the WHOLE previous copy is preserved inside the fresh LOCAL
@@ -136,7 +146,8 @@ Recovery PRs generated BEFORE the carry step existed (and any future
 regression) show deletion-dominant diffs on the managed-tail sentinel
 files or `.gitignore`:
 `+0/-N` on AGENTS.md, SECURITY.md, CONTRIBUTING.md, LICENSE.md,
-`.gitattributes`, or `.gitignore`. Do not merge one of those. Two fixes:
+`.gitattributes`, `.editorconfig`, `.github/CODEOWNERS`, or
+`.gitignore`. Do not merge one of those. Two fixes:
 
 - Preferred: re-dispatch the recovery (same command as above). The
   branch is force-pushed fresh, so the new run - with the carry step -
