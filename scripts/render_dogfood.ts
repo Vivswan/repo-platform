@@ -26,7 +26,10 @@ import { type JinjaVars, renderJinjaFile, resolveCondition } from "./jinja_subse
 import { loadManifests, type ModuleManifest } from "./module_manifests.ts";
 
 const REPO_ROOT = resolve(import.meta.dir, "..");
-const ANSWERS_FILE = ".repo-platform-answers.yml";
+
+/** This repository's own copier answers file; check_ssot.ts and
+ *  verify_dogfood_oracle.ts read the same name. */
+export const ANSWERS_FILE = ".repo-platform-answers.yml";
 
 // The generated pairs: repo copy <- template twin. A template under
 // templates/<module>/ renders only while the answers select that module

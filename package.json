@@ -20,6 +20,7 @@
     "dogfood": "bun scripts/render_dogfood.ts",
     "dogfood:check": "bun scripts/render_dogfood.ts --check",
     "gitignore:check": "bun scripts/build_gitignore.ts --check",
+    "regen": "bun run generate && bun run dogfood && bun scripts/build_gitignore.ts --locked",
     "compose": "bun scripts/compose_template.ts",
     "compose:check": "bun .github/scripts/build-branches/branch_tree.ts --dest /tmp/repo-platform-compose-check --channel staging && rm -rf /tmp/repo-platform-compose-check",
     "test": "bun test ./tests ./actions/fuzz-issue ./actions/release-health ./actions/validate-template",

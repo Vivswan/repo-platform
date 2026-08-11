@@ -22,6 +22,7 @@ import {
   stripGeneratedRegions,
   zToDollar,
 } from "../../scripts/check_ssot";
+import { MARKER_TOKENS, mdMarkers } from "../../scripts/generate";
 import { placeholderJinja } from "../../scripts/jinja_subset";
 
 describe("applyDivergences", () => {
@@ -322,12 +323,24 @@ describe("parseLabels", () => {
 });
 
 describe("stripGeneratedRegions", () => {
-  const begin = (name: string) => `<!-- BEGIN GENERATED: ${name} (scripts/generate.ts - x) -->`;
-  const end = (name: string) => `<!-- END GENERATED: ${name} -->`;
+  // Markers built by generate.ts's own grammar, so a marker-text rename
+  // there keeps these fixtures aligned with what the stripper must match.
+  const begin = (name: string) => mdMarkers(name).begin;
+  const end = (name: string) => mdMarkers(name).end;
 
   test("removes balanced regions, inline and multi-line, keeping hand prose", () => {
     const text = `hand ${begin("a")}gen a${end("a")} middle\n${begin("b")}\ngen b\n${end("b")} tail`;
-    expect(stripGeneratedRegions(text, "doc")).toBe("hand  middle\n tail");
+    expect(stripGeneratedRegions(text, "doc")).toEqual({
+      prose: "hand  middle\n tail",
+      regions: 2,
+    });
+  });
+
+  test("reports zero regions for marker-free text, so callers can fail a no-op strip", () => {
+    expect(stripGeneratedRegions("plain hand prose", "doc")).toEqual({
+      prose: "plain hand prose",
+      regions: 0,
+    });
   });
 
   test("a BEGIN inside an open region throws naming both regions", () => {
@@ -347,5 +360,11 @@ describe("stripGeneratedRegions", () => {
 
   test("an unclosed region throws", () => {
     expect(() => stripGeneratedRegions(`x ${begin("a")} y`, "doc")).toThrow("never closed");
+  });
+
+  test("a marker token outside the comment grammar throws instead of surviving the strip", () => {
+    expect(() => stripGeneratedRegions(`x ${MARKER_TOKENS.begin} y`, "doc")).toThrow(
+      "malformed generated-region markers remain",
+    );
   });
 });

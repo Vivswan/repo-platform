@@ -46,10 +46,15 @@ import { loadManifests, type ModuleManifest, manifestSchema } from "./module_man
 
 const REPO_ROOT = resolve(import.meta.dir, "..");
 
+/** The marker grammar's kind tokens. check_ssot.ts's stripGeneratedRegions
+ *  builds its matcher from these, so renaming the marker text here cannot
+ *  leave that stripper silently matching nothing. */
+export const MARKER_TOKENS = { begin: "BEGIN GENERATED:", end: "END GENERATED:" } as const;
+
 function markerTexts(name: string): { begin: string; end: string } {
   return {
-    begin: `BEGIN GENERATED: ${name} (scripts/generate.ts - edit module.yml manifests, not this block)`,
-    end: `END GENERATED: ${name}`,
+    begin: `${MARKER_TOKENS.begin} ${name} (scripts/generate.ts - edit module.yml manifests, not this block)`,
+    end: `${MARKER_TOKENS.end} ${name}`,
   };
 }
 
@@ -334,7 +339,10 @@ export interface DependabotLabelGroup {
 
 /** The dependabot labels the settings docs enumerate, deduped by label
  *  name (the loader already rejects same-label color disagreements), each
- *  listing its contributing ecosystems once, in manifest order. */
+ *  listing its contributing ecosystems once, in manifest order. Distinct
+ *  from compose_template.ts's dependabotLabels (the rich name/color/
+ *  description roster) and validate_central_settings.ts's moduleLabelPairs
+ *  (the fleet preflight's flat module->label pairs). */
 export function dependabotLabelGroups(manifests: ModuleManifest[]): DependabotLabelGroup[] {
   const byLabel = new Map<string, DependabotLabelGroup>();
   for (const { dependabot } of manifests) {

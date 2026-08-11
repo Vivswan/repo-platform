@@ -44,8 +44,11 @@ export type Fetched =
 
 /** The per-ecosystem labels dependabot puts on its PRs (and recreates when
  *  missing), keyed by the module that enables the ecosystem - read from the
- *  module manifests (templates/<module>/module.yml), in MODULE_ORDER. */
-export function dependabotLabels(): [module: string, label: string][] {
+ *  module manifests (templates/<module>/module.yml), in MODULE_ORDER.
+ *  compose_template.ts's dependabotLabels is the rich canonical roster
+ *  (name/color/description/modules); this flat pairing exists for
+ *  requiredLabelsFrom's module-selection filter. */
+export function moduleLabelPairs(): [module: string, label: string][] {
   return loadManifests().flatMap((m): [string, string][] =>
     m.dependabot ? [[m.module, m.dependabot.label]] : [],
   );
@@ -98,7 +101,7 @@ export function requiredLabels(
   modules: string[],
   fuzzerLabel: string | null,
 ): { name: string; why: string }[] {
-  cachedModuleLabels ??= dependabotLabels();
+  cachedModuleLabels ??= moduleLabelPairs();
   return requiredLabelsFrom(cachedModuleLabels, modules, fuzzerLabel);
 }
 

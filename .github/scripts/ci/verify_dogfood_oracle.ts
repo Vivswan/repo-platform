@@ -26,7 +26,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
-import { PAIRS, parseAnswers } from "../../../scripts/render_dogfood.ts";
+import { ANSWERS_FILE, PAIRS, parseAnswers } from "../../../scripts/render_dogfood.ts";
 
 const REPO_ROOT = resolve(import.meta.dir, "..", "..", "..");
 
@@ -40,10 +40,7 @@ function main(): number {
   if (args.length > 1) fail(`expected at most one argument (render root), got: ${args.join(" ")}`);
   const renderRoot = args[0] ?? "/tmp/smoke";
 
-  const answers = parseAnswers(
-    readFileSync(join(REPO_ROOT, ".repo-platform-answers.yml"), "utf-8"),
-    ".repo-platform-answers.yml",
-  );
+  const answers = parseAnswers(readFileSync(join(REPO_ROOT, ANSWERS_FILE), "utf-8"), ANSWERS_FILE);
 
   // The render must have used this repository's answers, or every
   // comparison below compares against the wrong project.
@@ -74,7 +71,7 @@ function main(): number {
   if (wrongAnswers.length > 0) {
     for (const problem of wrongAnswers) console.error(`${recordedPath}: ${problem}`);
     fail(
-      "the render's recorded answers do not match .repo-platform-answers.yml - " +
+      `the render's recorded answers do not match ${ANSWERS_FILE} - ` +
         "fix ci.yml's dogfood-oracle matrix row",
     );
   }

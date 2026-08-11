@@ -26,9 +26,10 @@ import { join, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { centralIdentityIssues } from "../.github/scripts/fleet/validate_central_settings.ts";
 import { dependabotLabels } from "./compose_template.ts";
+import { MARKER_TOKENS } from "./generate.ts";
 import { type JinjaVars, normalizeJinja, placeholderJinja } from "./jinja_subset.ts";
 import { loadManifests } from "./module_manifests.ts";
-import { parseAnswers } from "./render_dogfood.ts";
+import { ANSWERS_FILE, parseAnswers } from "./render_dogfood.ts";
 
 const REPO_ROOT = resolve(import.meta.dir, "..");
 
@@ -52,10 +53,11 @@ interface Rule {
 // line migrated elsewhere, still mismatches. A template side that carries
 // the same anchored line makes the entry stale - reported, with nothing
 // excused - so the excuse can never mask the template catching up. Honored
-// only by the semantic-mode dogfood-parity pairs; byte-compared pairs
-// cannot skip lines, and subset rules already tolerate repo-side additions
-// without an entry. Every entry must say why the divergence is deliberate;
-// an entry that excused nothing anywhere is reported as stale.
+// only by the semantic-mode dogfood-parity pairs - the prefix-mode pairs
+// compare their template prefix verbatim and cannot skip lines - and
+// subset rules already tolerate repo-side additions without an entry.
+// Every entry must say why the divergence is deliberate; an entry that
+// excused nothing anywhere is reported as stale.
 export const RECORDED_DIVERGENCES: {
   file: string;
   reason: string;
@@ -81,19 +83,29 @@ function read(rel: string): string {
   return readFileSync(join(REPO_ROOT, rel), "utf-8");
 }
 
-/** A markdown doc with its generated regions removed, so a doc-quoted
- *  constant must live in HAND prose to satisfy a rule: a value inside a
- *  generated region has the manifests as its author (generate:check
- *  polices those). Markers are parsed pairwise - a duplicate BEGIN, a
- *  mismatched name, a dangling END, or an unclosed region all throw. */
-export function stripGeneratedRegions(text: string, where: string): string {
-  const marker = /<!-- (BEGIN|END) GENERATED: ([a-z0-9-]+)[^>]*-->/g;
+/** A markdown doc with its generated regions removed (and how many), so a
+ *  doc-quoted constant must live in HAND prose to satisfy a rule: a value
+ *  inside a generated region has the manifests as its author
+ *  (generate:check polices those). The marker grammar is built from
+ *  scripts/generate.ts's MARKER_TOKENS, so renaming the marker text there
+ *  cannot leave this stripper matching nothing. Markers are parsed
+ *  pairwise - a duplicate BEGIN, a mismatched name, a dangling END, or an
+ *  unclosed region all throw. */
+export function stripGeneratedRegions(
+  text: string,
+  where: string,
+): { prose: string; regions: number } {
+  const marker = new RegExp(
+    `<!-- (${MARKER_TOKENS.begin}|${MARKER_TOKENS.end}) ([a-z0-9-]+)[^>]*-->`,
+    "g",
+  );
   let out = "";
   let cursor = 0;
+  let regions = 0;
   let open: { name: string; at: number } | null = null;
   for (const match of text.matchAll(marker)) {
     const [full, kind, name] = match;
-    if (kind === "BEGIN") {
+    if (kind === MARKER_TOKENS.begin) {
       if (open) {
         throw new Error(
           `${where}: generated region '${open.name}' is still open where '${name}' begins`,
@@ -108,19 +120,37 @@ export function stripGeneratedRegions(text: string, where: string): string {
         throw new Error(`${where}: region '${open.name}' is closed by END '${name}'`);
       }
       open = null;
+      regions++;
       cursor = match.index + full.length;
     }
   }
   if (open) throw new Error(`${where}: generated region '${open.name}' is never closed`);
   out += text.slice(cursor);
-  if (out.includes("GENERATED:")) {
+  if (out.includes(MARKER_TOKENS.begin) || out.includes(MARKER_TOKENS.end)) {
     throw new Error(`${where}: malformed generated-region markers remain after stripping`);
   }
-  return out;
+  return { prose: out, regions };
 }
 
+// The docs generate.ts targets with markdown regions. A strip over one of
+// these that removes nothing means the marker grammar drifted and every
+// stripped-prose rule is silently checking unstripped text.
+const DOCS_WITH_REGIONS = new Set([
+  "README.md",
+  "docs/new-repo.md",
+  "docs/settings.md",
+  "docs/pages.md",
+]);
+
 function handProse(rel: string): string {
-  return stripGeneratedRegions(read(rel), rel);
+  const { prose, regions } = stripGeneratedRegions(read(rel), rel);
+  if (regions === 0 && DOCS_WITH_REGIONS.has(rel)) {
+    throw new Error(
+      `${rel}: stripping removed no generated regions from a doc known to ` +
+        "carry them - the marker grammar drifted from scripts/generate.ts",
+    );
+  }
+  return prose;
 }
 
 /** Anchor extraction that fails loudly: a missing match means the fact this
@@ -555,10 +585,7 @@ const rules: Rule[] = [
     name: "dogfood-oracle-row",
     run: () => {
       const mismatches: Mismatch[] = [];
-      const answers = parseAnswers(
-        read(".repo-platform-answers.yml"),
-        ".repo-platform-answers.yml",
-      );
+      const answers = parseAnswers(read(ANSWERS_FILE), ANSWERS_FILE);
       const row = smokeMatrixRow("dogfood-oracle");
       mismatches.push(
         ...setMismatch(
@@ -570,7 +597,7 @@ const rules: Rule[] = [
       if (String(row.private) !== String(answers.private)) {
         mismatches.push({
           file: "ci.yml smoke-generate 'dogfood-oracle' row",
-          expected: `private: "${answers.private}" (.repo-platform-answers.yml)`,
+          expected: `private: "${answers.private}" (${ANSWERS_FILE})`,
           got: `private: "${String(row.private)}"`,
         });
       }

@@ -6,8 +6,8 @@ import {
   centralIdentityIssues,
   checkCentralFileLocal,
   checkCentralFileRemote,
-  dependabotLabels,
   type Fetched,
+  moduleLabelPairs,
   requiredLabels,
   requiredLabelsFrom,
 } from "../../.github/scripts/fleet/validate_central_settings";
@@ -71,7 +71,7 @@ describe("requiredLabels", () => {
   });
 
   test("the module->label pairs come from the manifests, in MODULE_ORDER", () => {
-    expect(dependabotLabels()).toEqual([
+    expect(moduleLabelPairs()).toEqual([
       ["bun", "javascript"],
       ["node", "javascript"],
       ["deno", "deno"],

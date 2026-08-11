@@ -32,11 +32,11 @@
 //   bun scripts/build_gitignore.ts --check   # exit 1 if outputs don't match the lock SHA
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join, relative, resolve } from "node:path";
+import { join, relative, resolve } from "node:path";
 import { gateExpression } from "./compose_template.ts";
 import { loadManifests } from "./module_manifests.ts";
 
-const REPO_ROOT = resolve(dirname(Bun.main), "..");
+const REPO_ROOT = resolve(import.meta.dir, "..");
 const LOCK_FILE = join(REPO_ROOT, "scripts", "gitignore.lock");
 const OUTPUT_TEMPLATE = join(REPO_ROOT, "templates", "base", ".gitignore.jinja");
 const OUTPUT_SELF = join(REPO_ROOT, ".gitignore");
@@ -44,7 +44,7 @@ const OUTPUT_SELF = join(REPO_ROOT, ".gitignore");
 const ALWAYS = ["Global/Windows.gitignore", "Global/macOS.gitignore", "Global/Linux.gitignore"];
 
 /** Per-module upstream sources plus every module's gate expression, from
- *  the manifests in MODULE_ORDER. Read inside main(), not at import time,
+ *  the manifests in MODULE_ORDER. Read at run time, not at import time,
  *  so a broken manifest reports through the normal error path of whichever
  *  mode is running. */
 function byModule(): { entries: [string, string[]][]; gates: Map<string, string> } {
@@ -230,16 +230,19 @@ async function main(): Promise<number> {
     );
     return 2;
   }
-  const mode: Mode = locked ? "locked" : check ? "check" : "fetch";
-
-  let moduleSources: [string, string[]][];
-  let gates: Map<string, string>;
+  // One error dialect for every failure past argument parsing (a broken
+  // manifest, a missing lock file, an upstream fetch failure), matching
+  // generate.ts and render_dogfood.ts.
   try {
-    ({ entries: moduleSources, gates } = byModule());
+    return await run(locked ? "locked" : check ? "check" : "fetch");
   } catch (error) {
     console.error(`error: ${error instanceof Error ? error.message : String(error)}`);
     return 1;
   }
+}
+
+async function run(mode: Mode): Promise<number> {
+  const { entries: moduleSources, gates } = byModule();
   const sources = selfSources(moduleSources);
 
   const paths = [...ALWAYS, ...sources];

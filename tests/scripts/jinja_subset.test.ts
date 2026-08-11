@@ -202,6 +202,7 @@ describe("renderJinjaFile", () => {
   test("raw blocks are untouchable: substitution never rewrites their contents", () => {
     // Unprotected, {{ project_slug }} inside the GitHub expression would
     // become $repo-platform.
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: literal GitHub Actions expression fixture
     expect(renderJinjaFile("a: {% raw %}${{ project_slug }}{% endraw %}\n", vars, {})).toBe(
       // biome-ignore lint/suspicious/noTemplateCurlyInString: literal GitHub Actions expression fixture
       "a: ${{ project_slug }}\n",

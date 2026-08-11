@@ -43,15 +43,18 @@ sync secret; the single REPO_PLATFORM_TOKEN PAT lives only here.
 - GitHub Actions expressions inside `.jinja` workflow files must be wrapped
   in `{% raw %}...{% endraw %}` or jinja eats the `{{ }}`.
 - Never hand-edit generated content; edit its source and rerun its
-  generator (CI fails on drift). From the module manifests via
-  `bun run generate`: the marker-fenced regions in copier.yml,
-  validate_generated_files.ts, and the docs, plus the whole
+  generator (CI fails on drift; `bun run regen` runs all three). From the
+  module manifests via `bun run generate`: the marker-fenced regions in
+  copier.yml, validate_generated_files.ts, and the docs, plus the whole
   templates/module.schema.json (the manifests' editor schema). From the
   templates + `.repo-platform-answers.yml` via `bun run dogfood`: this
   repo's copies of the files it dogfoods (the pair list is in
   scripts/render_dogfood.ts). From the manifests' `gitignore_sources` via
-  `bun scripts/build_gitignore.ts`: templates/base/.gitignore.jinja, the
-  per-module `fragments/gitignore.jinja`, and this repo's `.gitignore`.
+  `bun scripts/build_gitignore.ts --locked`:
+  templates/base/.gitignore.jinja, the per-module
+  `fragments/gitignore.jinja`, and this repo's `.gitignore` (plain mode,
+  without `--locked`, also advances the upstream pin - that is the
+  refresh-gitignore workflow's job, not routine regeneration).
 - Workflow run blocks longer than a few lines are extracted to TypeScript
   scripts under `.github/scripts/<owner>/`, run with bun; subprocesses use
   argv arrays via `shared/proc.ts`, never shell strings. Three scripts stay

@@ -304,6 +304,31 @@ export function lockfileGroups(manifests: ModuleManifest[]): LockfileGroup[] {
   return groups;
 }
 
+/** A dependabot- or toolchain-carrying module lands in the managed
+ *  AGENTS.md Toolchain section's audience; without an agents-toolchain
+ *  fragment its bullets would just silently be missing. `withFragment` is
+ *  the set of modules providing fragments/agents-toolchain.jinja. */
+export function agentsToolchainErrors(
+  manifests: ModuleManifest[],
+  withFragment: Set<string>,
+): string[] {
+  const errors: string[] = [];
+  for (const manifest of manifests) {
+    const declares = [
+      ...(manifest.dependabot ? ["dependabot"] : []),
+      ...(manifest.toolchain ? ["a toolchain"] : []),
+    ];
+    if (declares.length === 0 || withFragment.has(manifest.module)) continue;
+    errors.push(
+      `templates/${manifest.module}/${MANIFEST_NAME} declares ${declares.join(" and ")} but ` +
+        `templates/${manifest.module}/${FRAGMENTS_DIR}/agents-toolchain${JINJA_SUFFIX} ` +
+        "is missing - AGENTS.md's Toolchain section would silently skip the " +
+        "module; add the fragment with its toolchain bullets",
+    );
+  }
+  return errors;
+}
+
 // One spliced piece of an anchor's replacement, already carrying its gate.
 // `order` is the MODULE_ORDER position of the (first) contributing module,
 // so generated groups interleave with fragment contributions exactly where
@@ -801,22 +826,10 @@ export function build(): Map<string, Entry> {
     ]),
   });
 
-  // A dependabot-carrying module lands in the managed AGENTS.md Toolchain
-  // section's audience; without an agents-toolchain fragment its bullets
-  // would just silently be missing.
   const agentsToolchainModules = new Set(
     (fragments.get("agents-toolchain") ?? []).map(([module]) => module),
   );
-  for (const manifest of manifests) {
-    if (manifest.dependabot && !agentsToolchainModules.has(manifest.module)) {
-      errors.push(
-        `templates/${manifest.module}/${MANIFEST_NAME} declares dependabot but ` +
-          `templates/${manifest.module}/${FRAGMENTS_DIR}/agents-toolchain${JINJA_SUFFIX} ` +
-          "is missing - AGENTS.md's Toolchain section would silently skip the " +
-          "module; add the fragment with its toolchain bullets",
-      );
-    }
-  }
+  errors.push(...agentsToolchainErrors(manifests, agentsToolchainModules));
 
   for (const [anchor, spec] of Object.entries(DATA_ANCHORS)) {
     const fromFiles = fragments.get(anchor) ?? [];

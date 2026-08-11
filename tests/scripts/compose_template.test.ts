@@ -8,6 +8,7 @@
 import { describe, expect, test } from "bun:test";
 import { parse as parseYaml } from "yaml";
 import {
+  agentsToolchainErrors,
   codeqlGroups,
   codeqlSlug,
   dependabotLabels,
@@ -157,6 +158,45 @@ describe("dependabotLabels", () => {
         modules: ["uv"],
       },
     ]);
+  });
+});
+
+describe("agentsToolchainErrors", () => {
+  const codeqlOnly = manifest("zig", ["toolchain: {codeql_language: c-cpp}"]);
+  const dependabotOnly = manifest("cargo", [
+    'dependabot: {ecosystem: cargo, label: rust, color: "dea584"}',
+  ]);
+
+  test("passes when every dependabot/toolchain module ships its fragment", () => {
+    expect(
+      agentsToolchainErrors(
+        [AGENTS, BUN, codeqlOnly, dependabotOnly],
+        new Set(["bun", "zig", "cargo"]),
+      ),
+    ).toEqual([]);
+  });
+
+  test("a module declaring neither dependabot nor a toolchain needs no fragment", () => {
+    expect(agentsToolchainErrors([AGENTS], new Set())).toEqual([]);
+  });
+
+  test("a dependabot-only module without the fragment errors", () => {
+    const errors = agentsToolchainErrors([dependabotOnly], new Set());
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain("templates/cargo/module.yml declares dependabot but");
+    expect(errors[0]).toContain("fragments/agents-toolchain.jinja");
+  });
+
+  test("a toolchain-only module without the fragment errors too (codeql-only shape)", () => {
+    const errors = agentsToolchainErrors([codeqlOnly], new Set());
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain("templates/zig/module.yml declares a toolchain but");
+  });
+
+  test("a module declaring both names both in its error", () => {
+    const errors = agentsToolchainErrors([BUN], new Set());
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain("declares dependabot and a toolchain but");
   });
 });
 
