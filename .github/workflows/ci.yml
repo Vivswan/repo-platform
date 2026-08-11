@@ -349,6 +349,30 @@ jobs:
         if: github.event_name == 'pull_request' && startsWith(github.head_ref, 'release-please--')
         run: .github/scripts/ci/release_freshness.sh
 
+  # Fails a release PR while an open release-blocker issue or a high+
+  # Dependabot alert says the tip is not release-worthy (this repo runs no
+  # fuzzer, so no fuzz gate). Early visibility only: release-please.yml's
+  # pre-flight re-checks authoritatively at cut time. The skip lives on the
+  # STEPS: all-green treats a skipped needed job as failure.
+  release-health:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
+      vulnerability-alerts: read
+    steps:
+      - uses: actions/checkout@v7
+        if: github.event_name == 'pull_request' && startsWith(github.head_ref, 'release-please--')
+      - name: Require a releasable tip
+        if: github.event_name == 'pull_request' && startsWith(github.head_ref, 'release-please--')
+        uses: ./actions/release-health
+        with:
+          mode: pull-request
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   # CodeQL runs inside the gate: this thin job calls the analysis workflow,
   # and a caller job's permissions are the ceiling for every job in the
   # called workflow, so the scan permissions are granted here. This repo is
@@ -384,6 +408,7 @@ jobs:
       - upgrade-path
       - pr-title
       - release-freshness
+      - release-health
       - codeql-javascript
     runs-on: ubuntu-latest
     timeout-minutes: 5
