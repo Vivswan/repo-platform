@@ -1,0 +1,16 @@
+{
+  "name": {{ (project_slug ~ "-skills") | tojson }},
+  "owner": {
+    "name": {{ github_username | tojson }}
+  },
+  "metadata": {
+    "description": {{ ("Agent skills for " ~ project_name) | tojson }}
+  },
+  "plugins": [
+    {
+      "name": {{ (project_slug ~ "-skills") | tojson }},
+      "description": {{ ("Agent skills for " ~ project_name) | tojson }},
+      "source": "./"
+    }
+  ]
+}

@@ -276,6 +276,20 @@ jobs:
 {%- endif %}
         env:
           GH_TOKEN: {% raw %}${{ secrets.GITHUB_TOKEN }}{% endraw %}
+{% endif %}{% if 'skills' in modules %}
+  # Structural validation of the hosted agent skills (the skills module),
+  # inside the gate so branch protection blocks on a broken catalog:
+  # offline and cheap, so it runs unconditionally on every event. The
+  # network-dependent `npx skills` discovery check stays advisory in the
+  # standalone validate-skills.yml.
+  validate-skills:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: {{ github_username }}/repo-platform/actions/validate-skills@{{ uses_ref }}
+        with:
+          skills-dir: {{ skills_dir | tojson }}
 {% endif %}{% if 'pr-title' in modules %}
   # Conventional Commit PR title, checked inside the gate so branch
   # protection blocks on it. PRs are squash-merged, so the PR title becomes
@@ -315,6 +329,7 @@ jobs:
 {% endif %}{% endif %}{% if 'uv' in modules %}{% if enable_codeql %}      - codeql-python
 {% endif %}{% endif %}{% if 'release-please' in modules %}      - release-freshness
       - release-health
+{% endif %}{% if 'skills' in modules %}      - validate-skills
 {% endif %}{% if 'pr-title' in modules %}      - pr-title{% endif %}
     runs-on: ubuntu-latest
     timeout-minutes: 5
