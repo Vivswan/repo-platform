@@ -230,7 +230,7 @@ jobs:
       # lockfile sits at the workspace root.
       - name: Setup node
         if: contains(format(',{0},', inputs.setup), ',node,') && steps.cfg.outputs.publish == 'true'
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version-file: ${{ hashFiles('production/.node-version') != '' && 'production/.node-version' || (hashFiles('staging/.node-version') != '' && 'staging/.node-version' || '') }}
           package-manager-cache: false
