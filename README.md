@@ -67,7 +67,8 @@ self-apply of a repo's own settings file.
   failures still turn it red.
 - Recovery: when a repo's recorded `_commit` base is unusable (the sync
   fails with "no base to update from"), dispatch sync-repos with
-  `repo=<owner/name>` and `recover=recopy`. That performs a full
+  `recover=recopy` and `repo=<owner/name>`, or `repo=all` to recover
+  every managed repo in one run. Each recovered repo gets a full
   re-render with no three-way merge, so local edits to template-managed
   files are overwritten; generated-once files and `.github/settings.yml`
   survive, and the sanctioned repository-local regions (the docs'
@@ -75,8 +76,9 @@ self-apply of a repo's own settings file.
   repo-specific tails) are carried back from the repo's previous copies
   and listed in the PR body. A previous copy that cannot be split
   cleanly is kept in full below a marked recovery-appendix comment for
-  manual reconciliation. Recovery is single-repo only and the PR always
-  stays manual-review.
+  manual reconciliation. Recovery always needs an explicit repo scope
+  (a fat-fingered recover input without one is rejected) and the PRs
+  always stay manual-review.
 
 ### Repository settings
 

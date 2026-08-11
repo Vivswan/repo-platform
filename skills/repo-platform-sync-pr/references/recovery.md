@@ -45,9 +45,33 @@ gh workflow run sync-repos.yml -R Vivswan/repo-platform \
   -f repo=<owner/name> -f recover=recopy
 ```
 
-Single-repo only. For several repos, dispatch serially and wait for each
-run: the sync-repos concurrency group keeps one pending run and cancels
-the rest.
+For every managed repo at once, pass the literal `all`:
+
+```bash
+gh workflow run sync-repos.yml -R Vivswan/repo-platform \
+  -f repo=all -f recover=recopy
+```
+
+The repo input is required either way - a recovery dispatch without it
+is rejected, so recovery stays a deliberate act.
+
+`repo=all` is for fleet-wide breakage (a recreated staging branch,
+say), not routine use: it applies the destructive recovery path to
+every managed repo, including ones that never needed it - managed-half
+edits are overwritten everywhere, retired-file cleanup is skipped
+fleet-wide, and every open auto-merging sync PR is flipped to manual
+review.
+
+One fleet run fans out to every repo in parallel, and failures stay
+isolated per leg: every repo is attempted, the run goes red if any leg
+failed, but there is no aggregate summary - list the failed legs with
+`gh run view <id> -R Vivswan/repo-platform --log-failed` (a public
+repo's failure surfaces nowhere else; a private repo self-files its
+failure-report issue, as above). One sharp edge: each leg disarms
+auto-merge BEFORE it pushes the branch and updates the PR, so a leg
+that fails exactly there (rate limiting's favorite spot) leaves that
+repo's previously-armed PR disarmed with no new content - re-running
+the recovery for that repo heals it.
 
 ## What the recovery PR contains
 

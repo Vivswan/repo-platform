@@ -92,6 +92,7 @@ describe("select_sync_repos.ts", () => {
         GH_TOKEN: "stub-token",
         GITHUB_RUN_ID: "8675309",
         ONLY_REPO: "",
+        RECOVER: "",
         // Neutralize the real event payload CI runs carry; the dispatch
         // tests set their own.
         GITHUB_EVENT_PATH: "",
@@ -180,6 +181,57 @@ describe("select_sync_repos.ts", () => {
     expect(r.stderr).toContain("matched no selected repository");
     for (const channel of [r.stdout, r.stderr, r.output]) {
       expect(channel).not.toContain("hidden-servr");
+    }
+  });
+
+  test("recover=recopy with an empty repo input is rejected before selection", () => {
+    // The real fat-finger shape: a dispatch payload whose repo input was
+    // left blank, not the harness's empty GITHUB_EVENT_PATH short-circuit.
+    const eventFile = join(root, "recover-unscoped-event.json");
+    writeFileSync(eventFile, JSON.stringify({ inputs: { repo: "", recover: "recopy" } }));
+    const r = run("recover-unscoped", { GITHUB_EVENT_PATH: eventFile, RECOVER: "recopy" });
+    expect(r.exitCode).not.toBe(0);
+    expect(r.stdout).toContain(
+      "::error::recover=recopy needs an explicit scope: dispatch it with repo=<owner/name>",
+    );
+    expect(r.output).not.toContain("repos=");
+  });
+
+  test("recover=none (the dispatch default) with an empty repo selects normally", () => {
+    const eventFile = join(root, "recover-none-event.json");
+    writeFileSync(eventFile, JSON.stringify({ inputs: { repo: "", recover: "none" } }));
+    const r = run("recover-none", { GITHUB_EVENT_PATH: eventFile, RECOVER: "none" });
+    expect(r.exitCode).toBe(0);
+    expect(reposOf(r).map((row) => row.repo)).toEqual(reposOf(main).map((row) => row.repo));
+  });
+
+  test("repo=all with recover=recopy fans out to the whole selected fleet", () => {
+    // The real dispatch shape: repo arrives via the event payload,
+    // recover via the RECOVER step env.
+    const eventFile = join(root, "recover-all-event.json");
+    writeFileSync(eventFile, JSON.stringify({ inputs: { repo: "all", recover: "recopy" } }));
+    const r = run("recover-all", { GITHUB_EVENT_PATH: eventFile, RECOVER: "recopy" });
+    expect(r.exitCode).toBe(0);
+    expect(reposOf(r).map((row) => row.repo)).toEqual(reposOf(main).map((row) => row.repo));
+  });
+
+  test("repo=all without recover selects the same fleet as an empty repo", () => {
+    const r = run("all-plain", { ONLY_REPO: "all" });
+    expect(r.exitCode).toBe(0);
+    expect(reposOf(r).map((row) => row.repo)).toEqual(reposOf(main).map((row) => row.repo));
+  });
+
+  test("a single-repo recovery keeps its scope and never prints the slug", () => {
+    const eventFile = join(root, "recover-single-event.json");
+    writeFileSync(
+      eventFile,
+      JSON.stringify({ inputs: { repo: "Vivswan/hidden-server", recover: "recopy" } }),
+    );
+    const r = run("recover-single", { GITHUB_EVENT_PATH: eventFile, RECOVER: "recopy" });
+    expect(r.exitCode).toBe(0);
+    expect(reposOf(r).map((row) => row.repo)).toEqual(["h**-s**r"]);
+    for (const channel of [r.stdout, r.stderr, r.output]) {
+      expect(channel).not.toContain("hidden-server");
     }
   });
 });

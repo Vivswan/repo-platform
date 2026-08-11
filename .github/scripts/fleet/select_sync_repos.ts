@@ -12,9 +12,21 @@
 // No ::add-mask:: here: the runner silently drops a job output containing
 // a masked substring, which would kill the matrix.
 //
-// Env: PAT, GH_TOKEN, GITHUB_RUN_ID, RUNNER_TEMP, GITHUB_OUTPUT;
-// GITHUB_EVENT_PATH supplies the single-repo dispatch input (a non-empty
+// Env: PAT, GH_TOKEN, GITHUB_RUN_ID, RUNNER_TEMP, GITHUB_OUTPUT, RECOVER;
+// GITHUB_EVENT_PATH supplies the repo dispatch input (a non-empty
 // ONLY_REPO env overrides it - the test harness and local runs use that).
+//
+// Recovery scope contract: the repo input scopes the run - an owner/name
+// slug selects one repo, the literal "all" is an explicit whole-fleet
+// scope (same selection as an empty repo, and never ambiguous: real slugs
+// are always owner/name). RECOVER=recopy requires one of the two, because
+// a recovery re-render clobbers local edits in template-managed files and
+// must never fan out across the fleet by accident: an empty repo is
+// rejected, so a fat-fingered recover input on a plain dispatch cannot
+// flip every managed repo into manual-review re-render PRs. Only the repo
+// input's PRESENCE is judged - its value may be a private slug and this
+// log is publicly readable. sync-repos.yml fast-fails the same check
+// before checkout; the copy here is the tested backstop.
 
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -35,6 +47,17 @@ if (onlyRepo === "" && env("GITHUB_EVENT_PATH") !== "") {
   };
   onlyRepo = event.inputs?.repo ?? "";
 }
+
+// Recovery scope guard (full contract in the header above): recopy needs
+// an explicit repo scope, and "all" is the deliberate whole-fleet form.
+if (env("RECOVER") === "recopy" && onlyRepo === "") {
+  error(
+    "recover=recopy needs an explicit scope: dispatch it with repo=<owner/name> to recover one repository, or repo=all to fan the recovery out across every managed repo.",
+  );
+  process.exit(1);
+}
+
+if (onlyRepo === "all") onlyRepo = "";
 
 function runStage(command: string[], outFile: string): void {
   const proc = Bun.spawnSync(command, { stdout: "pipe", stderr: "inherit" });

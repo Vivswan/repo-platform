@@ -10,9 +10,10 @@
 # guarantee holds; the sync's lease-guarded force-push regenerates that
 # branch each run. GitHub keeps only ONE pending run per group and
 # cancels the rest ("a higher priority waiting request exists"), so
-# batch operations - a fleet-wide recover=recopy, for one - must
-# dispatch serially, waiting for each run to finish before the next.
-# The weekly cron is the catch-all: staging-channel
+# multi-repo work belongs in a single run - repo=all covers a
+# fleet-wide recover=recopy; a batch of distinct per-repo dispatches
+# must still run serially, waiting for each run to finish before the
+# next. The weekly cron is the catch-all: staging-channel
 # repos pick up main merges through it, and it heals any release whose
 # sync run was missed.
 
@@ -30,14 +31,18 @@ on:
         required: false
         type: string
       repo:
-        description: Single owner/name to sync (defaults to all managed repos)
+        description: >-
+          Single owner/name to sync, or the literal "all" - same as
+          leaving it empty, every managed repo (recovery requires one of
+          the two)
         required: false
         type: string
       recover:
         description: >-
           Recovery mode - "recopy" regenerates the repo with a full
           re-render (no three-way merge) when its recorded _commit base
-          is unusable. Single-repo only; the PR stays manual-review.
+          is unusable. Requires an explicit repo scope (owner/name, or
+          "all" to recover the whole fleet); the PRs stay manual-review.
         required: false
         type: choice
         options: [none, recopy]
@@ -80,17 +85,17 @@ jobs:
             exit 1
           fi
 
-      # A recovery re-render clobbers local edits in template-managed
-      # files; it must never fan out across the fleet by accident. Only
-      # the PRESENCE of the repo input is tested - its value may be a
-      # private slug, and step env values print into this public log.
-      - name: Require a single-repo scope for recovery
+      # Fast-fail twin of select_sync_repos.ts's recovery scope guard
+      # (that script's header states the full contract; its copy is the
+      # tested backstop). Presence-only on purpose: the repo value may be
+      # a private slug, and step env values print into this public log.
+      - name: Require an explicit repo scope for recovery
         if: inputs.recover == 'recopy'
         env:
           REPO_SET: ${{ inputs.repo != '' }}
         run: |
           if [ "$REPO_SET" != "true" ]; then
-            echo "::error::recover=recopy is a single-repo operation: pass the repo input (owner/name) with it, so a full re-render can never fan out across the fleet."
+            echo "::error::recover=recopy needs an explicit scope: dispatch it with repo=<owner/name> to recover one repository, or repo=all to fan the recovery out across every managed repo."
             exit 1
           fi
 
@@ -191,11 +196,15 @@ jobs:
       # No ONLY_REPO env on purpose: the typed dispatch input may be a
       # private slug, and the runner prints step env values into this
       # public log - the script reads it from the event payload instead.
+      # The script also re-runs the recovery scope guard fast-failed above.
       - name: Select repos and check adoption
         id: select
         env:
           GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
           PAT: ${{ secrets.REPO_PLATFORM_TOKEN }}
+          # Scheduled and release runs have no inputs context: empty is
+          # fine, only the literal "recopy" means recovery.
+          RECOVER: ${{ inputs.recover }}
         run: bun .github/scripts/fleet/select_sync_repos.ts
 
   sync:
@@ -209,6 +218,10 @@ jobs:
       actions: read
     strategy:
       fail-fast: false
+      # Every leg writes with the same PAT, and PR creation is
+      # content-creating (secondary rate limits): bound the wildcard-grown
+      # fleet's burst. Costs a single-repo dispatch nothing.
+      max-parallel: 5
       matrix:
         include: ${{ fromJSON(needs.plan.outputs.repos) }}
     # matrix.repo is the redaction hint for a private repo - the real slug
