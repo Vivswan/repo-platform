@@ -36,32 +36,24 @@ workflow.
 
 ## Canonical job
 
-```yaml
-  all-green:
-    name: all-green
-    if: always()
-    needs: [typography, actionlint, gitleaks, yamllint, commit-names, test]  # every other job
-    runs-on: ubuntu-latest
-    steps:
-      - name: All jobs green
-        env:
-          RESULTS: ${{ join(needs.*.result, ' ') }}
-        run: |
-          echo "results: $RESULTS"
-          for result in $RESULTS; do
-            if [ "$result" != "success" ]; then
-              echo "::error::a required job did not succeed"
-              exit 1
-            fi
-          done
-```
+The canonical implementation lives in
+`templates/base/.github/workflows/ci.yml.jinja` (the `all-green` job) -
+the code is the single source of truth, so this guide describes only the
+convention it encodes:
+
+- The job is named `all-green`, runs `if: always()`, and `needs:` every
+  gating job. Its one step reads `toJson(needs)`, prints each job's name
+  next to its result, and exits 1 naming the jobs whose result is not
+  `success`.
 
 Notes:
 
 - `if: always()` makes all-green run (and fail) even when a dependency
   failed or was skipped. Without it a failed dependency leaves all-green
   skipped, and a skipped check does not block the merge.
-- The strict `join(needs.*.result)` gate treats `skipped` as failure. If a
+- The strict gate treats any non-`success` result - `skipped` and
+  `cancelled` included - as failure, and its log names each job next to
+  its result. If a
   job may legitimately skip, keep the job itself unconditional and put the
   `if:` on its steps: a job whose steps all skip still counts as `success`.
   The managed `pr-title` job works this way - ci.yml also runs on push,

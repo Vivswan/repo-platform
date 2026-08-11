@@ -415,15 +415,15 @@ jobs:
     steps:
       - name: All jobs green
         env:
-          RESULTS: ${{ join(needs.*.result, ' ') }}
+          NEEDS: ${{ toJson(needs) }}
         run: |
-          echo "results: $RESULTS"
-          for result in $RESULTS; do
-            if [ "$result" != "success" ]; then
-              echo "::error::all-green failed: at least one required job did not succeed (results: $RESULTS). Open the failing job's log in this run, fix the failure, and push again."
-              exit 1
-            fi
-          done
+          set -o pipefail
+          jq -r 'to_entries[] | "\(.value.result)\t\(.key)"' <<< "$NEEDS"
+          failed="$(jq -r 'to_entries[] | select(.value.result != "success") | .key' <<< "$NEEDS" | tr '\n' ' ')"
+          if [ -n "$failed" ]; then
+            echo "::error::all-green failed: ${failed% } did not succeed. Open the failing job's log in this run, fix the failure, and push again."
+            exit 1
+          fi
 
   # Release from a green main only: release-please runs downstream of
   # all-green (in release-please.yml, via workflow_call), so a red commit can
