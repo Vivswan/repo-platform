@@ -1,0 +1,18 @@
+{
+  "name": "repo-platform-skills",
+  "owner": {
+    "name": "Vivswan Shah",
+    "email": "58091053+Vivswan@users.noreply.github.com"
+  },
+  "metadata": {
+    "description": "Fleet-operations agent skills shipped alongside the repo-platform template and workflows",
+    "version": "0.1.0"
+  },
+  "plugins": [
+    {
+      "name": "repo-platform-skills",
+      "description": "Fleet-operations agent skills for repo-platform: new project scaffolding and template sync-PR handling",
+      "source": "./"
+    }
+  ]
+}

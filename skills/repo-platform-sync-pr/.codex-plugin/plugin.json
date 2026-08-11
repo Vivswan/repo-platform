@@ -1,0 +1,29 @@
+{
+  "name": "repo-platform-sync-pr",
+  "description": "Handle an automated repo-platform template sync PR: triage the body, review every file, resolve conflicts, and recover a broken sync.",
+  "author": {
+    "name": "Vivswan Shah",
+    "email": "58091053+Vivswan@users.noreply.github.com",
+    "url": "https://vivswan.github.io/"
+  },
+  "homepage": "https://github.com/Vivswan/repo-platform/tree/main/skills/repo-platform-sync-pr",
+  "repository": "https://github.com/Vivswan/repo-platform",
+  "license": "SEE LICENSE IN LICENSE.md",
+  "keywords": ["agent-skills", "repo-platform", "template-sync", "copier", "plugin-ready"],
+  "skills": "./",
+  "interface": {
+    "displayName": "Repo Platform: Sync PR",
+    "shortDescription": "Review and repair repo-platform template sync PRs.",
+    "longDescription": "The playbook for the automation-branch PRs repo-platform pushes into managed repos: a mandatory per-file review pass, correct conflict resolution per file class, prompt fix-and-merge on the rolling branch, and the recover=recopy escalation for an unusable recorded base.",
+    "developerName": "Vivswan",
+    "category": "Developer Tools",
+    "capabilities": ["Read", "Edit", "Review"],
+    "websiteURL": "https://github.com/Vivswan/repo-platform/tree/main/skills/repo-platform-sync-pr",
+    "defaultPrompt": [
+      "Handle the repo-platform bot PR that just arrived.",
+      "The sync PR reports merge conflicts - resolve them.",
+      "The template update PR deleted my local section."
+    ],
+    "brandColor": "#B45309"
+  }
+}

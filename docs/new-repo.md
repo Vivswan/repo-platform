@@ -20,7 +20,8 @@ mkdir my-project && cd my-project && bun init
 ## 2. Apply the template
 
 Requires [copier](https://copier.readthedocs.io) >= 9.8.0 (serialized multiselect answers) and
-[bun](https://bun.sh) on PATH (copier's `_migrations` hook runs a bun script). `main` holds
+[bun](https://bun.sh) on PATH (copier's `_migrations` hook runs a bun script;
+the hook is also why copier needs `--trust`). `main` holds
 only sources; consume the GENERATED build refs, and match the initial
 `--vcs-ref` to the channel you pick when asked:
 
@@ -30,9 +31,9 @@ git init -b main
 # tag - list them with:
 #   git ls-remote --tags https://github.com/Vivswan/repo-platform.git 'refs/tags/templates/*'
 # ):
-copier copy gh:Vivswan/repo-platform . --vcs-ref templates/vX.Y.Z
+copier copy gh:Vivswan/repo-platform . --vcs-ref templates/vX.Y.Z --trust
 # or staging channel (main HEAD builds; what Vivswan's own repos use):
-copier copy gh:Vivswan/repo-platform . --vcs-ref staging
+copier copy gh:Vivswan/repo-platform . --vcs-ref staging --trust
 git add --all
 git commit -m "chore: initialize from repo-platform"
 ```

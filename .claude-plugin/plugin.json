@@ -1,0 +1,13 @@
+{
+  "name": "repo-platform-skills",
+  "displayName": "Repo Platform Skills",
+  "description": "Fleet-operations agent skills for repo-platform: new project scaffolding and template sync-PR handling",
+  "author": {
+    "name": "Vivswan Shah",
+    "email": "58091053+Vivswan@users.noreply.github.com"
+  },
+  "repository": "https://github.com/Vivswan/repo-platform",
+  "license": "SEE LICENSE IN LICENSE.md",
+  "keywords": ["agent-skills", "repo-platform", "copier", "template-sync"],
+  "skills": ["./skills/repo-platform-new-project", "./skills/repo-platform-sync-pr"]
+}

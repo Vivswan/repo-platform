@@ -1,0 +1,29 @@
+{
+  "name": "repo-platform-new-project",
+  "description": "Create or adopt a repository managed by Vivswan/repo-platform: scaffold, apply the copier template, publish, enroll, and register settings.",
+  "author": {
+    "name": "Vivswan Shah",
+    "email": "58091053+Vivswan@users.noreply.github.com",
+    "url": "https://vivswan.github.io/"
+  },
+  "homepage": "https://github.com/Vivswan/repo-platform/tree/main/skills/repo-platform-new-project",
+  "repository": "https://github.com/Vivswan/repo-platform",
+  "license": "SEE LICENSE IN LICENSE.md",
+  "keywords": ["agent-skills", "repo-platform", "copier", "scaffolding", "plugin-ready"],
+  "skills": "./",
+  "interface": {
+    "displayName": "Repo Platform: New Project",
+    "shortDescription": "Bring a repository under repo-platform fleet management.",
+    "longDescription": "Walks the creation or adoption of a repo-platform managed repository: native scaffold, copier template from the right channel ref, the questions that matter, publishing, PAT enrollment, and the settings home with its required labels.",
+    "developerName": "Vivswan",
+    "category": "Developer Tools",
+    "capabilities": ["Read", "Edit", "Scaffold"],
+    "websiteURL": "https://github.com/Vivswan/repo-platform/tree/main/skills/repo-platform-new-project",
+    "defaultPrompt": [
+      "Create a new project managed by repo-platform.",
+      "Set this repo up like my other repos.",
+      "Bring this repository into the fleet."
+    ],
+    "brandColor": "#1D4ED8"
+  }
+}
