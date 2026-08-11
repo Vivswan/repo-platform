@@ -37,6 +37,8 @@ jobs:
           persist-credentials: false
 {% if 'bun' in modules %}
       - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
       - uses: actions/cache@v6
         with:
           path: ~/.bun/install/cache
@@ -47,11 +49,14 @@ jobs:
 {% endif %}{% if 'node' in modules %}
       - uses: actions/setup-node@v6
         with:
+          node-version-file: .node-version
           package-manager-cache: false
       - name: Format (biome via npm)
         run: npx --yes @biomejs/biome@2 check --write .
 {% endif %}{% if 'deno' in modules %}
       - uses: denoland/setup-deno@v2
+        with:
+          deno-version-file: .dvmrc
       - name: Format (deno)
         run: |
           deno lint --fix || true
