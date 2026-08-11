@@ -43,12 +43,24 @@ jobs:
           key: {% raw %}bun-${{ runner.os }}-${{ hashFiles('**/bun.lock') }}{% endraw %}
           restore-keys: {% raw %}bun-${{ runner.os }}-{% endraw %}
       - name: Format (biome)
-        run: bun x @biomejs/biome check --write .
+        run: bun x @biomejs/biome@2 check --write .
+{% endif %}{% if 'node' in modules %}
+      - uses: actions/setup-node@v6
+        with:
+          package-manager-cache: false
+      - name: Format (biome via npm)
+        run: npx --yes @biomejs/biome@2 check --write .
+{% endif %}{% if 'deno' in modules %}
+      - uses: denoland/setup-deno@v2
+      - name: Format (deno)
+        run: |
+          deno lint --fix || true
+          deno fmt
 {% endif %}{% if 'uv' in modules %}
       - uses: astral-sh/setup-uv@v9.0.0
       - name: Format (ruff)
         run: |
-          uvx ruff check --fix .
+          uvx ruff check --fix . || true
           uvx ruff format .
 {% endif %}
       - name: Commit and push changes

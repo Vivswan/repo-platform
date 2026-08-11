@@ -28,6 +28,26 @@ updates:
     commit-message:
       prefix: "build"
       include: "scope"
+{% endif %}{% if 'node' in modules %}
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: "build"
+      include: "scope"
+{% endif %}{% if 'deno' in modules %}
+  - package-ecosystem: "deno"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: "build"
+      include: "scope"
 {% endif %}{% if 'uv' in modules %}
   - package-ecosystem: "uv"
     directory: "/"

@@ -12,6 +12,8 @@ minVersion = "8.30.1"
 useDefault = true
 {%- set locks = [] %}
 {%- if 'bun' in modules %}{% set _ = locks.append('bun\.lock') %}{% set _ = locks.append('bun\.lockb') %}{% endif %}
+{%- if 'node' in modules %}{% set _ = locks.append('package-lock\.json') %}{% endif %}
+{%- if 'deno' in modules %}{% set _ = locks.append('deno\.lock') %}{% endif %}
 {%- if 'uv' in modules %}{% set _ = locks.append('uv\.lock') %}{% endif %}
 {%- if 'rust' in modules %}{% set _ = locks.append('Cargo\.lock') %}{% endif %}
 {%- if locks %}

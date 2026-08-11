@@ -33,6 +33,16 @@ jobs:
           restore-keys: {% raw %}bun-${{ runner.os }}-{% endraw %}
       - name: Install dependencies (bun)
         run: bun install --frozen-lockfile
+{% endif %}{% if 'node' in modules %}
+      - uses: actions/setup-node@v6
+        with:
+          package-manager-cache: false
+      - name: Install dependencies (npm)
+        run: npm ci
+{% endif %}{% if 'deno' in modules %}
+      - uses: denoland/setup-deno@v2
+      - name: Install dependencies (deno)
+        run: deno install --frozen
 {% endif %}{% if 'uv' in modules %}
       - uses: astral-sh/setup-uv@v9.0.0
       - name: Install dependencies (uv)

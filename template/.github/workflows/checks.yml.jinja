@@ -28,6 +28,17 @@ jobs:
       # - run: bun install --frozen-lockfile
       # - run: bun run lint
       # - run: bun test
+{% endif %}{% if 'node' in modules %}
+      # Example node checks; replace the placeholder below with real ones.
+      # - uses: actions/setup-node@v6
+      # - run: npm ci
+      # - run: npm run lint
+      # - run: npm test
+{% endif %}{% if 'deno' in modules %}
+      # Example deno checks; replace the placeholder below with real ones.
+      # - uses: denoland/setup-deno@v2
+      # - run: deno lint
+      # - run: deno test
 {% endif %}{% if 'uv' in modules %}
       # Example uv checks; replace the placeholder below with real ones.
       # - uses: astral-sh/setup-uv@v9.0.0

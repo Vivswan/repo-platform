@@ -7,12 +7,20 @@ symlinks to this file, so edit only here.
 ## Project
 
 {{ project_name }}: {{ description }}
-{% if 'bun' in modules or 'uv' in modules or 'rust' in modules %}
+{% if 'bun' in modules or 'node' in modules or 'deno' in modules or 'uv' in modules or 'rust' in modules %}
 ## Toolchain
 
 {% if 'bun' in modules -%}
 - Runtime and package manager: bun (`bun install`, `bun test`, `bun run <script>`)
 - See `package.json` scripts for the available commands.
+{% endif -%}
+{% if 'node' in modules -%}
+- Node.js with npm (`npm install`, `npm test`, `npm run <script>`)
+- npm scripts in `package.json` are the command entry points.
+{% endif -%}
+{% if 'deno' in modules -%}
+- Deno runtime (`deno install`, `deno test`, `deno task <task>`)
+- See `deno.json` for tasks, imports, and lint/format settings.
 {% endif -%}
 {% if 'uv' in modules -%}
 - Python managed with uv (`uv sync`, `uv run <command>`)

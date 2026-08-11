@@ -197,7 +197,7 @@ jobs:
   # Repo-specific scan tuning (paths-ignore, extra queries, packs) goes in
   # the repo-owned .github/codeql/codeql-config.yml - the standard CodeQL
   # config file, picked up automatically when present.
-{% if 'bun' in modules %}
+{% if 'bun' in modules or 'node' in modules or 'deno' in modules %}
   codeql-javascript:
     uses: {{ github_username }}/repo-platform/.github/workflows/reusable-codeql.yml@{{ uses_ref }}
     with:
@@ -311,7 +311,7 @@ jobs:
       - yamllint
       - dependency-review
 {%- endif %}
-{% if 'bun' in modules %}{% if enable_codeql %}      - codeql-javascript
+{% if 'bun' in modules or 'node' in modules or 'deno' in modules %}{% if enable_codeql %}      - codeql-javascript
 {% endif %}{% endif %}{% if 'uv' in modules %}{% if enable_codeql %}      - codeql-python
 {% endif %}{% endif %}{% if 'release-please' in modules %}      - release-freshness
       - release-health
