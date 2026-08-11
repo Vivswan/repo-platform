@@ -212,7 +212,7 @@ jobs:
 
       - name: Cache bun dependencies
         if: contains(format(',{0},', inputs.setup), ',bun,') && steps.cfg.outputs.publish == 'true'
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.bun/install/cache
           key: bun-${{ runner.os }}-${{ hashFiles('**/bun.lock') }}
