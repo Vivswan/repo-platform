@@ -8,7 +8,9 @@
 // - templates/<module>/: whole files owned by that module. The composer adds
 //   the module's filename gate automatically ({% if '<module>' in modules %}),
 //   wrapping the leaf name (keeping any .jinja suffix outside), or a whole
-//   directory listed in the folder's optional module.yml `gate_dirs`.
+//   directory listed in the module.yml manifest's `gate_dirs`. module.yml is
+//   the module's manifest (schema: scripts/module_manifests.ts); the composer
+//   consumes only its gate/gate_dirs keys.
 // - templates/<module>/fragments/<anchor>.jinja: additive contributions to
 //   shared files. A skeleton file contains a full-line marker
 //   `{# compose:<anchor> #}`; the composer replaces it with every module's
@@ -38,29 +40,15 @@ import {
   writeFileSync,
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import { parse as parseYaml } from "yaml";
+import { MODULE_ORDER, type ModuleManifest, readManifest } from "./module_manifests.ts";
 
 const REPO_ROOT = resolve(import.meta.dir, "..");
 const SRC = join(REPO_ROOT, "templates");
 const OUT = join(REPO_ROOT, "template");
 
-// Fixed, deterministic fragment/collision order (bun before uv preserves the
-// dependabot ecosystem order). A templates/ folder not listed here is an
-// error, and so is an entry here without a templates/ folder.
-export const MODULE_ORDER = [
-  "agents",
-  "bun",
-  "uv",
-  "rust",
-  "pages",
-  "release-please",
-  "issue-templates",
-  "pr-title",
-  "auto-assign",
-  "fuzzer",
-  "settings-sync",
-  "custom-license",
-];
+// Module identity (the order included) lives with the manifests; re-exported
+// here for the existing importers keyed on the composer.
+export { MODULE_ORDER };
 
 const ANCHOR_RE = /^\{# compose:([a-z0-9][a-z0-9-]*) #\}$/;
 const JINJA_SUFFIX = ".jinja";
@@ -70,11 +58,6 @@ const FRAGMENTS_DIR = "fragments";
 // One collected source file: regular bytes or a symlink target (emitted as a
 // link with the target rewritten).
 export type Entry = { kind: "symlink"; target: string } | { kind: "file"; data: Buffer };
-
-interface Manifest {
-  gate?: string;
-  gate_dirs?: string[];
-}
 
 function die(message: string): never {
   console.error(message);
@@ -105,49 +88,17 @@ function walkFiles(dir: string): string[] {
   return found.sort();
 }
 
-function loadManifest(folder: string): Manifest {
-  const manifest = join(folder, MANIFEST_NAME);
-  if (!existsSync(manifest) || !lstatSync(manifest).isFile()) return {};
-  const data: unknown = parseYaml(readFileSync(manifest, "utf-8")) ?? {};
-  if (typeof data !== "object" || data === null || Array.isArray(data)) {
-    die(
-      `error: ${relToRepo(manifest)} must be a YAML mapping ` +
-        "(it parsed as something else); rewrite it as 'key: value' lines " +
-        "using only the gate / gate_dirs keys",
-    );
+// The slice of the manifest the composer consumes; everything else belongs
+// to generate.ts and the runtime readers.
+type ComposeManifest = Pick<ModuleManifest, "gate" | "gate_dirs">;
+
+/** The module's validated manifest; a broken one is a composition error. */
+function loadManifest(module: string): ComposeManifest {
+  try {
+    return readManifest(module);
+  } catch (error) {
+    die(`error: ${error instanceof Error ? error.message : String(error)}`);
   }
-  const record = data as Record<string, unknown>;
-  const unknown = Object.keys(record).filter((key) => key !== "gate" && key !== "gate_dirs");
-  if (unknown.length > 0) {
-    die(
-      `error: ${relToRepo(manifest)}: unknown key(s): ` +
-        `${unknown.sort().join(", ")} - only gate and gate_dirs are ` +
-        "recognized; remove or rename the extra keys",
-    );
-  }
-  const gate = record.gate;
-  if (gate !== undefined && gate !== null && typeof gate !== "string") {
-    die(
-      `error: ${relToRepo(manifest)}: gate must be a string ` +
-        "(quote it - unquoted YAML may parse as bool/int)",
-    );
-  }
-  const gateDirs = record.gate_dirs;
-  if (
-    gateDirs !== undefined &&
-    gateDirs !== null &&
-    (!Array.isArray(gateDirs) || !gateDirs.every((d) => typeof d === "string"))
-  ) {
-    die(
-      `error: ${relToRepo(manifest)}: gate_dirs must be a list of ` +
-        "strings naming directories in this module; write it as e.g. " +
-        'gate_dirs: [".github/ISSUE_TEMPLATE"]',
-    );
-  }
-  const result: Manifest = {};
-  if (typeof gate === "string") result.gate = gate;
-  if (Array.isArray(gateDirs)) result.gate_dirs = gateDirs as string[];
-  return result;
 }
 
 /** Logical path -> Entry for a source folder (skips manifest + fragments). */
@@ -180,7 +131,7 @@ function collectFragments(folder: string): Map<string, Buffer> {
   return fragments;
 }
 
-function gateExpression(module: string, manifest: Manifest): string {
+function gateExpression(module: string, manifest: ComposeManifest): string {
   return manifest.gate || `'${module}' in modules`;
 }
 
@@ -355,7 +306,7 @@ export function build(): Map<string, Entry> {
   if (unknown.length > 0) {
     die(
       `error: templates/${unknown[0]}/ is not a known module; add it to ` +
-        "MODULE_ORDER in scripts/compose_template.ts",
+        "MODULE_ORDER in scripts/module_manifests.ts",
     );
   }
   const missing = MODULE_ORDER.filter((m) => !folders.includes(m));
@@ -363,7 +314,7 @@ export function build(): Map<string, Entry> {
     die(
       `error: MODULE_ORDER lists '${missing[0]}' but templates/${missing[0]}/ ` +
         "does not exist; remove it from MODULE_ORDER in " +
-        "scripts/compose_template.ts or restore the folder",
+        "scripts/module_manifests.ts or restore the folder",
     );
   }
   const duplicate = MODULE_ORDER.find((m, i) => MODULE_ORDER.indexOf(m) !== i);
@@ -394,7 +345,7 @@ export function build(): Map<string, Entry> {
 
   for (const module of MODULE_ORDER) {
     const folder = join(SRC, module);
-    const manifest = loadManifest(folder);
+    const manifest = loadManifest(module);
     const gate = gateExpression(module, manifest);
     gates.set(module, gate);
     const dirs = [...(manifest.gate_dirs ?? [])];

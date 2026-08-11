@@ -1,0 +1,13 @@
+# Module manifest (schema and loader: scripts/module_manifests.ts).
+description: Rust/cargo toolchain (cargo dependabot, Rust gitignore; no CodeQL)
+# Deliberately no toolchain key: rust contributes no CodeQL language and no
+# auto-format command, and the schema makes a toolchain without a CodeQL
+# language unrepresentable (copier.yml's has_toolchain comment has the story).
+dependabot:
+  ecosystem: cargo
+  label: rust
+  color: "000000"
+gitignore_sources:
+  - Rust.gitignore
+lockfiles:
+  - 'Cargo\.lock'

@@ -6,8 +6,10 @@ import {
   centralIdentityIssues,
   checkCentralFileLocal,
   checkCentralFileRemote,
+  dependabotLabels,
   type Fetched,
   requiredLabels,
+  requiredLabelsFrom,
 } from "../../.github/scripts/fleet/validate_central_settings";
 
 const FILE = "settings/repos/my-project.yml";
@@ -66,6 +68,26 @@ describe("requiredLabels", () => {
       "release-override",
       "my-fuzz",
     ]);
+  });
+
+  test("the module->label pairs come from the manifests, in MODULE_ORDER", () => {
+    expect(dependabotLabels()).toEqual([
+      ["bun", "javascript"],
+      ["uv", "python:uv"],
+      ["rust", "rust"],
+    ]);
+  });
+
+  test("two modules sharing a dependabot label require it once", () => {
+    const names = requiredLabelsFrom(
+      [
+        ["bun", "javascript"],
+        ["node", "javascript"],
+      ],
+      ["bun", "node"],
+      null,
+    ).map((l) => l.name);
+    expect(names).toEqual(["dependencies", "github_actions", "javascript"]);
   });
 });
 

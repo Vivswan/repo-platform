@@ -1,5 +1,6 @@
-# Composer manifest (optional per module folder; every key optional).
+# Module manifest (schema and loader: scripts/module_manifests.ts).
 # This module owns no files: selecting it gates OFF the base fleet LICENSE
 # (see the conditional filename in templates/base/), leaving the repo's own
-# license file repo-owned. The folder exists because every module choice in
-# copier.yml must have a templates/ folder (check_ssot's module-list rule).
+# license file repo-owned. The folder exists because every module in
+# MODULE_ORDER must carry a manifest.
+description: repo carries its own license in LICENSE.md; the fleet license is not rendered

@@ -1,0 +1,17 @@
+# Module manifest (schema and loader: scripts/module_manifests.ts).
+description: TypeScript/bun toolchain (gitignore, dependabot, CodeQL JS)
+toolchain:
+  codeql_language: javascript-typescript
+dependabot:
+  ecosystem: bun
+  label: javascript
+  color: "168700"
+gitignore_sources:
+  - Node.gitignore
+  - bun.gitignore
+lockfiles:
+  - 'bun\.lock'
+  - 'bun\.lockb'
+pages:
+  install: bun install --frozen-lockfile
+  build: bun run build

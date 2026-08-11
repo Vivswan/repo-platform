@@ -1,0 +1,229 @@
+// Unit tests for the module-manifest loader: the zod schema's rejections
+// (every interpolation-hostile string shape), the file/folder existence
+// errors, the cross-manifest label-consistency check, and the MODULE_ORDER
+// load against the live repo's manifests.
+
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { MODULE_ORDER } from "../../scripts/compose_template";
+import {
+  assertDependabotLabelConsistency,
+  loadManifests,
+  type ModuleManifest,
+  parseManifest,
+  readManifest,
+} from "../../scripts/module_manifests";
+
+const WHERE = "templates/demo/module.yml";
+
+describe("parseManifest", () => {
+  test("a description-only manifest parses", () => {
+    const manifest = parseManifest("demo", "description: a demo module\n", WHERE);
+    expect(manifest.module).toBe("demo");
+    expect(manifest.description).toBe("a demo module");
+    expect(manifest.toolchain).toBeUndefined();
+  });
+
+  test("a full toolchain manifest parses with every field typed", () => {
+    const manifest = parseManifest(
+      "demo",
+      [
+        "description: demo toolchain",
+        "toolchain:",
+        "  codeql_language: python",
+        "dependabot:",
+        "  ecosystem: pip",
+        "  label: python",
+        '  color: "2b67c6"',
+        "gitignore_sources:",
+        "  - Python.gitignore",
+        "lockfiles:",
+        "  - 'demo\\.lock'",
+        "pages:",
+        "  install: demo install",
+        "  build: demo build",
+        "gate: \"'demo' in modules\"",
+        "gate_dirs:",
+        "  - .github/DEMO",
+      ].join("\n"),
+      WHERE,
+    );
+    expect(manifest.toolchain).toEqual({ codeql_language: "python" });
+    expect(manifest.dependabot).toEqual({ ecosystem: "pip", label: "python", color: "2b67c6" });
+    expect(manifest.lockfiles).toEqual(["demo\\.lock"]);
+    expect(manifest.pages).toEqual({ install: "demo install", build: "demo build" });
+    expect(manifest.gate_dirs).toEqual([".github/DEMO"]);
+  });
+
+  test("an unknown key fails loudly, naming the file", () => {
+    expect(() => parseManifest("demo", "description: x\ntoolchian: {}\n", WHERE)).toThrow(WHERE);
+  });
+
+  test("a toolchain without a CodeQL language is unrepresentable", () => {
+    expect(() => parseManifest("demo", "description: x\ntoolchain: true\n", WHERE)).toThrow(
+      "toolchain",
+    );
+    expect(() => parseManifest("demo", "description: x\ntoolchain: {}\n", WHERE)).toThrow(
+      "codeql_language",
+    );
+    expect(() =>
+      parseManifest("demo", "description: x\ntoolchain:\n  codeql_language: C++\n", WHERE),
+    ).toThrow("CodeQL language slug");
+  });
+
+  test("a missing description fails", () => {
+    expect(() => parseManifest("demo", "gate: x\n", WHERE)).toThrow("description");
+  });
+
+  test("interpolation-hostile descriptions fail: ': ', '#', newlines, edge whitespace", () => {
+    const bad: [string, string][] = [
+      ['description: "broken: choice text"', '": "'],
+      ['description: "text # with a comment"', '"#"'],
+      ['description: "two\\nlines"', "single line"],
+      ['description: " padded "', "whitespace"],
+    ];
+    for (const [line, message] of bad) {
+      expect(() => parseManifest("demo", `${line}\n`, WHERE)).toThrow(message);
+    }
+  });
+
+  test("a colon without a following space in the description is fine", () => {
+    const manifest = parseManifest("demo", 'description: "labels like python:uv work"\n', WHERE);
+    expect(manifest.description).toBe("labels like python:uv work");
+  });
+
+  test("pages commands reject quotes, backslashes, and newlines (they land in Jinja quotes inside a YAML double-quoted scalar)", () => {
+    const withPages = (install: string) =>
+      `description: x\npages:\n  install: ${install}\n  build: demo build\n`;
+    expect(() => parseManifest("demo", withPages(`"it's broken"`), WHERE)).toThrow(
+      "YAML double-quoted scalar",
+    );
+    expect(() => parseManifest("demo", withPages(`'echo "hi"'`), WHERE)).toThrow(
+      "YAML double-quoted scalar",
+    );
+    expect(() => parseManifest("demo", withPages(`'printf a\\tb'`), WHERE)).toThrow(
+      "YAML double-quoted scalar",
+    );
+    expect(() => parseManifest("demo", withPages('"two\\nlines"'), WHERE)).toThrow("single line");
+  });
+
+  test("dependabot fields reject shapes that would corrupt their consumers", () => {
+    const dependabot = (fields: string[]) =>
+      `description: x\ndependabot:\n${fields.map((f) => `  ${f}`).join("\n")}\n`;
+    expect(() =>
+      parseManifest("demo", dependabot(["ecosystem: pip", "label: python"]), WHERE),
+    ).toThrow("dependabot.color");
+    expect(() =>
+      parseManifest(
+        "demo",
+        dependabot(['ecosystem: "Not Valid"', "label: python", 'color: "2b67c6"']),
+        WHERE,
+      ),
+    ).toThrow("ecosystem");
+    expect(() =>
+      parseManifest(
+        "demo",
+        dependabot(["ecosystem: pip", 'label: "has space"', 'color: "2b67c6"']),
+        WHERE,
+      ),
+    ).toThrow("label");
+    expect(() =>
+      parseManifest(
+        "demo",
+        dependabot(["ecosystem: pip", "label: python", 'color: "2B67C6"']),
+        WHERE,
+      ),
+    ).toThrow("hex color");
+  });
+
+  test("gitignore_sources and lockfiles entries reject newlines", () => {
+    expect(() =>
+      parseManifest("demo", 'description: x\ngitignore_sources:\n  - "a\\nb"\n', WHERE),
+    ).toThrow("single line");
+    expect(() => parseManifest("demo", 'description: x\nlockfiles:\n  - "a\\nb"\n', WHERE)).toThrow(
+      "single line",
+    );
+  });
+
+  test("an unquoted gate that parses as a boolean fails the string type", () => {
+    expect(() => parseManifest("demo", "description: x\ngate: true\n", WHERE)).toThrow("gate");
+  });
+
+  test("a non-mapping manifest fails", () => {
+    expect(() => parseManifest("demo", "- just\n- a list\n", WHERE)).toThrow("YAML mapping");
+  });
+
+  test("unparsable YAML fails with the manifest path in the message", () => {
+    expect(() => parseManifest("demo", "description: [broken\n", WHERE)).toThrow(WHERE);
+    expect(() => parseManifest("demo", "description: [broken\n", WHERE)).toThrow(
+      "YAML parse error",
+    );
+  });
+});
+
+describe("assertDependabotLabelConsistency", () => {
+  const manifest = (
+    module: string,
+    dependabot: NonNullable<ModuleManifest["dependabot"]>,
+  ): ModuleManifest => ({ module, description: `${module} module`, dependabot });
+
+  test("modules sharing a label with the same color pass", () => {
+    expect(() =>
+      assertDependabotLabelConsistency([
+        manifest("bun", { ecosystem: "bun", label: "javascript", color: "168700" }),
+        manifest("node", { ecosystem: "npm", label: "javascript", color: "168700" }),
+      ]),
+    ).not.toThrow();
+  });
+
+  test("modules sharing a label with different colors throw, naming both files", () => {
+    expect(() =>
+      assertDependabotLabelConsistency([
+        manifest("bun", { ecosystem: "bun", label: "javascript", color: "168700" }),
+        manifest("node", { ecosystem: "npm", label: "javascript", color: "000000" }),
+      ]),
+    ).toThrow("templates/bun/module.yml");
+  });
+});
+
+describe("readManifest", () => {
+  const root = mkdtempSync(join(tmpdir(), "module-manifests-"));
+  const templates = join(root, "templates");
+  beforeAll(() => {
+    mkdirSync(join(templates, "demo"), { recursive: true });
+    writeFileSync(join(templates, "demo", "module.yml"), "description: a demo module\n");
+    mkdirSync(join(templates, "bare"));
+  });
+  afterAll(() => rmSync(root, { recursive: true, force: true }));
+
+  test("reads a manifest from its module folder", () => {
+    expect(readManifest("demo", templates).description).toBe("a demo module");
+  });
+
+  test("a missing module folder fails loudly", () => {
+    expect(() => readManifest("ghost", templates)).toThrow("templates/ghost/ does not exist");
+  });
+
+  test("a folder without module.yml fails loudly", () => {
+    expect(() => readManifest("bare", templates)).toThrow("templates/bare/module.yml is missing");
+  });
+});
+
+describe("loadManifests (live repo)", () => {
+  test("returns every module's manifest in MODULE_ORDER", () => {
+    const manifests = loadManifests();
+    expect(manifests.map((m) => m.module)).toEqual(MODULE_ORDER);
+  });
+
+  test("the toolchain facts match the modules that declare them", () => {
+    const byModule = new Map(loadManifests().map((m) => [m.module, m]));
+    expect(byModule.get("bun")?.toolchain).toEqual({ codeql_language: "javascript-typescript" });
+    expect(byModule.get("uv")?.toolchain).toEqual({ codeql_language: "python" });
+    // Deliberate: rust contributes no CodeQL language and no auto-format
+    // command (copier.yml's has_toolchain comment).
+    expect(byModule.get("rust")?.toolchain).toBeUndefined();
+    expect(byModule.get("agents")?.toolchain).toBeUndefined();
+  });
+});

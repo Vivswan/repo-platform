@@ -188,6 +188,8 @@ jobs:
         run: bun .github/scripts/fleet/repos_registry.ts validate
       - name: Check single-source-of-truth invariants
         run: bun run ssot:check
+      - name: Check generated regions against the module manifests
+        run: bun run generate:check
 
   script-tests:
     runs-on: ubuntu-latest

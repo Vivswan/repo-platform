@@ -1,0 +1,2 @@
+# Module manifest (schema and loader: scripts/module_manifests.ts).
+description: GitHub Pages deploy (root = latest release, /staging/ = main)

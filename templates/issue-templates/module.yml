@@ -1,4 +1,5 @@
-# Composer manifest (optional per module folder; every key optional).
+# Module manifest (schema and loader: scripts/module_manifests.ts).
+description: bug/feature issue forms
 # gate_dirs: output directories gated ONCE at the directory name instead of
 # per-file leaf, matching how copier skips a whole subtree.
 gate_dirs:

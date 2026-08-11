@@ -573,7 +573,7 @@ const rules: Rule[] = [
       const reference = copierChoices("modules");
 
       mismatches.push(
-        ...setMismatch("scripts/compose_template.ts MODULE_ORDER", reference, MODULE_ORDER),
+        ...setMismatch("scripts/module_manifests.ts MODULE_ORDER", reference, MODULE_ORDER),
       );
 
       const vgf = read("actions/validate-template/validate_generated_files.ts");
@@ -916,6 +916,7 @@ const rules: Rule[] = [
       );
       for (const required of [
         "bun run ssot:check",
+        "bun run generate:check",
         "bun .github/scripts/fleet/repos_registry.ts validate",
         "bun actions/validate-template/validate_generated_files.ts --self .",
       ]) {

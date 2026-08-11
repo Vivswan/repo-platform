@@ -1,0 +1,15 @@
+# Module manifest (schema and loader: scripts/module_manifests.ts).
+description: Python/uv toolchain (gitignore, dependabot, CodeQL Python)
+toolchain:
+  codeql_language: python
+dependabot:
+  ecosystem: uv
+  label: "python:uv"
+  color: "2b67c6"
+gitignore_sources:
+  - Python.gitignore
+lockfiles:
+  - 'uv\.lock'
+pages:
+  install: uv sync
+  build: uv run mkdocs build --site-dir dist

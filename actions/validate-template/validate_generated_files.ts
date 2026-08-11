@@ -120,6 +120,7 @@ function mergedStepMarkers(
   };
 }
 
+// BEGIN GENERATED: known-modules (scripts/generate.ts - edit module.yml manifests, not this block)
 const KNOWN_MODULES = new Set([
   "agents",
   "bun",
@@ -134,6 +135,7 @@ const KNOWN_MODULES = new Set([
   "settings-sync",
   "custom-license",
 ]);
+// END GENERATED: known-modules
 
 const STRICT_UTF8 = new TextDecoder("utf-8", { fatal: true });
 

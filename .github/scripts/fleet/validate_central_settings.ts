@@ -29,6 +29,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { parse } from "yaml";
+import { loadManifests } from "../../../scripts/module_manifests.ts";
 import { parseFlags } from "../shared/flags.ts";
 
 export interface CheckResult {
@@ -41,52 +42,64 @@ export type Fetched =
   | { status: "missing" }
   | { status: "failed"; detail: string };
 
-// The per-ecosystem labels dependabot puts on its PRs (and recreates when
-// missing), keyed by the toolchain module that enables the ecosystem.
-// Values match templates/settings-sync/.github/settings.yml.jinja.
-const TOOLCHAIN_LABELS: [module: string, label: string][] = [
-  ["bun", "javascript"],
-  ["uv", "python:uv"],
-  ["rust", "rust"],
-];
+/** The per-ecosystem labels dependabot puts on its PRs (and recreates when
+ *  missing), keyed by the module that enables the ecosystem - read from the
+ *  module manifests (templates/<module>/module.yml), in MODULE_ORDER. */
+export function dependabotLabels(): [module: string, label: string][] {
+  return loadManifests().flatMap((m): [string, string][] =>
+    m.dependabot ? [[m.module, m.dependabot.label]] : [],
+  );
+}
+
+// The manifests are on-disk constants: parse them once per process, not
+// once per central settings file.
+let cachedModuleLabels: [module: string, label: string][] | undefined;
 
 /** The label names a repo's settings file must declare so the apply's
  *  delete-undeclared pass does not fight the tools that recreate them.
+ *  Deduplicated by name: two modules sharing a dependabot label (the PR
+ *  label follows the language, not the ecosystem) require it once.
  *  `fuzzerLabel` is null when the repo's recorded label could not be
  *  fetched this run: the fuzzer requirement is dropped, never guessed. */
-export function requiredLabels(
+export function requiredLabelsFrom(
+  moduleLabels: [module: string, label: string][],
   modules: string[],
   fuzzerLabel: string | null,
 ): { name: string; why: string }[] {
-  const required = [
-    // The base dependabot.yml always carries the github-actions ecosystem,
-    // so these two are unconditional.
-    { name: "dependencies", why: "dependabot puts it on every PR" },
-    { name: "github_actions", why: "the github-actions dependabot ecosystem is unconditional" },
-  ];
-  for (const [module, name] of TOOLCHAIN_LABELS) {
+  const required: { name: string; why: string }[] = [];
+  const require = (name: string, why: string) => {
+    if (!required.some((label) => label.name === name)) required.push({ name, why });
+  };
+  // The base dependabot.yml always carries the github-actions ecosystem,
+  // so these two are unconditional.
+  require("dependencies", "dependabot puts it on every PR");
+  require("github_actions", "the github-actions dependabot ecosystem is unconditional");
+  for (const [module, name] of moduleLabels) {
     if (modules.includes(module)) {
-      required.push({ name, why: `the ${module} module's dependabot PRs carry it` });
+      require(name, `the ${module} module's dependabot PRs carry it`);
     }
   }
   if (modules.includes("release-please")) {
     for (const name of ["autorelease: pending", "autorelease: tagged"]) {
-      required.push({ name, why: "release-please manages it on release PRs" });
+      require(name, "release-please manages it on release PRs");
     }
     for (const name of ["release-blocker", "release-override"]) {
-      required.push({
-        name,
-        why: "the release-health gate keys on it (stripping it un-blocks or un-overrides a release)",
-      });
+      require(name, "the release-health gate keys on it (stripping it un-blocks or un-overrides a release)");
     }
   }
   if (modules.includes("fuzzer") && fuzzerLabel !== null) {
-    required.push({
-      name: fuzzerLabel,
-      why: "the fuzzer module's tracking issue keys on it (stripping it breaks the auto-close)",
-    });
+    require(fuzzerLabel, "the fuzzer module's tracking issue keys on it (stripping it breaks the auto-close)");
   }
   return required;
+}
+
+/** requiredLabelsFrom over the manifests' module->label pairs. */
+export function requiredLabels(
+  modules: string[],
+  fuzzerLabel: string | null,
+): { name: string; why: string }[] {
+  cachedModuleLabels ??= dependabotLabels();
+  return requiredLabelsFrom(cachedModuleLabels, modules, fuzzerLabel);
 }
 
 export interface IdentityIssue {
