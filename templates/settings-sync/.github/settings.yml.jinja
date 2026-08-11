@@ -75,7 +75,7 @@ labels:
 {% endif -%}
 {# compose:settings-labels #}
 
-# Branch ruleset for the default branch. Admins (RepositoryRole id 5) are in
+# Branch rulesets for the default branch. Admins (RepositoryRole id 5) are in
 # the bypass list, so direct pushes to main still work. The single required
 # status check is `all-green` (ci.yml), which `needs:` every gating CI job - the
 # list stays stable when jobs are added or renamed.
@@ -126,6 +126,26 @@ rulesets:
       - actor_id: 5
         actor_type: RepositoryRole
         bypass_mode: always
+
+  # Rules with an EMPTY bypass list: nobody - owner and admins included -
+  # can violate these on the default branch. A separate ruleset so the
+  # main ruleset's admin bypass (which keeps direct pushes working) cannot
+  # exempt anyone from these rules.
+  - name: non-bypassable
+    target: branch
+    enforcement: active
+    conditions:
+      ref_name:
+        include:
+          - "~DEFAULT_BRANCH"
+        exclude: []
+    rules:
+      - type: deletion
+      - type: required_linear_history
+    # Declared empty on purpose: an omitted key is invisible to drift
+    # detection and preserved by the update, so the empty list is what
+    # lets the nightly apply heal an out-of-band bypass actor.
+    bypass_actors: []
 {%- if 'release-please' in modules %}
   # vX.Y.Z release tags are immutable: repo-platform's push sync pins
   # against them and release artifacts reference them. Admins bypass, so

@@ -1449,19 +1449,40 @@ const rules: Rule[] = [
         });
       }
 
-      const mainRuleset = (doc: Record<string, unknown>, where: string) => {
-        const ruleset = (doc.rulesets as Record<string, unknown>[]).find((r) => r.name === "main");
-        if (!ruleset) throw new Error(`${where}: no main ruleset - anchor lost`);
-        return ruleset;
+      const namedRuleset = (doc: Record<string, unknown>, name: string, where: string) => {
+        const matches = (doc.rulesets as Record<string, unknown>[]).filter((r) => r.name === name);
+        if (matches.length === 0) throw new Error(`${where}: no ${name} ruleset - anchor lost`);
+        if (matches.length > 1) throw new Error(`${where}: duplicate ${name} rulesets`);
+        return matches[0] as Record<string, unknown>;
       };
-      const tplMain = mainRuleset(jinja, "settings.yml.jinja");
-      const centralMain = mainRuleset(central, "settings/repos/repo-platform.yml");
-      if (canonical(tplMain) !== canonical(centralMain)) {
-        mismatches.push({
-          file: "settings/repos/repo-platform.yml main ruleset",
-          expected: canonical(tplMain),
-          got: canonical(centralMain),
-        });
+      for (const name of ["main", "non-bypassable"]) {
+        const tplRuleset = namedRuleset(jinja, name, "settings.yml.jinja");
+        const centralRuleset = namedRuleset(central, name, "settings/repos/repo-platform.yml");
+        if (canonical(tplRuleset) !== canonical(centralRuleset)) {
+          mismatches.push({
+            file: `settings/repos/repo-platform.yml ${name} ruleset`,
+            expected: canonical(tplRuleset),
+            got: canonical(centralRuleset),
+          });
+        }
+        // The non-bypassable ruleset's whole point is that no actor is
+        // exempt, and only an EXPLICIT empty list keeps that healable: an
+        // omitted key is invisible to the applier's drift detection and
+        // preserved by its update.
+        if (name === "non-bypassable") {
+          for (const [where, ruleset] of [
+            ["templates/settings-sync/.github/settings.yml.jinja", tplRuleset],
+            ["settings/repos/repo-platform.yml", centralRuleset],
+          ] as const) {
+            if (canonical(ruleset.bypass_actors) !== canonical([])) {
+              mismatches.push({
+                file: `${where} non-bypassable ruleset`,
+                expected: "bypass_actors: [] (explicit empty list)",
+                got: canonical(ruleset.bypass_actors),
+              });
+            }
+          }
+        }
       }
       return mismatches;
     },

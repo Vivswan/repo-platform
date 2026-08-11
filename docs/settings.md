@@ -163,6 +163,20 @@ Stateless, declared-keys-only, upsert-by-name:
 - Short ref names in ruleset conditions are auto-prefixed (`staging` ->
   `refs/heads/staging`, `templates/*` -> `refs/tags/templates/*`);
   `~DEFAULT_BRANCH` passes through.
+- The default branch carries two rulesets on purpose: `main` (status
+  checks, PR gates, force-push and deletion protection) grants admins a
+  bypass so direct pushes keep working, while `non-bypassable`
+  (deletion, linear history) declares `bypass_actors: []` - GitHub then
+  binds everyone, repository owner included, and the explicit empty
+  list (unlike an omitted key) lets the nightly heal detect and clear
+  an out-of-band bypass actor. The owner can still edit or disable the
+  ruleset itself, but the nightly apply re-asserts it. Two knock-ons:
+  renaming the default branch is blocked for everyone (a rename
+  deletes the old ref - disable the ruleset first, and the next heal
+  restores it), and merge commits cannot be pushed directly even by
+  admins (`git pull --rebase`). The ssot settings-blocks rule keeps
+  both rulesets identical between the settings-sync template and
+  repo-platform's central file and pins the empty bypass list.
 
 ## The in-repo home
 
