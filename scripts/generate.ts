@@ -7,14 +7,18 @@
 //   default expression, the pages_setup default + validator, and the
 //   pages_install_command / pages_build_command default chains.
 // - actions/validate-template/validate_generated_files.ts: the
-//   KNOWN_MODULES set literal (the action stays self-contained for
-//   client-side execution; only the constant's authorship is generated).
-// - README.md, docs/new-repo.md, docs/settings.md, docs/pages.md: the
-//   prose that enumerates manifest data (module roster, dependabot
-//   labels, gitignore upstream mapping, pages toolchain defaults).
+//   KNOWN_MODULES set literal and the TOOLCHAIN_PINS record literal (the
+//   action stays self-contained for client-side execution; only the
+//   constants' authorship is generated).
+// - README.md, docs/new-repo.md, docs/settings.md, docs/pages.md,
+//   docs/toolchains.md: the prose that enumerates manifest data (module
+//   roster, dependabot labels, gitignore upstream mapping, pages toolchain
+//   defaults, toolchain pins).
 // - templates/module.schema.json: a WHOLE generated file (no markers), the
 //   JSON Schema the manifests' yaml-language-server directive points at,
 //   derived from the zod schema in scripts/module_manifests.ts.
+// - templates/<module>/<pin.file> for every manifest toolchain pin: WHOLE
+//   generated dotfiles carrying exactly the pinned version plus a newline.
 //
 // The .gitignore outputs are NOT owned here: scripts/build_gitignore.ts
 // has its own upstream-lock fetch/check cycle (bun run gitignore:check).
@@ -39,7 +43,7 @@
 //   bun scripts/generate.ts           # rewrite every generated region
 //   bun scripts/generate.ts --check   # exit 1 if any region is stale
 
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { z } from "zod";
 import {
@@ -254,6 +258,75 @@ export function pagesBuildCommand(withPages: PagesManifest[]): string[] {
 /** validate_generated_files.ts KNOWN_MODULES set literal. */
 export function knownModules(manifests: ModuleManifest[]): string[] {
   return ["const KNOWN_MODULES = new Set([", ...manifests.map((m) => `  "${m.module}",`), "]);"];
+}
+
+export interface ToolchainPin {
+  module: string;
+  file: string;
+  version: string;
+}
+
+/** The manifests' toolchain pins, in MODULE_ORDER; every pin becomes a
+ *  generated templates/<module>/<file> dotfile plus a row in the validator
+ *  and docs regions below. */
+export function toolchainPins(manifests: ModuleManifest[]): ToolchainPin[] {
+  return manifests.flatMap((m) =>
+    m.toolchain?.pin ? [{ module: m.module, ...m.toolchain.pin }] : [],
+  );
+}
+
+/** The version dotfile a pin renders into managed repos: exactly the
+ *  version plus a trailing newline (what the setup actions' version-file
+ *  readers expect). */
+export function pinFileContent(pin: ToolchainPin): string {
+  return `${pin.version}\n`;
+}
+
+/** validate_generated_files.ts TOOLCHAIN_PINS record literal. */
+export function toolchainPinsRegion(manifests: ModuleManifest[]): string[] {
+  const pins = toolchainPins(manifests);
+  if (pins.length === 0) {
+    throw new Error(
+      "no manifest declares a toolchain pin, so the validator's " +
+        "TOOLCHAIN_PINS record would be empty - declare toolchain: " +
+        "{pin: {file, version}} in at least one module.yml",
+    );
+  }
+  return [
+    "const TOOLCHAIN_PINS: Record<string, { file: string; version: string }> = {",
+    // Keys stay biome-stable: bare where valid, quoted where a dash in the
+    // module name requires it (matching the formatter's as-needed quoting).
+    ...pins.map((p) => {
+      const key = /^[a-z][a-z0-9]*$/.test(p.module) ? p.module : JSON.stringify(p.module);
+      return `  ${key}: { file: "${p.file}", version: "${p.version}" },`;
+    }),
+    "};",
+  ];
+}
+
+/** docs/toolchains.md pin table: one row per pinned toolchain module. */
+export function toolchainPinRows(manifests: ModuleManifest[]): string[] {
+  return toolchainPins(manifests).map((p) => `| \`${p.module}\` | \`${p.file}\` | ${p.version} |`);
+}
+
+/** Version-dotfile-shaped files at a module's root that no manifest pin
+ *  declares: a renamed or removed pin leaves the old dotfile behind, and
+ *  composition would keep shipping it to every render. Returned (for the
+ *  caller to throw on) rather than deleted - the file may be a pin typo
+ *  to fix, not an orphan to drop. */
+export function strayPinFiles(manifests: ModuleManifest[], templatesDir: string): string[] {
+  const strays: string[] = [];
+  for (const m of manifests) {
+    for (const name of readdirSync(join(templatesDir, m.module)).sort()) {
+      if (!/^\.[a-z][a-z0-9.-]*$/.test(name)) continue;
+      const path = join(templatesDir, m.module, name);
+      if (!lstatSync(path).isFile()) continue;
+      if (!/^\d+\.\d+\.\d+\n$/.test(readFileSync(path, "utf-8"))) continue;
+      if (m.toolchain?.pin?.file === name) continue;
+      strays.push(`templates/${m.module}/${name}`);
+    }
+  }
+  return strays;
 }
 
 // The docs regions below regenerate hand-written prose. Each region is a
@@ -526,7 +599,10 @@ const TARGETS: Target[] = [
     file: "actions/validate-template/validate_generated_files.ts",
     syntax: "line",
     prefix: "//",
-    regions: [["known-modules", ({ manifests }) => knownModules(manifests)]],
+    regions: [
+      ["known-modules", ({ manifests }) => knownModules(manifests)],
+      ["toolchain-pins", ({ manifests }) => toolchainPinsRegion(manifests)],
+    ],
   },
   {
     file: "README.md",
@@ -557,20 +633,34 @@ const TARGETS: Target[] = [
       ["pages-build-default", ({ pages }) => pagesBuildRow(pages)],
     ],
   },
+  {
+    file: "docs/toolchains.md",
+    syntax: "markdown",
+    regions: [["toolchain-pins", ({ manifests }) => toolchainPinRows(manifests)]],
+  },
 ];
 
 // Fully-generated files (no markers): the whole byte content is the
 // generator's output, byte-compared by --check like the regions. Each
 // carries its own staleness cause - their sources differ from the
 // manifests the regions derive from.
-const WHOLE_FILES: [file: string, content: (inputs: RegionInputs) => string, stale: string][] = [
-  [
-    "templates/module.schema.json",
-    () => moduleSchemaJson(),
-    "its content does not match the zod schema in scripts/module_manifests.ts " +
-      "(a zod upgrade changing the emitted JSON Schema is the usual cause)",
-  ],
-];
+function wholeFiles(
+  manifests: ModuleManifest[],
+): [file: string, content: (inputs: RegionInputs) => string, stale: string][] {
+  return [
+    [
+      "templates/module.schema.json",
+      () => moduleSchemaJson(),
+      "its content does not match the zod schema in scripts/module_manifests.ts " +
+        "(a zod upgrade changing the emitted JSON Schema is the usual cause)",
+    ],
+    ...toolchainPins(manifests).map((pin): [string, (inputs: RegionInputs) => string, string] => [
+      `templates/${pin.module}/${pin.file}`,
+      () => pinFileContent(pin),
+      `its content does not match the toolchain pin in templates/${pin.module}/module.yml`,
+    ]),
+  ];
+}
 
 function main(): number {
   const args = process.argv.slice(2);
@@ -586,6 +676,14 @@ function main(): number {
   let changed: { path: string; file: string; next: string; stale: string }[];
   try {
     const manifests = loadManifests();
+    const strays = strayPinFiles(manifests, join(REPO_ROOT, "templates"));
+    if (strays.length > 0) {
+      throw new Error(
+        `stray toolchain version dotfile(s) not declared by any manifest pin: ` +
+          `${strays.join(", ")} - a renamed or removed pin leaves the old file ` +
+          "shipping to every render; delete it (or fix the manifest's pin.file)",
+      );
+    }
     const inputs: RegionInputs = { manifests, pages: pagesManifests(manifests) };
     const regionStale = "its generated region(s) do not match the module manifests";
     changed = TARGETS.flatMap((target) => {
@@ -607,7 +705,7 @@ function main(): number {
       return next === current ? [] : [{ path, file: target.file, next, stale: regionStale }];
     });
     changed.push(
-      ...WHOLE_FILES.flatMap(([file, content, stale]) => {
+      ...wholeFiles(manifests).flatMap(([file, content, stale]) => {
         const path = join(REPO_ROOT, file);
         const current = existsSync(path) ? readFileSync(path, "utf-8") : undefined;
         const next = content(inputs);

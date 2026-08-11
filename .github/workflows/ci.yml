@@ -96,6 +96,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
       - name: Install tooling
         run: bun install --frozen-lockfile --silent
       - name: Biome (lint + format check)
@@ -123,6 +125,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
       - name: Typecheck repo and action scripts
         run: |
           for dir in . actions/check-typography actions/fuzz-issue actions/release-health actions/validate-commit-names actions/validate-skills actions/validate-template; do
@@ -137,6 +141,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
       - name: Verify the generated gitignore outputs match the lock
         run: bun scripts/build_gitignore.ts --check
 
@@ -150,6 +156,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
       - name: Resolve every pinned action ref
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -163,6 +171,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
       - name: Install dependencies
         run: bun install --frozen-lockfile --silent
       - name: Build twice and compare
@@ -178,6 +188,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
       - name: Install dependencies
         run: |
           bun install --frozen-lockfile --silent
@@ -199,6 +211,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
       - name: Install dependencies
         run: bun install --frozen-lockfile --silent
       - name: Run .github/scripts and action tests
@@ -353,6 +367,8 @@ jobs:
           fetch-depth: 0
       # copier invokes migrations/run.ts with bun during copy/update.
       - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
       - name: Install copier
         env:
           COPIER_SPEC: ${{ matrix.copier_spec || 'copier' }}
@@ -402,6 +418,8 @@ jobs:
           fetch-depth: 0
       # copier invokes migrations/run.ts with bun during copy/update.
       - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
       - name: Install copier
         run: pipx install copier
       - name: Update from previous build tag to a fresh build

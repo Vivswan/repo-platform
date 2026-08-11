@@ -144,7 +144,7 @@ each fixed PR needs a close/reopen for its checks to appear).
 | `scripts/build_gitignore.ts` | <!-- BEGIN GENERATED: gitignore-upstream-map (scripts/generate.ts - edit module.yml manifests, not this block) -->Regenerates the gitignore outputs (`templates/base/.gitignore.jinja`, the bun/node/deno/uv/rust toolchain fragments, this repo's `.gitignore`) from the latest [github/gitignore](https://github.com/github/gitignore) (Windows + macOS + Linux always, Node + bun / Deno / Python / Rust by bun/node/deno/uv/rust module)<!-- END GENERATED: gitignore-upstream-map --> |
 | `migrations/` | Copier `_migrations` scripts (TypeScript, run with bun) for breaking changes |
 | `skills/` | Portable agent skills for working with the platform from other repos (new-project setup, sync-PR handling); installed with `npx skills` (see each skill's README), never synced to managed repos |
-| `docs/` | [all-green convention](docs/all-green.md), [new repo](docs/new-repo.md), [pages module](docs/pages.md), [fuzzer module](docs/fuzzer.md), [nightly module](docs/nightly.md), [skills module](docs/skills.md), [settings](docs/settings.md), [eject](docs/eject.md) |
+| `docs/` | [all-green convention](docs/all-green.md), [new repo](docs/new-repo.md), [pages module](docs/pages.md), [fuzzer module](docs/fuzzer.md), [nightly module](docs/nightly.md), [skills module](docs/skills.md), [settings](docs/settings.md), [toolchain pins](docs/toolchains.md), [eject](docs/eject.md) |
 
 ## File ownership in managed repos
 

@@ -3,6 +3,9 @@
 // generated regions is proven by `bun run generate:check`, not here.
 
 import { describe, expect, test } from "bun:test";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   dependabotLabelGroups,
   gitignoreUpstreamMap,
@@ -22,10 +25,15 @@ import {
   pagesSetup,
   pagesSetupDefault,
   pagesSetupMeaning,
+  pinFileContent,
   readmeModuleRoster,
   settingsDependabotLabels,
   spliceInlineRegion,
   spliceRegion,
+  strayPinFiles,
+  toolchainPinRows,
+  toolchainPins,
+  toolchainPinsRegion,
   wrapProse,
 } from "../../scripts/generate";
 import type { ModuleManifest } from "../../scripts/module_manifests";
@@ -355,5 +363,70 @@ describe("docs region builders", () => {
       "Toolchain installed on the build runner (`bun` or `none`)",
     );
     expect(pagesSetupDefault([BUN])).toBe("`bun` when that module is selected, else `none`");
+  });
+});
+
+describe("toolchain pins", () => {
+  const PINNED_BUN = manifest("bun", {
+    toolchain: {
+      codeql_language: "javascript-typescript",
+      pin: { file: ".bun-version", version: "1.3.14" },
+    },
+  });
+  const PINNED_DASHED = manifest("my-tool", {
+    toolchain: { codeql_language: "python", pin: { file: ".my-tool-version", version: "0.1.2" } },
+  });
+
+  test("toolchainPins keeps only pin-carrying manifests, flattened", () => {
+    expect(toolchainPins([PINNED_BUN, UV, RUST])).toEqual([
+      { module: "bun", file: ".bun-version", version: "1.3.14" },
+    ]);
+    expect(toolchainPins([UV, RUST])).toEqual([]);
+  });
+
+  test("pinFileContent is exactly the version plus a newline", () => {
+    expect(pinFileContent({ module: "bun", file: ".bun-version", version: "1.3.14" })).toBe(
+      "1.3.14\n",
+    );
+  });
+
+  test("toolchainPinsRegion renders the record literal and refuses emptiness", () => {
+    expect(toolchainPinsRegion([PINNED_BUN, UV])).toEqual([
+      "const TOOLCHAIN_PINS: Record<string, { file: string; version: string }> = {",
+      '  bun: { file: ".bun-version", version: "1.3.14" },',
+      "};",
+    ]);
+    expect(() => toolchainPinsRegion([UV, RUST])).toThrow("toolchain pin");
+  });
+
+  test("toolchainPinsRegion quotes a dashed module name as a key", () => {
+    expect(toolchainPinsRegion([PINNED_DASHED])[1]).toBe(
+      '  "my-tool": { file: ".my-tool-version", version: "0.1.2" },',
+    );
+  });
+
+  test("toolchainPinRows renders one docs table row per pin", () => {
+    expect(toolchainPinRows([PINNED_BUN, UV])).toEqual(["| `bun` | `.bun-version` | 1.3.14 |"]);
+  });
+
+  test("strayPinFiles flags version-shaped dotfiles no manifest pin declares", () => {
+    const dir = mkdtempSync(join(tmpdir(), "strays-"));
+    try {
+      mkdirSync(join(dir, "bun"));
+      writeFileSync(join(dir, "bun", ".bun-version"), "1.3.14\n");
+      // A leftover from a renamed pin: version-shaped, undeclared.
+      writeFileSync(join(dir, "bun", ".bunver"), "1.0.0\n");
+      // Not version-shaped: never flagged.
+      writeFileSync(join(dir, "bun", ".gitkeep"), "");
+      mkdirSync(join(dir, "uv"));
+      writeFileSync(join(dir, "uv", ".python-version"), "3.13.0\n");
+      expect(strayPinFiles([PINNED_BUN, UV], dir)).toEqual([
+        "templates/bun/.bunver",
+        "templates/uv/.python-version",
+      ]);
+      expect(strayPinFiles([PINNED_BUN], dir)).toEqual(["templates/bun/.bunver"]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

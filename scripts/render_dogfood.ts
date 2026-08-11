@@ -58,6 +58,7 @@ export const PAIRS: { repo: string; tpl: string }[] = [
     repo: ".github/workflows/validate-skills.yml",
     tpl: "templates/skills/.github/workflows/validate-skills.yml.jinja",
   },
+  { repo: ".bun-version", tpl: "templates/bun/.bun-version" },
 ];
 
 const answersSchema = z.strictObject({

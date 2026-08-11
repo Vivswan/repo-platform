@@ -206,9 +206,15 @@ jobs:
 
       # Delimiter-aware token match, so future tokens sharing a prefix (e.g.
       # a hypothetical bunx) cannot false-positive a plain contains().
+      # The version-file expressions below prefer the production tree's pin,
+      # fall back to staging's, and pass '' when neither checkout carries the
+      # dotfile - each setup action treats an empty version-file input as
+      # unset and floats on its default, exactly today's behavior.
       - name: Setup bun
         if: contains(format(',{0},', inputs.setup), ',bun,') && steps.cfg.outputs.publish == 'true'
         uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: ${{ hashFiles('production/.bun-version') != '' && 'production/.bun-version' || (hashFiles('staging/.bun-version') != '' && 'staging/.bun-version' || '') }}
 
       - name: Cache bun dependencies
         if: contains(format(',{0},', inputs.setup), ',bun,') && steps.cfg.outputs.publish == 'true'
@@ -226,11 +232,14 @@ jobs:
         if: contains(format(',{0},', inputs.setup), ',node,') && steps.cfg.outputs.publish == 'true'
         uses: actions/setup-node@v6
         with:
+          node-version-file: ${{ hashFiles('production/.node-version') != '' && 'production/.node-version' || (hashFiles('staging/.node-version') != '' && 'staging/.node-version' || '') }}
           package-manager-cache: false
 
       - name: Setup deno
         if: contains(format(',{0},', inputs.setup), ',deno,') && steps.cfg.outputs.publish == 'true'
         uses: denoland/setup-deno@v2
+        with:
+          deno-version-file: ${{ hashFiles('production/.dvmrc') != '' && 'production/.dvmrc' || (hashFiles('staging/.dvmrc') != '' && 'staging/.dvmrc' || '') }}
 
       - name: Setup uv
         if: contains(format(',{0},', inputs.setup), ',uv,') && steps.cfg.outputs.publish == 'true'

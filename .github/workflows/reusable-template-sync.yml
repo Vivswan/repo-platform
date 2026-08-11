@@ -114,6 +114,8 @@ jobs:
           fetch-depth: 0
 
       - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
 
       # Before the resolve step: the resolver is a bun script and imports
       # the registry/redaction modules, which need the yaml dependency.

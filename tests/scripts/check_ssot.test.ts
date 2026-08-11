@@ -17,8 +17,10 @@ import {
   parseLabels,
   pinMismatches,
   RECORDED_DIVERGENCES,
+  SETUP_VERSION_FILES,
   semanticLines,
   setMismatch,
+  stepCarriesWithKey,
   stripGeneratedRegions,
   zToDollar,
 } from "../../scripts/check_ssot";
@@ -366,5 +368,117 @@ describe("stripGeneratedRegions", () => {
     expect(() => stripGeneratedRegions(`x ${MARKER_TOKENS.begin} y`, "doc")).toThrow(
       "malformed generated-region markers remain",
     );
+  });
+});
+
+describe("stepCarriesWithKey", () => {
+  const key = "bun-version-file:";
+  const lines = (text: string) => text.split("\n");
+
+  test("finds the key inside the step's own with: block (item and named shapes)", () => {
+    const item = lines(
+      [
+        "      - uses: oven-sh/setup-bun@v2",
+        "        with:",
+        "          bun-version-file: .bun-version",
+      ].join("\n"),
+    );
+    expect(stepCarriesWithKey(item, 0, key)).toBe(true);
+    const named = lines(
+      [
+        "      - name: Set up bun",
+        "        uses: oven-sh/setup-bun@v2",
+        "        with:",
+        "          bun-version-file: .bun-version",
+      ].join("\n"),
+    );
+    expect(stepCarriesWithKey(named, 1, key)).toBe(true);
+  });
+
+  test("the NEXT step's input never satisfies the check", () => {
+    const twoSteps = lines(
+      [
+        "      - uses: oven-sh/setup-bun@v2",
+        "      - uses: actions/cache@v6",
+        "        with:",
+        "          bun-version-file: .bun-version",
+      ].join("\n"),
+    );
+    expect(stepCarriesWithKey(twoSteps, 0, key)).toBe(false);
+  });
+
+  test("a comment mentioning the key never satisfies the check", () => {
+    const commented = lines(
+      [
+        "      - uses: oven-sh/setup-bun@v2",
+        "        # bun-version-file: .bun-version",
+        "      - run: bun install",
+      ].join("\n"),
+    );
+    expect(stepCarriesWithKey(commented, 0, key)).toBe(false);
+  });
+
+  test("the key must sit under with:, not as a stray step key", () => {
+    const noWith = lines(
+      ["      - uses: oven-sh/setup-bun@v2", "        bun-version-file: .bun-version"].join("\n"),
+    );
+    expect(stepCarriesWithKey(noWith, 0, key)).toBe(false);
+  });
+
+  test("a direct child at the with: block's exact level matches", () => {
+    const direct = lines(
+      [
+        "      - uses: oven-sh/setup-bun@v2",
+        "        with:",
+        "          no-cache: true",
+        "          bun-version-file: .bun-version",
+      ].join("\n"),
+    );
+    expect(stepCarriesWithKey(direct, 0, key)).toBe(true);
+  });
+
+  test("a key-shaped line inside a block scalar body never matches", () => {
+    const scalar = lines(
+      [
+        "      - uses: actions/setup-node@v6",
+        "        with:",
+        "          cache-dependency-path: |",
+        "            node-version-file: .node-version",
+      ].join("\n"),
+    );
+    expect(stepCarriesWithKey(scalar, 0, "node-version-file:")).toBe(false);
+  });
+
+  test("a key nested deeper than the direct-child level never matches", () => {
+    const nested = lines(
+      [
+        "      - uses: actions/setup-node@v6",
+        "        with:",
+        "          something:",
+        "            node-version-file: .node-version",
+      ].join("\n"),
+    );
+    expect(stepCarriesWithKey(nested, 0, "node-version-file:")).toBe(false);
+  });
+
+  test("a with: block ended by a later step key stops matching", () => {
+    const after = lines(
+      [
+        "      - uses: oven-sh/setup-bun@v2",
+        "        with:",
+        "          no-cache: true",
+        "        env:",
+        "          bun-version-file: .bun-version",
+      ].join("\n"),
+    );
+    expect(stepCarriesWithKey(after, 0, key)).toBe(false);
+  });
+
+  test("SETUP_VERSION_FILES matches uses lines commented or not, item or named", () => {
+    const [bun] = SETUP_VERSION_FILES[0];
+    expect(bun.test("- uses: oven-sh/setup-bun@v2")).toBe(true);
+    expect(bun.test("uses: oven-sh/setup-bun@v2")).toBe(true);
+    expect(bun.test("# - uses: oven-sh/setup-bun@v2".replace(/^#\s*/, ""))).toBe(true);
+    expect(bun.test("echo oven-sh/setup-bun@v2")).toBe(false);
   });
 });

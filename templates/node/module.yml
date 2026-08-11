@@ -3,6 +3,9 @@
 description: JavaScript/Node.js toolchain (gitignore, npm dependabot, CodeQL JS)
 toolchain:
   codeql_language: javascript-typescript
+  pin:
+    file: .node-version
+    version: 24.19.0
 dependabot:
   ecosystem: npm
   label: javascript

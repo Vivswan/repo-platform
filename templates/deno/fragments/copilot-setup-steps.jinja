@@ -1,4 +1,6 @@
 
       - uses: denoland/setup-deno@v2
+        with:
+          deno-version-file: .dvmrc
       - name: Install dependencies (deno)
         run: deno install --frozen

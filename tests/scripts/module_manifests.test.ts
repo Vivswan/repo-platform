@@ -62,6 +62,77 @@ describe("parseManifest", () => {
     expect(() => parseManifest("demo", "description: x\ntoolchian: {}\n", WHERE)).toThrow(WHERE);
   });
 
+  test("a toolchain pin parses with file and version typed", () => {
+    const manifest = parseManifest(
+      "demo",
+      [
+        "description: demo toolchain",
+        "toolchain:",
+        "  codeql_language: python",
+        "  pin:",
+        "    file: .demo-version",
+        "    version: 1.2.3",
+      ].join("\n"),
+      WHERE,
+    );
+    expect(manifest.toolchain?.pin).toEqual({ file: ".demo-version", version: "1.2.3" });
+  });
+
+  test("degenerate pin file names fail: no dot, uppercase, path separators", () => {
+    for (const file of ["bun-version", ".Bun-version", ".bun/version", "."]) {
+      expect(() =>
+        parseManifest(
+          "demo",
+          [
+            "description: x",
+            "toolchain:",
+            "  codeql_language: python",
+            "  pin:",
+            `    file: "${file}"`,
+            "    version: 1.2.3",
+          ].join("\n"),
+          WHERE,
+        ),
+      ).toThrow("dotfile");
+    }
+  });
+
+  test("degenerate pin versions fail: prefixes, ranges, partial versions", () => {
+    for (const version of ["v1.2.3", "1.2", "^1.2.3", "1.2.3-beta.1", "latest"]) {
+      expect(() =>
+        parseManifest(
+          "demo",
+          [
+            "description: x",
+            "toolchain:",
+            "  codeql_language: python",
+            "  pin:",
+            "    file: .demo-version",
+            `    version: "${version}"`,
+          ].join("\n"),
+          WHERE,
+        ),
+      ).toThrow("X.Y.Z");
+    }
+  });
+
+  test("a pin missing either key fails loudly", () => {
+    expect(() =>
+      parseManifest(
+        "demo",
+        "description: x\ntoolchain:\n  codeql_language: python\n  pin:\n    file: .demo-version\n",
+        WHERE,
+      ),
+    ).toThrow("version");
+    expect(() =>
+      parseManifest(
+        "demo",
+        "description: x\ntoolchain:\n  codeql_language: python\n  pin:\n    version: 1.2.3\n",
+        WHERE,
+      ),
+    ).toThrow("file");
+  });
+
   test("a toolchain without a CodeQL language is unrepresentable", () => {
     expect(() => parseManifest("demo", "description: x\ntoolchain: true\n", WHERE)).toThrow(
       "toolchain",
@@ -314,7 +385,12 @@ describe("loadManifests (live repo)", () => {
 
   test("the toolchain facts match the modules that declare them", () => {
     const byModule = new Map(loadManifests().map((m) => [m.module, m]));
-    expect(byModule.get("bun")?.toolchain).toEqual({ codeql_language: "javascript-typescript" });
+    expect(byModule.get("bun")?.toolchain?.codeql_language).toBe("javascript-typescript");
+    // The pinned versions themselves move weekly (refresh-toolchains); only
+    // the stable file names are asserted here.
+    expect(byModule.get("bun")?.toolchain?.pin?.file).toBe(".bun-version");
+    expect(byModule.get("node")?.toolchain?.pin?.file).toBe(".node-version");
+    expect(byModule.get("deno")?.toolchain?.pin?.file).toBe(".dvmrc");
     expect(byModule.get("uv")?.toolchain).toEqual({ codeql_language: "python" });
     // Deliberate: rust contributes no CodeQL language and no auto-format
     // command (copier.yml's has_toolchain comment).

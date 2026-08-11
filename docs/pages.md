@@ -89,3 +89,8 @@ custom domain in Pages settings together, or URLs and routing will disagree).
   private repo.
 - `pages_production: main` publishes main HEAD at the root and disables the
   staging path entirely.
+- The setup steps install the fleet-pinned toolchain version when the built
+  source carries its version dotfile (`.bun-version` / `.node-version` /
+  `.dvmrc` - see [docs/toolchains.md](toolchains.md)), preferring the
+  production tree's pin over staging's; without the dotfile they float on
+  the setup action's default.

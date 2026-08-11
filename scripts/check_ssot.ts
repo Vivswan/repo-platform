@@ -551,6 +551,52 @@ export function pinMismatches(pins: Pin[], allowed: Record<string, string[]>): M
 
 // --- rules --------------------------------------------------------------------
 
+/** The pinned-toolchain setup actions and the version-file input each must
+ *  carry (matched against a trimmed `uses:` line, commented or not). */
+export const SETUP_VERSION_FILES: [action: RegExp, input: string][] = [
+  [/^-? ?uses: oven-sh\/setup-bun@/, "bun-version-file:"],
+  [/^-? ?uses: actions\/setup-node@/, "node-version-file:"],
+  [/^-? ?uses: denoland\/setup-deno@/, "deno-version-file:"],
+];
+
+/** Whether the workflow step whose `uses:` line sits at `usesAt` carries
+ *  `key` as a DIRECT child of its OWN with: block. Structural,
+ *  indentation-scoped: the step's keys live two columns inside the `- `
+ *  item start, the scan stops where the step ends (a non-blank line left
+ *  of the key column), and the key only counts at the with: block's
+ *  direct-child level - the first child fixes that level, and anything
+ *  deeper (a nested mapping, a block scalar body that merely LOOKS like
+ *  the key) is a value, not an input. A comment, a neighbouring step's
+ *  input, or a look-alike elsewhere never matches. */
+export function stepCarriesWithKey(lines: string[], usesAt: number, key: string): boolean {
+  const usesLine = lines[usesAt];
+  const usesIndent = usesLine.length - usesLine.trimStart().length;
+  // `- uses:` starts the item; a bare `uses:` sits under `- name:` two
+  // columns in. Either way the step's sibling keys share one column.
+  const keyIndent = usesLine.trimStart().startsWith("- ") ? usesIndent + 2 : usesIndent;
+  let inWith = false;
+  let withChildIndent: number | null = null;
+  for (let i = usesAt + 1; i < lines.length; i++) {
+    const line = lines[i];
+    if (line.trim() === "" || line.trim().startsWith("#")) continue;
+    const indent = line.length - line.trimStart().length;
+    if (indent < keyIndent) return false;
+    if (indent === keyIndent) {
+      if (line.trimStart().startsWith("- ")) return false;
+      inWith = line.trim() === "with:";
+      withChildIndent = null;
+      continue;
+    }
+    if (!inWith) continue;
+    // The first line inside with: is necessarily a direct child (block
+    // scalar bodies and nested values always sit deeper than their key).
+    if (withChildIndent === null) withChildIndent = indent;
+    if (indent !== withChildIndent) continue;
+    if (line.trim().startsWith(key)) return true;
+  }
+  return false;
+}
+
 const rules: Rule[] = [
   {
     // The module roster's independently-authored sites, compared against
@@ -838,6 +884,72 @@ const rules: Rule[] = [
       if (pins.length === 0)
         throw new Error("no `uses: owner/action@ref` pins found anywhere - anchor lost");
       return pinMismatches(pins, ALLOWED_MULTI_REFS);
+    },
+  },
+
+  {
+    // Every pinned-toolchain setup step must read its version dotfile: the
+    // manifest pin (and the generated dotfile) only govern anything while
+    // the workflows actually pass the version-file input. Real steps are
+    // matched structurally (the key must sit inside that step's own with:
+    // block); commented starter examples are checked as comment text and
+    // can never satisfy the per-action anchors. actions/ is deliberately
+    // out of scope: the composite actions install their own floating bun
+    // for vendored scripts run in caller checkouts, where the repo's
+    // dotfile may not exist. reusable-pages.yml satisfies the rule with
+    // its hashFiles() production/staging fallback expression.
+    name: "toolchain-version-files",
+    run: () => {
+      const mismatches: Mismatch[] = [];
+      const files = [
+        ...walkFiles(".github/workflows").map((f) => f.path),
+        ...walkFiles("templates")
+          .filter((f) => !f.symlink)
+          .map((f) => f.path),
+      ];
+      const seen = new Set<string>();
+      for (const rel of files) {
+        const lines = read(rel).split("\n");
+        for (const [index, line] of lines.entries()) {
+          for (const [action, input] of SETUP_VERSION_FILES) {
+            const trimmed = line.trim();
+            if (trimmed.startsWith("#")) {
+              // Commented starter example: the commented step must carry
+              // its commented input nearby (text match suffices there).
+              if (
+                action.test(trimmed.replace(/^#\s*/, "")) &&
+                !lines
+                  .slice(index + 1, index + 6)
+                  .some((next) => next.trim().startsWith("#") && next.includes(input))
+              ) {
+                mismatches.push({
+                  file: `${rel}:${index + 1}`,
+                  expected: `a commented '${input} ...' input beside the commented example step`,
+                  got: "an example step floating on the action's default version",
+                });
+              }
+              continue;
+            }
+            if (!action.test(trimmed)) continue;
+            seen.add(input);
+            if (!stepCarriesWithKey(lines, index, input)) {
+              mismatches.push({
+                file: `${rel}:${index + 1}`,
+                expected: `a '${input} ...' input in the setup step's own with: block`,
+                got: "a setup step floating on the action's default version",
+              });
+            }
+          }
+        }
+      }
+      for (const [, input] of SETUP_VERSION_FILES) {
+        if (!seen.has(input)) {
+          throw new Error(
+            `no uncommented setup step for the ${input} toolchain found anywhere - anchor lost`,
+          );
+        }
+      }
+      return mismatches;
     },
   },
 

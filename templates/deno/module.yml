@@ -3,6 +3,9 @@
 description: Deno toolchain (deno fmt/lint, deno dependabot, CodeQL JS)
 toolchain:
   codeql_language: javascript-typescript
+  pin:
+    file: .dvmrc
+    version: 2.9.5
 dependabot:
   ecosystem: deno
   label: deno

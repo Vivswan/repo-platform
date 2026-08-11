@@ -46,7 +46,9 @@ sync secret; the single REPO_PLATFORM_TOKEN PAT lives only here.
   generator (CI fails on drift; `bun run regen` runs all three). From the
   module manifests via `bun run generate`: the marker-fenced regions in
   copier.yml, validate_generated_files.ts, and the docs, plus the whole
-  templates/module.schema.json (the manifests' editor schema). From the
+  templates/module.schema.json (the manifests' editor schema) and the
+  toolchain version dotfiles (templates/<module>/<pin.file>, bumped by
+  the refresh-toolchains workflow - docs/toolchains.md). From the
   templates + `.repo-platform-answers.yml` via `bun run dogfood`: this
   repo's copies of the files it dogfoods (the pair list is in
   scripts/render_dogfood.ts). From the manifests' `gitignore_sources` via

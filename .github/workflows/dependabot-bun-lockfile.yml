@@ -55,6 +55,8 @@ jobs:
           ref: ${{ github.event.pull_request.head.ref }}
           persist-credentials: false
       - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
       # Every tracked lockfile, not just the root one: a repository can
       # commit several (repo-platform itself locks each composite action's
       # directory). '*/bun.lock' is a git pathspec, where '*' crosses '/',

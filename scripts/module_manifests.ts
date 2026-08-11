@@ -95,7 +95,9 @@ export const manifestSchema = z.strictObject({
   description,
   // A toolchain always analyzes as SOME CodeQL language; a module that has
   // none (rust) omits the key entirely, so "toolchain without a language"
-  // is unrepresentable.
+  // is unrepresentable. pin declares the fleet-wide toolchain version:
+  // generate.ts emits templates/<module>/<pin.file> (exactly the version
+  // plus a newline) and the module's setup steps read that dotfile.
   toolchain: z
     .strictObject({
       codeql_language: z
@@ -104,6 +106,19 @@ export const manifestSchema = z.strictObject({
           /^[a-z]+(-[a-z]+)*$/,
           "must be a lowercase CodeQL language slug (dash-separated words)",
         ),
+      pin: z
+        .strictObject({
+          file: z
+            .string()
+            .regex(
+              /^\.[a-z][a-z0-9.-]*$/,
+              "must be a root dotfile name (a dot, then lowercase letters, digits, dots, dashes)",
+            ),
+          version: z
+            .string()
+            .regex(/^\d+\.\d+\.\d+$/, "must be an exact X.Y.Z version (no prefix, no range)"),
+        })
+        .optional(),
     })
     .optional(),
   dependabot: z

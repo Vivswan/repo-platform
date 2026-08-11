@@ -17,6 +17,8 @@
 //      `base-checks` on private renders (which merge the base checks there)
 //   6. LICENSE and LICENSE.md never coexist - a repo carries exactly one
 //      license file
+//   7. Every selected toolchain module with a version pin carries its
+//      managed version dotfile with exactly the pinned version
 //
 // Advisories (printed, never fail): missing actionlint / yamllint /
 // commit-names / gitleaks checks in ci.yml (older renders predate the newer
@@ -24,7 +26,8 @@
 // private ones - plus dependency-review on public renders only (private
 // renders never get that job, so their answers silence the advisory);
 // duplicate mapping keys in YAML outside .github/ and the registration
-// files.
+// files; a bun-module repo whose package.json still carries packageManager
+// (redundant once .bun-version pins the toolchain).
 //
 // Usage: bun actions/validate-template/validate_generated_files.ts [--self] [target-dir]
 //
@@ -146,6 +149,14 @@ const KNOWN_MODULES = new Set([
   "custom-license",
 ]);
 // END GENERATED: known-modules
+
+// BEGIN GENERATED: toolchain-pins (scripts/generate.ts - edit module.yml manifests, not this block)
+const TOOLCHAIN_PINS: Record<string, { file: string; version: string }> = {
+  bun: { file: ".bun-version", version: "1.3.14" },
+  node: { file: ".node-version", version: "24.19.0" },
+  deno: { file: ".dvmrc", version: "2.9.5" },
+};
+// END GENERATED: toolchain-pins
 
 const STRICT_UTF8 = new TextDecoder("utf-8", { fatal: true });
 
@@ -305,6 +316,50 @@ function main(): number {
               `valid modules are: ${[...KNOWN_MODULES].sort().join(", ")}; ` +
               "fix the modules list",
           );
+        }
+        // 7. Toolchain version pins: each selected pin-carrying module ships
+        // its managed version dotfile, and setup steps read it, so drifted
+        // content silently unpins the whole toolchain.
+        for (const module of modules) {
+          const pin = typeof module === "string" ? TOOLCHAIN_PINS[module] : undefined;
+          if (!pin) continue;
+          const pinPath = join(root, pin.file);
+          if (!isRegularFile(pinPath)) {
+            errors.push(
+              `${pin.file} is missing - the ${module} module pins its toolchain ` +
+                "version there and the template always generates it; restore the " +
+                "file from git history or run a template sync",
+            );
+          } else if (readFileSync(pinPath, "utf-8") !== `${pin.version}\n`) {
+            errors.push(
+              `${pin.file}: content must be exactly '${pin.version}' plus a newline ` +
+                `(the ${module} module's pinned toolchain version) - the file is ` +
+                "managed, so a template sync heals it; version overrides belong in " +
+                "the repo-owned workflows' explicit version inputs",
+            );
+          }
+        }
+        // packageManager is setup-bun's LAST fallback, dead once
+        // .bun-version pins the toolchain - and a stale field is a second,
+        // disagreeing pin. Advisory only: the field also drives corepack
+        // shims some repos may rely on.
+        if (modules.includes("bun")) {
+          const pkgPath = join(root, "package.json");
+          if (isRegularFile(pkgPath)) {
+            let pkg: unknown = null;
+            try {
+              pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
+            } catch {
+              // An unparseable package.json is not this check's problem.
+            }
+            if (typeof pkg === "object" && pkg !== null && "packageManager" in pkg) {
+              advisories.push(
+                "package.json: packageManager is redundant (and can disagree) once " +
+                  ".bun-version pins the toolchain - consider removing it " +
+                  "(repo-platform docs/toolchains.md)",
+              );
+            }
+          }
         }
       }
     }

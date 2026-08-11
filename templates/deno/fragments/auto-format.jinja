@@ -1,5 +1,7 @@
 
       - uses: denoland/setup-deno@v2
+        with:
+          deno-version-file: .dvmrc
       - name: Format (deno)
         run: |
           deno lint --fix || true

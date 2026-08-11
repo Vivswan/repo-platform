@@ -14,6 +14,24 @@
         "codeql_language": {
           "type": "string",
           "pattern": "^[a-z]+(-[a-z]+)*$"
+        },
+        "pin": {
+          "type": "object",
+          "properties": {
+            "file": {
+              "type": "string",
+              "pattern": "^\\.[a-z][a-z0-9.-]*$"
+            },
+            "version": {
+              "type": "string",
+              "pattern": "^\\d+\\.\\d+\\.\\d+$"
+            }
+          },
+          "required": [
+            "file",
+            "version"
+          ],
+          "additionalProperties": false
         }
       },
       "required": [

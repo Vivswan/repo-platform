@@ -462,11 +462,19 @@ fi
 if has bun; then
   test -f "$wf/dependabot-bun-lockfile.yml"
   present "bun install --lockfile-only" "$wf/dependabot-bun-lockfile.yml"
+  present "bun-version-file: .bun-version" "$wf/dependabot-bun-lockfile.yml"
   present "github.actor == 'dependabot[bot]'" "$wf/dependabot-bun-lockfile.yml"
   present "REPO_PLATFORM_TOKEN || github.token" "$wf/dependabot-bun-lockfile.yml"
 else
   test ! -e "$wf/dependabot-bun-lockfile.yml"
 fi
+
+# Toolchain version pins: each pinning toolchain module ships its managed
+# version dotfile containing an X.Y.Z line (the exact-bytes gate lives in
+# validate-template's pin check).
+if has bun; then grep -qxE '[0-9]+\.[0-9]+\.[0-9]+' /tmp/smoke/.bun-version; else test ! -e /tmp/smoke/.bun-version; fi
+if has node; then grep -qxE '[0-9]+\.[0-9]+\.[0-9]+' /tmp/smoke/.node-version; else test ! -e /tmp/smoke/.node-version; fi
+if has deno; then grep -qxE '[0-9]+\.[0-9]+\.[0-9]+' /tmp/smoke/.dvmrc; else test ! -e /tmp/smoke/.dvmrc; fi
 
 # copilot-setup-steps belongs to the agents module; the toolchain installs
 # inside it splice from the toolchain module fragments.
