@@ -73,6 +73,18 @@ describe("parseManifest", () => {
     ).toThrow("CodeQL language slug");
   });
 
+  test("degenerate CodeQL language shapes fail: leading/trailing/double dashes", () => {
+    for (const language of ["-python", "go-", "a--b", "-"]) {
+      expect(() =>
+        parseManifest(
+          "demo",
+          `description: x\ntoolchain:\n  codeql_language: "${language}"\n`,
+          WHERE,
+        ),
+      ).toThrow("CodeQL language slug");
+    }
+  });
+
   test("a missing description fails", () => {
     expect(() => parseManifest("demo", "gate: x\n", WHERE)).toThrow("description");
   });
@@ -145,6 +157,12 @@ describe("parseManifest", () => {
     expect(() => parseManifest("demo", 'description: x\nlockfiles:\n  - "a\\nb"\n', WHERE)).toThrow(
       "single line",
     );
+  });
+
+  test("lockfile patterns reject single quotes (they land inside Jinja quotes)", () => {
+    expect(() =>
+      parseManifest("demo", `description: x\nlockfiles:\n  - "it's\\\\.lock"\n`, WHERE),
+    ).toThrow("Jinja quotes");
   });
 
   test("an unquoted gate that parses as a boolean fails the string type", () => {

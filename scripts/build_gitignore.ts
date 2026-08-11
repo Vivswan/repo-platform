@@ -9,10 +9,16 @@
 // - templates/<module>/fragments/gitignore.jinja: one fragment per module
 //   declaring gitignore_sources in its module.yml manifest (uv maps to
 //   Python.gitignore, which carries upstream's uv section - there is no
-//   standalone uv template) as module fragments.
+//   standalone uv template) as module fragments. A source declared by
+//   several modules is emitted plain in the first declaring module's
+//   fragment; each later one carries the whole chunk (leading newline
+//   included) wrapped in the negation of the earlier declarers' gates, so
+//   a repo selecting both gets the section once and a suppressed chunk
+//   renders as nothing.
 // - .gitignore (this repo's own): same OS templates plus ALL toolchain
-//   templates (downstream repos may carry any combination). The REPOSITORY
-//   LOCAL section's existing content is preserved across regenerations.
+//   templates, each once (downstream repos may carry any combination). The
+//   REPOSITORY LOCAL section's existing content is preserved across
+//   regenerations.
 //
 // The template and self outputs open their managed block with one section
 // that has no upstream source: agent local state.
@@ -27,6 +33,7 @@
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
+import { gateExpression } from "./compose_template.ts";
 import { loadManifests } from "./module_manifests.ts";
 
 const REPO_ROOT = resolve(dirname(Bun.main), "..");
@@ -36,30 +43,18 @@ const OUTPUT_SELF = join(REPO_ROOT, ".gitignore");
 
 const ALWAYS = ["Global/Windows.gitignore", "Global/macOS.gitignore", "Global/Linux.gitignore"];
 
-/** Per-module upstream sources from the manifests, in MODULE_ORDER. Two
- *  modules sharing a source would duplicate its section in the self output
- *  and need or-gated fragments; refuse until that gating exists. Read
- *  inside main(), not at import time, so a broken manifest reports through
- *  the normal error path of whichever mode is running. */
-function byModule(): Record<string, string[]> {
-  const entries = loadManifests().flatMap((m): [string, string[]][] =>
-    m.gitignore_sources ? [[m.module, m.gitignore_sources]] : [],
-  );
-  const seen = new Map<string, string>();
-  for (const [module, sources] of entries) {
-    for (const source of sources) {
-      const owner = seen.get(source);
-      if (owner !== undefined) {
-        throw new Error(
-          `gitignore source ${source} is declared by both ${owner} and ${module} - ` +
-            "shared upstream sources need or-gated fragments, which this script " +
-            "does not generate yet",
-        );
-      }
-      seen.set(source, module);
-    }
-  }
-  return Object.fromEntries(entries);
+/** Per-module upstream sources plus every module's gate expression, from
+ *  the manifests in MODULE_ORDER. Read inside main(), not at import time,
+ *  so a broken manifest reports through the normal error path of whichever
+ *  mode is running. */
+function byModule(): { entries: [string, string[]][]; gates: Map<string, string> } {
+  const manifests = loadManifests();
+  return {
+    entries: manifests.flatMap((m): [string, string[]][] =>
+      m.gitignore_sources ? [[m.module, m.gitignore_sources]] : [],
+    ),
+    gates: new Map(manifests.map((m) => [m.module, gateExpression(m.module, m)])),
+  };
 }
 
 const ANCHOR = "gitignore";
@@ -152,16 +147,58 @@ function buildTemplate(sha: string, sections: Record<string, string>): string {
   return parts.join("");
 }
 
-/** A module's fragment: its sections, leading newline owned per the
- *  composer's fragment whitespace convention. */
-function buildFragment(sections: Record<string, string>, paths: string[]): string {
-  return `\n${paths.map((path) => sections[path]).join("\n")}`;
+/** Each module's fragment parts: its sources in manifest order, each with
+ *  the EARLIER modules that already declared the same source (whose
+ *  selection must suppress the duplicate section). */
+export function fragmentPlans(
+  entries: [string, string[]][],
+): { module: string; parts: { path: string; earlier: string[] }[] }[] {
+  const owners = new Map<string, string[]>();
+  return entries.map(([module, sources]) => ({
+    module,
+    parts: sources.map((path) => {
+      const earlier = owners.get(path) ?? [];
+      owners.set(path, [...earlier, module]);
+      return { path, earlier };
+    }),
+  }));
+}
+
+/** Every distinct source across all modules, in first-declaration order -
+ *  what the self output (which carries every toolchain) emits. */
+export function selfSources(entries: [string, string[]][]): string[] {
+  return [...new Set(entries.flatMap(([, sources]) => sources))];
+}
+
+/** A module's fragment: one chunk per source, each owning its leading
+ *  newline (the composer's fragment whitespace convention). A section
+ *  already owned by earlier modules has its WHOLE chunk wrapped in the
+ *  negation of those modules' gate expressions, so a suppressed chunk
+ *  renders as nothing - not as stray blank lines. */
+export function buildFragment(
+  sections: Record<string, string>,
+  parts: { path: string; earlier: string[] }[],
+  gates: Map<string, string>,
+): string {
+  const gateOf = (module: string): string => {
+    const gate = gates.get(module);
+    if (gate === undefined) throw new Error(`no gate expression for module '${module}'`);
+    return gate;
+  };
+  return parts
+    .map(({ path, earlier }) => {
+      const chunk = `\n${sections[path]}`;
+      if (earlier.length === 0) return chunk;
+      const guard = earlier.map((module) => `not (${gateOf(module)})`).join(" and ");
+      return `{% if ${guard} %}${chunk}{% endif %}`;
+    })
+    .join("");
 }
 
 function buildSelf(
   sha: string,
   sections: Record<string, string>,
-  moduleSources: Record<string, string[]>,
+  sources: string[],
   localBody: string,
 ): string {
   const parts = [
@@ -171,7 +208,7 @@ function buildSelf(
     AGENT_SECTION,
     "\n",
   ];
-  for (const path of [...ALWAYS, ...Object.values(moduleSources).flat()]) {
+  for (const path of [...ALWAYS, ...sources]) {
     parts.push(sections[path], "\n");
   }
   parts.push("# END REPO-PLATFORM MANAGED\n");
@@ -195,15 +232,17 @@ async function main(): Promise<number> {
   }
   const mode: Mode = locked ? "locked" : check ? "check" : "fetch";
 
-  let moduleSources: Record<string, string[]>;
+  let moduleSources: [string, string[]][];
+  let gates: Map<string, string>;
   try {
-    moduleSources = byModule();
+    ({ entries: moduleSources, gates } = byModule());
   } catch (error) {
     console.error(`error: ${error instanceof Error ? error.message : String(error)}`);
     return 1;
   }
+  const sources = selfSources(moduleSources);
 
-  const paths = [...ALWAYS, ...Object.values(moduleSources).flat()];
+  const paths = [...ALWAYS, ...sources];
   let sha: string;
   if (mode === "fetch") {
     sha = await upstreamHead();
@@ -221,11 +260,11 @@ async function main(): Promise<number> {
 
   const outputs: [string, string][] = [
     [OUTPUT_TEMPLATE, buildTemplate(sha, sections)],
-    ...Object.entries(moduleSources).map(([module, modulePaths]): [string, string] => [
+    ...fragmentPlans(moduleSources).map(({ module, parts }): [string, string] => [
       fragmentOutput(module),
-      buildFragment(sections, modulePaths),
+      buildFragment(sections, parts, gates),
     ]),
-    [OUTPUT_SELF, buildSelf(sha, sections, moduleSources, existingLocalBody(OUTPUT_SELF))],
+    [OUTPUT_SELF, buildSelf(sha, sections, sources, existingLocalBody(OUTPUT_SELF))],
   ];
 
   if (mode === "check") {
@@ -259,4 +298,6 @@ async function main(): Promise<number> {
   return 0;
 }
 
-process.exit(await main());
+if (import.meta.main) {
+  process.exit(await main());
+}

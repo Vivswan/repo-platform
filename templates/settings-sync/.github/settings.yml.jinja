@@ -54,16 +54,7 @@ labels:
   - name: github_actions
     color: "000000"
     description: Pull requests that update GitHub Actions code
-{% if 'bun' in modules %}  - name: javascript
-    color: "168700"
-    description: Pull requests that update javascript code
-{% endif %}{% if 'uv' in modules %}  - name: "python:uv"
-    color: "2b67c6"
-    description: Pull requests that update python:uv code
-{% endif %}{% if 'rust' in modules %}  - name: rust
-    color: "000000"
-    description: Pull requests that update rust code
-{% endif %}  - name: bug
+{# compose:settings-dependabot-labels #}  - name: bug
     color: "d73a4a"
     description: Something isn't working
   - name: enhancement

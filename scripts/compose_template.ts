@@ -9,17 +9,29 @@
 //   the module's filename gate automatically ({% if '<module>' in modules %}),
 //   wrapping the leaf name (keeping any .jinja suffix outside), or a whole
 //   directory listed in the module.yml manifest's `gate_dirs`. module.yml is
-//   the module's manifest (schema: scripts/module_manifests.ts); the composer
-//   consumes only its gate/gate_dirs keys.
+//   the module's manifest (schema: scripts/module_manifests.ts).
 // - templates/<module>/fragments/<anchor>.jinja: additive contributions to
-//   shared files. A skeleton file contains a full-line marker
-//   `{# compose:<anchor> #}`; the composer replaces it with every module's
-//   fragment wrapped in that module's gate, in MODULE_ORDER. Fragments own all
-//   whitespace between the tags; the composer adds none.
+//   shared files. A skeleton file carries a marker line starting with
+//   `{# compose:<anchor> #}` (text after the closing tag is appended
+//   verbatim after the last contribution, for inline `{% endif %}<text>`
+//   junctions); the composer replaces the line with every contribution in
+//   MODULE_ORDER, each fragment wrapped in its module's gate. Fragments own
+//   all whitespace between the tags; the composer adds none.
+// - Data anchors (DATA_ANCHORS below) are filled from manifest data instead
+//   of fragment files, so the composed output carries no marker comments and
+//   list-shaped content cannot drift from the manifests. The sharing rule: a
+//   manifest value declared by several modules is grouped BY VALUE, emitted
+//   ONCE, and gated on the or-chain of the contributing modules in
+//   MODULE_ORDER - never per-module duplicates, never precedence guards.
+//   A fragment file for a data anchor is an error, with two exceptions:
+//   ci-gate-needs still takes fragments from modules the generator does not
+//   cover, and agents-toolchain consumes its fragments as generator input.
 //
-// Collisions are errors, never silent merges: the same logical path provided
-// by two folders (or a module file colliding with base) must be resolved by
-// hoisting the file to base/ with an explicit gate or by adding an anchor.
+// Every anchor needs at least one contribution (fragment or generated) and
+// every contribution needs its anchor. Collisions are errors, never silent
+// merges: the same logical path provided by two folders (or a module file
+// colliding with base) must be resolved by hoisting the file to base/ with
+// an explicit gate or by adding an anchor.
 //
 // All I/O is bytes (source files are copied verbatim, never re-encoded) and
 // symlinks are copied as symlinks. Output is deterministic: sorted walks plus
@@ -40,7 +52,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import { MODULE_ORDER, type ModuleManifest, readManifest } from "./module_manifests.ts";
+import { loadManifests, MODULE_ORDER, type ModuleManifest } from "./module_manifests.ts";
 
 const REPO_ROOT = resolve(import.meta.dir, "..");
 const SRC = join(REPO_ROOT, "templates");
@@ -50,7 +62,7 @@ const OUT = join(REPO_ROOT, "template");
 // here for the existing importers keyed on the composer.
 export { MODULE_ORDER };
 
-const ANCHOR_RE = /^\{# compose:([a-z0-9][a-z0-9-]*) #\}$/;
+const ANCHOR_RE = /^\{# compose:([a-z0-9][a-z0-9-]*) #\}([^\r]*)$/;
 const JINJA_SUFFIX = ".jinja";
 const MANIFEST_NAME = "module.yml";
 const FRAGMENTS_DIR = "fragments";
@@ -88,19 +100,6 @@ function walkFiles(dir: string): string[] {
   return found.sort();
 }
 
-// The slice of the manifest the composer consumes; everything else belongs
-// to generate.ts and the runtime readers.
-type ComposeManifest = Pick<ModuleManifest, "gate" | "gate_dirs">;
-
-/** The module's validated manifest; a broken one is a composition error. */
-function loadManifest(module: string): ComposeManifest {
-  try {
-    return readManifest(module);
-  } catch (error) {
-    die(`error: ${error instanceof Error ? error.message : String(error)}`);
-  }
-}
-
 /** Logical path -> Entry for a source folder (skips manifest + fragments). */
 function collectFiles(folder: string): Map<string, Entry> {
   const files = new Map<string, Entry>();
@@ -131,7 +130,10 @@ function collectFragments(folder: string): Map<string, Buffer> {
   return fragments;
 }
 
-function gateExpression(module: string, manifest: ComposeManifest): string {
+/** A module's gate expression: its manifest override or plain membership.
+ *  Exported so build_gitignore's cross-module guards negate the same
+ *  expressions the composer gates with. */
+export function gateExpression(module: string, manifest: ModuleManifest): string {
   return manifest.gate || `'${module}' in modules`;
 }
 
@@ -163,6 +165,369 @@ function gatedPath(logical: string, gate: string, gateDirs: string[]): string {
   return parent ? `${parent}/${wrapped}` : wrapped;
 }
 
+// --- data anchors ----------------------------------------------------------
+
+// A total module -> gate lookup: build() populates the gate map for every
+// module in MODULE_ORDER before any generator runs, so a miss can only be
+// a programming error and fails loudly instead of guessing a gate.
+type GateOf = (module: string) => string;
+
+/** The gate for a group of contributing modules: each module's own gate
+ *  expression, or-chained in the given (MODULE_ORDER) order. */
+export function orChain(modules: string[], gateOf: GateOf): string {
+  return modules.map((module) => gateOf(module)).join(" or ");
+}
+
+/** The CodeQL job slug for a language: its first dash-separated word
+ *  (javascript-typescript -> javascript, python -> python). */
+export function codeqlSlug(language: string): string {
+  return language.split("-")[0];
+}
+
+// YAML parses these unquoted lowercase words as non-strings.
+const YAML_RESERVED = new Set(["true", "false", "null"]);
+
+/** settings.yml label names are emitted quoted unless they are plainly
+ *  safe YAML scalars (lowercase word characters, no leading digit, not a
+ *  reserved word) - python:uv gets quotes, javascript stays bare. */
+export function yamlLabelName(name: string): string {
+  return /^[a-z][a-z0-9_-]*$/.test(name) && !YAML_RESERVED.has(name) ? name : `"${name}"`;
+}
+
+export type EcosystemGroup = { ecosystem: string; modules: string[] };
+
+/** Distinct dependabot ecosystems with their contributing modules, in
+ *  MODULE_ORDER of first contributor. */
+export function ecosystemGroups(manifests: ModuleManifest[]): EcosystemGroup[] {
+  const groups = new Map<string, EcosystemGroup>();
+  for (const manifest of manifests) {
+    if (!manifest.dependabot) continue;
+    const { ecosystem } = manifest.dependabot;
+    const group = groups.get(ecosystem) ?? { ecosystem, modules: [] };
+    group.modules.push(manifest.module);
+    groups.set(ecosystem, group);
+  }
+  return [...groups.values()];
+}
+
+export type CodeqlGroup = { language: string; slug: string; modules: string[] };
+
+/** Distinct CodeQL languages with their contributing modules, in
+ *  MODULE_ORDER of first contributor. Two distinct languages deriving the
+ *  same job slug would emit duplicate codeql-<slug> YAML keys (one language
+ *  silently lost), so that collision throws. */
+export function codeqlGroups(manifests: ModuleManifest[]): CodeqlGroup[] {
+  const groups = new Map<string, CodeqlGroup>();
+  const bySlug = new Map<string, CodeqlGroup>();
+  for (const manifest of manifests) {
+    if (!manifest.toolchain) continue;
+    const language = manifest.toolchain.codeql_language;
+    const slug = codeqlSlug(language);
+    if (slug === "") {
+      throw new GeneratorValidationError(
+        `CodeQL language '${language}' (templates/${manifest.module}/module.yml) ` +
+          "derives an empty job slug - fix the language to start with a word",
+      );
+    }
+    const collision = bySlug.get(slug);
+    if (collision && collision.language !== language) {
+      throw new GeneratorValidationError(
+        `CodeQL languages '${collision.language}' (modules ${collision.modules.join(", ")}) ` +
+          `and '${language}' (templates/${manifest.module}/module.yml) both derive the ` +
+          `job slug 'codeql-${slug}' - the generated jobs would collide as duplicate ` +
+          "YAML keys; consolidate the modules onto one language",
+      );
+    }
+    const group = groups.get(language) ?? { language, slug, modules: [] };
+    group.modules.push(manifest.module);
+    groups.set(language, group);
+    bySlug.set(slug, group);
+  }
+  return [...groups.values()];
+}
+
+export type DependabotLabel = {
+  name: string;
+  color: string;
+  description: string;
+  modules: string[];
+};
+
+/** Distinct dependabot PR labels with their contributing modules, in
+ *  MODULE_ORDER of first contributor (shared labels agree on their color -
+ *  the manifest loader asserts it). check_ssot.ts reads this too, so the
+ *  label rosters cannot drift from what the composer emits. */
+export function dependabotLabels(manifests: ModuleManifest[]): DependabotLabel[] {
+  const groups = new Map<string, DependabotLabel>();
+  for (const manifest of manifests) {
+    if (!manifest.dependabot) continue;
+    const { label, color } = manifest.dependabot;
+    const group = groups.get(label) ?? {
+      name: label,
+      color,
+      description: `Pull requests that update ${label} code`,
+      modules: [],
+    };
+    group.modules.push(manifest.module);
+    groups.set(label, group);
+  }
+  return [...groups.values()];
+}
+
+export type LockfileGroup = { patterns: string[]; modules: string[] };
+
+/** Gitleaks lockfile patterns grouped for emission: each distinct pattern
+ *  appears once with its declaring modules; consecutive patterns with the
+ *  same module set share one group (one emitted line). */
+export function lockfileGroups(manifests: ModuleManifest[]): LockfileGroup[] {
+  const byPattern = new Map<string, string[]>();
+  for (const manifest of manifests) {
+    for (const pattern of manifest.lockfiles ?? []) {
+      const modules = byPattern.get(pattern) ?? [];
+      if (!modules.includes(manifest.module)) modules.push(manifest.module);
+      byPattern.set(pattern, modules);
+    }
+  }
+  const groups: LockfileGroup[] = [];
+  for (const [pattern, modules] of byPattern) {
+    const last = groups[groups.length - 1];
+    if (
+      last &&
+      last.modules.length === modules.length &&
+      last.modules.every((m, i) => m === modules[i])
+    ) {
+      last.patterns.push(pattern);
+    } else {
+      groups.push({ patterns: [pattern], modules });
+    }
+  }
+  return groups;
+}
+
+// One spliced piece of an anchor's replacement, already carrying its gate.
+// `order` is the MODULE_ORDER position of the (first) contributing module,
+// so generated groups interleave with fragment contributions exactly where
+// the contributing modules sit.
+type Contribution = { order: number; source: string; text: Buffer };
+
+/** A generator's own validation failure (bad manifest data): reported as a
+ *  clean composition error. Anything else escaping a generator is a bug and
+ *  is rethrown with its stack preserved via `cause`. */
+export class GeneratorValidationError extends Error {}
+
+/** Rendered-separation invariant for an anchor's ordered contributions:
+ *  every NON-LAST contribution, once its trailing closing tags are
+ *  stripped, must end with a newline - otherwise two selected
+ *  contributions render onto one line (adjacent `{% if %}...{% endif %}`
+ *  wrappers emit no separator of their own). The last contribution may end
+ *  mid-line (pr-title's gate entry does). */
+export function renderedSeparationErrors(
+  anchor: string,
+  contributions: { source: string; text: Buffer }[],
+): string[] {
+  const errors: string[] = [];
+  for (let i = 0; i + 1 < contributions.length; i++) {
+    const { source, text } = contributions[i];
+    let body = text.toString("latin1");
+    for (;;) {
+      const stripped = body.replace(/\{%-?\s*endif\s*-?%\}$/, "");
+      if (stripped === body) break;
+      body = stripped;
+    }
+    if (!body.endsWith("\n")) {
+      errors.push(
+        `anchor '${anchor}': ${source} renders without a trailing newline ` +
+          `(after its closing tags) but a later contribution follows - when ` +
+          "both are selected they render onto one line; end the fragment " +
+          "body with a newline",
+      );
+    }
+  }
+  return errors;
+}
+
+type GeneratorContext = { manifests: ModuleManifest[]; gateOf: GateOf };
+
+// Discriminated on `kind` so the shapes stay honest: only a coexist anchor
+// can (and must) say which modules the generator covers, and only a consume
+// generator ever sees fragment bytes.
+type DataAnchorSpec = { data: string } & (
+  | {
+      /** Any fragment file for the anchor is an error. */
+      kind: "reject";
+      generate: (ctx: GeneratorContext) => Contribution[];
+    }
+  | {
+      /** Fragments splice normally unless `covered` claims their module. */
+      kind: "coexist";
+      covered: (manifest: ModuleManifest) => boolean;
+      generate: (ctx: GeneratorContext) => Contribution[];
+    }
+  | {
+      /** Fragments become the generator's input instead of being spliced. */
+      kind: "consume";
+      generate: (ctx: GeneratorContext & { fragments: [string, Buffer][] }) => Contribution[];
+    }
+);
+
+function gatedText(gate: string, body: string): string {
+  return `{% if ${gate} %}${body}{% endif %}`;
+}
+
+function generatorSource(anchor: string, data: string): string {
+  return `the built-in '${anchor}' generator (module.yml ${data})`;
+}
+
+function orderOf(manifests: ModuleManifest[], module: string): number {
+  return manifests.findIndex((manifest) => manifest.module === module);
+}
+
+function ecosystemBlock(ecosystem: string): string {
+  return `
+  - package-ecosystem: "${ecosystem}"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: "build"
+      include: "scope"
+`;
+}
+
+function codeqlJob(group: CodeqlGroup): string {
+  return `
+  codeql-${group.slug}:
+    uses: {{ github_username }}/repo-platform/.github/workflows/reusable-codeql.yml@{{ uses_ref }}
+    with:
+      language: ${group.language}
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+`;
+}
+
+/** The rendered settings.yml block for one label group; exported so tests
+ *  can round-trip it through a YAML parser. */
+export function labelBlock(label: DependabotLabel): string {
+  return (
+    `  - name: ${yamlLabelName(label.name)}\n` +
+    `    color: "${label.color}"\n` +
+    `    description: ${label.description}\n`
+  );
+}
+
+const DATA_ANCHORS: Record<string, DataAnchorSpec> = {
+  "dependabot-ecosystems": {
+    data: "dependabot.ecosystem",
+    kind: "reject",
+    generate: ({ manifests, gateOf }) =>
+      ecosystemGroups(manifests).map((group) => ({
+        order: orderOf(manifests, group.modules[0]),
+        source: generatorSource("dependabot-ecosystems", "dependabot.ecosystem"),
+        text: Buffer.from(
+          gatedText(orChain(group.modules, gateOf), ecosystemBlock(group.ecosystem)),
+        ),
+      })),
+  },
+  "codeql-languages": {
+    data: "toolchain.codeql_language",
+    kind: "reject",
+    generate: ({ manifests, gateOf }) =>
+      codeqlGroups(manifests).map((group) => ({
+        order: orderOf(manifests, group.modules[0]),
+        source: generatorSource("codeql-languages", "toolchain.codeql_language"),
+        text: Buffer.from(gatedText(orChain(group.modules, gateOf), codeqlJob(group))),
+      })),
+  },
+  // Mixed anchor: the toolchain gate entries are generated here; pr-title
+  // and release-please still contribute fragment files, spliced at their
+  // own MODULE_ORDER positions.
+  "ci-gate-needs": {
+    data: "toolchain.codeql_language",
+    kind: "coexist",
+    covered: (manifest) => manifest.toolchain !== undefined,
+    generate: ({ manifests, gateOf }) =>
+      codeqlGroups(manifests).map((group) => ({
+        order: orderOf(manifests, group.modules[0]),
+        source: generatorSource("ci-gate-needs", "toolchain.codeql_language"),
+        text: Buffer.from(
+          gatedText(
+            orChain(group.modules, gateOf),
+            `{% if enable_codeql %}      - codeql-${group.slug}\n{% endif %}`,
+          ),
+        ),
+      })),
+  },
+  "settings-dependabot-labels": {
+    data: "dependabot.label",
+    kind: "reject",
+    generate: ({ manifests, gateOf }) =>
+      dependabotLabels(manifests).map((label) => ({
+        order: orderOf(manifests, label.modules[0]),
+        source: generatorSource("settings-dependabot-labels", "dependabot.label"),
+        text: Buffer.from(gatedText(orChain(label.modules, gateOf), labelBlock(label))),
+      })),
+  },
+  "gitleaks-locks": {
+    data: "lockfiles",
+    kind: "reject",
+    generate: ({ manifests, gateOf }) => {
+      const groups = lockfileGroups(manifests);
+      if (groups.length === 0) return [];
+      const lines = groups.map(
+        ({ patterns, modules }) =>
+          `{%- if ${orChain(modules, gateOf)} %}${patterns
+            .map((pattern) => `{% set _ = locks.append('${pattern}') %}`)
+            .join("")}{% endif %}`,
+      );
+      return [
+        {
+          order: orderOf(manifests, groups[0].modules[0]),
+          source: generatorSource("gitleaks-locks", "lockfiles"),
+          text: Buffer.from(lines.join("\n")),
+        },
+      ];
+    },
+  },
+  // The generator owns the whole Toolchain block: the outer guard is the
+  // or-chain over the modules that ship an agents-toolchain fragment, so a
+  // new toolchain module extends it by adding its fragment - nothing
+  // hand-written to keep in sync. The bullet text itself stays free-form in
+  // the fragments (which must end with a newline - the closing tag needs its
+  // own line).
+  "agents-toolchain": {
+    data: "fragments/agents-toolchain.jinja",
+    kind: "consume",
+    generate: ({ manifests, gateOf, fragments }) => {
+      if (fragments.length === 0) return [];
+      const modules = fragments.map(([module]) => module);
+      const parts: Buffer[] = [
+        Buffer.from(`{% if ${orChain(modules, gateOf)} %}\n## Toolchain\n\n`),
+      ];
+      for (const [module, body] of fragments) {
+        parts.push(
+          Buffer.from(`{% if ${gateOf(module)} -%}\n`),
+          body,
+          Buffer.from("{% endif -%}\n"),
+        );
+      }
+      parts.push(Buffer.from("{% endif %}"));
+      return [
+        {
+          order: orderOf(manifests, modules[0]),
+          source: generatorSource("agents-toolchain", "fragments"),
+          text: Buffer.concat(parts),
+        },
+      ];
+    },
+  },
+};
+
+// --- splicing ----------------------------------------------------------------
+
 const NEWLINE = Buffer.from("\n");
 const ANCHOR_HINT = Buffer.from("{# compose:");
 
@@ -188,10 +553,10 @@ function joinLines(lines: Buffer[]): Buffer {
   return Buffer.concat(parts);
 }
 
-function matchAnchor(line: Buffer): string | null {
+function matchAnchor(line: Buffer): { name: string; trailing: string } | null {
   // Bytes, matched as latin1: non-ASCII bytes can never satisfy the pattern.
   const match = ANCHOR_RE.exec(line.toString("latin1"));
-  return match ? match[1] : null;
+  return match ? { name: match[1], trailing: match[2] } : null;
 }
 
 function sortedByKey<V>(map: Map<string, V>): [string, V][] {
@@ -207,10 +572,9 @@ function sourceName(sourced: SourcedEntry): string {
 }
 
 /** Replace anchor lines in-place; returns error strings. */
-function spliceFragments(
+function spliceContributions(
   files: Map<string, SourcedEntry>,
-  fragments: Map<string, [string, Buffer][]>,
-  gates: Map<string, string>,
+  contributions: Map<string, Contribution[]>,
 ): string[] {
   const errors: string[] = [];
   const anchorOwner = new Map<string, [string, string]>(); // anchor -> [source, logical]
@@ -221,47 +585,57 @@ function spliceFragments(
       if (line.includes(ANCHOR_HINT) && matchAnchor(line) === null) {
         errors.push(
           `templates/${sourceName(sourced)}/${logical}: malformed anchor line ` +
-            `'${line.toString("utf-8").trim()}' - anchors must be a ` +
-            "full line exactly matching '{# compose:<name> #}' (no " +
-            "indentation, trailing whitespace, or CRLF)",
+            `'${line.toString("utf-8").trim()}' - anchors must start the ` +
+            "line as '{# compose:<name> #}' (no indentation or CRLF; text " +
+            "after the closing tag is appended verbatim after the last " +
+            "contribution)",
         );
         continue;
       }
       const anchor = matchAnchor(line);
       if (anchor === null) continue;
-      const other = anchorOwner.get(anchor);
-      if (other) {
+      if (anchor.trailing !== "" && anchor.trailing.trim() === "") {
         errors.push(
-          `duplicate anchor '${anchor}' in templates/${sourceName(sourced)}/${logical} ` +
-            `and templates/${other[0]}/${other[1]} - each anchor may appear ` +
-            "in exactly one skeleton file; rename one anchor (and any " +
-            `fragments/${anchor}.jinja files that feed it) or remove the duplicate marker`,
+          `templates/${sourceName(sourced)}/${logical}: anchor '${anchor.name}' ` +
+            "carries only whitespace after the closing tag - almost certainly " +
+            "an accident (a trailing literal must contain visible text); " +
+            "delete the stray whitespace",
         );
       }
-      anchorOwner.set(anchor, [sourceName(sourced), logical]);
+      const other = anchorOwner.get(anchor.name);
+      if (other) {
+        errors.push(
+          `duplicate anchor '${anchor.name}' in templates/${sourceName(sourced)}/${logical} ` +
+            `and templates/${other[0]}/${other[1]} - each anchor may appear ` +
+            "in exactly one skeleton file; rename one anchor (and any " +
+            `fragments/${anchor.name}.jinja files that feed it) or remove the duplicate marker`,
+        );
+      }
+      anchorOwner.set(anchor.name, [sourceName(sourced), logical]);
     }
   }
 
-  for (const [anchor, contributions] of sortedByKey(fragments)) {
+  for (const [anchor, list] of sortedByKey(contributions)) {
     if (!anchorOwner.has(anchor)) {
-      for (const [module] of contributions) {
+      for (const { source } of list) {
         errors.push(
-          `templates/${module}/${FRAGMENTS_DIR}/${anchor}${JINJA_SUFFIX}: no ` +
-            `anchor {# compose:${anchor} #} found in any source file - the ` +
-            "fragment has nowhere to splice; add the marker line to a " +
-            "skeleton file or delete the fragment",
+          `${source}: no anchor {# compose:${anchor} #} found in any source ` +
+            "file - the contribution has nowhere to splice; add the marker " +
+            "line to a skeleton file, or remove the contribution (delete " +
+            "the fragment or drop the manifest data feeding it)",
         );
       }
     }
   }
   for (const [anchor, [source, logical]] of sortedByKey(anchorOwner)) {
-    if (!fragments.has(anchor)) {
-      errors.push(
-        `templates/${source}/${logical}: anchor '${anchor}' has no contributing ` +
-          `fragments - remove the marker or add ${FRAGMENTS_DIR}/${anchor}${JINJA_SUFFIX} ` +
-          "to a module",
-      );
-    }
+    if ((contributions.get(anchor)?.length ?? 0) > 0) continue;
+    const dataHint =
+      anchor in DATA_ANCHORS ? `, or declare the manifest data (${DATA_ANCHORS[anchor].data})` : "";
+    errors.push(
+      `templates/${source}/${logical}: anchor '${anchor}' has no ` +
+        `contributions - remove the marker or add ${FRAGMENTS_DIR}/${anchor}${JINJA_SUFFIX} ` +
+        `to a module${dataHint}`,
+    );
   }
   if (errors.length > 0) return errors;
 
@@ -275,13 +649,10 @@ function spliceFragments(
         rebuilt.push(line);
         continue;
       }
-      const spliced = Buffer.concat(
-        (fragments.get(anchor) as [string, Buffer][]).flatMap(([module, body]) => [
-          Buffer.from(`{% if ${gates.get(module)} %}`),
-          body,
-          Buffer.from("{% endif %}"),
-        ]),
-      );
+      const spliced = Buffer.concat([
+        ...(contributions.get(anchor.name) as Contribution[]).map(({ text }) => text),
+        Buffer.from(anchor.trailing),
+      ]);
       rebuilt.push(spliced);
     }
     entry.data = joinLines(rebuilt);
@@ -325,6 +696,14 @@ export function build(): Map<string, Entry> {
     );
   }
 
+  let manifests: ModuleManifest[];
+  try {
+    manifests = loadManifests();
+  } catch (error) {
+    die(`error: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  const manifestByModule = new Map(manifests.map((manifest) => [manifest.module, manifest]));
+
   const errors: string[] = [];
   const files = new Map<string, SourcedEntry>();
   const fragments = new Map<string, [string, Buffer][]>();
@@ -345,7 +724,7 @@ export function build(): Map<string, Entry> {
 
   for (const module of MODULE_ORDER) {
     const folder = join(SRC, module);
-    const manifest = loadManifest(module);
+    const manifest = manifestByModule.get(module) as ModuleManifest;
     const gate = gateExpression(module, manifest);
     gates.set(module, gate);
     const dirs = [...(manifest.gate_dirs ?? [])];
@@ -398,7 +777,99 @@ export function build(): Map<string, Entry> {
     }
   }
 
-  errors.push(...spliceFragments(files, fragments, gates));
+  // Route every fragment and data generator into per-anchor contributions.
+  const contributions = new Map<string, Contribution[]>();
+  const addContribution = (anchor: string, contribution: Contribution) => {
+    const list = contributions.get(anchor) ?? [];
+    list.push(contribution);
+    contributions.set(anchor, list);
+  };
+  const gateOf: GateOf = (module) => {
+    const gate = gates.get(module);
+    if (gate === undefined) {
+      throw new Error(`no gate for module '${module}' - it is not in MODULE_ORDER`);
+    }
+    return gate;
+  };
+  const wrapFragment = (anchor: string, module: string, body: Buffer): Contribution => ({
+    order: MODULE_ORDER.indexOf(module),
+    source: `templates/${module}/${FRAGMENTS_DIR}/${anchor}${JINJA_SUFFIX}`,
+    text: Buffer.concat([
+      Buffer.from(`{% if ${gateOf(module)} %}`),
+      body,
+      Buffer.from("{% endif %}"),
+    ]),
+  });
+
+  // A dependabot-carrying module lands in the managed AGENTS.md Toolchain
+  // section's audience; without an agents-toolchain fragment its bullets
+  // would just silently be missing.
+  const agentsToolchainModules = new Set(
+    (fragments.get("agents-toolchain") ?? []).map(([module]) => module),
+  );
+  for (const manifest of manifests) {
+    if (manifest.dependabot && !agentsToolchainModules.has(manifest.module)) {
+      errors.push(
+        `templates/${manifest.module}/${MANIFEST_NAME} declares dependabot but ` +
+          `templates/${manifest.module}/${FRAGMENTS_DIR}/agents-toolchain${JINJA_SUFFIX} ` +
+          "is missing - AGENTS.md's Toolchain section would silently skip the " +
+          "module; add the fragment with its toolchain bullets",
+      );
+    }
+  }
+
+  for (const [anchor, spec] of Object.entries(DATA_ANCHORS)) {
+    const fromFiles = fragments.get(anchor) ?? [];
+    fragments.delete(anchor);
+    const consumed: [string, Buffer][] = [];
+    for (const [module, body] of fromFiles) {
+      const path = `templates/${module}/${FRAGMENTS_DIR}/${anchor}${JINJA_SUFFIX}`;
+      const manifest = manifestByModule.get(module) as ModuleManifest;
+      if (spec.kind === "reject" || (spec.kind === "coexist" && spec.covered(manifest))) {
+        errors.push(
+          `${path}: the composer generates this module's '${anchor}' ` +
+            `contribution from the module manifests (${spec.data}); delete ` +
+            `the fragment and declare the data in templates/${module}/${MANIFEST_NAME}`,
+        );
+      } else if (spec.kind === "consume") {
+        if (body.length === 0 || body[body.length - 1] !== 0x0a) {
+          errors.push(
+            `${path}: the fragment must end with a newline (the '${anchor}' ` +
+              "generator closes each contribution with '{% endif -%}' on the " +
+              "following line)",
+          );
+        } else {
+          consumed.push([module, body]);
+        }
+      } else {
+        addContribution(anchor, wrapFragment(anchor, module, body));
+      }
+    }
+    try {
+      const generated =
+        spec.kind === "consume"
+          ? spec.generate({ manifests, gateOf, fragments: consumed })
+          : spec.generate({ manifests, gateOf });
+      for (const contribution of generated) addContribution(anchor, contribution);
+    } catch (error) {
+      if (error instanceof GeneratorValidationError) {
+        errors.push(`anchor '${anchor}': ${error.message}`);
+      } else {
+        throw new Error(`anchor '${anchor}': unexpected generator failure`, { cause: error });
+      }
+    }
+  }
+  for (const [anchor, list] of fragments) {
+    for (const [module, body] of list) {
+      addContribution(anchor, wrapFragment(anchor, module, body));
+    }
+  }
+  for (const [anchor, list] of contributions) {
+    list.sort((a, b) => a.order - b.order);
+    errors.push(...renderedSeparationErrors(anchor, list));
+  }
+
+  errors.push(...spliceContributions(files, contributions));
   if (errors.length > 0) {
     for (const error of errors) console.error(`error: ${error}`);
     process.exit(1);

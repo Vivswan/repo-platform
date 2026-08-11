@@ -18,7 +18,8 @@ import { existsSync, lstatSync, readdirSync, readFileSync, readlinkSync } from "
 import { join, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { centralIdentityIssues } from "../.github/scripts/fleet/validate_central_settings.ts";
-import { MODULE_ORDER } from "./compose_template.ts";
+import { dependabotLabels, MODULE_ORDER } from "./compose_template.ts";
+import { loadManifests } from "./module_manifests.ts";
 
 const REPO_ROOT = resolve(import.meta.dir, "..");
 
@@ -432,7 +433,13 @@ function templateLabelRoster(): Label[] {
   const fragment = placeholderJinja(
     normalizeJinja(read("templates/release-please/fragments/settings-labels.jinja"), vars),
   );
+  // The dependabot toolchain labels are spliced in at compose time from the
+  // module manifests; read them from the composer's own derivation.
+  const manifestLabels = dependabotLabels(loadManifests()).map(
+    ({ name, color, description }): Label => ({ name, color, description }),
+  );
   return parseLabels(settings, "settings.yml.jinja").concat(
+    manifestLabels,
     parseLabels(`labels:\n${fragment}`, "settings-labels.jinja"),
   );
 }

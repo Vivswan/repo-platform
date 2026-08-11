@@ -81,7 +81,12 @@ const manifestSchema = z.strictObject({
   // is unrepresentable.
   toolchain: z
     .strictObject({
-      codeql_language: z.string().regex(/^[a-z-]+$/, "must be a lowercase CodeQL language slug"),
+      codeql_language: z
+        .string()
+        .regex(
+          /^[a-z]+(-[a-z]+)*$/,
+          "must be a lowercase CodeQL language slug (dash-separated words)",
+        ),
     })
     .optional(),
   dependabot: z
@@ -92,7 +97,17 @@ const manifestSchema = z.strictObject({
     })
     .optional(),
   gitignore_sources: z.array(singleLine("each gitignore source")).min(1).optional(),
-  lockfiles: z.array(singleLine("each lockfile pattern")).min(1).optional(),
+  // Patterns land inside a Jinja '...' literal in the generated gitleaks
+  // allowlist line, so a single quote would end that literal early.
+  lockfiles: z
+    .array(
+      singleLine("each lockfile pattern").refine((value) => !value.includes("'"), {
+        message:
+          "each lockfile pattern must not contain ' (it lands inside Jinja quotes in the gitleaks allowlist)",
+      }),
+    )
+    .min(1)
+    .optional(),
   pages: z
     .strictObject({
       install: jinjaQuoted("the install command"),
