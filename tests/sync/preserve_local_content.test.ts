@@ -454,8 +454,7 @@ describe("preserve_local_content script", () => {
 // runner); CI's script-tests job skips it, and the always-on CI coverage
 // is upgrade_path_test.sh's recovery leg, which drives the same carry
 // against a real recopy in the upgrade-path job.
-const hasCopier =
-  Bun.spawnSync(["copier", "--version"], { stdout: "pipe", stderr: "pipe" }).exitCode === 0;
+const hasCopier = Bun.which("copier") !== null;
 
 describe.skipIf(!hasCopier)("preserve_local_content end-to-end (copier recopy)", () => {
   test(
