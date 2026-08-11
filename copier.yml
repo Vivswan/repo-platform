@@ -37,6 +37,10 @@ _skip_if_exists:
   - .gitleaks.toml
   # Same story for actionlint ignores.
   - .github/actionlint.yaml
+  # The skills module's starters: plugin identity and the skill catalog are
+  # repo-owned after the first render (repos list their skills there).
+  - .claude-plugin/plugin.json
+  - .claude-plugin/marketplace.json
 
 # Migrations use FROM-version naming (see migrations/run.ts): each script in
 # migrations/ is named for the release it migrates away from, so authoring
@@ -54,6 +58,9 @@ project_slug:
   type: str
   help: Repository / package identifier (kebab-case)
   default: "{{ project_name | lower | replace(' ', '-') }}"
+  # The slug lands in URLs, YAML scalars, and (skills module) kebab-case
+  # plugin names; enforce the contract the help text states.
+  validator: "{% if not (project_slug | regex_search('^[a-z0-9]+(-[a-z0-9]+)*\\Z')) %}project_slug must be kebab-case (lowercase letters and digits, dash-separated){% endif %}"
 
 description:
   type: str
@@ -88,6 +95,7 @@ modules:
     pages - GitHub Pages deploy (root = latest release, /staging/ = main): pages
     release-please - release job on top of all-green + autorelease labels: release-please
     issue-templates - bug/feature issue forms: issue-templates
+    skills - agent skills hosting (plugin manifests, skill validation): skills
     pr-title - Conventional Commit PR title check in the all-green gate: pr-title
     auto-assign - auto-assign issues/PRs/alerts to owner: auto-assign
     fuzzer - nightly fuzz starter with issue filing, replay inputs, auto-close: fuzzer
@@ -202,6 +210,27 @@ nightly_label:
   # deduplicates label names case-insensitively.
   validator: "{% if not (nightly_label | regex_search('^[A-Za-z0-9._][A-Za-z0-9._: -]{0,49}\\Z')) %}nightly_label must be a plain label: letters, digits, ._:- and spaces, not starting with a dash, at most 50 characters{% elif 'fuzzer' in modules and nightly_label | lower == fuzzer_label | lower %}nightly_label must differ from fuzzer_label (GitHub label names are case-insensitive): each stream needs its own tracking label or a green night in one closes the other's open issue{% endif %}"
   when: "{{ 'nightly' in modules }}"
+
+# --- skills module parameter (asked only when it is selected) ---
+# The directory is baked into the managed validate-skills workflow (its
+# trigger paths and its action input) and into the starter manifests'
+# skill paths, so it is asked once here rather than edited in several
+# places after generation.
+
+skills_dir:
+  type: str
+  help: Directory holding this repository's agent skills (relative, no leading ./)
+  default: skills
+  # An unsafe value would point the managed validation (the ci.yml gate job
+  # and the discovery workflow) outside the repo or at the whole checkout,
+  # and the value also lands - tojson-quoted, so quoting is not the concern
+  # - in the discovery workflow's pull_request paths filter, where !, *, ?,
+  # and [ carry glob meaning: a name like 'foo*' would validate one
+  # directory while the workflow triggers on others. The conservative
+  # per-segment charset keeps the filter literal; the parts check rejects
+  # '.' (a leading ./) and '..' segments, which are within the charset.
+  validator: "{% set parts = skills_dir.split('/') %}{% if not (skills_dir | regex_search('^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*\\Z')) or '.' in parts or '..' in parts %}skills_dir must be relative path segments of letters, digits, dots, underscores, or dashes joined by single slashes (no leading ./ or /, no '..', no spaces or glob characters){% endif %}"
+  when: "{{ 'skills' in modules }}"
 
 private:
   type: bool

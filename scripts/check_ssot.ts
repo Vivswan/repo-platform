@@ -1827,6 +1827,24 @@ const rules: Rule[] = [
         });
       }
 
+      // Anchored on the parameter table's row (like the pages cells): a
+      // bare backticked "skills" occurs in the doc for unrelated reasons,
+      // so only the row's Default cell can satisfy this.
+      const skillsDefault = String(asRecord(copierConfig().skills_dir, "skills_dir").default);
+      const skillsCell = mustMatch(
+        handProse("docs/skills.md"),
+        /^\| `skills_dir` \|.+\| ([^|]+) \|$/m,
+        "docs/skills.md",
+        "the skills_dir table row",
+      )[1].trim();
+      if (skillsCell !== `\`${skillsDefault}\``) {
+        mismatches.push({
+          file: "docs/skills.md",
+          expected: `the skills_dir Default cell \`${skillsDefault}\``,
+          got: skillsCell,
+        });
+      }
+
       const settingsProse = handProse("docs/settings.md");
       // Only the two labels the hand prose quotes: the per-toolchain
       // dependabot labels sit in generated dependabot-labels regions

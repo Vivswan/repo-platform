@@ -17,6 +17,7 @@ updates:
       - "/actions/fuzz-issue"
       - "/actions/release-health"
       - "/actions/validate-commit-names"
+      - "/actions/validate-skills"
       - "/actions/validate-template"
     groups:
       actions:
@@ -80,6 +81,17 @@ updates:
   # Dev-only manifest (@types/bun, typescript) for the release-health action.
   - package-ecosystem: "bun"
     directory: "/actions/release-health"
+    schedule:
+      interval: "monthly"
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: "build"
+      include: "scope"
+
+  # Dev-only manifest (@types/bun, typescript) for the validate-skills action.
+  - package-ecosystem: "bun"
+    directory: "/actions/validate-skills"
     schedule:
       interval: "monthly"
     cooldown:

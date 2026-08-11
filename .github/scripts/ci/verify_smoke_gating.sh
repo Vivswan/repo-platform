@@ -87,6 +87,43 @@ else
   test ! -e "$wf/nightly.yml"
 fi
 
+# skills: the repo-owned plugin manifests (generated once, _skip_if_exists),
+# the gating structure job spliced into the managed ci.yml, and the
+# standalone advisory discovery workflow. The skills_dir answer (default
+# "skills"; a row can override it via EXTRA_DATA) lands in the ci.yml job's
+# action input and the discovery workflow's trigger paths. The starter
+# manifests must be real JSON once rendered - nothing else parses rendered
+# .json (the validator only parses YAML) - and python3 is already a
+# smoke-job dependency via pipx/copier.
+skills_dir="skills"
+case "$EXTRA_DATA" in
+  *skills_dir=*) skills_dir="${EXTRA_DATA##*skills_dir=}"; skills_dir="${skills_dir%% *}" ;;
+esac
+if has skills; then
+  test -f /tmp/smoke/.claude-plugin/plugin.json
+  test -f /tmp/smoke/.claude-plugin/marketplace.json
+  python3 -m json.tool /tmp/smoke/.claude-plugin/plugin.json > /dev/null
+  python3 -m json.tool /tmp/smoke/.claude-plugin/marketplace.json > /dev/null
+  # The seeded catalog starts empty; repos add their skills afterwards.
+  present '"skills": []' /tmp/smoke/.claude-plugin/plugin.json
+  # The structure job must render inside the gate AND sit in all-green's
+  # needs; losing either fragment would fail open silently.
+  present_line "  validate-skills:" "$wf/ci.yml"
+  present_line "      - validate-skills" "$wf/ci.yml"
+  present "actions/validate-skills@main" "$wf/ci.yml"
+  present_line "          skills-dir: \"$skills_dir\"" "$wf/ci.yml"
+  # The advisory discovery workflow: network-dependent, outside the gate.
+  test -f "$wf/validate-skills.yml"
+  present "actions/validate-skills@main" "$wf/validate-skills.yml"
+  present "paths: [\"$skills_dir/**\", \".claude-plugin/**\", \".github/workflows/validate-skills.yml\"]" "$wf/validate-skills.yml"
+  present_line "          skills-dir: \"$skills_dir\"" "$wf/validate-skills.yml"
+  present "mode: discovery" "$wf/validate-skills.yml"
+else
+  test ! -e /tmp/smoke/.claude-plugin
+  test ! -e "$wf/validate-skills.yml"
+  absent "validate-skills" "$wf/ci.yml"
+fi
+
 if has settings-sync; then
   test -f /tmp/smoke/.github/settings.yml
   test -f "$wf/settings-sync.yml"

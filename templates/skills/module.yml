@@ -1,0 +1,7 @@
+# yaml-language-server: $schema=../module.schema.json
+# Module manifest (schema and loader: scripts/module_manifests.ts).
+description: agent skills hosting (plugin manifests, skill validation)
+# gate_dirs: output directories gated ONCE at the directory name instead of
+# per-file leaf, matching how copier skips a whole subtree.
+gate_dirs:
+  - .claude-plugin

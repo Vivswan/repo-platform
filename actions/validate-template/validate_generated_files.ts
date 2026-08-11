@@ -131,6 +131,7 @@ const KNOWN_MODULES = new Set([
   "pages",
   "release-please",
   "issue-templates",
+  "skills",
   "pr-title",
   "auto-assign",
   "fuzzer",

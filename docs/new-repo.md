@@ -42,11 +42,12 @@ Copier asks for project name, description, an update **channel** (`latest`
 follows released `templates/vX.Y.Z` build tags and runs migrations;
 `staging` follows every main merge, migrations skipped), a `modules`<!-- BEGIN GENERATED: module-roster (scripts/generate.ts - edit module.yml manifests, not this block) -->
 multiselect (any combination of `agents`, `bun`, `node`, `deno`, `uv`,
-`rust`, `pages`, `release-please`, `issue-templates`, `pr-title`,
+`rust`, `pages`, `release-please`, `issue-templates`, `skills`, `pr-title`,
 `auto-assign`, `fuzzer`, `nightly`, `settings-sync`, `custom-license`),
 follow-up parameters for modules that have them (see
-[docs/pages.md](pages.md), [docs/fuzzer.md](fuzzer.md), and
-[docs/nightly.md](nightly.md)), and visibility.<!-- END GENERATED: module-roster -->
+[docs/pages.md](pages.md), [docs/skills.md](skills.md),
+[docs/fuzzer.md](fuzzer.md), and [docs/nightly.md](nightly.md)), and
+visibility.<!-- END GENERATED: module-roster -->
 Answers are recorded in `.copier-answers.yml`; never delete that file,
 `copier update` depends on it.
 

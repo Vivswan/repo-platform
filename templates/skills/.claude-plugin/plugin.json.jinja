@@ -1,0 +1,12 @@
+{
+  "name": {{ (project_slug ~ "-skills") | tojson }},
+  "displayName": {{ (project_name ~ " Skills") | tojson }},
+  "description": {{ ("Agent skills for " ~ project_name) | tojson }},
+  "author": {
+    "name": {{ github_username | tojson }}
+  },
+  "repository": {{ ("https://github.com/" ~ github_username ~ "/" ~ project_slug) | tojson }},
+  "license": "SEE LICENSE IN LICENSE.md",
+  "keywords": ["agent-skills"],
+  "skills": []
+}

@@ -125,7 +125,7 @@ jobs:
       - uses: oven-sh/setup-bun@v2
       - name: Typecheck repo and action scripts
         run: |
-          for dir in . actions/check-typography actions/fuzz-issue actions/release-health actions/validate-commit-names actions/validate-template; do
+          for dir in . actions/check-typography actions/fuzz-issue actions/release-health actions/validate-commit-names actions/validate-skills actions/validate-template; do
             echo "::group::$dir"
             (cd "$dir" && bun install --frozen-lockfile --silent && bun x tsc -p .)
             echo "::endgroup::"
@@ -202,7 +202,7 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile --silent
       - name: Run .github/scripts and action tests
-        run: bun test ./tests ./actions/fuzz-issue ./actions/release-health ./actions/validate-template
+        run: bun test ./tests ./actions/fuzz-issue ./actions/release-health ./actions/validate-skills ./actions/validate-template
 
   smoke-generate:
     runs-on: ubuntu-latest
@@ -217,7 +217,7 @@ jobs:
           # opt-out (no fleet license rendered) is exercised; every other
           # row covers the default fleet-license render.
           - name: everything
-            modules: "[agents, bun, node, deno, uv, rust, pages, release-please, issue-templates, pr-title, auto-assign, fuzzer, nightly, settings-sync, custom-license]"
+            modules: "[agents, bun, node, deno, uv, rust, pages, release-please, issue-templates, skills, pr-title, auto-assign, fuzzer, nightly, settings-sync, custom-license]"
             private: "false"
             expect_in_pages: |
               setup: bun,node,deno,uv
@@ -228,10 +228,13 @@ jobs:
             private: "false"
           # node and deno each as the sole toolchain: codeql-javascript and
           # the javascript/deno labels must render from the module alone,
-          # without bun in the selection.
+          # without bun in the selection. skills rides on this thin row
+          # with a non-default skills_dir, so the module's dir answer is
+          # exercised end-to-end (the everything row covers the default).
           - name: node-typical
-            modules: "[agents, node, settings-sync]"
+            modules: "[agents, node, skills, settings-sync]"
             private: "false"
+            extra_data: "-d skills_dir=lib/skills"
           # pages rides along as the only real render of a non-bun pages
           # chain end-to-end (the everything row's chain heads with bun).
           - name: deno-typical

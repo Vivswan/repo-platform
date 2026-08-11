@@ -38,6 +38,9 @@ export const MODULE_ORDER = [
   "pages",
   "release-please",
   "issue-templates",
+  // Before pr-title: both feed the ci-gate anchors, and pr-title's
+  // ci-gate-needs fragment is the anchor's deliberate mid-line ending.
+  "skills",
   "pr-title",
   "auto-assign",
   "fuzzer",

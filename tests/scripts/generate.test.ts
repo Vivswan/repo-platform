@@ -274,6 +274,9 @@ describe("docs region builders", () => {
     // Wrap-insensitive: the greedy wrapper may break inside the closing
     // phrase, but the sentence itself must still end the region.
     expect(text.replace(/\n/g, " ")).toEndWith("and visibility.");
+    // The parameter-doc links come from MODULE_PARAM_DOCS, not a hand list.
+    expect(text).toContain("[docs/skills.md](skills.md)");
+    expect(text).toContain("[docs/nightly.md](nightly.md)");
   });
 
   test("gitignoreUpstreamMap maps each module's upstream templates", () => {

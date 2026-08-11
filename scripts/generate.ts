@@ -42,7 +42,12 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { z } from "zod";
-import { loadManifests, type ModuleManifest, manifestSchema } from "./module_manifests.ts";
+import {
+  loadManifests,
+  MODULE_ORDER,
+  type ModuleManifest,
+  manifestSchema,
+} from "./module_manifests.ts";
 
 const REPO_ROOT = resolve(import.meta.dir, "..");
 
@@ -267,6 +272,44 @@ function proseList(items: string[]): string {
   return `${items.slice(0, -1).join(", ")}, and ${items[items.length - 1]}`;
 }
 
+/** Modules whose follow-up copier questions have a dedicated docs/ guide;
+ *  the new-repo roster sentence links each one. A module with parameters
+ *  gets its guide listed here when the guide lands. */
+export const MODULE_PARAM_DOCS: Record<string, string> = {
+  pages: "pages.md",
+  fuzzer: "fuzzer.md",
+  nightly: "nightly.md",
+  skills: "skills.md",
+};
+
+/** The `[docs/<file>](<file>)` links for MODULE_PARAM_DOCS, in MODULE_ORDER,
+ *  each key checked against the module roster and each guide against disk
+ *  so a renamed module or doc fails the generator instead of emitting a
+ *  dead link. */
+function paramDocLinks(): string[] {
+  const links: string[] = [];
+  for (const module of Object.keys(MODULE_PARAM_DOCS)) {
+    if (!MODULE_ORDER.includes(module)) {
+      throw new Error(
+        `MODULE_PARAM_DOCS names '${module}', which is not in MODULE_ORDER - ` +
+          "fix the key in scripts/generate.ts",
+      );
+    }
+  }
+  for (const module of MODULE_ORDER) {
+    const doc = MODULE_PARAM_DOCS[module];
+    if (doc === undefined) continue;
+    if (!existsSync(join(REPO_ROOT, "docs", doc))) {
+      throw new Error(
+        `MODULE_PARAM_DOCS maps '${module}' to docs/${doc}, which does not exist - ` +
+          "fix the mapping in scripts/generate.ts or restore the guide",
+      );
+    }
+    links.push(`[docs/${doc}](${doc})`);
+  }
+  return links;
+}
+
 /** README.md "Modules and channels": the roster bullet (the BEGIN marker
  *  rides on the section heading, so the span opens with the blank line
  *  separating them). */
@@ -289,8 +332,8 @@ export function readmeModuleRoster(manifests: ModuleManifest[]): string[] {
 export function newRepoModuleRoster(manifests: ModuleManifest[]): string[] {
   return wrapProse(
     `multiselect (any combination of ${moduleRoster(manifests)}), follow-up ` +
-      "parameters for modules that have them (see [docs/pages.md](pages.md), " +
-      "[docs/fuzzer.md](fuzzer.md), and [docs/nightly.md](nightly.md)), and visibility.",
+      `parameters for modules that have them (see ${proseList(paramDocLinks())}), ` +
+      "and visibility.",
   );
 }
 
