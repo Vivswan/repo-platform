@@ -92,20 +92,30 @@ else
   test ! -e "$wf/settings-sync.yml"
 fi
 
-# auto-assign: security-events is always granted (static validation of
-# the reusable call); the CodeQL-driven triggers and the code_scanning
-# input follow enable_codeql (= public AND a toolchain module).
+# auto-assign: the issues/PR call grants only issues/PR scopes;
+# security-events rides the separate alerts call, which - with its
+# CodeQL-driven triggers - follows enable_codeql (= public AND a toolchain
+# module) and is absent otherwise. The workflow level grants nothing, so a
+# scope moving back up there fails here.
 if has auto-assign; then
-  present "security-events: write" "$wf/auto-assign.yml"
+  absent "code_scanning:" "$wf/auto-assign.yml"
+  present "reusable-auto-assign.yml" "$wf/auto-assign.yml"
+  present_line "permissions: {}" "$wf/auto-assign.yml"
   if [ "$PRIVATE" != "true" ] && has_codeql_toolchain; then
     present "workflow_run:" "$wf/auto-assign.yml"
     # Alert assignment watches CI completions (the CodeQL jobs run inside
     # CI's gate; a reusable-workflow call creates no separate run to watch).
     present 'workflows: ["CI"]' "$wf/auto-assign.yml"
-    present "code_scanning: true" "$wf/auto-assign.yml"
+    present "reusable-auto-assign-alerts.yml" "$wf/auto-assign.yml"
+    # Exactly once: only the alerts caller job may carry the scope.
+    if [ "$(grep -cF -- "security-events: write" "$wf/auto-assign.yml")" != "1" ]; then
+      echo "::error::gating check failed: 'security-events: write' must appear exactly once (on the alerts caller job) in $wf/auto-assign.yml for modules=$MODULES private=$PRIVATE. Fix the gate in templates/ (or this expectation in verify_smoke_gating.sh)."
+      exit 1
+    fi
   else
     absent "workflow_run:" "$wf/auto-assign.yml"
-    present "code_scanning: false" "$wf/auto-assign.yml"
+    absent "reusable-auto-assign-alerts.yml" "$wf/auto-assign.yml"
+    absent "security-events: write" "$wf/auto-assign.yml"
   fi
 fi
 

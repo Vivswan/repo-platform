@@ -1,18 +1,19 @@
-# Reusable auto-assign. Callers trigger on issues/pull_request (and, on
-# CodeQL-enabled repos, workflow_run watching CI + schedule for code scanning
-# alerts); the caller's event context flows through. A workflow_dispatch with
-# an `issue` input assigns that one issue (or PR - PRs are issues), for items
-# whose creation event fired no workflow. Callers on repos WITHOUT code
-# scanning pass code_scanning: false so a manual dispatch never selects the
-# alert-assignment job there.
+# Reusable auto-assign. Callers trigger on issues/pull_request; the caller's
+# event context flows through. A workflow_dispatch with an `issue` input
+# assigns that one issue (or PR - PRs are issues), for items whose creation
+# event fired no workflow. Code scanning alert assignment lives in
+# reusable-auto-assign-alerts.yml: a reusable-workflow call is statically
+# validated against the permissions of every job in the called file
+# regardless of each job's `if:`, so keeping the alert job out of this file
+# is what lets callers grant security-events only to that call.
 #
 # Who gets assigned: the users on the last `*` entry of the repo's own
 # CODEOWNERS (teams cannot be assignees), falling back to the repo owner.
 # Each repo controls its policy by editing CODEOWNERS.
 #
 # Each job declares the minimum permissions it needs. A called job can only
-# downgrade the caller's token, so every scope below must also appear in the
-# caller template's permissions block - adding a scope here breaks callers
+# downgrade the caller's token, so every scope below must also appear on the
+# calling job in the caller template - adding a scope here breaks callers
 # that have not synced the matching caller update yet.
 
 name: Reusable Auto Assign
@@ -21,7 +22,13 @@ on:
   workflow_call:
     inputs:
       code_scanning:
-        description: Repo has CodeQL code scanning (gates the alert-assignment job)
+        # Callers rendered before the alerts split (main-pinned, not yet
+        # synced) still pass this: their issue/PR assignment keeps working,
+        # but their ALERT assignment pauses until their sync PR merges (only
+        # the new caller calls reusable-auto-assign-alerts.yml). Delete once
+        # every managed repo has synced past the release that ships the
+        # split caller.
+        description: Deprecated no-op, accepted for pre-split callers (see comment above)
         required: false
         type: boolean
         default: true
@@ -210,78 +217,3 @@ jobs:
               assignees
             });
             core.info(`assigned #${issueNumber} to ${assignees.join(', ')}`);
-
-  # Assign open, currently-unassigned code scanning alerts per the CODEOWNERS
-  # policy. No Actions trigger exists for alert creation, so this polls after
-  # CI completes (workflow_run - CodeQL analyzes inside CI's gate) and weekly
-  # (schedule). CI completes on every push, PR, and dispatch run, but only
-  # default-branch pushes and scheduled re-scans produce new alerts, so other
-  # workflow_run deliveries are filtered out. Idempotent: alerts that already
-  # have an assignee are skipped. Code scanning only exists on a public repo
-  # (or GHAS), matching the codeql workflow's private guard.
-  assign-code-scanning:
-    if: >-
-      inputs.code_scanning &&
-      github.event.repository.private == false &&
-      github.event_name != 'issues' &&
-      github.event_name != 'pull_request' &&
-      (github.event_name != 'workflow_run' ||
-        (github.event.workflow_run.conclusion == 'success' &&
-          ((github.event.workflow_run.event == 'push' &&
-            github.event.workflow_run.head_branch == github.event.repository.default_branch) ||
-            github.event.workflow_run.event == 'schedule')))
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    permissions:
-      contents: read # CODEOWNERS resolution
-      security-events: write
-    steps:
-      - name: Assign open alerts to code owners
-        uses: actions/github-script@v9
-        with:
-          script: |
-            const owner = context.repo.owner;
-            const repo = context.repo.repo;
-            // Users on the last `*` entry of CODEOWNERS; the repo owner when
-            // there is no usable entry or no file.
-            async function resolveAssignees() {
-              for (const path of ['.github/CODEOWNERS', 'CODEOWNERS', 'docs/CODEOWNERS']) {
-                let data;
-                try {
-                  ({ data } = await github.rest.repos.getContent({ owner, repo, path }));
-                } catch (error) {
-                  if (error.status === 404) continue;
-                  throw error;
-                }
-                const text = Buffer.from(data.content, 'base64').toString('utf8');
-                let owners = null;
-                for (const line of text.split('\n')) {
-                  const entry = line.trim();
-                  if (!entry || entry.startsWith('#')) continue;
-                  const [pattern, ...rest] = entry.split(/\s+/);
-                  if (pattern === '*') owners = rest; // last * entry wins
-                }
-                const users = (owners ?? [])
-                  .filter((o) => /^@[A-Za-z0-9-]+$/.test(o))
-                  .map((o) => o.slice(1));
-                if (users.length) return users;
-                break;
-              }
-              return [owner];
-            }
-            const assignees = await resolveAssignees();
-            const alerts = await github.paginate(
-              github.rest.codeScanning.listAlertsForRepo,
-              { owner, repo, state: 'open', per_page: 100 }
-            );
-            let assigned = 0;
-            for (const alert of alerts) {
-              if (alert.assignees && alert.assignees.length > 0) continue;
-              await github.request(
-                'PATCH /repos/{owner}/{repo}/code-scanning/alerts/{alert_number}',
-                { owner, repo, alert_number: alert.number, assignees }
-              );
-              core.info(`assigned alert #${alert.number} to ${assignees.join(', ')}`);
-              assigned++;
-            }
-            core.info(`assigned ${assigned} of ${alerts.length} open alert(s)`);

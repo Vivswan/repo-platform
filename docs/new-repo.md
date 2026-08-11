@@ -101,8 +101,9 @@ own checks:
   Registering `REPO_PLATFORM_TOKEN` as a *Dependabot* secret is recommended:
   it lets the fix commit re-run CI (a fine-grained token scoped to that one
   repo's Contents:RW is enough; do not put the fleet PAT in a downstream
-  repo). Without the secret every fixed PR needs a close/reopen for its
-  checks to appear.
+  repo). Without the secret the push cannot re-trigger checks, so the job
+  posts a PR comment and a run warning saying so; close/reopen the PR to
+  re-run its checks, or register the token.
 - with the agents module: a repo-owned `copilot-setup-steps.yml` starter
   (environment setup for the Copilot coding agent), prefilled with installs
   for the selected toolchains.
