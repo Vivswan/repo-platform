@@ -246,6 +246,36 @@ jobs:
             echo "::error::Release PR is behind ${GITHUB_BASE_REF} (tip ${tip}); its version and changelog would miss commits already on ${GITHUB_BASE_REF}. Do not merge; release-please refreshes the PR after the next green run on ${GITHUB_BASE_REF}."
             exit 1
           fi
+
+  # Early, visible release gating: fails the release PR while an open issue
+  # carries the fuzz-tracking or release-blocker label, or an open Dependabot
+  # alert reaches the severity threshold. This check can go stale (an issue
+  # opened after the PR turned green re-runs nothing here), so the release
+  # path re-runs the same action as the authoritative pre-flight before
+  # cutting a release. The skip lives on the STEP: all-green treats a
+  # skipped needed job as failure.
+  release-health:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # vulnerability-alerts read is the Dependabot alerts API key
+    # (security-events covers code scanning only); where the token cannot
+    # see alerts, the action's graceful degradation turns the security gate
+    # into a skipped check instead of a failure.
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
+      vulnerability-alerts: read
+    steps:
+      - uses: {{ github_username }}/repo-platform/actions/release-health@{{ uses_ref }}
+        if: github.event_name == 'pull_request' && startsWith(github.head_ref, 'release-please--')
+        with:
+          mode: pull-request
+{%- if 'fuzzer' in modules %}
+          fuzz-label: {{ fuzzer_label | tojson }}
+{%- endif %}
+        env:
+          GH_TOKEN: {% raw %}${{ secrets.GITHUB_TOKEN }}{% endraw %}
 {% endif %}{% if 'pr-title' in modules %}
   # Conventional Commit PR title, checked inside the gate so branch
   # protection blocks on it. PRs are squash-merged, so the PR title becomes
@@ -284,6 +314,7 @@ jobs:
 {% if 'bun' in modules %}{% if enable_codeql %}      - codeql-javascript
 {% endif %}{% endif %}{% if 'uv' in modules %}{% if enable_codeql %}      - codeql-python
 {% endif %}{% endif %}{% if 'release-please' in modules %}      - release-freshness
+      - release-health
 {% endif %}{% if 'pr-title' in modules %}      - pr-title{% endif %}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -323,6 +354,10 @@ jobs:
       packages: write
       id-token: write
       attestations: write
+      # The release-health pre-flight (in the managed release-please.yml)
+      # reads open issues and Dependabot alerts through this ceiling.
+      issues: read
+      vulnerability-alerts: read
     uses: ./.github/workflows/release.yml
     secrets: inherit
 {% endif %}
