@@ -30,8 +30,14 @@
 //
 // --self: validate repo-platform itself. Skips the registration-file check
 // (the template repo is not generated from itself, so it has no
-// .copier-answers.yml / .repo-platform.yml); all other checks apply.
+// .copier-answers.yml / .repo-platform.yml), and skips gitignored paths in
+// the per-file walk: the operator checkout carries gitignored working
+// state (agent worktrees with in-progress rebases, the composed template/
+// output) that is not the repository's content. Client renders keep the
+// full walk - they are validated as plain trees, often before any git
+// init, and everything in them is content. All other checks apply.
 
+import { spawnSync } from "node:child_process";
 import { lstatSync, readdirSync, readFileSync } from "node:fs";
 import { extname, join, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
@@ -190,16 +196,46 @@ function isRegularFile(path: string): boolean {
   }
 }
 
-/** All regular files below root, sorted, skipping SKIP_DIRS. */
-function walk(root: string): string[] {
+/** Untracked-and-ignored paths under `root`, from one `git ls-files
+ *  --others --ignored --directory` pre-pass: `dirs` are ignored
+ *  directories (reported collapsed, so the walk can prune them without
+ *  ever descending - .claude/worktrees/ holds whole checkouts), `files`
+ *  are individually ignored files. null when git cannot answer - no git
+ *  on PATH, or root is not a git checkout - which is the honest reading
+ *  of a plain tree: nothing is ignored. Only --self consults this (see
+ *  the header). */
+function gitIgnored(root: string): { dirs: Set<string>; files: Set<string> } | null {
+  const proc = spawnSync(
+    "git",
+    ["-C", root, "ls-files", "-z", "--others", "--ignored", "--exclude-standard", "--directory"],
+    { encoding: "utf-8", maxBuffer: 64 * 1024 * 1024 },
+  );
+  if (proc.error || proc.status !== 0) return null;
+  const dirs = new Set<string>();
+  const files = new Set<string>();
+  for (const entry of proc.stdout.split("\0")) {
+    if (entry === "") continue;
+    if (entry.endsWith("/")) dirs.add(entry.slice(0, -1));
+    else files.add(entry);
+  }
+  return { dirs, files };
+}
+
+/** All regular files below root, sorted, skipping SKIP_DIRS and (when
+ *  `ignored` is given) gitignored paths - directories are pruned before
+ *  descent. */
+function walk(root: string, ignored: ReturnType<typeof gitIgnored> = null): string[] {
   const found: string[] = [];
   const visit = (rel: string) => {
     for (const name of readdirSync(join(root, rel))) {
       const childRel = rel ? `${rel}/${name}` : name;
       if (SKIP_DIRS.has(name)) continue;
       const stat = lstatSync(join(root, childRel));
-      if (stat.isDirectory() && !stat.isSymbolicLink()) visit(childRel);
-      else if (stat.isFile() && !stat.isSymbolicLink()) found.push(childRel);
+      if (stat.isDirectory() && !stat.isSymbolicLink()) {
+        if (!ignored?.dirs.has(childRel)) visit(childRel);
+      } else if (stat.isFile() && !stat.isSymbolicLink()) {
+        if (!ignored?.files.has(childRel)) found.push(childRel);
+      }
     }
   };
   visit("");
@@ -327,7 +363,7 @@ function main(): number {
   }
 
   // 3 + 4. YAML parses; no conflict markers
-  for (const rel of walk(root)) {
+  for (const rel of walk(root, selfMode ? gitIgnored(root) : null)) {
     const path = join(root, rel);
     const suffix = extname(rel);
     if (suffix === ".yml" || suffix === ".yaml") {

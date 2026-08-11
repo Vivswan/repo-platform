@@ -42,10 +42,25 @@ afterAll(() => {
 });
 
 /** Writes BASELINE plus `extra` into a fresh temp repo and runs the
- *  validator against it, with any extra CLI `args` (e.g. --self). */
+ *  validator against it, with any extra CLI `args` (e.g. --self).
+ *  `opts.gitInit` makes the tree a real git checkout first, so the --self
+ *  gitignore skip has ignore rules to consult; `opts.gitAddForce`
+ *  force-tracks paths despite matching an ignore pattern. */
+function gitFreeEnv(): Record<string, string> {
+  // Hook-driven runs (husky pre-commit) export GIT_DIR/GIT_INDEX_FILE, which
+  // would make the spawned validator's git calls resolve the enclosing repo
+  // instead of the scratch tree (or lack thereof).
+  const env = { ...process.env } as Record<string, string>;
+  for (const key of Object.keys(env)) {
+    if (key.startsWith("GIT_")) delete env[key];
+  }
+  return env;
+}
+
 function runValidator(
   extra: Record<string, string> = {},
   args: string[] = [],
+  opts: { gitInit?: boolean; gitAddForce?: string[] } = {},
 ): {
   exitCode: number;
   stdout: string;
@@ -57,7 +72,19 @@ function runValidator(
     mkdirSync(join(root, dirname(rel)), { recursive: true });
     writeFileSync(join(root, rel), content);
   }
-  const result = Bun.spawnSync([process.execPath, VALIDATOR, ...args, root]);
+  if (opts.gitInit) {
+    const init = Bun.spawnSync(["git", "-C", root, "init", "-q"], { env: gitFreeEnv() });
+    if (init.exitCode !== 0) throw new Error(`git init failed: ${init.stderr.toString()}`);
+  }
+  if (opts.gitAddForce?.length) {
+    const add = Bun.spawnSync(["git", "-C", root, "add", "-f", "--", ...opts.gitAddForce], {
+      env: gitFreeEnv(),
+    });
+    if (add.exitCode !== 0) throw new Error(`git add -f failed: ${add.stderr.toString()}`);
+  }
+  const result = Bun.spawnSync([process.execPath, VALIDATOR, ...args, root], {
+    env: gitFreeEnv(),
+  });
   return {
     exitCode: result.exitCode,
     stdout: result.stdout.toString(),
@@ -359,6 +386,65 @@ describe("base checks shape", () => {
     });
     expect(exitCode).toBe(1);
     expect(stderr).toContain("no `typography` job");
+  });
+});
+
+describe("gitignored paths in self mode", () => {
+  // The operator checkout carries gitignored working state (agent
+  // worktrees with in-progress rebases, composed template/ output) that a
+  // --self walk must not fail on; client renders are plain trees where
+  // everything is content.
+  const IGNORED_TREE: Record<string, string> = {
+    ".gitignore": `${BASELINE[".gitignore"]}.claude/worktrees/\n`,
+    ".claude/worktrees/agent-x/broken.yml": "a: [1, 2\n",
+    ".claude/worktrees/agent-x/conflicted.md": `${"<".repeat(7)} ours\ntheirs\n${"=".repeat(7)}\n`,
+  };
+
+  test("--self skips gitignored paths in a git checkout", () => {
+    const { exitCode, stderr } = runValidator(IGNORED_TREE, ["--self"], { gitInit: true });
+    expect(stderr).toBe("");
+    expect(exitCode).toBe(0);
+  });
+
+  test("--self on a plain tree (no git) still scans everything", () => {
+    const { exitCode, stderr } = runValidator(IGNORED_TREE, ["--self"]);
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain(".claude/worktrees/agent-x/broken.yml: does not parse as YAML");
+  });
+
+  test("a managed render's walk ignores no paths even in a git checkout", () => {
+    const { exitCode, stderr } = runValidator(IGNORED_TREE, [], { gitInit: true });
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain(".claude/worktrees/agent-x/broken.yml: does not parse as YAML");
+    expect(stderr).toContain("conflicted.md: contains unresolved merge-conflict markers");
+  });
+
+  test("--self skips an ignored file while validating its siblings in the same directory", () => {
+    const { exitCode, stderr } = runValidator(
+      {
+        ".gitignore": `${BASELINE[".gitignore"]}vendor/generated.yml\n`,
+        "vendor/generated.yml": "a: [1, 2\n",
+        "vendor/checked.yml": "b: [1, 2\n",
+      },
+      ["--self"],
+      { gitInit: true },
+    );
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain("vendor/checked.yml: does not parse as YAML");
+    expect(stderr).not.toContain("vendor/generated.yml");
+  });
+
+  test("--self still validates a tracked file matching an ignore pattern", () => {
+    const { exitCode, stderr } = runValidator(
+      {
+        ".gitignore": `${BASELINE[".gitignore"]}vendor/generated.yml\n`,
+        "vendor/generated.yml": "a: [1, 2\n",
+      },
+      ["--self"],
+      { gitInit: true, gitAddForce: ["vendor/generated.yml"] },
+    );
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain("vendor/generated.yml: does not parse as YAML");
   });
 });
 
