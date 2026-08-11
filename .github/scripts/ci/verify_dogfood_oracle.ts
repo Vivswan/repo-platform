@@ -1,0 +1,154 @@
+#!/usr/bin/env bun
+// The copier-render oracle for the generated dogfood copies: the
+// dogfood-oracle smoke row renders /tmp/smoke with this repository's own
+// answers (.repo-platform-answers.yml), and this script byte-compares each
+// generated pair's rendered file against the committed copy - proving the
+// TS renderer behind `bun run dogfood` (scripts/render_dogfood.ts +
+// scripts/jinja_subset.ts) agrees with what real copier produces from the
+// same templates and answers.
+//
+// One mechanical normalization before comparing: this repository dogfoods
+// its own reusable workflows by LOCAL path, so the render's
+// `<username>/<slug>/<path>@main` references map to `./<path>`. The scratch
+// build tree's _commit is a bare sha, which the templates' uses_ref
+// preamble pins to main; a render from a release build tag would pin a
+// version instead and fail the comparison loudly - correct, since the
+// committed copies track this repo's own tree (= main).
+//
+// The rendered .copier-answers.yml is checked against the answers file
+// first, so a dogfood-oracle matrix row that drifts from
+// .repo-platform-answers.yml fails here instead of comparing the wrong
+// render.
+//
+// Usage: bun .github/scripts/ci/verify_dogfood_oracle.ts [render-root]
+//        (render-root defaults to /tmp/smoke)
+
+import { existsSync, readFileSync } from "node:fs";
+import { join, resolve } from "node:path";
+import { parse as parseYaml } from "yaml";
+import { PAIRS, parseAnswers } from "../../../scripts/render_dogfood.ts";
+
+const REPO_ROOT = resolve(import.meta.dir, "..", "..", "..");
+
+function fail(message: string): never {
+  console.error(`error: ${message}`);
+  process.exit(1);
+}
+
+function main(): number {
+  const args = process.argv.slice(2);
+  if (args.length > 1) fail(`expected at most one argument (render root), got: ${args.join(" ")}`);
+  const renderRoot = args[0] ?? "/tmp/smoke";
+
+  const answers = parseAnswers(
+    readFileSync(join(REPO_ROOT, ".repo-platform-answers.yml"), "utf-8"),
+    ".repo-platform-answers.yml",
+  );
+
+  // The render must have used this repository's answers, or every
+  // comparison below compares against the wrong project.
+  const recordedPath = join(renderRoot, ".copier-answers.yml");
+  if (!existsSync(recordedPath)) {
+    fail(`${recordedPath} not found - run the dogfood-oracle smoke render first`);
+  }
+  const recorded = parseYaml(readFileSync(recordedPath, "utf-8")) as Record<string, unknown>;
+  const wrongAnswers: string[] = [];
+  const expectRecorded = (key: string, expected: string | boolean) => {
+    const got = recorded[key];
+    if (got !== expected) {
+      wrongAnswers.push(`${key}: expected ${JSON.stringify(expected)}, got ${JSON.stringify(got)}`);
+    }
+  };
+  expectRecorded("project_name", answers.project_name);
+  expectRecorded("github_username", answers.github_username);
+  expectRecorded("private", answers.private);
+  const recordedModules = Array.isArray(recorded.modules) ? recorded.modules.map(String) : [];
+  if (
+    recordedModules.length !== answers.modules.size ||
+    !recordedModules.every((m) => answers.modules.has(m))
+  ) {
+    wrongAnswers.push(
+      `modules: expected [${[...answers.modules].join(", ")}], got [${recordedModules.join(", ")}]`,
+    );
+  }
+  if (wrongAnswers.length > 0) {
+    for (const problem of wrongAnswers) console.error(`${recordedPath}: ${problem}`);
+    fail(
+      "the render's recorded answers do not match .repo-platform-answers.yml - " +
+        "fix ci.yml's dogfood-oracle matrix row",
+    );
+  }
+
+  // The local-path dogfood rewrite (the same mapping renderJinjaFile bakes
+  // into the committed copies), applied to copier's remote-form output.
+  // Deliberately broader than jinja_subset's uses_ref rewrite: it matches
+  // rendered VALUES, not template expressions, and only the @main pin - a
+  // render pinned at anything else stays remote-form and fails the diff
+  // loudly rather than being silently localized.
+  const escapeRe = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const localize = (text: string) =>
+    text.replace(
+      new RegExp(
+        `${escapeRe(answers.github_username)}/${escapeRe(answers.project_slug)}/([^\\s@]+)@main`,
+        "g",
+      ),
+      "./$1",
+    );
+
+  let failures = 0;
+  let compared = 0;
+  const skipped: string[] = [];
+  for (const pair of PAIRS) {
+    const renderedPath = join(renderRoot, pair.repo);
+    const committedPath = join(REPO_ROOT, pair.repo);
+    const renderedExists = existsSync(renderedPath);
+    const committedExists = existsSync(committedPath);
+    if (!renderedExists || !committedExists) {
+      if (renderedExists !== committedExists) {
+        console.error(
+          `${pair.repo}: ${renderedExists ? "copier rendered it but no committed copy exists" : "committed copy exists but copier did not render it"} ` +
+            "- the answers, the matrix row, and the template's filename gate disagree",
+        );
+        failures++;
+      } else {
+        // Both sides agree the pair's filename gate is false; nothing to
+        // byte-compare, but say so instead of counting it as compared.
+        skipped.push(pair.repo);
+      }
+      continue;
+    }
+    compared++;
+    const rendered = localize(readFileSync(renderedPath, "utf-8"));
+    const committed = readFileSync(committedPath, "utf-8");
+    if (rendered === committed) continue;
+    const renderedLines = rendered.split("\n");
+    const committedLines = committed.split("\n");
+    const max = Math.max(renderedLines.length, committedLines.length);
+    for (let i = 0; i < max; i++) {
+      if (renderedLines[i] !== committedLines[i]) {
+        console.error(
+          `${pair.repo}: line ${i + 1} differs from the copier render of ${pair.tpl}\n` +
+            `  copier:    ${JSON.stringify(renderedLines[i] ?? "<end of file>")}\n` +
+            `  committed: ${JSON.stringify(committedLines[i] ?? "<end of file>")}`,
+        );
+        break;
+      }
+    }
+    failures++;
+  }
+  if (failures > 0) {
+    console.error(
+      `dogfood oracle: ${failures} of ${PAIRS.length} pairs disagree with the copier render`,
+    );
+    return 1;
+  }
+  if (skipped.length > 0) {
+    console.log(`skipped (absent on both sides, gate false): ${skipped.join(", ")}`);
+  }
+  console.log(
+    `dogfood oracle: ${compared} of ${PAIRS.length} pairs compared, all match the copier render byte-for-byte`,
+  );
+  return 0;
+}
+
+process.exit(main());

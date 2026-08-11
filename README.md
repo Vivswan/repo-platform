@@ -121,8 +121,8 @@ each fixed PR needs a close/reopen for its checks to appear).
 
 | Path | Purpose |
 |---|---|
-| `templates/` | SOURCE of the template: one folder per module plus `base/`; shared files composed via `{# compose:<anchor> #}` markers + per-module `fragments/` |
-| `copier.yml` | Questions + module choices (hand-maintained; standards-only, project skeletons come from `uv init` / `bun init`) |
+| `templates/` | SOURCE of the template: one folder per module (each with a `module.yml` manifest, the source of module identity) plus `base/`; shared files composed via `{# compose:<anchor> #}` markers filled from per-module `fragments/` or generated from manifest data |
+| `copier.yml` | Questions (module choices and toolchain defaults are generated regions fed by the `templates/<module>/module.yml` manifests; standards-only, project skeletons come from `uv init` / `bun init`) |
 | `repos.yml` | Fleet config: which repos are managed (wildcard + exclude) and which channel each follows |
 | `settings/` | Central settings home: `defaults.yml` (shared baseline) + `repos/<name>.yml` per repo ([docs](docs/settings.md)) |
 | `.github/workflows/sync-repos.yml` | Push sync fan-out: release + weekly cron + dispatch, parallel matrix legs, one per repo |

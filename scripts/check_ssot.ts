@@ -1,8 +1,13 @@
 #!/usr/bin/env bun
 // Single-source-of-truth drift checker: facts this repo intentionally states
-// in more than one place (module/channel enums, dogfooded template
-// counterparts, settings/label rosters, doc-quoted constants) are compared
-// here so drift fails CI instead of rotting silently.
+// in more than one INDEPENDENTLY-authored place (channel enums, the
+// hand-written module-roster sites, dogfooded template counterparts,
+// settings/label rosters, doc-quoted constants) are compared here so drift
+// fails CI instead of rotting silently. Copies GENERATED from the module
+// manifests (copier.yml's regions, KNOWN_MODULES, the docs regions, the
+// dogfood copies) are NOT compared here: `bun run generate:check` and
+// `bun run dogfood:check` prove the generators ran, and re-checking
+// generator output against generator input would pass vacuously.
 //
 // Structure: a flat list of named rules, each returning mismatches. Every
 // grep-shaped extraction goes through mustMatch(), so a rule whose anchor
@@ -20,9 +25,10 @@ import { existsSync, lstatSync, readdirSync, readFileSync, readlinkSync } from "
 import { join, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { centralIdentityIssues } from "../.github/scripts/fleet/validate_central_settings.ts";
-import { dependabotLabels, MODULE_ORDER } from "./compose_template.ts";
+import { dependabotLabels } from "./compose_template.ts";
 import { type JinjaVars, normalizeJinja, placeholderJinja } from "./jinja_subset.ts";
 import { loadManifests } from "./module_manifests.ts";
+import { parseAnswers } from "./render_dogfood.ts";
 
 const REPO_ROOT = resolve(import.meta.dir, "..");
 
@@ -73,6 +79,48 @@ export const ALLOWED_MULTI_REFS: Record<string, string[]> = {};
 
 function read(rel: string): string {
   return readFileSync(join(REPO_ROOT, rel), "utf-8");
+}
+
+/** A markdown doc with its generated regions removed, so a doc-quoted
+ *  constant must live in HAND prose to satisfy a rule: a value inside a
+ *  generated region has the manifests as its author (generate:check
+ *  polices those). Markers are parsed pairwise - a duplicate BEGIN, a
+ *  mismatched name, a dangling END, or an unclosed region all throw. */
+export function stripGeneratedRegions(text: string, where: string): string {
+  const marker = /<!-- (BEGIN|END) GENERATED: ([a-z0-9-]+)[^>]*-->/g;
+  let out = "";
+  let cursor = 0;
+  let open: { name: string; at: number } | null = null;
+  for (const match of text.matchAll(marker)) {
+    const [full, kind, name] = match;
+    if (kind === "BEGIN") {
+      if (open) {
+        throw new Error(
+          `${where}: generated region '${open.name}' is still open where '${name}' begins`,
+        );
+      }
+      open = { name, at: match.index };
+      out += text.slice(cursor, match.index);
+      cursor = match.index;
+    } else {
+      if (!open) throw new Error(`${where}: END marker for '${name}' has no matching BEGIN`);
+      if (open.name !== name) {
+        throw new Error(`${where}: region '${open.name}' is closed by END '${name}'`);
+      }
+      open = null;
+      cursor = match.index + full.length;
+    }
+  }
+  if (open) throw new Error(`${where}: generated region '${open.name}' is never closed`);
+  out += text.slice(cursor);
+  if (out.includes("GENERATED:")) {
+    throw new Error(`${where}: malformed generated-region markers remain after stripping`);
+  }
+  return out;
+}
+
+function handProse(rel: string): string {
+  return stripGeneratedRegions(read(rel), rel);
 }
 
 /** Anchor extraction that fails loudly: a missing match means the fact this
@@ -247,6 +295,22 @@ function templateCi(): Record<string, unknown> {
 
 function ciJobs(ci: Record<string, unknown>, where: string): Record<string, unknown> {
   return asRecord(ci.jobs, `${where} jobs`);
+}
+
+/** The named smoke-generate matrix row; a missing row throws (a rule keyed
+ *  on a row must fail loudly when the row is renamed or deleted). */
+function smokeMatrixRow(name: string): Record<string, unknown> {
+  const smoke = asRecord(ciJobs(repoCi(), "ci.yml")["smoke-generate"], "smoke-generate");
+  const matrix = asRecord(asRecord(smoke.strategy, "strategy").matrix, "matrix");
+  const rows = (matrix.include as Record<string, unknown>[]) ?? [];
+  const row = rows.find((r) => r.name === name);
+  if (!row) throw new Error(`ci.yml: smoke-generate has no '${name}' matrix row`);
+  return row;
+}
+
+/** A row's `modules` value (a YAML list serialized as a string). */
+function smokeRowModules(row: Record<string, unknown>): string[] {
+  return (parseYaml(String(row.modules)) as unknown[]).map(String);
 }
 
 /** All non-directory paths below `rel` (repo-relative), sorted; skips
@@ -442,58 +506,30 @@ export function pinMismatches(pins: Pin[], allowed: Record<string, string[]>): M
 
 const rules: Rule[] = [
   {
+    // The module roster's independently-authored sites, compared against
+    // the manifests (loadManifests walks MODULE_ORDER, so the hand-ordered
+    // list and the manifest set share one spine; the loader already fails
+    // on a listed module without a folder). copier.yml's choices,
+    // KNOWN_MODULES, and the doc rosters are generated FROM the manifests
+    // and are generate:check's job, not this rule's.
     name: "module-list",
     run: () => {
       const mismatches: Mismatch[] = [];
-      const reference = copierChoices("modules");
+      const reference = loadManifests().map((m) => m.module);
 
-      mismatches.push(
-        ...setMismatch("scripts/module_manifests.ts MODULE_ORDER", reference, MODULE_ORDER),
-      );
-
-      const vgf = read("actions/validate-template/validate_generated_files.ts");
-      const known = mustMatch(
-        vgf,
-        /const KNOWN_MODULES = new Set\(\[([\s\S]*?)\]\)/,
-        "validate_generated_files.ts",
-        "KNOWN_MODULES",
-      )[1];
-      const knownNames = [...known.matchAll(/"([^"]+)"/g)].map((m) => m[1]);
-      mismatches.push(
-        ...setMismatch(
-          "actions/validate-template/validate_generated_files.ts KNOWN_MODULES",
-          reference,
-          knownNames,
-        ),
-      );
-
+      // The filesystem side of MODULE_ORDER: the loader catches a listed
+      // module without a templates/ folder, this catches a folder no
+      // manifest claims.
       const dirs = readdirSync(join(REPO_ROOT, "templates")).filter(
         (name) => name !== "base" && lstatSync(join(REPO_ROOT, "templates", name)).isDirectory(),
       );
       mismatches.push(...setMismatch("templates/ module directories", reference, dirs));
 
-      const smoke = asRecord(ciJobs(repoCi(), "ci.yml")["smoke-generate"], "smoke-generate");
-      const include = asRecord(smoke.strategy, "strategy").matrix as Record<string, unknown>;
-      const rows = (asRecord(include, "matrix").include as Record<string, unknown>[]) ?? [];
-      const everything = rows.find((row) => row.name === "everything");
-      if (!everything) throw new Error("ci.yml: smoke-generate has no 'everything' matrix row");
-      const everyModules = (parseYaml(String(everything.modules)) as unknown[]).map(String);
+      const everyModules = smokeRowModules(smokeMatrixRow("everything"));
       mismatches.push(
         ...setMismatch("ci.yml smoke-generate 'everything' row", reference, everyModules),
       );
 
-      // The two docs enumerate the roster in one anchored sentence; compare
-      // the backticked names in that region as a set. A bare text.includes()
-      // would pass on module names that appear anywhere else in the doc.
-      const docRosters: [string, RegExp][] = [
-        ["README.md", /Modules \(pick any combination\):([\s\S]*?)\. /],
-        ["docs/new-repo.md", /any combination of([\s\S]*?)\)/],
-      ];
-      for (const [doc, anchor] of docRosters) {
-        const region = mustMatch(read(doc), anchor, doc, "the module roster")[1];
-        const listed = [...region.matchAll(/`([a-z-]+)`/g)].map((m) => m[1]);
-        mismatches.push(...setMismatch(`${doc} module roster`, reference, listed));
-      }
       const gating = read(".github/scripts/ci/verify_smoke_gating.sh");
       for (const module of reference) {
         if (!gatesOnModule(gating, module)) {
@@ -503,6 +539,40 @@ const rules: Rule[] = [
             got: "none (comments and unrelated substrings do not count)",
           });
         }
+      }
+      return mismatches;
+    },
+  },
+
+  {
+    // ci.yml's dogfood-oracle smoke row and .repo-platform-answers.yml are
+    // two independently-authored statements of this repository's own module
+    // selection and visibility. The oracle step byte-compares real copier
+    // output rendered from the ROW against copies generated from the
+    // ANSWERS, so a drifted row would make it test the wrong render (the
+    // oracle script re-checks the recorded answers at run time; this rule
+    // catches the drift before CI spends a render on it).
+    name: "dogfood-oracle-row",
+    run: () => {
+      const mismatches: Mismatch[] = [];
+      const answers = parseAnswers(
+        read(".repo-platform-answers.yml"),
+        ".repo-platform-answers.yml",
+      );
+      const row = smokeMatrixRow("dogfood-oracle");
+      mismatches.push(
+        ...setMismatch(
+          "ci.yml smoke-generate 'dogfood-oracle' row modules",
+          [...answers.modules],
+          smokeRowModules(row),
+        ),
+      );
+      if (String(row.private) !== String(answers.private)) {
+        mismatches.push({
+          file: "ci.yml smoke-generate 'dogfood-oracle' row",
+          expected: `private: "${answers.private}" (.repo-platform-answers.yml)`,
+          got: `private: "${String(row.private)}"`,
+        });
       }
       return mismatches;
     },
@@ -795,6 +865,10 @@ const rules: Rule[] = [
         "bun run dogfood:check",
         "bun .github/scripts/fleet/repos_registry.ts validate",
         "bun actions/validate-template/validate_generated_files.ts --self .",
+        // The copier-render oracle for the generated dogfood copies: its
+        // only home is a step of the smoke-generate job (dogfood-oracle
+        // row), so losing the step would fail the gate open silently.
+        "bun .github/scripts/ci/verify_dogfood_oracle.ts",
       ]) {
         if (!gatingLines.has(required)) {
           mismatches.push({
@@ -812,9 +886,11 @@ const rules: Rule[] = [
     // Most dogfooded copies (.editorconfig, release-please-config.json,
     // CODE_OF_CONDUCT.md, CODEOWNERS, auto-assign.yml,
     // dependabot-bun-lockfile.yml) are GENERATED from their templates by
-    // scripts/render_dogfood.ts and byte-checked by `bun run dogfood:check`,
-    // so they need no comparison here. This rule keeps only the pairs
-    // generation cannot own: the prefix files, whose repo-specific tails
+    // scripts/render_dogfood.ts, byte-checked by `bun run dogfood:check`,
+    // and byte-compared against a REAL copier render by ci.yml's
+    // dogfood-oracle smoke row (verify_dogfood_oracle.ts), so they need no
+    // comparison here. This rule keeps only the pairs generation cannot
+    // own: the prefix files, whose repo-specific tails
     // live below the template's marker, and release-please.yml, whose one
     // recorded divergence (the dogfooded ./actions/release-health checkout)
     // needs semantic comparison with an excuse.
@@ -1502,17 +1578,16 @@ const rules: Rule[] = [
   },
 
   {
+    // reusable-pages.yml's hand-written token grammar against the manifests'
+    // pages declarations. copier.yml's pages_setup validator carries the
+    // same token set but is generated from the manifests (generate:check),
+    // so the workflow's case arm is the one independently-authored copy.
     name: "pages-grammar",
     run: () => {
-      const question = asRecord(copierConfig().pages_setup, "copier.yml pages_setup");
-      const validator = String(question.validator ?? "");
-      const listLiteral = mustMatch(
-        validator,
-        /reject\('in', \[([^\]]+)\]\)/,
-        "copier.yml pages_setup validator",
-        "token whitelist",
-      )[1];
-      const copierTokens = [...listLiteral.matchAll(/'([^']+)'/g)].map((m) => m[1]);
+      const reference = loadManifests()
+        .filter((m) => m.pages !== undefined)
+        .map((m) => m.module)
+        .concat("none");
       const pages = read(".github/workflows/reusable-pages.yml");
       // Anchor on the token-validation case block: the workflow has other
       // case statements whose arms fit the same shape.
@@ -1530,7 +1605,7 @@ const rules: Rule[] = [
       )[1];
       return setMismatch(
         ".github/workflows/reusable-pages.yml setup tokens",
-        copierTokens,
+        reference,
         arm.split("|"),
       );
     },
@@ -1585,7 +1660,7 @@ const rules: Rule[] = [
       }
 
       const floor = String(copierConfig()._min_copier_version);
-      if (!read("docs/new-repo.md").includes(`>= ${floor}`)) {
+      if (!handProse("docs/new-repo.md").includes(`>= ${floor}`)) {
         mismatches.push({
           file: "docs/new-repo.md",
           expected: `the copier floor '>= ${floor}'`,
@@ -1595,7 +1670,7 @@ const rules: Rule[] = [
 
       const fuzzDefault = String(asRecord(copierConfig().fuzzer_label, "fuzzer_label").default);
       for (const doc of ["docs/fuzzer.md", "docs/settings.md"]) {
-        if (!read(doc).includes(`\`${fuzzDefault}\``)) {
+        if (!handProse(doc).includes(`\`${fuzzDefault}\``)) {
           mismatches.push({
             file: doc,
             expected: `the fuzzer_label default \`${fuzzDefault}\``,
@@ -1604,16 +1679,23 @@ const rules: Rule[] = [
         }
       }
 
-      const settingsDoc = read("docs/settings.md");
+      const settingsProse = handProse("docs/settings.md");
+      // Only the two labels the hand prose quotes: the per-toolchain
+      // dependabot labels sit in generated dependabot-labels regions
+      // (generate:check owns those). Name and color must appear in the
+      // exact quoted shape `name` (`color`) / `name` (color `color`) -
+      // a spannable gap would let a wrong hand-written color pass by
+      // matching a backticked color later in the doc.
       const roster = new Map(templateLabelRoster().map((label) => [label.name, label]));
-      for (const name of ["dependencies", "github_actions", "javascript", "python:uv", "rust"]) {
+      for (const name of ["dependencies", "github_actions"]) {
         const label = roster.get(name);
         if (!label) throw new Error(`settings.yml.jinja: label '${name}' vanished - anchor lost`);
-        if (!settingsDoc.includes(`\`${name}\``) || !settingsDoc.includes(`\`${label.color}\``)) {
+        const joint = new RegExp(`\`${name}\` \\((?:color )?\`${label.color}\`\\)`);
+        if (!joint.test(settingsProse)) {
           mismatches.push({
             file: "docs/settings.md",
-            expected: `label \`${name}\` with color \`${label.color}\``,
-            got: "name or color missing",
+            expected: `label \`${name}\` quoted as \`${name}\` (\`${label.color}\`) in hand prose`,
+            got: "missing, reworded, or a different color",
           });
         }
       }
@@ -1621,7 +1703,7 @@ const rules: Rule[] = [
         `labels:\n${placeholderJinja(normalizeJinja(read("templates/fuzzer/fragments/settings-labels.jinja"), jinjaVars()))}`,
         "fuzzer settings-labels.jinja",
       )[0].color;
-      if (!settingsDoc.includes(`\`${fuzzColor}\``)) {
+      if (!settingsProse.includes(`\`${fuzzColor}\``)) {
         mismatches.push({
           file: "docs/settings.md",
           expected: `the fuzz label color \`${fuzzColor}\``,

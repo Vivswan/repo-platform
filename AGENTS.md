@@ -24,8 +24,15 @@ sync secret; the single REPO_PLATFORM_TOKEN PAT lives only here.
   gitignored `template/` for inspection.
 - Composition rules (details in scripts/compose_template.ts's header):
   module files get filename gates, shared files take module contributions
-  via `{# compose:<name> #}` anchors + `fragments/<name>.jinja`, and
-  same-path collisions are errors.
+  via `{# compose:<name> #}` anchors (free-form anchors splice
+  `fragments/<name>.jinja`; list-shaped data anchors - dependabot
+  ecosystems, codeql jobs and gate needs, settings dependabot labels,
+  gitleaks lockfiles - are generated from the module manifests, and per
+  anchor either reject fragment files, coexist with fragments the
+  generator does not cover, or consume fragments as generator input), and
+  same-path collisions are errors. Each `templates/<module>/module.yml`
+  manifest is the single source of module identity
+  (scripts/module_manifests.ts is the loader).
 - Fleet config (which repos, which channel) is `repos.yml`; module
   selection lives in each repo's own `.repo-platform.yml`; central
   settings live in `settings/`. `_skip_if_exists` in copier.yml is the
@@ -35,9 +42,15 @@ sync secret; the single REPO_PLATFORM_TOKEN PAT lives only here.
 
 - GitHub Actions expressions inside `.jinja` workflow files must be wrapped
   in `{% raw %}...{% endraw %}` or jinja eats the `{{ }}`.
-- Never hand-edit generated files (templates/base/.gitignore.jinja, the
-  `templates/{bun,uv,rust}/fragments/gitignore.jinja` fragments); run
-  `bun scripts/build_gitignore.ts`. CI fails on drift.
+- Never hand-edit generated content; edit its source and rerun its
+  generator (CI fails on drift). From the module manifests via
+  `bun run generate`: the marker-fenced regions in copier.yml,
+  validate_generated_files.ts, and the docs. From the templates +
+  `.repo-platform-answers.yml` via `bun run dogfood`: this repo's copies
+  of the files it dogfoods (the pair list is in scripts/render_dogfood.ts).
+  From the manifests' `gitignore_sources` via
+  `bun scripts/build_gitignore.ts`: templates/base/.gitignore.jinja, the
+  per-module `fragments/gitignore.jinja`, and this repo's `.gitignore`.
 - Workflow run blocks longer than a few lines are extracted to TypeScript
   scripts under `.github/scripts/<owner>/`, run with bun; subprocesses use
   argv arrays via `shared/proc.ts`, never shell strings. Three scripts stay

@@ -19,6 +19,7 @@ import {
   RECORDED_DIVERGENCES,
   semanticLines,
   setMismatch,
+  stripGeneratedRegions,
   zToDollar,
 } from "../../scripts/check_ssot";
 import { placeholderJinja } from "../../scripts/jinja_subset";
@@ -317,5 +318,34 @@ describe("parseLabels", () => {
       '  - name: {{ fuzzer_label | tojson }}\n    color: "B60205"\n    description: Fuzz\n';
     const labels = parseLabels(`labels:\n${placeholderJinja(fragment)}`, "f");
     expect(labels[0].color).toBe("B60205");
+  });
+});
+
+describe("stripGeneratedRegions", () => {
+  const begin = (name: string) => `<!-- BEGIN GENERATED: ${name} (scripts/generate.ts - x) -->`;
+  const end = (name: string) => `<!-- END GENERATED: ${name} -->`;
+
+  test("removes balanced regions, inline and multi-line, keeping hand prose", () => {
+    const text = `hand ${begin("a")}gen a${end("a")} middle\n${begin("b")}\ngen b\n${end("b")} tail`;
+    expect(stripGeneratedRegions(text, "doc")).toBe("hand  middle\n tail");
+  });
+
+  test("a BEGIN inside an open region throws naming both regions", () => {
+    const text = `${begin("a")} x ${begin("b")} y ${end("b")}`;
+    expect(() => stripGeneratedRegions(text, "doc")).toThrow("'a' is still open where 'b'");
+  });
+
+  test("a mismatched END name throws", () => {
+    expect(() => stripGeneratedRegions(`${begin("a")} x ${end("b")}`, "doc")).toThrow(
+      "closed by END 'b'",
+    );
+  });
+
+  test("a dangling END throws", () => {
+    expect(() => stripGeneratedRegions(`x ${end("a")}`, "doc")).toThrow("no matching BEGIN");
+  });
+
+  test("an unclosed region throws", () => {
+    expect(() => stripGeneratedRegions(`x ${begin("a")} y`, "doc")).toThrow("never closed");
   });
 });
