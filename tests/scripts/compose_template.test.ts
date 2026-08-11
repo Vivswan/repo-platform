@@ -9,6 +9,7 @@ import { describe, expect, test } from "bun:test";
 import { parse as parseYaml } from "yaml";
 import {
   agentsToolchainErrors,
+  type Contribution,
   codeqlGroups,
   codeqlSlug,
   dependabotLabels,
@@ -17,6 +18,8 @@ import {
   lockfileGroups,
   orChain,
   renderedSeparationErrors,
+  type SourcedEntry,
+  spliceContributions,
   yamlLabelName,
 } from "../../scripts/compose_template";
 import { type ModuleManifest, parseManifest } from "../../scripts/module_manifests";
@@ -240,13 +243,106 @@ describe("renderedSeparationErrors", () => {
     ).toEqual([]);
   });
 
-  test("the last contribution may end mid-line (pr-title's gate entry)", () => {
+  test("the last contribution may end mid-line on a plain anchor", () => {
     expect(
       renderedSeparationErrors("demo", [
         { source: "a", text: wrapped("'a' in modules", "      - a-job\n") },
         { source: "b", text: wrapped("'b' in modules", "      - b-job") },
       ]),
     ).toEqual([]);
+  });
+
+  test("a tight anchor also requires the LAST contribution to end with a newline", () => {
+    const errors = renderedSeparationErrors(
+      "demo",
+      [
+        { source: "a", text: wrapped("'a' in modules", "      - a-job\n") },
+        { source: "b", text: wrapped("'b' in modules", "      - b-job") },
+      ],
+      true,
+    );
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain("the anchor is tight");
+    expect(errors[0]).toContain("end the fragment body with a newline");
+  });
+
+  test("a tight anchor passes when every contribution ends with a newline", () => {
+    expect(
+      renderedSeparationErrors(
+        "demo",
+        [
+          { source: "a", text: wrapped("'a' in modules", "      - a-job\n") },
+          { source: "b", text: wrapped("'b' in modules", "      - b-job\n") },
+        ],
+        true,
+      ),
+    ).toEqual([]);
+  });
+});
+
+describe("spliceContributions", () => {
+  const skeleton = (text: string): Map<string, SourcedEntry> =>
+    new Map([["demo.yml", { origin: "base", entry: { kind: "file", data: Buffer.from(text) } }]]);
+  const contribution = (body: string): Map<string, Contribution[]> =>
+    new Map([
+      ["demo", [{ order: 0, source: "templates/a/fragments/demo.jinja", text: Buffer.from(body) }]],
+    ]);
+  const dataOf = (files: Map<string, SourcedEntry>): string => {
+    const entry = (files.get("demo.yml") as SourcedEntry).entry;
+    if (entry.kind !== "file") throw new Error("expected a file entry");
+    return entry.data.toString("utf-8");
+  };
+
+  test("a plain anchor keeps the marker line's newline", () => {
+    const files = skeleton("needs:\n{# compose:demo #}\n    runs-on: x\n");
+    const errors = spliceContributions(files, contribution("{% if g %}      - a\n{% endif %}"));
+    expect(errors).toEqual([]);
+    expect(dataOf(files)).toBe("needs:\n{% if g %}      - a\n{% endif %}\n    runs-on: x\n");
+  });
+
+  test("a tight anchor absorbs the marker line's newline into the next line", () => {
+    const files = skeleton("needs:\n{# compose:demo -#}\n    runs-on: x\n");
+    const errors = spliceContributions(files, contribution("{% if g %}      - a\n{% endif %}"));
+    expect(errors).toEqual([]);
+    expect(dataOf(files)).toBe("needs:\n{% if g %}      - a\n{% endif %}    runs-on: x\n");
+  });
+
+  test("a tight anchor at end of file becomes the last line", () => {
+    const files = skeleton("needs:\n{# compose:demo -#}\n");
+    const errors = spliceContributions(files, contribution("{% if g %}      - a\n{% endif %}"));
+    expect(errors).toEqual([]);
+    expect(dataOf(files)).toBe("needs:\n{% if g %}      - a\n{% endif %}");
+  });
+
+  test("a tight anchor rejects a contribution ending mid-line", () => {
+    const files = skeleton("needs:\n{# compose:demo -#}\n    runs-on: x\n");
+    const errors = spliceContributions(files, contribution("{% if g %}      - a{% endif %}"));
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain("the anchor is tight");
+  });
+
+  test("a tight anchor rejects a trailing literal", () => {
+    const files = skeleton("{# compose:demo -#}tail\n");
+    const errors = spliceContributions(files, contribution("{% if g %}      - a\n{% endif %}"));
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain("is tight (-#}) but carries a trailing literal");
+  });
+
+  test("contributions splice in MODULE_ORDER order regardless of input order", () => {
+    const files = skeleton("needs:\n{# compose:demo -#}\n    runs-on: x\n");
+    const contributions = new Map<string, Contribution[]>([
+      [
+        "demo",
+        [
+          { order: 2, source: "b", text: Buffer.from("{% if b %}      - b\n{% endif %}") },
+          { order: 1, source: "a", text: Buffer.from("{% if a %}      - a\n{% endif %}") },
+        ],
+      ],
+    ]);
+    expect(spliceContributions(files, contributions)).toEqual([]);
+    expect(dataOf(files)).toBe(
+      "needs:\n{% if a %}      - a\n{% endif %}{% if b %}      - b\n{% endif %}    runs-on: x\n",
+    );
   });
 });
 

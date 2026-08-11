@@ -16,7 +16,13 @@
 //   verbatim after the last contribution, for inline `{% endif %}<text>`
 //   junctions); the composer replaces the line with every contribution in
 //   MODULE_ORDER, each fragment wrapped in its module's gate. Fragments own
-//   all whitespace between the tags; the composer adds none.
+//   all whitespace between the tags; the composer adds none. A `-#}`
+//   closer makes the anchor TIGHT: the marker line's newline is consumed
+//   too, so every contribution must end with a newline inside its own gate
+//   and the junction to the next line stays tight whichever gates render
+//   false (with a plain `#}` the skeleton newline terminates the block, so
+//   an all-conditional line list would leave it dangling when the last
+//   gate is off).
 // - Data anchors (DATA_ANCHORS below) are filled from manifest data instead
 //   of fragment files, so the composed output carries no marker comments and
 //   list-shaped content cannot drift from the manifests. The sharing rule: a
@@ -62,7 +68,7 @@ const OUT = join(REPO_ROOT, "template");
 // here for the existing importers keyed on the composer.
 export { MODULE_ORDER };
 
-const ANCHOR_RE = /^\{# compose:([a-z0-9][a-z0-9-]*) #\}([^\r]*)$/;
+const ANCHOR_RE = /^\{# compose:([a-z0-9][a-z0-9-]*) (-?)#\}([^\r]*)$/;
 const JINJA_SUFFIX = ".jinja";
 const MANIFEST_NAME = "module.yml";
 const FRAGMENTS_DIR = "fragments";
@@ -333,7 +339,7 @@ export function agentsToolchainErrors(
 // `order` is the MODULE_ORDER position of the (first) contributing module,
 // so generated groups interleave with fragment contributions exactly where
 // the contributing modules sit.
-type Contribution = { order: number; source: string; text: Buffer };
+export type Contribution = { order: number; source: string; text: Buffer };
 
 /** A generator's own validation failure (bad manifest data): reported as a
  *  clean composition error. Anything else escaping a generator is a bug and
@@ -344,14 +350,18 @@ export class GeneratorValidationError extends Error {}
  *  every NON-LAST contribution, once its trailing closing tags are
  *  stripped, must end with a newline - otherwise two selected
  *  contributions render onto one line (adjacent `{% if %}...{% endif %}`
- *  wrappers emit no separator of their own). The last contribution may end
- *  mid-line (pr-title's gate entry does). */
+ *  wrappers emit no separator of their own). On a plain anchor the last
+ *  contribution may end mid-line (the skeleton's own newline terminates
+ *  the block); on a TIGHT anchor (`-#}`) that newline is consumed, so the
+ *  last contribution must supply the line ending itself. */
 export function renderedSeparationErrors(
   anchor: string,
   contributions: { source: string; text: Buffer }[],
+  tight = false,
 ): string[] {
   const errors: string[] = [];
-  for (let i = 0; i + 1 < contributions.length; i++) {
+  const last = contributions.length - (tight ? 0 : 1);
+  for (let i = 0; i < last; i++) {
     const { source, text } = contributions[i];
     let body = text.toString("latin1");
     for (;;) {
@@ -361,10 +371,15 @@ export function renderedSeparationErrors(
     }
     if (!body.endsWith("\n")) {
       errors.push(
-        `anchor '${anchor}': ${source} renders without a trailing newline ` +
-          `(after its closing tags) but a later contribution follows - when ` +
-          "both are selected they render onto one line; end the fragment " +
-          "body with a newline",
+        i + 1 < contributions.length
+          ? `anchor '${anchor}': ${source} renders without a trailing newline ` +
+              `(after its closing tags) but a later contribution follows - when ` +
+              "both are selected they render onto one line; end the fragment " +
+              "body with a newline"
+          : `anchor '${anchor}': ${source} renders without a trailing newline ` +
+              `(after its closing tags) but the anchor is tight (-#}), so the ` +
+              "block supplies its own line ending; end the fragment body " +
+              "with a newline",
       );
     }
   }
@@ -467,9 +482,9 @@ const DATA_ANCHORS: Record<string, DataAnchorSpec> = {
         text: Buffer.from(gatedText(orChain(group.modules, gateOf), codeqlJob(group))),
       })),
   },
-  // Mixed anchor: the toolchain gate entries are generated here; pr-title
-  // and release-please still contribute fragment files, spliced at their
-  // own MODULE_ORDER positions.
+  // Mixed anchor: the toolchain gate entries are generated here;
+  // release-please, skills, and pr-title still contribute fragment files,
+  // spliced at their own MODULE_ORDER positions.
   "ci-gate-needs": {
     data: "toolchain.codeql_language",
     kind: "coexist",
@@ -578,17 +593,17 @@ function joinLines(lines: Buffer[]): Buffer {
   return Buffer.concat(parts);
 }
 
-function matchAnchor(line: Buffer): { name: string; trailing: string } | null {
+function matchAnchor(line: Buffer): { name: string; tight: boolean; trailing: string } | null {
   // Bytes, matched as latin1: non-ASCII bytes can never satisfy the pattern.
   const match = ANCHOR_RE.exec(line.toString("latin1"));
-  return match ? { name: match[1], trailing: match[2] } : null;
+  return match ? { name: match[1], tight: match[2] === "-", trailing: match[3] } : null;
 }
 
 function sortedByKey<V>(map: Map<string, V>): [string, V][] {
   return [...map.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
 }
 
-type SourcedEntry =
+export type SourcedEntry =
   | { origin: "base"; entry: Entry }
   | { origin: "module"; module: string; gate: string; gateDirs: string[]; entry: Entry };
 
@@ -596,13 +611,22 @@ function sourceName(sourced: SourcedEntry): string {
   return sourced.origin === "base" ? "base" : sourced.module;
 }
 
-/** Replace anchor lines in-place; returns error strings. */
-function spliceContributions(
+/** Replace anchor lines in-place; returns error strings. Sorts each
+ *  anchor's contributions into MODULE_ORDER emission order itself - the
+ *  rendered-separation invariant and the splice depend on it, so it is
+ *  enforced here rather than trusted to the caller. Exported so the
+ *  tight-anchor splice semantics (newline absorption, the tight+trailing
+ *  contradiction) stay covered by unit tests. */
+export function spliceContributions(
   files: Map<string, SourcedEntry>,
   contributions: Map<string, Contribution[]>,
 ): string[] {
+  for (const list of contributions.values()) {
+    list.sort((a, b) => a.order - b.order);
+  }
   const errors: string[] = [];
-  const anchorOwner = new Map<string, [string, string]>(); // anchor -> [source, logical]
+  // anchor -> its owning skeleton [source, logical] plus the tight flag.
+  const anchorOwner = new Map<string, { source: string; logical: string; tight: boolean }>();
   for (const [logical, sourced] of sortedByKey(files)) {
     const { entry } = sourced;
     if (entry.kind === "symlink") continue;
@@ -611,9 +635,9 @@ function spliceContributions(
         errors.push(
           `templates/${sourceName(sourced)}/${logical}: malformed anchor line ` +
             `'${line.toString("utf-8").trim()}' - anchors must start the ` +
-            "line as '{# compose:<name> #}' (no indentation or CRLF; text " +
-            "after the closing tag is appended verbatim after the last " +
-            "contribution)",
+            "line as '{# compose:<name> #}' (or '{# compose:<name> -#}' for " +
+            "a tight junction; no indentation or CRLF; text after the " +
+            "closing tag is appended verbatim after the last contribution)",
         );
         continue;
       }
@@ -627,16 +651,28 @@ function spliceContributions(
             "delete the stray whitespace",
         );
       }
+      if (anchor.tight && anchor.trailing !== "") {
+        errors.push(
+          `templates/${sourceName(sourced)}/${logical}: anchor '${anchor.name}' ` +
+            "is tight (-#}) but carries a trailing literal - a trailing " +
+            "literal is a mid-line junction while tight consumes the line " +
+            "ending; use one or the other",
+        );
+      }
       const other = anchorOwner.get(anchor.name);
       if (other) {
         errors.push(
           `duplicate anchor '${anchor.name}' in templates/${sourceName(sourced)}/${logical} ` +
-            `and templates/${other[0]}/${other[1]} - each anchor may appear ` +
+            `and templates/${other.source}/${other.logical} - each anchor may appear ` +
             "in exactly one skeleton file; rename one anchor (and any " +
             `fragments/${anchor.name}.jinja files that feed it) or remove the duplicate marker`,
         );
       }
-      anchorOwner.set(anchor.name, [sourceName(sourced), logical]);
+      anchorOwner.set(anchor.name, {
+        source: sourceName(sourced),
+        logical,
+        tight: anchor.tight,
+      });
     }
   }
 
@@ -652,15 +688,19 @@ function spliceContributions(
       }
     }
   }
-  for (const [anchor, [source, logical]] of sortedByKey(anchorOwner)) {
+  for (const [anchor, owner] of sortedByKey(anchorOwner)) {
     if ((contributions.get(anchor)?.length ?? 0) > 0) continue;
     const dataHint =
       anchor in DATA_ANCHORS ? `, or declare the manifest data (${DATA_ANCHORS[anchor].data})` : "";
     errors.push(
-      `templates/${source}/${logical}: anchor '${anchor}' has no ` +
+      `templates/${owner.source}/${owner.logical}: anchor '${anchor}' has no ` +
         `contributions - remove the marker or add ${FRAGMENTS_DIR}/${anchor}${JINJA_SUFFIX} ` +
         `to a module${dataHint}`,
     );
+  }
+  for (const [anchor, list] of sortedByKey(contributions)) {
+    const owner = anchorOwner.get(anchor);
+    if (owner) errors.push(...renderedSeparationErrors(anchor, list, owner.tight));
   }
   if (errors.length > 0) return errors;
 
@@ -668,18 +708,28 @@ function spliceContributions(
     const { entry } = sourced;
     if (entry.kind === "symlink" || !entry.data.includes(ANCHOR_HINT)) continue;
     const rebuilt: Buffer[] = [];
+    // A tight anchor's replacement absorbs the marker line's newline: its
+    // spliced text is carried into the next line instead of standing as a
+    // line of its own (at EOF it simply becomes the last line).
+    let carry: Buffer | null = null;
+    const emit = (chunk: Buffer) => {
+      rebuilt.push(carry === null ? chunk : Buffer.concat([carry, chunk]));
+      carry = null;
+    };
     for (const line of splitLines(entry.data)) {
       const anchor = matchAnchor(line);
       if (anchor === null) {
-        rebuilt.push(line);
+        emit(line);
         continue;
       }
       const spliced = Buffer.concat([
         ...(contributions.get(anchor.name) as Contribution[]).map(({ text }) => text),
         Buffer.from(anchor.trailing),
       ]);
-      rebuilt.push(spliced);
+      if (anchor.tight) carry = carry === null ? spliced : Buffer.concat([carry, spliced]);
+      else emit(spliced);
     }
+    if (carry !== null) rebuilt.push(carry);
     entry.data = joinLines(rebuilt);
   }
   return errors;
@@ -877,11 +927,6 @@ export function build(): Map<string, Entry> {
       addContribution(anchor, wrapFragment(anchor, module, body));
     }
   }
-  for (const [anchor, list] of contributions) {
-    list.sort((a, b) => a.order - b.order);
-    errors.push(...renderedSeparationErrors(anchor, list));
-  }
-
   errors.push(...spliceContributions(files, contributions));
   if (errors.length > 0) {
     for (const error of errors) console.error(`error: ${error}`);

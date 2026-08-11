@@ -38,8 +38,9 @@ export const MODULE_ORDER = [
   "pages",
   "release-please",
   "issue-templates",
-  // Before pr-title: both feed the ci-gate anchors, and pr-title's
-  // ci-gate-needs fragment is the anchor's deliberate mid-line ending.
+  // Before pr-title: both feed the ci-gate anchors, and pr-title must stay
+  // LAST among the ci-gate-needs fragment contributors - moving it would
+  // reorder the rendered needs entries and churn existing fleet renders.
   "skills",
   "pr-title",
   "auto-assign",

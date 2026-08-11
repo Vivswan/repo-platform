@@ -24,6 +24,7 @@ present() { grep -qF -- "$1" "$2" || { echo "::error::gating check failed: '$1' 
 present_line() { grep -qxF -- "$1" "$2" || { echo "::error::gating check failed: no line is exactly '$1' in $2, so the template did not emit it for modules=$MODULES private=$PRIVATE. Fix the gate in templates/ (or this expectation in verify_smoke_gating.sh)."; exit 1; }; }
 absent() { if grep -qF -- "$1" "$2"; then echo "::error::gating check failed: '$1' appears in $2 but modules=$MODULES private=$PRIVATE should not emit it. Fix the gate in templates/ (or this expectation in verify_smoke_gating.sh)."; exit 1; fi; }
 absent_line() { if grep -qxF -- "$1" "$2"; then echo "::error::gating check failed: a line is exactly '$1' in $2 but modules=$MODULES private=$PRIVATE should not emit it. Fix the gate in templates/ (or this expectation in verify_smoke_gating.sh)."; exit 1; fi; }
+adjacent() { grep -xF -A1 -- "$1" "$3" | grep -qxF -- "$2" || { echo "::error::gating check failed: the line '$1' in $3 is not immediately followed by '$2' for modules=$MODULES private=$PRIVATE. Fix the gate in templates/ (or this expectation in verify_smoke_gating.sh)."; exit 1; }; }
 
 # pr-title runs inside the managed ci.yml gate (no standalone workflow).
 test ! -e "$wf/pr-title.yml"
@@ -35,6 +36,21 @@ else
   absent "- pr-title" "$wf/ci.yml"
 fi
 if has auto-assign; then test -f "$wf/auto-assign.yml"; else test ! -e "$wf/auto-assign.yml"; fi
+
+# The all-green needs list must join runs-on: tight, whichever gate
+# fragment renders last (the ci-gate-needs anchor is tight: every
+# contribution owns its line ending and the composer adds none). This
+# pins the regression where an unselected trailing fragment left the
+# previous entry's newline dangling as a blank line.
+if has pr-title; then last_need="      - pr-title"
+elif has skills; then last_need="      - validate-skills"
+elif has release-please; then last_need="      - release-health"
+elif [ "$PRIVATE" != "true" ] && has uv; then last_need="      - codeql-python"
+elif [ "$PRIVATE" != "true" ] && has_codeql_toolchain; then last_need="      - codeql-javascript"
+elif [ "$PRIVATE" = "true" ]; then last_need="      - base-checks"
+else last_need="      - dependency-review"
+fi
+adjacent "$last_need" "    runs-on: ubuntu-latest" "$wf/ci.yml"
 if has issue-templates; then test -f /tmp/smoke/.github/ISSUE_TEMPLATE/config.yml; else test ! -e /tmp/smoke/.github/ISSUE_TEMPLATE; fi
 if has pages; then test -f "$wf/pages.yml"; else test ! -e "$wf/pages.yml"; fi
 
