@@ -49,9 +49,11 @@ jobs:
 {%- if enable_codeql %}
   # Alert assignment lives in its own reusable workflow so security-events
   # stays off the job above: a reusable-workflow call is statically
-  # validated against every job in the called file, `if:` or not.
+  # validated against every job in the called file, `if:` or not. A
+  # dispatch runs it only when no issue was named - naming one means the
+  # dispatch is a targeted assignment, not an alert sweep.
   assign-alerts:
-    if: github.event_name != 'issues' && github.event_name != 'pull_request'
+    if: github.event_name == 'workflow_run' || github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.issue == '')
     permissions:
       contents: read
       security-events: write
