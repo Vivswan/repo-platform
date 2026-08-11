@@ -7,5 +7,10 @@ if [ ! -d node_modules ]; then
 	exit 1
 fi
 
+# git exports GIT_DIR/GIT_INDEX_FILE into hooks, which redirects any git
+# subprocess the gates spawn (tests init scratch repos) at the real
+# repository; a leaked GIT_DIR once rewrote this repo's config to bare.
+for v in $(env | sed -n 's/^\(GIT_[A-Z_]*\)=.*/\1/p'); do unset "$v"; done
+
 # The full gates CI also runs; catch failures before they leave the machine.
 bun run check
