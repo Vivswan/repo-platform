@@ -13,7 +13,11 @@ updates the standard jobs and the gate. Module checks run inside the gate
 too: the pr-title module contributes a `pr-title` job (Conventional Commit
 title check), the release-please module contributes a `release-freshness`
 job (the release PR must contain main's tip when the gate runs; other
-PRs may merge while behind), public repos get a `dependency-review` job
+PRs may merge while behind) and a `release-health` job (blocks release PRs
+while a fuzz-tracking or `release-blocker` issue is open, or an open
+Dependabot alert reaches the severity threshold; a `release-override`
+label on the release PR bypasses the gates, loudly), public repos get a
+`dependency-review` job
 (its steps run on PR events only - the dependency graph behind it is free
 just for public repos), and public repos with a toolchain get
 per-language `codeql-*` jobs calling the reusable CodeQL analysis - so
@@ -84,6 +88,17 @@ Notes:
   every newly generated repository, never direct publishing. Config and
   pipeline are repo-owned, so repos generated before the draft flow keep
   publishing directly.
+- Release health is enforced twice on purpose. The ci.yml `release-health`
+  job fails the release PR early and visibly, but a PR-time check can go
+  stale: a fuzz or `release-blocker` issue opened after the PR turned green
+  re-runs nothing, so the managed release-please.yml re-runs the same
+  action as the authoritative pre-flight before release-please acts. In
+  release mode the gate self-scopes to the push that merges a release-please
+  PR - it reads the `release-override` label from that merged PR, and
+  ordinary main pushes and release-PR refreshes are never blocked. Adding
+  `release-override` to the release PR does not re-trigger CI (ci.yml does
+  not run on `labeled`): re-run the failed release-health job after
+  labeling; the release-time pre-flight reads the label on its own.
 - One job is informational by design: `validate-template` runs in every
   managed repo's ci.yml but is deliberately NOT in all-green's needs. A red
   run flags template-convention drift without blocking the repo's merges;

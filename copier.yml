@@ -32,6 +32,8 @@ _skip_if_exists:
   # Repos accumulate their own allowlists in it; sync must never reset
   # what a repo has excused.
   - .gitleaks.toml
+  # Same story for actionlint ignores.
+  - .github/actionlint.yaml
 
 # Migrations use FROM-version naming (see migrations/run.ts): each script in
 # migrations/ is named for the release it migrates away from, so authoring

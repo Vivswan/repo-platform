@@ -4,6 +4,7 @@
 
 import { describe, expect, test } from "bun:test";
 import {
+  applyDivergences,
   canonical,
   centralIdentityMismatches,
   expandCheckChain,
@@ -15,6 +16,7 @@ import {
   parseLabels,
   pinMismatches,
   placeholderJinja,
+  RECORDED_DIVERGENCES,
   semanticLines,
   setMismatch,
   zToDollar,
@@ -105,14 +107,90 @@ describe("normalizeJinja", () => {
   });
 
   test("a condition the context cannot resolve keeps its body, as without one", () => {
-    const text = "A\n{%- if enable_codeql %}\nB\n{%- endif %}\nZ";
-    expect(normalizeJinja(text, vars, { private: false })).toBe("A\nB\nZ");
-    expect(normalizeJinja(text, vars)).toBe("A\nB\nZ");
+    const text =
+      "A\n{%- if private %}\nP\n{%- endif %}\n{%- if enable_codeql %}\nB\n{%- endif %}\nZ";
+    expect(normalizeJinja(text, vars, { private: true })).toBe("A\nP\nB\nZ");
+    expect(normalizeJinja(text, vars)).toBe("A\nP\nB\nZ");
+  });
+
+  test("a non-variable condition resolves through an exact-text context key", () => {
+    const text = "A\n{%- if 'fuzzer' in modules %}\nF\n{%- endif %}\nZ";
+    expect(normalizeJinja(text, vars, { "'fuzzer' in modules": false })).toBe("A\nZ");
+    expect(normalizeJinja(text, vars, { "'fuzzer' in modules": true })).toBe("A\nF\nZ");
+  });
+
+  test("a context key no condition consulted fails loudly as stale", () => {
+    const text = "A\n{%- if private %}\nP\n{%- endif %}\nZ";
+    expect(() =>
+      normalizeJinja(text, vars, { private: false, "'fuzzer' in modules": false }),
+    ).toThrow("context key \"'fuzzer' in modules\" matched no condition");
   });
 
   test("an else inside a dropped branch still fails loudly", () => {
     const text = "A\n{%- if private %}\nP\n{%- else %}\nQ\n{%- endif %}\nZ";
     expect(() => normalizeJinja(text, vars, { private: false })).toThrow("cannot handle");
+  });
+});
+
+describe("applyDivergences", () => {
+  const entry = {
+    file: "f",
+    reason: "test",
+    skip: /^- uses: actions\/checkout@v7$/,
+    before: /^- uses: \.\/actions\/x$/,
+  };
+  const checkout = "      - uses: actions/checkout@v7";
+  const anchor = "      - uses: ./actions/x";
+  const template = ["A", anchor];
+
+  test("excuses one operator line sitting immediately before its anchor", () => {
+    const used = new Set<number>();
+    const out = applyDivergences("f", template, ["A", checkout, anchor], [entry], used);
+    expect(out.actual).toEqual(["A", anchor]);
+    expect(out.expected).toEqual(template);
+    expect(out.mismatches).toEqual([]);
+    expect(used.has(0)).toBe(true);
+  });
+
+  test("an operator line migrated below its anchor is not excused", () => {
+    const migrated = ["A", anchor, checkout];
+    const out = applyDivergences("f", template, migrated, [entry], new Set());
+    expect(out.actual).toEqual(migrated);
+    expect(out.mismatches).toEqual([]);
+  });
+
+  test("a second copy of the excused line stays and mismatches", () => {
+    const out = applyDivergences("f", template, [checkout, checkout, anchor], [entry], new Set());
+    expect(out.actual).toEqual([checkout, anchor]);
+  });
+
+  test("a template that gains the anchored line makes the entry stale, excusing nothing", () => {
+    const caught = ["A", checkout, anchor];
+    const used = new Set<number>();
+    const out = applyDivergences("f", caught, caught, [entry], used);
+    expect(out.expected).toEqual(caught);
+    expect(out.actual).toEqual(caught);
+    expect(out.mismatches).toHaveLength(1);
+    expect(out.mismatches[0].got).toContain("drop the RECORDED_DIVERGENCES entry");
+    expect(used.has(0)).toBe(true);
+  });
+
+  test("other files and unmatched lines pass through untouched", () => {
+    const lines = [checkout, anchor];
+    const out = applyDivergences("other", lines, lines, [entry], new Set());
+    expect(out.actual).toEqual(lines);
+    expect(out.mismatches).toEqual([]);
+  });
+
+  test("the real operator-checkout entry rejects the migrated-below shape", () => {
+    const entry0 = RECORDED_DIVERGENCES[0];
+    const health = "      - uses: ./actions/release-health";
+    expect(
+      applyDivergences(entry0.file, [health], [checkout, health], [entry0], new Set()).actual,
+    ).toEqual([health]);
+    expect(
+      applyDivergences(entry0.file, [health], [health, checkout], [entry0], new Set()).actual,
+    ).toEqual([health, checkout]);
   });
 });
 

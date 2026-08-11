@@ -103,6 +103,21 @@ visible. The action never assigns anyone; assignment happens through the
 dispatched auto-assign workflow, because issues created with `GITHUB_TOKEN`
 fire no triggers of their own.
 
+## Release gating
+
+With the release-please module also selected, the release-health gate ties
+releases to fuzz health: while the tracking issue is open, the release PR's
+`release-health` CI job fails early and visibly, and the release pipeline's
+authoritative pre-flight blocks the cut itself. The gate self-scopes to
+release-cut pushes, so release-PR refreshes and ordinary main runs are
+never blocked. Hand-closing the issue removes the block without waiting
+for a green run, but closing it re-triggers nothing: re-run the release
+PR's failed release-health job afterwards (the release path's pre-flight
+reads issue state fresh at release time). The next green nightly closes
+the issue automatically anyway. The `release-blocker` and
+`release-override` labels (docs/all-green.md) work independently of the
+fuzz stream.
+
 ## Regression pinning, and why auto-close is honest
 
 A coverage-guided fuzzer that found a crash yesterday can miss it today, so

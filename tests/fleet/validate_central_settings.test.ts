@@ -62,6 +62,8 @@ describe("requiredLabels", () => {
       "rust",
       "autorelease: pending",
       "autorelease: tagged",
+      "release-blocker",
+      "release-override",
       "my-fuzz",
     ]);
   });
@@ -260,7 +262,7 @@ describe("checkCentralFileRemote", () => {
       declared(["bug"]),
       fetcher({ ".repo-platform.yml": registration(["bun", "release-please"]) }),
     );
-    expect(errors).toHaveLength(5);
+    expect(errors).toHaveLength(7);
   });
 
   test("an unreadable modules list is an error, not a silent pass", () => {

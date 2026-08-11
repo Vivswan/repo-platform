@@ -289,7 +289,11 @@ jobs:
       - name: actionlint rendered workflows
         run: |
           bash <(curl -sSL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
-          ./actionlint -color /tmp/smoke/.github/workflows/*.yml
+          # git init + render-root cwd, or the render's actionlint.yaml
+          # ignores never apply: project discovery needs the .git dir, and
+          # the config's path globs match cwd-relative paths.
+          git -C /tmp/smoke init -q
+          (cd /tmp/smoke && "$GITHUB_WORKSPACE/actionlint" -color .github/workflows/*.yml)
 
   # Generate from the previous build tag, then `copier update` to a fresh
   # build - the path every managed repo takes (details in the script).
@@ -410,6 +414,10 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
+      # The release-health pre-flight (in release-please.yml) reads open
+      # issues and Dependabot alerts through this ceiling.
+      issues: read
+      vulnerability-alerts: read
     uses: ./.github/workflows/release-please.yml
     secrets: inherit
 

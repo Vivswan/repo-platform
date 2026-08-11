@@ -73,6 +73,12 @@ export function requiredLabels(
     for (const name of ["autorelease: pending", "autorelease: tagged"]) {
       required.push({ name, why: "release-please manages it on release PRs" });
     }
+    for (const name of ["release-blocker", "release-override"]) {
+      required.push({
+        name,
+        why: "the release-health gate keys on it (stripping it un-blocks or un-overrides a release)",
+      });
+    }
   }
   if (modules.includes("fuzzer") && fuzzerLabel !== null) {
     required.push({

@@ -22,5 +22,9 @@
       packages: write
       id-token: write
       attestations: write
+      # The release-health pre-flight (in the managed release-please.yml)
+      # reads open issues and Dependabot alerts through this ceiling.
+      issues: read
+      vulnerability-alerts: read
     uses: ./.github/workflows/release.yml
     secrets: inherit

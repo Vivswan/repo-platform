@@ -34,13 +34,34 @@ interface Rule {
 }
 
 // Intentional, recorded divergences between a repo file and its templates/
-// counterpart: lines matching `skip` are dropped from both sides before
-// comparing. Honored only by line-based comparisons (semantic-mode parity
-// pairs and the .gitattributes rules); byte-compared pairs cannot skip
-// lines, and subset rules already tolerate repo-side additions without an
-// entry. Every entry must say why the divergence is deliberate; an entry
-// whose pattern no longer matches anything is reported as stale.
-export const RECORDED_DIVERGENCES: { file: string; reason: string; skip: RegExp }[] = [];
+// counterpart. A divergence means exactly one thing: the OPERATOR copy
+// carries a line the template lacks. Each entry excuses, from the operator
+// side only, AT MOST ONE line matching `skip` sitting immediately before a
+// line matching `before` (both matched against trimmed lines, after
+// semanticLines dropped comments and blanks): a second copy, or the same
+// line migrated elsewhere, still mismatches. A template side that carries
+// the same anchored line makes the entry stale - reported, with nothing
+// excused - so the excuse can never mask the template catching up. Honored
+// only by the semantic-mode dogfood-parity pairs; byte-compared pairs
+// cannot skip lines, and subset rules already tolerate repo-side additions
+// without an entry. Every entry must say why the divergence is deliberate;
+// an entry that excused nothing anywhere is reported as stale.
+export const RECORDED_DIVERGENCES: {
+  file: string;
+  reason: string;
+  skip: RegExp;
+  before: RegExp;
+}[] = [
+  {
+    file: ".github/workflows/release-please.yml",
+    reason:
+      "the release-health pre-flight is dogfooded from this repository's own tree " +
+      "(./actions/release-health), which needs the repository checked out; downstream " +
+      "repos use the remote pin and carry no checkout",
+    skip: /^- uses: actions\/checkout@v7$/,
+    before: /^- uses: \.\/actions\/release-health$/,
+  },
+];
 
 // Actions allowed to be pinned at more than one ref, with the full expected
 // ref set. Empty today; record any intentional split here with a comment.
@@ -68,19 +89,30 @@ export interface JinjaVars {
 
 /** Drop every if/endif block whose condition is false in `context`: a
  *  condition that is exactly a context variable (or `not <variable>`)
- *  evaluates; any other condition keeps its body for the tag stripping in
- *  normalizeJinja. if/endif pairs are matched with a depth counter, so an
- *  outer false branch drops its nested blocks whole. else/elif are rejected
- *  here too - the no-else invariant must hold even inside a dropped branch,
- *  which the downstream guard would never see. */
-function evaluateIfBranches(text: string, context: Record<string, boolean>): string {
+ *  evaluates, a non-variable condition (module membership) evaluates when
+ *  the context carries its exact trimmed text as a key; any other condition
+ *  keeps its body for the tag stripping in normalizeJinja. if/endif pairs
+ *  are matched with a depth counter, so an outer false branch drops its
+ *  nested blocks whole. else/elif are rejected here too - the no-else
+ *  invariant must hold even inside a dropped branch, which the downstream
+ *  guard would never see. */
+function evaluateIfBranches(
+  text: string,
+  context: Record<string, boolean>,
+  used?: Set<string>,
+): string {
   const resolve = (expr: string): boolean | null => {
     const trimmed = expr.trim();
+    if (Object.hasOwn(context, trimmed)) {
+      used?.add(trimmed);
+      return context[trimmed];
+    }
     const negated = trimmed.startsWith("not ");
     const name = (negated ? trimmed.slice(4) : trimmed).trim();
     if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) return null;
     const value = context[name];
     if (value === undefined) return null;
+    used?.add(name);
     return negated ? !value : value;
   };
   let out = "";
@@ -136,7 +168,19 @@ export function normalizeJinja(
   out = out.replace(/\{%-?\s*(?:raw|endraw)\s*-?%\}/g, "");
   out = out.replace(/\{#-?[\s\S]*?-?#\}/g, "");
   out = out.replace(/\{%-?\s*set\b[\s\S]*?%\}/g, "");
-  if (context) out = evaluateIfBranches(out, context);
+  if (context) {
+    const used = new Set<string>();
+    out = evaluateIfBranches(out, context, used);
+    // Mirror RECORDED_DIVERGENCES staleness: a context key no condition
+    // consulted is dead configuration and must fail loudly, not linger.
+    for (const key of Object.keys(context)) {
+      if (!used.has(key)) {
+        throw new Error(
+          `normalizeJinja: context key ${JSON.stringify(key)} matched no condition (stale - remove it)`,
+        );
+      }
+    }
+  }
   // Keeping both branches of an if/else would concatenate mutually exclusive
   // content; no processed template uses statement-level else today, so its
   // appearance means this normalizer needs real branch handling.
@@ -184,19 +228,50 @@ export function semanticLines(text: string): string[] {
 
 const usedDivergences = new Set<number>();
 
-function applyDivergences(file: string, lines: string[]): string[] {
-  const entries = RECORDED_DIVERGENCES.map((d, index) => ({ ...d, index })).filter(
-    (d) => d.file === file,
-  );
-  if (entries.length === 0) return lines;
-  return lines.filter(
-    (line) =>
-      !entries.some((d) => {
-        if (!d.skip.test(line.trim())) return false;
-        usedDivergences.add(d.index);
-        return true;
-      }),
-  );
+/** Excuse recorded divergences for one parity pair: drop, from the ACTUAL
+ *  (operator) side only, at most one line per entry matching `skip` that
+ *  sits immediately before a line matching `before`. When the EXPECTED
+ *  (template) side carries the same anchored line, the entry is stale -
+ *  returned as a mismatch with nothing excused, so both sides keep the
+ *  line and the drift is named instead of silently excused twice. Entries
+ *  and the used-set are injectable for tests. */
+export function applyDivergences(
+  file: string,
+  expected: string[],
+  actual: string[],
+  entries: typeof RECORDED_DIVERGENCES = RECORDED_DIVERGENCES,
+  used: Set<number> = usedDivergences,
+): { expected: string[]; actual: string[]; mismatches: Mismatch[] } {
+  const mismatches: Mismatch[] = [];
+  const drop = new Set<number>();
+  const findAnchored = (lines: string[], entry: (typeof entries)[number], taken?: Set<number>) =>
+    lines.findIndex(
+      (line, i) =>
+        !taken?.has(i) &&
+        entry.skip.test(line.trim()) &&
+        entry.before.test(lines[i + 1]?.trim() ?? ""),
+    );
+  for (const [index, entry] of entries.entries()) {
+    if (entry.file !== file) continue;
+    if (findAnchored(expected, entry) !== -1) {
+      used.add(index);
+      mismatches.push({
+        file,
+        expected: `no template line matching ${entry.skip} before ${entry.before}`,
+        got: "the template now carries this line - drop the RECORDED_DIVERGENCES entry",
+      });
+      continue;
+    }
+    const at = findAnchored(actual, entry, drop);
+    if (at === -1) continue;
+    drop.add(at);
+    used.add(index);
+  }
+  return {
+    expected,
+    actual: drop.size === 0 ? actual : actual.filter((_, i) => !drop.has(i)),
+    mismatches,
+  };
 }
 
 // --- generic comparison helpers ------------------------------------------
@@ -861,7 +936,12 @@ const rules: Rule[] = [
     run: () => {
       const vars = jinjaVars();
       const mismatches: Mismatch[] = [];
-      const pairs: { repo: string; tpl: string; mode: "exact" | "prefix" | "semantic" }[] = [
+      const pairs: {
+        repo: string;
+        tpl: string;
+        mode: "exact" | "prefix" | "semantic";
+        context?: Record<string, boolean>;
+      }[] = [
         { repo: ".editorconfig", tpl: "templates/base/.editorconfig.jinja", mode: "exact" },
         {
           repo: "release-please-config.json",
@@ -884,6 +964,9 @@ const rules: Rule[] = [
           repo: ".github/workflows/release-please.yml",
           tpl: "templates/release-please/.github/workflows/release-please.yml.jinja",
           mode: "semantic",
+          // This repository selects no fuzzer module, so the fuzz-label
+          // branch must evaluate to what this repo really renders: absent.
+          context: { "'fuzzer' in modules": false },
         },
         {
           repo: ".github/workflows/auto-assign.yml",
@@ -918,7 +1001,7 @@ const rules: Rule[] = [
         },
       ];
       for (const pair of pairs) {
-        const expected = normalizeJinja(read(pair.tpl), vars);
+        const expected = normalizeJinja(read(pair.tpl), vars, pair.context);
         const got = read(pair.repo);
         if (pair.mode === "exact" && expected !== got) {
           mismatches.push(
@@ -929,13 +1012,10 @@ const rules: Rule[] = [
             ...lineDiffMismatch(pair.repo, pair.tpl, expected.split("\n"), got.split("\n")),
           );
         } else if (pair.mode === "semantic") {
+          const excused = applyDivergences(pair.repo, semanticLines(expected), semanticLines(got));
+          mismatches.push(...excused.mismatches);
           mismatches.push(
-            ...lineDiffMismatch(
-              pair.repo,
-              pair.tpl,
-              applyDivergences(pair.repo, semanticLines(expected)),
-              applyDivergences(pair.repo, semanticLines(got)),
-            ),
+            ...lineDiffMismatch(pair.repo, pair.tpl, excused.expected, excused.actual),
           );
         }
       }
@@ -946,9 +1026,8 @@ const rules: Rule[] = [
   {
     name: "gitattributes-subset",
     run: () => {
-      const expected = applyDivergences(
-        ".gitattributes",
-        semanticLines(normalizeJinja(read("templates/base/.gitattributes.jinja"), jinjaVars())),
+      const expected = semanticLines(
+        normalizeJinja(read("templates/base/.gitattributes.jinja"), jinjaVars()),
       );
       if (expected.length === 0)
         throw new Error(".gitattributes.jinja: no shared lines found - anchor lost");
@@ -1316,6 +1395,8 @@ const rules: Rule[] = [
         "fix-lint",
         "autorelease: pending",
         "autorelease: tagged",
+        "release-blocker",
+        "release-override",
       ];
       for (const name of required) {
         if (!templateByName.has(name) || !central.some((label) => label.name === name)) {

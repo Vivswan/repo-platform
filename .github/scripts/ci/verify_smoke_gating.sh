@@ -274,6 +274,24 @@ if has release-please; then
   # losing either fragment would fail open silently.
   present "release-freshness:" "$wf/ci.yml"
   present "      - release-freshness" "$wf/ci.yml"
+  # The release-health gate likewise: the PR-time job in ci.yml (exact
+  # indented lines - the header comments also say release-health) plus the
+  # authoritative pre-flight on the release path. Modes are pinned as whole
+  # lines so a flipped mode cannot pass, and the fuzz-label assert pins the
+  # exact tojson-quoted default so an unquoted or empty render fails too.
+  present_line "  release-health:" "$wf/ci.yml"
+  present_line "      - release-health" "$wf/ci.yml"
+  present "release-health@main" "$wf/ci.yml"
+  present "release-health@main" "$wf/release-please.yml"
+  present_line "          mode: pull-request" "$wf/ci.yml"
+  present_line "          mode: release" "$wf/release-please.yml"
+  if has fuzzer; then
+    present_line '          fuzz-label: "fuzz-nightly"' "$wf/ci.yml"
+    present_line '          fuzz-label: "fuzz-nightly"' "$wf/release-please.yml"
+  else
+    absent "fuzz-label:" "$wf/ci.yml"
+    absent "fuzz-label:" "$wf/release-please.yml"
+  fi
   test -f /tmp/smoke/release-please-config.json
   test -f /tmp/smoke/.release-please-manifest.json
   # Every render carries the full three-step draft flow: the update hook
@@ -288,6 +306,11 @@ else
   test ! -e "$wf/release.yml"
   absent "uses: ./.github/workflows/release.yml" "$wf/ci.yml"
   absent "release-freshness" "$wf/ci.yml"
+  absent_line "  release-health:" "$wf/ci.yml"
+  absent_line "      - release-health" "$wf/ci.yml"
+  # fuzz-label only rides in the release-please fragments, so even a
+  # fuzzer-selected render must not carry it without release-please.
+  absent "fuzz-label:" "$wf/ci.yml"
   test ! -e /tmp/smoke/release-please-config.json
   test ! -e /tmp/smoke/.release-please-manifest.json
 fi

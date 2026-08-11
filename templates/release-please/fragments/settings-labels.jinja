@@ -6,3 +6,12 @@
   - name: "autorelease: tagged"
     color: "ededed"
     description: release-please release PR has been tagged
+  # release-health's gate labels: an open release-blocker issue fails the
+  # release PR and the release pipeline's pre-flight; release-override on
+  # the release PR bypasses the gates for that one release.
+  - name: release-blocker
+    color: "B60205"
+    description: Blocks releases while open - release-health fails release PRs and the release pipeline
+  - name: release-override
+    color: "FBCA04"
+    description: "On a release PR: bypass release-health gates for this release"
