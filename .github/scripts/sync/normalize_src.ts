@@ -9,16 +9,20 @@
 // Env: TARGET_DISPLAY, HIDE_DETAILS, GITHUB_REPOSITORY, GITHUB_OUTPUT,
 // RUNNER_TEMP.
 
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { env, error, hideDetails, notice, requireEnv, setOutput } from "../shared/gha.ts";
 
 const canonical = `gh:${requireEnv("GITHUB_REPOSITORY")}`;
 const display = env("TARGET_DISPLAY");
+const answersPath = "target/.copier-answers.yml";
+const before = readFileSync(answersPath);
 const normalize = Bun.spawnSync(
   [
     "bun",
-    ".github/scripts/sync/normalize_src_path.ts",
+    join(import.meta.dir, "normalize_src_path.ts"),
     "--answers",
-    "target/.copier-answers.yml",
+    answersPath,
     "--canonical",
     canonical,
   ],
@@ -35,8 +39,11 @@ if (normalize.exitCode !== 0) {
   process.exit(1);
 }
 const recorded = normalize.stdout.toString().replace(/\n+$/, "");
-if (recorded !== canonical) {
-  // copier update refuses a dirty tree, so the rewrite is committed.
+// The commit decision is byte-level (Buffer, not decoded text: utf-8
+// decoding maps invalid bytes to U+FFFD, which can read equal while the
+// on-disk bytes changed): a rewrite that only reformats the line still
+// dirties the tree, and copier update refuses a dirty tree.
+if (!readFileSync(answersPath).equals(before)) {
   const commit = Bun.spawnSync(
     [
       "git",
@@ -53,7 +60,13 @@ if (recorded !== canonical) {
     { stdio: ["inherit", "inherit", "inherit"] },
   );
   if (commit.exitCode !== 0) process.exit(commit.exitCode ?? 1);
-  if (hideDetails()) {
+  if (recorded === canonical) {
+    // Nothing target-specific to hide: the value already was the
+    // canonical (public) source; only the line's formatting changed.
+    notice(
+      `${display}: the _src_path line already recorded '${canonical}' but not byte-for-byte; rewritten canonically for this and future updates.`,
+    );
+  } else if (hideDetails()) {
     notice(
       `${display}: _src_path was not the canonical template source (recorded value hidden: private repository); rewritten to '${canonical}' for this and future updates.`,
     );

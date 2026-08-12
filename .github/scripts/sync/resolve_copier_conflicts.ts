@@ -84,10 +84,17 @@ function stripCr(line: Buffer): Buffer {
   return line.subarray(0, end);
 }
 
-type Resolution = { kind: "malformed" } | { kind: "resolved"; resolved: Buffer; dropped: Buffer[] };
+type Resolution =
+  | { kind: "malformed" }
+  | { kind: "resolved"; resolved: Buffer; dropped: DroppedHunk[] };
 
-/** How each dropped hunk was handled, parallel to Resolution.dropped. */
-type HunkDisposition = "dropped" | "moved" | "moved-tail";
+/** A dropped local hunk with the tail it would contribute below the
+ * sentinel and how it was handled. */
+interface DroppedHunk {
+  hunk: Buffer;
+  tail: Buffer;
+  disposition: "dropped" | "moved" | "moved-tail";
+}
 
 function isSentinelLine(line: Buffer): boolean {
   const stripped = stripCr(line);
@@ -133,6 +140,18 @@ function appendBelowSentinel(resolved: Buffer, hunks: Buffer[]): Buffer {
   return Buffer.concat(parts);
 }
 
+/** Classify a dropped hunk against the kept side: with no sentinel in the
+ * kept side (or nothing left after the hunk's own) it is dropped to the
+ * summary; otherwise its tail moves below the sentinel - whole when the
+ * hunk carried no stale managed half, tail-only when it did. */
+function classifyHunk(hunk: Buffer, hasSentinel: boolean): DroppedHunk {
+  const tail = hasSentinel ? localTailOf(hunk) : hunk;
+  if (!hasSentinel || tail.toString("utf-8").trim().length === 0) {
+    return { hunk, tail, disposition: "dropped" };
+  }
+  return { hunk, tail, disposition: tail.length === hunk.length ? "moved" : "moved-tail" };
+}
+
 /** Keep the template side of every conflict block.
  *
  * Malformed means a marker line outside the strict START/SEP/END sequence;
@@ -169,7 +188,13 @@ function resolveConflicts(data: Buffer): Resolution {
     out.push(...lines.slice(j + 1, k));
     i = k + 1;
   }
-  return { kind: "resolved", resolved: joinLines(out), dropped };
+  const resolved = joinLines(out);
+  const hasSentinel = hasLocalSectionSentinel(resolved);
+  return {
+    kind: "resolved",
+    resolved,
+    dropped: dropped.map((hunk) => classifyHunk(hunk, hasSentinel)),
+  };
 }
 
 function fenceFor(text: string): string {
@@ -182,7 +207,7 @@ function fenceFor(text: string): string {
   return "`".repeat(Math.max(4, longest + 1));
 }
 
-function summarize(rel: string, resolution: Resolution, dispositions: HunkDisposition[]): string {
+function summarize(rel: string, resolution: Resolution): string {
   const lines = [`#### \`${rel}\``, ""];
   if (resolution.kind === "malformed") {
     lines.push(
@@ -191,12 +216,12 @@ function summarize(rel: string, resolution: Resolution, dispositions: HunkDispos
     );
     return lines.join("\n");
   }
-  resolution.dropped.forEach((hunk, index) => {
+  resolution.dropped.forEach(({ hunk, disposition }, index) => {
     const text = hunk.toString("utf-8");
     const heading =
-      dispositions[index] === "moved"
+      disposition === "moved"
         ? `Conflict ${index + 1}: local lines moved below the repository-specific marker (template side kept in place):`
-        : dispositions[index] === "moved-tail"
+        : disposition === "moved-tail"
           ? `Conflict ${index + 1}: the local tail after the marker was moved below the repository-specific marker; the stale local copy of the managed half above it was dropped:`
           : `Conflict ${index + 1}: dropped local lines (template version kept):`;
     lines.push(heading, "");
@@ -309,7 +334,6 @@ function main(): number {
     if (!data.includes(START)) continue;
     const printedRel = relative(root, path);
     const resolution = resolveConflicts(data);
-    let dispositions: HunkDisposition[] = [];
     // Paths and hunk content are target file data: a hide-details target
     // gets counts here and the full detail only in the PR body, which
     // lives in the private repo.
@@ -320,13 +344,9 @@ function main(): number {
           : `${printedRel}: malformed or out-of-order conflict markers, left untouched`,
       );
     } else if (resolution.dropped.length > 0) {
-      const hasSentinel = hasLocalSectionSentinel(resolution.resolved);
-      const tails = resolution.dropped.map((hunk) => (hasSentinel ? localTailOf(hunk) : hunk));
-      dispositions = resolution.dropped.map((hunk, index) => {
-        if (!hasSentinel || tails[index].toString("utf-8").trim().length === 0) return "dropped";
-        return tails[index].length === hunk.length ? "moved" : "moved-tail";
-      });
-      const appended = tails.filter((_, index) => dispositions[index] !== "dropped");
+      const appended = resolution.dropped
+        .filter(({ disposition }) => disposition !== "dropped")
+        .map(({ tail }) => tail);
       writeFileSync(
         path,
         appended.length > 0
@@ -346,7 +366,7 @@ function main(): number {
       // Marker bytes appear only mid-line (not a conflict); skip.
       continue;
     }
-    sections.push(summarize(printedRel, resolution, dispositions));
+    sections.push(summarize(printedRel, resolution));
   }
 
   const full = sections.join("\n");

@@ -176,7 +176,7 @@ if (channel === "staging") {
 }
 
 const runId = commitRunParse(mustCapture(["git", "log", "-1", "--format=%B", tipSha]));
-if (!/^[0-9]+$/.test(runId)) {
+if (runId === "") {
   fail(
     `${subject} carries no parseable 'run:' line, so the build run that produced it cannot be verified. ${rebuildHint}`,
   );

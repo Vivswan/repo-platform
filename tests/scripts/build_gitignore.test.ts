@@ -4,9 +4,20 @@
 // module's fragment, gets guard-wrapped in the later one, and appears once
 // in the self output. The guard tests pin the RENDER contract: a true guard
 // yields exactly the unguarded bytes, a false guard yields nothing at all.
+// The stray-fragment tests pin the orphan guard: a generated fragment must
+// not outlive its module's gitignore_sources declaration.
 
-import { describe, expect, test } from "bun:test";
-import { buildFragment, fragmentPlans, selfSources } from "../../scripts/build_gitignore";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import {
+  buildFragment,
+  fragmentPlans,
+  selfSources,
+  strayFragmentFiles,
+} from "../../scripts/build_gitignore";
+import type { ModuleManifest } from "../../scripts/module_manifests";
 
 const SECTIONS: Record<string, string> = {
   "Node.gitignore": "## Node (github/gitignore Node.gitignore)\nnode_modules/\n",
@@ -98,5 +109,42 @@ describe("buildFragment", () => {
 describe("selfSources", () => {
   test("a shared source appears once in the self output's section list", () => {
     expect(selfSources(SHARED)).toEqual(["Node.gitignore", "bun.gitignore"]);
+  });
+});
+
+describe("strayFragmentFiles", () => {
+  const templates = mkdtempSync(join(tmpdir(), "gitignore-strays-"));
+  beforeAll(() => {
+    for (const module of ["bun", "uv"]) {
+      mkdirSync(join(templates, module, "fragments"), { recursive: true });
+      writeFileSync(join(templates, module, "fragments", "gitignore.jinja"), "\n## stale\n");
+    }
+    mkdirSync(join(templates, "agents"), { recursive: true });
+  });
+  afterAll(() => rmSync(templates, { recursive: true, force: true }));
+
+  const manifest = (module: string, gitignore_sources?: string[]): ModuleManifest => ({
+    module,
+    description: `the ${module} module`,
+    ...(gitignore_sources ? { gitignore_sources } : {}),
+  });
+
+  test("declaring modules and fragment-less modules pass", () => {
+    expect(
+      strayFragmentFiles(
+        [
+          manifest("bun", ["Node.gitignore"]),
+          manifest("uv", ["Python.gitignore"]),
+          manifest("agents"),
+        ],
+        templates,
+      ),
+    ).toEqual([]);
+  });
+
+  test("a fragment outliving its module's gitignore_sources key is flagged", () => {
+    expect(
+      strayFragmentFiles([manifest("bun", ["Node.gitignore"]), manifest("uv")], templates),
+    ).toEqual(["templates/uv/fragments/gitignore.jinja"]);
   });
 });

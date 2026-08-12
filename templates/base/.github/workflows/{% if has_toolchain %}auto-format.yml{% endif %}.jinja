@@ -3,6 +3,13 @@
 # commit to the PR branch, then removes the label. Generated once by
 # {{ github_username }}/repo-platform and never overwritten by template
 # sync: adjust the format commands to this repository's tooling.
+#
+# The push uses github.token, which starts no workflows: the PR's checks
+# will not re-run on the new head, so the job says so loudly (a PR comment
+# and a warning annotation; close/reopen the PR to re-run them). Swapping
+# in a PAT with Contents write would re-trigger CI automatically, but the
+# formatter tooling of any same-repo PR runs in this checkout before the
+# push - only wire in a token you are willing to expose to it.
 
 name: Auto Format
 
@@ -40,16 +47,30 @@ jobs:
         env:
           GH_TOKEN: {% raw %}${{ github.token }}{% endraw %}
           HEAD_REF: {% raw %}${{ github.event.pull_request.head.ref }}{% endraw %}
+          PR_NUMBER: {% raw %}${{ github.event.pull_request.number }}{% endraw %}
         run: |
           if git diff --quiet; then
             echo "nothing to format"
-          else
-            git config user.name "github-actions[bot]"
-            git config user.email "github-actions[bot]@users.noreply.github.com"
-            git add -A
-            git commit -m "style: apply automated formatting"
-            git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:"$HEAD_REF"
+            exit 0
           fi
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "style: apply automated formatting"
+          git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:"$HEAD_REF"
+          # The commit landed via github.token, which starts no workflows:
+          # this PR's checks will not re-run on the new head. Surface that
+          # on the PR (once) and as a run annotation. The push itself
+          # succeeded, so the run stays green - a red run on every
+          # formatted PR would drown real failures.
+          marker="<!-- auto-format: no-retrigger-token -->"
+          comments=$(gh api "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments" --paginate --jq '.[].body' || true)
+          case "$comments" in
+            *"$marker"*) ;;
+            *) gh pr comment "$PR_NUMBER" -R "$GITHUB_REPOSITORY" --body "$marker
+          Pushed a formatting commit with the default workflow token, which starts no workflows, so checks will not re-run on the new head. Close and reopen this PR to re-run them." || true ;;
+          esac
+          echo "::warning::formatting commit pushed with github.token - checks will not re-run on the new head; close/reopen the PR to re-run them"
       # The label is a one-shot request: remove it even when a step failed,
       # so a broken run cannot loop.
       - name: Remove the fix-lint label

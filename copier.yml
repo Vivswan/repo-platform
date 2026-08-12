@@ -186,11 +186,15 @@ fuzzer_label:
   help: Label for the deduplicated nightly-fuzz tracking issue
   default: fuzz-nightly
   # The value lands in gh args (a leading dash would parse as a flag), in the
-  # rendered workflow's YAML, and in the settings-sync label list, so keep it
-  # to plain label characters within GitHub's 50-char limit. The fuzz-issue
-  # action enforces the same shape. \Z (not $) so a trailing newline in a
-  # piped-in answer cannot sneak past Python's regex semantics.
-  validator: "{% if not (fuzzer_label | regex_search('^[A-Za-z0-9._][A-Za-z0-9._: -]{0,49}\\Z')) %}fuzzer_label must be a plain label: letters, digits, ._:- and spaces, not starting with a dash, at most 50 characters{% endif %}"
+  # rendered workflow's YAML, and in the settings-sync label list, so the
+  # generated validator keeps it to plain label characters within GitHub's
+  # 50-char limit (the fuzz-issue action enforces the same shape) and
+  # rejects the label names the template already manages (the settings
+  # baseline, the release labels, the dependabot labels): reusing one would
+  # corrupt label sync and let a green night close unrelated issues.
+  # BEGIN GENERATED: fuzzer-label-validator (scripts/generate.ts - edit module.yml manifests, not this block)
+  validator: "{% if not (fuzzer_label | regex_search('^[A-Za-z0-9._][A-Za-z0-9._: -]{0,49}\\Z')) %}fuzzer_label must be a plain label: letters, digits, ._:- and spaces, not starting with a dash, at most 50 characters{% elif fuzzer_label | lower in ['dependencies', 'github_actions', 'bug', 'enhancement', 'fix-lint', 'settings-as-code-report', 'autorelease: pending', 'autorelease: tagged', 'release-blocker', 'release-override', 'javascript', 'deno', 'python:uv', 'rust'] %}fuzzer_label must not reuse a label the template already manages (GitHub label names are case-insensitive): a green night would close whatever issues carry it and every settings apply would fight over it{% endif %}"
+  # END GENERATED: fuzzer-label-validator
   when: "{{ 'fuzzer' in modules }}"
 
 # --- nightly module parameter (asked only when it is selected) ---
@@ -201,14 +205,14 @@ nightly_label:
   type: str
   help: Label for the deduplicated nightly-CI tracking issue
   default: nightly-failure
-  # Same shape constraints (and the same \Z rationale) as fuzzer_label
-  # above, plus stream independence: both streams dedup AND auto-close by
-  # label, so sharing one label would let either stream's green night close
-  # the other's active failure issue (and lift the release-health hold
-  # keyed on it), while settings.yml would declare two same-name
-  # labels whose colors fight on every apply. Compared lowercased: GitHub
-  # deduplicates label names case-insensitively.
-  validator: "{% if not (nightly_label | regex_search('^[A-Za-z0-9._][A-Za-z0-9._: -]{0,49}\\Z')) %}nightly_label must be a plain label: letters, digits, ._:- and spaces, not starting with a dash, at most 50 characters{% elif 'fuzzer' in modules and nightly_label | lower == fuzzer_label | lower %}nightly_label must differ from fuzzer_label (GitHub label names are case-insensitive): each stream needs its own tracking label or a green night in one closes the other's open issue{% endif %}"
+  # Same constraints as fuzzer_label above, plus stream independence: both
+  # streams dedup AND auto-close by label, so sharing one label would let
+  # either stream's green night close the other's active failure issue
+  # (and lift the release-health hold keyed on it), while settings.yml
+  # would declare two same-name labels whose colors fight on every apply.
+  # BEGIN GENERATED: nightly-label-validator (scripts/generate.ts - edit module.yml manifests, not this block)
+  validator: "{% if not (nightly_label | regex_search('^[A-Za-z0-9._][A-Za-z0-9._: -]{0,49}\\Z')) %}nightly_label must be a plain label: letters, digits, ._:- and spaces, not starting with a dash, at most 50 characters{% elif nightly_label | lower in ['dependencies', 'github_actions', 'bug', 'enhancement', 'fix-lint', 'settings-as-code-report', 'autorelease: pending', 'autorelease: tagged', 'release-blocker', 'release-override', 'javascript', 'deno', 'python:uv', 'rust'] %}nightly_label must not reuse a label the template already manages (GitHub label names are case-insensitive): a green night would close whatever issues carry it and every settings apply would fight over it{% elif 'fuzzer' in modules and nightly_label | lower == fuzzer_label | lower %}nightly_label must differ from fuzzer_label (GitHub label names are case-insensitive): each stream needs its own tracking label or a green night in one closes the other's open issue{% endif %}"
+  # END GENERATED: nightly-label-validator
   when: "{{ 'nightly' in modules }}"
 
 # --- skills module parameter (asked only when it is selected) ---

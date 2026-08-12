@@ -130,7 +130,7 @@ each fixed PR needs a close/reopen for its checks to appear).
 | Path | Purpose |
 |---|---|
 | `templates/` | SOURCE of the template: one folder per module (each with a `module.yml` manifest, the source of module identity) plus `base/`; shared files composed via `{# compose:<anchor> #}` markers filled from per-module `fragments/` or generated from manifest data |
-| `copier.yml` | Questions (module choices and toolchain defaults are generated regions fed by the `templates/<module>/module.yml` manifests; standards-only, project skeletons come from `uv init` / `bun init`) |
+| `copier.yml` | Questions (module choices, toolchain defaults, and the tracking-label validators are generated regions fed by the `templates/<module>/module.yml` manifests; standards-only, project skeletons come from `uv init` / `bun init`) |
 | `repos.yml` | Fleet config: which repos are managed (wildcard + exclude) and which channel each follows |
 | `settings/` | Central settings home: `defaults.yml` (shared baseline) + `repos/<name>.yml` per repo ([docs](docs/settings.md)) |
 | `.github/workflows/sync-repos.yml` | Push sync fan-out: release + weekly cron + dispatch, parallel matrix legs, one per repo |
@@ -170,9 +170,11 @@ source of truth for agent instructions.
   a release PR; merging it forces the `vX.Y.Z` tag, updates `CHANGELOG.md`,
   and creates the GitHub release as a draft (published releases are
   immutable), which ci.yml's `publish-release` job then flips live.
-- Publishing the release rebuilds the `latest` branch (tagged
-  `templates/vX.Y.Z`) and triggers `sync-repos.yml`, which pushes an update
-  PR into every managed repo.
+- Publishing a stable release whose tag matches `releases/latest` rebuilds
+  the `latest` branch (tagged `templates/vX.Y.Z`) and triggers
+  `sync-repos.yml`, which pushes an update PR into every managed repo
+  (prereleases and releases published for older tags do not move the
+  channel).
 - The weekly sync-repos cron is the catch-all: it heals any missed release
   sync, and staging-channel repos pick up merges to `main` through it. For
   one repo immediately:

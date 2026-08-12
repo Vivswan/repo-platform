@@ -1,7 +1,8 @@
 // Unit tests for the module-manifest loader: the zod schema's rejections
 // (every interpolation-hostile string shape), the file/folder existence
-// errors, the cross-manifest label-consistency check, and the MODULE_ORDER
-// load against the live repo's manifests.
+// errors, the cross-manifest label-consistency check, the MODULE_ORDER <->
+// templates/ integrity checks, and the MODULE_ORDER load against the live
+// repo's manifests.
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -10,6 +11,7 @@ import { join } from "node:path";
 import { MODULE_ORDER } from "../../scripts/compose_template";
 import {
   assertDependabotLabelConsistency,
+  assertModuleOrderIntegrity,
   assertTrackingLabelUniqueness,
   loadManifests,
   type ModuleManifest,
@@ -262,6 +264,26 @@ describe("parseManifest", () => {
     expect(() => parseManifest("demo", "description: x\ngate: true\n", WHERE)).toThrow("gate");
   });
 
+  test("gates reject jinja delimiters, #, /, \\, and newlines (they land in filename gates)", () => {
+    for (const piece of ["{", "}", "%", "#", "/", "\\\\"]) {
+      expect(() => parseManifest("demo", `description: x\ngate: "a ${piece} b"\n`, WHERE)).toThrow(
+        "filename gates",
+      );
+    }
+    expect(() => parseManifest("demo", 'description: x\ngate: "two\\nlines"\n', WHERE)).toThrow(
+      "single line",
+    );
+  });
+
+  test("gates keep single quotes - the default membership shape needs them", () => {
+    const manifest = parseManifest(
+      "demo",
+      "description: x\ngate: \"'demo' in modules or not private\"\n",
+      WHERE,
+    );
+    expect(manifest.gate).toBe("'demo' in modules or not private");
+  });
+
   test("a non-mapping manifest fails", () => {
     expect(() => parseManifest("demo", "- just\n- a list\n", WHERE)).toThrow("YAML mapping");
   });
@@ -374,6 +396,46 @@ describe("readManifest", () => {
     for (const name of ["Demo", "de|mo", "de mo", "3demo", "de`mo"]) {
       expect(() => readManifest(name, templates)).toThrow("must match");
     }
+  });
+});
+
+describe("assertModuleOrderIntegrity", () => {
+  const root = mkdtempSync(join(tmpdir(), "module-order-"));
+  const templates = join(root, "templates");
+  beforeAll(() => {
+    for (const module of MODULE_ORDER) {
+      mkdirSync(join(templates, module), { recursive: true });
+      writeFileSync(join(templates, module, "module.yml"), `description: the ${module} module\n`);
+    }
+    mkdirSync(join(templates, "base"));
+    writeFileSync(join(templates, "README.md"), "not a module folder\n");
+  });
+  afterAll(() => rmSync(root, { recursive: true, force: true }));
+
+  test("the live shape passes: every folder listed, base and files skipped", () => {
+    expect(() => assertModuleOrderIntegrity(MODULE_ORDER, templates)).not.toThrow();
+  });
+
+  test("a duplicate order entry throws", () => {
+    expect(() => assertModuleOrderIntegrity([...MODULE_ORDER, "bun"], templates)).toThrow(
+      "more than once",
+    );
+  });
+
+  test("a templates/ folder outside the order throws", () => {
+    expect(() =>
+      assertModuleOrderIntegrity(
+        MODULE_ORDER.filter((module) => module !== "uv"),
+        templates,
+      ),
+    ).toThrow("templates/uv/ is not a known module");
+  });
+
+  test("loadManifests inherits the integrity checks", () => {
+    mkdirSync(join(templates, "stray-module"));
+    expect(() => loadManifests(templates)).toThrow("templates/stray-module/ is not a known module");
+    rmSync(join(templates, "stray-module"), { recursive: true });
+    expect(loadManifests(templates).map((m) => m.module)).toEqual(MODULE_ORDER);
   });
 });
 

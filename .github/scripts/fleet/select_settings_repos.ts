@@ -27,13 +27,14 @@
 // GITHUB_EVENT_PATH supplies the single-repo dispatch input (a non-empty
 // ONLY_REPO env overrides it - the test harness and local runs use that).
 
-import { appendFileSync, existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
 import { env, notice, requireEnv, setOutput } from "../shared/gha.ts";
 import { parseWith } from "../shared/json.ts";
 import { capture } from "../shared/proc.ts";
 import { pushProbeStatus } from "./push_probe.ts";
+import { type EnrichedRow, parseEnriched } from "./redact.ts";
 
 const runnerTemp = requireEnv("RUNNER_TEMP");
 const pat = requireEnv("PAT");
@@ -234,15 +235,10 @@ runStage(
   join(runnerTemp, "enriched.json"),
 );
 
-interface EnrichedRow {
-  repo: string;
-  display: string;
-  redact_name: boolean;
-}
-
-const enriched = JSON.parse(readFileSync(join(runnerTemp, "enriched.json"), "utf-8")) as {
-  rows: EnrichedRow[];
-};
+const enriched = parseEnriched(
+  JSON.parse(readFileSync(join(runnerTemp, "enriched.json"), "utf-8")),
+  "select_settings_repos: enriched rows",
+);
 
 // Central filenames matched case-insensitively, like GitHub slugs (the
 // checkout's filesystem may or may not fold case itself).
@@ -276,9 +272,12 @@ const excluded = JSON.parse(readFileSync(join(runnerTemp, "excluded.json"), "utf
 // A single-repo dispatch is a scoped heal; the fleet-wide exclusion
 // reminders belong to the full runs.
 const sweepable = onlyRepo === "" ? excluded : [];
+// Central-file existence folds case like every other slug comparison: the
+// exclusion's casing in repos.yml need not match the settings file's.
+const centralFiles = new Set(readdirSync("settings/repos").map((name) => name.toLowerCase()));
 for (const repo of sweepable) {
   const name = repo.split("/").pop() ?? repo;
-  if (existsSync(`settings/repos/${name}.yml`)) continue;
+  if (centralFiles.has(`${name.toLowerCase()}.yml`)) continue;
   const probeResult = capture([
     "gh",
     "api",
@@ -297,7 +296,9 @@ for (const repo of sweepable) {
     // repo's error detail may not be - unless discovery proves the repo
     // public, only the HTTP code prints.
     let detail = probeResult.stderr.replace(/\n+$/, "");
-    const isPublic = discovered.some((entry) => entry.repo === repo && entry.private === false);
+    const isPublic = discovered.some(
+      (entry) => entry.repo.toLowerCase() === repo.toLowerCase() && entry.private === false,
+    );
     if (!isPublic) {
       const code = detail.match(/HTTP [0-9]+/)?.[0];
       detail = `${code ?? "no status"} (detail hidden: private repository)`;

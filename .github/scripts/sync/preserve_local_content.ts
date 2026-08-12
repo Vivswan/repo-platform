@@ -163,20 +163,26 @@ function withAppendix(renderNl: string, target: string): string {
   return `${renderNl}\n${appendix}\n\n${withTrailingNewline(target)}`;
 }
 
-export type CarryDisposition = "kept-whole" | "tail-appended" | "appendix";
-
-export interface TailCarry {
-  content: string;
-  disposition: CarryDisposition;
-  /** The target carried more than one sentinel line; everything after the
-   * first was kept, so the tail may hold a stale duplicate to review. */
-  extraSentinels: boolean;
-  /** Tail-appended only: the target's managed half (above its sentinel)
-   * differed from the fresh render's, so in-place edits there were NOT
-   * carried - recovery legitimately resets the managed half, but the drop
-   * must be loud, not silent. Kept-whole is identical by definition. */
-  managedHalfDiffers: boolean;
-}
+export type TailCarry =
+  | {
+      kind: "kept-whole";
+      content: string;
+      /** The target carried more than one sentinel line; everything after
+       * the first was kept, so the tail may hold a stale duplicate to
+       * review. */
+      extraSentinels: boolean;
+    }
+  | {
+      kind: "tail-appended";
+      content: string;
+      extraSentinels: boolean;
+      /** The target's managed half (above its sentinel) differed from the
+       * fresh render's, so in-place edits there were NOT carried -
+       * recovery legitimately resets the managed half, but the drop must
+       * be loud, not silent. (Kept-whole is identical by definition.) */
+      managedHalfDiffers: boolean;
+    }
+  | { kind: "appendix"; content: string };
 
 /** Managed-content carry, shared by the sentinel files and the prefix
  * docs: the render is the managed content, the target's local tail is
@@ -188,10 +194,9 @@ export function carryManagedTail(render: string, target: string): TailCarry | nu
   // Unchanged managed content: the target IS render + tail; keep it whole.
   if (target.startsWith(renderNl)) {
     return {
+      kind: "kept-whole",
       content: target,
-      disposition: "kept-whole",
       extraSentinels: splitAtFirstSentinel(target)?.extraSentinels ?? false,
-      managedHalfDiffers: false,
     };
   }
   // The render is usable as the managed half only when it ENDS at a
@@ -206,8 +211,8 @@ export function carryManagedTail(render: string, target: string): TailCarry | nu
       // Blank tail below the target's sentinel: never customized.
       if (split.tail.trim() === "") return null;
       return {
+        kind: "tail-appended",
         content: renderNl + split.tail,
-        disposition: "tail-appended",
         extraSentinels: split.extraSentinels,
         managedHalfDiffers: splitAtFirstSentinel(renderNl)?.head !== split.head,
       };
@@ -217,12 +222,7 @@ export function carryManagedTail(render: string, target: string): TailCarry | nu
   // was hand-edited past recognition). Keep BOTH: silently losing the
   // repository's content is the defect this script exists to fix, and the
   // recovery PR is manual-review, so a marked duplicate is acceptable.
-  return {
-    content: withAppendix(renderNl, target),
-    disposition: "appendix",
-    extraSentinels: false,
-    managedHalfDiffers: false,
-  };
+  return { kind: "appendix", content: withAppendix(renderNl, target) };
 }
 
 /** The LOCAL section split line-anchored on the BEGIN/END marker lines:
@@ -324,7 +324,7 @@ export interface Carried {
   note: string;
 }
 
-const TAIL_NOTES: Record<CarryDisposition, string> = {
+const TAIL_NOTES: Record<TailCarry["kind"], string> = {
   "kept-whole": "repository copy kept whole (its managed content matches the render)",
   "tail-appended": "repository tail re-appended below the fresh managed content",
   appendix:
@@ -350,6 +350,21 @@ const GITIGNORE_NOTES: Record<GitignoreCarry["disposition"], string> = {
     "until restored) - reconcile manually",
 };
 
+function tailNote(carry: TailCarry): string {
+  switch (carry.kind) {
+    case "kept-whole":
+      return TAIL_NOTES[carry.kind] + (carry.extraSentinels ? EXTRA_SENTINELS_NOTE : "");
+    case "tail-appended":
+      return (
+        TAIL_NOTES[carry.kind] +
+        (carry.extraSentinels ? EXTRA_SENTINELS_NOTE : "") +
+        (carry.managedHalfDiffers ? MANAGED_HALF_NOTE : "")
+      );
+    case "appendix":
+      return TAIL_NOTES[carry.kind];
+  }
+}
+
 /** Repository-local content of the pre-render target spliced into the
  * fresh render, or null when the render is already right. */
 export function carryLocalContent(rel: string, render: string, target: string): Carried | null {
@@ -363,13 +378,7 @@ export function carryLocalContent(rel: string, render: string, target: string): 
   } else if (PREFIX_DOCS.has(rel) || hasSentinelLine(render)) {
     const carry = carryManagedTail(render, target);
     if (carry !== null) {
-      carried = {
-        content: carry.content,
-        note:
-          TAIL_NOTES[carry.disposition] +
-          (carry.extraSentinels ? EXTRA_SENTINELS_NOTE : "") +
-          (carry.managedHalfDiffers ? MANAGED_HALF_NOTE : ""),
-      };
+      carried = { content: carry.content, note: tailNote(carry) };
     }
   }
   return carried;

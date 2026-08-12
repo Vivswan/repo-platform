@@ -34,21 +34,23 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import { gateExpression } from "./compose_template.ts";
-import { loadManifests } from "./module_manifests.ts";
+import { loadManifests, type ModuleManifest } from "./module_manifests.ts";
 
 const REPO_ROOT = resolve(import.meta.dir, "..");
+const TEMPLATES_DIR = join(REPO_ROOT, "templates");
 const LOCK_FILE = join(REPO_ROOT, "scripts", "gitignore.lock");
 const OUTPUT_TEMPLATE = join(REPO_ROOT, "templates", "base", ".gitignore.jinja");
 const OUTPUT_SELF = join(REPO_ROOT, ".gitignore");
 
 const ALWAYS = ["Global/Windows.gitignore", "Global/macOS.gitignore", "Global/Linux.gitignore"];
 
-/** Per-module upstream sources plus every module's gate expression, from
- *  the manifests in MODULE_ORDER. Read at run time, not at import time,
- *  so a broken manifest reports through the normal error path of whichever
- *  mode is running. */
-function byModule(): { entries: [string, string[]][]; gates: Map<string, string> } {
-  const manifests = loadManifests();
+/** Per-module upstream sources plus every module's gate expression. Reads
+ *  nothing itself: run() loads the manifests, so a broken one reports
+ *  through the normal error path of whichever mode is running. */
+function byModule(manifests: ModuleManifest[]): {
+  entries: [string, string[]][];
+  gates: Map<string, string>;
+} {
   return {
     entries: manifests.flatMap((m): [string, string[]][] =>
       m.gitignore_sources ? [[m.module, m.gitignore_sources]] : [],
@@ -78,7 +80,24 @@ const RAW = "https://raw.githubusercontent.com/github/gitignore";
 const HEAD_API = "https://api.github.com/repos/github/gitignore/commits/main";
 
 function fragmentOutput(module: string): string {
-  return join(REPO_ROOT, "templates", module, "fragments", `${ANCHOR}.jinja`);
+  return join(TEMPLATES_DIR, module, "fragments", `${ANCHOR}.jinja`);
+}
+
+/** Generated gitignore fragments whose module no longer declares
+ *  gitignore_sources: removing the manifest key stops regenerating the
+ *  fragment but leaves the old file behind, and composition would keep
+ *  shipping its stale sections to every render. Returned (for run() to
+ *  throw on, in every mode) rather than deleted - the missing key may be
+ *  the typo to fix, not the fragment. */
+export function strayFragmentFiles(manifests: ModuleManifest[], templatesDir: string): string[] {
+  const strays: string[] = [];
+  for (const m of manifests) {
+    if (m.gitignore_sources) continue;
+    if (existsSync(join(templatesDir, m.module, "fragments", `${ANCHOR}.jinja`))) {
+      strays.push(`templates/${m.module}/fragments/${ANCHOR}.jinja`);
+    }
+  }
+  return strays;
 }
 
 async function fetchText(url: string, headers?: Record<string, string>): Promise<string> {
@@ -242,7 +261,17 @@ async function main(): Promise<number> {
 }
 
 async function run(mode: Mode): Promise<number> {
-  const { entries: moduleSources, gates } = byModule();
+  const manifests = loadManifests();
+  const strays = strayFragmentFiles(manifests, TEMPLATES_DIR);
+  if (strays.length > 0) {
+    throw new Error(
+      `stray gitignore fragment(s) for module(s) without gitignore_sources: ` +
+        `${strays.join(", ")} - a removed manifest key leaves the old fragment ` +
+        "shipping stale sections to every render; delete it (or restore the " +
+        "manifest's gitignore_sources)",
+    );
+  }
+  const { entries: moduleSources, gates } = byModule(manifests);
   const sources = selfSources(moduleSources);
 
   const paths = [...ALWAYS, ...sources];

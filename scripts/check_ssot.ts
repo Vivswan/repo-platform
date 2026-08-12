@@ -25,6 +25,7 @@ import { existsSync, lstatSync, readdirSync, readFileSync, readlinkSync } from "
 import { join, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { centralIdentityIssues } from "../.github/scripts/fleet/validate_central_settings.ts";
+import { captureName } from "../.github/scripts/sync/run_hidden.ts";
 import { dependabotLabels } from "./compose_template.ts";
 import { MARKER_TOKENS, trackingGate, trackingStreams } from "./generate.ts";
 import { type JinjaVars, normalizeJinja, placeholderJinja } from "./jinja_subset.ts";
@@ -171,6 +172,15 @@ export function semanticLines(text: string): string[] {
     .split("\n")
     .map((line) => line.replace(/\s+$/, ""))
     .filter((line) => line.trim() !== "" && !line.trim().startsWith("#"));
+}
+
+/** Every `async function <name>() { ... }` block in `text`, matched from
+ *  the declaration to the closing brace at the declaration's own indent,
+ *  raw bytes included - for rules that pin inline script copies
+ *  byte-identical. */
+export function inlineFunctionCopies(text: string, name: string): string[] {
+  const block = new RegExp(`^( *)async function ${name}\\(\\) \\{\\n[\\s\\S]*?\\n\\1\\}`, "gm");
+  return [...text.matchAll(block)].map((match) => match[0]);
 }
 
 const usedDivergences = new Set<number>();
@@ -738,20 +748,20 @@ const rules: Rule[] = [
         }
       }
 
-      const resolveRefs = read(".github/scripts/sync/resolve_refs.ts");
-      // Anchor on the channel validation guard, the same shape as
-      // branch_tree.ts's.
-      const guardArm = mustMatch(
-        resolveRefs,
-        /channel !== "([a-z]+)" && channel !== "([a-z]+)"/,
-        "resolve_refs.ts",
-        "channel validation",
-      );
+      const answersFile = read(".github/scripts/sync/answers_file.ts");
+      // The sync consumers all take Channel from this one const.
+      const syncChannels = mustMatch(
+        answersFile,
+        /const CHANNELS = \[([^\]]+)\]/,
+        "answers_file.ts",
+        "CHANNELS",
+      )[1];
       mismatches.push(
-        ...setMismatch(".github/scripts/sync/resolve_refs.ts channel validation", reference, [
-          guardArm[1],
-          guardArm[2],
-        ]),
+        ...setMismatch(
+          ".github/scripts/sync/answers_file.ts CHANNELS",
+          reference,
+          [...syncChannels.matchAll(/"([^"]+)"/g)].map((m) => m[1]),
+        ),
       );
 
       const protect = read(".github/workflows/protect-build-branches.yml");
@@ -2161,10 +2171,6 @@ const rules: Rule[] = [
     name: "hidden-capture-names",
     run: () => {
       const mismatches: Mismatch[] = [];
-      // Mirrors run_hidden.ts's slug transform (non-alphanumeric runs
-      // squeezed to '-' and trimmed).
-      const slugify = (label: string) =>
-        label.replace(/[^A-Za-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
       const labels = [
         ...read(".github/workflows/reusable-template-sync.yml").matchAll(
           /run_hidden\.ts "([^"]+)" --/g,
@@ -2178,7 +2184,7 @@ const rules: Rule[] = [
       if (labels.length === 0) {
         throw new Error("no run_hidden labels found in the sync call sites - anchor lost");
       }
-      const derived = new Set(labels.map((l) => `hidden-${slugify(l)}.log`));
+      const derived = new Set(labels.map(captureName));
       const referenced = [
         ...read(".github/scripts/sync/open_pr.ts").matchAll(/hidden-[A-Za-z0-9-]+\.log/g),
       ].map((m) => m[0]);
@@ -2191,6 +2197,46 @@ const rules: Rule[] = [
             file: ".github/scripts/sync/open_pr.ts",
             expected: `a capture name derived from a run_hidden label (${[...derived].join(", ")})`,
             got: name,
+          });
+        }
+      }
+      return mismatches;
+    },
+  },
+
+  {
+    // The CODEOWNERS assignee-resolution function is inlined three times:
+    // twice in reusable-auto-assign.yml and once in
+    // reusable-auto-assign-alerts.yml (split for permissions - see the file
+    // headers). It cannot be hoisted: a reusable workflow runs from the
+    // CALLER's checkout, where this repo's scripts do not exist. Pin the
+    // copies byte-identical so a fix to one cannot silently leave the
+    // others behind.
+    name: "auto-assign-codeowners-parity",
+    run: () => {
+      const mismatches: Mismatch[] = [];
+      const sites = [
+        { file: ".github/workflows/reusable-auto-assign.yml", copies: 2 },
+        { file: ".github/workflows/reusable-auto-assign-alerts.yml", copies: 1 },
+      ];
+      const found: { file: string; body: string }[] = [];
+      for (const site of sites) {
+        const blocks = inlineFunctionCopies(read(site.file), "resolveAssignees");
+        if (blocks.length !== site.copies) {
+          throw new Error(
+            `${site.file}: expected ${site.copies} resolveAssignees ` +
+              `cop${site.copies === 1 ? "y" : "ies"}, found ${blocks.length} - anchor lost`,
+          );
+        }
+        for (const body of blocks) found.push({ file: site.file, body });
+      }
+      const [canon, ...rest] = found;
+      for (const copy of rest) {
+        if (copy.body !== canon.body) {
+          mismatches.push({
+            file: copy.file,
+            expected: `a resolveAssignees block byte-identical to ${canon.file}'s first copy`,
+            got: "a drifted copy - update every inline copy together",
           });
         }
       }

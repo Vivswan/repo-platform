@@ -328,6 +328,14 @@ describe("spliceContributions", () => {
     expect(errors[0]).toContain("is tight (-#}) but carries a trailing literal");
   });
 
+  test("an anchor with no contributions is an error, never a silent no-op splice", () => {
+    const files = skeleton("needs:\n{# compose:demo #}\n    runs-on: x\n");
+    const errors = spliceContributions(files, new Map());
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain("anchor 'demo' has no contributions");
+    expect(dataOf(files)).toContain("{# compose:demo #}");
+  });
+
   test("contributions splice in MODULE_ORDER order regardless of input order", () => {
     const files = skeleton("needs:\n{# compose:demo -#}\n    runs-on: x\n");
     const contributions = new Map<string, Contribution[]>([

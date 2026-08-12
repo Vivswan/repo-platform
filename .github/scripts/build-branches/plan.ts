@@ -5,7 +5,7 @@
 // Env: EVENT_NAME, DISPATCH_CHANNEL, RELEASE_TAG, GH_TOKEN,
 // GITHUB_REPOSITORY, GITHUB_OUTPUT.
 
-import { env, requireEnv, setOutput } from "../shared/gha.ts";
+import { env, requireEnv, setOutput, warning } from "../shared/gha.ts";
 import { capture } from "../shared/proc.ts";
 
 const eventName = requireEnv("EVENT_NAME");
@@ -50,8 +50,20 @@ if (eventName === "push" || eventName === "schedule") {
   }
 }
 if (eventName === "release") {
-  buildLatest = true;
-  latestVer = requireEnv("RELEASE_TAG");
+  // The event's tag can be a prerelease or a release published on an
+  // older tag; the latest branch follows only releases/latest (the
+  // newest stable release), so anything else must not roll it or mint
+  // a templates tag.
+  const releaseTag = requireEnv("RELEASE_TAG");
+  const newest = latestReleaseTag();
+  if (releaseTag === newest) {
+    buildLatest = true;
+    latestVer = releaseTag;
+  } else {
+    warning(
+      `published release ${releaseTag} is not the newest stable release (${newest === "" ? "none exists" : newest}); the latest branch stays on the newest stable release, so this event builds nothing.`,
+    );
+  }
 } else if (eventName === "workflow_dispatch" && dispatchChannel !== "staging") {
   // Manual dispatch rebuilds latest unconditionally (idempotent: unchanged
   // content appends nothing, existing tags are kept).

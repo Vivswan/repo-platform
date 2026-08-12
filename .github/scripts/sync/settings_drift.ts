@@ -32,10 +32,10 @@
 // it). Errors go to stderr as ::error:: workflow commands with a nonzero
 // exit.
 
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { parse } from "yaml";
 import { parseFlags } from "../shared/flags.ts";
+import { AnswersFileError, type CopierAnswers, readAnswersFile } from "./answers_file.ts";
 
 const FLAGS = [
   "--answers",
@@ -188,27 +188,24 @@ function main(args: string[]): void {
   const hideDetails = flags["--hide-details"] === "true";
 
   const answersPath = flags["--answers"];
-  let answers: unknown;
+  let answers: CopierAnswers;
   try {
-    answers = parse(readFileSync(answersPath, "utf-8"));
+    answers = readAnswersFile(answersPath);
   } catch (err) {
+    if (!(err instanceof AnswersFileError)) throw err;
     // The parser's message can quote target file content; a hidden
     // target gets the detail-free version.
     if (hideDetails) {
       fail(
-        `${display}: the recorded answers file cannot be read as YAML (detail hidden: ` +
-          "private repository). Reproduce the sync locally - see docs/private-repos.md.",
+        `${display}: the recorded answers file cannot be read as a YAML mapping (detail ` +
+          "hidden: private repository). Reproduce the sync locally - see docs/private-repos.md.",
       );
     }
-    const detail = err instanceof Error ? err.message.split("\n")[0] : String(err);
-    fail(`${answersPath}: cannot read as YAML: ${detail}`);
-  }
-  if (typeof answers !== "object" || answers === null || Array.isArray(answers)) {
-    fail(`${answersPath}: top level must be a mapping`);
+    fail(`${answersPath}: ${err.message}`);
   }
 
   const { drifts, errors } = detectDrift(
-    answers as Record<string, unknown>,
+    answers.fields,
     flags["--live-private"],
     flags["--live-description"],
   );

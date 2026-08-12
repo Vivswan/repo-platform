@@ -16,7 +16,8 @@
 // whenever `managed` contains the "*" wildcard. `excluded` prints the
 // exclude list as a JSON array of slugs (select_settings_repos.ts uses it
 // to report paused repos that still carry an in-repo settings file).
-// Errors go to stderr as
+// Slugs match case-insensitively everywhere, like GitHub repo identity;
+// original casing is kept for display. Errors go to stderr as
 // ::error:: workflow commands, all of them at once, and the exit code is
 // nonzero.
 
@@ -35,6 +36,7 @@ export interface Registry {
   managed: { wildcard: boolean; repos: string[] };
   exclude: string[];
   defaultChannel: Channel | null;
+  // Keyed by the lowercased slug (the parse boundary normalizes case).
   config: Map<string, { channel: Channel }>;
 }
 
@@ -116,29 +118,29 @@ export function validateRegistry(
         );
         continue;
       }
-      if (seen.has(entry)) {
-        errors.push(`${label}: duplicate managed entry "${entry}"`);
+      if (seen.has(entry.toLowerCase())) {
+        errors.push(`${label}: duplicate managed entry "${entry}" (slugs match ignoring case)`);
       }
-      seen.add(entry);
+      seen.add(entry.toLowerCase());
       repos.push(entry);
     }
   }
 
   const exclude: string[] = [];
+  const excluded = new Set<string>();
   if (data.exclude !== undefined) {
     if (!Array.isArray(data.exclude)) {
       errors.push(`${label}: exclude must be a list of owner/name slugs`);
     } else {
-      const seen = new Set<string>();
       for (const entry of data.exclude) {
         if (!isSlug(entry)) {
           errors.push(`${label}: exclude entry ${JSON.stringify(entry)} is not an owner/name slug`);
           continue;
         }
-        if (seen.has(entry)) {
-          errors.push(`${label}: duplicate exclude entry "${entry}"`);
+        if (excluded.has(entry.toLowerCase())) {
+          errors.push(`${label}: duplicate exclude entry "${entry}" (slugs match ignoring case)`);
         }
-        seen.add(entry);
+        excluded.add(entry.toLowerCase());
         exclude.push(entry);
       }
       if (exclude.length > 0 && !wildcard) {
@@ -179,17 +181,22 @@ export function validateRegistry(
     if (!isPlainObject(data.config)) {
       errors.push(`${label}: config must be a mapping of owner/name slugs`);
     } else {
+      const seen = new Set<string>();
       for (const [slug, value] of Object.entries(data.config)) {
         if (!isSlug(slug)) {
           errors.push(`${label}: config key "${slug}" is not an owner/name slug`);
           continue;
         }
-        if (exclude.includes(slug)) {
+        if (excluded.has(slug.toLowerCase())) {
           errors.push(
             `${label}: config entry "${slug}" is also in exclude - ` +
               `an excluded repo is never synced, so its config is dead; remove one of the two`,
           );
         }
+        if (seen.has(slug.toLowerCase())) {
+          errors.push(`${label}: duplicate config entry "${slug}" (slugs match ignoring case)`);
+        }
+        seen.add(slug.toLowerCase());
         if (!isPlainObject(value)) {
           errors.push(`${label}: config.${slug} must be a mapping`);
           continue;
@@ -201,7 +208,7 @@ export function validateRegistry(
         }
         if (value.channel !== undefined) {
           if (isChannel(value.channel)) {
-            config.set(slug, { channel: value.channel });
+            config.set(slug.toLowerCase(), { channel: value.channel });
           } else {
             errors.push(
               `${label}: config.${slug}.channel ${JSON.stringify(value.channel)} ` +
@@ -239,7 +246,12 @@ export function selectRepos(
     );
   }
 
-  const pool = new Set<string>(registry.managed.repos);
+  // Keyed by lowercased slug so a case-variant entry cannot slip past the
+  // exclude list or double-select a repo; values keep the listed casing.
+  const pool = new Map<string, string>();
+  for (const slug of registry.managed.repos) {
+    pool.set(slug.toLowerCase(), slug);
+  }
   if (registry.managed.wildcard && discovered !== null) {
     discovered.forEach((slug, index) => {
       if (!isSlug(slug)) {
@@ -248,27 +260,28 @@ export function selectRepos(
         errors.push(`discovered list entry at index ${index} is not an owner/name slug`);
         return;
       }
-      pool.add(slug);
+      if (!pool.has(slug.toLowerCase())) pool.set(slug.toLowerCase(), slug);
     });
   }
   for (const slug of registry.exclude) {
-    pool.delete(slug);
+    pool.delete(slug.toLowerCase());
   }
 
   if (errors.length > 0) {
     return { selection: [], errors };
   }
 
-  let repos = [...pool].sort();
+  let repos = [...pool.values()].sort();
   if (options.repo !== undefined) {
-    repos = repos.filter((slug) => slug === options.repo);
+    const wanted = options.repo.toLowerCase();
+    repos = repos.filter((slug) => slug.toLowerCase() === wanted);
     if (repos.length === 0) {
       // The requested value is withheld: this print is publicly readable
       // and the operator-typed slug may name a private repository.
       errors.push(
         "--repo matched no selected repository (value withheld - it may be a private " +
           "slug): the repo you dispatched with is not in managed (or the discovered " +
-          "list), or it is listed in exclude; check the spelling and its case",
+          "list), or it is listed in exclude; check the spelling (matching ignores case)",
       );
       return { selection: [], errors };
     }
@@ -276,7 +289,7 @@ export function selectRepos(
 
   const selection = repos.map((slug): Selected => {
     const [owner, name] = slug.split("/", 2);
-    const channel = registry.config.get(slug)?.channel ?? registry.defaultChannel;
+    const channel = registry.config.get(slug.toLowerCase())?.channel ?? registry.defaultChannel;
     return { repo: slug, owner, name, channel };
   });
   return { selection, errors: [] };

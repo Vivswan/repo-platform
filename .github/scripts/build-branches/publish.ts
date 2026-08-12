@@ -74,7 +74,7 @@ function restampReason(channel: string, currentSourceSha: string): string {
     }
   }
   const prevRun = commitRunParse(tipMsg);
-  if (!/^[0-9]+$/.test(prevRun)) {
+  if (prevRun === "") {
     return "re-stamp: tip carries no parseable run line";
   }
   const runProbe = capture(["gh", "api", `repos/${repository}/actions/runs/${prevRun}`]);

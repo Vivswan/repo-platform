@@ -39,17 +39,16 @@ describe("carryManagedTail", () => {
   test("unchanged managed content keeps the target whole", () => {
     const target = `${contributingRender}\n## Local dev setup\n\nrepo tail\n`;
     expect(carryManagedTail(contributingRender, target)).toEqual({
+      kind: "kept-whole",
       content: target,
-      disposition: "kept-whole",
       extraSentinels: false,
-      managedHalfDiffers: false,
     });
   });
 
   test("diverged managed content re-appends the target's tail", () => {
     expect(carryManagedTail(contributingRender, contributingTarget)).toEqual({
       content: `${contributingRender}\n## Local dev setup\n\nrun the local thing\n`,
-      disposition: "tail-appended",
+      kind: "tail-appended",
       extraSentinels: false,
       managedHalfDiffers: true,
     });
@@ -69,7 +68,7 @@ describe("carryManagedTail", () => {
     // lose it silently.
     const target = "# AGENTS.md\n\nold managed guidance\n\n## Project docs\n\nrepo-local notes\n";
     const carry = carryManagedTail(agentsRender, target);
-    expect(carry?.disposition).toBe("appendix");
+    expect(carry?.kind).toBe("appendix");
     expect(carry?.content).toStartWith(agentsRender);
     expect(carry?.content).toContain("repo-platform:recovery-appendix");
     expect(carry?.content).toEndWith(target);
@@ -78,14 +77,14 @@ describe("carryManagedTail", () => {
   test("render not ending at a sentinel is never used as a split anchor", () => {
     const render = `docs\n${SENTINEL}\ntrailing managed line\n`;
     const carry = carryManagedTail(render, `docs\n${SENTINEL}\nrepo tail\n`);
-    expect(carry?.disposition).toBe("appendix");
+    expect(carry?.kind).toBe("appendix");
   });
 
   test("duplicate sentinels in the target: split at the FIRST, flag the extras", () => {
     const target = `${SENTINEL}\nbetween the markers\n${SENTINEL}\nafter the last\n`;
     expect(carryManagedTail(agentsRender, target)).toEqual({
       content: `${agentsRender}between the markers\n${SENTINEL}\nafter the last\n`,
-      disposition: "tail-appended",
+      kind: "tail-appended",
       extraSentinels: true,
       managedHalfDiffers: true,
     });
@@ -96,7 +95,7 @@ describe("carryManagedTail", () => {
     const target = `*.jpg binary\n${HASH_SENTINEL}\n*.dat binary\n`;
     expect(carryManagedTail(render, target)).toEqual({
       content: `${render}*.dat binary\n`,
-      disposition: "tail-appended",
+      kind: "tail-appended",
       extraSentinels: false,
       managedHalfDiffers: true,
     });
@@ -105,7 +104,7 @@ describe("carryManagedTail", () => {
   test("appendix in a hash-sentinel file uses hash comments, not an HTML comment", () => {
     const render = `*.png binary\n${HASH_SENTINEL}\n`;
     const carry = carryManagedTail(render, "legacy attributes, no sentinel\n");
-    expect(carry?.disposition).toBe("appendix");
+    expect(carry?.kind).toBe("appendix");
     expect(carry?.content).toContain("# repo-platform:recovery-appendix");
     expect(carry?.content).not.toContain("<!--");
   });
@@ -114,7 +113,7 @@ describe("carryManagedTail", () => {
     const render = `docs\n${SENTINEL}`;
     expect(carryManagedTail(render, `old\n${SENTINEL}\nrepo tail\n`)).toEqual({
       content: `docs\n${SENTINEL}\nrepo tail\n`,
-      disposition: "tail-appended",
+      kind: "tail-appended",
       extraSentinels: false,
       managedHalfDiffers: true,
     });
@@ -127,18 +126,17 @@ describe("carryManagedTail", () => {
   test("kept-whole still flags duplicate sentinels in the tail", () => {
     const target = `${agentsRender}\nrepo tail\n${SENTINEL}\nstale duplicate\n`;
     expect(carryManagedTail(agentsRender, target)).toEqual({
+      kind: "kept-whole",
       content: target,
-      disposition: "kept-whole",
       extraSentinels: true,
-      managedHalfDiffers: false,
     });
   });
 
   test("a second recovery over an appendix result keeps it whole (same template)", () => {
     const legacy = "old copy without a sentinel\nrepo-local notes\n";
     const first = carryManagedTail(agentsRender, legacy);
-    expect(first?.disposition).toBe("appendix");
-    expect(carryManagedTail(agentsRender, first?.content ?? "")?.disposition).toBe("kept-whole");
+    expect(first?.kind).toBe("appendix");
+    expect(carryManagedTail(agentsRender, first?.content ?? "")?.kind).toBe("kept-whole");
   });
 
   test("a second recovery after the template moved keeps a single appendix", () => {
@@ -146,7 +144,7 @@ describe("carryManagedTail", () => {
     const first = carryManagedTail(agentsRender, legacy);
     const newerRender = `# AGENTS.md\n\nnewer managed guidance\n\n${SENTINEL}\n`;
     const second = carryManagedTail(newerRender, first?.content ?? "");
-    expect(second?.disposition).toBe("tail-appended");
+    expect(second?.kind).toBe("tail-appended");
     expect(second?.content.split("repo-platform:recovery-appendix").length).toBe(2);
     expect(second?.content).toStartWith(newerRender);
     expect(second?.content).toEndWith(legacy);
@@ -157,7 +155,7 @@ describe("carryManagedTail", () => {
     const target = `old\r\n${SENTINEL}\r\nrepo tail\r\n`;
     expect(carryManagedTail(render, target)).toEqual({
       content: `${render}repo tail\r\n`,
-      disposition: "tail-appended",
+      kind: "tail-appended",
       extraSentinels: false,
       managedHalfDiffers: true,
     });
@@ -169,7 +167,7 @@ describe("carryManagedTail", () => {
     const render = `docs\n${SENTINEL}\n\n`;
     expect(carryManagedTail(render, `docs\n${SENTINEL}\nrepo tail\n`)).toEqual({
       content: `${render}repo tail\n`,
-      disposition: "tail-appended",
+      kind: "tail-appended",
       extraSentinels: false,
       managedHalfDiffers: false,
     });

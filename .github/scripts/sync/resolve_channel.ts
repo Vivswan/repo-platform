@@ -3,15 +3,16 @@
 // recorded copier answer is the fallback, and latest is the default when
 // neither is set. resolve_refs.ts and its test share this.
 
-import { readFileSync } from "node:fs";
+import { type Channel, type CopierAnswers, isChannel } from "./answers_file.ts";
 
-/** Resolve the channel name (unvalidated - the caller rejects anything
- * other than staging or latest). */
-export function resolveChannel(channelInput: string, answersFile: string): string {
-  if (channelInput !== "") return channelInput;
-  for (const line of readFileSync(answersFile, "utf-8").split("\n")) {
-    const fields = line.split(/\s+/).filter((field) => field !== "");
-    if (fields[0] === "channel:" && fields[1] !== undefined) return fields[1];
+/** The resolved channel, or the raw text of an unusable value (from the
+ * input or the recorded answer) for the caller's error message. */
+export function resolveChannel(
+  channelInput: string,
+  answers: CopierAnswers,
+): Channel | { invalid: string } {
+  if (channelInput !== "") {
+    return isChannel(channelInput) ? channelInput : { invalid: channelInput };
   }
-  return "latest";
+  return answers.channel ?? "latest";
 }

@@ -4,8 +4,11 @@
 // scripts/module_manifests.ts):
 //
 // - copier.yml: the modules question's choices block, the has_toolchain
-//   default expression, the pages_setup default + validator, and the
-//   pages_install_command / pages_build_command default chains.
+//   default expression, the pages_setup default + validator, the
+//   pages_install_command / pages_build_command default chains, and the
+//   tracking-label questions' validators (shape, the reserved-label
+//   roster the settings templates and dependabot manifests declare, and
+//   cross-stream distinctness).
 // - actions/validate-template/validate_generated_files.ts: the
 //   KNOWN_MODULES set literal and the TOOLCHAIN_PINS record literal (the
 //   action stays self-contained for client-side execution; only the
@@ -54,7 +57,9 @@
 
 import { existsSync, lstatSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { parse as parseYaml } from "yaml";
 import { z } from "zod";
+import { normalizeJinja, placeholderJinja } from "./jinja_subset.ts";
 import {
   loadManifests,
   MODULE_ORDER,
@@ -260,6 +265,112 @@ export function trackingLabelsInput(manifests: ModuleManifest[]): string[] {
     `          tracking-labels: {{ (${listExpr}) | join(',') | tojson }}`,
     "{%- endif %}",
   ];
+}
+
+/** The label names one settings YAML document (or `labels:`-prefixed
+ *  fragment) declares; an empty or missing list throws so a moved label
+ *  block cannot silently empty the reserved roster below. */
+export function labelNames(yamlText: string, where: string): string[] {
+  const doc = parseYaml(yamlText) as { labels?: unknown } | null;
+  const labels = doc?.labels;
+  if (!Array.isArray(labels) || labels.length === 0) {
+    throw new Error(`${where}: no labels list - the reserved-label roster lost a source`);
+  }
+  return labels.map((entry, index) => {
+    const name = (entry as { name?: unknown })?.name;
+    if (typeof name !== "string" || name === "") {
+      throw new Error(`${where}: label ${index} has no name`);
+    }
+    return name;
+  });
+}
+
+/** The two settings templates whose label declarations (together with the
+ *  manifests' dependabot labels, spliced in at compose time) form every
+ *  label the template already manages. The tracking streams' own
+ *  settings-labels fragments are excluded: they render from the very
+ *  answers the validators check. */
+function settingsLabelSources(): { settings: string; releaseFragment: string } {
+  const read = (rel: string) => readFileSync(join(REPO_ROOT, rel), "utf-8");
+  return {
+    settings: read("templates/settings-sync/.github/settings.yml.jinja"),
+    releaseFragment: read("templates/release-please/fragments/settings-labels.jinja"),
+  };
+}
+
+/** Every managed label name, lowercased (GitHub deduplicates label names
+ *  case-insensitively) and deduped, in declaration order. A tracking-label
+ *  answer equal to one of these would corrupt the roster's owner: settings
+ *  applies would fight over the label's color/description, and a green
+ *  night would close whatever issues carry it - including the
+ *  release-blocker stream the release gate keys on. */
+export function reservedLabelNames(
+  manifests: ModuleManifest[],
+  sources = settingsLabelSources(),
+): string[] {
+  // Identity substitutions never land in label names, so placeholder
+  // values keep normalizeJinja total over the settings templates.
+  const vars = { username: "OWNER", slug: "SLUG", copyrightHolder: "HOLDER" };
+  const names = [
+    ...labelNames(placeholderJinja(normalizeJinja(sources.settings, vars)), "settings.yml.jinja"),
+    ...labelNames(
+      `labels:\n${placeholderJinja(normalizeJinja(sources.releaseFragment, vars))}`,
+      "settings-labels.jinja",
+    ),
+    ...dependabotLabelGroups(manifests).map((group) => group.label),
+  ].map((name) => name.toLowerCase());
+  for (const name of names) {
+    if (/['"\\]/.test(name)) {
+      throw new Error(
+        `reserved label ${JSON.stringify(name)} contains ', ", or \\ - it lands ` +
+          "inside Jinja quotes within copier.yml's YAML double-quoted validators",
+      );
+    }
+  }
+  return [...new Set(names)];
+}
+
+/** One tracking-label question's generated validator line: the plain-label
+ *  shape (\Z, not $, so a trailing newline in a piped-in answer cannot
+ *  sneak past Python's regex semantics), the reserved-roster rejection,
+ *  and distinctness from every EARLIER stream's answer (copier asks the
+ *  questions in MODULE_ORDER, so a later answer is not comparable yet).
+ *  All comparisons are lowercased: GitHub label names are
+ *  case-insensitive. */
+export function trackingLabelValidator(
+  streams: TrackingManifest[],
+  index: number,
+  reserved: string[],
+): string[] {
+  const stream = streams[index];
+  const answer = stream.tracking_label.answer;
+  if (reserved.includes(stream.tracking_label.default.toLowerCase())) {
+    throw new Error(
+      `templates/${stream.module}/module.yml tracking_label default ` +
+        `'${stream.tracking_label.default}' is a label the template already ` +
+        "manages - the question's own default would fail its validator",
+    );
+  }
+  const roster = reserved.map((name) => `'${name}'`).join(", ");
+  const clauses = [
+    `{% if not (${answer} | regex_search('^[A-Za-z0-9._][A-Za-z0-9._: -]{0,49}\\\\Z')) %}` +
+      `${answer} must be a plain label: letters, digits, ._:- and spaces, ` +
+      "not starting with a dash, at most 50 characters",
+    `{% elif ${answer} | lower in [${roster}] %}` +
+      `${answer} must not reuse a label the template already manages ` +
+      "(GitHub label names are case-insensitive): a green night would close " +
+      "whatever issues carry it and every settings apply would fight over it",
+    ...streams.slice(0, index).map((prior) => {
+      const other = prior.tracking_label.answer;
+      return (
+        `{% elif '${prior.module}' in modules and ${answer} | lower == ${other} | lower %}` +
+        `${answer} must differ from ${other} (GitHub label names are ` +
+        "case-insensitive): each stream needs its own tracking label or a " +
+        "green night in one closes the other's open issue"
+      );
+    }),
+  ];
+  return [`  validator: "${clauses.join("")}{% endif %}"`];
 }
 
 export type PagesManifest = ModuleManifest & { pages: NonNullable<ModuleManifest["pages"]> };
@@ -627,6 +738,7 @@ export function moduleSchemaJson(): string {
 interface RegionInputs {
   manifests: ModuleManifest[];
   pages: PagesManifest[];
+  reserved: string[];
 }
 
 type SpanRegion = [name: string, body: (inputs: RegionInputs) => string[]];
@@ -644,73 +756,85 @@ type Target =
   | { file: string; syntax: "jinja"; regions: SpanRegion[] }
   | ({ file: string; syntax: "markdown" } & MarkdownRegions);
 
-const TARGETS: Target[] = [
-  {
-    file: "copier.yml",
-    syntax: "line",
-    prefix: "#",
-    regions: [
-      ["module-choices", ({ manifests }) => moduleChoices(manifests)],
-      ["has-toolchain-default", ({ manifests }) => hasToolchainDefault(manifests)],
-      ["pages-setup", ({ pages }) => pagesSetup(pages)],
-      ["pages-install-command", ({ pages }) => pagesInstallCommand(pages)],
-      ["pages-build-command", ({ pages }) => pagesBuildCommand(pages)],
-    ],
-  },
-  {
-    file: "actions/validate-template/validate_generated_files.ts",
-    syntax: "line",
-    prefix: "//",
-    regions: [
-      ["known-modules", ({ manifests }) => knownModules(manifests)],
-      ["toolchain-pins", ({ manifests }) => toolchainPinsRegion(manifests)],
-    ],
-  },
-  {
-    file: "templates/release-please/fragments/ci-gate-jobs.jinja",
-    syntax: "jinja",
-    regions: [["tracking-labels", ({ manifests }) => trackingLabelsInput(manifests)]],
-  },
-  {
-    file: "templates/release-please/.github/workflows/release-please.yml.jinja",
-    syntax: "jinja",
-    regions: [["tracking-labels", ({ manifests }) => trackingLabelsInput(manifests)]],
-  },
-  {
-    file: "README.md",
-    syntax: "markdown",
-    regions: [["module-roster", ({ manifests }) => readmeModuleRoster(manifests)]],
-    cells: [["gitignore-upstream-map", ({ manifests }) => gitignoreUpstreamMap(manifests)]],
-  },
-  {
-    file: "docs/new-repo.md",
-    syntax: "markdown",
-    regions: [
-      ["module-roster", ({ manifests }) => newRepoModuleRoster(manifests)],
-      ["dependabot-labels", ({ manifests }) => newRepoDependabotLabels(manifests)],
-    ],
-  },
-  {
-    file: "docs/settings.md",
-    syntax: "markdown",
-    regions: [["dependabot-labels", ({ manifests }) => settingsDependabotLabels(manifests)]],
-  },
-  {
-    file: "docs/pages.md",
-    syntax: "markdown",
-    cells: [
-      ["pages-setup-meaning", ({ pages }) => pagesSetupMeaning(pages)],
-      ["pages-setup-default", ({ pages }) => pagesSetupDefault(pages)],
-      ["pages-install-default", ({ pages }) => pagesInstallRow(pages)],
-      ["pages-build-default", ({ pages }) => pagesBuildRow(pages)],
-    ],
-  },
-  {
-    file: "docs/toolchains.md",
-    syntax: "markdown",
-    regions: [["toolchain-pins", ({ manifests }) => toolchainPinRows(manifests)]],
-  },
-];
+// The region roster is a function of the manifests: each tracking stream
+// contributes its question's validator region (the markers are still
+// hand-placed once, next to the hand-written question).
+function targets(manifests: ModuleManifest[]): Target[] {
+  const streams = trackingStreams(manifests);
+  return [
+    {
+      file: "copier.yml",
+      syntax: "line",
+      prefix: "#",
+      regions: [
+        ["module-choices", ({ manifests }) => moduleChoices(manifests)],
+        ["has-toolchain-default", ({ manifests }) => hasToolchainDefault(manifests)],
+        ["pages-setup", ({ pages }) => pagesSetup(pages)],
+        ["pages-install-command", ({ pages }) => pagesInstallCommand(pages)],
+        ["pages-build-command", ({ pages }) => pagesBuildCommand(pages)],
+        ...streams.map(
+          (stream, index): SpanRegion => [
+            `${stream.module}-label-validator`,
+            ({ reserved }) => trackingLabelValidator(streams, index, reserved),
+          ],
+        ),
+      ],
+    },
+    {
+      file: "actions/validate-template/validate_generated_files.ts",
+      syntax: "line",
+      prefix: "//",
+      regions: [
+        ["known-modules", ({ manifests }) => knownModules(manifests)],
+        ["toolchain-pins", ({ manifests }) => toolchainPinsRegion(manifests)],
+      ],
+    },
+    {
+      file: "templates/release-please/fragments/ci-gate-jobs.jinja",
+      syntax: "jinja",
+      regions: [["tracking-labels", ({ manifests }) => trackingLabelsInput(manifests)]],
+    },
+    {
+      file: "templates/release-please/.github/workflows/release-please.yml.jinja",
+      syntax: "jinja",
+      regions: [["tracking-labels", ({ manifests }) => trackingLabelsInput(manifests)]],
+    },
+    {
+      file: "README.md",
+      syntax: "markdown",
+      regions: [["module-roster", ({ manifests }) => readmeModuleRoster(manifests)]],
+      cells: [["gitignore-upstream-map", ({ manifests }) => gitignoreUpstreamMap(manifests)]],
+    },
+    {
+      file: "docs/new-repo.md",
+      syntax: "markdown",
+      regions: [
+        ["module-roster", ({ manifests }) => newRepoModuleRoster(manifests)],
+        ["dependabot-labels", ({ manifests }) => newRepoDependabotLabels(manifests)],
+      ],
+    },
+    {
+      file: "docs/settings.md",
+      syntax: "markdown",
+      regions: [["dependabot-labels", ({ manifests }) => settingsDependabotLabels(manifests)]],
+    },
+    {
+      file: "docs/pages.md",
+      syntax: "markdown",
+      cells: [
+        ["pages-setup-meaning", ({ pages }) => pagesSetupMeaning(pages)],
+        ["pages-setup-default", ({ pages }) => pagesSetupDefault(pages)],
+        ["pages-install-default", ({ pages }) => pagesInstallRow(pages)],
+        ["pages-build-default", ({ pages }) => pagesBuildRow(pages)],
+      ],
+    },
+    {
+      file: "docs/toolchains.md",
+      syntax: "markdown",
+      regions: [["toolchain-pins", ({ manifests }) => toolchainPinRows(manifests)]],
+    },
+  ];
+}
 
 // Fully-generated files (no markers): the whole byte content is the
 // generator's output, byte-compared by --check like the regions. Each
@@ -756,9 +880,16 @@ function main(): number {
           "shipping to every render; delete it (or fix the manifest's pin.file)",
       );
     }
-    const inputs: RegionInputs = { manifests, pages: pagesManifests(manifests) };
-    const regionStale = "its generated region(s) do not match the module manifests";
-    changed = TARGETS.flatMap((target) => {
+    const inputs: RegionInputs = {
+      manifests,
+      pages: pagesManifests(manifests),
+      reserved: reservedLabelNames(manifests),
+    };
+    const regionStale =
+      "its generated region(s) do not match their sources (the module " +
+      "manifests, or the settings label templates for copier.yml's " +
+      "tracking-label validators)";
+    changed = targets(manifests).flatMap((target) => {
       const path = join(REPO_ROOT, target.file);
       const current = readFileSync(path, "utf-8");
       let next = current;

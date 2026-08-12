@@ -29,7 +29,16 @@ below is what sets the fuzz stream apart.
 | `fuzzer_label` | Label identifying the tracking-issue stream; one open issue per label. A single label, no commas. | `fuzz-nightly` |
 
 The label is asked as a copier question, rather than left as an edit in the
-starter, because the report and resolve steps must agree on it.
+starter, because the report and resolve steps must agree on it. The
+question's validator also rejects the label names the template already
+manages (the settings baseline, the release labels, the dependabot labels;
+GitHub label names are case-insensitive): reusing one would let a green
+night close unrelated issues carrying it and make every settings apply
+fight over the label's color and description. The validator runs on
+`copier update` too, so a repo whose recorded label later becomes reserved
+fails its next sync until the recorded `fuzzer_label` value in
+`.copier-answers.yml` is changed (and the starter's `label:` inputs with
+it, per the renaming section below).
 
 One more place must know the label: the repository's settings labels.
 Settings applies delete undeclared labels, and a tracking issue stripped of

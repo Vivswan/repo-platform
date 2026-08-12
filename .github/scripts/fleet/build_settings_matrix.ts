@@ -28,6 +28,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseFlags } from "../shared/flags.ts";
+import { type EnrichedRow, parseEnrichedRows } from "./redact.ts";
 
 // No hide_details here: unlike the sync matrix, the apply leg has no
 // consumer for it (the action's own private-repos redaction covers its
@@ -37,14 +38,6 @@ export interface Target {
   name: string;
   home: "central" | "in-repo";
   redact_name: boolean;
-  verify: string;
-}
-
-export interface InRepoRow {
-  repo: string;
-  redact_name: boolean;
-  hide_details: boolean;
-  display: string;
   verify: string;
 }
 
@@ -93,7 +86,7 @@ export function centralTargets(
  *  but the matrix must hold the invariant on its own; the comparison
  *  uses each in-repo row's REAL slug, before a redacted row swaps its
  *  display in). */
-export function buildMatrix(central: Target[], inRepo: InRepoRow[]): Target[] {
+export function buildMatrix(central: Target[], inRepo: EnrichedRow[]): Target[] {
   // Slug comparisons are case-insensitive, like GitHub's.
   const centralRepos = new Set(central.map((t) => t.repo.toLowerCase()));
   const targets = [...central];
@@ -108,7 +101,7 @@ export function buildMatrix(central: Target[], inRepo: InRepoRow[]): Target[] {
       name: row.redact_name ? row.display : (row.repo.split("/").pop() ?? row.repo),
       home: "in-repo",
       redact_name: row.redact_name,
-      verify: row.redact_name ? row.verify : "",
+      verify: row.verify,
     });
   }
   return targets.sort((a, b) => (a.repo < b.repo ? -1 : a.repo > b.repo ? 1 : 0));
@@ -120,9 +113,9 @@ export function buildMatrix(central: Target[], inRepo: InRepoRow[]): Target[] {
  *  target is matchable here and redacted as usual afterwards. */
 export function applyOnly(
   central: Target[],
-  inRepo: InRepoRow[],
+  inRepo: EnrichedRow[],
   only: string,
-): { central: Target[]; inRepo: InRepoRow[] } {
+): { central: Target[]; inRepo: EnrichedRow[] } {
   const wanted = only.toLowerCase();
   return {
     central: central.filter((t) => t.repo.toLowerCase() === wanted),
@@ -137,32 +130,14 @@ function fail(errors: string[]): never {
   process.exit(1);
 }
 
-function loadInRepoRows(path: string): InRepoRow[] {
+function loadInRepoRows(path: string): EnrichedRow[] {
   let parsed: unknown;
   try {
     parsed = JSON.parse(readFileSync(path, "utf-8"));
   } catch {
     fail([`${path}: cannot read the in-repo target list`]);
   }
-  if (
-    !Array.isArray(parsed) ||
-    !parsed.every(
-      (v) =>
-        typeof v === "object" &&
-        v !== null &&
-        typeof (v as InRepoRow).repo === "string" &&
-        typeof (v as InRepoRow).redact_name === "boolean" &&
-        typeof (v as InRepoRow).hide_details === "boolean" &&
-        typeof (v as InRepoRow).display === "string" &&
-        typeof (v as InRepoRow).verify === "string",
-    )
-  ) {
-    fail([
-      `${path}: the in-repo target list must be a JSON array of ` +
-        `{repo, redact_name, hide_details, display, verify} rows`,
-    ]);
-  }
-  return parsed as InRepoRow[];
+  return parseEnrichedRows(parsed, `${path}: in-repo target list`);
 }
 
 function main(args: string[]): void {

@@ -17,7 +17,7 @@
 // metacharacters in descriptions, single quotes in Jinja-quoted commands,
 // and pipes or backticks in strings that land inside markdown table cells.
 
-import { existsSync, lstatSync, readFileSync } from "node:fs";
+import { existsSync, lstatSync, readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
@@ -170,7 +170,18 @@ export const manifestSchema = z.strictObject({
       build: mdCellSafe(jinjaQuoted("the build command"), "the build command"),
     })
     .optional(),
-  gate: z.string().min(1).optional(),
+  // The gate expression is interpolated verbatim into `{% if <gate> %}`
+  // FILENAME gates and into `not (<gate>)` guard chains: { } % # would open
+  // or close a jinja delimiter around it, / would split the emitted
+  // filename into path segments, and \ escapes unpredictably. Single quotes
+  // stay allowed - membership gates like 'bun' in modules need them.
+  gate: singleLine("the gate expression")
+    .refine((value) => !/[{}%#/\\]/.test(value), {
+      message:
+        "the gate expression must not contain {, }, %, #, /, or \\ " +
+        "(it lands inside {% if %} filename gates and not(...) guard chains)",
+    })
+    .optional(),
   gate_dirs: z.array(z.string().min(1)).min(1).optional(),
 });
 
@@ -275,9 +286,34 @@ export function readManifest(module: string, templatesDir: string = TEMPLATES_DI
   return parseManifest(module, readFileSync(path, "utf-8"), where);
 }
 
+/** MODULE_ORDER <-> templates/ integrity: no duplicate entries (a
+ *  duplicate would splice its fragments twice) and no templates/ folder
+ *  outside the list (readManifest already rejects a listed module whose
+ *  folder is missing, closing the other half of the bijection). */
+export function assertModuleOrderIntegrity(order: string[], templatesDir: string): void {
+  const duplicate = order.find((module, index) => order.indexOf(module) !== index);
+  if (duplicate !== undefined) {
+    throw new Error(
+      `MODULE_ORDER lists '${duplicate}' more than once; a duplicate entry ` +
+        "splices its fragments twice",
+    );
+  }
+  const known = new Set(order);
+  for (const name of readdirSync(templatesDir).sort()) {
+    if (name === "base" || known.has(name)) continue;
+    if (!lstatSync(join(templatesDir, name)).isDirectory()) continue;
+    throw new Error(
+      `templates/${name}/ is not a known module; add it to MODULE_ORDER ` +
+        "in scripts/module_manifests.ts",
+    );
+  }
+}
+
 /** Every module's manifest, in MODULE_ORDER, cross-checked for
- *  dependabot-label consistency and tracking-label uniqueness. */
+ *  MODULE_ORDER <-> templates/ integrity, dependabot-label consistency,
+ *  and tracking-label uniqueness. */
 export function loadManifests(templatesDir: string = TEMPLATES_DIR): ModuleManifest[] {
+  assertModuleOrderIntegrity(MODULE_ORDER, templatesDir);
   const manifests = MODULE_ORDER.map((module) => readManifest(module, templatesDir));
   assertDependabotLabelConsistency(manifests);
   assertTrackingLabelUniqueness(manifests);

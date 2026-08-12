@@ -42,7 +42,9 @@
 import { createHmac } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { z } from "zod";
 import { parseFlags } from "../shared/flags.ts";
+import { parseWith } from "../shared/json.ts";
 import { loadRegistry } from "./repos_registry.ts";
 
 // One implementation for both sides: the plan job tags rows here and the
@@ -120,17 +122,55 @@ export interface DiscoveredRepo {
   private: boolean;
 }
 
-export interface EnrichedRow {
-  repo: string;
-  channel: string;
-  redact_name: boolean;
-  hide_details: boolean;
-  display: string;
-  verify: string;
+// The redaction invariant as a type, owned here alone: a redacted row
+// hides its slug behind a hint plus a resolution tag, an unredacted row
+// displays the slug itself and carries no tag. Consumers reading enrich's
+// output back from a file re-enter a trust boundary and must parse it
+// with parseEnriched/parseEnrichedRows instead of casting.
+export const enrichedRowSchema = z
+  .discriminatedUnion("redact_name", [
+    z.object({
+      repo: z.string(),
+      channel: z.string(),
+      redact_name: z.literal(true),
+      hide_details: z.literal(true),
+      display: z.string(),
+      verify: z.string().min(1),
+    }),
+    z.object({
+      repo: z.string(),
+      channel: z.string(),
+      redact_name: z.literal(false),
+      hide_details: z.boolean(),
+      display: z.string(),
+      verify: z.literal(""),
+    }),
+  ])
+  // A hint always contains "*" (illegal in repo names), so this rejects a
+  // slug leaking through the display of a redacted row - and a hint
+  // masquerading as the slug of an unredacted one. The issue names the
+  // field but never the value: this fires exactly where quoting is unsafe.
+  .refine((row) => (row.redact_name ? row.display.includes("*") : row.display === row.repo), {
+    message: "display must be a masked hint on a redacted row (the slug itself otherwise)",
+    path: ["display"],
+  });
+
+export type EnrichedRow = z.infer<typeof enrichedRowSchema>;
+
+const enrichedSchema = z.object({ rows: z.array(enrichedRowSchema) });
+
+export type Enriched = z.infer<typeof enrichedSchema>;
+
+/** Parse enrich's {rows} output at a consumer boundary; a violation of
+ * the row shape or the redaction invariant exits with ::error::. */
+export function parseEnriched(data: unknown, label: string): Enriched {
+  return parseWith(enrichedSchema, data, label);
 }
 
-export interface Enriched {
-  rows: EnrichedRow[];
+/** Same boundary for a bare row array (the selector's in-repo target
+ * file, which carries enriched rows verbatim). */
+export function parseEnrichedRows(data: unknown, label: string): EnrichedRow[] {
+  return parseWith(z.array(enrichedRowSchema), data, label);
 }
 
 /**
@@ -180,15 +220,24 @@ export function enrich(
 
   const rows = selection.map((row): EnrichedRow => {
     const priv = isPrivate(row.repo);
-    const redactName = priv && !isSelfDisclosed(row.repo);
-    return {
-      repo: row.repo,
-      channel: row.channel ?? "",
-      redact_name: redactName,
-      hide_details: priv,
-      display: redactName ? (hints.get(row.repo) ?? hintName(row.repo)) : row.repo,
-      verify: redactName ? tagFor(row.repo) : "",
-    };
+    const channel = row.channel ?? "";
+    return priv && !isSelfDisclosed(row.repo)
+      ? {
+          repo: row.repo,
+          channel,
+          redact_name: true,
+          hide_details: true,
+          display: hints.get(row.repo) ?? hintName(row.repo),
+          verify: tagFor(row.repo),
+        }
+      : {
+          repo: row.repo,
+          channel,
+          redact_name: false,
+          hide_details: priv,
+          display: row.repo,
+          verify: "",
+        };
   });
   return { rows };
 }

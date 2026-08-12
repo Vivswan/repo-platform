@@ -10,10 +10,11 @@
 //
 // Errors go to stderr as ::error:: workflow commands with a nonzero exit.
 
-import { readFileSync, writeFileSync } from "node:fs";
-import { parse, stringify } from "yaml";
+import { writeFileSync } from "node:fs";
+import { stringify } from "yaml";
 import { parseFlags } from "../shared/flags.ts";
 import { parseModules } from "../shared/modules.ts";
+import { readAnswersFile } from "./answers_file.ts";
 
 const FLAGS = [
   "--answers-old",
@@ -34,15 +35,11 @@ function main(args: string[]): void {
   const flags = parseFlags(args, FLAGS);
 
   const answersPath = flags["--answers-old"];
-  let answers: unknown;
+  let answers: Record<string, unknown>;
   try {
-    answers = parse(readFileSync(answersPath, "utf-8"));
+    answers = readAnswersFile(answersPath).fields;
   } catch (err) {
-    const detail = err instanceof Error ? err.message.split("\n")[0] : String(err);
-    fail(`${answersPath}: cannot read as YAML: ${detail}`);
-  }
-  if (typeof answers !== "object" || answers === null || Array.isArray(answers)) {
-    fail(`${answersPath}: top level must be a mapping`);
+    fail(`${answersPath}: ${err instanceof Error ? err.message : String(err)}`);
   }
 
   const modules = parseModules(flags["--modules"]);

@@ -31,7 +31,8 @@ describe("validate", () => {
     expect(errors).toEqual([]);
     expect(parsed?.managed).toEqual({ wildcard: true, repos: ["Vivswan/dotfiles"] });
     expect(parsed?.defaultChannel).toBe("staging");
-    expect(parsed?.config.get("Vivswan/github-settings-as-code")).toEqual({ channel: "latest" });
+    // Config is keyed by the lowercased slug at the parse boundary.
+    expect(parsed?.config.get("vivswan/github-settings-as-code")).toEqual({ channel: "latest" });
   });
 
   test("rejects a bad slug", () => {
@@ -49,6 +50,27 @@ describe("validate", () => {
     const { errors } = validateRegistry({ managed: ["a/b", "a/b"] });
     expect(errors).toHaveLength(1);
     expect(errors[0]).toContain("duplicate managed entry");
+  });
+
+  test("rejects a case-variant duplicate managed entry", () => {
+    const { errors } = validateRegistry({ managed: ["a/b", "A/B"] });
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain("duplicate managed entry");
+  });
+
+  test("rejects a case-variant duplicate exclude entry", () => {
+    const { errors } = validateRegistry({ managed: ["*"], exclude: ["a/b", "A/B"] });
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain("duplicate exclude entry");
+  });
+
+  test("rejects case-variant duplicate config entries", () => {
+    const { errors } = validateRegistry({
+      managed: ["*"],
+      config: { "a/b": { channel: "staging" }, "A/B": { channel: "latest" } },
+    });
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain("duplicate config entry");
   });
 
   test("rejects two wildcards", () => {
@@ -72,6 +94,16 @@ describe("validate", () => {
       managed: ["*"],
       exclude: ["a/b"],
       config: { "a/b": { channel: "staging" } },
+    });
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain("also in exclude");
+  });
+
+  test("rejects config for an excluded repo across case variants", () => {
+    const { errors } = validateRegistry({
+      managed: ["*"],
+      exclude: ["a/b"],
+      config: { "A/B": { channel: "staging" } },
     });
     expect(errors).toHaveLength(1);
     expect(errors[0]).toContain("also in exclude");
@@ -147,6 +179,15 @@ describe("select", () => {
     expect(selection.map((s) => s.repo)).toEqual(["a/kept", "x/explicit"]);
   });
 
+  test("exclude and dedupe match case-insensitively, keeping the listed casing", () => {
+    const { selection, errors } = selectRepos(
+      registry({ managed: { wildcard: true, repos: ["X/Explicit"] }, exclude: ["A/Skipped"] }),
+      { discovered: ["a/skipped", "x/explicit", "a/kept"] },
+    );
+    expect(errors).toEqual([]);
+    expect(selection.map((s) => s.repo)).toEqual(["X/Explicit", "a/kept"]);
+  });
+
   test("splits owner and name in the output", () => {
     const { selection } = selectRepos(
       registry({ managed: { wildcard: false, repos: ["Vivswan/dotfiles"] } }),
@@ -171,12 +212,30 @@ describe("select", () => {
     expect(selectRepos(noDefaults).selection[0].channel).toBeNull();
   });
 
+  test("config channels resolve across case variants of the managed entry", () => {
+    const { registry: parsed } = loadRegistry(
+      ["managed:", "  - A/Mixed", "config:", "  a/mixed:", "    channel: latest", ""].join("\n"),
+    );
+    if (parsed === null) throw new Error("registry should parse");
+    const { selection } = selectRepos(parsed);
+    expect(selection).toEqual([{ repo: "A/Mixed", owner: "A", name: "Mixed", channel: "latest" }]);
+  });
+
   test("--repo filters to one repo", () => {
     const { selection } = selectRepos(
       registry({ managed: { wildcard: false, repos: ["a/b", "c/d"] } }),
       { repo: "c/d" },
     );
     expect(selection.map((s) => s.repo)).toEqual(["c/d"]);
+  });
+
+  test("--repo matches case-insensitively", () => {
+    const { selection, errors } = selectRepos(
+      registry({ managed: { wildcard: false, repos: ["a/b", "C/Mixed-Case"] } }),
+      { repo: "c/mixed-case" },
+    );
+    expect(errors).toEqual([]);
+    expect(selection.map((s) => s.repo)).toEqual(["C/Mixed-Case"]);
   });
 
   test("--repo miss is an error mentioning exclude", () => {

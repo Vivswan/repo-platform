@@ -3,9 +3,9 @@ import {
   applyOnly,
   buildMatrix,
   centralTargets,
-  type InRepoRow,
   type Target,
 } from "../../.github/scripts/fleet/build_settings_matrix";
+import type { EnrichedRow } from "../../.github/scripts/fleet/redact";
 
 const OWNER = "Vivswan";
 const DIR = "settings/repos";
@@ -24,8 +24,15 @@ function centralTarget(repo: string): Target {
   };
 }
 
-function publicRow(repo: string): InRepoRow {
-  return { repo, redact_name: false, hide_details: false, display: repo, verify: "" };
+function publicRow(repo: string): EnrichedRow {
+  return {
+    repo,
+    channel: "",
+    redact_name: false,
+    hide_details: false,
+    display: repo,
+    verify: "",
+  };
 }
 
 describe("centralTargets", () => {
@@ -78,8 +85,9 @@ describe("buildMatrix", () => {
   });
 
   test("a redacted row emits its display, never the slug", () => {
-    const row: InRepoRow = {
+    const row: EnrichedRow = {
       repo: "Vivswan/hidden-server",
+      channel: "",
       redact_name: true,
       hide_details: true,
       display: "h**-s**r",
@@ -99,8 +107,9 @@ describe("buildMatrix", () => {
   });
 
   test("central-wins dedupe matches a redacted row on its real slug", () => {
-    const row: InRepoRow = {
+    const row: EnrichedRow = {
       repo: "Vivswan/central",
+      channel: "",
       redact_name: true,
       hide_details: true,
       display: "c**-p**e",
@@ -110,8 +119,9 @@ describe("buildMatrix", () => {
   });
 
   test("a self-disclosed private row keeps its committed name", () => {
-    const row: InRepoRow = {
+    const row: EnrichedRow = {
       repo: "Vivswan/committed-private",
+      channel: "",
       redact_name: false,
       hide_details: true,
       display: "Vivswan/committed-private",
@@ -144,9 +154,10 @@ describe("buildMatrix case folding", () => {
         verify: "",
       },
     ];
-    const inRepo = [
+    const inRepo: EnrichedRow[] = [
       {
         repo: "VIVSWAN/Alpha",
+        channel: "",
         redact_name: false,
         hide_details: false,
         display: "VIVSWAN/Alpha",
@@ -169,9 +180,10 @@ describe("applyOnly", () => {
       verify: "",
     },
   ];
-  const inRepo = [
+  const inRepo: EnrichedRow[] = [
     {
       repo: "Vivswan/beta",
+      channel: "",
       redact_name: false,
       hide_details: false,
       display: "Vivswan/beta",
@@ -179,9 +191,10 @@ describe("applyOnly", () => {
     },
     {
       repo: "Vivswan/gamma",
+      channel: "",
       redact_name: true,
       hide_details: true,
-      display: "private repo #1",
+      display: "g**a",
       verify: "v",
     },
   ];

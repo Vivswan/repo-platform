@@ -95,7 +95,13 @@ own checks:
 - with any toolchain module that ships a formatter (every one except
   rust): a repo-owned `auto-format.yml` starter (label a PR `fix-lint` to
   get a formatting commit pushed to it), prefilled with each selected
-  toolchain's formatter.
+  toolchain's formatter. The push uses `github.token`, which starts no
+  workflows, so the required `all-green` check would sit unreported on the
+  new head - the job posts a PR comment and a run warning saying so
+  (close/reopen the PR to re-run its checks). Swapping in a PAT with
+  Contents:RW makes formatting commits re-trigger CI automatically, but
+  any same-repo PR's formatter tooling runs next to that token, so the
+  starter deliberately does not wire one in.
 - with the bun module: a managed `dependabot-bun-lockfile.yml` that
   regenerates `bun.lock` from scratch on Dependabot's PRs and pushes the fix
   to the PR branch (Dependabot's own lockfile edits can leave stale nested
@@ -110,7 +116,8 @@ own checks:
 - with the deno module: a managed `deno-audit.yml` that runs `deno audit`
   weekly, on lockfile-touching PRs, and on pushes to main that change
   `deno.lock`, failing the run when any locked dependency (JSR or npm,
-  transitive included) has a known advisory.
+  transitive included) has a known advisory. Every tracked `deno.lock` is
+  audited, nested workspace lockfiles included.
 - with the agents module: a repo-owned `copilot-setup-steps.yml` starter
   (environment setup for the Copilot coding agent), prefilled with installs
   for the selected toolchains.

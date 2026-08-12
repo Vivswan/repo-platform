@@ -704,6 +704,15 @@ export function spliceContributions(
   }
   if (errors.length > 0) return errors;
 
+  // Total: every anchor surviving the validation above has contributions
+  // (an empty anchor already returned as an error), so a miss here is a
+  // programming error and fails loudly instead of splicing nothing.
+  const contributionsOf = (anchor: string): Contribution[] => {
+    const list = contributions.get(anchor);
+    if (list === undefined) throw new Error(`no contributions collected for anchor '${anchor}'`);
+    return list;
+  };
+
   for (const sourced of files.values()) {
     const { entry } = sourced;
     if (entry.kind === "symlink" || !entry.data.includes(ANCHOR_HINT)) continue;
@@ -723,7 +732,7 @@ export function spliceContributions(
         continue;
       }
       const spliced = Buffer.concat([
-        ...(contributions.get(anchor.name) as Contribution[]).map(({ text }) => text),
+        ...contributionsOf(anchor.name).map(({ text }) => text),
         Buffer.from(anchor.trailing),
       ]);
       if (anchor.tight) carry = carry === null ? spliced : Buffer.concat([carry, spliced]);
@@ -745,43 +754,20 @@ export function build(): Map<string, Entry> {
         "with git checkout before rerunning.",
     );
   }
-  const folders = readdirSync(SRC)
-    .filter((name) => name !== "base" && lstatSync(join(SRC, name)).isDirectory())
-    .sort();
-  const unknown = folders.filter((f) => !MODULE_ORDER.includes(f));
-  if (unknown.length > 0) {
-    die(
-      `error: templates/${unknown[0]}/ is not a known module; add it to ` +
-        "MODULE_ORDER in scripts/module_manifests.ts",
-    );
-  }
-  const missing = MODULE_ORDER.filter((m) => !folders.includes(m));
-  if (missing.length > 0) {
-    die(
-      `error: MODULE_ORDER lists '${missing[0]}' but templates/${missing[0]}/ ` +
-        "does not exist; remove it from MODULE_ORDER in " +
-        "scripts/module_manifests.ts or restore the folder",
-    );
-  }
-  const duplicate = MODULE_ORDER.find((m, i) => MODULE_ORDER.indexOf(m) !== i);
-  if (duplicate !== undefined) {
-    die(
-      `error: MODULE_ORDER lists '${duplicate}' more than once; a duplicate ` +
-        "entry splices its fragments twice",
-    );
-  }
-
+  // loadManifests enforces the MODULE_ORDER <-> templates/ bijection (no
+  // duplicates, no unknown folders, no missing folders) for every consumer.
   let manifests: ModuleManifest[];
   try {
     manifests = loadManifests();
   } catch (error) {
     die(`error: ${error instanceof Error ? error.message : String(error)}`);
   }
-  const manifestByModule = new Map(manifests.map((manifest) => [manifest.module, manifest]));
 
   const errors: string[] = [];
   const files = new Map<string, SourcedEntry>();
-  const fragments = new Map<string, [string, Buffer][]>();
+  // Fragment contributions carry their module's whole manifest, so every
+  // later consumer reads validated data instead of re-fetching by name.
+  const fragments = new Map<string, [ModuleManifest, Buffer][]>();
   const gates = new Map<string, string>();
 
   for (const [logical, entry] of collectFiles(base)) {
@@ -797,9 +783,9 @@ export function build(): Map<string, Entry> {
     // No fragments/ entry under base - the expected state.
   }
 
-  for (const module of MODULE_ORDER) {
+  for (const manifest of manifests) {
+    const { module } = manifest;
     const folder = join(SRC, module);
-    const manifest = manifestByModule.get(module) as ModuleManifest;
     const gate = gateExpression(module, manifest);
     gates.set(module, gate);
     const dirs = [...(manifest.gate_dirs ?? [])];
@@ -847,7 +833,7 @@ export function build(): Map<string, Entry> {
     }
     for (const [anchor, body] of collectFragments(folder)) {
       const contributions = fragments.get(anchor) ?? [];
-      contributions.push([module, body]);
+      contributions.push([manifest, body]);
       fragments.set(anchor, contributions);
     }
   }
@@ -877,7 +863,7 @@ export function build(): Map<string, Entry> {
   });
 
   const agentsToolchainModules = new Set(
-    (fragments.get("agents-toolchain") ?? []).map(([module]) => module),
+    (fragments.get("agents-toolchain") ?? []).map(([manifest]) => manifest.module),
   );
   errors.push(...agentsToolchainErrors(manifests, agentsToolchainModules));
 
@@ -885,9 +871,9 @@ export function build(): Map<string, Entry> {
     const fromFiles = fragments.get(anchor) ?? [];
     fragments.delete(anchor);
     const consumed: [string, Buffer][] = [];
-    for (const [module, body] of fromFiles) {
+    for (const [manifest, body] of fromFiles) {
+      const { module } = manifest;
       const path = `templates/${module}/${FRAGMENTS_DIR}/${anchor}${JINJA_SUFFIX}`;
-      const manifest = manifestByModule.get(module) as ModuleManifest;
       if (spec.kind === "reject" || (spec.kind === "coexist" && spec.covered(manifest))) {
         errors.push(
           `${path}: the composer generates this module's '${anchor}' ` +
@@ -923,8 +909,8 @@ export function build(): Map<string, Entry> {
     }
   }
   for (const [anchor, list] of fragments) {
-    for (const [module, body] of list) {
-      addContribution(anchor, wrapFragment(anchor, module, body));
+    for (const [manifest, body] of list) {
+      addContribution(anchor, wrapFragment(anchor, manifest.module, body));
     }
   }
   errors.push(...spliceContributions(files, contributions));

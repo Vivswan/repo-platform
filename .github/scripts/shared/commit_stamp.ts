@@ -32,9 +32,12 @@ export function commitRunWrite(runUrl: string): string {
   return `run: ${runUrl}`;
 }
 
-const RUN_RE = /^run: .*\/actions\/runs\/(.*)$/;
+// Like the stamp, only a numeric run id parses: consumers interpolate it
+// into an API path, so anything else is not a run line at all.
+const RUN_RE = /^run: .*\/actions\/runs\/(\d+)$/;
 
-/** The first stamped run id in the message (empty when there is none). */
+/** The first stamped numeric run id in the message (empty when there is
+ * none). */
 export function commitRunParse(message: string): string {
   for (const line of message.split("\n")) {
     const match = line.match(RUN_RE);

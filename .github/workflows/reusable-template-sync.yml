@@ -389,6 +389,16 @@ jobs:
           PAT: ${{ secrets.REPO_PLATFORM_TOKEN }}
         run: bun .github/scripts/sync/commit_push.ts
 
+      # The push step re-validates when it rewrites the tree (withheld
+      # workflow files); its verdict supersedes the full-tree one. Derived
+      # once so the PR body and the fail gate below can never disagree.
+      - name: Resolve the effective validation verdict
+        id: verdict
+        env:
+          PUSH_VALIDATION: ${{ steps.push.outputs.validation }}
+          TREE_VALIDATION: ${{ steps.validate.outputs.result }}
+        run: echo "verdict=${PUSH_VALIDATION:-$TREE_VALIDATION}" >> "$GITHUB_OUTPUT"
+
       - name: Create or refresh pull request
         if: steps.push.outputs.pushed == 'true'
         id: pr
@@ -398,9 +408,7 @@ jobs:
           DISPLAY: ${{ steps.versions.outputs.display }}
           BRANCH: ${{ steps.versions.outputs.branch }}
           BASE_BRANCH: ${{ steps.target.outputs.default_branch }}
-          # The push step re-validates when it rewrites the tree (withheld
-          # workflow files); its verdict supersedes the full-tree one.
-          VALIDATION: ${{ steps.push.outputs.validation || steps.validate.outputs.result }}
+          VALIDATION: ${{ steps.verdict.outputs.verdict }}
           RESOLVED: ${{ steps.conflicts.outputs.resolved }}
           DRIFT_FILE: ${{ runner.temp }}/settings-drift.md
           SUMMARY_FILE: ${{ runner.temp }}/dropped-local-hunks.md
@@ -415,9 +423,7 @@ jobs:
         run: bun .github/scripts/sync/open_pr.ts
 
       - name: Fail on validation errors
-        # The push step's re-validation (after withholding workflow files)
-        # supersedes the full-tree verdict when present.
-        if: (steps.push.outputs.validation || steps.validate.outputs.result) == 'failed'
+        if: steps.verdict.outputs.verdict == 'failed'
         env:
           PR_URL: ${{ steps.pr.outputs.url }}
           PUSH_VALIDATION: ${{ steps.push.outputs.validation }}

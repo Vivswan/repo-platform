@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { captureName } from "../../.github/scripts/sync/run_hidden.ts";
 
 const script = join(import.meta.dir, "../../.github/scripts/sync/run_hidden.ts");
 
@@ -23,6 +24,13 @@ function run(
 }
 
 describe("run_hidden.ts", () => {
+  test("captureName squeezes non-alphanumeric runs and trims the edges", () => {
+    expect(captureName("leak test")).toBe("hidden-leak-test.log");
+    expect(captureName(" post-withhold re-validation!")).toBe(
+      "hidden-post-withhold-re-validation.log",
+    );
+  });
+
   test("passes through untouched when details are not hidden", () => {
     const r = run("false", ["bash", "-c", "echo target-secret; echo err-secret >&2; exit 3"]);
     expect(r.exitCode).toBe(3);

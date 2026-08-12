@@ -8,11 +8,12 @@
 // HIDE_DETAILS, CHANNEL_INPUT, REQUESTED, RECOVER, GH_TOKEN,
 // GITHUB_REPOSITORY, GITHUB_OUTPUT, RUNNER_TEMP.
 
-import { readFileSync, writeFileSync } from "node:fs";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { commitStampParse } from "../shared/commit_stamp.ts";
 import { env, hideDetails, requireEnv, setOutput } from "../shared/gha.ts";
 import { capture, must, mustCapture } from "../shared/proc.ts";
+import { AnswersFileError, type CopierAnswers, readAnswersFile } from "./answers_file.ts";
 import { resolveChannel } from "./resolve_channel.ts";
 
 const target = requireEnv("TARGET");
@@ -45,8 +46,26 @@ must(["git", "fetch", "--quiet", "origin", "+refs/tags/templates/*:refs/tags/tem
 capture(["git", "fetch", "--quiet", "origin", "+refs/heads/staging:refs/remotes/origin/staging"]);
 capture(["git", "fetch", "--quiet", "origin", "+refs/heads/latest:refs/remotes/origin/latest"]);
 
-const channel = resolveChannel(env("CHANNEL_INPUT"), "target/.copier-answers.yml");
-if (channel !== "staging" && channel !== "latest") {
+let answers: CopierAnswers;
+try {
+  answers = readAnswersFile("target/.copier-answers.yml");
+} catch (err) {
+  if (!(err instanceof AnswersFileError)) throw err;
+  // The parser's message can quote target file content; a hidden target
+  // gets the detail-free version.
+  if (hideDetails()) {
+    console.log(
+      `::error::${targetDisplay}'s .copier-answers.yml cannot be read as a YAML mapping (detail hidden: private repository). Reproduce the sync locally - see docs/private-repos.md.`,
+    );
+  } else {
+    console.log(
+      `::error::${targetDisplay}'s .copier-answers.yml: ${err.message}. Fix the file, or regenerate the repo through Sync Repos with recover=recopy.`,
+    );
+  }
+  process.exit(1);
+}
+const channel = resolveChannel(env("CHANNEL_INPUT"), answers);
+if (typeof channel !== "string") {
   // The bad value came from the target's recorded answer (or repos.yml)
   // and can be arbitrary text.
   if (hideDetails()) {
@@ -55,19 +74,13 @@ if (channel !== "staging" && channel !== "latest") {
     );
   } else {
     console.log(
-      `::error::unknown channel '${channel}' for ${targetDisplay}: it must be staging or latest. Fix the channel in repos.yml (or the repo's recorded copier answer).`,
+      `::error::unknown channel '${channel.invalid}' for ${targetDisplay}: it must be staging or latest. Fix the channel in repos.yml (or the repo's recorded copier answer).`,
     );
   }
   process.exit(1);
 }
 
-// copier's to_nice_yaml quotes ambiguous scalars (a digit-only short sha
-// renders as '1234567'); strip the quotes.
-const answersLine = readFileSync("target/.copier-answers.yml", "utf-8")
-  .split("\n")
-  .map((line) => line.split(/\s+/).filter((field) => field !== ""))
-  .find((fields) => fields[0] === "_commit:");
-const oldCommit = (answersLine?.[1] ?? "").replace(/^['"]/, "").replace(/['"]$/, "");
+const oldCommit = answers.commit;
 
 function stampOf(sha: string): string {
   return commitStampParse(mustCapture(["git", "log", "-1", "--format=%B", sha]));

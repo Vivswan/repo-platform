@@ -13,6 +13,7 @@ import {
   extractUsesPins,
   firstDiff,
   gatesOnModule,
+  inlineFunctionCopies,
   mustMatch,
   parseLabels,
   pinMismatches,
@@ -368,6 +369,41 @@ describe("stripGeneratedRegions", () => {
     expect(() => stripGeneratedRegions(`x ${MARKER_TOKENS.begin} y`, "doc")).toThrow(
       "malformed generated-region markers remain",
     );
+  });
+});
+
+describe("inlineFunctionCopies", () => {
+  const copy = (indent: string, body: string) =>
+    [
+      `${indent}async function resolve() {`,
+      `${indent}  if (x) {`,
+      `${indent}    ${body}`,
+      `${indent}  }`,
+      `${indent}}`,
+    ].join("\n");
+
+  test("extracts every copy, closing at the declaration's own indent", () => {
+    const text = `head\n${copy("    ", "a();")}\ntail\n${copy("    ", "a();")}\n`;
+    const copies = inlineFunctionCopies(text, "resolve");
+    expect(copies).toHaveLength(2);
+    expect(copies[0]).toBe(copy("    ", "a();"));
+    expect(copies[0]).toBe(copies[1]);
+  });
+
+  test("a nested closing brace does not end the block early", () => {
+    const [only] = inlineFunctionCopies(copy("  ", "b();"), "resolve");
+    expect(only.endsWith("\n  }")).toBe(true);
+    expect(only).toContain("b();");
+  });
+
+  test("copies differing anywhere in their bytes compare unequal", () => {
+    const [a] = inlineFunctionCopies(copy("    ", "a();"), "resolve");
+    const [b] = inlineFunctionCopies(copy("    ", "b();"), "resolve");
+    expect(a).not.toBe(b);
+  });
+
+  test("returns nothing when the function is absent, so rules can fail loudly", () => {
+    expect(inlineFunctionCopies("const resolve = 1;", "resolve")).toEqual([]);
   });
 });
 

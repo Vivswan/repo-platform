@@ -35,6 +35,10 @@ function fail(message: string): never {
   process.exit(1);
 }
 
+function isMapping(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 function main(): number {
   const args = process.argv.slice(2);
   if (args.length > 1) fail(`expected at most one argument (render root), got: ${args.join(" ")}`);
@@ -48,7 +52,10 @@ function main(): number {
   if (!existsSync(recordedPath)) {
     fail(`${recordedPath} not found - run the dogfood-oracle smoke render first`);
   }
-  const recorded = parseYaml(readFileSync(recordedPath, "utf-8")) as Record<string, unknown>;
+  const recorded: unknown = parseYaml(readFileSync(recordedPath, "utf-8"));
+  if (!isMapping(recorded)) {
+    fail(`${recordedPath}: expected a YAML mapping of recorded answers`);
+  }
   const wrongAnswers: string[] = [];
   const expectRecorded = (key: string, expected: string | boolean) => {
     const got = recorded[key];

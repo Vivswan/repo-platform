@@ -46,8 +46,13 @@ differ from `fuzzer_label` when the fuzzer module is also selected: both
 streams dedup AND auto-close by label, so a shared label would let either
 stream's green night close the other's active failure issue (and lift the
 release-health hold keyed on it). The copier validator rejects the
-collision at generation time, and the settings preflight rejects it in
-recorded answers.
+collision at generation time - along with any label name the template
+already manages (the settings baseline, the release labels, the dependabot
+labels) - and the settings preflight rejects it in recorded answers. The
+validator runs on `copier update` too, so a repo whose recorded label
+later becomes reserved fails its next sync until the recorded
+`nightly_label` value in `.copier-answers.yml` is changed (and the
+starter's `label:` inputs with it, per the renaming section below).
 
 One more place must know the label: the repository's settings labels.
 Settings applies delete undeclared labels, and a tracking issue stripped of

@@ -45,11 +45,11 @@ describe("normalizeJinja", () => {
     expect(normalizeJinja(text, vars)).toBe("A\n\nB\n\nC");
   });
 
-  test("a trailing-control own-line tag ({%- ... -%}) is not line-removed", () => {
-    // -%} also strips the newline after the tag, which line removal does not
-    // model; the tag text alone is dropped so parity comparison fails loudly.
+  test("a trailing-control tag ({%- ... -%}) eats the whitespace on both sides", () => {
+    // Whitespace control is modeled faithfully on kept branches: each dash
+    // eats the adjacent whitespace, newlines included, as rendering does.
     const text = "A\n{%- if c -%}\nB\n{%- endif -%}\nC";
-    expect(normalizeJinja(text, vars)).toBe("A\n\nB\n\nC");
+    expect(normalizeJinja(text, vars)).toBe("ABC");
   });
 
   test("substitutes the copyright holder", () => {
@@ -168,6 +168,11 @@ describe("renderJinjaFile", () => {
   test("matches normalizeJinja for inline tags and substitutions", () => {
     const text = "owner: {{ github_username | lower }} {% if x %}kept{% endif %}\n";
     expect(renderJinjaFile(text, vars, { x: true })).toBe("owner: vivswan kept\n");
+  });
+
+  test("kept-branch if/endif whitespace control renders like real jinja", () => {
+    const text = "A\n{%- if x -%}\nB\n{%- endif -%}\nC";
+    expect(renderJinjaFile(text, vars, { x: true })).toBe("ABC");
   });
 
   test("resolves a string ternary through the context, false leg included", () => {

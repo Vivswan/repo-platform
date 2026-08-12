@@ -64,6 +64,11 @@ concurrency:
 
 jobs:
   plan:
+    # A prerelease must not roll the latest channel (and staging repos are
+    # covered by the weekly cron); skipping here skips the dependent sync
+    # fan-out too. A stable release published on an older tag still runs -
+    # the version resolve below pins it to the newest stable release.
+    if: github.event_name != 'release' || !github.event.release.prerelease
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -115,15 +120,29 @@ jobs:
           RELEASE_TAG: ${{ github.event.release.tag_name }}
           REQUESTED: ${{ inputs.version }}
         run: |
-          if [ -n "$RELEASE_TAG" ]; then
-            version="$RELEASE_TAG"
-          elif [ -n "$REQUESTED" ]; then
+          if [ -n "$REQUESTED" ]; then
             version="$REQUESTED"
-          elif ! version="$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq .tag_name 2>/dev/null)"; then
-            # No release yet: fine for a staging-only fleet; a latest-channel
-            # sync leg fails with its own actionable error.
-            version=""
-            echo "No release yet; syncing without a version."
+          elif ! version="$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq .tag_name 2>/tmp/gh-latest-err)"; then
+            # Only HTTP 404 means no release exists (fine for a staging-only
+            # fleet; a latest-channel sync leg fails with its own actionable
+            # error). Anything else is an API failure that must not read as
+            # "no release yet" - that would sync latest-channel repos to
+            # nothing (or a notice-only stale version) while staying green.
+            if grep -q "HTTP 404" /tmp/gh-latest-err; then
+              version=""
+              echo "No release yet; syncing without a version."
+            else
+              echo "::error::reading ${GITHUB_REPOSITORY}'s latest release failed - an API failure, not a missing release; re-run the sync."
+              cat /tmp/gh-latest-err
+              exit 1
+            fi
+          fi
+          # The release event's tag is never trusted as the sync target: a
+          # release published on an older tag must not roll the latest
+          # channel backwards, so releases/latest above is the ground truth
+          # and a differing event tag only gets a notice.
+          if [ -n "$RELEASE_TAG" ] && [ "$RELEASE_TAG" != "$version" ]; then
+            echo "::notice::published release ${RELEASE_TAG} is not the newest stable release (${version:-none exists}); latest-channel repos sync to the newest stable release instead."
           fi
           echo "version=${version}"
           echo "version=${version}" >> "$GITHUB_OUTPUT"
@@ -150,25 +169,27 @@ jobs:
 
       # Build Branches rebuilds staging asynchronously after each main
       # merge; a sync dispatched right after a merge could consume the
-      # previous staging tree. Wait (bounded) for a successful push-event
-      # run at main's HEAD - the only run kind that provably rebuilt
-      # staging (a no-op rebuild creates no staging commit to wait for).
+      # previous staging tree. Wait (bounded) for a successful push- or
+      # schedule-event run at main's HEAD - the run kinds that always
+      # rebuild staging, so either proves it (a no-op rebuild creates no
+      # staging commit to wait for; a manual dispatch may rebuild only
+      # latest, so it proves nothing).
       - name: Wait for a fresh staging build
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           main_sha="$(git ls-remote origin HEAD | cut -f1)"
           for _ in $(seq 1 30); do
-            built="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/build-branches.yml/runs?event=push&status=success&per_page=20" \
-              --jq '.workflow_runs[].head_sha' 2>/dev/null || true)"
+            built="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/build-branches.yml/runs?status=success&per_page=30" \
+              --jq '.workflow_runs[] | select(.event == "push" or .event == "schedule") | .head_sha' 2>/dev/null || true)"
             if grep -qx "$main_sha" <<<"$built"; then
               echo "staging is built from main HEAD ${main_sha}."
               exit 0
             fi
-            echo "waiting for a successful Build Branches push run at ${main_sha}..."
+            echo "waiting for a successful Build Branches push or schedule run at ${main_sha}..."
             sleep 10
           done
-          echo "::warning::no successful Build Branches push-event run found for main HEAD ${main_sha} after 5 minutes; staging-channel syncs may apply the previous staging tree. The weekly cron heals this on its next run."
+          echo "::warning::no successful Build Branches push- or schedule-event run found for main HEAD ${main_sha} after 5 minutes; staging-channel syncs may apply the previous staging tree. The weekly cron heals this on its next run."
 
       # user/repos with the PAT sees every public repo (fine-grained PATs
       # always read public resources) and its permissions field reflects

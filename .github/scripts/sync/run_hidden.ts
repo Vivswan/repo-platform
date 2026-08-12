@@ -19,32 +19,45 @@ import { join } from "node:path";
 import { hideDetails, requireEnv } from "../shared/gha.ts";
 import { exitCodeOf } from "../shared/proc.ts";
 
-const [label = "", dashes, ...command] = process.argv.slice(2);
-if (dashes !== "--") {
-  console.log("::error::run_hidden.ts: expected '--' after the label");
-  process.exit(2);
+/** Capture file name for a label (non-alphanumeric runs squeezed to '-' and
+ *  trimmed). Exported so same-run consumers of the captures derive the same
+ *  name instead of mirroring the transform. */
+export function captureName(label: string): string {
+  const slug = label
+    .replace(/[^A-Za-z0-9]+/g, "-")
+    .replace(/^-/, "")
+    .replace(/-$/, "");
+  return `hidden-${slug}.log`;
 }
 
-if (!hideDetails()) {
-  const proc = Bun.spawnSync(command, { stdio: ["inherit", "inherit", "inherit"] });
-  process.exit(exitCodeOf(proc));
+function main(): number {
+  const [label = "", dashes, ...command] = process.argv.slice(2);
+  if (dashes !== "--") {
+    console.log("::error::run_hidden.ts: expected '--' after the label");
+    return 2;
+  }
+
+  if (!hideDetails()) {
+    const proc = Bun.spawnSync(command, { stdio: ["inherit", "inherit", "inherit"] });
+    return exitCodeOf(proc);
+  }
+
+  const runnerTemp = requireEnv("RUNNER_TEMP");
+  const capture = join(runnerTemp, captureName(label));
+  const log = openSync(capture, "w");
+  const proc = Bun.spawnSync(command, { stdio: ["inherit", log, log] });
+  const rc = exitCodeOf(proc);
+  if (rc === 0) {
+    console.log(`${label}: ok (output hidden: private repository)`);
+  } else {
+    appendFileSync(join(runnerTemp, "hidden-failures.tsv"), `${label}\t${rc}\t${capture}\n`);
+    console.log(
+      `::error::${label}: failed with exit ${rc} (output hidden: private repository). The captured output is delivered privately - in the sync PR body when one exists, else in the target's failure-report issue (docs/private-repos.md).`,
+    );
+  }
+  return rc;
 }
 
-const runnerTemp = requireEnv("RUNNER_TEMP");
-const slug = label
-  .replace(/[^A-Za-z0-9]+/g, "-")
-  .replace(/^-/, "")
-  .replace(/-$/, "");
-const capture = join(runnerTemp, `hidden-${slug}.log`);
-const log = openSync(capture, "w");
-const proc = Bun.spawnSync(command, { stdio: ["inherit", log, log] });
-const rc = exitCodeOf(proc);
-if (rc === 0) {
-  console.log(`${label}: ok (output hidden: private repository)`);
-} else {
-  appendFileSync(join(runnerTemp, "hidden-failures.tsv"), `${label}\t${rc}\t${capture}\n`);
-  console.log(
-    `::error::${label}: failed with exit ${rc} (output hidden: private repository). The captured output is delivered privately - in the sync PR body when one exists, else in the target's failure-report issue (docs/private-repos.md).`,
-  );
+if (import.meta.main) {
+  process.exit(main());
 }
-process.exit(rc);

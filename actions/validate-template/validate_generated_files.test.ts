@@ -163,6 +163,60 @@ describe("duplicate mapping keys", () => {
   });
 });
 
+describe("multi-document YAML", () => {
+  test("a valid multi-document file passes", () => {
+    const { exitCode, stderr } = runValidator({
+      "deploy/manifests.yml": "kind: Service\n---\nkind: Deployment\n",
+    });
+    expect(stderr).toBe("");
+    expect(exitCode).toBe(0);
+  });
+
+  test("a duplicate key inside a document of a .github/ file fails", () => {
+    const { exitCode, stderr } = runValidator({
+      ".github/multi.yml": "a: 1\na: 2\n---\nb: 3\n",
+    });
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain(".github/multi.yml: duplicate mapping key");
+  });
+
+  test("a VALID multi-document .github/ file still fails - GitHub reads one mapping", () => {
+    const { exitCode, stderr } = runValidator({
+      ".github/dependabot.yml": "version: 2\nupdates: []\n---\nversion: 2\n",
+    });
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain(".github/dependabot.yml: multi-document YAML stream");
+  });
+
+  test("a duplicate key inside a repo-owned multi-document file is an advisory", () => {
+    const { exitCode, stdout, stderr } = runValidator({
+      "deploy/manifests.yml": "a: 1\na: 2\n---\nb: 3\n",
+    });
+    expect(stderr).toBe("");
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain("advisory: deploy/manifests.yml: duplicate mapping key");
+  });
+
+  test("a syntax error in a later document still fails", () => {
+    const { exitCode, stderr } = runValidator({
+      "deploy/manifests.yml": "a: 1\n---\nb: [1, 2\n",
+    });
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain("deploy/manifests.yml: does not parse as YAML");
+  });
+
+  test("a duplicate key cannot mask a resolution failure in the same file", () => {
+    // doc.errors carries only composer-stage problems; the unresolved
+    // alias surfaces at conversion and must still fail even though the
+    // duplicate key already reported (as an advisory here).
+    const { exitCode, stderr } = runValidator({
+      "deploy/manifests.yml": "a: 1\na: 2\nb: *nope\n",
+    });
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain("deploy/manifests.yml: does not parse as YAML");
+  });
+});
+
 describe("base checks shape", () => {
   // private: true in the answers also silences the dependency-review
   // advisory, like a real private render's answers do; github_username pins
@@ -300,6 +354,17 @@ describe("base checks shape", () => {
     });
     expect(exitCode).toBe(1);
     expect(stderr).toContain("`github_username` is missing or not a GitHub username");
+  });
+
+  test("a quoted github_username is read as its YAML value", () => {
+    const { exitCode, stderr } = runValidator({
+      ".copier-answers.yml":
+        "_commit: templates/v1.0.0\n_src_path: gh:Vivswan/repo-platform\n" +
+        'github_username: "Vivswan"\nprivate: true\n',
+      ".github/workflows/ci.yml": mergedCi(MERGED_STEPS),
+    });
+    expect(stderr).toBe("");
+    expect(exitCode).toBe(0);
   });
 
   test("self mode accepts any well-formed owner without answers to pin from", () => {

@@ -5,6 +5,7 @@ import { join } from "node:path";
 import {
   assignHints,
   enrich,
+  enrichedRowSchema,
   hintName,
   VERIFY_HEX_LENGTH,
   verifyTag,
@@ -162,6 +163,49 @@ describe("enrich", () => {
       tagFor,
     );
     expect(rows[0].display).toBe("h**-s**r#2");
+  });
+});
+
+describe("enrichedRowSchema", () => {
+  const redacted = {
+    repo: "o/hidden-one",
+    channel: "",
+    redact_name: true,
+    hide_details: true,
+    display: "h**-o**",
+    verify: "deadbeef",
+  };
+  const plain = {
+    repo: "o/pub",
+    channel: "staging",
+    redact_name: false,
+    hide_details: false,
+    display: "o/pub",
+    verify: "",
+  };
+
+  test("accepts both row kinds", () => {
+    expect(enrichedRowSchema.safeParse(redacted).success).toBe(true);
+    expect(enrichedRowSchema.safeParse(plain).success).toBe(true);
+  });
+
+  test("rejects a redacted row missing its verify tag or hide_details", () => {
+    expect(enrichedRowSchema.safeParse({ ...redacted, verify: "" }).success).toBe(false);
+    expect(enrichedRowSchema.safeParse({ ...redacted, hide_details: false }).success).toBe(false);
+  });
+
+  test("rejects a redacted row whose display is not a hint", () => {
+    expect(enrichedRowSchema.safeParse({ ...redacted, display: "o/hidden-one" }).success).toBe(
+      false,
+    );
+  });
+
+  test("rejects an unredacted row carrying a verify tag", () => {
+    expect(enrichedRowSchema.safeParse({ ...plain, verify: "deadbeef" }).success).toBe(false);
+  });
+
+  test("rejects an unredacted row whose display is not its slug", () => {
+    expect(enrichedRowSchema.safeParse({ ...plain, display: "p**" }).success).toBe(false);
   });
 });
 

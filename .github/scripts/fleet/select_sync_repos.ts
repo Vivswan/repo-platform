@@ -33,6 +33,7 @@ import { join } from "node:path";
 import { env, error, notice, requireEnv, setOutput } from "../shared/gha.ts";
 import { capture } from "../shared/proc.ts";
 import { pushProbeStatus } from "./push_probe.ts";
+import { parseEnriched } from "./redact.ts";
 
 const runnerTemp = requireEnv("RUNNER_TEMP");
 const pat = requireEnv("PAT");
@@ -47,6 +48,9 @@ if (onlyRepo === "" && env("GITHUB_EVENT_PATH") !== "") {
   };
   onlyRepo = event.inputs?.repo ?? "";
 }
+// Same normalization as the settings selector: GitHub identity is
+// case-insensitive, so the dispatch input folds before any comparison.
+onlyRepo = onlyRepo.trim().toLowerCase();
 
 // Recovery scope guard (full contract in the header above): recopy needs
 // an explicit repo scope, and "all" is the deliberate whole-fleet form.
@@ -89,18 +93,10 @@ runStage(
   join(runnerTemp, "enriched.json"),
 );
 
-interface EnrichedRow {
-  repo: string;
-  display: string;
-  channel: string;
-  redact_name: boolean;
-  hide_details: boolean;
-  verify?: string;
-}
-
-const enriched = JSON.parse(readFileSync(join(runnerTemp, "enriched.json"), "utf-8")) as {
-  rows: EnrichedRow[];
-};
+const enriched = parseEnriched(
+  JSON.parse(readFileSync(join(runnerTemp, "enriched.json"), "utf-8")),
+  "select_sync_repos: enriched rows",
+);
 
 const repos: Record<string, unknown>[] = [];
 for (const row of enriched.rows) {
@@ -122,23 +118,15 @@ for (const row of enriched.rows) {
   // limit, outage) fails the plan instead of silently skipping repos.
   const adoption = capture(["gh", "api", `repos/${slug}/contents/.repo-platform.yml`, "--silent"]);
   if (adoption.exitCode === 0) {
-    repos.push(
-      row.redact_name
-        ? {
-            repo: row.display,
-            channel: row.channel,
-            redact_name: row.redact_name,
-            hide_details: row.hide_details,
-            verify: row.verify,
-          }
-        : {
-            repo: row.repo,
-            channel: row.channel,
-            redact_name: row.redact_name,
-            hide_details: row.hide_details,
-            verify: row.verify,
-          },
-    );
+    // The display IS the slug for unredacted rows (parseEnriched holds
+    // that invariant), so every matrix row can emit it as its repo.
+    repos.push({
+      repo: row.display,
+      channel: row.channel,
+      redact_name: row.redact_name,
+      hide_details: row.hide_details,
+      verify: row.verify,
+    });
   } else {
     let probe = adoption.stdout + adoption.stderr;
     if (/HTTP 404/.test(probe)) {

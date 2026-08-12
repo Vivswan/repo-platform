@@ -60,6 +60,7 @@ jobs:
         run: |
           sha="$(cat scripts/gitignore.lock)"
           branch="automation/gitignore-refresh"
+          body="Automated regeneration of the gitignore outputs (base skeleton, toolchain fragments, this repo's own \`.gitignore\`) from [github/gitignore@\`${sha:0:12}\`](https://github.com/github/gitignore/tree/${sha}). Merging this rebuilds the staging branch; cutting a release makes sync-repos push it to latest-channel repos."
           git config user.name "repo-platform-sync"
           git config user.email "repo-platform-sync@users.noreply.github.com"
           git checkout -B "$branch"
@@ -75,5 +76,9 @@ jobs:
               --base "$BASE_BRANCH" \
               --head "$branch" \
               --title "chore: refresh gitignore templates from github/gitignore" \
-              --body "Automated regeneration of the gitignore outputs (base skeleton, toolchain fragments, this repo's own \`.gitignore\`) from [github/gitignore@\`${sha:0:12}\`](https://github.com/github/gitignore/tree/${sha}). Merging this rebuilds the staging branch; cutting a release makes sync-repos push it to latest-channel repos."
+              --body "$body"
+          else
+            # A later run force-pushes fresher content onto the same branch;
+            # keep the PR linking the upstream SHA it now ships.
+            gh pr edit "$existing" --body "$body"
           fi

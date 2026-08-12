@@ -11,6 +11,7 @@ import {
   gitignoreUpstreamMap,
   hasToolchainDefault,
   knownModules,
+  labelNames,
   markerLines,
   mdMarkers,
   moduleChoices,
@@ -27,6 +28,7 @@ import {
   pagesSetupMeaning,
   pinFileContent,
   readmeModuleRoster,
+  reservedLabelNames,
   settingsDependabotLabels,
   spliceInlineRegion,
   spliceRegion,
@@ -36,6 +38,7 @@ import {
   toolchainPinsRegion,
   trackingGate,
   trackingLabelsInput,
+  trackingLabelValidator,
   trackingStreams,
   wrapProse,
 } from "../../scripts/generate";
@@ -225,6 +228,120 @@ describe("region builders", () => {
       '  "rust",',
       "]);",
     ]);
+  });
+});
+
+describe("tracking-label validators", () => {
+  const STREAMS = trackingStreams([FUZZER, NIGHTLY]);
+  const SETTINGS = [
+    "labels:",
+    "  - name: dependencies",
+    '    color: "0366d6"',
+    "    description: Dependency updates",
+    "{% if private %}  - name: settings-as-code-report",
+    '    color: "0e2a47"',
+    "    description: managed",
+    "{% endif -%}",
+    "{# compose:settings-labels #}",
+    "",
+  ].join("\n");
+  const FRAGMENT = [
+    '  - name: "autorelease: pending"',
+    '    color: "ededed"',
+    "    description: release PR awaiting merge",
+    "  - name: Release-Blocker",
+    '    color: "B60205"',
+    "    description: blocks releases",
+    "",
+  ].join("\n");
+
+  test("labelNames extracts the declared names and refuses an empty list", () => {
+    expect(labelNames("labels:\n  - name: bug\n    color: a\n    description: b\n", "f")).toEqual([
+      "bug",
+    ]);
+    expect(() => labelNames("repository: {}\n", "f.yml")).toThrow("no labels list");
+    expect(() => labelNames("labels:\n  - color: a\n", "f.yml")).toThrow("no name");
+  });
+
+  test("reservedLabelNames joins settings, release, and dependabot labels, lowercased", () => {
+    expect(
+      reservedLabelNames([BUN, UV], { settings: SETTINGS, releaseFragment: FRAGMENT }),
+    ).toEqual([
+      "dependencies",
+      "settings-as-code-report",
+      "autorelease: pending",
+      "release-blocker",
+      "javascript",
+      "python:uv",
+    ]);
+  });
+
+  test("reservedLabelNames dedupes a name declared by two sources", () => {
+    const twin = manifest("twin", {
+      dependabot: { ecosystem: "x", label: "dependencies", color: "0366d6" },
+    });
+    expect(reservedLabelNames([twin], { settings: SETTINGS, releaseFragment: FRAGMENT })).toEqual([
+      "dependencies",
+      "settings-as-code-report",
+      "autorelease: pending",
+      "release-blocker",
+    ]);
+  });
+
+  test("reservedLabelNames refuses a name that would break the Jinja quoting", () => {
+    const quoted = SETTINGS.replace("dependencies", "it's-a-label");
+    expect(() =>
+      reservedLabelNames([BUN], { settings: quoted, releaseFragment: FRAGMENT }),
+    ).toThrow("Jinja quotes");
+  });
+
+  test("the default sources are the live settings templates", () => {
+    const reserved = reservedLabelNames([BUN]);
+    for (const name of [
+      "dependencies",
+      "github_actions",
+      "bug",
+      "enhancement",
+      "fix-lint",
+      "settings-as-code-report",
+      "autorelease: pending",
+      "autorelease: tagged",
+      "release-blocker",
+      "release-override",
+      "javascript",
+    ]) {
+      expect(reserved).toContain(name);
+    }
+  });
+
+  test("the first stream's validator checks shape then the reserved roster", () => {
+    expect(trackingLabelValidator(STREAMS, 0, ["bug", "release-blocker"])).toEqual([
+      '  validator: "' +
+        "{% if not (fuzzer_label | regex_search('^[A-Za-z0-9._][A-Za-z0-9._: -]{0,49}\\\\Z')) %}" +
+        "fuzzer_label must be a plain label: letters, digits, ._:- and spaces, " +
+        "not starting with a dash, at most 50 characters" +
+        "{% elif fuzzer_label | lower in ['bug', 'release-blocker'] %}" +
+        "fuzzer_label must not reuse a label the template already manages " +
+        "(GitHub label names are case-insensitive): a green night would close " +
+        "whatever issues carry it and every settings apply would fight over it" +
+        '{% endif %}"',
+    ]);
+  });
+
+  test("a later stream also rejects each earlier stream's answer, module-gated", () => {
+    const [line] = trackingLabelValidator(STREAMS, 1, ["bug"]);
+    expect(line).toContain(
+      "{% elif 'fuzzer' in modules and nightly_label | lower == fuzzer_label | lower %}",
+    );
+    expect(line).toContain("nightly_label must differ from fuzzer_label");
+    // The reserved-roster clause precedes the cross-stream one.
+    expect(line.indexOf("must not reuse")).toBeLessThan(line.indexOf("must differ from"));
+  });
+
+  test("a stream default colliding with the reserved roster throws", () => {
+    expect(() => trackingLabelValidator(STREAMS, 0, ["fuzz-nightly"])).toThrow(
+      "would fail its validator",
+    );
   });
 });
 

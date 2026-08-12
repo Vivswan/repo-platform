@@ -43,7 +43,7 @@
 import { spawnSync } from "node:child_process";
 import { lstatSync, readdirSync, readFileSync } from "node:fs";
 import { extname, join, resolve } from "node:path";
-import { parse as parseYaml } from "yaml";
+import { parseAllDocuments, parse as parseYaml } from "yaml";
 
 const SKIP_DIRS = new Set([
   ".git",
@@ -426,36 +426,59 @@ function main(): number {
       try {
         safeLoadYaml(text);
       } catch (exc) {
-        const message = exc instanceof Error ? exc.message.split("\n")[0] : String(exc);
         const syntaxError = (m: string) =>
           `${rel}: does not parse as YAML (${m}); fix the syntax at the position shown`;
-        if ((exc as { code?: string }).code !== "DUPLICATE_KEY") {
-          errors.push(syntaxError(message));
-        } else {
-          // Duplicate keys are syntactically valid YAML, so "fix the syntax"
-          // would mislead; name the real problem.
-          const report =
-            `${rel}: duplicate mapping key (${message}) - the later value silently ` +
-            "wins at consumption time; remove or rename the duplicate";
-          if (isStrictYaml(rel)) {
-            errors.push(report);
-          } else {
-            // Duplicates here are only an advisory, but re-parse tolerantly
-            // so a further real syntax error (masked above because parse
-            // throws its first error) still fails.
-            try {
-              shapeOfYaml(text);
-              advisories.push(report);
-            } catch (tolerantExc) {
-              errors.push(
-                syntaxError(
-                  tolerantExc instanceof Error
-                    ? tolerantExc.message.split("\n")[0]
-                    : String(tolerantExc),
-                ),
-              );
+        // Duplicate keys are syntactically valid YAML, so "fix the syntax"
+        // would mislead; name the real problem.
+        const duplicateReport = (m: string) =>
+          `${rel}: duplicate mapping key (${m}) - the later value silently ` +
+          "wins at consumption time; remove or rename the duplicate";
+        // parse() throws only its first error and refuses multi-document
+        // sources outright; re-parse per document so a valid multi-document
+        // file passes and every real error is reported. doc.errors carries
+        // only composer-stage problems, so each document is also converted:
+        // a duplicate key must not mask a resolution failure (an unresolved
+        // alias) that parse() would have thrown.
+        let reported = false;
+        const docs = parseAllDocuments(text, { uniqueKeys: true });
+        // Every consumer of the strict set (GitHub's config readers, the
+        // sync's answers parsing) reads one mapping and would silently
+        // ignore every document past the first, so multi-document streams
+        // stay hard errors there.
+        if (docs.length > 1 && isStrictYaml(rel)) {
+          reported = true;
+          errors.push(
+            `${rel}: multi-document YAML stream (${docs.length} documents) - this file's ` +
+              "consumers read a single mapping and silently ignore the rest; merge the documents",
+          );
+        }
+        for (const doc of docs) {
+          for (const docError of doc.errors) {
+            reported = true;
+            const docMessage = docError.message.split("\n")[0];
+            if (docError.code !== "DUPLICATE_KEY") {
+              errors.push(syntaxError(docMessage));
+            } else if (isStrictYaml(rel)) {
+              errors.push(duplicateReport(docMessage));
+            } else {
+              advisories.push(duplicateReport(docMessage));
             }
           }
+          try {
+            doc.toJS();
+          } catch (convError) {
+            reported = true;
+            errors.push(
+              syntaxError(
+                convError instanceof Error ? convError.message.split("\n")[0] : String(convError),
+              ),
+            );
+          }
+        }
+        // An exception the per-document re-parse does not surface (e.g. a
+        // conversion failure past parsing) still fails.
+        if (!reported && (exc as { code?: string }).code !== "MULTIPLE_DOCS") {
+          errors.push(syntaxError(exc instanceof Error ? exc.message.split("\n")[0] : String(exc)));
         }
       }
     }
@@ -596,17 +619,28 @@ function main(): number {
       // down until the answers are healed.
       const answersPath = join(root, ".copier-answers.yml");
       const hasAnswers = isRegularFile(answersPath);
-      const answersText = hasAnswers ? readFileSync(answersPath, "utf-8") : "";
-      const isPrivateRender = /^private: true\b/m.test(answersText);
-      const username = (/^github_username: (.*)$/m.exec(answersText)?.[1] ?? "").trim();
-      const owner: string | null = selfMode
-        ? "[A-Za-z0-9-]+"
-        : /^[A-Za-z0-9-]+$/.test(username)
-          ? username
+      let answers: Record<string, unknown> = {};
+      if (hasAnswers) {
+        try {
+          const parsed = shapeOfYaml(readFileSync(answersPath, "utf-8"));
+          if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+            answers = parsed as Record<string, unknown>;
+          }
+        } catch {
+          // The walk already reported the parse failure; the empty record
+          // makes the github_username error below name the missing pin.
+        }
+      }
+      const isPrivateRender = answers.private === true;
+      const username = answers.github_username;
+      const ownerPin: { kind: "pinned"; owner: string } | { kind: "any" } | null = selfMode
+        ? { kind: "any" }
+        : typeof username === "string" && /^[A-Za-z0-9-]+$/.test(username)
+          ? { kind: "pinned", owner: username }
           : null;
       // A missing answers file already errored above; no second diagnostic
       // on the same root cause.
-      if (owner === null && hasAnswers) {
+      if (ownerPin === null && hasAnswers) {
         errors.push(
           ".copier-answers.yml: `github_username` is missing or not a " +
             "GitHub username - it pins which owner's composite actions " +
@@ -614,9 +648,14 @@ function main(): number {
         );
       }
       const ownedActionFor =
-        (pinned: string) =>
-        (name: string): RegExp =>
-          new RegExp(`^${pinned}/repo-platform/actions/${name}@`);
+        (pin: { kind: "pinned"; owner: string } | { kind: "any" }) =>
+        (name: string): RegExp => {
+          const ownerPattern =
+            pin.kind === "pinned"
+              ? pin.owner.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+              : "[A-Za-z0-9-]+";
+          return new RegExp(`^${ownerPattern}/repo-platform/actions/${name}@`);
+        };
       // The render shape decides what the remaining checks require: a
       // base-checks job means the private merged shape (the five base
       // checks are its steps), anything else is the public fan-out.
@@ -626,8 +665,8 @@ function main(): number {
           ? ({ kind: "private-merged", steps: jobSteps(jobs["base-checks"]) } as const)
           : ({ kind: "public-fanout" } as const);
       if (shape.kind === "private-merged") {
-        if (owner !== null) {
-          const action = ownedActionFor(owner)("check-typography");
+        if (ownerPin !== null) {
+          const action = ownedActionFor(ownerPin)("check-typography");
           const enforced = shape.steps.some(
             (step) =>
               typeof step.uses === "string" && action.test(step.uses) && stepUnconditional(step),
@@ -654,7 +693,7 @@ function main(): number {
       // graph behind it is free just there), so a private render's answers
       // silence that advisory instead of nagging about a job it must not
       // have. Self mode has no answers file and is public anyway.
-      const stepMarkers = owner === null ? null : mergedStepMarkers(ownedActionFor(owner));
+      const stepMarkers = ownerPin === null ? null : mergedStepMarkers(ownedActionFor(ownerPin));
       for (const advisory of ADVISORY_JOBS) {
         if (advisory === "dependency-review") {
           if (!isPrivateRender && !(advisory in jobs)) {
