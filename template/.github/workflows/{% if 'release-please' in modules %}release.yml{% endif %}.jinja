@@ -38,6 +38,9 @@ jobs:
     timeout-minutes: 20
     permissions:
       contents: write # also what makes the draft visible to gh
+      # Attesting build provenance also needs id-token: write and
+      # attestations: write here; the managed ci.yml ceiling allows both,
+      # but this block must list them to get them.
     steps:
       - uses: actions/checkout@v7
         with:
@@ -51,12 +54,11 @@ jobs:
         #   gh release upload "$RELEASE_TAG" ./artifact --clobber
         run: echo "nothing to add to $RELEASE_TAG yet"
       # When this job uploads real artifacts, also attest their build
-      # provenance; the managed ci.yml ceiling already grants the required
-      # id-token: write and attestations: write. Attestations only work on
-      # public repositories (private needs GitHub Enterprise Cloud).
-      #   - uses: actions/attest-build-provenance@v4
-      #     with:
-      #       subject-path: ./artifact
+      # provenance (add the two scopes above; private and internal
+      # repositories need GitHub Enterprise Cloud for attestations):
+      # - uses: actions/attest-build-provenance@v4
+      #   with:
+      #     subject-path: ./artifact
 
   # Step 3: freeze the release. This job stays last.
   publish-release:
