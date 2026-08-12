@@ -55,10 +55,23 @@ jobs:
         run: echo "nothing to add to $RELEASE_TAG yet"
       # When this job uploads real artifacts, also attest their build
       # provenance (add the two scopes above; private and internal
-      # repositories need GitHub Enterprise Cloud for attestations):
+      # repositories need GitHub Enterprise Cloud for attestations), and
+      # attach the Sigstore bundle as a release asset so the artifact
+      # verifies against the frozen release without depending on GitHub's
+      # attestations API:
+      # `gh attestation verify ./artifact -R <owner>/<repo> --bundle artifact.attestation.jsonl`
       # - uses: actions/attest-build-provenance@v4
+      #   id: attest
       #   with:
       #     subject-path: ./artifact
+      # - name: Update the draft release
+      #   env:
+      #     GH_TOKEN: {% raw %}${{ github.token }}{% endraw %}
+      #     RELEASE_TAG: {% raw %}${{ needs.release-please.outputs.tag_name }}{% endraw %}
+      #     BUNDLE: {% raw %}${{ steps.attest.outputs.bundle-path }}{% endraw %}
+      #   run: |
+      #     cp "$BUNDLE" artifact.attestation.jsonl
+      #     gh release upload "$RELEASE_TAG" ./artifact artifact.attestation.jsonl --clobber
 
   # Step 3: freeze the release. This job stays last.
   publish-release:
