@@ -20,7 +20,8 @@ symlinks to this file, so edit only here.
 {% endif -%}
 {% if 'deno' in modules -%}
 - Deno runtime (`deno install`, `deno test`, `deno task <task>`)
-- See `deno.json` for tasks, imports, and lint/format settings.
+- See `deno.json` for tasks, imports (`npm:`/`jsr:` dependency
+  specifiers), and lint/format settings.
 {% endif -%}
 {% if 'uv' in modules -%}
 - Python managed with uv (`uv sync`, `uv run <command>`)

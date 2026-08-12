@@ -43,7 +43,9 @@ jobs:
       # - uses: denoland/setup-deno@v2
       #   with:
       #     deno-version-file: .dvmrc
+      # - run: deno ci
       # - run: deno lint
+      # - run: deno fmt --check
       # - run: deno test
 {% endif %}{% if 'uv' in modules %}
       # Example uv checks; replace the placeholder below with real ones.
