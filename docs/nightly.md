@@ -9,7 +9,7 @@ starter carries the shared machinery and leaves the check steps to you.
 The starter is two jobs - `checks` (yours) and `report` (the machinery,
 `needs: [checks]` with `if: always()`). What the machinery does:
 
-- runs on a nightly cron (02:47, offset from the fuzzer starter's 03:13)
+- runs on a nightly cron (06:59 UTC, overnight US-Eastern, offset from the fuzzer starter's 09:11 UTC)
   plus a bare `workflow_dispatch` for on-demand re-runs
 - on a red night - the checks job failed OR was cancelled, which is what a
   job hitting its `timeout-minutes` becomes, so a hang still counts as red -

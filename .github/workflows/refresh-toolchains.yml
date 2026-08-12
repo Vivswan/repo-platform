@@ -7,7 +7,7 @@ name: Refresh toolchains
 
 on:
   schedule:
-    - cron: "37 5 * * 1"
+    - cron: "58 9 * * 1"
   workflow_dispatch:
 
 permissions:

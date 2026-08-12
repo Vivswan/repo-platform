@@ -7,7 +7,7 @@ name: Refresh gitignore
 
 on:
   schedule:
-    - cron: "7 5 * * 1"
+    - cron: "31 10 * * 1"
   workflow_dispatch:
 
 permissions:

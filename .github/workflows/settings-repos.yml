@@ -17,7 +17,7 @@ on:
     paths: [settings/**]
   schedule:
     # Nightly heal at an offbeat minute.
-    - cron: "47 3 * * *"
+    - cron: "2 8 * * *"
   workflow_dispatch:
     inputs:
       repo:

@@ -207,7 +207,7 @@ test ! -e "$wf/codeql.yml"
 if [ "$PRIVATE" != "true" ] && has_codeql_toolchain; then
   present "reusable-codeql.yml@main" "$wf/ci.yml"
   present "schedule:" "$wf/ci.yml"
-  present 'cron: "23 4 * * 1"' "$wf/ci.yml"
+  present 'cron: "3 8 * * 1"' "$wf/ci.yml"
   # The caller jobs must grant the scan permissions (a caller job's
   # permissions are the ceiling for the called workflow).
   present "contents: read" "$wf/ci.yml"
