@@ -183,8 +183,17 @@ if (!/^[0-9]+$/.test(runId)) {
 }
 const runProbe = capture(["gh", "api", `repos/${repository}/actions/runs/${runId}`]);
 if (runProbe.exitCode !== 0) {
+  // Only HTTP 404 proves the run is not the builder's; any other failure
+  // is an API problem that proves nothing about the stamp, and accusing a
+  // legitimate build of being an impostor sends the operator hunting a
+  // tamperer who does not exist. Both still fail closed.
+  if (/HTTP 404/.test(runProbe.stderr)) {
+    fail(
+      `${subject} points at run ${runId}, which does not exist in ${repository} (or this token cannot read it), so the stamp cannot be verified as the builder's. ${rebuildHint}`,
+    );
+  }
   fail(
-    `${subject} points at run ${runId}, which cannot be read from ${repository} - it does not exist there, so the stamp is not the builder's. ${rebuildHint}`,
+    `${subject} points at run ${runId}, but reading it from ${repository} failed (${runProbe.stderr.trim()}) - an API failure, not evidence of tampering. Re-run the sync.`,
   );
 }
 const run = parseWith(

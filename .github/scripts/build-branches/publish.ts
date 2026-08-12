@@ -79,7 +79,16 @@ function restampReason(channel: string, currentSourceSha: string): string {
   }
   const runProbe = capture(["gh", "api", `repos/${repository}/actions/runs/${prevRun}`]);
   if (runProbe.exitCode !== 0) {
-    return `re-stamp: stamped run ${prevRun} is unreadable`;
+    // Only HTTP 404 means the stamped run is gone and a re-stamp can heal
+    // it. Any other failure is operational; re-stamping on it would push a
+    // needless empty commit onto the append-only branch (and a fleet-wide
+    // no-change sync PR), so abort and let a re-run decide.
+    if (/HTTP 404/.test(runProbe.stderr)) {
+      return `re-stamp: stamped run ${prevRun} does not exist`;
+    }
+    throw new Error(
+      `reading stamped run ${prevRun} failed (${runProbe.stderr.trim()}) - an API failure, not a broken stamp; re-run the build`,
+    );
   }
   const run = parseWith(
     z.object({ path: z.string(), conclusion: z.string().nullable(), head_sha: z.string() }),

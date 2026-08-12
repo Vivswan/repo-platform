@@ -137,9 +137,17 @@ if (channel === "staging") {
       ".tag_name",
     ]);
     if (release.exitCode !== 0) {
-      console.log(
-        `::error::cannot sync ${targetDisplay} on the latest channel: ${repository} has no release yet. Cut a release (or pass a version input), then re-run.`,
-      );
+      // Only HTTP 404 means no release exists; anything else is an
+      // operational failure that must not read as "cut a release".
+      if (/HTTP 404/.test(release.stderr)) {
+        console.log(
+          `::error::cannot sync ${targetDisplay} on the latest channel: ${repository} has no release yet (or this token cannot read releases). Cut a release (or pass a version input), then re-run.`,
+        );
+      } else {
+        console.log(
+          `::error::cannot sync ${targetDisplay}: reading ${repository}'s latest release failed (${release.stderr.trim()}) - an API failure, not a missing release. Re-run the sync.`,
+        );
+      }
       process.exit(1);
     }
     ver = release.stdout.trimEnd();

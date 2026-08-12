@@ -22,7 +22,17 @@ function latestReleaseTag(): string {
     "--jq",
     ".tag_name",
   ]);
-  return release.exitCode === 0 ? release.stdout.trimEnd() : "";
+  if (release.exitCode === 0) {
+    return release.stdout.trimEnd();
+  }
+  // Only HTTP 404 means "no release exists". Any other failure is an
+  // operational problem (rate limit, auth, outage) and must fail the plan:
+  // reading it as "no release yet" would skip the latest build (and the
+  // self-heal path) while the workflow reports success.
+  if (/HTTP 404/.test(release.stderr)) {
+    return "";
+  }
+  throw new Error(`gh api releases/latest failed (${release.exitCode}): ${release.stderr.trim()}`);
 }
 
 function remoteRefExists(ref: string): boolean {

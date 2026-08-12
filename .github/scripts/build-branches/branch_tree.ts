@@ -26,13 +26,30 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { build, writeOutput } from "../../../scripts/compose_template.ts";
 
 const REPO_ROOT = resolve(import.meta.dir, "..", "..", "..");
+
+/** The path with every EXISTING component dereferenced: resolve() is
+ * lexical, so a symlinked parent (say /tmp/projects -> the repo's parent)
+ * would otherwise alias the checkout past the overlap guard below. The
+ * not-yet-existing tail is re-attached unresolved. */
+export function canonicalize(path: string): string {
+  let base = path;
+  const tail: string[] = [];
+  while (!existsSync(base)) {
+    tail.unshift(basename(base));
+    const parent = dirname(base);
+    if (parent === base) break;
+    base = parent;
+  }
+  return join(realpathSync(base), ...tail);
+}
 
 const README = (channel: string) => `\
 # repo-platform build branch (${channel})
@@ -114,11 +131,24 @@ function parseArgs(argv: string[]): Args {
   return { dest, channel };
 }
 
+/** True when dest is the repository root, an ancestor of it, or inside it -
+ * every path whose recursive removal would take the checkout with it. A
+ * dest of "/" must not slip past the ancestor check because "/" + "/" is
+ * "//", which no absolute path starts with. */
+export function destOverlapsRepo(dest: string, repoRoot: string): boolean {
+  const destPrefix = dest.endsWith("/") ? dest : `${dest}/`;
+  return dest === repoRoot || repoRoot.startsWith(destPrefix) || dest.startsWith(`${repoRoot}/`);
+}
+
 function main(): number {
   const args = parseArgs(process.argv.slice(2));
 
   const dest = resolve(args.dest);
-  if (dest === REPO_ROOT || REPO_ROOT.startsWith(`${dest}/`) || dest.startsWith(`${REPO_ROOT}/`)) {
+  // Compare canonically - a symlinked parent must not alias the checkout
+  // past the guard - but mutate the lexical path: canonicalizing dest for
+  // rmSync would dereference a symlinked dest and delete its TARGET
+  // instead of replacing the link.
+  if (destOverlapsRepo(canonicalize(dest), canonicalize(REPO_ROOT))) {
     usageError(
       `--dest ${dest} is inside the repository and would be wiped along ` +
         "with the checkout; pass a path outside it, e.g. --dest /tmp/build-tree",
@@ -140,4 +170,6 @@ function main(): number {
   return 0;
 }
 
-process.exit(main());
+if (import.meta.main) {
+  process.exit(main());
+}

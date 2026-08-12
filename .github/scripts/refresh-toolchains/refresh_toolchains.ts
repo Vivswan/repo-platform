@@ -159,7 +159,9 @@ async function fetchJson(url: string): Promise<unknown> {
   if (token && url.startsWith("https://api.github.com/")) {
     headers.authorization = `Bearer ${token}`;
   }
-  const response = await fetch(url, { headers });
+  // A hung upstream should fail this one source fast (each source already
+  // degrades to a warning) instead of leaning on the job timeout.
+  const response = await fetch(url, { headers, signal: AbortSignal.timeout(30_000) });
   if (!response.ok) throw new Error(`GET ${url} failed: ${response.status}`);
   return response.json();
 }
