@@ -140,18 +140,6 @@ jobs:
               reviewers
             });
 
-      - name: Add fix-lint label to same-repo PRs
-        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
-        uses: actions/github-script@v9
-        with:
-          script: |
-            await github.rest.issues.addLabels({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.payload.pull_request.number,
-              labels: ['fix-lint']
-            });
-
   # Assign one named issue or PR per the CODEOWNERS policy. GitHub fires no
   # workflow for events created with a workflow's own GITHUB_TOKEN, so an
   # issue or PR created by another workflow never triggers the paths above;
