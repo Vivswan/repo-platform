@@ -88,6 +88,9 @@ jobs:
         if: {% raw %}steps.file-issue.outputs.issue-number != ''{% endraw %}
         env:
           GH_TOKEN: {% raw %}${{ github.token }}{% endraw %}
+          # This job has no checkout, so gh has no working tree to infer the
+          # repository from; name it explicitly.
+          GH_REPO: {% raw %}${{ github.repository }}{% endraw %}
           ISSUE_NUMBER: {% raw %}${{ steps.file-issue.outputs.issue-number }}{% endraw %}
         run: gh workflow run auto-assign.yml -f "issue=$ISSUE_NUMBER" || echo "::warning::could not dispatch auto-assign.yml"
 
