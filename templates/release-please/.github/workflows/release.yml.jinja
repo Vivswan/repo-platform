@@ -50,6 +50,13 @@ jobs:
         #   ./build.sh
         #   gh release upload "$RELEASE_TAG" ./artifact --clobber
         run: echo "nothing to add to $RELEASE_TAG yet"
+      # When this job uploads real artifacts, also attest their build
+      # provenance; the managed ci.yml ceiling already grants the required
+      # id-token: write and attestations: write. Attestations only work on
+      # public repositories (private needs GitHub Enterprise Cloud).
+      #   - uses: actions/attest-build-provenance@v4
+      #     with:
+      #       subject-path: ./artifact
 
   # Step 3: freeze the release. This job stays last.
   publish-release:
