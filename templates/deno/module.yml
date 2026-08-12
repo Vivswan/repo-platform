@@ -12,8 +12,10 @@ dependabot:
   color: "70ffaf"
 gitignore_sources:
   - Deno.gitignore
+  # nodeModulesDir auto materializes a real node_modules for npm deps.
+  - Node.gitignore
 lockfiles:
   - 'deno\.lock'
 pages:
-  install: deno install --frozen
+  install: deno ci
   build: deno task build

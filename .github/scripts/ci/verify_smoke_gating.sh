@@ -310,11 +310,12 @@ else
 fi
 
 # gitignore toolchain sections; the four markers are asserted by the validator.
-# bun and node share upstream Node.gitignore: the shared section must appear
-# under either module and exactly once under co-selection (the node fragment
-# suppresses its guarded copy when bun is also selected). The count matches
-# the full header line, so a reworded near-miss cannot satisfy it.
-if has bun || has node; then
+# bun, node, and deno share upstream Node.gitignore (deno's nodeModulesDir
+# materializes a real node_modules): the shared section must appear under any
+# of them and exactly once under co-selection (each later module's fragment
+# suppresses its guarded copy when an earlier declarer is also selected). The
+# count matches the full header line, so a reworded near-miss cannot satisfy it.
+if has bun || has node || has deno; then
   node_sections="$(grep -cxF -- "## Node (github/gitignore Node.gitignore)" /tmp/smoke/.gitignore || true)"
   if [ "$node_sections" -ne 1 ]; then
     echo "::error::gating check failed: expected exactly 1 line '## Node (github/gitignore Node.gitignore)' in /tmp/smoke/.gitignore but found $node_sections for modules=$MODULES private=$PRIVATE - the shared Node.gitignore source must render once, never per-module duplicates. Fix the fragment guards emitted by scripts/build_gitignore.ts (or this expectation in verify_smoke_gating.sh)."
@@ -467,6 +468,18 @@ if has bun; then
   present "REPO_PLATFORM_TOKEN || github.token" "$wf/dependabot-bun-lockfile.yml"
 else
   test ! -e "$wf/dependabot-bun-lockfile.yml"
+fi
+
+# The deno module's dependency audit is managed machinery too: a weekly
+# advisory re-scan plus an audit of every push that changes deno.lock.
+if has deno; then
+  test -f "$wf/deno-audit.yml"
+  present "deno audit --frozen" "$wf/deno-audit.yml"
+  present "deno-version-file: .dvmrc" "$wf/deno-audit.yml"
+  present 'paths: ["**/deno.lock"]' "$wf/deno-audit.yml"
+  present 'cron: "37 7 * * 1"' "$wf/deno-audit.yml"
+else
+  test ! -e "$wf/deno-audit.yml"
 fi
 
 # Toolchain version pins: each pinning toolchain module ships its managed

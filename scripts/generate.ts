@@ -411,8 +411,8 @@ export function newRepoModuleRoster(manifests: ModuleManifest[]): string[] {
 }
 
 /** README.md layout-table cell for scripts/build_gitignore.ts: which
- *  upstream templates map to which module. An upstream shared by two
- *  modules (Node.gitignore under bun and node) is named once, by its
+ *  upstream templates map to which module. An upstream shared by several
+ *  modules (Node.gitignore under bun, node, and deno) is named once, by its
  *  first declaring module. */
 export function gitignoreUpstreamMap(manifests: ModuleManifest[]): string {
   const withSources = manifests.filter(

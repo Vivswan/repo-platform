@@ -2,7 +2,10 @@
       - uses: denoland/setup-deno@v2
         with:
           deno-version-file: .dvmrc
+          cache: true
       - name: Format (deno)
+        env:
+          DENO_NO_UPDATE_CHECK: "1"
         run: |
           deno lint --fix || true
           deno fmt

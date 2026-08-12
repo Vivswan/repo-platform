@@ -224,10 +224,11 @@ jobs:
           key: bun-${{ runner.os }}-${{ hashFiles('**/bun.lock') }}
           restore-keys: bun-${{ runner.os }}-
 
-      # No cache steps for node/deno (mirrors uv). setup-node's own
-      # package-manager-cache is switched off: it defaults on, and when
-      # package.json declares a package manager it hard-fails unless the
-      # lockfile sits at the workspace root.
+      # node and uv have no cache step, and setup-deno's built-in DENO_DIR
+      # cache (used by the template's own deno steps) is not enabled here.
+      # setup-node's own package-manager-cache is switched off: it defaults
+      # on, and when package.json declares a package manager it hard-fails
+      # unless the lockfile sits at the workspace root.
       - name: Setup node
         if: contains(format(',{0},', inputs.setup), ',node,') && steps.cfg.outputs.publish == 'true'
         uses: actions/setup-node@v7

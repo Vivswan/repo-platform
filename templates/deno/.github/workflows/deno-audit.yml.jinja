@@ -1,0 +1,52 @@
+# This file is managed by {{ github_username }}/repo-platform.
+# Local edits may be replaced during template updates.
+#
+# `deno audit` checks every locked dependency (JSR and npm, transitive
+# entries included) against the GitHub Advisory Database (served through
+# the npm registry's bulk advisory endpoint) and fails the run on
+# findings. Dependabot's deno ecosystem covers security updates on its
+# own PR cadence; this run turns a fresh advisory (weekly re-scan) or a
+# change that locks a vulnerable version (lockfile-touching PRs and
+# pushes to main) into an immediate red signal.
+
+name: Deno Audit
+
+on:
+  pull_request:
+    paths: ["**/deno.lock"]
+  push:
+    branches: [main]
+    paths: ["**/deno.lock"]
+  schedule:
+    - cron: "37 7 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Newest audit per ref wins; a superseded run's verdict is stale anyway.
+concurrency:
+  group: {% raw %}${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}{% endraw %}
+  cancel-in-progress: true
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      DENO_NO_UPDATE_CHECK: "1"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version-file: .dvmrc
+      # Without the guard, the weekly run on a lockfile-less repo would go
+      # green having audited nothing. --frozen fails loudly when the
+      # lockfile disagrees with the manifest instead of auditing it as-is.
+      - name: Audit dependencies (deno)
+        run: |
+          if [ ! -f deno.lock ]; then
+            echo "::notice::no deno.lock - nothing to audit; commit a lockfile to enable advisory coverage"
+            exit 0
+          fi
+          deno audit --frozen

@@ -285,14 +285,26 @@ jobs:
             private: "false"
             expect_in_pages: |
               setup: deno
-              deno install --frozen
+              deno ci
               deno task build
           # bun + node co-selected: the only render exercising the shared
-          # javascript label or-gate, the shared javascript-typescript CodeQL
-          # group (the exact-count check must see one job), and the shared
-          # Node.gitignore guard (one section, the node copy suppressed).
+          # javascript label or-gate and the shared javascript-typescript
+          # CodeQL group (the exact-count check must see one job), plus the
+          # Node.gitignore guard's bun+node leg (one section, the node copy
+          # suppressed).
           - name: bun-node
             modules: "[agents, bun, node, settings-sync]"
+            private: "false"
+          # deno co-selected with each earlier Node.gitignore declarer:
+          # deno's two-operand suppression guard must render the shared
+          # section exactly once when exactly ONE of bun/node is also
+          # selected. An and->or slip in the guard passes bun-node and the
+          # everything row but duplicates the section on these rows.
+          - name: bun-deno
+            modules: "[bun, deno]"
+            private: "false"
+          - name: node-deno
+            modules: "[node, deno]"
             private: "false"
           # The only public row where uv is the sole toolchain: CodeQL must
           # gate ci.yml with the python leg and WITHOUT the javascript leg,

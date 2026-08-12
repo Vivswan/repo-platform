@@ -107,6 +107,10 @@ own checks:
   repo). Without the secret the push cannot re-trigger checks, so the job
   posts a PR comment and a run warning saying so; close/reopen the PR to
   re-run its checks, or register the token.
+- with the deno module: a managed `deno-audit.yml` that runs `deno audit`
+  weekly, on lockfile-touching PRs, and on pushes to main that change
+  `deno.lock`, failing the run when any locked dependency (JSR or npm,
+  transitive included) has a known advisory.
 - with the agents module: a repo-owned `copilot-setup-steps.yml` starter
   (environment setup for the Copilot coding agent), prefilled with installs
   for the selected toolchains.

@@ -137,7 +137,7 @@ pages_install_command:
   type: str
   help: Dependency install command run before each build (empty to skip)
   # BEGIN GENERATED: pages-install-command (scripts/generate.ts - edit module.yml manifests, not this block)
-  default: "{{ 'bun install --frozen-lockfile' if 'bun' in pages_setup.split(',') else ('npm ci' if 'node' in pages_setup.split(',') else ('deno install --frozen' if 'deno' in pages_setup.split(',') else ('uv sync' if 'uv' in pages_setup.split(',') else ''))) }}"
+  default: "{{ 'bun install --frozen-lockfile' if 'bun' in pages_setup.split(',') else ('npm ci' if 'node' in pages_setup.split(',') else ('deno ci' if 'deno' in pages_setup.split(',') else ('uv sync' if 'uv' in pages_setup.split(',') else ''))) }}"
   # END GENERATED: pages-install-command
   when: "{{ 'pages' in modules }}"
 
