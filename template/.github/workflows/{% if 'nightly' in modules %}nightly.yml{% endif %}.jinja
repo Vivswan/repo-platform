@@ -16,10 +16,10 @@ name: Nightly
 
 on:
   schedule:
-    # Off-peak, off the top of the hour, and offset from the fuzzer
-    # starter's 03:13; pick your repo's own minute so the fleet's nightlies
+    # Overnight US-Eastern, off the top of the hour, and offset from the
+    # fuzzer starter; pick your repo's own minute so the fleet's nightlies
     # do not all land on GitHub at once.
-    - cron: "47 2 * * *"
+    - cron: "59 6 * * *"
   workflow_dispatch:
 
 concurrency:
