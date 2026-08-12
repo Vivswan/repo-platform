@@ -204,8 +204,8 @@ nightly_label:
   # Same shape constraints (and the same \Z rationale) as fuzzer_label
   # above, plus stream independence: both streams dedup AND auto-close by
   # label, so sharing one label would let either stream's green night close
-  # the other's active failure issue (and lift a release-health hold keyed
-  # on the fuzz label), while settings.yml would declare two same-name
+  # the other's active failure issue (and lift the release-health hold
+  # keyed on it), while settings.yml would declare two same-name
   # labels whose colors fight on every apply. Compared lowercased: GitHub
   # deduplicates label names case-insensitively.
   validator: "{% if not (nightly_label | regex_search('^[A-Za-z0-9._][A-Za-z0-9._: -]{0,49}\\Z')) %}nightly_label must be a plain label: letters, digits, ._:- and spaces, not starting with a dash, at most 50 characters{% elif 'fuzzer' in modules and nightly_label | lower == fuzzer_label | lower %}nightly_label must differ from fuzzer_label (GitHub label names are case-insensitive): each stream needs its own tracking label or a green night in one closes the other's open issue{% endif %}"
