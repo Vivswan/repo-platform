@@ -10,6 +10,7 @@ into managed repos.
 |---|---|
 | [repo-platform-sync-pr](repo-platform-sync-pr/) | Handle an automated template sync PR: triage the body, review every changed file, resolve conflicts, and recover a broken sync |
 | [repo-platform-new-project](repo-platform-new-project/) | Create or adopt a repository under platform management: scaffold, apply the copier template, publish, enroll, and register settings |
+| [repo-platform-add-module](repo-platform-add-module/) | Add or remove a platform module in a managed repository: edit the selection, set parameters, land the companion steps, and verify the sync PR |
 
 ## Install
 

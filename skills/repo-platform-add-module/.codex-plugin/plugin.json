@@ -1,0 +1,29 @@
+{
+  "name": "repo-platform-add-module",
+  "description": "Add or remove a repo-platform module in a managed repository: edit the selection, set module parameters, review the sync PR, and finish the companion steps.",
+  "author": {
+    "name": "Vivswan Shah",
+    "email": "58091053+Vivswan@users.noreply.github.com",
+    "url": "https://vivswan.github.io/"
+  },
+  "homepage": "https://github.com/Vivswan/repo-platform/tree/main/skills/repo-platform-add-module",
+  "repository": "https://github.com/Vivswan/repo-platform",
+  "license": "SEE LICENSE IN LICENSE.md",
+  "keywords": ["agent-skills", "repo-platform", "modules", "copier", "plugin-ready"],
+  "skills": "./",
+  "interface": {
+    "displayName": "Repo Platform: Add Module",
+    "shortDescription": "Change a managed repository's repo-platform module selection.",
+    "longDescription": "The playbook for module changes in a repo-platform managed repository: the repo-owned modules list in .repo-platform.yml, module parameters recorded in .copier-answers.yml, the sync PR that renders the change, each module's companion steps (labels, secrets, one-time setup), and what removal cleans up vs leaves behind.",
+    "developerName": "Vivswan",
+    "category": "Developer Tools",
+    "capabilities": ["Read", "Edit", "Configure"],
+    "websiteURL": "https://github.com/Vivswan/repo-platform/tree/main/skills/repo-platform-add-module",
+    "defaultPrompt": [
+      "Add nightly CI to this repo.",
+      "Enable the fuzzer module here.",
+      "Remove the pages module from this repository."
+    ],
+    "brandColor": "#047857"
+  }
+}

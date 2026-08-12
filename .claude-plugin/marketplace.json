@@ -11,7 +11,7 @@
   "plugins": [
     {
       "name": "repo-platform-skills",
-      "description": "Fleet-operations agent skills for repo-platform: new project scaffolding and template sync-PR handling",
+      "description": "Fleet-operations agent skills for repo-platform: new project scaffolding, template sync-PR handling, and module changes",
       "source": "./"
     }
   ]
