@@ -4,10 +4,11 @@
 # `deno audit` checks every locked dependency (JSR and npm, transitive
 # entries included) against the GitHub Advisory Database (served through
 # the npm registry's bulk advisory endpoint) and fails the run on
-# findings. Dependabot's deno ecosystem covers security updates on its
-# own PR cadence; this run turns a fresh advisory (weekly re-scan) or a
-# change that locks a vulnerable version (lockfile-touching PRs and
-# pushes to main) into an immediate red signal.
+# findings. Dependabot's deno ecosystem does version updates only (no
+# security updates), so this run is the advisory coverage: a fresh
+# advisory (weekly re-scan) or a change that locks a vulnerable version
+# (lockfile-touching PRs and pushes to main) becomes an immediate red
+# signal.
 
 name: Deno Audit
 
