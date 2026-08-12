@@ -29,12 +29,12 @@
           fi
 
   # Early, visible release gating: fails the release PR while an open issue
-  # carries the fuzz-tracking or release-blocker label, or an open Dependabot
-  # alert reaches the severity threshold. This check can go stale (an issue
-  # opened after the PR turned green re-runs nothing here), so the release
-  # path re-runs the same action as the authoritative pre-flight before
-  # cutting a release. The skip lives on the STEP: all-green treats a
-  # skipped needed job as failure.
+  # carries a tracking-stream label (nightly fuzz/CI) or the release-blocker
+  # label, or an open Dependabot alert reaches the severity threshold. This
+  # check can go stale (an issue opened after the PR turned green re-runs
+  # nothing here), so the release path re-runs the same action as the
+  # authoritative pre-flight before cutting a release. The skip lives on
+  # the STEP: all-green treats a skipped needed job as failure.
   release-health:
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -52,8 +52,10 @@
         if: github.event_name == 'pull_request' && startsWith(github.head_ref, 'release-please--')
         with:
           mode: pull-request
-{%- if 'fuzzer' in modules %}
-          fuzz-label: {{ fuzzer_label | tojson }}
+{#- BEGIN GENERATED: tracking-labels (scripts/generate.ts - edit module.yml manifests, not this block) #}
+{%- if 'fuzzer' in modules or 'nightly' in modules %}
+          tracking-labels: {{ (([fuzzer_label] if 'fuzzer' in modules else []) + ([nightly_label] if 'nightly' in modules else [])) | join(',') | tojson }}
 {%- endif %}
+{#- END GENERATED: tracking-labels #}
         env:
           GH_TOKEN: {% raw %}${{ secrets.GITHUB_TOKEN }}{% endraw %}

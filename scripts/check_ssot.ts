@@ -26,7 +26,7 @@ import { join, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { centralIdentityIssues } from "../.github/scripts/fleet/validate_central_settings.ts";
 import { dependabotLabels } from "./compose_template.ts";
-import { MARKER_TOKENS } from "./generate.ts";
+import { MARKER_TOKENS, trackingGate, trackingStreams } from "./generate.ts";
 import { type JinjaVars, normalizeJinja, placeholderJinja } from "./jinja_subset.ts";
 import { loadManifests, type ModuleManifest } from "./module_manifests.ts";
 import { ANSWERS_FILE, parseAnswers } from "./render_dogfood.ts";
@@ -293,19 +293,18 @@ function copierChoices(question: string): string[] {
 
 /** The manifests' tracking_label streams (fuzzer, nightly, ...): the single
  *  source the hand-written copier questions, settings-labels fragments, and
- *  doc constants are anchored to. Throws when none declares one, so every
- *  rule keyed on this fails loudly rather than passing vacuously. */
+ *  doc constants are anchored to. The list comes from generate.ts's
+ *  trackingStreams (which throws when no manifest declares one), so every
+ *  rule keyed on it fails loudly rather than passing vacuously and can
+ *  never disagree with the generated tracking-labels regions. */
 function trackingManifests(): {
   module: string;
   tracking: NonNullable<ModuleManifest["tracking_label"]>;
 }[] {
-  const found = loadManifests().flatMap((m) =>
-    m.tracking_label ? [{ module: m.module, tracking: m.tracking_label }] : [],
-  );
-  if (found.length === 0) {
-    throw new Error("no module manifest declares tracking_label - anchor lost");
-  }
-  return found;
+  return trackingStreams(loadManifests()).map((m) => ({
+    module: m.module,
+    tracking: m.tracking_label,
+  }));
 }
 
 function jinjaVars(): JinjaVars {
@@ -1072,9 +1071,12 @@ const rules: Rule[] = [
           repo: ".github/workflows/release-please.yml",
           tpl: "templates/release-please/.github/workflows/release-please.yml.jinja",
           mode: "semantic",
-          // This repository selects no fuzzer module, so the fuzz-label
-          // branch must evaluate to what this repo really renders: absent.
-          context: { "'fuzzer' in modules": false },
+          // This repository selects no tracking-stream module (fuzzer,
+          // nightly), so the generated tracking-labels block must evaluate
+          // to what this repo really renders: absent. The key is the exact
+          // or-chain the generator emits, so a new stream module updates
+          // both sides together.
+          context: { [trackingGate(loadManifests())]: false },
         },
         {
           // The template ends with a repo-specific-notices marker

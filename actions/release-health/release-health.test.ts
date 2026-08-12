@@ -17,6 +17,7 @@ import {
   LABEL_RE,
   overrideFromPullRequest,
   parseConfig,
+  parseTrackingLabels,
   runHealthCheck,
   SEVERITIES,
   securityGate,
@@ -120,7 +121,8 @@ function prConfig(overrides: Partial<Config> = {}): Config {
   return {
     context: { mode: "pull-request", eventPath },
     repo: "o/r",
-    fuzzLabel: "fuzz-nightly",
+    trackingLabels: ["fuzz-nightly"],
+    legacyFuzzLabel: undefined,
     blockerLabel: "release-blocker",
     overrideLabel: "release-override",
     security: "high",
@@ -140,7 +142,7 @@ describe("parseConfig", () => {
       GITHUB_EVENT_PATH: eventPath,
     } as NodeJS.ProcessEnv);
     expect(cfg.context).toEqual({ mode: "pull-request", eventPath });
-    expect(cfg.fuzzLabel).toBeUndefined();
+    expect(cfg.trackingLabels).toEqual([]);
     expect(cfg.blockerLabel).toBe("release-blocker");
     expect(cfg.overrideLabel).toBe("release-override");
     expect(cfg.security).toBe("high");
@@ -150,13 +152,13 @@ describe("parseConfig", () => {
     const cfg = parseConfig({
       ...baseEnv,
       MODE: "release",
-      FUZZ_LABEL: "fuzz-nightly",
+      TRACKING_LABELS: "fuzz-nightly,nightly-failure",
       BLOCKER_LABEL: "no-ship",
       OVERRIDE_LABEL: "ship-anyway",
       SECURITY_SEVERITY: "critical",
     } as NodeJS.ProcessEnv);
     expect(cfg.context).toEqual({ mode: "release", sha: "abc123" });
-    expect(cfg.fuzzLabel).toBe("fuzz-nightly");
+    expect(cfg.trackingLabels).toEqual(["fuzz-nightly", "nightly-failure"]);
     expect(cfg.blockerLabel).toBe("no-ship");
     expect(cfg.overrideLabel).toBe("ship-anyway");
     expect(cfg.security).toBe("critical");
@@ -203,6 +205,9 @@ describe("parseConfig", () => {
         parseConfig({ ...baseEnv, MODE: "release", BLOCKER_LABEL: label } as NodeJS.ProcessEnv),
       ).toThrow("BLOCKER_LABEL");
       expect(() =>
+        parseConfig({ ...baseEnv, MODE: "release", TRACKING_LABELS: label } as NodeJS.ProcessEnv),
+      ).toThrow("TRACKING_LABELS");
+      expect(() =>
         parseConfig({ ...baseEnv, MODE: "release", FUZZ_LABEL: label } as NodeJS.ProcessEnv),
       ).toThrow("FUZZ_LABEL");
     }
@@ -212,6 +217,50 @@ describe("parseConfig", () => {
     expect(LABEL_RE.test("fuzz-nightly")).toBe(true);
     expect(LABEL_RE.test("autorelease: pending")).toBe(true);
     expect(LABEL_RE.test("-x")).toBe(false);
+  });
+});
+
+describe("parseTrackingLabels", () => {
+  test("empty environment means no tracking labels", () => {
+    expect(parseTrackingLabels({} as NodeJS.ProcessEnv)).toEqual({
+      labels: [],
+      legacyFuzzLabel: undefined,
+    });
+    expect(parseTrackingLabels({ TRACKING_LABELS: "" } as NodeJS.ProcessEnv)).toEqual({
+      labels: [],
+      legacyFuzzLabel: undefined,
+    });
+  });
+
+  test("splits on commas, trimming whitespace and dropping empty tokens", () => {
+    expect(
+      parseTrackingLabels({
+        TRACKING_LABELS: " fuzz-nightly , nightly-failure ,",
+      } as NodeJS.ProcessEnv).labels,
+    ).toEqual(["fuzz-nightly", "nightly-failure"]);
+  });
+
+  test("a single label needs no comma", () => {
+    expect(
+      parseTrackingLabels({ TRACKING_LABELS: "fuzz-nightly" } as NodeJS.ProcessEnv).labels,
+    ).toEqual(["fuzz-nightly"]);
+  });
+
+  test("a label sourced from the deprecated FUZZ_LABEL alone is flagged legacy", () => {
+    expect(parseTrackingLabels({ FUZZ_LABEL: "fuzz-nightly" } as NodeJS.ProcessEnv)).toEqual({
+      labels: ["fuzz-nightly"],
+      legacyFuzzLabel: "fuzz-nightly",
+    });
+  });
+
+  test("FUZZ_LABEL already covered by TRACKING_LABELS is deduplicated, not legacy", () => {
+    // Case-insensitively, the way GitHub deduplicates label names.
+    expect(
+      parseTrackingLabels({
+        TRACKING_LABELS: "Fuzz-Nightly,nightly-failure",
+        FUZZ_LABEL: "fuzz-nightly",
+      } as NodeJS.ProcessEnv),
+    ).toEqual({ labels: ["Fuzz-Nightly", "nightly-failure"], legacyFuzzLabel: undefined });
   });
 });
 
@@ -467,18 +516,51 @@ describe("runHealthCheck", () => {
     expect(await runHealthCheck(prConfig(), run, out)).toBe(0);
     expect(lines).toHaveLength(1);
     expect(lines[0]).toContain("all gates passed");
-    expect(lines[0]).toContain("fuzz");
+    expect(lines[0]).toContain("tracking:fuzz-nightly");
     expect(lines[0]).toContain("blocker");
     expect(lines[0]).toContain("Dependabot");
   });
 
-  test("an empty fuzz label runs no fuzz gate", async () => {
+  test("an empty tracking-label list runs no tracking gate", async () => {
     const { run, calls } = fakeGh({ issues: {}, alerts: [], prViewLabels: [] });
     const { out } = collect();
-    expect(await runHealthCheck(prConfig({ fuzzLabel: undefined }), run, out)).toBe(0);
+    expect(await runHealthCheck(prConfig({ trackingLabels: [] }), run, out)).toBe(0);
     const issueLists = calls.filter((c) => c[0] === "issue");
     expect(issueLists).toHaveLength(1);
     expect(issueLists[0]?.[issueLists[0].indexOf("--label") + 1]).toBe("release-blocker");
+  });
+
+  test("a legacy-sourced label draws a deprecation notice and still gates", async () => {
+    const { run } = fakeGh({
+      issues: { "fuzz-nightly": [2], "release-blocker": [] },
+      alerts: [],
+      prViewLabels: [],
+    });
+    const { out, lines } = collect();
+    expect(await runHealthCheck(prConfig({ legacyFuzzLabel: "fuzz-nightly" }), run, out)).toBe(1);
+    const notice = lines.find((line) => line.startsWith("::notice::"));
+    expect(notice).toContain("deprecated fuzz-label input");
+    expect(notice).toContain("tracking-labels");
+    expect(
+      lines.some((line) => line.startsWith("::error::tracking:fuzz-nightly gate failed")),
+    ).toBe(true);
+  });
+
+  test("each tracking label is its own gate, queried and reported by label", async () => {
+    const { run, calls } = fakeGh({
+      issues: { "fuzz-nightly": [], "nightly-failure": [3], "release-blocker": [] },
+      alerts: [],
+      prViewLabels: [],
+    });
+    const { out, lines } = collect();
+    const cfg = prConfig({ trackingLabels: ["fuzz-nightly", "nightly-failure"] });
+    expect(await runHealthCheck(cfg, run, out)).toBe(1);
+    const queried = calls.filter((c) => c[0] === "issue").map((c) => c[c.indexOf("--label") + 1]);
+    expect(queried).toEqual(["fuzz-nightly", "nightly-failure", "release-blocker"]);
+    const errors = lines.filter((line) => line.startsWith("::error::"));
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain("tracking:nightly-failure gate failed");
+    expect(errors[0]).toContain("1 open 'nightly-failure' issue(s): #3");
   });
 
   test("security off runs no security gate", async () => {
@@ -498,8 +580,8 @@ describe("runHealthCheck", () => {
     expect(await runHealthCheck(prConfig(), run, out)).toBe(1);
     const errors = lines.filter((line) => line.startsWith("::error::"));
     expect(errors).toHaveLength(3);
-    expect(errors[0]).toContain("fuzz gate failed");
-    expect(errors[0]).toContain("green nightly closes the tracking issue");
+    expect(errors[0]).toContain("tracking:fuzz-nightly gate failed");
+    expect(errors[0]).toContain("green nightly run closes the tracking issue");
     expect(errors[1]).toContain("blocker gate failed");
     expect(errors[1]).toContain("close the blocker issue(s)");
     expect(errors[2]).toContain("security gate failed");

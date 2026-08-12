@@ -19,6 +19,11 @@
 //   derived from the zod schema in scripts/module_manifests.ts.
 // - templates/<module>/<pin.file> for every manifest toolchain pin: WHOLE
 //   generated dotfiles carrying exactly the pinned version plus a newline.
+// - templates/release-please/fragments/ci-gate-jobs.jinja and
+//   templates/release-please/.github/workflows/release-please.yml.jinja:
+//   the tracking-labels input both release-health call sites pass, built
+//   from the manifests' tracking_label streams (jinja-comment markers, so
+//   a rendered downstream workflow carries no marker text).
 //
 // The .gitignore outputs are NOT owned here: scripts/build_gitignore.ts
 // has its own upstream-lock fetch/check cycle (bun run gitignore:check).
@@ -29,7 +34,11 @@
 // Every target's output is computed before anything is written, so a
 // broken marker in one file never leaves another half-updated.
 //
-// Line-comment files (#, //) carry the markers on lines of their own. In
+// Line-comment files (#, //) carry the markers on lines of their own, and
+// jinja templates the same way as `{#- ... #}` comment lines (the leading
+// dash folds the marker line into the preceding line's whitespace the way
+// the fenced `{%- if %}` blocks already do, so rendering leaves no blank
+// lines behind). In
 // markdown that is impossible without visible damage - a standalone
 // comment line is a CommonMark HTML block that severs the paragraph,
 // list, or table it sits in - so markdown markers ride INLINE at the ends
@@ -67,10 +76,16 @@ function markerTexts(name: string): { begin: string; end: string } {
   };
 }
 
-/** The BEGIN/END marker comment lines fencing a line-syntax region. */
-export function markerLines(name: string, prefix: string): { begin: string; end: string } {
+/** The BEGIN/END marker comment lines fencing a line-syntax region. A
+ *  suffix closes comment syntaxes that need one (jinja's `#}`). */
+export function markerLines(
+  name: string,
+  prefix: string,
+  suffix = "",
+): { begin: string; end: string } {
   const texts = markerTexts(name);
-  return { begin: `${prefix} ${texts.begin}`, end: `${prefix} ${texts.end}` };
+  const close = suffix === "" ? "" : ` ${suffix}`;
+  return { begin: `${prefix} ${texts.begin}${close}`, end: `${prefix} ${texts.end}${close}` };
 }
 
 /** The `<!-- ... -->` marker pair fencing an inline markdown region. */
@@ -99,8 +114,9 @@ export function spliceRegion(
   name: string,
   prefix: string,
   body: string[],
+  suffix = "",
 ): string {
-  const { begin, end } = markerLines(name, prefix);
+  const { begin, end } = markerLines(name, prefix, suffix);
   rejectSmuggledMarkers(body.join("\n"), file, name, [begin, end]);
   const lines = text.split("\n");
   const at = (marker: string) =>
@@ -199,6 +215,51 @@ export function hasToolchainDefault(manifests: ModuleManifest[]): string[] {
     );
   }
   return [`  default: "{{ ${chain} }}"`];
+}
+
+export type TrackingManifest = ModuleManifest & {
+  tracking_label: NonNullable<ModuleManifest["tracking_label"]>;
+};
+
+/** The tracking-stream manifests (fuzzer, nightly, ...), in MODULE_ORDER;
+ *  a new stream module joins every consumer below by declaring
+ *  tracking_label in its manifest. */
+export function trackingStreams(manifests: ModuleManifest[]): TrackingManifest[] {
+  const streams = manifests.filter((m): m is TrackingManifest => m.tracking_label !== undefined);
+  if (streams.length === 0) {
+    throw new Error(
+      "no manifest declares tracking_label, so the release-health call " +
+        "sites' tracking-labels region would be empty - declare " +
+        "tracking_label in at least one module.yml",
+    );
+  }
+  return streams;
+}
+
+/** The membership or-chain over the tracking-stream modules; exported so
+ *  check_ssot.ts's dogfood-parity rule resolves the exact expression the
+ *  tracking-labels region emits. */
+export function trackingGate(manifests: ModuleManifest[]): string {
+  return trackingStreams(manifests)
+    .map((m) => `'${m.module}' in modules`)
+    .join(" or ");
+}
+
+/** The release-health call sites' tracking-labels input: the selected
+ *  tracking streams' label ANSWERS joined into one comma-separated value
+ *  (labels cannot contain commas - copier.yml validates them against the
+ *  same shape the action's LABEL_RE enforces). The body hardcodes the
+ *  call sites' 10-space `with:`-entry indentation; a call site at a
+ *  different depth needs its own body. */
+export function trackingLabelsInput(manifests: ModuleManifest[]): string[] {
+  const listExpr = trackingStreams(manifests)
+    .map((m) => `([${m.tracking_label.answer}] if '${m.module}' in modules else [])`)
+    .join(" + ");
+  return [
+    `{%- if ${trackingGate(manifests)} %}`,
+    `          tracking-labels: {{ (${listExpr}) | join(',') | tojson }}`,
+    "{%- endif %}",
+  ];
 }
 
 export type PagesManifest = ModuleManifest & { pages: NonNullable<ModuleManifest["pages"]> };
@@ -580,6 +641,7 @@ type MarkdownRegions =
 
 type Target =
   | { file: string; syntax: "line"; prefix: string; regions: SpanRegion[] }
+  | { file: string; syntax: "jinja"; regions: SpanRegion[] }
   | ({ file: string; syntax: "markdown" } & MarkdownRegions);
 
 const TARGETS: Target[] = [
@@ -603,6 +665,16 @@ const TARGETS: Target[] = [
       ["known-modules", ({ manifests }) => knownModules(manifests)],
       ["toolchain-pins", ({ manifests }) => toolchainPinsRegion(manifests)],
     ],
+  },
+  {
+    file: "templates/release-please/fragments/ci-gate-jobs.jinja",
+    syntax: "jinja",
+    regions: [["tracking-labels", ({ manifests }) => trackingLabelsInput(manifests)]],
+  },
+  {
+    file: "templates/release-please/.github/workflows/release-please.yml.jinja",
+    syntax: "jinja",
+    regions: [["tracking-labels", ({ manifests }) => trackingLabelsInput(manifests)]],
   },
   {
     file: "README.md",
@@ -693,6 +765,10 @@ function main(): number {
       if (target.syntax === "line") {
         for (const [name, body] of target.regions) {
           next = spliceRegion(next, target.file, name, target.prefix, body(inputs));
+        }
+      } else if (target.syntax === "jinja") {
+        for (const [name, body] of target.regions) {
+          next = spliceRegion(next, target.file, name, "{#-", body(inputs), "#}");
         }
       } else {
         for (const [name, body] of target.regions ?? []) {

@@ -401,20 +401,30 @@ if has release-please; then
   # The release-health gate likewise: the PR-time job in ci.yml (exact
   # indented lines - the header comments also say release-health) plus the
   # authoritative pre-flight on the release path. Modes are pinned as whole
-  # lines so a flipped mode cannot pass, and the fuzz-label assert pins the
-  # exact tojson-quoted default so an unquoted or empty render fails too.
+  # lines so a flipped mode cannot pass, and the tracking-labels assert pins
+  # the exact quoted default list (selected tracking streams in module
+  # order) so an unquoted, empty, or partial render fails too. The legacy
+  # fuzz-label spelling must never render again.
   present_line "  release-health:" "$wf/ci.yml"
   present_line "      - release-health" "$wf/ci.yml"
   present "release-health@main" "$wf/ci.yml"
   present "release-health@main" "$wf/release-please.yml"
   present_line "          mode: pull-request" "$wf/ci.yml"
   present_line "          mode: release" "$wf/release-please.yml"
-  if has fuzzer; then
-    present_line '          fuzz-label: "fuzz-nightly"' "$wf/ci.yml"
-    present_line '          fuzz-label: "fuzz-nightly"' "$wf/release-please.yml"
+  absent "fuzz-label:" "$wf/ci.yml"
+  absent "fuzz-label:" "$wf/release-please.yml"
+  if has fuzzer && has nightly; then
+    present_line '          tracking-labels: "fuzz-nightly,nightly-failure"' "$wf/ci.yml"
+    present_line '          tracking-labels: "fuzz-nightly,nightly-failure"' "$wf/release-please.yml"
+  elif has fuzzer; then
+    present_line '          tracking-labels: "fuzz-nightly"' "$wf/ci.yml"
+    present_line '          tracking-labels: "fuzz-nightly"' "$wf/release-please.yml"
+  elif has nightly; then
+    present_line '          tracking-labels: "nightly-failure"' "$wf/ci.yml"
+    present_line '          tracking-labels: "nightly-failure"' "$wf/release-please.yml"
   else
-    absent "fuzz-label:" "$wf/ci.yml"
-    absent "fuzz-label:" "$wf/release-please.yml"
+    absent "tracking-labels:" "$wf/ci.yml"
+    absent "tracking-labels:" "$wf/release-please.yml"
   fi
   test -f /tmp/smoke/release-please-config.json
   test -f /tmp/smoke/.release-please-manifest.json
@@ -432,8 +442,10 @@ else
   absent "release-freshness" "$wf/ci.yml"
   absent_line "  release-health:" "$wf/ci.yml"
   absent_line "      - release-health" "$wf/ci.yml"
-  # fuzz-label only rides in the release-please fragments, so even a
-  # fuzzer-selected render must not carry it without release-please.
+  # The tracking-labels input only rides in the release-please fragments,
+  # so even a fuzzer- or nightly-selected render must not carry it without
+  # release-please.
+  absent "tracking-labels:" "$wf/ci.yml"
   absent "fuzz-label:" "$wf/ci.yml"
   test ! -e /tmp/smoke/release-please-config.json
   test ! -e /tmp/smoke/.release-please-manifest.json

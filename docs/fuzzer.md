@@ -110,7 +110,10 @@ fire no triggers of their own.
 With the release-please module also selected, the release-health gate ties
 releases to fuzz health: while the tracking issue is open, the release PR's
 `release-health` CI job fails early and visibly, and the release pipeline's
-authoritative pre-flight blocks the cut itself. The gate self-scopes to
+authoritative pre-flight blocks the cut itself. Every selected
+tracking-stream module gates this way - the rendered workflows pass each
+stream's label in the action's `tracking-labels` input, so the nightly
+module's issue blocks identically (docs/nightly.md). The gate self-scopes to
 release-cut pushes, so release-PR refreshes and ordinary main runs are
 never blocked. Hand-closing the issue removes the block without waiting
 for a green run, but closing it re-triggers nothing: re-run the release

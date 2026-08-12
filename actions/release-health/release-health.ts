@@ -9,17 +9,19 @@
  *   every push but only cuts a release from a release-PR merge, so gating
  *   ordinary pushes would paint all of main red while one issue is open).
  *
- * Three gates, all evaluated even when the override label is present so the
- * report is complete: an open fuzz tracking issue (FUZZ_LABEL, optional), an
- * open blocker issue (BLOCKER_LABEL), and open Dependabot alerts at or above
- * SECURITY_SEVERITY. Failures without the override label on the release PR
- * are ::error + exit 1; with it they become ::warning + a loud ::notice and
- * exit 0.
+ * Three gate families, all evaluated even when the override label is present
+ * so the report is complete: one tracking gate per label in TRACKING_LABELS
+ * (the nightly fuzz/CI streams' tracking-issue labels; each open tracking
+ * issue blocks and is reported under its own label), an open blocker issue
+ * (BLOCKER_LABEL), and open Dependabot alerts at or above SECURITY_SEVERITY.
+ * Failures without the override label on the release PR are ::error + exit
+ * 1; with it they become ::warning + a loud ::notice and exit 0.
  *
- * Configuration from the environment (set by action.yml): MODE, FUZZ_LABEL,
- * BLOCKER_LABEL, OVERRIDE_LABEL, SECURITY_SEVERITY. Context: GH_TOKEN (gh
- * auth), GITHUB_REPOSITORY, GITHUB_SHA (release mode), GITHUB_EVENT_PATH
- * (pull-request mode).
+ * Configuration from the environment (set by action.yml): MODE,
+ * TRACKING_LABELS (comma-separated; FUZZ_LABEL is the deprecated
+ * single-label spelling, folded in), BLOCKER_LABEL, OVERRIDE_LABEL,
+ * SECURITY_SEVERITY. Context: GH_TOKEN (gh auth), GITHUB_REPOSITORY,
+ * GITHUB_SHA (release mode), GITHUB_EVENT_PATH (pull-request mode).
  */
 
 import { existsSync, readFileSync } from "node:fs";
@@ -58,8 +60,12 @@ export type ModeContext =
 export interface Config {
   context: ModeContext;
   repo: string;
-  /** Undefined disables the fuzz gate. */
-  fuzzLabel: string | undefined;
+  /** Tracking-issue stream labels; empty disables the tracking gates. */
+  trackingLabels: string[];
+  /** Set when the deprecated FUZZ_LABEL input supplied a label on its own;
+   *  runHealthCheck emits a notice so lagging rendered workflows
+   *  self-identify (the alias can be removed once none fire it). */
+  legacyFuzzLabel: string | undefined;
   blockerLabel: string;
   overrideLabel: string;
   security: SecurityThreshold;
@@ -72,6 +78,39 @@ function parseLabel(name: string, value: string): string {
     );
   }
   return value;
+}
+
+export interface TrackingLabels {
+  labels: string[];
+  /** The FUZZ_LABEL value when it contributed a label TRACKING_LABELS did
+   *  not already carry; undefined when the alias was absent or redundant. */
+  legacyFuzzLabel: string | undefined;
+}
+
+/** Parse the tracking-label list: TRACKING_LABELS split on commas (labels
+ *  cannot contain commas - the copier answers share LABEL_RE's shape), plus
+ *  the deprecated FUZZ_LABEL folded in so a workflow rendered before the
+ *  rename keeps its fuzz gate until template sync re-renders it. Deduped
+ *  the way GitHub deduplicates label names: case-insensitively. */
+export function parseTrackingLabels(env: NodeJS.ProcessEnv): TrackingLabels {
+  const seen = new Set<string>();
+  const labels: string[] = [];
+  const push = (label: string): boolean => {
+    const key = label.toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    labels.push(label);
+    return true;
+  };
+  for (const token of (env.TRACKING_LABELS ?? "").split(",")) {
+    const label = token.trim();
+    if (label !== "") push(parseLabel("TRACKING_LABELS", label));
+  }
+  const legacy = env.FUZZ_LABEL ? parseLabel("FUZZ_LABEL", env.FUZZ_LABEL) : undefined;
+  return {
+    labels,
+    legacyFuzzLabel: legacy !== undefined && push(legacy) ? legacy : undefined,
+  };
 }
 
 /** Parse the environment into a Config, or throw naming the first problem. */
@@ -104,10 +143,12 @@ export function parseConfig(env: NodeJS.ProcessEnv): Config {
     );
   }
 
+  const tracking = parseTrackingLabels(env);
   return {
     context,
     repo,
-    fuzzLabel: env.FUZZ_LABEL ? parseLabel("FUZZ_LABEL", env.FUZZ_LABEL) : undefined,
+    trackingLabels: tracking.labels,
+    legacyFuzzLabel: tracking.legacyFuzzLabel,
     blockerLabel: parseLabel("BLOCKER_LABEL", env.BLOCKER_LABEL || "release-blocker"),
     overrideLabel: parseLabel("OVERRIDE_LABEL", env.OVERRIDE_LABEL || "release-override"),
     security: security as SecurityThreshold,
@@ -306,6 +347,11 @@ export async function runHealthCheck(
   run: GhRunner,
   out: (line: string) => void,
 ): Promise<number> {
+  if (cfg.legacyFuzzLabel !== undefined) {
+    out(
+      `::notice::tracking label '${cfg.legacyFuzzLabel}' arrived via the deprecated fuzz-label input; this workflow render predates the tracking-labels input, and the next template sync moves the label there`,
+    );
+  }
   let override: Override;
   if (cfg.context.mode === "release") {
     const { pr, unmerged } = await findReleasePr(run, cfg.repo, cfg.context.sha);
@@ -333,14 +379,14 @@ export async function runHealthCheck(
 
   const overrideHint = `or apply the '${cfg.overrideLabel}' label to the release PR and re-run this check`;
   const outcomes: GateOutcome[] = [];
-  if (cfg.fuzzLabel !== undefined) {
+  for (const label of cfg.trackingLabels) {
     outcomes.push(
       await issueGate(
         run,
         cfg.repo,
-        "fuzz",
-        cfg.fuzzLabel,
-        `fix the crashes (the next green nightly closes the tracking issue automatically), ${overrideHint}`,
+        `tracking:${label}`,
+        label,
+        `fix the failures behind it (the stream's next green nightly run closes the tracking issue automatically), ${overrideHint}`,
       ),
     );
   }

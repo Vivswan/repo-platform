@@ -45,7 +45,8 @@ sync secret; the single REPO_PLATFORM_TOKEN PAT lives only here.
 - Never hand-edit generated content; edit its source and rerun its
   generator (CI fails on drift; `bun run regen` runs all three). From the
   module manifests via `bun run generate`: the marker-fenced regions in
-  copier.yml, validate_generated_files.ts, and the docs, plus the whole
+  copier.yml, validate_generated_files.ts, the docs, and the
+  release-please templates' tracking-labels blocks, plus the whole
   templates/module.schema.json (the manifests' editor schema) and the
   toolchain version dotfiles (templates/<module>/<pin.file>, bumped by
   the refresh-toolchains workflow - docs/toolchains.md). From the

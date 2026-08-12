@@ -1,22 +1,31 @@
 name: Release Health
 description: >-
-  Gates releases in managed repos: fails when an open fuzz tracking issue,
-  an open release-blocker issue, or an open Dependabot alert at or above
-  the severity threshold says the repository is not release-worthy. Two
-  modes: pull-request (on a release-please PR's CI) and release (on the
-  main-push release path; a push that is not a release-PR merge is not
-  gated). The override label on the release PR turns failures into
-  warnings. Needs GH_TOKEN in the environment with issues read,
-  pull-requests read, and vulnerability-alerts read (the security gate
-  degrades to a notice where alerts are unreadable or disabled) and gh on
-  the runner (preinstalled on GitHub-hosted runners).
+  Gates releases in managed repos: fails when an open tracking issue of a
+  nightly stream (fuzz or CI), an open release-blocker issue, or an open
+  Dependabot alert at or above the severity threshold says the repository
+  is not release-worthy. Two modes: pull-request (on a release-please PR's
+  CI) and release (on the main-push release path; a push that is not a
+  release-PR merge is not gated). The override label on the release PR
+  turns failures into warnings. Needs GH_TOKEN in the environment with
+  issues read, pull-requests read, and vulnerability-alerts read (the
+  security gate degrades to a notice where alerts are unreadable or
+  disabled) and gh on the runner (preinstalled on GitHub-hosted runners).
 
 inputs:
   mode:
     description: pull-request (on the release PR's CI) or release (on the main-push release path)
     required: true
+  tracking-labels:
+    description: >-
+      Comma-separated labels of the nightly tracking-issue streams; an open
+      issue carrying any of them blocks. Empty disables the tracking gates.
+    required: false
+    default: ""
   fuzz-label:
-    description: Label of the nightly-fuzz tracking issue; empty disables the fuzz gate
+    description: >-
+      Deprecated single-label spelling of tracking-labels, folded into it
+      (kept so workflows rendered before the rename keep their fuzz gate
+      until template sync re-renders them)
     required: false
     default: ""
   blocker-label:
@@ -42,6 +51,7 @@ runs:
       shell: bash
       env:
         MODE: ${{ inputs.mode }}
+        TRACKING_LABELS: ${{ inputs.tracking-labels }}
         FUZZ_LABEL: ${{ inputs.fuzz-label }}
         BLOCKER_LABEL: ${{ inputs.blocker-label }}
         OVERRIDE_LABEL: ${{ inputs.override-label }}

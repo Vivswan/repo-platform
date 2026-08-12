@@ -311,9 +311,12 @@ jobs:
           # and AGENTS.md's Toolchain section must render the uv bullet
           # alone (every other agents+uv row pairs uv with bun). nightly
           # rides along as the only fuzzer-free nightly render: stream
-          # independence means the fuzz starter must not render here.
+          # independence means the fuzz starter must not render here, and
+          # with release-please the release-health call sites must pass
+          # exactly the nightly label (the single-stream nightly-only leg;
+          # rust-fuzzer covers the fuzzer-only mirror).
           - name: uv-typical
-            modules: "[agents, uv, nightly]"
+            modules: "[agents, uv, nightly, release-please]"
             private: "false"
           # rust + fuzzer must render cargo dependabot + the Rust gitignore and
           # nothing toolchain-gated (no CodeQL block, no auto-format starter):
@@ -324,9 +327,11 @@ jobs:
           # auto-assign dispatch (the everything row covers the with branch).
           # Deliberately nightly-free: the fuzzer-present/nightly-absent leg
           # (no nightly.yml renders) - uv-typical covers the mirror leg and
-          # the everything row the co-selection.
+          # the everything row the co-selection. release-please rides along
+          # so the release-health call sites pass exactly the fuzz label
+          # (the single-stream fuzzer-only leg).
           - name: rust-fuzzer
-            modules: "[agents, rust, fuzzer]"
+            modules: "[agents, rust, fuzzer, release-please]"
             private: "false"
           - name: uv-pages-private
             # settings-sync rides along so the private: true render of
@@ -477,9 +482,10 @@ jobs:
 
   # Fails a release PR while an open release-blocker issue or a high+
   # Dependabot alert says the tip is not release-worthy (this repo runs no
-  # fuzzer, so no fuzz gate). Early visibility only: release-please.yml's
-  # pre-flight re-checks authoritatively at cut time. The skip lives on the
-  # STEPS: all-green treats a skipped needed job as failure.
+  # tracking-stream module - fuzzer, nightly - so no tracking gate). Early
+  # visibility only: release-please.yml's pre-flight re-checks
+  # authoritatively at cut time. The skip lives on the STEPS: all-green
+  # treats a skipped needed job as failure.
   release-health:
     runs-on: ubuntu-latest
     timeout-minutes: 5

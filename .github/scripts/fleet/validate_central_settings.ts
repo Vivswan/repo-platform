@@ -335,9 +335,10 @@ export function checkCentralFileRemote(
       }
       // Cross-stream uniqueness: dedup and auto-close are label-keyed, so
       // two streams recording the same label would close each other's open
-      // issues (a green nightly lifting a fuzz-keyed release-health hold),
-      // and settings.yml cannot declare one name with two tuples. Keyed
-      // lowercased: GitHub deduplicates label names case-insensitively.
+      // issues (a green night in one stream lifting the release-health
+      // hold the other's open issue holds), and settings.yml cannot
+      // declare one name with two tuples. Keyed lowercased: GitHub
+      // deduplicates label names case-insensitively.
       const byLabel = new Map<string, string>();
       for (const [module, value] of trackingLabels) {
         const prior = byLabel.get(value.toLowerCase());

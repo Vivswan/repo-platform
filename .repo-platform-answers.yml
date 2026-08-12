@@ -33,10 +33,10 @@ private: false
 # config), skills (the hosted agent skills under skills/ and the
 # validate-skills.yml discovery workflow; the .claude-plugin manifests are
 # generated-once starters this repo owns), pr-title (ci.yml's pr-title
-# gate job), auto-assign (auto-assign.yml). fuzzer is deliberately absent
-# - check_ssot's release-please pair evaluates 'fuzzer' in modules to
-# false - and so is settings-sync: this repo's settings live centrally in
-# settings/repos/.
+# gate job), auto-assign (auto-assign.yml). The tracking-stream modules
+# (fuzzer, nightly) are deliberately absent - check_ssot's release-please
+# pair evaluates their membership or-chain to false - and so is
+# settings-sync: this repo's settings live centrally in settings/repos/.
 modules:
   - agents
   - bun

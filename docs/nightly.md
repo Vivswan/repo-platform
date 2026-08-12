@@ -43,9 +43,9 @@ The label is asked as a copier question, rather than left as an edit in the
 starter, because the report and resolve steps must agree on it. It must
 differ from `fuzzer_label` when the fuzzer module is also selected: both
 streams dedup AND auto-close by label, so a shared label would let either
-stream's green night close the other's active failure issue (and lift a
-release-health hold keyed on the fuzz label). The copier validator rejects
-the collision at generation time, and the settings preflight rejects it in
+stream's green night close the other's active failure issue (and lift the
+release-health hold keyed on it). The copier validator rejects the
+collision at generation time, and the settings preflight rejects it in
 recorded answers.
 
 One more place must know the label: the repository's settings labels.
@@ -93,11 +93,18 @@ assigns anyone; assignment happens through the dispatched auto-assign
 workflow, because issues created with `GITHUB_TOKEN` fire no triggers of
 their own.
 
-Unlike the fuzzer stream, the nightly tracking issue does NOT gate
-releases: the release-health gate keys on the fuzz label and the
-`release-blocker`/`release-override` labels (docs/all-green.md). Add
-`release-blocker` to a nightly issue by hand when its failure should block
-a cut.
+Like the fuzzer stream, the nightly tracking issue gates releases when the
+release-please module is also selected: while it is open, the release PR's
+`release-health` CI job fails early and visibly, and the release pipeline's
+authoritative pre-flight blocks the cut itself (docs/all-green.md). Closing
+the issue lifts the block - the next green nightly run closes it
+automatically, or hand-close it once the failure is fixed - but closing
+re-triggers no check either way: the release PR goes green when you re-run
+its failed release-health job, or when the next push to main refreshes the
+release PR and its CI with it. To ship despite the open issue, apply the
+`release-override` label to the release PR - it waves through EVERY
+release-health gate at once, open Dependabot alerts and blocker issues
+included, turning all failures into loud warnings.
 
 ## Renaming the label, deselecting the module
 

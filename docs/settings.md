@@ -101,12 +101,13 @@ Stateless, declared-keys-only, upsert-by-name:
   `nightly_label` (default `nightly-failure`, color `D93F0B`): the
   settings-sync module's settings.yml does it automatically, central
   settings files must carry them by hand, or the label sync strips them
-  from the open tracking issue and the auto-close loses the issue. Repos
-  with the release-please module also declare
-  `release-blocker` (`B60205`) and `release-override` (`FBCA04`): the
-  release-health gate keys on them, and stripping one un-blocks or
-  un-overrides a release mid-flight. The by-hand requirement is checked,
-  not trusted: before
+  from the open tracking issue: the auto-close loses the issue and the
+  release-health gate stops seeing it (with release-please, an open
+  tracking issue blocks releases). Repos with the release-please module
+  also declare `release-blocker` (`B60205`) and `release-override`
+  (`FBCA04`): the release-health gate keys on them, and stripping one
+  un-blocks or un-overrides a release mid-flight. The by-hand requirement
+  is checked, not trusted: before
   the apply, a central repo's matrix job compares its file (when it
   declares labels) against the repo's recorded module selection and fails
   that repo's apply on

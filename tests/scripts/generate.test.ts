@@ -34,6 +34,9 @@ import {
   toolchainPinRows,
   toolchainPins,
   toolchainPinsRegion,
+  trackingGate,
+  trackingLabelsInput,
+  trackingStreams,
   wrapProse,
 } from "../../scripts/generate";
 import type { ModuleManifest } from "../../scripts/module_manifests";
@@ -60,6 +63,22 @@ const RUST = manifest("rust", {
   description: "Rust/cargo toolchain",
   dependabot: { ecosystem: "cargo", label: "rust", color: "000000" },
   gitignore_sources: ["Rust.gitignore"],
+});
+const FUZZER = manifest("fuzzer", {
+  tracking_label: {
+    answer: "fuzzer_label",
+    default: "fuzz-nightly",
+    color: "B60205",
+    description: "Automated nightly fuzz failure",
+  },
+});
+const NIGHTLY = manifest("nightly", {
+  tracking_label: {
+    answer: "nightly_label",
+    default: "nightly-failure",
+    color: "D93F0B",
+    description: "Automated nightly CI failure",
+  },
 });
 
 describe("spliceRegion", () => {
@@ -102,6 +121,18 @@ describe("spliceRegion", () => {
   test("a body smuggling its own marker text throws", () => {
     expect(() => spliceRegion(text, "f.yml", "demo", "#", [`x ${end} y`])).toThrow("marker text");
   });
+
+  test("a suffix closes the marker comment (the jinja `{#- ... #}` form)", () => {
+    const jinja = markerLines("demo", "{#-", "#}");
+    expect(jinja.begin).toBe(
+      "{#- BEGIN GENERATED: demo (scripts/generate.ts - edit module.yml manifests, not this block) #}",
+    );
+    expect(jinja.end).toBe("{#- END GENERATED: demo #}");
+    const doc = ["top", jinja.begin, "old", jinja.end, ""].join("\n");
+    expect(spliceRegion(doc, "f.jinja", "demo", "{#-", ["new"], "#}")).toBe(
+      ["top", jinja.begin, "new", jinja.end, ""].join("\n"),
+    );
+  });
 });
 
 describe("region builders", () => {
@@ -119,6 +150,37 @@ describe("region builders", () => {
     ]);
     expect(hasToolchainDefault([BUN, RUST])).toEqual(["  default: \"{{ 'bun' in modules }}\""]);
     expect(() => hasToolchainDefault([RUST])).toThrow("declare toolchain");
+  });
+
+  test("trackingStreams filters to the tracking_label manifests and refuses none", () => {
+    expect(trackingStreams([BUN, FUZZER, NIGHTLY]).map((m) => m.module)).toEqual([
+      "fuzzer",
+      "nightly",
+    ]);
+    expect(() => trackingStreams([BUN, RUST])).toThrow("tracking_label");
+  });
+
+  test("trackingGate or-chains the tracking-stream modules", () => {
+    expect(trackingGate([BUN, FUZZER, NIGHTLY])).toBe(
+      "'fuzzer' in modules or 'nightly' in modules",
+    );
+    expect(trackingGate([FUZZER])).toBe("'fuzzer' in modules");
+  });
+
+  test("trackingLabelsInput gates the input on any stream and joins the selected answers", () => {
+    expect(trackingLabelsInput([BUN, FUZZER, NIGHTLY])).toEqual([
+      "{%- if 'fuzzer' in modules or 'nightly' in modules %}",
+      "          tracking-labels: {{ (([fuzzer_label] if 'fuzzer' in modules else []) + ([nightly_label] if 'nightly' in modules else [])) | join(',') | tojson }}",
+      "{%- endif %}",
+    ]);
+  });
+
+  test("a single stream still renders the same shape (no special casing)", () => {
+    expect(trackingLabelsInput([FUZZER])).toEqual([
+      "{%- if 'fuzzer' in modules %}",
+      "          tracking-labels: {{ (([fuzzer_label] if 'fuzzer' in modules else [])) | join(',') | tojson }}",
+      "{%- endif %}",
+    ]);
   });
 
   test("pagesManifests filters to the pages-declaring modules and refuses none", () => {
