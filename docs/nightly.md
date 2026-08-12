@@ -17,7 +17,8 @@ The starter is two jobs - `checks` (yours) and `report` (the machinery,
   nightly-failure report naming the workflow, the date, the failing commit,
   and the run - then dispatches auto-assign at it (when that module is
   selected)
-- on a green night, comments on and closes the open tracking issue
+- on a green night, comments on and closes every open issue carrying the
+  tracking label
 
 A human cancelling an in-flight nightly run also counts as red and files an
 issue (the report job runs `if: always()` and cannot tell a timeout from a
@@ -86,7 +87,11 @@ release notes.
 One open issue per label. A failing night comments on the open issue if one
 exists, otherwise creates it (creating the label too when it is missing,
 with the same color/description the settings-sync fragment declares). A
-green night comments and closes it; when no issue is open, the resolve step
+green night comments on and closes every open issue carrying the label -
+the release gate blocks while any of them is open, so hand-labeling an
+issue into the stream makes the next green night close it; to block a
+release deliberately, use the `release-blocker` label instead
+(docs/all-green.md). When no issue is open, the resolve step
 does nothing. A manual green dispatch also closes the issue; the close
 comment links the run, so the provenance is visible. The action never
 assigns anyone; assignment happens through the dispatched auto-assign

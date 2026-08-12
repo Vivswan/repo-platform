@@ -110,6 +110,10 @@ jobs:
         if: {% raw %}failure() && steps.file-issue.outputs.issue-number != ''{% endraw %}
         env:
           GH_TOKEN: {% raw %}${{ github.token }}{% endraw %}
+          # This job checks out, so gh could infer the repo - but the
+          # sharding guidance above moves these steps into a checkout-less
+          # job, so name the repo explicitly to keep the step portable.
+          GH_REPO: {% raw %}${{ github.repository }}{% endraw %}
           ISSUE_NUMBER: {% raw %}${{ steps.file-issue.outputs.issue-number }}{% endraw %}
         run: gh workflow run auto-assign.yml -f "issue=$ISSUE_NUMBER" || echo "::warning::could not dispatch auto-assign.yml"
 

@@ -2197,6 +2197,55 @@ const rules: Rule[] = [
       return mismatches;
     },
   },
+
+  {
+    // Every composite action that runs bun carries the same three-step
+    // setup guard: probe for a caller-installed bun, install only when
+    // absent, retry the install once (a setup-bun fetch flake on a nightly
+    // reporting path turns a green night red). The block cannot be hoisted
+    // into a shared action - a relative `uses:` inside a composite action
+    // resolves against the CALLER's workspace, not this repo - so the
+    // copies are load-bearing; this rule keeps every copy present and
+    // identical, and catches a future bun-running action shipped bare.
+    name: "actions-bun-guard",
+    run: () => {
+      const mismatches: Mismatch[] = [];
+      const guard = [
+        "- name: Check for a caller-installed bun",
+        "id: bun",
+        "shell: bash",
+        'run: echo "present=$(command -v bun >/dev/null && echo true || echo false)" >> "$GITHUB_OUTPUT"',
+        "- name: Set up bun",
+        "id: setup-bun",
+        "if: steps.bun.outputs.present != 'true'",
+        "continue-on-error: true",
+        "uses: oven-sh/setup-bun@v2",
+        "- name: Set up bun (retry)",
+        "if: steps.setup-bun.outcome == 'failure'",
+        "uses: oven-sh/setup-bun@v2",
+      ];
+      for (const dir of readdirSync(join(REPO_ROOT, "actions"))) {
+        const file = `actions/${dir}/action.yml`;
+        if (!existsSync(join(REPO_ROOT, file))) continue;
+        const text = read(file);
+        // Single-line `run: bun ...` steps and `bun ...` lines inside
+        // block-scalar run steps both count; a prose line starting with
+        // "bun " would over-demand the guard, which fails closed.
+        if (!/^\s*run: bun /m.test(text) && !/^\s*bun /m.test(text)) continue;
+        // Trimmed: the guard sits at different depths across actions.
+        const lines = semanticLines(text).map((line) => line.trim());
+        const carried = lines.some((_, i) => guard.every((line, j) => lines[i + j] === line));
+        if (!carried) {
+          mismatches.push({
+            file,
+            expected: "the canonical three-step bun setup guard (probe, guarded install, retry)",
+            got: "missing or drifted from the block this rule pins",
+          });
+        }
+      }
+      return mismatches;
+    },
+  },
 ];
 
 /** Normalize python-style \Z end anchors to $, for regex-pair comparison. */

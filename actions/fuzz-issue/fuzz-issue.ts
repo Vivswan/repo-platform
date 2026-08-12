@@ -15,15 +15,17 @@
  * - report: build a body (from the failure reports, or the generic one) and
  *   comment on the open labeled issue, or create it if none is open. One
  *   open issue per label.
- * - resolve: after a green run, comment on and close the open labeled issue;
- *   a silent no-op when none is open.
+ * - resolve: after a green run, comment on and close every open labeled
+ *   issue (the release gate blocks on any of them); a silent no-op when
+ *   none is open.
  *
  * Configuration from the environment (set by action.yml): MODE, LABEL,
  * TITLE, ARTIFACTS_DIR, ARTIFACT_NAME, LABEL_COLOR, LABEL_DESCRIPTION,
  * STREAM (resolve-comment wording; report bodies key on ARTIFACTS_DIR).
- * Context: GH_TOKEN (gh auth), GITHUB_SERVER_URL / GITHUB_REPOSITORY /
- * GITHUB_RUN_ID (the run link), GITHUB_WORKFLOW / GITHUB_SHA (the generic
- * body), GITHUB_OUTPUT (the issue-number step output).
+ * Context: GH_TOKEN (gh auth), GITHUB_REPOSITORY (the repo every gh call
+ * names via --repo, and part of the run link with GITHUB_SERVER_URL /
+ * GITHUB_RUN_ID), GITHUB_WORKFLOW / GITHUB_SHA (the generic body),
+ * GITHUB_OUTPUT (the issue-number step output).
  */
 
 import { appendFileSync, existsSync, readdirSync, readFileSync, statSync } from "node:fs";
@@ -244,22 +246,38 @@ export function buildGenericBody(env: NodeJS.ProcessEnv): string {
   return parts.join("\n");
 }
 
-/** The number of the open issue carrying the label, or undefined when none. */
-async function openIssueNumber(run: GhRunner, label: string): Promise<number | undefined> {
+/** gh issue list page size; resolve drains repeated listings, so this only
+ * bounds one round trip, not how many issues a green night can close. */
+const OPEN_ISSUE_LIMIT = 100;
+
+/** Numbers of the open issues carrying the label (gh's default ordering,
+ * newest first); empty when none. Humans can label extra issues into the
+ * stream, so one open issue per label is a goal, not an invariant. */
+async function openIssueNumbers(
+  run: GhRunner,
+  repo: string,
+  label: string,
+  limit: number = OPEN_ISSUE_LIMIT,
+): Promise<number[]> {
+  // The nightly module's report job runs this action without a checkout,
+  // so gh has no working tree to infer a repository from; every invocation
+  // names it (same rule as release-health.ts).
   const json = await run([
     "issue",
     "list",
+    "--repo",
+    repo,
     "--label",
     label,
     "--state",
     "open",
     "--limit",
-    "1",
+    String(limit),
     "--json",
     "number",
   ]);
   const issues = JSON.parse(json) as Array<{ number: number }>;
-  return issues[0]?.number;
+  return issues.map((issue) => issue.number);
 }
 
 /** The trailing issue number from a `gh issue create` URL, or undefined. */
@@ -276,8 +294,22 @@ export const LABEL_RE = /^[A-Za-z0-9._][A-Za-z0-9._: -]{0,49}$/;
 
 /** Whether the repo already has the label (exact name, case-insensitive,
  * the way GitHub deduplicates labels). */
-async function labelExists(run: GhRunner, label: string): Promise<boolean> {
-  const json = await run(["label", "list", "--search", label, "--json", "name"]);
+async function labelExists(run: GhRunner, repo: string, label: string): Promise<boolean> {
+  // --search is best-match ordered but not contractually so; a high limit
+  // keeps an exact match from hiding past the default 30 in a label-heavy
+  // repo (a miss would send fileIssue into a doomed duplicate create).
+  const json = await run([
+    "label",
+    "list",
+    "--repo",
+    repo,
+    "--search",
+    label,
+    "--limit",
+    "1000",
+    "--json",
+    "name",
+  ]);
   const labels = JSON.parse(json) as Array<{ name: string }>;
   return labels.some((entry) => entry.name.toLowerCase() === label.toLowerCase());
 }
@@ -289,6 +321,7 @@ async function labelExists(run: GhRunner, label: string): Promise<boolean> {
  */
 export async function fileIssue(
   run: GhRunner,
+  repo: string,
   body: string,
   label: string,
   title: string,
@@ -299,17 +332,38 @@ export async function fileIssue(
   // sniffing create-failure messages): creating with --force would silently
   // repaint a pre-existing label the repo owns (someone pointing this at
   // `bug`), and any real create failure must propagate.
-  if (!(await labelExists(run, label))) {
-    await run(["label", "create", label, "--color", labelColor, "--description", labelDescription]);
+  if (!(await labelExists(run, repo, label))) {
+    await run([
+      "label",
+      "create",
+      label,
+      "--repo",
+      repo,
+      "--color",
+      labelColor,
+      "--description",
+      labelDescription,
+    ]);
   }
 
-  const existing = await openIssueNumber(run, label);
+  const existing = (await openIssueNumbers(run, repo, label, 1))[0];
   if (existing !== undefined) {
-    await run(["issue", "comment", String(existing), "--body", body]);
+    await run(["issue", "comment", String(existing), "--repo", repo, "--body", body]);
     console.log(`commented on existing #${existing}`);
     return existing;
   }
-  const url = await run(["issue", "create", "--label", label, "--title", title, "--body", body]);
+  const url = await run([
+    "issue",
+    "create",
+    "--repo",
+    repo,
+    "--label",
+    label,
+    "--title",
+    title,
+    "--body",
+    body,
+  ]);
   console.log(`opened ${url.trim()}`);
   return issueNumberFromUrl(url);
 }
@@ -320,21 +374,27 @@ export async function fileIssue(
 export type Stream = "fuzz" | "generic";
 
 /**
- * After a green run: comment on and close the open labeled issue, or do
- * nothing when none is open. The fuzz-stream comment (the default - fleet
- * fuzzer starters predate the STREAM input and must keep seeing the exact
- * wording they always got; a test pins it verbatim) hedges on unpinned
- * crashes: one green night is only evidence for inputs pinned as
- * regression seeds. The generic-stream comment carries no fuzz notions.
+ * After a green run: comment on and close every open labeled issue, or do
+ * nothing when none is open. Closing all of them matters because the
+ * release-health gate blocks while ANY open issue carries the label, so
+ * leaving extras open (a human labeling a related issue) would keep
+ * releases blocked with a log that says everything was resolved. The
+ * fuzz-stream comment (the default - fleet fuzzer starters predate the
+ * STREAM input and must keep seeing the exact wording they always got; a
+ * test pins it verbatim) hedges on unpinned crashes: one green night is
+ * only evidence for inputs pinned as regression seeds. The generic-stream
+ * comment carries no fuzz notions.
  */
 export async function resolveIssue(
   run: GhRunner,
+  repo: string,
   label: string,
   env: NodeJS.ProcessEnv,
   stream: Stream = "fuzz",
 ): Promise<void> {
-  const existing = await openIssueNumber(run, label);
-  if (existing === undefined) {
+  const closed = new Set<number>();
+  let page = await openIssueNumbers(run, repo, label);
+  if (page.length === 0) {
     console.log(`no open ${label} issue to resolve`);
     return;
   }
@@ -354,13 +414,42 @@ export async function resolveIssue(
           "seeds, this pass replayed them; for anything not pinned, a green night is",
           "weaker evidence, and the next red night opens a fresh issue.",
         ].join("\n");
-  await run(["issue", "comment", String(existing), "--body", body]);
-  await run(["issue", "close", String(existing), "--reason", "completed"]);
-  console.log(`closed #${existing}`);
+  // One listing is a single page, so drain until the listing comes back
+  // empty. A lagging listing can re-serve just-closed issues; retrying a
+  // few stale rounds keeps that lag from stranding issues on later pages,
+  // while the bound keeps a permanently stale listing from looping forever.
+  let staleRounds = 0;
+  while (page.length > 0) {
+    const fresh = page.filter((number) => !closed.has(number));
+    if (fresh.length === 0) {
+      staleRounds += 1;
+      if (staleRounds >= 3) {
+        console.log(
+          `::warning::issue listing for '${label}' kept re-serving already-closed issues; ` +
+            "some open issues may remain (the next green night retries)",
+        );
+        break;
+      }
+    } else {
+      staleRounds = 0;
+      for (const number of fresh) {
+        await run(["issue", "comment", String(number), "--repo", repo, "--body", body]);
+        await run(["issue", "close", String(number), "--repo", repo, "--reason", "completed"]);
+        closed.add(number);
+      }
+    }
+    page = await openIssueNumbers(run, repo, label);
+  }
+  console.log(`closed ${[...closed].map((number) => `#${number}`).join(", ")}`);
 }
 
 async function main(): Promise<number> {
   const mode = process.env.MODE || "report";
+  const repo = process.env.GITHUB_REPOSITORY;
+  if (!repo) {
+    console.error("error: GITHUB_REPOSITORY is required");
+    return 1;
+  }
   const label = process.env.LABEL;
   if (!label || !LABEL_RE.test(label)) {
     console.error(
@@ -376,7 +465,7 @@ async function main(): Promise<number> {
     return 1;
   }
   if (mode === "resolve") {
-    await resolveIssue(gh, label, process.env, stream);
+    await resolveIssue(gh, repo, label, process.env, stream);
     return 0;
   }
   if (mode !== "report") {
@@ -392,6 +481,7 @@ async function main(): Promise<number> {
     : buildGenericBody(process.env);
   const number = await fileIssue(
     gh,
+    repo,
     body,
     label,
     title,

@@ -115,7 +115,15 @@ function listCommits(): Commit[] {
         subject: commitSubject(sha),
       }));
     }
-    return (payload.commits ?? []).map((commit) => ({
+    const listed = payload.commits ?? [];
+    // GitHub truncates the push payload's commit list at 20 entries; at
+    // exactly 20 there is no way to tell truncation from a 20-commit push.
+    if (listed.length >= 20) {
+      console.log(
+        "::warning::push payload may be truncated (it lists 20 commits, GitHub's cap) and the base..head range is not resolvable here; commits beyond the payload, if any, were not validated",
+      );
+    }
+    return listed.map((commit) => ({
       sha: commit.id,
       subject: subject(commit.message),
     }));

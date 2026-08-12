@@ -229,7 +229,7 @@ function fakeGh(openNumber?: number, labelTaken = false): { run: GhRunner; calls
   const run: GhRunner = async (args) => {
     calls.push(args);
     if (args[0] === "label" && args[1] === "list") {
-      return JSON.stringify(labelTaken ? [{ name: args[3] }] : []);
+      return JSON.stringify(labelTaken ? [{ name: args[args.indexOf("--search") + 1] }] : []);
     }
     if (args[0] === "issue" && args[1] === "list") {
       return JSON.stringify(openNumber === undefined ? [] : [{ number: openNumber }]);
@@ -245,7 +245,7 @@ function fakeGh(openNumber?: number, labelTaken = false): { run: GhRunner; calls
 describe("fileIssue", () => {
   test("create path opens a labeled issue with the body and title", async () => {
     const { run, calls } = fakeGh(undefined);
-    await fileIssue(run, "body", "fuzz-nightly", DEFAULT_TITLE);
+    await fileIssue(run, "o/r", "body", "fuzz-nightly", DEFAULT_TITLE);
     const create = calls.find((c) => c[0] === "issue" && c[1] === "create");
     expect(create).toBeDefined();
     expect(create?.[create.indexOf("--label") + 1]).toBe("fuzz-nightly");
@@ -255,7 +255,7 @@ describe("fileIssue", () => {
 
   test("comment path comments on the existing issue, does not create a new one", async () => {
     const { run, calls } = fakeGh(3);
-    await fileIssue(run, "body", "fuzz-nightly", "t");
+    await fileIssue(run, "o/r", "body", "fuzz-nightly", "t");
     expect(calls.some((c) => c[0] === "issue" && c[1] === "comment" && c[2] === "3")).toBe(true);
     expect(calls.some((c) => c[0] === "issue" && c[1] === "create")).toBe(false);
   });
@@ -265,7 +265,7 @@ describe("fileIssue", () => {
     // dispatches after filing; the filer must never touch assignees.
     for (const openNumber of [undefined, 3]) {
       const { run, calls } = fakeGh(openNumber);
-      await fileIssue(run, "body", "fuzz-nightly", "t");
+      await fileIssue(run, "o/r", "body", "fuzz-nightly", "t");
       const flat = calls.flat();
       expect(flat).not.toContain("--assignee");
       expect(flat).not.toContain("--add-assignee");
@@ -275,17 +275,17 @@ describe("fileIssue", () => {
 
   test("returns the created issue number (parsed from gh's create URL)", async () => {
     const { run } = fakeGh(undefined); // fakeGh's create returns .../issues/7
-    expect(await fileIssue(run, "body", "fuzz-nightly", "t")).toBe(7);
+    expect(await fileIssue(run, "o/r", "body", "fuzz-nightly", "t")).toBe(7);
   });
 
   test("returns the existing issue number on the comment path", async () => {
     const { run } = fakeGh(3);
-    expect(await fileIssue(run, "body", "fuzz-nightly", "t")).toBe(3);
+    expect(await fileIssue(run, "o/r", "body", "fuzz-nightly", "t")).toBe(3);
   });
 
   test("creates the label only when the list says it is missing", async () => {
     const { run, calls } = fakeGh(undefined, false);
-    await fileIssue(run, "body", "fuzz-nightly", "t");
+    await fileIssue(run, "o/r", "body", "fuzz-nightly", "t");
     const create = calls.find((c) => c[0] === "label" && c[1] === "create");
     expect(create).toBeDefined();
     expect(create).not.toContain("--force");
@@ -293,7 +293,7 @@ describe("fileIssue", () => {
 
   test("label creation defaults to the fuzz tuple when no override is given", async () => {
     const { run, calls } = fakeGh(undefined, false);
-    await fileIssue(run, "body", "fuzz-nightly", "t");
+    await fileIssue(run, "o/r", "body", "fuzz-nightly", "t");
     const create = calls.find((c) => c[0] === "label" && c[1] === "create");
     expect(create?.[create.indexOf("--color") + 1]).toBe(DEFAULT_LABEL_COLOR);
     expect(create?.[create.indexOf("--description") + 1]).toBe(DEFAULT_LABEL_DESCRIPTION);
@@ -301,7 +301,15 @@ describe("fileIssue", () => {
 
   test("a caller-supplied label tuple reaches the create call", async () => {
     const { run, calls } = fakeGh(undefined, false);
-    await fileIssue(run, "body", "nightly-failure", "t", "D93F0B", "Automated nightly CI failure");
+    await fileIssue(
+      run,
+      "o/r",
+      "body",
+      "nightly-failure",
+      "t",
+      "D93F0B",
+      "Automated nightly CI failure",
+    );
     const create = calls.find((c) => c[0] === "label" && c[1] === "create");
     expect(create?.[create.indexOf("--color") + 1]).toBe("D93F0B");
     expect(create?.[create.indexOf("--description") + 1]).toBe("Automated nightly CI failure");
@@ -310,7 +318,7 @@ describe("fileIssue", () => {
   test("never touches a pre-existing label (no create, no repaint)", async () => {
     // Someone pointing the action at `bug` must not get it repainted red.
     const { run, calls } = fakeGh(9, true);
-    expect(await fileIssue(run, "body", "bug", "t")).toBe(9);
+    expect(await fileIssue(run, "o/r", "body", "bug", "t")).toBe(9);
     expect(calls.some((c) => c[0] === "label" && c[1] === "create")).toBe(false);
   });
 
@@ -322,7 +330,20 @@ describe("fileIssue", () => {
       }
       return "";
     };
-    expect(fileIssue(run, "body", "fuzz-nightly", "t")).rejects.toThrow("auth required");
+    expect(fileIssue(run, "o/r", "body", "fuzz-nightly", "t")).rejects.toThrow("auth required");
+  });
+});
+
+describe("repo naming", () => {
+  test("every gh invocation names the repo - report jobs have no checkout to infer from", async () => {
+    for (const openNumber of [undefined, 3] as const) {
+      const { run, calls } = fakeGh(openNumber);
+      await fileIssue(run, "o/r", "body", "fuzz-nightly", "t");
+      await resolveIssue(run, "o/r", "fuzz-nightly", env);
+      for (const call of calls) {
+        expect(call[call.indexOf("--repo") + 1]).toBe("o/r");
+      }
+    }
   });
 });
 
@@ -360,7 +381,7 @@ describe("LABEL_RE", () => {
 describe("resolveIssue", () => {
   test("comments then closes the open labeled issue", async () => {
     const { run, calls } = fakeGh(5);
-    await resolveIssue(run, "fuzz-nightly", env);
+    await resolveIssue(run, "o/r", "fuzz-nightly", env);
     const commentIdx = calls.findIndex((c) => c[0] === "issue" && c[1] === "comment");
     const closeIdx = calls.findIndex((c) => c[0] === "issue" && c[1] === "close");
     expect(commentIdx).toBeGreaterThanOrEqual(0);
@@ -376,14 +397,71 @@ describe("resolveIssue", () => {
 
   test("no open issue is a silent no-op", async () => {
     const { run, calls } = fakeGh(undefined);
-    await resolveIssue(run, "fuzz-nightly", env);
+    await resolveIssue(run, "o/r", "fuzz-nightly", env);
     expect(calls.some((c) => c[0] === "issue" && c[1] === "comment")).toBe(false);
     expect(calls.some((c) => c[0] === "issue" && c[1] === "close")).toBe(false);
   });
 
+  test("every open labeled issue is closed, not just the first", async () => {
+    // The release gate blocks while ANY open issue carries the label, so a
+    // green night must clear the whole set (a human can label extras in).
+    const calls: string[][] = [];
+    const run: GhRunner = async (args) => {
+      calls.push(args);
+      if (args[0] === "issue" && args[1] === "list") {
+        return JSON.stringify([{ number: 5 }, { number: 8 }]);
+      }
+      return "";
+    };
+    await resolveIssue(run, "o/r", "fuzz-nightly", env);
+    for (const number of ["5", "8"]) {
+      expect(calls.some((c) => c[0] === "issue" && c[1] === "comment" && c[2] === number)).toBe(
+        true,
+      );
+      expect(calls.some((c) => c[0] === "issue" && c[1] === "close" && c[2] === number)).toBe(true);
+    }
+  });
+
+  test("a stale listing that re-serves closed issues does not strand later pages", async () => {
+    // Page 1 closes; the next listing lags, re-serving only just-closed
+    // numbers; the listing after that reveals the next page. The drain
+    // must push through the stale round and still close everything.
+    const listings = [
+      [{ number: 1 }, { number: 2 }],
+      [{ number: 1 }, { number: 2 }], // lagging: all already closed
+      [{ number: 3 }],
+      [],
+    ];
+    const calls: string[][] = [];
+    const run: GhRunner = async (args) => {
+      calls.push(args);
+      if (args[0] === "issue" && args[1] === "list") {
+        return JSON.stringify(listings.shift() ?? []);
+      }
+      return "";
+    };
+    await resolveIssue(run, "o/r", "fuzz-nightly", env);
+    for (const number of ["1", "2", "3"]) {
+      expect(calls.some((c) => c[0] === "issue" && c[1] === "close" && c[2] === number)).toBe(true);
+    }
+  });
+
+  test("a permanently stale listing terminates instead of looping", async () => {
+    const calls: string[][] = [];
+    const run: GhRunner = async (args) => {
+      calls.push(args);
+      if (args[0] === "issue" && args[1] === "list") {
+        return JSON.stringify([{ number: 4 }]); // never observes the close
+      }
+      return "";
+    };
+    await resolveIssue(run, "o/r", "fuzz-nightly", env);
+    expect(calls.filter((c) => c[0] === "issue" && c[1] === "close").length).toBe(1);
+  });
+
   test("the default (fuzz) close comment is pinned verbatim - fleet starters must see zero change", async () => {
     const { run, calls } = fakeGh(5);
-    await resolveIssue(run, "fuzz-nightly", env);
+    await resolveIssue(run, "o/r", "fuzz-nightly", env);
     const comment = calls.find((c) => c[0] === "issue" && c[1] === "comment");
     const date = new Date().toISOString().slice(0, 10);
     expect(comment?.[comment.indexOf("--body") + 1]).toBe(
@@ -399,7 +477,7 @@ describe("resolveIssue", () => {
 
   test("the generic close comment names the run and carries no fuzz notions", async () => {
     const { run, calls } = fakeGh(5);
-    await resolveIssue(run, "nightly-failure", env, "generic");
+    await resolveIssue(run, "o/r", "nightly-failure", env, "generic");
     const comment = calls.find((c) => c[0] === "issue" && c[1] === "comment");
     const body = comment?.[comment.indexOf("--body") + 1] ?? "";
     expect(body).toContain("Nightly run passed on");
@@ -416,7 +494,7 @@ describe("no-artifacts lifecycle", () => {
 
   test("a first red night creates the labeled issue with the generic body", async () => {
     const { run, calls } = fakeGh(undefined);
-    expect(await fileIssue(run, body, "nightly-failure", "Nightly CI failures")).toBe(7);
+    expect(await fileIssue(run, "o/r", body, "nightly-failure", "Nightly CI failures")).toBe(7);
     const create = calls.find((c) => c[0] === "issue" && c[1] === "create");
     expect(create?.[create.indexOf("--label") + 1]).toBe("nightly-failure");
     expect(create?.[create.indexOf("--title") + 1]).toBe("Nightly CI failures");
@@ -425,14 +503,14 @@ describe("no-artifacts lifecycle", () => {
 
   test("a repeat red night dedups onto the open issue", async () => {
     const { run, calls } = fakeGh(9, true);
-    expect(await fileIssue(run, body, "nightly-failure", "Nightly CI failures")).toBe(9);
+    expect(await fileIssue(run, "o/r", body, "nightly-failure", "Nightly CI failures")).toBe(9);
     expect(calls.some((c) => c[0] === "issue" && c[1] === "comment" && c[2] === "9")).toBe(true);
     expect(calls.some((c) => c[0] === "issue" && c[1] === "create")).toBe(false);
   });
 
   test("a green night resolves the stream with the generic wording", async () => {
     const { run, calls } = fakeGh(9, true);
-    await resolveIssue(run, "nightly-failure", env, "generic");
+    await resolveIssue(run, "o/r", "nightly-failure", env, "generic");
     expect(calls.some((c) => c[0] === "issue" && c[1] === "comment" && c[2] === "9")).toBe(true);
     expect(calls.some((c) => c[0] === "issue" && c[1] === "close" && c[2] === "9")).toBe(true);
   });

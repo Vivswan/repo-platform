@@ -52,7 +52,10 @@ const REPO = "o/r";
 
 function assertNamesRepo(args: string[]): void {
   if (args[0] === "api") {
-    if (!args[1]?.startsWith(`repos/${REPO}/`)) {
+    // The endpoint path is the first non-flag argument after "api"
+    // (flags like --paginate may precede it).
+    const path = args.slice(1).find((arg) => !arg.startsWith("--"));
+    if (!path?.startsWith(`repos/${REPO}/`)) {
       throw new Error(`gh api path does not name the repo: ${args.join(" ")}`);
     }
     return;
@@ -82,8 +85,10 @@ function fakeGh(fixture: Fixture): { run: GhRunner; calls: string[][] } {
       }
       return JSON.stringify((fixture.alerts ?? []).map((number) => ({ number })));
     }
-    if (args[0] === "api" && args[1]?.includes("/pulls")) {
-      return JSON.stringify(fixture.commitPulls ?? []);
+    if (args[0] === "api" && args.some((arg) => arg.includes("/pulls"))) {
+      // --paginate --slurp wraps the pages in one array; the fake returns a
+      // single page holding the fixture's PRs.
+      return JSON.stringify([fixture.commitPulls ?? []]);
     }
     if (args[0] === "pr" && args[1] === "view") {
       if (fixture.prViewLabels === undefined) {
@@ -364,6 +369,17 @@ describe("securityGate", () => {
     const { run } = fakeGh({ alertsError: "gh api failed (1): HTTP 500: boom" });
     expect(securityGate(run, "o/r", "high", "advice")).rejects.toThrow("HTTP 500");
   });
+
+  test("a rate-limited 403 propagates instead of skipping the gate", async () => {
+    for (const message of [
+      "gh api failed (1): API rate limit exceeded for installation ID 1 (HTTP 403)",
+      "gh api failed (1): You have exceeded a secondary rate limit. (HTTP 403)",
+      "gh api failed (1): You have triggered an abuse detection mechanism. (HTTP 403)",
+    ]) {
+      const { run } = fakeGh({ alertsError: message });
+      expect(securityGate(run, "o/r", "high", "advice")).rejects.toThrow("HTTP 403");
+    }
+  });
 });
 
 describe("overrideFromPullRequest", () => {
@@ -431,7 +447,30 @@ describe("findReleasePr", () => {
     });
     const lookup = await findReleasePr(run, REPO, "abc123");
     expect(lookup).toEqual({ pr: { number: 5, labels: ["l"] }, unmerged: [] });
-    expect(calls[0]?.[1]).toBe("repos/o/r/commits/abc123/pulls");
+    expect(calls[0]?.slice(1)).toEqual([
+      "--paginate",
+      "--slurp",
+      "repos/o/r/commits/abc123/pulls?per_page=100",
+    ]);
+  });
+
+  test("a release PR on a later page is still found (slurped pages are flattened)", async () => {
+    const page1 = Array.from({ length: 100 }, (_, i) => ({
+      number: i + 100,
+      head: { ref: `fix/${i}` },
+      labels: [],
+    }));
+    const page2 = [
+      {
+        number: 5,
+        head: { ref: "release-please--branches--main" },
+        labels: [{ name: "l" }],
+        merged_at: "2026-08-09T00:00:00Z",
+      },
+    ];
+    const run: GhRunner = async () => JSON.stringify([page1, page2]);
+    const lookup = await findReleasePr(run, REPO, "abc123");
+    expect(lookup.pr).toEqual({ number: 5, labels: ["l"] });
   });
 
   test("no associated release PR means no merge and nothing unmerged", async () => {

@@ -11,7 +11,8 @@ machinery and leaves the fuzz step itself to you. What the machinery does:
 - on failure, uploads the failure artifacts and files (or updates) a
   label-deduplicated tracking issue built from your failure reports, then
   dispatches auto-assign at it (when that module is selected)
-- on a green run, comments on and closes the open tracking issue
+- on a green run, comments on and closes every open issue carrying the
+  tracking label
 
 The issue filing and closing come from the `fuzz-issue` composite action in
 this repository (`actions/fuzz-issue`), pinned like every other managed
@@ -98,11 +99,15 @@ they were written.
 ## Issue lifecycle
 
 One open issue per label. A failing night comments on the open issue if one
-exists, otherwise creates it. A green night comments and closes it; when no
-issue is open, the resolve step does nothing. A manual green dispatch also
-closes the issue; the close comment links the run, so the provenance is
-visible. The action never assigns anyone; assignment happens through the
-dispatched auto-assign workflow, because issues created with `GITHUB_TOKEN`
+exists, otherwise creates it. A green night comments on and closes every
+open issue carrying the label - the release gate blocks while any of them
+is open, so hand-labeling an issue into the stream makes the next green
+night close it; to block a release deliberately, use the `release-blocker`
+label instead (docs/all-green.md). When no issue is open, the resolve step
+does nothing. A manual green dispatch also closes the issue; the close
+comment links the run, so the provenance is visible. The action never
+assigns anyone; assignment happens through the dispatched auto-assign
+workflow, because issues created with `GITHUB_TOKEN`
 fire no triggers of their own.
 
 ## Release gating

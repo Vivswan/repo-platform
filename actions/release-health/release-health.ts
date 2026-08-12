@@ -229,13 +229,27 @@ export async function findReleasePr(
   repo: string,
   sha: string,
 ): Promise<ReleaseLookup> {
-  const json = await run(["api", `repos/${repo}/commits/${sha}/pulls`]);
-  const prs = JSON.parse(json) as Array<{
-    number: number;
-    head?: { ref?: string };
-    labels?: Array<{ name: string }>;
-    merged_at?: string | null;
-  }>;
+  // The listing also carries open PRs whose branch contains the commit, so
+  // on a busy repo the merged release PR can sit past the default first
+  // page; paginate rather than silently ungating the release. --slurp pins
+  // the multi-page output to one array-of-pages document regardless of gh
+  // version or endpoint shape (needs gh >= 2.51; hosted runners ship
+  // current gh).
+  const json = await run([
+    "api",
+    "--paginate",
+    "--slurp",
+    `repos/${repo}/commits/${sha}/pulls?per_page=100`,
+  ]);
+  const pages = JSON.parse(json) as Array<
+    Array<{
+      number: number;
+      head?: { ref?: string };
+      labels?: Array<{ name: string }>;
+      merged_at?: string | null;
+    }>
+  >;
+  const prs = pages.flat();
   const candidates = prs.filter((entry) => entry.head?.ref?.startsWith("release-please--"));
   const merged = candidates.filter((entry) => entry.merged_at);
   if (merged.length > 1) {
@@ -323,6 +337,12 @@ export async function securityGate(
     // and a repo with Dependabot alerts disabled both answer HTTP 403, and a
     // host without the feature 404s - none of those may block a fleet repo.
     const message = error instanceof Error ? error.message : String(error);
+    // Rate limiting (primary, secondary, and abuse-detection wording) also
+    // answers HTTP 403, but it is an operational failure, not a missing
+    // grant; skipping on it would silently drop the gate.
+    if (/rate limit|abuse detection/i.test(message)) {
+      throw error;
+    }
     if (/HTTP 40[34]|dependabot alerts are (?:disabled|not available)/i.test(message)) {
       return { gate, status: "skip", reason: message };
     }
@@ -457,7 +477,9 @@ if (import.meta.main) {
   try {
     process.exit(await main());
   } catch (error) {
-    console.error(error instanceof Error ? error.message : String(error));
+    // ::error:: so an unexpected failure (a rate-limited gate, a broken gh)
+    // is annotated on the run like every deliberate gate failure.
+    console.error(`::error::${error instanceof Error ? error.message : String(error)}`);
     process.exit(1);
   }
 }
