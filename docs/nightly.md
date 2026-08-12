@@ -106,7 +106,10 @@ repo-owned while the label declaration is template-rendered:
 
 - Renaming `nightly_label` (a copier answer) updates the settings-sync
   label declaration on the next sync, but never the repo-owned
-  `nightly.yml`. Update the two `label:` inputs there in the same change,
+  `nightly.yml`. The rename itself is a default-branch PR editing the
+  `nightly_label` value key in `.copier-answers.yml` (the sync loads
+  recorded values from there; the underscore keys stay untouched).
+  Update the two `label:` inputs there in the same change,
   or the workflow keeps filing under the old name while the settings apply
   deletes it.
 - Deselecting the module removes the label declaration, but

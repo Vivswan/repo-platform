@@ -31,9 +31,11 @@ One line each, from the choices descriptions:
 - `pages`: GitHub Pages deploy (root = latest release, /staging/ = main)
 - `release-please`: release job on top of all-green + autorelease labels
 - `issue-templates`: bug/feature issue forms
+- `skills`: agent skills hosting (plugin manifests, skill validation)
 - `pr-title`: Conventional Commit PR title check in the all-green gate
 - `auto-assign`: auto-assign issues/PRs/alerts to owner
 - `fuzzer`: nightly fuzz starter with issue filing, replay inputs, auto-close
+- `nightly`: nightly CI starter with failure issue filing and auto-close
 - `settings-sync`: in-repo .github/settings.yml applied with the repo's own PAT
 - `custom-license`: repo carries its own license in LICENSE.md; the fleet license is not rendered
 
@@ -73,6 +75,24 @@ rejected without it).
 |---|---|---|
 | `fuzzer_label` | Label identifying the nightly-fuzz tracking-issue stream (one open issue per label; plain label characters, max 50) | `fuzz-nightly` |
 
+### nightly
+
+| Question | Meaning | Default |
+|---|---|---|
+| `nightly_label` | Label identifying the nightly-CI tracking-issue stream (same shape rules as `fuzzer_label`; must differ from it - each stream needs its own label or a green night in one closes the other's open issue) | `nightly-failure` |
+
+### skills
+
+| Question | Meaning | Default |
+|---|---|---|
+| `skills_dir` | Directory holding the repository's agent skills (plain relative path; baked into the managed validation workflow's trigger paths and action input) | `skills` |
+
+To change a module parameter later, edit that question's VALUE key in
+`.copier-answers.yml` through a normal default-branch PR - the sync
+loads recorded values from there, so the edit sticks and the next sync
+re-renders consistently. Never touch the underscore keys (`_commit`,
+`_src_path`).
+
 ## Required settings labels
 
 Settings applies delete undeclared labels, so the repo's settings file
@@ -92,6 +112,7 @@ required label.
 | rust | `rust` (`000000`) |
 | release-please | the `autorelease: *` pair, `release-blocker` (`B60205`), `release-override` (`FBCA04`) |
 | fuzzer | the `fuzzer_label` answer (default `fuzz-nightly`, `B60205`) |
+| nightly | the `nightly_label` answer (default `nightly-failure`, `D93F0B`) |
 | private repos declaring labels | `settings-as-code-report` (`0e2a47`) |
 
 Exact descriptions live in repo-platform's

@@ -49,11 +49,15 @@ The validation is split by what a failure means:
    skills directory has a `SKILL.md` whose frontmatter `name` matches the
    kebab-case folder and whose `description` is nonempty (both within
    Claude Code's 64/1024-character limits), a skill's `.mcp.json` (when
-   present) parses, and `marketplace.json` (when present) is well-formed
+   present) parses, the skills directory (when it exists - a repo that
+   publishes nothing yet has none, and anything other than a directory at
+   the path is an error) carries an index `README.md` at its
+   root, and `marketplace.json` (when present) is well-formed
    and consistent with `plugin.json` (a plugin publishing the repository
    root must carry the same name). Symlinks are rejected anywhere on a
    validated path - the skills directory (ancestor components included),
-   skill folders, `SKILL.md`, `.mcp.json`, and the two manifests
+   skill folders, `SKILL.md`, `.mcp.json`, the skills root's index
+   `README.md`, and the two manifests
    themselves - because a link can point outside the checkout, so what
    ships would not be what was validated. The one exception is a
    marketplace plugin's `source`, which may pass through in-repo symlinks;
@@ -84,10 +88,13 @@ structure check.
 
 ## Publishing a skill
 
-Each published skill is a direct child of the skills directory:
+Each published skill is a direct child of the skills directory, and the
+directory itself carries an index README (required by the structure
+check as soon as the directory exists):
 
 ```
 skills/
+  README.md       # index of the hosted skills (what each is, how to install)
   my-skill/
     SKILL.md      # YAML frontmatter: name (= folder, kebab-case), description
     ...           # whatever else the skill carries

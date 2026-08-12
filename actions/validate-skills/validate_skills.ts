@@ -7,7 +7,10 @@
 //     with a SKILL.md; every folder under the skills directory satisfies
 //     the SKILL.md contract installers expect (frontmatter name matching
 //     the kebab-case folder, a nonempty description, both within Claude
-//     Code's length limits, a parsable .mcp.json when present);
+//     Code's length limits, a parsable .mcp.json when present); the
+//     skills directory, when it exists, is a directory carrying an index
+//     README.md at its root (a missing skills directory stays the valid
+//     starter state; any other entry at the path is an error);
 //     marketplace.json, when present, parses with well-formed plugins
 //     entries consistent with the plugin manifest.
 //
@@ -19,9 +22,9 @@
 //
 // Symlinks are rejected anywhere on a validated path - the skills
 // directory (every component of it, ancestors included), skill folders,
-// SKILL.md, .mcp.json, and the plugin.json/marketplace.json manifests
-// themselves: a link can point outside the checkout, so what ships would
-// not be what was validated. The one deliberate exception is a
+// SKILL.md, .mcp.json, the skills root's index README.md, and the
+// plugin.json/marketplace.json manifests themselves: a link can point
+// outside the checkout, so what ships would not be what was validated. The one deliberate exception is a
 // marketplace plugin's `source`, which may resolve through links as long
 // as its physical path stays inside the repository.
 //
@@ -397,11 +400,44 @@ export function validateStructure(root: string, skillsDir: string, manifestRel: 
     errors.push(rootLinkError);
     return errors;
   }
+  // Absence is the one valid non-directory state (the starter publishes
+  // nothing yet); anything else at the path is not a skills directory,
+  // and nothing beneath it is worth validating either.
+  const rootStat = lstatOf(skillsRoot);
+  if (rootStat && !rootStat.isDirectory()) {
+    errors.push(
+      `${skillsDir}: exists but is ${rootStat.isFile() ? "a regular file" : "not a directory"}; ` +
+        "the skills directory must be a directory (or absent until the repository publishes a skill)",
+    );
+    return errors;
+  }
   for (const skillPath of manifest?.skills ?? []) {
     collect(errors, () => checkSkillPath(manifestRel, skillPath, root, skillsRoot, skillsDir));
   }
   const walked = skillDirs(skillsRoot, skillsDir);
-  errors.push(...walked.errors);
+  let walkErrors = walked.errors;
+  // An existing skills directory must carry an index README.md at its
+  // root, so installers browsing the directory see what the catalog
+  // holds. A missing skills directory is the starter state (nothing
+  // published yet), so there is nothing to index.
+  if (rootStat) {
+    const readmeRel = `${skillsDir}/README.md`;
+    const readme = lstatOf(join(skillsRoot, "README.md"));
+    if (readme?.isSymbolicLink()) {
+      // One error with the right remediation: the directory walk's generic
+      // symlinked-entry message says "publish a real directory", which is
+      // wrong for the root README, so the file-specific message replaces it.
+      walkErrors = walkErrors.filter((error) => !error.startsWith(`${readmeRel}:`));
+      errors.push(
+        `${readmeRel}: must be a real file, not a symlink (a link can point outside the checkout)`,
+      );
+    } else if (!readme?.isFile()) {
+      errors.push(
+        `${readmeRel}: missing; a skills directory must carry an index README.md at its root`,
+      );
+    }
+  }
+  errors.push(...walkErrors);
   for (const name of walked.dirs) {
     errors.push(...validateSkillDir(join(skillsRoot, name), `${skillsDir}/${name}`));
   }

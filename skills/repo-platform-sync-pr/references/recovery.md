@@ -91,7 +91,13 @@ followed by a carry step that splices repository-local content back:
     fresh render's sentinel. When the previous copy carried more than
     one marker, the summary bullet adds "review the tail for stale
     duplicates" - do that review; a stale second managed half may be
-    riding along in the tail.
+    riding along in the tail. And when the managed half above the repo's
+    marker differed from the fresh render (in-place edits there), the
+    bullet adds "the managed half above the marker differed from the
+    fresh render; those differences are not carried - review the diff":
+    recovery legitimately resets the managed half, but the drop is loud,
+    so check whether any of those edits deserve a home below the marker
+    or in the template.
   - appendix: anything unsplittable (no sentinel in the repo's copy -
     including legacy copies synced before the sentinels existed). The
     previous copy is preserved IN FULL below a recovery-appendix

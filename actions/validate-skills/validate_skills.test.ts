@@ -4,7 +4,7 @@
 // end-to-end over temporary fixture trees.
 
 import { describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -50,6 +50,7 @@ function fixtureRepo(options: { skills?: string[]; skillNames?: string[] } = {})
       `---\nname: ${name}\ndescription: A fixture skill.\n---\nbody\n`,
     );
   }
+  if (skillNames.length > 0) writeFileSync(join(root, "skills", "README.md"), "# Skills\n");
   return root;
 }
 
@@ -228,6 +229,46 @@ describe("validateStructure", () => {
     expect(validateStructure(root, "skills", ".claude-plugin/plugin.json")).toEqual([]);
   });
 
+  test("requires an index README.md when the skills dir exists", () => {
+    const root = fixtureRepo();
+    rmSync(join(root, "skills", "README.md"));
+    const errors = validateStructure(root, "skills", ".claude-plugin/plugin.json");
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toMatch(
+      /skills\/README\.md: missing; a skills directory must carry an index README\.md at its root/,
+    );
+  });
+
+  test("an empty skills dir needs the README too; a missing dir does not", () => {
+    const root = fixtureRepo({ skills: [], skillNames: [] });
+    mkdirSync(join(root, "skills"));
+    const errors = validateStructure(root, "skills", ".claude-plugin/plugin.json");
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toMatch(/skills\/README\.md: missing/);
+    writeFileSync(join(root, "skills", "README.md"), "# Skills\n");
+    expect(validateStructure(root, "skills", ".claude-plugin/plugin.json")).toEqual([]);
+  });
+
+  test("rejects a non-directory entry at the skills path", () => {
+    const root = fixtureRepo({ skills: [], skillNames: [] });
+    writeFileSync(join(root, "skills"), "not a directory\n");
+    const errors = validateStructure(root, "skills", ".claude-plugin/plugin.json");
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toMatch(/skills: exists but is a regular file/);
+  });
+
+  test("rejects a symlinked skills-root README.md", () => {
+    const root = fixtureRepo();
+    rmSync(join(root, "skills", "README.md"));
+    writeFileSync(join(root, "real-readme.md"), "# Skills\n");
+    symlinkSync(join(root, "real-readme.md"), join(root, "skills", "README.md"));
+    const errors = validateStructure(root, "skills", ".claude-plugin/plugin.json");
+    // Exactly one error: the file-specific message replaces the directory
+    // walk's generic symlinked-entry remediation for this path.
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toMatch(/skills\/README\.md: must be a real file, not a symlink/);
+  });
+
   test("reports a missing plugin manifest", () => {
     const errors = validateStructure(tempDir(), "skills", ".claude-plugin/plugin.json");
     expect(errors).toHaveLength(1);
@@ -264,6 +305,7 @@ describe("validateStructure", () => {
       '{"name": "x-y", "skills": ["./lib/skills/a-skill"]}',
     );
     mkdirSync(join(root, "lib", "skills", "a-skill"), { recursive: true });
+    writeFileSync(join(root, "lib", "skills", "README.md"), "# Skills\n");
     writeFileSync(
       join(root, "lib", "skills", "a-skill", "SKILL.md"),
       "---\nname: a-skill\ndescription: d\n---\n",

@@ -110,7 +110,8 @@ The load-bearing answers:
   skips migrations. Must match the `--vcs-ref` above.
 - `modules`: a multiselect (space toggles, enter confirms), any
   combination. Modules with parameters ask follow-up questions only when
-  selected (pages, fuzzer, settings-sync). The authoritative roster is
+  selected (pages, fuzzer, nightly, skills, settings-sync). The
+  authoritative roster is
   the interactive prompt itself (repo-platform's `copier.yml`).
 - `private`: gates the render - public repos get CodeQL and
   dependency-review jobs plus CONTRIBUTING.md; private ones do not. It
@@ -119,6 +120,9 @@ The load-bearing answers:
 Two files record the outcome:
 
 - `.copier-answers.yml`: never delete it - `copier update` depends on it.
+  Its one sanctioned edit is changing a question's VALUE key via a
+  default-branch PR to set a module parameter (`nightly_label`,
+  `skills_dir`, `pages_*`, ...); never touch the underscore keys.
 - `.repo-platform.yml`: its presence marks the repo as managed, and its
   top-level `modules:` list is the selection's home from then on. Edit
   that list and the next sync PR applies the change.
@@ -135,6 +139,11 @@ overwrites them). Put real content in the ones your modules created:
   (assets, notes), `publish-release` flips it live.
 - `.github/workflows/nightly-fuzz.yml` (fuzzer module): replace the
   placeholder fuzz step with your fuzzer.
+- `.github/workflows/nightly.yml` (nightly module): replace the
+  placeholder step with the repo's own nightly checks.
+- `.claude-plugin/plugin.json` and `marketplace.json` (skills module):
+  seeded with an empty catalog; list each published skill's path in
+  `plugin.json`'s `skills` array.
 - `auto-format.yml` and `copilot-setup-steps.yml` come prefilled for the
   selected toolchains; issue forms are generic starters to tailor.
 
@@ -206,8 +215,9 @@ CI gates on a single check named `all-green` (required once step 7's
 ruleset is applied): an aggregate job that `needs:` every gating job and
 fails on any non-success result (skipped counts as failure). Standard
 jobs (typography, commit-names, actionlint, gitleaks, yamllint), module
-jobs (pr-title, release-freshness/release-health, CodeQL on public
-repos), and your checks.yml jobs all feed it. `validate-template` also
+jobs (pr-title, release-freshness/release-health, validate-skills on
+skills repos, CodeQL on public repos), and your checks.yml jobs all feed
+it. `validate-template` also
 runs but is informational: a red run flags template drift without
 blocking merges.
 

@@ -113,12 +113,18 @@ this pass catches what it does not.
      restore what is below the marker (or inside the gitignore LOCAL
      section) before merging.
    - A generated-once starter (checks.yml, release.yml, nightly-fuzz.yml,
-     issue forms, release-please config, .gitleaks.toml, ...) being
+     nightly.yml, issue forms, release-please config, .gitleaks.toml,
+     the `.claude-plugin/` manifests, ...) being
      MODIFIED or DELETED is suspicious: `_skip_if_exists` files are never
      touched once they exist. A first-time ADDITION is expected when the
      same PR's `.repo-platform.yml` diff adds the owning module - "does
      the modules diff explain it?" is the check. Stop and investigate
      anything the modules diff does not explain.
+   - A `.bun-version`, `.node-version`, or `.dvmrc` addition or version
+     bump is EXPECTED: toolchain pin dotfiles are fully managed, and the
+     fleet shares one pinned version per toolchain - sync PRs deliver pin
+     advances. Do not "restore" the old version; divergence belongs in
+     the repo-owned workflows' version inputs, not the dotfile.
 5. Only when every file is classified and cleared, proceed to conflict
    resolution and merging.
 
@@ -164,13 +170,19 @@ What "restore the dropped lines" means depends on who owns the file (the
 full table is in [references/file-ownership.md](references/file-ownership.md)):
 
 - Fully managed (ci.yml, dependabot.yml, callers, .copier-answers.yml,
-  ...): accept the template side. These files are template-owned:
+  the toolchain pin dotfiles, ...): accept the template side. These
+  files are template-owned:
   overlapping local edits lose to the template (an edit the template
   happens not to touch can survive a given sync, but it is living on
   borrowed time). Move the need upstream (a template change in
   repo-platform) or into a repo-owned file (checks.yml for CI jobs).
+  One carve-out: changing a module parameter (nightly_label, skills_dir,
+  pages_*, fuzzer_label, ...) is done by editing that question's VALUE
+  key in .copier-answers.yml via a normal default-branch PR - never the
+  underscore keys.
 - Generated-once starters (checks.yml, release.yml, nightly-fuzz.yml,
-  issue forms, release-please config, .gitleaks.toml, ...): never
+  nightly.yml, issue forms, release-please config, .gitleaks.toml, the
+  .claude-plugin manifests, ...): never
   touched once they exist, so they do not conflict. Additions are
   explained by the modules diff; modifications or deletions are not -
   stop and look.
