@@ -1687,6 +1687,72 @@ const rules: Rule[] = [
   },
 
   {
+    // The stale-pending guard in the release-please workflow queries and
+    // names the autorelease labels as string literals. gh pr list exits 0
+    // and empty for a label that does not exist, so a literal that drifts
+    // from the fragment roster degrades the guard to a permanent silent
+    // no-op - anchor the literals to the fragment here instead.
+    name: "release-guard-labels",
+    run: () => {
+      const mismatches: Mismatch[] = [];
+      const fragment = placeholderJinja(
+        normalizeJinja(
+          read("templates/release-please/fragments/settings-labels.jinja"),
+          jinjaVars(),
+        ),
+      );
+      const roster = new Set(
+        parseLabels(`labels:\n${fragment}`, "settings-labels.jinja").map((label) => label.name),
+      );
+      for (const rel of [
+        ".github/workflows/release-please.yml",
+        "templates/release-please/.github/workflows/release-please.yml.jinja",
+      ]) {
+        const text = read(rel);
+        const queried = mustMatch(
+          text,
+          /gh pr list --state merged --label '([^']+)'/,
+          rel,
+          "guard label query",
+        )[1];
+        const worn = mustMatch(text, /have worn '([^']+)'/, rel, "guard error's pending label")[1];
+        const target = mustMatch(
+          text,
+          /move the label to '([^']+)'/,
+          rel,
+          "guard error's tagged label",
+        )[1];
+        for (const name of [queried, worn, target]) {
+          if (!roster.has(name)) {
+            mismatches.push({
+              file: rel,
+              expected: `label '${name}' declared in templates/release-please/fragments/settings-labels.jinja`,
+              got: "not in the fragment roster",
+            });
+          }
+        }
+        if (worn !== queried) {
+          mismatches.push({
+            file: rel,
+            expected: `guard error names the queried label '${queried}'`,
+            got: `'${worn}'`,
+          });
+        }
+        // The prescribed fix must point at the tagged label specifically -
+        // roster membership alone would accept any declared label.
+        if (target !== "autorelease: tagged") {
+          mismatches.push({
+            file: rel,
+            expected: "guard error prescribes moving to 'autorelease: tagged'",
+            got: `'${target}'`,
+          });
+        }
+      }
+      return mismatches;
+    },
+  },
+
+  {
     name: "all-green-name",
     run: () => {
       const mismatches: Mismatch[] = [];
