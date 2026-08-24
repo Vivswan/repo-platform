@@ -220,6 +220,13 @@ describe("fragmentJobIds", () => {
     expect(() => fragmentJobIds(Buffer.from("      - not a mapping\n"))).toThrow("jobs mapping");
     expect(() => fragmentJobIds(Buffer.from("  just a scalar line\n"))).toThrow("jobs mapping");
   });
+
+  test("a jinja-derived job key throws (it enumerates as one spelling and renders as another)", () => {
+    const body = Buffer.from(
+      "  {{ 'safe' if private else 'evil' }}:\n    runs-on: ubuntu-latest\n",
+    );
+    expect(() => fragmentJobIds(body)).toThrow("literally");
+  });
 });
 
 describe("gateJobsParityErrors", () => {
@@ -378,6 +385,17 @@ describe("injectUsesRefPreamble", () => {
     if (result === null || "error" in result) throw new Error("expected an injection");
     expect(result.data.toString("utf-8")).toContain("{%- set banner = uses_ref -%}");
     expect(result.data.toString("utf-8")).toContain(USES_REF_PREAMBLE[6]);
+  });
+
+  test("a set-assignment smuggled inside a string value still errors (fail closed, not quote-aware)", () => {
+    const result = injectUsesRefPreamble(
+      "templates/demo/w.yml.jinja",
+      Buffer.from(
+        '# h\n{% set banner = "%} {% set uses_ref = x %}" %}\nuses: o/r/a@{{ uses_ref }}\n',
+      ),
+    );
+    if (result === null || !("error" in result)) throw new Error("expected the fail-closed error");
+    expect(result.error).toContain("hand-writes");
   });
 
   test("the canonical preamble itself carries every derivation line and no hand-copy bait", () => {

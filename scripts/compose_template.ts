@@ -574,18 +574,37 @@ export function gateJobsGroups(manifests: ModuleManifest[]): GateJobsGroup[] {
  *  jobs mapping's spliced children, so it is normalized modulo jinja
  *  (placeholder identity values - job ids never carry substitutions),
  *  wrapped under a jobs: key, and YAML-parsed: the top-level mapping keys
- *  ARE the job ids, whatever YAML spelling they use. Throws on anything
- *  that does not parse as that mapping - the parity check must fail
- *  closed, never scan past a job spelling it did not anticipate. */
+ *  ARE the job ids, whatever YAML spelling they use. Every parsed key must
+ *  also appear as a literal 2-space key line in the RAW fragment - a
+ *  jinja-derived key would enumerate as one spelling and render as
+ *  another. Throws on anything that fails either bar - the parity check
+ *  must fail closed, never scan past a job spelling it did not
+ *  anticipate. */
 export function fragmentJobIds(body: Buffer): string[] {
+  const raw = body.toString("utf-8");
   const vars = { username: "OWNER", slug: "SLUG", copyrightHolder: "HOLDER" };
-  const normalized = placeholderJinja(normalizeJinja(body.toString("utf-8"), vars));
+  const normalized = placeholderJinja(normalizeJinja(raw, vars));
   const doc: unknown = parseYaml(`jobs:\n${normalized}`);
   const jobs = (doc as { jobs?: unknown } | null)?.jobs;
   if (typeof jobs !== "object" || jobs === null || Array.isArray(jobs)) {
     throw new Error("the fragment does not parse as the jobs mapping's children");
   }
-  return Object.keys(jobs);
+  const rawKeys = new Set(
+    [...raw.matchAll(/^ {2}("[^"\n]*"|'[^'\n]*'|[^\s'"][^\n:]*?)\s*:(?:\s|$)/gm)].map((m) =>
+      m[1].replace(/^(["'])(.*)\1$/, "$2"),
+    ),
+  );
+  const keys = Object.keys(jobs);
+  for (const key of keys) {
+    if (!rawKeys.has(key)) {
+      throw new Error(
+        `job key '${key}' does not appear as a literal 2-space key line in the ` +
+          "fragment - a jinja-derived job id would enumerate as one spelling " +
+          "and render as another; write the job id literally",
+      );
+    }
+  }
+  return keys;
 }
 
 /** gate_jobs <-> ci-gate-jobs parity for one module: the declared gate
@@ -938,7 +957,11 @@ const PREAMBLE_NAMES_RE = /\b(?:tpl_ref|release_pin|uses_ref)\b/;
  *  block set with no `=` at all - so everything between `set` and the
  *  first `=` (the whole tag when there is none) is checked and any
  *  mention fails closed. Reading the names on the VALUE side stays
- *  legitimate and does not trip. */
+ *  legitimate and does not trip. The tag scan is not quote-aware: a
+ *  string literal containing `%}` ends the scanned tag early, which can
+ *  only OVER-trigger (an assignment's target always precedes any string
+ *  literal), and a false positive is a loud compose error, never a
+ *  bypass. */
 function handWritesPreamble(text: string): boolean {
   for (const tag of text.matchAll(SET_TAG_RE)) {
     const inner = tag[1];
