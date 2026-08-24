@@ -576,11 +576,15 @@ describe("ownership self-declarations", () => {
   });
 
   test("a longer look-alike repo name does not count", () => {
-    const { exitCode, stderr } = runValidator({
-      ".yamllint": "# This file is managed by Vivswan/repo-platform-fork.\nextends: default\n",
-    });
-    expect(exitCode).toBe(1);
-    expect(stderr).toContain(".yamllint: does not open with the managed header");
+    // GitHub repo names allow [A-Za-z0-9._-], so every continuation
+    // character must fail the anchor.
+    for (const name of ["repo-platform-fork", "repo-platform_fork", "repo-platform.fork"]) {
+      const { exitCode, stderr } = runValidator({
+        ".yamllint": `# This file is managed by Vivswan/${name}.\nextends: default\n`,
+      });
+      expect(exitCode).toBe(1);
+      expect(stderr).toContain(".yamllint: does not open with the managed header");
+    }
   });
 
   test("a header buried past the opening lines does not count", () => {

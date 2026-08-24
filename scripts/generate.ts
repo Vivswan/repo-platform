@@ -76,9 +76,14 @@ const REPO_ROOT = resolve(import.meta.dir, "..");
  *  leave that stripper silently matching nothing. */
 export const MARKER_TOKENS = { begin: "BEGIN GENERATED:", end: "END GENERATED:" } as const;
 
-function markerTexts(name: string): { begin: string; end: string } {
+/** What the BEGIN marker tells editors to edit instead of the region; most
+ *  regions derive from the module manifests alone, and a region with more
+ *  sources names them all. */
+const DEFAULT_REGION_SOURCES = "module.yml manifests";
+
+function markerTexts(name: string, sources: string): { begin: string; end: string } {
   return {
-    begin: `${MARKER_TOKENS.begin} ${name} (scripts/generate.ts - edit module.yml manifests, not this block)`,
+    begin: `${MARKER_TOKENS.begin} ${name} (scripts/generate.ts - edit ${sources}, not this block)`,
     end: `${MARKER_TOKENS.end} ${name}`,
   };
 }
@@ -89,15 +94,16 @@ export function markerLines(
   name: string,
   prefix: string,
   suffix = "",
+  sources = DEFAULT_REGION_SOURCES,
 ): { begin: string; end: string } {
-  const texts = markerTexts(name);
+  const texts = markerTexts(name, sources);
   const close = suffix === "" ? "" : ` ${suffix}`;
   return { begin: `${prefix} ${texts.begin}${close}`, end: `${prefix} ${texts.end}${close}` };
 }
 
 /** The `<!-- ... -->` marker pair fencing an inline markdown region. */
 export function mdMarkers(name: string): { begin: string; end: string } {
-  const texts = markerTexts(name);
+  const texts = markerTexts(name, DEFAULT_REGION_SOURCES);
   return { begin: `<!-- ${texts.begin} -->`, end: `<!-- ${texts.end} -->` };
 }
 
@@ -122,8 +128,9 @@ export function spliceRegion(
   prefix: string,
   body: string[],
   suffix = "",
+  sources = DEFAULT_REGION_SOURCES,
 ): string {
-  const { begin, end } = markerLines(name, prefix, suffix);
+  const { begin, end } = markerLines(name, prefix, suffix, sources);
   rejectSmuggledMarkers(body.join("\n"), file, name, [begin, end]);
   const lines = text.split("\n");
   const at = (marker: string) =>
@@ -466,12 +473,14 @@ export function toolchainPinRows(manifests: ModuleManifest[]): string[] {
   return toolchainPins(manifests).map((p) => `| \`${p.module}\` | \`${p.file}\` | ${p.version} |`);
 }
 
-/** The managed ownership header in template sources, anchored so neither a
- *  negated look-alike ("is not managed by") nor a longer repo name
- *  ("/repo-platform-fork") counts; validate_generated_files.ts applies the
+/** The managed ownership header in template sources, anchored on the C1
+ *  line's canonical trailing period with no repo-name character (GitHub
+ *  allows [A-Za-z0-9._-]) after it, so neither a negated look-alike ("is
+ *  not managed by") nor a longer repo name ("/repo-platform_fork",
+ *  "/repo-platform.fork") counts; validate_generated_files.ts applies the
  *  same anchoring to rendered files. */
 const MANAGED_HEADER_RE =
-  /This file is managed by \{\{ github_username \}\}\/repo-platform(?![A-Za-z0-9-])/;
+  /This file is managed by \{\{ github_username \}\}\/repo-platform\.(?![A-Za-z0-9._-])/;
 const LOCAL_SECTION_MARKER = "repo-platform:local-section";
 const LOCAL_SECTION_LINES = new Set([
   `# ${LOCAL_SECTION_MARKER}`,
@@ -493,8 +502,10 @@ export const KNOWN_UNDECLARED_MODULE_FILES = new Set([
   "settings-sync/.github/settings.yml.jinja",
 ]);
 
-/** copier.yml's _skip_if_exists globs as rendered-path matchers (`*` stays
- *  within one path segment, matching copier's pathlib semantics). */
+/** copier.yml's _skip_if_exists globs as path matchers reproducing
+ *  copier's semantics (pathlib.PurePath.match): a relative pattern matches
+ *  the path's TRAILING components, so a bare filename matches at any
+ *  depth, and `*` stays within one component. */
 export function skipIfExistsMatchers(copierYamlText: string): RegExp[] {
   const skip = (parseYaml(copierYamlText) as { _skip_if_exists?: unknown } | null)?._skip_if_exists;
   if (!Array.isArray(skip) || skip.length === 0 || !skip.every((p) => typeof p === "string")) {
@@ -506,7 +517,7 @@ export function skipIfExistsMatchers(copierYamlText: string): RegExp[] {
   return skip.map(
     (pattern) =>
       new RegExp(
-        `^${pattern
+        `(?:^|/)${pattern
           .split("*")
           .map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
           .join("[^/]*")}$`,
@@ -606,20 +617,40 @@ export function moduleOwnershipFiles(
   return result;
 }
 
-/** validate_generated_files.ts MODULE_OWNERSHIP record literal. */
+/** validate_generated_files.ts MODULE_OWNERSHIP record literal, laid out
+ *  the way biome's formatter (lineWidth 100) prints it - an entry list
+ *  inlines only while its whole property line fits, otherwise one entry
+ *  per line - so regeneration and formatting can never disagree. */
 export function moduleOwnershipRegion(ownership: Record<string, OwnershipEntry[]>): string[] {
-  return [
+  const lines = [
     'const MODULE_OWNERSHIP: Record<string, { path: string; kind: "header" | "marker" }[]> = {',
-    // Keys quoted as-needed, like TOOLCHAIN_PINS above, to stay biome-stable.
-    ...Object.entries(ownership).map(([module, entries]) => {
-      const key = /^[a-z][a-z0-9]*$/.test(module) ? module : JSON.stringify(module);
-      const body = entries
-        .map((entry) => `{ path: ${JSON.stringify(entry.path)}, kind: "${entry.kind}" }`)
-        .join(", ");
-      return `  ${key}: [${body}],`;
-    }),
-    "};",
   ];
+  for (const [module, entries] of Object.entries(ownership)) {
+    // Keys quoted as-needed, like TOOLCHAIN_PINS above, to stay biome-stable.
+    const key = /^[a-z][a-z0-9]*$/.test(module) ? module : JSON.stringify(module);
+    const literals = entries.map(
+      (entry) => `{ path: ${JSON.stringify(entry.path)}, kind: "${entry.kind}" }`,
+    );
+    const inline = `  ${key}: [${literals.join(", ")}],`;
+    if (inline.length <= 100) {
+      lines.push(inline);
+      continue;
+    }
+    lines.push(`  ${key}: [`);
+    for (const literal of literals) {
+      const line = `    ${literal},`;
+      if (line.length > 100) {
+        throw new Error(
+          `module-ownership entry for '${module}' exceeds the formatter's line ` +
+            `width even one-per-line (${line.trim()}) - shorten the rendered path`,
+        );
+      }
+      lines.push(line);
+    }
+    lines.push("  ],");
+  }
+  lines.push("};");
+  return lines;
 }
 
 /** Version-dotfile-shaped files at a module's root that no manifest pin
@@ -877,7 +908,7 @@ interface RegionInputs {
   moduleOwnership: Record<string, OwnershipEntry[]>;
 }
 
-type SpanRegion = [name: string, body: (inputs: RegionInputs) => string[]];
+type SpanRegion = [name: string, body: (inputs: RegionInputs) => string[], sources?: string];
 type InlineRegion = [name: string, body: (inputs: RegionInputs) => string];
 
 // At least one region list is required by construction, and inline regions
@@ -924,7 +955,11 @@ function targets(manifests: ModuleManifest[]): Target[] {
       regions: [
         ["known-modules", ({ manifests }) => knownModules(manifests)],
         ["toolchain-pins", ({ manifests }) => toolchainPinsRegion(manifests)],
-        ["module-ownership", ({ moduleOwnership }) => moduleOwnershipRegion(moduleOwnership)],
+        [
+          "module-ownership",
+          ({ moduleOwnership }) => moduleOwnershipRegion(moduleOwnership),
+          "the module templates and copier.yml's _skip_if_exists",
+        ],
       ],
     },
     {
@@ -1032,19 +1067,20 @@ function main(): number {
     };
     const regionStale =
       "its generated region(s) do not match their sources (the module " +
-      "manifests, or the settings label templates for copier.yml's " +
-      "tracking-label validators)";
+      "manifests; the module template trees and copier.yml's _skip_if_exists " +
+      "for the module-ownership region; the settings label templates for " +
+      "copier.yml's tracking-label validators)";
     changed = targets(manifests).flatMap((target) => {
       const path = join(REPO_ROOT, target.file);
       const current = readFileSync(path, "utf-8");
       let next = current;
       if (target.syntax === "line") {
-        for (const [name, body] of target.regions) {
-          next = spliceRegion(next, target.file, name, target.prefix, body(inputs));
+        for (const [name, body, sources] of target.regions) {
+          next = spliceRegion(next, target.file, name, target.prefix, body(inputs), "", sources);
         }
       } else if (target.syntax === "jinja") {
-        for (const [name, body] of target.regions) {
-          next = spliceRegion(next, target.file, name, "{#-", body(inputs), "#}");
+        for (const [name, body, sources] of target.regions) {
+          next = spliceRegion(next, target.file, name, "{#-", body(inputs), "#}", sources);
         }
       } else {
         for (const [name, body] of target.regions ?? []) {

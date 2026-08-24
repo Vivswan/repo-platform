@@ -137,6 +137,18 @@ describe("spliceRegion", () => {
       ["top", jinja.begin, "new", jinja.end, ""].join("\n"),
     );
   });
+
+  test("a region with more sources than the manifests names them in its BEGIN marker", () => {
+    const sources = "the module templates and copier.yml's _skip_if_exists";
+    const custom = markerLines("demo", "//", "", sources);
+    expect(custom.begin).toBe(
+      `// BEGIN GENERATED: demo (scripts/generate.ts - edit ${sources}, not this block)`,
+    );
+    const doc = ["top", custom.begin, "old", custom.end, ""].join("\n");
+    expect(spliceRegion(doc, "f.ts", "demo", "//", ["new"], "", sources)).toBe(
+      ["top", custom.begin, "new", custom.end, ""].join("\n"),
+    );
+  });
 });
 
 describe("region builders", () => {
@@ -588,11 +600,20 @@ describe("module ownership files", () => {
     "# This file is managed by {{ github_username }}/repo-platform.\n" +
     "# Local edits may be replaced during template updates.\n";
 
-  test("skipIfExistsMatchers keeps * within one path segment and escapes literals", () => {
-    const [matcher] = skipIfExistsMatchers("_skip_if_exists:\n  - .github/ISSUE_TEMPLATE/*.yml\n");
-    expect(matcher.test(".github/ISSUE_TEMPLATE/bug_report.yml")).toBe(true);
-    expect(matcher.test(".github/ISSUE_TEMPLATE/sub/deep.yml")).toBe(false);
-    expect(matcher.test(".github/ISSUE_TEMPLATEx/bug_report,yml")).toBe(false);
+  test("skipIfExistsMatchers reproduces copier's trailing-component matching", () => {
+    const [forms, lockfile] = skipIfExistsMatchers(
+      "_skip_if_exists:\n  - .github/ISSUE_TEMPLATE/*.yml\n  - .gitleaks.toml\n",
+    );
+    expect(forms.test(".github/ISSUE_TEMPLATE/bug_report.yml")).toBe(true);
+    // A relative pattern matches the path's TRAILING components
+    // (pathlib.PurePath.match), so it matches at any depth...
+    expect(forms.test("sub/.github/ISSUE_TEMPLATE/bug_report.yml")).toBe(true);
+    expect(lockfile.test(".gitleaks.toml")).toBe(true);
+    expect(lockfile.test("nested/.gitleaks.toml")).toBe(true);
+    // ...but never partial components, and * stays within one component.
+    expect(lockfile.test("x.gitleaks.toml")).toBe(false);
+    expect(forms.test(".github/ISSUE_TEMPLATE/sub/deep.yml")).toBe(false);
+    expect(forms.test(".github/ISSUE_TEMPLATEx/bug_report,yml")).toBe(false);
     expect(() => skipIfExistsMatchers("modules: []\n")).toThrow("_skip_if_exists");
   });
 
@@ -681,21 +702,20 @@ describe("module ownership files", () => {
     const dir = mkdtempSync(join(tmpdir(), "headers-"));
     try {
       mkdirSync(join(dir, "bun"));
-      writeFileSync(
-        join(dir, "bun", "negated.yml.jinja"),
-        "# This file is not managed by {{ github_username }}/repo-platform.\nname: N\n",
-      );
-      expect(() => moduleOwnershipFiles([manifest("bun")], dir, [], new Set())).toThrow(
-        "declares no ownership",
-      );
-      rmSync(join(dir, "bun", "negated.yml.jinja"));
-      writeFileSync(
-        join(dir, "bun", "suffixed.yml.jinja"),
-        "# This file is managed by {{ github_username }}/repo-platform-fork.\nname: F\n",
-      );
-      expect(() => moduleOwnershipFiles([manifest("bun")], dir, [], new Set())).toThrow(
-        "declares no ownership",
-      );
+      // GitHub repo names allow [A-Za-z0-9._-], so every continuation
+      // character must fail the anchor, as must a negated wording.
+      const lookalikes = [
+        "# This file is not managed by {{ github_username }}/repo-platform.\n",
+        "# This file is managed by {{ github_username }}/repo-platform-fork.\n",
+        "# This file is managed by {{ github_username }}/repo-platform_fork.\n",
+        "# This file is managed by {{ github_username }}/repo-platform.fork.\n",
+      ];
+      for (const header of lookalikes) {
+        writeFileSync(join(dir, "bun", "odd.yml.jinja"), `${header}name: O\n`);
+        expect(() => moduleOwnershipFiles([manifest("bun")], dir, [], new Set())).toThrow(
+          "declares no ownership",
+        );
+      }
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -747,5 +767,36 @@ describe("module ownership files", () => {
       '  "release-please": [{ path: ".github/workflows/release.yml", kind: "header" }],',
       "};",
     ]);
+  });
+
+  test("moduleOwnershipRegion expands an entry list its property line cannot fit", () => {
+    // Two realistic workflow paths overflow the inline form, and biome
+    // (lineWidth 100) prints exactly this expansion - regeneration and
+    // formatting must agree byte-for-byte.
+    const first = ".github/workflows/dependabot-bun-lockfile.yml";
+    const second = ".github/workflows/dependabot-bun-second-flow.yml";
+    expect(
+      moduleOwnershipRegion({
+        bun: [
+          { path: first, kind: "header" },
+          { path: second, kind: "marker" },
+        ],
+      }),
+    ).toEqual([
+      'const MODULE_OWNERSHIP: Record<string, { path: string; kind: "header" | "marker" }[]> = {',
+      "  bun: [",
+      `    { path: "${first}", kind: "header" },`,
+      `    { path: "${second}", kind: "marker" },`,
+      "  ],",
+      "};",
+    ]);
+  });
+
+  test("moduleOwnershipRegion refuses a path even one-per-line cannot hold", () => {
+    expect(() =>
+      moduleOwnershipRegion({
+        bun: [{ path: `x/${"y".repeat(100)}.yml`, kind: "header" }],
+      }),
+    ).toThrow("shorten the rendered path");
   });
 });

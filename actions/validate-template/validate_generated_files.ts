@@ -202,7 +202,7 @@ const TOOLCHAIN_PINS: Record<string, { file: string; version: string }> = {
 // split a managed top from a repo-owned tail (scanned fail-closed by
 // moduleOwnershipFiles in scripts/generate.ts - starters and comment-free
 // formats stay out).
-// BEGIN GENERATED: module-ownership (scripts/generate.ts - edit module.yml manifests, not this block)
+// BEGIN GENERATED: module-ownership (scripts/generate.ts - edit the module templates and copier.yml's _skip_if_exists, not this block)
 const MODULE_OWNERSHIP: Record<string, { path: string; kind: "header" | "marker" }[]> = {
   agents: [{ path: "AGENTS.md", kind: "marker" }],
   bun: [{ path: ".github/workflows/dependabot-bun-lockfile.yml", kind: "header" }],
@@ -788,11 +788,13 @@ function main(): number {
   // repo's files are sources, not renders - and while the owner pin is
   // unhealed (its error is already recorded).
   if (!selfMode && ownerPin !== null && ownerPin.kind === "pinned") {
-    // Anchored so neither a negated look-alike ("is not managed by") nor a
-    // longer repo name ("/repo-platform-fork") counts.
+    // Anchored on the C1 line's canonical trailing period with no repo-name
+    // character (GitHub allows [A-Za-z0-9._-]) after it, so neither a
+    // negated look-alike ("is not managed by") nor a longer repo name
+    // ("/repo-platform_fork", "/repo-platform.fork") counts.
     const headerRe = new RegExp(
       `This file is managed by ${ownerPin.owner.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}` +
-        "/repo-platform(?![A-Za-z0-9-])",
+        "/repo-platform\\.(?![A-Za-z0-9._-])",
     );
     const files = Object.entries(BASE_OWNERSHIP).map(([rel, kind]) => ({ rel, kind }));
     // Conditionally rendered base files, under the same answers/modules
@@ -820,7 +822,7 @@ function main(): number {
         if (!headerRe.test(content.split("\n", HEADER_WINDOW).join("\n"))) {
           errors.push(
             `${rel}: does not open with the managed header ('This file is ` +
-              `managed by ${ownerPin.owner}/repo-platform') - the file is ` +
+              `managed by ${ownerPin.owner}/repo-platform.') - the file is ` +
               "overwritten by template sync and the header is what warns readers " +
               "their local edits get replaced; run a template sync to restore it",
           );
