@@ -1,21 +1,22 @@
 #!/usr/bin/env bun
 // Forgotten-migration tripwire: a template change that stops rendering a
-// previously RELEASED landing path (a rename, a retirement, an ownership
-// flip) must ship a migration script named for the release being left
-// behind (migrations/README.md). Compares the newest templates/vX.Y.Z
-// build tag's rendered landing paths against the working tree's composed
-// template and fails when a path left the render with no
-// migrations/<latest-version>.ts in the tree. With no release tag
-// reachable nothing has shipped, so nothing can need migrating and the
-// check passes trivially.
+// previously RELEASED landing path (a rename or retirement) or flips a
+// still-rendered path's ownership class (entering or leaving
+// _skip_if_exists) must ship a migration script named for the release
+// being left behind (migrations/README.md). Compares the newest
+// templates/vX.Y.Z build tag against the working tree's composed template
+// and fails naming each such path and the expected
+// migrations/<latest-version>.ts filename when that script is absent.
+// With no release tag reachable nothing has shipped, so nothing can need
+// migrating and the check passes trivially.
 //
 // Landing paths, not emitted paths: filename gates
 // ({% if ... %}name{% endif %}) and the .jinja suffix are stripped so the
 // comparison sees the path a downstream repo actually carries, whichever
-// modules it selects. Paths matched by either version's _skip_if_exists
-// list are generated-once and repo-owned - the sync never deletes them -
-// so their leaving the render is filtered out by retired_paths.ts's own
-// rules, the same ones the sync's cleanup applies.
+// modules it selects. A path matched by either version's _skip_if_exists
+// list that leaves the render is NOT a retirement: it was repo-owned
+// already, the sync never deletes it, and nothing changes in client repos
+// (retired_paths.ts applies the same rule to the sync's cleanup).
 //
 // Usage:
 //   bun scripts/check_migrations.ts
@@ -54,22 +55,49 @@ export function latestReleaseTag(tags: readonly string[]): { tag: string; versio
   return best === null ? null : { tag: best.tag, version: best.version };
 }
 
-/** One error per retired landing path when the migration for the release
- *  being left behind is missing; empty when nothing retired or the script
- *  exists (its adequacy is the upgrade-path test's job, not this check's). */
+/** Still-rendered landing paths whose _skip_if_exists status differs
+ *  between the two versions: an ownership flip (template-managed <->
+ *  generated-once repo-owned) changes what the sync may overwrite or
+ *  delete, so it needs a migration like a rename does. */
+export function ownershipFlips(
+  oldPaths: ReadonlySet<string>,
+  newPaths: ReadonlySet<string>,
+  skipOld: readonly string[],
+  skipNew: readonly string[],
+): string[] {
+  const oldGlobs = skipOld.map((pattern) => new Bun.Glob(pattern));
+  const newGlobs = skipNew.map((pattern) => new Bun.Glob(pattern));
+  return [...oldPaths]
+    .filter(
+      (path) =>
+        newPaths.has(path) &&
+        oldGlobs.some((glob) => glob.match(path)) !== newGlobs.some((glob) => glob.match(path)),
+    )
+    .sort();
+}
+
+export type Transition = { path: string; kind: "retired" | "ownership-flip" };
+
+/** One error per transition when the migration for the release being left
+ *  behind is missing; empty when nothing changed or the script exists (its
+ *  adequacy is the upgrade-path test's job, not this check's). */
 export function migrationErrors(
-  retired: readonly string[],
+  transitions: readonly Transition[],
   version: string,
   migrationExists: boolean,
 ): string[] {
-  if (retired.length === 0 || migrationExists) return [];
-  return retired.map(
-    (path) =>
-      `templates/v${version} rendered '${path}' but the current template does not; ` +
-      `synced repos cross this transition blind without migrations/${version}.ts. ` +
+  if (transitions.length === 0 || migrationExists) return [];
+  return transitions.map(({ path, kind }) => {
+    const what =
+      kind === "retired"
+        ? `templates/v${version} rendered '${path}' but the current template does not`
+        : `'${path}' changed ownership class since templates/v${version} (entered or left _skip_if_exists)`;
+    return (
+      `${what}; synced repos cross this transition blind without migrations/${version}.ts. ` +
       "Add the migration (plus an upgrade_path_test.sh case and a PR-body note - " +
-      "see migrations/README.md), or restore the path.",
-  );
+      "see migrations/README.md), or revert the transition."
+    );
+  });
 }
 
 function fail(message: string): never {
@@ -117,24 +145,27 @@ function main(): number {
   if (oldCopier.exitCode !== 0) {
     fail(`git show ${latest.tag}:copier.yml failed: ${oldCopier.stderr.trim()}`);
   }
-  const skips = [
-    ...skipPatterns(oldCopier.stdout, `${latest.tag}:copier.yml`),
-    ...skipPatterns(readFileSync(join(REPO_ROOT, "copier.yml"), "utf-8"), "copier.yml"),
-  ];
+  const skipOld = skipPatterns(oldCopier.stdout, `${latest.tag}:copier.yml`);
+  const skipNew = skipPatterns(readFileSync(join(REPO_ROOT, "copier.yml"), "utf-8"), "copier.yml");
 
   // Module selection [] means only the always-protected paths are exempt:
   // the check must fire for a path retired under ANY selection.
-  const retired = retiredPaths(oldPaths, newPaths, skips, []);
+  const retired = retiredPaths(oldPaths, newPaths, [...skipOld, ...skipNew], []);
+  const flips = ownershipFlips(oldPaths, newPaths, skipOld, skipNew);
+  const transitions: Transition[] = [
+    ...retired.map((path): Transition => ({ path, kind: "retired" })),
+    ...flips.map((path): Transition => ({ path, kind: "ownership-flip" })),
+  ];
   const migration = join(REPO_ROOT, "migrations", `${latest.version}.ts`);
-  const errors = migrationErrors(retired, latest.version, existsSync(migration));
+  const errors = migrationErrors(transitions, latest.version, existsSync(migration));
   if (errors.length > 0) {
     for (const message of errors) console.error(`error: ${message}`);
     return 1;
   }
   console.log(
-    retired.length > 0
-      ? `migrations check ok: migrations/${latest.version}.ts exists for ${retired.length} retired landing path(s) since ${latest.tag}`
-      : `migrations check ok: no rendered landing paths retired since ${latest.tag}`,
+    transitions.length > 0
+      ? `migrations check ok: migrations/${latest.version}.ts exists for ${transitions.length} transition(s) since ${latest.tag}`
+      : `migrations check ok: no landing paths retired or ownership-flipped since ${latest.tag}`,
   );
   return 0;
 }

@@ -10,11 +10,14 @@
 // preserve step, the manifest license check, and validation - then prints
 // the resulting diff and the would-be PR-body sections.
 //
-// READ-ONLY against the remote: the only network operations are the target
-// clone and the build-ref fetch. The target clone's push URL is pointed at
-// an unroutable value right after cloning, so a push attempt anywhere in
-// reused code fails loudly; nothing here opens PRs or writes to any remote.
-// The workspace under /tmp is left in place for inspection.
+// READ-ONLY against the remote: the network is touched only to clone the
+// target, fetch this repo's build refs, and (first run) install the
+// validator's dependencies. Right after cloning, the target's origin URLs
+// (fetch and push) are pointed at an unroutable value, so any remote
+// operation through the clone's remote fails loudly. The code that runs
+// with --trust is this repository's own template and migrations - the same
+// trust the real sync extends - and nothing here opens PRs or writes to
+// any remote. The workspace under /tmp is left in place for inspection.
 //
 // Known parity gaps vs the workflow (this is an operator convenience, not
 // a second pipeline): live visibility/description come from the recorded
@@ -39,6 +42,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join, resolve } from "node:path";
+import { loadRegistry } from "../fleet/repos_registry.ts";
 import { capture, must, mustCapture, passthrough } from "../shared/proc.ts";
 import { AnswersFileError, readAnswersFile } from "./answers_file.ts";
 import { resolveChannel } from "./resolve_channel.ts";
@@ -68,6 +72,16 @@ function gitShow(repo: string, revPath: string): string {
   return show.stdout;
 }
 
+// The channel input the real sync would receive: repos.yml's per-repo
+// config, then its defaults (sync-repos routes exactly this through
+// select_sync_repos); the recorded copier answer stays the fallback via
+// resolveChannel.
+function registryChannel(slug: string): string {
+  const { registry, errors } = loadRegistry(readFileSync(join(REPO_ROOT, "repos.yml"), "utf-8"));
+  if (registry === null) fail(`repos.yml: ${errors.join("; ")}`);
+  return registry.config.get(slug.toLowerCase())?.channel ?? registry.defaultChannel ?? "";
+}
+
 function main(): number {
   const slug = process.argv[2];
   if (
@@ -90,18 +104,21 @@ function main(): number {
 
   section(`cloning ${slug} (shallow, read-only)`);
   must(["git", "clone", "--quiet", "--depth", "1", `https://github.com/${slug}.git`, targetDir]);
-  // The read-only assertion: any push through this remote fails on the
-  // unroutable URL instead of reaching GitHub.
-  must([
-    "git",
-    "-C",
-    targetDir,
-    "remote",
-    "set-url",
-    "--push",
-    "origin",
-    "read-only-rehearsal://never-push",
-  ]);
+  // The read-only assertion: nothing after the clone may reach the target's
+  // remote, so both URLs go unroutable - a fetch or push through the
+  // clone's remote fails loudly instead of touching GitHub.
+  for (const kind of [[], ["--push"]]) {
+    must([
+      "git",
+      "-C",
+      targetDir,
+      "remote",
+      "set-url",
+      ...kind,
+      "origin",
+      "read-only-rehearsal://never-touch",
+    ]);
+  }
   const origHead = mustCapture(["git", "-C", targetDir, "rev-parse", "HEAD"]);
 
   for (const file of [".repo-platform.yml", ".copier-answers.yml"]) {
@@ -116,7 +133,7 @@ function main(): number {
     if (!(err instanceof AnswersFileError)) throw err;
     fail(`${slug}'s .copier-answers.yml: ${err.message}`);
   }
-  const channel = resolveChannel("", answers);
+  const channel = resolveChannel(registryChannel(slug), answers);
   if (typeof channel !== "string") {
     fail(`${slug} records an unknown channel '${channel.invalid}'; fix .copier-answers.yml`);
   }
@@ -133,9 +150,12 @@ function main(): number {
   must(["git", "init", "--quiet", platformDir]);
   const originUrl = mustCapture(["git", "-C", REPO_ROOT, "remote", "get-url", "origin"]);
   // The build branches and templates/v* tags live only on origin, never in
-  // this checkout. Best-effort per ref: a fleet missing one of them (no
+  // this checkout; main rides along because legacy repos record a plain
+  // main-history _commit (the workflow checks out full history for the
+  // same reason). Best-effort per ref: a fleet missing one of them (no
   // release yet, say) can still rehearse as long as _commit resolves.
   for (const refspec of [
+    "+refs/heads/main:refs/heads/main",
     "+refs/heads/staging:refs/heads/staging",
     "+refs/heads/latest:refs/heads/latest",
     "+refs/tags/templates/*:refs/tags/templates/*",
@@ -153,7 +173,7 @@ function main(): number {
   ]);
   if (oldShaProbe.exitCode !== 0) {
     fail(
-      `${slug}'s recorded _commit '${answers.commit}' does not resolve on ${originUrl}'s build refs; ` +
+      `${slug}'s recorded _commit '${answers.commit}' does not resolve on ${originUrl}'s build refs or main history; ` +
         "the real sync would need recover=recopy, which this rehearsal does not model",
     );
   }
