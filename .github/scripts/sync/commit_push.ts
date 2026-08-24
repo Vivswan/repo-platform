@@ -12,6 +12,7 @@ import { join } from "node:path";
 import { env, hideDetails, requireEnv, setOutput } from "../shared/gha.ts";
 import { SYNC_IDENTITY } from "../shared/git_identity.ts";
 import { capture, must, mustCapture, passthrough } from "../shared/proc.ts";
+import { MANIFEST_NAME, stampManifestText } from "./stamp_manifest.ts";
 
 const target = requireEnv("TARGET");
 const targetDisplay = env("TARGET_DISPLAY") || target;
@@ -120,6 +121,16 @@ if (existsSync(removedPaths) && readFileSync(removedPaths, "utf-8") !== "") {
     .split("\n")
     .filter((line) => line !== "" && !line.startsWith(".github/workflows/"));
   writeFileSync(removedPaths, kept.length > 0 ? `${kept.join("\n")}\n` : "");
+}
+// The restore rewrote workflow files after the workflow's stamping step, so
+// the ownership manifest must follow the tree that is actually pushed:
+// restamp in place (idempotent) so withheld modifications hash the restored
+// base content and a withheld added workflow stamps null (its absence is
+// the parity check's advisory, matching check 8's absence stance).
+const manifestPath = join("target", MANIFEST_NAME);
+if (existsSync(manifestPath)) {
+  const stamped = stampManifestText(readFileSync(manifestPath, "utf-8"), "target");
+  if (stamped.problem === null) writeFileSync(manifestPath, stamped.out);
 }
 must(git("add", "--all"));
 if (capture(git("diff", "--quiet", baseSha)).exitCode === 0) {

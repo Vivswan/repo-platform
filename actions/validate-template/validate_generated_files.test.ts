@@ -779,14 +779,17 @@ describe("ownership-manifest byte parity", () => {
     expect(stderr).toContain(".yamllint: .repo-platform-manifest.json records no hash");
   });
 
-  test("a listed managed file missing from the repo is an error", () => {
+  test("a listed managed file missing from the repo is an advisory", () => {
+    // Check 8's absence stance, and the warn-and-withhold push path leaves
+    // exactly this state for an added workflow the token cannot deliver.
     const entries = {
       ...stampedBaseline(),
-      ".github/workflows/release.yml": `{"class": "managed", "hash": "${"a".repeat(64)}"}`,
+      ".github/workflows/release.yml": '{"class": "managed", "hash": null}',
     };
-    const { exitCode, stderr } = runValidator({ [MANIFEST]: manifestOf(entries) });
-    expect(exitCode).toBe(1);
-    expect(stderr).toContain(".github/workflows/release.yml: listed as managed");
+    const { exitCode, stdout, stderr } = runValidator({ [MANIFEST]: manifestOf(entries) });
+    expect(stderr).toBe("");
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain("advisory: .github/workflows/release.yml: listed as managed");
   });
 
   test("a starter entry never carries a hash", () => {

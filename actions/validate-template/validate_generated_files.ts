@@ -33,8 +33,10 @@
 //      recorded sha256 matches the file on disk (split files: the managed
 //      half alone, delimited by the entry's marker line). Drift means the
 //      file changed since the last stamp; the next sync replaces it. A
-//      missing manifest is only an advisory (older renders predate it),
-//      and a conflict-marked one is left to check 4's report.
+//      missing manifest is only an advisory (older renders predate it), as
+//      is a listed file missing from the repo (check 8's absence stance -
+//      the withheld-workflows push path leaves those legitimately), and a
+//      conflict-marked manifest is left to check 4's report.
 //
 // Advisories (printed, never fail): missing actionlint / yamllint /
 // commit-names / gitleaks checks in ci.yml (older renders predate the newer
@@ -1009,9 +1011,14 @@ function main(): number {
           stat = null;
         }
         if (stat === null) {
-          errors.push(
+          // Check 8's absence stance: a missing managed file is damage the
+          // next sync heals - and the warn-and-withhold push path
+          // legitimately delivers a manifest listing a workflow file the
+          // token could not create. Advisory, not error.
+          advisories.push(
             `${rel}: listed as ${entry.class} in ${MANIFEST_NAME} but missing ` +
-              "from the repo - restore it from git history or run a template sync",
+              "from the repo - the next template sync restores it (workflow " +
+              "files may have been withheld by a token without the Workflows scope)",
           );
           continue;
         }
