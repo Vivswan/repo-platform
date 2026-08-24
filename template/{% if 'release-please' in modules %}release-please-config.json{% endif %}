@@ -5,6 +5,7 @@
   "include-component-in-tag": false,
   "packages": {
     ".": {
+      "$comment": "Seeded by Vivswan/repo-platform; repo-owned after first render - edit freely",
       "release-type": "simple",
       "initial-version": "0.0.1",
       "draft": true,

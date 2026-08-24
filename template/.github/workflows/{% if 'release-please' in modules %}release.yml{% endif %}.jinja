@@ -142,6 +142,9 @@ jobs:
   # non-public releases publish unattested by fleet policy).
   publish-release:
     needs: [release-please, update-release]
+    # The needs chain already implies this gate (a skipped update-release
+    # skips this job too); the job that flips a release live keeps its own
+    # explicit gate on purpose.
     if: needs.release-please.outputs.release_created == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
