@@ -13,10 +13,11 @@
 // Landing paths, not emitted paths: filename gates
 // ({% if ... %}name{% endif %}) and the .jinja suffix are stripped so the
 // comparison sees the path a downstream repo actually carries, whichever
-// modules it selects. A path matched by either version's _skip_if_exists
-// list that leaves the render is NOT a retirement: it was repo-owned
-// already, the sync never deletes it, and nothing changes in client repos
-// (retired_paths.ts applies the same rule to the sync's cleanup).
+// modules it selects. A _skip_if_exists path that leaves the render is a
+// distinct transition from a managed retirement: the sync deletes nothing
+// (retired_paths.ts exempts it from cleanup), but the client's customized
+// copy is stranded - the exact shape of a generated-once RENAME - so it
+// demands a migration decision all the same.
 //
 // Usage:
 //   bun scripts/check_migrations.ts
@@ -76,7 +77,38 @@ export function ownershipFlips(
     .sort();
 }
 
-export type Transition = { path: string; kind: "retired" | "ownership-flip" };
+export type Transition = {
+  path: string;
+  kind: "retired" | "ownership-flip" | "generated-once-removed";
+};
+
+/** Every transition between the two versions that demands a migration:
+ *  managed paths that left the render (retired), _skip_if_exists paths
+ *  that left the render (generated-once-removed - the sync deletes
+ *  nothing, but a rename strands the client's customized copy), and
+ *  still-rendered paths whose skip status changed (ownership-flip).
+ *  retiredPaths runs with modules=[] so only the always-protected paths
+ *  are exempt: the check must fire for a path retired under ANY
+ *  selection. */
+export function collectTransitions(
+  oldPaths: ReadonlySet<string>,
+  newPaths: ReadonlySet<string>,
+  skipOld: readonly string[],
+  skipNew: readonly string[],
+): Transition[] {
+  const managed = retiredPaths(oldPaths, newPaths, [...skipOld, ...skipNew], []);
+  const managedSet = new Set(managed);
+  const generatedOnce = retiredPaths(oldPaths, newPaths, [], []).filter(
+    (path) => !managedSet.has(path),
+  );
+  return [
+    ...managed.map((path): Transition => ({ path, kind: "retired" })),
+    ...generatedOnce.map((path): Transition => ({ path, kind: "generated-once-removed" })),
+    ...ownershipFlips(oldPaths, newPaths, skipOld, skipNew).map(
+      (path): Transition => ({ path, kind: "ownership-flip" }),
+    ),
+  ];
+}
 
 /** One error per transition when the migration for the release being left
  *  behind is missing; empty when nothing changed or the script exists (its
@@ -87,17 +119,19 @@ export function migrationErrors(
   migrationExists: boolean,
 ): string[] {
   if (transitions.length === 0 || migrationExists) return [];
-  return transitions.map(({ path, kind }) => {
-    const what =
-      kind === "retired"
-        ? `templates/v${version} rendered '${path}' but the current template does not`
-        : `'${path}' changed ownership class since templates/v${version} (entered or left _skip_if_exists)`;
-    return (
-      `${what}; synced repos cross this transition blind without migrations/${version}.ts. ` +
+  const what: Record<Transition["kind"], (path: string) => string> = {
+    retired: (path) => `templates/v${version} rendered '${path}' but the current template does not`,
+    "generated-once-removed": (path) =>
+      `templates/v${version} rendered '${path}' as a generated-once (_skip_if_exists) file and the current template does not render it at all - the sync deletes nothing, so a rename strands the client's customized copy`,
+    "ownership-flip": (path) =>
+      `'${path}' changed ownership class since templates/v${version} (entered or left _skip_if_exists)`,
+  };
+  return transitions.map(
+    ({ path, kind }) =>
+      `${what[kind](path)}; synced repos cross this transition blind without migrations/${version}.ts. ` +
       "Add the migration (plus an upgrade_path_test.sh case and a PR-body note - " +
-      "see migrations/README.md), or revert the transition."
-    );
-  });
+      "see migrations/README.md), or revert the transition.",
+  );
 }
 
 function fail(message: string): never {
@@ -148,14 +182,7 @@ function main(): number {
   const skipOld = skipPatterns(oldCopier.stdout, `${latest.tag}:copier.yml`);
   const skipNew = skipPatterns(readFileSync(join(REPO_ROOT, "copier.yml"), "utf-8"), "copier.yml");
 
-  // Module selection [] means only the always-protected paths are exempt:
-  // the check must fire for a path retired under ANY selection.
-  const retired = retiredPaths(oldPaths, newPaths, [...skipOld, ...skipNew], []);
-  const flips = ownershipFlips(oldPaths, newPaths, skipOld, skipNew);
-  const transitions: Transition[] = [
-    ...retired.map((path): Transition => ({ path, kind: "retired" })),
-    ...flips.map((path): Transition => ({ path, kind: "ownership-flip" })),
-  ];
+  const transitions = collectTransitions(oldPaths, newPaths, skipOld, skipNew);
   const migration = join(REPO_ROOT, "migrations", `${latest.version}.ts`);
   const errors = migrationErrors(transitions, latest.version, existsSync(migration));
   if (errors.length > 0) {
@@ -165,7 +192,7 @@ function main(): number {
   console.log(
     transitions.length > 0
       ? `migrations check ok: migrations/${latest.version}.ts exists for ${transitions.length} transition(s) since ${latest.tag}`
-      : `migrations check ok: no landing paths retired or ownership-flipped since ${latest.tag}`,
+      : `migrations check ok: no landing-path transitions since ${latest.tag}`,
   );
   return 0;
 }

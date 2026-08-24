@@ -1,15 +1,16 @@
 // Unit tests for the forgotten-migration tripwire: landing-path
 // normalization strips filename gates and the .jinja suffix, release-tag
-// selection is semver-ordered (not lexical), ownership flips are the
-// still-rendered paths whose _skip_if_exists status changed, and the
-// verdict names the path, the transition kind, and the expected migration
-// filename. The skip-list and protected-path filtering is
-// retired_paths.ts's contract, covered by its own tests; one composition
-// test here pins that check_migrations really consumes it.
+// selection is semver-ordered (not lexical), transitions classify managed
+// retirements, generated-once removals (the rename-strands-a-copy case),
+// and ownership flips, and the verdict names the path, the kind, and the
+// expected migration filename. The skip-list and protected-path filtering
+// is retired_paths.ts's contract, covered by its own tests; one
+// composition test here pins that check_migrations really consumes it.
 
 import { describe, expect, test } from "bun:test";
 import { retiredPaths } from "../../.github/scripts/sync/retired_paths";
 import {
+  collectTransitions,
   landingPath,
   latestReleaseTag,
   migrationErrors,
@@ -101,6 +102,37 @@ describe("ownershipFlips", () => {
   });
 });
 
+describe("collectTransitions", () => {
+  test("classifies managed retirements, generated-once removals, and flips", () => {
+    const oldPaths = new Set(["managed.yml", "checks.yml", "flip.yml", "stay.yml"]);
+    const newPaths = new Set(["flip.yml", "stay.yml"]);
+    expect(collectTransitions(oldPaths, newPaths, ["checks.yml"], ["flip.yml"])).toEqual([
+      { path: "managed.yml", kind: "retired" },
+      { path: "checks.yml", kind: "generated-once-removed" },
+      { path: "flip.yml", kind: "ownership-flip" },
+    ]);
+  });
+
+  test("a generated-once rename does not slip through as a no-op", () => {
+    // old.yml was generated-once and becomes new.yml, with _skip_if_exists
+    // moved along: the sync deletes nothing, so the client's customized
+    // old.yml is stranded next to the fresh new.yml - a migration must be
+    // demanded.
+    const transitions = collectTransitions(
+      new Set(["old.yml", "README.md"]),
+      new Set(["new.yml", "README.md"]),
+      ["old.yml"],
+      ["new.yml"],
+    );
+    expect(transitions).toEqual([{ path: "old.yml", kind: "generated-once-removed" }]);
+  });
+
+  test("identical versions produce no transitions", () => {
+    const paths = new Set(["a.yml", "checks.yml"]);
+    expect(collectTransitions(paths, paths, ["checks.yml"], ["checks.yml"])).toEqual([]);
+  });
+});
+
 describe("migrationErrors", () => {
   const retired: Transition = { path: ".yamllint", kind: "retired" };
   const flip: Transition = { path: "checks.yml", kind: "ownership-flip" };
@@ -115,12 +147,15 @@ describe("migrationErrors", () => {
   });
 
   test("transitions without the migration: name the path, the kind, and the expected filename", () => {
-    const errors = migrationErrors([retired, flip], "0.3.1", false);
-    expect(errors).toHaveLength(2);
+    const removed: Transition = { path: "old.yml", kind: "generated-once-removed" };
+    const errors = migrationErrors([retired, flip, removed], "0.3.1", false);
+    expect(errors).toHaveLength(3);
     expect(errors[0]).toContain("'.yamllint'");
     expect(errors[0]).toContain("migrations/0.3.1.ts");
     expect(errors[1]).toContain("'checks.yml'");
     expect(errors[1]).toContain("ownership class");
+    expect(errors[2]).toContain("'old.yml'");
+    expect(errors[2]).toContain("strands the client's customized copy");
   });
 });
 
