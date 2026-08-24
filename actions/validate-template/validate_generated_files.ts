@@ -95,8 +95,9 @@ const HEADER_WINDOW = 10;
  *  "header" files are wholly overwritten by sync and open with the managed
  *  header; "marker" files keep a repo-owned tail below the local-section
  *  marker. Conditionally rendered base files (CODE_OF_CONDUCT.md,
- *  CONTRIBUTING.md, LICENSE.md, AGENTS.md) join in check 8 under the same
- *  answers/modules conditions that gate their rendering. */
+ *  CONTRIBUTING.md, LICENSE.md) join in check 8 under the same
+ *  answers/modules conditions that gate their rendering; module files come
+ *  from the generated MODULE_OWNERSHIP record below. */
 const BASE_OWNERSHIP: Record<string, "header" | "marker"> = {
   ".copier-answers.yml": "header",
   ".repo-platform.yml": "header",
@@ -196,21 +197,23 @@ const TOOLCHAIN_PINS: Record<string, { file: string; version: string }> = {
 };
 // END GENERATED: toolchain-pins
 
-// Rendered module files that must open with the managed header while their
-// module is selected; a module template enrols by opening with the header
-// (split files and repo-owned starters stay out - see moduleHeaderFiles in
-// scripts/generate.ts).
-// BEGIN GENERATED: module-header-files (scripts/generate.ts - edit module.yml manifests, not this block)
-const MODULE_HEADER_FILES: Record<string, string[]> = {
-  bun: [".github/workflows/dependabot-bun-lockfile.yml"],
-  deno: [".github/workflows/deno-audit.yml"],
-  pages: [".github/workflows/pages.yml"],
-  "release-please": [".github/workflows/release.yml"],
-  skills: [".github/workflows/validate-skills.yml"],
-  "auto-assign": [".github/workflows/auto-assign.yml"],
-  "settings-sync": [".github/workflows/settings-sync.yml"],
+// How each rendered module file declares its ownership while its module is
+// selected: "header" files open with the managed header, "marker" files
+// split a managed top from a repo-owned tail (scanned fail-closed by
+// moduleOwnershipFiles in scripts/generate.ts - starters and comment-free
+// formats stay out).
+// BEGIN GENERATED: module-ownership (scripts/generate.ts - edit module.yml manifests, not this block)
+const MODULE_OWNERSHIP: Record<string, { path: string; kind: "header" | "marker" }[]> = {
+  agents: [{ path: "AGENTS.md", kind: "marker" }],
+  bun: [{ path: ".github/workflows/dependabot-bun-lockfile.yml", kind: "header" }],
+  deno: [{ path: ".github/workflows/deno-audit.yml", kind: "header" }],
+  pages: [{ path: ".github/workflows/pages.yml", kind: "header" }],
+  "release-please": [{ path: ".github/workflows/release.yml", kind: "header" }],
+  skills: [{ path: ".github/workflows/validate-skills.yml", kind: "header" }],
+  "auto-assign": [{ path: ".github/workflows/auto-assign.yml", kind: "header" }],
+  "settings-sync": [{ path: ".github/workflows/settings-sync.yml", kind: "header" }],
 };
-// END GENERATED: module-header-files
+// END GENERATED: module-ownership
 
 const STRICT_UTF8 = new TextDecoder("utf-8", { fatal: true });
 
@@ -785,9 +788,12 @@ function main(): number {
   // repo's files are sources, not renders - and while the owner pin is
   // unhealed (its error is already recorded).
   if (!selfMode && ownerPin !== null && ownerPin.kind === "pinned") {
-    // The "This file is" anchor keeps a negated look-alike ("this file is
-    // NOT managed by ...") from satisfying the check.
-    const headerNeedle = `This file is managed by ${ownerPin.owner}/repo-platform`;
+    // Anchored so neither a negated look-alike ("is not managed by") nor a
+    // longer repo name ("/repo-platform-fork") counts.
+    const headerRe = new RegExp(
+      `This file is managed by ${ownerPin.owner.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}` +
+        "/repo-platform(?![A-Za-z0-9-])",
+    );
     const files = Object.entries(BASE_OWNERSHIP).map(([rel, kind]) => ({ rel, kind }));
     // Conditionally rendered base files, under the same answers/modules
     // conditions as their templates' filename gates; a null modules list
@@ -800,12 +806,9 @@ function main(): number {
       if (!selectedModules.includes("custom-license")) {
         files.push({ rel: "LICENSE.md", kind: "marker" });
       }
-      if (selectedModules.includes("agents")) {
-        files.push({ rel: "AGENTS.md", kind: "marker" });
-      }
       for (const module of selectedModules) {
-        for (const rel of MODULE_HEADER_FILES[module] ?? []) {
-          files.push({ rel, kind: "header" });
+        for (const entry of MODULE_OWNERSHIP[module] ?? []) {
+          files.push({ rel: entry.path, kind: entry.kind });
         }
       }
     }
@@ -814,7 +817,7 @@ function main(): number {
       if (!isRegularFile(path)) continue;
       const content = readFileSync(path, "utf-8");
       if (kind === "header") {
-        if (!content.split("\n", HEADER_WINDOW).join("\n").includes(headerNeedle)) {
+        if (!headerRe.test(content.split("\n", HEADER_WINDOW).join("\n"))) {
           errors.push(
             `${rel}: does not open with the managed header ('This file is ` +
               `managed by ${ownerPin.owner}/repo-platform') - the file is ` +

@@ -16,8 +16,8 @@ import {
   markerLines,
   mdMarkers,
   moduleChoices,
-  moduleHeaderFiles,
-  moduleHeaderFilesRegion,
+  moduleOwnershipFiles,
+  moduleOwnershipRegion,
   newRepoModuleRoster,
   type PagesManifest,
   pagesBuildCommand,
@@ -583,7 +583,7 @@ describe("toolchain pins", () => {
   });
 });
 
-describe("module header files", () => {
+describe("module ownership files", () => {
   const HEADER =
     "# This file is managed by {{ github_username }}/repo-platform.\n" +
     "# Local edits may be replaced during template updates.\n";
@@ -596,7 +596,7 @@ describe("module header files", () => {
     expect(() => skipIfExistsMatchers("modules: []\n")).toThrow("_skip_if_exists");
   });
 
-  test("moduleHeaderFiles classifies every file: enrol, starter, split, gated, comment-free", () => {
+  test("moduleOwnershipFiles classifies every file: enrol, starter, split, gated, comment-free", () => {
     const dir = mkdtempSync(join(tmpdir(), "headers-"));
     try {
       mkdirSync(join(dir, "bun", ".github", "workflows"), { recursive: true });
@@ -608,8 +608,7 @@ describe("module header files", () => {
       );
       // Headerless starter: exempt through _skip_if_exists.
       writeFileSync(join(dir, "bun", ".github", "workflows", "starter.yml.jinja"), "name: S\n");
-      // Split file: the local-section marker line hands it to the validator's
-      // hand table.
+      // Split file: enrolled with marker semantics.
       writeFileSync(
         join(dir, "bun", "SPLIT.md.jinja"),
         "body\n<!-- repo-platform:local-section -->\n",
@@ -632,8 +631,11 @@ describe("module header files", () => {
         },
       });
       const skip = skipIfExistsMatchers("_skip_if_exists:\n  - .github/workflows/starter.yml\n");
-      expect(moduleHeaderFiles([pinned], dir, skip, new Set())).toEqual({
-        bun: [".github/workflows/managed.yml"],
+      expect(moduleOwnershipFiles([pinned], dir, skip, new Set())).toEqual({
+        bun: [
+          { path: ".github/workflows/managed.yml", kind: "header" },
+          { path: "SPLIT.md", kind: "marker" },
+        ],
       });
     } finally {
       rmSync(dir, { recursive: true, force: true });
@@ -649,13 +651,13 @@ describe("module header files", () => {
         `${HEADER}name: Managed\n`,
       );
       writeFileSync(join(dir, "bun", ".github", "workflows", "silent.yml.jinja"), "name: S\n");
-      expect(() => moduleHeaderFiles([manifest("bun")], dir, [], new Set())).toThrow(
+      expect(() => moduleOwnershipFiles([manifest("bun")], dir, [], new Set())).toThrow(
         "declares no ownership",
       );
       // ...unless the silence is recorded.
       const silences = new Set(["bun/.github/workflows/silent.yml.jinja"]);
-      expect(moduleHeaderFiles([manifest("bun")], dir, [], silences)).toEqual({
-        bun: [".github/workflows/managed.yml"],
+      expect(moduleOwnershipFiles([manifest("bun")], dir, [], silences)).toEqual({
+        bun: [{ path: ".github/workflows/managed.yml", kind: "header" }],
       });
     } finally {
       rmSync(dir, { recursive: true, force: true });
@@ -668,22 +670,30 @@ describe("module header files", () => {
       mkdirSync(join(dir, "bun"));
       writeFileSync(join(dir, "bun", "managed.yml.jinja"), `${HEADER}name: Managed\n`);
       expect(() =>
-        moduleHeaderFiles([manifest("bun")], dir, [], new Set(["bun/gone.yml.jinja"])),
+        moduleOwnershipFiles([manifest("bun")], dir, [], new Set(["bun/gone.yml.jinja"])),
       ).toThrow("stale entry");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
   });
 
-  test("a negated look-alike header is not a declaration", () => {
+  test("look-alike headers are not declarations", () => {
     const dir = mkdtempSync(join(tmpdir(), "headers-"));
     try {
       mkdirSync(join(dir, "bun"));
       writeFileSync(
-        join(dir, "bun", "odd.yml.jinja"),
-        "# This file is not managed by {{ github_username }}/repo-platform.\nname: O\n",
+        join(dir, "bun", "negated.yml.jinja"),
+        "# This file is not managed by {{ github_username }}/repo-platform.\nname: N\n",
       );
-      expect(() => moduleHeaderFiles([manifest("bun")], dir, [], new Set())).toThrow(
+      expect(() => moduleOwnershipFiles([manifest("bun")], dir, [], new Set())).toThrow(
+        "declares no ownership",
+      );
+      rmSync(join(dir, "bun", "negated.yml.jinja"));
+      writeFileSync(
+        join(dir, "bun", "suffixed.yml.jinja"),
+        "# This file is managed by {{ github_username }}/repo-platform-fork.\nname: F\n",
+      );
+      expect(() => moduleOwnershipFiles([manifest("bun")], dir, [], new Set())).toThrow(
         "declares no ownership",
       );
     } finally {
@@ -700,7 +710,7 @@ describe("module header files", () => {
         `${HEADER}name: Checks\n`,
       );
       expect(() =>
-        moduleHeaderFiles(
+        moduleOwnershipFiles(
           [manifest("bun")],
           dir,
           skipIfExistsMatchers("_skip_if_exists:\n  - .github/workflows/checks.yml\n"),
@@ -717,24 +727,24 @@ describe("module header files", () => {
     try {
       mkdirSync(join(dir, "bun"));
       writeFileSync(join(dir, "bun", "module.yml"), "description: bun\n");
-      expect(() => moduleHeaderFiles([manifest("bun")], dir, [], new Set())).toThrow(
-        "MODULE_HEADER_FILES record would be empty",
+      expect(() => moduleOwnershipFiles([manifest("bun")], dir, [], new Set())).toThrow(
+        "MODULE_OWNERSHIP record would be empty",
       );
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
   });
 
-  test("moduleHeaderFilesRegion renders the record with as-needed key quoting", () => {
+  test("moduleOwnershipRegion renders the record with as-needed key quoting", () => {
     expect(
-      moduleHeaderFilesRegion({
-        bun: [".github/workflows/a.yml"],
-        "release-please": [".github/workflows/release.yml"],
+      moduleOwnershipRegion({
+        agents: [{ path: "AGENTS.md", kind: "marker" }],
+        "release-please": [{ path: ".github/workflows/release.yml", kind: "header" }],
       }),
     ).toEqual([
-      "const MODULE_HEADER_FILES: Record<string, string[]> = {",
-      '  bun: [".github/workflows/a.yml"],',
-      '  "release-please": [".github/workflows/release.yml"],',
+      'const MODULE_OWNERSHIP: Record<string, { path: string; kind: "header" | "marker" }[]> = {',
+      '  agents: [{ path: "AGENTS.md", kind: "marker" }],',
+      '  "release-please": [{ path: ".github/workflows/release.yml", kind: "header" }],',
       "};",
     ]);
   });

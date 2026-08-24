@@ -11,10 +11,10 @@
 //   cross-stream distinctness).
 // - actions/validate-template/validate_generated_files.ts: the
 //   KNOWN_MODULES set literal, the TOOLCHAIN_PINS record literal, and the
-//   MODULE_HEADER_FILES record (the rendered module files that must open
-//   with the managed ownership header, scanned from the module template
-//   trees; the action stays self-contained for client-side execution; only
-//   the constants' authorship is generated).
+//   MODULE_OWNERSHIP record (how each rendered module file declares its
+//   ownership, scanned fail-closed from the module template trees; the
+//   action stays self-contained for client-side execution; only the
+//   constants' authorship is generated).
 // - README.md, docs/new-repo.md, docs/settings.md, docs/pages.md,
 //   docs/toolchains.md: the prose that enumerates manifest data (module
 //   roster, dependabot labels, gitignore upstream mapping, pages toolchain
@@ -466,12 +466,12 @@ export function toolchainPinRows(manifests: ModuleManifest[]): string[] {
   return toolchainPins(manifests).map((p) => `| \`${p.module}\` | \`${p.file}\` | ${p.version} |`);
 }
 
-/** The managed ownership header's identifying text in template sources
- *  (validate_generated_files.ts enforces the rendered counterpart; the
- *  "This file is" anchor keeps a negated look-alike from counting), and the
- *  marker splitting a managed top from a repo-owned tail (matched as its
- *  exact comment lines, never as a substring). */
-const MANAGED_HEADER_TEXT = "This file is managed by {{ github_username }}/repo-platform";
+/** The managed ownership header in template sources, anchored so neither a
+ *  negated look-alike ("is not managed by") nor a longer repo name
+ *  ("/repo-platform-fork") counts; validate_generated_files.ts applies the
+ *  same anchoring to rendered files. */
+const MANAGED_HEADER_RE =
+  /This file is managed by \{\{ github_username \}\}\/repo-platform(?![A-Za-z0-9-])/;
 const LOCAL_SECTION_MARKER = "repo-platform:local-section";
 const LOCAL_SECTION_LINES = new Set([
   `# ${LOCAL_SECTION_MARKER}`,
@@ -500,7 +500,7 @@ export function skipIfExistsMatchers(copierYamlText: string): RegExp[] {
   if (!Array.isArray(skip) || skip.length === 0 || !skip.every((p) => typeof p === "string")) {
     throw new Error(
       "copier.yml: _skip_if_exists is missing or not a list of strings - the " +
-        "module-header-files scan needs it to keep repo-owned starters exempt",
+        "module-ownership scan needs it to keep repo-owned starters exempt",
     );
   }
   return skip.map(
@@ -514,28 +514,30 @@ export function skipIfExistsMatchers(copierYamlText: string): RegExp[] {
   );
 }
 
-/** The rendered paths, per module, that must open with the managed header
- *  in client repos. Every module template file (fragments and symlinks
- *  aside) is classified, and one that fits no class throws, so a new
- *  module file cannot land silently undeclared: _skip_if_exists starters
- *  are exempt (and throw if they carry the header - it promises sync
- *  overwrites the file, the skip list promises it never does), split files
- *  carry the local-section marker line (the validator's hand table owns
- *  them), header-opening files enrol (filename-gated ones only declare -
- *  module selection alone does not render them, so the validator cannot
- *  require them), and comment-free formats (the manifest's version pin
- *  dotfile, JSON) have nowhere to declare. */
-export function moduleHeaderFiles(
+export interface OwnershipEntry {
+  path: string;
+  kind: "header" | "marker";
+}
+
+/** The rendered paths, per module, whose ownership declaration the
+ *  validator enforces while the module is selected. Every module template
+ *  file (fragments and symlinks aside) is classified - starter (exempt via
+ *  _skip_if_exists; carrying the header there throws, the two promises
+ *  contradict), split ("marker"), header-opening ("header"), or
+ *  comment-free (the manifest's pin dotfile, JSON) - and a file fitting no
+ *  class throws, so nothing lands silently undeclared. Filename-gated
+ *  files only declare: module selection alone does not render them. */
+export function moduleOwnershipFiles(
   manifests: ModuleManifest[],
   templatesDir: string,
   skipIfExists: RegExp[],
   knownUndeclared: ReadonlySet<string> = KNOWN_UNDECLARED_MODULE_FILES,
-): Record<string, string[]> {
-  const result: Record<string, string[]> = {};
+): Record<string, OwnershipEntry[]> {
+  const result: Record<string, OwnershipEntry[]> = {};
   const unusedSilences = new Set(knownUndeclared);
   for (const m of manifests) {
     const moduleDir = join(templatesDir, m.module);
-    const rendered: string[] = [];
+    const entries: OwnershipEntry[] = [];
     const visit = (rel: string) => {
       for (const name of readdirSync(join(moduleDir, rel)).sort()) {
         const childRel = rel ? `${rel}/${name}` : name;
@@ -553,9 +555,9 @@ export function moduleHeaderFiles(
           .split("/")
           .map((segment) => segment.replace(/^\{% if .+? %\}(.*)\{% endif %\}$/, "$1"))
           .join("/");
+        const ungated = landedPath === renderedPath;
         const source = readFileSync(join(moduleDir, childRel), "utf-8");
-        const head = source.split("\n", HEADER_WINDOW).join("\n");
-        const hasHeader = head.includes(MANAGED_HEADER_TEXT);
+        const hasHeader = MANAGED_HEADER_RE.test(source.split("\n", HEADER_WINDOW).join("\n"));
         if (skipIfExists.some((matcher) => matcher.test(landedPath))) {
           if (hasHeader) {
             throw new Error(
@@ -566,9 +568,12 @@ export function moduleHeaderFiles(
           }
           continue;
         }
-        if (source.split("\n").some((line) => LOCAL_SECTION_LINES.has(line.trim()))) continue;
+        if (source.split("\n").some((line) => LOCAL_SECTION_LINES.has(line.trim()))) {
+          if (ungated) entries.push({ path: landedPath, kind: "marker" });
+          continue;
+        }
         if (hasHeader) {
-          if (landedPath === renderedPath) rendered.push(landedPath);
+          if (ungated) entries.push({ path: landedPath, kind: "header" });
           continue;
         }
         if (landedPath === m.toolchain?.pin?.file || landedPath.endsWith(".json")) continue;
@@ -582,7 +587,7 @@ export function moduleHeaderFiles(
       }
     };
     visit("");
-    if (rendered.length > 0) result[m.module] = rendered;
+    if (entries.length > 0) result[m.module] = entries;
   }
   if (unusedSilences.size > 0) {
     throw new Error(
@@ -593,22 +598,25 @@ export function moduleHeaderFiles(
   }
   if (Object.keys(result).length === 0) {
     throw new Error(
-      "no module template opens with the managed header, so the validator's " +
-        "MODULE_HEADER_FILES record would be empty - the managed module " +
-        "workflows are expected to carry it",
+      "no module template declares ownership, so the validator's " +
+        "MODULE_OWNERSHIP record would be empty - the managed module " +
+        "workflows are expected to carry the header",
     );
   }
   return result;
 }
 
-/** validate_generated_files.ts MODULE_HEADER_FILES record literal. */
-export function moduleHeaderFilesRegion(moduleHeaders: Record<string, string[]>): string[] {
+/** validate_generated_files.ts MODULE_OWNERSHIP record literal. */
+export function moduleOwnershipRegion(ownership: Record<string, OwnershipEntry[]>): string[] {
   return [
-    "const MODULE_HEADER_FILES: Record<string, string[]> = {",
+    'const MODULE_OWNERSHIP: Record<string, { path: string; kind: "header" | "marker" }[]> = {',
     // Keys quoted as-needed, like TOOLCHAIN_PINS above, to stay biome-stable.
-    ...Object.entries(moduleHeaders).map(([module, files]) => {
+    ...Object.entries(ownership).map(([module, entries]) => {
       const key = /^[a-z][a-z0-9]*$/.test(module) ? module : JSON.stringify(module);
-      return `  ${key}: [${files.map((file) => JSON.stringify(file)).join(", ")}],`;
+      const body = entries
+        .map((entry) => `{ path: ${JSON.stringify(entry.path)}, kind: "${entry.kind}" }`)
+        .join(", ");
+      return `  ${key}: [${body}],`;
     }),
     "};",
   ];
@@ -866,7 +874,7 @@ interface RegionInputs {
   manifests: ModuleManifest[];
   pages: PagesManifest[];
   reserved: string[];
-  moduleHeaders: Record<string, string[]>;
+  moduleOwnership: Record<string, OwnershipEntry[]>;
 }
 
 type SpanRegion = [name: string, body: (inputs: RegionInputs) => string[]];
@@ -916,7 +924,7 @@ function targets(manifests: ModuleManifest[]): Target[] {
       regions: [
         ["known-modules", ({ manifests }) => knownModules(manifests)],
         ["toolchain-pins", ({ manifests }) => toolchainPinsRegion(manifests)],
-        ["module-header-files", ({ moduleHeaders }) => moduleHeaderFilesRegion(moduleHeaders)],
+        ["module-ownership", ({ moduleOwnership }) => moduleOwnershipRegion(moduleOwnership)],
       ],
     },
     {
@@ -1016,7 +1024,7 @@ function main(): number {
       manifests,
       pages: pagesManifests(manifests),
       reserved: reservedLabelNames(manifests),
-      moduleHeaders: moduleHeaderFiles(
+      moduleOwnership: moduleOwnershipFiles(
         manifests,
         join(REPO_ROOT, "templates"),
         skipIfExistsMatchers(readFileSync(join(REPO_ROOT, "copier.yml"), "utf-8")),

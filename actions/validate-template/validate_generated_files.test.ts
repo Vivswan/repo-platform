@@ -575,6 +575,14 @@ describe("ownership self-declarations", () => {
     expect(stderr).toContain(".yamllint: does not open with the managed header");
   });
 
+  test("a longer look-alike repo name does not count", () => {
+    const { exitCode, stderr } = runValidator({
+      ".yamllint": "# This file is managed by Vivswan/repo-platform-fork.\nextends: default\n",
+    });
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain(".yamllint: does not open with the managed header");
+  });
+
   test("a header buried past the opening lines does not count", () => {
     const { exitCode, stderr } = runValidator({
       ".yamllint": `${"# filler\n".repeat(10)}${C1}extends: default\n`,
@@ -669,6 +677,24 @@ describe("ownership self-declarations", () => {
     });
     expect(stderr).toBe("");
     expect(exitCode).toBe(0);
+  });
+
+  test("the agents module's AGENTS.md carries the marker", () => {
+    const agentsRender = {
+      ".repo-platform.yml": BASELINE[".repo-platform.yml"].replace(
+        "modules: [uv]",
+        "modules: [uv, agents]",
+      ),
+    };
+    const bare = runValidator({ ...agentsRender, "AGENTS.md": "# AGENTS.md\n" });
+    expect(bare.exitCode).toBe(1);
+    expect(bare.stderr).toContain("AGENTS.md: the 'repo-platform:local-section' marker");
+    const marked = runValidator({
+      ...agentsRender,
+      "AGENTS.md": "# AGENTS.md\n\n<!-- repo-platform:local-section -->\n",
+    });
+    expect(marked.stderr).toBe("");
+    expect(marked.exitCode).toBe(0);
   });
 
   test("self mode skips ownership declarations", () => {
