@@ -705,6 +705,7 @@ describe("manifestEntries", () => {
     const { entries, errors } = manifestEntries(files, skip);
     expect(errors).toEqual([]);
     expect(entries).toEqual([
+      { path: ".github/repo-platform-manifest.json", gates: [], ownership: { class: "managed" } },
       { path: ".github/workflows/checks.yml", gates: [], ownership: { class: "starter" } },
       { path: ".github/workflows/ci.yml", gates: [], ownership: { class: "managed" } },
       {
@@ -712,7 +713,6 @@ describe("manifestEntries", () => {
         gates: ["'release-please' in modules"],
         ownership: { class: "managed" },
       },
-      { path: ".repo-platform-manifest.json", gates: [], ownership: { class: "managed" } },
       { path: "CLAUDE.md", gates: ["'agents' in modules"], ownership: { class: "managed" } },
       {
         path: "CONTRIBUTING.md",
@@ -751,10 +751,10 @@ describe("manifestEntries", () => {
 
   test("a template landing at the manifest's own path collides with the self entry", () => {
     const files = new Map<string, SourcedEntry>([
-      [".repo-platform-manifest.json.jinja", base("{}\n")],
+      [".github/repo-platform-manifest.json.jinja", base("{}\n")],
     ]);
     const { errors } = manifestEntries(files, skip);
-    expect(errors.join("\n")).toContain("both land at .repo-platform-manifest.json");
+    expect(errors.join("\n")).toContain("both land at .github/repo-platform-manifest.json");
   });
 });
 
@@ -762,7 +762,7 @@ describe("manifestTemplate", () => {
   test("emits gated appends and a joined JSON skeleton with null hashes", () => {
     const text = manifestTemplate([
       { path: ".github/workflows/ci.yml", gates: [], ownership: { class: "managed" } },
-      { path: ".repo-platform-manifest.json", gates: [], ownership: { class: "managed" } },
+      { path: ".github/repo-platform-manifest.json", gates: [], ownership: { class: "managed" } },
       {
         path: "AGENTS.md",
         gates: ["'agents' in modules"],
@@ -788,7 +788,7 @@ describe("manifestTemplate", () => {
     );
     // The self entry alone carries the provenance slot the stamper fills.
     expect(text).toContain(
-      `'    ".repo-platform-manifest.json": {"class": "managed", "hash": null, "commit": null}'`,
+      `'    ".github/repo-platform-manifest.json": {"class": "managed", "hash": null, "commit": null}'`,
     );
     expect(text).toContain("{%- if 'agents' in modules -%}");
     expect(text).toContain('"managed": "above", "hash": null');

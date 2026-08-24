@@ -25,8 +25,8 @@
 //      repo-platform:local-section marker exactly once. Existing files
 //      only - absence is damage the next sync heals - and _skip_if_exists
 //      starters are exempt (repo-owned after the first render)
-//   9. Ownership-manifest byte parity: .repo-platform-manifest.json (the
-//      template-rendered ownership map, hashes and the render's _commit
+//   9. Ownership-manifest byte parity: .github/repo-platform-manifest.json
+//      (the template-rendered ownership map, hashes and the render's _commit
 //      provenance stamped post-render by the template's stamp_manifest.ts
 //      hook) is well-formed, its own entry stays hash-null (a self-hash
 //      would be circular - the content includes every other hash), its
@@ -123,7 +123,7 @@ const HEADER_WINDOW = 10;
  *  ownership map (path -> managed/split/mergeable/starter, marker metadata
  *  for splits) with per-repo sha256 hashes stamped post-render. Check 9
  *  verifies byte parity against it. */
-const MANIFEST_NAME = ".repo-platform-manifest.json";
+const MANIFEST_NAME = ".github/repo-platform-manifest.json";
 
 /** A split entry's managed half: through the first marker line's newline
  *  for managed "above", from the start of the marker line for "below";

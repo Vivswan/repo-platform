@@ -1022,7 +1022,7 @@ export function injectUsesRefPreamble(
 // --- ownership manifest -------------------------------------------------------
 
 /** Where the ownership manifest lands in generated repositories. */
-export const MANIFEST_LANDED_PATH = ".repo-platform-manifest.json";
+export const MANIFEST_LANDED_PATH = ".github/repo-platform-manifest.json";
 /** The manifest's emitted template name in the composed tree. */
 export const MANIFEST_TEMPLATE_PATH = `${MANIFEST_LANDED_PATH}${JINJA_SUFFIX}`;
 

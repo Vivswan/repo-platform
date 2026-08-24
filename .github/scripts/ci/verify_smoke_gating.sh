@@ -556,7 +556,7 @@ esac
 # post-render task. Entry classes and hashes are read with python3 (the
 # manifest is JSON), independently of the stamping and validation code
 # under test.
-manifest=/tmp/smoke/.repo-platform-manifest.json
+manifest=/tmp/smoke/.github/repo-platform-manifest.json
 test -f "$manifest"
 python3 -m json.tool "$manifest" > /dev/null
 mf() { # <path> <field> -> the entry's field, "null", "absent", or "missing"
@@ -576,7 +576,7 @@ expect_class ".github/workflows/ci.yml" managed
 expect_class ".github/workflows/checks.yml" starter
 expect_class "SECURITY.md" split
 expect_class ".gitignore" split
-expect_class ".repo-platform-manifest.json" managed
+expect_class ".github/repo-platform-manifest.json" managed
 if has agents; then expect_class "AGENTS.md" split; else expect_class "AGENTS.md" absent; fi
 if has release-please; then
   expect_class ".github/workflows/release.yml" managed
@@ -606,7 +606,7 @@ if [ "$(mf SECURITY.md hash)" != "$want_security" ]; then
   echo "::error::manifest check failed: the recorded hash for SECURITY.md in $manifest does not cover its managed half (through the marker line) for modules=$MODULES private=$PRIVATE. Fix stamp_manifest.ts (or this expectation in verify_smoke_gating.sh)."
   exit 1
 fi
-if [ "$(mf ".repo-platform-manifest.json" hash)" != "null" ]; then
+if [ "$(mf ".github/repo-platform-manifest.json" hash)" != "null" ]; then
   echo "::error::manifest check failed: the manifest's own hash entry in $manifest must stay null (a self-hash would be circular) for modules=$MODULES private=$PRIVATE. Fix stamp_manifest.ts (or this expectation in verify_smoke_gating.sh)."
   exit 1
 fi
@@ -617,7 +617,7 @@ fi
 # optional surrounding quotes or the comparison fails on a sha lottery.
 answers_commit="$(sed -n "s/^_commit:[[:space:]]*//p" /tmp/smoke/.copier-answers.yml \
   | sed -e "s/^'\(.*\)'\$/\1/" -e 's/^"\(.*\)"$/\1/')"
-if [ -z "$answers_commit" ] || [ "$(mf ".repo-platform-manifest.json" commit)" != "$answers_commit" ]; then
+if [ -z "$answers_commit" ] || [ "$(mf ".github/repo-platform-manifest.json" commit)" != "$answers_commit" ]; then
   echo "::error::manifest check failed: the manifest's provenance commit in $manifest does not match the _commit recorded in .copier-answers.yml ('$answers_commit') for modules=$MODULES private=$PRIVATE. Fix this harness's _commit extraction first (quote stripping), then stamp_manifest.ts."
   exit 1
 fi

@@ -33,7 +33,7 @@ Copier asks for project name, description, an update **channel** (`latest` follo
 
 The chosen modules also land in `.repo-platform.yml`, and that file is the selection's home from then on: edit its `modules:` list and the next sync PR applies the change. Its presence is what marks the repo as managed.
 
-Every render also carries `.repo-platform-manifest.json`, the ownership manifest: each template-landed path's class (`managed`, `split`, `mergeable`, or `starter`) plus sha256 hashes of the managed content, stamped after each render - `validate-template`'s parity check reports drift against it without blocking merges (the next sync heals).
+Every render also carries `.github/repo-platform-manifest.json`, the ownership manifest: each template-landed path's class (`managed`, `split`, `mergeable`, or `starter`) plus sha256 hashes of the managed content, stamped after each render - `validate-template`'s parity check reports drift against it without blocking merges (the next sync heals).
 
 To switch channels later, change the repo's entry under `config:` in repo-platform's `repos.yml` (see step 4). A repo moving from staging to latest gets every migration up to the target release on its first sync after the switch - the staging history says nothing about which ones already applied, and migrations are idempotent, so the runner over-runs rather than skips (see [migrations/README.md](../migrations/README.md)).
 

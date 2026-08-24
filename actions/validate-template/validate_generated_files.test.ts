@@ -743,7 +743,7 @@ describe("ownership self-declarations", () => {
 });
 
 describe("ownership-manifest byte parity", () => {
-  const MANIFEST = ".repo-platform-manifest.json";
+  const MANIFEST = ".github/repo-platform-manifest.json";
   const sha = (text: string) =>
     new Bun.CryptoHasher("sha256").update(Buffer.from(text, "latin1")).digest("hex");
   const manifestOf = (entries: Record<string, string>) =>
@@ -810,7 +810,7 @@ describe("ownership-manifest byte parity", () => {
       ".yamllint": "extends: default\n",
     });
     expect(exitCode).toBe(1);
-    expect(stderr).toContain(".yamllint: .repo-platform-manifest.json records no hash");
+    expect(stderr).toContain(".yamllint: .github/repo-platform-manifest.json records no hash");
   });
 
   test("a listed managed file missing from the repo is an advisory", () => {
@@ -833,7 +833,9 @@ describe("ownership-manifest byte parity", () => {
     });
     expect(stderr).toBe("");
     expect(exitCode).toBe(0);
-    expect(stdout).toContain("advisory: .repo-platform-manifest.json does not list 'SECURITY.md'");
+    expect(stdout).toContain(
+      "advisory: .github/repo-platform-manifest.json does not list 'SECURITY.md'",
+    );
     // The baseline records a staging-form _commit, so absence runs in skew
     // mode and the advisory says why.
     expect(stdout).toContain("skew mode");
@@ -863,7 +865,7 @@ describe("ownership-manifest byte parity", () => {
     });
     expect(exitCode).toBe(1);
     expect(stderr).toContain(
-      ".repo-platform-manifest.json does not list '.github/workflows/ci.yml'",
+      ".github/repo-platform-manifest.json does not list '.github/workflows/ci.yml'",
     );
     expect(stderr).toContain("the entry was deleted by hand");
   });

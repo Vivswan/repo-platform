@@ -16,7 +16,7 @@
 //   record (moduleOwnershipFiles below) and enforces that every module
 //   template declares its ownership.
 // - scripts/compose_template.ts emits the ownership manifest
-//   (.repo-platform-manifest.json) into the composed template tree.
+//   (.github/repo-platform-manifest.json) into the composed template tree.
 
 import { lstatSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";

@@ -360,10 +360,10 @@ fi
 # manifest's own entry stays null (its content includes every other hash,
 # so a self-hash would be circular). Read with python3, independent of the
 # stamping code under test.
-test -f .repo-platform-manifest.json || fail "the ownership manifest is missing after the update"
+test -f .github/repo-platform-manifest.json || fail "the ownership manifest is missing after the update"
 mf() { # <path> <field> -> the entry's field, "null", "absent", or "missing"
   python3 -c 'import json, sys
-entry = json.load(open(".repo-platform-manifest.json"))["files"].get(sys.argv[1])
+entry = json.load(open(".github/repo-platform-manifest.json"))["files"].get(sys.argv[1])
 value = "absent" if entry is None else entry.get(sys.argv[2], "missing")
 print("null" if value is None else value)' "$1" "$2"
 }
@@ -383,11 +383,11 @@ print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$1"
   || fail "the manifest hashes the repo-owned checks.yml starter"
 [ "$(mf ".github/workflows/ci.yml" hash)" = "$(file_sha .github/workflows/ci.yml)" ] \
   || fail "the manifest's ci.yml hash does not match the updated file (stamping)"
-[ "$(mf ".repo-platform-manifest.json" hash)" = "null" ] \
+[ "$(mf ".github/repo-platform-manifest.json" hash)" = "null" ] \
   || fail "the manifest's own hash entry must stay null (self-hash is circular)"
 # Provenance rides the self entry: the stamper writes the render's recorded
 # _commit, which is what lets the validator tell skew from deletion.
-[ "$(mf ".repo-platform-manifest.json" commit)" = "templates/v99.99.99" ] \
+[ "$(mf ".github/repo-platform-manifest.json" commit)" = "templates/v99.99.99" ] \
   || fail "the manifest's provenance commit was not stamped with the updated render's _commit"
 echo "upgrade path OK: retired files deleted, sentinels preserved, configuration kept"
 

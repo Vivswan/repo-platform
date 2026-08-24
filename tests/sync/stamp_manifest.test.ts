@@ -129,7 +129,7 @@ describe("stampManifestText", () => {
   test("stamps the self entry's provenance commit from the answers file", () => {
     const root = tree({ ".copier-answers.yml": "_commit: templates/v2.0.0\n_src_path: x\n" });
     const text = manifestText([
-      '    ".repo-platform-manifest.json": {"class": "managed", "hash": null, "commit": null}',
+      '    ".github/repo-platform-manifest.json": {"class": "managed", "hash": null, "commit": null}',
     ]);
     const { out, problem } = stampManifestText(text, root);
     expect(problem).toBeNull();
@@ -142,7 +142,7 @@ describe("stampManifestText", () => {
   test("no readable _commit stamps the provenance null", () => {
     const root = tree({});
     const text = manifestText([
-      '    ".repo-platform-manifest.json": {"class": "managed", "hash": null, "commit": "stale"}',
+      '    ".github/repo-platform-manifest.json": {"class": "managed", "hash": null, "commit": "stale"}',
     ]);
     expect(stampManifestText(text, root).out).toContain('"commit": null');
   });
@@ -158,7 +158,7 @@ describe("stampManifestText", () => {
       '    "SECURITY.md": {"class": "split", "marker": "<!-- repo-platform:local-section -->", "managed": "above", "hash": null}',
       '    "checks.yml": {"class": "starter"}',
       '    "ci.yml": {"class": "managed", "hash": null}',
-      '    ".repo-platform-manifest.json": {"class": "managed", "hash": null}',
+      '    ".github/repo-platform-manifest.json": {"class": "managed", "hash": null}',
     ]);
     const { out, problem } = stampManifestText(text, root);
     expect(problem).toBeNull();
@@ -171,7 +171,7 @@ describe("stampManifestText", () => {
     expect(files["checks.yml"].hash).toBeUndefined();
     // The self entry stays null: the manifest's content includes every
     // other hash, so a self-hash would be circular.
-    expect(files[".repo-platform-manifest.json"].hash).toBeNull();
+    expect(files[".github/repo-platform-manifest.json"].hash).toBeNull();
     // Only hash tokens change: nulling them back restores the input.
     expect(out.replace(/"hash": "[0-9a-f]{64}"/g, '"hash": null')).toBe(text);
   });
