@@ -899,6 +899,22 @@ describe("ownership-manifest byte parity", () => {
     expect(mismatched.stderr).toContain("stamped provenance");
   });
 
+  test("an exponent-shaped staging sha reads as a string, not a YAML float", () => {
+    // PyYAML (copier's writer) dumps shas like 95e1875 UNQUOTED (its float
+    // pattern needs a dot or signed exponent); the yaml core schema reads
+    // digits-e-digits as Infinity. A typed read turned ~2% of staging shas
+    // into a false tampering report; the failsafe re-read keeps them
+    // strings, so a matching stamp passes with no missing-_commit text.
+    const exponentSha = runValidator({
+      ".copier-answers.yml": `${MANAGED_HEADER}_commit: 95e1875\n_src_path: gh:Vivswan/repo-platform\ngithub_username: Vivswan\n`,
+      [MANIFEST]: manifestOf({
+        [MANIFEST]: '{"class": "managed", "hash": null, "commit": "95e1875"}',
+      }),
+    });
+    expect(exponentSha.stderr).not.toContain("stamped provenance");
+    expect(exponentSha.stderr).not.toContain("no _commit in .copier-answers.yml");
+  });
+
   test("any-form provenance mismatch is an error, even off the release channel", () => {
     // The stamper always writes the recorded _commit, so a differing (or
     // key-deleted) value is tampering on every channel; only a null stamp

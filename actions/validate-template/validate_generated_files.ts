@@ -949,7 +949,26 @@ function main(): number {
   // update base loudly. Paths beyond the tables (starters, version pins -
   // check 7 pins their bytes - and symlinks) remain manifest-trusted, an
   // accepted residue of the informational stance.
-  const answersCommit = typeof answers._commit === "string" ? answers._commit : null;
+  // The _commit read must mirror sync/answers_file.ts's failsafe-schema
+  // read: PyYAML (copier's writer) dumps exponent-shaped shas like
+  // 95e1875 UNQUOTED (its float pattern needs a dot or signed exponent),
+  // while the yaml package's core schema resolves digits-e-digits to a
+  // float - a typed read turns ~2% of staging shas into Infinity and a
+  // false tampering report. Re-read the one key under failsafe, where
+  // every scalar stays a string.
+  const answersCommit = ((): string | null => {
+    if (!hasAnswers) return null;
+    try {
+      const raw = parseYaml(readFileSync(answersPath, "utf-8"), {
+        schema: "failsafe",
+        logLevel: "error",
+      }) as Record<string, unknown>;
+      const value = raw?._commit;
+      return typeof value === "string" && value !== "" ? value : null;
+    } catch {
+      return null;
+    }
+  })();
   const releaseAligned =
     answersCommit !== null && /^templates\/v\d+\.\d+\.\d+$/.test(answersCommit);
   const manifestPath = join(root, MANIFEST_NAME);
