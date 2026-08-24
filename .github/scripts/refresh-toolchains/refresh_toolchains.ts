@@ -153,7 +153,12 @@ export function majorJumps(bumps: Bump[]): string {
     .join(", ");
 }
 
-async function fetchJson(url: string): Promise<unknown> {
+/** Fetch and JSON-parse one upstream source. The invalid-JSON diagnostic
+ *  is a fixed string BY CONSTRUCTION - runtimes differ on whether the
+ *  JSON error message embeds the malformed body, and this error's message
+ *  is published as a public ::warning by main() - so only the endpoint is
+ *  named, never the runtime's error text. */
+export async function fetchJson(url: string): Promise<unknown> {
   const headers: Record<string, string> = { "user-agent": "repo-platform-refresh-toolchains" };
   const token = process.env.GH_TOKEN ?? process.env.GITHUB_TOKEN;
   if (token && url.startsWith("https://api.github.com/")) {
@@ -163,7 +168,11 @@ async function fetchJson(url: string): Promise<unknown> {
   // degrades to a warning) instead of leaning on the job timeout.
   const response = await fetch(url, { headers, signal: AbortSignal.timeout(30_000) });
   if (!response.ok) throw new Error(`GET ${url} failed: ${response.status}`);
-  return response.json();
+  try {
+    return await response.json();
+  } catch {
+    throw new Error(`GET ${url} returned a body that is not valid JSON`);
+  }
 }
 
 async function main(): Promise<number> {

@@ -8,6 +8,7 @@ import {
   bumpPinVersion,
   compareVersions,
   decideBump,
+  fetchJson,
   latestBunVersion,
   latestDenoVersion,
   latestNodeLts,
@@ -16,6 +17,33 @@ import {
   proseBumps,
 } from "../../.github/scripts/refresh-toolchains/refresh_toolchains";
 import { loadManifests } from "../../scripts/module_manifests";
+
+describe("fetchJson", () => {
+  test("a malformed body rejects with the fixed diagnostic, never the body", async () => {
+    // Loopback server, no upstream network. The rejection message is
+    // published as a public ::warning, and runtimes differ on whether
+    // their JSON error text embeds the body - so the fixed-string
+    // guarantee must hold regardless of what the runtime would say.
+    const server = Bun.serve({
+      port: 0,
+      fetch: () => new Response('{"tag_name": corruptbody}'),
+    });
+    try {
+      const url = `http://localhost:${server.port}/releases/latest`;
+      let message = "";
+      try {
+        await fetchJson(url);
+      } catch (error) {
+        message = error instanceof Error ? error.message : String(error);
+      }
+      expect(message).toContain("not valid JSON");
+      expect(message).toContain(url);
+      expect(message).not.toContain("corruptbody");
+    } finally {
+      server.stop(true);
+    }
+  });
+});
 
 describe("decideBump", () => {
   test("a fetched version older than the pin is a downgrade, never applied", () => {
