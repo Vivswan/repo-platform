@@ -600,21 +600,29 @@ describe("module ownership files", () => {
     "# This file is managed by {{ github_username }}/repo-platform.\n" +
     "# Local edits may be replaced during template updates.\n";
 
-  test("skipIfExistsMatchers reproduces copier's trailing-component matching", () => {
+  test("skipIfExistsMatchers reproduces copier's gitwildmatch semantics", () => {
     const [forms, lockfile] = skipIfExistsMatchers(
       "_skip_if_exists:\n  - .github/ISSUE_TEMPLATE/*.yml\n  - .gitleaks.toml\n",
     );
-    expect(forms.test(".github/ISSUE_TEMPLATE/bug_report.yml")).toBe(true);
-    // A relative pattern matches the path's TRAILING components
-    // (pathlib.PurePath.match), so it matches at any depth...
-    expect(forms.test("sub/.github/ISSUE_TEMPLATE/bug_report.yml")).toBe(true);
+    // A bare filename matches at any depth...
     expect(lockfile.test(".gitleaks.toml")).toBe(true);
     expect(lockfile.test("nested/.gitleaks.toml")).toBe(true);
-    // ...but never partial components, and * stays within one component.
+    // ...a pattern containing "/" is anchored to the render root...
+    expect(forms.test(".github/ISSUE_TEMPLATE/bug_report.yml")).toBe(true);
+    expect(forms.test("sub/.github/ISSUE_TEMPLATE/bug_report.yml")).toBe(false);
+    // ...and neither partial components nor cross-component * count.
     expect(lockfile.test("x.gitleaks.toml")).toBe(false);
     expect(forms.test(".github/ISSUE_TEMPLATE/sub/deep.yml")).toBe(false);
     expect(forms.test(".github/ISSUE_TEMPLATEx/bug_report,yml")).toBe(false);
     expect(() => skipIfExistsMatchers("modules: []\n")).toThrow("_skip_if_exists");
+  });
+
+  test("skipIfExistsMatchers rejects gitwildmatch features it does not implement", () => {
+    for (const pattern of ["docs/**/*.yml", "file?.yml", "[ab].yml", "/rooted.yml", "dir/"]) {
+      expect(() => skipIfExistsMatchers(`_skip_if_exists:\n  - '${pattern}'\n`)).toThrow(
+        "beyond the implemented subset",
+      );
+    }
   });
 
   test("moduleOwnershipFiles classifies every file: enrol, starter, split, gated, comment-free", () => {

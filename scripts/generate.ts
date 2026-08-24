@@ -503,9 +503,11 @@ export const KNOWN_UNDECLARED_MODULE_FILES = new Set([
 ]);
 
 /** copier.yml's _skip_if_exists globs as path matchers reproducing
- *  copier's semantics (pathlib.PurePath.match): a relative pattern matches
- *  the path's TRAILING components, so a bare filename matches at any
- *  depth, and `*` stays within one component. */
+ *  copier's gitignore-style semantics (pathspec gitwildmatch): a pattern
+ *  containing "/" is anchored to the render root, a bare filename matches
+ *  at any depth, and `*` stays within one component. Only that subset is
+ *  implemented; a pattern using more (`**`, `?`, character classes,
+ *  negation, edge slashes) throws rather than guessing what copier does. */
 export function skipIfExistsMatchers(copierYamlText: string): RegExp[] {
   const skip = (parseYaml(copierYamlText) as { _skip_if_exists?: unknown } | null)?._skip_if_exists;
   if (!Array.isArray(skip) || skip.length === 0 || !skip.every((p) => typeof p === "string")) {
@@ -514,15 +516,25 @@ export function skipIfExistsMatchers(copierYamlText: string): RegExp[] {
         "module-ownership scan needs it to keep repo-owned starters exempt",
     );
   }
-  return skip.map(
-    (pattern) =>
-      new RegExp(
-        `(?:^|/)${pattern
-          .split("*")
-          .map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
-          .join("[^/]*")}$`,
-      ),
-  );
+  return skip.map((pattern) => {
+    if (
+      /[?[\]\\!]/.test(pattern) ||
+      pattern.includes("**") ||
+      pattern.startsWith("/") ||
+      pattern.endsWith("/")
+    ) {
+      throw new Error(
+        `copier.yml: _skip_if_exists pattern '${pattern}' uses gitwildmatch ` +
+          "features beyond the implemented subset (bare names, root-anchored " +
+          "paths, single *) - extend skipIfExistsMatchers alongside it",
+      );
+    }
+    const body = pattern
+      .split("*")
+      .map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+      .join("[^/]*");
+    return new RegExp(pattern.includes("/") ? `^${body}$` : `(?:^|/)${body}$`);
+  });
 }
 
 export interface OwnershipEntry {
