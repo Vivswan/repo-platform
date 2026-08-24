@@ -585,7 +585,7 @@ else
   expect_class ".github/workflows/release.yml" absent
   expect_class "release-please-config.json" absent
 fi
-if has settings-sync; then expect_class ".github/settings.yml" starter; else expect_class ".github/settings.yml" absent; fi
+if has settings-sync; then expect_class ".github/settings.yml" mergeable; else expect_class ".github/settings.yml" absent; fi
 if has custom-license; then expect_class "LICENSE.md" absent; else expect_class "LICENSE.md" split; fi
 # Stamping: the managed ci.yml hash must equal the file's sha256 (computed
 # here with hashlib, not the code under test), the split SECURITY.md hash

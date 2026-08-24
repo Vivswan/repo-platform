@@ -480,8 +480,10 @@ export function toolchainPinRows(manifests: ModuleManifest[]): string[] {
  *  inlines only while its whole property line fits, otherwise one entry
  *  per line - so regeneration and formatting can never disagree. */
 export function moduleOwnershipRegion(ownership: Record<string, OwnershipEntry[]>): string[] {
+  // References the hand-written OwnershipKind alias above the region:
+  // inlining the union would push the line past the formatter's width.
   const lines = [
-    'const MODULE_OWNERSHIP: Record<string, { path: string; kind: "header" | "marker" }[]> = {',
+    "const MODULE_OWNERSHIP: Record<string, { path: string; kind: OwnershipKind }[]> = {",
   ];
   for (const [module, entries] of Object.entries(ownership)) {
     // Keys quoted as-needed, like TOOLCHAIN_PINS above, to stay biome-stable.

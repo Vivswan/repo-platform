@@ -208,7 +208,7 @@ export function classifyTemplateSource(
 
 export interface OwnershipEntry {
   path: string;
-  kind: "header" | "marker";
+  kind: "header" | "marker" | "mergeable";
 }
 
 /** The rendered paths, per module, whose ownership declaration the
@@ -217,12 +217,13 @@ export interface OwnershipEntry {
  *  classifyTemplateSource - starter, mergeable, split ("marker"),
  *  header-opening ("header"), or comment-free (the manifest's pin dotfile,
  *  JSON) - and a file fitting no class throws, so nothing lands silently
- *  undeclared. Starters and mergeable files are declared but not enrolled:
- *  sync makes no byte-parity promise about either, and a mergeable file's
- *  marker is not restored by sync (three-way merge keeps a repo's
- *  deletion), so the validator has no in-file contract to enforce.
- *  Filename-gated files only declare: module selection alone does not
- *  render them. */
+ *  undeclared. Starters stay out (repo-owned; nothing to enforce or pin).
+ *  Mergeable files enrol with their own kind so check 9 can pin the
+ *  manifest entry's class against a hand flip, but check 8 enforces
+ *  nothing in the rendered file: sync cannot restore a repo-deleted
+ *  sentinel (three-way merge keeps the deletion), so an in-file
+ *  requirement would be a permanent, unhealable error. Filename-gated
+ *  files only declare: module selection alone does not render them. */
 export function moduleOwnershipFiles(
   manifests: ModuleManifest[],
   templatesDir: string,
@@ -252,7 +253,11 @@ export function moduleOwnershipFiles(
           skipIfExists,
           `templates/${m.module}/${childRel}`,
         );
-        if (ownership.class === "starter" || ownership.class === "mergeable") continue;
+        if (ownership.class === "starter") continue;
+        if (ownership.class === "mergeable") {
+          if (ungated) entries.push({ path: landedPath, kind: "mergeable" });
+          continue;
+        }
         if (ownership.class === "split") {
           if (ungated) entries.push({ path: landedPath, kind: "marker" });
           continue;

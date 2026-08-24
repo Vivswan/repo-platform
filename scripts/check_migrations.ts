@@ -17,7 +17,7 @@
 // The comparison keys on landing paths (filename gates and the .jinja
 // suffix stripped) PLUS each path's gate signature, so a file moving
 // between render conditions is a transition even though the path exists in
-// both versions. _skip_if_exists matching reuses scripts/generate.ts's
+// both versions. _skip_if_exists matching reuses scripts/ownership.ts's
 // gitwildmatch-faithful matchers - the same semantics copier applies - and
 // a skip-listed path leaving the render is a distinct transition from a
 // managed retirement: the sync deletes nothing, but the client's

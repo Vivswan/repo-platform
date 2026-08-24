@@ -1104,12 +1104,14 @@ describe("ownership-manifest byte parity", () => {
 
   test("a mergeable entry passes hashless: content drift is not parity drift", () => {
     // The mergeable contract: sync keeps the baseline current by three-way
-    // merge, so a repo-customized copy is healthy, not drifted.
+    // merge, so a repo-customized copy is healthy, not drifted. The module
+    // must be selected - the roster covers the path and pins its class.
     const entries = {
       ...stampedBaseline(),
       ".github/settings.yml": '{"class": "mergeable"}',
     };
     const { exitCode, stdout, stderr } = runValidator({
+      ".repo-platform.yml": `${MANAGED_HEADER}modules: [uv, settings-sync]\n`,
       [MANIFEST]: manifestOf(entries),
       ".github/settings.yml": "repository:\n  has_issues: true\n  custom_addition: true\n",
     });
@@ -1123,7 +1125,10 @@ describe("ownership-manifest byte parity", () => {
       ...stampedBaseline(),
       ".github/settings.yml": `{"class": "mergeable", "hash": "${"d".repeat(64)}"}`,
     };
-    const { exitCode, stderr } = runValidator({ [MANIFEST]: manifestOf(entries) });
+    const { exitCode, stderr } = runValidator({
+      ".repo-platform.yml": `${MANAGED_HEADER}modules: [uv, settings-sync]\n`,
+      [MANIFEST]: manifestOf(entries),
+    });
     expect(exitCode).toBe(1);
     expect(stderr).toContain("is mergeable carrying a hash");
   });
@@ -1133,16 +1138,41 @@ describe("ownership-manifest byte parity", () => {
       ...stampedBaseline(),
       ".github/settings.yml": '{"class": "mergeable"}',
     };
-    const { exitCode, stdout, stderr } = runValidator({ [MANIFEST]: manifestOf(entries) });
+    const { exitCode, stdout, stderr } = runValidator({
+      ".repo-platform.yml": `${MANAGED_HEADER}modules: [uv, settings-sync]\n`,
+      [MANIFEST]: manifestOf(entries),
+    });
     expect(stderr).toBe("");
     expect(exitCode).toBe(0);
     expect(stdout).toContain("advisory: .github/settings.yml: listed as mergeable");
   });
 
-  test("an unknown class names the whole vocabulary", () => {
+  test("a mergeable entry hand-flipped to starter fails the roster cross-check", () => {
+    // THE class-flip attack for hashless classes: starter and mergeable
+    // both carry no hash, so without the roster pin the flip would cost
+    // nothing visible - not even the missing-file advisory. Mirrors the
+    // managed-flip test below.
     const entries = {
       ...stampedBaseline(),
-      ".github/settings.yml": '{"class": "bespoke"}',
+      ".github/settings.yml": '{"class": "starter"}',
+    };
+    const { exitCode, stderr } = runValidator({
+      ".repo-platform.yml": `${MANAGED_HEADER}modules: [uv, settings-sync]\n`,
+      [MANIFEST]: manifestOf(entries),
+      ".github/settings.yml": "repository:\n  has_issues: true\n",
+    });
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain(
+      `entry '.github/settings.yml' claims class "starter" but this validator's ownership tables declare it mergeable`,
+    );
+  });
+
+  test("an unknown class names the whole vocabulary", () => {
+    // An uncovered path, so the structural loop's report is probed alone
+    // (a roster path would draw the cross-check error first).
+    const entries = {
+      ...stampedBaseline(),
+      "docs/handbook.md": '{"class": "bespoke"}',
     };
     const { exitCode, stderr } = runValidator({ [MANIFEST]: manifestOf(entries) });
     expect(exitCode).toBe(1);

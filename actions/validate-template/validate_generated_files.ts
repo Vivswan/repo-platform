@@ -148,6 +148,14 @@ function sha256(data: Buffer): string {
   return createHash("sha256").update(data).digest("hex");
 }
 
+/** How a declared file's ownership is enforced in the rendered repo:
+ *  "header" files open with the managed header, "marker" files carry the
+ *  local-section split line, "mergeable" files have no in-file requirement
+ *  (sync's three-way merge keeps a repo's deletion of the sentinel, so
+ *  check 8 skips them) - the kind exists so check 9 can pin the manifest
+ *  entry's class against a hand flip. */
+type OwnershipKind = "header" | "marker" | "mergeable";
+
 /** Unconditionally rendered base files and how each declares its ownership:
  *  "header" files are wholly overwritten by sync and open with the managed
  *  header; "marker" files keep a repo-owned tail below the local-section
@@ -155,7 +163,7 @@ function sha256(data: Buffer): string {
  *  CONTRIBUTING.md, LICENSE.md) join in check 8 under the same
  *  answers/modules conditions that gate their rendering; module files come
  *  from the generated MODULE_OWNERSHIP record below. */
-const BASE_OWNERSHIP: Record<string, "header" | "marker"> = {
+const BASE_OWNERSHIP: Record<string, OwnershipKind> = {
   ".copier-answers.yml": "header",
   ".repo-platform.yml": "header",
   ".yamllint": "header",
@@ -256,11 +264,12 @@ const TOOLCHAIN_PINS: Record<string, { file: string; version: string }> = {
 
 // How each rendered module file declares its ownership while its module is
 // selected: "header" files open with the managed header, "marker" files
-// split a managed top from a repo-owned tail (scanned fail-closed by
-// moduleOwnershipFiles in scripts/ownership.ts - starters, mergeable
-// baselines, and comment-free formats stay out).
+// split a managed top from a repo-owned tail, "mergeable" files enrol only
+// so check 9 can pin their manifest class - check 8 enforces nothing in
+// them (scanned fail-closed by moduleOwnershipFiles in
+// scripts/ownership.ts - starters and comment-free formats stay out).
 // BEGIN GENERATED: module-ownership (scripts/generate.ts - edit the module templates and copier.yml's _skip_if_exists, not this block)
-const MODULE_OWNERSHIP: Record<string, { path: string; kind: "header" | "marker" }[]> = {
+const MODULE_OWNERSHIP: Record<string, { path: string; kind: OwnershipKind }[]> = {
   agents: [{ path: "AGENTS.md", kind: "marker" }],
   bun: [{ path: ".github/workflows/dependabot-bun-lockfile.yml", kind: "header" }],
   deno: [{ path: ".github/workflows/deno-audit.yml", kind: "header" }],
@@ -268,7 +277,10 @@ const MODULE_OWNERSHIP: Record<string, { path: string; kind: "header" | "marker"
   "release-please": [{ path: ".github/workflows/release.yml", kind: "header" }],
   skills: [{ path: ".github/workflows/validate-skills.yml", kind: "header" }],
   "auto-assign": [{ path: ".github/workflows/auto-assign.yml", kind: "header" }],
-  "settings-sync": [{ path: ".github/workflows/settings-sync.yml", kind: "header" }],
+  "settings-sync": [
+    { path: ".github/settings.yml", kind: "mergeable" },
+    { path: ".github/workflows/settings-sync.yml", kind: "header" },
+  ],
 };
 // END GENERATED: module-ownership
 
@@ -843,7 +855,7 @@ function main(): number {
   // modules list stands the module-gated entries down - check 1 already
   // errored). Check 8 enforces the in-file declarations over it; check 9
   // cross-checks the manifest's class metadata against it.
-  const declaredOwnership: { rel: string; kind: "header" | "marker" }[] = Object.entries(
+  const declaredOwnership: { rel: string; kind: OwnershipKind }[] = Object.entries(
     BASE_OWNERSHIP,
   ).map(([rel, kind]) => ({ rel, kind }));
   if (!isPrivateRender) {
@@ -879,6 +891,11 @@ function main(): number {
         "/repo-platform\\.(?![A-Za-z0-9._-])",
     );
     for (const { rel, kind } of declaredOwnership) {
+      // Mergeable files carry no enforceable in-file declaration: the
+      // sentinel is template-side only, and sync's three-way merge keeps a
+      // repo's deletion of it, so requiring it here would be a permanent,
+      // unhealable error. Their roster entry exists for check 9's class pin.
+      if (kind === "mergeable") continue;
       const path = join(root, rel);
       if (!isRegularFile(path)) continue;
       const content = readFileSync(path, "utf-8");
@@ -946,10 +963,11 @@ function main(): number {
   // a named advisory on every run, and a tampered _commit both self-heals
   // on the next sync (template and local change the same line, and
   // conflicts resolve toward the template) and breaks the repo's own
-  // update base loudly. Paths beyond the tables (starters, mergeable
-  // baselines - no byte-parity promise exists for either - version pins,
-  // whose bytes check 7 pins, and symlinks) remain manifest-trusted, an
-  // accepted residue of the informational stance.
+  // update base loudly. Paths beyond the tables (starters, version pins -
+  // check 7 pins their bytes - and symlinks) remain manifest-trusted, an
+  // accepted residue of the informational stance; mergeable entries carry
+  // no hash, but their class IS table-pinned, so a flip to a hashless
+  // look-alike (starter) cannot silence even the absence advisory.
   // The _commit read must mirror sync/answers_file.ts's failsafe-schema
   // read: PyYAML (copier's writer) dumps exponent-shaped shas like
   // 95e1875 UNQUOTED (its float pattern needs a dot or signed exponent),
@@ -1139,7 +1157,8 @@ function main(): number {
         }
         const entry = asEntry(raw);
         if (entry === null) continue;
-        const declared = kind === "header" ? "managed" : "split";
+        const declared =
+          kind === "header" ? "managed" : kind === "mergeable" ? "mergeable" : "split";
         if (entry.class !== declared) {
           metadataError(rel, `claims class ${JSON.stringify(entry.class)}`, declared);
           continue;

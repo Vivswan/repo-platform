@@ -663,8 +663,8 @@ describe("module ownership files", () => {
       );
       // Headerless starter: exempt through _skip_if_exists.
       writeFileSync(join(dir, "bun", ".github", "workflows", "starter.yml.jinja"), "name: S\n");
-      // Mergeable baseline: declared by its marker, but not enrolled - sync
-      // makes no byte-parity promise and does not restore the marker.
+      // Mergeable baseline: enrolled with its own kind so check 9 pins the
+      // manifest class; check 8 enforces nothing in the rendered file.
       writeFileSync(join(dir, "bun", "baseline.yml.jinja"), "# repo-platform:mergeable\nname: B\n");
       // Split file: enrolled with marker semantics.
       writeFileSync(
@@ -693,6 +693,7 @@ describe("module ownership files", () => {
         bun: [
           { path: ".github/workflows/managed.yml", kind: "header" },
           { path: "SPLIT.md", kind: "marker" },
+          { path: "baseline.yml", kind: "mergeable" },
         ],
       });
     } finally {
@@ -778,11 +779,13 @@ describe("module ownership files", () => {
       moduleOwnershipRegion({
         agents: [{ path: "AGENTS.md", kind: "marker" }],
         "release-please": [{ path: ".github/workflows/release.yml", kind: "header" }],
+        "settings-sync": [{ path: ".github/settings.yml", kind: "mergeable" }],
       }),
     ).toEqual([
-      'const MODULE_OWNERSHIP: Record<string, { path: string; kind: "header" | "marker" }[]> = {',
+      "const MODULE_OWNERSHIP: Record<string, { path: string; kind: OwnershipKind }[]> = {",
       '  agents: [{ path: "AGENTS.md", kind: "marker" }],',
       '  "release-please": [{ path: ".github/workflows/release.yml", kind: "header" }],',
+      '  "settings-sync": [{ path: ".github/settings.yml", kind: "mergeable" }],',
       "};",
     ]);
   });
@@ -801,7 +804,7 @@ describe("module ownership files", () => {
         ],
       }),
     ).toEqual([
-      'const MODULE_OWNERSHIP: Record<string, { path: string; kind: "header" | "marker" }[]> = {',
+      "const MODULE_OWNERSHIP: Record<string, { path: string; kind: OwnershipKind }[]> = {",
       "  bun: [",
       `    { path: "${first}", kind: "header" },`,
       `    { path: "${second}", kind: "marker" },`,
