@@ -7,12 +7,14 @@ const script = join(import.meta.dir, "../../.github/scripts/sync/wait_for_build.
 
 const MAIN_SHA = "a".repeat(40);
 
-// git: ls-remote HEAD prints GIT_HEAD; ls-remote --exit-code for a tag
-// succeeds once the attempt counter reaches GIT_TAG_AFTER (a counter file
-// makes retries observable). gh: serves the runs JSON from GH_RUNS_FILE,
-// or exits 1 when GH_FAIL is set.
+// Stubs record every invocation to CALLS_LOG (\x1f between args, \x1e
+// between records). git: ls-remote HEAD prints GIT_HEAD; ls-remote
+// --exit-code for a tag succeeds once the attempt counter reaches
+// GIT_TAG_AFTER. gh: serves the runs JSON from GH_RUNS_FILE, or exits 1
+// when GH_FAIL is set.
 const gitStub = `#!/usr/bin/env bash
 set -euo pipefail
+{ printf '%s' "git"; for a in "$@"; do printf '\\x1f%s' "$a"; done; printf '\\x1e'; } >>"$CALLS_LOG"
 if [ "\${2:-}" = "--exit-code" ]; then
   count=$(($(cat "$COUNT_FILE" 2>/dev/null || echo 0) + 1))
   echo "$count" >"$COUNT_FILE"
@@ -23,6 +25,7 @@ printf '%s\\tHEAD\\n' "\${GIT_HEAD:-}"
 `;
 const ghStub = `#!/usr/bin/env bash
 set -euo pipefail
+{ printf '%s' "gh"; for a in "$@"; do printf '\\x1f%s' "$a"; done; printf '\\x1e'; } >>"$CALLS_LOG"
 if [ -n "\${GH_FAIL:-}" ]; then
   echo "gh: boom" >&2
   exit 1
@@ -44,6 +47,7 @@ function run(args: string[], opts: Options = {}) {
   const runsFile = join(root, "runs.json");
   writeFileSync(runsFile, JSON.stringify(opts.runs ?? { workflow_runs: [] }));
   const countFile = join(root, "count.txt");
+  const calls = join(root, "calls.log");
   const proc = Bun.spawnSync(["bun", script, ...args], {
     env: {
       ...process.env,
@@ -51,24 +55,39 @@ function run(args: string[], opts: Options = {}) {
       GITHUB_REPOSITORY: "Vivswan/repo-platform",
       GH_RUNS_FILE: runsFile,
       COUNT_FILE: countFile,
+      CALLS_LOG: calls,
       GIT_HEAD: MAIN_SHA,
       WAIT_DELAY_MS: "10",
       ...opts.env,
     },
   });
+  const raw = existsSync(calls) ? readFileSync(calls, "utf-8") : "";
   return {
     exitCode: proc.exitCode,
     output: proc.stdout.toString() + proc.stderr.toString(),
     attempts: existsSync(countFile) ? Number(readFileSync(countFile, "utf-8").trim()) : 0,
+    calls: raw
+      .split("\x1e")
+      .filter(Boolean)
+      .map((record) => record.split("\x1f")),
   };
 }
 
 describe("wait_for_build.ts", () => {
+  test("the production cadence stays 30 attempts x 10 s (tests shrink only the delay)", () => {
+    // The timeout warnings promise "after 5 minutes"; pin the constants
+    // that arithmetic depends on, since no test can wait it out.
+    const source = readFileSync(script, "utf-8");
+    expect(source).toContain("const ATTEMPTS = 30;");
+    expect(source).toContain('Number(env("WAIT_DELAY_MS", "10000"))');
+  });
+
   test("rejects a missing or unknown mode", () => {
     for (const args of [[], ["bogus"]]) {
       const r = run(args);
       expect(r.exitCode).toBe(2);
       expect(r.output).toContain("::error::usage");
+      expect(r.calls).toEqual([]);
     }
   });
 
@@ -78,9 +97,12 @@ describe("wait_for_build.ts", () => {
     expect(r.output).toContain("VERSION must be set");
   });
 
-  test("tag mode returns as soon as the tag exists", () => {
+  test("tag mode probes the templates tag ref and returns once it exists", () => {
     const r = run(["tag"], { env: { VERSION: "v1.2.3" } });
     expect(r.exitCode).toBe(0);
+    expect(r.calls).toEqual([
+      ["git", "ls-remote", "--exit-code", "origin", "refs/tags/templates/v1.2.3"],
+    ]);
     expect(r.output).toContain("templates/v1.2.3 exists.");
     expect(r.output).not.toContain("waiting");
   });
@@ -100,9 +122,25 @@ describe("wait_for_build.ts", () => {
     expect(r.output).toContain("::warning::templates/v1.2.3 is still missing after 5 minutes");
   });
 
-  test("staging mode succeeds on a push run at main HEAD", () => {
+  test("staging mode reads main HEAD then probes the build-branches runs", () => {
     const r = run(["staging"], {
       runs: { workflow_runs: [{ event: "push", head_sha: MAIN_SHA }] },
+    });
+    expect(r.exitCode).toBe(0);
+    expect(r.calls).toEqual([
+      ["git", "ls-remote", "origin", "HEAD"],
+      [
+        "gh",
+        "api",
+        "repos/Vivswan/repo-platform/actions/workflows/build-branches.yml/runs?status=success&per_page=30",
+      ],
+    ]);
+    expect(r.output).toContain(`staging is built from main HEAD ${MAIN_SHA}.`);
+  });
+
+  test("staging mode accepts a schedule run at main HEAD", () => {
+    const r = run(["staging"], {
+      runs: { workflow_runs: [{ event: "schedule", head_sha: MAIN_SHA }] },
     });
     expect(r.exitCode).toBe(0);
     expect(r.output).toContain(`staging is built from main HEAD ${MAIN_SHA}.`);

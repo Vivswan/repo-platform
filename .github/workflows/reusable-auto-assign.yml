@@ -31,8 +31,6 @@ on:
         default: ""
 
 jobs:
-  # One job covers every event path: the resolver runs once, and each
-  # assignment step gates on its event.
   assign:
     # Dependabot PR runs get a read-only GITHUB_TOKEN; the write calls below
     # would fail, so skip them (Dependabot PRs are labeled by dependabot.yml).

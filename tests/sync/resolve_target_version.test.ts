@@ -5,10 +5,12 @@ import { join } from "node:path";
 
 const script = join(import.meta.dir, "../../.github/scripts/sync/resolve_target_version.ts");
 
-// Answers `gh api repos/<repo>/releases/latest --jq .tag_name` with the
-// canned GH_LATEST; GH_FAIL picks the failure stderr (404 vs API outage).
+// Records every invocation to CALLS_LOG (\x1f between args, \x1e between
+// records) and answers with the canned GH_LATEST; GH_FAIL picks the
+// failure stderr (404 vs API outage).
 const ghStub = `#!/usr/bin/env bash
 set -euo pipefail
+{ printf '%s' "gh"; for a in "$@"; do printf '\\x1f%s' "$a"; done; printf '\\x1e'; } >>"$CALLS_LOG"
 if [ "\${GH_FAIL:-}" = "404" ]; then
   echo "gh: Not Found (HTTP 404)" >&2
   exit 1
@@ -33,22 +35,29 @@ function run(opts: Options = {}) {
   mkdirSync(bin);
   writeFileSync(join(bin, "gh"), ghStub, { mode: 0o755 });
   const output = join(root, "output.txt");
+  const calls = join(root, "calls.log");
   const proc = Bun.spawnSync(["bun", script], {
     env: {
       ...process.env,
       PATH: `${bin}:${process.env.PATH}`,
       GITHUB_REPOSITORY: "Vivswan/repo-platform",
       GITHUB_OUTPUT: output,
+      CALLS_LOG: calls,
       REQUESTED: opts.requested ?? "",
       RELEASE_TAG: opts.releaseTag ?? "",
       GH_LATEST: opts.latest ?? "",
       GH_FAIL: opts.fail ?? "",
     },
   });
+  const raw = existsSync(calls) ? readFileSync(calls, "utf-8") : "";
   return {
     exitCode: proc.exitCode,
     output: proc.stdout.toString() + proc.stderr.toString(),
     version: existsSync(output) ? readFileSync(output, "utf-8") : "",
+    calls: raw
+      .split("\x1e")
+      .filter(Boolean)
+      .map((record) => record.split("\x1f")),
   };
 }
 
@@ -57,11 +66,15 @@ describe("resolve_target_version.ts", () => {
     const r = run({ requested: "v2.0.0", fail: "outage" });
     expect(r.exitCode).toBe(0);
     expect(r.version).toBe("version=v2.0.0\n");
+    expect(r.calls).toEqual([]);
   });
 
-  test("resolves the newest stable release by default", () => {
+  test("resolves the newest stable release from releases/latest", () => {
     const r = run({ latest: "v3.1.4" });
     expect(r.exitCode).toBe(0);
+    expect(r.calls).toEqual([
+      ["gh", "api", "repos/Vivswan/repo-platform/releases/latest", "--jq", ".tag_name"],
+    ]);
     expect(r.version).toBe("version=v3.1.4\n");
     expect(r.output).not.toContain("::notice::");
   });
