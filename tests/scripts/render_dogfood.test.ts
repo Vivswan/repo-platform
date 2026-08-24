@@ -5,9 +5,10 @@
 // exercises every pair).
 
 import { describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, rmSync, symlinkSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { renderJinjaFile } from "../../scripts/jinja_subset";
 import type { ModuleManifest } from "../../scripts/module_manifests";
 import {
   type AnswerSources,
@@ -159,6 +160,31 @@ describe("filename gates", () => {
   test("an unresolvable gate condition fails loudly", () => {
     const tpl = "templates/base/{% if mystery %}X{% endif %}.jinja";
     expect(() => pairIsRendered(tpl, {})).toThrow("does not resolve");
+  });
+});
+
+describe("release-please-config template", () => {
+  // Regression oracle for the seeded-owner comment: every CI render uses
+  // this repo's own github_username (Vivswan), so a re-hardcoded owner
+  // literal in the template would pass byte-parity everywhere; rendering
+  // with a different owner catches it, and JSON.parse catches a
+  // substitution that breaks the file's syntax.
+  test("the seeded owner follows github_username and the render stays valid JSON", () => {
+    const tpl = readFileSync(
+      join(import.meta.dir, "../../templates/release-please/release-please-config.json.jinja"),
+      "utf-8",
+    );
+    const rendered = renderJinjaFile(
+      tpl,
+      { username: "OtherOwner", slug: "other-repo", copyrightHolder: "Other Owner" },
+      {},
+    );
+    const packages = (JSON.parse(rendered) as { packages: Record<string, { $comment: string }> })
+      .packages;
+    expect(packages["."].$comment).toBe(
+      "Seeded by OtherOwner/repo-platform; repo-owned after first render - edit freely",
+    );
+    expect(rendered).not.toContain("Vivswan");
   });
 });
 
