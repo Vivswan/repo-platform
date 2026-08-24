@@ -38,9 +38,9 @@ describe("fetchJson", () => {
       } catch (error) {
         message = error instanceof Error ? error.message : String(error);
       }
-      expect(message).toContain("not valid JSON");
-      expect(message).toContain(url);
-      expect(message).not.toContain("corruptbody");
+      // Exact equality, not substrings: any appended runtime text would
+      // reopen the leak this pins closed.
+      expect(message).toBe(`GET ${url} returned a body that is not valid JSON`);
     } finally {
       server.stop(true);
     }
@@ -60,12 +60,9 @@ describe("fetchJson", () => {
       } catch (error) {
         message = error instanceof Error ? error.message : String(error);
       }
-      expect(message).toContain("failed before a response");
-      expect(message).toContain(url);
-      // Runtime phrasings for handshake/connect failures must not leak.
-      expect(message).not.toContain("typo");
-      expect(message).not.toContain("SSL");
-      expect(message).not.toContain("handshake");
+      // Exact equality, not substrings: any appended runtime text would
+      // reopen the leak this pins closed.
+      expect(message).toBe(`GET ${url} failed before a response (network, TLS, or timeout)`);
     } finally {
       server.stop(true);
     }
