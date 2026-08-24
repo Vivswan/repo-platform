@@ -915,6 +915,24 @@ describe("ownership-manifest byte parity", () => {
     expect(exponentSha.stderr).not.toContain("no _commit in .copier-answers.yml");
   });
 
+  test("the exponent-shaped sha still feeds the provenance check (positive oracle)", () => {
+    // The absence assertions above would also pass if provenance checking
+    // silently stopped running. Same bare-exponent _commit, mismatched
+    // stamp: the error must fire AND quote 95e1875 as the recorded value,
+    // proving the failsafe read returned the string and the check ran.
+    const mismatched = runValidator({
+      ".copier-answers.yml": `${MANAGED_HEADER}_commit: 95e1875\n_src_path: gh:Vivswan/repo-platform\ngithub_username: Vivswan\n`,
+      [MANIFEST]: manifestOf({
+        [MANIFEST]: '{"class": "managed", "hash": null, "commit": "zzz9999"}',
+      }),
+    });
+    expect(mismatched.exitCode).toBe(1);
+    expect(mismatched.stderr).toContain("stamped provenance");
+    expect(mismatched.stderr).toContain(
+      "(self-entry commit 'zzz9999') does not match the recorded render 95e1875",
+    );
+  });
+
   test("any-form provenance mismatch is an error, even off the release channel", () => {
     // The stamper always writes the recorded _commit, so a differing (or
     // key-deleted) value is tampering on every channel; only a null stamp
