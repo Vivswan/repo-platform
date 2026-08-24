@@ -200,17 +200,20 @@ describe("wait_for_build.ts", () => {
 
   test("tag mode: a stalled origin burns the probe deadline and warns on the wall clock", () => {
     // Unbounded, each hung ls-remote would sit its full 5 s (GIT_SLEEP)
-    // and the first probe alone would blow the elapsed bound below; the
-    // probe timeout kills it at 100 ms and the wall-clock deadline
-    // (30 x WAIT_DELAY_MS = 300 ms) then ends the wait, probe time
-    // included.
+    // and the first probe alone would blow the elapsed bound below. With
+    // probes killed at 100 ms, the old attempt-count loop would still run
+    // all 30 (~3.3 s); the wall-clock deadline (30 x WAIT_DELAY_MS =
+    // 300 ms, probe time included) cuts it to a handful of calls well
+    // inside the bound.
     const start = Date.now();
     const r = run(["tag"], {
       env: { VERSION: "v1.2.3", GIT_SLEEP: "5", PROBE_TIMEOUT_MS: "100" },
     });
     expect(r.exitCode).toBe(0);
     expect(r.output).toContain("::warning::templates/v1.2.3 is still missing after 5 minutes");
-    expect(Date.now() - start).toBeLessThan(4000);
+    expect(r.calls.length).toBeGreaterThanOrEqual(2);
+    expect(r.calls.length).toBeLessThanOrEqual(10);
+    expect(Date.now() - start).toBeLessThan(2500);
   }, 20_000);
 
   test("staging mode: a stalled HEAD read exits loudly instead of hanging", () => {

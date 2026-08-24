@@ -43,19 +43,24 @@ const GIT_NO_PROMPT_ENV = { GIT_TERMINAL_PROMPT: "0", GIT_ASKPASS: "", SSH_ASKPA
 
 /** Poll until the probe succeeds (it prints its own success message), the
  * wall-clock deadline passes, or the attempts run out; a timeout warns
- * and returns - the caller's later guards own the hard failure. */
+ * and returns - the caller's later guards own the hard failure. The probe
+ * receives its network deadline, capped to the wall clock's remainder, so
+ * not even the final stalled call can overshoot DEADLINE_MS; only the
+ * first probe is exempt from the deadline gate (something must probe). */
 async function waitFor(
-  probe: () => boolean,
+  probe: (timeoutMs: number) => boolean,
   waitingMessage: string,
   timeoutWarning: string,
 ): Promise<void> {
   const deadline = Date.now() + DEADLINE_MS;
   for (let attempt = 0; attempt < ATTEMPTS; attempt++) {
-    if (probe()) return;
     const left = deadline - Date.now();
-    if (left <= 0) break;
+    if (attempt > 0 && left <= 0) break;
+    if (probe(Math.min(PROBE_TIMEOUT_MS, Math.max(left, 1)))) return;
+    const rest = deadline - Date.now();
+    if (rest <= 0) break;
     console.log(waitingMessage);
-    await Bun.sleep(Math.min(DELAY_MS, left));
+    await Bun.sleep(Math.min(DELAY_MS, rest));
   }
   warning(timeoutWarning);
 }
@@ -64,7 +69,7 @@ const mode = process.argv[2];
 if (mode === "tag") {
   const tag = `templates/${requireEnv("VERSION")}`;
   await waitFor(
-    () => {
+    (timeoutMs) => {
       const probe = capture(
         [
           "git",
@@ -75,7 +80,7 @@ if (mode === "tag") {
           "origin",
           `refs/tags/${tag}`,
         ],
-        { env: GIT_NO_PROMPT_ENV, timeoutMs: PROBE_TIMEOUT_MS },
+        { env: GIT_NO_PROMPT_ENV, timeoutMs },
       );
       if (probe.exitCode !== 0) return false;
       console.log(`${tag} exists.`);
@@ -98,14 +103,14 @@ if (mode === "tag") {
     workflow_runs: z.array(z.object({ event: z.string(), head_sha: z.string() })),
   });
   await waitFor(
-    () => {
+    (timeoutMs) => {
       const runs = capture(
         [
           "gh",
           "api",
           `repos/${repository}/actions/workflows/build-branches.yml/runs?status=success&per_page=30`,
         ],
-        { timeoutMs: PROBE_TIMEOUT_MS },
+        { timeoutMs },
       );
       // A transient API failure - a stalled call past its deadline
       // included - reads as not-built-yet: keep polling.
