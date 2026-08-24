@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 // Stamp per-repo content hashes into the ownership manifest
-// (.repo-platform-manifest.json) of a rendered repository.
+// (.github/repo-platform-manifest.json) of a rendered repository.
 //
 // The template renders the manifest with every hash null: hashes are
 // per-repo facts that exist only once copier has written the tree. This
@@ -45,7 +45,7 @@ import { createHash } from "node:crypto";
 import { lstatSync, readFileSync, readlinkSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 
-export const MANIFEST_NAME = ".repo-platform-manifest.json";
+export const MANIFEST_NAME = ".github/repo-platform-manifest.json";
 
 /** One manifest entry line, as compose_template.ts emits it: indentation,
  *  the JSON-quoted path, the one-line entry object, an optional joining

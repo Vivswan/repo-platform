@@ -32,6 +32,7 @@
 {%- set _ = entries.append('    ".github/copilot-instructions.md": {"class": "managed", "hash": null}') -%}
 {%- endif -%}
 {%- set _ = entries.append('    ".github/dependabot.yml": {"class": "managed", "hash": null}') -%}
+{%- set _ = entries.append('    ".github/repo-platform-manifest.json": {"class": "managed", "hash": null, "commit": null}') -%}
 {%- if 'settings-sync' in modules -%}
 {%- set _ = entries.append('    ".github/settings.yml": {"class": "mergeable"}') -%}
 {%- endif -%}
@@ -84,7 +85,6 @@
 {%- if 'release-please' in modules -%}
 {%- set _ = entries.append('    ".release-please-manifest.json": {"class": "starter"}') -%}
 {%- endif -%}
-{%- set _ = entries.append('    ".repo-platform-manifest.json": {"class": "managed", "hash": null, "commit": null}') -%}
 {%- set _ = entries.append('    ".repo-platform.yml": {"class": "managed", "hash": null}') -%}
 {%- set _ = entries.append('    ".typography-allow": {"class": "managed", "hash": null}') -%}
 {%- set _ = entries.append('    ".yamllint": {"class": "managed", "hash": null}') -%}
