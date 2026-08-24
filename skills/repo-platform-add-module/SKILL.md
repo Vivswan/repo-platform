@@ -94,7 +94,7 @@ The sync PR is an ordinary template sync PR: before anything merges, classify an
 What the PR delivers, in two classes:
 
 - Managed files: arrive now and keep updating on every future sync (workflow callers, ci.yml jobs, dependabot entries, gitignore sections). Do not edit them.
-- Generated-once starters (`_skip_if_exists`): arrive once, then repo-owned - sync never touches them again. Modules that ship starters: `fuzzer` (`nightly-fuzz.yml`), `nightly` (`nightly.yml`), `skills` (`.claude-plugin/plugin.json` + `marketplace.json`), `release-please` (`release.yml`, `release-please-config.json`, `.release-please-manifest.json`), `issue-templates` (issue forms + chooser), `agents` (`copilot-setup-steps.yml`), and any formatter toolchain (bun/node/deno/uv, not rust: `auto-format.yml` gains that toolchain only if the file does not exist yet). A starter that already exists is never re-rendered - a repo adopting `skills` with existing manifests keeps them untouched.
+- Generated-once starters (`_skip_if_exists`): arrive once, then repo-owned - sync never touches them again. Modules that ship starters: `fuzzer` (`nightly-fuzz.yml`), `nightly` (`nightly.yml`), `skills` (`.claude-plugin/plugin.json` + `marketplace.json`), `release-please` (`update-release.yml`, `update-release-pr.yml`, `release-please-config.json`, `.release-please-manifest.json`), `issue-templates` (issue forms + chooser), `agents` (`copilot-setup-steps.yml`), and any formatter toolchain (bun/node/deno/uv, not rust: `auto-format.yml` gains that toolchain only if the file does not exist yet). A starter that already exists is never re-rendered - a repo adopting `skills` with existing manifests keeps them untouched.
 
 ### 4. Finish the companion steps
 
