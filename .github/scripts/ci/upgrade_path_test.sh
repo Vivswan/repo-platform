@@ -23,12 +23,13 @@ GITHUB_WORKSPACE="${GITHUB_WORKSPACE:-$(pwd)}"
 PROJECT=/tmp/upgrade
 WORK=/tmp/upgrade-work
 
-# The fleet LICENSE template carries its Required Notice as a jinja
-# variable; comparisons against rendered projects substitute the copier
-# default (independent of the code under test, like the rest of this
-# harness).
+# The fleet LICENSE template carries its Required Notice and its
+# local-section marker as jinja variables; comparisons against rendered
+# projects substitute the copier defaults (independent of the code under
+# test, like the rest of this harness).
 rendered_fleet_license() {
-  sed 's|{{ copyright_holder }}|Vivswan Shah (https://github.com/Vivswan)|g' \
+  sed -e 's|{{ copyright_holder }}|Vivswan Shah (https://github.com/Vivswan)|g' \
+    -e 's|{{ github_username }}|Vivswan|g' \
     "$GITHUB_WORKSPACE/templates/base/{% if 'custom-license' not in modules %}LICENSE.md{% endif %}.jinja"
 }
 
