@@ -94,7 +94,7 @@ Two files record the outcome:
 Some files are generated once and then owned by the repo (sync never overwrites them). Put real content in the ones your modules created:
 
 - `.github/workflows/checks.yml`: the repo's own test/lint jobs. The managed `ci.yml` calls it inside the all-green gate.
-- `.github/workflows/release.yml` (release-please module): the release pipeline - release-please cuts a draft, `update-release` mutates it (assets, notes), `publish-release` flips it live.
+- `.github/workflows/update-release.yml` (release-please module): the repo's hook in the managed `release.yml` pipeline - release-please cuts a draft, this hook mutates it (assets, notes), then the publish stage attests every asset into a single `attestation.jsonl` and flips it live.
 - `.github/workflows/nightly-fuzz.yml` (fuzzer module): replace the placeholder fuzz step with your fuzzer.
 - `.github/workflows/nightly.yml` (nightly module): replace the placeholder step with the repo's own nightly checks.
 - `.claude-plugin/plugin.json` and `marketplace.json` (skills module): seeded with an empty catalog; list each published skill's path in `plugin.json`'s `skills` array.

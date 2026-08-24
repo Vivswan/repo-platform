@@ -66,7 +66,7 @@ export const RECORDED_DIVERGENCES: {
   before: RegExp;
 }[] = [
   {
-    file: ".github/workflows/release-please.yml",
+    file: ".github/workflows/release.yml",
     reason:
       "the release-health pre-flight is dogfooded from this repository's own tree " +
       "(./actions/release-health), which needs the repository checked out; downstream " +
@@ -1057,7 +1057,7 @@ const rules: Rule[] = [
     // dogfood-oracle smoke row (verify_dogfood_oracle.ts), so they need no
     // comparison here. This rule keeps only the pairs generation cannot
     // own: the prefix files, whose repo-specific tails
-    // live below the template's marker, and release-please.yml, whose one
+    // live below the template's marker, and release.yml, whose one
     // recorded divergence (the dogfooded ./actions/release-health checkout)
     // needs semantic comparison with an excuse.
     name: "dogfood-parity",
@@ -1078,8 +1078,8 @@ const rules: Rule[] = [
           mode: "prefix",
         },
         {
-          repo: ".github/workflows/release-please.yml",
-          tpl: "templates/release-please/.github/workflows/release-please.yml.jinja",
+          repo: ".github/workflows/release.yml",
+          tpl: "templates/release-please/.github/workflows/release.yml.jinja",
           mode: "semantic",
           // This repository selects no tracking-stream module (fuzzer,
           // nightly), so the generated tracking-labels block must evaluate
@@ -1705,8 +1705,8 @@ const rules: Rule[] = [
         parseLabels(`labels:\n${fragment}`, "settings-labels.jinja").map((label) => label.name),
       );
       for (const rel of [
-        ".github/workflows/release-please.yml",
-        "templates/release-please/.github/workflows/release-please.yml.jinja",
+        ".github/workflows/release.yml",
+        "templates/release-please/.github/workflows/release.yml.jinja",
       ]) {
         const text = read(rel);
         const queried = mustMatch(

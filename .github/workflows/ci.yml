@@ -485,7 +485,7 @@ jobs:
   # Fails a release PR while an open release-blocker issue or a high+
   # Dependabot alert says the tip is not release-worthy (this repo runs no
   # tracking-stream module - fuzzer, nightly - so no tracking gate). Early
-  # visibility only: release-please.yml's pre-flight re-checks
+  # visibility only: release.yml's pre-flight re-checks
   # authoritatively at cut time. The skip lives on the STEPS: all-green
   # treats a skipped needed job as failure.
   release-health:
@@ -562,47 +562,32 @@ jobs:
             exit 1
           fi
 
-  # Release from a green main only: release-please runs downstream of
-  # all-green (in release-please.yml, via workflow_call), so a red commit can
-  # never cut a release or refresh the release PR. Deliberately NOT in
-  # all-green's needs: it depends on the gate, it is not gated by it. Only
-  # push/dispatch runs release: pull requests must never reach it, and the
-  # weekly scheduled CodeQL re-scan has no business refreshing release state.
-  release-please:
+  # Release from a green main only: the release pipeline (release.yml:
+  # release-please cuts a draft, the repo-owned update-release.yml hook
+  # mutates it, then the attested publish flips it live) runs downstream of
+  # all-green, so a red commit can never cut a release or refresh the
+  # release PR. Deliberately NOT in all-green's needs: it depends on the
+  # gate, it is not gated by it. Only push/dispatch runs release: pull
+  # requests must never reach it, and the weekly scheduled CodeQL re-scan
+  # has no business refreshing release state. Publishing with the fleet PAT
+  # (inherited secret) keeps the release event firing build-branches (the
+  # default GITHUB_TOKEN cannot trigger it), which tags templates/vX.Y.Z
+  # and rebuilds the latest channel.
+  release:
     needs: [all-green]
     if: >-
       (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
       && github.ref == 'refs/heads/main'
+    # The publishing ceiling for the release pipeline's jobs; nested jobs
+    # can only narrow it, never raise it.
     permissions:
       contents: write
       pull-requests: write
-      # The release-health pre-flight (in release-please.yml) reads open
+      id-token: write
+      attestations: write
+      # The release-health pre-flight (in release.yml) reads open
       # issues and Dependabot alerts through this ceiling.
       issues: read
       vulnerability-alerts: read
-    uses: ./.github/workflows/release-please.yml
+    uses: ./.github/workflows/release.yml
     secrets: inherit
-
-  # GitHub releases are immutable once published, so release-please cuts the
-  # release as a draft (see release-please.yml) and this job flips it live.
-  # Nothing here mutates the draft in between - repo-platform ships no
-  # release assets. Publishing with the fleet PAT keeps the release event
-  # firing build-branches (the default GITHUB_TOKEN cannot trigger it),
-  # which tags templates/vX.Y.Z and rebuilds the latest channel.
-  # If this job fails the release stays a draft; re-run just this job
-  # (a full rerun cannot recreate it - release-please sees the forced
-  # tag) or `gh release edit <tag> --draft=false`.
-  publish-release:
-    needs: [all-green, release-please]
-    if: needs.release-please.outputs.release_created == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions:
-      contents: write
-    steps:
-      - name: Publish the GitHub release
-        env:
-          GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN || github.token }}
-          GH_REPO: ${{ github.repository }}
-          TAG: ${{ needs.release-please.outputs.tag_name }}
-        run: gh release edit "$TAG" --draft=false

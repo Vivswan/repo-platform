@@ -3,7 +3,7 @@
 // repo's own copies, so each generated file has exactly one author: the
 // template. The copies carry the template's comments verbatim; the pairs
 // generation cannot own (the prefix files with repo-specific tails,
-// release-please.yml with its recorded divergence) stay compared by
+// release.yml with its recorded divergence) stay compared by
 // check_ssot's dogfood-parity rule instead.
 //
 // Answers come from .repo-platform-answers.yml, this repository's own

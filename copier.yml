@@ -11,8 +11,9 @@ _preserve_symlinks: true
 
 # Repo-owned starters: generated when absent, never overwritten by template
 # sync. checks.yml holds each repo's own CI jobs (the managed ci.yml calls
-# it inside the all-green gate); release.yml is the repo's release pipeline
-# around the managed release-please machinery (pre/post jobs); auto-format
+# it inside the all-green gate); update-release.yml is the repo's hook in
+# the managed release.yml pipeline, called between the draft cut and the
+# attested publish (packaging, asset uploads, note edits); auto-format
 # and copilot-setup-steps run repo-specific commands; the release-please
 # config/manifest are release state (release-please bumps the manifest via
 # release PRs); issue forms and the chooser config start from the generic
@@ -20,7 +21,7 @@ _preserve_symlinks: true
 # components, labels, contact links, etc.).
 _skip_if_exists:
   - .github/workflows/checks.yml
-  - .github/workflows/release.yml
+  - .github/workflows/update-release.yml
   - .github/workflows/auto-format.yml
   - .github/workflows/copilot-setup-steps.yml
   # The fuzzer module's starter: the fuzz/toolchain steps are repo-specific,

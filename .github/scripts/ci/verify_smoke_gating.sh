@@ -367,7 +367,7 @@ fi
 # release-please module gates the autorelease labels in the settings-sync
 # module's settings.yml (only rendered when that module is on) and the
 # release-tags tag-immutability ruleset there (sync pins against v-tags),
-# the managed release-please.yml machinery, the repo-owned release.yml
+# the managed release.yml pipeline, the repo-owned update-release.yml hook,
 # pipeline plus its thin caller job in the managed ci.yml, and the config
 # files. The fuzzer and nightly modules' tracking labels splice into
 # settings.yml the same way.
@@ -391,8 +391,8 @@ if has settings-sync; then
   if has rust; then present_line "  - name: rust" /tmp/smoke/.github/settings.yml; else absent "name: rust" /tmp/smoke/.github/settings.yml; fi
 fi
 if has release-please; then
-  test -f "$wf/release-please.yml"
   test -f "$wf/release.yml"
+  test -f "$wf/update-release.yml"
   present "uses: ./.github/workflows/release.yml" "$wf/ci.yml"
   # The freshness gate must render as a job AND sit in all-green's needs;
   # losing either fragment would fail open silently.
@@ -408,36 +408,41 @@ if has release-please; then
   present_line "  release-health:" "$wf/ci.yml"
   present_line "      - release-health" "$wf/ci.yml"
   present "release-health@main" "$wf/ci.yml"
-  present "release-health@main" "$wf/release-please.yml"
+  present "release-health@main" "$wf/release.yml"
   present_line "          mode: pull-request" "$wf/ci.yml"
-  present_line "          mode: release" "$wf/release-please.yml"
+  present_line "          mode: release" "$wf/release.yml"
   absent "fuzz-label:" "$wf/ci.yml"
-  absent "fuzz-label:" "$wf/release-please.yml"
+  absent "fuzz-label:" "$wf/release.yml"
   if has fuzzer && has nightly; then
     present_line '          tracking-labels: "fuzz-nightly,nightly-failure"' "$wf/ci.yml"
-    present_line '          tracking-labels: "fuzz-nightly,nightly-failure"' "$wf/release-please.yml"
+    present_line '          tracking-labels: "fuzz-nightly,nightly-failure"' "$wf/release.yml"
   elif has fuzzer; then
     present_line '          tracking-labels: "fuzz-nightly"' "$wf/ci.yml"
-    present_line '          tracking-labels: "fuzz-nightly"' "$wf/release-please.yml"
+    present_line '          tracking-labels: "fuzz-nightly"' "$wf/release.yml"
   elif has nightly; then
     present_line '          tracking-labels: "nightly-failure"' "$wf/ci.yml"
-    present_line '          tracking-labels: "nightly-failure"' "$wf/release-please.yml"
+    present_line '          tracking-labels: "nightly-failure"' "$wf/release.yml"
   else
     absent "tracking-labels:" "$wf/ci.yml"
-    absent "tracking-labels:" "$wf/release-please.yml"
+    absent "tracking-labels:" "$wf/release.yml"
   fi
   test -f /tmp/smoke/release-please-config.json
   test -f /tmp/smoke/.release-please-manifest.json
-  # Every render carries the full three-step draft flow: the update hook
-  # between the draft and the publish, and the publish job last, each
-  # needing everything before it.
+  # Every render carries the full three-stage draft flow inside the managed
+  # release.yml: the repo-owned update hook called between the draft and
+  # the publish, the attestation on the publish path, and the publish job
+  # last, each needing everything before it.
   present "update-release:" "$wf/release.yml"
   present "publish-release:" "$wf/release.yml"
+  present "uses: ./.github/workflows/update-release.yml" "$wf/release.yml"
   present "needs: [release-please]" "$wf/release.yml"
   present "needs: [release-please, update-release]" "$wf/release.yml"
+  present "attest-build-provenance" "$wf/release.yml"
+  present "attestations: write" "$wf/release.yml"
+  present "id-token: write" "$wf/release.yml"
 else
-  test ! -e "$wf/release-please.yml"
   test ! -e "$wf/release.yml"
+  test ! -e "$wf/update-release.yml"
   absent "uses: ./.github/workflows/release.yml" "$wf/ci.yml"
   absent "release-freshness" "$wf/ci.yml"
   absent_line "  release-health:" "$wf/ci.yml"

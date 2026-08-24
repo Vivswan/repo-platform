@@ -23,7 +23,7 @@
 // - templates/<module>/<pin.file> for every manifest toolchain pin: WHOLE
 //   generated dotfiles carrying exactly the pinned version plus a newline.
 // - templates/release-please/fragments/ci-gate-jobs.jinja and
-//   templates/release-please/.github/workflows/release-please.yml.jinja:
+//   templates/release-please/.github/workflows/release.yml.jinja:
 //   the tracking-labels input both release-health call sites pass, built
 //   from the manifests' tracking_label streams (jinja-comment markers, so
 //   a rendered downstream workflow carries no marker text).
@@ -773,7 +773,7 @@ function targets(manifests: ModuleManifest[]): Target[] {
       regions: [["tracking-labels", ({ manifests }) => trackingLabelsInput(manifests)]],
     },
     {
-      file: "templates/release-please/.github/workflows/release-please.yml.jinja",
+      file: "templates/release-please/.github/workflows/release.yml.jinja",
       syntax: "jinja",
       regions: [["tracking-labels", ({ manifests }) => trackingLabelsInput(manifests)]],
     },
