@@ -113,83 +113,35 @@ jobs:
       - name: Install script dependencies
         run: bun install --frozen-lockfile --silent
 
+      # The version and wait logic live in scripts (their headers state
+      # the contracts): the resolve pins the newest stable release as the
+      # ground truth, and each bounded wait warns-and-continues on timeout
+      # because the sync's own guards fail loudly and the cron heals.
       - name: Resolve target version
         id: version
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.event.release.tag_name }}
           REQUESTED: ${{ inputs.version }}
-        run: |
-          if [ -n "$REQUESTED" ]; then
-            version="$REQUESTED"
-          elif ! version="$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq .tag_name 2>/tmp/gh-latest-err)"; then
-            # Only HTTP 404 means no release exists (fine for a staging-only
-            # fleet; a latest-channel sync leg fails with its own actionable
-            # error). Anything else is an API failure that must not read as
-            # "no release yet" - that would sync latest-channel repos to
-            # nothing (or a notice-only stale version) while staying green.
-            if grep -q "HTTP 404" /tmp/gh-latest-err; then
-              version=""
-              echo "No release yet; syncing without a version."
-            else
-              echo "::error::reading ${GITHUB_REPOSITORY}'s latest release failed - an API failure, not a missing release; re-run the sync."
-              cat /tmp/gh-latest-err
-              exit 1
-            fi
-          fi
-          # The release event's tag is never trusted as the sync target: a
-          # release published on an older tag must not roll the latest
-          # channel backwards, so releases/latest above is the ground truth
-          # and a differing event tag only gets a notice.
-          if [ -n "$RELEASE_TAG" ] && [ "$RELEASE_TAG" != "$version" ]; then
-            echo "::notice::published release ${RELEASE_TAG} is not the newest stable release (${version:-none exists}); latest-channel repos sync to the newest stable release instead."
-          fi
-          echo "version=${version}"
-          echo "version=${version}" >> "$GITHUB_OUTPUT"
+        run: bun .github/scripts/sync/resolve_target_version.ts
 
       # build-branches also triggers on release:published, with no ordering
       # between the two runs; latest-channel syncs need the templates/v* tag
-      # it creates. Wait for it (bounded) - on timeout, sync anyway: the
-      # sync's own guard fails with a clear message and the cron heals.
+      # it creates.
       - name: Wait for the templates build tag
         if: steps.version.outputs.version != ''
         env:
           VERSION: ${{ steps.version.outputs.version }}
-        run: |
-          tag="templates/${VERSION}"
-          for _ in $(seq 1 30); do
-            if git ls-remote --exit-code origin "refs/tags/${tag}" >/dev/null 2>&1; then
-              echo "${tag} exists."
-              exit 0
-            fi
-            echo "waiting for ${tag}..."
-            sleep 10
-          done
-          echo "::warning::${tag} is still missing after 5 minutes because Build Branches has not finished (or did not trigger). Syncing anyway - latest-channel legs will fail with a clear error until the tag exists. If it stays missing, dispatch the Build Branches workflow manually."
+        run: bun .github/scripts/sync/wait_for_build.ts tag
 
       # Build Branches rebuilds staging asynchronously after each main
       # merge; a sync dispatched right after a merge could consume the
       # previous staging tree. Wait (bounded) for a successful push- or
-      # schedule-event run at main's HEAD - the run kinds that always
-      # rebuild staging, so either proves it (a no-op rebuild creates no
-      # staging commit to wait for; a manual dispatch may rebuild only
-      # latest, so it proves nothing).
+      # schedule-event run at main's HEAD.
       - name: Wait for a fresh staging build
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          main_sha="$(git ls-remote origin HEAD | cut -f1)"
-          for _ in $(seq 1 30); do
-            built="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/build-branches.yml/runs?status=success&per_page=30" \
-              --jq '.workflow_runs[] | select(.event == "push" or .event == "schedule") | .head_sha' 2>/dev/null || true)"
-            if grep -qx "$main_sha" <<<"$built"; then
-              echo "staging is built from main HEAD ${main_sha}."
-              exit 0
-            fi
-            echo "waiting for a successful Build Branches push or schedule run at ${main_sha}..."
-            sleep 10
-          done
-          echo "::warning::no successful Build Branches push- or schedule-event run found for main HEAD ${main_sha} after 5 minutes; staging-channel syncs may apply the previous staging tree. The weekly cron heals this on its next run."
+        run: bun .github/scripts/sync/wait_for_build.ts staging
 
       # user/repos with the PAT sees every public repo (fine-grained PATs
       # always read public resources) and its permissions field reflects
