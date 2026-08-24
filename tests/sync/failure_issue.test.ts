@@ -7,8 +7,9 @@ const script = join(import.meta.dir, "../../.github/scripts/sync/failure_issue.t
 const SLUG = "Vivswan/hidden-server";
 
 // Records every invocation to GH_CALLS, copies any body=@file payload to
-// GH_BODY, answers `api user` with a login and issue-list GETs with the
-// canned GH_LOOKUP; GH_FAIL picks a failure mode, each with a leaky error.
+// GH_BODY, answers `api user` with a login, issue-list GETs with the
+// canned GH_LOOKUP, and the create POST with a fixed issue number;
+// GH_FAIL picks a failure mode, each with a leaky error.
 const ghStub = `#!/usr/bin/env bash
 set -euo pipefail
 { printf 'gh'; printf ' %s' "$@"; echo; } >>"$GH_CALLS"
@@ -40,6 +41,15 @@ case "$method" in
       echo "gh: Validation Failed (HTTP 422): ${SLUG}" >&2
       exit 1
     fi
+    case "\${2:-}" in
+      */assignees)
+        if [ "\${GH_FAIL:-}" = "assign" ]; then
+          echo "gh: Validation Failed (HTTP 422): ${SLUG}/assignees" >&2
+          exit 1
+        fi
+        ;;
+      repos/${SLUG}/issues) echo "31" ;;
+    esac
     ;;
 esac
 `;
@@ -132,13 +142,51 @@ describe("failure_issue.ts", () => {
     expect(r.output).not.toContain("hidden-server");
   });
 
+  test("deliver assigns the target's owner to the created issue", () => {
+    // A workflow-token issue fires no issues:opened event, so nothing on
+    // the target can assign it later - creation is the only moment.
+    const r = run("deliver", { failures: oneFailure });
+    expect(r.exitCode).toBe(0);
+    expect(r.calls).toContain(`repos/${SLUG}/issues/31/assignees --method POST`);
+    expect(r.calls).toContain("assignees[]=Vivswan");
+    expect(r.output).not.toContain("hidden-server");
+  });
+
+  test("a failed assignment logs a notice and never fails the delivery", () => {
+    const r = run("deliver", { failures: oneFailure, fail: "assign" });
+    expect(r.exitCode).toBe(0);
+    expect(r.output).toContain("::notice::could not assign the repository owner");
+    expect(r.output).toContain("delivered");
+    // The notice stays public-safe: no slug, no owner login, no API message.
+    expect(r.output).not.toContain("hidden-server");
+    expect(r.output).not.toContain("Vivswan");
+    expect(r.output).not.toContain("Validation Failed");
+  });
+
   test("deliver replaces and reopens an existing issue", () => {
-    const r = run("deliver", { failures: oneFailure, lookup: "17 closed" });
+    const r = run("deliver", { failures: oneFailure, lookup: "17 closed 0" });
     expect(r.exitCode).toBe(0);
     expect(r.calls).toContain(`repos/${SLUG}/issues/17 --method PATCH`);
     expect(r.calls).toContain("state=open");
-    expect(r.calls).not.toContain("--method POST");
+    // No create: the reused issue is the delivery target (the assignees
+    // POST below is the only POST this path may make).
+    expect(r.calls).not.toContain(`repos/${SLUG}/issues --method POST`);
     expect(r.output).not.toContain("hidden-server");
+  });
+
+  test("deliver assigns the owner to a reused issue that is still unassigned", () => {
+    const r = run("deliver", { failures: oneFailure, lookup: "17 closed 0" });
+    expect(r.exitCode).toBe(0);
+    expect(r.calls).toContain(`repos/${SLUG}/issues/17/assignees --method POST`);
+    expect(r.calls).toContain("assignees[]=Vivswan");
+  });
+
+  test("deliver leaves a reused issue's existing assignees alone", () => {
+    // The owner may have deliberately handed the issue off.
+    const r = run("deliver", { failures: oneFailure, lookup: "17 open 1" });
+    expect(r.exitCode).toBe(0);
+    expect(r.calls).toContain(`repos/${SLUG}/issues/17 --method PATCH`);
+    expect(r.calls).not.toContain("/assignees");
   });
 
   test("deliver bounds an oversized capture", () => {
@@ -238,16 +286,18 @@ describe("failure_issue.ts", () => {
   });
 
   test("resolve leaves a closed issue alone", () => {
-    const r = run("resolve", { lookup: "9 closed" });
+    const r = run("resolve", { lookup: "9 closed 0" });
     expect(r.exitCode).toBe(0);
     expect(r.calls).not.toContain("PATCH");
   });
 
   test("resolve closes an open issue with a healthy note", () => {
-    const r = run("resolve", { lookup: "9 open" });
+    const r = run("resolve", { lookup: "9 open 0" });
     expect(r.exitCode).toBe(0);
     expect(r.calls).toContain(`repos/${SLUG}/issues/9 --method PATCH`);
     expect(r.calls).toContain("state=closed");
+    // Closing is not a moment to assign: resolve never touches assignees.
+    expect(r.calls).not.toContain("/assignees");
     expect(r.body).toContain("Healthy");
     expect(r.body).toContain("actions/runs/123");
     expect(r.output).not.toContain("hidden-server");

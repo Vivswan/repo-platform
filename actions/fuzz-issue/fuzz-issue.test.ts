@@ -222,9 +222,14 @@ describe("buildGenericBody", () => {
 /**
  * A recording gh runner: captures every command, answers the label-list
  * query from `labelTaken`, and the issue-list query from `openNumber` (a
- * number opens the comment path, undefined the create path).
+ * number opens the comment path, undefined the create path) with the given
+ * `assignees` on the open issue.
  */
-function fakeGh(openNumber?: number, labelTaken = false): { run: GhRunner; calls: string[][] } {
+function fakeGh(
+  openNumber?: number,
+  labelTaken = false,
+  assignees: Array<{ login: string }> = [],
+): { run: GhRunner; calls: string[][] } {
   const calls: string[][] = [];
   const run: GhRunner = async (args) => {
     calls.push(args);
@@ -232,7 +237,7 @@ function fakeGh(openNumber?: number, labelTaken = false): { run: GhRunner; calls
       return JSON.stringify(labelTaken ? [{ name: args[args.indexOf("--search") + 1] }] : []);
     }
     if (args[0] === "issue" && args[1] === "list") {
-      return JSON.stringify(openNumber === undefined ? [] : [{ number: openNumber }]);
+      return JSON.stringify(openNumber === undefined ? [] : [{ number: openNumber, assignees }]);
     }
     if (args[0] === "issue" && args[1] === "create") {
       return "https://github.com/o/r/issues/7\n";
@@ -260,17 +265,47 @@ describe("fileIssue", () => {
     expect(calls.some((c) => c[0] === "issue" && c[1] === "create")).toBe(false);
   });
 
-  test("the filer performs no assignment on either path", async () => {
-    // Assignment policy lives in the auto-assign workflow, which the caller
-    // dispatches after filing; the filer must never touch assignees.
-    for (const openNumber of [undefined, 3]) {
-      const { run, calls } = fakeGh(openNumber);
-      await fileIssue(run, "o/r", "body", "fuzz-nightly", "t");
-      const flat = calls.flat();
-      expect(flat).not.toContain("--assignee");
-      expect(flat).not.toContain("--add-assignee");
-      expect(calls.some((c) => c[0] === "issue" && c[1] === "edit")).toBe(false);
-    }
+  test("the create path assigns the repository owner to the new issue", async () => {
+    // A workflow-token issue fires no issues:opened event, so assignment
+    // must happen at creation - the filer itself owns it now.
+    const { run, calls } = fakeGh(undefined);
+    await fileIssue(run, "o/r", "body", "fuzz-nightly", "t");
+    const edit = calls.find((c) => c[0] === "issue" && c[1] === "edit");
+    expect(edit?.[2]).toBe("7");
+    expect(edit?.[edit.indexOf("--add-assignee") + 1]).toBe("o");
+  });
+
+  test("an unassigned open issue picks up the owner on the comment path", async () => {
+    const { run, calls } = fakeGh(3, true);
+    await fileIssue(run, "o/r", "body", "fuzz-nightly", "t");
+    const edit = calls.find((c) => c[0] === "issue" && c[1] === "edit");
+    expect(edit?.[2]).toBe("3");
+    expect(edit?.[edit.indexOf("--add-assignee") + 1]).toBe("o");
+  });
+
+  test("an already-assigned open issue is left alone on the comment path", async () => {
+    // A human may have deliberately reassigned the tracking issue.
+    const { run, calls } = fakeGh(3, true, [{ login: "someone" }]);
+    await fileIssue(run, "o/r", "body", "fuzz-nightly", "t");
+    expect(calls.some((c) => c[0] === "issue" && c[1] === "edit")).toBe(false);
+  });
+
+  test("a failed assignment never fails the filing", async () => {
+    // An org-owned repo's owner is an org and not assignable; the filing
+    // must still succeed and return the number.
+    const calls: string[][] = [];
+    const run: GhRunner = async (args) => {
+      calls.push(args);
+      if (args[0] === "label" && args[1] === "list") return JSON.stringify([{ name: "l" }]);
+      if (args[0] === "issue" && args[1] === "list") return "[]";
+      if (args[0] === "issue" && args[1] === "create") return "https://github.com/o/r/issues/7\n";
+      if (args[0] === "issue" && args[1] === "edit") {
+        throw new Error("gh issue edit failed (1): could not assign user");
+      }
+      return "";
+    };
+    expect(await fileIssue(run, "o/r", "body", "fuzz-nightly", "t")).toBe(7);
+    expect(calls.some((c) => c[0] === "issue" && c[1] === "edit")).toBe(true);
   });
 
   test("returns the created issue number (parsed from gh's create URL)", async () => {
@@ -400,6 +435,12 @@ describe("resolveIssue", () => {
     await resolveIssue(run, "o/r", "fuzz-nightly", env);
     expect(calls.some((c) => c[0] === "issue" && c[1] === "comment")).toBe(false);
     expect(calls.some((c) => c[0] === "issue" && c[1] === "close")).toBe(false);
+  });
+
+  test("resolve never touches assignees - closing is not a moment to assign", async () => {
+    const { run, calls } = fakeGh(5);
+    await resolveIssue(run, "o/r", "fuzz-nightly", env);
+    expect(calls.some((c) => c[0] === "issue" && c[1] === "edit")).toBe(false);
   });
 
   test("every open labeled issue is closed, not just the first", async () => {

@@ -5,7 +5,8 @@
 // reusable-template-sync.yml's tail steps.
 //
 // deliver (failed run): replace the issue body with every recorded hidden
-// failure (hidden-failures.tsv from run_hidden.ts) and (re)open it.
+// failure (hidden-failures.tsv from run_hidden.ts) and (re)open it, and
+// assign the target's owner best-effort (see assignOwner for why here).
 // Skipped when PR_URL is set - the only hidden-wrapped failures that let
 // the run reach PR creation are validation ones, and open_pr.ts already
 // routed those into the PR body. resolve (fully successful run): close
@@ -88,11 +89,11 @@ const resolveLead =
   "the target repository's failure-report issue could not be resolved after this healthy run";
 const resolveTail = "If one is open, close it manually.";
 
-// Returns "<number> <state>" for the reused issue, "" when none exists,
-// or null on an API failure. Filtering to the token user's own issues
-// keeps a title squatted by someone else from hijacking the delivery;
-// creation order makes the oldest issue win deterministically should a
-// duplicate ever appear.
+// Returns "<number> <state> <assignee-count>" for the reused issue, ""
+// when none exists, or null on an API failure. Filtering to the token
+// user's own issues keeps a title squatted by someone else from hijacking
+// the delivery; creation order makes the oldest issue win deterministically
+// should a duplicate ever appear.
 function findIssue(): string | null {
   const login = gh(["api", "user", "--jq", ".login"]);
   if (login.exitCode !== 0) return null;
@@ -116,10 +117,41 @@ function findIssue(): string | null {
     "--jq",
     `[.[][] | select(has("pull_request") | not)
       | select(.title == env.ISSUE_TITLE)] | first
-      | if . == null then "" else "\\(.number) \\(.state)" end`,
+      | if . == null then ""
+        else "\\(.number) \\(.state) \\(.assignees | length)" end`,
   ]);
   if (list.exitCode !== 0) return null;
   return list.stdout.replace(/\n$/, "");
+}
+
+// Assign the target's owner to the failure-report issue: an issue created
+// with a workflow token fires no issues:opened event, so no automation on
+// the target can catch it - assignment has to happen at creation, here.
+// The owner login is the target slug's first segment (a personal-account
+// fleet: a user repo's owner is assignable). Best-effort by constraint: an
+// org-owned target's owner is an org and not assignable, and delivery must
+// not gain a failure path over assignment, so a failure logs one
+// public-safe notice (no login, no issue number: the target's owner is
+// half the private slug) and the delivery stands.
+function assignOwner(issueNumber: string): void {
+  const owner = target.split("/")[0];
+  const assign = gh(
+    [
+      "api",
+      `repos/${target}/issues/${issueNumber}/assignees`,
+      "--method",
+      "POST",
+      "--silent",
+      "-f",
+      `assignees[]=${owner}`,
+    ],
+    { stdoutToErrlog: true },
+  );
+  if (assign.exitCode !== 0) {
+    console.log(
+      "::notice::could not assign the repository owner to the failure-report issue (best-effort); the report delivery itself succeeded",
+    );
+  }
 }
 
 const bodyFile = join(runnerTemp, "failure-issue-body.md");
@@ -190,26 +222,40 @@ if (mode === "deliver") {
   const found = findIssue();
   if (found === null) warnAndExit(deliverLead, deliverTail);
   if (found === "") {
+    // --jq .number replaces --silent: the create must yield the new number
+    // (nothing but a bare integer, so nothing private) for the assignment
+    // call, while a failure's response body still folds into the unprinted
+    // errlog.
     const create = gh(
       [
         "api",
         `repos/${target}/issues`,
         "--method",
         "POST",
-        "--silent",
         "-f",
         `title=${ISSUE_TITLE}`,
         "-F",
         `body=@${bodyFile}`,
+        "--jq",
+        ".number",
       ],
       { stdoutToErrlog: true },
     );
     if (create.exitCode !== 0) warnAndExit(deliverLead, deliverTail);
+    const issueNumber = create.stdout.trim();
+    if (/^[0-9]+$/.test(issueNumber)) {
+      assignOwner(issueNumber);
+    } else {
+      console.log(
+        "::notice::the created failure-report issue's number could not be read; owner assignment skipped",
+      );
+    }
   } else {
+    const [issueNumber, , assigneeCount] = found.split(" ");
     const update = gh(
       [
         "api",
-        `repos/${target}/issues/${found.split(" ")[0]}`,
+        `repos/${target}/issues/${issueNumber}`,
         "--method",
         "PATCH",
         "--silent",
@@ -221,6 +267,10 @@ if (mode === "deliver") {
       { stdoutToErrlog: true },
     );
     if (update.exitCode !== 0) warnAndExit(deliverLead, deliverTail);
+    // A reused issue predating creation-time assignment may still be
+    // unassigned; pick it up here. An assigned one is left alone - the
+    // owner may have deliberately handed it off.
+    if (assigneeCount === "0") assignOwner(issueNumber);
   }
   console.log(
     "hidden failure diagnostics delivered to the target's failure-report issue (URL withheld: private repository)",

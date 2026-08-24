@@ -14,7 +14,8 @@
  * Two modes, selected by MODE:
  * - report: build a body (from the failure reports, or the generic one) and
  *   comment on the open labeled issue, or create it if none is open. One
- *   open issue per label.
+ *   open issue per label. The repository owner is assigned at creation
+ *   (best-effort; see assignOwner).
  * - resolve: after a green run, comment on and close every open labeled
  *   issue (the release gate blocks on any of them); a silent no-op when
  *   none is open.
@@ -250,15 +251,16 @@ export function buildGenericBody(env: NodeJS.ProcessEnv): string {
  * bounds one round trip, not how many issues a green night can close. */
 const OPEN_ISSUE_LIMIT = 100;
 
-/** Numbers of the open issues carrying the label (gh's default ordering,
- * newest first); empty when none. Humans can label extra issues into the
- * stream, so one open issue per label is a goal, not an invariant. */
-async function openIssueNumbers(
+/** The open issues carrying the label (gh's default ordering, newest
+ * first), with their assignees; empty when none. Humans can label extra
+ * issues into the stream, so one open issue per label is a goal, not an
+ * invariant. */
+async function openIssues(
   run: GhRunner,
   repo: string,
   label: string,
   limit: number = OPEN_ISSUE_LIMIT,
-): Promise<number[]> {
+): Promise<Array<{ number: number; assignees: Array<{ login: string }> }>> {
   // The nightly module's report job runs this action without a checkout,
   // so gh has no working tree to infer a repository from; every invocation
   // names it (same rule as release-health.ts).
@@ -274,10 +276,31 @@ async function openIssueNumbers(
     "--limit",
     String(limit),
     "--json",
-    "number",
+    "number,assignees",
   ]);
-  const issues = JSON.parse(json) as Array<{ number: number }>;
-  return issues.map((issue) => issue.number);
+  return JSON.parse(json) as Array<{ number: number; assignees: Array<{ login: string }> }>;
+}
+
+/**
+ * Best-effort owner assignment for a filed issue. Issues created with a
+ * workflow token fire no issues:opened event, so the auto-assign module
+ * structurally cannot catch them - assignment must happen at creation,
+ * here. The owner login comes from the repo slug (a personal-account
+ * fleet: a user repo's owner is assignable). Best-effort by constraint:
+ * an org-owned repo's owner is an org and not assignable, and the nightly
+ * pipeline must not gain a failure path over assignment, so a failed
+ * assignment logs a notice and the filing stands.
+ */
+export async function assignOwner(run: GhRunner, repo: string, issueNumber: number): Promise<void> {
+  const owner = repo.split("/")[0];
+  try {
+    await run(["issue", "edit", String(issueNumber), "--repo", repo, "--add-assignee", owner]);
+    console.log(`assigned @${owner} to #${issueNumber}`);
+  } catch {
+    console.log(
+      `::notice::could not assign @${owner} to #${issueNumber} (best-effort: an org owner is not assignable); the issue filing itself succeeded`,
+    );
+  }
 }
 
 /** The trailing issue number from a `gh issue create` URL, or undefined. */
@@ -315,9 +338,14 @@ async function labelExists(run: GhRunner, repo: string, label: string): Promise<
 }
 
 /**
- * Comment on the open labeled issue if one exists, else create it. Returns
- * the issue number so the caller can dispatch auto-assign at it (assignment
- * never happens here); undefined only when gh's create URL fails to parse.
+ * Comment on the open labeled issue if one exists, else create it, and
+ * assign the repository owner at creation (see assignOwner for why the
+ * assignment cannot live anywhere downstream). An already-open issue that
+ * is still unassigned picks the owner up on the comment path; an assigned
+ * one is left alone - a human may have deliberately reassigned it. Returns
+ * the issue number so the caller can dispatch auto-assign at it (which
+ * layers the CODEOWNERS policy on top of the owner default); undefined
+ * only when gh's create URL fails to parse.
  */
 export async function fileIssue(
   run: GhRunner,
@@ -346,11 +374,14 @@ export async function fileIssue(
     ]);
   }
 
-  const existing = (await openIssueNumbers(run, repo, label, 1))[0];
+  const existing = (await openIssues(run, repo, label, 1))[0];
   if (existing !== undefined) {
-    await run(["issue", "comment", String(existing), "--repo", repo, "--body", body]);
-    console.log(`commented on existing #${existing}`);
-    return existing;
+    await run(["issue", "comment", String(existing.number), "--repo", repo, "--body", body]);
+    console.log(`commented on existing #${existing.number}`);
+    if (existing.assignees.length === 0) {
+      await assignOwner(run, repo, existing.number);
+    }
+    return existing.number;
   }
   const url = await run([
     "issue",
@@ -365,7 +396,11 @@ export async function fileIssue(
     body,
   ]);
   console.log(`opened ${url.trim()}`);
-  return issueNumberFromUrl(url);
+  const number = issueNumberFromUrl(url);
+  if (number !== undefined) {
+    await assignOwner(run, repo, number);
+  }
+  return number;
 }
 
 /** Which nightly stream an issue tracks. Only resolve-comment wording keys
@@ -393,7 +428,7 @@ export async function resolveIssue(
   stream: Stream = "fuzz",
 ): Promise<void> {
   const closed = new Set<number>();
-  let page = await openIssueNumbers(run, repo, label);
+  let page = (await openIssues(run, repo, label)).map((issue) => issue.number);
   if (page.length === 0) {
     console.log(`no open ${label} issue to resolve`);
     return;
@@ -438,7 +473,7 @@ export async function resolveIssue(
         closed.add(number);
       }
     }
-    page = await openIssueNumbers(run, repo, label);
+    page = (await openIssues(run, repo, label)).map((issue) => issue.number);
   }
   console.log(`closed ${[...closed].map((number) => `#${number}`).join(", ")}`);
 }
