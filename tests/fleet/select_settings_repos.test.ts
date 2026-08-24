@@ -306,6 +306,19 @@ describe("select_settings_repos.ts", () => {
     expect(result.stdout).toContain("repos.yml");
   });
 
+  test("a matrix-builder failure is loud: its captured ::error:: is forwarded", () => {
+    const broken = join(root, "broken-central-fixture");
+    mkdirSync(join(broken, "settings", "repos"), { recursive: true });
+    symlinkSync(join(repoRoot, ".github"), join(broken, ".github"));
+    writeFileSync(join(broken, "repos.yml"), "managed:\n  - Vivswan/steady\n");
+    // A .yaml central file is a shape build_settings_matrix.ts rejects.
+    writeFileSync(join(broken, "settings", "repos", "steady.yaml"), "repository: {}\n");
+    const result = run("broken-central", { cwd: broken });
+    expect(result.exitCode).not.toBe(0);
+    expect(result.stdout).toContain("::error::");
+    expect(result.stdout).toContain("steady.yaml");
+  });
+
   test("a failed discovery still fails the whole run", () => {
     const result = run("no-discovery", { env: { STUB_FAIL_DISCOVERY: "1" } });
     expect(result.exitCode).not.toBe(0);

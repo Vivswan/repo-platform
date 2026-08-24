@@ -329,7 +329,12 @@ const matrix = Bun.spawnSync(
   ],
   { stdout: "pipe", stderr: "inherit" },
 );
-if (matrix.exitCode !== 0) process.exit(matrix.exitCode ?? 1);
+if (matrix.exitCode !== 0) {
+  // The builder's ::error:: detail rides its captured stdout (workflow
+  // commands parse from stdout); forward it or the failure is silent.
+  process.stdout.write(matrix.stdout.toString());
+  process.exit(matrix.exitCode ?? 1);
+}
 const targets = matrix.stdout.toString().replace(/\n$/, "");
 setOutput("targets", targets);
 const parsed = JSON.parse(targets) as { repo: string; home: string }[];
