@@ -612,9 +612,12 @@ if [ "$(mf ".repo-platform-manifest.json" hash)" != "null" ]; then
 fi
 # Provenance: the self entry's commit must equal the _commit copier
 # recorded (a staging-form sha here; the release form is the upgrade
-# test's territory).
-answers_commit="$(sed -n 's/^_commit:[[:space:]]*//p' /tmp/smoke/.copier-answers.yml)"
+# test's territory). YAML quotes the sha whenever it would parse as a
+# number (an all-digit or exponent-form sha, ~4% of them), so strip the
+# optional surrounding quotes or the comparison fails on a sha lottery.
+answers_commit="$(sed -n "s/^_commit:[[:space:]]*//p" /tmp/smoke/.copier-answers.yml \
+  | sed -e "s/^'\(.*\)'\$/\1/" -e 's/^"\(.*\)"$/\1/')"
 if [ -z "$answers_commit" ] || [ "$(mf ".repo-platform-manifest.json" commit)" != "$answers_commit" ]; then
-  echo "::error::manifest check failed: the manifest's provenance commit in $manifest does not match the _commit recorded in .copier-answers.yml ('$answers_commit') for modules=$MODULES private=$PRIVATE. Fix stamp_manifest.ts (or this expectation in verify_smoke_gating.sh)."
+  echo "::error::manifest check failed: the manifest's provenance commit in $manifest does not match the _commit recorded in .copier-answers.yml ('$answers_commit') for modules=$MODULES private=$PRIVATE. Fix this harness's _commit extraction first (quote stripping), then stamp_manifest.ts."
   exit 1
 fi
