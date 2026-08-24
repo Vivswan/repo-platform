@@ -1285,45 +1285,6 @@ const rules: Rule[] = [
   },
 
   {
-    name: "uses-ref-preamble",
-    run: () => {
-      const files = walkFiles("templates")
-        .filter((f) => !f.symlink)
-        .map((f) => f.path)
-        // Discover by CONSUMERS of uses_ref, not by preamble presence: a file
-        // that still references uses_ref but lost the preamble must fail its
-        // mustMatch below rather than silently drop out of the comparison.
-        // Fragments are spliced into a skeleton that carries the preamble;
-        // a fragment referencing uses_ref without one renders as undefined
-        // jinja, which smoke-generate catches.
-        .filter((rel) => !rel.includes("/fragments/") && read(rel).includes("uses_ref"));
-      if (files.length < 2)
-        throw new Error("fewer than two templates carry the uses_ref preamble - anchor lost");
-      const block = (rel: string) => {
-        const text = read(rel);
-        return ["tpl_ref", "release_pin", "uses_ref"]
-          .map((name) =>
-            mustMatch(text, new RegExp(`\\{%-?\\s*set ${name} =[^\\n]*%\\}`), rel, `set ${name}`)[0]
-              // Whitespace-control dashes vary with surrounding layout and
-              // do not change the assignment; normalize them away.
-              .replace(/\{%-/g, "{%")
-              .replace(/-%\}/g, "%}"),
-          )
-          .join("\n");
-      };
-      const reference = block(files[0]);
-      return files
-        .slice(1)
-        .filter((rel) => block(rel) !== reference)
-        .map((rel) => ({
-          file: rel,
-          expected: `the preamble in ${files[0]}`,
-          got: "a diverged preamble",
-        }));
-    },
-  },
-
-  {
     name: "symlink-trio",
     run: () => {
       const mismatches: Mismatch[] = [];

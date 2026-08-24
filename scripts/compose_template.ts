@@ -768,6 +768,56 @@ export function spliceContributions(
   return errors;
 }
 
+// --- uses_ref preamble ---------------------------------------------------
+
+const USES_REF_HINT = Buffer.from("uses_ref");
+// Any hand-written half of the derivation trips the guard: a partial copy
+// (say, only tpl_ref) would silently override the injected assignments.
+const HAND_WRITTEN_PREAMBLE_HINTS = ["set tpl_ref", "set release_pin", "set uses_ref"].map((text) =>
+  Buffer.from(text),
+);
+
+/** The canonical uses_ref derivation, injected (not hand-copied) into every
+ *  composed file that references uses_ref. All-jinja lines: they render to
+ *  nothing, so injection position only affects the composed bytes. The
+ *  final `%}` deliberately keeps the following newline: a `-%}` would eat
+ *  a skeleton's own blank line after the insertion point. */
+export const USES_REF_PREAMBLE = [
+  "{#- The reusable workflows and composite actions referenced via uses_ref",
+  "    live on main, not on the build branches: strip a templates/vX.Y.Z",
+  "    build-tag _commit to the same-version release tag on main; anything",
+  "    else (staging describe/sha strings, fresh copies) pins main. -#}",
+  "{%- set tpl_ref = _copier_answers._commit | default('', true) -%}",
+  "{%- set release_pin = tpl_ref | regex_replace('^templates/(v[0-9]+\\\\.[0-9]+\\\\.[0-9]+)$', '\\\\1') -%}",
+  "{%- set uses_ref = release_pin if (release_pin and release_pin != tpl_ref) else 'main' %}",
+];
+
+/** Inject the canonical preamble into a composed file that references
+ *  uses_ref: inserted after the file's leading run of `#` comment lines
+ *  (the managed/starter headers), where every hand copy sat, so composing
+ *  the derivation changed no rendered bytes. Returns null when the file
+ *  never references uses_ref, and an error when a source still hand-writes
+ *  any of the derivation's set lines - the composer owns the preamble. */
+export function injectUsesRefPreamble(
+  source: string,
+  data: Buffer,
+): { data: Buffer } | { error: string } | null {
+  if (!data.includes(USES_REF_HINT)) return null;
+  if (HAND_WRITTEN_PREAMBLE_HINTS.some((hint) => data.includes(hint))) {
+    return {
+      error:
+        `${source}: hand-writes the uses_ref pin-derivation preamble - the ` +
+        "composer injects the canonical one into every composed file " +
+        "referencing uses_ref; delete the hand-written comment and set lines",
+    };
+  }
+  const lines = splitLines(data);
+  let at = 0;
+  while (at < lines.length && lines[at][0] === 0x23) at++;
+  const preamble = USES_REF_PREAMBLE.map((line) => Buffer.from(line));
+  return { data: joinLines([...lines.slice(0, at), ...preamble, ...lines.slice(at)]) };
+}
+
 // --- ownership manifest -------------------------------------------------------
 
 /** Where the ownership manifest lands in generated repositories. */
@@ -1093,6 +1143,19 @@ export function build(): Map<string, Entry> {
     }
   }
   errors.push(...spliceContributions(files, contributions));
+  // Composed files consuming uses_ref get the canonical pin-derivation
+  // preamble here - one derivation, never hand-copied - before the
+  // ownership manifest is derived, so classification reads the final text.
+  for (const [logical, sourced] of files) {
+    if (sourced.entry.kind !== "file") continue;
+    const result = injectUsesRefPreamble(
+      `templates/${sourceName(sourced)}/${logical}`,
+      sourced.entry.data,
+    );
+    if (result === null) continue;
+    if ("error" in result) errors.push(result.error);
+    else sourced.entry.data = result.data;
+  }
   // The ownership manifest is generated from the same spliced file map the
   // tree is emitted from, so it can never disagree with what actually
   // lands. Emitted as one more template file - copier renders and syncs it

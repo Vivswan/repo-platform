@@ -34,13 +34,6 @@
 # finish by hand (a hand-published release carries no attestation.jsonl):
 #   gh release upload <tag> <assets> --clobber
 #   gh release edit <tag> --draft=false
-{#- The composite action lives on main, not on the build branches: strip a
-    templates/vX.Y.Z build-tag _commit to the same-version release tag on
-    main; anything else (staging describe/sha strings, fresh copies) pins
-    main. -#}
-{%- set tpl_ref = _copier_answers._commit | default('', true) -%}
-{%- set release_pin = tpl_ref | regex_replace('^templates/(v[0-9]+\\.[0-9]+\\.[0-9]+)$', '\\1') -%}
-{%- set uses_ref = release_pin if (release_pin and release_pin != tpl_ref) else 'main' %}
 
 name: Release
 
