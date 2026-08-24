@@ -54,8 +54,8 @@ const DIR_NAME = /^[A-Za-z0-9._-]+$/;
 export const DEFAULT_TITLE = "Nightly fuzz failures";
 /** Label tuple used only when report mode has to CREATE the label; each
  *  must match its input default in action.yml (the test asserts it), and
- *  the fuzzer module's settings-labels fragment carries the same values
- *  (check_ssot's labels rule pins that). */
+ *  the fuzzer module manifest's tracking_label carries the same values
+ *  (check_ssot pins that; the settings-labels block generates from it). */
 export const DEFAULT_LABEL_COLOR = "B60205";
 export const DEFAULT_LABEL_DESCRIPTION = "Automated nightly fuzz failure";
 

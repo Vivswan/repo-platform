@@ -37,11 +37,11 @@ else
 fi
 if has auto-assign; then test -f "$wf/auto-assign.yml"; else test ! -e "$wf/auto-assign.yml"; fi
 
-# The all-green needs list must join runs-on: tight, whichever gate
-# fragment renders last (the ci-gate-needs anchor is tight: every
-# contribution owns its line ending and the composer adds none). This
-# pins the regression where an unselected trailing fragment left the
-# previous entry's newline dangling as a blank line.
+# The all-green needs list must join runs-on: tight, whichever gate entry
+# the ci-gate-needs generator emits last (the anchor is tight: every
+# manifest-generated contribution owns its line ending and the composer
+# adds none). This pins the regression where an unselected trailing
+# contribution left the previous entry's newline dangling as a blank line.
 if has pr-title; then last_need="      - pr-title"
 elif has skills; then last_need="      - validate-skills"
 elif has release-please; then last_need="      - release-health"
