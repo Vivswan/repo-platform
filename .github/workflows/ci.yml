@@ -211,6 +211,8 @@ jobs:
         run: bun run dogfood:check
       - name: Check markdown is not hard-wrapped
         run: bun run wrap:check
+      - name: Check renamed or retired rendered files ship migrations
+        run: bun run migrations:check
 
   script-tests:
     runs-on: ubuntu-latest
