@@ -198,8 +198,13 @@ export function stampManifestText(
     // via main()'s warning. Standalone script - no shared/ helpers here.
     return { out: text, problem: "does not parse as a manifest (invalid JSON)" };
   }
-  const manifest = parsed as { files?: unknown };
-  if (typeof manifest.files !== "object" || manifest.files === null) {
+  const manifest = parsed as { files?: unknown } | null;
+  if (
+    manifest === null ||
+    typeof manifest !== "object" ||
+    typeof manifest.files !== "object" ||
+    manifest.files === null
+  ) {
     return { out: text, problem: "does not parse as a manifest (no top-level 'files' mapping)" };
   }
   const files = manifest.files as Record<string, ManifestEntryShape>;

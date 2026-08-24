@@ -245,6 +245,15 @@ describe("stampManifestText", () => {
     expect(problem).toContain("no top-level 'files' mapping");
   });
 
+  test("a top-level JSON null stays a fail-open problem, never a crash", () => {
+    // JSON.parse("null") succeeds, so this shape reaches the mapping
+    // check; dereferencing it would throw past the parse catch and turn
+    // the warn-and-exit-0 contract into a hard failure.
+    const { out, problem } = stampManifestText("null", tree({}));
+    expect(out).toBe("null");
+    expect(problem).toContain("no top-level 'files' mapping");
+  });
+
   test("a malformed conflict block is a problem, never a silent line drop", () => {
     const root = tree({ "ci.yml": "content\n" });
     const text = [
