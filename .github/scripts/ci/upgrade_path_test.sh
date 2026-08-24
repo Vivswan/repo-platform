@@ -373,6 +373,10 @@ print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$1"
   || fail "the manifest's ci.yml hash does not match the updated file (stamping)"
 [ "$(mf ".repo-platform-manifest.json" hash)" = "null" ] \
   || fail "the manifest's own hash entry must stay null (self-hash is circular)"
+# Provenance rides the self entry: the stamper writes the render's recorded
+# _commit, which is what lets the validator tell skew from deletion.
+[ "$(mf ".repo-platform-manifest.json" commit)" = "templates/v99.99.99" ] \
+  || fail "the manifest's provenance commit was not stamped with the updated render's _commit"
 echo "upgrade path OK: retired files deleted, sentinels preserved, configuration kept"
 
 # --- Recovery mode (recover=recopy) -----------------------------------

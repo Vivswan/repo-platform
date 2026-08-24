@@ -767,16 +767,21 @@ export interface ManifestEntry {
 }
 
 /** One landed path per line, so a stamped manifest differs from the raw
- *  render in hash values alone and copier's three-way update merge sees
- *  minimal local edits. stamp_manifest.ts substitutes the hash tokens on
- *  these lines in place - keep the layout in sync with its ENTRY_LINE_RE. */
+ *  render in the hash values - and the self entry's provenance commit -
+ *  alone, and copier's three-way update merge sees minimal local edits.
+ *  stamp_manifest.ts substitutes those tokens on these lines in place -
+ *  keep the layout in sync with its ENTRY_LINE_RE. The provenance slot
+ *  (stamped with the render's recorded _commit) is what lets the validator
+ *  tell version skew from entry deletion. */
 function manifestEntryLine(entry: ManifestEntry): string {
   const o = entry.ownership;
   const body =
     o.class === "starter"
       ? '{"class": "starter"}'
       : o.class === "managed"
-        ? '{"class": "managed", "hash": null}'
+        ? entry.path === MANIFEST_LANDED_PATH
+          ? '{"class": "managed", "hash": null, "commit": null}'
+          : '{"class": "managed", "hash": null}'
         : `{"class": "split", "marker": ${JSON.stringify(o.marker)}, ` +
           `"managed": "${o.managed}", "hash": null}`;
   return `    ${JSON.stringify(entry.path)}: ${body}`;
@@ -884,7 +889,8 @@ export function manifestTemplate(entries: ManifestEntry[]): Buffer {
     "the whole file; hash is sha256 of the last stamped content, or of the " +
     "symlink target), split (sync owns one half; the hash covers the managed " +
     "half, through the marker line for 'above' and from it for 'below'), " +
-    "starter (rendered once, repo-owned; no hash). Hashes are stamped after " +
+    "starter (rendered once, repo-owned; no hash). Hashes - and, on this " +
+    "file's own entry, the render's _commit provenance - are stamped after " +
     "each render by the template's stamp_manifest.ts hook; this file's own " +
     "hash stays null because its content includes every other hash, so a " +
     "self-hash would be circular.";

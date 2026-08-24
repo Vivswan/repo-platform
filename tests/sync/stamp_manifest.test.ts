@@ -10,6 +10,7 @@ import { dirname, join } from "node:path";
 import {
   entryHash,
   managedHalf,
+  recordedCommit,
   resolveConflictsTowardAfter,
   stampManifestText,
 } from "../../.github/scripts/sync/stamp_manifest";
@@ -110,7 +111,42 @@ describe("resolveConflictsTowardAfter", () => {
   });
 });
 
+describe("recordedCommit", () => {
+  test("reads the plain, double-quoted, and single-quoted forms", () => {
+    expect(recordedCommit(tree({ ".copier-answers.yml": "_commit: templates/v1.2.3\n" }))).toBe(
+      "templates/v1.2.3",
+    );
+    expect(recordedCommit(tree({ ".copier-answers.yml": '_commit: "abc1234"\n' }))).toBe("abc1234");
+    expect(recordedCommit(tree({ ".copier-answers.yml": "_commit: 'abc1234'\n" }))).toBe("abc1234");
+  });
+  test("a missing file or key yields null", () => {
+    expect(recordedCommit(tree({}))).toBeNull();
+    expect(recordedCommit(tree({ ".copier-answers.yml": "_src_path: x\n" }))).toBeNull();
+  });
+});
+
 describe("stampManifestText", () => {
+  test("stamps the self entry's provenance commit from the answers file", () => {
+    const root = tree({ ".copier-answers.yml": "_commit: templates/v2.0.0\n_src_path: x\n" });
+    const text = manifestText([
+      '    ".repo-platform-manifest.json": {"class": "managed", "hash": null, "commit": null}',
+    ]);
+    const { out, problem } = stampManifestText(text, root);
+    expect(problem).toBeNull();
+    expect(out).toContain('"commit": "templates/v2.0.0"');
+    // Hash stays null (self-hash is circular) and the stamp is idempotent.
+    expect(out).toContain('"hash": null');
+    expect(stampManifestText(out, root).out).toBe(out);
+  });
+
+  test("no readable _commit stamps the provenance null", () => {
+    const root = tree({});
+    const text = manifestText([
+      '    ".repo-platform-manifest.json": {"class": "managed", "hash": null, "commit": "stale"}',
+    ]);
+    expect(stampManifestText(text, root).out).toContain('"commit": null');
+  });
+
   test("stamps managed, split, and symlink entries and leaves the rest", () => {
     const root = tree({
       "ci.yml": "managed content\n",

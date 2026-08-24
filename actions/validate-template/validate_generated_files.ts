@@ -26,21 +26,28 @@
 //      only - absence is damage the next sync heals - and _skip_if_exists
 //      starters are exempt (repo-owned after the first render)
 //   9. Ownership-manifest byte parity: .repo-platform-manifest.json (the
-//      template-rendered ownership map, hashes stamped post-render by the
-//      template's stamp_manifest.ts hook) is well-formed, its own entry
-//      stays hash-null (a self-hash would be circular - the content
-//      includes every other hash), its class metadata agrees with this
-//      validator's own ownership tables for every path they cover (sync
-//      baselines local manifest edits, so a hand-flipped class would
-//      otherwise disable parity permanently), and every managed or split
-//      entry's recorded sha256 matches the file on disk (split files: the
-//      managed half alone, delimited by the entry's marker line). Drift
-//      means the file changed since the last stamp; the next sync replaces
-//      it. A missing manifest is only an advisory (older renders predate
-//      it), as are a listed file missing from the repo (check 8's absence
-//      stance - the withheld-workflows push path leaves those
-//      legitimately) and a roster path the manifest fails to list; a
-//      conflict-marked manifest is left to check 4's report.
+//      template-rendered ownership map, hashes and the render's _commit
+//      provenance stamped post-render by the template's stamp_manifest.ts
+//      hook) is well-formed, its own entry stays hash-null (a self-hash
+//      would be circular - the content includes every other hash), its
+//      class metadata agrees with this validator's own ownership tables
+//      for every path they cover (sync baselines local manifest edits, so
+//      a hand-flipped class would otherwise disable parity permanently),
+//      and every managed or split entry's recorded sha256 matches the file
+//      on disk (split files: the managed half alone, delimited by the
+//      entry's marker line). Drift means the file changed since the last
+//      stamp; the next sync replaces it. A non-null provenance stamp must
+//      equal the recorded _commit on every channel. ABSENCE is judged by
+//      alignment: a templates/vX.Y.Z-form recorded _commit proves version
+//      alignment (see the check's trust-model comment), making a missing
+//      manifest, a null provenance stamp, and a missing roster entry whose
+//      file still exists hard errors there - the latter only while the
+//      executing ref (VALIDATOR_REF) is the render's version; unaligned
+//      renders (staging, legacy) get skew-mode advisories instead. A
+//      listed file missing from the repo stays an advisory (check 8's
+//      absence stance - the withheld-workflows push path leaves those
+//      legitimately); a conflict-marked manifest is left to check 4's
+//      report.
 //
 // Advisories (printed, never fail): missing actionlint / yamllint /
 // commit-names / gitleaks checks in ci.yml (older renders predate the newer
@@ -901,23 +908,50 @@ function main(): number {
   }
 
   // 9. Ownership-manifest byte parity. The manifest is itself a managed
-  // render, so client repos carry it (older renders predate it: advisory,
-  // the next sync adds it) and the template repo must NOT (self mode
-  // inverts - repo-platform is not a render of itself). A conflict-marked
-  // manifest is check 4's report; there is nothing coherent to hash. All
-  // findings are informational by stance: validate-template does not gate
-  // client merges, and drift heals on the next sync. The manifest's
+  // render, so client repos carry it and the template repo must NOT (self
+  // mode inverts - repo-platform is not a render of itself). A
+  // conflict-marked manifest is check 4's report; there is nothing
+  // coherent to hash. Findings are informational by stance:
+  // validate-template does not gate client merges. The manifest's
   // ownership METADATA, however, is NOT trusted for the paths this
   // validator's version-aligned tables cover (declaredOwnership above,
   // plus .gitignore's marker grammar): the sync BASELINES non-conflicting
   // local manifest edits rather than healing them, so a hand-flipped class
   // (managed -> starter) would otherwise disable parity for that path
   // permanently and invisibly. A class or split-metadata mismatch, or an
-  // entry whose render condition is off, is an error; a roster path the
-  // manifest fails to list is an advisory (the absence model - older
-  // manifests predate newer files). Paths beyond the tables (starters,
-  // version pins - check 7 pins their bytes - and symlinks) remain
-  // manifest-trusted, an accepted residue of the informational stance.
+  // entry whose render condition is off, is an error. ABSENCE (a missing
+  // manifest, or a roster path the manifest fails to list) is judged by
+  // PROVENANCE: the stamper writes the render's recorded _commit into the
+  // self entry, and a templates/vX.Y.Z-form _commit proves version
+  // alignment by the fleet's own wiring - the client validator ref and the
+  // manifest ride the same render, and every templates/vX.Y.Z release ever
+  // cut ships the manifest (it landed before the first release). A
+  // non-null provenance stamp must equal the recorded _commit on EVERY
+  // channel (the stamper writes exactly that value; a difference or a
+  // deleted _commit key is tampering or a failed stamp). Aligned, absence
+  // can only be deletion or damage: a missing manifest, a missing roster
+  // entry whose file still exists, and a null provenance stamp (the
+  // downgrade that would fake skew) are all errors - with strictness
+  // additionally standing down when the executing ref (VALIDATOR_REF from
+  // action.yml) is not the render's version. Unaligned (staging pins main,
+  // so this validator's tables may be NEWER than the render; legacy
+  // main-history _commit forms too), absence stays an advisory that names
+  // the skew reason - and the strict deletion error additionally requires
+  // the missing entry's FILE to still exist (see reportUnlisted). The
+  // alignment signal itself (.copier-answers.yml's _commit) is
+  // client-editable: rewriting it to a sha form fakes skew mode, and no
+  // in-repo signal can be tamper-proof against the repo's own owner (who
+  // can as easily drop the validate-template job). The guarantee is
+  // therefore VISIBILITY, not prevention: every absence still surfaces as
+  // a named advisory on every run, and a tampered _commit both self-heals
+  // on the next sync (template and local change the same line, and
+  // conflicts resolve toward the template) and breaks the repo's own
+  // update base loudly. Paths beyond the tables (starters, version pins -
+  // check 7 pins their bytes - and symlinks) remain manifest-trusted, an
+  // accepted residue of the informational stance.
+  const answersCommit = typeof answers._commit === "string" ? answers._commit : null;
+  const releaseAligned =
+    answersCommit !== null && /^templates\/v\d+\.\d+\.\d+$/.test(answersCommit);
   const manifestPath = join(root, MANIFEST_NAME);
   const manifestExists = isRegularFile(manifestPath);
   if (selfMode) {
@@ -929,10 +963,20 @@ function main(): number {
       );
     }
   } else if (!manifestExists) {
-    advisories.push(
-      `${MANIFEST_NAME} is missing - this render predates the ownership ` +
-        "manifest; the next template sync adds it",
-    );
+    if (releaseAligned) {
+      errors.push(
+        `${MANIFEST_NAME} is missing, but the recorded render (${answersCommit}) ` +
+          "is a release that ships it (every templates/vX.Y.Z release does) - " +
+          "deletion or damage; restore it from git history or run a recovery " +
+          "sync (recover=recopy)",
+      );
+    } else {
+      advisories.push(
+        `${MANIFEST_NAME} is missing - this render is not pinned at a ` +
+          "templates/vX.Y.Z release, so it may simply predate the ownership " +
+          "manifest; a sync to a version that ships it adds the file",
+      );
+    }
   } else {
     const manifestText = readFileSync(manifestPath, "utf-8");
     let manifestFiles: Record<string, unknown> | null = null;
@@ -970,6 +1014,93 @@ function main(): number {
         typeof raw === "object" && raw !== null && !Array.isArray(raw)
           ? (raw as Record<string, unknown>)
           : null;
+      // Provenance: the stamped commit on the self entry. A NON-NULL stamp
+      // must equal the recorded answers _commit on every channel - the
+      // stamper always writes the value it reads there, so any difference
+      // (including a deleted _commit key) is tampering or a failed stamp.
+      // Strict absence additionally needs a release-form match AND, when
+      // the executing ref is known (VALIDATOR_REF from action.yml), that
+      // ref to BE the render's version - withheld workflow files leave a
+      // stale pinned validator behind whose tables legitimately disagree
+      // with a newer manifest. Null stamps on unaligned renders are the
+      // legacy/local skew path.
+      const rawSelfCommit = asEntry(manifestFiles[MANIFEST_NAME])?.commit;
+      const manifestCommit = typeof rawSelfCommit === "string" ? rawSelfCommit : null;
+      const validatorRef = (process.env.VALIDATOR_REF ?? "").trim();
+      const validatorRefAligned =
+        validatorRef === "" ||
+        validatorRef === answersCommit ||
+        `templates/${validatorRef}` === answersCommit;
+      let strictAbsence = false;
+      let skewReason =
+        "the render is not pinned at a templates/vX.Y.Z release and this " +
+        "validator's tables may be newer than it";
+      if (manifestCommit !== null && manifestCommit !== answersCommit) {
+        errors.push(
+          `${MANIFEST_NAME}: its stamped provenance (self-entry commit ` +
+            `'${manifestCommit}') does not match the recorded render ` +
+            `${answersCommit === null ? "(no _commit in .copier-answers.yml)" : answersCommit} - ` +
+            "the stamper always writes the recorded value, so this is " +
+            "tampering or a failed stamp; revert the edit or run a recovery " +
+            "sync (recover=recopy)",
+        );
+        // The absence checks stay lenient under an already-reported
+        // provenance error; no second diagnostic per missing entry.
+        skewReason = "its provenance stamp is unusable (error above)";
+      } else if (releaseAligned) {
+        if (manifestCommit === null) {
+          errors.push(
+            `${MANIFEST_NAME}: its provenance stamp is null but the recorded ` +
+              `render (${answersCommit}) is a release, whose stamper always ` +
+              "writes it - tampering or a failed stamp; revert the edit or " +
+              "run a recovery sync (recover=recopy)",
+          );
+          skewReason = "its provenance stamp is unusable (error above)";
+        } else if (validatorRefAligned) {
+          strictAbsence = true;
+        } else {
+          skewReason =
+            `this validator runs at ref '${validatorRef}', not the render's ` +
+            "version (a withheld-workflows sync leaves the pinned ref behind)";
+        }
+      }
+      const reportUnlisted = (rel: string, declaredBy: string) => {
+        let fileExists = false;
+        try {
+          lstatSync(join(root, rel));
+          fileExists = true;
+        } catch {
+          fileExists = false;
+        }
+        // The strict deletion error requires the FILE to still exist: the
+        // stealth attack parity guards against is an unlisted path whose
+        // file lives on for quiet editing. An absent file under alignment
+        // is a version split the fleet legitimately produces (withheld
+        // workflow files pin an older ci.yml validator ref; a channel
+        // switch can leave a main validator ahead of the render), where a
+        // retired or not-yet-delivered table path has no file - erroring
+        // there would be false.
+        if (strictAbsence && fileExists) {
+          errors.push(
+            `${MANIFEST_NAME} does not list '${rel}', which ${declaredBy} - the ` +
+              `stamper writes every entry of its version (${answersCommit}), so ` +
+              "the entry was deleted by hand, and sync baselines manifest edits; " +
+              "revert it (git history has the stamped original) or run a " +
+              "recovery sync (recover=recopy)",
+          );
+        } else {
+          advisories.push(
+            `${MANIFEST_NAME} does not list '${rel}', which ${declaredBy} - ` +
+              `${
+                strictAbsence
+                  ? "the path is absent from the repo too, so this is a retired " +
+                    "or not-yet-delivered path seen by a validator of a " +
+                    "different version, not stealth drift"
+                  : `skew mode: ${skewReason}, so this may be version skew rather than deletion`
+              } (a hand-deleted entry needs reverting; sync baselines manifest edits)`,
+          );
+        }
+      };
       const metadataError = (rel: string, claim: string, declared: string) => {
         errors.push(
           `${MANIFEST_NAME}: entry '${rel}' ${claim} but this validator's ` +
@@ -983,12 +1114,7 @@ function main(): number {
       for (const { rel, kind } of declaredOwnership) {
         const raw = manifestFiles[rel];
         if (raw === undefined) {
-          advisories.push(
-            `${MANIFEST_NAME} does not list '${rel}', which this validator's ` +
-              "ownership tables declare - a sync from a template version that " +
-              "ships the entry adds it (a hand-deleted entry needs reverting: " +
-              "sync baselines manifest edits)",
-          );
+          reportUnlisted(rel, "this validator's ownership tables declare");
           continue;
         }
         const entry = asEntry(raw);
@@ -1016,10 +1142,7 @@ function main(): number {
       {
         const raw = manifestFiles[".gitignore"];
         if (raw === undefined) {
-          advisories.push(
-            `${MANIFEST_NAME} does not list '.gitignore', which the template ` +
-              "always renders - the next template sync regenerates the manifest",
-          );
+          reportUnlisted(".gitignore", "the template always renders");
         } else {
           const entry = asEntry(raw);
           if (
@@ -1066,13 +1189,20 @@ function main(): number {
         }
         const entry = raw as Record<string, unknown>;
         // The self entry's invariant comes before any class dispatch: a
-        // corrupted class (say, starter) must not slip past it.
+        // corrupted class (say, starter) must not slip past it. Its commit
+        // slot holds the provenance stamp (null or a string; the alignment
+        // logic above judges the value).
         if (rel === MANIFEST_NAME) {
-          if (entry.class !== "managed" || entry.hash !== null) {
+          if (
+            entry.class !== "managed" ||
+            entry.hash !== null ||
+            ("commit" in entry && entry.commit !== null && typeof entry.commit !== "string")
+          ) {
             errors.push(
-              `${where} must be managed with hash null: the manifest's content ` +
-                "includes every other hash, so a self-hash would be circular; " +
-                "run a template sync to regenerate it",
+              `${where} must be managed with hash null (its content includes ` +
+                "every other hash, so a self-hash would be circular) and a " +
+                "null-or-string provenance commit; run a template sync to " +
+                "regenerate it",
             );
           }
           continue;

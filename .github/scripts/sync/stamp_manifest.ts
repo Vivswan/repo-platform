@@ -15,15 +15,17 @@
 // rendered repositories where none of this repository's node_modules or
 // shared/ helpers exist - node builtins only, no argv subprocesses.
 //
-// Only the "hash" tokens are rewritten, in place, line by line: the
-// rendered manifest keeps one entry per line (compose_template.ts's
-// manifestEntryLine - keep ENTRY_LINE_RE below in sync with it), so a
-// stamped manifest differs from the raw render in hash values alone and
-// copier's three-way update merge sees minimal local edits. An update can
-// still leave inline conflict blocks in the manifest (both sides touch
-// the hash lines); those resolve toward the template ("after updating")
-// side before parsing - the direction resolve_copier_conflicts.ts uses -
-// and the stamp then rewrites every hash anyway.
+// Only the "hash" tokens - plus the self entry's "commit" provenance slot,
+// filled with the render's recorded _commit - are rewritten, in place,
+// line by line: the rendered manifest keeps one entry per line
+// (compose_template.ts's manifestEntryLine - keep ENTRY_LINE_RE below in
+// sync with it), so a stamped manifest differs from the raw render in
+// those token values alone and copier's three-way update merge sees
+// minimal local edits. An update can still leave inline conflict blocks in
+// the manifest (both sides touch the hash lines); those resolve toward the
+// template ("after updating") side before parsing - the direction
+// resolve_copier_conflicts.ts uses - and the stamp then rewrites every
+// hash anyway.
 //
 // Data problems (missing or unparseable manifest) warn and exit 0, like
 // the migrations contract in migrations/run.ts: a stamping gap must never
@@ -53,6 +55,27 @@ const ENTRY_LINE_RE = /^(\s*)("(?:[^"\\]|\\.)*"): (\{.*\})(,?)$/;
 /** The hash token inside an entry object; entries without one (starters)
  *  are left alone. */
 const HASH_RE = /"hash": (?:null|"[0-9a-f]{64}")/;
+
+/** The provenance token on the manifest's own entry: the render's recorded
+ *  _commit, letting the validator tell version skew from entry deletion. */
+const COMMIT_RE = /"commit": (?:null|"[^"]*")/;
+
+/** The `_commit` the render recorded in .copier-answers.yml, or null when
+ *  the file or key is missing. Read with a line regex, not a YAML parser:
+ *  this script ships standalone (no node_modules downstream), copier
+ *  writes the key as a plain one-line scalar, and a value the regex cannot
+ *  see just leaves provenance null - the validator's skew path. */
+export function recordedCommit(root: string): string | null {
+  let text: string;
+  try {
+    text = readFileSync(join(root, ".copier-answers.yml"), "utf-8");
+  } catch {
+    return null;
+  }
+  const match = /^_commit:[ \t]*(?:"([^"\n]*)"|'([^'\n]*)'|([^#\n]*?))[ \t]*$/m.exec(text);
+  const value = match?.[1] ?? match?.[2] ?? match?.[3] ?? "";
+  return value === "" ? null : value;
+}
 
 // Copier's inline conflict markers, exactly as `copier update` writes them
 // (git merge-file labels): anything looser could swallow content lines.
@@ -157,9 +180,10 @@ export function entryHash(root: string, path: string, entry: ManifestEntryShape)
 
 /** Stamp the manifest text against the tree at `root`: conflict blocks
  *  resolve toward the template side, then every entry line's hash token is
- *  replaced with the honest value (the manifest's own entry stays null -
- *  see the manifest's $comment). Returns the input unchanged with a
- *  problem message when the text does not parse. */
+ *  replaced with the honest value, and the self entry's commit token with
+ *  the render's recorded _commit (its hash stays null - see the manifest's
+ *  $comment). Returns the input unchanged with a problem message when the
+ *  text does not parse. */
 export function stampManifestText(
   text: string,
   root: string,
@@ -180,6 +204,7 @@ export function stampManifestText(
       })`,
     };
   }
+  const commit = recordedCommit(root);
   const lines = resolved.split("\n").map((line) => {
     const match = ENTRY_LINE_RE.exec(line);
     if (!match) return line;
@@ -187,7 +212,13 @@ export function stampManifestText(
     const entry = files[path];
     if (entry === undefined || !HASH_RE.test(match[3])) return line;
     const hash = path === MANIFEST_NAME ? null : entryHash(root, path, entry);
-    const body = match[3].replace(HASH_RE, `"hash": ${hash === null ? "null" : `"${hash}"`}`);
+    let body = match[3].replace(HASH_RE, `"hash": ${hash === null ? "null" : `"${hash}"`}`);
+    if (path === MANIFEST_NAME) {
+      body = body.replace(
+        COMMIT_RE,
+        `"commit": ${commit === null ? "null" : JSON.stringify(commit)}`,
+      );
+    }
     return `${match[1]}${match[2]}: ${body}${match[4]}`;
   });
   return { out: lines.join("\n"), problem: null };

@@ -468,6 +468,7 @@ describe("manifestTemplate", () => {
   test("emits gated appends and a joined JSON skeleton with null hashes", () => {
     const text = manifestTemplate([
       { path: ".github/workflows/ci.yml", gates: [], ownership: { class: "managed" } },
+      { path: ".repo-platform-manifest.json", gates: [], ownership: { class: "managed" } },
       {
         path: "AGENTS.md",
         gates: ["'agents' in modules"],
@@ -485,6 +486,10 @@ describe("manifestTemplate", () => {
     ]).toString("utf-8");
     expect(text).toContain(
       `{%- set _ = entries.append('    ".github/workflows/ci.yml": {"class": "managed", "hash": null}') -%}`,
+    );
+    // The self entry alone carries the provenance slot the stamper fills.
+    expect(text).toContain(
+      `'    ".repo-platform-manifest.json": {"class": "managed", "hash": null, "commit": null}'`,
     );
     expect(text).toContain("{%- if 'agents' in modules -%}");
     expect(text).toContain('"managed": "above", "hash": null');

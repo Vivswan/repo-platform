@@ -610,3 +610,11 @@ if [ "$(mf ".repo-platform-manifest.json" hash)" != "null" ]; then
   echo "::error::manifest check failed: the manifest's own hash entry in $manifest must stay null (a self-hash would be circular) for modules=$MODULES private=$PRIVATE. Fix stamp_manifest.ts (or this expectation in verify_smoke_gating.sh)."
   exit 1
 fi
+# Provenance: the self entry's commit must equal the _commit copier
+# recorded (a staging-form sha here; the release form is the upgrade
+# test's territory).
+answers_commit="$(sed -n 's/^_commit:[[:space:]]*//p' /tmp/smoke/.copier-answers.yml)"
+if [ -z "$answers_commit" ] || [ "$(mf ".repo-platform-manifest.json" commit)" != "$answers_commit" ]; then
+  echo "::error::manifest check failed: the manifest's provenance commit in $manifest does not match the _commit recorded in .copier-answers.yml ('$answers_commit') for modules=$MODULES private=$PRIVATE. Fix stamp_manifest.ts (or this expectation in verify_smoke_gating.sh)."
+  exit 1
+fi

@@ -10,7 +10,7 @@ const VALIDATOR = join(import.meta.dir, "validate_generated_files.ts");
 // carrying the all-green + typography convention.
 const MANAGED_HEADER = "# This file is managed by Vivswan/repo-platform.\n";
 const BASELINE: Record<string, string> = {
-  ".copier-answers.yml": `${MANAGED_HEADER}_commit: templates/v1.0.0\n_src_path: gh:Vivswan/repo-platform\ngithub_username: Vivswan\n`,
+  ".copier-answers.yml": `${MANAGED_HEADER}_commit: 0.0.0.post5.dev0+abc1234\n_src_path: gh:Vivswan/repo-platform\ngithub_username: Vivswan\n`,
   ".repo-platform.yml": `${MANAGED_HEADER}modules: [uv]\n`,
   ".gitignore": [
     "# BEGIN REPOSITORY LOCAL",
@@ -62,7 +62,7 @@ function gitFreeEnv(): Record<string, string> {
 function runValidator(
   extra: Record<string, string> = {},
   args: string[] = [],
-  opts: { gitInit?: boolean; gitAddForce?: string[] } = {},
+  opts: { gitInit?: boolean; gitAddForce?: string[]; env?: Record<string, string> } = {},
 ): {
   exitCode: number;
   stdout: string;
@@ -85,7 +85,7 @@ function runValidator(
     if (add.exitCode !== 0) throw new Error(`git add -f failed: ${add.stderr.toString()}`);
   }
   const result = Bun.spawnSync([process.execPath, VALIDATOR, ...args, root], {
-    env: gitFreeEnv(),
+    env: { ...gitFreeEnv(), ...opts.env },
   });
   return {
     exitCode: result.exitCode,
@@ -224,7 +224,7 @@ describe("base checks shape", () => {
   // advisory, like a real private render's answers do; github_username pins
   // the owner the fleet's composite actions must come from.
   const PRIVATE_ANSWERS =
-    `${MANAGED_HEADER}_commit: templates/v1.0.0\n_src_path: gh:Vivswan/repo-platform\n` +
+    `${MANAGED_HEADER}_commit: 0.0.0.post5.dev0+abc1234\n_src_path: gh:Vivswan/repo-platform\n` +
     "github_username: Vivswan\nprivate: true\n";
 
   /** A private merged render: base-checks carries the base checks as
@@ -343,7 +343,8 @@ describe("base checks shape", () => {
 
   test("a managed render missing github_username in its answers fails", () => {
     const { exitCode, stderr } = runValidator({
-      ".copier-answers.yml": "_commit: templates/v1.0.0\n_src_path: gh:Vivswan/repo-platform\n",
+      ".copier-answers.yml":
+        "_commit: 0.0.0.post5.dev0+abc1234\n_src_path: gh:Vivswan/repo-platform\n",
     });
     expect(exitCode).toBe(1);
     expect(stderr).toContain("`github_username` is missing or not a GitHub username");
@@ -352,7 +353,7 @@ describe("base checks shape", () => {
   test("a malformed github_username (regex metacharacters, slashes) fails", () => {
     const { exitCode, stderr } = runValidator({
       ".copier-answers.yml":
-        "_commit: templates/v1.0.0\n_src_path: gh:Vivswan/repo-platform\n" +
+        "_commit: 0.0.0.post5.dev0+abc1234\n_src_path: gh:Vivswan/repo-platform\n" +
         "github_username: attacker/repo.*\n",
     });
     expect(exitCode).toBe(1);
@@ -362,7 +363,7 @@ describe("base checks shape", () => {
   test("a quoted github_username is read as its YAML value", () => {
     const { exitCode, stderr } = runValidator({
       ".copier-answers.yml":
-        `${MANAGED_HEADER}_commit: templates/v1.0.0\n_src_path: gh:Vivswan/repo-platform\n` +
+        `${MANAGED_HEADER}_commit: 0.0.0.post5.dev0+abc1234\n_src_path: gh:Vivswan/repo-platform\n` +
         'github_username: "Vivswan"\nprivate: true\n',
       ".github/workflows/ci.yml": mergedCi(MERGED_STEPS),
     });
@@ -800,6 +801,170 @@ describe("ownership-manifest byte parity", () => {
     expect(stderr).toBe("");
     expect(exitCode).toBe(0);
     expect(stdout).toContain("advisory: .repo-platform-manifest.json does not list 'SECURITY.md'");
+    // The baseline records a staging-form _commit, so absence runs in skew
+    // mode and the advisory says why.
+    expect(stdout).toContain("skew mode");
+  });
+
+  // Provenance: a templates/vX.Y.Z-form recorded _commit proves version
+  // alignment (this validator and the manifest ride the same render), so
+  // absence flips from skew advisories to hard errors there.
+  const RELEASE_ANSWERS = {
+    ".copier-answers.yml": BASELINE[".copier-answers.yml"].replace(
+      "_commit: 0.0.0.post5.dev0+abc1234",
+      "_commit: templates/v1.0.0",
+    ),
+  };
+  const RELEASE_SELF = {
+    [MANIFEST]: '{"class": "managed", "hash": null, "commit": "templates/v1.0.0"}',
+  };
+
+  test("release-aligned: a deleted roster entry is an error, not skew", () => {
+    // THE deletion attack: drop ci.yml's entry, edit the file under its
+    // header - without provenance this would ride the absence advisory.
+    const entries = { ...RELEASE_SELF };
+    const { exitCode, stderr } = runValidator({
+      ...RELEASE_ANSWERS,
+      [MANIFEST]: manifestOf(entries),
+      ".github/workflows/ci.yml": `${BASELINE[".github/workflows/ci.yml"]}# local tweak\n`,
+    });
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain(
+      ".repo-platform-manifest.json does not list '.github/workflows/ci.yml'",
+    );
+    expect(stderr).toContain("the entry was deleted by hand");
+  });
+
+  test("release-aligned: a missing manifest is an error, not an advisory", () => {
+    const { exitCode, stderr } = runValidator(RELEASE_ANSWERS);
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain(
+      `${MANIFEST} is missing, but the recorded render (templates/v1.0.0) is a release that ships it`,
+    );
+  });
+
+  test("release-aligned: a nulled or mismatched provenance stamp is an error (no skew downgrade)", () => {
+    // Nulling the self entry's commit must not buy the lenient skew path.
+    const nulled = runValidator({
+      ...RELEASE_ANSWERS,
+      [MANIFEST]: manifestOf({
+        ...SELF_ENTRY,
+        ".github/workflows/ci.yml": `{"class": "managed", "hash": "${sha(
+          BASELINE[".github/workflows/ci.yml"],
+        )}"}`,
+      }),
+    });
+    expect(nulled.exitCode).toBe(1);
+    expect(nulled.stderr).toContain("its provenance stamp is null but the recorded render");
+    const mismatched = runValidator({
+      ...RELEASE_ANSWERS,
+      [MANIFEST]: manifestOf({
+        [MANIFEST]: '{"class": "managed", "hash": null, "commit": "templates/v0.9.0"}',
+      }),
+    });
+    expect(mismatched.exitCode).toBe(1);
+    expect(mismatched.stderr).toContain("stamped provenance");
+  });
+
+  test("any-form provenance mismatch is an error, even off the release channel", () => {
+    // The stamper always writes the recorded _commit, so a differing (or
+    // key-deleted) value is tampering on every channel; only a null stamp
+    // stays lenient (legacy manifests).
+    const differing = runValidator({
+      [MANIFEST]: manifestOf({
+        [MANIFEST]: '{"class": "managed", "hash": null, "commit": "zzz9999"}',
+      }),
+    });
+    expect(differing.exitCode).toBe(1);
+    expect(differing.stderr).toContain("stamped provenance");
+    const keyDeleted = runValidator({
+      ".copier-answers.yml": `${MANAGED_HEADER}_src_path: gh:Vivswan/repo-platform\ngithub_username: Vivswan\n`,
+      [MANIFEST]: manifestOf({
+        [MANIFEST]: '{"class": "managed", "hash": null, "commit": "0.0.0.post5.dev0+abc1234"}',
+      }),
+    });
+    expect(keyDeleted.exitCode).toBe(1);
+    expect(keyDeleted.stderr).toContain("no _commit in .copier-answers.yml");
+  });
+
+  test("strict absence stands down when the executing validator ref is not the render's version", () => {
+    // The withheld-workflows fallback leaves an older pinned ci.yml behind:
+    // that validator's tables can declare a path the newer manifest
+    // legitimately omits (a retirement) whose restored file still exists.
+    const entries = { ...RELEASE_SELF };
+    const stale = runValidator(
+      {
+        ...RELEASE_ANSWERS,
+        [MANIFEST]: manifestOf(entries),
+      },
+      [],
+      { env: { VALIDATOR_REF: "v0.9.0" } },
+    );
+    expect(stale.stderr).toBe("");
+    expect(stale.exitCode).toBe(0);
+    expect(stale.stdout).toContain("this validator runs at ref 'v0.9.0'");
+    // The matching ref keeps the strict error (the plain-tag form uses_ref
+    // pins: v1.0.0 <-> templates/v1.0.0).
+    const matching = runValidator(
+      {
+        ...RELEASE_ANSWERS,
+        [MANIFEST]: manifestOf(entries),
+      },
+      [],
+      { env: { VALIDATOR_REF: "v1.0.0" } },
+    );
+    expect(matching.exitCode).toBe(1);
+    expect(matching.stderr).toContain("the entry was deleted by hand");
+  });
+
+  test("staging skew: matching sha-form provenance stays advisory", () => {
+    // A staging render's commit is not a release form: a main-pinned
+    // validator's tables may be newer than the render, so a missing roster
+    // entry must not false-error. This also pins the visibility guarantee
+    // behind the answers-side downgrade boundary (see the trust-model
+    // comment): even in skew mode, every absence names its path.
+    const entries = {
+      [MANIFEST]: '{"class": "managed", "hash": null, "commit": "0.0.0.post5.dev0+abc1234"}',
+    };
+    const { exitCode, stdout, stderr } = runValidator({ [MANIFEST]: manifestOf(entries) });
+    expect(stderr).toBe("");
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain("skew mode");
+    expect(stdout).toContain("does not list '.github/workflows/ci.yml'");
+  });
+
+  test("release-aligned: a fully listed manifest passes, absent-file paths advisory", () => {
+    // The strict deletion error requires the missing entry's FILE to still
+    // exist: roster paths the baseline tree does not carry (SECURITY.md and
+    // friends) stay advisories even under alignment - the version-split
+    // states the fleet legitimately produces (withheld workflow files, a
+    // channel switch) look exactly like this.
+    const gitignoreHalf = "# BEGIN REPO-PLATFORM MANAGED\n# END REPO-PLATFORM MANAGED\n";
+    const entries = {
+      ...RELEASE_SELF,
+      ".copier-answers.yml": `{"class": "managed", "hash": "${sha(
+        BASELINE[".copier-answers.yml"].replace(
+          "_commit: 0.0.0.post5.dev0+abc1234",
+          "_commit: templates/v1.0.0",
+        ),
+      )}"}`,
+      ".repo-platform.yml": `{"class": "managed", "hash": "${sha(BASELINE[".repo-platform.yml"])}"}`,
+      ".github/workflows/ci.yml": `{"class": "managed", "hash": "${sha(
+        BASELINE[".github/workflows/ci.yml"],
+      )}"}`,
+      ".gitignore":
+        `{"class": "split", "marker": "# BEGIN REPO-PLATFORM MANAGED", ` +
+        `"managed": "below", "hash": "${sha(gitignoreHalf)}"}`,
+    };
+    const { exitCode, stdout, stderr } = runValidator({
+      ...RELEASE_ANSWERS,
+      [MANIFEST]: manifestOf(entries),
+    });
+    expect(stderr).toBe("");
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain(
+      "does not list 'SECURITY.md', which this validator's ownership tables declare - the path is absent from the repo too",
+    );
   });
 
   test("a managed entry hand-flipped to starter fails the roster cross-check", () => {
