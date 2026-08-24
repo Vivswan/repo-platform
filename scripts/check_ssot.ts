@@ -1839,7 +1839,7 @@ const rules: Rule[] = [
         return `${name} <${email}>`;
       };
       const identityFiles = [
-        ".github/workflows/refresh-gitignore.yml",
+        ".github/scripts/shared/open_automation_pr.ts",
         ".github/scripts/sync/normalize_src.ts",
         ".github/scripts/sync/commit_push.ts",
       ];

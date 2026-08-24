@@ -52,33 +52,18 @@ jobs:
             echo "changed=true" >> "$GITHUB_OUTPUT"
           fi
 
+      # The commit subject and body embed the upstream SHA the lock now
+      # pins, so they are composed here (expressions cannot substring) and
+      # exported over the script's env.
       - name: Commit, push, and open PR
         if: steps.changes.outputs.changed == 'true'
         env:
           GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN || github.token }}
           BASE_BRANCH: ${{ github.event.repository.default_branch }}
+          BRANCH: automation/gitignore-refresh
+          PR_TITLE: "chore: refresh gitignore templates from github/gitignore"
         run: |
           sha="$(cat scripts/gitignore.lock)"
-          branch="automation/gitignore-refresh"
-          body="Automated regeneration of the gitignore outputs (base skeleton, toolchain fragments, this repo's own \`.gitignore\`) from [github/gitignore@\`${sha:0:12}\`](https://github.com/github/gitignore/tree/${sha}). Merging this rebuilds the staging branch; cutting a release makes sync-repos push it to latest-channel repos."
-          git config user.name "repo-platform-sync"
-          git config user.email "repo-platform-sync@users.noreply.github.com"
-          git checkout -B "$branch"
-          # The checkout was clean before regeneration, so the dirty set is
-          # exactly the script's outputs (plus the lock).
-          git add -A
-          git commit -m "chore: refresh gitignore templates from github/gitignore@${sha:0:12}"
-          git push --force origin "$branch"
-
-          existing="$(gh pr list --head "$branch" --json number --jq '.[0].number // empty')"
-          if [ -z "$existing" ]; then
-            gh pr create \
-              --base "$BASE_BRANCH" \
-              --head "$branch" \
-              --title "chore: refresh gitignore templates from github/gitignore" \
-              --body "$body"
-          else
-            # A later run force-pushes fresher content onto the same branch;
-            # keep the PR linking the upstream SHA it now ships.
-            gh pr edit "$existing" --body "$body"
-          fi
+          export COMMIT_MESSAGE="chore: refresh gitignore templates from github/gitignore@${sha:0:12}"
+          export PR_BODY="Automated regeneration of the gitignore outputs (base skeleton, toolchain fragments, this repo's own \`.gitignore\`) from [github/gitignore@\`${sha:0:12}\`](https://github.com/github/gitignore/tree/${sha}). Merging this rebuilds the staging branch; cutting a release makes sync-repos push it to latest-channel repos."
+          bun .github/scripts/shared/open_automation_pr.ts
