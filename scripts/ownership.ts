@@ -253,26 +253,39 @@ export function moduleOwnershipFiles(
           skipIfExists,
           `templates/${m.module}/${childRel}`,
         );
-        if (ownership.class === "starter") continue;
-        if (ownership.class === "mergeable") {
-          if (ungated) entries.push({ path: landedPath, kind: "mergeable" });
-          continue;
+        // Exhaustive over ManifestOwnership: a future class variant fails
+        // to compile (the never default) until it defines its roster
+        // behavior - silently inheriting an exemption or the header kind
+        // is exactly how a class would vanish from check 9's pin.
+        switch (ownership.class) {
+          case "starter":
+            // Repo-owned after the first render: nothing to enforce or pin.
+            break;
+          case "mergeable":
+            if (ungated) entries.push({ path: landedPath, kind: "mergeable" });
+            break;
+          case "split":
+            if (ungated) entries.push({ path: landedPath, kind: "marker" });
+            break;
+          case "managed": {
+            if (hasHeader) {
+              if (ungated) entries.push({ path: landedPath, kind: "header" });
+              break;
+            }
+            // Comment-free formats: the manifest's pin dotfile and JSON.
+            if (landedPath === m.toolchain?.pin?.file || landedPath.endsWith(".json")) break;
+            throw new Error(
+              `templates/${m.module}/${childRel}: declares no ownership - open it with ` +
+                "the managed header, split it with the local-section marker line, mark " +
+                `its baseline mergeable with a '# ${MERGEABLE_MARKER}' line, or list ` +
+                "its rendered path in _skip_if_exists",
+            );
+          }
+          default: {
+            const unhandled: never = ownership;
+            throw new Error(`unhandled ownership class: ${JSON.stringify(unhandled)}`);
+          }
         }
-        if (ownership.class === "split") {
-          if (ungated) entries.push({ path: landedPath, kind: "marker" });
-          continue;
-        }
-        if (hasHeader) {
-          if (ungated) entries.push({ path: landedPath, kind: "header" });
-          continue;
-        }
-        if (landedPath === m.toolchain?.pin?.file || landedPath.endsWith(".json")) continue;
-        throw new Error(
-          `templates/${m.module}/${childRel}: declares no ownership - open it with ` +
-            "the managed header, split it with the local-section marker line, mark " +
-            `its baseline mergeable with a '# ${MERGEABLE_MARKER}' line, or list ` +
-            "its rendered path in _skip_if_exists",
-        );
       }
     };
     visit("");

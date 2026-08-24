@@ -1168,7 +1168,7 @@ describe("ownership-manifest byte parity", () => {
     // THE class-flip attack for hashless classes: starter and mergeable
     // both carry no hash, so without the roster pin the flip would cost
     // nothing visible - not even the missing-file advisory. Mirrors the
-    // managed-flip test below.
+    // managed-flip test above.
     const entries = {
       ...stampedBaseline(),
       ".github/settings.yml": '{"class": "starter"}',
