@@ -45,18 +45,16 @@ jobs:
       # (paths-ignore, queries, packs, query-filters) - is picked up
       # automatically. The managed ci.yml cannot carry per-repo scan
       # parameters, so the file is how a repository customizes its scan;
-      # the inline config input wins when a caller passes both.
+      # the inline config input wins when a caller passes one (this step
+      # skips, and its empty output leaves config-file unset).
       - name: Detect the repository's CodeQL config
         id: config
-        env:
-          INLINE: ${{ inputs.config }}
+        if: inputs.config == ''
         run: |
           file=""
-          if [ -z "$INLINE" ]; then
-            for candidate in .github/codeql/codeql-config.yml .github/codeql/codeql-config.yaml; do
-              if [ -f "$candidate" ]; then file="./$candidate"; break; fi
-            done
-          fi
+          for candidate in .github/codeql/codeql-config.yml .github/codeql/codeql-config.yaml; do
+            if [ -f "$candidate" ]; then file="./$candidate"; break; fi
+          done
           echo "file=$file" >> "$GITHUB_OUTPUT"
 
       - uses: github/codeql-action/init@v4

@@ -856,10 +856,25 @@ const rules: Rule[] = [
       const runs = (typecheckJob.steps as Record<string, unknown>[])
         .map((step) => String(step.run ?? ""))
         .join("\n");
-      const dirList = mustMatch(runs, /for dir in ([^;\n]+);/, "ci.yml typecheck", "dir list");
-      mismatches.push(
-        ...setMismatch("ci.yml typecheck job dir list", lockDirs, dirList[1].trim().split(/\s+/)),
-      );
+      // The job iterates a tsconfig glob, so it cannot drift when actions
+      // are added; pin the glob shape, and require every bun dir to carry
+      // the tsconfig.json the glob keys on so none skips typechecking.
+      if (!runs.includes("for tsconfig in tsconfig.json actions/*/tsconfig.json")) {
+        mismatches.push({
+          file: "ci.yml typecheck",
+          expected: "a glob loop over tsconfig.json actions/*/tsconfig.json",
+          got: "no such loop",
+        });
+      }
+      for (const dir of lockDirs) {
+        if (!existsSync(join(REPO_ROOT, dir, "tsconfig.json"))) {
+          mismatches.push({
+            file: `${dir}/tsconfig.json`,
+            expected: "present (the ci.yml typecheck glob keys on it)",
+            got: "missing",
+          });
+        }
+      }
 
       const scriptTests = asRecord(ciJobs(repoCi(), "ci.yml")["script-tests"], "script-tests job");
       const testRun = (scriptTests.steps as Record<string, unknown>[])

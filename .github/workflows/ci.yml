@@ -127,9 +127,14 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: .bun-version
+      # Keyed on each action's tsconfig.json: dirs without one (no TS to
+      # check) skip naturally, and a new action joins without editing this
+      # list. The bun-dirs ssot rule pins the glob and requires every dir
+      # committing a bun.lock to carry a tsconfig.json.
       - name: Typecheck repo and action scripts
         run: |
-          for dir in . actions/check-typography actions/fuzz-issue actions/release-health actions/validate-commit-names actions/validate-skills actions/validate-template; do
+          for tsconfig in tsconfig.json actions/*/tsconfig.json; do
+            dir="$(dirname "$tsconfig")"
             echo "::group::$dir"
             (cd "$dir" && bun install --frozen-lockfile --silent && bun x tsc -p .)
             echo "::endgroup::"
@@ -218,7 +223,7 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile --silent
       - name: Run .github/scripts and action tests
-        run: bun test ./tests ./actions/fuzz-issue ./actions/release-health ./actions/validate-skills ./actions/validate-template
+        run: bun test ./tests ./actions
 
   # Structural validation of this repository's own hosted agent skills
   # (skills/ plus the repo-owned .claude-plugin manifests), dogfooding the
