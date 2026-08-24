@@ -26,11 +26,23 @@ WORK=/tmp/upgrade-work
 # The fleet LICENSE template carries its Required Notice and its
 # local-section marker as jinja variables; comparisons against rendered
 # projects substitute the copier defaults (independent of the code under
-# test, like the rest of this harness).
+# test, like the rest of this harness). If the template gains a variable
+# this oracle does not substitute, it fails HERE naming the leftover -
+# not later as a confusing prefix/cmp mismatch far from the cause.
 rendered_fleet_license() {
-  sed -e 's|{{ copyright_holder }}|Vivswan Shah (https://github.com/Vivswan)|g' \
+  local rendered leftover
+  rendered="$(sed -e 's|{{ copyright_holder }}|Vivswan Shah (https://github.com/Vivswan)|g' \
     -e 's|{{ github_username }}|Vivswan|g' \
-    "$GITHUB_WORKSPACE/templates/base/{% if 'custom-license' not in modules %}LICENSE.md{% endif %}.jinja"
+    "$GITHUB_WORKSPACE/templates/base/{% if 'custom-license' not in modules %}LICENSE.md{% endif %}.jinja")"
+  case "$rendered" in
+    *"{{"* | *"{%"*)
+      # head picks the first MATCH (-m1 would only limit matched lines);
+      # || true absorbs both a no-match grep and head's early-exit SIGPIPE.
+      leftover="$(printf '%s\n' "$rendered" | grep -oE '\{\{[^}]*\}\}|\{%[^}]*%\}' | head -n 1 || true)"
+      fail "rendered_fleet_license left an unrendered template expression (${leftover:-an unclosed jinja delimiter}); teach this oracle the substitution for it"
+      ;;
+  esac
+  printf '%s\n' "$rendered"
 }
 
 fail() {

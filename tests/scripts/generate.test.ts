@@ -618,14 +618,18 @@ describe("module ownership files", () => {
   });
 
   test("skipIfExistsMatchers rejects gitwildmatch features it does not implement", () => {
-    // The last three are gitwildmatch line forms (a comment, significant
-    // whitespace, an empty line), not path patterns.
+    // The negation form would RE-INCLUDE paths earlier patterns excluded -
+    // guessing at that would silently flip files between starter and
+    // managed. The last three are gitwildmatch line forms (a comment,
+    // significant whitespace, an empty line), not path patterns.
     const unsupported = [
       "docs/**/*.yml",
       "file?.yml",
       "[ab].yml",
       "/rooted.yml",
       "dir/",
+      "!negated.yml",
+      "dir/!(x).yml",
       "#comment.yml",
       " leading.yml",
       "",
