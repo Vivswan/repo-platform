@@ -204,6 +204,8 @@ jobs:
         run: bun run generate:check
       - name: Check generated dogfood copies against their template twins
         run: bun run dogfood:check
+      - name: Check markdown is not hard-wrapped
+        run: bun run wrap:check
 
   script-tests:
     runs-on: ubuntu-latest

@@ -19,13 +19,7 @@ This repo pushes updates to managed repos: sync PRs and settings changes origina
 
 ### Modules and channels<!-- BEGIN GENERATED: module-roster (scripts/generate.ts - edit module.yml manifests, not this block) -->
 
-- Modules (pick any combination): `agents`, `bun`, `node`, `deno`, `uv`,
-  `rust`, `pages`, `release-please`, `issue-templates`, `skills`,
-  `pr-title`, `auto-assign`, `fuzzer`, `nightly`, `settings-sync`,
-  `custom-license`. Modules with parameters (like `pages`) ask follow-up
-  questions only when selected. After generation, module selection lives in
-  each repo's own `.repo-platform.yml`: edit its `modules:` list and the
-  next sync applies the change.<!-- END GENERATED: module-roster -->
+- Modules (pick any combination): `agents`, `bun`, `node`, `deno`, `uv`, `rust`, `pages`, `release-please`, `issue-templates`, `skills`, `pr-title`, `auto-assign`, `fuzzer`, `nightly`, `settings-sync`, `custom-license`. Modules with parameters (like `pages`) ask follow-up questions only when selected. After generation, module selection lives in each repo's own `.repo-platform.yml`: edit its `modules:` list and the next sync applies the change.<!-- END GENERATED: module-roster -->
 - Channel `latest`: follows released `templates/vX.Y.Z` build tags; migrations run between releases.
 - Channel `staging`: follows the staging branch head; migrations are skipped. Vivswan's own managed repos use it.
 - Which channel a repo follows is fleet config: `defaults.channel` in [`repos.yml`](repos.yml), overridable per repo under `config:`.

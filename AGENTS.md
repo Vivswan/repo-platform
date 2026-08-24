@@ -30,3 +30,4 @@ repo-platform: a Copier template plus reusable GitHub Actions workflows and comp
 - PR titles and commit subjects are Conventional Commits; squash merges drive release-please versioning.
 - CI gates on a single required check named `all-green`, which `needs:` every gating job in `ci.yml` - add new jobs to its `needs` list. The gate is strict: a skipped needed job counts as failure, so jobs stay unconditional and event conditions go on their steps.
 - No typographic look-alike characters (curly quotes, em-dashes, invisible unicode); plain ASCII punctuation. check-typography enforces this.
+- Markdown prose is never hard-wrapped: one source line per paragraph, list item, or quote paragraph. `bun run wrap:check` enforces this.

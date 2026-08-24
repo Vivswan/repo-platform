@@ -29,14 +29,7 @@ git add --all
 git commit -m "chore: initialize from repo-platform"
 ```
 
-Copier asks for project name, description, an update **channel** (`latest` follows released `templates/vX.Y.Z` build tags and runs migrations; `staging` follows every main merge, migrations skipped), a `modules`<!-- BEGIN GENERATED: module-roster (scripts/generate.ts - edit module.yml manifests, not this block) -->
-multiselect (any combination of `agents`, `bun`, `node`, `deno`, `uv`,
-`rust`, `pages`, `release-please`, `issue-templates`, `skills`, `pr-title`,
-`auto-assign`, `fuzzer`, `nightly`, `settings-sync`, `custom-license`),
-follow-up parameters for modules that have them (see
-[docs/pages.md](pages.md), [docs/skills.md](skills.md),
-[docs/fuzzer.md](fuzzer.md), and [docs/nightly.md](nightly.md)), and
-visibility.<!-- END GENERATED: module-roster --> Answers are recorded in `.copier-answers.yml`; never delete that file, `copier update` depends on it.
+Copier asks for project name, description, an update **channel** (`latest` follows released `templates/vX.Y.Z` build tags and runs migrations; `staging` follows every main merge, migrations skipped), a `modules`<!-- BEGIN GENERATED: module-roster (scripts/generate.ts - edit module.yml manifests, not this block) --> multiselect (any combination of `agents`, `bun`, `node`, `deno`, `uv`, `rust`, `pages`, `release-please`, `issue-templates`, `skills`, `pr-title`, `auto-assign`, `fuzzer`, `nightly`, `settings-sync`, `custom-license`), follow-up parameters for modules that have them (see [docs/pages.md](pages.md), [docs/skills.md](skills.md), [docs/fuzzer.md](fuzzer.md), and [docs/nightly.md](nightly.md)), and visibility.<!-- END GENERATED: module-roster --> Answers are recorded in `.copier-answers.yml`; never delete that file, `copier update` depends on it.
 
 The chosen modules also land in `.repo-platform.yml`, and that file is the selection's home from then on: edit its `modules:` list and the next sync PR applies the change. Its presence is what marks the repo as managed.
 
@@ -100,9 +93,7 @@ rulesets:
     # starting point
 ```
 
-Since undeclared labels are deleted, the list must include the labels dependabot auto-creates, or the two sides loop forever: every apply deletes them, dependabot recreates them on its next run. That means `dependencies` (color `0366d6`) and `github_actions` (`000000`) always, plus one label per toolchain the repo's dependabot.yml covers:<!-- BEGIN GENERATED: dependabot-labels (scripts/generate.ts - edit module.yml manifests, not this block) -->
-`javascript` (`168700`) for bun and npm, `deno` (`70ffaf`) for deno,
-`python:uv` (`2b67c6`) for uv, `rust` (`000000`) for cargo.<!-- END GENERATED: dependabot-labels --> The exact descriptions are in `templates/settings-sync/.github/settings.yml.jinja`.
+Since undeclared labels are deleted, the list must include the labels dependabot auto-creates, or the two sides loop forever: every apply deletes them, dependabot recreates them on its next run. That means `dependencies` (color `0366d6`) and `github_actions` (`000000`) always, plus one label per toolchain the repo's dependabot.yml covers:<!-- BEGIN GENERATED: dependabot-labels (scripts/generate.ts - edit module.yml manifests, not this block) --> `javascript` (`168700`) for bun and npm, `deno` (`70ffaf`) for deno, `python:uv` (`2b67c6`) for uv, `rust` (`000000`) for cargo.<!-- END GENERATED: dependabot-labels --> The exact descriptions are in `templates/settings-sync/.github/settings.yml.jinja`.
 
 The easiest start is copying `settings/repos/repo-platform.yml` and trimming it. Merging the file to main applies it (settings-repos.yml runs on pushes to `settings/**`); for a drift report first, dispatch `gh workflow run settings-repos.yml -f check_only=true`.
 

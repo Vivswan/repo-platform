@@ -145,8 +145,9 @@ export function spliceRegion(
  *
  *  A `string[]` body is a multi-line span: the BEGIN marker ends the line
  *  preceding the region, so the body's lines start on a fresh line. A
- *  `string` body is a table cell and must stay a single line - a newline
- *  would end the row. */
+ *  `string` body is a single-line inline span (a table cell, or prose
+ *  continuing the marker's own sentence) and must stay one line - a
+ *  newline would end the row or hard-wrap the paragraph. */
 export function spliceInlineRegion(
   text: string,
   file: string,
@@ -156,7 +157,7 @@ export function spliceInlineRegion(
   const { begin, end } = mdMarkers(name);
   if (typeof body === "string" && /[\r\n]/.test(body)) {
     throw new Error(
-      `${file}: inline region '${name}' is a table cell; its body must be a single line`,
+      `${file}: inline region '${name}' is a single-line span; its body must be a single line`,
     );
   }
   const spliced = typeof body === "string" ? body : `\n${body.join("\n")}`;
@@ -177,24 +178,6 @@ export function spliceInlineRegion(
     throw new Error(`${file}: inline region '${name}' has its END marker before BEGIN - swap them`);
   }
   return text.slice(0, begins + begin.length) + spliced + text.slice(ends);
-}
-
-/** Greedy word-wrap for the docs' prose regions, at the files' prevailing
- *  75-column width. */
-export function wrapProse(
-  text: string,
-  { firstPrefix = "", indent = "", width = 75 } = {},
-): string[] {
-  const lines: string[] = [];
-  let line: string | undefined;
-  for (const word of text.split(/\s+/).filter((w) => w !== "")) {
-    if (line === undefined) line = firstPrefix + word;
-    else if (`${line} ${word}`.length > width) {
-      lines.push(line);
-      line = indent + word;
-    } else line = `${line} ${word}`;
-  }
-  return line === undefined ? [] : [...lines, line];
 }
 
 // --- region bodies ----------------------------------------------------------
@@ -561,24 +544,22 @@ function paramDocLinks(): string[] {
 export function readmeModuleRoster(manifests: ModuleManifest[]): string[] {
   return [
     "",
-    ...wrapProse(
-      `Modules (pick any combination): ${moduleRoster(manifests)}. ` +
-        "Modules with parameters (like `pages`) ask follow-up questions only when " +
-        "selected. After generation, module selection lives in each repo's own " +
-        "`.repo-platform.yml`: edit its `modules:` list and the next sync applies " +
-        "the change.",
-      { firstPrefix: "- ", indent: "  " },
-    ),
+    `- Modules (pick any combination): ${moduleRoster(manifests)}. ` +
+      "Modules with parameters (like `pages`) ask follow-up questions only when " +
+      "selected. After generation, module selection lives in each repo's own " +
+      "`.repo-platform.yml`: edit its `modules:` list and the next sync applies " +
+      "the change.",
   ];
 }
 
 /** docs/new-repo.md: the sentence run from the `modules` multiselect
- *  through "and visibility." (the roster's own sentence). */
-export function newRepoModuleRoster(manifests: ModuleManifest[]): string[] {
-  return wrapProse(
-    `multiselect (any combination of ${moduleRoster(manifests)}), follow-up ` +
-      `parameters for modules that have them (see ${proseList(paramDocLinks())}), ` +
-      "and visibility.",
+ *  through "and visibility." (the roster's own sentence). Single-line:
+ *  it continues the BEGIN marker's sentence in place. */
+export function newRepoModuleRoster(manifests: ModuleManifest[]): string {
+  return (
+    ` multiselect (any combination of ${moduleRoster(manifests)}), follow-up ` +
+    `parameters for modules that have them (see ${proseList(paramDocLinks())}), ` +
+    "and visibility."
   );
 }
 
@@ -665,15 +646,11 @@ function dependabotLabelList(manifests: ModuleManifest[]): string {
     .join(", ");
 }
 
-/** docs/new-repo.md: the per-toolchain dependabot labels a central
- *  settings file must declare. */
-export function newRepoDependabotLabels(manifests: ModuleManifest[]): string[] {
-  return wrapProse(`${dependabotLabelList(manifests)}.`);
-}
-
-/** docs/settings.md: the same labels inside the apply-semantics bullet. */
-export function settingsDependabotLabels(manifests: ModuleManifest[]): string[] {
-  return wrapProse(`${dependabotLabelList(manifests)}.`, { firstPrefix: "  ", indent: "  " });
+/** docs/new-repo.md and docs/settings.md: the per-toolchain dependabot
+ *  labels a settings file must declare. Single-line: it continues the
+ *  BEGIN marker's sentence in place. */
+export function dependabotLabelsSpan(manifests: ModuleManifest[]): string {
+  return ` ${dependabotLabelList(manifests)}.`;
 }
 
 /** docs/pages.md `pages_setup` row: the Meaning cell. */
@@ -742,14 +719,15 @@ interface RegionInputs {
 }
 
 type SpanRegion = [name: string, body: (inputs: RegionInputs) => string[]];
-type CellRegion = [name: string, body: (inputs: RegionInputs) => string];
+type InlineRegion = [name: string, body: (inputs: RegionInputs) => string];
 
-// At least one region list is required by construction, and cell regions
-// (single-line, inside table rows) exist only for markdown targets:
-// line-comment files cannot carry inline markers at all.
+// At least one region list is required by construction, and inline regions
+// (single-line bodies: table cells and mid-sentence prose spans) exist only
+// for markdown targets: line-comment files cannot carry inline markers at
+// all.
 type MarkdownRegions =
-  | { regions: SpanRegion[]; cells?: CellRegion[] }
-  | { regions?: SpanRegion[]; cells: CellRegion[] };
+  | { regions: SpanRegion[]; inlineRegions?: InlineRegion[] }
+  | { regions?: SpanRegion[]; inlineRegions: InlineRegion[] };
 
 type Target =
   | { file: string; syntax: "line"; prefix: string; regions: SpanRegion[] }
@@ -803,25 +781,27 @@ function targets(manifests: ModuleManifest[]): Target[] {
       file: "README.md",
       syntax: "markdown",
       regions: [["module-roster", ({ manifests }) => readmeModuleRoster(manifests)]],
-      cells: [["gitignore-upstream-map", ({ manifests }) => gitignoreUpstreamMap(manifests)]],
+      inlineRegions: [
+        ["gitignore-upstream-map", ({ manifests }) => gitignoreUpstreamMap(manifests)],
+      ],
     },
     {
       file: "docs/new-repo.md",
       syntax: "markdown",
-      regions: [
+      inlineRegions: [
         ["module-roster", ({ manifests }) => newRepoModuleRoster(manifests)],
-        ["dependabot-labels", ({ manifests }) => newRepoDependabotLabels(manifests)],
+        ["dependabot-labels", ({ manifests }) => dependabotLabelsSpan(manifests)],
       ],
     },
     {
       file: "docs/settings.md",
       syntax: "markdown",
-      regions: [["dependabot-labels", ({ manifests }) => settingsDependabotLabels(manifests)]],
+      inlineRegions: [["dependabot-labels", ({ manifests }) => dependabotLabelsSpan(manifests)]],
     },
     {
       file: "docs/pages.md",
       syntax: "markdown",
-      cells: [
+      inlineRegions: [
         ["pages-setup-meaning", ({ pages }) => pagesSetupMeaning(pages)],
         ["pages-setup-default", ({ pages }) => pagesSetupDefault(pages)],
         ["pages-install-default", ({ pages }) => pagesInstallRow(pages)],
@@ -905,7 +885,7 @@ function main(): number {
         for (const [name, body] of target.regions ?? []) {
           next = spliceInlineRegion(next, target.file, name, body(inputs));
         }
-        for (const [name, body] of target.cells ?? []) {
+        for (const [name, body] of target.inlineRegions ?? []) {
           next = spliceInlineRegion(next, target.file, name, body(inputs));
         }
       }

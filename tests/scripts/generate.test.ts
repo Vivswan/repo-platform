@@ -8,6 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   dependabotLabelGroups,
+  dependabotLabelsSpan,
   gitignoreUpstreamMap,
   hasToolchainDefault,
   knownModules,
@@ -15,7 +16,6 @@ import {
   markerLines,
   mdMarkers,
   moduleChoices,
-  newRepoDependabotLabels,
   newRepoModuleRoster,
   type PagesManifest,
   pagesBuildCommand,
@@ -29,7 +29,6 @@ import {
   pinFileContent,
   readmeModuleRoster,
   reservedLabelNames,
-  settingsDependabotLabels,
   spliceInlineRegion,
   spliceRegion,
   strayPinFiles,
@@ -40,7 +39,6 @@ import {
   trackingLabelsInput,
   trackingLabelValidator,
   trackingStreams,
-  wrapProse,
 } from "../../scripts/generate";
 import type { ModuleManifest } from "../../scripts/module_manifests";
 
@@ -407,27 +405,6 @@ describe("spliceInlineRegion", () => {
   });
 });
 
-describe("wrapProse", () => {
-  test("greedy-wraps at the width, prefixing and indenting", () => {
-    expect(wrapProse("one two three", { firstPrefix: "- ", indent: "  ", width: 9 })).toEqual([
-      "- one two",
-      "  three",
-    ]);
-  });
-
-  test("keeps a word longer than the width on its own line", () => {
-    expect(wrapProse("aa unbreakable bb", { width: 4 })).toEqual(["aa", "unbreakable", "bb"]);
-  });
-
-  test("collapses runs of whitespace", () => {
-    expect(wrapProse("a  b\n c", { width: 75 })).toEqual(["a b c"]);
-  });
-
-  test("empty text wraps to no lines", () => {
-    expect(wrapProse("  ")).toEqual([]);
-  });
-});
-
 describe("docs region builders", () => {
   test("readmeModuleRoster keeps the module-list rule's sentence anchor", () => {
     const text = readmeModuleRoster([BUN, UV, RUST]).join("\n");
@@ -442,25 +419,26 @@ describe("docs region builders", () => {
     expect(text).toContain("ask follow-up questions only when selected.");
   });
 
-  test("readmeModuleRoster opens with the heading-separating blank line, then a 75-column bullet", () => {
+  test("readmeModuleRoster opens with the heading-separating blank line, then one unwrapped bullet", () => {
     const lines = readmeModuleRoster([BUN, UV, RUST]);
+    expect(lines).toHaveLength(2);
     expect(lines[0]).toBe("");
     expect(lines[1]).toStartWith("- Modules (pick any combination): `bun`,");
-    for (const line of lines.slice(2)) expect(line).toStartWith("  ");
-    for (const line of lines) expect(line.length).toBeLessThanOrEqual(75);
+    expect(lines[1]).toEndWith("the next sync applies the change.");
   });
 
   test("newRepoModuleRoster keeps the module-list rule's paren anchor and ends its sentence", () => {
-    const text = newRepoModuleRoster([BUN, RUST]).join("\n");
+    const text = newRepoModuleRoster([BUN, RUST]);
     const region = text.match(/any combination of([\s\S]*?)\)/);
     expect(region).not.toBeNull();
     expect([...(region as RegExpMatchArray)[1].matchAll(/`([a-z-]+)`/g)].map((m) => m[1])).toEqual([
       "bun",
       "rust",
     ]);
-    // Wrap-insensitive: the greedy wrapper may break inside the closing
-    // phrase, but the sentence itself must still end the region.
-    expect(text.replace(/\n/g, " ")).toEndWith("and visibility.");
+    // Single-line: the span continues the BEGIN marker's sentence in place,
+    // so it opens with a separating space and ends the sentence itself.
+    expect(text).toStartWith(" multiselect");
+    expect(text).toEndWith("and visibility.");
     // The parameter-doc links come from MODULE_PARAM_DOCS, not a hand list.
     expect(text).toContain("[docs/skills.md](skills.md)");
     expect(text).toContain("[docs/nightly.md](nightly.md)");
@@ -503,25 +481,17 @@ describe("docs region builders", () => {
     const yarn = manifest("yarn", {
       dependabot: { ecosystem: "yarn", label: "javascript", color: "168700" },
     });
-    expect(newRepoDependabotLabels([BUN, UV]).join("\n")).toContain(
+    expect(dependabotLabelsSpan([BUN, UV])).toContain(
       "`javascript` (`168700`) for bun, `python:uv` (`2b67c6`) for uv.",
     );
-    expect(newRepoDependabotLabels([BUN, node, UV]).join("\n")).toContain(
-      "for bun and npm, `python:uv`",
-    );
-    expect(newRepoDependabotLabels([BUN, node, yarn]).join("\n")).toContain(
-      "for bun, npm, and yarn.",
-    );
+    expect(dependabotLabelsSpan([BUN, node, UV])).toContain("for bun and npm, `python:uv`");
+    expect(dependabotLabelsSpan([BUN, node, yarn])).toContain("for bun, npm, and yarn.");
   });
 
-  test("settingsDependabotLabels indents into the docs bullet and ends its sentence", () => {
-    const lines = settingsDependabotLabels([BUN, UV, RUST]);
-    expect(lines[0]).toStartWith("  `javascript` (`168700`) for bun");
-    expect(lines[lines.length - 1]).toEndWith("for cargo.");
-    for (const line of lines) {
-      expect(line).toStartWith("  ");
-      expect(line.length).toBeLessThanOrEqual(75);
-    }
+  test("dependabotLabelsSpan opens with the marker-separating space and ends its sentence", () => {
+    const span = dependabotLabelsSpan([BUN, UV, RUST]);
+    expect(span).toStartWith(" `javascript` (`168700`) for bun");
+    expect(span).toEndWith("for cargo.");
   });
 
   test("pages cells render token list, example, and command defaults", () => {
