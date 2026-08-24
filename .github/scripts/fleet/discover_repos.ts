@@ -22,7 +22,7 @@ import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { requireEnv } from "../shared/gha.ts";
 import { capture } from "../shared/proc.ts";
-import { discoverWritableRepos } from "./discovery.ts";
+import { discoverOwnerRepos } from "./discovery.ts";
 
 const runnerTemp = requireEnv("RUNNER_TEMP");
 
@@ -36,8 +36,6 @@ if (who.exitCode !== 0) {
 }
 const login = who.stdout.trim();
 
-const discovered = discoverWritableRepos("discover_repos: user/repos response")
-  .filter((repo) => repo.owner.login === login)
-  .map((repo) => ({ repo: repo.full_name, private: repo.private !== false }));
+const discovered = discoverOwnerRepos(login, "discover_repos: user/repos response");
 writeFileSync(join(runnerTemp, "discovered.json"), JSON.stringify(discovered));
 console.log(`discovered ${discovered.length} writable repos for ${login}`);

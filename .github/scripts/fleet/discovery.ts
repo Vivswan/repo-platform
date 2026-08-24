@@ -71,6 +71,20 @@ export function discoverWritableRepos(label: string) {
   return pages.flat().filter((repo) => !repo.archived && repo.permissions?.push === true);
 }
 
+/** The discovered fleet scoped to `owner` and projected to the {repo,
+ * private} rows the selection pipeline consumes (repos_registry select,
+ * redact enrich). Visibility rides along fail-closed - anything but
+ * private: false counts as private - because the flag drives the
+ * selectors' redaction of their public logs (docs/private-repos.md). */
+export function discoverOwnerRepos(
+  owner: string,
+  label: string,
+): { repo: string; private: boolean }[] {
+  return discoverWritableRepos(label)
+    .filter((repo) => repo.owner.login === owner)
+    .map((repo) => ({ repo: repo.full_name, private: repo.private !== false }));
+}
+
 // Only the dispatch input's slot is pinned; unrelated event fields pass
 // through unchecked. An absent input is valid - schedule and release
 // events carry no `inputs` key, and an inputs-less API dispatch writes

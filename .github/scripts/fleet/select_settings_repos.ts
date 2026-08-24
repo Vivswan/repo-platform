@@ -32,7 +32,7 @@ import { join } from "node:path";
 import { env, notice, requireEnv, setOutput } from "../shared/gha.ts";
 import { capture } from "../shared/proc.ts";
 import {
-  discoverWritableRepos,
+  discoverOwnerRepos,
   notAdoptedNotice,
   pushProbeSkipNotice,
   readDispatchRepo,
@@ -163,9 +163,7 @@ async function probe(
 // Discovery pre-filters to owned, user-writable repos; the token's actual
 // grant is probed per repo below. Visibility rides along fail-closed:
 // anything but private: false counts as private.
-const discovered = discoverWritableRepos("select_settings_repos: user/repos response")
-  .filter((repo) => repo.owner.login === owner)
-  .map((repo) => ({ repo: repo.full_name, private: repo.private !== false }));
+const discovered = discoverOwnerRepos(owner, "select_settings_repos: user/repos response");
 writeFileSync(join(runnerTemp, "discovered.json"), JSON.stringify(discovered));
 
 runStage(
