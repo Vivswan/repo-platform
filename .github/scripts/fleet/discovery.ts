@@ -55,6 +55,16 @@ export function discoverWritableRepos(label: string) {
   return pages.flat().filter((repo) => !repo.archived && repo.permissions?.push === true);
 }
 
+// Only the dispatch input's slot is pinned; unrelated event fields pass
+// through unchecked. An absent input is valid - schedule and release
+// events carry no `inputs` key, and an inputs-less API dispatch writes
+// `"inputs": null` - but a present slot of the wrong type fails loudly
+// (parseWith's diagnostic names paths only, never the value, which may be
+// a private slug).
+const dispatchEvent = z.object({
+  inputs: z.object({ repo: z.string().optional() }).nullish(),
+});
+
 /** The repo dispatch input, case-folded (GitHub identity is
  * case-insensitive, so it must fold before any comparison). A non-empty
  * ONLY_REPO env overrides the event payload - the test harnesses and
@@ -65,9 +75,11 @@ export function discoverWritableRepos(label: string) {
 export function readDispatchRepo(owner?: string): string {
   let repo = env("ONLY_REPO");
   if (repo === "" && env("GITHUB_EVENT_PATH") !== "") {
-    const event = JSON.parse(readFileSync(env("GITHUB_EVENT_PATH"), "utf-8")) as {
-      inputs?: { repo?: string };
-    };
+    const event = parseWith(
+      dispatchEvent,
+      JSON.parse(readFileSync(env("GITHUB_EVENT_PATH"), "utf-8")),
+      "readDispatchRepo: event payload",
+    );
     repo = event.inputs?.repo ?? "";
   }
   repo = repo.trim();

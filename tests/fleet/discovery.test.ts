@@ -172,6 +172,60 @@ describe("readDispatchRepo", () => {
     });
   });
 
+  test("a null inputs key reads as empty (an inputs-less API dispatch)", () => {
+    const eventFile = join(root, "event-null-inputs.json");
+    writeFileSync(eventFile, JSON.stringify({ inputs: null }));
+    withEnv({ ONLY_REPO: "", GITHUB_EVENT_PATH: eventFile }, () => {
+      expect(readDispatchRepo()).toBe("");
+    });
+  });
+
+  test("a payload without an inputs key reads as empty (schedule and release events)", () => {
+    const eventFile = join(root, "event-no-inputs.json");
+    writeFileSync(eventFile, JSON.stringify({ action: "published" }));
+    withEnv({ ONLY_REPO: "", GITHUB_EVENT_PATH: eventFile }, () => {
+      expect(readDispatchRepo()).toBe("");
+    });
+  });
+
+  // The malformed cases exit the process (parseWith), so they run behind
+  // a subprocess entry file.
+  const dispatchEntry = join(root, "dispatch_entry.ts");
+  writeFileSync(
+    dispatchEntry,
+    [
+      `import { readDispatchRepo } from ${JSON.stringify(
+        join(import.meta.dir, "../../.github/scripts/fleet/discovery.ts"),
+      )};`,
+      "console.log(JSON.stringify(readDispatchRepo()));",
+      "",
+    ].join("\n"),
+  );
+
+  function runDispatch(eventBody: string, name: string) {
+    const eventFile = join(root, `event-${name}.json`);
+    writeFileSync(eventFile, eventBody);
+    const proc = Bun.spawnSync(["bun", dispatchEntry], {
+      env: { ...process.env, ONLY_REPO: "", GITHUB_EVENT_PATH: eventFile },
+    });
+    return { exitCode: proc.exitCode, stdout: proc.stdout.toString() };
+  }
+
+  test("a wrong-typed repo input fails loudly, naming the path but never the value", () => {
+    const r = runDispatch(JSON.stringify({ inputs: { repo: 31337 } }), "wrong-type");
+    expect(r.exitCode).toBe(1);
+    expect(r.stdout).toContain("::error::readDispatchRepo: event payload: unexpected shape");
+    expect(r.stdout).toContain("inputs.repo");
+    expect(r.stdout).not.toContain("31337");
+  });
+
+  test("a non-object payload fails loudly instead of miscasting", () => {
+    const r = runDispatch(JSON.stringify("Vivswan/hidden-server"), "non-object");
+    expect(r.exitCode).toBe(1);
+    expect(r.stdout).toContain("::error::readDispatchRepo: event payload: unexpected shape");
+    expect(r.stdout).not.toContain("hidden-server");
+  });
+
   test("nothing set reads as empty, and an owner never prefixes an empty input", () => {
     withEnv({ ONLY_REPO: "", GITHUB_EVENT_PATH: "" }, () => {
       expect(readDispatchRepo("Vivswan")).toBe("");
