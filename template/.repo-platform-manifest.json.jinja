@@ -1,0 +1,115 @@
+{%- set entries = [] -%}
+{%- if 'bun' in modules -%}
+{%- set _ = entries.append('    ".bun-version": {"class": "managed", "hash": null}') -%}
+{%- endif -%}
+{%- if 'skills' in modules -%}
+{%- set _ = entries.append('    ".claude-plugin/marketplace.json": {"class": "starter"}') -%}
+{%- endif -%}
+{%- if 'skills' in modules -%}
+{%- set _ = entries.append('    ".claude-plugin/plugin.json": {"class": "starter"}') -%}
+{%- endif -%}
+{%- set _ = entries.append('    ".copier-answers.yml": {"class": "managed", "hash": null}') -%}
+{%- if 'deno' in modules -%}
+{%- set _ = entries.append('    ".dvmrc": {"class": "managed", "hash": null}') -%}
+{%- endif -%}
+{%- set _ = entries.append('    ".editorconfig": {"class": "split", "marker": "# repo-platform:local-section", "managed": "above", "hash": null}') -%}
+{%- set _ = entries.append('    ".gitattributes": {"class": "split", "marker": "# repo-platform:local-section", "managed": "above", "hash": null}') -%}
+{%- set _ = entries.append('    ".github/CODEOWNERS": {"class": "split", "marker": "# repo-platform:local-section", "managed": "above", "hash": null}') -%}
+{%- if 'issue-templates' in modules -%}
+{%- set _ = entries.append('    ".github/ISSUE_TEMPLATE/bug_report.yml": {"class": "starter"}') -%}
+{%- endif -%}
+{%- if 'issue-templates' in modules -%}
+{%- set _ = entries.append('    ".github/ISSUE_TEMPLATE/config.yml": {"class": "starter"}') -%}
+{%- endif -%}
+{%- if 'issue-templates' in modules -%}
+{%- set _ = entries.append('    ".github/ISSUE_TEMPLATE/feature_request.yml": {"class": "starter"}') -%}
+{%- endif -%}
+{%- set _ = entries.append('    ".github/actionlint.yaml": {"class": "starter"}') -%}
+{%- if 'agents' in modules -%}
+{%- set _ = entries.append('    ".github/agents.md": {"class": "managed", "hash": null}') -%}
+{%- endif -%}
+{%- if 'agents' in modules -%}
+{%- set _ = entries.append('    ".github/copilot-instructions.md": {"class": "managed", "hash": null}') -%}
+{%- endif -%}
+{%- set _ = entries.append('    ".github/dependabot.yml": {"class": "managed", "hash": null}') -%}
+{%- if 'settings-sync' in modules -%}
+{%- set _ = entries.append('    ".github/settings.yml": {"class": "starter"}') -%}
+{%- endif -%}
+{%- if 'auto-assign' in modules -%}
+{%- set _ = entries.append('    ".github/workflows/auto-assign.yml": {"class": "managed", "hash": null}') -%}
+{%- endif -%}
+{%- if has_toolchain -%}
+{%- set _ = entries.append('    ".github/workflows/auto-format.yml": {"class": "starter"}') -%}
+{%- endif -%}
+{%- set _ = entries.append('    ".github/workflows/checks.yml": {"class": "starter"}') -%}
+{%- set _ = entries.append('    ".github/workflows/ci.yml": {"class": "managed", "hash": null}') -%}
+{%- if 'agents' in modules -%}
+{%- set _ = entries.append('    ".github/workflows/copilot-setup-steps.yml": {"class": "starter"}') -%}
+{%- endif -%}
+{%- if 'deno' in modules -%}
+{%- set _ = entries.append('    ".github/workflows/deno-audit.yml": {"class": "managed", "hash": null}') -%}
+{%- endif -%}
+{%- if 'bun' in modules -%}
+{%- set _ = entries.append('    ".github/workflows/dependabot-bun-lockfile.yml": {"class": "managed", "hash": null}') -%}
+{%- endif -%}
+{%- if 'fuzzer' in modules -%}
+{%- set _ = entries.append('    ".github/workflows/nightly-fuzz.yml": {"class": "starter"}') -%}
+{%- endif -%}
+{%- if 'nightly' in modules -%}
+{%- set _ = entries.append('    ".github/workflows/nightly.yml": {"class": "starter"}') -%}
+{%- endif -%}
+{%- if 'pages' in modules -%}
+{%- set _ = entries.append('    ".github/workflows/pages.yml": {"class": "managed", "hash": null}') -%}
+{%- endif -%}
+{%- if 'release-please' in modules -%}
+{%- set _ = entries.append('    ".github/workflows/release.yml": {"class": "managed", "hash": null}') -%}
+{%- endif -%}
+{%- if 'settings-sync' in modules -%}
+{%- set _ = entries.append('    ".github/workflows/settings-sync.yml": {"class": "managed", "hash": null}') -%}
+{%- endif -%}
+{%- if 'release-please' in modules -%}
+{%- set _ = entries.append('    ".github/workflows/update-release-pr.yml": {"class": "starter"}') -%}
+{%- endif -%}
+{%- if 'release-please' in modules -%}
+{%- set _ = entries.append('    ".github/workflows/update-release.yml": {"class": "starter"}') -%}
+{%- endif -%}
+{%- if 'skills' in modules -%}
+{%- set _ = entries.append('    ".github/workflows/validate-skills.yml": {"class": "managed", "hash": null}') -%}
+{%- endif -%}
+{%- set _ = entries.append('    ".gitignore": {"class": "split", "marker": "# BEGIN REPO-PLATFORM MANAGED", "managed": "below", "hash": null}') -%}
+{%- set _ = entries.append('    ".gitleaks.toml": {"class": "starter"}') -%}
+{%- if 'node' in modules -%}
+{%- set _ = entries.append('    ".node-version": {"class": "managed", "hash": null}') -%}
+{%- endif -%}
+{%- if 'release-please' in modules -%}
+{%- set _ = entries.append('    ".release-please-manifest.json": {"class": "starter"}') -%}
+{%- endif -%}
+{%- set _ = entries.append('    ".repo-platform-manifest.json": {"class": "managed", "hash": null, "commit": null}') -%}
+{%- set _ = entries.append('    ".repo-platform.yml": {"class": "managed", "hash": null}') -%}
+{%- set _ = entries.append('    ".typography-allow": {"class": "managed", "hash": null}') -%}
+{%- set _ = entries.append('    ".yamllint": {"class": "managed", "hash": null}') -%}
+{%- if 'agents' in modules -%}
+{%- set _ = entries.append('    "AGENTS.md": {"class": "split", "marker": "<!-- repo-platform:local-section -->", "managed": "above", "hash": null}') -%}
+{%- endif -%}
+{%- if 'agents' in modules -%}
+{%- set _ = entries.append('    "CLAUDE.md": {"class": "managed", "hash": null}') -%}
+{%- endif -%}
+{%- if not private -%}
+{%- set _ = entries.append('    "CODE_OF_CONDUCT.md": {"class": "managed", "hash": null}') -%}
+{%- endif -%}
+{%- if not private -%}
+{%- set _ = entries.append('    "CONTRIBUTING.md": {"class": "split", "marker": "<!-- repo-platform:local-section -->", "managed": "above", "hash": null}') -%}
+{%- endif -%}
+{%- if 'custom-license' not in modules -%}
+{%- set _ = entries.append('    "LICENSE.md": {"class": "split", "marker": "<!-- repo-platform:local-section -->", "managed": "above", "hash": null}') -%}
+{%- endif -%}
+{%- set _ = entries.append('    "SECURITY.md": {"class": "split", "marker": "<!-- repo-platform:local-section -->", "managed": "above", "hash": null}') -%}
+{%- if 'release-please' in modules -%}
+{%- set _ = entries.append('    "release-please-config.json": {"class": "starter"}') -%}
+{%- endif -%}
+{
+  "$comment": "Generated by {{ github_username }}/repo-platform - do not edit. Every template-landed path with its ownership class: managed (sync overwrites the whole file; hash is sha256 of the last stamped content, or of the symlink target), split (sync owns one half; the hash covers the managed half, through the marker line for 'above' and from it for 'below'), starter (rendered once, repo-owned; no hash). Hashes - and, on this file's own entry, the render's _commit provenance - are stamped after each render by the template's stamp_manifest.ts hook; this file's own hash stays null because its content includes every other hash, so a self-hash would be circular.",
+  "files": {
+{{ entries | join(',\n') }}
+  }
+}
