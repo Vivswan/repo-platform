@@ -50,9 +50,21 @@ _skip_if_exists:
 # migrations/ is named for the release it migrates away from, so authoring
 # never requires predicting the next release number. Copier invokes the
 # runner once per update; selection happens inside it.
+#
+# The second entry stamps the ownership manifest's per-repo hashes: they
+# are facts of the rendered tree, so stamping must run after copier writes
+# it - and after run.ts, so files a migration edits are stamped too.
+# Copier runs _migrations only on update and _tasks only on copy/recopy,
+# hence the same stamper (shipped next to this file on the build branches)
+# is wired into both.
 _migrations:
   - command: bun "{{ _copier_conf.src_path }}/migrations/run.ts"
     when: "{{ _stage == 'after' }}"
+  - command: bun "{{ _copier_conf.src_path }}/stamp_manifest.ts"
+    when: "{{ _stage == 'after' }}"
+
+_tasks:
+  - command: bun "{{ _copier_conf.src_path }}/stamp_manifest.ts"
 
 project_name:
   type: str

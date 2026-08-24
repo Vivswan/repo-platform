@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -705,5 +705,169 @@ describe("ownership self-declarations", () => {
     const { exitCode, stderr } = runValidator({ ".yamllint": "extends: default\n" }, ["--self"]);
     expect(stderr).toBe("");
     expect(exitCode).toBe(0);
+  });
+});
+
+describe("ownership-manifest byte parity", () => {
+  const MANIFEST = ".repo-platform-manifest.json";
+  const sha = (text: string) =>
+    new Bun.CryptoHasher("sha256").update(Buffer.from(text, "latin1")).digest("hex");
+  const manifestOf = (entries: Record<string, string>) =>
+    `{\n  "$comment": "test",\n  "files": {\n${Object.entries(entries)
+      .map(([path, body]) => `    ${JSON.stringify(path)}: ${body}`)
+      .join(",\n")}\n  }\n}\n`;
+  const SELF_ENTRY = { [MANIFEST]: '{"class": "managed", "hash": null}' };
+  const stampedBaseline = () => ({
+    ...SELF_ENTRY,
+    ".github/workflows/ci.yml": `{"class": "managed", "hash": "${sha(
+      BASELINE[".github/workflows/ci.yml"],
+    )}"}`,
+  });
+
+  test("a missing manifest is an advisory, not an error", () => {
+    const { exitCode, stdout, stderr } = runValidator();
+    expect(stderr).toBe("");
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain(`advisory: ${MANIFEST} is missing`);
+  });
+
+  test("a stamped manifest with matching hashes passes", () => {
+    const { exitCode, stderr } = runValidator({ [MANIFEST]: manifestOf(stampedBaseline()) });
+    expect(stderr).toBe("");
+    expect(exitCode).toBe(0);
+  });
+
+  test("a drifted managed file fails parity", () => {
+    const entries = {
+      ...SELF_ENTRY,
+      ".github/workflows/ci.yml": `{"class": "managed", "hash": "${"0".repeat(64)}"}`,
+    };
+    const { exitCode, stderr } = runValidator({ [MANIFEST]: manifestOf(entries) });
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain(".github/workflows/ci.yml: content does not match the sha256");
+  });
+
+  test("split parity covers the managed half only: tail edits pass, top edits fail", () => {
+    const managedTop = "# Security\n<!-- repo-platform:local-section -->\n";
+    const entries = {
+      ...stampedBaseline(),
+      "SECURITY.md":
+        `{"class": "split", "marker": "<!-- repo-platform:local-section -->", ` +
+        `"managed": "above", "hash": "${sha(managedTop)}"}`,
+    };
+    const tailEdited = runValidator({
+      [MANIFEST]: manifestOf(entries),
+      "SECURITY.md": `${managedTop}repo-owned tail, freely edited\n`,
+    });
+    expect(tailEdited.stderr).toBe("");
+    expect(tailEdited.exitCode).toBe(0);
+    const topEdited = runValidator({
+      [MANIFEST]: manifestOf(entries),
+      "SECURITY.md": `# Security, reworded\n<!-- repo-platform:local-section -->\ntail\n`,
+    });
+    expect(topEdited.exitCode).toBe(1);
+    expect(topEdited.stderr).toContain("SECURITY.md: its managed half does");
+  });
+
+  test("an unstamped managed entry is an error naming the stamp hook", () => {
+    const entries = { ...SELF_ENTRY, ".yamllint": '{"class": "managed", "hash": null}' };
+    const { exitCode, stderr } = runValidator({
+      [MANIFEST]: manifestOf(entries),
+      ".yamllint": "extends: default\n",
+    });
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain(".yamllint: .repo-platform-manifest.json records no hash");
+  });
+
+  test("a listed managed file missing from the repo is an error", () => {
+    const entries = {
+      ...stampedBaseline(),
+      ".github/workflows/release.yml": `{"class": "managed", "hash": "${"a".repeat(64)}"}`,
+    };
+    const { exitCode, stderr } = runValidator({ [MANIFEST]: manifestOf(entries) });
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain(".github/workflows/release.yml: listed as managed");
+  });
+
+  test("a starter entry never carries a hash", () => {
+    const entries = {
+      ...stampedBaseline(),
+      ".github/workflows/checks.yml": `{"class": "starter", "hash": "${"a".repeat(64)}"}`,
+    };
+    const { exitCode, stderr } = runValidator({ [MANIFEST]: manifestOf(entries) });
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain("a starter carrying a hash");
+  });
+
+  test("the manifest's own entry must stay hash-null (self-hash is circular)", () => {
+    const entries = {
+      ...stampedBaseline(),
+      [MANIFEST]: `{"class": "managed", "hash": "${"b".repeat(64)}"}`,
+    };
+    const { exitCode, stderr } = runValidator({ [MANIFEST]: manifestOf(entries) });
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain("self-hash would be circular");
+  });
+
+  test("a manifest that does not list itself is an error", () => {
+    const entries = {
+      ".github/workflows/ci.yml": `{"class": "managed", "hash": "${sha(
+        BASELINE[".github/workflows/ci.yml"],
+      )}"}`,
+    };
+    const { exitCode, stderr } = runValidator({ [MANIFEST]: manifestOf(entries) });
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain("does not list itself");
+  });
+
+  test("an unparseable manifest is its own error", () => {
+    const { exitCode, stderr } = runValidator({ [MANIFEST]: "not json\n" });
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain(`${MANIFEST}: does not parse as an ownership manifest`);
+  });
+
+  test("a conflict-marked manifest is check 4's report, with no parity double", () => {
+    const conflicted = [
+      `${"<".repeat(7)} before updating`,
+      manifestOf(stampedBaseline()),
+      "=".repeat(7),
+      `${">".repeat(7)} after updating`,
+      "",
+    ].join("\n");
+    const { exitCode, stderr } = runValidator({ [MANIFEST]: conflicted });
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain(`${MANIFEST}: contains unresolved merge-conflict markers`);
+    expect(stderr).not.toContain("does not parse as an ownership manifest");
+  });
+
+  test("self mode inverts: a present manifest is the error", () => {
+    const present = runValidator({ [MANIFEST]: manifestOf(SELF_ENTRY) }, ["--self"]);
+    expect(present.exitCode).toBe(1);
+    expect(present.stderr).toContain(`${MANIFEST}: exists in the template repository`);
+    const absent = runValidator({}, ["--self"]);
+    expect(absent.stderr).toBe("");
+    expect(absent.exitCode).toBe(0);
+  });
+
+  test("a managed symlink's hash covers the link target", () => {
+    // BASELINE has no symlinks; exercise the rule through a manifest entry
+    // pointing at one created next to it.
+    const root = mkdtempSync(join(tmpdir(), "validate-template-link-"));
+    roots.push(root);
+    for (const [rel, content] of Object.entries(BASELINE)) {
+      mkdirSync(join(root, dirname(rel)), { recursive: true });
+      writeFileSync(join(root, rel), content);
+    }
+    symlinkSync("AGENTS.md", join(root, "CLAUDE.md"));
+    writeFileSync(
+      join(root, MANIFEST),
+      manifestOf({
+        ...stampedBaseline(),
+        "CLAUDE.md": `{"class": "managed", "hash": "${sha("AGENTS.md")}"}`,
+      }),
+    );
+    const result = Bun.spawnSync([process.execPath, VALIDATOR, root], { env: gitFreeEnv() });
+    expect(result.stderr.toString()).toBe("");
+    expect(result.exitCode).toBe(0);
   });
 });

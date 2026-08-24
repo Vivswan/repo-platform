@@ -25,6 +25,16 @@
 //      repo-platform:local-section marker exactly once. Existing files
 //      only - absence is damage the next sync heals - and _skip_if_exists
 //      starters are exempt (repo-owned after the first render)
+//   9. Ownership-manifest byte parity: .repo-platform-manifest.json (the
+//      template-rendered ownership map, hashes stamped post-render by the
+//      template's stamp_manifest.ts hook) is well-formed, its own entry
+//      stays hash-null (a self-hash would be circular - the content
+//      includes every other hash), and every managed or split entry's
+//      recorded sha256 matches the file on disk (split files: the managed
+//      half alone, delimited by the entry's marker line). Drift means the
+//      file changed since the last stamp; the next sync replaces it. A
+//      missing manifest is only an advisory (older renders predate it),
+//      and a conflict-marked one is left to check 4's report.
 //
 // Advisories (printed, never fail): missing actionlint / yamllint /
 // commit-names / gitleaks checks in ci.yml (older renders predate the newer
@@ -44,10 +54,15 @@
 // state (agent worktrees with in-progress rebases, the composed template/
 // output) that is not the repository's content. Client renders keep the
 // full walk - they are validated as plain trees, often before any git
-// init, and everything in them is content. All other checks apply.
+// init, and everything in them is content. All other checks apply, except
+// that check 9 inverts: the ownership manifest lands only in generated
+// repos (this repo dogfoods individual template twins via
+// scripts/render_dogfood.ts instead of rendering itself), so in self mode
+// a PRESENT manifest is the error.
 
 import { spawnSync } from "node:child_process";
-import { lstatSync, readdirSync, readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { lstatSync, readdirSync, readFileSync, readlinkSync } from "node:fs";
 import { extname, join, resolve } from "node:path";
 import { parseAllDocuments, parse as parseYaml } from "yaml";
 
@@ -90,6 +105,35 @@ const LOCAL_SECTION_LINES = new Set([
 /** How many opening lines may hold the managed header (rendering collapses
  *  the templates' jinja preambles, so it always lands near the top). */
 const HEADER_WINDOW = 10;
+
+/** The ownership manifest the template renders into every repo: the full
+ *  ownership map (path -> managed/split/starter, marker metadata for
+ *  splits) with per-repo sha256 hashes stamped post-render. Check 9
+ *  verifies byte parity against it. */
+const MANIFEST_NAME = ".repo-platform-manifest.json";
+
+/** A split entry's managed half: through the first marker line's newline
+ *  for managed "above", from the start of the marker line for "below";
+ *  null when the marker line is missing. `content` is latin1 text
+ *  (byte-faithful). Twin of stamp_manifest.ts's managedHalf - keep them
+ *  matching (this action stays self-contained for client-side execution). */
+function managedHalf(content: string, marker: string, managed: "above" | "below"): string | null {
+  let offset = 0;
+  for (const line of content.split("\n")) {
+    const end = offset + line.length;
+    if (line.trim() === marker) {
+      return managed === "above"
+        ? content.slice(0, Math.min(end + 1, content.length))
+        : content.slice(offset);
+    }
+    offset = end + 1;
+  }
+  return null;
+}
+
+function sha256(data: string, encoding: "latin1" | "utf-8"): string {
+  return createHash("sha256").update(Buffer.from(data, encoding)).digest("hex");
+}
 
 /** Unconditionally rendered base files and how each declares its ownership:
  *  "header" files are wholly overwritten by sync and open with the managed
@@ -837,6 +881,170 @@ function main(): number {
               "times (expected 1) - it splits the sync-managed top of the file " +
               "from this repository's own tail; restore the single marker line " +
               "via a template sync",
+          );
+        }
+      }
+    }
+  }
+
+  // 9. Ownership-manifest byte parity. The manifest is itself a managed
+  // render, so client repos carry it (older renders predate it: advisory,
+  // the next sync adds it) and the template repo must NOT (self mode
+  // inverts - repo-platform is not a render of itself). A conflict-marked
+  // manifest is check 4's report; there is nothing coherent to hash. All
+  // findings are informational by stance: validate-template does not gate
+  // client merges, and drift heals on the next sync.
+  const manifestPath = join(root, MANIFEST_NAME);
+  const manifestExists = isRegularFile(manifestPath);
+  if (selfMode) {
+    if (manifestExists) {
+      errors.push(
+        `${MANIFEST_NAME}: exists in the template repository - the ownership ` +
+          "manifest lands only in generated repos (this repo dogfoods " +
+          "individual template twins, never a full render of itself); delete it",
+      );
+    }
+  } else if (!manifestExists) {
+    advisories.push(
+      `${MANIFEST_NAME} is missing - this render predates the ownership ` +
+        "manifest; the next template sync adds it",
+    );
+  } else {
+    const manifestText = readFileSync(manifestPath, "utf-8");
+    let manifestFiles: Record<string, unknown> | null = null;
+    if (!hasConflictMarker(manifestText)) {
+      try {
+        const manifest = JSON.parse(manifestText) as { files?: unknown };
+        if (
+          typeof manifest.files !== "object" ||
+          manifest.files === null ||
+          Array.isArray(manifest.files)
+        ) {
+          throw new Error("no top-level 'files' mapping");
+        }
+        manifestFiles = manifest.files as Record<string, unknown>;
+      } catch (exc) {
+        errors.push(
+          `${MANIFEST_NAME}: does not parse as an ownership manifest ` +
+            `(${exc instanceof Error ? exc.message.split("\n")[0] : String(exc)}); ` +
+            "the file is managed - run a template sync to regenerate it",
+        );
+      }
+    }
+    if (manifestFiles !== null) {
+      if (!(MANIFEST_NAME in manifestFiles)) {
+        errors.push(
+          `${MANIFEST_NAME}: does not list itself - the manifest is a managed ` +
+            "render like any other; run a template sync to regenerate it",
+        );
+      }
+      for (const [rel, raw] of Object.entries(manifestFiles)) {
+        const where = `${MANIFEST_NAME}: entry '${rel}'`;
+        if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+          errors.push(`${where} is not an object; run a template sync to regenerate the manifest`);
+          continue;
+        }
+        const entry = raw as Record<string, unknown>;
+        if (entry.class === "starter") {
+          if ("hash" in entry) {
+            errors.push(
+              `${where} is a starter carrying a hash - starters are repo-owned ` +
+                "after the first render, so sync makes no byte-parity promise " +
+                "about them; run a template sync to regenerate the manifest",
+            );
+          }
+          continue;
+        }
+        if (entry.class !== "managed" && entry.class !== "split") {
+          errors.push(
+            `${where} has unknown class ${JSON.stringify(entry.class)} (expected ` +
+              "managed, split, or starter); run a template sync to regenerate the manifest",
+          );
+          continue;
+        }
+        const hash = "hash" in entry ? entry.hash : undefined;
+        if (hash !== null && !(typeof hash === "string" && /^[0-9a-f]{64}$/.test(hash))) {
+          errors.push(
+            `${where}: hash must be null or a lowercase sha256 hex digest; ` +
+              "run a template sync to regenerate and restamp the manifest",
+          );
+          continue;
+        }
+        let split: { marker: string; managed: "above" | "below" } | null = null;
+        if (entry.class === "split") {
+          if (
+            typeof entry.marker !== "string" ||
+            (entry.managed !== "above" && entry.managed !== "below")
+          ) {
+            errors.push(
+              `${where} is split but lacks a marker line and a managed half of ` +
+                '"above" or "below"; run a template sync to regenerate the manifest',
+            );
+            continue;
+          }
+          split = { marker: entry.marker, managed: entry.managed };
+        }
+        if (rel === MANIFEST_NAME) {
+          if (entry.class !== "managed" || hash !== null) {
+            errors.push(
+              `${where} must be managed with hash null: the manifest's content ` +
+                "includes every other hash, so a self-hash would be circular; " +
+                "run a template sync to regenerate it",
+            );
+          }
+          continue;
+        }
+        let stat: ReturnType<typeof lstatSync> | null = null;
+        try {
+          stat = lstatSync(join(root, rel));
+        } catch {
+          stat = null;
+        }
+        if (stat === null) {
+          errors.push(
+            `${rel}: listed as ${entry.class} in ${MANIFEST_NAME} but missing ` +
+              "from the repo - restore it from git history or run a template sync",
+          );
+          continue;
+        }
+        if (hash === null) {
+          errors.push(
+            `${rel}: ${MANIFEST_NAME} records no hash for it (unstamped) - the ` +
+              "render's stamp hook did not run; run a template sync (or bun " +
+              "stamp_manifest.ts from the build branch) to stamp it",
+          );
+          continue;
+        }
+        let actual: string | null;
+        if (stat.isSymbolicLink()) {
+          actual = sha256(readlinkSync(join(root, rel)), "utf-8");
+        } else if (!stat.isFile()) {
+          errors.push(
+            `${rel}: listed in ${MANIFEST_NAME} but is neither a regular file ` +
+              "nor a symlink; run a template sync to restore the managed render",
+          );
+          continue;
+        } else {
+          const content = readFileSync(join(root, rel)).toString("latin1");
+          if (split !== null) {
+            const half = managedHalf(content, split.marker, split.managed);
+            // A missing marker line is already reported: check 8 for the
+            // local-section splits, the marker-section check for .gitignore.
+            // No second diagnostic on the same root cause.
+            if (half === null) continue;
+            actual = sha256(half, "latin1");
+          } else {
+            actual = sha256(content, "latin1");
+          }
+        }
+        if (actual !== hash) {
+          errors.push(
+            `${rel}: ${split !== null ? "its managed half does" : "content does"} ` +
+              `not match the sha256 recorded in ${MANIFEST_NAME} - the file ` +
+              "drifted from the last stamped sync state; local edits to " +
+              `${split !== null ? "the managed half" : "a managed file"} are ` +
+              "replaced by the next template sync (move them to a repo-owned " +
+              "location), and intended template-side updates restamp on that sync",
           );
         }
       }

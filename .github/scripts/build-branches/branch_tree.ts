@@ -8,6 +8,8 @@
 // - copier.yml       (byte copy from this checkout's root)
 // - template/        (composed from templates/ via compose_template.build)
 // - migrations/      (the runner + migration scripts)
+// - stamp_manifest.ts (the manifest stamping hook copier.yml's _tasks and
+//                     _migrations run; byte copy of .github/scripts/sync's)
 // - README.md        (static per-channel explainer)
 // - BUILD_INFO.yml   (channel, plus version on the latest channel)
 //
@@ -169,6 +171,10 @@ function main(): number {
   writeOutput(composed, join(dest, "template"));
   writeFileSync(join(dest, "copier.yml"), readFileSync(join(REPO_ROOT, "copier.yml")));
   copyMigrations(dest);
+  writeFileSync(
+    join(dest, "stamp_manifest.ts"),
+    readFileSync(join(REPO_ROOT, ".github", "scripts", "sync", "stamp_manifest.ts")),
+  );
   writeFileSync(join(dest, "README.md"), README(args.channel));
   let info = `channel: ${args.channel}\n`;
   if (args.channel === "latest") info += `version: ${args.version}\n`;

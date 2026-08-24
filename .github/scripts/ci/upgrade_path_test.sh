@@ -252,6 +252,11 @@ fi
 # from the base commit.
 RECOVER="" RUNNER_TEMP="$WORK" bun .github/scripts/sync/preserve_repo_owned.ts
 
+# The workflow's final stamping step: conflict resolution and the preserve
+# steps can rewrite files after copier's own post-render hook stamped the
+# ownership manifest, so the sync stamps once more when the tree is final.
+TARGET_DIR="$PROJECT" bun .github/scripts/sync/stamp_manifest.ts
+
 bun install --frozen-lockfile --cwd "$GITHUB_WORKSPACE/actions/validate-template"
 bun "$GITHUB_WORKSPACE/actions/validate-template/validate_generated_files.ts" "$PROJECT"
 
@@ -324,6 +329,38 @@ fi
 if find . -name '*.rej' -not -path './.git/*' | grep -q .; then
   fail "copier left .rej files behind"
 fi
+# The ownership manifest survives the update stamped for the NEW tree:
+# entries follow the new selection (settings-sync deselected, the
+# custom-license opt-out de-rendering LICENSE.md), starters stay hashless,
+# the managed ci.yml hash matches the updated file byte-for-byte, and the
+# manifest's own entry stays null (its content includes every other hash,
+# so a self-hash would be circular). Read with python3, independent of the
+# stamping code under test.
+test -f .repo-platform-manifest.json || fail "the ownership manifest is missing after the update"
+mf() { # <path> <field> -> the entry's field, "null", "absent", or "missing"
+  python3 -c 'import json, sys
+entry = json.load(open(".repo-platform-manifest.json"))["files"].get(sys.argv[1])
+value = "absent" if entry is None else entry.get(sys.argv[2], "missing")
+print("null" if value is None else value)' "$1" "$2"
+}
+file_sha() { # <path> -> sha256 hex of the file's bytes
+  python3 -c 'import hashlib, sys
+print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$1"
+}
+[ "$(mf ".github/workflows/ci.yml" class)" = "managed" ] \
+  || fail "the manifest lost ci.yml's managed entry across the update"
+[ "$(mf ".github/workflows/settings-sync.yml" class)" = "absent" ] \
+  || fail "the manifest still lists settings-sync.yml after the module deselection"
+[ "$(mf "LICENSE.md" class)" = "absent" ] \
+  || fail "the manifest still lists LICENSE.md despite the custom-license opt-out"
+[ "$(mf ".github/workflows/checks.yml" class)" = "starter" ] \
+  || fail "the manifest lost the checks.yml starter entry"
+[ "$(mf ".github/workflows/checks.yml" hash)" = "missing" ] \
+  || fail "the manifest hashes the repo-owned checks.yml starter"
+[ "$(mf ".github/workflows/ci.yml" hash)" = "$(file_sha .github/workflows/ci.yml)" ] \
+  || fail "the manifest's ci.yml hash does not match the updated file (stamping)"
+[ "$(mf ".repo-platform-manifest.json" hash)" = "null" ] \
+  || fail "the manifest's own hash entry must stay null (self-hash is circular)"
 echo "upgrade path OK: retired files deleted, sentinels preserved, configuration kept"
 
 # --- Recovery mode (recover=recopy) -----------------------------------
@@ -368,6 +405,7 @@ RECOVER=recopy bun "$GITHUB_WORKSPACE/.github/scripts/sync/apply_update.ts"
 bun "$GITHUB_WORKSPACE/.github/scripts/sync/preserve_local_content.ts" \
   --summary "$WORK/local-carryover.md" --root .
 RECOVER=recopy RUNNER_TEMP="$WORK" bun "$GITHUB_WORKSPACE/.github/scripts/sync/preserve_repo_owned.ts"
+TARGET_DIR="$PROJECT" bun "$GITHUB_WORKSPACE/.github/scripts/sync/stamp_manifest.ts"
 
 grep -qF "_commit: templates/v99.99.99" .copier-answers.yml \
   || fail "recovery did not re-record _commit as templates/v99.99.99"
@@ -403,6 +441,10 @@ for carried in AGENTS.md CONTRIBUTING.md .gitignore .gitattributes .editorconfig
     || fail "the local-content carry summary does not list $carried"
 done
 bun "$GITHUB_WORKSPACE/actions/validate-template/validate_generated_files.ts" "$PROJECT"
+# The recopy carry steps run after copier's own stamp hook, so the final
+# stamp must leave the managed ci.yml hash matching the re-rendered file.
+[ "$(mf ".github/workflows/ci.yml" hash)" = "$(file_sha .github/workflows/ci.yml)" ] \
+  || fail "recovery left the manifest's ci.yml hash stale (stamping after recopy)"
 echo "recovery recopy OK: skip_if_exists, repo-owned files, and repo-local content preserved, managed files re-rendered"
 
 # --- Visibility flip (public -> private) --------------------------------
@@ -513,6 +555,7 @@ if git -C "$GITHUB_WORKSPACE" ls-tree -r --name-only "$prev" | grep -qF "CONTRIB
     || fail "retired_cleanup's rm loop did not delete the resurrected CONTRIBUTING.md"
 fi
 RECOVER="" RUNNER_TEMP="$VIS_WORK" bun .github/scripts/sync/preserve_repo_owned.ts
+TARGET_DIR="$VIS" bun .github/scripts/sync/stamp_manifest.ts
 if [ "$synthetic" = true ]; then
   grep -qxF "LICENSE" "$VIS_WORK/license-transition.txt" \
     || fail "the license rename did not raise the license-transition flag that holds the PR for review"
@@ -531,6 +574,10 @@ test -f SECURITY.md || fail "SECURITY.md did not survive the flip to private"
 # rename) takes through a real sync, deleting the old spelling.
 test ! -e CONTRIBUTING.md || fail "CONTRIBUTING.md survived the flip to private"
 test ! -e CODE_OF_CONDUCT.md || fail "CODE_OF_CONDUCT.md survived the flip to private"
+# The manifest's visibility-gated entries must retire with the flip (its
+# entries render under the same `not private` gates as the files).
+[ "$(mf "CONTRIBUTING.md" class)" = "absent" ] \
+  || fail "the manifest still lists CONTRIBUTING.md after the flip to private"
 # Assign first: a failed substitution inside a case WORD does not trip
 # errexit, and an empty pattern would collapse to a match-everything *.
 fleet_license="$(rendered_fleet_license)"

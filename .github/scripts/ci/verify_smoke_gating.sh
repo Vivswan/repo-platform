@@ -551,3 +551,62 @@ case "$EXTRA_DATA" in
   *channel=staging*) present "channel: staging" /tmp/smoke/.copier-answers.yml ;;
   *) present "channel: latest" /tmp/smoke/.copier-answers.yml ;;
 esac
+
+# Ownership manifest: rendered for every row and stamped by the template's
+# post-render task. Entry classes and hashes are read with python3 (the
+# manifest is JSON), independently of the stamping and validation code
+# under test.
+manifest=/tmp/smoke/.repo-platform-manifest.json
+test -f "$manifest"
+python3 -m json.tool "$manifest" > /dev/null
+mf() { # <path> <field> -> the entry's field, "null", "absent", or "missing"
+  python3 -c 'import json, sys
+entry = json.load(open(sys.argv[1]))["files"].get(sys.argv[2])
+value = "absent" if entry is None else entry.get(sys.argv[3], "missing")
+print("null" if value is None else value)' "$manifest" "$1" "$2"
+}
+expect_class() { # <path> <expected class, or "absent">
+  got="$(mf "$1" class)"
+  if [ "$got" != "$2" ]; then
+    echo "::error::manifest check failed: expected class '$2' for '$1' in $manifest but got '$got' for modules=$MODULES private=$PRIVATE. Fix the manifest emission in scripts/compose_template.ts (or this expectation in verify_smoke_gating.sh)."
+    exit 1
+  fi
+}
+expect_class ".github/workflows/ci.yml" managed
+expect_class ".github/workflows/checks.yml" starter
+expect_class "SECURITY.md" split
+expect_class ".gitignore" split
+expect_class ".repo-platform-manifest.json" managed
+if has agents; then expect_class "AGENTS.md" split; else expect_class "AGENTS.md" absent; fi
+if has release-please; then
+  expect_class ".github/workflows/release.yml" managed
+  expect_class "release-please-config.json" starter
+else
+  expect_class ".github/workflows/release.yml" absent
+  expect_class "release-please-config.json" absent
+fi
+if has settings-sync; then expect_class ".github/settings.yml" starter; else expect_class ".github/settings.yml" absent; fi
+if has custom-license; then expect_class "LICENSE.md" absent; else expect_class "LICENSE.md" split; fi
+# Stamping: the managed ci.yml hash must equal the file's sha256 (computed
+# here with hashlib, not the code under test), the split SECURITY.md hash
+# must cover exactly the managed half through its marker line, and the
+# manifest's own entry stays null (a self-hash would be circular).
+want_ci="$(python3 -c 'import hashlib, sys
+print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$wf/ci.yml")"
+if [ "$(mf ".github/workflows/ci.yml" hash)" != "$want_ci" ]; then
+  echo "::error::manifest check failed: the recorded hash for ci.yml in $manifest does not match the file's sha256 for modules=$MODULES private=$PRIVATE - the post-render stamp task did not stamp it. Fix stamp_manifest.ts or the copier.yml hook wiring (or this expectation in verify_smoke_gating.sh)."
+  exit 1
+fi
+want_security="$(python3 -c 'import hashlib, sys
+lines = open(sys.argv[1], "rb").read().split(b"\n")
+idx = next(i for i, line in enumerate(lines) if line.strip() == sys.argv[2].encode())
+half = b"\n".join(lines[: idx + 1]) + (b"\n" if idx + 1 < len(lines) else b"")
+print(hashlib.sha256(half).hexdigest())' /tmp/smoke/SECURITY.md "$(mf SECURITY.md marker)")"
+if [ "$(mf SECURITY.md hash)" != "$want_security" ]; then
+  echo "::error::manifest check failed: the recorded hash for SECURITY.md in $manifest does not cover its managed half (through the marker line) for modules=$MODULES private=$PRIVATE. Fix stamp_manifest.ts (or this expectation in verify_smoke_gating.sh)."
+  exit 1
+fi
+if [ "$(mf ".repo-platform-manifest.json" hash)" != "null" ]; then
+  echo "::error::manifest check failed: the manifest's own hash entry in $manifest must stay null (a self-hash would be circular) for modules=$MODULES private=$PRIVATE. Fix stamp_manifest.ts (or this expectation in verify_smoke_gating.sh)."
+  exit 1
+fi

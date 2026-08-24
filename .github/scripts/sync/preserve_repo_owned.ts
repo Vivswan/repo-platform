@@ -134,8 +134,12 @@ if (
       );
       process.exit(1);
     }
+    // The managed-marker comment line names the owner via github_username;
+    // render it from the same recorded answers, shape-checked the way the
+    // validator's owner pin is (a malformed non-empty value would pass the
+    // unrendered-expression check below yet seed a wrong owner).
     const username = answers.github_username;
-    if (typeof username !== "string" || username === "") {
+    if (typeof username !== "string" || !/^[A-Za-z0-9-]+$/.test(username)) {
       error(
         `${label}: cannot re-seed the fleet license; .copier-answers.yml records no github_username`,
       );

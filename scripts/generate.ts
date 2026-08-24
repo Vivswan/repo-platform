@@ -68,6 +68,22 @@ import {
   type ModuleManifest,
   manifestSchema,
 } from "./module_manifests.ts";
+import { moduleOwnershipFiles, type OwnershipEntry, skipIfExistsMatchers } from "./ownership.ts";
+
+// The ownership classification machinery (the managed-header/local-section
+// grammar, the _skip_if_exists matchers, the module-ownership scan) lives
+// in scripts/ownership.ts - the single owner of ownership truth, shared
+// with compose_template.ts's manifest emission. Re-exported here so
+// importers keyed on the generator keep resolving.
+export {
+  classifyTemplateSource,
+  KNOWN_UNDECLARED_MODULE_FILES,
+  landedPathAndGates,
+  type ManifestOwnership,
+  moduleOwnershipFiles,
+  type OwnershipEntry,
+  skipIfExistsMatchers,
+} from "./ownership.ts";
 
 const REPO_ROOT = resolve(import.meta.dir, "..");
 
@@ -471,169 +487,6 @@ export function toolchainPinsRegion(manifests: ModuleManifest[]): string[] {
 /** docs/toolchains.md pin table: one row per pinned toolchain module. */
 export function toolchainPinRows(manifests: ModuleManifest[]): string[] {
   return toolchainPins(manifests).map((p) => `| \`${p.module}\` | \`${p.file}\` | ${p.version} |`);
-}
-
-/** The managed ownership header in template sources, anchored on the C1
- *  line's canonical trailing period with no repo-name character (GitHub
- *  allows [A-Za-z0-9._-]) after it, so neither a negated look-alike ("is
- *  not managed by") nor a longer repo name ("/repo-platform_fork",
- *  "/repo-platform.fork") counts; validate_generated_files.ts applies the
- *  same anchoring to rendered files. */
-const MANAGED_HEADER_RE =
-  /This file is managed by \{\{ github_username \}\}\/repo-platform\.(?![A-Za-z0-9._-])/;
-const LOCAL_SECTION_MARKER = "repo-platform:local-section";
-const LOCAL_SECTION_LINES = new Set([
-  `# ${LOCAL_SECTION_MARKER}`,
-  `<!-- ${LOCAL_SECTION_MARKER} -->`,
-]);
-
-/** How many opening lines may hold the managed header: template sources
- *  keep it at the top, at most below a short jinja preamble that rendering
- *  collapses. The validator's rendered-file check uses the same window. */
-const HEADER_WINDOW = 10;
-
-/** Module template files that declare no ownership today, tolerated without
- *  enrolment so the undeclared-file throw below stays fail-closed for
- *  everything new. An entry whose file gains a declaration (or disappears)
- *  throws as stale, so the list can only shrink. */
-export const KNOWN_UNDECLARED_MODULE_FILES = new Set([
-  // States which operator applies the settings but not that sync owns the
-  // file; enrols by opening with the managed header.
-  "settings-sync/.github/settings.yml.jinja",
-]);
-
-/** copier.yml's _skip_if_exists globs as path matchers reproducing
- *  copier's gitignore-style semantics (pathspec gitwildmatch): a pattern
- *  containing "/" is anchored to the render root, a bare filename matches
- *  at any depth, and `*` stays within one component. Only that subset is
- *  implemented; a pattern using more (`**`, `?`, character classes,
- *  negation, edge slashes, and gitwildmatch's comment/whitespace line
- *  forms) throws rather than guessing what copier does. */
-export function skipIfExistsMatchers(copierYamlText: string): RegExp[] {
-  const skip = (parseYaml(copierYamlText) as { _skip_if_exists?: unknown } | null)?._skip_if_exists;
-  if (!Array.isArray(skip) || skip.length === 0 || !skip.every((p) => typeof p === "string")) {
-    throw new Error(
-      "copier.yml: _skip_if_exists is missing or not a list of strings - the " +
-        "module-ownership scan needs it to keep repo-owned starters exempt",
-    );
-  }
-  return skip.map((pattern) => {
-    if (
-      /[?[\]\\!]/.test(pattern) ||
-      pattern.includes("**") ||
-      pattern.startsWith("/") ||
-      pattern.endsWith("/") ||
-      pattern.startsWith("#") ||
-      pattern.trim() !== pattern ||
-      pattern === ""
-    ) {
-      throw new Error(
-        `copier.yml: _skip_if_exists pattern '${pattern}' uses gitwildmatch ` +
-          "features beyond the implemented subset (bare names, root-anchored " +
-          "paths, single *) - extend skipIfExistsMatchers alongside it",
-      );
-    }
-    const body = pattern
-      .split("*")
-      .map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
-      .join("[^/]*");
-    // A gitwildmatch pattern that matches a directory also covers every
-    // descendant, hence the optional /... tail.
-    const tail = "(?:/.*)?$";
-    return new RegExp(pattern.includes("/") ? `^${body}${tail}` : `(?:^|/)${body}${tail}`);
-  });
-}
-
-export interface OwnershipEntry {
-  path: string;
-  kind: "header" | "marker";
-}
-
-/** The rendered paths, per module, whose ownership declaration the
- *  validator enforces while the module is selected. Every module template
- *  file (fragments and symlinks aside) is classified - starter (exempt via
- *  _skip_if_exists; carrying the header there throws, the two promises
- *  contradict), split ("marker"), header-opening ("header"), or
- *  comment-free (the manifest's pin dotfile, JSON) - and a file fitting no
- *  class throws, so nothing lands silently undeclared. Filename-gated
- *  files only declare: module selection alone does not render them. */
-export function moduleOwnershipFiles(
-  manifests: ModuleManifest[],
-  templatesDir: string,
-  skipIfExists: RegExp[],
-  knownUndeclared: ReadonlySet<string> = KNOWN_UNDECLARED_MODULE_FILES,
-): Record<string, OwnershipEntry[]> {
-  const result: Record<string, OwnershipEntry[]> = {};
-  const unusedSilences = new Set(knownUndeclared);
-  for (const m of manifests) {
-    const moduleDir = join(templatesDir, m.module);
-    const entries: OwnershipEntry[] = [];
-    const visit = (rel: string) => {
-      for (const name of readdirSync(join(moduleDir, rel)).sort()) {
-        const childRel = rel ? `${rel}/${name}` : name;
-        if (childRel === "fragments" || childRel === "module.yml") continue;
-        const stat = lstatSync(join(moduleDir, childRel));
-        if (stat.isDirectory() && !stat.isSymbolicLink()) {
-          visit(childRel);
-          continue;
-        }
-        if (!stat.isFile() || stat.isSymbolicLink()) continue;
-        const renderedPath = childRel.replace(/\.jinja$/, "");
-        // The path the render lands, with any filename gates stripped, for
-        // matching against _skip_if_exists and the pin file.
-        const landedPath = renderedPath
-          .split("/")
-          .map((segment) => segment.replace(/^\{% if .+? %\}(.*)\{% endif %\}$/, "$1"))
-          .join("/");
-        const ungated = landedPath === renderedPath;
-        const source = readFileSync(join(moduleDir, childRel), "utf-8");
-        const hasHeader = MANAGED_HEADER_RE.test(source.split("\n", HEADER_WINDOW).join("\n"));
-        if (skipIfExists.some((matcher) => matcher.test(landedPath))) {
-          if (hasHeader) {
-            throw new Error(
-              `templates/${m.module}/${childRel}: opens with the managed header but ` +
-                "renders a _skip_if_exists starter - the header promises sync " +
-                "overwrites the file, the skip list promises it never does; drop one",
-            );
-          }
-          continue;
-        }
-        if (source.split("\n").some((line) => LOCAL_SECTION_LINES.has(line.trim()))) {
-          if (ungated) entries.push({ path: landedPath, kind: "marker" });
-          continue;
-        }
-        if (hasHeader) {
-          if (ungated) entries.push({ path: landedPath, kind: "header" });
-          continue;
-        }
-        if (landedPath === m.toolchain?.pin?.file || landedPath.endsWith(".json")) continue;
-        if (unusedSilences.delete(`${m.module}/${childRel}`)) continue;
-        throw new Error(
-          `templates/${m.module}/${childRel}: declares no ownership - open it with ` +
-            "the managed header, split it with the local-section marker line, list " +
-            "its rendered path in _skip_if_exists, or record the silence in " +
-            "KNOWN_UNDECLARED_MODULE_FILES (scripts/generate.ts)",
-        );
-      }
-    };
-    visit("");
-    if (entries.length > 0) result[m.module] = entries;
-  }
-  if (unusedSilences.size > 0) {
-    throw new Error(
-      `KNOWN_UNDECLARED_MODULE_FILES entr${unusedSilences.size === 1 ? "y" : "ies"} ` +
-        `${[...unusedSilences].join(", ")} matched no undeclared file - the file ` +
-        "gained a declaration or moved; remove the stale entry",
-    );
-  }
-  if (Object.keys(result).length === 0) {
-    throw new Error(
-      "no module template declares ownership, so the validator's " +
-        "MODULE_OWNERSHIP record would be empty - the managed module " +
-        "workflows are expected to carry the header",
-    );
-  }
-  return result;
 }
 
 /** validate_generated_files.ts MODULE_OWNERSHIP record literal, laid out

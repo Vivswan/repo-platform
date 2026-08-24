@@ -16,6 +16,8 @@ import {
   ecosystemGroups,
   labelBlock,
   lockfileGroups,
+  manifestEntries,
+  manifestTemplate,
   orChain,
   renderedSeparationErrors,
   type SourcedEntry,
@@ -23,6 +25,7 @@ import {
   yamlLabelName,
 } from "../../scripts/compose_template";
 import { type ModuleManifest, parseManifest } from "../../scripts/module_manifests";
+import { skipIfExistsMatchers } from "../../scripts/ownership";
 
 function manifest(module: string, body: string[]): ModuleManifest {
   return parseManifest(
@@ -368,5 +371,125 @@ describe("lockfileGroups", () => {
       { patterns: ["bun\\.lock"], modules: ["bun", "node"] },
       { patterns: ["bun\\.lockb"], modules: ["bun"] },
     ]);
+  });
+});
+
+describe("manifestEntries", () => {
+  const skip = skipIfExistsMatchers(
+    ["_skip_if_exists:", "  - .github/workflows/checks.yml"].join("\n"),
+  );
+  const file = (text: string) => ({ kind: "file", data: Buffer.from(text) }) as const;
+  const base = (text: string): SourcedEntry => ({ origin: "base", entry: file(text) });
+  const mod = (module: string, text: string): SourcedEntry => ({
+    origin: "module",
+    module,
+    gate: `'${module}' in modules`,
+    gateDirs: [],
+    entry: file(text),
+  });
+
+  test("classifies base and module files with their render gates, sorted, self-listed", () => {
+    const files = new Map<string, SourcedEntry>([
+      [".github/workflows/ci.yml.jinja", base("# managed\n")],
+      [".github/workflows/checks.yml.jinja", base("# starter\n")],
+      [
+        "{% if not private %}CONTRIBUTING.md{% endif %}.jinja",
+        base("<!-- repo-platform:local-section -->\n"),
+      ],
+      [
+        ".github/workflows/release.yml.jinja",
+        mod("release-please", "# This file is managed by {{ github_username }}/repo-platform.\n"),
+      ],
+      [
+        "CLAUDE.md",
+        {
+          origin: "module",
+          module: "agents",
+          gate: "'agents' in modules",
+          gateDirs: [],
+          entry: { kind: "symlink", target: "AGENTS.md" },
+        },
+      ],
+    ]);
+    const { entries, errors } = manifestEntries(files, skip);
+    expect(errors).toEqual([]);
+    expect(entries).toEqual([
+      { path: ".github/workflows/checks.yml", gates: [], ownership: { class: "starter" } },
+      { path: ".github/workflows/ci.yml", gates: [], ownership: { class: "managed" } },
+      {
+        path: ".github/workflows/release.yml",
+        gates: ["'release-please' in modules"],
+        ownership: { class: "managed" },
+      },
+      { path: ".repo-platform-manifest.json", gates: [], ownership: { class: "managed" } },
+      { path: "CLAUDE.md", gates: ["'agents' in modules"], ownership: { class: "managed" } },
+      {
+        path: "CONTRIBUTING.md",
+        gates: ["not private"],
+        ownership: {
+          class: "split",
+          marker: "<!-- repo-platform:local-section -->",
+          managed: "above",
+        },
+      },
+    ]);
+  });
+
+  test("the policy-listed repo-owned settings.yml is a starter", () => {
+    const files = new Map<string, SourcedEntry>([
+      [".github/settings.yml.jinja", mod("settings-sync", "repository: {}\n")],
+    ]);
+    const { entries, errors } = manifestEntries(files, skip);
+    expect(errors).toEqual([]);
+    expect(entries.find((e) => e.path === ".github/settings.yml")?.ownership).toEqual({
+      class: "starter",
+    });
+  });
+
+  test("two sources landing at one path is an error, not a duplicate key", () => {
+    const files = new Map<string, SourcedEntry>([
+      ["{% if not private %}X.md{% endif %}.jinja", base("a\n")],
+      ["X.md.jinja", mod("agents", "b\n")],
+    ]);
+    const { errors } = manifestEntries(files, skip);
+    expect(errors.join("\n")).toContain("both land at X.md");
+  });
+
+  test("a template landing at the manifest's own path collides with the self entry", () => {
+    const files = new Map<string, SourcedEntry>([
+      [".repo-platform-manifest.json.jinja", base("{}\n")],
+    ]);
+    const { errors } = manifestEntries(files, skip);
+    expect(errors.join("\n")).toContain("both land at .repo-platform-manifest.json");
+  });
+});
+
+describe("manifestTemplate", () => {
+  test("emits gated appends and a joined JSON skeleton with null hashes", () => {
+    const text = manifestTemplate([
+      { path: ".github/workflows/ci.yml", gates: [], ownership: { class: "managed" } },
+      {
+        path: "AGENTS.md",
+        gates: ["'agents' in modules"],
+        ownership: {
+          class: "split",
+          marker: "<!-- repo-platform:local-section -->",
+          managed: "above",
+        },
+      },
+      {
+        path: "checks.yml",
+        gates: ["'a' in modules", "not private"],
+        ownership: { class: "starter" },
+      },
+    ]).toString("utf-8");
+    expect(text).toContain(
+      `{%- set _ = entries.append('    ".github/workflows/ci.yml": {"class": "managed", "hash": null}') -%}`,
+    );
+    expect(text).toContain("{%- if 'agents' in modules -%}");
+    expect(text).toContain('"managed": "above", "hash": null');
+    expect(text).toContain("{%- if ('a' in modules) and (not private) -%}");
+    expect(text).toContain("{{ entries | join(',\\n') }}");
+    expect(text.endsWith("}\n")).toBe(true);
   });
 });

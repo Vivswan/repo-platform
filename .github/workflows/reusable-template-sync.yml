@@ -311,6 +311,15 @@ jobs:
           MODULES="$(cat "$RUNNER_TEMP/modules.json")" \
             bun .github/scripts/sync/preserve_repo_owned.ts
 
+      # Conflict resolution and the preserve steps can rewrite files after
+      # copier's own post-render stamp hook ran, so the ownership
+      # manifest's hashes are stamped once more when the tree is final
+      # (idempotent; see stamp_manifest.ts).
+      - name: Stamp the ownership manifest
+        env:
+          TARGET_DIR: target
+        run: bun .github/scripts/sync/stamp_manifest.ts
+
       # Registries publish the manifest's license claim, not the LICENSE
       # file: a repo adopting the fleet license with package.json still
       # saying "MIT" publishes a false grant. Flags conflicting claims in

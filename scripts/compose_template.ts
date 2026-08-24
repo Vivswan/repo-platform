@@ -59,6 +59,13 @@ import {
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { loadManifests, MODULE_ORDER, type ModuleManifest } from "./module_manifests.ts";
+import {
+  classifyTemplateSource,
+  KNOWN_UNDECLARED_MODULE_FILES,
+  landedPathAndGates,
+  type ManifestOwnership,
+  skipIfExistsMatchers,
+} from "./ownership.ts";
 
 const REPO_ROOT = resolve(import.meta.dir, "..");
 const SRC = join(REPO_ROOT, "templates");
@@ -744,6 +751,155 @@ export function spliceContributions(
   return errors;
 }
 
+// --- ownership manifest -------------------------------------------------------
+
+/** Where the ownership manifest lands in generated repositories. */
+export const MANIFEST_LANDED_PATH = ".repo-platform-manifest.json";
+/** The manifest's emitted template name in the composed tree. */
+export const MANIFEST_TEMPLATE_PATH = `${MANIFEST_LANDED_PATH}${JINJA_SUFFIX}`;
+
+export interface ManifestEntry {
+  path: string;
+  /** Jinja conditions gating the render (the module gate and/or filename
+   *  gates); the entry appears in a rendered manifest only while all hold. */
+  gates: string[];
+  ownership: ManifestOwnership;
+}
+
+/** One landed path per line, so a stamped manifest differs from the raw
+ *  render in hash values alone and copier's three-way update merge sees
+ *  minimal local edits. stamp_manifest.ts substitutes the hash tokens on
+ *  these lines in place - keep the layout in sync with its ENTRY_LINE_RE. */
+function manifestEntryLine(entry: ManifestEntry): string {
+  const o = entry.ownership;
+  const body =
+    o.class === "starter"
+      ? '{"class": "starter"}'
+      : o.class === "managed"
+        ? '{"class": "managed", "hash": null}'
+        : `{"class": "split", "marker": ${JSON.stringify(o.marker)}, ` +
+          `"managed": "${o.managed}", "hash": null}`;
+  return `    ${JSON.stringify(entry.path)}: ${body}`;
+}
+
+/** The full ownership map for the composed tree: every landed path with
+ *  its class (via classifyTemplateSource - the one classifier) and its
+ *  render gates, plus the manifest's own self-entry, sorted by path.
+ *  Symlinks are managed (sync re-renders them; parity hashes the link
+ *  target), and the policy-listed repo-owned renders
+ *  (KNOWN_UNDECLARED_MODULE_FILES) are starters. Called after
+ *  spliceContributions, so classification reads the final template text
+ *  fragments included. */
+export function manifestEntries(
+  files: Map<string, SourcedEntry>,
+  skipIfExists: RegExp[],
+): { entries: ManifestEntry[]; errors: string[] } {
+  const errors: string[] = [];
+  const byPath = new Map<string, ManifestEntry & { source: string }>();
+  const add = (entry: ManifestEntry, source: string) => {
+    const existing = byPath.get(entry.path);
+    if (existing) {
+      errors.push(
+        `manifest: ${existing.source} and ${source} both land at ${entry.path} ` +
+          "under disjoint gates - a co-selected render would emit duplicate " +
+          "manifest keys; consolidate the sources",
+      );
+      return;
+    }
+    byPath.set(entry.path, { ...entry, source });
+  };
+  for (const [logical, sourced] of sortedByKey(files)) {
+    const source = `templates/${sourceName(sourced)}/${logical}`;
+    const rendered = logical.endsWith(JINJA_SUFFIX)
+      ? logical.slice(0, -JINJA_SUFFIX.length)
+      : logical;
+    const { path, gates: nameGates } = landedPathAndGates(rendered);
+    const gates = sourced.origin === "module" ? [sourced.gate, ...nameGates] : nameGates;
+    let ownership: ManifestOwnership;
+    if (sourced.entry.kind === "symlink") {
+      ownership = { class: "managed" };
+    } else if (
+      sourced.origin === "module" &&
+      KNOWN_UNDECLARED_MODULE_FILES.has(`${sourced.module}/${logical}`)
+    ) {
+      ownership = { class: "starter" };
+    } else {
+      try {
+        ownership = classifyTemplateSource(
+          path,
+          sourced.entry.data.toString("utf-8"),
+          skipIfExists,
+          source,
+        ).ownership;
+      } catch (error) {
+        errors.push(error instanceof Error ? error.message : String(error));
+        continue;
+      }
+    }
+    add({ path, gates, ownership }, source);
+  }
+  // The manifest lists itself: it is a managed render like any other. Its
+  // hash entry stays null forever - the content includes every other hash,
+  // so a self-hash would be circular (stamping would change the very bytes
+  // being hashed); parity of the other entries is what verifies sync state.
+  add(
+    { path: MANIFEST_LANDED_PATH, gates: [], ownership: { class: "managed" } },
+    "the generated manifest itself",
+  );
+  const entries = [...byPath.values()]
+    .sort((a, b) => (a.path < b.path ? -1 : 1))
+    .map(({ source: _source, ...entry }) => entry);
+  return { entries, errors };
+}
+
+/** The manifest's jinja template: gated `entries.append(...)` statements
+ *  (the gitleaks-locks pattern) building one JSON entry line per selected
+ *  path, joined with ',\n' so the render is valid JSON with no trailing
+ *  comma. Every hash renders null; the post-render stamp hook
+ *  (stamp_manifest.ts, wired in copier.yml's _tasks and _migrations)
+ *  fills them in. */
+export function manifestTemplate(entries: ManifestEntry[]): Buffer {
+  const lines = ["{%- set entries = [] -%}"];
+  for (const entry of entries) {
+    const line = manifestEntryLine(entry);
+    if (line.includes("'")) {
+      // The line rides inside a single-quoted jinja string literal.
+      throw new Error(
+        `manifest entry for ${entry.path} contains a single quote - it cannot ` +
+          "be embedded in the manifest template's jinja string literals",
+      );
+    }
+    const append = `{%- set _ = entries.append('${line}') -%}`;
+    if (entry.gates.length === 0) {
+      lines.push(append);
+    } else {
+      const gate =
+        entry.gates.length === 1 ? entry.gates[0] : entry.gates.map((g) => `(${g})`).join(" and ");
+      lines.push(`{%- if ${gate} -%}`, append, `{%- endif -%}`);
+    }
+  }
+  const comment =
+    "Generated by {{ github_username }}/repo-platform - do not edit. Every " +
+    "template-landed path with its ownership class: managed (sync overwrites " +
+    "the whole file; hash is sha256 of the last stamped content, or of the " +
+    "symlink target), split (sync owns one half; the hash covers the managed " +
+    "half, through the marker line for 'above' and from it for 'below'), " +
+    "starter (rendered once, repo-owned; no hash). Hashes are stamped after " +
+    "each render by the template's stamp_manifest.ts hook; this file's own " +
+    "hash stays null because its content includes every other hash, so a " +
+    "self-hash would be circular.";
+  lines.push(
+    "{",
+    `  "$comment": ${JSON.stringify(comment)},`,
+    '  "files": {',
+    "{{ entries | join(',\\n') }}",
+    "  }",
+    "}",
+    "",
+  );
+  return Buffer.from(lines.join("\n"));
+}
+
 /** Compose the output map: emitted path -> Entry. Exits 1 on errors. */
 export function build(): Map<string, Entry> {
   const base = join(SRC, "base");
@@ -914,12 +1070,30 @@ export function build(): Map<string, Entry> {
     }
   }
   errors.push(...spliceContributions(files, contributions));
+  // The ownership manifest is generated from the same spliced file map the
+  // tree is emitted from, so it can never disagree with what actually
+  // lands. Emitted as one more template file - copier renders and syncs it
+  // like any managed file.
+  let manifestData: Buffer | null = null;
+  try {
+    const skip = skipIfExistsMatchers(readFileSync(join(REPO_ROOT, "copier.yml"), "utf-8"));
+    const manifest = manifestEntries(files, skip);
+    errors.push(...manifest.errors);
+    if (manifest.errors.length === 0) manifestData = manifestTemplate(manifest.entries);
+  } catch (error) {
+    errors.push(error instanceof Error ? error.message : String(error));
+  }
   if (errors.length > 0) {
     for (const error of errors) console.error(`error: ${error}`);
     process.exit(1);
   }
 
   const output = new Map<string, Entry>();
+  if (manifestData === null) {
+    // Unreachable: a null manifest always comes with a recorded error.
+    throw new Error("manifest generation produced neither content nor errors");
+  }
+  output.set(MANIFEST_TEMPLATE_PATH, { kind: "file", data: manifestData });
   const emittedErrors: string[] = [];
   for (const [logical, sourced] of files) {
     const emitted =

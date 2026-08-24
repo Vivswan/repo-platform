@@ -1,0 +1,206 @@
+#!/usr/bin/env bun
+// Stamp per-repo content hashes into the ownership manifest
+// (.repo-platform-manifest.json) of a rendered repository.
+//
+// The template renders the manifest with every hash null: hashes are
+// per-repo facts that exist only once copier has written the tree. This
+// script is the post-render stamping hook - copier.yml wires it into
+// _tasks (copy and recopy; copier does not run tasks on update) and into
+// _migrations at the 'after' stage (update) - and reusable-template-sync
+// runs it once more as the sync leg's final stamping step, after conflict
+// resolution and the preserve steps have finished rewriting files.
+//
+// STANDALONE BY DESIGN: branch_tree.ts ships this file on the build
+// branches next to copier.yml, and copier executes it inside freshly
+// rendered repositories where none of this repository's node_modules or
+// shared/ helpers exist - node builtins only, no argv subprocesses.
+//
+// Only the "hash" tokens are rewritten, in place, line by line: the
+// rendered manifest keeps one entry per line (compose_template.ts's
+// manifestEntryLine - keep ENTRY_LINE_RE below in sync with it), so a
+// stamped manifest differs from the raw render in hash values alone and
+// copier's three-way update merge sees minimal local edits. An update can
+// still leave inline conflict blocks in the manifest (both sides touch
+// the hash lines); those resolve toward the template ("after updating")
+// side before parsing - the direction resolve_copier_conflicts.ts uses -
+// and the stamp then rewrites every hash anyway.
+//
+// Data problems (missing or unparseable manifest) warn and exit 0, like
+// the migrations contract in migrations/run.ts: a stamping gap must never
+// abort an otherwise-successful render - validate-template's byte-parity
+// check is the enforcement point that reports an unstamped manifest.
+//
+// Env: TARGET_DIR (the rendered repository; default "." - the copier
+// hooks run with cwd at the destination, the sync workflow passes
+// TARGET_DIR=target).
+
+import { createHash } from "node:crypto";
+import { lstatSync, readFileSync, readlinkSync, writeFileSync } from "node:fs";
+import { join, resolve } from "node:path";
+
+export const MANIFEST_NAME = ".repo-platform-manifest.json";
+
+/** One manifest entry line, as compose_template.ts emits it: indentation,
+ *  the JSON-quoted path, the one-line entry object, an optional joining
+ *  comma. */
+const ENTRY_LINE_RE = /^(\s*)("(?:[^"\\]|\\.)*"): (\{.*\})(,?)$/;
+
+/** The hash token inside an entry object; entries without one (starters)
+ *  are left alone. */
+const HASH_RE = /"hash": (?:null|"[0-9a-f]{64}")/;
+
+/** Copier's inline conflict blocks resolved toward the template side: the
+ *  lines between ======= and >>>>>>> survive, the "before updating" local
+ *  lines and the marker lines drop. Text without markers passes through
+ *  unchanged. */
+export function resolveConflictsTowardAfter(text: string): string {
+  const out: string[] = [];
+  let state: "keep" | "local" | "template" = "keep";
+  for (const line of text.split("\n")) {
+    if (state === "keep" && line.startsWith("<<<<<<< ")) {
+      state = "local";
+    } else if (state === "local" && line === "=======") {
+      state = "template";
+    } else if (state !== "keep" && line.startsWith(">>>>>>> ")) {
+      state = "keep";
+    } else if (state !== "local") {
+      out.push(line);
+    }
+  }
+  return out.join("\n");
+}
+
+/** A split entry's managed half: through the first marker line's newline
+ *  for managed "above", from the start of the marker line for "below".
+ *  `content` is latin1 text (byte-faithful); null when the marker line is
+ *  missing (parity reports that - there is no honest hash to stamp). */
+export function managedHalf(
+  content: string,
+  marker: string,
+  managed: "above" | "below",
+): string | null {
+  let offset = 0;
+  for (const line of content.split("\n")) {
+    const end = offset + line.length;
+    if (line.trim() === marker) {
+      return managed === "above"
+        ? content.slice(0, Math.min(end + 1, content.length))
+        : content.slice(offset);
+    }
+    offset = end + 1;
+  }
+  return null;
+}
+
+function sha256(data: string, encoding: "latin1" | "utf-8"): string {
+  return createHash("sha256").update(Buffer.from(data, encoding)).digest("hex");
+}
+
+export interface ManifestEntryShape {
+  class: string;
+  marker?: unknown;
+  managed?: unknown;
+  hash?: unknown;
+}
+
+/** The hash a manifest entry should carry for the file as it sits on disk:
+ *  sha256 of the whole content (managed), of the managed half (split), or
+ *  of the symlink target. null when the file is missing or its split
+ *  marker is gone - the parity check reports those; a stamp must not
+ *  invent a value. */
+export function entryHash(root: string, path: string, entry: ManifestEntryShape): string | null {
+  const abs = join(root, path);
+  let stat: ReturnType<typeof lstatSync>;
+  try {
+    stat = lstatSync(abs);
+  } catch {
+    return null;
+  }
+  if (stat.isSymbolicLink()) return sha256(readlinkSync(abs), "utf-8");
+  if (!stat.isFile()) return null;
+  // latin1 round-trips every byte, so the hash covers the file verbatim.
+  const content = readFileSync(abs).toString("latin1");
+  if (entry.class === "split") {
+    if (
+      typeof entry.marker !== "string" ||
+      (entry.managed !== "above" && entry.managed !== "below")
+    ) {
+      return null;
+    }
+    const half = managedHalf(content, entry.marker, entry.managed);
+    return half === null ? null : sha256(half, "latin1");
+  }
+  return sha256(content, "latin1");
+}
+
+/** Stamp the manifest text against the tree at `root`: conflict blocks
+ *  resolve toward the template side, then every entry line's hash token is
+ *  replaced with the honest value (the manifest's own entry stays null -
+ *  see the manifest's $comment). Returns the input unchanged with a
+ *  problem message when the text does not parse. */
+export function stampManifestText(
+  text: string,
+  root: string,
+): { out: string; problem: string | null } {
+  const resolved = resolveConflictsTowardAfter(text);
+  let files: Record<string, ManifestEntryShape>;
+  try {
+    const manifest = JSON.parse(resolved) as { files?: unknown };
+    if (typeof manifest.files !== "object" || manifest.files === null) {
+      throw new Error("no top-level 'files' mapping");
+    }
+    files = manifest.files as Record<string, ManifestEntryShape>;
+  } catch (error) {
+    return {
+      out: text,
+      problem: `does not parse as a manifest (${
+        error instanceof Error ? error.message.split("\n")[0] : String(error)
+      })`,
+    };
+  }
+  const lines = resolved.split("\n").map((line) => {
+    const match = ENTRY_LINE_RE.exec(line);
+    if (!match) return line;
+    const path = JSON.parse(match[2]) as string;
+    const entry = files[path];
+    if (entry === undefined || !HASH_RE.test(match[3])) return line;
+    const hash = path === MANIFEST_NAME ? null : entryHash(root, path, entry);
+    const body = match[3].replace(HASH_RE, `"hash": ${hash === null ? "null" : `"${hash}"`}`);
+    return `${match[1]}${match[2]}: ${body}${match[4]}`;
+  });
+  return { out: lines.join("\n"), problem: null };
+}
+
+function main(): number {
+  const root = resolve(process.env.TARGET_DIR || ".");
+  const manifestPath = join(root, MANIFEST_NAME);
+  let text: string;
+  try {
+    text = readFileSync(manifestPath, "utf-8");
+  } catch {
+    console.error(
+      `warning: ${MANIFEST_NAME} not found under ${root}; nothing to stamp ` +
+        "(renders from templates that predate the manifest have none)",
+    );
+    return 0;
+  }
+  const { out, problem } = stampManifestText(text, root);
+  if (problem !== null) {
+    console.error(
+      `warning: ${MANIFEST_NAME} ${problem}; left unstamped for ` +
+        "validate-template's parity check to report",
+    );
+    return 0;
+  }
+  if (out === text) {
+    console.log(`${MANIFEST_NAME} already stamped; nothing to write`);
+    return 0;
+  }
+  writeFileSync(manifestPath, out);
+  console.log(`stamped ${MANIFEST_NAME}`);
+  return 0;
+}
+
+if (import.meta.main) {
+  process.exit(main());
+}
