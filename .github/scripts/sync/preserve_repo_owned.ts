@@ -134,9 +134,19 @@ if (
       );
       process.exit(1);
     }
+    const username = answers.github_username;
+    if (typeof username !== "string" || username === "") {
+      error(
+        `${label}: cannot re-seed the fleet license; .copier-answers.yml records no github_username`,
+      );
+      process.exit(1);
+    }
     // Callback replacement: a literal holder string would have its $
     // sequences expanded.
-    const rendered = show.stdout.toString().replaceAll("{{ copyright_holder }}", () => holder);
+    const rendered = show.stdout
+      .toString()
+      .replaceAll("{{ copyright_holder }}", () => holder)
+      .replaceAll("{{ github_username }}", () => username);
     if (rendered.includes("{{") || rendered.includes("{%")) {
       error(`${label}: cannot re-seed the fleet license; unrendered template expressions remain`);
       process.exit(1);
