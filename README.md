@@ -1,13 +1,8 @@
 # repo-platform
 
-Push-based standards management for [@Vivswan](https://github.com/Vivswan)'s
-repositories: a [Copier](https://copier.readthedocs.io/) template plus
-reusable GitHub Actions workflows and composite actions.
+Push-based standards management for [@Vivswan](https://github.com/Vivswan)'s repositories: a [Copier](https://copier.readthedocs.io/) template plus reusable GitHub Actions workflows and composite actions.
 
-This repo pushes updates to managed repos: sync PRs and settings changes
-originate here, and managed repos carry no sync workflow and no sync
-secret. The one exception is the settings-sync module's optional
-self-apply of a repo's own settings file.
+This repo pushes updates to managed repos: sync PRs and settings changes originate here, and managed repos carry no sync workflow and no sync secret. The one exception is the settings-sync module's optional self-apply of a repo's own settings file.
 
 ## How it works
 
@@ -17,13 +12,10 @@ self-apply of a repo's own settings file.
 | `staging` | Generated build of the latest `main` commit (rebuilt on every push) |
 | `latest` | Generated build of the latest release, tagged `templates/vX.Y.Z` |
 
-`staging` and `latest` are orphan, append-only branches published by the
-[build-branches workflow](.github/workflows/build-branches.yml):
+`staging` and `latest` are orphan, append-only branches published by the [build-branches workflow](.github/workflows/build-branches.yml):
 
-- PRs against them are closed automatically, and a `main` history rewrite
-  cannot invalidate them.
-- `templates/` on main holds the sources; the composed tree that copier
-  renders lands on the build branches.
+- PRs against them are closed automatically, and a `main` history rewrite cannot invalidate them.
+- `templates/` on main holds the sources; the composed tree that copier renders lands on the build branches.
 
 ### Modules and channels<!-- BEGIN GENERATED: module-roster (scripts/generate.ts - edit module.yml manifests, not this block) -->
 
@@ -34,78 +26,32 @@ self-apply of a repo's own settings file.
   questions only when selected. After generation, module selection lives in
   each repo's own `.repo-platform.yml`: edit its `modules:` list and the
   next sync applies the change.<!-- END GENERATED: module-roster -->
-- Channel `latest`: follows released `templates/vX.Y.Z` build tags;
-  migrations run between releases.
-- Channel `staging`: follows the staging branch head; migrations are
-  skipped. Vivswan's own managed repos use it.
-- Which channel a repo follows is fleet config: `defaults.channel` in
-  [`repos.yml`](repos.yml), overridable per repo under `config:`.
+- Channel `latest`: follows released `templates/vX.Y.Z` build tags; migrations run between releases.
+- Channel `staging`: follows the staging branch head; migrations are skipped. Vivswan's own managed repos use it.
+- Which channel a repo follows is fleet config: `defaults.channel` in [`repos.yml`](repos.yml), overridable per repo under `config:`.
 
 ### Keeping repos in sync
 
-- The [sync-repos workflow](.github/workflows/sync-repos.yml) here runs on
-  every release, on a weekly cron, and on manual dispatch. For each managed
-  repo it runs `copier update`, validates the result, and pushes a branch +
-  PR into the repo with the fleet PAT. PRs opened by a PAT trigger the
-  target repo's CI and auto-assign normally.
-- Clean updates arm squash auto-merge on the PR, so it merges itself once
-  the repo's `all-green` check passes. A PR that needs review stays
-  manual: auto-resolved conflicts, withheld workflow files, failed
-  validation, an update that deletes a license file (below-marker content
-  does not survive a delete-vs-modify merge, so a human checks whether
-  the deleted file held anything worth keeping), or a dispatch with
-  `manual=true`, which holds every PR in the run for human review.
-- `repos.yml` decides which repos: a quoted `"*"` wildcard auto-discovers
-  every owned, non-archived repo the PAT can WRITE to (granting the
-  fleet PAT a repository is what enrolls it; fine-grained PATs can read
-  every public repo, so read access alone means nothing), `exclude:` opts repos
-  out, and a discovered repo is synced only once it carries
-  `.repo-platform.yml` (unadopted repos are skipped with a notice).
-- Conflicts (local edits overlapping template changes) resolve in the
-  template's favor: the PR lists the dropped local lines for review. The
-  run stays green (auto-resolution is normal operation); validation
-  failures still turn it red.
-- Recovery: when a repo's recorded `_commit` base is unusable (the sync
-  fails with "no base to update from"), dispatch sync-repos with
-  `recover=recopy` and `repo=<owner/name>`, or `repo=all` to recover
-  every managed repo in one run. Each recovered repo gets a full
-  re-render with no three-way merge, so local edits to template-managed
-  files are overwritten; generated-once files and `.github/settings.yml`
-  survive, and the sanctioned repository-local regions (the sentinel
-  files' local-section tails, `.gitignore`'s LOCAL section, the prefix
-  docs' repo-specific tails) are carried back from the repo's previous
-  copies and listed in the PR body. A previous copy that cannot be split
-  cleanly is kept in full below a marked recovery-appendix comment for
-  manual reconciliation. Recovery always needs an explicit repo scope
-  (a fat-fingered recover input without one is rejected) and the PRs
-  always stay manual-review.
+- The [sync-repos workflow](.github/workflows/sync-repos.yml) here runs on every release, on a weekly cron, and on manual dispatch. For each managed repo it runs `copier update`, validates the result, and pushes a branch + PR into the repo with the fleet PAT. PRs opened by a PAT trigger the target repo's CI and auto-assign normally.
+- Clean updates arm squash auto-merge on the PR, so it merges itself once the repo's `all-green` check passes. A PR that needs review stays manual: auto-resolved conflicts, withheld workflow files, failed validation, an update that deletes a license file (below-marker content does not survive a delete-vs-modify merge, so a human checks whether the deleted file held anything worth keeping), or a dispatch with `manual=true`, which holds every PR in the run for human review.
+- `repos.yml` decides which repos: a quoted `"*"` wildcard auto-discovers every owned, non-archived repo the PAT can WRITE to (granting the fleet PAT a repository is what enrolls it; fine-grained PATs can read every public repo, so read access alone means nothing), `exclude:` opts repos out, and a discovered repo is synced only once it carries `.repo-platform.yml` (unadopted repos are skipped with a notice).
+- Conflicts (local edits overlapping template changes) resolve in the template's favor: the PR lists the dropped local lines for review. The run stays green (auto-resolution is normal operation); validation failures still turn it red.
+- Recovery: when a repo's recorded `_commit` base is unusable (the sync fails with "no base to update from"), dispatch sync-repos with `recover=recopy` and `repo=<owner/name>`, or `repo=all` to recover every managed repo in one run. Each recovered repo gets a full re-render with no three-way merge, so local edits to template-managed files are overwritten; generated-once files and `.github/settings.yml` survive, and the sanctioned repository-local regions (the sentinel files' local-section tails, `.gitignore`'s LOCAL section, the prefix docs' repo-specific tails) are carried back from the repo's previous copies and listed in the PR body. A previous copy that cannot be split cleanly is kept in full below a marked recovery-appendix comment for manual reconciliation. Recovery always needs an explicit repo scope (a fat-fingered recover input without one is rejected) and the PRs always stay manual-review.
 
 ### Repository settings
 
-A repo's settings live in one of two homes, both applied from here by the
-[settings-repos workflow](.github/workflows/settings-repos.yml) through
-[github-settings-as-code](https://github.com/Vivswan/github-settings-as-code)
-(details in [docs/settings.md](docs/settings.md)):
+A repo's settings live in one of two homes, both applied from here by the [settings-repos workflow](.github/workflows/settings-repos.yml) through [github-settings-as-code](https://github.com/Vivswan/github-settings-as-code) (details in [docs/settings.md](docs/settings.md)):
 
-- Central: `settings/repos/<name>.yml` in this repo, with
-  `settings/defaults.yml` deep-merged under every target.
-- In-repo: the repo's own `.github/settings.yml` - carrying the file is
-  the whole opt-in. The `settings-sync` module is optional sugar on top:
-  it seeds the file and adds push-time self-apply.
+- Central: `settings/repos/<name>.yml` in this repo, with `settings/defaults.yml` deep-merged under every target.
+- In-repo: the repo's own `.github/settings.yml` - carrying the file is the whole opt-in. The `settings-sync` module is optional sugar on top: it seeds the file and adds push-time self-apply.
 
-A central file wins when both exist for the same repo, and the sync never
-deletes a repo's `.github/settings.yml`.
+A central file wins when both exist for the same repo, and the sync never deletes a repo's `.github/settings.yml`.
 
 ### Credentials
 
-One fine-grained PAT covers the whole fleet, stored ONLY in this repo as
-the `REPO_PLATFORM_TOKEN` Actions secret
-([create it with the permissions pre-selected](https://github.com/settings/personal-access-tokens/new?name=REPO_PLATFORM_TOKEN&description=repo-platform+fleet%3A+push+sync+and+central+settings&contents=write&pull_requests=write&workflows=write&administration=write&issues=write)),
-granted access to the managed repositories. Store it with
-`gh secret set REPO_PLATFORM_TOKEN`.
+One fine-grained PAT covers the whole fleet, stored ONLY in this repo as the `REPO_PLATFORM_TOKEN` Actions secret ([create it with the permissions pre-selected](https://github.com/settings/personal-access-tokens/new?name=REPO_PLATFORM_TOKEN&description=repo-platform+fleet%3A+push+sync+and+central+settings&contents=write&pull_requests=write&workflows=write&administration=write&issues=write)), granted access to the managed repositories. Store it with `gh secret set REPO_PLATFORM_TOKEN`.
 
-Workflows RW is the only scope the machinery adapts to; the others are
-hard requirements:
+Workflows RW is the only scope the machinery adapts to; the others are hard requirements:
 
 | Permission | Used for | Removing it |
 |---|---|---|
@@ -113,17 +59,7 @@ hard requirements:
 | Workflows:RW | sync updates that change `.github/workflows/` files | workflow-file changes are withheld from the sync PR and listed in its body with a warning; everything else still lands |
 | Administration:RW, Issues:RW | settings runs (fields, rulesets, labels) | settings runs fail: a section the token cannot reach must not hide drift behind a green run |
 
-A missing secret is a misconfiguration of this repo: sync and settings
-runs fail loudly with an error that carries the setup link. Dropping the
-Workflows scope is the one supported narrowing; dropping anything else
-turns runs red. Managed repos need no secret, with two optional
-exceptions: a settings-sync module repo that wants to self-apply its
-settings on push carries its own PAT (without one those runs skip with a
-warning and the central apply covers the repo), and a bun repo should
-carry a PAT as a *Dependabot* secret named `REPO_PLATFORM_TOKEN` so the
-Dependabot lockfile fixer's push re-runs CI (a fine-grained token scoped
-to that one repo's Contents:RW is enough; without any, the fix lands but
-each fixed PR needs a close/reopen for its checks to appear).
+A missing secret is a misconfiguration of this repo: sync and settings runs fail loudly with an error that carries the setup link. Dropping the Workflows scope is the one supported narrowing; dropping anything else turns runs red. Managed repos need no secret, with two optional exceptions: a settings-sync module repo that wants to self-apply its settings on push carries its own PAT (without one those runs skip with a warning and the central apply covers the repo), and a bun repo should carry a PAT as a *Dependabot* secret named `REPO_PLATFORM_TOKEN` so the Dependabot lockfile fixer's push re-runs CI (a fine-grained token scoped to that one repo's Contents:RW is enough; without any, the fix lands but each fixed PR needs a close/reopen for its checks to appear).
 
 ## Layout
 
@@ -159,23 +95,10 @@ each fixed PR needs a close/reopen for its checks to appear).
 | Generated once, then repo-owned | `checks.yml` (your CI jobs, called inside the all-green gate), `release.yml` (your release pipeline around the managed release-please machinery), `auto-format.yml`, `copilot-setup-steps.yml`, `nightly-fuzz.yml` (the fuzzer module's starter, [docs](docs/fuzzer.md)), `nightly.yml` (the nightly module's starter, [docs](docs/nightly.md)), `.claude-plugin/plugin.json` and `.claude-plugin/marketplace.json` (the skills module's starters, [docs](docs/skills.md)), issue forms and chooser config (starters you tailor to the repo), `release-please-config.json`, `.release-please-manifest.json`, `.gitleaks.toml` (repos accumulate their own allowlists), `.github/actionlint.yaml` (same for actionlint ignores) |
 | Repo-owned (never touched) | source code, release tooling, `.typography-allow.local`, everything else |
 
-`CLAUDE.md`, `.github/copilot-instructions.md`, and `.github/agents.md` are
-symlinks to the repo's `AGENTS.md` (the `agents` module, on by default): one
-source of truth for agent instructions.
+`CLAUDE.md`, `.github/copilot-instructions.md`, and `.github/agents.md` are symlinks to the repo's `AGENTS.md` (the `agents` module, on by default): one source of truth for agent instructions.
 
 ## Releasing
 
-- [release-please](https://github.com/googleapis/release-please) accumulates
-  [conventional commits](https://www.conventionalcommits.org) on `main` into
-  a release PR; merging it forces the `vX.Y.Z` tag, updates `CHANGELOG.md`,
-  and creates the GitHub release as a draft (published releases are
-  immutable), which ci.yml's `publish-release` job then flips live.
-- Publishing a stable release whose tag matches `releases/latest` rebuilds
-  the `latest` branch (tagged `templates/vX.Y.Z`) and triggers
-  `sync-repos.yml`, which pushes an update PR into every managed repo
-  (prereleases and releases published for older tags do not move the
-  channel).
-- The weekly sync-repos cron is the catch-all: it heals any missed release
-  sync, and staging-channel repos pick up merges to `main` through it. For
-  one repo immediately:
-  `gh workflow run sync-repos.yml -f repo=Vivswan/<repo>`.
+- [release-please](https://github.com/googleapis/release-please) accumulates [conventional commits](https://www.conventionalcommits.org) on `main` into a release PR; merging it forces the `vX.Y.Z` tag, updates `CHANGELOG.md`, and creates the GitHub release as a draft (published releases are immutable), which ci.yml's `publish-release` job then flips live.
+- Publishing a stable release whose tag matches `releases/latest` rebuilds the `latest` branch (tagged `templates/vX.Y.Z`) and triggers `sync-repos.yml`, which pushes an update PR into every managed repo (prereleases and releases published for older tags do not move the channel).
+- The weekly sync-repos cron is the catch-all: it heals any missed release sync, and staging-channel repos pick up merges to `main` through it. For one repo immediately: `gh workflow run sync-repos.yml -f repo=Vivswan/<repo>`.

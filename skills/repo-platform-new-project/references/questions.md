@@ -1,9 +1,6 @@
 # Copier questions, module roster, and required labels
 
-The authoritative source is repo-platform's `copier.yml` (the interactive
-prompt shows exactly the current questions). This walkthrough matches it
-at the time of writing; if the prompt shows a module not listed here,
-trust the prompt.
+The authoritative source is repo-platform's `copier.yml` (the interactive prompt shows exactly the current questions). This walkthrough matches it at the time of writing; if the prompt shows a module not listed here, trust the prompt.
 
 ## Base questions
 
@@ -39,8 +36,7 @@ One line each, from the choices descriptions:
 - `settings-sync`: in-repo .github/settings.yml applied with the repo's own PAT
 - `custom-license`: repo carries its own license in LICENSE.md; the fleet license is not rendered
 
-`settings-sync` is deliberately not a default: central settings
-(`settings/repos/<name>.yml` in repo-platform) are the default home.
+`settings-sync` is deliberately not a default: central settings (`settings/repos/<name>.yml` in repo-platform) are the default home.
 
 ## Per-module follow-up questions
 
@@ -64,10 +60,7 @@ Asked only when the module is selected.
 | `pages_production` | Root built from `release` (latest tag) or `main` | `release` |
 | `pages_staging` | Also publish main HEAD under `/staging/` | `true` |
 
-One-time repo setup afterwards: Settings -> Pages -> Source: GitHub
-Actions, and add a `v*` tag rule to the `github-pages` environment's
-deployment branches (release-triggered deploys run on the tag ref and are
-rejected without it).
+One-time repo setup afterwards: Settings -> Pages -> Source: GitHub Actions, and add a `v*` tag rule to the `github-pages` environment's deployment branches (release-triggered deploys run on the tag ref and are rejected without it).
 
 ### fuzzer
 
@@ -87,21 +80,11 @@ rejected without it).
 |---|---|---|
 | `skills_dir` | Directory holding the repository's agent skills (plain relative path; baked into the managed validation workflow's trigger paths and action input) | `skills` |
 
-To change a module parameter later, edit that question's VALUE key in
-`.copier-answers.yml` through a normal default-branch PR - the sync
-loads recorded values from there, so the edit sticks and the next sync
-re-renders consistently. Never touch the underscore keys (`_commit`,
-`_src_path`).
+To change a module parameter later, edit that question's VALUE key in `.copier-answers.yml` through a normal default-branch PR - the sync loads recorded values from there, so the edit sticks and the next sync re-renders consistently. Never touch the underscore keys (`_commit`, `_src_path`).
 
 ## Required settings labels
 
-Settings applies delete undeclared labels, so the repo's settings file
-(central or in-repo) must declare every label the repo needs. The
-settings-sync module's rendered settings.yml declares these
-automatically; a central `settings/repos/<name>.yml` must carry them by
-hand. A preflight compares a central file that declares labels against
-the repo's recorded module selection and fails the apply on a missing
-required label.
+Settings applies delete undeclared labels, so the repo's settings file (central or in-repo) must declare every label the repo needs. The settings-sync module's rendered settings.yml declares these automatically; a central `settings/repos/<name>.yml` must carry them by hand. A preflight compares a central file that declares labels against the repo's recorded module selection and fails the apply on a missing required label.
 
 | Needed by | Labels |
 |---|---|
@@ -115,5 +98,4 @@ required label.
 | nightly | the `nightly_label` answer (default `nightly-failure`, `D93F0B`) |
 | private repos declaring labels | `settings-as-code-report` (`0e2a47`) |
 
-Exact descriptions live in repo-platform's
-`templates/settings-sync/.github/settings.yml.jinja`.
+Exact descriptions live in repo-platform's `templates/settings-sync/.github/settings.yml.jinja`.

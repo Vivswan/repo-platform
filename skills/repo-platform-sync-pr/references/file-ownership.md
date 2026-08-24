@@ -1,11 +1,9 @@
 # File classes and the decision rule per class
 
 <!-- Keep in sync with the twin copy in skills/repo-platform-new-project/
-     references/file-ownership.md - skills install standalone, so the
-     table is duplicated. -->
+     references/file-ownership.md - skills install standalone, so the table is duplicated. -->
 
-Classify every file a sync PR touches before deciding what to do with a
-conflict or a surprising diff.
+Classify every file a sync PR touches before deciding what to do with a conflict or a surprising diff.
 
 | Class | Files | Decision rule in a sync PR |
 |---|---|---|
@@ -19,23 +17,8 @@ conflict or a surprising diff.
 
 Notes:
 
-- `.copier-answers.yml` is managed; the one sanctioned edit is changing
-  a question's VALUE key via a default-branch PR to set a module
-  parameter (`nightly_label`, `skills_dir`, `pages_*`, `fuzzer_label`,
-  ...) - the sync loads those values from the recorded answers, so the
-  edit sticks. Never touch the underscore keys (`_commit`, `_src_path`).
-- A `.bun-version`, `.node-version`, or `.dvmrc` addition or version
-  bump in a sync PR is expected: toolchain pins are fleet-wide managed
-  files (one shared version per toolchain, advanced by repo-platform's
-  refresh-toolchains workflow). Deliberate divergence belongs in the
-  repo-owned workflows' version inputs, not in the dotfile - a
-  hand-edited copy is overwritten on the next sync.
-- `LICENSE.md` carries the fleet license; with the `custom-license`
-  module it is the repo's own license and sync never touches it. An
-  update that DELETES a license file is flagged in the PR body: content
-  below its marker does not survive a delete-vs-modify merge, so check
-  the old file for local notices worth moving.
-- `CONTRIBUTING.md` is a public-only render: a repo flipped private has
-  it retired, local section included.
-- The authoritative generated-once list is `_skip_if_exists` in
-  repo-platform's `copier.yml`.
+- `.copier-answers.yml` is managed; the one sanctioned edit is changing a question's VALUE key via a default-branch PR to set a module parameter (`nightly_label`, `skills_dir`, `pages_*`, `fuzzer_label`, ...) - the sync loads those values from the recorded answers, so the edit sticks. Never touch the underscore keys (`_commit`, `_src_path`).
+- A `.bun-version`, `.node-version`, or `.dvmrc` addition or version bump in a sync PR is expected: toolchain pins are fleet-wide managed files (one shared version per toolchain, advanced by repo-platform's refresh-toolchains workflow). Deliberate divergence belongs in the repo-owned workflows' version inputs, not in the dotfile - a hand-edited copy is overwritten on the next sync.
+- `LICENSE.md` carries the fleet license; with the `custom-license` module it is the repo's own license and sync never touches it. An update that DELETES a license file is flagged in the PR body: content below its marker does not survive a delete-vs-modify merge, so check the old file for local notices worth moving.
+- `CONTRIBUTING.md` is a public-only render: a repo flipped private has it retired, local section included.
+- The authoritative generated-once list is `_skip_if_exists` in repo-platform's `copier.yml`.

@@ -1,11 +1,9 @@
 # File ownership in a managed repository
 
 <!-- Keep in sync with the twin copy in skills/repo-platform-sync-pr/
-     references/file-ownership.md - skills install standalone, so the
-     table is duplicated. -->
+     references/file-ownership.md - skills install standalone, so the table is duplicated. -->
 
-Who owns what after generation. "Managed" files are template-owned;
-"repo-owned" files are yours.
+Who owns what after generation. "Managed" files are template-owned; "repo-owned" files are yours.
 
 | Category | Files | What that means |
 |---|---|---|
@@ -19,20 +17,8 @@ Who owns what after generation. "Managed" files are template-owned;
 
 Notes:
 
-- `.copier-answers.yml` is managed; the one sanctioned edit is changing
-  a question's VALUE key via a default-branch PR to set a module
-  parameter (`nightly_label`, `skills_dir`, `pages_*`, `fuzzer_label`,
-  ...) - the sync loads those values from the recorded answers, so the
-  edit sticks. Never touch the underscore keys (`_commit`, `_src_path`).
-- The toolchain pin dotfiles (`.bun-version`, `.node-version`, `.dvmrc`)
-  are fleet-wide: sync PRs add and bump them (one shared version per
-  toolchain). Override a version in your repo-owned workflows' version
-  inputs, not by editing the dotfile.
-- `LICENSE.md` carries the fleet license (Individual and Small
-  Organization License); local notices (third-party components) go below
-  its marker. With the `custom-license` module the file is the repo's own
-  license and sync never touches it.
-- `CLAUDE.md`, `.github/copilot-instructions.md`, and `.github/agents.md`
-  are symlinks to `AGENTS.md` (agents module): one source of truth.
-- The authoritative generated-once list is `_skip_if_exists` in
-  repo-platform's `copier.yml`.
+- `.copier-answers.yml` is managed; the one sanctioned edit is changing a question's VALUE key via a default-branch PR to set a module parameter (`nightly_label`, `skills_dir`, `pages_*`, `fuzzer_label`, ...) - the sync loads those values from the recorded answers, so the edit sticks. Never touch the underscore keys (`_commit`, `_src_path`).
+- The toolchain pin dotfiles (`.bun-version`, `.node-version`, `.dvmrc`) are fleet-wide: sync PRs add and bump them (one shared version per toolchain). Override a version in your repo-owned workflows' version inputs, not by editing the dotfile.
+- `LICENSE.md` carries the fleet license (Individual and Small Organization License); local notices (third-party components) go below its marker. With the `custom-license` module the file is the repo's own license and sync never touches it.
+- `CLAUDE.md`, `.github/copilot-instructions.md`, and `.github/agents.md` are symlinks to `AGENTS.md` (agents module): one source of truth.
+- The authoritative generated-once list is `_skip_if_exists` in repo-platform's `copier.yml`.
