@@ -247,6 +247,21 @@ function fakeGh(
   return { run, calls };
 }
 
+/** Run `body` with console.log captured; returns the captured lines. */
+async function withCapturedLog(body: () => Promise<void>): Promise<string[]> {
+  const lines: string[] = [];
+  const original = console.log;
+  console.log = (...args: unknown[]) => {
+    lines.push(args.map(String).join(" "));
+  };
+  try {
+    await body();
+  } finally {
+    console.log = original;
+  }
+  return lines;
+}
+
 describe("fileIssue", () => {
   test("create path opens a labeled issue with the body and title", async () => {
     const { run, calls } = fakeGh(undefined);
@@ -290,7 +305,7 @@ describe("fileIssue", () => {
     expect(calls.some((c) => c[0] === "issue" && c[1] === "edit")).toBe(false);
   });
 
-  test("a failed assignment never fails the filing", async () => {
+  test("a failed assignment logs a notice and never fails the filing", async () => {
     // An org-owned repo's owner is an org and not assignable; the filing
     // must still succeed and return the number.
     const calls: string[][] = [];
@@ -304,11 +319,14 @@ describe("fileIssue", () => {
       }
       return "";
     };
-    expect(await fileIssue(run, "o/r", "body", "fuzz-nightly", "t")).toBe(7);
+    const logs = await withCapturedLog(async () => {
+      expect(await fileIssue(run, "o/r", "body", "fuzz-nightly", "t")).toBe(7);
+    });
     expect(calls.some((c) => c[0] === "issue" && c[1] === "edit")).toBe(true);
+    expect(logs.some((line) => line.startsWith("::notice::could not assign @o to #7"))).toBe(true);
   });
 
-  test("an unparseable create URL skips assignment without failing the filing", async () => {
+  test("an unparseable create URL logs a notice, skips assignment, never fails the filing", async () => {
     const calls: string[][] = [];
     const run: GhRunner = async (args) => {
       calls.push(args);
@@ -317,8 +335,13 @@ describe("fileIssue", () => {
       if (args[0] === "issue" && args[1] === "create") return "not a url\n";
       return "";
     };
-    expect(await fileIssue(run, "o/r", "body", "fuzz-nightly", "t")).toBeUndefined();
+    const logs = await withCapturedLog(async () => {
+      expect(await fileIssue(run, "o/r", "body", "fuzz-nightly", "t")).toBeUndefined();
+    });
     expect(calls.some((c) => c[0] === "issue" && c[1] === "edit")).toBe(false);
+    expect(
+      logs.some((line) => line.startsWith("::notice::could not parse the created issue's number")),
+    ).toBe(true);
   });
 
   test("returns the created issue number (parsed from gh's create URL)", async () => {

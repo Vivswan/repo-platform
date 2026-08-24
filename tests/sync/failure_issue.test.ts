@@ -188,6 +188,7 @@ describe("failure_issue.ts", () => {
     expect(r.calls).toContain(`repos/${SLUG}/issues/17/assignees --method POST`);
     expect(r.calls).toContain("assignees[]=Vivswan");
     expect(r.output).not.toContain("17");
+    expect(r.output).not.toContain("issues/");
   });
 
   test("deliver leaves a reused issue's existing assignees alone", () => {

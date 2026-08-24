@@ -135,19 +135,28 @@ function findIssue(): string | null {
 // half the private slug) and the delivery stands.
 function assignOwner(issueNumber: string): void {
   const owner = target.split("/")[0];
-  const assign = gh(
-    [
-      "api",
-      `repos/${target}/issues/${issueNumber}/assignees`,
-      "--method",
-      "POST",
-      "--silent",
-      "-f",
-      `assignees[]=${owner}`,
-    ],
-    { stdoutToErrlog: true },
-  );
-  if (assign.exitCode !== 0) {
+  // try/catch, not just the exit-code check: Bun.spawnSync itself can
+  // throw (gh vanishing mid-run), and by this point the delivery already
+  // succeeded - nothing about assignment may unwind that.
+  let failed: boolean;
+  try {
+    const assign = gh(
+      [
+        "api",
+        `repos/${target}/issues/${issueNumber}/assignees`,
+        "--method",
+        "POST",
+        "--silent",
+        "-f",
+        `assignees[]=${owner}`,
+      ],
+      { stdoutToErrlog: true },
+    );
+    failed = assign.exitCode !== 0;
+  } catch {
+    failed = true;
+  }
+  if (failed) {
     console.log(
       "::notice::could not assign the repository owner to the failure-report issue (best-effort); the report delivery itself succeeded",
     );
