@@ -19,6 +19,12 @@
 //      license file
 //   7. Every selected toolchain module with a version pin carries its
 //      managed version dotfile with exactly the pinned version
+//   8. Sync-managed files self-declare their ownership: files sync wholly
+//      overwrites open with the managed header naming the pinned owner, and
+//      split files (a managed top above a repo-owned tail) carry the
+//      repo-platform:local-section marker exactly once. Existing files
+//      only - absence is damage the next sync heals - and _skip_if_exists
+//      starters are exempt (repo-owned after the first render)
 //
 // Advisories (printed, never fail): missing actionlint / yamllint /
 // commit-names / gitleaks checks in ci.yml (older renders predate the newer
@@ -70,6 +76,33 @@ const MARKER_FILES: Record<string, string[]> = {
     "# BEGIN REPO-PLATFORM MANAGED",
     "# END REPO-PLATFORM MANAGED",
   ],
+};
+
+/** The line splitting a file's sync-managed top from its repo-owned tail;
+ *  ownership check 8 requires it exactly once in split files. */
+const LOCAL_SECTION_MARKER = "repo-platform:local-section";
+
+/** How many opening lines may hold the managed header (rendering collapses
+ *  the templates' jinja preambles, so it always lands near the top). */
+const HEADER_WINDOW = 10;
+
+/** Unconditionally rendered base files and how each declares its ownership:
+ *  "header" files are wholly overwritten by sync and open with the managed
+ *  header; "marker" files keep a repo-owned tail below the local-section
+ *  marker. Conditionally rendered base files (CODE_OF_CONDUCT.md,
+ *  CONTRIBUTING.md, LICENSE.md, AGENTS.md) join in check 8 under the same
+ *  answers/modules conditions that gate their rendering. */
+const BASE_OWNERSHIP: Record<string, "header" | "marker"> = {
+  ".copier-answers.yml": "header",
+  ".repo-platform.yml": "header",
+  ".yamllint": "header",
+  ".typography-allow": "header",
+  ".github/dependabot.yml": "header",
+  ".github/workflows/ci.yml": "header",
+  ".editorconfig": "marker",
+  ".gitattributes": "marker",
+  ".github/CODEOWNERS": "marker",
+  "SECURITY.md": "marker",
 };
 
 const TEXT_SUFFIXES = new Set([
@@ -157,6 +190,22 @@ const TOOLCHAIN_PINS: Record<string, { file: string; version: string }> = {
   deno: { file: ".dvmrc", version: "2.9.5" },
 };
 // END GENERATED: toolchain-pins
+
+// Rendered module files that must open with the managed header while their
+// module is selected; a module template enrols by opening with the header
+// (split files and repo-owned starters stay out - see moduleHeaderFiles in
+// scripts/generate.ts).
+// BEGIN GENERATED: module-header-files (scripts/generate.ts - edit module.yml manifests, not this block)
+const MODULE_HEADER_FILES: Record<string, string[]> = {
+  bun: [".github/workflows/dependabot-bun-lockfile.yml"],
+  deno: [".github/workflows/deno-audit.yml"],
+  pages: [".github/workflows/pages.yml"],
+  "release-please": [".github/workflows/release.yml"],
+  skills: [".github/workflows/validate-skills.yml"],
+  "auto-assign": [".github/workflows/auto-assign.yml"],
+  "settings-sync": [".github/workflows/settings-sync.yml"],
+};
+// END GENERATED: module-header-files
 
 const STRICT_UTF8 = new TextDecoder("utf-8", { fatal: true });
 
@@ -275,6 +324,58 @@ function main(): number {
   const errors: string[] = [];
   const advisories: string[] = [];
 
+  // The template renders this fleet's composite actions as
+  // <github_username>/repo-platform/actions/<name>@<ref>. A managed
+  // render's answers must pin that owner (another owner's look-alike
+  // action must not satisfy a check): a missing or malformed
+  // github_username is a hard error, never a permissive fallback. Self
+  // mode validates repo-platform itself, which has no answers file to
+  // pin from, so any well-formed owner counts there. null = the error
+  // below is already recorded and the owner-dependent checks stand
+  // down until the answers are healed.
+  const answersPath = join(root, ".copier-answers.yml");
+  const hasAnswers = isRegularFile(answersPath);
+  let answers: Record<string, unknown> = {};
+  if (hasAnswers) {
+    try {
+      const parsed = shapeOfYaml(readFileSync(answersPath, "utf-8"));
+      if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+        answers = parsed as Record<string, unknown>;
+      }
+    } catch {
+      // The walk (check 3) reports the parse failure; the empty record
+      // makes the github_username error below name the missing pin.
+    }
+  }
+  const isPrivateRender = answers.private === true;
+  const username = answers.github_username;
+  const ownerPin: { kind: "pinned"; owner: string } | { kind: "any" } | null = selfMode
+    ? { kind: "any" }
+    : typeof username === "string" && /^[A-Za-z0-9-]+$/.test(username)
+      ? { kind: "pinned", owner: username }
+      : null;
+  // A missing answers file gets check 1's own error; no second diagnostic
+  // on the same root cause.
+  if (ownerPin === null && hasAnswers) {
+    errors.push(
+      ".copier-answers.yml: `github_username` is missing or not a " +
+        "GitHub username - it pins which owner's composite actions " +
+        "ci.yml must use; restore the field or re-run a template sync",
+    );
+  }
+  const ownedActionFor =
+    (pin: { kind: "pinned"; owner: string } | { kind: "any" }) =>
+    (name: string): RegExp => {
+      const ownerPattern =
+        pin.kind === "pinned" ? pin.owner.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") : "[A-Za-z0-9-]+";
+      return new RegExp(`^${ownerPattern}/repo-platform/actions/${name}@`);
+    };
+
+  // The modules a valid .repo-platform.yml selects, for the checks gated on
+  // module membership (7 and 8); null while the list is missing or
+  // malformed (check 1's own error) and in self mode.
+  let selectedModules: string[] | null = null;
+
   // 1. Registration files (not applicable to the template repo itself)
   if (!selfMode) {
     for (const required of [".copier-answers.yml", ".repo-platform.yml"]) {
@@ -306,6 +407,7 @@ function main(): number {
             "module names, e.g. modules: [uv, release-please]",
         );
       } else {
+        selectedModules = modules.filter((m): m is string => typeof m === "string");
         const unknown = modules
           .filter((m) => typeof m !== "string" || !KNOWN_MODULES.has(m))
           .map((m) => String(m))
@@ -608,54 +710,8 @@ function main(): number {
           );
         }
       }
-      // The template renders this fleet's composite actions as
-      // <github_username>/repo-platform/actions/<name>@<ref>. A managed
-      // render's answers must pin that owner (another owner's look-alike
-      // action must not satisfy a check): a missing or malformed
-      // github_username is a hard error, never a permissive fallback. Self
-      // mode validates repo-platform itself, which has no answers file to
-      // pin from, so any well-formed owner counts there. null = the error
-      // below is already recorded and the owner-dependent checks stand
-      // down until the answers are healed.
-      const answersPath = join(root, ".copier-answers.yml");
-      const hasAnswers = isRegularFile(answersPath);
-      let answers: Record<string, unknown> = {};
-      if (hasAnswers) {
-        try {
-          const parsed = shapeOfYaml(readFileSync(answersPath, "utf-8"));
-          if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
-            answers = parsed as Record<string, unknown>;
-          }
-        } catch {
-          // The walk already reported the parse failure; the empty record
-          // makes the github_username error below name the missing pin.
-        }
-      }
-      const isPrivateRender = answers.private === true;
-      const username = answers.github_username;
-      const ownerPin: { kind: "pinned"; owner: string } | { kind: "any" } | null = selfMode
-        ? { kind: "any" }
-        : typeof username === "string" && /^[A-Za-z0-9-]+$/.test(username)
-          ? { kind: "pinned", owner: username }
-          : null;
-      // A missing answers file already errored above; no second diagnostic
-      // on the same root cause.
-      if (ownerPin === null && hasAnswers) {
-        errors.push(
-          ".copier-answers.yml: `github_username` is missing or not a " +
-            "GitHub username - it pins which owner's composite actions " +
-            "ci.yml must use; restore the field or re-run a template sync",
-        );
-      }
-      const ownedActionFor =
-        (pin: { kind: "pinned"; owner: string } | { kind: "any" }) =>
-        (name: string): RegExp => {
-          const ownerPattern =
-            pin.kind === "pinned"
-              ? pin.owner.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-              : "[A-Za-z0-9-]+";
-          return new RegExp(`^${ownerPattern}/repo-platform/actions/${name}@`);
-        };
+      // The template renders this fleet's composite actions with the owner
+      // pinned from the answers (hoisted above, shared with check 8).
       // The render shape decides what the remaining checks require: a
       // base-checks job means the private merged shape (the five base
       // checks are its steps), anything else is the public fan-out.
@@ -710,6 +766,64 @@ function main(): number {
           }
         } else if (!(advisory in jobs)) {
           advisories.push(`ci.yml: consider adding a \`${advisory}\` job`);
+        }
+      }
+    }
+  }
+
+  // 8. Ownership self-declarations: every sync-managed file that supports
+  // comments tells its readers who owns it - the managed header on files
+  // sync wholly overwrites, the local-section marker splitting split files'
+  // managed top from the repo-owned tail. Existing files only: a missing
+  // managed file is damage the next sync heals (ci.yml and .gitignore
+  // absence already error above). Skipped in self mode - the template
+  // repo's files are sources, not renders - and while the owner pin is
+  // unhealed (its error is already recorded).
+  if (!selfMode && ownerPin !== null && ownerPin.kind === "pinned") {
+    const headerNeedle = `managed by ${ownerPin.owner}/repo-platform`;
+    const files = Object.entries(BASE_OWNERSHIP).map(([rel, kind]) => ({ rel, kind }));
+    // Conditionally rendered base files, under the same answers/modules
+    // conditions as their templates' filename gates; a null modules list
+    // stands the module-gated entries down (check 1 already errored).
+    if (!isPrivateRender) {
+      files.push({ rel: "CODE_OF_CONDUCT.md", kind: "header" });
+      files.push({ rel: "CONTRIBUTING.md", kind: "marker" });
+    }
+    if (selectedModules !== null) {
+      if (!selectedModules.includes("custom-license")) {
+        files.push({ rel: "LICENSE.md", kind: "marker" });
+      }
+      if (selectedModules.includes("agents")) {
+        files.push({ rel: "AGENTS.md", kind: "marker" });
+      }
+      for (const module of selectedModules) {
+        for (const rel of MODULE_HEADER_FILES[module] ?? []) {
+          files.push({ rel, kind: "header" });
+        }
+      }
+    }
+    for (const { rel, kind } of files) {
+      const path = join(root, rel);
+      if (!isRegularFile(path)) continue;
+      const content = readFileSync(path, "utf-8");
+      if (kind === "header") {
+        if (!content.split("\n", HEADER_WINDOW).join("\n").includes(headerNeedle)) {
+          errors.push(
+            `${rel}: does not open with the managed header ('managed by ` +
+              `${ownerPin.owner}/repo-platform') - the file is overwritten by ` +
+              "template sync and the header is what warns readers their local " +
+              "edits get replaced; run a template sync to restore it",
+          );
+        }
+      } else {
+        const count = content.split(LOCAL_SECTION_MARKER).length - 1;
+        if (count !== 1) {
+          errors.push(
+            `${rel}: the '${LOCAL_SECTION_MARKER}' marker appears ${count} ` +
+              "times (expected 1) - it splits the sync-managed top of the file " +
+              "from this repository's own tail; restore the single marker line " +
+              "via a template sync",
+          );
         }
       }
     }

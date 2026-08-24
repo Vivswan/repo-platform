@@ -10,9 +10,11 @@
 //   roster the settings templates and dependabot manifests declare, and
 //   cross-stream distinctness).
 // - actions/validate-template/validate_generated_files.ts: the
-//   KNOWN_MODULES set literal and the TOOLCHAIN_PINS record literal (the
-//   action stays self-contained for client-side execution; only the
-//   constants' authorship is generated).
+//   KNOWN_MODULES set literal, the TOOLCHAIN_PINS record literal, and the
+//   MODULE_HEADER_FILES record (the rendered module files that must open
+//   with the managed ownership header, scanned from the module template
+//   trees; the action stays self-contained for client-side execution; only
+//   the constants' authorship is generated).
 // - README.md, docs/new-repo.md, docs/settings.md, docs/pages.md,
 //   docs/toolchains.md: the prose that enumerates manifest data (module
 //   roster, dependabot labels, gitignore upstream mapping, pages toolchain
@@ -464,6 +466,108 @@ export function toolchainPinRows(manifests: ModuleManifest[]): string[] {
   return toolchainPins(manifests).map((p) => `| \`${p.module}\` | \`${p.file}\` | ${p.version} |`);
 }
 
+/** The managed ownership header's identifying text in template sources
+ *  (validate_generated_files.ts enforces the rendered counterpart), and the
+ *  marker splitting a managed top from a repo-owned tail. */
+const MANAGED_HEADER_TEXT = "managed by {{ github_username }}/repo-platform";
+const LOCAL_SECTION_MARKER = "repo-platform:local-section";
+
+/** How many opening lines may hold the managed header: template sources
+ *  keep it at the top, at most below a short jinja preamble that rendering
+ *  collapses. The validator's rendered-file check uses the same window. */
+const HEADER_WINDOW = 10;
+
+/** copier.yml's _skip_if_exists globs as rendered-path matchers (`*` stays
+ *  within one path segment, matching copier's pathlib semantics). */
+export function skipIfExistsMatchers(copierYamlText: string): RegExp[] {
+  const skip = (parseYaml(copierYamlText) as { _skip_if_exists?: unknown } | null)?._skip_if_exists;
+  if (!Array.isArray(skip) || skip.length === 0 || !skip.every((p) => typeof p === "string")) {
+    throw new Error(
+      "copier.yml: _skip_if_exists is missing or not a list of strings - the " +
+        "module-header-files scan needs it to keep repo-owned starters exempt",
+    );
+  }
+  return skip.map(
+    (pattern) =>
+      new RegExp(
+        `^${pattern
+          .split("*")
+          .map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+          .join("[^/]*")}$`,
+      ),
+  );
+}
+
+/** The rendered paths, per module, that must open with the managed header
+ *  in client repos: every module template file (fragments and symlinks
+ *  aside) whose source opens with the header. Carrying the header is the
+ *  enrolment: split files carry the local-section marker instead (the
+ *  validator's hand table owns them), starters and comment-free formats
+ *  carry neither. A _skip_if_exists starter carrying the header throws -
+ *  the header promises sync overwrites the file, the skip list promises it
+ *  never does. Filename-gated files are skipped: module selection alone
+ *  does not render them, so the validator cannot require them per module. */
+export function moduleHeaderFiles(
+  manifests: ModuleManifest[],
+  templatesDir: string,
+  skipIfExists: RegExp[],
+): Record<string, string[]> {
+  const result: Record<string, string[]> = {};
+  for (const m of manifests) {
+    const moduleDir = join(templatesDir, m.module);
+    const rendered: string[] = [];
+    const visit = (rel: string) => {
+      for (const name of readdirSync(join(moduleDir, rel)).sort()) {
+        const childRel = rel ? `${rel}/${name}` : name;
+        if (childRel === "fragments" || childRel === "module.yml") continue;
+        const stat = lstatSync(join(moduleDir, childRel));
+        if (stat.isDirectory() && !stat.isSymbolicLink()) {
+          visit(childRel);
+          continue;
+        }
+        if (!stat.isFile() || stat.isSymbolicLink()) continue;
+        const renderedPath = childRel.replace(/\.jinja$/, "");
+        if (renderedPath.includes("{%")) continue;
+        const source = readFileSync(join(moduleDir, childRel), "utf-8");
+        if (source.includes(LOCAL_SECTION_MARKER)) continue;
+        const head = source.split("\n", HEADER_WINDOW).join("\n");
+        if (!head.includes(MANAGED_HEADER_TEXT)) continue;
+        if (skipIfExists.some((matcher) => matcher.test(renderedPath))) {
+          throw new Error(
+            `templates/${m.module}/${childRel}: opens with the managed header but ` +
+              "renders a _skip_if_exists starter - the header promises sync " +
+              "overwrites the file, the skip list promises it never does; drop one",
+          );
+        }
+        rendered.push(renderedPath);
+      }
+    };
+    visit("");
+    if (rendered.length > 0) result[m.module] = rendered;
+  }
+  if (Object.keys(result).length === 0) {
+    throw new Error(
+      "no module template opens with the managed header, so the validator's " +
+        "MODULE_HEADER_FILES record would be empty - the managed module " +
+        "workflows are expected to carry it",
+    );
+  }
+  return result;
+}
+
+/** validate_generated_files.ts MODULE_HEADER_FILES record literal. */
+export function moduleHeaderFilesRegion(moduleHeaders: Record<string, string[]>): string[] {
+  return [
+    "const MODULE_HEADER_FILES: Record<string, string[]> = {",
+    // Keys quoted as-needed, like TOOLCHAIN_PINS above, to stay biome-stable.
+    ...Object.entries(moduleHeaders).map(([module, files]) => {
+      const key = /^[a-z][a-z0-9]*$/.test(module) ? module : JSON.stringify(module);
+      return `  ${key}: [${files.map((file) => JSON.stringify(file)).join(", ")}],`;
+    }),
+    "};",
+  ];
+}
+
 /** Version-dotfile-shaped files at a module's root that no manifest pin
  *  declares: a renamed or removed pin leaves the old dotfile behind, and
  *  composition would keep shipping it to every render. Returned (for the
@@ -716,6 +820,7 @@ interface RegionInputs {
   manifests: ModuleManifest[];
   pages: PagesManifest[];
   reserved: string[];
+  moduleHeaders: Record<string, string[]>;
 }
 
 type SpanRegion = [name: string, body: (inputs: RegionInputs) => string[]];
@@ -765,6 +870,7 @@ function targets(manifests: ModuleManifest[]): Target[] {
       regions: [
         ["known-modules", ({ manifests }) => knownModules(manifests)],
         ["toolchain-pins", ({ manifests }) => toolchainPinsRegion(manifests)],
+        ["module-header-files", ({ moduleHeaders }) => moduleHeaderFilesRegion(moduleHeaders)],
       ],
     },
     {
@@ -864,6 +970,11 @@ function main(): number {
       manifests,
       pages: pagesManifests(manifests),
       reserved: reservedLabelNames(manifests),
+      moduleHeaders: moduleHeaderFiles(
+        manifests,
+        join(REPO_ROOT, "templates"),
+        skipIfExistsMatchers(readFileSync(join(REPO_ROOT, "copier.yml"), "utf-8")),
+      ),
     };
     const regionStale =
       "its generated region(s) do not match their sources (the module " +

@@ -5,12 +5,13 @@ import { dirname, join } from "node:path";
 
 const VALIDATOR = join(import.meta.dir, "validate_generated_files.ts");
 
-// The smallest tree the validator accepts: registration files, the marked
-// .gitignore, and a ci.yml carrying the all-green + typography convention.
+// The smallest tree the validator accepts: registration files (opening with
+// the managed header check 8 requires), the marked .gitignore, and a ci.yml
+// carrying the all-green + typography convention.
+const MANAGED_HEADER = "# This file is managed by Vivswan/repo-platform.\n";
 const BASELINE: Record<string, string> = {
-  ".copier-answers.yml":
-    "_commit: templates/v1.0.0\n_src_path: gh:Vivswan/repo-platform\ngithub_username: Vivswan\n",
-  ".repo-platform.yml": "modules: [uv]\n",
+  ".copier-answers.yml": `${MANAGED_HEADER}_commit: templates/v1.0.0\n_src_path: gh:Vivswan/repo-platform\ngithub_username: Vivswan\n`,
+  ".repo-platform.yml": `${MANAGED_HEADER}modules: [uv]\n`,
   ".gitignore": [
     "# BEGIN REPOSITORY LOCAL",
     "# END REPOSITORY LOCAL",
@@ -19,6 +20,7 @@ const BASELINE: Record<string, string> = {
     "",
   ].join("\n"),
   ".github/workflows/ci.yml": [
+    "# This file is managed by Vivswan/repo-platform.",
     "name: CI",
     "jobs:",
     "  typography:",
@@ -222,7 +224,7 @@ describe("base checks shape", () => {
   // advisory, like a real private render's answers do; github_username pins
   // the owner the fleet's composite actions must come from.
   const PRIVATE_ANSWERS =
-    "_commit: templates/v1.0.0\n_src_path: gh:Vivswan/repo-platform\n" +
+    `${MANAGED_HEADER}_commit: templates/v1.0.0\n_src_path: gh:Vivswan/repo-platform\n` +
     "github_username: Vivswan\nprivate: true\n";
 
   /** A private merged render: base-checks carries the base checks as
@@ -230,6 +232,7 @@ describe("base checks shape", () => {
    *  otherwise). */
   const mergedCi = (steps: string[], needs = "[base-checks]") =>
     [
+      "# This file is managed by Vivswan/repo-platform.",
       "name: CI",
       "jobs:",
       "  base-checks:",
@@ -359,7 +362,7 @@ describe("base checks shape", () => {
   test("a quoted github_username is read as its YAML value", () => {
     const { exitCode, stderr } = runValidator({
       ".copier-answers.yml":
-        "_commit: templates/v1.0.0\n_src_path: gh:Vivswan/repo-platform\n" +
+        `${MANAGED_HEADER}_commit: templates/v1.0.0\n_src_path: gh:Vivswan/repo-platform\n` +
         'github_username: "Vivswan"\nprivate: true\n',
       ".github/workflows/ci.yml": mergedCi(MERGED_STEPS),
     });
@@ -515,7 +518,9 @@ describe("gitignored paths in self mode", () => {
 
 describe("one license file", () => {
   test("LICENSE.md alone passes (fleet repos)", () => {
-    const { exitCode, stderr } = runValidator({ "LICENSE.md": "# License\n" });
+    const { exitCode, stderr } = runValidator({
+      "LICENSE.md": "# License\n\n<!-- repo-platform:local-section -->\n",
+    });
     expect(stderr).toBe("");
     expect(exitCode).toBe(0);
   });
@@ -534,5 +539,125 @@ describe("one license file", () => {
     });
     expect(exitCode).toBe(1);
     expect(stderr).toContain("LICENSE and LICENSE.md both exist");
+  });
+});
+
+describe("ownership self-declarations", () => {
+  const C1 =
+    "# This file is managed by Vivswan/repo-platform.\n" +
+    "# Local edits may be replaced during template updates.\n";
+
+  test("a sync-managed file without the managed header fails", () => {
+    const { exitCode, stderr } = runValidator({ ".yamllint": "extends: default\n" });
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain(".yamllint: does not open with the managed header");
+  });
+
+  test("a sync-managed file opening with the managed header passes", () => {
+    const { exitCode, stderr } = runValidator({ ".yamllint": `${C1}extends: default\n` });
+    expect(stderr).toBe("");
+    expect(exitCode).toBe(0);
+  });
+
+  test("another owner's header does not satisfy the pinned owner", () => {
+    const { exitCode, stderr } = runValidator({
+      ".yamllint": "# This file is managed by attacker/repo-platform.\nextends: default\n",
+    });
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain(".yamllint: does not open with the managed header");
+  });
+
+  test("a header buried past the opening lines does not count", () => {
+    const { exitCode, stderr } = runValidator({
+      ".yamllint": `${"# filler\n".repeat(10)}${C1}extends: default\n`,
+    });
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain(".yamllint: does not open with the managed header");
+  });
+
+  test("a split file carries the local-section marker exactly once", () => {
+    const marker = "# repo-platform:local-section\n";
+    const missing = runValidator({ ".editorconfig": "root = true\n" });
+    expect(missing.exitCode).toBe(1);
+    expect(missing.stderr).toContain(".editorconfig: the 'repo-platform:local-section' marker");
+    const once = runValidator({ ".editorconfig": `root = true\n${marker}` });
+    expect(once.stderr).toBe("");
+    expect(once.exitCode).toBe(0);
+    const twice = runValidator({ ".editorconfig": `root = true\n${marker}${marker}` });
+    expect(twice.exitCode).toBe(1);
+    expect(twice.stderr).toContain("appears 2 times");
+  });
+
+  test("CODE_OF_CONDUCT.md needs the header only on public renders", () => {
+    const coc = { "CODE_OF_CONDUCT.md": "# Contributor Covenant Code of Conduct\n" };
+    const publicRender = runValidator(coc);
+    expect(publicRender.exitCode).toBe(1);
+    expect(publicRender.stderr).toContain("CODE_OF_CONDUCT.md: does not open");
+    // A private render never gets the managed file, so a repo-authored one
+    // is its own business.
+    const privateRender = runValidator({
+      ...coc,
+      ".copier-answers.yml": `${BASELINE[".copier-answers.yml"]}private: true\n`,
+      ".github/workflows/ci.yml": BASELINE[".github/workflows/ci.yml"]
+        .replace("  typography:", "  base-checks:")
+        .replace("needs: [typography]", "needs: [base-checks]")
+        .replace(
+          "      - run: echo ok",
+          "      - uses: Vivswan/repo-platform/actions/check-typography@main",
+        ),
+    });
+    expect(privateRender.stderr).toBe("");
+    expect(privateRender.exitCode).toBe(0);
+  });
+
+  test("LICENSE.md needs the marker unless custom-license owns licensing", () => {
+    const fleet = runValidator({ "LICENSE.md": "# License\n" });
+    expect(fleet.exitCode).toBe(1);
+    expect(fleet.stderr).toContain("LICENSE.md: the 'repo-platform:local-section' marker");
+    const custom = runValidator({
+      "LICENSE.md": "# My own license\n",
+      ".repo-platform.yml": `${BASELINE[".repo-platform.yml"]}`.replace(
+        "modules: [uv]",
+        "modules: [uv, custom-license]",
+      ),
+    });
+    expect(custom.stderr).toBe("");
+    expect(custom.exitCode).toBe(0);
+  });
+
+  test("a selected module's managed workflow needs the header", () => {
+    const bunRender = {
+      ".repo-platform.yml": BASELINE[".repo-platform.yml"].replace(
+        "modules: [uv]",
+        "modules: [bun]",
+      ),
+      ".bun-version": "1.3.14\n",
+    };
+    const bare = runValidator({
+      ...bunRender,
+      ".github/workflows/dependabot-bun-lockfile.yml": "name: x\non: [push]\n",
+    });
+    expect(bare.exitCode).toBe(1);
+    expect(bare.stderr).toContain(".github/workflows/dependabot-bun-lockfile.yml: does not open");
+    const headed = runValidator({
+      ...bunRender,
+      ".github/workflows/dependabot-bun-lockfile.yml": `${C1}name: x\non: [push]\n`,
+    });
+    expect(headed.stderr).toBe("");
+    expect(headed.exitCode).toBe(0);
+  });
+
+  test("an unselected module's managed workflow is not required to declare", () => {
+    const { exitCode, stderr } = runValidator({
+      ".github/workflows/dependabot-bun-lockfile.yml": "name: x\non: [push]\n",
+    });
+    expect(stderr).toBe("");
+    expect(exitCode).toBe(0);
+  });
+
+  test("self mode skips ownership declarations", () => {
+    const { exitCode, stderr } = runValidator({ ".yamllint": "extends: default\n" }, ["--self"]);
+    expect(stderr).toBe("");
+    expect(exitCode).toBe(0);
   });
 });

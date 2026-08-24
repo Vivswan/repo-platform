@@ -16,6 +16,8 @@ import {
   markerLines,
   mdMarkers,
   moduleChoices,
+  moduleHeaderFiles,
+  moduleHeaderFilesRegion,
   newRepoModuleRoster,
   type PagesManifest,
   pagesBuildCommand,
@@ -29,6 +31,7 @@ import {
   pinFileContent,
   readmeModuleRoster,
   reservedLabelNames,
+  skipIfExistsMatchers,
   spliceInlineRegion,
   spliceRegion,
   strayPinFiles,
@@ -577,5 +580,98 @@ describe("toolchain pins", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("module header files", () => {
+  const HEADER =
+    "# This file is managed by {{ github_username }}/repo-platform.\n" +
+    "# Local edits may be replaced during template updates.\n";
+
+  test("skipIfExistsMatchers keeps * within one path segment and escapes literals", () => {
+    const [matcher] = skipIfExistsMatchers("_skip_if_exists:\n  - .github/ISSUE_TEMPLATE/*.yml\n");
+    expect(matcher.test(".github/ISSUE_TEMPLATE/bug_report.yml")).toBe(true);
+    expect(matcher.test(".github/ISSUE_TEMPLATE/sub/deep.yml")).toBe(false);
+    expect(matcher.test(".github/ISSUE_TEMPLATEx/bug_report,yml")).toBe(false);
+    expect(() => skipIfExistsMatchers("modules: []\n")).toThrow("_skip_if_exists");
+  });
+
+  test("moduleHeaderFiles enrols header-opening files and skips the rest", () => {
+    const dir = mkdtempSync(join(tmpdir(), "headers-"));
+    try {
+      mkdirSync(join(dir, "bun", ".github", "workflows"), { recursive: true });
+      mkdirSync(join(dir, "bun", "fragments"));
+      writeFileSync(join(dir, "bun", "module.yml"), "description: bun\n");
+      writeFileSync(
+        join(dir, "bun", ".github", "workflows", "managed.yml.jinja"),
+        `${HEADER}name: Managed\n`,
+      );
+      // No header: a repo-owned starter stays out.
+      writeFileSync(join(dir, "bun", ".github", "workflows", "starter.yml.jinja"), "name: S\n");
+      // Split file: the local-section marker hands it to the marker table.
+      writeFileSync(
+        join(dir, "bun", "SPLIT.md.jinja"),
+        `${HEADER}body\n<!-- repo-platform:local-section -->\n`,
+      );
+      // Filename-gated: module selection alone does not render it.
+      writeFileSync(
+        join(dir, "bun", "{% if not private %}gated.yml{% endif %}.jinja"),
+        `${HEADER}name: G\n`,
+      );
+      // Fragments never render as their own files.
+      writeFileSync(join(dir, "bun", "fragments", "agents-toolchain.jinja"), `${HEADER}- x\n`);
+      expect(moduleHeaderFiles([manifest("bun")], dir, [])).toEqual({
+        bun: [".github/workflows/managed.yml"],
+      });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a _skip_if_exists starter carrying the header throws", () => {
+    const dir = mkdtempSync(join(tmpdir(), "headers-"));
+    try {
+      mkdirSync(join(dir, "bun", ".github", "workflows"), { recursive: true });
+      writeFileSync(
+        join(dir, "bun", ".github", "workflows", "checks.yml.jinja"),
+        `${HEADER}name: Checks\n`,
+      );
+      expect(() =>
+        moduleHeaderFiles(
+          [manifest("bun")],
+          dir,
+          skipIfExistsMatchers("_skip_if_exists:\n  - .github/workflows/checks.yml\n"),
+        ),
+      ).toThrow("_skip_if_exists starter");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("an empty table throws - the managed module workflows must enrol", () => {
+    const dir = mkdtempSync(join(tmpdir(), "headers-"));
+    try {
+      mkdirSync(join(dir, "bun"));
+      writeFileSync(join(dir, "bun", "module.yml"), "description: bun\n");
+      expect(() => moduleHeaderFiles([manifest("bun")], dir, [])).toThrow(
+        "MODULE_HEADER_FILES record would be empty",
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("moduleHeaderFilesRegion renders the record with as-needed key quoting", () => {
+    expect(
+      moduleHeaderFilesRegion({
+        bun: [".github/workflows/a.yml"],
+        "release-please": [".github/workflows/release.yml"],
+      }),
+    ).toEqual([
+      "const MODULE_HEADER_FILES: Record<string, string[]> = {",
+      '  bun: [".github/workflows/a.yml"],',
+      '  "release-please": [".github/workflows/release.yml"],',
+      "};",
+    ]);
   });
 });

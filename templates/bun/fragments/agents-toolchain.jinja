@@ -1,2 +1,3 @@
 - Runtime and package manager: bun (`bun install`, `bun test`, `bun run <script>`)
 - See `package.json` scripts for the available commands.
+- `.bun-version` pins the toolchain and is managed by the template: sync overwrites it, so version overrides belong in the repo-owned workflows' explicit version inputs.
