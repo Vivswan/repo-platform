@@ -79,12 +79,15 @@ describe("wait_for_build.ts", () => {
   test("the production cadence stays 30 attempts x 10 s (tests shrink only the delay)", () => {
     // The timeout warnings promise "after 5 minutes"; pin the constants
     // that arithmetic depends on, since no test can wait it out. The
-    // per-call network deadline is pinned too: unbounded probes hang past
-    // the warning path on a stalled origin.
+    // wall-clock deadline must stay the attempts-x-delay product (probe
+    // time counts against it), and the per-call network deadline is
+    // pinned too: unbounded probes hang past the warning on a stalled
+    // origin.
     const source = readFileSync(script, "utf-8");
     expect(source).toContain("const ATTEMPTS = 30;");
     expect(source).toContain('Number(env("WAIT_DELAY_MS", "10000"))');
     expect(source).toContain('Number(env("PROBE_TIMEOUT_MS", "15000"))');
+    expect(source).toContain("const DEADLINE_MS = ATTEMPTS * DELAY_MS;");
   });
 
   test("rejects a missing or unknown mode", () => {
@@ -128,10 +131,14 @@ describe("wait_for_build.ts", () => {
     expect(r.output).toContain("templates/v1.2.3 exists.");
   });
 
-  test("tag mode warns and exits green after the attempts run out", () => {
+  test("tag mode warns and exits green when the tag never appears", () => {
+    // The warning is deadline-driven: probe time counts against the wall
+    // clock, so with real (stub) probes the deadline lands before the
+    // attempt cap - the count just proves polling actually retried.
     const r = run(["tag"], { env: { VERSION: "v1.2.3", GIT_TAG_AFTER: "99" } });
     expect(r.exitCode).toBe(0);
-    expect(r.attempts).toBe(30);
+    expect(r.attempts).toBeGreaterThanOrEqual(2);
+    expect(r.attempts).toBeLessThanOrEqual(30);
     expect(r.output).toContain("::warning::templates/v1.2.3 is still missing after 5 minutes");
   });
 
@@ -191,14 +198,19 @@ describe("wait_for_build.ts", () => {
     expect(r.output).toContain("could not read main's HEAD sha");
   });
 
-  test("tag mode: a stalled origin burns the probe deadline and reaches the warning path", () => {
-    // Unbounded, a hung ls-remote would sit until the job-level kill; the
-    // probe timeout turns each stall into a failed attempt.
+  test("tag mode: a stalled origin burns the probe deadline and warns on the wall clock", () => {
+    // Unbounded, each hung ls-remote would sit its full 5 s (GIT_SLEEP)
+    // and the first probe alone would blow the elapsed bound below; the
+    // probe timeout kills it at 100 ms and the wall-clock deadline
+    // (30 x WAIT_DELAY_MS = 300 ms) then ends the wait, probe time
+    // included.
+    const start = Date.now();
     const r = run(["tag"], {
       env: { VERSION: "v1.2.3", GIT_SLEEP: "5", PROBE_TIMEOUT_MS: "100" },
     });
     expect(r.exitCode).toBe(0);
     expect(r.output).toContain("::warning::templates/v1.2.3 is still missing after 5 minutes");
+    expect(Date.now() - start).toBeLessThan(4000);
   }, 20_000);
 
   test("staging mode: a stalled HEAD read exits loudly instead of hanging", () => {

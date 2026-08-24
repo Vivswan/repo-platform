@@ -28,9 +28,12 @@ const ATTEMPTS = 30;
 const DELAY_MS = Number(env("WAIT_DELAY_MS", "10000"));
 /** Hard deadline for each network call: generous next to a healthy
  * ls-remote or API hit, small enough that a stalled connection burns one
- * probe and still reaches the timeout warning (at worst ATTEMPTS x
- * (probe + delay)) instead of hanging into the job-level kill. */
+ * probe, not the run (the wall-clock deadline below owns the total). */
 const PROBE_TIMEOUT_MS = Number(env("PROBE_TIMEOUT_MS", "15000"));
+/** The warning's promised wall clock, the nominal poll cadence: probe
+ * time counts against it, so stalled probes cannot stretch "after 5
+ * minutes" toward the job-level kill - they just leave fewer attempts. */
+const DEADLINE_MS = ATTEMPTS * DELAY_MS;
 
 /** Prompt-disabling env for the git network calls (check_migrations.ts's
  * networkGit pattern): empty GIT_ASKPASS/SSH_ASKPASS fall through to the
@@ -38,18 +41,21 @@ const PROBE_TIMEOUT_MS = Number(env("PROBE_TIMEOUT_MS", "15000"));
  * GIT_ASKPASS would otherwise intercept an auth failure and hang. */
 const GIT_NO_PROMPT_ENV = { GIT_TERMINAL_PROMPT: "0", GIT_ASKPASS: "", SSH_ASKPASS: "" };
 
-/** Poll until the probe succeeds (it prints its own success message) or
- * the attempts run out; a timeout warns and returns - the caller's later
- * guards own the hard failure. */
+/** Poll until the probe succeeds (it prints its own success message), the
+ * wall-clock deadline passes, or the attempts run out; a timeout warns
+ * and returns - the caller's later guards own the hard failure. */
 async function waitFor(
   probe: () => boolean,
   waitingMessage: string,
   timeoutWarning: string,
 ): Promise<void> {
+  const deadline = Date.now() + DEADLINE_MS;
   for (let attempt = 0; attempt < ATTEMPTS; attempt++) {
     if (probe()) return;
+    const left = deadline - Date.now();
+    if (left <= 0) break;
     console.log(waitingMessage);
-    await Bun.sleep(DELAY_MS);
+    await Bun.sleep(Math.min(DELAY_MS, left));
   }
   warning(timeoutWarning);
 }
