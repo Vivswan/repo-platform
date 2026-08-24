@@ -308,6 +308,19 @@ describe("fileIssue", () => {
     expect(calls.some((c) => c[0] === "issue" && c[1] === "edit")).toBe(true);
   });
 
+  test("an unparseable create URL skips assignment without failing the filing", async () => {
+    const calls: string[][] = [];
+    const run: GhRunner = async (args) => {
+      calls.push(args);
+      if (args[0] === "label" && args[1] === "list") return JSON.stringify([{ name: "l" }]);
+      if (args[0] === "issue" && args[1] === "list") return "[]";
+      if (args[0] === "issue" && args[1] === "create") return "not a url\n";
+      return "";
+    };
+    expect(await fileIssue(run, "o/r", "body", "fuzz-nightly", "t")).toBeUndefined();
+    expect(calls.some((c) => c[0] === "issue" && c[1] === "edit")).toBe(false);
+  });
+
   test("returns the created issue number (parsed from gh's create URL)", async () => {
     const { run } = fakeGh(undefined); // fakeGh's create returns .../issues/7
     expect(await fileIssue(run, "o/r", "body", "fuzz-nightly", "t")).toBe(7);

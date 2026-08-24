@@ -399,6 +399,14 @@ export async function fileIssue(
   const number = issueNumberFromUrl(url);
   if (number !== undefined) {
     await assignOwner(run, repo, number);
+  } else {
+    // Same best-effort rule as a failed assignment: the filing succeeded,
+    // so an unparseable create URL must not become a failure - but it must
+    // not be silent either (the issue stays unassigned and the caller's
+    // issue-number output stays empty).
+    console.log(
+      "::notice::could not parse the created issue's number from gh's create URL; owner assignment skipped",
+    );
   }
   return number;
 }

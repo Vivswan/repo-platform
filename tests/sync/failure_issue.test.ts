@@ -147,8 +147,16 @@ describe("failure_issue.ts", () => {
     // the target can assign it later - creation is the only moment.
     const r = run("deliver", { failures: oneFailure });
     expect(r.exitCode).toBe(0);
+    // The create must ask gh for the bare number (the stub answers 31) and
+    // the lookup jq must extract the assignee count - both pinned via the
+    // recorded argv, since the stub does not evaluate jq itself.
+    expect(r.calls).toContain("--jq .number");
+    expect(r.calls).toContain("assignees | length");
     expect(r.calls).toContain(`repos/${SLUG}/issues/31/assignees --method POST`);
     expect(r.calls).toContain("assignees[]=Vivswan");
+    // The number gh returned stays out of the public log, like the slug.
+    expect(r.output).not.toContain("31");
+    expect(r.output).not.toContain("issues/");
     expect(r.output).not.toContain("hidden-server");
   });
 
@@ -179,6 +187,7 @@ describe("failure_issue.ts", () => {
     expect(r.exitCode).toBe(0);
     expect(r.calls).toContain(`repos/${SLUG}/issues/17/assignees --method POST`);
     expect(r.calls).toContain("assignees[]=Vivswan");
+    expect(r.output).not.toContain("17");
   });
 
   test("deliver leaves a reused issue's existing assignees alone", () => {
