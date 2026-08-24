@@ -14,11 +14,10 @@
 // an ambiguous match errors out naming only the hint.
 //
 // Env in: TARGET_INPUT (slug, or hint when REDACT_NAME=true), REDACT_NAME,
-// VERIFY, PAT, GITHUB_RUN_ID, GITHUB_ENV, GITHUB_OUTPUT, RUNNER_TEMP.
+// VERIFY, PAT, GITHUB_RUN_ID, GITHUB_ENV, GITHUB_OUTPUT.
 // Out: TARGET + TARGET_DISPLAY via GITHUB_ENV, repo= via GITHUB_OUTPUT.
 
-import { appendFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { appendFileSync } from "node:fs";
 import { addMask, env, error, requireEnv, setOutput } from "../shared/gha.ts";
 import { discoverWritableRepos } from "./discovery.ts";
 import { verifyTag } from "./redact.ts";
@@ -53,12 +52,8 @@ const runId = requireEnv("GITHUB_RUN_ID");
 
 // Every writable repo, regardless of owner: repos.yml accepts explicit
 // entries under other owners, so the search must not assume the fleet
-// owner. The payload stays in a file - never printed.
+// owner. The candidate slugs are never printed - any may be private.
 const candidates = discoverWritableRepos("resolve_private_repo: user/repos response");
-writeFileSync(
-  join(requireEnv("RUNNER_TEMP"), "resolve-candidates.json"),
-  JSON.stringify(candidates.map((repo) => repo.full_name)),
-);
 
 const matches = candidates
   .map((repo) => repo.full_name)
