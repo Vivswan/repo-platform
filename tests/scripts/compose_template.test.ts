@@ -9,6 +9,7 @@ import { describe, expect, test } from "bun:test";
 import { parse as parseYaml } from "yaml";
 import {
   agentsToolchainErrors,
+  applyToolchainSetup,
   type Contribution,
   codeqlGroups,
   codeqlSlug,
@@ -215,6 +216,50 @@ describe("gateJobsParityErrors", () => {
     const errors = gateJobsParityErrors("pr-title", ["pr-title", "ghost"], fragment);
     expect(errors).toHaveLength(1);
     expect(errors[0]).toContain("'ghost'");
+  });
+});
+
+describe("applyToolchainSetup", () => {
+  const fragmentMap = (entries: [ModuleManifest, string][][]) => {
+    const map = new Map<string, [ModuleManifest, Buffer][]>();
+    const names = ["toolchain-setup", "auto-format", "copilot-setup-steps"];
+    entries.forEach((list, index) => {
+      if (list.length > 0) {
+        map.set(
+          names[index],
+          list.map(([m, body]) => [m, Buffer.from(body)]),
+        );
+      }
+    });
+    return map;
+  };
+
+  test("the setup steps are prepended to both targets and the entry is consumed", () => {
+    const map = fragmentMap([
+      [[BUN, "\n- setup\n"]],
+      [
+        [BUN, "- format\n"],
+        [UV, "- ruff\n"],
+      ],
+      [[BUN, "- install\n"]],
+    ]);
+    expect(applyToolchainSetup(map)).toEqual([]);
+    expect(map.has("toolchain-setup")).toBe(false);
+    const bodies = (anchor: string) =>
+      (map.get(anchor) ?? []).map(([m, body]) => [m.module, body.toString("utf-8")]);
+    expect(bodies("auto-format")).toEqual([
+      ["bun", "\n- setup\n- format\n"],
+      ["uv", "- ruff\n"],
+    ]);
+    expect(bodies("copilot-setup-steps")).toEqual([["bun", "\n- setup\n- install\n"]]);
+  });
+
+  test("setup steps without both target fragments error instead of half-applying", () => {
+    const map = fragmentMap([[[BUN, "- setup\n"]], [[BUN, "- format\n"]], []]);
+    const errors = applyToolchainSetup(map);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain("templates/bun/fragments/toolchain-setup.jinja");
+    expect(errors[0]).toContain("copilot-setup-steps");
   });
 });
 

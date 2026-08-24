@@ -23,6 +23,10 @@
 //   false (with a plain `#}` the skeleton newline terminates the block, so
 //   an all-conditional line list would leave it dangling when the last
 //   gate is off).
+// - templates/<module>/fragments/toolchain-setup.jinja is no anchor's
+//   fragment: it carries the module's toolchain setup steps, prepended by
+//   the composer to the module's own auto-format and copilot-setup-steps
+//   contributions so the two spliced copies can never drift apart.
 // - Data anchors (DATA_ANCHORS below) are filled from manifest data instead
 //   of fragment files, so the composed output carries no marker comments and
 //   list-shaped content cannot drift from the manifests. The sharing rule: a
@@ -397,6 +401,35 @@ export function renderedSeparationErrors(
 
 type GeneratorContext = { manifests: ModuleManifest[]; gateOf: GateOf };
 
+/** The non-anchor fragment name carrying a module's toolchain setup steps
+ *  and the two anchors those steps are prepended to. */
+const TOOLCHAIN_SETUP_FRAGMENT = "toolchain-setup";
+const TOOLCHAIN_SETUP_TARGETS = ["auto-format", "copilot-setup-steps"];
+
+/** Prepend each module's toolchain-setup fragment to its own auto-format
+ *  and copilot-setup-steps contributions (in place), then drop the
+ *  toolchain-setup entry - it is generator input, never spliced itself. A
+ *  module carrying setup steps without both target fragments errors: the
+ *  steps would silently reach only one (or neither) of the workflows. */
+export function applyToolchainSetup(fragments: Map<string, [ModuleManifest, Buffer][]>): string[] {
+  const errors: string[] = [];
+  for (const [manifest, setup] of fragments.get(TOOLCHAIN_SETUP_FRAGMENT) ?? []) {
+    for (const target of TOOLCHAIN_SETUP_TARGETS) {
+      const entry = (fragments.get(target) ?? []).find(([m]) => m.module === manifest.module);
+      if (!entry) {
+        errors.push(
+          `templates/${manifest.module}/${FRAGMENTS_DIR}/${TOOLCHAIN_SETUP_FRAGMENT}${JINJA_SUFFIX}: ` +
+            `the module ships no ${FRAGMENTS_DIR}/${target}${JINJA_SUFFIX} to prepend the setup ` +
+            "steps to - add that fragment or inline the steps and delete this one",
+        );
+        continue;
+      }
+      entry[1] = Buffer.concat([setup, entry[1]]);
+    }
+  }
+  fragments.delete(TOOLCHAIN_SETUP_FRAGMENT);
+  return errors;
+}
 // Discriminated on `kind` so the shapes stay honest: only a coexist anchor
 // can (and must) say which modules the generator covers, and only a consume
 // generator ever sees fragment bytes.
@@ -1167,6 +1200,8 @@ export function build(): Map<string, Entry> {
       Buffer.from("{% endif %}"),
     ]),
   });
+
+  errors.push(...applyToolchainSetup(fragments));
 
   const agentsToolchainModules = new Set(
     (fragments.get("agents-toolchain") ?? []).map(([manifest]) => manifest.module),
