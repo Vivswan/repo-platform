@@ -48,7 +48,12 @@ case "$method" in
           exit 1
         fi
         ;;
-      repos/${SLUG}/issues) echo "31" ;;
+      repos/${SLUG}/issues)
+        echo "31"
+        # vanish: the NEXT spawn (the assignees POST) finds no gh at all,
+        # so Bun.spawnSync throws instead of returning a nonzero exit.
+        if [ "\${GH_FAIL:-}" = "vanish" ]; then rm -- "$0"; fi
+        ;;
     esac
     ;;
 esac
@@ -143,8 +148,8 @@ describe("failure_issue.ts", () => {
   });
 
   test("deliver assigns the target's owner to the created issue", () => {
-    // A workflow-token issue fires no issues:opened event, so nothing on
-    // the target can assign it later - creation is the only moment.
+    // Creation-time assignment guarantees the owner regardless of whether
+    // the target has automation listening for the PAT-fired issues:opened.
     const r = run("deliver", { failures: oneFailure });
     expect(r.exitCode).toBe(0);
     // The create must ask gh for the bare number (the stub answers 31) and
@@ -169,6 +174,17 @@ describe("failure_issue.ts", () => {
     expect(r.output).not.toContain("hidden-server");
     expect(r.output).not.toContain("Vivswan");
     expect(r.output).not.toContain("Validation Failed");
+  });
+
+  test("a throwing assignment spawn cannot unwind a successful delivery", () => {
+    // Not a nonzero exit: gh vanishes after the create, so Bun.spawnSync
+    // itself throws on the assignees call - the catch must turn that into
+    // the same notice and keep the exit at 0.
+    const r = run("deliver", { failures: oneFailure, fail: "vanish" });
+    expect(r.exitCode).toBe(0);
+    expect(r.output).toContain("::notice::could not assign the repository owner");
+    expect(r.output).toContain("delivered");
+    expect(r.output).not.toContain("hidden-server");
   });
 
   test("deliver replaces and reopens an existing issue", () => {

@@ -124,15 +124,17 @@ function findIssue(): string | null {
   return list.stdout.replace(/\n$/, "");
 }
 
-// Assign the target's owner to the failure-report issue: an issue created
-// with a workflow token fires no issues:opened event, so no automation on
-// the target can catch it - assignment has to happen at creation, here.
-// The owner login is the target slug's first segment (a personal-account
-// fleet: a user repo's owner is assignable). Best-effort by constraint: an
-// org-owned target's owner is an org and not assignable, and delivery must
-// not gain a failure path over assignment, so a failure logs one
-// public-safe notice (no login, no issue number: the target's owner is
-// half the private slug) and the delivery stands.
+// Assign the target's owner to the failure-report issue at creation.
+// This delivery runs with the fleet PAT, whose issues CAN fire
+// issues:opened (unlike GITHUB_TOKEN) - but whether the target has any
+// automation listening is the target's business, so assigning here is the
+// only spot that guarantees the owner regardless of token or target
+// modules. The owner login is the target slug's first segment (a
+// personal-account fleet: a user repo's owner is assignable). Best-effort
+// by constraint: an org-owned target's owner is an org and not
+// assignable, and delivery must not gain a failure path over assignment,
+// so a failure logs one public-safe notice (no login, no issue number:
+// the target's owner is half the private slug) and the delivery stands.
 function assignOwner(issueNumber: string): void {
   const owner = target.split("/")[0];
   // try/catch, not just the exit-code check: Bun.spawnSync itself can

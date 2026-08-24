@@ -4,8 +4,10 @@ description: >-
   stream - fuzz or plain CI - (report mode), or comments on and closes
   every open labeled issue after a green run (resolve mode). Report mode
   assigns the repository owner at creation (best-effort: an unassignable
-  owner never fails the filing), because a token-created issue fires no
-  issues:opened event for anything downstream to catch. With an
+  owner never fails the filing) - creation-time assignment guarantees the
+  owner regardless of token, and an issue created with the default
+  GITHUB_TOKEN additionally fires no issues:opened event for anything
+  downstream to catch. With an
   artifacts-dir the issue body is built from nightly-fuzz failure reports
   (the contract is documented in repo-platform's docs/fuzzer.md); without
   one it is a generic nightly-failure report (workflow, commit, run link).
