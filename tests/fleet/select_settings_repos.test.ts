@@ -69,10 +69,11 @@ describe("select_settings_repos.ts", () => {
         '    echo "HTTP 404 from stub" >&2',
         "    exit 1",
         "    ;;",
-        // Error text with the slug in a URL plus the bare name: every
-        // retry line and the final warning must scrub both to the hint.
+        // Error text with the slug in a URL, the bare name, and a case
+        // variant: every retry line and the final warning must scrub all
+        // three to the hint.
         "  repos/Vivswan/hidden-deadapi/contents/.github/settings.yml)",
-        '    echo "HTTP 502: https://api.github.com/repos/Vivswan/hidden-deadapi bad gateway; hidden-deadapi unreachable" >&2',
+        '    echo "HTTP 502: https://api.github.com/repos/Vivswan/hidden-deadapi bad gateway; HIDDEN-DEADAPI unreachable" >&2',
         "    exit 1",
         "    ;;",
         "  repos/*/contents/.repo-platform.yml) exit 0 ;;",
@@ -255,19 +256,20 @@ describe("select_settings_repos.ts", () => {
 
   test("a discovered private repo never leaks its slug anywhere public", () => {
     // Job log, GITHUB_OUTPUT (the matrix), and the step summary are all
-    // world-readable; the hint is the only permitted spelling.
+    // world-readable; the hint is the only permitted spelling, in any
+    // casing (the stub plants an uppercase variant).
     for (const channel of [main.stdout, main.stderr, main.output, main.summary]) {
-      expect(channel).not.toContain("hidden-server");
-      expect(channel).not.toContain("hidden-nohome");
-      expect(channel).not.toContain("hidden-deadapi");
+      expect(channel.toLowerCase()).not.toContain("hidden-server");
+      expect(channel.toLowerCase()).not.toContain("hidden-nohome");
+      expect(channel.toLowerCase()).not.toContain("hidden-deadapi");
     }
     expect(main.output).toContain("h**-s**r");
   });
 
   test("a redacted repo's persistent probe failure warns with the scrubbed detail", () => {
-    // The stub's 502 text carries the slug inside a URL and the bare name
-    // after it; the retry lines (checked by the leak test above) and this
-    // warning must render both as the hint.
+    // The stub's 502 text carries the slug inside a URL and an uppercase
+    // bare-name variant after it; the retry lines (checked by the leak
+    // test above) and this warning must render both as the hint.
     const warning = main.stdout.split("\n").find((line) => line.startsWith("::warning::h**-d**i"));
     expect(warning).toBeDefined();
     expect(warning).toContain("settings.yml check");

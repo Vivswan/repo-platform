@@ -40,9 +40,9 @@ describe("select_sync_repos.ts", () => {
         "    ;;",
         // A redacted repo whose adoption check fails hard, with the slug
         // and bare name woven through the error text (a URL, a sentence,
-        // a repeat): the selector must scrub them all before printing.
+        // a repeat, a case variant): the selector must scrub them all.
         "  repos/Vivswan/hidden-blocked/contents/.repo-platform.yml)",
-        '    echo "HTTP 500: https://api.github.com/repos/Vivswan/hidden-blocked failed; hidden-blocked unavailable, retry hidden-blocked later" >&2',
+        '    echo "HTTP 500: https://api.github.com/repos/Vivswan/hidden-blocked failed; hidden-blocked unavailable, retry HIDDEN-BLOCKED later" >&2',
         "    exit 1",
         "    ;;",
         "  repos/*/contents/.repo-platform.yml) exit 0 ;;",
@@ -249,9 +249,9 @@ describe("select_sync_repos.ts", () => {
   });
 
   test("a redacted repo's hard adoption failure prints only the hint, wherever the slug hid", () => {
-    // The stub's error text carries the slug in a URL and the bare name
-    // twice more; the failure must surface (exit 1) with every spelling
-    // scrubbed to the hint.
+    // The stub's error text carries the slug in a URL, the bare name, and
+    // an uppercase variant; the failure must surface (exit 1) with every
+    // spelling scrubbed to the hint.
     const eventFile = join(root, "hidden-blocked-event.json");
     writeFileSync(eventFile, JSON.stringify({ inputs: { repo: "Vivswan/hidden-blocked" } }));
     const r = run("hidden-blocked", { GITHUB_EVENT_PATH: eventFile }, [
@@ -262,7 +262,7 @@ describe("select_sync_repos.ts", () => {
     expect(r.stdout).toContain("adoption check failed for h**-b**d");
     expect(r.stdout).toContain("https://api.github.com/repos/h**-b**d failed");
     for (const channel of [r.stdout, r.stderr, r.output]) {
-      expect(channel).not.toContain("hidden-blocked");
+      expect(channel.toLowerCase()).not.toContain("hidden-blocked");
     }
   });
 });

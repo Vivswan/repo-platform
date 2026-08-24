@@ -90,16 +90,26 @@ export function runStage(command: string[], outFile: string): void {
   writeFileSync(outFile, proc.stdout);
 }
 
+// Case-insensitive replaceAll: GitHub identity is case-insensitive, so a
+// scrub keyed to one casing must catch every other. The needle is
+// regex-escaped and the replacement is a thunk, so neither is ever
+// interpreted as pattern or substitution syntax.
+function replaceAllFoldingCase(text: string, needle: string, replacement: string): string {
+  const escaped = needle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return text.replace(new RegExp(escaped, "gi"), () => replacement);
+}
+
 /** Scrub a captured error detail of a redacted repo's identity before it
  * reaches a public log: every occurrence of the slug, then of the bare
- * name, becomes the display. A no-op when the display IS the slug (an
- * unredacted row) - the bare-name pass there would EXPAND bare names into
- * slugs instead of hiding anything. Substring-based and case-sensitive on
- * purpose: a redacted slug comes from discovery's API-canonical
- * full_name, the casing gh's own error text echoes back. */
+ * name, in any casing, becomes the display. A no-op when the display IS
+ * the slug (an unredacted row) - the bare-name pass there would EXPAND
+ * bare names into slugs instead of hiding anything. Substring-based on
+ * purpose: garbling an innocent embedding is cosmetic, printing a private
+ * name is not. */
 export function scrubSlug(detail: string, slug: string, display: string): string {
   if (display === slug) return detail;
-  return detail.replaceAll(slug, display).replaceAll(slug.split("/").pop() ?? slug, display);
+  const scrubbed = replaceAllFoldingCase(detail, slug, display);
+  return replaceAllFoldingCase(scrubbed, slug.split("/").pop() ?? slug, display);
 }
 
 /** Skip notice for a repo the fleet token cannot push to; `code` is the

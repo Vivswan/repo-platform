@@ -42,23 +42,28 @@ describe("scrubSlug", () => {
     );
   });
 
-  test("a mixed-case canonical slug is scrubbed in its own casing", () => {
+  test("every casing of the slug and bare name is scrubbed", () => {
+    // GitHub identity is case-insensitive: error text may echo a casing
+    // other than discovery's canonical full_name (a redirect, a tool that
+    // lowercases URLs), and each variant is as private as the original.
     const scrubbed = scrubSlug(
-      "GET https://api.github.com/repos/Other/Shared-Private: 502; Shared-Private is unreachable",
+      "GET https://api.github.com/repos/other/shared-private: 502; SHARED-PRIVATE is unreachable, Shared-Private retried",
       "Other/Shared-Private",
       "S**-P**e",
     );
     expect(scrubbed).toBe(
-      "GET https://api.github.com/repos/S**-P**e: 502; S**-P**e is unreachable",
+      "GET https://api.github.com/repos/S**-P**e: 502; S**-P**e is unreachable, S**-P**e retried",
     );
   });
 
-  test("scrubbing is case-sensitive by design: only the API-canonical casing is rewritten", () => {
-    // Redacted slugs come from discovery's full_name, and gh's error text
-    // echoes that exact casing back; other casings stay untouched here
-    // (the leg-side masker registers the case forms separately).
-    const detail = "cannot reach other/shared-private";
-    expect(scrubSlug(detail, "Other/Shared-Private", "S**-P**e")).toBe(detail);
+  test("regex metacharacters in a slug are treated literally", () => {
+    expect(
+      scrubSlug("cannot read Vivswan/dotted.repo today", "Vivswan/dotted.repo", "d**.r**"),
+    ).toBe("cannot read d**.r** today");
+    // The "." must not match arbitrary characters: an unrelated name one
+    // character apart stays untouched.
+    const near = "cannot read Vivswan/dottedXrepo today";
+    expect(scrubSlug(near, "Vivswan/dotted.repo", "d**.r**")).toBe(near);
   });
 
   test("a no-op when the display IS the slug: the bare name must not expand into the slug", () => {
