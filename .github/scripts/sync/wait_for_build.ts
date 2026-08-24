@@ -16,7 +16,8 @@
 //   nothing).
 //
 // Env: tag mode - VERSION; staging mode - GH_TOKEN, GITHUB_REPOSITORY.
-// WAIT_DELAY_MS shortens the poll interval for tests.
+// WAIT_DELAY_MS shortens the poll interval for tests, PROBE_TIMEOUT_MS the
+// per-call network deadline.
 
 import { z } from "zod";
 import { env, error, requireEnv, warning } from "../shared/gha.ts";
@@ -25,6 +26,17 @@ import { capture, mustCapture } from "../shared/proc.ts";
 
 const ATTEMPTS = 30;
 const DELAY_MS = Number(env("WAIT_DELAY_MS", "10000"));
+/** Hard deadline for each network call: generous next to a healthy
+ * ls-remote or API hit, small enough that a stalled connection burns one
+ * probe and still reaches the timeout warning (at worst ATTEMPTS x
+ * (probe + delay)) instead of hanging into the job-level kill. */
+const PROBE_TIMEOUT_MS = Number(env("PROBE_TIMEOUT_MS", "15000"));
+
+/** Prompt-disabling env for the git network calls (check_migrations.ts's
+ * networkGit pattern): empty GIT_ASKPASS/SSH_ASKPASS fall through to the
+ * terminal prompt, which GIT_TERMINAL_PROMPT=0 disables - a set
+ * GIT_ASKPASS would otherwise intercept an auth failure and hang. */
+const GIT_NO_PROMPT_ENV = { GIT_TERMINAL_PROMPT: "0", GIT_ASKPASS: "", SSH_ASKPASS: "" };
 
 /** Poll until the probe succeeds (it prints its own success message) or
  * the attempts run out; a timeout warns and returns - the caller's later
@@ -47,8 +59,19 @@ if (mode === "tag") {
   const tag = `templates/${requireEnv("VERSION")}`;
   await waitFor(
     () => {
-      if (capture(["git", "ls-remote", "--exit-code", "origin", `refs/tags/${tag}`]).exitCode !== 0)
-        return false;
+      const probe = capture(
+        [
+          "git",
+          "-c",
+          "credential.helper=",
+          "ls-remote",
+          "--exit-code",
+          "origin",
+          `refs/tags/${tag}`,
+        ],
+        { env: GIT_NO_PROMPT_ENV, timeoutMs: PROBE_TIMEOUT_MS },
+      );
+      if (probe.exitCode !== 0) return false;
       console.log(`${tag} exists.`);
       return true;
     },
@@ -57,7 +80,10 @@ if (mode === "tag") {
   );
 } else if (mode === "staging") {
   const repository = requireEnv("GITHUB_REPOSITORY");
-  const mainSha = mustCapture(["git", "ls-remote", "origin", "HEAD"]).split("\t")[0];
+  const mainSha = mustCapture(["git", "-c", "credential.helper=", "ls-remote", "origin", "HEAD"], {
+    env: GIT_NO_PROMPT_ENV,
+    timeoutMs: PROBE_TIMEOUT_MS,
+  }).split("\t")[0];
   if (!/^[0-9a-f]{40}$/.test(mainSha)) {
     error(`wait_for_build: could not read main's HEAD sha from origin (got "${mainSha}")`);
     process.exit(1);
@@ -67,12 +93,16 @@ if (mode === "tag") {
   });
   await waitFor(
     () => {
-      const runs = capture([
-        "gh",
-        "api",
-        `repos/${repository}/actions/workflows/build-branches.yml/runs?status=success&per_page=30`,
-      ]);
-      // A transient API failure reads as not-built-yet: keep polling.
+      const runs = capture(
+        [
+          "gh",
+          "api",
+          `repos/${repository}/actions/workflows/build-branches.yml/runs?status=success&per_page=30`,
+        ],
+        { timeoutMs: PROBE_TIMEOUT_MS },
+      );
+      // A transient API failure - a stalled call past its deadline
+      // included - reads as not-built-yet: keep polling.
       if (runs.exitCode !== 0) return false;
       const built = parseJsonWith(
         runsSchema,
@@ -90,6 +120,6 @@ if (mode === "tag") {
     `no successful Build Branches push- or schedule-event run found for main HEAD ${mainSha} after 5 minutes; staging-channel syncs may apply the previous staging tree. The weekly cron heals this on its next run.`,
   );
 } else {
-  console.error(`::error::usage: wait_for_build.ts <tag|staging> (got "${mode ?? ""}")`);
+  error(`usage: wait_for_build.ts <tag|staging> (got "${mode ?? ""}")`);
   process.exit(2);
 }

@@ -68,14 +68,23 @@ export function must(command: string[], options: RunOptions = {}): void {
 
 /** Run with stdout captured and stderr inherited; exits the process with
  * the command's code on failure. Returns stdout with trailing newlines
- * stripped (command-substitution semantics). */
+ * stripped (command-substitution semantics). A `timeoutMs` expiry is a
+ * failure like any other, except a line naming the deadline precedes the
+ * exit - a SIGKILLed child usually dies without printing anything. */
 export function mustCapture(command: string[], options: RunOptions = {}): string {
   const proc = Bun.spawnSync(command, {
     cwd: options.cwd,
     env: options.env ? { ...process.env, ...options.env } : undefined,
     stdout: "pipe",
     stderr: "inherit",
+    ...(options.timeoutMs !== undefined
+      ? { timeout: options.timeoutMs, killSignal: "SIGKILL" }
+      : {}),
   });
+  if (proc.exitedDueToTimeout === true) {
+    console.error(`command timed out after ${options.timeoutMs}ms: ${command.join(" ")}`);
+    process.exit(exitCodeOf(proc));
+  }
   if (proc.exitCode !== 0) process.exit(exitCodeOf(proc));
   return proc.stdout.toString().replace(/\n+$/, "");
 }

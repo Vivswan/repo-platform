@@ -8,14 +8,16 @@ const script = join(import.meta.dir, "../../.github/scripts/sync/wait_for_build.
 const MAIN_SHA = "a".repeat(40);
 
 // Stubs record every invocation to CALLS_LOG (\x1f between args, \x1e
-// between records). git: ls-remote HEAD prints GIT_HEAD; ls-remote
+// between records). git: sleeps GIT_SLEEP seconds first when set (the
+// stalled-origin case); ls-remote HEAD prints GIT_HEAD; ls-remote
 // --exit-code for a tag succeeds once the attempt counter reaches
 // GIT_TAG_AFTER. gh: serves the runs JSON from GH_RUNS_FILE, or exits 1
 // when GH_FAIL is set.
 const gitStub = `#!/usr/bin/env bash
 set -euo pipefail
 { printf '%s' "git"; for a in "$@"; do printf '\\x1f%s' "$a"; done; printf '\\x1e'; } >>"$CALLS_LOG"
-if [ "\${2:-}" = "--exit-code" ]; then
+if [ -n "\${GIT_SLEEP:-}" ]; then sleep "$GIT_SLEEP"; fi
+if printf '%s\\n' "$@" | grep -qxF -- '--exit-code'; then
   count=$(($(cat "$COUNT_FILE" 2>/dev/null || echo 0) + 1))
   echo "$count" >"$COUNT_FILE"
   [ "$count" -ge "\${GIT_TAG_AFTER:-1}" ] && exit 0
@@ -76,10 +78,13 @@ function run(args: string[], opts: Options = {}) {
 describe("wait_for_build.ts", () => {
   test("the production cadence stays 30 attempts x 10 s (tests shrink only the delay)", () => {
     // The timeout warnings promise "after 5 minutes"; pin the constants
-    // that arithmetic depends on, since no test can wait it out.
+    // that arithmetic depends on, since no test can wait it out. The
+    // per-call network deadline is pinned too: unbounded probes hang past
+    // the warning path on a stalled origin.
     const source = readFileSync(script, "utf-8");
     expect(source).toContain("const ATTEMPTS = 30;");
     expect(source).toContain('Number(env("WAIT_DELAY_MS", "10000"))');
+    expect(source).toContain('Number(env("PROBE_TIMEOUT_MS", "15000"))');
   });
 
   test("rejects a missing or unknown mode", () => {
@@ -101,7 +106,15 @@ describe("wait_for_build.ts", () => {
     const r = run(["tag"], { env: { VERSION: "v1.2.3" } });
     expect(r.exitCode).toBe(0);
     expect(r.calls).toEqual([
-      ["git", "ls-remote", "--exit-code", "origin", "refs/tags/templates/v1.2.3"],
+      [
+        "git",
+        "-c",
+        "credential.helper=",
+        "ls-remote",
+        "--exit-code",
+        "origin",
+        "refs/tags/templates/v1.2.3",
+      ],
     ]);
     expect(r.output).toContain("templates/v1.2.3 exists.");
     expect(r.output).not.toContain("waiting");
@@ -128,7 +141,7 @@ describe("wait_for_build.ts", () => {
     });
     expect(r.exitCode).toBe(0);
     expect(r.calls).toEqual([
-      ["git", "ls-remote", "origin", "HEAD"],
+      ["git", "-c", "credential.helper=", "ls-remote", "origin", "HEAD"],
       [
         "gh",
         "api",
@@ -176,5 +189,21 @@ describe("wait_for_build.ts", () => {
     const r = run(["staging"], { env: { GIT_HEAD: "not-a-sha" } });
     expect(r.exitCode).toBe(1);
     expect(r.output).toContain("could not read main's HEAD sha");
+  });
+
+  test("tag mode: a stalled origin burns the probe deadline and reaches the warning path", () => {
+    // Unbounded, a hung ls-remote would sit until the job-level kill; the
+    // probe timeout turns each stall into a failed attempt.
+    const r = run(["tag"], {
+      env: { VERSION: "v1.2.3", GIT_SLEEP: "5", PROBE_TIMEOUT_MS: "100" },
+    });
+    expect(r.exitCode).toBe(0);
+    expect(r.output).toContain("::warning::templates/v1.2.3 is still missing after 5 minutes");
+  }, 20_000);
+
+  test("staging mode: a stalled HEAD read exits loudly instead of hanging", () => {
+    const r = run(["staging"], { env: { GIT_SLEEP: "5", PROBE_TIMEOUT_MS: "100" } });
+    expect(r.exitCode).not.toBe(0);
+    expect(r.output).toContain("timed out after 100ms");
   });
 });
