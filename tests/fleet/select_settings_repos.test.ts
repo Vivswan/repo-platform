@@ -349,4 +349,63 @@ describe("select_settings_repos.ts", () => {
     const result = run("no-discovery", { env: { STUB_FAIL_DISCOVERY: "1" } });
     expect(result.exitCode).not.toBe(0);
   });
+
+  // A stub bun ahead of the real one corrupts one pipeline stage's JSON
+  // per flag; everything else (including this test's own script
+  // invocation) execs through to the real bun. The bare identifiers are
+  // the leaking form: a raw JSON.parse error would quote them into this
+  // public log, so both parses must fail with the fixed value-free
+  // diagnostic instead.
+  function corruptStubBin(name: string): string {
+    const dir = join(root, `bin-${name}`);
+    mkdirSync(dir);
+    writeFileSync(
+      join(dir, "bun"),
+      [
+        "#!/usr/bin/env bash",
+        'if [ -n "$STUB_CORRUPT_EXCLUDED" ]; then',
+        '  case "$*" in *repos_registry.ts\\ excluded*) echo "[corruptslug]"; exit 0 ;; esac',
+        "fi",
+        'if [ -n "$STUB_CORRUPT_MATRIX" ]; then',
+        '  case "$*" in *build_settings_matrix.ts*) echo \'[{"repo": corruptmatrix}]\'; exit 0 ;; esac',
+        "fi",
+        'exec "$REAL_BUN" "$@"',
+        "",
+      ].join("\n"),
+      { mode: 0o755 },
+    );
+    return dir;
+  }
+
+  test("a malformed excluded list fails value-free (no SyntaxError echo)", () => {
+    const stub = corruptStubBin("excluded");
+    const r = run("corrupt-excluded", {
+      env: {
+        PATH: `${stub}:${bin}:${process.env.PATH}`,
+        REAL_BUN: process.execPath,
+        STUB_CORRUPT_EXCLUDED: "1",
+      },
+    });
+    expect(r.exitCode).toBe(1);
+    expect(r.stdout).toContain("::error::select_settings_repos: excluded list: not valid JSON");
+    for (const channel of [r.stdout, r.stderr, r.summary]) {
+      expect(channel).not.toContain("corruptslug");
+    }
+  });
+
+  test("a malformed settings matrix fails value-free (no SyntaxError echo)", () => {
+    const stub = corruptStubBin("matrix");
+    const r = run("corrupt-matrix", {
+      env: {
+        PATH: `${stub}:${bin}:${process.env.PATH}`,
+        REAL_BUN: process.execPath,
+        STUB_CORRUPT_MATRIX: "1",
+      },
+    });
+    expect(r.exitCode).toBe(1);
+    expect(r.stdout).toContain("::error::select_settings_repos: settings matrix: not valid JSON");
+    for (const channel of [r.stdout, r.stderr, r.summary]) {
+      expect(channel).not.toContain("corruptmatrix");
+    }
+  });
 });

@@ -228,7 +228,10 @@ runStage(
   ["bun", ".github/scripts/fleet/repos_registry.ts", "excluded"],
   join(runnerTemp, "excluded.json"),
 );
-const excluded = JSON.parse(readFileSync(join(runnerTemp, "excluded.json"), "utf-8")) as string[];
+const excluded = parseJson(
+  readFileSync(join(runnerTemp, "excluded.json"), "utf-8"),
+  "select_settings_repos: excluded list",
+) as string[];
 // A single-repo dispatch is a scoped heal; the fleet-wide exclusion
 // reminders belong to the full runs.
 const sweepable = onlyRepo === "" ? excluded : [];
@@ -292,7 +295,10 @@ if (matrix.exitCode !== 0) {
 }
 const targets = matrix.stdout.toString().replace(/\n$/, "");
 setOutput("targets", targets);
-const parsed = JSON.parse(targets) as { repo: string; home: string }[];
+const parsed = parseJson(targets, "select_settings_repos: settings matrix") as {
+  repo: string;
+  home: string;
+}[];
 if (onlyRepo !== "" && parsed.length === 0) {
   // The input is echoed nowhere: the dispatcher typed it, and it may be
   // a private slug this public log must not print.

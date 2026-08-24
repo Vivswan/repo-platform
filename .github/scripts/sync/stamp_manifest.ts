@@ -189,21 +189,20 @@ export function stampManifestText(
   root: string,
 ): { out: string; problem: string | null } {
   const resolved = resolveConflictsTowardAfter(text);
-  let files: Record<string, ManifestEntryShape>;
+  let parsed: unknown;
   try {
-    const manifest = JSON.parse(resolved) as { files?: unknown };
-    if (typeof manifest.files !== "object" || manifest.files === null) {
-      throw new Error("no top-level 'files' mapping");
-    }
-    files = manifest.files as Record<string, ManifestEntryShape>;
-  } catch (error) {
-    return {
-      out: text,
-      problem: `does not parse as a manifest (${
-        error instanceof Error ? error.message.split("\n")[0] : String(error)
-      })`,
-    };
+    parsed = JSON.parse(resolved);
+  } catch {
+    // Value-free on purpose: a SyntaxError's message quotes manifest text
+    // (target-repo content), and this problem string reaches a public log
+    // via main()'s warning. Standalone script - no shared/ helpers here.
+    return { out: text, problem: "does not parse as a manifest (invalid JSON)" };
   }
+  const manifest = parsed as { files?: unknown };
+  if (typeof manifest.files !== "object" || manifest.files === null) {
+    return { out: text, problem: "does not parse as a manifest (no top-level 'files' mapping)" };
+  }
+  const files = manifest.files as Record<string, ManifestEntryShape>;
   const commit = recordedCommit(root);
   const lines = resolved.split("\n").map((line) => {
     const match = ENTRY_LINE_RE.exec(line);

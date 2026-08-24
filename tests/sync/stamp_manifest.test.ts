@@ -228,6 +228,23 @@ describe("stampManifestText", () => {
     expect(problem).toMatch(/does not parse/);
   });
 
+  test("invalid JSON reports a value-free problem (no SyntaxError echo)", () => {
+    // The bare identifier is the leaking form: a raw JSON.parse error
+    // quotes it ('Unexpected identifier ...'), and the problem string
+    // reaches the target repo's public sync log via main()'s warning.
+    const text = '{"files": hiddensecret}';
+    const { out, problem } = stampManifestText(text, tree({}));
+    expect(out).toBe(text);
+    expect(problem).toContain("invalid JSON");
+    expect(problem).not.toContain("hiddensecret");
+  });
+
+  test("a parseable document without a files mapping names that shape problem", () => {
+    const { out, problem } = stampManifestText('{"other": 1}', tree({}));
+    expect(out).toBe('{"other": 1}');
+    expect(problem).toContain("no top-level 'files' mapping");
+  });
+
   test("a malformed conflict block is a problem, never a silent line drop", () => {
     const root = tree({ "ci.yml": "content\n" });
     const text = [

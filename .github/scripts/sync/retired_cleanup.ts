@@ -12,6 +12,7 @@ import { appendFileSync, existsSync, lstatSync, rmSync, writeFileSync } from "no
 import { join } from "node:path";
 import { parse } from "yaml";
 import { env, fail, requireEnv } from "../shared/gha.ts";
+import { parseJson } from "../shared/json.ts";
 import { parseModules } from "../shared/modules.ts";
 import { customLicenseFlipError } from "./retired_paths.ts";
 
@@ -137,7 +138,9 @@ const retiredJson = run(
 // The file copy is for debugging only; the captured stdout is the input.
 writeFileSync(join(runnerTemp, "retired-paths.json"), retiredJson);
 
-const retired: unknown = JSON.parse(retiredJson);
+// parseJson, not a raw JSON.parse: a SyntaxError's message quotes the
+// payload (target-derived paths) into the public sync log.
+const retired = parseJson(retiredJson, "retired_cleanup: retired_paths.ts output");
 if (!isStringList(retired)) {
   fail("retired_paths.ts printed something other than a JSON list of paths");
 }

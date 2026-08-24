@@ -593,4 +593,23 @@ describe("CLI exit codes", () => {
     expect(stdout).toContain("no .repo-platform.yml");
     expect(exitCode).toBe(0);
   });
+
+  test("a malformed package.json fails value-free (no SyntaxError echo)", () => {
+    // The self-name read happens before any central file is inspected;
+    // the bare identifier is the leaking form a raw JSON.parse error
+    // would quote into this public log.
+    const badRoot = join(root, "bad-package-root");
+    mkdirSync(badRoot);
+    writeFileSync(join(badRoot, "package.json"), '{"name": corruptpkg}');
+    const dir = caseDir("bad-package", {});
+    const proc = Bun.spawnSync(["bun", script, "--owner", "Vivswan", "--dir", dir], {
+      cwd: badRoot,
+      env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
+    });
+    expect(proc.exitCode).toBe(1);
+    expect(proc.stdout.toString()).toContain(
+      "::error::validate_central_settings: package.json: not valid JSON",
+    );
+    expect(proc.stdout.toString() + proc.stderr.toString()).not.toContain("corruptpkg");
+  });
 });

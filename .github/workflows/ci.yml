@@ -271,7 +271,11 @@ jobs:
         env:
           ACTIONLINT_VERSION: 1.7.12
         run: |
-          curl -sSL --retry 3 -o /tmp/download-actionlint.bash \
+          # --retry-all-errors: plain --retry skips connection resets (the
+          # observed failure) - it only retries timeouts and a few HTTP
+          # codes. -f turns HTTP errors into curl failures so they retry
+          # too and still fail the step; -S keeps errors visible under -s.
+          curl -fsSL --retry 3 --retry-all-errors -o /tmp/download-actionlint.bash \
             "https://raw.githubusercontent.com/rhysd/actionlint/v${ACTIONLINT_VERSION}/scripts/download-actionlint.bash"
           bash /tmp/download-actionlint.bash "$ACTIONLINT_VERSION"
       - uses: actions/upload-artifact@v7

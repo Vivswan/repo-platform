@@ -32,6 +32,7 @@ import { parse } from "yaml";
 import { loadManifests } from "../../../scripts/module_manifests.ts";
 import { parseFlags } from "../shared/flags.ts";
 import { fail } from "../shared/gha.ts";
+import { parseJson } from "../shared/json.ts";
 
 export interface CheckResult {
   errors: string[];
@@ -430,7 +431,12 @@ function main(args: string[]): void {
   // template, so it has no .repo-platform.yml to read modules from);
   // check_ssot.ts validates its label roster instead.
   const selfName = String(
-    (JSON.parse(readFileSync("package.json", "utf-8")) as Record<string, unknown>).name,
+    (
+      parseJson(
+        readFileSync("package.json", "utf-8"),
+        "validate_central_settings: package.json",
+      ) as Record<string, unknown>
+    ).name,
   );
 
   let entries: string[];
