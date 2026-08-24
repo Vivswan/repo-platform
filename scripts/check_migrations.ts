@@ -37,17 +37,41 @@ import { skipIfExistsMatchers } from "./generate.ts";
 
 const REPO_ROOT = resolve(import.meta.dir, "..");
 
+/** A gate expression with whitespace runs collapsed OUTSIDE quoted
+ *  literals only, so reformatting is not a transition but a changed string
+ *  literal is. Backslash escapes are not handled: no filename gate can
+ *  realistically quote a quote. */
+export function normalizeGate(expr: string): string {
+  let out = "";
+  let quote: string | null = null;
+  for (let i = 0; i < expr.length; i++) {
+    const ch = expr[i];
+    if (quote !== null) {
+      out += ch;
+      if (ch === quote) quote = null;
+    } else if (ch === "'" || ch === '"') {
+      quote = ch;
+      out += ch;
+    } else if (/\s/.test(ch)) {
+      if (!out.endsWith(" ")) out += " ";
+    } else {
+      out += ch;
+    }
+  }
+  return out;
+}
+
 /** An emitted template path reduced to what a downstream repo sees: the
  *  landing path (gate tags and the .jinja suffix stripped) and the gate
- *  signature - the whitespace-normalized `{% if %}` expressions along the
- *  path, joined in order ("" = rendered unconditionally). */
+ *  signature - the normalized `{% if %}` expressions along the path,
+ *  joined in order ("" = rendered unconditionally). */
 export function renderedPath(emitted: string): { landing: string; signature: string } {
   const stem = emitted.endsWith(".jinja") ? emitted.slice(0, -".jinja".length) : emitted;
   const gates: string[] = [];
   const landing = stem.replace(
     /\{%\s*if\s+(.*?)\s*%\}|\{%\s*endif\s*%\}/g,
     (_, expr: string | undefined) => {
-      if (expr !== undefined) gates.push(expr.replace(/\s+/g, " "));
+      if (expr !== undefined) gates.push(normalizeGate(expr));
       return "";
     },
   );
@@ -221,18 +245,27 @@ function skipMatchers(text: string, label: string): RegExp[] {
   }
 }
 
+/** Thrown when the release state cannot be determined or the released
+ *  tree cannot be obtained; main reports it as the check's failure. */
+export class ReleaseStateError extends Error {}
+
 /** The newest release tag, consulting BOTH local tags and origin's - a
  *  shallow or tagless checkout must not silently read as "nothing
- *  released". Failure to list origin's tags fails the check loudly; a
- *  tag known only remotely is fetched before use. */
-function resolveLatestRelease(): { tag: string; version: string } | null {
-  const local = capture(["git", "tag", "--list", "templates/v*"], { cwd: REPO_ROOT });
-  if (local.exitCode !== 0) fail(`git tag --list failed: ${local.stderr.trim()}`);
+ *  released". Failure to list origin's tags throws; a tag known only
+ *  remotely is fetched, and throws when unfetchable. `repoRoot` is
+ *  parameterized so tests can run this against fixture repositories. */
+export function resolveLatestRelease(
+  repoRoot = REPO_ROOT,
+): { tag: string; version: string } | null {
+  const local = capture(["git", "tag", "--list", "templates/v*"], { cwd: repoRoot });
+  if (local.exitCode !== 0) {
+    throw new ReleaseStateError(`git tag --list failed: ${local.stderr.trim()}`);
+  }
   const remote = capture(["git", "ls-remote", "--tags", "origin", "refs/tags/templates/v*"], {
-    cwd: REPO_ROOT,
+    cwd: repoRoot,
   });
   if (remote.exitCode !== 0) {
-    fail(
+    throw new ReleaseStateError(
       `cannot determine the release state: listing origin's templates/v* tags failed (${remote.stderr.trim()}). ` +
         "The tripwire must see the release history to compare against; restore remote access " +
         "(or fetch the templates/v* tags), then re-run.",
@@ -245,15 +278,15 @@ function resolveLatestRelease(): { tag: string; version: string } | null {
   if (latest === null) return null;
   const resolvable = () =>
     capture(["git", "rev-parse", "--verify", "--quiet", `refs/tags/${latest.tag}^{commit}`], {
-      cwd: REPO_ROOT,
+      cwd: repoRoot,
     }).exitCode === 0;
   if (!resolvable()) {
     capture(
       ["git", "fetch", "--quiet", "origin", `+refs/tags/${latest.tag}:refs/tags/${latest.tag}`],
-      { cwd: REPO_ROOT },
+      { cwd: repoRoot },
     );
     if (!resolvable()) {
-      fail(
+      throw new ReleaseStateError(
         `origin has ${latest.tag} but it cannot be fetched into this checkout, so the released ` +
           "template tree is unavailable to compare against. Fetch the tag manually, then re-run.",
       );
@@ -263,7 +296,13 @@ function resolveLatestRelease(): { tag: string; version: string } | null {
 }
 
 function main(): number {
-  const latest = resolveLatestRelease();
+  let latest: { tag: string; version: string } | null;
+  try {
+    latest = resolveLatestRelease();
+  } catch (err) {
+    if (!(err instanceof ReleaseStateError)) throw err;
+    fail(err.message);
+  }
   if (latest === null) {
     console.log("migrations check ok: no templates/vX.Y.Z release tag exists locally or on origin");
     return 0;

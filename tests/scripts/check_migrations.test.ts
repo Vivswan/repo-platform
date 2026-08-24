@@ -8,15 +8,21 @@
 // copier applies (a bare filename matches at any depth).
 
 import { describe, expect, test } from "bun:test";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   collectTransitions,
   landingPath,
   latestReleaseTag,
   migrationErrors,
+  normalizeGate,
   ownershipFlips,
+  ReleaseStateError,
   remoteTagNames,
   renderedPath,
   renderMap,
+  resolveLatestRelease,
   type Transition,
 } from "../../scripts/check_migrations";
 import { skipIfExistsMatchers } from "../../scripts/generate";
@@ -65,6 +71,13 @@ describe("landingPath / renderedPath", () => {
       "'uv' in modules",
     );
   });
+
+  test("whitespace inside quoted literals survives normalization", () => {
+    expect(normalizeGate('project_name == "two  words"')).toBe('project_name == "two  words"');
+    expect(normalizeGate("description  ==  'a  b'  and  not  private")).toBe(
+      "description == 'a  b' and not private",
+    );
+  });
 });
 
 describe("renderMap", () => {
@@ -111,6 +124,58 @@ describe("remoteTagNames", () => {
 
   test("empty output (no remote tags): empty list", () => {
     expect(remoteTagNames("")).toEqual([]);
+  });
+});
+
+// Fixture git repositories for the release-state resolution: the original
+// bug was a tagless checkout silently reading as "nothing released", so
+// these pin the origin consultation, the remote-only fetch, and the loud
+// failure paths against real git.
+function git(cwd: string, ...args: string[]): void {
+  const proc = Bun.spawnSync(
+    ["git", "-c", "user.name=t", "-c", "user.email=t@t", "-C", cwd, ...args],
+    { stdout: "pipe", stderr: "pipe" },
+  );
+  if (proc.exitCode !== 0) throw new Error(`git ${args.join(" ")}: ${proc.stderr.toString()}`);
+}
+
+function makeRepo(tags: string[] = []): string {
+  const dir = mkdtempSync(join(tmpdir(), "check-migrations-repo-"));
+  git(dir, "init", "-q", "-b", "main");
+  git(dir, "commit", "-q", "--allow-empty", "-m", "init");
+  for (const tag of tags) git(dir, "tag", tag);
+  return dir;
+}
+
+describe("resolveLatestRelease", () => {
+  test("a tagless clone consults origin and fetches its newest tag", () => {
+    const upstream = makeRepo(["templates/v0.1.0", "templates/v0.2.0"]);
+    const clone = mkdtempSync(join(tmpdir(), "check-migrations-clone-"));
+    git(clone, "clone", "-q", "--no-tags", upstream, "work");
+    const work = join(clone, "work");
+    expect(resolveLatestRelease(work)).toEqual({ tag: "templates/v0.2.0", version: "0.2.0" });
+    // The released tree must now be comparable locally: the tag was fetched.
+    git(work, "rev-parse", "--verify", "--quiet", "refs/tags/templates/v0.2.0");
+  });
+
+  test("no templates/v* tag locally or on origin: null (trivial pass)", () => {
+    const upstream = makeRepo(["v1.0.0"]);
+    const clone = mkdtempSync(join(tmpdir(), "check-migrations-clone-"));
+    git(clone, "clone", "-q", "--no-tags", upstream, "work");
+    expect(resolveLatestRelease(join(clone, "work"))).toBeNull();
+  });
+
+  test("a local-only tag still counts when origin has none", () => {
+    const repo = makeRepo(["templates/v0.3.0"]);
+    git(repo, "remote", "add", "origin", makeRepo());
+    expect(resolveLatestRelease(repo)).toEqual({ tag: "templates/v0.3.0", version: "0.3.0" });
+  });
+
+  test("an unreachable origin throws instead of passing silently", () => {
+    const repo = makeRepo();
+    git(repo, "remote", "add", "origin", join(tmpdir(), "check-migrations-missing-remote"));
+    expect(() => resolveLatestRelease(repo)).toThrow(ReleaseStateError);
+    expect(() => resolveLatestRelease(repo)).toThrow(/release state/);
   });
 });
 
