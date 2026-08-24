@@ -31,6 +31,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { env, error, notice, requireEnv, setOutput } from "../shared/gha.ts";
+import { parseJson } from "../shared/json.ts";
 import { capture } from "../shared/proc.ts";
 import {
   notAdoptedNotice,
@@ -82,8 +83,13 @@ runStage(
   join(runnerTemp, "enriched.json"),
 );
 
+// parseJson, not a raw JSON.parse: enriched.json carries real slugs, and
+// a SyntaxError echoing them would leak into this public log.
 const enriched = parseEnriched(
-  JSON.parse(readFileSync(join(runnerTemp, "enriched.json"), "utf-8")),
+  parseJson(
+    readFileSync(join(runnerTemp, "enriched.json"), "utf-8"),
+    "select_sync_repos: enriched rows",
+  ),
   "select_sync_repos: enriched rows",
 );
 

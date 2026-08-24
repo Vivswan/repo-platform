@@ -13,7 +13,7 @@ import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
 import { addMask, env, error, hideDetails, requireEnv, setOutput } from "../shared/gha.ts";
-import { parseWith } from "../shared/json.ts";
+import { parseJsonWith } from "../shared/json.ts";
 
 const target = requireEnv("TARGET");
 const proc = Bun.spawnSync(["gh", "api", `repos/${target}`], { stderr: "inherit" });
@@ -24,13 +24,13 @@ if (proc.exitCode !== 0) {
   );
   process.exit(1);
 }
-const info = parseWith(
+const info = parseJsonWith(
   z.object({
     default_branch: z.string(),
     description: z.string().nullable(),
     private: z.boolean(),
   }),
-  JSON.parse(proc.stdout.toString()),
+  proc.stdout.toString(),
   "read_target: repos/<target> response",
 );
 const branch = info.default_branch;

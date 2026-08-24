@@ -17,3 +17,21 @@ export function parseWith<T>(schema: ZodType<T>, data: unknown, label: string): 
   }
   return result.data;
 }
+
+/** JSON.parse with the same discipline: a raw SyntaxError echoes a
+ * fragment of the offending text ("Unexpected identifier ..."), so the
+ * invalid-JSON diagnostic is fixed and value-free like parseWith's. */
+export function parseJson(text: string, label: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    console.log(`::error::${label}: not valid JSON`);
+    process.exit(1);
+  }
+}
+
+/** Validate text that must first survive JSON.parse; both failure modes
+ * exit here with the value-free diagnostics above. */
+export function parseJsonWith<T>(schema: ZodType<T>, text: string, label: string): T {
+  return parseWith(schema, parseJson(text, label), label);
+}

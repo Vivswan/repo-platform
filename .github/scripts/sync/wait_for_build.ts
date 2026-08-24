@@ -20,7 +20,7 @@
 
 import { z } from "zod";
 import { env, error, requireEnv, warning } from "../shared/gha.ts";
-import { parseWith } from "../shared/json.ts";
+import { parseJsonWith } from "../shared/json.ts";
 import { capture, mustCapture } from "../shared/proc.ts";
 
 const ATTEMPTS = 30;
@@ -74,9 +74,9 @@ if (mode === "tag") {
       ]);
       // A transient API failure reads as not-built-yet: keep polling.
       if (runs.exitCode !== 0) return false;
-      const built = parseWith(
+      const built = parseJsonWith(
         runsSchema,
-        JSON.parse(runs.stdout),
+        runs.stdout,
         "wait_for_build: workflow runs response",
       );
       const fresh = built.workflow_runs.some(

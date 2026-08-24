@@ -8,24 +8,8 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { z } from "zod";
 import { env } from "../shared/gha.ts";
-import { parseWith } from "../shared/json.ts";
+import { parseJsonWith } from "../shared/json.ts";
 import { capture } from "../shared/proc.ts";
-
-// parseWith over text that must first survive JSON.parse: a raw
-// SyntaxError would echo a fragment of the offending text ("Unexpected
-// identifier ..."), and everything parsed here can carry private repo
-// names, so the invalid-JSON diagnostic is fixed and value-free like
-// parseWith's own.
-function parseJsonWith<T>(schema: z.ZodType<T>, text: string, label: string): T {
-  let data: unknown;
-  try {
-    data = JSON.parse(text);
-  } catch {
-    console.log(`::error::${label}: not valid JSON`);
-    process.exit(1);
-  }
-  return parseWith(schema, data, label);
-}
 
 // user/repos with the fleet PAT sees every repo the USER can reach, and
 // its permissions field reflects the user, not the token: discovery only

@@ -17,7 +17,7 @@ import {
 } from "../shared/commit_stamp.ts";
 import { requireEnv } from "../shared/gha.ts";
 import { BUILD_IDENTITY } from "../shared/git_identity.ts";
-import { parseWith } from "../shared/json.ts";
+import { parseJsonWith } from "../shared/json.ts";
 import { capture, must, mustCapture } from "../shared/proc.ts";
 import { rebuildChannelTree } from "../shared/rebuild_tree.ts";
 
@@ -92,9 +92,9 @@ function restampReason(channel: string, currentSourceSha: string): string {
       `reading stamped run ${prevRun} failed (${runProbe.stderr.trim()}) - an API failure, not a broken stamp; re-run the build`,
     );
   }
-  const run = parseWith(
+  const run = parseJsonWith(
     z.object({ path: z.string(), conclusion: z.string().nullable(), head_sha: z.string() }),
-    JSON.parse(runProbe.stdout),
+    runProbe.stdout,
     "publish: actions/runs response",
   );
   if (

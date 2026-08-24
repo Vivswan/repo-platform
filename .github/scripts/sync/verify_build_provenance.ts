@@ -54,7 +54,7 @@ import { join } from "node:path";
 import { z } from "zod";
 import { commitRunParse, commitStampParse, commitStampParseAll } from "../shared/commit_stamp.ts";
 import { env, fail, requireEnv } from "../shared/gha.ts";
-import { parseWith } from "../shared/json.ts";
+import { parseJsonWith } from "../shared/json.ts";
 import { capture, mustCapture } from "../shared/proc.ts";
 import { rebuildChannelTree } from "../shared/rebuild_tree.ts";
 
@@ -192,14 +192,14 @@ if (runProbe.exitCode !== 0) {
     `${subject} points at run ${runId}, but reading it from ${repository} failed (${runProbe.stderr.trim()}) - an API failure, not evidence of tampering. Re-run the sync.`,
   );
 }
-const run = parseWith(
+const run = parseJsonWith(
   z.object({
     path: z.string(),
     status: z.string(),
     conclusion: z.string().nullable(),
     head_sha: z.string(),
   }),
-  JSON.parse(runProbe.stdout),
+  runProbe.stdout,
   "verify_build_provenance: actions/runs response",
 );
 if (run.path !== ".github/workflows/build-branches.yml") {
