@@ -39,7 +39,7 @@ export const PAIRS: { repo: string; tpl: string }[] = [
   { repo: ".editorconfig", tpl: "templates/base/.editorconfig.jinja" },
   {
     repo: "release-please-config.json",
-    tpl: "templates/release-please/release-please-config.json",
+    tpl: "templates/release-please/release-please-config.json.jinja",
   },
   {
     repo: "CODE_OF_CONDUCT.md",
