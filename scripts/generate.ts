@@ -61,6 +61,7 @@ import { existsSync, lstatSync, readdirSync, readFileSync, writeFileSync } from 
 import { join, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
+import { dependabotLabels } from "./compose_template.ts";
 import { normalizeJinja, placeholderJinja } from "./jinja_subset.ts";
 import {
   loadManifests,
@@ -667,37 +668,39 @@ export interface DependabotLabelGroup {
   ecosystems: string[];
 }
 
-/** The dependabot labels the settings docs enumerate, deduped by label
- *  name (the loader already rejects same-label color disagreements), each
- *  listing its contributing ecosystems once, in manifest order. Distinct
- *  from compose_template.ts's dependabotLabels (the rich name/color/
- *  description roster) and validate_central_settings.ts's moduleLabelPairs
- *  (the fleet preflight's flat module->label pairs). */
+/** The dependabot labels the settings docs enumerate: the composer's
+ *  dependabotLabels owns the dedup-by-label grouping (MODULE_ORDER of
+ *  first contributor); this only re-shapes each group into the docs'
+ *  label/color/ecosystems view, each group listing its contributing
+ *  ecosystems once, in manifest order. */
 export function dependabotLabelGroups(manifests: ModuleManifest[]): DependabotLabelGroup[] {
-  const byLabel = new Map<string, DependabotLabelGroup>();
-  for (const { dependabot } of manifests) {
-    if (!dependabot) continue;
-    const group = byLabel.get(dependabot.label);
-    if (group) {
-      if (!group.ecosystems.includes(dependabot.ecosystem)) {
-        group.ecosystems.push(dependabot.ecosystem);
-      }
-    } else {
-      byLabel.set(dependabot.label, {
-        label: dependabot.label,
-        color: dependabot.color,
-        ecosystems: [dependabot.ecosystem],
-      });
-    }
-  }
-  if (byLabel.size === 0) {
+  const ecosystemOf = new Map(
+    manifests.flatMap((m) => (m.dependabot ? [[m.module, m.dependabot.ecosystem] as const] : [])),
+  );
+  const groups = dependabotLabels(manifests).map((label) => ({
+    label: label.name,
+    color: label.color,
+    ecosystems: [
+      ...new Set(
+        label.modules.map((module) => {
+          const ecosystem = ecosystemOf.get(module);
+          if (ecosystem === undefined) {
+            // Unreachable: every module in a label group declared dependabot.
+            throw new Error(`no dependabot ecosystem recorded for module '${module}'`);
+          }
+          return ecosystem;
+        }),
+      ),
+    ],
+  }));
+  if (groups.length === 0) {
     throw new Error(
       "no manifest declares a dependabot entry, so the docs' per-toolchain " +
         "label lists would be empty - declare dependabot: {ecosystem, label, " +
         "color} in at least one module.yml",
     );
   }
-  return [...byLabel.values()];
+  return groups;
 }
 
 /** `javascript` (`168700`) for bun, `python:uv` (`2b67c6`) for uv, ... */
