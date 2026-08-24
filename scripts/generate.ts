@@ -467,15 +467,31 @@ export function toolchainPinRows(manifests: ModuleManifest[]): string[] {
 }
 
 /** The managed ownership header's identifying text in template sources
- *  (validate_generated_files.ts enforces the rendered counterpart), and the
- *  marker splitting a managed top from a repo-owned tail. */
-const MANAGED_HEADER_TEXT = "managed by {{ github_username }}/repo-platform";
+ *  (validate_generated_files.ts enforces the rendered counterpart; the
+ *  "This file is" anchor keeps a negated look-alike from counting), and the
+ *  marker splitting a managed top from a repo-owned tail (matched as its
+ *  exact comment lines, never as a substring). */
+const MANAGED_HEADER_TEXT = "This file is managed by {{ github_username }}/repo-platform";
 const LOCAL_SECTION_MARKER = "repo-platform:local-section";
+const LOCAL_SECTION_LINES = new Set([
+  `# ${LOCAL_SECTION_MARKER}`,
+  `<!-- ${LOCAL_SECTION_MARKER} -->`,
+]);
 
 /** How many opening lines may hold the managed header: template sources
  *  keep it at the top, at most below a short jinja preamble that rendering
  *  collapses. The validator's rendered-file check uses the same window. */
 const HEADER_WINDOW = 10;
+
+/** Module template files that declare no ownership today, tolerated without
+ *  enrolment so the undeclared-file throw below stays fail-closed for
+ *  everything new. An entry whose file gains a declaration (or disappears)
+ *  throws as stale, so the list can only shrink. */
+export const KNOWN_UNDECLARED_MODULE_FILES = new Set([
+  // States which operator applies the settings but not that sync owns the
+  // file; enrols by opening with the managed header.
+  "settings-sync/.github/settings.yml.jinja",
+]);
 
 /** copier.yml's _skip_if_exists globs as rendered-path matchers (`*` stays
  *  within one path segment, matching copier's pathlib semantics). */
@@ -499,20 +515,24 @@ export function skipIfExistsMatchers(copierYamlText: string): RegExp[] {
 }
 
 /** The rendered paths, per module, that must open with the managed header
- *  in client repos: every module template file (fragments and symlinks
- *  aside) whose source opens with the header. Carrying the header is the
- *  enrolment: split files carry the local-section marker instead (the
- *  validator's hand table owns them), starters and comment-free formats
- *  carry neither. A _skip_if_exists starter carrying the header throws -
- *  the header promises sync overwrites the file, the skip list promises it
- *  never does. Filename-gated files are skipped: module selection alone
- *  does not render them, so the validator cannot require them per module. */
+ *  in client repos. Every module template file (fragments and symlinks
+ *  aside) is classified, and one that fits no class throws, so a new
+ *  module file cannot land silently undeclared: _skip_if_exists starters
+ *  are exempt (and throw if they carry the header - it promises sync
+ *  overwrites the file, the skip list promises it never does), split files
+ *  carry the local-section marker line (the validator's hand table owns
+ *  them), header-opening files enrol (filename-gated ones only declare -
+ *  module selection alone does not render them, so the validator cannot
+ *  require them), and comment-free formats (the manifest's version pin
+ *  dotfile, JSON) have nowhere to declare. */
 export function moduleHeaderFiles(
   manifests: ModuleManifest[],
   templatesDir: string,
   skipIfExists: RegExp[],
+  knownUndeclared: ReadonlySet<string> = KNOWN_UNDECLARED_MODULE_FILES,
 ): Record<string, string[]> {
   const result: Record<string, string[]> = {};
+  const unusedSilences = new Set(knownUndeclared);
   for (const m of manifests) {
     const moduleDir = join(templatesDir, m.module);
     const rendered: string[] = [];
@@ -527,23 +547,49 @@ export function moduleHeaderFiles(
         }
         if (!stat.isFile() || stat.isSymbolicLink()) continue;
         const renderedPath = childRel.replace(/\.jinja$/, "");
-        if (renderedPath.includes("{%")) continue;
+        // The path the render lands, with any filename gates stripped, for
+        // matching against _skip_if_exists and the pin file.
+        const landedPath = renderedPath
+          .split("/")
+          .map((segment) => segment.replace(/^\{% if .+? %\}(.*)\{% endif %\}$/, "$1"))
+          .join("/");
         const source = readFileSync(join(moduleDir, childRel), "utf-8");
-        if (source.includes(LOCAL_SECTION_MARKER)) continue;
         const head = source.split("\n", HEADER_WINDOW).join("\n");
-        if (!head.includes(MANAGED_HEADER_TEXT)) continue;
-        if (skipIfExists.some((matcher) => matcher.test(renderedPath))) {
-          throw new Error(
-            `templates/${m.module}/${childRel}: opens with the managed header but ` +
-              "renders a _skip_if_exists starter - the header promises sync " +
-              "overwrites the file, the skip list promises it never does; drop one",
-          );
+        const hasHeader = head.includes(MANAGED_HEADER_TEXT);
+        if (skipIfExists.some((matcher) => matcher.test(landedPath))) {
+          if (hasHeader) {
+            throw new Error(
+              `templates/${m.module}/${childRel}: opens with the managed header but ` +
+                "renders a _skip_if_exists starter - the header promises sync " +
+                "overwrites the file, the skip list promises it never does; drop one",
+            );
+          }
+          continue;
         }
-        rendered.push(renderedPath);
+        if (source.split("\n").some((line) => LOCAL_SECTION_LINES.has(line.trim()))) continue;
+        if (hasHeader) {
+          if (landedPath === renderedPath) rendered.push(landedPath);
+          continue;
+        }
+        if (landedPath === m.toolchain?.pin?.file || landedPath.endsWith(".json")) continue;
+        if (unusedSilences.delete(`${m.module}/${childRel}`)) continue;
+        throw new Error(
+          `templates/${m.module}/${childRel}: declares no ownership - open it with ` +
+            "the managed header, split it with the local-section marker line, list " +
+            "its rendered path in _skip_if_exists, or record the silence in " +
+            "KNOWN_UNDECLARED_MODULE_FILES (scripts/generate.ts)",
+        );
       }
     };
     visit("");
     if (rendered.length > 0) result[m.module] = rendered;
+  }
+  if (unusedSilences.size > 0) {
+    throw new Error(
+      `KNOWN_UNDECLARED_MODULE_FILES entr${unusedSilences.size === 1 ? "y" : "ies"} ` +
+        `${[...unusedSilences].join(", ")} matched no undeclared file - the file ` +
+        "gained a declaration or moved; remove the stale entry",
+    );
   }
   if (Object.keys(result).length === 0) {
     throw new Error(

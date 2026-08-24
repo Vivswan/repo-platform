@@ -79,8 +79,13 @@ const MARKER_FILES: Record<string, string[]> = {
 };
 
 /** The line splitting a file's sync-managed top from its repo-owned tail;
- *  ownership check 8 requires it exactly once in split files. */
+ *  ownership check 8 requires it exactly once in split files, matched as
+ *  its exact comment lines (a substring mention must not count). */
 const LOCAL_SECTION_MARKER = "repo-platform:local-section";
+const LOCAL_SECTION_LINES = new Set([
+  `# ${LOCAL_SECTION_MARKER}`,
+  `<!-- ${LOCAL_SECTION_MARKER} -->`,
+]);
 
 /** How many opening lines may hold the managed header (rendering collapses
  *  the templates' jinja preambles, so it always lands near the top). */
@@ -780,7 +785,9 @@ function main(): number {
   // repo's files are sources, not renders - and while the owner pin is
   // unhealed (its error is already recorded).
   if (!selfMode && ownerPin !== null && ownerPin.kind === "pinned") {
-    const headerNeedle = `managed by ${ownerPin.owner}/repo-platform`;
+    // The "This file is" anchor keeps a negated look-alike ("this file is
+    // NOT managed by ...") from satisfying the check.
+    const headerNeedle = `This file is managed by ${ownerPin.owner}/repo-platform`;
     const files = Object.entries(BASE_OWNERSHIP).map(([rel, kind]) => ({ rel, kind }));
     // Conditionally rendered base files, under the same answers/modules
     // conditions as their templates' filename gates; a null modules list
@@ -809,17 +816,19 @@ function main(): number {
       if (kind === "header") {
         if (!content.split("\n", HEADER_WINDOW).join("\n").includes(headerNeedle)) {
           errors.push(
-            `${rel}: does not open with the managed header ('managed by ` +
-              `${ownerPin.owner}/repo-platform') - the file is overwritten by ` +
-              "template sync and the header is what warns readers their local " +
-              "edits get replaced; run a template sync to restore it",
+            `${rel}: does not open with the managed header ('This file is ` +
+              `managed by ${ownerPin.owner}/repo-platform') - the file is ` +
+              "overwritten by template sync and the header is what warns readers " +
+              "their local edits get replaced; run a template sync to restore it",
           );
         }
       } else {
-        const count = content.split(LOCAL_SECTION_MARKER).length - 1;
+        const count = content
+          .split("\n")
+          .filter((line) => LOCAL_SECTION_LINES.has(line.trim())).length;
         if (count !== 1) {
           errors.push(
-            `${rel}: the '${LOCAL_SECTION_MARKER}' marker appears ${count} ` +
+            `${rel}: the '${LOCAL_SECTION_MARKER}' marker line appears ${count} ` +
               "times (expected 1) - it splits the sync-managed top of the file " +
               "from this repository's own tail; restore the single marker line " +
               "via a template sync",

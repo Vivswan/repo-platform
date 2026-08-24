@@ -596,7 +596,7 @@ describe("module header files", () => {
     expect(() => skipIfExistsMatchers("modules: []\n")).toThrow("_skip_if_exists");
   });
 
-  test("moduleHeaderFiles enrols header-opening files and skips the rest", () => {
+  test("moduleHeaderFiles classifies every file: enrol, starter, split, gated, comment-free", () => {
     const dir = mkdtempSync(join(tmpdir(), "headers-"));
     try {
       mkdirSync(join(dir, "bun", ".github", "workflows"), { recursive: true });
@@ -606,23 +606,86 @@ describe("module header files", () => {
         join(dir, "bun", ".github", "workflows", "managed.yml.jinja"),
         `${HEADER}name: Managed\n`,
       );
-      // No header: a repo-owned starter stays out.
+      // Headerless starter: exempt through _skip_if_exists.
       writeFileSync(join(dir, "bun", ".github", "workflows", "starter.yml.jinja"), "name: S\n");
-      // Split file: the local-section marker hands it to the marker table.
+      // Split file: the local-section marker line hands it to the validator's
+      // hand table.
       writeFileSync(
         join(dir, "bun", "SPLIT.md.jinja"),
-        `${HEADER}body\n<!-- repo-platform:local-section -->\n`,
+        "body\n<!-- repo-platform:local-section -->\n",
       );
-      // Filename-gated: module selection alone does not render it.
+      // Filename-gated: declares ownership but module selection alone does
+      // not render it, so it is not enrolled.
       writeFileSync(
         join(dir, "bun", "{% if not private %}gated.yml{% endif %}.jinja"),
         `${HEADER}name: G\n`,
       );
+      // Comment-free formats: the manifest's pin dotfile and JSON.
+      writeFileSync(join(dir, "bun", ".bun-version"), "1.3.14\n");
+      writeFileSync(join(dir, "bun", "data.json"), "{}\n");
       // Fragments never render as their own files.
       writeFileSync(join(dir, "bun", "fragments", "agents-toolchain.jinja"), `${HEADER}- x\n`);
-      expect(moduleHeaderFiles([manifest("bun")], dir, [])).toEqual({
+      const pinned = manifest("bun", {
+        toolchain: {
+          codeql_language: "javascript-typescript",
+          pin: { file: ".bun-version", version: "1.3.14" },
+        },
+      });
+      const skip = skipIfExistsMatchers("_skip_if_exists:\n  - .github/workflows/starter.yml\n");
+      expect(moduleHeaderFiles([pinned], dir, skip, new Set())).toEqual({
         bun: [".github/workflows/managed.yml"],
       });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a file fitting no class throws instead of shipping undeclared", () => {
+    const dir = mkdtempSync(join(tmpdir(), "headers-"));
+    try {
+      mkdirSync(join(dir, "bun", ".github", "workflows"), { recursive: true });
+      writeFileSync(
+        join(dir, "bun", ".github", "workflows", "managed.yml.jinja"),
+        `${HEADER}name: Managed\n`,
+      );
+      writeFileSync(join(dir, "bun", ".github", "workflows", "silent.yml.jinja"), "name: S\n");
+      expect(() => moduleHeaderFiles([manifest("bun")], dir, [], new Set())).toThrow(
+        "declares no ownership",
+      );
+      // ...unless the silence is recorded.
+      const silences = new Set(["bun/.github/workflows/silent.yml.jinja"]);
+      expect(moduleHeaderFiles([manifest("bun")], dir, [], silences)).toEqual({
+        bun: [".github/workflows/managed.yml"],
+      });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a recorded silence that matches nothing throws as stale", () => {
+    const dir = mkdtempSync(join(tmpdir(), "headers-"));
+    try {
+      mkdirSync(join(dir, "bun"));
+      writeFileSync(join(dir, "bun", "managed.yml.jinja"), `${HEADER}name: Managed\n`);
+      expect(() =>
+        moduleHeaderFiles([manifest("bun")], dir, [], new Set(["bun/gone.yml.jinja"])),
+      ).toThrow("stale entry");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a negated look-alike header is not a declaration", () => {
+    const dir = mkdtempSync(join(tmpdir(), "headers-"));
+    try {
+      mkdirSync(join(dir, "bun"));
+      writeFileSync(
+        join(dir, "bun", "odd.yml.jinja"),
+        "# This file is not managed by {{ github_username }}/repo-platform.\nname: O\n",
+      );
+      expect(() => moduleHeaderFiles([manifest("bun")], dir, [], new Set())).toThrow(
+        "declares no ownership",
+      );
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -641,6 +704,7 @@ describe("module header files", () => {
           [manifest("bun")],
           dir,
           skipIfExistsMatchers("_skip_if_exists:\n  - .github/workflows/checks.yml\n"),
+          new Set(),
         ),
       ).toThrow("_skip_if_exists starter");
     } finally {
@@ -653,7 +717,7 @@ describe("module header files", () => {
     try {
       mkdirSync(join(dir, "bun"));
       writeFileSync(join(dir, "bun", "module.yml"), "description: bun\n");
-      expect(() => moduleHeaderFiles([manifest("bun")], dir, [])).toThrow(
+      expect(() => moduleHeaderFiles([manifest("bun")], dir, [], new Set())).toThrow(
         "MODULE_HEADER_FILES record would be empty",
       );
     } finally {

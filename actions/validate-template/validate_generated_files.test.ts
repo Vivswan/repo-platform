@@ -567,6 +567,14 @@ describe("ownership self-declarations", () => {
     expect(stderr).toContain(".yamllint: does not open with the managed header");
   });
 
+  test("a negated look-alike header does not count", () => {
+    const { exitCode, stderr } = runValidator({
+      ".yamllint": "# This file is not managed by Vivswan/repo-platform.\nextends: default\n",
+    });
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain(".yamllint: does not open with the managed header");
+  });
+
   test("a header buried past the opening lines does not count", () => {
     const { exitCode, stderr } = runValidator({
       ".yamllint": `${"# filler\n".repeat(10)}${C1}extends: default\n`,
@@ -586,6 +594,14 @@ describe("ownership self-declarations", () => {
     const twice = runValidator({ ".editorconfig": `root = true\n${marker}${marker}` });
     expect(twice.exitCode).toBe(1);
     expect(twice.stderr).toContain("appears 2 times");
+  });
+
+  test("a prose mention of the marker is not the marker line", () => {
+    const { exitCode, stderr } = runValidator({
+      ".editorconfig": "root = true\n# rules go below the repo-platform:local-section marker\n",
+    });
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain(".editorconfig: the 'repo-platform:local-section' marker");
   });
 
   test("CODE_OF_CONDUCT.md needs the header only on public renders", () => {
