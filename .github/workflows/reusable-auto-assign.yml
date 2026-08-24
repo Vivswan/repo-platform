@@ -11,27 +11,19 @@
 # CODEOWNERS (teams cannot be assignees), falling back to the repo owner.
 # Each repo controls its policy by editing CODEOWNERS.
 #
-# Each job declares the minimum permissions it needs. A called job can only
+# The job declares the minimum permissions it needs. A called job can only
 # downgrade the caller's token, so every scope below must also appear on the
 # calling job in the caller template - adding a scope here breaks callers
 # that have not synced the matching caller update yet.
+#
+# This runs in CALLER repos, where repo-platform's scripts do not exist:
+# every step stays inline.
 
 name: Reusable Auto Assign
 
 on:
   workflow_call:
     inputs:
-      code_scanning:
-        # Callers rendered before the alerts split (main-pinned, not yet
-        # synced) still pass this: their issue/PR assignment keeps working,
-        # but their ALERT assignment pauses until their sync PR merges (only
-        # the new caller calls reusable-auto-assign-alerts.yml). Delete once
-        # every managed repo has synced past the release that ships the
-        # split caller.
-        description: Deprecated no-op, accepted for pre-split callers (see comment above)
-        required: false
-        type: boolean
-        default: true
       issue:
         description: Issue or PR number to assign (dispatch only)
         required: false
@@ -39,18 +31,22 @@ on:
         default: ""
 
 jobs:
+  # One job covers every event path: the resolver runs once, and each
+  # assignment step gates on its event.
   assign:
     # Dependabot PR runs get a read-only GITHUB_TOKEN; the write calls below
     # would fail, so skip them (Dependabot PRs are labeled by dependabot.yml).
+    # A dispatch without an issue number has nothing to assign.
     if: >-
-      (github.event_name == 'issues' || github.event_name == 'pull_request') &&
-      github.actor != 'dependabot[bot]'
+      ((github.event_name == 'issues' || github.event_name == 'pull_request') &&
+      github.actor != 'dependabot[bot]') ||
+      (github.event_name == 'workflow_dispatch' && inputs.issue != '')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
       contents: read # CODEOWNERS resolution
       issues: write
-      pull-requests: write
+      pull-requests: write # PR events, and a dispatched number may be a PR
     steps:
       - name: Resolve assignees from CODEOWNERS
         id: who
@@ -140,24 +136,18 @@ jobs:
               reviewers
             });
 
-  # Assign one named issue or PR per the CODEOWNERS policy. GitHub fires no
-  # workflow for events created with a workflow's own GITHUB_TOKEN, so an
-  # issue or PR created by another workflow never triggers the paths above;
-  # the creating workflow dispatches this one with the number instead. Only
-  # the named item is touched, so unassigning yourself later sticks.
-  assign-dispatched-issue:
-    if: github.event_name == 'workflow_dispatch' && inputs.issue != ''
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      contents: read # CODEOWNERS resolution
-      issues: write
-      pull-requests: write # the dispatched number may be a PR
-    steps:
+      # Assign one named issue or PR per the CODEOWNERS policy. GitHub fires
+      # no workflow for events created with a workflow's own GITHUB_TOKEN, so
+      # an issue or PR created by another workflow never triggers the paths
+      # above; the creating workflow dispatches this one with the number
+      # instead. Only the named item is touched, so unassigning yourself
+      # later sticks.
       - name: Assign the dispatched issue to code owners
+        if: github.event_name == 'workflow_dispatch'
         uses: actions/github-script@v9
         env:
           ISSUE: ${{ inputs.issue }}
+          ASSIGNEES: ${{ steps.who.outputs.assignees }}
         with:
           script: |
             const raw = process.env.ISSUE ?? "";
@@ -166,38 +156,7 @@ jobs:
               return;
             }
             const issueNumber = Number(raw);
-            // Users on the last `*` entry of CODEOWNERS; the repo owner when
-            // there is no usable entry or no file.
-            async function resolveAssignees() {
-              for (const path of ['.github/CODEOWNERS', 'CODEOWNERS', 'docs/CODEOWNERS']) {
-                let data;
-                try {
-                  ({ data } = await github.rest.repos.getContent({
-                    owner: context.repo.owner,
-                    repo: context.repo.repo,
-                    path,
-                  }));
-                } catch (error) {
-                  if (error.status === 404) continue;
-                  throw error;
-                }
-                const text = Buffer.from(data.content, 'base64').toString('utf8');
-                let owners = null;
-                for (const line of text.split('\n')) {
-                  const entry = line.trim();
-                  if (!entry || entry.startsWith('#')) continue;
-                  const [pattern, ...rest] = entry.split(/\s+/);
-                  if (pattern === '*') owners = rest; // last * entry wins
-                }
-                const users = (owners ?? [])
-                  .filter((o) => /^@[A-Za-z0-9-]+$/.test(o))
-                  .map((o) => o.slice(1));
-                if (users.length) return users;
-                break;
-              }
-              return [context.repo.owner];
-            }
-            const assignees = await resolveAssignees();
+            const assignees = JSON.parse(process.env.ASSIGNEES);
             await github.rest.issues.addAssignees({
               owner: context.repo.owner,
               repo: context.repo.repo,

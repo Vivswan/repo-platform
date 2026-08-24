@@ -2271,18 +2271,18 @@ const rules: Rule[] = [
   },
 
   {
-    // The CODEOWNERS assignee-resolution function is inlined three times:
-    // twice in reusable-auto-assign.yml and once in
+    // The CODEOWNERS assignee-resolution function is inlined twice: once
+    // in reusable-auto-assign.yml and once in
     // reusable-auto-assign-alerts.yml (split for permissions - see the file
     // headers). It cannot be hoisted: a reusable workflow runs from the
     // CALLER's checkout, where this repo's scripts do not exist. Pin the
     // copies byte-identical so a fix to one cannot silently leave the
-    // others behind.
+    // other behind.
     name: "auto-assign-codeowners-parity",
     run: () => {
       const mismatches: Mismatch[] = [];
       const sites = [
-        { file: ".github/workflows/reusable-auto-assign.yml", copies: 2 },
+        { file: ".github/workflows/reusable-auto-assign.yml", copies: 1 },
         { file: ".github/workflows/reusable-auto-assign-alerts.yml", copies: 1 },
       ];
       const found: { file: string; body: string }[] = [];
