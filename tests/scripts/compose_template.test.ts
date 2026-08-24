@@ -210,6 +210,16 @@ describe("fragmentJobIds", () => {
     );
     expect(fragmentJobIds(body)).toEqual(["build", "deploy"]);
   });
+
+  test("a space before the key's colon still surfaces (valid YAML the old scanner missed)", () => {
+    const body = Buffer.from("  new-job :\n    runs-on: ubuntu-latest\n");
+    expect(fragmentJobIds(body)).toEqual(["new-job"]);
+  });
+
+  test("a fragment that is not the jobs mapping's children throws instead of scanning past", () => {
+    expect(() => fragmentJobIds(Buffer.from("      - not a mapping\n"))).toThrow("jobs mapping");
+    expect(() => fragmentJobIds(Buffer.from("  just a scalar line\n"))).toThrow("jobs mapping");
+  });
 });
 
 describe("gateJobsParityErrors", () => {
@@ -218,6 +228,13 @@ describe("gateJobsParityErrors", () => {
   test("matching declarations and fragment jobs pass", () => {
     expect(gateJobsParityErrors("pr-title", ["pr-title"], fragment)).toEqual([]);
     expect(gateJobsParityErrors("agents", undefined, undefined)).toEqual([]);
+  });
+
+  test("an unparseable fragment fails closed, naming the fragment", () => {
+    const errors = gateJobsParityErrors("pr-title", ["pr-title"], Buffer.from("      - item\n"));
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain("templates/pr-title/fragments/ci-gate-jobs.jinja");
+    expect(errors[0]).toContain("fails closed");
   });
 
   test("a fragment job the manifest does not declare fails (it would escape the gate)", () => {
@@ -339,6 +356,9 @@ describe("injectUsesRefPreamble", () => {
       "{%- set uses_ref = 'main' %}",
       "{% set  uses_ref = 'main' %}",
       "{%+ set uses_ref = 'main' %}",
+      "{% set (uses_ref) = 'main' %}",
+      "{% set extra, uses_ref = 1, 'main' %}",
+      "{% set tpl_ref %}templates/v1.2.3{% endset %}",
     ]) {
       const result = injectUsesRefPreamble(
         "templates/demo/w.yml.jinja",
@@ -348,6 +368,16 @@ describe("injectUsesRefPreamble", () => {
       expect(result.error).toContain("templates/demo/w.yml.jinja");
       expect(result.error).toContain("hand-writes");
     }
+  });
+
+  test("reading a derivation name on a set's VALUE side stays legitimate", () => {
+    const result = injectUsesRefPreamble(
+      "templates/demo/w.yml.jinja",
+      Buffer.from("# h\n{%- set banner = uses_ref -%}\nuses: o/r/a@{{ uses_ref }}\n"),
+    );
+    if (result === null || "error" in result) throw new Error("expected an injection");
+    expect(result.data.toString("utf-8")).toContain("{%- set banner = uses_ref -%}");
+    expect(result.data.toString("utf-8")).toContain(USES_REF_PREAMBLE[6]);
   });
 
   test("the canonical preamble itself carries every derivation line and no hand-copy bait", () => {

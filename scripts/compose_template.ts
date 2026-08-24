@@ -63,7 +63,9 @@ import {
   writeFileSync,
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
+import { parse as parseYaml } from "yaml";
 import { joinLines, splitLines } from "../.github/scripts/shared/lines.ts";
+import { normalizeJinja, placeholderJinja } from "./jinja_subset.ts";
 import { loadManifests, MODULE_ORDER, type ModuleManifest } from "./module_manifests.ts";
 import {
   classifyTemplateSource,
@@ -568,16 +570,22 @@ export function gateJobsGroups(manifests: ModuleManifest[]): GateJobsGroup[] {
   return groups;
 }
 
-/** Workflow job ids a ci-gate-jobs fragment defines: the mapping keys at
- *  the fragment's own 2-space job indentation (the anchor sits among
- *  ci.yml's jobs, so every 2-space key is a job id; comments, steps, and
- *  jinja tags all sit elsewhere). Quoted keys and GitHub's whole job-id
- *  grammar are matched - broader than gate_jobs' declarable shape - so a
- *  job the manifest schema could not declare must still surface as a
- *  parity error, never escape the gate unseen. */
+/** Workflow job ids a ci-gate-jobs fragment defines. The fragment is the
+ *  jobs mapping's spliced children, so it is normalized modulo jinja
+ *  (placeholder identity values - job ids never carry substitutions),
+ *  wrapped under a jobs: key, and YAML-parsed: the top-level mapping keys
+ *  ARE the job ids, whatever YAML spelling they use. Throws on anything
+ *  that does not parse as that mapping - the parity check must fail
+ *  closed, never scan past a job spelling it did not anticipate. */
 export function fragmentJobIds(body: Buffer): string[] {
-  const key = /^ {2}(?:"([^"]*)"|'([^']*)'|([A-Za-z_][A-Za-z0-9_-]*)):[ \t]*(?:#.*)?$/gm;
-  return [...body.toString("utf-8").matchAll(key)].map((m) => m[1] ?? m[2] ?? m[3]);
+  const vars = { username: "OWNER", slug: "SLUG", copyrightHolder: "HOLDER" };
+  const normalized = placeholderJinja(normalizeJinja(body.toString("utf-8"), vars));
+  const doc: unknown = parseYaml(`jobs:\n${normalized}`);
+  const jobs = (doc as { jobs?: unknown } | null)?.jobs;
+  if (typeof jobs !== "object" || jobs === null || Array.isArray(jobs)) {
+    throw new Error("the fragment does not parse as the jobs mapping's children");
+  }
+  return Object.keys(jobs);
 }
 
 /** gate_jobs <-> ci-gate-jobs parity for one module: the declared gate
@@ -591,10 +599,20 @@ export function gateJobsParityErrors(
   fragment: Buffer | undefined,
 ): string[] {
   const declared = gateJobs ?? [];
-  const defined = fragment === undefined ? [] : fragmentJobIds(fragment);
-  const errors: string[] = [];
   const where = `templates/${module}/${MANIFEST_NAME}`;
   const fragmentPath = `templates/${module}/${FRAGMENTS_DIR}/ci-gate-jobs${JINJA_SUFFIX}`;
+  let defined: string[];
+  try {
+    defined = fragment === undefined ? [] : fragmentJobIds(fragment);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message.split("\n")[0] : String(error);
+    return [
+      `${fragmentPath}: cannot enumerate its job ids (${detail}) - the gate_jobs ` +
+        "parity check fails closed; fix the fragment so it parses as the " +
+        "jobs mapping's children (modulo jinja)",
+    ];
+  }
+  const errors: string[] = [];
   for (const job of defined) {
     if (!declared.includes(job)) {
       errors.push(
@@ -910,12 +928,25 @@ export function spliceContributions(
 // --- uses_ref preamble ---------------------------------------------------
 
 const USES_REF_HINT = Buffer.from("uses_ref");
-// Any hand-written half of the derivation trips the guard: a partial copy
-// (say, only tpl_ref) would silently override the injected assignments.
-// Matched as a jinja set-tag with any whitespace-control modifier, so
-// spacing variants cannot slip past and prose mentioning the names cannot
-// false-positive.
-const HAND_WRITTEN_PREAMBLE_RE = /\{%[-+]?\s*set\s+(?:tpl_ref|release_pin|uses_ref)\b/;
+const SET_TAG_RE = /\{%[-+]?\s*set\b([\s\S]*?)%\}/g;
+const PREAMBLE_NAMES_RE = /\b(?:tpl_ref|release_pin|uses_ref)\b/;
+
+/** Whether the text hand-writes any of the derivation's assignments: a
+ *  jinja set statement whose TARGET side names tpl_ref, release_pin, or
+ *  uses_ref would silently override the injected canonical values. Set
+ *  spellings vary - `(x)` grouping, tuple lists, namespace attributes,
+ *  block set with no `=` at all - so everything between `set` and the
+ *  first `=` (the whole tag when there is none) is checked and any
+ *  mention fails closed. Reading the names on the VALUE side stays
+ *  legitimate and does not trip. */
+function handWritesPreamble(text: string): boolean {
+  for (const tag of text.matchAll(SET_TAG_RE)) {
+    const inner = tag[1];
+    const eq = inner.indexOf("=");
+    if (PREAMBLE_NAMES_RE.test(eq === -1 ? inner : inner.slice(0, eq))) return true;
+  }
+  return false;
+}
 
 /** The canonical uses_ref derivation, injected (not hand-copied) into every
  *  composed file that references uses_ref. All-jinja lines: they render to
@@ -943,7 +974,7 @@ export function injectUsesRefPreamble(
   data: Buffer,
 ): { data: Buffer } | { error: string } | null {
   if (!data.includes(USES_REF_HINT)) return null;
-  if (HAND_WRITTEN_PREAMBLE_RE.test(data.toString("latin1"))) {
+  if (handWritesPreamble(data.toString("latin1"))) {
     return {
       error:
         `${source}: hand-writes the uses_ref pin-derivation preamble (or a ` +
