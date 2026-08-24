@@ -20,10 +20,11 @@
 #      `gh attestation verify <asset> -R <owner>/<repo> --bundle attestation.jsonl`
 #      The bundle rides on the frozen release itself, so verification
 #      never depends on GitHub's attestations API staying reachable.
-# A run that instead creates or refreshes the release PR (release-please's
-# other outcome; plain main pushes do neither) calls the repo-owned
-# update-release-pr.yml with that PR's number and head branch, so files
-# that must ride in the release commit are regenerated there.
+# A run in which release-please creates or refreshes the release PR
+# (computed independently of any release cut; plain main pushes do
+# neither) calls the repo-owned update-release-pr.yml with that PR's
+# number and head branch, so files that must ride in the release commit
+# are regenerated there.
 # Everything runs in the same workflow run, so it works with the default
 # GITHUB_TOKEN too, which cannot trigger `on: release` workflows. Without
 # the REPO_PLATFORM_TOKEN secret the release PR is created by the default
@@ -218,12 +219,12 @@ jobs:
           GH_TOKEN: {% raw %}${{ secrets.REPO_PLATFORM_TOKEN || github.token }}{% endraw %}
         run: gh release edit "$TAG" --draft=false
 
-  # The release-PR fork: a run refreshes the release PR xor cuts a release
-  # (plain main pushes do neither), so this hook call is independent of the
-  # three release stages above and never delays publish-release. Same
-  # ceiling passthrough as update-release: no permissions block, so the
-  # repo-owned hook gets the calling job's full ceiling and its jobs narrow
-  # it themselves.
+  # The release-PR hook: gated only on prs_created, which release-please
+  # computes independently of release_created (plain main pushes set
+  # neither), so this call sits outside the three release stages above and
+  # never delays publish-release. Same ceiling passthrough as
+  # update-release: no permissions block, so the repo-owned hook gets the
+  # calling job's full ceiling and its jobs narrow it themselves.
   update-release-pr:
     needs: [release-please]
     if: needs.release-please.outputs.prs_created == 'true'

@@ -441,9 +441,9 @@ if has release-please; then
   present "attest-build-provenance" "$wf/release.yml"
   present "attestations: write" "$wf/release.yml"
   present "id-token: write" "$wf/release.yml"
-  # The release-PR fork: the repo-owned hook release.yml calls when
+  # The release-PR hook: the repo-owned workflow release.yml calls when
   # release-please creates or refreshes the release PR, gated on the
-  # action's prs_created output so a release cut never triggers it.
+  # action's prs_created output (computed independently of a release cut).
   present "uses: ./.github/workflows/update-release-pr.yml" "$wf/release.yml"
   present "if: needs.release-please.outputs.prs_created == 'true'" "$wf/release.yml"
 else

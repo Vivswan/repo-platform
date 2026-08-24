@@ -1,6 +1,6 @@
 # The release-PR hook of the release pipeline: repo-owned, called by the
 # managed release.yml whenever release-please creates or refreshes the
-# release PR (the runs that do NOT cut a release). repo-platform has
+# release PR (independently of any release cut). repo-platform has
 # nothing to regenerate into its release commits yet, so this is the
 # untouched starter. Add jobs freely - releases never wait on this path.
 # Token caveat: pushes to the PR branch made with the default github.token
