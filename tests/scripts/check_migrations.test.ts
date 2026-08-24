@@ -127,6 +127,16 @@ describe("collectTransitions", () => {
     expect(transitions).toEqual([{ path: "old.yml", kind: "generated-once-removed" }]);
   });
 
+  test("a path skip-listed only in the NEW version still classifies as generated-once-removed", () => {
+    // The old version managed it, the new version drops the render and
+    // adds the skip entry: the sync's cleanup exempts it (union skip), so
+    // the deletion never happens and the transition still needs a
+    // migration decision.
+    expect(
+      collectTransitions(new Set(["late-skip.yml"]), new Set([]), [], ["late-skip.yml"]),
+    ).toEqual([{ path: "late-skip.yml", kind: "generated-once-removed" }]);
+  });
+
   test("identical versions produce no transitions", () => {
     const paths = new Set(["a.yml", "checks.yml"]);
     expect(collectTransitions(paths, paths, ["checks.yml"], ["checks.yml"])).toEqual([]);

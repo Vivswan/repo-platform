@@ -122,7 +122,7 @@ export function migrationErrors(
   const what: Record<Transition["kind"], (path: string) => string> = {
     retired: (path) => `templates/v${version} rendered '${path}' but the current template does not`,
     "generated-once-removed": (path) =>
-      `templates/v${version} rendered '${path}' as a generated-once (_skip_if_exists) file and the current template does not render it at all - the sync deletes nothing, so a rename strands the client's customized copy`,
+      `templates/v${version} rendered '${path}', which left the render while listed in _skip_if_exists (in either version's list) - the sync deletes nothing, so a rename strands the client's customized copy`,
     "ownership-flip": (path) =>
       `'${path}' changed ownership class since templates/v${version} (entered or left _skip_if_exists)`,
   };
