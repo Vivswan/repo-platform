@@ -33,7 +33,7 @@ import { capture } from "../.github/scripts/shared/proc.ts";
 import { protectedPaths } from "../.github/scripts/sync/retired_paths.ts";
 import { compare, parse as parseVersion, type Version } from "../migrations/run.ts";
 import { build } from "./compose_template.ts";
-import { skipIfExistsMatchers } from "./generate.ts";
+import { skipIfExistsMatchers } from "./ownership.ts";
 
 const REPO_ROOT = resolve(import.meta.dir, "..");
 

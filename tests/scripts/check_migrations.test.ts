@@ -25,7 +25,7 @@ import {
   resolveLatestRelease,
   type Transition,
 } from "../../scripts/check_migrations";
-import { skipIfExistsMatchers } from "../../scripts/generate";
+import { skipIfExistsMatchers } from "../../scripts/ownership";
 
 function matchers(patterns: string[]): RegExp[] {
   return patterns.length === 0

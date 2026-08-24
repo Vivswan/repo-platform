@@ -16,9 +16,6 @@
 //   template declares its ownership.
 // - scripts/compose_template.ts emits the ownership manifest
 //   (.repo-platform-manifest.json) into the composed template tree.
-//
-// generate.ts re-exports everything here, so importers keyed on the
-// generator keep resolving.
 
 import { lstatSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";

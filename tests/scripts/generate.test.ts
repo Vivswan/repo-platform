@@ -16,7 +16,6 @@ import {
   markerLines,
   mdMarkers,
   moduleChoices,
-  moduleOwnershipFiles,
   moduleOwnershipRegion,
   newRepoModuleRoster,
   type PagesManifest,
@@ -31,7 +30,6 @@ import {
   pinFileContent,
   readmeModuleRoster,
   reservedLabelNames,
-  skipIfExistsMatchers,
   spliceInlineRegion,
   spliceRegion,
   strayPinFiles,
@@ -44,6 +42,7 @@ import {
   trackingStreams,
 } from "../../scripts/generate";
 import type { ModuleManifest } from "../../scripts/module_manifests";
+import { moduleOwnershipFiles, skipIfExistsMatchers } from "../../scripts/ownership";
 
 function manifest(module: string, extra: Partial<ModuleManifest> = {}): ModuleManifest {
   return { module, description: `${module} module`, ...extra };

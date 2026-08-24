@@ -71,21 +71,6 @@ import {
 } from "./module_manifests.ts";
 import { moduleOwnershipFiles, type OwnershipEntry, skipIfExistsMatchers } from "./ownership.ts";
 
-// The ownership classification machinery (the managed-header/local-section
-// grammar, the _skip_if_exists matchers, the module-ownership scan) lives
-// in scripts/ownership.ts - the single owner of ownership truth, shared
-// with compose_template.ts's manifest emission. Re-exported here so
-// importers keyed on the generator keep resolving.
-export {
-  classifyTemplateSource,
-  KNOWN_UNDECLARED_MODULE_FILES,
-  landedPathAndGates,
-  type ManifestOwnership,
-  moduleOwnershipFiles,
-  type OwnershipEntry,
-  skipIfExistsMatchers,
-} from "./ownership.ts";
-
 const REPO_ROOT = resolve(import.meta.dir, "..");
 
 /** The marker grammar's kind tokens. check_ssot.ts's stripGeneratedRegions
