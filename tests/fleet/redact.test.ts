@@ -328,4 +328,33 @@ describe("enrich CLI", () => {
     expect(proc.exitCode).toBe(0);
     expect(proc.stdout.toString().trim()).toBe("h**-s**r");
   });
+
+  test("a malformed input file fails value-free (no SyntaxError echo)", () => {
+    // The bare identifier is the leaking form: a raw JSON.parse error
+    // quotes it ('Unexpected identifier "hiddenserver"') into this public
+    // log, and both readJson inputs carry private slugs.
+    const dir = mkdtempSync(join(tmpdir(), "redact-unparseable-"));
+    writeFileSync(join(dir, "selection.json"), '[{"repo": hiddenserver}]');
+    writeFileSync(join(dir, "discovered.json"), "[]");
+    writeFileSync(join(dir, "repos.yml"), 'managed:\n  - "*"\n');
+    const proc = Bun.spawnSync(
+      [
+        "bun",
+        join(import.meta.dir, "../../.github/scripts/fleet/redact.ts"),
+        "enrich",
+        "--selection",
+        join(dir, "selection.json"),
+        "--discovered",
+        join(dir, "discovered.json"),
+        "--registry",
+        join(dir, "repos.yml"),
+        "--central-dir",
+        join(dir, "no-central"),
+      ],
+      { env: { ...process.env, PAT: "p", GITHUB_RUN_ID: "1" } },
+    );
+    expect(proc.exitCode).toBe(1);
+    expect(proc.stdout.toString()).toContain("not valid JSON");
+    expect(proc.stdout.toString() + proc.stderr.toString()).not.toContain("hiddenserver");
+  });
 });

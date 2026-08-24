@@ -335,6 +335,18 @@ describe("CLI", () => {
     expect(stdout).not.toContain("42");
   });
 
+  test("a malformed discovered file fails value-free (no SyntaxError echo)", async () => {
+    // The bare identifier is the leaking form: a raw JSON.parse error
+    // quotes it ('Unexpected identifier "hiddenserver"') into this public
+    // log, and discovered.json carries private slugs.
+    const discovered = join(tmpdir(), "repos-registry-test-discovered-unparseable.json");
+    await Bun.write(discovered, '["Vivswan/dotfiles", hiddenserver]');
+    const { exitCode, stdout, stderr } = run(["select", "--discovered", discovered]);
+    expect(exitCode).toBe(1);
+    expect(stdout).toContain("not valid JSON");
+    expect(stdout + stderr).not.toContain("hiddenserver");
+  });
+
   test("excluded prints the exclude list as a JSON array", async () => {
     const file = join(tmpdir(), "repos-registry-test-excluded.yml");
     await Bun.write(file, 'managed:\n  - "*"\nexclude:\n  - a/b\n  - a/c\n');

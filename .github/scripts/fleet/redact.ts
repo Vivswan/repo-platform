@@ -45,7 +45,7 @@ import { join } from "node:path";
 import { z } from "zod";
 import { parseFlags } from "../shared/flags.ts";
 import { fail } from "../shared/gha.ts";
-import { parseWith } from "../shared/json.ts";
+import { parseJson, parseWith } from "../shared/json.ts";
 import { loadRegistry } from "./repos_registry.ts";
 
 // One implementation for both sides: the plan job tags rows here and the
@@ -274,12 +274,18 @@ export function parseSelectionList(
 }
 
 function readJson(path: string, what: string): unknown {
+  let text: string;
   try {
-    return JSON.parse(readFileSync(path, "utf-8"));
+    text = readFileSync(path, "utf-8");
   } catch (err) {
+    // An fs error's message carries the errno and the path (already in
+    // this diagnostic), never file content, so it may print. The parse
+    // failure may NOT: a SyntaxError quotes the payload, which carries
+    // private slugs, so parseJson keeps that diagnostic value-free.
     const detail = err instanceof Error ? err.message : String(err);
     fail(`${path}: cannot read ${what}: ${detail}`);
   }
+  return parseJson(text, `${path}: ${what}`);
 }
 
 function loadDiscovered(path: string): DiscoveredRepo[] {

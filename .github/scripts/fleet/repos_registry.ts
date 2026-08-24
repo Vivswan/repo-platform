@@ -27,6 +27,7 @@ import { z } from "zod";
 import { CHANNELS, type Channel, isChannel } from "../shared/channels.ts";
 import { parseFlags } from "../shared/flags.ts";
 import { fail } from "../shared/gha.ts";
+import { parseJson } from "../shared/json.ts";
 
 const SLUG_RE = /^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?\/[A-Za-z0-9._-]+$/;
 const WILDCARD = "*";
@@ -334,13 +335,17 @@ function main(args: string[]): void {
       let discovered: string[] | null = null;
       const discoveredPath = flags["--discovered"];
       if (discoveredPath !== undefined) {
-        let parsed: unknown;
+        let text: string;
         try {
-          parsed = JSON.parse(readFileSync(discoveredPath, "utf-8"));
+          text = readFileSync(discoveredPath, "utf-8");
         } catch (err) {
+          // The fs error's message is errno + path, never file content;
+          // the parse failure's may quote the payload (private slugs), so
+          // parseJson keeps that diagnostic value-free.
           const detail = err instanceof Error ? err.message : String(err);
           fail([`${discoveredPath}: cannot read discovered list: ${detail}`]);
         }
+        const parsed = parseJson(text, `${discoveredPath}: discovered list`);
         if (!Array.isArray(parsed)) {
           fail([`${discoveredPath}: discovered list must be a JSON array`]);
         }
