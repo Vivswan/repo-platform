@@ -625,6 +625,17 @@ describe("module ownership files", () => {
     }
   });
 
+  test("a pattern matching a directory also covers its descendants", () => {
+    const [plugin, starDir] = skipIfExistsMatchers(
+      "_skip_if_exists:\n  - .claude-plugin\n  - dir/*\n",
+    );
+    expect(plugin.test(".claude-plugin/plugin.json")).toBe(true);
+    expect(plugin.test("nested/.claude-plugin/plugin.json")).toBe(true);
+    expect(starDir.test("dir/x")).toBe(true);
+    expect(starDir.test("dir/x/deep/file.yml")).toBe(true);
+    expect(starDir.test("other/dir/x")).toBe(false);
+  });
+
   test("moduleOwnershipFiles classifies every file: enrol, starter, split, gated, comment-free", () => {
     const dir = mkdtempSync(join(tmpdir(), "headers-"));
     try {

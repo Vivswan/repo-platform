@@ -533,7 +533,10 @@ export function skipIfExistsMatchers(copierYamlText: string): RegExp[] {
       .split("*")
       .map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
       .join("[^/]*");
-    return new RegExp(pattern.includes("/") ? `^${body}$` : `(?:^|/)${body}$`);
+    // A gitwildmatch pattern that matches a directory also covers every
+    // descendant, hence the optional /... tail.
+    const tail = "(?:/.*)?$";
+    return new RegExp(pattern.includes("/") ? `^${body}${tail}` : `(?:^|/)${body}${tail}`);
   });
 }
 
