@@ -434,6 +434,39 @@ describe("base checks shape", () => {
     expect(stderr).toContain("all-green `needs:` is missing job(s): base-checks");
   });
 
+  test("a rendered job absent from all-green's needs fails (the composer guards' backstop)", () => {
+    // The composer's gate_jobs parity and preamble guards catch honest
+    // mistakes at compose time but deliberately not obfuscated jinja; this
+    // check, run by smoke-generate on every push, is the render-side
+    // backstop they name: any job that ends up in a rendered ci.yml
+    // without gating the merge is an error here.
+    const { exitCode, stderr } = runValidator({
+      ".github/workflows/ci.yml": [
+        "# This file is managed by Vivswan/repo-platform.",
+        "name: CI",
+        "jobs:",
+        "  typography:",
+        "    runs-on: ubuntu-latest",
+        "    steps:",
+        "      - run: echo ok",
+        "  release-freshness:",
+        "    runs-on: ubuntu-latest",
+        "    steps:",
+        "      - run: echo rendered but undeclared",
+        "  all-green:",
+        "    if: always()",
+        "    needs: [typography]",
+        "    runs-on: ubuntu-latest",
+        "    steps:",
+        "      - run: |",
+        '          if [ "$RESULT" != "success" ]; then exit 1; fi',
+        "",
+      ].join("\n"),
+    });
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain("all-green `needs:` is missing job(s): release-freshness");
+  });
+
   test("a ci.yml with neither a typography job nor a merged shape fails", () => {
     const { exitCode, stderr } = runValidator({
       ".github/workflows/ci.yml": [

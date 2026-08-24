@@ -575,11 +575,15 @@ export function gateJobsGroups(manifests: ModuleManifest[]): GateJobsGroup[] {
  *  (placeholder identity values - job ids never carry substitutions),
  *  wrapped under a jobs: key, and YAML-parsed: the top-level mapping keys
  *  ARE the job ids, whatever YAML spelling they use. Every parsed key must
- *  also appear as a literal 2-space key line in the RAW fragment - a
- *  jinja-derived key would enumerate as one spelling and render as
- *  another. Throws on anything that fails either bar - the parity check
- *  must fail closed, never scan past a job spelling it did not
- *  anticipate. */
+ *  also appear as a literal 2-space key line in the RAW fragment (jinja
+ *  comments stripped) - a jinja-derived key would enumerate as one
+ *  spelling and render as another. Throws on anything that fails either
+ *  bar, so honest-mistake shapes (a new job spelling, a typo) fail closed
+ *  rather than escape the parity check. Scope: value-side jinja CAN still
+ *  synthesize rendered structure this scan never sees; that is out of
+ *  scope here - this repo's review gates and the render-side validator's
+ *  all-green needs-completeness check (run by smoke-generate on every
+ *  push) are the backstop. */
 export function fragmentJobIds(body: Buffer): string[] {
   const raw = body.toString("utf-8");
   const vars = { username: "OWNER", slug: "SLUG", copyrightHolder: "HOLDER" };
@@ -958,13 +962,13 @@ const PREAMBLE_NAMES_RE = /\b(?:tpl_ref|release_pin|uses_ref)\b/;
  *  uses_ref would silently override the injected canonical values. Set
  *  spellings vary - `(x)` grouping, tuple lists, namespace attributes,
  *  block set with no `=` at all - so everything between `set` and the
- *  first `=` (the whole tag when there is none) is checked and any
- *  mention fails closed. Reading the names on the VALUE side stays
- *  legitimate and does not trip. The tag scan is not quote-aware: a
- *  string literal containing `%}` ends the scanned tag early, which can
- *  only OVER-trigger (an assignment's target always precedes any string
- *  literal), and a false positive is a loud compose error, never a
- *  bypass. */
+ *  first `=` (the whole tag when there is none) is checked. Reading the
+ *  names on the VALUE side stays legitimate and does not trip. Scope:
+ *  this catches every straightforward assignment form - the
+ *  honest-mistake shapes (accidental re-declaration, drift) the guard
+ *  exists for. Deliberately obfuscated jinja can evade it and is out of
+ *  scope; this repo's review gates and the render-side validator are the
+ *  backstop. */
 function handWritesPreamble(text: string): boolean {
   for (const tag of text.matchAll(SET_TAG_RE)) {
     const inner = tag[1];
