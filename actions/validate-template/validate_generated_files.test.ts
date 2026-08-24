@@ -1147,6 +1147,23 @@ describe("ownership-manifest byte parity", () => {
     expect(stdout).toContain("advisory: .github/settings.yml: listed as mergeable");
   });
 
+  test("a directory squatting on a mergeable path is an error, not presence", () => {
+    // lstat success alone must not count: three-way merge has nothing to
+    // merge into a directory, so the squatter is unhealable damage.
+    const entries = {
+      ...stampedBaseline(),
+      ".github/settings.yml": '{"class": "mergeable"}',
+    };
+    const { exitCode, stderr } = runValidator({
+      ".repo-platform.yml": `${MANAGED_HEADER}modules: [uv, settings-sync]\n`,
+      [MANIFEST]: manifestOf(entries),
+      ".github/settings.yml/placeholder": "not the settings file\n",
+    });
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain(".github/settings.yml: listed as mergeable");
+    expect(stderr).toContain("not a regular file");
+  });
+
   test("a mergeable entry hand-flipped to starter fails the roster cross-check", () => {
     // THE class-flip attack for hashless classes: starter and mergeable
     // both carry no hash, so without the roster pin the flip would cost

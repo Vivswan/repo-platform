@@ -1268,13 +1268,26 @@ function main(): number {
           }
           // Check 8's absence stance, matching the managed advisory below:
           // sync re-renders mergeable files, so a missing one is damage the
-          // next sync heals.
+          // next sync heals. A present node must be a regular file, though -
+          // three-way merge has nothing to merge into a directory or special
+          // file, so a squatter here is unhealable, not presence.
+          let stat: ReturnType<typeof lstatSync> | null = null;
           try {
-            lstatSync(join(root, rel));
+            stat = lstatSync(join(root, rel));
           } catch {
+            stat = null;
+          }
+          if (stat === null) {
             advisories.push(
               `${rel}: listed as mergeable in ${MANIFEST_NAME} but missing ` +
                 "from the repo - the next template sync restores it",
+            );
+          } else if (!stat.isFile()) {
+            errors.push(
+              `${rel}: listed as mergeable in ${MANIFEST_NAME} but is not a ` +
+                "regular file - sync three-way merges a baseline file at this " +
+                "path and cannot heal a directory or special file; remove the " +
+                "squatter, then a template sync restores the baseline",
             );
           }
           continue;
