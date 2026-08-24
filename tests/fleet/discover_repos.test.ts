@@ -5,10 +5,11 @@ import { join } from "node:path";
 
 // End-to-end harness for the sync plan's discovery step, stub-gh style
 // (see discovery.test.ts). This script replaced sync-repos.yml's inline
-// jq pipeline, so the tests pin its two output contracts to the jq era:
-// the {repo, private} rows in discovered.json (redact.ts's enrich and
+// jq pipeline, so the tests pin its two output contracts: the
+// {repo, private} rows in discovered.json (redact.ts's enrich and
 // repos_registry's select parse them; `private` drives redaction) and
-// the public log line, which prints only a count and the owner login.
+// the public log line, byte-identical to the jq era, which prints only
+// a count and the owner login.
 describe("discover_repos.ts", () => {
   const script = join(import.meta.dir, "../../.github/scripts/fleet/discover_repos.ts");
   const root = mkdtempSync(join(tmpdir(), "discover-repos-"));
@@ -86,6 +87,9 @@ describe("discover_repos.ts", () => {
     expect(r.exitCode).toBe(0);
     // Row shape and key order pinned to the retired jq step's
     // `{repo: .full_name, private: (.private != false)}` projection.
+    // Deliberately no trailing newline (jq -c emitted one): the file's
+    // consumers JSON.parse it, and select_settings_repos.ts writes its
+    // discovered.json the same way.
     expect(readFileSync(r.discoveredPath, "utf-8")).toBe(
       '[{"repo":"Vivswan/hidden","private":true},{"repo":"Vivswan/pub","private":false}]',
     );
@@ -114,12 +118,15 @@ describe("discover_repos.ts", () => {
   });
 
   test("an unparseable listing fails with a value-free diagnostic (no SyntaxError echo)", () => {
-    const payload = join(root, "truncated.json");
-    writeFileSync(payload, '[[{"full_name": "Vivswan/hidden-serv');
-    const r = run("truncated", { STUB_PAYLOAD: payload });
+    // A bare identifier is the leaking form: Bun's raw JSON.parse error
+    // echoes it ('Unexpected identifier "hiddenserver"'), so this pins
+    // that parseJsonWith's fixed diagnostic replaces it.
+    const payload = join(root, "unparseable.json");
+    writeFileSync(payload, '[[{"full_name": hiddenserver}]]');
+    const r = run("unparseable", { STUB_PAYLOAD: payload });
     expect(r.exitCode).toBe(1);
     expect(r.stdout).toContain("::error::discover_repos: user/repos response: not valid JSON");
-    expect(r.stdout + r.stderr).not.toContain("hidden-serv");
+    expect(r.stdout + r.stderr).not.toContain("hiddenserver");
     expect(existsSync(r.discoveredPath)).toBe(false);
   });
 });

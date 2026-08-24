@@ -231,12 +231,13 @@ describe("readDispatchRepo", () => {
   });
 
   test("an unparseable payload fails with a value-free diagnostic (no SyntaxError echo)", () => {
-    // A truncated event file still carries the private slug; a raw
-    // JSON.parse SyntaxError would echo a fragment of it.
-    const r = runDispatch('{"inputs": {"repo": "Vivswan/hidden-serv', "truncated");
+    // A bare identifier is the leaking form: Bun's raw JSON.parse error
+    // echoes it ('Unexpected identifier "hiddenserver"'), so this pins
+    // that parseJsonWith's fixed diagnostic replaces it.
+    const r = runDispatch('{"inputs": {"repo": hiddenserver}}', "unparseable");
     expect(r.exitCode).toBe(1);
     expect(r.stdout).toContain("::error::readDispatchRepo: event payload: not valid JSON");
-    expect(r.stdout + r.stderr).not.toContain("hidden-serv");
+    expect(r.stdout + r.stderr).not.toContain("hiddenserver");
   });
 
   test("nothing set reads as empty, and an owner never prefixes an empty input", () => {
@@ -338,14 +339,15 @@ describe("discoverWritableRepos and runStage", () => {
   });
 
   test("an unparseable listing fails with a value-free diagnostic (no SyntaxError echo)", () => {
-    // A truncated gh response still carries slugs; a raw JSON.parse
-    // SyntaxError would echo a fragment of the offending text.
-    const payload = join(root, "truncated.json");
-    writeFileSync(payload, '[[{"full_name": "Vivswan/hidden-serv');
+    // A bare identifier is the leaking form: Bun's raw JSON.parse error
+    // echoes it ('Unexpected identifier "hiddenserver"'), so this pins
+    // that parseJsonWith's fixed diagnostic replaces it.
+    const payload = join(root, "unparseable.json");
+    writeFileSync(payload, '[[{"full_name": hiddenserver}]]');
     const r = runDiscover({ STUB_PAYLOAD: payload });
     expect(r.exitCode).toBe(1);
     expect(r.stdout).toContain("::error::discovery.test: user/repos response: not valid JSON");
-    expect(r.stdout + r.stderr).not.toContain("hidden-serv");
+    expect(r.stdout + r.stderr).not.toContain("hiddenserver");
   });
 
   const stageEntry = join(root, "stage_entry.ts");
