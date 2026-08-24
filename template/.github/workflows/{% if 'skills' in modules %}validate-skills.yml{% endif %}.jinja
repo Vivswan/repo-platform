@@ -10,10 +10,10 @@
 # offline structural validation runs inside the gate (the validate-skills
 # job in ci.yml). Repo-specific assertions (docs coverage, extra per-skill
 # files) belong in the repo-owned checks.yml, not here.
-{#- The composite action lives on main, not on the build branches: strip a
-    templates/vX.Y.Z build-tag _commit to the same-version release tag on
-    main; anything else (staging describe/sha strings, fresh copies) pins
-    main. -#}
+{#- The reusable workflows and composite actions referenced via uses_ref
+    live on main, not on the build branches: strip a templates/vX.Y.Z
+    build-tag _commit to the same-version release tag on main; anything
+    else (staging describe/sha strings, fresh copies) pins main. -#}
 {%- set tpl_ref = _copier_answers._commit | default('', true) -%}
 {%- set release_pin = tpl_ref | regex_replace('^templates/(v[0-9]+\\.[0-9]+\\.[0-9]+)$', '\\1') -%}
 {%- set uses_ref = release_pin if (release_pin and release_pin != tpl_ref) else 'main' %}
