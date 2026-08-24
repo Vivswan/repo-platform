@@ -14,6 +14,9 @@ import {
   codeqlSlug,
   dependabotLabels,
   ecosystemGroups,
+  fragmentJobIds,
+  gateJobsGroups,
+  gateJobsParityErrors,
   injectUsesRefPreamble,
   labelBlock,
   lockfileGroups,
@@ -151,6 +154,67 @@ describe("trackingLabelBlock", () => {
     expect(trackingLabelBlock("fuzzer", tracking)).toContain(
       "  - name: {{ fuzzer_label | tojson }}\n",
     );
+  });
+});
+
+describe("gateJobsGroups", () => {
+  test("each declaring module keeps its own group, in manifest order", () => {
+    const rp = manifest("release-please", ["gate_jobs: [release-freshness, release-health]"]);
+    const prTitle = manifest("pr-title", ["gate_jobs: [pr-title]"]);
+    expect(gateJobsGroups([AGENTS, rp, prTitle])).toEqual([
+      { module: "release-please", jobs: ["release-freshness", "release-health"] },
+      { module: "pr-title", jobs: ["pr-title"] },
+    ]);
+  });
+
+  test("a job id declared by two modules throws (duplicate needs entry)", () => {
+    expect(() =>
+      gateJobsGroups([
+        manifest("skills", ["gate_jobs: [validate-skills]"]),
+        manifest("pr-title", ["gate_jobs: [validate-skills]"]),
+      ]),
+    ).toThrow("templates/skills/module.yml");
+  });
+});
+
+describe("fragmentJobIds", () => {
+  test("collects the 2-space mapping keys, skipping comments, steps, and jinja", () => {
+    const body = Buffer.from(
+      [
+        "  # a job comment",
+        "  release-freshness:",
+        "    runs-on: ubuntu-latest",
+        "    steps:",
+        "      - uses: actions/checkout@v7",
+        "{%- if x %}",
+        "  release-health:",
+        "    runs-on: ubuntu-latest",
+        "{%- endif %}",
+        "",
+      ].join("\n"),
+    );
+    expect(fragmentJobIds(body)).toEqual(["release-freshness", "release-health"]);
+  });
+});
+
+describe("gateJobsParityErrors", () => {
+  const fragment = Buffer.from("  pr-title:\n    runs-on: ubuntu-latest\n");
+
+  test("matching declarations and fragment jobs pass", () => {
+    expect(gateJobsParityErrors("pr-title", ["pr-title"], fragment)).toEqual([]);
+    expect(gateJobsParityErrors("agents", undefined, undefined)).toEqual([]);
+  });
+
+  test("a fragment job the manifest does not declare fails (it would escape the gate)", () => {
+    const errors = gateJobsParityErrors("pr-title", undefined, fragment);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain("outside the strict all-green gate");
+  });
+
+  test("a declared job the fragment does not define fails (a needs entry nothing satisfies)", () => {
+    const errors = gateJobsParityErrors("pr-title", ["pr-title", "ghost"], fragment);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain("'ghost'");
   });
 });
 

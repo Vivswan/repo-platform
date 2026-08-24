@@ -38,9 +38,9 @@ export const MODULE_ORDER = [
   "pages",
   "release-please",
   "issue-templates",
-  // Before pr-title: both feed the ci-gate anchors, and pr-title must stay
-  // LAST among the ci-gate-needs fragment contributors - moving it would
-  // reorder the rendered needs entries and churn existing fleet renders.
+  // Before pr-title: both declare gate_jobs, and pr-title must stay LAST
+  // among the gate_jobs contributors - moving it would reorder the
+  // generated needs entries and churn existing fleet renders.
   "skills",
   "pr-title",
   "auto-assign",
@@ -180,6 +180,15 @@ export const manifestSchema = z.strictObject({
       install: mdCellSafe(jinjaQuoted("the install command"), "the install command"),
       build: mdCellSafe(jinjaQuoted("the build command"), "the build command"),
     })
+    .optional(),
+  // The module's jobs inside ci.yml's strict all-green gate: the composer
+  // generates the gate's needs entries from this and cross-checks it
+  // against the job ids the module's fragments/ci-gate-jobs.jinja defines,
+  // so a spliced job can never ship outside the gate's needs list (a
+  // skipped needed job counts as failure).
+  gate_jobs: z
+    .array(z.string().regex(/^[a-z][a-z0-9-]*$/, "must be a lowercase workflow job id"))
+    .min(1)
     .optional(),
   // The gate expression is interpolated verbatim into `{% if <gate> %}`
   // FILENAME gates and into `not (<gate>)` guard chains: { } % # would open

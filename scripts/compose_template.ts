@@ -30,9 +30,9 @@
 //   ONCE, and gated on the or-chain of the contributing modules in
 //   MODULE_ORDER - never per-module duplicates, never precedence guards.
 //   A fragment file for a data anchor is an error, with two exceptions:
-//   ci-gate-needs and settings-labels still take fragments from modules the
-//   generator does not cover, and agents-toolchain consumes its fragments
-//   as generator input.
+//   settings-labels still takes fragments from modules the generator does
+//   not cover, and agents-toolchain consumes its fragments as generator
+//   input.
 //
 // Every anchor needs at least one contribution (fragment or generated) and
 // every contribution needs its anchor. Collisions are errors, never silent
@@ -484,6 +484,76 @@ export function trackingLabelBlock(
   );
 }
 
+export type GateJobsGroup = { module: string; jobs: string[] };
+
+/** Each module's declared gate jobs, in MODULE_ORDER. A job id declared by
+ *  two modules throws: the all-green gate's needs list would carry a
+ *  duplicate entry, and a gate job has exactly one defining module. */
+export function gateJobsGroups(manifests: ModuleManifest[]): GateJobsGroup[] {
+  const owners = new Map<string, string>();
+  const groups: GateJobsGroup[] = [];
+  for (const manifest of manifests) {
+    if (!manifest.gate_jobs) continue;
+    for (const job of manifest.gate_jobs) {
+      const prior = owners.get(job);
+      if (prior) {
+        throw new GeneratorValidationError(
+          `gate job '${job}' is declared by both templates/${prior}/module.yml and ` +
+            `templates/${manifest.module}/module.yml - the all-green needs list ` +
+            "would carry a duplicate entry; each gate job has one owning module",
+        );
+      }
+      owners.set(job, manifest.module);
+    }
+    groups.push({ module: manifest.module, jobs: manifest.gate_jobs });
+  }
+  return groups;
+}
+
+/** Workflow job ids a ci-gate-jobs fragment defines: the mapping keys at
+ *  the fragment's own 2-space job indentation (the anchor sits among
+ *  ci.yml's jobs, so every 2-space key is a job id; comments, steps, and
+ *  jinja tags all sit elsewhere). */
+export function fragmentJobIds(body: Buffer): string[] {
+  return [...body.toString("utf-8").matchAll(/^ {2}([a-z][a-z0-9-]*):[ \t]*$/gm)].map((m) => m[1]);
+}
+
+/** gate_jobs <-> ci-gate-jobs parity for one module: the declared gate
+ *  jobs must be exactly the jobs the module's fragment defines. An
+ *  undeclared fragment job would run outside the strict all-green gate
+ *  (branch protection never sees it); a declared job no fragment defines
+ *  would render a needs entry nothing satisfies and fail every run. */
+export function gateJobsParityErrors(
+  module: string,
+  gateJobs: string[] | undefined,
+  fragment: Buffer | undefined,
+): string[] {
+  const declared = gateJobs ?? [];
+  const defined = fragment === undefined ? [] : fragmentJobIds(fragment);
+  const errors: string[] = [];
+  const where = `templates/${module}/${MANIFEST_NAME}`;
+  const fragmentPath = `templates/${module}/${FRAGMENTS_DIR}/ci-gate-jobs${JINJA_SUFFIX}`;
+  for (const job of defined) {
+    if (!declared.includes(job)) {
+      errors.push(
+        `${fragmentPath}: defines job '${job}' but ${where} does not declare it in ` +
+          "gate_jobs - the job would run outside the strict all-green gate; " +
+          "declare it (the composer emits the needs entry)",
+      );
+    }
+  }
+  for (const job of declared) {
+    if (!defined.includes(job)) {
+      errors.push(
+        `${where}: gate_jobs declares '${job}' but ${fragmentPath} defines no such ` +
+          "job - the generated needs entry would fail every run; fix the id " +
+          "or add the job to the fragment",
+      );
+    }
+  }
+  return errors;
+}
+
 const DATA_ANCHORS: Record<string, DataAnchorSpec> = {
   "dependabot-ecosystems": {
     data: "dependabot.ecosystem",
@@ -507,15 +577,14 @@ const DATA_ANCHORS: Record<string, DataAnchorSpec> = {
         text: Buffer.from(gatedText(orChain(group.modules, gateOf), codeqlJob(group))),
       })),
   },
-  // Mixed anchor: the toolchain gate entries are generated here;
-  // release-please, skills, and pr-title still contribute fragment files,
-  // spliced at their own MODULE_ORDER positions.
+  // The all-green gate's needs entries: the enable_codeql-guarded
+  // codeql-<slug> jobs from the toolchain manifests, then each module's
+  // declared gate_jobs, all in MODULE_ORDER.
   "ci-gate-needs": {
-    data: "toolchain.codeql_language",
-    kind: "coexist",
-    covered: (manifest) => manifest.toolchain !== undefined,
-    generate: ({ manifests, gateOf }) =>
-      codeqlGroups(manifests).map((group) => ({
+    data: "toolchain.codeql_language and gate_jobs",
+    kind: "reject",
+    generate: ({ manifests, gateOf }) => [
+      ...codeqlGroups(manifests).map((group) => ({
         order: orderOf(manifests, group.modules[0]),
         source: generatorSource("ci-gate-needs", "toolchain.codeql_language"),
         text: Buffer.from(
@@ -525,6 +594,14 @@ const DATA_ANCHORS: Record<string, DataAnchorSpec> = {
           ),
         ),
       })),
+      ...gateJobsGroups(manifests).map((group) => ({
+        order: orderOf(manifests, group.module),
+        source: generatorSource("ci-gate-needs", "gate_jobs"),
+        text: Buffer.from(
+          gatedText(gateOf(group.module), group.jobs.map((job) => `      - ${job}\n`).join("")),
+        ),
+      })),
+    ],
   },
   "settings-dependabot-labels": {
     data: "dependabot.label",
@@ -1095,6 +1172,21 @@ export function build(): Map<string, Entry> {
     (fragments.get("agents-toolchain") ?? []).map(([manifest]) => manifest.module),
   );
   errors.push(...agentsToolchainErrors(manifests, agentsToolchainModules));
+
+  // Every module's gate_jobs must mirror the jobs its ci-gate-jobs fragment
+  // splices into ci.yml, in both directions (see gateJobsParityErrors).
+  const gateJobsFragments = new Map(
+    (fragments.get("ci-gate-jobs") ?? []).map(([manifest, body]) => [manifest.module, body]),
+  );
+  for (const manifest of manifests) {
+    errors.push(
+      ...gateJobsParityErrors(
+        manifest.module,
+        manifest.gate_jobs,
+        gateJobsFragments.get(manifest.module),
+      ),
+    );
+  }
 
   for (const [anchor, spec] of Object.entries(DATA_ANCHORS)) {
     const fromFiles = fragments.get(anchor) ?? [];
