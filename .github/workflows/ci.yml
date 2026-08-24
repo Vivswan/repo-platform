@@ -244,7 +244,7 @@ jobs:
   # advisory validate-skills.yml (npx needs the npm registry, and managed
   # repos must not block on a registry hiccup); here it GATES, per this
   # repo's all-jobs-gate convention - CI is not network-shy (smoke-generate
-  # already downloads copier and actionlint) and a listing regression in
+  # already downloads copier) and a listing regression in
   # the action this repo ships should block its own merges.
   skills-discovery:
     runs-on: ubuntu-latest
@@ -256,9 +256,35 @@ jobs:
           skills-dir: skills
           mode: discovery
 
+  # The smoke legs lint their rendered workflows with the actionlint
+  # binary. Fetched here ONCE per run and handed to the legs as an
+  # artifact: each leg fetching it itself meant one unpinned download of
+  # rhysd/actionlint@main's install script per matrix row per push
+  # (observed connection-reset flake, and unpinned third-party code). The
+  # install script rides the same pinned release tag as the binary it
+  # installs; curl retries transient resets as belt-and-braces.
+  actionlint-binary:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Download actionlint
+        env:
+          ACTIONLINT_VERSION: 1.7.12
+        run: |
+          curl -sSL --retry 3 -o /tmp/download-actionlint.bash \
+            "https://raw.githubusercontent.com/rhysd/actionlint/v${ACTIONLINT_VERSION}/scripts/download-actionlint.bash"
+          bash /tmp/download-actionlint.bash "$ACTIONLINT_VERSION"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: actionlint-binary
+          path: actionlint
+          if-no-files-found: error
+
   smoke-generate:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # For the actionlint-binary artifact the lint step downloads.
+    needs: [actionlint-binary]
     strategy:
       fail-fast: false
       matrix:
@@ -423,10 +449,15 @@ jobs:
         if: matrix.name == 'dogfood-oracle'
         run: bun .github/scripts/ci/verify_dogfood_oracle.ts
       # Rendered workflows are invisible to the repo-level actionlint job
-      # (.jinja files are not YAML pre-render), so lint the smoke output.
+      # (.jinja files are not YAML pre-render), so lint the smoke output
+      # with the binary the actionlint-binary job fetched once for the run.
+      - uses: actions/download-artifact@v7
+        with:
+          name: actionlint-binary
       - name: actionlint rendered workflows
         run: |
-          bash <(curl -sSL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
+          # The artifact zip drops the executable bit.
+          chmod +x "$GITHUB_WORKSPACE/actionlint"
           # git init + render-root cwd, or the render's actionlint.yaml
           # ignores never apply: project discovery needs the .git dir, and
           # the config's path globs match cwd-relative paths.
@@ -533,6 +564,7 @@ jobs:
     if: always()
     needs:
       - actionlint
+      - actionlint-binary
       - gitleaks
       - dependency-review
       - shellcheck
