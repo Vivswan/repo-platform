@@ -69,9 +69,12 @@ const HTML_TAG_LINE = /^<\/?[a-zA-Z][a-zA-Z0-9-]*(\s[^>]*)?\/?>$/;
 /** An HTML comment left open on this line (no `-->` after the last
  *  `<!--`), wherever the opener sits. Inline code spans (any backtick run
  *  length) are masked first so a literal `<!--` token cannot swallow the
- *  rest of the file. */
+ *  rest of the file. Masks here substitute a space rather than deleting:
+ *  deletion changes adjacency, so the text around a removed match can
+ *  splice into syntax that was never in the document (`` <`x`!-- `` would
+ *  mask to `<!--`). */
 function opensComment(raw: string): boolean {
-  const masked = raw.replace(/(`+)(.*?)\1/g, "");
+  const masked = raw.replace(/(`+)(.*?)\1/g, " ");
   const last = masked.lastIndexOf("<!--");
   return last !== -1 && !masked.includes("-->", last + 4);
 }
@@ -139,15 +142,15 @@ export function scanMarkdown(content: string): {
     // GFM tables: a header line with a pipe whose next line is the
     // delimiter row at the same quote depth opens a table; rows with
     // pipes at that depth continue it. Inline marker comments may ride
-    // on the delimiter row (docs/toolchains.md), so strip them before
-    // matching.
+    // on the delimiter row (docs/toolchains.md), so mask them (to a
+    // space, same rationale as opensComment) before matching.
     if (table !== null && (!rest.includes("|") || depth !== table.depth)) table = null;
     const next = quoteDepth(lines[index + 1] ?? "");
     if (
       table === null &&
       rest.includes("|") &&
       next.depth === depth &&
-      TABLE_DELIMITER.test(next.rest.replace(/<!--[\s\S]*?-->/g, ""))
+      TABLE_DELIMITER.test(next.rest.replace(/<!--[\s\S]*?-->/g, " "))
     ) {
       table = { depth };
     }

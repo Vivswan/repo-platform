@@ -121,6 +121,13 @@ describe("scanMarkdown", () => {
     expect(scanMarkdown("A literal `<!--` token\nwrapped continuation").hits).toEqual([2]);
   });
 
+  test("masking a code span cannot splice its surroundings into a comment opener", () => {
+    // Deleting the span instead of masking it to a space would turn this
+    // line into `<!--`, silently skipping the wrapped continuation.
+    const text = "prose with a spliced <`x`!-- token\nwrapped continuation";
+    expect(scanMarkdown(text)).toEqual({ hits: [2], unterminated: null });
+  });
+
   test("setext underlines and bare HTML tag lines are structural", () => {
     expect(scanMarkdown("Title\n=====\n\nprose").hits).toEqual([]);
     expect(
