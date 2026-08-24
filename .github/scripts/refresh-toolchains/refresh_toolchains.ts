@@ -153,20 +153,27 @@ export function majorJumps(bumps: Bump[]): string {
     .join(", ");
 }
 
-/** Fetch and JSON-parse one upstream source. The invalid-JSON diagnostic
- *  is a fixed string BY CONSTRUCTION - runtimes differ on whether the
- *  JSON error message embeds the malformed body, and this error's message
- *  is published as a public ::warning by main() - so only the endpoint is
- *  named, never the runtime's error text. */
+/** Fetch and JSON-parse one upstream source. Both failure diagnostics are
+ *  fixed strings BY CONSTRUCTION - fetch()'s pre-response rejections (DNS,
+ *  TLS, refused connection, timeout) and response.json()'s invalid-body
+ *  rejection all carry runtime-generated messages, and this error's
+ *  message is published as a public ::warning by main() - so only the
+ *  endpoint is named, never the runtime's error text. */
 export async function fetchJson(url: string): Promise<unknown> {
   const headers: Record<string, string> = { "user-agent": "repo-platform-refresh-toolchains" };
   const token = process.env.GH_TOKEN ?? process.env.GITHUB_TOKEN;
   if (token && url.startsWith("https://api.github.com/")) {
     headers.authorization = `Bearer ${token}`;
   }
-  // A hung upstream should fail this one source fast (each source already
-  // degrades to a warning) instead of leaning on the job timeout.
-  const response = await fetch(url, { headers, signal: AbortSignal.timeout(30_000) });
+  let response: Response;
+  try {
+    // A hung upstream should fail this one source fast (each source
+    // already degrades to a warning) instead of leaning on the job
+    // timeout.
+    response = await fetch(url, { headers, signal: AbortSignal.timeout(30_000) });
+  } catch {
+    throw new Error(`GET ${url} failed before a response (network, TLS, or timeout)`);
+  }
   if (!response.ok) throw new Error(`GET ${url} failed: ${response.status}`);
   try {
     return await response.json();

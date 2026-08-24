@@ -20,16 +20,18 @@ import { loadManifests } from "../../scripts/module_manifests";
 
 describe("fetchJson", () => {
   test("a malformed body rejects with the fixed diagnostic, never the body", async () => {
-    // Loopback server, no upstream network. The rejection message is
-    // published as a public ::warning, and runtimes differ on whether
+    // Loopback server, no upstream network (hostname pinned: the default
+    // 0.0.0.0 listener collides in sandboxed runs). The rejection message
+    // is published as a public ::warning, and runtimes differ on whether
     // their JSON error text embeds the body - so the fixed-string
     // guarantee must hold regardless of what the runtime would say.
     const server = Bun.serve({
       port: 0,
+      hostname: "127.0.0.1",
       fetch: () => new Response('{"tag_name": corruptbody}'),
     });
     try {
-      const url = `http://localhost:${server.port}/releases/latest`;
+      const url = `http://127.0.0.1:${server.port}/releases/latest`;
       let message = "";
       try {
         await fetchJson(url);
@@ -39,6 +41,31 @@ describe("fetchJson", () => {
       expect(message).toContain("not valid JSON");
       expect(message).toContain(url);
       expect(message).not.toContain("corruptbody");
+    } finally {
+      server.stop(true);
+    }
+  });
+
+  test("a pre-response failure rejects with the fixed diagnostic, never runtime text", async () => {
+    // https against a plaintext listener: the TLS handshake fails before
+    // any response exists - the rejection path whose message is
+    // runtime-generated and must not pass through. The port stays bound
+    // to this test's own server throughout, so there is no reuse race.
+    const server = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: () => new Response("") });
+    try {
+      const url = `https://127.0.0.1:${server.port}/releases/latest`;
+      let message = "";
+      try {
+        await fetchJson(url);
+      } catch (error) {
+        message = error instanceof Error ? error.message : String(error);
+      }
+      expect(message).toContain("failed before a response");
+      expect(message).toContain(url);
+      // Runtime phrasings for handshake/connect failures must not leak.
+      expect(message).not.toContain("typo");
+      expect(message).not.toContain("SSL");
+      expect(message).not.toContain("handshake");
     } finally {
       server.stop(true);
     }
