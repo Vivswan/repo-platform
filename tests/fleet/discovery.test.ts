@@ -208,7 +208,11 @@ describe("readDispatchRepo", () => {
     const proc = Bun.spawnSync(["bun", dispatchEntry], {
       env: { ...process.env, ONLY_REPO: "", GITHUB_EVENT_PATH: eventFile },
     });
-    return { exitCode: proc.exitCode, stdout: proc.stdout.toString() };
+    return {
+      exitCode: proc.exitCode,
+      stdout: proc.stdout.toString(),
+      stderr: proc.stderr.toString(),
+    };
   }
 
   test("a wrong-typed repo input fails loudly, naming the path but never the value", () => {
@@ -216,14 +220,23 @@ describe("readDispatchRepo", () => {
     expect(r.exitCode).toBe(1);
     expect(r.stdout).toContain("::error::readDispatchRepo: event payload: unexpected shape");
     expect(r.stdout).toContain("inputs.repo");
-    expect(r.stdout).not.toContain("31337");
+    expect(r.stdout + r.stderr).not.toContain("31337");
   });
 
   test("a non-object payload fails loudly instead of miscasting", () => {
     const r = runDispatch(JSON.stringify("Vivswan/hidden-server"), "non-object");
     expect(r.exitCode).toBe(1);
     expect(r.stdout).toContain("::error::readDispatchRepo: event payload: unexpected shape");
-    expect(r.stdout).not.toContain("hidden-server");
+    expect(r.stdout + r.stderr).not.toContain("hidden-server");
+  });
+
+  test("an unparseable payload fails with a value-free diagnostic (no SyntaxError echo)", () => {
+    // A truncated event file still carries the private slug; a raw
+    // JSON.parse SyntaxError would echo a fragment of it.
+    const r = runDispatch('{"inputs": {"repo": "Vivswan/hidden-serv', "truncated");
+    expect(r.exitCode).toBe(1);
+    expect(r.stdout).toContain("::error::readDispatchRepo: event payload: not valid JSON");
+    expect(r.stdout + r.stderr).not.toContain("hidden-serv");
   });
 
   test("nothing set reads as empty, and an owner never prefixes an empty input", () => {
@@ -321,7 +334,18 @@ describe("discoverWritableRepos and runStage", () => {
     const r = runDiscover({ STUB_PAYLOAD: payload });
     expect(r.exitCode).toBe(1);
     expect(r.stdout).toContain("::error::discovery.test: user/repos response: unexpected shape");
-    expect(r.stdout).not.toContain("shapeless");
+    expect(r.stdout + r.stderr).not.toContain("shapeless");
+  });
+
+  test("an unparseable listing fails with a value-free diagnostic (no SyntaxError echo)", () => {
+    // A truncated gh response still carries slugs; a raw JSON.parse
+    // SyntaxError would echo a fragment of the offending text.
+    const payload = join(root, "truncated.json");
+    writeFileSync(payload, '[[{"full_name": "Vivswan/hidden-serv');
+    const r = runDiscover({ STUB_PAYLOAD: payload });
+    expect(r.exitCode).toBe(1);
+    expect(r.stdout).toContain("::error::discovery.test: user/repos response: not valid JSON");
+    expect(r.stdout + r.stderr).not.toContain("hidden-serv");
   });
 
   const stageEntry = join(root, "stage_entry.ts");

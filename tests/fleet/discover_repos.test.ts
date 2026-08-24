@@ -109,7 +109,17 @@ describe("discover_repos.ts", () => {
     const r = run("malformed", { STUB_PAYLOAD: payload });
     expect(r.exitCode).toBe(1);
     expect(r.stdout).toContain("::error::discover_repos: user/repos response: unexpected shape");
-    expect(r.stdout).not.toContain("shapeless");
+    expect(r.stdout + r.stderr).not.toContain("shapeless");
+    expect(existsSync(r.discoveredPath)).toBe(false);
+  });
+
+  test("an unparseable listing fails with a value-free diagnostic (no SyntaxError echo)", () => {
+    const payload = join(root, "truncated.json");
+    writeFileSync(payload, '[[{"full_name": "Vivswan/hidden-serv');
+    const r = run("truncated", { STUB_PAYLOAD: payload });
+    expect(r.exitCode).toBe(1);
+    expect(r.stdout).toContain("::error::discover_repos: user/repos response: not valid JSON");
+    expect(r.stdout + r.stderr).not.toContain("hidden-serv");
     expect(existsSync(r.discoveredPath)).toBe(false);
   });
 });

@@ -10,6 +10,12 @@
 // (docs/private-repos.md). The log line prints only a count and the
 // owner login, never a repo name.
 //
+// Deliberately stricter than the retired inline jq, which truthiness-
+// coerced missing booleans: a listing off the documented shape fails
+// loudly (value-free diagnostic) instead of guessing - the same contract
+// the other discovery.ts consumers already pin. Real user/repos payloads
+// always carry the fields, so the emitted rows are unchanged.
+//
 // Env: GH_TOKEN (the fleet PAT), RUNNER_TEMP.
 
 import { writeFileSync } from "node:fs";
