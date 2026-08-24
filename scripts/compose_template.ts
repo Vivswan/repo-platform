@@ -58,6 +58,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
+import { joinLines, splitLines } from "../.github/scripts/shared/lines.ts";
 import { loadManifests, MODULE_ORDER, type ModuleManifest } from "./module_manifests.ts";
 import {
   classifyTemplateSource,
@@ -575,30 +576,7 @@ const DATA_ANCHORS: Record<string, DataAnchorSpec> = {
 
 // --- splicing ----------------------------------------------------------------
 
-const NEWLINE = Buffer.from("\n");
 const ANCHOR_HINT = Buffer.from("{# compose:");
-
-function splitLines(data: Buffer): Buffer[] {
-  const lines: Buffer[] = [];
-  let start = 0;
-  for (let i = 0; i < data.length; i++) {
-    if (data[i] === 0x0a) {
-      lines.push(data.subarray(start, i));
-      start = i + 1;
-    }
-  }
-  lines.push(data.subarray(start));
-  return lines;
-}
-
-function joinLines(lines: Buffer[]): Buffer {
-  const parts: Buffer[] = [];
-  lines.forEach((line, index) => {
-    if (index > 0) parts.push(NEWLINE);
-    parts.push(line);
-  });
-  return Buffer.concat(parts);
-}
 
 function matchAnchor(line: Buffer): { name: string; tight: boolean; trailing: string } | null {
   // Bytes, matched as latin1: non-ASCII bytes can never satisfy the pattern.
