@@ -945,6 +945,18 @@ function main(): number {
           continue;
         }
         const entry = raw as Record<string, unknown>;
+        // The self entry's invariant comes before any class dispatch: a
+        // corrupted class (say, starter) must not slip past it.
+        if (rel === MANIFEST_NAME) {
+          if (entry.class !== "managed" || entry.hash !== null) {
+            errors.push(
+              `${where} must be managed with hash null: the manifest's content ` +
+                "includes every other hash, so a self-hash would be circular; " +
+                "run a template sync to regenerate it",
+            );
+          }
+          continue;
+        }
         if (entry.class === "starter") {
           if ("hash" in entry) {
             errors.push(
@@ -984,16 +996,6 @@ function main(): number {
           }
           split = { marker: entry.marker, managed: entry.managed };
         }
-        if (rel === MANIFEST_NAME) {
-          if (entry.class !== "managed" || hash !== null) {
-            errors.push(
-              `${where} must be managed with hash null: the manifest's content ` +
-                "includes every other hash, so a self-hash would be circular; " +
-                "run a template sync to regenerate it",
-            );
-          }
-          continue;
-        }
         let stat: ReturnType<typeof lstatSync> | null = null;
         try {
           stat = lstatSync(join(root, rel));
@@ -1028,10 +1030,21 @@ function main(): number {
           const content = readFileSync(join(root, rel)).toString("latin1");
           if (split !== null) {
             const half = managedHalf(content, split.marker, split.managed);
-            // A missing marker line is already reported: check 8 for the
-            // local-section splits, the marker-section check for .gitignore.
-            // No second diagnostic on the same root cause.
-            if (half === null) continue;
+            // Fail closed: without the marker line there is nothing to
+            // verify parity against, and a corrupted manifest reclassifying
+            // a file as split must not silently exempt it. For the known
+            // split files this doubles check 8's (or the .gitignore marker
+            // check's) missing-marker report, but that state is already
+            // broken and the two messages complement.
+            if (half === null) {
+              errors.push(
+                `${rel}: the split marker line '${split.marker}' recorded in ` +
+                  `${MANIFEST_NAME} is missing from the file, so managed-half ` +
+                  "parity cannot be verified - restore the marker or run a " +
+                  "template sync",
+              );
+              continue;
+            }
             actual = sha256(half, "latin1");
           } else {
             actual = sha256(content, "latin1");

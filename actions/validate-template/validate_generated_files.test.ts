@@ -809,6 +809,29 @@ describe("ownership-manifest byte parity", () => {
     expect(stderr).toContain("self-hash would be circular");
   });
 
+  test("a self entry reclassified as starter cannot slip past the invariant", () => {
+    const entries = { ...stampedBaseline(), [MANIFEST]: '{"class": "starter"}' };
+    const { exitCode, stderr } = runValidator({ [MANIFEST]: manifestOf(entries) });
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain("self-hash would be circular");
+  });
+
+  test("a split entry whose marker is missing from the file fails closed", () => {
+    // A corrupted manifest reclassifying a managed file as split must not
+    // silently exempt it from parity.
+    const entries = {
+      ...SELF_ENTRY,
+      ".github/workflows/ci.yml":
+        `{"class": "split", "marker": "# no-such-marker", "managed": "above", ` +
+        `"hash": "${"c".repeat(64)}"}`,
+    };
+    const { exitCode, stderr } = runValidator({ [MANIFEST]: manifestOf(entries) });
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain(
+      ".github/workflows/ci.yml: the split marker line '# no-such-marker' recorded in",
+    );
+  });
+
   test("a manifest that does not list itself is an error", () => {
     const entries = {
       ".github/workflows/ci.yml": `{"class": "managed", "hash": "${sha(

@@ -70,6 +70,33 @@ describe("resolveConflictsTowardAfter", () => {
   test("passes marker-free text through unchanged", () => {
     expect(resolveConflictsTowardAfter("a\nb\n")).toBe("a\nb\n");
   });
+  test("a bare ======= outside a block is ordinary content", () => {
+    expect(resolveConflictsTowardAfter("a\n=======\nb")).toBe("a\n=======\nb");
+  });
+  test("malformed blocks return the text unchanged instead of guessing", () => {
+    // Unterminated block (no separator, no end).
+    const unterminated = "a\n<<<<<<< before updating\nlocal\nb";
+    expect(resolveConflictsTowardAfter(unterminated)).toBe(unterminated);
+    // Separator never arrives before the end marker.
+    const noSeparator = ["<<<<<<< before updating", "local", ">>>>>>> after updating"].join("\n");
+    expect(resolveConflictsTowardAfter(noSeparator)).toBe(noSeparator);
+    // An end marker outside any block.
+    const strayEnd = "a\n>>>>>>> after updating\nb";
+    expect(resolveConflictsTowardAfter(strayEnd)).toBe(strayEnd);
+    // A nested start inside a block.
+    const nested = [
+      "<<<<<<< before updating",
+      "<<<<<<< before updating",
+      "=======",
+      "x",
+      ">>>>>>> after updating",
+    ].join("\n");
+    expect(resolveConflictsTowardAfter(nested)).toBe(nested);
+  });
+  test("non-copier conflict labels are not treated as markers", () => {
+    const gitStyle = ["<<<<<<< HEAD", "local", "=======", "theirs", ">>>>>>> main"].join("\n");
+    expect(resolveConflictsTowardAfter(gitStyle)).toBe(gitStyle);
+  });
 });
 
 describe("stampManifestText", () => {
@@ -151,6 +178,21 @@ describe("stampManifestText", () => {
   test("unparseable input returns the text unchanged with a problem", () => {
     const { out, problem } = stampManifestText("not json", tree({}));
     expect(out).toBe("not json");
+    expect(problem).toMatch(/does not parse/);
+  });
+
+  test("a malformed conflict block is a problem, never a silent line drop", () => {
+    const root = tree({ "ci.yml": "content\n" });
+    const text = [
+      "{",
+      '  "files": {',
+      "<<<<<<< before updating",
+      '    "ci.yml": {"class": "managed", "hash": null}',
+      "  }",
+      "}",
+    ].join("\n");
+    const { out, problem } = stampManifestText(text, root);
+    expect(out).toBe(text);
     expect(problem).toMatch(/does not parse/);
   });
 });

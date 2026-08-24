@@ -49,24 +49,36 @@ const ENTRY_LINE_RE = /^(\s*)("(?:[^"\\]|\\.)*"): (\{.*\})(,?)$/;
  *  are left alone. */
 const HASH_RE = /"hash": (?:null|"[0-9a-f]{64}")/;
 
+// Copier's inline conflict markers, exactly as `copier update` writes them
+// (git merge-file labels): anything looser could swallow content lines.
+const CONFLICT_START = "<<<<<<< before updating";
+const CONFLICT_SEP = "=======";
+const CONFLICT_END = ">>>>>>> after updating";
+
 /** Copier's inline conflict blocks resolved toward the template side: the
  *  lines between ======= and >>>>>>> survive, the "before updating" local
- *  lines and the marker lines drop. Text without markers passes through
- *  unchanged. */
+ *  lines and the marker lines drop. Only exact, well-sequenced copier
+ *  markers count; a malformed block (unterminated, or an END outside a
+ *  block) returns the text unchanged - dropping lines on a guess could
+ *  silently discard entries, and the parse step then reports the mess. A
+ *  bare ======= outside a block is ordinary content. */
 export function resolveConflictsTowardAfter(text: string): string {
   const out: string[] = [];
   let state: "keep" | "local" | "template" = "keep";
   for (const line of text.split("\n")) {
-    if (state === "keep" && line.startsWith("<<<<<<< ")) {
+    if (line === CONFLICT_START) {
+      if (state !== "keep") return text;
       state = "local";
-    } else if (state === "local" && line === "=======") {
+    } else if (line === CONFLICT_SEP && state === "local") {
       state = "template";
-    } else if (state !== "keep" && line.startsWith(">>>>>>> ")) {
+    } else if (line === CONFLICT_END) {
+      if (state !== "template") return text;
       state = "keep";
     } else if (state !== "local") {
       out.push(line);
     }
   }
+  if (state !== "keep") return text;
   return out.join("\n");
 }
 
