@@ -50,6 +50,18 @@ fail() {
   exit 1
 }
 
+# modules.ts reports its failures on stdout, which the callers' $( )
+# capture swallows; on a nonzero exit, surface the captured output before
+# failing so the diagnostic is never exit-code-only.
+select_modules() {
+  local out
+  if ! out="$(bun .github/scripts/sync/modules.ts "$@")"; then
+    printf '%s\n' "$out" >&2
+    fail "sync/modules.ts exited nonzero (its output is above)"
+  fi
+  printf '%s\n' "$out"
+}
+
 # Idempotent local reruns: drop the artifacts of a previous run.
 rm -rf "$PROJECT" "$WORK" /tmp/next /tmp/old-tree /tmp/upgrade-vis /tmp/upgrade-vis-work /tmp/upgrade-del /tmp/upgrade-del-hunks.md
 mkdir -p "$WORK"
@@ -197,7 +209,7 @@ git show templates/v99.99.99:copier.yml > "$WORK/copier-new.yml"
 
 # Module selection exactly as reusable-template-sync computes it: the
 # target's .repo-platform.yml filtered against the new template's choices.
-MODULES="$(bun .github/scripts/sync/modules.ts \
+MODULES="$(select_modules \
   --repo-file "$PROJECT/.repo-platform.yml" \
   --template-copier "$WORK/copier-new.yml" \
   --retired-summary "$WORK/retired-modules.txt")"
@@ -535,7 +547,7 @@ fi
 cd "$GITHUB_WORKSPACE"
 git show "${prev}:copier.yml" > "$VIS_WORK/copier-old.yml"
 git show templates/v99.99.99:copier.yml > "$VIS_WORK/copier-new.yml"
-MODULES="$(bun .github/scripts/sync/modules.ts \
+MODULES="$(select_modules \
   --repo-file "$VIS/.repo-platform.yml" \
   --template-copier "$VIS_WORK/copier-new.yml" \
   --retired-summary "$VIS_WORK/retired-modules.txt")"
