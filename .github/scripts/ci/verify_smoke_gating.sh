@@ -393,6 +393,7 @@ fi
 if has release-please; then
   test -f "$wf/release.yml"
   test -f "$wf/update-release.yml"
+  test -f "$wf/update-release-pr.yml"
   present "uses: ./.github/workflows/release.yml" "$wf/ci.yml"
   # The freshness gate must render as a job AND sit in all-green's needs;
   # losing either fragment would fail open silently.
@@ -440,9 +441,15 @@ if has release-please; then
   present "attest-build-provenance" "$wf/release.yml"
   present "attestations: write" "$wf/release.yml"
   present "id-token: write" "$wf/release.yml"
+  # The release-PR fork: the repo-owned hook release.yml calls when
+  # release-please creates or refreshes the release PR, gated on the
+  # action's prs_created output so a release cut never triggers it.
+  present "uses: ./.github/workflows/update-release-pr.yml" "$wf/release.yml"
+  present "if: needs.release-please.outputs.prs_created == 'true'" "$wf/release.yml"
 else
   test ! -e "$wf/release.yml"
   test ! -e "$wf/update-release.yml"
+  test ! -e "$wf/update-release-pr.yml"
   absent "uses: ./.github/workflows/release.yml" "$wf/ci.yml"
   absent "release-freshness" "$wf/ci.yml"
   absent_line "  release-health:" "$wf/ci.yml"

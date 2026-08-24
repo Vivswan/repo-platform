@@ -13,7 +13,10 @@
 # its vX.Y.Z tag already forced at the merge SHA, update-release.yml (this
 # repository ships no release assets, so it is the untouched starter) may
 # mutate it, and publish-release attests any assets into a single
-# attestation.jsonl and flips it live. Publishing fires build-branches,
+# attestation.jsonl and flips it live. A run that instead creates or
+# refreshes the release PR calls the repo-owned update-release-pr.yml (also
+# the untouched starter here) with that PR's number and head branch.
+# Publishing fires build-branches,
 # which tags templates/vX.Y.Z and rebuilds the latest channel sync-repos
 # pushes to managed repos.
 #
@@ -45,6 +48,13 @@ jobs:
     outputs:
       release_created: ${{ steps.release.outputs.release_created }}
       tag_name: ${{ steps.release.outputs.tag_name }}
+      # The action's pr output is one JSON PullRequest object ({number,
+      # headBranchName, ...}), unset unless a PR was created or refreshed;
+      # the && short-circuit keeps fromJSON off the empty string on
+      # release-cut, plain-push, and head-check-skipped runs.
+      prs_created: ${{ steps.release.outputs.prs_created }}
+      pr_number: ${{ steps.release.outputs.pr && fromJSON(steps.release.outputs.pr).number }}
+      pr_head_branch: ${{ steps.release.outputs.pr && fromJSON(steps.release.outputs.pr).headBranchName }}
     steps:
       # A green run releases only the head it tested: if main moved on, skip
       # and let the newer push's own run release (after its CI passes).
@@ -189,3 +199,18 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN || github.token }}
         run: gh release edit "$TAG" --draft=false
+
+  # The release-PR fork: a run refreshes the release PR xor cuts a release
+  # (plain main pushes do neither), so this hook call is independent of the
+  # three release stages above and never delays publish-release. Same
+  # ceiling passthrough as update-release: no permissions block, so the
+  # repo-owned hook gets the calling job's full ceiling and its jobs narrow
+  # it themselves.
+  update-release-pr:
+    needs: [release-please]
+    if: needs.release-please.outputs.prs_created == 'true'
+    uses: ./.github/workflows/update-release-pr.yml
+    with:
+      pr_number: ${{ needs.release-please.outputs.pr_number }}
+      head_branch: ${{ needs.release-please.outputs.pr_head_branch }}
+    secrets: inherit

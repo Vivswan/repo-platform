@@ -22,6 +22,9 @@ _preserve_symlinks: true
 _skip_if_exists:
   - .github/workflows/checks.yml
   - .github/workflows/update-release.yml
+  # Its release-PR twin: release.yml calls it when release-please creates or
+  # refreshes the release PR (files regenerated into the release commit).
+  - .github/workflows/update-release-pr.yml
   - .github/workflows/auto-format.yml
   - .github/workflows/copilot-setup-steps.yml
   # The fuzzer module's starter: the fuzz/toolchain steps are repo-specific,
