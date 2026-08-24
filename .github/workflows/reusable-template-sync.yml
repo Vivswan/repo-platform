@@ -96,15 +96,9 @@ jobs:
     env:
       HIDE_DETAILS: ${{ inputs.target_hide_details }}
     steps:
-      - name: Require the fleet token
-        env:
-          PAT: ${{ secrets.REPO_PLATFORM_TOKEN }}
-        run: |
-          if [ -z "$PAT" ]; then
-            echo "::error::push sync cannot run: the REPO_PLATFORM_TOKEN secret is empty. Create a fine-grained PAT with the permissions pre-selected at https://github.com/settings/personal-access-tokens/new?name=REPO_PLATFORM_TOKEN&description=repo-platform+fleet%3A+push+sync+and+central+settings&contents=write&pull_requests=write&workflows=write&administration=write&issues=write scoped to the managed repos, then store it with 'gh secret set REPO_PLATFORM_TOKEN' in this repo."
-            exit 1
-          fi
-
+      # No token presence check here: the secret is declared required
+      # above, and the only caller (sync-repos.yml) fails its plan job
+      # loudly when REPO_PLATFORM_TOKEN is unset, before any leg starts.
       - name: Check out repo-platform
         uses: actions/checkout@v7
         with:

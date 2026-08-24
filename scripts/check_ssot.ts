@@ -1881,7 +1881,6 @@ const rules: Rule[] = [
         "README.md",
         ".github/workflows/sync-repos.yml",
         ".github/workflows/settings-repos.yml",
-        ".github/workflows/reusable-template-sync.yml",
       ];
       const referenceUrl = patUrls(patFiles[0])[0];
       for (const rel of patFiles) {
