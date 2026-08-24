@@ -13,18 +13,17 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { env, error, hideDetails, notice, requireEnv, setOutput } from "../shared/gha.ts";
 import { identityArgs, SYNC_IDENTITY } from "../shared/git_identity.ts";
 import { must } from "../shared/proc.ts";
+import { rewriteSrcPath } from "./src_path.ts";
 
 const canonical = `gh:${requireEnv("GITHUB_REPOSITORY")}`;
 const display = env("TARGET_DISPLAY");
 const answersPath = "target/.copier-answers.yml";
 const before = readFileSync(answersPath);
 
-// The normalization itself: extract the recorded value, rewrite the line.
 // No print touches the recorded value here - it is target-derived, and the
 // hide-details discipline below decides what may reach the public log.
-const text = before.toString("utf-8");
-const match = text.match(/^_src_path:.*$/m);
-if (match === null) {
+const rewrite = rewriteSrcPath(before.toString("utf-8"), canonical);
+if (rewrite === null) {
   if (hideDetails()) {
     error(
       `normalizing ${display}'s recorded template source failed (detail hidden: private repository). Reproduce the sync locally - see docs/private-repos.md.`,
@@ -34,8 +33,8 @@ if (match === null) {
   }
   process.exit(1);
 }
-const recorded = match[0].replace(/^_src_path:\s*/, "");
-writeFileSync(answersPath, text.replace(/^_src_path:.*$/m, `_src_path: ${canonical}`));
+const recorded = rewrite.recorded;
+writeFileSync(answersPath, rewrite.rewritten);
 
 // The commit decision is byte-level (Buffer, not decoded text: utf-8
 // decoding maps invalid bytes to U+FFFD, which can read equal while the

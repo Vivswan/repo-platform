@@ -46,6 +46,7 @@ import { loadRegistry } from "../fleet/repos_registry.ts";
 import { capture, must, mustCapture, passthrough } from "../shared/proc.ts";
 import { AnswersFileError, readAnswersFile } from "./answers_file.ts";
 import { resolveChannel } from "./resolve_channel.ts";
+import { rewriteSrcPath } from "./src_path.ts";
 
 const REPO_ROOT = resolve(import.meta.dir, "..", "..", "..");
 const REHEARSAL_TAG = "templates/v99.99.99";
@@ -227,20 +228,16 @@ function main(): number {
   ]);
   must(["git", "-C", platformDir, "tag", REHEARSAL_TAG]);
 
-  // The sync's own normalization step, pointed at the local build instead
-  // of the canonical source; committed because copier update needs a clean
-  // tree (the real sync commits its normalization too).
-  must(
-    [
-      "bun",
-      ".github/scripts/sync/normalize_src_path.ts",
-      "--answers",
-      join(targetDir, ".copier-answers.yml"),
-      "--canonical",
-      platformDir,
-    ],
-    { cwd: REPO_ROOT },
-  );
+  // The sync's own normalization (sync/src_path.ts's rewrite), pointed at
+  // the local build instead of the canonical source; committed because
+  // copier update needs a clean tree (the real sync commits its
+  // normalization too).
+  const answersPath = join(targetDir, ".copier-answers.yml");
+  const rewrite = rewriteSrcPath(readFileSync(answersPath, "utf-8"), platformDir);
+  if (rewrite === null) {
+    fail(`no _src_path line in ${answersPath}`);
+  }
+  writeFileSync(answersPath, rewrite.rewritten);
   must([
     "git",
     "-C",
@@ -253,7 +250,7 @@ function main(): number {
   ]);
 
   section("selecting modules");
-  const modules = mustCapture(
+  const selection = capture(
     [
       "bun",
       ".github/scripts/sync/modules.ts",
@@ -266,6 +263,14 @@ function main(): number {
     ],
     { cwd: REPO_ROOT },
   );
+  if (selection.exitCode !== 0) {
+    // modules.ts prints its ::error:: detail on stdout (where workflow
+    // commands parse); forward both streams or the failure is silent.
+    process.stdout.write(selection.stdout);
+    process.stderr.write(selection.stderr);
+    process.exit(selection.exitCode);
+  }
+  const modules = selection.stdout.replace(/\n+$/, "");
   console.log(`selected modules: ${modules}`);
 
   const legEnv = {
