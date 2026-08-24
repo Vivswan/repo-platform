@@ -65,9 +65,10 @@
 //   bun preserve_local_content.ts --summary FILE [--root target]
 //     [--hide-details true|false]
 
-import { lstatSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseFlags } from "../shared/flags.ts";
+import { walkFiles } from "./walk.ts";
 
 const HTML_SENTINEL = "<!-- repo-platform:local-section -->";
 const HASH_SENTINEL = "# repo-platform:local-section";
@@ -78,8 +79,6 @@ const MANAGED_BEGIN = "# BEGIN REPO-PLATFORM MANAGED";
 const MANAGED_END = "# END REPO-PLATFORM MANAGED";
 const GITIGNORE_MARKERS = [LOCAL_BEGIN, LOCAL_END, MANAGED_BEGIN, MANAGED_END];
 const PREFIX_DOCS = new Set(["SECURITY.md", "CONTRIBUTING.md", "LICENSE.md"]);
-
-const SKIP_DIRS = new Set([".git", ".repo-platform-src", "node_modules", ".venv", "__pycache__"]);
 
 interface Line {
   text: string;
@@ -382,22 +381,6 @@ export function carryLocalContent(rel: string, render: string, target: string): 
     }
   }
   return carried;
-}
-
-/** All regular (non-symlink) files below root, sorted, skipping SKIP_DIRS. */
-function walkFiles(root: string): string[] {
-  const found: string[] = [];
-  const visit = (rel: string) => {
-    for (const name of readdirSync(join(root, rel))) {
-      const childRel = rel ? `${rel}/${name}` : name;
-      if (SKIP_DIRS.has(name)) continue;
-      const stat = lstatSync(join(root, childRel));
-      if (stat.isDirectory() && !stat.isSymbolicLink()) visit(childRel);
-      else if (stat.isFile() && !stat.isSymbolicLink()) found.push(childRel);
-    }
-  };
-  visit("");
-  return found.sort();
 }
 
 /** Fail closed before any per-file HEAD read: a missing repository or an

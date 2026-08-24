@@ -31,6 +31,7 @@ import { basename, join } from "node:path";
 import { parse } from "yaml";
 import { loadManifests } from "../../../scripts/module_manifests.ts";
 import { parseFlags } from "../shared/flags.ts";
+import { fail } from "../shared/gha.ts";
 
 export interface CheckResult {
   errors: string[];
@@ -380,13 +381,6 @@ export function checkCentralFileRemote(
     }
   }
   return { errors, warnings };
-}
-
-function fail(errors: string[]): never {
-  for (const message of errors) {
-    console.error(`::error::${message}`);
-  }
-  process.exit(1);
 }
 
 /** Raw file content from the repo's default branch. HTTP 404 is a real

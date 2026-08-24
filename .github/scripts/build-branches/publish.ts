@@ -16,13 +16,15 @@ import {
   commitStampWrite,
 } from "../shared/commit_stamp.ts";
 import { requireEnv } from "../shared/gha.ts";
+import { BUILD_IDENTITY } from "../shared/git_identity.ts";
 import { parseWith } from "../shared/json.ts";
-import { capture, must, mustCapture, passthrough } from "../shared/proc.ts";
+import { capture, must, mustCapture } from "../shared/proc.ts";
+import { rebuildChannelTree } from "../shared/rebuild_tree.ts";
 
 const repository = requireEnv("GITHUB_REPOSITORY");
 
-must(["git", "config", "user.name", "repo-platform-build"]);
-must(["git", "config", "user.email", "repo-platform-build@users.noreply.github.com"]);
+must(["git", "config", "user.name", BUILD_IDENTITY.name]);
+must(["git", "config", "user.email", BUILD_IDENTITY.email]);
 
 function resolves(revspec: string): string {
   const probe = capture(["git", "rev-parse", "--verify", "--quiet", revspec]);
@@ -106,35 +108,26 @@ function restampReason(channel: string, currentSourceSha: string): string {
   // source's build (a hand-push of the current build's exact tree over
   // the previous stamps): the sync's tree proof rejects that pair, so
   // prove the stamped source still rebuilds this tree and re-stamp when
-  // it does not - or can no longer be rebuilt at all.
+  // it does not - or can no longer be rebuilt at all. Tree hashes compare
+  // through the same rebuild the sync's verifier uses; the pub side hashes
+  // its staged index, which at this point equals the tip commit's tree
+  // (a staged content change took the "content change" branch instead).
   if (prevSrc !== currentSourceSha) {
-    rmSync(`/tmp/prev-tree-${channel}`, { recursive: true, force: true });
-    capture(["git", "worktree", "remove", "--force", `/tmp/prev-src-${channel}`]);
-    const stampedBuildOk =
-      passthrough(["git", "worktree", "add", "--detach", `/tmp/prev-src-${channel}`, prevSrc]) ===
-        0 &&
-      passthrough(["bun", "install", "--frozen-lockfile", "--cwd", `/tmp/prev-src-${channel}`]) ===
-        0 &&
-      passthrough([
-        "bun",
-        `/tmp/prev-src-${channel}/.github/scripts/build-branches/branch_tree.ts`,
-        "--dest",
-        `/tmp/prev-tree-${channel}`,
-        "--channel",
-        channel,
-      ]) === 0 &&
-      passthrough([
-        "diff",
-        "-r",
-        "-q",
-        "--no-dereference",
-        "--exclude=.git",
-        `/tmp/prev-tree-${channel}`,
-        `/tmp/pub-${channel}`,
-      ]) === 0;
-    capture(["git", "worktree", "remove", "--force", `/tmp/prev-src-${channel}`]);
-    rmSync(`/tmp/prev-tree-${channel}`, { recursive: true, force: true });
-    if (!stampedBuildOk) {
+    const srcDir = `/tmp/prev-src-${channel}`;
+    const treeDir = `/tmp/prev-tree-${channel}`;
+    rmSync(treeDir, { recursive: true, force: true });
+    capture(["git", "worktree", "remove", "--force", srcDir]);
+    let stampedTree: string | null;
+    try {
+      stampedTree = rebuildChannelTree({ sourceSha: prevSrc, channel, srcDir, treeDir });
+    } catch {
+      // An unbuildable stamped source is exactly the "can no longer be
+      // rebuilt" case: re-stamp.
+      stampedTree = null;
+    }
+    capture(["git", "worktree", "remove", "--force", srcDir]);
+    rmSync(treeDir, { recursive: true, force: true });
+    if (stampedTree !== mustCapture(["git", "-C", `/tmp/pub-${channel}`, "write-tree"])) {
       return `re-stamp: the tip tree is not the stamped ${prevSrc.slice(0, 12)} build`;
     }
   }

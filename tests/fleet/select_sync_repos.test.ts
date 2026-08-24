@@ -178,7 +178,9 @@ describe("select_sync_repos.ts", () => {
     writeFileSync(eventFile, JSON.stringify({ inputs: { repo: "Vivswan/hidden-servr" } }));
     const r = run("dispatch-miss", { ONLY_REPO: "", GITHUB_EVENT_PATH: eventFile });
     expect(r.exitCode).not.toBe(0);
-    expect(r.stderr).toContain("matched no selected repository");
+    // The registry stage's ::error:: rides its captured stdout, which
+    // runStage forwards on failure.
+    expect(r.stdout).toContain("matched no selected repository");
     for (const channel of [r.stdout, r.stderr, r.output]) {
       expect(channel).not.toContain("hidden-servr");
     }

@@ -5,14 +5,15 @@ import { parseFlags } from "../../.github/scripts/shared/flags.ts";
 const HELPER = join(import.meta.dir, "../../.github/scripts/shared/flags.ts");
 
 // Error paths call process.exit, so exercise them in a subprocess the way
-// the adopting scripts hit them.
-function run(snippet: string): { exitCode: number; stderr: string } {
+// the adopting scripts hit them. Failures print ::error:: workflow
+// commands on stdout (the stream the runner parses them from).
+function run(snippet: string): { exitCode: number; stdout: string } {
   const proc = Bun.spawnSync([
     "bun",
     "-e",
     `import { parseFlags } from ${JSON.stringify(HELPER)}; ${snippet}`,
   ]);
-  return { exitCode: proc.exitCode, stderr: proc.stderr.toString() };
+  return { exitCode: proc.exitCode, stdout: proc.stdout.toString() };
 }
 
 describe("parseFlags", () => {
@@ -39,27 +40,28 @@ describe("parseFlags", () => {
   });
 
   test("an inherited object key does not satisfy a required flag", () => {
-    const { exitCode, stderr } = run(`parseFlags([], ["toString"]);`);
+    const { exitCode, stdout } = run(`parseFlags([], ["toString"]);`);
     expect(exitCode).toBe(1);
-    expect(stderr).toContain("missing required flags: toString");
+    expect(stdout).toContain("::error::");
+    expect(stdout).toContain("missing required flags: toString");
   });
 
   test("an unknown flag fails naming the allowed set", () => {
-    const { exitCode, stderr } = run(`parseFlags(["--nope", "1"], ["--a"]);`);
+    const { exitCode, stdout } = run(`parseFlags(["--nope", "1"], ["--a"]);`);
     expect(exitCode).toBe(1);
-    expect(stderr).toContain('unknown or valueless argument "--nope"');
-    expect(stderr).toContain("--a");
+    expect(stdout).toContain('unknown or valueless argument "--nope"');
+    expect(stdout).toContain("--a");
   });
 
   test("a trailing flag with no value fails", () => {
-    const { exitCode, stderr } = run(`parseFlags(["--a"], ["--a"]);`);
+    const { exitCode, stdout } = run(`parseFlags(["--a"], ["--a"]);`);
     expect(exitCode).toBe(1);
-    expect(stderr).toContain("unknown or valueless argument");
+    expect(stdout).toContain("unknown or valueless argument");
   });
 
   test("a missing required flag fails naming exactly the missing ones", () => {
-    const { exitCode, stderr } = run(`parseFlags(["--a", "1"], ["--a", "--b", "--c"]);`);
+    const { exitCode, stdout } = run(`parseFlags(["--a", "1"], ["--a", "--b", "--c"]);`);
     expect(exitCode).toBe(1);
-    expect(stderr).toContain("missing required flags: --b, --c");
+    expect(stdout).toContain("missing required flags: --b, --c");
   });
 });

@@ -5,13 +5,12 @@
 
 import { readFileSync } from "node:fs";
 import { parse } from "yaml";
+import { type Channel, isChannel } from "../shared/channels.ts";
 
-export const CHANNELS = ["staging", "latest"] as const;
-export type Channel = (typeof CHANNELS)[number];
-
-export function isChannel(value: unknown): value is Channel {
-  return CHANNELS.some((channel) => channel === value);
-}
+// The sync consumers historically took the channel enum from this module;
+// it now lives with the other shared constants, re-exported here so the
+// answers-file readers keep a single import.
+export { CHANNELS, type Channel, isChannel } from "../shared/channels.ts";
 
 /** The recorded channel answer: a valid channel, null when the file
  * records none, or the raw text of an unusable value so the caller can

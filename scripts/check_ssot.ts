@@ -25,11 +25,12 @@ import { existsSync, lstatSync, readdirSync, readFileSync, readlinkSync } from "
 import { join, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { centralIdentityIssues } from "../.github/scripts/fleet/validate_central_settings.ts";
+import { CHANNELS } from "../.github/scripts/shared/channels.ts";
 import { captureName } from "../.github/scripts/sync/run_hidden.ts";
 import { dependabotLabels } from "./compose_template.ts";
 import { MARKER_TOKENS, trackingGate, trackingStreams } from "./generate.ts";
 import { type JinjaVars, normalizeJinja, placeholderJinja } from "./jinja_subset.ts";
-import { loadManifests, type ModuleManifest } from "./module_manifests.ts";
+import { loadManifests as loadManifestsFresh, type ModuleManifest } from "./module_manifests.ts";
 import { ANSWERS_FILE, parseAnswers } from "./render_dogfood.ts";
 
 const REPO_ROOT = resolve(import.meta.dir, "..");
@@ -284,6 +285,23 @@ function lineDiffMismatch(
 
 // --- shared parsed inputs -------------------------------------------------
 
+/** Rules re-derive these shared inputs dozens of times per run and the
+ *  underlying files never change mid-run; memoize the parse, not the
+ *  callers. */
+function memoize<T>(compute: () => T): () => T {
+  let cached = false;
+  let value: T | undefined;
+  return () => {
+    if (!cached) {
+      value = compute();
+      cached = true;
+    }
+    return value as T;
+  };
+}
+
+const loadManifests = memoize(loadManifestsFresh);
+
 function asRecord(value: unknown, where: string): Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     throw new Error(`${where}: expected a mapping`);
@@ -291,9 +309,9 @@ function asRecord(value: unknown, where: string): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
-function copierConfig(): Record<string, unknown> {
-  return asRecord(parseYaml(read("copier.yml")), "copier.yml");
-}
+const copierConfig = memoize(
+  (): Record<string, unknown> => asRecord(parseYaml(read("copier.yml")), "copier.yml"),
+);
 
 function copierChoices(question: string): string[] {
   const q = asRecord(copierConfig()[question], `copier.yml ${question}`);
@@ -678,52 +696,17 @@ const rules: Rule[] = [
   },
 
   {
+    // TypeScript consumers import shared/channels.ts directly - the import
+    // IS the guarantee - so this rule covers only the sites TypeScript
+    // cannot own: copier.yml's choices, the two workflows, the ruleset,
+    // and plan.ts's per-channel legs (string-keyed, not typed).
     name: "channels",
     run: () => {
       const mismatches: Mismatch[] = [];
-      const reference = copierChoices("channel");
+      const reference = [...CHANNELS];
 
-      const registry = read(".github/scripts/fleet/repos_registry.ts");
-      const channelsLiteral = mustMatch(
-        registry,
-        /const CHANNELS = \[([^\]]+)\]/,
-        "repos_registry.ts",
-        "CHANNELS",
-      )[1];
-      const registryChannels = [...channelsLiteral.matchAll(/"([^"]+)"/g)].map((m) => m[1]);
       mismatches.push(
-        ...setMismatch(
-          ".github/scripts/fleet/repos_registry.ts CHANNELS",
-          reference,
-          registryChannels,
-        ),
-      );
-
-      const branchTree = read(".github/scripts/build-branches/branch_tree.ts");
-      const union = mustMatch(
-        branchTree,
-        /\{ channel: "([a-z]+)" \} \| \{ channel: "([a-z]+)";/,
-        "branch_tree.ts",
-        "channel type",
-      );
-      mismatches.push(
-        ...setMismatch(".github/scripts/build-branches/branch_tree.ts channel type", reference, [
-          union[1],
-          union[2],
-        ]),
-      );
-      const guard = mustMatch(
-        branchTree,
-        /channel !== "([a-z]+)" && channel !== "([a-z]+)"/,
-        "branch_tree.ts",
-        "channel validation",
-      );
-      mismatches.push(
-        ...setMismatch(
-          ".github/scripts/build-branches/branch_tree.ts channel validation",
-          reference,
-          [guard[1], guard[2]],
-        ),
+        ...setMismatch("copier.yml channel choices", reference, copierChoices("channel")),
       );
 
       const plan = read(".github/scripts/build-branches/plan.ts");
@@ -747,22 +730,6 @@ const rules: Rule[] = [
           });
         }
       }
-
-      const answersFile = read(".github/scripts/sync/answers_file.ts");
-      // The sync consumers all take Channel from this one const.
-      const syncChannels = mustMatch(
-        answersFile,
-        /const CHANNELS = \[([^\]]+)\]/,
-        "answers_file.ts",
-        "CHANNELS",
-      )[1];
-      mismatches.push(
-        ...setMismatch(
-          ".github/scripts/sync/answers_file.ts CHANNELS",
-          reference,
-          [...syncChannels.matchAll(/"([^"]+)"/g)].map((m) => m[1]),
-        ),
-      );
 
       const protect = read(".github/workflows/protect-build-branches.yml");
       const fromJson = mustMatch(
@@ -1706,7 +1673,9 @@ const rules: Rule[] = [
     // names the autorelease labels as string literals. gh pr list exits 0
     // and empty for a label that does not exist, so a literal that drifts
     // from the fragment roster degrades the guard to a permanent silent
-    // no-op - anchor the literals to the fragment here instead.
+    // no-op - anchor the literals to the fragment here instead. Only the
+    // template side is checked: dogfood-parity already pins this repo's
+    // .github/workflows/release.yml to it.
     name: "release-guard-labels",
     run: () => {
       const mismatches: Mismatch[] = [];
@@ -1719,49 +1688,45 @@ const rules: Rule[] = [
       const roster = new Set(
         parseLabels(`labels:\n${fragment}`, "settings-labels.jinja").map((label) => label.name),
       );
-      for (const rel of [
-        ".github/workflows/release.yml",
-        "templates/release-please/.github/workflows/release.yml.jinja",
-      ]) {
-        const text = read(rel);
-        const queried = mustMatch(
-          text,
-          /gh pr list --state merged --label '([^']+)'/,
-          rel,
-          "guard label query",
-        )[1];
-        const worn = mustMatch(text, /have worn '([^']+)'/, rel, "guard error's pending label")[1];
-        const target = mustMatch(
-          text,
-          /move the label to '([^']+)'/,
-          rel,
-          "guard error's tagged label",
-        )[1];
-        for (const name of [queried, worn, target]) {
-          if (!roster.has(name)) {
-            mismatches.push({
-              file: rel,
-              expected: `label '${name}' declared in templates/release-please/fragments/settings-labels.jinja`,
-              got: "not in the fragment roster",
-            });
-          }
-        }
-        if (worn !== queried) {
+      const rel = "templates/release-please/.github/workflows/release.yml.jinja";
+      const text = read(rel);
+      const queried = mustMatch(
+        text,
+        /gh pr list --state merged --label '([^']+)'/,
+        rel,
+        "guard label query",
+      )[1];
+      const worn = mustMatch(text, /have worn '([^']+)'/, rel, "guard error's pending label")[1];
+      const target = mustMatch(
+        text,
+        /move the label to '([^']+)'/,
+        rel,
+        "guard error's tagged label",
+      )[1];
+      for (const name of [queried, worn, target]) {
+        if (!roster.has(name)) {
           mismatches.push({
             file: rel,
-            expected: `guard error names the queried label '${queried}'`,
-            got: `'${worn}'`,
+            expected: `label '${name}' declared in templates/release-please/fragments/settings-labels.jinja`,
+            got: "not in the fragment roster",
           });
         }
-        // The prescribed fix must point at the tagged label specifically -
-        // roster membership alone would accept any declared label.
-        if (target !== "autorelease: tagged") {
-          mismatches.push({
-            file: rel,
-            expected: "guard error prescribes moving to 'autorelease: tagged'",
-            got: `'${target}'`,
-          });
-        }
+      }
+      if (worn !== queried) {
+        mismatches.push({
+          file: rel,
+          expected: `guard error names the queried label '${queried}'`,
+          got: `'${worn}'`,
+        });
+      }
+      // The prescribed fix must point at the tagged label specifically -
+      // roster membership alone would accept any declared label.
+      if (target !== "autorelease: tagged") {
+        mismatches.push({
+          file: rel,
+          expected: "guard error prescribes moving to 'autorelease: tagged'",
+          got: `'${target}'`,
+        });
       }
       return mismatches;
     },
@@ -1844,26 +1809,8 @@ const rules: Rule[] = [
         });
       }
 
-      const identity = (rel: string) => {
-        const text = read(rel);
-        // Covers the shell shape (user.name "x"), the single-arg config
-        // shape ("user.name=x"), and the argv-array shape ("user.name",
-        // "x").
-        const name = mustMatch(text, /user\.name["', =]+([^\s"',]+)/, rel, "git user.name")[1];
-        const email = mustMatch(text, /user\.email["', =]+([^\s"',]+)/, rel, "git user.email")[1];
-        return `${name} <${email}>`;
-      };
-      const identityFiles = [
-        ".github/scripts/shared/open_automation_pr.ts",
-        ".github/scripts/sync/normalize_src.ts",
-        ".github/scripts/sync/commit_push.ts",
-      ];
-      const referenceIdentity = identity(identityFiles[0]);
-      for (const rel of identityFiles.slice(1)) {
-        if (identity(rel) !== referenceIdentity) {
-          mismatches.push({ file: rel, expected: referenceIdentity, got: identity(rel) });
-        }
-      }
+      // No git-identity arm: every committer is TypeScript and imports
+      // shared/git_identity.ts, so the import is the guarantee.
 
       // Every PAT URL in every file must match, not just the first per file.
       const patUrls = (rel: string) => {

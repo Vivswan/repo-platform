@@ -74,11 +74,6 @@ function* walk(dir: string): Generator<string> {
   }
 }
 
-/** Resolvable = the ref names a commit (tag, branch, or SHA). */
-export function resolves(repo: string, ref: string): boolean {
-  return resolve(repo, ref).ok;
-}
-
 if (import.meta.main) {
   const files = [".github/workflows", "actions", "templates"]
     .flatMap((root) => [...walk(root)])

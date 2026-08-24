@@ -11,7 +11,7 @@
 import { appendFileSync, existsSync, lstatSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse } from "yaml";
-import { env, requireEnv } from "../shared/gha.ts";
+import { env, fail, requireEnv } from "../shared/gha.ts";
 import { parseModules } from "../shared/modules.ts";
 import { customLicenseFlipError } from "./retired_paths.ts";
 
@@ -26,7 +26,12 @@ function run(command: string[], options: { stdout?: "pipe" } = {}): string {
   const proc = Bun.spawnSync(command, {
     stdio: ["inherit", options.stdout === "pipe" ? "pipe" : "inherit", "inherit"],
   });
-  if (proc.exitCode !== 0) process.exit(proc.exitCode ?? 1);
+  if (proc.exitCode !== 0) {
+    // A captured child's ::error:: detail rides ITS stdout (workflow
+    // commands parse from stdout); forward it or the failure is silent.
+    if (options.stdout === "pipe") process.stdout.write(proc.stdout?.toString() ?? "");
+    process.exit(proc.exitCode ?? 1);
+  }
   return options.stdout === "pipe" ? (proc.stdout?.toString() ?? "") : "";
 }
 
@@ -44,8 +49,7 @@ writeFileSync(join(runnerTemp, "answers-old.yml"), answersOldText);
 // render_data.ts's canonical error just below.
 const newModules = parseModules(requireEnv("MODULES"));
 if (newModules === null) {
-  console.error("::error::MODULES must be a JSON list of strings");
-  process.exit(1);
+  fail("MODULES must be a JSON list of strings");
 }
 let answersOld: unknown;
 try {
@@ -55,10 +59,9 @@ try {
 }
 const recordedModules = (answersOld as Record<string, unknown> | null | undefined)?.modules;
 if (recordedModules !== undefined && !isStringList(recordedModules)) {
-  console.error(
-    "::error::HEAD:.copier-answers.yml records a malformed modules list; cannot check the custom-license flip",
+  fail(
+    "HEAD:.copier-answers.yml records a malformed modules list; cannot check the custom-license flip",
   );
-  process.exit(1);
 }
 const oldModules = isStringList(recordedModules) ? recordedModules : [];
 const presentLicenses = ["LICENSE", "LICENSE.md"].filter(
@@ -67,8 +70,7 @@ const presentLicenses = ["LICENSE", "LICENSE.md"].filter(
 );
 const flipError = customLicenseFlipError(oldModules, newModules, presentLicenses);
 if (flipError !== null) {
-  console.error(`::error::${flipError}`);
-  process.exit(1);
+  fail(flipError);
 }
 
 run([
@@ -115,30 +117,30 @@ run([
   srcPath,
   join(runnerTemp, "render-new"),
 ]);
-writeFileSync(
-  join(runnerTemp, "retired-paths.json"),
-  run(
-    [
-      "bun",
-      ".github/scripts/sync/retired_paths.ts",
-      "--old-render",
-      join(runnerTemp, "render-old"),
-      "--new-render",
-      join(runnerTemp, "render-new"),
-      "--old-copier",
-      join(runnerTemp, "copier-old.yml"),
-      "--new-copier",
-      join(runnerTemp, "copier-new.yml"),
-      "--modules",
-      requireEnv("MODULES"),
-    ],
-    { stdout: "pipe" },
-  ),
+const retiredJson = run(
+  [
+    "bun",
+    ".github/scripts/sync/retired_paths.ts",
+    "--old-render",
+    join(runnerTemp, "render-old"),
+    "--new-render",
+    join(runnerTemp, "render-new"),
+    "--old-copier",
+    join(runnerTemp, "copier-old.yml"),
+    "--new-copier",
+    join(runnerTemp, "copier-new.yml"),
+    "--modules",
+    requireEnv("MODULES"),
+  ],
+  { stdout: "pipe" },
 );
+// The file copy is for debugging only; the captured stdout is the input.
+writeFileSync(join(runnerTemp, "retired-paths.json"), retiredJson);
 
-const retired = JSON.parse(
-  await Bun.file(join(runnerTemp, "retired-paths.json")).text(),
-) as string[];
+const retired: unknown = JSON.parse(retiredJson);
+if (!isStringList(retired)) {
+  fail("retired_paths.ts printed something other than a JSON list of paths");
+}
 writeFileSync(join(runnerTemp, "removed-paths.txt"), "");
 for (const path of retired) {
   const absolute = join(targetDir, path);

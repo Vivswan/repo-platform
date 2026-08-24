@@ -301,7 +301,9 @@ describe("select_settings_repos.ts", () => {
     symlinkSync(join(repoRoot, ".github"), join(bare, ".github"));
     const result = run("no-registry", { cwd: bare });
     expect(result.exitCode).not.toBe(0);
-    expect(result.stderr).toContain("repos.yml");
+    // The registry stage's ::error:: rides its captured stdout, which
+    // runStage forwards on failure.
+    expect(result.stdout).toContain("repos.yml");
   });
 
   test("a failed discovery still fails the whole run", () => {

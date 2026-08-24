@@ -12,7 +12,7 @@ export function env(name: string, fallback = ""): string {
 export function requireEnv(name: string): string {
   const value = process.env[name];
   if (value === undefined || value === "") {
-    console.error(`::error::${name} must be set`);
+    error(`${name} must be set`);
     process.exit(2);
   }
   return value;
@@ -40,6 +40,17 @@ export function error(message: string): void {
 
 export function addMask(value: string): void {
   console.log(`::add-mask::${escapeData(value)}`);
+}
+
+/** Print each message as an ::error:: workflow command and exit 1. On
+ * stdout, like error(): the runner parses workflow commands from stdout
+ * only, so a stderr copy shows in the log but never becomes an
+ * annotation. */
+export function fail(messages: string | string[]): never {
+  for (const message of Array.isArray(messages) ? messages : [messages]) {
+    error(message);
+  }
+  process.exit(1);
 }
 
 /** Append a step output to $GITHUB_OUTPUT. */

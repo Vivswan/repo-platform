@@ -36,14 +36,15 @@
 // {rows}: one row per selection entry, in order, as
 // {repo, channel, redact_name, hide_details, display, verify} (`repo` is
 // always the real slug - the CALLER must emit `display` in its matrix
-// instead for redact_name rows). Errors go to stderr as ::error::
-// workflow commands with a nonzero exit.
+// instead for redact_name rows). Errors print as ::error:: workflow
+// commands (on stdout, where the runner parses them) with a nonzero exit.
 
 import { createHmac } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
 import { parseFlags } from "../shared/flags.ts";
+import { fail } from "../shared/gha.ts";
 import { parseWith } from "../shared/json.ts";
 import { loadRegistry } from "./repos_registry.ts";
 
@@ -242,9 +243,34 @@ export function enrich(
   return { rows };
 }
 
-function fail(message: string): never {
-  console.error(`::error::${message}`);
-  process.exit(1);
+// The discovered list a caller hands to `enrich`. Fail closed at the
+// parse already: an entry without an explicit boolean `private` is
+// rejected outright rather than defaulted, and one bad entry rejects the
+// whole list - a silently dropped row would skip its repo's redaction
+// decision. Loose on the rest: extra discovery fields pass through.
+const discoveredListSchema = z.array(z.looseObject({ repo: z.string(), private: z.boolean() }));
+
+/** Parse a discovered list at the trust boundary; null when the shape is
+ * wrong (the CLI then fails without quoting the payload, which can carry
+ * private repo names). */
+export function parseDiscoveredList(data: unknown): DiscoveredRepo[] | null {
+  const result = discoveredListSchema.safeParse(data);
+  return result.success ? result.data : null;
+}
+
+// The selection rows from repos_registry select. Only `repo` is load
+// bearing here; `channel` is deliberately NOT validated (enrich coalesces
+// a nullish one to "" and passes anything else through untouched), and
+// extra keys ride along - the legacy fail-open tolerance, kept exactly.
+const selectionListSchema = z.array(z.looseObject({ repo: z.string() }));
+
+/** Parse a selection list at the trust boundary; null when the shape is
+ * wrong. */
+export function parseSelectionList(
+  data: unknown,
+): { repo: string; channel: string | null }[] | null {
+  const result = selectionListSchema.safeParse(data);
+  return result.success ? (result.data as { repo: string; channel: string | null }[]) : null;
 }
 
 function readJson(path: string, what: string): unknown {
@@ -257,34 +283,19 @@ function readJson(path: string, what: string): unknown {
 }
 
 function loadDiscovered(path: string): DiscoveredRepo[] {
-  const parsed = readJson(path, "the discovered list");
-  if (
-    !Array.isArray(parsed) ||
-    !parsed.every(
-      (v) =>
-        typeof v === "object" &&
-        v !== null &&
-        typeof (v as DiscoveredRepo).repo === "string" &&
-        typeof (v as DiscoveredRepo).private === "boolean",
-    )
-  ) {
+  const parsed = parseDiscoveredList(readJson(path, "the discovered list"));
+  if (parsed === null) {
     fail(`${path}: the discovered list must be a JSON array of {repo, private} objects`);
   }
-  return parsed as DiscoveredRepo[];
+  return parsed;
 }
 
 function loadSelection(path: string): { repo: string; channel: string | null }[] {
-  const parsed = readJson(path, "the selection");
-  if (
-    !Array.isArray(parsed) ||
-    !parsed.every(
-      (v) =>
-        typeof v === "object" && v !== null && typeof (v as { repo: unknown }).repo === "string",
-    )
-  ) {
+  const parsed = parseSelectionList(readJson(path, "the selection"));
+  if (parsed === null) {
     fail(`${path}: the selection must be a JSON array of {repo, ...} objects`);
   }
-  return parsed as { repo: string; channel: string | null }[];
+  return parsed;
 }
 
 function main(args: string[]): void {
@@ -313,8 +324,7 @@ function main(args: string[]): void {
       const centralDir = flags["--central-dir"] ?? "settings/repos";
       const { registry, errors } = loadRegistry(readFileSync(registryPath, "utf-8"), registryPath);
       if (registry === null) {
-        for (const message of errors) console.error(`::error::${message}`);
-        process.exit(1);
+        fail(errors);
       }
       const committed = new Set(
         [...registry.managed.repos, ...registry.exclude, ...registry.config.keys()].map((slug) =>

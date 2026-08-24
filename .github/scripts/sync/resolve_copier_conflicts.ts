@@ -27,8 +27,10 @@
 // Usage:
 //   bun resolve_copier_conflicts.ts --summary /path/to/summary.md [--root .]
 
-import { lstatSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
+import { joinLines, NEWLINE, splitLines, stripCr } from "../shared/lines.ts";
+import { walkFiles } from "./walk.ts";
 
 // Built by concatenation so this file never contains a literal marker line
 // (the validator flags those in any text file).
@@ -51,38 +53,7 @@ const LOCAL_SECTION_SENTINELS = [
   Buffer.from("# repo-platform:local-section"),
 ];
 
-const SKIP_DIRS = new Set([".git", ".repo-platform-src", "node_modules", ".venv", "__pycache__"]);
-
-const NEWLINE = Buffer.from("\n");
 const CRLF = Buffer.from("\r\n");
-
-function splitLines(data: Buffer): Buffer[] {
-  const lines: Buffer[] = [];
-  let start = 0;
-  for (let i = 0; i < data.length; i++) {
-    if (data[i] === 0x0a) {
-      lines.push(data.subarray(start, i));
-      start = i + 1;
-    }
-  }
-  lines.push(data.subarray(start));
-  return lines;
-}
-
-function joinLines(lines: Buffer[]): Buffer {
-  const parts: Buffer[] = [];
-  lines.forEach((line, index) => {
-    if (index > 0) parts.push(NEWLINE);
-    parts.push(line);
-  });
-  return Buffer.concat(parts);
-}
-
-function stripCr(line: Buffer): Buffer {
-  let end = line.length;
-  while (end > 0 && line[end - 1] === 0x0d) end--;
-  return line.subarray(0, end);
-}
 
 type Resolution =
   | { kind: "malformed" }
@@ -265,22 +236,6 @@ function truncate(sections: string[], limit: number, hideDetails: boolean): stri
     size += sectionSize;
   }
   return kept.join("\n");
-}
-
-/** All regular (non-symlink) files below root, sorted, skipping SKIP_DIRS. */
-function walkFiles(root: string): string[] {
-  const found: string[] = [];
-  const visit = (rel: string) => {
-    for (const name of readdirSync(join(root, rel))) {
-      const childRel = rel ? `${rel}/${name}` : name;
-      if (SKIP_DIRS.has(name)) continue;
-      const stat = lstatSync(join(root, childRel));
-      if (stat.isDirectory() && !stat.isSymbolicLink()) visit(childRel);
-      else if (stat.isFile() && !stat.isSymbolicLink()) found.push(childRel);
-    }
-  };
-  visit("");
-  return found.sort();
 }
 
 function usageError(message: string): never {

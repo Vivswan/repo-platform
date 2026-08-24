@@ -29,12 +29,13 @@
 //
 // The summary file is written empty when nothing drifted, and its size is
 // the single source of truth for "this PR needs review" (open_pr.ts tests
-// it). Errors go to stderr as ::error:: workflow commands with a nonzero
-// exit.
+// it). Errors print as ::error:: workflow commands (on stdout, where the
+// runner parses them) with a nonzero exit.
 
 import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseFlags } from "../shared/flags.ts";
+import { escapeData, fail } from "../shared/gha.ts";
 import { AnswersFileError, type CopierAnswers, readAnswersFile } from "./answers_file.ts";
 
 const FLAGS = [
@@ -63,11 +64,6 @@ export interface Drift {
 // Which file, if any, an apply run enforces this repo's settings from.
 // Central wins over in-repo where both exist (docs/settings.md).
 export type SettingsHome = "central" | "in-repo" | "none";
-
-function fail(message: string): never {
-  console.error(`::error::${message}`);
-  process.exit(1);
-}
 
 // GitHub cannot store a real newline in a description, but the value
 // arrives through a heredoc-shaped step output, so a trailing newline is
@@ -157,11 +153,6 @@ ${consequence[home]}
 > Auto-merge is off until this is settled.`;
 }
 
-// Workflow-command data is single-line; escape per the runner's rules.
-function escapeData(message: string): string {
-  return message.replaceAll("%", "%25").replaceAll("\r", "%0D").replaceAll("\n", "%0A");
-}
-
 // The log line deliberately does not say what merging ratifies: that
 // depends on the settings home, and driftSummary is the one place that
 // decides it. Two descriptions would drift apart.
@@ -210,16 +201,15 @@ function main(args: string[]): void {
     flags["--live-description"],
   );
   if (errors.length > 0) {
-    for (const error of errors) {
-      // The error text embeds the malformed recorded value; a hidden
-      // target gets the field-free version.
-      console.error(
+    // The error text embeds the malformed recorded value; a hidden
+    // target gets the field-free version.
+    fail(
+      errors.map((error) =>
         hideDetails
-          ? `::error::${display}: a recorded answer is malformed, so drift cannot be detected (detail hidden: private repository). Reproduce the sync locally - see docs/private-repos.md.`
-          : `::error::${repo}: ${error}`,
-      );
-    }
-    process.exit(1);
+          ? `${display}: a recorded answer is malformed, so drift cannot be detected (detail hidden: private repository). Reproduce the sync locally - see docs/private-repos.md.`
+          : `${repo}: ${error}`,
+      ),
+    );
   }
   const name = repo.split("/").pop() ?? repo;
   const home: SettingsHome = existsSync(join(flags["--central-dir"], `${name}.yml`))

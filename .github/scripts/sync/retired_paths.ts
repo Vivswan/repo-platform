@@ -15,13 +15,14 @@
 //     --old-copier <copier.yml> --new-copier <copier.yml>
 //
 // Prints the candidate paths (relative to the render roots) as a sorted
-// JSON array on stdout. Errors go to stderr as ::error:: workflow commands
-// and the exit code is nonzero.
+// JSON array on stdout. Errors print as ::error:: workflow commands (on
+// stdout, where the runner parses them) and the exit code is nonzero.
 
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { parse } from "yaml";
 import { parseFlags } from "../shared/flags.ts";
+import { fail } from "../shared/gha.ts";
 import { parseModules } from "../shared/modules.ts";
 
 // Relative paths of every file and symlink under root (directories are
@@ -127,13 +128,6 @@ export function readSkipIfExists(
     };
   }
   return { patterns: raw, errors: [] };
-}
-
-function fail(errors: string[]): never {
-  for (const message of errors) {
-    console.error(`::error::${message}`);
-  }
-  process.exit(1);
 }
 
 function skipPatternsFrom(path: string): string[] {

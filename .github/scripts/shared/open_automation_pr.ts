@@ -11,6 +11,7 @@
 // REFRESH_TITLE (optional), GH_TOKEN.
 
 import { env, requireEnv } from "../shared/gha.ts";
+import { SYNC_IDENTITY } from "../shared/git_identity.ts";
 import { must, mustCapture } from "../shared/proc.ts";
 
 const branch = requireEnv("BRANCH");
@@ -20,8 +21,8 @@ const title = requireEnv("PR_TITLE");
 const body = requireEnv("PR_BODY");
 const refreshTitle = env("REFRESH_TITLE") === "true";
 
-must(["git", "config", "user.name", "repo-platform-sync"]);
-must(["git", "config", "user.email", "repo-platform-sync@users.noreply.github.com"]);
+must(["git", "config", "user.name", SYNC_IDENTITY.name]);
+must(["git", "config", "user.email", SYNC_IDENTITY.email]);
 must(["git", "checkout", "-B", branch]);
 // The checkout was clean before the workflow's regeneration step, so the
 // dirty set is exactly that step's outputs.

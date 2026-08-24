@@ -32,6 +32,7 @@ import {
 } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { build, writeOutput } from "../../../scripts/compose_template.ts";
+import { CHANNELS, type Channel, isChannel } from "../shared/channels.ts";
 
 const REPO_ROOT = resolve(import.meta.dir, "..", "..", "..");
 
@@ -90,7 +91,12 @@ function copyMigrations(dest: string): void {
   copyDir("");
 }
 
-type Args = { dest: string } & ({ channel: "staging" } | { channel: "latest"; version: string });
+// Extract<> ties each arm to the shared channel enum: a renamed channel
+// breaks the compile here instead of leaving a stale literal behind.
+type Args = { dest: string } & (
+  | { channel: Extract<Channel, "staging"> }
+  | { channel: Extract<Channel, "latest">; version: string }
+);
 
 function parseArgs(argv: string[]): Args {
   let dest: string | undefined;
@@ -110,8 +116,10 @@ function parseArgs(argv: string[]): Args {
   }
   if (!dest) usageError("the following arguments are required: --dest");
   if (!channel) usageError("the following arguments are required: --channel");
-  if (channel !== "staging" && channel !== "latest") {
-    usageError(`argument --channel: invalid choice: '${channel}' (choose from staging, latest)`);
+  if (!isChannel(channel)) {
+    usageError(
+      `argument --channel: invalid choice: '${channel}' (choose from ${CHANNELS.join(", ")})`,
+    );
   }
   if (channel === "latest") {
     if (!version) {

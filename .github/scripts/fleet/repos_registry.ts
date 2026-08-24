@@ -17,20 +17,20 @@
 // exclude list as a JSON array of slugs (select_settings_repos.ts uses it
 // to report paused repos that still carry an in-repo settings file).
 // Slugs match case-insensitively everywhere, like GitHub repo identity;
-// original casing is kept for display. Errors go to stderr as
-// ::error:: workflow commands, all of them at once, and the exit code is
-// nonzero.
+// original casing is kept for display. Errors print as ::error:: workflow
+// commands (on stdout, where the runner parses them), all of them at
+// once, and the exit code is nonzero.
 
 import { readFileSync } from "node:fs";
 import { parse } from "yaml";
+import { z } from "zod";
+import { CHANNELS, type Channel, isChannel } from "../shared/channels.ts";
 import { parseFlags } from "../shared/flags.ts";
+import { fail } from "../shared/gha.ts";
 
 const SLUG_RE = /^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?\/[A-Za-z0-9._-]+$/;
 const WILDCARD = "*";
-const CHANNELS = ["staging", "latest"] as const;
 const TOP_LEVEL_KEYS = ["managed", "exclude", "defaults", "config"];
-
-type Channel = (typeof CHANNELS)[number];
 
 export interface Registry {
   managed: { wildcard: boolean; repos: string[] };
@@ -49,10 +49,6 @@ export interface Selected {
 
 function isSlug(value: unknown): value is string {
   return typeof value === "string" && SLUG_RE.test(value);
-}
-
-function isChannel(value: unknown): value is Channel {
-  return typeof value === "string" && (CHANNELS as readonly string[]).includes(value);
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -295,12 +291,14 @@ export function selectRepos(
   return { selection, errors: [] };
 }
 
-function fail(errors: string[]): never {
-  for (const message of errors) {
-    console.error(`::error::${message}`);
-  }
-  process.exit(1);
-}
+// The two accepted discovered-entry shapes: plain "owner/name" strings, or
+// the discovery objects the redaction-aware callers write ({repo, private,
+// ...} - only repo matters here; visibility is the enricher's concern,
+// keeping registry logic pure). Loose on purpose: extra keys pass through.
+const discoveredEntrySchema = z.union([
+  z.string(),
+  z.looseObject({ repo: z.string() }).transform((entry) => entry.repo),
+]);
 
 function readRegistryFile(path: string): Registry {
   let text: string;
@@ -343,26 +341,20 @@ function main(args: string[]): void {
           const detail = err instanceof Error ? err.message : String(err);
           fail([`${discoveredPath}: cannot read discovered list: ${detail}`]);
         }
-        // Two accepted shapes: plain "owner/name" strings, or the
-        // discovery objects the redaction-aware callers write
-        // ({repo, private, ...} - only repo matters here; visibility is
-        // the enricher's concern, keeping registry logic pure).
         if (!Array.isArray(parsed)) {
           fail([`${discoveredPath}: discovered list must be a JSON array`]);
         }
         discovered = parsed.map((entry, index): string => {
-          if (typeof entry === "string") return entry;
-          if (
-            typeof entry === "object" &&
-            entry !== null &&
-            typeof (entry as { repo: unknown }).repo === "string"
-          ) {
-            return (entry as { repo: string }).repo;
+          const result = discoveredEntrySchema.safeParse(entry);
+          if (!result.success) {
+            // Index only, never the value: a malformed entry may still be
+            // a private repo's name, and this print is publicly readable.
+            return fail([
+              `${discoveredPath}: entry at index ${index} is neither an "owner/name" ` +
+                `string nor a {repo, ...} object`,
+            ]);
           }
-          return fail([
-            `${discoveredPath}: entry at index ${index} is neither an "owner/name" ` +
-              `string nor a {repo, ...} object`,
-          ]);
+          return result.data;
         });
       }
       const { selection, errors } = selectRepos(registry, {

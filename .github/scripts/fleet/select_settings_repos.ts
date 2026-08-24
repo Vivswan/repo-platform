@@ -208,7 +208,12 @@ writeFileSync(join(runnerTemp, "discovered.json"), JSON.stringify(discovered));
 
 function runStage(command: string[], outFile: string): void {
   const proc = Bun.spawnSync(command, { stdout: "pipe", stderr: "inherit" });
-  if (proc.exitCode !== 0) process.exit(proc.exitCode ?? 1);
+  if (proc.exitCode !== 0) {
+    // The stage's ::error:: detail rides its captured stdout (workflow
+    // commands parse from stdout); forward it or the failure is silent.
+    process.stdout.write(proc.stdout.toString());
+    process.exit(proc.exitCode ?? 1);
+  }
   writeFileSync(outFile, proc.stdout);
 }
 
@@ -272,12 +277,12 @@ const excluded = JSON.parse(readFileSync(join(runnerTemp, "excluded.json"), "utf
 // A single-repo dispatch is a scoped heal; the fleet-wide exclusion
 // reminders belong to the full runs.
 const sweepable = onlyRepo === "" ? excluded : [];
-// Central-file existence folds case like every other slug comparison: the
-// exclusion's casing in repos.yml need not match the settings file's.
-const centralFiles = new Set(readdirSync("settings/repos").map((name) => name.toLowerCase()));
 for (const repo of sweepable) {
   const name = repo.split("/").pop() ?? repo;
-  if (centralFiles.has(`${name.toLowerCase()}.yml`)) continue;
+  // Central-file existence folds case via centralNames, like every other
+  // slug comparison: the exclusion's casing in repos.yml need not match
+  // the settings file's.
+  if (centralNames.has(`${name.toLowerCase()}.yml`)) continue;
   const probeResult = capture([
     "gh",
     "api",

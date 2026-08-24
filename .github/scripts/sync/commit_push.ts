@@ -10,6 +10,7 @@
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { env, hideDetails, requireEnv, setOutput } from "../shared/gha.ts";
+import { SYNC_IDENTITY } from "../shared/git_identity.ts";
 import { capture, must, mustCapture, passthrough } from "../shared/proc.ts";
 
 const target = requireEnv("TARGET");
@@ -19,8 +20,8 @@ const runnerTemp = requireEnv("RUNNER_TEMP");
 
 const git = (...args: string[]) => ["git", "-C", "target", ...args];
 
-must(git("config", "user.name", "repo-platform-sync"));
-must(git("config", "user.email", "repo-platform-sync@users.noreply.github.com"));
+must(git("config", "user.name", SYNC_IDENTITY.name));
+must(git("config", "user.email", SYNC_IDENTITY.email));
 must(git("add", "--all"));
 // The tree can be clean when the only change is the committed _src_path
 // normalization; there is still a branch to push.

@@ -12,12 +12,15 @@
 // line to --retired-summary for the workflow to surface; any other unknown
 // name is an error - silently dropping a typo would strip that module's
 // files from the repo. Malformed input never degrades to an empty list for
-// the same reason. Errors go to stderr as ::error:: workflow commands and
-// the exit code is nonzero.
+// the same reason. Errors print as ::error:: workflow commands (on stdout,
+// where the runner parses them) and the exit code is nonzero. The CLI
+// stays for ci/upgrade_path_test.sh; the sync itself imports the pure
+// functions (sync/select_modules.ts).
 
 import { readFileSync, writeFileSync } from "node:fs";
 import { parse } from "yaml";
 import { parseFlags } from "../shared/flags.ts";
+import { fail } from "../shared/gha.ts";
 
 // Modules the template has deliberately retired: a repo still listing one
 // gets it dropped with a notice instead of a hard failure. Empty today;
@@ -121,13 +124,6 @@ export function filterModules(
     }
   }
   return { kept, dropped, errors };
-}
-
-function fail(errors: string[]): never {
-  for (const message of errors) {
-    console.error(`::error::${message}`);
-  }
-  process.exit(1);
 }
 
 function parseYamlFile(path: string): unknown {

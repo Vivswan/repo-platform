@@ -1,12 +1,10 @@
 // Typed `--flag value` CLI parsing shared by the fleet and sync scripts.
 // Unknown or valueless flags and missing required flags fail as ::error::
-// workflow commands with a nonzero exit; the returned record carries the
-// required flags as guaranteed keys, so call sites never re-check presence.
+// workflow commands on stdout with a nonzero exit; the returned record
+// carries the required flags as guaranteed keys, so call sites never
+// re-check presence.
 
-function fail(message: string): never {
-  console.error(`::error::${message}`);
-  process.exit(1);
-}
+import { fail } from "./gha.ts";
 
 function isAllowed<K extends string>(flag: string, allowed: readonly K[]): flag is K {
   return allowed.some((candidate) => candidate === flag);

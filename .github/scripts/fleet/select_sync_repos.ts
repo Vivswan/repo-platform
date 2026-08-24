@@ -65,7 +65,12 @@ if (onlyRepo === "all") onlyRepo = "";
 
 function runStage(command: string[], outFile: string): void {
   const proc = Bun.spawnSync(command, { stdout: "pipe", stderr: "inherit" });
-  if (proc.exitCode !== 0) process.exit(proc.exitCode ?? 1);
+  if (proc.exitCode !== 0) {
+    // The stage's ::error:: detail rides its captured stdout (workflow
+    // commands parse from stdout); forward it or the failure is silent.
+    process.stdout.write(proc.stdout.toString());
+    process.exit(proc.exitCode ?? 1);
+  }
   writeFileSync(outFile, proc.stdout);
 }
 

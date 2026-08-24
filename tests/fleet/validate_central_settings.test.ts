@@ -572,12 +572,15 @@ describe("CLI exit codes", () => {
       "flaky.yml": central(["dependencies", "github_actions"]),
       "violating.yml": central(["dependencies"]),
     });
-    const { exitCode, stdout, stderr } = run(dir);
+    const { exitCode, stdout } = run(dir);
     expect(stdout).toContain("Vivswan/flaky");
-    expect(stderr).toContain("::error::");
-    expect(stderr).toContain("violating.yml");
-    expect(stderr).toContain('"github_actions"');
-    expect(stderr).not.toContain("flaky");
+    // ::error:: lines print on stdout (where annotations parse); the
+    // flaked repo must appear only in its warning, never accused.
+    const errorLines = stdout.split("\n").filter((line) => line.startsWith("::error::"));
+    expect(errorLines.length).toBeGreaterThan(0);
+    expect(errorLines.join("\n")).toContain("violating.yml");
+    expect(errorLines.join("\n")).toContain('"github_actions"');
+    expect(errorLines.join("\n")).not.toContain("flaky");
     expect(exitCode).toBe(1);
   });
 

@@ -8,11 +8,13 @@
 //     --out-old <file> --out-new <file> --modules <json-list>
 //     --channel <name> --private <true|false> --description <text>
 //
-// Errors go to stderr as ::error:: workflow commands with a nonzero exit.
+// Errors print as ::error:: workflow commands (on stdout, where the
+// runner parses them) with a nonzero exit.
 
 import { writeFileSync } from "node:fs";
 import { stringify } from "yaml";
 import { parseFlags } from "../shared/flags.ts";
+import { fail } from "../shared/gha.ts";
 import { parseModules } from "../shared/modules.ts";
 import { readAnswersFile } from "./answers_file.ts";
 
@@ -25,11 +27,6 @@ const FLAGS = [
   "--private",
   "--description",
 ] as const;
-
-function fail(message: string): never {
-  console.error(`::error::${message}`);
-  process.exit(1);
-}
 
 function main(args: string[]): void {
   const flags = parseFlags(args, FLAGS);

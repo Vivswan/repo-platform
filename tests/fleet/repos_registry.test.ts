@@ -306,10 +306,33 @@ describe("CLI", () => {
   test("validate fails with ::error:: annotations on a broken file", async () => {
     const broken = join(tmpdir(), "repos-registry-test-broken.yml");
     await Bun.write(broken, "managed:\n  - bad slug\n  - a/b\n  - a/b\n");
-    const { exitCode, stderr } = run(["validate", "--file", broken]);
+    // Annotations parse from stdout only; that is where fail() prints.
+    const { exitCode, stdout } = run(["validate", "--file", broken]);
     expect(exitCode).toBe(1);
-    expect(stderr).toContain("::error::");
-    expect(stderr.match(/::error::/g)?.length).toBe(2);
+    expect(stdout).toContain("::error::");
+    expect(stdout.match(/::error::/g)?.length).toBe(2);
+  });
+
+  test("select accepts discovered {repo, ...} objects with extra keys", async () => {
+    const discovered = join(tmpdir(), "repos-registry-test-discovered-objects.json");
+    await Bun.write(
+      discovered,
+      JSON.stringify([{ repo: "Vivswan/dotfiles", private: false, extra: 1 }]),
+    );
+    const { exitCode, stdout } = run(["select", "--discovered", discovered]);
+    expect(exitCode).toBe(0);
+    expect(JSON.parse(stdout).map((row: { repo: string }) => row.repo)).toContain(
+      "Vivswan/dotfiles",
+    );
+  });
+
+  test("a discovered entry of the wrong shape fails naming its index, never its value", async () => {
+    const discovered = join(tmpdir(), "repos-registry-test-discovered-bad.json");
+    await Bun.write(discovered, JSON.stringify(["Vivswan/dotfiles", { repo: 42 }]));
+    const { exitCode, stdout } = run(["select", "--discovered", discovered]);
+    expect(exitCode).toBe(1);
+    expect(stdout).toContain("entry at index 1");
+    expect(stdout).not.toContain("42");
   });
 
   test("excluded prints the exclude list as a JSON array", async () => {

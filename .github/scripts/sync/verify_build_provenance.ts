@@ -53,20 +53,16 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
 import { commitRunParse, commitStampParse, commitStampParseAll } from "../shared/commit_stamp.ts";
-import { env, requireEnv } from "../shared/gha.ts";
+import { env, fail, requireEnv } from "../shared/gha.ts";
 import { parseWith } from "../shared/json.ts";
-import { capture, mustCapture, passthrough } from "../shared/proc.ts";
+import { capture, mustCapture } from "../shared/proc.ts";
+import { rebuildChannelTree } from "../shared/rebuild_tree.ts";
 
 const channel = requireEnv("CHANNEL");
 const tipSha = requireEnv("TIP_SHA");
 const sourceSha = requireEnv("SOURCE_SHA");
 const version = env("VERSION");
 const repository = requireEnv("GITHUB_REPOSITORY");
-
-function fail(message: string): never {
-  console.log(`::error::${message}`);
-  process.exit(1);
-}
 
 let subject: string;
 let unit: string;
@@ -227,43 +223,28 @@ if (run.head_sha !== sourceSha) {
   );
 }
 
-// Rebuild exactly as publish.ts does: the SOURCE commit's own script and
-// dependencies, so the check reproduces that commit's composition.
+// Rebuild exactly as publish.ts does (the shared rebuildChannelTree: the
+// SOURCE commit's own script and dependencies, so the check reproduces
+// that commit's composition).
 const workDir = mkdtempSync(join(requireEnv("RUNNER_TEMP"), `${channel}-provenance.`));
 const srcDir = join(workDir, "src");
 const treeDir = join(workDir, "tree");
 
-// Command failures throw (never process.exit) so the finally cleanup
-// always runs, like the bash version's EXIT trap.
-function step(command: string[]): void {
-  if (passthrough(command) !== 0) throw new Error(`command failed: ${command.join(" ")}`);
-}
-function stepCapture(command: string[]): string {
-  const result = capture(command);
-  if (result.exitCode !== 0) throw new Error(`command failed: ${command.join(" ")}`);
-  return result.stdout.trimEnd();
-}
-
 /** Rebuild the channel tree and compare; returns the failure message for
- * a tree mismatch, null when the tip verifies. */
+ * a tree mismatch, null when the tip verifies. Command failures throw
+ * (never process.exit) so the finally cleanup always runs, like the bash
+ * version's EXIT trap. */
 function rebuildMismatch(): string | null {
-  step(["git", "worktree", "add", "--detach", "--quiet", srcDir, sourceSha]);
-  step(["bun", "install", "--frozen-lockfile", "--cwd", srcDir, "--silent"]);
-  const build = [
-    "bun",
-    join(srcDir, ".github/scripts/build-branches/branch_tree.ts"),
-    "--dest",
-    treeDir,
-    "--channel",
+  const builtTree = rebuildChannelTree({
+    sourceSha,
     channel,
-  ];
-  step(channel === "latest" ? [...build, "--version", version] : build);
-  // Hash the rebuilt tree the way publish.ts's commit did: a scratch git
-  // repo's index, so file modes and symlinks land in the comparison too.
-  step(["git", "-C", treeDir, "init", "--quiet"]);
-  step(["git", "-C", treeDir, "add", "-A"]);
-  const builtTree = stepCapture(["git", "-C", treeDir, "write-tree"]);
-  const tipTree = stepCapture(["git", "rev-parse", `${tipSha}^{tree}`]);
+    version: channel === "latest" ? version : undefined,
+    srcDir,
+    treeDir,
+  });
+  const tip = capture(["git", "rev-parse", `${tipSha}^{tree}`]);
+  if (tip.exitCode !== 0) throw new Error(`command failed: git rev-parse ${tipSha}^{tree}`);
+  const tipTree = tip.stdout.trimEnd();
   if (builtTree !== tipTree) {
     return `${subject} does not match its stamp: rebuilding the tree from stamped source ${sourceSha.slice(0, 12)} gives tree ${builtTree}, but the ${unit}'s tree is ${tipTree}. The ${carrier} carries content the builder never produced. ${rebuildHint}`;
   }

@@ -7,6 +7,8 @@ import {
   enrich,
   enrichedRowSchema,
   hintName,
+  parseDiscoveredList,
+  parseSelectionList,
   VERIFY_HEX_LENGTH,
   verifyTag,
 } from "../../.github/scripts/fleet/redact.ts";
@@ -206,6 +208,55 @@ describe("enrichedRowSchema", () => {
 
   test("rejects an unredacted row whose display is not its slug", () => {
     expect(enrichedRowSchema.safeParse({ ...plain, display: "p**" }).success).toBe(false);
+  });
+});
+
+// Parity with the pre-zod hand-rolled ladders: the discovered list fails
+// CLOSED (an entry without an explicit boolean `private` rejects the whole
+// list), the selection stays fail-open on everything but `repo`.
+describe("parseDiscoveredList", () => {
+  test("accepts {repo, private} entries and passes extra keys through", () => {
+    const parsed = parseDiscoveredList([
+      { repo: "o/a", private: true, archived: false, pushed_at: "now" },
+    ]);
+    expect(parsed).toEqual([{ repo: "o/a", private: true, archived: false, pushed_at: "now" }]);
+  });
+
+  test("an empty list is valid", () => {
+    expect(parseDiscoveredList([])).toEqual([]);
+  });
+
+  test("rejects a missing or non-boolean private (fail closed, whole list)", () => {
+    expect(parseDiscoveredList([{ repo: "o/a" }])).toBeNull();
+    expect(parseDiscoveredList([{ repo: "o/a", private: "true" }])).toBeNull();
+    expect(parseDiscoveredList([{ repo: "o/a", private: true }, { repo: "o/b" }])).toBeNull();
+  });
+
+  test("rejects non-object entries, a non-string repo, and a non-array payload", () => {
+    expect(parseDiscoveredList(["o/a"])).toBeNull();
+    expect(parseDiscoveredList([{ repo: 7, private: true }])).toBeNull();
+    expect(parseDiscoveredList({ repo: "o/a", private: true })).toBeNull();
+  });
+});
+
+describe("parseSelectionList", () => {
+  test("only repo is validated; channel and extras ride along untouched", () => {
+    const parsed = parseSelectionList([
+      { repo: "o/a", owner: "o", name: "a", channel: "staging" },
+      { repo: "o/b", channel: null },
+      { repo: "o/c" },
+    ]);
+    expect(parsed).toEqual([
+      { repo: "o/a", owner: "o", name: "a", channel: "staging" },
+      { repo: "o/b", channel: null },
+      { repo: "o/c" },
+    ]);
+  });
+
+  test("rejects a missing or non-string repo and a non-array payload", () => {
+    expect(parseSelectionList([{ channel: "staging" }])).toBeNull();
+    expect(parseSelectionList([{ repo: 7 }])).toBeNull();
+    expect(parseSelectionList("o/a")).toBeNull();
   });
 });
 

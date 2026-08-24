@@ -9,57 +9,48 @@
 // Env: TARGET_DISPLAY, HIDE_DETAILS, GITHUB_REPOSITORY, GITHUB_OUTPUT,
 // RUNNER_TEMP.
 
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { readFileSync, writeFileSync } from "node:fs";
 import { env, error, hideDetails, notice, requireEnv, setOutput } from "../shared/gha.ts";
+import { identityArgs, SYNC_IDENTITY } from "../shared/git_identity.ts";
+import { must } from "../shared/proc.ts";
 
 const canonical = `gh:${requireEnv("GITHUB_REPOSITORY")}`;
 const display = env("TARGET_DISPLAY");
 const answersPath = "target/.copier-answers.yml";
 const before = readFileSync(answersPath);
-const normalize = Bun.spawnSync(
-  [
-    "bun",
-    join(import.meta.dir, "normalize_src_path.ts"),
-    "--answers",
-    answersPath,
-    "--canonical",
-    canonical,
-  ],
-  { stderr: "pipe" },
-);
-if (normalize.exitCode !== 0) {
+
+// The normalization itself: extract the recorded value, rewrite the line.
+// No print touches the recorded value here - it is target-derived, and the
+// hide-details discipline below decides what may reach the public log.
+const text = before.toString("utf-8");
+const match = text.match(/^_src_path:.*$/m);
+if (match === null) {
   if (hideDetails()) {
     error(
       `normalizing ${display}'s recorded template source failed (detail hidden: private repository). Reproduce the sync locally - see docs/private-repos.md.`,
     );
   } else {
-    process.stderr.write(normalize.stderr);
+    error(`no _src_path line in ${answersPath}`);
   }
   process.exit(1);
 }
-const recorded = normalize.stdout.toString().replace(/\n+$/, "");
+const recorded = match[0].replace(/^_src_path:\s*/, "");
+writeFileSync(answersPath, text.replace(/^_src_path:.*$/m, `_src_path: ${canonical}`));
+
 // The commit decision is byte-level (Buffer, not decoded text: utf-8
 // decoding maps invalid bytes to U+FFFD, which can read equal while the
 // on-disk bytes changed): a rewrite that only reformats the line still
 // dirties the tree, and copier update refuses a dirty tree.
 if (!readFileSync(answersPath).equals(before)) {
-  const commit = Bun.spawnSync(
-    [
-      "git",
-      "-C",
-      "target",
-      "-c",
-      "user.name=repo-platform-sync",
-      "-c",
-      "user.email=repo-platform-sync@users.noreply.github.com",
-      "commit",
-      "-qam",
-      `chore: normalize the copier template source to ${canonical}`,
-    ],
-    { stdio: ["inherit", "inherit", "inherit"] },
-  );
-  if (commit.exitCode !== 0) process.exit(commit.exitCode ?? 1);
+  must([
+    "git",
+    "-C",
+    "target",
+    ...identityArgs(SYNC_IDENTITY),
+    "commit",
+    "-qam",
+    `chore: normalize the copier template source to ${canonical}`,
+  ]);
   if (recorded === canonical) {
     // Nothing target-specific to hide: the value already was the
     // canonical (public) source; only the line's formatting changed.

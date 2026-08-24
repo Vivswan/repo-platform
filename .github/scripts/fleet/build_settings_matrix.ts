@@ -28,6 +28,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseFlags } from "../shared/flags.ts";
+import { fail } from "../shared/gha.ts";
 import { type EnrichedRow, parseEnrichedRows } from "./redact.ts";
 
 // No hide_details here: unlike the sync matrix, the apply leg has no
@@ -121,13 +122,6 @@ export function applyOnly(
     central: central.filter((t) => t.repo.toLowerCase() === wanted),
     inRepo: inRepo.filter((r) => r.repo.toLowerCase() === wanted),
   };
-}
-
-function fail(errors: string[]): never {
-  for (const message of errors) {
-    console.error(`::error::${message}`);
-  }
-  process.exit(1);
 }
 
 function loadInRepoRows(path: string): EnrichedRow[] {

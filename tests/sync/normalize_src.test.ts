@@ -44,7 +44,10 @@ function makeRoot(answers: string): string {
   return root;
 }
 
-function runScript(root: string): { exitCode: number | null; stdout: string; stderr: string } {
+function runScript(
+  root: string,
+  extraEnv: Record<string, string> = {},
+): { exitCode: number | null; stdout: string; stderr: string } {
   const proc = Bun.spawnSync(["bun", script], {
     cwd: root,
     env: {
@@ -52,6 +55,7 @@ function runScript(root: string): { exitCode: number | null; stdout: string; std
       GITHUB_REPOSITORY: "Vivswan/repo-platform",
       GITHUB_OUTPUT: join(root, "github-output.txt"),
       TARGET_DISPLAY: "Vivswan/demo",
+      ...extraEnv,
     },
     stdout: "pipe",
     stderr: "pipe",
@@ -106,6 +110,16 @@ describe("normalize_src", () => {
     const root = makeRoot("_commit: templates/v1.0.0\n");
     const result = runScript(root);
     expect(result.exitCode).not.toBe(0);
-    expect(result.stderr).toContain("no _src_path line");
+    // ::error:: on stdout: workflow commands only parse from there.
+    expect(result.stdout).toContain("::error::");
+    expect(result.stdout).toContain("no _src_path line");
+  });
+
+  test("a missing _src_path line stays detail-free for a hide-details target", () => {
+    const root = makeRoot("_commit: templates/v1.0.0\n");
+    const result = runScript(root, { HIDE_DETAILS: "true" });
+    expect(result.exitCode).not.toBe(0);
+    expect(result.stdout).toContain("detail hidden: private repository");
+    expect(result.stdout).not.toContain("no _src_path line");
   });
 });
