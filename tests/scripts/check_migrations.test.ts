@@ -8,7 +8,7 @@
 // copier applies (a bare filename matches at any depth).
 
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync } from "node:fs";
+import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -212,11 +212,21 @@ describe("resolveLatestRelease", () => {
     );
     const { value } = await server.stdout.getReader().read();
     const port = Number(new TextDecoder().decode(value).trim());
+    // A hostile inherited GIT_ASKPASS (VS Code exports one) must be
+    // suppressed by the override, not merely absent: the marker file
+    // proves git never invoked it.
+    const askpassDir = mkdtempSync(join(tmpdir(), "check-migrations-askpass-"));
+    const marker = join(askpassDir, "invoked");
+    const askpass = join(askpassDir, "askpass.sh");
+    writeFileSync(askpass, `#!/bin/sh\ntouch '${marker}'\necho hostile\n`, { mode: 0o755 });
+    process.env.GIT_ASKPASS = askpass;
     try {
       const repo = makeRepo();
       git(repo, "remote", "add", "origin", `http://127.0.0.1:${port}/repo.git`);
       expect(() => resolveLatestRelease(repo, 3000)).toThrow(/terminal prompts disabled/);
+      expect(existsSync(marker)).toBe(false);
     } finally {
+      delete process.env.GIT_ASKPASS;
       server.kill();
     }
   });
