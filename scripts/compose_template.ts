@@ -571,14 +571,13 @@ export function gateJobsGroups(manifests: ModuleManifest[]): GateJobsGroup[] {
 /** Workflow job ids a ci-gate-jobs fragment defines: the mapping keys at
  *  the fragment's own 2-space job indentation (the anchor sits among
  *  ci.yml's jobs, so every 2-space key is a job id; comments, steps, and
- *  jinja tags all sit elsewhere). Matched against GitHub's whole job-id
- *  grammar, not gate_jobs' stricter shape: a job the manifest schema could
- *  not declare must still surface as a parity error, never escape the
- *  gate unseen. */
+ *  jinja tags all sit elsewhere). Quoted keys and GitHub's whole job-id
+ *  grammar are matched - broader than gate_jobs' declarable shape - so a
+ *  job the manifest schema could not declare must still surface as a
+ *  parity error, never escape the gate unseen. */
 export function fragmentJobIds(body: Buffer): string[] {
-  return [
-    ...body.toString("utf-8").matchAll(/^ {2}([A-Za-z_][A-Za-z0-9_-]*):[ \t]*(?:#.*)?$/gm),
-  ].map((m) => m[1]);
+  const key = /^ {2}(?:"([^"]*)"|'([^']*)'|([A-Za-z_][A-Za-z0-9_-]*)):[ \t]*(?:#.*)?$/gm;
+  return [...body.toString("utf-8").matchAll(key)].map((m) => m[1] ?? m[2] ?? m[3]);
 }
 
 /** gate_jobs <-> ci-gate-jobs parity for one module: the declared gate
@@ -913,9 +912,10 @@ export function spliceContributions(
 const USES_REF_HINT = Buffer.from("uses_ref");
 // Any hand-written half of the derivation trips the guard: a partial copy
 // (say, only tpl_ref) would silently override the injected assignments.
-// Matched as a jinja set-tag, so spacing variants cannot slip past and
-// prose mentioning the names cannot false-positive.
-const HAND_WRITTEN_PREAMBLE_RE = /\{%-?\s*set\s+(?:tpl_ref|release_pin|uses_ref)\b/;
+// Matched as a jinja set-tag with any whitespace-control modifier, so
+// spacing variants cannot slip past and prose mentioning the names cannot
+// false-positive.
+const HAND_WRITTEN_PREAMBLE_RE = /\{%[-+]?\s*set\s+(?:tpl_ref|release_pin|uses_ref)\b/;
 
 /** The canonical uses_ref derivation, injected (not hand-copied) into every
  *  composed file that references uses_ref. All-jinja lines: they render to

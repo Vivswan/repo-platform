@@ -203,6 +203,13 @@ describe("fragmentJobIds", () => {
     );
     expect(fragmentJobIds(body)).toEqual(["Security_Scan", "_lint"]);
   });
+
+  test("quoted job keys still surface (they must fail parity, not escape)", () => {
+    const body = Buffer.from(
+      "  \"build\":\n    runs-on: ubuntu-latest\n  'deploy':\n    runs-on: ubuntu-latest\n",
+    );
+    expect(fragmentJobIds(body)).toEqual(["build", "deploy"]);
+  });
 });
 
 describe("gateJobsParityErrors", () => {
@@ -331,6 +338,7 @@ describe("injectUsesRefPreamble", () => {
       "{%- set release_pin = tpl_ref -%}",
       "{%- set uses_ref = 'main' %}",
       "{% set  uses_ref = 'main' %}",
+      "{%+ set uses_ref = 'main' %}",
     ]) {
       const result = injectUsesRefPreamble(
         "templates/demo/w.yml.jinja",
