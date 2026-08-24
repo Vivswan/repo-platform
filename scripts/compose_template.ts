@@ -589,8 +589,11 @@ export function fragmentJobIds(body: Buffer): string[] {
   if (typeof jobs !== "object" || jobs === null || Array.isArray(jobs)) {
     throw new Error("the fragment does not parse as the jobs mapping's children");
   }
+  // Literal-key collection ignores jinja comments: a key-shaped line inside
+  // a comment renders to nothing, so it must never vouch for a parsed key.
+  const commentFree = raw.replace(/\{#-?[\s\S]*?-?#\}/g, "");
   const rawKeys = new Set(
-    [...raw.matchAll(/^ {2}("[^"\n]*"|'[^'\n]*'|[^\s'"][^\n:]*?)\s*:(?:\s|$)/gm)].map((m) =>
+    [...commentFree.matchAll(/^ {2}("[^"\n]*"|'[^'\n]*'|[^\s'"][^\n:]*?)\s*:(?:\s|$)/gm)].map((m) =>
       m[1].replace(/^(["'])(.*)\1$/, "$2"),
     ),
   );

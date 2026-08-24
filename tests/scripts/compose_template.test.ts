@@ -227,6 +227,13 @@ describe("fragmentJobIds", () => {
     );
     expect(() => fragmentJobIds(body)).toThrow("literally");
   });
+
+  test("a commented-out key line cannot vouch for a jinja-derived key", () => {
+    const body = Buffer.from(
+      "{#-\n  safe:\n-#}\n  {{ 'safe' if private else 'evil' }}:\n    runs-on: ubuntu-latest\n",
+    );
+    expect(() => fragmentJobIds(body)).toThrow("literally");
+  });
 });
 
 describe("gateJobsParityErrors", () => {
