@@ -52,8 +52,8 @@ export const MANIFEST_NAME = ".repo-platform-manifest.json";
  *  comma. */
 const ENTRY_LINE_RE = /^(\s*)("(?:[^"\\]|\\.)*"): (\{.*\})(,?)$/;
 
-/** The hash token inside an entry object; entries without one (starters)
- *  are left alone. */
+/** The hash token inside an entry object; entries without one (starters,
+ *  mergeable baselines) are left alone. */
 const HASH_RE = /"hash": (?:null|"[0-9a-f]{64}")/;
 
 /** The provenance token on the manifest's own entry: the render's recorded
