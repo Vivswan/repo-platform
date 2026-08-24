@@ -1084,6 +1084,55 @@ describe("ownership-manifest byte parity", () => {
     expect(stderr).toContain("a starter carrying a hash");
   });
 
+  test("a mergeable entry passes hashless: content drift is not parity drift", () => {
+    // The mergeable contract: sync keeps the baseline current by three-way
+    // merge, so a repo-customized copy is healthy, not drifted.
+    const entries = {
+      ...stampedBaseline(),
+      ".github/settings.yml": '{"class": "mergeable"}',
+    };
+    const { exitCode, stdout, stderr } = runValidator({
+      [MANIFEST]: manifestOf(entries),
+      ".github/settings.yml": "repository:\n  has_issues: true\n  custom_addition: true\n",
+    });
+    expect(stderr).toBe("");
+    expect(exitCode).toBe(0);
+    expect(stdout).not.toContain(".github/settings.yml");
+  });
+
+  test("a mergeable entry never carries a hash", () => {
+    const entries = {
+      ...stampedBaseline(),
+      ".github/settings.yml": `{"class": "mergeable", "hash": "${"d".repeat(64)}"}`,
+    };
+    const { exitCode, stderr } = runValidator({ [MANIFEST]: manifestOf(entries) });
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain("is mergeable carrying a hash");
+  });
+
+  test("a listed mergeable file missing from the repo is an advisory", () => {
+    const entries = {
+      ...stampedBaseline(),
+      ".github/settings.yml": '{"class": "mergeable"}',
+    };
+    const { exitCode, stdout, stderr } = runValidator({ [MANIFEST]: manifestOf(entries) });
+    expect(stderr).toBe("");
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain("advisory: .github/settings.yml: listed as mergeable");
+  });
+
+  test("an unknown class names the whole vocabulary", () => {
+    const entries = {
+      ...stampedBaseline(),
+      ".github/settings.yml": '{"class": "bespoke"}',
+    };
+    const { exitCode, stderr } = runValidator({ [MANIFEST]: manifestOf(entries) });
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain(
+      'has unknown class "bespoke" (expected managed, split, mergeable, or starter)',
+    );
+  });
+
   test("the manifest's own entry must stay hash-null (self-hash is circular)", () => {
     const entries = {
       ...stampedBaseline(),

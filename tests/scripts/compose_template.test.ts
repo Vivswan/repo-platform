@@ -726,14 +726,17 @@ describe("manifestEntries", () => {
     ]);
   });
 
-  test("the policy-listed repo-owned settings.yml is a starter", () => {
+  test("a mergeable-marked source classifies mergeable in the manifest", () => {
     const files = new Map<string, SourcedEntry>([
-      [".github/settings.yml.jinja", mod("settings-sync", "repository: {}\n")],
+      [
+        ".github/settings.yml.jinja",
+        mod("settings-sync", "---\n# repo-platform:mergeable\nrepository: {}\n"),
+      ],
     ]);
     const { entries, errors } = manifestEntries(files, skip);
     expect(errors).toEqual([]);
     expect(entries.find((e) => e.path === ".github/settings.yml")?.ownership).toEqual({
-      class: "starter",
+      class: "mergeable",
     });
   });
 
@@ -774,6 +777,11 @@ describe("manifestTemplate", () => {
         gates: ["'a' in modules", "not private"],
         ownership: { class: "starter" },
       },
+      {
+        path: ".github/settings.yml",
+        gates: ["'settings-sync' in modules"],
+        ownership: { class: "mergeable" },
+      },
     ]).toString("utf-8");
     expect(text).toContain(
       `{%- set _ = entries.append('    ".github/workflows/ci.yml": {"class": "managed", "hash": null}') -%}`,
@@ -785,6 +793,9 @@ describe("manifestTemplate", () => {
     expect(text).toContain("{%- if 'agents' in modules -%}");
     expect(text).toContain('"managed": "above", "hash": null');
     expect(text).toContain("{%- if ('a' in modules) and (not private) -%}");
+    // No-parity classes carry no hash token for the stamper to fill.
+    expect(text).toContain(`'    "checks.yml": {"class": "starter"}'`);
+    expect(text).toContain(`'    ".github/settings.yml": {"class": "mergeable"}'`);
     expect(text).toContain("{{ entries | join(',\\n') }}");
     expect(text.endsWith("}\n")).toBe(true);
   });

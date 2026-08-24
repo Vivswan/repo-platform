@@ -46,7 +46,7 @@ Stateless, declared-keys-only, upsert-by-name:
 
 ## The in-repo home
 
-Carrying `.github/settings.yml` in the repo is the whole opt-in: the central `settings-repos.yml` run reads and applies it remotely, and template sync never deletes the file. Excluding a repo from sync in `repos.yml` also pauses its nightly heal, so the settings run warns when an excluded repo still carries the file. The `settings-sync` module is optional sugar on top: it seeds the file with the template baseline (three-way merged on updates) and renders a managed `settings-sync.yml` workflow (push on that file + manual dispatch) that self-applies it through `reusable-apply-settings.yml`.
+Carrying `.github/settings.yml` in the repo is the whole opt-in: the central `settings-repos.yml` run reads and applies it remotely, and template sync never deletes the file. Excluding a repo from sync in `repos.yml` also pauses its nightly heal, so the settings run warns when an excluded repo still carries the file. The `settings-sync` module is optional sugar on top: it seeds the file with the template baseline (three-way merged on updates; the ownership manifest classes it `mergeable`, the class for exactly that contract) and renders a managed `settings-sync.yml` workflow (push on that file + manual dispatch) that self-applies it through `reusable-apply-settings.yml`.
 
 Self-apply needs the repo's OWN `REPO_PLATFORM_TOKEN` Actions secret: a fine-grained PAT with Administration (read and write) and Issues (read and write) on that repository. Without the secret, self-apply runs skip with a warning - the module stays safe to enable before any token exists, and the central `settings-repos.yml` run applies the repo's settings.yml regardless. The per-repo PAT only buys apply-on-push immediacy.
 

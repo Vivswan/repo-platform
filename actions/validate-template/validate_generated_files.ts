@@ -120,8 +120,8 @@ const LOCAL_SECTION_LINES = new Set([
 const HEADER_WINDOW = 10;
 
 /** The ownership manifest the template renders into every repo: the full
- *  ownership map (path -> managed/split/starter, marker metadata for
- *  splits) with per-repo sha256 hashes stamped post-render. Check 9
+ *  ownership map (path -> managed/split/mergeable/starter, marker metadata
+ *  for splits) with per-repo sha256 hashes stamped post-render. Check 9
  *  verifies byte parity against it. */
 const MANIFEST_NAME = ".repo-platform-manifest.json";
 
@@ -257,8 +257,8 @@ const TOOLCHAIN_PINS: Record<string, { file: string; version: string }> = {
 // How each rendered module file declares its ownership while its module is
 // selected: "header" files open with the managed header, "marker" files
 // split a managed top from a repo-owned tail (scanned fail-closed by
-// moduleOwnershipFiles in scripts/generate.ts - starters and comment-free
-// formats stay out).
+// moduleOwnershipFiles in scripts/ownership.ts - starters, mergeable
+// baselines, and comment-free formats stay out).
 // BEGIN GENERATED: module-ownership (scripts/generate.ts - edit the module templates and copier.yml's _skip_if_exists, not this block)
 const MODULE_OWNERSHIP: Record<string, { path: string; kind: "header" | "marker" }[]> = {
   agents: [{ path: "AGENTS.md", kind: "marker" }],
@@ -946,8 +946,9 @@ function main(): number {
   // a named advisory on every run, and a tampered _commit both self-heals
   // on the next sync (template and local change the same line, and
   // conflicts resolve toward the template) and breaks the repo's own
-  // update base loudly. Paths beyond the tables (starters, version pins -
-  // check 7 pins their bytes - and symlinks) remain manifest-trusted, an
+  // update base loudly. Paths beyond the tables (starters, mergeable
+  // baselines - no byte-parity promise exists for either - version pins,
+  // whose bytes check 7 pins, and symlinks) remain manifest-trusted, an
   // accepted residue of the informational stance.
   // The _commit read must mirror sync/answers_file.ts's failsafe-schema
   // read: PyYAML (copier's writer) dumps exponent-shaped shas like
@@ -1236,10 +1237,34 @@ function main(): number {
           }
           continue;
         }
+        if (entry.class === "mergeable") {
+          if ("hash" in entry) {
+            errors.push(
+              `${where} is mergeable carrying a hash - sync keeps a mergeable ` +
+                "baseline current by three-way merge, so repo additions survive " +
+                "and no byte-parity promise exists; run a template sync to " +
+                "regenerate the manifest",
+            );
+            continue;
+          }
+          // Check 8's absence stance, matching the managed advisory below:
+          // sync re-renders mergeable files, so a missing one is damage the
+          // next sync heals.
+          try {
+            lstatSync(join(root, rel));
+          } catch {
+            advisories.push(
+              `${rel}: listed as mergeable in ${MANIFEST_NAME} but missing ` +
+                "from the repo - the next template sync restores it",
+            );
+          }
+          continue;
+        }
         if (entry.class !== "managed" && entry.class !== "split") {
           errors.push(
             `${where} has unknown class ${JSON.stringify(entry.class)} (expected ` +
-              "managed, split, or starter); run a template sync to regenerate the manifest",
+              "managed, split, mergeable, or starter); run a template sync to " +
+              "regenerate the manifest",
           );
           continue;
         }

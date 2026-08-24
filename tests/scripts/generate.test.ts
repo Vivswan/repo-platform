@@ -651,7 +651,7 @@ describe("module ownership files", () => {
     expect(starDir.test("other/dir/x")).toBe(false);
   });
 
-  test("moduleOwnershipFiles classifies every file: enrol, starter, split, gated, comment-free", () => {
+  test("moduleOwnershipFiles classifies every file: enrol, starter, mergeable, split, gated, comment-free", () => {
     const dir = mkdtempSync(join(tmpdir(), "headers-"));
     try {
       mkdirSync(join(dir, "bun", ".github", "workflows"), { recursive: true });
@@ -663,6 +663,9 @@ describe("module ownership files", () => {
       );
       // Headerless starter: exempt through _skip_if_exists.
       writeFileSync(join(dir, "bun", ".github", "workflows", "starter.yml.jinja"), "name: S\n");
+      // Mergeable baseline: declared by its marker, but not enrolled - sync
+      // makes no byte-parity promise and does not restore the marker.
+      writeFileSync(join(dir, "bun", "baseline.yml.jinja"), "# repo-platform:mergeable\nname: B\n");
       // Split file: enrolled with marker semantics.
       writeFileSync(
         join(dir, "bun", "SPLIT.md.jinja"),
@@ -686,7 +689,7 @@ describe("module ownership files", () => {
         },
       });
       const skip = skipIfExistsMatchers("_skip_if_exists:\n  - .github/workflows/starter.yml\n");
-      expect(moduleOwnershipFiles([pinned], dir, skip, new Set())).toEqual({
+      expect(moduleOwnershipFiles([pinned], dir, skip)).toEqual({
         bun: [
           { path: ".github/workflows/managed.yml", kind: "header" },
           { path: "SPLIT.md", kind: "marker" },
@@ -706,27 +709,9 @@ describe("module ownership files", () => {
         `${HEADER}name: Managed\n`,
       );
       writeFileSync(join(dir, "bun", ".github", "workflows", "silent.yml.jinja"), "name: S\n");
-      expect(() => moduleOwnershipFiles([manifest("bun")], dir, [], new Set())).toThrow(
+      expect(() => moduleOwnershipFiles([manifest("bun")], dir, [])).toThrow(
         "declares no ownership",
       );
-      // ...unless the silence is recorded.
-      const silences = new Set(["bun/.github/workflows/silent.yml.jinja"]);
-      expect(moduleOwnershipFiles([manifest("bun")], dir, [], silences)).toEqual({
-        bun: [{ path: ".github/workflows/managed.yml", kind: "header" }],
-      });
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
-
-  test("a recorded silence that matches nothing throws as stale", () => {
-    const dir = mkdtempSync(join(tmpdir(), "headers-"));
-    try {
-      mkdirSync(join(dir, "bun"));
-      writeFileSync(join(dir, "bun", "managed.yml.jinja"), `${HEADER}name: Managed\n`);
-      expect(() =>
-        moduleOwnershipFiles([manifest("bun")], dir, [], new Set(["bun/gone.yml.jinja"])),
-      ).toThrow("stale entry");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -746,7 +731,7 @@ describe("module ownership files", () => {
       ];
       for (const header of lookalikes) {
         writeFileSync(join(dir, "bun", "odd.yml.jinja"), `${header}name: O\n`);
-        expect(() => moduleOwnershipFiles([manifest("bun")], dir, [], new Set())).toThrow(
+        expect(() => moduleOwnershipFiles([manifest("bun")], dir, [])).toThrow(
           "declares no ownership",
         );
       }
@@ -768,7 +753,6 @@ describe("module ownership files", () => {
           [manifest("bun")],
           dir,
           skipIfExistsMatchers("_skip_if_exists:\n  - .github/workflows/checks.yml\n"),
-          new Set(),
         ),
       ).toThrow("_skip_if_exists starter");
     } finally {
@@ -781,7 +765,7 @@ describe("module ownership files", () => {
     try {
       mkdirSync(join(dir, "bun"));
       writeFileSync(join(dir, "bun", "module.yml"), "description: bun\n");
-      expect(() => moduleOwnershipFiles([manifest("bun")], dir, [], new Set())).toThrow(
+      expect(() => moduleOwnershipFiles([manifest("bun")], dir, [])).toThrow(
         "MODULE_OWNERSHIP record would be empty",
       );
     } finally {

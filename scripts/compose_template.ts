@@ -69,7 +69,6 @@ import { normalizeJinja, placeholderJinja } from "./jinja_subset.ts";
 import { loadManifests, MODULE_ORDER, type ModuleManifest } from "./module_manifests.ts";
 import {
   classifyTemplateSource,
-  KNOWN_UNDECLARED_MODULE_FILES,
   landedPathAndGates,
   type ManifestOwnership,
   skipIfExistsMatchers,
@@ -1047,12 +1046,14 @@ function manifestEntryLine(entry: ManifestEntry): string {
   const body =
     o.class === "starter"
       ? '{"class": "starter"}'
-      : o.class === "managed"
-        ? entry.path === MANIFEST_LANDED_PATH
-          ? '{"class": "managed", "hash": null, "commit": null}'
-          : '{"class": "managed", "hash": null}'
-        : `{"class": "split", "marker": ${JSON.stringify(o.marker)}, ` +
-          `"managed": "${o.managed}", "hash": null}`;
+      : o.class === "mergeable"
+        ? '{"class": "mergeable"}'
+        : o.class === "managed"
+          ? entry.path === MANIFEST_LANDED_PATH
+            ? '{"class": "managed", "hash": null, "commit": null}'
+            : '{"class": "managed", "hash": null}'
+          : `{"class": "split", "marker": ${JSON.stringify(o.marker)}, ` +
+            `"managed": "${o.managed}", "hash": null}`;
   return `    ${JSON.stringify(entry.path)}: ${body}`;
 }
 
@@ -1060,10 +1061,8 @@ function manifestEntryLine(entry: ManifestEntry): string {
  *  its class (via classifyTemplateSource - the one classifier) and its
  *  render gates, plus the manifest's own self-entry, sorted by path.
  *  Symlinks are managed (sync re-renders them; parity hashes the link
- *  target), and the policy-listed repo-owned renders
- *  (KNOWN_UNDECLARED_MODULE_FILES) are starters. Called after
- *  spliceContributions, so classification reads the final template text
- *  fragments included. */
+ *  target). Called after spliceContributions, so classification reads the
+ *  final template text fragments included. */
 export function manifestEntries(
   files: Map<string, SourcedEntry>,
   skipIfExists: RegExp[],
@@ -1092,11 +1091,6 @@ export function manifestEntries(
     let ownership: ManifestOwnership;
     if (sourced.entry.kind === "symlink") {
       ownership = { class: "managed" };
-    } else if (
-      sourced.origin === "module" &&
-      KNOWN_UNDECLARED_MODULE_FILES.has(`${sourced.module}/${logical}`)
-    ) {
-      ownership = { class: "starter" };
     } else {
       try {
         ownership = classifyTemplateSource(
@@ -1158,11 +1152,12 @@ export function manifestTemplate(entries: ManifestEntry[]): Buffer {
     "the whole file; hash is sha256 of the last stamped content, or of the " +
     "symlink target), split (sync owns one half; the hash covers the managed " +
     "half, through the marker line for 'above' and from it for 'below'), " +
-    "starter (rendered once, repo-owned; no hash). Hashes - and, on this " +
-    "file's own entry, the render's _commit provenance - are stamped after " +
-    "each render by the template's stamp_manifest.ts hook; this file's own " +
-    "hash stays null because its content includes every other hash, so a " +
-    "self-hash would be circular.";
+    "mergeable (sync keeps the baseline current by three-way merge, so repo " +
+    "additions survive; no hash), starter (rendered once, repo-owned; no " +
+    "hash). Hashes - and, on this file's own entry, the render's _commit " +
+    "provenance - are stamped after each render by the template's " +
+    "stamp_manifest.ts hook; this file's own hash stays null because its " +
+    "content includes every other hash, so a self-hash would be circular.";
   lines.push(
     "{",
     `  "$comment": ${JSON.stringify(comment)},`,
