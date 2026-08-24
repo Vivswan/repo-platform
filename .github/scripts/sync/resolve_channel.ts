@@ -3,7 +3,8 @@
 // recorded copier answer is the fallback, and latest is the default when
 // neither is set. resolve_refs.ts and its test share this.
 
-import { type Channel, type CopierAnswers, isChannel } from "./answers_file.ts";
+import { type Channel, isChannel } from "../shared/channels.ts";
+import type { CopierAnswers } from "./answers_file.ts";
 
 /** The resolved channel, or the raw text of an unusable value (from the
  * input or the recorded answer) for the caller's error message. */

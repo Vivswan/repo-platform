@@ -226,6 +226,15 @@ describe("parseDiscoveredList", () => {
     expect(parseDiscoveredList([])).toEqual([]);
   });
 
+  test("a wrong-typed EXTRA key survives unchanged (only repo and private are inspected)", () => {
+    // The legacy ladder checked exactly those two fields; everything else
+    // passed through untouched, whatever its type - pinned so a schema
+    // tightening cannot silently change it.
+    expect(parseDiscoveredList([{ repo: "o/a", private: true, channel: 42 }])).toEqual([
+      { repo: "o/a", private: true, channel: 42 },
+    ]);
+  });
+
   test("rejects a missing or non-boolean private (fail closed, whole list)", () => {
     expect(parseDiscoveredList([{ repo: "o/a" }])).toBeNull();
     expect(parseDiscoveredList([{ repo: "o/a", private: "true" }])).toBeNull();
@@ -250,6 +259,14 @@ describe("parseSelectionList", () => {
       { repo: "o/a", owner: "o", name: "a", channel: "staging" },
       { repo: "o/b", channel: null },
       { repo: "o/c" },
+    ]);
+  });
+
+  test("a wrong-typed channel survives unchanged (the legacy ladder never inspected it)", () => {
+    // Pins the fail-open side of the parity claim: tightening the schema
+    // to channel: string|null would break here, not silently in enrich.
+    expect(parseSelectionList([{ repo: "o/a", channel: 42 }])).toEqual([
+      { repo: "o/a", channel: 42 as unknown as string },
     ]);
   });
 
