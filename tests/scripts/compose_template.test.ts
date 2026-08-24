@@ -22,6 +22,7 @@ import {
   renderedSeparationErrors,
   type SourcedEntry,
   spliceContributions,
+  trackingLabelBlock,
   yamlLabelName,
 } from "../../scripts/compose_template";
 import { type ModuleManifest, parseManifest } from "../../scripts/module_manifests";
@@ -120,6 +121,34 @@ describe("labelBlock", () => {
         description: `Pull requests that update ${name} code`,
       });
     }
+  });
+});
+
+describe("trackingLabelBlock", () => {
+  const tracking = {
+    answer: "fuzzer_label",
+    default: "fuzz-nightly",
+    color: "B60205",
+    description: "Automated nightly fuzz failure",
+  };
+
+  test("the rendered block round-trips through a YAML parser with the answer substituted", () => {
+    const block = trackingLabelBlock("fuzzer", tracking).replace(
+      "{{ fuzzer_label | tojson }}",
+      '"fuzz-nightly"',
+    );
+    const doc = parseYaml(`labels:\n${block}`) as { labels: Record<string, unknown>[] };
+    expect(doc.labels[0]).toEqual({
+      name: "fuzz-nightly",
+      color: "B60205",
+      description: "Automated nightly fuzz failure",
+    });
+  });
+
+  test("the label name renders from the stream's copier answer, tojson-quoted", () => {
+    expect(trackingLabelBlock("fuzzer", tracking)).toContain(
+      "  - name: {{ fuzzer_label | tojson }}\n",
+    );
   });
 });
 

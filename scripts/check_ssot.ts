@@ -320,11 +320,11 @@ function copierChoices(question: string): string[] {
 }
 
 /** The manifests' tracking_label streams (fuzzer, nightly, ...): the single
- *  source the hand-written copier questions, settings-labels fragments, and
- *  doc constants are anchored to. The list comes from generate.ts's
- *  trackingStreams (which throws when no manifest declares one), so every
- *  rule keyed on it fails loudly rather than passing vacuously and can
- *  never disagree with the generated tracking-labels regions. */
+ *  source the hand-written copier questions and doc constants are anchored
+ *  to. The list comes from generate.ts's trackingStreams (which throws when
+ *  no manifest declares one), so every rule keyed on it fails loudly rather
+ *  than passing vacuously and can never disagree with the generated
+ *  tracking-labels regions. */
 function trackingManifests(): {
   module: string;
   tracking: NonNullable<ModuleManifest["tracking_label"]>;
@@ -1522,10 +1522,11 @@ const rules: Rule[] = [
       }
 
       // Tracking-label streams: each manifest's tracking_label block is the
-      // single source; the hand-written copier question and settings-labels
-      // fragment are anchored back to it here, and the create-tuple
-      // carriers (the action's defaults for the fuzz stream, the starter's
-      // overrides for the nightly stream) below.
+      // single source; the hand-written copier question is anchored back to
+      // it here (the settings-labels block itself is composed from the
+      // manifest, so it cannot drift), and the create-tuple carriers (the
+      // action's defaults for the fuzz stream, the starter's overrides for
+      // the nightly stream) below.
       for (const { module, tracking } of trackingManifests()) {
         const question = asRecord(copierConfig()[tracking.answer], `copier.yml ${tracking.answer}`);
         if (String(question.default) !== tracking.default) {
@@ -1533,17 +1534,6 @@ const rules: Rule[] = [
             file: `copier.yml ${tracking.answer} default`,
             expected: `${tracking.default} (templates/${module}/module.yml tracking_label)`,
             got: String(question.default),
-          });
-        }
-        const fragment = parseLabels(
-          `labels:\n${placeholderJinja(normalizeJinja(read(`templates/${module}/fragments/settings-labels.jinja`), jinjaVars()))}`,
-          `${module} settings-labels.jinja`,
-        )[0];
-        if (fragment.color !== tracking.color || fragment.description !== tracking.description) {
-          mismatches.push({
-            file: `templates/${module}/fragments/settings-labels.jinja`,
-            expected: `${tracking.color} / ${tracking.description} (templates/${module}/module.yml tracking_label)`,
-            got: `${fragment.color} / ${fragment.description}`,
           });
         }
       }

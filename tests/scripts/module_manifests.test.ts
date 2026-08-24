@@ -163,6 +163,31 @@ describe("parseManifest", () => {
     expect(() => parseManifest("demo", "gate: x\n", WHERE)).toThrow("description");
   });
 
+  test("tracking-label descriptions that YAML could reinterpret bare are refused", () => {
+    const withDescription = (description: string) =>
+      [
+        "description: x",
+        "tracking_label:",
+        "  answer: demo_label",
+        "  default: demo-nightly",
+        '  color: "B60205"',
+        `  description: ${JSON.stringify(description)}`,
+      ].join("\n");
+    expect(() =>
+      parseManifest("demo", withDescription("Automated nightly failure"), WHERE),
+    ).not.toThrow();
+    for (const bad of [
+      "fails: often",
+      "count #1",
+      "'quoted'",
+      '"quoted"',
+      "a\\b",
+      "- leading dash",
+    ]) {
+      expect(() => parseManifest("demo", withDescription(bad), WHERE)).toThrow("bare YAML scalar");
+    }
+  });
+
   test("interpolation-hostile descriptions fail: ': ', '#', newlines, edge whitespace", () => {
     const bad: [string, string][] = [
       ['description: "broken: choice text"', '": "'],

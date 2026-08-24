@@ -1,7 +1,0 @@
-  # The nightly-CI tracking label (nightly module): the fuzz-issue action
-  # keys its one-open-issue-per-label dedup on it, so it must survive the
-  # label sync. Values match the tuple the nightly starter passes to the
-  # action for label creation.
-  - name: {{ nightly_label | tojson }}
-    color: "D93F0B"
-    description: Automated nightly CI failure

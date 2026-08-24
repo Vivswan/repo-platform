@@ -129,11 +129,11 @@ export const manifestSchema = z.strictObject({
     })
     .optional(),
   // A nightly-stream module's tracking label: the copier answer recording
-  // it (the question and settings-labels fragment stay hand-written; the
-  // ssot rules anchor them here), the answer's default, and the tuple the
-  // stream's starter/action creates the label with. The fleet preflight
-  // derives its answer keys from this, so a third stream module cannot
-  // silently miss it.
+  // it (the question stays hand-written; the ssot rules anchor it here),
+  // the answer's default, and the tuple the stream's starter/action creates
+  // the label with - the composer generates the settings-labels block from
+  // it. The fleet preflight derives its answer keys from this, so a third
+  // stream module cannot silently miss it.
   tracking_label: z
     .strictObject({
       answer: z
@@ -146,7 +146,18 @@ export const manifestSchema = z.strictObject({
           "must be a plain label (the shape the fuzz-issue action enforces)",
         ),
       color: z.string().regex(/^[0-9A-Fa-f]{6}$/, "must be a 6-digit hex color"),
-      description: singleLine("the tracking-label description"),
+      // Lands bare (unquoted) in the generated settings-labels block and in
+      // the nightly starter's label-description input, so anything YAML
+      // could reinterpret there is refused rather than escaped.
+      description: singleLine("the tracking-label description").refine(
+        (value) => /^[A-Za-z0-9]/.test(value) && !/[:#'"\\]/.test(value),
+        {
+          message:
+            "the tracking-label description must start with a letter or digit and " +
+            "contain no :, #, ', \", or \\ (it lands as a bare YAML scalar in the " +
+            "generated settings-labels block and the nightly starter)",
+        },
+      ),
     })
     .optional(),
   gitignore_sources: z

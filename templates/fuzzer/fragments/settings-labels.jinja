@@ -1,6 +1,0 @@
-  # The nightly-fuzz tracking label (fuzzer module): the fuzz-issue action
-  # keys its one-open-issue-per-label dedup on it, so it must survive the
-  # label sync. Values match what the action creates when the label is absent.
-  - name: {{ fuzzer_label | tojson }}
-    color: "B60205"
-    description: Automated nightly fuzz failure

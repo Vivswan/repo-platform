@@ -30,8 +30,9 @@
 //   ONCE, and gated on the or-chain of the contributing modules in
 //   MODULE_ORDER - never per-module duplicates, never precedence guards.
 //   A fragment file for a data anchor is an error, with two exceptions:
-//   ci-gate-needs still takes fragments from modules the generator does not
-//   cover, and agents-toolchain consumes its fragments as generator input.
+//   ci-gate-needs and settings-labels still take fragments from modules the
+//   generator does not cover, and agents-toolchain consumes its fragments
+//   as generator input.
 //
 // Every anchor needs at least one contribution (fragment or generated) and
 // every contribution needs its anchor. Collisions are errors, never silent
@@ -467,6 +468,22 @@ export function labelBlock(label: DependabotLabel): string {
   );
 }
 
+/** The rendered settings.yml block for one tracking-label stream: the
+ *  label name renders from the stream's copier answer (each repo picks its
+ *  own label), the color/description from its manifest tuple. */
+export function trackingLabelBlock(
+  module: string,
+  tracking: NonNullable<ModuleManifest["tracking_label"]>,
+): string {
+  return (
+    `  # The ${module} module's tracking label: the fuzz-issue action keys its\n` +
+    `  # one-open-issue-per-label dedup on it, so it must survive the label sync.\n` +
+    `  - name: {{ ${tracking.answer} | tojson }}\n` +
+    `    color: "${tracking.color}"\n` +
+    `    description: ${tracking.description}\n`
+  );
+}
+
 const DATA_ANCHORS: Record<string, DataAnchorSpec> = {
   "dependabot-ecosystems": {
     data: "dependabot.ecosystem",
@@ -518,6 +535,28 @@ const DATA_ANCHORS: Record<string, DataAnchorSpec> = {
         source: generatorSource("settings-dependabot-labels", "dependabot.label"),
         text: Buffer.from(gatedText(orChain(label.modules, gateOf), labelBlock(label))),
       })),
+  },
+  // Mixed anchor: the tracking-stream label entries are generated here;
+  // release-please still contributes its static-labels fragment, spliced at
+  // its own MODULE_ORDER position.
+  "settings-labels": {
+    data: "tracking_label",
+    kind: "coexist",
+    covered: (manifest) => manifest.tracking_label !== undefined,
+    generate: ({ manifests, gateOf }) =>
+      manifests.flatMap((manifest) => {
+        const tracking = manifest.tracking_label;
+        if (!tracking) return [];
+        return [
+          {
+            order: orderOf(manifests, manifest.module),
+            source: generatorSource("settings-labels", "tracking_label"),
+            text: Buffer.from(
+              gatedText(gateOf(manifest.module), trackingLabelBlock(manifest.module, tracking)),
+            ),
+          },
+        ];
+      }),
   },
   "gitleaks-locks": {
     data: "lockfiles",

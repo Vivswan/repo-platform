@@ -296,9 +296,9 @@ export function labelNames(yamlText: string, where: string): string[] {
 
 /** The two settings templates whose label declarations (together with the
  *  manifests' dependabot labels, spliced in at compose time) form every
- *  label the template already manages. The tracking streams' own
- *  settings-labels fragments are excluded: they render from the very
- *  answers the validators check. */
+ *  label the template already manages. The tracking streams' generated
+ *  settings-labels blocks are excluded: they render from the very answers
+ *  the validators check. */
 function settingsLabelSources(): { settings: string; releaseFragment: string } {
   const read = (rel: string) => readFileSync(join(REPO_ROOT, rel), "utf-8");
   return {
