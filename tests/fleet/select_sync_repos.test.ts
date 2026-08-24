@@ -38,6 +38,13 @@ describe("select_sync_repos.ts", () => {
         '    echo "HTTP 404 from stub" >&2',
         "    exit 1",
         "    ;;",
+        // A redacted repo whose adoption check fails hard, with the slug
+        // and bare name woven through the error text (a URL, a sentence,
+        // a repeat): the selector must scrub them all before printing.
+        "  repos/Vivswan/hidden-blocked/contents/.repo-platform.yml)",
+        '    echo "HTTP 500: https://api.github.com/repos/Vivswan/hidden-blocked failed; hidden-blocked unavailable, retry hidden-blocked later" >&2',
+        "    exit 1",
+        "    ;;",
         "  repos/*/contents/.repo-platform.yml) exit 0 ;;",
         "  *)",
         '    echo "HTTP 404 from stub" >&2',
@@ -77,12 +84,16 @@ describe("select_sync_repos.ts", () => {
     output: string;
   }
 
-  function run(name: string, env: Record<string, string> = {}): Run {
+  function run(
+    name: string,
+    env: Record<string, string> = {},
+    discoveredList: { repo: string; private: boolean }[] = discovered,
+  ): Run {
     const work = join(root, `work-${name}`);
     mkdirSync(join(work, "temp"), { recursive: true });
     const outputFile = join(work, "output.txt");
     writeFileSync(outputFile, "");
-    writeFileSync(join(work, "temp", "discovered.json"), JSON.stringify(discovered));
+    writeFileSync(join(work, "temp", "discovered.json"), JSON.stringify(discoveredList));
     const proc = Bun.spawnSync(["bun", script], {
       cwd: fixture,
       env: {
@@ -234,6 +245,24 @@ describe("select_sync_repos.ts", () => {
     expect(reposOf(r).map((row) => row.repo)).toEqual(["h**-s**r"]);
     for (const channel of [r.stdout, r.stderr, r.output]) {
       expect(channel).not.toContain("hidden-server");
+    }
+  });
+
+  test("a redacted repo's hard adoption failure prints only the hint, wherever the slug hid", () => {
+    // The stub's error text carries the slug in a URL and the bare name
+    // twice more; the failure must surface (exit 1) with every spelling
+    // scrubbed to the hint.
+    const eventFile = join(root, "hidden-blocked-event.json");
+    writeFileSync(eventFile, JSON.stringify({ inputs: { repo: "Vivswan/hidden-blocked" } }));
+    const r = run("hidden-blocked", { GITHUB_EVENT_PATH: eventFile }, [
+      ...discovered,
+      { repo: "Vivswan/hidden-blocked", private: true },
+    ]);
+    expect(r.exitCode).not.toBe(0);
+    expect(r.stdout).toContain("adoption check failed for h**-b**d");
+    expect(r.stdout).toContain("https://api.github.com/repos/h**-b**d failed");
+    for (const channel of [r.stdout, r.stderr, r.output]) {
+      expect(channel).not.toContain("hidden-blocked");
     }
   });
 });

@@ -18,14 +18,18 @@ import { join } from "node:path";
 //                   matrix as its hint with a verify tag, never as a slug
 //   hidden-nohome - PRIVATE, wildcard-discovered: no settings home, so
 //                   its warning and summary line must carry the hint
+//   hidden-deadapi - PRIVATE, wildcard-discovered: settings.yml check
+//                   502s every attempt with the slug and bare name in the
+//                   error text; the retry lines and the final warning
+//                   must carry only the hint
 // The explicit managed personas are absent from discovery, so the
 // fail-closed rule marks them private - but their names are committed in
 // repos.yml (self-disclosed), so they still print plainly with
 // hide_details riding the matrix row.
 // The heal must select flaky, steady, and hidden-server (plus
-// central-home's central file), warn about deadapi and deadprobe
-// (skipped this run, retried nightly), and exit 0; only an unreadable
-// registry or a failed discovery still exits 1.
+// central-home's central file), warn about deadapi, deadprobe, and
+// hidden-deadapi (skipped this run, retried nightly), and exit 0; only an
+// unreadable registry or a failed discovery still exits 1.
 describe("select_settings_repos.ts", () => {
   const repoRoot = join(import.meta.dir, "..", "..");
   const script = join(import.meta.dir, "../../.github/scripts/fleet/select_settings_repos.ts");
@@ -44,10 +48,10 @@ describe("select_settings_repos.ts", () => {
         '    echo "HTTP 500 from stub" >&2',
         "    exit 1",
         "  fi",
-        // Two wildcard-discovered private repos; every explicit managed
+        // Three wildcard-discovered private repos; every explicit managed
         // persona is deliberately absent (fail-closed => private, but
         // self-disclosed by their repos.yml entries).
-        `  echo '[[{"full_name":"Vivswan/hidden-server","private":true,"archived":false,"owner":{"login":"Vivswan"},"permissions":{"push":true}},{"full_name":"Vivswan/hidden-nohome","private":true,"archived":false,"owner":{"login":"Vivswan"},"permissions":{"push":true}}]]'`,
+        `  echo '[[{"full_name":"Vivswan/hidden-server","private":true,"archived":false,"owner":{"login":"Vivswan"},"permissions":{"push":true}},{"full_name":"Vivswan/hidden-nohome","private":true,"archived":false,"owner":{"login":"Vivswan"},"permissions":{"push":true}},{"full_name":"Vivswan/hidden-deadapi","private":true,"archived":false,"owner":{"login":"Vivswan"},"permissions":{"push":true}}]]'`,
         "  exit 0",
         "fi",
         'case "$2" in',
@@ -63,6 +67,12 @@ describe("select_settings_repos.ts", () => {
         "    ;;",
         "  repos/Vivswan/hidden-nohome/contents/.github/settings.yml)",
         '    echo "HTTP 404 from stub" >&2',
+        "    exit 1",
+        "    ;;",
+        // Error text with the slug in a URL plus the bare name: every
+        // retry line and the final warning must scrub both to the hint.
+        "  repos/Vivswan/hidden-deadapi/contents/.github/settings.yml)",
+        '    echo "HTTP 502: https://api.github.com/repos/Vivswan/hidden-deadapi bad gateway; hidden-deadapi unreachable" >&2',
         "    exit 1",
         "    ;;",
         "  repos/*/contents/.repo-platform.yml) exit 0 ;;",
@@ -249,8 +259,22 @@ describe("select_settings_repos.ts", () => {
     for (const channel of [main.stdout, main.stderr, main.output, main.summary]) {
       expect(channel).not.toContain("hidden-server");
       expect(channel).not.toContain("hidden-nohome");
+      expect(channel).not.toContain("hidden-deadapi");
     }
     expect(main.output).toContain("h**-s**r");
+  });
+
+  test("a redacted repo's persistent probe failure warns with the scrubbed detail", () => {
+    // The stub's 502 text carries the slug inside a URL and the bare name
+    // after it; the retry lines (checked by the leak test above) and this
+    // warning must render both as the hint.
+    const warning = main.stdout.split("\n").find((line) => line.startsWith("::warning::h**-d**i"));
+    expect(warning).toBeDefined();
+    expect(warning).toContain("settings.yml check");
+    expect(warning).toContain(
+      "https://api.github.com/repos/h**-d**i bad gateway; h**-d**i unreachable",
+    );
+    expect(main.summary).toContain("- h**-d**i");
   });
 
   test("a hinted repo's no-settings-home warning and summary carry the hint", () => {

@@ -19,10 +19,8 @@
 
 import { appendFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { z } from "zod";
 import { addMask, env, error, requireEnv, setOutput } from "../shared/gha.ts";
-import { parseWith } from "../shared/json.ts";
-import { capture } from "../shared/proc.ts";
+import { discoverWritableRepos } from "./discovery.ts";
 import { verifyTag } from "./redact.ts";
 
 const targetInput = requireEnv("TARGET_INPUT");
@@ -56,35 +54,7 @@ const runId = requireEnv("GITHUB_RUN_ID");
 // Every writable repo, regardless of owner: repos.yml accepts explicit
 // entries under other owners, so the search must not assume the fleet
 // owner. The payload stays in a file - never printed.
-const list = capture([
-  "gh",
-  "api",
-  "user/repos",
-  "--method",
-  "GET",
-  "--paginate",
-  "--slurp",
-  "-F",
-  "per_page=100",
-]);
-if (list.exitCode !== 0) {
-  process.stderr.write(list.stderr);
-  process.exit(list.exitCode);
-}
-const pages = parseWith(
-  z.array(
-    z.array(
-      z.object({
-        full_name: z.string(),
-        archived: z.boolean(),
-        permissions: z.object({ push: z.boolean().optional() }).optional(),
-      }),
-    ),
-  ),
-  JSON.parse(list.stdout),
-  "resolve_private_repo: user/repos response",
-);
-const candidates = pages.flat().filter((repo) => !repo.archived && repo.permissions?.push === true);
+const candidates = discoverWritableRepos("resolve_private_repo: user/repos response");
 writeFileSync(
   join(requireEnv("RUNNER_TEMP"), "resolve-candidates.json"),
   JSON.stringify(candidates.map((repo) => repo.full_name)),

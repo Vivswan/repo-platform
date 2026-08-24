@@ -22,8 +22,16 @@ describe("resolve_private_repo.ts", () => {
       join(bin, "gh"),
       [
         "#!/usr/bin/env bash",
+        // The stub carries every field the shared discovery schema
+        // requires (discovery.ts), like the real user/repos payload.
         `echo '[${JSON.stringify(
-          FLEET.map((full_name) => ({ full_name, archived: false, permissions: { push: true } })),
+          FLEET.map((full_name) => ({
+            full_name,
+            archived: false,
+            private: true,
+            owner: { login: full_name.split("/")[0] },
+            permissions: { push: true },
+          })),
         )}]'`,
         "",
       ].join("\n"),

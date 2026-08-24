@@ -29,10 +29,16 @@
 
 import { appendFileSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { z } from "zod";
 import { env, notice, requireEnv, setOutput } from "../shared/gha.ts";
-import { parseWith } from "../shared/json.ts";
 import { capture } from "../shared/proc.ts";
+import {
+  discoverWritableRepos,
+  notAdoptedNotice,
+  pushProbeSkipNotice,
+  readDispatchRepo,
+  runStage,
+  scrubSlug,
+} from "./discovery.ts";
 import { pushProbeStatus } from "./push_probe.ts";
 import { type EnrichedRow, parseEnriched } from "./redact.ts";
 
@@ -40,20 +46,9 @@ const runnerTemp = requireEnv("RUNNER_TEMP");
 const pat = requireEnv("PAT");
 const owner = requireEnv("OWNER");
 
-// The typed dispatch input may be a private slug, so it must not ride in
-// as step env: the runner prints step env values into the public log
-// group. The event payload on the runner's disk is not logged. A bare
-// name gets the fleet owner prefixed; matching is case-insensitive.
-let onlyRepo = env("ONLY_REPO");
-if (onlyRepo === "" && env("GITHUB_EVENT_PATH") !== "") {
-  const event = JSON.parse(readFileSync(env("GITHUB_EVENT_PATH"), "utf-8")) as {
-    inputs?: { repo?: string };
-  };
-  onlyRepo = event.inputs?.repo ?? "";
-}
-onlyRepo = onlyRepo.trim();
-if (onlyRepo !== "" && !onlyRepo.includes("/")) onlyRepo = `${owner}/${onlyRepo}`;
-onlyRepo = onlyRepo.toLowerCase();
+// A bare name gets the fleet owner prefixed; the read-and-fold rationale
+// lives with readDispatchRepo.
+const onlyRepo = readDispatchRepo(owner);
 
 // A drop that leaves a repo without settings management is announced: a
 // workflow warning, plus a step-summary bullet (under a heading written
@@ -85,9 +80,7 @@ function probePush(slug: string, display: string): ProbeResult {
   const code = pushProbeStatus(slug, pat);
   if (code === 200) return "pass";
   if (code === 401 || code === 403 || code === 404) {
-    notice(
-      `${display}: skipped - the fleet token has no write access (push probe HTTP ${code}). Grant the REPO_PLATFORM_TOKEN access to this repository to enroll it, or add it to repos.yml's exclude list to silence this.`,
-    );
+    notice(pushProbeSkipNotice(display, code));
     return "drop";
   }
   return { detail: `HTTP ${String(code).padStart(3, "0")}` };
@@ -99,7 +92,10 @@ function probeAdoption(slug: string, display: string): ProbeResult {
   if (probe.exitCode === 0) return "pass";
   if (/HTTP 404/.test(probe.stderr)) {
     notice(
-      `${display}: skipped - no .repo-platform.yml on its default branch, so it has not adopted the template. If it carries .github/settings.yml, the central nightly heal no longer applies it. Generate it with copier (see the repo-platform README) to opt in, or add the repo to repos.yml's exclude list to silence this.`,
+      notAdoptedNotice(
+        display,
+        "If it carries .github/settings.yml, the central nightly heal no longer applies it.",
+      ),
     );
     return "drop";
   }
@@ -150,11 +146,7 @@ async function probe(
     const result = fn(slug, display, centralRef);
     if (result === "pass") return true;
     if (result === "drop") return false;
-    detail = result.detail;
-    if (display !== slug) {
-      detail = detail.replaceAll(slug, display);
-      detail = detail.replaceAll(slug.split("/").pop() ?? slug, display);
-    }
+    detail = scrubSlug(result.detail, slug, display);
     if (attempt < ATTEMPTS) {
       console.log(
         `${display}: ${label} failed (attempt ${attempt}/${ATTEMPTS}: ${detail}); retrying...`,
@@ -168,54 +160,13 @@ async function probe(
   return false;
 }
 
-// -F alone would flip gh api to POST; this is a read. Visibility rides
-// along fail-closed: anything but private: false counts as private.
-const list = capture([
-  "gh",
-  "api",
-  "user/repos",
-  "--method",
-  "GET",
-  "--paginate",
-  "--slurp",
-  "-F",
-  "per_page=100",
-]);
-if (list.exitCode !== 0) {
-  process.stderr.write(list.stderr);
-  process.exit(list.exitCode);
-}
-const pages = parseWith(
-  z.array(
-    z.array(
-      z.object({
-        full_name: z.string(),
-        archived: z.boolean(),
-        private: z.boolean(),
-        owner: z.object({ login: z.string() }),
-        permissions: z.object({ push: z.boolean().optional() }).optional(),
-      }),
-    ),
-  ),
-  JSON.parse(list.stdout),
-  "select_settings_repos: user/repos response",
-);
-const discovered = pages
-  .flat()
-  .filter((repo) => repo.owner.login === owner && !repo.archived && repo.permissions?.push === true)
+// Discovery pre-filters to owned, user-writable repos; the token's actual
+// grant is probed per repo below. Visibility rides along fail-closed:
+// anything but private: false counts as private.
+const discovered = discoverWritableRepos("select_settings_repos: user/repos response")
+  .filter((repo) => repo.owner.login === owner)
   .map((repo) => ({ repo: repo.full_name, private: repo.private !== false }));
 writeFileSync(join(runnerTemp, "discovered.json"), JSON.stringify(discovered));
-
-function runStage(command: string[], outFile: string): void {
-  const proc = Bun.spawnSync(command, { stdout: "pipe", stderr: "inherit" });
-  if (proc.exitCode !== 0) {
-    // The stage's ::error:: detail rides its captured stdout (workflow
-    // commands parse from stdout); forward it or the failure is silent.
-    process.stdout.write(proc.stdout.toString());
-    process.exit(proc.exitCode ?? 1);
-  }
-  writeFileSync(outFile, proc.stdout);
-}
 
 runStage(
   [
