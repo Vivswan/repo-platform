@@ -20,7 +20,7 @@ writeFileSync(
     `import { parseJsonWith } from ${JSON.stringify(jsonPath)};`,
     "const schema = z.object({ repo: z.string() });",
     'const parsed = parseJsonWith(schema, process.env.PAYLOAD ?? "", "json.test: payload");',
-    "console.log(`repo-name-length=${parsed.repo.length}`);",
+    `console.log(\`repo-name-length=\${parsed.repo.length}\`);`,
     "",
   ].join("\n"),
 );
