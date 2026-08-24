@@ -75,11 +75,23 @@ function gitShow(repo: string, revPath: string): string {
 // The channel input the real sync would receive: repos.yml's per-repo
 // config, then its defaults (sync-repos routes exactly this through
 // select_sync_repos); the recorded copier answer stays the fallback via
-// resolveChannel.
+// resolveChannel. Production's full selection needs the fleet PAT's
+// repo discovery (the managed wildcard), which does not exist locally, so
+// a repo production would skip is warned about and rehearsed anyway - a
+// read-only what-if against an excluded repo is a legitimate rehearsal.
 function registryChannel(slug: string): string {
   const { registry, errors } = loadRegistry(readFileSync(join(REPO_ROOT, "repos.yml"), "utf-8"));
   if (registry === null) fail(`repos.yml: ${errors.join("; ")}`);
-  return registry.config.get(slug.toLowerCase())?.channel ?? registry.defaultChannel ?? "";
+  const lower = slug.toLowerCase();
+  if (registry.exclude.some((entry) => entry.toLowerCase() === lower)) {
+    console.warn(`warning: ${slug} is in repos.yml's exclude list; production never syncs it`);
+  } else if (
+    !registry.managed.wildcard &&
+    !registry.managed.repos.some((entry) => entry.toLowerCase() === lower)
+  ) {
+    console.warn(`warning: ${slug} is not in repos.yml's managed list; production never syncs it`);
+  }
+  return registry.config.get(lower)?.channel ?? registry.defaultChannel ?? "";
 }
 
 function main(): number {
