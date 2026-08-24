@@ -618,7 +618,19 @@ describe("module ownership files", () => {
   });
 
   test("skipIfExistsMatchers rejects gitwildmatch features it does not implement", () => {
-    for (const pattern of ["docs/**/*.yml", "file?.yml", "[ab].yml", "/rooted.yml", "dir/"]) {
+    // The last three are gitwildmatch line forms (a comment, significant
+    // whitespace, an empty line), not path patterns.
+    const unsupported = [
+      "docs/**/*.yml",
+      "file?.yml",
+      "[ab].yml",
+      "/rooted.yml",
+      "dir/",
+      "#comment.yml",
+      " leading.yml",
+      "",
+    ];
+    for (const pattern of unsupported) {
       expect(() => skipIfExistsMatchers(`_skip_if_exists:\n  - '${pattern}'\n`)).toThrow(
         "beyond the implemented subset",
       );

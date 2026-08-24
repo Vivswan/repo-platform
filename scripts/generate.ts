@@ -507,7 +507,8 @@ export const KNOWN_UNDECLARED_MODULE_FILES = new Set([
  *  containing "/" is anchored to the render root, a bare filename matches
  *  at any depth, and `*` stays within one component. Only that subset is
  *  implemented; a pattern using more (`**`, `?`, character classes,
- *  negation, edge slashes) throws rather than guessing what copier does. */
+ *  negation, edge slashes, and gitwildmatch's comment/whitespace line
+ *  forms) throws rather than guessing what copier does. */
 export function skipIfExistsMatchers(copierYamlText: string): RegExp[] {
   const skip = (parseYaml(copierYamlText) as { _skip_if_exists?: unknown } | null)?._skip_if_exists;
   if (!Array.isArray(skip) || skip.length === 0 || !skip.every((p) => typeof p === "string")) {
@@ -521,7 +522,10 @@ export function skipIfExistsMatchers(copierYamlText: string): RegExp[] {
       /[?[\]\\!]/.test(pattern) ||
       pattern.includes("**") ||
       pattern.startsWith("/") ||
-      pattern.endsWith("/")
+      pattern.endsWith("/") ||
+      pattern.startsWith("#") ||
+      pattern.trim() !== pattern ||
+      pattern === ""
     ) {
       throw new Error(
         `copier.yml: _skip_if_exists pattern '${pattern}' uses gitwildmatch ` +
