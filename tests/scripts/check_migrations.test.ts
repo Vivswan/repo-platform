@@ -177,6 +177,49 @@ describe("resolveLatestRelease", () => {
     expect(() => resolveLatestRelease(repo)).toThrow(ReleaseStateError);
     expect(() => resolveLatestRelease(repo)).toThrow(/release state/);
   });
+
+  test("a stalled origin hits the hard deadline instead of hanging", () => {
+    // A listener that accepts the git:// connection and never answers -
+    // the shape of a stalled origin; without the deadline the check would
+    // block until the surrounding job timeout.
+    const listener = Bun.listen({
+      hostname: "127.0.0.1",
+      port: 0,
+      socket: { data() {}, open() {} },
+    });
+    try {
+      const repo = makeRepo();
+      git(repo, "remote", "add", "origin", `git://127.0.0.1:${listener.port}/stalled`);
+      expect(() => resolveLatestRelease(repo, 500)).toThrow(/hung past 500ms/);
+    } finally {
+      listener.stop(true);
+    }
+  });
+
+  test("a credential prompt fails fast instead of waiting for input", async () => {
+    // An origin demanding auth: with credential helpers and askpass
+    // cleared and GIT_TERMINAL_PROMPT=0, git fails immediately instead of
+    // prompting (which would hang a non-interactive run). The 401 server
+    // must be a separate process: the synchronous git call blocks this
+    // test's event loop, so an in-process Bun.serve could never answer.
+    const server = Bun.spawn(
+      [
+        process.execPath,
+        "-e",
+        'const s = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response("x", { status: 401, headers: { "WWW-Authenticate": "Basic realm=\\"x\\"" } }) }); console.log(s.port);',
+      ],
+      { stdout: "pipe" },
+    );
+    const { value } = await server.stdout.getReader().read();
+    const port = Number(new TextDecoder().decode(value).trim());
+    try {
+      const repo = makeRepo();
+      git(repo, "remote", "add", "origin", `http://127.0.0.1:${port}/repo.git`);
+      expect(() => resolveLatestRelease(repo, 3000)).toThrow(/terminal prompts disabled/);
+    } finally {
+      server.kill();
+    }
+  });
 });
 
 describe("ownershipFlips", () => {

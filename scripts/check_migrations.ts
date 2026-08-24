@@ -249,21 +249,44 @@ function skipMatchers(text: string, label: string): RegExp[] {
  *  tree cannot be obtained; main reports it as the check's failure. */
 export class ReleaseStateError extends Error {}
 
+/** Hard deadline for the two network git calls: generous next to a real
+ *  tag listing or single-tag fetch, tiny next to the job timeout a stalled
+ *  origin would otherwise burn. */
+export const GIT_NETWORK_TIMEOUT_MS = 60_000;
+
 /** The newest release tag, consulting BOTH local tags and origin's - a
  *  shallow or tagless checkout must not silently read as "nothing
  *  released". Failure to list origin's tags throws; a tag known only
- *  remotely is fetched, and throws when unfetchable. `repoRoot` is
- *  parameterized so tests can run this against fixture repositories. */
+ *  remotely is fetched, and throws when unfetchable. Network calls run
+ *  with prompts disabled (GIT_TERMINAL_PROMPT=0, credential helpers
+ *  cleared) and a hard deadline, so a stalled origin or a credential
+ *  prompt becomes a loud, fast ReleaseStateError instead of a hang.
+ *  `repoRoot` and `timeoutMs` are parameterized so tests can run this
+ *  against fixture repositories with a short deadline. */
 export function resolveLatestRelease(
   repoRoot = REPO_ROOT,
+  timeoutMs = GIT_NETWORK_TIMEOUT_MS,
 ): { tag: string; version: string } | null {
   const local = capture(["git", "tag", "--list", "templates/v*"], { cwd: repoRoot });
   if (local.exitCode !== 0) {
     throw new ReleaseStateError(`git tag --list failed: ${local.stderr.trim()}`);
   }
-  const remote = capture(["git", "ls-remote", "--tags", "origin", "refs/tags/templates/v*"], {
-    cwd: repoRoot,
-  });
+  // Empty GIT_ASKPASS/SSH_ASKPASS fall through to the terminal prompt,
+  // which GIT_TERMINAL_PROMPT=0 disables - a set GIT_ASKPASS (VS Code
+  // exports one) would otherwise intercept the 401 and hang or misbehave.
+  const networkGit = (args: string[]) =>
+    capture(["git", "-c", "credential.helper=", ...args], {
+      cwd: repoRoot,
+      env: { GIT_TERMINAL_PROMPT: "0", GIT_ASKPASS: "", SSH_ASKPASS: "" },
+      timeoutMs,
+    });
+  const remote = networkGit(["ls-remote", "--tags", "origin", "refs/tags/templates/v*"]);
+  if (remote.timedOut) {
+    throw new ReleaseStateError(
+      `cannot determine the release state: listing origin's templates/v* tags hung past ` +
+        `${timeoutMs}ms (stalled origin?). Restore remote access, then re-run.`,
+    );
+  }
   if (remote.exitCode !== 0) {
     throw new ReleaseStateError(
       `cannot determine the release state: listing origin's templates/v* tags failed (${remote.stderr.trim()}). ` +
@@ -281,10 +304,18 @@ export function resolveLatestRelease(
       cwd: repoRoot,
     }).exitCode === 0;
   if (!resolvable()) {
-    capture(
-      ["git", "fetch", "--quiet", "origin", `+refs/tags/${latest.tag}:refs/tags/${latest.tag}`],
-      { cwd: repoRoot },
-    );
+    const fetch = networkGit([
+      "fetch",
+      "--quiet",
+      "origin",
+      `+refs/tags/${latest.tag}:refs/tags/${latest.tag}`,
+    ]);
+    if (fetch.timedOut) {
+      throw new ReleaseStateError(
+        `fetching ${latest.tag} from origin hung past ${timeoutMs}ms (stalled origin?), so the ` +
+          "released template tree is unavailable to compare against. Restore remote access, then re-run.",
+      );
+    }
     if (!resolvable()) {
       throw new ReleaseStateError(
         `origin has ${latest.tag} but it cannot be fetched into this checkout, so the released ` +

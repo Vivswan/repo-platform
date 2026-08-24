@@ -7,12 +7,17 @@ import { constants } from "node:os";
 export interface RunOptions {
   cwd?: string;
   env?: Record<string, string | undefined>;
+  /** Hard deadline in milliseconds: on expiry the child is SIGKILLed and
+   * the result reports `timedOut`. Absent = today's unbounded behavior. */
+  timeoutMs?: number;
 }
 
 export interface RunResult {
   exitCode: number;
   stdout: string;
   stderr: string;
+  /** True when the child was killed by `timeoutMs` expiring. */
+  timedOut?: boolean;
 }
 
 /** Bash-style exit code: the command's own, or 128+signal when it was
@@ -32,11 +37,15 @@ export function capture(command: string[], options: RunOptions = {}): RunResult 
     env: options.env ? { ...process.env, ...options.env } : undefined,
     stdout: "pipe",
     stderr: "pipe",
+    ...(options.timeoutMs !== undefined
+      ? { timeout: options.timeoutMs, killSignal: "SIGKILL" }
+      : {}),
   });
   return {
     exitCode: exitCodeOf(proc),
     stdout: proc.stdout.toString(),
     stderr: proc.stderr.toString(),
+    ...(options.timeoutMs !== undefined ? { timedOut: proc.exitedDueToTimeout === true } : {}),
   };
 }
 
