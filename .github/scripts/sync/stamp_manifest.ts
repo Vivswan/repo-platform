@@ -69,7 +69,10 @@ export function resolveConflictsTowardAfter(text: string): string {
     if (line === CONFLICT_START) {
       if (state !== "keep") return text;
       state = "local";
-    } else if (line === CONFLICT_SEP && state === "local") {
+    } else if (line === CONFLICT_SEP && state !== "keep") {
+      // A second separator inside a block is malformed; outside any block
+      // a bare ======= is ordinary content.
+      if (state !== "local") return text;
       state = "template";
     } else if (line === CONFLICT_END) {
       if (state !== "template") return text;

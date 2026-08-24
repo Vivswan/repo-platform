@@ -893,7 +893,13 @@ function main(): number {
   // inverts - repo-platform is not a render of itself). A conflict-marked
   // manifest is check 4's report; there is nothing coherent to hash. All
   // findings are informational by stance: validate-template does not gate
-  // client merges, and drift heals on the next sync.
+  // client merges, and drift heals on the next sync. The manifest's
+  // OWNERSHIP METADATA is trusted as delivered: this validator cannot know
+  // an arbitrary template version's roster, and hand-editing the manifest
+  // is itself managed-file drift the next sync overwrites - the threat
+  // model here is accidental drift, while check 8's independent
+  // BASE_OWNERSHIP/MODULE_OWNERSHIP tables pin the known files'
+  // declarations regardless of what the manifest claims.
   const manifestPath = join(root, MANIFEST_NAME);
   const manifestExists = isRegularFile(manifestPath);
   if (selfMode) {

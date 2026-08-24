@@ -92,6 +92,17 @@ describe("resolveConflictsTowardAfter", () => {
       ">>>>>>> after updating",
     ].join("\n");
     expect(resolveConflictsTowardAfter(nested)).toBe(nested);
+    // A second separator inside the template side.
+    const doubleSep = [
+      "<<<<<<< before updating",
+      "local",
+      "=======",
+      "x",
+      "=======",
+      "y",
+      ">>>>>>> after updating",
+    ].join("\n");
+    expect(resolveConflictsTowardAfter(doubleSep)).toBe(doubleSep);
   });
   test("non-copier conflict labels are not treated as markers", () => {
     const gitStyle = ["<<<<<<< HEAD", "local", "=======", "theirs", ">>>>>>> main"].join("\n");
