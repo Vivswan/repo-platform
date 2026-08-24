@@ -782,14 +782,82 @@ describe("ownership-manifest byte parity", () => {
   test("a listed managed file missing from the repo is an advisory", () => {
     // Check 8's absence stance, and the warn-and-withhold push path leaves
     // exactly this state for an added workflow the token cannot deliver.
+    // The path sits outside the ownership tables so only absence is probed.
     const entries = {
       ...stampedBaseline(),
-      ".github/workflows/release.yml": '{"class": "managed", "hash": null}',
+      "docs/handbook.md": '{"class": "managed", "hash": null}',
     };
     const { exitCode, stdout, stderr } = runValidator({ [MANIFEST]: manifestOf(entries) });
     expect(stderr).toBe("");
     expect(exitCode).toBe(0);
-    expect(stdout).toContain("advisory: .github/workflows/release.yml: listed as managed");
+    expect(stdout).toContain("advisory: docs/handbook.md: listed as managed");
+  });
+
+  test("a roster path the manifest fails to list is an advisory", () => {
+    const { exitCode, stdout, stderr } = runValidator({
+      [MANIFEST]: manifestOf(stampedBaseline()),
+    });
+    expect(stderr).toBe("");
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain("advisory: .repo-platform-manifest.json does not list 'SECURITY.md'");
+  });
+
+  test("a managed entry hand-flipped to starter fails the roster cross-check", () => {
+    // THE tamper scenario the cross-check exists for: sync baselines
+    // non-conflicting local manifest edits, so without the tables this flip
+    // would disable ci.yml's parity permanently and invisibly.
+    const entries = { ...SELF_ENTRY, ".github/workflows/ci.yml": '{"class": "starter"}' };
+    const { exitCode, stderr } = runValidator({
+      [MANIFEST]: manifestOf(entries),
+      // A drifted ci.yml that keeps the managed header, so neither check 8
+      // nor the (now skipped) hash can be what flags it.
+      ".github/workflows/ci.yml": `${BASELINE[".github/workflows/ci.yml"]}# local tweak\n`,
+    });
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain(
+      `${MANIFEST}: entry '.github/workflows/ci.yml' claims class "starter"`,
+    );
+    expect(stderr).toContain("ownership tables declare it managed");
+  });
+
+  test("tampered split metadata on a roster path fails the cross-check", () => {
+    const managedTop = "# Security\n<!-- repo-platform:local-section -->\n";
+    const entries = {
+      ...stampedBaseline(),
+      "SECURITY.md":
+        `{"class": "split", "marker": "<!-- repo-platform:local-section -->", ` +
+        `"managed": "below", "hash": "${sha(managedTop)}"}`,
+    };
+    const { exitCode, stderr } = runValidator({
+      [MANIFEST]: manifestOf(entries),
+      "SECURITY.md": `${managedTop}tail\n`,
+    });
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain("carries split metadata outside the local-section grammar");
+  });
+
+  test("a tampered .gitignore entry fails its managed-section grammar", () => {
+    const entries = {
+      ...stampedBaseline(),
+      ".gitignore": '{"class": "starter"}',
+    };
+    const { exitCode, stderr } = runValidator({ [MANIFEST]: manifestOf(entries) });
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain("'.gitignore' does not match the managed-section grammar");
+  });
+
+  test("an entry whose render condition is off is manifest drift", () => {
+    // release.yml belongs to the release-please module; the baseline
+    // selects only uv, so no template render can have listed it.
+    const entries = {
+      ...stampedBaseline(),
+      ".github/workflows/release.yml": '{"class": "managed", "hash": null}',
+    };
+    const { exitCode, stderr } = runValidator({ [MANIFEST]: manifestOf(entries) });
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain(
+      "entry '.github/workflows/release.yml' should not exist for this render",
+    );
   });
 
   test("a starter entry never carries a hash", () => {

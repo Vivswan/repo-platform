@@ -29,13 +29,17 @@
 //      template-rendered ownership map, hashes stamped post-render by the
 //      template's stamp_manifest.ts hook) is well-formed, its own entry
 //      stays hash-null (a self-hash would be circular - the content
-//      includes every other hash), and every managed or split entry's
-//      recorded sha256 matches the file on disk (split files: the managed
-//      half alone, delimited by the entry's marker line). Drift means the
-//      file changed since the last stamp; the next sync replaces it. A
-//      missing manifest is only an advisory (older renders predate it), as
-//      is a listed file missing from the repo (check 8's absence stance -
-//      the withheld-workflows push path leaves those legitimately), and a
+//      includes every other hash), its class metadata agrees with this
+//      validator's own ownership tables for every path they cover (sync
+//      baselines local manifest edits, so a hand-flipped class would
+//      otherwise disable parity permanently), and every managed or split
+//      entry's recorded sha256 matches the file on disk (split files: the
+//      managed half alone, delimited by the entry's marker line). Drift
+//      means the file changed since the last stamp; the next sync replaces
+//      it. A missing manifest is only an advisory (older renders predate
+//      it), as are a listed file missing from the repo (check 8's absence
+//      stance - the withheld-workflows push path leaves those
+//      legitimately) and a roster path the manifest fails to list; a
 //      conflict-marked manifest is left to check 4's report.
 //
 // Advisories (printed, never fail): missing actionlint / yamllint /
@@ -133,8 +137,8 @@ function managedHalf(content: string, marker: string, managed: "above" | "below"
   return null;
 }
 
-function sha256(data: string, encoding: "latin1" | "utf-8"): string {
-  return createHash("sha256").update(Buffer.from(data, encoding)).digest("hex");
+function sha256(data: Buffer): string {
+  return createHash("sha256").update(data).digest("hex");
 }
 
 /** Unconditionally rendered base files and how each declares its ownership:
@@ -825,6 +829,31 @@ function main(): number {
     }
   }
 
+  // The version-aligned ownership roster this validator declares ITSELF:
+  // the unconditional base table plus the conditionally rendered base files
+  // and the selected modules' generated entries, under the same
+  // answers/modules conditions as their templates' filename gates (a null
+  // modules list stands the module-gated entries down - check 1 already
+  // errored). Check 8 enforces the in-file declarations over it; check 9
+  // cross-checks the manifest's class metadata against it.
+  const declaredOwnership: { rel: string; kind: "header" | "marker" }[] = Object.entries(
+    BASE_OWNERSHIP,
+  ).map(([rel, kind]) => ({ rel, kind }));
+  if (!isPrivateRender) {
+    declaredOwnership.push({ rel: "CODE_OF_CONDUCT.md", kind: "header" });
+    declaredOwnership.push({ rel: "CONTRIBUTING.md", kind: "marker" });
+  }
+  if (selectedModules !== null) {
+    if (!selectedModules.includes("custom-license")) {
+      declaredOwnership.push({ rel: "LICENSE.md", kind: "marker" });
+    }
+    for (const module of selectedModules) {
+      for (const entry of MODULE_OWNERSHIP[module] ?? []) {
+        declaredOwnership.push({ rel: entry.path, kind: entry.kind });
+      }
+    }
+  }
+
   // 8. Ownership self-declarations: every sync-managed file that supports
   // comments tells its readers who owns it - the managed header on files
   // sync wholly overwrites, the local-section marker splitting split files'
@@ -842,25 +871,7 @@ function main(): number {
       `This file is managed by ${ownerPin.owner.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}` +
         "/repo-platform\\.(?![A-Za-z0-9._-])",
     );
-    const files = Object.entries(BASE_OWNERSHIP).map(([rel, kind]) => ({ rel, kind }));
-    // Conditionally rendered base files, under the same answers/modules
-    // conditions as their templates' filename gates; a null modules list
-    // stands the module-gated entries down (check 1 already errored).
-    if (!isPrivateRender) {
-      files.push({ rel: "CODE_OF_CONDUCT.md", kind: "header" });
-      files.push({ rel: "CONTRIBUTING.md", kind: "marker" });
-    }
-    if (selectedModules !== null) {
-      if (!selectedModules.includes("custom-license")) {
-        files.push({ rel: "LICENSE.md", kind: "marker" });
-      }
-      for (const module of selectedModules) {
-        for (const entry of MODULE_OWNERSHIP[module] ?? []) {
-          files.push({ rel: entry.path, kind: entry.kind });
-        }
-      }
-    }
-    for (const { rel, kind } of files) {
+    for (const { rel, kind } of declaredOwnership) {
       const path = join(root, rel);
       if (!isRegularFile(path)) continue;
       const content = readFileSync(path, "utf-8");
@@ -896,12 +907,17 @@ function main(): number {
   // manifest is check 4's report; there is nothing coherent to hash. All
   // findings are informational by stance: validate-template does not gate
   // client merges, and drift heals on the next sync. The manifest's
-  // OWNERSHIP METADATA is trusted as delivered: this validator cannot know
-  // an arbitrary template version's roster, and hand-editing the manifest
-  // is itself managed-file drift the next sync overwrites - the threat
-  // model here is accidental drift, while check 8's independent
-  // BASE_OWNERSHIP/MODULE_OWNERSHIP tables pin the known files'
-  // declarations regardless of what the manifest claims.
+  // ownership METADATA, however, is NOT trusted for the paths this
+  // validator's version-aligned tables cover (declaredOwnership above,
+  // plus .gitignore's marker grammar): the sync BASELINES non-conflicting
+  // local manifest edits rather than healing them, so a hand-flipped class
+  // (managed -> starter) would otherwise disable parity for that path
+  // permanently and invisibly. A class or split-metadata mismatch, or an
+  // entry whose render condition is off, is an error; a roster path the
+  // manifest fails to list is an advisory (the absence model - older
+  // manifests predate newer files). Paths beyond the tables (starters,
+  // version pins - check 7 pins their bytes - and symlinks) remain
+  // manifest-trusted, an accepted residue of the informational stance.
   const manifestPath = join(root, MANIFEST_NAME);
   const manifestExists = isRegularFile(manifestPath);
   if (selfMode) {
@@ -945,6 +961,102 @@ function main(): number {
           `${MANIFEST_NAME}: does not list itself - the manifest is a managed ` +
             "render like any other; run a template sync to regenerate it",
         );
+      }
+      // Roster cross-check (see the trust model above): the manifest's
+      // class metadata must agree with this validator's own tables for
+      // every path they cover. Shape problems on an entry are the
+      // structural loop's report, not doubled here.
+      const asEntry = (raw: unknown): Record<string, unknown> | null =>
+        typeof raw === "object" && raw !== null && !Array.isArray(raw)
+          ? (raw as Record<string, unknown>)
+          : null;
+      const metadataError = (rel: string, claim: string, declared: string) => {
+        errors.push(
+          `${MANIFEST_NAME}: entry '${rel}' ${claim} but this validator's ` +
+            `ownership tables declare it ${declared} - a hand edit here would ` +
+            "silently disable or skew byte parity, and sync baselines manifest " +
+            "edits instead of healing them; revert the entry (git history has " +
+            "the stamped original) or run a recovery sync (recover=recopy), " +
+            "which re-renders the manifest without a merge",
+        );
+      };
+      for (const { rel, kind } of declaredOwnership) {
+        const raw = manifestFiles[rel];
+        if (raw === undefined) {
+          advisories.push(
+            `${MANIFEST_NAME} does not list '${rel}', which this validator's ` +
+              "ownership tables declare - a sync from a template version that " +
+              "ships the entry adds it (a hand-deleted entry needs reverting: " +
+              "sync baselines manifest edits)",
+          );
+          continue;
+        }
+        const entry = asEntry(raw);
+        if (entry === null) continue;
+        const declared = kind === "header" ? "managed" : "split";
+        if (entry.class !== declared) {
+          metadataError(rel, `claims class ${JSON.stringify(entry.class)}`, declared);
+          continue;
+        }
+        if (
+          kind === "marker" &&
+          (entry.managed !== "above" ||
+            typeof entry.marker !== "string" ||
+            !LOCAL_SECTION_LINES.has(entry.marker))
+        ) {
+          metadataError(
+            rel,
+            "carries split metadata outside the local-section grammar",
+            "split with the managed half above a sentinel marker line",
+          );
+        }
+      }
+      // .gitignore has its own split grammar (the LOCAL section sits above
+      // the managed one), known to this validator via MARKER_FILES.
+      {
+        const raw = manifestFiles[".gitignore"];
+        if (raw === undefined) {
+          advisories.push(
+            `${MANIFEST_NAME} does not list '.gitignore', which the template ` +
+              "always renders - the next template sync regenerates the manifest",
+          );
+        } else {
+          const entry = asEntry(raw);
+          if (
+            entry !== null &&
+            (entry.class !== "split" ||
+              entry.marker !== "# BEGIN REPO-PLATFORM MANAGED" ||
+              entry.managed !== "below")
+          ) {
+            metadataError(
+              ".gitignore",
+              "does not match the managed-section grammar",
+              'split with the managed half below "# BEGIN REPO-PLATFORM MANAGED"',
+            );
+          }
+        }
+      }
+      // An entry for a table-covered path whose render condition is off
+      // (an unselected module's workflow, a public-only file on a private
+      // render) cannot come from the template; it is manifest drift.
+      const expectedPaths = new Set(declaredOwnership.map((f) => f.rel));
+      const coveredEver = new Set<string>([
+        ...Object.keys(BASE_OWNERSHIP),
+        "CODE_OF_CONDUCT.md",
+        "CONTRIBUTING.md",
+        ...(selectedModules !== null
+          ? ["LICENSE.md", ...Object.values(MODULE_OWNERSHIP).flatMap((e) => e.map((f) => f.path))]
+          : []),
+      ]);
+      for (const rel of Object.keys(manifestFiles)) {
+        if (coveredEver.has(rel) && !expectedPaths.has(rel)) {
+          errors.push(
+            `${MANIFEST_NAME}: entry '${rel}' should not exist for this render ` +
+              "(its module is unselected or its render condition is off) - " +
+              "manifest drift, which sync baselines rather than heals; revert " +
+              "the entry or run a recovery sync (recover=recopy)",
+          );
+        }
       }
       for (const [rel, raw] of Object.entries(manifestFiles)) {
         const where = `${MANIFEST_NAME}: entry '${rel}'`;
@@ -1032,7 +1144,9 @@ function main(): number {
         }
         let actual: string | null;
         if (stat.isSymbolicLink()) {
-          actual = sha256(readlinkSync(join(root, rel)), "utf-8");
+          // Raw link bytes: decoding a malformed-UTF-8 target would fold
+          // distinct targets onto the replacement character.
+          actual = sha256(readlinkSync(join(root, rel), { encoding: "buffer" }));
         } else if (!stat.isFile()) {
           errors.push(
             `${rel}: listed in ${MANIFEST_NAME} but is neither a regular file ` +
@@ -1058,9 +1172,9 @@ function main(): number {
               );
               continue;
             }
-            actual = sha256(half, "latin1");
+            actual = sha256(Buffer.from(half, "latin1"));
           } else {
-            actual = sha256(content, "latin1");
+            actual = sha256(Buffer.from(content, "latin1"));
           }
         }
         if (actual !== hash) {

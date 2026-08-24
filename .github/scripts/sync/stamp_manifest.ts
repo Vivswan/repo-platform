@@ -28,7 +28,12 @@
 // Data problems (missing or unparseable manifest) warn and exit 0, like
 // the migrations contract in migrations/run.ts: a stamping gap must never
 // abort an otherwise-successful render - validate-template's byte-parity
-// check is the enforcement point that reports an unstamped manifest.
+// check is the enforcement point that reports an unstamped manifest. The
+// same division covers metadata: this script refreshes hash VALUES and
+// deliberately trusts each entry's class for what to hash (it ships
+// standalone, without the validator's ownership tables), so a hand-flipped
+// class is not healed here - the validator's roster cross-check is what
+// reports it.
 //
 // Env: TARGET_DIR (the rendered repository; default "." - the copier
 // hooks run with cwd at the destination, the sync workflow passes
@@ -107,8 +112,8 @@ export function managedHalf(
   return null;
 }
 
-function sha256(data: string, encoding: "latin1" | "utf-8"): string {
-  return createHash("sha256").update(Buffer.from(data, encoding)).digest("hex");
+function sha256(data: Buffer): string {
+  return createHash("sha256").update(data).digest("hex");
 }
 
 export interface ManifestEntryShape {
@@ -131,7 +136,9 @@ export function entryHash(root: string, path: string, entry: ManifestEntryShape)
   } catch {
     return null;
   }
-  if (stat.isSymbolicLink()) return sha256(readlinkSync(abs), "utf-8");
+  // Raw link bytes: decoding a malformed-UTF-8 target would fold distinct
+  // targets onto the replacement character.
+  if (stat.isSymbolicLink()) return sha256(readlinkSync(abs, { encoding: "buffer" }));
   if (!stat.isFile()) return null;
   // latin1 round-trips every byte, so the hash covers the file verbatim.
   const content = readFileSync(abs).toString("latin1");
@@ -143,9 +150,9 @@ export function entryHash(root: string, path: string, entry: ManifestEntryShape)
       return null;
     }
     const half = managedHalf(content, entry.marker, entry.managed);
-    return half === null ? null : sha256(half, "latin1");
+    return half === null ? null : sha256(Buffer.from(half, "latin1"));
   }
-  return sha256(content, "latin1");
+  return sha256(Buffer.from(content, "latin1"));
 }
 
 /** Stamp the manifest text against the tree at `root`: conflict blocks
