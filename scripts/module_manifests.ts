@@ -147,15 +147,24 @@ export const manifestSchema = z.strictObject({
         ),
       color: z.string().regex(/^[0-9A-Fa-f]{6}$/, "must be a 6-digit hex color"),
       // Lands bare (unquoted) in the generated settings-labels block and in
-      // the nightly starter's label-description input, so anything YAML
-      // could reinterpret there is refused rather than escaped.
+      // the nightly starter's label-description input, so it must read back
+      // as itself from YAML - a value YAML reinterprets (booleans, numbers,
+      // quotes, ': ', '#', leading indicators) is refused rather than
+      // escaped.
       description: singleLine("the tracking-label description").refine(
-        (value) => /^[A-Za-z0-9]/.test(value) && !/[:#'"\\]/.test(value),
+        (value) => {
+          try {
+            return parseYaml(value) === value;
+          } catch {
+            return false;
+          }
+        },
         {
           message:
-            "the tracking-label description must start with a letter or digit and " +
-            "contain no :, #, ', \", or \\ (it lands as a bare YAML scalar in the " +
-            "generated settings-labels block and the nightly starter)",
+            "the tracking-label description must survive a YAML round-trip as the " +
+            "same plain string (no quotes, booleans, numbers, ': ', or '#') - it " +
+            "lands as a bare YAML scalar in the generated settings-labels block " +
+            "and the nightly starter",
         },
       ),
     })

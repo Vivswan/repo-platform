@@ -409,22 +409,47 @@ const TOOLCHAIN_SETUP_TARGETS = ["auto-format", "copilot-setup-steps"];
 /** Prepend each module's toolchain-setup fragment to its own auto-format
  *  and copilot-setup-steps contributions (in place), then drop the
  *  toolchain-setup entry - it is generator input, never spliced itself. A
- *  module carrying setup steps without both target fragments errors: the
- *  steps would silently reach only one (or neither) of the workflows. */
+ *  module carrying setup steps without both target fragments errors (the
+ *  steps would silently reach only one of the workflows), and a module
+ *  carrying both target fragments without setup steps errors too - that is
+ *  the hand-duplication this rule exists to prevent. */
 export function applyToolchainSetup(fragments: Map<string, [ModuleManifest, Buffer][]>): string[] {
   const errors: string[] = [];
   for (const [manifest, setup] of fragments.get(TOOLCHAIN_SETUP_FRAGMENT) ?? []) {
+    const path = `templates/${manifest.module}/${FRAGMENTS_DIR}/${TOOLCHAIN_SETUP_FRAGMENT}${JINJA_SUFFIX}`;
+    if (setup.length === 0 || setup[setup.length - 1] !== 0x0a) {
+      errors.push(
+        `${path}: the fragment must end with a newline - prepending would ` +
+          "fuse its last line with the target fragment's first step",
+      );
+      continue;
+    }
     for (const target of TOOLCHAIN_SETUP_TARGETS) {
       const entry = (fragments.get(target) ?? []).find(([m]) => m.module === manifest.module);
       if (!entry) {
         errors.push(
-          `templates/${manifest.module}/${FRAGMENTS_DIR}/${TOOLCHAIN_SETUP_FRAGMENT}${JINJA_SUFFIX}: ` +
-            `the module ships no ${FRAGMENTS_DIR}/${target}${JINJA_SUFFIX} to prepend the setup ` +
-            "steps to - add that fragment or inline the steps and delete this one",
+          `${path}: the module ships no ${FRAGMENTS_DIR}/${target}${JINJA_SUFFIX} to prepend ` +
+            "the setup steps to - add that fragment or inline the steps and delete this one",
         );
         continue;
       }
       entry[1] = Buffer.concat([setup, entry[1]]);
+    }
+  }
+  const withSetup = new Set(
+    (fragments.get(TOOLCHAIN_SETUP_FRAGMENT) ?? []).map(([manifest]) => manifest.module),
+  );
+  const targetModules = TOOLCHAIN_SETUP_TARGETS.map(
+    (target) => new Set((fragments.get(target) ?? []).map(([manifest]) => manifest.module)),
+  );
+  for (const module of targetModules[0]) {
+    if (targetModules.every((modules) => modules.has(module)) && !withSetup.has(module)) {
+      errors.push(
+        `templates/${module}/${FRAGMENTS_DIR}: the module ships both ` +
+          `${TOOLCHAIN_SETUP_TARGETS.join(" and ")} fragments without a ` +
+          `${TOOLCHAIN_SETUP_FRAGMENT} fragment - hoist the shared setup steps into ` +
+          `${FRAGMENTS_DIR}/${TOOLCHAIN_SETUP_FRAGMENT}${JINJA_SUFFIX} so the two copies cannot drift`,
+      );
     }
   }
   fragments.delete(TOOLCHAIN_SETUP_FRAGMENT);
@@ -546,9 +571,14 @@ export function gateJobsGroups(manifests: ModuleManifest[]): GateJobsGroup[] {
 /** Workflow job ids a ci-gate-jobs fragment defines: the mapping keys at
  *  the fragment's own 2-space job indentation (the anchor sits among
  *  ci.yml's jobs, so every 2-space key is a job id; comments, steps, and
- *  jinja tags all sit elsewhere). */
+ *  jinja tags all sit elsewhere). Matched against GitHub's whole job-id
+ *  grammar, not gate_jobs' stricter shape: a job the manifest schema could
+ *  not declare must still surface as a parity error, never escape the
+ *  gate unseen. */
 export function fragmentJobIds(body: Buffer): string[] {
-  return [...body.toString("utf-8").matchAll(/^ {2}([a-z][a-z0-9-]*):[ \t]*$/gm)].map((m) => m[1]);
+  return [
+    ...body.toString("utf-8").matchAll(/^ {2}([A-Za-z_][A-Za-z0-9_-]*):[ \t]*(?:#.*)?$/gm),
+  ].map((m) => m[1]);
 }
 
 /** gate_jobs <-> ci-gate-jobs parity for one module: the declared gate
@@ -883,9 +913,9 @@ export function spliceContributions(
 const USES_REF_HINT = Buffer.from("uses_ref");
 // Any hand-written half of the derivation trips the guard: a partial copy
 // (say, only tpl_ref) would silently override the injected assignments.
-const HAND_WRITTEN_PREAMBLE_HINTS = ["set tpl_ref", "set release_pin", "set uses_ref"].map((text) =>
-  Buffer.from(text),
-);
+// Matched as a jinja set-tag, so spacing variants cannot slip past and
+// prose mentioning the names cannot false-positive.
+const HAND_WRITTEN_PREAMBLE_RE = /\{%-?\s*set\s+(?:tpl_ref|release_pin|uses_ref)\b/;
 
 /** The canonical uses_ref derivation, injected (not hand-copied) into every
  *  composed file that references uses_ref. All-jinja lines: they render to
@@ -913,12 +943,13 @@ export function injectUsesRefPreamble(
   data: Buffer,
 ): { data: Buffer } | { error: string } | null {
   if (!data.includes(USES_REF_HINT)) return null;
-  if (HAND_WRITTEN_PREAMBLE_HINTS.some((hint) => data.includes(hint))) {
+  if (HAND_WRITTEN_PREAMBLE_RE.test(data.toString("latin1"))) {
     return {
       error:
-        `${source}: hand-writes the uses_ref pin-derivation preamble - the ` +
-        "composer injects the canonical one into every composed file " +
-        "referencing uses_ref; delete the hand-written comment and set lines",
+        `${source}: hand-writes the uses_ref pin-derivation preamble (or a ` +
+        "fragment spliced into it does) - the composer injects the canonical " +
+        "one into every composed file referencing uses_ref; delete the " +
+        "hand-written comment and set lines",
     };
   }
   const lines = splitLines(data);

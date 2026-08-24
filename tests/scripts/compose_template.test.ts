@@ -196,6 +196,13 @@ describe("fragmentJobIds", () => {
     );
     expect(fragmentJobIds(body)).toEqual(["release-freshness", "release-health"]);
   });
+
+  test("job ids beyond gate_jobs' declarable shape still surface (they must fail parity, not escape)", () => {
+    const body = Buffer.from(
+      "  Security_Scan: # inline note\n    runs-on: ubuntu-latest\n  _lint:\n    runs-on: ubuntu-latest\n",
+    );
+    expect(fragmentJobIds(body)).toEqual(["Security_Scan", "_lint"]);
+  });
 });
 
 describe("gateJobsParityErrors", () => {
@@ -261,6 +268,21 @@ describe("applyToolchainSetup", () => {
     expect(errors[0]).toContain("templates/bun/fragments/toolchain-setup.jinja");
     expect(errors[0]).toContain("copilot-setup-steps");
   });
+
+  test("setup steps not ending with a newline error instead of fusing lines", () => {
+    const map = fragmentMap([[[BUN, "- setup"]], [[BUN, "- format\n"]], [[BUN, "- install\n"]]]);
+    const errors = applyToolchainSetup(map);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain("end with a newline");
+    expect(map.get("auto-format")?.[0][1].toString("utf-8")).toBe("- format\n");
+  });
+
+  test("both target fragments without setup steps error - that duplication is the rule's point", () => {
+    const map = fragmentMap([[], [[BUN, "- format\n"]], [[BUN, "- install\n"]]]);
+    const errors = applyToolchainSetup(map);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain("hoist the shared setup steps");
+  });
 });
 
 describe("injectUsesRefPreamble", () => {
@@ -308,6 +330,7 @@ describe("injectUsesRefPreamble", () => {
       "{%- set tpl_ref = _copier_answers._commit -%}",
       "{%- set release_pin = tpl_ref -%}",
       "{%- set uses_ref = 'main' %}",
+      "{% set  uses_ref = 'main' %}",
     ]) {
       const result = injectUsesRefPreamble(
         "templates/demo/w.yml.jinja",

@@ -181,10 +181,12 @@ describe("parseManifest", () => {
       "count #1",
       "'quoted'",
       '"quoted"',
-      "a\\b",
       "- leading dash",
+      "true",
+      "123",
+      "1e3",
     ]) {
-      expect(() => parseManifest("demo", withDescription(bad), WHERE)).toThrow("bare YAML scalar");
+      expect(() => parseManifest("demo", withDescription(bad), WHERE)).toThrow("YAML round-trip");
     }
   });
 
