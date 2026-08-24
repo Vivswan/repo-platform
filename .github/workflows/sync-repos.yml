@@ -143,28 +143,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: bun .github/scripts/sync/wait_for_build.ts staging
 
-      # user/repos with the PAT sees every public repo (fine-grained PATs
-      # always read public resources) and its permissions field reflects
-      # the USER, not the token - so this only pre-filters to owned,
-      # non-archived, user-writable repos; the TOKEN's actual grant is
-      # probed per repo in the next step. --paginate emits concatenated
-      # page arrays, so --slurp + add makes one array first. Visibility
-      # rides along, fail-closed (anything but private: false is treated
-      # as private): the selector redacts private repos from this public
-      # run's logs and matrix (docs/private-repos.md).
+      # Snapshots the owner's writable fleet to $RUNNER_TEMP/discovered.json
+      # for the select step; the script's header states the contract
+      # (pre-filter vs probe, fail-closed visibility for redaction).
       - name: Discover repos
         env:
           GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
-        run: |
-          # The implicit runner shell has no pipefail; without it a gh api
-          # failure would vanish into jq's success.
-          set -o pipefail
-          login="$(gh api user --jq .login)"
-          gh api user/repos --paginate --slurp \
-            | jq -c --arg login "$login" \
-                '[add[] | select((.archived | not) and .owner.login == $login and .permissions.push) | {repo: .full_name, private: (.private != false)}]' \
-            > "$RUNNER_TEMP/discovered.json"
-          echo "discovered $(jq 'length' "$RUNNER_TEMP/discovered.json") writable repos for ${login}"
+        run: bun .github/scripts/fleet/discover_repos.ts
 
       # No ONLY_REPO env on purpose: the typed dispatch input may be a
       # private slug, and the runner prints step env values into this
