@@ -21,10 +21,10 @@
 #      The bundle rides on the frozen release itself, so verification
 #      never depends on GitHub's attestations API staying reachable.
 # A run in which release-please creates or refreshes the release PR
-# (computed independently of any release cut; a push with no releasable
-# commits triggers neither) calls the repo-owned update-release-pr.yml
-# with that PR's number and head branch, so files that must ride in the
-# release commit are regenerated there.
+# (computed independently of any release cut; a run finding no unreleased
+# releasable commits triggers neither) calls the repo-owned
+# update-release-pr.yml with that PR's number and head branch, so files
+# that must ride in the release commit are regenerated there.
 # Everything runs in the same workflow run, so it works with the default
 # GITHUB_TOKEN too, which cannot trigger `on: release` workflows. Without
 # the REPO_PLATFORM_TOKEN secret the release PR is created by the default
@@ -66,8 +66,8 @@ jobs:
       # The action's pr output is one JSON PullRequest object ({number,
       # headBranchName, ...}), unset unless a PR was created or refreshed;
       # the && short-circuit keeps fromJSON off the empty string whenever
-      # no PR was proposed (release-cut-only, nothing-releasable, and
-      # head-check-skipped runs).
+      # no PR was proposed (release-cut-only runs, runs finding nothing
+      # awaiting release, and head-check-skipped runs).
       prs_created: {% raw %}${{ steps.release.outputs.prs_created }}{% endraw %}
       pr_number: {% raw %}${{ steps.release.outputs.pr && fromJSON(steps.release.outputs.pr).number }}{% endraw %}
       pr_head_branch: {% raw %}${{ steps.release.outputs.pr && fromJSON(steps.release.outputs.pr).headBranchName }}{% endraw %}
@@ -221,11 +221,12 @@ jobs:
         run: gh release edit "$TAG" --draft=false
 
   # The release-PR hook: gated only on prs_created, which release-please
-  # computes independently of release_created (a push with no releasable
-  # commits sets neither), so this call sits outside the three release
-  # stages above and never delays publish-release. Same ceiling passthrough
-  # as update-release: no permissions block, so the repo-owned hook gets
-  # the calling job's full ceiling and its jobs narrow it themselves.
+  # computes independently of release_created (a run finding no unreleased
+  # releasable commits sets neither), so this call sits outside the three
+  # release stages above and never delays publish-release. Same ceiling
+  # passthrough as update-release: no permissions block, so the repo-owned
+  # hook gets the calling job's full ceiling and its jobs narrow it
+  # themselves.
   update-release-pr:
     needs: [release-please]
     if: needs.release-please.outputs.prs_created == 'true'
