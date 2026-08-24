@@ -51,8 +51,9 @@ jobs:
       tag_name: ${{ steps.release.outputs.tag_name }}
       # The action's pr output is one JSON PullRequest object ({number,
       # headBranchName, ...}), unset unless a PR was created or refreshed;
-      # the && short-circuit keeps fromJSON off the empty string on
-      # release-cut, plain-push, and head-check-skipped runs.
+      # the && short-circuit keeps fromJSON off the empty string whenever
+      # no PR was proposed (release-cut-only, nothing-releasable, and
+      # head-check-skipped runs).
       prs_created: ${{ steps.release.outputs.prs_created }}
       pr_number: ${{ steps.release.outputs.pr && fromJSON(steps.release.outputs.pr).number }}
       pr_head_branch: ${{ steps.release.outputs.pr && fromJSON(steps.release.outputs.pr).headBranchName }}
@@ -202,11 +203,11 @@ jobs:
         run: gh release edit "$TAG" --draft=false
 
   # The release-PR hook: gated only on prs_created, which release-please
-  # computes independently of release_created (plain main pushes set
-  # neither), so this call sits outside the three release stages above and
-  # never delays publish-release. Same ceiling passthrough as
-  # update-release: no permissions block, so the repo-owned hook gets the
-  # calling job's full ceiling and its jobs narrow it themselves.
+  # computes independently of release_created (a push with no releasable
+  # commits sets neither), so this call sits outside the three release
+  # stages above and never delays publish-release. Same ceiling passthrough
+  # as update-release: no permissions block, so the repo-owned hook gets
+  # the calling job's full ceiling and its jobs narrow it themselves.
   update-release-pr:
     needs: [release-please]
     if: needs.release-please.outputs.prs_created == 'true'
