@@ -1,0 +1,12 @@
+{
+  "name": "golden-render-skills",
+  "displayName": "Golden Render Skills",
+  "description": "Agent skills for Golden Render",
+  "author": {
+    "name": "Vivswan"
+  },
+  "repository": "https://github.com/Vivswan/golden-render",
+  "license": "SEE LICENSE IN LICENSE.md",
+  "keywords": ["agent-skills"],
+  "skills": []
+}

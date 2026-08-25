@@ -1,0 +1,176 @@
+# This file is managed by Vivswan/repo-platform.
+# Local edits may be replaced during template updates.
+#
+# The all-green convention: branch protection requires only the `all-green`
+# check, which needs every other job here, so the required-checks list never
+# changes as jobs come and go. This repository's own test and lint jobs live
+# in checks.yml (repo-owned, never overwritten by sync) and run inside the
+# gate through the `checks` job. Module checks (the pr-title title check,
+# CodeQL analysis) run inside the gate too, so branch protection blocks on
+# them without extra required checks.
+#
+# The base checks (typography, commit-names, actionlint, yamllint, gitleaks)
+# render as one job each on public repositories and as steps of a single
+# base-checks job on private ones, where every job bills a rounded-up minute.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  # `edited` on top of the default three: a PR title edit must re-run the
+  # gate so title-sensitive checks (the pr-title module) stay honest. The
+  # cancel-in-progress concurrency below bounds the extra runs.
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+  workflow_dispatch:
+  # Weekly CodeQL re-scan with refreshed query packs; every other gate job
+  # is event-agnostic or skips its work cleanly on non-PR events.
+  schedule:
+    - cron: "3 8 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  # Repo-owned checks: edit .github/workflows/checks.yml, not this file. No
+  # secrets are passed and permissions cap at contents: read; a check that
+  # needs either belongs in its own workflow (see
+  # https://github.com/Vivswan/repo-platform/blob/main/docs/all-green.md).
+  checks:
+    uses: ./.github/workflows/checks.yml
+
+  # Informational, deliberately NOT in all-green's needs: a red run flags
+  # template-convention drift (usually local edits to managed files), but
+  # it never blocks this repository's merges - the next sync PR heals it.
+  validate-template:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: Vivswan/repo-platform/actions/validate-template@main
+
+  typography:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: Vivswan/repo-platform/actions/check-typography@main
+
+  commit-names:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: Vivswan/repo-platform/actions/validate-commit-names@main
+
+  actionlint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: raven-actions/actionlint@v2
+
+  yamllint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install yamllint
+        run: python3 -m pip install --quiet yamllint
+      - name: Lint YAML
+        run: yamllint -s .
+
+  gitleaks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      # Secret scanning: a committed credential fails the gate. The action
+      # scans the event's commit range (fetch-depth 0 above lets any range
+      # resolve); audit the OLD history once with a local `gitleaks git`.
+      # Personal-account repos need no GITLEAKS_LICENSE; allowlist false
+      # positives in the repo-owned .gitleaks.toml at the repository root
+      # (seeded by the template, never overwritten by sync).
+      # pull-requests read on this job: the action lists the PR's commits
+      # to build the scan range. Comments off keeps that scope at read;
+      # leaks still land in the job summary and SARIF artifact.
+      - uses: gitleaks/gitleaks-action@v3
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_ENABLE_COMMENTS: "false"
+          # The action's default binary (8.24.3) predates .gitleaks.toml's
+          # minVersion floor AND skips that check silently; pin one meeting
+          # the floor so CI honors the same config local runs do.
+          GITLEAKS_VERSION: "8.30.1"
+
+  # Fails when a PR introduces dependencies with known vulnerabilities, by
+  # diffing the dependency graph between base and head. Public renders only:
+  # the dependency-graph API behind it is free just for public repositories.
+  # Only PR events have a diff to review, so the skip lives on the steps:
+  # all-green treats a skipped needed job as failure, so the job itself
+  # stays unconditional.
+  dependency-review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        if: github.event_name == 'pull_request'
+      # The severity threshold and the upstream pin live in the wrapper.
+      - uses: Vivswan/repo-platform/actions/dependency-review@main
+        if: github.event_name == 'pull_request'
+
+  # CodeQL analysis runs inside the gate (one job per language), so a failed
+  # scan blocks merges. Each job grants the scan permissions - a caller
+  # job's permissions are the ceiling for the called workflow - and the
+  # weekly re-scan schedule lives on this workflow's triggers.
+  # Repo-specific scan tuning (paths-ignore, extra queries, packs) goes in
+  # the repo-owned .github/codeql/codeql-config.yml - the standard CodeQL
+  # config file, picked up automatically when present.
+
+  codeql-python:
+    uses: Vivswan/repo-platform/.github/workflows/reusable-codeql.yml@main
+    with:
+      language: python
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+
+  all-green:
+    name: all-green
+    if: always()
+    needs:
+      - checks
+      - typography
+      - commit-names
+      - actionlint
+      - gitleaks
+      - yamllint
+      - dependency-review
+      - codeql-python
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: All jobs green
+        env:
+          NEEDS: ${{ toJson(needs) }}
+        run: |
+          set -o pipefail
+          jq -r 'to_entries[] | "\(.value.result)\t\(.key)"' <<< "$NEEDS"
+          failed="$(jq -r 'to_entries[] | select(.value.result != "success") | .key' <<< "$NEEDS" | tr '\n' ' ')"
+          if [ -n "$failed" ]; then
+            echo "::error::all-green failed: ${failed% } did not succeed. Open the failing job's log in this run, fix the failure, and push again."
+            exit 1
+          fi

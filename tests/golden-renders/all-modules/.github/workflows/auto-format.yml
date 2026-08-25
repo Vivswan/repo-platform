@@ -1,0 +1,116 @@
+# Repo-owned auto-format: label a pull request `fix-lint` (the label ships
+# with the template's settings.yml) and this workflow pushes a formatting
+# commit to the PR branch, then removes the label. Generated once by
+# Vivswan/repo-platform and never overwritten by template
+# sync: adjust the format commands to this repository's tooling.
+#
+# The push uses github.token, which starts no workflows: the PR's checks
+# will not re-run on the new head, so the job says so loudly (a PR comment
+# and a warning annotation; close/reopen the PR to re-run them). Swapping
+# in a PAT with Contents write would re-trigger CI automatically, but the
+# formatter tooling of any same-repo PR runs in this checkout before the
+# push - only wire in a token you are willing to expose to it.
+
+name: Auto Format
+
+on:
+  pull_request:
+    types: [labeled]
+
+# Per-label group: unrelated labels skip in their own group, while
+# re-adding fix-lint cancels the older fix-lint run in favor of the newest.
+concurrency:
+  group: auto-format-${{ github.event.pull_request.number }}-${{ github.event.label.name }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  format:
+    # Same-repo PRs only: GITHUB_TOKEN cannot push to a fork's branch, and
+    # PR-controlled tool configuration should not run next to write
+    # credentials (checkout below persists none; the push step scopes them).
+    if: github.event.label.name == 'fix-lint' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          persist-credentials: false
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      - uses: actions/cache@v6
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('**/bun.lock') }}
+          restore-keys: bun-${{ runner.os }}-
+      - name: Format (biome)
+        run: bun x @biomejs/biome@2 check --write .
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .node-version
+          package-manager-cache: false
+      - name: Format (biome via npm)
+        run: npx --yes @biomejs/biome@2 check --write .
+
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version-file: .dvmrc
+          cache: true
+      - name: Format (deno)
+        env:
+          DENO_NO_UPDATE_CHECK: "1"
+        run: |
+          deno lint --fix || true
+          deno fmt
+
+      - uses: astral-sh/setup-uv@v9.0.0
+      - name: Format (ruff)
+        run: |
+          uvx ruff check --fix . || true
+          uvx ruff format .
+
+      - name: Commit and push changes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          if git diff --quiet; then
+            echo "nothing to format"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "style: apply automated formatting"
+          git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:"$HEAD_REF"
+          # The commit landed via github.token, which starts no workflows:
+          # this PR's checks will not re-run on the new head. Surface that
+          # on the PR (once) and as a run annotation. The push itself
+          # succeeded, so the run stays green - a red run on every
+          # formatted PR would drown real failures.
+          marker="<!-- auto-format: no-retrigger-token -->"
+          comments=$(gh api "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments" --paginate --jq '.[].body' || true)
+          case "$comments" in
+            *"$marker"*) ;;
+            *) gh pr comment "$PR_NUMBER" -R "$GITHUB_REPOSITORY" --body "$marker
+          Pushed a formatting commit with the default workflow token, which starts no workflows, so checks will not re-run on the new head. Close and reopen this PR to re-run them." || true ;;
+          esac
+          echo "::warning::formatting commit pushed with github.token - checks will not re-run on the new head; close/reopen the PR to re-run them"
+      # The label is a one-shot request: remove it even when a step failed,
+      # so a broken run cannot loop.
+      - name: Remove the fix-lint label
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: gh pr edit "$PR_URL" --remove-label fix-lint

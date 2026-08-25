@@ -214,6 +214,25 @@ jobs:
       - name: Check renamed or retired rendered files ship migrations
         run: bun run migrations:check
 
+  # Committed golden renders (tests/golden-renders/) must match a fresh
+  # copier render of the canonical selection matrix, so every template or
+  # composer change shows its fleet-facing rendered diff in the PR
+  # (scripts/render_goldens.ts has the matrix and determinism contract).
+  golden-renders:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      - name: Install dependencies
+        run: bun install --frozen-lockfile --silent
+      - name: Install copier
+        run: pipx install copier
+      - name: Check the golden renders against a fresh render
+        run: bun run renders:check
+
   script-tests:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -581,6 +600,7 @@ jobs:
       - action-refs
       - compose
       - validate-template
+      - golden-renders
       - script-tests
       - validate-skills
       - skills-discovery

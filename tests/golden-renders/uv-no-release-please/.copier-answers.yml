@@ -1,0 +1,13 @@
+# This file is managed by Vivswan/repo-platform.
+# Copier uses it to track the template source and version - do not delete.
+_commit: 5a7b02c
+_src_path: ./tree
+channel: latest
+copyright_holder: Vivswan Shah (https://github.com/Vivswan)
+description: Golden render fixture
+github_username: Vivswan
+modules:
+- uv
+private: false
+project_name: Golden Render
+project_slug: golden-render
