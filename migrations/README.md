@@ -32,3 +32,11 @@ Salvage policy: WARN-ONLY by default. When a migration finds client content in t
 
 - The `.github/scripts/ci/upgrade_path_test.sh` case must include a CUSTOMIZED-client fixture - a repo that locally edited the affected path - not just a clean render; the clean case is the one copier already handles on its own.
 - Migrations are skipped on the staging channel (unparseable target versions, above), so the staging canary proves nothing about a migration. Proof is the upgrade-path test plus a local rehearsal against a real client: `bun .github/scripts/sync/rehearse.ts <owner>/<repo>` runs the update, the due migrations, and the cleanup legs against a read-only clone and prints the would-be sync PR.
+
+## Fleet-wide rehearsal
+
+`bun run rehearse:fleet` (`.github/scripts/sync/rehearse_fleet.ts`) runs the same rehearsal across every repo repos.yml selects (the exclude list is respected) and prints one summary line per repo plus a final `repo | status | detail` table: clean vs conflicts (with the conflicted files and dropped-hunk counts), retired-file count, the ownership manifest's stamp state, the validation verdict, and any recovery-needed condition (a recorded `_commit` that no longer resolves).
+
+- Private repos are NEVER touched - not even cloned. Visibility is checked via the GitHub API before any git command aims at the repo, and the decision is fail-closed: anything but a definitive `private: false` (a failed lookup included) prints `<repo>  skipped (private)` and moves on.
+- Per-repo failure is information, never an abort: a repo whose rehearsal throws prints `REHEARSAL FAILED: <reason>` and the loop continues (repos that never adopted the template report as `skipped (not adopted)` instead, matching the production selector). The exit code is 0 whenever the loop completed - it is a report, not a gate.
+- Same read-only guarantees as the single-repo rehearsal (every clone's origin goes unroutable before any leg runs); workspaces are removed after each repo instead of kept for inspection.
