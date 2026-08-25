@@ -22,7 +22,12 @@
 //   and the junction to the next line stays tight whichever gates render
 //   false (with a plain `#}` the skeleton newline terminates the block, so
 //   an all-conditional line list would leave it dangling when the last
-//   gate is off).
+//   gate is off). On a plain anchor whose contributions all carry a
+//   recorded gate, the marker line's newline is wrapped in an any-gate
+//   guard (see collapseGuard): with every gate false the whole line
+//   collapses instead of rendering as a stray blank line, and with any
+//   gate true the guard re-emits the same newline, byte-identical to an
+//   unguarded splice.
 // - templates/<module>/fragments/toolchain-setup.jinja is no anchor's
 //   fragment: it carries the module's toolchain setup steps, prepended by
 //   the composer to the module's own auto-format and copilot-setup-steps
@@ -349,11 +354,14 @@ export function agentsToolchainErrors(
   return errors;
 }
 
-// One spliced piece of an anchor's replacement, already carrying its gate.
+// One spliced piece of an anchor's replacement, already carrying its gate
+// tags in `text`. `gate` is the condition under which the text renders
+// anything at all - null when the contribution manages its own whitespace
+// (it must then keep the anchor line sensible in every render itself).
 // `order` is the MODULE_ORDER position of the (first) contributing module,
 // so generated groups interleave with fragment contributions exactly where
 // the contributing modules sit.
-export type Contribution = { order: number; source: string; text: Buffer };
+export type Contribution = { order: number; source: string; gate: string | null; text: Buffer };
 
 /** A generator's own validation failure (bad manifest data): reported as a
  *  clean composition error. Anything else escaping a generator is a bug and
@@ -366,8 +374,10 @@ export class GeneratorValidationError extends Error {}
  *  contributions render onto one line (adjacent `{% if %}...{% endif %}`
  *  wrappers emit no separator of their own). On a plain anchor the last
  *  contribution may end mid-line (the skeleton's own newline terminates
- *  the block); on a TIGHT anchor (`-#}`) that newline is consumed, so the
- *  last contribution must supply the line ending itself. */
+ *  the block - the collapse guard re-emits it whenever any contribution
+ *  is selected, so guarding changes nothing here); on a TIGHT anchor
+ *  (`-#}`) that newline is consumed, so the last contribution must supply
+ *  the line ending itself. */
 export function renderedSeparationErrors(
   anchor: string,
   contributions: { source: string; text: Buffer }[],
@@ -478,8 +488,11 @@ type DataAnchorSpec = { data: string } & (
     }
 );
 
-function gatedText(gate: string, body: string): string {
-  return `{% if ${gate} %}${body}{% endif %}`;
+/** A contribution body wrapped whole in one gate, with the gate recorded
+ *  so spliceContributions can collapse an anchor line whose contributions
+ *  all render false. */
+function gated(gate: string, body: string): { gate: string; text: Buffer } {
+  return { gate, text: Buffer.from(`{% if ${gate} %}${body}{% endif %}`) };
 }
 
 function generatorSource(anchor: string, data: string): string {
@@ -667,9 +680,7 @@ const DATA_ANCHORS: Record<string, DataAnchorSpec> = {
       ecosystemGroups(manifests).map((group) => ({
         order: orderOf(manifests, group.modules[0]),
         source: generatorSource("dependabot-ecosystems", "dependabot.ecosystem"),
-        text: Buffer.from(
-          gatedText(orChain(group.modules, gateOf), ecosystemBlock(group.ecosystem)),
-        ),
+        ...gated(orChain(group.modules, gateOf), ecosystemBlock(group.ecosystem)),
       })),
   },
   "codeql-languages": {
@@ -679,7 +690,7 @@ const DATA_ANCHORS: Record<string, DataAnchorSpec> = {
       codeqlGroups(manifests).map((group) => ({
         order: orderOf(manifests, group.modules[0]),
         source: generatorSource("codeql-languages", "toolchain.codeql_language"),
-        text: Buffer.from(gatedText(orChain(group.modules, gateOf), codeqlJob(group))),
+        ...gated(orChain(group.modules, gateOf), codeqlJob(group)),
       })),
   },
   // The all-green gate's needs entries: the enable_codeql-guarded
@@ -692,19 +703,15 @@ const DATA_ANCHORS: Record<string, DataAnchorSpec> = {
       ...codeqlGroups(manifests).map((group) => ({
         order: orderOf(manifests, group.modules[0]),
         source: generatorSource("ci-gate-needs", "toolchain.codeql_language"),
-        text: Buffer.from(
-          gatedText(
-            orChain(group.modules, gateOf),
-            `{% if enable_codeql %}      - codeql-${group.slug}\n{% endif %}`,
-          ),
+        ...gated(
+          orChain(group.modules, gateOf),
+          `{% if enable_codeql %}      - codeql-${group.slug}\n{% endif %}`,
         ),
       })),
       ...gateJobsGroups(manifests).map((group) => ({
         order: orderOf(manifests, group.module),
         source: generatorSource("ci-gate-needs", "gate_jobs"),
-        text: Buffer.from(
-          gatedText(gateOf(group.module), group.jobs.map((job) => `      - ${job}\n`).join("")),
-        ),
+        ...gated(gateOf(group.module), group.jobs.map((job) => `      - ${job}\n`).join("")),
       })),
     ],
   },
@@ -715,7 +722,7 @@ const DATA_ANCHORS: Record<string, DataAnchorSpec> = {
       dependabotLabels(manifests).map((label) => ({
         order: orderOf(manifests, label.modules[0]),
         source: generatorSource("settings-dependabot-labels", "dependabot.label"),
-        text: Buffer.from(gatedText(orChain(label.modules, gateOf), labelBlock(label))),
+        ...gated(orChain(label.modules, gateOf), labelBlock(label)),
       })),
   },
   // Mixed anchor: the tracking-stream label entries are generated here;
@@ -733,9 +740,7 @@ const DATA_ANCHORS: Record<string, DataAnchorSpec> = {
           {
             order: orderOf(manifests, manifest.module),
             source: generatorSource("settings-labels", "tracking_label"),
-            text: Buffer.from(
-              gatedText(gateOf(manifest.module), trackingLabelBlock(manifest.module, tracking)),
-            ),
+            ...gated(gateOf(manifest.module), trackingLabelBlock(manifest.module, tracking)),
           },
         ];
       }),
@@ -756,6 +761,9 @@ const DATA_ANCHORS: Record<string, DataAnchorSpec> = {
         {
           order: orderOf(manifests, groups[0].modules[0]),
           source: generatorSource("gitleaks-locks", "lockfiles"),
+          // Renders nothing in every selection (append statements only);
+          // the leading {%- on each line manages the anchor's whitespace.
+          gate: null,
           text: Buffer.from(lines.join("\n")),
         },
       ];
@@ -788,6 +796,10 @@ const DATA_ANCHORS: Record<string, DataAnchorSpec> = {
         {
           order: orderOf(manifests, modules[0]),
           source: generatorSource("agents-toolchain", "fragments"),
+          // No collapse gate: with no toolchain module selected the anchor
+          // line's newline IS the blank line separating the Project section
+          // from ## Conventions in AGENTS.md - collapsing it would fuse them.
+          gate: null,
           text: Buffer.concat(parts),
         },
       ];
@@ -807,6 +819,38 @@ function matchAnchor(line: Buffer): { name: string; tight: boolean; trailing: st
 
 function sortedByKey<V>(map: Map<string, V>): [string, V][] {
   return [...map.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+}
+
+/** The guard replacing a plain anchor line's newline: all gates false
+ *  collapses the line, any selected gate re-emits the identical newline.
+ *  Null when a gate-null contribution or a lexical trim owns the newline. */
+function collapseGuard(
+  contributions: Contribution[],
+  spliced: Buffer,
+  followingTrims: boolean,
+): Buffer | null {
+  const gates: string[] = [];
+  for (const { gate } of contributions) {
+    if (gate === null) return null;
+    if (!gates.includes(gate)) gates.push(gate);
+  }
+  if (/-[%#}]\}[ \t\r\n]*$/.test(spliced.toString("latin1"))) return null;
+  if (followingTrims) return null;
+  const condition = gates.length === 1 ? gates[0] : gates.map((gate) => `(${gate})`).join(" or ");
+  return Buffer.from(`{% if ${condition} %}\n{% endif %}`);
+}
+
+/** Whether the effective texts following a marker line (anchors already
+ *  spliced) reach a trimming opener across nothing but whitespace - the
+ *  opener would consume the run, a guarded newline included. */
+export function trimsFollowingWhitespace(texts: Buffer[]): boolean {
+  for (const text of texts) {
+    const chars = text.toString("latin1");
+    const at = chars.search(/[^ \t\r\n]/);
+    if (at === -1) continue; // all-whitespace text: the run goes on
+    return /^\{[{%#]-/.test(chars.slice(at));
+  }
+  return false;
 }
 
 export type SourcedEntry =
@@ -922,27 +966,50 @@ export function spliceContributions(
   for (const sourced of files.values()) {
     const { entry } = sourced;
     if (entry.kind === "symlink" || !entry.data.includes(ANCHOR_HINT)) continue;
+    // First pass: every line's effective replacement, so the guard decision
+    // below can look forward across anchor lines at the text that will
+    // actually surround the marker line's newline.
+    const pieces = splitLines(entry.data).map((line) => {
+      const anchor = matchAnchor(line);
+      if (anchor === null) return { anchor, list: [], text: line };
+      const list = contributionsOf(anchor.name);
+      const text = Buffer.concat([...list.map((c) => c.text), Buffer.from(anchor.trailing)]);
+      return { anchor, list, text };
+    });
     const rebuilt: Buffer[] = [];
-    // A tight anchor's replacement absorbs the marker line's newline: its
-    // spliced text is carried into the next line instead of standing as a
-    // line of its own (at EOF it simply becomes the last line).
+    // Carried text absorbs the marker line's newline into the next line: a
+    // tight anchor by definition, a guarded plain anchor because the guard
+    // block supplies the newline itself.
     let carry: Buffer | null = null;
     const emit = (chunk: Buffer) => {
       rebuilt.push(carry === null ? chunk : Buffer.concat([carry, chunk]));
       carry = null;
     };
-    for (const line of splitLines(entry.data)) {
-      const anchor = matchAnchor(line);
+    const carryOver = (chunk: Buffer) => {
+      carry = carry === null ? chunk : Buffer.concat([carry, chunk]);
+    };
+    for (let at = 0; at < pieces.length; at++) {
+      const { anchor, list, text } = pieces[at];
       if (anchor === null) {
-        emit(line);
+        emit(text);
         continue;
       }
-      const spliced = Buffer.concat([
-        ...contributionsOf(anchor.name).map(({ text }) => text),
-        Buffer.from(anchor.trailing),
-      ]);
-      if (anchor.tight) carry = carry === null ? spliced : Buffer.concat([carry, spliced]);
-      else emit(spliced);
+      if (anchor.tight) {
+        carryOver(text);
+        continue;
+      }
+      // No newline to guard on the file's last segment; a trailing literal
+      // keeps its newline or the literal would fuse onto the next line.
+      const guard =
+        anchor.trailing === "" && at + 1 < pieces.length
+          ? collapseGuard(
+              list,
+              text,
+              trimsFollowingWhitespace(pieces.slice(at + 1).map((piece) => piece.text)),
+            )
+          : null;
+      if (guard === null) emit(text);
+      else carryOver(Buffer.concat([text, guard]));
     }
     if (carry !== null) rebuilt.push(carry);
     entry.data = joinLines(rebuilt);
@@ -1281,6 +1348,7 @@ export function build(): Map<string, Entry> {
   const wrapFragment = (anchor: string, module: string, body: Buffer): Contribution => ({
     order: MODULE_ORDER.indexOf(module),
     source: `templates/${module}/${FRAGMENTS_DIR}/${anchor}${JINJA_SUFFIX}`,
+    gate: gateOf(module),
     text: Buffer.concat([
       Buffer.from(`{% if ${gateOf(module)} %}`),
       body,
