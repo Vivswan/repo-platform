@@ -52,6 +52,6 @@ jobs:
       # - uses: astral-sh/setup-uv@v9.0.0
       # - run: uv sync
       # - run: uv run pytest
-{% endif %}
-      - name: No repository checks yet
+{% endif %}{% if ('bun' in modules) or ('node' in modules) or ('deno' in modules) or ('uv' in modules) %}
+{% endif %}      - name: No repository checks yet
         run: echo "add this repository's test and lint jobs to checks.yml"

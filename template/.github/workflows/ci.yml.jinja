@@ -310,8 +310,8 @@ jobs:
         uses: amannn/action-semantic-pull-request@v6
         env:
           GITHUB_TOKEN: {% raw %}${{ secrets.GITHUB_TOKEN }}{% endraw %}
-{% endif %}
-  all-green:
+{% endif %}{% if ('release-please' in modules) or ('skills' in modules) or ('pr-title' in modules) %}
+{% endif %}  all-green:
     name: all-green
     if: always()
     needs:

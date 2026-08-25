@@ -77,8 +77,8 @@ jobs:
         run: |
           uvx ruff check --fix . || true
           uvx ruff format .
-{% endif %}
-      - name: Commit and push changes
+{% endif %}{% if ('bun' in modules) or ('node' in modules) or ('deno' in modules) or ('uv' in modules) %}
+{% endif %}      - name: Commit and push changes
         env:
           GH_TOKEN: {% raw %}${{ github.token }}{% endraw %}
           HEAD_REF: {% raw %}${{ github.event.pull_request.head.ref }}{% endraw %}
