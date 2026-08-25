@@ -9,7 +9,33 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { z } from "zod";
 import { env } from "../shared/gha.ts";
 import { parseJsonWith } from "../shared/json.ts";
-import { capture } from "../shared/proc.ts";
+import { capture, type RunResult } from "../shared/proc.ts";
+
+/** Hard deadline for every fleet network subprocess (the gh api calls and
+ * the curl push probe). Single calls answer in seconds; the slowest is
+ * discoverWritableRepos' paginated user/repos listing, whose pages fetch
+ * serially at one page per 100 repos, so two minutes covers the fleet
+ * growing to several hundred repos with a wide margin. This is a
+ * stalled-network backstop, not a latency budget: without it a hung
+ * connection blocks the plan job until the runner's own job timeout. Sits
+ * between check_migrations' 60s single-git-command deadline and
+ * rehearse's 300s whole-copier-run deadline. */
+export const NETWORK_TIMEOUT_MS = 120_000;
+
+/** capture() with the fleet network deadline applied; `timeoutMs` is
+ * parameterized so tests can exercise the expiry path without waiting out
+ * the production deadline. A SIGKILLed child usually dies silently, so an
+ * expiry appends a line naming the deadline to the result's stderr. The
+ * line names only the program, never the argv tail: the tail can carry a
+ * private slug or, for the curl push probe, the PAT itself, and this
+ * helper cannot know which call sites let stderr reach a public log. */
+export function captureNetwork(command: string[], timeoutMs = NETWORK_TIMEOUT_MS): RunResult {
+  const result = capture(command, { timeoutMs });
+  if (result.timedOut === true) {
+    result.stderr += `${command[0]} timed out after ${timeoutMs}ms (stalled network?)\n`;
+  }
+  return result;
+}
 
 // user/repos with the fleet PAT sees every repo the USER can reach, and
 // its permissions field reflects the user, not the token: discovery only
@@ -36,7 +62,7 @@ const userReposPages = z.array(
 export function discoverWritableRepos(label: string) {
   // -F alone would flip gh api to POST; this is a read. --paginate emits
   // concatenated page arrays, so --slurp makes one array of pages first.
-  const list = capture([
+  const list = captureNetwork([
     "gh",
     "api",
     "user/repos",

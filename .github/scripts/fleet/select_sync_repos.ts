@@ -32,8 +32,8 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { env, error, notice, requireEnv, setOutput } from "../shared/gha.ts";
 import { parseJson } from "../shared/json.ts";
-import { capture } from "../shared/proc.ts";
 import {
+  captureNetwork,
   notAdoptedNotice,
   pushProbeSkipNotice,
   readDispatchRepo,
@@ -109,7 +109,12 @@ for (const row of enriched.rows) {
   }
   // Only a 404 means "not adopted"; any other API failure (auth, rate
   // limit, outage) fails the plan instead of silently skipping repos.
-  const adoption = capture(["gh", "api", `repos/${slug}/contents/.repo-platform.yml`, "--silent"]);
+  const adoption = captureNetwork([
+    "gh",
+    "api",
+    `repos/${slug}/contents/.repo-platform.yml`,
+    "--silent",
+  ]);
   if (adoption.exitCode === 0) {
     // The display IS the slug for unredacted rows (parseEnriched holds
     // that invariant), so every matrix row can emit it as its repo.

@@ -33,6 +33,7 @@ import { loadManifests } from "../../../scripts/module_manifests.ts";
 import { parseFlags } from "../shared/flags.ts";
 import { fail } from "../shared/gha.ts";
 import { parseJson } from "../shared/json.ts";
+import { captureNetwork } from "./discovery.ts";
 
 export interface CheckResult {
   errors: string[];
@@ -389,17 +390,16 @@ export function checkCentralFileRemote(
  *  ::warning:: at the call site, so an unreadable target never blocks
  *  the apply. */
 function fetchRepoFile(repo: string, path: string): Fetched {
-  const proc = Bun.spawnSync([
+  const proc = captureNetwork([
     "gh",
     "api",
     `repos/${repo}/contents/${path}`,
     "-H",
     "Accept: application/vnd.github.raw",
   ]);
-  if (proc.exitCode === 0) return { status: "ok", text: proc.stdout.toString() };
-  const stderr = proc.stderr.toString();
-  if (stderr.includes("HTTP 404")) return { status: "missing" };
-  return { status: "failed", detail: stderr.trim().split("\n")[0] || "unknown error" };
+  if (proc.exitCode === 0) return { status: "ok", text: proc.stdout };
+  if (proc.stderr.includes("HTTP 404")) return { status: "missing" };
+  return { status: "failed", detail: proc.stderr.trim().split("\n")[0] || "unknown error" };
 }
 
 /** Whether the target must be treated as private for detail purposes.
@@ -409,7 +409,7 @@ function fetchRepoFile(repo: string, path: string): Fetched {
  *  The name itself is self-disclosed (a committed central filename);
  *  this only decides whether its module facts and values may print. */
 function fetchRepoIsPrivate(repo: string): boolean {
-  const proc = Bun.spawnSync(["gh", "api", `repos/${repo}`, "--jq", ".private"]);
+  const proc = captureNetwork(["gh", "api", `repos/${repo}`, "--jq", ".private"]);
   if (proc.exitCode !== 0) {
     console.log(
       `::warning::the visibility probe for ${repo} failed; treating it as private ` +
@@ -418,7 +418,7 @@ function fetchRepoIsPrivate(repo: string): boolean {
     );
     return true;
   }
-  return proc.stdout.toString().trim() !== "false";
+  return proc.stdout.trim() !== "false";
 }
 
 function main(args: string[]): void {

@@ -1,13 +1,61 @@
 import { describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  captureNetwork,
+  NETWORK_TIMEOUT_MS,
   notAdoptedNotice,
   pushProbeSkipNotice,
   readDispatchRepo,
   scrubSlug,
 } from "../../.github/scripts/fleet/discovery.ts";
+
+// captureNetwork is the fleet's hang backstop: every gh/curl subprocess in
+// the plan jobs goes through it, so a stalled network fails the run at the
+// deadline instead of blocking until the runner's own job timeout.
+describe("captureNetwork", () => {
+  test("passes the deadline through to the proc layer: a hung command dies at expiry", () => {
+    const started = Date.now();
+    const result = captureNetwork(["sleep", "31337"], 250);
+    expect(Date.now() - started).toBeLessThan(10_000);
+    expect(result.timedOut).toBe(true);
+    expect(result.exitCode).not.toBe(0);
+    // The SIGKILLed child prints nothing, so the synthesized stderr line
+    // is the only trace of the deadline. It must name the program but
+    // never the argv tail: real tails carry private slugs and, for the
+    // curl push probe, the PAT itself.
+    expect(result.stderr).toContain("sleep timed out after 250ms (stalled network?)");
+    expect(result.stderr).not.toContain("31337");
+  });
+
+  test("a command that answers in time is untouched by the deadline", () => {
+    const result = captureNetwork(["echo", "ok"]);
+    expect(result.exitCode).toBe(0);
+    expect(result.timedOut).toBe(false);
+    expect(result.stdout).toBe("ok\n");
+    expect(result.stderr).toBe("");
+  });
+
+  test("the production deadline is two minutes (guards against a ms/s unit slip)", () => {
+    expect(NETWORK_TIMEOUT_MS).toBe(120_000);
+  });
+
+  test("every fleet gh/curl subprocess goes through captureNetwork (class sweep)", () => {
+    // A bare capture/spawnSync around a gh or curl argv reintroduces the
+    // unbounded-hang class this helper closed; new network calls must
+    // carry the deadline too.
+    const dir = join(import.meta.dir, "../../.github/scripts/fleet");
+    const offenders: string[] = [];
+    for (const entry of readdirSync(dir)) {
+      if (!entry.endsWith(".ts")) continue;
+      const source = readFileSync(join(dir, entry), "utf-8");
+      const bare = source.match(/\b(?:capture|mustCapture|spawnSync)\(\s*\[\s*"(?:gh|curl)"/g);
+      for (const match of bare ?? []) offenders.push(`${entry}: ${match.replace(/\s+/g, " ")}`);
+    }
+    expect(offenders).toEqual([]);
+  });
+});
 
 // scrubSlug is the redaction-critical piece: it keeps a private repo's
 // slug and bare name out of captured error text that both selectors print

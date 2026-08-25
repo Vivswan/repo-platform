@@ -5,25 +5,25 @@
 // no side effects. curl stays a subprocess (not fetch) so the test
 // harnesses can stub it on PATH.
 
+import { captureNetwork } from "./discovery.ts";
+
 /** HTTP status of the push probe; 0 for a transport failure (DNS, TLS,
- * timeout), like curl's 000. A status printed by a FAILING curl is not
- * trusted: only exit 0 output counts as an answer. */
+ * the fleet network deadline expiring), like curl's 000. A status printed
+ * by a FAILING curl is not trusted: only exit 0 output counts as an
+ * answer. */
 export function pushProbeStatus(slug: string, pat: string): number {
-  const proc = Bun.spawnSync(
-    [
-      "curl",
-      "-s",
-      "-o",
-      "/dev/null",
-      "-w",
-      "%{http_code}",
-      "-u",
-      `x-access-token:${pat}`,
-      `https://github.com/${slug}.git/info/refs?service=git-receive-pack`,
-    ],
-    { stdout: "pipe", stderr: "ignore" },
-  );
+  const proc = captureNetwork([
+    "curl",
+    "-s",
+    "-o",
+    "/dev/null",
+    "-w",
+    "%{http_code}",
+    "-u",
+    `x-access-token:${pat}`,
+    `https://github.com/${slug}.git/info/refs?service=git-receive-pack`,
+  ]);
   if (proc.exitCode !== 0) return 0;
-  const code = Number.parseInt(proc.stdout.toString(), 10);
+  const code = Number.parseInt(proc.stdout, 10);
   return Number.isNaN(code) ? 0 : code;
 }

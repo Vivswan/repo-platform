@@ -46,6 +46,7 @@ import { z } from "zod";
 import { parseFlags } from "../shared/flags.ts";
 import { fail } from "../shared/gha.ts";
 import { parseJson, parseWith } from "../shared/json.ts";
+import { captureNetwork } from "./discovery.ts";
 import { loadRegistry } from "./repos_registry.ts";
 
 // One implementation for both sides: the plan job tags rows here and the
@@ -348,8 +349,8 @@ function main(args: string[]): void {
         // A selected repo the owner-filtered discovery never saw (an
         // explicit cross-owner entry): one live probe, failing closed.
         (slug) => {
-          const proc = Bun.spawnSync(["gh", "api", `repos/${slug}`, "--jq", ".private"]);
-          return proc.exitCode !== 0 || proc.stdout.toString().trim() !== "false";
+          const proc = captureNetwork(["gh", "api", `repos/${slug}`, "--jq", ".private"]);
+          return proc.exitCode !== 0 || proc.stdout.trim() !== "false";
         },
       );
       console.log(JSON.stringify(result));

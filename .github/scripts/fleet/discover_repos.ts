@@ -21,15 +21,14 @@
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { requireEnv } from "../shared/gha.ts";
-import { capture } from "../shared/proc.ts";
-import { discoverOwnerRepos } from "./discovery.ts";
+import { captureNetwork, discoverOwnerRepos } from "./discovery.ts";
 
 const runnerTemp = requireEnv("RUNNER_TEMP");
 
 // The owner scope is the PAT's own user: repos.yml's wildcard means
 // "every repo of the fleet owner", so cross-owner repos the user can
 // write to must not ride into the sync plan.
-const who = capture(["gh", "api", "user", "--jq", ".login"]);
+const who = captureNetwork(["gh", "api", "user", "--jq", ".login"]);
 if (who.exitCode !== 0) {
   process.stderr.write(who.stderr);
   process.exit(who.exitCode);

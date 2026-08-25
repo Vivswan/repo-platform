@@ -31,8 +31,8 @@ import { appendFileSync, readdirSync, readFileSync, writeFileSync } from "node:f
 import { join } from "node:path";
 import { env, notice, requireEnv, setOutput } from "../shared/gha.ts";
 import { parseJson } from "../shared/json.ts";
-import { capture } from "../shared/proc.ts";
 import {
+  captureNetwork,
   discoverOwnerRepos,
   notAdoptedNotice,
   pushProbeSkipNotice,
@@ -89,7 +89,12 @@ function probePush(slug: string, display: string): ProbeResult {
 
 // Only a 404 means "not adopted"; any other API failure is a non-answer.
 function probeAdoption(slug: string, display: string): ProbeResult {
-  const probe = capture(["gh", "api", `repos/${slug}/contents/.repo-platform.yml`, "--silent"]);
+  const probe = captureNetwork([
+    "gh",
+    "api",
+    `repos/${slug}/contents/.repo-platform.yml`,
+    "--silent",
+  ]);
   if (probe.exitCode === 0) return "pass";
   if (/HTTP 404/.test(probe.stderr)) {
     notice(
@@ -107,7 +112,7 @@ function probeAdoption(slug: string, display: string): ProbeResult {
 // names the central file the warning may reference - the literal
 // placeholder form for a redacted repo, whose bare name must not appear.
 function probeSettings(slug: string, display: string, centralRef: string): ProbeResult {
-  const probe = capture([
+  const probe = captureNetwork([
     "gh",
     "api",
     `repos/${slug}/contents/.github/settings.yml`,
@@ -241,7 +246,7 @@ for (const repo of sweepable) {
   // slug comparison: the exclusion's casing in repos.yml need not match
   // the settings file's.
   if (centralNames.has(`${name.toLowerCase()}.yml`)) continue;
-  const probeResult = capture([
+  const probeResult = captureNetwork([
     "gh",
     "api",
     `repos/${repo}/contents/.github/settings.yml`,
