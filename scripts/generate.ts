@@ -11,10 +11,11 @@
 //   distinctness).
 // - actions/validate-template/validate_generated_files.ts: the
 //   KNOWN_MODULES set literal, the TOOLCHAIN_PINS record literal, and the
-//   MODULE_OWNERSHIP record (how each rendered module file declares its
-//   ownership, scanned fail-closed from the module template trees; the
-//   action stays self-contained for client-side execution; only the
-//   constants' authorship is generated).
+//   MODULE_OWNERSHIP and BASE_OWNERSHIP records (each rendered file's
+//   declared ownership, from the module.yml `ownership:` lists and
+//   templates/base/ownership.yml plus the sources' header/marker
+//   decoration; the action stays self-contained for client-side execution;
+//   only the constants' authorship is generated).
 // - README.md, docs/new-repo.md, docs/settings.md, docs/pages.md,
 //   docs/toolchains.md: the prose that enumerates manifest data (module
 //   roster, dependabot labels, gitignore upstream mapping, pages toolchain
@@ -68,7 +69,13 @@ import {
   type ModuleManifest,
   manifestSchema,
 } from "./module_manifests.ts";
-import { moduleOwnershipFiles, type OwnershipEntry, skipIfExistsMatchers } from "./ownership.ts";
+import {
+  type BaseOwnershipEntry,
+  baseOwnershipTables,
+  moduleOwnershipEntries,
+  type OwnershipEntry,
+  type RegionSplitGrammar,
+} from "./ownership.ts";
 
 const REPO_ROOT = resolve(import.meta.dir, "..");
 
@@ -436,39 +443,99 @@ export function toolchainPinRows(manifests: ModuleManifest[]): string[] {
   return toolchainPins(manifests).map((p) => `| \`${p.module}\` | \`${p.file}\` | ${p.version} |`);
 }
 
-/** validate_generated_files.ts MODULE_OWNERSHIP record literal, laid out
- *  the way biome's formatter (lineWidth 100) prints it - an entry list
- *  inlines only while its whole property line fits, otherwise one entry
- *  per line - so regeneration and formatting can never disagree. */
+/** One object literal, laid out the way biome's formatter (lineWidth 100)
+ *  prints it: inline while the whole line fits, otherwise one property per
+ *  line. Throws when even a single property line cannot fit - regeneration
+ *  and formatting must never disagree. */
+function objectLiteralLines(fields: string[], indent: string, suffix: string): string[] {
+  const inline = `${indent}{ ${fields.join(", ")} }${suffix}`;
+  if (inline.length <= 100) return [inline];
+  const lines = [`${indent}{`];
+  for (const field of fields) {
+    const line = `${indent}  ${field},`;
+    if (line.length > 100) {
+      throw new Error(
+        `ownership table entry property exceeds the formatter's line width ` +
+          `(${field}) - shorten the rendered path or marker`,
+      );
+    }
+    lines.push(line);
+  }
+  lines.push(`${indent}}${suffix}`);
+  return lines;
+}
+
+/** An ownership table entry's property list, in the emitted field order. */
+function ownedFileFields(entry: BaseOwnershipEntry): string[] {
+  const fields = [`path: ${JSON.stringify(entry.path)}`, `kind: "${entry.kind}"`];
+  if (entry.kind === "marker") fields.push(`marker: ${JSON.stringify(entry.marker)}`);
+  if (entry.when !== undefined) {
+    const when: string[] = [];
+    if (entry.when.publicOnly) when.push("publicOnly: true");
+    if (entry.when.withoutModule !== undefined) {
+      when.push(`withoutModule: ${JSON.stringify(entry.when.withoutModule)}`);
+    }
+    fields.push(`when: { ${when.join(", ")} }`);
+  }
+  return fields;
+}
+
+/** validate_generated_files.ts MODULE_OWNERSHIP record literal, sourced
+ *  from the module.yml ownership declarations (moduleOwnershipEntries) and
+ *  laid out the way biome's formatter prints it. */
 export function moduleOwnershipRegion(ownership: Record<string, OwnershipEntry[]>): string[] {
-  // References the hand-written OwnershipKind alias above the region:
-  // inlining the union would push the line past the formatter's width.
-  const lines = [
-    "const MODULE_OWNERSHIP: Record<string, { path: string; kind: OwnershipKind }[]> = {",
-  ];
+  // References the hand-written OwnedFile union above the region: inlining
+  // it would push the line past the formatter's width.
+  const lines = ["const MODULE_OWNERSHIP: Record<string, OwnedFile[]> = {"];
   for (const [module, entries] of Object.entries(ownership)) {
     // Keys quoted as-needed, like TOOLCHAIN_PINS above, to stay biome-stable.
     const key = /^[a-z][a-z0-9]*$/.test(module) ? module : JSON.stringify(module);
-    const literals = entries.map(
-      (entry) => `{ path: ${JSON.stringify(entry.path)}, kind: "${entry.kind}" }`,
-    );
+    const literals = entries.map((entry) => `{ ${ownedFileFields(entry).join(", ")} }`);
     const inline = `  ${key}: [${literals.join(", ")}],`;
     if (inline.length <= 100) {
       lines.push(inline);
       continue;
     }
     lines.push(`  ${key}: [`);
-    for (const literal of literals) {
-      const line = `    ${literal},`;
-      if (line.length > 100) {
-        throw new Error(
-          `module-ownership entry for '${module}' exceeds the formatter's line ` +
-            `width even one-per-line (${line.trim()}) - shorten the rendered path`,
-        );
-      }
-      lines.push(line);
+    for (const entry of entries) {
+      lines.push(...objectLiteralLines(ownedFileFields(entry), "    ", ","));
     }
     lines.push("  ],");
+  }
+  lines.push("};");
+  return lines;
+}
+
+/** validate_generated_files.ts BASE_OWNERSHIP + BASE_REGION_SPLITS
+ *  literals, sourced from templates/base/ownership.yml
+ *  (baseOwnershipTables): the enforced base files with their render
+ *  conditions, and the bounded-region split grammars the marker-section
+ *  checks read. */
+export function baseOwnershipRegion(tables: {
+  enforced: BaseOwnershipEntry[];
+  regionSplits: Record<string, RegionSplitGrammar>;
+}): string[] {
+  const lines = ["const BASE_OWNERSHIP: BaseOwnedFile[] = ["];
+  for (const entry of tables.enforced) {
+    lines.push(...objectLiteralLines(ownedFileFields(entry), "  ", ","));
+  }
+  lines.push("];", "", "const BASE_REGION_SPLITS: Record<string, RegionSplitGrammar> = {");
+  for (const [path, grammar] of Object.entries(tables.regionSplits)) {
+    const fields = [
+      `managedBegin: ${JSON.stringify(grammar.managedBegin)}`,
+      `managedEnd: ${JSON.stringify(grammar.managedEnd)}`,
+      `localBegin: ${JSON.stringify(grammar.localBegin)}`,
+      `localEnd: ${JSON.stringify(grammar.localEnd)}`,
+    ];
+    const key = JSON.stringify(path);
+    const inline = `  ${key}: { ${fields.join(", ")} },`;
+    if (inline.length <= 100) {
+      lines.push(inline);
+      continue;
+    }
+    lines.push(`  ${key}: {`);
+    for (const field of fields) lines.push(`    ${field},`);
+    lines.push("  },");
   }
   lines.push("};");
   return lines;
@@ -729,6 +796,10 @@ interface RegionInputs {
   pages: PagesManifest[];
   reserved: string[];
   moduleOwnership: Record<string, OwnershipEntry[]>;
+  baseOwnership: {
+    enforced: BaseOwnershipEntry[];
+    regionSplits: Record<string, RegionSplitGrammar>;
+  };
 }
 
 type SpanRegion = [name: string, body: (inputs: RegionInputs) => string[], sources?: string];
@@ -779,9 +850,14 @@ function targets(manifests: ModuleManifest[]): Target[] {
         ["known-modules", ({ manifests }) => knownModules(manifests)],
         ["toolchain-pins", ({ manifests }) => toolchainPinsRegion(manifests)],
         [
+          "base-ownership",
+          ({ baseOwnership }) => baseOwnershipRegion(baseOwnership),
+          "templates/base/ownership.yml and the base templates",
+        ],
+        [
           "module-ownership",
           ({ moduleOwnership }) => moduleOwnershipRegion(moduleOwnership),
-          "the module templates and copier.yml's _skip_if_exists",
+          "the module.yml ownership declarations and the module templates",
         ],
       ],
     },
@@ -882,17 +958,14 @@ function main(): number {
       manifests,
       pages: pagesManifests(manifests),
       reserved: reservedLabelNames(manifests),
-      moduleOwnership: moduleOwnershipFiles(
-        manifests,
-        join(REPO_ROOT, "templates"),
-        skipIfExistsMatchers(readFileSync(join(REPO_ROOT, "copier.yml"), "utf-8")),
-      ),
+      moduleOwnership: moduleOwnershipEntries(manifests, join(REPO_ROOT, "templates")),
+      baseOwnership: baseOwnershipTables(join(REPO_ROOT, "templates")),
     };
     const regionStale =
       "its generated region(s) do not match their sources (the module " +
-      "manifests; the module template trees and copier.yml's _skip_if_exists " +
-      "for the module-ownership region; the settings baseline generator's " +
-      "label roster for copier.yml's tracking-label validators)";
+      "manifests; the ownership declarations and template decoration for " +
+      "the ownership regions; the settings baseline generator's label " +
+      "roster for copier.yml's tracking-label validators)";
     changed = targets(manifests).flatMap((target) => {
       const path = join(REPO_ROOT, target.file);
       const current = readFileSync(path, "utf-8");

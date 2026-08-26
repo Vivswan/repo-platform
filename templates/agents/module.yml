@@ -1,3 +1,14 @@
 # yaml-language-server: $schema=../module.schema.json
 # Module manifest (schema and loader: scripts/module_manifests.ts).
 description: AGENTS.md agent instructions, agent-file symlinks, Copilot setup
+# Every file the module lands (paths are landed paths; the .github/*.md
+# entries and CLAUDE.md are symlinks to AGENTS.md, managed like any render).
+ownership:
+  - { path: .github/agents.md, class: managed }
+  - { path: .github/copilot-instructions.md, class: managed }
+  - { path: .github/workflows/copilot-setup-steps.yml, class: starter }
+  - path: AGENTS.md
+    class: split
+    grammar: tail-marker
+    marker: "<!-- repo-platform:local-section -->"
+  - { path: CLAUDE.md, class: managed }

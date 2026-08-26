@@ -323,6 +323,69 @@ describe("parseManifest", () => {
   });
 });
 
+describe("ownership declarations", () => {
+  test("an ownership list parses with every class and grammar shape", () => {
+    const manifest = parseManifest(
+      "demo",
+      [
+        "description: a demo module",
+        "ownership:",
+        "  - { path: .github/workflows/demo.yml, class: managed }",
+        "  - { path: .github/workflows/demo-starter.yml, class: starter }",
+        "  - path: DEMO.md",
+        "    class: split",
+        "    grammar: tail-marker",
+        '    marker: "<!-- repo-platform:local-section -->"',
+        "  - path: .demoignore",
+        "    class: split",
+        "    grammar: bounded-region",
+        '    managed_begin: "# BEGIN MANAGED"',
+        '    managed_end: "# END MANAGED"',
+        '    local_begin: "# BEGIN LOCAL"',
+        '    local_end: "# END LOCAL"',
+        "",
+      ].join("\n"),
+      WHERE,
+    );
+    expect(manifest.ownership).toEqual([
+      { path: ".github/workflows/demo.yml", class: "managed" },
+      { path: ".github/workflows/demo-starter.yml", class: "starter" },
+      {
+        path: "DEMO.md",
+        class: "split",
+        grammar: "tail-marker",
+        marker: "<!-- repo-platform:local-section -->",
+      },
+      {
+        path: ".demoignore",
+        class: "split",
+        grammar: "bounded-region",
+        managed_begin: "# BEGIN MANAGED",
+        managed_end: "# END MANAGED",
+        local_begin: "# BEGIN LOCAL",
+        local_end: "# END LOCAL",
+      },
+    ]);
+  });
+
+  test("an unknown class, a missing grammar, and a duplicate path are rejected", () => {
+    const cases: [string, string[]][] = [
+      ["unknown class", ["ownership:", "  - { path: X.md, class: bespoke }"]],
+      ["split without grammar", ["ownership:", "  - { path: X.md, class: split, marker: '# m' }"]],
+      [
+        "duplicate path",
+        ["ownership:", "  - { path: X.md, class: managed }", "  - { path: X.md, class: starter }"],
+      ],
+      ["empty list", ["ownership: []"]],
+    ];
+    for (const [, lines] of cases) {
+      expect(() =>
+        parseManifest("demo", ["description: a demo module", ...lines, ""].join("\n"), WHERE),
+      ).toThrow(WHERE);
+    }
+  });
+});
+
 describe("assertDependabotLabelConsistency", () => {
   const manifest = (
     module: string,

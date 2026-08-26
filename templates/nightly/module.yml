@@ -1,6 +1,8 @@
 # yaml-language-server: $schema=../module.schema.json
 # Module manifest (schema and loader: scripts/module_manifests.ts).
 description: nightly CI starter with failure issue filing and auto-close
+ownership:
+  - { path: .github/workflows/nightly.yml, class: starter }
 tracking_label:
   answer: nightly_label
   default: nightly-failure

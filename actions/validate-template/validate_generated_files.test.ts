@@ -103,6 +103,22 @@ describe("duplicate mapping keys", () => {
     expect(exitCode).toBe(0);
   });
 
+  test("reordered .gitignore marker sections fail even when each appears once", () => {
+    // Counting alone would pass this shape; a swap above the managed BEGIN
+    // leaves the managed-half hash unchanged too, so order is its own rule.
+    const { exitCode, stderr } = runValidator({
+      ".gitignore": [
+        "# BEGIN REPO-PLATFORM MANAGED",
+        "# END REPO-PLATFORM MANAGED",
+        "# BEGIN REPOSITORY LOCAL",
+        "# END REPOSITORY LOCAL",
+        "",
+      ].join("\n"),
+    });
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain(".gitignore: the managed/local markers appear out of order");
+  });
+
   test("a duplicate key in .github/settings.yml fails with the tailored message", () => {
     const { exitCode, stderr } = runValidator({ ".github/settings.yml": DUP_KEY_YAML });
     expect(exitCode).toBe(1);
@@ -629,11 +645,11 @@ describe("ownership self-declarations", () => {
     expect(stderr).toContain(".yamllint: does not open with the managed header");
   });
 
-  test("a split file carries the local-section marker exactly once", () => {
+  test("a split file carries its declared marker line exactly once", () => {
     const marker = "# repo-platform:local-section\n";
     const missing = runValidator({ ".editorconfig": "root = true\n" });
     expect(missing.exitCode).toBe(1);
-    expect(missing.stderr).toContain(".editorconfig: the 'repo-platform:local-section' marker");
+    expect(missing.stderr).toContain(".editorconfig: the '# repo-platform:local-section' marker");
     const once = runValidator({ ".editorconfig": `root = true\n${marker}` });
     expect(once.stderr).toBe("");
     expect(once.exitCode).toBe(0);
@@ -642,12 +658,22 @@ describe("ownership self-declarations", () => {
     expect(twice.stderr).toContain("appears 2 times");
   });
 
+  test("the OTHER marker spelling does not satisfy the declared one", () => {
+    // .editorconfig declares the hash spelling; an HTML-comment marker is
+    // not its marker (the table carries the exact line, not a family).
+    const { exitCode, stderr } = runValidator({
+      ".editorconfig": "root = true\n<!-- repo-platform:local-section -->\n",
+    });
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain(".editorconfig: the '# repo-platform:local-section' marker");
+  });
+
   test("a prose mention of the marker is not the marker line", () => {
     const { exitCode, stderr } = runValidator({
       ".editorconfig": "root = true\n# rules go below the repo-platform:local-section marker\n",
     });
     expect(exitCode).toBe(1);
-    expect(stderr).toContain(".editorconfig: the 'repo-platform:local-section' marker");
+    expect(stderr).toContain(".editorconfig: the '# repo-platform:local-section' marker");
   });
 
   test("CODE_OF_CONDUCT.md needs the header only on public renders", () => {
@@ -675,7 +701,7 @@ describe("ownership self-declarations", () => {
   test("LICENSE.md needs the marker unless custom-license owns licensing", () => {
     const fleet = runValidator({ "LICENSE.md": "# License\n" });
     expect(fleet.exitCode).toBe(1);
-    expect(fleet.stderr).toContain("LICENSE.md: the 'repo-platform:local-section' marker");
+    expect(fleet.stderr).toContain("LICENSE.md: the '<!-- repo-platform:local-section -->' marker");
     const custom = runValidator({
       "LICENSE.md": "# My own license\n",
       ".repo-platform.yml": `${BASELINE[".repo-platform.yml"]}`.replace(
@@ -726,7 +752,7 @@ describe("ownership self-declarations", () => {
     };
     const bare = runValidator({ ...agentsRender, "AGENTS.md": "# AGENTS.md\n" });
     expect(bare.exitCode).toBe(1);
-    expect(bare.stderr).toContain("AGENTS.md: the 'repo-platform:local-section' marker");
+    expect(bare.stderr).toContain("AGENTS.md: the '<!-- repo-platform:local-section -->' marker");
     const marked = runValidator({
       ...agentsRender,
       "AGENTS.md": "# AGENTS.md\n\n<!-- repo-platform:local-section -->\n",
@@ -1067,7 +1093,60 @@ describe("ownership-manifest byte parity", () => {
       "SECURITY.md": `${managedTop}tail\n`,
     });
     expect(exitCode).toBe(1);
-    expect(stderr).toContain("carries split metadata outside the local-section grammar");
+    expect(stderr).toContain("carries split metadata outside its declared tail-marker grammar");
+  });
+
+  test("a wrong marker spelling on a roster path fails the cross-check", () => {
+    // The tables carry the DECLARED marker line: SECURITY.md's is the HTML
+    // form, so the hash spelling is drift even though it is a real marker.
+    const managedTop = "# Security\n# repo-platform:local-section\n";
+    const entries = {
+      ...stampedBaseline(),
+      "SECURITY.md":
+        `{"class": "split", "marker": "# repo-platform:local-section", ` +
+        `"managed": "above", "hash": "${sha(managedTop)}"}`,
+    };
+    const { exitCode, stderr } = runValidator({
+      [MANIFEST]: manifestOf(entries),
+      "SECURITY.md": `${managedTop}tail\n<!-- repo-platform:local-section -->\n`,
+    });
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain("carries split metadata outside its declared tail-marker grammar");
+  });
+
+  test("a grammar-bearing entry must name the declared grammar on a tail path", () => {
+    const managedTop = "# Security\n<!-- repo-platform:local-section -->\n";
+    const entries = {
+      ...stampedBaseline(),
+      "SECURITY.md":
+        `{"class": "split", "grammar": "bounded-region", ` +
+        `"marker": "<!-- repo-platform:local-section -->", "managed": "below", ` +
+        `"managed_end": "x", "local_begin": "y", "local_end": "z", ` +
+        `"hash": "${sha(managedTop)}"}`,
+    };
+    const { exitCode, stderr } = runValidator({
+      [MANIFEST]: manifestOf(entries),
+      "SECURITY.md": `${managedTop}tail\n`,
+    });
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain("carries split metadata outside its declared tail-marker grammar");
+  });
+
+  test("a grammar-carrying tail entry matching the declaration passes", () => {
+    const managedTop = "# Security\n<!-- repo-platform:local-section -->\n";
+    const entries = {
+      ...stampedBaseline(),
+      "SECURITY.md":
+        `{"class": "split", "grammar": "tail-marker", ` +
+        `"marker": "<!-- repo-platform:local-section -->", "managed": "above", ` +
+        `"hash": "${sha(managedTop)}"}`,
+    };
+    const { exitCode, stderr } = runValidator({
+      [MANIFEST]: manifestOf(entries),
+      "SECURITY.md": `${managedTop}repo tail\n`,
+    });
+    expect(stderr).toBe("");
+    expect(exitCode).toBe(0);
   });
 
   test("a tampered .gitignore entry fails its managed-section grammar", () => {
@@ -1078,6 +1157,83 @@ describe("ownership-manifest byte parity", () => {
     const { exitCode, stderr } = runValidator({ [MANIFEST]: manifestOf(entries) });
     expect(exitCode).toBe(1);
     expect(stderr).toContain("'.gitignore' does not match the managed-section grammar");
+  });
+
+  test("a bounded-region .gitignore entry matching the declared grammar passes", () => {
+    const gitignoreHalf = "# BEGIN REPO-PLATFORM MANAGED\n# END REPO-PLATFORM MANAGED\n";
+    const entries = {
+      ...stampedBaseline(),
+      ".gitignore":
+        `{"class": "split", "grammar": "bounded-region", ` +
+        `"marker": "# BEGIN REPO-PLATFORM MANAGED", "managed": "below", ` +
+        `"managed_end": "# END REPO-PLATFORM MANAGED", ` +
+        `"local_begin": "# BEGIN REPOSITORY LOCAL", ` +
+        `"local_end": "# END REPOSITORY LOCAL", "hash": "${sha(gitignoreHalf)}"}`,
+    };
+    const { exitCode, stderr } = runValidator({ [MANIFEST]: manifestOf(entries) });
+    expect(stderr).toBe("");
+    expect(exitCode).toBe(0);
+  });
+
+  test("a bounded-region entry with drifted region markers fails the cross-check", () => {
+    const gitignoreHalf = "# BEGIN REPO-PLATFORM MANAGED\n# END REPO-PLATFORM MANAGED\n";
+    const entries = {
+      ...stampedBaseline(),
+      ".gitignore":
+        `{"class": "split", "grammar": "bounded-region", ` +
+        `"marker": "# BEGIN REPO-PLATFORM MANAGED", "managed": "below", ` +
+        `"managed_end": "# END REPO-PLATFORM MANAGED", ` +
+        `"local_begin": "# BEGIN SOMETHING ELSE", ` +
+        `"local_end": "# END REPOSITORY LOCAL", "hash": "${sha(gitignoreHalf)}"}`,
+    };
+    const { exitCode, stderr } = runValidator({ [MANIFEST]: manifestOf(entries) });
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain("'.gitignore' does not match the managed-section grammar");
+  });
+
+  test("an unknown split grammar on an uncovered path is a structural error", () => {
+    const entries = {
+      ...stampedBaseline(),
+      "docs/notes.md":
+        `{"class": "split", "grammar": "prefix", "marker": "# m", "managed": "above", ` +
+        `"hash": "${"d".repeat(64)}"}`,
+    };
+    const { exitCode, stderr } = runValidator({
+      [MANIFEST]: manifestOf(entries),
+      "docs/notes.md": "# m\n",
+    });
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain('declares unknown split grammar "prefix"');
+  });
+
+  test("a grammar disagreeing with its managed side is a structural error", () => {
+    const entries = {
+      ...stampedBaseline(),
+      "docs/notes.md":
+        `{"class": "split", "grammar": "tail-marker", "marker": "# m", "managed": "below", ` +
+        `"hash": "${"d".repeat(64)}"}`,
+    };
+    const { exitCode, stderr } = runValidator({
+      [MANIFEST]: manifestOf(entries),
+      "docs/notes.md": "# m\n",
+    });
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain('tail-marker grammar with a managed half not "above"');
+  });
+
+  test("a bounded-region entry without its region strings is a structural error", () => {
+    const entries = {
+      ...stampedBaseline(),
+      "docs/notes.md":
+        `{"class": "split", "grammar": "bounded-region", "marker": "# m", ` +
+        `"managed": "below", "hash": "${"d".repeat(64)}"}`,
+    };
+    const { exitCode, stderr } = runValidator({
+      [MANIFEST]: manifestOf(entries),
+      "docs/notes.md": "# m\n",
+    });
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain('bounded-region grammar without a "below" managed');
   });
 
   test("an entry whose render condition is off is manifest drift", () => {

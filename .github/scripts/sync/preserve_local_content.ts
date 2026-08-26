@@ -1,30 +1,38 @@
 #!/usr/bin/env bun
 // Rebuilds the sanctioned repository-local regions of split-class files,
-// in one of two modes:
+// in one of two modes. In BOTH modes the file list and each file's split
+// GRAMMAR come from an ownership manifest's class "split" entries
+// (.github/repo-platform-manifest.json) - nothing here hardcodes marker
+// lines or file names, so a future module with a different marker or
+// grammar rides the same carries instead of silently degrading:
+//
+// - tail-marker grammar: one marker line ends the sync-owned top; the
+//   repository owns everything below it (carryManagedTail).
+// - bounded-region grammar: a BEGIN/END-bounded repository-local region
+//   sits above the sync-owned half (.gitignore's shape; carryLocalRegion
+//   via the shared slicer in scripts/gitignore_local.ts).
 //
 // RENDER MODE (--render-dir; the PRIMARY path, run on every normal sync):
 // after `copier update`, the merged result for every split-class file is
 // DISCARDED and the file is rebuilt structurally - the managed half from
 // the clean render at the new template ref, the repository-local half
-// byte-for-byte from the pre-update HEAD. The file list, marker line, and
-// managed side come from the new render's own ownership manifest
-// (.github/repo-platform-manifest.json class "split" entries), so the
-// rebuild can never miss a file the template splits. The merge never
-// touches mixed-ownership content: a template retraction cannot eat a
-// local tail, and a local tail cannot resurrect retracted managed lines.
-// The deliberate flip side: local edits INSIDE a managed half no longer
-// survive by merge luck - they are RESET to the fresh render on every
-// sync, loudly (a reset note in the summary plus the needs-review flag).
-// Edits are detected against the OLD ref's clean render (--old-render-dir),
-// so a routine template change to the managed half does not read as a
-// local edit.
+// byte-for-byte from the pre-update HEAD. The split entries come from the
+// new render's own manifest, so the rebuild can never miss a file the
+// template splits. The merge never touches mixed-ownership content: a
+// template retraction cannot eat a local tail, and a local tail cannot
+// resurrect retracted managed lines. The deliberate flip side: local
+// edits INSIDE a managed half no longer survive by merge luck - they are
+// RESET to the fresh render on every sync, loudly (a reset note in the
+// summary plus the needs-review flag). Edits are detected against the OLD
+// ref's clean render (--old-render-dir), so a routine template change to
+// the managed half does not read as a local edit.
 //
-// SENTINEL-SCAN MODE (no --render-dir; the recovery path): a recovery
-// re-render (recover=recopy) has no usable old ref, so there are no clean
-// renders to consume - the recopy result in the working tree IS the fresh
-// render. This mode walks the rendered tree for the known split grammars
-// (the repo-platform:local-section sentinel, the prefix docs, .gitignore's
-// LOCAL region) and splices the repository-local content back over it.
+// RECOPY MODE (no --render-dir; the recovery path): a recovery re-render
+// (recover=recopy) has no usable old ref, so there are no clean renders to
+// consume - the recopy result in the working tree IS the fresh render,
+// manifest included. The split entries come from that manifest, the
+// pre-recovery content from HEAD, and the same carries splice the
+// repository-local content back over the re-render.
 //
 // Both modes share the same carries. All file content is handled as
 // latin1 text (one code unit per byte, the stamp_manifest.ts convention):
@@ -33,40 +41,34 @@
 // ASCII, so matching is unaffected. Loud beats lossy: NO shape of
 // previous copy may lose content without a disposition in the summary -
 // when a previous copy cannot be split into managed content and local
-// tail (it predates the sentinel, or was hand-edited past recognition),
+// tail (it predates the marker, or was hand-edited past recognition),
 // the WHOLE previous copy is appended below a marked recovery-appendix
 // comment instead of being dropped. Rules:
 //
-// - Sentinel files and prefix docs share one carry: a target that
-//   startsWith the render is kept whole; else the target's content after
-//   its FIRST sentinel line is re-appended below the render (which must
-//   end at a sentinel to be used as the managed half - splitting at the
-//   first target sentinel keeps everything after it, so a stale duplicate
-//   marker can only ever ADD reviewable lines, never drop them); else
-//   keep BOTH (render, then the marked appendix). A sentinel-bearing
-//   target with an EMPTY tail was never customized and keeps the render;
-//   a whitespace-only tail is carried like any other (byte-owned).
-// - A render without the sentinel is routed to this carry only for the
-//   prefix docs in sentinel-scan mode (their mechanism is prefix-ness,
-//   not the sentinel) and for manifest-declared entries in render mode;
-//   for every other scanned file it means the template dropped the
-//   mechanism and the tail is not resurrected.
-// - .gitignore (and any managed-below split entry): the target's LOCAL
-//   section body replaces the render's. A previous copy without a single
-//   cleanly-locatable LOCAL region (markers missing, duplicated - even as
-//   mid-line text - or reversed) is preserved INSIDE the fresh LOCAL
-//   section below a recovery-appendix comment, every carried line
-//   commented out (the carry must not silently activate or rewrite ignore
-//   patterns) and marker text dash-joined so the validator's exactly-once
-//   rule holds; a render without the region keeps the render (the
-//   mechanism left the template).
+// - Tail-marker files: a target that startsWith the render is kept whole;
+//   else the target's content after its FIRST marker line is re-appended
+//   below the render (which must end at the marker to be used as the
+//   managed half - splitting at the first target marker keeps everything
+//   after it, so a stale duplicate marker can only ever ADD reviewable
+//   lines, never drop them); else keep BOTH (render, then the marked
+//   appendix). A marker-bearing target with an EMPTY tail was never
+//   customized and keeps the render; a whitespace-only tail is carried
+//   like any other (byte-owned).
+// - Bounded-region files: the target's local region body replaces the
+//   render's. A previous copy without a single cleanly-locatable region
+//   (markers missing, duplicated - even as mid-line text - or reversed)
+//   is preserved INSIDE the fresh local region below a recovery-appendix
+//   comment, every carried line commented out (the carry must not
+//   silently activate or rewrite ignore patterns) and marker text
+//   dash-joined so the validator's exactly-once rule holds; a render
+//   without the region keeps the render (the mechanism left the template).
 //
 // The carried files land in --summary as markdown for the PR body; for a
 // hide-details target the log prints counts only (paths and dispositions
 // are target data). Carries that need human review - an appendix, reset
-// managed-half edits, duplicate sentinel markers - are listed in the
+// managed-half edits, duplicate markers - are listed in the
 // --needs-review flag file, which open_pr.ts turns into the manual-review
-// path; kept-whole, clean tail-appends, and clean LOCAL splices stay
+// path; kept-whole, clean tail-appends, and clean region splices stay
 // auto-merge-eligible.
 //
 // Usage:
@@ -78,19 +80,14 @@ import { existsSync, lstatSync, readFileSync, rmSync, writeFileSync } from "node
 import { join } from "node:path";
 import {
   cleanLocalRegion,
-  GITIGNORE_MARKERS,
   localRegion,
+  type RegionMarkers,
   splitLines,
   stripCr,
+  substringCount,
 } from "../../../scripts/gitignore_local.ts";
 import { parseFlags } from "../shared/flags.ts";
 import { MANIFEST_NAME, managedHalf } from "./stamp_manifest.ts";
-import { walkFiles } from "./walk.ts";
-
-const HTML_SENTINEL = "<!-- repo-platform:local-section -->";
-const HASH_SENTINEL = "# repo-platform:local-section";
-const SENTINELS = [HTML_SENTINEL, HASH_SENTINEL];
-const PREFIX_DOCS = new Set(["SECURITY.md", "CONTRIBUTING.md", "LICENSE.md"]);
 
 function lastLineIndex(
   lines: ReturnType<typeof splitLines>,
@@ -102,32 +99,23 @@ function lastLineIndex(
   return -1;
 }
 
-function isSentinel(text: string): boolean {
-  return SENTINELS.includes(text);
-}
-
-function hasSentinelLine(content: string): boolean {
-  return splitLines(content).some((line) => isSentinel(stripCr(line.text)));
-}
-
-/** Content split at the FIRST sentinel line: head runs through the
- * sentinel (newline included), tail is everything below it. Splitting at
- * the first keeps every later line - including any further sentinel, so a
- * stale duplicate marker adds reviewable lines instead of dropping the
- * content between the markers; extraSentinels flags that for the summary. */
-function splitAtFirstSentinel(
+/** Content split at the FIRST marker line: head runs through the marker
+ * (newline included), tail is everything below it. Splitting at the first
+ * keeps every later line - including any further marker, so a stale
+ * duplicate adds reviewable lines instead of dropping the content between
+ * the markers; extraMarkers flags that for the summary. */
+function splitAtFirstMarker(
   content: string,
-): { head: string; tail: string; extraSentinels: boolean } | null {
+  marker: string,
+): { head: string; tail: string; extraMarkers: boolean } | null {
   const lines = splitLines(content);
-  const first = lines.findIndex((line) => isSentinel(stripCr(line.text)));
+  const first = lines.findIndex((line) => stripCr(line.text) === marker);
   if (first === -1) return null;
-  const extraSentinels = lines.some(
-    (line, index) => index > first && isSentinel(stripCr(line.text)),
-  );
+  const extraMarkers = lines.some((line, index) => index > first && stripCr(line.text) === marker);
   return {
     head: content.slice(0, lines[first].end),
     tail: content.slice(lines[first].end),
-    extraSentinels,
+    extraMarkers,
   };
 }
 
@@ -136,21 +124,21 @@ function withTrailingNewline(content: string): string {
 }
 
 /** The keep-both fallback: render, then the previous copy in full below a
- * marked comment. Hash-comment spelling for files whose sentinel is the
- * hash form (.gitattributes - an HTML comment there would parse as
- * attribute patterns - .editorconfig, and .github/CODEOWNERS), the HTML
- * comment otherwise. */
-function withAppendix(renderNl: string, target: string): string {
-  const hashStyle = splitLines(renderNl).some((line) => stripCr(line.text) === HASH_SENTINEL);
+ * marked comment. The comment spelling follows the entry's marker form:
+ * an HTML comment for HTML-comment markers, hash comments otherwise
+ * (.gitattributes, .editorconfig, .github/CODEOWNERS - an HTML comment
+ * there would parse as file content). */
+function withAppendix(renderNl: string, target: string, marker: string): string {
+  const htmlStyle = marker.startsWith("<!--");
   const explanation = [
     "The template sync's re-render could not tell this file's",
     "repository-local tail apart from its managed content, so the previous",
     "copy is preserved in full below. Keep what is repository-local, drop",
     "what the content above already covers, then delete this comment.",
   ];
-  const appendix = hashStyle
-    ? ["# repo-platform:recovery-appendix", ...explanation.map((line) => `# ${line}`)].join("\n")
-    : ["<!-- repo-platform:recovery-appendix", `${explanation.join("\n")} -->`].join("\n");
+  const appendix = htmlStyle
+    ? ["<!-- repo-platform:recovery-appendix", `${explanation.join("\n")} -->`].join("\n")
+    : ["# repo-platform:recovery-appendix", ...explanation.map((line) => `# ${line}`)].join("\n");
   return `${renderNl}\n${appendix}\n\n${withTrailingNewline(target)}`;
 }
 
@@ -158,29 +146,28 @@ export type TailCarry =
   | {
       kind: "kept-whole";
       content: string;
-      /** The target carried more than one sentinel line; everything after
+      /** The target carried more than one marker line; everything after
        * the first was kept, so the tail may hold a stale duplicate to
        * review. */
-      extraSentinels: boolean;
+      extraMarkers: boolean;
     }
   | {
       kind: "tail-appended";
       content: string;
-      extraSentinels: boolean;
-      /** The target's managed half (above its sentinel) differed from the
+      extraMarkers: boolean;
+      /** The target's managed half (above its marker) differed from the
        * fresh render's, so in-place edits there were NOT carried. In
-       * sentinel-scan mode this is the loudness signal; render mode
-       * recomputes the signal against the OLD render instead (a template
-       * change to the managed half is not a local edit). */
+       * recopy mode this is the loudness signal; render mode recomputes
+       * the signal against the OLD render instead (a template change to
+       * the managed half is not a local edit). */
       managedHalfDiffers: boolean;
     }
   | { kind: "appendix"; content: string };
 
-/** Managed-content carry, shared by the sentinel files and the prefix
- * docs: the render is the managed content, the target's local tail is
- * re-appended below it. Null means keep the render (the target never
- * diverged below the managed content). */
-export function carryManagedTail(render: string, target: string): TailCarry | null {
+/** Tail-marker carry: the render is the managed content, the target's
+ * local tail is re-appended below it. Null means keep the render (the
+ * target never diverged below the managed content). */
+export function carryManagedTail(render: string, target: string, marker: string): TailCarry | null {
   const renderNl = withTrailingNewline(render);
   if (target === render || target === renderNl) return null;
   // Unchanged managed content: the target IS render + tail; keep it whole.
@@ -188,72 +175,79 @@ export function carryManagedTail(render: string, target: string): TailCarry | nu
     return {
       kind: "kept-whole",
       content: target,
-      extraSentinels: splitAtFirstSentinel(target)?.extraSentinels ?? false,
+      extraMarkers: splitAtFirstMarker(target, marker)?.extraMarkers ?? false,
     };
   }
-  // The render is usable as the managed half only when it ENDS at a
-  // recognized sentinel line; anchoring a split on an arbitrary final
-  // line would guess. Then the target's content after its FIRST sentinel
-  // is the repository tail.
+  // The render is usable as the managed half only when it ENDS at the
+  // declared marker line; anchoring a split on an arbitrary final line
+  // would guess. Then the target's content after its FIRST marker is the
+  // repository tail.
   const renderLines = splitLines(render);
   const finalIndex = lastLineIndex(renderLines, (text) => text.trim() !== "");
-  if (finalIndex !== -1 && isSentinel(stripCr(renderLines[finalIndex].text))) {
-    const split = splitAtFirstSentinel(target);
+  if (finalIndex !== -1 && stripCr(renderLines[finalIndex].text) === marker) {
+    const split = splitAtFirstMarker(target, marker);
     if (split !== null) {
-      // Empty tail below the target's sentinel: never customized. A
+      // Empty tail below the target's marker: never customized. A
       // whitespace-only tail is still carried - the tail is byte-owned by
       // the repository, and nothing may drop silently, not even blanks.
       if (split.tail === "") return null;
       return {
         kind: "tail-appended",
         content: renderNl + split.tail,
-        extraSentinels: split.extraSentinels,
-        managedHalfDiffers: splitAtFirstSentinel(renderNl)?.head !== split.head,
+        extraMarkers: split.extraMarkers,
+        managedHalfDiffers: splitAtFirstMarker(renderNl, marker)?.head !== split.head,
       };
     }
   }
-  // No recognizable split (the previous copy predates the sentinel, or
+  // No recognizable split (the previous copy predates the marker, or
   // was hand-edited past recognition). Keep BOTH: silently losing the
   // repository's content is the defect this script exists to fix, and an
   // appendix carry forces manual review, so a marked duplicate is
   // acceptable.
-  return { kind: "appendix", content: withAppendix(renderNl, target) };
+  return { kind: "appendix", content: withAppendix(renderNl, target, marker) };
 }
 
-export interface GitignoreCarry {
+export interface RegionCarry {
   content: string;
   disposition: "spliced" | "appendix";
 }
 
 /** Previous-copy lines carried into the appendix are commented out (the
  * carry must not silently activate or rewrite ignore patterns - inert and
- * loud, like the .md appendices) and marker text inside them is
- * dash-joined so validate_generated_files' exactly-once substring rule
+ * loud, like the .md appendices) and the grammar's marker text inside them
+ * is dash-joined so validate_generated_files' exactly-once substring rule
  * holds on the result. */
-function inertPreviousCopy(content: string): string {
+function inertPreviousCopy(content: string, markers: RegionMarkers): string {
   let neutralized = content;
-  for (const marker of GITIGNORE_MARKERS) {
-    neutralized = neutralized.replaceAll(marker, marker.slice(2).replaceAll(" ", "-"));
+  for (const marker of markers.all) {
+    let inert = (marker.startsWith("# ") ? marker.slice(2) : marker).replaceAll(" ", "-");
+    // A space-free marker dash-joins to itself; break the substring anyway.
+    if (inert.includes(marker)) inert = `${inert.slice(0, 1)}-${inert.slice(1)}`;
+    neutralized = neutralized.replaceAll(marker, inert);
   }
   return splitLines(neutralized)
     .map((line) => (stripCr(line.text) === "" ? line.text : `# ${line.text}`))
     .join("\n");
 }
 
-/** .gitignore carry: the target's LOCAL section body inside the render's
- * markers. The target's region must be exactly-once clean per
+/** Bounded-region carry: the target's local region body inside the
+ * render's markers. The target's region must be exactly-once clean per
  * cleanLocalRegion (scripts/gitignore_local.ts - the shared definition, so
  * this carry and the self-output regenerator can never slice the same
  * malformed file differently). Any other shape with non-blank previous
- * content is preserved, commented out, inside the fresh LOCAL section -
+ * content is preserved, commented out, inside the fresh local region -
  * dropping it would silently lose whatever local entries it held. Null
  * means keep the render: the render has no region (the mechanism left the
  * template), the bodies already match, or an unsplittable previous copy is
  * blank. */
-export function carryGitignoreLocal(render: string, target: string): GitignoreCarry | null {
-  const renderRegion = localRegion(render);
+export function carryLocalRegion(
+  render: string,
+  target: string,
+  markers: RegionMarkers,
+): RegionCarry | null {
+  const renderRegion = localRegion(render, markers);
   if (renderRegion === null) return null;
-  const targetRegion = cleanLocalRegion(target);
+  const targetRegion = cleanLocalRegion(target, markers);
   if (targetRegion !== null) {
     if (renderRegion.body === targetRegion.body) return null;
     return {
@@ -265,24 +259,31 @@ export function carryGitignoreLocal(render: string, target: string): GitignoreCa
   const explanation = [
     "# repo-platform:recovery-appendix",
     "# The template sync's re-render could not locate a single",
-    "# REPOSITORY LOCAL section in this file's previous copy, so the",
+    "# repository-local region in this file's previous copy, so the",
     "# previous copy is preserved below, commented out, with marker text",
     "# neutralized. Move what is repository-local up into this section",
     "# (uncommented), drop the rest, then delete this block.",
   ].join("\n");
-  return {
-    content:
-      renderRegion.before +
-      renderRegion.body +
-      `${explanation}\n${withTrailingNewline(inertPreviousCopy(target))}` +
-      renderRegion.after,
-    disposition: "appendix",
-  };
-}
-
-export interface Carried {
-  content: string;
-  note: string;
+  const content =
+    renderRegion.before +
+    renderRegion.body +
+    `${explanation}\n${withTrailingNewline(inertPreviousCopy(target, markers))}` +
+    renderRegion.after;
+  // Postcondition: neutralization must not have re-created any marker (a
+  // replacement product could collide with a sibling marker). The declared
+  // markers are schema-constrained against containing each other, so a
+  // violation here means adversarially colliding markers - fail loudly
+  // rather than deliver a file the validator's exactly-once rule rejects.
+  for (const marker of markers.all) {
+    if (substringCount(content, marker) !== substringCount(render, marker)) {
+      throw new Error(
+        `appendix neutralization would change the '${marker}' marker's occurrence ` +
+          "count - the declared region markers collide under neutralization; " +
+          "declare markers whose neutralized forms cannot recreate each other",
+      );
+    }
+  }
+  return { content, disposition: "appendix" };
 }
 
 const TAIL_NOTES: Record<TailCarry["kind"], string> = {
@@ -294,8 +295,8 @@ const TAIL_NOTES: Record<TailCarry["kind"], string> = {
     "reconcile manually",
 };
 
-const EXTRA_SENTINELS_NOTE =
-  "; the previous copy carried more than one local-section marker, and everything " +
+const EXTRA_MARKERS_NOTE =
+  "; the previous copy carried more than one split marker line, and everything " +
   "after its first marker was kept - review the tail for stale duplicates";
 
 const MANAGED_HALF_NOTE =
@@ -305,8 +306,8 @@ const MANAGED_HALF_NOTE =
 const MANAGED_RESET_NOTE =
   "local edits INSIDE the managed half were RESET to the fresh render - managed " +
   "halves are template-owned and rebuilt on every sync; content that must survive " +
-  "belongs in the repository-local half (below the marker, or inside .gitignore's " +
-  "REPOSITORY LOCAL section)";
+  "belongs in the repository-local half (below the marker, or inside the " +
+  "repository-local region)";
 
 const MANAGED_UNVERIFIABLE_NOTE =
   "the previous copy's managed half could not be located (its marker line is " +
@@ -314,64 +315,67 @@ const MANAGED_UNVERIFIABLE_NOTE =
   "it cannot be ruled out - the fresh render stands; review the diff for content " +
   "that belongs in the repository-local half";
 
-const GITIGNORE_NOTES: Record<GitignoreCarry["disposition"], string> = {
-  spliced: "REPOSITORY LOCAL section restored from the repository's copy",
+const REGION_NOTES: Record<RegionCarry["disposition"], string> = {
+  spliced: "repository-local region restored from the repository's copy",
   appendix:
-    "no single REPOSITORY LOCAL section in the repository's previous copy; the " +
-    "previous copy is preserved, commented out, inside the fresh LOCAL section " +
+    "no single repository-local region in the repository's previous copy; the " +
+    "previous copy is preserved, commented out, inside the fresh local region " +
     "below a repo-platform:recovery-appendix comment (its entries do not apply " +
     "until restored) - reconcile manually",
 };
 
-function tailNote(carry: TailCarry, mode: "scan" | "render"): string {
+function tailNote(carry: TailCarry, mode: "recopy" | "render"): string {
   switch (carry.kind) {
     case "kept-whole":
-      return TAIL_NOTES[carry.kind] + (carry.extraSentinels ? EXTRA_SENTINELS_NOTE : "");
+      return TAIL_NOTES[carry.kind] + (carry.extraMarkers ? EXTRA_MARKERS_NOTE : "");
     case "tail-appended":
       // Render mode reports managed-half drift against the OLD render (the
       // reset note, appended by the caller); against the NEW render every
       // routine template change would read as dropped local edits.
       return (
         TAIL_NOTES[carry.kind] +
-        (carry.extraSentinels ? EXTRA_SENTINELS_NOTE : "") +
-        (mode === "scan" && carry.managedHalfDiffers ? MANAGED_HALF_NOTE : "")
+        (carry.extraMarkers ? EXTRA_MARKERS_NOTE : "") +
+        (mode === "recopy" && carry.managedHalfDiffers ? MANAGED_HALF_NOTE : "")
       );
     case "appendix":
       return TAIL_NOTES[carry.kind];
   }
 }
 
-/** Repository-local content of the pre-render target spliced into the
- * fresh render, or null when the render is already right. Sentinel-scan
- * routing: .gitignore by name, the prefix docs by name, everything else by
- * a sentinel line in the render. */
-export function carryLocalContent(rel: string, render: string, target: string): Carried | null {
-  if (render === target) return null;
-  let carried: Carried | null = null;
-  if (rel === ".gitignore") {
-    const carry = carryGitignoreLocal(render, target);
-    if (carry !== null) {
-      carried = { content: carry.content, note: GITIGNORE_NOTES[carry.disposition] };
-    }
-  } else if (PREFIX_DOCS.has(rel) || hasSentinelLine(render)) {
-    const carry = carryManagedTail(render, target);
-    if (carry !== null) {
-      carried = { content: carry.content, note: tailNote(carry, "scan") };
-    }
-  }
-  return carried;
+export type SplitEntry =
+  | { path: string; grammar: "tail-marker"; marker: string }
+  | ({ path: string; grammar: "bounded-region"; marker: string } & RegionMarkers);
+
+/** Which line the stamper's managedHalf splits a split entry's file at,
+ * and on which side the managed half sits - derived from the grammar. */
+function entrySide(entry: SplitEntry): "above" | "below" {
+  return entry.grammar === "tail-marker" ? "above" : "below";
 }
 
-export interface SplitEntry {
-  path: string;
-  marker: string;
-  managed: "above" | "below";
+/** Markers are matched against latin1-decoded file bytes, so a non-ASCII
+ * marker (utf-8 in the manifest, one code unit per byte in the file) could
+ * never match and the carry would silently degrade; the declaration schema
+ * forbids it, and this boundary re-checks what it consumes. */
+const ASCII_MARKER_RE = /^[\x20-\x7e]+$/;
+
+/** Manifest keys become filesystem paths under the target root, so a key
+ * that could escape it (absolute, or carrying .. segments) is refused at
+ * this boundary - the declaration schema upstream never emits one, but the
+ * manifest text rides through a checkout this script must not trust. */
+function isCleanRelativePath(path: string): boolean {
+  return (
+    path !== "" &&
+    !/[\r\n]/.test(path) &&
+    !path.startsWith("/") &&
+    path.split("/").every((part) => part !== "" && part !== "." && part !== "..")
+  );
 }
 
 /** The class "split" entries of a render's ownership manifest - the single
- * source of which files the template splits and where each marker sits.
- * Malformed data throws: silently skipping an entry would hand that file
- * back to the merge result this mode exists to discard. */
+ * source of which files the template splits and each file's grammar and
+ * marker lines. Malformed data throws, an unknown or missing grammar
+ * included: silently skipping an entry (or guessing its grammar) would
+ * hand that file back to the merge result this mode exists to discard. */
 export function splitEntries(manifestText: string, where: string): SplitEntry[] {
   let parsed: unknown;
   try {
@@ -388,15 +392,62 @@ export function splitEntries(manifestText: string, where: string): SplitEntry[] 
     if (typeof entry !== "object" || entry === null) {
       throw new Error(`${where}: entry for ${path} is not an object`);
     }
-    const shaped = entry as { class?: unknown; marker?: unknown; managed?: unknown };
+    const shaped = entry as Record<string, unknown>;
     if (shaped.class !== "split") continue;
-    if (
-      typeof shaped.marker !== "string" ||
-      (shaped.managed !== "above" && shaped.managed !== "below")
-    ) {
-      throw new Error(`${where}: split entry for ${path} lacks a valid marker/managed pair`);
+    if (!isCleanRelativePath(path)) {
+      throw new Error(
+        `${where}: split entry path '${path}' is not a clean relative path - it ` +
+          "could escape the target root at the rebuild's write; the manifest is damaged",
+      );
     }
-    out.push({ path, marker: shaped.marker, managed: shaped.managed });
+    if (typeof shaped.marker !== "string" || !ASCII_MARKER_RE.test(shaped.marker)) {
+      throw new Error(
+        `${where}: split entry for ${path} lacks a printable-ASCII marker line ` +
+          "(markers are matched against latin1-decoded file bytes)",
+      );
+    }
+    if (shaped.grammar === "tail-marker") {
+      if (shaped.managed !== "above") {
+        throw new Error(
+          `${where}: split entry for ${path} declares the tail-marker grammar with a ` +
+            "managed side other than 'above' - the manifest is inconsistent",
+        );
+      }
+      out.push({ path, grammar: "tail-marker", marker: shaped.marker });
+      continue;
+    }
+    if (shaped.grammar === "bounded-region") {
+      const regionStrings = [shaped.managed_end, shaped.local_begin, shaped.local_end];
+      if (
+        shaped.managed !== "below" ||
+        !regionStrings.every((value) => typeof value === "string" && ASCII_MARKER_RE.test(value))
+      ) {
+        throw new Error(
+          `${where}: split entry for ${path} declares the bounded-region grammar ` +
+            "without a 'below' managed side and its printable-ASCII region marker " +
+            "strings - the manifest is inconsistent",
+        );
+      }
+      out.push({
+        path,
+        grammar: "bounded-region",
+        marker: shaped.marker,
+        begin: shaped.local_begin as string,
+        end: shaped.local_end as string,
+        all: [
+          shaped.local_begin as string,
+          shaped.local_end as string,
+          shaped.marker,
+          shaped.managed_end as string,
+        ],
+      });
+      continue;
+    }
+    throw new Error(
+      `${where}: split entry for ${path} declares ${
+        "grammar" in shaped ? `unknown grammar ${JSON.stringify(shaped.grammar)}` : "no grammar"
+      } - this carry refuses to guess (a new grammar needs its own carry here)`,
+    );
   }
   return out;
 }
@@ -442,8 +493,6 @@ function headContent(root: string, rel: string): string | null {
   return proc.stdout.toString("latin1");
 }
 
-const SENTINEL_BUFFERS = SENTINELS.map((sentinel) => Buffer.from(sentinel));
-
 /** Land `content` as a REGULAR file at `path`. writeFileSync follows an
  * existing symlink, so a split path a repo replaced with a link would have
  * its TARGET overwritten - possibly outside the checkout; the rebuild owns
@@ -466,6 +515,51 @@ interface FileOutcome {
   note: string;
   /** Reasons this carry needs human review (empty = auto-merge-eligible). */
   reviewReasons: string[];
+}
+
+/** One split entry's carry over (render, target): the delivered content
+ * plus its summary note and review reasons, dispatched on the entry's
+ * grammar. Null content change (carry === null) keeps the render. */
+function carrySplitEntry(
+  entry: SplitEntry,
+  render: string,
+  target: string,
+  mode: "recopy" | "render",
+): { content: string; note: string | null; appendixCarry: boolean; reviewReasons: string[] } {
+  const reviewReasons: string[] = [];
+  if (entry.grammar === "bounded-region") {
+    // The manifest and the render are generated together: a declared
+    // region the render does not carry means one of them is damaged, and
+    // keeping the render here would silently drop HEAD's local body.
+    if (localRegion(render, entry) === null) {
+      throw new Error(
+        `the manifest declares a bounded-region split for ${entry.path}, but the ` +
+          "render carries no such local region - manifest and render disagree",
+      );
+    }
+    const carry = carryLocalRegion(render, target, entry);
+    if (carry === null) return { content: render, note: null, appendixCarry: false, reviewReasons };
+    if (carry.disposition === "appendix") reviewReasons.push("recovery-appendix");
+    return {
+      content: carry.content,
+      note: REGION_NOTES[carry.disposition],
+      appendixCarry: carry.disposition === "appendix",
+      reviewReasons,
+    };
+  }
+  const carry = carryManagedTail(render, target, entry.marker);
+  if (carry === null) return { content: render, note: null, appendixCarry: false, reviewReasons };
+  if (carry.kind === "appendix") {
+    reviewReasons.push("recovery-appendix");
+  } else if (carry.extraMarkers) {
+    reviewReasons.push("duplicate split markers");
+  }
+  return {
+    content: carry.content,
+    note: tailNote(carry, mode),
+    appendixCarry: carry.kind === "appendix",
+    reviewReasons,
+  };
 }
 
 /** Render mode, per split entry: DISCARD the working tree's merged copy
@@ -494,27 +588,11 @@ function rebuildSplitFile(
   let appendixCarry = false;
   const reviewReasons: string[] = [];
   if (target !== null) {
-    if (entry.managed === "below") {
-      const carry = carryGitignoreLocal(render, target);
-      if (carry !== null) {
-        content = carry.content;
-        note = GITIGNORE_NOTES[carry.disposition];
-        appendixCarry = carry.disposition === "appendix";
-        if (appendixCarry) reviewReasons.push("recovery-appendix");
-      }
-    } else {
-      const carry = carryManagedTail(render, target);
-      if (carry !== null) {
-        content = carry.content;
-        note = tailNote(carry, "render");
-        if (carry.kind === "appendix") {
-          appendixCarry = true;
-          reviewReasons.push("recovery-appendix");
-        } else if (carry.extraSentinels) {
-          reviewReasons.push("duplicate local-section markers");
-        }
-      }
-    }
+    const carried = carrySplitEntry(entry, render, target, "render");
+    content = carried.content;
+    note = carried.note;
+    appendixCarry = carried.appendixCarry;
+    reviewReasons.push(...carried.reviewReasons);
     // Did the rebuild drop bytes from the previous managed half? Compare
     // HEAD's half against the DELIVERED content's half (byte-equal means
     // nothing was dropped, however the carry got there), then classify a
@@ -526,14 +604,15 @@ function rebuildSplitFile(
     // preserves the full previous copy below the render and is already
     // manual.
     if (!appendixCarry) {
-      const targetHalf = managedHalf(target, entry.marker, entry.managed);
-      const deliveredHalf = managedHalf(content, entry.marker, entry.managed);
+      const side = entrySide(entry);
+      const targetHalf = managedHalf(target, entry.marker, side);
+      const deliveredHalf = managedHalf(content, entry.marker, side);
       if (targetHalf !== null && deliveredHalf !== null && targetHalf === deliveredHalf) {
         // Nothing from the previous managed half was dropped.
       } else {
         const oldRenderPath = join(oldRenderDir, rel);
         const oldHalf = existsSync(oldRenderPath)
-          ? managedHalf(readFileSync(oldRenderPath).toString("latin1"), entry.marker, entry.managed)
+          ? managedHalf(readFileSync(oldRenderPath).toString("latin1"), entry.marker, side)
           : null;
         if (targetHalf === null || deliveredHalf === null || oldHalf === null) {
           note =
@@ -563,7 +642,7 @@ const RENDER_INTRO = [
   "file's diff before merging:",
 ];
 
-const SCAN_INTRO = [
+const RECOPY_INTRO = [
   "Repo-local content carried over the recovery re-render - the re-render",
   "has no three-way merge and had reset these sanctioned repository-local",
   "regions; verify each file's diff before merging:",
@@ -612,26 +691,32 @@ function main(argv: string[]): number {
       if (outcome !== null) outcomes.push(outcome);
     }
   } else {
-    for (const rel of walkFiles(root)) {
-      // Byte-level pre-filter (binaries never decode): only the
-      // LOCAL-marker gitignore, the prefix docs, and sentinel-bearing
-      // files can carry local content.
-      const data = readFileSync(join(root, rel));
-      if (
-        rel !== ".gitignore" &&
-        !PREFIX_DOCS.has(rel) &&
-        !SENTINEL_BUFFERS.some((sentinel) => data.includes(sentinel))
-      ) {
-        continue;
+    // Recopy mode: the working tree IS the fresh render, its manifest
+    // included - recover=recopy re-renders at the current template, which
+    // always ships the manifest.
+    const manifestPath = join(root, MANIFEST_NAME);
+    if (!existsSync(manifestPath)) {
+      throw new Error(
+        `${root} has no ${MANIFEST_NAME}; the recovery carry needs the recopied render's manifest to know which files are split`,
+      );
+    }
+    for (const entry of splitEntries(readFileSync(manifestPath, "utf-8"), manifestPath)) {
+      const renderPath = join(root, entry.path);
+      if (!existsSync(renderPath)) {
+        throw new Error(
+          `${manifestPath} declares a split entry for ${entry.path}, but the recopied tree has no such file - manifest and render disagree`,
+        );
       }
-      const render = data.toString("latin1");
-      const target = headContent(root, rel);
+      const render = readFileSync(renderPath).toString("latin1");
+      const target = headContent(root, entry.path);
       if (target === null) continue;
-      const carried = carryLocalContent(rel, render, target);
-      if (carried === null) continue;
-      writeRegularFile(join(root, rel), carried.content);
-      rebuiltRels.push(rel);
-      outcomes.push({ rel, note: carried.note, reviewReasons: [] });
+      const carried = carrySplitEntry(entry, render, target, "recopy");
+      if (carried.note === null) continue;
+      writeRegularFile(renderPath, carried.content);
+      rebuiltRels.push(entry.path);
+      // Recovery PRs take the manual path wholesale (recover=recopy is a
+      // hand-driven run), so recopy-mode outcomes carry no review reasons.
+      outcomes.push({ rel: entry.path, note: carried.note, reviewReasons: [] });
     }
   }
 
@@ -645,7 +730,7 @@ function main(argv: string[]): number {
   let summary = "";
   if (outcomes.length > 0) {
     summary = [
-      ...(renderDir !== undefined ? RENDER_INTRO : SCAN_INTRO),
+      ...(renderDir !== undefined ? RENDER_INTRO : RECOPY_INTRO),
       "",
       ...outcomes.map(({ rel, note }) => `- \`${rel}\`: ${note}`),
       "",

@@ -1,7 +1,8 @@
 #!/usr/bin/env bun
 // Shared loader for the module manifests (templates/<module>/module.yml),
 // the single source of truth for module identity: the copier choice text,
-// the toolchain declaration (with its CodeQL language), the dependabot
+// the ownership declarations for every file the module lands, the
+// toolchain declaration (with its CodeQL language), the dependabot
 // ecosystem/label tuple, gitignore upstream sources, gitleaks lockfile
 // patterns, Pages commands, and the composer's gate/gate_dirs.
 //
@@ -21,6 +22,7 @@ import { existsSync, lstatSync, readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
+import { ownershipListSchema } from "./ownership.ts";
 
 const TEMPLATES_DIR = resolve(import.meta.dir, "..", "templates");
 
@@ -93,6 +95,12 @@ const description = z
  *  templates/module.schema.json from it. */
 export const manifestSchema = z.strictObject({
   description,
+  // Every file the module lands, with its declared ownership class (the
+  // schema and the split-grammar union live in scripts/ownership.ts). The
+  // composer errors on a landed file with no declaration and on a
+  // declaration whose path never lands, so a module that lands files MUST
+  // carry the list; modules landing none (fragment-only modules) omit it.
+  ownership: ownershipListSchema.optional(),
   // A toolchain always analyzes as SOME CodeQL language; a module that has
   // none (rust) omits the key entirely, so "toolchain without a language"
   // is unrepresentable. pin declares the fleet-wide toolchain version:

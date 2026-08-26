@@ -6,20 +6,38 @@
 // "mergeable" - baseline kept current by three-way merge - was retired
 // when settings.yml, its only member, became a starter):
 // - managed: sync overwrites the whole file; local edits are replaced.
-// - split: sync owns one half (a marker line separates it from the
-//   repo-owned half); local content lives in the other half.
+// - split: sync owns one half; the split GRAMMAR is part of the
+//   declaration (a discriminated union):
+//   - tail-marker: one marker line ends the sync-owned top; the
+//     repository owns everything below it.
+//   - bounded-region: a BEGIN/END-bounded repository-local region sits
+//     above the sync-owned half, which runs from its own BEGIN marker
+//     line to end of file (.gitignore: last-match-wins makes managed
+//     patterns non-overridable only below the local region).
 // - starter: rendered once, repo-owned from then on (_skip_if_exists).
 //
-// Consumers, all reading the same classifier so ownership can never fork:
-// - scripts/generate.ts derives validate-template's MODULE_OWNERSHIP
-//   record (moduleOwnershipFiles below) and enforces that every module
-//   template declares its ownership.
+// Ownership is DECLARED as data, never inferred from file text:
+// templates/base/ownership.yml covers every base file (loadBaseOwnership)
+// and each templates/<module>/module.yml carries an `ownership:` list
+// covering every file the module lands (ownershipListSchema, consumed by
+// scripts/module_manifests.ts). Headers and marker lines in template
+// sources are validated DECORATION: declarationTextErrors reports a
+// source whose text contradicts its declared class, and the composer
+// (scripts/compose_template.ts) errors on a landed file with no
+// declaration, a declaration whose path never lands, and same-path
+// declarations that disagree across sources.
+//
+// Consumers, all reading the same declarations so ownership can never fork:
 // - scripts/compose_template.ts emits the ownership manifest
 //   (.github/repo-platform-manifest.json) into the composed template tree.
+// - scripts/generate.ts derives validate-template's MODULE_OWNERSHIP and
+//   BASE_OWNERSHIP records (moduleOwnershipEntries / baseOwnershipTables
+//   below).
 
-import { lstatSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, lstatSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
+import { z } from "zod";
 import type { ModuleManifest } from "./module_manifests.ts";
 
 /** The managed ownership header in template sources, anchored on the C1
@@ -52,13 +70,188 @@ export const SETTINGS_LAYER_NAMES = new Set([
   "settings-private.yml",
 ]);
 
-/** Split base files whose marker grammar predates the local-section
- *  sentinel. .gitignore's REPOSITORY LOCAL section sits ABOVE its managed
- *  section (last-match-wins makes managed patterns non-overridable), so
- *  its managed half runs from the BEGIN marker line to end of file. */
-const BASE_SPLIT_FILES: Record<string, { marker: string; managed: "above" | "below" }> = {
-  ".gitignore": { marker: "# BEGIN REPO-PLATFORM MANAGED", managed: "below" },
-};
+/** Whether a template source opens with the managed header (decoration;
+ *  the class itself is declared, never inferred from this). */
+export function hasManagedHeader(source: string): boolean {
+  return MANAGED_HEADER_RE.test(source.split("\n", HEADER_WINDOW).join("\n"));
+}
+
+// --- ownership declarations -------------------------------------------------
+
+// Declared paths and marker lines ride through YAML declarations, the
+// manifest template's jinja single-quoted string literals, and JSON, so a
+// single quote is refused (it would end the jinja literal early). Markers
+// are matched as whole trimmed lines against latin1-decoded file bytes by
+// the sync's split-file rebuild, so they must be trim-stable printable
+// ASCII (a non-ASCII marker would decode to different code units in the
+// manifest and the file and never match); the recovery appendix writes
+// comments in the marker's own syntax, so a marker must open as a hash or
+// HTML comment - a new comment syntax extends the appendix writer and
+// this schema together.
+const singleLineNoQuote = (what: string) =>
+  z
+    .string()
+    .min(1)
+    .refine((value) => !/[\r\n]/.test(value), { message: `${what} must be a single line` })
+    .refine((value) => !value.includes("'"), {
+      message: `${what} must not contain ' (it lands inside the manifest template's jinja string literals)`,
+    });
+
+const declaredPath = singleLineNoQuote("each ownership path")
+  .refine((value) => value === value.trim(), {
+    message: "each ownership path must not have leading or trailing whitespace",
+  })
+  .refine(
+    (value) =>
+      !value.startsWith("/") && value.split("/").every((part) => part !== "" && part !== ".."),
+    { message: "each ownership path must be a clean relative landed path (no leading /, no ..)" },
+  )
+  .refine((value) => !value.includes("{%"), {
+    message:
+      "each ownership path must be the LANDED path, with filename gates stripped " +
+      "(gates are recorded from the template filename, not the declaration)",
+  });
+
+const markerLine = (what: string) =>
+  singleLineNoQuote(what)
+    .refine((value) => value === value.trim(), {
+      message: `${what} is matched as a whole trimmed line, so it must not have leading or trailing whitespace`,
+    })
+    .refine((value) => /^[\x20-\x7e]+$/.test(value), {
+      message: `${what} must be printable ASCII (the sync rebuild matches markers against latin1-decoded file bytes)`,
+    });
+
+const hashOrHtmlMarker = (what: string) =>
+  markerLine(what).refine(
+    (value) => value.startsWith("#") || (value.startsWith("<!--") && value.endsWith("-->")),
+    {
+      message: `${what} must be a hash comment or a complete HTML comment line (the recovery appendix writes comments in the marker's syntax)`,
+    },
+  );
+
+const hashMarker = (what: string) =>
+  markerLine(what).refine((value) => value.startsWith("#"), {
+    message: `${what} must open as a hash comment (the bounded-region appendix comments carried lines with #)`,
+  });
+
+/** One declared file. Exported for scripts/module_manifests.ts (module
+ *  `ownership:` lists) and loadBaseOwnership below - one schema, so the
+ *  two declaration homes can never diverge in shape. */
+export const ownershipEntrySchema = z.discriminatedUnion("class", [
+  z.strictObject({ path: declaredPath, class: z.literal("managed") }),
+  z.strictObject({ path: declaredPath, class: z.literal("starter") }),
+  z.discriminatedUnion("grammar", [
+    z.strictObject({
+      path: declaredPath,
+      class: z.literal("split"),
+      grammar: z.literal("tail-marker"),
+      marker: hashOrHtmlMarker("the tail marker"),
+    }),
+    z
+      .strictObject({
+        path: declaredPath,
+        class: z.literal("split"),
+        grammar: z.literal("bounded-region"),
+        managed_begin: hashMarker("the managed BEGIN marker"),
+        managed_end: hashMarker("the managed END marker"),
+        local_begin: hashMarker("the local BEGIN marker"),
+        local_end: hashMarker("the local END marker"),
+      })
+      // The four markers must be mutually substring-free: the region slicer
+      // matches whole lines, but the validator's exactly-once rule and the
+      // appendix neutralization both count SUBSTRINGS, so a marker contained
+      // in another would double-count (or re-create) its sibling.
+      .refine(
+        (entry) => {
+          const markers = [
+            entry.managed_begin,
+            entry.managed_end,
+            entry.local_begin,
+            entry.local_end,
+          ];
+          return markers.every(
+            (marker, index) =>
+              !markers.some((other, otherIndex) => otherIndex !== index && other.includes(marker)),
+          );
+        },
+        {
+          message:
+            "the four bounded-region markers must be distinct and none may contain " +
+            "another (exactly-once counting and appendix neutralization count substrings)",
+        },
+      ),
+  ]),
+]);
+
+export type OwnershipDeclaration = z.infer<typeof ownershipEntrySchema>;
+
+type OmitPath<T> = T extends { path: string } ? Omit<T, "path"> : never;
+
+/** A declaration's ownership without its path: what the manifest entry
+ *  records for the landed file. Derived from the schema inference, so a
+ *  schema change cannot leave this union behind. */
+export type ManifestOwnership = OmitPath<OwnershipDeclaration>;
+
+export type SplitOwnership = Extract<ManifestOwnership, { class: "split" }>;
+
+/** Which half of a split file sync owns, derived from the grammar (never
+ *  declared separately - a side that disagreed with its grammar would be
+ *  an unrepresentable state). */
+export function managedSide(split: SplitOwnership): "above" | "below" {
+  return split.grammar === "tail-marker" ? "above" : "below";
+}
+
+export function ownershipOf(declaration: OwnershipDeclaration): ManifestOwnership {
+  const { path: _path, ...ownership } = declaration;
+  return ownership;
+}
+
+/** An `ownership:` list: entries valid per ownershipEntrySchema, paths
+ *  unique (two declarations for one path inside one list is always a
+ *  mistake, whatever they say). */
+export const ownershipListSchema = z
+  .array(ownershipEntrySchema)
+  .min(1)
+  .superRefine((entries, ctx) => {
+    const seen = new Set<string>();
+    for (const entry of entries) {
+      if (seen.has(entry.path)) {
+        ctx.addIssue({ code: "custom", message: `path '${entry.path}' is declared twice` });
+      }
+      seen.add(entry.path);
+    }
+  });
+
+/** templates/base/ownership.yml: the base tree's declarations. Throws on a
+ *  missing file, YAML problems, or schema violations - base files without
+ *  a valid declaration home must fail every consumer loudly. */
+export function loadBaseOwnership(templatesDir: string): OwnershipDeclaration[] {
+  const path = join(templatesDir, "base", "ownership.yml");
+  const where = "templates/base/ownership.yml";
+  if (!existsSync(path) || !lstatSync(path).isFile()) {
+    throw new Error(
+      `${where} is missing - every base file's ownership class is declared there ` +
+        "(the module files declare in their module.yml ownership lists)",
+    );
+  }
+  let data: unknown;
+  try {
+    data = parseYaml(readFileSync(path, "utf-8"));
+  } catch (error) {
+    const detail = error instanceof Error ? error.message.split("\n")[0] : String(error);
+    throw new Error(`${where}: YAML parse error: ${detail}`);
+  }
+  const shaped = z.strictObject({ ownership: ownershipListSchema }).safeParse(data);
+  if (!shaped.success) {
+    const details = shaped.error.issues
+      .map((issue) => `${issue.path.join(".") || "(top level)"}: ${issue.message}`)
+      .join("; ");
+    throw new Error(`${where}: ${details}`);
+  }
+  return shaped.data.ownership;
+}
+
+// --- copier.yml's _skip_if_exists -------------------------------------------
 
 /** copier.yml's _skip_if_exists globs as path matchers reproducing
  *  copier's gitignore-style semantics (pathspec gitwildmatch): a pattern
@@ -67,12 +260,14 @@ const BASE_SPLIT_FILES: Record<string, { marker: string; managed: "above" | "bel
  *  implemented; a pattern using more (`**`, `?`, character classes,
  *  negation, edge slashes, and gitwildmatch's comment/whitespace line
  *  forms) throws rather than guessing what copier does. */
-export function skipIfExistsMatchers(copierYamlText: string): RegExp[] {
+export function skipIfExistsPatterns(
+  copierYamlText: string,
+): { pattern: string; matcher: RegExp }[] {
   const skip = (parseYaml(copierYamlText) as { _skip_if_exists?: unknown } | null)?._skip_if_exists;
   if (!Array.isArray(skip) || skip.length === 0 || !skip.every((p) => typeof p === "string")) {
     throw new Error(
       "copier.yml: _skip_if_exists is missing or not a list of strings - the " +
-        "module-ownership scan needs it to keep repo-owned starters exempt",
+        "starter consistency check needs it to keep repo-owned starters exempt",
     );
   }
   return skip.map((pattern) => {
@@ -88,7 +283,7 @@ export function skipIfExistsMatchers(copierYamlText: string): RegExp[] {
       throw new Error(
         `copier.yml: _skip_if_exists pattern '${pattern}' uses gitwildmatch ` +
           "features beyond the implemented subset (bare names, root-anchored " +
-          "paths, single *) - extend skipIfExistsMatchers alongside it",
+          "paths, single *) - extend skipIfExistsPatterns alongside it",
       );
     }
     const body = pattern
@@ -98,8 +293,16 @@ export function skipIfExistsMatchers(copierYamlText: string): RegExp[] {
     // A gitwildmatch pattern that matches a directory also covers every
     // descendant, hence the optional /... tail.
     const tail = "(?:/.*)?$";
-    return new RegExp(pattern.includes("/") ? `^${body}${tail}` : `(?:^|/)${body}${tail}`);
+    return {
+      pattern,
+      matcher: new RegExp(pattern.includes("/") ? `^${body}${tail}` : `(?:^|/)${body}${tail}`),
+    };
   });
+}
+
+/** The matchers alone, for consumers that never need the pattern text. */
+export function skipIfExistsMatchers(copierYamlText: string): RegExp[] {
+  return skipIfExistsPatterns(copierYamlText).map(({ matcher }) => matcher);
 }
 
 const FILENAME_GATE_RE = /^\{% if (.+?) %\}(.*)\{% endif %\}$/;
@@ -121,144 +324,356 @@ export function landedPathAndGates(renderedPath: string): { path: string; gates:
   return { path, gates };
 }
 
-export type ManifestOwnership =
-  | { class: "managed" }
-  | { class: "starter" }
-  | { class: "split"; marker: string; managed: "above" | "below" };
+// --- declaration decoration checks --------------------------------------------
 
-/** Classify one template source file by landed path and source text:
- *  starter (exempt via _skip_if_exists; carrying the managed header there
- *  throws, the promises contradict), split (a marker line separates the
- *  sync-owned half from the repo-owned half - the local-section sentinel,
- *  or a BASE_SPLIT_FILES grammar), or managed (everything else: sync
- *  overwrites the whole file whether or not it can carry the header).
- *  `where` names the source file in errors. */
-export function classifyTemplateSource(
-  landedPath: string,
+/** Errors where a template source's TEXT contradicts its declared class -
+ *  headers and marker lines are validated decoration, never classification
+ *  input. `skipMatched` says whether copier.yml's _skip_if_exists exempts
+ *  the landed path: the starter class and the skip list must agree in both
+ *  directions (copier needs the skip entry, the declaration is the single
+ *  ownership truth). `where` names the source file in errors. */
+export function declarationTextErrors(
+  declaration: OwnershipDeclaration,
   source: string,
-  skipIfExists: RegExp[],
+  skipMatched: boolean,
   where: string,
-): { ownership: ManifestOwnership; hasHeader: boolean } {
-  const opening = source.split("\n", HEADER_WINDOW);
-  const hasHeader = MANAGED_HEADER_RE.test(opening.join("\n"));
-  if (skipIfExists.some((matcher) => matcher.test(landedPath))) {
-    if (hasHeader) {
-      throw new Error(
-        `${where}: opens with the managed header but ` +
-          "renders a _skip_if_exists starter - the header promises sync " +
-          "overwrites the file, the skip list promises it never does; drop one",
-      );
-    }
-    return { ownership: { class: "starter" }, hasHeader };
-  }
-  const baseSplit = BASE_SPLIT_FILES[landedPath];
-  const markerLine = source
+): string[] {
+  const errors: string[] = [];
+  const hasHeader = hasManagedHeader(source);
+  const sentinelLine = source
     .split("\n")
     .map((line) => line.trim())
     .find((line) => LOCAL_SECTION_LINES.has(line));
-  if (baseSplit) {
-    if (!source.split("\n").some((line) => line.trim() === baseSplit.marker)) {
-      throw new Error(
-        `${where}: lands at ${landedPath}, whose split grammar expects the ` +
-          `'${baseSplit.marker}' line, but the source does not carry it - ` +
-          "restore the marker or update BASE_SPLIT_FILES (scripts/ownership.ts)",
+  if (declaration.class === "starter") {
+    if (!skipMatched) {
+      errors.push(
+        `${where}: declared a starter but no copier.yml _skip_if_exists pattern ` +
+          `matches '${declaration.path}' - copier would overwrite the file on every ` +
+          "sync; add the skip entry or fix the declared class",
       );
     }
-    return { ownership: { class: "split", ...baseSplit }, hasHeader };
+    if (hasHeader) {
+      errors.push(
+        `${where}: opens with the managed header but is declared a starter - the ` +
+          "header promises sync overwrites the file, the starter class promises " +
+          "it never does; drop one",
+      );
+    }
+    if (sentinelLine !== undefined) {
+      errors.push(
+        `${where}: carries the '${sentinelLine}' split marker but is declared a ` +
+          "starter - the marker promises a sync-maintained half that a starter " +
+          "never gets; drop one",
+      );
+    }
+    return errors;
   }
-  if (markerLine !== undefined) {
-    return { ownership: { class: "split", marker: markerLine, managed: "above" }, hasHeader };
+  if (skipMatched) {
+    errors.push(
+      `${where}: declared ${declaration.class} but copier.yml's _skip_if_exists ` +
+        `matches '${declaration.path}', which makes the file render-once and ` +
+        "repo-owned; declare it a starter or drop the skip entry",
+    );
   }
-  return { ownership: { class: "managed" }, hasHeader };
+  if (declaration.class === "managed") {
+    if (sentinelLine !== undefined) {
+      errors.push(
+        `${where}: carries the '${sentinelLine}' split marker but is declared ` +
+          "managed - sync would overwrite the repo-owned half the marker promises; " +
+          "declare the file split (grammar tail-marker) or drop the marker",
+      );
+    }
+    return errors;
+  }
+  if (declaration.grammar === "tail-marker") {
+    // The sync rebuild anchors its split on the render ENDING at the
+    // marker line - managed content below it would be carried into
+    // repositories' local tails as if it were repo-owned - so the source
+    // must end there too (which implies the marker is present at all).
+    const lastNonBlank = source
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line !== "")
+      .at(-1);
+    if (lastNonBlank !== declaration.marker) {
+      errors.push(
+        `${where}: declared split (tail-marker) but the source does not END at the ` +
+          `'${declaration.marker}' marker line - the sync rebuild anchors the ` +
+          "repo-owned tail there; move the marker to the last non-blank line " +
+          "or fix the declaration",
+      );
+    }
+    return errors;
+  }
+  // bounded-region: every declared marker must appear, in the grammar's
+  // order (the local region above the managed half). Matched as substrings
+  // rather than exact lines - splicing can glue jinja tags onto a marker
+  // line (the gitignore anchor's collapse guard does) - so the RENDERED
+  // line grammar stays the validator's check, not this decoration check's.
+  const ordered: [string, string][] = [
+    ["local BEGIN", declaration.local_begin],
+    ["local END", declaration.local_end],
+    ["managed BEGIN", declaration.managed_begin],
+    ["managed END", declaration.managed_end],
+  ];
+  let previous = -1;
+  for (const [name, marker] of ordered) {
+    const at = source.indexOf(marker);
+    if (at === -1) {
+      errors.push(
+        `${where}: declared split (bounded-region) but the source does not ` +
+          `carry the '${marker}' marker line - restore the marker or fix the declaration`,
+      );
+      continue;
+    }
+    if (at <= previous) {
+      errors.push(
+        `${where}: the ${name} marker '${marker}' appears out of the bounded-region ` +
+          "order (local BEGIN, local END, managed BEGIN, managed END) - the slicer " +
+          "and the managed-half hash both assume that order; fix the source",
+      );
+    }
+    previous = Math.max(previous, at);
+  }
+  return errors;
 }
 
-export interface OwnershipEntry {
-  path: string;
-  kind: "header" | "marker";
+// --- validator table derivations ----------------------------------------------
+
+export type OwnershipEntry =
+  | { path: string; kind: "header" }
+  | { path: string; kind: "marker"; marker: string };
+
+/** Render conditions the validator can evaluate from a rendered repo's
+ *  answers and modules list, translated from declared filename gates. */
+export interface RenderWhen {
+  publicOnly?: true;
+  withoutModule?: string;
+}
+
+export type BaseOwnershipEntry = OwnershipEntry & { when?: RenderWhen };
+
+export interface RegionSplitGrammar {
+  managedBegin: string;
+  managedEnd: string;
+  localBegin: string;
+  localEnd: string;
+}
+
+/** A source folder's landed files: landed path -> gates + source text
+ *  (null for symlinks - no text to read decoration from). */
+function landedFiles(
+  folder: string,
+): Map<string, { gates: string[]; source: string | null; templateRel: string }> {
+  const out = new Map<string, { gates: string[]; source: string | null; templateRel: string }>();
+  const visit = (rel: string) => {
+    for (const name of readdirSync(join(folder, rel)).sort()) {
+      const childRel = rel ? `${rel}/${name}` : name;
+      if (childRel === "fragments" || childRel === "module.yml" || childRel === "ownership.yml") {
+        continue;
+      }
+      // The module's settings layers are module METADATA like the manifest:
+      // read by the fleet's settings merge, never rendered into a repository,
+      // so they land nowhere and declare no ownership class.
+      if (SETTINGS_LAYER_NAMES.has(childRel)) continue;
+      const stat = lstatSync(join(folder, childRel));
+      if (stat.isDirectory() && !stat.isSymbolicLink()) {
+        visit(childRel);
+        continue;
+      }
+      if (!stat.isFile() && !stat.isSymbolicLink()) continue;
+      const rendered = childRel.replace(/\.jinja$/, "");
+      const { path, gates } = landedPathAndGates(rendered);
+      out.set(path, {
+        gates,
+        source: stat.isSymbolicLink() ? null : readFileSync(join(folder, childRel), "utf-8"),
+        templateRel: childRel,
+      });
+    }
+  };
+  visit("");
+  return out;
+}
+
+/** The in-file enforcement a declaration gets in the validator's tables:
+ *  "header" for a managed file whose source carries the managed header
+ *  (headerless managed files - pin dotfiles, JSON, symlinks - have no
+ *  comment channel to enforce), "marker" for a tail-marker split with its
+ *  exact marker line, null for starters (repo-owned; nothing to enforce)
+ *  and bounded-region splits (their grammar is enforced by the region
+ *  tables, not a kind). */
+function enforcementOf(
+  declaration: OwnershipDeclaration,
+  source: string | null,
+): OwnershipEntry | null {
+  switch (declaration.class) {
+    case "starter":
+      return null;
+    case "managed":
+      return source !== null && hasManagedHeader(source)
+        ? { path: declaration.path, kind: "header" }
+        : null;
+    case "split":
+      return declaration.grammar === "tail-marker"
+        ? { path: declaration.path, kind: "marker", marker: declaration.marker }
+        : null;
+    default: {
+      const unhandled: never = declaration;
+      throw new Error(`unhandled ownership class: ${JSON.stringify(unhandled)}`);
+    }
+  }
 }
 
 /** The rendered paths, per module, whose ownership declaration the
- *  validator enforces while the module is selected. Every module template
- *  file (fragments and symlinks aside) is classified via
- *  classifyTemplateSource - starter, split ("marker"), header-opening
- *  ("header"), or comment-free (the manifest's pin dotfile, JSON) - and a
- *  file fitting no class throws, so nothing lands silently undeclared.
- *  Starters stay out (repo-owned; nothing to enforce or pin).
- *  Filename-gated files only declare: module selection alone does not
- *  render them. */
-export function moduleOwnershipFiles(
+ *  validator enforces while the module is selected - derived from the
+ *  module.yml `ownership:` declarations plus each source's decoration
+ *  (header presence, the declared marker). A declared path with no
+ *  template file, or a landed file with no declaration, throws: the
+ *  composer reports the same drift as a compose error, and this generator
+ *  must never emit tables from a tree it cannot account for. */
+export function moduleOwnershipEntries(
   manifests: ModuleManifest[],
   templatesDir: string,
-  skipIfExists: RegExp[],
 ): Record<string, OwnershipEntry[]> {
   const result: Record<string, OwnershipEntry[]> = {};
   for (const m of manifests) {
-    const moduleDir = join(templatesDir, m.module);
-    const entries: OwnershipEntry[] = [];
-    const visit = (rel: string) => {
-      for (const name of readdirSync(join(moduleDir, rel)).sort()) {
-        const childRel = rel ? `${rel}/${name}` : name;
-        // fragments/, the manifest, and the module's settings layers are
-        // module METADATA: the composer never renders them into a
-        // repository, so they have no ownership class to declare.
-        if (childRel === "fragments" || childRel === "module.yml") continue;
-        if (SETTINGS_LAYER_NAMES.has(childRel)) continue;
-        const stat = lstatSync(join(moduleDir, childRel));
-        if (stat.isDirectory() && !stat.isSymbolicLink()) {
-          visit(childRel);
-          continue;
-        }
-        if (!stat.isFile() || stat.isSymbolicLink()) continue;
-        const renderedPath = childRel.replace(/\.jinja$/, "");
-        const { path: landedPath } = landedPathAndGates(renderedPath);
-        const ungated = landedPath === renderedPath;
-        const source = readFileSync(join(moduleDir, childRel), "utf-8");
-        const { ownership, hasHeader } = classifyTemplateSource(
-          landedPath,
-          source,
-          skipIfExists,
-          `templates/${m.module}/${childRel}`,
+    const where = `templates/${m.module}/module.yml`;
+    const files = landedFiles(join(templatesDir, m.module));
+    const declarations = m.ownership ?? [];
+    const declared = new Set(declarations.map((d) => d.path));
+    for (const [path, { templateRel }] of files) {
+      if (!declared.has(path)) {
+        throw new Error(
+          `templates/${m.module}/${templateRel}: lands at '${path}' with no ownership ` +
+            `declaration - add the entry to ${where}'s ownership list`,
         );
-        // Exhaustive over ManifestOwnership: a future class variant fails
-        // to compile (the never default) until it defines its roster
-        // behavior - silently inheriting an exemption or the header kind
-        // is exactly how a class would vanish from check 9's pin.
-        switch (ownership.class) {
-          case "starter":
-            // Repo-owned after the first render: nothing to enforce or pin.
-            break;
-          case "split":
-            if (ungated) entries.push({ path: landedPath, kind: "marker" });
-            break;
-          case "managed": {
-            if (hasHeader) {
-              if (ungated) entries.push({ path: landedPath, kind: "header" });
-              break;
-            }
-            // Comment-free formats: the manifest's pin dotfile and JSON.
-            if (landedPath === m.toolchain?.pin?.file || landedPath.endsWith(".json")) break;
-            throw new Error(
-              `templates/${m.module}/${childRel}: declares no ownership - open it with ` +
-                "the managed header, split it with the local-section marker line, or " +
-                "list its rendered path in _skip_if_exists",
-            );
-          }
-          default: {
-            const unhandled: never = ownership;
-            throw new Error(`unhandled ownership class: ${JSON.stringify(unhandled)}`);
-          }
-        }
       }
-    };
-    visit("");
+    }
+    const entries: OwnershipEntry[] = [];
+    for (const declaration of declarations) {
+      const file = files.get(declaration.path);
+      if (file === undefined) {
+        throw new Error(
+          `${where}: ownership declares '${declaration.path}', but no templates/` +
+            `${m.module}/ file lands there - fix the path or delete the entry`,
+        );
+      }
+      // Filename-gated files only declare: module selection alone does not
+      // render them, so the module-keyed tables must not enforce them.
+      if (file.gates.length > 0) continue;
+      if (declaration.class === "split" && declaration.grammar === "bounded-region") {
+        throw new Error(
+          `${where}: '${declaration.path}' declares a bounded-region split, which the ` +
+            "validator's module tables do not carry yet - extend " +
+            "moduleOwnershipEntries and the validator's region tables together",
+        );
+      }
+      const entry = enforcementOf(declaration, file.source);
+      if (entry !== null) entries.push(entry);
+    }
     if (entries.length > 0) result[m.module] = entries;
   }
   if (Object.keys(result).length === 0) {
     throw new Error(
-      "no module template declares ownership, so the validator's " +
+      "no module declaration yields an enforceable entry, so the validator's " +
         "MODULE_OWNERSHIP record would be empty - the managed module " +
         "workflows are expected to carry the header",
     );
   }
   return result;
+}
+
+/** Declared filename gates translated to conditions the validator can
+ *  evaluate client-side. Only the forms the base tree uses are known; an
+ *  enforced file behind an untranslatable gate throws so it cannot
+ *  silently fall out of the tables. */
+export function translateGates(gates: string[], where: string): RenderWhen | undefined {
+  if (gates.length === 0) return undefined;
+  const when: RenderWhen = {};
+  for (const gate of gates) {
+    const withoutModule = /^'([a-z][a-z0-9-]*)' not in modules$/.exec(gate);
+    if (gate === "not private") {
+      when.publicOnly = true;
+    } else if (withoutModule) {
+      if (when.withoutModule !== undefined && when.withoutModule !== withoutModule[1]) {
+        throw new Error(
+          `${where}: two module-exclusion gates ('${when.withoutModule}', ` +
+            `'${withoutModule[1]}') gate one file - RenderWhen carries a single ` +
+            "withoutModule; extend it to a list before stacking exclusions",
+        );
+      }
+      when.withoutModule = withoutModule[1];
+    } else {
+      throw new Error(
+        `${where}: filename gate '${gate}' has no client-side translation - the ` +
+          "validator could not tell when the file renders; extend translateGates " +
+          "(scripts/ownership.ts) alongside the new gate form",
+      );
+    }
+  }
+  return when;
+}
+
+/** The validator's base tables, derived from templates/base/ownership.yml
+ *  plus each base source's decoration and declared filename gates:
+ *  `enforced` drives check 8 (header/marker self-declarations) and check
+ *  9's class cross-check; `regionSplits` carries the bounded-region
+ *  grammars (today: .gitignore) for the marker-section checks. Drift
+ *  between the declarations and the base tree throws, mirroring
+ *  moduleOwnershipEntries. */
+export function baseOwnershipTables(templatesDir: string): {
+  enforced: BaseOwnershipEntry[];
+  regionSplits: Record<string, RegionSplitGrammar>;
+} {
+  const where = "templates/base/ownership.yml";
+  const declarations = loadBaseOwnership(templatesDir);
+  const files = landedFiles(join(templatesDir, "base"));
+  const declared = new Set(declarations.map((d) => d.path));
+  for (const [path, { templateRel }] of files) {
+    if (!declared.has(path)) {
+      throw new Error(
+        `templates/base/${templateRel}: lands at '${path}' with no ownership ` +
+          `declaration - add the entry to ${where}`,
+      );
+    }
+  }
+  const enforced: BaseOwnershipEntry[] = [];
+  const regionSplits: Record<string, RegionSplitGrammar> = {};
+  for (const declaration of declarations) {
+    const file = files.get(declaration.path);
+    if (file === undefined) {
+      throw new Error(
+        `${where}: declares '${declaration.path}', but no templates/base/ file ` +
+          "lands there - fix the path or delete the entry",
+      );
+    }
+    if (declaration.class === "split" && declaration.grammar === "bounded-region") {
+      const when = translateGates(file.gates, `templates/base/${file.templateRel}`);
+      if (when !== undefined) {
+        throw new Error(
+          `templates/base/${file.templateRel}: a gated bounded-region split has no ` +
+            "validator support - the region tables assume the file always renders; " +
+            "extend baseOwnershipTables alongside the gate",
+        );
+      }
+      regionSplits[declaration.path] = {
+        managedBegin: declaration.managed_begin,
+        managedEnd: declaration.managed_end,
+        localBegin: declaration.local_begin,
+        localEnd: declaration.local_end,
+      };
+      continue;
+    }
+    const entry = enforcementOf(declaration, file.source);
+    if (entry === null) continue;
+    const when = translateGates(file.gates, `templates/base/${file.templateRel}`);
+    enforced.push(when === undefined ? entry : { ...entry, when });
+  }
+  if (enforced.length === 0 || Object.keys(regionSplits).length === 0) {
+    throw new Error(
+      `${where}: the derived validator tables would be empty (no enforced base ` +
+        "files, or no bounded-region split) - the base tree always carries both",
+    );
+  }
+  return { enforced, regionSplits };
 }

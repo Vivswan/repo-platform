@@ -1,9 +1,13 @@
-// The .gitignore REPOSITORY LOCAL region grammar, shared by the two
-// writers that must agree on it: scripts/build_gitignore.ts (regenerates
-// this repo's own .gitignore around the existing LOCAL body) and
+// The bounded-region local-content grammar, shared by the writers that
+// must agree on it: scripts/build_gitignore.ts (regenerates this repo's
+// own .gitignore around the existing LOCAL body) and
 // .github/scripts/sync/preserve_local_content.ts (splices a target repo's
-// LOCAL body into a fresh render). One owner on purpose: a duplicate that
-// drifted would let one writer mis-slice what the other produced.
+// local region body into a fresh render). One owner on purpose: a
+// duplicate that drifted would let one writer mis-slice what the other
+// produced. The .gitignore marker constants below are the grammar's
+// default instance; the sync carry passes each split entry's DECLARED
+// markers instead, so a future bounded-region file with different marker
+// lines slices with the same one definition.
 //
 // actions/validate-template deliberately does NOT import this module: the
 // action ships standalone and enforces its own marker rules.
@@ -13,6 +17,21 @@ export const LOCAL_END = "# END REPOSITORY LOCAL";
 export const MANAGED_BEGIN = "# BEGIN REPO-PLATFORM MANAGED";
 export const MANAGED_END = "# END REPO-PLATFORM MANAGED";
 export const GITIGNORE_MARKERS = [LOCAL_BEGIN, LOCAL_END, MANAGED_BEGIN, MANAGED_END];
+
+/** One bounded-region grammar instance: the local region's BEGIN/END lines
+ *  plus every marker line the grammar owns (`all` feeds the
+ *  no-marker-text-inside-the-body rule and appendix neutralization). */
+export interface RegionMarkers {
+  begin: string;
+  end: string;
+  all: string[];
+}
+
+export const GITIGNORE_REGION: RegionMarkers = {
+  begin: LOCAL_BEGIN,
+  end: LOCAL_END,
+  all: GITIGNORE_MARKERS,
+};
 
 export interface Line {
   text: string;
@@ -37,19 +56,20 @@ export function stripCr(text: string): string {
   return text.replace(/\r+$/, "");
 }
 
-/** The LOCAL section split line-anchored on the BEGIN/END marker lines:
- * before runs through the BEGIN line, body sits between the markers, after
- * starts at the END line. Null when no ordered BEGIN/END line pair exists.
- * This is the raw slice; writers slicing an EXISTING file must use
- * cleanLocalRegion below, which rejects malformed shapes instead of
- * guessing. */
+/** The local region split line-anchored on the grammar's BEGIN/END marker
+ * lines: before runs through the BEGIN line, body sits between the
+ * markers, after starts at the END line. Null when no ordered BEGIN/END
+ * line pair exists. This is the raw slice; writers slicing an EXISTING
+ * file must use cleanLocalRegion below, which rejects malformed shapes
+ * instead of guessing. */
 export function localRegion(
   content: string,
+  markers: RegionMarkers = GITIGNORE_REGION,
 ): { before: string; body: string; after: string } | null {
   const lines = splitLines(content);
-  const begin = lines.findIndex((line) => stripCr(line.text) === LOCAL_BEGIN);
+  const begin = lines.findIndex((line) => stripCr(line.text) === markers.begin);
   if (begin === -1) return null;
-  const end = lines.findIndex((line, index) => index > begin && stripCr(line.text) === LOCAL_END);
+  const end = lines.findIndex((line, index) => index > begin && stripCr(line.text) === markers.end);
   if (end === -1) return null;
   const bodyStart = lines[begin].end;
   const bodyEnd = lines[end - 1].end;
@@ -70,24 +90,27 @@ export function substringCount(content: string, marker: string): number {
   return content.split(marker).length - 1;
 }
 
-/** The LOCAL region of an EXISTING file, or null when the file is not
- * exactly-once clean: each LOCAL marker must appear once as a whole line
- * AND once as a substring (the validator counts substrings, so marker text
- * buried mid-line is a duplicate too), in order, with no gitignore marker
- * text inside the body (a body carrying MANAGED marker text would
- * duplicate it next to the regenerated managed section). One definition
- * for every writer that slices an existing file - the sync carry and the
- * self-output regenerator must never split the same malformed file
- * differently. */
+/** The local region of an EXISTING file, or null when the file is not
+ * exactly-once clean: each REGION marker (begin/end) must appear once as a
+ * whole line AND once as a substring (the validator counts substrings, so
+ * marker text buried mid-line is a duplicate too), in order, with none of
+ * the grammar's marker text inside the body (a body carrying MANAGED
+ * marker text would duplicate it next to the regenerated managed section).
+ * The managed markers OUTSIDE the body go unchecked on purpose: they sit
+ * in the half the caller discards and rebuilds from the render, so they
+ * cannot reach the delivered file. One definition for every writer that
+ * slices an existing file - the sync carry and the self-output
+ * regenerator must never split the same malformed file differently. */
 export function cleanLocalRegion(
   content: string,
+  markers: RegionMarkers = GITIGNORE_REGION,
 ): { before: string; body: string; after: string } | null {
-  const clean = [LOCAL_BEGIN, LOCAL_END].every(
+  const clean = [markers.begin, markers.end].every(
     (marker) => markerLineCount(content, marker) === 1 && substringCount(content, marker) === 1,
   );
   if (!clean) return null;
-  const region = localRegion(content);
+  const region = localRegion(content, markers);
   if (region === null) return null;
-  if (GITIGNORE_MARKERS.some((marker) => region.body.includes(marker))) return null;
+  if (markers.all.some((marker) => region.body.includes(marker))) return null;
   return region;
 }
