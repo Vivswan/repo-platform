@@ -249,6 +249,7 @@ jobs:
           # thing ever spliced into a jq program is the static $defs prelude
           # below - no response data reaches jq as source text.
           api() { timeout 20 gh api "$1"; }
+          api_paginated() { timeout 20 gh api --paginate --slurp "$1"; }
           # Answers strictly: anything that is not a bare true/false - jq
           # erroring on a malformed body, or yielding nothing at all on an
           # empty one - is a MISSING answer, and the caller clears the same
@@ -274,14 +275,19 @@ jobs:
           # `is_copilot` is Copilot's identity in ONE place: it posts reviews
           # under the "<check>[bot]" login and is requested as the plain
           # "Copilot" login, and either spelling can turn up in either place.
-          defs='def arr: if type == "array" then . else error("expected an array") end; def is_copilot: ascii_downcase | . == "copilot" or . == (env.COPILOT_CHECK + "[bot]"); def mine: [.[] | select(.user != null) | select(.user.login | is_copilot)];'
+          defs='def arr: if type == "array" then . else error("expected an array") end; def pages: arr | map(arr) | add // []; def is_copilot: ascii_downcase | . == "copilot" or . == (env.COPILOT_CHECK + "[bot]"); def mine: [.[] | select(.user != null) | select(.user.login | is_copilot)];'
 
           rules_ok=1
           rules="$(api "repos/$GITHUB_REPOSITORY/rules/branches/$BASE_BRANCH")" || rules_ok=0
           checks_ok=1
           checks="$(api "repos/$GITHUB_REPOSITORY/commits/$HEAD_SHA/check-runs?check_name=$COPILOT_CHECK&filter=latest")" || checks_ok=0
           reviews_ok=1
-          reviews="$(api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/reviews?per_page=100")" || reviews_ok=0
+          # --paginate: GitHub returns reviews oldest-first, so a single page
+          # shows only the STALEST 100 on a busy PR and Copilot's latest review
+          # would be invisible. --slurp yields one array per page; `pages`
+          # flattens them. The deadline wraps the whole paginated read, exactly
+          # as the operator twin budgets it.
+          reviews="$(api_paginated "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/reviews?per_page=100")" || reviews_ok=0
 
           # An unreadable body is a missing answer too, so a jq failure clears
           # the same flag a failed call would.
@@ -292,8 +298,8 @@ jobs:
           fi
           review_at_head=false review_seen=false
           if [ "$reviews_ok" = 1 ]; then
-            review_at_head="$(ask "$reviews" "$defs"'arr | mine | map(select(.commit_id == env.HEAD_SHA)) | length > 0')" || reviews_ok=0
-            review_seen="$(ask "$reviews" "$defs"'arr | mine | length > 0')" || reviews_ok=0
+            review_at_head="$(ask "$reviews" "$defs"'pages | mine | map(select(.commit_id == env.HEAD_SHA)) | length > 0')" || reviews_ok=0
+            review_seen="$(ask "$reviews" "$defs"'pages | mine | length > 0')" || reviews_ok=0
           fi
           rule_expects=false
           if [ "$rules_ok" = 1 ]; then

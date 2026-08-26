@@ -59,7 +59,7 @@ if [ -n "\${GH_FAIL:-}" ]; then
   echo "gh: boom" >&2
   exit 1
 fi
-case "$2" in
+case "$*" in
   */rules/branches/*) cat "$GH_RULES_FILE" ;;
   *check-runs*) cat "$GH_CHECKS_FILE" ;;
   */reviews*) cat "$GH_REVIEWS_FILE" ;;
@@ -86,6 +86,7 @@ interface Options {
   rules?: unknown;
   checks?: unknown;
   reviews?: unknown;
+  reviewPages?: unknown[];
   pr?: unknown;
 }
 
@@ -113,7 +114,9 @@ function run(opts: Options = {}, golden = "minimal") {
       COPILOT_CHECK,
       GH_RULES_FILE: file("rules.json", opts.rules ?? []),
       GH_CHECKS_FILE: file("checks.json", opts.checks ?? { check_runs: [] }),
-      GH_REVIEWS_FILE: file("reviews.json", opts.reviews ?? []),
+      // --slurp returns one array PER PAGE; a plain `reviews` fixture is
+      // the single-page case.
+      GH_REVIEWS_FILE: file("reviews.json", opts.reviewPages ?? [opts.reviews ?? []]),
       GH_PR_FILE: file("pr.json", opts.pr ?? { requested_reviewers: [] }),
       ...opts.env,
     },
@@ -217,6 +220,19 @@ describe("the template's copilot-review gate job", () => {
 
   test("no rule, a review posted for the head sha passes as arrival", () => {
     const r = run({ reviews: [{ commit_id: HEAD_SHA, user: { login: `${COPILOT_CHECK}[bot]` } }] });
+    expect(r.exitCode).toBe(0);
+    expect(r.output).toContain("arrived");
+  });
+
+  // GitHub returns reviews oldest-first, so on a busy PR a single unpaginated
+  // page shows only the stalest 100 and Copilot's latest review is invisible.
+  test("a head-sha review on a LATER page still counts", () => {
+    const r = run({
+      reviewPages: [
+        [{ commit_id: OLD_SHA, user: { login: "someone" } }],
+        [{ commit_id: HEAD_SHA, user: { login: `${COPILOT_CHECK}[bot]` } }],
+      ],
+    });
     expect(r.exitCode).toBe(0);
     expect(r.output).toContain("arrived");
   });

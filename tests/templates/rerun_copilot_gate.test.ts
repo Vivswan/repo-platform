@@ -60,7 +60,7 @@ if [ -n "\${GH_FAIL:-}" ]; then
   echo "gh: boom" >&2
   exit 1
 fi
-case "$2" in
+case "$*" in
   *workflows/ci.yml/runs*) cat "$GH_RUNS_FILE" ;;
   */jobs*) cat "$GH_JOBS_FILE" ;;
   */actions/runs/*) cat "$GH_RUN_FILE" ;;
@@ -95,6 +95,7 @@ interface Options {
   checks?: unknown;
   pulls?: unknown;
   reviews?: unknown;
+  reviewPages?: unknown[];
 }
 
 function run(opts: Options = {}, golden = "minimal") {
@@ -128,7 +129,7 @@ function run(opts: Options = {}, golden = "minimal") {
       GH_JOBS_FILE: file("jobs.json", opts.jobs ?? failedGate),
       GH_CHECKS_FILE: file("checks.json", opts.checks ?? { check_runs: [] }),
       GH_PULLS_FILE: file("pulls.json", opts.pulls ?? []),
-      GH_REVIEWS_FILE: file("reviews.json", opts.reviews ?? []),
+      GH_REVIEWS_FILE: file("reviews.json", opts.reviewPages ?? [opts.reviews ?? []]),
       ...opts.env,
     },
   });
@@ -282,6 +283,19 @@ describe("the template's rerun-copilot-gate workflow", () => {
       runId: RUN_ID,
       pulls: [{ number: 12, head: { sha: HEAD_SHA } }],
       reviews: [{ commit_id: HEAD_SHA, user: { login: `${COPILOT_CHECK}[bot]` } }],
+    });
+    expect(r.exitCode).toBe(0);
+    expect(r.rerans).toContain("run rerun --job 99");
+  });
+
+  test("CI-completed trigger: a head-sha review on a LATER page still counts", () => {
+    const r = run({
+      runId: RUN_ID,
+      pulls: [{ number: 12, head: { sha: HEAD_SHA } }],
+      reviewPages: [
+        [{ commit_id: OLD_SHA, user: { login: "someone" } }],
+        [{ commit_id: HEAD_SHA, user: { login: `${COPILOT_CHECK}[bot]` } }],
+      ],
     });
     expect(r.exitCode).toBe(0);
     expect(r.rerans).toContain("run rerun --job 99");

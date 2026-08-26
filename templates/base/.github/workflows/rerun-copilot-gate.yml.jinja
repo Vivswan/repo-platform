@@ -107,6 +107,10 @@ jobs:
           # HEAD_SHA, GATE_JOB and COPILOT_CHECK from the environment, so the
           # only thing spliced into a jq program is the static $defs prelude.
           api() { timeout 20 gh api "$1"; }
+          # Reviews come back oldest-first, so one page shows only the stalest
+          # 100: the arrival check must read them all. One deadline covers the
+          # whole paginated read, as the operator twin budgets it.
+          api_paginated() { timeout 20 gh api --paginate --slurp "$1"; }
           die() { echo "::error::rerun-copilot-gate: $1"; exit 1; }
           # Every quiet no-op below is a decision to leave a red gate alone,
           # so each one has to be taken on a body we actually read. gh exits 0
@@ -115,7 +119,7 @@ jobs:
           # null" and this workflow would exit 0 having stranded the gate.
           # errexit turns any of them into a loud failure, which is the right
           # outcome when nothing re-runs you.
-          defs='def arr: if type == "array" then . else error("expected an array") end; def obj: if type == "object" then . else error("expected an object") end; def str: if type == "string" then . else error("expected a string") end; def num: if type == "number" then . else error("expected a number") end; def is_copilot: ascii_downcase | . == "copilot" or . == (env.COPILOT_CHECK + "[bot]");'
+          defs='def arr: if type == "array" then . else error("expected an array") end; def pages: arr | map(arr) | add // []; def obj: if type == "object" then . else error("expected an object") end; def str: if type == "string" then . else error("expected a string") end; def num: if type == "number" then . else error("expected a number") end; def is_copilot: ascii_downcase | . == "copilot" or . == (env.COPILOT_CHECK + "[bot]");'
 
           # A review of an OLDER head must not re-arm the new one: the gate
           # at the new head would still find no review for ITS sha and burn
@@ -184,9 +188,9 @@ jobs:
                 die "listing the pull requests at $HEAD_SHA failed."
               number="$(jq -r "$defs"'arr | first(.[] | select(.head.sha == env.HEAD_SHA) | .number) // empty' <<< "$pulls")"
               if [ -n "$number" ]; then
-                reviews="$(api "repos/$GITHUB_REPOSITORY/pulls/$number/reviews?per_page=100")" ||
+                reviews="$(api_paginated "repos/$GITHUB_REPOSITORY/pulls/$number/reviews?per_page=100")" ||
                   die "reading the reviews of PR #$number failed."
-                arrived="$(jq -r "$defs"'arr | map(select(.user != null and .commit_id == env.HEAD_SHA) | select(.user.login | is_copilot)) | length > 0' <<< "$reviews")"
+                arrived="$(jq -r "$defs"'pages | map(select(.user != null and .commit_id == env.HEAD_SHA) | select(.user.login | is_copilot)) | length > 0' <<< "$reviews")"
               fi
             fi
             if [ "$arrived" != true ]; then
