@@ -28,8 +28,11 @@
 // commit. Nothing generated records the SHA, so the outputs change only
 // when upstream content we consume changes - which is what makes the
 // refresh-gitignore workflow's PR diff worth reading. That workflow is the
-// only caller: no CI job verifies these outputs, so a hand edit to a
-// managed block survives until the next refresh PR regenerates over it.
+// only caller of networked regeneration; `bun run check` and CI's validate
+// job also call this script with --topology for offline validation. Content
+// drift INSIDE a managed block is still ungated - only the fragments'
+// encoded source paths are checked - so a hand edit there survives until the
+// next refresh PR regenerates over it.
 //
 // Usage:
 //   bun scripts/build_gitignore.ts              # fetch upstream HEAD, regenerate
@@ -326,7 +329,7 @@ async function run(topology = false): Promise<number> {
         throw new Error(
           `${rel} encodes sources [${encoded.join(", ")}] but templates/${module}/module.yml ` +
             `declares [${declared.join(", ")}] - the fragment is stale against the manifest ` +
-            "edit; run 'bun scripts/build_gitignore.ts --locked' to regenerate it",
+            "edit; run 'bun scripts/build_gitignore.ts' to regenerate it",
         );
       }
     }

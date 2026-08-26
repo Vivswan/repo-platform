@@ -187,8 +187,9 @@ describe("argument parsing", () => {
 describe("missingFragmentFiles", () => {
   // The topology check's second direction: a module NEWLY declaring
   // gitignore_sources has no fragment until the generator runs, and
-  // composition would render nothing for it - `git diff --quiet` in the
-  // refresh workflow also never saw the untracked new file.
+  // composition would render nothing for it. Historically the refresh
+  // workflow's `git diff --quiet` could not see this either, because the new
+  // fragment was untracked; the topology check is what closed that.
   const templates = mkdtempSync(join(tmpdir(), "gitignore-missing-"));
   beforeAll(() => {
     mkdirSync(join(templates, "bun", "fragments"), { recursive: true });
