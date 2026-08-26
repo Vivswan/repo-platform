@@ -17,14 +17,19 @@ const RUN = { id: 77, status: "completed", run_attempt: 1 };
 const FAILED_GATE_JOBS = { jobs: [{ id: 900, name: "copilot-review", conclusion: "failure" }] };
 const COMPLETED_CHECK = { check_runs: [{ status: "completed" }] };
 
-// `gh api <path>` serves per-path files; `gh run rerun ...` only records.
-// Every invocation lands in CALLS_LOG (\x1f between args, \x1e between
+// `gh api <path>` serves per-path files (or exits 1 when GH_API_FAIL is
+// set - the read-failure knob); `gh run rerun ...` only records. Every
+// invocation lands in CALLS_LOG (\x1f between args, \x1e between
 // records), wait_for_build.test.ts's format.
 const ghStub = `#!/usr/bin/env bash
 set -euo pipefail
 { printf '%s' "gh"; for a in "$@"; do printf '\\x1f%s' "$a"; done; printf '\\x1e'; } >>"$CALLS_LOG"
 if [ "$1" = "run" ]; then
   exit "\${GH_RERUN_EXIT:-0}"
+fi
+if [ -n "\${GH_API_FAIL:-}" ]; then
+  echo "gh: boom" >&2
+  exit 1
 fi
 case "$2" in
   */actions/workflows/ci.yml/runs*) cat "$GH_RUNS_FILE" ;;
@@ -220,5 +225,40 @@ describe("rerun_copilot_gate.ts", () => {
     const r = run({ env: { GH_RERUN_EXIT: "1" } });
     expect(r.exitCode).toBe(1);
     expect(r.output).toContain("::error::re-running the copilot-review job 900 failed");
+  });
+
+  // Shape validation: a response gh accepted but the schema rejects must
+  // exit loudly on every read - nothing re-runs this re-runner, so a
+  // quiet mis-parse would strand a red gate (the template twin pins the
+  // same three cases).
+  test("a wrong-shape workflow-runs response is loud, not quiet", () => {
+    const r = run({ runs: {} });
+    expect(r.exitCode).toBe(1);
+    expect(r.output).toContain("::error::rerun_copilot_gate: workflow runs response");
+    expect(r.reruns).toEqual([]);
+  });
+
+  test("a wrong-shape run response is loud, not quiet", () => {
+    const r = run({ run: {}, env: { RUN_ID: "77" } });
+    expect(r.exitCode).toBe(1);
+    expect(r.output).toContain("::error::rerun_copilot_gate: run response");
+    expect(r.reruns).toEqual([]);
+  });
+
+  test("a wrong-shape jobs response is loud, not quiet", () => {
+    const r = run({ jobs: {} });
+    expect(r.exitCode).toBe(1);
+    expect(r.output).toContain("::error::rerun_copilot_gate: jobs response");
+    expect(r.reruns).toEqual([]);
+  });
+
+  test("a failed read is loud, not quiet", () => {
+    // mustFetch's contract: unlike the gate itself, nothing re-runs this
+    // re-runner, so silence would strand a red gate.
+    const r = run({ env: { GH_API_FAIL: "1" } });
+    expect(r.exitCode).toBe(1);
+    expect(r.output).toContain("::error::");
+    expect(r.output).toContain("failed");
+    expect(r.reruns).toEqual([]);
   });
 });

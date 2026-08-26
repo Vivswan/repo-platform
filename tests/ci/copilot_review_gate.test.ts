@@ -139,6 +139,15 @@ describe("copilot_review_gate.ts", () => {
     expect(r.output).toContain("copilot is not a reviewer on this PR");
   });
 
+  test("a review by a null user (deleted account) is not Copilot involvement", () => {
+    // The reviews schema allows user: null (GitHub serves it for deleted
+    // accounts); the filter must skip it instead of crashing or counting
+    // it as involvement.
+    const r = run({ reviews: [{ commit_id: HEAD_SHA, user: null }] });
+    expect(r.exitCode).toBe(0);
+    expect(r.output).toContain("copilot is not a reviewer on this PR");
+  });
+
   test("API failures never pass as uninvolved: the gate fails closed naming the probe problem", () => {
     const r = run({ env: { GH_FAIL: "1" } });
     expect(r.exitCode).toBe(1);
