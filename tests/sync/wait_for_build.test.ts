@@ -65,7 +65,13 @@ function run(opts: Options = {}) {
       GH_RUNS_FILE: runsFile,
       CALLS_LOG: calls,
       GIT_HEAD: MAIN_SHA,
+      // Time is INJECTED, never raced: three fast attempts under a
+      // wall-clock deadline far above any real probe latency, so the
+      // attempt-path assertions (waiting lines, the final warning) are
+      // deterministic on the slowest runner.
+      WAIT_ATTEMPTS: "3",
       WAIT_DELAY_MS: "10",
+      WAIT_DEADLINE_MS: "60000",
       ...tipEnv,
       ...opts.env,
     },
@@ -82,20 +88,21 @@ function run(opts: Options = {}) {
 }
 
 describe("wait_for_build.ts", () => {
-  test("the production cadence stays 90 attempts x 30 s (tests shrink only the delay)", () => {
+  test("the production cadence stays 90 attempts x 30 s (tests shrink only the knobs)", () => {
     // The timeout warning promises the deadline in minutes (45: a full
     // main CI run must finish before build-branches even starts under the
     // workflow_run trigger, ~30 minutes worst case with rehearse-fleet,
     // plus the build itself); pin the constants that arithmetic depends
-    // on, since no test can wait it out. The wall-clock deadline must
-    // stay the attempts-x-delay product (probe time counts against it),
-    // and the per-call network deadline is pinned too: unbounded probes
-    // hang past the warning on a stalled origin.
+    // on, since no test can wait it out. The wall-clock deadline defaults
+    // to the attempts-x-delay product (probe time counts against it) and
+    // is injectable ONLY so tests control time instead of racing the
+    // runner; the per-call network deadline is pinned too: unbounded
+    // probes hang past the warning on a stalled origin.
     const source = readFileSync(script, "utf-8");
-    expect(source).toContain("const ATTEMPTS = 90;");
+    expect(source).toContain('Number(env("WAIT_ATTEMPTS", "90"))');
     expect(source).toContain('Number(env("WAIT_DELAY_MS", "30000"))');
     expect(source).toContain('Number(env("PROBE_TIMEOUT_MS", "15000"))');
-    expect(source).toContain("const DEADLINE_MS = ATTEMPTS * DELAY_MS;");
+    expect(source).toContain('Number(env("WAIT_DEADLINE_MS", String(ATTEMPTS * DELAY_MS)))');
   });
 
   test("reads main HEAD then probes the build-branches runs", () => {

@@ -45,6 +45,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { z } from "zod";
 import { pushProbeStatus } from "../fleet/push_probe.ts";
+import { assignHints } from "../fleet/redact.ts";
 import { loadRegistry, type Registry, selectRepos } from "../fleet/repos_registry.ts";
 import { error, warning } from "../shared/gha.ts";
 import { parseJsonWith } from "../shared/json.ts";
@@ -101,6 +102,27 @@ export function enumerateFleet(
 }
 
 const PRIVATE_SKIP = "skipped (private)";
+
+/** Display names for the report's private rows. This repo's Actions logs
+ * are PUBLIC, so under --gate a wildcard-DISCOVERED private slug renders
+ * as its redact.ts hint - the same partial pseudonymization the sync's
+ * own logs use. Two deliberate exemptions, from redact.ts's design: a
+ * name committed in repos.yml (managed/exclude entries) is public by
+ * definition, so hinting it would be theater; and the local CLI (no
+ * --gate) prints raw to the operator's own terminal. Public repos always
+ * print raw - their names are public. */
+export function privateDisplayNames(
+  gate: boolean,
+  discovered: { repo: string; private: boolean }[] | null,
+  committed: Set<string>,
+): (slug: string) => string {
+  if (!gate || discovered === null) return (slug) => slug;
+  const hidden = discovered
+    .filter((row) => row.private && !committed.has(row.repo.toLowerCase()))
+    .map((row) => row.repo);
+  const hints = new Map([...assignHints(hidden)].map(([slug, hint]) => [slug.toLowerCase(), hint]));
+  return (slug) => hints.get(slug.toLowerCase()) ?? slug;
+}
 
 // Pipeline phase per leg script, so a failure reason names WHERE the sync
 // broke without a live run. Keyed on the script basename rehearse.ts's
@@ -214,6 +236,9 @@ export interface FleetDeps {
    * (treated as private, fail-closed - and as an error under --gate: a
    * selected repo went unrehearsed for an unknown reason). */
   isPrivate: (slug: string) => boolean | null;
+  /** The display name a PRIVATE row prints (privateDisplayNames above);
+   * public rows always print the raw slug - their names are public. */
+  display: (slug: string) => string;
   /** Production's enrollment signal (the fleet token's actual write
    * grant, select_sync_repos.ts's push probe): "not-enrolled" repos are
    * skipped like production skips them, "unknown" (no token, transport
@@ -225,7 +250,9 @@ export interface FleetDeps {
 
 /** The report loop. The private check gates EVERY repo before the
  * enrollment probe and deps.rehearse (the only code path that clones)
- * can run, and a throwing rehearsal becomes a row, never an abort. */
+ * can run, and a throwing rehearsal becomes a row, never an abort.
+ * Private rows carry deps.display's name, so every output path
+ * (summary lines, the table, gate annotations) inherits the redaction. */
 export function rehearseFleet(slugs: string[], deps: FleetDeps): FleetRow[] {
   const rows: FleetRow[] = [];
   for (const slug of slugs) {
@@ -233,7 +260,7 @@ export function rehearseFleet(slugs: string[], deps: FleetDeps): FleetRow[] {
     let row: FleetRow;
     if (isPrivate !== false) {
       row = {
-        repo: slug,
+        repo: deps.display(slug),
         status: PRIVATE_SKIP,
         detail:
           isPrivate === null ? "visibility lookup failed; treated as private, NOT rehearsed" : "",
@@ -370,8 +397,12 @@ function main(): number {
     `rehearsing ${fleet.slugs.length} repo(s); ${fleet.excluded} excluded by repos.yml\n`,
   );
 
+  const committed = new Set(
+    [...registry.managed.repos, ...registry.exclude].map((slug) => slug.toLowerCase()),
+  );
   const rows = rehearseFleet(fleet.slugs, {
     isPrivate: (slug) => fleet.visibility.get(slug.toLowerCase()) ?? lookupPrivate(slug),
+    display: privateDisplayNames(gate, discovered, committed),
     enrollment: makeEnrollment(),
     rehearse: (slug) => rehearseRepo(slug, { verbose: false, keepWorkspace: false }),
     log: console.log,

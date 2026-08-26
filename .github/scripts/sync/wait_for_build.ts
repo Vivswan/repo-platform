@@ -31,16 +31,18 @@ import { env, error, requireEnv, warning } from "../shared/gha.ts";
 import { parseJsonWith } from "../shared/json.ts";
 import { capture, mustCapture } from "../shared/proc.ts";
 
-const ATTEMPTS = 90;
+const ATTEMPTS = Number(env("WAIT_ATTEMPTS", "90"));
 const DELAY_MS = Number(env("WAIT_DELAY_MS", "30000"));
 /** Hard deadline for each network call: generous next to a healthy
  * ls-remote or API hit, small enough that a stalled connection burns one
  * probe, not the run (the wall-clock deadline below owns the total). */
 const PROBE_TIMEOUT_MS = Number(env("PROBE_TIMEOUT_MS", "15000"));
 /** The warning's promised wall clock, the nominal poll cadence: probe
- * time counts against it, so stalled probes cannot stretch "after 5
- * minutes" toward the job-level kill - they just leave fewer attempts. */
-const DEADLINE_MS = ATTEMPTS * DELAY_MS;
+ * time counts against it, so stalled probes cannot stretch the promised
+ * minutes toward the job-level kill - they just leave fewer attempts.
+ * Tests inject a generous WAIT_DEADLINE_MS so attempt-path assertions
+ * control time instead of racing the runner's real probe latency. */
+const DEADLINE_MS = Number(env("WAIT_DEADLINE_MS", String(ATTEMPTS * DELAY_MS)));
 
 /** Prompt-disabling env for the git network calls: empty
  * GIT_ASKPASS/SSH_ASKPASS fall through to the terminal prompt, which

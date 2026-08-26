@@ -21,6 +21,7 @@ import {
   gateAnnotations,
   outcomeRow,
   phaseOf,
+  privateDisplayNames,
   rehearseFleet,
   statusTally,
   summaryLine,
@@ -82,6 +83,52 @@ describe("enumerateFleet", () => {
   });
 });
 
+describe("privateDisplayNames", () => {
+  // This repo's Actions logs are public: a wildcard-discovered private
+  // slug must never print raw under --gate, on ANY output path.
+  const discovered = [
+    { repo: "Vivswan/hidden-server", private: true },
+    { repo: "Vivswan/committed-private", private: true },
+    { repo: "Vivswan/app", private: false },
+  ];
+  const committed = new Set(["vivswan/committed-private"]);
+
+  test("gate mode hints a wildcard-discovered private slug on every output path", () => {
+    const display = privateDisplayNames(true, discovered, committed);
+    const deps = {
+      display,
+      enrollment: () => "enrolled" as const,
+      rehearse: () => outcome(),
+      log: () => {},
+    };
+    const rows = rehearseFleet(["Vivswan/hidden-server"], { ...deps, isPrivate: () => true });
+    expect(rows[0].repo).toBe("h**-s**r");
+    expect(summaryLine(rows[0])).toBe("h**-s**r  skipped (private)");
+    expect(summaryTable(rows)).not.toContain("hidden-server");
+    // The lookup-failure shape is error severity, so it reaches the gate
+    // annotations - the hint must hold there too.
+    const failed = rehearseFleet(["Vivswan/hidden-server"], { ...deps, isPrivate: () => null });
+    const annotations = gateAnnotations(failed);
+    expect(annotations.errors[0]).toContain("h**-s**r");
+    expect(JSON.stringify(annotations)).not.toContain("hidden-server");
+  });
+
+  test("a committed registry entry keeps its raw name (hinting a public name is theater)", () => {
+    const display = privateDisplayNames(true, discovered, committed);
+    expect(display("Vivswan/committed-private")).toBe("Vivswan/committed-private");
+  });
+
+  test("the local CLI (no --gate) prints raw slugs to the operator's terminal", () => {
+    const display = privateDisplayNames(false, discovered, committed);
+    expect(display("Vivswan/hidden-server")).toBe("Vivswan/hidden-server");
+  });
+
+  test("a public repo prints raw even in gate mode - its name is public", () => {
+    const display = privateDisplayNames(true, discovered, committed);
+    expect(display("Vivswan/app")).toBe("Vivswan/app");
+  });
+});
+
 describe("rehearseFleet private skip", () => {
   test("private and visibility-unknown repos are skipped before the rehearsal function runs", () => {
     const rehearsed: string[] = [];
@@ -89,6 +136,7 @@ describe("rehearseFleet private skip", () => {
     const lines: string[] = [];
     const rows = rehearseFleet(["o/public", "o/secret", "o/unknown"], {
       isPrivate: (slug) => (slug === "o/public" ? false : slug === "o/secret" ? true : null),
+      display: (slug) => slug,
       enrollment: (slug) => {
         probed.push(slug);
         return "enrolled";
@@ -123,6 +171,7 @@ describe("rehearseFleet private skip", () => {
     const rehearsed: string[] = [];
     const rows = rehearseFleet(["o/unenrolled", "o/unknown-grant"], {
       isPrivate: () => false,
+      display: (slug) => slug,
       enrollment: (slug) => (slug === "o/unenrolled" ? "not-enrolled" : "unknown"),
       rehearse: (slug) => {
         rehearsed.push(slug);
@@ -146,6 +195,7 @@ describe("rehearseFleet failure handling", () => {
     const lines: string[] = [];
     const rows = rehearseFleet(["o/a", "o/b", "o/c"], {
       isPrivate: () => false,
+      display: (slug) => slug,
       enrollment: () => "enrolled",
       rehearse: (slug) => {
         if (slug === "o/a") {
