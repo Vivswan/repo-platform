@@ -15,18 +15,26 @@
 # only automated writer, and the push uses --force-with-lease so an
 # out-of-band push racing this run surfaces instead of vanishing. Manual
 # commits on the branch are overwritten by design; the PR body says so.
-# Split-class files (a marker line separates the sync-owned half from the
-# repo-owned half) never ride copier's three-way merge: after the update
-# they are rebuilt structurally - managed half from a clean render at the
-# new ref, repo-local half from the pre-update HEAD. Clean updates arm
-# squash auto-merge (the target's all-green check gates the actual merge);
+# The post-update pipeline is fixed: copier update -> clean renders at
+# the old and new refs -> structural rebuild of split-class files (a
+# marker line separates the sync-owned half from the repo-owned half,
+# which never rides copier's three-way merge: managed half from the clean
+# render at the new ref, repo-owned half byte-for-byte from the
+# pre-update HEAD; the rebuilt paths are --skip'd by the conflict
+# resolver) -> remaining conflicts resolved toward the template ->
+# retired-file cleanup -> repo-owned files preserved -> ownership
+# manifest stamped -> tail tripwire (every repo-owned half must still
+# hold each non-blank line it held at HEAD, HEAD's copy split with
+# HEAD's own manifest markers) -> validation. Clean updates arm squash
+# auto-merge (the target's all-green check gates the actual merge);
 # conflicts in non-split files resolve toward the template with the
 # dropped local lines in the PR body and stay MANUAL, as do split-file
 # carries needing review (an appendix, reset managed-half edits, duplicate
-# markers), withheld workflow files, failed validation, and out-of-band
-# settings drift (live visibility or description differing from the
-# recorded copier answers) - auto-resolution warns; only validation
-# failures (and broken inputs) go red.
+# markers), a tripped tail tripwire, withheld workflow files, failed
+# validation, and out-of-band settings drift (live visibility or
+# description differing from the recorded copier answers) -
+# auto-resolution warns; only validation failures (and broken inputs) go
+# red.
 
 name: Reusable Template Sync
 
@@ -346,6 +354,21 @@ jobs:
         env:
           TARGET_DIR: target
         run: bun .github/scripts/sync/stamp_manifest.ts
+
+      # Defense-in-depth, now that the tree is final: every split entry's
+      # repository-owned half must still hold each non-blank line it held
+      # at the target's HEAD - HEAD's copy is split with HEAD's OWN
+      # manifest markers, so a marker rename cannot mis-split it. After
+      # the structural rebuild above this should never fire; a trip is a
+      # sync bug, delivered as a PR-body section (tail-shrank.md) that
+      # open_pr.ts turns into the manual-review path. Warn, not red: a
+      # blocked delivery would hide the diff the reviewer needs.
+      - name: Tripwire on repository-owned content loss
+        run: |
+          bun .github/scripts/sync/tail_tripwire.ts \
+            --root target \
+            --hide-details "$HIDE_DETAILS" \
+            --report "$RUNNER_TEMP/tail-shrank.md"
 
       # Registries publish the manifest's license claim, not the LICENSE
       # file: a repo adopting the fleet license with package.json still

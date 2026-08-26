@@ -99,6 +99,18 @@ if (nonEmpty(carriedFile)) {
 }
 const carryReviewFile = requireEnv("CARRY_REVIEW_FILE");
 
+// tail_tripwire.ts's post-stamp check: split-file repository-owned halves
+// that lost non-blank lines held at the target's previous commit, or that
+// could not be verified at all. The structural rebuild should make this
+// impossible, so a non-empty report is a sync bug - the section carries
+// the missing lines the reviewer needs, and the PR waits for a human
+// (needsReview below). Read from RUNNER_TEMP by its fixed name, like
+// settings-layering.md below.
+const tailShrankFile = join(runnerTemp, "tail-shrank.md");
+if (nonEmpty(tailShrankFile)) {
+  body += `\n\n${slurp(tailShrankFile)}`;
+}
+
 const retiredModulesFile = requireEnv("RETIRED_MODULES_FILE");
 if (nonEmpty(retiredModulesFile)) {
   body += `\n\nRetired modules dropped from the selection: ${lines(retiredModulesFile).join(", ")}`;
@@ -211,17 +223,19 @@ if (validation === "failed") {
 
 // Anything that needs human review - dropped local hunks, a split-file
 // carry that needs a human (appendix, reset managed-half edits, duplicate
-// markers), withheld workflow files, failed validation, a recovery
-// re-render, a dispatch that forced manual review, a deleted license
-// file, out-of-band settings drift, dropped settings-layering overrides -
-// stays manual; a clean update (which includes kept-whole and clean
-// tail-appended carries) arms squash auto-merge below.
+// markers), a tripped tail tripwire, withheld workflow files, failed
+// validation, a recovery re-render, a dispatch that forced manual review,
+// a deleted license file, out-of-band settings drift, dropped
+// settings-layering overrides - stays manual; a clean update (which
+// includes kept-whole and clean tail-appended carries) arms squash
+// auto-merge below.
 const needsReview =
   resolved === "true" ||
   validation === "failed" ||
   recover === "recopy" ||
   env("FORCE_MANUAL") === "true" ||
   nonEmpty(carryReviewFile) ||
+  nonEmpty(tailShrankFile) ||
   nonEmpty(licenseTransitionFile) ||
   nonEmpty(withheldFile) ||
   nonEmpty(settingsLayeringFile) ||
@@ -287,6 +301,6 @@ if (!needsReview) {
   }
 } else {
   console.log(
-    "auto-merge left off: this PR needs review (conflicts, split-file carries needing review, withheld files, failed validation, out-of-band settings drift, dropped settings-layering overrides, a recovery re-render, a forced-manual dispatch, or a deleted license file).",
+    "auto-merge left off: this PR needs review (conflicts, split-file carries needing review, a tripped tail tripwire, withheld files, failed validation, out-of-band settings drift, dropped settings-layering overrides, a recovery re-render, a forced-manual dispatch, or a deleted license file).",
   );
 }
