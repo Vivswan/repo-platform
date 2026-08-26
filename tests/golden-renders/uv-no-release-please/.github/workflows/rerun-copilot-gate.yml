@@ -31,7 +31,14 @@
 # API exposes a toggle. When it happens, open the failed CI run and pick
 # Re-run jobs, then Re-run failed jobs. That re-runs copilot-review
 # together with the all-green job that needs it, and both go green once
-# the review has arrived. See
+# the review has arrived.
+#
+# FORK PRs: a pull_request_review run on a fork's PR gets a read-only
+# token, so `gh run rerun` cannot re-run anything and this workflow fails
+# instead of re-arming. It only bites when Copilot reviews AFTER CI has
+# finished; a review that lands mid-run is covered by the workflow_run
+# trigger, which runs in the base repository's own context. Fork-PR
+# operators use the same manual re-run as above. See
 # https://github.com/Vivswan/repo-platform/blob/main/docs/all-green.md.
 
 name: Rerun Copilot Gate
@@ -88,16 +95,24 @@ jobs:
           set -euo pipefail
           # Nothing re-runs this re-runner, so unlike the gate itself a failed
           # read is fatal here: going quiet would strand a red gate. jq takes
-          # HEAD_SHA, GATE_JOB and COPILOT_CHECK from the environment, so no jq
-          # program below needs a shell expansion.
+          # HEAD_SHA, GATE_JOB and COPILOT_CHECK from the environment, so the
+          # only thing spliced into a jq program is the static $defs prelude.
           api() { timeout 20 gh api "$1"; }
           die() { echo "::error::rerun-copilot-gate: $1"; exit 1; }
+          # Every quiet no-op below is a decision to leave a red gate alone,
+          # so each one has to be taken on a body we actually read. gh exits 0
+          # on some error payloads, and jq reads a missing field as null, so
+          # without these assertions `{}` would answer "no CI run" or "status
+          # null" and this workflow would exit 0 having stranded the gate.
+          # errexit turns any of them into a loud failure, which is the right
+          # outcome when nothing re-runs you.
+          defs='def arr: if type == "array" then . else error("expected an array") end; def obj: if type == "object" then . else error("expected an object") end; def str: if type == "string" then . else error("expected a string") end; def num: if type == "number" then . else error("expected a number") end; def is_copilot: ascii_downcase | . == "copilot" or . == (env.COPILOT_CHECK + "[bot]");'
 
           # The review trigger looks the run up; workflow_run carries it.
           if [ -z "$RUN_ID" ]; then
             runs="$(api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$HEAD_SHA&event=pull_request&per_page=1")" ||
               die "listing CI runs at $HEAD_SHA failed."
-            run="$(jq -c '.workflow_runs[0] // empty' <<< "$runs")"
+            run="$(jq -c "$defs"'obj | .workflow_runs | arr | .[0] // empty' <<< "$runs")"
             if [ -z "$run" ]; then
               echo "::notice::no pull_request CI run exists at $HEAD_SHA; nothing to re-arm."
               exit 0
@@ -107,9 +122,9 @@ jobs:
               die "reading CI run $RUN_ID failed."
             [ -n "$run" ] || die "CI run $RUN_ID came back empty."
           fi
-          run_id="$(jq -r '.id' <<< "$run")"
-          status="$(jq -r '.status' <<< "$run")"
-          attempt="$(jq -r '.run_attempt' <<< "$run")"
+          run_id="$(jq -r "$defs"'obj | .id | num' <<< "$run")"
+          status="$(jq -r "$defs"'obj | .status | str' <<< "$run")"
+          attempt="$(jq -r "$defs"'obj | .run_attempt | num' <<< "$run")"
 
           if [ "$status" != completed ]; then
             echo "::notice::CI run $run_id at $HEAD_SHA is still '$status'; its completion re-fires this workflow, so nothing to do yet."
@@ -122,13 +137,13 @@ jobs:
 
           jobs="$(api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/jobs?filter=latest&per_page=100")" ||
             die "listing the jobs of CI run $run_id failed."
-          gate="$(jq -c 'first(.jobs[] | select(.name == env.GATE_JOB)) // empty' <<< "$jobs")"
+          gate="$(jq -c "$defs"'obj | .jobs | arr | first(.[] | select(.name == env.GATE_JOB)) // empty' <<< "$jobs")"
           if [ -z "$gate" ]; then
             echo "::notice::CI run $run_id has no $GATE_JOB job; nothing to re-arm."
             exit 0
           fi
-          job_id="$(jq -r '.id' <<< "$gate")"
-          conclusion="$(jq -r '.conclusion // "null"' <<< "$gate")"
+          job_id="$(jq -r "$defs"'obj | .id | num' <<< "$gate")"
+          conclusion="$(jq -r "$defs"'obj | .conclusion // "null"' <<< "$gate")"
           if [ "$conclusion" != failure ]; then
             echo "::notice::the $GATE_JOB job of CI run $run_id concluded '$conclusion'; no re-run needed."
             exit 0
@@ -142,15 +157,15 @@ jobs:
           if [ -n "$RUN_ID" ]; then
             checks="$(api "repos/$GITHUB_REPOSITORY/commits/$HEAD_SHA/check-runs?check_name=$COPILOT_CHECK&filter=latest")" ||
               die "reading the $COPILOT_CHECK check runs at $HEAD_SHA failed."
-            arrived="$(jq -r '[.check_runs[] | select(.status == "completed")] | length > 0' <<< "$checks")"
+            arrived="$(jq -r "$defs"'obj | .check_runs | arr | map(select(.status == "completed")) | length > 0' <<< "$checks")"
             if [ "$arrived" != true ]; then
               pulls="$(api "repos/$GITHUB_REPOSITORY/commits/$HEAD_SHA/pulls")" ||
                 die "listing the pull requests at $HEAD_SHA failed."
-              number="$(jq -r 'first(.[] | select(.head.sha == env.HEAD_SHA) | .number) // empty' <<< "$pulls")"
+              number="$(jq -r "$defs"'arr | first(.[] | select(.head.sha == env.HEAD_SHA) | .number) // empty' <<< "$pulls")"
               if [ -n "$number" ]; then
                 reviews="$(api "repos/$GITHUB_REPOSITORY/pulls/$number/reviews?per_page=100")" ||
                   die "reading the reviews of PR #$number failed."
-                arrived="$(jq -r '[.[] | select(.user != null and .commit_id == env.HEAD_SHA) | select((.user.login | ascii_downcase) | . == "copilot" or . == (env.COPILOT_CHECK + "[bot]"))] | length > 0' <<< "$reviews")"
+                arrived="$(jq -r "$defs"'arr | map(select(.user != null and .commit_id == env.HEAD_SHA) | select(.user.login | is_copilot)) | length > 0' <<< "$reviews")"
               fi
             fi
             if [ "$arrived" != true ]; then

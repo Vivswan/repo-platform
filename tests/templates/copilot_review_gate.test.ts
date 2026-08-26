@@ -244,4 +244,23 @@ describe("the template's copilot-review gate job", () => {
     expect(r.exitCode).toBe(1);
     expect(r.output).toContain("::error::cannot rule Copilot's involvement");
   });
+
+  // gh exits 0 on some error payloads, and jq iterates an OBJECT's values
+  // without complaint, so an unguarded probe reads `{}` as a confident
+  // "nothing here" and the gate passes as uninvolved on a body it never
+  // really read. Each probe asserts its shape; one wrong shape is enough to
+  // fail the whole gate closed, so they are pinned one at a time.
+  for (const [label, shape] of [
+    ["rules", { rules: {} }],
+    ["check-runs", { checks: {} }],
+    ["reviews", { reviews: {} }],
+    ["pull", { pr: {} }],
+  ] as const) {
+    test(`a wrong-shaped ${label} body fails closed, never as uninvolved`, () => {
+      const r = run(shape);
+      expect(r.exitCode).toBe(1);
+      expect(r.output).toContain("::error::cannot rule Copilot's involvement");
+      expect(r.output).not.toContain("copilot is not a reviewer");
+    });
+  }
 });

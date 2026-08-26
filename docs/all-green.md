@@ -45,6 +45,8 @@ Until that changes the operator finishes the re-arm by hand. When the `copilot-r
 
 One observation will settle whether the hold is worth working around. The first Copilot review on a PR raised after `rerun-copilot-gate.yml` reaches the default branch either re-arms the gate on its own or lands `action_required` again. Only in the second case is the per-repository toggle worth a look, and even then it buys one repository at a time.
 
+Fork PRs land in the same manual fallback for a different reason. A `pull_request_review` run on a fork's PR gets a read-only token, so `gh run rerun` cannot re-run anything and the re-arm fails instead. It only bites when Copilot reviews after CI has already finished, because a review landing mid-run is picked up by the `workflow_run` trigger, which runs in the base repository's own context with a writable token. A `workflow_run` handoff for the review path would close the gap properly, and it is worth building if forks ever become common in the fleet; today every managed repository is solo, so the manual re-run covers it.
+
 ## Private repositories: the merged base-checks job
 
 On private repositories the five base check jobs (`typography`, `commit-names`, `actionlint`, `yamllint`, `gitleaks`) run as one `base-checks` job - each tiny job would otherwise bill a rounded-up minute per push. Public repos keep the per-check fan-out.
