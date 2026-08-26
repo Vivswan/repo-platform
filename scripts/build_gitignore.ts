@@ -34,6 +34,7 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import { gateExpression } from "./compose_template.ts";
+import { LOCAL_BEGIN, LOCAL_END, localRegion } from "./gitignore_local.ts";
 import { loadManifests, type ModuleManifest } from "./module_manifests.ts";
 
 const REPO_ROOT = resolve(import.meta.dir, "..");
@@ -61,8 +62,6 @@ function byModule(manifests: ModuleManifest[]): {
 
 const ANCHOR = "gitignore";
 
-const LOCAL_BEGIN = "# BEGIN REPOSITORY LOCAL";
-const LOCAL_END = "# END REPOSITORY LOCAL";
 const DEFAULT_LOCAL_BODY = "# Add repository-specific ignore patterns in this section only.\n";
 
 // Not from github/gitignore: agent local state (worktree directories and
@@ -141,14 +140,13 @@ function managedHeader(sha: string): string {
   );
 }
 
-/** Current content between the LOCAL markers, or the default. */
+/** Current content between the LOCAL markers, or the default. The region
+ *  grammar is the shared scripts/gitignore_local.ts helper - the same
+ *  line-anchored split the sync's split-file rebuild uses, so the two
+ *  writers can never disagree about where the body sits. */
 function existingLocalBody(output: string): string {
   if (!existsSync(output)) return DEFAULT_LOCAL_BODY;
-  const text = readFileSync(output).toString("utf-8");
-  const begin = text.indexOf(LOCAL_BEGIN);
-  const end = text.indexOf(LOCAL_END);
-  if (begin === -1 || end === -1 || end < begin) return DEFAULT_LOCAL_BODY;
-  return text.slice(begin + LOCAL_BEGIN.length + 1, end);
+  return localRegion(readFileSync(output).toString("utf-8"))?.body ?? DEFAULT_LOCAL_BODY;
 }
 
 function buildTemplate(sha: string, sections: Record<string, string>): string {

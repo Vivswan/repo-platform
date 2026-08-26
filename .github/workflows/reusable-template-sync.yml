@@ -15,13 +15,18 @@
 # only automated writer, and the push uses --force-with-lease so an
 # out-of-band push racing this run surfaces instead of vanishing. Manual
 # commits on the branch are overwritten by design; the PR body says so.
-# Clean updates arm squash auto-merge (the target's all-green check gates
-# the actual merge); conflicts resolve toward the template with the
-# dropped local lines in the PR body and stay MANUAL, as do withheld
-# workflow files, failed validation, and out-of-band settings drift
-# (live visibility or description differing from the recorded copier
-# answers) - auto-resolution warns; only validation failures (and broken
-# inputs) go red.
+# Split-class files (a marker line separates the sync-owned half from the
+# repo-owned half) never ride copier's three-way merge: after the update
+# they are rebuilt structurally - managed half from a clean render at the
+# new ref, repo-local half from the pre-update HEAD. Clean updates arm
+# squash auto-merge (the target's all-green check gates the actual merge);
+# conflicts in non-split files resolve toward the template with the
+# dropped local lines in the PR body and stay MANUAL, as do split-file
+# carries needing review (an appendix, reset managed-half edits, duplicate
+# markers), withheld workflow files, failed validation, and out-of-band
+# settings drift (live visibility or description differing from the
+# recorded copier answers) - auto-resolution warns; only validation
+# failures (and broken inputs) go red.
 
 name: Reusable Template Sync
 
@@ -237,52 +242,16 @@ jobs:
             bun .github/scripts/sync/run_hidden.ts "copier update" -- \
             bun .github/scripts/sync/apply_update.ts
 
-      # Conflicts (local edits overlapping template changes) resolve in the
-      # template's favor so the tree stays valid; in docs carrying the
-      # repo-platform:local-section marker the local lines also move below
-      # the marker instead of being lost. Either way the local lines go
-      # into the PR body for review - and, for a hidden target, ONLY there
-      # (the step-log dump is target file content).
-      - name: Resolve copier conflicts toward the template
-        id: conflicts
-        run: |
-          bun .github/scripts/sync/resolve_copier_conflicts.ts \
-            --summary "$RUNNER_TEMP/dropped-local-hunks.md" --root target \
-            --hide-details "$HIDE_DETAILS"
-          if [ -s "$RUNNER_TEMP/dropped-local-hunks.md" ]; then
-            echo "resolved=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "resolved=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      # A recovery re-render has no three-way merge, so it resets the
-      # sanctioned repository-local regions a normal update preserves: the
-      # content below the repo-platform:local-section sentinel (AGENTS.md,
-      # .gitattributes, .editorconfig, .github/CODEOWNERS), .gitignore's
-      # REPOSITORY LOCAL section, and the
-      # repository tails of the prefix docs (SECURITY.md, CONTRIBUTING.md,
-      # LICENSE.md). Carry them back from the pre-render HEAD before the
-      # tree is validated and diffed; the carried files are listed in the
-      # PR body - and, for a hidden target, ONLY there (paths and
-      # dispositions are target data).
-      - name: Carry repo-local content over the recovery re-render
-        if: inputs.recover == 'recopy'
-        run: |
-          bun .github/scripts/sync/preserve_local_content.ts \
-            --summary "$RUNNER_TEMP/local-carryover.md" --root target \
-            --hide-details "$HIDE_DETAILS"
-
-      # A locally modified file that leaves the render survives copier
-      # update as a conflict leftover. Deletion candidates come only from
-      # the difference of two clean renders minus both versions'
-      # _skip_if_exists lists (see retired_paths.ts): paths never rendered
-      # by either version cannot appear. A formerly rendered path the repo
-      # repurposed after the template retired it IS deleted - the PR body
-      # lists every removal for review. Recovery mode has no trustworthy
-      # old render to diff against, so cleanup is skipped there.
-      - name: Remove files the template retired
+      # Clean template renders at the old and new refs, materialized once
+      # in RUNNER_TEMP by clean_renders.ts: the split-file rebuild below
+      # consumes render-new (and render-old for edit detection), and the
+      # retired-file cleanup diffs the pair - one materialization, so every
+      # consumer sees the same bytes the update rendered. Recovery mode
+      # skips it: the recorded base is unusable, so there is no old ref to
+      # render. copier's output names target paths, so a hidden target's
+      # run is captured.
+      - name: Materialize clean renders
         if: inputs.recover != 'recopy'
-        id: cleanup
         env:
           OLD_SHA: ${{ steps.versions.outputs.old_sha }}
           TARGET_REF: ${{ steps.versions.outputs.target_ref }}
@@ -292,6 +261,79 @@ jobs:
         run: |
           MODULES="$(cat "$RUNNER_TEMP/modules.json")" \
           DESCRIPTION="$(cat "$RUNNER_TEMP/description.txt")" \
+            bun .github/scripts/sync/run_hidden.ts "clean renders" -- \
+            bun .github/scripts/sync/clean_renders.ts
+
+      # Split-class files are REBUILT structurally after every update:
+      # copier's merged result for them is discarded, the managed half
+      # comes from the clean render at the new ref, and the repo-local
+      # half comes byte-for-byte from the pre-update HEAD. Which files are
+      # split, and where each marker sits, comes from the new render's
+      # ownership manifest. Local edits INSIDE a managed half are reset by
+      # this rebuild (detected against the old render, so a template
+      # change never reads as a local edit) - the reset is flagged in the
+      # PR body and via the carry-review file, which forces the PR onto
+      # the manual-review path (open_pr.ts). A recovery re-render has no
+      # renders to consume, so it keeps the sentinel-scan carry over the
+      # recopy result (the working tree IS the fresh render there). The
+      # carried files are listed in the PR body - and, for a hidden
+      # target, ONLY there (paths and dispositions are target data).
+      - name: Rebuild split files structurally
+        env:
+          RECOVER: ${{ inputs.recover }}
+        run: |
+          if [ "$RECOVER" = "recopy" ]; then
+            bun .github/scripts/sync/preserve_local_content.ts \
+              --summary "$RUNNER_TEMP/local-carryover.md" --root target \
+              --hide-details "$HIDE_DETAILS" \
+              --needs-review "$RUNNER_TEMP/carry-review.txt" \
+              --rebuilt-paths "$RUNNER_TEMP/split-rebuilt-paths.txt"
+          else
+            bun .github/scripts/sync/preserve_local_content.ts \
+              --summary "$RUNNER_TEMP/local-carryover.md" --root target \
+              --hide-details "$HIDE_DETAILS" \
+              --needs-review "$RUNNER_TEMP/carry-review.txt" \
+              --rebuilt-paths "$RUNNER_TEMP/split-rebuilt-paths.txt" \
+              --render-dir "$RUNNER_TEMP/render-new" \
+              --old-render-dir "$RUNNER_TEMP/render-old"
+          fi
+
+      # Conflicts (local edits overlapping template changes) resolve in the
+      # template's favor so the tree stays valid. The files the rebuild
+      # above wrote are excluded via --skip - their conflict blocks are
+      # gone with the merged result, and a carried repository half may
+      # legitimately contain conflict-marker-shaped text this pass must not
+      # rewrite - so the conflicts resolved here live in non-split files.
+      # Either way the dropped local lines go into the PR body for review -
+      # and, for a hidden target, ONLY there (the step-log dump is target
+      # file content).
+      - name: Resolve copier conflicts toward the template
+        id: conflicts
+        run: |
+          bun .github/scripts/sync/resolve_copier_conflicts.ts \
+            --summary "$RUNNER_TEMP/dropped-local-hunks.md" --root target \
+            --skip "$RUNNER_TEMP/split-rebuilt-paths.txt" \
+            --hide-details "$HIDE_DETAILS"
+          if [ -s "$RUNNER_TEMP/dropped-local-hunks.md" ]; then
+            echo "resolved=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "resolved=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # A locally modified file that leaves the render survives copier
+      # update as a conflict leftover. Deletion candidates come only from
+      # the difference of the two clean renders materialized above minus
+      # both versions' _skip_if_exists lists (see retired_paths.ts): paths
+      # never rendered by either version cannot appear. A formerly
+      # rendered path the repo repurposed after the template retired it IS
+      # deleted - the PR body lists every removal for review. Recovery
+      # mode has no trustworthy old render to diff against, so cleanup is
+      # skipped there.
+      - name: Remove files the template retired
+        if: inputs.recover != 'recopy'
+        id: cleanup
+        run: |
+          MODULES="$(cat "$RUNNER_TEMP/modules.json")" \
             bun .github/scripts/sync/run_hidden.ts "retired-file cleanup" -- \
             bun .github/scripts/sync/retired_cleanup.ts
           if [ "$HIDE_DETAILS" = "true" ] && [ -s "$RUNNER_TEMP/removed-paths.txt" ]; then
@@ -420,6 +462,7 @@ jobs:
           DRIFT_FILE: ${{ runner.temp }}/settings-drift.md
           SUMMARY_FILE: ${{ runner.temp }}/dropped-local-hunks.md
           CARRIED_FILE: ${{ runner.temp }}/local-carryover.md
+          CARRY_REVIEW_FILE: ${{ runner.temp }}/carry-review.txt
           RETIRED_MODULES_FILE: ${{ runner.temp }}/retired-modules.txt
           REMOVED_PATHS_FILE: ${{ runner.temp }}/removed-paths.txt
           WITHHELD_FILE: ${{ runner.temp }}/withheld-workflows.txt

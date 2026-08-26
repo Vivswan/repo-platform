@@ -3,10 +3,14 @@
 // Invoked from the repo-platform checkout root by reusable-template-sync.yml's
 // "Remove files the template retired" step and by ci/upgrade_path_test.sh;
 // deletion candidates come from retired_paths.ts (see its header for the
-// safety rules).
+// safety rules), diffing the clean renders clean_renders.ts materialized
+// (ensureRenders is idempotent, so callers that never ran the materialize
+// step - rehearse.ts, older harness legs - still work; they just pay for
+// the renders here).
 //
-// Env: OLD_SHA, TARGET_REF, MODULES, CHANNEL, PRIVATE, DESCRIPTION,
-// SRC_PATH, RUNNER_TEMP; TARGET_DIR (default target).
+// Env: RUNNER_TEMP, MODULES; TARGET_DIR (default target); plus, when the
+// renders are not already materialized, ensureRenders' inputs (OLD_SHA,
+// TARGET_REF, CHANNEL, PRIVATE, DESCRIPTION, SRC_PATH).
 
 import { appendFileSync, existsSync, lstatSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -14,6 +18,7 @@ import { parse } from "yaml";
 import { env, fail, requireEnv } from "../shared/gha.ts";
 import { parseJson } from "../shared/json.ts";
 import { parseModules } from "../shared/modules.ts";
+import { ensureRenders, run } from "./clean_renders.ts";
 import { customLicenseFlipError } from "./retired_paths.ts";
 
 function isStringList(value: unknown): value is string[] {
@@ -23,31 +28,13 @@ function isStringList(value: unknown): value is string[] {
 const runnerTemp = requireEnv("RUNNER_TEMP");
 const targetDir = env("TARGET_DIR", "target");
 
-function run(command: string[], options: { stdout?: "pipe" } = {}): string {
-  const proc = Bun.spawnSync(command, {
-    stdio: ["inherit", options.stdout === "pipe" ? "pipe" : "inherit", "inherit"],
-  });
-  if (proc.exitCode !== 0) {
-    // A captured child's ::error:: detail rides ITS stdout (workflow
-    // commands parse from stdout); forward it or the failure is silent.
-    if (options.stdout === "pipe") process.stdout.write(proc.stdout?.toString() ?? "");
-    process.exit(proc.exitCode ?? 1);
-  }
-  return options.stdout === "pipe" ? (proc.stdout?.toString() ?? "") : "";
-}
-
-// The old render uses the answers recorded BEFORE this update (HEAD still
-// points at the pre-update commit); the new render applies the live
-// module/channel/private/description data on top.
-const answersOldText = run(["git", "-C", targetDir, "show", "HEAD:.copier-answers.yml"], {
-  stdout: "pipe",
-});
-writeFileSync(join(runnerTemp, "answers-old.yml"), answersOldText);
+const { renderOld, renderNew, answersOldText } = ensureRenders();
 
 // Dropping the custom-license module leaves the repo's own license file
 // behind (see customLicenseFlipError); the guard needs the pre-update
 // module answer, so an unparseable answers file falls through to
-// render_data.ts's canonical error just below.
+// render_data.ts's canonical error inside ensureRenders (or, on the
+// already-materialized path, to the fallthrough below).
 const newModules = parseModules(requireEnv("MODULES"));
 if (newModules === null) {
   fail("MODULES must be a JSON list of strings");
@@ -74,58 +61,14 @@ if (flipError !== null) {
   fail(flipError);
 }
 
-run([
-  "bun",
-  ".github/scripts/sync/render_data.ts",
-  "--answers-old",
-  join(runnerTemp, "answers-old.yml"),
-  "--out-old",
-  join(runnerTemp, "data-old.yml"),
-  "--out-new",
-  join(runnerTemp, "data-new.yml"),
-  "--modules",
-  requireEnv("MODULES"),
-  "--channel",
-  requireEnv("CHANNEL"),
-  "--private",
-  requireEnv("PRIVATE"),
-  "--description",
-  env("DESCRIPTION"),
-]);
-
-const srcPath = requireEnv("SRC_PATH");
-run([
-  "copier",
-  "copy",
-  "--vcs-ref",
-  requireEnv("OLD_SHA"),
-  "--defaults",
-  "--trust",
-  "--data-file",
-  join(runnerTemp, "data-old.yml"),
-  srcPath,
-  join(runnerTemp, "render-old"),
-]);
-run([
-  "copier",
-  "copy",
-  "--vcs-ref",
-  requireEnv("TARGET_REF"),
-  "--defaults",
-  "--trust",
-  "--data-file",
-  join(runnerTemp, "data-new.yml"),
-  srcPath,
-  join(runnerTemp, "render-new"),
-]);
 const retiredJson = run(
   [
     "bun",
     ".github/scripts/sync/retired_paths.ts",
     "--old-render",
-    join(runnerTemp, "render-old"),
+    renderOld,
     "--new-render",
-    join(runnerTemp, "render-new"),
+    renderNew,
     "--old-copier",
     join(runnerTemp, "copier-old.yml"),
     "--new-copier",

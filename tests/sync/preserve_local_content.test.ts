@@ -6,6 +6,7 @@ import {
   carryGitignoreLocal,
   carryLocalContent,
   carryManagedTail,
+  splitEntries,
 } from "../../.github/scripts/sync/preserve_local_content.ts";
 
 const script = join(import.meta.dir, "../../.github/scripts/sync/preserve_local_content.ts");
@@ -540,6 +541,428 @@ describe("preserve_local_content script", () => {
     expect(result.exitCode).toBe(0);
     expect(result.summary).toBe("");
     expect(result.stdout).toContain("no repo-local content needed carrying over");
+  });
+});
+
+describe("splitEntries", () => {
+  const entry = (over: Record<string, unknown> = {}) => ({
+    class: "split",
+    marker: SENTINEL,
+    managed: "above",
+    hash: null,
+    ...over,
+  });
+
+  test("returns only the split entries with their marker and side", () => {
+    const manifest = JSON.stringify({
+      files: {
+        "AGENTS.md": entry(),
+        ".gitignore": entry({ marker: MANAGED_BEGIN, managed: "below" }),
+        ".github/workflows/ci.yml": { class: "managed", hash: null },
+        ".github/workflows/checks.yml": { class: "starter" },
+      },
+    });
+    expect(splitEntries(manifest, "m")).toEqual([
+      { path: "AGENTS.md", marker: SENTINEL, managed: "above" },
+      { path: ".gitignore", marker: MANAGED_BEGIN, managed: "below" },
+    ]);
+  });
+
+  test("throws on a split entry without a valid marker/managed pair", () => {
+    const manifest = JSON.stringify({ files: { "AGENTS.md": entry({ managed: "sideways" }) } });
+    expect(() => splitEntries(manifest, "m")).toThrow("valid marker/managed pair");
+  });
+
+  test("throws on non-JSON input and on a files-less document", () => {
+    expect(() => splitEntries("not json", "m")).toThrow("does not parse as JSON");
+    expect(() => splitEntries("{}", "m")).toThrow("no top-level 'files' mapping");
+  });
+});
+
+// The managed-tail carry anchors its split on the render ENDING at a
+// sentinel line, so every split-above template source must keep the
+// sentinel as its last non-empty line - managed content below it would be
+// carried into repositories' local tails as if it were repo-owned.
+describe("split-above templates end at the sentinel", () => {
+  test("the templates with repository-owned tails end with the exact sentinel line", () => {
+    const templatesDir = join(repoRoot, "templates");
+    const templated: [string, string][] = [
+      [
+        join(templatesDir, "base", "{% if not private %}CONTRIBUTING.md{% endif %}.jinja"),
+        SENTINEL,
+      ],
+      [join(templatesDir, "base", "SECURITY.md.jinja"), SENTINEL],
+      [
+        join(
+          templatesDir,
+          "base",
+          "{% if 'custom-license' not in modules %}LICENSE.md{% endif %}.jinja",
+        ),
+        SENTINEL,
+      ],
+      [join(templatesDir, "base", ".gitattributes.jinja"), HASH_SENTINEL],
+      [join(templatesDir, "base", ".editorconfig.jinja"), HASH_SENTINEL],
+      [join(templatesDir, "base", ".github", "CODEOWNERS.jinja"), HASH_SENTINEL],
+      [join(templatesDir, "agents", "AGENTS.md.jinja"), SENTINEL],
+    ];
+    for (const [path, sentinel] of templated) {
+      const lines = readFileSync(path, "utf-8").split("\n");
+      const lastNonEmpty = lines.filter((line) => line.trim().length > 0).at(-1);
+      expect(lastNonEmpty).toBe(sentinel);
+    }
+  });
+});
+
+// Render mode: the primary sync path. The working tree holds copier's
+// MERGED result, which the rebuild must DISCARD - every fixture below
+// plants junk there to prove the output comes from (render-new, HEAD)
+// only. HEAD is the committed pre-update state; render-old/render-new are
+// clean renders at the old and new template refs.
+describe("preserve_local_content render mode", () => {
+  const MANIFEST_REL = ".github/repo-platform-manifest.json";
+  const agentsOld = `# AGENTS.md\n\nold managed guidance\n\n${SENTINEL}\n`;
+  const securityOld = `old security prefix\n${SENTINEL}\n`;
+  const securityNew = `fresh security prefix\n${SENTINEL}\n`;
+  const gitignoreOldRender = `${LOCAL_BEGIN}\n# Add repository-specific ignore patterns in this section only.\n\n${LOCAL_END}\n\n${MANAGED_BEGIN}\n*.old\n${MANAGED_END}\n`;
+  const MERGE_JUNK = "merged result to discard\n";
+
+  interface SplitSpec {
+    path: string;
+    marker: string;
+    managed: "above" | "below";
+  }
+
+  function manifestJson(entries: SplitSpec[]): string {
+    return JSON.stringify({
+      files: Object.fromEntries(
+        entries.map((e) => [
+          e.path,
+          { class: "split", marker: e.marker, managed: e.managed, hash: null },
+        ]),
+      ),
+    });
+  }
+
+  function makeRenderPair(
+    entries: SplitSpec[],
+    newFiles: Record<string, string>,
+    oldFiles: Record<string, string>,
+  ): { renderDir: string; oldRenderDir: string } {
+    const base = mkdtempSync(join(tmpdir(), "preserve-render-"));
+    const renderDir = join(base, "render-new");
+    const oldRenderDir = join(base, "render-old");
+    for (const [dir, files] of [
+      [renderDir, { ...newFiles, [MANIFEST_REL]: manifestJson(entries) }],
+      [oldRenderDir, oldFiles],
+    ] as const) {
+      mkdirSync(dir, { recursive: true });
+      for (const [rel, content] of Object.entries(files)) {
+        mkdirSync(dirname(join(dir, rel)), { recursive: true });
+        writeFileSync(join(dir, rel), content);
+      }
+    }
+    return { renderDir, oldRenderDir };
+  }
+
+  function runRender(root: string, renderDir: string, oldRenderDir: string) {
+    const reviewPath = join(root, "..", "carry-review.txt");
+    const rebuiltPath = join(root, "..", "rebuilt-paths.txt");
+    const result = runScript(root, [
+      "--render-dir",
+      renderDir,
+      "--old-render-dir",
+      oldRenderDir,
+      "--needs-review",
+      reviewPath,
+      "--rebuilt-paths",
+      rebuiltPath,
+    ]);
+    return {
+      ...result,
+      review: existsSync(reviewPath) ? readFileSync(reviewPath, "utf-8") : "",
+      rebuilt: existsSync(rebuiltPath) ? readFileSync(rebuiltPath, "utf-8") : "",
+    };
+  }
+
+  test("rebuilds a split file from the clean render and HEAD, discarding the merge", () => {
+    const root = makeTarget({ "AGENTS.md": agentsTarget });
+    initGitRepo(root);
+    writeFileSync(join(root, "AGENTS.md"), MERGE_JUNK);
+    const { renderDir, oldRenderDir } = makeRenderPair(
+      [{ path: "AGENTS.md", marker: SENTINEL, managed: "above" }],
+      { "AGENTS.md": agentsRender },
+      { "AGENTS.md": agentsOld },
+    );
+    const result = runRender(root, renderDir, oldRenderDir);
+    expect(result.exitCode).toBe(0);
+    // Managed half byte-equal to render-new, tail byte-equal to HEAD's.
+    expect(readFileSync(join(root, "AGENTS.md"), "utf-8")).toBe(
+      `${agentsRender}\n## Project docs\n\nrepo-local instructions\n`,
+    );
+    expect(result.summary).toContain("- `AGENTS.md`:");
+    expect(result.summary).toContain("rebuilt structurally");
+    // A template change to the managed half is routine, not a local edit:
+    // nothing to review, the PR stays auto-merge-eligible.
+    expect(result.review).toBe("");
+  });
+
+  test("a sentinel-bearing file not declared split in the manifest is untouched", () => {
+    const root = makeTarget({ "AGENTS.md": agentsTarget, "NOTES.md": `note\n${SENTINEL}\n` });
+    initGitRepo(root);
+    writeFileSync(join(root, "NOTES.md"), MERGE_JUNK);
+    const { renderDir, oldRenderDir } = makeRenderPair(
+      [{ path: "AGENTS.md", marker: SENTINEL, managed: "above" }],
+      { "AGENTS.md": agentsRender },
+      { "AGENTS.md": agentsOld },
+    );
+    const result = runRender(root, renderDir, oldRenderDir);
+    expect(result.exitCode).toBe(0);
+    // The manifest, not a sentinel scan, drives the file list.
+    expect(readFileSync(join(root, "NOTES.md"), "utf-8")).toBe(MERGE_JUNK);
+  });
+
+  test("an edit inside the managed half is reset to the fresh render and flagged", () => {
+    const root = makeTarget({ "SECURITY.md": `old security prefix EDITED\n${SENTINEL}\n` });
+    initGitRepo(root);
+    writeFileSync(join(root, "SECURITY.md"), MERGE_JUNK);
+    const { renderDir, oldRenderDir } = makeRenderPair(
+      [{ path: "SECURITY.md", marker: SENTINEL, managed: "above" }],
+      { "SECURITY.md": securityNew },
+      { "SECURITY.md": securityOld },
+    );
+    const result = runRender(root, renderDir, oldRenderDir);
+    expect(result.exitCode).toBe(0);
+    // Managed halves are template-owned: byte-equal to render-new.
+    expect(readFileSync(join(root, "SECURITY.md"), "utf-8")).toBe(securityNew);
+    expect(result.summary).toContain("RESET to the fresh render");
+    expect(result.review).toContain("SECURITY.md: managed-half edits reset");
+  });
+
+  test("a routine template change to the managed half is not read as a local edit", () => {
+    const root = makeTarget({ "SECURITY.md": `${securityOld}\n## Scope\n\nrepo tail\n` });
+    initGitRepo(root);
+    writeFileSync(join(root, "SECURITY.md"), MERGE_JUNK);
+    const { renderDir, oldRenderDir } = makeRenderPair(
+      [{ path: "SECURITY.md", marker: SENTINEL, managed: "above" }],
+      { "SECURITY.md": securityNew },
+      { "SECURITY.md": securityOld },
+    );
+    const result = runRender(root, renderDir, oldRenderDir);
+    expect(result.exitCode).toBe(0);
+    expect(readFileSync(join(root, "SECURITY.md"), "utf-8")).toBe(
+      `${securityNew}\n## Scope\n\nrepo tail\n`,
+    );
+    expect(result.review).toBe("");
+    expect(result.summary).not.toContain("RESET");
+  });
+
+  test("a managed:below entry routes to the LOCAL-section carry", () => {
+    const root = makeTarget({ ".gitignore": gitignoreTarget });
+    initGitRepo(root);
+    writeFileSync(join(root, ".gitignore"), MERGE_JUNK);
+    const { renderDir, oldRenderDir } = makeRenderPair(
+      [{ path: ".gitignore", marker: MANAGED_BEGIN, managed: "below" }],
+      { ".gitignore": gitignoreRender },
+      { ".gitignore": gitignoreOldRender },
+    );
+    const result = runRender(root, renderDir, oldRenderDir);
+    expect(result.exitCode).toBe(0);
+    const rebuilt = readFileSync(join(root, ".gitignore"), "utf-8");
+    expect(rebuilt).toContain("/repo-local-cache/");
+    expect(rebuilt).toEndWith(gitignoreManagedNew);
+    expect(result.summary).toContain("REPOSITORY LOCAL section restored");
+    expect(result.review).toBe("");
+  });
+
+  test("an edit inside .gitignore's managed section is reset and flagged", () => {
+    const target = `${LOCAL_BEGIN}\n# Add repository-specific ignore patterns in this section only.\n\n${LOCAL_END}\n\n${MANAGED_BEGIN}\n*.old\nhand-added-in-managed/\n${MANAGED_END}\n`;
+    const root = makeTarget({ ".gitignore": target });
+    initGitRepo(root);
+    writeFileSync(join(root, ".gitignore"), MERGE_JUNK);
+    const { renderDir, oldRenderDir } = makeRenderPair(
+      [{ path: ".gitignore", marker: MANAGED_BEGIN, managed: "below" }],
+      { ".gitignore": gitignoreRender },
+      { ".gitignore": gitignoreOldRender },
+    );
+    const result = runRender(root, renderDir, oldRenderDir);
+    expect(result.exitCode).toBe(0);
+    const rebuilt = readFileSync(join(root, ".gitignore"), "utf-8");
+    expect(rebuilt).toEndWith(gitignoreManagedNew);
+    expect(rebuilt).not.toContain("hand-added-in-managed/");
+    expect(result.review).toContain(".gitignore: managed-half edits reset");
+  });
+
+  test("a split file absent from HEAD is written as the clean render", () => {
+    const root = makeTarget({ "README.md": "readme\n" });
+    initGitRepo(root);
+    writeFileSync(join(root, "AGENTS.md"), MERGE_JUNK);
+    const { renderDir, oldRenderDir } = makeRenderPair(
+      [{ path: "AGENTS.md", marker: SENTINEL, managed: "above" }],
+      { "AGENTS.md": agentsRender },
+      {},
+    );
+    const result = runRender(root, renderDir, oldRenderDir);
+    expect(result.exitCode).toBe(0);
+    expect(readFileSync(join(root, "AGENTS.md"), "utf-8")).toBe(agentsRender);
+    expect(result.summary).toBe("");
+    expect(result.review).toBe("");
+  });
+
+  test("an unsplittable previous copy takes the appendix and flags review", () => {
+    const legacy = "# AGENTS.md\n\nold guidance, no sentinel\n\nrepo-local notes\n";
+    const root = makeTarget({ "AGENTS.md": legacy });
+    initGitRepo(root);
+    writeFileSync(join(root, "AGENTS.md"), MERGE_JUNK);
+    const { renderDir, oldRenderDir } = makeRenderPair(
+      [{ path: "AGENTS.md", marker: SENTINEL, managed: "above" }],
+      { "AGENTS.md": agentsRender },
+      { "AGENTS.md": agentsOld },
+    );
+    const result = runRender(root, renderDir, oldRenderDir);
+    expect(result.exitCode).toBe(0);
+    const rebuilt = readFileSync(join(root, "AGENTS.md"), "utf-8");
+    expect(rebuilt).toStartWith(agentsRender);
+    expect(rebuilt).toContain("repo-platform:recovery-appendix");
+    expect(rebuilt).toEndWith(legacy);
+    expect(result.review).toContain("AGENTS.md: recovery-appendix");
+  });
+
+  test("duplicate sentinels in the previous copy flag review", () => {
+    const target = `${agentsOld}\ntail\n${SENTINEL}\nstale duplicate\n`;
+    const root = makeTarget({ "AGENTS.md": target });
+    initGitRepo(root);
+    writeFileSync(join(root, "AGENTS.md"), MERGE_JUNK);
+    const { renderDir, oldRenderDir } = makeRenderPair(
+      [{ path: "AGENTS.md", marker: SENTINEL, managed: "above" }],
+      { "AGENTS.md": agentsRender },
+      { "AGENTS.md": agentsOld },
+    );
+    const result = runRender(root, renderDir, oldRenderDir);
+    expect(result.exitCode).toBe(0);
+    expect(result.review).toContain("AGENTS.md: duplicate local-section markers");
+  });
+
+  test("a previous copy whose managed marker is gone is unverifiable, not clean", () => {
+    // Clean LOCAL markers, but the managed BEGIN marker is missing: the
+    // LOCAL body splices fine, yet whatever sat where the managed section
+    // should be is dropped - that drop must reach review, not auto-merge.
+    const target = `${LOCAL_BEGIN}\n/repo-local-cache/\n${LOCAL_END}\n\nunmarked old managed content\n`;
+    const root = makeTarget({ ".gitignore": target });
+    initGitRepo(root);
+    writeFileSync(join(root, ".gitignore"), MERGE_JUNK);
+    const { renderDir, oldRenderDir } = makeRenderPair(
+      [{ path: ".gitignore", marker: MANAGED_BEGIN, managed: "below" }],
+      { ".gitignore": gitignoreRender },
+      { ".gitignore": gitignoreOldRender },
+    );
+    const result = runRender(root, renderDir, oldRenderDir);
+    expect(result.exitCode).toBe(0);
+    expect(result.review).toContain(".gitignore: managed half unverifiable");
+    expect(result.summary).toContain("could not be located");
+  });
+
+  test("a HEAD file with no old-render baseline is unverifiable, not clean", () => {
+    // The template starts splitting a path the repo already owned: the
+    // tail carries, but the pre-marker content is replaced with no old
+    // render to prove it was template content - review, not auto-merge.
+    const root = makeTarget({ "AGENTS.md": agentsTarget });
+    initGitRepo(root);
+    writeFileSync(join(root, "AGENTS.md"), MERGE_JUNK);
+    const { renderDir, oldRenderDir } = makeRenderPair(
+      [{ path: "AGENTS.md", marker: SENTINEL, managed: "above" }],
+      { "AGENTS.md": agentsRender },
+      {},
+    );
+    const result = runRender(root, renderDir, oldRenderDir);
+    expect(result.exitCode).toBe(0);
+    expect(result.review).toContain("AGENTS.md: managed half unverifiable");
+  });
+
+  test("a repo that pre-applied the new managed half is kept whole without a reset flag", () => {
+    // Nothing is dropped (the delivered half equals HEAD's), so neither
+    // the reset nor the unverifiable flag may fire even though HEAD's
+    // half differs from the OLD render's.
+    const target = `${agentsRender}\nrepo tail\n`;
+    const root = makeTarget({ "AGENTS.md": target });
+    initGitRepo(root);
+    writeFileSync(join(root, "AGENTS.md"), MERGE_JUNK);
+    const { renderDir, oldRenderDir } = makeRenderPair(
+      [{ path: "AGENTS.md", marker: SENTINEL, managed: "above" }],
+      { "AGENTS.md": agentsRender },
+      { "AGENTS.md": agentsOld },
+    );
+    const result = runRender(root, renderDir, oldRenderDir);
+    expect(result.exitCode).toBe(0);
+    expect(readFileSync(join(root, "AGENTS.md"), "utf-8")).toBe(target);
+    expect(result.review).toBe("");
+  });
+
+  test("a carried tail keeps conflict-marker-shaped text byte-for-byte", () => {
+    // The resolver skips rebuilt files (--skip); the rebuild itself must
+    // also carry such a tail untouched.
+    const markerish = [`${"<".repeat(7)} before updating`, "=".repeat(7)].join("\n");
+    const target = `${agentsOld}\n## Notes on merges\n\n${markerish}\n`;
+    const root = makeTarget({ "AGENTS.md": target });
+    initGitRepo(root);
+    writeFileSync(join(root, "AGENTS.md"), MERGE_JUNK);
+    const { renderDir, oldRenderDir } = makeRenderPair(
+      [{ path: "AGENTS.md", marker: SENTINEL, managed: "above" }],
+      { "AGENTS.md": agentsRender },
+      { "AGENTS.md": agentsOld },
+    );
+    const result = runRender(root, renderDir, oldRenderDir);
+    expect(result.exitCode).toBe(0);
+    expect(readFileSync(join(root, "AGENTS.md"), "utf-8")).toBe(
+      `${agentsRender}\n## Notes on merges\n\n${markerish}\n`,
+    );
+  });
+
+  test("--rebuilt-paths lists every split entry for the resolver's skip list", () => {
+    const root = makeTarget({ "AGENTS.md": agentsTarget, ".gitignore": gitignoreTarget });
+    initGitRepo(root);
+    const { renderDir, oldRenderDir } = makeRenderPair(
+      [
+        { path: "AGENTS.md", marker: SENTINEL, managed: "above" },
+        { path: ".gitignore", marker: MANAGED_BEGIN, managed: "below" },
+      ],
+      { "AGENTS.md": agentsRender, ".gitignore": gitignoreRender },
+      { "AGENTS.md": agentsOld, ".gitignore": gitignoreOldRender },
+    );
+    const result = runRender(root, renderDir, oldRenderDir);
+    expect(result.exitCode).toBe(0);
+    expect(result.rebuilt).toBe("AGENTS.md\n.gitignore\n");
+  });
+
+  test("a split entry whose file is missing from the render fails loudly", () => {
+    const root = makeTarget({ "AGENTS.md": agentsTarget });
+    initGitRepo(root);
+    const { renderDir, oldRenderDir } = makeRenderPair(
+      [{ path: "AGENTS.md", marker: SENTINEL, managed: "above" }],
+      {},
+      {},
+    );
+    const result = runRender(root, renderDir, oldRenderDir);
+    expect(result.exitCode).not.toBe(0);
+    expect(result.stderr).toContain("manifest and render disagree");
+  });
+
+  test("a render tree without the ownership manifest fails loudly", () => {
+    const root = makeTarget({ "AGENTS.md": agentsTarget });
+    initGitRepo(root);
+    const base = mkdtempSync(join(tmpdir(), "preserve-render-"));
+    mkdirSync(join(base, "render-new"));
+    mkdirSync(join(base, "render-old"));
+    const result = runRender(root, join(base, "render-new"), join(base, "render-old"));
+    expect(result.exitCode).not.toBe(0);
+    expect(result.stderr).toContain("needs the new render's manifest");
+  });
+
+  test("--render-dir without --old-render-dir is rejected", () => {
+    const root = makeTarget({ "AGENTS.md": agentsTarget });
+    initGitRepo(root);
+    const result = runScript(root, ["--render-dir", root]);
+    expect(result.exitCode).not.toBe(0);
+    expect(result.stderr).toContain("--render-dir and --old-render-dir come together");
   });
 });
 

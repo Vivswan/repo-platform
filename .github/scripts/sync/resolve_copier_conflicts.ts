@@ -11,14 +11,21 @@
 //     >(x7) after updating
 //
 // This script keeps the "after updating" (template) side of every block and
-// collects the dropped local lines into a markdown summary, which the template
-// sync workflow embeds in the PR body so a human can restore anything that
-// should stay local. When the kept side carries the repo-local-section
-// sentinel line (templated docs place it at the end of their managed half),
-// local hunks are instead appended below it and the summary says so. The
-// full summary goes to stdout; the --summary file drops
-// whole trailing sections past --limit bytes so it fits a PR body with its
-// markdown fences intact.
+// collects the dropped local lines into a markdown summary, which the
+// template sync workflow embeds in the PR body so a human can restore
+// anything that should stay local. Split-class files never reach this pass:
+// the preceding "Rebuild split files structurally" step
+// (preserve_local_content.ts) discards copier's merged result for them -
+// conflict blocks included - rebuilds them from the clean render plus the
+// HEAD copy, and lists them in the --skip file, which this script excludes
+// outright (a carried repository half may legitimately contain
+// conflict-marker-shaped text, and rewriting it would mutate the bytes the
+// rebuild just preserved; real leftover markers there fail validation
+// instead). The conflicts resolved here live in non-split files - fully
+// managed ones, where the template side is the owner by definition, plus
+// the mergeable settings.yml. The full summary goes to stdout; the
+// --summary file drops whole trailing sections past --limit bytes so it
+// fits a PR body with its markdown fences intact.
 //
 // A file whose markers are malformed (missing, nested, or out-of-order marker
 // lines) is left untouched and noted in the summary; the validator then fails
@@ -26,10 +33,11 @@
 //
 // Usage:
 //   bun resolve_copier_conflicts.ts --summary /path/to/summary.md [--root .]
+//     [--skip /path/to/rebuilt-paths.txt]
 
 import { readFileSync, writeFileSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
-import { joinLines, NEWLINE, splitLines, stripCr } from "../shared/lines.ts";
+import { joinLines, splitLines, stripCr } from "../shared/lines.ts";
 import { walkFiles } from "./walk.ts";
 
 // Built by concatenation so this file never contains a literal marker line
@@ -38,90 +46,7 @@ const START = Buffer.from(`${"<".repeat(7)} before updating`);
 const SEP = Buffer.from("=".repeat(7));
 const END = Buffer.from(`${">".repeat(7)} after updating`);
 
-// Repo-local-section sentinel: templated files with a repository-owned tail
-// (templates/base CONTRIBUTING.md, SECURITY.md, LICENSE.md, .gitattributes,
-// .editorconfig, and .github/CODEOWNERS, templates/agents AGENTS.md)
-// close their managed half with this exact comment line; everything below it
-// is repository-owned and runs to end of file. When the kept template side of
-// a resolved file carries the sentinel, dropped local hunks are appended below
-// it instead of being discarded to the PR body. Detection is the exact line,
-// never prose, so ordinary template wording cannot trigger it. Two spellings:
-// the HTML comment for markdown-family files, the hash comment for files
-// whose comment character is # (.gitattributes, .editorconfig, CODEOWNERS).
-const LOCAL_SECTION_SENTINELS = [
-  Buffer.from("<!-- repo-platform:local-section -->"),
-  Buffer.from("# repo-platform:local-section"),
-];
-
-const CRLF = Buffer.from("\r\n");
-
-type Resolution =
-  | { kind: "malformed" }
-  | { kind: "resolved"; resolved: Buffer; dropped: DroppedHunk[] };
-
-/** A dropped local hunk with the tail it would contribute below the
- * sentinel and how it was handled. */
-interface DroppedHunk {
-  hunk: Buffer;
-  tail: Buffer;
-  disposition: "dropped" | "moved" | "moved-tail";
-}
-
-function isSentinelLine(line: Buffer): boolean {
-  const stripped = stripCr(line);
-  return LOCAL_SECTION_SENTINELS.some((sentinel) => stripped.equals(sentinel));
-}
-
-function hasLocalSectionSentinel(data: Buffer): boolean {
-  return splitLines(data).some(isSentinelLine);
-}
-
-/** Content after the hunk's own last sentinel line: a hunk carrying a stale
- * copy of the managed half contributes only its repository-owned tail, so the
- * output file keeps a single sentinel and a single managed half. */
-function localTailOf(hunk: Buffer): Buffer {
-  const lines = splitLines(hunk);
-  let last = -1;
-  for (let i = 0; i < lines.length; i++) {
-    if (isSentinelLine(lines[i])) last = i;
-  }
-  return last === -1 ? hunk : joinLines(lines.slice(last + 1));
-}
-
-/** Append hunks to the end of the file (below the sentinel, whose local
- * section runs to end of file), separated by exactly one blank line each,
- * matching the file's dominant line-ending style. Hunks are trimmed of blank
- * lines at both ends: they often start with one (the blank that separated
- * them from the text above, or the slice point after their own sentinel). */
-function appendBelowSentinel(resolved: Buffer, hunks: Buffer[]): Buffer {
-  const newline = resolved.includes(CRLF) ? CRLF : NEWLINE;
-  const trimEnd = (data: Buffer): Buffer => {
-    let end = data.length;
-    while (end > 0 && (data[end - 1] === 0x0a || data[end - 1] === 0x0d)) end--;
-    return data.subarray(0, end);
-  };
-  const trimBlankLines = (data: Buffer): Buffer => {
-    let start = 0;
-    while (start < data.length && (data[start] === 0x0a || data[start] === 0x0d)) start++;
-    return trimEnd(data.subarray(start));
-  };
-  const parts: Buffer[] = [trimEnd(resolved)];
-  for (const hunk of hunks) parts.push(newline, newline, trimBlankLines(hunk));
-  parts.push(newline);
-  return Buffer.concat(parts);
-}
-
-/** Classify a dropped hunk against the kept side: with no sentinel in the
- * kept side (or nothing left after the hunk's own) it is dropped to the
- * summary; otherwise its tail moves below the sentinel - whole when the
- * hunk carried no stale managed half, tail-only when it did. */
-function classifyHunk(hunk: Buffer, hasSentinel: boolean): DroppedHunk {
-  const tail = hasSentinel ? localTailOf(hunk) : hunk;
-  if (!hasSentinel || tail.toString("utf-8").trim().length === 0) {
-    return { hunk, tail, disposition: "dropped" };
-  }
-  return { hunk, tail, disposition: tail.length === hunk.length ? "moved" : "moved-tail" };
-}
+type Resolution = { kind: "malformed" } | { kind: "resolved"; resolved: Buffer; dropped: Buffer[] };
 
 /** Keep the template side of every conflict block.
  *
@@ -159,13 +84,7 @@ function resolveConflicts(data: Buffer): Resolution {
     out.push(...lines.slice(j + 1, k));
     i = k + 1;
   }
-  const resolved = joinLines(out);
-  const hasSentinel = hasLocalSectionSentinel(resolved);
-  return {
-    kind: "resolved",
-    resolved,
-    dropped: dropped.map((hunk) => classifyHunk(hunk, hasSentinel)),
-  };
+  return { kind: "resolved", resolved: joinLines(out), dropped };
 }
 
 function fenceFor(text: string): string {
@@ -187,15 +106,9 @@ function summarize(rel: string, resolution: Resolution): string {
     );
     return lines.join("\n");
   }
-  resolution.dropped.forEach(({ hunk, disposition }, index) => {
+  resolution.dropped.forEach((hunk, index) => {
     const text = hunk.toString("utf-8");
-    const heading =
-      disposition === "moved"
-        ? `Conflict ${index + 1}: local lines moved below the repository-specific marker (template side kept in place):`
-        : disposition === "moved-tail"
-          ? `Conflict ${index + 1}: the local tail after the marker was moved below the repository-specific marker; the stale local copy of the managed half above it was dropped:`
-          : `Conflict ${index + 1}: dropped local lines (template version kept):`;
-    lines.push(heading, "");
+    lines.push(`Conflict ${index + 1}: dropped local lines (template version kept):`, "");
     if (text.trim()) {
       const fence = fenceFor(text);
       lines.push(fence, text, fence, "");
@@ -248,6 +161,8 @@ interface Args {
   root: string;
   limit: number;
   hideDetails: boolean;
+  /** Relative paths this pass must not touch (the rebuilt split files). */
+  skip: Set<string>;
 }
 
 function parseArgs(argv: string[]): Args {
@@ -255,6 +170,7 @@ function parseArgs(argv: string[]): Args {
   let root = ".";
   let limit = 20000;
   let hideDetails = false;
+  const skip = new Set<string>();
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     const value = () => {
@@ -265,7 +181,11 @@ function parseArgs(argv: string[]): Args {
     if (arg === "--summary") summary = value();
     else if (arg === "--root") root = value();
     else if (arg === "--hide-details") hideDetails = value() === "true";
-    else if (arg === "--limit") {
+    else if (arg === "--skip") {
+      for (const line of readFileSync(value(), "utf-8").split("\n")) {
+        if (line !== "") skip.add(line);
+      }
+    } else if (arg === "--limit") {
       const raw = value();
       limit = Number.parseInt(raw, 10);
       if (Number.isNaN(limit) || String(limit) !== raw.trim()) {
@@ -275,7 +195,7 @@ function parseArgs(argv: string[]): Args {
   }
   if (!summary) usageError("the following arguments are required: --summary");
   if (limit < 200) usageError("--limit must be at least 200");
-  return { summary, root, limit, hideDetails };
+  return { summary, root, limit, hideDetails, skip };
 }
 
 function main(): number {
@@ -284,6 +204,7 @@ function main(): number {
 
   const sections: string[] = [];
   for (const rel of walkFiles(root)) {
+    if (args.skip.has(rel)) continue;
     const path = join(root, rel);
     const data = readFileSync(path);
     if (!data.includes(START)) continue;
@@ -299,23 +220,11 @@ function main(): number {
           : `${printedRel}: malformed or out-of-order conflict markers, left untouched`,
       );
     } else if (resolution.dropped.length > 0) {
-      const appended = resolution.dropped
-        .filter(({ disposition }) => disposition !== "dropped")
-        .map(({ tail }) => tail);
-      writeFileSync(
-        path,
-        appended.length > 0
-          ? appendBelowSentinel(resolution.resolved, appended)
-          : resolution.resolved,
-      );
-      const moved =
-        appended.length > 0
-          ? `; moved ${appended.length} local hunk(s) below the repository-specific marker`
-          : "";
+      writeFileSync(path, resolution.resolved);
       console.log(
         args.hideDetails
-          ? `resolved ${resolution.dropped.length} conflict(s) toward the template${moved} (path hidden: private repository)`
-          : `${printedRel}: resolved ${resolution.dropped.length} conflict(s) toward the template${moved}`,
+          ? `resolved ${resolution.dropped.length} conflict(s) toward the template (path hidden: private repository)`
+          : `${printedRel}: resolved ${resolution.dropped.length} conflict(s) toward the template`,
       );
     } else {
       // Marker bytes appear only mid-line (not a conflict); skip.
