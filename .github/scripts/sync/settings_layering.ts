@@ -5,13 +5,14 @@
 // under the layering dialect every key there would shadow the centrally
 // computed managed layer forever. This step REPLACES such a file with the
 // freshly rendered identity starter (the settings-sync template, seeded
-// from the repo's live values - description and private from the
-// post-update recorded answers, homepage and topics from the old file's
-// own declarations, the state the nightly heal enforced), diffs the OLD
-// file's declarations against the computed managed layer, and writes the
-// dropped deliberate overrides to $RUNNER_TEMP/settings-layering.md -
-// open_pr.ts appends that section and holds the PR for review so wanted
-// overrides can be re-added before merging.
+// from the description in the post-update recorded answers - the live
+// value the sync fetched - and the old file's own declared homepage,
+// topics, and visibility, the state the nightly heal enforced, with the
+// recorded answers as the fallback), diffs the OLD file's declarations
+// against the computed managed layer, and writes the dropped deliberate
+// overrides to $RUNNER_TEMP/settings-layering.md - open_pr.ts appends
+// that section and holds the PR for review so wanted overrides can be
+// re-added before merging.
 //
 // One-time by construction: the legacy `# repo-platform:mergeable` marker
 // line is the trigger, and the rendered starter does not carry it -
@@ -196,9 +197,12 @@ export function transitionSettingsStarter(
         const facts = factsFromTargetDir(targetDir, manifests);
         const old = parseSettingsDoc(oldText, settingsPath);
         const oldRepository = isMapping(old.repository) ? old.repository : {};
-        // description/private: the post-update recorded answers carry the
-        // live values (the sync fetched them). homepage/topics: the old
-        // file's declarations, the state the nightly heal enforced.
+        // description: the post-update recorded answer carries the live
+        // value the sync fetched. homepage/topics: the old file's own
+        // declarations, the state the nightly heal enforced. private:
+        // facts.private, the same declared-over-recorded precedence the
+        // apply paths use (factsFromTargetDir reads the old file's
+        // declaration first).
         const answers = parseSettingsDoc(
           readFileSync(join(targetDir, ".copier-answers.yml"), "utf-8"),
           join(targetDir, ".copier-answers.yml"),

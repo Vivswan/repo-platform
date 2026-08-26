@@ -12,6 +12,7 @@ import { parse as parseYaml } from "yaml";
 import {
   droppedOverrides,
   type IdentitySeed,
+  isLegacyBaseline,
   LEGACY_MERGEABLE_LINE,
   layeringSummary,
   renderStarter,
@@ -30,6 +31,22 @@ const seed: IdentitySeed = {
   private: false,
   githubUsername: "Vivswan",
 };
+
+describe("isLegacyBaseline", () => {
+  test("matches the marker exactly at column 0 within the header window", () => {
+    expect(isLegacyBaseline(`---\n${LEGACY_MERGEABLE_LINE}\nrepository: {}\n`)).toBe(true);
+    // Line 10 (index 9) is the last line inside the window; line 11 is out.
+    expect(isLegacyBaseline(`${"# filler\n".repeat(9)}${LEGACY_MERGEABLE_LINE}\n`)).toBe(true);
+    expect(isLegacyBaseline(`${"# filler\n".repeat(10)}${LEGACY_MERGEABLE_LINE}\n`)).toBe(false);
+  });
+
+  test("an indented mention (a block scalar of a hand-written file) never triggers", () => {
+    expect(isLegacyBaseline(`repository:\n  description: |\n    ${LEGACY_MERGEABLE_LINE}\n`)).toBe(
+      false,
+    );
+    expect(isLegacyBaseline(`see the ${LEGACY_MERGEABLE_LINE} marker\n`)).toBe(false);
+  });
+});
 
 describe("renderStarter", () => {
   test("substitutes the four identity expressions and parses as YAML", () => {

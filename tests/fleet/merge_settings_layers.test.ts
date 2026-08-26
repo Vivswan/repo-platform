@@ -5,6 +5,7 @@
 
 import { describe, expect, test } from "bun:test";
 import {
+  duplicateNameWarnings,
   identityKeyIssues,
   mergeSettingsLayers,
   missingIdentityKeys,
@@ -118,6 +119,47 @@ describe("nameKeyedUnion", () => {
   test("nameless entries pass through for the apply to reject on its own terms", () => {
     const union = nameKeyedUnion([{ name: "a" }], [{ color: "fff" }], (name) => name);
     expect(union).toEqual([{ name: "a" }, { color: "fff" }]);
+  });
+
+  test("a repo-layer duplicate rides through once, first wins", () => {
+    expect(
+      nameKeyedUnion(
+        [{ name: "a" }],
+        [
+          { name: "z", v: 1 },
+          { name: "Z", v: 2 },
+        ],
+        (name) => name.toLowerCase(),
+      ),
+    ).toEqual([{ name: "a" }, { name: "z", v: 1 }]);
+    expect(
+      nameKeyedUnion(
+        [{ name: "a" }],
+        [
+          { name: "a", v: 1 },
+          { name: "A", v: 2 },
+        ],
+        (name) => name.toLowerCase(),
+      ),
+    ).toEqual([{ name: "a", v: 1 }]);
+  });
+});
+
+describe("duplicateNameWarnings", () => {
+  test("names label duplicates case-folded and ruleset duplicates exactly", () => {
+    const warnings = duplicateNameWarnings({
+      labels: [{ name: "bug" }, { name: "BUG" }],
+      rulesets: [{ name: "main" }, { name: "MAIN" }, { name: "main" }],
+    });
+    expect(warnings).toHaveLength(2);
+    expect(warnings[0]).toContain('"bug" and "BUG"');
+    expect(warnings[1]).toContain('"main" and "main"');
+  });
+
+  test("distinct names draw no warning", () => {
+    expect(duplicateNameWarnings({ labels: [{ name: "a" }, { name: "b" }], rulesets: [] })).toEqual(
+      [],
+    );
   });
 });
 

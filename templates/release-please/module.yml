@@ -46,4 +46,3 @@ settings_rulesets:
       - actor_id: 5
         actor_type: RepositoryRole
         bypass_mode: always
-

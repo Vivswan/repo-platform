@@ -93,7 +93,13 @@ export function nameKeyedUnion(
       merged.push(entry);
       continue;
     }
-    if (!taken.has(fold(name))) merged.push(entry);
+    // taken also collects appended repo-only names, so a repo-layer
+    // duplicate rides through once - the same first-wins rule the matched
+    // branch applies (duplicateNameWarnings names the duplicate).
+    if (!taken.has(fold(name))) {
+      merged.push(entry);
+      taken.add(fold(name));
+    }
   }
   return merged;
 }

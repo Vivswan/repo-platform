@@ -144,6 +144,30 @@ export function managedLabelNames(
   ];
 }
 
+/** The assembled contributions (baseline document, dependabot tuples,
+ *  manifest settings_labels/settings_rulesets, tracking answers) come
+ *  from independent homes, so two of them declaring one name is a real
+ *  authoring error the apply would then fight over - asserted here at
+ *  assembly time, naming both spellings. */
+function assertUniqueNames(
+  entries: { name: string }[],
+  what: string,
+  fold: (name: string) => string,
+): void {
+  const seen = new Map<string, string>();
+  for (const { name } of entries) {
+    const prior = seen.get(fold(name));
+    if (prior !== undefined) {
+      throw new Error(
+        `the assembled ${what} declare ${JSON.stringify(prior)} and ${JSON.stringify(name)}, ` +
+          "which collide - two settings sources (the baseline document, a module manifest, " +
+          "a tracking answer) claim one name; rename one",
+      );
+    }
+    seen.set(fold(name), name);
+  }
+}
+
 /** The full label roster a repo's facts require. Order is stable:
  *  baseline labels, per-module dependabot labels, the private-only
  *  labels, the selected modules' own labels (manifest order), tracking
@@ -177,6 +201,8 @@ export function managedLabels(
     }
     labels.push({ name: label, color: tracking.color, description: tracking.description });
   }
+  // Case-folded like GitHub's own label dedup.
+  assertUniqueNames(labels, "labels", (name) => name.toLowerCase());
   return labels;
 }
 
@@ -213,6 +239,8 @@ export function managedRulesets(
       rulesets.push(...m.settings_rulesets);
     }
   }
+  // Exact names, like the merge dialect's ruleset fold.
+  assertUniqueNames(rulesets as { name: string }[], "rulesets", (name) => name);
   return rulesets;
 }
 
