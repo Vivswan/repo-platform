@@ -234,6 +234,14 @@ describe("missingLines", () => {
     expect(missingLines("one\n\n   \n\t\n", "one\n")).toEqual([]);
   });
 
+  test("occurrence counts are a multiset: a line held twice and delivered once is missing", () => {
+    // A plain Set would see "kept" and pass exactly the shrink this wire
+    // exists to catch; each previous occurrence must consume one
+    // delivered occurrence.
+    expect(missingLines("dup\nother\ndup\n", "dup\nother\n")).toEqual(["dup"]);
+    expect(missingLines("dup\ndup\n", "dup\ndup\nextra\n")).toEqual([]);
+  });
+
   test("byte-exact: a latin1 byte and its utf-8 spelling are different lines", () => {
     const latin1Line = Buffer.from([0x63, 0x61, 0x66, 0xe9]).toString("latin1"); // caf\xe9
     const utf8Line = Buffer.from("caf\u00e9", "utf-8").toString("latin1"); // caf\xc3\xa9
@@ -456,6 +464,23 @@ describe("tail_tripwire script", () => {
     expect(result.report).toContain("> [!WARNING]");
     expect(result.report).toContain("`AGENTS.md`");
     expect(result.report).toContain("repo-local instructions");
+  });
+
+  test("a duplicated tail line shrinking to one copy fires: the PR is forced manual", () => {
+    // The multiset regression: previous half holds the line TWICE, the
+    // delivered half keeps one - a Set-based check would call that clean
+    // and leave the shrink auto-merge eligible.
+    const head = `# AGENTS.md\n\nmanaged\n\n${SENTINEL}\n\ndup entry\ndup entry\n`;
+    const delivered = `# AGENTS.md\n\nmanaged\n\n${SENTINEL}\n\ndup entry\n`;
+    const root = makeTarget(
+      { "AGENTS.md": head, [MANIFEST_NAME]: headManifest },
+      { "AGENTS.md": delivered, [MANIFEST_NAME]: headManifest },
+    );
+    const result = runScript(root);
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("::warning::");
+    expect(result.stdout).toContain("AGENTS.md: 1 repository-owned line(s) missing");
+    expect(result.report).toContain("dup entry");
   });
 
   test("a NUL-carrying tail line reaches the report escaped, never as a raw control byte", () => {

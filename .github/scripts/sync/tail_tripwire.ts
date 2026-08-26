@@ -30,7 +30,7 @@
 // covers region scaffolding the bounded-region body excludes), HEAD's
 // lines are checked for survival anywhere in the delivered file - loss
 // still fires, relocation across a grammar change does not. The line
-// check is set membership, not a positional diff: moved lines are not
+// check is multiset membership, not a positional diff: moved lines are not
 // lost content. All file content is read as latin1 (one code unit per
 // byte, the stamp_manifest.ts convention) - a utf-8 decode would fold
 // non-UTF-8 bytes onto U+FFFD and could hide or invent a mismatch; the
@@ -147,9 +147,23 @@ function sameShape(head: HeadSplit, entry: SplitEntry): boolean {
  * Membership, not a diff: a moved or deduplicated line is still present,
  * and only genuinely vanished content should trip the wire. Blank lines
  * (whitespace-only) never count as lost. */
+/** Previous non-blank lines the delivered text no longer holds, counted
+ * as a MULTISET: each previous occurrence consumes one delivered
+ * occurrence, so a line held twice and delivered once is one missing line
+ * - a plain Set would lose occurrence counts and pass exactly the shrink
+ * this wire exists to catch. */
 export function missingLines(previous: string, delivered: string): string[] {
-  const kept = new Set(delivered.split("\n"));
-  return previous.split("\n").filter((line) => line.trim() !== "" && !kept.has(line));
+  const kept = new Map<string, number>();
+  for (const line of delivered.split("\n")) {
+    kept.set(line, (kept.get(line) ?? 0) + 1);
+  }
+  return previous.split("\n").filter((line) => {
+    if (line.trim() === "") return false;
+    const remaining = kept.get(line) ?? 0;
+    if (remaining === 0) return true;
+    kept.set(line, remaining - 1);
+    return false;
+  });
 }
 
 export type Finding =
