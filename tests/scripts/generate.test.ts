@@ -726,13 +726,13 @@ describe("module ownership files", () => {
       moduleOwnershipRegion({
         agents: [{ path: "AGENTS.md", kind: "marker" }],
         "release-please": [{ path: ".github/workflows/release.yml", kind: "header" }],
-        "settings-sync": [{ path: ".github/settings.yml", kind: "mergeable" }],
+        "settings-sync": [{ path: ".github/workflows/settings-sync.yml", kind: "header" }],
       }),
     ).toEqual([
       "const MODULE_OWNERSHIP: Record<string, { path: string; kind: OwnershipKind }[]> = {",
       '  agents: [{ path: "AGENTS.md", kind: "marker" }],',
       '  "release-please": [{ path: ".github/workflows/release.yml", kind: "header" }],',
-      '  "settings-sync": [{ path: ".github/settings.yml", kind: "mergeable" }],',
+      '  "settings-sync": [{ path: ".github/workflows/settings-sync.yml", kind: "header" }],',
       "};",
     ]);
   });

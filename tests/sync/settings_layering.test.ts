@@ -408,6 +408,46 @@ describe("transitionSettingsStarter", () => {
     expect(section).not.toContain('- rulesets "main"\n');
   });
 
+  test("a fleet-supplied rule on a fleet ruleset is not mistaken for a repo addition", () => {
+    // A public toolchain repo's legacy main carries code_scanning, which
+    // the OVERRIDE does not declare - the module visibility layer adds
+    // it. Comparing against the override alone would report it as a repo
+    // addition on essentially every public toolchain repo.
+    const legacy = [
+      "---",
+      "# Rendered by the settings-sync module.",
+      LEGACY_MERGEABLE_LINE,
+      "repository:",
+      "  private: false",
+      "rulesets:",
+      "  - name: main",
+      "    target: branch",
+      "    rules:",
+      "      - type: deletion",
+      "      - type: code_scanning",
+      "        parameters:",
+      "          code_scanning_tools:",
+      "            - tool: CodeQL",
+      "              security_alerts_threshold: high_or_higher",
+      "              alerts_threshold: errors",
+      "      - type: required_signatures",
+      "",
+    ].join("\n");
+    const { dir, out } = target({
+      settings: legacy,
+      modules: "modules: [uv, settings-sync]\n",
+      answers,
+    });
+    transitionSettingsStarter(dir, out, "t");
+    const section = readFileSync(out, "utf-8");
+    // The fleet already supplies this one identically, so it is silent...
+    expect(section).not.toContain('rule "code_scanning"');
+    // ...the override declares this one, so it is silent too...
+    expect(section).not.toContain('rule "deletion"');
+    // ...and the genuinely repo-only type is still reported.
+    expect(section).toContain('rulesets "main": rule "required_signatures"');
+  });
+
   test("fail-soft: a broken answers file leaves the old file for the next sync", () => {
     const { dir, out } = target({
       settings: legacySettings,

@@ -183,12 +183,17 @@ export function droppedOverrides(
         isMapping(entry) && typeof entry.name === "string" && fold(entry.name) === fold(name),
     );
   };
-  const ruleTypesOf = (entry: unknown): string[] =>
-    isMapping(entry) && Array.isArray(entry.rules)
-      ? entry.rules.flatMap((rule) =>
-          isMapping(rule) && typeof rule.type === "string" ? [rule.type] : [],
-        )
-      : [];
+  const rulesByType = (entry: unknown): Map<string, unknown> => {
+    const byType = new Map<string, unknown>();
+    if (isMapping(entry) && Array.isArray(entry.rules)) {
+      for (const rule of entry.rules) {
+        if (isMapping(rule) && typeof rule.type === "string" && !byType.has(rule.type)) {
+          byType.set(rule.type, rule);
+        }
+      }
+    }
+    return byType;
+  };
   for (const [key, oldValue] of Object.entries(old)) {
     const managedValue = managed[key];
     if (isMapping(oldValue) && isMapping(managedValue)) {
@@ -217,13 +222,20 @@ export function droppedOverrides(
         if (fleetEntry !== undefined) {
           // The entry itself is fleet law and cannot be re-added. Its
           // RULES are a different matter: a same-name ruleset appends
-          // rules by type, so a rule type the old file carried and the
-          // override does not declare is a genuine repo addition the
-          // reviewer can put back. Report those, never the entry.
+          // rules by type, so a type the old file carried that the fleet
+          // does not already supply is a genuine repo addition the
+          // reviewer can put back. Two things are NOT that: a type the
+          // override declares (unbeatable from a repo file), and a type
+          // the MERGED fleet entry already supplies identically - the
+          // module visibility layers add code_scanning to `main` on every
+          // public toolchain repo, and a legacy file carries it too.
           if (key === "rulesets") {
-            const fleetTypes = new Set(ruleTypesOf(fleetEntry));
-            const extra = [...new Set(ruleTypesOf(entry))].filter((type) => !fleetTypes.has(type));
-            for (const type of extra) {
+            const overrideTypes = new Set(rulesByType(fleetEntry).keys());
+            const fleetRules = rulesByType(managedByName.get(fold(name)));
+            for (const [type, rule] of rulesByType(entry)) {
+              if (overrideTypes.has(type)) continue;
+              const supplied = fleetRules.get(type);
+              if (supplied !== undefined && canonical(supplied) === canonical(rule)) continue;
               dropped.push(
                 `${key} ${JSON.stringify(name)}: rule ${JSON.stringify(type)} (the ruleset is ` +
                   "fleet-owned, but re-declaring just this rule in the new settings.yml appends it)",

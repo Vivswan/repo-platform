@@ -84,7 +84,7 @@ To change a module parameter later, edit that question's VALUE key in `.copier-a
 
 ## Required settings labels
 
-Settings applies delete undeclared labels, but the managed baseline declares every label the repo's module selection needs automatically (assembled from the module manifests at apply time; the merged roster is what the delete-undeclared pass runs against). The table below is the reference for what each module brings:
+Settings applies delete undeclared labels, but the merged settings layers declare every label the repo's module selection needs automatically (each module's `templates/<module>/settings.yml` supplies its own; the merged roster is what the delete-undeclared pass runs against). The table below is the reference for what each module brings:
 
 | Needed by | Labels |
 |---|---|
