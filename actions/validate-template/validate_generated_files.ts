@@ -801,18 +801,13 @@ function main(): number {
             .filter(([name, job]) => name !== "all-green" && jobNeeds(job).includes("all-green"))
             .map(([name]) => name),
         );
-        // Informational jobs that run alongside the gate without gating:
-        // validate-template flags convention drift in managed repos but
-        // must never block their merges (the next sync PR heals drift).
-        const informational = new Set(["validate-template"]);
+        // No informational exemption any more. validate-template used to
+        // hold one, back when it only flagged drift; it now blocks on an
+        // integrity failure (managed content changed outside a sync), so a
+        // ci.yml that leaves it out of `needs` has disarmed a real gate and
+        // must be told so.
         const missing = Object.keys(jobs)
-          .filter(
-            (name) =>
-              name !== "all-green" &&
-              !downstream.has(name) &&
-              !informational.has(name) &&
-              !needs.includes(name),
-          )
+          .filter((name) => name !== "all-green" && !downstream.has(name) && !needs.includes(name))
           .sort();
         if (missing.length > 0) {
           errors.push(
