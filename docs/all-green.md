@@ -37,6 +37,14 @@ Failures are closed, never silent: an API probe that did not come back is treate
 
 The re-arm workflow covers both orderings of "the review posts" against "CI finishes": `pull_request_review` for a review arriving after CI went red, and `workflow_run` for CI finishing red after the review posted mid-run (jobs of a live run cannot be re-run, so the review trigger defers to that one). On the `workflow_run` path it re-checks that the review really arrived, since CI can fail red for any reason and re-running the gate without it would only fail again. A run without the job, a job that did not fail, and a run past the attempt cap - a loop-breaker, because a re-run's own completion fires the `workflow_run` trigger again - are all quiet no-ops. Its relevance test is a job-level `if:` rather than a step-level one, unlike ci.yml's gate jobs: nothing here is inside all-green, and on a private repository a started-then-skipped job still bills a rounded-up minute.
 
+### The re-arm needs a click today
+
+GitHub holds a workflow run for manual approval when the triggering actor is the Copilot bot, so the `pull_request_review` run lands with the `action_required` conclusion and no jobs executed. No REST API exposes that policy. The only control is a per-repository web UI setting (Settings, then Copilot, then Cloud agent, then Actions workflow approval), which the settings sync cannot reach, so turning it off would be a manual click in every managed repository.
+
+Until that changes the operator finishes the re-arm by hand. When the `copilot-review` job is red and Copilot's review has since landed, open the CI run and click Re-run failed jobs. Nothing else is affected: the gate re-runs green in about ten seconds, because by then the review has arrived.
+
+One observation will settle whether the hold is worth working around. The first Copilot review on a PR raised after `rerun-copilot-gate.yml` reaches the default branch either re-arms the gate on its own or lands `action_required` again. Only in the second case is the per-repository toggle worth a look, and even then it buys one repository at a time.
+
 ## Private repositories: the merged base-checks job
 
 On private repositories the five base check jobs (`typography`, `commit-names`, `actionlint`, `yamllint`, `gitleaks`) run as one `base-checks` job - each tiny job would otherwise bill a rounded-up minute per push. Public repos keep the per-check fan-out.
