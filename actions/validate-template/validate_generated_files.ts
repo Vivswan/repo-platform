@@ -72,7 +72,7 @@
 
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { lstatSync, readdirSync, readFileSync, readlinkSync } from "node:fs";
+import { lstatSync, readdirSync, readFileSync, readlinkSync, writeFileSync } from "node:fs";
 import { extname, join, resolve } from "node:path";
 import { parseAllDocuments, parse as parseYaml } from "yaml";
 
@@ -409,6 +409,22 @@ function walk(root: string, ignored: ReturnType<typeof gitIgnored> = null): stri
 function usageError(message: string): never {
   console.error(`error: ${message}`);
   process.exit(2);
+}
+
+/** Findings as markdown for a caller that reports instead of failing (the
+ *  fleet ci.yml's advisory job posts them on a PR). Writing is OPT-IN via
+ *  FINDINGS_FILE and changes no exit code: the operator's --self run and
+ *  the sync pipeline still read this process's status, not this file. An
+ *  empty findings set writes an EMPTY file rather than none, so a caller
+ *  can tell "nothing to report" from "the validator never ran". */
+function writeFindings(errors: string[], advisories: string[]): void {
+  const path = process.env.FINDINGS_FILE;
+  if (path === undefined || path === "") return;
+  const section = (title: string, items: string[]): string =>
+    items.length === 0
+      ? ""
+      : `#### ${title} (${items.length})\n\n${items.map((i) => `- ${i}`).join("\n")}\n\n`;
+  writeFileSync(path, section("Errors", errors) + section("Advisories", advisories));
 }
 
 function main(): number {
@@ -1406,6 +1422,7 @@ function main(): number {
     }
   }
 
+  writeFindings(errors, advisories);
   for (const advisory of advisories) console.log(`advisory: ${advisory}`);
   if (errors.length > 0) {
     for (const error of errors) console.error(`error: ${error}`);
