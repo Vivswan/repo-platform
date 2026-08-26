@@ -191,6 +191,18 @@ describe("the template's copilot-review gate job", () => {
     expect(r.output).toContain(AWAITING);
   });
 
+  // Regression pin: the requested-reviewer probe used to test the plain
+  // login only, so a [bot]-spelled reviewer request read as "not a
+  // reviewer" and the gate went silently green where the operator twin
+  // fails fast. Both spellings now reach every probe through one shared jq
+  // is_copilot definition.
+  test("no rule, the [bot] spelling in the requested reviewers is involvement too", () => {
+    const r = run({ pr: { requested_reviewers: [{ login: `${COPILOT_CHECK}[bot]` }] } });
+    expect(r.exitCode).toBe(1);
+    expect(r.output).toContain(AWAITING);
+    expect(r.output).not.toContain("copilot is not a reviewer");
+  });
+
   test("no rule, an in-progress check run is involvement, not arrival", () => {
     const r = run({ checks: { check_runs: [{ status: "in_progress" }] } });
     expect(r.exitCode).toBe(1);
@@ -201,6 +213,12 @@ describe("the template's copilot-review gate job", () => {
     const r = run({ reviews: [{ commit_id: OLD_SHA, user: { login: `${COPILOT_CHECK}[bot]` } }] });
     expect(r.exitCode).toBe(1);
     expect(r.output).toContain(AWAITING);
+  });
+
+  test("no rule, a review posted for the head sha passes as arrival", () => {
+    const r = run({ reviews: [{ commit_id: HEAD_SHA, user: { login: `${COPILOT_CHECK}[bot]` } }] });
+    expect(r.exitCode).toBe(0);
+    expect(r.output).toContain("arrived");
   });
 
   test("a human requested reviewer is not Copilot involvement", () => {

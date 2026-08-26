@@ -198,8 +198,9 @@ jobs:
           # Each probe records whether its call CAME BACK, because a read that
           # failed must never count as "Copilot is not involved". Every call
           # carries a hard deadline and the job never sleeps. jq takes
-          # HEAD_SHA and COPILOT_CHECK from the environment, so no jq program
-          # below needs a shell expansion.
+          # HEAD_SHA and COPILOT_CHECK from the environment, so the only
+          # thing ever spliced into a jq program is the static $copilot
+          # definition below - no response data reaches jq as source text.
           api() { timeout 20 gh api "$1"; }
           # Answers strictly: anything that is not a bare true/false - jq
           # erroring on a malformed body, or yielding nothing at all on an
@@ -213,7 +214,12 @@ jobs:
               *) return 1 ;;
             esac
           }
-          mine='def mine: [.[] | select(.user != null) | select((.user.login | ascii_downcase) | . == "copilot" or . == (env.COPILOT_CHECK + "[bot]"))];'
+          # Copilot's identity, defined ONCE and shared by every probe below:
+          # it posts reviews under the "<check>[bot]" login and is requested
+          # as the plain "Copilot" login, and either spelling can turn up in
+          # either place. Splitting these tests is how the two forms drift
+          # apart and a probe silently answers "not involved".
+          copilot='def is_copilot: ascii_downcase | . == "copilot" or . == (env.COPILOT_CHECK + "[bot]"); def mine: [.[] | select(.user != null) | select(.user.login | is_copilot)];'
 
           rules_ok=1
           rules="$(api "repos/$GITHUB_REPOSITORY/rules/branches/$BASE_BRANCH")" || rules_ok=0
@@ -231,8 +237,8 @@ jobs:
           fi
           review_at_head=false review_seen=false
           if [ "$reviews_ok" = 1 ]; then
-            review_at_head="$(ask "$reviews" "$mine mine | map(select(.commit_id == env.HEAD_SHA)) | length > 0")" || reviews_ok=0
-            review_seen="$(ask "$reviews" "$mine mine | length > 0")" || reviews_ok=0
+            review_at_head="$(ask "$reviews" "$copilot mine | map(select(.commit_id == env.HEAD_SHA)) | length > 0")" || reviews_ok=0
+            review_seen="$(ask "$reviews" "$copilot mine | length > 0")" || reviews_ok=0
           fi
           rule_expects=false
           if [ "$rules_ok" = 1 ]; then
@@ -259,7 +265,7 @@ jobs:
           pull="$(api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER")" || pull_ok=0
           requested=false
           if [ "$pull_ok" = 1 ]; then
-            requested="$(ask "$pull" '[.requested_reviewers[] | select((.login | ascii_downcase) == "copilot")] | length > 0')" || pull_ok=0
+            requested="$(ask "$pull" "$copilot [.requested_reviewers[] | select(.login | is_copilot)] | length > 0")" || pull_ok=0
           fi
           if [ "$check_seen" = true ] || [ "$review_seen" = true ] || [ "$requested" = true ]; then
             echo "$awaiting"
