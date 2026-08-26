@@ -46,7 +46,26 @@ export type SettingsLayer = { [key: string]: LayerValue };
 export type MergedValue = LayerScalar | MergedValue[] | { [key: string]: MergedValue };
 
 /** The finished document, the one thing an apply may be handed. Only
- *  merge_settings_layers.ts can build one from layers. */
+ *  merge_settings_layers.ts can build one from layers.
+ *
+ *  The guard is ONE-DIRECTIONAL on purpose: MergedValue is LayerValue minus
+ *  null, so a MergedSettings is also a valid SettingsLayer, and passing one
+ *  back in as a layer is not a leak but the fold - mergeLayers reduces with
+ *  the accumulated document as the next `below`, and the sync's layering
+ *  summary re-merges an already-merged fleet document with the override.
+ *  Making that assignment fail (a brand, or a readonly-deep MergedValue,
+ *  which does block it) would force casts at exactly those honest call
+ *  sites, which is the reason the header gives for staying structural.
+ *
+ *  Re-entry is safe because the invariant lives at the construction point,
+ *  not in the type's assignability: every path to a MergedSettings runs
+ *  through merge_settings_layers.ts's hardenDocument, which builds a FRESH
+ *  structure and drops nulls as it goes. So there is no mutable alias to
+ *  write back through, and a merged document fed in as a layer is hardened
+ *  again on the way out - idempotently, since it has no nulls left to
+ *  strip. A post-merge write COULD reintroduce a null in layer space, and
+ *  the next harden removes it; what the type stops is that document
+ *  reaching an apply without one. */
 export type MergedSettings = { [key: string]: MergedValue };
 
 export function isMapping(value: unknown): value is Record<string, unknown> {
