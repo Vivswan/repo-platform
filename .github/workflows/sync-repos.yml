@@ -13,23 +13,16 @@
 # multi-repo work belongs in a single run - repo=all covers a
 # fleet-wide recover=recopy; a batch of distinct per-repo dispatches
 # must still run serially, waiting for each run to finish before the
-# next. The weekly cron is the catch-all: staging-channel
-# repos pick up main merges through it, and it heals any release whose
-# sync run was missed.
+# next. The weekly cron is the catch-all: repos pick up main merges
+# through it, and it heals any sync run that was missed.
 
 name: Sync Repos
 
 on:
-  release:
-    types: [published]
   schedule:
     - cron: "50 8 * * 2"
   workflow_dispatch:
     inputs:
-      version:
-        description: Release tag to sync latest-channel repos to (defaults to newest release)
-        required: false
-        type: string
       repo:
         description: >-
           Single owner/name to sync, or the literal "all" - same as
@@ -64,11 +57,6 @@ concurrency:
 
 jobs:
   plan:
-    # A prerelease must not roll the latest channel (and staging repos are
-    # covered by the weekly cron); skipping here skips the dependent sync
-    # fan-out too. A stable release published on an older tag still runs -
-    # the version resolve below pins it to the newest stable release.
-    if: github.event_name != 'release' || !github.event.release.prerelease
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -76,7 +64,6 @@ jobs:
       actions: read
     outputs:
       repos: ${{ steps.select.outputs.repos }}
-      version: ${{ steps.version.outputs.version }}
     steps:
       # A missing token is a misconfiguration of this repo: fail loudly. A
       # deliberately NARROWED token still works - see the reusable sync's
@@ -113,35 +100,16 @@ jobs:
       - name: Install script dependencies
         run: bun install --frozen-lockfile --silent
 
-      # The version and wait logic live in scripts (their headers state
-      # the contracts): the resolve pins the newest stable release as the
-      # ground truth, and each bounded wait warns-and-continues on timeout
-      # because the sync's own guards fail loudly and the cron heals.
-      - name: Resolve target version
-        id: version
+      # The wait logic lives in a script (its header states the contract):
+      # the bounded wait warns-and-continues on timeout because the sync's
+      # own guards fail loudly and the cron heals. Build Branches rebuilds
+      # the template branch asynchronously after each main merge; a sync
+      # dispatched right after a merge could consume the previous build
+      # tree. Wait (bounded) for a successful run at main's HEAD.
+      - name: Wait for a fresh build
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
-          REQUESTED: ${{ inputs.version }}
-        run: bun .github/scripts/sync/resolve_target_version.ts
-
-      # build-branches also triggers on release:published, with no ordering
-      # between the two runs; latest-channel syncs need the templates/v* tag
-      # it creates.
-      - name: Wait for the templates build tag
-        if: steps.version.outputs.version != ''
-        env:
-          VERSION: ${{ steps.version.outputs.version }}
-        run: bun .github/scripts/sync/wait_for_build.ts tag
-
-      # Build Branches rebuilds staging asynchronously after each main
-      # merge; a sync dispatched right after a merge could consume the
-      # previous staging tree. Wait (bounded) for a successful push- or
-      # schedule-event run at main's HEAD.
-      - name: Wait for a fresh staging build
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: bun .github/scripts/sync/wait_for_build.ts staging
+        run: bun .github/scripts/sync/wait_for_build.ts
 
       # Snapshots the owner's writable fleet to $RUNNER_TEMP/discovered.json
       # for the select step; the script's header states the contract
@@ -160,7 +128,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
           PAT: ${{ secrets.REPO_PLATFORM_TOKEN }}
-          # Scheduled and release runs have no inputs context: empty is
+          # Scheduled runs have no inputs context: empty is
           # fine, only the literal "recopy" means recovery.
           RECOVER: ${{ inputs.recover }}
         run: bun .github/scripts/fleet/select_sync_repos.ts
@@ -170,7 +138,7 @@ jobs:
     if: needs.plan.outputs.repos != '[]'
     # Actions read flows to the called workflow's token: its build
     # provenance check reads the build run stamped on the shipped ref
-    # (staging tip or templates/vX.Y.Z tag).
+    # (the template branch tip).
     permissions:
       contents: read
       actions: read
@@ -192,12 +160,10 @@ jobs:
       target_redact_name: ${{ matrix.redact_name }}
       target_hide_details: ${{ matrix.hide_details }}
       target_verify: ${{ matrix.verify }}
-      version: ${{ needs.plan.outputs.version }}
-      channel: ${{ matrix.channel }}
       # The dispatch default is the literal "none"; only "recopy" means
       # recovery downstream.
       recover: ${{ inputs.recover == 'recopy' && 'recopy' || '' }}
-      # Scheduled and release runs have no inputs context: default false.
+      # Scheduled runs have no inputs context: default false.
       force_manual: ${{ inputs.manual || false }}
     secrets:
       REPO_PLATFORM_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}

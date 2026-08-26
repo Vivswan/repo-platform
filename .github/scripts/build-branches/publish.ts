@@ -1,10 +1,9 @@
 #!/usr/bin/env bun
-// Composes and publishes the planned build branches (append-only orphan
-// branches; see build-branches.yml's header for the branch model).
-// Invoked by build-branches.yml's "Build and publish" step.
+// Composes and publishes the `template` build branch (an append-only orphan
+// branch; see build-branches.yml's header for the branch model). Invoked by
+// build-branches.yml's "Build and publish" step.
 //
-// Env: BUILD_STAGING, BUILD_LATEST, VERSION, RUN_URL, GH_TOKEN,
-// GITHUB_SERVER_URL, GITHUB_REPOSITORY.
+// Env: RUN_URL, GH_TOKEN, GITHUB_SERVER_URL, GITHUB_REPOSITORY, GITHUB_REF.
 
 import { rmSync } from "node:fs";
 import { z } from "zod";
@@ -15,13 +14,26 @@ import {
   commitStampParseAll,
   commitStampWrite,
 } from "../shared/commit_stamp.ts";
-import { requireEnv } from "../shared/gha.ts";
+import { env, fail, requireEnv } from "../shared/gha.ts";
 import { BUILD_IDENTITY } from "../shared/git_identity.ts";
 import { parseJsonWith } from "../shared/json.ts";
 import { capture, must, mustCapture } from "../shared/proc.ts";
-import { rebuildChannelTree } from "../shared/rebuild_tree.ts";
+import { rebuildBranchTree } from "../shared/rebuild_tree.ts";
 
+const BRANCH = "template";
 const repository = requireEnv("GITHUB_REPOSITORY");
+
+// The build always stamps and composes origin/main, but the sync's run
+// proof requires the stamped run's head_sha to EQUAL the stamped source -
+// a workflow_dispatch aimed at any other ref would publish a build whose
+// run can never vouch for it, leaving a tip the sync rejects until the
+// next main build heals it. Refuse before any mutation.
+const ref = env("GITHUB_REF");
+if (ref !== "" && ref !== "refs/heads/main") {
+  fail(
+    `Build Branches only publishes from main, but this run was dispatched on '${ref}'. Re-run the workflow on the main branch.`,
+  );
+}
 
 must(["git", "config", "user.name", BUILD_IDENTITY.name]);
 must(["git", "config", "user.email", BUILD_IDENTITY.email]);
@@ -37,17 +49,14 @@ function isAncestor(ancestor: string, descendant: string): boolean {
 
 // Returns a re-stamp reason when the branch tip's stamp would fail the
 // sync's provenance checks, and "" when the stamp is still good. The
-// append-only branches only gain a commit on content change, so a fresh
+// append-only branch only gains a commit on content change, so a fresh
 // empty stamp commit from here is the ONLY way to heal a tip whose stamp
 // is broken - without this, "dispatch Build Branches" could never clear a
-// rejected tip. Staging gets the full battery its sync verification
+// rejected tip. The tip gets the full battery its sync verification
 // (sync/verify_build_provenance.ts) enforces, including one rebuild of
-// the stamped source when it lags the current one; latest is consumed via
-// immutable templates/vX.Y.Z tags (each verified the same way at sync
-// time against the commit it points at) and only heals unparseable
-// stamps here: a version build always tags a fresh, fully stamped commit.
-function restampReason(channel: string, currentSourceSha: string): string {
-  const tipMsg = mustCapture(["git", "-C", `/tmp/pub-${channel}`, "log", "-1", "--format=%B"]);
+// the stamped source when it lags the current one.
+function restampReason(currentSourceSha: string): string {
+  const tipMsg = mustCapture(["git", "-C", "/tmp/pub", "log", "-1", "--format=%B"]);
   const prevSrc = commitStampParse(tipMsg);
   if (prevSrc === "") {
     return "re-stamp: tip carries no source stamp";
@@ -57,7 +66,6 @@ function restampReason(channel: string, currentSourceSha: string): string {
   if (resolves(`${prevSrc}^{commit}`) === "") {
     return `re-stamp: previous source ${prevSrc.slice(0, 12)} unreachable`;
   }
-  if (channel !== "staging") return "";
   if (!isAncestor(prevSrc, "origin/main")) {
     return `re-stamp: previous source ${prevSrc.slice(0, 12)} not on main history`;
   }
@@ -66,7 +74,7 @@ function restampReason(channel: string, currentSourceSha: string): string {
   // can heal the append-only branch. Same walk and same on-main filter
   // as the sync's: no on-main stamp anywhere in the tip's ancestry may
   // be newer than the tip's own.
-  const history = mustCapture(["git", "-C", `/tmp/pub-${channel}`, "log", "--format=%B", "HEAD"]);
+  const history = mustCapture(["git", "-C", "/tmp/pub", "log", "--format=%B", "HEAD"]);
   for (const stamped of commitStampParseAll(history)) {
     const ancestorSrc = resolves(`${stamped}^{commit}`);
     if (ancestorSrc === "") continue;
@@ -113,13 +121,13 @@ function restampReason(channel: string, currentSourceSha: string): string {
   // its staged index, which at this point equals the tip commit's tree
   // (a staged content change took the "content change" branch instead).
   if (prevSrc !== currentSourceSha) {
-    const srcDir = `/tmp/prev-src-${channel}`;
-    const treeDir = `/tmp/prev-tree-${channel}`;
+    const srcDir = "/tmp/prev-src";
+    const treeDir = "/tmp/prev-tree";
     rmSync(treeDir, { recursive: true, force: true });
     capture(["git", "worktree", "remove", "--force", srcDir]);
     let stampedTree: string | null;
     try {
-      stampedTree = rebuildChannelTree({ sourceSha: prevSrc, channel, srcDir, treeDir });
+      stampedTree = rebuildBranchTree({ sourceSha: prevSrc, srcDir, treeDir });
     } catch {
       // An unbuildable stamped source is exactly the "can no longer be
       // rebuilt" case: re-stamp.
@@ -127,133 +135,80 @@ function restampReason(channel: string, currentSourceSha: string): string {
     }
     capture(["git", "worktree", "remove", "--force", srcDir]);
     rmSync(treeDir, { recursive: true, force: true });
-    if (stampedTree !== mustCapture(["git", "-C", `/tmp/pub-${channel}`, "write-tree"])) {
+    if (stampedTree !== mustCapture(["git", "-C", "/tmp/pub", "write-tree"])) {
       return `re-stamp: the tip tree is not the stamped ${prevSrc.slice(0, 12)} build`;
     }
   }
   return "";
 }
 
-function publish(channel: string, sourceSha: string, version = ""): void {
-  console.log(
-    `::group::build ${channel} from ${sourceSha.slice(0, 12)}${version === "" ? "" : ` (${version})`}`,
-  );
-  for (const dir of [`/tmp/src-${channel}`, `/tmp/tree-${channel}`, `/tmp/pub-${channel}`]) {
+function publish(sourceSha: string): void {
+  console.log(`::group::build ${BRANCH} from ${sourceSha.slice(0, 12)}`);
+  for (const dir of ["/tmp/src", "/tmp/tree", "/tmp/pub"]) {
     rmSync(dir, { recursive: true, force: true });
   }
   // Compose with the SOURCE ref's own script + sources, so a rebuild of an
-  // old tag reproduces that tag's composition. The script's dependencies
-  // must resolve from that tree, not this checkout.
-  must(["git", "worktree", "add", "--detach", `/tmp/src-${channel}`, sourceSha]);
-  must(["bun", "install", "--frozen-lockfile", "--cwd", `/tmp/src-${channel}`]);
-  const build = [
-    "bun",
-    `/tmp/src-${channel}/.github/scripts/build-branches/branch_tree.ts`,
-    "--dest",
-    `/tmp/tree-${channel}`,
-    "--channel",
-    channel,
-  ];
-  must(version === "" ? build : [...build, "--version", version]);
-  if (
-    capture(["git", "ls-remote", "--exit-code", "origin", `refs/heads/${channel}`]).exitCode === 0
+  // old commit reproduces that commit's composition. The script's
+  // dependencies must resolve from that tree, not this checkout.
+  must(["git", "worktree", "add", "--detach", "/tmp/src", sourceSha]);
+  must(["bun", "install", "--frozen-lockfile", "--cwd", "/tmp/src"]);
+  must(["bun", "/tmp/src/.github/scripts/build-branches/branch_tree.ts", "--dest", "/tmp/tree"]);
+  const branchExists =
+    capture(["git", "ls-remote", "--exit-code", "origin", `refs/heads/${BRANCH}`]).exitCode === 0;
+  if (branchExists) {
+    must(["git", "fetch", "--quiet", "origin", BRANCH]);
+    must(["git", "worktree", "add", "--detach", "/tmp/pub", `origin/${BRANCH}`]);
+  } else if (
+    capture(["git", "ls-remote", "--exit-code", "origin", "refs/heads/staging"]).exitCode === 0
   ) {
-    must(["git", "fetch", "--quiet", "origin", channel]);
-    must(["git", "worktree", "add", "--detach", `/tmp/pub-${channel}`, `origin/${channel}`]);
+    // Transition seam from the retired staging/latest channel era: the
+    // first build after the rename lands CONTINUES the old staging
+    // history instead of minting a disconnected orphan, so every fleet
+    // repo's recorded _commit (an old staging build commit) stays
+    // reachable through the new branch. Once the old ref is deleted this
+    // arm goes dead and can be removed.
+    must(["git", "fetch", "--quiet", "origin", "staging"]);
+    must(["git", "worktree", "add", "--detach", "/tmp/pub", "origin/staging"]);
   } else {
-    must(["git", "worktree", "add", "--detach", `/tmp/pub-${channel}`, sourceSha]);
-    must(["git", "-C", `/tmp/pub-${channel}`, "switch", "--orphan", `build-${channel}`]);
+    must(["git", "worktree", "add", "--detach", "/tmp/pub", sourceSha]);
+    must(["git", "-C", "/tmp/pub", "switch", "--orphan", `build-${BRANCH}`]);
   }
   // --checksum: the quick size+mtime check can miss a changed file when
   // both trees were written in the same second and the content is
-  // same-size (BUILD_INFO.yml's version line across releases) - and every
-  // decision below trusts this tree, including what gets tagged.
-  must([
-    "rsync",
-    "-a",
-    "--delete",
-    "--checksum",
-    "--exclude=.git",
-    `/tmp/tree-${channel}/`,
-    `/tmp/pub-${channel}/`,
-  ]);
-  must(["git", "-C", `/tmp/pub-${channel}`, "add", "-A"]);
+  // same-size - and every decision below trusts this tree.
+  must(["rsync", "-a", "--delete", "--checksum", "--exclude=.git", "/tmp/tree/", "/tmp/pub/"]);
+  must(["git", "-C", "/tmp/pub", "add", "-A"]);
+  // A missing branch always publishes: the ref must exist for the sync to
+  // resolve, even when the composed tree happens to equal the seed tip's.
   const note =
-    capture(["git", "-C", `/tmp/pub-${channel}`, "diff", "--cached", "--quiet"]).exitCode !== 0
+    capture(["git", "-C", "/tmp/pub", "diff", "--cached", "--quiet"]).exitCode !== 0
       ? "content change"
-      : restampReason(channel, sourceSha);
+      : branchExists
+        ? restampReason(sourceSha)
+        : "branch bootstrap";
   if (note !== "") {
     must([
       "git",
       "-C",
-      `/tmp/pub-${channel}`,
+      "/tmp/pub",
       "commit",
       "-q",
       "--allow-empty",
       "-m",
-      `build(${channel}): ${version === "" ? "main" : version} from ${sourceSha.slice(0, 12)}`,
+      `build(${BRANCH}): main from ${sourceSha.slice(0, 12)}`,
       "-m",
       commitStampWrite(requireEnv("GITHUB_SERVER_URL"), repository, sourceSha),
       "-m",
       commitRunWrite(requireEnv("RUN_URL")),
     ]);
-    // Plain push, never force: the branches are append-only.
-    must(["git", "-C", `/tmp/pub-${channel}`, "push", "origin", `HEAD:refs/heads/${channel}`]);
-    const short = mustCapture(["git", "-C", `/tmp/pub-${channel}`, "rev-parse", "--short", "HEAD"]);
-    console.log(`${channel}: pushed ${short} (${note})`);
+    // Plain push, never force: the branch is append-only.
+    must(["git", "-C", "/tmp/pub", "push", "origin", `HEAD:refs/heads/${BRANCH}`]);
+    const short = mustCapture(["git", "-C", "/tmp/pub", "rev-parse", "--short", "HEAD"]);
+    console.log(`${BRANCH}: pushed ${short} (${note})`);
   } else {
-    console.log(`${channel}: no content change`);
-  }
-  // The build-tags ruleset freezes templates/* tags once they exist
-  // (update/delete/non-fast-forward are blocked for everyone), but tag
-  // CREATION is open to any writer. A tag that already exists here is
-  // therefore either this build re-run (fine, skip) or a pre-created
-  // impostor that the ruleset would freeze forever - so prove which by
-  // tree hash before skipping, and never skip silently.
-  if (version !== "") {
-    if (
-      capture(["git", "ls-remote", "--exit-code", "origin", `refs/tags/templates/${version}`])
-        .exitCode === 0
-    ) {
-      must([
-        "git",
-        "fetch",
-        "--quiet",
-        "origin",
-        `+refs/tags/templates/${version}:refs/tags/templates/${version}`,
-      ]);
-      const tagTree = mustCapture(["git", "rev-parse", `refs/tags/templates/${version}^{tree}`]);
-      const builtTree = mustCapture(["git", "-C", `/tmp/pub-${channel}`, "write-tree"]);
-      if (tagTree === builtTree) {
-        console.log(
-          `${channel}: tag templates/${version} already carries this build's tree ${builtTree}; skipping (idempotent re-run)`,
-        );
-      } else {
-        console.log(
-          `::error::tag templates/${version} already exists with tree ${tagTree}, but building ${version} from ${sourceSha.slice(0, 12)} produces tree ${builtTree} - the tag is not this builder's output, and the build-tags ruleset has frozen it. Have an admin delete the tag (the ruleset blocks tag deletion for everyone, so temporarily disable build-tags under Settings > Rules > Rulesets, delete it, re-enable), then re-run this build.`,
-        );
-        process.exit(1);
-      }
-    } else {
-      // Tag the exact commit this run built or verified (the pub tree's
-      // HEAD). Re-resolving origin/<channel> here would tag whatever the
-      // branch points at NOW - a fast-forward pushed into that window
-      // would be frozen by the ruleset under this version's name.
-      const head = mustCapture(["git", "-C", `/tmp/pub-${channel}`, "rev-parse", "HEAD"]);
-      must(["git", "tag", `templates/${version}`, head]);
-      must(["git", "push", "origin", `refs/tags/templates/${version}`]);
-      console.log(`${channel}: tagged templates/${version}`);
-    }
+    console.log(`${BRANCH}: no content change`);
   }
   console.log("::endgroup::");
 }
 
-if (requireEnv("BUILD_STAGING") === "true") {
-  publish("staging", mustCapture(["git", "rev-parse", "origin/main"]));
-}
-if (requireEnv("BUILD_LATEST") === "true") {
-  const version = requireEnv("VERSION");
-  must(["git", "fetch", "--quiet", "--tags", "origin"]);
-  const src = mustCapture(["git", "rev-list", "-n1", `refs/tags/${version}`]);
-  publish("latest", src, version);
-}
+publish(mustCapture(["git", "rev-parse", "origin/main"]));

@@ -201,17 +201,9 @@ function run(checkMode: boolean): number {
     // One scratch build tree, shared by every selection (the smoke recipe
     // in ci.yml's smoke legs, with the commit inputs pinned).
     const tree = join(work, "tree");
-    must(
-      [
-        "bun",
-        ".github/scripts/build-branches/branch_tree.ts",
-        "--dest",
-        tree,
-        "--channel",
-        "staging",
-      ],
-      { cwd: REPO_ROOT },
-    );
+    must(["bun", ".github/scripts/build-branches/branch_tree.ts", "--dest", tree], {
+      cwd: REPO_ROOT,
+    });
     const git = (...args: string[]) => must(["git", "-C", tree, ...args], { env: RENDER_ENV });
     git("init", "-q", "-b", "build");
     git("add", "-A");

@@ -29,12 +29,13 @@ private: false
 
 # The modules this repository actually dogfoods: agents (AGENTS.md and the
 # agent-file symlinks), bun (dependabot-bun-lockfile.yml; the toolchain
-# feeding enable_codeql), release-please (release.yml and its
-# config), skills (the hosted agent skills under skills/ and the
-# validate-skills.yml discovery workflow; the .claude-plugin manifests are
-# generated-once starters this repo owns), pr-title (ci.yml's pr-title
-# gate job), auto-assign (auto-assign.yml). The tracking-stream modules
-# (fuzzer, nightly) are deliberately absent - check_ssot's release-please
+# feeding enable_codeql), skills (the hosted agent skills under skills/
+# and the validate-skills.yml discovery workflow; the .claude-plugin
+# manifests are generated-once starters this repo owns), pr-title (ci.yml's
+# pr-title gate job), auto-assign (auto-assign.yml). release-please is
+# deliberately absent: repo-platform ships the module to clients but runs
+# no release pipeline of its own. The tracking-stream modules (fuzzer,
+# nightly) are deliberately absent too - check_ssot's release-please
 # pair evaluates their membership or-chain to false - and so is
 # settings-sync: this operator repo hand-writes its .github/settings.yml
 # (extra rulesets the starter never renders), and settings-repos.yml
@@ -42,7 +43,6 @@ private: false
 modules:
   - agents
   - bun
-  - release-please
   - skills
   - pr-title
   - auto-assign

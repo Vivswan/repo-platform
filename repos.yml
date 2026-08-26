@@ -1,4 +1,4 @@
-# Fleet config for the push sync: which repos, which channel.
+# Fleet config for the push sync: which repos are managed.
 # Validated and resolved by .github/scripts/fleet/repos_registry.ts.
 #
 # - managed: owner/name slugs, or one quoted "*" wildcard. The wildcard
@@ -6,8 +6,6 @@
 #   (granting the fleet PAT a repository is what enrolls it)
 #   (quoted because a bare * is YAML alias syntax).
 # - exclude: discovered repos that must NOT be synced (opt-outs).
-# - Channel precedence: config.<repo>.channel > defaults.channel > the
-#   repo's recorded copier answer.
 # - Modules are NOT fleet config: each repo selects them in its own
 #   .repo-platform.yml.
 # - Settings: selecting the settings-sync module in .repo-platform.yml
@@ -18,12 +16,3 @@ managed:
   - "*"
 
 exclude: []
-
-# Fleet defaults - what auto-discovered repos use without a config entry.
-defaults:
-  channel: staging
-
-# Per-repo overrides of the defaults.
-config:
-  Vivswan/github-settings-as-code:
-    channel: staging

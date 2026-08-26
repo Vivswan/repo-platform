@@ -1186,14 +1186,7 @@ describe.skipIf(!hasCopier)("preserve_local_content end-to-end (copier recopy)",
         }
         return proc.stdout.toString();
       };
-      run([
-        "bun",
-        join(repoRoot, ".github/scripts/build-branches/branch_tree.ts"),
-        "--dest",
-        tree,
-        "--channel",
-        "staging",
-      ]);
+      run(["bun", join(repoRoot, ".github/scripts/build-branches/branch_tree.ts"), "--dest", tree]);
       run(["git", "-C", tree, "init", "-b", "build"]);
       run(["git", "-C", tree, "add", "-A"]);
       run(["git", "-C", tree, "-c", "user.name=t", "-c", "user.email=t@e.c", "commit", "-qm", "b"]);

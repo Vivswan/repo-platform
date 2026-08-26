@@ -1,6 +1,6 @@
 // Fleet registry tooling for repos.yml - the single owner of the schema.
 // Used by CI validation and by sync-repos/settings-repos to resolve which
-// repos to target and which channel each one follows.
+// repos to target.
 //
 // Usage:
 //   bun .github/scripts/fleet/repos_registry.ts validate [--file repos.yml]
@@ -8,44 +8,38 @@
 //     [--discovered discovered.json] [--file repos.yml]
 //   bun .github/scripts/fleet/repos_registry.ts excluded [--file repos.yml]
 //
-// `select` prints a JSON array of {repo, owner, name, channel} on stdout;
-// channel is null when the registry resolves none (the sync then falls
-// back to the repo's recorded copier answer). `--discovered` names a JSON
-// file holding an array of "owner/name" strings or {repo, ...} objects
-// (already filtered for archived repos by the caller); it is required
-// whenever `managed` contains the "*" wildcard. `excluded` prints the
-// exclude list as a JSON array of slugs (select_settings_repos.ts uses it
-// to report paused repos that still carry an in-repo settings file).
-// Slugs match case-insensitively everywhere, like GitHub repo identity;
-// original casing is kept for display. Errors print as ::error:: workflow
-// commands (on stdout, where the runner parses them), all of them at
-// once, and the exit code is nonzero.
+// `select` prints a JSON array of {repo, owner, name} on stdout.
+// `--discovered` names a JSON file holding an array of "owner/name"
+// strings or {repo, ...} objects (already filtered for archived repos by
+// the caller); it is required whenever `managed` contains the "*"
+// wildcard. `excluded` prints the exclude list as a JSON array of slugs
+// (select_settings_repos.ts uses it to report paused repos that still
+// carry an in-repo settings file). Slugs match case-insensitively
+// everywhere, like GitHub repo identity; original casing is kept for
+// display. Errors print as ::error:: workflow commands (on stdout, where
+// the runner parses them), all of them at once, and the exit code is
+// nonzero.
 
 import { readFileSync } from "node:fs";
 import { parse } from "yaml";
 import { z } from "zod";
-import { CHANNELS, type Channel, isChannel } from "../shared/channels.ts";
 import { parseFlags } from "../shared/flags.ts";
 import { fail } from "../shared/gha.ts";
 import { parseJson } from "../shared/json.ts";
 
 const SLUG_RE = /^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?\/[A-Za-z0-9._-]+$/;
 const WILDCARD = "*";
-const TOP_LEVEL_KEYS = ["managed", "exclude", "defaults", "config"];
+const TOP_LEVEL_KEYS = ["managed", "exclude"];
 
 export interface Registry {
   managed: { wildcard: boolean; repos: string[] };
   exclude: string[];
-  defaultChannel: Channel | null;
-  // Keyed by the lowercased slug (the parse boundary normalizes case).
-  config: Map<string, { channel: Channel }>;
 }
 
 export interface Selected {
   repo: string;
   owner: string;
   name: string;
-  channel: Channel | null;
 }
 
 function isSlug(value: unknown): value is string {
@@ -150,85 +144,17 @@ export function validateRegistry(
     }
   }
 
-  let defaultChannel: Channel | null = null;
-  if (data.defaults !== undefined) {
-    if (!isPlainObject(data.defaults)) {
-      errors.push(`${label}: defaults must be a mapping`);
-    } else {
-      for (const key of Object.keys(data.defaults)) {
-        if (key !== "channel") {
-          errors.push(`${label}: unknown defaults key "${key}" - only channel is allowed`);
-        }
-      }
-      if (data.defaults.channel !== undefined) {
-        if (isChannel(data.defaults.channel)) {
-          defaultChannel = data.defaults.channel;
-        } else {
-          errors.push(
-            `${label}: defaults.channel ${JSON.stringify(data.defaults.channel)} ` +
-              `must be one of: ${CHANNELS.join(", ")}`,
-          );
-        }
-      }
-    }
-  }
-
-  const config = new Map<string, { channel: Channel }>();
-  if (data.config !== undefined) {
-    if (!isPlainObject(data.config)) {
-      errors.push(`${label}: config must be a mapping of owner/name slugs`);
-    } else {
-      const seen = new Set<string>();
-      for (const [slug, value] of Object.entries(data.config)) {
-        if (!isSlug(slug)) {
-          errors.push(`${label}: config key "${slug}" is not an owner/name slug`);
-          continue;
-        }
-        if (excluded.has(slug.toLowerCase())) {
-          errors.push(
-            `${label}: config entry "${slug}" is also in exclude - ` +
-              `an excluded repo is never synced, so its config is dead; remove one of the two`,
-          );
-        }
-        if (seen.has(slug.toLowerCase())) {
-          errors.push(`${label}: duplicate config entry "${slug}" (slugs match ignoring case)`);
-        }
-        seen.add(slug.toLowerCase());
-        if (!isPlainObject(value)) {
-          errors.push(`${label}: config.${slug} must be a mapping`);
-          continue;
-        }
-        for (const key of Object.keys(value)) {
-          if (key !== "channel") {
-            errors.push(`${label}: unknown config.${slug} key "${key}" - only channel is allowed`);
-          }
-        }
-        if (value.channel !== undefined) {
-          if (isChannel(value.channel)) {
-            config.set(slug.toLowerCase(), { channel: value.channel });
-          } else {
-            errors.push(
-              `${label}: config.${slug}.channel ${JSON.stringify(value.channel)} ` +
-                `must be one of: ${CHANNELS.join(", ")}`,
-            );
-          }
-        }
-      }
-    }
-  }
-
   if (errors.length > 0) {
     return { registry: null, errors };
   }
   return {
-    registry: { managed: { wildcard, repos }, exclude, defaultChannel, config },
+    registry: { managed: { wildcard, repos }, exclude },
     errors: [],
   };
 }
 
 // Resolve the selection: (wildcard x discovered) union explicit slugs,
-// minus exclude, with the effective channel per repo. `discovered` is
-// null when --discovered was not provided.
+// minus exclude. `discovered` is null when --discovered was not provided.
 export function selectRepos(
   registry: Registry,
   options: { repo?: string; discovered?: string[] | null } = {},
@@ -286,8 +212,7 @@ export function selectRepos(
 
   const selection = repos.map((slug): Selected => {
     const [owner, name] = slug.split("/", 2);
-    const channel = registry.config.get(slug.toLowerCase())?.channel ?? registry.defaultChannel;
-    return { repo: slug, owner, name, channel };
+    return { repo: slug, owner, name };
   });
   return { selection, errors: [] };
 }
@@ -325,7 +250,7 @@ function main(args: string[]): void {
       console.log(
         `${path}: OK - explicit repos: ${registry.managed.repos.length}, ` +
           `wildcard: ${registry.managed.wildcard ? "yes" : "no"}, ` +
-          `excluded: ${registry.exclude.length}, config entries: ${registry.config.size}`,
+          `excluded: ${registry.exclude.length}`,
       );
       return;
     }

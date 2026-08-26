@@ -1,6 +1,6 @@
 ---
 name: repo-platform-sync-pr
-description: 'Handle an automated template sync PR from Vivswan/repo-platform - triage the PR body, resolve conflicts, restore dropped local lines, and recover a broken sync. Use when a PR titled "chore: update repo-platform template to ..." arrives on branch automation/repo-platform-staging or automation/repo-platform-latest, for "the repo-platform bot PR", "the template update PR", "the automation branch PR", "the copier update PR", when a sync PR warns about merge conflicts or dropped local lines, when "the sync PR deleted my local section", or when a sync run fails with "no base to update from".'
+description: 'Handle an automated template sync PR from Vivswan/repo-platform - triage the PR body, resolve conflicts, restore dropped local lines, and recover a broken sync. Use when a PR titled "chore: update repo-platform template to ..." arrives on branch automation/repo-platform, for "the repo-platform bot PR", "the template update PR", "the automation branch PR", "the copier update PR", when a sync PR warns about merge conflicts or dropped local lines, when "the sync PR deleted my local section", or when a sync run fails with "no base to update from".'
 license: SEE LICENSE IN LICENSE.md
 metadata:
   author: Vivswan
@@ -19,20 +19,20 @@ Work in this order, always:
 
 ## When to Apply
 
-- A PR titled `chore: update repo-platform template to staging@<sha>` or `... to templates/vX.Y.Z` appeared, head branch `automation/repo-platform-staging` (or `-latest`)
+- A PR titled `chore: update repo-platform template to template@<sha>` appeared, head branch `automation/repo-platform`
 - The PR body warns about merge conflicts, dropped local lines, retired files, withheld workflow files, settings drift, a settings.yml layering transition, or failed validation
 - A sync run failed with "recorded _commit ... does not resolve" / "no base to update from" (see [references/recovery.md](references/recovery.md))
 
 ## What the PR is
 
 - A three-way `copier update`: the template's render at the repo's recorded base (`_commit` in `.copier-answers.yml`, quoted as "Previous:" in the PR body) is diffed against the render at the new ref ("New:"), and that diff is merged onto the repo's current state. Local edits to non-split files survive unless they overlap a template change. Split-class files (a `repo-platform:local-section` marker or the `.gitignore` LOCAL region separates the halves) never ride that merge: after the update they are REBUILT structurally - the managed half from a clean render at the new ref, the repository-local half byte-for-byte from the repo's last commit. Content in the repo-owned half always survives; local edits INSIDE a managed half are reset on every sync (they used to survive by merge luck) - the PR body flags each reset and the PR stays manual-review.
-- The head branch `automation/repo-platform-<channel>` is REGENERATED on every sync run (release, weekly cron, or dispatch) with a lease-guarded force-push. Manual commits sitting on it when the next run starts are overwritten by design; the PR body says so.
+- The head branch `automation/repo-platform` is REGENERATED on every sync run (weekly cron or dispatch) with a lease-guarded force-push. Manual commits sitting on it when the next run starts are overwritten by design; the PR body says so.
 - Clean updates arm squash auto-merge: the PR merges itself once the repo's required `all-green` check passes. A PR stays manual-review when any of these hold: auto-resolved conflicts, a split-file carry needing review (an appendix, reset managed-half edits, duplicate markers), failed validation, a recovery re-render, a forced-manual dispatch, a deleted license file, withheld workflow files, out-of-band settings drift, or a settings.yml layering transition that dropped overrides or failed.
 
 Find and open the PR from the repo:
 
 ```bash
-gh pr list --head automation/repo-platform-staging --json number,title,url
+gh pr list --head automation/repo-platform --json number,title,url
 gh pr view <number>
 ```
 
@@ -69,8 +69,8 @@ Do not resolve, approve, or merge until every file in the diff is accounted for.
 3. Inspect any file you cannot clear from the stats alone. `gh pr diff` takes no pathspec, so use git:
 
    ```bash
-   git fetch origin main automation/repo-platform-staging
-   git diff origin/main...origin/automation/repo-platform-staging -- <path>
+   git fetch origin main automation/repo-platform
+   git diff origin/main...origin/automation/repo-platform -- <path>
    ```
 
 4. For each file, verify no repository-local content is being removed. Tell-tale patterns:
@@ -107,10 +107,10 @@ The branch name is constant and force-pushed every run, so a stale local copy of
 
 ```bash
 git fetch origin
-git checkout -B automation/repo-platform-staging origin/automation/repo-platform-staging   # or -latest
+git checkout -B automation/repo-platform origin/automation/repo-platform
 # restore hunks / hand-resolve malformed files
 git commit -am "fix: restore repository-local lines after template sync"
-git push origin automation/repo-platform-staging
+git push origin automation/repo-platform
 ```
 
 - Pushing more commits is the supported way to fix the PR; CI re-runs on the push. Needs-review PRs are never auto-merged, so merge manually when green.

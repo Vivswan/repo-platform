@@ -85,7 +85,6 @@ describe("retired_cleanup retired-paths parse", () => {
         RUNNER_TEMP: runnerTemp,
         TARGET_DIR: target,
         MODULES: '["uv"]',
-        CHANNEL: "staging",
         PRIVATE: "false",
         DESCRIPTION: "d",
         SRC_PATH: root,

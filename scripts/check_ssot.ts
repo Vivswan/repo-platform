@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 // Single-source-of-truth drift checker: facts this repo intentionally states
-// in more than one INDEPENDENTLY-authored place (channel enums, the
+// in more than one INDEPENDENTLY-authored place (the
 // hand-written module-roster sites, dogfooded template counterparts,
 // settings/label rosters, doc-quoted constants) are compared here so drift
 // fails CI instead of rotting silently. Copies GENERATED from the module
@@ -29,9 +29,8 @@ import {
   loadOverrideLayer,
 } from "../.github/scripts/fleet/merge_settings_layers.ts";
 import { allLayerLabels, loadLayer } from "../.github/scripts/fleet/render_managed_settings.ts";
-import { CHANNELS } from "../.github/scripts/shared/channels.ts";
 import { captureName } from "../.github/scripts/sync/run_hidden.ts";
-import { MARKER_TOKENS, trackingGate, trackingStreams } from "./generate.ts";
+import { MARKER_TOKENS, trackingStreams } from "./generate.ts";
 import { type JinjaVars, normalizeJinja, placeholderJinja } from "./jinja_subset.ts";
 import { loadManifests as loadManifestsFresh, type ModuleManifest } from "./module_manifests.ts";
 import { ANSWERS_FILE, parseAnswers } from "./render_dogfood.ts";
@@ -68,17 +67,7 @@ export const RECORDED_DIVERGENCES: {
   reason: string;
   skip: RegExp;
   before: RegExp;
-}[] = [
-  {
-    file: ".github/workflows/release.yml",
-    reason:
-      "the release-health pre-flight is dogfooded from this repository's own tree " +
-      "(./actions/release-health), which needs the repository checked out; downstream " +
-      "repos use the remote pin and carry no checkout",
-    skip: /^- uses: actions\/checkout@v7$/,
-    before: /^- uses: \.\/actions\/release-health$/,
-  },
-];
+}[] = [];
 
 // Actions allowed to be pinned at more than one ref, with the full expected
 // ref set. Empty today; record any intentional split here with a comment.
@@ -360,12 +349,6 @@ function asRecord(value: unknown, where: string): Record<string, unknown> {
 const copierConfig = memoize(
   (): Record<string, unknown> => asRecord(parseYaml(read("copier.yml")), "copier.yml"),
 );
-
-function copierChoices(question: string): string[] {
-  const q = asRecord(copierConfig()[question], `copier.yml ${question}`);
-  const choices = asRecord(q.choices, `copier.yml ${question}.choices`);
-  return Object.values(choices).map(String);
-}
 
 /** The manifests' tracking_label streams (fuzzer, nightly, ...): the single
  *  source the hand-written copier questions and doc constants are anchored
@@ -710,90 +693,6 @@ const rules: Rule[] = [
   },
 
   {
-    // TypeScript consumers import shared/channels.ts directly - the import
-    // IS the guarantee - so this rule covers only the sites TypeScript
-    // cannot own: copier.yml's choices, the two workflows, the ruleset,
-    // and plan.ts's per-channel legs (string-keyed, not typed).
-    name: "channels",
-    run: () => {
-      const mismatches: Mismatch[] = [];
-      const reference = [...CHANNELS];
-
-      mismatches.push(
-        ...setMismatch("copier.yml channel choices", reference, copierChoices("channel")),
-      );
-
-      const plan = read(".github/scripts/build-branches/plan.ts");
-      for (const channel of reference) {
-        // The camelCase twin of the old build_<channel>=true anchor: the
-        // rule must fail when a channel loses its build leg, not merely
-        // when its output line disappears.
-        const leg = `build${channel[0].toUpperCase()}${channel.slice(1)} = true`;
-        if (!plan.includes(leg)) {
-          mismatches.push({
-            file: ".github/scripts/build-branches/plan.ts",
-            expected: `a '${leg}' leg`,
-            got: "no such leg",
-          });
-        }
-        if (!plan.includes(`setOutput("${channel}"`)) {
-          mismatches.push({
-            file: ".github/scripts/build-branches/plan.ts",
-            expected: `a setOutput("${channel}", ...) leg`,
-            got: "no such leg",
-          });
-        }
-      }
-
-      const protect = read(".github/workflows/protect-build-branches.yml");
-      const fromJson = mustMatch(
-        protect,
-        /fromJSON\('(\[[^']*\])'\)/,
-        "protect-build-branches.yml",
-        "channel list",
-      );
-      mismatches.push(
-        ...setMismatch(
-          ".github/workflows/protect-build-branches.yml fromJSON",
-          reference,
-          (JSON.parse(fromJson[1]) as unknown[]).map(String),
-        ),
-      );
-
-      const buildBranches = asRecord(
-        parseYaml(read(".github/workflows/build-branches.yml")),
-        "build-branches.yml",
-      );
-      const dispatch = asRecord(
-        asRecord(buildBranches.on, "on").workflow_dispatch,
-        "workflow_dispatch",
-      );
-      const channelInput = asRecord(asRecord(dispatch.inputs, "inputs").channel, "channel input");
-      const options = (channelInput.options as unknown[])
-        .map(String)
-        .filter((option) => option !== "both");
-      mismatches.push(
-        ...setMismatch(".github/workflows/build-branches.yml dispatch options", reference, options),
-      );
-
-      const own = asRecord(parseYaml(read(".github/settings.yml")), ".github/settings.yml");
-      const ruleset = (own.rulesets as Record<string, unknown>[]).find(
-        (r) => r.name === "build-branches",
-      );
-      if (!ruleset) throw new Error(".github/settings.yml: no build-branches ruleset");
-      const conditions = asRecord(asRecord(ruleset.conditions, "conditions").ref_name, "ref_name");
-      mismatches.push(
-        ...setMismatch(
-          ".github/settings.yml build-branches ruleset",
-          reference,
-          (conditions.include as unknown[]).map(String),
-        ),
-      );
-      return mismatches;
-    },
-  },
-
-  {
     name: "bun-dirs",
     run: () => {
       const mismatches: Mismatch[] = [];
@@ -1041,7 +940,7 @@ const rules: Rule[] = [
   },
 
   {
-    // Most dogfooded copies (.editorconfig, release-please-config.json,
+    // Most dogfooded copies (.editorconfig,
     // CODE_OF_CONDUCT.md, CODEOWNERS, auto-assign.yml,
     // dependabot-bun-lockfile.yml, validate-skills.yml) are GENERATED from
     // their templates by
@@ -1050,9 +949,7 @@ const rules: Rule[] = [
     // dogfood-oracle smoke row (verify_dogfood_oracle.ts), so they need no
     // comparison here. This rule keeps only the pairs generation cannot
     // own: the prefix files, whose repo-specific tails
-    // live below the template's marker, and release.yml, whose one
-    // recorded divergence (the dogfooded ./actions/release-health checkout)
-    // needs semantic comparison with an excuse.
+    // live below the template's marker.
     name: "dogfood-parity",
     run: () => {
       const vars = jinjaVars();
@@ -1069,17 +966,6 @@ const rules: Rule[] = [
           repo: "SECURITY.md",
           tpl: "templates/base/SECURITY.md.jinja",
           mode: "prefix",
-        },
-        {
-          repo: ".github/workflows/release.yml",
-          tpl: "templates/release-please/.github/workflows/release.yml.jinja",
-          mode: "semantic",
-          // This repository selects no tracking-stream module (fuzzer,
-          // nightly), so the generated tracking-labels block must evaluate
-          // to what this repo really renders: absent. The key is the exact
-          // or-chain the generator emits, so a new stream module updates
-          // both sides together.
-          context: { [trackingGate(loadManifests())]: false },
         },
         {
           // The template ends with a repo-specific-notices marker
@@ -1592,9 +1478,8 @@ const rules: Rule[] = [
     // and empty for a label that does not exist, so a literal that drifts
     // from the managed roster degrades the guard to a permanent silent
     // no-op - anchor the literals to the release-please manifest's
-    // settings layer here instead. Only the template side is checked:
-    // dogfood-parity already pins this repo's
-    // .github/workflows/release.yml to it.
+    // settings layer here instead. Only the template side exists to check:
+    // repo-platform runs no release pipeline of its own.
     name: "release-guard-labels",
     run: () => {
       const mismatches: Mismatch[] = [];
@@ -2343,6 +2228,8 @@ const rules: Rule[] = [
           // <something>/repo-platform.<ext> is a filename inside a path
           // (say, a scratch repo-platform.yml), not an owner slug.
           if (/^\.[A-Za-z0-9]/.test(text.slice(match.index + match[0].length))) continue;
+          // The sync branch name is not an owner slug either.
+          if (match[1] === "automation") continue;
           if (match[1].toLowerCase() === username.toLowerCase()) {
             sawExpected = true;
             continue;
@@ -2361,9 +2248,9 @@ const rules: Rule[] = [
   },
 
   {
-    // The release-freshness ancestor check exists twice: this repo's
-    // ci.yml runs .github/scripts/ci/release_freshness.sh, while the
-    // release-please fragment inlines the same logic (downstream repos do
+    // The release-freshness ancestor check exists twice: the shell-checked
+    // .github/scripts/ci/release_freshness.sh copy this repo lints, and the
+    // release-please fragment inlining the same logic (downstream repos do
     // not carry this repo's scripts). Pin the core lines so a fix to one
     // side cannot silently leave the other behind.
     name: "release-freshness-parity",
@@ -2371,7 +2258,6 @@ const rules: Rule[] = [
       const mismatches: Mismatch[] = [];
       const script = ".github/scripts/ci/release_freshness.sh";
       const fragment = "templates/release-please/fragments/ci-gate-jobs.jinja";
-      const workflow = ".github/workflows/ci.yml";
       const pins: { line: string; files: string[] }[] = [
         {
           // biome-ignore lint/suspicious/noTemplateCurlyInString: literal shell line pinned in both copies
@@ -2385,9 +2271,9 @@ const rules: Rule[] = [
         {
           // The release-PR predicate: a renamed release-please branch
           // prefix would make every step skip and the gate silently fail
-          // open, so the exact condition is pinned in both workflows.
+          // open, so the exact condition is pinned in the fragment.
           line: "if: github.event_name == 'pull_request' && startsWith(github.head_ref, 'release-please--')",
-          files: [workflow, fragment],
+          files: [fragment],
         },
       ];
       for (const pin of pins) {

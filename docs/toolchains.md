@@ -26,4 +26,4 @@ A toolchain module can pin its runtime version fleet-wide through its manifest (
 
 ## Keeping the pins fresh
 
-The refresh-toolchains workflow (weekly cron + manual dispatch, mirroring refresh-gitignore) fetches the latest upstream versions - bun's latest GitHub release, Node's newest LTS line from nodejs.org, Deno's latest stable release - rewrites the manifests' pin version lines, reruns `bun run generate` and `bun run dogfood`, and opens or refreshes a PR on the `automation/toolchain-refresh` branch when anything moved. Merging the PR rebuilds the staging branch; cutting a release rolls the pin out to latest-channel repos on the next sync.
+The refresh-toolchains workflow (weekly cron + manual dispatch, mirroring refresh-gitignore) fetches the latest upstream versions - bun's latest GitHub release, Node's newest LTS line from nodejs.org, Deno's latest stable release - rewrites the manifests' pin version lines, reruns `bun run generate` and `bun run dogfood`, and opens or refreshes a PR on the `automation/toolchain-refresh` branch when anything moved. Merging the PR rebuilds the template branch; the next sync rolls the pin out to the fleet.

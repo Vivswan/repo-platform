@@ -7,7 +7,7 @@
 // manual-review path). Invoked by reusable-template-sync.yml's "Apply
 // copier update" step.
 //
-// Env: TARGET_DIR (default target), TARGET_REF, MODULES, CHANNEL, PRIVATE,
+// Env: TARGET_DIR (default target), TARGET_REF, MODULES, PRIVATE,
 // DESCRIPTION, RECOVER.
 
 import { env, requireEnv } from "../shared/gha.ts";
@@ -23,8 +23,6 @@ const proc = Bun.spawnSync(
     "--trust",
     "-d",
     `modules=${requireEnv("MODULES")}`,
-    "-d",
-    `channel=${requireEnv("CHANNEL")}`,
     "-d",
     `private=${requireEnv("PRIVATE")}`,
     "-d",

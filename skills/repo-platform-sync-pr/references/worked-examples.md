@@ -18,8 +18,8 @@ Resolution: those PRs predate the recovery carry step; recoveries now splice loc
 A sync PR "undoes" edits someone made directly to ci.yml, dependabot.yml, the managed half of AGENTS.md, or another fully-managed file. Diagnosed by diffing the file between base and automation branch:
 
 ```bash
-git fetch origin main automation/repo-platform-staging
-git diff origin/main...origin/automation/repo-platform-staging -- .github/workflows/ci.yml
+git fetch origin main automation/repo-platform
+git diff origin/main...origin/automation/repo-platform -- .github/workflows/ci.yml
 ```
 
 Resolution: expected - overlapping edits to template-owned files lose to the template. Move the content to where it is owned: below the `repo-platform:local-section` marker, into the `.gitignore` REPOSITORY LOCAL section, or into a repo-owned file (CI jobs go in checks.yml). If the change belongs to every repo, change the template in repo-platform instead.
@@ -32,7 +32,7 @@ Local edits overlapped template changes in a non-split file; the PR body lists d
 gh pr view <number> --json body --jq .body | grep -A20 'Conflict'
 ```
 
-Resolution: reset to the remote automation branch (`git checkout -B automation/repo-platform-<channel> origin/automation/repo-platform-<channel>`), restore the hunks that should stay (in their owned location, per the file-class table), push, merge when green. Resolve promptly: the next scheduled sync force-pushes the branch and replaces parked commits.
+Resolution: reset to the remote automation branch (`git checkout -B automation/repo-platform origin/automation/repo-platform`), restore the hunks that should stay (in their owned location, per the file-class table), push, merge when green. Resolve promptly: the next scheduled sync force-pushes the branch and replaces parked commits.
 
 ## 4. Repo-owned checks asserting content inside managed files
 

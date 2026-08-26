@@ -4,7 +4,7 @@ Selecting the `skills` module lets a repository host its own agent skills (consu
 
 - `.claude-plugin/plugin.json` and `.claude-plugin/marketplace.json` starters, seeded from the repository's identity (plugin name `<project_slug>-skills`, description from the project name, the owner as author) with an empty `skills` catalog
 - a `validate-skills` structure job spliced into the managed ci.yml, so the all-green gate blocks merges on a broken catalog, plus a standalone advisory `.github/workflows/validate-skills.yml` for CLI discovery
-- the `validate-skills` composite action in this repository (`actions/validate-skills`), pinned like every other managed action: released repos pin the matching `vX.Y.Z` tag, staging-channel repos pin `main`
+- the `validate-skills` composite action in this repository (`actions/validate-skills`), pinned at `main` like every other managed action
 
 ## Module parameter (copier question)
 

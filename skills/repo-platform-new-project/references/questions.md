@@ -9,7 +9,6 @@ The authoritative source is repo-platform's `copier.yml` (the interactive prompt
 | `project_name` | Human-readable project name | - |
 | `project_slug` | Repository / package identifier (kebab-case) | derived from the name |
 | `description` | One-line repository description (used in settings.yml) | - |
-| `channel` | `latest` (released `templates/vX.Y.Z` tags, migrations run) or `staging` (main HEAD builds, migrations skipped) | `latest` |
 | `modules` | Multiselect, any combination (space toggles, enter confirms) | `agents, release-please, issue-templates, pr-title, auto-assign` |
 | `private` | Repository visibility; gates CodeQL, dependency-review, CONTRIBUTING.md | `false` |
 | `github_username` | Owner of the repository | `Vivswan` |

@@ -2,9 +2,8 @@
 // Renders the template twins this repository dogfoods and writes this
 // repo's own copies, so each generated file has exactly one author: the
 // template. The copies carry the template's comments verbatim; the pairs
-// generation cannot own (the prefix files with repo-specific tails,
-// release.yml with its recorded divergence) stay compared by
-// check_ssot's dogfood-parity rule instead.
+// generation cannot own (the prefix files with repo-specific tails) stay
+// compared by check_ssot's dogfood-parity rule instead.
 //
 // Answers come from .repo-platform-answers.yml, this repository's own
 // copier answers; every value is cross-checked against its authoritative
@@ -37,10 +36,6 @@ export const ANSWERS_FILE = ".repo-platform-answers.yml";
 // (gateOfPair) decides whether the repo copy may exist at all.
 export const PAIRS: { repo: string; tpl: string }[] = [
   { repo: ".editorconfig", tpl: "templates/base/.editorconfig.jinja" },
-  {
-    repo: "release-please-config.json",
-    tpl: "templates/release-please/release-please-config.json.jinja",
-  },
   {
     repo: "CODE_OF_CONDUCT.md",
     tpl: "templates/base/{% if not private %}CODE_OF_CONDUCT.md{% endif %}.jinja",

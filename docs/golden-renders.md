@@ -17,7 +17,7 @@ bun run renders          # rewrite tests/golden-renders/ (also part of bun run r
 bun run renders:check    # render to temp and diff against the committed snapshots
 ```
 
-The runner is `scripts/render_goldens.ts`. It needs `copier` and `bun` on PATH, builds one scratch staging build tree per run (the smoke-render recipe), renders each selection with `--defaults` plus the fixed answers `project_name=Golden Render`, `description=Golden render fixture`, `private=false`, and snapshots the output verbatim - symlinks stay symlinks.
+The runner is `scripts/render_goldens.ts`. It needs `copier` and `bun` on PATH, builds one scratch build tree per run (the smoke-render recipe), renders each selection with `--defaults` plus the fixed answers `project_name=Golden Render`, `description=Golden render fixture`, `private=false`, and snapshots the output verbatim - symlinks stay symlinks.
 
 ## Determinism contract
 

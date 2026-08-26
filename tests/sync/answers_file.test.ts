@@ -11,21 +11,10 @@ function read(content: string) {
 }
 
 describe("readAnswersFile", () => {
-  test("parses channel, commit, and keeps every field for other consumers", () => {
-    const answers = read("_commit: templates/v1.2.3\nchannel: staging\nprivate: true\n");
-    expect(answers.channel).toBe("staging");
-    expect(answers.commit).toBe("templates/v1.2.3");
+  test("parses commit and keeps every field for other consumers", () => {
+    const answers = read("_commit: abc1234\nprivate: true\n");
+    expect(answers.commit).toBe("abc1234");
     expect(answers.fields.private).toBe(true);
-  });
-
-  test("an absent or null channel is null, never a guess", () => {
-    expect(read("_commit: x\n").channel).toBeNull();
-    expect(read("channel:\n").channel).toBeNull();
-  });
-
-  test("a channel outside the union surfaces its raw text as invalid", () => {
-    expect(read("channel: nightly\n").channel).toEqual({ invalid: "nightly" });
-    expect(read("channel: true\n").channel).toEqual({ invalid: "true" });
   });
 
   test("undoes copier's to_nice_yaml quoting of a digit-only short sha", () => {
@@ -44,7 +33,7 @@ describe("readAnswersFile", () => {
   });
 
   test("an absent or non-scalar _commit is empty (the caller fails it loudly)", () => {
-    expect(read("channel: latest\n").commit).toBe("");
+    expect(read("private: true\n").commit).toBe("");
     expect(read("_commit: [a, b]\n").commit).toBe("");
   });
 

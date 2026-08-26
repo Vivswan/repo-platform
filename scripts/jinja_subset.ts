@@ -3,7 +3,7 @@
 // dogfooded twins it still owns modulo these transforms, and
 // scripts/render_dogfood.ts renders this repository's generated copies with
 // them. Tag stripping, if/endif branch evaluation against a boolean
-// context, identity substitution, and the uses_ref -> local-path rewrite
+// context, identity substitution, and the remote-uses -> local-path rewrite
 // all live here so the checker and the generator can never normalize
 // differently. Pure functions only; the helpers moved verbatim from
 // check_ssot.ts.
@@ -94,7 +94,7 @@ export function evaluateIfBranches(
  * Reduce a template file to the text this repo's own copy should carry:
  * strip raw markers, jinja comments and set/if/endif tags, substitute the
  * identity expressions, and map remote
- * `<owner>/repo-platform/<path>@{{ uses_ref }}` references to their local
+ * `<owner>/repo-platform/<path>@main` references to their local
  * `./<path>` form. Without a `context`, every if/endif body is kept (fine
  * while the kept bodies never contradict each other); with one, false
  * branches are dropped and only conditions the context cannot resolve keep
@@ -138,7 +138,7 @@ export function normalizeJinja(
   );
   out = out.replace(/\{\{ '([^']*)' if [^}]*? else '[^']*' \}\}/g, "$1");
   out = out.replace(
-    new RegExp(`\\{\\{ github_username \\}\\}/${vars.slug}/([^\\s@]+)@\\{\\{ uses_ref \\}\\}`, "g"),
+    new RegExp(`\\{\\{ github_username \\}\\}/${vars.slug}/([^\\s@]+)@main`, "g"),
     "./$1",
   );
   out = out.replace(/\{\{ copyright_holder \}\}/g, () => vars.copyrightHolder);

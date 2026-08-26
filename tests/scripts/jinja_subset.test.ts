@@ -71,9 +71,8 @@ describe("normalizeJinja", () => {
     expect(normalizeJinja(text, vars)).toBe("* @vivswan by Vivswan in repo-platform");
   });
 
-  test("maps remote uses_ref references to the local workflow form", () => {
-    const text =
-      "uses: {{ github_username }}/repo-platform/.github/workflows/reusable-x.yml@{{ uses_ref }}";
+  test("maps remote uses references to the local workflow form", () => {
+    const text = "uses: {{ github_username }}/repo-platform/.github/workflows/reusable-x.yml@main";
     expect(normalizeJinja(text, vars)).toBe("uses: ./.github/workflows/reusable-x.yml");
   });
 
@@ -157,7 +156,7 @@ describe("renderJinjaFile", () => {
   test("set/comment whitespace control matches real jinja: a dash eats newlines", () => {
     expect(renderJinjaFile("A\n{#- c -#}\nB", vars, {})).toBe("AB");
     const preamble =
-      "# header\n\n{#- why the preamble\n    exists -#}\n{%- set tpl_ref = x -%}\n{%- set uses_ref = y if z else 'main' %}\nname: X\n";
+      "# header\n\n{#- why the set lines\n    exist -#}\n{%- set a = x -%}\n{%- set b = y if z else 'main' %}\nname: X\n";
     expect(renderJinjaFile(preamble, vars, {})).toBe("# header\nname: X\n");
   });
 

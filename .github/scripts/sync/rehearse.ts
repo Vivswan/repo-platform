@@ -1,12 +1,10 @@
 #!/usr/bin/env bun
 // Local rehearsal of one managed repo's sync PR: clones the target shallow
 // into /tmp, assembles a build tree from THIS working tree (uncommitted
-// template changes included), commits it as a synthetic templates/v99.99.99
-// release chained onto the target's recorded _commit, and runs the legs
-// reusable-template-sync.yml runs - module selection, copier update (which
-// executes due migrations via copier.yml's _migrations; the synthetic
-// release version gives them a parseable target even for staging-channel
-// repos), clean-render materialization, the split-file structural rebuild,
+// template changes included), commits it as a synthetic build chained onto
+// the target's recorded _commit, and runs the legs
+// reusable-template-sync.yml runs - module selection, copier update,
+// clean-render materialization, the split-file structural rebuild,
 // conflict resolution (rebuilt files skipped), retired-file cleanup, the
 // repo-owned preserve step, the final manifest stamp, the manifest license
 // check, and validation - then prints the resulting diff and the would-be
@@ -17,12 +15,11 @@
 // validator's dependencies. Right after cloning, the target's origin URLs
 // (fetch and push) are pointed at an unroutable value, so any remote
 // operation through the clone's remote fails loudly. Network git calls run
-// with prompts disabled and a hard deadline (check_migrations.ts pins the
-// same pattern), so a stalled network or a credential prompt becomes a
-// loud, fast failure instead of a hang. The code that runs with --trust is
-// this repository's own template and migrations - the same trust the real
-// sync extends - and nothing here opens PRs or writes to any remote. The
-// workspace under /tmp is left in place for inspection.
+// with prompts disabled and a hard deadline, so a stalled network or a
+// credential prompt becomes a loud, fast failure instead of a hang. The
+// code that runs with --trust is this repository's own template - the same
+// trust the real sync extends - and nothing here opens PRs or writes to
+// any remote. The workspace under /tmp is left in place for inspection.
 //
 // The CLI below rehearses one repo; rehearse_fleet.ts drives the exported
 // rehearseRepo across every managed repo (quiet, workspace cleaned up) and
@@ -54,12 +51,11 @@ import { join, resolve } from "node:path";
 import { loadRegistry } from "../fleet/repos_registry.ts";
 import { capture, passthrough, type RunOptions, type RunResult } from "../shared/proc.ts";
 import { AnswersFileError, readAnswersFile } from "./answers_file.ts";
-import { resolveChannel } from "./resolve_channel.ts";
 import { rewriteSrcPath } from "./src_path.ts";
 import { MANIFEST_NAME, stampManifestText } from "./stamp_manifest.ts";
 
 const REPO_ROOT = resolve(import.meta.dir, "..", "..", "..");
-const REHEARSAL_TAG = "templates/v99.99.99";
+const REHEARSAL_TAG = "rehearsal-build";
 // Fresh clones have no committer identity configured.
 const GIT_IDENT = ["-c", "user.name=rehearsal", "-c", "user.email=rehearsal@localhost"];
 
@@ -223,14 +219,12 @@ export function manifestStatus(root: string): ManifestStatus {
   return out === text ? "stamped" : "stale";
 }
 
-// The channel input the real sync would receive: repos.yml's per-repo
-// config, then its defaults (sync-repos routes exactly this through
-// select_sync_repos); the recorded copier answer stays the fallback via
-// resolveChannel. Production's full selection needs the fleet PAT's
-// repo discovery (the managed wildcard), which does not exist locally, so
-// a repo production would skip is warned about and rehearsed anyway - a
-// read-only what-if against an excluded repo is a legitimate rehearsal.
-function registryChannel(slug: string): string {
+// Warns when repos.yml would never sync this repo (production's full
+// selection needs the fleet PAT's repo discovery - the managed wildcard -
+// which does not exist locally, so a repo production would skip is warned
+// about and rehearsed anyway: a read-only what-if against an excluded repo
+// is a legitimate rehearsal).
+function warnUnselected(slug: string): void {
   const { registry, errors } = loadRegistry(readFileSync(join(REPO_ROOT, "repos.yml"), "utf-8"));
   if (registry === null) throw new RehearsalError(`repos.yml: ${errors.join("; ")}`);
   const lower = slug.toLowerCase();
@@ -242,7 +236,6 @@ function registryChannel(slug: string): string {
   ) {
     console.warn(`warning: ${slug} is not in repos.yml's managed list; production never syncs it`);
   }
-  return registry.config.get(lower)?.channel ?? registry.defaultChannel ?? "";
 }
 
 /** Rehearse one repo's sync end to end (see the file header for the legs
@@ -331,12 +324,7 @@ export function rehearseRepo(slug: string, options: RehearsalOptions): Rehearsal
       if (!(err instanceof AnswersFileError)) throw err;
       throw new RehearsalError(`${slug}'s .copier-answers.yml: ${err.message}`);
     }
-    const channel = resolveChannel(registryChannel(slug), answers);
-    if (typeof channel !== "string") {
-      throw new RehearsalError(
-        `${slug} records an unknown channel '${channel.invalid}'; fix .copier-answers.yml`,
-      );
-    }
+    warnUnselected(slug);
     if (answers.commit === "") {
       throw new RehearsalError(
         `${slug}'s .copier-answers.yml records no _commit; there is no base to update from`,
@@ -358,18 +346,16 @@ export function rehearseRepo(slug: string, options: RehearsalOptions): Rehearsal
       "get-url",
       "origin",
     ]).stdout.trim();
-    // The build branches and templates/v* tags live only on origin, never in
-    // this checkout; main rides along because legacy repos record a plain
-    // main-history _commit (the workflow checks out full history for the
-    // same reason). Best-effort per ref: a fleet missing one of them (no
-    // release yet, say) can still rehearse as long as _commit resolves. The
-    // credential helper stays (a private origin may legitimately need it);
-    // prompts are off and the deadline turns a stall into a fast failure.
+    // The build ref lives only on origin, never in this checkout; main
+    // rides along because legacy repos record a plain main-history _commit
+    // (the workflow checks out full history for the same reason).
+    // Best-effort per ref: a fleet missing one of them can still rehearse
+    // as long as _commit resolves. The credential helper stays (a private
+    // origin may legitimately need it); prompts are off and the deadline
+    // turns a stall into a fast failure.
     const fetches = [
       "+refs/heads/main:refs/heads/main",
-      "+refs/heads/staging:refs/heads/staging",
-      "+refs/heads/latest:refs/heads/latest",
-      "+refs/tags/templates/*:refs/tags/templates/*",
+      "+refs/heads/template:refs/heads/template",
     ].map((refspec) =>
       capture(["git", "-C", platformDir, "fetch", "--quiet", originUrl, refspec], {
         env: NO_PROMPT_ENV,
@@ -406,19 +392,9 @@ export function rehearseRepo(slug: string, options: RehearsalOptions): Rehearsal
     }
     const oldSha = oldShaProbe.stdout.trim();
 
-    run(
-      [
-        "bun",
-        ".github/scripts/build-branches/branch_tree.ts",
-        "--dest",
-        buildDir,
-        "--channel",
-        "latest",
-        "--version",
-        "v99.99.99",
-      ],
-      { cwd: REPO_ROOT },
-    );
+    run(["bun", ".github/scripts/build-branches/branch_tree.ts", "--dest", buildDir], {
+      cwd: REPO_ROOT,
+    });
     // Chain the rehearsal build onto the recorded base, mirroring the real
     // append-only build branches (ci/upgrade_path_test.sh does the same):
     // copier's downgrade check orders unparseable refs by dunamai's
@@ -486,7 +462,6 @@ export function rehearseRepo(slug: string, options: RehearsalOptions): Rehearsal
       TARGET_DIR: targetDir,
       TARGET_REF: REHEARSAL_TAG,
       MODULES: modules,
-      CHANNEL: channel,
       PRIVATE: privateAnswer,
       DESCRIPTION: description,
       RUNNER_TEMP: temp,
@@ -495,7 +470,7 @@ export function rehearseRepo(slug: string, options: RehearsalOptions): Rehearsal
       RECOVER: "",
     };
 
-    section("copier update (due migrations run inside, via copier.yml's _migrations)");
+    section("copier update");
     run(["bun", ".github/scripts/sync/apply_update.ts"], { cwd: REPO_ROOT, env: legEnv });
 
     // The workflow's leg order: materialize the clean renders, rebuild the

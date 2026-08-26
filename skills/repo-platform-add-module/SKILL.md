@@ -13,7 +13,7 @@ Module selection is repo-owned: the top-level `modules:` list in the repository'
 Work in this order, always:
 
 1. Edit `modules:` in `.repo-platform.yml` (and any module parameter in `.copier-answers.yml`, same PR) and merge.
-2. Get the sync PR (wait for the weekly cron / next release, or dispatch it now) and review every changed file before it merges.
+2. Get the sync PR (wait for the weekly cron, or dispatch it now) and review every changed file before it merges.
 3. Finish the module's companion steps (labels, secrets, one-time setup, starter customization).
 
 ## When to Apply
@@ -62,7 +62,7 @@ modules: ["agents", "release-please", "issue-templates", "pr-title", "auto-assig
 A typo is safe: a name the template does not know fails the sync run loudly instead of being dropped - and the safety net fires earlier than that: the informational `validate-template` job on the step-1 PR itself flags an unknown module name before merge. Two more caveats:
 
 - Older repos nest the selection under `template:`; add a top-level `modules:` list, which wins.
-- A brand-new module reaches a repo only through a template ref that ships it: `latest`-channel repos wait for a template release, and `staging`-channel repos need the staging branch rebuilt from the main merge that added it - either way, delivery still waits for the next sync run (weekly cron, release, or dispatch); the rebuild alone syncs nothing.
+- A brand-new module reaches a repo only through a template ref that ships it: the `template` branch must be rebuilt from the main merge that added it (build-branches runs on every push), and delivery still waits for the next sync run (weekly cron or dispatch); the rebuild alone syncs nothing.
 
 Expected-red window when adding a toolchain module (bun/node/deno): after the step-1 merge, `validate-template` reports the missing toolchain pin dotfile (`.bun-version` / `.node-version` / `.dvmrc`) until the sync PR lands it. That job is informational, not gating - do not hand-create the dotfile.
 
@@ -72,7 +72,7 @@ Merge the PR. Nothing renders yet - the render happens in the sync.
 
 ### 2. Get the sync PR
 
-Sync PRs arrive on template releases and the weekly cron (Tuesday 08:50 UTC). A module edit alone is enough to produce one (the selection is a live input; the sync re-renders even at an unchanged template ref). To sync immediately:
+Sync PRs arrive on the weekly cron (Tuesday 08:50 UTC). A module edit alone is enough to produce one (the selection is a live input; the sync re-renders even at an unchanged template ref). To sync immediately:
 
 ```bash
 gh workflow run sync-repos.yml -R Vivswan/repo-platform -f repo=Vivswan/<repo>
@@ -108,7 +108,7 @@ The full checklist per module is in [references/modules.md](references/modules.m
 
 ## Module parameters
 
-How the sync actually renders answers: it passes only `modules` (from `.repo-platform.yml`), `channel` (fleet config), and the live `private`/`description` as data. Every other answer - `nightly_label`, `fuzzer_label`, `skills_dir`, the `pages_*` set, `homepage`, `topics`, `copyright_holder` - is loaded from the repo's recorded `.copier-answers.yml`, and a question with no recorded answer (a module just added) takes its `copier.yml` default.
+How the sync actually renders answers: it passes only `modules` (from `.repo-platform.yml`) and the live `private`/`description` as data. Every other answer - `nightly_label`, `fuzzer_label`, `skills_dir`, the `pages_*` set, `homepage`, `topics`, `copyright_holder` - is loaded from the repo's recorded `.copier-answers.yml`, and a question with no recorded answer (a module just added) takes its `copier.yml` default.
 
 So the parameter mechanism is the recorded answers file, edited by PR on the default branch:
 
@@ -126,7 +126,7 @@ gh workflow run sync-repos.yml -R Vivswan/repo-platform -f repo=Vivswan/<repo>
 The answers file holds three classes of key - know which one you are touching:
 
 - `_`-prefixed keys (`_commit`, `_src_path`): never touch them, and never delete the file - `copier update` depends on them, and a broken `_commit` puts the repo on the recovery path.
-- `modules`, `channel`, `private`, `description`: recorded here, but force-overridden by the sync every run - an edit here silently evaporates. Change them at their real source: `.repo-platform.yml` for modules, repo-platform's `repos.yml` for channel, and the repo's own `.github/settings.yml` for visibility and description (the settings apply enforces that file; the sync then adopts the applied values).
+- `modules`, `private`, `description`: recorded here, but force-overridden by the sync every run - an edit here silently evaporates. Change them at their real source: `.repo-platform.yml` for modules, and the repo's own `.github/settings.yml` for visibility and description (the settings apply enforces that file; the sync then adopts the applied values).
 - Everything else (the module parameters above): editing the value key here IS the mechanism. The next sync re-renders everything derived from the answer and rewrites `.copier-answers.yml` itself consistently; an answer that violates its copier validator fails the sync run loudly. The settings assembly reads tracking labels from exactly this file on the default branch, so the recorded value is what the apply declares.
 
 When both `fuzzer` and `nightly` are selected, their labels must differ (case-insensitively - GitHub deduplicates label names that way): both streams dedup AND auto-close by label, so a shared label lets one stream's green night close the other's open issue. The copier validator and the settings assembly both reject the collision.

@@ -32,7 +32,7 @@
 //
 // `enrich` needs PAT and GITHUB_RUN_ID in the environment. It prints
 // {rows}: one row per selection entry, in order, as
-// {repo, channel, redact_name, hide_details, display, verify} (`repo` is
+// {repo, redact_name, hide_details, display, verify} (`repo` is
 // always the real slug - the CALLER must emit `display` in its matrix
 // instead for redact_name rows). Errors print as ::error:: workflow
 // commands (on stdout, where the runner parses them) with a nonzero exit.
@@ -130,7 +130,6 @@ export const enrichedRowSchema = z
   .discriminatedUnion("redact_name", [
     z.object({
       repo: z.string(),
-      channel: z.string(),
       redact_name: z.literal(true),
       hide_details: z.literal(true),
       display: z.string(),
@@ -138,7 +137,6 @@ export const enrichedRowSchema = z
     }),
     z.object({
       repo: z.string(),
-      channel: z.string(),
       redact_name: z.literal(false),
       hide_details: z.boolean(),
       display: z.string(),
@@ -182,7 +180,7 @@ export function parseEnrichedRows(data: unknown, label: string): EnrichedRow[] {
  * repository.
  */
 export function enrich(
-  selection: { repo: string; channel: string | null }[],
+  selection: { repo: string }[],
   discovered: DiscoveredRepo[],
   isSelfDisclosed: (slug: string) => boolean,
   tagFor: (slug: string) => string,
@@ -219,11 +217,9 @@ export function enrich(
 
   const rows = selection.map((row): EnrichedRow => {
     const priv = isPrivate(row.repo);
-    const channel = row.channel ?? "";
     return priv && !isSelfDisclosed(row.repo)
       ? {
           repo: row.repo,
-          channel,
           redact_name: true,
           hide_details: true,
           display: hints.get(row.repo) ?? hintName(row.repo),
@@ -231,7 +227,6 @@ export function enrich(
         }
       : {
           repo: row.repo,
-          channel,
           redact_name: false,
           hide_details: priv,
           display: row.repo,
@@ -257,18 +252,15 @@ export function parseDiscoveredList(data: unknown): DiscoveredRepo[] | null {
 }
 
 // The selection rows from repos_registry select. Only `repo` is load
-// bearing here; `channel` is deliberately NOT validated (enrich coalesces
-// a nullish one to "" and passes anything else through untouched), and
-// extra keys ride along - the legacy fail-open tolerance, kept exactly.
+// bearing here; extra keys ride along - the legacy fail-open tolerance,
+// kept exactly.
 const selectionListSchema = z.array(z.looseObject({ repo: z.string() }));
 
 /** Parse a selection list at the trust boundary; null when the shape is
  * wrong. */
-export function parseSelectionList(
-  data: unknown,
-): { repo: string; channel: string | null }[] | null {
+export function parseSelectionList(data: unknown): { repo: string }[] | null {
   const result = selectionListSchema.safeParse(data);
-  return result.success ? (result.data as { repo: string; channel: string | null }[]) : null;
+  return result.success ? (result.data as { repo: string }[]) : null;
 }
 
 function readJson(path: string, what: string): unknown {
@@ -294,7 +286,7 @@ function loadDiscovered(path: string): DiscoveredRepo[] {
   return parsed;
 }
 
-function loadSelection(path: string): { repo: string; channel: string | null }[] {
+function loadSelection(path: string): { repo: string }[] {
   const parsed = parseSelectionList(readJson(path, "the selection"));
   if (parsed === null) {
     fail(`${path}: the selection must be a JSON array of {repo, ...} objects`);
@@ -326,9 +318,7 @@ function main(args: string[]): void {
         fail(errors);
       }
       const committed = new Set(
-        [...registry.managed.repos, ...registry.exclude, ...registry.config.keys()].map((slug) =>
-          slug.toLowerCase(),
-        ),
+        [...registry.managed.repos, ...registry.exclude].map((slug) => slug.toLowerCase()),
       );
       const isSelfDisclosed = (slug: string) => committed.has(slug.toLowerCase());
       const result = enrich(

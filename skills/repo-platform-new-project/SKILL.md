@@ -19,8 +19,7 @@ Bring a repository under Vivswan/repo-platform management: the platform is a Cop
 ## Key facts before you start
 
 - The template is standards-only: CI conventions, settings, gitignore, agent instructions. The project skeleton comes from the native tool (`uv init`, `bun init`); repo-platform layers on top.
-- repo-platform's `main` branch is NOT copier-consumable. Consume the generated build refs: the `staging` branch (rebuilt from every main merge) or a `templates/vX.Y.Z` build tag (released versions).
-- The `--vcs-ref` you generate from must match the `channel` answer you give: `staging` ref for the staging channel, a `templates/vX.Y.Z` tag for the latest channel.
+- repo-platform's `main` branch is NOT copier-consumable. Consume the generated build ref: the `template` branch (rebuilt from every main merge).
 - Some steps need repository-settings access; they are collected in "Owner actions" below so a human can do them in one sitting.
 
 ## Workflow
@@ -28,7 +27,7 @@ Bring a repository under Vivswan/repo-platform management: the platform is a Cop
 ### 1. Prerequisites
 
 - copier >= 9.8.0 (serialized multiselect answers need it).
-- bun on PATH - even for a Python repo. The template's `_migrations` hook runs a bun script, so copier fails without bun available.
+- bun on PATH - even for a Python repo. The template's post-render stamp hook runs a bun script, so copier fails without bun available.
 - `git` and an authenticated `gh` CLI.
 
 ### 2. Scaffold with the native tool (new projects only)
@@ -54,23 +53,18 @@ git symbolic-ref --short HEAD   # must print main for a new project
 # the repo): git symbolic-ref HEAD refs/heads/main  (safe before the
 # first commit)
 
-# staging channel (main HEAD builds; what Vivswan's own repos use):
-copier copy gh:Vivswan/repo-platform . --vcs-ref staging --trust
-
-# OR latest channel (released template versions; pick the newest tag from
-# git ls-remote --tags https://github.com/Vivswan/repo-platform.git 'refs/tags/templates/*'):
-copier copy gh:Vivswan/repo-platform . --vcs-ref templates/vX.Y.Z --trust
+copier copy gh:Vivswan/repo-platform . --vcs-ref template --trust
 
 git add --all
 git commit -m "chore: initialize from repo-platform"
 ```
 
-`--trust` is needed because the template declares a `_migrations` hook (copier treats templates with hooks as unsafe).
+`--trust` is needed because the template declares a post-render stamp hook (copier treats templates with hooks as unsafe).
 
 Running non-interactively (agent-driven): add `--defaults --overwrite`. Without `--overwrite`, copier prompts per conflicting file - the scaffolder already wrote `.gitignore` (and maybe a README) that the template also renders, and `--defaults` does not answer overwrite prompts, so a non-TTY run hangs. The modules multiselect must be a YAML list in ONE `-d` argument:
 
 ```bash
-copier copy gh:Vivswan/repo-platform . --vcs-ref staging --defaults --overwrite --trust \
+copier copy gh:Vivswan/repo-platform . --vcs-ref template --defaults --overwrite --trust \
   -d project_name=X -d description=Y -d 'modules=[uv]' -d private=false
 ```
 
@@ -80,7 +74,6 @@ The template's `.gitignore` is generated and managed: after the copy, move any s
 
 Full walkthrough in [references/questions.md](references/questions.md). The load-bearing answers:
 
-- `channel`: `latest` follows released `templates/vX.Y.Z` tags and runs migrations between releases; `staging` follows every main merge and skips migrations. Must match the `--vcs-ref` above.
 - `modules`: a multiselect (space toggles, enter confirms), any combination. Modules with parameters ask follow-up questions only when selected (pages, fuzzer, nightly, skills, settings-sync). The authoritative roster is the interactive prompt itself (repo-platform's `copier.yml`).
 - `private`: gates the render - public repos get CodeQL and dependency-review jobs plus CONTRIBUTING.md; private ones do not. It must match the visibility you create the repo with in step 6.
 
@@ -115,8 +108,8 @@ The `--public`/`--private` flag must match the `private` copier answer, or the f
 
 Then one grant: give the fleet `REPO_PLATFORM_TOKEN` PAT access to the new repository (see "Owner actions"). Discovery only enrolls repos the token can WRITE to; that grant is the enrollment.
 
-- No entry in repo-platform's `repos.yml` is needed unless the repo deviates from the default channel (then add a `config:` entry).
-- Sync PRs arrive on releases and the weekly cron. To sync immediately:
+- No entry in repo-platform's `repos.yml` is needed (the wildcard discovers it); `exclude:` is only for opting a repo out.
+- Sync PRs arrive on the weekly cron. To sync immediately:
 
 ```bash
 gh workflow run sync-repos.yml -R Vivswan/repo-platform -f repo=Vivswan/my-project

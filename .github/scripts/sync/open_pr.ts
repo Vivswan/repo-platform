@@ -5,7 +5,7 @@
 // "Create or refresh pull request" step.
 //
 // Env: TARGET, TARGET_DISPLAY (log label; falls back to TARGET),
-// HIDE_DETAILS, CHANNEL, DISPLAY, BRANCH, BASE_BRANCH,
+// HIDE_DETAILS, DISPLAY, BRANCH, BASE_BRANCH,
 // VALIDATION, RESOLVED, RECOVER, FORCE_MANUAL, DRIFT_FILE, SUMMARY_FILE,
 // CARRIED_FILE, CARRY_REVIEW_FILE, RETIRED_MODULES_FILE,
 // REMOVED_PATHS_FILE, WITHHELD_FILE, MANIFEST_LICENSE_FILE,
@@ -47,13 +47,9 @@ function lines(path: string): string[] {
 // body ships to the private repo, so the raw value is fine HERE.
 const oldCommit = readFileSync(join(runnerTemp, "old_commit.txt"), "utf-8");
 
-// TARGET_REF is the verified commit on both channels (pinned by
-// resolve_refs.ts), so the channel and DISPLAY (staging@<sha> or
-// templates/vX.Y.Z) drive the source line.
-const sourceLine =
-  requireEnv("CHANNEL") === "staging"
-    ? `[\`${repository}\`](https://github.com/${repository}/tree/staging) (staging channel)`
-    : `[\`${repository}\`](https://github.com/${repository}/releases/tag/${display.replace(/^templates\//, "")})`;
+// TARGET_REF is the verified commit (pinned by resolve_refs.ts), so
+// DISPLAY (template@<sha>) drives the source line.
+const sourceLine = `[\`${repository}\`](https://github.com/${repository}/tree/template) (template branch)`;
 
 const title = `chore: update repo-platform template to ${display}`;
 let body = `Automated template update from ${sourceLine}.

@@ -398,12 +398,15 @@ describe("fact resolvers", () => {
     // root under bun test), so a drifted answers schema fails here first.
     const operatorFacts = factsFromOperatorAnswers(".repo-platform-answers.yml");
     expect(operatorFacts.private).toBe(false);
-    expect(operatorFacts.modules).toContain("release-please");
+    // repo-platform runs no release pipeline of its own, so release-please
+    // is deliberately absent from its dogfooded modules.
+    expect(operatorFacts.modules).not.toContain("release-please");
+    expect(operatorFacts.modules).toContain("bun");
     expect(operatorFacts.trackingLabels).toEqual([]);
-    // The operator baseline must carry the release labels its release
-    // machinery recreates - the delete/recreate loop tripwire.
+    // The operator baseline must carry the labels its own machinery
+    // recreates (dependabot) - the delete/recreate loop tripwire.
     const names = managedLabels(operatorFacts, manifests).map((label) => label.name);
-    for (const required of ["dependencies", "github_actions", "javascript", "release-blocker"]) {
+    for (const required of ["dependencies", "github_actions", "javascript"]) {
       expect(names).toContain(required);
     }
   });

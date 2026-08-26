@@ -4,7 +4,7 @@
 
 The sync leg fails red with exactly this error (no PR arrives):
 
-> ::error::<repo>'s recorded _commit '<value>' does not resolve on Vivswan/repo-platform's build branches, so there is no base to update from. Fix the _commit in its .copier-answers.yml, or dispatch Sync Repos with repo=<the repository's real owner/name> (shown here as <repo>) and recover=recopy to regenerate the repo through a manual-review PR.
+> ::error::<repo>'s recorded _commit '<value>' does not resolve on Vivswan/repo-platform's build branch, so there is no base to update from. Fix the _commit in its .copier-answers.yml, or dispatch Sync Repos with repo=<the repository's real owner/name> (shown here as <repo>) and recover=recopy to regenerate the repo through a manual-review PR.
 
 Where it surfaces depends on visibility:
 
@@ -19,9 +19,9 @@ Where it surfaces depends on visibility:
 
 ## Why it happens
 
-`staging` and `latest` are append-only orphan branches, so a recorded `_commit` normally stays resolvable forever. It breaks when:
+`template` is an append-only orphan branch, so a recorded `_commit` normally stays resolvable forever. It breaks when:
 
-- the staging branch was recreated (its old commits are orphaned),
+- the template branch was recreated (its old commits are orphaned),
 - the repo was generated from a local repo-platform checkout whose commit never existed upstream,
 - `.copier-answers.yml`'s `_commit` was hand-edited, or
 - the repo predates the build-branch architecture and records a main-history commit that a main rewrite orphaned.
@@ -42,7 +42,7 @@ gh workflow run sync-repos.yml -R Vivswan/repo-platform \
 
 The repo input is required either way - a recovery dispatch without it is rejected, so recovery stays a deliberate act.
 
-`repo=all` is for fleet-wide breakage (a recreated staging branch, say), not routine use: it applies the destructive recovery path to every managed repo, including ones that never needed it - managed-half edits are overwritten everywhere, retired-file cleanup is skipped fleet-wide, and every open auto-merging sync PR is flipped to manual review.
+`repo=all` is for fleet-wide breakage (a recreated template branch, say), not routine use: it applies the destructive recovery path to every managed repo, including ones that never needed it - managed-half edits are overwritten everywhere, retired-file cleanup is skipped fleet-wide, and every open auto-merging sync PR is flipped to manual review.
 
 One fleet run fans out to every repo in parallel, and failures stay isolated per leg: every repo is attempted, the run goes red if any leg failed, but there is no aggregate summary - list the failed legs with `gh run view <id> -R Vivswan/repo-platform --log-failed` (a public repo's failure surfaces nowhere else; a private repo self-files its failure-report issue, as above). One sharp edge: each leg disarms auto-merge BEFORE it pushes the branch and updates the PR, so a leg that fails exactly there (rate limiting's favorite spot) leaves that repo's previously-armed PR disarmed with no new content - re-running the recovery for that repo heals it.
 
@@ -75,7 +75,7 @@ Recovery PRs generated BEFORE the carry step existed (and any future regression)
 
   ```bash
   git fetch origin
-  git checkout -B automation/repo-platform-staging origin/automation/repo-platform-staging
+  git checkout -B automation/repo-platform origin/automation/repo-platform
   git show origin/main:AGENTS.md   # copy everything BELOW the
                                    # repo-platform:local-section line,
                                    # paste it below the marker on the branch
