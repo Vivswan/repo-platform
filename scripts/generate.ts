@@ -32,7 +32,9 @@
 //   a rendered downstream workflow carries no marker text).
 //
 // The .gitignore outputs are NOT owned here: scripts/build_gitignore.ts
-// has its own upstream-lock fetch/check cycle (bun run gitignore:check).
+// fetches them from github/gitignore HEAD on every run, so it lives
+// outside `bun run regen` and outside CI (the refresh-gitignore workflow
+// is its only caller).
 //
 // A region is the content strictly between its BEGIN/END marker comments;
 // the markers themselves are hand-placed once and never rewritten. Editing

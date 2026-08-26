@@ -1,6 +1,8 @@
 # Weekly: regenerate the gitignore outputs (base skeleton, toolchain
-# fragments, this repo's own .gitignore) from the latest github/gitignore and
-# open a PR when upstream changed anything we consume.
+# fragments, this repo's own .gitignore) from github/gitignore's current HEAD
+# and open a PR when upstream changed anything we consume. This workflow is
+# the only place that fetches upstream: nothing is pinned and no CI job
+# verifies the outputs, so the diff below IS the upstream change.
 # Merging the PR reaches the template branch automatically via build-branches.
 
 name: Refresh gitignore
@@ -39,7 +41,7 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      - name: Regenerate from latest upstream
+      - name: Regenerate from upstream HEAD
         run: bun scripts/build_gitignore.ts
 
       - name: Detect changes
@@ -52,9 +54,8 @@ jobs:
             echo "changed=true" >> "$GITHUB_OUTPUT"
           fi
 
-      # The commit subject and body embed the upstream SHA the lock now
-      # pins, so they are composed here (expressions cannot substring) and
-      # exported over the script's env.
+      # Nothing generated records the upstream SHA, so the commit subject
+      # and PR body are fixed text - what moved is the diff itself.
       - name: Commit, push, and open PR
         if: steps.changes.outputs.changed == 'true'
         env:
@@ -62,8 +63,6 @@ jobs:
           BASE_BRANCH: ${{ github.event.repository.default_branch }}
           BRANCH: automation/gitignore-refresh
           PR_TITLE: "chore: refresh gitignore templates from github/gitignore"
-        run: |
-          sha="$(cat scripts/gitignore.lock)"
-          export COMMIT_MESSAGE="chore: refresh gitignore templates from github/gitignore@${sha:0:12}"
-          export PR_BODY="Automated regeneration of the gitignore outputs (base skeleton, toolchain fragments, this repo's own \`.gitignore\`) from [github/gitignore@\`${sha:0:12}\`](https://github.com/github/gitignore/tree/${sha}). Merging this rebuilds the template branch; the next sync pushes it to the fleet."
-          bun .github/scripts/shared/open_automation_pr.ts
+          COMMIT_MESSAGE: "chore: refresh gitignore templates from github/gitignore"
+          PR_BODY: "Automated regeneration of the gitignore outputs (base skeleton, toolchain fragments, this repo's own `.gitignore`) from [github/gitignore](https://github.com/github/gitignore)'s current HEAD. The diff is the upstream change to the sections we consume. Merging this rebuilds the template branch; the next sync pushes it to the fleet."
+        run: bun .github/scripts/shared/open_automation_pr.ts

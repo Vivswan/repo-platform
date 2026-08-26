@@ -6,6 +6,9 @@
 // yields exactly the unguarded bytes, a false guard yields nothing at all.
 // The stray-fragment tests pin the orphan guard: a generated fragment must
 // not outlive its module's gitignore_sources declaration.
+// The argv tests pin the single-mode shape: the script takes no arguments,
+// and the retired pin flags are rejected before any network call - the one
+// part of main() that can run offline.
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -14,6 +17,7 @@ import { join } from "node:path";
 import {
   buildFragment,
   fragmentPlans,
+  main,
   selfSources,
   strayFragmentFiles,
 } from "../../scripts/build_gitignore";
@@ -146,5 +150,34 @@ describe("strayFragmentFiles", () => {
     expect(
       strayFragmentFiles([manifest("bun", ["Node.gitignore"]), manifest("uv")], templates),
     ).toEqual(["templates/uv/fragments/gitignore.jinja"]);
+  });
+});
+
+describe("argument parsing", () => {
+  /** main() with arguments never reaches the fetch, so this stays offline;
+   *  the returned message is captured rather than printed. */
+  async function reject(argv: string[]): Promise<{ code: number; message: string }> {
+    const original = console.error;
+    let message = "";
+    console.error = (value: unknown) => {
+      message = String(value);
+    };
+    try {
+      return { code: await main(argv), message };
+    } finally {
+      console.error = original;
+    }
+  }
+
+  for (const flag of ["--locked", "--check"]) {
+    test(`the retired ${flag} mode is rejected, not silently ignored`, async () => {
+      const { code, message } = await reject([flag]);
+      expect(code).toBe(2);
+      expect(message).toContain(flag);
+    });
+  }
+
+  test("any other argument is rejected too", async () => {
+    expect((await reject(["--dry-run", "x"])).code).toBe(2);
   });
 });
