@@ -4,25 +4,35 @@
 // main merge, so a sync dispatched right after a merge could consume the
 // previous build tree. Wait for a successful run at main's HEAD - every
 // trigger rebuilds the branch, so any successful run there proves it (a
-// no-op rebuild creates no build commit to wait for). A red main tip
-// never builds at all (builds trigger on CI success and publish.ts
-// refuses ungreen sources), so this wait then times out and the sync
-// ships the previous green build - resolve_refs.ts re-checks the shipped
-// build's own source is green (shared/all_green.ts); this bounded wait
-// stays a freshness aid, not the gate. Polls
-// every 10 seconds, 30 attempts, then warns and lets the run continue (the
-// sync's own guards fail loudly and the weekly cron heals).
+// no-op rebuild creates no build commit to wait for) - or for a template
+// tip whose source stamp already names main's HEAD (publish.ts always
+// composes origin/main, so a build triggered by an OLDER run can publish
+// a newer main than that run's head_sha). Two waiting cases end in the
+// warning path, both benign: a green main whose CI is still running
+// (build-branches triggers on CI success, so nothing has even started
+// yet), and a red main tip, which never builds at all (publish.ts refuses
+// ungreen sources). Either way the sync ships the PREVIOUS green build -
+// its scripts and templates may lag main (script/template skew), which is
+// exactly the state a pre-gate sync always ran in - and resolve_refs.ts
+// re-checks the shipped build's own source is green (shared/all_green.ts);
+// this bounded wait stays a freshness aid, not the gate. Polls every 30
+// seconds, 90 attempts (45 minutes): under the workflow_run trigger the
+// wait must cover a full main CI run before the build even starts (~30
+// minutes worst case with rehearse-fleet) plus the build itself, then
+// warns and lets the run continue (the sync's own guards fail loudly and
+// the weekly cron heals).
 //
 // Env: GH_TOKEN, GITHUB_REPOSITORY. WAIT_DELAY_MS shortens the poll
 // interval for tests, PROBE_TIMEOUT_MS the per-call network deadline.
 
 import { z } from "zod";
+import { commitStampParse } from "../shared/commit_stamp.ts";
 import { env, error, requireEnv, warning } from "../shared/gha.ts";
 import { parseJsonWith } from "../shared/json.ts";
 import { capture, mustCapture } from "../shared/proc.ts";
 
-const ATTEMPTS = 30;
-const DELAY_MS = Number(env("WAIT_DELAY_MS", "10000"));
+const ATTEMPTS = 90;
+const DELAY_MS = Number(env("WAIT_DELAY_MS", "30000"));
 /** Hard deadline for each network call: generous next to a healthy
  * ls-remote or API hit, small enough that a stalled connection burns one
  * probe, not the run (the wall-clock deadline below owns the total). */
@@ -90,11 +100,28 @@ await waitFor(
     const built = parseJsonWith(runsSchema, runs.stdout, "wait_for_build: workflow runs response");
     // Every build-branches trigger rebuilds the one branch, so any
     // successful run at main's HEAD proves the build.
-    const fresh = built.workflow_runs.some((run) => run.head_sha === mainSha);
-    if (!fresh) return false;
-    console.log(`the template branch is built from main HEAD ${mainSha}.`);
+    if (built.workflow_runs.some((run) => run.head_sha === mainSha)) {
+      console.log(`the template branch is built from main HEAD ${mainSha}.`);
+      return true;
+    }
+    // The runs match misses a publish that composed a NEWER main than the
+    // triggering run's head_sha (publish.ts always composes origin/main):
+    // the branch tip's own source stamp is the artifact's provenance, so
+    // a tip already stamped with main's HEAD proves freshness directly.
+    // (The converse miss - a no-op rebuild keeping an old-but-valid stamp
+    // - is what the runs match above covers.)
+    const fetched = capture(
+      ["git", "-c", "credential.helper=", "fetch", "--quiet", "--depth=1", "origin", "template"],
+      { env: GIT_NO_PROMPT_ENV, timeoutMs },
+    );
+    if (fetched.exitCode !== 0) return false;
+    const tip = capture(["git", "log", "-1", "--format=%B", "FETCH_HEAD"], { timeoutMs });
+    if (tip.exitCode !== 0 || commitStampParse(tip.stdout) !== mainSha) return false;
+    console.log(`the template branch tip is stamped with main HEAD ${mainSha}.`);
     return true;
   },
   `waiting for a successful Build Branches run at ${mainSha}...`,
-  `no successful Build Branches run found for main HEAD ${mainSha} after 5 minutes; syncs may apply the previous build tree. The weekly cron heals this on its next run.`,
+  `no successful Build Branches run found for main HEAD ${mainSha} after ${Math.round(
+    DEADLINE_MS / 60000,
+  )} minutes; syncs may apply the previous build tree. The weekly cron heals this on its next run.`,
 );

@@ -27,6 +27,14 @@
 // only after this job passed as not-involved is not re-gated - required
 // review thread resolution still covers its comments. The rule-present
 // path (this repository and the fleet baseline) has no such window.
+// Likewise bounded: a renamed rule TYPE (copilot_code_review) would fall
+// through to the involvement probe and pass non-blocking - but the
+// settings apply rejects an override document naming an unknown rule
+// type loudly first; and a renamed Copilot LOGIN leaves this gate red
+// yet unable to self-re-arm (rerun-copilot-gate.yml's RELEVANT filter is
+// keyed on the current logins), so a stuck-red gate after an upstream
+// rename means updating the login lists (copilot_review_common.ts and
+// that workflow's fromJSON literal).
 //
 // A ruleset-side required check cannot do this job: Copilot's check
 // suite never appears in PR merge-box rollups, so requiring it there
@@ -101,14 +109,14 @@ const copilotReviews = (reviews ?? []).filter(
 );
 
 const arrived =
-  (checks !== null && checks.check_runs.some((run) => run.status === "completed")) ||
+  checks?.check_runs.some((run) => run.status === "completed") ||
   copilotReviews.some((review) => review.commit_id === headSha);
 if (arrived) {
   console.log(`Copilot's review (${CHECK_NAME}) arrived at ${headSha}.`);
   process.exit(0);
 }
 
-if (rules !== null && rules.some((rule) => rule.type === "copilot_code_review")) {
+if (rules?.some((rule) => rule.type === "copilot_code_review")) {
   console.log(
     `${baseBranch}'s rules include copilot_code_review: the review is expected by configuration.`,
   );
@@ -123,7 +131,7 @@ const pull = fetchJson(
 const involved =
   (checks !== null && checks.check_runs.length > 0) ||
   copilotReviews.length > 0 ||
-  (pull !== null && pull.requested_reviewers.some((reviewer) => isCopilot(reviewer.login)));
+  pull?.requested_reviewers.some((reviewer) => isCopilot(reviewer.login));
 if (involved) failAwaitingReview();
 
 // Only clean answers on every probe (the rules read included - a failed

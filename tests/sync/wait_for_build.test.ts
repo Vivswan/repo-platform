@@ -9,12 +9,19 @@ const MAIN_SHA = "a".repeat(40);
 
 // Stubs record every invocation to CALLS_LOG (\x1f between args, \x1e
 // between records). git: sleeps GIT_SLEEP seconds first when set (the
-// stalled-origin case); ls-remote HEAD prints GIT_HEAD. gh: serves the
-// runs JSON from GH_RUNS_FILE, or exits 1 when GH_FAIL is set.
+// stalled-origin case); ls-remote HEAD prints GIT_HEAD; log prints
+// GIT_TIP_MSG_FILE's content when set (the stamped template tip). gh:
+// serves the runs JSON from GH_RUNS_FILE, or exits 1 when GH_FAIL is set.
 const gitStub = `#!/usr/bin/env bash
 set -euo pipefail
 { printf '%s' "git"; for a in "$@"; do printf '\\x1f%s' "$a"; done; printf '\\x1e'; } >>"$CALLS_LOG"
 if [ -n "\${GIT_SLEEP:-}" ]; then sleep "$GIT_SLEEP"; fi
+for a in "$@"; do
+  if [ "$a" = "log" ] && [ -n "\${GIT_TIP_MSG_FILE:-}" ]; then
+    cat "$GIT_TIP_MSG_FILE"
+    exit 0
+  fi
+done
 printf '%s\\tHEAD\\n' "\${GIT_HEAD:-}"
 `;
 const ghStub = `#!/usr/bin/env bash
@@ -30,6 +37,9 @@ cat "$GH_RUNS_FILE"
 interface Options {
   env?: Record<string, string>;
   runs?: unknown;
+  /** When set, the git stub serves this as the template tip's commit
+   * message (the stamp-fallback path). */
+  tipMessage?: string;
 }
 
 function run(opts: Options = {}) {
@@ -40,6 +50,12 @@ function run(opts: Options = {}) {
   writeFileSync(join(bin, "gh"), ghStub, { mode: 0o755 });
   const runsFile = join(root, "runs.json");
   writeFileSync(runsFile, JSON.stringify(opts.runs ?? { workflow_runs: [] }));
+  const tipEnv: Record<string, string> = {};
+  if (opts.tipMessage !== undefined) {
+    const tipFile = join(root, "tip-message.txt");
+    writeFileSync(tipFile, opts.tipMessage);
+    tipEnv.GIT_TIP_MSG_FILE = tipFile;
+  }
   const calls = join(root, "calls.log");
   const proc = Bun.spawnSync(["bun", script], {
     env: {
@@ -50,6 +66,7 @@ function run(opts: Options = {}) {
       CALLS_LOG: calls,
       GIT_HEAD: MAIN_SHA,
       WAIT_DELAY_MS: "10",
+      ...tipEnv,
       ...opts.env,
     },
   });
@@ -65,16 +82,18 @@ function run(opts: Options = {}) {
 }
 
 describe("wait_for_build.ts", () => {
-  test("the production cadence stays 30 attempts x 10 s (tests shrink only the delay)", () => {
-    // The timeout warning promises "after 5 minutes"; pin the constants
-    // that arithmetic depends on, since no test can wait it out. The
-    // wall-clock deadline must stay the attempts-x-delay product (probe
-    // time counts against it), and the per-call network deadline is
-    // pinned too: unbounded probes hang past the warning on a stalled
-    // origin.
+  test("the production cadence stays 90 attempts x 30 s (tests shrink only the delay)", () => {
+    // The timeout warning promises the deadline in minutes (45: a full
+    // main CI run must finish before build-branches even starts under the
+    // workflow_run trigger, ~30 minutes worst case with rehearse-fleet,
+    // plus the build itself); pin the constants that arithmetic depends
+    // on, since no test can wait it out. The wall-clock deadline must
+    // stay the attempts-x-delay product (probe time counts against it),
+    // and the per-call network deadline is pinned too: unbounded probes
+    // hang past the warning on a stalled origin.
     const source = readFileSync(script, "utf-8");
-    expect(source).toContain("const ATTEMPTS = 30;");
-    expect(source).toContain('Number(env("WAIT_DELAY_MS", "10000"))');
+    expect(source).toContain("const ATTEMPTS = 90;");
+    expect(source).toContain('Number(env("WAIT_DELAY_MS", "30000"))');
     expect(source).toContain('Number(env("PROBE_TIMEOUT_MS", "15000"))');
     expect(source).toContain("const DEADLINE_MS = ATTEMPTS * DELAY_MS;");
   });
@@ -101,6 +120,27 @@ describe("wait_for_build.ts", () => {
     });
     expect(r.exitCode).toBe(0);
     expect(r.output).toContain(`the template branch is built from main HEAD ${MAIN_SHA}.`);
+  });
+
+  test("accepts a template tip stamped with main HEAD when no run matches", () => {
+    // The newer-main publish: the successful run's head_sha is an OLDER
+    // commit, but publish.ts composed origin/main and stamped the tip with
+    // it - the runs match misses, the stamp fallback proves freshness.
+    const r = run({
+      runs: { workflow_runs: [{ event: "push", head_sha: "b".repeat(40) }] },
+      tipMessage: `build: template\n\nsource: https://github.com/Vivswan/repo-platform/commit/${MAIN_SHA}\nrun: https://github.com/Vivswan/repo-platform/actions/runs/1\n`,
+    });
+    expect(r.exitCode).toBe(0);
+    expect(r.output).toContain(`the template branch tip is stamped with main HEAD ${MAIN_SHA}.`);
+  });
+
+  test("a tip stamped with an older source does not count as fresh", () => {
+    const r = run({
+      runs: { workflow_runs: [] },
+      tipMessage: `build: template\n\nsource: https://github.com/Vivswan/repo-platform/commit/${"c".repeat(40)}\n`,
+    });
+    expect(r.exitCode).toBe(0);
+    expect(r.output).toContain("::warning::no successful Build Branches run");
   });
 
   test("ignores stale shas, then warns green", () => {
