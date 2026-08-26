@@ -411,20 +411,25 @@ function usageError(message: string): never {
   process.exit(2);
 }
 
-/** Findings as markdown for a caller that reports instead of failing (the
- *  fleet ci.yml's advisory job posts them on a PR). Writing is OPT-IN via
- *  FINDINGS_FILE and changes no exit code: the operator's --self run and
- *  the sync pipeline still read this process's status, not this file. An
- *  empty findings set writes an EMPTY file rather than none, so a caller
- *  can tell "nothing to report" from "the validator never ran". */
+/** Findings as markdown, in TWO separate files because the two streams
+ *  have different consequences: errors are what this process exits nonzero
+ *  on, advisories never touch the exit code. One combined file made a
+ *  caller treat "has content" as "blocks", which is wrong for an
+ *  advisory-only run. Both are opt-in and neither changes any exit code, so
+ *  a consumer that sets neither sees no difference. An empty set writes an
+ *  EMPTY file rather than none, which is how a caller tells "nothing to
+ *  report" from "the validator never ran". */
 function writeFindings(errors: string[], advisories: string[]): void {
-  const path = process.env.FINDINGS_FILE;
-  if (path === undefined || path === "") return;
   const section = (title: string, items: string[]): string =>
     items.length === 0
       ? ""
-      : `#### ${title} (${items.length})\n\n${items.map((i) => `- ${i}`).join("\n")}\n\n`;
-  writeFileSync(path, section("Errors", errors) + section("Advisories", advisories));
+      : `#### ${title} (${items.length})\n\n${items.map((i) => `- ${i}`).join("\n")}\n`;
+  const write = (variable: string, text: string): void => {
+    const path = process.env[variable];
+    if (path !== undefined && path !== "") writeFileSync(path, text);
+  };
+  write("FINDINGS_FILE", section("Errors", errors));
+  write("ADVISORIES_FILE", section("Advisories", advisories));
 }
 
 function main(): number {

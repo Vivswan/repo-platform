@@ -77,6 +77,7 @@ jobs:
         continue-on-error: true
         with:
           findings-file: ${{ runner.temp }}/validate-findings.md
+          advisories-file: ${{ runner.temp }}/validate-advisories.md
       - name: Check how far behind the template this repo is
         id: freshness
         continue-on-error: true
@@ -118,6 +119,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           FINDINGS: ${{ runner.temp }}/validate-findings.md
+          ADVISORIES: ${{ runner.temp }}/validate-advisories.md
           FRESHNESS: ${{ runner.temp }}/freshness.md
           FRESHNESS_STATE: ${{ steps.freshness.outputs.state }}
           INTEGRITY: ${{ steps.integrity.outcome }}
@@ -142,20 +144,28 @@ jobs:
             blocking=false
           fi
 
+          # Advisories never gate - they are the action's own non-failing
+          # stream, and folding them into the integrity verdict would have a
+          # clean repository reading as blocked.
+          advice=""
+          if [ -s "$ADVISORIES" ]; then
+            advice=$'\n\n'"$(cat "$ADVISORIES")"
+          fi
+
           case "$FRESHNESS_STATE" in
             behind) freshness="$(cat "$FRESHNESS")" ;;
             fresh) freshness="#### Freshness"$'\n\n'"Up to date with the template branch." ;;
             *) freshness="#### Freshness"$'\n\n'"Not checked this run; see the run log for why." ;;
           esac
 
-          body="$MARKER"$'\n'"### Template check"$'\n\n'"$integrity"$'\n\n'"$freshness"
+          body="$MARKER"$'\n'"### Template check"$'\n\n'"$integrity$advice"$'\n\n'"$freshness"
           printf '%s\n' "$body" >> "$GITHUB_STEP_SUMMARY"
 
           # A comment is worth making only when something needs saying. A
           # clean, fresh repository leaves no new comment - but it does clear
           # one a previous run left behind.
           worth_saying=false
-          if [ "$blocking" = true ] || [ "$FRESHNESS_STATE" = behind ]; then
+          if [ "$blocking" = true ] || [ "$FRESHNESS_STATE" = behind ] || [ -n "$advice" ]; then
             worth_saying=true
           fi
 
@@ -163,8 +173,11 @@ jobs:
             exit 0
           fi
 
-          existing="$(timeout 20 gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments?per_page=100" \
-            --jq 'map(select(.body | contains(env.MARKER))) | last | .id // empty')" || {
+          # --paginate: on a long PR our marker comment sits past the first page,
+          # and a lookup that misses it POSTS A NEW ONE on every push. --slurp
+          # yields one array per page, so flatten before searching.
+          existing="$(timeout 20 gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments?per_page=100" \
+            --jq 'add // [] | map(select(.body | contains(env.MARKER))) | last | .id // empty')" || {
             echo "::warning::could not list PR comments; the findings are in the job summary instead."
             exit 0
           }

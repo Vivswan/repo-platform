@@ -80,6 +80,8 @@ interface Options {
   /** The id the marker search resolves to, or "" for no existing comment. */
   existing?: string;
   freshness?: "fresh" | "behind" | "skipped" | "";
+  /** The action's NON-blocking stream, written to its own file. */
+  advisories?: string;
   integrity?: "success" | "failure";
   env?: Record<string, string>;
 }
@@ -94,6 +96,8 @@ function run(opts: Options = {}, golden = "minimal") {
   writeFileSync(script, reportStep(golden).run ?? "");
   const findingsPath = join(root, "findings.md");
   if (opts.findings !== undefined) writeFileSync(findingsPath, opts.findings);
+  const advisoriesPath = join(root, "advisories.md");
+  writeFileSync(advisoriesPath, opts.advisories ?? "");
   const freshnessPath = join(root, "freshness.md");
   writeFileSync(freshnessPath, "#### Freshness\n\nbehind the template branch by 3 commit(s).\n");
   const calls = join(root, "calls.txt");
@@ -113,6 +117,7 @@ function run(opts: Options = {}, golden = "minimal") {
       GH_TOKEN: "x",
       FINDINGS: findingsPath,
       EVENT_NAME: opts.event ?? "pull_request",
+      ADVISORIES: advisoriesPath,
       FRESHNESS: freshnessPath,
       FRESHNESS_STATE: opts.freshness ?? "fresh",
       INTEGRITY: opts.integrity ?? "success",
@@ -194,6 +199,18 @@ describe("the template's validate-template job", () => {
     expect(r.summary).toContain("Passed");
     expect(r.summary).toContain("behind the template branch");
     expect(r.summary).not.toContain("This FAILS the check.");
+  });
+
+  // Advisories are the action's non-failing stream. Folding them into the
+  // integrity verdict had a clean repository reading as blocked.
+  test("advisories are reported without ever claiming to block", () => {
+    const r = run({ findings: "", advisories: "#### Advisories (1)\n\n- consider a codeql job\n" });
+    expect(r.exitCode).toBe(0);
+    expect(r.summary).toContain("consider a codeql job");
+    expect(r.summary).toContain("Passed");
+    expect(r.summary).not.toContain("This FAILS the check.");
+    // Worth a comment, since there is something to say.
+    expect(r.calls).toContain("POST");
   });
 
   test("clean and fresh: no new comment at all", () => {
