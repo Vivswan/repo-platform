@@ -41,7 +41,7 @@ The re-arm workflow covers both orderings of "the review posts" against "CI fini
 
 GitHub holds a workflow run for manual approval when the triggering actor is the Copilot bot, so the `pull_request_review` run lands with the `action_required` conclusion and no jobs executed. No REST API exposes that policy. The only control is a per-repository web UI setting (Settings, then Copilot, then Cloud agent, then Actions workflow approval), which the settings sync cannot reach, so turning it off would be a manual click in every managed repository.
 
-Until that changes the operator finishes the re-arm by hand. When the `copilot-review` job is red and Copilot's review has since landed, open the CI run and click Re-run failed jobs. Nothing else is affected: the gate re-runs green in about ten seconds, because by then the review has arrived.
+Until that changes the operator finishes the re-arm by hand. When the `copilot-review` job is red and Copilot's review has since landed, open the failed CI run and pick Re-run jobs, then Re-run failed jobs. That re-runs `copilot-review` together with the `all-green` job that needs it, which is why the run-level control is the one to use rather than the per-job re-run icon. Both go green in about ten seconds, because by then the review has arrived.
 
 One observation will settle whether the hold is worth working around. The first Copilot review on a PR raised after `rerun-copilot-gate.yml` reaches the default branch either re-arms the gate on its own or lands `action_required` again. Only in the second case is the per-repository toggle worth a look, and even then it buys one repository at a time.
 
