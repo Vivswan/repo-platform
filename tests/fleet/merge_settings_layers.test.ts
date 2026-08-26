@@ -280,6 +280,28 @@ describe("hardening the merged document (the choke-point)", () => {
     expect(merged.rulesets.rules).toEqual([{ type: "a" }, { type: "a" }]);
   });
 
+  test("a NESTED key named 'rulesets' is free-form data, never a rulesets section", () => {
+    // Entry semantics belong to the document's TOP-LEVEL rulesets array
+    // alone: repository.metadata.rulesets sharing the name used to get
+    // its string 'rules' fed to appendRules (throws) or deduplicated as
+    // if they were {type} objects.
+    const merged = mergeSettingsLayers(
+      { repository: { metadata: { rulesets: [{ rules: ["keep", "keep"] }] } } } as never,
+      {},
+    ) as { repository: { metadata: { rulesets: { rules: string[] }[] } } };
+    expect(merged.repository.metadata.rulesets).toEqual([{ rules: ["keep", "keep"] }]);
+  });
+
+  test("the top-level rulesets section keeps entry semantics", () => {
+    const merged = mergeSettingsLayers(
+      { rulesets: [{ name: "main", rules: [{ type: "deletion" }, { type: "deletion" }] }] },
+      {},
+    ) as { rulesets: { rules: unknown[] }[] };
+    // Duplicate rule types in ONE entry still collapse - the entry-level
+    // treatment survives the root narrowing.
+    expect(merged.rulesets[0].rules).toEqual([{ type: "deletion" }]);
+  });
+
   test("arrays nested deeper under 'rulesets' do not inherit the entry flag", () => {
     // Only the DIRECT elements of the rulesets array are entries; a
     // nested array's mappings used to inherit the flag at every depth and

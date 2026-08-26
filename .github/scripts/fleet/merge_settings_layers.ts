@@ -100,7 +100,7 @@ type Declared = Exclude<LayerValue, null>;
  *  repeating a rule `type` is rejected wholesale, which leaves a branch
  *  unprotected on a green run. */
 function hardenDocument(doc: SettingsLayer): MergedSettings {
-  return hardenMapping(doc, false);
+  return hardenMapping(doc, false, true);
 }
 
 /** `isRulesetEntry` marks THIS value as an element of a `rulesets` array -
@@ -119,18 +119,25 @@ function hardenValue(value: Declared, isRulesetEntry: boolean): MergedValue {
       .map((item) => hardenValue(item, false));
   }
   if (typeof value !== "object") return value;
-  return hardenMapping(value, isRulesetEntry);
+  return hardenMapping(value, isRulesetEntry, false);
 }
 
-function hardenMapping(value: SettingsLayer, isRulesetEntry: boolean): MergedSettings {
+function hardenMapping(
+  value: SettingsLayer,
+  isRulesetEntry: boolean,
+  atRoot: boolean,
+): MergedSettings {
   const out: MergedSettings = {};
   for (const [key, child] of Object.entries(value)) {
     if (child === null) continue;
-    // The ruleset-entry flag marks exactly the direct elements of a
-    // `rulesets` ARRAY. A mapping under the key (rulesets: {rules: ...})
-    // is malformed input, not a ruleset entry - flagging it used to
-    // produce a diagnostic naming a ruleset that does not exist.
-    if (key === "rulesets" && Array.isArray(child)) {
+    // The ruleset-entry flag marks exactly the direct elements of the
+    // DOCUMENT'S top-level `rulesets` array (the section the dialect
+    // defines). A mapping under the key (rulesets: {rules: ...}) is
+    // malformed input, not a ruleset entry, and a NESTED key that merely
+    // shares the name (repository.metadata.rulesets) is free-form data -
+    // either used to draw entry semantics and a diagnostic naming a
+    // ruleset that does not exist.
+    if (atRoot && key === "rulesets" && Array.isArray(child)) {
       out[key] = child
         .filter((item): item is Declared => item !== null)
         .map((item) => hardenValue(item, true));
