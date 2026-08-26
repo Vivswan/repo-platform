@@ -8,19 +8,25 @@
 
 /** The file's bytes at `root`'s HEAD, or null when the path is genuinely
  * absent there. Raw bytes so each caller picks the honest decode (latin1
- * for byte-owned file content, utf-8 for the manifest). */
+ * for byte-owned file content, utf-8 for the manifest).
+ * --literal-pathspecs: a tracked file NAMED like pathspec magic
+ * (":(top)a.txt" - the validators bar traversal, not leading colons)
+ * would otherwise silently resolve to a different path. */
 export function headBytes(root: string, rel: string): Buffer | null {
-  const probe = Bun.spawnSync(["git", "-C", root, "ls-tree", "HEAD", "--", rel], {
-    stdout: "pipe",
-    stderr: "pipe",
-  });
+  const probe = Bun.spawnSync(
+    ["git", "--literal-pathspecs", "-C", root, "ls-tree", "HEAD", "--", rel],
+    {
+      stdout: "pipe",
+      stderr: "pipe",
+    },
+  );
   if (probe.exitCode !== 0) {
     throw new Error(
       `git ls-tree HEAD -- ${rel} failed in ${root}: ${probe.stderr.toString().trim()}`,
     );
   }
   if (probe.stdout.toString().trim() === "") return null;
-  const proc = Bun.spawnSync(["git", "-C", root, "show", `HEAD:${rel}`], {
+  const proc = Bun.spawnSync(["git", "--literal-pathspecs", "-C", root, "show", `HEAD:${rel}`], {
     stdout: "pipe",
     stderr: "pipe",
   });
