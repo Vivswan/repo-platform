@@ -14,8 +14,9 @@
 // Idempotent WITHIN one RUNNER_TEMP: when both render directories already
 // exist the call is a no-op, so retired_cleanup.ts (and older callers like
 // rehearse.ts and ci/upgrade_path_test.sh legs written before this split)
-// can call ensureRenders unconditionally. A single leftover directory (a
-// crash between the two copier calls) is deleted and both are rebuilt.
+// can call ensureRenders unconditionally. Renders are built in scratch
+// directories and renamed into place once both succeeded, so a crash never
+// publishes a partial render; any leftover is deleted and rebuilt.
 // Callers own RUNNER_TEMP freshness: CI provides a per-job directory, the
 // harness and rehearse create fresh scratch dirs per run - a reused
 // directory would serve renders from whatever inputs built them.
@@ -23,7 +24,7 @@
 // Env: OLD_SHA, TARGET_REF, MODULES, CHANNEL, PRIVATE, DESCRIPTION,
 // SRC_PATH, RUNNER_TEMP; TARGET_DIR (default target).
 
-import { existsSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { env, requireEnv } from "../shared/gha.ts";
 
@@ -61,6 +62,11 @@ export function ensureRenders(): CleanRenders {
   // The old render uses the answers recorded BEFORE this update (HEAD
   // still points at the pre-update commit); captured even on the no-op
   // path so consumers of answers-old.yml never depend on call order.
+  // Caveat: the renders are NOT re-captured on that path, so if HEAD ever
+  // moved between two calls in one RUNNER_TEMP, answers-old.yml could
+  // disagree with render-old. No sync step moves HEAD between the
+  // materialize and consume steps; if one ever did, the mismatch surfaces
+  // as retired-paths noise and validation failures - loud, not lossy.
   const answersOldText = run(["git", "-C", targetDir, "show", "HEAD:.copier-answers.yml"], {
     stdout: "pipe",
   });
@@ -70,11 +76,16 @@ export function ensureRenders(): CleanRenders {
     console.log("clean renders already materialized; nothing to do");
     return { renderOld, renderNew, answersOldText };
   }
-  // Exactly one directory: a previous materialization died between the two
-  // copier calls. Rebuild the pair from scratch - copier will not render
-  // into a non-empty directory, and a half-materialized pair must never be
-  // consumed as if complete.
-  for (const dir of [renderOld, renderNew]) {
+  // Render into scratch directories and publish both with renames at the
+  // end: the consumers' existence probe must never see a directory copier
+  // is still filling, and a crash mid-render leaves no final directory
+  // behind. A leftover from a previous crash (scratch, or a lone final
+  // directory from a pre-rename failure) is deleted first - copier will
+  // not render into a non-empty directory, and a half-materialized pair
+  // must never be consumed as if complete.
+  const scratchOld = `${renderOld}.rendering`;
+  const scratchNew = `${renderNew}.rendering`;
+  for (const dir of [renderOld, renderNew, scratchOld, scratchNew]) {
     rmSync(dir, { recursive: true, force: true });
   }
 
@@ -110,7 +121,7 @@ export function ensureRenders(): CleanRenders {
     "--data-file",
     join(runnerTemp, "data-old.yml"),
     srcPath,
-    renderOld,
+    scratchOld,
   ]);
   run([
     "copier",
@@ -122,8 +133,10 @@ export function ensureRenders(): CleanRenders {
     "--data-file",
     join(runnerTemp, "data-new.yml"),
     srcPath,
-    renderNew,
+    scratchNew,
   ]);
+  renameSync(scratchOld, renderOld);
+  renameSync(scratchNew, renderNew);
   return { renderOld, renderNew, answersOldText };
 }
 

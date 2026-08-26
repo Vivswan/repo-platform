@@ -55,8 +55,19 @@ describe("carryManagedTail", () => {
     });
   });
 
-  test("never-customized target (blank tail below its sentinel) keeps the render", () => {
-    expect(carryManagedTail(agentsRender, `old stuff\n${SENTINEL}\n\n`)).toBeNull();
+  test("never-customized target (empty tail below its sentinel) keeps the render", () => {
+    expect(carryManagedTail(agentsRender, `old stuff\n${SENTINEL}\n`)).toBeNull();
+  });
+
+  test("a whitespace-only tail is carried, not silently dropped", () => {
+    // The tail is byte-owned by the repository: even blanks below the
+    // sentinel ride through rather than vanish without a disposition.
+    expect(carryManagedTail(agentsRender, `old stuff\n${SENTINEL}\n\n`)).toEqual({
+      content: `${agentsRender}\n`,
+      kind: "tail-appended",
+      extraSentinels: false,
+      managedHalfDiffers: true,
+    });
   });
 
   test("identical target keeps the render", () => {
@@ -446,7 +457,7 @@ describe("preserve_local_content script", () => {
       "AGENTS.md": agentsTarget,
       ".gitignore": gitignoreTarget,
       "CONTRIBUTING.md": contributingTarget,
-      "SECURITY.md": `old security prefix\n${SENTINEL}\n\n`,
+      "SECURITY.md": `old security prefix\n${SENTINEL}\n`,
       ".editorconfig": editorconfigTarget,
       ".github/CODEOWNERS": codeownersTarget,
       ".typography-allow.local": "docs/legacy/\n",
@@ -490,6 +501,20 @@ describe("preserve_local_content script", () => {
     expect(result.summary).toContain("- `.editorconfig`:");
     expect(result.summary).toContain("- `.github/CODEOWNERS`:");
     expect(result.summary).not.toContain("SECURITY.md");
+  });
+
+  test("non-UTF-8 bytes survive the sentinel-scan carry byte-for-byte", () => {
+    const agentsOld = `# AGENTS.md\n\nold managed guidance\n\n${SENTINEL}\n`;
+    const tailBytes = Buffer.concat([Buffer.from("\ncaf"), Buffer.from([0xe9]), Buffer.from("\n")]);
+    const root = makeTarget({});
+    writeFileSync(join(root, "AGENTS.md"), Buffer.concat([Buffer.from(agentsOld), tailBytes]));
+    initGitRepo(root);
+    // The recopy overwrites the file with the fresh render.
+    writeFileSync(join(root, "AGENTS.md"), agentsRender);
+    const result = runScript(root);
+    expect(result.exitCode).toBe(0);
+    const carried = readFileSync(join(root, "AGENTS.md"));
+    expect(carried.equals(Buffer.concat([Buffer.from(agentsRender), tailBytes]))).toBe(true);
   });
 
   test("legacy sentinel-less AGENTS.md flows through to a marked appendix", () => {
@@ -894,6 +919,31 @@ describe("preserve_local_content render mode", () => {
     const result = runRender(root, renderDir, oldRenderDir);
     expect(result.exitCode).toBe(0);
     expect(readFileSync(join(root, "AGENTS.md"), "utf-8")).toBe(target);
+    expect(result.review).toBe("");
+  });
+
+  test("non-UTF-8 bytes in the repo-owned half survive byte-for-byte", () => {
+    // A Latin-1 0xe9 ("caf<e9>") is not valid UTF-8; a utf-8 decode would
+    // fold it onto U+FFFD and grow the file - silent corruption of the
+    // byte-owned half.
+    const tailBytes = Buffer.concat([
+      Buffer.from("\n## Notes\n\ncaf"),
+      Buffer.from([0xe9]),
+      Buffer.from("\n"),
+    ]);
+    const root = makeTarget({});
+    writeFileSync(join(root, "AGENTS.md"), Buffer.concat([Buffer.from(agentsOld), tailBytes]));
+    initGitRepo(root);
+    writeFileSync(join(root, "AGENTS.md"), MERGE_JUNK);
+    const { renderDir, oldRenderDir } = makeRenderPair(
+      [{ path: "AGENTS.md", marker: SENTINEL, managed: "above" }],
+      { "AGENTS.md": agentsRender },
+      { "AGENTS.md": agentsOld },
+    );
+    const result = runRender(root, renderDir, oldRenderDir);
+    expect(result.exitCode).toBe(0);
+    const rebuilt = readFileSync(join(root, "AGENTS.md"));
+    expect(rebuilt.equals(Buffer.concat([Buffer.from(agentsRender), tailBytes]))).toBe(true);
     expect(result.review).toBe("");
   });
 

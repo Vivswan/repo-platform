@@ -282,21 +282,15 @@ jobs:
         env:
           RECOVER: ${{ inputs.recover }}
         run: |
-          if [ "$RECOVER" = "recopy" ]; then
-            bun .github/scripts/sync/preserve_local_content.ts \
-              --summary "$RUNNER_TEMP/local-carryover.md" --root target \
-              --hide-details "$HIDE_DETAILS" \
-              --needs-review "$RUNNER_TEMP/carry-review.txt" \
-              --rebuilt-paths "$RUNNER_TEMP/split-rebuilt-paths.txt"
-          else
-            bun .github/scripts/sync/preserve_local_content.ts \
-              --summary "$RUNNER_TEMP/local-carryover.md" --root target \
-              --hide-details "$HIDE_DETAILS" \
-              --needs-review "$RUNNER_TEMP/carry-review.txt" \
-              --rebuilt-paths "$RUNNER_TEMP/split-rebuilt-paths.txt" \
-              --render-dir "$RUNNER_TEMP/render-new" \
-              --old-render-dir "$RUNNER_TEMP/render-old"
+          flags=(--summary "$RUNNER_TEMP/local-carryover.md" --root target
+                 --hide-details "$HIDE_DETAILS"
+                 --needs-review "$RUNNER_TEMP/carry-review.txt"
+                 --rebuilt-paths "$RUNNER_TEMP/split-rebuilt-paths.txt")
+          if [ "$RECOVER" != "recopy" ]; then
+            flags+=(--render-dir "$RUNNER_TEMP/render-new"
+                    --old-render-dir "$RUNNER_TEMP/render-old")
           fi
+          bun .github/scripts/sync/preserve_local_content.ts "${flags[@]}"
 
       # Conflicts (local edits overlapping template changes) resolve in the
       # template's favor so the tree stays valid. The files the rebuild

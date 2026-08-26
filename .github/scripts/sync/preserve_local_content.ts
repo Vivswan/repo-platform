@@ -26,7 +26,11 @@
 // (the repo-platform:local-section sentinel, the prefix docs, .gitignore's
 // LOCAL region) and splices the repository-local content back over it.
 //
-// Both modes share the same carries. Loud beats lossy: NO shape of
+// Both modes share the same carries. All file content is handled as
+// latin1 text (one code unit per byte, the stamp_manifest.ts convention):
+// the repo-owned half is promised byte-for-byte, and a utf-8 decode would
+// fold any non-UTF-8 byte onto U+FFFD - silent corruption. The markers are
+// ASCII, so matching is unaffected. Loud beats lossy: NO shape of
 // previous copy may lose content without a disposition in the summary -
 // when a previous copy cannot be split into managed content and local
 // tail (it predates the sentinel, or was hand-edited past recognition),
@@ -40,7 +44,8 @@
 //   first target sentinel keeps everything after it, so a stale duplicate
 //   marker can only ever ADD reviewable lines, never drop them); else
 //   keep BOTH (render, then the marked appendix). A sentinel-bearing
-//   target whose tail is blank was never customized and keeps the render.
+//   target with an EMPTY tail was never customized and keeps the render;
+//   a whitespace-only tail is carried like any other (byte-owned).
 // - A render without the sentinel is routed to this carry only for the
 //   prefix docs in sentinel-scan mode (their mechanism is prefix-ness,
 //   not the sentinel) and for manifest-declared entries in render mode;
@@ -198,8 +203,10 @@ export function carryManagedTail(render: string, target: string): TailCarry | nu
   if (finalIndex !== -1 && isSentinel(stripCr(renderLines[finalIndex].text))) {
     const split = splitAtFirstSentinel(target);
     if (split !== null) {
-      // Blank tail below the target's sentinel: never customized.
-      if (split.tail.trim() === "") return null;
+      // Empty tail below the target's sentinel: never customized. A
+      // whitespace-only tail is still carried - the tail is byte-owned by
+      // the repository, and nothing may drop silently, not even blanks.
+      if (split.tail === "") return null;
       return {
         kind: "tail-appended",
         content: renderNl + split.tail,
@@ -450,7 +457,8 @@ function headContent(root: string, rel: string): string | null {
   if (proc.exitCode !== 0) {
     throw new Error(`git show HEAD:${rel} failed in ${root}: ${proc.stderr.toString().trim()}`);
   }
-  return proc.stdout.toString();
+  // latin1, not utf-8: the pre-render copy is the byte-owned repo half.
+  return proc.stdout.toString("latin1");
 }
 
 const SENTINEL_BUFFERS = SENTINELS.map((sentinel) => Buffer.from(sentinel));
@@ -480,7 +488,7 @@ function rebuildSplitFile(
       `${MANIFEST_NAME} in ${renderDir} declares a split entry for ${rel}, but the render has no such file - manifest and render disagree`,
     );
   }
-  const render = readFileSync(renderPath, "utf-8");
+  const render = readFileSync(renderPath).toString("latin1");
   const target = headContent(root, rel);
 
   let content = render;
@@ -527,7 +535,7 @@ function rebuildSplitFile(
       } else {
         const oldRenderPath = join(oldRenderDir, rel);
         const oldHalf = existsSync(oldRenderPath)
-          ? managedHalf(readFileSync(oldRenderPath, "utf-8"), entry.marker, entry.managed)
+          ? managedHalf(readFileSync(oldRenderPath).toString("latin1"), entry.marker, entry.managed)
           : null;
         if (targetHalf === null || deliveredHalf === null || oldHalf === null) {
           note =
@@ -543,7 +551,7 @@ function rebuildSplitFile(
   // Unconditional write: the working tree holds copier's merged result,
   // which this mode exists to discard - even a byte-identical rewrite is
   // the correct statement of ownership.
-  writeFileSync(join(root, rel), content);
+  writeFileSync(join(root, rel), Buffer.from(content, "latin1"));
   return note === null ? null : { rel, note, reviewReasons };
 }
 
@@ -618,12 +626,12 @@ function main(argv: string[]): number {
       ) {
         continue;
       }
-      const render = data.toString("utf-8");
+      const render = data.toString("latin1");
       const target = headContent(root, rel);
       if (target === null) continue;
       const carried = carryLocalContent(rel, render, target);
       if (carried === null) continue;
-      writeFileSync(join(root, rel), carried.content);
+      writeFileSync(join(root, rel), Buffer.from(carried.content, "latin1"));
       rebuiltRels.push(rel);
       outcomes.push({ rel, note: carried.note, reviewReasons: [] });
     }
