@@ -87,7 +87,7 @@ import {
   stripCr,
   substringCount,
 } from "../../../scripts/gitignore_local.ts";
-import { isCommentMarker } from "../../../scripts/ownership.ts";
+import { isCommentMarker, isHashMarker } from "../../../scripts/ownership.ts";
 import { parseFlags } from "../shared/flags.ts";
 import { headBytes } from "../shared/git_head.ts";
 import { MANIFEST_NAME, managedHalf } from "./stamp_manifest.ts";
@@ -467,7 +467,7 @@ export function splitEntries(manifestText: string, where: string): SplitEntry[] 
       // schema constrains bounded-region markers to hash comments (the
       // appendix comments carried lines with #).
       for (const value of [shaped.marker, ...(regionStrings as string[])]) {
-        if (!value.startsWith("#")) {
+        if (!isHashMarker(value)) {
           throw new Error(
             `${where}: split entry for ${path} declares bounded-region marker ` +
               `'${value}', which does not open as a hash comment - the appendix ` +

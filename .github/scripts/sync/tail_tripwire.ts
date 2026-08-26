@@ -376,6 +376,11 @@ function main(argv: string[]): number {
   }
 
   const findings: Finding[] = [];
+  // The loop iterates the POST-SYNC manifest's splits, so the mirror
+  // boundary is deliberate: a path split at HEAD but absent from the
+  // freshly stamped post-sync manifest is never visited - the template
+  // retired it (or flipped its class), and retirements ride their own
+  // review machinery, not this wire.
   for (const entry of entries) {
     const headCopy = headBytes(root, entry.path);
     // Absent at HEAD: no previous repository-owned half to lose.

@@ -11,6 +11,7 @@ import type { ModuleManifest } from "../../scripts/module_manifests";
 import {
   baseOwnershipTables,
   declarationTextErrors,
+  declaredRegionMarkerTexts,
   landedPathAndGates,
   loadBaseOwnership,
   managedSide,
@@ -228,11 +229,31 @@ describe("loadBaseOwnership", () => {
 });
 
 describe("declarationTextErrors", () => {
+  // The contradiction scan's marker set derives from every declared
+  // bounded-region grammar: the canonical .gitignore instance plus a
+  // hypothetical module-declared grammar with its own marker lines.
+  const otherBounded: OwnershipDeclaration = {
+    path: "notes/.notesignore",
+    class: "split",
+    grammar: "bounded-region",
+    managed_begin: "# NOTES MANAGED OPEN",
+    managed_end: "# NOTES MANAGED CLOSE",
+    local_begin: "# NOTES LOCAL OPEN",
+    local_end: "# NOTES LOCAL CLOSE",
+  };
+  const REGION_MARKER_TEXTS = declaredRegionMarkerTexts([bounded(".gitignore"), otherBounded]);
   const errorsOf = (
     declaration: OwnershipDeclaration,
     source: string,
     skipMatched: boolean,
-  ): string[] => declarationTextErrors(declaration, source, skipMatched, "templates/t/x.jinja");
+  ): string[] =>
+    declarationTextErrors(
+      declaration,
+      source,
+      skipMatched,
+      REGION_MARKER_TEXTS,
+      "templates/t/x.jinja",
+    );
 
   test("a clean managed file, header optional, passes", () => {
     expect(errorsOf(managed(".yamllint"), `${HEADER}rules: {}\n`, false)).toEqual([]);
@@ -336,6 +357,12 @@ describe("declarationTextErrors", () => {
     const errors = errorsOf(starter(".gitignore"), "# BEGIN REPOSITORY LOCAL\n", true);
     expect(errors).toHaveLength(1);
     expect(errors[0]).toContain("bounded-region marker but is declared a starter");
+  });
+
+  test("ANOTHER declared grammar's markers contradict managed too - the set is derived, not canonical", () => {
+    const errors = errorsOf(managed("X.md"), "# NOTES LOCAL OPEN\n", false);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain("bounded-region marker but is declared managed");
   });
 
   test("a duplicated bounded-region marker is an error", () => {

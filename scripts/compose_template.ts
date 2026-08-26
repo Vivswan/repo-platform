@@ -87,6 +87,7 @@ import { normalizeJinja, placeholderJinja } from "./jinja_subset.ts";
 import { loadManifests, MODULE_ORDER, type ModuleManifest } from "./module_manifests.ts";
 import {
   declarationTextErrors,
+  declaredRegionMarkerTexts,
   landedPathAndGates,
   loadBaseOwnership,
   type ManifestOwnership,
@@ -1062,6 +1063,12 @@ export function manifestEntries(
   for (const [module, list] of declarations.modules) {
     register(module, `templates/${module}/module.yml`, `templates/${module}/`, list);
   }
+  // The managed/starter contradiction scan checks against EVERY declared
+  // bounded-region grammar's markers, base and module declarations alike.
+  const regionMarkerTexts = declaredRegionMarkerTexts([
+    ...declarations.base,
+    ...[...declarations.modules.values()].flat(),
+  ]);
   for (const [path, list] of declaredBy) {
     const first = JSON.stringify(list[0].ownership);
     const dissenter = list.find(({ ownership }) => JSON.stringify(ownership) !== first);
@@ -1123,6 +1130,7 @@ export function manifestEntries(
           declaration,
           sourced.entry.data.toString("utf-8"),
           skipMatched,
+          regionMarkerTexts,
           source,
         ),
       );

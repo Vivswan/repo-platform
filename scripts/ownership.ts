@@ -38,7 +38,6 @@ import { existsSync, lstatSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
-import { GITIGNORE_MARKERS } from "./gitignore_local.ts";
 import type { ModuleManifest } from "./module_manifests.ts";
 
 /** The managed ownership header in template sources, anchored on the C1
@@ -136,8 +135,17 @@ const hashOrHtmlMarker = (what: string) =>
     message: `${what} must be a hash comment or a complete HTML comment line (the recovery appendix writes comments in the marker's syntax)`,
   });
 
+/** A bounded-region marker's comment syntax: hash comments only (the
+ *  bounded-region appendix comments carried lines with #). One predicate
+ *  for the declaration schema AND the sync boundary
+ *  (preserve_local_content's splitEntries re-checks what the manifest
+ *  text claims), like isCommentMarker above. */
+export function isHashMarker(value: string): boolean {
+  return value.startsWith("#");
+}
+
 const hashMarker = (what: string) =>
-  markerLine(what).refine((value) => value.startsWith("#"), {
+  markerLine(what).refine(isHashMarker, {
     message: `${what} must open as a hash comment (the bounded-region appendix comments carried lines with #)`,
   });
 
@@ -333,16 +341,40 @@ export function landedPathAndGates(renderedPath: string): { path: string; gates:
 
 // --- declaration decoration checks --------------------------------------------
 
-/** Errors where a template source's TEXT contradicts its declared class -
- *  headers and marker lines are validated decoration, never classification
- *  input. `skipMatched` says whether copier.yml's _skip_if_exists exempts
- *  the landed path: the starter class and the skip list must agree in both
- *  directions (copier needs the skip entry, the declaration is the single
- *  ownership truth). `where` names the source file in errors. */
+/** Every marker string any declared bounded-region grammar owns, for the
+ *  managed/starter contradiction scan: declarations accept arbitrary
+ *  marker strings, so a managed file carrying some OTHER declared
+ *  grammar's markers is the same overwrite hazard as one carrying
+ *  .gitignore's - the scanned set derives from ALL declarations, never a
+ *  constant. */
+export function declaredRegionMarkerTexts(declarations: Iterable<OwnershipDeclaration>): string[] {
+  const out = new Set<string>();
+  for (const declaration of declarations) {
+    if (declaration.class !== "split" || declaration.grammar !== "bounded-region") continue;
+    out.add(declaration.local_begin);
+    out.add(declaration.local_end);
+    out.add(declaration.managed_begin);
+    out.add(declaration.managed_end);
+  }
+  return [...out];
+}
+
+/** Errors when a template source's decoration contradicts its declared
+ *  class or grammar. Purely textual, purely per-file: the declaration is
+ *  the classification, headers and marker lines are validated decoration,
+ *  never classification input. `skipMatched` says whether copier.yml's
+ *  _skip_if_exists exempts the landed path: the starter class and the
+ *  skip list must agree in both directions (copier needs the skip entry,
+ *  the declaration is the single ownership truth). `regionMarkerTexts` is
+ *  every declared bounded-region grammar's marker strings
+ *  (declaredRegionMarkerTexts over ALL declaration sources) - the
+ *  managed/starter contradiction scan checks against them all. `where`
+ *  names the source file in errors. */
 export function declarationTextErrors(
   declaration: OwnershipDeclaration,
   source: string,
   skipMatched: boolean,
+  regionMarkerTexts: readonly string[],
   where: string,
 ): string[] {
   const errors: string[] = [];
@@ -351,11 +383,11 @@ export function declarationTextErrors(
     .split("\n")
     .map((line) => line.trim())
     .find((line) => LOCAL_SECTION_LINES.has(line));
-  // The canonical bounded-region marker text (substring-matched, the way
-  // the validator and appendix neutralization count): a managed or starter
+  // Declared bounded-region marker text (substring-matched, the way the
+  // validator and appendix neutralization count): a managed or starter
   // source carrying it promises a repo-owned LOCAL region the declared
   // class would let sync overwrite (or never maintain).
-  const regionMarker = GITIGNORE_MARKERS.find((marker) => source.includes(marker));
+  const regionMarker = regionMarkerTexts.find((marker) => source.includes(marker));
   if (declaration.class === "starter") {
     if (!skipMatched) {
       errors.push(
