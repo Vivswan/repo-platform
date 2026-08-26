@@ -19,18 +19,27 @@ export const MANAGED_END = "# END REPO-PLATFORM MANAGED";
 export const GITIGNORE_MARKERS = [LOCAL_BEGIN, LOCAL_END, MANAGED_BEGIN, MANAGED_END];
 
 /** One bounded-region grammar instance: the local region's BEGIN/END lines
- *  plus every marker line the grammar owns (`all` feeds the
- *  no-marker-text-inside-the-body rule and appendix neutralization). */
+ *  plus the managed section's, named individually - the full marker list
+ *  is DERIVED (allRegionMarkers), so a grammar instance can never disagree
+ *  with its own roster. */
 export interface RegionMarkers {
   begin: string;
   end: string;
-  all: string[];
+  managedBegin: string;
+  managedEnd: string;
+}
+
+/** Every marker line a grammar instance owns, for the
+ *  no-marker-text-inside-the-body rule and appendix neutralization. */
+export function allRegionMarkers(markers: RegionMarkers): string[] {
+  return [markers.begin, markers.end, markers.managedBegin, markers.managedEnd];
 }
 
 export const GITIGNORE_REGION: RegionMarkers = {
   begin: LOCAL_BEGIN,
   end: LOCAL_END,
-  all: GITIGNORE_MARKERS,
+  managedBegin: MANAGED_BEGIN,
+  managedEnd: MANAGED_END,
 };
 
 export interface Line {
@@ -64,7 +73,7 @@ export function stripCr(text: string): string {
  * instead of guessing. */
 export function localRegion(
   content: string,
-  markers: RegionMarkers = GITIGNORE_REGION,
+  markers: RegionMarkers,
 ): { before: string; body: string; after: string } | null {
   const lines = splitLines(content);
   const begin = lines.findIndex((line) => stripCr(line.text) === markers.begin);
@@ -103,7 +112,7 @@ export function substringCount(content: string, marker: string): number {
  * regenerator must never split the same malformed file differently. */
 export function cleanLocalRegion(
   content: string,
-  markers: RegionMarkers = GITIGNORE_REGION,
+  markers: RegionMarkers,
 ): { before: string; body: string; after: string } | null {
   const clean = [markers.begin, markers.end].every(
     (marker) => markerLineCount(content, marker) === 1 && substringCount(content, marker) === 1,
@@ -111,6 +120,6 @@ export function cleanLocalRegion(
   if (!clean) return null;
   const region = localRegion(content, markers);
   if (region === null) return null;
-  if (markers.all.some((marker) => region.body.includes(marker))) return null;
+  if (allRegionMarkers(markers).some((marker) => region.body.includes(marker))) return null;
   return region;
 }

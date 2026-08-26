@@ -289,7 +289,7 @@ describe("declarationTextErrors", () => {
     expect(errorsOf(tail("X.md", HTML_SENTINEL), `top\n${HTML_SENTINEL}\n\n`, false)).toEqual([]);
     const missing = errorsOf(tail("X.md", HTML_SENTINEL), "top\nno marker\n", false);
     expect(missing).toHaveLength(1);
-    expect(missing[0]).toContain("does not END at the '<!-- repo-platform:local-section -->'");
+    expect(missing[0]).toContain("marker line 0 times");
     const midLine = errorsOf(tail("X.md", HTML_SENTINEL), `see ${HTML_SENTINEL} here\n`, false);
     expect(midLine).toHaveLength(1);
     const contentBelow = errorsOf(
@@ -299,6 +299,56 @@ describe("declarationTextErrors", () => {
     );
     expect(contentBelow).toHaveLength(1);
     expect(contentBelow[0]).toContain("does not END at");
+  });
+
+  test("a duplicated tail marker line is an error, not a pass", () => {
+    // Two marker lines split ambiguously: the rebuild splits at the first,
+    // the second would ride into repositories where the validator's
+    // exactly-once rule flags every render.
+    const doubled = errorsOf(
+      tail("X.md", HTML_SENTINEL),
+      `top\n${HTML_SENTINEL}\nmiddle\n${HTML_SENTINEL}\n`,
+      false,
+    );
+    expect(doubled).toHaveLength(1);
+    expect(doubled[0]).toContain("marker line 2 times");
+  });
+
+  test("a managed declaration over bounded-region marker text is an error", () => {
+    // The one guarantee the old BASE_SPLIT_FILES table gave: .gitignore
+    // declared managed would let sync overwrite every repo's LOCAL region.
+    const regionText = [
+      "# BEGIN REPOSITORY LOCAL",
+      "# END REPOSITORY LOCAL",
+      "# BEGIN REPO-PLATFORM MANAGED",
+      "# END REPO-PLATFORM MANAGED",
+      "",
+    ].join("\n");
+    const errors = errorsOf(managed(".gitignore"), regionText, false);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain("bounded-region marker but is declared managed");
+    // A single marker's text is enough - the promise is already there.
+    const single = errorsOf(managed("X.md"), "# BEGIN REPOSITORY LOCAL\n", false);
+    expect(single).toHaveLength(1);
+  });
+
+  test("a starter declaration over bounded-region marker text is an error", () => {
+    const errors = errorsOf(starter(".gitignore"), "# BEGIN REPOSITORY LOCAL\n", true);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain("bounded-region marker but is declared a starter");
+  });
+
+  test("a duplicated bounded-region marker is an error", () => {
+    const doubled = [
+      "# BEGIN REPOSITORY LOCAL",
+      "# END REPOSITORY LOCAL",
+      "# BEGIN REPO-PLATFORM MANAGED",
+      "# END REPO-PLATFORM MANAGED",
+      "# END REPO-PLATFORM MANAGED",
+      "",
+    ].join("\n");
+    const errors = errorsOf(bounded(".gitignore"), doubled, false);
+    expect(errors.join("\n")).toContain("appears 2 times");
   });
 
   test("bounded-region markers out of grammar order are an error", () => {

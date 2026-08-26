@@ -52,6 +52,7 @@ import {
 } from "node:fs";
 import { join, resolve } from "node:path";
 import { loadRegistry } from "../fleet/repos_registry.ts";
+import { lastLine } from "../shared/lines.ts";
 import { capture, passthrough, type RunOptions, type RunResult } from "../shared/proc.ts";
 import { AnswersFileError, readAnswersFile } from "./answers_file.ts";
 import { rewriteSrcPath } from "./src_path.ts";
@@ -140,14 +141,6 @@ function describeCommand(command: string[]): string {
     }
   }
   return command[0];
-}
-
-function lastLine(text: string): string {
-  const lines = text
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line !== "");
-  return lines.at(-1) ?? "";
 }
 
 /** Subprocess runners that throw RehearsalError instead of exiting, so the

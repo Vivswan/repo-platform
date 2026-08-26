@@ -1090,13 +1090,13 @@ function main(): number {
       // recorded answers _commit - the stamper always writes the value it
       // reads there (null exactly when the answers record none), so any
       // difference, a null stamp against a recorded _commit included, is
-      // tampering or a failed stamp. Absence checks stay strict unless a
-      // provenance error was already reported (one diagnostic per cause,
-      // not a second per missing entry).
+      // tampering or a failed stamp. Absence checks are strict unless a
+      // provenance error was already reported; `absenceCaveat` (null =
+      // strict) carries that error's name into the per-entry advisory,
+      // so one cause never piles a second diagnostic per missing entry.
       const rawSelfCommit = asEntry(manifestFiles[MANIFEST_NAME])?.commit;
       const manifestCommit = typeof rawSelfCommit === "string" ? rawSelfCommit : null;
-      let strictAbsence = true;
-      let absenceCaveat = "";
+      let absenceCaveat: string | null = null;
       if (manifestCommit === null && answersCommit !== null) {
         errors.push(
           `${MANIFEST_NAME}: its provenance stamp is null but the render ` +
@@ -1104,7 +1104,6 @@ function main(): number {
             "writes - tampering or a failed stamp; revert the edit or " +
             "run a recovery sync (recover=recopy)",
         );
-        strictAbsence = false;
         absenceCaveat = "its provenance stamp is unusable (error above)";
       } else if (manifestCommit !== null && manifestCommit !== answersCommit) {
         errors.push(
@@ -1115,7 +1114,6 @@ function main(): number {
             "tampering or a failed stamp; revert the edit or run a recovery " +
             "sync (recover=recopy)",
         );
-        strictAbsence = false;
         absenceCaveat = "its provenance stamp is unusable (error above)";
       }
       const reportUnlisted = (rel: string, declaredBy: string) => {
@@ -1133,7 +1131,7 @@ function main(): number {
         // pin an older ci.yml; client validators float at main, ahead of
         // the render), where a retired or not-yet-delivered table path has
         // no file - erroring there would be false.
-        if (strictAbsence && fileExists) {
+        if (absenceCaveat === null && fileExists) {
           errors.push(
             `${MANIFEST_NAME} does not list '${rel}', which ${declaredBy} - the ` +
               `stamper writes every entry of its render (${answersCommit}), so ` +
@@ -1145,11 +1143,10 @@ function main(): number {
           advisories.push(
             `${MANIFEST_NAME} does not list '${rel}', which ${declaredBy} - ` +
               `${
-                strictAbsence
-                  ? "the path is absent from the repo too, so this is a retired " +
-                    "or not-yet-delivered path seen by a validator of a " +
-                    "different vintage, not stealth drift"
-                  : absenceCaveat
+                absenceCaveat ??
+                "the path is absent from the repo too, so this is a retired " +
+                  "or not-yet-delivered path seen by a validator of a " +
+                  "different vintage, not stealth drift"
               } (a hand-deleted entry needs reverting; sync baselines manifest edits)`,
           );
         }

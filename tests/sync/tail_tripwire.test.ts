@@ -55,7 +55,8 @@ function regionEntry(
     marker: markers.managedBegin,
     begin: markers.begin,
     end: markers.end,
-    all: [markers.begin, markers.end, markers.managedBegin, markers.managedEnd],
+    managedBegin: markers.managedBegin,
+    managedEnd: markers.managedEnd,
   };
 }
 const asHead = (entry: SplitEntry) => ({ kind: "grammar", entry }) as const;
@@ -232,6 +233,16 @@ describe("headSplitEntries", () => {
     expect(() =>
       headSplitEntries(manifestText({ "AGENTS.md": rawLegacy(`# local §`, "above") }), "t"),
     ).toThrow(/marker\/managed pair/);
+  });
+
+  test("array-shaped files and entries fail loud, never open", () => {
+    // Arrays pass `typeof === "object"`: '"files": []' would declare zero
+    // splits (nothing checked), an array entry would silently skip its
+    // file - both must route to the unverifiable path via a throw.
+    expect(() => headSplitEntries('{"files": []}', "t")).toThrow(/no top-level 'files' mapping/);
+    expect(() => headSplitEntries(manifestText({ "AGENTS.md": [] as never }), "t")).toThrow(
+      /not an object/,
+    );
   });
 });
 

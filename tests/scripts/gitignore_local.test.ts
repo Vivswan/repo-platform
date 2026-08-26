@@ -40,12 +40,12 @@ function onDisk(content: string): string {
 
 describe("cleanLocalRegion", () => {
   test("accepts the exactly-once clean shape and slices the body", () => {
-    expect(cleanLocalRegion(CLEAN)?.body).toBe("/repo-local-cache/\n");
+    expect(cleanLocalRegion(CLEAN, GITIGNORE_REGION)?.body).toBe("/repo-local-cache/\n");
   });
 
   for (const [shape, content] of Object.entries(MALFORMED)) {
     test(`rejects ${shape}`, () => {
-      expect(cleanLocalRegion(content)).toBeNull();
+      expect(cleanLocalRegion(content, GITIGNORE_REGION)).toBeNull();
     });
   }
 });

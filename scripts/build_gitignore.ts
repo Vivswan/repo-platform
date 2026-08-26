@@ -44,7 +44,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { gateExpression } from "./compose_template.ts";
-import { cleanLocalRegion, LOCAL_BEGIN, LOCAL_END } from "./gitignore_local.ts";
+import { cleanLocalRegion, GITIGNORE_REGION, LOCAL_BEGIN, LOCAL_END } from "./gitignore_local.ts";
 import { loadManifests, type ModuleManifest } from "./module_manifests.ts";
 
 const REPO_ROOT = resolve(import.meta.dir, "..");
@@ -184,7 +184,7 @@ function managedHeader(): string {
  *  hand edit, not a guess. Exported for the writers-agree test. */
 export function existingLocalBody(output: string): string {
   if (!existsSync(output)) return DEFAULT_LOCAL_BODY;
-  const region = cleanLocalRegion(readFileSync(output).toString("utf-8"));
+  const region = cleanLocalRegion(readFileSync(output).toString("utf-8"), GITIGNORE_REGION);
   if (region === null) {
     throw new Error(
       `${output} has no single clean REPOSITORY LOCAL region (markers missing, duplicated, out of order, or marker text inside the body); fix its markers by hand, then rerun`,

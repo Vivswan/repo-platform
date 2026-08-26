@@ -28,6 +28,7 @@
 
 import { z } from "zod";
 import { parseJsonWith } from "./json.ts";
+import { lastLine } from "./lines.ts";
 import { capture, type RunResult } from "./proc.ts";
 
 /** The gate workflow whose runs prove a commit green. */
@@ -52,14 +53,6 @@ const workflowRunsSchema = z.object({
 /** Injectable gh runner so tests never touch the network. */
 export type GhRunner = (command: string[]) => RunResult;
 
-function lastLine(text: string): string {
-  const lines = text
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line !== "");
-  return lines.at(-1) ?? "";
-}
-
 /** Hard deadline for the default runner's API call: capture only enforces
  * a deadline when handed one, and an unbounded probe would hang the green
  * gate (and every caller waiting on it) on a stalled connection.
@@ -67,7 +60,6 @@ function lastLine(text: string): string {
 const PROBE_TIMEOUT_MS = Number(process.env.PROBE_TIMEOUT_MS ?? "15000");
 
 const boundedCapture: GhRunner = (command) => capture(command, { timeoutMs: PROBE_TIMEOUT_MS });
-
 /** Returns null when a completed direct-event CI run succeeded at `sha`,
  * else a one-line reason the commit cannot be treated as green. Any
  * completed success counts: every direct-event CI run at one sha ran the

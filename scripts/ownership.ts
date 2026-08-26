@@ -38,6 +38,7 @@ import { existsSync, lstatSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
+import { GITIGNORE_MARKERS } from "./gitignore_local.ts";
 import type { ModuleManifest } from "./module_manifests.ts";
 
 /** The managed ownership header in template sources, anchored on the C1
@@ -121,13 +122,19 @@ const markerLine = (what: string) =>
       message: `${what} must be printable ASCII (the sync rebuild matches markers against latin1-decoded file bytes)`,
     });
 
+/** A tail marker's comment syntax: a hash comment or a complete HTML
+ *  comment line. One predicate for the declaration schema AND the sync
+ *  boundary (preserve_local_content's splitEntries re-checks what the
+ *  manifest text claims) - the recovery appendix writes comments in the
+ *  marker's syntax, so anything else would emit a non-comment line. */
+export function isCommentMarker(value: string): boolean {
+  return value.startsWith("#") || (value.startsWith("<!--") && value.endsWith("-->"));
+}
+
 const hashOrHtmlMarker = (what: string) =>
-  markerLine(what).refine(
-    (value) => value.startsWith("#") || (value.startsWith("<!--") && value.endsWith("-->")),
-    {
-      message: `${what} must be a hash comment or a complete HTML comment line (the recovery appendix writes comments in the marker's syntax)`,
-    },
-  );
+  markerLine(what).refine(isCommentMarker, {
+    message: `${what} must be a hash comment or a complete HTML comment line (the recovery appendix writes comments in the marker's syntax)`,
+  });
 
 const hashMarker = (what: string) =>
   markerLine(what).refine((value) => value.startsWith("#"), {
@@ -344,6 +351,11 @@ export function declarationTextErrors(
     .split("\n")
     .map((line) => line.trim())
     .find((line) => LOCAL_SECTION_LINES.has(line));
+  // The canonical bounded-region marker text (substring-matched, the way
+  // the validator and appendix neutralization count): a managed or starter
+  // source carrying it promises a repo-owned LOCAL region the declared
+  // class would let sync overwrite (or never maintain).
+  const regionMarker = GITIGNORE_MARKERS.find((marker) => source.includes(marker));
   if (declaration.class === "starter") {
     if (!skipMatched) {
       errors.push(
@@ -366,6 +378,13 @@ export function declarationTextErrors(
           "never gets; drop one",
       );
     }
+    if (regionMarker !== undefined) {
+      errors.push(
+        `${where}: carries the '${regionMarker}' bounded-region marker but is ` +
+          "declared a starter - the markers promise a sync-maintained managed " +
+          "section that a starter never gets; drop one",
+      );
+    }
     return errors;
   }
   if (skipMatched) {
@@ -383,13 +402,35 @@ export function declarationTextErrors(
           "declare the file split (grammar tail-marker) or drop the marker",
       );
     }
+    if (regionMarker !== undefined) {
+      errors.push(
+        `${where}: carries the '${regionMarker}' bounded-region marker but is ` +
+          "declared managed - sync would overwrite the repo-owned LOCAL region " +
+          "the markers promise; declare the file split (grammar bounded-region) " +
+          "or drop the markers",
+      );
+    }
     return errors;
   }
   if (declaration.grammar === "tail-marker") {
-    // The sync rebuild anchors its split on the render ENDING at the
+    // The sync rebuild splits at ONE marker line, so the source must carry
+    // it exactly once (a second copy would ride into repositories where
+    // the exactly-once validator flags every render)...
+    const markerCount = source
+      .split("\n")
+      .filter((line) => line.trim() === declaration.marker).length;
+    if (markerCount !== 1) {
+      errors.push(
+        `${where}: declared split (tail-marker) but the source carries the ` +
+          `'${declaration.marker}' marker line ${markerCount} times - the sync ` +
+          "rebuild splits at exactly one marker line; keep exactly one",
+      );
+      return errors;
+    }
+    // ... and the rebuild anchors its split on the render ENDING at the
     // marker line - managed content below it would be carried into
     // repositories' local tails as if it were repo-owned - so the source
-    // must end there too (which implies the marker is present at all).
+    // must end there too.
     const lastNonBlank = source
       .split("\n")
       .map((line) => line.trim())
@@ -405,11 +446,13 @@ export function declarationTextErrors(
     }
     return errors;
   }
-  // bounded-region: every declared marker must appear, in the grammar's
-  // order (the local region above the managed half). Matched as substrings
-  // rather than exact lines - splicing can glue jinja tags onto a marker
-  // line (the gitignore anchor's collapse guard does) - so the RENDERED
-  // line grammar stays the validator's check, not this decoration check's.
+  // bounded-region: every declared marker must appear exactly once, in the
+  // grammar's order (the local region above the managed half). Matched as
+  // substrings rather than exact lines - splicing can glue jinja tags onto
+  // a marker line (the gitignore anchor's collapse guard does) - so the
+  // RENDERED line grammar stays the validator's check, not this decoration
+  // check's; exactly-once is counted the same substring way the validator
+  // and appendix neutralization count.
   const ordered: [string, string][] = [
     ["local BEGIN", declaration.local_begin],
     ["local END", declaration.local_end],
@@ -418,14 +461,22 @@ export function declarationTextErrors(
   ];
   let previous = -1;
   for (const [name, marker] of ordered) {
-    const at = source.indexOf(marker);
-    if (at === -1) {
+    const count = source.split(marker).length - 1;
+    if (count === 0) {
       errors.push(
         `${where}: declared split (bounded-region) but the source does not ` +
           `carry the '${marker}' marker line - restore the marker or fix the declaration`,
       );
       continue;
     }
+    if (count > 1) {
+      errors.push(
+        `${where}: the ${name} marker '${marker}' appears ${count} times - the ` +
+          "region slicer and the validator's exactly-once rule both require one " +
+          "copy; fix the source",
+      );
+    }
+    const at = source.indexOf(marker);
     if (at <= previous) {
       errors.push(
         `${where}: the ${name} marker '${marker}' appears out of the bounded-region ` +
