@@ -1,5 +1,14 @@
 import { describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  symlinkSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import {
@@ -981,6 +990,28 @@ describe("preserve_local_content render mode", () => {
     const result = runRender(root, renderDir, oldRenderDir);
     expect(result.exitCode).toBe(0);
     expect(result.rebuilt).toBe("AGENTS.md\n.gitignore\n");
+  });
+
+  test("a split path replaced by a symlink is rebuilt as a regular file, never through the link", () => {
+    // writeFileSync follows an existing symlink: without the guard, the
+    // rebuild would overwrite the link TARGET (potentially outside the
+    // checkout) and leave the symlink in place.
+    const root = makeTarget({ "AGENTS.md": agentsTarget, "victim.txt": "victim content\n" });
+    initGitRepo(root);
+    unlinkSync(join(root, "AGENTS.md"));
+    symlinkSync("victim.txt", join(root, "AGENTS.md"));
+    const { renderDir, oldRenderDir } = makeRenderPair(
+      [{ path: "AGENTS.md", marker: SENTINEL, managed: "above" }],
+      { "AGENTS.md": agentsRender },
+      { "AGENTS.md": agentsOld },
+    );
+    const result = runRender(root, renderDir, oldRenderDir);
+    expect(result.exitCode).toBe(0);
+    expect(lstatSync(join(root, "AGENTS.md")).isSymbolicLink()).toBe(false);
+    expect(readFileSync(join(root, "AGENTS.md"), "utf-8")).toBe(
+      `${agentsRender}\n## Project docs\n\nrepo-local instructions\n`,
+    );
+    expect(readFileSync(join(root, "victim.txt"), "utf-8")).toBe("victim content\n");
   });
 
   test("a split entry whose file is missing from the render fails loudly", () => {

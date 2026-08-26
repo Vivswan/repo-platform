@@ -74,11 +74,11 @@
 //     [--hide-details true|false] [--needs-review FILE]
 //     [--rebuilt-paths FILE] [--render-dir DIR --old-render-dir DIR]
 
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
-  LOCAL_BEGIN,
-  LOCAL_END,
+  cleanLocalRegion,
+  GITIGNORE_MARKERS,
   localRegion,
   splitLines,
   stripCr,
@@ -90,9 +90,6 @@ import { walkFiles } from "./walk.ts";
 const HTML_SENTINEL = "<!-- repo-platform:local-section -->";
 const HASH_SENTINEL = "# repo-platform:local-section";
 const SENTINELS = [HTML_SENTINEL, HASH_SENTINEL];
-const MANAGED_BEGIN = "# BEGIN REPO-PLATFORM MANAGED";
-const MANAGED_END = "# END REPO-PLATFORM MANAGED";
-const GITIGNORE_MARKERS = [LOCAL_BEGIN, LOCAL_END, MANAGED_BEGIN, MANAGED_END];
 const PREFIX_DOCS = new Set(["SECURITY.md", "CONTRIBUTING.md", "LICENSE.md"]);
 
 function lastLineIndex(
@@ -228,16 +225,6 @@ export interface GitignoreCarry {
   disposition: "spliced" | "appendix";
 }
 
-/** Count of lines whose CR-stripped text equals the marker. */
-function markerLineCount(content: string, marker: string): number {
-  return splitLines(content).filter((line) => stripCr(line.text) === marker).length;
-}
-
-/** Substring occurrences, the way validate_generated_files counts. */
-function substringCount(content: string, marker: string): number {
-  return content.split(marker).length - 1;
-}
-
 /** Previous-copy lines carried into the appendix are commented out (the
  * carry must not silently activate or rewrite ignore patterns - inert and
  * loud, like the .md appendices) and marker text inside them is
@@ -254,26 +241,20 @@ function inertPreviousCopy(content: string): string {
 }
 
 /** .gitignore carry: the target's LOCAL section body inside the render's
- * markers. The clean shape requires each LOCAL marker exactly once BOTH
- * as an exact line and as a substring (the validator counts substrings,
- * so a marker buried in surrounding text is a duplicate too), ordered,
- * with no marker text inside the body. Any other shape with non-blank
- * previous content is preserved, commented out, inside the fresh LOCAL
- * section - dropping it would silently lose whatever local entries it
- * held. Null means keep the render: the render has no region (the
- * mechanism left the template), the bodies already match, or an
- * unsplittable previous copy is blank. */
+ * markers. The target's region must be exactly-once clean per
+ * cleanLocalRegion (scripts/gitignore_local.ts - the shared definition, so
+ * this carry and the self-output regenerator can never slice the same
+ * malformed file differently). Any other shape with non-blank previous
+ * content is preserved, commented out, inside the fresh LOCAL section -
+ * dropping it would silently lose whatever local entries it held. Null
+ * means keep the render: the render has no region (the mechanism left the
+ * template), the bodies already match, or an unsplittable previous copy is
+ * blank. */
 export function carryGitignoreLocal(render: string, target: string): GitignoreCarry | null {
   const renderRegion = localRegion(render);
   if (renderRegion === null) return null;
-  const clean = [LOCAL_BEGIN, LOCAL_END].every(
-    (marker) => markerLineCount(target, marker) === 1 && substringCount(target, marker) === 1,
-  );
-  const targetRegion = clean ? localRegion(target) : null;
-  if (
-    targetRegion !== null &&
-    !GITIGNORE_MARKERS.some((marker) => targetRegion.body.includes(marker))
-  ) {
+  const targetRegion = cleanLocalRegion(target);
+  if (targetRegion !== null) {
     if (renderRegion.body === targetRegion.body) return null;
     return {
       content: renderRegion.before + targetRegion.body + renderRegion.after,
@@ -463,6 +444,23 @@ function headContent(root: string, rel: string): string | null {
 
 const SENTINEL_BUFFERS = SENTINELS.map((sentinel) => Buffer.from(sentinel));
 
+/** Land `content` as a REGULAR file at `path`. writeFileSync follows an
+ * existing symlink, so a split path a repo replaced with a link would have
+ * its TARGET overwritten - possibly outside the checkout; the rebuild owns
+ * the manifest path itself, so a symlink there is removed first. latin1:
+ * the content is byte-owned (see the header). A directory at the path is
+ * left for writeFileSync to fail on loudly. */
+function writeRegularFile(path: string, content: string): void {
+  let stat: ReturnType<typeof lstatSync> | null = null;
+  try {
+    stat = lstatSync(path);
+  } catch {
+    stat = null;
+  }
+  if (stat?.isSymbolicLink()) rmSync(path);
+  writeFileSync(path, Buffer.from(content, "latin1"));
+}
+
 interface FileOutcome {
   rel: string;
   note: string;
@@ -551,7 +549,7 @@ function rebuildSplitFile(
   // Unconditional write: the working tree holds copier's merged result,
   // which this mode exists to discard - even a byte-identical rewrite is
   // the correct statement of ownership.
-  writeFileSync(join(root, rel), Buffer.from(content, "latin1"));
+  writeRegularFile(join(root, rel), content);
   return note === null ? null : { rel, note, reviewReasons };
 }
 
@@ -631,7 +629,7 @@ function main(argv: string[]): number {
       if (target === null) continue;
       const carried = carryLocalContent(rel, render, target);
       if (carried === null) continue;
-      writeFileSync(join(root, rel), Buffer.from(carried.content, "latin1"));
+      writeRegularFile(join(root, rel), carried.content);
       rebuiltRels.push(rel);
       outcomes.push({ rel, note: carried.note, reviewReasons: [] });
     }

@@ -34,7 +34,7 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import { gateExpression } from "./compose_template.ts";
-import { LOCAL_BEGIN, LOCAL_END, localRegion } from "./gitignore_local.ts";
+import { cleanLocalRegion, LOCAL_BEGIN, LOCAL_END } from "./gitignore_local.ts";
 import { loadManifests, type ModuleManifest } from "./module_manifests.ts";
 
 const REPO_ROOT = resolve(import.meta.dir, "..");
@@ -140,13 +140,22 @@ function managedHeader(sha: string): string {
   );
 }
 
-/** Current content between the LOCAL markers, or the default. The region
- *  grammar is the shared scripts/gitignore_local.ts helper - the same
- *  line-anchored split the sync's split-file rebuild uses, so the two
- *  writers can never disagree about where the body sits. */
-function existingLocalBody(output: string): string {
+/** Current content between the LOCAL markers, the default when the file
+ *  does not exist yet, or a loud error when the file exists but has no
+ *  exactly-once clean region (cleanLocalRegion - the same accept/reject
+ *  the sync carry applies, so the two writers can never slice the same
+ *  malformed file differently). Regenerating around a malformed region
+ *  would silently drop local content or duplicate markers; the fix is a
+ *  hand edit, not a guess. Exported for the writers-agree test. */
+export function existingLocalBody(output: string): string {
   if (!existsSync(output)) return DEFAULT_LOCAL_BODY;
-  return localRegion(readFileSync(output).toString("utf-8"))?.body ?? DEFAULT_LOCAL_BODY;
+  const region = cleanLocalRegion(readFileSync(output).toString("utf-8"));
+  if (region === null) {
+    throw new Error(
+      `${output} has no single clean REPOSITORY LOCAL region (markers missing, duplicated, out of order, or marker text inside the body); fix its markers by hand, then rerun`,
+    );
+  }
+  return region.body;
 }
 
 function buildTemplate(sha: string, sections: Record<string, string>): string {
@@ -271,6 +280,10 @@ async function run(mode: Mode): Promise<number> {
   }
   const { entries: moduleSources, gates } = byModule(manifests);
   const sources = selfSources(moduleSources);
+  // Before any fetch or lock write: a malformed self output must abort
+  // while the lock still matches the committed outputs - advancing it
+  // first would leave lock and outputs out of step behind the error.
+  const selfLocalBody = existingLocalBody(OUTPUT_SELF);
 
   const paths = [...ALWAYS, ...sources];
   let sha: string;
@@ -294,7 +307,7 @@ async function run(mode: Mode): Promise<number> {
       fragmentOutput(module),
       buildFragment(sections, parts, gates),
     ]),
-    [OUTPUT_SELF, buildSelf(sha, sections, sources, existingLocalBody(OUTPUT_SELF))],
+    [OUTPUT_SELF, buildSelf(sha, sections, sources, selfLocalBody)],
   ];
 
   if (mode === "check") {
