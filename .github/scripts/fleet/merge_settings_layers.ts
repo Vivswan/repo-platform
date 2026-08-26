@@ -8,9 +8,10 @@
 // - An explicit `null` in the repo layer opts that key out entirely: the
 //   key is stripped from the merged document, so the apply never touches
 //   that section (or nested key) on this repository.
-// - `labels` and `rulesets` are NAME-KEYED UNIONS: a repo entry replaces
-//   the same-name managed entry wholesale (never a field-merge of the
-//   two), and both sides' other entries are kept. Plain array-replace
+// - `labels` and `rulesets` are NAME-KEYED UNIONS: both sides' other
+//   entries are kept. A same-name LABEL is replaced wholesale by the
+//   higher layer; a same-name RULESET merges field by field, with its
+//   `rules` appended by rule `type` (see appendRules). Plain array-replace
 //   would freeze the managed roster (a repo declaring one extra label
 //   would nightly-delete every module label the moment the baseline
 //   grows); the union keeps repo additions and managed evolution both

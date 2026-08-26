@@ -74,7 +74,7 @@ Twin nightly issue streams backed by the same `fuzz-issue` action; `fuzzer` adds
 
 - Selecting the module IS the opt-in to centrally managed settings: the nightly heal assembles the repo's baseline (policy block, module labels, fleet rulesets) and merges the repo's own `.github/settings.yml` over it.
 - Managed: `settings-sync.yml` caller (push-time self-apply of the same merge).
-- Starter, never deleted: `.github/settings.yml` - the identity keys plus local overrides, rendered once and repo-owned (entries there replace same-name baseline entries wholesale; a key set to `null` opts out of that part of the baseline).
+- Starter, never deleted: `.github/settings.yml` - the identity keys plus local overrides, rendered once and repo-owned (a same-name label there replaces the fleet one wholesale, a same-name ruleset merges into it; a key set to `null` opts out of that part of the fleet defaults, except where the override layer declares it).
 - Parameters: `homepage`, `topics` (seeded into the starter; declared-empty clears the live value, so copy UI-set values into the file before they get healed away).
 - Companion step (optional): a repo-scoped PAT with Administration + Issues RW as the repo's own `REPO_PLATFORM_TOKEN` Actions secret buys apply-on-push immediacy; without it self-apply skips with a warning and the central nightly run still applies the repo.
 - Removal: the caller is deleted; `settings.yml` stays as inert documentation - nothing enforces the repo's settings afterwards.

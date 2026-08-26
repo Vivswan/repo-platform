@@ -123,12 +123,20 @@ export function driftSummary(repo: string, drifts: Drift[], managed: boolean): s
 > re-run the sync for a clean PR.`;
   const consequence = managed
     ? `> Merging this PR records the live values as the answers and
-> re-renders the answer-derived files - but it does NOT make them the
-> enforced settings: the nightly heal applies the centrally assembled
-> baseline with this repository's own \`.github/settings.yml\` merged
-> over it, and that file still declares the OLD values, so the heal
-> reverts the live change. To keep the change, update
-> \`.github/settings.yml\` too (on this branch or after merging).
+> re-renders the answer-derived files - but it does NOT decide the
+> enforced settings. What the nightly heal does next depends on the
+> \`.github/settings.yml\` this branch leaves behind (the sync may have
+> created it here from the live values):
+>
+> - it declares the drifted key: the heal enforces THAT value, so a
+>   declaration of the old value reverts the live change.
+> - it omits the key: the heal leaves the live value alone; the key
+>   stays unmanaged.
+> - the branch has no settings.yml at all: the apply skips this
+>   repository entirely until one exists.
+>
+> So check that file on this branch and declare the value you want
+> enforced.
 ${revert}`
     : `> Merging this PR records the live values as ${repo}'s answers and
 > re-renders from them. Nothing enforces them either way: the repo

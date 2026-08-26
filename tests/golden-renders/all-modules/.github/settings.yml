@@ -5,39 +5,48 @@
 # one that self-apply skips with a warning).
 #
 # Rendered ONCE by the settings-sync module, repo-owned from then on:
-# template sync never rewrites or deletes this file. The managed baseline
-# (the shared repository policy block, the module-derived label roster,
-# the fleet rulesets) is NOT in this file - repo-platform computes it per
-# repository at apply time and deep-merges this file OVER it:
+# template sync never rewrites or deletes this file. The fleet's own
+# settings (the shared repository defaults, the labels and rulesets this
+# repository's modules need) are NOT in this file - repo-platform merges
+# them per repository at apply time and layers this file OVER them:
 #
-# - Keys here win; objects merge key by key.
+# - Keys here win over the fleet defaults; objects merge key by key.
 # - Setting a key to null opts this repository out of that part of the
-#   baseline entirely.
-# - labels and rulesets are name-keyed unions: an entry here replaces the
-#   same-name baseline entry wholesale, and both sides' other entries are
-#   kept - declare only this repository's own additions and overrides.
+#   defaults entirely.
+# - labels are name-keyed: an entry here replaces the same-name fleet
+#   label wholesale, and both sides' other labels are kept.
+# - rulesets are name-keyed too, but a same-name entry MERGES: its fields
+#   win, and its rules join the fleet ones - a rule of a type the fleet
+#   already declares replaces that rule, a new type is added. You cannot
+#   drop a fleet rule by leaving it out.
+#
+# One layer sits ABOVE this file: the fleet invariants (squash-only
+# merging and the default branch's protection rulesets). It wins for the
+# keys and rule types it declares, so declaring one of those - or nulling
+# it out - has no effect. Anything it does not declare is still yours,
+# including extra rules you add to a protected ruleset.
 #
 # Undeclared labels are deleted by the apply (against the MERGED roster,
-# so baseline labels are always safe); undeclared rulesets are left alone.
+# so fleet labels are always safe); undeclared rulesets are left alone.
 
 repository:
   description: "Golden render fixture"
-  # homepage, topics, and private are always declared, even when empty or
+  # homepage, topics, and private are declared here even when empty or
   # public: the apply manages only declared keys, so this keeps it healing
   # out-of-band edits (an empty value declares-and-clears).
   homepage: ""
   topics: ""
   private: false
 
-# This repository's own labels (the baseline already carries the
+# This repository's own labels (the fleet layers already carry the
 # dependabot, release, and tracking labels its modules need):
 # labels:
 #   - name: my-label
 #     color: "0e8a16"
 #     description: What it marks
 
-# This repository's own rulesets, or whole-entry overrides of baseline
-# ones (an entry named like a baseline ruleset replaces it wholesale):
+# This repository's own rulesets, or additions to a fleet one (an entry
+# named like a fleet ruleset merges into it and adds its rules):
 # rulesets:
 #   - name: my-ruleset
 #     target: branch

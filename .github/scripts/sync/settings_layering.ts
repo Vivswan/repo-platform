@@ -55,7 +55,10 @@ export function isLegacyBaseline(text: string): boolean {
 }
 
 export interface IdentitySeed {
-  description: string;
+  /** undefined OMITS the key, like homepage/topics below: declaring ""
+   *  would declare-and-clear a live description neither the old file nor
+   *  the recorded answers ever managed. */
+  description?: string;
   /** GitHub serves topics as a string in the old renders but tolerates a
    *  string list; a hand-edited list must survive the transition.
    *  undefined OMITS the key from the starter - declaring "" would
@@ -70,10 +73,15 @@ export interface IdentitySeed {
 
 /** Render the settings-sync starter template with an identity seed. The
  *  starter's jinja surface is validated FIRST - the template stripped of
- *  the known identity expressions must carry no jinja at all - so a seed
- *  VALUE containing braces can never trip the check, and a template that
- *  grew a construct this renderer does not know throws before anything is
- *  substituted. An undefined optional value drops its whole line. */
+ *  the known identity expressions must carry no jinja at all - so a
+ *  template that grew a construct this renderer does not know throws
+ *  before anything is substituted. An undefined optional value drops its
+ *  whole line; `private` is always defined, so the `repository:` block
+ *  can never render empty however many optional keys are dropped.
+ *
+ *  Substitution is a single pass over the template so a seed VALUE can
+ *  never be re-read as a template expression, and a template line
+ *  carrying two identity expressions is rejected rather than trusted. */
 export function renderStarter(templateText: string, seed: IdentitySeed): string {
   const identityRe = /\{\{ (description|homepage|topics|private) \| tojson \}\}/g;
   const stripped = templateText.replace(identityRe, "").replaceAll("{{ github_username }}", "");
@@ -89,19 +97,34 @@ export function renderStarter(templateText: string, seed: IdentitySeed): string 
     topics: seed.topics,
     private: seed.private,
   };
-  let rendered = templateText;
-  for (const [name, value] of Object.entries(values)) {
-    const expression = `{{ ${name} | tojson }}`;
-    rendered =
-      value === undefined
-        ? rendered
-            .split("\n")
-            .filter((line) => !line.includes(expression))
-            .join("\n")
-        : // JSON is valid YAML for a list too, so an array seed round-trips.
-          rendered.replaceAll(expression, () => JSON.stringify(value));
+  // Enforced, not just documented: an undefined value drops its whole
+  // LINE, so two identity expressions on one line would make one key's
+  // absence delete the other key's declaration.
+  const lines = templateText.split("\n");
+  for (const line of lines) {
+    const names = [...line.matchAll(identityRe)];
+    if (names.length > 1) {
+      throw new Error(
+        "the settings-sync starter template puts two identity expressions on one line " +
+          `(${names.map((m) => m[1]).join(", ")}) - renderStarter drops an undefined value ` +
+          "by line, so they must each have their own",
+      );
+    }
   }
-  return rendered.replaceAll("{{ github_username }}", () => seed.githubUsername);
+  const kept = lines.filter((line) => {
+    const match = /\{\{ (description|homepage|topics|private) \| tojson \}\}/.exec(line);
+    return match === null || values[match[1]] !== undefined;
+  });
+  // ONE pass over the template text, identity expressions and the owner
+  // name together: String.replace never rescans what it substituted, so a
+  // seed VALUE that happens to look like another expression is emitted
+  // verbatim instead of being re-interpreted by a later pass.
+  const allRe =
+    /\{\{ (description|homepage|topics|private) \| tojson \}\}|\{\{ github_username \}\}/g;
+  return kept.join("\n").replace(allRe, (_match, name?: string) =>
+    // JSON is valid YAML for a list too, so an array seed round-trips.
+    name === undefined ? seed.githubUsername : JSON.stringify(values[name]),
+  );
 }
 
 /** JSON with recursively sorted object keys, for order-insensitive
@@ -251,8 +274,11 @@ export function transitionSettingsStarter(
           // same precedence as homepage/topics/private below. Seeding
           // from the live answer instead would silently drop a declared
           // description, and droppedOverrides never reports it (the
-          // identity keys are exempt there as "carried").
-          description: str(oldRepository.description, answers.description) ?? "",
+          // identity keys are exempt there as "carried"). Undefined when
+          // NEITHER source declares one: the starter then omits the key
+          // rather than declare-and-clear a live description nothing ever
+          // managed.
+          description: str(oldRepository.description, answers.description),
           // undefined when neither source declares the key: the starter
           // then omits it rather than declare-and-clear a live value
           // nothing ever managed.

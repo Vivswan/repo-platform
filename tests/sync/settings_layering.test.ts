@@ -49,6 +49,28 @@ describe("isLegacyBaseline", () => {
 });
 
 describe("renderStarter", () => {
+  test("a seed value shaped like another expression is emitted verbatim", () => {
+    // Sequential per-key substitution used to let a later pass re-read
+    // what an earlier one wrote, rewriting the repo's own description.
+    const rendered = renderStarter(STARTER_TEMPLATE, {
+      ...seed,
+      description: "{{ homepage | tojson }} and {{ github_username }}",
+    });
+    const doc = parseYaml(rendered) as { repository: Record<string, unknown> };
+    expect(doc.repository.description).toBe("{{ homepage | tojson }} and {{ github_username }}");
+    expect(doc.repository.homepage).toBe("https://example.test");
+  });
+
+  test("two identity expressions on one template line are refused", () => {
+    // An undefined value drops the whole line, so a shared line would let
+    // one key's absence delete another key's declaration.
+    const bad = STARTER_TEMPLATE.replace(
+      "  private: {{ private | tojson }}",
+      "  private: {{ private | tojson }} # {{ homepage | tojson }}",
+    );
+    expect(() => renderStarter(bad, seed)).toThrow("two identity expressions on one line");
+  });
+
   test("substitutes the four identity expressions and parses as YAML", () => {
     const rendered = renderStarter(STARTER_TEMPLATE, seed);
     const doc = parseYaml(rendered) as { repository: Record<string, unknown> };
@@ -278,6 +300,25 @@ describe("transitionSettingsStarter", () => {
       repository: Record<string, unknown>;
     };
     expect(doc.repository.description).toBe("Live description");
+  });
+
+  test("a description neither source declares is OMITTED, not cleared", () => {
+    // Declaring "" would declare-and-clear a live description that
+    // nothing ever managed - the same reason homepage and topics drop.
+    const { dir, out } = target({
+      settings: legacySettings.replace("  description: Old declared description\n", ""),
+      modules: "modules: [settings-sync]\n",
+      answers: answers.replace("description: Live description\n", ""),
+    });
+    transitionSettingsStarter(dir, out, "t");
+    const text = readFileSync(join(dir, ".github/settings.yml"), "utf-8");
+    // The commented label example also mentions description, so match the
+    // repository block's own declaration line.
+    expect(text.split("\n").some((line) => /^ {2}description:/.test(line))).toBe(false);
+    const doc = parseYaml(text) as { repository: Record<string, unknown> };
+    expect("description" in doc.repository).toBe(false);
+    // private is always seeded, so the block never renders empty.
+    expect(doc.repository.private).toBe(false);
   });
 
   test("fail-soft: a broken answers file leaves the old file for the next sync", () => {

@@ -97,13 +97,19 @@ describe("driftSummary", () => {
     expect(summary).toContain("> [!WARNING]");
     expect(summary).toContain("Vivswan/demo");
     expect(summary).toContain('`private`: "false" -> "true" (recorded -> live)');
-    // Merging never ratifies the enforced settings: the heal applies the
-    // repo's own settings.yml over the baseline, so the reviewer must be
-    // told to update THAT file to keep a live change.
-    expect(summary.replace(/\n> /g, " ")).toContain("does NOT make them the enforced settings");
-    expect(summary.replace(/\n> /g, " ")).toContain("the heal reverts the live change");
-    expect(summary.replace(/\n> /g, " ")).toContain("update `.github/settings.yml` too");
-    expect(summary.replace(/\n> /g, " ")).toContain("centrally assembled baseline");
+    // Merging never decides the enforced settings, and the text must
+    // describe the file this BRANCH leaves behind - the same sync may
+    // have just created it from the live values - not the pre-sync one.
+    // All three outcomes have to be named: declared (heal enforces the
+    // declaration), omitted (live value left alone), absent (apply skips).
+    const flat = summary.replace(/\n> /g, " ").replace(/\s+/g, " ");
+    expect(flat).toContain("does NOT decide the");
+    expect(flat).toContain("the sync may have created it here");
+    expect(flat).toContain("the heal enforces THAT value");
+    expect(flat).toContain("omits the key");
+    expect(flat).toContain("leaves the live value alone");
+    expect(flat).toContain("no settings.yml at all");
+    expect(flat).toContain("skips this repository");
     expect(summary).toContain("Auto-merge is off");
     expect(summary).toContain("settings-repos heal");
   });
