@@ -55,60 +55,46 @@ export const OVERRIDE_PATH = join(REPO_ROOT, ".github/settings-override.yml");
  *  that only wants to add a rule. */
 const NAME_KEYED: Record<
   string,
-  {
-    fold: (name: string) => string;
-    combine: (lower: unknown, higher: unknown) => unknown;
-    /** Applied to EVERY emitted entry, not just merged ones: an entry
-     *  contributed by one side alone never passes through the merge, so
-     *  without this its nulls would reach the document literally. */
-    normalize?: (entry: unknown) => unknown;
-  }
+  { fold: (name: string) => string; combine: (lower: unknown, higher: unknown) => unknown }
 > = {
-  labels: {
-    fold: (name) => name.toLowerCase(),
-    combine: (_lower, higher) => higher,
-    // A label is replaced wholesale, but it still owes the dialect its
-    // null handling: the pinned action rejects the WHOLE apply over one
-    // literal null, so a repo writing `description: null` on a label
-    // would take the repository's entire settings run down with it.
-    normalize: stripNulls,
-  },
-  rulesets: {
-    fold: (name) => name,
-    combine: (lower, higher) => mergeRulesetEntry(lower, higher),
-    normalize: normalizeRuleset,
-  },
+  labels: { fold: (name) => name.toLowerCase(), combine: (_lower, higher) => higher },
+  rulesets: { fold: (name) => name, combine: (lower, higher) => mergeRulesetEntry(lower, higher) },
 };
 
-/** The null opt-out, applied inside a list entry: a null-valued key is
- *  removed rather than emitted. GitHub rejects a ruleset carrying a
- *  literal null, so an entry that never met a merge partner still has to
- *  obey the dialect. */
-export function stripNulls(entry: unknown): unknown {
-  if (Array.isArray(entry)) return entry.map(stripNulls);
-  if (!isMapping(entry)) return entry;
-  const out: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(entry)) {
-    if (value === null) continue;
-    out[key] = stripNulls(value);
+/** THE normalization choke-point: one pass over the FINISHED document, so
+ *  no merge path can reach the output without it, whatever the layer,
+ *  sidedness or depth. Two invariants, both about what GitHub rejects:
+ *  a literal null anywhere fails the apply (the dialect's opt-out means
+ *  ABSENT), and a ruleset repeating a rule `type` is rejected wholesale,
+ *  which leaves a branch unprotected on a green run. */
+export function normalizeDocument(doc: Record<string, unknown>): Record<string, unknown> {
+  return normalizeValue(doc, false) as Record<string, unknown>;
+}
+
+/** `isRulesetEntry` marks THIS value as an element of a `rulesets` array -
+ *  it is not a "somewhere below rulesets" flag. Letting it stay true for
+ *  every descendant deduplicated any nested key called `rules` as though
+ *  it were a rule list, which silently emptied `conditions.rules`. */
+function normalizeValue(value: unknown, isRulesetEntry: boolean): unknown {
+  if (Array.isArray(value)) {
+    // A null ELEMENT is as fatal as a null field, and the map alone left
+    // it in place.
+    return value
+      .filter((item) => item !== null)
+      .map((item) => normalizeValue(item, isRulesetEntry));
   }
+  if (!isMapping(value)) return value;
+  const out: Record<string, unknown> = {};
+  for (const [key, child] of Object.entries(value)) {
+    if (child === null) continue;
+    out[key] = normalizeValue(child, key === "rulesets");
+  }
+  if (isRulesetEntry && Array.isArray(out.rules)) out.rules = appendRules(out.rules, []);
   return out;
 }
 
 function isMapping(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-/** Every emitted ruleset, merged or not: nulls stripped AND rule types
- *  deduplicated. Deduping only on a same-name collision left the
- *  standalone path open - a repo-only or module-only ruleset that lists
- *  one rule type twice reaches GitHub as-is, and GitHub rejects the whole
- *  ruleset, which is the silent-unprotect failure again. appendRules with
- *  an empty higher side is exactly the dedup pass. */
-export function normalizeRuleset(entry: unknown): unknown {
-  const stripped = stripNulls(entry);
-  if (!isMapping(stripped) || !Array.isArray(stripped.rules)) return stripped;
-  return { ...stripped, rules: appendRules(stripped.rules, []) };
 }
 
 function ruleType(rule: unknown): string | null {
@@ -170,13 +156,18 @@ export function mergeRulesetEntry(lower: unknown, higher: unknown): unknown {
   const { rules: lowerRules, ...lowerFields } = lower;
   const { rules: higherRules, ...higherFields } = higher;
   const merged: Record<string, unknown> = mergeMappings(lowerFields, higherFields, {});
+  // PRESENCE, not truthiness: an explicit `rules: null` is the opt-out
+  // and must strip the inherited rules; the null rides out to the
+  // choke-point, which removes the key. Layer 6 re-adds its own rules
+  // afterwards, so the fleet's mandatory ones survive it.
   const rules =
     Array.isArray(lowerRules) && Array.isArray(higherRules)
       ? appendRules(lowerRules, higherRules)
-      : (higherRules ?? lowerRules);
-  // A null on either side is left for stripNulls, which removes the key.
+      : "rules" in higher
+        ? higherRules
+        : lowerRules;
   if (rules !== undefined) merged.rules = rules;
-  return stripNulls(merged);
+  return merged;
 }
 
 function entryName(entry: unknown): string | null {
@@ -195,7 +186,6 @@ export function nameKeyedUnion(
   repo: unknown[],
   fold: (name: string) => string,
   combine: (lower: unknown, higher: unknown) => unknown = (_lower, higher) => higher,
-  normalize: (entry: unknown) => unknown = (entry) => entry,
 ): unknown[] {
   const repoByName = new Map<string, unknown>();
   for (const entry of repo) {
@@ -207,16 +197,16 @@ export function nameKeyedUnion(
   for (const entry of managed) {
     const name = entryName(entry);
     if (name === null) {
-      merged.push(normalize(entry));
+      merged.push(entry);
       continue;
     }
     const key = fold(name);
     const override = repoByName.get(key);
     if (override !== undefined) {
-      merged.push(normalize(combine(entry, override)));
+      merged.push(combine(entry, override));
       taken.add(key);
     } else {
-      merged.push(normalize(entry));
+      merged.push(entry);
     }
   }
   for (const entry of repo) {
@@ -229,7 +219,7 @@ export function nameKeyedUnion(
     // duplicate rides through once - the same first-wins rule the matched
     // branch applies (duplicateNameWarnings names the duplicate).
     if (!taken.has(fold(name))) {
-      merged.push(normalize(entry));
+      merged.push(entry);
       taken.add(fold(name));
     }
   }
@@ -272,40 +262,22 @@ function mergeMappings(
   nameKeyed: typeof NAME_KEYED,
 ): Record<string, unknown> {
   const merged: Record<string, unknown> = {};
-  // A name-keyed section present on ONE side only still goes through the
-  // union, with an empty other side: that is where normalization lives,
-  // and skipping it let a module-only or repo-only entry reach the
-  // document with duplicate rule types or literal nulls intact.
-  const oneSided = (key: string, entries: unknown[], fromRepo: boolean): unknown => {
-    const section = nameKeyed[key];
-    if (section === undefined) return entries;
-    return fromRepo
-      ? nameKeyedUnion([], entries, section.fold, section.combine, section.normalize)
-      : nameKeyedUnion(entries, [], section.fold, section.combine, section.normalize);
-  };
   for (const key of [...Object.keys(managed), ...Object.keys(repo)]) {
     if (key in merged) continue;
     if (!(key in repo)) {
-      const value = managed[key];
-      merged[key] = Array.isArray(value) ? oneSided(key, value, false) : value;
+      merged[key] = managed[key];
       continue;
     }
     const repoValue = repo[key];
     if (repoValue === null) continue; // explicit opt-out: the key is stripped
     if (!(key in managed)) {
-      merged[key] = Array.isArray(repoValue) ? oneSided(key, repoValue, true) : repoValue;
+      merged[key] = repoValue;
       continue;
     }
     const managedValue = managed[key];
     const section = nameKeyed[key];
     if (section !== undefined && Array.isArray(managedValue) && Array.isArray(repoValue)) {
-      merged[key] = nameKeyedUnion(
-        managedValue,
-        repoValue,
-        section.fold,
-        section.combine,
-        section.normalize,
-      );
+      merged[key] = nameKeyedUnion(managedValue, repoValue, section.fold, section.combine);
     } else if (isMapping(managedValue) && isMapping(repoValue)) {
       // Name-keying applies only at the section level; nested objects
       // merge plainly.
@@ -323,7 +295,10 @@ export function mergeSettingsLayers(
   managed: Record<string, unknown>,
   repo: Record<string, unknown>,
 ): Record<string, unknown> {
-  return mergeMappings(managed, repo, NAME_KEYED);
+  // Merge, then normalize the whole result exactly once. Idempotent, so
+  // folding many layers re-runs it harmlessly - and no merge path can
+  // reach the output without passing through here.
+  return normalizeDocument(mergeMappings(managed, repo, NAME_KEYED));
 }
 
 /** The identity keys the merged document should declare (they can only

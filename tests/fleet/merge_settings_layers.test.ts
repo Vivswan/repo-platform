@@ -94,7 +94,8 @@ describe("mergeSettingsLayers", () => {
       ],
     }) as { rulesets: Record<string, unknown>[] };
     // The higher layer declared no rules, so the lower layer's survive: a
-    // ruleset's rules can only be ADDED to across layers, never removed.
+    // ruleset's rules are only ever ADDED to by declaring more of them;
+    // removing an inherited rule takes the explicit `rules: null` opt-out.
     expect(merged.rulesets).toEqual([
       { name: "main", target: "branch", rules: [{ type: "deletion" }] },
       { name: "non-bypassable", target: "branch", bypass_actors: [] },
@@ -198,7 +199,50 @@ describe("mergeRulesetEntry", () => {
   });
 });
 
-describe("stripNulls on emitted entries", () => {
+describe("normalizeDocument (the choke-point)", () => {
+  test("a null ARRAY ELEMENT is dropped, at any depth", () => {
+    // Mapping every element preserved a null instead of removing it, so
+    // "no null survives" was false for lists.
+    const merged = mergeSettingsLayers(
+      { labels: [null, { name: "bug", color: "d73a4a", description: "x" }], nested: [[null, 1]] },
+      {},
+    ) as Record<string, unknown>;
+    expect(merged.labels).toEqual([{ name: "bug", color: "d73a4a", description: "x" }]);
+    expect(merged.nested).toEqual([[1]]);
+  });
+
+  test("a nested key called 'rules' outside a ruleset entry is left alone", () => {
+    // The ruleset marker used to stay true for every descendant, so any
+    // nested `rules` was deduplicated as a rule list - and since these
+    // are not {type} objects, that emptied the array outright.
+    const merged = mergeSettingsLayers(
+      {
+        rulesets: [
+          {
+            name: "main",
+            conditions: { rules: ["keep-a", "keep-b"] },
+            rules: [{ type: "deletion" }],
+          },
+        ],
+      },
+      {},
+    ) as { rulesets: Record<string, unknown>[] };
+    const main = merged.rulesets[0];
+    expect(main).toBeDefined();
+    const conditions = main?.conditions as Record<string, unknown>;
+    expect(conditions.rules).toEqual(["keep-a", "keep-b"]);
+    // The entry's OWN rules are still deduplicated.
+    expect(main?.rules).toEqual([{ type: "deletion" }]);
+  });
+
+  test("a 'rules' key outside rulesets entirely is untouched", () => {
+    const merged = mergeSettingsLayers({ repository: { rules: ["a", "a"] } }, {}) as Record<
+      string,
+      unknown
+    >;
+    expect((merged.repository as Record<string, unknown>).rules).toEqual(["a", "a"]);
+  });
+
   test("a repo-ONLY ruleset never reaches the document carrying a null", () => {
     // A one-sided entry skips the merge entirely, so without normalizing
     // every emitted entry its null lands literally and GitHub rejects the
@@ -235,6 +279,30 @@ describe("stripNulls on emitted entries", () => {
       {},
     ) as { rulesets: Record<string, unknown>[] };
     expect(merged.rulesets[0]?.rules).toEqual([{ type: "update" }]);
+  });
+
+  test("a nested null in a ONE-SIDED mapping is stripped", () => {
+    // repository is not a name-keyed section and only the lower layer
+    // declares it here, so this value never touches a merge path - the
+    // document-level normalization is the only thing that sees it.
+    const merged = mergeSettingsLayers(
+      { repository: { has_issues: true, security_and_analysis: { secret_scanning: null } } },
+      {},
+    ) as { repository: Record<string, unknown> };
+    expect(merged.repository.security_and_analysis).toEqual({});
+    expect(merged.repository.has_issues).toBe(true);
+  });
+
+  test("an explicit rules: null strips inherited rules, it does not fall back", () => {
+    // The documented opt-out: a repo can drop the rules it inherited on a
+    // module-only ruleset. `??` used to turn the null back into the lower
+    // layer's list, so the opt-out silently did nothing.
+    const merged = mergeSettingsLayers(
+      { rulesets: [{ name: "release-tags", target: "tag", rules: [{ type: "deletion" }] }] },
+      { rulesets: [{ name: "release-tags", rules: null }] },
+    ) as { rulesets: Record<string, unknown>[] };
+    const tags = merged.rulesets.find((r) => r.name === "release-tags");
+    expect(tags).toEqual({ name: "release-tags", target: "tag" });
   });
 
   test("a null nested inside a one-sided entry is stripped too", () => {

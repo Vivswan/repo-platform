@@ -55,9 +55,9 @@ A coverage-guided fuzzer that found a crash yesterday can miss it today, so one 
 
 ## Renaming the label, deselecting the module
 
-Two lifecycle edges follow from the starter being repo-owned while the label declaration is template-rendered:
+Two lifecycle edges follow from the starter being repo-owned while the label reaches settings from the recorded answer, read fresh on every apply:
 
-- Renaming `fuzzer_label` (a copier answer) updates the settings-sync label declaration on the next sync, but never the repo-owned `nightly-fuzz.yml`. The rename itself is a default-branch PR editing the `fuzzer_label` value key in `.copier-answers.yml` (the sync loads recorded values from there; the underscore keys stay untouched). Update the two `label:` inputs there in the same change, or the workflow keeps filing under the old name while the settings apply deletes it.
+- Renaming `fuzzer_label` (a copier answer) changes the label the NEXT settings apply declares - no sync is needed, because the apply reads the recorded answer rather than a rendered declaration - but never the repo-owned `nightly-fuzz.yml`. The rename itself is a default-branch PR editing the `fuzzer_label` value key in `.copier-answers.yml` (the sync loads recorded values from there; the underscore keys stay untouched). Update the two `label:` inputs there in the same change, or the workflow keeps filing under the old name while the settings apply deletes it.
 - Deselecting the module removes the label declaration, but `_skip_if_exists` files are never deleted by sync: the nightly workflow keeps running. When you drop the module, also delete `.github/workflows/nightly-fuzz.yml` (or keep the label declared in your settings if you keep the workflow).
 
 ## Sharding

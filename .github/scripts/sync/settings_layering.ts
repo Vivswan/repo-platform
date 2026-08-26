@@ -47,15 +47,20 @@ const STARTER_TEMPLATE = join(REPO_ROOT, "templates/settings-sync/.github/settin
  *  old template rendered carries it, and nothing renders it anymore, so
  *  its presence IS the "legacy baseline file" signal (the constant left
  *  scripts/ownership.ts with the class; this literal is the transition's
- *  own anchor). Matched exactly, column 0, inside the header window the
- *  old class's classifier used - an indented mention (say, inside a block
- *  scalar of a hand-written file) must never trigger the replacement. */
+ *  own anchor). Matched EXACTLY and at column 0, so an indented mention -
+ *  inside a block scalar of a hand-written file, say - never triggers the
+ *  replacement. */
 export const LEGACY_MERGEABLE_LINE = "# repo-platform:mergeable";
-const LEGACY_HEADER_WINDOW = 10;
 
-/** Whether a settings.yml text is the legacy rendered baseline. */
+/** Whether a settings.yml text is the legacy rendered baseline. Scans the
+ *  WHOLE file: a repo that kept its own header comments above the
+ *  rendered ones pushes the marker past any fixed window, and a legacy
+ *  file mistaken for a starter is the silent failure - the transition
+ *  skips, the file keeps shadowing the fleet layers, and the sync PR
+ *  auto-merges because nothing held it. Column 0 is what keeps the exact
+ *  match honest, not proximity to the top. */
 export function isLegacyBaseline(text: string): boolean {
-  return text.split("\n", LEGACY_HEADER_WINDOW).some((line) => line === LEGACY_MERGEABLE_LINE);
+  return text.split("\n").some((line) => line === LEGACY_MERGEABLE_LINE);
 }
 
 // Each identity value has three states, and they mean different things:

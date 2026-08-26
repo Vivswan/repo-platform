@@ -46,7 +46,7 @@ import { parseFlags } from "../shared/flags.ts";
 import { fail, warning } from "../shared/gha.ts";
 import { RETIRED_MODULES } from "../sync/modules.ts";
 import { captureNetwork } from "./discovery.ts";
-import { mergeLayers } from "./merge_settings_layers.ts";
+import { mergeLayers, normalizeDocument } from "./merge_settings_layers.ts";
 
 export interface Label {
   name: string;
@@ -204,14 +204,20 @@ export function managedSettings(
     ...trackingLabels(facts, manifests),
   ];
   if (labels.length > 0) merged.labels = labels;
+  // The tracking labels are appended AFTER the merge, so this document
+  // would otherwise leave the layer stack without passing the
+  // choke-point. It is normalized again downstream when the repo layer is
+  // merged over it, but relying on that is what the choke-point exists to
+  // stop: the invariant should not depend on a later caller.
+  const normalized = normalizeDocument(merged);
   // Case-folded like GitHub's own label dedup; ruleset names match exactly.
   assertUniqueNames(labels, "labels", (name) => name.toLowerCase());
   assertUniqueNames(
-    (Array.isArray(merged.rulesets) ? merged.rulesets : []) as { name: string }[],
+    (Array.isArray(normalized.rulesets) ? normalized.rulesets : []) as { name: string }[],
     "rulesets",
     (name) => name,
   );
-  return merged;
+  return normalized;
 }
 
 /** The merged label roster for a repo's facts. */

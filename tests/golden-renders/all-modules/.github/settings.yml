@@ -17,8 +17,9 @@
 #   label wholesale, and both sides' other labels are kept.
 # - rulesets are name-keyed too, but a same-name entry MERGES: its fields
 #   win, and its rules join the fleet ones - a rule of a type the fleet
-#   already declares replaces that rule, a new type is added. You cannot
-#   drop a fleet rule by leaving it out.
+#   already declares replaces that rule, a new type is added. Leaving a
+#   rule out does not drop it; `rules: null` drops the ones the fleet's
+#   lower layers contributed, and never the protection rulesets' own.
 #
 # One layer sits ABOVE this file: the fleet invariants (squash-only
 # merging and the default branch's protection rulesets). It wins for the

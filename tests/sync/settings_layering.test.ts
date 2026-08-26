@@ -33,11 +33,13 @@ const seed: IdentitySeed = {
 };
 
 describe("isLegacyBaseline", () => {
-  test("matches the marker exactly at column 0 within the header window", () => {
+  test("matches the marker exactly at column 0, at ANY depth in the file", () => {
     expect(isLegacyBaseline(`---\n${LEGACY_MERGEABLE_LINE}\nrepository: {}\n`)).toBe(true);
-    // Line 10 (index 9) is the last line inside the window; line 11 is out.
-    expect(isLegacyBaseline(`${"# filler\n".repeat(9)}${LEGACY_MERGEABLE_LINE}\n`)).toBe(true);
-    expect(isLegacyBaseline(`${"# filler\n".repeat(10)}${LEGACY_MERGEABLE_LINE}\n`)).toBe(false);
+    // There is no header window: a repo that kept its own comments above
+    // the rendered ones would otherwise be read as an already-transitioned
+    // starter, and the transition would silently never run.
+    expect(isLegacyBaseline(`${"# filler\n".repeat(40)}${LEGACY_MERGEABLE_LINE}\n`)).toBe(true);
+    expect(isLegacyBaseline("# filler\nrepository: {}\n")).toBe(false);
   });
 
   test("an indented mention (a block scalar of a hand-written file) never triggers", () => {
@@ -274,6 +276,24 @@ describe("transitionSettingsStarter", () => {
     const section = readFileSync(out, "utf-8");
     expect(section).toContain("Nothing was dropped");
     expect(section).toContain("held for review");
+  });
+
+  test("a legacy marker below a long repo-owned header still transitions", () => {
+    // A repo that kept its own comments above the rendered ones pushes
+    // the marker past any header window. Missing it is the silent
+    // failure: the file stays, keeps shadowing the fleet layers, and the
+    // PR auto-merges because nothing held it.
+    const header = Array.from({ length: 12 }, (_, i) => `# repo note line ${i + 1}`).join("\n");
+    const { dir, out } = target({
+      settings: legacySettings.replace("---\n", `---\n${header}\n`),
+      modules: "modules: [settings-sync]\n",
+      answers,
+    });
+    transitionSettingsStarter(dir, out, "t");
+    expect(readFileSync(join(dir, ".github/settings.yml"), "utf-8")).not.toContain(
+      LEGACY_MERGEABLE_LINE,
+    );
+    expect(readFileSync(out, "utf-8")).not.toBe("");
   });
 
   test("a marker-less file (hand-written or already transitioned) is never touched", () => {
