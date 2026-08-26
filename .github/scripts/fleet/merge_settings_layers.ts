@@ -110,10 +110,13 @@ function hardenDocument(doc: SettingsLayer): MergedSettings {
 function hardenValue(value: Declared, isRulesetEntry: boolean): MergedValue {
   if (Array.isArray(value)) {
     // A null ELEMENT is as fatal as a null field, and mapping alone left
-    // it in place.
+    // it in place. Elements do NOT inherit the ruleset-entry flag: it
+    // belongs to the direct elements of a `rulesets` ARRAY alone (the
+    // explicit arm in hardenMapping), never to arrays nested deeper
+    // inside an entry.
     return value
       .filter((item): item is Declared => item !== null)
-      .map((item) => hardenValue(item, isRulesetEntry));
+      .map((item) => hardenValue(item, false));
   }
   if (typeof value !== "object") return value;
   return hardenMapping(value, isRulesetEntry);
@@ -123,7 +126,17 @@ function hardenMapping(value: SettingsLayer, isRulesetEntry: boolean): MergedSet
   const out: MergedSettings = {};
   for (const [key, child] of Object.entries(value)) {
     if (child === null) continue;
-    out[key] = hardenValue(child, key === "rulesets");
+    // The ruleset-entry flag marks exactly the direct elements of a
+    // `rulesets` ARRAY. A mapping under the key (rulesets: {rules: ...})
+    // is malformed input, not a ruleset entry - flagging it used to
+    // produce a diagnostic naming a ruleset that does not exist.
+    if (key === "rulesets" && Array.isArray(child)) {
+      out[key] = child
+        .filter((item): item is Declared => item !== null)
+        .map((item) => hardenValue(item, true));
+      continue;
+    }
+    out[key] = hardenValue(child, false);
   }
   if (isRulesetEntry && Array.isArray(out.rules)) {
     out.rules = appendRules(out.rules, [], rulesetLabel(out));

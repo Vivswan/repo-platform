@@ -268,6 +268,29 @@ describe("hardening the merged document (the choke-point)", () => {
     expect(main?.rules).toEqual([{ type: "deletion" }]);
   });
 
+  test("a mapping under 'rulesets' is not a ruleset entry (malformed input passes through)", () => {
+    // rulesets must be an ARRAY; a mapping there used to draw the
+    // ruleset-entry treatment and a diagnostic naming a ruleset that does
+    // not exist. Hardening now leaves the malformed shape for the schema
+    // validation to reject honestly.
+    const merged = mergeSettingsLayers(
+      { rulesets: { rules: [{ type: "a" }, { type: "a" }] } } as never,
+      {},
+    ) as { rulesets: { rules: unknown[] } };
+    expect(merged.rulesets.rules).toEqual([{ type: "a" }, { type: "a" }]);
+  });
+
+  test("arrays nested deeper under 'rulesets' do not inherit the entry flag", () => {
+    // Only the DIRECT elements of the rulesets array are entries; a
+    // nested array's mappings used to inherit the flag at every depth and
+    // get their `rules` deduplicated as if they were entries.
+    const merged = mergeSettingsLayers(
+      { rulesets: [[{ name: "x", rules: [{ type: "a" }, { type: "a" }] }]] } as never,
+      {},
+    ) as { rulesets: unknown[] };
+    expect(merged.rulesets).toEqual([[{ name: "x", rules: [{ type: "a" }, { type: "a" }] }]]);
+  });
+
   test("a 'rules' key outside rulesets entirely is untouched", () => {
     const merged = mergeSettingsLayers({ repository: { rules: ["a", "a"] } }, {}) as Record<
       string,
