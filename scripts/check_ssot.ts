@@ -920,6 +920,7 @@ const rules: Rule[] = [
         "bun run ssot:check",
         "bun run generate:check",
         "bun run dogfood:check",
+        "bun run gitignore:topology",
         "bun .github/scripts/fleet/repos_registry.ts validate",
         "bun actions/validate-template/validate_generated_files.ts --self .",
         // The copier-render oracle for the generated dogfood copies: its

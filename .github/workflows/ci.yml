@@ -198,6 +198,10 @@ jobs:
         run: bun run generate:check
       - name: Check generated dogfood copies against their template twins
         run: bun run dogfood:check
+      # Offline and sub-second: fragments must match the manifests'
+      # gitignore_sources on the PR that edits them, not a week later.
+      - name: Check gitignore topology against the module manifests
+        run: bun run gitignore:topology
       - name: Check markdown is not hard-wrapped
         run: bun run wrap:check
 
