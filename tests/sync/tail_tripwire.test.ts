@@ -1,16 +1,19 @@
 // tail_tripwire.ts: the post-stamp defense-in-depth check that no split
 // file's repository-owned half lost non-blank lines it held at the
-// target's HEAD. The script-level tests build a real git repo whose HEAD
-// carries both the previous file copies and the previous manifest, then
-// overwrite the working tree with the "delivered" state - exactly the
-// shape the sync leg hands the tripwire.
+// target's HEAD, across both split grammars (tail-marker, bounded-region)
+// and legacy pre-grammar HEAD manifests. The script-level tests build a
+// real git repo whose HEAD carries both the previous file copies and the
+// previous manifest, then overwrite the working tree with the "delivered"
+// state - exactly the shape the sync leg hands the tripwire.
 
 import { describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import type { SplitEntry } from "../../.github/scripts/sync/preserve_local_content.ts";
 import {
   compareHalves,
+  headSplitEntries,
   missingLines,
   renderReport,
   repoOwnedHalf,
@@ -20,20 +23,67 @@ const script = join(import.meta.dir, "../../.github/scripts/sync/tail_tripwire.t
 
 const SENTINEL = "<!-- repo-platform:local-section -->";
 const MANIFEST_NAME = ".github/repo-platform-manifest.json";
+const LOCAL_BEGIN = "# BEGIN REPOSITORY LOCAL";
+const LOCAL_END = "# END REPOSITORY LOCAL";
+const MANAGED_BEGIN = "# BEGIN REPO-PLATFORM MANAGED";
+const MANAGED_END = "# END REPO-PLATFORM MANAGED";
 
 const agentsHead = `# AGENTS.md\n\nold managed guidance\n\n${SENTINEL}\n\n## Project docs\n\nrepo-local instructions\n`;
 const agentsDelivered = `# AGENTS.md\n\nfresh managed guidance\n\n${SENTINEL}\n\n## Project docs\n\nrepo-local instructions\n`;
 
-type Entry = { class: string; marker?: string; managed?: string };
-
-function manifestText(files: Record<string, Entry>): string {
-  return `${JSON.stringify({ files }, null, 2)}\n`;
+/** A .gitignore-shaped file: local region, then the managed section. */
+function regionFile(bodyLines: string[], managedLines: string[]): string {
+  return `${LOCAL_BEGIN}\n${bodyLines.map((l) => `${l}\n`).join("")}${LOCAL_END}\n\n${MANAGED_BEGIN}\n${managedLines.map((l) => `${l}\n`).join("")}${MANAGED_END}\n`;
 }
 
-const splitAbove = (marker: string = SENTINEL): Entry => ({
+/** SplitEntry builders (the parsed shape splitEntries produces). */
+function tailEntry(path = "AGENTS.md", marker: string = SENTINEL): SplitEntry {
+  return { path, grammar: "tail-marker", marker };
+}
+function regionEntry(
+  path = ".gitignore",
+  markers: { begin: string; end: string; managedBegin: string; managedEnd: string } = {
+    begin: LOCAL_BEGIN,
+    end: LOCAL_END,
+    managedBegin: MANAGED_BEGIN,
+    managedEnd: MANAGED_END,
+  },
+): SplitEntry {
+  return {
+    path,
+    grammar: "bounded-region",
+    marker: markers.managedBegin,
+    begin: markers.begin,
+    end: markers.end,
+    all: [markers.begin, markers.end, markers.managedBegin, markers.managedEnd],
+  };
+}
+const asHead = (entry: SplitEntry) => ({ kind: "grammar", entry }) as const;
+
+/** Manifest JSON builders (the raw shape the manifest files carry). */
+type RawEntry = Record<string, unknown>;
+function manifestText(files: Record<string, RawEntry>): string {
+  return `${JSON.stringify({ files }, null, 2)}\n`;
+}
+const rawTail = (marker: string = SENTINEL): RawEntry => ({
   class: "split",
+  grammar: "tail-marker",
   marker,
   managed: "above",
+});
+const rawRegion = (): RawEntry => ({
+  class: "split",
+  grammar: "bounded-region",
+  marker: MANAGED_BEGIN,
+  managed: "below",
+  managed_end: MANAGED_END,
+  local_begin: LOCAL_BEGIN,
+  local_end: LOCAL_END,
+});
+const rawLegacy = (marker: string, managed: "above" | "below"): RawEntry => ({
+  class: "split",
+  marker,
+  managed,
 });
 
 function gitFreeEnv(): Record<string, string> {
@@ -96,11 +146,7 @@ function runScript(
   const reportPath = join(root, "..", "tail-shrank.md");
   const proc = Bun.spawnSync(
     ["bun", script, "--report", reportPath, "--root", root, ...extraArgs],
-    {
-      env: gitFreeEnv(),
-      stdout: "pipe",
-      stderr: "pipe",
-    },
+    { env: gitFreeEnv(), stdout: "pipe", stderr: "pipe" },
   );
   return {
     exitCode: proc.exitCode,
@@ -111,22 +157,61 @@ function runScript(
 }
 
 describe("repoOwnedHalf", () => {
-  test("managed above: the half below the marker line", () => {
-    expect(repoOwnedHalf(`managed\n${SENTINEL}\ntail\n`, SENTINEL, "above")).toBe("tail\n");
+  test("tail-marker: the half below the marker line", () => {
+    expect(repoOwnedHalf(`managed\n${SENTINEL}\ntail\n`, tailEntry())).toBe("tail\n");
   });
 
-  test("managed below: the half above the marker line", () => {
-    expect(repoOwnedHalf("local\n\n# MARKER\nmanaged\n", "# MARKER", "below")).toBe("local\n\n");
-  });
-
-  test("missing marker line means no honest split", () => {
-    expect(repoOwnedHalf("no marker here\n", SENTINEL, "above")).toBeNull();
-  });
-
-  test("managed and repo-owned halves partition the content exactly", () => {
+  test("tail-marker: managed and repo-owned halves partition the content exactly", () => {
     const content = `a\n${SENTINEL}\nb\n`;
-    expect(repoOwnedHalf(content, SENTINEL, "above")).toBe("b\n");
-    expect(`a\n${SENTINEL}\n${repoOwnedHalf(content, SENTINEL, "above")}`).toBe(content);
+    expect(repoOwnedHalf(content, tailEntry())).toBe("b\n");
+    expect(`a\n${SENTINEL}\n${repoOwnedHalf(content, tailEntry())}`).toBe(content);
+  });
+
+  test("tail-marker: missing marker line means no honest split", () => {
+    expect(repoOwnedHalf("no marker here\n", tailEntry())).toBeNull();
+  });
+
+  test("bounded-region: the local region body, not everything above the managed marker", () => {
+    const content = regionFile(["keep-me"], ["*.new"]);
+    expect(repoOwnedHalf(content, regionEntry())).toBe("keep-me\n");
+  });
+
+  test("bounded-region: a duplicated region marker is unlocatable, never guessed", () => {
+    const content = `${LOCAL_BEGIN}\nbody\n${LOCAL_END}\n${LOCAL_BEGIN}\n${LOCAL_END}\n${MANAGED_BEGIN}\n${MANAGED_END}\n`;
+    expect(repoOwnedHalf(content, regionEntry())).toBeNull();
+  });
+});
+
+describe("headSplitEntries", () => {
+  test("parses a grammar-bearing manifest strictly", () => {
+    const map = headSplitEntries(
+      manifestText({ "AGENTS.md": rawTail(), ".gitignore": rawRegion() }),
+      "t",
+    );
+    expect(map.get("AGENTS.md")).toEqual({ kind: "grammar", entry: tailEntry() });
+    expect(map.get(".gitignore")?.kind).toBe("grammar");
+  });
+
+  test("falls back to legacy marker/managed pairs on a pre-grammar manifest", () => {
+    const map = headSplitEntries(
+      manifestText({
+        "AGENTS.md": rawLegacy(SENTINEL, "above"),
+        ".gitignore": rawLegacy(MANAGED_BEGIN, "below"),
+      }),
+      "t",
+    );
+    expect(map.get("AGENTS.md")).toEqual({
+      kind: "legacy",
+      path: "AGENTS.md",
+      marker: SENTINEL,
+      managed: "above",
+    });
+    expect(map.get(".gitignore")?.kind).toBe("legacy");
+  });
+
+  test("an unknown grammar is never guessed at - it throws (fail closed)", () => {
+    const files = { "AGENTS.md": { class: "split", grammar: "mystery", marker: SENTINEL } };
+    expect(() => headSplitEntries(manifestText(files), "t")).toThrow(/refusing to guess/);
   });
 });
 
@@ -160,14 +245,12 @@ describe("missingLines", () => {
 
 describe("compareHalves", () => {
   test("null when the delivered half keeps every line", () => {
-    expect(
-      compareHalves("AGENTS.md", splitAbove(), splitAbove(), agentsHead, agentsDelivered),
-    ).toBeNull();
+    expect(compareHalves(tailEntry(), asHead(tailEntry()), agentsHead, agentsDelivered)).toBeNull();
   });
 
   test("shrank when a line vanished", () => {
     const delivered = `# AGENTS.md\n\nfresh managed guidance\n\n${SENTINEL}\n\n## Project docs\n`;
-    expect(compareHalves("AGENTS.md", splitAbove(), splitAbove(), agentsHead, delivered)).toEqual({
+    expect(compareHalves(tailEntry(), asHead(tailEntry()), agentsHead, delivered)).toEqual({
       path: "AGENTS.md",
       kind: "shrank",
       missing: ["repo-local instructions"],
@@ -179,20 +262,82 @@ describe("compareHalves", () => {
     const head = `old managed\n${oldMarker}\nrepo tail\n`;
     const delivered = `new managed\n${SENTINEL}\nrepo tail\n`;
     expect(
-      compareHalves("AGENTS.md", splitAbove(), splitAbove(oldMarker), head, delivered),
+      compareHalves(tailEntry(), asHead(tailEntry("AGENTS.md", oldMarker)), head, delivered),
     ).toBeNull();
     // Splitting HEAD with the NEW marker instead would be the mis-split
     // this design rules out: the old copy has no such line.
-    expect(compareHalves("AGENTS.md", splitAbove(), splitAbove(), head, delivered)?.kind).toBe(
+    expect(compareHalves(tailEntry(), asHead(tailEntry()), head, delivered)?.kind).toBe(
       "unverifiable",
     );
   });
 
-  test("a delivered copy without its manifest marker is unverifiable", () => {
+  test("bounded-region: bodies compare, region scaffolding does not", () => {
+    const head = regionFile(["local-one", "local-two"], ["*.old"]);
+    const kept = regionFile(["local-two", "local-one"], ["*.new"]);
+    expect(compareHalves(regionEntry(), asHead(regionEntry()), head, kept)).toBeNull();
+    const shrank = regionFile(["local-one"], ["*.new"]);
+    expect(compareHalves(regionEntry(), asHead(regionEntry()), head, shrank)).toEqual({
+      path: ".gitignore",
+      kind: "shrank",
+      missing: ["local-two"],
+    });
+  });
+
+  test("bounded-region: HEAD splits by ITS declared region markers (rename safety)", () => {
+    const oldMarkers = {
+      begin: "# OLD LOCAL BEGIN",
+      end: "# OLD LOCAL END",
+      managedBegin: "# OLD MANAGED BEGIN",
+      managedEnd: "# OLD MANAGED END",
+    };
+    const head = `${oldMarkers.begin}\nbody-line\n${oldMarkers.end}\n${oldMarkers.managedBegin}\n${oldMarkers.managedEnd}\n`;
+    const delivered = regionFile(["body-line"], ["*.new"]);
+    expect(
+      compareHalves(regionEntry(), asHead(regionEntry(".gitignore", oldMarkers)), head, delivered),
+    ).toBeNull();
+    // Splitting HEAD with the NEW region markers would find no region.
+    expect(compareHalves(regionEntry(), asHead(regionEntry()), head, delivered)?.kind).toBe(
+      "unverifiable",
+    );
+  });
+
+  test("legacy 'above' pair draws the tail-marker boundary: half against half", () => {
+    const head: Parameters<typeof compareHalves>[1] = {
+      kind: "legacy",
+      path: "AGENTS.md",
+      marker: SENTINEL,
+      managed: "above",
+    };
+    expect(compareHalves(tailEntry(), head, agentsHead, agentsDelivered)).toBeNull();
+    const shrank = `# AGENTS.md\n\nfresh managed guidance\n\n${SENTINEL}\n`;
+    expect(compareHalves(tailEntry(), head, agentsHead, shrank)?.kind).toBe("shrank");
+  });
+
+  test("legacy 'below' vs bounded-region: scaffolding never false-fires, lost bodies still do", () => {
+    const head: Parameters<typeof compareHalves>[1] = {
+      kind: "legacy",
+      path: ".gitignore",
+      marker: MANAGED_BEGIN,
+      managed: "below",
+    };
+    // The legacy half (everything above MANAGED_BEGIN) includes the
+    // LOCAL_BEGIN/END marker lines; they survive in the delivered FILE
+    // even though the bounded-region body excludes them.
+    const headCopy = regionFile(["keep-me"], ["*.old"]);
+    const kept = regionFile(["keep-me"], ["*.new"]);
+    expect(compareHalves(regionEntry(), head, headCopy, kept)).toBeNull();
+    const dropped = regionFile([], ["*.new"]);
+    expect(compareHalves(regionEntry(), head, headCopy, dropped)).toEqual({
+      path: ".gitignore",
+      kind: "shrank",
+      missing: ["keep-me"],
+    });
+  });
+
+  test("a delivered copy that does not split by the post-sync manifest is unverifiable", () => {
     const finding = compareHalves(
-      "AGENTS.md",
-      splitAbove(),
-      splitAbove(),
+      tailEntry(),
+      asHead(tailEntry()),
       agentsHead,
       "render lost its marker\n",
     );
@@ -226,7 +371,7 @@ describe("renderReport", () => {
     expect(report).toContain("[clipped]");
   });
 
-  test("an enormous unverifiable reason (HEAD-manifest text) is bounded too", () => {
+  test("an enormous unverifiable reason is bounded too", () => {
     const report = renderReport([
       { path: "AGENTS.md", kind: "unverifiable", reason: `marker ${"y".repeat(70000)} missing` },
     ]);
@@ -261,7 +406,7 @@ describe("renderReport", () => {
 });
 
 describe("tail_tripwire script", () => {
-  const headManifest = manifestText({ "AGENTS.md": splitAbove() });
+  const headManifest = manifestText({ "AGENTS.md": rawTail() });
 
   test("clear when the repository-owned half survives a managed-half change", () => {
     const root = makeTarget(
@@ -297,35 +442,61 @@ describe("tail_tripwire script", () => {
     const head = `old managed\n${oldMarker}\nrepo tail line\n`;
     const delivered = `new managed\n${SENTINEL}\nrepo tail line\n`;
     const root = makeTarget(
-      { "AGENTS.md": head, [MANIFEST_NAME]: manifestText({ "AGENTS.md": splitAbove(oldMarker) }) },
-      { "AGENTS.md": delivered, [MANIFEST_NAME]: manifestText({ "AGENTS.md": splitAbove() }) },
+      { "AGENTS.md": head, [MANIFEST_NAME]: manifestText({ "AGENTS.md": rawTail(oldMarker) }) },
+      { "AGENTS.md": delivered, [MANIFEST_NAME]: manifestText({ "AGENTS.md": rawTail() }) },
     );
     const result = runScript(root);
     expect(result.exitCode).toBe(0);
     expect(result.report).toBe("");
   });
 
-  test("managed-below entries guard the half above the marker (.gitignore shape)", () => {
-    const marker = "# BEGIN REPO-PLATFORM MANAGED";
-    const gitignoreEntry = manifestText({
-      ".gitignore": { class: "split", marker, managed: "below" },
-    });
-    const head = `local-one\nlocal-two\n\n${marker}\n*.old\n`;
-    const kept = `local-two\nlocal-one\n${marker}\n*.new\n`;
-    const shrank = `local-one\n${marker}\n*.new\n`;
+  test("bounded-region entries split by their region markers, not the managed marker alone", () => {
+    const regionManifest = manifestText({ ".gitignore": rawRegion() });
+    const head = regionFile(["local-one", "local-two"], ["*.old"]);
+    const kept = regionFile(["local-two", "local-one"], ["*.new"]);
     const keptRoot = makeTarget(
-      { ".gitignore": head, [MANIFEST_NAME]: gitignoreEntry },
-      { ".gitignore": kept, [MANIFEST_NAME]: gitignoreEntry },
+      { ".gitignore": head, [MANIFEST_NAME]: regionManifest },
+      { ".gitignore": kept, [MANIFEST_NAME]: regionManifest },
     );
     expect(runScript(keptRoot).report).toBe("");
+    const shrank = regionFile(["local-one"], ["*.new"]);
     const shrankRoot = makeTarget(
-      { ".gitignore": head, [MANIFEST_NAME]: gitignoreEntry },
-      { ".gitignore": shrank, [MANIFEST_NAME]: gitignoreEntry },
+      { ".gitignore": head, [MANIFEST_NAME]: regionManifest },
+      { ".gitignore": shrank, [MANIFEST_NAME]: regionManifest },
     );
     const result = runScript(shrankRoot);
     expect(result.exitCode).toBe(0);
     expect(result.report).toContain("`.gitignore`");
     expect(result.report).toContain("local-two");
+  });
+
+  test("a legacy pre-grammar HEAD manifest verifies without false fires", () => {
+    // The first post-grammar sync of every fleet repo hits exactly this
+    // shape: HEAD's manifest declares only marker/managed pairs.
+    const legacyManifest = manifestText({
+      "AGENTS.md": rawLegacy(SENTINEL, "above"),
+      ".gitignore": rawLegacy(MANAGED_BEGIN, "below"),
+    });
+    const newManifest = manifestText({ "AGENTS.md": rawTail(), ".gitignore": rawRegion() });
+    const gitignoreHead = regionFile(["keep-me"], ["*.old"]);
+    const root = makeTarget(
+      { "AGENTS.md": agentsHead, ".gitignore": gitignoreHead, [MANIFEST_NAME]: legacyManifest },
+      {
+        "AGENTS.md": agentsDelivered,
+        ".gitignore": regionFile(["keep-me"], ["*.new"]),
+        [MANIFEST_NAME]: newManifest,
+      },
+    );
+    const result = runScript(root);
+    expect(result.exitCode).toBe(0);
+    expect(result.report).toBe("");
+    // And a genuinely dropped local body line still fires through the
+    // legacy path.
+    const shrankRoot = makeTarget(
+      { ".gitignore": gitignoreHead, [MANIFEST_NAME]: legacyManifest },
+      { ".gitignore": regionFile([], ["*.new"]), [MANIFEST_NAME]: newManifest },
+    );
+    expect(runScript(shrankRoot).report).toContain("keep-me");
   });
 
   test("non-UTF-8 tail bytes compare byte-for-byte and never false-fire", () => {
@@ -407,6 +578,34 @@ describe("tail_tripwire script", () => {
     const result = runScript(root);
     expect(result.exitCode).toBe(0);
     expect(result.report).toContain("no usable ownership manifest");
+  });
+
+  test("an unknown grammar in the HEAD manifest is unverifiable, not guessed", () => {
+    const mystery = manifestText({
+      "AGENTS.md": { class: "split", grammar: "mystery", marker: SENTINEL },
+    });
+    const root = makeTarget(
+      { "AGENTS.md": agentsHead, [MANIFEST_NAME]: mystery },
+      { "AGENTS.md": agentsDelivered, [MANIFEST_NAME]: headManifest },
+    );
+    const result = runScript(root);
+    expect(result.exitCode).toBe(0);
+    expect(result.report).toContain("no usable ownership manifest");
+  });
+
+  test("an unknown grammar in the POST-SYNC manifest is a broken input and goes red", () => {
+    // Our own render produced this manifest; refusing to guess matches
+    // preserve_local_content's discipline.
+    const mystery = manifestText({
+      "AGENTS.md": { class: "split", grammar: "mystery", marker: SENTINEL },
+    });
+    const root = makeTarget(
+      { "AGENTS.md": agentsHead, [MANIFEST_NAME]: headManifest },
+      { "AGENTS.md": agentsDelivered, [MANIFEST_NAME]: mystery },
+    );
+    const result = runScript(root);
+    expect(result.exitCode).not.toBe(0);
+    expect(result.stderr).toContain("refuses to guess");
   });
 
   test("a delivered copy missing from the working tree is unverifiable", () => {

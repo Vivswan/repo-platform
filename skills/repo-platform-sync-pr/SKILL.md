@@ -37,7 +37,7 @@ gh pr list --head automation/repo-platform --json number,title,url
 gh pr view <number>
 ```
 
-If the staging list is empty, try `--head automation/repo-platform-latest` (the repo may follow the latest channel). Exactly one open sync PR should exist per repo; when none exists, or more than one does, stop and report that instead of guessing - a missing PR usually means the last sync run failed or delivered nothing, and a duplicate means something opened a PR out of band.
+Exactly one open sync PR should exist per repo; when none exists, or more than one does, stop and report that instead of guessing - a missing PR usually means the last sync run failed or delivered nothing, and a duplicate means something opened a PR out of band.
 
 ## Triage: read the PR body top to bottom
 
