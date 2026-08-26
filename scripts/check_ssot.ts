@@ -24,7 +24,13 @@
 import { existsSync, lstatSync, readdirSync, readFileSync, readlinkSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
-import { centralIdentityIssues } from "../.github/scripts/fleet/validate_central_settings.ts";
+import { identityKeyIssues } from "../.github/scripts/fleet/merge_settings_layers.ts";
+import {
+  managedRulesets,
+  privateReportLabel,
+  releasePleaseLabels,
+  staticLabels,
+} from "../.github/scripts/fleet/render_managed_settings.ts";
 import { CHANNELS } from "../.github/scripts/shared/channels.ts";
 import { captureName } from "../.github/scripts/sync/run_hidden.ts";
 import { dependabotLabels } from "./compose_template.ts";
@@ -412,56 +418,30 @@ export interface Label {
   description: string;
 }
 
-export function parseLabels(yamlText: string, where: string): Label[] {
-  const doc = asRecord(parseYaml(yamlText), where);
-  const labels = doc.labels;
-  if (!Array.isArray(labels)) throw new Error(`${where}: no labels list`);
-  return labels.map((entry) => {
-    const rec = asRecord(entry, `${where} label`);
-    for (const key of ["name", "color", "description"] as const) {
-      if (typeof rec[key] !== "string") {
-        throw new Error(`${where}: label ${JSON.stringify(rec.name ?? "?")} has no ${key}`);
-      }
-    }
-    return {
-      name: String(rec.name),
-      color: String(rec.color),
-      description: String(rec.description),
-    };
-  });
+/** Every label tuple the settings baseline generator can emit for ANY
+ *  selection (static, private report marker, release-please, dependabot -
+ *  the dependabot tuples from the composer's own derivation), tracking
+ *  labels excluded (they render from per-repo answers). The single roster
+ *  the doc-constant and issue-form rules key on. */
+function managedLabelRoster(): Label[] {
+  return [
+    ...staticLabels(),
+    privateReportLabel(),
+    ...releasePleaseLabels(),
+    ...dependabotLabels(loadManifests()).map(
+      ({ name, color, description }): Label => ({ name, color, description }),
+    ),
+  ];
 }
 
-function templateLabelRoster(): Label[] {
-  const vars = jinjaVars();
-  const settings = placeholderJinja(
-    normalizeJinja(read("templates/settings-sync/.github/settings.yml.jinja"), vars),
-  );
-  const fragment = placeholderJinja(
-    normalizeJinja(read("templates/release-please/fragments/settings-labels.jinja"), vars),
-  );
-  // The dependabot toolchain labels are spliced in at compose time from the
-  // module manifests; read them from the composer's own derivation.
-  const manifestLabels = dependabotLabels(loadManifests()).map(
-    ({ name, color, description }): Label => ({ name, color, description }),
-  );
-  return parseLabels(settings, "settings.yml.jinja").concat(
-    manifestLabels,
-    parseLabels(`labels:\n${fragment}`, "settings-labels.jinja"),
-  );
-}
-
-function centralLabelRoster(): Label[] {
-  return parseLabels(read("settings/repos/repo-platform.yml"), "settings/repos/repo-platform.yml");
-}
-
-/** The identity keys the settings-sync template renders unconditionally
- *  for module repos; the key list lives in the fleet preflight
- *  (centralIdentityIssues), which checks every central file - this wrapper
- *  applies the same contract to repo-platform's own file so the two
- *  checkers cannot drift apart. */
-export function centralIdentityMismatches(repository: Record<string, unknown>): Mismatch[] {
-  return centralIdentityIssues(repository).map((issue) => ({
-    file: `settings/repos/repo-platform.yml repository.${issue.key}`,
+/** The identity keys the settings-sync starter seeds (description,
+ *  homepage, topics, private); the key list lives with the merge dialect
+ *  (identityKeyIssues) - this wrapper applies the same contract to
+ *  repo-platform's own .github/settings.yml so the two checkers cannot
+ *  drift apart. */
+export function settingsIdentityMismatches(repository: Record<string, unknown>): Mismatch[] {
+  return identityKeyIssues(repository).map((issue) => ({
+    file: `.github/settings.yml repository.${issue.key}`,
     expected: issue.expected,
     got: issue.got,
   }));
@@ -762,18 +742,15 @@ const rules: Rule[] = [
         ...setMismatch(".github/workflows/build-branches.yml dispatch options", reference, options),
       );
 
-      const central = asRecord(
-        parseYaml(read("settings/repos/repo-platform.yml")),
-        "repo-platform.yml",
-      );
-      const ruleset = (central.rulesets as Record<string, unknown>[]).find(
+      const own = asRecord(parseYaml(read(".github/settings.yml")), ".github/settings.yml");
+      const ruleset = (own.rulesets as Record<string, unknown>[]).find(
         (r) => r.name === "build-branches",
       );
-      if (!ruleset) throw new Error("settings/repos/repo-platform.yml: no build-branches ruleset");
+      if (!ruleset) throw new Error(".github/settings.yml: no build-branches ruleset");
       const conditions = asRecord(asRecord(ruleset.conditions, "conditions").ref_name, "ref_name");
       mismatches.push(
         ...setMismatch(
-          "settings/repos/repo-platform.yml build-branches ruleset",
+          ".github/settings.yml build-branches ruleset",
           reference,
           (conditions.include as unknown[]).map(String),
         ),
@@ -1334,12 +1311,21 @@ const rules: Rule[] = [
   },
 
   {
-    name: "settings-blocks",
+    // The settings-sync starter and repo-platform's own .github/settings.yml
+    // are the two independently-authored repo layers this repo controls;
+    // the managed baseline itself is TypeScript data
+    // (render_managed_settings.ts) with unit tests, so no baseline pair
+    // exists to compare here. This rule pins what the layers must declare:
+    // the starter seeds all four identity keys, repo-platform's own file
+    // declares them with valid shapes, and its hand-written non-bypassable
+    // override stays byte-equivalent to the baseline entry it replaces
+    // wholesale (a drifted override would silently weaken the ruleset the
+    // baseline promises).
+    name: "settings-starter",
     run: () => {
       const mismatches: Mismatch[] = [];
       const vars = jinjaVars();
-      const defaults = asRecord(parseYaml(read("settings/defaults.yml")), "defaults.yml");
-      const jinja = asRecord(
+      const starter = asRecord(
         parseYaml(
           placeholderJinja(
             normalizeJinja(read("templates/settings-sync/.github/settings.yml.jinja"), vars),
@@ -1347,97 +1333,53 @@ const rules: Rule[] = [
         ),
         "settings.yml.jinja",
       );
-      const central = asRecord(
-        parseYaml(read("settings/repos/repo-platform.yml")),
-        "repo-platform.yml",
-      );
-
-      const sharedFields = asRecord(defaults.repository, "defaults repository");
-      if (Object.keys(sharedFields).length === 0) {
-        throw new Error("settings/defaults.yml: repository block is empty - anchor lost");
-      }
-      // List-valued sections live per repo, never in defaults (arrays
-      // REPLACE on merge), and the central preflight treats an absent
-      // labels section as unmanaged - a labels or rulesets block here
-      // would silently break both.
-      for (const section of ["labels", "rulesets"]) {
-        if (section in defaults) {
+      const starterRepository = asRecord(starter.repository, "settings.yml.jinja repository");
+      for (const key of ["description", "homepage", "topics", "private"]) {
+        if (!(key in starterRepository)) {
           mismatches.push({
-            file: "settings/defaults.yml",
-            expected: `no ${section} section (list sections live in each repo's own settings file)`,
+            file: "templates/settings-sync/.github/settings.yml.jinja",
+            expected: `repository.${key} seeded from the copier answers`,
+            got: "missing - the starter must declare all four identity keys",
+          });
+        }
+      }
+      // The starter is a repo layer: a labels or rulesets section in it
+      // would seed every new repo with a shadowing copy of baseline
+      // entries (frozen at render time, overriding baseline evolution).
+      for (const section of ["labels", "rulesets"]) {
+        if (starter[section] !== undefined) {
+          mismatches.push({
+            file: "templates/settings-sync/.github/settings.yml.jinja",
+            expected: `no ${section} section (the managed baseline supplies it; the starter only shows commented examples)`,
             got: "declared",
           });
         }
       }
-      const jinjaRepository = asRecord(jinja.repository, "settings.yml.jinja repository");
-      for (const [key, value] of Object.entries(sharedFields)) {
-        if (canonical(jinjaRepository[key]) !== canonical(value)) {
-          mismatches.push({
-            file: `templates/settings-sync/.github/settings.yml.jinja repository.${key}`,
-            expected: canonical(value),
-            got: canonical(jinjaRepository[key]),
-          });
-        }
-      }
 
-      // Template-only repository keys (private, description) have no
-      // defaults.yml counterpart, so the loop above never sees them; assert
-      // the central file declares them the way the template guarantees
-      // them for module repos.
-      const centralRepository = asRecord(central.repository, "repo-platform.yml repository");
-      mismatches.push(...centralIdentityMismatches(centralRepository));
+      const own = asRecord(parseYaml(read(".github/settings.yml")), ".github/settings.yml");
+      mismatches.push(
+        ...settingsIdentityMismatches(asRecord(own.repository, ".github/settings.yml repository")),
+      );
 
-      // security_and_analysis is template-only too (public-only: defaults
-      // reach private repos, which reject the block), so it needs the same
-      // template<->central lock as the identity keys.
-      if (jinjaRepository.security_and_analysis === undefined) {
-        throw new Error("settings.yml.jinja: security_and_analysis block missing - anchor lost");
+      const ownNonBypassable = (own.rulesets as Record<string, unknown>[] | undefined)?.find(
+        (r) => r.name === "non-bypassable",
+      );
+      if (!ownNonBypassable) {
+        throw new Error(".github/settings.yml: no non-bypassable ruleset - anchor lost");
       }
-      if (
-        canonical(jinjaRepository.security_and_analysis) !==
-        canonical(centralRepository.security_and_analysis)
-      ) {
+      const baseline = managedRulesets(
+        { modules: [], private: false, trackingLabels: [] },
+        loadManifests(),
+      ).find((r) => r.name === "non-bypassable");
+      if (!baseline) {
+        throw new Error("render_managed_settings.ts: no non-bypassable ruleset - anchor lost");
+      }
+      if (canonical(ownNonBypassable) !== canonical(baseline)) {
         mismatches.push({
-          file: "settings/repos/repo-platform.yml repository.security_and_analysis",
-          expected: canonical(jinjaRepository.security_and_analysis),
-          got: canonical(centralRepository.security_and_analysis),
+          file: ".github/settings.yml non-bypassable ruleset",
+          expected: `${canonical(baseline)} (the baseline entry this override replaces wholesale)`,
+          got: canonical(ownNonBypassable),
         });
-      }
-
-      const namedRuleset = (doc: Record<string, unknown>, name: string, where: string) => {
-        const matches = (doc.rulesets as Record<string, unknown>[]).filter((r) => r.name === name);
-        if (matches.length === 0) throw new Error(`${where}: no ${name} ruleset - anchor lost`);
-        if (matches.length > 1) throw new Error(`${where}: duplicate ${name} rulesets`);
-        return matches[0] as Record<string, unknown>;
-      };
-      for (const name of ["main", "non-bypassable"]) {
-        const tplRuleset = namedRuleset(jinja, name, "settings.yml.jinja");
-        const centralRuleset = namedRuleset(central, name, "settings/repos/repo-platform.yml");
-        if (canonical(tplRuleset) !== canonical(centralRuleset)) {
-          mismatches.push({
-            file: `settings/repos/repo-platform.yml ${name} ruleset`,
-            expected: canonical(tplRuleset),
-            got: canonical(centralRuleset),
-          });
-        }
-        // The non-bypassable ruleset's whole point is that no actor is
-        // exempt, and only an EXPLICIT empty list keeps that healable: an
-        // omitted key is invisible to the applier's drift detection and
-        // preserved by its update.
-        if (name === "non-bypassable") {
-          for (const [where, ruleset] of [
-            ["templates/settings-sync/.github/settings.yml.jinja", tplRuleset],
-            ["settings/repos/repo-platform.yml", centralRuleset],
-          ] as const) {
-            if (canonical(ruleset.bypass_actors) !== canonical([])) {
-              mismatches.push({
-                file: `${where} non-bypassable ruleset`,
-                expected: "bypass_actors: [] (explicit empty list)",
-                got: canonical(ruleset.bypass_actors),
-              });
-            }
-          }
-        }
       }
       return mismatches;
     },
@@ -1447,9 +1389,12 @@ const rules: Rule[] = [
     name: "labels",
     run: () => {
       const mismatches: Mismatch[] = [];
-      const template = templateLabelRoster();
-      const central = centralLabelRoster();
-      const templateByName = new Map(template.map((label) => [label.name, label]));
+      // The baseline generator is the label roster's single home; this
+      // regression tripwire keeps the hand-maintained tuples from quietly
+      // losing a member the fleet's tools recreate (dependabot, the
+      // release machinery) - losing one restarts the nightly
+      // delete/recreate loop the generator exists to kill.
+      const rosterNames = new Set(managedLabelRoster().map((label) => label.name));
       const required = [
         "dependencies",
         "github_actions",
@@ -1457,37 +1402,28 @@ const rules: Rule[] = [
         "bug",
         "enhancement",
         "fix-lint",
+        "settings-as-code-report",
         "autorelease: pending",
         "autorelease: tagged",
         "release-blocker",
         "release-override",
       ];
       for (const name of required) {
-        if (!templateByName.has(name) || !central.some((label) => label.name === name)) {
+        if (!rosterNames.has(name)) {
           mismatches.push({
-            file: "label rosters",
-            expected: `label '${name}' in both the settings-sync template and settings/repos/repo-platform.yml`,
-            got: "missing from at least one roster",
-          });
-        }
-      }
-      for (const label of central) {
-        const counterpart = templateByName.get(label.name);
-        if (counterpart && canonical(counterpart) !== canonical(label)) {
-          mismatches.push({
-            file: `settings/repos/repo-platform.yml label '${label.name}'`,
-            expected: canonical(counterpart),
-            got: canonical(label),
+            file: ".github/scripts/fleet/render_managed_settings.ts",
+            expected: `label '${name}' in the managed roster`,
+            got: "missing",
           });
         }
       }
 
       // Tracking-label streams: each manifest's tracking_label block is the
       // single source; the hand-written copier question is anchored back to
-      // it here (the settings-labels block itself is composed from the
-      // manifest, so it cannot drift), and the create-tuple carriers (the
-      // action's defaults for the fuzz stream, the starter's overrides for
-      // the nightly stream) below.
+      // it here (the baseline generator renders the stream labels from the
+      // same manifest tuples, so it cannot drift), and the create-tuple
+      // carriers (the action's defaults for the fuzz stream, the starter's
+      // overrides for the nightly stream) below.
       for (const { module, tracking } of trackingManifests()) {
         const question = asRecord(copierConfig()[tracking.answer], `copier.yml ${tracking.answer}`);
         if (String(question.default) !== tracking.default) {
@@ -1590,8 +1526,7 @@ const rules: Rule[] = [
     name: "issue-labels",
     run: () => {
       const mismatches: Mismatch[] = [];
-      const templateNames = new Set(templateLabelRoster().map((label) => label.name));
-      const centralNames = new Set(centralLabelRoster().map((label) => label.name));
+      const rosterNames = new Set(managedLabelRoster().map((label) => label.name));
       const forms = walkFiles("templates/issue-templates").map((f) => f.path);
       let sawLabels = false;
       for (const rel of forms) {
@@ -1605,11 +1540,11 @@ const rules: Rule[] = [
         }
         sawLabels = true;
         for (const name of doc.labels.map(String)) {
-          if (!templateNames.has(name) || !centralNames.has(name)) {
+          if (!rosterNames.has(name)) {
             mismatches.push({
               file: rel,
-              expected: `label '${name}' declared in both settings label rosters`,
-              got: "missing from at least one roster",
+              expected: `label '${name}' declared in the managed settings roster (render_managed_settings.ts)`,
+              got: "missing - the label sync would delete what the issue form applies",
             });
           }
         }
@@ -1623,22 +1558,15 @@ const rules: Rule[] = [
     // The stale-pending guard in the release-please workflow queries and
     // names the autorelease labels as string literals. gh pr list exits 0
     // and empty for a label that does not exist, so a literal that drifts
-    // from the fragment roster degrades the guard to a permanent silent
-    // no-op - anchor the literals to the fragment here instead. Only the
-    // template side is checked: dogfood-parity already pins this repo's
+    // from the managed roster degrades the guard to a permanent silent
+    // no-op - anchor the literals to the baseline generator's
+    // release-please tuples here instead. Only the template side is
+    // checked: dogfood-parity already pins this repo's
     // .github/workflows/release.yml to it.
     name: "release-guard-labels",
     run: () => {
       const mismatches: Mismatch[] = [];
-      const fragment = placeholderJinja(
-        normalizeJinja(
-          read("templates/release-please/fragments/settings-labels.jinja"),
-          jinjaVars(),
-        ),
-      );
-      const roster = new Set(
-        parseLabels(`labels:\n${fragment}`, "settings-labels.jinja").map((label) => label.name),
-      );
+      const roster = new Set(releasePleaseLabels().map((label) => label.name));
       const rel = "templates/release-please/.github/workflows/release.yml.jinja";
       const text = read(rel);
       const queried = mustMatch(
@@ -1658,8 +1586,8 @@ const rules: Rule[] = [
         if (!roster.has(name)) {
           mismatches.push({
             file: rel,
-            expected: `label '${name}' declared in templates/release-please/fragments/settings-labels.jinja`,
-            got: "not in the fragment roster",
+            expected: `label '${name}' declared by releasePleaseLabels (render_managed_settings.ts)`,
+            got: "not in the managed roster",
           });
         }
       }
@@ -1708,9 +1636,8 @@ const rules: Rule[] = [
         }
       }
 
-      const contexts = (text: string, where: string): string[] => {
-        const doc = asRecord(parseYaml(text), where);
-        const main = (doc.rulesets as Record<string, unknown>[]).find((r) => r.name === "main");
+      const contexts = (rulesets: Record<string, unknown>[], where: string): string[] => {
+        const main = rulesets.find((r) => r.name === "main");
         if (!main) throw new Error(`${where}: no main ruleset - anchor lost`);
         const checksRule = (main.rules as Record<string, unknown>[]).find(
           (rule) => rule.type === "required_status_checks",
@@ -1721,19 +1648,20 @@ const rules: Rule[] = [
           String(c.context),
         );
       };
-      for (const [text, where] of [
-        [
-          placeholderJinja(
-            normalizeJinja(read("templates/settings-sync/.github/settings.yml.jinja"), jinjaVars()),
-          ),
-          "templates/settings-sync/.github/settings.yml.jinja",
-        ],
-        [read("settings/repos/repo-platform.yml"), "settings/repos/repo-platform.yml"],
-      ] as const) {
-        mismatches.push(
-          ...setMismatch(`${where} required checks`, [gateName], contexts(text, where)),
-        );
-      }
+      // The baseline's main ruleset is the fleet's only home for the
+      // required-check context now; the validator's gate-name literal must
+      // match what it requires.
+      const baseline = managedRulesets(
+        { modules: [], private: false, trackingLabels: [] },
+        loadManifests(),
+      ) as Record<string, unknown>[];
+      mismatches.push(
+        ...setMismatch(
+          "render_managed_settings.ts main ruleset required checks",
+          [gateName],
+          contexts(baseline, "render_managed_settings.ts"),
+        ),
+      );
       return mismatches;
     },
   },
@@ -1976,10 +1904,11 @@ const rules: Rule[] = [
       // exact quoted shape `name` (`color`) / `name` (color `color`) -
       // a spannable gap would let a wrong hand-written color pass by
       // matching a backticked color later in the doc.
-      const roster = new Map(templateLabelRoster().map((label) => [label.name, label]));
+      const roster = new Map(managedLabelRoster().map((label) => [label.name, label]));
       for (const name of ["dependencies", "github_actions"]) {
         const label = roster.get(name);
-        if (!label) throw new Error(`settings.yml.jinja: label '${name}' vanished - anchor lost`);
+        if (!label)
+          throw new Error(`render_managed_settings.ts: label '${name}' vanished - anchor lost`);
         const joint = new RegExp(`\`${name}\` \\((?:color )?\`${label.color}\`\\)`);
         if (!joint.test(settingsProse)) {
           mismatches.push({

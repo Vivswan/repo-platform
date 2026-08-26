@@ -1,0 +1,91 @@
+---
+# Vivswan/repo-platform's OWN settings, applied by its settings-repos run
+# via Vivswan/github-settings-as-code. The managed baseline (the shared
+# repository policy block, the module-derived label roster, the fleet
+# rulesets) is computed by .github/scripts/fleet/render_managed_settings.ts
+# - for this operator repo from .repo-platform-answers.yml, since it is not
+# generated from the template - and this file deep-merges OVER it: keys
+# here win, labels and rulesets are name-keyed unions (an entry here
+# replaces the same-name baseline entry wholesale). Undeclared labels are
+# deleted against the MERGED roster; undeclared rulesets are left alone.
+
+repository:
+  description: Copier template + reusable workflows managing standards across Vivswan's repositories
+  # Declared empty so the apply owns the field: an out-of-band homepage
+  # URL is cleared on the next run.
+  homepage: ""
+  topics: copier, template, github-actions, reusable-workflows, standards
+  # Declared so the apply manages visibility; without it an out-of-band
+  # flip to private would never be healed.
+  private: false
+
+# Only this repository's OWN rulesets live here; the fleet-generic main
+# ruleset (all-green required check, PR gates) comes from the baseline.
+rulesets:
+  # Rules with an EMPTY bypass list: nobody - owner and admins included -
+  # can violate these on the default branch. The baseline carries the same
+  # ruleset; it is declared here too so the operator repo's copy stays
+  # visible and reviewable in-repo, and a name-keyed override replaces the
+  # baseline entry wholesale with identical content.
+  # Declared-empty bypass_actors on purpose: an omitted key is invisible
+  # to drift detection and preserved by the update, so the empty list is
+  # what lets the nightly apply heal an out-of-band bypass actor.
+  - name: non-bypassable
+    target: branch
+    enforcement: active
+    conditions:
+      ref_name:
+        include:
+          - "~DEFAULT_BRANCH"
+        exclude: []
+    rules:
+      - type: deletion
+      - type: required_linear_history
+    bypass_actors: []
+
+  # The generated build branches are append-only: the builder's plain pushes
+  # are fast-forwards and pass; force-pushes and deletion are blocked for
+  # everyone (no bypass actors on purpose).
+  - name: build-branches
+    target: branch
+    enforcement: active
+    conditions:
+      ref_name:
+        include:
+          - staging
+          - latest
+        exclude: []
+    rules:
+      - type: deletion
+      - type: non_fast_forward
+
+  # templates/vX.Y.Z build tags are the anchors downstream latest-channel
+  # repos record as _commit, and vX.Y.Z release tags are what their workflow
+  # `uses:` pins and sync validation checkouts reference; deleting or moving
+  # either breaks downstream repos, so both are immutable. Admins bypass,
+  # so deliberate tag cleanup doesn't require disabling the ruleset.
+  # No creation rule on purpose: build-branches creates templates/* tags
+  # with the workflow's GITHUB_TOKEN and release-please creates v* tags,
+  # and the admin bypass would not cover GITHUB_TOKEN (an app, not a
+  # role), so a creation rule would block both; an Integration bypass for
+  # github-actions would let ANY workflow create these tags. Pre-created
+  # impostor tags are caught in code instead: publish.ts refuses to skip a
+  # wrong existing tag, and sync/verify_build_provenance.ts proves every
+  # tag before it ships.
+  - name: build-tags
+    target: tag
+    enforcement: active
+    conditions:
+      ref_name:
+        include:
+          - templates/*
+          - v*
+        exclude: []
+    rules:
+      - type: deletion
+      - type: non_fast_forward
+      - type: update
+    bypass_actors:
+      - actor_id: 5
+        actor_type: RepositoryRole
+        bypass_mode: always

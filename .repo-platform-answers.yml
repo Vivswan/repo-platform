@@ -14,8 +14,8 @@ project_name: repo-platform
 # same source check_ssot's jinjaVars reads.
 project_slug: repo-platform
 
-# Checked against settings/repos/repo-platform.yml repository.description,
-# the field's authoritative home (this repo uses central settings).
+# Checked against .github/settings.yml repository.description, the
+# field's authoritative home (this repo's own settings starter).
 description: Copier template + reusable workflows managing standards across Vivswan's repositories
 
 # Checked against the copier.yml defaults, the source check_ssot's
@@ -23,8 +23,8 @@ description: Copier template + reusable workflows managing standards across Vivs
 github_username: Vivswan
 copyright_holder: Vivswan Shah (https://github.com/Vivswan)
 
-# Checked against settings/repos/repo-platform.yml repository.private;
-# public plus a toolchain module makes enable_codeql true.
+# Checked against .github/settings.yml repository.private; public plus a
+# toolchain module makes enable_codeql true.
 private: false
 
 # The modules this repository actually dogfoods: agents (AGENTS.md and the
@@ -36,7 +36,9 @@ private: false
 # gate job), auto-assign (auto-assign.yml). The tracking-stream modules
 # (fuzzer, nightly) are deliberately absent - check_ssot's release-please
 # pair evaluates their membership or-chain to false - and so is
-# settings-sync: this repo's settings live centrally in settings/repos/.
+# settings-sync: this operator repo hand-writes its .github/settings.yml
+# (extra rulesets the starter never renders), and settings-repos.yml
+# heals it as its always-included self target.
 modules:
   - agents
   - bun

@@ -1,5 +1,5 @@
 // Unit tests for the shared ownership classifier: filename-gate stripping,
-// the starter/mergeable/split/managed classification (including the
+// the starter/split/managed classification (including the
 // contradiction throws and the .gitignore split grammar), and the
 // marker-form fidelity the ownership manifest depends on.
 
@@ -133,77 +133,16 @@ describe("classifyTemplateSource", () => {
     expect(hasHeader).toBe(true);
   });
 
-  test("the mergeable marker classifies mergeable, in either comment form", () => {
-    for (const marker of ["# repo-platform:mergeable", "<!-- repo-platform:mergeable -->"]) {
-      const { ownership, hasHeader } = classifyTemplateSource(
-        ".github/settings.yml",
-        `---\n${marker}\n# baseline prose\nrepository: {}\n`,
-        SKIP,
-        "templates/settings-sync/.github/settings.yml.jinja",
-      );
-      expect(ownership).toEqual({ class: "mergeable" });
-      expect(hasHeader).toBe(false);
-    }
-  });
-
-  test("a mergeable marker buried past the header window does not count", () => {
-    const { ownership } = classifyTemplateSource(
-      ".github/settings.yml",
-      `${"# filler\n".repeat(10)}# repo-platform:mergeable\nrepository: {}\n`,
-      SKIP,
-      "templates/settings-sync/.github/settings.yml.jinja",
-    );
-    expect(ownership).toEqual({ class: "managed" });
-  });
-
-  test("a marker mention mid-line is not a mergeable declaration", () => {
+  test("a legacy mergeable marker line is inert: the class is retired", () => {
+    // Old renders' settings.yml carried "# repo-platform:mergeable";
+    // nothing renders it anymore, and a template source carrying the
+    // literal classifies by the surviving grammars alone (managed here).
     const { ownership } = classifyTemplateSource(
       "GUIDE.md",
-      "see the repo-platform:mergeable marker\n",
+      "# repo-platform:mergeable\nrepository: {}\n",
       SKIP,
       "templates/base/GUIDE.md.jinja",
     );
     expect(ownership).toEqual({ class: "managed" });
-  });
-
-  test("a mergeable file also opening with the managed header throws", () => {
-    expect(() =>
-      classifyTemplateSource(
-        ".github/settings.yml",
-        "# This file is managed by {{ github_username }}/repo-platform.\n# repo-platform:mergeable\n",
-        SKIP,
-        "templates/settings-sync/.github/settings.yml.jinja",
-      ),
-    ).toThrow(/both the managed header and the\s+'repo-platform:mergeable' marker/);
-  });
-
-  test("a _skip_if_exists starter carrying the mergeable marker throws", () => {
-    expect(() =>
-      classifyTemplateSource(
-        ".github/workflows/checks.yml",
-        "# repo-platform:mergeable\nname: Checks\n",
-        SKIP,
-        "templates/base/.github/workflows/checks.yml.jinja",
-      ),
-    ).toThrow(/marker but renders a\s+_skip_if_exists starter/);
-  });
-
-  test("a mergeable marker alongside a split grammar throws", () => {
-    expect(() =>
-      classifyTemplateSource(
-        "SECURITY.md",
-        "# repo-platform:mergeable\ntop\n<!-- repo-platform:local-section -->\ntail\n",
-        SKIP,
-        "templates/base/SECURITY.md.jinja",
-      ),
-    ).toThrow(/marker alongside a\s+split grammar/);
-    expect(() =>
-      classifyTemplateSource(
-        ".gitignore",
-        "# repo-platform:mergeable\n# BEGIN REPO-PLATFORM MANAGED\nx\n# END REPO-PLATFORM MANAGED\n",
-        SKIP,
-        "templates/base/.gitignore.jinja",
-      ),
-    ).toThrow(/marker alongside a\s+split grammar/);
   });
 });

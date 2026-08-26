@@ -33,7 +33,7 @@ Copier asks for project name, description, an update **channel** (`latest` follo
 
 The chosen modules also land in `.repo-platform.yml`, and that file is the selection's home from then on: edit its `modules:` list and the next sync PR applies the change. Its presence is what marks the repo as managed.
 
-Every render also carries `.github/repo-platform-manifest.json`, the ownership manifest: each template-landed path's class (`managed`, `split`, `mergeable`, or `starter`) plus sha256 hashes of the managed content, stamped after each render - `validate-template`'s parity check reports drift against it without blocking merges (the next sync heals).
+Every render also carries `.github/repo-platform-manifest.json`, the ownership manifest: each template-landed path's class (`managed`, `split`, or `starter`) plus sha256 hashes of the managed content, stamped after each render - `validate-template`'s parity check reports drift against it without blocking merges (the next sync heals).
 
 To switch channels later, change the repo's entry under `config:` in repo-platform's `repos.yml` (see step 4). A repo moving from staging to latest gets every migration up to the target release on its first sync after the switch - the staging history says nothing about which ones already applied, and migrations are idempotent, so the runner over-runs rather than skips (see [migrations/README.md](../migrations/README.md)).
 
@@ -71,37 +71,10 @@ In repo-platform, two optional registrations:
 - `config:` entry in `repos.yml`: only when the repo deviates from `defaults.channel` (staging). Auto-discovered repos need no entry otherwise.
 - `exclude:` list in `repos.yml`: only for opting a discovered repo OUT of management; a new managed repo does not touch it.
 
-## 5. Pick a settings home
+## 5. Settings management (the settings-sync module)
 
-Repository settings are applied from repo-platform (see [docs/settings.md](settings.md)). Pick one of the two homes:
+Repository settings are applied from repo-platform (see [docs/settings.md](settings.md)), and selecting the `settings-sync` module is the whole opt-in: the nightly `settings-repos.yml` heal computes the repo's managed baseline (the shared `repository:` policy block, the full label roster its module selection requires, the fleet rulesets) and deep-merges the repo's own `.github/settings.yml` over it.
 
-Central (the default): add `settings/repos/my-project.yml` in repo-platform. `settings/defaults.yml` already supplies the shared `repository:` field block, so the file only carries repo specifics plus the list-valued sections (arrays do not merge with defaults):
+The module renders `.github/settings.yml` ONCE as a repo-owned identity starter - `description`, `homepage`, `topics`, `private`, seeded from the copier answers - plus commented examples for local additions. Everything fleet-shaped stays out of the file: the baseline supplies it, generated from the module manifests, so the labels dependabot auto-creates can never fall out of sync with the roster - that means `dependencies` (color `0366d6`) and `github_actions` (`000000`) always, plus one label per toolchain the repo's dependabot.yml covers:<!-- BEGIN GENERATED: dependabot-labels (scripts/generate.ts - edit module.yml manifests, not this block) --> `javascript` (`168700`) for bun and npm, `deno` (`70ffaf`) for deno, `python:uv` (`2b67c6`) for uv, `rust` (`000000`) for cargo.<!-- END GENERATED: dependabot-labels --> Declare only the repo's OWN labels, rulesets, and overrides in settings.yml: entries there win over same-name baseline entries wholesale, and setting a key to `null` opts the repo out of that part of the baseline.
 
-```yaml
-# settings/repos/my-project.yml
-repository:
-  description: One-line description (match the copier answer)
-  # Declare all four identity keys, empty included: the apply manages
-  # only declared keys, so an omitted key's drift is never healed. The
-  # settings preflight fails a central file that drops one of them.
-  homepage: ""
-  topics: comma, separated, topics
-  private: false
-
-labels:
-  - name: bug
-    color: "d73a4a"
-    description: Something isn't working
-  # ...every label the repo should keep; undeclared labels are deleted
-
-rulesets:
-  - name: main
-    # ...branch protection; copy a sibling file in settings/repos/ as the
-    # starting point
-```
-
-Since undeclared labels are deleted, the list must include the labels dependabot auto-creates, or the two sides loop forever: every apply deletes them, dependabot recreates them on its next run. That means `dependencies` (color `0366d6`) and `github_actions` (`000000`) always, plus one label per toolchain the repo's dependabot.yml covers:<!-- BEGIN GENERATED: dependabot-labels (scripts/generate.ts - edit module.yml manifests, not this block) --> `javascript` (`168700`) for bun and npm, `deno` (`70ffaf`) for deno, `python:uv` (`2b67c6`) for uv, `rust` (`000000`) for cargo.<!-- END GENERATED: dependabot-labels --> The exact descriptions are in `templates/settings-sync/.github/settings.yml.jinja`.
-
-The easiest start is copying `settings/repos/repo-platform.yml` and trimming it. Merging the file to main applies it (settings-repos.yml runs on pushes to `settings/**`); for a drift report first, dispatch `gh workflow run settings-repos.yml -f check_only=true`.
-
-In-repo: skip the central file and carry `.github/settings.yml` in the repo itself - the file is the whole opt-in, and the central run applies it remotely. Selecting the `settings-sync` module is optional sugar: it seeds the file with the template baseline and adds push-time self-apply (which needs a repo-scoped PAT and warns and skips without one); see [docs/settings.md](settings.md).
+The module also renders a `settings-sync.yml` workflow for push-time self-apply (needs a repo-scoped PAT and warns and skips without one); the central heal applies the repo's settings either way. A repo without the module has unmanaged settings - nothing installs or heals the `main` ruleset (so `all-green` may not be a required check) and labels are never reconciled.

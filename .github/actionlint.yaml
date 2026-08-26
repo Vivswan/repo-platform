@@ -10,3 +10,8 @@ paths:
       # it); actionlint's permission-scope list has not caught up yet
       # (rhysd/actionlint#666). Drop this once it knows the scope.
       - 'unknown permission scope "vulnerability-alerts"'
+      # github.job_workflow_sha (the reusable workflow file's commit -
+      # reusable-apply-settings pins its repo-platform checkout to it) is
+      # documented GitHub context actionlint's github-context type does
+      # not know yet. Drop this once it does.
+      - 'property "job_workflow_sha" is not defined in object type'

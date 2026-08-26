@@ -136,6 +136,17 @@ if (nonEmpty(manifestLicenseFile)) {
   body += `\n\n${slurp(manifestLicenseFile)}`;
 }
 
+// The one-time settings-layering transition (settings_layering.ts, run by
+// the preserve step): when the legacy settings.yml was replaced with the
+// identity starter and old declarations differing from the managed
+// baseline were dropped, the section lists them - and the PR must wait
+// for a human to re-add the wanted ones (needsReview below). Read from
+// RUNNER_TEMP by its fixed name, like old_commit.txt above.
+const settingsLayeringFile = join(runnerTemp, "settings-layering.md");
+if (nonEmpty(settingsLayeringFile)) {
+  body += `\n\n${slurp(settingsLayeringFile)}`;
+}
+
 const licenseTransitionFile = requireEnv("LICENSE_TRANSITION_FILE");
 if (nonEmpty(licenseTransitionFile)) {
   body += `
@@ -206,9 +217,9 @@ if (validation === "failed") {
 // carry that needs a human (appendix, reset managed-half edits, duplicate
 // markers), withheld workflow files, failed validation, a recovery
 // re-render, a dispatch that forced manual review, a deleted license
-// file, out-of-band settings drift - stays manual; a clean update (which
-// includes kept-whole and clean tail-appended carries) arms squash
-// auto-merge below.
+// file, out-of-band settings drift, dropped settings-layering overrides -
+// stays manual; a clean update (which includes kept-whole and clean
+// tail-appended carries) arms squash auto-merge below.
 const needsReview =
   resolved === "true" ||
   validation === "failed" ||
@@ -217,6 +228,7 @@ const needsReview =
   nonEmpty(carryReviewFile) ||
   nonEmpty(licenseTransitionFile) ||
   nonEmpty(withheldFile) ||
+  nonEmpty(settingsLayeringFile) ||
   nonEmpty(driftFile);
 
 const existing = mustCapture([
@@ -279,6 +291,6 @@ if (!needsReview) {
   }
 } else {
   console.log(
-    "auto-merge left off: this PR needs review (conflicts, split-file carries needing review, withheld files, failed validation, out-of-band settings drift, a recovery re-render, a forced-manual dispatch, or a deleted license file).",
+    "auto-merge left off: this PR needs review (conflicts, split-file carries needing review, withheld files, failed validation, out-of-band settings drift, dropped settings-layering overrides, a recovery re-render, a forced-manual dispatch, or a deleted license file).",
   );
 }

@@ -1104,13 +1104,27 @@ describe("ownership-manifest byte parity", () => {
     expect(stderr).toContain("a starter carrying a hash");
   });
 
-  test("a mergeable entry passes hashless: content drift is not parity drift", () => {
-    // The mergeable contract: sync keeps the baseline current by three-way
-    // merge, so a repo-customized copy is healthy, not drifted. The module
-    // must be selected - the roster covers the path and pins its class.
+  test("a legacy mergeable entry is an error naming the retirement", () => {
+    // Old renders' manifests still class settings.yml mergeable; the class
+    // is retired (the file is a starter now), and a manifest claiming it
+    // predates that sync - the error says the next sync re-renders it.
     const entries = {
       ...stampedBaseline(),
       ".github/settings.yml": '{"class": "mergeable"}',
+    };
+    const { exitCode, stderr } = runValidator({
+      ".repo-platform.yml": `${MANAGED_HEADER}modules: [uv, settings-sync]\n`,
+      [MANIFEST]: manifestOf(entries),
+      ".github/settings.yml": "repository:\n  has_issues: true\n",
+    });
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain('has class "mergeable", which is retired');
+  });
+
+  test("a settings.yml starter entry passes: the file is repo-owned", () => {
+    const entries = {
+      ...stampedBaseline(),
+      ".github/settings.yml": '{"class": "starter"}',
     };
     const { exitCode, stdout, stderr } = runValidator({
       ".repo-platform.yml": `${MANAGED_HEADER}modules: [uv, settings-sync]\n`,
@@ -1122,70 +1136,6 @@ describe("ownership-manifest byte parity", () => {
     expect(stdout).not.toContain(".github/settings.yml");
   });
 
-  test("a mergeable entry never carries a hash", () => {
-    const entries = {
-      ...stampedBaseline(),
-      ".github/settings.yml": `{"class": "mergeable", "hash": "${"d".repeat(64)}"}`,
-    };
-    const { exitCode, stderr } = runValidator({
-      ".repo-platform.yml": `${MANAGED_HEADER}modules: [uv, settings-sync]\n`,
-      [MANIFEST]: manifestOf(entries),
-    });
-    expect(exitCode).toBe(1);
-    expect(stderr).toContain("is mergeable carrying a hash");
-  });
-
-  test("a listed mergeable file missing from the repo is an advisory", () => {
-    const entries = {
-      ...stampedBaseline(),
-      ".github/settings.yml": '{"class": "mergeable"}',
-    };
-    const { exitCode, stdout, stderr } = runValidator({
-      ".repo-platform.yml": `${MANAGED_HEADER}modules: [uv, settings-sync]\n`,
-      [MANIFEST]: manifestOf(entries),
-    });
-    expect(stderr).toBe("");
-    expect(exitCode).toBe(0);
-    expect(stdout).toContain("advisory: .github/settings.yml: listed as mergeable");
-  });
-
-  test("a directory squatting on a mergeable path is an error, not presence", () => {
-    // lstat success alone must not count: three-way merge has nothing to
-    // merge into a directory, so the squatter is unhealable damage.
-    const entries = {
-      ...stampedBaseline(),
-      ".github/settings.yml": '{"class": "mergeable"}',
-    };
-    const { exitCode, stderr } = runValidator({
-      ".repo-platform.yml": `${MANAGED_HEADER}modules: [uv, settings-sync]\n`,
-      [MANIFEST]: manifestOf(entries),
-      ".github/settings.yml/placeholder": "not the settings file\n",
-    });
-    expect(exitCode).toBe(1);
-    expect(stderr).toContain(".github/settings.yml: listed as mergeable");
-    expect(stderr).toContain("not a regular file");
-  });
-
-  test("a mergeable entry hand-flipped to starter fails the roster cross-check", () => {
-    // THE class-flip attack for hashless classes: starter and mergeable
-    // both carry no hash, so without the roster pin the flip would cost
-    // nothing visible - not even the missing-file advisory. Mirrors the
-    // managed-flip test above.
-    const entries = {
-      ...stampedBaseline(),
-      ".github/settings.yml": '{"class": "starter"}',
-    };
-    const { exitCode, stderr } = runValidator({
-      ".repo-platform.yml": `${MANAGED_HEADER}modules: [uv, settings-sync]\n`,
-      [MANIFEST]: manifestOf(entries),
-      ".github/settings.yml": "repository:\n  has_issues: true\n",
-    });
-    expect(exitCode).toBe(1);
-    expect(stderr).toContain(
-      `entry '.github/settings.yml' claims class "starter" but this validator's ownership tables declare it mergeable`,
-    );
-  });
-
   test("an unknown class names the whole vocabulary", () => {
     // An uncovered path, so the structural loop's report is probed alone
     // (a roster path would draw the cross-check error first).
@@ -1195,9 +1145,7 @@ describe("ownership-manifest byte parity", () => {
     };
     const { exitCode, stderr } = runValidator({ [MANIFEST]: manifestOf(entries) });
     expect(exitCode).toBe(1);
-    expect(stderr).toContain(
-      'has unknown class "bespoke" (expected managed, split, mergeable, or starter)',
-    );
+    expect(stderr).toContain('has unknown class "bespoke" (expected managed, split, or starter)');
   });
 
   test("the manifest's own entry must stay hash-null (self-hash is circular)", () => {

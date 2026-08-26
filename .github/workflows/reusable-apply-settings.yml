@@ -1,7 +1,12 @@
-# Reusable settings apply for the IN-REPO settings home: a settings-sync
-# module repo's thin caller runs Vivswan/github-settings-as-code against its
-# own .github/settings.yml on push. The central home (settings/repos/ files
-# here, plus a remote pass over the module repos) is settings-repos.yml.
+# Reusable settings apply for settings-sync module repos: a thin caller
+# runs this on pushes touching its .github/settings.yml. The apply is the
+# SAME two-layer merge the central settings-repos run computes - a partial
+# repo document alone would delete every baseline label (the action's
+# label sync removes undeclared ones), so this workflow checks out
+# repo-platform (pinned to the calling ref's commit), computes the managed
+# baseline from the caller's module selection, merges the caller's
+# settings.yml over it, and applies the merged document in single-repo
+# mode. The central home for the same merge is settings-repos.yml.
 #
 # Token model: settings mutation needs Administration (and Issues) write,
 # which GITHUB_TOKEN can never hold - the caller passes its own
@@ -74,6 +79,45 @@ jobs:
         with:
           ref: ${{ github.event.repository.default_branch }}
 
+      # The baseline generator and merge dialect live in repo-platform;
+      # job_workflow_sha pins the checkout to the exact commit the
+      # caller's `uses:` ref resolved to, so the scripts and this workflow
+      # can never version-skew (fallback for contexts that omit it: main,
+      # what staging-channel callers pin anyway).
+      - name: Check out repo-platform
+        if: steps.token.outputs.proceed == 'true'
+        uses: actions/checkout@v7
+        with:
+          repository: Vivswan/repo-platform
+          ref: ${{ github.job_workflow_sha || 'main' }}
+          path: platform
+
+      - if: steps.token.outputs.proceed == 'true'
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: platform/.bun-version
+
+      - name: Install repo-platform script dependencies
+        if: steps.token.outputs.proceed == 'true'
+        working-directory: platform
+        run: bun install --frozen-lockfile --silent
+
+      # The managed baseline from this repository's own facts (module
+      # selection and tracking answers fetched from the default branch,
+      # live visibility probed), then the checked-out settings.yml merged
+      # over it - the document the apply step below reads.
+      - name: Compute the merged settings document
+        if: steps.token.outputs.proceed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
+        run: |
+          bun platform/.github/scripts/fleet/render_managed_settings.ts \
+            --repo "$GITHUB_REPOSITORY" --out "$RUNNER_TEMP/managed-settings.yml"
+          bun platform/.github/scripts/fleet/merge_settings_layers.ts \
+            --managed "$RUNNER_TEMP/managed-settings.yml" \
+            --repo-file .github/settings.yml \
+            --out "$RUNNER_TEMP/merged-settings.yml"
+
       - name: Apply repository settings
         if: steps.token.outputs.proceed == 'true'
         # Pinned to an immutable commit; bump to @v1 once the action cuts
@@ -82,6 +126,7 @@ jobs:
         with:
           token: ${{ secrets.REPO_PLATFORM_TOKEN }}
           mode: ${{ inputs.check_only && 'check' || 'apply' }}
+          settings-file: ${{ runner.temp }}/merged-settings.yml
           on-missing-permission: ${{ inputs.on_missing_permission }}
           required-sections: ${{ inputs.required_sections }}
           sections: ${{ inputs.sections }}

@@ -7,8 +7,8 @@
 //   default expression, the pages_setup default + validator, the
 //   pages_install_command / pages_build_command default chains, and the
 //   tracking-label questions' validators (shape, the reserved-label
-//   roster the settings templates and dependabot manifests declare, and
-//   cross-stream distinctness).
+//   roster the settings baseline generator declares, and cross-stream
+//   distinctness).
 // - actions/validate-template/validate_generated_files.ts: the
 //   KNOWN_MODULES set literal, the TOOLCHAIN_PINS record literal, and the
 //   MODULE_OWNERSHIP record (how each rendered module file declares its
@@ -59,10 +59,9 @@
 
 import { existsSync, lstatSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { parse as parseYaml } from "yaml";
 import { z } from "zod";
+import { managedLabelNames } from "../.github/scripts/fleet/render_managed_settings.ts";
 import { dependabotLabels } from "./compose_template.ts";
-import { normalizeJinja, placeholderJinja } from "./jinja_subset.ts";
 import {
   loadManifests,
   MODULE_ORDER,
@@ -261,58 +260,20 @@ export function trackingLabelsInput(manifests: ModuleManifest[]): string[] {
   ];
 }
 
-/** The label names one settings YAML document (or `labels:`-prefixed
- *  fragment) declares; an empty or missing list throws so a moved label
- *  block cannot silently empty the reserved roster below. */
-export function labelNames(yamlText: string, where: string): string[] {
-  const doc = parseYaml(yamlText) as { labels?: unknown } | null;
-  const labels = doc?.labels;
-  if (!Array.isArray(labels) || labels.length === 0) {
-    throw new Error(`${where}: no labels list - the reserved-label roster lost a source`);
-  }
-  return labels.map((entry, index) => {
-    const name = (entry as { name?: unknown })?.name;
-    if (typeof name !== "string" || name === "") {
-      throw new Error(`${where}: label ${index} has no name`);
-    }
-    return name;
-  });
-}
-
-/** The two settings templates whose label declarations (together with the
- *  manifests' dependabot labels, spliced in at compose time) form every
- *  label the template already manages. The tracking streams' generated
- *  settings-labels blocks are excluded: they render from the very answers
- *  the validators check. */
-function settingsLabelSources(): { settings: string; releaseFragment: string } {
-  const read = (rel: string) => readFileSync(join(REPO_ROOT, rel), "utf-8");
-  return {
-    settings: read("templates/settings-sync/.github/settings.yml.jinja"),
-    releaseFragment: read("templates/release-please/fragments/settings-labels.jinja"),
-  };
-}
-
 /** Every managed label name, lowercased (GitHub deduplicates label names
- *  case-insensitively) and deduped, in declaration order. A tracking-label
- *  answer equal to one of these would corrupt the roster's owner: settings
- *  applies would fight over the label's color/description, and a green
- *  night would close whatever issues carry it - including the
+ *  case-insensitively) and deduped, in declaration order - from the
+ *  settings baseline generator (render_managed_settings.ts), the single
+ *  home of the managed roster. The tracking streams' labels are excluded
+ *  there: they render from the very answers the validators check. A
+ *  tracking-label answer equal to one of these would corrupt the roster's
+ *  owner: settings applies would fight over the label's color/description,
+ *  and a green night would close whatever issues carry it - including the
  *  release-blocker stream the release gate keys on. */
 export function reservedLabelNames(
   manifests: ModuleManifest[],
-  sources = settingsLabelSources(),
+  roster: string[] = managedLabelNames(manifests),
 ): string[] {
-  // Identity substitutions never land in label names, so placeholder
-  // values keep normalizeJinja total over the settings templates.
-  const vars = { username: "OWNER", slug: "SLUG", copyrightHolder: "HOLDER" };
-  const names = [
-    ...labelNames(placeholderJinja(normalizeJinja(sources.settings, vars)), "settings.yml.jinja"),
-    ...labelNames(
-      `labels:\n${placeholderJinja(normalizeJinja(sources.releaseFragment, vars))}`,
-      "settings-labels.jinja",
-    ),
-    ...dependabotLabelGroups(manifests).map((group) => group.label),
-  ].map((name) => name.toLowerCase());
+  const names = roster.map((name) => name.toLowerCase());
   for (const name of names) {
     if (/['"\\]/.test(name)) {
       throw new Error(
@@ -930,8 +891,8 @@ function main(): number {
     const regionStale =
       "its generated region(s) do not match their sources (the module " +
       "manifests; the module template trees and copier.yml's _skip_if_exists " +
-      "for the module-ownership region; the settings label templates for " +
-      "copier.yml's tracking-label validators)";
+      "for the module-ownership region; the settings baseline generator's " +
+      "label roster for copier.yml's tracking-label validators)";
     changed = targets(manifests).flatMap((target) => {
       const path = join(REPO_ROOT, target.file);
       const current = readFileSync(path, "utf-8");

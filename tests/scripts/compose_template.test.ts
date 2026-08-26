@@ -1,12 +1,10 @@
 // Unit tests for the composer's data-anchor derivations: value grouping,
 // the CodeQL slug rule (including the duplicate-job-key collision guard),
-// or-chain gate rendering, and YAML label quoting with a round-trip parse
-// oracle - covering the future shapes (two modules sharing a CodeQL
-// language, a dependabot label, or a lockfile pattern) that the sharing
-// rule must emit once behind an or-chain gate.
+// and or-chain gate rendering - covering the future shapes (two modules
+// sharing a CodeQL language, a dependabot label, or a lockfile pattern)
+// that the sharing rule must emit once behind an or-chain gate.
 
 import { describe, expect, test } from "bun:test";
-import { parse as parseYaml } from "yaml";
 import {
   agentsToolchainErrors,
   applyToolchainSetup,
@@ -19,7 +17,6 @@ import {
   gateJobsGroups,
   gateJobsParityErrors,
   injectUsesRefPreamble,
-  labelBlock,
   lockfileGroups,
   manifestEntries,
   manifestTemplate,
@@ -27,9 +24,7 @@ import {
   renderedSeparationErrors,
   type SourcedEntry,
   spliceContributions,
-  trackingLabelBlock,
   USES_REF_PREAMBLE,
-  yamlLabelName,
 } from "../../scripts/compose_template";
 import { renderJinjaFile } from "../../scripts/jinja_subset";
 import { type ModuleManifest, parseManifest } from "../../scripts/module_manifests";
@@ -94,68 +89,6 @@ describe("orChain", () => {
 
   test("an unknown module fails loudly instead of guessing a gate", () => {
     expect(() => orChain(["ghost"], gateOf)).toThrow("ghost");
-  });
-});
-
-describe("yamlLabelName", () => {
-  test("plainly safe labels stay unquoted", () => {
-    expect(yamlLabelName("javascript")).toBe("javascript");
-    expect(yamlLabelName("rust")).toBe("rust");
-    expect(yamlLabelName("deno")).toBe("deno");
-  });
-
-  test("anything else gets quotes: colons, leading digits, YAML reserved words", () => {
-    expect(yamlLabelName("python:uv")).toBe('"python:uv"');
-    expect(yamlLabelName("123")).toBe('"123"');
-    expect(yamlLabelName("true")).toBe('"true"');
-    expect(yamlLabelName("null")).toBe('"null"');
-  });
-});
-
-describe("labelBlock", () => {
-  test("the rendered block round-trips through a YAML parser as strings", () => {
-    for (const name of ["javascript", "python:uv", "true", "123"]) {
-      const block = labelBlock({
-        name,
-        color: "2b67c6",
-        description: `Pull requests that update ${name} code`,
-        modules: ["demo"],
-      });
-      const doc = parseYaml(`labels:\n${block}`) as { labels: Record<string, unknown>[] };
-      expect(doc.labels[0]).toEqual({
-        name,
-        color: "2b67c6",
-        description: `Pull requests that update ${name} code`,
-      });
-    }
-  });
-});
-
-describe("trackingLabelBlock", () => {
-  const tracking = {
-    answer: "fuzzer_label",
-    default: "fuzz-nightly",
-    color: "B60205",
-    description: "Automated nightly fuzz failure",
-  };
-
-  test("the rendered block round-trips through a YAML parser with the answer substituted", () => {
-    const block = trackingLabelBlock("fuzzer", tracking).replace(
-      "{{ fuzzer_label | tojson }}",
-      '"fuzz-nightly"',
-    );
-    const doc = parseYaml(`labels:\n${block}`) as { labels: Record<string, unknown>[] };
-    expect(doc.labels[0]).toEqual({
-      name: "fuzz-nightly",
-      color: "B60205",
-      description: "Automated nightly fuzz failure",
-    });
-  });
-
-  test("the label name renders from the stream's copier answer, tojson-quoted", () => {
-    expect(trackingLabelBlock("fuzzer", tracking)).toContain(
-      "  - name: {{ fuzzer_label | tojson }}\n",
-    );
   });
 });
 
@@ -932,20 +865,6 @@ describe("manifestEntries", () => {
     ]);
   });
 
-  test("a mergeable-marked source classifies mergeable in the manifest", () => {
-    const files = new Map<string, SourcedEntry>([
-      [
-        ".github/settings.yml.jinja",
-        mod("settings-sync", "---\n# repo-platform:mergeable\nrepository: {}\n"),
-      ],
-    ]);
-    const { entries, errors } = manifestEntries(files, skip);
-    expect(errors).toEqual([]);
-    expect(entries.find((e) => e.path === ".github/settings.yml")?.ownership).toEqual({
-      class: "mergeable",
-    });
-  });
-
   test("two sources landing at one path is an error, not a duplicate key", () => {
     const files = new Map<string, SourcedEntry>([
       ["{% if not private %}X.md{% endif %}.jinja", base("a\n")],
@@ -986,7 +905,7 @@ describe("manifestTemplate", () => {
       {
         path: ".github/settings.yml",
         gates: ["'settings-sync' in modules"],
-        ownership: { class: "mergeable" },
+        ownership: { class: "starter" },
       },
     ]).toString("utf-8");
     expect(text).toContain(
@@ -1001,7 +920,7 @@ describe("manifestTemplate", () => {
     expect(text).toContain("{%- if ('a' in modules) and (not private) -%}");
     // No-parity classes carry no hash token for the stamper to fill.
     expect(text).toContain(`'    "checks.yml": {"class": "starter"}'`);
-    expect(text).toContain(`'    ".github/settings.yml": {"class": "mergeable"}'`);
+    expect(text).toContain(`'    ".github/settings.yml": {"class": "starter"}'`);
     expect(text).toContain("{{ entries | join(',\\n') }}");
     expect(text.endsWith("}\n")).toBe(true);
   });

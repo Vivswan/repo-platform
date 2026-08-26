@@ -16,7 +16,7 @@ The issue filing and closing come from the `fuzz-issue` composite action in this
 
 The label is asked as a copier question, rather than left as an edit in the starter, because the report and resolve steps must agree on it. The question's validator also rejects the label names the template already manages (the settings baseline, the release labels, the dependabot labels; GitHub label names are case-insensitive): reusing one would let a green night close unrelated issues carrying it and make every settings apply fight over the label's color and description. The validator runs on `copier update` too, so a repo whose recorded label later becomes reserved fails its next sync until the recorded `fuzzer_label` value in `.copier-answers.yml` is changed (and the starter's `label:` inputs with it, per the renaming section below).
 
-One more place must know the label: the repository's settings labels. Settings applies delete undeclared labels, and a tracking issue stripped of its label is invisible to both the dedup and the auto-close. With the settings-sync module the rendered settings.yml declares it automatically; a repo on central settings (a `settings/repos/<name>.yml` in repo-platform) must carry the label there by hand.
+One more place must know the label: the repository's settings labels. Settings applies delete undeclared labels, and a tracking issue stripped of its label is invisible to both the dedup and the auto-close. The managed settings baseline declares it automatically: repo-platform resolves the recorded `fuzzer_label` answer when it computes the repo's label roster at apply time (docs/settings.md).
 
 ## Customizing the starter
 

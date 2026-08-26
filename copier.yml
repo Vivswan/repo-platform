@@ -45,6 +45,12 @@ _skip_if_exists:
   # repo-owned after the first render (repos list their skills there).
   - .claude-plugin/plugin.json
   - .claude-plugin/marketplace.json
+  # The settings-sync module's starter: identity keys plus local overrides,
+  # repo-owned after the first render. The managed baseline (policy block,
+  # labels, rulesets) is computed centrally at apply time and merged UNDER
+  # this file (.github/scripts/fleet/render_managed_settings.ts), so sync
+  # never rewrites it.
+  - .github/settings.yml
 
 # Migrations use FROM-version naming (see migrations/run.ts): each script in
 # migrations/ is named for the release it migrates away from, so authoring
@@ -116,11 +122,12 @@ modules:
     auto-assign - auto-assign issues/PRs/alerts to owner: auto-assign
     fuzzer - nightly fuzz starter with issue filing, replay inputs, auto-close: fuzzer
     nightly - nightly CI starter with failure issue filing and auto-close: nightly
-    settings-sync - in-repo .github/settings.yml applied with the repo's own PAT: settings-sync
+    settings-sync - centrally managed repo settings + repo-owned settings.yml starter: settings-sync
     custom-license - repo carries its own license in LICENSE.md; the fleet license is not rendered: custom-license
   # END GENERATED: module-choices
-  # settings-sync is deliberately NOT a default: central settings
-  # (settings/repos/<name>.yml in repo-platform) are the default home.
+  # settings-sync is deliberately NOT a default: selecting it is the
+  # opt-in to centrally managed settings (the nightly heal computes the
+  # baseline and merges the repo's settings.yml over it).
   default: [agents, release-please, issue-templates, pr-title, auto-assign]
 
 # --- settings-sync module parameters (asked only when it is selected) ---

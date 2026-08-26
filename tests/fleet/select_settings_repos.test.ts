@@ -2,34 +2,51 @@ import { beforeAll, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { selectsSettingsSync } from "../../.github/scripts/fleet/build_settings_matrix";
 
-// End-to-end harness for the selector, in the stub-gh style of
-// validate_central_settings.test.ts: the script runs against stub `gh`
+// End-to-end harness for the selector: the script runs against stub `gh`
 // and `curl` binaries on PATH (plus a no-op `sleep`, so the retry loop
-// costs no wall time). Personas, all enrolled/adopted unless probed
-// otherwise:
-//   central-home  - has settings/repos/central-home.yml, never probed
-//   deadapi       - settings.yml check fails with HTTP 502 every attempt
+// costs no wall time). Personas, all enrolled unless probed otherwise;
+// the opt-in is the settings-sync module in .repo-platform.yml:
+//   deadapi       - .repo-platform.yml fetch fails HTTP 502 every attempt
 //   deadprobe     - push probe answers HTTP 500 every attempt
-//   flaky         - push probe 500s once then 200s; adoption 502s once
-//                   then succeeds (both must be healed by the retries)
-//   steady        - every probe answers first try
-//   hidden-server - PRIVATE, wildcard-discovered: healthy, must reach the
-//                   matrix as its hint with a verify tag, never as a slug
-//   hidden-nohome - PRIVATE, wildcard-discovered: no settings home, so
-//                   its warning and summary line must carry the hint
-//   hidden-deadapi - PRIVATE, wildcard-discovered: settings.yml check
-//                   502s every attempt with the slug and bare name in the
+//   flaky         - push probe 500s once then 200s; the opt-in fetch 502s
+//                   once then succeeds (both must be healed by the retries)
+//   steady        - every probe answers first try; opts in
+//   nomodule      - adopted but does not select settings-sync: a routine
+//                   notice-level skip, never a warning
+//   hidden-server - PRIVATE, wildcard-discovered: healthy opt-in, must
+//                   reach the matrix as its hint with a verify tag, never
+//                   as a slug
+//   hidden-nomods - PRIVATE, wildcard-discovered: its .repo-platform.yml
+//                   has no readable modules list, so the unmanaged
+//                   warning and summary line must carry the hint
+//   hidden-deadapi - PRIVATE, wildcard-discovered: the opt-in fetch 502s
+//                   every attempt with the slug and bare name in the
 //                   error text; the retry lines and the final warning
 //                   must carry only the hint
 // The explicit managed personas are absent from discovery, so the
 // fail-closed rule marks them private - but their names are committed in
 // repos.yml (self-disclosed), so they still print plainly with
-// hide_details riding the matrix row.
-// The heal must select flaky, steady, and hidden-server (plus
-// central-home's central file), warn about deadapi, deadprobe, and
-// hidden-deadapi (skipped this run, retried nightly), and exit 0; only an
-// unreadable registry or a failed discovery still exits 1.
+// hide_details riding the matrix row. The operator repository itself
+// (GITHUB_REPOSITORY) always joins the matrix as the builder's self row.
+// The heal must select flaky, steady, and hidden-server, warn about
+// deadapi, deadprobe, hidden-nomods, and hidden-deadapi (skipped this
+// run, retried nightly), and exit 0; only an unreadable registry or a
+// failed discovery still exits 1.
+describe("selectsSettingsSync", () => {
+  test("answers true/false for a readable modules list", () => {
+    expect(selectsSettingsSync("modules:\n  - settings-sync\n")).toBe(true);
+    expect(selectsSettingsSync("modules: [uv]\n")).toBe(false);
+  });
+
+  test("answers null for an unreadable list, never guessing", () => {
+    expect(selectsSettingsSync("notmodules: true\n")).toBeNull();
+    expect(selectsSettingsSync("modules: notalist\n")).toBeNull();
+    expect(selectsSettingsSync(": broken\n")).toBeNull();
+  });
+});
+
 describe("select_settings_repos.ts", () => {
   const repoRoot = join(import.meta.dir, "..", "..");
   const script = join(import.meta.dir, "../../.github/scripts/fleet/select_settings_repos.ts");
@@ -51,33 +68,36 @@ describe("select_settings_repos.ts", () => {
         // Three wildcard-discovered private repos; every explicit managed
         // persona is deliberately absent (fail-closed => private, but
         // self-disclosed by their repos.yml entries).
-        `  echo '[[{"full_name":"Vivswan/hidden-server","private":true,"archived":false,"owner":{"login":"Vivswan"},"permissions":{"push":true}},{"full_name":"Vivswan/hidden-nohome","private":true,"archived":false,"owner":{"login":"Vivswan"},"permissions":{"push":true}},{"full_name":"Vivswan/hidden-deadapi","private":true,"archived":false,"owner":{"login":"Vivswan"},"permissions":{"push":true}}]]'`,
+        `  echo '[[{"full_name":"Vivswan/hidden-server","private":true,"archived":false,"owner":{"login":"Vivswan"},"permissions":{"push":true}},{"full_name":"Vivswan/hidden-nomods","private":true,"archived":false,"owner":{"login":"Vivswan"},"permissions":{"push":true}},{"full_name":"Vivswan/hidden-deadapi","private":true,"archived":false,"owner":{"login":"Vivswan"},"permissions":{"push":true}}]]'`,
         "  exit 0",
         "fi",
         'case "$2" in',
         "  repos/Vivswan/flaky/contents/.repo-platform.yml)",
-        '    if [ -e "$STUB_STATE/flaky-adoption" ]; then exit 0; fi',
-        '    touch "$STUB_STATE/flaky-adoption"',
+        '    if [ -e "$STUB_STATE/flaky-optin" ]; then echo "modules: [settings-sync]"; exit 0; fi',
+        '    touch "$STUB_STATE/flaky-optin"',
         '    echo "HTTP 502 from stub" >&2',
         "    exit 1",
         "    ;;",
-        "  repos/Vivswan/deadapi/contents/.github/settings.yml)",
+        "  repos/Vivswan/deadapi/contents/.repo-platform.yml)",
         '    echo "HTTP 502 from stub" >&2',
         "    exit 1",
         "    ;;",
-        "  repos/Vivswan/hidden-nohome/contents/.github/settings.yml)",
-        '    echo "HTTP 404 from stub" >&2',
-        "    exit 1",
+        "  repos/Vivswan/nomodule/contents/.repo-platform.yml)",
+        '    echo "modules: [uv, release-please]"',
+        "    ;;",
+        "  repos/Vivswan/hidden-nomods/contents/.repo-platform.yml)",
+        '    echo "notmodules: true"',
         "    ;;",
         // Error text with the slug in a URL, the bare name, and a case
         // variant: every retry line and the final warning must scrub all
         // three to the hint.
-        "  repos/Vivswan/hidden-deadapi/contents/.github/settings.yml)",
+        "  repos/Vivswan/hidden-deadapi/contents/.repo-platform.yml)",
         '    echo "HTTP 502: https://api.github.com/repos/Vivswan/hidden-deadapi bad gateway; HIDDEN-DEADAPI unreachable" >&2',
         "    exit 1",
         "    ;;",
-        "  repos/*/contents/.repo-platform.yml) exit 0 ;;",
-        "  repos/*/contents/.github/settings.yml) echo '\"abc123\"' ;;",
+        "  repos/*/contents/.repo-platform.yml)",
+        '    echo "modules: [settings-sync]"',
+        "    ;;",
         "  *)",
         '    echo "HTTP 404 from stub" >&2',
         "    exit 1",
@@ -113,24 +133,23 @@ describe("select_settings_repos.ts", () => {
     writeFileSync(join(bin, "sleep"), "#!/usr/bin/env bash\nexit 0\n", { mode: 0o755 });
 
     // The fixture root stands in for the checked-out repo: the script
-    // resolves .github/scripts, repos.yml, and settings/repos relative
-    // to its cwd, so only .github is borrowed from the real repo.
-    mkdirSync(join(fixture, "settings", "repos"), { recursive: true });
+    // resolves .github/scripts and repos.yml relative to its cwd, so only
+    // .github is borrowed from the real repo.
+    mkdirSync(fixture, { recursive: true });
     symlinkSync(join(repoRoot, ".github"), join(fixture, ".github"));
     writeFileSync(
       join(fixture, "repos.yml"),
       [
         "managed:",
         '  - "*"',
-        "  - Vivswan/central-home",
         "  - Vivswan/deadapi",
         "  - Vivswan/deadprobe",
         "  - Vivswan/flaky",
+        "  - Vivswan/nomodule",
         "  - Vivswan/steady",
         "",
       ].join("\n"),
     );
-    writeFileSync(join(fixture, "settings", "repos", "central-home.yml"), "repository: {}\n");
   });
 
   interface Run {
@@ -158,6 +177,7 @@ describe("select_settings_repos.ts", () => {
         PROBE_RETRY_DELAY_MS: "0",
         GH_TOKEN: "stub-token",
         GITHUB_RUN_ID: "8675309",
+        GITHUB_REPOSITORY: "Vivswan/repo-platform",
         OWNER: "Vivswan",
         RUNNER_TEMP: join(work, "temp"),
         GITHUB_OUTPUT: outputFile,
@@ -197,7 +217,7 @@ describe("select_settings_repos.ts", () => {
 
   test("a probe that flakes once is retried and the repo stays selected", () => {
     expect(main.stdout).toContain("Vivswan/flaky: push-permission probe failed (attempt 1/3");
-    expect(main.stdout).toContain("Vivswan/flaky: adoption check failed (attempt 1/3");
+    expect(main.stdout).toContain("Vivswan/flaky: settings opt-in check failed (attempt 1/3");
     expect(main.stdout).not.toContain("::warning::Vivswan/flaky");
     expect(targetsOf(main).map((t) => t.repo)).toContain("Vivswan/flaky");
   });
@@ -205,7 +225,7 @@ describe("select_settings_repos.ts", () => {
   test("a persistently failing repo is skipped with a warning naming repo, probe, and error", () => {
     for (const [repo, probe, error] of [
       ["Vivswan/deadprobe", "push-permission probe", "HTTP 500"],
-      ["Vivswan/deadapi", "settings.yml check", "HTTP 502"],
+      ["Vivswan/deadapi", "settings opt-in check", "HTTP 502"],
     ]) {
       const warning = main.stdout
         .split("\n")
@@ -219,35 +239,43 @@ describe("select_settings_repos.ts", () => {
     }
   });
 
-  test("the matrix is intact: skips never drop their neighbors, homes are carried", () => {
+  test("a repo without the settings-sync module is a routine notice-level skip", () => {
+    const notice = main.stdout
+      .split("\n")
+      .find((line) => line.startsWith("::notice::Vivswan/nomodule"));
+    expect(notice).toBeDefined();
+    expect(notice).toContain("does not select the settings-sync");
+    expect(main.stdout).not.toContain("::warning::Vivswan/nomodule");
+    expect(main.summary).not.toContain("Vivswan/nomodule");
+    expect(targetsOf(main).map((t) => t.repo)).not.toContain("Vivswan/nomodule");
+  });
+
+  test("the matrix is intact: skips never drop their neighbors, self included", () => {
     // Explicit personas are absent from discovery, so fail-closed marks
     // them private - self-disclosed names stay, hide_details rides along.
+    // The operator repo joins as the builder's self row.
     expect(targetsOf(main)).toEqual([
       {
-        repo: "Vivswan/central-home",
-        name: "central-home",
-        home: "central",
+        repo: "Vivswan/flaky",
+        name: "flaky",
         redact_name: false,
         verify: "",
       },
       {
-        repo: "Vivswan/flaky",
-        name: "flaky",
-        home: "in-repo",
+        repo: "Vivswan/repo-platform",
+        name: "repo-platform",
         redact_name: false,
         verify: "",
       },
       {
         repo: "Vivswan/steady",
         name: "steady",
-        home: "in-repo",
         redact_name: false,
         verify: "",
       },
       {
         repo: "h**-s**r",
         name: "h**-s**r",
-        home: "in-repo",
         redact_name: true,
         verify: expect.stringMatching(/^[0-9a-f]{32}$/),
       },
@@ -260,7 +288,7 @@ describe("select_settings_repos.ts", () => {
     // casing (the stub plants an uppercase variant).
     for (const channel of [main.stdout, main.stderr, main.output, main.summary]) {
       expect(channel.toLowerCase()).not.toContain("hidden-server");
-      expect(channel.toLowerCase()).not.toContain("hidden-nohome");
+      expect(channel.toLowerCase()).not.toContain("hidden-nomods");
       expect(channel.toLowerCase()).not.toContain("hidden-deadapi");
     }
     expect(main.output).toContain("h**-s**r");
@@ -272,18 +300,18 @@ describe("select_settings_repos.ts", () => {
     // test above) and this warning must render both as the hint.
     const warning = main.stdout.split("\n").find((line) => line.startsWith("::warning::h**-d**i"));
     expect(warning).toBeDefined();
-    expect(warning).toContain("settings.yml check");
+    expect(warning).toContain("settings opt-in check");
     expect(warning).toContain(
       "https://api.github.com/repos/h**-d**i bad gateway; h**-d**i unreachable",
     );
     expect(main.summary).toContain("- h**-d**i");
   });
 
-  test("a hinted repo's no-settings-home warning and summary carry the hint", () => {
-    const warning = main.stdout.split("\n").find((line) => line.startsWith("::warning::h**-n**e"));
+  test("a hinted repo's unreadable-modules warning and summary carry the hint", () => {
+    const warning = main.stdout.split("\n").find((line) => line.startsWith("::warning::h**-n**s"));
     expect(warning).toBeDefined();
-    expect(warning).toContain("no settings/repos/<name>.yml here");
-    expect(main.summary).toContain("- h**-n**e");
+    expect(warning).toContain("no readable top-level modules list");
+    expect(main.summary).toContain("- h**-n**s");
   });
 
   test("a private dispatch input arrives via the event payload and never prints", () => {
@@ -298,15 +326,14 @@ describe("select_settings_repos.ts", () => {
     }
     const targets = targetsOf(r);
     expect(targets).toHaveLength(1);
-    expect(targets[0].home).toBe("in-repo");
     expect(targets[0].redact_name).toBe(true);
   });
 
-  test("a bare central-file name scopes the heal to its central row", () => {
-    const r = run("dispatch-central", { env: { ONLY_REPO: "central-home" } });
+  test("a bare name scopes the heal, the operator repo's own included", () => {
+    const r = run("dispatch-self", { env: { ONLY_REPO: "repo-platform" } });
     expect(r.exitCode).toBe(0);
     expect(targetsOf(r)).toEqual([
-      expect.objectContaining({ repo: "Vivswan/central-home", home: "central" }),
+      expect.objectContaining({ repo: "Vivswan/repo-platform", redact_name: false }),
     ]);
   });
 
@@ -332,26 +359,13 @@ describe("select_settings_repos.ts", () => {
     expect(result.stdout).toContain("repos.yml");
   });
 
-  test("a matrix-builder failure is loud: its captured ::error:: is forwarded", () => {
-    const broken = join(root, "broken-central-fixture");
-    mkdirSync(join(broken, "settings", "repos"), { recursive: true });
-    symlinkSync(join(repoRoot, ".github"), join(broken, ".github"));
-    writeFileSync(join(broken, "repos.yml"), "managed:\n  - Vivswan/steady\n");
-    // A .yaml central file is a shape build_settings_matrix.ts rejects.
-    writeFileSync(join(broken, "settings", "repos", "steady.yaml"), "repository: {}\n");
-    const result = run("broken-central", { cwd: broken });
-    expect(result.exitCode).not.toBe(0);
-    expect(result.stdout).toContain("::error::");
-    expect(result.stdout).toContain("steady.yaml");
-  });
-
   test("a failed discovery still fails the whole run", () => {
     const result = run("no-discovery", { env: { STUB_FAIL_DISCOVERY: "1" } });
     expect(result.exitCode).not.toBe(0);
   });
 
-  // A stub bun ahead of the real one corrupts one pipeline stage's JSON
-  // per flag; everything else (including this test's own script
+  // A stub bun ahead of the real one corrupts (or fails) one pipeline
+  // stage per flag; everything else (including this test's own script
   // invocation) execs through to the real bun. The bare identifiers are
   // the leaking form: a raw JSON.parse error would quote them into this
   // public log, so both parses must fail with the fixed value-free
@@ -368,6 +382,9 @@ describe("select_settings_repos.ts", () => {
         "fi",
         'if [ -n "$STUB_CORRUPT_MATRIX" ]; then',
         '  case "$*" in *build_settings_matrix.ts*) echo \'[{"repo": corruptmatrix}]\'; exit 0 ;; esac',
+        "fi",
+        'if [ -n "$STUB_FAIL_MATRIX" ]; then',
+        '  case "$*" in *build_settings_matrix.ts*) echo "::error::matrix builder boom"; exit 1 ;; esac',
         "fi",
         'exec "$REAL_BUN" "$@"',
         "",
@@ -407,5 +424,18 @@ describe("select_settings_repos.ts", () => {
     for (const channel of [r.stdout, r.stderr, r.summary]) {
       expect(channel).not.toContain("corruptmatrix");
     }
+  });
+
+  test("a matrix-builder failure is loud: its captured ::error:: is forwarded", () => {
+    const stub = corruptStubBin("fail-matrix");
+    const r = run("fail-matrix", {
+      env: {
+        PATH: `${stub}:${bin}:${process.env.PATH}`,
+        REAL_BUN: process.execPath,
+        STUB_FAIL_MATRIX: "1",
+      },
+    });
+    expect(r.exitCode).not.toBe(0);
+    expect(r.stdout).toContain("::error::matrix builder boom");
   });
 });

@@ -63,7 +63,7 @@ select_modules() {
 }
 
 # Idempotent local reruns: drop the artifacts of a previous run.
-rm -rf "$PROJECT" "$WORK" /tmp/next /tmp/old-tree /tmp/upgrade-vis /tmp/upgrade-vis-work /tmp/upgrade-del /tmp/upgrade-del-hunks.md
+rm -rf "$PROJECT" "$WORK" /tmp/next /tmp/old-tree /tmp/upgrade-vis /tmp/upgrade-vis-work /tmp/upgrade-del /tmp/upgrade-del-hunks.md /tmp/upgrade-settings /tmp/upgrade-settings-work
 mkdir -p "$WORK"
 git worktree remove --force /tmp/wt 2>/dev/null || true
 git worktree prune
@@ -508,13 +508,11 @@ if git -C "$GITHUB_WORKSPACE" ls-tree -r --name-only "$prev" | grep -qF "CONTRIB
   test -f CODE_OF_CONDUCT.md || fail "public fixture render is missing CODE_OF_CONDUCT.md"
   grep -qF "dependency-review:" .github/workflows/ci.yml \
     || fail "public fixture ci.yml is missing the dependency-review job"
-  grep -qF "security_and_analysis:" .github/settings.yml \
-    || fail "public fixture settings.yml is missing security_and_analysis"
 fi
+# The identity starter (repo-owned; the managed settings baseline is
+# computed centrally, so no rulesets or labels render here).
 grep -qxF "  private: false" .github/settings.yml \
   || fail "public fixture settings.yml does not declare private: false"
-grep -qF "type: code_scanning" .github/settings.yml \
-  || fail "public fixture settings.yml is missing the code_scanning rule"
 grep -qF "codeql-javascript" .github/workflows/ci.yml \
   || fail "public fixture ci.yml is missing the codeql-javascript job"
 git init -q -b main
@@ -634,20 +632,16 @@ fi
 if grep -qF "dependency-review" .github/workflows/ci.yml; then
   fail "ci.yml kept the dependency-review job after the flip to private"
 fi
-if grep -qF "security_and_analysis" .github/settings.yml; then
-  fail "settings.yml kept security_and_analysis after the flip to private"
-fi
-grep -qxF "  private: true" .github/settings.yml \
-  || fail "settings.yml's private line did not flip to true"
-# The other always-declared identity keys must survive the three-way merge
-# with their empty declare-and-clear values intact.
+# settings.yml is a repo-owned starter: the flip must NOT rewrite it (the
+# managed baseline follows live visibility centrally; the file keeps the
+# repo's own declarations, drift surfacing via the settings-drift report).
+grep -qxF "  private: false" .github/settings.yml \
+  || fail "the repo-owned settings.yml was rewritten by the flip (it must keep its declarations)"
+# The other always-declared identity keys survive untouched too.
 grep -qxF '  homepage: ""' .github/settings.yml \
   || fail "settings.yml lost the empty homepage declaration across the update"
 grep -qxF '  topics: ""' .github/settings.yml \
   || fail "settings.yml lost the empty topics declaration across the update"
-if grep -qF "type: code_scanning" .github/settings.yml; then
-  fail "settings.yml kept the code_scanning rule after the flip to private"
-fi
 # The unconditional header comment mentions CodeQL by name, so assert on
 # the machinery: the job (and its reusable-workflow call) and the gate's
 # needs entry all carry the codeql-javascript identifier.
@@ -663,7 +657,7 @@ fi
 if find . -name '*.rej' -not -path './.git/*' | grep -q .; then
   fail "the visibility flip left .rej files behind"
 fi
-echo "visibility flip OK: CONTRIBUTING.md retired, private declared true, codeql stripped"
+echo "visibility flip OK: CONTRIBUTING.md retired, settings starter untouched, codeql stripped"
 
 # --- Committed LICENSE deletion (fleet license mandatory) ----------------
 # A repo still on the fleet license that committed a LICENSE deletion:
@@ -869,3 +863,116 @@ if grep -rIqF "$split_marker" . --exclude-dir=.git; then
   fail "the split-file rebuild left unresolved copier conflict markers"
 fi
 echo "split-file rebuild OK: tails byte-preserved, managed halves byte-equal to render-new, managed-half edit reset and flagged"
+# --- settings.yml layering transition (customized client) ----------------
+# A repo generated before the two-layer settings model carries the full
+# old baseline in a settings.yml still marked with the retired mergeable
+# class, customized with its own topics and one extra label. The sync must
+# REPLACE the file with the identity starter - custom topics carried over,
+# live description seeded from the freshly recorded answers - and list the
+# extra label (the only declaration differing from the computed managed
+# baseline) in the PR-body section that holds the PR for review. Fixture
+# on the NEW build: the legacy file shape is planted by hand, because no
+# current template renders it.
+SET=/tmp/upgrade-settings
+SET_WORK=/tmp/upgrade-settings-work
+mkdir -p "$SET_WORK"
+cd "$GITHUB_WORKSPACE"
+copier copy "$GITHUB_WORKSPACE" "$SET" \
+  --vcs-ref templates/v99.99.99 --defaults --trust \
+  -d project_name="Settings Transition" \
+  -d description="Settings-transition project" \
+  -d 'modules=[uv, settings-sync]' \
+  -d channel="latest" \
+  -d private="false"
+cd "$SET"
+# The freshly rendered starter must NOT carry the retired marker (the
+# transition would otherwise re-fire on every sync).
+if grep -qxF "# repo-platform:mergeable" .github/settings.yml; then
+  fail "the settings-sync starter still renders the retired mergeable marker"
+fi
+# Plant the legacy baseline file: the retired marker, the identity keys
+# with custom topics, one baseline-equal policy key, and the labels the
+# old template rendered plus one deliberate extra.
+cat > .github/settings.yml <<'LEGACY'
+---
+# Rendered by the settings-sync module (legacy baseline shape).
+# repo-platform:mergeable
+repository:
+  description: Settings-transition project
+  homepage: ""
+  topics: kept, custom, topics
+  private: false
+  has_issues: true
+labels:
+  - name: dependencies
+    color: "0366d6"
+    description: Dependency updates
+  - name: incident
+    color: "b60205"
+    description: A deliberate repo-only label
+LEGACY
+git init -q -b main
+git add --all
+git -c user.name=ci -c user.email=ci@localhost commit -q -m "chore: init with legacy settings"
+
+cd "$GITHUB_WORKSPACE"
+export MODULES='["uv", "settings-sync"]'
+export CHANNEL=latest
+export PRIVATE=false
+export DESCRIPTION="Live transition description"
+export TARGET_DIR="$SET"
+export TARGET_REF=templates/v99.99.99
+RECOVER="" bun .github/scripts/sync/apply_update.ts
+bun .github/scripts/sync/resolve_copier_conflicts.ts \
+  --summary "$SET_WORK/dropped-local-hunks.md" --root "$SET"
+RECOVER="" RUNNER_TEMP="$SET_WORK" bun .github/scripts/sync/preserve_repo_owned.ts
+TARGET_DIR="$SET" bun .github/scripts/sync/stamp_manifest.ts
+bun "$GITHUB_WORKSPACE/actions/validate-template/validate_generated_files.ts" "$SET"
+
+cd "$SET"
+# The legacy file was replaced with the identity starter: the retired
+# marker and the baseline copies are gone, the identity keys survive -
+# custom topics from the old file, the live description from the
+# post-update recorded answers.
+if grep -qxF "# repo-platform:mergeable" .github/settings.yml; then
+  fail "the layering transition left the retired mergeable marker in settings.yml"
+fi
+grep -qxF '  topics: "kept, custom, topics"' .github/settings.yml \
+  || fail "the transition dropped the repo's custom topics from the new starter"
+grep -qxF '  description: "Live transition description"' .github/settings.yml \
+  || fail "the transition did not seed the live description into the new starter"
+grep -qxF "  private: false" .github/settings.yml \
+  || fail "the transition did not seed private into the new starter"
+if grep -qF "has_issues" .github/settings.yml; then
+  fail "the transition kept a baseline policy key in the repo-owned starter"
+fi
+if grep -qF "incident" .github/settings.yml; then
+  fail "the transition kept the old labels section in the repo-owned starter"
+fi
+# The PR-body section lists exactly the dropped overrides: the repo-only
+# label, never the baseline-equal keys or the carried identity keys.
+test -s "$SET_WORK/settings-layering.md" \
+  || fail "the transition dropped an override but wrote no settings-layering section"
+grep -qF 'labels "incident"' "$SET_WORK/settings-layering.md" \
+  || fail "the settings-layering section does not name the dropped repo-only label"
+if grep -qF "repository.has_issues" "$SET_WORK/settings-layering.md"; then
+  fail "the settings-layering section lists a baseline-equal key as dropped"
+fi
+if grep -qF "repository.topics" "$SET_WORK/settings-layering.md"; then
+  fail "the settings-layering section lists a carried identity key as dropped"
+fi
+# The manifest classes settings.yml as a starter now (no hash).
+[ "$(TARGET_DIR="$SET" python3 -c 'import json, os
+entry = json.load(open(os.path.join(os.environ["TARGET_DIR"], ".github/repo-platform-manifest.json")))["files"].get(".github/settings.yml")
+print("absent" if entry is None else entry.get("class", "missing"))')" = "starter" ] \
+  || fail "the manifest does not class settings.yml as a starter after the transition"
+# One-time: a second preserve pass over the transitioned tree must leave
+# the file byte-identical and report nothing.
+cp .github/settings.yml "$SET_WORK/settings-after-first-pass.yml"
+cd "$GITHUB_WORKSPACE"
+RECOVER="" RUNNER_TEMP="$SET_WORK" bun .github/scripts/sync/preserve_repo_owned.ts
+cmp -s "$SET/.github/settings.yml" "$SET_WORK/settings-after-first-pass.yml" \
+  || fail "the layering transition re-fired on an already-transitioned starter"
+test -s "$SET_WORK/settings-layering.md" \
+  && fail "the second pass wrote a settings-layering section for nothing"
+echo "settings layering transition OK: starter replaced once, custom topics carried, dropped override listed"

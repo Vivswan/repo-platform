@@ -34,12 +34,7 @@ This repo pushes updates to managed repos: sync PRs and settings changes origina
 
 ### Repository settings
 
-A repo's settings live in one of two homes, both applied from here by the [settings-repos workflow](.github/workflows/settings-repos.yml) through [github-settings-as-code](https://github.com/Vivswan/github-settings-as-code) (details in [docs/settings.md](docs/settings.md)):
-
-- Central: `settings/repos/<name>.yml` in this repo, with `settings/defaults.yml` deep-merged under every target.
-- In-repo: the repo's own `.github/settings.yml` - carrying the file is the whole opt-in. The `settings-sync` module is optional sugar on top: it seeds the file and adds push-time self-apply.
-
-A central file wins when both exist for the same repo, and the sync never deletes a repo's `.github/settings.yml`.
+Selecting the `settings-sync` module in a repo's `.repo-platform.yml` opts it into centrally managed settings, applied from here by the [settings-repos workflow](.github/workflows/settings-repos.yml) through [github-settings-as-code](https://github.com/Vivswan/github-settings-as-code) (details in [docs/settings.md](docs/settings.md)): the managed baseline (shared policy block, module-derived label roster, fleet rulesets) is computed per repository at apply time, and the repo's own `.github/settings.yml` - a generated-once identity starter carrying its description, homepage, topics, visibility, and local overrides - deep-merges over it. The sync never deletes a repo's `.github/settings.yml`, and the module's rendered workflow adds optional push-time self-apply of the same merge.
 
 ### Credentials
 

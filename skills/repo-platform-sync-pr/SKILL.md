@@ -20,14 +20,14 @@ Work in this order, always:
 ## When to Apply
 
 - A PR titled `chore: update repo-platform template to staging@<sha>` or `... to templates/vX.Y.Z` appeared, head branch `automation/repo-platform-staging` (or `-latest`)
-- The PR body warns about merge conflicts, dropped local lines, retired files, withheld workflow files, settings drift, or failed validation
+- The PR body warns about merge conflicts, dropped local lines, retired files, withheld workflow files, settings drift, a settings.yml layering transition, or failed validation
 - A sync run failed with "recorded _commit ... does not resolve" / "no base to update from" (see [references/recovery.md](references/recovery.md))
 
 ## What the PR is
 
 - A three-way `copier update`: the template's render at the repo's recorded base (`_commit` in `.copier-answers.yml`, quoted as "Previous:" in the PR body) is diffed against the render at the new ref ("New:"), and that diff is merged onto the repo's current state. Local edits to non-split files survive unless they overlap a template change. Split-class files (a `repo-platform:local-section` marker or the `.gitignore` LOCAL region separates the halves) never ride that merge: after the update they are REBUILT structurally - the managed half from a clean render at the new ref, the repository-local half byte-for-byte from the repo's last commit. Content in the repo-owned half always survives; local edits INSIDE a managed half are reset on every sync (they used to survive by merge luck) - the PR body flags each reset and the PR stays manual-review.
 - The head branch `automation/repo-platform-<channel>` is REGENERATED on every sync run (release, weekly cron, or dispatch) with a lease-guarded force-push. Manual commits sitting on it when the next run starts are overwritten by design; the PR body says so.
-- Clean updates arm squash auto-merge: the PR merges itself once the repo's required `all-green` check passes. A PR stays manual-review when any of these hold: auto-resolved conflicts, a split-file carry needing review (an appendix, reset managed-half edits, duplicate markers), failed validation, a recovery re-render, a forced-manual dispatch, a deleted license file, withheld workflow files, or out-of-band settings drift.
+- Clean updates arm squash auto-merge: the PR merges itself once the repo's required `all-green` check passes. A PR stays manual-review when any of these hold: auto-resolved conflicts, a split-file carry needing review (an appendix, reset managed-half edits, duplicate markers), failed validation, a recovery re-render, a forced-manual dispatch, a deleted license file, withheld workflow files, out-of-band settings drift, or a settings.yml layering transition that dropped overrides.
 
 Find and open the PR from the repo:
 
@@ -65,7 +65,7 @@ Do not resolve, approve, or merge until every file in the diff is accounted for.
    gh pr view <number> --json files --jq '.files[]|[.path,.additions,.deletions]|@tsv'
    ```
 
-2. Classify each path against the file-class table ([references/file-ownership.md](references/file-ownership.md)): fully managed, generated-once starter, local-section file, mergeable, or repo-owned.
+2. Classify each path against the file-class table ([references/file-ownership.md](references/file-ownership.md)): fully managed, generated-once starter, local-section file, or repo-owned.
 3. Inspect any file you cannot clear from the stats alone. `gh pr diff` takes no pathspec, so use git:
 
    ```bash
@@ -99,7 +99,7 @@ What "restore the dropped lines" means depends on who owns the file (the full ta
 - Generated-once starters (checks.yml, update-release.yml, update-release-pr.yml, nightly-fuzz.yml, nightly.yml, issue forms, release-please config, .gitleaks.toml, the .claude-plugin manifests, ...): never touched once they exist, so they do not conflict. Additions are explained by the modules diff; modifications or deletions are not - stop and look.
 - Managed-tail sentinel files (AGENTS.md, SECURITY.md, CONTRIBUTING.md, LICENSE.md, .gitattributes, .editorconfig, .github/CODEOWNERS below the marker): local content belongs BELOW the marker - the rebuild carries it byte-for-byte every sync. Content ABOVE the marker is reset every sync (the carry summary flags each reset); re-add anything durable below the marker, never in place.
 - `.gitignore`: local entries belong inside the BEGIN/END REPOSITORY LOCAL section, which the rebuild carries byte-for-byte; entries hand-added to the managed section are reset the same way.
-- `.github/settings.yml`: restore dropped hunks before merging. A key the resolution dropped toward the template is declared empty, and the nightly settings heal then CLEARS the live value (homepage, topics) - the dropped-hunk warning is the only tell.
+- `.github/settings.yml`: a repo-owned starter (identity keys + local overrides); the managed baseline is computed centrally and merged under it, so sync never touches the file - except the one-time layering transition, whose PR-body section lists the old declarations it dropped. Re-add wanted overrides to the new file on the branch before merging.
 
 ## Fix the PR
 

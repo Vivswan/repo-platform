@@ -8,25 +8,23 @@ import { describe, expect, test } from "bun:test";
 import {
   applyDivergences,
   canonical,
-  centralIdentityMismatches,
   expandCheckChain,
   extractUsesPins,
   firstDiff,
   gatesOnModule,
   inlineFunctionCopies,
   mustMatch,
-  parseLabels,
   pinMismatches,
   RECORDED_DIVERGENCES,
   SETUP_VERSION_FILES,
   semanticLines,
   setMismatch,
+  settingsIdentityMismatches,
   stepCarriesWithKey,
   stripGeneratedRegions,
   zToDollar,
 } from "../../scripts/check_ssot";
 import { MARKER_TOKENS, mdMarkers } from "../../scripts/generate";
-import { placeholderJinja } from "../../scripts/jinja_subset";
 
 describe("applyDivergences", () => {
   const entry = {
@@ -262,33 +260,33 @@ describe("gatesOnModule", () => {
   });
 });
 
-describe("centralIdentityMismatches", () => {
+describe("settingsIdentityMismatches", () => {
   const identity = { description: "x", homepage: "", topics: "", private: false };
 
   test("passes when all four identity keys are declared, empty strings included", () => {
-    expect(centralIdentityMismatches(identity)).toEqual([]);
-    expect(centralIdentityMismatches({ ...identity, private: true, topics: "a, b" })).toEqual([]);
+    expect(settingsIdentityMismatches(identity)).toEqual([]);
+    expect(settingsIdentityMismatches({ ...identity, private: true, topics: "a, b" })).toEqual([]);
   });
 
   test("flags a missing or stringly-typed private key", () => {
     const { private: _, ...rest } = identity;
-    expect(centralIdentityMismatches(rest)).toHaveLength(1);
-    const [mismatch] = centralIdentityMismatches({ ...identity, private: "false" });
+    expect(settingsIdentityMismatches(rest)).toHaveLength(1);
+    const [mismatch] = settingsIdentityMismatches({ ...identity, private: "false" });
     expect(mismatch.file).toContain("repository.private");
   });
 
   test("flags a missing or empty description", () => {
     const { description: _, ...rest } = identity;
-    expect(centralIdentityMismatches(rest)).toHaveLength(1);
-    const [mismatch] = centralIdentityMismatches({ ...identity, description: "" });
+    expect(settingsIdentityMismatches(rest)).toHaveLength(1);
+    const [mismatch] = settingsIdentityMismatches({ ...identity, description: "" });
     expect(mismatch.file).toContain("repository.description");
   });
 
   test("flags undeclared homepage and topics keys", () => {
-    const mismatches = centralIdentityMismatches({ description: "x", private: false });
+    const mismatches = settingsIdentityMismatches({ description: "x", private: false });
     expect(mismatches.map((m) => m.file)).toEqual([
-      "settings/repos/repo-platform.yml repository.homepage",
-      "settings/repos/repo-platform.yml repository.topics",
+      ".github/settings.yml repository.homepage",
+      ".github/settings.yml repository.topics",
     ]);
   });
 });
@@ -297,31 +295,6 @@ describe("zToDollar", () => {
   test("normalizes a python \\Z end anchor to $", () => {
     expect(zToDollar("^a{0,49}\\Z")).toBe("^a{0,49}$");
     expect(zToDollar("^a$")).toBe("^a$");
-  });
-});
-
-describe("parseLabels", () => {
-  test("parses name/color/description tuples from a settings roster", () => {
-    const roster = 'labels:\n  - name: bug\n    color: "d73a4a"\n    description: Broken\n';
-    expect(parseLabels(roster, "f")).toEqual([
-      { name: "bug", color: "d73a4a", description: "Broken" },
-    ]);
-  });
-
-  test("throws loudly when the labels list is missing", () => {
-    expect(() => parseLabels("repository: {}", "f")).toThrow("no labels list");
-  });
-
-  test("throws loudly when a label drops a field", () => {
-    const roster = 'labels:\n  - name: bug\n    color: "d73a4a"\n';
-    expect(() => parseLabels(roster, "f")).toThrow("has no description");
-  });
-
-  test("normalized fragment output parses as a roster", () => {
-    const fragment =
-      '  - name: {{ fuzzer_label | tojson }}\n    color: "B60205"\n    description: Fuzz\n';
-    const labels = parseLabels(`labels:\n${placeholderJinja(fragment)}`, "f");
-    expect(labels[0].color).toBe("B60205");
   });
 });
 

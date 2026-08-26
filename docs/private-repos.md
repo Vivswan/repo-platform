@@ -27,7 +27,6 @@ Names already committed in this public repository cannot be un-published, so red
 |---|---|---|
 | wildcard discovery only | hint | hidden |
 | explicit `managed:`/`exclude:`/`config:` entry in repos.yml | plain | hidden |
-| `settings/repos/<name>.yml` central file | plain | hidden |
 | public repo | plain | shown |
 
 Only wildcard-discovered private repos get true non-disclosure. Today every private repo in the fleet is wildcard-discovered (the registry's committed entries name public repos), so in practice every private repo is hinted.
