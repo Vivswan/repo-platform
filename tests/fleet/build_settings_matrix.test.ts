@@ -7,11 +7,12 @@ import {
 } from "../../.github/scripts/fleet/build_settings_matrix";
 import type { EnrichedRow } from "../../.github/scripts/fleet/redact";
 
-function target(repo: string): Target {
+function target(repo: string, hideDetails = false): Target {
   return {
     repo,
     name: repo.split("/").pop() ?? repo,
     redact_name: false,
+    hide_details: hideDetails,
     verify: "",
   };
 }
@@ -33,6 +34,7 @@ describe("selfTarget", () => {
       repo: "Vivswan/repo-platform",
       name: "repo-platform",
       redact_name: false,
+      hide_details: false,
       verify: "",
     });
   });
@@ -75,6 +77,7 @@ describe("buildMatrix", () => {
         repo: "h**-s**r",
         name: "h**-s**r",
         redact_name: true,
+        hide_details: true,
         verify: "deadbeef",
       },
     ]);
@@ -90,7 +93,10 @@ describe("buildMatrix", () => {
       display: "Vivswan/committed-private",
       verify: "",
     };
-    expect(buildMatrix([row], null)).toEqual([target("Vivswan/committed-private")]);
+    // The NAME is disclosed but the content is not: hide_details must
+    // survive the matrix, or the pre-action render and merge steps print
+    // this repo's own label and ruleset names into a public log.
+    expect(buildMatrix([row], null)).toEqual([target("Vivswan/committed-private", true)]);
   });
 
   test("no targets is an empty matrix, not an error", () => {

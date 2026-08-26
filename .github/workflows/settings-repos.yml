@@ -125,6 +125,11 @@ jobs:
     # slug never enters the matrix or this job name; the resolve step
     # recovers it.
     name: apply (${{ matrix.repo }})
+    # Job level so the deliver step's `if:` can read it - a step-level env
+    # is invisible to another step's condition. Rendered as the string
+    # "true"/"false", which is what the comparison below expects.
+    env:
+      HIDE_DETAILS: ${{ matrix.hide_details }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -160,17 +165,27 @@ jobs:
       # through env (already masked). The operator repo itself has no
       # .repo-platform.yml to fetch; its facts come from its recorded
       # answers file in this checkout.
+      # Both of these run BEFORE the settings action, so the action's own
+      # private-repos redaction cannot cover what they print, and both
+      # quote repo-owned content on their diagnostic paths. run_hidden.ts
+      # is the boundary: it passes output through untouched for a public
+      # target and captures it for a hide-details one, publishing only a
+      # generic outcome. HIDE_DETAILS is independent of redact_name - a
+      # private repo can disclose its NAME and still need its content
+      # hidden.
       - name: Render the managed settings baseline
         env:
           GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
           TARGET: ${{ steps.resolve.outputs.repo }}
         run: |
           if [ "$TARGET" = "$GITHUB_REPOSITORY" ]; then
-            bun .github/scripts/fleet/render_managed_settings.ts \
+            bun .github/scripts/sync/run_hidden.ts "settings render" -- \
+              bun .github/scripts/fleet/render_managed_settings.ts \
               --repo "$TARGET" --operator-answers .repo-platform-answers.yml \
               --out "$RUNNER_TEMP/managed-settings.yml"
           else
-            bun .github/scripts/fleet/render_managed_settings.ts \
+            bun .github/scripts/sync/run_hidden.ts "settings render" -- \
+              bun .github/scripts/fleet/render_managed_settings.ts \
               --repo "$TARGET" --out "$RUNNER_TEMP/managed-settings.yml"
           fi
 
@@ -180,6 +195,7 @@ jobs:
           GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
           TARGET: ${{ steps.resolve.outputs.repo }}
         run: >-
+          bun .github/scripts/sync/run_hidden.ts "settings merge" --
           bun .github/scripts/fleet/merge_settings_layers.ts
           --managed "$RUNNER_TEMP/managed-settings.yml"
           --repo-fetch "$TARGET" --out "$RUNNER_TEMP/merged-settings.yml"
@@ -209,3 +225,16 @@ jobs:
           # this repo's job (the action's default) - settings drift must
           # not hide behind a green run.
           on-missing-permission: fail
+
+      # run_hidden.ts keeps a hide-details target's render/merge output out
+      # of this public log, which means the detail only exists in
+      # RUNNER_TEMP. Without this step it would die with the runner and
+      # the operator would see an exit code and nothing else, breaking the
+      # private-detail contract in docs/private-repos.md. TARGET comes
+      # from the resolve step via GITHUB_ENV.
+      - name: Deliver hidden failure diagnostics
+        if: failure() && env.HIDE_DETAILS == 'true' && env.TARGET != ''
+        env:
+          GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: bun .github/scripts/sync/failure_issue.ts deliver

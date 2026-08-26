@@ -46,13 +46,20 @@ export function selectsSettingsSync(registrationText: string): boolean | null {
   return modules.includes("settings-sync");
 }
 
-// No hide_details here: unlike the sync matrix, the apply leg has no
-// consumer for it (the action's own private-repos redaction covers its
-// output, and the visibility probes are the apply's own).
+// hide_details rides the matrix because the apply leg DOES have
+// consumers for it now: the layer render and the merge run as workflow
+// steps BEFORE the action, and their diagnostics quote repo-owned
+// content (duplicate label and ruleset names, tracking-label values,
+// parser errors). The action's own private-repos redaction cannot cover
+// output produced before it runs, and a self-disclosed private repo
+// (redact_name false, hide_details true) would otherwise have that
+// content printed to a public log. settings-repos.yml passes this to
+// run_hidden.ts, which is the boundary that keeps it out.
 export interface Target {
   repo: string;
   name: string;
   redact_name: boolean;
+  hide_details: boolean;
   verify: string;
 }
 
@@ -63,6 +70,7 @@ export function selfTarget(self: string): Target {
     repo: self,
     name: self.split("/").pop() ?? self,
     redact_name: false,
+    hide_details: false,
     verify: "",
   };
 }
@@ -80,6 +88,7 @@ export function buildMatrix(rows: EnrichedRow[], self: Target | null): Target[] 
       repo: row.redact_name ? row.display : row.repo,
       name: row.redact_name ? row.display : (row.repo.split("/").pop() ?? row.repo),
       redact_name: row.redact_name,
+      hide_details: row.hide_details,
       verify: row.verify,
     });
   }

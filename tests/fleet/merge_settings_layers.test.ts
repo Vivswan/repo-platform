@@ -171,6 +171,54 @@ describe("mergeOutcome", () => {
   });
 });
 
+describe("mergeRulesetEntry", () => {
+  test("a partial nested object deep-merges instead of replacing", () => {
+    const merged = mergeSettingsLayers(
+      {
+        rulesets: [
+          { name: "main", conditions: { ref_name: { include: ["~DEFAULT"], exclude: [] } } },
+        ],
+      },
+      { rulesets: [{ name: "main", conditions: { ref_name: { exclude: ["refs/heads/tmp"] } } }] },
+    ) as { rulesets: Record<string, unknown>[] };
+    // The include survives: only the declared child is replaced.
+    expect(merged.rulesets[0]?.conditions).toEqual({
+      ref_name: { include: ["~DEFAULT"], exclude: ["refs/heads/tmp"] },
+    });
+  });
+
+  test("an explicit null on a ruleset field removes the key", () => {
+    const merged = mergeSettingsLayers(
+      { rulesets: [{ name: "main", target: "branch", bypass_actors: [{ actor_id: 5 }] }] },
+      { rulesets: [{ name: "main", bypass_actors: null }] },
+    ) as { rulesets: Record<string, unknown>[] };
+    // Emitting the literal null would have GitHub reject the ruleset.
+    expect("bypass_actors" in (merged.rulesets[0] ?? {})).toBe(false);
+    expect(merged.rulesets[0]?.target).toBe("branch");
+  });
+});
+
+describe("stripNulls on emitted entries", () => {
+  test("a repo-ONLY ruleset never reaches the document carrying a null", () => {
+    // A one-sided entry skips the merge entirely, so without normalizing
+    // every emitted entry its null lands literally and GitHub rejects the
+    // whole ruleset.
+    const merged = mergeSettingsLayers(managed, {
+      rulesets: [{ name: "local", target: "branch", rules: null, bypass_actors: null }],
+    }) as { rulesets: Record<string, unknown>[] };
+    const local = merged.rulesets.find((r) => r.name === "local");
+    expect(local).toEqual({ name: "local", target: "branch" });
+  });
+
+  test("a null nested inside a one-sided entry is stripped too", () => {
+    const merged = mergeSettingsLayers(managed, {
+      rulesets: [{ name: "local", conditions: { ref_name: { include: ["main"], exclude: null } } }],
+    }) as { rulesets: Record<string, unknown>[] };
+    const local = merged.rulesets.find((r) => r.name === "local");
+    expect(local?.conditions).toEqual({ ref_name: { include: ["main"] } });
+  });
+});
+
 describe("appendRules", () => {
   const types = (rules: unknown[]) => rules.map((r) => (r as { type: string }).type);
 

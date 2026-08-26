@@ -165,8 +165,14 @@ describe("droppedOverrides", () => {
 });
 
 describe("layeringSummary", () => {
-  test("empty when nothing was dropped", () => {
-    expect(layeringSummary([])).toBe("");
+  test("a lossless transition still gets a section: the file changed owner", () => {
+    // open_pr.ts arms auto-merge only when every review-forcing section
+    // is empty, and the ownership flip is itself the manual-review event -
+    // so this must never be "".
+    const summary = layeringSummary([]);
+    expect(summary).not.toBe("");
+    expect(summary).toContain("Nothing was dropped");
+    expect(summary).toContain("held for review");
   });
 
   test("lists the dropped keys and tells the reviewer what to do", () => {
@@ -247,7 +253,7 @@ describe("transitionSettingsStarter", () => {
     expect(section).not.toContain("repository.has_issues");
   });
 
-  test("a lossless transition still replaces but writes no section", () => {
+  test("a lossless transition still replaces, and is still held for review", () => {
     const lossless = legacySettings.replace(
       /labels:[\s\S]*$/,
       "labels:\n  - name: dependencies\n" +
@@ -263,7 +269,11 @@ describe("transitionSettingsStarter", () => {
     expect(readFileSync(join(dir, ".github/settings.yml"), "utf-8")).not.toContain(
       LEGACY_MERGEABLE_LINE,
     );
-    expect(readFileSync(out, "utf-8")).toBe("");
+    // Nothing dropped, but the file still changed owner, so the PR is
+    // still held: a non-empty section is what does the holding.
+    const section = readFileSync(out, "utf-8");
+    expect(section).toContain("Nothing was dropped");
+    expect(section).toContain("held for review");
   });
 
   test("a marker-less file (hand-written or already transitioned) is never touched", () => {
@@ -446,6 +456,53 @@ describe("transitionSettingsStarter", () => {
     expect(section).not.toContain('rule "deletion"');
     // ...and the genuinely repo-only type is still reported.
     expect(section).toContain('rulesets "main": rule "required_signatures"');
+  });
+
+  test("an explicitly null identity key is preserved, not re-seeded", () => {
+    // homepage: null in the old file means the repo took the field OUT of
+    // management and the heal was honouring that. Falling back to the
+    // recorded answer would silently start managing it again.
+    const { dir, out } = target({
+      settings: legacySettings.replace('  homepage: ""', "  homepage: null"),
+      modules: "modules: [settings-sync]\n",
+      answers,
+    });
+    transitionSettingsStarter(dir, out, "t");
+    const doc = parseYaml(readFileSync(join(dir, ".github/settings.yml"), "utf-8")) as {
+      repository: Record<string, unknown>;
+    };
+    expect("homepage" in doc.repository).toBe(true);
+    expect(doc.repository.homepage).toBeNull();
+  });
+
+  test("an explicitly null private is preserved: visibility stays unmanaged", () => {
+    // private takes its own path (facts.private, which falls back to the
+    // recorded answer), so it needs its own guard against the same
+    // absent-vs-null conflation.
+    const { dir, out } = target({
+      settings: legacySettings.replace("  private: false", "  private: null"),
+      modules: "modules: [settings-sync]\n",
+      answers,
+    });
+    transitionSettingsStarter(dir, out, "t");
+    const doc = parseYaml(readFileSync(join(dir, ".github/settings.yml"), "utf-8")) as {
+      repository: Record<string, unknown>;
+    };
+    expect("private" in doc.repository).toBe(true);
+    expect(doc.repository.private).toBeNull();
+  });
+
+  test("an ABSENT identity key still falls back to the recorded answer", () => {
+    const { dir, out } = target({
+      settings: legacySettings.replace('  homepage: ""\n', ""),
+      modules: "modules: [settings-sync]\n",
+      answers: answers.replace('homepage: ""', 'homepage: "https://example.test"'),
+    });
+    transitionSettingsStarter(dir, out, "t");
+    const doc = parseYaml(readFileSync(join(dir, ".github/settings.yml"), "utf-8")) as {
+      repository: Record<string, unknown>;
+    };
+    expect(doc.repository.homepage).toBe("https://example.test");
   });
 
   test("fail-soft: a broken answers file leaves the old file for the next sync", () => {

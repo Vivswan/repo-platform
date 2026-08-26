@@ -55,11 +55,37 @@ export const OVERRIDE_PATH = join(REPO_ROOT, ".github/settings-override.yml");
  *  that only wants to add a rule. */
 const NAME_KEYED: Record<
   string,
-  { fold: (name: string) => string; combine: (lower: unknown, higher: unknown) => unknown }
+  {
+    fold: (name: string) => string;
+    combine: (lower: unknown, higher: unknown) => unknown;
+    /** Applied to EVERY emitted entry, not just merged ones: an entry
+     *  contributed by one side alone never passes through the merge, so
+     *  without this its nulls would reach the document literally. */
+    normalize?: (entry: unknown) => unknown;
+  }
 > = {
   labels: { fold: (name) => name.toLowerCase(), combine: (_lower, higher) => higher },
-  rulesets: { fold: (name) => name, combine: (lower, higher) => mergeRulesetEntry(lower, higher) },
+  rulesets: {
+    fold: (name) => name,
+    combine: (lower, higher) => mergeRulesetEntry(lower, higher),
+    normalize: stripNulls,
+  },
 };
+
+/** The null opt-out, applied inside a list entry: a null-valued key is
+ *  removed rather than emitted. GitHub rejects a ruleset carrying a
+ *  literal null, so an entry that never met a merge partner still has to
+ *  obey the dialect. */
+export function stripNulls(entry: unknown): unknown {
+  if (Array.isArray(entry)) return entry.map(stripNulls);
+  if (!isMapping(entry)) return entry;
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(entry)) {
+    if (value === null) continue;
+    out[key] = stripNulls(value);
+  }
+  return out;
+}
 
 function isMapping(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -113,19 +139,24 @@ export function appendRules(lower: unknown[], higher: unknown[]): unknown[] {
   return merged;
 }
 
-/** Two same-name ruleset entries: every key merged with the higher layer
- *  winning, except `rules`, which appends (see appendRules). */
+/** Two same-name ruleset entries: every field merged by the SAME dialect
+ *  the rest of the document uses - nested objects deep-merge, an explicit
+ *  null strips the key - except `rules`, which appends (see appendRules).
+ *  Doing the fields by hand here is what made a partial `conditions`
+ *  replace the whole lower object and a `bypass_actors: null` land in the
+ *  document literally, which GitHub rejects. */
 export function mergeRulesetEntry(lower: unknown, higher: unknown): unknown {
   if (!isMapping(lower) || !isMapping(higher)) return higher;
-  const merged: Record<string, unknown> = { ...lower };
-  for (const [key, value] of Object.entries(higher)) {
-    if (key === "rules" && Array.isArray(lower.rules) && Array.isArray(value)) {
-      merged.rules = appendRules(lower.rules, value);
-      continue;
-    }
-    merged[key] = value;
-  }
-  return merged;
+  const { rules: lowerRules, ...lowerFields } = lower;
+  const { rules: higherRules, ...higherFields } = higher;
+  const merged: Record<string, unknown> = mergeMappings(lowerFields, higherFields, {});
+  const rules =
+    Array.isArray(lowerRules) && Array.isArray(higherRules)
+      ? appendRules(lowerRules, higherRules)
+      : (higherRules ?? lowerRules);
+  // A null on either side is left for stripNulls, which removes the key.
+  if (rules !== undefined) merged.rules = rules;
+  return stripNulls(merged);
 }
 
 function entryName(entry: unknown): string | null {
@@ -144,6 +175,7 @@ export function nameKeyedUnion(
   repo: unknown[],
   fold: (name: string) => string,
   combine: (lower: unknown, higher: unknown) => unknown = (_lower, higher) => higher,
+  normalize: (entry: unknown) => unknown = (entry) => entry,
 ): unknown[] {
   const repoByName = new Map<string, unknown>();
   for (const entry of repo) {
@@ -155,16 +187,16 @@ export function nameKeyedUnion(
   for (const entry of managed) {
     const name = entryName(entry);
     if (name === null) {
-      merged.push(entry);
+      merged.push(normalize(entry));
       continue;
     }
     const key = fold(name);
     const override = repoByName.get(key);
     if (override !== undefined) {
-      merged.push(combine(entry, override));
+      merged.push(normalize(combine(entry, override)));
       taken.add(key);
     } else {
-      merged.push(entry);
+      merged.push(normalize(entry));
     }
   }
   for (const entry of repo) {
@@ -177,7 +209,7 @@ export function nameKeyedUnion(
     // duplicate rides through once - the same first-wins rule the matched
     // branch applies (duplicateNameWarnings names the duplicate).
     if (!taken.has(fold(name))) {
-      merged.push(entry);
+      merged.push(normalize(entry));
       taken.add(fold(name));
     }
   }
@@ -235,7 +267,13 @@ function mergeMappings(
     const managedValue = managed[key];
     const section = nameKeyed[key];
     if (section !== undefined && Array.isArray(managedValue) && Array.isArray(repoValue)) {
-      merged[key] = nameKeyedUnion(managedValue, repoValue, section.fold, section.combine);
+      merged[key] = nameKeyedUnion(
+        managedValue,
+        repoValue,
+        section.fold,
+        section.combine,
+        section.normalize,
+      );
     } else if (isMapping(managedValue) && isMapping(repoValue)) {
       // Name-keying applies only at the section level; nested objects
       // merge plainly.

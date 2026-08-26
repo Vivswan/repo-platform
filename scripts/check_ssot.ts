@@ -1702,6 +1702,72 @@ const rules: Rule[] = [
   },
 
   {
+    name: "settings-hide-details",
+    run: () => {
+      // The layer render and the merge run BEFORE the settings action, so
+      // the action's own redaction cannot cover their output, and both
+      // quote repo-owned content on their diagnostic paths. hide_details
+      // must therefore reach them: it has to ride the matrix AND be
+      // handed to both steps, which pass it to run_hidden.ts. This was
+      // dropped once already, with a comment explaining why it was safe -
+      // it was not, so the invariant is pinned rather than commented.
+      const mismatches: Mismatch[] = [];
+      const matrix = read(".github/scripts/fleet/build_settings_matrix.ts");
+      if (
+        !/hide_details:\s*boolean/.test(matrix) ||
+        !matrix.includes("hide_details: row.hide_details")
+      ) {
+        mismatches.push({
+          file: ".github/scripts/fleet/build_settings_matrix.ts",
+          expected: "the matrix Target carries hide_details, copied from the row",
+          got: "the flag is not on the matrix",
+        });
+      }
+      const workflow = read(".github/workflows/settings-repos.yml");
+      // Per INVOCATION, not per count: there are two render call sites
+      // (operator and target), so counting matches passed even with a
+      // wrapper removed - which is the exact regression this rule exists
+      // to catch. Fold continuations first, then require every call of
+      // either script to sit behind its own run_hidden wrapper.
+      const flat = workflow.replace(/\\[ \t]*\n/g, " ").replace(/\s+/g, " ");
+      for (const script of ["render_managed_settings", "merge_settings_layers"]) {
+        const calls =
+          flat.match(new RegExp(`bun \\.github/scripts/fleet/${script}\\.ts`, "g")) ?? [];
+        const wrapped =
+          flat.match(
+            new RegExp(
+              `run_hidden\\.ts "settings [a-z]+" -- bun \\.github/scripts/fleet/${script}\\.ts`,
+              "g",
+            ),
+          ) ?? [];
+        if (calls.length === 0 || wrapped.length !== calls.length) {
+          mismatches.push({
+            file: ".github/workflows/settings-repos.yml",
+            expected: `every ${script}.ts call wrapped in run_hidden.ts (${calls.length} call(s))`,
+            got: `${wrapped.length} wrapped`,
+          });
+        }
+      }
+      if (!/^\s+HIDE_DETAILS: \$\{\{ matrix\.hide_details \}\}$/m.test(workflow)) {
+        mismatches.push({
+          file: ".github/workflows/settings-repos.yml",
+          expected: "the apply job takes HIDE_DETAILS from the matrix row",
+          got: "no such env binding",
+        });
+      }
+      if (!flat.includes("failure_issue.ts deliver")) {
+        mismatches.push({
+          file: ".github/workflows/settings-repos.yml",
+          expected:
+            "a deliver step for hidden diagnostics (run_hidden captures them privately; without delivery the detail dies with the runner)",
+          got: "no failure_issue.ts deliver step",
+        });
+      }
+      return mismatches;
+    },
+  },
+
+  {
     name: "settings-apply-skip-gate",
     run: () => {
       // merge_settings_layers.ts writes NO merged document for a target

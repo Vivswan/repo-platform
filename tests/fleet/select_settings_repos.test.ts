@@ -253,30 +253,36 @@ describe("select_settings_repos.ts", () => {
   test("the matrix is intact: skips never drop their neighbors, self included", () => {
     // Explicit personas are absent from discovery, so fail-closed marks
     // them private - self-disclosed names stay, hide_details rides along.
+    // That pairing (redact_name false, hide_details true) is exactly the
+    // case the pre-action render and merge steps must stay quiet for.
     // The operator repo joins as the builder's self row.
     expect(targetsOf(main)).toEqual([
       {
         repo: "Vivswan/flaky",
         name: "flaky",
         redact_name: false,
+        hide_details: true,
         verify: "",
       },
       {
         repo: "Vivswan/repo-platform",
         name: "repo-platform",
         redact_name: false,
+        hide_details: false,
         verify: "",
       },
       {
         repo: "Vivswan/steady",
         name: "steady",
         redact_name: false,
+        hide_details: true,
         verify: "",
       },
       {
         repo: "h**-s**r",
         name: "h**-s**r",
         redact_name: true,
+        hide_details: true,
         verify: expect.stringMatching(/^[0-9a-f]{32}$/),
       },
     ]);

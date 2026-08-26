@@ -58,19 +58,18 @@ export function isLegacyBaseline(text: string): boolean {
   return text.split("\n", LEGACY_HEADER_WINDOW).some((line) => line === LEGACY_MERGEABLE_LINE);
 }
 
+// Each identity value has three states, and they mean different things:
+// a VALUE seeds the key, undefined OMITS it (nothing ever managed it, so
+// declaring "" would declare-and-clear a live value), and null RENDERS as
+// null (the old file explicitly opted out of managing that field, and the
+// null opt-out in the merge dialect is how that intent survives).
 export interface IdentitySeed {
-  /** undefined OMITS the key, like homepage/topics below: declaring ""
-   *  would declare-and-clear a live description neither the old file nor
-   *  the recorded answers ever managed. */
-  description?: string;
+  description?: string | null;
   /** GitHub serves topics as a string in the old renders but tolerates a
-   *  string list; a hand-edited list must survive the transition.
-   *  undefined OMITS the key from the starter - declaring "" would
-   *  declare-and-clear a live value neither the old file nor the recorded
-   *  answers ever managed. Same for homepage. */
-  topics?: string | string[];
-  homepage?: string;
-  private: boolean;
+   *  string list; a hand-edited list must survive the transition. */
+  topics?: string | string[] | null;
+  homepage?: string | null;
+  private: boolean | null;
   /** The owner named in the starter's header comment. */
   githubUsername: string;
 }
@@ -80,8 +79,9 @@ export interface IdentitySeed {
  *  the known identity expressions must carry no jinja at all - so a
  *  template that grew a construct this renderer does not know throws
  *  before anything is substituted. An undefined optional value drops its
- *  whole line; `private` is always defined, so the `repository:` block
- *  can never render empty however many optional keys are dropped.
+ *  whole line; `private` is always present (a value or an explicit
+ *  null), so the `repository:` block can never render empty however many
+ *  optional keys are dropped.
  *
  *  Substitution is a single pass over the template so a seed VALUE can
  *  never be re-read as a template expression, and a template line
@@ -95,7 +95,7 @@ export function renderStarter(templateText: string, seed: IdentitySeed): string 
         "expressions - teach settings_layering.ts's renderStarter the new construct",
     );
   }
-  const values: Record<string, string | string[] | boolean | undefined> = {
+  const values: Record<string, string | string[] | boolean | null | undefined> = {
     description: seed.description,
     homepage: seed.homepage,
     topics: seed.topics,
@@ -257,7 +257,14 @@ export function droppedOverrides(
 /** The PR-body section: empty when the replacement dropped nothing (a
  *  lossless transition needs no review). */
 export function layeringSummary(dropped: string[]): string {
-  if (dropped.length === 0) return "";
+  if (dropped.length === 0) {
+    return `### settings.yml layering transition
+
+This update REPLACED \`.github/settings.yml\` with the identity starter: the fleet's own settings are merged centrally per repository now and this file layers over them (see repo-platform's docs/settings.md), so the old baseline copy had to go. Nothing was dropped - every declaration in the old file was either an identity key (carried over) or something the fleet layers already supply.
+
+The file changed owner, which is why this PR is held for review rather than merging itself: check that the new starter says what you want before merging.
+`;
+  }
   return `### settings.yml layering transition
 
 This update REPLACED \`.github/settings.yml\` with the identity starter: the managed settings baseline (policy block, module labels, fleet rulesets) is now computed centrally per repository and this file merges OVER it (see repo-platform's docs/settings.md), so the old baseline copy had to go. The identity keys were carried over, and baseline-equal declarations are supplied by the managed layer - but these old declarations DIFFER from the baseline and were dropped:
@@ -315,11 +322,25 @@ export function transitionSettingsStarter(
           readFileSync(join(targetDir, ".copier-answers.yml"), "utf-8"),
           join(targetDir, ".copier-answers.yml"),
         );
-        const str = (value: unknown, fallback: unknown) =>
-          typeof value === "string" ? value : typeof fallback === "string" ? fallback : undefined;
         const isTopics = (value: unknown): value is string | string[] =>
           typeof value === "string" ||
           (Array.isArray(value) && value.every((t) => typeof t === "string"));
+        // Presence, not just type: a key the old file DECLARED as null is
+        // a deliberate opt-out ("do not manage this"), and the nightly
+        // heal had been honouring it. Falling back to the recorded answer
+        // there would quietly start managing a field the repo had taken
+        // out of management, so the null declaration is carried into the
+        // starter as-is. Only an ABSENT key falls back.
+        const seedKey = <T>(key: string, accept: (v: unknown) => v is T): T | null | undefined => {
+          if (key in oldRepository) {
+            const declared = oldRepository[key];
+            if (declared === null) return null;
+            if (accept(declared)) return declared;
+          }
+          const recorded = answers[key];
+          return accept(recorded) ? recorded : undefined;
+        };
+        const isString = (value: unknown): value is string => typeof value === "string";
         // The header comment names the owner; shape-checked like the
         // license re-seed's owner pin (a malformed value would render a
         // wrong owner into a repo-owned file).
@@ -338,15 +359,16 @@ export function transitionSettingsStarter(
           // NEITHER source declares one: the starter then omits the key
           // rather than declare-and-clear a live description nothing ever
           // managed.
-          description: str(oldRepository.description, answers.description),
+          description: seedKey("description", isString),
           // undefined when neither source declares the key: the starter
           // then omits it rather than declare-and-clear a live value
           // nothing ever managed.
-          homepage: str(oldRepository.homepage, answers.homepage),
-          topics: isTopics(oldRepository.topics)
-            ? oldRepository.topics
-            : str(answers.topics, undefined),
-          private: facts.private,
+          homepage: seedKey("homepage", isString),
+          topics: seedKey("topics", isTopics),
+          // Same rule for visibility: a declared null means the repo took
+          // visibility out of management, so facts.private (which falls
+          // back to the recorded answer) must not overwrite it.
+          private: oldRepository.private === null ? null : facts.private,
           githubUsername: username,
         };
         // Everything is computed BEFORE the replacement is written: a
@@ -361,15 +383,16 @@ export function transitionSettingsStarter(
         // paste it back into a file that cannot win over it anyway.
         const override = loadOverrideLayer();
         const fleet = mergeSettingsLayers(managedSettings(facts, manifests), override);
-        section = layeringSummary(droppedOverrides(old, fleet, override));
+        const dropped = droppedOverrides(old, fleet, override);
+        section = layeringSummary(dropped);
         writeFileSync(settingsPath, starter);
         notice(
           `${label}: replaced the legacy baseline .github/settings.yml with the identity starter ` +
-            `(the managed baseline is computed centrally now)${
-              section === ""
-                ? "; nothing differed from the baseline, so nothing was dropped"
-                : "; the PR body lists the dropped overrides"
-            }.`,
+            `(the fleet layers are merged centrally now)${
+              dropped.length === 0
+                ? "; nothing differed from the fleet layers, so nothing was dropped"
+                : `; the PR body lists the ${dropped.length} dropped declaration(s)`
+            }. The PR is held for review either way: the file changed owner.`,
         );
       }
     }
