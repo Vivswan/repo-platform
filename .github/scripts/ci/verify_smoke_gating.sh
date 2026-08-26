@@ -47,11 +47,30 @@ elif has skills; then last_need="      - validate-skills"
 elif has release-please; then last_need="      - release-health"
 elif [ "$PRIVATE" != "true" ] && has uv; then last_need="      - codeql-python"
 elif [ "$PRIVATE" != "true" ] && has_codeql_toolchain; then last_need="      - codeql-javascript"
-# copilot-review is the last BASE entry, on every row and both visibilities,
-# so it closes the list whenever no module contributes a gate job.
-else last_need="      - copilot-review"
+# validate-template is the last BASE entry, on every row and both
+# visibilities, so it closes the list whenever no module contributes a gate
+# job.
+else last_need="      - validate-template"
 fi
 adjacent "$last_need" "    runs-on: ubuntu-latest" "$wf/ci.yml"
+
+# validate-template splits: INTEGRITY blocks (so the job is in the gate and
+# a last step re-raises the deferred verdict) while FRESHNESS only informs
+# (one ref compare, never copier, never fatal).
+present_line "  validate-template:" "$wf/ci.yml"
+present_line "      - validate-template" "$wf/ci.yml"
+present "findings-file:" "$wf/ci.yml"
+present "continue-on-error: true" "$wf/ci.yml"
+present "repo-platform:validate-template" "$wf/ci.yml"
+present "steps.integrity.outcome == 'failure'" "$wf/ci.yml"
+present "branches/template" "$wf/ci.yml"
+# The freshness leg must stay a ref compare: a render here would cost every
+# fleet repo a copier run on every push.
+absent_line "          copier copy" "$wf/ci.yml"
+# The comment write is scoped to that one job, never the workflow default.
+present_line "  contents: read" "$wf/ci.yml"
+absent_line "  pull-requests: write" "$wf/ci.yml"
+present_line "      pull-requests: write" "$wf/ci.yml"
 
 # The Copilot bridge is unconditional: the gate job waits for Copilot's review
 # on every managed repo, and the re-arm workflow re-runs JUST that job once the
