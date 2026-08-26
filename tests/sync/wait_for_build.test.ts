@@ -11,7 +11,8 @@ const MAIN_SHA = "a".repeat(40);
 // between records). git: sleeps GIT_SLEEP seconds first when set (the
 // stalled-origin case); ls-remote HEAD prints GIT_HEAD; log prints
 // GIT_TIP_MSG_FILE's content when set (the stamped template tip). gh:
-// serves the runs JSON from GH_RUNS_FILE, or exits 1 when GH_FAIL is set.
+// serves GH_JOBS_FILE for a .../jobs read, otherwise the runs JSON from
+// GH_RUNS_FILE, or exits 1 when GH_FAIL is set.
 const gitStub = `#!/usr/bin/env bash
 set -euo pipefail
 { printf '%s' "git"; for a in "$@"; do printf '\\x1f%s' "$a"; done; printf '\\x1e'; } >>"$CALLS_LOG"
@@ -31,16 +32,28 @@ if [ -n "\${GH_FAIL:-}" ]; then
   echo "gh: boom" >&2
   exit 1
 fi
+for a in "$@"; do
+  case "$a" in
+    */jobs) cat "$GH_JOBS_FILE"; exit 0 ;;
+  esac
+done
 cat "$GH_RUNS_FILE"
 `;
 
 interface Options {
   env?: Record<string, string>;
   runs?: unknown;
+  /** The .../jobs response (defaults to a run whose publish step
+   * succeeded - the published case). */
+  jobs?: unknown;
   /** When set, the git stub serves this as the template tip's commit
    * message (the stamp-fallback path). */
   tipMessage?: string;
 }
+
+const PUBLISHED_JOBS = {
+  jobs: [{ steps: [{ name: "Build and publish", conclusion: "success" }] }],
+};
 
 function run(opts: Options = {}) {
   const root = mkdtempSync(join(tmpdir(), "wait-for-build-"));
@@ -50,6 +63,8 @@ function run(opts: Options = {}) {
   writeFileSync(join(bin, "gh"), ghStub, { mode: 0o755 });
   const runsFile = join(root, "runs.json");
   writeFileSync(runsFile, JSON.stringify(opts.runs ?? { workflow_runs: [] }));
+  const jobsFile = join(root, "jobs.json");
+  writeFileSync(jobsFile, JSON.stringify(opts.jobs ?? PUBLISHED_JOBS));
   const tipEnv: Record<string, string> = {};
   if (opts.tipMessage !== undefined) {
     const tipFile = join(root, "tip-message.txt");
@@ -63,6 +78,7 @@ function run(opts: Options = {}) {
       PATH: `${bin}:${process.env.PATH}`,
       GITHUB_REPOSITORY: "Vivswan/repo-platform",
       GH_RUNS_FILE: runsFile,
+      GH_JOBS_FILE: jobsFile,
       CALLS_LOG: calls,
       GIT_HEAD: MAIN_SHA,
       // Time is INJECTED, never raced: three fast attempts under a
@@ -105,9 +121,9 @@ describe("wait_for_build.ts", () => {
     expect(source).toContain('Number(env("WAIT_DEADLINE_MS", String(ATTEMPTS * DELAY_MS)))');
   });
 
-  test("reads main HEAD then probes the build-branches runs", () => {
+  test("reads main HEAD, probes the runs, then proves the publish step ran", () => {
     const r = run({
-      runs: { workflow_runs: [{ event: "push", head_sha: MAIN_SHA }] },
+      runs: { workflow_runs: [{ id: 1, event: "push", head_sha: MAIN_SHA }] },
     });
     expect(r.exitCode).toBe(0);
     expect(r.calls).toEqual([
@@ -117,13 +133,28 @@ describe("wait_for_build.ts", () => {
         "api",
         "repos/Vivswan/repo-platform/actions/workflows/build-branches.yml/runs?status=success&per_page=30",
       ],
+      ["gh", "api", "repos/Vivswan/repo-platform/actions/runs/1/jobs"],
     ]);
     expect(r.output).toContain(`the template branch is built from main HEAD ${MAIN_SHA}.`);
   });
 
+  test("a skipped publish step at main HEAD is not fresh (red main's no-op run)", () => {
+    // The workflow_run trigger fires on CI COMPLETED regardless of
+    // conclusion: on a red main every step skips via CI_GREEN while the
+    // run still concludes success at main's HEAD - nothing was published,
+    // so the warning must survive.
+    const r = run({
+      runs: { workflow_runs: [{ id: 1, event: "workflow_run", head_sha: MAIN_SHA }] },
+      jobs: { jobs: [{ steps: [{ name: "Build and publish", conclusion: "skipped" }] }] },
+    });
+    expect(r.exitCode).toBe(0);
+    expect(r.output).not.toContain("is built from main HEAD");
+    expect(r.output).toContain("::warning::no successful Build Branches run");
+  });
+
   test("accepts a successful run of any event kind at main HEAD", () => {
     const r = run({
-      runs: { workflow_runs: [{ event: "workflow_dispatch", head_sha: MAIN_SHA }] },
+      runs: { workflow_runs: [{ id: 1, event: "workflow_dispatch", head_sha: MAIN_SHA }] },
     });
     expect(r.exitCode).toBe(0);
     expect(r.output).toContain(`the template branch is built from main HEAD ${MAIN_SHA}.`);
@@ -134,7 +165,7 @@ describe("wait_for_build.ts", () => {
     // commit, but publish.ts composed origin/main and stamped the tip with
     // it - the runs match misses, the stamp fallback proves freshness.
     const r = run({
-      runs: { workflow_runs: [{ event: "push", head_sha: "b".repeat(40) }] },
+      runs: { workflow_runs: [{ id: 1, event: "push", head_sha: "b".repeat(40) }] },
       tipMessage: `build: template\n\nsource: https://github.com/Vivswan/repo-platform/commit/${MAIN_SHA}\nrun: https://github.com/Vivswan/repo-platform/actions/runs/1\n`,
     });
     expect(r.exitCode).toBe(0);
@@ -153,7 +184,7 @@ describe("wait_for_build.ts", () => {
   test("ignores stale shas, then warns green", () => {
     const r = run({
       runs: {
-        workflow_runs: [{ event: "push", head_sha: "b".repeat(40) }],
+        workflow_runs: [{ id: 1, event: "push", head_sha: "b".repeat(40) }],
       },
     });
     expect(r.exitCode).toBe(0);

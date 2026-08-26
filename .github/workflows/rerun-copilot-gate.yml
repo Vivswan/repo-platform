@@ -67,4 +67,10 @@ jobs:
                 github.event.workflow_run.head_sha ||
                 github.event.pull_request.head.sha }}
           RUN_ID: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.id || '' }}
+          # The commit the triggering review actually covered (review
+          # trigger only): a review of an OLDER head must not re-arm the
+          # new head - the re-review of the new head fires its own event.
+          REVIEW_COMMIT: >-
+            ${{ github.event_name == 'pull_request_review' &&
+                github.event.review.commit_id || '' }}
         run: bun .github/scripts/ci/rerun_copilot_gate.ts

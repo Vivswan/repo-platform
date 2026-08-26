@@ -84,8 +84,34 @@ if (!/^[0-9a-f]{40}$/.test(mainSha)) {
   process.exit(1);
 }
 const runsSchema = z.object({
-  workflow_runs: z.array(z.object({ head_sha: z.string() })),
+  workflow_runs: z.array(z.object({ id: z.number(), head_sha: z.string() })),
 });
+const jobsSchema = z.object({
+  jobs: z.array(
+    z.object({
+      steps: z.array(z.object({ name: z.string(), conclusion: z.string().nullable() })).optional(),
+    }),
+  ),
+});
+/** build-branches.yml's publish step name; only its own success proves a
+ * publish happened. */
+const PUBLISH_STEP = "Build and publish";
+/** Whether a matched build run actually PUBLISHED: the workflow_run
+ * trigger fires on CI COMPLETED regardless of conclusion, and on a red
+ * main every step skips via CI_GREEN while the run still concludes
+ * success at main's HEAD - so a head_sha match alone can name a run that
+ * published nothing. A transient jobs-API failure reads as not-published:
+ * the stamp fallback and the next poll still speak. */
+function runPublished(runId: number, timeoutMs: number): boolean {
+  const jobs = capture(["gh", "api", `repos/${repository}/actions/runs/${runId}/jobs`], {
+    timeoutMs,
+  });
+  if (jobs.exitCode !== 0) return false;
+  const parsed = parseJsonWith(jobsSchema, jobs.stdout, "wait_for_build: run jobs response");
+  return parsed.jobs.some((job) =>
+    (job.steps ?? []).some((step) => step.name === PUBLISH_STEP && step.conclusion === "success"),
+  );
+}
 await waitFor(
   (timeoutMs) => {
     const runs = capture(
@@ -100,9 +126,12 @@ await waitFor(
     // included - reads as not-built-yet: keep polling.
     if (runs.exitCode !== 0) return false;
     const built = parseJsonWith(runsSchema, runs.stdout, "wait_for_build: workflow runs response");
-    // Every build-branches trigger rebuilds the one branch, so any
-    // successful run at main's HEAD proves the build.
-    if (built.workflow_runs.some((run) => run.head_sha === mainSha)) {
+    // Every build-branches trigger rebuilds the one branch, so a
+    // successful run at main's HEAD whose publish step itself succeeded
+    // proves the build (a red main's run also "succeeds" at main's HEAD
+    // with every step skipped - runPublished tells them apart).
+    const matched = built.workflow_runs.filter((run) => run.head_sha === mainSha);
+    if (matched.some((run) => runPublished(run.id, timeoutMs))) {
       console.log(`the template branch is built from main HEAD ${mainSha}.`);
       return true;
     }

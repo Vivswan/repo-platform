@@ -124,12 +124,58 @@ describe("rerun_copilot_gate.ts", () => {
     expect(r.output).toContain("no re-run needed");
   });
 
-  test("the attempt cap breaks re-run loops", () => {
-    const r = run({ runs: { workflow_runs: [{ ...RUN, run_attempt: 5 }] } });
+  test("the attempt cap breaks re-run loops, counted on the GATE JOB's own attempts", () => {
+    // Five prior copilot-review job attempts exhaust the budget...
+    const gateAttempt = (id: number) => ({ id, name: "copilot-review", conclusion: "failure" });
+    const exhausted = run({
+      jobs: { jobs: [900, 901, 902, 903, 904].map(gateAttempt) },
+    });
+    expect(exhausted.exitCode).toBe(0);
+    expect(exhausted.reruns).toEqual([]);
+    expect(exhausted.output).toContain("::warning::");
+    expect(exhausted.output).toContain("loop-breaker");
+    // ... but unrelated flaky-job re-runs must NOT count against it: one
+    // gate attempt among many biome attempts still re-arms.
+    const flaky = run({
+      jobs: {
+        jobs: [
+          { id: 1, name: "biome", conclusion: "success" },
+          { id: 2, name: "biome", conclusion: "success" },
+          { id: 3, name: "biome", conclusion: "success" },
+          { id: 4, name: "biome", conclusion: "success" },
+          { id: 900, name: "copilot-review", conclusion: "failure" },
+        ],
+      },
+    });
+    expect(flaky.exitCode).toBe(0);
+    expect(flaky.reruns.length).toBe(1);
+  });
+
+  test("a re-run targets the NEWEST gate attempt when several exist", () => {
+    const r = run({
+      jobs: {
+        jobs: [
+          { id: 900, name: "copilot-review", conclusion: "failure" },
+          { id: 950, name: "copilot-review", conclusion: "failure" },
+        ],
+      },
+    });
+    expect(r.exitCode).toBe(0);
+    expect(r.reruns.length).toBe(1);
+    expect(r.reruns[0]).toContain("950");
+  });
+
+  test("a stale review (older commit_id than the head) never re-arms", () => {
+    const r = run({ env: { REVIEW_COMMIT: "c".repeat(40) } });
     expect(r.exitCode).toBe(0);
     expect(r.reruns).toEqual([]);
-    expect(r.output).toContain("::warning::");
-    expect(r.output).toContain("loop-breaker");
+    expect(r.output).toContain("not the current head");
+  });
+
+  test("a review whose commit_id matches the head proceeds", () => {
+    const r = run({ env: { REVIEW_COMMIT: HEAD_SHA } });
+    expect(r.exitCode).toBe(0);
+    expect(r.reruns.length).toBe(1);
   });
 
   test("CI-completed trigger: re-runs only when the review actually arrived", () => {

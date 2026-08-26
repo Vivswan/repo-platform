@@ -17,13 +17,18 @@
 //     arrival the re-run would just fail again - the review trigger
 //     handles it later.
 //
-// Guards: no CI run for the sha, a run without the job, a job that did
-// not fail, and a run past the attempt cap (a loop-breaker: a re-run's
-// completion fires the workflow_run trigger again) are all quiet no-ops.
+// Guards: a review of an older head (a push landed mid-review; the
+// re-review of the new head fires its own event), no CI run for the sha,
+// a run without the job, a job that did not fail, and a gate job past the
+// attempt cap (a loop-breaker counted on the GATE JOB's own attempts -
+// run_attempt would count unrelated flaky-job re-runs against the budget)
+// are all quiet no-ops.
 //
 // Env: HEAD_SHA; RUN_ID (the completed CI run - workflow_run trigger
-// only, empty on the review trigger); GH_TOKEN, GITHUB_REPOSITORY.
-// PROBE_TIMEOUT_MS overrides the per-call network deadline.
+// only, empty on the review trigger); REVIEW_COMMIT (the triggering
+// review's commit_id - review trigger only, empty otherwise); GH_TOKEN,
+// GITHUB_REPOSITORY. PROBE_TIMEOUT_MS overrides the per-call network
+// deadline.
 
 import type { ZodType } from "zod";
 import { z } from "zod";
@@ -34,18 +39,22 @@ import { COPILOT_CHECK_NAME as CHECK_NAME, isCopilot } from "./copilot_review_co
 
 const GATE_JOB = "copilot-review";
 /** Loop-breaker: a re-run completing fires the workflow_run trigger
- * again, so a persistently failing gate must stop re-arming itself. */
-const MAX_RUN_ATTEMPTS = 5;
+ * again, so a persistently failing gate must stop re-arming itself. The
+ * budget counts the GATE JOB's own attempts (jobs?filter=all), never the
+ * run's run_attempt - that increments on every re-run of anything, so an
+ * unrelated flaky job could exhaust the budget before the first genuine
+ * re-arm. */
+const MAX_GATE_ATTEMPTS = 5;
 const PROBE_TIMEOUT_MS = Number(env("PROBE_TIMEOUT_MS", "15000"));
 
 const repository = requireEnv("GITHUB_REPOSITORY");
 const headSha = requireEnv("HEAD_SHA");
 const runId = env("RUN_ID");
+const reviewCommit = env("REVIEW_COMMIT");
 
 const runShape = z.object({
   id: z.number(),
   status: z.string(),
-  run_attempt: z.number(),
 });
 const runsSchema = z.object({ workflow_runs: z.array(runShape) });
 const jobsSchema = z.object({
@@ -75,6 +84,17 @@ function mustFetch<T>(path: string, schema: ZodType<T>, label: string): T {
   return parseJsonWith(schema, probe.stdout, label);
 }
 
+// A review of an OLDER head must not re-arm the new one: the gate at the
+// new head would still find no review for ITS sha and burn an attempt.
+// The push's re-review fires this workflow again with a matching commit.
+if (runId === "" && reviewCommit !== "" && reviewCommit !== headSha) {
+  notice(
+    `the triggering review covers ${reviewCommit}, not the current head ${headSha}; ` +
+      "the re-review of the new head re-fires this workflow - nothing to re-arm.",
+  );
+  process.exit(0);
+}
+
 // The review trigger looks the run up; the workflow_run trigger carries it.
 let run: z.infer<typeof runShape>;
 if (runId === "") {
@@ -102,23 +122,28 @@ if (run.status !== "completed") {
   );
   process.exit(0);
 }
-if (run.run_attempt >= MAX_RUN_ATTEMPTS) {
-  warning(
-    `CI run ${run.id} is already on attempt ${run.run_attempt}; refusing to re-arm the ${GATE_JOB} job again (loop-breaker). Re-run it manually if the Copilot review really arrived.`,
-  );
-  process.exit(0);
-}
 
+// filter=all: every attempt of every job, so the gate job's OWN attempt
+// count is the loop-breaker and the newest attempt (highest id) is the
+// one a re-run targets.
 const jobs = mustFetch(
-  `repos/${repository}/actions/runs/${run.id}/jobs?filter=latest&per_page=100`,
+  `repos/${repository}/actions/runs/${run.id}/jobs?filter=all&per_page=100`,
   jobsSchema,
   "rerun_copilot_gate: jobs response",
 ).jobs;
-const gateJob = jobs.find((job) => job.name === GATE_JOB);
-if (gateJob === undefined) {
+const gateAttempts = jobs.filter((job) => job.name === GATE_JOB);
+if (gateAttempts.length === 0) {
   notice(`CI run ${run.id} has no ${GATE_JOB} job; nothing to re-arm.`);
   process.exit(0);
 }
+if (gateAttempts.length >= MAX_GATE_ATTEMPTS) {
+  warning(
+    `the ${GATE_JOB} job of CI run ${run.id} already has ${gateAttempts.length} attempt(s); ` +
+      "refusing to re-arm it again (loop-breaker). Re-run it manually if the Copilot review really arrived.",
+  );
+  process.exit(0);
+}
+const gateJob = gateAttempts.reduce((latest, job) => (job.id > latest.id ? job : latest));
 if (gateJob.conclusion !== "failure") {
   notice(
     `the ${GATE_JOB} job of CI run ${run.id} concluded '${gateJob.conclusion}'; no re-run needed.`,
