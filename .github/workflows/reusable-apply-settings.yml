@@ -126,6 +126,10 @@ jobs:
         with:
           token: ${{ secrets.REPO_PLATFORM_TOKEN }}
           mode: ${{ inputs.check_only && 'check' || 'apply' }}
+          # Single-repo mode, pinned explicitly to this repository (the
+          # action's default; stated so the contract is visible), reading
+          # the merged scratch document.
+          repository: ${{ github.repository }}
           settings-file: ${{ runner.temp }}/merged-settings.yml
           on-missing-permission: ${{ inputs.on_missing_permission }}
           required-sections: ${{ inputs.required_sections }}

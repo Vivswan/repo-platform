@@ -1,7 +1,8 @@
-# Central settings apply: computes each target's managed settings baseline
-# per repository (.github/scripts/fleet/render_managed_settings.ts - the
-# shared policy block, the module-derived label roster, the fleet rulesets,
-# from the target's .repo-platform.yml module selection and live
+# Central settings apply: assembles each target's managed settings
+# baseline per repository (.github/scripts/fleet/render_managed_settings.ts
+# - the fleet-generic content from .github/settings-baseline.yml, the
+# module-conditional labels/rulesets from the module manifests, driven by
+# the target's .repo-platform.yml module selection and its effective
 # visibility), deep-merges the repo's own .github/settings.yml over it
 # (merge_settings_layers.ts; the repo layer wins, labels/rulesets are
 # name-keyed unions), and runs Vivswan/github-settings-as-code in
@@ -19,13 +20,16 @@ name: Settings Repos
 on:
   push:
     branches: [main]
-    # The inputs the merged documents are computed from: this repo's own
-    # settings layer, the baseline generator and merge dialect, and the
-    # module manifests the label roster derives from.
+    # The inputs the merged documents are assembled from: this repo's own
+    # settings layer, the baseline document, the assembly and merge
+    # scripts, and the module manifests the module-conditional content
+    # comes from.
     paths:
       - .github/settings.yml
+      - .github/settings-baseline.yml
       - .github/scripts/fleet/render_managed_settings.ts
       - .github/scripts/fleet/merge_settings_layers.ts
+      - .repo-platform-answers.yml
       - templates/*/module.yml
   schedule:
     # Nightly heal at an offbeat minute.
@@ -143,17 +147,25 @@ jobs:
         run: bun .github/scripts/fleet/resolve_private_repo.ts
 
       # The managed baseline for THIS repository's facts (module
-      # selection, live visibility, tracking-label answers), then the
-      # repo's own settings.yml merged over it. Scratch filenames are
-      # fixed and neutral - a redacted slug reaches the scripts only
-      # through env (already masked).
+      # selection, declared-or-live visibility, tracking-label answers),
+      # then the repo's own settings.yml merged over it. Scratch filenames
+      # are fixed and neutral - a redacted slug reaches the scripts only
+      # through env (already masked). The operator repo itself has no
+      # .repo-platform.yml to fetch; its facts come from its recorded
+      # answers file in this checkout.
       - name: Render the managed settings baseline
         env:
           GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
           TARGET: ${{ steps.resolve.outputs.repo }}
-        run: >-
-          bun .github/scripts/fleet/render_managed_settings.ts
-          --repo "$TARGET" --out "$RUNNER_TEMP/managed-settings.yml"
+        run: |
+          if [ "$TARGET" = "$GITHUB_REPOSITORY" ]; then
+            bun .github/scripts/fleet/render_managed_settings.ts \
+              --repo "$TARGET" --operator-answers .repo-platform-answers.yml \
+              --out "$RUNNER_TEMP/managed-settings.yml"
+          else
+            bun .github/scripts/fleet/render_managed_settings.ts \
+              --repo "$TARGET" --out "$RUNNER_TEMP/managed-settings.yml"
+          fi
 
       - name: Merge the repository's settings.yml over the baseline
         env:

@@ -169,6 +169,27 @@ export const manifestSchema = z.strictObject({
       ),
     })
     .optional(),
+  // The module's managed settings contributions, assembled into each
+  // selecting repo's baseline by the fleet's render_managed_settings.ts:
+  // whole label tuples and whole ruleset entries, both name-keyed in the
+  // layering dialect (a repo's settings.yml entry of the same name
+  // replaces the entry wholesale). Values land in machine-written scratch
+  // YAML only (never interpolated into generated text), so no
+  // metacharacter refinements are needed here.
+  settings_labels: z
+    .array(
+      z.strictObject({
+        name: singleLine("each settings label name"),
+        color: z.string().regex(/^[0-9A-Fa-f]{6}$/, "must be a 6-digit hex color"),
+        description: singleLine("each settings label description"),
+      }),
+    )
+    .min(1)
+    .optional(),
+  settings_rulesets: z
+    .array(z.looseObject({ name: singleLine("each settings ruleset name") }))
+    .min(1)
+    .optional(),
   gitignore_sources: z
     .array(mdCellSafe(singleLine("each gitignore source"), "each gitignore source"))
     .min(1)

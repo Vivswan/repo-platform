@@ -25,12 +25,7 @@ import { existsSync, lstatSync, readdirSync, readFileSync, readlinkSync } from "
 import { join, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { identityKeyIssues } from "../.github/scripts/fleet/merge_settings_layers.ts";
-import {
-  managedRulesets,
-  privateReportLabel,
-  releasePleaseLabels,
-  staticLabels,
-} from "../.github/scripts/fleet/render_managed_settings.ts";
+import { loadBaseline, managedRulesets } from "../.github/scripts/fleet/render_managed_settings.ts";
 import { CHANNELS } from "../.github/scripts/shared/channels.ts";
 import { captureName } from "../.github/scripts/sync/run_hidden.ts";
 import { dependabotLabels } from "./compose_template.ts";
@@ -418,16 +413,18 @@ export interface Label {
   description: string;
 }
 
-/** Every label tuple the settings baseline generator can emit for ANY
- *  selection (static, private report marker, release-please, dependabot -
- *  the dependabot tuples from the composer's own derivation), tracking
- *  labels excluded (they render from per-repo answers). The single roster
- *  the doc-constant and issue-form rules key on. */
+/** Every label tuple the settings baseline assembly can emit for ANY
+ *  selection: the baseline document's unconditional and private-only
+ *  labels, every manifest's settings_labels, and the dependabot tuples
+ *  from the composer's own derivation - tracking labels excluded (they
+ *  render from per-repo answers). The single roster the doc-constant and
+ *  issue-form rules key on. */
 function managedLabelRoster(): Label[] {
+  const baseline = loadBaseline();
   return [
-    ...staticLabels(),
-    privateReportLabel(),
-    ...releasePleaseLabels(),
+    ...baseline.labels,
+    ...baseline.private_labels,
+    ...loadManifests().flatMap((m) => m.settings_labels ?? []),
     ...dependabotLabels(loadManifests()).map(
       ({ name, color, description }): Label => ({ name, color, description }),
     ),
@@ -1313,10 +1310,10 @@ const rules: Rule[] = [
   {
     // The settings-sync starter and repo-platform's own .github/settings.yml
     // are the two independently-authored repo layers this repo controls;
-    // the managed baseline itself is TypeScript data
-    // (render_managed_settings.ts) with unit tests, so no baseline pair
-    // exists to compare here. This rule pins what the layers must declare:
-    // the starter seeds all four identity keys, repo-platform's own file
+    // the managed baseline document (.github/settings-baseline.yml) is the
+    // single home of the fleet-generic content, so no baseline pair exists
+    // to compare here. This rule pins what the layers must declare: the
+    // starter seeds all four identity keys, repo-platform's own file
     // declares them with valid shapes, and its hand-written non-bypassable
     // override stays byte-equivalent to the baseline entry it replaces
     // wholesale (a drifted override would silently weaken the ruleset the
@@ -1411,7 +1408,7 @@ const rules: Rule[] = [
       for (const name of required) {
         if (!rosterNames.has(name)) {
           mismatches.push({
-            file: ".github/scripts/fleet/render_managed_settings.ts",
+            file: ".github/settings-baseline.yml (or a manifest's settings_labels)",
             expected: `label '${name}' in the managed roster`,
             got: "missing",
           });
@@ -1559,14 +1556,22 @@ const rules: Rule[] = [
     // names the autorelease labels as string literals. gh pr list exits 0
     // and empty for a label that does not exist, so a literal that drifts
     // from the managed roster degrades the guard to a permanent silent
-    // no-op - anchor the literals to the baseline generator's
-    // release-please tuples here instead. Only the template side is
-    // checked: dogfood-parity already pins this repo's
+    // no-op - anchor the literals to the release-please manifest's
+    // settings_labels here instead. Only the template side is checked:
+    // dogfood-parity already pins this repo's
     // .github/workflows/release.yml to it.
     name: "release-guard-labels",
     run: () => {
       const mismatches: Mismatch[] = [];
-      const roster = new Set(releasePleaseLabels().map((label) => label.name));
+      const releaseLabels = loadManifests().find(
+        (m) => m.module === "release-please",
+      )?.settings_labels;
+      if (!releaseLabels) {
+        throw new Error(
+          "templates/release-please/module.yml declares no settings_labels - anchor lost",
+        );
+      }
+      const roster = new Set(releaseLabels.map((label) => label.name));
       const rel = "templates/release-please/.github/workflows/release.yml.jinja";
       const text = read(rel);
       const queried = mustMatch(
@@ -1586,8 +1591,8 @@ const rules: Rule[] = [
         if (!roster.has(name)) {
           mismatches.push({
             file: rel,
-            expected: `label '${name}' declared by releasePleaseLabels (render_managed_settings.ts)`,
-            got: "not in the managed roster",
+            expected: `label '${name}' declared in templates/release-please/module.yml settings_labels`,
+            got: "not in the manifest roster",
           });
         }
       }

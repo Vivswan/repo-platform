@@ -40,7 +40,7 @@ import {
   trackingLabelValidator,
   trackingStreams,
 } from "../../scripts/generate";
-import type { ModuleManifest } from "../../scripts/module_manifests";
+import { loadManifests, type ModuleManifest } from "../../scripts/module_manifests";
 import { moduleOwnershipFiles, skipIfExistsMatchers } from "../../scripts/ownership";
 
 function manifest(module: string, extra: Partial<ModuleManifest> = {}): ModuleManifest {
@@ -256,7 +256,10 @@ describe("tracking-label validators", () => {
   });
 
   test("the default roster is the managed settings baseline's label names", () => {
-    const reserved = reservedLabelNames([BUN]);
+    // The LIVE manifests: the roster folds in every manifest's
+    // settings_labels (release-please's autorelease pair and gate labels)
+    // on top of the baseline document and the dependabot tuples.
+    const reserved = reservedLabelNames(loadManifests());
     for (const name of [
       "dependencies",
       "github_actions",

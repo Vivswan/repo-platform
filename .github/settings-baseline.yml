@@ -1,0 +1,159 @@
+---
+# The fleet-wide managed settings baseline, assembled per repository at
+# apply time by .github/scripts/fleet/render_managed_settings.ts: this
+# file supplies the fleet-generic content, the module manifests
+# (templates/<module>/module.yml settings_labels / settings_rulesets /
+# dependabot / tracking_label) supply the module-conditional content, and
+# each repo's own .github/settings.yml deep-merges OVER the assembled
+# document (docs/settings.md has the layering dialect). Identity keys
+# (description, homepage, topics, private) stay per-repo, never here.
+
+# The repository policy block every managed repo shares. A repo opts out
+# of a key by declaring its own value (or null) in its settings.yml.
+repository:
+  has_issues: true
+  has_wiki: false
+  has_projects: false
+  has_discussions: false
+  default_branch: main
+  allow_squash_merge: true
+  allow_merge_commit: false
+  allow_rebase_merge: false
+  # The squash subject must ALWAYS be the PR title (the pr-title check and
+  # release-please rely on it); GitHub only defaults to that for
+  # single-commit PRs.
+  squash_merge_commit_title: PR_TITLE
+  squash_merge_commit_message: PR_BODY
+  allow_update_branch: true
+  delete_branch_on_merge: true
+  allow_auto_merge: true
+  enable_vulnerability_alerts: true
+  enable_automated_security_fixes: true
+
+# Merged into the repository block for PUBLIC repos only: private
+# repositories without Advanced Security reject these keys (422).
+# Declared so the apply heals out-of-band disables (GitHub enables both
+# by default on public repositories).
+public_repository:
+  security_and_analysis:
+    secret_scanning:
+      status: enabled
+    secret_scanning_push_protection:
+      status: enabled
+
+# The unconditional labels: dependabot's base pair first (the base
+# dependabot.yml always carries the github-actions ecosystem, and
+# dependabot recreates its labels when missing, so leaving either
+# undeclared would loop delete/recreate nightly), then the triage trio.
+# Module-conditional labels are NOT here: the per-ecosystem dependabot
+# labels and the tracking labels come from the module manifests, and a
+# module's own labels from its manifest's settings_labels.
+labels:
+  - name: dependencies
+    color: "0366d6"
+    description: Dependency updates
+  - name: github_actions
+    color: "000000"
+    description: Pull requests that update GitHub Actions code
+  - name: bug
+    color: "d73a4a"
+    description: Something isn't working
+  - name: enhancement
+    color: "a2eeef"
+    description: New feature or request
+  - name: fix-lint
+    color: "fbca04"
+    description: Lint / formatting fixes
+
+# Appended for PRIVATE repos: the marker label github-settings-as-code's
+# private reporting pins its report issue with. The central apply redacts
+# private targets and injects the label into its managed set
+# automatically; the settings-sync self-apply is never redacted and
+# injects nothing - so the baseline declares it, keeping the self-apply
+# from deleting what the next central run recreates.
+private_labels:
+  - name: settings-as-code-report
+    color: "0e2a47"
+    description: managed by settings-as-code private reporting - do not remove
+
+# The fleet-generic rulesets for the default branch. Admins
+# (RepositoryRole id 5) are in the main ruleset's bypass list, so direct
+# pushes to main still work; the single required status check is
+# `all-green` (ci.yml), which `needs:` every gating CI job.
+rulesets:
+  - name: main
+    target: branch
+    enforcement: active
+    conditions:
+      ref_name:
+        include:
+          - "~DEFAULT_BRANCH"
+        exclude: []
+    rules:
+      - type: deletion
+      - type: non_fast_forward
+      - type: required_linear_history
+      - type: required_status_checks
+        parameters:
+          strict_required_status_checks_policy: false
+          do_not_enforce_on_create: true
+          required_status_checks:
+            - context: all-green
+      # The codeql_rule below is spliced in here (after
+      # required_status_checks) when CodeQL analyzes the repo.
+      - type: pull_request
+        parameters:
+          required_approving_review_count: 0
+          dismiss_stale_reviews_on_push: false
+          # Require an approving review from a CODEOWNER before merge.
+          # Admins in bypass_actors can still merge without one.
+          require_code_owner_review: true
+          require_last_push_approval: false
+          # Every PR review thread must be resolved before merge, fleet
+          # wide - an unresolved comment is an unaddressed finding.
+          required_review_thread_resolution: true
+          # Squash-only merges (enforced by the ruleset, not just repo
+          # settings).
+          allowed_merge_methods:
+            - squash
+      # Automatically request Copilot code review on PRs to main, including
+      # on each new push and on draft PRs.
+      - type: copilot_code_review
+        parameters:
+          review_on_push: true
+          review_draft_pull_requests: true
+    bypass_actors:
+      - actor_id: 5
+        actor_type: RepositoryRole
+        bypass_mode: always
+
+  # Rules with an EMPTY bypass list: nobody - owner and admins included -
+  # can violate these on the default branch. A separate ruleset so the
+  # main ruleset's admin bypass (which keeps direct pushes working) cannot
+  # exempt anyone from these rules.
+  - name: non-bypassable
+    target: branch
+    enforcement: active
+    conditions:
+      ref_name:
+        include:
+          - "~DEFAULT_BRANCH"
+        exclude: []
+    rules:
+      - type: deletion
+      - type: required_linear_history
+    # Declared empty on purpose: an omitted key is invisible to drift
+    # detection and preserved by the update, so the empty list is what
+    # lets the nightly apply heal an out-of-band bypass actor.
+    bypass_actors: []
+
+# Spliced into the main ruleset's rules (after required_status_checks)
+# when CodeQL analyzes the repository - a public repo with an analyzable
+# toolchain. GitHub rejects the rule everywhere else.
+codeql_rule:
+  type: code_scanning
+  parameters:
+    code_scanning_tools:
+      - tool: CodeQL
+        security_alerts_threshold: high_or_higher
+        alerts_threshold: errors

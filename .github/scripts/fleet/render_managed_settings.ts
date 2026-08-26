@@ -1,48 +1,53 @@
 #!/usr/bin/env bun
-// The managed settings baseline, computed per repository at apply time.
-// This module is the single source of the fleet's settings policy: the
-// repository field block every repo shares, the full label roster a
-// repo's module selection requires, and the fleet-generic rulesets. The
-// settings-sync template's rendered .github/settings.yml is a repo-owned
-// STARTER carrying only identity keys and local overrides; the baseline
-// is never synced into client repos - settings-repos.yml (and the
-// self-apply in reusable-apply-settings.yml) computes it here and
-// merge_settings_layers.ts merges the repo's own file over it.
+// Assembles the managed settings baseline, computed per repository at
+// apply time. No settings VALUES live here: the fleet-generic content is
+// .github/settings-baseline.yml (policy block, public-only keys, common
+// labels, fleet rulesets, the codeql splice rule), the module-conditional
+// content is the module manifests (settings_labels, settings_rulesets,
+// dependabot, tracking_label) - this script only assembles them for a
+// repo's facts. The settings-sync template's rendered .github/settings.yml
+// is a repo-owned STARTER carrying only identity keys and local
+// overrides; the baseline is never synced into client repos -
+// settings-repos.yml (and the self-apply in reusable-apply-settings.yml)
+// assembles it here and merge_settings_layers.ts merges the repo's own
+// file over it.
 //
 // Consumers beyond the apply paths: scripts/generate.ts derives the
 // tracking-label validators' reserved-label roster from managedLabelNames,
 // scripts/check_ssot.ts anchors its label/ruleset rules here, and the
-// sync's settings_layering.ts shadow-diff renders each repo's baseline to
-// name the keys its settings.yml shadows.
+// sync's settings_layering.ts transition renders each repo's baseline to
+// diff the legacy settings.yml against.
 //
 // Inputs are repo facts: the module selection (the target repo's
 // .repo-platform.yml - selecting the settings-sync module there is the
-// opt-in), live visibility (private repositories reject
-// security_and_analysis and the code_scanning rule with a 422), and the
+// opt-in), effective visibility (private repositories reject the
+// public-only keys and the codeql rule with a 422), and the
 // tracking-label answers recorded in .copier-answers.yml (each stream
 // repo picks its own label name; the color/description tuples live in
 // the module manifests).
 //
 // CLI (the apply paths):
 //   bun .github/scripts/fleet/render_managed_settings.ts --repo owner/name
-//     --out managed.yml [--target-dir <checkout>]
+//     --out managed.yml [--target-dir <checkout> | --operator-answers <file>]
 //
-// Without --target-dir the facts come from the target repository's default
-// branch via gh api plus a live visibility probe (env: GH_TOKEN). The
-// operator repo itself (GITHUB_REPOSITORY) is the one repo with no
-// .repo-platform.yml - it is not generated from the template - so fetching
-// it reads module selection and visibility from .repo-platform-answers.yml
-// in the cwd instead. --target-dir reads the facts from a local checkout
-// (recorded answers; no network).
+// By default the facts come from the target repository's default branch
+// via gh api (env: GH_TOKEN); visibility is the DECLARED
+// repository.private in its settings.yml, live-probed when undeclared.
+// --target-dir reads the facts from a local checkout (no network);
+// --operator-answers reads module selection and visibility from the
+// operator repository's recorded answers file - repo-platform is the one
+// fleet member with no .repo-platform.yml (it is not generated from the
+// template), and settings-repos.yml passes the flag for its self target.
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
+import { z } from "zod";
 import { dependabotLabels } from "../../../scripts/compose_template.ts";
 import { loadManifests, type ModuleManifest } from "../../../scripts/module_manifests.ts";
-import { ANSWERS_FILE, parseAnswers } from "../../../scripts/render_dogfood.ts";
+import { parseAnswers } from "../../../scripts/render_dogfood.ts";
 import { parseFlags } from "../shared/flags.ts";
-import { env, fail } from "../shared/gha.ts";
+import { fail } from "../shared/gha.ts";
 import { captureNetwork } from "./discovery.ts";
 
 export interface Label {
@@ -54,139 +59,113 @@ export interface Label {
 export interface RepoFacts {
   /** The target's module selection (its .repo-platform.yml list). */
   modules: string[];
-  /** Live visibility: private repos reject the public-only blocks. */
+  /** Effective visibility (declared repository.private, else live):
+   *  private repos reject the public-only blocks. */
   private: boolean;
   /** Resolved tracking-label answers, one per SELECTED stream module. */
   trackingLabels: { module: string; label: string }[];
 }
 
-/** The repository policy block every managed repo shares (previously
- *  settings/defaults.yml; identity keys - description, homepage, topics,
- *  private - stay in each repo's own settings.yml). */
-export function policyBlock(): Record<string, unknown> {
-  return {
-    has_issues: true,
-    has_wiki: false,
-    has_projects: false,
-    has_discussions: false,
-    default_branch: "main",
-    allow_squash_merge: true,
-    allow_merge_commit: false,
-    allow_rebase_merge: false,
-    // The squash subject must ALWAYS be the PR title (the pr-title check
-    // and release-please rely on it); GitHub only defaults to that for
-    // single-commit PRs.
-    squash_merge_commit_title: "PR_TITLE",
-    squash_merge_commit_message: "PR_BODY",
-    allow_update_branch: true,
-    delete_branch_on_merge: true,
-    allow_auto_merge: true,
-    enable_vulnerability_alerts: true,
-    enable_automated_security_fixes: true,
-  };
+// --- the baseline document ---------------------------------------------------
+
+const REPO_ROOT = resolve(import.meta.dir, "..", "..", "..");
+export const BASELINE_PATH = join(REPO_ROOT, ".github/settings-baseline.yml");
+
+const labelSchema = z.strictObject({
+  name: z.string().min(1),
+  color: z.string().regex(/^[0-9A-Fa-f]{6}$/),
+  description: z.string().min(1),
+});
+
+// No settings VALUES live in this script: the fleet-generic content is
+// .github/settings-baseline.yml (validated here), the module-conditional
+// content is the module manifests' settings_labels / settings_rulesets /
+// dependabot / tracking_label - this script only assembles them.
+const baselineSchema = z.strictObject({
+  /** The repository policy block every managed repo shares. */
+  repository: z.record(z.string(), z.unknown()),
+  /** Merged into the repository block for PUBLIC repos only (422 on
+   *  private repos without Advanced Security). */
+  public_repository: z.record(z.string(), z.unknown()),
+  /** The unconditional labels. */
+  labels: z.array(labelSchema).min(1),
+  /** Appended for PRIVATE repos (the report marker label). */
+  private_labels: z.array(labelSchema).min(1),
+  /** The fleet-generic rulesets; must include a `main` ruleset with a
+   *  required_status_checks rule (asserted below - the codeql splice and
+   *  the all-green contract anchor on them). */
+  rulesets: z.array(z.looseObject({ name: z.string().min(1) })).min(1),
+  /** Spliced into the main ruleset's rules (after required_status_checks)
+   *  when CodeQL analyzes the repository. */
+  codeql_rule: z.record(z.string(), z.unknown()),
+});
+
+export type SettingsBaseline = z.infer<typeof baselineSchema>;
+
+/** Load and validate the baseline document; throws on any shape problem
+ *  so a broken baseline fails every consumer loudly. */
+export function loadBaseline(path: string = BASELINE_PATH): SettingsBaseline {
+  const data = parseMapping(readFileSync(path, "utf-8"), path);
+  const result = baselineSchema.safeParse(data);
+  if (!result.success) {
+    const details = result.error.issues
+      .map((issue) => `${issue.path.join(".") || "(top level)"}: ${issue.message}`)
+      .join("; ");
+    throw new Error(`${path}: ${details}`);
+  }
+  const main = result.data.rulesets.find((r) => r.name === "main");
+  const mainRules = main !== undefined && Array.isArray(main.rules) ? main.rules : [];
+  if (!mainRules.some((rule) => isMapping(rule) && rule.type === "required_status_checks")) {
+    throw new Error(
+      `${path}: the rulesets must include a 'main' ruleset with a required_status_checks ` +
+        "rule - the codeql splice and the all-green contract anchor on it",
+    );
+  }
+  return result.data;
 }
 
-/** Declared so the apply heals out-of-band disables (GitHub enables both
- *  by default on public repositories). Public only: private repositories
- *  without Advanced Security reject this block (422). */
-export function securityAndAnalysis(): Record<string, unknown> {
-  return {
-    secret_scanning: { status: "enabled" },
-    secret_scanning_push_protection: { status: "enabled" },
-  };
+function isMapping(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-/** The unconditional labels: dependabot's base pair (the base
- *  dependabot.yml always carries the github-actions ecosystem, and
- *  dependabot recreates its labels when missing, so leaving either
- *  undeclared would loop delete/recreate nightly) plus the conventional
- *  triage trio. */
-export function staticLabels(): Label[] {
-  return [
-    { name: "dependencies", color: "0366d6", description: "Dependency updates" },
-    {
-      name: "github_actions",
-      color: "000000",
-      description: "Pull requests that update GitHub Actions code",
-    },
-    { name: "bug", color: "d73a4a", description: "Something isn't working" },
-    { name: "enhancement", color: "a2eeef", description: "New feature or request" },
-    { name: "fix-lint", color: "fbca04", description: "Lint / formatting fixes" },
-  ];
-}
-
-/** The release-please module's labels: the autorelease pair release-please
- *  manages on release PRs, and release-health's gate labels (an open
- *  release-blocker issue fails the release PR and the release pipeline's
- *  pre-flight; release-override on the release PR bypasses the gates for
- *  that one release). */
-export function releasePleaseLabels(): Label[] {
-  return [
-    {
-      name: "autorelease: pending",
-      color: "ededed",
-      description: "release-please release PR awaiting merge/tag",
-    },
-    {
-      name: "autorelease: tagged",
-      color: "ededed",
-      description: "release-please release PR has been tagged",
-    },
-    {
-      name: "release-blocker",
-      color: "B60205",
-      description:
-        "Blocks releases while open - release-health fails release PRs and the release pipeline",
-    },
-    {
-      name: "release-override",
-      color: "FBCA04",
-      description: "On a release PR: bypass release-health gates for this release",
-    },
-  ];
-}
-
-/** The marker label github-settings-as-code's private reporting pins its
- *  report issue with. The central apply redacts private targets and
- *  injects the label into its managed set automatically; the settings-sync
- *  self-apply is never redacted and injects nothing - so the baseline
- *  declares it for private repos, keeping the self-apply from deleting
- *  what the next central run recreates. */
-export function privateReportLabel(): Label {
-  return {
-    name: "settings-as-code-report",
-    color: "0e2a47",
-    description: "managed by settings-as-code private reporting - do not remove",
-  };
-}
-
-/** Every label name this generator can emit for ANY selection, tracking
+/** Every label name the assembly can emit for ANY selection, tracking
  *  labels excluded (those render from the very answers the copier
  *  validators check). scripts/generate.ts builds the reserved-label
- *  roster from this. */
-export function managedLabelNames(manifests: ModuleManifest[]): string[] {
+ *  roster from this, check_ssot.ts its roster rules. */
+export function managedLabelNames(
+  manifests: ModuleManifest[],
+  baseline: SettingsBaseline = loadBaseline(),
+): string[] {
   return [
-    ...staticLabels().map((label) => label.name),
-    privateReportLabel().name,
-    ...releasePleaseLabels().map((label) => label.name),
+    ...baseline.labels.map((label) => label.name),
+    ...baseline.private_labels.map((label) => label.name),
+    ...manifests.flatMap((m) => (m.settings_labels ?? []).map((label) => label.name)),
     ...dependabotLabels(manifests).map((label) => label.name),
   ];
 }
 
 /** The full label roster a repo's facts require. Order is stable:
- *  static, per-module dependabot labels, the private report marker, the
- *  release-please labels, tracking labels - a superset-shaped echo of the
- *  retired settings.yml.jinja render, so existing repos' shadow diffs
- *  read as byte-equal. */
-export function managedLabels(facts: RepoFacts, manifests: ModuleManifest[]): Label[] {
-  const labels = staticLabels();
+ *  baseline labels, per-module dependabot labels, the private-only
+ *  labels, the selected modules' own labels (manifest order), tracking
+ *  labels - a superset-shaped echo of the retired settings.yml.jinja
+ *  render, so existing repos' transition diffs read as byte-equal. */
+export function managedLabels(
+  facts: RepoFacts,
+  manifests: ModuleManifest[],
+  baseline: SettingsBaseline = loadBaseline(),
+): Label[] {
+  const labels: Label[] = [...baseline.labels];
   for (const group of dependabotLabels(manifests)) {
     if (group.modules.some((module) => facts.modules.includes(module))) {
       labels.push({ name: group.name, color: group.color, description: group.description });
     }
   }
-  if (facts.private) labels.push(privateReportLabel());
-  if (facts.modules.includes("release-please")) labels.push(...releasePleaseLabels());
+  if (facts.private) labels.push(...baseline.private_labels);
+  for (const m of manifests) {
+    if (m.settings_labels && facts.modules.includes(m.module)) {
+      labels.push(...m.settings_labels);
+    }
+  }
   const byModule = new Map(manifests.map((m) => [m.module, m]));
   for (const { module, label } of facts.trackingLabels) {
     const tracking = byModule.get(module)?.tracking_label;
@@ -210,127 +189,50 @@ export function enableCodeql(facts: RepoFacts, manifests: ModuleManifest[]): boo
   );
 }
 
-const ADMIN_BYPASS = [{ actor_id: 5, actor_type: "RepositoryRole", bypass_mode: "always" }];
-const DEFAULT_BRANCH_CONDITIONS = { ref_name: { include: ["~DEFAULT_BRANCH"], exclude: [] } };
-
-/** The fleet-generic rulesets for a repo's facts. Admins (RepositoryRole
- *  id 5) are in the main ruleset's bypass list, so direct pushes to main
- *  still work; the single required status check is `all-green`, which
- *  `needs:` every gating CI job. */
+/** The rulesets for a repo's facts: the baseline's fleet-generic entries
+ *  (the codeql rule spliced into `main` after required_status_checks when
+ *  CodeQL analyzes the repo - GitHub rejects the rule everywhere else)
+ *  plus the selected modules' settings_rulesets in manifest order. */
 export function managedRulesets(
   facts: RepoFacts,
   manifests: ModuleManifest[],
+  baseline: SettingsBaseline = loadBaseline(),
 ): Record<string, unknown>[] {
-  const rulesets: Record<string, unknown>[] = [
-    {
-      name: "main",
-      target: "branch",
-      enforcement: "active",
-      conditions: DEFAULT_BRANCH_CONDITIONS,
-      rules: [
-        { type: "deletion" },
-        { type: "non_fast_forward" },
-        { type: "required_linear_history" },
-        {
-          type: "required_status_checks",
-          parameters: {
-            strict_required_status_checks_policy: false,
-            do_not_enforce_on_create: true,
-            required_status_checks: [{ context: "all-green" }],
-          },
-        },
-        // GitHub rejects the code_scanning rule on repos CodeQL does not
-        // analyze (private personal repos, no analyzable toolchain).
-        ...(enableCodeql(facts, manifests)
-          ? [
-              {
-                type: "code_scanning",
-                parameters: {
-                  code_scanning_tools: [
-                    {
-                      tool: "CodeQL",
-                      security_alerts_threshold: "high_or_higher",
-                      alerts_threshold: "errors",
-                    },
-                  ],
-                },
-              },
-            ]
-          : []),
-        {
-          type: "pull_request",
-          parameters: {
-            required_approving_review_count: 0,
-            dismiss_stale_reviews_on_push: false,
-            // Require an approving review from a CODEOWNER before merge.
-            // Admins in bypass_actors can still merge without one.
-            require_code_owner_review: true,
-            require_last_push_approval: false,
-            // Every PR review thread must be resolved before merge, fleet
-            // wide - an unresolved comment is an unaddressed finding.
-            required_review_thread_resolution: true,
-            // Squash-only merges (enforced by the ruleset, not just repo
-            // settings).
-            allowed_merge_methods: ["squash"],
-          },
-        },
-        // Automatically request Copilot code review on PRs to main,
-        // including on each new push and on draft PRs.
-        {
-          type: "copilot_code_review",
-          parameters: { review_on_push: true, review_draft_pull_requests: true },
-        },
-      ],
-      bypass_actors: ADMIN_BYPASS,
-    },
-    // Rules with an EMPTY bypass list: nobody - owner and admins included -
-    // can violate these on the default branch. A separate ruleset so the
-    // main ruleset's admin bypass (which keeps direct pushes working)
-    // cannot exempt anyone from these rules. The explicit empty list is
-    // deliberate: an omitted key is invisible to drift detection and
-    // preserved by the update, so the empty list is what lets the nightly
-    // apply heal an out-of-band bypass actor.
-    {
-      name: "non-bypassable",
-      target: "branch",
-      enforcement: "active",
-      conditions: DEFAULT_BRANCH_CONDITIONS,
-      rules: [{ type: "deletion" }, { type: "required_linear_history" }],
-      bypass_actors: [],
-    },
-  ];
-  if (facts.modules.includes("release-please")) {
-    // vX.Y.Z release tags are immutable: repo-platform's push sync pins
-    // against them and release artifacts reference them. Admins bypass, so
-    // deliberate tag cleanup doesn't require disabling the ruleset.
-    rulesets.push({
-      name: "release-tags",
-      target: "tag",
-      enforcement: "active",
-      conditions: { ref_name: { include: ["v*"], exclude: [] } },
-      rules: [{ type: "deletion" }, { type: "non_fast_forward" }, { type: "update" }],
-      bypass_actors: ADMIN_BYPASS,
-    });
+  const rulesets = baseline.rulesets.map((ruleset) => ({ ...ruleset }));
+  if (enableCodeql(facts, manifests)) {
+    const main = rulesets.find((r) => r.name === "main");
+    const rules = main !== undefined && Array.isArray(main.rules) ? [...main.rules] : [];
+    const at = rules.findIndex((rule) => isMapping(rule) && rule.type === "required_status_checks");
+    // loadBaseline asserted the anchor rule exists; splicing right after
+    // it keeps the rule order the fleet's rulesets have always had.
+    rules.splice(at + 1, 0, baseline.codeql_rule);
+    if (main !== undefined) main.rules = rules;
+  }
+  for (const m of manifests) {
+    if (m.settings_rulesets && facts.modules.includes(m.module)) {
+      rulesets.push(...m.settings_rulesets);
+    }
   }
   return rulesets;
 }
 
-/** The whole managed settings document for a repo's facts: the shared
- *  repository policy block (plus the public-only security_and_analysis),
- *  the module-derived label roster, and the fleet-generic rulesets.
- *  Identity keys are absent on purpose - they live in the repo's own
- *  settings.yml, which merges OVER this document. */
+/** The whole managed settings document for a repo's facts: the baseline's
+ *  repository policy block (plus its public-only keys), the assembled
+ *  label roster, and the rulesets. Identity keys are absent on purpose -
+ *  they live in the repo's own settings.yml, which merges OVER this
+ *  document. */
 export function managedSettings(
   facts: RepoFacts,
   manifests: ModuleManifest[] = loadManifests(),
+  baseline: SettingsBaseline = loadBaseline(),
 ): Record<string, unknown> {
   return {
     repository: {
-      ...policyBlock(),
-      ...(facts.private ? {} : { security_and_analysis: securityAndAnalysis() }),
+      ...baseline.repository,
+      ...(facts.private ? {} : baseline.public_repository),
     },
-    labels: managedLabels(facts, manifests),
-    rulesets: managedRulesets(facts, manifests),
+    labels: managedLabels(facts, manifests, baseline),
+    rulesets: managedRulesets(facts, manifests, baseline),
   };
 }
 
@@ -416,12 +318,35 @@ function fetchRepoIsPrivate(repo: string): boolean {
   return proc.stdout.trim() !== "false";
 }
 
+/** The DECLARED visibility in a settings.yml text: the repo layer's
+ *  `repository.private` boolean, or null when the file, the key, or the
+ *  boolean shape is absent. */
+export function declaredPrivate(settingsText: string | null): boolean | null {
+  if (settingsText === null) return null;
+  let data: unknown;
+  try {
+    data = parseYaml(settingsText);
+  } catch {
+    return null;
+  }
+  const repository =
+    typeof data === "object" && data !== null && !Array.isArray(data)
+      ? (data as Record<string, unknown>).repository
+      : null;
+  const value =
+    typeof repository === "object" && repository !== null && !Array.isArray(repository)
+      ? (repository as Record<string, unknown>).private
+      : null;
+  return typeof value === "boolean" ? value : null;
+}
+
 /** Facts for the operator repository itself: it is not generated from the
  *  template (no .repo-platform.yml, no .copier-answers.yml), so its module
- *  selection and visibility come from .repo-platform-answers.yml in `dir`
- *  - the same recorded answers the dogfood render uses. */
-export function factsFromOperatorAnswers(dir: string): RepoFacts {
-  const answers = parseAnswers(readFileSync(join(dir, ANSWERS_FILE), "utf-8"), ANSWERS_FILE);
+ *  selection and visibility come from the recorded operator answers file -
+ *  the same answers the dogfood render uses (render_dogfood.ts pins its
+ *  private answer to the in-repo settings.yml declaration). */
+export function factsFromOperatorAnswers(answersPath: string): RepoFacts {
+  const answers = parseAnswers(readFileSync(answersPath, "utf-8"), answersPath);
   const modules = [...answers.modules];
   const streams = loadManifests().filter(
     (m) => m.tracking_label !== undefined && modules.includes(m.module),
@@ -431,7 +356,7 @@ export function factsFromOperatorAnswers(dir: string): RepoFacts {
     // selecting a stream module here means teaching that schema (and this
     // resolver) the answer first.
     throw new Error(
-      `${ANSWERS_FILE}: selects the tracking-stream module(s) ` +
+      `${answersPath}: selects the tracking-stream module(s) ` +
         `${streams.map((m) => m.module).join(", ")} but records no tracking-label answers - ` +
         "extend the answers schema before selecting a stream module",
     );
@@ -439,8 +364,13 @@ export function factsFromOperatorAnswers(dir: string): RepoFacts {
   return { modules, private: answers.private, trackingLabels: [] };
 }
 
-/** Facts fetched from the target repository's default branch (gh api)
- *  plus a live visibility probe. */
+/** Facts fetched from the target repository's default branch (gh api).
+ *  Visibility is the DECLARED repository.private in the repo's
+ *  settings.yml when it is a boolean, the live probe otherwise: the apply
+ *  flips visibility to the declared value (repository section first), so
+ *  the baseline's visibility-gated blocks must match the POST-apply state
+ *  - deriving them from live visibility would 422 the very apply that
+ *  performs a deliberate flip. */
 export function factsFromFetch(repo: string, manifests: ModuleManifest[]): RepoFacts {
   const registration = fetchRepoFile(repo, ".repo-platform.yml");
   if (registration === null) {
@@ -450,7 +380,8 @@ export function factsFromFetch(repo: string, manifests: ModuleManifest[]): RepoF
     );
   }
   const modules = modulesFrom(registration, `${repo}/.repo-platform.yml`);
-  const isPrivate = fetchRepoIsPrivate(repo);
+  const isPrivate =
+    declaredPrivate(fetchRepoFile(repo, ".github/settings.yml")) ?? fetchRepoIsPrivate(repo);
   const streams = manifests.filter(
     (m) => m.tracking_label !== undefined && modules.includes(m.module),
   );
@@ -468,9 +399,11 @@ export function factsFromFetch(repo: string, manifests: ModuleManifest[]): RepoF
   return { modules, private: isPrivate, trackingLabels };
 }
 
-/** Facts read from a local checkout: the sync's shadow-diff path. The
- *  private fact is the RECORDED answer - post-update the sync has already
- *  re-recorded the live value, so the two agree there. */
+/** Facts read from a local checkout: the sync's transition path. The
+ *  private fact prefers the checkout's DECLARED repository.private (the
+ *  same precedence as the fetch path), falling back to the recorded
+ *  answer - post-update the sync has already re-recorded the live value
+ *  there. */
 export function factsFromTargetDir(dir: string, manifests: ModuleManifest[]): RepoFacts {
   const where = (name: string) => `${join(dir, name)}`;
   const modules = modulesFrom(
@@ -478,8 +411,12 @@ export function factsFromTargetDir(dir: string, manifests: ModuleManifest[]): Re
     where(".repo-platform.yml"),
   );
   const answersText = readFileSync(join(dir, ".copier-answers.yml"), "utf-8");
+  const settingsPath = join(dir, ".github/settings.yml");
+  const declared = declaredPrivate(
+    existsSync(settingsPath) ? readFileSync(settingsPath, "utf-8") : null,
+  );
   const recorded = parseMapping(answersText, where(".copier-answers.yml")).private;
-  if (typeof recorded !== "boolean") {
+  if (declared === null && typeof recorded !== "boolean") {
     throw new Error(
       `${where(".copier-answers.yml")}: records no boolean private answer - ` +
         "the baseline's visibility-gated blocks cannot be computed",
@@ -487,7 +424,7 @@ export function factsFromTargetDir(dir: string, manifests: ModuleManifest[]): Re
   }
   return {
     modules,
-    private: recorded,
+    private: declared ?? recorded === true,
     trackingLabels: trackingLabelsFrom(
       answersText,
       modules,
@@ -506,26 +443,24 @@ export function renderManagedYaml(facts: RepoFacts, manifests?: ModuleManifest[]
 }
 
 function main(args: string[]): void {
-  const flags = parseFlags(args, ["--repo", "--out"] as const, ["--target-dir"] as const);
+  const flags = parseFlags(
+    args,
+    ["--repo", "--out"] as const,
+    ["--target-dir", "--operator-answers"] as const,
+  );
+  if (flags["--target-dir"] !== undefined && flags["--operator-answers"] !== undefined) {
+    fail("--target-dir and --operator-answers are mutually exclusive - pass one fact source");
+  }
   const repo = flags["--repo"];
   let facts: RepoFacts;
   try {
     const manifests = loadManifests();
-    if (flags["--target-dir"] !== undefined) {
-      facts = factsFromTargetDir(flags["--target-dir"], manifests);
-    } else {
-      // The operator repo is the one fleet member with no
-      // .repo-platform.yml (see the header): when the target is the
-      // running repository AND the cwd carries the operator answers file
-      // (settings-repos.yml runs from the repo-platform checkout; a
-      // client's reusable-apply-settings checkout never has it), the
-      // facts come from those answers. Everything else fetches.
-      const self = env("GITHUB_REPOSITORY");
-      facts =
-        self !== "" && repo.toLowerCase() === self.toLowerCase() && existsSync(ANSWERS_FILE)
-          ? factsFromOperatorAnswers(".")
+    facts =
+      flags["--target-dir"] !== undefined
+        ? factsFromTargetDir(flags["--target-dir"], manifests)
+        : flags["--operator-answers"] !== undefined
+          ? factsFromOperatorAnswers(flags["--operator-answers"])
           : factsFromFetch(repo, manifests);
-    }
     writeFileSync(flags["--out"], renderManagedYaml(facts, manifests));
   } catch (error) {
     fail(error instanceof Error ? error.message : String(error));

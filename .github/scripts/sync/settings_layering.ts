@@ -43,43 +43,53 @@ const STARTER_TEMPLATE = join(REPO_ROOT, "templates/settings-sync/.github/settin
  *  old template rendered carries it, and nothing renders it anymore, so
  *  its presence IS the "legacy baseline file" signal (the constant left
  *  scripts/ownership.ts with the class; this literal is the transition's
- *  own anchor). */
+ *  own anchor). Matched exactly, column 0, inside the header window the
+ *  old class's classifier used - an indented mention (say, inside a block
+ *  scalar of a hand-written file) must never trigger the replacement. */
 export const LEGACY_MERGEABLE_LINE = "# repo-platform:mergeable";
+const LEGACY_HEADER_WINDOW = 10;
+
+/** Whether a settings.yml text is the legacy rendered baseline. */
+export function isLegacyBaseline(text: string): boolean {
+  return text.split("\n", LEGACY_HEADER_WINDOW).some((line) => line === LEGACY_MERGEABLE_LINE);
+}
 
 export interface IdentitySeed {
   description: string;
+  /** GitHub serves topics as a string in the old renders but tolerates a
+   *  string list; a hand-edited list must survive the transition. */
+  topics: string | string[];
   homepage: string;
-  topics: string;
   private: boolean;
   /** The owner named in the starter's header comment. */
   githubUsername: string;
 }
 
 /** Render the settings-sync starter template with an identity seed. The
- *  starter's only jinja is the four `{{ <answer> | tojson }}` identity
- *  expressions plus the header's `{{ github_username }}`, so substitution
- *  is total - anything else left over throws (the template grew a
- *  construct this renderer must learn first). */
+ *  starter's jinja surface is validated FIRST - the template stripped of
+ *  the known identity expressions must carry no jinja at all - so a seed
+ *  VALUE containing braces can never trip the check, and a template that
+ *  grew a construct this renderer does not know throws before anything is
+ *  substituted. */
 export function renderStarter(templateText: string, seed: IdentitySeed): string {
-  const values: Record<string, string> = {
-    description: JSON.stringify(seed.description),
-    homepage: JSON.stringify(seed.homepage),
-    topics: JSON.stringify(seed.topics),
-    private: JSON.stringify(seed.private),
-  };
-  const rendered = templateText
-    .replace(
-      /\{\{ (description|homepage|topics|private) \| tojson \}\}/g,
-      (_, name: string) => values[name],
-    )
-    .replaceAll("{{ github_username }}", () => seed.githubUsername);
-  if (rendered.includes("{{") || rendered.includes("{%")) {
+  const identityRe = /\{\{ (description|homepage|topics|private) \| tojson \}\}/g;
+  const stripped = templateText.replace(identityRe, "").replaceAll("{{ github_username }}", "");
+  if (stripped.includes("{{") || stripped.includes("{%") || stripped.includes("{#")) {
     throw new Error(
       "the settings-sync starter template carries jinja beyond the identity " +
         "expressions - teach settings_layering.ts's renderStarter the new construct",
     );
   }
-  return rendered;
+  const values: Record<string, string> = {
+    description: JSON.stringify(seed.description),
+    homepage: JSON.stringify(seed.homepage),
+    // JSON is valid YAML for a list too, so an array seed round-trips.
+    topics: JSON.stringify(seed.topics),
+    private: JSON.stringify(seed.private),
+  };
+  return templateText
+    .replace(identityRe, (_, name: string) => values[name])
+    .replaceAll("{{ github_username }}", () => seed.githubUsername);
 }
 
 /** JSON with recursively sorted object keys, for order-insensitive
@@ -178,11 +188,10 @@ export function transitionSettingsStarter(
     const registrationPath = join(targetDir, ".repo-platform.yml");
     if (existsSync(settingsPath) && existsSync(registrationPath)) {
       const oldText = readFileSync(settingsPath, "utf-8");
-      const legacy = oldText.split("\n").some((line) => line.trim() === LEGACY_MERGEABLE_LINE);
-      const modules = legacy
+      const modules = isLegacyBaseline(oldText)
         ? modulesFrom(readFileSync(registrationPath, "utf-8"), registrationPath)
         : [];
-      if (legacy && modules.includes("settings-sync")) {
+      if (modules.includes("settings-sync")) {
         const manifests = loadManifests();
         const facts = factsFromTargetDir(targetDir, manifests);
         const old = parseSettingsDoc(oldText, settingsPath);
@@ -196,6 +205,9 @@ export function transitionSettingsStarter(
         );
         const str = (value: unknown, fallback: unknown) =>
           typeof value === "string" ? value : typeof fallback === "string" ? fallback : "";
+        const isTopics = (value: unknown): value is string | string[] =>
+          typeof value === "string" ||
+          (Array.isArray(value) && value.every((t) => typeof t === "string"));
         // The header comment names the owner; shape-checked like the
         // license re-seed's owner pin (a malformed value would render a
         // wrong owner into a repo-owned file).
@@ -208,15 +220,16 @@ export function transitionSettingsStarter(
         const seed: IdentitySeed = {
           description: str(answers.description, oldRepository.description),
           homepage: str(oldRepository.homepage, answers.homepage),
-          topics: str(oldRepository.topics, answers.topics),
+          topics: isTopics(oldRepository.topics) ? oldRepository.topics : str(answers.topics, ""),
           private: facts.private,
           githubUsername: username,
         };
-        writeFileSync(
-          settingsPath,
-          renderStarter(readFileSync(starterTemplatePath, "utf-8"), seed),
-        );
+        // Everything is computed BEFORE the replacement is written: a
+        // throw anywhere above leaves the old file (marker included)
+        // untouched, so the fail-soft retry contract holds.
+        const starter = renderStarter(readFileSync(starterTemplatePath, "utf-8"), seed);
         section = layeringSummary(droppedOverrides(old, managedSettings(facts, manifests)));
+        writeFileSync(settingsPath, starter);
         notice(
           `${label}: replaced the legacy baseline .github/settings.yml with the identity starter ` +
             `(the managed baseline is computed centrally now)${

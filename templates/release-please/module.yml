@@ -4,3 +4,46 @@ description: release job on top of all-green + autorelease labels
 gate_jobs:
   - release-freshness
   - release-health
+
+# The module's managed settings contributions, assembled into each
+# selecting repo's baseline by render_managed_settings.ts.
+settings_labels:
+  # release-please manages these two on release PRs; declaring them keeps
+  # the label sync from deleting what it recreates.
+  - name: "autorelease: pending"
+    color: ededed
+    description: release-please release PR awaiting merge/tag
+  - name: "autorelease: tagged"
+    color: ededed
+    description: release-please release PR has been tagged
+  # release-health's gate labels: an open release-blocker issue fails the
+  # release PR and the release pipeline's pre-flight; release-override on
+  # the release PR bypasses the gates for that one release.
+  - name: release-blocker
+    color: B60205
+    description: Blocks releases while open - release-health fails release PRs and the release pipeline
+  - name: release-override
+    color: FBCA04
+    description: "On a release PR: bypass release-health gates for this release"
+
+settings_rulesets:
+  # vX.Y.Z release tags are immutable: repo-platform's push sync pins
+  # against them and release artifacts reference them. Admins bypass, so
+  # deliberate tag cleanup doesn't require disabling the ruleset.
+  - name: release-tags
+    target: tag
+    enforcement: active
+    conditions:
+      ref_name:
+        include:
+          - v*
+        exclude: []
+    rules:
+      - type: deletion
+      - type: non_fast_forward
+      - type: update
+    bypass_actors:
+      - actor_id: 5
+        actor_type: RepositoryRole
+        bypass_mode: always
+

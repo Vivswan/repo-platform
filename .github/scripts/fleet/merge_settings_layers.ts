@@ -98,6 +98,34 @@ export function nameKeyedUnion(
   return merged;
 }
 
+/** Repo-layer entries sharing a folded name: the union takes the FIRST
+ *  and the rest ride through as repo-only extras, so the apply would
+ *  fight itself over the label. Returned as warning texts - the repo
+ *  layer is repo-owned content the merge must not hard-fail on. */
+export function duplicateNameWarnings(repo: Record<string, unknown>): string[] {
+  const warnings: string[] = [];
+  for (const [section, fold] of Object.entries(NAME_KEYED)) {
+    const entries = repo[section];
+    if (!Array.isArray(entries)) continue;
+    const seen = new Map<string, string>();
+    for (const entry of entries) {
+      const name = entryName(entry);
+      if (name === null) continue;
+      const prior = seen.get(fold(name));
+      if (prior !== undefined) {
+        warnings.push(
+          `the repository's settings.yml declares ${section} ${JSON.stringify(prior)} and ` +
+            `${JSON.stringify(name)}, which the apply treats as one name - only the first ` +
+            "entry takes effect in the merge; remove the duplicate",
+        );
+      } else {
+        seen.set(fold(name), name);
+      }
+    }
+  }
+  return warnings;
+}
+
 /** Two plain objects merged key by key, repo winning; a repo `null`
  *  strips the key. */
 function mergeMappings(
@@ -256,6 +284,7 @@ function main(args: string[]): void {
       repoLayer = fetchRepoLayer(flags["--repo-fetch"]);
     }
     const repo = repoLayer === null ? {} : parseSettingsDoc(repoLayer.text, repoLayer.where);
+    for (const message of duplicateNameWarnings(repo)) warning(message);
     const merged = mergeSettingsLayers(managed, repo);
     const missing = missingIdentityKeys(merged);
     if (missing.length > 0) {

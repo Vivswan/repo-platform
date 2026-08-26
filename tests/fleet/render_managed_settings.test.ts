@@ -1,28 +1,33 @@
-// Unit tests for the managed settings baseline generator: the module
+// Unit tests for the managed settings baseline assembly: the module
 // matrix -> labels/rulesets derivations, the visibility-gated blocks, and
-// the fact resolvers' fail-closed reads. Uses the REAL module manifests -
-// they are on-disk constants, and the roster tuples are exactly what the
-// fleet's applies ship.
+// the fact resolvers' fail-closed reads. Uses the REAL baseline document
+// and module manifests - they are on-disk constants, and the roster
+// tuples are exactly what the fleet's applies ship.
 
 import { describe, expect, test } from "bun:test";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
+  declaredPrivate,
   enableCodeql,
   factsFromOperatorAnswers,
+  factsFromTargetDir,
+  loadBaseline,
   managedLabelNames,
   managedLabels,
   managedRulesets,
   managedSettings,
   modulesFrom,
-  privateReportLabel,
   type RepoFacts,
-  releasePleaseLabels,
   renderManagedYaml,
-  staticLabels,
   trackingLabelsFrom,
 } from "../../.github/scripts/fleet/render_managed_settings";
 import { loadManifests } from "../../scripts/module_manifests";
 
 const manifests = loadManifests();
+const baseline = loadBaseline();
+const releaseLabels = manifests.find((m) => m.module === "release-please")?.settings_labels ?? [];
 
 function facts(overrides: Partial<RepoFacts> = {}): RepoFacts {
   return { modules: [], private: false, trackingLabels: [], ...overrides };
@@ -33,7 +38,7 @@ function labelNames(f: RepoFacts): string[] {
 }
 
 describe("managedLabels", () => {
-  test("a bare selection gets the static roster alone", () => {
+  test("a bare selection gets the baseline's unconditional roster alone", () => {
     expect(labelNames(facts())).toEqual([
       "dependencies",
       "github_actions",
@@ -49,16 +54,25 @@ describe("managedLabels", () => {
     expect(shared.filter((name) => name === "javascript")).toHaveLength(1);
   });
 
-  test("release-please adds the autorelease pair and the release-health gates", () => {
+  test("a selected module contributes its manifest's settings_labels", () => {
+    expect(releaseLabels.map((label) => label.name)).toEqual([
+      "autorelease: pending",
+      "autorelease: tagged",
+      "release-blocker",
+      "release-override",
+    ]);
     const names = labelNames(facts({ modules: ["release-please"] }));
-    for (const label of releasePleaseLabels()) {
+    for (const label of releaseLabels) {
       expect(names).toContain(label.name);
     }
+    expect(labelNames(facts())).not.toContain("release-blocker");
   });
 
-  test("a private repo carries the settings-as-code-report marker label", () => {
-    expect(labelNames(facts({ private: true }))).toContain(privateReportLabel().name);
-    expect(labelNames(facts())).not.toContain(privateReportLabel().name);
+  test("a private repo carries the baseline's private-only labels", () => {
+    for (const label of baseline.private_labels) {
+      expect(labelNames(facts({ private: true }))).toContain(label.name);
+      expect(labelNames(facts())).not.toContain(label.name);
+    }
   });
 
   test("tracking labels render the repo's answer with the manifest tuple", () => {
@@ -176,10 +190,31 @@ describe("fact resolvers", () => {
     );
   });
 
+  test("declaredPrivate reads only a boolean repository.private", () => {
+    expect(declaredPrivate("repository:\n  private: true\n")).toBe(true);
+    expect(declaredPrivate("repository:\n  private: false\n")).toBe(false);
+    expect(declaredPrivate("repository:\n  private: 'false'\n")).toBeNull();
+    expect(declaredPrivate("repository: {}\n")).toBeNull();
+    expect(declaredPrivate("a: [unclosed\n")).toBeNull();
+    expect(declaredPrivate(null)).toBeNull();
+  });
+
+  test("factsFromTargetDir prefers the checkout's declared visibility over the recorded answer", () => {
+    const dir = mkdtempSync(join(tmpdir(), "facts-"));
+    mkdirSync(join(dir, ".github"));
+    writeFileSync(join(dir, ".repo-platform.yml"), "modules: [settings-sync]\n");
+    writeFileSync(join(dir, ".copier-answers.yml"), "private: false\n");
+    writeFileSync(join(dir, ".github/settings.yml"), "repository:\n  private: true\n");
+    expect(factsFromTargetDir(dir, manifests).private).toBe(true);
+    // Undeclared falls back to the recorded answer.
+    writeFileSync(join(dir, ".github/settings.yml"), "repository: {}\n");
+    expect(factsFromTargetDir(dir, manifests).private).toBe(false);
+  });
+
   test("the operator answers reproduce this repository's own facts", () => {
     // Runs against the real .repo-platform-answers.yml (cwd is the repo
     // root under bun test), so a drifted answers schema fails here first.
-    const operatorFacts = factsFromOperatorAnswers(".");
+    const operatorFacts = factsFromOperatorAnswers(".repo-platform-answers.yml");
     expect(operatorFacts.private).toBe(false);
     expect(operatorFacts.modules).toContain("release-please");
     expect(operatorFacts.trackingLabels).toEqual([]);
@@ -195,7 +230,7 @@ describe("fact resolvers", () => {
 describe("managedLabelNames", () => {
   test("covers every emittable label for the reserved-roster consumers", () => {
     const names = managedLabelNames(manifests);
-    for (const label of [...staticLabels(), privateReportLabel(), ...releasePleaseLabels()]) {
+    for (const label of [...baseline.labels, ...baseline.private_labels, ...releaseLabels]) {
       expect(names).toContain(label.name);
     }
     expect(names).toContain("javascript");
