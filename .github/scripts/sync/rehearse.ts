@@ -6,10 +6,11 @@
 // reusable-template-sync.yml runs - module selection, copier update (which
 // executes due migrations via copier.yml's _migrations; the synthetic
 // release version gives them a parseable target even for staging-channel
-// repos), conflict resolution, retired-file cleanup, the repo-owned
-// preserve step, the final manifest stamp, the manifest license check, and
-// validation - then prints the resulting diff and the would-be PR-body
-// sections.
+// repos), clean-render materialization, the split-file structural rebuild,
+// conflict resolution (rebuilt files skipped), retired-file cleanup, the
+// repo-owned preserve step, the final manifest stamp, the manifest license
+// check, and validation - then prints the resulting diff and the would-be
+// PR-body sections.
 //
 // READ-ONLY against the remote: the network is touched only to clone the
 // target, fetch this repo's build refs, and (first run) install the
@@ -496,6 +497,33 @@ export function rehearseRepo(slug: string, options: RehearsalOptions): Rehearsal
 
     section("copier update (due migrations run inside, via copier.yml's _migrations)");
     run(["bun", ".github/scripts/sync/apply_update.ts"], { cwd: REPO_ROOT, env: legEnv });
+
+    // The workflow's leg order: materialize the clean renders, rebuild the
+    // split files structurally, then resolve leftover conflicts with the
+    // rebuilt files excluded - rehearsal must exercise exactly what
+    // production runs, or it drops split-file content production preserves
+    // (false red) and hides real rebuild bugs (false green).
+    section("clean renders + split-file structural rebuild");
+    run(["bun", ".github/scripts/sync/clean_renders.ts"], { cwd: REPO_ROOT, env: legEnv });
+    run(
+      [
+        "bun",
+        ".github/scripts/sync/preserve_local_content.ts",
+        "--summary",
+        join(temp, "local-carryover.md"),
+        "--root",
+        targetDir,
+        "--needs-review",
+        join(temp, "carry-review.txt"),
+        "--rebuilt-paths",
+        join(temp, "split-rebuilt-paths.txt"),
+        "--render-dir",
+        join(temp, "render-new"),
+        "--old-render-dir",
+        join(temp, "render-old"),
+      ],
+      { cwd: REPO_ROOT, env: legEnv },
+    );
     // Captured in both modes: the per-file lines carry the conflict report.
     const resolution = runCaptured(
       [
@@ -505,6 +533,8 @@ export function rehearseRepo(slug: string, options: RehearsalOptions): Rehearsal
         join(temp, "dropped-local-hunks.md"),
         "--root",
         targetDir,
+        "--skip",
+        join(temp, "split-rebuilt-paths.txt"),
       ],
       { cwd: REPO_ROOT },
     );
@@ -579,6 +609,8 @@ export function rehearseRepo(slug: string, options: RehearsalOptions): Rehearsal
       const prSections: [string, string][] = [
         ["retired-modules.txt", "Retired modules dropped from the selection"],
         ["removed-paths.txt", "The template retired these files; this update deletes them"],
+        ["local-carryover.md", "Split-file carry summary (rebuilt structurally)"],
+        ["carry-review.txt", "Split-file carries needing review (the PR would stay manual-review)"],
         [
           "dropped-local-hunks.md",
           "Merge conflicts resolved toward the template (review the dropped local lines)",

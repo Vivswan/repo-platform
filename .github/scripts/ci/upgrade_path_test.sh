@@ -704,3 +704,168 @@ RECOVER="" RUNNER_TEMP=/tmp bun .github/scripts/sync/preserve_repo_owned.ts
 rendered_fleet_license | cmp -s "$DEL/LICENSE.md" - \
   || fail "a committed LICENSE deletion did not re-converge to the mandatory fleet license"
 echo "license deletion OK: fleet license re-seeded"
+
+# --- Split-file structural rebuild (regenerate-and-splice) ----------------
+# The primary sync path discards copier's merged result for every
+# split-class file and rebuilds it structurally: the managed half from the
+# clean render at the new ref, the repository-local half byte-for-byte
+# from HEAD (preserve_local_content.ts --render-dir, files and markers
+# from the new render's ownership manifest). This leg plants a local
+# AGENTS.md tail, a local .gitignore LOCAL entry, and a hand edit INSIDE
+# SECURITY.md's managed half, then updates to a build whose template
+# changed each file's managed half - the overlap that used to end in merge
+# conflicts or merge luck. Tails must ride through byte-preserved, managed
+# halves must equal render-new byte-for-byte, the managed-half edit must
+# be reset and flagged for review, and no split file may appear in the
+# dropped-hunks summary. Self-contained: fresh fixture, its own build tag
+# (templates/v99.99.100, chained on v99.99.99), its own trap layer.
+SPLIT=/tmp/upgrade-split
+SPLIT_WORK=/tmp/upgrade-split-work
+rm -rf "$SPLIT" "$SPLIT_WORK" /tmp/next-split /tmp/upgrade-split-local-expected.txt
+mkdir -p "$SPLIT_WORK"
+cleanup_split() {
+  git -C "$REPO_ROOT" tag -d templates/v99.99.100 2>/dev/null || true
+}
+trap 'cleanup_split; cleanup' EXIT
+cleanup_split
+
+cd "$GITHUB_WORKSPACE"
+cp -R /tmp/next /tmp/next-split
+# Perturb the managed half of each split grammar in the new build: a line
+# above AGENTS.md's and SECURITY.md's local-section sentinel, a pattern
+# inside .gitignore's managed section.
+insert_above_sentinel() { # <file> <line>
+  awk -v insert="$2" \
+    '{ if ($0 == "<!-- repo-platform:local-section -->" && !done) { print insert; done = 1 } print }' \
+    "$1" > "$1.tmp"
+  mv "$1.tmp" "$1"
+  grep -qF "$2" "$1" || fail "could not perturb the managed half of $1"
+}
+agents_tpl="$(find /tmp/next-split/template -maxdepth 1 -name "*AGENTS.md*.jinja" | head -n 1)"
+test -n "$agents_tpl" || fail "no AGENTS.md template in the assembled build tree"
+insert_above_sentinel "$agents_tpl" "Split-rebuild fixture managed line (agents)."
+insert_above_sentinel /tmp/next-split/template/SECURITY.md.jinja \
+  "Split-rebuild fixture managed line (security)."
+awk '{ print } $0 == "# BEGIN REPO-PLATFORM MANAGED" && !done { print "split-rebuild-fixture.tmp"; done = 1 }' \
+  /tmp/next-split/template/.gitignore.jinja > /tmp/next-split/template/.gitignore.jinja.tmp
+mv /tmp/next-split/template/.gitignore.jinja.tmp /tmp/next-split/template/.gitignore.jinja
+grep -qxF "split-rebuild-fixture.tmp" /tmp/next-split/template/.gitignore.jinja \
+  || fail "could not perturb .gitignore's managed section"
+commit_build_tree /tmp/next-split templates/v99.99.100 templates/v99.99.99
+
+copier copy "$GITHUB_WORKSPACE" "$SPLIT" \
+  --vcs-ref templates/v99.99.99 --defaults --trust \
+  -d project_name="Split Rebuild" \
+  -d description="Split-rebuild project" \
+  -d 'modules=[agents]' \
+  -d channel="latest" \
+  -d private="false"
+cd "$SPLIT"
+git init -q -b main
+git add --all
+git -c user.name=ci -c user.email=ci@localhost commit -q -m "chore: init"
+
+# The local state a real repo carries into the sync: a tail below
+# AGENTS.md's sentinel, a .gitignore LOCAL entry, and - the deliberate
+# ownership violation - a hand edit inside SECURITY.md's managed half.
+split_tail_body='## Local agent docs
+
+split-local agents tail'
+printf '\n%s\n' "$split_tail_body" >> AGENTS.md
+awk '/^# END REPOSITORY LOCAL$/ { print "split-local-cache/" } { print }' .gitignore > .gitignore.tmp
+mv .gitignore.tmp .gitignore
+# The expected post-update LOCAL region: the rebuild must carry this body
+# byte-for-byte (markers included).
+awk '/^# BEGIN REPOSITORY LOCAL$/, /^# END REPOSITORY LOCAL$/' .gitignore > /tmp/upgrade-split-local-expected.txt
+awk 'NR == 2 { print "split-local hand edit inside the managed half" } { print }' SECURITY.md > SECURITY.md.tmp
+mv SECURITY.md.tmp SECURITY.md
+grep -qF "split-local hand edit" SECURITY.md || fail "could not plant the managed-half edit"
+git add --all
+git -c user.name=ci -c user.email=ci@localhost commit -q -m "chore: local modifications"
+
+# The workflow's leg order: apply update, materialize the clean renders,
+# rebuild split files, resolve conflicts, retired cleanup, preserve,
+# stamp, validate.
+cd "$GITHUB_WORKSPACE"
+export MODULES='["agents"]'
+export CHANNEL=latest
+export PRIVATE=false
+export DESCRIPTION="Split-rebuild project"
+export TARGET_DIR="$SPLIT"
+export TARGET_REF=templates/v99.99.100
+RECOVER="" bun .github/scripts/sync/apply_update.ts
+answers_split="$(git -C "$SPLIT" show HEAD:.copier-answers.yml)"
+src_path_split="$(sed -n 's/^_src_path: //p' <<<"$answers_split")"
+test -n "$src_path_split" || fail "split fixture records no _src_path"
+RUNNER_TEMP="$SPLIT_WORK" SRC_PATH="$src_path_split" \
+  OLD_SHA="$(git rev-parse "templates/v99.99.99^{commit}")" \
+  bun .github/scripts/sync/clean_renders.ts
+bun .github/scripts/sync/preserve_local_content.ts \
+  --summary "$SPLIT_WORK/local-carryover.md" --root "$SPLIT" \
+  --needs-review "$SPLIT_WORK/carry-review.txt" \
+  --rebuilt-paths "$SPLIT_WORK/split-rebuilt-paths.txt" \
+  --render-dir "$SPLIT_WORK/render-new" --old-render-dir "$SPLIT_WORK/render-old"
+bun .github/scripts/sync/resolve_copier_conflicts.ts \
+  --summary "$SPLIT_WORK/dropped-local-hunks.md" --root "$SPLIT" \
+  --skip "$SPLIT_WORK/split-rebuilt-paths.txt"
+git show "templates/v99.99.99:copier.yml" > "$SPLIT_WORK/copier-old.yml"
+git show "templates/v99.99.100:copier.yml" > "$SPLIT_WORK/copier-new.yml"
+RUNNER_TEMP="$SPLIT_WORK" SRC_PATH="$src_path_split" \
+  OLD_SHA="$(git rev-parse "templates/v99.99.99^{commit}")" \
+  bun .github/scripts/sync/retired_cleanup.ts
+RECOVER="" RUNNER_TEMP="$SPLIT_WORK" bun .github/scripts/sync/preserve_repo_owned.ts
+TARGET_DIR="$SPLIT" bun .github/scripts/sync/stamp_manifest.ts
+bun "$GITHUB_WORKSPACE/actions/validate-template/validate_generated_files.ts" "$SPLIT"
+
+cd "$SPLIT"
+# AGENTS.md: managed half byte-equal to render-new, the local tail
+# byte-preserved below it - the whole file is exactly render-new + tail.
+{ cat "$SPLIT_WORK/render-new/AGENTS.md"; printf '\n%s\n' "$split_tail_body"; } \
+  | cmp -s - AGENTS.md \
+  || fail "AGENTS.md is not byte-equal to render-new plus the preserved local tail"
+grep -qF "Split-rebuild fixture managed line (agents)." AGENTS.md \
+  || fail "AGENTS.md did not receive the template's managed-half change"
+# SECURITY.md: the hand edit inside the managed half is RESET - the file
+# is byte-equal to render-new, and the reset is flagged for review.
+cmp -s "$SPLIT_WORK/render-new/SECURITY.md" SECURITY.md \
+  || fail "SECURITY.md is not byte-equal to render-new after the managed-half reset"
+if grep -qF "split-local hand edit" SECURITY.md; then
+  fail "the hand edit inside SECURITY.md's managed half survived the rebuild"
+fi
+grep -q '^SECURITY\.md: managed-half edits reset' "$SPLIT_WORK/carry-review.txt" \
+  || fail "the managed-half reset was not flagged in the carry-review file"
+grep -qF 'RESET to the fresh render' "$SPLIT_WORK/local-carryover.md" \
+  || fail "the carry summary does not state the managed-half reset loudly"
+# The clean carries stay auto-merge-eligible: neither AGENTS.md nor
+# .gitignore may appear in the review flag.
+if grep -qE '^(AGENTS\.md|\.gitignore):' "$SPLIT_WORK/carry-review.txt"; then
+  fail "a clean split-file carry was flagged for review"
+fi
+# .gitignore: the whole LOCAL region (markers included) byte-preserved,
+# the managed half (from the BEGIN marker to end of file) byte-equal to
+# render-new's.
+awk '/^# BEGIN REPOSITORY LOCAL$/, /^# END REPOSITORY LOCAL$/' .gitignore > "$SPLIT_WORK/local-actual.txt"
+cmp -s /tmp/upgrade-split-local-expected.txt "$SPLIT_WORK/local-actual.txt" \
+  || fail ".gitignore's REPOSITORY LOCAL region is not byte-preserved"
+awk '/^# BEGIN REPO-PLATFORM MANAGED$/, 0' .gitignore > "$SPLIT_WORK/managed-actual.txt"
+awk '/^# BEGIN REPO-PLATFORM MANAGED$/, 0' "$SPLIT_WORK/render-new/.gitignore" \
+  > "$SPLIT_WORK/managed-expected.txt"
+cmp -s "$SPLIT_WORK/managed-expected.txt" "$SPLIT_WORK/managed-actual.txt" \
+  || fail ".gitignore's managed half is not byte-equal to render-new"
+grep -qxF "split-rebuild-fixture.tmp" .gitignore \
+  || fail ".gitignore did not receive the template's managed-section change"
+# The split files never reach the conflict resolver: no split-file section
+# in the dropped-hunks summary, no leftover markers. The marker is built
+# here (not reused from an earlier leg) so this block stays self-contained.
+split_marker="$(printf '<%.0s' 1 2 3 4 5 6 7) before updating"
+if [ -s "$SPLIT_WORK/dropped-local-hunks.md" ]; then
+  for f in AGENTS.md SECURITY.md .gitignore; do
+    if grep -qF "\`$f\`" "$SPLIT_WORK/dropped-local-hunks.md"; then
+      fail "split file $f appeared in the dropped-hunks summary"
+    fi
+  done
+fi
+if grep -rIqF "$split_marker" . --exclude-dir=.git; then
+  fail "the split-file rebuild left unresolved copier conflict markers"
+fi
+echo "split-file rebuild OK: tails byte-preserved, managed halves byte-equal to render-new, managed-half edit reset and flagged"

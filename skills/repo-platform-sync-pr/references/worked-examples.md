@@ -26,7 +26,7 @@ Resolution: expected - overlapping edits to template-owned files lose to the tem
 
 ## 3. True three-way conflicts in a normal sync PR
 
-Local edits overlapped template changes; the PR body lists dropped or moved hunks per file. Diagnosed by reading the body's conflict summary:
+Local edits overlapped template changes in a non-split file; the PR body lists dropped hunks per file. Diagnosed by reading the body's conflict summary:
 
 ```bash
 gh pr view <number> --json body --jq .body | grep -A20 'Conflict'

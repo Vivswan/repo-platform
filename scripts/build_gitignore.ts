@@ -34,6 +34,7 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import { gateExpression } from "./compose_template.ts";
+import { cleanLocalRegion, LOCAL_BEGIN, LOCAL_END } from "./gitignore_local.ts";
 import { loadManifests, type ModuleManifest } from "./module_manifests.ts";
 
 const REPO_ROOT = resolve(import.meta.dir, "..");
@@ -61,8 +62,6 @@ function byModule(manifests: ModuleManifest[]): {
 
 const ANCHOR = "gitignore";
 
-const LOCAL_BEGIN = "# BEGIN REPOSITORY LOCAL";
-const LOCAL_END = "# END REPOSITORY LOCAL";
 const DEFAULT_LOCAL_BODY = "# Add repository-specific ignore patterns in this section only.\n";
 
 // Not from github/gitignore: agent local state (worktree directories and
@@ -141,14 +140,22 @@ function managedHeader(sha: string): string {
   );
 }
 
-/** Current content between the LOCAL markers, or the default. */
-function existingLocalBody(output: string): string {
+/** Current content between the LOCAL markers, the default when the file
+ *  does not exist yet, or a loud error when the file exists but has no
+ *  exactly-once clean region (cleanLocalRegion - the same accept/reject
+ *  the sync carry applies, so the two writers can never slice the same
+ *  malformed file differently). Regenerating around a malformed region
+ *  would silently drop local content or duplicate markers; the fix is a
+ *  hand edit, not a guess. Exported for the writers-agree test. */
+export function existingLocalBody(output: string): string {
   if (!existsSync(output)) return DEFAULT_LOCAL_BODY;
-  const text = readFileSync(output).toString("utf-8");
-  const begin = text.indexOf(LOCAL_BEGIN);
-  const end = text.indexOf(LOCAL_END);
-  if (begin === -1 || end === -1 || end < begin) return DEFAULT_LOCAL_BODY;
-  return text.slice(begin + LOCAL_BEGIN.length + 1, end);
+  const region = cleanLocalRegion(readFileSync(output).toString("utf-8"));
+  if (region === null) {
+    throw new Error(
+      `${output} has no single clean REPOSITORY LOCAL region (markers missing, duplicated, out of order, or marker text inside the body); fix its markers by hand, then rerun`,
+    );
+  }
+  return region.body;
 }
 
 function buildTemplate(sha: string, sections: Record<string, string>): string {
@@ -273,6 +280,10 @@ async function run(mode: Mode): Promise<number> {
   }
   const { entries: moduleSources, gates } = byModule(manifests);
   const sources = selfSources(moduleSources);
+  // Before any fetch or lock write: a malformed self output must abort
+  // while the lock still matches the committed outputs - advancing it
+  // first would leave lock and outputs out of step behind the error.
+  const selfLocalBody = existingLocalBody(OUTPUT_SELF);
 
   const paths = [...ALWAYS, ...sources];
   let sha: string;
@@ -296,7 +307,7 @@ async function run(mode: Mode): Promise<number> {
       fragmentOutput(module),
       buildFragment(sections, parts, gates),
     ]),
-    [OUTPUT_SELF, buildSelf(sha, sections, sources, existingLocalBody(OUTPUT_SELF))],
+    [OUTPUT_SELF, buildSelf(sha, sections, sources, selfLocalBody)],
   ];
 
   if (mode === "check") {

@@ -7,9 +7,10 @@
 // Env: TARGET, TARGET_DISPLAY (log label; falls back to TARGET),
 // HIDE_DETAILS, CHANNEL, DISPLAY, BRANCH, BASE_BRANCH,
 // VALIDATION, RESOLVED, RECOVER, FORCE_MANUAL, DRIFT_FILE, SUMMARY_FILE,
-// CARRIED_FILE, RETIRED_MODULES_FILE, REMOVED_PATHS_FILE, WITHHELD_FILE,
-// MANIFEST_LICENSE_FILE, LICENSE_TRANSITION_FILE, GH_TOKEN,
-// GITHUB_REPOSITORY, GITHUB_OUTPUT, RUNNER_TEMP.
+// CARRIED_FILE, CARRY_REVIEW_FILE, RETIRED_MODULES_FILE,
+// REMOVED_PATHS_FILE, WITHHELD_FILE, MANIFEST_LICENSE_FILE,
+// LICENSE_TRANSITION_FILE, GH_TOKEN, GITHUB_REPOSITORY, GITHUB_OUTPUT,
+// RUNNER_TEMP.
 
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
@@ -88,15 +89,19 @@ if (recover === "recopy") {
 > below a repo-platform:recovery-appendix comment and needs manual
 > deduplication), and retired-file cleanup was skipped.
 > Review the whole diff before merging.`;
-  // preserve_local_content.ts carried the sanctioned repository-local
-  // regions (local-section tails, the .gitignore LOCAL section, the
-  // prefix docs' repo tails) back over the re-render; its summary names
-  // each carried file for review.
-  const carriedFile = requireEnv("CARRIED_FILE");
-  if (nonEmpty(carriedFile)) {
-    body += `\n\n${slurp(carriedFile)}`;
-  }
 }
+
+// preserve_local_content.ts rebuilds every split-class file structurally
+// on every run (managed half from a clean render, repository-local half
+// from the pre-update HEAD; sentinel-scan carry on a recovery re-render);
+// its summary names each carried file for review. Carries that need a
+// human (an appendix, reset managed-half edits, duplicate markers) also
+// land in CARRY_REVIEW_FILE, which forces the manual path below.
+const carriedFile = requireEnv("CARRIED_FILE");
+if (nonEmpty(carriedFile)) {
+  body += `\n\n${slurp(carriedFile)}`;
+}
+const carryReviewFile = requireEnv("CARRY_REVIEW_FILE");
 
 const retiredModulesFile = requireEnv("RETIRED_MODULES_FILE");
 if (nonEmpty(retiredModulesFile)) {
@@ -197,16 +202,19 @@ if (validation === "failed") {
 > in this PR before merging.${validationExtra}`;
 }
 
-// Anything that needs human review - dropped local hunks, withheld
-// workflow files, failed validation, a recovery re-render, a dispatch
-// that forced manual review, a deleted license file, out-of-band
-// settings drift - stays manual; a clean update arms squash auto-merge
-// below.
+// Anything that needs human review - dropped local hunks, a split-file
+// carry that needs a human (appendix, reset managed-half edits, duplicate
+// markers), withheld workflow files, failed validation, a recovery
+// re-render, a dispatch that forced manual review, a deleted license
+// file, out-of-band settings drift - stays manual; a clean update (which
+// includes kept-whole and clean tail-appended carries) arms squash
+// auto-merge below.
 const needsReview =
   resolved === "true" ||
   validation === "failed" ||
   recover === "recopy" ||
   env("FORCE_MANUAL") === "true" ||
+  nonEmpty(carryReviewFile) ||
   nonEmpty(licenseTransitionFile) ||
   nonEmpty(withheldFile) ||
   nonEmpty(driftFile);
@@ -271,6 +279,6 @@ if (!needsReview) {
   }
 } else {
   console.log(
-    "auto-merge left off: this PR needs review (conflicts, withheld files, failed validation, out-of-band settings drift, a recovery re-render, a forced-manual dispatch, or a deleted license file).",
+    "auto-merge left off: this PR needs review (conflicts, split-file carries needing review, withheld files, failed validation, out-of-band settings drift, a recovery re-render, a forced-manual dispatch, or a deleted license file).",
   );
 }
