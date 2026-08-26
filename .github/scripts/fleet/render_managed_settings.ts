@@ -43,7 +43,8 @@ import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { loadManifests, type ModuleManifest } from "../../../scripts/module_manifests.ts";
 import { parseAnswers } from "../../../scripts/render_dogfood.ts";
 import { parseFlags } from "../shared/flags.ts";
-import { fail } from "../shared/gha.ts";
+import { fail, warning } from "../shared/gha.ts";
+import { RETIRED_MODULES } from "../sync/modules.ts";
 import { captureNetwork } from "./discovery.ts";
 import { mergeLayers } from "./merge_settings_layers.ts";
 
@@ -247,12 +248,53 @@ function parseMapping(text: string, where: string): Record<string, unknown> {
 /** Modules from a .repo-platform.yml text; throws on a missing or
  *  malformed top-level list (the baseline cannot be computed from a
  *  guess). */
-export function modulesFrom(registrationText: string, where: string): string[] {
+/** The module selection, VALIDATED against the manifest roster. An
+ *  unknown name cannot be tolerated here the way an unknown key can:
+ *  layerPaths simply finds no layer files for it, so a typo yields a
+ *  perfectly valid-looking document that is missing that module's labels,
+ *  and the apply's delete-undeclared pass then removes them from the live
+ *  repository. A retired module is different - the template dropped it on
+ *  purpose and repos may still list it - so it is dropped with a warning,
+ *  the same tolerance sync/modules.ts applies (and the same single list,
+ *  imported rather than mirrored). */
+export function modulesFrom(
+  registrationText: string,
+  where: string,
+  manifests: ModuleManifest[] = loadManifests(),
+  retired: ReadonlySet<string> = RETIRED_MODULES,
+): string[] {
   const modules = parseMapping(registrationText, where).modules;
   if (!Array.isArray(modules) || !modules.every((m) => typeof m === "string")) {
     throw new Error(`${where}: no readable top-level modules list`);
   }
-  return modules;
+  return assertKnownModules(modules, where, manifests, retired);
+}
+
+/** Every selection reaching the render goes through here, against the SAME
+ *  manifest array the render uses - a validator keyed on its own roster
+ *  could pass a name the render then finds no layers for. */
+export function assertKnownModules(
+  modules: string[],
+  where: string,
+  manifests: ModuleManifest[],
+  retired: ReadonlySet<string> = RETIRED_MODULES,
+): string[] {
+  const known = new Set(manifests.map((m) => m.module));
+  const kept: string[] = [];
+  const unknown: string[] = [];
+  for (const name of modules) {
+    if (known.has(name)) kept.push(name);
+    else if (retired.has(name)) warning(`${where}: module "${name}" is retired; ignoring it`);
+    else unknown.push(name);
+  }
+  if (unknown.length > 0) {
+    throw new Error(
+      `${where}: unknown module(s) ${unknown.map((n) => JSON.stringify(n)).join(", ")} - not a ` +
+        "template module and not retired. Applying the settings without them would compute a " +
+        "roster missing their labels, and the apply deletes undeclared labels.",
+    );
+  }
+  return kept;
 }
 
 /** The selected stream modules' tracking-label answers from a
@@ -337,10 +379,17 @@ export function declaredPrivate(settingsText: string | null): boolean | null {
  *  selection and visibility come from the recorded operator answers file -
  *  the same answers the dogfood render uses (render_dogfood.ts pins its
  *  private answer to the in-repo settings.yml declaration). */
-export function factsFromOperatorAnswers(answersPath: string): RepoFacts {
+export function factsFromOperatorAnswers(
+  answersPath: string,
+  manifests: ModuleManifest[] = loadManifests(),
+): RepoFacts {
   const answers = parseAnswers(readFileSync(answersPath, "utf-8"), answersPath);
-  const modules = [...answers.modules];
-  const streams = loadManifests().filter(
+  // The operator repository is ALWAYS a settings target, so an unknown
+  // name here is the same destructive path as one in a client repo's
+  // .repo-platform.yml: no layer files are found, the roster comes out
+  // short, and the apply deletes the missing labels off this repository.
+  const modules = assertKnownModules([...answers.modules], answersPath, manifests);
+  const streams = manifests.filter(
     (m) => m.tracking_label !== undefined && modules.includes(m.module),
   );
   if (streams.length > 0) {
@@ -371,7 +420,7 @@ export function factsFromFetch(repo: string, manifests: ModuleManifest[]): RepoF
         "so there is no module selection to compute a settings baseline from",
     );
   }
-  const modules = modulesFrom(registration, `${repo}/.repo-platform.yml`);
+  const modules = modulesFrom(registration, `${repo}/.repo-platform.yml`, manifests);
   const isPrivate =
     declaredPrivate(fetchRepoFile(repo, ".github/settings.yml")) ?? fetchRepoIsPrivate(repo);
   const streams = manifests.filter(
@@ -401,6 +450,7 @@ export function factsFromTargetDir(dir: string, manifests: ModuleManifest[]): Re
   const modules = modulesFrom(
     readFileSync(join(dir, ".repo-platform.yml"), "utf-8"),
     where(".repo-platform.yml"),
+    manifests,
   );
   const answersText = readFileSync(join(dir, ".copier-answers.yml"), "utf-8");
   const settingsPath = join(dir, ".github/settings.yml");
@@ -451,7 +501,7 @@ function main(args: string[]): void {
       flags["--target-dir"] !== undefined
         ? factsFromTargetDir(flags["--target-dir"], manifests)
         : flags["--operator-answers"] !== undefined
-          ? factsFromOperatorAnswers(flags["--operator-answers"])
+          ? factsFromOperatorAnswers(flags["--operator-answers"], manifests)
           : factsFromFetch(repo, manifests);
     writeFileSync(flags["--out"], renderManagedYaml(facts, manifests));
   } catch (error) {

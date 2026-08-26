@@ -210,6 +210,14 @@ describe("stripNulls on emitted entries", () => {
     expect(local).toEqual({ name: "local", target: "branch" });
   });
 
+  test("a null on a LABEL is stripped: one literal null fails the whole apply", () => {
+    const merged = mergeSettingsLayers(managed, {
+      labels: [{ name: "incident", color: "b60205", description: null }],
+    }) as { labels: Record<string, unknown>[] };
+    const incident = merged.labels.find((l) => l.name === "incident");
+    expect(incident).toEqual({ name: "incident", color: "b60205" });
+  });
+
   test("a null nested inside a one-sided entry is stripped too", () => {
     const merged = mergeSettingsLayers(managed, {
       rulesets: [{ name: "local", conditions: { ref_name: { include: ["main"], exclude: null } } }],

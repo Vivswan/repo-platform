@@ -64,7 +64,15 @@ const NAME_KEYED: Record<
     normalize?: (entry: unknown) => unknown;
   }
 > = {
-  labels: { fold: (name) => name.toLowerCase(), combine: (_lower, higher) => higher },
+  labels: {
+    fold: (name) => name.toLowerCase(),
+    combine: (_lower, higher) => higher,
+    // A label is replaced wholesale, but it still owes the dialect its
+    // null handling: the pinned action rejects the WHOLE apply over one
+    // literal null, so a repo writing `description: null` on a label
+    // would take the repository's entire settings run down with it.
+    normalize: stripNulls,
+  },
   rulesets: {
     fold: (name) => name,
     combine: (lower, higher) => mergeRulesetEntry(lower, higher),

@@ -1763,6 +1763,64 @@ const rules: Rule[] = [
           got: "no failure_issue.ts deliver step",
         });
       }
+      // Per STEP, not per flattened file: a title binding or a condition
+      // sitting on some unrelated step would satisfy a whole-file search.
+      // Steps are the "- name:" blocks of the apply job.
+      const steps = new Map<string, string>();
+      for (const block of workflow.split(/\n {6}- name: /).slice(1)) {
+        const name = block.slice(0, block.indexOf("\n"));
+        steps.set(name.trim(), block);
+      }
+      const step = (name: string, needs: [RegExp, string][]) => {
+        const block = steps.get(name);
+        if (block === undefined) {
+          mismatches.push({
+            file: ".github/workflows/settings-repos.yml",
+            expected: `a step named "${name}"`,
+            got: "no such step",
+          });
+          return;
+        }
+        for (const [pattern, what] of needs) {
+          if (!pattern.test(block)) {
+            mismatches.push({
+              file: `.github/workflows/settings-repos.yml step "${name}"`,
+              expected: what,
+              got: "missing",
+            });
+          }
+        }
+      };
+      const settingsTitle = /REPORT_TITLE: \$\{\{ env\.SETTINGS_REPORT_TITLE \}\}/;
+      step("Deliver hidden failure diagnostics", [
+        [/failure_issue\.ts deliver/, "the deliver call"],
+        [settingsTitle, "the settings-specific report title"],
+        [/if: failure\(\)/, "a failure() condition"],
+      ]);
+      // Deliver without resolve leaves the report open after a recovered
+      // run, and a shared title would let the sync workflow's green run
+      // close a report the settings apply is still failing on.
+      step("Resolve the settings failure report", [
+        [/failure_issue\.ts resolve/, "the resolve call"],
+        [settingsTitle, "the settings-specific report title"],
+        [/if: success\(\)/, "a success() condition"],
+      ]);
+      // OUTSIDE the hidden capture, or a hide-details target is skipped
+      // with a green job and no signal at all.
+      step("Report a skipped target", [
+        [/steps\.merge\.outputs\.skipped == 'true'/, "a condition on the merge step's output"],
+        [/::notice::/, "a public notice"],
+      ]);
+      // The whole point of that step is being OUTSIDE the capture, so the
+      // wrapper is checked as a forbidden token, not a negated pattern.
+      const skipStep = steps.get("Report a skipped target");
+      if (skipStep?.includes("run_hidden")) {
+        mismatches.push({
+          file: '.github/workflows/settings-repos.yml step "Report a skipped target"',
+          expected: "the notice stays outside run_hidden, or the skip has no public signal",
+          got: "wrapped in run_hidden",
+        });
+      }
       return mismatches;
     },
   },

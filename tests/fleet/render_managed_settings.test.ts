@@ -6,7 +6,7 @@
 // the fleet override (layers 5 and 6) are merge_settings_layers' tests.
 
 import { describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -211,6 +211,19 @@ describe("fact resolvers", () => {
   test("modulesFrom reads the top-level list and refuses anything else", () => {
     expect(modulesFrom("modules: [uv, settings-sync]\n", "f")).toEqual(["uv", "settings-sync"]);
     expect(() => modulesFrom("notmodules: true\n", "f")).toThrow("modules list");
+    // A typo must be LOUD: layerPaths finds no layer files for it, so the
+    // document would look valid while missing that module's labels, and
+    // the apply deletes undeclared labels off the live repository.
+    expect(() => modulesFrom("modules: [uv, setings-sync]\n", "f")).toThrow("unknown module");
+    // A retired module is tolerated, matching sync/modules.ts.
+    expect(
+      modulesFrom(
+        "modules: [uv, gone]\n",
+        "f",
+        manifests.filter((m) => m.module === "uv"),
+        new Set(["gone"]),
+      ),
+    ).toEqual(["uv"]);
     expect(() => modulesFrom("a: [unclosed\n", "f")).toThrow("YAML parse error");
   });
 
@@ -243,6 +256,16 @@ describe("fact resolvers", () => {
     // Undeclared falls back to the recorded answer.
     writeFileSync(join(dir, ".github/settings.yml"), "repository: {}\n");
     expect(factsFromTargetDir(dir, manifests).private).toBe(false);
+  });
+
+  test("the operator's own selection is validated too", () => {
+    // repo-platform is always a settings target, so a typo in its answers
+    // file is the same destructive path as one in a client repo.
+    const dir = mkdtempSync(join(tmpdir(), "operator-"));
+    const file = join(dir, "answers.yml");
+    const real = readFileSync(".repo-platform-answers.yml", "utf-8");
+    writeFileSync(file, real.replace("- bun", "- bnu"));
+    expect(() => factsFromOperatorAnswers(file, manifests)).toThrow("unknown module");
   });
 
   test("the operator answers reproduce this repository's own facts", () => {
