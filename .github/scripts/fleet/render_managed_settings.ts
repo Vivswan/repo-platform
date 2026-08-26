@@ -47,13 +47,23 @@ import { fail, setOutput, warning } from "../shared/gha.ts";
 import { capture } from "../shared/proc.ts";
 import { RETIRED_MODULES } from "../sync/modules.ts";
 import { captureNetwork } from "./discovery.ts";
-import { assertRuleTypes, mergeLayers, normalizeDocument } from "./merge_settings_layers.ts";
+import { mergeLayers } from "./merge_settings_layers.ts";
+import {
+  isMapping,
+  type MergedSettings,
+  parseLayerFile,
+  parseYamlMapping,
+  type SettingsLayer,
+} from "./settings_document.ts";
 
-export interface Label {
+/** A label tuple. A type alias rather than an interface so it carries an
+ *  implicit index signature: a label list is a value inside a merged
+ *  document, and only structural types are assignable to MergedValue. */
+export type Label = {
   name: string;
   color: string;
   description: string;
-}
+};
 
 export interface RepoFacts {
   /** The target's module selection (its .repo-platform.yml list). */
@@ -68,10 +78,6 @@ export interface RepoFacts {
 // --- the settings layers ----------------------------------------------------
 
 const REPO_ROOT = resolve(import.meta.dir, "..", "..", "..");
-
-function isMapping(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
 
 /** The module-level layer filenames, next to each templates/<module>/
  *  module.yml. compose_template.ts skips them: they are read here, never
@@ -102,14 +108,11 @@ export function layerPaths(facts: RepoFacts, manifests: ModuleManifest[]): strin
   ].filter((path) => existsSync(path));
 }
 
-/** One layer document. Every layer is a plain settings-as-code file, so
- *  there is nothing to validate beyond "it is a mapping". */
-export function loadLayer(path: string): Record<string, unknown> {
-  const doc = parseMapping(readFileSync(path, "utf-8"), path);
-  // Named here because this is where the file is known; the merge throws
-  // too, for anything assembled in code rather than read from a layer.
-  assertRuleTypes(doc, path);
-  return doc;
+/** One layer document, through the settings parse boundary: the file is
+ *  known here, so a rule that declares no `type` names this file and the
+ *  position inside it. */
+export function loadLayer(path: string): SettingsLayer {
+  return parseLayerFile(readFileSync(path, "utf-8"), path);
 }
 
 /** Every label tuple any layer can emit, for ANY module selection and
@@ -202,27 +205,25 @@ export function enableCodeql(facts: RepoFacts, manifests: ModuleManifest[]): boo
 export function managedSettings(
   facts: RepoFacts,
   manifests: ModuleManifest[] = loadManifests(),
-): Record<string, unknown> {
+): MergedSettings {
   const merged = mergeLayers(layerPaths(facts, manifests).map(loadLayer));
   const labels = [
     ...(Array.isArray(merged.labels) ? (merged.labels as Label[]) : []),
     ...trackingLabels(facts, manifests),
   ];
+  // Appended AFTER the merge, which is safe without re-hardening the
+  // document: `merged` is a MergedSettings already, and a Label is three
+  // strings - neither side can reintroduce a null or a duplicate rule
+  // type, and the compiler is what says so.
   if (labels.length > 0) merged.labels = labels;
-  // The tracking labels are appended AFTER the merge, so this document
-  // would otherwise leave the layer stack without passing the
-  // choke-point. It is normalized again downstream when the repo layer is
-  // merged over it, but relying on that is what the choke-point exists to
-  // stop: the invariant should not depend on a later caller.
-  const normalized = normalizeDocument(merged);
   // Case-folded like GitHub's own label dedup; ruleset names match exactly.
   assertUniqueNames(labels, "labels", (name) => name.toLowerCase());
   assertUniqueNames(
-    (Array.isArray(normalized.rulesets) ? normalized.rulesets : []) as { name: string }[],
+    (Array.isArray(merged.rulesets) ? merged.rulesets : []) as { name: string }[],
     "rulesets",
     (name) => name,
   );
-  return normalized;
+  return merged;
 }
 
 /** The merged label roster for a repo's facts. */
@@ -242,20 +243,6 @@ export function managedRulesets(
 
 // --- fact resolution --------------------------------------------------------
 
-function parseMapping(text: string, where: string): Record<string, unknown> {
-  let data: unknown;
-  try {
-    data = parseYaml(text);
-  } catch (error) {
-    const detail = error instanceof Error ? error.message.split("\n")[0] : String(error);
-    throw new Error(`${where}: YAML parse error: ${detail}`);
-  }
-  if (typeof data !== "object" || data === null || Array.isArray(data)) {
-    throw new Error(`${where}: not a YAML mapping`);
-  }
-  return data as Record<string, unknown>;
-}
-
 /** Modules from a .repo-platform.yml text; throws on a missing or
  *  malformed top-level list (the baseline cannot be computed from a
  *  guess). */
@@ -274,7 +261,7 @@ export function modulesFrom(
   manifests: ModuleManifest[] = loadManifests(),
   retired: ReadonlySet<string> = RETIRED_MODULES,
 ): string[] {
-  const modules = parseMapping(registrationText, where).modules;
+  const modules = parseYamlMapping(registrationText, where).modules;
   if (!Array.isArray(modules) || !modules.every((m) => typeof m === "string")) {
     throw new Error(`${where}: no readable top-level modules list`);
   }
@@ -323,7 +310,7 @@ export function trackingLabelsFrom(
     (m) => m.tracking_label !== undefined && modules.includes(m.module),
   );
   if (streams.length === 0) return [];
-  const answers = parseMapping(answersText, where);
+  const answers = parseYamlMapping(answersText, where);
   return streams.map((m) => {
     const tracking = m.tracking_label;
     if (tracking === undefined) throw new Error("unreachable: filtered on tracking_label");
@@ -404,7 +391,10 @@ function fetchRepoIsPrivate(repo: string): boolean {
 
 /** The DECLARED visibility in a settings.yml text: the repo layer's
  *  `repository.private` boolean, or null when the file, the key, or the
- *  boolean shape is absent. */
+ *  boolean shape is absent. Deliberately NOT the settings parse boundary:
+ *  this is a peek at a fact, and a target whose settings.yml is malformed
+ *  must fall back to the live probe rather than fail the render before it
+ *  reaches the layer that would report the file properly. */
 export function declaredPrivate(settingsText: string | null): boolean | null {
   if (settingsText === null) return null;
   let data: unknown;
@@ -413,14 +403,8 @@ export function declaredPrivate(settingsText: string | null): boolean | null {
   } catch {
     return null;
   }
-  const repository =
-    typeof data === "object" && data !== null && !Array.isArray(data)
-      ? (data as Record<string, unknown>).repository
-      : null;
-  const value =
-    typeof repository === "object" && repository !== null && !Array.isArray(repository)
-      ? (repository as Record<string, unknown>).private
-      : null;
+  const repository = isMapping(data) ? data.repository : null;
+  const value = isMapping(repository) ? repository.private : null;
   return typeof value === "boolean" ? value : null;
 }
 
@@ -512,7 +496,7 @@ export function factsFromTargetDir(dir: string, manifests: ModuleManifest[]): Re
   const declared = declaredPrivate(
     existsSync(settingsPath) ? readFileSync(settingsPath, "utf-8") : null,
   );
-  const recorded = parseMapping(answersText, where(".copier-answers.yml")).private;
+  const recorded = parseYamlMapping(answersText, where(".copier-answers.yml")).private;
   if (declared === null && typeof recorded !== "boolean") {
     throw new Error(
       `${where(".copier-answers.yml")}: records no boolean private answer - ` +

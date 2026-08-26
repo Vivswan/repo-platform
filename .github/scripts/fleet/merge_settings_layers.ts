@@ -19,6 +19,11 @@
 //   label names that way); ruleset names match exactly.
 // - Every other array (and every scalar) replaces wholesale.
 //
+// Layers arrive as the SettingsLayer type, from settings_document.ts's
+// parse boundary, and leave as a MergedSettings, which cannot hold a null
+// at all (hardenDocument below). The dialect's job is to consume the
+// opt-out markers; the type is what checks that it did.
+//
 // A repository with no .github/settings.yml is NOT-YET-ONBOARDED, never
 // "an empty repo layer": applying the managed baseline alone would let
 // the action's delete-undeclared label reconciliation wipe every label
@@ -39,10 +44,25 @@
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
+import { stringify as stringifyYaml } from "yaml";
 import { parseFlags } from "../shared/flags.ts";
 import { fail, setOutput, warning } from "../shared/gha.ts";
 import { captureNetwork } from "./discovery.ts";
+import {
+  isLayerMapping,
+  isMapping,
+  type LayerValue,
+  type MergedSettings,
+  type MergedValue,
+  parseSettingsDoc,
+  rulesetLabel,
+  ruleType,
+  type SettingsLayer,
+} from "./settings_document.ts";
+
+// The boundary lives in settings_document.ts; re-exported here because
+// the layering dialect is what its callers came for.
+export { parseSettingsDoc } from "./settings_document.ts";
 
 const REPO_ROOT = resolve(import.meta.dir, "..", "..", "..");
 export const OVERRIDE_PATH = join(REPO_ROOT, ".github/settings-override.yml");
@@ -55,59 +75,60 @@ export const OVERRIDE_PATH = join(REPO_ROOT, ".github/settings-override.yml");
  *  that only wants to add a rule. */
 const NAME_KEYED: Record<
   string,
-  { fold: (name: string) => string; combine: (lower: unknown, higher: unknown) => unknown }
+  {
+    fold: (name: string) => string;
+    combine: (lower: LayerValue, higher: LayerValue) => LayerValue;
+  }
 > = {
   labels: { fold: (name) => name.toLowerCase(), combine: (_lower, higher) => higher },
   rulesets: { fold: (name) => name, combine: (lower, higher) => mergeRulesetEntry(lower, higher) },
 };
 
-/** THE normalization choke-point: one pass over the FINISHED document, so
- *  no merge path can reach the output without it, whatever the layer,
- *  sidedness or depth. Two invariants, both about what GitHub rejects:
- *  a literal null anywhere fails the apply (the dialect's opt-out means
- *  ABSENT), and a ruleset repeating a rule `type` is rejected wholesale,
- *  which leaves a branch unprotected on a green run. */
-export function normalizeDocument(doc: Record<string, unknown>): Record<string, unknown> {
-  return normalizeValue(doc, false) as Record<string, unknown>;
+/** A layer value that is present: what is left of LayerValue once the
+ *  dialect's null opt-out has been consumed. */
+type Declared = Exclude<LayerValue, null>;
+
+/** THE choke-point, now a TYPE rather than a convention: merging works in
+ *  layer space, where nulls are legal, and the merged document is the one
+ *  thing an apply may be handed. Since MergedValue has no null, the only
+ *  way out of the merge is through here - a future merge path that skips
+ *  it does not compile, where before it merely produced a document that
+ *  looked like every other Record<string, unknown>.
+ *
+ *  Two invariants, both about what GitHub rejects: a literal null anywhere
+ *  fails the apply (the dialect's opt-out means ABSENT), and a ruleset
+ *  repeating a rule `type` is rejected wholesale, which leaves a branch
+ *  unprotected on a green run. */
+function hardenDocument(doc: SettingsLayer): MergedSettings {
+  return hardenMapping(doc, false);
 }
 
 /** `isRulesetEntry` marks THIS value as an element of a `rulesets` array -
  *  it is not a "somewhere below rulesets" flag. Letting it stay true for
  *  every descendant deduplicated any nested key called `rules` as though
  *  it were a rule list, which silently emptied `conditions.rules`. */
-function normalizeValue(value: unknown, isRulesetEntry: boolean): unknown {
+function hardenValue(value: Declared, isRulesetEntry: boolean): MergedValue {
   if (Array.isArray(value)) {
-    // A null ELEMENT is as fatal as a null field, and the map alone left
+    // A null ELEMENT is as fatal as a null field, and mapping alone left
     // it in place.
     return value
-      .filter((item) => item !== null)
-      .map((item) => normalizeValue(item, isRulesetEntry));
+      .filter((item): item is Declared => item !== null)
+      .map((item) => hardenValue(item, isRulesetEntry));
   }
-  if (!isMapping(value)) return value;
-  const out: Record<string, unknown> = {};
+  if (typeof value !== "object") return value;
+  return hardenMapping(value, isRulesetEntry);
+}
+
+function hardenMapping(value: SettingsLayer, isRulesetEntry: boolean): MergedSettings {
+  const out: MergedSettings = {};
   for (const [key, child] of Object.entries(value)) {
     if (child === null) continue;
-    out[key] = normalizeValue(child, key === "rulesets");
+    out[key] = hardenValue(child, key === "rulesets");
   }
   if (isRulesetEntry && Array.isArray(out.rules)) {
     out.rules = appendRules(out.rules, [], rulesetLabel(out));
   }
   return out;
-}
-
-function isMapping(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function rulesetLabel(entry: unknown): string {
-  return isMapping(entry) && typeof entry.name === "string"
-    ? `ruleset ${JSON.stringify(entry.name)}`
-    : "";
-}
-
-function ruleType(rule: unknown): string | null {
-  if (!isMapping(rule)) return null;
-  return typeof rule.type === "string" ? rule.type : null;
 }
 
 /** A ruleset's `rules` list APPENDS across layers, keyed by `type`: the
@@ -117,16 +138,34 @@ function ruleType(rule: unknown): string | null {
  *  the `main` ruleset that .github/settings-override.yml declares - the
  *  override sits at the top of the stack, so a whole-entry replace would
  *  drop the module's rule instead. Adding a rule can only tighten the
- *  ruleset; nothing here can remove one a higher layer declared. */
-export function appendRules(lower: unknown[], higher: unknown[], where = "a ruleset"): unknown[] {
-  const higherByType = new Map<string, unknown>();
+ *  ruleset; nothing here can remove one a higher layer declared.
+ *
+ *  Two signatures for one body because this never invents an element: it
+ *  picks from what it was handed, so hardened rules in means hardened
+ *  rules out, and the hardening pass can dedup without a cast. */
+export function appendRules(
+  lower: readonly MergedValue[],
+  higher: readonly MergedValue[],
+  where?: string,
+): MergedValue[];
+export function appendRules(
+  lower: readonly LayerValue[],
+  higher: readonly LayerValue[],
+  where?: string,
+): LayerValue[];
+export function appendRules(
+  lower: readonly LayerValue[],
+  higher: readonly LayerValue[],
+  where = "a ruleset",
+): LayerValue[] {
+  const higherByType = new Map<string, LayerValue>();
   for (const rule of higher) {
     const type = ruleType(rule);
     if (type !== null && !higherByType.has(type)) higherByType.set(type, rule);
   }
   const taken = new Set<string>();
-  const merged: unknown[] = [];
-  const take = (rules: unknown[]) => {
+  const merged: LayerValue[] = [];
+  const take = (rules: readonly LayerValue[]) => {
     for (const rule of rules) {
       const type = ruleType(rule);
       // Never a drop. Dropping it would let the apply SUCCEED with the
@@ -164,11 +203,11 @@ export function appendRules(lower: unknown[], higher: unknown[], where = "a rule
  *  Doing the fields by hand here is what made a partial `conditions`
  *  replace the whole lower object and a `bypass_actors: null` land in the
  *  document literally, which GitHub rejects. */
-export function mergeRulesetEntry(lower: unknown, higher: unknown): unknown {
-  if (!isMapping(lower) || !isMapping(higher)) return higher;
+export function mergeRulesetEntry(lower: LayerValue, higher: LayerValue): LayerValue {
+  if (!isLayerMapping(lower) || !isLayerMapping(higher)) return higher;
   const { rules: lowerRules, ...lowerFields } = lower;
   const { rules: higherRules, ...higherFields } = higher;
-  const merged: Record<string, unknown> = mergeMappings(lowerFields, higherFields, {});
+  const merged: SettingsLayer = mergeMappings(lowerFields, higherFields, {});
   // PRESENCE, not truthiness: an explicit `rules: null` is the opt-out
   // and must strip the inherited rules; the null rides out to the
   // choke-point, which removes the key. Layer 6 re-adds its own rules
@@ -195,18 +234,18 @@ function entryName(entry: unknown): string | null {
  *  (entries are objects); the null opt-out applies to the section key
  *  itself. */
 export function nameKeyedUnion(
-  managed: unknown[],
-  repo: unknown[],
+  managed: readonly LayerValue[],
+  repo: readonly LayerValue[],
   fold: (name: string) => string,
-  combine: (lower: unknown, higher: unknown) => unknown = (_lower, higher) => higher,
-): unknown[] {
-  const repoByName = new Map<string, unknown>();
+  combine: (lower: LayerValue, higher: LayerValue) => LayerValue = (_lower, higher) => higher,
+): LayerValue[] {
+  const repoByName = new Map<string, LayerValue>();
   for (const entry of repo) {
     const name = entryName(entry);
     if (name !== null && !repoByName.has(fold(name))) repoByName.set(fold(name), entry);
   }
   const taken = new Set<string>();
-  const merged: unknown[] = [];
+  const merged: LayerValue[] = [];
   for (const entry of managed) {
     const name = entryName(entry);
     if (name === null) {
@@ -243,7 +282,7 @@ export function nameKeyedUnion(
  *  and the rest ride through as repo-only extras, so the apply would
  *  fight itself over the label. Returned as warning texts - the repo
  *  layer is repo-owned content the merge must not hard-fail on. */
-export function duplicateNameWarnings(repo: Record<string, unknown>): string[] {
+export function duplicateNameWarnings(repo: SettingsLayer): string[] {
   const warnings: string[] = [];
   for (const [section, { fold }] of Object.entries(NAME_KEYED)) {
     const entries = repo[section];
@@ -268,13 +307,16 @@ export function duplicateNameWarnings(repo: Record<string, unknown>): string[] {
 }
 
 /** Two plain objects merged key by key, repo winning; a repo `null`
- *  strips the key. */
+ *  strips the key. Layer space in, layer space out: the nulls the higher
+ *  layer did not consume (a lower layer's own opt-out markers, a nested
+ *  one under a key only one side declares) are still in the result, which
+ *  is why the merged type is only reachable through hardenDocument. */
 function mergeMappings(
-  managed: Record<string, unknown>,
-  repo: Record<string, unknown>,
+  managed: SettingsLayer,
+  repo: SettingsLayer,
   nameKeyed: typeof NAME_KEYED,
-): Record<string, unknown> {
-  const merged: Record<string, unknown> = {};
+): SettingsLayer {
+  const merged: SettingsLayer = {};
   for (const key of [...Object.keys(managed), ...Object.keys(repo)]) {
     if (key in merged) continue;
     if (!(key in repo)) {
@@ -291,7 +333,7 @@ function mergeMappings(
     const section = nameKeyed[key];
     if (section !== undefined && Array.isArray(managedValue) && Array.isArray(repoValue)) {
       merged[key] = nameKeyedUnion(managedValue, repoValue, section.fold, section.combine);
-    } else if (isMapping(managedValue) && isMapping(repoValue)) {
+    } else if (isLayerMapping(managedValue) && isLayerMapping(repoValue)) {
       // Name-keying applies only at the section level; nested objects
       // merge plainly.
       merged[key] = mergeMappings(managedValue, repoValue, {});
@@ -304,14 +346,11 @@ function mergeMappings(
 
 /** The merged settings document: `repo` layered over `managed` under the
  *  dialect in the header. */
-export function mergeSettingsLayers(
-  managed: Record<string, unknown>,
-  repo: Record<string, unknown>,
-): Record<string, unknown> {
-  // Merge, then normalize the whole result exactly once. Idempotent, so
-  // folding many layers re-runs it harmlessly - and no merge path can
-  // reach the output without passing through here.
-  return normalizeDocument(mergeMappings(managed, repo, NAME_KEYED));
+export function mergeSettingsLayers(managed: SettingsLayer, repo: SettingsLayer): MergedSettings {
+  // Merge in layer space, harden the whole result exactly once. Idempotent,
+  // so folding many layers re-runs it harmlessly - and no merge path can
+  // reach a MergedSettings without passing through it.
+  return hardenDocument(mergeMappings(managed, repo, NAME_KEYED));
 }
 
 /** The identity keys the merged document should declare (they can only
@@ -320,7 +359,7 @@ export function mergeSettingsLayers(
  *  drift is never healed; returned for the caller to warn on, never an
  *  error - identity is repo-owned under this model, and a repo choosing
  *  not to declare a key must not lose its baseline heal over it. */
-export function missingIdentityKeys(merged: Record<string, unknown>): string[] {
+export function missingIdentityKeys(merged: MergedSettings): string[] {
   const repository = merged.repository;
   const declared = isMapping(repository) ? repository : {};
   return ["description", "homepage", "topics", "private"].filter((key) => !(key in declared));
@@ -375,38 +414,6 @@ export function identityKeyIssues(repository: Record<string, unknown>): Identity
   return issues;
 }
 
-/** Rule types checked where the FILE is known, so the error names it.
- *  appendRules throws too, as the backstop for anything built in code. */
-export function assertRuleTypes(doc: Record<string, unknown>, where: string): void {
-  const rulesets = Array.isArray(doc.rulesets) ? doc.rulesets : [];
-  for (const entry of rulesets) {
-    if (!isMapping(entry) || !Array.isArray(entry.rules)) continue;
-    for (const rule of entry.rules) {
-      if (ruleType(rule) === null) {
-        throw new Error(
-          `${where}: ${rulesetLabel(entry) || "a ruleset"} has a rule with no string 'type' ` +
-            `(${JSON.stringify(rule)}) - it cannot be merged, and dropping it would apply a ` +
-            "weaker policy than this file declares",
-        );
-      }
-    }
-  }
-}
-
-export function parseSettingsDoc(text: string, where: string): Record<string, unknown> {
-  let data: unknown;
-  try {
-    data = parseYaml(text);
-  } catch (error) {
-    const detail = error instanceof Error ? error.message.split("\n")[0] : String(error);
-    throw new Error(`${where}: YAML parse error: ${detail}`);
-  }
-  if (data === null || data === undefined) return {};
-  if (!isMapping(data)) throw new Error(`${where}: not a YAML mapping`);
-  assertRuleTypes(data, where);
-  return data;
-}
-
 /** The repo layer AT THE REF the facts were read at. Without the pin this
  *  read happens later than the fact reads, so a push in between pairs an
  *  old module selection with a new repo layer and the apply deletes the
@@ -426,11 +433,8 @@ function fetchRepoLayer(repo: string, ref: string): { text: string; where: strin
 }
 
 /** Every layer folded low to high under the dialect above. */
-export function mergeLayers(layers: Record<string, unknown>[]): Record<string, unknown> {
-  return layers.reduce<Record<string, unknown>>(
-    (below, layer) => mergeSettingsLayers(below, layer),
-    {},
-  );
+export function mergeLayers(layers: SettingsLayer[]): MergedSettings {
+  return layers.reduce<MergedSettings>((below, layer) => mergeSettingsLayers(below, layer), {});
 }
 
 /** The status check GitHub's Copilot code review reports. It must NEVER
@@ -448,7 +452,7 @@ export const COPILOT_REVIEW_CONTEXT = "copilot-pull-request-reviewer";
  *  Validated here, the one place every consumer goes through, against the
  *  one required-check mistake that bricks the whole fleet (see
  *  COPILOT_REVIEW_CONTEXT). */
-export function loadOverrideLayer(path: string = OVERRIDE_PATH): Record<string, unknown> {
+export function loadOverrideLayer(path: string = OVERRIDE_PATH): SettingsLayer {
   const data = parseSettingsDoc(readFileSync(path, "utf-8"), path);
   const rulesets = Array.isArray(data.rulesets) ? data.rulesets : [];
   const main = rulesets.find((entry) => isMapping(entry) && entry.name === "main");
@@ -486,13 +490,13 @@ export interface RepoLayer {
  *  never receive a baseline-only document. */
 export type MergeOutcome =
   | { kind: "skip"; message: string }
-  | { kind: "merged"; document: Record<string, unknown>; warnings: string[] };
+  | { kind: "merged"; document: MergedSettings; warnings: string[] };
 
 export function mergeOutcome(
-  managed: Record<string, unknown>,
+  managed: SettingsLayer,
   repoLayer: RepoLayer | null,
   source: string,
-  override: Record<string, unknown> = loadOverrideLayer(),
+  override: SettingsLayer = loadOverrideLayer(),
 ): MergeOutcome {
   if (repoLayer === null) {
     return {

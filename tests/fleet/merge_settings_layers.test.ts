@@ -232,7 +232,7 @@ describe("mergeRulesetEntry", () => {
   });
 });
 
-describe("normalizeDocument (the choke-point)", () => {
+describe("hardening the merged document (the choke-point)", () => {
   test("a null ARRAY ELEMENT is dropped, at any depth", () => {
     // Mapping every element preserved a null instead of removing it, so
     // "no null survives" was false for lists.
