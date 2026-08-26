@@ -239,11 +239,22 @@ const REPORT_INTRO = [
   "",
 ];
 
-/** One display line, bounded: a missing line or an unverifiable reason
- * can embed target-controlled text (repository content, HEAD-manifest
- * marker strings), and one enormous value must not blow the body cap. */
+/** One display line, bounded and control-free: a missing line or an
+ * unverifiable reason can embed target-controlled text (repository
+ * content, HEAD-manifest marker strings), so one enormous value must not
+ * blow the body cap - and C0 control bytes must not survive into the
+ * report: a NUL riding latin1 all the way to open_pr's --body argv kills
+ * the spawn (OS argv cannot carry NUL), turning this warn-only wire into
+ * the thing that BLOCKS PR creation. Escaped as visible \\xNN (lossless);
+ * tab stays literal. */
 function clip(text: string): string {
-  return text.length > MAX_LINE_CHARS ? `${text.slice(0, MAX_LINE_CHARS)} [clipped]` : text;
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: matching control bytes to escape them is this regex's whole job
+  const printable = text.replace(/[\x00-\x08\x0a-\x1f\x7f]/g, (control) => {
+    return `\\x${control.charCodeAt(0).toString(16).padStart(2, "0")}`;
+  });
+  return printable.length > MAX_LINE_CHARS
+    ? `${printable.slice(0, MAX_LINE_CHARS)} [clipped]`
+    : printable;
 }
 
 /** A fence long enough that no shown line can close it early. */

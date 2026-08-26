@@ -363,7 +363,8 @@ jobs:
       # blocked delivery would hide the diff the reviewer needs.
       - name: Tripwire on repository-owned content loss
         run: |
-          bun .github/scripts/sync/tail_tripwire.ts \
+          bun .github/scripts/sync/run_hidden.ts "tail tripwire" -- \
+            bun .github/scripts/sync/tail_tripwire.ts \
             --root target \
             --hide-details "$HIDE_DETAILS" \
             --report "$RUNNER_TEMP/tail-shrank.md"

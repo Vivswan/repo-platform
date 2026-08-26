@@ -458,6 +458,28 @@ describe("tail_tripwire script", () => {
     expect(result.report).toContain("repo-local instructions");
   });
 
+  test("a NUL-carrying tail line reaches the report escaped, never as a raw control byte", () => {
+    // latin1 preserves a NUL byte end to end; raw in the report it would
+    // ride into open_pr's --body argv, and OS argv cannot carry NUL - the
+    // warn-only wire would become the thing that BLOCKS PR creation.
+    const nulLine = "secret\x00control\x01line";
+    const head = `# AGENTS.md\n\nmanaged\n\n${SENTINEL}\n\n${nulLine}\n`;
+    const delivered = `# AGENTS.md\n\nmanaged\n\n${SENTINEL}\n`;
+    const root = makeTarget(
+      { "AGENTS.md": head, [MANIFEST_NAME]: headManifest },
+      { "AGENTS.md": delivered, [MANIFEST_NAME]: headManifest },
+    );
+    const result = runScript(root);
+    expect(result.exitCode).toBe(0);
+    expect(result.report).toContain("secret\\x00control\\x01line");
+    expect(result.report).not.toContain("\x00");
+    expect(result.report).not.toContain("\x01");
+    // End to end: the report must be spawnable as an argv element, the
+    // way open_pr passes the assembled body to gh.
+    const spawn = Bun.spawnSync(["true", result.report]);
+    expect(spawn.exitCode).toBe(0);
+  });
+
   test("a marker rename cannot mis-split HEAD's copy (HEAD manifest wins there)", () => {
     const oldMarker = "<!-- legacy-marker -->";
     const head = `old managed\n${oldMarker}\nrepo tail line\n`;
