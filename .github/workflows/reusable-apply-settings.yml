@@ -105,10 +105,15 @@ jobs:
         working-directory: platform
         run: bun install --frozen-lockfile --silent
 
-      # The managed baseline from this repository's own facts (module
-      # selection and tracking answers fetched from the default branch,
-      # live visibility probed), then the checked-out settings.yml merged
-      # over it - the document the apply step below reads.
+      # This repository's facts come from the CHECKOUT above, not from
+      # gh api: the self-apply grant documented for REPO_PLATFORM_TOKEN is
+      # Administration and Issues only, with no Contents scope, so
+      # fetching .repo-platform.yml and .copier-answers.yml over the API
+      # failed on every private repository before it rendered anything.
+      # The checkout already has contents: read, and --target-dir needs no
+      # network at all. The central run in settings-repos.yml is
+      # unaffected: it holds the fleet PAT, which does have Contents, and
+      # has no checkout of the target to read instead.
       - name: Compute the merged settings document
         id: merge
         if: steps.token.outputs.proceed == 'true'
@@ -116,7 +121,8 @@ jobs:
           GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
         run: |
           bun platform/.github/scripts/fleet/render_managed_settings.ts \
-            --repo "$GITHUB_REPOSITORY" --out "$RUNNER_TEMP/managed-settings.yml"
+            --repo "$GITHUB_REPOSITORY" --target-dir . \
+            --out "$RUNNER_TEMP/managed-settings.yml"
           bun platform/.github/scripts/fleet/merge_settings_layers.ts \
             --managed "$RUNNER_TEMP/managed-settings.yml" \
             --repo-file .github/settings.yml \

@@ -46,7 +46,7 @@ import { parseFlags } from "../shared/flags.ts";
 import { fail, warning } from "../shared/gha.ts";
 import { RETIRED_MODULES } from "../sync/modules.ts";
 import { captureNetwork } from "./discovery.ts";
-import { mergeLayers, normalizeDocument } from "./merge_settings_layers.ts";
+import { assertRuleTypes, mergeLayers, normalizeDocument } from "./merge_settings_layers.ts";
 
 export interface Label {
   name: string;
@@ -104,7 +104,11 @@ export function layerPaths(facts: RepoFacts, manifests: ModuleManifest[]): strin
 /** One layer document. Every layer is a plain settings-as-code file, so
  *  there is nothing to validate beyond "it is a mapping". */
 export function loadLayer(path: string): Record<string, unknown> {
-  return parseMapping(readFileSync(path, "utf-8"), path);
+  const doc = parseMapping(readFileSync(path, "utf-8"), path);
+  // Named here because this is where the file is known; the merge throws
+  // too, for anything assembled in code rather than read from a layer.
+  assertRuleTypes(doc, path);
+  return doc;
 }
 
 /** Every label tuple any layer can emit, for ANY module selection and

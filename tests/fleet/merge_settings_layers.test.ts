@@ -314,6 +314,46 @@ describe("normalizeDocument (the choke-point)", () => {
   });
 });
 
+describe("a rule without a type is fatal, never dropped", () => {
+  test("the merge fails rather than emitting a weaker ruleset", () => {
+    // Dropping it would let the apply SUCCEED with the policy quietly
+    // reduced - the silent-unprotect class through the drop path itself.
+    expect(() =>
+      mergeSettingsLayers(
+        { rulesets: [{ name: "main", rules: [{ type: "deletion" }, { parameters: {} }] }] },
+        {},
+      ),
+    ).toThrow("no string 'type'");
+  });
+
+  test("the message names the ruleset", () => {
+    expect(() =>
+      mergeSettingsLayers({ rulesets: [{ name: "release-tags", rules: [{ oops: 1 }] }] }, {}),
+    ).toThrow('ruleset "release-tags"');
+  });
+
+  test("an OVERRIDE-layer rule that lost its type fails too", () => {
+    // The case that matters most: the override carries the fleet's
+    // mandatory protection, so silently shrinking it is the worst
+    // outcome of the drop path.
+    expect(() =>
+      mergeSettingsLayers(
+        { rulesets: [{ name: "main", rules: [{ type: "deletion" }] }] },
+        { rulesets: [{ name: "main", rules: [{ parameters: { x: 1 } }] }] },
+      ),
+    ).toThrow("no string 'type'");
+  });
+
+  test("a layer FILE names itself in the error", () => {
+    expect(() =>
+      parseSettingsDoc(
+        "rulesets:\n  - name: main\n    rules:\n      - parameters: {}\n",
+        "layer.yml",
+      ),
+    ).toThrow("layer.yml");
+  });
+});
+
 describe("appendRules", () => {
   const types = (rules: unknown[]) => rules.map((r) => (r as { type: string }).type);
 

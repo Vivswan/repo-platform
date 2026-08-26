@@ -1702,6 +1702,32 @@ const rules: Rule[] = [
   },
 
   {
+    name: "self-apply-fact-source",
+    run: () => {
+      // The self-apply's REPO_PLATFORM_TOKEN grant is Administration and
+      // Issues only - no Contents - so reading the caller's
+      // .repo-platform.yml or .copier-answers.yml over gh api fails on
+      // every private repository before anything renders. The caller is
+      // already checked out, so the render must take --target-dir and
+      // touch no network. The central run is the opposite case: it holds
+      // the fleet PAT and has no checkout of the target, so it fetches.
+      const mismatches: Mismatch[] = [];
+      const selfApply = read(".github/workflows/reusable-apply-settings.yml").replace(
+        /\\[ \t]*\n\s*/g,
+        " ",
+      );
+      if (!/render_managed_settings\.ts[^\n]*--target-dir/.test(selfApply)) {
+        mismatches.push({
+          file: ".github/workflows/reusable-apply-settings.yml",
+          expected: "the render reads the caller's checkout (--target-dir), not gh api",
+          got: "no --target-dir on the render",
+        });
+      }
+      return mismatches;
+    },
+  },
+
+  {
     name: "settings-hide-details",
     run: () => {
       // The layer render and the merge run BEFORE the settings action, so

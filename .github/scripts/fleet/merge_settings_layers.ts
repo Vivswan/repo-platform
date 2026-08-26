@@ -89,12 +89,20 @@ function normalizeValue(value: unknown, isRulesetEntry: boolean): unknown {
     if (child === null) continue;
     out[key] = normalizeValue(child, key === "rulesets");
   }
-  if (isRulesetEntry && Array.isArray(out.rules)) out.rules = appendRules(out.rules, []);
+  if (isRulesetEntry && Array.isArray(out.rules)) {
+    out.rules = appendRules(out.rules, [], rulesetLabel(out));
+  }
   return out;
 }
 
 function isMapping(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function rulesetLabel(entry: unknown): string {
+  return isMapping(entry) && typeof entry.name === "string"
+    ? `ruleset ${JSON.stringify(entry.name)}`
+    : "";
 }
 
 function ruleType(rule: unknown): string | null {
@@ -110,7 +118,7 @@ function ruleType(rule: unknown): string | null {
  *  override sits at the top of the stack, so a whole-entry replace would
  *  drop the module's rule instead. Adding a rule can only tighten the
  *  ruleset; nothing here can remove one a higher layer declared. */
-export function appendRules(lower: unknown[], higher: unknown[]): unknown[] {
+export function appendRules(lower: unknown[], higher: unknown[], where = "a ruleset"): unknown[] {
   const higherByType = new Map<string, unknown>();
   for (const rule of higher) {
     const type = ruleType(rule);
@@ -121,15 +129,20 @@ export function appendRules(lower: unknown[], higher: unknown[]): unknown[] {
   const take = (rules: unknown[]) => {
     for (const rule of rules) {
       const type = ruleType(rule);
-      // A rule with no usable `type` cannot be deduplicated, and GitHub
-      // rejects it anyway; dropping it here keeps one malformed entry
-      // from being emitted twice (once per side) and turning a rejected
-      // ruleset into a silently unapplied one.
+      // Never a drop. Dropping it would let the apply SUCCEED with the
+      // policy quietly weakened - if an override rule ever lost its type
+      // through some other bug, the fleet's protection would silently
+      // shrink and the run would stay green. The pinned action passes a
+      // malformed rule through on purpose so GitHub 422s loudly; failing
+      // here is the same choice, one step earlier and with a better
+      // message.
       if (type === null) {
-        warning(
-          `a ruleset rule without a string 'type' was dropped from the merge: ${JSON.stringify(rule)}`,
+        throw new Error(
+          `${where}: a rule has no string 'type' (${JSON.stringify(rule)}). A rule that cannot ` +
+            "be identified cannot be merged or deduplicated, and emitting the ruleset without " +
+            "it would apply a weaker policy than the layers declare. Fix the rule in its layer " +
+            "file.",
         );
-        continue;
       }
       // First occurrence wins on BOTH sides. Without this, a layer that
       // declares one type twice emits it twice (or emits the higher
@@ -162,7 +175,7 @@ export function mergeRulesetEntry(lower: unknown, higher: unknown): unknown {
   // afterwards, so the fleet's mandatory ones survive it.
   const rules =
     Array.isArray(lowerRules) && Array.isArray(higherRules)
-      ? appendRules(lowerRules, higherRules)
+      ? appendRules(lowerRules, higherRules, rulesetLabel(higher) || rulesetLabel(lower))
       : "rules" in higher
         ? higherRules
         : lowerRules;
@@ -362,6 +375,24 @@ export function identityKeyIssues(repository: Record<string, unknown>): Identity
   return issues;
 }
 
+/** Rule types checked where the FILE is known, so the error names it.
+ *  appendRules throws too, as the backstop for anything built in code. */
+export function assertRuleTypes(doc: Record<string, unknown>, where: string): void {
+  const rulesets = Array.isArray(doc.rulesets) ? doc.rulesets : [];
+  for (const entry of rulesets) {
+    if (!isMapping(entry) || !Array.isArray(entry.rules)) continue;
+    for (const rule of entry.rules) {
+      if (ruleType(rule) === null) {
+        throw new Error(
+          `${where}: ${rulesetLabel(entry) || "a ruleset"} has a rule with no string 'type' ` +
+            `(${JSON.stringify(rule)}) - it cannot be merged, and dropping it would apply a ` +
+            "weaker policy than this file declares",
+        );
+      }
+    }
+  }
+}
+
 export function parseSettingsDoc(text: string, where: string): Record<string, unknown> {
   let data: unknown;
   try {
@@ -372,6 +403,7 @@ export function parseSettingsDoc(text: string, where: string): Record<string, un
   }
   if (data === null || data === undefined) return {};
   if (!isMapping(data)) throw new Error(`${where}: not a YAML mapping`);
+  assertRuleTypes(data, where);
   return data;
 }
 
