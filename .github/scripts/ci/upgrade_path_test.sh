@@ -29,10 +29,19 @@ REPO_ROOT="$(pwd)"
 # file(s) known to git") and overwrite each other's fixtures. In CI the
 # harness runs alone, so isolation only ever costs a uniquely named
 # directory. Cleanup runs from the EXIT trap, which covers ordinary
-# failures and Ctrl-C; a SIGKILLed run leaves its namespace behind, and
-# `git tag -l 'ci-build-*/*'` lists the strays.
+# failures and Ctrl-C. A SIGKILLed run leaves EVERYTHING behind - the
+# directory, its worktree admin entry, and its tags (SIGKILL skips EXIT
+# traps, and the prune below only drops admin entries whose directories
+# are already gone) - so sweep by hand:
+#   git tag -l 'ci-build-*/*'          # stray tag namespaces
+#   git branch --list 'ci-build-*'     # stray build branches
+#   git worktree list                  # stray worktree admin entries
 TMP_ROOT="${TMPDIR:-/tmp}"
-RUN_DIR="$(mktemp -d "${TMP_ROOT%/}/upgrade-path.XXXXXX")"
+# Absolutized: the harness cd's between the repo and its fixtures, so a
+# RELATIVE TMPDIR would make every later "$RUN_DIR/..." path (cleanup rm
+# included) resolve against whatever directory happens to be current -
+# wrong targets, leaked temp dirs.
+RUN_DIR="$(cd "$(mktemp -d "${TMP_ROOT%/}/upgrade-path.XXXXXX")" && pwd)"
 REF_NS="ci-build-${RUN_DIR##*.}"
 OLD_TAG="$REF_NS/old"
 NEW_TAG="$REF_NS/new"
@@ -98,8 +107,9 @@ select_modules() {
 # the old fixed-path cleanup did to a concurrent run.
 mkdir -p "$WORK"
 # Safe under concurrency: this only drops admin entries whose working tree
-# is already gone, so it collects after SIGKILLed runs without touching a
-# live one.
+# directory is already GONE - it cannot touch a live run's, and it does
+# NOT collect after a SIGKILLed run (the directory survives; see the
+# manual sweep recipe in the header).
 git worktree prune
 
 bun install --frozen-lockfile
