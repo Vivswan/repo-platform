@@ -16,8 +16,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   buildFragment,
+  fragmentGuardExpressions,
   fragmentPlans,
   fragmentSourcePaths,
+  guardExpressionFor,
   main,
   missingFragmentFiles,
   selfSources,
@@ -217,6 +219,39 @@ describe("missingFragmentFiles", () => {
         templates,
       ),
     ).toEqual(["templates/deno/fragments/gitignore.jinja"]);
+  });
+});
+
+describe("fragment guard expressions match the manifests", () => {
+  // The topology check's fourth direction: shared-source chunks embed the
+  // EARLIER owners' gate expressions as jinja guards, so a changed module
+  // gate leaves a stale fragment whose next build emits duplicate shared
+  // sections. Expected and actual guards come from ONE constructor
+  // (guardExpressionFor), so a generated fragment always matches.
+  const sections = {
+    "Node.gitignore": "## Node (github/gitignore Node.gitignore)\nnode_modules/\n",
+  };
+  const parts = [{ path: "Node.gitignore", earlier: ["bun"] }];
+
+  test("a regenerated fragment's guards match the manifests' expectation", () => {
+    const gates = new Map([["bun", '"bun" in modules']]);
+    const fragment = buildFragment(sections, parts, gates);
+    expect(fragmentGuardExpressions(fragment)).toEqual([guardExpressionFor(["bun"], gates)]);
+  });
+
+  test("a changed module gate makes the stale fragment's guards mismatch", () => {
+    const oldGates = new Map([["bun", '"bun" in modules']]);
+    const staleFragment = buildFragment(sections, parts, oldGates);
+    const newGates = new Map([["bun", '"bun" in modules or "node" in modules']]);
+    expect(fragmentGuardExpressions(staleFragment)).not.toEqual([
+      guardExpressionFor(["bun"], newGates),
+    ]);
+  });
+
+  test("an unguarded fragment expects no guards", () => {
+    const gates = new Map([["bun", '"bun" in modules']]);
+    const fragment = buildFragment(sections, [{ path: "Node.gitignore", earlier: [] }], gates);
+    expect(fragmentGuardExpressions(fragment)).toEqual([]);
   });
 });
 

@@ -231,6 +231,29 @@ export function selfSources(entries: [string, string[]][]): string[] {
   return [...new Set(entries.flatMap(([, sources]) => sources))];
 }
 
+/** The jinja guard expression a shared source's chunk carries: the
+ *  negation of every EARLIER owner's gate expression, and-joined. ONE
+ *  constructor for buildFragment and the offline topology check, so the
+ *  expected guard can never drift from the generated one. */
+export function guardExpressionFor(earlier: string[], gates: Map<string, string>): string {
+  return earlier
+    .map((module) => {
+      const gate = gates.get(module);
+      if (gate === undefined) throw new Error(`no gate expression for module '${module}'`);
+      return `not (${gate})`;
+    })
+    .join(" and ");
+}
+
+/** The jinja guard expressions a generated fragment actually carries, in
+ *  order - the offline topology check compares them against the
+ *  manifests' expected guards, so a changed module gate cannot leave a
+ *  stale fragment passing until the weekly refresh (the next build would
+ *  emit duplicate shared sections). */
+export function fragmentGuardExpressions(fragmentText: string): string[] {
+  return [...fragmentText.matchAll(/\{% if (.+?) %\}/g)].map((match) => match[1]);
+}
+
 /** A module's fragment: one chunk per source, each owning its leading
  *  newline (the composer's fragment whitespace convention). A section
  *  already owned by earlier modules has its WHOLE chunk wrapped in the
@@ -241,17 +264,11 @@ export function buildFragment(
   parts: { path: string; earlier: string[] }[],
   gates: Map<string, string>,
 ): string {
-  const gateOf = (module: string): string => {
-    const gate = gates.get(module);
-    if (gate === undefined) throw new Error(`no gate expression for module '${module}'`);
-    return gate;
-  };
   return parts
     .map(({ path, earlier }) => {
       const chunk = `\n${sections[path]}`;
       if (earlier.length === 0) return chunk;
-      const guard = earlier.map((module) => `not (${gateOf(module)})`).join(" and ");
-      return `{% if ${guard} %}${chunk}{% endif %}`;
+      return `{% if ${guardExpressionFor(earlier, gates)} %}${chunk}{% endif %}`;
     })
     .join("");
 }
@@ -310,9 +327,13 @@ async function run(topology = false): Promise<number> {
   // gitignore_sources key with the fragment left behind (the stray check
   // above, which would otherwise ABORT the weekly refresh - the failure
   // could never self-heal), a newly declared key whose fragment was never
-  // generated (composition would render nothing for it), and an EDITED
+  // generated (composition would render nothing for it), an EDITED
   // source list whose fragment still encodes the old sources (each
-  // fragment's section headings carry them - fragmentSourcePaths).
+  // fragment's section headings carry them - fragmentSourcePaths), and a
+  // changed module GATE whose fragment still embeds the old guard
+  // expressions (fragmentGuardExpressions vs the manifests' expected
+  // guards - a stale guard makes the next build emit duplicate shared
+  // sections).
   if (topology) {
     const missing = missingFragmentFiles(manifests, TEMPLATES_DIR);
     if (missing.length > 0) {
@@ -322,9 +343,12 @@ async function run(topology = false): Promise<number> {
           "to generate them (or drop the manifest key)",
       );
     }
-    for (const [module, declared] of byModule(manifests).entries) {
+    const { entries, gates } = byModule(manifests);
+    const plans = new Map(fragmentPlans(entries).map((plan) => [plan.module, plan.parts]));
+    for (const [module, declared] of entries) {
       const rel = relative(REPO_ROOT, fragmentOutput(module));
-      const encoded = fragmentSourcePaths(readFileSync(fragmentOutput(module), "utf-8"));
+      const text = readFileSync(fragmentOutput(module), "utf-8");
+      const encoded = fragmentSourcePaths(text);
       if (JSON.stringify(encoded) !== JSON.stringify(declared)) {
         throw new Error(
           `${rel} encodes sources [${encoded.join(", ")}] but templates/${module}/module.yml ` +
@@ -332,8 +356,22 @@ async function run(topology = false): Promise<number> {
             "edit; run 'bun scripts/build_gitignore.ts' to regenerate it",
         );
       }
+      const expectedGuards = (plans.get(module) ?? [])
+        .filter((part) => part.earlier.length > 0)
+        .map((part) => guardExpressionFor(part.earlier, gates));
+      const actualGuards = fragmentGuardExpressions(text);
+      if (JSON.stringify(actualGuards) !== JSON.stringify(expectedGuards)) {
+        throw new Error(
+          `${rel} embeds guard expression(s) [${actualGuards.join(" | ")}] but the manifests ` +
+            `expect [${expectedGuards.join(" | ")}] - a changed module gate leaves the ` +
+            "fragment's shared-section guards stale (the next build would emit duplicate " +
+            "sections); run 'bun scripts/build_gitignore.ts' to regenerate it",
+        );
+      }
     }
-    console.log("gitignore topology OK: fragments match the manifests' gitignore_sources.");
+    console.log(
+      "gitignore topology OK: fragments match the manifests' gitignore_sources and gates.",
+    );
     return 0;
   }
   const { entries: moduleSources, gates } = byModule(manifests);
