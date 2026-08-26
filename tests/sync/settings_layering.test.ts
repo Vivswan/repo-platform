@@ -525,6 +525,36 @@ describe("transitionSettingsStarter", () => {
     expect(doc.repository.homepage).toBe("https://example.test");
   });
 
+  test("a legacy 'repository: null' stays unmanaged, it is not re-seeded", () => {
+    // The section-level twin of the identity-key null: the repo took its
+    // whole identity block out of management, and seeding from the
+    // recorded answers would silently start managing all of it again.
+    const legacy = [
+      "---",
+      "# Rendered by the settings-sync module.",
+      LEGACY_MERGEABLE_LINE,
+      "repository: null",
+      "labels:",
+      "  - name: incident",
+      '    color: "b60205"',
+      "    description: A deliberate repo-only label",
+      "",
+    ].join("\n");
+    const { dir, out } = target({
+      settings: legacy,
+      modules: "modules: [settings-sync]\n",
+      answers,
+    });
+    transitionSettingsStarter(dir, out, "t");
+    const text = readFileSync(join(dir, ".github/settings.yml"), "utf-8");
+    const doc = parseYaml(text) as Record<string, unknown>;
+    expect("repository" in doc).toBe(true);
+    expect(doc.repository).toBeNull();
+    // None of the identity values leaked back in.
+    expect(text).not.toContain("Live transition description");
+    expect(text.split("\n").some((l) => /^ {2}private:/.test(l))).toBe(false);
+  });
+
   test("fail-soft: a broken answers file leaves the old file for the next sync", () => {
     const { dir, out } = target({
       settings: legacySettings,

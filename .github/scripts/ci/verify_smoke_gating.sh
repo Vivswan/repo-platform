@@ -375,6 +375,9 @@ if has settings-sync; then
   managed_out=/tmp/smoke-managed-settings.yml
   merged_out=/tmp/smoke-merged-settings.yml
   [ -d node_modules ] || bun install --frozen-lockfile --silent
+  # Both scripts publish step outputs now, so both need somewhere to
+  # write them; Actions sets this, a hand run does not.
+  export GITHUB_OUTPUT="${GITHUB_OUTPUT:-/tmp/smoke-step-output.txt}"
   bun .github/scripts/fleet/render_managed_settings.ts \
     --repo smoke/test --target-dir /tmp/smoke --out "$managed_out"
   # The document the apply actually receives: the rendered layers plus the
@@ -382,8 +385,7 @@ if has settings-sync; then
   # protection rulesets live in the override, so only the merged document
   # shows the whole contract. GITHUB_OUTPUT is set by Actions; give the
   # script a scratch file when running this harness by hand.
-  GITHUB_OUTPUT="${GITHUB_OUTPUT:-/tmp/smoke-merge-output.txt}" \
-    bun .github/scripts/fleet/merge_settings_layers.ts \
+  bun .github/scripts/fleet/merge_settings_layers.ts \
     --managed "$managed_out" --repo-file /tmp/smoke/.github/settings.yml \
     --out "$merged_out"
   # The unconditional labels: dependabot's base pair (the base

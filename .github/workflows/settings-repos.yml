@@ -178,6 +178,7 @@ jobs:
       # private repo can disclose its NAME and still need its content
       # hidden.
       - name: Render the managed settings baseline
+        id: render
         env:
           GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
           TARGET: ${{ steps.resolve.outputs.repo }}
@@ -202,7 +203,8 @@ jobs:
           bun .github/scripts/sync/run_hidden.ts "settings merge" --
           bun .github/scripts/fleet/merge_settings_layers.ts
           --managed "$RUNNER_TEMP/managed-settings.yml"
-          --repo-fetch "$TARGET" --out "$RUNNER_TEMP/merged-settings.yml"
+          --repo-fetch "$TARGET" --repo-ref "${{ steps.render.outputs.ref }}"
+          --out "$RUNNER_TEMP/merged-settings.yml"
 
       # Outside the hidden capture on purpose: for a hide-details target
       # run_hidden swallows the merge step's SUCCESS output, including its

@@ -43,7 +43,7 @@ import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { loadManifests, type ModuleManifest } from "../../../scripts/module_manifests.ts";
 import { parseAnswers } from "../../../scripts/render_dogfood.ts";
 import { parseFlags } from "../shared/flags.ts";
-import { fail, warning } from "../shared/gha.ts";
+import { fail, setOutput, warning } from "../shared/gha.ts";
 import { RETIRED_MODULES } from "../sync/modules.ts";
 import { captureNetwork } from "./discovery.ts";
 import { assertRuleTypes, mergeLayers, normalizeDocument } from "./merge_settings_layers.ts";
@@ -337,17 +337,45 @@ export function trackingLabelsFrom(
   });
 }
 
-function fetchRepoFile(repo: string, path: string): string | null {
+/** One file from a target, AT A PINNED REF. Every fact and the repo layer
+ *  read at one commit: from the moving default branch, a push landing
+ *  between two reads pairs an old module selection with a new repo layer,
+ *  and the apply then deletes the labels of a module the repo had just
+ *  selected. */
+export type RepoFileFetcher = (repo: string, path: string, ref: string) => string | null;
+
+export const fetchRepoFile: RepoFileFetcher = (repo, path, ref) => {
   const proc = captureNetwork([
     "gh",
     "api",
-    `repos/${repo}/contents/${path}`,
+    `repos/${repo}/contents/${path}?ref=${ref}`,
     "-H",
     "Accept: application/vnd.github.raw",
   ]);
   if (proc.exitCode === 0) return proc.stdout;
   if (proc.stderr.includes("HTTP 404")) return null;
-  throw new Error(`${repo}/${path}: fetch failed (${proc.stderr.trim().split("\n")[0]})`);
+  throw new Error(`${repo}/${path}@${ref}: fetch failed (${proc.stderr.trim().split("\n")[0]})`);
+};
+
+/** The commit every read for this target pins to: the default branch's
+ *  head, resolved ONCE per target. */
+export function resolveTargetRef(repo: string): string {
+  const branchProc = captureNetwork(["gh", "api", `repos/${repo}`, "--jq", ".default_branch"]);
+  if (branchProc.exitCode !== 0) {
+    throw new Error(
+      `${repo}: cannot read the default branch (${branchProc.stderr.trim().split("\n")[0]})`,
+    );
+  }
+  const branch = branchProc.stdout.trim();
+  const head = captureNetwork(["gh", "api", `repos/${repo}/commits/${branch}`, "--jq", ".sha"]);
+  if (head.exitCode !== 0) {
+    throw new Error(`${repo}: cannot resolve ${branch} (${head.stderr.trim().split("\n")[0]})`);
+  }
+  const sha = head.stdout.trim();
+  if (!/^[0-9a-f]{40}$/.test(sha)) {
+    throw new Error(`${repo}: ${branch} resolved to no commit sha`);
+  }
+  return sha;
 }
 
 /** Live visibility, failing closed like every other probe: only an
@@ -422,8 +450,13 @@ export function factsFromOperatorAnswers(
  *  the baseline's visibility-gated blocks must match the POST-apply state
  *  - deriving them from live visibility would 422 the very apply that
  *  performs a deliberate flip. */
-export function factsFromFetch(repo: string, manifests: ModuleManifest[]): RepoFacts {
-  const registration = fetchRepoFile(repo, ".repo-platform.yml");
+export function factsFromFetch(
+  repo: string,
+  manifests: ModuleManifest[],
+  ref: string,
+  fetch: RepoFileFetcher = fetchRepoFile,
+): RepoFacts {
+  const registration = fetch(repo, ".repo-platform.yml", ref);
   if (registration === null) {
     throw new Error(
       `${repo}: no .repo-platform.yml on the default branch - the repo is not adopted, ` +
@@ -432,13 +465,13 @@ export function factsFromFetch(repo: string, manifests: ModuleManifest[]): RepoF
   }
   const modules = modulesFrom(registration, `${repo}/.repo-platform.yml`, manifests);
   const isPrivate =
-    declaredPrivate(fetchRepoFile(repo, ".github/settings.yml")) ?? fetchRepoIsPrivate(repo);
+    declaredPrivate(fetch(repo, ".github/settings.yml", ref)) ?? fetchRepoIsPrivate(repo);
   const streams = manifests.filter(
     (m) => m.tracking_label !== undefined && modules.includes(m.module),
   );
   let trackingLabels: { module: string; label: string }[] = [];
   if (streams.length > 0) {
-    const answers = fetchRepoFile(repo, ".copier-answers.yml");
+    const answers = fetch(repo, ".copier-answers.yml", ref);
     if (answers === null) {
       throw new Error(
         `${repo}: selects tracking-stream module(s) but has no .copier-answers.yml - ` +
@@ -505,20 +538,30 @@ function main(args: string[]): void {
   }
   const repo = flags["--repo"];
   let facts: RepoFacts;
+  // Published so the merge step reads the repo layer at the SAME commit
+  // these facts came from; empty for the local/operator fact sources,
+  // which have no moving branch to race with.
+  let pinnedRef = "";
   try {
     const manifests = loadManifests();
-    facts =
-      flags["--target-dir"] !== undefined
-        ? factsFromTargetDir(flags["--target-dir"], manifests)
-        : flags["--operator-answers"] !== undefined
-          ? factsFromOperatorAnswers(flags["--operator-answers"], manifests)
-          : factsFromFetch(repo, manifests);
+    if (flags["--target-dir"] !== undefined) {
+      facts = factsFromTargetDir(flags["--target-dir"], manifests);
+    } else if (flags["--operator-answers"] !== undefined) {
+      facts = factsFromOperatorAnswers(flags["--operator-answers"], manifests);
+    } else {
+      // Resolved BEFORE any read, and published below, so the merge step
+      // reads the repo layer at this same commit.
+      pinnedRef = resolveTargetRef(repo);
+      facts = factsFromFetch(repo, manifests, pinnedRef);
+    }
     writeFileSync(flags["--out"], renderManagedYaml(facts, manifests));
   } catch (error) {
     fail(error instanceof Error ? error.message : String(error));
   }
+  setOutput("ref", pinnedRef);
   console.log(
-    `rendered the managed settings baseline for ${facts.modules.length} module(s) into ${flags["--out"]}`,
+    `rendered the managed settings baseline for ${facts.modules.length} module(s) into ${flags["--out"]}` +
+      (pinnedRef === "" ? "" : ` at ${pinnedRef}`),
   );
 }
 

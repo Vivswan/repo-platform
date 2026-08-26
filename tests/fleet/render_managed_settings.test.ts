@@ -12,6 +12,7 @@ import { join } from "node:path";
 import {
   declaredPrivate,
   enableCodeql,
+  factsFromFetch,
   factsFromOperatorAnswers,
   factsFromTargetDir,
   layerPaths,
@@ -204,6 +205,30 @@ describe("enableCodeql", () => {
     expect(enableCodeql(facts({ modules: ["bun"] }), manifests)).toBe(true);
     expect(enableCodeql(facts({ modules: ["bun"], private: true }), manifests)).toBe(false);
     expect(enableCodeql(facts({ modules: ["rust"] }), manifests)).toBe(false);
+  });
+});
+
+describe("factsFromFetch pins every read to one ref", () => {
+  test("all reads use the SAME ref, never the moving branch", () => {
+    // A push between two reads would otherwise pair an old module
+    // selection with a new repo layer, and the apply deletes the labels
+    // of a module the repo had just selected.
+    const seen: { path: string; ref: string }[] = [];
+    const fetcher = (_repo: string, path: string, ref: string): string | null => {
+      seen.push({ path, ref });
+      if (path === ".repo-platform.yml") return "modules: [uv, fuzzer, settings-sync]\n";
+      if (path === ".github/settings.yml") return "repository:\n  private: false\n";
+      if (path === ".copier-answers.yml") return "fuzzer_label: my-fuzz\n";
+      return null;
+    };
+    const facts = factsFromFetch("owner/name", manifests, "cafebabe", fetcher);
+    expect(facts.modules).toContain("uv");
+    expect(facts.trackingLabels).toEqual([{ module: "fuzzer", label: "my-fuzz" }]);
+    // Every read pinned, and the files that matter actually read.
+    expect(seen.length).toBeGreaterThan(1);
+    expect(new Set(seen.map((s) => s.ref))).toEqual(new Set(["cafebabe"]));
+    expect(seen.map((s) => s.path)).toContain(".repo-platform.yml");
+    expect(seen.map((s) => s.path)).toContain(".github/settings.yml");
   });
 });
 

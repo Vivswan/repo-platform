@@ -32,10 +32,10 @@
 //     --out <file> (--repo-file <path> | --repo-fetch <owner/name>)
 //
 // --repo-file reads the repo layer from a local path (the self-apply's
-// own checkout); --repo-fetch reads it from the target's default branch
-// via gh api (env: GH_TOKEN). Exactly one is required - there is no
-// baseline-only mode, because its output is the destructive document
-// above.
+// own checkout); --repo-fetch reads it from the target via gh api (env:
+// GH_TOKEN), pinned to --repo-ref, the commit the render read its facts
+// at. Exactly one source is required - there is no baseline-only mode,
+// because its output is the destructive document above.
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -407,19 +407,23 @@ export function parseSettingsDoc(text: string, where: string): Record<string, un
   return data;
 }
 
-function fetchRepoLayer(repo: string): { text: string; where: string } | null {
+/** The repo layer AT THE REF the facts were read at. Without the pin this
+ *  read happens later than the fact reads, so a push in between pairs an
+ *  old module selection with a new repo layer and the apply deletes the
+ *  labels of a module the repo had just selected. */
+function fetchRepoLayer(repo: string, ref: string): { text: string; where: string } | null {
+  const at = ref === "" ? "" : `?ref=${ref}`;
+  const where = `${repo}/.github/settings.yml${ref === "" ? "" : `@${ref}`}`;
   const proc = captureNetwork([
     "gh",
     "api",
-    `repos/${repo}/contents/.github/settings.yml`,
+    `repos/${repo}/contents/.github/settings.yml${at}`,
     "-H",
     "Accept: application/vnd.github.raw",
   ]);
-  if (proc.exitCode === 0) return { text: proc.stdout, where: `${repo}/.github/settings.yml` };
+  if (proc.exitCode === 0) return { text: proc.stdout, where };
   if (proc.stderr.includes("HTTP 404")) return null;
-  throw new Error(
-    `${repo}/.github/settings.yml: fetch failed (${proc.stderr.trim().split("\n")[0]})`,
-  );
+  throw new Error(`${where}: fetch failed (${proc.stderr.trim().split("\n")[0]})`);
 }
 
 /** Every layer folded low to high under the dialect above. */
@@ -523,7 +527,7 @@ function main(args: string[]): void {
   const flags = parseFlags(
     args,
     ["--managed", "--out"] as const,
-    ["--repo-file", "--repo-fetch"] as const,
+    ["--repo-file", "--repo-fetch", "--repo-ref"] as const,
   );
   const fileSource = flags["--repo-file"];
   const fetchSource = flags["--repo-fetch"];
@@ -540,7 +544,7 @@ function main(args: string[]): void {
         ? existsSync(fileSource)
           ? { text: readFileSync(fileSource, "utf-8"), where: fileSource }
           : null
-        : fetchRepoLayer(fetchSource as string);
+        : fetchRepoLayer(fetchSource as string, flags["--repo-ref"] ?? "");
     const outcome = mergeOutcome(managed, repoLayer, fileSource ?? (fetchSource as string));
     if (outcome.kind === "skip") {
       warning(outcome.message);

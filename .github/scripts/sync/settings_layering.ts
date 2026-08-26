@@ -74,7 +74,7 @@ export interface IdentitySeed {
    *  string list; a hand-edited list must survive the transition. */
   topics?: string | string[] | null;
   homepage?: string | null;
-  private: boolean | null;
+  private?: boolean | null;
   /** The owner named in the starter's header comment. */
   githubUsername: string;
 }
@@ -84,9 +84,9 @@ export interface IdentitySeed {
  *  the known identity expressions must carry no jinja at all - so a
  *  template that grew a construct this renderer does not know throws
  *  before anything is substituted. An undefined optional value drops its
- *  whole line; `private` is always present (a value or an explicit
- *  null), so the `repository:` block can never render empty however many
- *  optional keys are dropped.
+ *  whole line. Dropping ALL FOUR is meaningful, not degenerate: the
+ *  block then renders as bare `repository:`, which YAML reads as null -
+ *  exactly the "do not manage this section" the legacy file declared.
  *
  *  Substitution is a single pass over the template so a seed VALUE can
  *  never be re-read as a template expression, and a template line
@@ -317,6 +317,11 @@ export function transitionSettingsStarter(
         const manifests = loadManifests();
         const facts = factsFromTargetDir(targetDir, manifests);
         const old = parseSettingsDoc(oldText, settingsPath);
+        // A section-level null is a declaration, not an absence: the repo
+        // took its whole identity block out of management and the heal
+        // was honouring that. Seeding from the recorded answers here
+        // would silently start managing every one of those fields again.
+        const repositoryOptedOut = "repository" in old && old.repository === null;
         const oldRepository = isMapping(old.repository) ? old.repository : {};
         // description/homepage/topics: the old file's own declarations,
         // the state the nightly heal enforced, with the post-update
@@ -355,27 +360,29 @@ export function transitionSettingsStarter(
             ".copier-answers.yml records no github_username - the starter's header cannot be seeded",
           );
         }
-        const seed: IdentitySeed = {
-          // Declared wins, recorded answer only when undeclared - the
-          // same precedence as homepage/topics/private below. Seeding
-          // from the live answer instead would silently drop a declared
-          // description, and droppedOverrides never reports it (the
-          // identity keys are exempt there as "carried"). Undefined when
-          // NEITHER source declares one: the starter then omits the key
-          // rather than declare-and-clear a live description nothing ever
-          // managed.
-          description: seedKey("description", isString),
-          // undefined when neither source declares the key: the starter
-          // then omits it rather than declare-and-clear a live value
-          // nothing ever managed.
-          homepage: seedKey("homepage", isString),
-          topics: seedKey("topics", isTopics),
-          // Same rule for visibility: a declared null means the repo took
-          // visibility out of management, so facts.private (which falls
-          // back to the recorded answer) must not overwrite it.
-          private: oldRepository.private === null ? null : facts.private,
-          githubUsername: username,
-        };
+        const seed: IdentitySeed = repositoryOptedOut
+          ? { githubUsername: username }
+          : {
+              // Declared wins, recorded answer only when undeclared - the
+              // same precedence as homepage/topics/private below. Seeding
+              // from the live answer instead would silently drop a declared
+              // description, and droppedOverrides never reports it (the
+              // identity keys are exempt there as "carried"). Undefined when
+              // NEITHER source declares one: the starter then omits the key
+              // rather than declare-and-clear a live description nothing ever
+              // managed.
+              description: seedKey("description", isString),
+              // undefined when neither source declares the key: the starter
+              // then omits it rather than declare-and-clear a live value
+              // nothing ever managed.
+              homepage: seedKey("homepage", isString),
+              topics: seedKey("topics", isTopics),
+              // Same rule for visibility: a declared null means the repo took
+              // visibility out of management, so facts.private (which falls
+              // back to the recorded answer) must not overwrite it.
+              private: oldRepository.private === null ? null : facts.private,
+              githubUsername: username,
+            };
         // Everything is computed BEFORE the replacement is written: a
         // throw anywhere above leaves the old file (marker included)
         // untouched, so the fail-soft retry contract holds.
