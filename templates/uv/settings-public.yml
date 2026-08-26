@@ -1,0 +1,23 @@
+---
+# The uv module's PUBLIC-only settings layer (layer 4 of the settings
+# merge, docs/settings.md): merged for a public repository that selects
+# the module.
+#
+# CodeQL analyzes this toolchain, so the main ruleset gains the
+# code_scanning rule. Rules of a same-name ruleset APPEND across layers
+# keyed by `type`, so this adds to the main ruleset that
+# .github/settings-override.yml declares rather than replacing it, and a
+# repository selecting two analyzable toolchains contributes the rule
+# twice with identical content (the append dedupes by type). GitHub
+# rejects the rule on a private repository, which is why it is here and
+# not in the module's unconditional layer.
+
+rulesets:
+  - name: main
+    rules:
+      - type: code_scanning
+        parameters:
+          code_scanning_tools:
+            - tool: CodeQL
+              security_alerts_threshold: high_or_higher
+              alerts_threshold: errors

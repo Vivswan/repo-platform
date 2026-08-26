@@ -210,9 +210,12 @@ describe("transitionSettingsStarter", () => {
     const replaced = readFileSync(join(dir, ".github/settings.yml"), "utf-8");
     expect(replaced).not.toContain(LEGACY_MERGEABLE_LINE);
     const doc = parseYaml(replaced) as { repository: Record<string, unknown> };
-    // description/private from the post-update answers (the live values);
-    // homepage/topics from the old file's own declarations.
-    expect(doc.repository.description).toBe("Live description");
+    // Every identity key follows declared-wins: the old file's own
+    // values, which the nightly heal was enforcing. The live answer is
+    // only a fallback, so a declared description is never silently
+    // swapped (droppedOverrides would not report it - identity keys are
+    // exempt there as carried).
+    expect(doc.repository.description).toBe("Old declared description");
     expect(doc.repository.topics).toBe("kept, custom, topics");
     expect(doc.repository.private).toBe(false);
     const section = readFileSync(out, "utf-8");
@@ -264,6 +267,19 @@ describe("transitionSettingsStarter", () => {
     expect(readFileSync(out, "utf-8")).toBe("");
   });
 
+  test("an undeclared description falls back to the recorded live answer", () => {
+    const { dir, out } = target({
+      settings: legacySettings.replace("  description: Old declared description\n", ""),
+      modules: "modules: [settings-sync]\n",
+      answers,
+    });
+    transitionSettingsStarter(dir, out, "t");
+    const doc = parseYaml(readFileSync(join(dir, ".github/settings.yml"), "utf-8")) as {
+      repository: Record<string, unknown>;
+    };
+    expect(doc.repository.description).toBe("Live description");
+  });
+
   test("fail-soft: a broken answers file leaves the old file for the next sync", () => {
     const { dir, out } = target({
       settings: legacySettings,
@@ -272,7 +288,14 @@ describe("transitionSettingsStarter", () => {
     });
     transitionSettingsStarter(dir, out, "t");
     expect(readFileSync(join(dir, ".github/settings.yml"), "utf-8")).toBe(legacySettings);
-    expect(readFileSync(out, "utf-8")).toBe("");
+    // A failed transition leaves the legacy file shadowing the managed
+    // layer, so the section must be NON-empty: open_pr.ts arms auto-merge
+    // only when every review-forcing section is empty, and this PR must
+    // not merge unseen.
+    const section = readFileSync(out, "utf-8");
+    expect(section).not.toBe("");
+    expect(section).toContain("FAILED");
+    expect(section).toContain("held for review");
   });
 
   test("a target without settings.yml writes an empty section and touches nothing", () => {

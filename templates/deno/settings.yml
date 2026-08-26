@@ -1,0 +1,8 @@
+---
+# The deno module's settings layer (layer 3 of the settings merge,
+# docs/settings.md): merged for every repository that selects the module.
+
+labels:
+  - name: deno
+    color: "70ffaf"
+    description: Pull requests that update deno code

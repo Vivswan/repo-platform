@@ -1,12 +1,21 @@
-// Unit tests for the settings layering dialect: deep merge with the repo
-// layer winning, explicit-null opt-outs, and the name-keyed unions for
-// labels and rulesets (whole-entry replace, both sides' other entries
-// kept) - the exact semantics docs/settings.md promises.
+// Unit tests for the settings layering dialect: deep merge with the higher
+// layer winning, explicit-null opt-outs, the name-keyed unions (labels
+// replace wholesale, same-name rulesets merge with their rules appending),
+// and the fleet override layer that no repository can beat - the exact
+// semantics docs/settings.md promises.
 
 import { describe, expect, test } from "bun:test";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import {
+  appendRules,
+  COPILOT_REVIEW_CONTEXT,
   duplicateNameWarnings,
   identityKeyIssues,
+  loadOverrideLayer,
+  mergeOutcome,
   mergeSettingsLayers,
   missingIdentityKeys,
   nameKeyedUnion,
@@ -77,17 +86,38 @@ describe("mergeSettingsLayers", () => {
     expect(merged.labels.map((l) => l.name)).toEqual(["Bug", "dependencies"]);
   });
 
-  test("rulesets are a name-keyed union too, matched exactly", () => {
+  test("same-name rulesets merge key by key, and their rules APPEND", () => {
     const merged = mergeSettingsLayers(managed, {
       rulesets: [
         { name: "main", target: "branch", rules: [] },
         { name: "build-tags", target: "tag" },
       ],
     }) as { rulesets: Record<string, unknown>[] };
+    // The higher layer declared no rules, so the lower layer's survive: a
+    // ruleset's rules can only be ADDED to across layers, never removed.
     expect(merged.rulesets).toEqual([
-      { name: "main", target: "branch", rules: [] },
+      { name: "main", target: "branch", rules: [{ type: "deletion" }] },
       { name: "non-bypassable", target: "branch", bypass_actors: [] },
       { name: "build-tags", target: "tag" },
+    ]);
+  });
+
+  test("a higher layer adds a rule and replaces a same-type one in place", () => {
+    const merged = mergeSettingsLayers(
+      { rulesets: [{ name: "main", rules: [{ type: "deletion" }, { type: "pull_request" }] }] },
+      {
+        rulesets: [
+          {
+            name: "main",
+            rules: [{ type: "pull_request", parameters: { x: 1 } }, { type: "code_scanning" }],
+          },
+        ],
+      },
+    ) as { rulesets: Record<string, unknown>[] };
+    expect(merged.rulesets[0]?.rules).toEqual([
+      { type: "deletion" },
+      { type: "pull_request", parameters: { x: 1 } },
+      { type: "code_scanning" },
     ]);
   });
 
@@ -103,6 +133,195 @@ describe("mergeSettingsLayers", () => {
   test("repo-only sections pass through untouched", () => {
     const merged = mergeSettingsLayers(managed, { environments: [{ name: "prod" }] });
     expect(merged.environments).toEqual([{ name: "prod" }]);
+  });
+});
+
+describe("mergeOutcome", () => {
+  test("an absent repo layer SKIPS instead of applying the baseline alone", () => {
+    // A repo that selects settings-sync before its first sync delivers
+    // the starter has no settings.yml. Applying the baseline alone would
+    // let delete-undeclared label reconciliation wipe every label the
+    // repo declares for itself, so absence must never mean "empty".
+    const outcome = mergeOutcome(managed, null, "owner/name");
+    expect(outcome.kind).toBe("skip");
+    if (outcome.kind !== "skip") throw new Error("expected a skip");
+    expect(outcome.message).toContain("owner/name");
+    expect(outcome.message).toContain("not onboarded yet");
+  });
+
+  test("a present repo layer merges and reports its warnings", () => {
+    const outcome = mergeOutcome(
+      managed,
+      { text: "repository:\n  description: mine\n", where: "owner/name/.github/settings.yml" },
+      "owner/name",
+    );
+    expect(outcome.kind).toBe("merged");
+    if (outcome.kind !== "merged") throw new Error("expected a merge");
+    const repository = outcome.document.repository as Record<string, unknown>;
+    expect(repository.description).toBe("mine");
+    expect(repository.has_issues).toBe(true);
+    // homepage/topics/private are undeclared here, so the identity
+    // warning still fires - the merge just is not destructive.
+    expect(outcome.warnings.join(" ")).toContain("homepage");
+  });
+
+  test("an empty but PRESENT settings.yml is a real empty layer, not a skip", () => {
+    const outcome = mergeOutcome(managed, { text: "\n", where: "owner/name" }, "owner/name");
+    expect(outcome.kind).toBe("merged");
+  });
+});
+
+describe("appendRules", () => {
+  const types = (rules: unknown[]) => rules.map((r) => (r as { type: string }).type);
+
+  test("a duplicate type in the LOWER list collapses to one", () => {
+    // GitHub rejects a ruleset carrying one rule type twice, and a
+    // rejected ruleset means the override never applies at all.
+    expect(types(appendRules([{ type: "deletion" }, { type: "deletion" }], []))).toEqual([
+      "deletion",
+    ]);
+  });
+
+  test("a lower duplicate does not multiply the higher layer's replacement", () => {
+    const merged = appendRules(
+      [{ type: "deletion" }, { type: "deletion" }],
+      [{ type: "deletion", parameters: { x: 1 } }],
+    );
+    expect(merged).toEqual([{ type: "deletion", parameters: { x: 1 } }]);
+  });
+
+  test("a duplicate type in the HIGHER list collapses too", () => {
+    expect(types(appendRules([], [{ type: "code_scanning" }, { type: "code_scanning" }]))).toEqual([
+      "code_scanning",
+    ]);
+  });
+
+  test("first occurrence wins and lower order is preserved", () => {
+    expect(
+      types(
+        appendRules(
+          [{ type: "deletion" }, { type: "pull_request" }],
+          [{ type: "pull_request" }, { type: "code_scanning" }],
+        ),
+      ),
+    ).toEqual(["deletion", "pull_request", "code_scanning"]);
+  });
+});
+
+describe("the override layer", () => {
+  const override = {
+    repository: { allow_merge_commit: false, squash_merge_commit_title: "PR_TITLE" },
+    rulesets: [{ name: "main", rules: [{ type: "required_linear_history" }] }],
+  };
+  const outcome = (repoText: string) =>
+    mergeOutcome(managed, { text: repoText, where: "r" }, "owner/name", override);
+
+  test("a repo cannot override an override key", () => {
+    const result = outcome("repository:\n  allow_merge_commit: true\n");
+    if (result.kind !== "merged") throw new Error("expected a merge");
+    expect((result.document.repository as Record<string, unknown>).allow_merge_commit).toBe(false);
+  });
+
+  test("a repo cannot strip an override key with the null opt-out either", () => {
+    // The null opt-out only removes the key from the layers BELOW the
+    // override, so the override puts it straight back.
+    const result = outcome("repository:\n  squash_merge_commit_title: null\n");
+    if (result.kind !== "merged") throw new Error("expected a merge");
+    expect((result.document.repository as Record<string, unknown>).squash_merge_commit_title).toBe(
+      "PR_TITLE",
+    );
+  });
+
+  test("a repo cannot drop a rule the override declares, but may add its own", () => {
+    const result = outcome("rulesets:\n  - name: main\n    rules:\n      - type: deletion\n");
+    if (result.kind !== "merged") throw new Error("expected a merge");
+    const main = (result.document.rulesets as Record<string, unknown>[]).find(
+      (r) => r.name === "main",
+    );
+    expect(main?.rules).toEqual([{ type: "deletion" }, { type: "required_linear_history" }]);
+  });
+
+  test("keys no layer above declares still come from the repo", () => {
+    const result = outcome("repository:\n  description: mine\n");
+    if (result.kind !== "merged") throw new Error("expected a merge");
+    expect((result.document.repository as Record<string, unknown>).description).toBe("mine");
+  });
+
+  test("the shipped override layer requires all-green and nothing else", () => {
+    const shipped = loadOverrideLayer();
+    const main = (shipped.rulesets as Record<string, unknown>[]).find((r) => r.name === "main");
+    expect(main).toBeDefined();
+    const rules = main?.rules as Record<string, unknown>[];
+    const checks = rules.find((r) => r.type === "required_status_checks")?.parameters as {
+      required_status_checks: { context: string }[];
+    };
+    expect(checks.required_status_checks.map((c) => c.context)).toEqual(["all-green"]);
+  });
+
+  test("the shipped override layer pins the whole protection policy", () => {
+    // These are the invariants the override exists to make unbeatable, so
+    // they are pinned here rather than left to whatever the file happens
+    // to say. Losing any of them silently weakens every managed repo.
+    const shipped = loadOverrideLayer();
+    const rulesets = shipped.rulesets as Record<string, unknown>[];
+
+    const main = rulesets.find((r) => r.name === "main");
+    const mainRules = main?.rules as Record<string, unknown>[];
+    expect(mainRules.map((r) => r.type).sort()).toEqual([
+      "copilot_code_review",
+      "deletion",
+      "non_fast_forward",
+      "pull_request",
+      "required_linear_history",
+      "required_status_checks",
+    ]);
+    const pr = mainRules.find((r) => r.type === "pull_request")?.parameters as Record<
+      string,
+      unknown
+    >;
+    expect(pr.required_review_thread_resolution).toBe(true);
+    expect(pr.require_code_owner_review).toBe(true);
+    expect(pr.allowed_merge_methods).toEqual(["squash"]);
+    // Admins keep a bypass so direct pushes to main still work.
+    expect(main?.bypass_actors).toEqual([
+      { actor_id: 5, actor_type: "RepositoryRole", bypass_mode: "always" },
+    ]);
+
+    const nonBypassable = rulesets.find((r) => r.name === "non-bypassable");
+    expect(nonBypassable).toBeDefined();
+    const nonBypassableRules = (nonBypassable?.rules ?? []) as Record<string, unknown>[];
+    expect(nonBypassableRules.map((r) => r.type).sort()).toEqual([
+      "deletion",
+      "required_linear_history",
+    ]);
+    // Declared EMPTY on purpose: an omitted key is invisible to drift
+    // detection, so the empty list is what heals an out-of-band bypass.
+    expect(nonBypassable?.bypass_actors).toEqual([]);
+
+    const repository = shipped.repository as Record<string, unknown>;
+    expect(repository.allow_merge_commit).toBe(false);
+    expect(repository.allow_rebase_merge).toBe(false);
+    expect(repository.allow_squash_merge).toBe(true);
+    expect(repository.squash_merge_commit_title).toBe("PR_TITLE");
+  });
+
+  test("requiring Copilot's review context is refused: it bricks every PR", () => {
+    // Copilot's check suite never reaches a merge-box rollup, so the
+    // context is never reported and no pull request can merge.
+    const doc = parseYaml(readFileSync(".github/settings-override.yml", "utf-8")) as Record<
+      string,
+      unknown
+    >;
+    const main = (doc.rulesets as { name: string; rules: Record<string, unknown>[] }[]).find(
+      (r) => r.name === "main",
+    );
+    const params = main?.rules.find((r) => r.type === "required_status_checks")?.parameters as {
+      required_status_checks: { context: string }[];
+    };
+    params.required_status_checks.push({ context: COPILOT_REVIEW_CONTEXT });
+    const file = join(mkdtempSync(join(tmpdir(), "override-")), "settings-override.yml");
+    writeFileSync(file, stringifyYaml(doc));
+    expect(() => loadOverrideLayer(file)).toThrow("merge-box rollup");
   });
 });
 

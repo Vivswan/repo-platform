@@ -1,0 +1,102 @@
+---
+# Layer 6 of the settings merge: the TOP of the stack (docs/settings.md).
+# This is the only layer a repository cannot beat - it merges ABOVE the
+# repository's own .github/settings.yml, so a repo that declares one of
+# these keys, or nulls it out, still gets the fleet value. Everything a
+# repository is allowed to tune lives in .github/settings-baseline.yml
+# instead.
+#
+# Keep this file to genuine fleet invariants: the merge-method policy and
+# the two protection rulesets. Cosmetic defaults belong in the baseline.
+
+repository:
+  # Squash-only merges, fleet wide.
+  allow_squash_merge: true
+  allow_merge_commit: false
+  allow_rebase_merge: false
+  # The squash subject must ALWAYS be the PR title (the pr-title check and
+  # release-please rely on it); GitHub only defaults to that for
+  # single-commit PRs.
+  squash_merge_commit_title: PR_TITLE
+  squash_merge_commit_message: PR_BODY
+  allow_auto_merge: true
+  enable_vulnerability_alerts: true
+
+rulesets:
+  # Admins (RepositoryRole id 5) are in the bypass list, so direct pushes
+  # to main still work. The single required status check is `all-green`
+  # (ci.yml), which `needs:` every gating CI job.
+  #
+  # Copilot's own `copilot-pull-request-reviewer` check must NOT be listed
+  # here: its check suite never appears in a PR's merge-box rollup, so
+  # requiring the context blocks every pull request forever. Waiting for
+  # Copilot's review is a bridge job inside the all-green gate instead.
+  #
+  # A module layer may ADD a rule to this ruleset (the toolchain modules'
+  # settings-public.yml layers add code_scanning): rules lists of a
+  # same-name ruleset append across layers, keyed by `type`. They cannot
+  # remove or weaken a rule declared here.
+  - name: main
+    target: branch
+    enforcement: active
+    conditions:
+      ref_name:
+        include:
+          - "~DEFAULT_BRANCH"
+        exclude: []
+    rules:
+      - type: deletion
+      - type: non_fast_forward
+      - type: required_linear_history
+      - type: required_status_checks
+        parameters:
+          strict_required_status_checks_policy: false
+          do_not_enforce_on_create: true
+          required_status_checks:
+            - context: all-green
+      - type: pull_request
+        parameters:
+          required_approving_review_count: 0
+          dismiss_stale_reviews_on_push: false
+          # Require an approving review from a CODEOWNER before merge.
+          # Admins in bypass_actors can still merge without one.
+          require_code_owner_review: true
+          require_last_push_approval: false
+          # Every PR review thread must be resolved before merge, fleet
+          # wide - an unresolved comment is an unaddressed finding.
+          required_review_thread_resolution: true
+          # Squash-only merges (enforced by the ruleset, not just repo
+          # settings).
+          allowed_merge_methods:
+            - squash
+      # Automatically request Copilot code review on PRs to main, including
+      # on each new push and on draft PRs. The review is requested, never
+      # required as a status check (see the note above).
+      - type: copilot_code_review
+        parameters:
+          review_on_push: true
+          review_draft_pull_requests: true
+    bypass_actors:
+      - actor_id: 5
+        actor_type: RepositoryRole
+        bypass_mode: always
+
+  # Rules with an EMPTY bypass list: nobody - owner and admins included -
+  # can violate these on the default branch. A separate ruleset so the
+  # main ruleset's admin bypass (which keeps direct pushes working) cannot
+  # exempt anyone from these rules.
+  - name: non-bypassable
+    target: branch
+    enforcement: active
+    conditions:
+      ref_name:
+        include:
+          - "~DEFAULT_BRANCH"
+        exclude: []
+    rules:
+      - type: deletion
+      - type: required_linear_history
+    # Declared empty on purpose: an omitted key is invisible to drift
+    # detection and preserved by the update, so the empty list is what
+    # lets the nightly apply heal an out-of-band bypass actor.
+    bypass_actors: []

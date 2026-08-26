@@ -1,11 +1,11 @@
-# Central settings apply: assembles each target's managed settings
-# baseline per repository (.github/scripts/fleet/render_managed_settings.ts
-# - the fleet-generic content from .github/settings-baseline.yml, the
-# module-conditional labels/rulesets from the module manifests, driven by
-# the target's .repo-platform.yml module selection and its effective
-# visibility), deep-merges the repo's own .github/settings.yml over it
-# (merge_settings_layers.ts; the repo layer wins, labels/rulesets are
-# name-keyed unions), and runs Vivswan/github-settings-as-code in
+# Central settings apply: merges each target's settings LAYERS
+# (docs/settings.md). render_managed_settings.ts selects and merges layers
+# 1 to 4 - the fleet baseline, the fleet visibility overlay, and each
+# selected module's own layer and visibility overlay - driven by the
+# target's .repo-platform.yml module selection and its effective
+# visibility. merge_settings_layers.ts then adds the repo's own
+# .github/settings.yml and the fleet override on top, and runs
+# Vivswan/github-settings-as-code in
 # single-repo mode once per repository in a fail-fast-free matrix. Targets
 # are enrolled, adopted repos whose .repo-platform.yml selects the
 # settings-sync module - the module selection is the opt-in - plus this
@@ -168,6 +168,7 @@ jobs:
           fi
 
       - name: Merge the repository's settings.yml over the baseline
+        id: merge
         env:
           GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
           TARGET: ${{ steps.resolve.outputs.repo }}
@@ -177,6 +178,10 @@ jobs:
           --repo-fetch "$TARGET" --out "$RUNNER_TEMP/merged-settings.yml"
 
       - name: Apply repository settings
+        # Skipped for a target that selected settings-sync but has no
+        # settings.yml yet: the merge step writes no document, because
+        # applying the baseline alone would delete the repo's own labels.
+        if: steps.merge.outputs.skipped != 'true'
         # Pinned to an immutable commit; bump to @v1 once the action cuts
         # its first release. Bump together with reusable-apply-settings.yml.
         uses: Vivswan/github-settings-as-code@ac83fb48219309e2249294ef37fb55310bd45fb3

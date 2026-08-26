@@ -373,66 +373,78 @@ fi
 # repo root's dependencies, which the smoke job does not install.
 if has settings-sync; then
   managed_out=/tmp/smoke-managed-settings.yml
+  merged_out=/tmp/smoke-merged-settings.yml
   [ -d node_modules ] || bun install --frozen-lockfile --silent
   bun .github/scripts/fleet/render_managed_settings.ts \
     --repo smoke/test --target-dir /tmp/smoke --out "$managed_out"
+  # The document the apply actually receives: the rendered layers plus the
+  # smoke repo's own settings.yml plus the fleet override on top. The
+  # protection rulesets live in the override, so only the merged document
+  # shows the whole contract. GITHUB_OUTPUT is set by Actions; give the
+  # script a scratch file when running this harness by hand.
+  GITHUB_OUTPUT="${GITHUB_OUTPUT:-/tmp/smoke-merge-output.txt}" \
+    bun .github/scripts/fleet/merge_settings_layers.ts \
+    --managed "$managed_out" --repo-file /tmp/smoke/.github/settings.yml \
+    --out "$merged_out"
   # The unconditional labels: dependabot's base pair (the base
   # dependabot.yml always carries the github-actions ecosystem, and
   # dependabot recreates its labels when missing, so an undeclared one
   # would loop delete/recreate nightly) plus the triage trio.
-  present_line "  - name: dependencies" "$managed_out"
-  present_line "  - name: github_actions" "$managed_out"
-  present_line "  - name: bug" "$managed_out"
-  present_line "  - name: enhancement" "$managed_out"
-  present_line "  - name: fix-lint" "$managed_out"
-  # The fleet rulesets, always, with the all-green required check and the
+  present_line "  - name: dependencies" "$merged_out"
+  present_line "  - name: github_actions" "$merged_out"
+  present_line "  - name: bug" "$merged_out"
+  present_line "  - name: enhancement" "$merged_out"
+  present_line "  - name: fix-lint" "$merged_out"
+  # The fleet rulesets, always, with all-green as the ONLY required check
+  # (Copilot's check never reaches a merge-box rollup) and the
   # review-thread gate.
-  present_line "  - name: main" "$managed_out"
-  present_line "  - name: non-bypassable" "$managed_out"
-  present "context: all-green" "$managed_out"
-  present "required_review_thread_resolution: true" "$managed_out"
+  present_line "  - name: main" "$merged_out"
+  present_line "  - name: non-bypassable" "$merged_out"
+  present "context: all-green" "$merged_out"
+  absent "context: copilot-pull-request-reviewer" "$merged_out"
+  present "required_review_thread_resolution: true" "$merged_out"
   # The main ruleset's code_scanning rule follows enable_codeql (public
   # AND an analyzable toolchain): GitHub 422s that rule on a private
   # personal repo, so a private assembly must never emit it.
   if [ "$PRIVATE" != "true" ] && has_codeql_toolchain; then
-    present "type: code_scanning" "$managed_out"
+    present "type: code_scanning" "$merged_out"
   else
-    absent "type: code_scanning" "$managed_out"
+    absent "type: code_scanning" "$merged_out"
   fi
   # security_and_analysis follows visibility alone (private repos without
   # Advanced Security reject the block); the settings-as-code-report
   # marker label is the private-only counterpart.
   if [ "$PRIVATE" != "true" ]; then
-    present "security_and_analysis:" "$managed_out"
-    present "secret_scanning_push_protection:" "$managed_out"
-    absent "settings-as-code-report" "$managed_out"
+    present "security_and_analysis:" "$merged_out"
+    present "secret_scanning_push_protection:" "$merged_out"
+    absent "settings-as-code-report" "$merged_out"
   else
-    absent "security_and_analysis:" "$managed_out"
-    present_line "  - name: settings-as-code-report" "$managed_out"
+    absent "security_and_analysis:" "$merged_out"
+    present_line "  - name: settings-as-code-report" "$merged_out"
   fi
   # Dependabot's per-ecosystem labels follow the toolchain modules.
-  if has bun || has node; then present_line "  - name: javascript" "$managed_out"; else absent "name: javascript" "$managed_out"; fi
-  if has deno; then present_line "  - name: deno" "$managed_out"; else absent "name: deno" "$managed_out"; fi
-  if has uv; then present_line "  - name: python:uv" "$managed_out"; else absent "python:uv" "$managed_out"; fi
-  if has rust; then present_line "  - name: rust" "$managed_out"; else absent "name: rust" "$managed_out"; fi
+  if has bun || has node; then present_line "  - name: javascript" "$merged_out"; else absent "name: javascript" "$merged_out"; fi
+  if has deno; then present_line "  - name: deno" "$merged_out"; else absent "name: deno" "$merged_out"; fi
+  if has uv; then present_line "  - name: python:uv" "$merged_out"; else absent "python:uv" "$merged_out"; fi
+  if has rust; then present_line "  - name: rust" "$merged_out"; else absent "name: rust" "$merged_out"; fi
   # release-please brings its labels and the release-tags ruleset from its
   # manifest's settings_labels/settings_rulesets.
   if has release-please; then
-    present "autorelease: pending" "$managed_out"
-    present "autorelease: tagged" "$managed_out"
-    present "release-blocker" "$managed_out"
-    present "release-override" "$managed_out"
-    present_line "  - name: release-tags" "$managed_out"
+    present "autorelease: pending" "$merged_out"
+    present "autorelease: tagged" "$merged_out"
+    present "release-blocker" "$merged_out"
+    present "release-override" "$merged_out"
+    present_line "  - name: release-tags" "$merged_out"
   else
-    absent "autorelease:" "$managed_out"
-    absent "release-blocker" "$managed_out"
-    absent "release-override" "$managed_out"
-    absent "name: release-tags" "$managed_out"
+    absent "autorelease:" "$merged_out"
+    absent "release-blocker" "$merged_out"
+    absent "release-override" "$merged_out"
+    absent "name: release-tags" "$merged_out"
   fi
   # The tracking streams render the recorded answers (the rows take the
   # copier defaults).
-  if has fuzzer; then present_line "  - name: fuzz-nightly" "$managed_out"; else absent "fuzz-nightly" "$managed_out"; fi
-  if has nightly; then present_line "  - name: nightly-failure" "$managed_out"; else absent "nightly-failure" "$managed_out"; fi
+  if has fuzzer; then present_line "  - name: fuzz-nightly" "$merged_out"; else absent "fuzz-nightly" "$merged_out"; fi
+  if has nightly; then present_line "  - name: nightly-failure" "$merged_out"; else absent "nightly-failure" "$merged_out"; fi
 fi
 if has release-please; then
   test -f "$wf/release.yml"

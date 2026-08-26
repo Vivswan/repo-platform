@@ -74,6 +74,7 @@ import {
   classifyTemplateSource,
   landedPathAndGates,
   type ManifestOwnership,
+  SETTINGS_LAYER_NAMES,
   skipIfExistsMatchers,
 } from "./ownership.ts";
 
@@ -123,11 +124,13 @@ function walkFiles(dir: string): string[] {
   return found.sort();
 }
 
-/** Logical path -> Entry for a source folder (skips manifest + fragments). */
+/** Logical path -> Entry for a source folder (skips manifest, settings
+ *  layers, and fragments). */
 function collectFiles(folder: string): Map<string, Entry> {
   const files = new Map<string, Entry>();
   for (const rel of walkFiles(folder)) {
     if (rel.split("/")[0] === FRAGMENTS_DIR || rel === MANIFEST_NAME) continue;
+    if (SETTINGS_LAYER_NAMES.has(rel)) continue;
     files.set(rel, readEntry(join(folder, rel)));
   }
   return files;

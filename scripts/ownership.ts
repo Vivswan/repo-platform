@@ -42,6 +42,16 @@ export const LOCAL_SECTION_LINES = new Set([
  *  collapses. The validator's rendered-file check uses the same window. */
 export const HEADER_WINDOW = 10;
 
+/** A module's settings layers, next to its module.yml (docs/settings.md).
+ *  Module METADATA like the manifest itself: read by the fleet's settings
+ *  merge, never rendered into a repository, so the composer skips them and
+ *  they declare no ownership class. */
+export const SETTINGS_LAYER_NAMES = new Set([
+  "settings.yml",
+  "settings-public.yml",
+  "settings-private.yml",
+]);
+
 /** Split base files whose marker grammar predates the local-section
  *  sentinel. .gitignore's REPOSITORY LOCAL section sits ABOVE its managed
  *  section (last-match-wins makes managed patterns non-overridable), so
@@ -188,7 +198,11 @@ export function moduleOwnershipFiles(
     const visit = (rel: string) => {
       for (const name of readdirSync(join(moduleDir, rel)).sort()) {
         const childRel = rel ? `${rel}/${name}` : name;
+        // fragments/, the manifest, and the module's settings layers are
+        // module METADATA: the composer never renders them into a
+        // repository, so they have no ownership class to declare.
         if (childRel === "fragments" || childRel === "module.yml") continue;
+        if (SETTINGS_LAYER_NAMES.has(childRel)) continue;
         const stat = lstatSync(join(moduleDir, childRel));
         if (stat.isDirectory() && !stat.isSymbolicLink()) {
           visit(childRel);

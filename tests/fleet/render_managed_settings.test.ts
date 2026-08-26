@@ -1,8 +1,9 @@
-// Unit tests for the managed settings baseline assembly: the module
-// matrix -> labels/rulesets derivations, the visibility-gated blocks, and
-// the fact resolvers' fail-closed reads. Uses the REAL baseline document
-// and module manifests - they are on-disk constants, and the roster
-// tuples are exactly what the fleet's applies ship.
+// Unit tests for the managed settings layers (layers 1 to 4): which layer
+// files a repo's facts select, what the merged labels and rulesets come
+// out as, and the fact resolvers' fail-closed reads. Uses the REAL layer
+// files and module manifests - they are on-disk constants, and what they
+// merge to is exactly what the fleet's applies ship. The repo layer and
+// the fleet override (layers 5 and 6) are merge_settings_layers' tests.
 
 import { describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
@@ -13,7 +14,8 @@ import {
   enableCodeql,
   factsFromOperatorAnswers,
   factsFromTargetDir,
-  loadBaseline,
+  layerPaths,
+  loadLayer,
   managedLabelNames,
   managedLabels,
   managedRulesets,
@@ -26,8 +28,12 @@ import {
 import { loadManifests } from "../../scripts/module_manifests";
 
 const manifests = loadManifests();
-const baseline = loadBaseline();
-const releaseLabels = manifests.find((m) => m.module === "release-please")?.settings_labels ?? [];
+const privateLayerLabels = (loadLayer(".github/settings-private.yml").labels ?? []) as {
+  name: string;
+}[];
+const releaseLabels = (loadLayer("templates/release-please/settings.yml").labels ?? []) as {
+  name: string;
+}[];
 
 function facts(overrides: Partial<RepoFacts> = {}): RepoFacts {
   return { modules: [], private: false, trackingLabels: [], ...overrides };
@@ -54,7 +60,7 @@ describe("managedLabels", () => {
     expect(shared.filter((name) => name === "javascript")).toHaveLength(1);
   });
 
-  test("a selected module contributes its manifest's settings_labels", () => {
+  test("a selected module contributes its own settings layer's labels", () => {
     expect(releaseLabels.map((label) => label.name)).toEqual([
       "autorelease: pending",
       "autorelease: tagged",
@@ -68,8 +74,8 @@ describe("managedLabels", () => {
     expect(labelNames(facts())).not.toContain("release-blocker");
   });
 
-  test("a private repo carries the baseline's private-only labels", () => {
-    for (const label of baseline.private_labels) {
+  test("a private repo carries the fleet private layer's labels", () => {
+    for (const label of privateLayerLabels) {
       expect(labelNames(facts({ private: true }))).toContain(label.name);
       expect(labelNames(facts())).not.toContain(label.name);
     }
@@ -101,8 +107,12 @@ describe("managedRulesets", () => {
     return ((main?.rules ?? []) as { type: string }[]).map((r) => r.type);
   };
 
-  test("every selection carries main and non-bypassable", () => {
-    expect(rulesetNames(facts())).toEqual(["main", "non-bypassable"]);
+  test("the fleet protection rulesets are NOT in these layers", () => {
+    // main and non-bypassable live in .github/settings-override.yml, which
+    // merges above the repo layer at apply time - a repo must not be able
+    // to beat them, so they cannot sit in a layer the repo wins over.
+    expect(rulesetNames(facts())).toEqual([]);
+    expect(rulesetNames(facts({ private: true }))).toEqual([]);
   });
 
   test("release-please adds the release-tags ruleset", () => {
@@ -110,6 +120,9 @@ describe("managedRulesets", () => {
   });
 
   test("code_scanning renders exactly for a public repo with a toolchain", () => {
+    // The toolchain modules' settings-public.yml layers contribute it to
+    // the main ruleset; the override's own main rules are appended to at
+    // apply time (merge_settings_layers' tests pin that).
     expect(mainRuleTypes(facts({ modules: ["bun"] }))).toContain("code_scanning");
     expect(mainRuleTypes(facts({ modules: ["bun"], private: true }))).not.toContain(
       "code_scanning",
@@ -117,28 +130,49 @@ describe("managedRulesets", () => {
     expect(mainRuleTypes(facts({ modules: ["rust"] }))).not.toContain("code_scanning");
   });
 
-  test("non-bypassable declares the explicit empty bypass list", () => {
-    const ruleset = managedRulesets(facts(), manifests).find((r) => r.name === "non-bypassable");
-    expect(ruleset?.bypass_actors).toEqual([]);
+  test("two analyzable toolchains contribute code_scanning once", () => {
+    expect(
+      mainRuleTypes(facts({ modules: ["bun", "uv"] })).filter((t) => t === "code_scanning"),
+    ).toHaveLength(1);
+  });
+});
+
+describe("layerPaths", () => {
+  const names = (f: RepoFacts) =>
+    layerPaths(f, manifests).map((p) => p.split("/").slice(-2).join("/"));
+
+  test("a bare public selection is the baseline plus the public overlay", () => {
+    expect(names(facts())).toEqual([
+      ".github/settings-baseline.yml",
+      ".github/settings-public.yml",
+    ]);
   });
 
-  test("main requires exactly the all-green check", () => {
-    const main = managedRulesets(facts(), manifests).find((r) => r.name === "main");
-    const rules = (main?.rules ?? []) as Record<string, unknown>[];
-    const checks = rules.find((rule) => rule.type === "required_status_checks")?.parameters as {
-      required_status_checks: { context: string }[];
-    };
-    expect(checks.required_status_checks.map((c) => c.context)).toEqual(["all-green"]);
+  test("visibility picks exactly one fleet overlay", () => {
+    expect(names(facts({ private: true }))).toEqual([
+      ".github/settings-baseline.yml",
+      ".github/settings-private.yml",
+    ]);
   });
 
-  test("main's PR gate requires resolved review threads, fleet wide", () => {
-    const main = managedRulesets(facts(), manifests).find((r) => r.name === "main");
-    const rules = (main?.rules ?? []) as Record<string, unknown>[];
-    const pr = rules.find((rule) => rule.type === "pull_request")?.parameters as Record<
-      string,
-      unknown
-    >;
-    expect(pr.required_review_thread_resolution).toBe(true);
+  test("all module base layers come before all module visibility layers", () => {
+    // Precedence: a module's visibility overlay must be able to win over
+    // any module's base layer, so the two groups cannot interleave.
+    expect(names(facts({ modules: ["bun", "release-please"] }))).toEqual([
+      ".github/settings-baseline.yml",
+      ".github/settings-public.yml",
+      "bun/settings.yml",
+      "release-please/settings.yml",
+      "bun/settings-public.yml",
+    ]);
+  });
+
+  test("a module with no layer files contributes none", () => {
+    // agents ships no settings layer at all, so it must not appear.
+    expect(names(facts({ modules: ["agents"] }))).toEqual([
+      ".github/settings-baseline.yml",
+      ".github/settings-public.yml",
+    ]);
   });
 });
 
@@ -230,9 +264,13 @@ describe("fact resolvers", () => {
 describe("managedLabelNames", () => {
   test("covers every emittable label for the reserved-roster consumers", () => {
     const names = managedLabelNames(manifests);
-    for (const label of [...baseline.labels, ...baseline.private_labels, ...releaseLabels]) {
+    const baselineLabels = (loadLayer(".github/settings-baseline.yml").labels ?? []) as {
+      name: string;
+    }[];
+    for (const label of [...baselineLabels, ...privateLayerLabels, ...releaseLabels]) {
       expect(names).toContain(label.name);
     }
+    // A toolchain module's own layer, reachable for ANY selection.
     expect(names).toContain("javascript");
   });
 });

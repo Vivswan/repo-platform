@@ -19,30 +19,11 @@ repository:
   # flip to private would never be healed.
   private: false
 
-# Only this repository's OWN rulesets live here; the fleet-generic main
-# ruleset (all-green required check, PR gates) comes from the baseline.
+# Only this repository's OWN rulesets live here. The fleet protection
+# rulesets (main, non-bypassable) come from .github/settings-override.yml,
+# which merges ABOVE this file - redeclaring one here would be silently
+# overridden, so this repository does not.
 rulesets:
-  # Rules with an EMPTY bypass list: nobody - owner and admins included -
-  # can violate these on the default branch. The baseline carries the same
-  # ruleset; it is declared here too so the operator repo's copy stays
-  # visible and reviewable in-repo, and a name-keyed override replaces the
-  # baseline entry wholesale with identical content.
-  # Declared-empty bypass_actors on purpose: an omitted key is invisible
-  # to drift detection and preserved by the update, so the empty list is
-  # what lets the nightly apply heal an out-of-band bypass actor.
-  - name: non-bypassable
-    target: branch
-    enforcement: active
-    conditions:
-      ref_name:
-        include:
-          - "~DEFAULT_BRANCH"
-        exclude: []
-    rules:
-      - type: deletion
-      - type: required_linear_history
-    bypass_actors: []
-
   # The generated build branches are append-only: the builder's plain pushes
   # are fast-forwards and pass; force-pushes and deletion are blocked for
   # everyone (no bypass actors on purpose).

@@ -5,9 +5,8 @@
 // under the layering dialect every key there would shadow the centrally
 // computed managed layer forever. This step REPLACES such a file with the
 // freshly rendered identity starter (the settings-sync template, seeded
-// from the description in the post-update recorded answers - the live
-// value the sync fetched - and the old file's own declared homepage,
-// topics, and visibility, the state the nightly heal enforced, with the
+// from the old file's own declared description, homepage, topics, and
+// visibility - the state the nightly heal enforced - with the post-update
 // recorded answers as the fallback), diffs the OLD file's declarations
 // against the computed managed layer, and writes the dropped deliberate
 // overrides to $RUNNER_TEMP/settings-layering.md - open_pr.ts appends
@@ -186,9 +185,24 @@ Re-add any of them that are deliberate overrides to the new settings.yml on this
 `;
 }
 
+/** The PR-body section for a transition that threw. Non-empty on
+ *  purpose: a failed transition leaves the legacy baseline file in place,
+ *  still shadowing the managed layer, and open_pr.ts arms auto-merge
+ *  whenever every review-forcing section is empty. Reporting the failure
+ *  here is what keeps an un-transitioned repository from merging its sync
+ *  PR unseen. */
+export function failureSummary(detail: string): string {
+  return `### settings.yml layering transition FAILED
+
+The one-time replacement of \`.github/settings.yml\` with the identity starter did not run (${detail}), so this repository still carries the legacy baseline copy. Under the layering model every key in that file shadows the centrally computed managed layer (see repo-platform's docs/settings.md), so the repository does not receive baseline updates until the transition succeeds.
+
+This PR is held for review because of that. Merging it is safe - it changes nothing about settings.yml - but the next sync retries the transition, and a transition that keeps failing needs a human to look at the sync run's warning.
+`;
+}
+
 /** Run the one-time transition for a synced target; writes the PR-body
- *  section (empty when no transition or nothing dropped). Fail-soft by
- *  contract (see the header). */
+ *  section (empty only when no transition was needed and nothing was
+ *  dropped). Fail-soft by contract (see the header). */
 export function transitionSettingsStarter(
   targetDir: string,
   outPath: string,
@@ -209,12 +223,11 @@ export function transitionSettingsStarter(
         const facts = factsFromTargetDir(targetDir, manifests);
         const old = parseSettingsDoc(oldText, settingsPath);
         const oldRepository = isMapping(old.repository) ? old.repository : {};
-        // description: the post-update recorded answer carries the live
-        // value the sync fetched. homepage/topics: the old file's own
-        // declarations, the state the nightly heal enforced. private:
-        // facts.private, the same declared-over-recorded precedence the
-        // apply paths use (factsFromTargetDir reads the old file's
-        // declaration first).
+        // description/homepage/topics: the old file's own declarations,
+        // the state the nightly heal enforced, with the post-update
+        // recorded answers as the fallback. private: facts.private, the
+        // same declared-over-recorded precedence the apply paths use
+        // (factsFromTargetDir reads the old file's declaration first).
         const answers = parseSettingsDoc(
           readFileSync(join(targetDir, ".copier-answers.yml"), "utf-8"),
           join(targetDir, ".copier-answers.yml"),
@@ -234,7 +247,12 @@ export function transitionSettingsStarter(
           );
         }
         const seed: IdentitySeed = {
-          description: str(answers.description, oldRepository.description) ?? "",
+          // Declared wins, recorded answer only when undeclared - the
+          // same precedence as homepage/topics/private below. Seeding
+          // from the live answer instead would silently drop a declared
+          // description, and droppedOverrides never reports it (the
+          // identity keys are exempt there as "carried").
+          description: str(oldRepository.description, answers.description) ?? "",
           // undefined when neither source declares the key: the starter
           // then omits it rather than declare-and-clear a live value
           // nothing ever managed.
@@ -272,7 +290,7 @@ export function transitionSettingsStarter(
     warning(
       `${label}: the settings.yml layering transition failed (${detail}); the old file is left in place and the next sync retries.`,
     );
-    section = "";
+    section = failureSummary(detail);
   }
   writeFileSync(outPath, section);
 }

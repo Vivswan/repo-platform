@@ -18,35 +18,115 @@
 //   label names that way); ruleset names match exactly.
 // - Every other array (and every scalar) replaces wholesale.
 //
-// A repo with no settings.yml gets the plain baseline - identity keys
-// (description, homepage, topics, private) are then undeclared and their
-// out-of-band drift is never healed, which draws a warning; the starter
-// the settings-sync module renders seeds all four.
+// A repository with no .github/settings.yml is NOT-YET-ONBOARDED, never
+// "an empty repo layer": applying the managed baseline alone would let
+// the action's delete-undeclared label reconciliation wipe every label
+// the repository declared for itself. Absence therefore SKIPS the apply
+// (loudly, and `skipped=true` on the step) instead of producing a
+// document. The settings-sync starter seeds settings.yml on the next
+// template sync, and the apply after that picks it up.
 //
 // CLI:
 //   bun .github/scripts/fleet/merge_settings_layers.ts --managed <file>
-//     --out <file> [--repo-file <path> | --repo-fetch <owner/name>]
+//     --out <file> (--repo-file <path> | --repo-fetch <owner/name>)
 //
 // --repo-file reads the repo layer from a local path (the self-apply's
 // own checkout); --repo-fetch reads it from the target's default branch
-// via gh api (env: GH_TOKEN), tolerating a 404 as "no repo layer".
-// Neither flag means baseline-only (with the warning above).
+// via gh api (env: GH_TOKEN). Exactly one is required - there is no
+// baseline-only mode, because its output is the destructive document
+// above.
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { parseFlags } from "../shared/flags.ts";
-import { fail, warning } from "../shared/gha.ts";
+import { fail, setOutput, warning } from "../shared/gha.ts";
 import { captureNetwork } from "./discovery.ts";
 
-/** The list sections merged as name-keyed unions, with each section's
- *  name-matching fold (labels case-insensitive, rulesets exact). */
-const NAME_KEYED: Record<string, (name: string) => string> = {
-  labels: (name) => name.toLowerCase(),
-  rulesets: (name) => name,
+const REPO_ROOT = resolve(import.meta.dir, "..", "..", "..");
+export const OVERRIDE_PATH = join(REPO_ROOT, ".github/settings-override.yml");
+
+/** The list sections merged as name-keyed unions. `fold` decides when two
+ *  entries are the same entry (labels case-insensitive, like GitHub;
+ *  rulesets exact). `combine` decides what a same-name collision means:
+ *  a label is REPLACED wholesale by the higher layer, while a ruleset is
+ *  merged key by key so a lower layer cannot be erased by a higher one
+ *  that only wants to add a rule. */
+const NAME_KEYED: Record<
+  string,
+  { fold: (name: string) => string; combine: (lower: unknown, higher: unknown) => unknown }
+> = {
+  labels: { fold: (name) => name.toLowerCase(), combine: (_lower, higher) => higher },
+  rulesets: { fold: (name) => name, combine: (lower, higher) => mergeRulesetEntry(lower, higher) },
 };
 
 function isMapping(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function ruleType(rule: unknown): string | null {
+  if (!isMapping(rule)) return null;
+  return typeof rule.type === "string" ? rule.type : null;
+}
+
+/** A ruleset's `rules` list APPENDS across layers, keyed by `type`: the
+ *  lower layer's rules in order, each replaced in place by a higher-layer
+ *  rule of the same type, then the higher layer's new types appended.
+ *  This is what lets a module's visibility layer add `code_scanning` to
+ *  the `main` ruleset that .github/settings-override.yml declares - the
+ *  override sits at the top of the stack, so a whole-entry replace would
+ *  drop the module's rule instead. Adding a rule can only tighten the
+ *  ruleset; nothing here can remove one a higher layer declared. */
+export function appendRules(lower: unknown[], higher: unknown[]): unknown[] {
+  const higherByType = new Map<string, unknown>();
+  for (const rule of higher) {
+    const type = ruleType(rule);
+    if (type !== null && !higherByType.has(type)) higherByType.set(type, rule);
+  }
+  const taken = new Set<string>();
+  const merged: unknown[] = [];
+  for (const rule of lower) {
+    const type = ruleType(rule);
+    if (type === null) {
+      merged.push(rule);
+      continue;
+    }
+    // First occurrence wins on BOTH sides. Without this, a layer that
+    // declares one type twice emits it twice (or emits the higher layer's
+    // replacement twice), and GitHub rejects the ruleset - which would
+    // stop layer 6 applying at all.
+    if (taken.has(type)) continue;
+    const replacement = higherByType.get(type);
+    merged.push(replacement === undefined ? rule : replacement);
+    taken.add(type);
+  }
+  for (const rule of higher) {
+    const type = ruleType(rule);
+    if (type === null) {
+      merged.push(rule);
+      continue;
+    }
+    if (!taken.has(type)) {
+      merged.push(rule);
+      taken.add(type);
+    }
+  }
+  return merged;
+}
+
+/** Two same-name ruleset entries: every key merged with the higher layer
+ *  winning, except `rules`, which appends (see appendRules). */
+export function mergeRulesetEntry(lower: unknown, higher: unknown): unknown {
+  if (!isMapping(lower) || !isMapping(higher)) return higher;
+  const merged: Record<string, unknown> = { ...lower };
+  for (const [key, value] of Object.entries(higher)) {
+    if (key === "rules" && Array.isArray(lower.rules) && Array.isArray(value)) {
+      merged.rules = appendRules(lower.rules, value);
+      continue;
+    }
+    merged[key] = value;
+  }
+  return merged;
 }
 
 function entryName(entry: unknown): string | null {
@@ -54,16 +134,17 @@ function entryName(entry: unknown): string | null {
   return typeof entry.name === "string" ? entry.name : null;
 }
 
-/** Managed entries in managed order, each replaced WHOLESALE by the
- *  same-name repo entry when one exists; repo-only entries (and nameless
- *  repo entries, which the apply will reject on its own terms) appended
- *  in repo order. A repo entry of `null` under a matched name is not a
- *  thing (entries are objects); the null opt-out applies to the section
- *  key itself. */
+/** Lower-layer entries in order, each combined with the same-name
+ *  higher-layer entry when one exists; higher-only entries (and nameless
+ *  ones, which the apply will reject on its own terms) appended in higher
+ *  order. A higher entry of `null` under a matched name is not a thing
+ *  (entries are objects); the null opt-out applies to the section key
+ *  itself. */
 export function nameKeyedUnion(
   managed: unknown[],
   repo: unknown[],
   fold: (name: string) => string,
+  combine: (lower: unknown, higher: unknown) => unknown = (_lower, higher) => higher,
 ): unknown[] {
   const repoByName = new Map<string, unknown>();
   for (const entry of repo) {
@@ -81,7 +162,7 @@ export function nameKeyedUnion(
     const key = fold(name);
     const override = repoByName.get(key);
     if (override !== undefined) {
-      merged.push(override);
+      merged.push(combine(entry, override));
       taken.add(key);
     } else {
       merged.push(entry);
@@ -110,7 +191,7 @@ export function nameKeyedUnion(
  *  layer is repo-owned content the merge must not hard-fail on. */
 export function duplicateNameWarnings(repo: Record<string, unknown>): string[] {
   const warnings: string[] = [];
-  for (const [section, fold] of Object.entries(NAME_KEYED)) {
+  for (const [section, { fold }] of Object.entries(NAME_KEYED)) {
     const entries = repo[section];
     if (!Array.isArray(entries)) continue;
     const seen = new Map<string, string>();
@@ -137,7 +218,7 @@ export function duplicateNameWarnings(repo: Record<string, unknown>): string[] {
 function mergeMappings(
   managed: Record<string, unknown>,
   repo: Record<string, unknown>,
-  nameKeyed: Record<string, (name: string) => string>,
+  nameKeyed: typeof NAME_KEYED,
 ): Record<string, unknown> {
   const merged: Record<string, unknown> = {};
   for (const key of [...Object.keys(managed), ...Object.keys(repo)]) {
@@ -153,9 +234,9 @@ function mergeMappings(
       continue;
     }
     const managedValue = managed[key];
-    const fold = nameKeyed[key];
-    if (fold !== undefined && Array.isArray(managedValue) && Array.isArray(repoValue)) {
-      merged[key] = nameKeyedUnion(managedValue, repoValue, fold);
+    const section = nameKeyed[key];
+    if (section !== undefined && Array.isArray(managedValue) && Array.isArray(repoValue)) {
+      merged[key] = nameKeyedUnion(managedValue, repoValue, section.fold, section.combine);
     } else if (isMapping(managedValue) && isMapping(repoValue)) {
       // Name-keying applies only at the section level; nested objects
       // merge plainly.
@@ -265,51 +346,139 @@ function fetchRepoLayer(repo: string): { text: string; where: string } | null {
   );
 }
 
+/** Every layer folded low to high under the dialect above. */
+export function mergeLayers(layers: Record<string, unknown>[]): Record<string, unknown> {
+  return layers.reduce<Record<string, unknown>>(
+    (below, layer) => mergeSettingsLayers(below, layer),
+    {},
+  );
+}
+
+/** The status check GitHub's Copilot code review reports. It must NEVER
+ *  be a required status check: the check suite never appears in a pull
+ *  request's merge-box rollup, so requiring the context leaves every PR
+ *  permanently unmergeable. Kept here as the name loadOverrideLayer
+ *  refuses, so the fleet cannot re-adopt it by accident. */
+export const COPILOT_REVIEW_CONTEXT = "copilot-pull-request-reviewer";
+
+/** The fleet-mandatory top layer: merged ABOVE the repository's own
+ *  settings.yml, so no repository can weaken what it declares - including
+ *  by nulling the key out, since the null opt-out only strips keys from
+ *  the layers BELOW this one.
+ *
+ *  Validated here, the one place every consumer goes through, against the
+ *  one required-check mistake that bricks the whole fleet (see
+ *  COPILOT_REVIEW_CONTEXT). */
+export function loadOverrideLayer(path: string = OVERRIDE_PATH): Record<string, unknown> {
+  const data = parseSettingsDoc(readFileSync(path, "utf-8"), path);
+  const rulesets = Array.isArray(data.rulesets) ? data.rulesets : [];
+  const main = rulesets.find((entry) => isMapping(entry) && entry.name === "main");
+  const mainRules: unknown[] = isMapping(main) && Array.isArray(main.rules) ? main.rules : [];
+  const checksRule = mainRules.find(
+    (rule): rule is Record<string, unknown> =>
+      isMapping(rule) && rule.type === "required_status_checks",
+  );
+  const checksParams =
+    checksRule !== undefined && isMapping(checksRule.parameters) ? checksRule.parameters : {};
+  const contexts = Array.isArray(checksParams.required_status_checks)
+    ? checksParams.required_status_checks.map((entry) =>
+        isMapping(entry) ? entry.context : undefined,
+      )
+    : [];
+  if (contexts.includes(COPILOT_REVIEW_CONTEXT)) {
+    throw new Error(
+      `${path}: the 'main' ruleset must not require the ${COPILOT_REVIEW_CONTEXT} status ` +
+        "check - Copilot's check suite never reaches a pull request's merge-box rollup, so " +
+        "the context is never reported and every pull request stays unmergeable. Wait for " +
+        "Copilot's review with a bridge job inside the all-green gate instead.",
+    );
+  }
+  return data;
+}
+
+export interface RepoLayer {
+  text: string;
+  where: string;
+}
+
+/** What a run does with a resolved repo layer. A null layer is the
+ *  not-yet-onboarded skip (see the header): the merged document exists
+ *  only when the repository declared a settings.yml, so the apply can
+ *  never receive a baseline-only document. */
+export type MergeOutcome =
+  | { kind: "skip"; message: string }
+  | { kind: "merged"; document: Record<string, unknown>; warnings: string[] };
+
+export function mergeOutcome(
+  managed: Record<string, unknown>,
+  repoLayer: RepoLayer | null,
+  source: string,
+  override: Record<string, unknown> = loadOverrideLayer(),
+): MergeOutcome {
+  if (repoLayer === null) {
+    return {
+      kind: "skip",
+      message:
+        `no repository settings layer at ${source} - the repository selected settings-sync ` +
+        "but is not onboarded yet, so this apply is SKIPPED. Applying the managed baseline " +
+        "alone would delete every label the repository declares for itself, because the " +
+        "apply deletes undeclared labels. The settings-sync starter seeds the file on the " +
+        "next template sync and the apply after that picks it up.",
+    };
+  }
+  const repo = parseSettingsDoc(repoLayer.text, repoLayer.where);
+  const warnings = [...duplicateNameWarnings(repo)];
+  // The repo layer over everything below it, then the fleet override on
+  // top - the one layer the repository cannot beat.
+  const merged = mergeSettingsLayers(mergeSettingsLayers(managed, repo), override);
+  const missing = missingIdentityKeys(merged);
+  if (missing.length > 0) {
+    warnings.push(
+      `the merged settings document declares no ${missing.join(", ")} - the apply never ` +
+        "touches an undeclared key, so out-of-band drift in " +
+        `${missing.length === 1 ? "it" : "them"} is never healed; ` +
+        "declare the identity keys in the repository's .github/settings.yml",
+    );
+  }
+  return { kind: "merged", document: merged, warnings };
+}
+
 function main(args: string[]): void {
   const flags = parseFlags(
     args,
     ["--managed", "--out"] as const,
     ["--repo-file", "--repo-fetch"] as const,
   );
-  if (flags["--repo-file"] !== undefined && flags["--repo-fetch"] !== undefined) {
+  const fileSource = flags["--repo-file"];
+  const fetchSource = flags["--repo-fetch"];
+  if (fileSource !== undefined && fetchSource !== undefined) {
     fail("--repo-file and --repo-fetch are mutually exclusive - pass one repo-layer source");
+  }
+  if (fileSource === undefined && fetchSource === undefined) {
+    fail("pass a repo-layer source: --repo-file <path> or --repo-fetch <owner/name>");
   }
   try {
     const managed = parseSettingsDoc(readFileSync(flags["--managed"], "utf-8"), flags["--managed"]);
-    let repoLayer: { text: string; where: string } | null = null;
-    if (flags["--repo-file"] !== undefined) {
-      // A missing local file is a real answer (no repo layer yet), same
-      // as the fetch path's 404.
-      if (existsSync(flags["--repo-file"])) {
-        repoLayer = {
-          text: readFileSync(flags["--repo-file"], "utf-8"),
-          where: flags["--repo-file"],
-        };
-      }
-    } else if (flags["--repo-fetch"] !== undefined) {
-      repoLayer = fetchRepoLayer(flags["--repo-fetch"]);
+    const repoLayer =
+      fileSource !== undefined
+        ? existsSync(fileSource)
+          ? { text: readFileSync(fileSource, "utf-8"), where: fileSource }
+          : null
+        : fetchRepoLayer(fetchSource as string);
+    const outcome = mergeOutcome(managed, repoLayer, fileSource ?? (fetchSource as string));
+    if (outcome.kind === "skip") {
+      warning(outcome.message);
+      setOutput("skipped", "true");
+      console.log("skipped: the repository has no settings.yml to layer over the baseline");
+      return;
     }
-    const repo = repoLayer === null ? {} : parseSettingsDoc(repoLayer.text, repoLayer.where);
-    for (const message of duplicateNameWarnings(repo)) warning(message);
-    const merged = mergeSettingsLayers(managed, repo);
-    const missing = missingIdentityKeys(merged);
-    if (missing.length > 0) {
-      warning(
-        `the merged settings document declares no ${missing.join(", ")} - the apply never ` +
-          "touches an undeclared key, so out-of-band drift in " +
-          `${missing.length === 1 ? "it" : "them"} is never healed; ` +
-          (repoLayer === null
-            ? "the repository has no .github/settings.yml yet (the settings-sync starter seeds all four identity keys)"
-            : "declare the identity keys in the repository's .github/settings.yml"),
-      );
-    }
+    for (const message of outcome.warnings) warning(message);
     writeFileSync(
       flags["--out"],
-      `# Merged settings document (managed baseline + the repository's own settings.yml),\n# built by repo-platform's .github/scripts/fleet/merge_settings_layers.ts - scratch output.\n${stringifyYaml(merged)}`,
+      `# Merged settings document (managed baseline + the repository's own settings.yml),\n# built by repo-platform's .github/scripts/fleet/merge_settings_layers.ts - scratch output.\n${stringifyYaml(outcome.document)}`,
     );
-    console.log(
-      `merged the ${repoLayer === null ? "baseline alone (no repo layer)" : `repo layer (${repoLayer.where}) over the baseline`} into ${flags["--out"]}`,
-    );
+    setOutput("skipped", "false");
+    console.log(`merged the repo layer over the baseline into ${flags["--out"]}`);
   } catch (error) {
     fail(error instanceof Error ? error.message : String(error));
   }

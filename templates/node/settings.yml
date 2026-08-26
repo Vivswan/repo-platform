@@ -1,0 +1,8 @@
+---
+# The node module's settings layer (layer 3 of the settings merge,
+# docs/settings.md): merged for every repository that selects the module.
+
+labels:
+  - name: javascript
+    color: "168700"
+    description: Pull requests that update javascript code

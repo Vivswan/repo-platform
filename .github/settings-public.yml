@@ -1,0 +1,15 @@
+---
+# Layer 2 of the settings merge, applied to PUBLIC repositories only
+# (docs/settings.md). Private repositories without Advanced Security
+# reject these keys with a 422, which is why they cannot live in the
+# unconditional baseline.
+#
+# Declared so the apply heals an out-of-band disable: GitHub enables both
+# by default on public repositories.
+
+repository:
+  security_and_analysis:
+    secret_scanning:
+      status: enabled
+    secret_scanning_push_protection:
+      status: enabled

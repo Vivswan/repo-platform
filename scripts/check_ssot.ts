@@ -24,11 +24,13 @@
 import { existsSync, lstatSync, readdirSync, readFileSync, readlinkSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
-import { identityKeyIssues } from "../.github/scripts/fleet/merge_settings_layers.ts";
-import { loadBaseline, managedRulesets } from "../.github/scripts/fleet/render_managed_settings.ts";
+import {
+  identityKeyIssues,
+  loadOverrideLayer,
+} from "../.github/scripts/fleet/merge_settings_layers.ts";
+import { allLayerLabels, loadLayer } from "../.github/scripts/fleet/render_managed_settings.ts";
 import { CHANNELS } from "../.github/scripts/shared/channels.ts";
 import { captureName } from "../.github/scripts/sync/run_hidden.ts";
-import { dependabotLabels } from "./compose_template.ts";
 import { MARKER_TOKENS, trackingGate, trackingStreams } from "./generate.ts";
 import { type JinjaVars, normalizeJinja, placeholderJinja } from "./jinja_subset.ts";
 import { loadManifests as loadManifestsFresh, type ModuleManifest } from "./module_manifests.ts";
@@ -413,22 +415,12 @@ export interface Label {
   description: string;
 }
 
-/** Every label tuple the settings baseline assembly can emit for ANY
- *  selection: the baseline document's unconditional and private-only
- *  labels, every manifest's settings_labels, and the dependabot tuples
- *  from the composer's own derivation - tracking labels excluded (they
- *  render from per-repo answers). The single roster the doc-constant and
- *  issue-form rules key on. */
+/** Every label tuple any settings LAYER can emit for ANY selection and
+ *  either visibility - tracking labels excluded (they render from
+ *  per-repo answers). The single roster the doc-constant and issue-form
+ *  rules key on. */
 function managedLabelRoster(): Label[] {
-  const baseline = loadBaseline();
-  return [
-    ...baseline.labels,
-    ...baseline.private_labels,
-    ...loadManifests().flatMap((m) => m.settings_labels ?? []),
-    ...dependabotLabels(loadManifests()).map(
-      ({ name, color, description }): Label => ({ name, color, description }),
-    ),
-  ];
+  return allLayerLabels(loadManifests());
 }
 
 /** The identity keys the settings-sync starter seeds (description,
@@ -1358,25 +1350,23 @@ const rules: Rule[] = [
         ...settingsIdentityMismatches(asRecord(own.repository, ".github/settings.yml repository")),
       );
 
-      const ownNonBypassable = (own.rulesets as Record<string, unknown>[] | undefined)?.find(
-        (r) => r.name === "non-bypassable",
-      );
-      if (!ownNonBypassable) {
-        throw new Error(".github/settings.yml: no non-bypassable ruleset - anchor lost");
-      }
-      const baseline = managedRulesets(
-        { modules: [], private: false, trackingLabels: [] },
-        loadManifests(),
-      ).find((r) => r.name === "non-bypassable");
-      if (!baseline) {
-        throw new Error("render_managed_settings.ts: no non-bypassable ruleset - anchor lost");
-      }
-      if (canonical(ownNonBypassable) !== canonical(baseline)) {
-        mismatches.push({
-          file: ".github/settings.yml non-bypassable ruleset",
-          expected: `${canonical(baseline)} (the baseline entry this override replaces wholesale)`,
-          got: canonical(ownNonBypassable),
-        });
+      // The fleet protection rulesets live in the override layer, which
+      // merges ABOVE every repo layer - so a repo (this one included)
+      // redeclaring one would be silently overridden. Assert the override
+      // owns them and no repo layer duplicates them.
+      const override = loadOverrideLayer();
+      const overrideRulesets = (override.rulesets ?? []) as Record<string, unknown>[];
+      for (const name of ["main", "non-bypassable"]) {
+        if (!overrideRulesets.some((ruleset) => ruleset.name === name)) {
+          throw new Error(`.github/settings-override.yml: no ${name} ruleset - anchor lost`);
+        }
+        if ((own.rulesets as Record<string, unknown>[] | undefined)?.some((r) => r.name === name)) {
+          mismatches.push({
+            file: ".github/settings.yml",
+            expected: `no '${name}' ruleset (the override layer supplies it and wins over this file)`,
+            got: "declared, which the merge silently overrides",
+          });
+        }
       }
       return mismatches;
     },
@@ -1557,19 +1547,17 @@ const rules: Rule[] = [
     // and empty for a label that does not exist, so a literal that drifts
     // from the managed roster degrades the guard to a permanent silent
     // no-op - anchor the literals to the release-please manifest's
-    // settings_labels here instead. Only the template side is checked:
+    // settings layer here instead. Only the template side is checked:
     // dogfood-parity already pins this repo's
     // .github/workflows/release.yml to it.
     name: "release-guard-labels",
     run: () => {
       const mismatches: Mismatch[] = [];
-      const releaseLabels = loadManifests().find(
-        (m) => m.module === "release-please",
-      )?.settings_labels;
-      if (!releaseLabels) {
-        throw new Error(
-          "templates/release-please/module.yml declares no settings_labels - anchor lost",
-        );
+      const releaseLabels = (loadLayer("templates/release-please/settings.yml").labels ?? []) as {
+        name: string;
+      }[];
+      if (releaseLabels.length === 0) {
+        throw new Error("templates/release-please/settings.yml declares no labels - anchor lost");
       }
       const roster = new Set(releaseLabels.map((label) => label.name));
       const rel = "templates/release-please/.github/workflows/release.yml.jinja";
@@ -1653,20 +1641,95 @@ const rules: Rule[] = [
           String(c.context),
         );
       };
-      // The baseline's main ruleset is the fleet's only home for the
-      // required-check context now; the validator's gate-name literal must
-      // match what it requires.
-      const baseline = managedRulesets(
-        { modules: [], private: false, trackingLabels: [] },
-        loadManifests(),
-      ) as Record<string, unknown>[];
+      // The override layer's main ruleset is the fleet's only home for the
+      // required-check context now, and all-green is the only one: the
+      // validator's gate-name literal must match it. loadOverrideLayer
+      // separately refuses the Copilot review context, which GitHub never
+      // reports into a merge-box rollup.
+      const override = loadOverrideLayer();
       mismatches.push(
         ...setMismatch(
-          "render_managed_settings.ts main ruleset required checks",
+          ".github/settings-override.yml main ruleset required checks",
           [gateName],
-          contexts(baseline, "render_managed_settings.ts"),
+          contexts(
+            (override.rulesets ?? []) as Record<string, unknown>[],
+            ".github/settings-override.yml",
+          ),
         ),
       );
+      return mismatches;
+    },
+  },
+
+  {
+    name: "dependabot-label-tuples",
+    run: () => {
+      // A toolchain module's dependabot label now has two homes: the
+      // manifest's `dependabot` tuple (which drives the generated
+      // dependabot.yml and the docs) and the module's own settings layer
+      // (which drives the label roster the apply syncs). If they drift,
+      // dependabot recreates a label the settings apply then deletes -
+      // the nightly delete/recreate loop this whole roster exists to kill.
+      const mismatches: Mismatch[] = [];
+      for (const manifest of loadManifests()) {
+        const tuple = manifest.dependabot;
+        if (tuple === undefined) continue;
+        const rel = `templates/${manifest.module}/settings.yml`;
+        const declared = (loadLayer(rel).labels ?? []) as {
+          name: string;
+          color: string;
+          description: string;
+        }[];
+        const entry = declared.find((label) => label.name === tuple.label);
+        if (entry === undefined) {
+          mismatches.push({
+            file: rel,
+            expected: `a label '${tuple.label}' (the manifest's dependabot.label)`,
+            got: declared.map((label) => label.name).join(", ") || "no labels",
+          });
+          continue;
+        }
+        if (entry.color !== tuple.color) {
+          mismatches.push({
+            file: `${rel} label '${tuple.label}' color`,
+            expected: `${tuple.color} (templates/${manifest.module}/module.yml dependabot.color)`,
+            got: entry.color,
+          });
+        }
+      }
+      return mismatches;
+    },
+  },
+
+  {
+    name: "settings-apply-skip-gate",
+    run: () => {
+      // merge_settings_layers.ts writes NO merged document for a target
+      // that has no settings.yml yet, because applying the baseline alone
+      // would delete that repo's own labels. Both apply paths must gate on
+      // the step output that says so - a dropped `if:` silently restores
+      // the destructive behaviour, and no unit test can see a workflow.
+      const mismatches: Mismatch[] = [];
+      for (const rel of [
+        ".github/workflows/settings-repos.yml",
+        ".github/workflows/reusable-apply-settings.yml",
+      ]) {
+        const text = read(rel);
+        if (!/^\s+id: merge$/m.test(text)) {
+          mismatches.push({
+            file: rel,
+            expected: "the merge step carries `id: merge`",
+            got: "no such step id",
+          });
+        }
+        if (!text.includes("steps.merge.outputs.skipped != 'true'")) {
+          mismatches.push({
+            file: rel,
+            expected: "the apply step gates on steps.merge.outputs.skipped != 'true'",
+            got: "no such condition",
+          });
+        }
+      }
       return mismatches;
     },
   },
