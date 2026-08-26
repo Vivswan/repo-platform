@@ -10,7 +10,6 @@ import {
   baseOwnershipRegion,
   dependabotLabelGroups,
   dependabotLabelsSpan,
-  gitignoreUpstreamMap,
   hasToolchainDefault,
   knownModules,
   markerLines,
@@ -408,22 +407,6 @@ describe("docs region builders", () => {
     // The parameter-doc links come from MODULE_PARAM_DOCS, not a hand list.
     expect(text).toContain("[docs/skills.md](skills.md)");
     expect(text).toContain("[docs/nightly.md](nightly.md)");
-  });
-
-  test("gitignoreUpstreamMap maps each module's upstream templates", () => {
-    const cell = gitignoreUpstreamMap([BUN, UV, RUST]);
-    expect(cell).toContain("the bun/uv/rust toolchain fragments");
-    expect(cell).toContain(
-      "(Windows + macOS + Linux always, Node + bun / Python / Rust by bun/uv/rust module)",
-    );
-    expect(() => gitignoreUpstreamMap([manifest("agents")])).toThrow("gitignore_sources");
-  });
-
-  test("gitignoreUpstreamMap names a shared upstream once, under its first declaring module", () => {
-    const node = manifest("node", { gitignore_sources: ["Node.gitignore"] });
-    expect(gitignoreUpstreamMap([BUN, node, UV])).toContain(
-      "(Windows + macOS + Linux always, Node + bun / Python by bun/node/uv module)",
-    );
   });
 
   test("dependabotLabelGroups dedupes labels AND repeated ecosystems", () => {
