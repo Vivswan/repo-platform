@@ -51,6 +51,21 @@
 // symlinks are copied as symlinks. Output is deterministic: sorted walks plus
 // the fixed MODULE_ORDER (CI builds twice and diffs to prove it).
 //
+// Ownership contract (the manifest's source of truth): every file the
+// template lands carries a DECLARED ownership class - templates/base/
+// ownership.yml covers the base tree and each module.yml's `ownership:`
+// list covers its module's files (schema: scripts/ownership.ts).
+// Composition errors on a landed file with no declaration, a declaration
+// whose path never lands, same-path declarations that disagree across
+// sources, starter declarations out of step with copier.yml's
+// _skip_if_exists (both directions, dead skip patterns included), and
+// source text that contradicts its declared class - managed headers and
+// split marker lines are validated DECORATION, never classification
+// input. Split declarations carry their GRAMMAR: tail-marker (one marker
+// line ends the sync-owned top) or bounded-region (a BEGIN/END-bounded
+// repo-local region above the sync-owned half); the manifest entries
+// expose the grammar to the sync's split-file rebuild.
+//
 // Usage:
 //   bun scripts/compose_template.ts   # regenerate the local template/ artifact
 
@@ -71,11 +86,14 @@ import { joinLines, splitLines } from "../.github/scripts/shared/lines.ts";
 import { normalizeJinja, placeholderJinja } from "./jinja_subset.ts";
 import { loadManifests, MODULE_ORDER, type ModuleManifest } from "./module_manifests.ts";
 import {
-  classifyTemplateSource,
+  declarationTextErrors,
   landedPathAndGates,
+  loadBaseOwnership,
   type ManifestOwnership,
+  type OwnershipDeclaration,
+  ownershipOf,
   SETTINGS_LAYER_NAMES,
-  skipIfExistsMatchers,
+  skipIfExistsPatterns,
 } from "./ownership.ts";
 
 const REPO_ROOT = resolve(import.meta.dir, "..");
@@ -89,6 +107,7 @@ export { MODULE_ORDER };
 const ANCHOR_RE = /^\{# compose:([a-z0-9][a-z0-9-]*) (-?)#\}([^\r]*)$/;
 const JINJA_SUFFIX = ".jinja";
 const MANIFEST_NAME = "module.yml";
+const OWNERSHIP_NAME = "ownership.yml";
 const FRAGMENTS_DIR = "fragments";
 
 // One collected source file: regular bytes or a symlink target (emitted as a
@@ -124,12 +143,14 @@ function walkFiles(dir: string): string[] {
   return found.sort();
 }
 
-/** Logical path -> Entry for a source folder (skips manifest, settings
- *  layers, and fragments). */
+/** Logical path -> Entry for a source folder (skips the manifest, the base
+ *  ownership declarations, and fragments - none of them land in renders). */
 function collectFiles(folder: string): Map<string, Entry> {
   const files = new Map<string, Entry>();
   for (const rel of walkFiles(folder)) {
-    if (rel.split("/")[0] === FRAGMENTS_DIR || rel === MANIFEST_NAME) continue;
+    if (rel.split("/")[0] === FRAGMENTS_DIR || rel === MANIFEST_NAME || rel === OWNERSHIP_NAME) {
+      continue;
+    }
     if (SETTINGS_LAYER_NAMES.has(rel)) continue;
     files.set(rel, readEntry(join(folder, rel)));
   }
@@ -1037,32 +1058,90 @@ export interface ManifestEntry {
  *  stamp_manifest.ts substitutes those tokens on these lines in place -
  *  keep the layout in sync with its ENTRY_LINE_RE. The provenance slot
  *  (stamped with the render's recorded _commit) is what lets the validator
- *  tell version skew from entry deletion. */
+ *  tell version skew from entry deletion. Split entries keep the legacy
+ *  `marker`/`managed` pair (the stamper's managedHalf and older validators
+ *  read those) next to the declared grammar fields the sync's split-file
+ *  rebuild consumes; the pair is derived from the grammar, so the two
+ *  spellings cannot disagree. */
 function manifestEntryLine(entry: ManifestEntry): string {
   const o = entry.ownership;
-  const body =
-    o.class === "starter"
-      ? '{"class": "starter"}'
-      : o.class === "managed"
-        ? entry.path === MANIFEST_LANDED_PATH
-          ? '{"class": "managed", "hash": null, "commit": null}'
-          : '{"class": "managed", "hash": null}'
-        : `{"class": "split", "marker": ${JSON.stringify(o.marker)}, ` +
-          `"managed": "${o.managed}", "hash": null}`;
+  let body: string;
+  if (o.class === "starter") {
+    body = '{"class": "starter"}';
+  } else if (o.class === "managed") {
+    body =
+      entry.path === MANIFEST_LANDED_PATH
+        ? '{"class": "managed", "hash": null, "commit": null}'
+        : '{"class": "managed", "hash": null}';
+  } else if (o.grammar === "tail-marker") {
+    body =
+      `{"class": "split", "grammar": "tail-marker", "marker": ${JSON.stringify(o.marker)}, ` +
+      `"managed": "above", "hash": null}`;
+  } else {
+    body =
+      `{"class": "split", "grammar": "bounded-region", "marker": ${JSON.stringify(o.managed_begin)}, ` +
+      `"managed": "below", "managed_end": ${JSON.stringify(o.managed_end)}, ` +
+      `"local_begin": ${JSON.stringify(o.local_begin)}, ` +
+      `"local_end": ${JSON.stringify(o.local_end)}, "hash": null}`;
+  }
   return `    ${JSON.stringify(entry.path)}: ${body}`;
 }
 
+/** Where a path's ownership is declared: templates/base/ownership.yml for
+ *  base files, the module.yml `ownership:` list for module files. */
+export interface DeclarationSources {
+  base: OwnershipDeclaration[];
+  /** module -> declarations, in MODULE_ORDER. */
+  modules: Map<string, OwnershipDeclaration[]>;
+}
+
 /** The full ownership map for the composed tree: every landed path with
- *  its class (via classifyTemplateSource - the one classifier) and its
- *  render gates, plus the manifest's own self-entry, sorted by path.
- *  Symlinks are managed (sync re-renders them; parity hashes the link
- *  target). Called after spliceContributions, so classification reads the
- *  final template text fragments included. */
+ *  its DECLARED class and its render gates, plus the manifest's own
+ *  self-entry, sorted by path. Errors on: a landed file with no
+ *  declaration, a declaration whose path never lands, same-path
+ *  declarations disagreeing across sources, dead _skip_if_exists patterns,
+ *  starter/skip disagreement, symlinks declared anything but managed
+ *  (sync re-renders links whole), and source text contradicting the
+ *  declared class (declarationTextErrors). Called after
+ *  spliceContributions, so the decoration checks read the final template
+ *  text, fragments included. */
 export function manifestEntries(
   files: Map<string, SourcedEntry>,
-  skipIfExists: RegExp[],
+  skipPatterns: { pattern: string; matcher: RegExp }[],
+  declarations: DeclarationSources,
 ): { entries: ManifestEntry[]; errors: string[] } {
   const errors: string[] = [];
+  interface Home {
+    name: string;
+    tree: string;
+    lookup: Map<string, OwnershipDeclaration>;
+    used: Set<string>;
+  }
+  const homes = new Map<string, Home>();
+  const declaredBy = new Map<string, { name: string; ownership: ManifestOwnership }[]>();
+  const register = (key: string, name: string, tree: string, list: OwnershipDeclaration[]) => {
+    homes.set(key, { name, tree, lookup: new Map(list.map((d) => [d.path, d])), used: new Set() });
+    for (const declaration of list) {
+      const prior = declaredBy.get(declaration.path) ?? [];
+      prior.push({ name, ownership: ownershipOf(declaration) });
+      declaredBy.set(declaration.path, prior);
+    }
+  };
+  register("base", "templates/base/ownership.yml", "templates/base/", declarations.base);
+  for (const [module, list] of declarations.modules) {
+    register(module, `templates/${module}/module.yml`, `templates/${module}/`, list);
+  }
+  for (const [path, list] of declaredBy) {
+    const first = JSON.stringify(list[0].ownership);
+    const dissenter = list.find(({ ownership }) => JSON.stringify(ownership) !== first);
+    if (dissenter) {
+      errors.push(
+        `ownership: ${list[0].name} and ${dissenter.name} both declare '${path}' ` +
+          "but disagree on its ownership - one path has one class; reconcile the declarations",
+      );
+    }
+  }
+
   const byPath = new Map<string, ManifestEntry & { source: string }>();
   const add = (entry: ManifestEntry, source: string) => {
     const existing = byPath.get(entry.path);
@@ -1083,23 +1162,63 @@ export function manifestEntries(
       : logical;
     const { path, gates: nameGates } = landedPathAndGates(rendered);
     const gates = sourced.origin === "module" ? [sourced.gate, ...nameGates] : nameGates;
-    let ownership: ManifestOwnership;
+    const home = homes.get(sourced.origin === "base" ? "base" : sourced.module);
+    const declaration = home?.lookup.get(path);
+    if (home === undefined || declaration === undefined) {
+      errors.push(
+        `${source}: lands at ${path} with no ownership declaration - add the ` +
+          `entry to ${home?.name ?? `templates/${sourceName(sourced)}/module.yml`}`,
+      );
+      continue;
+    }
+    home.used.add(path);
+    const skipMatched = skipPatterns.some(({ matcher }) => matcher.test(path));
     if (sourced.entry.kind === "symlink") {
-      ownership = { class: "managed" };
+      if (declaration.class !== "managed") {
+        errors.push(
+          `${source}: is a symlink declared ${declaration.class} in ${home.name} - ` +
+            "sync re-renders symlinks whole (parity hashes the link target), so " +
+            "they are managed",
+        );
+      } else if (skipMatched) {
+        errors.push(
+          `${source}: is a managed symlink but copier.yml's _skip_if_exists ` +
+            `matches '${path}' - declare it a starter or drop the skip entry`,
+        );
+      }
     } else {
-      try {
-        ownership = classifyTemplateSource(
-          path,
+      errors.push(
+        ...declarationTextErrors(
+          declaration,
           sourced.entry.data.toString("utf-8"),
-          skipIfExists,
+          skipMatched,
           source,
-        ).ownership;
-      } catch (error) {
-        errors.push(error instanceof Error ? error.message : String(error));
-        continue;
+        ),
+      );
+    }
+    add({ path, gates, ownership: ownershipOf(declaration) }, source);
+  }
+  for (const home of homes.values()) {
+    for (const path of home.lookup.keys()) {
+      if (!home.used.has(path)) {
+        errors.push(
+          `${home.name}: ownership declares '${path}', but no ${home.tree} file ` +
+            "lands there - fix the path or delete the entry",
+        );
       }
     }
-    add({ path, gates, ownership }, source);
+  }
+  // Dead skip patterns: every _skip_if_exists entry must exempt at least
+  // one landed path, or it is a leftover (or a typo for a moved starter).
+  const landedPaths = [...byPath.keys()];
+  for (const { pattern, matcher } of skipPatterns) {
+    if (!landedPaths.some((path) => matcher.test(path))) {
+      errors.push(
+        `copier.yml: _skip_if_exists pattern '${pattern}' matches no landed ` +
+          "template path - a dead entry keeps promising a starter that no " +
+          "longer exists; remove or fix it",
+      );
+    }
   }
   // The manifest lists itself: it is a managed render like any other. Its
   // hash entry stays null forever - the content includes every other hash,
@@ -1145,13 +1264,16 @@ export function manifestTemplate(entries: ManifestEntry[]): Buffer {
     "Generated by {{ github_username }}/repo-platform - do not edit. Every " +
     "template-landed path with its ownership class: managed (sync overwrites " +
     "the whole file; hash is sha256 of the last stamped content, or of the " +
-    "symlink target), split (sync owns one half; the hash covers the managed " +
-    "half, through the marker line for 'above' and from it for 'below'), " +
-    "starter (rendered once, repo-owned; no hash). Hashes - and, on this " +
-    "file's own entry, the render's _commit provenance - are stamped after " +
-    "each render by the template's stamp_manifest.ts hook; this file's own " +
-    "hash stays null because its content includes every other hash, so a " +
-    "self-hash would be circular.";
+    "symlink target), split (sync owns one half; the entry's grammar names " +
+    "the marker lines - tail-marker keeps the repository's half below the " +
+    "marker, bounded-region keeps it between the local_begin/local_end " +
+    "lines - and the hash covers the managed half, through the marker line " +
+    "for 'above' and from it for 'below'), starter (rendered once, " +
+    "repo-owned; no hash). Hashes - and, on this file's own entry, the " +
+    "render's _commit provenance - are stamped after each render by the " +
+    "template's stamp_manifest.ts hook; this file's own hash stays null " +
+    "because its content includes every other hash, so a self-hash would " +
+    "be circular.";
   lines.push(
     "{",
     `  "$comment": ${JSON.stringify(comment)},`,
@@ -1206,6 +1328,13 @@ export function build(): Map<string, Entry> {
   for (const manifest of manifests) {
     const { module } = manifest;
     const folder = join(SRC, module);
+    if (existsSync(join(folder, OWNERSHIP_NAME))) {
+      errors.push(
+        `templates/${module}/${OWNERSHIP_NAME}: module ownership is declared in the ` +
+          `${MANIFEST_NAME} manifest's ownership list (${OWNERSHIP_NAME} is the base ` +
+          "tree's declaration home); move the entries and delete this file",
+      );
+    }
     const gate = gateExpression(module, manifest);
     gates.set(module, gate);
     const dirs = [...(manifest.gate_dirs ?? [])];
@@ -1364,13 +1493,18 @@ export function build(): Map<string, Entry> {
     else sourced.entry.data = result.data;
   }
   // The ownership manifest is generated from the same spliced file map the
-  // tree is emitted from, so it can never disagree with what actually
-  // lands. Emitted as one more template file - copier renders and syncs it
-  // like any managed file.
+  // tree is emitted from and the DECLARED classes (base ownership.yml plus
+  // the module.yml ownership lists), so it can never disagree with what
+  // actually lands. Emitted as one more template file - copier renders and
+  // syncs it like any managed file.
   let manifestData: Buffer | null = null;
   try {
-    const skip = skipIfExistsMatchers(readFileSync(join(REPO_ROOT, "copier.yml"), "utf-8"));
-    const manifest = manifestEntries(files, skip);
+    const skipPatterns = skipIfExistsPatterns(readFileSync(join(REPO_ROOT, "copier.yml"), "utf-8"));
+    const declarations: DeclarationSources = {
+      base: loadBaseOwnership(SRC),
+      modules: new Map(manifests.map((m) => [m.module, m.ownership ?? []])),
+    };
+    const manifest = manifestEntries(files, skipPatterns, declarations);
     errors.push(...manifest.errors);
     if (manifest.errors.length === 0) manifestData = manifestTemplate(manifest.entries);
   } catch (error) {

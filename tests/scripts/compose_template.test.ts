@@ -11,6 +11,7 @@ import {
   type Contribution,
   codeqlGroups,
   codeqlSlug,
+  type DeclarationSources,
   dependabotLabels,
   ecosystemGroups,
   fragmentJobIds,
@@ -28,7 +29,7 @@ import {
 } from "../../scripts/compose_template";
 import { renderJinjaFile } from "../../scripts/jinja_subset";
 import { type ModuleManifest, parseManifest } from "../../scripts/module_manifests";
-import { skipIfExistsMatchers } from "../../scripts/ownership";
+import { type OwnershipDeclaration, skipIfExistsPatterns } from "../../scripts/ownership";
 
 function manifest(module: string, body: string[]): ModuleManifest {
   return parseManifest(
@@ -805,7 +806,7 @@ describe("lockfileGroups", () => {
 });
 
 describe("manifestEntries", () => {
-  const skip = skipIfExistsMatchers(
+  const skip = skipIfExistsPatterns(
     ["_skip_if_exists:", "  - .github/workflows/checks.yml"].join("\n"),
   );
   const file = (text: string) => ({ kind: "file", data: Buffer.from(text) }) as const;
@@ -817,31 +818,44 @@ describe("manifestEntries", () => {
     gateDirs: [],
     entry: file(text),
   });
+  const SENTINEL = "<!-- repo-platform:local-section -->";
+  const declarations = (over: Partial<DeclarationSources> = {}): DeclarationSources => ({
+    base: [
+      { path: ".github/workflows/ci.yml", class: "managed" },
+      { path: ".github/workflows/checks.yml", class: "starter" },
+      { path: "CONTRIBUTING.md", class: "split", grammar: "tail-marker", marker: SENTINEL },
+    ],
+    modules: new Map([
+      ["agents", [{ path: "CLAUDE.md", class: "managed" }] as OwnershipDeclaration[]],
+      [
+        "release-please",
+        [{ path: ".github/workflows/release.yml", class: "managed" }] as OwnershipDeclaration[],
+      ],
+    ]),
+    ...over,
+  });
+  const FILES = new Map<string, SourcedEntry>([
+    [".github/workflows/ci.yml.jinja", base("# managed\n")],
+    [".github/workflows/checks.yml.jinja", base("# starter\n")],
+    ["{% if not private %}CONTRIBUTING.md{% endif %}.jinja", base(`${SENTINEL}\n`)],
+    [
+      ".github/workflows/release.yml.jinja",
+      mod("release-please", "# This file is managed by {{ github_username }}/repo-platform.\n"),
+    ],
+    [
+      "CLAUDE.md",
+      {
+        origin: "module",
+        module: "agents",
+        gate: "'agents' in modules",
+        gateDirs: [],
+        entry: { kind: "symlink", target: "AGENTS.md" },
+      },
+    ],
+  ]);
 
-  test("classifies base and module files with their render gates, sorted, self-listed", () => {
-    const files = new Map<string, SourcedEntry>([
-      [".github/workflows/ci.yml.jinja", base("# managed\n")],
-      [".github/workflows/checks.yml.jinja", base("# starter\n")],
-      [
-        "{% if not private %}CONTRIBUTING.md{% endif %}.jinja",
-        base("<!-- repo-platform:local-section -->\n"),
-      ],
-      [
-        ".github/workflows/release.yml.jinja",
-        mod("release-please", "# This file is managed by {{ github_username }}/repo-platform.\n"),
-      ],
-      [
-        "CLAUDE.md",
-        {
-          origin: "module",
-          module: "agents",
-          gate: "'agents' in modules",
-          gateDirs: [],
-          entry: { kind: "symlink", target: "AGENTS.md" },
-        },
-      ],
-    ]);
-    const { entries, errors } = manifestEntries(files, skip);
+  test("records each landed file's declared class with its render gates, sorted, self-listed", () => {
+    const { entries, errors } = manifestEntries(FILES, skip, declarations());
     expect(errors).toEqual([]);
     expect(entries).toEqual([
       { path: ".github/repo-platform-manifest.json", gates: [], ownership: { class: "managed" } },
@@ -856,13 +870,99 @@ describe("manifestEntries", () => {
       {
         path: "CONTRIBUTING.md",
         gates: ["not private"],
-        ownership: {
-          class: "split",
-          marker: "<!-- repo-platform:local-section -->",
-          managed: "above",
-        },
+        ownership: { class: "split", grammar: "tail-marker", marker: SENTINEL },
       },
     ]);
+  });
+
+  test("a landed file with no declaration is an error naming the declaration home", () => {
+    const undeclaredBase = manifestEntries(
+      new Map([...FILES, ["EXTRA.md.jinja", base("extra\n")]]),
+      skip,
+      declarations(),
+    );
+    expect(undeclaredBase.errors.join("\n")).toContain(
+      "templates/base/EXTRA.md.jinja: lands at EXTRA.md with no ownership declaration",
+    );
+    expect(undeclaredBase.errors.join("\n")).toContain("templates/base/ownership.yml");
+    const undeclaredModule = manifestEntries(
+      new Map([...FILES, ["EXTRA.md.jinja", mod("agents", "extra\n")]]),
+      skip,
+      declarations(),
+    );
+    expect(undeclaredModule.errors.join("\n")).toContain("templates/agents/module.yml");
+  });
+
+  test("a module with no ownership list gets the same undeclared error", () => {
+    const { errors } = manifestEntries(
+      new Map([["EXTRA.md.jinja", mod("uv", "extra\n")]]),
+      skip,
+      declarations({ modules: new Map() }),
+    );
+    expect(errors.join("\n")).toContain("lands at EXTRA.md with no ownership declaration");
+  });
+
+  test("a declaration whose path never lands is an error", () => {
+    const { errors } = manifestEntries(
+      FILES,
+      skip,
+      declarations({
+        base: [
+          { path: ".github/workflows/ci.yml", class: "managed" },
+          { path: ".github/workflows/checks.yml", class: "starter" },
+          { path: "CONTRIBUTING.md", class: "split", grammar: "tail-marker", marker: SENTINEL },
+          { path: "GHOST.md", class: "managed" },
+        ],
+      }),
+    );
+    expect(errors.join("\n")).toContain(
+      "templates/base/ownership.yml: ownership declares 'GHOST.md', but no templates/base/ file lands there",
+    );
+  });
+
+  test("same-path declarations disagreeing across sources are an error", () => {
+    const decls = declarations();
+    decls.modules.set("agents", [
+      { path: "CLAUDE.md", class: "managed" },
+      { path: "CONTRIBUTING.md", class: "managed" },
+    ]);
+    const { errors } = manifestEntries(FILES, skip, decls);
+    expect(errors.join("\n")).toContain(
+      "templates/base/ownership.yml and templates/agents/module.yml both declare 'CONTRIBUTING.md' but disagree",
+    );
+  });
+
+  test("text contradicting the declared class is an error", () => {
+    const decls = declarations();
+    // ci.yml declared managed but carrying a local-section marker line.
+    const files = new Map([
+      ...FILES,
+      [".github/workflows/ci.yml.jinja", base(`# managed\n# repo-platform:local-section\n`)],
+    ]);
+    const { errors } = manifestEntries(files, skip, decls);
+    expect(errors.join("\n")).toContain("declared managed");
+  });
+
+  test("starter declarations and _skip_if_exists must agree in both directions", () => {
+    // Declared starter, no skip pattern: error from the decoration check.
+    const noSkip = manifestEntries(FILES, [], declarations());
+    expect(noSkip.errors.join("\n")).toContain("no copier.yml _skip_if_exists pattern");
+    // A skip pattern matching no landed path is a dead entry.
+    const dead = manifestEntries(
+      FILES,
+      [...skip, ...skipIfExistsPatterns("_skip_if_exists:\n  - ghost-starter.yml\n")],
+      declarations(),
+    );
+    expect(dead.errors.join("\n")).toContain(
+      "_skip_if_exists pattern 'ghost-starter.yml' matches no landed template path",
+    );
+  });
+
+  test("a symlink declared anything but managed is an error", () => {
+    const decls = declarations();
+    decls.modules.set("agents", [{ path: "CLAUDE.md", class: "starter" }]);
+    const { errors } = manifestEntries(FILES, skip, decls);
+    expect(errors.join("\n")).toContain("is a symlink declared starter");
   });
 
   test("two sources landing at one path is an error, not a duplicate key", () => {
@@ -870,7 +970,13 @@ describe("manifestEntries", () => {
       ["{% if not private %}X.md{% endif %}.jinja", base("a\n")],
       ["X.md.jinja", mod("agents", "b\n")],
     ]);
-    const { errors } = manifestEntries(files, skip);
+    const decls = declarations({
+      base: [{ path: "X.md", class: "managed" }],
+      modules: new Map([
+        ["agents", [{ path: "X.md", class: "managed" }] as OwnershipDeclaration[]],
+      ]),
+    });
+    const { errors } = manifestEntries(files, [], decls);
     expect(errors.join("\n")).toContain("both land at X.md");
   });
 
@@ -878,7 +984,11 @@ describe("manifestEntries", () => {
     const files = new Map<string, SourcedEntry>([
       [".github/repo-platform-manifest.json.jinja", base("{}\n")],
     ]);
-    const { errors } = manifestEntries(files, skip);
+    const decls = declarations({
+      base: [{ path: ".github/repo-platform-manifest.json", class: "managed" }],
+      modules: new Map(),
+    });
+    const { errors } = manifestEntries(files, [], decls);
     expect(errors.join("\n")).toContain("both land at .github/repo-platform-manifest.json");
   });
 });
@@ -893,8 +1003,20 @@ describe("manifestTemplate", () => {
         gates: ["'agents' in modules"],
         ownership: {
           class: "split",
+          grammar: "tail-marker",
           marker: "<!-- repo-platform:local-section -->",
-          managed: "above",
+        },
+      },
+      {
+        path: ".gitignore",
+        gates: [],
+        ownership: {
+          class: "split",
+          grammar: "bounded-region",
+          managed_begin: "# BEGIN REPO-PLATFORM MANAGED",
+          managed_end: "# END REPO-PLATFORM MANAGED",
+          local_begin: "# BEGIN REPOSITORY LOCAL",
+          local_end: "# END REPOSITORY LOCAL",
         },
       },
       {
@@ -916,7 +1038,16 @@ describe("manifestTemplate", () => {
       `'    ".github/repo-platform-manifest.json": {"class": "managed", "hash": null, "commit": null}'`,
     );
     expect(text).toContain("{%- if 'agents' in modules -%}");
-    expect(text).toContain('"managed": "above", "hash": null');
+    // Split entries expose their grammar next to the stamper's legacy
+    // marker/managed pair, derived from it.
+    expect(text).toContain(
+      '"class": "split", "grammar": "tail-marker", "marker": "<!-- repo-platform:local-section -->", "managed": "above", "hash": null',
+    );
+    expect(text).toContain(
+      '"class": "split", "grammar": "bounded-region", "marker": "# BEGIN REPO-PLATFORM MANAGED", ' +
+        '"managed": "below", "managed_end": "# END REPO-PLATFORM MANAGED", ' +
+        '"local_begin": "# BEGIN REPOSITORY LOCAL", "local_end": "# END REPOSITORY LOCAL", "hash": null',
+    );
     expect(text).toContain("{%- if ('a' in modules) and (not private) -%}");
     // No-parity classes carry no hash token for the stamper to fill.
     expect(text).toContain(`'    "checks.yml": {"class": "starter"}'`);

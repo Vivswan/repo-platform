@@ -5,7 +5,8 @@
 //   1. .copier-answers.yml and .repo-platform.yml exist, the latter records
 //      a valid top-level `modules` list, and the former pins a well-formed
 //      `github_username` (the owner whose composite actions ci.yml must use)
-//   2. .gitignore managed/local marker sections appear exactly once
+//   2. .gitignore managed/local marker sections appear exactly once, in
+//      their declared order
 //   3. Every .yml/.yaml file parses; duplicate mapping keys are errors
 //      under .github/ and in the registration files, advisories elsewhere
 //   4. No unresolved merge-conflict markers in text files
@@ -21,8 +22,8 @@
 //      managed version dotfile with exactly the pinned version
 //   8. Sync-managed files self-declare their ownership: files sync wholly
 //      overwrites open with the managed header naming the pinned owner, and
-//      split files (a managed top above a repo-owned tail) carry the
-//      repo-platform:local-section marker exactly once. Existing files
+//      split files (a managed top above a repo-owned tail) carry their
+//      declared split marker line exactly once. Existing files
 //      only - absence is damage the next sync heals - and _skip_if_exists
 //      starters are exempt (repo-owned after the first render)
 //   9. Ownership-manifest byte parity: .github/repo-platform-manifest.json
@@ -97,24 +98,6 @@ const SKIP_DIRS = new Set([
   ".mypy_cache",
 ]);
 
-const MARKER_FILES: Record<string, string[]> = {
-  ".gitignore": [
-    "# BEGIN REPOSITORY LOCAL",
-    "# END REPOSITORY LOCAL",
-    "# BEGIN REPO-PLATFORM MANAGED",
-    "# END REPO-PLATFORM MANAGED",
-  ],
-};
-
-/** The line splitting a file's sync-managed top from its repo-owned tail;
- *  ownership check 8 requires it exactly once in split files, matched as
- *  its exact comment lines (a substring mention must not count). */
-const LOCAL_SECTION_MARKER = "repo-platform:local-section";
-const LOCAL_SECTION_LINES = new Set([
-  `# ${LOCAL_SECTION_MARKER}`,
-  `<!-- ${LOCAL_SECTION_MARKER} -->`,
-]);
-
 /** How many opening lines may hold the managed header (rendering collapses
  *  the templates' jinja preambles, so it always lands near the top). */
 const HEADER_WINDOW = 10;
@@ -149,31 +132,82 @@ function sha256(data: Buffer): string {
 }
 
 /** How a declared file's ownership is enforced in the rendered repo:
- *  "header" files open with the managed header, "marker" files carry the
- *  local-section split line. (A third kind, "mergeable", was retired with
- *  the class - settings.yml, its only member, is a repo-owned starter
- *  now.) */
-type OwnershipKind = "header" | "marker";
+ *  "header" files open with the managed header, "marker" files carry their
+ *  declared split marker line exactly once (a substring mention must not
+ *  count). (A third kind, "mergeable", was retired with the class -
+ *  settings.yml, its only member, is a repo-owned starter now.) */
+type OwnedFile =
+  | { path: string; kind: "header"; marker?: undefined }
+  | { path: string; kind: "marker"; marker: string };
 
-/** Unconditionally rendered base files and how each declares its ownership:
- *  "header" files are wholly overwritten by sync and open with the managed
- *  header; "marker" files keep a repo-owned tail below the local-section
- *  marker. Conditionally rendered base files (CODE_OF_CONDUCT.md,
- *  CONTRIBUTING.md, LICENSE.md) join in check 8 under the same
- *  answers/modules conditions that gate their rendering; module files come
- *  from the generated MODULE_OWNERSHIP record below. */
-const BASE_OWNERSHIP: Record<string, OwnershipKind> = {
-  ".copier-answers.yml": "header",
-  ".repo-platform.yml": "header",
-  ".yamllint": "header",
-  ".typography-allow": "header",
-  ".github/dependabot.yml": "header",
-  ".github/workflows/ci.yml": "header",
-  ".editorconfig": "marker",
-  ".gitattributes": "marker",
-  ".github/CODEOWNERS": "marker",
-  "SECURITY.md": "marker",
+/** Render conditions translated from the templates' declared filename
+ *  gates, evaluated against a render's answers and modules list. */
+type RenderWhen = { publicOnly?: boolean; withoutModule?: string };
+
+type BaseOwnedFile = OwnedFile & { when?: RenderWhen };
+
+/** A bounded-region split grammar: the repo-owned local region's BEGIN/END
+ *  lines above the managed half, which runs from managedBegin to end of
+ *  file (managedEnd included). */
+interface RegionSplitGrammar {
+  managedBegin: string;
+  managedEnd: string;
+  localBegin: string;
+  localEnd: string;
+}
+
+// The declared ownership of every enforceable base file (kind + marker
+// decoration, render conditions from the templates' filename gates) and
+// the bounded-region split grammars; module files come from the generated
+// MODULE_OWNERSHIP record below, starters and headerless comment-free
+// formats stay out (nothing to enforce in-file; the manifest still
+// declares them).
+// BEGIN GENERATED: base-ownership (scripts/generate.ts - edit templates/base/ownership.yml and the base templates, not this block)
+const BASE_OWNERSHIP: BaseOwnedFile[] = [
+  { path: ".copier-answers.yml", kind: "header" },
+  { path: ".editorconfig", kind: "marker", marker: "# repo-platform:local-section" },
+  { path: ".gitattributes", kind: "marker", marker: "# repo-platform:local-section" },
+  { path: ".github/CODEOWNERS", kind: "marker", marker: "# repo-platform:local-section" },
+  { path: ".github/dependabot.yml", kind: "header" },
+  { path: ".github/workflows/ci.yml", kind: "header" },
+  { path: ".repo-platform.yml", kind: "header" },
+  { path: ".typography-allow", kind: "header" },
+  { path: ".yamllint", kind: "header" },
+  { path: "CODE_OF_CONDUCT.md", kind: "header", when: { publicOnly: true } },
+  {
+    path: "CONTRIBUTING.md",
+    kind: "marker",
+    marker: "<!-- repo-platform:local-section -->",
+    when: { publicOnly: true },
+  },
+  {
+    path: "LICENSE.md",
+    kind: "marker",
+    marker: "<!-- repo-platform:local-section -->",
+    when: { withoutModule: "custom-license" },
+  },
+  { path: "SECURITY.md", kind: "marker", marker: "<!-- repo-platform:local-section -->" },
+];
+
+const BASE_REGION_SPLITS: Record<string, RegionSplitGrammar> = {
+  ".gitignore": {
+    managedBegin: "# BEGIN REPO-PLATFORM MANAGED",
+    managedEnd: "# END REPO-PLATFORM MANAGED",
+    localBegin: "# BEGIN REPOSITORY LOCAL",
+    localEnd: "# END REPOSITORY LOCAL",
+  },
 };
+// END GENERATED: base-ownership
+
+/** Marker lines required exactly once per file (substring-counted, so a
+ *  buried mention is a duplicate too), derived from the declared
+ *  bounded-region grammars so the two can never drift apart. */
+const MARKER_FILES: Record<string, string[]> = Object.fromEntries(
+  Object.entries(BASE_REGION_SPLITS).map(([path, grammar]) => [
+    path,
+    [grammar.localBegin, grammar.localEnd, grammar.managedBegin, grammar.managedEnd],
+  ]),
+);
 
 const TEXT_SUFFIXES = new Set([
   ".ts",
@@ -263,12 +297,13 @@ const TOOLCHAIN_PINS: Record<string, { file: string; version: string }> = {
 
 // How each rendered module file declares its ownership while its module is
 // selected: "header" files open with the managed header, "marker" files
-// split a managed top from a repo-owned tail (scanned fail-closed by
-// moduleOwnershipFiles in scripts/ownership.ts - starters and comment-free
-// formats stay out).
-// BEGIN GENERATED: module-ownership (scripts/generate.ts - edit the module templates and copier.yml's _skip_if_exists, not this block)
-const MODULE_OWNERSHIP: Record<string, { path: string; kind: OwnershipKind }[]> = {
-  agents: [{ path: "AGENTS.md", kind: "marker" }],
+// split a managed top from a repo-owned tail at their declared marker line
+// (derived from the module.yml ownership declarations by
+// moduleOwnershipEntries in scripts/ownership.ts - starters and headerless
+// comment-free formats stay out).
+// BEGIN GENERATED: module-ownership (scripts/generate.ts - edit the module.yml ownership declarations and the module templates, not this block)
+const MODULE_OWNERSHIP: Record<string, OwnedFile[]> = {
+  agents: [{ path: "AGENTS.md", kind: "marker", marker: "<!-- repo-platform:local-section -->" }],
   bun: [{ path: ".github/workflows/dependabot-bun-lockfile.yml", kind: "header" }],
   deno: [{ path: ".github/workflows/deno-audit.yml", kind: "header" }],
   pages: [{ path: ".github/workflows/pages.yml", kind: "header" }],
@@ -539,8 +574,12 @@ function main(): number {
     }
   }
 
-  // 2. Marker sections exactly once (.gitignore is always generated by the
-  // template - absence means the repo is damaged, not unconfigured)
+  // 2. Marker sections exactly once and in grammar order (.gitignore is
+  // always generated by the template - absence means the repo is damaged,
+  // not unconfigured). MARKER_FILES lists each file's markers in the
+  // declared order (local BEGIN, local END, managed BEGIN, managed END);
+  // counting alone would pass a reordered file whose managed-half hash is
+  // unchanged (a swap above the managed BEGIN), so order is checked too.
   for (const [rel, markers] of Object.entries(MARKER_FILES)) {
     const path = join(root, rel);
     if (!isRegularFile(path)) {
@@ -551,13 +590,25 @@ function main(): number {
       continue;
     }
     const content = readFileSync(path).toString("utf-8");
+    let exactlyOnce = true;
     for (const marker of markers) {
       const count = content.split(marker).length - 1;
       if (count !== 1) {
+        exactlyOnce = false;
         errors.push(
           `${rel}: marker '${marker}' appears ${count} times (expected 1) - ` +
             "a merge or manual edit broke the managed sections; restore one " +
             "LOCAL section followed by one MANAGED section",
+        );
+      }
+    }
+    if (exactlyOnce) {
+      const positions = markers.map((marker) => content.indexOf(marker));
+      if (positions.some((at, index) => index > 0 && at <= positions[index - 1])) {
+        errors.push(
+          `${rel}: the managed/local markers appear out of order - the sections ` +
+            "must run local BEGIN, local END, managed BEGIN, managed END; restore " +
+            "the order via a template sync",
         );
       }
     }
@@ -844,26 +895,27 @@ function main(): number {
   }
 
   // The version-aligned ownership roster this validator declares ITSELF:
-  // the unconditional base table plus the conditionally rendered base files
-  // and the selected modules' generated entries, under the same
-  // answers/modules conditions as their templates' filename gates (a null
-  // modules list stands the module-gated entries down - check 1 already
-  // errored). Check 8 enforces the in-file declarations over it; check 9
-  // cross-checks the manifest's class metadata against it.
-  const declaredOwnership: { rel: string; kind: OwnershipKind }[] = Object.entries(
-    BASE_OWNERSHIP,
-  ).map(([rel, kind]) => ({ rel, kind }));
-  if (!isPrivateRender) {
-    declaredOwnership.push({ rel: "CODE_OF_CONDUCT.md", kind: "header" });
-    declaredOwnership.push({ rel: "CONTRIBUTING.md", kind: "marker" });
-  }
-  if (selectedModules !== null) {
-    if (!selectedModules.includes("custom-license")) {
-      declaredOwnership.push({ rel: "LICENSE.md", kind: "marker" });
+  // the generated base table (its `when` conditions are the templates'
+  // declared filename gates, translated) plus the selected modules'
+  // generated entries (a null modules list stands the module-gated and
+  // module-conditioned entries down - check 1 already errored). Check 8
+  // enforces the in-file declarations over it; check 9 cross-checks the
+  // manifest's class metadata against it.
+  const whenHolds = (when?: RenderWhen): boolean => {
+    if (when === undefined) return true;
+    if (when.publicOnly && isPrivateRender) return false;
+    if (when.withoutModule !== undefined) {
+      if (selectedModules === null || selectedModules.includes(when.withoutModule)) return false;
     }
+    return true;
+  };
+  const declaredOwnership: ({ rel: string } & OwnedFile)[] = BASE_OWNERSHIP.filter((entry) =>
+    whenHolds(entry.when),
+  ).map(({ when: _when, ...entry }) => ({ rel: entry.path, ...entry }));
+  if (selectedModules !== null) {
     for (const module of selectedModules) {
       for (const entry of MODULE_OWNERSHIP[module] ?? []) {
-        declaredOwnership.push({ rel: entry.path, kind: entry.kind });
+        declaredOwnership.push({ rel: entry.path, ...entry });
       }
     }
   }
@@ -885,7 +937,7 @@ function main(): number {
       `This file is managed by ${ownerPin.owner.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}` +
         "/repo-platform\\.(?![A-Za-z0-9._-])",
     );
-    for (const { rel, kind } of declaredOwnership) {
+    for (const { rel, kind, marker } of declaredOwnership) {
       const path = join(root, rel);
       if (!isRegularFile(path)) continue;
       const content = readFileSync(path, "utf-8");
@@ -899,12 +951,10 @@ function main(): number {
           );
         }
       } else {
-        const count = content
-          .split("\n")
-          .filter((line) => LOCAL_SECTION_LINES.has(line.trim())).length;
+        const count = content.split("\n").filter((line) => line.trim() === marker).length;
         if (count !== 1) {
           errors.push(
-            `${rel}: the '${LOCAL_SECTION_MARKER}' marker line appears ${count} ` +
+            `${rel}: the '${marker}' marker line appears ${count} ` +
               "times (expected 1) - it splits the sync-managed top of the file " +
               "from this repository's own tail; restore the single marker line " +
               "via a template sync",
@@ -1137,7 +1187,7 @@ function main(): number {
             "which re-renders the manifest without a merge",
         );
       };
-      for (const { rel, kind } of declaredOwnership) {
+      for (const { rel, kind, marker } of declaredOwnership) {
         const raw = manifestFiles[rel];
         if (raw === undefined) {
           reportUnlisted(rel, "this validator's ownership tables declare");
@@ -1150,51 +1200,63 @@ function main(): number {
           metadataError(rel, `claims class ${JSON.stringify(entry.class)}`, declared);
           continue;
         }
+        // A grammar-less split entry is a pre-grammar render (legacy);
+        // when the field is present it must name the declared grammar.
         if (
           kind === "marker" &&
           (entry.managed !== "above" ||
-            typeof entry.marker !== "string" ||
-            !LOCAL_SECTION_LINES.has(entry.marker))
+            entry.marker !== marker ||
+            ("grammar" in entry && entry.grammar !== "tail-marker"))
         ) {
           metadataError(
             rel,
-            "carries split metadata outside the local-section grammar",
-            "split with the managed half above a sentinel marker line",
+            "carries split metadata outside its declared tail-marker grammar",
+            `split with the managed half above the '${marker}' marker line`,
           );
         }
       }
-      // .gitignore has its own split grammar (the LOCAL section sits above
-      // the managed one), known to this validator via MARKER_FILES.
-      {
-        const raw = manifestFiles[".gitignore"];
+      // Bounded-region splits (.gitignore's grammar: the repo-owned LOCAL
+      // region sits above the managed half), from the declared grammars.
+      for (const [rel, grammar] of Object.entries(BASE_REGION_SPLITS)) {
+        const raw = manifestFiles[rel];
         if (raw === undefined) {
-          reportUnlisted(".gitignore", "the template always renders");
-        } else {
-          const entry = asEntry(raw);
-          if (
-            entry !== null &&
-            (entry.class !== "split" ||
-              entry.marker !== "# BEGIN REPO-PLATFORM MANAGED" ||
-              entry.managed !== "below")
-          ) {
-            metadataError(
-              ".gitignore",
-              "does not match the managed-section grammar",
-              'split with the managed half below "# BEGIN REPO-PLATFORM MANAGED"',
-            );
-          }
+          reportUnlisted(rel, "the template always renders");
+          continue;
+        }
+        const entry = asEntry(raw);
+        if (entry === null) continue;
+        const legacyOk =
+          entry.class === "split" &&
+          entry.marker === grammar.managedBegin &&
+          entry.managed === "below";
+        const grammarOk =
+          !("grammar" in entry) ||
+          (entry.grammar === "bounded-region" &&
+            entry.managed_end === grammar.managedEnd &&
+            entry.local_begin === grammar.localBegin &&
+            entry.local_end === grammar.localEnd);
+        if (!legacyOk || !grammarOk) {
+          metadataError(
+            rel,
+            "does not match the managed-section grammar",
+            `split with the managed half below "${grammar.managedBegin}"`,
+          );
         }
       }
       // An entry for a table-covered path whose render condition is off
       // (an unselected module's workflow, a public-only file on a private
       // render) cannot come from the template; it is manifest drift.
-      const expectedPaths = new Set(declaredOwnership.map((f) => f.rel));
+      const expectedPaths = new Set([
+        ...declaredOwnership.map((f) => f.rel),
+        ...Object.keys(BASE_REGION_SPLITS),
+      ]);
       const coveredEver = new Set<string>([
-        ...Object.keys(BASE_OWNERSHIP),
-        "CODE_OF_CONDUCT.md",
-        "CONTRIBUTING.md",
+        ...BASE_OWNERSHIP.filter(
+          (entry) => entry.when?.withoutModule === undefined || selectedModules !== null,
+        ).map((entry) => entry.path),
+        ...Object.keys(BASE_REGION_SPLITS),
         ...(selectedModules !== null
-          ? ["LICENSE.md", ...Object.values(MODULE_OWNERSHIP).flatMap((e) => e.map((f) => f.path))]
+          ? Object.values(MODULE_OWNERSHIP).flatMap((entries) => entries.map((f) => f.path))
           : []),
       ]);
       for (const rel of Object.keys(manifestFiles)) {
@@ -1281,6 +1343,30 @@ function main(): number {
                 '"above" or "below"; run a template sync to regenerate the manifest',
             );
             continue;
+          }
+          // The grammar field (absent on pre-grammar renders) must agree
+          // with the managed side and carry its region marker strings.
+          if ("grammar" in entry) {
+            const grammarProblem =
+              entry.grammar === "tail-marker"
+                ? entry.managed !== "above"
+                  ? 'declares the tail-marker grammar with a managed half not "above"'
+                  : null
+                : entry.grammar === "bounded-region"
+                  ? entry.managed !== "below" ||
+                    typeof entry.managed_end !== "string" ||
+                    typeof entry.local_begin !== "string" ||
+                    typeof entry.local_end !== "string"
+                    ? 'declares the bounded-region grammar without a "below" managed ' +
+                      "half and its region marker strings"
+                    : null
+                  : `declares unknown split grammar ${JSON.stringify(entry.grammar)}`;
+            if (grammarProblem !== null) {
+              errors.push(
+                `${where} ${grammarProblem}; run a template sync to regenerate the manifest`,
+              );
+              continue;
+            }
           }
           split = { marker: entry.marker, managed: entry.managed };
         }

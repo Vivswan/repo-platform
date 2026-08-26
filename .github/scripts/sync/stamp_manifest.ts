@@ -21,7 +21,11 @@
 // (compose_template.ts's manifestEntryLine - keep ENTRY_LINE_RE below in
 // sync with it), so a stamped manifest differs from the raw render in
 // those token values alone and copier's three-way update merge sees
-// minimal local edits. An update can still leave inline conflict blocks in
+// minimal local edits. Split entries also carry declared-grammar fields
+// ("grammar", the bounded-region marker strings) for the sync's
+// split-file rebuild; this stamper reads only the legacy marker/managed
+// pair (derived from the grammar at compose time) and passes the rest
+// through untouched. An update can still leave inline conflict blocks in
 // the manifest (both sides touch the hash lines); those resolve toward the
 // template ("after updating") side before parsing - the direction
 // resolve_copier_conflicts.ts uses - and the stamp then rewrites every

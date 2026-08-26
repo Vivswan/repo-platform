@@ -1,6 +1,8 @@
 # yaml-language-server: $schema=../module.schema.json
 # Module manifest (schema and loader: scripts/module_manifests.ts).
 description: nightly fuzz starter with issue filing, replay inputs, auto-close
+ownership:
+  - { path: .github/workflows/nightly-fuzz.yml, class: starter }
 tracking_label:
   answer: fuzzer_label
   default: fuzz-nightly

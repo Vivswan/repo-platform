@@ -8,10 +8,11 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { carryGitignoreLocal } from "../../.github/scripts/sync/preserve_local_content";
+import { carryLocalRegion } from "../../.github/scripts/sync/preserve_local_content";
 import { existingLocalBody } from "../../scripts/build_gitignore";
 import {
   cleanLocalRegion,
+  GITIGNORE_REGION,
   LOCAL_BEGIN,
   LOCAL_END,
   MANAGED_BEGIN,
@@ -52,7 +53,7 @@ describe("cleanLocalRegion", () => {
 describe("the two writers agree on the shared accept/reject", () => {
   test("a clean file: the regenerator and the sync carry use the same body", () => {
     expect(existingLocalBody(onDisk(CLEAN))).toBe("/repo-local-cache/\n");
-    const carry = carryGitignoreLocal(RENDER, CLEAN);
+    const carry = carryLocalRegion(RENDER, CLEAN, GITIGNORE_REGION);
     expect(carry?.disposition).toBe("spliced");
     expect(carry?.content).toContain("/repo-local-cache/\n");
   });
@@ -66,7 +67,7 @@ describe("the two writers agree on the shared accept/reject", () => {
   for (const [shape, content] of Object.entries(MALFORMED)) {
     test(`a file with ${shape}: both writers reject, neither slices`, () => {
       expect(() => existingLocalBody(onDisk(content))).toThrow("clean REPOSITORY LOCAL region");
-      expect(carryGitignoreLocal(RENDER, content)?.disposition).toBe("appendix");
+      expect(carryLocalRegion(RENDER, content, GITIGNORE_REGION)?.disposition).toBe("appendix");
     });
   }
 });

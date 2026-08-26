@@ -1,6 +1,9 @@
 # yaml-language-server: $schema=../module.schema.json
 # Module manifest (schema and loader: scripts/module_manifests.ts).
 description: Deno toolchain (deno fmt/lint, deno dependabot, CodeQL JS)
+ownership:
+  - { path: .dvmrc, class: managed }
+  - { path: .github/workflows/deno-audit.yml, class: managed }
 toolchain:
   codeql_language: javascript-typescript
   pin:

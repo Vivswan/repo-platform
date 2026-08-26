@@ -1,6 +1,10 @@
 # yaml-language-server: $schema=../module.schema.json
 # Module manifest (schema and loader: scripts/module_manifests.ts).
 description: agent skills hosting (plugin manifests, skill validation)
+ownership:
+  - { path: .claude-plugin/marketplace.json, class: starter }
+  - { path: .claude-plugin/plugin.json, class: starter }
+  - { path: .github/workflows/validate-skills.yml, class: managed }
 gate_jobs:
   - validate-skills
 # gate_dirs: output directories gated ONCE at the directory name instead of

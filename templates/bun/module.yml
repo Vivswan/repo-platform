@@ -1,6 +1,9 @@
 # yaml-language-server: $schema=../module.schema.json
 # Module manifest (schema and loader: scripts/module_manifests.ts).
 description: TypeScript/bun toolchain (gitignore, dependabot, CodeQL JS)
+ownership:
+  - { path: .bun-version, class: managed }
+  - { path: .github/workflows/dependabot-bun-lockfile.yml, class: managed }
 toolchain:
   codeql_language: javascript-typescript
   pin:

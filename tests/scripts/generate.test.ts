@@ -7,6 +7,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  baseOwnershipRegion,
   dependabotLabelGroups,
   dependabotLabelsSpan,
   gitignoreUpstreamMap,
@@ -41,7 +42,7 @@ import {
   trackingStreams,
 } from "../../scripts/generate";
 import { loadManifests, type ModuleManifest } from "../../scripts/module_manifests";
-import { moduleOwnershipFiles, skipIfExistsMatchers } from "../../scripts/ownership";
+import { skipIfExistsMatchers } from "../../scripts/ownership";
 
 function manifest(module: string, extra: Partial<ModuleManifest> = {}): ModuleManifest {
   return { module, description: `${module} module`, ...extra };
@@ -546,10 +547,6 @@ describe("toolchain pins", () => {
 });
 
 describe("module ownership files", () => {
-  const HEADER =
-    "# This file is managed by {{ github_username }}/repo-platform.\n" +
-    "# Local edits may be replaced during template updates.\n";
-
   test("skipIfExistsMatchers reproduces copier's gitwildmatch semantics", () => {
     const [forms, lockfile] = skipIfExistsMatchers(
       "_skip_if_exists:\n  - .github/ISSUE_TEMPLATE/*.yml\n  - .gitleaks.toml\n",
@@ -602,137 +599,18 @@ describe("module ownership files", () => {
     expect(starDir.test("other/dir/x")).toBe(false);
   });
 
-  test("moduleOwnershipFiles classifies every file: enrol, starter, split, gated, comment-free", () => {
-    const dir = mkdtempSync(join(tmpdir(), "headers-"));
-    try {
-      mkdirSync(join(dir, "bun", ".github", "workflows"), { recursive: true });
-      mkdirSync(join(dir, "bun", "fragments"));
-      writeFileSync(join(dir, "bun", "module.yml"), "description: bun\n");
-      writeFileSync(
-        join(dir, "bun", ".github", "workflows", "managed.yml.jinja"),
-        `${HEADER}name: Managed\n`,
-      );
-      // Headerless starter: exempt through _skip_if_exists.
-      writeFileSync(join(dir, "bun", ".github", "workflows", "starter.yml.jinja"), "name: S\n");
-      // Split file: enrolled with marker semantics.
-      writeFileSync(
-        join(dir, "bun", "SPLIT.md.jinja"),
-        "body\n<!-- repo-platform:local-section -->\n",
-      );
-      // Filename-gated: declares ownership but module selection alone does
-      // not render it, so it is not enrolled.
-      writeFileSync(
-        join(dir, "bun", "{% if not private %}gated.yml{% endif %}.jinja"),
-        `${HEADER}name: G\n`,
-      );
-      // Comment-free formats: the manifest's pin dotfile and JSON.
-      writeFileSync(join(dir, "bun", ".bun-version"), "1.3.14\n");
-      writeFileSync(join(dir, "bun", "data.json"), "{}\n");
-      // Fragments never render as their own files.
-      writeFileSync(join(dir, "bun", "fragments", "agents-toolchain.jinja"), `${HEADER}- x\n`);
-      const pinned = manifest("bun", {
-        toolchain: {
-          codeql_language: "javascript-typescript",
-          pin: { file: ".bun-version", version: "1.3.14" },
-        },
-      });
-      const skip = skipIfExistsMatchers("_skip_if_exists:\n  - .github/workflows/starter.yml\n");
-      expect(moduleOwnershipFiles([pinned], dir, skip)).toEqual({
-        bun: [
-          { path: ".github/workflows/managed.yml", kind: "header" },
-          { path: "SPLIT.md", kind: "marker" },
-        ],
-      });
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
-
-  test("a file fitting no class throws instead of shipping undeclared", () => {
-    const dir = mkdtempSync(join(tmpdir(), "headers-"));
-    try {
-      mkdirSync(join(dir, "bun", ".github", "workflows"), { recursive: true });
-      writeFileSync(
-        join(dir, "bun", ".github", "workflows", "managed.yml.jinja"),
-        `${HEADER}name: Managed\n`,
-      );
-      writeFileSync(join(dir, "bun", ".github", "workflows", "silent.yml.jinja"), "name: S\n");
-      expect(() => moduleOwnershipFiles([manifest("bun")], dir, [])).toThrow(
-        "declares no ownership",
-      );
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
-
-  test("look-alike headers are not declarations", () => {
-    const dir = mkdtempSync(join(tmpdir(), "headers-"));
-    try {
-      mkdirSync(join(dir, "bun"));
-      // GitHub repo names allow [A-Za-z0-9._-], so every continuation
-      // character must fail the anchor, as must a negated wording.
-      const lookalikes = [
-        "# This file is not managed by {{ github_username }}/repo-platform.\n",
-        "# This file is managed by {{ github_username }}/repo-platform-fork.\n",
-        "# This file is managed by {{ github_username }}/repo-platform_fork.\n",
-        "# This file is managed by {{ github_username }}/repo-platform.fork.\n",
-      ];
-      for (const header of lookalikes) {
-        writeFileSync(join(dir, "bun", "odd.yml.jinja"), `${header}name: O\n`);
-        expect(() => moduleOwnershipFiles([manifest("bun")], dir, [])).toThrow(
-          "declares no ownership",
-        );
-      }
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
-
-  test("a _skip_if_exists starter carrying the header throws", () => {
-    const dir = mkdtempSync(join(tmpdir(), "headers-"));
-    try {
-      mkdirSync(join(dir, "bun", ".github", "workflows"), { recursive: true });
-      writeFileSync(
-        join(dir, "bun", ".github", "workflows", "checks.yml.jinja"),
-        `${HEADER}name: Checks\n`,
-      );
-      expect(() =>
-        moduleOwnershipFiles(
-          [manifest("bun")],
-          dir,
-          skipIfExistsMatchers("_skip_if_exists:\n  - .github/workflows/checks.yml\n"),
-        ),
-      ).toThrow("_skip_if_exists starter");
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
-
-  test("an empty table throws - the managed module workflows must enrol", () => {
-    const dir = mkdtempSync(join(tmpdir(), "headers-"));
-    try {
-      mkdirSync(join(dir, "bun"));
-      writeFileSync(join(dir, "bun", "module.yml"), "description: bun\n");
-      expect(() => moduleOwnershipFiles([manifest("bun")], dir, [])).toThrow(
-        "MODULE_OWNERSHIP record would be empty",
-      );
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
-
   test("moduleOwnershipRegion renders the record with as-needed key quoting", () => {
     expect(
       moduleOwnershipRegion({
-        agents: [{ path: "AGENTS.md", kind: "marker" }],
+        agents: [
+          { path: "AGENTS.md", kind: "marker", marker: "<!-- repo-platform:local-section -->" },
+        ],
         "release-please": [{ path: ".github/workflows/release.yml", kind: "header" }],
-        "settings-sync": [{ path: ".github/workflows/settings-sync.yml", kind: "header" }],
       }),
     ).toEqual([
-      "const MODULE_OWNERSHIP: Record<string, { path: string; kind: OwnershipKind }[]> = {",
-      '  agents: [{ path: "AGENTS.md", kind: "marker" }],',
+      "const MODULE_OWNERSHIP: Record<string, OwnedFile[]> = {",
+      '  agents: [{ path: "AGENTS.md", kind: "marker", marker: "<!-- repo-platform:local-section -->" }],',
       '  "release-please": [{ path: ".github/workflows/release.yml", kind: "header" }],',
-      '  "settings-sync": [{ path: ".github/workflows/settings-sync.yml", kind: "header" }],',
       "};",
     ]);
   });
@@ -747,14 +625,30 @@ describe("module ownership files", () => {
       moduleOwnershipRegion({
         bun: [
           { path: first, kind: "header" },
-          { path: second, kind: "marker" },
+          { path: second, kind: "header" },
         ],
       }),
     ).toEqual([
-      "const MODULE_OWNERSHIP: Record<string, { path: string; kind: OwnershipKind }[]> = {",
+      "const MODULE_OWNERSHIP: Record<string, OwnedFile[]> = {",
       "  bun: [",
       `    { path: "${first}", kind: "header" },`,
-      `    { path: "${second}", kind: "marker" },`,
+      `    { path: "${second}", kind: "header" },`,
+      "  ],",
+      "};",
+    ]);
+  });
+
+  test("an entry too long even inline expands one property per line, like biome", () => {
+    const path = ".github/workflows/a-rather-long-managed-workflow-file-name.yml";
+    const marker = "<!-- repo-platform:local-section -->";
+    expect(moduleOwnershipRegion({ bun: [{ path, kind: "marker", marker }] })).toEqual([
+      "const MODULE_OWNERSHIP: Record<string, OwnedFile[]> = {",
+      "  bun: [",
+      "    {",
+      `      path: "${path}",`,
+      '      kind: "marker",',
+      `      marker: "${marker}",`,
+      "    },",
       "  ],",
       "};",
     ]);
@@ -765,6 +659,51 @@ describe("module ownership files", () => {
       moduleOwnershipRegion({
         bun: [{ path: `x/${"y".repeat(100)}.yml`, kind: "header" }],
       }),
-    ).toThrow("shorten the rendered path");
+    ).toThrow("exceeds the formatter's line width");
+  });
+
+  test("baseOwnershipRegion emits the enforced table and the region splits", () => {
+    expect(
+      baseOwnershipRegion({
+        enforced: [
+          { path: ".yamllint", kind: "header" },
+          {
+            path: "LICENSE.md",
+            kind: "marker",
+            marker: "<!-- repo-platform:local-section -->",
+            when: { withoutModule: "custom-license" },
+          },
+          { path: "CODE_OF_CONDUCT.md", kind: "header", when: { publicOnly: true } },
+        ],
+        regionSplits: {
+          ".gitignore": {
+            managedBegin: "# BEGIN REPO-PLATFORM MANAGED",
+            managedEnd: "# END REPO-PLATFORM MANAGED",
+            localBegin: "# BEGIN REPOSITORY LOCAL",
+            localEnd: "# END REPOSITORY LOCAL",
+          },
+        },
+      }),
+    ).toEqual([
+      "const BASE_OWNERSHIP: BaseOwnedFile[] = [",
+      '  { path: ".yamllint", kind: "header" },',
+      "  {",
+      '    path: "LICENSE.md",',
+      '    kind: "marker",',
+      '    marker: "<!-- repo-platform:local-section -->",',
+      '    when: { withoutModule: "custom-license" },',
+      "  },",
+      '  { path: "CODE_OF_CONDUCT.md", kind: "header", when: { publicOnly: true } },',
+      "];",
+      "",
+      "const BASE_REGION_SPLITS: Record<string, RegionSplitGrammar> = {",
+      '  ".gitignore": {',
+      '    managedBegin: "# BEGIN REPO-PLATFORM MANAGED",',
+      '    managedEnd: "# END REPO-PLATFORM MANAGED",',
+      '    localBegin: "# BEGIN REPOSITORY LOCAL",',
+      '    localEnd: "# END REPOSITORY LOCAL",',
+      "  },",
+      "};",
+    ]);
   });
 });

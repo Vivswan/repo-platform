@@ -1,6 +1,10 @@
 # yaml-language-server: $schema=../module.schema.json
 # Module manifest (schema and loader: scripts/module_manifests.ts).
 description: bug/feature issue forms
+ownership:
+  - { path: .github/ISSUE_TEMPLATE/bug_report.yml, class: starter }
+  - { path: .github/ISSUE_TEMPLATE/config.yml, class: starter }
+  - { path: .github/ISSUE_TEMPLATE/feature_request.yml, class: starter }
 # gate_dirs: output directories gated ONCE at the directory name instead of
 # per-file leaf, matching how copier skips a whole subtree.
 gate_dirs:

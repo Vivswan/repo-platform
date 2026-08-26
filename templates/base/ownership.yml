@@ -1,0 +1,50 @@
+# Ownership declarations for every file templates/base/ lands in generated
+# repositories (schema and loader: scripts/ownership.ts loadBaseOwnership;
+# module files declare in their module.yml `ownership:` lists). Paths are
+# LANDED paths - filename gates stay on the template filenames and are
+# recorded from there. The composer errors when a landed file has no
+# declaration here, when a declared path never lands, and when a source's
+# text (headers, marker lines) contradicts its declared class.
+ownership:
+  - { path: .copier-answers.yml, class: managed }
+  - path: .editorconfig
+    class: split
+    grammar: tail-marker
+    marker: "# repo-platform:local-section"
+  - path: .gitattributes
+    class: split
+    grammar: tail-marker
+    marker: "# repo-platform:local-section"
+  - { path: .github/actionlint.yaml, class: starter }
+  - path: .github/CODEOWNERS
+    class: split
+    grammar: tail-marker
+    marker: "# repo-platform:local-section"
+  - { path: .github/dependabot.yml, class: managed }
+  - { path: .github/workflows/auto-format.yml, class: starter }
+  - { path: .github/workflows/checks.yml, class: starter }
+  - { path: .github/workflows/ci.yml, class: managed }
+  - path: .gitignore
+    class: split
+    grammar: bounded-region
+    managed_begin: "# BEGIN REPO-PLATFORM MANAGED"
+    managed_end: "# END REPO-PLATFORM MANAGED"
+    local_begin: "# BEGIN REPOSITORY LOCAL"
+    local_end: "# END REPOSITORY LOCAL"
+  - { path: .gitleaks.toml, class: starter }
+  - { path: .repo-platform.yml, class: managed }
+  - { path: .typography-allow, class: managed }
+  - { path: .yamllint, class: managed }
+  - { path: CODE_OF_CONDUCT.md, class: managed }
+  - path: CONTRIBUTING.md
+    class: split
+    grammar: tail-marker
+    marker: "<!-- repo-platform:local-section -->"
+  - path: LICENSE.md
+    class: split
+    grammar: tail-marker
+    marker: "<!-- repo-platform:local-section -->"
+  - path: SECURITY.md
+    class: split
+    grammar: tail-marker
+    marker: "<!-- repo-platform:local-section -->"

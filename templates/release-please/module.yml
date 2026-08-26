@@ -1,6 +1,12 @@
 # yaml-language-server: $schema=../module.schema.json
 # Module manifest (schema and loader: scripts/module_manifests.ts).
 description: release job on top of all-green + autorelease labels
+ownership:
+  - { path: .github/workflows/release.yml, class: managed }
+  - { path: .github/workflows/update-release-pr.yml, class: starter }
+  - { path: .github/workflows/update-release.yml, class: starter }
+  - { path: .release-please-manifest.json, class: starter }
+  - { path: release-please-config.json, class: starter }
 gate_jobs:
   - release-freshness
   - release-health
