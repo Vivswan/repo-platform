@@ -4,10 +4,12 @@
 # repository policy block, the module-derived label roster, the fleet
 # rulesets) is computed by .github/scripts/fleet/render_managed_settings.ts
 # - for this operator repo from .repo-platform-answers.yml, since it is not
-# generated from the template - and this file deep-merges OVER it: keys
-# here win, labels and rulesets are name-keyed unions (an entry here
-# replaces the same-name baseline entry wholesale). Undeclared labels are
-# deleted against the MERGED roster; undeclared rulesets are left alone.
+# generated from the template - and this file merges OVER it: keys here
+# win, a same-name label replaces the fleet one wholesale, and a same-name
+# ruleset merges field by field with its rules appended by type. Then
+# .github/settings-override.yml merges over THIS file, so what it declares
+# cannot be changed from here. Undeclared labels are deleted against the
+# MERGED roster; undeclared rulesets are left alone.
 
 repository:
   description: Copier template + reusable workflows managing standards across Vivswan's repositories

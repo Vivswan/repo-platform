@@ -20,17 +20,24 @@ name: Settings Repos
 on:
   push:
     branches: [main]
-    # The inputs the merged documents are assembled from: this repo's own
-    # settings layer, the baseline document, the assembly and merge
-    # scripts, and the module manifests the module-conditional content
-    # comes from.
+    # Every input the merged documents are built from: this repo's own
+    # settings layer, the fleet layers (baseline, visibility overlays, and
+    # the override that outranks every repo file), the per-module settings
+    # layers, the merge scripts, and the module manifests. A push that
+    # changes any single layer must reach the fleet.
     paths:
       - .github/settings.yml
       - .github/settings-baseline.yml
+      - .github/settings-public.yml
+      - .github/settings-private.yml
+      - .github/settings-override.yml
       - .github/scripts/fleet/render_managed_settings.ts
       - .github/scripts/fleet/merge_settings_layers.ts
       - .repo-platform-answers.yml
       - templates/*/module.yml
+      - templates/*/settings.yml
+      - templates/*/settings-public.yml
+      - templates/*/settings-private.yml
   schedule:
     # Nightly heal at an offbeat minute.
     - cron: "2 8 * * *"

@@ -175,16 +175,20 @@ export function droppedOverrides(
     const section = override[key];
     return isMapping(section) && child in section;
   };
-  const overrideDeclaresEntry = (key: string, name: string, fold: (n: string) => string) => {
+  const overrideEntry = (key: string, name: string, fold: (n: string) => string) => {
     const section = override[key];
-    return (
-      Array.isArray(section) &&
-      section.some(
-        (entry) =>
-          isMapping(entry) && typeof entry.name === "string" && fold(entry.name) === fold(name),
-      )
+    if (!Array.isArray(section)) return undefined;
+    return section.find(
+      (entry) =>
+        isMapping(entry) && typeof entry.name === "string" && fold(entry.name) === fold(name),
     );
   };
+  const ruleTypesOf = (entry: unknown): string[] =>
+    isMapping(entry) && Array.isArray(entry.rules)
+      ? entry.rules.flatMap((rule) =>
+          isMapping(rule) && typeof rule.type === "string" ? [rule.type] : [],
+        )
+      : [];
   for (const [key, oldValue] of Object.entries(old)) {
     const managedValue = managed[key];
     if (isMapping(oldValue) && isMapping(managedValue)) {
@@ -209,7 +213,25 @@ export function droppedOverrides(
           dropped.push(`${key} (a nameless entry)`);
           continue;
         }
-        if (overrideDeclaresEntry(key, name, fold)) continue; // fleet law
+        const fleetEntry = overrideEntry(key, name, fold);
+        if (fleetEntry !== undefined) {
+          // The entry itself is fleet law and cannot be re-added. Its
+          // RULES are a different matter: a same-name ruleset appends
+          // rules by type, so a rule type the old file carried and the
+          // override does not declare is a genuine repo addition the
+          // reviewer can put back. Report those, never the entry.
+          if (key === "rulesets") {
+            const fleetTypes = new Set(ruleTypesOf(fleetEntry));
+            const extra = [...new Set(ruleTypesOf(entry))].filter((type) => !fleetTypes.has(type));
+            for (const type of extra) {
+              dropped.push(
+                `${key} ${JSON.stringify(name)}: rule ${JSON.stringify(type)} (the ruleset is ` +
+                  "fleet-owned, but re-declaring just this rule in the new settings.yml appends it)",
+              );
+            }
+          }
+          continue;
+        }
         classify(`${key} ${JSON.stringify(name)}`, entry, managedByName.get(fold(name)));
       }
       continue;

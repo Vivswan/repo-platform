@@ -373,6 +373,41 @@ describe("transitionSettingsStarter", () => {
     }
   });
 
+  test("a repo-added rule on a fleet-owned ruleset is still reported", () => {
+    // The ruleset itself is fleet law and cannot be re-added, but rules
+    // append by type - so a rule type the override does not declare IS a
+    // genuine repo addition, and losing it silently would drop protection
+    // the repo chose for itself.
+    const legacy = [
+      "---",
+      "# Rendered by the settings-sync module.",
+      LEGACY_MERGEABLE_LINE,
+      "repository:",
+      "  private: false",
+      "rulesets:",
+      "  - name: main",
+      "    target: branch",
+      "    rules:",
+      "      - type: deletion",
+      "      - type: required_signatures",
+      "",
+    ].join("\n");
+    const { dir, out } = target({
+      settings: legacy,
+      modules: "modules: [settings-sync]\n",
+      answers,
+    });
+    transitionSettingsStarter(dir, out, "t");
+    const section = readFileSync(out, "utf-8");
+    // required_signatures is not in the override, so it is reported...
+    expect(section).toContain('rulesets "main": rule "required_signatures"');
+    expect(section).toContain("re-declaring just this rule");
+    // ...while deletion, which the override declares, is not, and neither
+    // is the ruleset entry on its own.
+    expect(section).not.toContain('rule "deletion"');
+    expect(section).not.toContain('- rulesets "main"\n');
+  });
+
   test("fail-soft: a broken answers file leaves the old file for the next sync", () => {
     const { dir, out } = target({
       settings: legacySettings,
