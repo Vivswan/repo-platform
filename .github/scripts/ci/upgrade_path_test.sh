@@ -972,9 +972,9 @@ echo "settings layering transition OK: starter replaced once, custom topics carr
 # manual-review path (auto-merge off). Reuses the NEW build (no extra
 # tag); gh is stubbed, so open_pr.ts's body and arm decisions are
 # observable without a network.
-TRIP="${RUN_DIR:-/tmp}/upgrade-trip"
-TRIP_WORK="${RUN_DIR:-/tmp}/upgrade-trip-work"
-TRIP_REF="${REF_NS:-ci-build}/new"
+TRIP="$RUN_DIR/upgrade-trip"
+TRIP_WORK="$RUN_DIR/upgrade-trip-work"
+TRIP_REF="$REF_NS/new"
 rm -rf "$TRIP" "$TRIP_WORK"
 mkdir -p "$TRIP_WORK"
 cd "$GITHUB_WORKSPACE"
