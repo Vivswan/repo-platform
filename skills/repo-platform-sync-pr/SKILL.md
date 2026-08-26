@@ -15,7 +15,8 @@ Work in this order, always:
 1. Read the PR body top to bottom (the triage table below).
 2. Run the mandatory per-file review pass - every changed file classified and cleared.
 3. Resolve: restore dropped lines, hand-edit unresolved files.
-4. Merge (or let auto-merge fire on a clean PR).
+4. Disposition every bot review comment (the section below) - none may be left unaddressed.
+5. Merge (or let auto-merge fire on a clean PR) - unless a human does the merging, in which case stop at green and report with a verdict line (see "Resolving on a human's behalf").
 
 ## When to Apply
 
@@ -35,6 +36,8 @@ Find and open the PR from the repo:
 gh pr list --head automation/repo-platform --json number,title,url
 gh pr view <number>
 ```
+
+If the staging list is empty, try `--head automation/repo-platform-latest` (the repo may follow the latest channel). Exactly one open sync PR should exist per repo; when none exists, or more than one does, stop and report that instead of guessing - a missing PR usually means the last sync run failed or delivered nothing, and a duplicate means something opened a PR out of band.
 
 ## Triage: read the PR body top to bottom
 
@@ -116,6 +119,14 @@ git push origin automation/repo-platform
 - Pushing more commits is the supported way to fix the PR; CI re-runs on the push. Needs-review PRs are never auto-merged, so merge manually when green.
 - Merge PROMPTLY. The PR body's "manual commits pushed to it are overwritten" and this workflow are both true: commits parked on the branch BETWEEN runs are replaced by the next run's force-push, so fix-then-merge before the next release, weekly cron, or dispatch. A push that lands while a sync run is already in flight trips that run's lease and turns the run red (loud, not lost) - the silent overwrite is only the between-runs case.
 - Do not rebase the automation branch onto the default branch or force-push it yourself - the next run replaces it wholesale anyway, and an out-of-band force-push just trips the lease.
+
+## Disposition every bot review comment
+
+Copilot and other bots leave review comments on sync PRs; do not resolve or merge with any of them unaddressed. Read them all - `gh pr view <number> --comments` for the conversation, plus the inline review comments via `gh api repos/{owner}/{repo}/pulls/<number>/comments`. For each one: fix the valid ones on the branch, reply on the thread explaining why an invalid or inapplicable one is rejected, and resolve the thread. When reporting to a human, include the disposition per comment.
+
+## Resolving on a human's behalf
+
+When a human does the merging, your job ends with the branch resolved, pushed, and green - NEVER merge, enable auto-merge, or approve reviews. Constraints that bite: never rebase or force-push the automation branch (check it out fresh and commit on top, per "Fix the PR"); never edit the `.copier-answers.yml` underscore keys (`_commit`, `_src_path`); work fast once resolved, because commits parked on the branch between runs are overwritten by the next sync. Green means the repo's required `all-green` check passes on the branch (a red validate-template check flags drift to fix, but where it is not required it does not gate the merge). End the report with an explicit verdict line: "READY TO MERGE" when every changed file is classified and cleared, dropped local content is restored to its owned location, and every bot comment is fixed or answered - or "NOT READY: <what blocks it>". Also report what local content you restored and where, the disposition of each bot comment, and anything unexplained you left open (anything the PR body and the modules diff do not explain is a stop-and-report, not a guess).
 
 ## Closing instead of fixing
 
