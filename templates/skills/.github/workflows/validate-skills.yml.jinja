@@ -27,7 +27,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
-      - uses: {{ github_username }}/repo-platform/actions/validate-skills@{{ uses_ref }}
+      - uses: {{ github_username }}/repo-platform/actions/validate-skills@main
         with:
           skills-dir: {{ skills_dir | tojson }}
           mode: discovery

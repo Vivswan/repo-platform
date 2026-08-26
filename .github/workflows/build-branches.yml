@@ -1,36 +1,24 @@
-# Publishes the generated build branches copier consumes:
-#   staging -> minimal build tree from the LATEST main commit (every push)
-#   latest  -> minimal build tree from the LATEST release, tagged
-#              templates/vX.Y.Z
-# Both are ORPHAN, APPEND-ONLY branches: each build commit parents the
-# previous build commit, never a main commit, so a main history rewrite can
-# never invalidate them and old build commits (downstream repos' recorded
-# _commit, needed by copier update's three-way merge) stay reachable forever.
-# The weekly schedule is a self-heal net: releases published with the default
-# GITHUB_TOKEN do not fire the `release` trigger (same caveat as sync-repos).
-# GITHUB_TOKEN pushes trigger no workflows - intended; nothing may run on the
-# build branches (their trees carry no .github/).
+# Publishes the generated `template` build branch copier consumes: a minimal
+# build tree from the LATEST main commit, rebuilt on every push. It is an
+# ORPHAN, APPEND-ONLY branch: each build commit parents the previous build
+# commit, never a main commit, so a main history rewrite can never
+# invalidate it and old build commits (downstream repos' recorded _commit,
+# needed by copier update's three-way merge) stay reachable forever.
+# The weekly schedule is a self-heal net. GITHUB_TOKEN pushes trigger no
+# workflows - intended; nothing may run on the build branch (its tree
+# carries no .github/).
 
 name: Build Branches
 
 on:
   push:
     branches: [main]
-  release:
-    types: [published]
   schedule:
     - cron: "12 6 * * 1"
   workflow_dispatch:
-    inputs:
-      channel:
-        description: Which build branch(es) to rebuild
-        required: false
-        type: choice
-        options: [both, staging, latest]
-        default: both
 
-# Contents write publishes the build branches and tags; actions read lets
-# publish.ts's re-stamp check read the run stamped on the current tip.
+# Contents write publishes the build branch; actions read lets publish.ts's
+# re-stamp check read the run stamped on the current tip.
 permissions:
   contents: write
   actions: read
@@ -53,21 +41,8 @@ jobs:
         with:
           bun-version-file: .bun-version
 
-      - name: Plan builds
-        id: plan
-        env:
-          GH_TOKEN: ${{ github.token }}
-          EVENT_NAME: ${{ github.event_name }}
-          DISPATCH_CHANNEL: ${{ inputs.channel }}
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
-        run: bun .github/scripts/build-branches/plan.ts
-
       - name: Build and publish
-        if: steps.plan.outputs.staging == 'true' || steps.plan.outputs.latest == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-          BUILD_STAGING: ${{ steps.plan.outputs.staging }}
-          BUILD_LATEST: ${{ steps.plan.outputs.latest }}
-          VERSION: ${{ steps.plan.outputs.version }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: bun .github/scripts/build-branches/publish.ts

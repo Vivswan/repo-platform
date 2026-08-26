@@ -1,8 +1,8 @@
 # Push-only template sync: runs in repo-platform and pushes a template
 # update into one managed repo - target checkout in a subdirectory, `copier
-# update` against the target's channel (staging head or a templates/vX.Y.Z
-# build tag), then a branch + PR opened in the target with the
-# REPO_PLATFORM_TOKEN PAT stored here. Called only by sync-repos.yml.
+# update` against the template branch head, then a branch + PR opened in
+# the target with the REPO_PLATFORM_TOKEN PAT stored here. Called only by
+# sync-repos.yml.
 #
 # Permission-adaptive token model: the token itself is REQUIRED (a missing
 # secret is a misconfiguration and fails loudly), but a deliberately
@@ -10,7 +10,7 @@
 # changes are withheld from the PR with a warning; Contents + Pull
 # requests write are the core the sync cannot work without.
 #
-# The rolling per-channel branch (automation/repo-platform-staging|latest)
+# The rolling branch (automation/repo-platform)
 # is regenerated on every run: sync-repos.yml's concurrency group is the
 # only automated writer, and the push uses --force-with-lease so an
 # out-of-band push racing this run surfaces instead of vanishing. Manual
@@ -55,16 +55,6 @@ on:
         required: false
         type: string
         default: ""
-      version:
-        description: Release to sync to (latest channel only; empty = newest release)
-        required: false
-        type: string
-        default: ""
-      channel:
-        description: Channel to sync (empty = the target's recorded copier answer)
-        required: false
-        type: string
-        default: ""
       recover:
         description: >-
           "recopy" = full re-render with no three-way merge, for a repo
@@ -85,7 +75,7 @@ on:
 # The workflow's own token only reads this repo; every target-repo write
 # (checkout, push, PR) uses the REPO_PLATFORM_TOKEN PAT. Actions read is
 # for the build provenance check: resolve_refs.ts verifies the build run
-# stamped on the shipped ref (staging tip or templates/vX.Y.Z tag).
+# stamped on the shipped ref (the template branch tip).
 permissions:
   contents: read
   actions: read
@@ -161,8 +151,8 @@ jobs:
 
       - name: Require registration files
         run: |
-          test -f target/.repo-platform.yml || { echo "::error::${TARGET_DISPLAY} is not registered with repo-platform: .repo-platform.yml is missing from its default branch. Restore the file from git history, or regenerate the repo with 'copier copy gh:${GITHUB_REPOSITORY} . --vcs-ref staging' (or a templates/vX.Y.Z tag)."; exit 1; }
-          test -f target/.copier-answers.yml || { echo "::error::${TARGET_DISPLAY} has no .copier-answers.yml on its default branch, so copier has no recorded answers to update from. Restore the file from git history, or regenerate the repo with 'copier copy gh:${GITHUB_REPOSITORY} . --vcs-ref staging' (or a templates/vX.Y.Z tag)."; exit 1; }
+          test -f target/.repo-platform.yml || { echo "::error::${TARGET_DISPLAY} is not registered with repo-platform: .repo-platform.yml is missing from its default branch. Restore the file from git history, or regenerate the repo with 'copier copy gh:${GITHUB_REPOSITORY} . --vcs-ref template'."; exit 1; }
+          test -f target/.copier-answers.yml || { echo "::error::${TARGET_DISPLAY} has no .copier-answers.yml on its default branch, so copier has no recorded answers to update from. Restore the file from git history, or regenerate the repo with 'copier copy gh:${GITHUB_REPOSITORY} . --vcs-ref template'."; exit 1; }
 
       # Live visibility and description feed the render on purpose (adopt
       # semantics: the visibility-gated renders - CONTRIBUTING.md and the
@@ -199,12 +189,10 @@ jobs:
         id: src
         run: bun .github/scripts/sync/normalize_src.ts
 
-      - name: Resolve channel, refs, and template copier configs
+      - name: Resolve refs and template copier configs
         id: versions
         env:
           GH_TOKEN: ${{ github.token }}
-          REQUESTED: ${{ inputs.version }}
-          CHANNEL_INPUT: ${{ inputs.channel }}
           RECOVER: ${{ inputs.recover }}
         run: bun .github/scripts/sync/resolve_refs.ts
 
@@ -222,7 +210,7 @@ jobs:
           BRANCH: ${{ steps.versions.outputs.branch }}
         run: git -C target checkout -B "$BRANCH"
 
-      # No up-to-date shortcut: modules, channel, private, and description
+      # No up-to-date shortcut: modules, private, and description
       # are live inputs that must re-render even at an unchanged template
       # ref, and a no-op render is cheap. The no-changes case exits with a
       # notice after diffing. MODULES and DESCRIPTION come from files via
@@ -232,7 +220,6 @@ jobs:
       - name: Apply copier update
         env:
           TARGET_REF: ${{ steps.versions.outputs.target_ref }}
-          CHANNEL: ${{ steps.versions.outputs.channel }}
           PRIVATE: ${{ steps.target.outputs.private }}
           RECOVER: ${{ inputs.recover }}
         run: |
@@ -254,7 +241,6 @@ jobs:
         env:
           OLD_SHA: ${{ steps.versions.outputs.old_sha }}
           TARGET_REF: ${{ steps.versions.outputs.target_ref }}
-          CHANNEL: ${{ steps.versions.outputs.channel }}
           PRIVATE: ${{ steps.target.outputs.private }}
           SRC_PATH: ${{ steps.src.outputs.src_path }}
         run: |
@@ -368,9 +354,9 @@ jobs:
           MODULES="$(cat "$RUNNER_TEMP/modules.json")" \
             bun .github/scripts/sync/manifest_license_check.ts
 
-      # Version-aligned validation: a templates/vX.Y.Z target is judged by
-      # the validator at that release tag, never by main's unreleased rules;
-      # staging is judged by the source commit its build was assembled from.
+      # Version-aligned validation: the tree is judged by the validator at
+      # the source commit its build was assembled from, never by main's
+      # newer rules when main moved since.
       - name: Check out the version-aligned validator
         uses: actions/checkout@v7
         with:
@@ -446,7 +432,6 @@ jobs:
         id: pr
         env:
           GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
-          CHANNEL: ${{ steps.versions.outputs.channel }}
           DISPLAY: ${{ steps.versions.outputs.display }}
           BRANCH: ${{ steps.versions.outputs.branch }}
           BASE_BRANCH: ${{ steps.target.outputs.default_branch }}

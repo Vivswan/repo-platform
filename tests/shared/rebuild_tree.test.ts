@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { rebuildChannelTree } from "../../.github/scripts/shared/rebuild_tree.ts";
+import { rebuildBranchTree } from "../../.github/scripts/shared/rebuild_tree.ts";
 
 // The helper resolves git against the process cwd and the builder script
 // against the SOURCE worktree, so the fixture is a self-contained scratch
@@ -17,11 +17,8 @@ const get = (flag: string) => {
   return at === -1 ? undefined : args[at + 1];
 };
 const dest = get("--dest");
-const channel = get("--channel");
-if (!dest || !channel) process.exit(2);
+if (!dest) process.exit(2);
 mkdirSync(dest, { recursive: true });
-const version = get("--version") ?? "";
-writeFileSync(join(dest, "BUILD_INFO.yml"), \`channel: \${channel}\\n\` + (version ? \`version: \${version}\\n\` : ""));
 writeFileSync(join(dest, "content.txt"), "deterministic\\n");
 `;
 
@@ -75,33 +72,25 @@ afterAll(() => {
   }
 });
 
-describe("rebuildChannelTree", () => {
-  test("the same source rebuilds to the same tree hash; a version changes it", () => {
+describe("rebuildBranchTree", () => {
+  test("the same source rebuilds to the same tree hash", () => {
     const dirs = (name: string) => ({
       srcDir: join(scratch, `work-${name}`, "src"),
       treeDir: join(scratch, `work-${name}`, "tree"),
     });
-    const first = rebuildChannelTree({ sourceSha, channel: "staging", ...dirs("a") });
-    const second = rebuildChannelTree({ sourceSha, channel: "staging", ...dirs("b") });
+    const first = rebuildBranchTree({ sourceSha, ...dirs("a") });
+    const second = rebuildBranchTree({ sourceSha, ...dirs("b") });
     expect(first).toMatch(/^[0-9a-f]{40}$/);
     expect(second).toBe(first);
-    const tagged = rebuildChannelTree({
-      sourceSha,
-      channel: "latest",
-      version: "v1.2.3",
-      ...dirs("c"),
-    });
-    expect(tagged).not.toBe(first);
-    for (const name of ["a", "b", "c"]) {
+    for (const name of ["a", "b"]) {
       git("worktree", "remove", "--force", join(scratch, `work-${name}`, "src"));
     }
   });
 
   test("an unresolvable source throws instead of returning a hash", () => {
     expect(() =>
-      rebuildChannelTree({
+      rebuildBranchTree({
         sourceSha: "0123456789012345678901234567890123456789",
-        channel: "staging",
         srcDir: join(scratch, "work-bad", "src"),
         treeDir: join(scratch, "work-bad", "tree"),
       }),

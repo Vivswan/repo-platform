@@ -182,8 +182,8 @@ jobs:
         run: bun install --frozen-lockfile --silent
       - name: Build twice and compare
         run: |
-          bun .github/scripts/build-branches/branch_tree.ts --dest /tmp/tree-a --channel staging
-          bun .github/scripts/build-branches/branch_tree.ts --dest /tmp/tree-b --channel staging
+          bun .github/scripts/build-branches/branch_tree.ts --dest /tmp/tree-a
+          bun .github/scripts/build-branches/branch_tree.ts --dest /tmp/tree-b
           diff -r --no-dereference /tmp/tree-a /tmp/tree-b
           echo "build tree is deterministic"
 
@@ -211,8 +211,6 @@ jobs:
         run: bun run dogfood:check
       - name: Check markdown is not hard-wrapped
         run: bun run wrap:check
-      - name: Check renamed or retired rendered files ship migrations
-        run: bun run migrations:check
 
   # Committed golden renders (tests/golden-renders/) must match a fresh
   # copier render of the canonical selection matrix, so every template or
@@ -412,7 +410,7 @@ jobs:
           - name: pages-bare
             modules: "[pages, auto-assign]"
             private: "false"
-            extra_data: "-d pages_setup=none -d pages_build_command=./build.sh -d pages_production=main -d channel=staging"
+            extra_data: "-d pages_setup=none -d pages_build_command=./build.sh -d pages_production=main"
             expect_in_pages: |
               ./build.sh
               production: main
@@ -433,14 +431,14 @@ jobs:
           # description stays the harness default - EXTRA_DATA cannot carry
           # whitespace and no generated pair renders it.
           - name: dogfood-oracle
-            modules: "[agents, bun, release-please, skills, pr-title, auto-assign]"
+            modules: "[agents, bun, skills, pr-title, auto-assign]"
             private: "false"
             extra_data: "-d project_name=repo-platform"
     steps:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      # copier invokes migrations/run.ts with bun during copy/update.
+      # copier invokes the stamp hook with bun during copy/update.
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: .bun-version
@@ -487,7 +485,7 @@ jobs:
           git -C /tmp/smoke init -q
           (cd /tmp/smoke && "$GITHUB_WORKSPACE/actionlint" -color .github/workflows/*.yml)
 
-  # Generate from the previous build tag, then `copier update` to a fresh
+  # Generate from a previous build tree, then `copier update` to a fresh
   # build - the path every managed repo takes (details in the script).
   upgrade-path:
     runs-on: ubuntu-latest
@@ -496,13 +494,13 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      # copier invokes migrations/run.ts with bun during copy/update.
+      # copier invokes the stamp hook with bun during copy/update.
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: .bun-version
       - name: Install copier
         run: pipx install copier
-      - name: Update from previous build tag to a fresh build
+      - name: Update from a previous build tree to a fresh build
         run: .github/scripts/ci/upgrade_path_test.sh
 
   # Conventional Commit PR title, checked inside the gate so branch
@@ -520,53 +518,6 @@ jobs:
         uses: amannn/action-semantic-pull-request@v6
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  # Fails when the release-please PR head lacks main's tip at CHECK time:
-  # a stale release PR cuts a release whose version and changelog miss
-  # commits already on main. A main push after this run is only caught by
-  # release-please's refresh re-running CI. Other PRs stay mergeable while
-  # behind (required checks are not strict). The skip lives on the STEPS:
-  # all-green treats a skipped needed job as failure.
-  release-freshness:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v7
-        if: github.event_name == 'pull_request' && startsWith(github.head_ref, 'release-please--')
-        with:
-          # Full history: the ancestor check needs origin/main.
-          fetch-depth: 0
-          # PR head, not the default merge ref - the merge ref already
-          # contains main's tip, so it would always pass.
-          ref: ${{ github.event.pull_request.head.sha }}
-      - name: Require the release PR to contain the tip of main
-        if: github.event_name == 'pull_request' && startsWith(github.head_ref, 'release-please--')
-        run: .github/scripts/ci/release_freshness.sh
-
-  # Fails a release PR while an open release-blocker issue or a high+
-  # Dependabot alert says the tip is not release-worthy (this repo runs no
-  # tracking-stream module - fuzzer, nightly - so no tracking gate). Early
-  # visibility only: release.yml's pre-flight re-checks
-  # authoritatively at cut time. The skip lives on the STEPS: all-green
-  # treats a skipped needed job as failure.
-  release-health:
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions:
-      contents: read
-      issues: read
-      pull-requests: read
-      vulnerability-alerts: read
-    steps:
-      - uses: actions/checkout@v7
-        if: github.event_name == 'pull_request' && startsWith(github.head_ref, 'release-please--')
-      - name: Require a releasable tip
-        if: github.event_name == 'pull_request' && startsWith(github.head_ref, 'release-please--')
-        uses: ./actions/release-health
-        with:
-          mode: pull-request
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   # CodeQL runs inside the gate: this thin job calls the analysis workflow,
   # and a caller job's permissions are the ceiling for every job in the
@@ -607,8 +558,6 @@ jobs:
       - smoke-generate
       - upgrade-path
       - pr-title
-      - release-freshness
-      - release-health
       - codeql-javascript
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -624,33 +573,3 @@ jobs:
             echo "::error::all-green failed: ${failed% } did not succeed. Open the failing job's log in this run, fix the failure, and push again."
             exit 1
           fi
-
-  # Release from a green main only: the release pipeline (release.yml:
-  # release-please cuts a draft, the repo-owned update-release.yml hook
-  # mutates it, then the attested publish flips it live) runs downstream of
-  # all-green, so a red commit can never cut a release or refresh the
-  # release PR. Deliberately NOT in all-green's needs: it depends on the
-  # gate, it is not gated by it. Only push/dispatch runs release: pull
-  # requests must never reach it, and the weekly scheduled CodeQL re-scan
-  # has no business refreshing release state. Publishing with the fleet PAT
-  # (inherited secret) keeps the release event firing build-branches (the
-  # default GITHUB_TOKEN cannot trigger it), which tags templates/vX.Y.Z
-  # and rebuilds the latest channel.
-  release:
-    needs: [all-green]
-    if: >-
-      (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
-      && github.ref == 'refs/heads/main'
-    # The publishing ceiling for the release pipeline's jobs; nested jobs
-    # can only narrow it, never raise it.
-    permissions:
-      contents: write
-      pull-requests: write
-      id-token: write
-      attestations: write
-      # The release-health pre-flight (in release.yml) reads open
-      # issues and Dependabot alerts through this ceiling.
-      issues: read
-      vulnerability-alerts: read
-    uses: ./.github/workflows/release.yml
-    secrets: inherit

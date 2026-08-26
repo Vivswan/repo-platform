@@ -1,14 +1,14 @@
-# Auto-close pull requests targeting the generated build branches. staging
-# and latest are append-only outputs of build-branches.yml; nothing merges
-# into them - changes go to templates/ on main. pull_request_target (not
-# pull_request) so fork PRs are handled too; safe because the PR's code is
-# never checked out or executed here.
+# Auto-close pull requests targeting the generated build branch. `template`
+# is an append-only output of build-branches.yml; nothing merges into it -
+# changes go to templates/ on main. pull_request_target (not pull_request)
+# so fork PRs are handled too; safe because the PR's code is never checked
+# out or executed here.
 
 name: Protect Build Branches
 
 on:
   pull_request_target:
-    # edited fires when a PR is RETARGETED onto a build branch after opening.
+    # edited fires when a PR is RETARGETED onto the build branch after opening.
     types: [opened, reopened, edited]
 
 permissions:
@@ -16,7 +16,7 @@ permissions:
 
 jobs:
   close:
-    if: contains(fromJSON('["staging", "latest"]'), github.event.pull_request.base.ref)
+    if: github.event.pull_request.base.ref == 'template'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -27,5 +27,5 @@ jobs:
           BASE: ${{ github.event.pull_request.base.ref }}
         run: |
           gh pr comment "$PR" -R "$GITHUB_REPOSITORY" --body \
-            "\`$BASE\` is a generated build branch (append-only output of the build-branches workflow); nothing merges into it. Template changes go to \`templates/\` on \`main\`. Closing."
+            "\`$BASE\` is the generated build branch (append-only output of the build-branches workflow); nothing merges into it. Template changes go to \`templates/\` on \`main\`. Closing."
           gh pr close "$PR" -R "$GITHUB_REPOSITORY"

@@ -58,7 +58,7 @@ Managed: `ci.yml` and its standard jobs, `dependabot.yml` (github-actions ecosys
 
 Twin nightly issue streams backed by the same `fuzz-issue` action; `fuzzer` adds the failure-report/replay-artifact contract and release gating, `nightly` is the plain-CI stream.
 
-- Starters: `nightly-fuzz.yml` (fuzzer, cron 09:11 UTC) / `nightly.yml` (nightly, cron 06:59 UTC). Placeholder step is a green no-op until customized. The action pin inside a starter is never updated by sync (dependabot bumps it on released repos; staging pins `main`).
+- Starters: `nightly-fuzz.yml` (fuzzer, cron 09:11 UTC) / `nightly.yml` (nightly, cron 06:59 UTC). Placeholder step is a green no-op until customized. The action pin inside a starter is never updated by sync (it pins `main` and floats).
 - Parameters: `fuzzer_label` (default `fuzz-nightly`) / `nightly_label` (default `nightly-failure`). The two must differ (case-insensitive) when both modules are selected - both streams dedup AND auto-close by label, so a shared label lets one stream's green night close the other's open issue. The copier validator and the settings assembly both reject the collision.
 - Settings labels are automatic: the managed baseline declares the tracking label - `fuzz-nightly` (`B60205`) / `nightly-failure` (`D93F0B`) or the repo's recorded answer, read from `.copier-answers.yml` at apply time. A tracking issue stripped of its label is invisible to dedup and auto-close.
 - Renaming a label: update the recorded answer AND the starter's two `label:` inputs in the same PR (the starter is repo-owned; sync never fixes it). The managed baseline picks the renamed value up on the next apply.

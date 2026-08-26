@@ -120,7 +120,6 @@ for (const row of enriched.rows) {
     // that invariant), so every matrix row can emit it as its repo.
     repos.push({
       repo: row.display,
-      channel: row.channel,
       redact_name: row.redact_name,
       hide_details: row.hide_details,
       verify: row.verify,

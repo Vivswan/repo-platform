@@ -17,7 +17,6 @@ import {
   fragmentJobIds,
   gateJobsGroups,
   gateJobsParityErrors,
-  injectUsesRefPreamble,
   lockfileGroups,
   manifestEntries,
   manifestTemplate,
@@ -25,7 +24,6 @@ import {
   renderedSeparationErrors,
   type SourcedEntry,
   spliceContributions,
-  USES_REF_PREAMBLE,
 } from "../../scripts/compose_template";
 import { renderJinjaFile } from "../../scripts/jinja_subset";
 import { type ModuleManifest, parseManifest } from "../../scripts/module_manifests";
@@ -255,97 +253,6 @@ describe("applyToolchainSetup", () => {
     const errors = applyToolchainSetup(map);
     expect(errors).toHaveLength(1);
     expect(errors[0]).toContain("hoist the shared setup steps");
-  });
-});
-
-describe("injectUsesRefPreamble", () => {
-  const preamble = USES_REF_PREAMBLE.join("\n");
-
-  test("a file without a uses_ref reference is left alone", () => {
-    expect(injectUsesRefPreamble("templates/base/x.jinja", Buffer.from("name: X\n"))).toBeNull();
-  });
-
-  test("the preamble lands after the leading run of # comment lines", () => {
-    const result = injectUsesRefPreamble(
-      "templates/nightly/w.yml.jinja",
-      Buffer.from("# managed header\n# second line\nname: X\nuses: o/r/a@{{ uses_ref }}\n"),
-    );
-    if (result === null || "error" in result) throw new Error("expected an injection");
-    expect(result.data.toString("utf-8")).toBe(
-      `# managed header\n# second line\n${preamble}\nname: X\nuses: o/r/a@{{ uses_ref }}\n`,
-    );
-  });
-
-  test("a file with no leading comments gets the preamble at the very top", () => {
-    const result = injectUsesRefPreamble(
-      "templates/base/ci.yml.jinja",
-      Buffer.from("{#- header -#}\nuses: o/r/a@{{ uses_ref }}\n"),
-    );
-    if (result === null || "error" in result) throw new Error("expected an injection");
-    expect(result.data.toString("utf-8")).toBe(
-      `${preamble}\n{#- header -#}\nuses: o/r/a@{{ uses_ref }}\n`,
-    );
-  });
-
-  test("a blank line ends the header run: the preamble sits before it", () => {
-    const result = injectUsesRefPreamble(
-      "templates/pages/w.yml.jinja",
-      Buffer.from("# header\n\nname: X\nuses: o/r/a@{{ uses_ref }}\n"),
-    );
-    if (result === null || "error" in result) throw new Error("expected an injection");
-    expect(result.data.toString("utf-8")).toBe(
-      `# header\n${preamble}\n\nname: X\nuses: o/r/a@{{ uses_ref }}\n`,
-    );
-  });
-
-  test("a hand-written derivation line errors instead of double-defining", () => {
-    for (const hand of [
-      "{%- set tpl_ref = _copier_answers._commit -%}",
-      "{%- set release_pin = tpl_ref -%}",
-      "{%- set uses_ref = 'main' %}",
-      "{% set  uses_ref = 'main' %}",
-      "{%+ set uses_ref = 'main' %}",
-      "{% set (uses_ref) = 'main' %}",
-      "{% set extra, uses_ref = 1, 'main' %}",
-      "{% set tpl_ref %}templates/v1.2.3{% endset %}",
-    ]) {
-      const result = injectUsesRefPreamble(
-        "templates/demo/w.yml.jinja",
-        Buffer.from(`# h\n${hand}\nuses: o/r/a@{{ uses_ref }}\n`),
-      );
-      if (result === null || !("error" in result)) throw new Error("expected an error");
-      expect(result.error).toContain("templates/demo/w.yml.jinja");
-      expect(result.error).toContain("hand-writes");
-    }
-  });
-
-  test("reading a derivation name on a set's VALUE side stays legitimate", () => {
-    const result = injectUsesRefPreamble(
-      "templates/demo/w.yml.jinja",
-      Buffer.from("# h\n{%- set banner = uses_ref -%}\nuses: o/r/a@{{ uses_ref }}\n"),
-    );
-    if (result === null || "error" in result) throw new Error("expected an injection");
-    expect(result.data.toString("utf-8")).toContain("{%- set banner = uses_ref -%}");
-    expect(result.data.toString("utf-8")).toContain(USES_REF_PREAMBLE[6]);
-  });
-
-  test("a set-assignment smuggled inside a string value still errors (fail closed, not quote-aware)", () => {
-    const result = injectUsesRefPreamble(
-      "templates/demo/w.yml.jinja",
-      Buffer.from(
-        '# h\n{% set banner = "%} {% set uses_ref = x %}" %}\nuses: o/r/a@{{ uses_ref }}\n',
-      ),
-    );
-    if (result === null || !("error" in result)) throw new Error("expected the fail-closed error");
-    expect(result.error).toContain("hand-writes");
-  });
-
-  test("the canonical preamble itself carries every derivation line and no hand-copy bait", () => {
-    // The injector must never re-inject into its own output.
-    const once = injectUsesRefPreamble("t", Buffer.from("uses: o/r/a@{{ uses_ref }}\n"));
-    if (once === null || "error" in once) throw new Error("expected an injection");
-    const twice = injectUsesRefPreamble("t", once.data);
-    if (twice === null || !("error" in twice)) throw new Error("expected the tripwire");
   });
 });
 

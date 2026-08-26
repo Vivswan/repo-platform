@@ -9,24 +9,20 @@ This repo pushes updates to managed repos: sync PRs and settings changes origina
 | Branch | Contents |
 |---|---|
 | `main` | Sources only (`templates/`, workflows, actions, scripts); NOT consumable by copier |
-| `staging` | Generated build of the latest `main` commit (rebuilt on every push) |
-| `latest` | Generated build of the latest release, tagged `templates/vX.Y.Z` |
+| `template` | Generated build of the latest `main` commit (rebuilt on every push) |
 
-`staging` and `latest` are orphan, append-only branches published by the [build-branches workflow](.github/workflows/build-branches.yml):
+`template` is an orphan, append-only branch published by the [build-branches workflow](.github/workflows/build-branches.yml):
 
-- PRs against them are closed automatically, and a `main` history rewrite cannot invalidate them.
-- `templates/` on main holds the sources; the composed tree that copier renders lands on the build branches.
+- PRs against it are closed automatically, and a `main` history rewrite cannot invalidate it.
+- `templates/` on main holds the sources; the composed tree that copier renders lands on the build branch.
 
-### Modules and channels<!-- BEGIN GENERATED: module-roster (scripts/generate.ts - edit module.yml manifests, not this block) -->
+### Modules<!-- BEGIN GENERATED: module-roster (scripts/generate.ts - edit module.yml manifests, not this block) -->
 
 - Modules (pick any combination): `agents`, `bun`, `node`, `deno`, `uv`, `rust`, `pages`, `release-please`, `issue-templates`, `skills`, `pr-title`, `auto-assign`, `fuzzer`, `nightly`, `settings-sync`, `custom-license`. Modules with parameters (like `pages`) ask follow-up questions only when selected. After generation, module selection lives in each repo's own `.repo-platform.yml`: edit its `modules:` list and the next sync applies the change.<!-- END GENERATED: module-roster -->
-- Channel `latest`: follows released `templates/vX.Y.Z` build tags; migrations run between releases.
-- Channel `staging`: follows the staging branch head; migrations are skipped. Vivswan's own managed repos use it.
-- Which channel a repo follows is fleet config: `defaults.channel` in [`repos.yml`](repos.yml), overridable per repo under `config:`.
 
 ### Keeping repos in sync
 
-- The [sync-repos workflow](.github/workflows/sync-repos.yml) here runs on every release, on a weekly cron, and on manual dispatch. For each managed repo it runs `copier update`, validates the result, and pushes a branch + PR into the repo with the fleet PAT. PRs opened by a PAT trigger the target repo's CI and auto-assign normally.
+- The [sync-repos workflow](.github/workflows/sync-repos.yml) here runs on a weekly cron and on manual dispatch. For each managed repo it runs `copier update`, validates the result, and pushes a branch + PR into the repo with the fleet PAT. PRs opened by a PAT trigger the target repo's CI and auto-assign normally.
 - Clean updates arm squash auto-merge on the PR, so it merges itself once the repo's `all-green` check passes. A PR that needs review stays manual: auto-resolved conflicts, withheld workflow files, failed validation, an update that deletes a license file (below-marker content does not survive a delete-vs-modify merge, so a human checks whether the deleted file held anything worth keeping), a failed settings.yml layering transition, or a dispatch with `manual=true`, which holds every PR in the run for human review.
 - `repos.yml` decides which repos: a quoted `"*"` wildcard auto-discovers every owned, non-archived repo the PAT can WRITE to (granting the fleet PAT a repository is what enrolls it; fine-grained PATs can read every public repo, so read access alone means nothing), `exclude:` opts repos out, and a discovered repo is synced only once it carries `.repo-platform.yml` (unadopted repos are skipped with a notice).
 - Conflicts (local edits overlapping template changes) resolve in the template's favor: the PR lists the dropped local lines for review. The run stays green (auto-resolution is normal operation); validation failures still turn it red.
@@ -56,9 +52,9 @@ A missing secret is a misconfiguration of this repo: sync and settings runs fail
 |---|---|
 | `templates/` | SOURCE of the template: one folder per module (each with a `module.yml` manifest, the source of module identity) plus `base/`; shared files composed via `{# compose:<anchor> #}` markers filled from per-module `fragments/` or generated from manifest data |
 | `copier.yml` | Questions (module choices, toolchain defaults, and the tracking-label validators are generated regions fed by the `templates/<module>/module.yml` manifests; standards-only, project skeletons come from `uv init` / `bun init`) |
-| `repos.yml` | Fleet config: which repos are managed (wildcard + exclude) and which channel each follows |
+| `repos.yml` | Fleet config: which repos are managed (wildcard + exclude) |
 | `.github/settings-baseline.yml` | Layer 1 of the settings merge: the overridable fleet defaults. The visibility overlays and the fleet override sit beside it ([docs](docs/settings.md)) |
-| `.github/workflows/sync-repos.yml` | Push sync fan-out: release + weekly cron + dispatch, parallel matrix legs, one per repo |
+| `.github/workflows/sync-repos.yml` | Push sync fan-out: weekly cron + dispatch, parallel matrix legs, one per repo |
 | `.github/workflows/settings-repos.yml` | Central settings apply across the fleet |
 | `.github/workflows/reusable-*.yml` | Reusable workflows: template-sync (the push-sync engine), auto-assign, codeql, pages ([docs](docs/pages.md)), apply-settings ([docs](docs/settings.md)) |
 | `actions/check-typography` | Blocks look-alike/invisible unicode (vendored from cloud-speech, config via `.typography-allow` + repo-owned `.typography-allow.local`) |
@@ -69,7 +65,6 @@ A missing secret is a misconfiguration of this repo: sync and settings runs fail
 | `actions/fuzz-issue` | Files/updates the label-deduplicated nightly tracking issue (fuzz failure reports or a generic nightly-failure body), closes it on green (used by the fuzzer and nightly starters, [fuzzer docs](docs/fuzzer.md), [nightly docs](docs/nightly.md)) |
 | `actions/release-health` | Gates releases: open tracking-stream issues (the fuzzer and nightly modules' labels) and blocker issues and open Dependabot alerts block, an override label on the release PR bypasses with warnings |
 | `scripts/build_gitignore.ts` | <!-- BEGIN GENERATED: gitignore-upstream-map (scripts/generate.ts - edit module.yml manifests, not this block) -->Regenerates the gitignore outputs (`templates/base/.gitignore.jinja`, the bun/node/deno/uv/rust toolchain fragments, this repo's `.gitignore`) from the latest [github/gitignore](https://github.com/github/gitignore) (Windows + macOS + Linux always, Node + bun / Deno / Python / Rust by bun/node/deno/uv/rust module)<!-- END GENERATED: gitignore-upstream-map --> |
-| `migrations/` | Copier `_migrations` scripts (TypeScript, run with bun) for breaking changes |
 | `skills/` | Portable agent skills for working with the platform from other repos (new-project setup, sync-PR handling, module add/remove); installed with `npx skills` (see each skill's README), never synced to managed repos |
 | `docs/` | [all-green convention](docs/all-green.md), [new repo](docs/new-repo.md), [pages module](docs/pages.md), [fuzzer module](docs/fuzzer.md), [nightly module](docs/nightly.md), [skills module](docs/skills.md), [settings](docs/settings.md), [toolchain pins](docs/toolchains.md), [eject](docs/eject.md) |
 
@@ -86,8 +81,7 @@ A missing secret is a misconfiguration of this repo: sync and settings runs fail
 
 `CLAUDE.md`, `.github/copilot-instructions.md`, and `.github/agents.md` are symlinks to the repo's `AGENTS.md` (the `agents` module, on by default): one source of truth for agent instructions.
 
-## Releasing
+## Shipping template changes
 
-- [release-please](https://github.com/googleapis/release-please) accumulates [conventional commits](https://www.conventionalcommits.org) on `main` into a release PR; merging it forces the `vX.Y.Z` tag, updates `CHANGELOG.md`, and creates the GitHub release as a draft (published releases are immutable), which the release pipeline then flips live (attesting any assets first).
-- Publishing a stable release whose tag matches `releases/latest` rebuilds the `latest` branch (tagged `templates/vX.Y.Z`) and triggers `sync-repos.yml`, which pushes an update PR into every managed repo (prereleases and releases published for older tags do not move the channel).
-- The weekly sync-repos cron is the catch-all: it heals any missed release sync, and staging-channel repos pick up merges to `main` through it. For one repo immediately: `gh workflow run sync-repos.yml -f repo=Vivswan/<repo>`.
+- Merging to `main` rebuilds the `template` branch (the build-branches workflow runs on every push); managed repos pick the new build up through the weekly sync-repos cron. For one repo immediately: `gh workflow run sync-repos.yml -f repo=Vivswan/<repo>`; for the whole fleet: `gh workflow run sync-repos.yml`.
+- Managed repos that select the `release-please` module get their own release pipeline; repo-platform itself runs none - the template branch is its only release artifact.

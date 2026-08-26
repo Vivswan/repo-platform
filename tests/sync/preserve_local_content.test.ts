@@ -1161,7 +1161,7 @@ describe("preserve_local_content render mode", () => {
 
 // End-to-end against a REAL template render and a REAL `copier recopy
 // --overwrite`, mirroring reusable-template-sync.yml's recovery path:
-// build the staging tree, generate a repo from it, customize the
+// build a scratch template tree, generate a repo from it, customize the
 // sanctioned repo-local regions, commit, recopy (which resets them - the
 // live defect), then assert the carry restores every region. Requires
 // copier on PATH, so it runs where copier exists (locally and on the sync
@@ -1186,14 +1186,7 @@ describe.skipIf(!hasCopier)("preserve_local_content end-to-end (copier recopy)",
         }
         return proc.stdout.toString();
       };
-      run([
-        "bun",
-        join(repoRoot, ".github/scripts/build-branches/branch_tree.ts"),
-        "--dest",
-        tree,
-        "--channel",
-        "staging",
-      ]);
+      run(["bun", join(repoRoot, ".github/scripts/build-branches/branch_tree.ts"), "--dest", tree]);
       run(["git", "-C", tree, "init", "-b", "build"]);
       run(["git", "-C", tree, "add", "-A"]);
       run(["git", "-C", tree, "-c", "user.name=t", "-c", "user.email=t@e.c", "commit", "-qm", "b"]);

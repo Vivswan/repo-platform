@@ -1,6 +1,6 @@
 # Copier template configuration for Vivswan/repo-platform.
 # Downstream repos are generated/updated from the template/ subdirectory,
-# which exists only on the generated staging/latest build branches (on main
+# which exists only on the generated `template` build branch (on main
 # it is a local gitignored build artifact; sources live in templates/).
 
 _min_copier_version: "9.8.0"
@@ -52,20 +52,12 @@ _skip_if_exists:
   # never rewrites it.
   - .github/settings.yml
 
-# Migrations use FROM-version naming (see migrations/run.ts): each script in
-# migrations/ is named for the release it migrates away from, so authoring
-# never requires predicting the next release number. Copier invokes the
-# runner once per update; selection happens inside it.
-#
-# The second entry stamps the ownership manifest's per-repo hashes: they
-# are facts of the rendered tree, so stamping must run after copier writes
-# it - and after run.ts, so files a migration edits are stamped too.
-# Copier runs _migrations only on update and _tasks only on copy/recopy,
-# hence the same stamper (shipped next to this file on the build branches)
-# is wired into both.
+# The _migrations entry stamps the ownership manifest's per-repo hashes:
+# they are facts of the rendered tree, so stamping must run after copier
+# writes it. Copier runs _migrations only on update and _tasks only on
+# copy/recopy, hence the same stamper (shipped next to this file on the
+# build branch) is wired into both.
 _migrations:
-  - command: bun "{{ _copier_conf.src_path }}/migrations/run.ts"
-    when: "{{ _stage == 'after' }}"
   - command: bun "{{ _copier_conf.src_path }}/stamp_manifest.ts"
     when: "{{ _stage == 'after' }}"
 
@@ -87,16 +79,6 @@ project_slug:
 description:
   type: str
   help: One-line repository description (used in settings.yml)
-
-# Which generated build branch this repo follows. Vivswan's own managed
-# repos follow staging; latest is the stable default for everything else.
-channel:
-  type: str
-  help: Template update channel this repo follows
-  choices:
-    latest - released template versions (templates/vX.Y.Z tags): latest
-    staging - main HEAD builds (testing; migrations are skipped): staging
-  default: latest
 
 # Feature modules: any combination. Each module gates the files/config it
 # owns; per-module parameters below are asked only when the module is

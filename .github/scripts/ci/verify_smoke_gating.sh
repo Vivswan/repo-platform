@@ -585,8 +585,7 @@ fi
 
 # Managed ci.yml is always generated (repo checks live in the repo-owned
 # checks.yml it calls); the validator asserts the all-green shape, so only
-# check the wiring and the composite-action pin falling back to main here
-# (scratch build tree: _commit is a bare sha, not a templates/vX.Y.Z tag).
+# check the wiring and the composite-action pin at main here.
 test -f "$wf/ci.yml"
 test -f "$wf/checks.yml"
 present "uses: ./.github/workflows/checks.yml" "$wf/ci.yml"
@@ -603,12 +602,6 @@ fi
 # The per-repo sync caller is gone: template updates are pushed by
 # repo-platform's sync-repos workflow, so no sync workflow may render.
 test ! -e "$wf/template-sync.yml"
-# Channel is recorded in copier's answers (a row can override to staging
-# via EXTRA_DATA; every other row takes the latest default).
-case "$EXTRA_DATA" in
-  *channel=staging*) present "channel: staging" /tmp/smoke/.copier-answers.yml ;;
-  *) present "channel: latest" /tmp/smoke/.copier-answers.yml ;;
-esac
 
 # Ownership manifest: rendered for every row and stamped by the template's
 # post-render task. Entry classes and hashes are read with python3 (the
@@ -669,8 +662,8 @@ if [ "$(mf ".github/repo-platform-manifest.json" hash)" != "null" ]; then
   exit 1
 fi
 # Provenance: the self entry's commit must equal the _commit copier
-# recorded (a staging-form sha here; the release form is the upgrade
-# test's territory). YAML quotes the sha whenever it would parse as a
+# recorded (a bare build-tree sha here). YAML quotes the sha whenever it
+# would parse as a
 # number (an all-digit or exponent-form sha, ~4% of them), so strip the
 # optional surrounding quotes or the comparison fails on a sha lottery.
 answers_commit="$(sed -n "s/^_commit:[[:space:]]*//p" /tmp/smoke/.copier-answers.yml \

@@ -84,18 +84,13 @@ describe("enrich", () => {
 
   test("classifies public, hinted, and self-disclosed rows", () => {
     const { rows } = enrich(
-      [
-        { repo: "o/pub", channel: "staging" },
-        { repo: "o/hidden-one", channel: null },
-        { repo: "o/committed-private", channel: "latest" },
-      ],
+      [{ repo: "o/pub" }, { repo: "o/hidden-one" }, { repo: "o/committed-private" }],
       discovered,
       selfDisclosed,
       tagFor,
     );
     expect(rows[0]).toEqual({
       repo: "o/pub",
-      channel: "staging",
       redact_name: false,
       hide_details: false,
       display: "o/pub",
@@ -103,7 +98,6 @@ describe("enrich", () => {
     });
     expect(rows[1]).toEqual({
       repo: "o/hidden-one",
-      channel: "",
       redact_name: true,
       hide_details: true,
       display: "h**-o**",
@@ -112,7 +106,6 @@ describe("enrich", () => {
     // Committed name stays visible; details still hide.
     expect(rows[2]).toEqual({
       repo: "o/committed-private",
-      channel: "latest",
       redact_name: false,
       hide_details: true,
       display: "o/committed-private",
@@ -121,12 +114,7 @@ describe("enrich", () => {
   });
 
   test("fails closed: absent from discovery asks the probe, defaulting private", () => {
-    const { rows } = enrich(
-      [{ repo: "o/undiscovered", channel: null }],
-      discovered,
-      () => false,
-      tagFor,
-    );
+    const { rows } = enrich([{ repo: "o/undiscovered" }], discovered, () => false, tagFor);
     expect(rows[0].redact_name).toBe(true);
     expect(rows[0].hide_details).toBe(true);
     expect(rows[0].display).toBe("u**d");
@@ -135,7 +123,7 @@ describe("enrich", () => {
 
   test("a probe that proves an undiscovered repo public keeps it plain", () => {
     const { rows } = enrich(
-      [{ repo: "other/cross-owner", channel: null }],
+      [{ repo: "other/cross-owner" }],
       discovered,
       () => false,
       tagFor,
@@ -143,7 +131,6 @@ describe("enrich", () => {
     );
     expect(rows[0]).toEqual({
       repo: "other/cross-owner",
-      channel: "",
       redact_name: false,
       hide_details: false,
       display: "other/cross-owner",
@@ -158,12 +145,7 @@ describe("enrich", () => {
       { repo: "o/hail-sooner", private: true },
       { repo: "o/hidden-server", private: true },
     ];
-    const { rows } = enrich(
-      [{ repo: "o/hidden-server", channel: null }],
-      colliding,
-      () => false,
-      tagFor,
-    );
+    const { rows } = enrich([{ repo: "o/hidden-server" }], colliding, () => false, tagFor);
     expect(rows[0].display).toBe("h**-s**r#2");
   });
 });
@@ -171,7 +153,6 @@ describe("enrich", () => {
 describe("enrichedRowSchema", () => {
   const redacted = {
     repo: "o/hidden-one",
-    channel: "",
     redact_name: true,
     hide_details: true,
     display: "h**-o**",
@@ -179,7 +160,6 @@ describe("enrichedRowSchema", () => {
   };
   const plain = {
     repo: "o/pub",
-    channel: "staging",
     redact_name: false,
     hide_details: false,
     display: "o/pub",
@@ -230,8 +210,8 @@ describe("parseDiscoveredList", () => {
     // The legacy ladder checked exactly those two fields; everything else
     // passed through untouched, whatever its type - pinned so a schema
     // tightening cannot silently change it.
-    expect(parseDiscoveredList([{ repo: "o/a", private: true, channel: 42 }])).toEqual([
-      { repo: "o/a", private: true, channel: 42 },
+    expect(parseDiscoveredList([{ repo: "o/a", private: true, extra: 42 }])).toEqual([
+      { repo: "o/a", private: true, extra: 42 },
     ]);
   });
 
@@ -249,29 +229,26 @@ describe("parseDiscoveredList", () => {
 });
 
 describe("parseSelectionList", () => {
-  test("only repo is validated; channel and extras ride along untouched", () => {
+  test("only repo is validated; extras ride along untouched", () => {
     const parsed = parseSelectionList([
-      { repo: "o/a", owner: "o", name: "a", channel: "staging" },
-      { repo: "o/b", channel: null },
+      { repo: "o/a", owner: "o", name: "a" },
+      { repo: "o/b" },
       { repo: "o/c" },
     ]);
     expect(parsed).toEqual([
-      { repo: "o/a", owner: "o", name: "a", channel: "staging" },
-      { repo: "o/b", channel: null },
+      { repo: "o/a", owner: "o", name: "a" },
+      { repo: "o/b" },
       { repo: "o/c" },
     ]);
   });
 
-  test("a wrong-typed channel survives unchanged (the legacy ladder never inspected it)", () => {
-    // Pins the fail-open side of the parity claim: tightening the schema
-    // to channel: string|null would break here, not silently in enrich.
-    expect(parseSelectionList([{ repo: "o/a", channel: 42 }])).toEqual([
-      { repo: "o/a", channel: 42 as unknown as string },
-    ]);
+  test("a wrong-typed EXTRA key survives unchanged (the ladder never inspected it)", () => {
+    // Pins the fail-open side of the parity claim: only repo is validated.
+    expect(parseSelectionList([{ repo: "o/a", extra: 42 }])).toEqual([{ repo: "o/a", extra: 42 }]);
   });
 
   test("rejects a missing or non-string repo and a non-array payload", () => {
-    expect(parseSelectionList([{ channel: "staging" }])).toBeNull();
+    expect(parseSelectionList([{ owner: "o" }])).toBeNull();
     expect(parseSelectionList([{ repo: 7 }])).toBeNull();
     expect(parseSelectionList("o/a")).toBeNull();
   });
@@ -283,8 +260,8 @@ describe("enrich CLI", () => {
     writeFileSync(
       join(dir, "selection.json"),
       JSON.stringify([
-        { repo: "Vivswan/pub", owner: "Vivswan", name: "pub", channel: "staging" },
-        { repo: "Vivswan/hidden-server", owner: "Vivswan", name: "hidden-server", channel: null },
+        { repo: "Vivswan/pub", owner: "Vivswan", name: "pub" },
+        { repo: "Vivswan/hidden-server", owner: "Vivswan", name: "hidden-server" },
       ]),
     );
     writeFileSync(

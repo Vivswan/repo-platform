@@ -23,7 +23,7 @@ concurrency:
 
 jobs:
   deploy:
-    uses: {{ github_username }}/repo-platform/.github/workflows/reusable-pages.yml@{{ uses_ref }}
+    uses: {{ github_username }}/repo-platform/.github/workflows/reusable-pages.yml@main
     with:
       setup: {{ pages_setup }}
       install_command: {{ pages_install_command | tojson }}

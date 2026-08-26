@@ -29,7 +29,7 @@ permissions:
 
 jobs:
   apply:
-    uses: {{ github_username }}/repo-platform/.github/workflows/reusable-apply-settings.yml@{{ uses_ref }}
+    uses: {{ github_username }}/repo-platform/.github/workflows/reusable-apply-settings.yml@main
     with:
       check_only: {% raw %}${{ inputs.check_only || false }}{% endraw %}
     secrets:

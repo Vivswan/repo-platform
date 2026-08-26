@@ -8,7 +8,7 @@ Selecting the `nightly` module gives a repository a `nightly.yml` starter workfl
 
 A human cancelling an in-flight nightly run also counts as red and files an issue (the report job runs `if: always()` and cannot tell a timeout from a hand cancel). That trade is deliberate: a spurious issue the next green night closes beats a hang going silent.
 
-The issue filing and closing come from the same `fuzz-issue` composite action the fuzzer module uses (`actions/fuzz-issue`; the action serves any nightly stream), pinned like every other managed action: released repos pin the matching `vX.Y.Z` tag, staging-channel repos pin `main`. Because this stream passes no `artifacts-dir`, the action never looks for failure reports: the issue body always points at the run log. A stream that DOES write per-failure reports wants the fuzzer module's contract instead (docs/fuzzer.md).
+The issue filing and closing come from the same `fuzz-issue` composite action the fuzzer module uses (`actions/fuzz-issue`; the action serves any nightly stream), pinned at `main` like every other managed action. Because this stream passes no `artifacts-dir`, the action never looks for failure reports: the issue body always points at the run log. A stream that DOES write per-failure reports wants the fuzzer module's contract instead (docs/fuzzer.md).
 
 ## Module parameter (copier question)
 
@@ -24,7 +24,7 @@ One more place must know the label: the repository's settings labels. Settings a
 
 Replace the placeholder in the `checks` job with the repository's own nightly checks. Until you do, the step is a green no-op that prints a warning; an uncustomized starter never files issues. Everything the managed ci.yml does NOT run per-PR is a candidate: for a repo like litellm, the existing nightly suite and docker test jobs move in as-is - port their setup and run steps into the `checks` job, or add them as sibling jobs and extend the `report` job's `needs` list and red/green conditions to fold in each result. The report job already runs `if: always()` and decides red or green from the `needs` results, so one green job cannot close an issue another job just filed. Keep sibling jobs unconditional: a sibling skipped by its own `if:` reports `result == 'skipped'`, which matches neither the red nor the green condition, and the report job silently does nothing that night - if a sibling must be conditional, fold its `skipped` state into one side explicitly.
 
-One caveat carried over from the fuzzer starter: because this file is generated once and then repo-owned, the `fuzz-issue` action pin inside it is never updated by template sync (released repos get dependabot bump PRs for it; staging-channel repos pin `main` and float). A breaking change to the action's inputs therefore needs a manual edit here, announced in the release notes.
+One caveat carried over from the fuzzer starter: because this file is generated once and then repo-owned, the `fuzz-issue` action pin inside it is never updated by template sync (it pins `main` and floats). A breaking change to the action's inputs therefore needs a manual edit here, announced loudly in the change's PR.
 
 ## Issue lifecycle
 

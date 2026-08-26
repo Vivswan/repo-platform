@@ -51,7 +51,7 @@ To go back, undo all three (in particular, remove the variable AND clear the cus
 
 ## Caveats
 
-- Releases published by the default `GITHUB_TOKEN` (e.g. [release-please](https://github.com/googleapis/release-please) without a PAT) do not fire `pages.yml`'s `release:` trigger (the same token caveat as repo-platform's sync-repos.yml). The next push to main or a manual `workflow_dispatch` picks the release up, since the root is re-resolved from the latest release on every run.
+- Releases published by the default `GITHUB_TOKEN` (e.g. [release-please](https://github.com/googleapis/release-please) without a PAT) do not fire `pages.yml`'s `release:` trigger. The next push to main or a manual `workflow_dispatch` picks the release up, since the root is re-resolved from the latest release on every run.
 - Serving Pages from a private repository requires a paid GitHub plan; the workflow is unchanged either way, the deploy step simply fails on a free private repo.
 - `pages_production: main` publishes main HEAD at the root and disables the staging path entirely.
 - The setup steps install the fleet-pinned toolchain version when the built source carries its version dotfile (`.bun-version` / `.node-version` / `.dvmrc` - see [docs/toolchains.md](toolchains.md)), preferring the production tree's pin over staging's; without the dotfile they float on the setup action's default.

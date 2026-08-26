@@ -2,7 +2,7 @@
 // Materializes the two clean template renders a sync run consumes, once,
 // in $RUNNER_TEMP: render-old (the template at the recorded pre-update
 // ref, with the answers recorded before this update) and render-new (the
-// target ref, with the live module/channel/private/description data).
+// target ref, with the live module/private/description data).
 // Invoked from the repo-platform checkout root by
 // reusable-template-sync.yml's "Materialize clean renders" step; the
 // split-file rebuild (preserve_local_content.ts --render-dir) consumes
@@ -21,7 +21,7 @@
 // harness and rehearse create fresh scratch dirs per run - a reused
 // directory would serve renders from whatever inputs built them.
 //
-// Env: OLD_SHA, TARGET_REF, MODULES, CHANNEL, PRIVATE, DESCRIPTION,
+// Env: OLD_SHA, TARGET_REF, MODULES, PRIVATE, DESCRIPTION,
 // SRC_PATH, RUNNER_TEMP; TARGET_DIR (default target).
 
 import { existsSync, renameSync, rmSync, writeFileSync } from "node:fs";
@@ -89,8 +89,8 @@ export function ensureRenders(): CleanRenders {
     rmSync(dir, { recursive: true, force: true });
   }
 
-  // The new render applies the live module/channel/private/description
-  // data on top of the recorded answers.
+  // The new render applies the live module/private/description data on
+  // top of the recorded answers.
   run([
     "bun",
     ".github/scripts/sync/render_data.ts",
@@ -102,8 +102,6 @@ export function ensureRenders(): CleanRenders {
     join(runnerTemp, "data-new.yml"),
     "--modules",
     requireEnv("MODULES"),
-    "--channel",
-    requireEnv("CHANNEL"),
     "--private",
     requireEnv("PRIVATE"),
     "--description",

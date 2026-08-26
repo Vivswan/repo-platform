@@ -20,7 +20,6 @@ function target(repo: string, hideDetails = false): Target {
 function publicRow(repo: string): EnrichedRow {
   return {
     repo,
-    channel: "",
     redact_name: false,
     hide_details: false,
     display: repo,
@@ -65,7 +64,6 @@ describe("buildMatrix", () => {
   test("a redacted row emits its display, never the slug", () => {
     const row: EnrichedRow = {
       repo: "Vivswan/hidden-server",
-      channel: "",
       redact_name: true,
       hide_details: true,
       display: "h**-s**r",
@@ -87,7 +85,6 @@ describe("buildMatrix", () => {
   test("a self-disclosed private row keeps its committed name", () => {
     const row: EnrichedRow = {
       repo: "Vivswan/committed-private",
-      channel: "",
       redact_name: false,
       hide_details: true,
       display: "Vivswan/committed-private",
@@ -109,7 +106,6 @@ describe("applyOnly", () => {
   const rows: EnrichedRow[] = [
     {
       repo: "Vivswan/beta",
-      channel: "",
       redact_name: false,
       hide_details: false,
       display: "Vivswan/beta",
@@ -117,7 +113,6 @@ describe("applyOnly", () => {
     },
     {
       repo: "Vivswan/gamma",
-      channel: "",
       redact_name: true,
       hide_details: true,
       display: "g**a",

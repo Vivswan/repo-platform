@@ -6,7 +6,7 @@ Selecting the `fuzzer` module gives a repository a `nightly-fuzz.yml` starter wo
 - on failure, uploads the failure artifacts and files (or updates) a label-deduplicated tracking issue built from your failure reports, then dispatches auto-assign at it (when that module is selected)
 - on a green run, comments on and closes every open issue carrying the tracking label
 
-The issue filing and closing come from the `fuzz-issue` composite action in this repository (`actions/fuzz-issue`), pinned like every other managed action: released repos pin the matching `vX.Y.Z` tag, staging-channel repos pin `main`. The action needs `gh` on the runner, which GitHub-hosted runners preinstall; self-hosted runners must provide it. The same action serves the nightly module's plain-CI stream (docs/nightly.md); the artifacts contract below is what sets the fuzz stream apart.
+The issue filing and closing come from the `fuzz-issue` composite action in this repository (`actions/fuzz-issue`), pinned at `main` like every other managed action. The action needs `gh` on the runner, which GitHub-hosted runners preinstall; self-hosted runners must provide it. The same action serves the nightly module's plain-CI stream (docs/nightly.md); the artifacts contract below is what sets the fuzz stream apart.
 
 ## Module parameter (copier question)
 
@@ -24,7 +24,7 @@ Replace the placeholder in the `Fuzz` step with your fuzzer, seeded from `$SEED`
 
 Bound the fuzz run itself below the job's `timeout-minutes` (a wall-clock flag, or a `timeout` wrapper). A job that hits its timeout is cancelled, not failed, and cancelled jobs skip the `if: failure()` steps: no artifact, no issue, a silent night for exactly the hang a fuzzer exists to find.
 
-One more caveat, because this file is generated once and then repo-owned: the `fuzz-issue` action pin inside it is never updated by template sync (released repos get dependabot bump PRs for it; staging-channel repos pin `main` and float). A breaking change to the action's inputs therefore needs a manual edit here, announced in the release notes.
+One more caveat, because this file is generated once and then repo-owned: the `fuzz-issue` action pin inside it is never updated by template sync (it pins `main` and floats). A breaking change to the action's inputs therefore needs a manual edit here, announced loudly in the change's PR.
 
 ## The failure-report contract (v1)
 

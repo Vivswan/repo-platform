@@ -43,6 +43,119 @@ afterAll(() => {
   for (const root of roots) rmSync(root, { recursive: true, force: true });
 });
 
+const MANIFEST = ".github/repo-platform-manifest.json";
+
+// Absence and provenance checks are STRICT (every build ships the
+// manifest), so every client-render fixture must carry a manifest listing
+// each expected path whose file exists. This mirror of the validator's
+// ownership tables stamps one from the fixture's final tree; a drifted
+// mirror fails loudly through the roster cross-check, so it cannot rot
+// silently. Tests probing manifest behavior itself pass their own manifest
+// (which wins) or opt out via `noManifest`.
+const TAIL_MARKER = "<!-- repo-platform:local-section -->";
+const HASH_COMMENT_MARKER = "# repo-platform:local-section";
+type MirrorEntry = {
+  path: string;
+  kind: "header" | "marker";
+  marker?: string;
+  publicOnly?: boolean;
+  withoutModule?: string;
+};
+const MIRROR_BASE: MirrorEntry[] = [
+  { path: ".copier-answers.yml", kind: "header" },
+  { path: ".editorconfig", kind: "marker", marker: HASH_COMMENT_MARKER },
+  { path: ".gitattributes", kind: "marker", marker: HASH_COMMENT_MARKER },
+  { path: ".github/CODEOWNERS", kind: "marker", marker: HASH_COMMENT_MARKER },
+  { path: ".github/dependabot.yml", kind: "header" },
+  { path: ".github/workflows/ci.yml", kind: "header" },
+  { path: ".repo-platform.yml", kind: "header" },
+  { path: ".typography-allow", kind: "header" },
+  { path: ".yamllint", kind: "header" },
+  { path: "CODE_OF_CONDUCT.md", kind: "header", publicOnly: true },
+  { path: "CONTRIBUTING.md", kind: "marker", marker: TAIL_MARKER, publicOnly: true },
+  { path: "LICENSE.md", kind: "marker", marker: TAIL_MARKER, withoutModule: "custom-license" },
+  { path: "SECURITY.md", kind: "marker", marker: TAIL_MARKER },
+];
+const MIRROR_MODULES: Record<string, MirrorEntry[]> = {
+  agents: [{ path: "AGENTS.md", kind: "marker", marker: TAIL_MARKER }],
+  bun: [{ path: ".github/workflows/dependabot-bun-lockfile.yml", kind: "header" }],
+  deno: [{ path: ".github/workflows/deno-audit.yml", kind: "header" }],
+  pages: [{ path: ".github/workflows/pages.yml", kind: "header" }],
+  "release-please": [{ path: ".github/workflows/release.yml", kind: "header" }],
+  skills: [{ path: ".github/workflows/validate-skills.yml", kind: "header" }],
+  "auto-assign": [{ path: ".github/workflows/auto-assign.yml", kind: "header" }],
+  "settings-sync": [{ path: ".github/workflows/settings-sync.yml", kind: "header" }],
+};
+
+const shaLatin1 = (text: string) =>
+  new Bun.CryptoHasher("sha256").update(Buffer.from(text, "latin1")).digest("hex");
+
+/** Twin of the validator's managedHalf: through the first marker line's
+ *  newline for "above", from the start of the marker line for "below". */
+function managedHalfOf(content: string, marker: string, managed: "above" | "below"): string | null {
+  let offset = 0;
+  for (const line of content.split("\n")) {
+    const end = offset + line.length;
+    if (line.trim() === marker) {
+      return managed === "above"
+        ? content.slice(0, Math.min(end + 1, content.length))
+        : content.slice(offset);
+    }
+    offset = end + 1;
+  }
+  return null;
+}
+
+function manifestForTree(tree: Record<string, string>): string {
+  const answers = tree[".copier-answers.yml"] ?? "";
+  const isPrivate = /^private:\s*true\b/m.test(answers);
+  const commit = /^_commit:[ \t]*(.+?)[ \t]*$/m.exec(answers)?.[1] ?? null;
+  const modules = (/^modules:\s*\[([^\]]*)\]/m.exec(tree[".repo-platform.yml"] ?? "")?.[1] ?? "")
+    .split(",")
+    .map((name) => name.trim().replace(/^["']|["']$/g, ""))
+    .filter(Boolean);
+  const entries: Record<string, string> = {
+    [MANIFEST]: `{"class": "managed", "hash": null, "commit": ${
+      commit === null ? "null" : JSON.stringify(commit)
+    }}`,
+  };
+  const expected = [
+    ...MIRROR_BASE.filter(
+      (entry) =>
+        !(entry.publicOnly && isPrivate) &&
+        !(entry.withoutModule !== undefined && modules.includes(entry.withoutModule)),
+    ),
+    ...modules.flatMap((name) => MIRROR_MODULES[name] ?? []),
+  ];
+  for (const { path, kind, marker } of expected) {
+    const content = tree[path];
+    if (content === undefined) continue;
+    if (kind === "header") {
+      entries[path] = `{"class": "managed", "hash": "${shaLatin1(content)}"}`;
+    } else {
+      // A missing or duplicated marker is that check's own report; the
+      // manifest still lists the half the first marker delimits.
+      const half = managedHalfOf(content, marker as string, "above");
+      if (half === null) continue;
+      entries[path] =
+        `{"class": "split", "grammar": "tail-marker", "marker": ${JSON.stringify(marker)}, ` +
+        `"managed": "above", "hash": "${shaLatin1(half)}"}`;
+    }
+  }
+  const gitignore = tree[".gitignore"];
+  if (gitignore !== undefined) {
+    const half = managedHalfOf(gitignore, "# BEGIN REPO-PLATFORM MANAGED", "below");
+    if (half !== null) {
+      entries[".gitignore"] =
+        `{"class": "split", "marker": "# BEGIN REPO-PLATFORM MANAGED", ` +
+        `"managed": "below", "hash": "${shaLatin1(half)}"}`;
+    }
+  }
+  return `{\n  "$comment": "test-stamped", "files": {\n${Object.entries(entries)
+    .map(([path, body]) => `    ${JSON.stringify(path)}: ${body}`)
+    .join(",\n")}\n  }\n}\n`;
+}
+
 /** Writes BASELINE plus `extra` into a fresh temp repo and runs the
  *  validator against it, with any extra CLI `args` (e.g. --self).
  *  `opts.gitInit` makes the tree a real git checkout first, so the --self
@@ -62,7 +175,12 @@ function gitFreeEnv(): Record<string, string> {
 function runValidator(
   extra: Record<string, string> = {},
   args: string[] = [],
-  opts: { gitInit?: boolean; gitAddForce?: string[]; env?: Record<string, string> } = {},
+  opts: {
+    gitInit?: boolean;
+    gitAddForce?: string[];
+    env?: Record<string, string>;
+    noManifest?: boolean;
+  } = {},
 ): {
   exitCode: number;
   stdout: string;
@@ -70,7 +188,13 @@ function runValidator(
 } {
   const root = mkdtempSync(join(tmpdir(), "validate-template-"));
   roots.push(root);
-  for (const [rel, content] of Object.entries({ ...BASELINE, ...extra })) {
+  const tree: Record<string, string> = { ...BASELINE, ...extra };
+  // Client renders need a stamped manifest (absence is strict); self mode
+  // must NOT have one, and manifest-behavior tests bring their own.
+  if (!opts.noManifest && !args.includes("--self") && !Object.hasOwn(tree, MANIFEST)) {
+    tree[MANIFEST] = manifestForTree(tree);
+  }
+  for (const [rel, content] of Object.entries(tree)) {
     mkdirSync(join(root, dirname(rel)), { recursive: true });
     writeFileSync(join(root, rel), content);
   }
@@ -769,26 +893,35 @@ describe("ownership self-declarations", () => {
 });
 
 describe("ownership-manifest byte parity", () => {
-  const MANIFEST = ".github/repo-platform-manifest.json";
-  const sha = (text: string) =>
-    new Bun.CryptoHasher("sha256").update(Buffer.from(text, "latin1")).digest("hex");
+  const sha = shaLatin1;
   const manifestOf = (entries: Record<string, string>) =>
     `{\n  "$comment": "test",\n  "files": {\n${Object.entries(entries)
       .map(([path, body]) => `    ${JSON.stringify(path)}: ${body}`)
       .join(",\n")}\n  }\n}\n`;
-  const SELF_ENTRY = { [MANIFEST]: '{"class": "managed", "hash": null}' };
+  const SELF_ENTRY = {
+    [MANIFEST]: '{"class": "managed", "hash": null, "commit": "0.0.0.post5.dev0+abc1234"}',
+  };
+  // The full roster for the BASELINE tree: absence checks are strict, so a
+  // passing fixture must list every table-covered path whose file exists.
+  const GITIGNORE_HALF = "# BEGIN REPO-PLATFORM MANAGED\n# END REPO-PLATFORM MANAGED\n";
   const stampedBaseline = () => ({
     ...SELF_ENTRY,
+    ".copier-answers.yml": `{"class": "managed", "hash": "${sha(
+      BASELINE[".copier-answers.yml"],
+    )}"}`,
+    ".repo-platform.yml": `{"class": "managed", "hash": "${sha(BASELINE[".repo-platform.yml"])}"}`,
     ".github/workflows/ci.yml": `{"class": "managed", "hash": "${sha(
       BASELINE[".github/workflows/ci.yml"],
     )}"}`,
+    ".gitignore":
+      `{"class": "split", "marker": "# BEGIN REPO-PLATFORM MANAGED", ` +
+      `"managed": "below", "hash": "${sha(GITIGNORE_HALF)}"}`,
   });
 
-  test("a missing manifest is an advisory, not an error", () => {
-    const { exitCode, stdout, stderr } = runValidator();
-    expect(stderr).toBe("");
-    expect(exitCode).toBe(0);
-    expect(stdout).toContain(`advisory: ${MANIFEST} is missing`);
+  test("a missing manifest is an error", () => {
+    const { exitCode, stderr } = runValidator({}, [], { noManifest: true });
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain(`${MANIFEST} is missing - every build ships it`);
   });
 
   test("a stamped manifest with matching hashes passes", () => {
@@ -799,7 +932,7 @@ describe("ownership-manifest byte parity", () => {
 
   test("a drifted managed file fails parity", () => {
     const entries = {
-      ...SELF_ENTRY,
+      ...stampedBaseline(),
       ".github/workflows/ci.yml": `{"class": "managed", "hash": "${"0".repeat(64)}"}`,
     };
     const { exitCode, stderr } = runValidator({ [MANIFEST]: manifestOf(entries) });
@@ -830,7 +963,7 @@ describe("ownership-manifest byte parity", () => {
   });
 
   test("an unstamped managed entry is an error naming the stamp hook", () => {
-    const entries = { ...SELF_ENTRY, ".yamllint": '{"class": "managed", "hash": null}' };
+    const entries = { ...stampedBaseline(), ".yamllint": '{"class": "managed", "hash": null}' };
     const { exitCode, stderr } = runValidator({
       [MANIFEST]: manifestOf(entries),
       ".yamllint": "extends: default\n",
@@ -853,7 +986,12 @@ describe("ownership-manifest byte parity", () => {
     expect(stdout).toContain("advisory: docs/handbook.md: listed as managed");
   });
 
-  test("a roster path the manifest fails to list is an advisory", () => {
+  test("an unlisted roster path whose file is absent too stays an advisory", () => {
+    // The strict deletion error requires the missing entry's FILE to still
+    // exist: roster paths the baseline tree does not carry (SECURITY.md and
+    // friends) stay advisories - the version splits the fleet legitimately
+    // produces (withheld workflow files; a main-floating client validator
+    // ahead of the render) look exactly like this.
     const { exitCode, stdout, stderr } = runValidator({
       [MANIFEST]: manifestOf(stampedBaseline()),
     });
@@ -862,30 +1000,19 @@ describe("ownership-manifest byte parity", () => {
     expect(stdout).toContain(
       "advisory: .github/repo-platform-manifest.json does not list 'SECURITY.md'",
     );
-    // The baseline records a staging-form _commit, so absence runs in skew
-    // mode and the advisory says why.
-    expect(stdout).toContain("skew mode");
+    expect(stdout).toContain("the path is absent from the repo too");
   });
 
-  // Provenance: a templates/vX.Y.Z-form recorded _commit proves version
-  // alignment (this validator and the manifest ride the same render), so
-  // absence flips from skew advisories to hard errors there.
-  const RELEASE_ANSWERS = {
-    ".copier-answers.yml": BASELINE[".copier-answers.yml"].replace(
-      "_commit: 0.0.0.post5.dev0+abc1234",
-      "_commit: templates/v1.0.0",
-    ),
-  };
-  const RELEASE_SELF = {
-    [MANIFEST]: '{"class": "managed", "hash": null, "commit": "templates/v1.0.0"}',
-  };
-
-  test("release-aligned: a deleted roster entry is an error, not skew", () => {
+  // Absence and provenance are STRICT: every build ships the manifest and
+  // the stamper always writes the recorded _commit, so a missing manifest,
+  // a stamp differing from the recorded value, and a deleted roster entry
+  // whose file still exists are errors on every render.
+  test("a deleted roster entry whose file still exists is an error", () => {
     // THE deletion attack: drop ci.yml's entry, edit the file under its
-    // header - without provenance this would ride the absence advisory.
-    const entries = { ...RELEASE_SELF };
+    // header - without strict absence this would ride an advisory.
+    const entries = { ...stampedBaseline() } as Record<string, string>;
+    delete entries[".github/workflows/ci.yml"];
     const { exitCode, stderr } = runValidator({
-      ...RELEASE_ANSWERS,
       [MANIFEST]: manifestOf(entries),
       ".github/workflows/ci.yml": `${BASELINE[".github/workflows/ci.yml"]}# local tweak\n`,
     });
@@ -896,41 +1023,46 @@ describe("ownership-manifest byte parity", () => {
     expect(stderr).toContain("the entry was deleted by hand");
   });
 
-  test("release-aligned: a missing manifest is an error, not an advisory", () => {
-    const { exitCode, stderr } = runValidator(RELEASE_ANSWERS);
-    expect(exitCode).toBe(1);
-    expect(stderr).toContain(
-      `${MANIFEST} is missing, but the recorded render (templates/v1.0.0) is a release that ships it`,
-    );
-  });
-
-  test("release-aligned: a nulled or mismatched provenance stamp is an error (no skew downgrade)", () => {
-    // Nulling the self entry's commit must not buy the lenient skew path.
+  test("a nulled or mismatched provenance stamp is an error", () => {
+    // Nulling the self entry's commit must not buy any lenient path: the
+    // stamper always writes the recorded _commit.
     const nulled = runValidator({
-      ...RELEASE_ANSWERS,
       [MANIFEST]: manifestOf({
-        ...SELF_ENTRY,
-        ".github/workflows/ci.yml": `{"class": "managed", "hash": "${sha(
-          BASELINE[".github/workflows/ci.yml"],
-        )}"}`,
+        ...stampedBaseline(),
+        [MANIFEST]: '{"class": "managed", "hash": null}',
       }),
     });
     expect(nulled.exitCode).toBe(1);
-    expect(nulled.stderr).toContain("its provenance stamp is null but the recorded render");
+    expect(nulled.stderr).toContain("its provenance stamp is null but the render records _commit");
     const mismatched = runValidator({
-      ...RELEASE_ANSWERS,
       [MANIFEST]: manifestOf({
-        [MANIFEST]: '{"class": "managed", "hash": null, "commit": "templates/v0.9.0"}',
+        ...stampedBaseline(),
+        [MANIFEST]: '{"class": "managed", "hash": null, "commit": "0.0.0.post4.dev0+dead999"}',
       }),
     });
     expect(mismatched.exitCode).toBe(1);
     expect(mismatched.stderr).toContain("stamped provenance");
   });
 
-  test("an exponent-shaped staging sha reads as a string, not a YAML float", () => {
+  test("a provenance error downgrades absence to an advisory naming it", () => {
+    // One diagnostic per cause: under an already-reported provenance error,
+    // a missing roster entry must not pile a second error per path on the
+    // same tamper - but every absence still surfaces as an advisory.
+    const entries = { ...stampedBaseline() } as Record<string, string>;
+    delete entries[".github/workflows/ci.yml"];
+    entries[MANIFEST] = '{"class": "managed", "hash": null}';
+    const { exitCode, stdout, stderr } = runValidator({ [MANIFEST]: manifestOf(entries) });
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain("its provenance stamp is null");
+    expect(stderr).not.toContain("the entry was deleted by hand");
+    expect(stdout).toContain("does not list '.github/workflows/ci.yml'");
+    expect(stdout).toContain("its provenance stamp is unusable (error above)");
+  });
+
+  test("an exponent-shaped build sha reads as a string, not a YAML float", () => {
     // PyYAML (copier's writer) dumps shas like 95e1875 UNQUOTED (its float
     // pattern needs a dot or signed exponent); the yaml core schema reads
-    // digits-e-digits as Infinity. A typed read turned ~2% of staging shas
+    // digits-e-digits as Infinity. A typed read turned ~2% of build shas
     // into a false tampering report; the failsafe re-read keeps them
     // strings, so a matching stamp passes with no missing-_commit text.
     const exponentSha = runValidator({
@@ -961,17 +1093,9 @@ describe("ownership-manifest byte parity", () => {
     );
   });
 
-  test("any-form provenance mismatch is an error, even off the release channel", () => {
-    // The stamper always writes the recorded _commit, so a differing (or
-    // key-deleted) value is tampering on every channel; only a null stamp
-    // stays lenient (legacy manifests).
-    const differing = runValidator({
-      [MANIFEST]: manifestOf({
-        [MANIFEST]: '{"class": "managed", "hash": null, "commit": "zzz9999"}',
-      }),
-    });
-    expect(differing.exitCode).toBe(1);
-    expect(differing.stderr).toContain("stamped provenance");
+  test("a key-deleted _commit against a non-null stamp is an error", () => {
+    // The stamper always writes the recorded _commit, so a stamp with no
+    // recorded counterpart is the same tamper as a differing value.
     const keyDeleted = runValidator({
       ".copier-answers.yml": `${MANAGED_HEADER}_src_path: gh:Vivswan/repo-platform\ngithub_username: Vivswan\n`,
       [MANIFEST]: manifestOf({
@@ -980,86 +1104,6 @@ describe("ownership-manifest byte parity", () => {
     });
     expect(keyDeleted.exitCode).toBe(1);
     expect(keyDeleted.stderr).toContain("no _commit in .copier-answers.yml");
-  });
-
-  test("strict absence stands down when the executing validator ref is not the render's version", () => {
-    // The withheld-workflows fallback leaves an older pinned ci.yml behind:
-    // that validator's tables can declare a path the newer manifest
-    // legitimately omits (a retirement) whose restored file still exists.
-    const entries = { ...RELEASE_SELF };
-    const stale = runValidator(
-      {
-        ...RELEASE_ANSWERS,
-        [MANIFEST]: manifestOf(entries),
-      },
-      [],
-      { env: { VALIDATOR_REF: "v0.9.0" } },
-    );
-    expect(stale.stderr).toBe("");
-    expect(stale.exitCode).toBe(0);
-    expect(stale.stdout).toContain("this validator runs at ref 'v0.9.0'");
-    // The matching ref keeps the strict error (the plain-tag form uses_ref
-    // pins: v1.0.0 <-> templates/v1.0.0).
-    const matching = runValidator(
-      {
-        ...RELEASE_ANSWERS,
-        [MANIFEST]: manifestOf(entries),
-      },
-      [],
-      { env: { VALIDATOR_REF: "v1.0.0" } },
-    );
-    expect(matching.exitCode).toBe(1);
-    expect(matching.stderr).toContain("the entry was deleted by hand");
-  });
-
-  test("staging skew: matching sha-form provenance stays advisory", () => {
-    // A staging render's commit is not a release form: a main-pinned
-    // validator's tables may be newer than the render, so a missing roster
-    // entry must not false-error. This also pins the visibility guarantee
-    // behind the answers-side downgrade boundary (see the trust-model
-    // comment): even in skew mode, every absence names its path.
-    const entries = {
-      [MANIFEST]: '{"class": "managed", "hash": null, "commit": "0.0.0.post5.dev0+abc1234"}',
-    };
-    const { exitCode, stdout, stderr } = runValidator({ [MANIFEST]: manifestOf(entries) });
-    expect(stderr).toBe("");
-    expect(exitCode).toBe(0);
-    expect(stdout).toContain("skew mode");
-    expect(stdout).toContain("does not list '.github/workflows/ci.yml'");
-  });
-
-  test("release-aligned: a fully listed manifest passes, absent-file paths advisory", () => {
-    // The strict deletion error requires the missing entry's FILE to still
-    // exist: roster paths the baseline tree does not carry (SECURITY.md and
-    // friends) stay advisories even under alignment - the version-split
-    // states the fleet legitimately produces (withheld workflow files, a
-    // channel switch) look exactly like this.
-    const gitignoreHalf = "# BEGIN REPO-PLATFORM MANAGED\n# END REPO-PLATFORM MANAGED\n";
-    const entries = {
-      ...RELEASE_SELF,
-      ".copier-answers.yml": `{"class": "managed", "hash": "${sha(
-        BASELINE[".copier-answers.yml"].replace(
-          "_commit: 0.0.0.post5.dev0+abc1234",
-          "_commit: templates/v1.0.0",
-        ),
-      )}"}`,
-      ".repo-platform.yml": `{"class": "managed", "hash": "${sha(BASELINE[".repo-platform.yml"])}"}`,
-      ".github/workflows/ci.yml": `{"class": "managed", "hash": "${sha(
-        BASELINE[".github/workflows/ci.yml"],
-      )}"}`,
-      ".gitignore":
-        `{"class": "split", "marker": "# BEGIN REPO-PLATFORM MANAGED", ` +
-        `"managed": "below", "hash": "${sha(gitignoreHalf)}"}`,
-    };
-    const { exitCode, stdout, stderr } = runValidator({
-      ...RELEASE_ANSWERS,
-      [MANIFEST]: manifestOf(entries),
-    });
-    expect(stderr).toBe("");
-    expect(exitCode).toBe(0);
-    expect(stdout).toContain(
-      "does not list 'SECURITY.md', which this validator's ownership tables declare - the path is absent from the repo too",
-    );
   });
 
   test("a managed entry hand-flipped to starter fails the roster cross-check", () => {
@@ -1278,12 +1322,14 @@ describe("ownership-manifest byte parity", () => {
   });
 
   test("a settings.yml starter entry passes: the file is repo-owned", () => {
+    const registration = `${MANAGED_HEADER}modules: [uv, settings-sync]\n`;
     const entries = {
       ...stampedBaseline(),
+      ".repo-platform.yml": `{"class": "managed", "hash": "${sha(registration)}"}`,
       ".github/settings.yml": '{"class": "starter"}',
     };
     const { exitCode, stdout, stderr } = runValidator({
-      ".repo-platform.yml": `${MANAGED_HEADER}modules: [uv, settings-sync]\n`,
+      ".repo-platform.yml": registration,
       [MANIFEST]: manifestOf(entries),
       ".github/settings.yml": "repository:\n  has_issues: true\n  custom_addition: true\n",
     });

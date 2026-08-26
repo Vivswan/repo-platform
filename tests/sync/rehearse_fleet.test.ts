@@ -45,15 +45,7 @@ function registryOf(text: string): Registry {
 
 describe("enumerateFleet", () => {
   const registry = registryOf(
-    [
-      "managed:",
-      '  - "*"',
-      "  - Other/extra",
-      "exclude:",
-      "  - Vivswan/paused",
-      "defaults:",
-      "  channel: staging",
-    ].join("\n"),
+    ["managed:", '  - "*"', "  - Other/extra", "exclude:", "  - Vivswan/paused"].join("\n"),
   );
 
   test("unions the wildcard discovery with explicit entries and drops the exclude list", () => {

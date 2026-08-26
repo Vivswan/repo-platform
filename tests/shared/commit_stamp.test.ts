@@ -15,7 +15,7 @@ describe("commit stamp", () => {
 
   test("parse finds the stamp inside a full build commit message", () => {
     const message = [
-      "build(staging): main from 62653b669d40",
+      "build(template): main from 62653b669d40",
       "",
       "source: https://github.com/Vivswan/repo-platform/commit/62653b669d40d3c88b6a0c713942d7e80ac4032d",
       "run: https://github.com/Vivswan/repo-platform/actions/runs/1",

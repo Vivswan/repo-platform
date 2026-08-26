@@ -43,10 +43,4 @@ runs:
       shell: bash
       env:
         SCAN_PATH: ${{ inputs.path }}
-        # The ref this action was invoked at: check 9's strict absence mode
-        # requires it to match the render's recorded version, so a stale
-        # pinned validator (withheld workflow files leave one behind) never
-        # false-errors on paths its tables and the newer manifest disagree
-        # about.
-        VALIDATOR_REF: ${{ github.action_ref }}
       run: bun "${{ github.action_path }}/validate_generated_files.ts" "$SCAN_PATH"

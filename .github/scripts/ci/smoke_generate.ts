@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 // Render a smoke-test project into /tmp/smoke for one CI matrix row: main
 // carries only templates/ sources, so assemble the consumable build tree
-// (what the staging/latest branches hold) and `copier copy` from it.
+// (what the template branch holds) and `copier copy` from it.
 //
 // Inputs (env): MODULES (YAML list as a string), PRIVATE, EXTRA_DATA
 // (optional extra -d args; values must stay whitespace-free - the string
@@ -18,14 +18,7 @@ const extraData = env("EXTRA_DATA")
   .filter((arg) => arg !== "");
 
 must(["bun", "install", "--frozen-lockfile"]);
-must([
-  "bun",
-  ".github/scripts/build-branches/branch_tree.ts",
-  "--dest",
-  "/tmp/build-tree",
-  "--channel",
-  "staging",
-]);
+must(["bun", ".github/scripts/build-branches/branch_tree.ts", "--dest", "/tmp/build-tree"]);
 must(["git", "-C", "/tmp/build-tree", "init", "-q", "-b", "build"]);
 must(["git", "-C", "/tmp/build-tree", "add", "-A"]);
 must([

@@ -58,7 +58,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
-      - uses: {{ github_username }}/repo-platform/actions/validate-template@{{ uses_ref }}
+      - uses: {{ github_username }}/repo-platform/actions/validate-template@main
 {%- if private %}
 
   base-checks:
@@ -82,7 +82,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 {%- endif %}
-      - uses: {{ github_username }}/repo-platform/actions/check-typography@{{ uses_ref }}
+      - uses: {{ github_username }}/repo-platform/actions/check-typography@main
 {%- if private %}
         if: '!cancelled()'
 {%- endif %}
@@ -96,7 +96,7 @@ jobs:
         with:
           fetch-depth: 0
 {%- endif %}
-      - uses: {{ github_username }}/repo-platform/actions/validate-commit-names@{{ uses_ref }}
+      - uses: {{ github_username }}/repo-platform/actions/validate-commit-names@main
 {%- if private %}
         if: '!cancelled()'
 {%- endif %}
@@ -178,7 +178,7 @@ jobs:
       - uses: actions/checkout@v7
         if: github.event_name == 'pull_request'
       # The severity threshold and the upstream pin live in the wrapper.
-      - uses: {{ github_username }}/repo-platform/actions/dependency-review@{{ uses_ref }}
+      - uses: {{ github_username }}/repo-platform/actions/dependency-review@main
         if: github.event_name == 'pull_request'
 {%- endif %}
 {%- if enable_codeql %}

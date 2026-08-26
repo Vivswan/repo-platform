@@ -9,11 +9,8 @@
 //
 // One mechanical normalization before comparing: this repository dogfoods
 // its own reusable workflows by LOCAL path, so the render's
-// `<username>/<slug>/<path>@main` references map to `./<path>`. The scratch
-// build tree's _commit is a bare sha, which the templates' uses_ref
-// preamble pins to main; a render from a release build tag would pin a
-// version instead and fail the comparison loudly - correct, since the
-// committed copies track this repo's own tree (= main).
+// `<username>/<slug>/<path>@main` references map to `./<path>` (the
+// templates pin `main` literally).
 //
 // The rendered .copier-answers.yml is checked against the answers file
 // first, so a dogfood-oracle matrix row that drifts from
@@ -87,7 +84,7 @@ function main(): number {
 
   // The local-path dogfood rewrite (the same mapping renderJinjaFile bakes
   // into the committed copies), applied to copier's remote-form output.
-  // Deliberately broader than jinja_subset's uses_ref rewrite: it matches
+  // Deliberately broader than jinja_subset's rewrite: it matches
   // rendered VALUES, not template expressions, and only the @main pin - a
   // render pinned at anything else stays remote-form and fails the diff
   // loudly rather than being silently localized.

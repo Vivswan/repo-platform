@@ -615,7 +615,7 @@ function paramDocLinks(): string[] {
   return links;
 }
 
-/** README.md "Modules and channels": the roster bullet (the BEGIN marker
+/** README.md "Modules": the roster bullet (the BEGIN marker
  *  rides on the section heading, so the span opens with the blank line
  *  separating them). */
 export function readmeModuleRoster(manifests: ModuleManifest[]): string[] {

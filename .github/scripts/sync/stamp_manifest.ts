@@ -31,8 +31,8 @@
 // resolve_copier_conflicts.ts uses - and the stamp then rewrites every
 // hash anyway.
 //
-// Data problems (missing or unparseable manifest) warn and exit 0, like
-// the migrations contract in migrations/run.ts: a stamping gap must never
+// Data problems (missing or unparseable manifest) warn and exit 0: a
+// stamping gap must never
 // abort an otherwise-successful render - validate-template's byte-parity
 // check is the enforcement point that reports an unstamped manifest. The
 // same division covers metadata: this script refreshes hash VALUES and

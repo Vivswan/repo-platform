@@ -140,14 +140,12 @@ describe("select_sync_repos.ts", () => {
     expect(reposOf(main)).toEqual([
       {
         repo: "h**-s**r",
-        channel: "",
         redact_name: true,
         hide_details: true,
         verify: expect.stringMatching(/^[0-9a-f]{32}$/),
       },
       {
         repo: "Vivswan/steady",
-        channel: "",
         redact_name: false,
         hide_details: false,
         verify: "",

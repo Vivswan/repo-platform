@@ -15,7 +15,6 @@ import {
   inlineFunctionCopies,
   mustMatch,
   pinMismatches,
-  RECORDED_DIVERGENCES,
   SETUP_VERSION_FILES,
   semanticLines,
   setMismatch,
@@ -75,17 +74,6 @@ describe("applyDivergences", () => {
     const out = applyDivergences("other", lines, lines, [entry], new Set());
     expect(out.actual).toEqual(lines);
     expect(out.mismatches).toEqual([]);
-  });
-
-  test("the real operator-checkout entry rejects the migrated-below shape", () => {
-    const entry0 = RECORDED_DIVERGENCES[0];
-    const health = "      - uses: ./actions/release-health";
-    expect(
-      applyDivergences(entry0.file, [health], [checkout, health], [entry0], new Set()).actual,
-    ).toEqual([health]);
-    expect(
-      applyDivergences(entry0.file, [health], [health, checkout], [entry0], new Set()).actual,
-    ).toEqual([health, checkout]);
   });
 });
 

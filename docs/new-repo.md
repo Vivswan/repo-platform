@@ -14,28 +14,20 @@ mkdir my-project && cd my-project && bun init
 
 ## 2. Apply the template
 
-Requires [copier](https://copier.readthedocs.io) >= 9.8.0 (serialized multiselect answers) and [bun](https://bun.sh) on PATH (copier's `_migrations` hook runs a bun script; the hook is also why copier needs `--trust`). `main` holds only sources; consume the GENERATED build refs, and match the initial `--vcs-ref` to the channel you pick when asked:
+Requires [copier](https://copier.readthedocs.io) >= 9.8.0 (serialized multiselect answers) and [bun](https://bun.sh) on PATH (copier's post-render stamp hook runs a bun script; the hook is also why copier needs `--trust`). `main` holds only sources; consume the GENERATED `template` build branch:
 
 ```bash
 git init -b main
-# latest channel (released template versions; pick the newest templates/v*
-# tag - list them with:
-#   git ls-remote --tags https://github.com/Vivswan/repo-platform.git 'refs/tags/templates/*'
-# ):
-copier copy gh:Vivswan/repo-platform . --vcs-ref templates/vX.Y.Z --trust
-# or staging channel (main HEAD builds; what Vivswan's own repos use):
-copier copy gh:Vivswan/repo-platform . --vcs-ref staging --trust
+copier copy gh:Vivswan/repo-platform . --vcs-ref template --trust
 git add --all
 git commit -m "chore: initialize from repo-platform"
 ```
 
-Copier asks for project name, description, an update **channel** (`latest` follows released `templates/vX.Y.Z` build tags and runs migrations; `staging` follows every main merge, migrations skipped), a `modules`<!-- BEGIN GENERATED: module-roster (scripts/generate.ts - edit module.yml manifests, not this block) --> multiselect (any combination of `agents`, `bun`, `node`, `deno`, `uv`, `rust`, `pages`, `release-please`, `issue-templates`, `skills`, `pr-title`, `auto-assign`, `fuzzer`, `nightly`, `settings-sync`, `custom-license`), follow-up parameters for modules that have them (see [docs/pages.md](pages.md), [docs/skills.md](skills.md), [docs/fuzzer.md](fuzzer.md), and [docs/nightly.md](nightly.md)), and visibility.<!-- END GENERATED: module-roster --> Answers are recorded in `.copier-answers.yml`; never delete that file, `copier update` depends on it.
+Copier asks for project name, description, a `modules`<!-- BEGIN GENERATED: module-roster (scripts/generate.ts - edit module.yml manifests, not this block) --> multiselect (any combination of `agents`, `bun`, `node`, `deno`, `uv`, `rust`, `pages`, `release-please`, `issue-templates`, `skills`, `pr-title`, `auto-assign`, `fuzzer`, `nightly`, `settings-sync`, `custom-license`), follow-up parameters for modules that have them (see [docs/pages.md](pages.md), [docs/skills.md](skills.md), [docs/fuzzer.md](fuzzer.md), and [docs/nightly.md](nightly.md)), and visibility.<!-- END GENERATED: module-roster --> Answers are recorded in `.copier-answers.yml`; never delete that file, `copier update` depends on it.
 
 The chosen modules also land in `.repo-platform.yml`, and that file is the selection's home from then on: edit its `modules:` list and the next sync PR applies the change. Its presence is what marks the repo as managed.
 
 Every render also carries `.github/repo-platform-manifest.json`, the ownership manifest: each template-landed path's class (`managed`, `split`, or `starter`) plus sha256 hashes of the managed content, stamped after each render - `validate-template`'s parity check reports drift against it without blocking merges (the next sync heals).
-
-To switch channels later, change the repo's entry under `config:` in repo-platform's `repos.yml` (see step 4). A repo moving from staging to latest gets every migration up to the target release on its first sync after the switch - the staging history says nothing about which ones already applied, and migrations are idempotent, so the runner over-runs rather than skips (see [migrations/README.md](../migrations/README.md)).
 
 ## 3. Add checks to checks.yml
 
@@ -64,11 +56,10 @@ See the [all-green convention](all-green.md) for how the gate works.
 gh repo create Vivswan/my-project --public --source . --push
 ```
 
-That is the whole repo-side setup, plus one grant: give the fleet PAT access to the new repository (its repository access list) - discovery only enrolls repos the token can write to. The `repos.yml` wildcard then picks it up, `.repo-platform.yml` opts it into push sync, and update PRs start arriving on releases and the weekly cron (`gh workflow run sync-repos.yml -f repo=Vivswan/my-project -R Vivswan/repo-platform` syncs it immediately).
+That is the whole repo-side setup, plus one grant: give the fleet PAT access to the new repository (its repository access list) - discovery only enrolls repos the token can write to. The `repos.yml` wildcard then picks it up, `.repo-platform.yml` opts it into push sync, and update PRs start arriving on the weekly cron (`gh workflow run sync-repos.yml -f repo=Vivswan/my-project -R Vivswan/repo-platform` syncs it immediately).
 
-In repo-platform, two optional registrations:
+One optional registration in repo-platform:
 
-- `config:` entry in `repos.yml`: only when the repo deviates from `defaults.channel` (staging). Auto-discovered repos need no entry otherwise.
 - `exclude:` list in `repos.yml`: only for opting a discovered repo OUT of management; a new managed repo does not touch it.
 
 ## 5. Settings management (the settings-sync module)

@@ -2,7 +2,7 @@
 // Compose .gitignore files from the latest github/gitignore templates:
 //
 // - templates/base/.gitignore.jinja: the skeleton downstream repos receive
-//   (published onto the staging/latest build branches by build-branches.yml):
+//   (published onto the template build branch by build-branches.yml):
 //   OS templates (Windows, macOS, Linux) plus a {# compose:gitignore #}
 //   anchor where the composer splices the toolchain fragments below, each
 //   wrapped in its module's gate.

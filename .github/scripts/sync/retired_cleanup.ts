@@ -10,7 +10,7 @@
 //
 // Env: RUNNER_TEMP, MODULES; TARGET_DIR (default target); plus, when the
 // renders are not already materialized, ensureRenders' inputs (OLD_SHA,
-// TARGET_REF, CHANNEL, PRIVATE, DESCRIPTION, SRC_PATH).
+// TARGET_REF, PRIVATE, DESCRIPTION, SRC_PATH).
 
 import { appendFileSync, existsSync, lstatSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";

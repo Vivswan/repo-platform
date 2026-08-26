@@ -3,7 +3,7 @@
   "private": true,
   "description": "Tooling manifest for repo-platform (biome, husky, the bun scripts' yaml parser and zod schemas); the actions carry their own dependencies.",
   "scripts": {
-    "check": "bun run lint && bun run lint:actions && bun run lint:sh && bun run lint:secrets && bun run typecheck && bun run typography && bun run wrap:check && bun run lint:yaml && bun run validate && bun run validate:registry && bun run validate:skills && bun run ssot:check && bun run migrations:check && bun run generate:check && bun run dogfood:check && bun run gitignore:check && bun run compose:check && bun run renders:check && bun run test",
+    "check": "bun run lint && bun run lint:actions && bun run lint:sh && bun run lint:secrets && bun run typecheck && bun run typography && bun run wrap:check && bun run lint:yaml && bun run validate && bun run validate:registry && bun run validate:skills && bun run ssot:check && bun run generate:check && bun run dogfood:check && bun run gitignore:check && bun run compose:check && bun run renders:check && bun run test",
     "check:fix": "bun x biome check --write .",
     "lint": "bun x biome ci .",
     "lint:actions": "if command -v actionlint >/dev/null; then actionlint; else echo 'actionlint not installed locally; CI runs it (brew install actionlint)'; fi",
@@ -17,7 +17,6 @@
     "validate:registry": "bun .github/scripts/fleet/repos_registry.ts validate",
     "validate:skills": "bun actions/validate-skills/validate_skills.ts",
     "ssot:check": "bun scripts/check_ssot.ts",
-    "migrations:check": "bun scripts/check_migrations.ts",
     "generate": "bun scripts/generate.ts",
     "generate:check": "bun scripts/generate.ts --check",
     "dogfood": "bun scripts/render_dogfood.ts",
@@ -27,7 +26,7 @@
     "renders": "bun scripts/render_goldens.ts",
     "renders:check": "bun scripts/render_goldens.ts --check",
     "compose": "bun scripts/compose_template.ts",
-    "compose:check": "bun .github/scripts/build-branches/branch_tree.ts --dest /tmp/repo-platform-compose-check --channel staging && rm -rf /tmp/repo-platform-compose-check",
+    "compose:check": "bun .github/scripts/build-branches/branch_tree.ts --dest /tmp/repo-platform-compose-check && rm -rf /tmp/repo-platform-compose-check",
     "rehearse:fleet": "bun .github/scripts/sync/rehearse_fleet.ts",
     "test": "bun test ./tests ./actions",
     "prepare": "husky"

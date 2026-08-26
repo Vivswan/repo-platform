@@ -5,16 +5,8 @@
 
 import { readFileSync } from "node:fs";
 import { parse } from "yaml";
-import { type Channel, isChannel } from "../shared/channels.ts";
-
-/** The recorded channel answer: a valid channel, null when the file
- * records none, or the raw text of an unusable value so the caller can
- * name it in its error (it is target data - hide-details callers must
- * not print it). */
-export type RecordedChannel = Channel | null | { invalid: string };
 
 export interface CopierAnswers {
-  channel: RecordedChannel;
   /** The recorded _commit VERBATIM, or "" when absent or not a string.
    * Read under the failsafe schema: copier writes with PyYAML (YAML 1.1),
    * which leaves short shas like 1626e53 or 0089012 bare, and the default
@@ -30,13 +22,6 @@ export interface CopierAnswers {
  * message can quote target file content - hide-details callers must not
  * print it. */
 export class AnswersFileError extends Error {}
-
-function channelOf(fields: Record<string, unknown>): RecordedChannel {
-  const value = fields.channel;
-  if (value === undefined || value === null) return null;
-  if (isChannel(value)) return value;
-  return { invalid: typeof value === "string" ? value : JSON.stringify(value) };
-}
 
 function commitOf(text: string): string {
   // logLevel error: the parser's default level prints warned-on source
@@ -61,6 +46,5 @@ export function readAnswersFile(path: string): CopierAnswers {
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
     throw new AnswersFileError("top level must be a mapping");
   }
-  const fields = parsed as Record<string, unknown>;
-  return { channel: channelOf(fields), commit: commitOf(text), fields };
+  return { commit: commitOf(text), fields: parsed as Record<string, unknown> };
 }

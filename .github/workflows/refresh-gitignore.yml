@@ -1,7 +1,7 @@
 # Weekly: regenerate the gitignore outputs (base skeleton, toolchain
 # fragments, this repo's own .gitignore) from the latest github/gitignore and
 # open a PR when upstream changed anything we consume.
-# Merging the PR reaches the staging branch automatically via build-branches.
+# Merging the PR reaches the template branch automatically via build-branches.
 
 name: Refresh gitignore
 
@@ -65,5 +65,5 @@ jobs:
         run: |
           sha="$(cat scripts/gitignore.lock)"
           export COMMIT_MESSAGE="chore: refresh gitignore templates from github/gitignore@${sha:0:12}"
-          export PR_BODY="Automated regeneration of the gitignore outputs (base skeleton, toolchain fragments, this repo's own \`.gitignore\`) from [github/gitignore@\`${sha:0:12}\`](https://github.com/github/gitignore/tree/${sha}). Merging this rebuilds the staging branch; cutting a release makes sync-repos push it to latest-channel repos."
+          export PR_BODY="Automated regeneration of the gitignore outputs (base skeleton, toolchain fragments, this repo's own \`.gitignore\`) from [github/gitignore@\`${sha:0:12}\`](https://github.com/github/gitignore/tree/${sha}). Merging this rebuilds the template branch; the next sync pushes it to the fleet."
           bun .github/scripts/shared/open_automation_pr.ts

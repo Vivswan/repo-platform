@@ -1,12 +1,12 @@
 // Builds the copier --data-file inputs for the retired-file cleanup's two
 // clean renders: the OLD render replays the answers recorded before the
 // update (non-underscore keys only), and the NEW render applies the live
-// module/channel/private/description data on top of them.
+// module/private/description data on top of them.
 //
 // Usage:
 //   bun .github/scripts/sync/render_data.ts --answers-old <file>
 //     --out-old <file> --out-new <file> --modules <json-list>
-//     --channel <name> --private <true|false> --description <text>
+//     --private <true|false> --description <text>
 //
 // Errors print as ::error:: workflow commands (on stdout, where the
 // runner parses them) with a nonzero exit.
@@ -23,7 +23,6 @@ const FLAGS = [
   "--out-old",
   "--out-new",
   "--modules",
-  "--channel",
   "--private",
   "--description",
 ] as const;
@@ -53,7 +52,6 @@ function main(args: string[]): void {
     stringify({
       ...data,
       modules,
-      channel: flags["--channel"],
       private: flags["--private"] === "true",
       description: flags["--description"],
     }),
