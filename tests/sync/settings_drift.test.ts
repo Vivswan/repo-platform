@@ -97,9 +97,13 @@ describe("driftSummary", () => {
     expect(summary).toContain("> [!WARNING]");
     expect(summary).toContain("Vivswan/demo");
     expect(summary).toContain('`private`: "false" -> "true" (recorded -> live)');
-    expect(summary).toContain("RATIFIES");
-    expect(summary).toContain("centrally assembled baseline");
-    expect(summary).toContain("`.github/settings.yml` merged over it");
+    // Merging never ratifies the enforced settings: the heal applies the
+    // repo's own settings.yml over the baseline, so the reviewer must be
+    // told to update THAT file to keep a live change.
+    expect(summary.replace(/\n> /g, " ")).toContain("does NOT make them the enforced settings");
+    expect(summary.replace(/\n> /g, " ")).toContain("the heal reverts the live change");
+    expect(summary.replace(/\n> /g, " ")).toContain("update `.github/settings.yml` too");
+    expect(summary.replace(/\n> /g, " ")).toContain("centrally assembled baseline");
     expect(summary).toContain("Auto-merge is off");
     expect(summary).toContain("settings-repos heal");
   });

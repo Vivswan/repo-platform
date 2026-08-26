@@ -145,9 +145,11 @@ if has settings-sync; then
   test -f "$wf/settings-sync.yml"
   present "reusable-apply-settings.yml@main" "$wf/settings-sync.yml"
   # The rendered settings.yml is the repo-owned IDENTITY STARTER: the four
-  # identity keys and nothing else. Visibility is declared even when
-  # public; the whole-line match keeps the explanatory comment above the
-  # key from satisfying the check.
+  # identity keys and nothing else. description is the constant
+  # smoke_generate.ts passes; visibility is declared even when public. The
+  # whole-line matches keep the explanatory comments above the keys from
+  # satisfying the checks.
+  present_line '  description: "Smoke-test project"' /tmp/smoke/.github/settings.yml
   present_line "  private: $PRIVATE" /tmp/smoke/.github/settings.yml
   # homepage and topics are declared even when empty (declare-and-clear);
   # no row passes either answer, so every row must render the empty form.
@@ -377,9 +379,12 @@ if has settings-sync; then
   # The unconditional labels: dependabot's base pair (the base
   # dependabot.yml always carries the github-actions ecosystem, and
   # dependabot recreates its labels when missing, so an undeclared one
-  # would loop delete/recreate nightly).
+  # would loop delete/recreate nightly) plus the triage trio.
   present_line "  - name: dependencies" "$managed_out"
   present_line "  - name: github_actions" "$managed_out"
+  present_line "  - name: bug" "$managed_out"
+  present_line "  - name: enhancement" "$managed_out"
+  present_line "  - name: fix-lint" "$managed_out"
   # The fleet rulesets, always, with the all-green required check and the
   # review-thread gate.
   present_line "  - name: main" "$managed_out"
@@ -414,11 +419,14 @@ if has settings-sync; then
   # manifest's settings_labels/settings_rulesets.
   if has release-please; then
     present "autorelease: pending" "$managed_out"
+    present "autorelease: tagged" "$managed_out"
     present "release-blocker" "$managed_out"
+    present "release-override" "$managed_out"
     present_line "  - name: release-tags" "$managed_out"
   else
-    absent "autorelease: pending" "$managed_out"
+    absent "autorelease:" "$managed_out"
     absent "release-blocker" "$managed_out"
+    absent "release-override" "$managed_out"
     absent "name: release-tags" "$managed_out"
   fi
   # The tracking streams render the recorded answers (the rows take the

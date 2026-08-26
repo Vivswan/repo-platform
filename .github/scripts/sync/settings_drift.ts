@@ -122,11 +122,13 @@ export function driftSummary(repo: string, drifts: Drift[], managed: boolean): s
     : `> To revert instead, flip the setting back in the GitHub UI, then
 > re-run the sync for a clean PR.`;
   const consequence = managed
-    ? `> Merging this PR RATIFIES the live values: they become the recorded
-> answers and are re-rendered into the repo's files. The nightly
-> settings heal enforces the centrally assembled baseline with this
-> repository's own \`.github/settings.yml\` merged over it, so check
-> that this merge leaves that file saying what you want.
+    ? `> Merging this PR records the live values as the answers and
+> re-renders the answer-derived files - but it does NOT make them the
+> enforced settings: the nightly heal applies the centrally assembled
+> baseline with this repository's own \`.github/settings.yml\` merged
+> over it, and that file still declares the OLD values, so the heal
+> reverts the live change. To keep the change, update
+> \`.github/settings.yml\` too (on this branch or after merging).
 ${revert}`
     : `> Merging this PR records the live values as ${repo}'s answers and
 > re-renders from them. Nothing enforces them either way: the repo

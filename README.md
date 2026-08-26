@@ -57,7 +57,7 @@ A missing secret is a misconfiguration of this repo: sync and settings runs fail
 | `templates/` | SOURCE of the template: one folder per module (each with a `module.yml` manifest, the source of module identity) plus `base/`; shared files composed via `{# compose:<anchor> #}` markers filled from per-module `fragments/` or generated from manifest data |
 | `copier.yml` | Questions (module choices, toolchain defaults, and the tracking-label validators are generated regions fed by the `templates/<module>/module.yml` manifests; standards-only, project skeletons come from `uv init` / `bun init`) |
 | `repos.yml` | Fleet config: which repos are managed (wildcard + exclude) and which channel each follows |
-| `settings/` | Central settings home: `defaults.yml` (shared baseline) + `repos/<name>.yml` per repo ([docs](docs/settings.md)) |
+| `.github/settings-baseline.yml` | The fleet-generic settings content the per-repo managed baseline is assembled from ([docs](docs/settings.md)) |
 | `.github/workflows/sync-repos.yml` | Push sync fan-out: release + weekly cron + dispatch, parallel matrix legs, one per repo |
 | `.github/workflows/settings-repos.yml` | Central settings apply across the fleet |
 | `.github/workflows/reusable-*.yml` | Reusable workflows: template-sync (the push-sync engine), auto-assign, codeql, pages ([docs](docs/pages.md)), apply-settings ([docs](docs/settings.md)) |

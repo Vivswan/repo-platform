@@ -8,7 +8,7 @@ Goal: the repo's slow suites (full end-to-end runs, docker builds, live integrat
 
 ### Label distinctness first
 
-Both streams dedup AND auto-close their tracking issue by label, so `nightly_label` must differ from `fuzzer_label` (case-insensitive - GitHub deduplicates label names that way). The defaults already differ (`nightly-failure` vs `fuzz-nightly`); a custom label collision is rejected by the copier validator at render time and by the settings preflight in recorded answers.
+Both streams dedup AND auto-close their tracking issue by label, so `nightly_label` must differ from `fuzzer_label` (case-insensitive - GitHub deduplicates label names that way). The defaults already differ (`nightly-failure` vs `fuzz-nightly`); a custom label collision is rejected by the copier validator at render time and by the settings assembly in recorded answers.
 
 ### The edit
 
