@@ -307,7 +307,7 @@ if (found === "" || found.split(" ")[1] !== "open") {
 }
 writeFileSync(
   bodyFile,
-  `Healthy: the push sync from \`${repository}\` completed cleanly as of ${runUrl}. The last failure report is in this issue's edit history.\n`,
+  `Healthy: the ${REPORT_KIND} from \`${repository}\` completed cleanly as of ${runUrl}. The last failure report is in this issue's edit history.\n`,
 );
 const close = gh(
   [

@@ -218,6 +218,25 @@ describe("stripNulls on emitted entries", () => {
     expect(incident).toEqual({ name: "incident", color: "b60205" });
   });
 
+  test("a STANDALONE ruleset's duplicate rule types collapse", () => {
+    // Dedup used to run only on a same-name collision, so a ruleset that
+    // met no merge partner reached GitHub with the duplicate intact - and
+    // GitHub rejects the whole ruleset, which unprotects the branch.
+    const merged = mergeSettingsLayers(managed, {
+      rulesets: [{ name: "local", rules: [{ type: "deletion" }, { type: "deletion" }] }],
+    }) as { rulesets: Record<string, unknown>[] };
+    const local = merged.rulesets.find((r) => r.name === "local");
+    expect(local?.rules).toEqual([{ type: "deletion" }]);
+  });
+
+  test("a module-only ruleset from the LOWER side dedups too", () => {
+    const merged = mergeSettingsLayers(
+      { rulesets: [{ name: "release-tags", rules: [{ type: "update" }, { type: "update" }] }] },
+      {},
+    ) as { rulesets: Record<string, unknown>[] };
+    expect(merged.rulesets[0]?.rules).toEqual([{ type: "update" }]);
+  });
+
   test("a null nested inside a one-sided entry is stripped too", () => {
     const merged = mergeSettingsLayers(managed, {
       rulesets: [{ name: "local", conditions: { ref_name: { include: ["main"], exclude: null } } }],

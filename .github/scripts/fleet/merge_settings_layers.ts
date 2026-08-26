@@ -76,7 +76,7 @@ const NAME_KEYED: Record<
   rulesets: {
     fold: (name) => name,
     combine: (lower, higher) => mergeRulesetEntry(lower, higher),
-    normalize: stripNulls,
+    normalize: normalizeRuleset,
   },
 };
 
@@ -97,6 +97,18 @@ export function stripNulls(entry: unknown): unknown {
 
 function isMapping(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** Every emitted ruleset, merged or not: nulls stripped AND rule types
+ *  deduplicated. Deduping only on a same-name collision left the
+ *  standalone path open - a repo-only or module-only ruleset that lists
+ *  one rule type twice reaches GitHub as-is, and GitHub rejects the whole
+ *  ruleset, which is the silent-unprotect failure again. appendRules with
+ *  an empty higher side is exactly the dedup pass. */
+export function normalizeRuleset(entry: unknown): unknown {
+  const stripped = stripNulls(entry);
+  if (!isMapping(stripped) || !Array.isArray(stripped.rules)) return stripped;
+  return { ...stripped, rules: appendRules(stripped.rules, []) };
 }
 
 function ruleType(rule: unknown): string | null {
@@ -260,16 +272,28 @@ function mergeMappings(
   nameKeyed: typeof NAME_KEYED,
 ): Record<string, unknown> {
   const merged: Record<string, unknown> = {};
+  // A name-keyed section present on ONE side only still goes through the
+  // union, with an empty other side: that is where normalization lives,
+  // and skipping it let a module-only or repo-only entry reach the
+  // document with duplicate rule types or literal nulls intact.
+  const oneSided = (key: string, entries: unknown[], fromRepo: boolean): unknown => {
+    const section = nameKeyed[key];
+    if (section === undefined) return entries;
+    return fromRepo
+      ? nameKeyedUnion([], entries, section.fold, section.combine, section.normalize)
+      : nameKeyedUnion(entries, [], section.fold, section.combine, section.normalize);
+  };
   for (const key of [...Object.keys(managed), ...Object.keys(repo)]) {
     if (key in merged) continue;
     if (!(key in repo)) {
-      merged[key] = managed[key];
+      const value = managed[key];
+      merged[key] = Array.isArray(value) ? oneSided(key, value, false) : value;
       continue;
     }
     const repoValue = repo[key];
     if (repoValue === null) continue; // explicit opt-out: the key is stripped
     if (!(key in managed)) {
-      merged[key] = repoValue;
+      merged[key] = Array.isArray(repoValue) ? oneSided(key, repoValue, true) : repoValue;
       continue;
     }
     const managedValue = managed[key];
