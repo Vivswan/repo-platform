@@ -149,6 +149,13 @@ describe("missingLines", () => {
     expect(missingLines(`${latin1Line}\n`, `${utf8Line}\n`)).toEqual([latin1Line]);
     expect(missingLines(`${latin1Line}\n`, `${latin1Line}\n`)).toEqual([]);
   });
+
+  test("byte-exact: CRLF and LF spellings of a line are different lines", () => {
+    // Split-file repo halves are carried byte-for-byte, so a line-ending
+    // flip IS a byte change worth a manual look (warn-cheap by design).
+    expect(missingLines("one\r\ntwo\r\n", "one\ntwo\n")).toEqual(["one\r", "two\r"]);
+    expect(missingLines("one\r\ntwo\r\n", "one\r\ntwo\r\n")).toEqual([]);
+  });
 });
 
 describe("compareHalves", () => {
@@ -206,6 +213,32 @@ describe("renderReport", () => {
     expect(report).toContain("line 39");
     expect(report).not.toContain("line 40");
     expect(report).toContain("(5 more; see the previous commit's copy)");
+  });
+
+  test("one enormous missing line cannot blow the PR-body budget", () => {
+    // gh fails outright past GitHub's 64 KiB body cap, which would strand
+    // the pushed branch with no PR - the exact failure the warn-not-red
+    // contract exists to avoid.
+    const report = renderReport([
+      { path: "AGENTS.md", kind: "shrank", missing: ["x".repeat(70000)] },
+    ]);
+    expect(Buffer.byteLength(report, "utf-8")).toBeLessThan(20000);
+    expect(report).toContain("[line clipped]");
+  });
+
+  test("the total excerpt budget spans files; past it, count-only bullets", () => {
+    const missing = Array.from({ length: 40 }, (_, i) => `${"y".repeat(290)}-${i}`);
+    const findings = Array.from({ length: 4 }, (_, i) => ({
+      path: `FILE${i}.md`,
+      kind: "shrank" as const,
+      missing,
+    }));
+    const report = renderReport(findings);
+    expect(Buffer.byteLength(report, "utf-8")).toBeLessThan(24000);
+    // Every finding still gets its bullet, even once the excerpt budget
+    // is spent.
+    for (const { path } of findings) expect(report).toContain(`\`${path}\``);
+    expect(report).toContain("excerpt omitted: report size limit");
   });
 });
 
@@ -345,6 +378,16 @@ describe("tail_tripwire script", () => {
     const result = runScript(root);
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain("::warning::");
+    expect(result.report).toContain("no usable ownership manifest");
+  });
+
+  test("an unparseable HEAD manifest is treated like a missing one", () => {
+    const root = makeTarget(
+      { "AGENTS.md": agentsHead, [MANIFEST_NAME]: "{ not json" },
+      { "AGENTS.md": agentsDelivered, [MANIFEST_NAME]: headManifest },
+    );
+    const result = runScript(root);
+    expect(result.exitCode).toBe(0);
     expect(result.report).toContain("no usable ownership manifest");
   });
 

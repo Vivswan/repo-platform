@@ -357,11 +357,9 @@ jobs:
 
       # Defense-in-depth, now that the tree is final: every split entry's
       # repository-owned half must still hold each non-blank line it held
-      # at the target's HEAD - HEAD's copy is split with HEAD's OWN
-      # manifest markers, so a marker rename cannot mis-split it. After
-      # the structural rebuild above this should never fire; a trip is a
-      # sync bug, delivered as a PR-body section (tail-shrank.md) that
-      # open_pr.ts turns into the manual-review path. Warn, not red: a
+      # at the target's HEAD (split rules in the script header). A trip is
+      # a sync bug: it lands in the PR body via tail-shrank.md and
+      # open_pr.ts forces the manual-review path. Warn, not red - a
       # blocked delivery would hide the diff the reviewer needs.
       - name: Tripwire on repository-owned content loss
         run: |

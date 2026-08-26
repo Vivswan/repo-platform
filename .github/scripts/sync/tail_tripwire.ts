@@ -130,8 +130,13 @@ function headBytes(root: string, rel: string): Buffer | null {
 }
 
 // PR bodies cap at 64 KiB and gh fails outright past it (see open_pr.ts),
-// so the per-file excerpt is bounded; the previous commit holds the rest.
+// and the report shares the body with every other section - so the
+// excerpt is bounded three ways: lines per file, characters per line (one
+// minified line must not blow the body), and total bytes across the whole
+// report. The previous commit holds whatever the excerpt omits.
 const MAX_REPORT_LINES = 40;
+const MAX_LINE_CHARS = 300;
+const MAX_REPORT_BYTES = 16384;
 
 const REPORT_INTRO = [
   "> [!WARNING]",
@@ -145,15 +150,29 @@ const REPORT_INTRO = [
 
 export function renderReport(findings: Finding[]): string {
   if (findings.length === 0) return "";
+  let budget = MAX_REPORT_BYTES;
   const sections = findings.map((finding) => {
     if (finding.kind === "unverifiable") {
       return `- \`${finding.path}\`: ${finding.reason} - review this file's full diff against the previous commit before merging.`;
     }
-    const shown = finding.missing.slice(0, MAX_REPORT_LINES);
+    const shown: string[] = [];
+    for (const line of finding.missing) {
+      if (shown.length >= MAX_REPORT_LINES) break;
+      const clipped =
+        line.length > MAX_LINE_CHARS ? `${line.slice(0, MAX_LINE_CHARS)} [line clipped]` : line;
+      const cost = Buffer.byteLength(clipped, "utf-8") + 3;
+      if (cost > budget) break;
+      budget -= cost;
+      shown.push(clipped);
+    }
+    const heading = `- \`${finding.path}\`: ${finding.missing.length} non-blank line(s) of the repository-owned half at the previous commit are missing from this update's copy`;
+    if (shown.length === 0) {
+      return `${heading} (excerpt omitted: report size limit; compare against the previous commit's copy).`;
+    }
     const omitted = finding.missing.length - shown.length;
     const tail = omitted > 0 ? `\n  (${omitted} more; see the previous commit's copy)` : "";
     return (
-      `- \`${finding.path}\`: ${finding.missing.length} non-blank line(s) of the repository-owned half at the previous commit are missing from this update's copy:\n\n` +
+      `${heading}:\n\n` +
       `  \`\`\`\`text\n${shown.map((line) => `  ${line}`).join("\n")}\n  \`\`\`\`${tail}`
     );
   });
