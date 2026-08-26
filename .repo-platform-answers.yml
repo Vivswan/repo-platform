@@ -35,8 +35,8 @@ private: false
 # pr-title gate job), auto-assign (auto-assign.yml). release-please is
 # deliberately absent: repo-platform ships the module to clients but runs
 # no release pipeline of its own. The tracking-stream modules (fuzzer,
-# nightly) are deliberately absent too - check_ssot's release-please
-# pair evaluates their membership or-chain to false - and so is
+# nightly) are deliberately absent too - their release-gating rode the
+# release-please machinery this repo dropped - and so is
 # settings-sync: this operator repo hand-writes its .github/settings.yml
 # (extra rulesets the starter never renders), and settings-repos.yml
 # heals it as its always-included self target.
