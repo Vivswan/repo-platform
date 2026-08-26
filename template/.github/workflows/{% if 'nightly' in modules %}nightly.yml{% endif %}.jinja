@@ -5,13 +5,6 @@
 # integration tests); the report job below keeps working unchanged - a red
 # night files or updates one label-deduplicated tracking issue, a green
 # night closes it (see repo-platform's docs/nightly.md).
-{#- The reusable workflows and composite actions referenced via uses_ref
-    live on main, not on the build branches: strip a templates/vX.Y.Z
-    build-tag _commit to the same-version release tag on main; anything
-    else (staging describe/sha strings, fresh copies) pins main. -#}
-{%- set tpl_ref = _copier_answers._commit | default('', true) -%}
-{%- set release_pin = tpl_ref | regex_replace('^templates/(v[0-9]+\\.[0-9]+\\.[0-9]+)$', '\\1') -%}
-{%- set uses_ref = release_pin if (release_pin and release_pin != tpl_ref) else 'main' %}
 name: Nightly
 
 on:
@@ -70,7 +63,7 @@ jobs:
       - name: File or update the nightly issue
         id: file-issue
         if: {% raw %}needs.checks.result == 'failure' || needs.checks.result == 'cancelled'{% endraw %}
-        uses: {{ github_username }}/repo-platform/actions/fuzz-issue@{{ uses_ref }}
+        uses: {{ github_username }}/repo-platform/actions/fuzz-issue@main
         with:
           mode: report
           label: {{ nightly_label | tojson }}
@@ -96,7 +89,7 @@ jobs:
 
 {% endif %}      - name: Close the nightly issue on a green night
         if: {% raw %}needs.checks.result == 'success'{% endraw %}
-        uses: {{ github_username }}/repo-platform/actions/fuzz-issue@{{ uses_ref }}
+        uses: {{ github_username }}/repo-platform/actions/fuzz-issue@main
         with:
           mode: resolve
           label: {{ nightly_label | tojson }}

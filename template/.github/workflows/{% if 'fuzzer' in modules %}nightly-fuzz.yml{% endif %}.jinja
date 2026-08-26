@@ -4,13 +4,6 @@
 # reports under the artifacts directory per the contract in repo-platform's
 # docs/fuzzer.md, the issue filing, replay inputs, and auto-close steps
 # below keep working unchanged.
-{#- The reusable workflows and composite actions referenced via uses_ref
-    live on main, not on the build branches: strip a templates/vX.Y.Z
-    build-tag _commit to the same-version release tag on main; anything
-    else (staging describe/sha strings, fresh copies) pins main. -#}
-{%- set tpl_ref = _copier_answers._commit | default('', true) -%}
-{%- set release_pin = tpl_ref | regex_replace('^templates/(v[0-9]+\\.[0-9]+\\.[0-9]+)$', '\\1') -%}
-{%- set uses_ref = release_pin if (release_pin and release_pin != tpl_ref) else 'main' %}
 name: Nightly Fuzz
 
 on:
@@ -94,7 +87,7 @@ jobs:
       - name: File or update the fuzz issue
         id: file-issue
         if: failure()
-        uses: {{ github_username }}/repo-platform/actions/fuzz-issue@{{ uses_ref }}
+        uses: {{ github_username }}/repo-platform/actions/fuzz-issue@main
         with:
           mode: report
           label: {{ fuzzer_label | tojson }}
@@ -119,7 +112,7 @@ jobs:
 
 {% endif %}      - name: Close the fuzz issue on a green night
         if: success()
-        uses: {{ github_username }}/repo-platform/actions/fuzz-issue@{{ uses_ref }}
+        uses: {{ github_username }}/repo-platform/actions/fuzz-issue@main
         with:
           mode: resolve
           label: {{ fuzzer_label | tojson }}

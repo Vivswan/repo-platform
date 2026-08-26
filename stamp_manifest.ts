@@ -21,14 +21,18 @@
 // (compose_template.ts's manifestEntryLine - keep ENTRY_LINE_RE below in
 // sync with it), so a stamped manifest differs from the raw render in
 // those token values alone and copier's three-way update merge sees
-// minimal local edits. An update can still leave inline conflict blocks in
+// minimal local edits. Split entries also carry declared-grammar fields
+// ("grammar", the bounded-region marker strings) for the sync's
+// split-file rebuild; this stamper reads only the legacy marker/managed
+// pair (derived from the grammar at compose time) and passes the rest
+// through untouched. An update can still leave inline conflict blocks in
 // the manifest (both sides touch the hash lines); those resolve toward the
 // template ("after updating") side before parsing - the direction
 // resolve_copier_conflicts.ts uses - and the stamp then rewrites every
 // hash anyway.
 //
-// Data problems (missing or unparseable manifest) warn and exit 0, like
-// the migrations contract in migrations/run.ts: a stamping gap must never
+// Data problems (missing or unparseable manifest) warn and exit 0: a
+// stamping gap must never
 // abort an otherwise-successful render - validate-template's byte-parity
 // check is the enforcement point that reports an unstamped manifest. The
 // same division covers metadata: this script refreshes hash VALUES and
@@ -53,7 +57,8 @@ export const MANIFEST_NAME = ".github/repo-platform-manifest.json";
 const ENTRY_LINE_RE = /^(\s*)("(?:[^"\\]|\\.)*"): (\{.*\})(,?)$/;
 
 /** The hash token inside an entry object; entries without one (starters,
- *  mergeable baselines) are left alone. */
+ *  and legacy "mergeable" entries from renders that predate the class's
+ *  retirement) are left alone. */
 const HASH_RE = /"hash": (?:null|"[0-9a-f]{64}")/;
 
 /** The provenance token on the manifest's own entry: the render's recorded

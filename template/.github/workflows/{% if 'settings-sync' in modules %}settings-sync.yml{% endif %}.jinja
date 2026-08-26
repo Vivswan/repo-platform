@@ -1,19 +1,14 @@
 # This file is managed by {{ github_username }}/repo-platform.
 # Local edits may be replaced during template updates.
 #
-# Applies this repository's .github/settings.yml via github-settings-as-code.
+# Applies this repository's settings via github-settings-as-code: the
+# called workflow computes the managed baseline (from this repo's module
+# selection) and merges .github/settings.yml over it before the apply.
 # Without the REPO_PLATFORM_TOKEN secret the run warns and skips; with
 # one, it needs Administration + Issues write, and a section the token
 # cannot reach fails the run. No heal cron here on purpose:
 # {{ github_username }}/repo-platform's central settings-repos run applies this
-# repository's settings.yml regardless of this workflow.
-{#- The reusable workflows and composite actions referenced via uses_ref
-    live on main, not on the build branches: strip a templates/vX.Y.Z
-    build-tag _commit to the same-version release tag on main; anything
-    else (staging describe/sha strings, fresh copies) pins main. -#}
-{%- set tpl_ref = _copier_answers._commit | default('', true) -%}
-{%- set release_pin = tpl_ref | regex_replace('^templates/(v[0-9]+\\.[0-9]+\\.[0-9]+)$', '\\1') -%}
-{%- set uses_ref = release_pin if (release_pin and release_pin != tpl_ref) else 'main' %}
+# repository's settings regardless of this workflow.
 
 name: Settings Sync
 
@@ -34,7 +29,7 @@ permissions:
 
 jobs:
   apply:
-    uses: {{ github_username }}/repo-platform/.github/workflows/reusable-apply-settings.yml@{{ uses_ref }}
+    uses: {{ github_username }}/repo-platform/.github/workflows/reusable-apply-settings.yml@main
     with:
       check_only: {% raw %}${{ inputs.check_only || false }}{% endraw %}
     secrets:

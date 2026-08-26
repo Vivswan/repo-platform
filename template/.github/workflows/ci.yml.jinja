@@ -1,10 +1,3 @@
-{#- The reusable workflows and composite actions referenced via uses_ref
-    live on main, not on the build branches: strip a templates/vX.Y.Z
-    build-tag _commit to the same-version release tag on main; anything
-    else (staging describe/sha strings, fresh copies) pins main. -#}
-{%- set tpl_ref = _copier_answers._commit | default('', true) -%}
-{%- set release_pin = tpl_ref | regex_replace('^templates/(v[0-9]+\\.[0-9]+\\.[0-9]+)$', '\\1') -%}
-{%- set uses_ref = release_pin if (release_pin and release_pin != tpl_ref) else 'main' %}
 {#- The five base checks below are written once: public repos wrap each in
     its own job (the if-not-private headers); private repos collect the
     same steps into one base-checks job, each step guarded so every check
@@ -65,7 +58,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
-      - uses: {{ github_username }}/repo-platform/actions/validate-template@{{ uses_ref }}
+      - uses: {{ github_username }}/repo-platform/actions/validate-template@main
 {%- if private %}
 
   base-checks:
@@ -89,7 +82,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 {%- endif %}
-      - uses: {{ github_username }}/repo-platform/actions/check-typography@{{ uses_ref }}
+      - uses: {{ github_username }}/repo-platform/actions/check-typography@main
 {%- if private %}
         if: '!cancelled()'
 {%- endif %}
@@ -103,7 +96,7 @@ jobs:
         with:
           fetch-depth: 0
 {%- endif %}
-      - uses: {{ github_username }}/repo-platform/actions/validate-commit-names@{{ uses_ref }}
+      - uses: {{ github_username }}/repo-platform/actions/validate-commit-names@main
 {%- if private %}
         if: '!cancelled()'
 {%- endif %}
@@ -185,7 +178,7 @@ jobs:
       - uses: actions/checkout@v7
         if: github.event_name == 'pull_request'
       # The severity threshold and the upstream pin live in the wrapper.
-      - uses: {{ github_username }}/repo-platform/actions/dependency-review@{{ uses_ref }}
+      - uses: {{ github_username }}/repo-platform/actions/dependency-review@main
         if: github.event_name == 'pull_request'
 {%- endif %}
 {%- if enable_codeql %}
@@ -199,7 +192,7 @@ jobs:
   # config file, picked up automatically when present.
 {% if 'bun' in modules or 'node' in modules or 'deno' in modules %}
   codeql-javascript:
-    uses: {{ github_username }}/repo-platform/.github/workflows/reusable-codeql.yml@{{ uses_ref }}
+    uses: {{ github_username }}/repo-platform/.github/workflows/reusable-codeql.yml@main
     with:
       language: javascript-typescript
     permissions:
@@ -208,7 +201,7 @@ jobs:
       actions: read
 {% endif %}{% if 'uv' in modules %}
   codeql-python:
-    uses: {{ github_username }}/repo-platform/.github/workflows/reusable-codeql.yml@{{ uses_ref }}
+    uses: {{ github_username }}/repo-platform/.github/workflows/reusable-codeql.yml@main
     with:
       language: python
     permissions:
@@ -267,7 +260,7 @@ jobs:
       pull-requests: read
       vulnerability-alerts: read
     steps:
-      - uses: {{ github_username }}/repo-platform/actions/release-health@{{ uses_ref }}
+      - uses: {{ github_username }}/repo-platform/actions/release-health@main
         if: github.event_name == 'pull_request' && startsWith(github.head_ref, 'release-please--')
         with:
           mode: pull-request
@@ -289,7 +282,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
-      - uses: {{ github_username }}/repo-platform/actions/validate-skills@{{ uses_ref }}
+      - uses: {{ github_username }}/repo-platform/actions/validate-skills@main
         with:
           skills-dir: {{ skills_dir | tojson }}
 {% endif %}{% if 'pr-title' in modules %}

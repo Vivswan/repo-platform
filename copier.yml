@@ -1,6 +1,6 @@
 # Copier template configuration for Vivswan/repo-platform.
 # Downstream repos are generated/updated from the template/ subdirectory,
-# which exists only on the generated staging/latest build branches (on main
+# which exists only on the generated `template` build branch (on main
 # it is a local gitignored build artifact; sources live in templates/).
 
 _min_copier_version: "9.8.0"
@@ -45,21 +45,19 @@ _skip_if_exists:
   # repo-owned after the first render (repos list their skills there).
   - .claude-plugin/plugin.json
   - .claude-plugin/marketplace.json
+  # The settings-sync module's starter: identity keys plus local overrides,
+  # repo-owned after the first render. The managed baseline (policy block,
+  # labels, rulesets) is computed centrally at apply time and merged UNDER
+  # this file (.github/scripts/fleet/render_managed_settings.ts), so sync
+  # never rewrites it.
+  - .github/settings.yml
 
-# Migrations use FROM-version naming (see migrations/run.ts): each script in
-# migrations/ is named for the release it migrates away from, so authoring
-# never requires predicting the next release number. Copier invokes the
-# runner once per update; selection happens inside it.
-#
-# The second entry stamps the ownership manifest's per-repo hashes: they
-# are facts of the rendered tree, so stamping must run after copier writes
-# it - and after run.ts, so files a migration edits are stamped too.
-# Copier runs _migrations only on update and _tasks only on copy/recopy,
-# hence the same stamper (shipped next to this file on the build branches)
-# is wired into both.
+# The _migrations entry stamps the ownership manifest's per-repo hashes:
+# they are facts of the rendered tree, so stamping must run after copier
+# writes it. Copier runs _migrations only on update and _tasks only on
+# copy/recopy, hence the same stamper (shipped next to this file on the
+# build branch) is wired into both.
 _migrations:
-  - command: bun "{{ _copier_conf.src_path }}/migrations/run.ts"
-    when: "{{ _stage == 'after' }}"
   - command: bun "{{ _copier_conf.src_path }}/stamp_manifest.ts"
     when: "{{ _stage == 'after' }}"
 
@@ -81,16 +79,6 @@ project_slug:
 description:
   type: str
   help: One-line repository description (used in settings.yml)
-
-# Which generated build branch this repo follows. Vivswan's own managed
-# repos follow staging; latest is the stable default for everything else.
-channel:
-  type: str
-  help: Template update channel this repo follows
-  choices:
-    latest - released template versions (templates/vX.Y.Z tags): latest
-    staging - main HEAD builds (testing; migrations are skipped): staging
-  default: latest
 
 # Feature modules: any combination. Each module gates the files/config it
 # owns; per-module parameters below are asked only when the module is
@@ -116,11 +104,12 @@ modules:
     auto-assign - auto-assign issues/PRs/alerts to owner: auto-assign
     fuzzer - nightly fuzz starter with issue filing, replay inputs, auto-close: fuzzer
     nightly - nightly CI starter with failure issue filing and auto-close: nightly
-    settings-sync - in-repo .github/settings.yml applied with the repo's own PAT: settings-sync
+    settings-sync - centrally managed repo settings + repo-owned settings.yml starter: settings-sync
     custom-license - repo carries its own license in LICENSE.md; the fleet license is not rendered: custom-license
   # END GENERATED: module-choices
-  # settings-sync is deliberately NOT a default: central settings
-  # (settings/repos/<name>.yml in repo-platform) are the default home.
+  # settings-sync is deliberately NOT a default: selecting it is the
+  # opt-in to centrally managed settings (the nightly heal computes the
+  # baseline and merges the repo's settings.yml over it).
   default: [agents, release-please, issue-templates, pr-title, auto-assign]
 
 # --- settings-sync module parameters (asked only when it is selected) ---
@@ -209,7 +198,7 @@ fuzzer_label:
   # baseline, the release labels, the dependabot labels): reusing one would
   # corrupt label sync and let a green night close unrelated issues.
   # BEGIN GENERATED: fuzzer-label-validator (scripts/generate.ts - edit module.yml manifests, not this block)
-  validator: "{% if not (fuzzer_label | regex_search('^[A-Za-z0-9._][A-Za-z0-9._: -]{0,49}\\Z')) %}fuzzer_label must be a plain label: letters, digits, ._:- and spaces, not starting with a dash, at most 50 characters{% elif fuzzer_label | lower in ['dependencies', 'github_actions', 'bug', 'enhancement', 'fix-lint', 'settings-as-code-report', 'autorelease: pending', 'autorelease: tagged', 'release-blocker', 'release-override', 'javascript', 'deno', 'python:uv', 'rust'] %}fuzzer_label must not reuse a label the template already manages (GitHub label names are case-insensitive): a green night would close whatever issues carry it and every settings apply would fight over it{% endif %}"
+  validator: "{% if not (fuzzer_label | regex_search('^[A-Za-z0-9._][A-Za-z0-9._: -]{0,49}\\Z')) %}fuzzer_label must be a plain label: letters, digits, ._:- and spaces, not starting with a dash, at most 50 characters{% elif fuzzer_label | lower in ['dependencies', 'github_actions', 'bug', 'enhancement', 'fix-lint', 'settings-as-code-report', 'javascript', 'deno', 'python:uv', 'rust', 'autorelease: pending', 'autorelease: tagged', 'release-blocker', 'release-override'] %}fuzzer_label must not reuse a label the template already manages (GitHub label names are case-insensitive): a green night would close whatever issues carry it and every settings apply would fight over it{% endif %}"
   # END GENERATED: fuzzer-label-validator
   when: "{{ 'fuzzer' in modules }}"
 
@@ -227,7 +216,7 @@ nightly_label:
   # (and lift the release-health hold keyed on it), while settings.yml
   # would declare two same-name labels whose colors fight on every apply.
   # BEGIN GENERATED: nightly-label-validator (scripts/generate.ts - edit module.yml manifests, not this block)
-  validator: "{% if not (nightly_label | regex_search('^[A-Za-z0-9._][A-Za-z0-9._: -]{0,49}\\Z')) %}nightly_label must be a plain label: letters, digits, ._:- and spaces, not starting with a dash, at most 50 characters{% elif nightly_label | lower in ['dependencies', 'github_actions', 'bug', 'enhancement', 'fix-lint', 'settings-as-code-report', 'autorelease: pending', 'autorelease: tagged', 'release-blocker', 'release-override', 'javascript', 'deno', 'python:uv', 'rust'] %}nightly_label must not reuse a label the template already manages (GitHub label names are case-insensitive): a green night would close whatever issues carry it and every settings apply would fight over it{% elif 'fuzzer' in modules and nightly_label | lower == fuzzer_label | lower %}nightly_label must differ from fuzzer_label (GitHub label names are case-insensitive): each stream needs its own tracking label or a green night in one closes the other's open issue{% endif %}"
+  validator: "{% if not (nightly_label | regex_search('^[A-Za-z0-9._][A-Za-z0-9._: -]{0,49}\\Z')) %}nightly_label must be a plain label: letters, digits, ._:- and spaces, not starting with a dash, at most 50 characters{% elif nightly_label | lower in ['dependencies', 'github_actions', 'bug', 'enhancement', 'fix-lint', 'settings-as-code-report', 'javascript', 'deno', 'python:uv', 'rust', 'autorelease: pending', 'autorelease: tagged', 'release-blocker', 'release-override'] %}nightly_label must not reuse a label the template already manages (GitHub label names are case-insensitive): a green night would close whatever issues carry it and every settings apply would fight over it{% elif 'fuzzer' in modules and nightly_label | lower == fuzzer_label | lower %}nightly_label must differ from fuzzer_label (GitHub label names are case-insensitive): each stream needs its own tracking label or a green night in one closes the other's open issue{% endif %}"
   # END GENERATED: nightly-label-validator
   when: "{{ 'nightly' in modules }}"
 
