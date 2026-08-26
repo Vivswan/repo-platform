@@ -88,6 +88,51 @@ function read(rel: string): string {
   return readFileSync(join(REPO_ROOT, rel), "utf-8");
 }
 
+interface WorkflowStep {
+  id?: string;
+  name?: string;
+  uses?: string;
+  if?: string;
+}
+
+/** Every step of every job in a workflow, parsed. Rules about step
+ *  conditions read this rather than the file's text: a matching string in
+ *  a comment, or on some other step, must not satisfy them. */
+function workflowSteps(rel: string): WorkflowStep[] {
+  const doc = asRecord(parseYaml(read(rel)), rel);
+  const jobs = asRecord(doc.jobs ?? {}, `${rel} jobs`);
+  const steps: WorkflowStep[] = [];
+  for (const job of Object.values(jobs)) {
+    const list = asRecord(job ?? {}, `${rel} job`).steps;
+    if (!Array.isArray(list)) continue;
+    for (const step of list) steps.push(asRecord(step, `${rel} step`) as WorkflowStep);
+  }
+  return steps;
+}
+
+/** The unsafe term of a step condition, or null when every term is safe.
+ *  A step that did not run publishes an EMPTY output, so a test that an
+ *  absent output can SATISFY - `!= 'true'`, `!x`, `== ''`, `== false` -
+ *  opens the gate exactly when the step it guards on never happened.
+ *  Rather than enumerate those shapes, this admits only the one that
+ *  cannot: equality against a non-empty literal. Terms that mention no
+ *  step output (`success()`, `env.X != ''`, `needs.*`) are not this
+ *  hazard - a failed dependency blocks the job outright - and pass. */
+export function unsafeStepCondition(condition: string): string | null {
+  const OUTPUT = /steps\.[\w-]+\.outputs\./;
+  if (!OUTPUT.test(condition)) return null;
+  // A negated GROUP inverts terms this check reads term by term, so it
+  // cannot be proven safe here. `!cancelled()` and friends do not match:
+  // the parenthesis has to follow the `!` directly.
+  if (/!\s*\(/.test(condition)) return `a negated group: ${condition.trim()}`;
+  for (const raw of condition.split(/&&|\|\|/)) {
+    const term = raw.replaceAll(/[()]/g, "").trim();
+    if (!OUTPUT.test(term)) continue;
+    if (!/^steps\.[\w-]+\.outputs\.[\w-]+ == '[^']+'$/.test(term)) return term;
+  }
+  return null;
+}
+
 /** A markdown doc with its generated regions removed (and how many), so a
  *  doc-quoted constant must live in HAND prose to satisfy a rule: a value
  *  inside a generated region has the manifests as its author
@@ -1876,7 +1921,10 @@ const rules: Rule[] = [
       step("Resolve the settings failure report", [
         [/failure_issue\.ts resolve/, "the resolve call"],
         [settingsTitle, "the settings-specific report title"],
-        [/if: success\(\)/, "a success() condition"],
+        [/success\(\)/, "a success() condition"],
+        // A moved target was never checked, so a green job alone must not
+        // close its open report.
+        [/steps\.apply\.outcome == .success./, "a check that the apply actually ran"],
       ]);
       // OUTSIDE the hidden capture, or a hide-details target is skipped
       // with a green job and no signal at all.
@@ -1901,30 +1949,58 @@ const rules: Rule[] = [
   {
     name: "settings-apply-skip-gate",
     run: () => {
-      // merge_settings_layers.ts writes NO merged document for a target
-      // that has no settings.yml yet, because applying the baseline alone
-      // would delete that repo's own labels. Both apply paths must gate on
-      // the step output that says so - a dropped `if:` silently restores
-      // the destructive behaviour, and no unit test can see a workflow.
+      // The apply DELETES labels the merged document does not declare, so
+      // every step condition guarding it is load-bearing: a target that
+      // dropped the module writes no baseline, one with no settings.yml of
+      // its own writes no merged document, and a target whose branch moved
+      // has a stale one. No unit test can see a workflow, so the shape is
+      // asserted here - on the parsed steps, not on the file's text, so a
+      // matching string in a comment or an unrelated step cannot satisfy it.
       const mismatches: Mismatch[] = [];
+      const expected: Record<string, string> = {
+        merge: "steps.render.outputs.skipped == 'false'",
+        freshness:
+          "steps.render.outputs.skipped == 'false' && steps.merge.outputs.skipped == 'false'",
+        apply: "steps.freshness.outputs.moved == 'false'",
+      };
       for (const rel of [
         ".github/workflows/settings-repos.yml",
         ".github/workflows/reusable-apply-settings.yml",
       ]) {
-        const text = read(rel);
-        if (!/^\s+id: merge$/m.test(text)) {
-          mismatches.push({
-            file: rel,
-            expected: "the merge step carries `id: merge`",
-            got: "no such step id",
-          });
+        const steps = workflowSteps(rel);
+        for (const [id, condition] of Object.entries(expected)) {
+          // EVERY apply step, not the first: a second, ungated
+          // invocation of the settings action would otherwise pass.
+          const matched =
+            id === "apply"
+              ? steps.filter((s) => String(s.uses ?? "").includes("github-settings-as-code"))
+              : steps.filter((s) => s.id === id);
+          if (matched.length === 0) {
+            mismatches.push({ file: rel, expected: `a settings ${id} step`, got: "no such step" });
+            continue;
+          }
+          for (const step of matched) {
+            const actual = String(step.if ?? "").trim();
+            if (actual !== condition) {
+              mismatches.push({
+                file: rel,
+                expected: `the ${id} step condition ${condition}`,
+                got: actual === "" ? "no condition at all" : actual,
+              });
+            }
+          }
         }
-        if (!text.includes("steps.merge.outputs.skipped != 'true'")) {
-          mismatches.push({
-            file: rel,
-            expected: "the apply step gates on steps.merge.outputs.skipped != 'true'",
-            got: "no such condition",
-          });
+        // Defense in depth over the REST of the workflow: a condition that
+        // tests a step output negatively passes when the step never ran.
+        for (const step of steps) {
+          const unsafe = unsafeStepCondition(String(step.if ?? ""));
+          if (unsafe !== null) {
+            mismatches.push({
+              file: rel,
+              expected: `step "${step.id ?? step.name ?? step.uses}" tests step outputs positively`,
+              got: `${unsafe} (a step that did not run has an EMPTY output, which passes)`,
+            });
+          }
         }
       }
       return mismatches;

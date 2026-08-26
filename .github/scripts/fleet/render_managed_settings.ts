@@ -38,12 +38,13 @@
 // template), and settings-repos.yml passes the flag for its self target.
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { loadManifests, type ModuleManifest } from "../../../scripts/module_manifests.ts";
 import { parseAnswers } from "../../../scripts/render_dogfood.ts";
 import { parseFlags } from "../shared/flags.ts";
 import { fail, setOutput, warning } from "../shared/gha.ts";
+import { capture } from "../shared/proc.ts";
 import { RETIRED_MODULES } from "../sync/modules.ts";
 import { captureNetwork } from "./discovery.ts";
 import { assertRuleTypes, mergeLayers, normalizeDocument } from "./merge_settings_layers.ts";
@@ -378,6 +379,17 @@ export function resolveTargetRef(repo: string): string {
   return sha;
 }
 
+/** The commit a LOCAL fact source read from: the checkout's head. A local
+ *  snapshot is no less stale than a fetched one - the branch it came from
+ *  keeps moving - so it is pinned the same way and checked the same way.
+ *  Empty when the directory is not a git checkout (the smoke harness
+ *  renders a bare copier output), which check_target_fresh.ts refuses. */
+export function localHeadSha(dir: string): string {
+  const proc = capture(["git", "-C", dir, "rev-parse", "HEAD"]);
+  const sha = proc.stdout.trim();
+  return proc.exitCode === 0 && /^[0-9a-f]{40}$/.test(sha) ? sha : "";
+}
+
 /** Live visibility, failing closed like every other probe: only an
  *  explicit "false" proves the repo public. A probe failure throws - a
  *  wrong visibility would apply the public-only blocks to a private repo
@@ -527,6 +539,38 @@ export function renderManagedYaml(facts: RepoFacts, manifests?: ModuleManifest[]
   )}`;
 }
 
+/** The opt-in, rechecked at the PINNED commit. Selection happened in the
+ *  plan job against whatever the default branch held then; a repo that
+ *  dropped settings-sync in between would otherwise still get a baseline
+ *  built from the opted-out revision and applied - deleting labels after
+ *  the repo turned management off. The operator repository is exempt: it
+ *  has no .repo-platform.yml and opts in by being the operator. */
+const SETTINGS_MODULE = "settings-sync";
+
+/** Whether this run may write a baseline at all. A pure decision so the
+ *  refusal is testable on its own: asserting that facts round-trip a
+ *  module list proves nothing about whether the render acts on them. */
+export type RenderDecision = { kind: "render" } | { kind: "skip"; reason: string };
+
+export function renderDecision(
+  facts: RepoFacts,
+  source: "fetch" | "target-dir" | "operator",
+  repo: string,
+): RenderDecision {
+  // The operator repository has no .repo-platform.yml; it opts in by
+  // being the operator, so there is no selection to recheck.
+  if (source === "operator") return { kind: "render" };
+  if (facts.modules.includes(SETTINGS_MODULE)) return { kind: "render" };
+  return {
+    kind: "skip",
+    reason:
+      `${repo}: the ${SETTINGS_MODULE} module is not selected at the revision these facts were ` +
+      "read from, so settings are no longer managed here and this apply is SKIPPED. Applying " +
+      "anyway would reconcile - and delete - labels on a repository that has turned central " +
+      "settings off.",
+  };
+}
+
 function main(args: string[]): void {
   const flags = parseFlags(
     args,
@@ -539,26 +583,48 @@ function main(args: string[]): void {
   const repo = flags["--repo"];
   let facts: RepoFacts;
   // Published so the merge step reads the repo layer at the SAME commit
-  // these facts came from; empty for the local/operator fact sources,
-  // which have no moving branch to race with.
+  // these facts came from, and so the freshness step can tell whether the
+  // target moved since. Every fact source pins, local ones included.
   let pinnedRef = "";
+  // The opt-in can be dropped between the plan job's selection and this
+  // read; when it has been, nothing is written and the apply is gated off.
+  let optedOut = false;
   try {
     const manifests = loadManifests();
     if (flags["--target-dir"] !== undefined) {
       facts = factsFromTargetDir(flags["--target-dir"], manifests);
+      pinnedRef = localHeadSha(flags["--target-dir"]);
     } else if (flags["--operator-answers"] !== undefined) {
       facts = factsFromOperatorAnswers(flags["--operator-answers"], manifests);
+      pinnedRef = localHeadSha(dirname(resolve(flags["--operator-answers"])));
     } else {
       // Resolved BEFORE any read, and published below, so the merge step
       // reads the repo layer at this same commit.
       pinnedRef = resolveTargetRef(repo);
       facts = factsFromFetch(repo, manifests, pinnedRef);
     }
-    writeFileSync(flags["--out"], renderManagedYaml(facts, manifests));
+    const source =
+      flags["--target-dir"] !== undefined
+        ? "target-dir"
+        : flags["--operator-answers"] !== undefined
+          ? "operator"
+          : "fetch";
+    const decision = renderDecision(facts, source, repo);
+    if (decision.kind === "skip") {
+      warning(decision.reason);
+      optedOut = true;
+    } else {
+      writeFileSync(flags["--out"], renderManagedYaml(facts, manifests));
+    }
   } catch (error) {
     fail(error instanceof Error ? error.message : String(error));
   }
   setOutput("ref", pinnedRef);
+  setOutput("skipped", String(optedOut));
+  if (optedOut) {
+    console.log("skipped: the target no longer selects the settings module");
+    return;
+  }
   console.log(
     `rendered the managed settings baseline for ${facts.modules.length} module(s) into ${flags["--out"]}` +
       (pinnedRef === "" ? "" : ` at ${pinnedRef}`),

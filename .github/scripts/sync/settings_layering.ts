@@ -39,6 +39,7 @@ import {
   modulesFrom,
 } from "../fleet/render_managed_settings.ts";
 import { hideDetails, notice, warning } from "../shared/gha.ts";
+import { capture } from "../shared/proc.ts";
 
 const REPO_ROOT = resolve(import.meta.dir, "..", "..", "..");
 const STARTER_TEMPLATE = join(REPO_ROOT, "templates/settings-sync/.github/settings.yml.jinja");
@@ -51,6 +52,66 @@ const STARTER_TEMPLATE = join(REPO_ROOT, "templates/settings-sync/.github/settin
  *  inside a block scalar of a hand-written file, say - never triggers the
  *  replacement. */
 export const LEGACY_MERGEABLE_LINE = "# repo-platform:mergeable";
+/** The retired class name, as the pre-update manifest spells it. */
+export const RETIRED_MERGEABLE_CLASS = "mergeable";
+const MANIFEST_PATH = ".github/repo-platform-manifest.json";
+
+/** The PRE-update ownership manifest's class for settings.yml, read from
+ *  the target's HEAD because the working tree may already carry this
+ *  update's render. Repos were historically allowed to DELETE the
+ *  mergeable marker line, so the marker alone is not a complete trigger.
+ *  UNREADABLE is its own answer: folded into "no entry", a marker-deleted
+ *  legacy file would read as a transitioned starter and auto-merge. */
+export type HeadManifestClass =
+  | { kind: "read"; class: string | null }
+  | { kind: "unreadable"; detail: string };
+
+/** The classes a manifest entry may carry: today's three, plus the
+ *  retired one this transition exists to catch. A present entry spelling
+ *  anything else is a manifest this code does not understand, and reading
+ *  "not mergeable, therefore starter" out of it would be the same silent
+ *  misclassification as an unreadable file. */
+const KNOWN_CLASSES = new Set(["managed", "split", "starter", RETIRED_MERGEABLE_CLASS]);
+
+export function headManifestClass(
+  targetDir: string,
+  path = ".github/settings.yml",
+): HeadManifestClass {
+  const proc = capture(["git", "-C", targetDir, "show", `HEAD:${MANIFEST_PATH}`]);
+  if (proc.exitCode !== 0) {
+    return { kind: "unreadable", detail: `git show HEAD:${MANIFEST_PATH} failed` };
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(proc.stdout);
+  } catch {
+    return { kind: "unreadable", detail: `HEAD:${MANIFEST_PATH} is not readable JSON` };
+  }
+  // Valid JSON is not a valid manifest. `{"files": []}` or a missing
+  // files map yields no entry for the path, and reading that as "never
+  // rendered from the template" would skip the transition on a
+  // marker-deleted legacy baseline - the exact silent case this exists to
+  // catch. Only a well-formed manifest may answer.
+  const isMapping = (value: unknown): value is Record<string, unknown> =>
+    typeof value === "object" && value !== null && !Array.isArray(value);
+  const unreadable = (why: string): HeadManifestClass => ({
+    kind: "unreadable",
+    detail: `HEAD:${MANIFEST_PATH} ${why}`,
+  });
+  if (!isMapping(parsed)) return unreadable("is not a JSON object");
+  if (!isMapping(parsed.files)) return unreadable("has no files map");
+  const entry = parsed.files[path];
+  // No entry is an answer: the file was not rendered from the template at
+  // HEAD, so it is not a legacy baseline. A malformed one is not.
+  if (entry === undefined) return { kind: "read", class: null };
+  if (!isMapping(entry)) return unreadable(`entry for ${path} is not an object`);
+  if (typeof entry.class !== "string" || !KNOWN_CLASSES.has(entry.class)) {
+    return unreadable(
+      `classes ${path} as ${JSON.stringify(entry.class)}, which is not an ownership class this sync knows`,
+    );
+  }
+  return { kind: "read", class: entry.class };
+}
 
 /** Whether a settings.yml text is the legacy rendered baseline. Scans the
  *  WHOLE file: a repo that kept its own header comments above the
@@ -59,8 +120,16 @@ export const LEGACY_MERGEABLE_LINE = "# repo-platform:mergeable";
  *  skips, the file keeps shadowing the fleet layers, and the sync PR
  *  auto-merges because nothing held it. Column 0 is what keeps the exact
  *  match honest, not proximity to the top. */
-export function isLegacyBaseline(text: string): boolean {
+export function isLegacyBaseline(text: string, headClass: string | null = null): boolean {
+  if (headClass === RETIRED_MERGEABLE_CLASS) return true;
   return text.split("\n").some((line) => line === LEGACY_MERGEABLE_LINE);
+}
+
+/** A file with no marker AND no readable manifest cannot be classified.
+ *  Guessing "starter" is the silent failure; the caller holds the PR. */
+export function classificationUncertain(text: string, head: HeadManifestClass): boolean {
+  if (head.kind === "read") return false;
+  return !text.split("\n").some((line) => line === LEGACY_MERGEABLE_LINE);
 }
 
 // Each identity value has three states, and they mean different things:
@@ -280,6 +349,18 @@ Re-add any of them that are deliberate overrides to the new settings.yml on this
 `;
 }
 
+/** The PR-body section when settings.yml cannot be classified: no marker
+ *  and no readable pre-update manifest. Non-empty so open_pr.ts holds the
+ *  PR - guessing wrong here is silent and permanent. */
+export function uncertainSummary(detail: string): string {
+  return `### settings.yml could not be classified
+
+This repository's \`.github/settings.yml\` carries no \`# repo-platform:mergeable\` marker, and the pre-update ownership manifest could not be read (${detail}), so this sync cannot tell whether the file is a legacy full baseline awaiting the one-time transition or an identity starter that has already been through it.
+
+Nothing was changed. This PR is held for review: if the file is still the old full baseline, it is shadowing the centrally merged settings layers and the transition needs to run; if it is already a starter, this PR is safe to merge as-is.
+`;
+}
+
 /** The PR-body section for a transition that threw. Non-empty on
  *  purpose: a failed transition leaves the legacy baseline file in place,
  *  still shadowing the managed layer, and open_pr.ts arms auto-merge
@@ -310,7 +391,17 @@ export function transitionSettingsStarter(
     const registrationPath = join(targetDir, ".repo-platform.yml");
     if (existsSync(settingsPath) && existsSync(registrationPath)) {
       const oldText = readFileSync(settingsPath, "utf-8");
-      const modules = isLegacyBaseline(oldText)
+      const head = headManifestClass(targetDir);
+      if (classificationUncertain(oldText, head)) {
+        // Cannot tell a legacy baseline from a transitioned starter, and
+        // the wrong guess leaves a stale file shadowing the fleet layers
+        // with nothing to notice. Hold the PR and say so.
+        warning(`${label}: ${head.kind === "unreadable" ? head.detail : ""}`);
+        section = uncertainSummary(head.kind === "unreadable" ? head.detail : "unknown");
+        writeFileSync(outPath, section);
+        return;
+      }
+      const modules = isLegacyBaseline(oldText, head.kind === "read" ? head.class : null)
         ? modulesFrom(readFileSync(registrationPath, "utf-8"), registrationPath)
         : [];
       if (modules.includes("settings-sync")) {

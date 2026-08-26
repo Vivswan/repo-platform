@@ -114,8 +114,8 @@ jobs:
       # network at all. The central run in settings-repos.yml is
       # unaffected: it holds the fleet PAT, which does have Contents, and
       # has no checkout of the target to read instead.
-      - name: Compute the merged settings document
-        id: merge
+      - name: Render this repository's settings layers
+        id: render
         if: steps.token.outputs.proceed == 'true'
         env:
           GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
@@ -123,16 +123,44 @@ jobs:
           bun platform/.github/scripts/fleet/render_managed_settings.ts \
             --repo "$GITHUB_REPOSITORY" --target-dir . \
             --out "$RUNNER_TEMP/managed-settings.yml"
+
+      # Its own step so a repository that has DROPPED settings-sync ends
+      # in a clean warned skip: the render writes no baseline and reports
+      # skipped, and merging a file that was never written would turn a
+      # deliberate opt-out into a red workflow. The token gate is not
+      # repeated here - without it the render never ran, so its output is
+      # empty and this condition is already false.
+      - name: Merge this repository's settings.yml over them
+        id: merge
+        if: steps.render.outputs.skipped == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
+        run: |
           bun platform/.github/scripts/fleet/merge_settings_layers.ts \
             --managed "$RUNNER_TEMP/managed-settings.yml" \
             --repo-file .github/settings.yml \
             --out "$RUNNER_TEMP/merged-settings.yml"
 
+      # This checkout is a snapshot of the default branch, and the branch
+      # keeps moving while the merge runs: a push that drops settings-sync
+      # or rewrites settings.yml lands after the facts were read, and the
+      # apply would reconcile - and delete - labels from the stale
+      # document. GITHUB_TOKEN's contents: read is enough to re-resolve
+      # the head. Same narrowing as the central run, same gate.
+      - name: Check this repository has not moved
+        id: freshness
+        if: steps.render.outputs.skipped == 'false' && steps.merge.outputs.skipped == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET: ${{ github.repository }}
+          PINNED: ${{ steps.render.outputs.ref }}
+        run: bun platform/.github/scripts/fleet/check_target_fresh.ts
+
       - name: Apply repository settings
-        # The merge step writes no document when this repository has no
-        # settings.yml yet (applying the baseline alone would delete the
-        # repo's own labels), so the apply skips with it.
-        if: steps.token.outputs.proceed == 'true' && steps.merge.outputs.skipped != 'true'
+        # Positive equality, never `!= 'true'`: a step that did not RUN has
+        # an empty output, and a negative test would let the apply through
+        # with no merged document behind it.
+        if: steps.freshness.outputs.moved == 'false'
         # Pinned to an immutable commit; bump to @v1 once the action cuts
         # its first release. Bump together with settings-repos.yml.
         uses: Vivswan/github-settings-as-code@ac83fb48219309e2249294ef37fb55310bd45fb3

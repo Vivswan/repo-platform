@@ -6,9 +6,9 @@
 // the fleet override (layers 5 and 6) are merge_settings_layers' tests.
 
 import { describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import {
   declaredPrivate,
   enableCodeql,
@@ -23,9 +23,11 @@ import {
   managedSettings,
   modulesFrom,
   type RepoFacts,
+  renderDecision,
   renderManagedYaml,
   trackingLabelsFrom,
 } from "../../.github/scripts/fleet/render_managed_settings";
+import { capture } from "../../.github/scripts/shared/proc";
 import { loadManifests } from "../../scripts/module_manifests";
 
 const manifests = loadManifests();
@@ -205,6 +207,97 @@ describe("enableCodeql", () => {
     expect(enableCodeql(facts({ modules: ["bun"] }), manifests)).toBe(true);
     expect(enableCodeql(facts({ modules: ["bun"], private: true }), manifests)).toBe(false);
     expect(enableCodeql(facts({ modules: ["rust"] }), manifests)).toBe(false);
+  });
+});
+
+describe("the render CLI acts on the recheck", () => {
+  // renderDecision being right proves nothing if main() stops calling it,
+  // so these drive the script itself and assert what the workflow gates
+  // on: the output file, and whether a document was written at all.
+  const script = resolve(import.meta.dir, "../../.github/scripts/fleet/render_managed_settings.ts");
+
+  function runCli(modules: string): {
+    exitCode: number | null;
+    outputs: string;
+    wroteDocument: boolean;
+    head: string;
+  } {
+    // A real checkout: a local fact source pins to its HEAD like a fetched
+    // one does, and the freshness step refuses an empty pin.
+    const root = mkdtempSync(join(tmpdir(), "render-cli-"));
+    const git = (command: string[]) => {
+      const result = capture(command);
+      if (result.exitCode !== 0) throw new Error(`${command.join(" ")}: ${result.stderr}`);
+      return result.stdout.trim();
+    };
+    git(["git", "-C", root, "init", "-q", "-b", "main"]);
+    git(["git", "-C", root, "config", "user.email", "t@example.com"]);
+    git(["git", "-C", root, "config", "user.name", "t"]);
+    git(["git", "-C", root, "config", "commit.gpgsign", "false"]);
+    git(["git", "-C", root, "config", "core.hooksPath", "/dev/null"]);
+    writeFileSync(join(root, ".repo-platform.yml"), `modules: [${modules}]\n`);
+    mkdirSync(join(root, ".github"), { recursive: true });
+    writeFileSync(join(root, ".github/settings.yml"), "repository:\n  private: false\n");
+    writeFileSync(join(root, ".copier-answers.yml"), "github_username: o\n");
+    git(["git", "-C", root, "add", "-A"]);
+    git(["git", "-C", root, "commit", "-qm", "facts"]);
+    const head = git(["git", "-C", root, "rev-parse", "HEAD"]);
+    const outPath = join(root, "managed.yml");
+    const outputPath = join(root, "step-output.txt");
+    const proc = Bun.spawnSync(
+      ["bun", script, "--repo", "o/r", "--target-dir", root, "--out", outPath],
+      { env: { ...process.env, GITHUB_OUTPUT: outputPath } },
+    );
+    return {
+      exitCode: proc.exitCode,
+      outputs: existsSync(outputPath) ? readFileSync(outputPath, "utf-8") : "",
+      wroteDocument: existsSync(outPath),
+      head,
+    };
+  }
+
+  test("dropping settings-sync writes NO document and publishes skipped=true", () => {
+    const result = runCli("uv");
+    expect(result.exitCode).toBe(0);
+    expect(result.wroteDocument).toBe(false);
+    expect(result.outputs).toContain("skipped=true");
+  });
+
+  test("keeping it writes the document and publishes skipped=false", () => {
+    const result = runCli("uv, settings-sync");
+    expect(result.exitCode).toBe(0);
+    expect(result.wroteDocument).toBe(true);
+    expect(result.outputs).toContain("skipped=false");
+    // The pin the freshness step compares against: without it that step
+    // refuses, and the apply never runs.
+    expect(result.outputs).toContain(`ref=${result.head}`);
+  });
+});
+
+describe("renderDecision rechecks the opt-in at the pinned commit", () => {
+  const withModules = (modules: string[]): RepoFacts => facts({ modules });
+
+  test("a target that dropped settings-sync is REFUSED", () => {
+    // Selection ran in the plan job against an older revision. Applying
+    // now would reconcile - and delete - labels on a repository that has
+    // turned central settings off.
+    const decision = renderDecision(withModules(["uv"]), "fetch", "owner/name");
+    expect(decision.kind).toBe("skip");
+    if (decision.kind !== "skip") throw new Error("expected a skip");
+    expect(decision.reason).toContain("owner/name");
+    expect(decision.reason).toContain("no longer managed");
+  });
+
+  test("a target that still selects it renders", () => {
+    expect(renderDecision(withModules(["uv", "settings-sync"]), "fetch", "r").kind).toBe("render");
+  });
+
+  test("the self-apply's local fact source is rechecked too", () => {
+    expect(renderDecision(withModules(["uv"]), "target-dir", "r").kind).toBe("skip");
+  });
+
+  test("the operator repository is exempt: it has no .repo-platform.yml", () => {
+    expect(renderDecision(withModules([]), "operator", "r").kind).toBe("render");
   });
 });
 

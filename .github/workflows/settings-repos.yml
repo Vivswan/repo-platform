@@ -33,6 +33,7 @@ on:
       - .github/settings-override.yml
       - .github/scripts/fleet/render_managed_settings.ts
       - .github/scripts/fleet/merge_settings_layers.ts
+      - .github/scripts/fleet/check_target_fresh.ts
       - .repo-platform-answers.yml
       - templates/*/module.yml
       - templates/*/settings.yml
@@ -196,6 +197,9 @@ jobs:
 
       - name: Merge the repository's settings.yml over the baseline
         id: merge
+        # No baseline was written when the target turned settings off at
+        # the pinned revision, so there is nothing to merge.
+        if: steps.render.outputs.skipped == 'false'
         env:
           GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
           TARGET: ${{ steps.resolve.outputs.repo }}
@@ -226,15 +230,35 @@ jobs:
       # redacted row, so this says WHICH target without saying anything
       # about its contents.
       - name: Report a skipped target
-        if: steps.merge.outputs.skipped == 'true'
+        if: steps.render.outputs.skipped == 'true' || steps.merge.outputs.skipped == 'true'
         run: |
-          echo "::notice::settings apply skipped for ${{ matrix.repo }}: it selects settings-sync but has no .github/settings.yml yet, so there is nothing to layer over the fleet defaults. The settings-sync starter seeds the file on its next template sync."
+          if [ "${{ steps.render.outputs.skipped }}" = "true" ]; then
+            echo "::notice::settings apply skipped for ${{ matrix.repo }}: it no longer selects the settings-sync module at the revision this run read, so its settings are not managed here any more."
+          else
+            echo "::notice::settings apply skipped for ${{ matrix.repo }}: it selects settings-sync but has no .github/settings.yml yet, so there is nothing to layer over the fleet defaults. The settings-sync starter seeds the file on its next template sync."
+          fi
+
+      # The opt-in was rechecked at the pinned commit, but the apply runs
+      # later and the branch keeps moving. Re-resolving the head here
+      # narrows that window to this step: if the target moved, the run
+      # skips and the next one reads the new revision. It cannot CLOSE the
+      # window - there is no compare-and-swap on "still opted in" - so
+      # this is damage limitation, not a guarantee.
+      - name: Check the target has not moved
+        id: freshness
+        if: steps.render.outputs.skipped == 'false' && steps.merge.outputs.skipped == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
+          TARGET: ${{ steps.resolve.outputs.repo }}
+          PINNED: ${{ steps.render.outputs.ref }}
+        run: bun .github/scripts/fleet/check_target_fresh.ts
 
       - name: Apply repository settings
+        id: apply
         # Skipped for a target that selected settings-sync but has no
         # settings.yml yet: the merge step writes no document, because
         # applying the baseline alone would delete the repo's own labels.
-        if: steps.merge.outputs.skipped != 'true'
+        if: steps.freshness.outputs.moved == 'false'
         # Pinned to an immutable commit; bump to @v1 once the action cuts
         # its first release. Bump together with reusable-apply-settings.yml.
         uses: Vivswan/github-settings-as-code@ac83fb48219309e2249294ef37fb55310bd45fb3
@@ -274,9 +298,15 @@ jobs:
       # Without this the issue stays open after a recovered run, and the
       # template sync's own green run could close a report the settings
       # apply is still failing on - which is why the two carry different
-      # titles.
+      # titles. A green job is not enough on its own: a MOVED target means
+      # this run never checked the settings, so an open report stays open
+      # until a run actually applies. The two skips are terminal - the repo
+      # opted out, or has no settings.yml to layer yet - so they resolve.
       - name: Resolve the settings failure report
-        if: success() && env.HIDE_DETAILS == 'true' && env.TARGET != ''
+        if: >-
+          success() && env.HIDE_DETAILS == 'true' && env.TARGET != '' &&
+          (steps.apply.outcome == 'success' || steps.render.outputs.skipped == 'true' ||
+          steps.merge.outputs.skipped == 'true')
         env:
           GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}

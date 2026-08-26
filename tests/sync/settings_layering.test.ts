@@ -9,14 +9,18 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
+import { capture } from "../../.github/scripts/shared/proc";
 import {
+  classificationUncertain,
   droppedOverrides,
+  headManifestClass,
   type IdentitySeed,
   isLegacyBaseline,
   LEGACY_MERGEABLE_LINE,
   layeringSummary,
   renderStarter,
   transitionSettingsStarter,
+  uncertainSummary,
 } from "../../.github/scripts/sync/settings_layering";
 
 const STARTER_TEMPLATE = readFileSync(
@@ -33,6 +37,40 @@ const seed: IdentitySeed = {
 };
 
 describe("isLegacyBaseline", () => {
+  test("no marker AND no readable manifest is UNCERTAIN, not a starter", () => {
+    // Guessing "starter" here is the silent failure: the stale baseline
+    // keeps shadowing the fleet layers and the PR auto-merges.
+    expect(classificationUncertain("repository: {}\n", { kind: "unreadable", detail: "x" })).toBe(
+      true,
+    );
+    // A marker settles it, and so does a readable manifest.
+    expect(
+      classificationUncertain(`${LEGACY_MERGEABLE_LINE}\n`, { kind: "unreadable", detail: "x" }),
+    ).toBe(false);
+    expect(classificationUncertain("repository: {}\n", { kind: "read", class: "starter" })).toBe(
+      false,
+    );
+  });
+
+  test("the uncertain section is non-empty, so the PR is held", () => {
+    const summary = uncertainSummary("git show failed");
+    expect(summary).not.toBe("");
+    expect(summary).toContain("could not be classified");
+    expect(summary).toContain("held for review");
+    expect(summary).toContain("git show failed");
+  });
+
+  test("a manifest class of mergeable triggers even with the marker deleted", () => {
+    // Repos were historically allowed to delete the marker line, and the
+    // merge preserved that deletion - such a file would otherwise read as
+    // a starter and shadow the fleet layers forever.
+    expect(isLegacyBaseline("repository: {}\n", "mergeable")).toBe(true);
+    // Any other class, or none, falls back to the in-file marker.
+    expect(isLegacyBaseline("repository: {}\n", "starter")).toBe(false);
+    expect(isLegacyBaseline("repository: {}\n", null)).toBe(false);
+    expect(isLegacyBaseline(`${LEGACY_MERGEABLE_LINE}\n`, "starter")).toBe(true);
+  });
+
   test("matches the marker exactly at column 0, at ANY depth in the file", () => {
     expect(isLegacyBaseline(`---\n${LEGACY_MERGEABLE_LINE}\nrepository: {}\n`)).toBe(true);
     // There is no header window: a repo that kept its own comments above
@@ -47,6 +85,84 @@ describe("isLegacyBaseline", () => {
       false,
     );
     expect(isLegacyBaseline(`see the ${LEGACY_MERGEABLE_LINE} marker\n`)).toBe(false);
+  });
+});
+
+describe("headManifestClass", () => {
+  // "Parsed successfully" is not the same as "classified". A present entry
+  // this code cannot read is as unclassifiable as an unreadable file, and
+  // reading "not mergeable, therefore starter" out of it would silently
+  // leave a stale baseline shadowing the fleet layers.
+  function repoWithManifest(contents: string | null): string {
+    const dir = mkdtempSync(join(tmpdir(), "head-manifest-"));
+    mkdirSync(join(dir, ".github"), { recursive: true });
+    const git = (command: string[]) => {
+      const result = capture(command);
+      if (result.exitCode !== 0) throw new Error(`${command.join(" ")}: ${result.stderr}`);
+    };
+    git(["git", "-C", dir, "init", "-q", "-b", "main"]);
+    // A contributor's global commit signing or hooks path must not decide
+    // whether these fixtures can commit.
+    git(["git", "-C", dir, "config", "commit.gpgsign", "false"]);
+    git(["git", "-C", dir, "config", "core.hooksPath", "/dev/null"]);
+    git(["git", "-C", dir, "config", "user.email", "t@example.com"]);
+    git(["git", "-C", dir, "config", "user.name", "t"]);
+    if (contents !== null) {
+      writeFileSync(join(dir, ".github/repo-platform-manifest.json"), contents);
+    }
+    git(["git", "-C", dir, "add", "-A"]);
+    git(["git", "-C", dir, "commit", "-qm", "head", "--allow-empty"]);
+    return dir;
+  }
+
+  const entry = (value: string) => `{"files": {".github/settings.yml": ${value}}}\n`;
+
+  test("a known class reads", () => {
+    expect(headManifestClass(repoWithManifest(entry('{"class": "mergeable"}')))).toEqual({
+      kind: "read",
+      class: "mergeable",
+    });
+  });
+
+  test("no entry for the file reads as null - it was never rendered", () => {
+    expect(headManifestClass(repoWithManifest('{"files": {}}\n'))).toEqual({
+      kind: "read",
+      class: null,
+    });
+  });
+
+  test("an entry with an UNKNOWN class is unreadable, not a starter", () => {
+    // "mergable" is one keystroke from the retired class this transition
+    // triggers on; silently reading it as "some other class" is the whole
+    // failure mode.
+    const head = headManifestClass(repoWithManifest(entry('{"class": "mergable"}')));
+    expect(head.kind).toBe("unreadable");
+  });
+
+  test("an entry with NO class is unreadable", () => {
+    expect(headManifestClass(repoWithManifest(entry("{}"))).kind).toBe("unreadable");
+  });
+
+  test("a malformed container is unreadable, not an absent entry", () => {
+    // Valid JSON is not a valid manifest: reading "no entry, therefore
+    // never rendered" out of a files list or a null entry skips the
+    // transition on a marker-deleted legacy baseline.
+    expect(headManifestClass(repoWithManifest('{"files": []}\n')).kind).toBe("unreadable");
+    expect(headManifestClass(repoWithManifest('{"files": null}\n')).kind).toBe("unreadable");
+    expect(headManifestClass(repoWithManifest('{"generated": true}\n')).kind).toBe("unreadable");
+    expect(headManifestClass(repoWithManifest("[]\n")).kind).toBe("unreadable");
+    expect(headManifestClass(repoWithManifest(entry("null"))).kind).toBe("unreadable");
+    expect(headManifestClass(repoWithManifest(entry('"starter"'))).kind).toBe("unreadable");
+  });
+
+  test("unparseable JSON and a missing manifest are unreadable", () => {
+    expect(headManifestClass(repoWithManifest("{not json")).kind).toBe("unreadable");
+    expect(headManifestClass(repoWithManifest(null)).kind).toBe("unreadable");
+  });
+
+  test("an unknown class HOLDS the PR when the marker is gone", () => {
+    const head = headManifestClass(repoWithManifest(entry('{"class": "mergable"}')));
+    expect(classificationUncertain("repository: {}\n", head)).toBe(true);
   });
 });
 
@@ -187,12 +303,42 @@ describe("layeringSummary", () => {
 });
 
 describe("transitionSettingsStarter", () => {
-  function target(options: { settings?: string; modules?: string; answers?: string }): {
+  // The sync always runs against a git checkout whose HEAD predates this
+  // update, so the helper builds one: the transition reads the ownership
+  // class from `git show HEAD:`. Pass manifestClass: null for the repo
+  // shape where that read FAILS (no manifest committed yet).
+  function git(command: string[]): void {
+    const result = capture(command);
+    if (result.exitCode !== 0) throw new Error(`${command.join(" ")}: ${result.stderr}`);
+  }
+
+  function target(options: {
+    settings?: string;
+    modules?: string;
+    answers?: string;
+    manifestClass?: string | null;
+  }): {
     dir: string;
     out: string;
   } {
     const dir = mkdtempSync(join(tmpdir(), "settings-layering-"));
     mkdirSync(join(dir, ".github"), { recursive: true });
+    const manifestClass = options.manifestClass === undefined ? "starter" : options.manifestClass;
+    git(["git", "-C", dir, "init", "-q", "-b", "main"]);
+    // A contributor's global commit signing or hooks path must not decide
+    // whether these fixtures can commit.
+    git(["git", "-C", dir, "config", "commit.gpgsign", "false"]);
+    git(["git", "-C", dir, "config", "core.hooksPath", "/dev/null"]);
+    git(["git", "-C", dir, "config", "user.email", "t@example.com"]);
+    git(["git", "-C", dir, "config", "user.name", "t"]);
+    if (manifestClass !== null) {
+      writeFileSync(
+        join(dir, ".github/repo-platform-manifest.json"),
+        `${JSON.stringify({ files: { ".github/settings.yml": { class: manifestClass } } }, null, 2)}\n`,
+      );
+    }
+    git(["git", "-C", dir, "add", "-A"]);
+    git(["git", "-C", dir, "commit", "-qm", "head", "--allow-empty"]);
     if (options.settings !== undefined) {
       writeFileSync(join(dir, ".github/settings.yml"), options.settings);
     }
@@ -306,6 +452,40 @@ describe("transitionSettingsStarter", () => {
     transitionSettingsStarter(dir, out, "t");
     expect(readFileSync(join(dir, ".github/settings.yml"), "utf-8")).toBe(handWritten);
     expect(readFileSync(out, "utf-8")).toBe("");
+  });
+
+  test("a legacy baseline whose marker was DELETED still transitions", () => {
+    // The marker line was deletable and the three-way merge preserved the
+    // deletion, so the file alone cannot answer the question; the
+    // pre-update manifest class can.
+    const { dir, out } = target({
+      settings: legacySettings.replace(`${LEGACY_MERGEABLE_LINE}\n`, ""),
+      modules: "modules: [settings-sync]\n",
+      answers,
+      manifestClass: "mergeable",
+    });
+    transitionSettingsStarter(dir, out, "t");
+    const written = readFileSync(join(dir, ".github/settings.yml"), "utf-8");
+    expect(written).toContain("Rendered ONCE by the settings-sync module");
+    expect(written).not.toContain("extra-label");
+    const section = readFileSync(out, "utf-8");
+    expect(section).toContain("layering transition");
+    expect(section).toContain('- labels "extra-label"');
+  });
+
+  test("marker-less AND no committed manifest HOLDS the PR without writing", () => {
+    // Neither source can classify the file. Guessing either way is the
+    // silent failure, so the transition refuses and says why.
+    const handWritten = "repository:\n  description: mine\n";
+    const { dir, out } = target({
+      settings: handWritten,
+      modules: "modules: [settings-sync]\n",
+      answers,
+      manifestClass: null,
+    });
+    transitionSettingsStarter(dir, out, "t");
+    expect(readFileSync(join(dir, ".github/settings.yml"), "utf-8")).toBe(handWritten);
+    expect(readFileSync(out, "utf-8")).toContain("could not be classified");
   });
 
   test("a repo without the settings-sync module keeps its legacy file", () => {

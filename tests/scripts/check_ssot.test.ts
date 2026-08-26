@@ -22,6 +22,7 @@ import {
   settingsIdentityMismatches,
   stepCarriesWithKey,
   stripGeneratedRegions,
+  unsafeStepCondition,
   zToDollar,
 } from "../../scripts/check_ssot";
 import { MARKER_TOKENS, mdMarkers } from "../../scripts/generate";
@@ -490,4 +491,51 @@ describe("stepCarriesWithKey", () => {
     expect(bun.test("# - uses: oven-sh/setup-bun@v2".replace(/^#\s*/, ""))).toBe(true);
     expect(bun.test("echo oven-sh/setup-bun@v2")).toBe(false);
   });
+});
+
+describe("unsafeStepCondition", () => {
+  // A step that did not run publishes an EMPTY output, so any test an
+  // absent output can satisfy opens the gate exactly when the step it
+  // guards on never happened. Only equality against a non-empty literal
+  // is admitted, so the list below is closed by construction rather than
+  // by enumerating the unsafe spellings.
+  const unsafe = [
+    "steps.merge.outputs.skipped != 'true'",
+    "steps.render.outputs.skipped!='true'",
+    "'true' != steps.merge.outputs.skipped",
+    "!steps.merge.outputs.skipped",
+    "! steps.merge.outputs.skipped",
+    "!(steps.merge.outputs.skipped == 'true')",
+    "!(success() && steps.merge.outputs.skipped == 'true')",
+    // Actions coerces an absent output to the empty string, which equals
+    // both '' and false.
+    "steps.merge.outputs.skipped == ''",
+    "steps.merge.outputs.skipped == false",
+    "steps.a.outputs.b == 'false' && steps.c.outputs.d != 'true'",
+    "steps.a.outputs.b == 'false' || !steps.c.outputs.d",
+  ];
+  for (const condition of unsafe) {
+    test(`rejects ${condition}`, () => {
+      expect(unsafeStepCondition(condition)).not.toBeNull();
+    });
+  }
+
+  const safe = [
+    "steps.merge.outputs.skipped == 'false'",
+    "steps.render.outputs.skipped == 'false' && steps.merge.outputs.skipped == 'false'",
+    "success() && (steps.apply.outcome == 'success' || steps.render.outputs.skipped == 'true')",
+    // always() is not itself the hazard: an absent output still fails the
+    // equality, so a reporting step may use it.
+    "always() && steps.merge.outputs.skipped == 'false'",
+    "failure() && env.HIDE_DETAILS == 'true'",
+    // Not a step output: a failed dependency blocks the job outright.
+    "needs.select.outputs.targets != '[]'",
+    "success() && env.TARGET != ''",
+    "",
+  ];
+  for (const condition of safe) {
+    test(`accepts ${condition === "" ? "(no condition)" : condition}`, () => {
+      expect(unsafeStepCondition(condition)).toBeNull();
+    });
+  }
 });
