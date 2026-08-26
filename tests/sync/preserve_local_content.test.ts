@@ -728,6 +728,18 @@ describe("splitEntries", () => {
     );
   });
 
+  // The manifest text is attacker-adjacent at this boundary: it is whatever
+  // the target repo's stamped file claims, so the same one-comment rule has
+  // to hold here and not just at declaration time.
+  test("throws on an HTML tail marker that is not exactly one comment", () => {
+    for (const marker of ["<!-- closed --> active <!-- final -->", "<!-->"]) {
+      const manifest = JSON.stringify({ files: { "AGENTS.md": tailEntry({ marker }) } });
+      expect(() => splitEntries(manifest, "m")).toThrow(
+        "not a hash comment or a complete HTML comment",
+      );
+    }
+  });
+
   test("throws on a bounded-region marker that is not a hash comment", () => {
     const manifest = JSON.stringify({
       files: {

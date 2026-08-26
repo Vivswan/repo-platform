@@ -151,6 +151,22 @@ describe("ownershipEntrySchema", () => {
     ).toBe(false);
   });
 
+  // Opens-and-closes accepted two DIFFERENT comments with live text between
+  // them, and the degenerate form whose delimiters overlap. Either would let
+  // the recovery appendix emit a line that is not one comment.
+  test("rejects HTML markers that are not exactly one comment", () => {
+    const rejects = (marker: string) =>
+      expect(ownershipEntrySchema.safeParse(tail("X.md", marker)).success).toBe(false);
+    // Opener and closer belong to different comments; "active" is live text.
+    rejects("<!-- closed --> active <!-- final -->");
+    // Delimiters overlap: the closer IS part of the opener.
+    rejects("<!-->");
+    // The shape a real declaration uses still passes.
+    expect(
+      ownershipEntrySchema.safeParse(tail("X.md", "<!-- repo-platform:local-section -->")).success,
+    ).toBe(true);
+  });
+
   test("rejects bounded-region markers that contain each other", () => {
     expect(
       ownershipEntrySchema.safeParse({

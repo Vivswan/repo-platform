@@ -141,7 +141,16 @@ const markerLine = (what: string) =>
  *  manifest text claims) - the recovery appendix writes comments in the
  *  marker's syntax, so anything else would emit a non-comment line. */
 export function isCommentMarker(value: string): boolean {
-  return value.startsWith("#") || (value.startsWith("<!--") && value.endsWith("-->"));
+  if (value.startsWith("#")) return true;
+  if (!value.startsWith("<!--")) return false;
+  // Opens-and-closes was not enough: it accepted a line whose opener and
+  // closer belong to DIFFERENT comments, leaving active text between them
+  // ("<!-- a --> live <!-- b -->"), and the degenerate "<!-->" where the
+  // delimiters overlap. A valid marker is exactly ONE comment spanning the
+  // whole line, so the first closer AFTER the opener must be the line's
+  // final characters - searching from 4 is also what rules the overlap out.
+  const close = value.indexOf("-->", 4);
+  return close !== -1 && close + 3 === value.length;
 }
 
 const hashOrHtmlMarker = (what: string) =>
