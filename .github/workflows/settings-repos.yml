@@ -199,12 +199,25 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
           TARGET: ${{ steps.resolve.outputs.repo }}
-        run: >-
-          bun .github/scripts/sync/run_hidden.ts "settings merge" --
-          bun .github/scripts/fleet/merge_settings_layers.ts
-          --managed "$RUNNER_TEMP/managed-settings.yml"
-          --repo-fetch "$TARGET" --repo-ref "${{ steps.render.outputs.ref }}"
-          --out "$RUNNER_TEMP/merged-settings.yml"
+        run: |
+          # The operator repository IS this checkout, so its layer is read
+          # from disk - the render took its facts from the same working
+          # tree, and fetching would reintroduce the race the pin removes.
+          # Every other target is fetched, pinned to the commit the render
+          # published.
+          if [ "$TARGET" = "$GITHUB_REPOSITORY" ]; then
+            bun .github/scripts/sync/run_hidden.ts "settings merge" -- \
+              bun .github/scripts/fleet/merge_settings_layers.ts \
+              --managed "$RUNNER_TEMP/managed-settings.yml" \
+              --repo-file .github/settings.yml \
+              --out "$RUNNER_TEMP/merged-settings.yml"
+          else
+            bun .github/scripts/sync/run_hidden.ts "settings merge" -- \
+              bun .github/scripts/fleet/merge_settings_layers.ts \
+              --managed "$RUNNER_TEMP/managed-settings.yml" \
+              --repo-fetch "$TARGET" --repo-ref "${{ steps.render.outputs.ref }}" \
+              --out "$RUNNER_TEMP/merged-settings.yml"
+          fi
 
       # Outside the hidden capture on purpose: for a hide-details target
       # run_hidden swallows the merge step's SUCCESS output, including its

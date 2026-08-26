@@ -221,12 +221,19 @@ describe("factsFromFetch pins every read to one ref", () => {
       if (path === ".copier-answers.yml") return "fuzzer_label: my-fuzz\n";
       return null;
     };
-    const facts = factsFromFetch("owner/name", manifests, "cafebabe", fetcher);
+    const facts = factsFromFetch(
+      "owner/name",
+      manifests,
+      "000000000000000000000000000000000000000a",
+      fetcher,
+    );
     expect(facts.modules).toContain("uv");
     expect(facts.trackingLabels).toEqual([{ module: "fuzzer", label: "my-fuzz" }]);
     // Every read pinned, and the files that matter actually read.
     expect(seen.length).toBeGreaterThan(1);
-    expect(new Set(seen.map((s) => s.ref))).toEqual(new Set(["cafebabe"]));
+    expect(new Set(seen.map((s) => s.ref))).toEqual(
+      new Set(["000000000000000000000000000000000000000a"]),
+    );
     expect(seen.map((s) => s.path)).toContain(".repo-platform.yml");
     expect(seen.map((s) => s.path)).toContain(".github/settings.yml");
   });

@@ -1702,6 +1702,53 @@ const rules: Rule[] = [
   },
 
   {
+    name: "settings-read-pin",
+    run: () => {
+      // The unit tests can prove factsFromFetch forwards one ref and that
+      // the CLI refuses an unpinned fetch. They cannot see the TRANSPORT
+      // or the workflow, so those are pinned here: the ref has to reach
+      // the API URL, and the fetch call has to carry the render's output.
+      const mismatches: Mismatch[] = [];
+      const render = read(".github/scripts/fleet/render_managed_settings.ts");
+      if (!/contents\/\$\{path\}\?ref=\$\{ref\}/.test(render)) {
+        mismatches.push({
+          file: ".github/scripts/fleet/render_managed_settings.ts",
+          expected: "the contents URL carries ?ref=, or every fact reads the moving branch",
+          got: "no ?ref= on the fetch URL",
+        });
+      }
+      const merge = read(".github/scripts/fleet/merge_settings_layers.ts");
+      if (!/contents\/\.github\/settings\.yml\?ref=\$\{ref\}/.test(merge)) {
+        mismatches.push({
+          file: ".github/scripts/fleet/merge_settings_layers.ts",
+          expected: "the repo-layer URL carries ?ref=",
+          got: "no ?ref= on the repo-layer fetch",
+        });
+      }
+      const workflow = read(".github/workflows/settings-repos.yml").replace(/\\[ \t]*\n\s*/g, " ");
+      if (
+        !/--repo-fetch [^\n]*--repo-ref "\$\{\{ steps\.render\.outputs\.ref \}\}"/.test(workflow)
+      ) {
+        mismatches.push({
+          file: ".github/workflows/settings-repos.yml",
+          expected: "every --repo-fetch passes the render step's published ref",
+          got: "a fetch without the pinned ref",
+        });
+      }
+      // The operator row reads its own checkout; fetching it would race
+      // against the facts the render took from that same working tree.
+      if (!/--repo-file \.github\/settings\.yml/.test(workflow)) {
+        mismatches.push({
+          file: ".github/workflows/settings-repos.yml",
+          expected: "the operator row merges from its checkout (--repo-file)",
+          got: "the operator row fetches",
+        });
+      }
+      return mismatches;
+    },
+  },
+
+  {
     name: "self-apply-fact-source",
     run: () => {
       // The self-apply's REPO_PLATFORM_TOKEN grant is Administration and

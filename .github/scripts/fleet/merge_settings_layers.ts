@@ -412,12 +412,11 @@ export function parseSettingsDoc(text: string, where: string): Record<string, un
  *  old module selection with a new repo layer and the apply deletes the
  *  labels of a module the repo had just selected. */
 function fetchRepoLayer(repo: string, ref: string): { text: string; where: string } | null {
-  const at = ref === "" ? "" : `?ref=${ref}`;
-  const where = `${repo}/.github/settings.yml${ref === "" ? "" : `@${ref}`}`;
+  const where = `${repo}/.github/settings.yml@${ref}`;
   const proc = captureNetwork([
     "gh",
     "api",
-    `repos/${repo}/contents/.github/settings.yml${at}`,
+    `repos/${repo}/contents/.github/settings.yml?ref=${ref}`,
     "-H",
     "Accept: application/vnd.github.raw",
   ]);
@@ -523,29 +522,68 @@ export function mergeOutcome(
   return { kind: "merged", document: merged, warnings };
 }
 
+/** Where the repo layer comes from. A UNION rather than three loose
+ *  flags: a fetched layer must name the commit the facts were read at, so
+ *  the pin cannot degrade to a moving-branch read because someone dropped
+ *  a step id, misspelled an output, or forgot the flag. A local path has
+ *  no ref: the checkout is already one coherent revision. */
+export type RepoSource =
+  | { kind: "file"; path: string }
+  | { kind: "fetch"; repo: string; ref: string };
+
+export function repoSourceFrom(
+  file: string | undefined,
+  fetch: string | undefined,
+  ref: string | undefined,
+): RepoSource {
+  if (file !== undefined && fetch !== undefined) {
+    throw new Error("--repo-file and --repo-fetch are mutually exclusive - pass one source");
+  }
+  if (file !== undefined) {
+    if (ref !== undefined && ref !== "") {
+      throw new Error("--repo-ref belongs to --repo-fetch; a local path is already one revision");
+    }
+    return { kind: "file", path: file };
+  }
+  if (fetch !== undefined) {
+    if (ref === undefined || !/^[0-9a-f]{40}$/.test(ref)) {
+      throw new Error(
+        `--repo-fetch needs --repo-ref <40-hex commit sha> (got ${JSON.stringify(ref ?? "")}). ` +
+          "The repo layer must be read at the same commit the facts were, or a push between " +
+          "the two reads pairs an old module selection with a new layer and the apply deletes " +
+          "the labels of a module the repo just selected.",
+      );
+    }
+    return { kind: "fetch", repo: fetch, ref };
+  }
+  throw new Error("pass a repo-layer source: --repo-file <path> or --repo-fetch <owner/name>");
+}
+
 function main(args: string[]): void {
   const flags = parseFlags(
     args,
     ["--managed", "--out"] as const,
     ["--repo-file", "--repo-fetch", "--repo-ref"] as const,
   );
-  const fileSource = flags["--repo-file"];
-  const fetchSource = flags["--repo-fetch"];
-  if (fileSource !== undefined && fetchSource !== undefined) {
-    fail("--repo-file and --repo-fetch are mutually exclusive - pass one repo-layer source");
-  }
-  if (fileSource === undefined && fetchSource === undefined) {
-    fail("pass a repo-layer source: --repo-file <path> or --repo-fetch <owner/name>");
+  let source: RepoSource;
+  try {
+    source = repoSourceFrom(flags["--repo-file"], flags["--repo-fetch"], flags["--repo-ref"]);
+  } catch (error) {
+    fail(error instanceof Error ? error.message : String(error));
   }
   try {
     const managed = parseSettingsDoc(readFileSync(flags["--managed"], "utf-8"), flags["--managed"]);
     const repoLayer =
-      fileSource !== undefined
-        ? existsSync(fileSource)
-          ? { text: readFileSync(fileSource, "utf-8"), where: fileSource }
+      source.kind === "file"
+        ? existsSync(source.path)
+          ? { text: readFileSync(source.path, "utf-8"), where: source.path }
           : null
-        : fetchRepoLayer(fetchSource as string, flags["--repo-ref"] ?? "");
-    const outcome = mergeOutcome(managed, repoLayer, fileSource ?? (fetchSource as string));
+        : fetchRepoLayer(source.repo, source.ref);
+    const outcome = mergeOutcome(
+      managed,
+      repoLayer,
+      source.kind === "file" ? source.path : source.repo,
+    );
     if (outcome.kind === "skip") {
       warning(outcome.message);
       setOutput("skipped", "true");

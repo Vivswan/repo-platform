@@ -20,6 +20,7 @@ import {
   missingIdentityKeys,
   nameKeyedUnion,
   parseSettingsDoc,
+  repoSourceFrom,
 } from "../../.github/scripts/fleet/merge_settings_layers";
 
 const managed = {
@@ -134,6 +135,38 @@ describe("mergeSettingsLayers", () => {
   test("repo-only sections pass through untouched", () => {
     const merged = mergeSettingsLayers(managed, { environments: [{ name: "prod" }] });
     expect(merged.environments).toEqual([{ name: "prod" }]);
+  });
+});
+
+describe("repoSourceFrom", () => {
+  test("a fetched layer MUST be pinned to a commit sha", () => {
+    // The whole point: without this, dropping the flag or misspelling the
+    // step output silently restores the moving-branch read.
+    expect(() => repoSourceFrom(undefined, "owner/name", undefined)).toThrow("--repo-ref");
+    expect(() => repoSourceFrom(undefined, "owner/name", "")).toThrow("--repo-ref");
+    expect(() => repoSourceFrom(undefined, "owner/name", "main")).toThrow("--repo-ref");
+    expect(() => repoSourceFrom(undefined, "owner/name", "cafebabe")).toThrow("40-hex");
+    expect(
+      repoSourceFrom(undefined, "owner/name", "000000000000000000000000000000000000000a"),
+    ).toEqual({
+      kind: "fetch",
+      repo: "owner/name",
+      ref: "000000000000000000000000000000000000000a",
+    });
+  });
+
+  test("a local path takes no ref, and the two sources are exclusive", () => {
+    expect(repoSourceFrom(".github/settings.yml", undefined, undefined)).toEqual({
+      kind: "file",
+      path: ".github/settings.yml",
+    });
+    expect(() =>
+      repoSourceFrom("a.yml", undefined, "000000000000000000000000000000000000000a"),
+    ).toThrow("belongs to --repo-fetch");
+    expect(() => repoSourceFrom("a.yml", "owner/name", undefined)).toThrow("mutually exclusive");
+    expect(() => repoSourceFrom(undefined, undefined, undefined)).toThrow(
+      "pass a repo-layer source",
+    );
   });
 });
 
