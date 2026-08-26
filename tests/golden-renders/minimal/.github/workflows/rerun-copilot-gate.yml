@@ -24,6 +24,14 @@
 # relevance test is a JOB-level `if:` rather than a step-level one: an
 # irrelevant event starts no job at all, and on a private repository a
 # started-then-skipped job still bills a rounded-up minute.
+#
+# EXPECT action_required: GitHub holds a run for manual approval when the
+# triggering actor is the Copilot bot, so this workflow can land with that
+# conclusion and no jobs run at all. It is GitHub actor policy and no REST
+# API exposes a toggle. When it happens, open the CI run and click Re-run
+# failed jobs on the copilot-review job; the gate goes green once the
+# review has arrived. See
+# https://github.com/Vivswan/repo-platform/blob/main/docs/all-green.md.
 
 name: Rerun Copilot Gate
 
