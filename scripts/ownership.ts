@@ -49,6 +49,20 @@ import type { ModuleManifest } from "./module_manifests.ts";
 export const MANAGED_HEADER_RE =
   /This file is managed by \{\{ github_username \}\}\/repo-platform\.(?![A-Za-z0-9._-])/;
 
+/** The bounded-region marker texts the fleet actually ships, kept as a
+ *  CONSTANT beside the derived set. Deriving from current declarations
+ *  alone is self-disarming: .gitignore is the only bounded-region
+ *  declaration in the tree, so flipping it to managed would empty the
+ *  derived set and silence the contradiction scan on exactly the flip the
+ *  scan exists to catch. The union of constant and derived is what gets
+ *  scanned. */
+export const REGION_MARKER_LINES = new Set([
+  "# BEGIN REPO-PLATFORM MANAGED",
+  "# END REPO-PLATFORM MANAGED",
+  "# BEGIN REPOSITORY LOCAL",
+  "# END REPOSITORY LOCAL",
+]);
+
 export const LOCAL_SECTION_MARKER = "repo-platform:local-section";
 export const LOCAL_SECTION_LINES = new Set([
   `# ${LOCAL_SECTION_MARKER}`,
@@ -347,6 +361,15 @@ export function landedPathAndGates(renderedPath: string): { path: string; gates:
  *  grammar's markers is the same overwrite hazard as one carrying
  *  .gitignore's - the scanned set derives from ALL declarations, never a
  *  constant. */
+export function declaredTailMarkerTexts(declarations: Iterable<OwnershipDeclaration>): string[] {
+  const out = new Set<string>();
+  for (const declaration of declarations) {
+    if (declaration.class !== "split" || declaration.grammar !== "tail-marker") continue;
+    out.add(declaration.marker);
+  }
+  return [...out];
+}
+
 export function declaredRegionMarkerTexts(declarations: Iterable<OwnershipDeclaration>): string[] {
   const out = new Set<string>();
   for (const declaration of declarations) {
@@ -376,18 +399,26 @@ export function declarationTextErrors(
   skipMatched: boolean,
   regionMarkerTexts: readonly string[],
   where: string,
+  tailMarkerTexts: readonly string[] = [],
 ): string[] {
   const errors: string[] = [];
   const hasHeader = hasManagedHeader(source);
+  // Declared tail markers are arbitrary strings, so the shipped constants
+  // alone would miss a custom one copied into a managed or starter source.
+  // Exact trimmed-line match, so a mid-line MENTION of a marker still
+  // passes - only a line that IS the marker claims a repo-owned tail.
+  const tailLines = new Set<string>([...LOCAL_SECTION_LINES, ...tailMarkerTexts]);
   const sentinelLine = source
     .split("\n")
     .map((line) => line.trim())
-    .find((line) => LOCAL_SECTION_LINES.has(line));
+    .find((line) => tailLines.has(line));
   // Declared bounded-region marker text (substring-matched, the way the
   // validator and appendix neutralization count): a managed or starter
   // source carrying it promises a repo-owned LOCAL region the declared
   // class would let sync overwrite (or never maintain).
-  const regionMarker = regionMarkerTexts.find((marker) => source.includes(marker));
+  const regionMarker = [...new Set([...REGION_MARKER_LINES, ...regionMarkerTexts])].find((marker) =>
+    source.includes(marker),
+  );
   if (declaration.class === "starter") {
     if (!skipMatched) {
       errors.push(

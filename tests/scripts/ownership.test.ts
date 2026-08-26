@@ -246,6 +246,7 @@ describe("declarationTextErrors", () => {
     declaration: OwnershipDeclaration,
     source: string,
     skipMatched: boolean,
+    tailMarkers: readonly string[] = [],
   ): string[] =>
     declarationTextErrors(
       declaration,
@@ -253,6 +254,7 @@ describe("declarationTextErrors", () => {
       skipMatched,
       REGION_MARKER_TEXTS,
       "templates/t/x.jinja",
+      tailMarkers,
     );
 
   test("a clean managed file, header optional, passes", () => {
@@ -351,6 +353,24 @@ describe("declarationTextErrors", () => {
     // A single marker's text is enough - the promise is already there.
     const single = errorsOf(managed("X.md"), "# BEGIN REPOSITORY LOCAL\n", false);
     expect(single).toHaveLength(1);
+  });
+
+  // The schema accepts ARBITRARY tail markers, so the shipped constants
+  // alone leave a custom declared marker invisible when it is copied into a
+  // managed source.
+  test("a declared CUSTOM tail marker in a managed source is an error", () => {
+    const custom = "# acme:local-tail";
+    const errors = errorsOf(managed("X.md"), `top\n${custom}\nlocal\n`, false, [custom]);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain("split marker but is declared managed");
+    // Unknown markers stay invisible - only DECLARED ones are enforced.
+    expect(errorsOf(managed("X.md"), `top\n${custom}\nlocal\n`, false)).toHaveLength(0);
+  });
+
+  test("a mid-line mention of a declared tail marker still passes", () => {
+    const custom = "# acme:local-tail";
+    const mention = `see ${custom} for details\n`;
+    expect(errorsOf(managed("X.md"), mention, false, [custom])).toHaveLength(0);
   });
 
   test("a starter declaration over bounded-region marker text is an error", () => {
