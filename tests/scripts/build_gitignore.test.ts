@@ -6,7 +6,7 @@
 // yields exactly the unguarded bytes, a false guard yields nothing at all.
 // The stray-fragment tests pin the orphan guard: a generated fragment must
 // not outlive its module's gitignore_sources declaration.
-// The argv tests pin the single-mode shape: the script takes no arguments,
+// The argv tests pin the two-mode shape: the script takes only --topology,
 // and the retired pin flags are rejected before any network call - the one
 // part of main() that can run offline.
 
@@ -17,6 +17,7 @@ import { join } from "node:path";
 import {
   buildFragment,
   fragmentPlans,
+  fragmentSourcePaths,
   main,
   missingFragmentFiles,
   selfSources,
@@ -215,5 +216,27 @@ describe("missingFragmentFiles", () => {
         templates,
       ),
     ).toEqual(["templates/deno/fragments/gitignore.jinja"]);
+  });
+});
+
+describe("fragmentSourcePaths", () => {
+  // The topology check's third direction: an EDITED gitignore_sources
+  // list (source added, removed, replaced, or reordered) must not pass on
+  // fragment presence alone - the fragment's own section headings encode
+  // its sources, offline.
+  test("reads the encoded sources in order, guarded chunks included", () => {
+    const fragment =
+      "\n## Node (github/gitignore Node.gitignore)\nnode_modules/\n" +
+      '{% if not ("bun" in modules) %}\n## Python (github/gitignore Python.gitignore)\n__pycache__/\n{% endif %}';
+    expect(fragmentSourcePaths(fragment)).toEqual(["Node.gitignore", "Python.gitignore"]);
+  });
+
+  test("community subdirectory paths round-trip whole", () => {
+    const fragment = "\n## Nix (github/gitignore community/Nix.gitignore)\nresult\n";
+    expect(fragmentSourcePaths(fragment)).toEqual(["community/Nix.gitignore"]);
+  });
+
+  test("a heading-free fragment reads as no sources (mismatch, not a crash)", () => {
+    expect(fragmentSourcePaths("# not a generated fragment\n")).toEqual([]);
   });
 });

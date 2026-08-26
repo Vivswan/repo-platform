@@ -23,7 +23,7 @@
 // The template and self outputs open their managed block with one section
 // that has no upstream source: agent local state.
 //
-// There is no pinned upstream SHA and no offline mode: every run resolves
+// There is no pinned upstream SHA and no offline REGENERATION mode: every run resolves
 // github/gitignore's current HEAD and fetches every section from that one
 // commit. Nothing generated records the SHA, so the outputs change only
 // when upstream content we consume changes - which is what makes the
@@ -34,9 +34,12 @@
 // Usage:
 //   bun scripts/build_gitignore.ts              # fetch upstream HEAD, regenerate
 //   bun scripts/build_gitignore.ts --topology   # offline: fragments match the manifests' gitignore_sources
+//
+// --topology is the one OFFLINE mode, and it only verifies; there is no
+// offline REGENERATION mode - producing content always fetches upstream HEAD.
 
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { join, relative, resolve } from "node:path";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join, relative, resolve } from "node:path";
 import { gateExpression } from "./compose_template.ts";
 import { cleanLocalRegion, LOCAL_BEGIN, LOCAL_END } from "./gitignore_local.ts";
 import { loadManifests, type ModuleManifest } from "./module_manifests.ts";
@@ -115,6 +118,17 @@ export function missingFragmentFiles(manifests: ModuleManifest[], templatesDir: 
     }
   }
   return missing;
+}
+
+/** The github/gitignore source paths a generated fragment encodes in its
+ *  section headings, in order. The offline topology check compares them
+ *  against the manifest's gitignore_sources, so a manifest EDIT (a source
+ *  added, removed, replaced, or reordered) cannot pass on fragment
+ *  presence alone with stale content until the weekly refresh. */
+export function fragmentSourcePaths(fragmentText: string): string[] {
+  return [...fragmentText.matchAll(/^## .+ \(github\/gitignore (.+)\)$/gm)].map(
+    (match) => match[1],
+  );
 }
 
 async function fetchText(url: string, headers?: Record<string, string>): Promise<string> {
@@ -287,13 +301,15 @@ async function run(topology = false): Promise<number> {
         "manifest's gitignore_sources)",
     );
   }
-  // --topology: the OFFLINE manifests-vs-fragment-presence check (no
-  // upstream fetch, no lock read), for bun run check. It catches both
-  // topology directions on the PR that changes a manifest: a removed
+  // --topology: the OFFLINE manifests-vs-fragments check (no upstream
+  // fetch, no lock read), for bun run check. It catches every topology
+  // direction on the PR that changes a manifest: a removed
   // gitignore_sources key with the fragment left behind (the stray check
   // above, which would otherwise ABORT the weekly refresh - the failure
-  // could never self-heal), and a newly declared key whose fragment was
-  // never generated (composition would render nothing for it).
+  // could never self-heal), a newly declared key whose fragment was never
+  // generated (composition would render nothing for it), and an EDITED
+  // source list whose fragment still encodes the old sources (each
+  // fragment's section headings carry them - fragmentSourcePaths).
   if (topology) {
     const missing = missingFragmentFiles(manifests, TEMPLATES_DIR);
     if (missing.length > 0) {
@@ -302,6 +318,17 @@ async function run(topology = false): Promise<number> {
           `${missing.join(", ")} - run 'bun scripts/build_gitignore.ts' ` +
           "to generate them (or drop the manifest key)",
       );
+    }
+    for (const [module, declared] of byModule(manifests).entries) {
+      const rel = relative(REPO_ROOT, fragmentOutput(module));
+      const encoded = fragmentSourcePaths(readFileSync(fragmentOutput(module), "utf-8"));
+      if (JSON.stringify(encoded) !== JSON.stringify(declared)) {
+        throw new Error(
+          `${rel} encodes sources [${encoded.join(", ")}] but templates/${module}/module.yml ` +
+            `declares [${declared.join(", ")}] - the fragment is stale against the manifest ` +
+            "edit; run 'bun scripts/build_gitignore.ts --locked' to regenerate it",
+        );
+      }
     }
     console.log("gitignore topology OK: fragments match the manifests' gitignore_sources.");
     return 0;
@@ -330,6 +357,10 @@ async function run(topology = false): Promise<number> {
   ];
 
   for (const [out, content] of outputs) {
+    // A module declaring gitignore_sources for the first time has no
+    // fragments/ directory yet (newly-declared sources are exactly the
+    // path the topology check routes here); create it rather than ENOENT.
+    mkdirSync(dirname(out), { recursive: true });
     writeFileSync(out, Buffer.from(content, "utf-8"));
     console.log(`wrote ${relative(REPO_ROOT, out)}`);
   }
