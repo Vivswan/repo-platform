@@ -28,8 +28,11 @@
 // by a guessed grammar. When the two sides claim the same shape the check
 // is half against half; when they differ (a legacy managed-below claim
 // covers region scaffolding the bounded-region body excludes), HEAD's
-// lines are checked for survival anywhere in the delivered file - loss
-// still fires, relocation across a grammar change does not. The line
+// copy is re-split under the post-sync grammar when one exactly-once
+// clean region exists there - otherwise the file is UNVERIFIABLE (manual
+// review), never checked against a whole-file universe, which was blind
+// to a line duplicated across the local body and the managed scaffolding.
+// The line
 // check is multiset membership, not a positional diff: moved lines are not
 // lost content. All file content is read as latin1 (one code unit per
 // byte, the stamp_manifest.ts convention) - a utf-8 decode would fold
@@ -143,10 +146,6 @@ function sameShape(head: HeadSplit, entry: SplitEntry): boolean {
   return head.managed === "above" && entry.grammar === "tail-marker";
 }
 
-/** Non-blank lines of `previous` absent from `delivered`, byte-exact.
- * Membership, not a diff: a moved or deduplicated line is still present,
- * and only genuinely vanished content should trip the wire. Blank lines
- * (whitespace-only) never count as lost. */
 /** Previous non-blank lines the delivered text no longer holds, counted
  * as a MULTISET: each previous occurrence consumes one delivered
  * occurrence, so a line held twice and delivered once is one missing line
@@ -171,9 +170,11 @@ export type Finding =
   | { path: string; kind: "unverifiable"; reason: string };
 
 /** One path's verdict, each side split by its own declaration: null means
- * every non-blank line of HEAD's repository-owned half survives - in the
- * delivered repository-owned half when both sides claim the same shape,
- * anywhere in the delivered file when they do not. */
+ * every non-blank line of HEAD's repository-owned half survives in the
+ * delivered repository-owned half. When the two sides claim DIFFERENT
+ * shapes, the previous copy is re-split under the post-sync grammar when
+ * that is honestly possible; otherwise the file is unverifiable (manual
+ * review), never compared against a whole-file universe - see below. */
 export function compareHalves(
   entry: SplitEntry,
   head: HeadSplit,
@@ -201,9 +202,35 @@ export function compareHalves(
         "marker lines, so its repository-owned half cannot be located",
     };
   }
-  const universe = sameShape(head, entry) ? deliveredHalf : delivered;
-  const missing = missingLines(previousHalf, universe);
-  return missing.length === 0 ? null : { path, kind: "shrank", missing };
+  if (sameShape(head, entry)) {
+    const missing = missingLines(previousHalf, deliveredHalf);
+    return missing.length === 0 ? null : { path, kind: "shrank", missing };
+  }
+  // Shape mismatch (a legacy managed-below claim vs the bounded-region
+  // body, or a grammar change). The old whole-file fallback was BLIND to
+  // a colliding duplicate: a line living in both the local body and the
+  // managed scaffolding read as "present anywhere in the file" while its
+  // local copy vanished. Narrow honestly instead: when the post-sync
+  // grammar is bounded-region and HEAD's copy carries one
+  // exactly-once-clean region under the SAME markers, that body is the
+  // honest previous half; anything else is unverifiable (manual review).
+  // A genuine marker rename now reads unverifiable rather than silently
+  // passing - acceptable for a warn-only wire.
+  if (entry.grammar === "bounded-region") {
+    const headRegion = cleanLocalRegion(headCopy, entry);
+    if (headRegion !== null) {
+      const missing = missingLines(headRegion.body, deliveredHalf);
+      return missing.length === 0 ? null : { path, kind: "shrank", missing };
+    }
+  }
+  return {
+    path,
+    kind: "unverifiable",
+    reason:
+      "the previous commit's manifest claims a different split shape than the " +
+      "post-sync manifest, and the previous copy cannot be honestly re-split " +
+      "under the new grammar",
+  };
 }
 
 /** The file's bytes at the target's HEAD, or null when the path is

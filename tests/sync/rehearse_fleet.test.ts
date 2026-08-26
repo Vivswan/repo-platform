@@ -37,6 +37,7 @@ function outcome(overrides: Partial<RehearsalOutcome> = {}): RehearsalOutcome {
     manifest: "stamped",
     validationOk: true,
     validationErrors: [],
+    tripwireReport: "",
     workspace: null,
     ...overrides,
   };
@@ -254,6 +255,7 @@ describe("phaseOf", () => {
     expect(phaseOf("resolve_copier_conflicts.ts failed (exit 1)")).toBe("resolve");
     expect(phaseOf("retired_cleanup.ts failed (exit 1)")).toBe("retire");
     expect(phaseOf("stamp_manifest.ts failed (exit 1)")).toBe("stamp");
+    expect(phaseOf("tail_tripwire.ts failed (exit 1)")).toBe("tripwire");
   });
 
   test("non-script failures stay unlabeled - clone and fetch reasons already read clearly", () => {
@@ -271,6 +273,13 @@ describe("outcomeRow", () => {
       detail: "no changes; retired 0; manifest stamped ok; validation ok",
       severity: "ok",
     });
+  });
+
+  test("a tripped tail tripwire is an error row (the script exits 0 by design)", () => {
+    const row = outcomeRow("o/r", outcome({ tripwireReport: "> [!WARNING]\n> TAIL TRIPWIRE\n" }));
+    expect(row.status).toBe("TRIPPED");
+    expect(row.detail).toContain("[phase tripwire] tail tripwire TRIPPED");
+    expect(row.severity).toBe("error");
   });
 
   test("conflicted files carry their dropped-hunk counts and malformed files their state", () => {

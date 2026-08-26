@@ -139,6 +139,7 @@ const PHASE_BY_SCRIPT = new Map<string, string>([
   ["resolve_copier_conflicts.ts", "resolve"],
   ["retired_cleanup.ts", "retire"],
   ["stamp_manifest.ts", "stamp"],
+  ["tail_tripwire.ts", "tripwire"],
   ["manifest_license_check.ts", "stamp"],
   ["validate_generated_files.ts", "validate"],
 ]);
@@ -163,6 +164,13 @@ export function outcomeRow(slug: string, outcome: RehearsalOutcome): FleetRow {
   for (const file of outcome.malformed) parts.push(`${file} (malformed markers, left unresolved)`);
   parts.push(`retired ${outcome.retired}`);
   parts.push(`manifest ${outcome.manifest === "stamped" ? "stamped ok" : outcome.manifest}`);
+  // The tripwire exits 0 on findings by design (warn-only in the sync,
+  // where the PR body carries the report); here a non-empty report IS a
+  // regression a repo-platform PR is about to cause - error severity.
+  const tripped = outcome.tripwireReport !== "";
+  if (tripped) {
+    parts.push("[phase tripwire] tail tripwire TRIPPED (repository-owned lines would be lost)");
+  }
   if (outcome.validationOk) {
     parts.push("validation ok");
   } else {
@@ -172,9 +180,9 @@ export function outcomeRow(slug: string, outcome: RehearsalOutcome): FleetRow {
   const affected = outcome.conflicts.length + outcome.malformed.length;
   return {
     repo: slug,
-    status: affected === 0 ? "clean" : `${affected} conflict(s)`,
+    status: tripped ? "TRIPPED" : affected === 0 ? "clean" : `${affected} conflict(s)`,
     detail: parts.join("; "),
-    severity: outcome.validationOk ? "ok" : "error",
+    severity: outcome.validationOk && !tripped ? "ok" : "error",
   };
 }
 

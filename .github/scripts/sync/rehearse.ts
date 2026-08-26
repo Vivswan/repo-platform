@@ -6,7 +6,8 @@
 // reusable-template-sync.yml runs - module selection, copier update,
 // clean-render materialization, the split-file structural rebuild,
 // conflict resolution (rebuilt files skipped), retired-file cleanup, the
-// repo-owned preserve step, the final manifest stamp, the manifest license
+// repo-owned preserve step, the final manifest stamp, the post-stamp tail
+// tripwire, the manifest license
 // check, and validation - then prints the resulting diff and the would-be
 // PR-body sections.
 //
@@ -29,7 +30,9 @@
 // a second pipeline): live visibility/description come from the recorded
 // copier answers instead of the GitHub API, so out-of-band settings drift
 // is not rehearsed; token-scope workflow withholding, hide-details
-// redaction, and the PR/auto-merge machinery do not apply locally; and
+// redaction, and the PR/auto-merge machinery do not apply locally (the
+// tail tripwire CHECK runs and its report rides the outcome, but its
+// PR-body section and forced manual review are PR machinery); and
 // validation uses this working tree's validator, not a version-aligned
 // release checkout - which is the point when rehearsing unreleased changes.
 //
@@ -103,6 +106,10 @@ export interface RehearsalOutcome {
    * (quiet mode only - verbose forwards the full output to the console
    * instead), so a fleet report names the failing files. */
   validationErrors: string[];
+  /** The tail tripwire's report ("" = clear): the script exits 0 even on
+   * findings by design (warn-only), so the report IS the verdict - the
+   * fleet gate turns a non-empty one into an error row. */
+  tripwireReport: string;
   /** The /tmp workspace, or null when the rehearsal removed it. */
   workspace: string | null;
 }
@@ -571,6 +578,26 @@ export function rehearseRepo(slug: string, options: RehearsalOptions): Rehearsal
     // reusable-template-sync.yml runs (idempotent; see stamp_manifest.ts).
     run(["bun", join(import.meta.dir, "stamp_manifest.ts")], { cwd: REPO_ROOT, env: legEnv });
     const manifest = manifestStatus(targetDir);
+    // The workflow's post-stamp tail tripwire. It exits 0 even on findings
+    // BY DESIGN (warn-only; a blocked delivery would hide the diff), so a
+    // bare run() proves nothing - the REPORT is the verdict, read below
+    // and carried in the outcome for the fleet gate.
+    section("tail tripwire (post-stamp)");
+    const tripwireReportPath = join(work, "tail-shrank.md");
+    run(
+      [
+        "bun",
+        join(import.meta.dir, "tail_tripwire.ts"),
+        "--root",
+        targetDir,
+        "--report",
+        tripwireReportPath,
+      ],
+      { cwd: REPO_ROOT },
+    );
+    const tripwireReport = existsSync(tripwireReportPath)
+      ? readFileSync(tripwireReportPath, "utf-8")
+      : "";
     run(["bun", join(import.meta.dir, "manifest_license_check.ts")], {
       cwd: REPO_ROOT,
       env: legEnv,
@@ -646,6 +673,7 @@ export function rehearseRepo(slug: string, options: RehearsalOptions): Rehearsal
       section("rehearsal summary");
       console.log(`validation: ${validationOk ? "ok" : "FAILED (diagnostics above)"}`);
       console.log(`ownership manifest: ${manifest}`);
+      console.log(`tail tripwire: ${tripwireReport === "" ? "clear" : "TRIPPED (report above)"}`);
       if (keepWorkspace) console.log(`workspace kept for inspection: ${work}`);
       console.log(
         "note: the diff's _src_path points at the rehearsal build (the real sync writes the " +
@@ -662,6 +690,7 @@ export function rehearseRepo(slug: string, options: RehearsalOptions): Rehearsal
       manifest,
       validationOk,
       validationErrors,
+      tripwireReport,
       workspace: keepWorkspace ? work : null,
     };
   } finally {

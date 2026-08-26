@@ -359,19 +359,59 @@ describe("compareHalves", () => {
     expect(finding?.kind === "unverifiable" && finding.reason).toContain("delivered copy");
   });
 
-  test("a grammar change between renders checks survival in the whole delivered file", () => {
-    // HEAD declared tail-marker, the new render declares bounded-region:
-    // the two claims draw different boundaries, so relocation across the
-    // change is fine while loss still fires.
+  test("a grammar change re-splits HEAD under the new grammar when honestly possible", () => {
+    // HEAD declared legacy managed-below over a region-shaped file: its
+    // copy carries one exactly-once-clean region under the post-sync
+    // markers, so THAT body is the honest previous half.
+    const head = regionFile(["keep-line"], ["*.old"]);
+    const kept = regionFile(["keep-line"], ["*.new"]);
+    const legacyHead = {
+      kind: "legacy",
+      path: ".gitignore",
+      marker: MANAGED_BEGIN,
+      managed: "below",
+    } as const;
+    expect(compareHalves(regionEntry(".gitignore"), legacyHead, head, kept)).toBeNull();
+    const dropped = regionFile([], ["*.new"]);
+    expect(compareHalves(regionEntry(".gitignore"), legacyHead, head, dropped)).toEqual({
+      path: ".gitignore",
+      kind: "shrank",
+      missing: ["keep-line"],
+    });
+  });
+
+  test("a colliding duplicate across the local body and managed scaffolding still fires", () => {
+    // The whole-file fallback this replaced was BLIND here: node_modules/
+    // lives in the local body AND the managed half, so its vanished local
+    // copy still read as "present anywhere in the file".
+    const head = regionFile(["node_modules/", "keep-me"], ["node_modules/", "*.old"]);
+    const delivered = regionFile(["keep-me"], ["node_modules/", "*.new"]);
+    const legacyHead = {
+      kind: "legacy",
+      path: ".gitignore",
+      marker: MANAGED_BEGIN,
+      managed: "below",
+    } as const;
+    const finding = compareHalves(regionEntry(".gitignore"), legacyHead, head, delivered);
+    expect(finding).toEqual({ path: ".gitignore", kind: "shrank", missing: ["node_modules/"] });
+  });
+
+  test("a grammar change that cannot be honestly re-split is unverifiable, never silent", () => {
+    // HEAD declared tail-marker and carries NO region under the post-sync
+    // markers: there is no honest previous half - manual review, not a
+    // whole-file survival pass.
     const head = `managed\n${SENTINEL}\nkeep-line\n`;
     const kept = regionFile(["keep-line"], ["*.new"]);
-    expect(
-      compareHalves(regionEntry(".gitignore"), asHead(tailEntry(".gitignore")), head, kept),
-    ).toBeNull();
-    const dropped = regionFile([], ["*.new"]);
-    expect(
-      compareHalves(regionEntry(".gitignore"), asHead(tailEntry(".gitignore")), head, dropped),
-    ).toEqual({ path: ".gitignore", kind: "shrank", missing: ["keep-line"] });
+    const finding = compareHalves(
+      regionEntry(".gitignore"),
+      asHead(tailEntry(".gitignore")),
+      head,
+      kept,
+    );
+    expect(finding?.kind).toBe("unverifiable");
+    expect(finding?.kind === "unverifiable" && finding.reason).toContain(
+      "cannot be honestly re-split",
+    );
   });
 });
 
