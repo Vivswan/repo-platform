@@ -199,8 +199,8 @@ jobs:
           # failed must never count as "Copilot is not involved". Every call
           # carries a hard deadline and the job never sleeps. jq takes
           # HEAD_SHA and COPILOT_CHECK from the environment, so the only
-          # thing ever spliced into a jq program is the static $copilot
-          # definition below - no response data reaches jq as source text.
+          # thing ever spliced into a jq program is the static $defs prelude
+          # below - no response data reaches jq as source text.
           api() { timeout 20 gh api "$1"; }
           # Answers strictly: anything that is not a bare true/false - jq
           # erroring on a malformed body, or yielding nothing at all on an
@@ -214,12 +214,20 @@ jobs:
               *) return 1 ;;
             esac
           }
-          # Copilot's identity, defined ONCE and shared by every probe below:
-          # it posts reviews under the "<check>[bot]" login and is requested
-          # as the plain "Copilot" login, and either spelling can turn up in
-          # either place. Splitting these tests is how the two forms drift
-          # apart and a probe silently answers "not involved".
-          copilot='def is_copilot: ascii_downcase | . == "copilot" or . == (env.COPILOT_CHECK + "[bot]"); def mine: [.[] | select(.user != null) | select(.user.login | is_copilot)];'
+          # The jq prelude, spliced into every probe below.
+          #
+          # `arr` is load-bearing, not decoration. jq iterates an OBJECT's
+          # values happily, so a body like `{}` (a plain error payload gh
+          # still exits 0 on) makes an unguarded `[.[] | select(...)] |
+          # length > 0` answer a confident `false`, and the gate then passes
+          # as "not a reviewer" on a response it never actually read. Every
+          # probe therefore asserts its shape first and errors out otherwise,
+          # which `ask` turns into a cleared flag and a fail-closed exit.
+          #
+          # `is_copilot` is Copilot's identity in ONE place: it posts reviews
+          # under the "<check>[bot]" login and is requested as the plain
+          # "Copilot" login, and either spelling can turn up in either place.
+          defs='def arr: if type == "array" then . else error("expected an array") end; def is_copilot: ascii_downcase | . == "copilot" or . == (env.COPILOT_CHECK + "[bot]"); def mine: [.[] | select(.user != null) | select(.user.login | is_copilot)];'
 
           rules_ok=1
           rules="$(api "repos/$GITHUB_REPOSITORY/rules/branches/$BASE_BRANCH")" || rules_ok=0
@@ -232,17 +240,17 @@ jobs:
           # the same flag a failed call would.
           check_done=false check_seen=false
           if [ "$checks_ok" = 1 ]; then
-            check_done="$(ask "$checks" '[.check_runs[] | select(.status == "completed")] | length > 0')" || checks_ok=0
-            check_seen="$(ask "$checks" '.check_runs | length > 0')" || checks_ok=0
+            check_done="$(ask "$checks" "$defs"'.check_runs | arr | map(select(.status == "completed")) | length > 0')" || checks_ok=0
+            check_seen="$(ask "$checks" "$defs"'.check_runs | arr | length > 0')" || checks_ok=0
           fi
           review_at_head=false review_seen=false
           if [ "$reviews_ok" = 1 ]; then
-            review_at_head="$(ask "$reviews" "$copilot mine | map(select(.commit_id == env.HEAD_SHA)) | length > 0")" || reviews_ok=0
-            review_seen="$(ask "$reviews" "$copilot mine | length > 0")" || reviews_ok=0
+            review_at_head="$(ask "$reviews" "$defs"'arr | mine | map(select(.commit_id == env.HEAD_SHA)) | length > 0')" || reviews_ok=0
+            review_seen="$(ask "$reviews" "$defs"'arr | mine | length > 0')" || reviews_ok=0
           fi
           rule_expects=false
           if [ "$rules_ok" = 1 ]; then
-            rule_expects="$(ask "$rules" '[.[] | select(.type == "copilot_code_review")] | length > 0')" || rules_ok=0
+            rule_expects="$(ask "$rules" "$defs"'arr | map(select(.type == "copilot_code_review")) | length > 0')" || rules_ok=0
           fi
 
           awaiting="::error::waiting for Copilot review; this job is re-run automatically when it posts (no completed '$COPILOT_CHECK' check run or posted review at $HEAD_SHA yet)."
@@ -265,7 +273,7 @@ jobs:
           pull="$(api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER")" || pull_ok=0
           requested=false
           if [ "$pull_ok" = 1 ]; then
-            requested="$(ask "$pull" "$copilot [.requested_reviewers[] | select(.login | is_copilot)] | length > 0")" || pull_ok=0
+            requested="$(ask "$pull" "$defs"'.requested_reviewers | arr | map(select(.login | is_copilot)) | length > 0')" || pull_ok=0
           fi
           if [ "$check_seen" = true ] || [ "$review_seen" = true ] || [ "$requested" = true ]; then
             echo "$awaiting"

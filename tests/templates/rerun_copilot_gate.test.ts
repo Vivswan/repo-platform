@@ -244,6 +244,24 @@ describe("the template's rerun-copilot-gate workflow", () => {
     expect(r.output).toContain("::error::rerun-copilot-gate:");
   });
 
+  // Every quiet no-op here is a decision to leave a red gate alone, so it
+  // has to rest on a body that was actually read. Before the shape guards a
+  // `{}` runs listing answered "no CI run exists" and a `{}` run object
+  // answered "still 'null'", both exiting 0 with the gate still red - the
+  // exact silence the script's own header forbids.
+  for (const [label, shape] of [
+    ["runs listing", { runs: {} }],
+    ["run object", { runId: RUN_ID, run: {} }],
+    ["jobs listing", { jobs: {} }],
+  ] as const) {
+    test(`a wrong-shaped ${label} fails loudly instead of stranding the gate`, () => {
+      const r = run(shape);
+      expect(r.exitCode).not.toBe(0);
+      expect(r.rerans).toBe("");
+      expect(r.output).not.toContain("nothing to re-arm");
+    });
+  }
+
   test("a re-run call that fails is reported, never swallowed", () => {
     const r = run({ env: { RERUN_EXIT: "1" } });
     expect(r.exitCode).toBe(1);
