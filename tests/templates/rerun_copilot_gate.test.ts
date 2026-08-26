@@ -87,6 +87,7 @@ const failedGate = { jobs: [{ id: 99, name: "copilot-review", conclusion: "failu
 
 interface Options {
   runId?: string;
+  reviewCommit?: string;
   env?: Record<string, string>;
   run?: unknown;
   runs?: unknown;
@@ -117,9 +118,10 @@ function run(opts: Options = {}, golden = "minimal") {
       GITHUB_REPOSITORY: "Vivswan/managed-repo",
       HEAD_SHA,
       RUN_ID: opts.runId ?? "",
+      REVIEW_COMMIT: opts.reviewCommit ?? "",
       GATE_JOB: "copilot-review",
       COPILOT_CHECK,
-      MAX_ATTEMPTS: "5",
+      MAX_GATE_ATTEMPTS: "5",
       RERUN_LOG: rerunLog,
       GH_RUNS_FILE: file("runs.json", opts.runs ?? { workflow_runs: [completedRun] }),
       GH_RUN_FILE: file("run.json", opts.run ?? completedRun),
@@ -183,11 +185,69 @@ describe("the template's rerun-copilot-gate workflow", () => {
   });
 
   test("the attempt cap breaks the re-run loop instead of re-arming forever", () => {
-    const r = run({ runs: { workflow_runs: [{ ...completedRun, run_attempt: 5 }] } });
+    const gate = (id: number) => ({ id, name: "copilot-review", conclusion: "failure" });
+    const r = run({ jobs: { jobs: [1, 2, 3, 4, 5].map(gate) } });
     expect(r.exitCode).toBe(0);
     expect(r.rerans).toBe("");
     expect(r.output).toContain("::warning::");
     expect(r.output).toContain("loop-breaker");
+  });
+
+  // The budget counts the GATE JOB's own attempts. run_attempt increments on
+  // every re-run of anything, so counting it let one flaky neighbour exhaust
+  // the budget before the first genuine re-arm.
+  test("an unrelated flaky job's re-runs never burn the gate's budget", () => {
+    const r = run({
+      runs: { workflow_runs: [{ ...completedRun, run_attempt: 9 }] },
+      jobs: {
+        jobs: [
+          { id: 10, name: "typography", conclusion: "success" },
+          { id: 11, name: "typography", conclusion: "success" },
+          { id: 12, name: "typography", conclusion: "success" },
+          { id: 99, name: "copilot-review", conclusion: "failure" },
+        ],
+      },
+    });
+    expect(r.exitCode).toBe(0);
+    expect(r.rerans).toContain("run rerun --job 99");
+  });
+
+  test("a re-run targets the NEWEST gate attempt when several exist", () => {
+    const r = run({
+      jobs: {
+        jobs: [
+          { id: 40, name: "copilot-review", conclusion: "failure" },
+          { id: 91, name: "copilot-review", conclusion: "failure" },
+          { id: 55, name: "copilot-review", conclusion: "failure" },
+        ],
+      },
+    });
+    expect(r.exitCode).toBe(0);
+    expect(r.rerans).toContain("run rerun --job 91");
+    expect(r.rerans).not.toContain("--job 40");
+  });
+
+  // A push landing mid-review leaves the review pointing at the old head.
+  // Re-arming the new head would burn an attempt on a sha the review never
+  // covered; the push's own re-review fires this workflow again.
+  test("a review of an older head defers instead of re-arming the new one", () => {
+    const r = run({ reviewCommit: OLD_SHA });
+    expect(r.exitCode).toBe(0);
+    expect(r.rerans).toBe("");
+    expect(r.output).toContain("not the current head");
+  });
+
+  test("a review of the current head re-arms as usual", () => {
+    const r = run({ reviewCommit: HEAD_SHA });
+    expect(r.exitCode).toBe(0);
+    expect(r.rerans).toContain("run rerun --job 99");
+  });
+
+  test("CI-completed trigger: no PR associated with the sha defers quietly", () => {
+    const r = run({ runId: RUN_ID, pulls: [] });
+    expect(r.exitCode).toBe(0);
+    expect(r.rerans).toBe("");
+    expect(r.output).toContain("has not arrived");
   });
 
   test("a run without the gate job: quiet no-op", () => {
