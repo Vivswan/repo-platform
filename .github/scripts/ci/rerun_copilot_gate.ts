@@ -35,7 +35,11 @@ import { z } from "zod";
 import { env, error, notice, requireEnv, warning } from "../shared/gha.ts";
 import { parseJsonWith } from "../shared/json.ts";
 import { capture } from "../shared/proc.ts";
-import { COPILOT_CHECK_NAME as CHECK_NAME, isCopilot } from "./copilot_review_common.ts";
+import {
+  COPILOT_CHECK_NAME as CHECK_NAME,
+  fetchAllReviews,
+  isCopilot,
+} from "./copilot_review_common.ts";
 
 const GATE_JOB = "copilot-review";
 /** Loop-breaker: a re-run completing fires the workflow_run trigger
@@ -66,12 +70,10 @@ const checkRunsSchema = z.object({
 const commitPullsSchema = z.array(
   z.object({ number: z.number(), head: z.object({ sha: z.string() }) }),
 );
-const reviewsSchema = z.array(
-  z.object({
-    commit_id: z.string(),
-    user: z.object({ login: z.string() }).nullable(),
-  }),
-);
+
+/** The paginated reviews read fetches N sequential pages under ONE
+ * deadline, so its budget is several single-call probes' worth. */
+const PAGINATED_TIMEOUT_MS = PROBE_TIMEOUT_MS * 4;
 
 /** One gh api read; exits loudly on failure - unlike the gate itself,
  * nothing re-runs this re-runner, so silence would strand a red gate. */
@@ -171,11 +173,22 @@ if (runId !== "") {
       "rerun_copilot_gate: commit pulls response",
     ).find((pull) => pull.head.sha === headSha);
     if (pr !== undefined) {
-      arrived = mustFetch(
-        `repos/${repository}/pulls/${pr.number}/reviews?per_page=100`,
-        reviewsSchema,
+      // Paginated (all pages, PAGINATED_TIMEOUT_MS budget): GET reviews is
+      // OLDEST-first, so one page of a >100-review PR shows only stale
+      // reviews and the fresh head's arrival would stay invisible.
+      const reviews = fetchAllReviews(
+        repository,
+        pr.number,
         "rerun_copilot_gate: reviews response",
-      ).some(
+        PAGINATED_TIMEOUT_MS,
+      );
+      if (reviews === null) {
+        error(
+          `rerun_copilot_gate: reading PR #${pr.number}'s reviews failed - nothing re-runs this re-runner, so silence would strand a red gate`,
+        );
+        process.exit(1);
+      }
+      arrived = reviews.some(
         (review) =>
           review.commit_id === headSha && review.user !== null && isCopilot(review.user.login),
       );

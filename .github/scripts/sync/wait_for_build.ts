@@ -5,9 +5,10 @@
 // previous build tree. Wait for a successful run at main's HEAD - every
 // trigger rebuilds the branch, so any successful run there proves it (a
 // no-op rebuild creates no build commit to wait for) - or for a template
-// tip whose source stamp already names main's HEAD (publish.ts always
-// composes origin/main, so a build triggered by an OLDER run can publish
-// a newer main than that run's head_sha). Two waiting cases end in the
+// tip whose source stamp already names main's HEAD (publish.ts stamps
+// each run's OWN trigger commit, so the tip's stamp is the artifact's
+// direct provenance and survives the runs list's per_page window). Two
+// waiting cases end in the
 // warning path, both benign: a green main whose CI is still running
 // (build-branches triggers on CI success, so nothing has even started
 // yet), and a red main tip, which never builds at all (publish.ts refuses
@@ -135,12 +136,12 @@ await waitFor(
       console.log(`the template branch is built from main HEAD ${mainSha}.`);
       return true;
     }
-    // The runs match misses a publish that composed a NEWER main than the
-    // triggering run's head_sha (publish.ts always composes origin/main):
-    // the branch tip's own source stamp is the artifact's provenance, so
-    // a tip already stamped with main's HEAD proves freshness directly.
-    // (The converse miss - a no-op rebuild keeping an old-but-valid stamp
-    // - is what the runs match above covers.)
+    // Stamp fallback: publish.ts stamps each run's OWN trigger commit, so
+    // the branch tip's source stamp is the artifact's direct provenance -
+    // it proves freshness when the runs list no longer shows the matching
+    // run (per_page window) or the jobs read keeps failing. (The converse
+    // miss - a no-op rebuild keeping an old-but-valid stamp - is what the
+    // runs match above covers; the two checks are complements.)
     const fetched = capture(
       ["git", "-c", "credential.helper=", "fetch", "--quiet", "--depth=1", "origin", "template"],
       { env: GIT_NO_PROMPT_ENV, timeoutMs },

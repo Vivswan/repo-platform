@@ -31,14 +31,14 @@ if [ -n "\${GH_API_FAIL:-}" ]; then
   echo "gh: boom" >&2
   exit 1
 fi
-case "$2" in
+case "\${@: -1}" in
   */actions/workflows/ci.yml/runs*) cat "$GH_RUNS_FILE" ;;
   */actions/runs/*/jobs*) cat "$GH_JOBS_FILE" ;;
   */actions/runs/*) cat "$GH_RUN_FILE" ;;
   *check-runs*) cat "$GH_CHECKS_FILE" ;;
   */commits/*/pulls*) cat "$GH_COMMIT_PULLS_FILE" ;;
   */pulls/*/reviews*) cat "$GH_REVIEWS_FILE" ;;
-  *) echo "gh stub: unexpected path $2" >&2; exit 1 ;;
+  *) echo "gh stub: unexpected path \${@: -1}" >&2; exit 1 ;;
 esac
 `;
 
@@ -75,7 +75,7 @@ function run(opts: Options = {}) {
       GH_JOBS_FILE: file("jobs.json", opts.jobs ?? FAILED_GATE_JOBS),
       GH_CHECKS_FILE: file("checks.json", opts.checks ?? COMPLETED_CHECK),
       GH_COMMIT_PULLS_FILE: file("commit-pulls.json", opts.commitPulls ?? []),
-      GH_REVIEWS_FILE: file("reviews.json", opts.reviews ?? []),
+      GH_REVIEWS_FILE: file("reviews.json", [opts.reviews ?? []]),
       ...opts.env,
     },
   });

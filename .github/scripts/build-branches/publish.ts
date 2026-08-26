@@ -3,7 +3,8 @@
 // branch; see build-branches.yml's header for the branch model). Invoked by
 // build-branches.yml's "Build and publish" step.
 //
-// Env: RUN_URL, GH_TOKEN, GITHUB_SERVER_URL, GITHUB_REPOSITORY, GITHUB_REF.
+// Env: RUN_URL, GH_TOKEN, GITHUB_SERVER_URL, GITHUB_REPOSITORY, GITHUB_REF,
+// GITHUB_SHA.
 
 import { rmSync } from "node:fs";
 import { z } from "zod";
@@ -24,11 +25,17 @@ import { rebuildBranchTree } from "../shared/rebuild_tree.ts";
 const BRANCH = "template";
 const repository = requireEnv("GITHUB_REPOSITORY");
 
-// The build always stamps and composes origin/main, but the sync's run
-// proof requires the stamped run's head_sha to EQUAL the stamped source -
-// a workflow_dispatch aimed at any other ref would publish a build whose
-// run can never vouch for it, leaving a tip the sync rejects until the
-// next main build heals it. Refuse before any mutation.
+// The build stamps and composes GITHUB_SHA - this run's own trigger
+// commit, the one the run's head_sha can vouch for - because the sync's
+// run proof requires the stamped run's head_sha to EQUAL the stamped
+// source. Composing origin/main NOW instead would break exactly that:
+// under cancel-in-progress: false a queued run executes after a newer
+// main merged, and stamping the newer tip against this run's fixed
+// RUN_URL hands the fleet a tip verify_build_provenance rejects (the
+// plan job then fails for every repo until the next build self-heals).
+// The newer tip's own CI run triggers the build that publishes it. A
+// workflow_dispatch aimed at any other ref would publish a build whose
+// run can never vouch for it either - refuse before any mutation.
 const ref = env("GITHUB_REF");
 if (ref !== "" && ref !== "refs/heads/main") {
   fail(
@@ -212,14 +219,17 @@ function publish(sourceSha: string): void {
   console.log("::endgroup::");
 }
 
-const sourceSha = mustCapture(["git", "rev-parse", "origin/main"]);
+// This run's own trigger commit (see the run-proof comment above), never
+// origin/main - which can already be newer while this run was queued.
+const sourceSha = requireEnv("GITHUB_SHA");
+if (!/^[0-9a-f]{40}$/.test(sourceSha)) {
+  fail(`GITHUB_SHA is not a full commit sha (got '${sourceSha}')`);
+}
 // Green-source gate, on top of the ref guard above: the workflow_run
 // trigger only fires on a successful CI run, but the schedule, dispatch,
 // and API paths reach here with no such proof - and the branch ships only
 // commits whose all-green gate succeeded. Enforced on the commit actually
-// being published (origin/main NOW, which can be newer than the commit
-// whose CI run triggered this build - that newer tip's own CI run
-// triggers the build that publishes it).
+// being published (GITHUB_SHA, the same commit the stamp records).
 const notGreen = allGreenFailure(repository, sourceSha);
 if (notGreen !== null) {
   fail(

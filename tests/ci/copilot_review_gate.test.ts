@@ -29,12 +29,13 @@ if [ -n "\${GH_FAIL:-}" ]; then
   echo "gh: boom" >&2
   exit 1
 fi
-case "$2" in
+path="\${@: -1}"
+case "$path" in
   */rules/branches/*) cat "$GH_RULES_FILE" ;;
   *check-runs*) cat "$GH_CHECKS_FILE" ;;
   */reviews*) cat "$GH_REVIEWS_FILE" ;;
   */pulls/*) cat "$GH_PR_FILE" ;;
-  *) echo "gh stub: unexpected path $2" >&2; exit 1 ;;
+  *) echo "gh stub: unexpected path $path" >&2; exit 1 ;;
 esac
 `;
 
@@ -42,7 +43,10 @@ interface Options {
   env?: Record<string, string>;
   rules?: unknown;
   checks?: unknown;
+  /** The PR's reviews, ONE page (wrapped into the --slurp page-array
+   * shape at write time); reviewPages overrides with explicit pages. */
   reviews?: unknown;
+  reviewPages?: unknown;
   pr?: unknown;
 }
 
@@ -66,7 +70,7 @@ function run(opts: Options = {}) {
       BASE_BRANCH: "main",
       GH_RULES_FILE: file("rules.json", opts.rules ?? []),
       GH_CHECKS_FILE: file("checks.json", opts.checks ?? { check_runs: [] }),
-      GH_REVIEWS_FILE: file("reviews.json", opts.reviews ?? []),
+      GH_REVIEWS_FILE: file("reviews.json", opts.reviewPages ?? [opts.reviews ?? []]),
       GH_PR_FILE: file("pr.json", opts.pr ?? { requested_reviewers: [] }),
       ...opts.env,
     },
@@ -146,6 +150,20 @@ describe("copilot_review_gate.ts", () => {
     const r = run({ reviews: [{ commit_id: HEAD_SHA, user: null }] });
     expect(r.exitCode).toBe(0);
     expect(r.output).toContain("copilot is not a reviewer on this PR");
+  });
+
+  test("a head-sha review on a LATER page still counts (reviews are paginated oldest-first)", () => {
+    // >100 reviews push the fresh head's review past page one; a single
+    // unpaginated page would show only stale reviews and fail the gate
+    // red forever.
+    const r = run({
+      reviewPages: [
+        [{ commit_id: OLD_SHA, user: { login: "copilot-pull-request-reviewer[bot]" } }],
+        [{ commit_id: HEAD_SHA, user: { login: "copilot-pull-request-reviewer[bot]" } }],
+      ],
+    });
+    expect(r.exitCode).toBe(0);
+    expect(r.output).toContain("arrived");
   });
 
   test("API failures never pass as uninvolved: the gate fails closed naming the probe problem", () => {

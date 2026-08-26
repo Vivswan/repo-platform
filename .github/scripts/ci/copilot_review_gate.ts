@@ -11,9 +11,12 @@
 //   1. The base branch's effective rules contain `copilot_code_review`
 //      -> the review is expected by configuration: a completed
 //      `copilot-pull-request-reviewer` check run on the head sha OR a
-//      Copilot review posted for the head sha passes (any conclusion -
-//      the main ruleset's required review thread resolution polices the
-//      content); otherwise fail fast for the re-runner.
+//      Copilot review posted for the head sha passes. Accepting ANY
+//      completed conclusion is DELIBERATE fail-open: a broken Copilot
+//      reviewer (its check erroring, its review empty) must not wedge
+//      the merge box shut - the main ruleset's required review thread
+//      resolution polices the content; otherwise fail fast for the
+//      re-runner.
 //   2. No such rule -> one-shot involvement probe. GitHub CONSUMES the
 //      reviewer request once the review posts, so involvement is any of:
 //      Copilot in the requested reviewers, an existing check run on the
@@ -50,7 +53,11 @@ import { z } from "zod";
 import { env, error, requireEnv } from "../shared/gha.ts";
 import { parseJsonWith } from "../shared/json.ts";
 import { capture } from "../shared/proc.ts";
-import { COPILOT_CHECK_NAME as CHECK_NAME, isCopilot } from "./copilot_review_common.ts";
+import {
+  COPILOT_CHECK_NAME as CHECK_NAME,
+  fetchAllReviews,
+  isCopilot,
+} from "./copilot_review_common.ts";
 
 const PROBE_TIMEOUT_MS = Number(env("PROBE_TIMEOUT_MS", "15000"));
 
@@ -66,12 +73,10 @@ const checkRunsSchema = z.object({
 const pullSchema = z.object({
   requested_reviewers: z.array(z.object({ login: z.string() })),
 });
-const reviewsSchema = z.array(
-  z.object({
-    commit_id: z.string(),
-    user: z.object({ login: z.string() }).nullable(),
-  }),
-);
+
+/** The paginated reviews read fetches N sequential pages under ONE
+ * deadline, so its budget is several single-call probes' worth. */
+const PAGINATED_TIMEOUT_MS = PROBE_TIMEOUT_MS * 4;
 
 /** One gh api read: null on a FAILED call (the caller decides what a
  * missing answer means, always fail-closed), process exit on a response
@@ -99,10 +104,11 @@ const checks = fetchJson(
   checkRunsSchema,
   "copilot_review_gate: check-runs response",
 );
-const reviews = fetchJson(
-  `repos/${repository}/pulls/${prNumber}/reviews?per_page=100`,
-  reviewsSchema,
+const reviews = fetchAllReviews(
+  repository,
+  prNumber,
   "copilot_review_gate: reviews response",
+  PAGINATED_TIMEOUT_MS,
 );
 const copilotReviews = (reviews ?? []).filter(
   (review) => review.user !== null && isCopilot(review.user.login),
