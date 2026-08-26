@@ -5,12 +5,18 @@
 // which CI drift-checks against templates/, and executed against a stubbed
 // gh. Nothing here touches the network or sleeps.
 //
-// The predicate mirrors .github/scripts/ci/copilot_review_gate.ts - the
-// operator-side twin - so the cases below are deliberately the same cases as
-// tests/ci/copilot_review_gate.test.ts: rules-first ordering, the involvement
-// probe on rule-less repositories, arrival by completed check run or head-sha
-// review, and fail-closed handling of API failures. A divergence between the
-// two suites is the drift signal.
+// This suite ALONE pins the rendered bash's behaviour; it depends on nothing
+// outside this tree. The same predicate is implemented a second time in the
+// operator's own gate script, which lives in the parallel operator stack, not
+// here - so nothing below can reference it, and none of these cases needs it.
+//
+// What the two share is case NAMES, deliberately: rules-first ordering, the
+// involvement probe on rule-less repositories, arrival by completed check run
+// or head-sha review, and fail-closed handling of API failures. Reading the
+// two suites side by side once both stacks land is what makes a divergence
+// visible, and every parity round so far has been a fix landing on one copy
+// and not the other. The composite-action follow-up retires the duplication,
+// and this comment with it.
 
 import { describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
@@ -207,7 +213,7 @@ describe("the template's copilot-review gate job", () => {
 
   // Regression pin: the requested-reviewer probe used to test the plain
   // login only, so a [bot]-spelled reviewer request read as "not a
-  // reviewer" and the gate went silently green where the operator twin
+  // reviewer" and the gate went silently green where the operator copy
   // fails fast. Both spellings now reach every probe through one shared jq
   // is_copilot definition.
   test("no rule, the [bot] spelling in the requested reviewers is involvement too", () => {

@@ -4,10 +4,17 @@
 // committed golden render, against a stubbed gh. Nothing here sleeps or
 // touches the network.
 //
-// Mirrors .github/scripts/ci/rerun_copilot_gate.ts, the operator-side twin:
-// the two triggers, every quiet no-op guard, the attempt-cap loop-breaker,
-// and the arrival re-check that keeps the CI-completed trigger from re-running
-// a gate that would only fail again.
+// This suite ALONE pins the rendered bash's behaviour; it depends on nothing
+// outside this tree. The operator implements the same re-arm a second time in
+// the parallel operator stack, not here, so nothing below can reference it.
+//
+// The case names are deliberately the operator's: the two triggers, every
+// quiet no-op guard, the attempt-cap loop-breaker, and the arrival re-check
+// that keeps the CI-completed trigger from re-running a gate that would only
+// fail again. Side by side, once both stacks land, a divergence is visible -
+// which is the point, since every parity round so far has been a fix landing
+// on one copy and not the other. The composite-action follow-up retires the
+// duplication, and this comment with it.
 
 import { describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
