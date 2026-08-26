@@ -46,8 +46,14 @@ jobs:
 
       - name: Detect changes
         id: changes
+        # add -A first: `git diff --quiet` ignores UNTRACKED files, so a
+        # brand-new fragment (a module newly declaring gitignore_sources)
+        # would read as no-change and never land - and this workflow is
+        # the generator's only caller. open_automation_pr.ts re-adds
+        # everything itself, so the staging here is only the probe's.
         run: |
-          if git diff --quiet; then
+          git add -A
+          if git diff --cached --quiet; then
             echo "gitignore templates are up to date."
             echo "changed=false" >> "$GITHUB_OUTPUT"
           else

@@ -32,7 +32,8 @@
 // managed block survives until the next refresh PR regenerates over it.
 //
 // Usage:
-//   bun scripts/build_gitignore.ts   # fetch upstream HEAD, regenerate
+//   bun scripts/build_gitignore.ts              # fetch upstream HEAD, regenerate
+//   bun scripts/build_gitignore.ts --topology   # offline: fragments match the manifests' gitignore_sources
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
@@ -99,6 +100,21 @@ export function strayFragmentFiles(manifests: ModuleManifest[], templatesDir: st
     }
   }
   return strays;
+}
+
+/** Declared gitignore_sources whose generated fragment file is missing: a
+ *  module NEWLY declaring the key has no fragment until the generator
+ *  runs, and composition would render nothing for it. The topology
+ *  check's second direction (strayFragmentFiles is the first). */
+export function missingFragmentFiles(manifests: ModuleManifest[], templatesDir: string): string[] {
+  const missing: string[] = [];
+  for (const m of manifests) {
+    if (!m.gitignore_sources) continue;
+    if (!existsSync(join(templatesDir, m.module, "fragments", `${ANCHOR}.jinja`))) {
+      missing.push(`templates/${m.module}/fragments/${ANCHOR}.jinja`);
+    }
+  }
+  return missing;
 }
 
 async function fetchText(url: string, headers?: Record<string, string>): Promise<string> {
@@ -239,10 +255,13 @@ function buildSelf(sections: Record<string, string>, sources: string[], localBod
 }
 
 export async function main(argv: string[] = process.argv.slice(2)): Promise<number> {
-  if (argv.length > 0) {
+  const topology = argv.includes("--topology");
+  const unknown = argv.filter((a) => a !== "--topology");
+  if (unknown.length > 0) {
     console.error(
-      `error: unrecognized argument(s): ${argv.join(" ")} - the script takes none; ` +
-        "it always regenerates from github/gitignore HEAD",
+      `error: unrecognized argument(s): ${unknown.join(" ")} - the script takes only ` +
+        "--topology (the offline manifest/fragment check); with no arguments it " +
+        "always regenerates from github/gitignore HEAD",
     );
     return 2;
   }
@@ -250,14 +269,14 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   // manifest, an upstream fetch failure), matching generate.ts and
   // render_dogfood.ts.
   try {
-    return await run();
+    return await run(topology);
   } catch (error) {
     console.error(`error: ${error instanceof Error ? error.message : String(error)}`);
     return 1;
   }
 }
 
-async function run(): Promise<number> {
+async function run(topology = false): Promise<number> {
   const manifests = loadManifests();
   const strays = strayFragmentFiles(manifests, TEMPLATES_DIR);
   if (strays.length > 0) {
@@ -267,6 +286,25 @@ async function run(): Promise<number> {
         "shipping stale sections to every render; delete it (or restore the " +
         "manifest's gitignore_sources)",
     );
+  }
+  // --topology: the OFFLINE manifests-vs-fragment-presence check (no
+  // upstream fetch, no lock read), for bun run check. It catches both
+  // topology directions on the PR that changes a manifest: a removed
+  // gitignore_sources key with the fragment left behind (the stray check
+  // above, which would otherwise ABORT the weekly refresh - the failure
+  // could never self-heal), and a newly declared key whose fragment was
+  // never generated (composition would render nothing for it).
+  if (topology) {
+    const missing = missingFragmentFiles(manifests, TEMPLATES_DIR);
+    if (missing.length > 0) {
+      throw new Error(
+        `missing gitignore fragment(s) for module(s) declaring gitignore_sources: ` +
+          `${missing.join(", ")} - run 'bun scripts/build_gitignore.ts' ` +
+          "to generate them (or drop the manifest key)",
+      );
+    }
+    console.log("gitignore topology OK: fragments match the manifests' gitignore_sources.");
+    return 0;
   }
   const { entries: moduleSources, gates } = byModule(manifests);
   const sources = selfSources(moduleSources);

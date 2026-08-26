@@ -18,6 +18,7 @@ import {
   buildFragment,
   fragmentPlans,
   main,
+  missingFragmentFiles,
   selfSources,
   strayFragmentFiles,
 } from "../../scripts/build_gitignore";
@@ -179,5 +180,40 @@ describe("argument parsing", () => {
 
   test("any other argument is rejected too", async () => {
     expect((await reject(["--dry-run", "x"])).code).toBe(2);
+  });
+});
+
+describe("missingFragmentFiles", () => {
+  // The topology check's second direction: a module NEWLY declaring
+  // gitignore_sources has no fragment until the generator runs, and
+  // composition would render nothing for it - `git diff --quiet` in the
+  // refresh workflow also never saw the untracked new file.
+  const templates = mkdtempSync(join(tmpdir(), "gitignore-missing-"));
+  beforeAll(() => {
+    mkdirSync(join(templates, "bun", "fragments"), { recursive: true });
+    writeFileSync(join(templates, "bun", "fragments", "gitignore.jinja"), "\n## bun\n");
+    mkdirSync(join(templates, "deno"), { recursive: true });
+  });
+  afterAll(() => rmSync(templates, { recursive: true, force: true }));
+
+  const manifest = (module: string, gitignore_sources?: string[]): ModuleManifest => ({
+    module,
+    description: `the ${module} module`,
+    ...(gitignore_sources ? { gitignore_sources } : {}),
+  });
+
+  test("present fragments and undeclaring modules pass", () => {
+    expect(
+      missingFragmentFiles([manifest("bun", ["Node.gitignore"]), manifest("deno")], templates),
+    ).toEqual([]);
+  });
+
+  test("a declared gitignore_sources without its fragment is flagged", () => {
+    expect(
+      missingFragmentFiles(
+        [manifest("bun", ["Node.gitignore"]), manifest("deno", ["Deno.gitignore"])],
+        templates,
+      ),
+    ).toEqual(["templates/deno/fragments/gitignore.jinja"]);
   });
 });
