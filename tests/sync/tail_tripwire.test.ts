@@ -223,7 +223,25 @@ describe("renderReport", () => {
       { path: "AGENTS.md", kind: "shrank", missing: ["x".repeat(70000)] },
     ]);
     expect(Buffer.byteLength(report, "utf-8")).toBeLessThan(20000);
-    expect(report).toContain("[line clipped]");
+    expect(report).toContain("[clipped]");
+  });
+
+  test("an enormous unverifiable reason (HEAD-manifest text) is bounded too", () => {
+    const report = renderReport([
+      { path: "AGENTS.md", kind: "unverifiable", reason: `marker ${"y".repeat(70000)} missing` },
+    ]);
+    expect(Buffer.byteLength(report, "utf-8")).toBeLessThan(20000);
+    expect(report).toContain("[clipped]");
+  });
+
+  test("a missing line made of backticks cannot close the excerpt fence", () => {
+    const report = renderReport([
+      { path: "AGENTS.md", kind: "shrank", missing: ["`````", "after the backticks"] },
+    ]);
+    // The fence outruns the longest backtick run in the content, so the
+    // second line stays inside the block.
+    expect(report).toMatch(/``````text\n/);
+    expect(report).toContain("  after the backticks");
   });
 
   test("the total excerpt budget spans files; past it, count-only bullets", () => {

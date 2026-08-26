@@ -148,18 +148,35 @@ const REPORT_INTRO = [
   "",
 ];
 
+/** One display line, bounded: a missing line or an unverifiable reason
+ * can embed target-controlled text (repository content, HEAD-manifest
+ * marker strings), and one enormous value must not blow the body cap. */
+function clip(text: string): string {
+  return text.length > MAX_LINE_CHARS ? `${text.slice(0, MAX_LINE_CHARS)} [clipped]` : text;
+}
+
+/** A fence long enough that no shown line can close it early. */
+function fenceFor(lines: string[]): string {
+  let longest = 3;
+  for (const line of lines) {
+    for (const match of line.matchAll(/`+/g)) {
+      longest = Math.max(longest, match[0].length);
+    }
+  }
+  return "`".repeat(longest + 1);
+}
+
 export function renderReport(findings: Finding[]): string {
   if (findings.length === 0) return "";
   let budget = MAX_REPORT_BYTES;
   const sections = findings.map((finding) => {
     if (finding.kind === "unverifiable") {
-      return `- \`${finding.path}\`: ${finding.reason} - review this file's full diff against the previous commit before merging.`;
+      return `- \`${finding.path}\`: ${clip(finding.reason)} - review this file's full diff against the previous commit before merging.`;
     }
     const shown: string[] = [];
     for (const line of finding.missing) {
       if (shown.length >= MAX_REPORT_LINES) break;
-      const clipped =
-        line.length > MAX_LINE_CHARS ? `${line.slice(0, MAX_LINE_CHARS)} [line clipped]` : line;
+      const clipped = clip(line);
       const cost = Buffer.byteLength(clipped, "utf-8") + 3;
       if (cost > budget) break;
       budget -= cost;
@@ -171,9 +188,10 @@ export function renderReport(findings: Finding[]): string {
     }
     const omitted = finding.missing.length - shown.length;
     const tail = omitted > 0 ? `\n  (${omitted} more; see the previous commit's copy)` : "";
+    const fence = fenceFor(shown);
     return (
       `${heading}:\n\n` +
-      `  \`\`\`\`text\n${shown.map((line) => `  ${line}`).join("\n")}\n  \`\`\`\`${tail}`
+      `  ${fence}text\n${shown.map((line) => `  ${line}`).join("\n")}\n  ${fence}${tail}`
     );
   });
   return [...REPORT_INTRO, ...sections, ""].join("\n");
