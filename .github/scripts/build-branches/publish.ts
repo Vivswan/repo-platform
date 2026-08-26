@@ -7,6 +7,7 @@
 
 import { rmSync } from "node:fs";
 import { z } from "zod";
+import { allGreenFailure } from "../shared/all_green.ts";
 import {
   commitRunParse,
   commitRunWrite,
@@ -211,4 +212,18 @@ function publish(sourceSha: string): void {
   console.log("::endgroup::");
 }
 
-publish(mustCapture(["git", "rev-parse", "origin/main"]));
+const sourceSha = mustCapture(["git", "rev-parse", "origin/main"]);
+// Green-source gate, on top of the ref guard above: the workflow_run
+// trigger only fires on a successful CI run, but the schedule, dispatch,
+// and API paths reach here with no such proof - and the branch ships only
+// commits whose all-green gate succeeded. Enforced on the commit actually
+// being published (origin/main NOW, which can be newer than the commit
+// whose CI run triggered this build - that newer tip's own CI run
+// triggers the build that publishes it).
+const notGreen = allGreenFailure(repository, sourceSha);
+if (notGreen !== null) {
+  fail(
+    `refusing to publish the template branch: main commit ${sourceSha.slice(0, 12)} is not green - ${notGreen}. The branch only ships green main commits; get CI to a successful run on main's tip, then re-run.`,
+  );
+}
+publish(sourceSha);

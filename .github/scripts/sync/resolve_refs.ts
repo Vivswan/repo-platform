@@ -10,6 +10,7 @@
 
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { allGreenFailure } from "../shared/all_green.ts";
 import { commitStampParse } from "../shared/commit_stamp.ts";
 import { env, hideDetails, requireEnv, setOutput } from "../shared/gha.ts";
 import { capture, must, mustCapture } from "../shared/proc.ts";
@@ -112,6 +113,19 @@ if (!resolves(`${validateRef}^{commit}`)) {
 must(["bun", join(import.meta.dir, "verify_build_provenance.ts")], {
   env: { TIP_SHA: targetSha, SOURCE_SHA: validateRef },
 });
+// Green-source gate, belt over the builder's own (publish.ts refuses
+// ungreen sources): the provenance check above proves the tip is the
+// builder's honest output of the stamped source, but not that the source
+// itself passed CI - a build published before the green gate existed, or
+// through a builder bug, would still verify. Nothing ungreen templates
+// fleet-wide.
+const notGreen = allGreenFailure(repository, validateRef);
+if (notGreen !== null) {
+  console.log(
+    `::error::the template branch tip ${targetSha.slice(0, 12)} was built from ${validateRef.slice(0, 12)}, which is not green - ${notGreen}. The sync only ships builds of green main commits; get CI to a successful run on main, dispatch Build Branches, then re-run.`,
+  );
+  process.exit(1);
+}
 const display = `template@${targetSha.slice(0, 12)}`;
 
 // copier consumes target_ref, and a branch name would be re-resolved from

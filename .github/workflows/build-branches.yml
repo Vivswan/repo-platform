@@ -1,24 +1,38 @@
 # Publishes the generated `template` build branch copier consumes: a minimal
-# build tree from the LATEST main commit, rebuilt on every push. It is an
+# build tree from the LATEST main commit, rebuilt whenever CI completes
+# successfully on main (the workflow_run trigger below). It is an
 # ORPHAN, APPEND-ONLY branch: each build commit parents the previous build
 # commit, never a main commit, so a main history rewrite can never
 # invalidate it and old build commits (downstream repos' recorded _commit,
 # needed by copier update's three-way merge) stay reachable forever.
-# The weekly schedule is a self-heal net. GITHUB_TOKEN pushes trigger no
-# workflows - intended; nothing may run on the build branch (its tree
-# carries no .github/).
+#
+# Only GREEN commits publish, twice over: the trigger fires on a
+# successful CI run (a failed run skips this workflow's steps quietly -
+# the red already shows on the CI run itself), and publish.ts re-verifies
+# a completed successful CI run at the source commit via the API before
+# any mutation (shared/all_green.ts), covering the schedule, dispatch,
+# and API paths the trigger never guards. The weekly schedule is a
+# self-heal net.
+# GITHUB_TOKEN pushes trigger no workflows - intended; nothing may run on
+# the build branch (its tree carries no .github/).
 
 name: Build Branches
 
 on:
-  push:
+  # Fires only for CI runs whose head branch is main; the publish gate in
+  # code re-checks the conclusion, so the step condition below is about
+  # not burning a runner (and not going red) on CI runs that failed.
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
     branches: [main]
   schedule:
     - cron: "12 6 * * 1"
   workflow_dispatch:
 
 # Contents write publishes the build branch; actions read lets publish.ts's
-# re-stamp check read the run stamped on the current tip.
+# re-stamp check read the run stamped on the current tip and the
+# green-source gate read the source commit's CI runs.
 permissions:
   contents: write
   actions: read
@@ -31,17 +45,26 @@ jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    env:
+      # A workflow_run trigger for a failed CI run skips every step (the
+      # event condition lives on the steps, not the job, per this repo's
+      # convention); schedule and dispatch runs always proceed into
+      # publish.ts's own green gate.
+      CI_GREEN: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
     steps:
       - uses: actions/checkout@v7
+        if: env.CI_GREEN == 'true'
         with:
           fetch-depth: 0
 
       - name: Set up bun
+        if: env.CI_GREEN == 'true'
         uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: .bun-version
 
       - name: Build and publish
+        if: env.CI_GREEN == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}

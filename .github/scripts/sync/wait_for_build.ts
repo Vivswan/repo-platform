@@ -4,7 +4,12 @@
 // main merge, so a sync dispatched right after a merge could consume the
 // previous build tree. Wait for a successful run at main's HEAD - every
 // trigger rebuilds the branch, so any successful run there proves it (a
-// no-op rebuild creates no build commit to wait for). Polls
+// no-op rebuild creates no build commit to wait for). A red main tip
+// never builds at all (builds trigger on CI success and publish.ts
+// refuses ungreen sources), so this wait then times out and the sync
+// ships the previous green build - resolve_refs.ts re-checks the shipped
+// build's own source is green (shared/all_green.ts); this bounded wait
+// stays a freshness aid, not the gate. Polls
 // every 10 seconds, 30 attempts, then warns and lets the run continue (the
 // sync's own guards fail loudly and the weekly cron heals).
 //
