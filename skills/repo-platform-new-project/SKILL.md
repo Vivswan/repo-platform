@@ -122,23 +122,11 @@ Then one grant: give the fleet `REPO_PLATFORM_TOKEN` PAT access to the new repos
 gh workflow run sync-repos.yml -R Vivswan/repo-platform -f repo=Vivswan/my-project
 ```
 
-### 7. Pick a settings home
+### 7. Settings management (the settings-sync module)
 
-Repository settings (fields, topics, labels, rulesets) are applied FROM repo-platform. Do this before relying on CI gating: the branch protection that makes `all-green` a REQUIRED check comes from the settings apply (rulesets are per-repo; `settings/defaults.yml` carries none, and list sections replace rather than merge).
+Repository settings (fields, topics, labels, rulesets) are applied FROM repo-platform, and selecting the `settings-sync` module in `.repo-platform.yml` is the whole opt-in. Do this before relying on CI gating: the branch protection that makes `all-green` a REQUIRED check is the managed baseline's `main` ruleset, applied by the nightly heal (or immediately via `gh workflow run settings-repos.yml -R Vivswan/repo-platform -f repo=Vivswan/my-project`).
 
-Two homes; when both exist, the central file wins:
-
-- Central (default for public repos): add `settings/repos/my-project.yml` in repo-platform. No local checkout needed:
-
-  ```bash
-  gh repo clone Vivswan/repo-platform && cd repo-platform
-  # copy a sibling file in settings/repos/ and trim; open a PR
-  ```
-
-  Declare all four identity keys (description, homepage, topics, private) - only declared keys are managed - and every label the repo should keep: undeclared labels are deleted on each apply. Required labels per module are listed in [references/questions.md](references/questions.md#required-settings-labels). Merging the file applies it; for a dry run first: `gh workflow run settings-repos.yml -R Vivswan/repo-platform -f check_only=true`.
-- In-repo: carry `.github/settings.yml` in the repo - the file is the whole opt-in; the central run applies it remotely. The `settings-sync` module is optional sugar: it seeds the file and adds push-time self-apply (which needs a repo-scoped PAT and skips with a warning without one).
-
-Private repos should use the in-repo home unless the owner accepts the repo's name appearing in repo-platform's public `settings/repos/` directory - committed names are self-disclosure (see "Private repositories" below).
+The managed baseline (shared policy block, every label the module selection requires, the fleet rulesets) is computed per repository at apply time; the repo's own `.github/settings.yml` - a generated-once identity starter carrying description, homepage, topics, private, plus local overrides - deep-merges over it. Nothing to hand-maintain: the labels each module needs come from the module manifests automatically. For a dry run: `gh workflow run settings-repos.yml -R Vivswan/repo-platform -f check_only=true`. The module also renders a push-time self-apply workflow (needs a repo-scoped PAT and skips with a warning without one).
 
 ### 8. What runs on PRs
 
@@ -153,13 +141,13 @@ Collect these for the human with admin rights:
 - Grant the fleet PAT access to the new repo: the `REPO_PLATFORM_TOKEN` fine-grained PAT's repository access list at https://github.com/settings/personal-access-tokens - this is the enrollment step; nothing syncs without it.
 - pages module: Settings -> Pages -> Source: GitHub Actions, and add a `v*` tag rule to the `github-pages` environment's deployment branches (release-triggered deploys run on the tag ref and are rejected without it).
 - bun module: register a repo-scoped Contents:RW PAT as a Dependabot secret so the lockfile fixer's push re-runs CI: `gh secret set REPO_PLATFORM_TOKEN --app dependabot` (prompts for the token value on stdin - the human runs it, or pass `--body "$TOKEN"` non-interactively). Without it the fix lands but each fixed PR needs a close/reopen for checks to appear.
-- settings-sync module self-apply (optional): a repo-scoped PAT with Administration + Issues RW as the repo's own `REPO_PLATFORM_TOKEN` Actions secret; without it self-apply skips and the central run still covers the repo.
+- settings-sync module self-apply (optional): a repo-scoped PAT with Administration + Issues RW as the repo's own `REPO_PLATFORM_TOKEN` Actions secret; without it self-apply skips and the central heal still covers the repo.
 
 ## Private repositories
 
 - Base checks merge into one `base-checks` job; no CodeQL or dependency-review jobs; CONTRIBUTING.md is not rendered.
 - Fleet run logs are public, so a wildcard-discovered private repo appears only as a name hint (`hidden-server` -> `h**-s**r`) and its details (paths, module lists, conflict content) stay out of public logs; the full detail lands in the repo's own sync PRs and report issues.
-- Naming a private repo in repos.yml or `settings/repos/` publishes the name (details stay hidden). That is why the in-repo settings home is the default recommendation for private repos.
+- Naming a private repo in repos.yml publishes the name (details stay hidden); wildcard discovery keeps it hinted.
 
 ## Verify
 

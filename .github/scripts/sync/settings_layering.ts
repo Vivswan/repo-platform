@@ -58,9 +58,12 @@ export function isLegacyBaseline(text: string): boolean {
 export interface IdentitySeed {
   description: string;
   /** GitHub serves topics as a string in the old renders but tolerates a
-   *  string list; a hand-edited list must survive the transition. */
-  topics: string | string[];
-  homepage: string;
+   *  string list; a hand-edited list must survive the transition.
+   *  undefined OMITS the key from the starter - declaring "" would
+   *  declare-and-clear a live value neither the old file nor the recorded
+   *  answers ever managed. Same for homepage. */
+  topics?: string | string[];
+  homepage?: string;
   private: boolean;
   /** The owner named in the starter's header comment. */
   githubUsername: string;
@@ -71,7 +74,7 @@ export interface IdentitySeed {
  *  the known identity expressions must carry no jinja at all - so a seed
  *  VALUE containing braces can never trip the check, and a template that
  *  grew a construct this renderer does not know throws before anything is
- *  substituted. */
+ *  substituted. An undefined optional value drops its whole line. */
 export function renderStarter(templateText: string, seed: IdentitySeed): string {
   const identityRe = /\{\{ (description|homepage|topics|private) \| tojson \}\}/g;
   const stripped = templateText.replace(identityRe, "").replaceAll("{{ github_username }}", "");
@@ -81,16 +84,25 @@ export function renderStarter(templateText: string, seed: IdentitySeed): string 
         "expressions - teach settings_layering.ts's renderStarter the new construct",
     );
   }
-  const values: Record<string, string> = {
-    description: JSON.stringify(seed.description),
-    homepage: JSON.stringify(seed.homepage),
-    // JSON is valid YAML for a list too, so an array seed round-trips.
-    topics: JSON.stringify(seed.topics),
-    private: JSON.stringify(seed.private),
+  const values: Record<string, string | string[] | boolean | undefined> = {
+    description: seed.description,
+    homepage: seed.homepage,
+    topics: seed.topics,
+    private: seed.private,
   };
-  return templateText
-    .replace(identityRe, (_, name: string) => values[name])
-    .replaceAll("{{ github_username }}", () => seed.githubUsername);
+  let rendered = templateText;
+  for (const [name, value] of Object.entries(values)) {
+    const expression = `{{ ${name} | tojson }}`;
+    rendered =
+      value === undefined
+        ? rendered
+            .split("\n")
+            .filter((line) => !line.includes(expression))
+            .join("\n")
+        : // JSON is valid YAML for a list too, so an array seed round-trips.
+          rendered.replaceAll(expression, () => JSON.stringify(value));
+  }
+  return rendered.replaceAll("{{ github_username }}", () => seed.githubUsername);
 }
 
 /** JSON with recursively sorted object keys, for order-insensitive
@@ -208,7 +220,7 @@ export function transitionSettingsStarter(
           join(targetDir, ".copier-answers.yml"),
         );
         const str = (value: unknown, fallback: unknown) =>
-          typeof value === "string" ? value : typeof fallback === "string" ? fallback : "";
+          typeof value === "string" ? value : typeof fallback === "string" ? fallback : undefined;
         const isTopics = (value: unknown): value is string | string[] =>
           typeof value === "string" ||
           (Array.isArray(value) && value.every((t) => typeof t === "string"));
@@ -222,9 +234,14 @@ export function transitionSettingsStarter(
           );
         }
         const seed: IdentitySeed = {
-          description: str(answers.description, oldRepository.description),
+          description: str(answers.description, oldRepository.description) ?? "",
+          // undefined when neither source declares the key: the starter
+          // then omits it rather than declare-and-clear a live value
+          // nothing ever managed.
           homepage: str(oldRepository.homepage, answers.homepage),
-          topics: isTopics(oldRepository.topics) ? oldRepository.topics : str(answers.topics, ""),
+          topics: isTopics(oldRepository.topics)
+            ? oldRepository.topics
+            : str(answers.topics, undefined),
           private: facts.private,
           githubUsername: username,
         };

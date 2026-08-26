@@ -61,6 +61,18 @@ describe("renderStarter", () => {
     expect(rendered).not.toContain(LEGACY_MERGEABLE_LINE);
   });
 
+  test("an undefined optional key drops its line instead of declaring empty", () => {
+    const rendered = renderStarter(STARTER_TEMPLATE, {
+      ...seed,
+      homepage: undefined,
+      topics: undefined,
+    });
+    const doc = parseYaml(rendered) as { repository: Record<string, unknown> };
+    expect("homepage" in doc.repository).toBe(false);
+    expect("topics" in doc.repository).toBe(false);
+    expect(doc.repository.description).toBe("A test repo");
+  });
+
   test("a template construct beyond the identity expressions throws", () => {
     expect(() => renderStarter("{% if private %}x{% endif %}\n", seed)).toThrow(
       "teach settings_layering.ts",

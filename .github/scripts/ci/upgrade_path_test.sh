@@ -63,7 +63,7 @@ select_modules() {
 }
 
 # Idempotent local reruns: drop the artifacts of a previous run.
-rm -rf "$PROJECT" "$WORK" /tmp/next /tmp/old-tree /tmp/upgrade-vis /tmp/upgrade-vis-work /tmp/upgrade-del /tmp/upgrade-del-hunks.md /tmp/upgrade-settings /tmp/upgrade-settings-work
+rm -rf "$PROJECT" "$WORK" /tmp/next /tmp/old-tree /tmp/upgrade-vis /tmp/upgrade-vis-work /tmp/upgrade-del /tmp/upgrade-del-hunks.md /tmp/upgrade-settings /tmp/upgrade-settings-work /tmp/settings-layering.md
 mkdir -p "$WORK"
 git worktree remove --force /tmp/wt 2>/dev/null || true
 git worktree prune
@@ -973,6 +973,7 @@ cd "$GITHUB_WORKSPACE"
 RECOVER="" RUNNER_TEMP="$SET_WORK" bun .github/scripts/sync/preserve_repo_owned.ts
 cmp -s "$SET/.github/settings.yml" "$SET_WORK/settings-after-first-pass.yml" \
   || fail "the layering transition re-fired on an already-transitioned starter"
-test -s "$SET_WORK/settings-layering.md" \
-  && fail "the second pass wrote a settings-layering section for nothing"
+if [ -s "$SET_WORK/settings-layering.md" ]; then
+  fail "the second pass wrote a settings-layering section for nothing"
+fi
 echo "settings layering transition OK: starter replaced once, custom topics carried, dropped override listed"

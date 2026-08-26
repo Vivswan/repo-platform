@@ -33,10 +33,10 @@ One line each, from the choices descriptions:
 - `auto-assign`: auto-assign issues/PRs/alerts to owner
 - `fuzzer`: nightly fuzz starter with issue filing, replay inputs, auto-close
 - `nightly`: nightly CI starter with failure issue filing and auto-close
-- `settings-sync`: in-repo .github/settings.yml applied with the repo's own PAT
+- `settings-sync`: centrally managed repo settings + repo-owned settings.yml starter
 - `custom-license`: repo carries its own license in LICENSE.md; the fleet license is not rendered
 
-`settings-sync` is deliberately not a default: central settings (`settings/repos/<name>.yml` in repo-platform) are the default home.
+`settings-sync` is deliberately not a default: selecting it is the opt-in to centrally managed settings (the assembled baseline plus the repo's own settings.yml - docs/settings.md).
 
 ## Per-module follow-up questions
 
@@ -84,7 +84,7 @@ To change a module parameter later, edit that question's VALUE key in `.copier-a
 
 ## Required settings labels
 
-Settings applies delete undeclared labels, so the repo's settings file (central or in-repo) must declare every label the repo needs. The settings-sync module's rendered settings.yml declares these automatically; a central `settings/repos/<name>.yml` must carry them by hand. A preflight compares a central file that declares labels against the repo's recorded module selection and fails the apply on a missing required label.
+Settings applies delete undeclared labels, but the managed baseline declares every label the repo's module selection needs automatically (assembled from the module manifests at apply time; the merged roster is what the delete-undeclared pass runs against). The table below is the reference for what each module brings:
 
 | Needed by | Labels |
 |---|---|

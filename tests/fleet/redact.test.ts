@@ -306,8 +306,6 @@ describe("enrich CLI", () => {
         join(dir, "discovered.json"),
         "--registry",
         join(dir, "repos.yml"),
-        "--central-dir",
-        join(dir, "no-central"),
       ],
       { env: { ...process.env, PAT: "p", GITHUB_RUN_ID: "1" } },
     );
@@ -348,8 +346,6 @@ describe("enrich CLI", () => {
         join(dir, "discovered.json"),
         "--registry",
         join(dir, "repos.yml"),
-        "--central-dir",
-        join(dir, "no-central"),
       ],
       { env: { ...process.env, PAT: "p", GITHUB_RUN_ID: "1" } },
     );

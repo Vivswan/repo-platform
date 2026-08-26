@@ -2004,8 +2004,8 @@ const rules: Rule[] = [
       for (const rel of files) {
         const text = read(rel);
         for (const match of text.matchAll(slugRe)) {
-          // <something>/repo-platform.<ext> is a filename inside a repo path
-          // (settings/repos/repo-platform.yml), not an owner slug.
+          // <something>/repo-platform.<ext> is a filename inside a path
+          // (say, a scratch repo-platform.yml), not an owner slug.
           if (/^\.[A-Za-z0-9]/.test(text.slice(match.index + match[0].length))) continue;
           if (match[1].toLowerCase() === username.toLowerCase()) {
             sawExpected = true;

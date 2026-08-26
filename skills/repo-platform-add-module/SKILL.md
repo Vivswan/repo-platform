@@ -8,7 +8,7 @@ metadata:
 
 # repo-platform: Adding or Removing a Module
 
-Module selection is repo-owned: the top-level `modules:` list in the repository's own `.repo-platform.yml`. Change it on the default branch (a normal PR), and the next template sync PR renders the change - no edits in repo-platform are needed for the selection itself, only for central settings labels.
+Module selection is repo-owned: the top-level `modules:` list in the repository's own `.repo-platform.yml`. Change it on the default branch (a normal PR), and the next template sync PR renders the change - no edits in repo-platform are needed: the managed settings baseline (labels, rulesets) follows the module selection automatically at apply time.
 
 Work in this order, always:
 
@@ -45,7 +45,7 @@ One line each. The roster's source of truth is the module manifests (`templates/
 | `auto-assign` | auto-assign issues/PRs/alerts to owner |
 | `fuzzer` | nightly fuzz starter with issue filing, replay inputs, auto-close |
 | `nightly` | nightly CI starter with failure issue filing and auto-close |
-| `settings-sync` | in-repo .github/settings.yml applied with the repo's own PAT |
+| `settings-sync` | centrally managed repo settings + repo-owned settings.yml starter |
 | `custom-license` | repo carries its own license in LICENSE.md; the fleet license is not rendered |
 
 Per-module details - what is managed vs starter, parameters, companion steps, removal notes - are in [references/modules.md](references/modules.md).
@@ -100,7 +100,7 @@ What the PR delivers, in two classes:
 
 The full checklist per module is in [references/modules.md](references/modules.md). The ones that bite when skipped:
 
-- Central-settings repos (a `settings/repos/<name>.yml` in repo-platform that declares labels): add every label the new module requires - the tracking label for `fuzzer`/`nightly` (the `fuzzer_label`/`nightly_label` answer), the dependabot label for a new toolchain, the `autorelease: *` pair plus `release-blocker`/`release-override` for `release-please`. The repo owner adds them via a PR in repo-platform; the tuples come from the module manifests (`templates/<module>/module.yml`) and the release-please module's settings-labels fragment - the settings-sync template only assembles them via anchors, so the easiest full roster to copy from is a settings-sync repo's rendered `.github/settings.yml`. The settings preflight compares the file against the modules list in the repo's `.repo-platform.yml` (live as soon as step 1 merges) and the tracking-label answer in its `.copier-answers.yml`, and fails the apply on a missing required label - so land the central label PR FIRST (extra labels never error; missing ones do), and record the tracking-label answer in the step-1 PR even when accepting the default, or the preflight cannot read it until the sync PR merges. Repos with the `settings-sync` module get the declarations rendered automatically.
+- Settings labels need no hand work: the managed baseline assembles every label the new module requires (the dependabot label for a new toolchain, the `autorelease: *` pair plus `release-blocker`/`release-override` for `release-please`, the tracking label for `fuzzer`/`nightly`) from the module manifests at apply time. The one thing to record: a `fuzzer`/`nightly` repo's tracking-label answer (`fuzzer_label`/`nightly_label`) must be readable from its `.copier-answers.yml` - record it in the step-1 PR even when accepting the default, or the apply fails for that repo until the sync PR merges (the assembly refuses to guess a tracking label).
 - `bun`: register a repo-scoped Contents:RW PAT as a DEPENDABOT secret so the lockfile fixer's push re-runs CI (human-only - needs the token value): `gh secret set REPO_PLATFORM_TOKEN --app dependabot`.
 - `pages`: one-time repo setup - Settings -> Pages -> Source: GitHub Actions, and a `v*` tag rule on the `github-pages` environment's deployment branches.
 - `skills`: the starter manifests are repo-owned - a skill folder is unpublished until `plugin.json`'s `skills` array lists it.
@@ -127,11 +127,11 @@ The answers file holds three classes of key - know which one you are touching:
 
 - `_`-prefixed keys (`_commit`, `_src_path`): never touch them, and never delete the file - `copier update` depends on them, and a broken `_commit` puts the repo on the recovery path.
 - `modules`, `channel`, `private`, `description`: recorded here, but force-overridden by the sync every run - an edit here silently evaporates. Change them at their real source: `.repo-platform.yml` for modules, repo-platform's `repos.yml` for channel, the live GitHub settings for visibility and description.
-- Everything else (the module parameters above): editing the value key here IS the mechanism. The next sync re-renders everything derived from the answer and rewrites `.copier-answers.yml` itself consistently; an answer that violates its copier validator fails the sync run loudly. The settings preflight reads tracking labels from exactly this file on the default branch, so central labels must match what it records.
+- Everything else (the module parameters above): editing the value key here IS the mechanism. The next sync re-renders everything derived from the answer and rewrites `.copier-answers.yml` itself consistently; an answer that violates its copier validator fails the sync run loudly. The settings assembly reads tracking labels from exactly this file on the default branch, so the recorded value is what the apply declares.
 
-When both `fuzzer` and `nightly` are selected, their labels must differ (case-insensitively - GitHub deduplicates label names that way): both streams dedup AND auto-close by label, so a shared label lets one stream's green night close the other's open issue. The copier validator and the settings preflight both reject the collision.
+When both `fuzzer` and `nightly` are selected, their labels must differ (case-insensitively - GitHub deduplicates label names that way): both streams dedup AND auto-close by label, so a shared label lets one stream's green night close the other's open issue. The copier validator and the settings assembly both reject the collision.
 
-One ripple to remember: renaming a tracking label (`fuzzer_label`/`nightly_label`) never updates the repo-owned starter workflow - update the starter's two `label:` inputs in the same PR, or it keeps filing under the old name while the settings apply deletes that label. The settings declaration side splits by settings home: settings-sync repos get the rendered `settings.yml` declaration updated automatically on the next sync; central-settings repos need a matching PR to `settings/repos/<name>.yml` in repo-platform, or the preflight fails the apply.
+One ripple to remember: renaming a tracking label (`fuzzer_label`/`nightly_label`) never updates the repo-owned starter workflow - update the starter's two `label:` inputs in the same PR, or it keeps filing under the old name while the settings apply deletes that label. The managed baseline picks the renamed value up automatically on the next apply (it reads the recorded answer).
 
 ## Removing a module
 
@@ -139,9 +139,9 @@ Deselecting works the same way: remove the name from `modules:` in `.repo-platfo
 
 - Managed files the module owned leave the render and are deleted - including locally modified ones (the retired-file cleanup diffs two clean renders; every removal is listed in the PR body for review). Check none were repurposed locally before merging.
 - Starters and repo-owned files stay: `_skip_if_exists` files are never deleted by sync. Dropping `fuzzer`/`nightly` leaves `nightly-fuzz.yml`/`nightly.yml` running - delete the workflow yourself, or keep its tracking label declared in your settings.
-- `.github/settings.yml` is never deleted by sync, even when dropping `settings-sync` de-renders it. Moving to central settings: copy the content to `settings/repos/<name>.yml` in repo-platform, then remove the in-repo file yourself (while both exist, central wins).
+- `.github/settings.yml` is never deleted by sync, even when dropping `settings-sync` de-renders it. Dropping the module also stops the nightly heal for the repo: nothing enforces its settings afterwards (docs/settings.md).
 - Dropping `custom-license` is guarded: the sync FAILS with instructions while the repo's own license file still exists, because the incoming fleet LICENSE.md cannot be reconciled with it. Delete the old license in the same commit that removes the module (git history records prior licensing; third-party notices go below the fleet LICENSE.md's local-section marker), then re-run the sync.
-- Label cleanup: labels only the dropped module required can be removed from the central settings file (the apply then deletes them from the repo). Do not remove a tracking label whose workflow you kept.
+- Label cleanup is automatic: the baseline stops declaring the dropped module's labels and the next apply deletes them from the repo. If you kept the module's starter workflow running, declare its tracking label in the repo's own `.github/settings.yml` first, or the apply strips the label off the open tracking issue.
 
 A module the TEMPLATE retired (rather than you deselecting it) is handled automatically: the sync drops it from the selection with a notice and the same cleanup rules apply.
 

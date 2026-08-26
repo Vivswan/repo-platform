@@ -85,56 +85,41 @@ describe("detectDrift", () => {
 
 describe("driftSummary", () => {
   test("empty when nothing drifted", () => {
-    expect(driftSummary("Vivswan/demo", [], "in-repo")).toBe("");
+    expect(driftSummary("Vivswan/demo", [], true)).toBe("");
   });
 
   test("names the repo, the field, and both values", () => {
     const summary = driftSummary(
       "Vivswan/demo",
       [{ field: "private", recorded: "false", live: "true" }],
-      "in-repo",
+      true,
     );
     expect(summary).toContain("> [!WARNING]");
     expect(summary).toContain("Vivswan/demo");
     expect(summary).toContain('`private`: "false" -> "true" (recorded -> live)');
     expect(summary).toContain("RATIFIES");
-    expect(summary).toContain("`.github/settings.yml` is what the nightly settings heal enforces");
+    expect(summary).toContain("centrally assembled baseline");
+    expect(summary).toContain("`.github/settings.yml` merged over it");
     expect(summary).toContain("Auto-merge is off");
     expect(summary).toContain("settings-repos heal");
-    expect(summary).not.toContain("centrally homed");
   });
 
   test("keeps a multiline description value on one body line", () => {
     const summary = driftSummary(
       "Vivswan/demo",
       [{ field: "description", recorded: "old", live: "line one\nline two" }],
-      "in-repo",
+      true,
     );
     expect(summary).toContain('`description`: "old" -> "line one\\nline two"');
   });
 
-  test("tells a centrally homed repo the merge does not become the enforced truth", () => {
+  test("tells an unmanaged repo that nothing enforces the values", () => {
     const summary = driftSummary(
       "Vivswan/demo",
       [{ field: "private", recorded: "false", live: "true" }],
-      "central",
+      false,
     );
-    expect(summary).toContain("centrally homed");
-    expect(summary).toContain("`settings/repos/demo.yml`");
-    expect(summary).toContain("does NOT make them the enforced");
-    expect(summary).toContain("Auto-merge is off");
-    // The ratification and heal claims belong to the in-repo wording only.
-    expect(summary).not.toContain("RATIFIES");
-    expect(summary).not.toContain("heal enforces");
-  });
-
-  test("tells a repo with no settings home that nothing enforces the values", () => {
-    const summary = driftSummary(
-      "Vivswan/demo",
-      [{ field: "private", recorded: "false", live: "true" }],
-      "none",
-    );
-    expect(summary).toContain("no settings home");
+    expect(summary).toContain("does not select the settings-sync module");
     expect(summary).toContain("Nothing enforces them either way");
     expect(summary).toContain("flip the setting back in the GitHub UI");
     // No apply run targets this repo, so the heal is not a way back.
@@ -143,11 +128,11 @@ describe("driftSummary", () => {
   });
 
   test("every body line is blockquoted so the section survives concatenation", () => {
-    for (const home of ["central", "in-repo", "none"] as const) {
+    for (const managed of [true, false]) {
       const summary = driftSummary(
         "Vivswan/demo",
         [{ field: "private", recorded: "false", live: "true" }],
-        home,
+        managed,
       );
       for (const line of summary.split("\n")) {
         expect(line).toStartWith(">");

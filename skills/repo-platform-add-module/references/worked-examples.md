@@ -29,7 +29,7 @@ Every file should be explained by the modules diff:
 
 - `.github/workflows/nightly.yml` - NEW, the starter (repo-owned from now on).
 - `.copier-answers.yml` - records `nightly` and `nightly_label`.
-- With `settings-sync`: `.github/settings.yml` gains the `nightly-failure` label declaration. On central settings there is no settings diff here - the label is YOUR companion step (below).
+- No settings.yml diff: the managed baseline declares the `nightly-failure` label automatically at apply time, read from the recorded `nightly_label` answer (below).
 
 ### The starter, and moving real checks in
 
@@ -42,19 +42,9 @@ Move the real checks in either way:
 
 Unlike the fuzz stream, the nightly issue does NOT gate releases; add `release-blocker` to a nightly issue by hand when it should block a cut.
 
-### Companion step (central-settings repos)
+### Companion step: record the answer
 
-Add the tracking label to `settings/repos/<repo>.yml` in repo-platform (a PR there; merging applies it) - and land it BEFORE the sync PR merges: extra declared labels never error, missing required ones fail the apply. The preflight reads the module list from the repo's `.repo-platform.yml` (live as soon as the step-1 PR merges) but the label value from `.copier-answers.yml`, which is why the step-1 PR should record `nightly_label` even when accepting the default.
-
-```yaml
-labels:
-  # ...existing labels, fuzz-nightly included...
-  - name: nightly-failure
-    color: "D93F0B"
-    description: Automated nightly CI failure
-```
-
-Skip it and the next settings apply fails its preflight against the repo's `.repo-platform.yml` modules and recorded `nightly_label` answer.
+The settings assembly reads the module list from the repo's `.repo-platform.yml` (live as soon as the step-1 PR merges) but the label value from `.copier-answers.yml` - so record `nightly_label` in the step-1 PR even when accepting the default, or the repo's settings apply fails (the assembly refuses to guess a tracking label) until the sync PR merges the recorded answer.
 
 ## 2. Adding `skills`
 

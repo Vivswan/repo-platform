@@ -144,30 +144,26 @@ if has settings-sync; then
   test -f /tmp/smoke/.github/settings.yml
   test -f "$wf/settings-sync.yml"
   present "reusable-apply-settings.yml@main" "$wf/settings-sync.yml"
-  # Visibility is declared even when public; the whole-line match keeps
-  # the explanatory comment above the key from satisfying the check.
+  # The rendered settings.yml is the repo-owned IDENTITY STARTER: the four
+  # identity keys and nothing else. Visibility is declared even when
+  # public; the whole-line match keeps the explanatory comment above the
+  # key from satisfying the check.
   present_line "  private: $PRIVATE" /tmp/smoke/.github/settings.yml
   # homepage and topics are declared even when empty (declare-and-clear);
   # no row passes either answer, so every row must render the empty form.
   # A re-gated key would vanish and its drift would go unmanaged again.
   present_line '  homepage: ""' /tmp/smoke/.github/settings.yml
   present_line '  topics: ""' /tmp/smoke/.github/settings.yml
-  # The ruleset's code_scanning rule follows enable_codeql (public AND a
-  # toolchain): GitHub 422s that rule on a private personal repo, so a
-  # private render must never emit it.
-  if [ "$PRIVATE" != "true" ] && has_codeql_toolchain; then
-    present "type: code_scanning" /tmp/smoke/.github/settings.yml
-  else
-    absent "type: code_scanning" /tmp/smoke/.github/settings.yml
-  fi
-  # security_and_analysis follows visibility alone: private repos without
-  # Advanced Security reject the block (422), so it must never render there.
-  if [ "$PRIVATE" != "true" ]; then
-    present "security_and_analysis:" /tmp/smoke/.github/settings.yml
-    present "secret_scanning_push_protection:" /tmp/smoke/.github/settings.yml
-  else
-    absent "security_and_analysis:" /tmp/smoke/.github/settings.yml
-  fi
+  # The managed baseline (labels, rulesets, security_and_analysis) is
+  # assembled centrally at apply time and merged UNDER this file - none of
+  # it may render into the starter again (a rendered copy would shadow
+  # baseline evolution forever), and the retired mergeable marker must
+  # never come back (it is the one-time transition's trigger).
+  absent "type: code_scanning" /tmp/smoke/.github/settings.yml
+  absent "security_and_analysis:" /tmp/smoke/.github/settings.yml
+  absent_line "labels:" /tmp/smoke/.github/settings.yml
+  absent_line "rulesets:" /tmp/smoke/.github/settings.yml
+  absent "repo-platform:mergeable" /tmp/smoke/.github/settings.yml
 else
   test ! -e /tmp/smoke/.github/settings.yml
   test ! -e "$wf/settings-sync.yml"
@@ -364,31 +360,71 @@ else
   test ! -e /tmp/smoke/.github/copilot-instructions.md && test ! -L /tmp/smoke/.github/copilot-instructions.md
 fi
 
-# release-please module gates the autorelease labels in the settings-sync
-# module's settings.yml (only rendered when that module is on) and the
-# release-tags tag-immutability ruleset there (sync pins against v-tags),
-# the managed release.yml pipeline, the repo-owned update-release.yml hook,
-# pipeline plus its thin caller job in the managed ci.yml, and the config
-# files. The fuzzer and nightly modules' tracking labels splice into
-# settings.yml the same way.
+# The module/visibility gating that used to render into settings.yml now
+# lives in the centrally ASSEMBLED baseline: invoke the assembly CLI as a
+# black box against the rendered repo's own recorded facts and assert its
+# output with hardcoded expectations here (this harness stays independent
+# - it greps the output, never imports the code). A failing assertion in
+# $managed_out means the assembly changed: fix
+# .github/settings-baseline.yml / the module manifests /
+# render_managed_settings.ts (or this expectation). The assembly needs the
+# repo root's dependencies, which the smoke job does not install.
 if has settings-sync; then
-  if has release-please; then present "autorelease: pending" /tmp/smoke/.github/settings.yml; else absent "autorelease: pending" /tmp/smoke/.github/settings.yml; fi
-  if has release-please; then present "name: release-tags" /tmp/smoke/.github/settings.yml; else absent "name: release-tags" /tmp/smoke/.github/settings.yml; fi
-  if has fuzzer; then present "Automated nightly fuzz failure" /tmp/smoke/.github/settings.yml; else absent "Automated nightly fuzz failure" /tmp/smoke/.github/settings.yml; fi
-  if has nightly; then present "Automated nightly CI failure" /tmp/smoke/.github/settings.yml; else absent "Automated nightly CI failure" /tmp/smoke/.github/settings.yml; fi
-fi
-
-# Toolchain modules gate dependabot's default per-ecosystem labels in the
-# settings-sync module's settings.yml (dependabot recreates them when
-# missing, so the settings apply must declare them or loop on deletion).
-# github_actions is unconditional: the base dependabot.yml always carries
-# the github-actions ecosystem.
-if has settings-sync; then
-  present_line "  - name: github_actions" /tmp/smoke/.github/settings.yml
-  if has bun || has node; then present_line "  - name: javascript" /tmp/smoke/.github/settings.yml; else absent "name: javascript" /tmp/smoke/.github/settings.yml; fi
-  if has deno; then present_line "  - name: deno" /tmp/smoke/.github/settings.yml; else absent "name: deno" /tmp/smoke/.github/settings.yml; fi
-  if has uv; then present_line '  - name: "python:uv"' /tmp/smoke/.github/settings.yml; else absent 'name: "python:uv"' /tmp/smoke/.github/settings.yml; fi
-  if has rust; then present_line "  - name: rust" /tmp/smoke/.github/settings.yml; else absent "name: rust" /tmp/smoke/.github/settings.yml; fi
+  managed_out=/tmp/smoke-managed-settings.yml
+  [ -d node_modules ] || bun install --frozen-lockfile --silent
+  bun .github/scripts/fleet/render_managed_settings.ts \
+    --repo smoke/test --target-dir /tmp/smoke --out "$managed_out"
+  # The unconditional labels: dependabot's base pair (the base
+  # dependabot.yml always carries the github-actions ecosystem, and
+  # dependabot recreates its labels when missing, so an undeclared one
+  # would loop delete/recreate nightly).
+  present_line "  - name: dependencies" "$managed_out"
+  present_line "  - name: github_actions" "$managed_out"
+  # The fleet rulesets, always, with the all-green required check and the
+  # review-thread gate.
+  present_line "  - name: main" "$managed_out"
+  present_line "  - name: non-bypassable" "$managed_out"
+  present "context: all-green" "$managed_out"
+  present "required_review_thread_resolution: true" "$managed_out"
+  # The main ruleset's code_scanning rule follows enable_codeql (public
+  # AND an analyzable toolchain): GitHub 422s that rule on a private
+  # personal repo, so a private assembly must never emit it.
+  if [ "$PRIVATE" != "true" ] && has_codeql_toolchain; then
+    present "type: code_scanning" "$managed_out"
+  else
+    absent "type: code_scanning" "$managed_out"
+  fi
+  # security_and_analysis follows visibility alone (private repos without
+  # Advanced Security reject the block); the settings-as-code-report
+  # marker label is the private-only counterpart.
+  if [ "$PRIVATE" != "true" ]; then
+    present "security_and_analysis:" "$managed_out"
+    present "secret_scanning_push_protection:" "$managed_out"
+    absent "settings-as-code-report" "$managed_out"
+  else
+    absent "security_and_analysis:" "$managed_out"
+    present_line "  - name: settings-as-code-report" "$managed_out"
+  fi
+  # Dependabot's per-ecosystem labels follow the toolchain modules.
+  if has bun || has node; then present_line "  - name: javascript" "$managed_out"; else absent "name: javascript" "$managed_out"; fi
+  if has deno; then present_line "  - name: deno" "$managed_out"; else absent "name: deno" "$managed_out"; fi
+  if has uv; then present_line "  - name: python:uv" "$managed_out"; else absent "python:uv" "$managed_out"; fi
+  if has rust; then present_line "  - name: rust" "$managed_out"; else absent "name: rust" "$managed_out"; fi
+  # release-please brings its labels and the release-tags ruleset from its
+  # manifest's settings_labels/settings_rulesets.
+  if has release-please; then
+    present "autorelease: pending" "$managed_out"
+    present "release-blocker" "$managed_out"
+    present_line "  - name: release-tags" "$managed_out"
+  else
+    absent "autorelease: pending" "$managed_out"
+    absent "release-blocker" "$managed_out"
+    absent "name: release-tags" "$managed_out"
+  fi
+  # The tracking streams render the recorded answers (the rows take the
+  # copier defaults).
+  if has fuzzer; then present_line "  - name: fuzz-nightly" "$managed_out"; else absent "fuzz-nightly" "$managed_out"; fi
+  if has nightly; then present_line "  - name: nightly-failure" "$managed_out"; else absent "nightly-failure" "$managed_out"; fi
 fi
 if has release-please; then
   test -f "$wf/release.yml"
@@ -585,7 +621,7 @@ else
   expect_class ".github/workflows/release.yml" absent
   expect_class "release-please-config.json" absent
 fi
-if has settings-sync; then expect_class ".github/settings.yml" mergeable; else expect_class ".github/settings.yml" absent; fi
+if has settings-sync; then expect_class ".github/settings.yml" starter; else expect_class ".github/settings.yml" absent; fi
 if has custom-license; then expect_class "LICENSE.md" absent; else expect_class "LICENSE.md" split; fi
 # Stamping: the managed ci.yml hash must equal the file's sha256 (computed
 # here with hashlib, not the code under test), the split SECURITY.md hash
