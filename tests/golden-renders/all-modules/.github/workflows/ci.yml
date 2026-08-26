@@ -271,7 +271,10 @@ jobs:
             rule_expects="$(ask "$rules" "$defs"'arr | map(select(.type == "copilot_code_review")) | length > 0')" || rules_ok=0
           fi
 
-          awaiting="::error::waiting for Copilot review; this job is re-run automatically when it posts (no completed '$COPILOT_CHECK' check run or posted review at $HEAD_SHA yet)."
+          # Names the human action on purpose: there is no API that triggers
+          # a Copilot review, so "wait and hope" is not a complete
+          # instruction when the auto-request never fired.
+          awaiting="::error::waiting for Copilot review at $HEAD_SHA (no completed '$COPILOT_CHECK' check run and no posted review yet). Copilot is usually requested automatically when you push; if nothing appears after a few minutes, request it by hand from the PR sidebar under Reviewers -> Copilot (a draft PR or an exhausted review quota suppresses the automatic request). This job re-runs itself when the review posts; if it does not, open this CI run and pick Re-run jobs, then Re-run failed jobs."
 
           # 1. Arrived, whatever it concluded.
           if [ "$check_done" = true ] || [ "$review_at_head" = true ]; then

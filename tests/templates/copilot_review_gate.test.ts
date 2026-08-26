@@ -26,7 +26,7 @@ const OLD_SHA = "c".repeat(40);
 const COPILOT_CHECK = "copilot-pull-request-reviewer";
 const COPILOT_RULE = [{ type: "copilot_code_review" }];
 const COMPLETED_CHECK = { check_runs: [{ status: "completed" }] };
-const AWAITING = "::error::waiting for Copilot review; this job is re-run automatically";
+const AWAITING = "::error::waiting for Copilot review at";
 
 interface Step {
   name?: string;
@@ -180,6 +180,17 @@ describe("the template's copilot-review gate job", () => {
     });
     expect(r.exitCode).toBe(0);
     expect(r.output).toContain("arrived");
+  });
+
+  // There is no API that triggers a Copilot review, so the failure has to
+  // name the human action or the reader is left waiting on something that
+  // may never come.
+  test("the waiting message names the manual request and the re-run", () => {
+    const r = run({ rules: COPILOT_RULE });
+    expect(r.exitCode).toBe(1);
+    expect(r.output).toContain("Reviewers -> Copilot");
+    expect(r.output).toContain("draft PR or an exhausted review quota");
+    expect(r.output).toContain("Re-run failed jobs");
   });
 
   test("no rule, no involvement: passes non-blocking with the log line", () => {
