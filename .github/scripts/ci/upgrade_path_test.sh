@@ -37,11 +37,24 @@ REPO_ROOT="$(pwd)"
 #   git branch --list 'ci-build-*'     # stray build branches
 #   git worktree list                  # stray worktree admin entries
 TMP_ROOT="${TMPDIR:-/tmp}"
-# Absolutized: the harness cd's between the repo and its fixtures, so a
-# RELATIVE TMPDIR would make every later "$RUN_DIR/..." path (cleanup rm
-# included) resolve against whatever directory happens to be current -
-# wrong targets, leaked temp dirs.
-RUN_DIR="$(cd "$(mktemp -d "${TMP_ROOT%/}/upgrade-path.XXXXXX")" && pwd)"
+# Normalized to an absolute path: the harness cd's between the repo and
+# its fixtures, so a relative "$RUN_DIR/..." (cleanup rm included) would
+# resolve against whatever directory happens to be current. A TMPDIR that
+# lands INSIDE the repo checkout is rejected outright rather than
+# relocated: branch_tree.ts refuses any destination beneath the repo, the
+# nested worktree would sit inside the main worktree, and a silent
+# relocation would surprise - fail loud, before any namespace exists.
+TMP_ROOT_ABS="$(cd "$TMP_ROOT" 2>/dev/null && pwd)" || {
+  echo "FAIL: TMPDIR '$TMP_ROOT' does not exist or cannot be entered" >&2
+  exit 1
+}
+case "$TMP_ROOT_ABS/" in
+  "$REPO_ROOT/" | "$REPO_ROOT"/*)
+    echo "FAIL: TMPDIR resolves to '$TMP_ROOT_ABS', inside the repo checkout '$REPO_ROOT' - the harness's fixtures cannot live under the repo (branch_tree.ts refuses such destinations and the nested worktree would sit inside the main worktree); point TMPDIR outside the checkout" >&2
+    exit 1
+    ;;
+esac
+RUN_DIR="$(cd "$(mktemp -d "${TMP_ROOT_ABS%/}/upgrade-path.XXXXXX")" && pwd)"
 REF_NS="ci-build-${RUN_DIR##*.}"
 OLD_TAG="$REF_NS/old"
 NEW_TAG="$REF_NS/new"
