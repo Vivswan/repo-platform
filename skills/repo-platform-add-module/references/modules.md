@@ -13,9 +13,9 @@ Managed: `ci.yml` and its standard jobs, `dependabot.yml` (github-actions ecosys
 - Managed: dependabot ecosystem entry, gitignore section, CodeQL job in ci.yml (public repos; not rust), and for bun/node/deno the toolchain version dotfile (`.bun-version` / `.node-version` / `.dvmrc`, fleet-pinned; uv and rust carry none) plus, bun only, the `dependabot-bun-lockfile.yml` lockfile fixer.
 - Starter: `auto-format.yml` prefilled per selected formatter toolchain (all but rust) - only when the file does not exist yet. The same applies to every composite starter a toolchain contributes fragments to: an existing `auto-format.yml`, `checks.yml` (example jobs), `.gitleaks.toml` (lockfile allowlists), or `copilot-setup-steps.yml` (agents module) does NOT gain a newly added toolchain's fragment - add the toolchain's piece to the existing file by hand.
 - Companion steps:
-  - Central settings labels: `dependencies` (`0366d6`) and `github_actions` (`000000`) always, plus the toolchain label - `javascript` (`168700`) for bun/node, `deno` (`70ffaf`), `python:uv` (`2b67c6`), `rust` (`000000`). The tuples live in the module manifests (`templates/<module>/module.yml`).
+  - Settings labels are automatic: the fleet baseline declares `dependencies` (`0366d6`) and `github_actions` (`000000`) always, and each toolchain module's own `templates/<module>/settings.yml` layer declares its label - `javascript` (`168700`) for bun/node, `deno` (`70ffaf`), `python:uv` (`2b67c6`), `rust` (`000000`). An SSOT rule pins each of those against the manifest's `dependabot` tuple, so the two cannot drift.
   - bun only: `gh secret set REPO_PLATFORM_TOKEN --app dependabot` with a repo-scoped Contents:RW PAT (human-only). Without it the lockfile fix lands but cannot re-trigger checks; each fixed Dependabot PR then needs a close/reopen.
-- Removal: the dependabot entry, gitignore section, and CodeQL job leave - except outputs another selected toolchain still contributes: bun/node/deno share the `codeql-javascript` job, and bun and node share the Node gitignore section, so those stay while any contributor remains selected. The auto-format starter stays (edit it yourself). Remove the toolchain label from central settings once nothing carries it.
+- Removal: the dependabot entry, gitignore section, and CodeQL job leave - except outputs another selected toolchain still contributes: bun/node/deno share the `codeql-javascript` job, and bun and node share the Node gitignore section, so those stay while any contributor remains selected. The auto-format starter stays (edit it yourself). The toolchain label leaves the managed baseline once nothing carries it, and the next apply deletes it from the repo.
 
 ## agents
 
@@ -37,7 +37,7 @@ Managed: `ci.yml` and its standard jobs, `dependabot.yml` (github-actions ecosys
 
 - Managed: `release.yml` (the full pipeline: draft cut -> repo-owned update hook -> attested publish with a single `attestation.jsonl` per release), the `release` job on top of all-green, and the `release-freshness` and `release-health` gate jobs in ci.yml.
 - Starters: `update-release.yml` (the update hook release.yml calls between draft and publish), `update-release-pr.yml` (the hook release.yml calls on release-PR refreshes), `release-please-config.json`, `.release-please-manifest.json`.
-- Companion labels (central settings): `autorelease: pending`, `autorelease: tagged`, `release-blocker` (`B60205`), `release-override` (`FBCA04`).
+- Settings labels are automatic: the module's own `templates/release-please/settings.yml` layer declares `autorelease: pending`, `autorelease: tagged`, `release-blocker` (`B60205`), `release-override` (`FBCA04`), plus the `release-tags` tag-immutability ruleset.
 - With `fuzzer` also selected, the release-health gate ties releases to fuzz health (an open fuzz tracking issue blocks cuts).
 - Removal: managed pieces leave; the starters stay (delete them yourself if the repo stops releasing this way).
 
@@ -59,10 +59,10 @@ Managed: `ci.yml` and its standard jobs, `dependabot.yml` (github-actions ecosys
 Twin nightly issue streams backed by the same `fuzz-issue` action; `fuzzer` adds the failure-report/replay-artifact contract and release gating, `nightly` is the plain-CI stream.
 
 - Starters: `nightly-fuzz.yml` (fuzzer, cron 09:11 UTC) / `nightly.yml` (nightly, cron 06:59 UTC). Placeholder step is a green no-op until customized. The action pin inside a starter is never updated by sync (dependabot bumps it on released repos; staging pins `main`).
-- Parameters: `fuzzer_label` (default `fuzz-nightly`) / `nightly_label` (default `nightly-failure`). The two must differ (case-insensitive) when both modules are selected - both streams dedup AND auto-close by label, so a shared label lets one stream's green night close the other's open issue. The copier validator and the settings preflight both reject the collision.
-- Companion labels (central settings): the tracking label itself - `fuzz-nightly` (`B60205`) / `nightly-failure` (`D93F0B`) or the repo's recorded answer. A tracking issue stripped of its label is invisible to dedup and auto-close.
-- Renaming a label: update the recorded answer AND the starter's two `label:` inputs in the same PR (the starter is repo-owned; sync never fixes it). The settings declaration follows automatically only for settings-sync repos (the rendered settings.yml); a central-settings repo needs a matching `settings/repos/<name>.yml` PR in repo-platform, or the preflight fails the apply.
-- Removal: on settings-sync repos the label declaration leaves the rendered settings.yml; on central settings, remove it from the central file yourself. Either way the starter workflow keeps running - delete it yourself, or keep the label declared.
+- Parameters: `fuzzer_label` (default `fuzz-nightly`) / `nightly_label` (default `nightly-failure`). The two must differ (case-insensitive) when both modules are selected - both streams dedup AND auto-close by label, so a shared label lets one stream's green night close the other's open issue. The copier validator and the settings assembly both reject the collision.
+- Settings labels are automatic: the managed baseline declares the tracking label - `fuzz-nightly` (`B60205`) / `nightly-failure` (`D93F0B`) or the repo's recorded answer, read from `.copier-answers.yml` at apply time. A tracking issue stripped of its label is invisible to dedup and auto-close.
+- Renaming a label: update the recorded answer AND the starter's two `label:` inputs in the same PR (the starter is repo-owned; sync never fixes it). The managed baseline picks the renamed value up on the next apply.
+- Removal: the label leaves the managed baseline and the next apply deletes it. The starter workflow keeps running - delete it yourself, or declare its label in the repo's own `.github/settings.yml` first.
 - Depth: repo-platform's `docs/fuzzer.md` and `docs/nightly.md` (failure-report contract, sharding, issue lifecycle, release gating).
 
 ## pr-title / auto-assign
@@ -72,11 +72,12 @@ Twin nightly issue streams backed by the same `fuzz-issue` action; `fuzzer` adds
 
 ## settings-sync
 
-- Managed: `settings-sync.yml` caller (push-time self-apply).
-- Mergeable, never deleted: `.github/settings.yml` (three-way merged on updates; carrying the file at all is what opts the repo into the in-repo settings home, module or not).
-- Parameters: `homepage`, `topics` (rendered into settings.yml; declared-empty clears the live value, so copy UI-set values into the answer or the file before they get healed away).
-- Companion step (optional): a repo-scoped PAT with Administration + Issues RW as the repo's own `REPO_PLATFORM_TOKEN` Actions secret buys apply-on-push immediacy; without it self-apply skips with a warning and the central nightly run still applies the file.
-- Removal: the caller is deleted; `settings.yml` stays. Moving to central settings: copy the content to `settings/repos/<name>.yml` in repo-platform and delete the in-repo file yourself (central wins while both exist).
+- Selecting the module IS the opt-in to centrally managed settings: the nightly heal assembles the repo's baseline (policy block, module labels, fleet rulesets) and merges the repo's own `.github/settings.yml` over it.
+- Managed: `settings-sync.yml` caller (push-time self-apply of the same merge).
+- Starter, never deleted: `.github/settings.yml` - the identity keys plus local overrides, rendered once and repo-owned (a same-name label there replaces the fleet one wholesale, a same-name ruleset merges into it; a key set to `null` opts out of that part of the fleet defaults, except where the override layer declares it).
+- Parameters: `homepage`, `topics` (seeded into the starter; declared-empty clears the live value, so copy UI-set values into the file before they get healed away).
+- Companion step (optional): a repo-scoped PAT with Administration + Issues RW as the repo's own `REPO_PLATFORM_TOKEN` Actions secret buys apply-on-push immediacy; without it self-apply skips with a warning and the central nightly run still applies the repo.
+- Removal: the caller is deleted; `settings.yml` stays as inert documentation - nothing enforces the repo's settings afterwards.
 
 ## custom-license
 

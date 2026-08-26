@@ -2,24 +2,17 @@ import { describe, expect, test } from "bun:test";
 import {
   applyOnly,
   buildMatrix,
-  centralTargets,
+  selfTarget,
   type Target,
 } from "../../.github/scripts/fleet/build_settings_matrix";
 import type { EnrichedRow } from "../../.github/scripts/fleet/redact";
 
-const OWNER = "Vivswan";
-const DIR = "settings/repos";
-
-function file(name: string): { name: string; isDirectory: boolean } {
-  return { name, isDirectory: false };
-}
-
-function centralTarget(repo: string): Target {
+function target(repo: string, hideDetails = false): Target {
   return {
     repo,
     name: repo.split("/").pop() ?? repo,
-    home: "central",
     redact_name: false,
+    hide_details: hideDetails,
     verify: "",
   };
 }
@@ -35,52 +28,37 @@ function publicRow(repo: string): EnrichedRow {
   };
 }
 
-describe("centralTargets", () => {
-  test("maps <name>.yml files to same-owner central targets", () => {
-    const { targets, errors } = centralTargets(OWNER, [file("alpha.yml"), file("beta.yml")], DIR);
-    expect(errors).toEqual([]);
-    expect(targets).toEqual([centralTarget("Vivswan/alpha"), centralTarget("Vivswan/beta")]);
-  });
-
-  test("ignores non-YAML entries like a README", () => {
-    const { targets, errors } = centralTargets(OWNER, [file("README.md")], DIR);
-    expect(errors).toEqual([]);
-    expect(targets).toEqual([]);
-  });
-
-  test("a .yaml suffix is an error, never a silent drop from the matrix", () => {
-    const { errors } = centralTargets(OWNER, [file("alpha.yaml")], DIR);
-    expect(errors).toHaveLength(1);
-    expect(errors[0]).toContain("settings/repos/alpha.yaml");
-    expect(errors[0]).toContain(".yml suffix");
-  });
-
-  test("an owner subdirectory is an error, never a silent drop from the matrix", () => {
-    const { errors } = centralTargets(OWNER, [{ name: "other-org", isDirectory: true }], DIR);
-    expect(errors).toHaveLength(1);
-    expect(errors[0]).toContain("settings/repos/other-org");
-    expect(errors[0]).toContain("owner subdirectories");
+describe("selfTarget", () => {
+  test("the operator repo becomes a plain unredacted row", () => {
+    expect(selfTarget("Vivswan/repo-platform")).toEqual({
+      repo: "Vivswan/repo-platform",
+      name: "repo-platform",
+      redact_name: false,
+      hide_details: false,
+      verify: "",
+    });
   });
 });
 
 describe("buildMatrix", () => {
-  const central: Target[] = [centralTarget("Vivswan/central")];
-
-  test("merges central and in-repo targets sorted by repo", () => {
-    expect(buildMatrix(central, [publicRow("Vivswan/zeta"), publicRow("Vivswan/alpha")])).toEqual([
-      { ...centralTarget("Vivswan/alpha"), home: "in-repo" },
-      centralTarget("Vivswan/central"),
-      { ...centralTarget("Vivswan/zeta"), home: "in-repo" },
-    ]);
+  test("merges the rows and the self target sorted by repo", () => {
+    expect(
+      buildMatrix(
+        [publicRow("Vivswan/zeta"), publicRow("Vivswan/alpha")],
+        selfTarget("Vivswan/repo-platform"),
+      ),
+    ).toEqual([target("Vivswan/alpha"), target("Vivswan/repo-platform"), target("Vivswan/zeta")]);
   });
 
-  test("the central home wins when a slug appears in both lists", () => {
-    expect(buildMatrix(central, [publicRow("Vivswan/central")])).toEqual(central);
+  test("the self target wins when its slug also appears as a row", () => {
+    expect(
+      buildMatrix([publicRow("Vivswan/repo-platform")], selfTarget("Vivswan/repo-platform")),
+    ).toEqual([target("Vivswan/repo-platform")]);
   });
 
-  test("a duplicated in-repo slug yields one entry", () => {
-    expect(buildMatrix([], [publicRow("Vivswan/alpha"), publicRow("Vivswan/alpha")])).toEqual([
-      { ...centralTarget("Vivswan/alpha"), home: "in-repo" },
+  test("a duplicated slug yields one entry, folding case like GitHub", () => {
+    expect(buildMatrix([publicRow("Vivswan/alpha"), publicRow("VIVSWAN/Alpha")], null)).toEqual([
+      target("Vivswan/alpha"),
     ]);
   });
 
@@ -93,29 +71,17 @@ describe("buildMatrix", () => {
       display: "h**-s**r",
       verify: "deadbeef",
     };
-    const matrix = buildMatrix([], [row]);
+    const matrix = buildMatrix([row], null);
     expect(matrix).toEqual([
       {
         repo: "h**-s**r",
         name: "h**-s**r",
-        home: "in-repo",
         redact_name: true,
+        hide_details: true,
         verify: "deadbeef",
       },
     ]);
     expect(JSON.stringify(matrix)).not.toContain("hidden-server");
-  });
-
-  test("central-wins dedupe matches a redacted row on its real slug", () => {
-    const row: EnrichedRow = {
-      repo: "Vivswan/central",
-      channel: "",
-      redact_name: true,
-      hide_details: true,
-      display: "c**-p**e",
-      verify: "deadbeef",
-    };
-    expect(buildMatrix(central, [row])).toEqual(central);
   });
 
   test("a self-disclosed private row keeps its committed name", () => {
@@ -127,60 +93,20 @@ describe("buildMatrix", () => {
       display: "Vivswan/committed-private",
       verify: "",
     };
-    expect(buildMatrix([], [row])).toEqual([
-      {
-        repo: "Vivswan/committed-private",
-        name: "committed-private",
-        home: "in-repo",
-        redact_name: false,
-        verify: "",
-      },
-    ]);
+    // The NAME is disclosed but the content is not: hide_details must
+    // survive the matrix, or the pre-action render and merge steps print
+    // this repo's own label and ruleset names into a public log.
+    expect(buildMatrix([row], null)).toEqual([target("Vivswan/committed-private", true)]);
   });
 
   test("no targets is an empty matrix, not an error", () => {
-    expect(buildMatrix([], [])).toEqual([]);
-  });
-});
-
-describe("buildMatrix case folding", () => {
-  test("central wins over an in-repo row differing only by case", () => {
-    const central = [
-      {
-        repo: "Vivswan/alpha",
-        name: "alpha",
-        home: "central" as const,
-        redact_name: false,
-        verify: "",
-      },
-    ];
-    const inRepo: EnrichedRow[] = [
-      {
-        repo: "VIVSWAN/Alpha",
-        channel: "",
-        redact_name: false,
-        hide_details: false,
-        display: "VIVSWAN/Alpha",
-        verify: "",
-      },
-    ];
-    const matrix = buildMatrix(central, inRepo);
-    expect(matrix).toHaveLength(1);
-    expect(matrix[0].home).toBe("central");
+    expect(buildMatrix([], null)).toEqual([]);
   });
 });
 
 describe("applyOnly", () => {
-  const central = [
-    {
-      repo: "Vivswan/alpha",
-      name: "alpha",
-      home: "central" as const,
-      redact_name: false,
-      verify: "",
-    },
-  ];
-  const inRepo: EnrichedRow[] = [
+  const self = selfTarget("Vivswan/repo-platform");
+  const rows: EnrichedRow[] = [
     {
       repo: "Vivswan/beta",
       channel: "",
@@ -199,21 +125,21 @@ describe("applyOnly", () => {
     },
   ];
 
-  test("keeps only the requested central target", () => {
-    const scoped = applyOnly(central, inRepo, "Vivswan/alpha");
-    expect(scoped.central).toHaveLength(1);
-    expect(scoped.inRepo).toHaveLength(0);
+  test("keeps only the requested self target", () => {
+    const scoped = applyOnly(rows, self, "vivswan/REPO-PLATFORM");
+    expect(scoped.self).toEqual(self);
+    expect(scoped.rows).toHaveLength(0);
   });
 
-  test("matches in-repo rows case-insensitively on the real slug", () => {
-    const scoped = applyOnly(central, inRepo, "vivswan/GAMMA");
-    expect(scoped.central).toHaveLength(0);
-    expect(scoped.inRepo.map((r) => r.repo)).toEqual(["Vivswan/gamma"]);
+  test("matches rows case-insensitively on the real slug", () => {
+    const scoped = applyOnly(rows, self, "vivswan/GAMMA");
+    expect(scoped.self).toBeNull();
+    expect(scoped.rows.map((r) => r.repo)).toEqual(["Vivswan/gamma"]);
   });
 
-  test("an unknown repo scopes both lists to empty", () => {
-    const scoped = applyOnly(central, inRepo, "Vivswan/nope");
-    expect(scoped.central).toHaveLength(0);
-    expect(scoped.inRepo).toHaveLength(0);
+  test("an unknown repo scopes everything to empty", () => {
+    const scoped = applyOnly(rows, self, "Vivswan/nope");
+    expect(scoped.self).toBeNull();
+    expect(scoped.rows).toHaveLength(0);
   });
 });

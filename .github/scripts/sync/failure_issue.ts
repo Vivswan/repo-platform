@@ -39,7 +39,18 @@ const runUrl = requireEnv("RUN_URL");
 const runnerTemp = requireEnv("RUNNER_TEMP");
 const repository = requireEnv("GITHUB_REPOSITORY");
 
-const ISSUE_TITLE = "[automated] repo-platform sync: private failure report";
+// One title per REPORTING WORKFLOW. The issue is matched by exact title,
+// so a shared one lets an unrelated green run resolve a report the other
+// workflow is still failing on - the settings apply and the template sync
+// fail for different reasons and recover independently.
+const ISSUE_TITLE =
+  env("REPORT_TITLE") !== ""
+    ? env("REPORT_TITLE")
+    : "[automated] repo-platform sync: private failure report";
+/** What FAILED, in the report's own words. Follows the title so the two
+ *  cannot describe different workflows: a settings report that says "push
+ *  sync" sends the reader to the wrong run. */
+const REPORT_KIND = env("REPORT_KIND") !== "" ? env("REPORT_KIND") : "push sync";
 // gh's stderr accumulates here, captured and never printed: it embeds the
 // request path and API message.
 let errlog = "";
@@ -208,7 +219,7 @@ if (mode === "deliver") {
   const fence = "`".repeat(fenceLen);
 
   const sections: string[] = [
-    `The push sync from \`${repository}\` failed for this repository, and no sync PR exists to carry the hidden diagnostics, so the captured output lands here instead (this repo's issues are as private as the repo).`,
+    `The ${REPORT_KIND} from \`${repository}\` failed for this repository, and nothing else carries the hidden diagnostics, so the captured output lands here instead (this repo's issues are as private as the repo).`,
     "",
     `Run: ${runUrl}`,
   ];
@@ -226,7 +237,7 @@ if (mode === "deliver") {
   }
   sections.push(
     "",
-    `This issue is reused by every sync run: each delivery replaces the body (earlier reports stay in the edit history), open means the sync needs attention, and the next fully healthy run closes it. Local reproduction: https://github.com/${repository}/blob/main/docs/private-repos.md`,
+    `This issue is reused by every ${REPORT_KIND} run: each delivery replaces the body (earlier reports stay in the edit history), open means the ${REPORT_KIND} needs attention, and the next fully healthy run closes it. Local reproduction: https://github.com/${repository}/blob/main/docs/private-repos.md`,
   );
   writeFileSync(bodyFile, `${sections.join("\n")}\n`);
 
@@ -296,7 +307,7 @@ if (found === "" || found.split(" ")[1] !== "open") {
 }
 writeFileSync(
   bodyFile,
-  `Healthy: the push sync from \`${repository}\` completed cleanly as of ${runUrl}. The last failure report is in this issue's edit history.\n`,
+  `Healthy: the ${REPORT_KIND} from \`${repository}\` completed cleanly as of ${runUrl}. The last failure report is in this issue's edit history.\n`,
 );
 const close = gh(
   [

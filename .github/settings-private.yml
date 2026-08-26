@@ -1,0 +1,15 @@
+---
+# Layer 2 of the settings merge, applied to PRIVATE repositories only
+# (docs/settings.md).
+#
+# The marker label github-settings-as-code's private reporting pins its
+# report issue with. The central apply redacts private targets and injects
+# the label into its managed set automatically; the settings-sync
+# self-apply is never redacted and injects nothing - so this layer
+# declares it, keeping the self-apply from deleting what the next central
+# run recreates.
+
+labels:
+  - name: settings-as-code-report
+    color: "0e2a47"
+    description: managed by settings-as-code private reporting - do not remove

@@ -1,0 +1,47 @@
+---
+# Layer 1 of the settings merge: the fleet-wide defaults every managed
+# repository starts from. Everything here is OVERRIDABLE - a repository's
+# own .github/settings.yml wins over it. Invariants a repository must not
+# be able to weaken live in .github/settings-override.yml, which merges
+# ABOVE the repo layer.
+#
+# The full merge order (low to high) and the dialect are in
+# docs/settings.md. Identity keys (description, homepage, topics,
+# private) never appear in any fleet layer: they are per-repo and live in
+# the repository's own settings.yml.
+#
+# This is a plain settings-as-code document, like every other layer: no
+# key here is special to the merge, and no code derives content from it.
+
+repository:
+  has_issues: true
+  has_wiki: false
+  has_projects: false
+  has_discussions: false
+  default_branch: main
+  delete_branch_on_merge: true
+  allow_update_branch: true
+  enable_automated_security_fixes: true
+
+# The unconditional labels: dependabot's base pair first (the base
+# dependabot.yml always carries the github-actions ecosystem, and
+# dependabot recreates its labels when missing, so leaving either
+# undeclared would loop delete/recreate nightly), then the triage trio.
+# Per-ecosystem dependabot labels come from the toolchain modules' own
+# settings.yml layers.
+labels:
+  - name: dependencies
+    color: "0366d6"
+    description: Dependency updates
+  - name: github_actions
+    color: "000000"
+    description: Pull requests that update GitHub Actions code
+  - name: bug
+    color: "d73a4a"
+    description: Something isn't working
+  - name: enhancement
+    color: "a2eeef"
+    description: New feature or request
+  - name: fix-lint
+    color: "fbca04"
+    description: Lint / formatting fixes

@@ -10,9 +10,9 @@
 #   repo's recorded copier answer.
 # - Modules are NOT fleet config: each repo selects them in its own
 #   .repo-platform.yml.
-# - Settings home: settings/repos/<name>.yml here (central) or the
-#   repo's own .github/settings.yml (file presence is the opt-in; a
-#   central file wins).
+# - Settings: selecting the settings-sync module in .repo-platform.yml
+#   opts a repo into the managed baseline + its own .github/settings.yml
+#   (docs/settings.md).
 
 managed:
   - "*"

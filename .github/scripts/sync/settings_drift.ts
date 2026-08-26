@@ -1,13 +1,12 @@
 // Guards the sync's adopt semantics: live visibility and description feed
 // the render on purpose (the visibility-gated renders - CONTRIBUTING.md,
-// CODE_OF_CONDUCT.md, the CodeQL and dependency-review jobs - and
-// settings.yml must follow the repo's real state), so a value
-// changed out-of-band in the GitHub UI would ride a clean sync PR into
-// the rendered files and
-// auto-merge into declared truth: exactly the drift the nightly settings
-// heal exists to revert. This script compares the live values against the
-// answers recorded in the target's .copier-answers.yml. On a mismatch it
-// emits one ::warning:: per drifted field and writes a PR-body section;
+// CODE_OF_CONDUCT.md, the CodeQL and dependency-review jobs - must follow
+// the repo's real state), so a value changed out-of-band in the GitHub UI
+// would ride a clean sync PR into the rendered files and auto-merge into
+// declared truth: exactly the drift the nightly settings heal exists to
+// revert. This script compares the live values against the answers
+// recorded in the target's .copier-answers.yml. On a mismatch it emits
+// one ::warning:: per drifted field and writes a PR-body section;
 // open_pr.ts prepends that section and keeps auto-merge off, so ratifying
 // the change stays a human decision. A field the answers file does not
 // record is skipped (nothing to drift from; the sync adopts it), but a
@@ -16,24 +15,27 @@
 //
 // Usage:
 //   bun .github/scripts/sync/settings_drift.ts --answers <file>
-//     --repo <owner/name> --central-dir <settings/repos dir>
+//     --repo <owner/name>
 //     --in-repo-settings <target's .github/settings.yml path>
 //     --live-private <true|false> --live-description <text>
 //     --summary <out-file>
 //
-// What merging ratifies depends on which settings home the repo has, so
-// the PR body says something different for each (see driftSummary): a
-// central file outranks the merge, an in-repo settings.yml is what the
-// heal enforces afterwards, and a repo with neither home has nothing
-// enforcing its settings at all.
+// What merging ratifies depends on whether the repo opts into managed
+// settings - the settings-sync module in its .repo-platform.yml, read
+// from the registration file at the settings path's repo root - so the
+// PR body says something different for managed and unmanaged repos (see
+// driftSummary): a managed repo's nightly heal enforces the centrally
+// assembled baseline with its own settings.yml merged over it, an
+// unmanaged repo has nothing enforcing its settings at all.
 //
 // The summary file is written empty when nothing drifted, and its size is
 // the single source of truth for "this PR needs review" (open_pr.ts tests
 // it). Errors print as ::error:: workflow commands (on stdout, where the
 // runner parses them) with a nonzero exit.
 
-import { existsSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { selectsSettingsSync } from "../fleet/build_settings_matrix.ts";
 import { parseFlags } from "../shared/flags.ts";
 import { escapeData, fail } from "../shared/gha.ts";
 import { AnswersFileError, type CopierAnswers, readAnswersFile } from "./answers_file.ts";
@@ -41,7 +43,6 @@ import { AnswersFileError, type CopierAnswers, readAnswersFile } from "./answers
 const FLAGS = [
   "--answers",
   "--repo",
-  "--central-dir",
   "--in-repo-settings",
   "--live-private",
   "--live-description",
@@ -60,10 +61,6 @@ export interface Drift {
   recorded: string;
   live: string;
 }
-
-// Which file, if any, an apply run enforces this repo's settings from.
-// Central wins over in-repo where both exist (docs/settings.md).
-export type SettingsHome = "central" | "in-repo" | "none";
 
 // GitHub cannot store a real newline in a description, but the value
 // arrives through a heredoc-shaped step output, so a trailing newline is
@@ -112,50 +109,53 @@ function show(value: string): string {
   return JSON.stringify(value);
 }
 
-export function driftSummary(repo: string, drifts: Drift[], home: SettingsHome): string {
+export function driftSummary(repo: string, drifts: Drift[], managed: boolean): string {
   if (drifts.length === 0) {
     return "";
   }
-  const name = repo.split("/").pop() ?? repo;
   const changes = drifts
     .map((d) => `> - \`${d.field}\`: ${show(d.recorded)} -> ${show(d.live)} (recorded -> live)`)
     .join("\n");
-  const revert =
-    home === "none"
-      ? `> To revert instead, flip the setting back in the GitHub UI, then
-> re-run the sync for a clean PR.`
-      : `> To revert instead, flip the setting back in the GitHub UI or run
-> the settings-repos heal, then re-run the sync for a clean PR.`;
-  const consequence: Record<SettingsHome, string> = {
-    central: `> Merging this PR writes the live values into the recorded answers
-> and the rendered files, but it does NOT make them the enforced
-> settings: ${repo} is centrally homed, and
-> \`settings/repos/${name}.yml\` in repo-platform wins regardless.
-> Make the change, or the revert, in that central file.`,
-    "in-repo": `> Merging this PR RATIFIES the live values: they become the recorded
-> answers and are re-rendered into the repo's files. Its own
-> \`.github/settings.yml\` is what the nightly settings heal enforces,
-> so check that this merge leaves that file saying what you want.
-${revert}`,
-    none: `> Merging this PR records the live values as ${repo}'s answers and
+  const revert = managed
+    ? `> To revert instead, flip the setting back in the GitHub UI or run
+> the settings-repos heal, then re-run the sync for a clean PR.`
+    : `> To revert instead, flip the setting back in the GitHub UI, then
+> re-run the sync for a clean PR.`;
+  const consequence = managed
+    ? `> Merging this PR records the live values as the answers and
+> re-renders the answer-derived files - but it does NOT decide the
+> enforced settings. What the nightly heal does next depends on the
+> \`.github/settings.yml\` this branch leaves behind (the sync may have
+> created it here from the live values):
+>
+> - it declares the drifted key: the heal enforces THAT value, so a
+>   declaration of the old value reverts the live change.
+> - it omits the key: the heal leaves the live value alone; the key
+>   stays unmanaged.
+> - the branch has no settings.yml at all: the apply skips this
+>   repository entirely until one exists.
+>
+> So check that file on this branch and declare the value you want
+> enforced.
+${revert}`
+    : `> Merging this PR records the live values as ${repo}'s answers and
 > re-renders from them. Nothing enforces them either way: the repo
-> has no settings home (no \`settings/repos/${name}.yml\` here, no
-> \`.github/settings.yml\` of its own), so no apply run reverts this.
-${revert}`,
-  };
+> does not select the settings-sync module (its \`.repo-platform.yml\`
+> is the opt-in to managed settings), so no apply run reverts this.
+${revert}`;
   return `> [!WARNING]
 > OUT-OF-BAND SETTINGS CHANGE: ${repo}'s live settings no longer
 > match the answers recorded in its .copier-answers.yml:
 >
 ${changes}
 >
-${consequence[home]}
+${consequence}
 > Auto-merge is off until this is settled.`;
 }
 
 // The log line deliberately does not say what merging ratifies: that
-// depends on the settings home, and driftSummary is the one place that
-// decides it. Two descriptions would drift apart.
+// depends on the opt-in, and driftSummary is the one place that decides
+// it. Two descriptions would drift apart.
 export function driftWarnings(repo: string, drifts: Drift[], hideDetails = false): string[] {
   return drifts.map((d) =>
     hideDetails
@@ -211,14 +211,20 @@ function main(args: string[]): void {
       ),
     );
   }
-  const name = repo.split("/").pop() ?? repo;
-  const home: SettingsHome = existsSync(join(flags["--central-dir"], `${name}.yml`))
-    ? "central"
-    : existsSync(flags["--in-repo-settings"])
-      ? "in-repo"
-      : "none";
+  // The opt-in signal, read from the registration file at the settings
+  // path's repo root (target/.github/settings.yml -> target/
+  // .repo-platform.yml): an unreadable or opt-out selection tells the
+  // unmanaged story. selectsSettingsSync is the same parse the fleet
+  // selector uses, so the two opt-in readings cannot drift apart.
+  const registrationPath = join(
+    dirname(dirname(flags["--in-repo-settings"])),
+    ".repo-platform.yml",
+  );
+  const managed =
+    existsSync(registrationPath) &&
+    selectsSettingsSync(readFileSync(registrationPath, "utf-8")) === true;
 
-  writeFileSync(flags["--summary"], driftSummary(repo, drifts, home));
+  writeFileSync(flags["--summary"], driftSummary(repo, drifts, managed));
   if (drifts.length === 0) {
     console.log(`${display}: live settings match the recorded answers; no out-of-band drift.`);
     return;

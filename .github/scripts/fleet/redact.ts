@@ -21,16 +21,14 @@
 // redaction decision per row. Fail closed: a repo whose discovery entry
 // does not positively say `private: false` is treated as private. A
 // private repo whose name is already committed in this public repository
-// (an explicit/exclude/config entry in repos.yml, or a
-// settings/repos/<name>.yml file) is self-disclosed: its name stays
-// visible - hinting a committed name would be theater - but its details
-// are still hidden (redact_name=false, hide_details=true).
+// (an explicit/exclude/config entry in repos.yml) is self-disclosed: its
+// name stays visible - hinting a committed name would be theater - but
+// its details are still hidden (redact_name=false, hide_details=true).
 //
 // Usage:
 //   bun .github/scripts/fleet/redact.ts hint <name>
 //   bun .github/scripts/fleet/redact.ts enrich --selection <selection.json>
 //     --discovered <discovered.json> [--registry repos.yml]
-//     [--central-dir settings/repos]
 //
 // `enrich` needs PAT and GITHUB_RUN_ID in the environment. It prints
 // {rows}: one row per selection entry, in order, as
@@ -40,8 +38,7 @@
 // commands (on stdout, where the runner parses them) with a nonzero exit.
 
 import { createHmac } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { readFileSync } from "node:fs";
 import { z } from "zod";
 import { parseFlags } from "../shared/flags.ts";
 import { fail } from "../shared/gha.ts";
@@ -317,18 +314,13 @@ function main(args: string[]): void {
       return;
     }
     case "enrich": {
-      const flags = parseFlags(
-        rest,
-        ["--selection", "--discovered"],
-        ["--registry", "--central-dir"],
-      );
+      const flags = parseFlags(rest, ["--selection", "--discovered"], ["--registry"]);
       const pat = process.env.PAT;
       const runId = process.env.GITHUB_RUN_ID;
       if (!pat || !runId) {
         fail("enrich needs PAT and GITHUB_RUN_ID in the environment");
       }
       const registryPath = flags["--registry"] ?? "repos.yml";
-      const centralDir = flags["--central-dir"] ?? "settings/repos";
       const { registry, errors } = loadRegistry(readFileSync(registryPath, "utf-8"), registryPath);
       if (registry === null) {
         fail(errors);
@@ -338,9 +330,7 @@ function main(args: string[]): void {
           slug.toLowerCase(),
         ),
       );
-      const isSelfDisclosed = (slug: string) =>
-        committed.has(slug.toLowerCase()) ||
-        existsSync(join(centralDir, `${slug.split("/").pop() ?? slug}.yml`));
+      const isSelfDisclosed = (slug: string) => committed.has(slug.toLowerCase());
       const result = enrich(
         loadSelection(flags["--selection"]),
         loadDiscovered(flags["--discovered"]),

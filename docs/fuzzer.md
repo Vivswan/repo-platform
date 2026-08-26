@@ -16,7 +16,7 @@ The issue filing and closing come from the `fuzz-issue` composite action in this
 
 The label is asked as a copier question, rather than left as an edit in the starter, because the report and resolve steps must agree on it. The question's validator also rejects the label names the template already manages (the settings baseline, the release labels, the dependabot labels; GitHub label names are case-insensitive): reusing one would let a green night close unrelated issues carrying it and make every settings apply fight over the label's color and description. The validator runs on `copier update` too, so a repo whose recorded label later becomes reserved fails its next sync until the recorded `fuzzer_label` value in `.copier-answers.yml` is changed (and the starter's `label:` inputs with it, per the renaming section below).
 
-One more place must know the label: the repository's settings labels. Settings applies delete undeclared labels, and a tracking issue stripped of its label is invisible to both the dedup and the auto-close. With the settings-sync module the rendered settings.yml declares it automatically; a repo on central settings (a `settings/repos/<name>.yml` in repo-platform) must carry the label there by hand.
+One more place must know the label: the repository's settings labels. Settings applies delete undeclared labels, and a tracking issue stripped of its label is invisible to both the dedup and the auto-close. The managed settings baseline declares it automatically: repo-platform resolves the recorded `fuzzer_label` answer when it computes the repo's label roster at apply time (docs/settings.md).
 
 ## Customizing the starter
 
@@ -55,9 +55,9 @@ A coverage-guided fuzzer that found a crash yesterday can miss it today, so one 
 
 ## Renaming the label, deselecting the module
 
-Two lifecycle edges follow from the starter being repo-owned while the label declaration is template-rendered:
+Two lifecycle edges follow from the starter being repo-owned while the label reaches settings from the recorded answer, read fresh on every apply:
 
-- Renaming `fuzzer_label` (a copier answer) updates the settings-sync label declaration on the next sync, but never the repo-owned `nightly-fuzz.yml`. The rename itself is a default-branch PR editing the `fuzzer_label` value key in `.copier-answers.yml` (the sync loads recorded values from there; the underscore keys stay untouched). Update the two `label:` inputs there in the same change, or the workflow keeps filing under the old name while the settings apply deletes it.
+- Renaming `fuzzer_label` (a copier answer) changes the label the NEXT settings apply declares - no sync is needed, because the apply reads the recorded answer rather than a rendered declaration - but never the repo-owned `nightly-fuzz.yml`. The rename itself is a default-branch PR editing the `fuzzer_label` value key in `.copier-answers.yml` (the sync loads recorded values from there; the underscore keys stay untouched). Update the two `label:` inputs there in the same change, or the workflow keeps filing under the old name while the settings apply deletes it.
 - Deselecting the module removes the label declaration, but `_skip_if_exists` files are never deleted by sync: the nightly workflow keeps running. When you drop the module, also delete `.github/workflows/nightly-fuzz.yml` (or keep the label declared in your settings if you keep the workflow).
 
 ## Sharding

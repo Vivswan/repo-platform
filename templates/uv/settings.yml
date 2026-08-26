@@ -1,0 +1,8 @@
+---
+# The uv module's settings layer (layer 3 of the settings merge,
+# docs/settings.md): merged for every repository that selects the module.
+
+labels:
+  - name: python:uv
+    color: "2b67c6"
+    description: Pull requests that update python:uv code

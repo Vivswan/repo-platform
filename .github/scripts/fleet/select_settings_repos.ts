@@ -1,12 +1,12 @@
 #!/usr/bin/env bun
 // Discovers the settings targets and builds the per-repo apply matrix
-// for settings-repos.yml. In-repo targets are enrolled repos (the fleet
-// token can push - probed, since user/repos' permissions field reflects
-// the USER, not the token), adopted (.repo-platform.yml on the default
-// branch), and carrying their own .github/settings.yml - no module
-// required, the file is the signal. A central settings/repos/<name>.yml
-// wins and drops the repo from the remote list; the matrix carries both
-// homes, one entry per repo (build_settings_matrix.ts).
+// for settings-repos.yml. A target is an enrolled repo (the fleet token
+// can push - probed, since user/repos' permissions field reflects the
+// USER, not the token) that is adopted AND selects the settings-sync
+// module in its .repo-platform.yml - the module selection is the opt-in
+// to centrally managed settings. The operator repository itself is always
+// a target (build_settings_matrix.ts's --self row; its baseline facts
+// come from .repo-platform-answers.yml).
 //
 // One repo's flaky probe must never block the heal for the rest of the
 // fleet: every probe is retried, and a repo whose probes still return no
@@ -19,18 +19,20 @@
 // probes print the display, captured error text is scrubbed of the slug,
 // and a redacted matrix row carries the hint plus an HMAC tag instead of
 // the slug. No ::add-mask:: here - the runner drops a job output holding
-// a masked substring, which would kill the matrix. Central-file repos and
-// repos.yml-excluded repos keep their committed (self-disclosed) names.
+// a masked substring, which would kill the matrix. repos.yml-excluded
+// repos keep their committed (self-disclosed) names.
 //
-// Env: PAT, GH_TOKEN, GITHUB_RUN_ID, OWNER, RUNNER_TEMP, GITHUB_OUTPUT;
-// GITHUB_STEP_SUMMARY (optional) receives a copy of every warning;
-// GITHUB_EVENT_PATH supplies the single-repo dispatch input (a non-empty
-// ONLY_REPO env overrides it - the test harness and local runs use that).
+// Env: PAT, GH_TOKEN, GITHUB_RUN_ID, GITHUB_REPOSITORY, OWNER,
+// RUNNER_TEMP, GITHUB_OUTPUT; GITHUB_STEP_SUMMARY (optional) receives a
+// copy of every warning; GITHUB_EVENT_PATH supplies the single-repo
+// dispatch input (a non-empty ONLY_REPO env overrides it - the test
+// harness and local runs use that).
 
-import { appendFileSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { env, notice, requireEnv, setOutput } from "../shared/gha.ts";
 import { parseJson } from "../shared/json.ts";
+import { selectsSettingsSync } from "./build_settings_matrix.ts";
 import {
   captureNetwork,
   discoverOwnerRepos,
@@ -46,6 +48,7 @@ import { type EnrichedRow, parseEnriched } from "./redact.ts";
 const runnerTemp = requireEnv("RUNNER_TEMP");
 const pat = requireEnv("PAT");
 const owner = requireEnv("OWNER");
+const selfRepo = requireEnv("GITHUB_REPOSITORY");
 
 // A bare name gets the fleet owner prefixed; the read-and-fold rationale
 // lives with readDispatchRepo.
@@ -87,45 +90,39 @@ function probePush(slug: string, display: string): ProbeResult {
   return { detail: `HTTP ${String(code).padStart(3, "0")}` };
 }
 
-// Only a 404 means "not adopted"; any other API failure is a non-answer.
-function probeAdoption(slug: string, display: string): ProbeResult {
+// The opt-in probe: the repo's .repo-platform.yml must exist (adopted) and
+// select the settings-sync module. Only a 404 means "not adopted"; any
+// other API failure is a non-answer. A repo without the module is a
+// routine, deliberate skip (notice level); an unreadable modules list is a
+// repo defect worth a warning - its settings stay unmanaged until fixed.
+function probeOptIn(slug: string, display: string): ProbeResult {
   const probe = captureNetwork([
     "gh",
     "api",
     `repos/${slug}/contents/.repo-platform.yml`,
-    "--silent",
+    "-H",
+    "Accept: application/vnd.github.raw",
   ]);
-  if (probe.exitCode === 0) return "pass";
-  if (/HTTP 404/.test(probe.stderr)) {
-    notice(
-      notAdoptedNotice(
-        display,
-        "If it carries .github/settings.yml, the central nightly heal no longer applies it.",
-      ),
+  if (probe.exitCode === 0) {
+    const optedIn = selectsSettingsSync(probe.stdout);
+    if (optedIn === true) return "pass";
+    if (optedIn === false) {
+      notice(
+        `${display}: skipped - its .repo-platform.yml does not select the settings-sync ` +
+          "module, the opt-in to centrally managed settings (docs/settings.md). Nothing " +
+          "installs or heals its rulesets or labels.",
+      );
+      return "drop";
+    }
+    warn(
+      `${display}: its .repo-platform.yml has no readable top-level modules list, so the ` +
+        "settings opt-in cannot be determined - the repo is skipped and its settings stay " +
+        "unmanaged until the file is fixed.",
     );
     return "drop";
   }
-  return { detail: probe.stderr.replace(/\n+$/, "") };
-}
-
-// Same 404-vs-failure split for the settings file itself. centralRef
-// names the central file the warning may reference - the literal
-// placeholder form for a redacted repo, whose bare name must not appear.
-function probeSettings(slug: string, display: string, centralRef: string): ProbeResult {
-  const probe = captureNetwork([
-    "gh",
-    "api",
-    `repos/${slug}/contents/.github/settings.yml`,
-    "--jq",
-    ".sha",
-  ]);
-  if (probe.exitCode === 0) return "pass";
   if (/HTTP 404/.test(probe.stderr)) {
-    // The central file was already ruled out above, so at this point
-    // nothing manages the repo's settings.
-    warn(
-      `${display} is enrolled and adopted but has no settings home: no ${centralRef} here and no .github/settings.yml in the repo. Its settings are unmanaged - nothing installs or heals the main ruleset (so all-green may not be a required check) and labels are never reconciled. Pick a home per docs/settings.md.`,
-    );
+    notice(notAdoptedNotice(display, "The settings heal only manages adopted repos."));
     return "drop";
   }
   return { detail: probe.stderr.replace(/\n+$/, "") };
@@ -142,14 +139,13 @@ const ATTEMPTS = 3;
 const RETRY_DELAY_MS = Number(env("PROBE_RETRY_DELAY_MS", "5000"));
 async function probe(
   label: string,
-  fn: (slug: string, display: string, centralRef: string) => ProbeResult,
+  fn: (slug: string, display: string) => ProbeResult,
   slug: string,
   display: string,
-  centralRef: string,
 ): Promise<boolean> {
   let detail = "";
   for (let attempt = 1; attempt <= ATTEMPTS; attempt++) {
-    const result = fn(slug, display, centralRef);
+    const result = fn(slug, display);
     if (result === "pass") return true;
     if (result === "drop") return false;
     detail = scrubSlug(result.detail, slug, display);
@@ -205,30 +201,26 @@ const enriched = parseEnriched(
   "select_settings_repos: enriched rows",
 );
 
-// Central filenames matched case-insensitively, like GitHub slugs (the
-// checkout's filesystem may or may not fold case itself).
-const centralNames = new Set(readdirSync("settings/repos").map((entry) => entry.toLowerCase()));
-const inRepoTargets: EnrichedRow[] = [];
+const targets: EnrichedRow[] = [];
 for (const row of enriched.rows) {
   if (onlyRepo !== "" && row.repo.toLowerCase() !== onlyRepo) continue;
   const { repo, display } = row;
-  const name = repo.split("/").pop() ?? repo;
-  const centralRef = row.redact_name ? "settings/repos/<name>.yml" : `settings/repos/${name}.yml`;
-  if (centralNames.has(`${name.toLowerCase()}.yml`)) continue;
-  if (!(await probe("push-permission probe", probePush, repo, display, centralRef))) continue;
-  if (!(await probe("adoption check", probeAdoption, repo, display, centralRef))) continue;
-  if (!(await probe("settings.yml check", probeSettings, repo, display, centralRef))) continue;
-  inRepoTargets.push(row);
+  // The operator repo rides in as the matrix builder's --self row (it is
+  // not adopted, so the opt-in probe would drop it here).
+  if (repo.toLowerCase() === selfRepo.toLowerCase()) continue;
+  if (!(await probe("push-permission probe", probePush, repo, display))) continue;
+  if (!(await probe("settings opt-in check", probeOptIn, repo, display))) continue;
+  targets.push(row);
 }
-writeFileSync(join(runnerTemp, "in_repo_targets.json"), JSON.stringify(inRepoTargets));
+writeFileSync(join(runnerTemp, "settings_targets.json"), JSON.stringify(targets));
 
 // repos.yml's exclude: pauses the sync AND this heal - the registry drops
 // excluded repos before the loop above ever sees them. When such a repo
-// still carries an in-repo settings.yml (and no central file has taken
-// over), say that the heal stopped instead of going quiet. Materialized
-// first so a registry failure fails the run instead of silently
-// skipping every exclusion warning. Excluded slugs are committed in
-// repos.yml - self-disclosed, so they print plainly.
+// still opts in via its .repo-platform.yml, say that the heal stopped
+// instead of going quiet. Materialized first so a registry failure fails
+// the run instead of silently skipping every exclusion warning. Excluded
+// slugs are committed in repos.yml - self-disclosed, so they print
+// plainly.
 runStage(
   ["bun", ".github/scripts/fleet/repos_registry.ts", "excluded"],
   join(runnerTemp, "excluded.json"),
@@ -241,21 +233,22 @@ const excluded = parseJson(
 // reminders belong to the full runs.
 const sweepable = onlyRepo === "" ? excluded : [];
 for (const repo of sweepable) {
-  const name = repo.split("/").pop() ?? repo;
-  // Central-file existence folds case via centralNames, like every other
-  // slug comparison: the exclusion's casing in repos.yml need not match
-  // the settings file's.
-  if (centralNames.has(`${name.toLowerCase()}.yml`)) continue;
   const probeResult = captureNetwork([
     "gh",
     "api",
-    `repos/${repo}/contents/.github/settings.yml`,
-    "--silent",
+    `repos/${repo}/contents/.repo-platform.yml`,
+    "-H",
+    "Accept: application/vnd.github.raw",
   ]);
   if (probeResult.exitCode === 0) {
-    warn(
-      `${repo} is excluded in repos.yml but still carries .github/settings.yml - the exclusion also pauses the central nightly heal for that file, so its settings can drift. If the pause is deliberate, this is the reminder that healing is off; otherwise remove the exclusion, or move the settings to settings/repos/${name}.yml here (central files are applied regardless of exclude).`,
-    );
+    if (selectsSettingsSync(probeResult.stdout) === true) {
+      warn(
+        `${repo} is excluded in repos.yml but its .repo-platform.yml still selects the ` +
+          "settings-sync module - the exclusion also pauses the central nightly settings " +
+          "heal, so its settings can drift. If the pause is deliberate, this is the " +
+          "reminder that healing is off; otherwise remove the exclusion.",
+      );
+    }
   } else if (!/HTTP 404/.test(probeResult.stderr)) {
     // A 404 also covers repos the token cannot read; those skip
     // silently. Anything else: this check is purely informational, so
@@ -272,22 +265,21 @@ for (const repo of sweepable) {
       detail = `${code ?? "no status"} (detail hidden: private repository)`;
     }
     console.log(
-      `::warning::settings.yml check for excluded repo ${repo} failed: ${detail} - cannot tell whether its pause left an in-repo settings file behind; continuing.`,
+      `::warning::settings opt-in check for excluded repo ${repo} failed: ${detail} - cannot tell whether its pause left managed settings behind; continuing.`,
     );
   }
 }
 
-// The matrix joins the probed in-repo list with the central files; a
-// builder failure (unreadable dir, a central file the per-repo scoping
-// cannot represent) invalidates the whole selection and exits 1.
+// The matrix joins the probed opt-in list with the operator repo's own
+// row; a builder failure invalidates the whole selection and exits 1.
 const matrix = Bun.spawnSync(
   [
     "bun",
     ".github/scripts/fleet/build_settings_matrix.ts",
-    "--owner",
-    owner,
-    "--in-repo",
-    join(runnerTemp, "in_repo_targets.json"),
+    "--targets",
+    join(runnerTemp, "settings_targets.json"),
+    "--self",
+    selfRepo,
     ...(onlyRepo === "" ? [] : ["--only", onlyRepo]),
   ],
   { stdout: "pipe", stderr: "inherit" },
@@ -298,20 +290,19 @@ if (matrix.exitCode !== 0) {
   process.stdout.write(matrix.stdout.toString());
   process.exit(matrix.exitCode ?? 1);
 }
-const targets = matrix.stdout.toString().replace(/\n$/, "");
-setOutput("targets", targets);
-const parsed = parseJson(targets, "select_settings_repos: settings matrix") as {
+const targetsJson = matrix.stdout.toString().replace(/\n$/, "");
+setOutput("targets", targetsJson);
+const parsed = parseJson(targetsJson, "select_settings_repos: settings matrix") as {
   repo: string;
-  home: string;
 }[];
 if (onlyRepo !== "" && parsed.length === 0) {
   // The input is echoed nowhere: the dispatcher typed it, and it may be
   // a private slug this public log must not print.
   console.log(
-    "::error::the repo input matches no settings target (matching ignores case): it must be an enrolled repo carrying .github/settings.yml or have a central settings/repos/<name>.yml file, and a repos.yml exclude pauses this heal for it",
+    "::error::the repo input matches no settings target (matching ignores case): it must be an enrolled, adopted repo whose .repo-platform.yml selects the settings-sync module (or this repository itself), and a repos.yml exclude pauses this heal for it",
   );
   process.exit(1);
 }
 console.log(
-  `settings targets: ${parsed.length === 0 ? "(none)" : parsed.map((t) => `${t.repo} [${t.home}]`).join(", ")}`,
+  `settings targets: ${parsed.length === 0 ? "(none)" : parsed.map((t) => t.repo).join(", ")}`,
 );

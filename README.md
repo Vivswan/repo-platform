@@ -27,19 +27,14 @@ This repo pushes updates to managed repos: sync PRs and settings changes origina
 ### Keeping repos in sync
 
 - The [sync-repos workflow](.github/workflows/sync-repos.yml) here runs on every release, on a weekly cron, and on manual dispatch. For each managed repo it runs `copier update`, validates the result, and pushes a branch + PR into the repo with the fleet PAT. PRs opened by a PAT trigger the target repo's CI and auto-assign normally.
-- Clean updates arm squash auto-merge on the PR, so it merges itself once the repo's `all-green` check passes. A PR that needs review stays manual: auto-resolved conflicts, withheld workflow files, failed validation, an update that deletes a license file (below-marker content does not survive a delete-vs-modify merge, so a human checks whether the deleted file held anything worth keeping), or a dispatch with `manual=true`, which holds every PR in the run for human review.
+- Clean updates arm squash auto-merge on the PR, so it merges itself once the repo's `all-green` check passes. A PR that needs review stays manual: auto-resolved conflicts, withheld workflow files, failed validation, an update that deletes a license file (below-marker content does not survive a delete-vs-modify merge, so a human checks whether the deleted file held anything worth keeping), a failed settings.yml layering transition, or a dispatch with `manual=true`, which holds every PR in the run for human review.
 - `repos.yml` decides which repos: a quoted `"*"` wildcard auto-discovers every owned, non-archived repo the PAT can WRITE to (granting the fleet PAT a repository is what enrolls it; fine-grained PATs can read every public repo, so read access alone means nothing), `exclude:` opts repos out, and a discovered repo is synced only once it carries `.repo-platform.yml` (unadopted repos are skipped with a notice).
 - Conflicts (local edits overlapping template changes) resolve in the template's favor: the PR lists the dropped local lines for review. The run stays green (auto-resolution is normal operation); validation failures still turn it red.
 - Recovery: when a repo's recorded `_commit` base is unusable (the sync fails with "no base to update from"), dispatch sync-repos with `recover=recopy` and `repo=<owner/name>`, or `repo=all` to recover every managed repo in one run. Each recovered repo gets a full re-render with no three-way merge, so local edits to template-managed files are overwritten; generated-once files and `.github/settings.yml` survive, and the sanctioned repository-local regions (the sentinel files' local-section tails, `.gitignore`'s LOCAL section, the prefix docs' repo-specific tails) are carried back from the repo's previous copies and listed in the PR body. A previous copy that cannot be split cleanly is kept in full below a marked recovery-appendix comment for manual reconciliation. Recovery always needs an explicit repo scope (a fat-fingered recover input without one is rejected) and the PRs always stay manual-review.
 
 ### Repository settings
 
-A repo's settings live in one of two homes, both applied from here by the [settings-repos workflow](.github/workflows/settings-repos.yml) through [github-settings-as-code](https://github.com/Vivswan/github-settings-as-code) (details in [docs/settings.md](docs/settings.md)):
-
-- Central: `settings/repos/<name>.yml` in this repo, with `settings/defaults.yml` deep-merged under every target.
-- In-repo: the repo's own `.github/settings.yml` - carrying the file is the whole opt-in. The `settings-sync` module is optional sugar on top: it seeds the file and adds push-time self-apply.
-
-A central file wins when both exist for the same repo, and the sync never deletes a repo's `.github/settings.yml`.
+Selecting the `settings-sync` module in a repo's `.repo-platform.yml` opts it into centrally managed settings, applied from here by the [settings-repos workflow](.github/workflows/settings-repos.yml) through [github-settings-as-code](https://github.com/Vivswan/github-settings-as-code) (details in [docs/settings.md](docs/settings.md)): settings are a six-layer merge of plain YAML documents computed per repository at apply time. The repo's own `.github/settings.yml` - a generated-once identity starter carrying its description, homepage, topics, visibility, and local overrides - merges over the fleet defaults and its selected modules' layers, and a fleet override layer merges above even that, carrying the invariants no repo may weaken (squash-only merging, the branch protection rulesets). The sync never deletes a repo's `.github/settings.yml`, and the module's rendered workflow adds optional push-time self-apply of the same merge.
 
 ### Credentials
 
@@ -62,7 +57,7 @@ A missing secret is a misconfiguration of this repo: sync and settings runs fail
 | `templates/` | SOURCE of the template: one folder per module (each with a `module.yml` manifest, the source of module identity) plus `base/`; shared files composed via `{# compose:<anchor> #}` markers filled from per-module `fragments/` or generated from manifest data |
 | `copier.yml` | Questions (module choices, toolchain defaults, and the tracking-label validators are generated regions fed by the `templates/<module>/module.yml` manifests; standards-only, project skeletons come from `uv init` / `bun init`) |
 | `repos.yml` | Fleet config: which repos are managed (wildcard + exclude) and which channel each follows |
-| `settings/` | Central settings home: `defaults.yml` (shared baseline) + `repos/<name>.yml` per repo ([docs](docs/settings.md)) |
+| `.github/settings-baseline.yml` | Layer 1 of the settings merge: the overridable fleet defaults. The visibility overlays and the fleet override sit beside it ([docs](docs/settings.md)) |
 | `.github/workflows/sync-repos.yml` | Push sync fan-out: release + weekly cron + dispatch, parallel matrix legs, one per repo |
 | `.github/workflows/settings-repos.yml` | Central settings apply across the fleet |
 | `.github/workflows/reusable-*.yml` | Reusable workflows: template-sync (the push-sync engine), auto-assign, codeql, pages ([docs](docs/pages.md)), apply-settings ([docs](docs/settings.md)) |

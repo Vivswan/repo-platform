@@ -51,8 +51,8 @@ const sources: AnswerSources = {
   usernameDefault: "Vivswan",
   copyrightDefault: "Vivswan Shah",
   skillsDirDefault: "skills",
-  centralDescription: "d",
-  centralPrivate: false,
+  settingsDescription: "d",
+  settingsPrivate: false,
   moduleNames: new Set(manifests.map((m) => m.module)),
 };
 
@@ -204,7 +204,7 @@ describe("answerMismatches", () => {
     expect(answerMismatches({ ...answers, copyright_holder: "X" }, sources)).toHaveLength(1);
   });
 
-  test("flags description/private drift from the central settings file", () => {
+  test("flags description/private drift from the in-repo settings file", () => {
     expect(answerMismatches({ ...answers, description: "X" }, sources)).toHaveLength(1);
     expect(answerMismatches({ ...answers, private: true }, sources)).toHaveLength(1);
   });

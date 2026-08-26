@@ -14,7 +14,7 @@
   "interface": {
     "displayName": "Repo Platform: New Project",
     "shortDescription": "Bring a repository under repo-platform fleet management.",
-    "longDescription": "Walks the creation or adoption of a repo-platform managed repository: native scaffold, copier template from the right channel ref, the questions that matter, publishing, PAT enrollment, and the settings home with its required labels.",
+    "longDescription": "Walks the creation or adoption of a repo-platform managed repository: native scaffold, copier template from the right channel ref, the questions that matter, publishing, PAT enrollment, and the settings-sync opt-in to managed settings.",
     "developerName": "Vivswan",
     "category": "Developer Tools",
     "capabilities": ["Read", "Edit", "Scaffold"],

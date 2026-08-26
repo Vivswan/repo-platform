@@ -12,7 +12,6 @@ import {
   gitignoreUpstreamMap,
   hasToolchainDefault,
   knownModules,
-  labelNames,
   markerLines,
   mdMarkers,
   moduleChoices,
@@ -41,7 +40,7 @@ import {
   trackingLabelValidator,
   trackingStreams,
 } from "../../scripts/generate";
-import type { ModuleManifest } from "../../scripts/module_manifests";
+import { loadManifests, type ModuleManifest } from "../../scripts/module_manifests";
 import { moduleOwnershipFiles, skipIfExistsMatchers } from "../../scripts/ownership";
 
 function manifest(module: string, extra: Partial<ModuleManifest> = {}): ModuleManifest {
@@ -245,70 +244,22 @@ describe("region builders", () => {
 
 describe("tracking-label validators", () => {
   const STREAMS = trackingStreams([FUZZER, NIGHTLY]);
-  const SETTINGS = [
-    "labels:",
-    "  - name: dependencies",
-    '    color: "0366d6"',
-    "    description: Dependency updates",
-    "{% if private %}  - name: settings-as-code-report",
-    '    color: "0e2a47"',
-    "    description: managed",
-    "{% endif -%}",
-    "{# compose:settings-labels #}",
-    "",
-  ].join("\n");
-  const FRAGMENT = [
-    '  - name: "autorelease: pending"',
-    '    color: "ededed"',
-    "    description: release PR awaiting merge",
-    "  - name: Release-Blocker",
-    '    color: "B60205"',
-    "    description: blocks releases",
-    "",
-  ].join("\n");
 
-  test("labelNames extracts the declared names and refuses an empty list", () => {
-    expect(labelNames("labels:\n  - name: bug\n    color: a\n    description: b\n", "f")).toEqual([
-      "bug",
-    ]);
-    expect(() => labelNames("repository: {}\n", "f.yml")).toThrow("no labels list");
-    expect(() => labelNames("labels:\n  - color: a\n", "f.yml")).toThrow("no name");
-  });
-
-  test("reservedLabelNames joins settings, release, and dependabot labels, lowercased", () => {
+  test("reservedLabelNames lowercases and dedupes the roster", () => {
     expect(
-      reservedLabelNames([BUN, UV], { settings: SETTINGS, releaseFragment: FRAGMENT }),
-    ).toEqual([
-      "dependencies",
-      "settings-as-code-report",
-      "autorelease: pending",
-      "release-blocker",
-      "javascript",
-      "python:uv",
-    ]);
-  });
-
-  test("reservedLabelNames dedupes a name declared by two sources", () => {
-    const twin = manifest("twin", {
-      dependabot: { ecosystem: "x", label: "dependencies", color: "0366d6" },
-    });
-    expect(reservedLabelNames([twin], { settings: SETTINGS, releaseFragment: FRAGMENT })).toEqual([
-      "dependencies",
-      "settings-as-code-report",
-      "autorelease: pending",
-      "release-blocker",
-    ]);
+      reservedLabelNames([], ["Dependencies", "dependencies", "Release-Blocker", "python:uv"]),
+    ).toEqual(["dependencies", "release-blocker", "python:uv"]);
   });
 
   test("reservedLabelNames refuses a name that would break the Jinja quoting", () => {
-    const quoted = SETTINGS.replace("dependencies", "it's-a-label");
-    expect(() =>
-      reservedLabelNames([BUN], { settings: quoted, releaseFragment: FRAGMENT }),
-    ).toThrow("Jinja quotes");
+    expect(() => reservedLabelNames([], ["it's-a-label"])).toThrow("Jinja quotes");
   });
 
-  test("the default sources are the live settings templates", () => {
-    const reserved = reservedLabelNames([BUN]);
+  test("the default roster is the managed settings baseline's label names", () => {
+    // The LIVE manifests: the roster folds in every manifest's
+    // settings_labels (release-please's autorelease pair and gate labels)
+    // on top of the baseline document and the dependabot tuples.
+    const reserved = reservedLabelNames(loadManifests());
     for (const name of [
       "dependencies",
       "github_actions",
@@ -651,7 +602,7 @@ describe("module ownership files", () => {
     expect(starDir.test("other/dir/x")).toBe(false);
   });
 
-  test("moduleOwnershipFiles classifies every file: enrol, starter, mergeable, split, gated, comment-free", () => {
+  test("moduleOwnershipFiles classifies every file: enrol, starter, split, gated, comment-free", () => {
     const dir = mkdtempSync(join(tmpdir(), "headers-"));
     try {
       mkdirSync(join(dir, "bun", ".github", "workflows"), { recursive: true });
@@ -663,9 +614,6 @@ describe("module ownership files", () => {
       );
       // Headerless starter: exempt through _skip_if_exists.
       writeFileSync(join(dir, "bun", ".github", "workflows", "starter.yml.jinja"), "name: S\n");
-      // Mergeable baseline: enrolled with its own kind so check 9 pins the
-      // manifest class; check 8 enforces nothing in the rendered file.
-      writeFileSync(join(dir, "bun", "baseline.yml.jinja"), "# repo-platform:mergeable\nname: B\n");
       // Split file: enrolled with marker semantics.
       writeFileSync(
         join(dir, "bun", "SPLIT.md.jinja"),
@@ -693,7 +641,6 @@ describe("module ownership files", () => {
         bun: [
           { path: ".github/workflows/managed.yml", kind: "header" },
           { path: "SPLIT.md", kind: "marker" },
-          { path: "baseline.yml", kind: "mergeable" },
         ],
       });
     } finally {
@@ -779,13 +726,13 @@ describe("module ownership files", () => {
       moduleOwnershipRegion({
         agents: [{ path: "AGENTS.md", kind: "marker" }],
         "release-please": [{ path: ".github/workflows/release.yml", kind: "header" }],
-        "settings-sync": [{ path: ".github/settings.yml", kind: "mergeable" }],
+        "settings-sync": [{ path: ".github/workflows/settings-sync.yml", kind: "header" }],
       }),
     ).toEqual([
       "const MODULE_OWNERSHIP: Record<string, { path: string; kind: OwnershipKind }[]> = {",
       '  agents: [{ path: "AGENTS.md", kind: "marker" }],',
       '  "release-please": [{ path: ".github/workflows/release.yml", kind: "header" }],',
-      '  "settings-sync": [{ path: ".github/settings.yml", kind: "mergeable" }],',
+      '  "settings-sync": [{ path: ".github/workflows/settings-sync.yml", kind: "header" }],',
       "};",
     ]);
   });

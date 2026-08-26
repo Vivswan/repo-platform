@@ -1,20 +1,44 @@
-# Central settings apply: resolves every managed settings target -
-# central settings/repos/<name>.yml files (settings/defaults.yml
-# deep-merged under each) plus in-repo targets (enrolled, adopted repos
-# carrying their own .github/settings.yml - the file is the opt-in, no
-# module needed; a central file for the same repository wins) - and runs
-# Vivswan/github-settings-as-code once per repository in a fail-fast-free
-# matrix. Repos heal independently: one target's failure is its own red
-# "apply (<repo>)" job and never blocks the others. The optional
-# settings-sync module adds push-time self-apply via
-# reusable-apply-settings.yml.
+# Central settings apply: merges each target's settings LAYERS
+# (docs/settings.md). render_managed_settings.ts selects and merges layers
+# 1 to 4 - the fleet baseline, the fleet visibility overlay, and each
+# selected module's own layer and visibility overlay - driven by the
+# target's .repo-platform.yml module selection and its effective
+# visibility. merge_settings_layers.ts then adds the repo's own
+# .github/settings.yml and the fleet override on top, and runs
+# Vivswan/github-settings-as-code in
+# single-repo mode once per repository in a fail-fast-free matrix. Targets
+# are enrolled, adopted repos whose .repo-platform.yml selects the
+# settings-sync module - the module selection is the opt-in - plus this
+# repository itself (its baseline facts come from
+# .repo-platform-answers.yml). Repos heal independently: one target's
+# failure is its own red "apply (<repo>)" job and never blocks the others.
+# The settings-sync module also adds push-time self-apply via
+# reusable-apply-settings.yml, which computes the same merge.
 
 name: Settings Repos
 
 on:
   push:
     branches: [main]
-    paths: [settings/**]
+    # Every input the merged documents are built from: this repo's own
+    # settings layer, the fleet layers (baseline, visibility overlays, and
+    # the override that outranks every repo file), the per-module settings
+    # layers, the merge scripts, and the module manifests. A push that
+    # changes any single layer must reach the fleet.
+    paths:
+      - .github/settings.yml
+      - .github/settings-baseline.yml
+      - .github/settings-public.yml
+      - .github/settings-private.yml
+      - .github/settings-override.yml
+      - .github/scripts/fleet/render_managed_settings.ts
+      - .github/scripts/fleet/merge_settings_layers.ts
+      - .github/scripts/fleet/check_target_fresh.ts
+      - .repo-platform-answers.yml
+      - templates/*/module.yml
+      - templates/*/settings.yml
+      - templates/*/settings-public.yml
+      - templates/*/settings-private.yml
   schedule:
     # Nightly heal at an offbeat minute.
     - cron: "2 8 * * *"
@@ -69,11 +93,10 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      # One matrix entry per target repo, each carrying its settings
-      # home. Probes retry and then warn-and-skip a repo they cannot
-      # answer for; only selection-infrastructure failures (unreadable
-      # registry, failed discovery, a central file the per-repo scoping
-      # cannot represent) fail this job.
+      # One matrix entry per target repo. Probes retry and then
+      # warn-and-skip a repo they cannot answer for; only
+      # selection-infrastructure failures (unreadable registry, failed
+      # discovery) fail this job.
       # No ONLY_REPO env on purpose: the typed dispatch input may be a
       # private slug, and the runner prints step env values into this
       # public log - the script reads it from the event payload instead.
@@ -99,10 +122,19 @@ jobs:
       fail-fast: false
       matrix:
         include: ${{ fromJSON(needs.select.outputs.targets) }}
-    # matrix.repo is the redaction hint for a private in-repo target - the
-    # real slug never enters the matrix or this job name; the resolve step
-    # recovers it. Central names are committed filenames, self-disclosed.
+    # matrix.repo is the redaction hint for a private target - the real
+    # slug never enters the matrix or this job name; the resolve step
+    # recovers it.
     name: apply (${{ matrix.repo }})
+    # Job level so the deliver step's `if:` can read it - a step-level env
+    # is invisible to another step's condition. Rendered as the string
+    # "true"/"false", which is what the comparison below expects.
+    env:
+      HIDE_DETAILS: ${{ matrix.hide_details }}
+      # Distinct from the template sync's report: failure_issue.ts matches
+      # by exact title, so a shared one would let either workflow's green
+      # run close the other's open report.
+      SETTINGS_REPORT_TITLE: "[automated] repo-platform settings: private failure report"
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -119,8 +151,8 @@ jobs:
         run: bun install --frozen-lockfile
 
       # Recovers the real slug for a redacted target and registers it with
-      # the runner's masker before anything else prints; public and
-      # central rows pass straight through.
+      # the runner's masker before anything else prints; public rows pass
+      # straight through.
       - name: Resolve the target repository
         id: resolve
         env:
@@ -131,50 +163,113 @@ jobs:
           PAT: ${{ secrets.REPO_PLATFORM_TOKEN }}
         run: bun .github/scripts/fleet/resolve_private_repo.ts
 
-      # The action's central mode reads a whole directory and has no
-      # per-target filter, so scoping this job to one repository means a
-      # scratch dir holding just its file. (Single-repo `repository:`
-      # mode is no alternative: it rejects defaults-file.)
-      - name: Scope the central file to this repository
-        if: matrix.home == 'central'
-        env:
-          NAME: ${{ matrix.name }}
-        run: |
-          mkdir -p "$RUNNER_TEMP/central-scope"
-          cp "settings/repos/${NAME}.yml" "$RUNNER_TEMP/central-scope/"
-
-      # Central files are hand-maintained, but the labels they must declare
-      # follow the target repo's module selection (its .repo-platform.yml)
-      # and tracking labels (its .copier-answers.yml). A stale roster fails
-      # this repo's apply, loudly, instead of starting the nightly
-      # delete/recreate loop; a failed fetch only warns, so this step
-      # never blocks the apply over a file it could not read. It runs
-      # here, scoped to this job's file, rather than in select: one bad
-      # central file must fail one apply job, never the whole heal.
-      - name: Validate the central file against target modules
-        if: matrix.home == 'central'
+      # The managed baseline for THIS repository's facts (module
+      # selection, declared-or-live visibility, tracking-label answers),
+      # then the repo's own settings.yml merged over it. Scratch filenames
+      # are fixed and neutral - a redacted slug reaches the scripts only
+      # through env (already masked). The operator repo itself has no
+      # .repo-platform.yml to fetch; its facts come from its recorded
+      # answers file in this checkout.
+      # Both of these run BEFORE the settings action, so the action's own
+      # private-repos redaction cannot cover what they print, and both
+      # quote repo-owned content on their diagnostic paths. run_hidden.ts
+      # is the boundary: it passes output through untouched for a public
+      # target and captures it for a hide-details one, publishing only a
+      # generic outcome. HIDE_DETAILS is independent of redact_name - a
+      # private repo can disclose its NAME and still need its content
+      # hidden.
+      - name: Render the managed settings baseline
+        id: render
         env:
           GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
-          OWNER: ${{ github.repository_owner }}
-        run: >-
-          bun .github/scripts/fleet/validate_central_settings.ts
-          --owner "$OWNER" --dir "$RUNNER_TEMP/central-scope"
+          TARGET: ${{ steps.resolve.outputs.repo }}
+        run: |
+          if [ "$TARGET" = "$GITHUB_REPOSITORY" ]; then
+            bun .github/scripts/sync/run_hidden.ts "settings render" -- \
+              bun .github/scripts/fleet/render_managed_settings.ts \
+              --repo "$TARGET" --operator-answers .repo-platform-answers.yml \
+              --out "$RUNNER_TEMP/managed-settings.yml"
+          else
+            bun .github/scripts/sync/run_hidden.ts "settings render" -- \
+              bun .github/scripts/fleet/render_managed_settings.ts \
+              --repo "$TARGET" --out "$RUNNER_TEMP/managed-settings.yml"
+          fi
+
+      - name: Merge the repository's settings.yml over the baseline
+        id: merge
+        # No baseline was written when the target turned settings off at
+        # the pinned revision, so there is nothing to merge.
+        if: steps.render.outputs.skipped == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
+          TARGET: ${{ steps.resolve.outputs.repo }}
+        run: |
+          # The operator repository IS this checkout, so its layer is read
+          # from disk - the render took its facts from the same working
+          # tree, and fetching would reintroduce the race the pin removes.
+          # Every other target is fetched, pinned to the commit the render
+          # published.
+          if [ "$TARGET" = "$GITHUB_REPOSITORY" ]; then
+            bun .github/scripts/sync/run_hidden.ts "settings merge" -- \
+              bun .github/scripts/fleet/merge_settings_layers.ts \
+              --managed "$RUNNER_TEMP/managed-settings.yml" \
+              --repo-file .github/settings.yml \
+              --out "$RUNNER_TEMP/merged-settings.yml"
+          else
+            bun .github/scripts/sync/run_hidden.ts "settings merge" -- \
+              bun .github/scripts/fleet/merge_settings_layers.ts \
+              --managed "$RUNNER_TEMP/managed-settings.yml" \
+              --repo-fetch "$TARGET" --repo-ref "${{ steps.render.outputs.ref }}" \
+              --out "$RUNNER_TEMP/merged-settings.yml"
+          fi
+
+      # Outside the hidden capture on purpose: for a hide-details target
+      # run_hidden swallows the merge step's SUCCESS output, including its
+      # not-onboarded warning, so the skip would otherwise be a green job
+      # with no signal at all. matrix.repo is the masked hint for a
+      # redacted row, so this says WHICH target without saying anything
+      # about its contents.
+      - name: Report a skipped target
+        if: steps.render.outputs.skipped == 'true' || steps.merge.outputs.skipped == 'true'
+        run: |
+          if [ "${{ steps.render.outputs.skipped }}" = "true" ]; then
+            echo "::notice::settings apply skipped for ${{ matrix.repo }}: it no longer selects the settings-sync module at the revision this run read, so its settings are not managed here any more."
+          else
+            echo "::notice::settings apply skipped for ${{ matrix.repo }}: it selects settings-sync but has no .github/settings.yml yet, so there is nothing to layer over the fleet defaults. The settings-sync starter seeds the file on its next template sync."
+          fi
+
+      # The opt-in was rechecked at the pinned commit, but the apply runs
+      # later and the branch keeps moving. Re-resolving the head here
+      # narrows that window to this step: if the target moved, the run
+      # skips and the next one reads the new revision. It cannot CLOSE the
+      # window - there is no compare-and-swap on "still opted in" - so
+      # this is damage limitation, not a guarantee.
+      - name: Check the target has not moved
+        id: freshness
+        if: steps.render.outputs.skipped == 'false' && steps.merge.outputs.skipped == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
+          TARGET: ${{ steps.resolve.outputs.repo }}
+          PINNED: ${{ steps.render.outputs.ref }}
+        run: bun .github/scripts/fleet/check_target_fresh.ts
 
       - name: Apply repository settings
+        id: apply
+        # Skipped for a target that selected settings-sync but has no
+        # settings.yml yet: the merge step writes no document, because
+        # applying the baseline alone would delete the repo's own labels.
+        if: steps.freshness.outputs.moved == 'false'
         # Pinned to an immutable commit; bump to @v1 once the action cuts
         # its first release. Bump together with reusable-apply-settings.yml.
         uses: Vivswan/github-settings-as-code@ac83fb48219309e2249294ef37fb55310bd45fb3
         with:
           token: ${{ secrets.REPO_PLATFORM_TOKEN }}
           mode: ${{ inputs.check_only && 'check' || 'apply' }}
-          # Exactly one of the two multi-repo modes carries this job's
-          # single repository: the scoped scratch dir for a central
-          # home, the action's remote mode for an in-repo home (the
-          # resolved slug - already masked when the row is redacted, so
-          # this with: line renders *** in the log).
-          repos-dir: ${{ matrix.home == 'central' && format('{0}/central-scope', runner.temp) || '' }}
-          repos: ${{ matrix.home == 'in-repo' && steps.resolve.outputs.repo || '' }}
-          defaults-file: settings/defaults.yml
+          # Single-repo mode, scoped by the resolved slug (already masked
+          # when the row is redacted, so this with: line renders *** in
+          # the log); the merged scratch document is the settings source.
+          repository: ${{ steps.resolve.outputs.repo }}
+          settings-file: ${{ runner.temp }}/merged-settings.yml
           private-repos: redact
           # A redacted target's failure/drift details cannot appear in
           # this public log; they land as a reused issue on the target
@@ -184,3 +279,37 @@ jobs:
           # this repo's job (the action's default) - settings drift must
           # not hide behind a green run.
           on-missing-permission: fail
+
+      # run_hidden.ts keeps a hide-details target's render/merge output out
+      # of this public log, which means the detail only exists in
+      # RUNNER_TEMP. Without this step it would die with the runner and
+      # the operator would see an exit code and nothing else, breaking the
+      # private-detail contract in docs/private-repos.md. TARGET comes
+      # from the resolve step via GITHUB_ENV.
+      - name: Deliver hidden failure diagnostics
+        if: failure() && env.HIDE_DETAILS == 'true' && env.TARGET != ''
+        env:
+          GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          REPORT_TITLE: ${{ env.SETTINGS_REPORT_TITLE }}
+          REPORT_KIND: settings apply
+        run: bun .github/scripts/sync/failure_issue.ts deliver
+
+      # Without this the issue stays open after a recovered run, and the
+      # template sync's own green run could close a report the settings
+      # apply is still failing on - which is why the two carry different
+      # titles. A green job is not enough on its own: a MOVED target means
+      # this run never checked the settings, so an open report stays open
+      # until a run actually applies. The two skips are terminal - the repo
+      # opted out, or has no settings.yml to layer yet - so they resolve.
+      - name: Resolve the settings failure report
+        if: >-
+          success() && env.HIDE_DETAILS == 'true' && env.TARGET != '' &&
+          (steps.apply.outcome == 'success' || steps.render.outputs.skipped == 'true' ||
+          steps.merge.outputs.skipped == 'true')
+        env:
+          GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          REPORT_TITLE: ${{ env.SETTINGS_REPORT_TITLE }}
+          REPORT_KIND: settings apply
+        run: bun .github/scripts/sync/failure_issue.ts resolve

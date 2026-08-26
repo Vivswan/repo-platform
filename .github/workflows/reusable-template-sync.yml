@@ -184,7 +184,6 @@ jobs:
             --repo "$TARGET" \
             --display "$TARGET_DISPLAY" \
             --hide-details "$HIDE_DETAILS" \
-            --central-dir settings/repos \
             --in-repo-settings target/.github/settings.yml \
             --live-private "$PRIVATE" \
             --live-description "$(cat "$RUNNER_TEMP/description.txt")" \

@@ -1,12 +1,16 @@
 #!/usr/bin/env bun
 // Preserves repo-owned files after an update.
 //
-// settings.yml is repo-owned wherever it exists: deselecting the
-// settings-sync module de-renders it, but the sync must never delete a
-// repo's settings file - repo-platform's settings-repos run applies it
-// remotely (a central settings/repos/<name>.yml wins over it). A recovery
-// re-render has no three-way merge to protect local content, so there it
-// is restored outright.
+// settings.yml is a repo-owned starter (_skip_if_exists) wherever it
+// exists: deselecting the settings-sync module de-renders it, but the
+// sync must never delete a repo's settings file - repo-platform's
+// settings-repos run merges it over the centrally computed managed
+// baseline and applies the result. A recovery re-render can de-render the
+// file too, so it is restored outright there. This step also runs the
+// one-time layering transition (settings_layering.ts): a settings.yml
+// still carrying the retired mergeable marker holds the old full
+// baseline, and is replaced with the identity starter - the PR body
+// lists the dropped overrides and open_pr.ts holds the PR for review.
 //
 // The license (LICENSE.md, or a custom repo's own spelling) leaves the
 // render when a repo selects the custom-license module;
@@ -39,6 +43,7 @@ import { join } from "node:path";
 import { parse } from "yaml";
 import { env, error, notice, requireEnv } from "../shared/gha.ts";
 import { parseModules } from "../shared/modules.ts";
+import { transitionSettingsStarter } from "./settings_layering.ts";
 
 const targetDir = env("TARGET_DIR", "target");
 const label = env("TARGET_DISPLAY") || env("TARGET") || targetDir;
@@ -77,6 +82,15 @@ if (inHead(".github/settings.yml")) {
     );
   }
 }
+
+// The one-time layering transition (see the header): after the restore
+// above, so a de-rendered-then-restored legacy file transitions in the
+// same sync instead of waiting a round.
+transitionSettingsStarter(
+  targetDir,
+  join(requireEnv("RUNNER_TEMP"), "settings-layering.md"),
+  label,
+);
 
 // Only on the custom-license module: there the repo's own license is
 // repo-owned - LICENSE.md by convention, with the extensionless spelling

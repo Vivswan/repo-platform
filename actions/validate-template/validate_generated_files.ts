@@ -120,8 +120,8 @@ const LOCAL_SECTION_LINES = new Set([
 const HEADER_WINDOW = 10;
 
 /** The ownership manifest the template renders into every repo: the full
- *  ownership map (path -> managed/split/mergeable/starter, marker metadata
- *  for splits) with per-repo sha256 hashes stamped post-render. Check 9
+ *  ownership map (path -> managed/split/starter, marker metadata for
+ *  splits) with per-repo sha256 hashes stamped post-render. Check 9
  *  verifies byte parity against it. */
 const MANIFEST_NAME = ".github/repo-platform-manifest.json";
 
@@ -150,11 +150,10 @@ function sha256(data: Buffer): string {
 
 /** How a declared file's ownership is enforced in the rendered repo:
  *  "header" files open with the managed header, "marker" files carry the
- *  local-section split line, "mergeable" files have no in-file requirement
- *  (sync's three-way merge keeps a repo's deletion of the sentinel, so
- *  check 8 skips them) - the kind exists so check 9 can pin the manifest
- *  entry's class against a hand flip. */
-type OwnershipKind = "header" | "marker" | "mergeable";
+ *  local-section split line. (A third kind, "mergeable", was retired with
+ *  the class - settings.yml, its only member, is a repo-owned starter
+ *  now.) */
+type OwnershipKind = "header" | "marker";
 
 /** Unconditionally rendered base files and how each declares its ownership:
  *  "header" files are wholly overwritten by sync and open with the managed
@@ -264,10 +263,9 @@ const TOOLCHAIN_PINS: Record<string, { file: string; version: string }> = {
 
 // How each rendered module file declares its ownership while its module is
 // selected: "header" files open with the managed header, "marker" files
-// split a managed top from a repo-owned tail, "mergeable" files enrol only
-// so check 9 can pin their manifest class - check 8 enforces nothing in
-// them (scanned fail-closed by moduleOwnershipFiles in
-// scripts/ownership.ts - starters and comment-free formats stay out).
+// split a managed top from a repo-owned tail (scanned fail-closed by
+// moduleOwnershipFiles in scripts/ownership.ts - starters and comment-free
+// formats stay out).
 // BEGIN GENERATED: module-ownership (scripts/generate.ts - edit the module templates and copier.yml's _skip_if_exists, not this block)
 const MODULE_OWNERSHIP: Record<string, { path: string; kind: OwnershipKind }[]> = {
   agents: [{ path: "AGENTS.md", kind: "marker" }],
@@ -277,10 +275,7 @@ const MODULE_OWNERSHIP: Record<string, { path: string; kind: OwnershipKind }[]> 
   "release-please": [{ path: ".github/workflows/release.yml", kind: "header" }],
   skills: [{ path: ".github/workflows/validate-skills.yml", kind: "header" }],
   "auto-assign": [{ path: ".github/workflows/auto-assign.yml", kind: "header" }],
-  "settings-sync": [
-    { path: ".github/settings.yml", kind: "mergeable" },
-    { path: ".github/workflows/settings-sync.yml", kind: "header" },
-  ],
+  "settings-sync": [{ path: ".github/workflows/settings-sync.yml", kind: "header" }],
 };
 // END GENERATED: module-ownership
 
@@ -891,11 +886,6 @@ function main(): number {
         "/repo-platform\\.(?![A-Za-z0-9._-])",
     );
     for (const { rel, kind } of declaredOwnership) {
-      // Mergeable files carry no enforceable in-file declaration: the
-      // sentinel is template-side only, and sync's three-way merge keeps a
-      // repo's deletion of it, so requiring it here would be a permanent,
-      // unhealable error. Their roster entry exists for check 9's class pin.
-      if (kind === "mergeable") continue;
       const path = join(root, rel);
       if (!isRegularFile(path)) continue;
       const content = readFileSync(path, "utf-8");
@@ -965,9 +955,7 @@ function main(): number {
   // conflicts resolve toward the template) and breaks the repo's own
   // update base loudly. Paths beyond the tables (starters, version pins -
   // check 7 pins their bytes - and symlinks) remain manifest-trusted, an
-  // accepted residue of the informational stance; mergeable entries carry
-  // no hash, but their class IS table-pinned, so a flip to a hashless
-  // look-alike (starter) cannot silence even the absence advisory.
+  // accepted residue of the informational stance.
   // The _commit read must mirror sync/answers_file.ts's failsafe-schema
   // read: PyYAML (copier's writer) dumps exponent-shaped shas like
   // 95e1875 UNQUOTED (its float pattern needs a dot or signed exponent),
@@ -1157,8 +1145,7 @@ function main(): number {
         }
         const entry = asEntry(raw);
         if (entry === null) continue;
-        const declared =
-          kind === "header" ? "managed" : kind === "mergeable" ? "mergeable" : "split";
+        const declared = kind === "header" ? "managed" : "split";
         if (entry.class !== declared) {
           metadataError(rel, `claims class ${JSON.stringify(entry.class)}`, declared);
           continue;
@@ -1257,45 +1244,20 @@ function main(): number {
           continue;
         }
         if (entry.class === "mergeable") {
-          if ("hash" in entry) {
-            errors.push(
-              `${where} is mergeable carrying a hash - sync keeps a mergeable ` +
-                "baseline current by three-way merge, so repo additions survive " +
-                "and no byte-parity promise exists; run a template sync to " +
-                "regenerate the manifest",
-            );
-            continue;
-          }
-          // Check 8's absence stance, matching the managed advisory below:
-          // sync re-renders mergeable files, so a missing one is damage the
-          // next sync heals. A present node must be a regular file, though -
-          // three-way merge has nothing to merge into a directory or special
-          // file, so a squatter here is unhealable, not presence.
-          let stat: ReturnType<typeof lstatSync> | null = null;
-          try {
-            stat = lstatSync(join(root, rel));
-          } catch {
-            stat = null;
-          }
-          if (stat === null) {
-            advisories.push(
-              `${rel}: listed as mergeable in ${MANIFEST_NAME} but missing ` +
-                "from the repo - the next template sync restores it",
-            );
-          } else if (!stat.isFile()) {
-            errors.push(
-              `${rel}: listed as mergeable in ${MANIFEST_NAME} but is not a ` +
-                "regular file - sync three-way merges a baseline file at this " +
-                "path and cannot heal a directory or special file; remove the " +
-                "squatter, then a template sync restores the baseline",
-            );
-          }
+          // The class was retired: settings.yml, its only member, is a
+          // repo-owned starter now (_skip_if_exists), and its baseline is
+          // computed centrally at apply time. A manifest still claiming it
+          // predates that sync; the next sync re-renders the manifest.
+          errors.push(
+            `${where} has class "mergeable", which is retired - the next template ` +
+              "sync re-renders the manifest (settings.yml became a repo-owned starter)",
+          );
           continue;
         }
         if (entry.class !== "managed" && entry.class !== "split") {
           errors.push(
             `${where} has unknown class ${JSON.stringify(entry.class)} (expected ` +
-              "managed, split, mergeable, or starter); run a template sync to " +
+              "managed, split, or starter); run a template sync to " +
               "regenerate the manifest",
           );
           continue;

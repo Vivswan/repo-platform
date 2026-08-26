@@ -8,7 +8,7 @@
 //
 // Answers come from .repo-platform-answers.yml, this repository's own
 // copier answers; every value is cross-checked against its authoritative
-// source (package.json, copier.yml defaults, the central settings file).
+// source (package.json, copier.yml defaults, this repo's .github/settings.yml).
 // One render context is built from the answers - private, has_toolchain
 // and enable_codeql exactly as copier.yml computes them, plus a membership
 // key per module - and every pair renders against it; a condition the
@@ -193,14 +193,15 @@ export interface AnswerSources {
   usernameDefault: string;
   copyrightDefault: string;
   skillsDirDefault: string;
-  centralDescription: string;
-  centralPrivate: boolean;
+  settingsDescription: string;
+  settingsPrivate: boolean;
   moduleNames: Set<string>;
 }
 
 /** Every answer is cross-checked against the source that owns it, so this
  *  file can never silently disagree with what check_ssot's jinjaVars reads
- *  for the remaining dogfood-parity pairs, with the central settings, or
+ *  for the remaining dogfood-parity pairs, with this repo's own
+ *  .github/settings.yml, or
  *  with the module roster. */
 export function answerMismatches(answers: Answers, sources: AnswerSources): string[] {
   const problems: string[] = [];
@@ -232,15 +233,15 @@ export function answerMismatches(answers: Answers, sources: AnswerSources): stri
   );
   expect(
     "description",
-    sources.centralDescription,
+    sources.settingsDescription,
     answers.description,
-    "settings/repos/repo-platform.yml repository.description",
+    ".github/settings.yml repository.description",
   );
   expect(
     "private",
-    sources.centralPrivate,
+    sources.settingsPrivate,
     answers.private,
-    "settings/repos/repo-platform.yml repository.private",
+    ".github/settings.yml repository.private",
   );
   for (const module of answers.modules) {
     if (!sources.moduleNames.has(module)) {
@@ -305,22 +306,20 @@ function stringDefault(copier: Record<string, unknown>, question: string): strin
 function loadSources(manifests: ModuleManifest[]): AnswerSources {
   const copier = asRecord(parseYaml(read("copier.yml")), "copier.yml");
   const pkg = asRecord(JSON.parse(read("package.json")), "package.json");
-  const central = asRecord(
-    asRecord(parseYaml(read("settings/repos/repo-platform.yml")), "repo-platform.yml").repository,
-    "settings/repos/repo-platform.yml repository",
+  const settings = asRecord(
+    asRecord(parseYaml(read(".github/settings.yml")), ".github/settings.yml").repository,
+    ".github/settings.yml repository",
   );
-  if (typeof central.description !== "string" || typeof central.private !== "boolean") {
-    throw new Error(
-      "settings/repos/repo-platform.yml: repository.description/private missing or mistyped",
-    );
+  if (typeof settings.description !== "string" || typeof settings.private !== "boolean") {
+    throw new Error(".github/settings.yml: repository.description/private missing or mistyped");
   }
   return {
     packageName: String(pkg.name),
     usernameDefault: stringDefault(copier, "github_username"),
     copyrightDefault: stringDefault(copier, "copyright_holder"),
     skillsDirDefault: stringDefault(copier, "skills_dir"),
-    centralDescription: central.description,
-    centralPrivate: central.private,
+    settingsDescription: settings.description,
+    settingsPrivate: settings.private,
     moduleNames: new Set(manifests.map((m) => m.module)),
   };
 }

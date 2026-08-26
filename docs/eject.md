@@ -11,7 +11,7 @@ In `repos.yml`:
 1. Add the repo to the `exclude:` list, or revoke the fleet PAT's access to the repo (discovery only enrolls repos the token can write to); either stops sync PRs.
 2. Remove its `config:` entry, if it has one.
 
-Then delete `settings/repos/<name>.yml`, if the repo uses the central settings home, so settings stop being applied.
+Settings stop being applied with the pause too: the nightly heal only manages enrolled repos whose `.repo-platform.yml` selects the settings-sync module.
 
 ## 2. (Optional) Strip the managed files in the repo
 

@@ -2,13 +2,12 @@
 // The single owner of template-file OWNERSHIP truth: how each file the
 // template lands in a generated repository relates to sync.
 //
-// Four classes (the ownership manifest's vocabulary):
+// Three classes (the ownership manifest's vocabulary; a fourth,
+// "mergeable" - baseline kept current by three-way merge - was retired
+// when settings.yml, its only member, became a starter):
 // - managed: sync overwrites the whole file; local edits are replaced.
 // - split: sync owns one half (a marker line separates it from the
 //   repo-owned half); local content lives in the other half.
-// - mergeable: sync keeps the baseline current by three-way merge, so
-//   repo additions survive and sync makes no byte-parity promise about
-//   the content.
 // - starter: rendered once, repo-owned from then on (_skip_if_exists).
 //
 // Consumers, all reading the same classifier so ownership can never fork:
@@ -38,22 +37,20 @@ export const LOCAL_SECTION_LINES = new Set([
   `<!-- ${LOCAL_SECTION_MARKER} -->`,
 ]);
 
-/** The declaration line of a mergeable file: sync re-renders the baseline
- *  and three-way merge folds it into the repo's copy, so repo additions
- *  survive and no byte-parity promise exists for the content. Unlike the
- *  local-section sentinel the line carries no positional meaning - it
- *  describes the whole file - so it must sit inside HEADER_WINDOW, like
- *  the managed header. */
-export const MERGEABLE_MARKER = "repo-platform:mergeable";
-export const MERGEABLE_MARKER_LINES = new Set([
-  `# ${MERGEABLE_MARKER}`,
-  `<!-- ${MERGEABLE_MARKER} -->`,
-]);
-
 /** How many opening lines may hold the managed header: template sources
  *  keep it at the top, at most below a short jinja preamble that rendering
  *  collapses. The validator's rendered-file check uses the same window. */
 export const HEADER_WINDOW = 10;
+
+/** A module's settings layers, next to its module.yml (docs/settings.md).
+ *  Module METADATA like the manifest itself: read by the fleet's settings
+ *  merge, never rendered into a repository, so the composer skips them and
+ *  they declare no ownership class. */
+export const SETTINGS_LAYER_NAMES = new Set([
+  "settings.yml",
+  "settings-public.yml",
+  "settings-private.yml",
+]);
 
 /** Split base files whose marker grammar predates the local-section
  *  sentinel. .gitignore's REPOSITORY LOCAL section sits ABOVE its managed
@@ -126,18 +123,15 @@ export function landedPathAndGates(renderedPath: string): { path: string; gates:
 
 export type ManifestOwnership =
   | { class: "managed" }
-  | { class: "mergeable" }
   | { class: "starter" }
   | { class: "split"; marker: string; managed: "above" | "below" };
 
 /** Classify one template source file by landed path and source text:
- *  starter (exempt via _skip_if_exists; carrying the managed header or the
- *  mergeable marker there throws, the promises contradict), mergeable (the
- *  mergeable marker line inside HEADER_WINDOW; the managed header and the
- *  split grammars contradict it and throw), split (a marker line separates
- *  the sync-owned half from the repo-owned half - the local-section
- *  sentinel, or a BASE_SPLIT_FILES grammar), or managed (everything else:
- *  sync overwrites the whole file whether or not it can carry the header).
+ *  starter (exempt via _skip_if_exists; carrying the managed header there
+ *  throws, the promises contradict), split (a marker line separates the
+ *  sync-owned half from the repo-owned half - the local-section sentinel,
+ *  or a BASE_SPLIT_FILES grammar), or managed (everything else: sync
+ *  overwrites the whole file whether or not it can carry the header).
  *  `where` names the source file in errors. */
 export function classifyTemplateSource(
   landedPath: string,
@@ -147,21 +141,12 @@ export function classifyTemplateSource(
 ): { ownership: ManifestOwnership; hasHeader: boolean } {
   const opening = source.split("\n", HEADER_WINDOW);
   const hasHeader = MANAGED_HEADER_RE.test(opening.join("\n"));
-  const hasMergeable = opening.some((line) => MERGEABLE_MARKER_LINES.has(line.trim()));
   if (skipIfExists.some((matcher) => matcher.test(landedPath))) {
     if (hasHeader) {
       throw new Error(
         `${where}: opens with the managed header but ` +
           "renders a _skip_if_exists starter - the header promises sync " +
           "overwrites the file, the skip list promises it never does; drop one",
-      );
-    }
-    if (hasMergeable) {
-      throw new Error(
-        `${where}: carries the '${MERGEABLE_MARKER}' marker but renders a ` +
-          "_skip_if_exists starter - the marker promises sync keeps the " +
-          "baseline current, the skip list promises sync never re-renders " +
-          "the file; drop one",
       );
     }
     return { ownership: { class: "starter" }, hasHeader };
@@ -171,25 +156,6 @@ export function classifyTemplateSource(
     .split("\n")
     .map((line) => line.trim())
     .find((line) => LOCAL_SECTION_LINES.has(line));
-  if (hasMergeable) {
-    if (hasHeader) {
-      throw new Error(
-        `${where}: carries both the managed header and the ` +
-          `'${MERGEABLE_MARKER}' marker - the header promises sync ` +
-          "overwrites the whole file, the marker promises repo additions " +
-          "survive its merges; drop one",
-      );
-    }
-    if (baseSplit !== undefined || markerLine !== undefined) {
-      throw new Error(
-        `${where}: carries the '${MERGEABLE_MARKER}' marker alongside a ` +
-          "split grammar - a split file's repo-owned half never merges " +
-          "with the template while a mergeable file merges everywhere; " +
-          "drop one",
-      );
-    }
-    return { ownership: { class: "mergeable" }, hasHeader };
-  }
   if (baseSplit) {
     if (!source.split("\n").some((line) => line.trim() === baseSplit.marker)) {
       throw new Error(
@@ -208,22 +174,18 @@ export function classifyTemplateSource(
 
 export interface OwnershipEntry {
   path: string;
-  kind: "header" | "marker" | "mergeable";
+  kind: "header" | "marker";
 }
 
 /** The rendered paths, per module, whose ownership declaration the
  *  validator enforces while the module is selected. Every module template
  *  file (fragments and symlinks aside) is classified via
- *  classifyTemplateSource - starter, mergeable, split ("marker"),
- *  header-opening ("header"), or comment-free (the manifest's pin dotfile,
- *  JSON) - and a file fitting no class throws, so nothing lands silently
- *  undeclared. Starters stay out (repo-owned; nothing to enforce or pin).
- *  Mergeable files enrol with their own kind so check 9 can pin the
- *  manifest entry's class against a hand flip, but check 8 enforces
- *  nothing in the rendered file: sync cannot restore a repo-deleted
- *  sentinel (three-way merge keeps the deletion), so an in-file
- *  requirement would be a permanent, unhealable error. Filename-gated
- *  files only declare: module selection alone does not render them. */
+ *  classifyTemplateSource - starter, split ("marker"), header-opening
+ *  ("header"), or comment-free (the manifest's pin dotfile, JSON) - and a
+ *  file fitting no class throws, so nothing lands silently undeclared.
+ *  Starters stay out (repo-owned; nothing to enforce or pin).
+ *  Filename-gated files only declare: module selection alone does not
+ *  render them. */
 export function moduleOwnershipFiles(
   manifests: ModuleManifest[],
   templatesDir: string,
@@ -236,7 +198,11 @@ export function moduleOwnershipFiles(
     const visit = (rel: string) => {
       for (const name of readdirSync(join(moduleDir, rel)).sort()) {
         const childRel = rel ? `${rel}/${name}` : name;
+        // fragments/, the manifest, and the module's settings layers are
+        // module METADATA: the composer never renders them into a
+        // repository, so they have no ownership class to declare.
         if (childRel === "fragments" || childRel === "module.yml") continue;
+        if (SETTINGS_LAYER_NAMES.has(childRel)) continue;
         const stat = lstatSync(join(moduleDir, childRel));
         if (stat.isDirectory() && !stat.isSymbolicLink()) {
           visit(childRel);
@@ -261,9 +227,6 @@ export function moduleOwnershipFiles(
           case "starter":
             // Repo-owned after the first render: nothing to enforce or pin.
             break;
-          case "mergeable":
-            if (ungated) entries.push({ path: landedPath, kind: "mergeable" });
-            break;
           case "split":
             if (ungated) entries.push({ path: landedPath, kind: "marker" });
             break;
@@ -276,9 +239,8 @@ export function moduleOwnershipFiles(
             if (landedPath === m.toolchain?.pin?.file || landedPath.endsWith(".json")) break;
             throw new Error(
               `templates/${m.module}/${childRel}: declares no ownership - open it with ` +
-                "the managed header, split it with the local-section marker line, mark " +
-                `its baseline mergeable with a '# ${MERGEABLE_MARKER}' line, or list ` +
-                "its rendered path in _skip_if_exists",
+                "the managed header, split it with the local-section marker line, or " +
+                "list its rendered path in _skip_if_exists",
             );
           }
           default: {

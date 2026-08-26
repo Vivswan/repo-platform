@@ -38,10 +38,8 @@
 //   manifest value declared by several modules is grouped BY VALUE, emitted
 //   ONCE, and gated on the or-chain of the contributing modules in
 //   MODULE_ORDER - never per-module duplicates, never precedence guards.
-//   A fragment file for a data anchor is an error, with two exceptions:
-//   settings-labels still takes fragments from modules the generator does
-//   not cover, and agents-toolchain consumes its fragments as generator
-//   input.
+//   A fragment file for a data anchor is an error, with one exception:
+//   agents-toolchain consumes its fragments as generator input.
 //
 // Every anchor needs at least one contribution (fragment or generated) and
 // every contribution needs its anchor. Collisions are errors, never silent
@@ -76,6 +74,7 @@ import {
   classifyTemplateSource,
   landedPathAndGates,
   type ManifestOwnership,
+  SETTINGS_LAYER_NAMES,
   skipIfExistsMatchers,
 } from "./ownership.ts";
 
@@ -125,11 +124,13 @@ function walkFiles(dir: string): string[] {
   return found.sort();
 }
 
-/** Logical path -> Entry for a source folder (skips manifest + fragments). */
+/** Logical path -> Entry for a source folder (skips manifest, settings
+ *  layers, and fragments). */
 function collectFiles(folder: string): Map<string, Entry> {
   const files = new Map<string, Entry>();
   for (const rel of walkFiles(folder)) {
     if (rel.split("/")[0] === FRAGMENTS_DIR || rel === MANIFEST_NAME) continue;
+    if (SETTINGS_LAYER_NAMES.has(rel)) continue;
     files.set(rel, readEntry(join(folder, rel)));
   }
   return files;
@@ -209,16 +210,6 @@ export function codeqlSlug(language: string): string {
   return language.split("-")[0];
 }
 
-// YAML parses these unquoted lowercase words as non-strings.
-const YAML_RESERVED = new Set(["true", "false", "null"]);
-
-/** settings.yml label names are emitted quoted unless they are plainly
- *  safe YAML scalars (lowercase word characters, no leading digit, not a
- *  reserved word) - python:uv gets quotes, javascript stays bare. */
-export function yamlLabelName(name: string): string {
-  return /^[a-z][a-z0-9_-]*$/.test(name) && !YAML_RESERVED.has(name) ? name : `"${name}"`;
-}
-
 export type EcosystemGroup = { ecosystem: string; modules: string[] };
 
 /** Distinct dependabot ecosystems with their contributing modules, in
@@ -280,8 +271,10 @@ export type DependabotLabel = {
 
 /** Distinct dependabot PR labels with their contributing modules, in
  *  MODULE_ORDER of first contributor (shared labels agree on their color -
- *  the manifest loader asserts it). check_ssot.ts reads this too, so the
- *  label rosters cannot drift from what the composer emits. */
+ *  the manifest loader asserts it). The settings baseline generator
+ *  (.github/scripts/fleet/render_managed_settings.ts), check_ssot.ts, and
+ *  the generated docs regions all read this one derivation, so the label
+ *  rosters cannot drift apart. */
 export function dependabotLabels(manifests: ModuleManifest[]): DependabotLabel[] {
   const groups = new Map<string, DependabotLabel>();
   for (const manifest of manifests) {
@@ -466,19 +459,12 @@ export function applyToolchainSetup(fragments: Map<string, [ModuleManifest, Buff
   fragments.delete(TOOLCHAIN_SETUP_FRAGMENT);
   return errors;
 }
-// Discriminated on `kind` so the shapes stay honest: only a coexist anchor
-// can (and must) say which modules the generator covers, and only a consume
+// Discriminated on `kind` so the shapes stay honest: only a consume
 // generator ever sees fragment bytes.
 type DataAnchorSpec = { data: string } & (
   | {
       /** Any fragment file for the anchor is an error. */
       kind: "reject";
-      generate: (ctx: GeneratorContext) => Contribution[];
-    }
-  | {
-      /** Fragments splice normally unless `covered` claims their module. */
-      kind: "coexist";
-      covered: (manifest: ModuleManifest) => boolean;
       generate: (ctx: GeneratorContext) => Contribution[];
     }
   | {
@@ -528,32 +514,6 @@ function codeqlJob(group: CodeqlGroup): string {
       security-events: write
       actions: read
 `;
-}
-
-/** The rendered settings.yml block for one label group; exported so tests
- *  can round-trip it through a YAML parser. */
-export function labelBlock(label: DependabotLabel): string {
-  return (
-    `  - name: ${yamlLabelName(label.name)}\n` +
-    `    color: "${label.color}"\n` +
-    `    description: ${label.description}\n`
-  );
-}
-
-/** The rendered settings.yml block for one tracking-label stream: the
- *  label name renders from the stream's copier answer (each repo picks its
- *  own label), the color/description from its manifest tuple. */
-export function trackingLabelBlock(
-  module: string,
-  tracking: NonNullable<ModuleManifest["tracking_label"]>,
-): string {
-  return (
-    `  # The ${module} module's tracking label: the fuzz-issue action keys its\n` +
-    `  # one-open-issue-per-label dedup on it, so it must survive the label sync.\n` +
-    `  - name: {{ ${tracking.answer} | tojson }}\n` +
-    `    color: "${tracking.color}"\n` +
-    `    description: ${tracking.description}\n`
-  );
 }
 
 export type GateJobsGroup = { module: string; jobs: string[] };
@@ -714,36 +674,6 @@ const DATA_ANCHORS: Record<string, DataAnchorSpec> = {
         ...gated(gateOf(group.module), group.jobs.map((job) => `      - ${job}\n`).join("")),
       })),
     ],
-  },
-  "settings-dependabot-labels": {
-    data: "dependabot.label",
-    kind: "reject",
-    generate: ({ manifests, gateOf }) =>
-      dependabotLabels(manifests).map((label) => ({
-        order: orderOf(manifests, label.modules[0]),
-        source: generatorSource("settings-dependabot-labels", "dependabot.label"),
-        ...gated(orChain(label.modules, gateOf), labelBlock(label)),
-      })),
-  },
-  // Mixed anchor: the tracking-stream label entries are generated here;
-  // release-please still contributes its static-labels fragment, spliced at
-  // its own MODULE_ORDER position.
-  "settings-labels": {
-    data: "tracking_label",
-    kind: "coexist",
-    covered: (manifest) => manifest.tracking_label !== undefined,
-    generate: ({ manifests, gateOf }) =>
-      manifests.flatMap((manifest) => {
-        const tracking = manifest.tracking_label;
-        if (!tracking) return [];
-        return [
-          {
-            order: orderOf(manifests, manifest.module),
-            source: generatorSource("settings-labels", "tracking_label"),
-            ...gated(gateOf(manifest.module), trackingLabelBlock(manifest.module, tracking)),
-          },
-        ];
-      }),
   },
   "gitleaks-locks": {
     data: "lockfiles",
@@ -1113,14 +1043,12 @@ function manifestEntryLine(entry: ManifestEntry): string {
   const body =
     o.class === "starter"
       ? '{"class": "starter"}'
-      : o.class === "mergeable"
-        ? '{"class": "mergeable"}'
-        : o.class === "managed"
-          ? entry.path === MANIFEST_LANDED_PATH
-            ? '{"class": "managed", "hash": null, "commit": null}'
-            : '{"class": "managed", "hash": null}'
-          : `{"class": "split", "marker": ${JSON.stringify(o.marker)}, ` +
-            `"managed": "${o.managed}", "hash": null}`;
+      : o.class === "managed"
+        ? entry.path === MANIFEST_LANDED_PATH
+          ? '{"class": "managed", "hash": null, "commit": null}'
+          : '{"class": "managed", "hash": null}'
+        : `{"class": "split", "marker": ${JSON.stringify(o.marker)}, ` +
+          `"managed": "${o.managed}", "hash": null}`;
   return `    ${JSON.stringify(entry.path)}: ${body}`;
 }
 
@@ -1219,12 +1147,11 @@ export function manifestTemplate(entries: ManifestEntry[]): Buffer {
     "the whole file; hash is sha256 of the last stamped content, or of the " +
     "symlink target), split (sync owns one half; the hash covers the managed " +
     "half, through the marker line for 'above' and from it for 'below'), " +
-    "mergeable (sync keeps the baseline current by three-way merge, so repo " +
-    "additions survive; no hash), starter (rendered once, repo-owned; no " +
-    "hash). Hashes - and, on this file's own entry, the render's _commit " +
-    "provenance - are stamped after each render by the template's " +
-    "stamp_manifest.ts hook; this file's own hash stays null because its " +
-    "content includes every other hash, so a self-hash would be circular.";
+    "starter (rendered once, repo-owned; no hash). Hashes - and, on this " +
+    "file's own entry, the render's _commit provenance - are stamped after " +
+    "each render by the template's stamp_manifest.ts hook; this file's own " +
+    "hash stays null because its content includes every other hash, so a " +
+    "self-hash would be circular.";
   lines.push(
     "{",
     `  "$comment": ${JSON.stringify(comment)},`,
@@ -1385,7 +1312,7 @@ export function build(): Map<string, Entry> {
     for (const [manifest, body] of fromFiles) {
       const { module } = manifest;
       const path = `templates/${module}/${FRAGMENTS_DIR}/${anchor}${JINJA_SUFFIX}`;
-      if (spec.kind === "reject" || (spec.kind === "coexist" && spec.covered(manifest))) {
+      if (spec.kind === "reject") {
         errors.push(
           `${path}: the composer generates this module's '${anchor}' ` +
             `contribution from the module manifests (${spec.data}); delete ` +
@@ -1401,8 +1328,6 @@ export function build(): Map<string, Entry> {
         } else {
           consumed.push([module, body]);
         }
-      } else {
-        addContribution(anchor, wrapFragment(anchor, module, body));
       }
     }
     try {
