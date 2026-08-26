@@ -355,8 +355,12 @@ function entrySide(entry: SplitEntry): "above" | "below" {
 /** Markers are matched against latin1-decoded file bytes, so a non-ASCII
  * marker (utf-8 in the manifest, one code unit per byte in the file) could
  * never match and the carry would silently degrade; the declaration schema
- * forbids it, and this boundary re-checks what it consumes. */
-const ASCII_MARKER_RE = /^[\x20-\x7e]+$/;
+ * forbids it, and this boundary re-checks what it consumes. NON-EMPTY is
+ * load-bearing too: managedHalf matches line.trim() === marker, so an
+ * empty marker selects the synthetic empty line at EOF and reads a whole
+ * file as one half. Exported for tail_tripwire's legacy fallback - the
+ * two boundaries must reject the same damage. */
+export const ASCII_MARKER_RE = /^[\x20-\x7e]+$/;
 
 /** Manifest keys become filesystem paths under the target root, so a key
  * that could escape it (absolute, or carrying .. segments) is refused at

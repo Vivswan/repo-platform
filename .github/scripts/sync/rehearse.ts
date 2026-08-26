@@ -583,7 +583,10 @@ export function rehearseRepo(slug: string, options: RehearsalOptions): Rehearsal
     // bare run() proves nothing - the REPORT is the verdict, read below
     // and carried in the outcome for the fleet gate.
     section("tail tripwire (post-stamp)");
-    const tripwireReportPath = join(work, "tail-shrank.md");
+    // Written under the RUNNER_TEMP twin by the workflow's fixed name, so
+    // the PR-sections printer below surfaces the report body itself - the
+    // subprocess only prints path/count warnings.
+    const tripwireReportPath = join(temp, "tail-shrank.md");
     run(
       [
         "bun",
@@ -658,6 +661,10 @@ export function rehearseRepo(slug: string, options: RehearsalOptions): Rehearsal
           "License files this update deletes (the PR would stay manual-review)",
         ],
         ["manifest-license-warnings.md", "Registry metadata conflicting with the fleet license"],
+        [
+          "tail-shrank.md",
+          "TAIL TRIPWIRE report (the PR would stay manual-review; a trip is a sync bug)",
+        ],
       ];
       let anySection = false;
       for (const [file, title] of prSections) {
@@ -673,7 +680,9 @@ export function rehearseRepo(slug: string, options: RehearsalOptions): Rehearsal
       section("rehearsal summary");
       console.log(`validation: ${validationOk ? "ok" : "FAILED (diagnostics above)"}`);
       console.log(`ownership manifest: ${manifest}`);
-      console.log(`tail tripwire: ${tripwireReport === "" ? "clear" : "TRIPPED (report above)"}`);
+      console.log(
+        `tail tripwire: ${tripwireReport === "" ? "clear" : "TRIPPED (report in the PR-body sections above)"}`,
+      );
       if (keepWorkspace) console.log(`workspace kept for inspection: ${work}`);
       console.log(
         "note: the diff's _src_path points at the rehearsal build (the real sync writes the " +

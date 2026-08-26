@@ -219,6 +219,20 @@ describe("headSplitEntries", () => {
       /not an object/,
     );
   });
+
+  test("an empty or non-printable legacy marker throws (fails closed to unverifiable)", () => {
+    // managedHalf matches line.trim() === marker, so an EMPTY marker
+    // selects the synthetic empty line at EOF: the previous repo-owned
+    // half reads as empty and a delivered file could lose every local
+    // line while the wire reports clear. Same constraint splitEntries
+    // applies to grammar entries.
+    expect(() =>
+      headSplitEntries(manifestText({ "AGENTS.md": rawLegacy("", "above") }), "t"),
+    ).toThrow(/marker\/managed pair/);
+    expect(() =>
+      headSplitEntries(manifestText({ "AGENTS.md": rawLegacy(`# local §`, "above") }), "t"),
+    ).toThrow(/marker\/managed pair/);
+  });
 });
 
 describe("missingLines", () => {

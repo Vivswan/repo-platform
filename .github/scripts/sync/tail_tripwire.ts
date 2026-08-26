@@ -48,7 +48,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { cleanLocalRegion } from "../../../scripts/gitignore_local.ts";
 import { parseFlags } from "../shared/flags.ts";
-import { type SplitEntry, splitEntries } from "./preserve_local_content.ts";
+import { ASCII_MARKER_RE, type SplitEntry, splitEntries } from "./preserve_local_content.ts";
 import { MANIFEST_NAME, managedHalf } from "./stamp_manifest.ts";
 
 /** The complement of stamp_manifest's managedHalf: managedHalf returns a
@@ -120,6 +120,12 @@ export function headSplitEntries(text: string, where: string): Map<string, HeadS
     }
     if (
       typeof shaped.marker !== "string" ||
+      // splitEntries' own constraint: an EMPTY marker would match the
+      // synthetic empty line at EOF (managedHalf compares line.trim()),
+      // read the previous repo-owned half as empty, and report CLEAR
+      // while every local line vanished. Damaged legacy markers fail
+      // closed to the unverifiable path like every other damaged entry.
+      !ASCII_MARKER_RE.test(shaped.marker) ||
       (shaped.managed !== "above" && shaped.managed !== "below")
     ) {
       throw new Error(`${where}: split entry for ${path} lacks a valid marker/managed pair`);
