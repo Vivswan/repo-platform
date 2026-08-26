@@ -115,6 +115,17 @@ describe("copilot_review_gate.ts", () => {
     expect(r.output).toContain(AWAITING);
   });
 
+  // The template twin regressed on exactly this case (it tested the plain
+  // login only), so both suites now pin both spellings on both probes.
+  test("no rule, the [bot] spelling in the requested reviewers is involvement too", () => {
+    const r = run({
+      pr: { requested_reviewers: [{ login: "copilot-pull-request-reviewer[bot]" }] },
+    });
+    expect(r.exitCode).toBe(1);
+    expect(r.output).toContain(AWAITING);
+    expect(r.output).not.toContain("copilot is not a reviewer");
+  });
+
   test("no rule, an in-progress check run is involvement, not arrival", () => {
     const r = run({ checks: { check_runs: [{ status: "in_progress" }] } });
     expect(r.exitCode).toBe(1);
@@ -177,4 +188,22 @@ describe("copilot_review_gate.ts", () => {
     expect(r.exitCode).toBe(1);
     expect(r.output).toContain("::error::copilot_review_gate: check-runs response");
   });
+
+  // Parity with the template twin, which had to grow jq shape guards for
+  // exactly these bodies: gh exits 0 on some error payloads, and a probe
+  // that reads `{}` as "nothing here" passes the gate as uninvolved on a
+  // response it never really read. Zod is what stops it here.
+  for (const [label, shape, message] of [
+    ["rules", { rules: {} }, "branch rules response"],
+    ["check-runs", { checks: {} }, "check-runs response"],
+    ["reviews", { reviews: {} }, "reviews response"],
+    ["pull", { pr: {} }, "pull response"],
+  ] as const) {
+    test(`a wrong-shaped ${label} body fails immediately, never as uninvolved`, () => {
+      const r = run(shape);
+      expect(r.exitCode).toBe(1);
+      expect(r.output).toContain(`::error::copilot_review_gate: ${message}`);
+      expect(r.output).not.toContain("copilot is not a reviewer");
+    });
+  }
 });
