@@ -496,6 +496,50 @@ jobs:
       - name: Update from a previous build tree to a fresh build
         run: .github/scripts/ci/upgrade_path_test.sh
 
+  # Dry-run sync against every fleet repo's REAL current state (render,
+  # splice, resolve, validate - no push, no PR, private repos hard-skipped
+  # by rehearse_fleet.ts's fail-closed visibility rule): the class of bug
+  # the synthetic rows above cannot see - a real repo's local edits, stale
+  # markers, recorded answers - goes red here instead of during a live
+  # sync run. Gate mode turns failed rehearsals and failed validations
+  # into ::error:: annotations naming repo, phase, and files, and fails
+  # the job (bun run rehearse:fleet is the local, report-only twin). The
+  # job stays unconditional for the strict gate; the steps skip when the
+  # fleet PAT is absent from the event's secrets (Dependabot-triggered
+  # runs get Dependabot secrets, not this repo's) - the push run after
+  # merge and the weekly schedule still rehearse every change. No fork
+  # exposure: solo repo.
+  rehearse-fleet:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      HAS_FLEET_PAT: ${{ secrets.REPO_PLATFORM_TOKEN != '' }}
+    steps:
+      - uses: actions/checkout@v7
+        if: env.HAS_FLEET_PAT == 'true'
+      - uses: oven-sh/setup-bun@v2
+        if: env.HAS_FLEET_PAT == 'true'
+        with:
+          bun-version-file: .bun-version
+      - name: Install dependencies
+        if: env.HAS_FLEET_PAT == 'true'
+        run: bun install --frozen-lockfile --silent
+      # copier invokes the stamp hook with bun during the rehearsal update.
+      - name: Install copier
+        if: env.HAS_FLEET_PAT == 'true'
+        run: pipx install copier
+      - name: Rehearse the fleet sync
+        if: env.HAS_FLEET_PAT == 'true'
+        env:
+          # The PAT, not github.token: fleet discovery and the enrollment
+          # probe answer for the fleet token, exactly as production's
+          # plan job does.
+          GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
+        run: bun .github/scripts/ci/rehearse_fleet_gate.ts
+      - name: Note the tokenless skip
+        if: env.HAS_FLEET_PAT != 'true'
+        run: echo "::notice::rehearse-fleet skipped - this event's secrets carry no REPO_PLATFORM_TOKEN (a Dependabot-triggered run); the post-merge push run rehearses the same tree."
+
   # Conventional Commit PR title, checked inside the gate so branch
   # protection blocks on it. The skip lives on the STEP, not the job:
   # all-green treats a skipped needed job as failure, and CI also runs on
@@ -549,6 +593,7 @@ jobs:
       - skills-discovery
       - smoke-generate
       - upgrade-path
+      - rehearse-fleet
       - pr-title
       - codeql-javascript
     runs-on: ubuntu-latest

@@ -1,13 +1,18 @@
 // Unit tests for rehearse.ts's fleet-consumable pieces: the conflict-report
-// parser over resolve_copier_conflicts.ts's stdout shapes, and the
-// ownership-manifest stamp classification. Nothing here touches the
-// network or runs a real rehearsal.
+// parser over resolve_copier_conflicts.ts's stdout shapes, the validator-
+// diagnostics extraction for quiet-mode fleet rows, and the ownership-
+// manifest stamp classification. Nothing here touches the network or runs
+// a real rehearsal.
 
 import { describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { manifestStatus, parseConflictReport } from "../../.github/scripts/sync/rehearse.ts";
+import {
+  manifestStatus,
+  parseConflictReport,
+  validationErrorLines,
+} from "../../.github/scripts/sync/rehearse.ts";
 
 describe("parseConflictReport", () => {
   test("collects resolved files with their dropped-hunk counts", () => {
@@ -46,6 +51,43 @@ describe("parseConflictReport", () => {
 
   test("a conflict-free run parses to nothing", () => {
     expect(parseConflictReport("")).toEqual({ conflicts: [], malformed: [] });
+  });
+});
+
+describe("validationErrorLines", () => {
+  test("extracts the validator's per-file error lines, prefix stripped", () => {
+    const output = [
+      "advisory: something informational",
+      "error: .github/workflows/ci.yml: all-green is missing the needs entry",
+      "error: README.md: content does not match the recorded sha256",
+      "",
+      "2 error(s).",
+    ].join("\n");
+    expect(validationErrorLines(output)).toEqual([
+      ".github/workflows/ci.yml: all-green is missing the needs entry",
+      "README.md: content does not match the recorded sha256",
+    ]);
+  });
+
+  test("caps the list and counts the rest", () => {
+    const output = [1, 2, 3, 4, 5].map((n) => `error: file${n}.md: broken`).join("\n");
+    expect(validationErrorLines(output)).toEqual([
+      "file1.md: broken",
+      "file2.md: broken",
+      "file3.md: broken",
+      "... and 2 more",
+    ]);
+  });
+
+  test("a crash before the report falls back to the output's last non-empty line", () => {
+    expect(validationErrorLines("boom\nTypeError: x is not a function\n\n")).toEqual([
+      "TypeError: x is not a function",
+    ]);
+  });
+
+  test("empty output yields no lines rather than an empty string entry", () => {
+    expect(validationErrorLines("")).toEqual([]);
+    expect(validationErrorLines("\n\n")).toEqual([]);
   });
 });
 
