@@ -86,7 +86,7 @@ jobs:
       # can never version-skew. NOT github.workflow_sha: that is the
       # CALLER's workflow file, a sha absent from this repository. The
       # fallback covers contexts that omit the property (GHES): main,
-      # what staging-channel callers pin anyway.
+      # what callers pin anyway.
       - name: Check out repo-platform
         if: steps.token.outputs.proceed == 'true'
         uses: actions/checkout@v7

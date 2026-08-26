@@ -210,8 +210,8 @@ describe("parseDiscoveredList", () => {
     // The legacy ladder checked exactly those two fields; everything else
     // passed through untouched, whatever its type - pinned so a schema
     // tightening cannot silently change it.
-    expect(parseDiscoveredList([{ repo: "o/a", private: true, channel: 42 }])).toEqual([
-      { repo: "o/a", private: true, channel: 42 },
+    expect(parseDiscoveredList([{ repo: "o/a", private: true, extra: 42 }])).toEqual([
+      { repo: "o/a", private: true, extra: 42 },
     ]);
   });
 
