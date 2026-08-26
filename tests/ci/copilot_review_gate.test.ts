@@ -17,8 +17,10 @@ const script = join(import.meta.dir, "../../.github/scripts/ci/copilot_review_ga
 const HEAD_SHA = "b".repeat(40);
 const OLD_SHA = "c".repeat(40);
 const COPILOT_RULE = [{ type: "copilot_code_review" }];
-const COMPLETED_CHECK = { check_runs: [{ status: "completed" }] };
-const AWAITING = "::error::waiting for Copilot review; this job is re-run automatically";
+const COMPLETED_CHECK = {
+  check_runs: [{ status: "completed", pull_requests: [{ number: 12 }] }],
+};
+const AWAITING = "::error::waiting for Copilot's review of";
 
 // Dispatches on the requested path: branch rules, check-runs, the
 // reviews listing, or the PR itself. GH_FAIL fails every call (the
@@ -92,6 +94,17 @@ describe("copilot_review_gate.ts", () => {
     expect(r.exitCode).toBe(0);
     expect(r.output).toContain("arrived");
     expect(r.output).toContain(HEAD_SHA);
+  });
+
+  test("a sibling PR's completed check run at the same sha is NOT this PR's arrival", () => {
+    // Check runs are commit-scoped: stacked PRs share head shas, so a run
+    // associated with another PR must not satisfy this PR's gate.
+    const r = run({
+      rules: COPILOT_RULE,
+      checks: { check_runs: [{ status: "completed", pull_requests: [{ number: 99 }] }] },
+    });
+    expect(r.exitCode).toBe(1);
+    expect(r.output).toContain("waiting for Copilot's review of");
   });
 
   test("rule present, review posted for the head sha: passes without any check run", () => {

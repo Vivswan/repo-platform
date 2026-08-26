@@ -50,11 +50,13 @@
 
 import type { ZodType } from "zod";
 import { z } from "zod";
-import { env, error, requireEnv } from "../shared/gha.ts";
+import { env, error, notice, requireEnv } from "../shared/gha.ts";
 import { parseJsonWith } from "../shared/json.ts";
 import { capture } from "../shared/proc.ts";
 import {
   COPILOT_CHECK_NAME as CHECK_NAME,
+  checkRunArrivedForPr,
+  checkRunsSchema,
   fetchAllReviews,
   isCopilot,
 } from "./copilot_review_common.ts";
@@ -67,9 +69,6 @@ const prNumber = requireEnv("PR_NUMBER");
 const baseBranch = requireEnv("BASE_BRANCH");
 
 const rulesSchema = z.array(z.object({ type: z.string() }));
-const checkRunsSchema = z.object({
-  check_runs: z.array(z.object({ status: z.string() })),
-});
 const pullSchema = z.object({
   requested_reviewers: z.array(z.object({ login: z.string() })),
 });
@@ -88,14 +87,22 @@ function fetchJson<T>(path: string, schema: ZodType<T>, label: string): T | null
 }
 
 function failAwaitingReview(): never {
+  // Auto-requesting the review is impossible (the reviewers endpoint 422s
+  // on the bot login, silently ignores "copilot", and GraphQL rejects the
+  // bot id), so the message names the exact HUMAN action.
   error(
-    `waiting for Copilot review; this job is re-run automatically when it posts (no completed '${CHECK_NAME}' check run or posted review at ${headSha} yet).`,
+    `waiting for Copilot's review of ${headSha}; this job re-runs automatically when the review posts - re-run it manually otherwise.`,
+  );
+  notice(
+    "Copilot's review is usually requested automatically on push; if no review appears in a few minutes, request it manually: PR sidebar -> Reviewers -> Copilot (drafts and exhausted Copilot quotas suppress the automatic request).",
   );
   process.exit(1);
 }
 
 const rules = fetchJson(
-  `repos/${repository}/rules/branches/${baseBranch}`,
+  // Encoded: a "/" in a branch name (release/v2) would otherwise read as
+  // a REST path separator and probe the wrong resource.
+  `repos/${repository}/rules/branches/${encodeURIComponent(baseBranch)}`,
   rulesSchema,
   "copilot_review_gate: branch rules response",
 );
@@ -114,8 +121,14 @@ const copilotReviews = (reviews ?? []).filter(
   (review) => review.user !== null && isCopilot(review.user.login),
 );
 
+// Arrival is PR-SCOPED: a completed check run counts only when its PR
+// associations name THIS PR (checkRunArrivedForPr - the same head sha on
+// a stacked sibling PR carries the other PR's run), and a posted review
+// counts by its commit_id. Involvement below stays commit-scoped on
+// purpose: over-detecting involvement fails CLOSED (a re-armable red),
+// never open.
 const arrived =
-  checks?.check_runs.some((run) => run.status === "completed") ||
+  (checks !== null && checkRunArrivedForPr(checks.check_runs, Number(prNumber))) ||
   copilotReviews.some((review) => review.commit_id === headSha);
 if (arrived) {
   console.log(`Copilot's review (${CHECK_NAME}) arrived at ${headSha}.`);

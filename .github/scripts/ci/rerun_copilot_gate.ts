@@ -37,6 +37,8 @@ import { parseJsonWith } from "../shared/json.ts";
 import { capture } from "../shared/proc.ts";
 import {
   COPILOT_CHECK_NAME as CHECK_NAME,
+  checkRunArrivedForPr,
+  checkRunsSchema,
   fetchAllReviews,
   isCopilot,
 } from "./copilot_review_common.ts";
@@ -63,9 +65,6 @@ const runShape = z.object({
 const runsSchema = z.object({ workflow_runs: z.array(runShape) });
 const jobsSchema = z.object({
   jobs: z.array(z.object({ id: z.number(), name: z.string(), conclusion: z.string().nullable() })),
-});
-const checkRunsSchema = z.object({
-  check_runs: z.array(z.object({ status: z.string() })),
 });
 const commitPullsSchema = z.array(
   z.object({ number: z.number(), head: z.object({ sha: z.string() }) }),
@@ -160,19 +159,25 @@ if (gateJob.conclusion !== "failure") {
 // PR is found through the commit's associated PRs). The review trigger
 // IS the arrival, so it skips this.
 if (runId !== "") {
-  const checks = mustFetch(
-    `repos/${repository}/commits/${headSha}/check-runs?check_name=${CHECK_NAME}&filter=latest`,
-    checkRunsSchema,
-    "rerun_copilot_gate: check-runs response",
-  ).check_runs;
-  let arrived = checks.some((check) => check.status === "completed");
-  if (!arrived) {
-    const pr = mustFetch(
-      `repos/${repository}/commits/${headSha}/pulls`,
-      commitPullsSchema,
-      "rerun_copilot_gate: commit pulls response",
-    ).find((pull) => pull.head.sha === headSha);
-    if (pr !== undefined) {
+  // The PR association comes FIRST: check runs are commit-scoped, so a
+  // completed run at this sha can belong to a stacked sibling PR -
+  // acceptance needs the PR number (checkRunArrivedForPr, the gate's own
+  // predicate). No associated PR means nothing to scope against: defer
+  // quietly, the review trigger carries its own arrival.
+  const pr = mustFetch(
+    `repos/${repository}/commits/${headSha}/pulls`,
+    commitPullsSchema,
+    "rerun_copilot_gate: commit pulls response",
+  ).find((pull) => pull.head.sha === headSha);
+  let arrived = false;
+  if (pr !== undefined) {
+    const checks = mustFetch(
+      `repos/${repository}/commits/${headSha}/check-runs?check_name=${CHECK_NAME}&filter=latest`,
+      checkRunsSchema,
+      "rerun_copilot_gate: check-runs response",
+    ).check_runs;
+    arrived = checkRunArrivedForPr(checks, pr.number);
+    if (!arrived) {
       // Paginated (all pages, PAGINATED_TIMEOUT_MS budget): GET reviews is
       // OLDEST-first, so one page of a >100-review PR shows only stale
       // reviews and the fresh head's arrival would stay invisible.

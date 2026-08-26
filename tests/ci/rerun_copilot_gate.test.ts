@@ -184,9 +184,26 @@ describe("rerun_copilot_gate.ts", () => {
   });
 
   test("CI-completed trigger: re-runs only when the review actually arrived", () => {
-    const r = run({ env: { RUN_ID: "77" } });
+    // The completed check run counts only through ITS PR association
+    // (checkRunArrivedForPr), so the commit's PR must resolve first.
+    const r = run({
+      env: { RUN_ID: "77" },
+      checks: { check_runs: [{ status: "completed", pull_requests: [{ number: 12 }] }] },
+      commitPulls: [{ number: 12, head: { sha: HEAD_SHA } }],
+    });
     expect(r.exitCode).toBe(0);
     expect(r.reruns.length).toBe(1);
+  });
+
+  test("CI-completed trigger: a sibling PR's check run at the same sha defers quietly", () => {
+    const r = run({
+      env: { RUN_ID: "77" },
+      checks: { check_runs: [{ status: "completed", pull_requests: [{ number: 99 }] }] },
+      commitPulls: [{ number: 12, head: { sha: HEAD_SHA } }],
+    });
+    expect(r.exitCode).toBe(0);
+    expect(r.reruns).toEqual([]);
+    expect(r.output).toContain("has not arrived");
   });
 
   test("CI-completed trigger: a posted head-sha review counts as arrival even without the check run", () => {
