@@ -28,7 +28,11 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { loadManifests } from "../../../scripts/module_manifests.ts";
-import { parseSettingsDoc } from "../fleet/merge_settings_layers.ts";
+import {
+  loadOverrideLayer,
+  mergeSettingsLayers,
+  parseSettingsDoc,
+} from "../fleet/merge_settings_layers.ts";
 import {
   factsFromTargetDir,
   managedSettings,
@@ -155,6 +159,7 @@ const IDENTITY_KEYS = new Set(["description", "homepage", "topics", "private"]);
 export function droppedOverrides(
   old: Record<string, unknown>,
   managed: Record<string, unknown>,
+  override: Record<string, unknown> = {},
 ): string[] {
   const dropped: string[] = [];
   const classify = (key: string, oldValue: unknown, managedValue: unknown) => {
@@ -162,11 +167,30 @@ export function droppedOverrides(
       dropped.push(key);
     }
   };
+  // Anything the OVERRIDE layer declares is unbeatable from a repo file,
+  // whatever the old file said about it. Listing it would tell the
+  // reviewer to re-add fleet law as config that cannot take effect, so it
+  // is skipped outright rather than compared.
+  const overrideDeclaresChild = (key: string, child: string) => {
+    const section = override[key];
+    return isMapping(section) && child in section;
+  };
+  const overrideDeclaresEntry = (key: string, name: string, fold: (n: string) => string) => {
+    const section = override[key];
+    return (
+      Array.isArray(section) &&
+      section.some(
+        (entry) =>
+          isMapping(entry) && typeof entry.name === "string" && fold(entry.name) === fold(name),
+      )
+    );
+  };
   for (const [key, oldValue] of Object.entries(old)) {
     const managedValue = managed[key];
     if (isMapping(oldValue) && isMapping(managedValue)) {
       for (const [child, childValue] of Object.entries(oldValue)) {
         if (key === "repository" && IDENTITY_KEYS.has(child)) continue; // carried
+        if (overrideDeclaresChild(key, child)) continue; // fleet law
         classify(`${key}.${child}`, childValue, managedValue[child]);
       }
       continue;
@@ -185,10 +209,12 @@ export function droppedOverrides(
           dropped.push(`${key} (a nameless entry)`);
           continue;
         }
+        if (overrideDeclaresEntry(key, name, fold)) continue; // fleet law
         classify(`${key} ${JSON.stringify(name)}`, entry, managedByName.get(fold(name)));
       }
       continue;
     }
+    if (key in override) continue; // fleet law
     classify(key, oldValue, managedValue);
   }
   return dropped;
@@ -293,7 +319,15 @@ export function transitionSettingsStarter(
         // throw anywhere above leaves the old file (marker included)
         // untouched, so the fail-soft retry contract holds.
         const starter = renderStarter(readFileSync(starterTemplatePath, "utf-8"), seed);
-        section = layeringSummary(droppedOverrides(old, managedSettings(facts, manifests)));
+        // The basis is EVERY fleet layer, override included: the merge
+        // policy and the main/non-bypassable rulesets live in layer 6
+        // now, and a legacy file declares all of them. Diffing against
+        // layers 1-4 alone would report the whole of fleet law as
+        // "dropped overrides" on every legacy repo, telling reviewers to
+        // paste it back into a file that cannot win over it anyway.
+        const override = loadOverrideLayer();
+        const fleet = mergeSettingsLayers(managedSettings(facts, manifests), override);
+        section = layeringSummary(droppedOverrides(old, fleet, override));
         writeFileSync(settingsPath, starter);
         notice(
           `${label}: replaced the legacy baseline .github/settings.yml with the identity starter ` +

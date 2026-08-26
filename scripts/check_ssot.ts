@@ -1398,7 +1398,7 @@ const rules: Rule[] = [
       for (const name of required) {
         if (!rosterNames.has(name)) {
           mismatches.push({
-            file: ".github/settings-baseline.yml (or a manifest's settings_labels)",
+            file: ".github/settings-baseline.yml (or a module's settings.yml layer)",
             expected: `label '${name}' in the managed roster`,
             got: "missing",
           });
@@ -1579,7 +1579,7 @@ const rules: Rule[] = [
         if (!roster.has(name)) {
           mismatches.push({
             file: rel,
-            expected: `label '${name}' declared in templates/release-please/module.yml settings_labels`,
+            expected: `label '${name}' declared in templates/release-please/settings.yml`,
             got: "not in the manifest roster",
           });
         }

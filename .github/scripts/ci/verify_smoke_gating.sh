@@ -428,7 +428,7 @@ if has settings-sync; then
   if has uv; then present_line "  - name: python:uv" "$merged_out"; else absent "python:uv" "$merged_out"; fi
   if has rust; then present_line "  - name: rust" "$merged_out"; else absent "name: rust" "$merged_out"; fi
   # release-please brings its labels and the release-tags ruleset from its
-  # manifest's settings_labels/settings_rulesets.
+  # own templates/release-please/settings.yml layer.
   if has release-please; then
     present "autorelease: pending" "$merged_out"
     present "autorelease: tagged" "$merged_out"

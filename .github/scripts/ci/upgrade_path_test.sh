@@ -868,7 +868,9 @@ echo "split-file rebuild OK: tails byte-preserved, managed halves byte-equal to 
 # old baseline in a settings.yml still marked with the retired mergeable
 # class, customized with its own topics and one extra label. The sync must
 # REPLACE the file with the identity starter - custom topics carried over,
-# live description seeded from the freshly recorded answers - and list the
+# and the description seeded from the freshly recorded answers, because
+# this fixture deliberately declares none (the FALLBACK leg; the
+# declared-wins leg is exercised below) - and list the
 # extra label (the only declaration differing from the computed managed
 # baseline) in the PR-body section that holds the PR for review. Fixture
 # on the NEW build: the legacy file shape is planted by hand, because no
@@ -898,7 +900,6 @@ cat > .github/settings.yml <<'LEGACY'
 # Rendered by the settings-sync module (legacy baseline shape).
 # repo-platform:mergeable
 repository:
-  description: Settings-transition project
   homepage: ""
   topics: kept, custom, topics
   private: false
@@ -932,15 +933,15 @@ bun "$GITHUB_WORKSPACE/actions/validate-template/validate_generated_files.ts" "$
 cd "$SET"
 # The legacy file was replaced with the identity starter: the retired
 # marker and the baseline copies are gone, the identity keys survive -
-# custom topics from the old file, the live description from the
-# post-update recorded answers.
+# custom topics from the old file, and the description from the
+# post-update recorded answers because the old file declared none.
 if grep -qxF "# repo-platform:mergeable" .github/settings.yml; then
   fail "the layering transition left the retired mergeable marker in settings.yml"
 fi
 grep -qxF '  topics: "kept, custom, topics"' .github/settings.yml \
   || fail "the transition dropped the repo's custom topics from the new starter"
 grep -qxF '  description: "Live transition description"' .github/settings.yml \
-  || fail "the transition did not seed the live description into the new starter"
+  || fail "the transition did not fall back to the recorded description"
 grep -qxF "  private: false" .github/settings.yml \
   || fail "the transition did not seed private into the new starter"
 if grep -qF "has_issues" .github/settings.yml; then
@@ -976,4 +977,30 @@ cmp -s "$SET/.github/settings.yml" "$SET_WORK/settings-after-first-pass.yml" \
 if [ -s "$SET_WORK/settings-layering.md" ]; then
   fail "the second pass wrote a settings-layering section for nothing"
 fi
+# The other precedence leg: a legacy file that DOES declare a description
+# must keep its own, not the recorded answer. Declared-wins is the point
+# of the seeding rule (the heal was enforcing that declaration), so both
+# legs are pinned. Re-plant a legacy file in the transitioned tree - the
+# retired marker is what re-arms the one-time transition.
+cd "$SET"
+cat > .github/settings.yml <<'LEGACY2'
+---
+# Rendered by the settings-sync module (legacy baseline shape).
+# repo-platform:mergeable
+repository:
+  description: Declared beats the answer
+  homepage: ""
+  topics: kept, custom, topics
+  private: false
+LEGACY2
+cd "$GITHUB_WORKSPACE"
+RECOVER="" RUNNER_TEMP="$SET_WORK" bun .github/scripts/sync/preserve_repo_owned.ts
+cd "$SET"
+grep -qxF '  description: "Declared beats the answer"' .github/settings.yml \
+  || fail "the transition did not prefer the old file's declared description"
+if grep -qF "Live transition description" .github/settings.yml; then
+  fail "the transition used the recorded answer over a declared description"
+fi
+echo "settings layering precedence OK: declared description wins, recorded answer is the fallback"
+
 echo "settings layering transition OK: starter replaced once, custom topics carried, dropped override listed"

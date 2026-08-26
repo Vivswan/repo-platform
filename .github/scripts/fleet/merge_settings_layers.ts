@@ -86,32 +86,30 @@ export function appendRules(lower: unknown[], higher: unknown[]): unknown[] {
   }
   const taken = new Set<string>();
   const merged: unknown[] = [];
-  for (const rule of lower) {
-    const type = ruleType(rule);
-    if (type === null) {
-      merged.push(rule);
-      continue;
-    }
-    // First occurrence wins on BOTH sides. Without this, a layer that
-    // declares one type twice emits it twice (or emits the higher layer's
-    // replacement twice), and GitHub rejects the ruleset - which would
-    // stop layer 6 applying at all.
-    if (taken.has(type)) continue;
-    const replacement = higherByType.get(type);
-    merged.push(replacement === undefined ? rule : replacement);
-    taken.add(type);
-  }
-  for (const rule of higher) {
-    const type = ruleType(rule);
-    if (type === null) {
-      merged.push(rule);
-      continue;
-    }
-    if (!taken.has(type)) {
-      merged.push(rule);
+  const take = (rules: unknown[]) => {
+    for (const rule of rules) {
+      const type = ruleType(rule);
+      // A rule with no usable `type` cannot be deduplicated, and GitHub
+      // rejects it anyway; dropping it here keeps one malformed entry
+      // from being emitted twice (once per side) and turning a rejected
+      // ruleset into a silently unapplied one.
+      if (type === null) {
+        warning(
+          `a ruleset rule without a string 'type' was dropped from the merge: ${JSON.stringify(rule)}`,
+        );
+        continue;
+      }
+      // First occurrence wins on BOTH sides. Without this, a layer that
+      // declares one type twice emits it twice (or emits the higher
+      // layer's replacement twice), and GitHub rejects the ruleset -
+      // which would stop layer 6 applying at all.
+      if (taken.has(type)) continue;
+      merged.push(higherByType.get(type) ?? rule);
       taken.add(type);
     }
-  }
+  };
+  take(lower);
+  take(higher);
   return merged;
 }
 

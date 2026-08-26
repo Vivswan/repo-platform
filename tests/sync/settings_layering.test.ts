@@ -321,6 +321,58 @@ describe("transitionSettingsStarter", () => {
     expect(doc.repository.private).toBe(false);
   });
 
+  test("fleet law that moved into the override is NOT reported as dropped", () => {
+    // A legacy file declares the whole old baseline, and the merge policy
+    // plus the main / non-bypassable rulesets now live in the override
+    // layer. Diffing against layers 1-4 alone would call all of it
+    // "dropped overrides" and tell the reviewer to paste fleet law back
+    // into a file that cannot win over it.
+    const legacy = [
+      "---",
+      "# Rendered by the settings-sync module.",
+      LEGACY_MERGEABLE_LINE,
+      "repository:",
+      "  description: Old declared description",
+      "  private: false",
+      "  has_issues: true",
+      "  allow_merge_commit: false",
+      "  allow_squash_merge: true",
+      "  squash_merge_commit_title: PR_TITLE",
+      "labels:",
+      "  - name: incident",
+      '    color: "b60205"',
+      "    description: A deliberate repo-only label",
+      "rulesets:",
+      "  - name: main",
+      "    target: branch",
+      "    enforcement: active",
+      "  - name: non-bypassable",
+      "    target: branch",
+      "    enforcement: active",
+      "",
+    ].join("\n");
+    const { dir, out } = target({
+      settings: legacy,
+      modules: "modules: [settings-sync]\n",
+      answers,
+    });
+    transitionSettingsStarter(dir, out, "t");
+    const section = readFileSync(out, "utf-8");
+    // The one genuine repo-only declaration is listed...
+    expect(section).toContain('labels "incident"');
+    // ...and nothing that the fleet layers (override included) supply is.
+    for (const fleet of [
+      "repository.allow_merge_commit",
+      "repository.allow_squash_merge",
+      "repository.squash_merge_commit_title",
+      "repository.has_issues",
+      'rulesets "main"',
+      'rulesets "non-bypassable"',
+    ]) {
+      expect(section).not.toContain(fleet);
+    }
+  });
+
   test("fail-soft: a broken answers file leaves the old file for the next sync", () => {
     const { dir, out } = target({
       settings: legacySettings,
