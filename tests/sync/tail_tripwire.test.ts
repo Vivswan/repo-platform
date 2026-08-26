@@ -213,6 +213,12 @@ describe("headSplitEntries", () => {
     const files = { "AGENTS.md": { class: "split", grammar: "mystery", marker: SENTINEL } };
     expect(() => headSplitEntries(manifestText(files), "t")).toThrow(/refusing to guess/);
   });
+
+  test("a damaged (non-object) entry throws instead of silently skipping its file", () => {
+    expect(() => headSplitEntries(manifestText({ "AGENTS.md": null as never }), "t")).toThrow(
+      /not an object/,
+    );
+  });
 });
 
 describe("missingLines", () => {
@@ -343,6 +349,21 @@ describe("compareHalves", () => {
     );
     expect(finding?.kind).toBe("unverifiable");
     expect(finding?.kind === "unverifiable" && finding.reason).toContain("delivered copy");
+  });
+
+  test("a grammar change between renders checks survival in the whole delivered file", () => {
+    // HEAD declared tail-marker, the new render declares bounded-region:
+    // the two claims draw different boundaries, so relocation across the
+    // change is fine while loss still fires.
+    const head = `managed\n${SENTINEL}\nkeep-line\n`;
+    const kept = regionFile(["keep-line"], ["*.new"]);
+    expect(
+      compareHalves(regionEntry(".gitignore"), asHead(tailEntry(".gitignore")), head, kept),
+    ).toBeNull();
+    const dropped = regionFile([], ["*.new"]);
+    expect(
+      compareHalves(regionEntry(".gitignore"), asHead(tailEntry(".gitignore")), head, dropped),
+    ).toEqual({ path: ".gitignore", kind: "shrank", missing: ["keep-line"] });
   });
 });
 
@@ -586,6 +607,17 @@ describe("tail_tripwire script", () => {
     });
     const root = makeTarget(
       { "AGENTS.md": agentsHead, [MANIFEST_NAME]: mystery },
+      { "AGENTS.md": agentsDelivered, [MANIFEST_NAME]: headManifest },
+    );
+    const result = runScript(root);
+    expect(result.exitCode).toBe(0);
+    expect(result.report).toContain("no usable ownership manifest");
+  });
+
+  test("a HEAD manifest with a damaged entry is unverifiable, not silently skipped", () => {
+    const damaged = manifestText({ "AGENTS.md": null as never });
+    const root = makeTarget(
+      { "AGENTS.md": agentsHead, [MANIFEST_NAME]: damaged },
       { "AGENTS.md": agentsDelivered, [MANIFEST_NAME]: headManifest },
     );
     const result = runScript(root);

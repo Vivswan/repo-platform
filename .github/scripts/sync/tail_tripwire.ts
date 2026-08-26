@@ -103,7 +103,11 @@ export function headSplitEntries(text: string, where: string): Map<string, HeadS
   }
   const out = new Map<string, HeadSplit>();
   for (const [path, entry] of Object.entries(files as Record<string, unknown>)) {
-    if (typeof entry !== "object" || entry === null) continue;
+    if (typeof entry !== "object" || entry === null) {
+      // Fail closed like the strict parse: a damaged entry must route the
+      // manifest to the unverifiable path, not silently skip its file.
+      throw new Error(`${where}: entry for ${path} is not an object`);
+    }
     const shaped = entry as Record<string, unknown>;
     if (shaped.class !== "split") continue;
     if ("grammar" in shaped) {
