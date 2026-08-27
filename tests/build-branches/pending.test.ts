@@ -20,8 +20,16 @@ const mainHistory = (ancestor: string, descendant: string): boolean =>
   ancestor === OLD && descendant === NEW;
 
 describe("pendingRefFor", () => {
-  test("keys the ref by the full source sha", () => {
-    expect(pendingRefFor(OLD)).toBe(`${PENDING_REF_PREFIX}${OLD}`);
+  test("keys the ref by the full source sha, in the BRANCH namespace", () => {
+    // The literal prefix is load-bearing security config, not a free
+    // choice: rulesets only target branches and tags, and the
+    // build-branches-writer ruleset (.github/settings.yml) covers
+    // build-pending/** so plain contents write cannot park a poisoned
+    // tree the publisher would promote by name-match. Moving the prefix
+    // out of refs/heads/ would silently drop that protection, so the
+    // expectation here is spelled out rather than derived.
+    expect(pendingRefFor(OLD)).toBe(`refs/heads/build-pending/${OLD}`);
+    expect(PENDING_REF_PREFIX).toBe("refs/heads/build-pending/");
   });
 
   test("rejects anything but a full sha - a ref name is a filesystem-ish input", () => {

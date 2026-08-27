@@ -30,6 +30,7 @@ import {
   renderedSeparationErrors,
   type SourcedEntry,
   spliceContributions,
+  templatePathErrors,
 } from "../../scripts/compose_template";
 import { renderJinjaFile } from "../../scripts/jinja_subset";
 import { type ModuleManifest, parseManifest } from "../../scripts/module_manifests";
@@ -1171,6 +1172,41 @@ describe("plainTemplatePath", () => {
       ".github/workflows/ci.yml.jinja",
     );
     expect(plainTemplatePath("CLAUDE.md")).toBe("CLAUDE.md");
+  });
+});
+
+// Fail-closed filename validation: a name the composer cannot honestly
+// strip (or that copier would land under a different name than the
+// manifest records) is a compose error, never a silent divergence.
+describe("templatePathErrors", () => {
+  test("accepts plain names, recognized gates, and gated directories", () => {
+    for (const ok of [
+      "AGENTS.md.jinja",
+      "{% if not private %}CONTRIBUTING.md{% endif %}.jinja",
+      "{% if 'demo' in modules %}.demo{% endif %}/config.yml",
+      ".github/workflows/ci.yml.jinja",
+    ]) {
+      expect(templatePathErrors(ok)).toEqual([]);
+    }
+  });
+
+  test("rejects residual jinja syntax the gate-stripping does not recognize", () => {
+    expect(templatePathErrors("a{#comment#}b.md.jinja").join("\n")).toContain("jinja syntax");
+    expect(templatePathErrors("{{ project_slug }}.md").join("\n")).toContain("jinja syntax");
+  });
+
+  test("rejects a .jinja suffix wrapped inside the gate", () => {
+    expect(
+      templatePathErrors("{% if 'demo' in modules %}foo.jinja{% endif %}").join("\n"),
+    ).toContain("wraps a .jinja suffix inside its filename gate");
+  });
+
+  test("rejects edge whitespace on the LANDED name, the suffix stripped first", () => {
+    expect(templatePathErrors("docs /note.md").join("\n")).toContain("whitespace");
+    // 'foo .jinja' has clean emitted segments but LANDS as 'foo '.
+    expect(templatePathErrors("foo .jinja").join("\n")).toContain("whitespace");
+    // An INTERIOR space is fine: pathspec only strips trailing whitespace.
+    expect(templatePathErrors("docs/my note.md")).toEqual([]);
   });
 });
 

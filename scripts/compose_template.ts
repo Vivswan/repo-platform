@@ -239,9 +239,9 @@ function allOf(gates: string[]): string {
  *  destination name than the manifest records), a gate's inner name must
  *  not end in .jinja (the suffix belongs OUTSIDE the gate; wrapped
  *  inside, the emitted plain name would be treated as a template and land
- *  suffix-stripped, again diverging from the manifest), and no segment
- *  may carry edge whitespace (pathspec strips trailing whitespace from
- *  gitwildmatch patterns, so such a path could never be excluded
+ *  suffix-stripped, again diverging from the manifest), and no LANDED
+ *  segment may carry edge whitespace (pathspec strips trailing whitespace
+ *  from gitwildmatch patterns, so such a path could never be excluded
  *  literally). */
 export function templatePathErrors(logical: string): string[] {
   const errors: string[] = [];
@@ -270,12 +270,17 @@ export function templatePathErrors(logical: string): string[] {
       );
     }
   }
-  for (const segment of emitted.split("/")) {
+  // Checked on the LANDED name (suffix stripped): 'foo .jinja' has clean
+  // emitted segments but lands as 'foo ', which pathspec's trailing-
+  // whitespace stripping could never match literally.
+  const landed = emitted.endsWith(JINJA_SUFFIX) ? emitted.slice(0, -JINJA_SUFFIX.length) : emitted;
+  for (const segment of landed.split("/")) {
     if (segment !== segment.trim()) {
       errors.push(
-        `'${logical}' has a path segment with leading or trailing whitespace - ` +
-          "pathspec strips trailing whitespace from gitwildmatch patterns, so " +
-          "the generated _exclude could never match it literally; rename the file",
+        `'${logical}' lands with a path segment carrying leading or trailing ` +
+          "whitespace - pathspec strips trailing whitespace from gitwildmatch " +
+          "patterns, so the generated _exclude could never match it literally; " +
+          "rename the file",
       );
       break;
     }
