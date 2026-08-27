@@ -94,7 +94,12 @@ export function hasManagedHeader(source: string): boolean {
 
 // Declared paths and marker lines ride through YAML declarations, the
 // manifest template's jinja single-quoted string literals, and JSON, so a
-// single quote is refused (it would end the jinja literal early). Markers
+// single quote is refused (it would end the jinja literal early), and so
+// is every character JSON.stringify must escape: the manifest template
+// builds its entry lines with JSON.stringify, jinja UNESCAPES backslash
+// sequences inside string literals, and a control character lands raw
+// inside the JSON - a double quote breaks the rendered JSON, a backslash
+// decodes to a different character, a tab corrupts the string. Markers
 // are matched as whole trimmed lines against latin1-decoded file bytes by
 // the sync's split-file rebuild, so they must be trim-stable printable
 // ASCII (a non-ASCII marker would decode to different code units in the
@@ -102,16 +107,30 @@ export function hasManagedHeader(source: string): boolean {
 // comments in the marker's own syntax, so a marker must open as a hash or
 // HTML comment - a new comment syntax extends the appendix writer and
 // this schema together.
-const singleLineNoQuote = (what: string) =>
+const manifestSafeLine = (what: string) =>
   z
     .string()
     .min(1)
     .refine((value) => !/[\r\n]/.test(value), { message: `${what} must be a single line` })
     .refine((value) => !value.includes("'"), {
       message: `${what} must not contain ' (it lands inside the manifest template's jinja string literals)`,
+    })
+    .superRefine((value, ctx) => {
+      for (const ch of value) {
+        if (JSON.stringify(ch) !== `"${ch}"`) {
+          ctx.addIssue({
+            code: "custom",
+            message:
+              `${what} must not contain ${JSON.stringify(ch)} - JSON.stringify escapes it, ` +
+              "and the manifest template's jinja string literals unescape backslash " +
+              "sequences, so the rendered manifest would not round-trip the value",
+          });
+          return;
+        }
+      }
     });
 
-const declaredPath = singleLineNoQuote("each ownership path")
+const declaredPath = manifestSafeLine("each ownership path")
   .refine((value) => value === value.trim(), {
     message: "each ownership path must not have leading or trailing whitespace",
   })
@@ -127,7 +146,7 @@ const declaredPath = singleLineNoQuote("each ownership path")
   });
 
 const markerLine = (what: string) =>
-  singleLineNoQuote(what)
+  manifestSafeLine(what)
     .refine((value) => value === value.trim(), {
       message: `${what} is matched as a whole trimmed line, so it must not have leading or trailing whitespace`,
     })

@@ -135,6 +135,28 @@ describe("ownershipEntrySchema", () => {
     }
   });
 
+  // Entries ride through JSON.stringify into the manifest template, whose
+  // jinja string literals UNESCAPE backslash sequences: a double quote
+  // renders the manifest as invalid JSON, a backslash decodes to a
+  // different character (\b became a backspace), and a control character
+  // lands raw inside the JSON string. One rule refuses them all.
+  test("rejects paths and markers carrying characters JSON must escape", () => {
+    for (const path of ['a"b.md', "a\\b.md", "a\tb.md"]) {
+      expect(ownershipEntrySchema.safeParse(managed(path)).success).toBe(false);
+    }
+    const quoted = ownershipEntrySchema.safeParse(managed('a"b.md'));
+    expect(quoted.success).toBe(false);
+    if (!quoted.success) {
+      expect(quoted.error.issues.map((issue) => issue.message).join("; ")).toContain('"\\""');
+    }
+    expect(ownershipEntrySchema.safeParse(tail("X.md", '# say "hi"')).success).toBe(false);
+    expect(ownershipEntrySchema.safeParse(tail("X.md", "# back\\slash")).success).toBe(false);
+    // A lone surrogate is JSON-escaped too; a well-formed astral character
+    // is not and stays a legal path (markers are ASCII-restricted anyway).
+    expect(ownershipEntrySchema.safeParse(managed("a\ud800b.md")).success).toBe(false);
+    expect(ownershipEntrySchema.safeParse(managed("emoji-\u{1f600}.md")).success).toBe(true);
+  });
+
   test("rejects non-ASCII markers (latin1 file bytes would never match them)", () => {
     expect(ownershipEntrySchema.safeParse(tail("X.md", "# local § section")).success).toBe(false);
   });
