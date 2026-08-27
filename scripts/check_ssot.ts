@@ -25,6 +25,7 @@ import { existsSync, lstatSync, readdirSync, readFileSync, readlinkSync } from "
 import { join, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
 import {
+  COPILOT_REVIEW_CONTEXT,
   identityKeyIssues,
   loadOverrideLayer,
 } from "../.github/scripts/fleet/merge_settings_layers.ts";
@@ -945,47 +946,13 @@ const rules: Rule[] = [
         "bun .github/scripts/ci/verify_dogfood_oracle.ts",
         // The fleet rehearsal gate lives only as a step of its
         // all-green-needed job: trimming the step would leave a green
-        // checkout/setup/install job and fail the gate open. (The
-        // Copilot-review gate used to be pinned here the same way; it is an
-        // ACTION now, so its pin moved to the uses-line rule below - the
-        // action's own steps cannot be trimmed from this repository.)
+        // checkout/setup/install job and fail the gate open.
         "bun .github/scripts/ci/rehearse_fleet_gate.ts",
-        "./actions/copilot-review-gate",
       ]) {
         if (!gatingLines.has(required)) {
           mismatches.push({
             file: "ci.yml",
             expected: `'${required}' as a run line of an all-green-needed job`,
-            got: "missing",
-          });
-        }
-      }
-      // The uses-line pins above prove ci.yml INVOKES the gate action;
-      // this proves each composite action still RUNS its own entry script.
-      // Without it, trimming the entry step out of an action.yml would
-      // leave a green setup/install shell - every uses pin intact, the gate
-      // (or its re-armer) failed open. Only an unconditional, non-suppressed
-      // step counts: an `if:` or `continue-on-error:` on the entry step is
-      // the same failed-open action with the command text still present.
-      for (const [dir, entryScript] of [
-        ["actions/copilot-review-gate", "gate.ts"],
-        ["actions/copilot-rearm", "rerun.ts"],
-      ] as const) {
-        const manifest = parseYaml(readFileSync(join(REPO_ROOT, dir, "action.yml"), "utf-8")) as {
-          runs?: { steps?: Record<string, unknown>[] };
-        };
-        const entry = `bun "\${{ github.action_path }}/${entryScript}"`;
-        const runLines = (manifest.runs?.steps ?? [])
-          .filter((step) => step.if === undefined && step["continue-on-error"] === undefined)
-          .flatMap((step) =>
-            String(step.run ?? "")
-              .split("\n")
-              .map((line) => line.trim()),
-          );
-        if (!runLines.includes(entry)) {
-          mismatches.push({
-            file: `${dir}/action.yml`,
-            expected: `'${entry}' as a run line of an unconditional, non-suppressed composite step`,
             got: "missing",
           });
         }
@@ -1627,15 +1594,15 @@ const rules: Rule[] = [
         );
       };
       // The override layer's main ruleset is the fleet's only home for the
-      // required-check context now, and all-green is the only one: the
-      // validator's gate-name literal must match it. loadOverrideLayer
-      // separately refuses the Copilot review context, which GitHub never
-      // reports into a merge-box rollup.
+      // required-check contexts: the validator's gate-name literal must
+      // match the all-green entry, and the second entry is Copilot's own
+      // per-sha review check run (loadOverrideLayer separately refuses an
+      // override that drops either context or its Actions integration pin).
       const override = loadOverrideLayer();
       mismatches.push(
         ...setMismatch(
           ".github/settings-override.yml main ruleset required checks",
-          [gateName],
+          [gateName, COPILOT_REVIEW_CONTEXT],
           contexts(
             (override.rulesets ?? []) as Record<string, unknown>[],
             ".github/settings-override.yml",

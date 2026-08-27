@@ -89,29 +89,14 @@ present_line "  contents: read" "$wf/ci.yml"
 absent_line "  pull-requests: write" "$wf/ci.yml"
 present_line "      pull-requests: write" "$wf/ci.yml"
 
-# The Copilot bridge is unconditional: the gate job waits for Copilot's review
-# on every managed repo, and the re-arm workflow re-runs JUST that job once the
-# review lands. Both are visibility-independent - private repos merge the five
-# base checks into one job, but this one stays separate because its NAME is
-# what the re-arm workflow re-runs.
-present_line "  copilot-review:" "$wf/ci.yml"
-present_line "      - copilot-review" "$wf/ci.yml"
-# Both halves of the bridge are thin callers now, so what a render has to
-# show is the shape a composite action cannot carry: the gate job's own key
-# and its all-green needs entry above, the re-arm's job and its actions:
-# write below, and each side's uses ref at the green-gated @actions rather
-# than @main. The predicates themselves are the actions' suites to police.
-present "actions/copilot-review-gate@actions" "$wf/ci.yml"
-test -f "$wf/rerun-copilot-gate.yml"
-present_line "  rerun:" "$wf/rerun-copilot-gate.yml"
-present_line "  actions: write" "$wf/rerun-copilot-gate.yml"
-present "actions/copilot-rearm@actions" "$wf/rerun-copilot-gate.yml"
-# Fail-fast economy: the bridge waits by FAILING, never by sleeping on a
-# billed runner. The per-call network deadlines moved into the actions along
-# with the calls, so what is left to assert on a render is that no sleep
-# creeps back into either workflow.
+# The Copilot review wait moved OUT of CI: the ruleset requires Copilot's
+# own per-sha check run directly (settings-override.yml), so no render may
+# resurrect the retired gate job, its re-arm workflow, or a sleep-based
+# wait for the review.
+absent "copilot-review" "$wf/ci.yml"
+absent "copilot-rearm" "$wf/ci.yml"
+test ! -e "$wf/rerun-copilot-gate.yml"
 absent "sleep " "$wf/ci.yml"
-absent "sleep " "$wf/rerun-copilot-gate.yml"
 if has issue-templates; then test -f "$SMOKE/.github/ISSUE_TEMPLATE/config.yml"; else test ! -e "$SMOKE/.github/ISSUE_TEMPLATE"; fi
 if has pages; then test -f "$wf/pages.yml"; else test ! -e "$wf/pages.yml"; fi
 
@@ -459,13 +444,16 @@ if has settings-sync; then
   present_line "  - name: bug" "$merged_out"
   present_line "  - name: enhancement" "$merged_out"
   present_line "  - name: fix-lint" "$merged_out"
-  # The fleet rulesets, always, with all-green as the ONLY required check
-  # (Copilot's check never reaches a merge-box rollup) and the
-  # review-thread gate.
+  # The fleet rulesets, always, with BOTH required checks - all-green and
+  # Copilot's own per-sha review check run - each pinned to the GitHub
+  # Actions app (both check runs are Actions-created; the pin stops any
+  # other app or a plain commit status from satisfying the context), plus
+  # the review-thread gate.
   present_line "  - name: main" "$merged_out"
   present_line "  - name: non-bypassable" "$merged_out"
   present "context: all-green" "$merged_out"
-  absent "context: copilot-pull-request-reviewer" "$merged_out"
+  present "context: copilot-pull-request-reviewer" "$merged_out"
+  present "integration_id: 15368" "$merged_out"
   present "required_review_thread_resolution: true" "$merged_out"
   # The main ruleset's code_scanning rule follows enable_codeql (public
   # AND an analyzable toolchain): GitHub 422s that rule on a private

@@ -31,6 +31,6 @@ repo-platform: a Copier template plus reusable GitHub Actions workflows and comp
 ## Conventions
 
 - PR titles and commit subjects are Conventional Commits, squash-merged; repo-platform runs no release pipeline of its own (managed repos that select the release-please module drive their own versioning from the same convention).
-- CI gates on a single required check named `all-green`, which `needs:` every gating job in `ci.yml` - add new jobs to its `needs` list. The gate is strict: a skipped needed job counts as failure, so jobs stay unconditional and event conditions go on their steps.
+- CI gates on the required check `all-green`, which `needs:` every gating job in `ci.yml` - add new jobs to its `needs` list. The gate is strict: a skipped needed job counts as failure, so jobs stay unconditional and event conditions go on their steps. The ruleset's second required check is Copilot's own `copilot-pull-request-reviewer` check run (settings data, not a CI job - docs/all-green.md).
 - No typographic look-alike characters (curly quotes, em-dashes, invisible unicode); plain ASCII punctuation. check-typography enforces this.
 - Markdown prose is never hard-wrapped: one source line per paragraph, list item, or quote paragraph. `bun run wrap:check` enforces this.

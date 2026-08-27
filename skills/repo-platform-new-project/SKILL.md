@@ -123,7 +123,7 @@ The fleet and module settings layers (shared defaults, every label the module se
 
 ### 8. What runs on PRs
 
-CI gates on a single check named `all-green` (required once step 7's ruleset is applied): an aggregate job that `needs:` every gating job and fails on any non-success result (skipped counts as failure). Standard jobs (typography, commit-names, actionlint, gitleaks, yamllint), module jobs (pr-title, release-freshness/release-health, validate-skills on skills repos, CodeQL on public repos), and your checks.yml jobs all feed it. `validate-template` also runs but is informational: a red run flags template drift without blocking merges.
+CI gates on the `all-green` check (required once step 7's ruleset is applied, alongside Copilot's own `copilot-pull-request-reviewer` review check): an aggregate job that `needs:` every gating job and fails on any non-success result (skipped counts as failure). Standard jobs (typography, commit-names, actionlint, gitleaks, yamllint), module jobs (pr-title, release-freshness/release-health, validate-skills on skills repos, CodeQL on public repos), and your checks.yml jobs all feed it. `validate-template` also runs but is informational: a red run flags template drift without blocking merges.
 
 On private repositories the five base checks run as one combined `base-checks` job (billing: tiny jobs round up to a minute each).
 
@@ -144,5 +144,5 @@ Collect these for the human with admin rights:
 
 ## Verify
 
-- After step 7's settings apply: the first PR shows `all-green` as the only required check and it passes. (Before the apply, `all-green` runs but nothing marks it required - that is expected, not a platform failure.)
+- After step 7's settings apply: the first PR shows `all-green` and `copilot-pull-request-reviewer` as the required checks, and both pass (the Copilot one once its automatic review of the head posts). (Before the apply, `all-green` runs but nothing marks it required - that is expected, not a platform failure.)
 - `gh workflow run sync-repos.yml -R Vivswan/repo-platform -f repo=...` produces a run that ends with "already matches ... no sync PR needed" (or a no-op-level PR), proving the repo is enrolled and clean.

@@ -1,9 +1,11 @@
 # This file is managed by Vivswan/repo-platform.
 # Local edits may be replaced during template updates.
 #
-# The all-green convention: branch protection requires only the `all-green`
+# The all-green convention: branch protection requires the `all-green`
 # check, which needs every other job here, so the required-checks list never
-# changes as jobs come and go. This repository's own test and lint jobs live
+# changes as jobs come and go (its one sibling required check is Copilot's
+# own per-sha review check run - settings data, never a CI job). This
+# repository's own test and lint jobs live
 # in checks.yml (repo-owned, never overwritten by sync) and run inside the
 # gate through the `checks` job. Module checks (the pr-title title check,
 # CodeQL analysis) run inside the gate too, so branch protection blocks on
@@ -274,54 +276,6 @@ jobs:
       # The severity threshold and the upstream pin live in the wrapper.
       - uses: Vivswan/repo-platform/actions/dependency-review@actions
         if: github.event_name == 'pull_request'
-
-  # Copilot's automatic PR review must have ARRIVED before the gate goes
-  # green - but only when Copilot is actually involved in the PR. ONE SHOT,
-  # fail-fast: when the review is expected (the base branch's
-  # copilot_code_review rule - the fleet ruleset sets it, so this is the
-  # normal path - or a live involvement signal) but has not posted yet, this
-  # job fails in seconds instead of burning billed runner time waiting, and
-  # rerun-copilot-gate.yml re-runs just this job the moment the review lands.
-  # Any review conclusion counts: the ruleset's required review thread
-  # resolution polices the content, this job only polices the timing. It sits
-  # inside the gate because a ruleset-side required check cannot express it -
-  # Copilot's check suite never appears in PR merge-box rollups, so requiring
-  # that context there hangs the merge box forever.
-  #
-  # With no rule and no involvement signal this job passes non-blocking,
-  # logging that Copilot is not a reviewer - but on a settings-sync repo the
-  # rule comes from the fleet override layer, which is applied last and cannot
-  # be dropped from this repository (a hand-deleted rule returns on the next
-  # nightly apply). Not selecting settings-sync, or a repos.yml exclusion, is
-  # what opts a repo out; changing the override itself is a fleet-wide
-  # decision. Failures are closed, never silent - an API probe that did not
-  # come back is treated as "cannot tell", not as "not involved".
-  #
-  # No checkout: the action carries its own code, runs three or four `gh api`
-  # reads and never sleeps, so the job finishes in seconds. That is why it
-  # stays its own job on private repositories - where Actions bills per job
-  # rounded UP to the minute - instead of joining base-checks: the job name is
-  # what rerun-copilot-gate.yml re-runs, and folding it in would make every
-  # re-arm replay all five base checks. Non-PR events have no review to await,
-  # so the step skips; the job itself stays unconditional for the strict gate.
-  copilot-review:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      contents: read
-      checks: read
-      pull-requests: read
-    steps:
-      # The SAME action repo-platform gates itself on, so the predicate has
-      # one implementation for the whole fleet: the probes, their fail-closed
-      # handling and Copilot's identity all live inside it.
-      - uses: Vivswan/repo-platform/actions/copilot-review-gate@actions
-        if: github.event_name == 'pull_request'
-        with:
-          head-sha: ${{ github.event.pull_request.head.sha }}
-          pr-number: ${{ github.event.pull_request.number }}
-          base-branch: ${{ github.event.pull_request.base.ref }}
-          github-token: ${{ secrets.GITHUB_TOKEN }}
   all-green:
     name: all-green
     if: always()
@@ -333,7 +287,6 @@ jobs:
       - gitleaks
       - yamllint
       - dependency-review
-      - copilot-review
       - validate-template
     runs-on: ubuntu-latest
     timeout-minutes: 5

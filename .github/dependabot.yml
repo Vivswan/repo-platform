@@ -13,8 +13,6 @@ updates:
     directories:
       - "/"
       - "/actions/check-typography"
-      - "/actions/copilot-rearm"
-      - "/actions/copilot-review-gate"
       - "/actions/dependency-review"
       - "/actions/fuzz-issue"
       - "/actions/release-health"
@@ -50,28 +48,6 @@ updates:
   # current.
   - package-ecosystem: "bun"
     directory: "/actions/check-typography"
-    schedule:
-      interval: "monthly"
-    cooldown:
-      default-days: 7
-    commit-message:
-      prefix: "build"
-      include: "scope"
-
-  # zod validates the gh api responses the copilot-review re-armer reads.
-  - package-ecosystem: "bun"
-    directory: "/actions/copilot-rearm"
-    schedule:
-      interval: "monthly"
-    cooldown:
-      default-days: 7
-    commit-message:
-      prefix: "build"
-      include: "scope"
-
-  # zod validates the gh api responses the copilot-review gate reads.
-  - package-ecosystem: "bun"
-    directory: "/actions/copilot-review-gate"
     schedule:
       interval: "monthly"
     cooldown:
