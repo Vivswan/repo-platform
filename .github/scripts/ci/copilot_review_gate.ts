@@ -50,7 +50,7 @@
 
 import type { ZodType } from "zod";
 import { z } from "zod";
-import { env, error, notice, requireEnv } from "../shared/gha.ts";
+import { env, error, requireEnv } from "../shared/gha.ts";
 import { parseJsonWith } from "../shared/json.ts";
 import { capture } from "../shared/proc.ts";
 import {
@@ -87,14 +87,16 @@ function fetchJson<T>(path: string, schema: ZodType<T>, label: string): T | null
 }
 
 function failAwaitingReview(): never {
-  // Auto-requesting the review is impossible (the reviewers endpoint 422s
-  // on the bot login, silently ignores "copilot", and GraphQL rejects the
-  // bot id), so the message names the exact HUMAN action.
+  // The template twin's canonical awaiting text (templates/base
+  // ci.yml.jinja), honest about the re-arm: a Copilot-triggered re-arm
+  // run can itself be HELD action_required by GitHub actor policy, so
+  // "re-runs itself" gets the manual Re-run recipe as its fallback, part
+  // of the contract rather than an afterthought. Auto-requesting the
+  // review is impossible (the reviewers endpoint 422s on the bot login,
+  // silently ignores "copilot", and GraphQL rejects the bot id), so the
+  // message names the exact human action for that too.
   error(
-    `waiting for Copilot's review of ${headSha}; this job re-runs automatically when the review posts - re-run it manually otherwise.`,
-  );
-  notice(
-    "Copilot's review is usually requested automatically on push; if no review appears in a few minutes, request it manually: PR sidebar -> Reviewers -> Copilot (drafts and exhausted Copilot quotas suppress the automatic request).",
+    `waiting for Copilot review at ${headSha} (no completed '${CHECK_NAME}' check run and no posted review for this PR yet). Copilot is usually requested automatically when you push; if nothing appears after a few minutes, request it by hand from the PR sidebar under Reviewers -> Copilot (a draft PR or an exhausted review quota suppresses the automatic request). This job re-runs itself when the review posts; if it does not, open this CI run and pick Re-run jobs, then Re-run failed jobs.`,
   );
   process.exit(1);
 }

@@ -20,7 +20,7 @@ const COPILOT_RULE = [{ type: "copilot_code_review" }];
 const COMPLETED_CHECK = {
   check_runs: [{ status: "completed", pull_requests: [{ number: 12 }] }],
 };
-const AWAITING = "::error::waiting for Copilot's review of";
+const AWAITING = "::error::waiting for Copilot review at";
 
 // Dispatches on the requested path: branch rules, check-runs, the
 // reviews listing, or the PR itself. GH_FAIL fails every call (the
@@ -104,7 +104,7 @@ describe("copilot_review_gate.ts", () => {
       checks: { check_runs: [{ status: "completed", pull_requests: [{ number: 99 }] }] },
     });
     expect(r.exitCode).toBe(1);
-    expect(r.output).toContain("waiting for Copilot's review of");
+    expect(r.output).toContain("waiting for Copilot review at");
   });
 
   test("rule present, review posted for the head sha: passes without any check run", () => {
