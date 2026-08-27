@@ -649,7 +649,12 @@ function main(): number {
       );
       continue;
     }
-    const content = readFileSync(path).toString("utf-8");
+    // latin1 for byte fidelity, like the stamper and the sync rebuild: a
+    // UTF-8 decode folds invalid sequences onto the replacement character,
+    // which could mask or invent marker text. Counting stays SUBSTRING
+    // semantics on purpose (see MARKER_FILES): a buried mention of a
+    // region marker is a duplicate by the fleet-wide region convention.
+    const content = readFileSync(path).toString("latin1");
     let exactlyOnce = true;
     for (const marker of markers) {
       const count = content.split(marker).length - 1;
@@ -998,7 +1003,11 @@ function main(): number {
       if (kind === "class-only") continue;
       const path = join(root, rel);
       if (!isRegularFile(path)) continue;
-      const content = readFileSync(path, "utf-8");
+      // latin1, matching the stamper's and sync rebuild's byte-level marker
+      // predicate: a UTF-8 decode turns multibyte whitespace into
+      // characters trim() strips, counting a line as the marker that the
+      // byte-level matchers (and the stamped managed half) do not.
+      const content = readFileSync(path).toString("latin1");
       if (kind === "header") {
         if (!headerRe.test(content.split("\n", HEADER_WINDOW).join("\n"))) {
           errors.push(

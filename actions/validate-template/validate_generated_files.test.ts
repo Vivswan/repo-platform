@@ -1580,6 +1580,38 @@ describe("ownership-manifest byte parity", () => {
     expect(absent.exitCode).toBe(0);
   });
 
+  test("validator and stamper split a multibyte-whitespace decoy line the same way", () => {
+    // A UTF-8 decode + trim reads these decoy lines as the marker (JS
+    // trim() strips U+00A0 and U+2003), but the stamper and the sync
+    // rebuild match latin1 BYTES, where the same lines carry
+    // non-whitespace characters. The validator must count markers and
+    // split halves exactly where the stamper stamped, or sync would
+    // deliver trees the validator rejects (marker count 2) and parity
+    // would report drift on a freshly stamped tree.
+    const marker = "# repo-platform:local-section";
+    for (const decoy of [`\u00a0${marker}`, `${marker}\u2003`]) {
+      const content = `root = true\n${decoy}\nline the utf-8 view would exclude\n${marker}\nrepo tail\n`;
+      const latin1 = Buffer.from(content, "utf-8").toString("latin1");
+      const half = managedHalfOf(latin1, marker, "above");
+      if (half === null) throw new Error("fixture lost its marker line");
+      // The fixture is a real decoy: UTF-8 trim semantics would slice at
+      // the decoy line instead.
+      expect(managedHalfOf(content, marker, "above")).not.toBe(half);
+      const entries = {
+        ...stampedBaseline(),
+        ".editorconfig":
+          `{"class": "split", "grammar": "tail-marker", "marker": ${JSON.stringify(marker)}, ` +
+          `"managed": "above", "hash": "${sha(half)}"}`,
+      };
+      const { exitCode, stderr } = runValidator({
+        ".editorconfig": content,
+        [MANIFEST]: manifestOf(entries),
+      });
+      expect(stderr).toBe("");
+      expect(exitCode).toBe(0);
+    }
+  });
+
   // The agents module's CLAUDE.md is a symlink: a class-only roster path
   // with no comment channel. These fixtures select agents and land the
   // link so both the parity rule and the cross-check see a real symlink.
