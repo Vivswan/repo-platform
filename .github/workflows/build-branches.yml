@@ -15,9 +15,10 @@
 # that pre-built tree once all-green completes (publish.ts PREBUILT_REF,
 # with a compose fallback when the pending ref is missing). Concurrent
 # pushes are race-safe: pending refs are keyed by source sha, and
-# publish.ts skips a stale build whose source is an ancestor of the tip's
-# stamped source - newest-green wins, a stale build never overwrites a
-# newer published tree.
+# publish.ts's newest-green preflight gates BOTH delivery branches before
+# either moves, skipping a stale build whose source is an ancestor of
+# either tip's stamped source - then lands template and actions in ONE
+# atomic push, so the two branches always ship the same source.
 #
 # Only GREEN commits publish, twice over: the trigger fires on a
 # successful CI run (a failed run skips this workflow's steps quietly -
@@ -95,10 +96,20 @@ jobs:
 
       # workflow_run/schedule/dispatch path: publish - promoting the push
       # build's parked tree on workflow_run, composing otherwise.
+      #
+      # SOURCE_SHA is the commit being published. On workflow_run it MUST
+      # be the completed CI run's head_sha, never github.sha: workflow_run
+      # events evaluate github.sha to the CURRENT default-branch tip, so
+      # when main has already advanced from green A to red B, github.sha
+      # names B - A's pending tree is never found, publish.ts's green gate
+      # evaluates B and refuses, and A never publishes while B's failed CI
+      # never triggers a publish at all. The event's head_sha is the
+      # commit whose green CI this trigger is reporting.
       - name: Build and publish
         if: env.CI_GREEN == 'true' && github.event_name != 'push'
         env:
           GH_TOKEN: ${{ github.token }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          PREBUILT_REF: ${{ github.event_name == 'workflow_run' && format('refs/build-pending/{0}', github.sha) || '' }}
+          SOURCE_SHA: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+          PREBUILT_REF: ${{ github.event_name == 'workflow_run' && format('refs/build-pending/{0}', github.event.workflow_run.head_sha) || '' }}
         run: bun .github/scripts/build-branches/publish.ts

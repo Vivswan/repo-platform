@@ -20,8 +20,10 @@ import { BUILD_IDENTITY } from "../shared/git_identity.ts";
 import { must } from "../shared/proc.ts";
 import { pendingRefFor } from "./pending.ts";
 
-// Same source discipline as publish.ts: this run's own trigger commit,
-// which is exactly what the publisher's GITHUB_SHA will name-match.
+// Same source discipline as publish.ts: this push's own commit (on the
+// push trigger GITHUB_SHA IS the pushed commit), which is exactly what
+// the publisher's SOURCE_SHA - the completed CI run's head_sha - will
+// name-match.
 const sourceSha = requireEnv("GITHUB_SHA");
 if (!/^[0-9a-f]{40}$/.test(sourceSha)) {
   fail(`GITHUB_SHA is not a full commit sha (got '${sourceSha}')`);

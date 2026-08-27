@@ -6,7 +6,8 @@
 // trigger rebuilds the branch, so any successful run there proves it (a
 // no-op rebuild creates no build commit to wait for) - or for a template
 // tip whose source stamp already names main's HEAD (publish.ts stamps
-// each run's OWN trigger commit, so the tip's stamp is the artifact's
+// the commit it publishes - the completed CI run's head_sha on the
+// workflow_run path - so the tip's stamp is the artifact's
 // direct provenance and survives the runs list's per_page window). Two
 // waiting cases end in the
 // warning path, both benign: a green main whose CI is still running
@@ -129,7 +130,7 @@ await waitFor(
     // included - reads as not-built-yet: keep polling.
     if (runs.exitCode !== 0) return false;
     const built = parseJsonWith(runsSchema, runs.stdout, "wait_for_build: workflow runs response");
-    // Every build-branches trigger rebuilds the one branch, so a
+    // Every build-branches trigger rebuilds the delivery branches, so a
     // successful run at main's HEAD whose publish step itself succeeded
     // proves the build (a red main's run also "succeeds" at main's HEAD
     // with every step skipped - runPublished tells them apart).
@@ -138,7 +139,8 @@ await waitFor(
       console.log(`the template branch is built from main HEAD ${mainSha}.`);
       return true;
     }
-    // Stamp fallback: publish.ts stamps each run's OWN trigger commit, so
+    // Stamp fallback: publish.ts stamps the commit it publishes (the
+    // completed CI run's head_sha on the workflow_run path), so
     // the branch tip's source stamp is the artifact's direct provenance -
     // it proves freshness when the runs list no longer shows the matching
     // run (per_page window) or the jobs read keeps failing. (The converse

@@ -162,9 +162,10 @@ describe("wait_for_build.ts", () => {
   });
 
   test("accepts a template tip stamped with main HEAD when no run matches", () => {
-    // The newer-main publish: the successful run's head_sha is an OLDER
-    // commit, but publish.ts composed origin/main and stamped the tip with
-    // it - the runs match misses, the stamp fallback proves freshness.
+    // The runs-list miss: the tip's stamp names main's HEAD but the runs
+    // listing no longer shows the run that published it (per_page window,
+    // or its jobs read keeps failing) - the stamp fallback proves
+    // freshness on the artifact's own provenance.
     const r = run({
       runs: { workflow_runs: [{ id: 1, event: "push", head_sha: "b".repeat(40) }] },
       tipMessage: `build: template\n\nsource: https://github.com/Vivswan/repo-platform/commit/${MAIN_SHA}\nrun: https://github.com/Vivswan/repo-platform/actions/runs/1\n`,

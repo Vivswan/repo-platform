@@ -8,8 +8,17 @@
 // without one (schedule, dispatch, or a missing pending ref) it composes
 // the tree itself.
 //
-// Env: RUN_URL, GH_TOKEN, GITHUB_SERVER_URL, GITHUB_REPOSITORY, GITHUB_REF,
-// GITHUB_SHA; PREBUILT_REF optional (workflow_run only).
+// The two branches advance TOGETHER: one newest-green preflight gates
+// both, both commits are prepared unpushed, and a single atomic push
+// lands whichever of the two changed - so no interleaving of runs or
+// partial failure can leave the executable actions ref carrying a
+// different source than the template tree (fleet workflows would execute
+// one commit's actions against another commit's renders).
+//
+// Env: RUN_URL, GH_TOKEN, GITHUB_SERVER_URL, GITHUB_REPOSITORY,
+// GITHUB_REF, SOURCE_SHA (the commit to publish - the completed CI run's
+// head_sha on the workflow_run path, the trigger commit otherwise);
+// PREBUILT_REF optional (workflow_run only).
 
 import { rmSync } from "node:fs";
 import { z } from "zod";
@@ -34,19 +43,24 @@ const BRANCH = "template";
  * tree's jinja-expression filenames - so action refs get their own branch
  * with no composed tree at all (publish_actions.ts's header has the full
  * story). Published from the same source commit, behind the same green
- * gate, right before the template branch below. */
+ * gate, in the same atomic push as the template branch below. */
 const ACTIONS_BRANCH = "actions";
+/** build-branches.yml's publish step name - the step-level publish proof;
+ * twin of wait_for_build.ts's PUBLISH_STEP on the sync side. */
+const PUBLISH_STEP = "Build and publish";
 const repository = requireEnv("GITHUB_REPOSITORY");
 
-// The build stamps and composes GITHUB_SHA - this run's own trigger
-// commit, the one the run's head_sha can vouch for - because the sync's
-// run proof requires the stamped run's head_sha to EQUAL the stamped
-// source. Composing origin/main NOW instead would break exactly that:
-// under cancel-in-progress: false a queued run executes after a newer
-// main merged, and stamping the newer tip against this run's fixed
-// RUN_URL hands the fleet a tip verify_build_provenance rejects (the
-// plan job then fails for every repo until the next build self-heals).
-// The newer tip's own CI run triggers the build that publishes it. A
+// The build stamps and composes SOURCE_SHA - the commit the publish's
+// run proof can vouch for: the sync's verification requires the stamped
+// run's head_sha to EQUAL the stamped source. On the workflow_run path
+// that is the completed CI run's head_sha (GITHUB_SHA there is the
+// CURRENT main tip, which can already be a newer - even red - commit
+// this run must not touch); on schedule and dispatch it is the trigger
+// commit itself. Composing origin/main NOW instead would break exactly
+// the run proof: stamping a newer tip against this run's fixed RUN_URL
+// hands the fleet a tip verify_build_provenance rejects (the plan job
+// then fails for every repo until the next build self-heals). The newer
+// tip's own CI run triggers the build that publishes it. A
 // workflow_dispatch aimed at any other ref would publish a build whose
 // run can never vouch for it either - refuse before any mutation.
 const ref = env("GITHUB_REF");
@@ -133,6 +147,37 @@ function restampReason(currentSourceSha: string): string {
   ) {
     return `re-stamp: stamped run ${prevRun} does not vouch for source ${prevSrc.slice(0, 12)}`;
   }
+  // conclusion=success alone is NOT publish proof: on a red main every
+  // step skips via CI_GREEN and the run still concludes success at that
+  // head_sha, so a stamp naming such a run would pass the checks above.
+  // Require the publish step itself to have succeeded - the same
+  // step-level proof the sync side's wait_for_build.ts runPublished()
+  // uses (PUBLISH_STEP is its twin constant).
+  const jobsProbe = capture(["gh", "api", `repos/${repository}/actions/runs/${prevRun}/jobs`]);
+  if (jobsProbe.exitCode !== 0) {
+    throw new Error(
+      `reading stamped run ${prevRun}'s jobs failed (${jobsProbe.stderr.trim()}) - an API failure, not a broken stamp; re-run the build`,
+    );
+  }
+  const jobs = parseJsonWith(
+    z.object({
+      jobs: z.array(
+        z.object({
+          steps: z
+            .array(z.object({ name: z.string(), conclusion: z.string().nullable() }))
+            .optional(),
+        }),
+      ),
+    }),
+    jobsProbe.stdout,
+    "publish: runs/jobs response",
+  );
+  const published = jobs.jobs.some((job) =>
+    (job.steps ?? []).some((step) => step.name === PUBLISH_STEP && step.conclusion === "success"),
+  );
+  if (!published) {
+    return `re-stamp: stamped run ${prevRun} never ran its '${PUBLISH_STEP}' step`;
+  }
   // The stamps can be individually valid while the TREE is a different
   // source's build (a hand-push of the current build's exact tree over
   // the previous stamps): the sync's tree proof rejects that pair, so
@@ -163,14 +208,23 @@ function restampReason(currentSourceSha: string): string {
   return "";
 }
 
-/** Publishes the `actions` branch: actions/ + README from the SOURCE
- * commit's own tree (same discipline as the template compose - a rebuild
- * of an old commit reproduces that commit's actions), appended to the
- * existing branch (orphan bootstrap on first publish), stamped with the
- * same source + run lines. Append-only, plain push, no-change skips -
- * mirroring the template branch's model; the two advance together from
- * one green gate. */
-function publishActionsBranch(sourceSha: string): void {
+/** A branch commit prepared in a worktree, not yet pushed: the atomic
+ * push at the end is the ONLY place a ref moves. */
+interface PreparedBranch {
+  branch: string;
+  /** The worktree whose HEAD is the commit to push. */
+  dir: string;
+  note: string;
+}
+
+/** Prepares the `actions` branch commit: actions/ + README from the
+ * SOURCE commit's own tree (same discipline as the template compose - a
+ * rebuild of an old commit reproduces that commit's actions), appended to
+ * the existing branch (orphan bootstrap on first publish), stamped with
+ * the same source + run lines. Append-only, no-change returns null -
+ * mirroring the template branch's model; the two land in one atomic
+ * push from one green gate. */
+function prepareActionsBranch(sourceSha: string): PreparedBranch | null {
   console.log(`::group::build ${ACTIONS_BRANCH} from ${sourceSha.slice(0, 12)}`);
   for (const dir of ["/tmp/actions-src", "/tmp/actions-tree", "/tmp/actions-pub"]) {
     rmSync(dir, { recursive: true, force: true });
@@ -205,35 +259,35 @@ function publishActionsBranch(sourceSha: string): void {
   must(["git", "-C", "/tmp/actions-pub", "add", "-A"]);
   const changed =
     capture(["git", "-C", "/tmp/actions-pub", "diff", "--cached", "--quiet"]).exitCode !== 0;
+  console.log("::endgroup::");
   // A missing branch always publishes: the ref must exist for the fleet's
   // @actions pins to resolve, even when the tree matches the seed's.
-  if (changed || !exists) {
-    must([
-      "git",
-      "-C",
-      "/tmp/actions-pub",
-      "commit",
-      "-q",
-      "--allow-empty",
-      "-m",
-      `build(${ACTIONS_BRANCH}): main from ${sourceSha.slice(0, 12)}`,
-      "-m",
-      commitStampWrite(requireEnv("GITHUB_SERVER_URL"), repository, sourceSha),
-      "-m",
-      commitRunWrite(requireEnv("RUN_URL")),
-    ]);
-    must(["git", "-C", "/tmp/actions-pub", "push", "origin", `HEAD:refs/heads/${ACTIONS_BRANCH}`]);
-    const short = mustCapture(["git", "-C", "/tmp/actions-pub", "rev-parse", "--short", "HEAD"]);
-    console.log(
-      `${ACTIONS_BRANCH}: pushed ${short} (${changed ? "content change" : "branch bootstrap"})`,
-    );
-  } else {
+  if (!changed && exists) {
     console.log(`${ACTIONS_BRANCH}: no content change`);
+    return null;
   }
-  console.log("::endgroup::");
+  must([
+    "git",
+    "-C",
+    "/tmp/actions-pub",
+    "commit",
+    "-q",
+    "--allow-empty",
+    "-m",
+    `build(${ACTIONS_BRANCH}): main from ${sourceSha.slice(0, 12)}`,
+    "-m",
+    commitStampWrite(requireEnv("GITHUB_SERVER_URL"), repository, sourceSha),
+    "-m",
+    commitRunWrite(requireEnv("RUN_URL")),
+  ]);
+  return {
+    branch: ACTIONS_BRANCH,
+    dir: "/tmp/actions-pub",
+    note: changed ? "content change" : "branch bootstrap",
+  };
 }
 
-function publish(sourceSha: string): void {
+function prepareTemplateBranch(sourceSha: string): PreparedBranch | null {
   console.log(`::group::build ${BRANCH} from ${sourceSha.slice(0, 12)}`);
   for (const dir of ["/tmp/src", "/tmp/tree", "/tmp/pub"]) {
     rmSync(dir, { recursive: true, force: true });
@@ -241,7 +295,7 @@ function publish(sourceSha: string): void {
   // The workflow_run path hands over the PUSH run's pre-built tree
   // (build_pending.ts parked it while CI was still executing), so the
   // compose cost was already paid concurrently with CI. Name-matched by
-  // construction: the env value is pendingRefFor(GITHUB_SHA), so a
+  // construction: the env value is pendingRefFor(SOURCE_SHA), so a
   // pending ref can never hand this run another source's tree. A missing
   // ref (the push build failed, or its queued run was coalesced away)
   // falls back to composing here - slower, never wrong.
@@ -272,28 +326,6 @@ function publish(sourceSha: string): void {
   if (branchExists) {
     must(["git", "fetch", "--quiet", "origin", BRANCH]);
     must(["git", "worktree", "add", "--detach", "/tmp/pub", `origin/${BRANCH}`]);
-    // Newest-green-wins (pending.ts owns the rule): under
-    // cancel-in-progress: false a queued publisher can execute after a
-    // NEWER main already published - its build is stale and must never
-    // roll the branch back. Loud skip, green run: this is normal
-    // operation under concurrent pushes, and the newer tip's own run
-    // already delivered the newer tree.
-    const tipSource = commitStampParse(
-      mustCapture(["git", "-C", "/tmp/pub", "log", "-1", "--format=%B"]),
-    );
-    const stale = staleReason(
-      sourceSha,
-      tipSource,
-      (ancestor, descendant) =>
-        resolves(`${ancestor}^{commit}`) !== "" &&
-        resolves(`${descendant}^{commit}`) !== "" &&
-        isAncestor(ancestor, descendant),
-    );
-    if (stale !== "") {
-      console.log(`${BRANCH}: skipping publish - ${stale}`);
-      console.log("::endgroup::");
-      return;
-    }
   } else if (
     capture(["git", "ls-remote", "--exit-code", "origin", "refs/heads/staging"]).exitCode === 0
   ) {
@@ -314,6 +346,7 @@ function publish(sourceSha: string): void {
   // same-size - and every decision below trusts this tree.
   must(["rsync", "-a", "--delete", "--checksum", "--exclude=.git", "/tmp/tree/", "/tmp/pub/"]);
   must(["git", "-C", "/tmp/pub", "add", "-A"]);
+  console.log("::endgroup::");
   // A missing branch always publishes: the ref must exist for the sync to
   // resolve, even when the composed tree happens to equal the seed tip's.
   const note =
@@ -322,29 +355,77 @@ function publish(sourceSha: string): void {
       : branchExists
         ? restampReason(sourceSha)
         : "branch bootstrap";
-  if (note !== "") {
-    must([
-      "git",
-      "-C",
-      "/tmp/pub",
-      "commit",
-      "-q",
-      "--allow-empty",
-      "-m",
-      `build(${BRANCH}): main from ${sourceSha.slice(0, 12)}`,
-      "-m",
-      commitStampWrite(requireEnv("GITHUB_SERVER_URL"), repository, sourceSha),
-      "-m",
-      commitRunWrite(requireEnv("RUN_URL")),
-    ]);
-    // Plain push, never force: the branch is append-only.
-    must(["git", "-C", "/tmp/pub", "push", "origin", `HEAD:refs/heads/${BRANCH}`]);
-    const short = mustCapture(["git", "-C", "/tmp/pub", "rev-parse", "--short", "HEAD"]);
-    console.log(`${BRANCH}: pushed ${short} (${note})`);
-  } else {
+  if (note === "") {
     console.log(`${BRANCH}: no content change`);
+    return null;
   }
-  console.log("::endgroup::");
+  must([
+    "git",
+    "-C",
+    "/tmp/pub",
+    "commit",
+    "-q",
+    "--allow-empty",
+    "-m",
+    `build(${BRANCH}): main from ${sourceSha.slice(0, 12)}`,
+    "-m",
+    commitStampWrite(requireEnv("GITHUB_SERVER_URL"), repository, sourceSha),
+    "-m",
+    commitRunWrite(requireEnv("RUN_URL")),
+  ]);
+  return { branch: BRANCH, dir: "/tmp/pub", note };
+}
+
+/** Newest-green-wins (pending.ts owns the rule), gating BOTH branches
+ * before EITHER moves: under cancel-in-progress: false a queued publisher
+ * can execute after a NEWER main already published, and a stale build
+ * must never roll a branch back. Checking only the template tip after
+ * already pushing actions - the old shape - let a stale run rewind the
+ * executable actions ref and then skip template, leaving the two branches
+ * shipping different sources. Either branch's tip being newer than this
+ * run's source skips the whole publish: the tips only ever advance
+ * together (one atomic push), so a newer stamp on one speaks for both.
+ * Loud skip, green run: this is normal operation under concurrent pushes,
+ * and the newer tip's own run already delivered the newer trees. */
+function stalePreflight(sourceSha: string): string {
+  for (const branch of [ACTIONS_BRANCH, BRANCH]) {
+    const exists =
+      capture(["git", "ls-remote", "--exit-code", "origin", `refs/heads/${branch}`]).exitCode === 0;
+    if (!exists) continue;
+    must(["git", "fetch", "--quiet", "origin", branch]);
+    const tipSource = commitStampParse(
+      mustCapture(["git", "log", "-1", "--format=%B", `origin/${branch}`]),
+    );
+    const stale = staleReason(
+      sourceSha,
+      tipSource,
+      (ancestor, descendant) =>
+        resolves(`${ancestor}^{commit}`) !== "" &&
+        resolves(`${descendant}^{commit}`) !== "" &&
+        isAncestor(ancestor, descendant),
+    );
+    if (stale !== "") return `${branch}: ${stale}`;
+  }
+  return "";
+}
+
+/** One push, atomic across both refs: either every prepared branch
+ * advances or none does, so a partial failure (or any push race the
+ * serializing concurrency group ever fails to prevent) cannot leave
+ * `actions` and `template` shipping different sources. Plain fast-forward
+ * refspecs, never force: the branches are append-only, and a ref that
+ * moved since the preflight's fetch rejects the whole push loudly. */
+function pushPrepared(prepared: PreparedBranch[]): void {
+  if (prepared.length === 0) return;
+  const refspecs = prepared.map(
+    (branch) =>
+      `${mustCapture(["git", "-C", branch.dir, "rev-parse", "HEAD"])}:refs/heads/${branch.branch}`,
+  );
+  must(["git", "push", "--atomic", "origin", ...refspecs]);
+  for (const branch of prepared) {
+    const short = mustCapture(["git", "-C", branch.dir, "rev-parse", "--short", "HEAD"]);
+    console.log(`${branch.branch}: pushed ${short} (${branch.note})`);
+  }
 }
 
 /** Delete pending refs this publish consumed or obsoleted: the candidate's
@@ -376,26 +457,36 @@ function sweepPendingRefs(sourceSha: string): void {
   }
 }
 
-// This run's own trigger commit (see the run-proof comment above), never
-// origin/main - which can already be newer while this run was queued.
-const sourceSha = requireEnv("GITHUB_SHA");
+// The commit to publish (see the run-proof comment above): the completed
+// CI run's head_sha on the workflow_run path, the trigger commit on
+// schedule/dispatch - NEVER a bare read of origin/main, which can already
+// be a newer (even red) commit while this run was queued.
+const sourceSha = requireEnv("SOURCE_SHA");
 if (!/^[0-9a-f]{40}$/.test(sourceSha)) {
-  fail(`GITHUB_SHA is not a full commit sha (got '${sourceSha}')`);
+  fail(`SOURCE_SHA is not a full commit sha (got '${sourceSha}')`);
 }
 // Green-source gate, on top of the ref guard above: the workflow_run
 // trigger only fires on a successful CI run, but the schedule, dispatch,
 // and API paths reach here with no such proof - and the branches ship only
 // commits whose all-green gate succeeded. Enforced on the commit actually
-// being published (GITHUB_SHA, the same commit the stamp records).
+// being published (SOURCE_SHA, the same commit the stamp records).
 const notGreen = allGreenFailure(repository, sourceSha);
 if (notGreen !== null) {
   fail(
     `refusing to publish the build branches: main commit ${sourceSha.slice(0, 12)} is not green - ${notGreen}. The branches only ship green main commits; get CI to a successful run on main's tip, then re-run.`,
   );
 }
-// Actions first: a fresh template render pins @actions, so the branch its
-// refs resolve against must exist (and be current) by the time the
-// template branch advances.
-publishActionsBranch(sourceSha);
-publish(sourceSha);
+// The newest-green preflight gates BOTH branches before EITHER is
+// prepared or pushed; the prepared commits then land in one atomic push
+// (actions listed first: a fresh template render pins @actions, so the
+// ref its pins resolve against advances in the same stroke, never after).
+const staleness = stalePreflight(sourceSha);
+if (staleness !== "") {
+  console.log(`skipping publish - ${staleness}`);
+} else {
+  const prepared = [prepareActionsBranch(sourceSha), prepareTemplateBranch(sourceSha)].filter(
+    (branch): branch is PreparedBranch => branch !== null,
+  );
+  pushPrepared(prepared);
+}
 sweepPendingRefs(sourceSha);
