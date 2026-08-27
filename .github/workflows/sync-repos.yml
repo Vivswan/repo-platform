@@ -110,7 +110,7 @@ jobs:
       # own guards fail loudly and the cron heals. Build Branches rebuilds
       # the build branch asynchronously after each main merge; a sync
       # dispatched right after a merge could consume the previous build
-      # tree. Wait (bounded) for the template tip whose SOURCE STAMP names
+      # tree. Wait (bounded) for the build tip whose SOURCE STAMP names
       # main's HEAD - the artifact's own provenance - or for the verified
       # no-op marker when the render left the branch unchanged. The token
       # feeds only the marker's run-proof battery (the job's actions: read

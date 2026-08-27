@@ -87,4 +87,21 @@ describe("build-branches publish wiring", () => {
     expect(workflow).toContain("path: /tmp/noop-claim.txt");
     expect(publish).toContain('writeFileSync("/tmp/noop-claim.txt"');
   });
+
+  test("no tree without actions/ ever publishes (the bootstrap shape guard)", () => {
+    // A queued CI completion for a PRE-unification main commit runs the
+    // new publisher with an old SOURCE_SHA whose own branch_tree.ts
+    // composes the retired template-only tree; minting `build` from it
+    // would 404 every fleet @build ref. The guard must check the tree on
+    // EVERY path (pre-built included), and it must run BEFORE the first
+    // commit or push inside publish() - moving it later would leave the
+    // window open while this test stayed green on presence alone.
+    const publish = read(".github/scripts/build-branches/publish.ts");
+    expect(publish).toContain("carries no actions/ subtree");
+    const body = publish.slice(publish.indexOf("function publish("));
+    const guardAt = body.indexOf('hasActionManifest("/tmp/tree/actions")');
+    expect(guardAt).toBeGreaterThan(-1);
+    expect(guardAt).toBeLessThan(body.indexOf('"commit"'));
+    expect(guardAt).toBeLessThan(body.indexOf('"push"'));
+  });
 });
