@@ -392,17 +392,212 @@ export function declaredRegionMarkerTexts(declarations: Iterable<OwnershipDeclar
   return [...out];
 }
 
+// --- the foreign-marker rule, stated once -------------------------------------
+
+/** The two marker vocabularies a source can claim ownership with: a TAIL
+ *  marker (one line ends the sync-owned top) and the BOUNDED-REGION markers
+ *  (four lines bound the halves). Every declaration owns some markers of at
+ *  most one kind; markers of either kind that it does not own are foreign. */
+type MarkerKind = "tail" | "region";
+
+/** The markers a declaration itself owns, by kind. managed and starter own
+ *  none of either - which is exactly what makes every marker in the tree
+ *  foreign to them - and so does a shape this union does not recognise yet,
+ *  so a grammar added tomorrow inherits the foreign-marker rejection before
+ *  it has an arm of its own. */
+function ownMarkers(declaration: OwnershipDeclaration): Record<MarkerKind, readonly string[]> {
+  if (declaration.class === "split" && declaration.grammar === "tail-marker") {
+    return { tail: [declaration.marker], region: [] };
+  }
+  if (declaration.class === "split" && declaration.grammar === "bounded-region") {
+    return {
+      tail: [],
+      region: [
+        declaration.local_begin,
+        declaration.local_end,
+        declaration.managed_begin,
+        declaration.managed_end,
+      ],
+    };
+  }
+  return { tail: [], region: [] };
+}
+
+/** The four shipped declaration shapes, plus `other` for anything this
+ *  union grows later: the discriminator the contradiction wording switches
+ *  on, so an unrecognised shape falls to a generic wording rather than off
+ *  the end of a switch. */
+type DeclarationShape = "managed" | "starter" | "tail-marker" | "bounded-region" | "other";
+
+function shapeOf(declaration: OwnershipDeclaration): DeclarationShape {
+  if (declaration.class === "managed") return "managed";
+  if (declaration.class === "starter") return "starter";
+  if (declaration.class === "split") {
+    if (declaration.grammar === "tail-marker") return "tail-marker";
+    if (declaration.grammar === "bounded-region") return "bounded-region";
+  }
+  return "other";
+}
+
+/** How a declaration names itself inside a contradiction message. */
+function declaredAs(declaration: OwnershipDeclaration): string {
+  switch (shapeOf(declaration)) {
+    case "starter":
+      return "a starter";
+    case "managed":
+      return "managed";
+    case "tail-marker":
+      return "split (tail-marker)";
+    case "bounded-region":
+      return "split (bounded-region)";
+    default:
+      return String((declaration as { class: unknown }).class);
+  }
+}
+
+const FOREIGN_GENERIC_CONSEQUENCE =
+  "sync rebuilds by the DECLARED grammar and would overwrite the repo-owned " +
+  "area that marker promises";
+const FOREIGN_GENERIC_REMEDY = "drop the marker or declare the file under the grammar that owns it";
+
+/** The one contradiction message a foreign marker gets, in one template:
+ *  what the source CLAIMS by carrying the marker, what the rebuild would do
+ *  about it, and the fix. Two families fill it. If the declaration owns
+ *  markers of the same kind, the file carries a SECOND set of one grammar
+ *  and the rebuild - which splits by this declaration's markers alone -
+ *  overwrites whatever the other set promised. If it owns none of that
+ *  kind, the marker is the wrong grammar entirely and the promise it makes
+ *  is one the declared class never keeps; the clauses there are per shape,
+ *  each the wording its specimen asserts. */
+function foreignMarkerMessage(
+  kind: MarkerKind,
+  marker: string,
+  own: readonly string[],
+  declaration: OwnershipDeclaration,
+  where: string,
+): string {
+  const say = (claim: string, consequence: string, remedy: string) =>
+    `${where}: carries the '${marker}' ${claim} - ${consequence}; ${remedy}`;
+  if (own.length > 0) {
+    return kind === "tail"
+      ? say(
+          `tail marker as well as its own '${own[0]}'`,
+          "the rebuild splits at this declaration's marker and would overwrite " +
+            "the repo-owned tail the other one promises",
+          "drop it or declare the file under the declaration that owns it",
+        )
+      : say(
+          "bounded-region marker, which is not one of this declaration's four",
+          "sync rebuilds by the DECLARED grammar and would overwrite the " +
+            "repo-owned region that marker promises",
+          "drop it or declare the file under the grammar that owns it",
+        );
+  }
+  const claim = (noun: string) => `${noun} but is declared ${declaredAs(declaration)}`;
+  if (kind === "tail") {
+    switch (shapeOf(declaration)) {
+      case "starter":
+        return say(
+          claim("split marker"),
+          "the marker promises a sync-maintained half that a starter never gets",
+          "drop one",
+        );
+      case "managed":
+        return say(
+          claim("split marker"),
+          "sync would overwrite the repo-owned half the marker promises",
+          "declare the file split (grammar tail-marker) or drop the marker",
+        );
+      case "bounded-region":
+        return say(
+          claim("tail-marker line"),
+          "the rebuild would treat the tail that marker promises as part of this region",
+          "drop the marker or declare the file split (grammar tail-marker)",
+        );
+      default:
+        return say(claim("tail-marker line"), FOREIGN_GENERIC_CONSEQUENCE, FOREIGN_GENERIC_REMEDY);
+    }
+  }
+  switch (shapeOf(declaration)) {
+    case "starter":
+      return say(
+        claim("bounded-region marker"),
+        "the markers promise a sync-maintained managed section that a starter never gets",
+        "drop one",
+      );
+    case "managed":
+      return say(
+        claim("bounded-region marker"),
+        "sync would overwrite the repo-owned LOCAL region the markers promise",
+        "declare the file split (grammar bounded-region) or drop the markers",
+      );
+    case "tail-marker":
+      return say(
+        claim("bounded-region marker"),
+        "the rebuild would treat the repo-owned LOCAL region as managed and overwrite it",
+        "declare the file split (grammar bounded-region) or drop the markers",
+      );
+    default:
+      return say(
+        claim("bounded-region marker"),
+        FOREIGN_GENERIC_CONSEQUENCE,
+        FOREIGN_GENERIC_REMEDY,
+      );
+  }
+}
+
+/** Markers in the source that this declaration does not own, at most one
+ *  per kind. Sync dispatches on the DECLARED grammar alone, so a foreign
+ *  marker is always the same hazard however the declaration is spelled: the
+ *  rebuild treats the repo-owned area that marker promises as its own and
+ *  overwrites it.
+ *
+ *  The two matching semantics stay SPLIT on purpose, because they decide
+ *  what counts as a claim. Tail markers match as exact TRIMMED LINES, so a
+ *  source may still MENTION one mid-line without claiming the tail below
+ *  it. Region markers match as SUBSTRINGS, the way the validator's
+ *  exactly-once count and the appendix neutralization both count, so a
+ *  spliced jinja tag glued onto a marker line does not smuggle the claim
+ *  past. Unifying them would move the boundary of what a source can say. */
+function foreignMarkerErrors(
+  declaration: OwnershipDeclaration,
+  source: string,
+  rosters: Record<MarkerKind, readonly string[]>,
+  where: string,
+): string[] {
+  const own = ownMarkers(declaration);
+  const errors: string[] = [];
+  const ownTail = new Set(own.tail);
+  const tailRoster = new Set(rosters.tail);
+  const foreignTail = source
+    .split("\n")
+    .map((line) => line.trim())
+    .find((line) => tailRoster.has(line) && !ownTail.has(line));
+  if (foreignTail !== undefined) {
+    errors.push(foreignMarkerMessage("tail", foreignTail, own.tail, declaration, where));
+  }
+  const ownRegion = new Set(own.region);
+  const foreignRegion = [...new Set(rosters.region)]
+    .filter((candidate) => !ownRegion.has(candidate))
+    .find((candidate) => source.includes(candidate));
+  if (foreignRegion !== undefined) {
+    errors.push(foreignMarkerMessage("region", foreignRegion, own.region, declaration, where));
+  }
+  return errors;
+}
+
 /** Errors when a template source's decoration contradicts its declared
  *  class or grammar. Purely textual, purely per-file: the declaration is
  *  the classification, headers and marker lines are validated decoration,
  *  never classification input. `skipMatched` says whether copier.yml's
  *  _skip_if_exists exempts the landed path: the starter class and the
  *  skip list must agree in both directions (copier needs the skip entry,
- *  the declaration is the single ownership truth). `regionMarkerTexts` is
- *  every declared bounded-region grammar's marker strings
- *  (declaredRegionMarkerTexts over ALL declaration sources) - the
- *  managed/starter contradiction scan checks against them all. `where`
- *  names the source file in errors. */
+ *  the declaration is the single ownership truth). `regionMarkerTexts` and
+ *  `tailMarkerTexts` are every declared grammar's marker strings
+ *  (declaredRegionMarkerTexts / declaredTailMarkerTexts over ALL declaration
+ *  sources); they join the shipped constants to form the rosters the shared
+ *  foreign-marker scan checks every declaration against. `where` names the
+ *  source file in errors. */
 export function declarationTextErrors(
   declaration: OwnershipDeclaration,
   source: string,
@@ -411,24 +606,25 @@ export function declarationTextErrors(
   where: string,
   tailMarkerTexts: readonly string[] = [],
 ): string[] {
+  // The foreign-marker rule runs FIRST and for every declaration, so each
+  // arm below states only what is true of its OWN markers. Written per arm
+  // it arrived unarmed every time an arm was added (three separate fixes
+  // armed managed/starter, then tail-marker, then bounded-region); written
+  // here, a grammar added tomorrow inherits it before it has an arm.
+  //
+  // Both rosters union the SHIPPED marker constants with the texts derived
+  // from live declarations. Deriving alone is self-disarming - retiring the
+  // last declaration of a grammar would empty the roster and silence the
+  // scan on exactly the flip it exists to catch - and the constants alone
+  // would miss a custom declared marker copied into another source.
+  const rosters: Record<MarkerKind, readonly string[]> = {
+    tail: [...LOCAL_SECTION_LINES, ...tailMarkerTexts],
+    region: [...REGION_MARKER_LINES, ...regionMarkerTexts],
+  };
+  const foreign = foreignMarkerErrors(declaration, source, rosters, where);
+  if (foreign.length > 0) return foreign;
+
   const errors: string[] = [];
-  const hasHeader = hasManagedHeader(source);
-  // Declared tail markers are arbitrary strings, so the shipped constants
-  // alone would miss a custom one copied into a managed or starter source.
-  // Exact trimmed-line match, so a mid-line MENTION of a marker still
-  // passes - only a line that IS the marker claims a repo-owned tail.
-  const tailLines = new Set<string>([...LOCAL_SECTION_LINES, ...tailMarkerTexts]);
-  const sentinelLine = source
-    .split("\n")
-    .map((line) => line.trim())
-    .find((line) => tailLines.has(line));
-  // Declared bounded-region marker text (substring-matched, the way the
-  // validator and appendix neutralization count): a managed or starter
-  // source carrying it promises a repo-owned LOCAL region the declared
-  // class would let sync overwrite (or never maintain).
-  const regionMarker = [...new Set([...REGION_MARKER_LINES, ...regionMarkerTexts])].find((marker) =>
-    source.includes(marker),
-  );
   if (declaration.class === "starter") {
     if (!skipMatched) {
       errors.push(
@@ -437,25 +633,11 @@ export function declarationTextErrors(
           "sync; add the skip entry or fix the declared class",
       );
     }
-    if (hasHeader) {
+    if (hasManagedHeader(source)) {
       errors.push(
         `${where}: opens with the managed header but is declared a starter - the ` +
           "header promises sync overwrites the file, the starter class promises " +
           "it never does; drop one",
-      );
-    }
-    if (sentinelLine !== undefined) {
-      errors.push(
-        `${where}: carries the '${sentinelLine}' split marker but is declared a ` +
-          "starter - the marker promises a sync-maintained half that a starter " +
-          "never gets; drop one",
-      );
-    }
-    if (regionMarker !== undefined) {
-      errors.push(
-        `${where}: carries the '${regionMarker}' bounded-region marker but is ` +
-          "declared a starter - the markers promise a sync-maintained managed " +
-          "section that a starter never gets; drop one",
       );
     }
     return errors;
@@ -467,41 +649,10 @@ export function declarationTextErrors(
         "repo-owned; declare it a starter or drop the skip entry",
     );
   }
-  if (declaration.class === "managed") {
-    if (sentinelLine !== undefined) {
-      errors.push(
-        `${where}: carries the '${sentinelLine}' split marker but is declared ` +
-          "managed - sync would overwrite the repo-owned half the marker promises; " +
-          "declare the file split (grammar tail-marker) or drop the marker",
-      );
-    }
-    if (regionMarker !== undefined) {
-      errors.push(
-        `${where}: carries the '${regionMarker}' bounded-region marker but is ` +
-          "declared managed - sync would overwrite the repo-owned LOCAL region " +
-          "the markers promise; declare the file split (grammar bounded-region) " +
-          "or drop the markers",
-      );
-    }
-    return errors;
-  }
+  // managed owns no markers at all, so the shared scan above is its whole
+  // marker surface; the skip cross-check is all that is left here.
+  if (declaration.class === "managed") return errors;
   if (declaration.grammar === "tail-marker") {
-    // Bounded-region markers promise a LOCAL region between them; a
-    // tail-marker declaration promises a repo-owned tail below one line.
-    // A source carrying both is the same overwrite hazard the managed and
-    // starter arms already reject: sync rebuilds by the DECLARED grammar,
-    // so it would treat everything above the terminal marker - the LOCAL
-    // region included - as managed, and overwrite repository edits inside
-    // it. Checked here because those arms return before reaching this one.
-    if (regionMarker !== undefined) {
-      errors.push(
-        `${where}: carries the '${regionMarker}' bounded-region marker but is ` +
-          "declared split (tail-marker) - the rebuild would treat the repo-owned " +
-          "LOCAL region as managed and overwrite it; declare the file split " +
-          "(grammar bounded-region) or drop the markers",
-      );
-      return errors;
-    }
     // The sync rebuild splits at ONE marker line, so the source must carry
     // it exactly once (a second copy would ride into repositories where
     // the exactly-once validator flags every render)...

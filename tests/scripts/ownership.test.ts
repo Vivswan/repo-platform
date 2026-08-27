@@ -414,6 +414,74 @@ describe("declarationTextErrors", () => {
     expect(errorsOf(tail("X.md", HTML_SENTINEL), source, false)).toEqual([]);
   });
 
+  // The last direction: a bounded declaration validated only its OWN four
+  // markers, so a source could smuggle a second split grammar past
+  // composition. Sync dispatches on the DECLARED grammar, so it rebuilds the
+  // file as this region and overwrites whatever the other grammar promised.
+  // The same-grammar mirror: this declaration's marker sits once at EOF, so
+  // the count and EOF checks both pass, but a FOREIGN declared tail marker
+  // earlier in the file means everything between them rebuilds as managed.
+  test("a tail declaration carrying ANOTHER declaration's tail marker is an error", () => {
+    const source = ["managed body", HASH_SENTINEL, "someone else's tail", HTML_SENTINEL, ""].join(
+      "\n",
+    );
+    const errors = errorsOf(tail("X.md", HTML_SENTINEL), source, false);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain("tail marker as well as its own");
+  });
+
+  test("a tail declaration with only its own marker still passes", () => {
+    const source = ["managed body", HTML_SENTINEL, ""].join("\n");
+    expect(errorsOf(tail("X.md", HTML_SENTINEL), source, false)).toEqual([]);
+  });
+
+  test("a bounded declaration carrying a tail sentinel is an error", () => {
+    const source = [
+      "# BEGIN REPOSITORY LOCAL",
+      "# END REPOSITORY LOCAL",
+      "# BEGIN REPO-PLATFORM MANAGED",
+      "# END REPO-PLATFORM MANAGED",
+      HASH_SENTINEL,
+      "",
+    ].join("\n");
+    const errors = errorsOf(bounded(".gitignore"), source, false);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain("tail-marker line but is declared split (bounded-region)");
+  });
+
+  test("a bounded declaration carrying ANOTHER declaration's region markers is an error", () => {
+    const source = [
+      "# BEGIN REPOSITORY LOCAL",
+      "# END REPOSITORY LOCAL",
+      "# BEGIN REPO-PLATFORM MANAGED",
+      "# END REPO-PLATFORM MANAGED",
+      "# BEGIN ACME LOCAL",
+      "# END ACME LOCAL",
+      "",
+    ].join("\n");
+    const errors = declarationTextErrors(
+      bounded(".gitignore"),
+      source,
+      false,
+      [...REGION_MARKER_TEXTS, "# BEGIN ACME LOCAL", "# END ACME LOCAL"],
+      "templates/t/x.jinja",
+    );
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain("which is not one of this declaration's four");
+  });
+
+  test("the legitimate .gitignore, carrying only its own four, passes", () => {
+    const source = [
+      "# BEGIN REPOSITORY LOCAL",
+      "# END REPOSITORY LOCAL",
+      "# BEGIN REPO-PLATFORM MANAGED",
+      "node_modules/",
+      "# END REPO-PLATFORM MANAGED",
+      "",
+    ].join("\n");
+    expect(errorsOf(bounded(".gitignore"), source, false)).toEqual([]);
+  });
+
   test("a starter declaration over bounded-region marker text is an error", () => {
     const errors = errorsOf(starter(".gitignore"), "# BEGIN REPOSITORY LOCAL\n", true);
     expect(errors).toHaveLength(1);
@@ -479,6 +547,46 @@ describe("declarationTextErrors", () => {
     );
     expect(missing).toHaveLength(1);
     expect(missing[0]).toContain("'# END REPO-PLATFORM MANAGED'");
+  });
+
+  // The point of hoisting the foreign-marker rule out of the four arms: it
+  // is stated ONCE, before any arm runs, so a grammar this union grows
+  // later inherits the rejection with no arm of its own. The specimen is a
+  // shape no arm knows - it reaches declarationTextErrors past the type
+  // system the way a half-finished new grammar would - and it is still
+  // refused both kinds of marker it does not own. Written per arm, every
+  // arm that was added arrived unarmed and needed its own fix round; this
+  // is the test that stops the next one from repeating that.
+  test("a grammar with NO arm of its own still rejects foreign markers", () => {
+    const novel = {
+      path: "X.md",
+      class: "split",
+      grammar: "ledger-block",
+      marker: "# LEDGER",
+    } as unknown as OwnershipDeclaration;
+
+    const tailForeign = errorsOf(novel, `body\n${HASH_SENTINEL}\n`, false);
+    expect(tailForeign).toHaveLength(1);
+    expect(tailForeign[0]).toContain(`carries the '${HASH_SENTINEL}' tail-marker line`);
+    expect(tailForeign[0]).toContain("sync rebuilds by the DECLARED grammar");
+
+    const regionForeign = errorsOf(novel, "# NOTES LOCAL OPEN\nbody\n", false);
+    expect(regionForeign).toHaveLength(1);
+    expect(regionForeign[0]).toContain("carries the '# NOTES LOCAL OPEN' bounded-region marker");
+
+    // Both kinds at once are both reported - the scan owes no arm a choice
+    // about which hazard it names.
+    expect(errorsOf(novel, `# NOTES LOCAL OPEN\n${HTML_SENTINEL}\n`, false)).toHaveLength(2);
+
+    // And the matching semantics the shared scan inherited stay split: a
+    // mid-line MENTION of a tail marker is not a claim, while region marker
+    // text is matched as a substring wherever it sits. Counted over the
+    // foreign findings alone - past the shared scan a shape with no arm
+    // falls into the arm chain, which is the very thing it has yet to grow.
+    const foreignOf = (source: string) =>
+      errorsOf(novel, source, false).filter((error) => error.includes(": carries the '"));
+    expect(foreignOf(`see ${HASH_SENTINEL} for details\n`)).toEqual([]);
+    expect(foreignOf("{% if g %}# NOTES LOCAL OPEN\n")).toHaveLength(1);
   });
 });
 
