@@ -27,6 +27,7 @@ import {
   summaryLine,
   summaryTable,
 } from "../../.github/scripts/sync/rehearse_fleet.ts";
+import { SHRANK_PHRASE } from "../../.github/scripts/sync/tail_tripwire.ts";
 
 function outcome(overrides: Partial<RehearsalOutcome> = {}): RehearsalOutcome {
   return {
@@ -37,6 +38,7 @@ function outcome(overrides: Partial<RehearsalOutcome> = {}): RehearsalOutcome {
     manifest: "stamped",
     validationOk: true,
     validationErrors: [],
+    tripwireReport: "",
     workspace: null,
     ...overrides,
   };
@@ -254,6 +256,7 @@ describe("phaseOf", () => {
     expect(phaseOf("resolve_copier_conflicts.ts failed (exit 1)")).toBe("resolve");
     expect(phaseOf("retired_cleanup.ts failed (exit 1)")).toBe("retire");
     expect(phaseOf("stamp_manifest.ts failed (exit 1)")).toBe("stamp");
+    expect(phaseOf("tail_tripwire.ts failed (exit 1)")).toBe("tripwire");
   });
 
   test("non-script failures stay unlabeled - clone and fetch reasons already read clearly", () => {
@@ -271,6 +274,34 @@ describe("outcomeRow", () => {
       detail: "no changes; retired 0; manifest stamped ok; validation ok",
       severity: "ok",
     });
+  });
+
+  test("a tripped tail tripwire is an error row (the script exits 0 by design)", () => {
+    const row = outcomeRow(
+      "o/r",
+      outcome({ tripwireReport: `> [!WARNING]\n- \`AGENTS.md\`: 1 ${SHRANK_PHRASE}\n` }),
+    );
+    expect(row.status).toBe("TRIPPED");
+    expect(row.detail).toContain("[phase tripwire] tail tripwire TRIPPED");
+    expect(row.detail).toContain("lines would be lost");
+    expect(row.severity).toBe("error");
+  });
+
+  test("an unverifiable-only report never asserts confirmed loss", () => {
+    // Unverifiable findings prove nothing was lost - the row must say
+    // integrity is unproven, not that lines vanished. Severity stays
+    // error either way (manual attention).
+    const row = outcomeRow(
+      "o/r",
+      outcome({
+        tripwireReport:
+          "> [!WARNING]\n- `AGENTS.md`: the previous commit has no usable ownership manifest - review this file's full diff against the previous commit before merging.\n",
+      }),
+    );
+    expect(row.status).toBe("TRIPPED");
+    expect(row.detail).toContain("integrity unproven");
+    expect(row.detail).not.toContain("lines would be lost");
+    expect(row.severity).toBe("error");
   });
 
   test("conflicted files carry their dropped-hunk counts and malformed files their state", () => {

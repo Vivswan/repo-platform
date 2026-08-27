@@ -15,7 +15,8 @@ Work in this order, always:
 1. Read the PR body top to bottom (the triage table below).
 2. Run the mandatory per-file review pass - every changed file classified and cleared.
 3. Resolve: restore dropped lines, hand-edit unresolved files.
-4. Merge (or let auto-merge fire on a clean PR).
+4. Disposition every bot review comment (the section below) - none may be left unaddressed.
+5. Merge (or let auto-merge fire on a clean PR) - unless a human does the merging, in which case stop at green and report with a verdict line (see "Resolving on a human's behalf").
 
 ## When to Apply
 
@@ -27,7 +28,7 @@ Work in this order, always:
 
 - A three-way `copier update`: the template's render at the repo's recorded base (`_commit` in `.copier-answers.yml`, quoted as "Previous:" in the PR body) is diffed against the render at the new ref ("New:"), and that diff is merged onto the repo's current state. Local edits to non-split files survive unless they overlap a template change. Split-class files (a `repo-platform:local-section` marker or the `.gitignore` LOCAL region separates the halves) never ride that merge: after the update they are REBUILT structurally - the managed half from a clean render at the new ref, the repository-local half byte-for-byte from the repo's last commit. Content in the repo-owned half always survives; local edits INSIDE a managed half are reset on every sync (they used to survive by merge luck) - the PR body flags each reset and the PR stays manual-review.
 - The head branch `automation/repo-platform` is REGENERATED on every sync run (weekly cron or dispatch) with a lease-guarded force-push. Manual commits sitting on it when the next run starts are overwritten by design; the PR body says so.
-- Clean updates arm squash auto-merge: the PR merges itself once the repo's required `all-green` check passes. A PR stays manual-review when any of these hold: auto-resolved conflicts, a split-file carry needing review (an appendix, reset managed-half edits, duplicate markers), failed validation, a recovery re-render, a forced-manual dispatch, a deleted license file, withheld workflow files, out-of-band settings drift, or a settings.yml layering transition that dropped overrides or failed.
+- Clean updates arm squash auto-merge: the PR merges itself once the repo's required `all-green` check passes. A PR stays manual-review when any of these hold: auto-resolved conflicts, a split-file carry needing review (an appendix, reset managed-half edits, duplicate markers), a tripped tail tripwire, failed validation, a recovery re-render, a forced-manual dispatch, a deleted license file, withheld workflow files, out-of-band settings drift, or a settings.yml layering transition that dropped overrides or failed.
 
 Find and open the PR from the repo:
 
@@ -35,6 +36,8 @@ Find and open the PR from the repo:
 gh pr list --head automation/repo-platform --json number,title,url
 gh pr view <number>
 ```
+
+Exactly one open sync PR should exist per repo; when none exists, or more than one does, stop and report that instead of guessing - a missing PR usually means the last sync run failed or delivered nothing, and a duplicate means something opened a PR out of band.
 
 ## Triage: read the PR body top to bottom
 
@@ -49,6 +52,7 @@ Each block tells you what to verify before anything merges:
 | Workflow files WITHHELD warning | The fleet token lacks the Workflows scope; `.github/workflows` changes are missing from the diff | Grant Workflows RW to REPO_PLATFORM_TOKEN in repo-platform and re-run the sync, or accept the partial update |
 | License metadata / license deletion warnings | Manifest license claim conflicts, or the update deletes a license file (below-marker content does not survive a delete-vs-modify merge) | Fix the manifest claim; check the old license file for local notices worth moving |
 | Split-files carry summary ("rebuilt structurally" / "carried over the recovery re-render") | Split-class files were rebuilt: managed halves from the fresh render, repository-local halves from the repo's last commit; each bullet names a file whose carry changed it | Verify each listed file's diff. A "managed-half edits reset" bullet means someone edited the template-owned half - the edit is gone from the tree by design; move it below the marker or upstream if it must live. An appendix bullet needs manual deduplication |
+| TAIL TRIPWIRE warning | A split file's repository-owned half lost lines the previous commit held (or could not be verified); the structural rebuild should make this impossible, so it doubles as a sync-bug report | For a shrink finding: restore the listed lines on the PR branch (they are quoted in the section; the previous commit holds the full copy), or confirm the shrink was intended (you deleted them yourself), then merge. For an UNVERIFIABLE finding there are no quoted lines: diff the file's repo-owned half (below its marker, or the .gitignore LOCAL region) against the previous commit's copy by hand - `git diff origin/<base>...HEAD -- <file>` - then merge if intact, escalate if not. Either way, report the trip on Vivswan/repo-platform - the wire firing at all is a sync bug |
 | Merge conflicts warning + per-file summary | Copier hit conflicts; see the conflicts section | Restore dropped lines that should stay; hand-edit files marked unresolved |
 | Validation failed warning | The updated tree fails the template validator; the sync run is red | Fix the tree in the PR |
 
@@ -95,7 +99,7 @@ Copier renders overlapping edits as git-style inline conflict blocks (markers re
 
 What "restore the dropped lines" means depends on who owns the file (the full table is in [references/file-ownership.md](references/file-ownership.md)):
 
-- Fully managed (ci.yml, dependabot.yml, callers, .copier-answers.yml, the toolchain pin dotfiles, ...): accept the template side. These files are template-owned: overlapping local edits lose to the template (an edit the template happens not to touch can survive a given sync, but it is living on borrowed time). Move the need upstream (a template change in repo-platform) or into a repo-owned file (checks.yml for CI jobs). One carve-out: changing a module parameter (nightly_label, skills_dir, pages_*, fuzzer_label, ...) is done by editing that question's VALUE key in .copier-answers.yml via a normal default-branch PR - never the underscore keys.
+- Fully managed (ci.yml, dependabot.yml, callers, .copier-answers.yml, the toolchain pin dotfiles, ...): accept the template side. These files are template-owned: overlapping local edits lose to the template (an edit the template happens not to touch can survive a given sync, but it is living on borrowed time). Move the need upstream (a template change in repo-platform) or into a repo-owned file: checks.yml for CI jobs; update-release.yml and update-release-pr.yml for release-time logic (asset uploads, release-note edits, publish-time side effects) dropped from a managed release.yml or release-please.yml. One carve-out: changing a module parameter (nightly_label, skills_dir, pages_*, fuzzer_label, ...) is done by editing that question's VALUE key in .copier-answers.yml via a normal default-branch PR - never the underscore keys.
 - Generated-once starters (checks.yml, update-release.yml, update-release-pr.yml, nightly-fuzz.yml, nightly.yml, issue forms, release-please config, .gitleaks.toml, the .claude-plugin manifests, ...): never touched once they exist, so they do not conflict. Additions are explained by the modules diff; modifications or deletions are not - stop and look.
 - Managed-tail sentinel files (AGENTS.md, SECURITY.md, CONTRIBUTING.md, LICENSE.md, .gitattributes, .editorconfig, .github/CODEOWNERS below the marker): local content belongs BELOW the marker - the rebuild carries it byte-for-byte every sync. Content ABOVE the marker is reset every sync (the carry summary flags each reset); re-add anything durable below the marker, never in place.
 - `.gitignore`: local entries belong inside the BEGIN/END REPOSITORY LOCAL section, which the rebuild carries byte-for-byte; entries hand-added to the managed section are reset the same way.
@@ -116,6 +120,21 @@ git push origin automation/repo-platform
 - Pushing more commits is the supported way to fix the PR; CI re-runs on the push. Needs-review PRs are never auto-merged, so merge manually when green.
 - Merge PROMPTLY. The PR body's "manual commits pushed to it are overwritten" and this workflow are both true: commits parked on the branch BETWEEN runs are replaced by the next run's force-push, so fix-then-merge before the next release, weekly cron, or dispatch. A push that lands while a sync run is already in flight trips that run's lease and turns the run red (loud, not lost) - the silent overwrite is only the between-runs case.
 - Do not rebase the automation branch onto the default branch or force-push it yourself - the next run replaces it wholesale anyway, and an out-of-band force-push just trips the lease.
+
+## Disposition every bot review comment
+
+Copilot and other bots leave review comments on sync PRs; do not resolve or merge with any of them unaddressed. Read them all - `gh pr view <number> --comments` for the conversation, plus the inline review comments via `gh api repos/{owner}/{repo}/pulls/<number>/comments`. For each one: fix the valid ones on the branch, reply on the thread explaining why an invalid or inapplicable one is rejected, and resolve the thread. When reporting to a human, include the disposition per comment.
+
+## Resolving on a human's behalf
+
+When a human does the merging, your job ends with the branch resolved, pushed, and green:
+
+- NEVER merge, enable auto-merge, or approve reviews.
+- Never rebase or force-push the automation branch (check it out fresh and commit on top, per "Fix the PR"); never edit the `.copier-answers.yml` underscore keys (`_commit`, `_src_path`).
+- Work fast once resolved: commits parked on the branch between runs are overwritten by the next sync.
+- Green means the repo's required `all-green` check passes on the branch (a red validate-template check flags drift to fix, but where it is not required it does not gate the merge).
+- End the report with an explicit verdict line: "READY TO MERGE" when every changed file is classified and cleared, dropped local content is restored to its owned location, and every bot comment is fixed or answered - or "NOT READY: <what blocks it>".
+- Also report what local content you restored and where, the disposition of each bot comment, and anything unexplained you left open (anything the PR body and the modules diff do not explain is a stop-and-report, not a guess).
 
 ## Closing instead of fixing
 

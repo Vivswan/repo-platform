@@ -160,16 +160,21 @@ if (
       process.exit(1);
     }
     // Callback replacement: a literal holder string would have its $
-    // sequences expanded.
+    // sequences expanded. latin1 throughout (the byte-faithfulness
+    // convention shared with preserve_local_content.ts): the template
+    // bytes round-trip verbatim instead of folding onto U+FFFD, and each
+    // substituted answer is spliced in as its UTF-8 bytes viewed as
+    // latin1 code units, so the final write emits real UTF-8 for it.
+    const asLatin1 = (value: string) => Buffer.from(value, "utf-8").toString("latin1");
     const rendered = show.stdout
-      .toString()
-      .replaceAll("{{ copyright_holder }}", () => holder)
-      .replaceAll("{{ github_username }}", () => username);
+      .toString("latin1")
+      .replaceAll("{{ copyright_holder }}", () => asLatin1(holder))
+      .replaceAll("{{ github_username }}", () => asLatin1(username));
     if (rendered.includes("{{") || rendered.includes("{%")) {
       error(`${label}: cannot re-seed the fleet license; unrendered template expressions remain`);
       process.exit(1);
     }
-    writeFileSync(join(targetDir, "LICENSE.md"), rendered);
+    writeFileSync(join(targetDir, "LICENSE.md"), Buffer.from(rendered, "latin1"));
     notice(
       `${label}: LICENSE.md was deleted but the fleet license is mandatory without the custom-license module; re-seeded from ${targetRef}.`,
     );

@@ -59,7 +59,7 @@ const TARGET_REF = "templates/v9.9.9";
 
 // The workspace repo stands in for the sync runner's repo-platform
 // checkout: the script resolves TARGET_REF:template/... against its CWD.
-function makeWorkspace(templateContent: string): string {
+function makeWorkspace(templateContent: string | Buffer): string {
   const dir = mkdtempSync(join(tmpdir(), "preserve-owned-ws-"));
   const path = join(dir, fleetLicenseRel);
   mkdirSync(dirname(path), { recursive: true });
@@ -127,6 +127,27 @@ describe("preserve_repo_owned fleet-license re-seed", () => {
     // variable, teach the re-seed to render it.
     expect(result.license).not.toContain("{{");
     expect(result.license).not.toContain("{%");
+  });
+
+  test("template bytes round-trip and a multi-byte holder lands as real UTF-8", () => {
+    // A non-UTF-8 byte in the template (0xE9) must survive verbatim - a
+    // utf-8 decode would fold it onto U+FFFD - while a holder beyond
+    // latin1 must land as its UTF-8 bytes, not be masked to a low byte.
+    const marked = Buffer.concat([
+      Buffer.from(licenseTemplateSource, "utf-8"),
+      Buffer.from([0x63, 0x61, 0x66, 0xe9, 0x0a]), // caf\xe9\n
+    ]);
+    const workspace = makeWorkspace(marked);
+    const holder = "Vivswan \u0160ah \u7814"; // beyond latin1: S-caron and a CJK ideograph
+    const target = makeTarget({
+      ".copier-answers.yml": `copyright_holder: "${holder}"\ngithub_username: Vivswan\n`,
+    });
+    const result = runPreserve(workspace, target);
+    expect(result.exitCode).toBe(0);
+    const bytes = readFileSync(join(target, "LICENSE.md"));
+    expect(bytes.includes(Buffer.from([0x63, 0x61, 0x66, 0xe9]))).toBe(true);
+    expect(bytes.includes(Buffer.from([0xef, 0xbf, 0xbd]))).toBe(false); // no U+FFFD
+    expect(bytes.includes(Buffer.from(`Copyright ${holder}`, "utf-8"))).toBe(true);
   });
 
   test("a template variable the re-seed does not render fails loudly", () => {
