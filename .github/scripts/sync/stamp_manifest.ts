@@ -406,8 +406,8 @@ function main(): number {
   const { out, problem } = stampManifestText(text, root);
   if (problem !== null) {
     console.error(
-      `warning: ${MANIFEST_NAME} ${problem}; left unstamped for ` +
-        "validate-template's parity check to report",
+      `warning: ${MANIFEST_NAME} ${problem}; left unstamped (symlink target ` +
+        "normalization skipped too) for validate-template's parity check to report",
     );
     return 0;
   }

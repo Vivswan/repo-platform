@@ -1735,6 +1735,32 @@ export function build(): Map<string, Entry> {
     die(`error: ${error instanceof Error ? error.message : String(error)}`);
   }
   if (JSON.stringify(committed) !== JSON.stringify(expected)) {
+    // Two distinct causes, two distinct remedies: entries the generator
+    // never emits are HAND-ADDED (outside or inside the markers - the
+    // generated region owns the whole _exclude list), while missing or
+    // reordered generated entries mean the region is stale.
+    const extras = committed.filter((pattern) => !expected.includes(pattern));
+    const missing = expected.filter((pattern) => !committed.includes(pattern));
+    if (missing.length === 0 && extras.length > 0) {
+      die(
+        `error: copier.yml's _exclude carries ${extras.length} hand-added ` +
+          `entr${extras.length === 1 ? "y" : "ies"} the generator does not emit ` +
+          `(first: ${JSON.stringify(extras[0])}) - the generated region owns the ` +
+          "whole list (conditional landing derives from the module manifests " +
+          "and base filename gates); remove the hand-added entries",
+      );
+    }
+    if (missing.length === 0 && extras.length === 0) {
+      // Same set, different list: duplicated or reordered entries, e.g. a
+      // generated entry hand-copied OUTSIDE the markers - which a
+      // regeneration would preserve, so the generic advice below would
+      // not heal it.
+      die(
+        "error: copier.yml's _exclude duplicates or reorders the generated " +
+          "entries (a copy outside the region markers survives regeneration) - " +
+          "remove everything outside the generated region and rerun `bun run generate`",
+      );
+    }
     die(
       "error: copier.yml's _exclude region does not match the patterns " +
         "derived from the composed tree's gates - run `bun run generate` " +
