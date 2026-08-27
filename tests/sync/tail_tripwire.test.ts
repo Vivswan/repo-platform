@@ -13,6 +13,7 @@ import { dirname, join } from "node:path";
 import type { SplitEntry } from "../../.github/scripts/sync/preserve_local_content.ts";
 import {
   compareHalves,
+  hasDuplicateJsonKeys,
   headSplitEntries,
   missingLines,
   renderReport,
@@ -243,6 +244,43 @@ describe("headSplitEntries", () => {
     expect(() =>
       headSplitEntries(manifestText({ "../AGENTS.md": rawLegacy(SENTINEL, "above") }), "t"),
     ).toThrow(/clean relative path/);
+  });
+
+  test("a duplicated path key throws instead of last-wins reclassifying the file", () => {
+    // JSON.parse keeps only the LAST duplicate: a conflict-mangled
+    // manifest declaring AGENTS.md split THEN managed would classify it
+    // managed, drop it from the split candidates, and let a retirement
+    // delete its repository-owned half with no hold.
+    const dup = `{"files": {"AGENTS.md": ${JSON.stringify(rawTail())}, "AGENTS.md": {"class": "managed", "hash": null}}}`;
+    expect(() => headSplitEntries(dup, "t")).toThrow(/same key twice/);
+  });
+
+  test("an escape-variant duplicate key is caught too (JSON.parse collides decoded keys)", () => {
+    // The second spelling escapes the final "d" as backslash-u0064: a
+    // byte-level raw-token compare would miss it, but JSON.parse still
+    // collides the two keys last-wins.
+    const escaped = String.raw`"AGENTS.m\u0064"`;
+    const dup = `{"files": {"AGENTS.md": ${JSON.stringify(rawTail())}, ${escaped}: {"class": "managed", "hash": null}}}`;
+    expect(() => headSplitEntries(dup, "t")).toThrow(/same key twice/);
+  });
+
+  test("the same key in DIFFERENT objects is not a duplicate (every entry carries class)", () => {
+    expect(hasDuplicateJsonKeys('{"a": {"class": "split"}, "b": {"class": "managed"}}')).toBe(
+      false,
+    );
+    expect(hasDuplicateJsonKeys('{"a": ["x", "x"], "b": {"a": 1}}')).toBe(false);
+  });
+
+  test("an unknown or missing ownership class throws instead of reading as non-split", () => {
+    // A damaged class ("spllt") read as merely non-split would drop the
+    // file from the candidates and let a retirement delete its
+    // repository-owned half with auto-merge armed.
+    expect(() =>
+      headSplitEntries(manifestText({ "AGENTS.md": { class: "spllt", marker: SENTINEL } }), "t"),
+    ).toThrow(/ownership class/);
+    expect(() =>
+      headSplitEntries(manifestText({ "AGENTS.md": { marker: SENTINEL } }), "t"),
+    ).toThrow(/ownership class/);
   });
 
   test("a damaged (non-object) entry throws instead of silently skipping its file", () => {

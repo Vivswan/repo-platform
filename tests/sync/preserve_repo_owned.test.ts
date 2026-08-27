@@ -334,6 +334,50 @@ describe("preserve_repo_owned removed-splits hold", () => {
     expect(result.report).not.toBe("");
     expect(result.report).toContain("`AGENTS.md`");
     expect(result.report).toContain("does not class this file");
+    expect(result.report).toContain("ownership manifest was rejected");
+    expect(result.stdout).toContain("manual-review");
+  });
+
+  test("a duplicate-key HEAD manifest fails closed with the reason in the report", () => {
+    // JSON.parse keeps the LAST duplicate: split-then-managed for the same
+    // path would silently reclassify the file managed and drop it from the
+    // candidates while a retirement deletes its repository-owned half.
+    const dup = `{"files": {"AGENTS.md": {"class": "split", "grammar": "tail-marker", "marker": ${JSON.stringify(SENTINEL)}, "managed": "above", "hash": null}, "AGENTS.md": {"class": "managed", "hash": null}}}`;
+    const result = runHold({ [MANIFEST_REL]: dup, "AGENTS.md": agentsWithTail }, ["AGENTS.md"]);
+    expect(result.exitCode).toBe(0);
+    expect(result.report).toContain("`AGENTS.md`");
+    expect(result.report).toContain("ownership manifest was rejected");
+    expect(result.report).toContain("same key twice");
+    expect(result.stdout).toContain("manual-review");
+  });
+
+  test("an unknown ownership class fails closed with the reason in the report", () => {
+    // A damaged class ("spllt") read as merely non-split would drop the
+    // file from the candidates and let the retirement auto-merge.
+    const damaged = JSON.stringify({
+      files: { "AGENTS.md": { class: "spllt", marker: SENTINEL, managed: "above", hash: null } },
+    });
+    const result = runHold({ [MANIFEST_REL]: damaged, "AGENTS.md": agentsWithTail }, ["AGENTS.md"]);
+    expect(result.exitCode).toBe(0);
+    expect(result.report).toContain("`AGENTS.md`");
+    expect(result.report).toContain("ownership manifest was rejected");
+    expect(result.report).toContain("ownership class");
+    expect(result.stdout).toContain("manual-review");
+  });
+
+  test("a hostile rejection reason is clipped and control-escaped in the report", () => {
+    // The rejection message embeds decoded manifest keys, which are
+    // target-controlled: a huge key must not blow the section budget and a
+    // NUL must not survive into the report (it would kill gh's --body
+    // argv later). The key here is 2000 chars with an embedded NUL escape.
+    const hugeKey = `A\\u0000${"x".repeat(2000)}`;
+    const damaged = `{"files": {"${hugeKey}": {"class": "spllt", "hash": null}}}`;
+    const result = runHold({ [MANIFEST_REL]: damaged, "AGENTS.md": agentsWithTail }, ["AGENTS.md"]);
+    expect(result.exitCode).toBe(0);
+    expect(result.report).toContain("ownership manifest was rejected");
+    expect(result.report).not.toContain("\u0000");
+    expect(result.report).toContain("[clipped]");
+    expect(Buffer.byteLength(result.report, "utf-8")).toBeLessThanOrEqual(16384);
     expect(result.stdout).toContain("manual-review");
   });
 

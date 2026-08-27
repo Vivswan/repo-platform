@@ -313,18 +313,23 @@ const REMOVED_SPLITS_UNVERIFIABLE = [
   "",
 ].join("\n");
 
-/** The removed-splits section, bounded as a WHOLE by MAX_SECTION_BYTES
- * (intro, bullets, and the omission item all count): bullets are added
- * until the next would overflow, then the rest collapse into one aggregate
- * omission item, so no number of deletions can blow the PR body. Empty
- * string when nothing left (no section, no forced review). */
-function renderRemovedSplits(removals: RemovedSplit[]): string {
+/** The removed-splits section, bounded as a WHOLE by MAX_SECTION_BYTES:
+ * the fixed framing (intro, rejection preface, reserved omission item) is
+ * subtracted up front, bullets are added until the next would overflow,
+ * and the rest collapse into one omission item. Empty when nothing left. */
+function renderRemovedSplits(removals: RemovedSplit[], manifestProblem: string | null): string {
   if (removals.length === 0) return "";
-  // The intro, the two framing newlines, and the reserved omission item are
-  // all subtracted up front, so the sum of bullet bytes below can never
-  // push the rendered section past MAX_SECTION_BYTES.
+  const preface =
+    manifestProblem === null
+      ? ""
+      : `The previous commit's ownership manifest was rejected (${manifestProblem}), so the ` +
+        "deleted files below cannot be classified and each one is held for review.\n\n";
   let budget =
-    MAX_SECTION_BYTES - Buffer.byteLength(REMOVED_SPLITS_INTRO, "utf-8") - OMISSION_HEADROOM - 2;
+    MAX_SECTION_BYTES -
+    Buffer.byteLength(REMOVED_SPLITS_INTRO, "utf-8") -
+    Buffer.byteLength(preface, "utf-8") -
+    OMISSION_HEADROOM -
+    2;
   const rendered: string[] = [];
   let omitted = 0;
   for (let i = 0; i < removals.length; i++) {
@@ -343,7 +348,7 @@ function renderRemovedSplits(removals: RemovedSplit[]): string {
         "limit; inspect the base branch's copies before merging.)",
     );
   }
-  return `${REMOVED_SPLITS_INTRO}\n${rendered.join("\n")}\n`;
+  return `${REMOVED_SPLITS_INTRO}\n${preface}${rendered.join("\n")}\n`;
 }
 
 /** Paths present at HEAD and gone from the working tree - the deletion axis
@@ -363,12 +368,20 @@ function deletedTrackedPaths(): string[] | null {
 // anomalies the fully-migrated fleet manifest should never present, both
 // handled fail closed below.
 let headSplits: Map<string, HeadSplit> | null = null;
+// WHY the manifest was rejected, for the PR body only (the message can
+// name manifest paths, so it never reaches a log line). Clipped: the
+// rejection message embeds decoded manifest keys, which are
+// target-controlled - unbounded text would blow the section budget and a
+// NUL would kill gh's --body argv (clip escapes control bytes).
+let manifestProblem: string | null = null;
 const headManifest = git(["show", `HEAD:${MANIFEST_NAME}`]);
-if (headManifest.exitCode === 0) {
+if (headManifest.exitCode !== 0) {
+  manifestProblem = "it could not be read from the previous commit";
+} else {
   try {
     headSplits = headSplitEntries(headManifest.stdout, `HEAD:${MANIFEST_NAME}`);
-  } catch {
-    headSplits = null;
+  } catch (err) {
+    manifestProblem = clip(err instanceof Error ? err.message : String(err));
   }
 }
 
@@ -402,7 +415,7 @@ for (const [path, split] of candidates) {
   });
 }
 
-const section = renderRemovedSplits(removals);
+const section = renderRemovedSplits(removals, manifestProblem);
 // The generic unverifiable notice forces review even when no removal could
 // be enumerated - the whole point of failing closed on an unreadable scan.
 const report = scanUnavailable ? `${REMOVED_SPLITS_UNVERIFIABLE}\n${section}` : section;

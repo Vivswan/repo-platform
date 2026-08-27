@@ -4,7 +4,7 @@
 // or git stderr, any of which can be private-repo content.
 
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { headBytes } from "../../.github/scripts/shared/git_head.ts";
@@ -72,7 +72,7 @@ describe("headBytes value-free failure", () => {
       run("init", "-q", "-b", "main");
       run("config", "user.email", "t@example.com");
       run("config", "user.name", "t");
-      Bun.spawnSync(["bash", "-c", `printf x > "${join(root, "present.txt")}"`]);
+      writeFileSync(join(root, "present.txt"), "x");
       run("add", "-A");
       run("commit", "-qm", "init");
       expect(headBytes(root, "present.txt")?.toString("latin1")).toBe("x");

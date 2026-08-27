@@ -109,6 +109,55 @@ export function repoOwnedHalf(content: string, entry: SplitEntry): string | null
   }
 }
 
+/** True when any object in valid-JSON `text` declares the same key twice.
+ * JSON.parse keeps only the LAST duplicate silently, so a conflict-mangled
+ * manifest carrying a path twice (split, then managed) would drop it from
+ * the split candidates. Keys compare DECODED - exactly JSON.parse's
+ * collision, so escape-variant duplicates are caught; the caller has
+ * already JSON.parse'd `text`, so tokens are well-formed. */
+export function hasDuplicateJsonKeys(text: string): boolean {
+  /** keys === null marks an array frame (its strings are never keys). */
+  type Frame = { keys: Set<string> | null; expectKey: boolean };
+  const stack: Frame[] = [];
+  let i = 0;
+  while (i < text.length) {
+    const ch = text[i];
+    if (ch === '"') {
+      const start = i;
+      i++;
+      while (i < text.length && text[i] !== '"') {
+        if (text[i] === "\\") i++;
+        i++;
+      }
+      i++;
+      const top = stack[stack.length - 1];
+      if (top !== undefined && top.keys !== null && top.expectKey) {
+        const key = JSON.parse(text.slice(start, i)) as string;
+        if (top.keys.has(key)) return true;
+        top.keys.add(key);
+        top.expectKey = false;
+      }
+      continue;
+    }
+    if (ch === "{") stack.push({ keys: new Set(), expectKey: true });
+    else if (ch === "[") stack.push({ keys: null, expectKey: false });
+    else if (ch === "}" || ch === "]") stack.pop();
+    else if (ch === ",") {
+      const top = stack[stack.length - 1];
+      if (top !== undefined && top.keys !== null) top.expectKey = true;
+    }
+    i++;
+  }
+  return false;
+}
+
+/** Every class any manifest vintage has stamped: the current three plus
+ * the retired mergeable era (settings_layering.ts and the validator carry
+ * the same roster). An entry spelling anything else ("spllt") is damage
+ * that could be hiding a split declaration, so the whole manifest is
+ * rejected to the callers' fail-closed path. */
+const KNOWN_HEAD_CLASSES = new Set(["managed", "split", "starter", "mergeable"]);
+
 /** How HEAD's manifest declares a split: the grammar union (post-grammar
  * templates) or the bare marker/managed pair (manifests stamped before the
  * grammar field existed). */
@@ -137,6 +186,12 @@ export function headSplitEntries(text: string, where: string): Map<string, HeadS
     // content) and this error can reach warning paths.
     throw new Error(`${where} does not parse as JSON`);
   }
+  if (hasDuplicateJsonKeys(text)) {
+    throw new Error(
+      `${where} declares the same key twice in one object - JSON.parse keeps only the ` +
+        "last duplicate, so a duplicate entry could flip a path's ownership class silently",
+    );
+  }
   const files = (parsed as { files?: unknown } | null)?.files;
   // An array passes `typeof === "object"` with zero-or-index entries -
   // that would fail OPEN (no split declarations, nothing checked); reject
@@ -152,6 +207,15 @@ export function headSplitEntries(text: string, where: string): Map<string, HeadS
       throw new Error(`${where}: entry for ${path} is not an object`);
     }
     const shaped = entry as Record<string, unknown>;
+    // Every entry's class is validated, not just the split ones: reading a
+    // damaged class ("spllt") as merely non-split would drop that file
+    // from the candidates and let a retirement delete its repo-owned half.
+    if (typeof shaped.class !== "string" || !KNOWN_HEAD_CLASSES.has(shaped.class)) {
+      throw new Error(
+        `${where}: entry for ${path} declares no ownership class this sync knows - the ` +
+          "damage could be hiding a split declaration",
+      );
+    }
     if (shaped.class === "split") splitShapes.push([path, shaped]);
   }
   if (splitShapes.some(([, shaped]) => "grammar" in shaped)) {
