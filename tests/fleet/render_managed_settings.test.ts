@@ -179,6 +179,47 @@ describe("layerPaths", () => {
   });
 });
 
+describe("the layer topology fails CLOSED", () => {
+  // layerPaths used to select layer files by existence, which failed
+  // OPEN: a deleted templates/uv/settings.yml just vanished from the
+  // stack, the roster came out short but valid-looking, and the apply's
+  // delete-undeclared pass removed the module's labels from live repos.
+  // The declared roster (MODULE_LAYER_FILES) and the tree are now held
+  // together in both directions; `exists` is injected so these prove the
+  // failure without deleting anything.
+
+  test("a deleted module layer file is a hard error, never a shorter roster", () => {
+    const exists = (path: string) =>
+      !path.endsWith(join("templates", "uv", "settings.yml")) && existsSync(path);
+    expect(() => layerPaths(facts({ modules: ["uv"] }), manifests, exists)).toThrow(
+      "templates/uv/settings.yml: declared in MODULE_LAYER_FILES but missing",
+    );
+    // Selection does not matter: the topology is checked whole, so the
+    // breakage cannot hide behind a selection that skips the module.
+    expect(() => layerPaths(facts(), manifests, exists)).toThrow("templates/uv/settings.yml");
+  });
+
+  test("a deleted FLEET layer is a hard error too", () => {
+    const exists = (path: string) =>
+      !path.endsWith(join(".github", "settings-baseline.yml")) && existsSync(path);
+    expect(() => layerPaths(facts(), manifests, exists)).toThrow("fleet settings layer is missing");
+  });
+
+  test("an undeclared layer file appearing is refused, not silently ignored", () => {
+    const exists = (path: string) =>
+      path.endsWith(join("templates", "fuzzer", "settings.yml")) || existsSync(path);
+    expect(() => layerPaths(facts(), manifests, exists)).toThrow(
+      "templates/fuzzer/settings.yml: exists but MODULE_LAYER_FILES does not declare it",
+    );
+  });
+
+  test("the real tree satisfies the declared roster", () => {
+    // The two ways this can fail are a genuine drift (fix the roster or
+    // the tree) - never a shorter render.
+    expect(() => layerPaths(facts(), manifests)).not.toThrow();
+  });
+});
+
 describe("managedSettings", () => {
   test("public repos get security_and_analysis; private ones must not (422)", () => {
     const publicDoc = managedSettings(facts(), manifests).repository as Record<string, unknown>;

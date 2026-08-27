@@ -99,6 +99,36 @@ describe("buildMatrix", () => {
   test("no targets is an empty matrix, not an error", () => {
     expect(buildMatrix([], null)).toEqual([]);
   });
+
+  test("the redaction union rides through: redacted always means hidden details", () => {
+    // Target used to flatten EnrichedRow's discriminated union into three
+    // independent fields, re-admitting `redact_name: true, hide_details:
+    // false` - the combination the selector's schema exists to prevent
+    // (a repo whose NAME is hidden but whose label and ruleset names
+    // print to the public log). The union now carries through at the
+    // type level (tsc checks the construction sites); this pins the
+    // runtime outputs, which were already sound - no behavior change.
+    const rows: EnrichedRow[] = [
+      publicRow("Vivswan/open"),
+      {
+        repo: "Vivswan/hidden-server",
+        redact_name: true,
+        hide_details: true,
+        display: "h**-s**r",
+        verify: "deadbeef",
+      },
+      {
+        repo: "Vivswan/committed-private",
+        redact_name: false,
+        hide_details: true,
+        display: "Vivswan/committed-private",
+        verify: "",
+      },
+    ];
+    for (const entry of buildMatrix(rows, selfTarget("Vivswan/repo-platform"))) {
+      if (entry.redact_name) expect(entry.hide_details).toBe(true);
+    }
+  });
 });
 
 describe("applyOnly", () => {

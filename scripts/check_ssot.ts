@@ -1723,12 +1723,13 @@ const rules: Rule[] = [
       const mismatches: Mismatch[] = [];
       const matrix = read(".github/scripts/fleet/build_settings_matrix.ts");
       if (
-        !/hide_details:\s*boolean/.test(matrix) ||
+        !matrix.includes("& RedactionState") ||
         !matrix.includes("hide_details: row.hide_details")
       ) {
         mismatches.push({
           file: ".github/scripts/fleet/build_settings_matrix.ts",
-          expected: "the matrix Target carries hide_details, copied from the row",
+          expected:
+            "the matrix Target carries the row's RedactionState (redact.ts), hide_details copied from the row",
           got: "the flag is not on the matrix",
         });
       }
@@ -1737,9 +1738,15 @@ const rules: Rule[] = [
       // (operator and target), so counting matches passed even with a
       // wrapper removed - which is the exact regression this rule exists
       // to catch. Fold continuations first, then require every call of
-      // either script to sit behind its own run_hidden wrapper.
+      // either script to sit behind its own run_hidden wrapper. The
+      // freshness recheck is covered too: its moved warning quotes commit
+      // shas and its resolver errors name the target's default branch.
       const flat = workflow.replace(/\\[ \t]*\n/g, " ").replace(/\s+/g, " ");
-      for (const script of ["render_managed_settings", "merge_settings_layers"]) {
+      for (const script of [
+        "render_managed_settings",
+        "merge_settings_layers",
+        "check_target_fresh",
+      ]) {
         const calls =
           flat.match(new RegExp(`bun \\.github/scripts/fleet/${script}\\.ts`, "g")) ?? [];
         const wrapped =
@@ -1894,6 +1901,178 @@ const rules: Rule[] = [
           }
         }
       }
+      return mismatches;
+    },
+  },
+
+  {
+    // Both apply paths must hand github-settings-as-code the MERGED
+    // document. A one-line regression to managed-settings.yml ships a
+    // baseline-only apply - the exact document the merge pipeline exists
+    // to never produce, because the action's label reconciliation would
+    // delete every label the repository declares for itself - and every
+    // other gate stays green while it does. Self-contained on purpose:
+    // both workflows are parsed right here, leaning on no shared workflow
+    // helpers.
+    name: "settings-apply-merged-input",
+    run: () => {
+      const mismatches: Mismatch[] = [];
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: a literal GitHub Actions expression, pinned byte-for-byte
+      const wanted = "${{ runner.temp }}/merged-settings.yml";
+      const mapping = (value: unknown): Record<string, unknown> =>
+        typeof value === "object" && value !== null && !Array.isArray(value)
+          ? (value as Record<string, unknown>)
+          : {};
+      for (const rel of [
+        ".github/workflows/settings-repos.yml",
+        ".github/workflows/reusable-apply-settings.yml",
+      ]) {
+        const jobs = mapping(mapping(parseYaml(read(rel))).jobs);
+        const applySteps: Record<string, unknown>[] = [];
+        for (const job of Object.values(jobs)) {
+          const steps = mapping(job).steps;
+          if (!Array.isArray(steps)) continue;
+          for (const raw of steps) {
+            const step = mapping(raw);
+            if (String(step.uses ?? "").includes("github-settings-as-code")) {
+              applySteps.push(step);
+            }
+          }
+        }
+        if (applySteps.length === 0) {
+          throw new Error(`${rel}: no github-settings-as-code step - anchor lost`);
+        }
+        for (const step of applySteps) {
+          const settingsFile = String(mapping(step.with)["settings-file"] ?? "");
+          if (settingsFile !== wanted) {
+            mismatches.push({
+              file: rel,
+              expected: `the apply step reads settings-file: ${wanted}`,
+              got: settingsFile === "" ? "no settings-file input" : settingsFile,
+            });
+          }
+        }
+      }
+      return mismatches;
+    },
+  },
+
+  {
+    // settings-repos.yml is the one fleet-wide settings WRITER, and its
+    // green gate is a plain step of the select job - trimming it would
+    // leave the workflow applying from raw pushed commits again, with
+    // every other gate green. Pinned on the parsed steps (a mention in a
+    // comment cannot satisfy it), before the target selection so an
+    // ungreen commit never even computes a matrix. Self-contained like
+    // the rule above.
+    name: "settings-green-gate",
+    run: () => {
+      const mismatches: Mismatch[] = [];
+      const rel = ".github/workflows/settings-repos.yml";
+      const mapping = (value: unknown): Record<string, unknown> =>
+        typeof value === "object" && value !== null && !Array.isArray(value)
+          ? (value as Record<string, unknown>)
+          : {};
+      const select = mapping(mapping(mapping(parseYaml(read(rel))).jobs).select);
+      const steps = Array.isArray(select.steps) ? select.steps.map(mapping) : [];
+      if (steps.length === 0) throw new Error(`${rel}: no select job steps - anchor lost`);
+      const runs = steps.map((step) => String(step.run ?? ""));
+      const gateAt = runs.findIndex((run) =>
+        run.includes("bun .github/scripts/fleet/require_green_commit.ts"),
+      );
+      const selectAt = runs.findIndex((run) =>
+        run.includes("bun .github/scripts/fleet/select_settings_repos.ts"),
+      );
+      if (selectAt === -1) throw new Error(`${rel}: no target-selection step - anchor lost`);
+      if (gateAt === -1) {
+        mismatches.push({
+          file: rel,
+          expected: "a select-job step running fleet/require_green_commit.ts",
+          got: "missing - the fleet-wide settings writer would run ungated from raw pushes",
+        });
+      } else if (gateAt > selectAt) {
+        mismatches.push({
+          file: rel,
+          expected: "the green gate BEFORE the target selection",
+          got: "the gate runs after targets are computed",
+        });
+      } else if (String(steps[gateAt].if ?? "") !== "") {
+        mismatches.push({
+          file: rel,
+          expected: "an unconditional green gate (every trigger reads main's tip)",
+          got: `if: ${String(steps[gateAt].if)}`,
+        });
+      }
+      return mismatches;
+    },
+  },
+
+  {
+    // Every run_hidden-wrapped step in settings-repos.yml must be
+    // followed by a PUBLIC ::notice:: step that fires on one of the
+    // wrapped step's own outputs. The capture swallows a wrapped step's
+    // success output - warnings included - for a hide-details target, so
+    // without a compensating notice its skip is a green job with no
+    // signal at all. DERIVED from the workflow rather than pinned per
+    // step: this gap was reintroduced three times one step at a time (the
+    // merge notice, then the freshness wrap, then the notice condition
+    // missing the freshness clause), so a fourth wrapped script fails
+    // here until it gets its notice instead of repeating the cycle.
+    // Order is part of the requirement - the notice must sit AFTER the
+    // wrapped step, or it reads outputs that do not exist yet.
+    // Self-contained like the neighbouring settings rules.
+    name: "settings-hidden-step-notices",
+    run: () => {
+      const mismatches: Mismatch[] = [];
+      const rel = ".github/workflows/settings-repos.yml";
+      const mapping = (value: unknown): Record<string, unknown> =>
+        typeof value === "object" && value !== null && !Array.isArray(value)
+          ? (value as Record<string, unknown>)
+          : {};
+      const jobs = mapping(mapping(parseYaml(read(rel))).jobs);
+      let wrapped = 0;
+      for (const [jobName, job] of Object.entries(jobs)) {
+        const steps = mapping(job).steps;
+        if (!Array.isArray(steps)) continue;
+        const parsed = steps.map(mapping);
+        parsed.forEach((step, index) => {
+          if (!String(step.run ?? "").includes("run_hidden.ts")) return;
+          wrapped++;
+          const id = String(step.id ?? "");
+          if (id === "") {
+            mismatches.push({
+              file: rel,
+              expected: `an id on the run_hidden-wrapped step ${JSON.stringify(String(step.name ?? "?"))} (job '${jobName}')`,
+              got: "no id - a compensating notice cannot reference the step's outcome",
+            });
+            return;
+          }
+          // Positive equality against 'true', the one output test an
+          // unrun step cannot satisfy (unsafeStepCondition's rule). The
+          // id is escaped so an exotic step id cannot broaden the match.
+          const escaped = id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+          const fires = new RegExp(`steps\\.${escaped}\\.outputs\\.[\\w-]+ == 'true'`);
+          const compensated = parsed.slice(index + 1).some((later) => {
+            const laterRun = String(later.run ?? "");
+            return (
+              !laterRun.includes("run_hidden") &&
+              laterRun.includes("::notice::") &&
+              fires.test(String(later.if ?? ""))
+            );
+          });
+          if (!compensated) {
+            mismatches.push({
+              file: rel,
+              expected:
+                `a public ::notice:: step AFTER the hidden '${id}' step whose condition ` +
+                `carries steps.${id}.outputs.<name> == 'true' - the capture swallows the ` +
+                "step's own warnings, so its skip would otherwise be a green job with no signal",
+              got: "no such step",
+            });
+          }
+        });
+      }
+      if (wrapped === 0) throw new Error(`${rel}: no run_hidden-wrapped steps - anchor lost`);
       return mismatches;
     },
   },

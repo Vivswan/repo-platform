@@ -22,7 +22,9 @@
 // Layers arrive as the SettingsLayer type, from settings_document.ts's
 // parse boundary, and leave as a MergedSettings, which cannot hold a null
 // at all (hardenDocument below). The dialect's job is to consume the
-// opt-out markers; the type is what checks that it did.
+// opt-out markers; the type is what checks that it did. The boundary also
+// refuses a labels/rulesets section that is not a list of mappings, so
+// the unions here never meet a shape they would have to fall back from.
 //
 // A repository with no .github/settings.yml is NOT-YET-ONBOARDED, never
 // "an empty repo layer": applying the managed baseline alone would let
@@ -60,8 +62,10 @@ import {
   type SettingsLayer,
 } from "./settings_document.ts";
 
-// The boundary lives in settings_document.ts; re-exported here because
-// the layering dialect is what its callers came for.
+// Re-exported ONLY for .github/scripts/sync/settings_layering.ts, which
+// still imports the boundary through this module; every other consumer
+// imports settings_document.ts (the owner) directly. Drop this line when
+// that import moves.
 export { parseSettingsDoc } from "./settings_document.ts";
 
 const REPO_ROOT = resolve(import.meta.dir, "..", "..", "..");
@@ -130,6 +134,21 @@ function hardenMapping(
   const out: MergedSettings = {};
   for (const [key, child] of Object.entries(value)) {
     if (child === null) continue;
+    // A ruleset entry's rules NEVER silently lose a null element: filtered
+    // like every other array, `rules: [null]` becomes `rules: []`, and an
+    // empty rules list on `main` upserts the protected branch with NO
+    // rules at all - the apply stays green while the protection vanishes.
+    // The same hard-error appendRules throws for a type-less rule, one
+    // step earlier (the parse boundary already refuses this in a layer
+    // FILE; this covers documents assembled in code).
+    if (isRulesetEntry && key === "rules" && Array.isArray(child) && child.includes(null)) {
+      throw new Error(
+        `${rulesetLabel(value) || "a ruleset"}: a rule is null. A null rule cannot be merged ` +
+          "or identified, and silently dropping it would emit the ruleset with fewer rules " +
+          "than the layers declare - possibly none, which upserts the branch unprotected on " +
+          "a green run. Fix the rule in its layer file.",
+      );
+    }
     // The ruleset-entry flag marks exactly the direct elements of the
     // DOCUMENT'S top-level `rulesets` array (the section the dialect
     // defines). A mapping under the key (rulesets: {rules: ...}) is
@@ -305,8 +324,11 @@ export function nameKeyedUnion(
 export function duplicateNameWarnings(repo: SettingsLayer): string[] {
   const warnings: string[] = [];
   for (const [section, { fold }] of Object.entries(NAME_KEYED)) {
-    const entries = repo[section];
-    if (!Array.isArray(entries)) continue;
+    const declared = repo[section];
+    // Undeclared, or the dialect's null opt-out; anything else the parse
+    // boundary guarantees is a list of mappings.
+    if (declared === undefined || declared === null) continue;
+    const entries = declared as LayerValue[];
     const seen = new Map<string, string>();
     for (const entry of entries) {
       const name = entryName(entry);
@@ -350,9 +372,28 @@ function mergeMappings(
       continue;
     }
     const managedValue = managed[key];
+    if (managedValue === null) {
+      // The lower layer's own un-consumed opt-out marker: it declares
+      // nothing for the higher layer to merge WITH, so the higher value
+      // stands alone (same result the wholesale-replace arm produced).
+      merged[key] = repoValue;
+      continue;
+    }
     const section = nameKeyed[key];
-    if (section !== undefined && Array.isArray(managedValue) && Array.isArray(repoValue)) {
-      merged[key] = nameKeyedUnion(managedValue, repoValue, section.fold, section.combine);
+    if (section !== undefined) {
+      // Unconditionally the union: the parse boundary
+      // (settings_document.ts) refused any labels/rulesets that is not a
+      // list of mappings, so both declared sides are lists here. The old
+      // Array.isArray guards routed a mis-shaped section to wholesale
+      // replace, which silently discarded the managed roster - the apply
+      // then deleted every managed label, or upserted `main` without the
+      // modules' rules, green either way.
+      merged[key] = nameKeyedUnion(
+        managedValue as LayerValue[],
+        repoValue as LayerValue[],
+        section.fold,
+        section.combine,
+      );
     } else if (isLayerMapping(managedValue) && isLayerMapping(repoValue)) {
       // Name-keying applies only at the section level; nested objects
       // merge plainly.

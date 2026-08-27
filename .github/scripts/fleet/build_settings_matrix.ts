@@ -24,7 +24,7 @@ import { readFileSync } from "node:fs";
 import { parse as parseYaml } from "yaml";
 import { parseFlags } from "../shared/flags.ts";
 import { fail } from "../shared/gha.ts";
-import { type EnrichedRow, parseEnrichedRows } from "./redact.ts";
+import { type EnrichedRow, parseEnrichedRows, type RedactionState } from "./redact.ts";
 
 /** Whether a .repo-platform.yml text selects the settings-sync module -
  *  the opt-in to centrally managed settings; null when the top-level
@@ -55,13 +55,14 @@ export function selectsSettingsSync(registrationText: string): boolean | null {
 // (redact_name false, hide_details true) would otherwise have that
 // content printed to a public log. settings-repos.yml passes this to
 // run_hidden.ts, which is the boundary that keeps it out.
-export interface Target {
-  repo: string;
-  name: string;
-  redact_name: boolean;
-  hide_details: boolean;
-  verify: string;
-}
+//
+// The redaction triple keeps EnrichedRow's discriminated-union shape
+// (RedactionState is derived from the row schema in redact.ts) instead
+// of flattening to three independent fields: a redacted row always hides
+// its details and always carries a resolution tag, so `redact_name:
+// true, hide_details: false` - the combination the selector's schema
+// exists to prevent - stays unrepresentable here too.
+export type Target = { repo: string; name: string } & RedactionState;
 
 /** The operator repository's own matrix row: committed workflows disclose
  *  its name, so it never redacts. */
@@ -84,13 +85,25 @@ export function buildMatrix(rows: EnrichedRow[], self: Target | null): Target[] 
     const key = row.repo.toLowerCase();
     if (seen.has(key)) continue;
     seen.add(key);
-    targets.push({
-      repo: row.redact_name ? row.display : row.repo,
-      name: row.redact_name ? row.display : (row.repo.split("/").pop() ?? row.repo),
-      redact_name: row.redact_name,
-      hide_details: row.hide_details,
-      verify: row.verify,
-    });
+    // Branch on the discriminant rather than copying field by field, so
+    // the row's union arm carries through to the Target unchanged.
+    targets.push(
+      row.redact_name
+        ? {
+            repo: row.display,
+            name: row.display,
+            redact_name: true,
+            hide_details: true,
+            verify: row.verify,
+          }
+        : {
+            repo: row.repo,
+            name: row.repo.split("/").pop() ?? row.repo,
+            redact_name: false,
+            hide_details: row.hide_details,
+            verify: "",
+          },
+    );
   }
   return targets.sort((a, b) => (a.repo < b.repo ? -1 : a.repo > b.repo ? 1 : 0));
 }

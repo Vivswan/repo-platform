@@ -13,6 +13,13 @@
 // revision - so this reports and lets the caller gate.
 //
 // Env: GH_TOKEN, TARGET (owner/name), PINNED (the render's sha).
+//
+// The output here quotes commit shas, and the resolver's failure strings
+// name the target's default BRANCH - so settings-repos.yml runs this step
+// behind the same run_hidden.ts boundary as the render and the merge for
+// a hide-details target (docs/private-repos.md). The self-apply path
+// (reusable-apply-settings.yml) runs it bare: its log lives in the target
+// repository itself.
 
 import { env, fail, requireEnv, setOutput, warning } from "../shared/gha.ts";
 import { resolveTargetRef } from "./render_managed_settings.ts";

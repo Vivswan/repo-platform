@@ -154,6 +154,16 @@ export const enrichedRowSchema = z
 
 export type EnrichedRow = z.infer<typeof enrichedRowSchema>;
 
+/** Omit distributed over a union, so each arm keeps its discriminant
+ *  instead of collapsing into one widened object. */
+type DistributedOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
+
+/** The redaction triple alone, DERIVED from the row schema so a consumer
+ *  carrying it (build_settings_matrix.ts's Target) can never drift from
+ *  the invariant: a redacted row hides its details and carries a
+ *  resolution tag, an unredacted one carries neither. */
+export type RedactionState = DistributedOmit<EnrichedRow, "repo" | "display">;
+
 const enrichedSchema = z.object({ rows: z.array(enrichedRowSchema) });
 
 export type Enriched = z.infer<typeof enrichedSchema>;

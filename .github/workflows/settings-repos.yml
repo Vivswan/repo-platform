@@ -63,6 +63,10 @@ on:
 
 permissions:
   contents: read
+  # For the green gate's workflow-run lookup (require_green_commit.ts):
+  # GITHUB_TOKEN reads this repository's own CI runs; the fleet PAT's
+  # grant does not carry Actions read.
+  actions: read
 
 concurrency:
   group: settings-repos
@@ -71,7 +75,9 @@ concurrency:
 jobs:
   select:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # Room for the green gate's bounded wait (up to 20 minutes) on top of
+    # selection itself.
+    timeout-minutes: 35
     outputs:
       targets: ${{ steps.targets.outputs.targets }}
     steps:
@@ -97,6 +103,22 @@ jobs:
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
+
+      # THE FLEET-WIDE WRITER'S GREEN GATE. This workflow mutates every
+      # managed repository's settings from this checkout's layer files,
+      # and the apply's label reconciliation deletes undeclared labels -
+      # so it must never run from a commit CI has not vouched for, or a
+      # broken layer change reaches the fleet concurrently with the CI
+      # run that would have caught it. Same predicate the template
+      # publisher and the sync enforce (shared/all_green.ts), and the
+      # same ref guard as the publisher: a dispatch aimed at a branch is
+      # refused outright, since a branch CI run vouches only for that
+      # branch. The script waits out the race a push-triggered run has
+      # with its own CI run, then gates hard.
+      - name: Require a green commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bun .github/scripts/fleet/require_green_commit.ts
 
       # One matrix entry per target repo. Probes retry and then
       # warn-and-skip a repo they cannot answer for; only
@@ -228,27 +250,19 @@ jobs:
               --out "$RUNNER_TEMP/merged-settings.yml"
           fi
 
-      # Outside the hidden capture on purpose: for a hide-details target
-      # run_hidden swallows the merge step's SUCCESS output, including its
-      # not-onboarded warning, so the skip would otherwise be a green job
-      # with no signal at all. matrix.repo is the masked hint for a
-      # redacted row, so this says WHICH target without saying anything
-      # about its contents.
-      - name: Report a skipped target
-        if: steps.render.outputs.skipped == 'true' || steps.merge.outputs.skipped == 'true'
-        run: |
-          if [ "${{ steps.render.outputs.skipped }}" = "true" ]; then
-            echo "::notice::settings apply skipped for ${{ matrix.repo }}: it no longer selects the settings-sync module at the revision this run read, so its settings are not managed here any more."
-          else
-            echo "::notice::settings apply skipped for ${{ matrix.repo }}: it selects settings-sync but has no .github/settings.yml yet, so there is nothing to layer over the fleet defaults. The settings-sync starter seeds the file on its next template sync."
-          fi
-
       # The opt-in was rechecked at the pinned commit, but the apply runs
       # later and the branch keeps moving. Re-resolving the head here
       # narrows that window to this step: if the target moved, the run
       # skips and the next one reads the new revision. It cannot CLOSE the
       # window - there is no compare-and-swap on "still opted in" - so
       # this is damage limitation, not a guarantee.
+      # Behind the same hidden-capture boundary as the render and merge:
+      # the moved warning quotes the current head sha and resolveTargetRef's
+      # failure strings name the target's default BRANCH, none of which a
+      # hide-details target's public log may carry. The pinned sha in this
+      # step's env still echoes into the log header - an accepted, opaque
+      # identifier (docs/private-repos.md), already printed by the merge
+      # step's rendered command above.
       - name: Check the target has not moved
         id: freshness
         if: steps.render.outputs.skipped == 'false' && steps.merge.outputs.skipped == 'false'
@@ -256,7 +270,29 @@ jobs:
           GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
           TARGET: ${{ steps.resolve.outputs.repo }}
           PINNED: ${{ steps.render.outputs.ref }}
-        run: bun .github/scripts/fleet/check_target_fresh.ts
+        run: |
+          bun .github/scripts/sync/run_hidden.ts "settings freshness" -- \
+            bun .github/scripts/fleet/check_target_fresh.ts
+
+      # Outside the hidden capture on purpose: for a hide-details target
+      # the capture swallows the merge step's SUCCESS output (its
+      # not-onboarded warning) and the freshness step's moved warning
+      # alike, so each of these skips would otherwise be a green job with
+      # no signal at all. matrix.repo is the masked hint for a redacted
+      # row, so this says WHICH target without saying anything about its
+      # contents.
+      - name: Report a skipped target
+        if: >-
+          steps.render.outputs.skipped == 'true' || steps.merge.outputs.skipped == 'true' ||
+          steps.freshness.outputs.moved == 'true'
+        run: |
+          if [ "${{ steps.render.outputs.skipped }}" = "true" ]; then
+            echo "::notice::settings apply skipped for ${{ matrix.repo }}: it no longer selects the settings-sync module at the revision this run read, so its settings are not managed here any more."
+          elif [ "${{ steps.merge.outputs.skipped }}" = "true" ]; then
+            echo "::notice::settings apply skipped for ${{ matrix.repo }}: it selects settings-sync but has no .github/settings.yml yet, so there is nothing to layer over the fleet defaults. The settings-sync starter seeds the file on its next template sync."
+          else
+            echo "::notice::settings apply skipped for ${{ matrix.repo }}: its default branch moved while this run was computing its settings, so the apply was skipped rather than applied from a stale snapshot. The next run reads the new revision."
+          fi
 
       - name: Apply repository settings
         id: apply
