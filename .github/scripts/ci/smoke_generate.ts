@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 // Render a smoke-test project (by default into /tmp/smoke) for one CI
 // matrix row: main carries only templates/ sources, so assemble the
-// consumable build tree (what the template branch holds) and `copier copy`
+// consumable build tree (what the build branch holds) and `copier copy`
 // from it.
 //
 // Inputs (env): MODULES (YAML list as a string), PRIVATE, EXTRA_DATA

@@ -1,9 +1,9 @@
 #!/usr/bin/env bun
-// Proves the template branch tip is the build-branches workflow's own
+// Proves the build branch tip is the build-branches workflow's own
 // output before the sync templates it into managed repos. Invoked by
 // sync/resolve_refs.ts after it parses the tip's source stamp. The
-// template ruleset only blocks deletion and force-pushes, so anyone with
-// push access can fast-forward the branch.
+// build-branches ruleset model cannot pin the ref to one workflow, so
+// the stamp lines below stay untrusted input.
 //
 // The stamp lines in the commit message (see shared/commit_stamp.ts) are
 // plain text anyone can write. Checks, all hard failures:
@@ -46,12 +46,12 @@ const tipSha = requireEnv("TIP_SHA");
 const sourceSha = requireEnv("SOURCE_SHA");
 const repository = requireEnv("GITHUB_REPOSITORY");
 
-const subject = `template tip ${tipSha.slice(0, 12)}`;
+const subject = `build tip ${tipSha.slice(0, 12)}`;
 /** build-branches.yml's publish step name - the step-level publish proof,
  * twin of publish.ts's PUBLISH_STEP constant. */
 const PUBLISH_STEP = "Build and publish";
 const rebuildHint =
-  "If the template branch was pushed by something other than the Build Branches workflow, reset it: dispatch Build Branches to rebuild it from main, then re-run the sync.";
+  "If the build branch was pushed by something other than the Build Branches workflow, reset it: dispatch Build Branches to rebuild it from main, then re-run the sync.";
 
 function isAncestor(ancestor: string, descendant: string): boolean {
   return capture(["git", "merge-base", "--is-ancestor", ancestor, descendant]).exitCode === 0;
@@ -64,7 +64,7 @@ function resolveCommit(revspec: string): string {
 
 if (!isAncestor(sourceSha, "refs/remotes/origin/main")) {
   fail(
-    `${subject} is stamped with source ${sourceSha.slice(0, 12)}, which is not on main's history. The builder only stamps the template branch with main commits, so this tip is not its output. ${rebuildHint}`,
+    `${subject} is stamped with source ${sourceSha.slice(0, 12)}, which is not on main's history. The builder only stamps the build branch with main commits, so this tip is not its output. ${rebuildHint}`,
   );
 }
 
@@ -193,7 +193,7 @@ if (!published) {
 // Rebuild exactly as publish.ts does (the shared rebuildBranchTree: the
 // SOURCE commit's own script and dependencies, so the check reproduces
 // that commit's composition).
-const workDir = mkdtempSync(join(requireEnv("RUNNER_TEMP"), "template-provenance."));
+const workDir = mkdtempSync(join(requireEnv("RUNNER_TEMP"), "build-provenance."));
 const srcDir = join(workDir, "src");
 const treeDir = join(workDir, "tree");
 

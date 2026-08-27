@@ -56,8 +56,8 @@ function lines(path: string): string[] {
 const oldCommit = clip(slurp(join(runnerTemp, "old_commit.txt")));
 
 // TARGET_REF is the verified commit (pinned by resolve_refs.ts), so
-// DISPLAY (template@<sha>) drives the source line.
-const sourceLine = `[\`${repository}\`](https://github.com/${repository}/tree/template) (template branch)`;
+// DISPLAY (build@<sha>) drives the source line.
+const sourceLine = `[\`${repository}\`](https://github.com/${repository}/tree/build) (build branch)`;
 
 const title = `chore: update repo-platform template to ${display}`;
 let body = `Automated template update from ${sourceLine}.

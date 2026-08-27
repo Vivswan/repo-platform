@@ -108,7 +108,7 @@ jobs:
       # The wait logic lives in a script (its header states the contract):
       # the bounded wait warns-and-continues on timeout because the sync's
       # own guards fail loudly and the cron heals. Build Branches rebuilds
-      # the template branch asynchronously after each main merge; a sync
+      # the build branch asynchronously after each main merge; a sync
       # dispatched right after a merge could consume the previous build
       # tree. Wait (bounded) for the template tip whose SOURCE STAMP names
       # main's HEAD - the artifact's own provenance, no gh api or token.
@@ -142,7 +142,7 @@ jobs:
     if: needs.plan.outputs.repos != '[]'
     # Actions read flows to the called workflow's token: its build
     # provenance check reads the build run stamped on the shipped ref
-    # (the template branch tip).
+    # (the build branch tip).
     permissions:
       contents: read
       actions: read

@@ -1,8 +1,8 @@
 #!/usr/bin/env bun
 // Bounded wait for the build output sync-repos.yml's plan job consumes:
-// Build Branches rebuilds the template branch asynchronously after each
+// Build Branches rebuilds the build branch asynchronously after each
 // main merge, so a sync dispatched right after a merge could consume the
-// previous build tree. Wait for the template tip whose SOURCE STAMP names
+// previous build tree. Wait for the build tip whose SOURCE STAMP names
 // main's HEAD - publish.ts stamps the commit it actually published (the
 // completed CI run's head_sha on the workflow_run path), so the tip's
 // stamp is the artifact's direct, unambiguous provenance. A "successful
@@ -87,7 +87,7 @@ if (!/^[0-9a-f]{40}$/.test(mainSha)) {
 }
 await waitFor(
   (timeoutMs) => {
-    // The template tip's SOURCE STAMP is the only sound freshness proof.
+    // The build tip's SOURCE STAMP is the only sound freshness proof.
     // A successful build-branches run whose head sha equals main's HEAD
     // does NOT prove the branch is built from HEAD: since the publisher
     // stamps the COMPLETED CI run's commit (SOURCE_SHA), a run created at
@@ -96,17 +96,17 @@ await waitFor(
     // from B". publish.ts stamps the commit it actually published, so the
     // tip's stamp naming main's HEAD is direct, unambiguous provenance.
     const fetched = capture(
-      ["git", "-c", "credential.helper=", "fetch", "--quiet", "--depth=1", "origin", "template"],
+      ["git", "-c", "credential.helper=", "fetch", "--quiet", "--depth=1", "origin", "build"],
       { env: GIT_NO_PROMPT_ENV, timeoutMs },
     );
     if (fetched.exitCode !== 0) return false;
     const tip = capture(["git", "log", "-1", "--format=%B", "FETCH_HEAD"], { timeoutMs });
     if (tip.exitCode !== 0 || commitStampParse(tip.stdout) !== mainSha) return false;
-    console.log(`the template branch tip is stamped with main HEAD ${mainSha}.`);
+    console.log(`the build branch tip is stamped with main HEAD ${mainSha}.`);
     return true;
   },
-  `waiting for the template branch to be built from ${mainSha}...`,
-  `the template branch is not yet built from main HEAD ${mainSha} after ${Math.round(
+  `waiting for the build branch to be built from ${mainSha}...`,
+  `the build branch is not yet built from main HEAD ${mainSha} after ${Math.round(
     DEADLINE_MS / 60000,
   )} minutes; syncs may apply the previous build tree. The weekly cron heals this on its next run.`,
 );

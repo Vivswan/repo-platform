@@ -3,13 +3,25 @@
 //
 // templates/ is the source of truth, one folder per module plus base/:
 //
-// - templates/base/: passed through verbatim, filenames included (explicit
-//   conditional filenames like CONTRIBUTING.md's `not private` gate live here).
-// - templates/<module>/: whole files owned by that module. The composer adds
-//   the module's filename gate automatically ({% if '<module>' in modules %}),
-//   wrapping the leaf name (keeping any .jinja suffix outside), or a whole
-//   directory listed in the module.yml manifest's `gate_dirs`. module.yml is
-//   the module's manifest (schema: scripts/module_manifests.ts).
+// - templates/base/: passed through with content verbatim. A conditional
+//   base file DECLARES its gate in its source filename (CONTRIBUTING.md's
+//   `not private`, LICENSE.md's custom-license opt-out); the composer
+//   strips the gate from the EMITTED name and records it in the gate data
+//   below - the composed tree carries only plain filenames, because a
+//   `uses:` ref downloads the whole build branch as a tarball and
+//   extraction dies on jinja-expression path segments.
+// - templates/<module>/: whole files owned by that module, emitted at
+//   their plain paths; the module's gate (its manifest `gate:` override or
+//   plain membership) is recorded per file. module.yml is the module's
+//   manifest (schema: scripts/module_manifests.ts).
+// - Conditional LANDING happens in copier.yml, not in filenames: its
+//   generated _exclude region (scripts/generate.ts, from excludePatterns
+//   below) carries one jinja-templated pattern per gated landed path,
+//   rendering to the literal path exactly when the file's gates do NOT
+//   hold - copier then never renders the file at all, on copy and update
+//   alike, byte-identical to the retired filename-gate behavior. build()
+//   errors when copier.yml's committed region is stale, so a build branch
+//   can never ship a tree whose excludes disagree with its content.
 // - templates/<module>/fragments/<anchor>.jinja: additive contributions to
 //   shared files. A skeleton file carries a marker line starting with
 //   `{# compose:<anchor> #}` (text after the closing tag is appended
@@ -94,6 +106,7 @@ import {
   type ManifestOwnership,
   type OwnershipDeclaration,
   ownershipOf,
+  readExcludeList,
   SETTINGS_LAYER_NAMES,
   skipIfExistsPatterns,
 } from "./ownership.ts";
@@ -186,32 +199,102 @@ export function gateExpression(module: string, manifest: ModuleManifest): string
   return manifest.gate || `'${module}' in modules`;
 }
 
-function rpartition(value: string, sep: string): [string, string, string] {
-  const index = value.lastIndexOf(sep);
-  if (index === -1) return ["", "", value];
-  return [value.slice(0, index), sep, value.slice(index + sep.length)];
+/** The emitted template path for a source's logical path: any filename
+ *  gates stripped (they are the gate DECLARATION, recorded as data), the
+ *  .jinja suffix kept. The composed tree carries only plain names - a
+ *  `uses:` ref downloads the whole build branch tarball and extraction
+ *  dies on jinja-expression path segments. */
+export function plainTemplatePath(logical: string): string {
+  const jinja = logical.endsWith(JINJA_SUFFIX);
+  const rendered = jinja ? logical.slice(0, -JINJA_SUFFIX.length) : logical;
+  const { path } = landedPathAndGates(rendered);
+  return jinja ? `${path}${JINJA_SUFFIX}` : path;
 }
 
-/** Wrap the leaf filename (or a declared directory) in the module gate. */
-function gatedPath(logical: string, gate: string, gateDirs: string[]): string {
-  for (const gatedDir of gateDirs) {
-    const prefix = gatedDir.replace(/\/+$/, "");
-    if (logical === prefix || logical.startsWith(`${prefix}/`)) {
-      const [parent, , dirname_] = rpartition(prefix, "/");
-      const wrapped = `{% if ${gate} %}${dirname_}{% endif %}`;
-      const newPrefix = parent ? `${parent}/${wrapped}` : wrapped;
-      return newPrefix + logical.slice(prefix.length);
+// --- conditional landing (the generated _exclude region) --------------------
+
+/** A landed path as a LITERAL gitwildmatch pattern: glob metacharacters
+ *  are backslash-escaped so a path containing one can never widen into a
+ *  glob matching siblings, and a leading ! or # cannot negate or comment
+ *  the pattern away. */
+export function gitwildmatchLiteral(path: string): string {
+  let out = path.replace(/[*?[\]\\]/g, (ch) => `\\${ch}`);
+  if (/^[!#]/.test(out)) out = `\\${out}`;
+  return out;
+}
+
+/** One gate expression for an entry's gate list: the single gate verbatim,
+ *  several gates parenthesized and and-chained (a file renders only while
+ *  ALL its gates hold). */
+function allOf(gates: string[]): string {
+  return gates.length === 1 ? gates[0] : gates.map((gate) => `(${gate})`).join(" and ");
+}
+
+/** A pattern anchored to the render root: gitwildmatch treats a pattern
+ *  containing a slash as root-anchored, so single-segment paths get a
+ *  leading slash - an unanchored "AGENTS.md" would match at any depth. */
+function anchored(pattern: string): string {
+  return pattern.includes("/") ? pattern : `/${pattern}`;
+}
+
+/** The copier.yml _exclude patterns realizing conditional landing over the
+ *  plain-named composed tree, from the same entries the ownership manifest
+ *  is generated from: per gated FILE a pattern rendering to the literal
+ *  landed path exactly when its gates do not hold, and per DIRECTORY whose
+ *  every landed file is gated a pattern excluding the directory itself
+ *  when no gate combination under it holds (copier would otherwise render
+ *  it as an empty directory; a gitwildmatch pattern naming a directory
+ *  covers its descendants too, so the per-file patterns underneath are
+ *  belt and braces). scripts/generate.ts writes these into copier.yml's
+ *  generated region; build() refuses a stale region. */
+export function excludePatterns(entries: ManifestEntry[]): string[] {
+  const patterns: string[] = [];
+  for (const entry of entries) {
+    if (entry.gates.length === 0) continue;
+    for (const [what, bad] of [
+      ["a double quote", '"'],
+      ["a backslash", "\\"],
+      ["a jinja expression delimiter", "{{"],
+      ["a jinja statement delimiter", "{%"],
+    ] as const) {
+      if (entry.path.includes(bad)) {
+        throw new GeneratorValidationError(
+          `landed path '${entry.path}' contains ${what} - it cannot ride inside ` +
+            "the generated _exclude patterns' jinja-in-YAML wrapper; rename the file",
+        );
+      }
+    }
+    patterns.push(
+      `{% if not (${allOf(entry.gates)}) %}${anchored(gitwildmatchLiteral(entry.path))}{% endif %}`,
+    );
+  }
+  // Directory patterns: for every directory all of whose landed files are
+  // gated, exclude the directory itself unless SOME selection under it
+  // holds - otherwise an all-unselected render leaves an empty directory
+  // behind (the retired filename gates collapsed the dirname instead).
+  const dirs = new Map<string, { all: boolean; conditions: string[] }>();
+  for (const entry of entries) {
+    const segments = entry.path.split("/");
+    for (let depth = 1; depth < segments.length; depth++) {
+      const dir = segments.slice(0, depth).join("/");
+      const state = dirs.get(dir) ?? { all: true, conditions: [] };
+      if (entry.gates.length === 0) state.all = false;
+      else {
+        const condition = allOf(entry.gates);
+        if (!state.conditions.includes(condition)) state.conditions.push(condition);
+      }
+      dirs.set(dir, state);
     }
   }
-  const [parent, , leaf] = rpartition(logical, "/");
-  let wrapped: string;
-  if (leaf.endsWith(JINJA_SUFFIX)) {
-    const stem = leaf.slice(0, -JINJA_SUFFIX.length);
-    wrapped = `{% if ${gate} %}${stem}{% endif %}${JINJA_SUFFIX}`;
-  } else {
-    wrapped = `{% if ${gate} %}${leaf}{% endif %}`;
+  for (const [dir, state] of [...dirs.entries()].sort(([a], [b]) => (a < b ? -1 : 1))) {
+    if (!state.all) continue;
+    const anySelected =
+      state.conditions.length === 1
+        ? state.conditions[0]
+        : state.conditions.map((condition) => `(${condition})`).join(" or ");
+    patterns.push(`{% if not (${anySelected}) %}${anchored(gitwildmatchLiteral(dir))}{% endif %}`);
   }
-  return parent ? `${parent}/${wrapped}` : wrapped;
+  return patterns;
 }
 
 // --- data anchors ----------------------------------------------------------
@@ -896,7 +979,7 @@ export function trimsFollowingWhitespace(texts: Buffer[]): boolean {
 
 export type SourcedEntry =
   | { origin: "base"; entry: Entry }
-  | { origin: "module"; module: string; gate: string; gateDirs: string[]; entry: Entry };
+  | { origin: "module"; module: string; gate: string; entry: Entry };
 
 function sourceName(sourced: SourcedEntry): string {
   return sourced.origin === "base" ? "base" : sourced.module;
@@ -1343,8 +1426,10 @@ export function manifestTemplate(entries: ManifestEntry[]): Buffer {
   return Buffer.from(lines.join("\n"));
 }
 
-/** Compose the output map: emitted path -> Entry. Exits 1 on errors. */
-export function build(): Map<string, Entry> {
+/** Compose the tree: emitted path -> Entry, plus the ownership manifest
+ *  entries the tree was generated from (excludePatterns derives copier.yml's
+ *  _exclude region from the same entries). Exits 1 on errors. */
+export function compose(): { output: Map<string, Entry>; entries: ManifestEntry[] } {
   const base = join(SRC, "base");
   if (!existsSync(base) || !lstatSync(base).isDirectory() || readdirSync(base).length === 0) {
     die(
@@ -1394,33 +1479,13 @@ export function build(): Map<string, Entry> {
     }
     const gate = gateExpression(module, manifest);
     gates.set(module, gate);
-    const dirs = [...(manifest.gate_dirs ?? [])];
     const moduleFiles = collectFiles(folder);
-    // Every gate_dirs entry must name a DIRECTORY holding at least one of
-    // this module's files - a typo would otherwise silently fall back to
-    // per-leaf gating, and a file entry would break .jinja suffix handling.
-    for (const gatedDir of dirs) {
-      const prefix = gatedDir.replace(/\/+$/, "");
-      if (moduleFiles.has(prefix)) {
-        errors.push(
-          `templates/${module}/${MANIFEST_NAME}: gate_dirs entry ` +
-            `'${gatedDir}' is a file, not a directory - leaf files are ` +
-            "gated automatically; remove the entry",
-        );
-      } else if (![...moduleFiles.keys()].some((p) => p.startsWith(`${prefix}/`))) {
-        errors.push(
-          `templates/${module}/${MANIFEST_NAME}: gate_dirs entry ` +
-            `'${gatedDir}' matches none of the module's files - likely a ` +
-            "typo; fix the path or remove the entry",
-        );
-      }
-    }
     for (const [logical, entry] of moduleFiles) {
       if (logical.includes("{%")) {
         errors.push(
-          `templates/${module}/${logical}: module files must not hand-write ` +
-            `filename gates; the composer adds the '${module}' gate ` +
-            "automatically (custom gates go in module.yml)",
+          `templates/${module}/${logical}: module files must not carry ` +
+            `filename gates; the composer records the '${module}' gate as ` +
+            "data for the generated _exclude region (custom gates go in module.yml)",
         );
         continue;
       }
@@ -1435,7 +1500,7 @@ export function build(): Map<string, Entry> {
         );
         continue;
       }
-      files.set(logical, { origin: "module", module, gate, gateDirs: dirs, entry });
+      files.set(logical, { origin: "module", module, gate, entry });
     }
     for (const [anchor, body] of collectFragments(folder)) {
       const contributions = fragments.get(anchor) ?? [];
@@ -1543,6 +1608,7 @@ export function build(): Map<string, Entry> {
   // actually lands. Emitted as one more template file - copier renders and
   // syncs it like any managed file.
   let manifestData: Buffer | null = null;
+  let manifestEntriesResult: ManifestEntry[] = [];
   try {
     const skipPatterns = skipIfExistsPatterns(readFileSync(join(REPO_ROOT, "copier.yml"), "utf-8"));
     const declarations: DeclarationSources = {
@@ -1551,7 +1617,10 @@ export function build(): Map<string, Entry> {
     };
     const manifest = manifestEntries(files, skipPatterns, declarations);
     errors.push(...manifest.errors);
-    if (manifest.errors.length === 0) manifestData = manifestTemplate(manifest.entries);
+    if (manifest.errors.length === 0) {
+      manifestData = manifestTemplate(manifest.entries);
+      manifestEntriesResult = manifest.entries;
+    }
   } catch (error) {
     errors.push(error instanceof Error ? error.message : String(error));
   }
@@ -1568,11 +1637,12 @@ export function build(): Map<string, Entry> {
   output.set(MANIFEST_TEMPLATE_PATH, { kind: "file", data: manifestData });
   const emittedErrors: string[] = [];
   for (const [logical, sourced] of files) {
-    const emitted =
-      sourced.origin === "base" ? logical : gatedPath(logical, sourced.gate, sourced.gateDirs);
+    // Plain names only: filename gates are declaration, stripped here and
+    // realized by copier.yml's generated _exclude region instead.
+    const emitted = plainTemplatePath(logical);
     if (output.has(emitted)) {
       // Distinct logical paths can still emit the same name (e.g. a
-      // hand-gated base filename plus the module's plain copy).
+      // hand-gated base filename plus another source's plain copy).
       emittedErrors.push(
         `collision: two sources emit template/${emitted} (one of them via ` +
           "an explicit filename gate in base/) - delete the module copy or " +
@@ -1585,6 +1655,31 @@ export function build(): Map<string, Entry> {
   if (emittedErrors.length > 0) {
     for (const error of emittedErrors) console.error(`error: ${error}`);
     process.exit(1);
+  }
+  return { output, entries: manifestEntriesResult };
+}
+
+/** compose() plus the copier.yml gate: the committed _exclude region must
+ *  equal the patterns derived from this tree's entries, or the assembled
+ *  branch would ship plain-named conditional files that copier lands
+ *  unconditionally. Regenerated by `bun run generate`; drift-gated there
+ *  too, but a branch build must fail on its own checkout's staleness. */
+export function build(): Map<string, Entry> {
+  const { output, entries } = compose();
+  const expected = excludePatterns(entries);
+  let committed: string[];
+  try {
+    committed = readExcludeList(readFileSync(join(REPO_ROOT, "copier.yml"), "utf-8"));
+  } catch (error) {
+    die(`error: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  if (JSON.stringify(committed) !== JSON.stringify(expected)) {
+    die(
+      "error: copier.yml's _exclude region does not match the patterns " +
+        "derived from the composed tree's gates - run `bun run generate` " +
+        "and commit the result (conditional files would otherwise land " +
+        "unconditionally in every render)",
+    );
   }
   return output;
 }

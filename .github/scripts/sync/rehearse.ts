@@ -381,14 +381,12 @@ export function rehearseRepo(slug: string, options: RehearsalOptions): Rehearsal
     // as long as _commit resolves. The credential helper stays (a private
     // origin may legitimately need it); prompts are off and the deadline
     // turns a stall into a fast failure.
-    const fetches = [
-      "+refs/heads/main:refs/heads/main",
-      "+refs/heads/template:refs/heads/template",
-    ].map((refspec) =>
-      capture(["git", "-C", platformDir, "fetch", "--quiet", originUrl, refspec], {
-        env: NO_PROMPT_ENV,
-        timeoutMs: NETWORK_TIMEOUT_MS,
-      }),
+    const fetches = ["+refs/heads/main:refs/heads/main", "+refs/heads/build:refs/heads/build"].map(
+      (refspec) =>
+        capture(["git", "-C", platformDir, "fetch", "--quiet", originUrl, refspec], {
+          env: NO_PROMPT_ENV,
+          timeoutMs: NETWORK_TIMEOUT_MS,
+        }),
     );
     // One failed ref is normal (best-effort, above), but a timeout or a
     // failure of every ref is a network problem, and the _commit probe

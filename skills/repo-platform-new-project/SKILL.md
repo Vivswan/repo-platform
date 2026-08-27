@@ -19,7 +19,7 @@ Bring a repository under Vivswan/repo-platform management: the platform is a Cop
 ## Key facts before you start
 
 - The template is standards-only: CI conventions, settings, gitignore, agent instructions. The project skeleton comes from the native tool (`uv init`, `bun init`); repo-platform layers on top.
-- repo-platform's `main` branch is NOT copier-consumable. Consume the generated build ref: the `template` branch (rebuilt from every main merge).
+- repo-platform's `main` branch is NOT copier-consumable. Consume the generated build ref: the `build` branch (rebuilt from every main merge).
 - Some steps need repository-settings access; they are collected in "Owner actions" below so a human can do them in one sitting.
 
 ## Workflow
@@ -53,7 +53,7 @@ git symbolic-ref --short HEAD   # must print main for a new project
 # the repo): git symbolic-ref HEAD refs/heads/main  (safe before the
 # first commit)
 
-copier copy gh:Vivswan/repo-platform . --vcs-ref template --trust
+copier copy gh:Vivswan/repo-platform . --vcs-ref build --trust
 
 git add --all
 git commit -m "chore: initialize from repo-platform"
@@ -64,7 +64,7 @@ git commit -m "chore: initialize from repo-platform"
 Running non-interactively (agent-driven): add `--defaults --overwrite`. Without `--overwrite`, copier prompts per conflicting file - the scaffolder already wrote `.gitignore` (and maybe a README) that the template also renders, and `--defaults` does not answer overwrite prompts, so a non-TTY run hangs. The modules multiselect must be a YAML list in ONE `-d` argument:
 
 ```bash
-copier copy gh:Vivswan/repo-platform . --vcs-ref template --defaults --overwrite --trust \
+copier copy gh:Vivswan/repo-platform . --vcs-ref build --defaults --overwrite --trust \
   -d project_name=X -d description=Y -d 'modules=[uv]' -d private=false
 ```
 

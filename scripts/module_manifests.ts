@@ -5,7 +5,7 @@
 // toolchain declaration (with its CodeQL language), the dependabot
 // ecosystem/label tuple, the settings layer files it ships, gitignore
 // upstream sources, gitleaks lockfile patterns, Pages commands, and the
-// composer's gate/gate_dirs.
+// composer's gate expression.
 //
 // scripts/generate.ts derives the marker-fenced GENERATED regions from
 // these; scripts/compose_template.ts, scripts/build_gitignore.ts, and the
@@ -270,19 +270,19 @@ export const manifestSchema = z.strictObject({
     .array(z.string().regex(/^[a-z][a-z0-9-]*$/, "must be a lowercase workflow job id"))
     .min(1)
     .optional(),
-  // The gate expression is interpolated verbatim into `{% if <gate> %}`
-  // FILENAME gates and into `not (<gate>)` guard chains: { } % # would open
-  // or close a jinja delimiter around it, / would split the emitted
-  // filename into path segments, and \ escapes unpredictably. Single quotes
-  // stay allowed - membership gates like 'bun' in modules need them.
+  // The gate expression is interpolated verbatim into the generated
+  // _exclude patterns' `{% if not (<gate>) %}` conditions and into
+  // `not (<gate>)` guard chains: { } % # would open or close a jinja
+  // delimiter around it, / would read as a path segment in older gated
+  // filenames, and \ escapes unpredictably. Single quotes stay allowed -
+  // membership gates like 'bun' in modules need them.
   gate: singleLine("the gate expression")
     .refine((value) => !/[{}%#/\\]/.test(value), {
       message:
         "the gate expression must not contain {, }, %, #, /, or \\ " +
-        "(it lands inside {% if %} filename gates and not(...) guard chains)",
+        "(it lands inside the generated _exclude conditions and not(...) guard chains)",
     })
     .optional(),
-  gate_dirs: z.array(z.string().min(1)).min(1).optional(),
 });
 
 export type ModuleManifest = z.infer<typeof manifestSchema> & { module: string };

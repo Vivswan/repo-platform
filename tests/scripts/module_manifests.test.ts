@@ -49,8 +49,6 @@ describe("parseManifest", () => {
         "  install: demo install",
         "  build: demo build",
         "gate: \"'demo' in modules\"",
-        "gate_dirs:",
-        "  - .github/DEMO",
       ].join("\n"),
       WHERE,
     );
@@ -58,7 +56,7 @@ describe("parseManifest", () => {
     expect(manifest.dependabot).toEqual({ ecosystem: "pip", label: "python", color: "2b67c6" });
     expect(manifest.lockfiles).toEqual(["demo\\.lock"]);
     expect(manifest.pages).toEqual({ install: "demo install", build: "demo build" });
-    expect(manifest.gate_dirs).toEqual([".github/DEMO"]);
+    expect(manifest.gate).toBe("'demo' in modules");
   });
 
   test("an unknown key fails loudly, naming the file", () => {
@@ -292,10 +290,10 @@ describe("parseManifest", () => {
     expect(() => parseManifest("demo", "description: x\ngate: true\n", WHERE)).toThrow("gate");
   });
 
-  test("gates reject jinja delimiters, #, /, \\, and newlines (they land in filename gates)", () => {
+  test("gates reject jinja delimiters, #, /, \\, and newlines (they land in the exclude conditions)", () => {
     for (const piece of ["{", "}", "%", "#", "/", "\\\\"]) {
       expect(() => parseManifest("demo", `description: x\ngate: "a ${piece} b"\n`, WHERE)).toThrow(
-        "filename gates",
+        "_exclude conditions",
       );
     }
     expect(() => parseManifest("demo", 'description: x\ngate: "two\\nlines"\n', WHERE)).toThrow(

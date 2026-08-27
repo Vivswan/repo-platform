@@ -48,7 +48,7 @@
       pull-requests: read
       vulnerability-alerts: read
     steps:
-      - uses: {{ github_username }}/repo-platform/actions/release-health@actions
+      - uses: {{ github_username }}/repo-platform/actions/release-health@build
         if: github.event_name == 'pull_request' && startsWith(github.head_ref, 'release-please--')
         with:
           mode: pull-request

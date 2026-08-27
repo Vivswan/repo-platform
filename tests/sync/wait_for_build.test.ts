@@ -11,7 +11,7 @@ const MAIN_SHA = "a".repeat(40);
 // \x1e between records), sleeps GIT_SLEEP seconds first when set (the
 // stalled-origin case), fails a `fetch` when GIT_FETCH_FAIL is set (the
 // transient network case), serves GIT_TIP_MSG_FILE's content for a `log`
-// (the stamped template tip), and prints GIT_HEAD as the ls-remote HEAD.
+// (the stamped build tip), and prints GIT_HEAD as the ls-remote HEAD.
 // wait_for_build calls NO gh api - freshness is the tip stamp alone - so
 // the gh stub only RECORDS (and exits non-zero): a reintroduced gh call
 // then both shows up in the calls log and fails the run, catching a
@@ -40,7 +40,7 @@ exit 1
 
 interface Options {
   env?: Record<string, string>;
-  /** When set, the git stub serves this as the template tip's commit
+  /** When set, the git stub serves this as the build tip's commit
    * message (the stamp check reads its `source:` line). */
   tipMessage?: string;
 }
@@ -87,7 +87,7 @@ function run(opts: Options = {}) {
 }
 
 function stampMessage(sourceSha: string): string {
-  return `build: template\n\nsource: https://github.com/Vivswan/repo-platform/commit/${sourceSha}\nrun: https://github.com/Vivswan/repo-platform/actions/runs/1\n`;
+  return `build: build\n\nsource: https://github.com/Vivswan/repo-platform/commit/${sourceSha}\nrun: https://github.com/Vivswan/repo-platform/actions/runs/1\n`;
 }
 
 describe("wait_for_build.ts", () => {
@@ -111,12 +111,12 @@ describe("wait_for_build.ts", () => {
 
   test("a tip stamped with main HEAD is fresh, proven WITHOUT any gh api call", () => {
     // Freshness is the tip's SOURCE STAMP alone: read main HEAD, fetch the
-    // template tip, parse its stamp. No gh api - the runs-list check was
+    // build tip, parse its stamp. No gh api - the runs-list check was
     // deleted because a successful build run at HEAD does not prove the
     // tip was built from HEAD (it may have published an earlier source).
     const r = run({ tipMessage: stampMessage(MAIN_SHA) });
     expect(r.exitCode).toBe(0);
-    expect(r.output).toContain(`the template branch tip is stamped with main HEAD ${MAIN_SHA}.`);
+    expect(r.output).toContain(`the build branch tip is stamped with main HEAD ${MAIN_SHA}.`);
     expect(r.calls.every((args) => args[0] === "git")).toBe(true);
   });
 
@@ -130,20 +130,20 @@ describe("wait_for_build.ts", () => {
     const r = run({ tipMessage: stampMessage("c".repeat(40)) });
     expect(r.exitCode).toBe(0);
     expect(r.output).not.toContain("stamped with main HEAD");
-    expect(r.output).toContain("::warning::the template branch is not yet built");
+    expect(r.output).toContain("::warning::the build branch is not yet built");
   });
 
   test("no stamp on the tip warns green after exhausting the attempts", () => {
     const r = run();
     expect(r.exitCode).toBe(0);
-    expect(r.output).toContain("waiting for the template branch to be built");
-    expect(r.output).toContain("::warning::the template branch is not yet built");
+    expect(r.output).toContain("waiting for the build branch to be built");
+    expect(r.output).toContain("::warning::the build branch is not yet built");
   });
 
   test("keeps polling through a transient fetch failure, then warns green", () => {
     const r = run({ env: { GIT_FETCH_FAIL: "1" }, tipMessage: stampMessage(MAIN_SHA) });
     expect(r.exitCode).toBe(0);
-    expect(r.output).toContain("::warning::the template branch is not yet built");
+    expect(r.output).toContain("::warning::the build branch is not yet built");
   });
 
   test("fails loudly on an unreadable main HEAD", () => {

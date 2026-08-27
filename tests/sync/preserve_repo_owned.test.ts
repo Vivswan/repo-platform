@@ -14,11 +14,16 @@ import { REMOVED_SPLITS_NAME } from "../../.github/scripts/sync/section_files.ts
 const script = join(import.meta.dir, "../../.github/scripts/sync/preserve_repo_owned.ts");
 const repoRoot = join(import.meta.dir, "..", "..");
 
-// The build ref carries the license under the composed template/ prefix;
-// the source of truth lives under templates/base/.
-const licenseName = "{% if 'custom-license' not in modules %}LICENSE.md{% endif %}.jinja";
-const fleetLicenseRel = join("template", licenseName);
-const licenseTemplateSource = readFileSync(join(repoRoot, "templates/base", licenseName), "utf-8");
+// The build ref carries the license under the composed template/ prefix at
+// its PLAIN name (conditional landing lives in copier.yml's _exclude, not
+// in filenames); the source of truth lives under templates/base/, where the
+// filename still declares the gate.
+const sourceLicenseName = "{% if 'custom-license' not in modules %}LICENSE.md{% endif %}.jinja";
+const fleetLicenseRel = join("template", "LICENSE.md.jinja");
+const licenseTemplateSource = readFileSync(
+  join(repoRoot, "templates/base", sourceLicenseName),
+  "utf-8",
+);
 
 const goodAnswers = [
   'copyright_holder: "Vivswan Shah (https://github.com/Vivswan)"',

@@ -1,7 +1,7 @@
 # Weekly: bump the toolchain version pins (templates/<module>/module.yml
 # toolchain.pin) to the latest upstream releases, regenerate the pinned
 # dotfiles and dogfood copies, and open a PR when anything moved.
-# Merging the PR reaches the template branch automatically via build-branches.
+# Merging the PR reaches the build branch automatically via build-branches.
 
 name: Refresh toolchains
 
@@ -60,7 +60,7 @@ jobs:
           PR_TITLE: "fix(templates): bump ${{ steps.refresh.outputs.bumps }}"
           REFRESH_TITLE: "true"
         run: |
-          body="Automated toolchain pin refresh: bump $BUMPS (fleet-wide via the managed version dotfiles - see docs/toolchains.md). Merging this rebuilds the template branch; the next sync pushes it to the fleet."
+          body="Automated toolchain pin refresh: bump $BUMPS (fleet-wide via the managed version dotfiles - see docs/toolchains.md). Merging this rebuilds the build branch; the next sync pushes it to the fleet."
           if [ -n "$MAJOR" ]; then
             body="**MAJOR VERSION JUMP: $MAJOR - review before merging.**
 

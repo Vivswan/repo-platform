@@ -1,12 +1,13 @@
 #!/usr/bin/env bun
-// Composes the template tree for THIS push's commit while main's CI run
-// is still executing, and parks it UNPUBLISHED at refs/build-pending/<sha>
-// (pending.ts owns the ref grammar). Publishing stays gated on all-green:
-// build-branches.yml's workflow_run publisher promotes this pre-built
-// tree through publish.ts's PREBUILT_REF once CI succeeds, so the compose
-// cost is paid concurrently with CI instead of after it. Nothing here
-// weakens the gate - this script never touches refs/heads/template, and
-// publish.ts's green hard-verify still fronts every publish.
+// Composes the build-branch tree for THIS push's commit while main's CI
+// run is still executing, and parks it UNPUBLISHED at
+// refs/build-pending/<sha> (pending.ts owns the ref grammar). Publishing
+// stays gated on all-green: build-branches.yml's workflow_run publisher
+// promotes this pre-built tree through publish.ts's PREBUILT_REF once CI
+// succeeds, so the compose cost is paid concurrently with CI instead of
+// after it. Nothing here weakens the gate - this script never touches
+// refs/heads/build, and publish.ts's green hard-verify still fronts every
+// publish.
 //
 // The push is force: the ref is keyed by the source sha, so a re-run of
 // the same push only ever replaces its own content - never another
@@ -61,7 +62,7 @@ must([
   "commit",
   "-q",
   "-m",
-  `build-pending: template tree of ${sourceSha.slice(0, 12)} (unpublished; promoted after all-green)`,
+  `build-pending: build tree of ${sourceSha.slice(0, 12)} (unpublished; promoted after all-green)`,
 ]);
 must(["git", "-C", "/tmp/pend", "push", "--force", "origin", `HEAD:${pendingRefFor(sourceSha)}`]);
 console.log(`parked the pre-built tree at ${pendingRefFor(sourceSha)} (unpublished)`);
