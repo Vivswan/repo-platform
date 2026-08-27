@@ -284,18 +284,43 @@ describe("stampManifestText", () => {
     expect(problem).toMatch(/does not parse/);
   });
 
-  test("a duplicated entry line for one path fails loudly, never launders", () => {
+  test("a duplicated entry line for one path is a soft problem, never a throw", () => {
     // Duplicate JSON keys last-win at parse time, so a duplicate line (a
     // bad conflict resolution) can flip a path's ownership class with no
-    // parse error; stamping both lines would deliver a plausibly-stamped
-    // manifest carrying the flip. The second line here has NO hash token -
-    // the starter-shaped flip - and must still be refused.
+    // parse error; stamping both lines would launder the flip. But this
+    // must stay SOFT: the same code ships as copier's after-hook over the
+    // MERGED tree, where a throw would fail the render and deliver no PR -
+    // the validator's parity check reports it in a delivered PR instead.
+    // The second line here has NO hash token - the starter-shaped flip.
     const root = tree({ "CLAUDE.md": "content\n" });
     const text = manifestText([
       '    "CLAUDE.md": {"class": "managed", "hash": null}',
       '    "CLAUDE.md": {"class": "starter"}',
     ]);
-    expect(() => stampManifestText(text, root)).toThrow(/more than one entry line for CLAUDE\.md/);
+    let result: { out: string; problem: string | null } | undefined;
+    expect(() => {
+      result = stampManifestText(text, root);
+    }).not.toThrow();
+    expect(result?.problem).toContain('more than one entry line for "CLAUDE.md"');
+    // The untouched text is emitted (out === text), so main() warns and
+    // exits 0 rather than aborting the render.
+    expect(result?.out).toBe(text);
+  });
+
+  test("a duplicated key with control characters stays escaped in the problem (no log injection)", () => {
+    // The merged manifest is target-controlled; a decoded key carrying a
+    // real newline would inject it into the public log. The raw quoted
+    // form (match[2]) keeps the backslash-escape literal.
+    const key = String.raw`"a\nb"`;
+    const root = tree({ "x.md": "content\n" });
+    const text = manifestText([
+      `    ${key}: {"class": "managed", "hash": null}`,
+      `    ${key}: {"class": "starter"}`,
+    ]);
+    const result = stampManifestText(text, root);
+    expect(result.problem).toContain(String.raw`"a\nb"`);
+    expect(result.problem).not.toContain("\n"); // the escape stayed literal
+    expect(result.out).toBe(text);
   });
 });
 

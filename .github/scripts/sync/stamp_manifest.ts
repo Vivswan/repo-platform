@@ -202,12 +202,18 @@ export function entryHash(root: string, path: string, entry: ManifestEntryShape)
  *  replaced with the honest value, and the self entry's commit token with
  *  the render's recorded _commit (its hash stays null - see the manifest's
  *  $comment). Returns the input unchanged with a problem message when the
- *  text does not parse. THROWS on a duplicated entry line for one path: a
+ *  text does not parse OR carries a duplicated entry line for one path: a
  *  bad conflict resolution can leave the same path's line twice, duplicate
  *  JSON keys last-win at parse time (so a duplicate can flip a path's
  *  class with no parse error), and stamping both lines would launder the
- *  duplicate into a plausibly-stamped manifest - that is corruption to
- *  refuse, not data to pass through. */
+ *  duplicate into a plausibly-stamped manifest. Reported soft, never
+ *  thrown: this function's contract (see the file header) is that a
+ *  stamping gap warns and lets the validator's parity check report it in a
+ *  DELIVERED PR - and this same code ships standalone as copier's
+ *  after-hook, where the manifest being stamped is copier's MERGED result
+ *  (the exact place a bad three-way merge duplicates a line), so a throw
+ *  there would fail the render, turn the sync red, and deliver no PR for a
+ *  human to fix the corruption in. */
 export function stampManifestText(
   text: string,
   root: string,
@@ -233,25 +239,36 @@ export function stampManifestText(
   }
   const files = manifest.files as Record<string, ManifestEntryShape>;
   const commit = recordedCommit(root);
+  // A path's value in `files` is whichever duplicate JSON parsed last, so a
+  // duplicated entry line cannot be stamped honestly - report it soft
+  // (like every other corruption here) BEFORE writing anything, so the
+  // untouched text stays for the validator's parity check to flag in a
+  // delivered PR. The path is named in its RAW JSON-quoted form (match[2],
+  // as written in the source line) rather than decoded: a decoded key
+  // could carry real newlines or control bytes into this problem string,
+  // which reaches a public log via main()'s warning, and the merged
+  // manifest is target-controlled. The quoted form keeps every escape
+  // literal.
   const seenPaths = new Set<string>();
+  for (const line of resolved.split("\n")) {
+    const match = ENTRY_LINE_RE.exec(line);
+    if (!match) continue;
+    const path = JSON.parse(match[2]) as string;
+    if (files[path] === undefined) continue;
+    if (seenPaths.has(path)) {
+      return {
+        out: text,
+        problem: `carries more than one entry line for ${match[2]} (duplicate keys last-win at parse, so a duplicate can flip its ownership class silently)`,
+      };
+    }
+    seenPaths.add(path);
+  }
   const lines = resolved.split("\n").map((line) => {
     const match = ENTRY_LINE_RE.exec(line);
     if (!match) return line;
     const path = JSON.parse(match[2]) as string;
     const entry = files[path];
-    if (entry === undefined) return line;
-    // Duplicate detection BEFORE the hash-token guard: a duplicate whose
-    // second line carries no hash token (a starter-shaped flip) is still a
-    // duplicate to refuse.
-    if (seenPaths.has(path)) {
-      throw new Error(
-        `${MANIFEST_NAME} carries more than one entry line for ${path}; duplicate JSON ` +
-          "keys last-win at parse time, so a duplicate (a bad conflict resolution) can " +
-          "flip the path's ownership class silently - refusing to stamp it",
-      );
-    }
-    seenPaths.add(path);
-    if (!HASH_RE.test(match[3])) return line;
+    if (entry === undefined || !HASH_RE.test(match[3])) return line;
     const hash = path === MANIFEST_NAME ? null : entryHash(root, path, entry);
     let body = match[3].replace(HASH_RE, `"hash": ${hash === null ? "null" : `"${hash}"`}`);
     if (path === MANIFEST_NAME) {
