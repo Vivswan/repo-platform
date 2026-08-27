@@ -13,7 +13,7 @@ import { join } from "node:path";
 const script = join(import.meta.dir, "../../.github/scripts/ci/rerun_copilot_gate.ts");
 
 const HEAD_SHA = "b".repeat(40);
-const RUN = { id: 77, status: "completed", run_attempt: 1 };
+const RUN = { id: 77, status: "completed", pull_requests: [{ number: 12 }] };
 const FAILED_GATE_JOBS = { jobs: [{ id: 900, name: "copilot-review", conclusion: "failure" }] };
 const COMPLETED_CHECK = { check_runs: [{ status: "completed" }] };
 
@@ -69,6 +69,7 @@ function run(opts: Options = {}) {
       PATH: `${bin}:${process.env.PATH}`,
       GITHUB_REPOSITORY: "Vivswan/repo-platform",
       HEAD_SHA,
+      REVIEW_PR: "12",
       CALLS_LOG: calls,
       GH_RUNS_FILE: file("runs.json", opts.runs ?? { workflow_runs: [RUN] }),
       GH_RUN_FILE: file("run.json", opts.run ?? RUN),
@@ -88,6 +89,10 @@ function run(opts: Options = {}) {
       .filter(Boolean)
       .map((record) => record.split("\x1f"))
       .filter((args) => args[1] === "run"),
+    calls: raw
+      .split("\x1e")
+      .filter(Boolean)
+      .map((record) => record.split("\x1f")),
   };
 }
 
@@ -231,11 +236,46 @@ describe("rerun_copilot_gate.ts", () => {
     expect(r.output).toContain("has not arrived");
   });
 
-  test("CI-completed trigger: no PR associated with the sha defers quietly", () => {
-    const r = run({ env: { RUN_ID: "77" }, checks: { check_runs: [] } });
+  test("CI-completed trigger: a run with NO PR association defers quietly", () => {
+    const r = run({
+      env: { RUN_ID: "77" },
+      run: { id: 77, status: "completed" },
+      checks: COMPLETED_CHECK,
+    });
     expect(r.exitCode).toBe(0);
     expect(r.reruns).toEqual([]);
     expect(r.output).toContain("has not arrived");
+  });
+
+  test("review trigger: a sibling PR's run at the same sha never re-arms this PR's gate", () => {
+    // The runs listing is sha-scoped; the SELECTION is PR-scoped: the only
+    // run at the sha belongs to PR 99, the review is on PR 12 - re-running
+    // 99's gate would burn the wrong PR's attempt budget.
+    const r = run({
+      runs: { workflow_runs: [{ id: 77, status: "completed", pull_requests: [{ number: 99 }] }] },
+    });
+    expect(r.exitCode).toBe(0);
+    expect(r.reruns).toEqual([]);
+    expect(r.output).toContain("no pull_request CI run at");
+    expect(r.output).toContain("PR #12");
+  });
+
+  test("CI-completed trigger: arrival is read from the RUN'S OWN PR, never a sibling's", () => {
+    // The run belongs to PR 12; the reviews consulted must be PR 12's
+    // (the old commit-pulls .find() was arbitrary under shared shas and
+    // could adopt a sibling's completed review).
+    const r = run({
+      env: { RUN_ID: "77" },
+      checks: { check_runs: [] },
+      reviews: [],
+    });
+    expect(r.exitCode).toBe(0);
+    expect(r.reruns).toEqual([]);
+    const reviewReads = r.calls.filter((args) =>
+      String(args[args.length - 1] ?? "").includes("/reviews"),
+    );
+    expect(reviewReads.length).toBe(1);
+    expect(reviewReads[0][reviewReads[0].length - 1]).toContain("/pulls/12/reviews");
   });
 
   test("a failing rerun command is loud, not swallowed", () => {

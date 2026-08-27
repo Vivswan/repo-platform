@@ -25,10 +25,10 @@
 // are all quiet no-ops.
 //
 // Env: HEAD_SHA; RUN_ID (the completed CI run - workflow_run trigger
-// only, empty on the review trigger); REVIEW_COMMIT (the triggering
-// review's commit_id - review trigger only, empty otherwise); GH_TOKEN,
-// GITHUB_REPOSITORY. PROBE_TIMEOUT_MS overrides the per-call network
-// deadline.
+// only, empty on the review trigger); REVIEW_COMMIT and REVIEW_PR (the
+// triggering review's commit_id and its PR number - review trigger only,
+// empty otherwise); GH_TOKEN, GITHUB_REPOSITORY. PROBE_TIMEOUT_MS
+// overrides the per-call network deadline.
 
 import type { ZodType } from "zod";
 import { z } from "zod";
@@ -57,18 +57,20 @@ const repository = requireEnv("GITHUB_REPOSITORY");
 const headSha = requireEnv("HEAD_SHA");
 const runId = env("RUN_ID");
 const reviewCommit = env("REVIEW_COMMIT");
+const reviewPr = env("REVIEW_PR");
 
+// A run's pull_requests associations are what scopes every lookup to ONE
+// PR: stacked PRs share head shas constantly, so anything keyed on the
+// sha alone can land on a SIBLING PR's run or review.
 const runShape = z.object({
   id: z.number(),
   status: z.string(),
+  pull_requests: z.array(z.object({ number: z.number() })).optional(),
 });
 const runsSchema = z.object({ workflow_runs: z.array(runShape) });
 const jobsSchema = z.object({
   jobs: z.array(z.object({ id: z.number(), name: z.string(), conclusion: z.string().nullable() })),
 });
-const commitPullsSchema = z.array(
-  z.object({ number: z.number(), head: z.object({ sha: z.string() }) }),
-);
 
 /** The paginated reviews read fetches N sequential pages under ONE
  * deadline, so its budget is several single-call probes' worth. */
@@ -99,16 +101,31 @@ if (runId === "" && reviewCommit !== "" && reviewCommit !== headSha) {
 // The review trigger looks the run up; the workflow_run trigger carries it.
 let run: z.infer<typeof runShape>;
 if (runId === "") {
+  // SHA-scoped listing, PR-scoped selection: stacked PRs share head shas,
+  // so the newest run at the sha can belong to a SIBLING PR - re-running
+  // its gate would burn the wrong PR's attempt budget. The event's own PR
+  // number picks the run through its pull_requests association; no
+  // associated run is a quiet defer (the CI-completed trigger owns it).
+  if (reviewPr === "" || !/^\d+$/.test(reviewPr)) {
+    notice("the review event carries no usable PR number; nothing to re-arm.");
+    process.exit(0);
+  }
+  const prNumber = Number(reviewPr);
   const runs = mustFetch(
-    `repos/${repository}/actions/workflows/ci.yml/runs?head_sha=${headSha}&event=pull_request&per_page=1`,
+    `repos/${repository}/actions/workflows/ci.yml/runs?head_sha=${headSha}&event=pull_request&per_page=30`,
     runsSchema,
     "rerun_copilot_gate: workflow runs response",
   ).workflow_runs;
-  if (runs.length === 0) {
-    notice(`no pull_request CI run exists at ${headSha}; nothing to re-arm.`);
+  const own = runs.find((candidate) =>
+    (candidate.pull_requests ?? []).some((pull) => pull.number === prNumber),
+  );
+  if (own === undefined) {
+    notice(
+      `no pull_request CI run at ${headSha} is associated with PR #${prNumber}; nothing to re-arm.`,
+    );
     process.exit(0);
   }
-  run = runs[0];
+  run = own;
 } else {
   run = mustFetch(
     `repos/${repository}/actions/runs/${runId}`,
@@ -159,16 +176,14 @@ if (gateJob.conclusion !== "failure") {
 // PR is found through the commit's associated PRs). The review trigger
 // IS the arrival, so it skips this.
 if (runId !== "") {
-  // The PR association comes FIRST: check runs are commit-scoped, so a
-  // completed run at this sha can belong to a stacked sibling PR -
-  // acceptance needs the PR number (checkRunArrivedForPr, the gate's own
-  // predicate). No associated PR means nothing to scope against: defer
-  // quietly, the review trigger carries its own arrival.
-  const pr = mustFetch(
-    `repos/${repository}/commits/${headSha}/pulls`,
-    commitPullsSchema,
-    "rerun_copilot_gate: commit pulls response",
-  ).find((pull) => pull.head.sha === headSha);
+  // The PR comes from the RUN'S OWN pull_requests association, never from
+  // the commit's PR listing: stacked PRs share head shas, and .find()
+  // over commit-associated PRs is arbitrary there - a sibling's completed
+  // review could re-arm this PR repeatedly and burn the attempt budget
+  // (same predicate discipline as checkRunArrivedForPr). No association
+  // means nothing to scope against: defer quietly, the review trigger
+  // carries its own arrival.
+  const pr = (run.pull_requests ?? [])[0];
   let arrived = false;
   if (pr !== undefined) {
     const checks = mustFetch(

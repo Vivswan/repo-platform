@@ -85,4 +85,10 @@ jobs:
           REVIEW_COMMIT: >-
             ${{ github.event_name == 'pull_request_review' &&
                 github.event.review.commit_id || '' }}
+          # The review's own PR (review trigger only): stacked PRs share
+          # head shas, so the run to re-arm is selected by ITS
+          # pull_requests association, never by the sha alone.
+          REVIEW_PR: >-
+            ${{ github.event_name == 'pull_request_review' &&
+                github.event.pull_request.number || '' }}
         run: bun .github/scripts/ci/rerun_copilot_gate.ts
