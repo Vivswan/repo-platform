@@ -928,6 +928,28 @@ export function spliceContributions(
     }
   }
 
+  // Contributions are spliced verbatim, so an anchor marker inside one
+  // would dodge the skeleton scan above whole: it never registers an owner
+  // (contributions to it get the misleading no-anchor error), a malformed
+  // marker goes undiagnosed, and a well-formed one survives into the
+  // composed tree as a comment rendering to nothing. Anchors live in
+  // skeleton files only; generators synthesize no markers of their own, so
+  // this fires on fragment content - directly, or via a consume generator
+  // (agents-toolchain) whose contribution embeds its input fragments'
+  // bytes, in which case the error names the generator.
+  for (const [anchor, list] of sortedByKey(contributions)) {
+    for (const { source, text } of list) {
+      if (text.includes(ANCHOR_HINT)) {
+        errors.push(
+          `${source}: the contribution to anchor '${anchor}' contains an anchor ` +
+            `marker ('${ANCHOR_HINT}') - a marker inside a contribution is never ` +
+            "scanned or filled (anchors live in skeleton files only, each in " +
+            "exactly one); move the marker line to a skeleton file or remove it",
+        );
+      }
+    }
+  }
+
   for (const [anchor, list] of sortedByKey(contributions)) {
     if (!anchorOwner.has(anchor)) {
       for (const { source } of list) {

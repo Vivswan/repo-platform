@@ -559,6 +559,29 @@ describe("spliceContributions", () => {
       "needs:\n{% if a %}      - a\n{% endif %}{% if b %}      - b\n{% endif %}    runs-on: x\n",
     );
   });
+
+  test("a contribution smuggling a well-formed anchor marker errors, naming the fragment", () => {
+    const files = skeleton("needs:\n{# compose:demo #}\n    runs-on: x\n");
+    const errors = spliceContributions(
+      files,
+      contribution("{% if g %}{# compose:other #}\n      - a\n{% endif %}", "g"),
+    );
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain("templates/a/fragments/demo.jinja");
+    expect(errors[0]).toContain("anchor marker");
+    // Fail closed: nothing spliced, the skeleton keeps its own marker.
+    expect(dataOf(files)).toContain("{# compose:demo #}");
+  });
+
+  test("a contribution smuggling a malformed anchor marker errors too", () => {
+    const files = skeleton("needs:\n{# compose:demo #}\n    runs-on: x\n");
+    const errors = spliceContributions(
+      files,
+      contribution("{% if g %}  {# compose:bad\n      - a\n{% endif %}", "g"),
+    );
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain("anchor marker");
+  });
 });
 
 // The collapse guard is a render-time fix (an all-false anchor line must
