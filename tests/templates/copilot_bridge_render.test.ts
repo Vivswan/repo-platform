@@ -37,6 +37,8 @@ interface Step {
   uses?: string;
   if?: string;
   run?: string;
+  with?: Record<string, string>;
+  "continue-on-error"?: boolean;
 }
 interface Job {
   if?: string;
@@ -54,6 +56,17 @@ function workflow(golden: string, name: string): Workflow {
   return parseYaml(
     readFileSync(join(RENDERS, golden, ".github/workflows", name), "utf8"),
   ) as Workflow;
+}
+
+/** A step's `with:` map with each value's whitespace collapsed, so a
+ * folded (>-) multi-line expression compares as one line. */
+function inputs(step: Step | undefined): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(step?.with ?? {}).map(([key, value]) => [
+      key,
+      value.replace(/\s+/g, " ").trim(),
+    ]),
+  );
 }
 
 /** The job name rerun.ts re-runs, read out of the action's own source so
@@ -88,6 +101,16 @@ describe("the rendered copilot-review gate job", () => {
       // code, and the job has to stay seconds long to be free on a private
       // repository, where Actions bills per job rounded UP to the minute.
       expect(steps.some((step) => step.run !== undefined)).toBe(false);
+      // A continue-on-error on the call fails the gate OPEN (a red review
+      // gate would be swallowed), and a miswired input is silent (the action
+      // reads the wrong ref), so pin the whole with: map exactly.
+      expect(steps[0]?.["continue-on-error"]).toBeUndefined();
+      expect(inputs(steps[0])).toEqual({
+        "head-sha": "${{ github.event.pull_request.head.sha }}",
+        "pr-number": "${{ github.event.pull_request.number }}",
+        "base-branch": "${{ github.event.pull_request.base.ref }}",
+        "github-token": "${{ secrets.GITHUB_TOKEN }}",
+      });
     });
 
     test(`${golden}: the event condition is on the STEP, so the strict gate still sees the job`, () => {
@@ -158,6 +181,21 @@ describe("the rendered rerun-copilot-gate workflow", () => {
       const steps = rerun().jobs.rerun?.steps ?? [];
       expect(steps.map((step) => step.uses ?? "")).toEqual([REARM_ACTION]);
       expect(steps.some((step) => step.run !== undefined)).toBe(false);
+      // Same discipline as the gate: no continue-on-error, and the whole
+      // with: map pinned - a miswired review-pr or run-id silently strands
+      // the re-arm (it scopes to the wrong PR or never finds the run).
+      expect(steps[0]?.["continue-on-error"]).toBeUndefined();
+      expect(inputs(steps[0])).toEqual({
+        "head-sha":
+          "${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.event.pull_request.head.sha }}",
+        "run-id":
+          "${{ github.event_name == 'workflow_run' && github.event.workflow_run.id || '' }}",
+        "review-commit":
+          "${{ github.event_name == 'pull_request_review' && github.event.review.commit_id || '' }}",
+        "review-pr":
+          "${{ github.event_name == 'pull_request_review' && github.event.pull_request.number || '' }}",
+        "github-token": "${{ github.token }}",
+      });
     });
   }
 });
