@@ -21,6 +21,13 @@ const COMPLETED_CHECK = {
   check_runs: [{ status: "completed", pull_requests: [{ number: 12 }] }],
 };
 const AWAITING = "::error::waiting for Copilot review at";
+// The actionable recovery tail of the fail-fast message: the gate exists
+// to be re-armable, so the diagnostic MUST tell the operator the job
+// re-runs itself and how to re-run it by hand if it does not. Pinned so a
+// reword cannot quietly strip the recovery instructions and leave a bare
+// "waiting" error no one can act on.
+const RECOVERY =
+  "This job re-runs itself when the review posts; if it does not, open this CI run and pick Re-run jobs, then Re-run failed jobs.";
 
 // Dispatches on the requested path: branch rules, check-runs, the
 // reviews listing, or the PR itself. GH_FAIL fails every call (the
@@ -97,6 +104,7 @@ describe("copilot_review_gate.ts", () => {
     expect(r.exitCode).toBe(1);
     expect(r.output).toContain("the review is expected by configuration");
     expect(r.output).toContain(AWAITING);
+    expect(r.output).toContain(RECOVERY);
     expect(r.output).not.toContain("copilot is not a reviewer");
   });
 
@@ -116,6 +124,7 @@ describe("copilot_review_gate.ts", () => {
     });
     expect(r.exitCode).toBe(1);
     expect(r.output).toContain("waiting for Copilot review at");
+    expect(r.output).toContain(RECOVERY);
   });
 
   test("a completed check run with NO associations is arrival (fork PR: GitHub omits the links)", () => {
@@ -261,4 +270,33 @@ describe("copilot_review_gate.ts", () => {
       expect(r.output).not.toContain("copilot is not a reviewer");
     });
   }
+
+  test("a blank PROBE_TIMEOUT_MS is rejected, never read as no-timeout", () => {
+    // Number("") is 0 and Bun.spawnSync reads 0 as "no deadline", so a
+    // blank override would silently disable every gh call's network
+    // deadline. positiveMsEnv must refuse it at the read.
+    const r = run({ rules: COPILOT_RULE, checks: COMPLETED_CHECK, env: { PROBE_TIMEOUT_MS: "" } });
+    expect(r.exitCode).toBe(2);
+    expect(r.output).toContain("PROBE_TIMEOUT_MS must be a whole number of milliseconds");
+  });
+
+  test("a non-numeric PROBE_TIMEOUT_MS is rejected (NaN would disable the deadline too)", () => {
+    const r = run({
+      rules: COPILOT_RULE,
+      checks: COMPLETED_CHECK,
+      env: { PROBE_TIMEOUT_MS: "soon" },
+    });
+    expect(r.exitCode).toBe(2);
+    expect(r.output).toContain("PROBE_TIMEOUT_MS must be a whole number of milliseconds");
+  });
+
+  test("a fractional PROBE_TIMEOUT_MS is rejected (Bun throws on a non-integer timeout)", () => {
+    const r = run({
+      rules: COPILOT_RULE,
+      checks: COMPLETED_CHECK,
+      env: { PROBE_TIMEOUT_MS: "1.5" },
+    });
+    expect(r.exitCode).toBe(2);
+    expect(r.output).toContain("PROBE_TIMEOUT_MS must be a whole number of milliseconds");
+  });
 });

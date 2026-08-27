@@ -57,9 +57,9 @@ import {
   fetchAllReviews,
   isCopilot,
 } from "./identity.ts";
-import { capture, env, error, parseJsonWith, requireEnv } from "./runtime.ts";
+import { capture, error, parseJsonWith, positiveMsEnv, requireEnv } from "./runtime.ts";
 
-const PROBE_TIMEOUT_MS = Number(env("PROBE_TIMEOUT_MS", "15000"));
+const PROBE_TIMEOUT_MS = positiveMsEnv("PROBE_TIMEOUT_MS", "15000");
 
 const repository = requireEnv("GITHUB_REPOSITORY");
 const headSha = requireEnv("HEAD_SHA");
