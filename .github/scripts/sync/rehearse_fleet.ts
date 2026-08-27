@@ -317,29 +317,42 @@ export async function rehearseFleet(slugs: string[], deps: FleetDeps): Promise<F
     }
   };
   await runPool(slugs, deps.concurrency, async (slug, index) => {
+    // The display name is redaction-safe and computed first: it is the row
+    // identity for EVERY outcome, including a failure where we never got
+    // far enough to learn the repo's visibility.
+    const name = deps.display(slug);
     let row: FleetRow;
-    const isPrivate = deps.isPrivate(slug);
-    if (isPrivate !== false) {
-      row = {
-        repo: deps.display(slug),
-        status: PRIVATE_SKIP,
-        detail:
-          isPrivate === null ? "visibility lookup failed; treated as private, NOT rehearsed" : "",
-        severity: isPrivate === null ? "error" : "ok",
-      };
-    } else if (deps.enrollment(slug) === "not-enrolled") {
-      row = {
-        repo: slug,
-        status: "skipped (not enrolled)",
-        detail: "the fleet token has no write grant here; production never syncs it",
-        severity: "ok",
-      };
-    } else {
-      try {
+    // The whole per-repo body is guarded, not just deps.rehearse: the
+    // visibility lookup and the enrollment probe (a curl subprocess) reach
+    // the network too, and a throw from ANY of them must become THIS lane's
+    // failed row - never an unhandled rejection that rejects runPool's
+    // Promise.all, tears down the envelope temp under the running siblings,
+    // and destroys the whole report. That is the isolation this loop's
+    // header promises.
+    try {
+      const isPrivate = deps.isPrivate(slug);
+      if (isPrivate !== false) {
+        row = {
+          repo: name,
+          status: PRIVATE_SKIP,
+          detail:
+            isPrivate === null ? "visibility lookup failed; treated as private, NOT rehearsed" : "",
+          severity: isPrivate === null ? "error" : "ok",
+        };
+      } else if (deps.enrollment(slug) === "not-enrolled") {
+        row = {
+          repo: slug,
+          status: "skipped (not enrolled)",
+          detail: "the fleet token has no write grant here; production never syncs it",
+          severity: "ok",
+        };
+      } else {
         row = outcomeRow(slug, await deps.rehearse(slug));
-      } catch (err) {
-        row = failureRow(slug, err);
       }
+    } catch (err) {
+      // Redacted name, not the raw slug: a repo we could not even classify
+      // may be private.
+      row = failureRow(name, err);
     }
     rows[index] = row;
     flush();
@@ -440,6 +453,16 @@ export function gateAnnotations(rows: FleetRow[]): {
  * spawnSync-blocking - in-process lanes could never actually overlap. */
 const FLEET_CONCURRENCY = 4;
 
+/** Per-lane hard deadline. A rehearsal is a shallow clone plus copier/bun
+ * subprocess work - minutes at most - so eight minutes is generous for a
+ * healthy repo yet well under the rehearse-fleet job's 30-minute budget.
+ * WITHOUT it a single wedged subprocess (a hung clone, a copier prompt
+ * waiting on stdin that never comes) blocks its lane forever, and the
+ * roster-prefix flush then withholds EVERY later row and the summary - the
+ * exact opposite of the failure isolation the parallel run exists for. On
+ * expiry the child is SIGKILLed and the lane files a failed row. */
+const LANE_TIMEOUT_MS = 8 * 60_000;
+
 /** Parses a lane's fleet-outcome envelope and maps its kind the way the
  * in-process API would have surfaced it: the outcome returns, the typed
  * skips re-throw their typed errors (failureRow keeps its one mapping),
@@ -480,15 +503,40 @@ async function rehearseInSubprocess(slug: string, temp: string): Promise<Rehears
   const outFile = join(temp, `${encodeURIComponent(slug)}.json`);
   const proc = Bun.spawn(
     ["bun", join(import.meta.dir, "rehearse.ts"), slug, "--fleet-outcome", outFile],
-    { cwd: REPO_ROOT, stdout: "pipe", stderr: "pipe" },
+    // env EXPLICITLY, not omitted: Bun.spawn's default env is a STARTUP
+    // snapshot, so REHEARSE_SKIP_VALIDATE_INSTALL - set on process.env after
+    // this process started, once main did the shared install - would not
+    // reach the lane otherwise, and all four would race their own install.
+    { cwd: REPO_ROOT, stdout: "pipe", stderr: "pipe", env: { ...process.env } },
   );
+  // Manual deadline (the async Subprocess type has no built-in timeout
+  // result): a timer SIGKILLs a lane that overran and sets timedOut, so a
+  // wedged subprocess cannot block its lane - and, through the
+  // roster-prefix flush, every later row - forever.
+  let timedOut = false;
+  const deadline = setTimeout(() => {
+    timedOut = true;
+    proc.kill("SIGKILL");
+  }, LANE_TIMEOUT_MS);
   // Drain both pipes (backpressure would deadlock a chatty subprocess);
-  // stdout is the quiet run's residue, stderr feeds the crash reason.
-  const [stderrText, , exitCode] = await Promise.all([
-    new Response(proc.stderr).text(),
-    new Response(proc.stdout).text(),
-    proc.exited,
-  ]);
+  // stdout is the quiet run's residue, stderr feeds the crash reason. The
+  // finally clears the timer even if a stream read rejects.
+  let stderrText: string;
+  let exitCode: number;
+  try {
+    [stderrText, , exitCode] = await Promise.all([
+      new Response(proc.stderr).text(),
+      new Response(proc.stdout).text(),
+      proc.exited,
+    ]);
+  } finally {
+    clearTimeout(deadline);
+  }
+  if (timedOut) {
+    throw new Error(
+      `rehearse.ts subprocess for ${slug} exceeded the ${LANE_TIMEOUT_MS}ms lane deadline and was killed - a wedged lane must not hang the whole fleet run`,
+    );
+  }
   if (exitCode !== 0 || !existsSync(outFile)) {
     const tail = stderrText.trim().split("\n").pop() ?? "";
     throw new Error(
@@ -507,6 +555,9 @@ async function main(): Promise<number> {
   if (Bun.which("gh") === null) {
     fail("gh is not on PATH; fleet discovery and the visibility checks need it");
   }
+  if (Bun.which("curl") === null) {
+    fail("curl is not on PATH; the enrollment push probe (push_probe.ts) shells out to it");
+  }
   if (Bun.which("copier") === null) {
     fail("copier is not on PATH (pipx install copier); the rehearsal runs real copier updates");
   }
@@ -523,6 +574,24 @@ async function main(): Promise<number> {
   console.log(
     `rehearsing ${fleet.slugs.length} repo(s), ${FLEET_CONCURRENCY} in flight; ${fleet.excluded} excluded by repos.yml\n`,
   );
+
+  // The validator's deps install ONCE here, serially, before any lane
+  // spawns: four lanes racing `bun install` into the shared
+  // actions/validate-template/node_modules on a fresh checkout is
+  // nondeterministic. With this done, the lanes carry
+  // REHEARSE_SKIP_VALIDATE_INSTALL and skip their own install. A hard
+  // prerequisite like the PATH checks above - a validator with no deps
+  // cannot validate anything.
+  const install = capture(["bun", "install", "--frozen-lockfile", "--silent"], {
+    cwd: join(REPO_ROOT, "actions/validate-template"),
+    timeoutMs: NETWORK_TIMEOUT_MS,
+  });
+  if (install.exitCode !== 0) {
+    fail(
+      `installing the validator's deps (actions/validate-template) failed: ${install.stderr.trim().split("\n").pop() ?? ""}`,
+    );
+  }
+  process.env.REHEARSE_SKIP_VALIDATE_INSTALL = "1";
 
   const committed = new Set(
     [...registry.managed.repos, ...registry.exclude].map((slug) => slug.toLowerCase()),

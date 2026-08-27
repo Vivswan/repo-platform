@@ -262,6 +262,62 @@ describe("rehearseFleet failure handling", () => {
     });
   });
 
+  test("a throwing visibility lookup becomes a lane-local failed row, siblings survive", async () => {
+    // The isolation the loop promises must cover EVERY per-repo dep, not
+    // just rehearse: a throw from isPrivate (or the enrollment probe's
+    // curl) used to escape the worker, reject runPool's Promise.all, and
+    // destroy the whole report. Now it is this lane's failed row, and the
+    // report continues.
+    const rows = await rehearseFleet(["o/a", "o/b"], {
+      isPrivate: (slug) => {
+        if (slug === "o/a") throw new Error("visibility probe curl not found");
+        return false;
+      },
+      display: (slug) => slug,
+      enrollment: () => "enrolled",
+      rehearse: async () => outcome(),
+      concurrency: 2,
+      log: () => {},
+    });
+    expect(rows[0].status).toBe("REHEARSAL FAILED");
+    expect(rows[0].detail).toContain("visibility probe curl not found");
+    expect(rows[1].status).toBe("clean");
+  });
+
+  test("a throwing enrollment probe becomes a lane-local failed row, not an abort", async () => {
+    const rows = await rehearseFleet(["o/a", "o/b"], {
+      isPrivate: () => false,
+      display: (slug) => slug,
+      enrollment: (slug) => {
+        if (slug === "o/b") throw new Error("gh auth token subprocess failed");
+        return "enrolled";
+      },
+      rehearse: async () => outcome(),
+      concurrency: 2,
+      log: () => {},
+    });
+    expect(rows[0].status).toBe("clean");
+    expect(rows[1].status).toBe("REHEARSAL FAILED");
+    expect(rows[1].detail).toContain("gh auth token subprocess failed");
+  });
+
+  test("a failed row for an unclassifiable repo carries the redacted display name", async () => {
+    // isPrivate threw before visibility was known, so the row must use the
+    // display name (redacted for a hidden repo), never the raw slug.
+    const rows = await rehearseFleet(["o/maybe-secret"], {
+      isPrivate: () => {
+        throw new Error("network down");
+      },
+      display: () => "h**-s**t",
+      enrollment: () => "enrolled",
+      rehearse: async () => outcome(),
+      concurrency: 1,
+      log: () => {},
+    });
+    expect(rows[0].repo).toBe("h**-s**t");
+    expect(rows[0].status).toBe("REHEARSAL FAILED");
+  });
+
   test("a known leg script's failure names its pipeline phase", () => {
     const row = failureRow(
       "o/r",

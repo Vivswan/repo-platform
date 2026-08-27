@@ -603,11 +603,19 @@ export function rehearseRepo(slug: string, options: RehearsalOptions): Rehearsal
     });
 
     section("validating the updated tree");
-    // First run reaches the network for packages, so it gets the deadline.
-    run(["bun", "install", "--frozen-lockfile", "--silent"], {
-      cwd: join(REPO_ROOT, "actions/validate-template"),
-      timeoutMs: NETWORK_TIMEOUT_MS,
-    });
+    // The validator installs into the SHARED actions/validate-template dir.
+    // Under the fleet driver, four lanes reach this concurrently, and four
+    // `bun install` racing into one fresh node_modules is nondeterministic
+    // - so rehearse_fleet.ts does this install ONCE, serially, before it
+    // spawns the lanes and sets REHEARSE_SKIP_VALIDATE_INSTALL. A standalone
+    // rehearsal has no such flag and installs here as before. First run
+    // reaches the network for packages, so it gets the deadline.
+    if (process.env.REHEARSE_SKIP_VALIDATE_INSTALL !== "1") {
+      run(["bun", "install", "--frozen-lockfile", "--silent"], {
+        cwd: join(REPO_ROOT, "actions/validate-template"),
+        timeoutMs: NETWORK_TIMEOUT_MS,
+      });
+    }
     // A failure prints its diagnostics but does not stop the rehearsal: the
     // sync opens the PR on failed validation too, and the diff below is what
     // the operator came for. The outcome carries the verdict - and, in
