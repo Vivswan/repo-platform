@@ -40,7 +40,12 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
-import { loadManifests, type ModuleManifest } from "../../../scripts/module_manifests.ts";
+import {
+  loadManifests,
+  type ModuleManifest,
+  SETTINGS_LAYER_FILES,
+  type SettingsLayerName,
+} from "../../../scripts/module_manifests.ts";
 import { parseAnswers } from "../../../scripts/render_dogfood.ts";
 import { parseFlags } from "../shared/flags.ts";
 import { fail, setOutput, warning } from "../shared/gha.ts";
@@ -80,60 +85,31 @@ export interface RepoFacts {
 const REPO_ROOT = resolve(import.meta.dir, "..", "..", "..");
 
 /** The module-level layer filenames, next to each templates/<module>/
- *  module.yml. compose_template.ts skips them: they are read here, never
- *  rendered into a repository. */
-const MODULE_LAYER = "settings.yml";
-const MODULE_PUBLIC_LAYER = "settings-public.yml";
-const MODULE_PRIVATE_LAYER = "settings-private.yml";
+ *  module.yml, bound by ROLE (never by list position) from the manifest
+ *  loader's roster. compose_template.ts skips them: they are read here,
+ *  never rendered into a repository. */
+const MODULE_LAYER = SETTINGS_LAYER_FILES.module;
+const MODULE_PUBLIC_LAYER = SETTINGS_LAYER_FILES.public;
+const MODULE_PRIVATE_LAYER = SETTINGS_LAYER_FILES.private;
 
 export const BASELINE_LAYER = join(REPO_ROOT, ".github/settings-baseline.yml");
 export const FLEET_PUBLIC_LAYER = join(REPO_ROOT, ".github/settings-public.yml");
 export const FLEET_PRIVATE_LAYER = join(REPO_ROOT, ".github/settings-private.yml");
 
-/** Which settings layer files each module ships, BY DESIGN; a module
- *  absent here (agents, fuzzer, nightly, ...) declares no settings layer
- *  at all. layerPaths used to select layer files by existence alone,
- *  which failed OPEN: a deleted templates/uv/settings.yml simply vanished
- *  from the stack, the merged roster came out short but valid-looking,
- *  and the apply's delete-undeclared pass then removed that module's
- *  labels from every live repository. This roster is the design
- *  statement, and assertLayerTopology holds it and the tree together in
- *  BOTH directions before any layer is read - a deleted file that is
- *  still declared, or a new file nothing declares, is a hard error at
- *  render time, so the roster can only ever shrink on purpose (one
- *  change updating both). */
-export const MODULE_LAYER_FILES: Record<string, readonly string[]> = {
-  bun: [MODULE_LAYER, MODULE_PUBLIC_LAYER],
-  deno: [MODULE_LAYER, MODULE_PUBLIC_LAYER],
-  node: [MODULE_LAYER, MODULE_PUBLIC_LAYER],
-  "release-please": [MODULE_LAYER],
-  rust: [MODULE_LAYER],
-  uv: [MODULE_LAYER, MODULE_PUBLIC_LAYER],
-};
-
-const ALL_MODULE_LAYER_NAMES = [MODULE_LAYER, MODULE_PUBLIC_LAYER, MODULE_PRIVATE_LAYER];
-
 function moduleLayerPath(module: string, name: string): string {
   return join(REPO_ROOT, "templates", module, name);
 }
 
-/** The declared roster against the real tree, in both directions, plus
- *  the three fleet layer files (unconditional by design). `exists` is
- *  injectable so a test can prove a deletion fails loudly without
+/** The three fleet layer files, unconditional by design; a missing one is
+ *  a hard error before any layer is read. The MODULE layer files carry no
+ *  existence check here: which files a module ships is declared in its
+ *  module.yml (settings_layers), and the manifest loader holds that
+ *  declaration and the tree together in both directions on every load
+ *  (assertSettingsLayerFiles), so a deleted-but-declared or
+ *  present-but-undeclared module layer never reaches this render. `exists`
+ *  is injectable so a test can prove a deletion fails loudly without
  *  deleting anything. */
-export function assertLayerTopology(
-  manifests: ModuleManifest[],
-  exists: (path: string) => boolean = existsSync,
-): void {
-  const known = new Set(manifests.map((m) => m.module));
-  for (const module of Object.keys(MODULE_LAYER_FILES)) {
-    if (!known.has(module)) {
-      throw new Error(
-        `MODULE_LAYER_FILES declares settings layers for '${module}', which is not a module - ` +
-          "a renamed or retired module must take its roster entry with it",
-      );
-    }
-  }
+export function assertFleetLayerFiles(exists: (path: string) => boolean = existsSync): void {
   for (const path of [BASELINE_LAYER, FLEET_PUBLIC_LAYER, FLEET_PRIVATE_LAYER]) {
     if (!exists(path)) {
       throw new Error(
@@ -142,34 +118,15 @@ export function assertLayerTopology(
       );
     }
   }
-  for (const m of manifests) {
-    const declared = MODULE_LAYER_FILES[m.module] ?? [];
-    for (const name of ALL_MODULE_LAYER_NAMES) {
-      const path = moduleLayerPath(m.module, name);
-      if (declared.includes(name) && !exists(path)) {
-        throw new Error(
-          `templates/${m.module}/${name}: declared in MODULE_LAYER_FILES but missing from the ` +
-            "tree. Selecting layer files by existence alone fails OPEN - the roster silently " +
-            "shrinks and the apply deletes the missing labels fleet-wide - so a deleted layer " +
-            "file must retire its roster entry in the same change.",
-        );
-      }
-      if (!declared.includes(name) && exists(path)) {
-        throw new Error(
-          `templates/${m.module}/${name}: exists but MODULE_LAYER_FILES does not declare it, ` +
-            "so the render would silently ignore it; declare it in the roster.",
-        );
-      }
-    }
-  }
 }
 
 /** Every layer file a repository's facts select, LOW to HIGH: the fleet
  *  baseline, the fleet visibility overlay, each selected module's own
- *  layer, then each selected module's visibility overlay. Which files
- *  exist is DECLARED (MODULE_LAYER_FILES), never discovered: the topology
- *  assertion above runs first, so a missing declared file is a hard error
- *  here instead of a silently shorter stack. The repo's own settings.yml
+ *  layer, then each selected module's visibility overlay. Which module
+ *  files exist is DECLARED (each manifest's settings_layers), never
+ *  discovered: selecting by existence alone fails OPEN - a deleted layer
+ *  file silently shrinks the stack, and the apply's delete-undeclared
+ *  pass then removes its labels fleet-wide. The repo's own settings.yml
  *  and .github/settings-override.yml are layers 5 and 6, applied by
  *  merge_settings_layers.ts at apply time. */
 export function layerPaths(
@@ -177,19 +134,19 @@ export function layerPaths(
   manifests: ModuleManifest[],
   exists: (path: string) => boolean = existsSync,
 ): string[] {
-  assertLayerTopology(manifests, exists);
+  assertFleetLayerFiles(exists);
   const visibility = facts.private ? MODULE_PRIVATE_LAYER : MODULE_PUBLIC_LAYER;
   const selected = manifests.filter((m) => facts.modules.includes(m.module));
-  const declares = (module: string, name: string) =>
-    (MODULE_LAYER_FILES[module] ?? []).includes(name);
+  const declares = (m: ModuleManifest, name: SettingsLayerName) =>
+    (m.settings_layers ?? []).includes(name);
   return [
     BASELINE_LAYER,
     facts.private ? FLEET_PRIVATE_LAYER : FLEET_PUBLIC_LAYER,
     ...selected
-      .filter((m) => declares(m.module, MODULE_LAYER))
+      .filter((m) => declares(m, MODULE_LAYER))
       .map((m) => moduleLayerPath(m.module, MODULE_LAYER)),
     ...selected
-      .filter((m) => declares(m.module, visibility))
+      .filter((m) => declares(m, visibility))
       .map((m) => moduleLayerPath(m.module, visibility)),
   ];
 }
@@ -205,14 +162,15 @@ export function loadLayer(path: string): SettingsLayer {
  *  either visibility; tracking labels excluded (those render from the
  *  very answers the copier validators check). The single roster
  *  scripts/generate.ts and check_ssot.ts key on. Reads exactly the
- *  DECLARED layer files (topology asserted first), so a deleted layer
- *  fails this roster loudly instead of quietly shrinking it. */
+ *  DECLARED layer files (each manifest's settings_layers, which the
+ *  loader holds against the tree), so a deleted layer fails the load
+ *  loudly instead of quietly shrinking this roster. */
 export function allLayerLabels(manifests: ModuleManifest[] = loadManifests()): Label[] {
-  assertLayerTopology(manifests);
+  assertFleetLayerFiles();
   const labels: Label[] = [];
   const paths = [BASELINE_LAYER, FLEET_PUBLIC_LAYER, FLEET_PRIVATE_LAYER];
   for (const m of manifests) {
-    for (const name of MODULE_LAYER_FILES[m.module] ?? []) {
+    for (const name of m.settings_layers ?? []) {
       paths.push(moduleLayerPath(m.module, name));
     }
   }

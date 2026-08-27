@@ -184,38 +184,34 @@ describe("the layer topology fails CLOSED", () => {
   // OPEN: a deleted templates/uv/settings.yml just vanished from the
   // stack, the roster came out short but valid-looking, and the apply's
   // delete-undeclared pass removed the module's labels from live repos.
-  // The declared roster (MODULE_LAYER_FILES) and the tree are now held
-  // together in both directions; `exists` is injected so these prove the
-  // failure without deleting anything.
+  // The module declaration now lives in each module.yml (settings_layers)
+  // and the manifest LOADER holds it against the tree in both directions
+  // (assertSettingsLayerFiles, tests/scripts/module_manifests.test.ts);
+  // what the render still owns is the fleet layer files and the
+  // declaration-driven selection proven here.
 
-  test("a deleted module layer file is a hard error, never a shorter roster", () => {
-    const exists = (path: string) =>
-      !path.endsWith(join("templates", "uv", "settings.yml")) && existsSync(path);
-    expect(() => layerPaths(facts({ modules: ["uv"] }), manifests, exists)).toThrow(
-      "templates/uv/settings.yml: declared in MODULE_LAYER_FILES but missing",
+  test("selection follows the manifest declaration, never the tree", () => {
+    // templates/uv/settings.yml exists on disk, but a manifest that does
+    // not declare it must not select it - the tree is not the source.
+    const undeclared = manifests.map((m) =>
+      m.module === "uv" ? { ...m, settings_layers: undefined } : m,
     );
-    // Selection does not matter: the topology is checked whole, so the
-    // breakage cannot hide behind a selection that skips the module.
-    expect(() => layerPaths(facts(), manifests, exists)).toThrow("templates/uv/settings.yml");
+    const paths = layerPaths(facts({ modules: ["uv"] }), undeclared).map((p) =>
+      p.split("/").slice(-2).join("/"),
+    );
+    expect(paths).not.toContain("uv/settings.yml");
+    expect(paths).not.toContain("uv/settings-public.yml");
   });
 
-  test("a deleted FLEET layer is a hard error too", () => {
+  test("a deleted FLEET layer is a hard error", () => {
     const exists = (path: string) =>
       !path.endsWith(join(".github", "settings-baseline.yml")) && existsSync(path);
     expect(() => layerPaths(facts(), manifests, exists)).toThrow("fleet settings layer is missing");
   });
 
-  test("an undeclared layer file appearing is refused, not silently ignored", () => {
-    const exists = (path: string) =>
-      path.endsWith(join("templates", "fuzzer", "settings.yml")) || existsSync(path);
-    expect(() => layerPaths(facts(), manifests, exists)).toThrow(
-      "templates/fuzzer/settings.yml: exists but MODULE_LAYER_FILES does not declare it",
-    );
-  });
-
-  test("the real tree satisfies the declared roster", () => {
-    // The two ways this can fail are a genuine drift (fix the roster or
-    // the tree) - never a shorter render.
+  test("the real tree satisfies the manifests' declarations", () => {
+    // loadManifests already asserted every settings_layers entry against
+    // the tree; a genuine drift fails there - never as a shorter render.
     expect(() => layerPaths(facts(), manifests)).not.toThrow();
   });
 });

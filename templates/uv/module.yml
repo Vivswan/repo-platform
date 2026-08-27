@@ -7,6 +7,9 @@ dependabot:
   ecosystem: uv
   label: "python:uv"
   color: "2b67c6"
+settings_layers:
+  - settings.yml
+  - settings-public.yml
 gitignore_sources:
   - Python.gitignore
 lockfiles:

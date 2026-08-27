@@ -13,6 +13,9 @@ dependabot:
   ecosystem: deno
   label: deno
   color: "70ffaf"
+settings_layers:
+  - settings.yml
+  - settings-public.yml
 gitignore_sources:
   - Deno.gitignore
   # nodeModulesDir auto materializes a real node_modules for npm deps.

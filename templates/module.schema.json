@@ -209,6 +209,18 @@
       ],
       "additionalProperties": false
     },
+    "settings_layers": {
+      "minItems": 1,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "settings.yml",
+          "settings-public.yml",
+          "settings-private.yml"
+        ]
+      }
+    },
     "gitignore_sources": {
       "minItems": 1,
       "type": "array",
