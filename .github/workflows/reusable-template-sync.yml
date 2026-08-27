@@ -338,13 +338,16 @@ jobs:
       # repo's own license file are repo-owned wherever they exist: a
       # module change de-renders them, but the sync must never delete them
       # (see the script's header for the full rules and the recovery-mode
-      # behavior).
+      # behavior). Wrapped in run_hidden: the removed-splits hold names
+      # deleted repo-owned paths, so a hidden target captures the step's
+      # output instead of logging it.
       - name: Preserve repo-owned files
         env:
           RECOVER: ${{ inputs.recover }}
           TARGET_REF: ${{ steps.versions.outputs.target_ref }}
         run: |
           MODULES="$(cat "$RUNNER_TEMP/modules.json")" \
+            bun .github/scripts/sync/run_hidden.ts "preserve repo-owned files" -- \
             bun .github/scripts/sync/preserve_repo_owned.ts
 
       # Conflict resolution and the preserve steps can rewrite files after
