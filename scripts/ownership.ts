@@ -568,57 +568,98 @@ function foreignMarkerMessage(
 
 // --- tail-marker claim scanning -----------------------------------------------
 //
-// What counts as a tail-marker CLAIM in a template source: any line whose
-// RENDER can be a whole roster-marker line (the sync rebuild and the
-// validator both match rendered markers as exact trimmed lines - trim is
-// the fleet-wide marker-matching convention). Claims are POSSIBILISTIC,
-// judged from the guaranteed render of each of the line's parts: a
-// control-flow statement renders nothing of its own, so the glued
-// "{% if x %}MARKER{% endif %}" claims whatever its condition - the render
-// CAN be the marker, and evaluating conditions is out of scope. The parts:
+// What counts as a tail-marker CLAIM in a template source: any line one of
+// whose POSSIBLE renders is a whole roster-marker line (the sync rebuild
+// and the validator both match rendered markers as exact trimmed lines -
+// trim is the fleet-wide marker-matching convention). Claims are
+// possibilistic over the SET of a line's renders, not one flattened
+// literal: control-flow bodies are optional or alternative, so
+// "{% if x %}prefix{% endif %}MARKER" renders "prefixMARKER" when the
+// condition holds and "MARKER" when it does not - the bare-marker render
+// is reachable, so it claims. Each part of a line contributes:
 // - literal text renders verbatim; a literal whole marker line always
-//   claims (the rule the exact-trim scan always had, whatever
-//   whitespace-control on neighboring lines might join onto it);
-//   raw-block inner text (multiline blocks included, via the
+//   claims. Raw-block inner text (multiline blocks included, via the
 //   leftmost-precedence pre-pass in disarmRawBlocks) is literal too, so
 //   "{% raw %}{# note #}{% endraw %}MARKER" stays a legal mid-line mention
 //   while "{% raw %}{% endraw %}MARKER" claims;
 // - comment spans render nothing, whatever tag-shaped text they hold, so
 //   "{# docs: {% print 'x' %} #}MARKER" claims;
-// - control-flow statement spans (the COLLAPSING allowlist: if/for/with/do
-//   and their closers) render nothing - which also keeps marker text
-//   INSIDE a tag legal; capture and context CLOSERS (endset, endmacro,
-//   ...) are not on the list, because text before them on a closer line
-//   was captured, never rendered;
+// - if/for openers, elif/else branches and their closers render nothing of
+//   their own; their BODY is one possible render and its absence another,
+//   so an inline body reachable in any branch is found (this also keeps
+//   marker text INSIDE such a tag legal). Each branch carries the condition
+//   values it needs, and only condition-consistent renders combine, so a
+//   reused condition ("{% if x %}a{% endif %}{% if x %}MARKER{% endif %}"
+//   renders only "aMARKER" or "") and an unreachable "{% elif x %}" after
+//   "{% if x %}" do NOT invent a bare-marker render, while distinct
+//   conditions ("{% if x %}a{% endif %}{% if y %}MARKER{% endif %}") still
+//   reach it;
+// - statements that emit nothing - set-assignment, import, from, do,
+//   with/endwith - render "", so a marker glued after them ("{% set x = 1
+//   %}MARKER") is a live line and claims;
 // - an expression span renders its constant string value ("{{ '' }}MARKER"
 //   and "{{ 'MARKER' }}" claim, "{{ 'prefix' }}MARKER" stays mid-line).
 // EVERYTHING else leaves the line unbounded and fails toward LEGALITY:
-// output emitters (print, include, ...), capture blocks (set, macro, call,
-// filter, block), context changers (autoescape), unknown or extension
-// statements, whitespace-modified tags ({%- -%} join adjacent lines, {%+
-// disables trimming), non-constant expressions, and anything the span
-// lexing cannot represent (multiline tags, string-embedded delimiters)
-// mis-lexes into literal junk that matches no marker. Capture blocks
-// are additionally tracked ACROSS lines: every line inside one is skipped,
-// because its text is captured, never rendered inline (unbalanced or
-// missed closers only ever skip more, which is the legal direction). A
+// output emitters (print, include, extends) and NON-EMPTY body-emitting
+// blocks (call, filter, block, autoescape - they transform, override or
+// escape, so they are not stripped), non-constant expressions,
+// whitespace-modified tags ({%- -%} join adjacent lines, {%+ disables
+// trimming), and anything the span lexing cannot represent (multiline tags,
+// string-embedded delimiters) mis-lexing into literal junk that matches no
+// marker. The blocks that emit NOTHING - a block-form set, a macro, and an
+// EMPTY emit block - are REMOVED first by stripCaptureBlocks, whose inner
+// newlines are captured not emitted, so text before an open joins text
+// after the matching close into one rendered line, exactly as jinja does. A
 // false rejection blocks a legitimate template; a miss leaves a lying
-// marker the repo owner can see, and sync dispatch never reads markers -
-// it goes by the declared grammar.
+// marker the repo owner can see, and sync dispatch never reads markers - it
+// goes by the declared grammar.
 const TAG_SPAN_RE = /\{\{.*?\}\}|\{%.*?%\}|\{#.*?#\}/g;
 const CONSTANT_EXPRESSION_RE = /^\{\{\s*(?:"([^"\\]*)"|'([^'\\]*)')\s*\}\}$/;
-const COLLAPSING_STATEMENT_RE = /^\{%\s*(?:if|elif|else|endif|for|endfor|with|endwith|do)\b/;
+// A tag carrying a whitespace-control modifier can trim into a neighboring
+// line, so a line holding one cannot be bounded on its own.
 const WHITESPACE_CONTROL_RE = /^\{[{%#][-+]|[-+][}%#]\}$/;
-// set counts as an ASSIGNMENT (renders nothing, captures nothing) only in
-// the clearly name-list-then-= shape; every other set - the block capture
-// form, filtered captures whose arguments may contain = - opens a capture.
-// Misreading an assignment as a capture only skips more lines, which is
-// the legal direction; the reverse would reject captured text.
-const CAPTURE_OPEN_RE =
-  /^\{%[-+]?\s*(?:set\b(?!\s*[\w.\s,()]+=)|macro\b|call\b|filter\b|block\b|autoescape\b)/;
-const CAPTURE_CLOSE_RE = /^\{%[-+]?\s*end(?:set|macro|call|filter|block|autoescape)\b/;
+// Statements that emit nothing of their own (checked AFTER capture-open, so
+// the block-set form is a capture, not an assignment).
+const EMPTY_STATEMENT_RE = /^\{%\s*(?:set|import|from|do|with|endwith)\b/;
+// if/for openers, their elif/else branches, and their closers. The
+// condition of an if/elif and the iterable of a for are extracted as a
+// string KEY so repeated conditions correlate: `{% if x %}...{% endif %}
+// {% if x %}...{% endif %}` shares one x, and `{% elif x %}` after
+// `{% if x %}` is unreachable - the reducer tracks each branch's required
+// truth values and drops renders whose conditions contradict.
+const CONTROL_OPEN_RE = /^\{%\s*(?:if|for)\b/;
+const CONTROL_BRANCH_RE = /^\{%\s*(?:elif|else)\b/;
+const CONTROL_CLOSE_RE = /^\{%\s*(?:endif|endfor)\b/;
+const IF_CONDITION_RE = /^\{%\s*(?:if|elif)\s+([\s\S]+?)\s*%\}$/;
+const FOR_ITERABLE_RE = /^\{%\s*for\s+[\s\S]+?\bin\b\s*([\s\S]+?)\s*%\}$/;
+// The only two blocks that CAPTURE their body (emit nothing): a block-form
+// set and a macro definition. call/filter/block/autoescape all EMIT their
+// body (transformed, overridden or escaped), so they are NOT stripped -
+// they fall through to unbounded, the legal direction, and a bare marker
+// line inside one still renders live. set counts as an ASSIGNMENT (renders
+// nothing, captures nothing) only in the clearly name-list-then-= shape;
+// every other set - the block capture form, filtered captures whose
+// arguments may contain = - opens a capture. Misreading an assignment as a
+// capture only skips more lines, the legal direction; the reverse would
+// reject captured text.
+const CAPTURE_OPEN_RE = /^\{%[-+]?\s*(?:set\b(?!\s*[\w.\s,()]+=)|macro\b)/;
+const CAPTURE_CLOSE_RE = /^\{%[-+]?\s*end(?:set|macro)\b/;
+// Body-EMITTING blocks: their body renders (transformed, overridden or
+// escaped), so they are left in place - a bare marker line inside one still
+// claims, and their tag lines fall through to unbounded. The one exception
+// stripCaptureBlocks handles is an EMPTY emit block (open immediately
+// followed by close), which emits nothing, so a marker glued after it is a
+// live line.
+const EMIT_BLOCK_OPEN_RE = /^\{%[-+]?\s*(?:call\b|filter\b|block\b|autoescape\b)/;
+const EMIT_BLOCK_CLOSE_RE = /^\{%[-+]?\s*end(?:call|filter|block|autoescape)\b/;
 const RAW_OPEN_RE = /^\{%[-+]?\s*raw\s*[-+]?%\}/;
 const RAW_CLOSE_RE = /\{%[-+]?\s*endraw\s*[-+]?%\}/g;
+
+/** A cap on the number of distinct partial renders a single line's
+ *  inline branching may produce before the line bails to unbounded
+ *  (toward legality). Real template lines carry a handful; a pathological
+ *  fan-out is not worth enumerating. */
+const RENDER_CAP = 256;
 
 /** The source with every raw block's inner text disarmed (each `{`
  *  dropped to NUL, so the span lexing below can neither eat it nor
@@ -663,39 +704,288 @@ function disarmRawBlocks(source: string): string {
   return out + source.slice(at);
 }
 
-/** A tag span's guaranteed render: "" for comments and control-flow
- *  statements, the constant value of a constant string expression, null
- *  when the span's output cannot be bounded. */
-function spanRender(span: string): string | null {
-  if (WHITESPACE_CONTROL_RE.test(span)) return null;
-  if (span.startsWith("{#")) return "";
-  if (span.startsWith("{{")) {
-    const constant = CONSTANT_EXPRESSION_RE.exec(span);
-    return constant === null ? null : (constant[1] ?? constant[2] ?? "");
+/** The source with capture blocks (block-form set, macro) and EMPTY
+ *  body-emitting blocks (an autoescape/filter/block/call whose open is
+ *  immediately followed by its close) removed, so text before the open
+ *  joins text after the matching close into one line - exactly as jinja
+ *  renders it, since the block emits nothing (captures swallow their body;
+ *  an empty emit block has none). A non-empty emit block is left in place:
+ *  its body renders, so a bare marker line inside it still claims and its
+ *  tag lines fall through to unbounded. Whitespace-control modifiers on the
+ *  outer tags are applied ({%- open trims preceding whitespace, close -%}
+ *  trims following). Nesting is balanced; an unclosed capture is dropped to
+ *  end of source (discarding more, the legal direction). Runs AFTER
+ *  disarmRawBlocks, whose NUL-poking keeps raw-inner tag-shaped text from
+ *  being read as a block tag. */
+function stripCaptureBlocks(source: string): string {
+  const tagAt = (from: number): { span: string; start: number; end: number } | null => {
+    const rel = source.slice(from).search(/\{[{%#]/);
+    if (rel === -1) return null;
+    const start = from + rel;
+    const closer = source.startsWith("{{", start)
+      ? "}}"
+      : source.startsWith("{%", start)
+        ? "%}"
+        : "#}";
+    const close = source.indexOf(closer, start + 2);
+    return close === -1 ? null : { span: source.slice(start, close + 2), start, end: close + 2 };
+  };
+  // Drop up to closeEnd, applying the open/close whitespace-control trims.
+  const joinAcross = (openSpan: string, closeSpan: string, closeEnd: number): number => {
+    if (openSpan.startsWith("{%-")) out = out.replace(/\s+$/, "");
+    let next = closeEnd;
+    if (/-%\}$/.test(closeSpan)) {
+      while (next < source.length && /\s/.test(source[next])) next += 1;
+    }
+    return next;
+  };
+  let out = "";
+  let at = 0;
+  while (at < source.length) {
+    const tag = tagAt(at);
+    if (tag === null) break;
+    out += source.slice(at, tag.start);
+    if (CAPTURE_OPEN_RE.test(tag.span)) {
+      // Drop the whole capture block, inner newlines included, tracking nesting.
+      let depth = 1;
+      let closeSpan = "";
+      at = tag.end;
+      while (depth > 0) {
+        const inner = tagAt(at);
+        if (inner === null) {
+          at = source.length;
+          break;
+        }
+        at = inner.end;
+        if (CAPTURE_OPEN_RE.test(inner.span)) depth += 1;
+        else if (CAPTURE_CLOSE_RE.test(inner.span)) {
+          depth -= 1;
+          if (depth === 0) closeSpan = inner.span;
+        }
+      }
+      at = joinAcross(tag.span, closeSpan, at);
+      continue;
+    }
+    if (EMIT_BLOCK_OPEN_RE.test(tag.span)) {
+      const next = tagAt(tag.end);
+      if (
+        next !== null &&
+        EMIT_BLOCK_CLOSE_RE.test(next.span) &&
+        source.slice(tag.end, next.start) === ""
+      ) {
+        // Truly-empty emit block (nothing between open and close): emits
+        // nothing, so join across it. A whitespace-only body is NOT empty -
+        // the block emits that whitespace, a newline can even start a fresh
+        // line - so it is left in place (unbounded, the legal direction).
+        at = joinAcross(tag.span, next.span, next.end);
+        continue;
+      }
+      // Non-empty or nested: leave the open tag; the body renders and is
+      // scanned normally (a bare marker line inside it still claims).
+    }
+    out += tag.span;
+    at = tag.end;
   }
-  return COLLAPSING_STATEMENT_RE.test(span) ? "" : null;
+  return out + source.slice(at);
+}
+
+/** One possible render of a line: its text plus the branch conditions that
+ *  must hold for it, each mapped to the truth value it requires. Two renders
+ *  combine only when their guards agree on every shared condition, so a
+ *  reused condition (`if x ... if x`) cannot take both values and an `elif x`
+ *  after `if x` (which needs x both false and true) is dropped as
+ *  unreachable. */
+interface Render {
+  text: string;
+  guards: Map<string, boolean>;
+}
+
+/** The two guards merged, or null when they disagree on a shared condition
+ *  (the combined render is then unreachable). */
+function mergeGuards(
+  a: Map<string, boolean>,
+  b: Map<string, boolean>,
+): Map<string, boolean> | null {
+  const out = new Map(a);
+  for (const [key, value] of b) {
+    const existing = out.get(key);
+    if (existing !== undefined && existing !== value) return null;
+    out.set(key, value);
+  }
+  return out;
+}
+
+/** An open control frame while a line is reduced: `current` are the renders
+ *  of the branch being built; `completed` the renders of branches already
+ *  closed by an elif/else, each already constrained by its branch guard.
+ *  `priors` are the conditions of earlier branches (false in later ones),
+ *  `condition` this branch's condition (null for else / an unconditional
+ *  body). */
+interface ControlFrame {
+  current: Render[];
+  completed: Render[];
+  priors: string[];
+  condition: string | null;
+  sawElse: boolean;
+}
+
+/** The possible whole-line renders of one capture-stripped source line, or
+ *  null when the line cannot be bounded (an output emitter, a non-constant
+ *  expression, a whitespace-trimmed tag, a residual block tag). Control
+ *  bodies contribute a SET of guarded renders - a body when its condition
+ *  holds, its absence otherwise - and only condition-consistent renders
+ *  combine, so a marker reachable under SOME assignment claims while one
+ *  that needs a condition to be two values at once does not. Captures and
+ *  empty emit blocks are removed by stripCaptureBlocks first. */
+function lineRenders(line: string): Render[] | null {
+  let unbounded = false;
+  const stack: ControlFrame[] = [
+    {
+      current: [{ text: "", guards: new Map() }],
+      completed: [],
+      priors: [],
+      condition: null,
+      sawElse: false,
+    },
+  ];
+  const top = () => stack[stack.length - 1];
+  const append = (text: string) => {
+    for (const render of top().current) render.text += text;
+  };
+  const product = (left: Render[], right: Render[]): Render[] => {
+    const out: Render[] = [];
+    const seen = new Set<string>();
+    for (const l of left) {
+      for (const r of right) {
+        const guards = mergeGuards(l.guards, r.guards);
+        if (guards === null) continue; // unreachable combination
+        const text = l.text + r.text;
+        const key = JSON.stringify([text, [...guards].sort()]);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        out.push({ text, guards });
+        if (out.length > RENDER_CAP) {
+          unbounded = true;
+          return out;
+        }
+      }
+    }
+    return out;
+  };
+  // The guard of the branch about to close: every prior branch condition
+  // false, this branch's condition true (null = an else or unconditional
+  // body, so only the priors constrain it).
+  const branchGuard = (frame: ControlFrame): Map<string, boolean> | null => {
+    let guard: Map<string, boolean> | null = new Map();
+    for (const prior of frame.priors) {
+      if (guard === null) break;
+      guard = mergeGuards(guard, new Map([[prior, false]]));
+    }
+    if (guard !== null && frame.condition !== null) {
+      guard = mergeGuards(guard, new Map([[frame.condition, true]]));
+    }
+    return guard;
+  };
+  const closeBranch = (frame: ControlFrame) => {
+    const guard = branchGuard(frame);
+    if (guard !== null) {
+      for (const render of frame.current) {
+        const merged = mergeGuards(render.guards, guard);
+        if (merged !== null) frame.completed.push({ text: render.text, guards: merged });
+      }
+    }
+    frame.current = [{ text: "", guards: new Map() }];
+  };
+  const closeFrame = (frame: ControlFrame) => {
+    closeBranch(frame);
+    // An if/for without an else can render nothing: add the all-conditions-
+    // false empty branch.
+    if (!frame.sawElse) {
+      let guard: Map<string, boolean> | null = new Map();
+      for (const cond of [
+        ...frame.priors,
+        ...(frame.condition !== null ? [frame.condition] : []),
+      ]) {
+        if (guard === null) break;
+        guard = mergeGuards(guard, new Map([[cond, false]]));
+      }
+      if (guard !== null) frame.completed.push({ text: "", guards: guard });
+    }
+    top().current = product(top().current, frame.completed);
+  };
+
+  let at = 0;
+  for (const match of line.matchAll(TAG_SPAN_RE)) {
+    if (match.index > at) append(line.slice(at, match.index));
+    at = match.index + match[0].length;
+    const span = match[0];
+    if (WHITESPACE_CONTROL_RE.test(span)) unbounded = true;
+    else if (span.startsWith("{#")) {
+      // comment renders nothing
+    } else if (span.startsWith("{{")) {
+      const constant = CONSTANT_EXPRESSION_RE.exec(span);
+      if (constant !== null) append(constant[1] ?? constant[2] ?? "");
+      else unbounded = true;
+    } else if (CONTROL_OPEN_RE.test(span)) {
+      const isFor = /^\{%\s*for\b/.test(span);
+      const key = isFor ? FOR_ITERABLE_RE.exec(span) : IF_CONDITION_RE.exec(span);
+      stack.push({
+        current: [{ text: "", guards: new Map() }],
+        completed: [],
+        priors: [],
+        // An if/elif test keys on its RAW expression text (so textually
+        // identical tests correlate); a for's presence keys on its iterable
+        // under a "for:" prefix (distinct from an if test of the same text).
+        // An unparsed opener keys on its whole span, correlating with
+        // nothing (safe). Any textual difference - even a same-meaning one
+        // like `x == y` vs `x==y` - keeps the conditions INDEPENDENT, which
+        // over-approximates toward claiming, the safe direction; and a
+        // variable REASSIGNED between two tests of it is not tracked (the
+        // model assumes a condition is stable across a line), a fail-legal
+        // miss.
+        condition: isFor ? `for:${key?.[1] ?? span}` : (key?.[1] ?? span),
+        sawElse: false,
+      });
+    } else if (CONTROL_BRANCH_RE.test(span)) {
+      // A branch of a control opened on THIS line; one whose opener is on an
+      // earlier line is untracked and renders as nothing.
+      if (stack.length > 1) {
+        const frame = top();
+        closeBranch(frame);
+        if (frame.condition !== null) frame.priors.push(frame.condition);
+        if (/^\{%\s*elif\b/.test(span)) frame.condition = IF_CONDITION_RE.exec(span)?.[1] ?? span;
+        else {
+          frame.condition = null;
+          frame.sawElse = true;
+        }
+      }
+    } else if (CONTROL_CLOSE_RE.test(span)) {
+      // Close a frame opened on this line; a closer for an earlier-line
+      // opener renders as nothing.
+      if (stack.length > 1) closeFrame(stack.pop() as ControlFrame);
+    } else if (EMPTY_STATEMENT_RE.test(span)) {
+      // set-assignment, import, from, do, with/endwith render nothing
+    } else unbounded = true; // print/include/extends/residual block: cannot bound
+  }
+  if (at < line.length) append(line.slice(at));
+  // An if/for left open at line end makes the body-tail optional too.
+  while (stack.length > 1) closeFrame(stack.pop() as ControlFrame);
+  if (unbounded) return null;
+  return top().current;
 }
 
 /** Every roster marker the source claims per the model above, in first-
  *  appearance order. */
 function claimedTailMarkers(source: string, roster: ReadonlySet<string>): string[] {
-  const disarmed = disarmRawBlocks(source);
+  const flattened = stripCaptureBlocks(disarmRawBlocks(source));
   const claims: string[] = [];
-  let captureDepth = 0;
-  for (const line of disarmed.split("\n")) {
-    const insideCapture = captureDepth > 0;
-    let bounded = true;
-    const literal = line
-      .replace(TAG_SPAN_RE, (span) => {
-        if (CAPTURE_OPEN_RE.test(span)) captureDepth += 1;
-        else if (CAPTURE_CLOSE_RE.test(span)) captureDepth = Math.max(0, captureDepth - 1);
-        const rendered = spanRender(span);
-        if (rendered === null) bounded = false;
-        return rendered ?? "";
-      })
-      .trim();
-    if (insideCapture || !bounded) continue;
-    if (roster.has(literal) && !claims.includes(literal)) claims.push(literal);
+  for (const line of flattened.split("\n")) {
+    const renders = lineRenders(line);
+    if (renders === null) continue;
+    for (const render of renders) {
+      const trimmed = render.text.trim();
+      if (roster.has(trimmed) && !claims.includes(trimmed)) claims.push(trimmed);
+    }
   }
   return claims;
 }

@@ -378,6 +378,178 @@ describe("declarationTextErrors", () => {
     }
   });
 
+  // A control-flow body is optional or alternative, so a line whose marker
+  // is reachable in ANY branch claims - the reducer tracks the SET of
+  // possible renders, not one flattened concatenation of every branch.
+  test("a marker reachable through a control-flow branch claims", () => {
+    for (const line of [
+      // if-only: the body renders when true, nothing when false, so the
+      // trailing marker stands alone in the false render.
+      `{% if x %}prefix{% endif %}${HASH_SENTINEL}`,
+      // if/else: the marker IS one branch.
+      `{% if x %}${HASH_SENTINEL}{% else %}other{% endif %}`,
+      // elif introduces another alternative branch.
+      `{% if x %}a{% elif y %}${HASH_SENTINEL}{% endif %}`,
+      // nested control flow.
+      `{% if x %}{% if y %}${HASH_SENTINEL}{% endif %}{% endif %}`,
+      // a for body renders zero or more times; one time is the marker.
+      `{% for m in modules %}${HASH_SENTINEL}{% endfor %}`,
+      // the body split across lines: the marker line renders when the
+      // condition holds.
+      `{% if x %}\n${HASH_SENTINEL}\n{% endif %}`,
+    ]) {
+      const errors = errorsOf(managed("X.md"), `top\n${line}\ntail\n`, false);
+      expect(errors).toHaveLength(1);
+      expect(errors[0]).toContain("split marker but is declared managed");
+    }
+  });
+
+  test("a branch whose every render carries other text does not claim", () => {
+    // Neither branch is the bare marker, and both prefix it, so no render
+    // is a whole marker line - the set model must not over-claim.
+    for (const line of [
+      `{% if x %}a${HASH_SENTINEL}{% else %}b${HASH_SENTINEL}{% endif %}`,
+      `prefix{% if x %}${HASH_SENTINEL}{% endif %}`,
+    ]) {
+      expect(errorsOf(managed("X.md"), `${line}\n`, false)).toEqual([]);
+    }
+  });
+
+  test("a cross-line else branch does not manufacture a bare-marker render", () => {
+    // The if/else opened on an earlier line is untracked here: the closer
+    // renders as nothing rather than inventing an empty branch that would
+    // let the trailing marker stand alone. Real renders are 'a<MARKER>' or
+    // 'b<MARKER>', never the bare marker, so this must not claim.
+    const source = `{% if x %}\na${HASH_SENTINEL}{% else %}b${HASH_SENTINEL}{% endif %}\n`;
+    expect(errorsOf(managed("X.md"), source, false)).toEqual([]);
+  });
+
+  test("a capture that CLOSES before a marker on the same line claims", () => {
+    // The capture body is discarded, but text after the closer renders
+    // inline - a marker glued to an {% endset %} is a live whole line.
+    for (const source of [
+      `{% set note %}\n{% endset %}${HASH_SENTINEL}\n`,
+      `{% set note %}body{% endset %}${HASH_SENTINEL}\n`,
+      `{% macro m() %}${HASH_SENTINEL}{% endmacro %}\n${HASH_SENTINEL}\n`,
+      // A whitespace-modified capture opener is still a capture.
+      `{%- set note %}\nbody\n{% endset %}${HASH_SENTINEL}\n`,
+    ]) {
+      const errors = errorsOf(managed("X.md"), source, false);
+      expect(errors).toHaveLength(1);
+      expect(errors[0]).toContain("split marker but is declared managed");
+    }
+  });
+
+  test("a capture SWALLOWS its inner newlines, joining the text around it", () => {
+    // A set-block captures the newlines between its tags, so text before
+    // the opener and after the closer render on ONE line - the marker is
+    // never alone, so these must NOT claim.
+    for (const source of [
+      `${HASH_SENTINEL}{% set note %}\nbody\n{% endset %}suffix\n`,
+      // A marker INSIDE a whitespace-modified capture is discarded, not a claim.
+      `{%- set note %}\n${HASH_SENTINEL}\n{% endset %}\n`,
+      // A `-%}` close trims the following newline, joining the marker onto
+      // the prefix: renders 'prefix<MARKER>', not a bare marker.
+      `prefix{% set x %}body{% endset -%}\n${HASH_SENTINEL}\n`,
+    ]) {
+      expect(errorsOf(managed("X.md"), source, false)).toEqual([]);
+    }
+  });
+
+  test("a body-emitting block is not a capture, so it does not manufacture a claim", () => {
+    // call/filter/block/autoescape EMIT their body (transformed, overridden
+    // or escaped), so they are not stripped; a marker glued after the close
+    // renders behind that body, never as a bare line, so these do NOT claim.
+    for (const line of [
+      `{% autoescape true %}prefix{% endautoescape %}${HASH_SENTINEL}`,
+      `{% filter upper %}prefix{% endfilter %}${HASH_SENTINEL}`,
+    ]) {
+      expect(errorsOf(managed("X.md"), `${line}\n`, false)).toEqual([]);
+    }
+  });
+
+  test("sibling control blocks track condition identity", () => {
+    // Reused condition: `{% if x %}prefix{% endif %}{% if x %}MARKER{% endif %}`
+    // renders only 'prefixMARKER' or '' - the same x cannot be false then
+    // true - so it must NOT claim, even nested inside another block.
+    expect(
+      errorsOf(
+        managed("X.md"),
+        `{% if x %}prefix{% endif %}{% if x %}${HASH_SENTINEL}{% endif %}\n`,
+        false,
+      ),
+    ).toEqual([]);
+    expect(
+      errorsOf(
+        managed("X.md"),
+        `{% if z %}{% if x %}prefix{% endif %}{% if x %}${HASH_SENTINEL}{% endif %}{% endif %}\n`,
+        false,
+      ),
+    ).toEqual([]);
+    // An unreachable elif reusing the if's condition is dropped, not a claim.
+    expect(
+      errorsOf(managed("X.md"), `{% if x %}prefix{% elif x %}${HASH_SENTINEL}{% endif %}\n`, false),
+    ).toEqual([]);
+    // Textually identical conditions correlate; a textually DISTINCT one
+    // (here a different string literal) stays independent, and x == "ab"
+    // reaches the bare marker, so it claims.
+    const distinctStrings = errorsOf(
+      managed("X.md"),
+      `top\n{% if x == "a b" %}prefix{% endif %}{% if x == "ab" %}${HASH_SENTINEL}{% endif %}\ntail\n`,
+      false,
+    );
+    expect(distinctStrings).toHaveLength(1);
+    expect(distinctStrings[0]).toContain("split marker but is declared managed");
+    // DISTINCT conditions: x false, y true reaches the bare marker, so it
+    // still claims - a crude "two blocks bail" would have missed this.
+    const distinct = errorsOf(
+      managed("X.md"),
+      `top\n{% if x %}prefix{% endif %}{% if y %}${HASH_SENTINEL}{% endif %}\ntail\n`,
+      false,
+    );
+    expect(distinct).toHaveLength(1);
+    expect(distinct[0]).toContain("split marker but is declared managed");
+  });
+
+  test("an empty body-emitting block emits nothing, so a marker after it claims", () => {
+    // An autoescape with no body emits nothing; the marker glued after its
+    // close is a live whole line.
+    const errors = errorsOf(
+      managed("X.md"),
+      `top\n{% autoescape true %}{% endautoescape %}${HASH_SENTINEL}\ntail\n`,
+      false,
+    );
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain("split marker but is declared managed");
+  });
+
+  test("a for-else always renders a branch, so a trailing marker is never alone", () => {
+    // for-else renders the loop body (>=1 iterations) or the else branch on
+    // an empty loop - never nothing - so the marker after {% endfor %}
+    // always carries a prefix and must NOT claim.
+    const withElse = `{% for x in xs %}prefix{% else %}suffix{% endfor %}${HASH_SENTINEL}\n`;
+    expect(errorsOf(managed("X.md"), withElse, false)).toEqual([]);
+    // A plain for (no else) can iterate zero times, so the trailing marker
+    // stands alone and DOES claim.
+    const noElse = `{% for x in xs %}prefix{% endfor %}${HASH_SENTINEL}\n`;
+    expect(errorsOf(managed("X.md"), noElse, false)).toHaveLength(1);
+  });
+
+  test("a marker glued after an empty-output statement claims", () => {
+    // set-assignment, import, from and do emit nothing, so the marker is
+    // the whole rendered line.
+    for (const line of [
+      `{% set note = "x" %}${HASH_SENTINEL}`,
+      `{% import "x.jinja" as helpers %}${HASH_SENTINEL}`,
+      `{% from "x.jinja" import thing %}${HASH_SENTINEL}`,
+      `{% do items.append(1) %}${HASH_SENTINEL}`,
+    ]) {
+      const errors = errorsOf(managed("X.md"), `top\n${line}\ntail\n`, false);
+      expect(errors).toHaveLength(1);
+      expect(errors[0]).toContain("split marker but is declared managed");
+    }
+  });
+
   test("a prose mention NEXT TO a jinja tag is still not a claim", () => {
     const source = `{% if x %}see ${HASH_SENTINEL} for details{% endif %}\n`;
     expect(errorsOf(managed("X.md"), source, false)).toEqual([]);
