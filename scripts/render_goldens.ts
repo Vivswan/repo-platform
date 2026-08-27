@@ -37,9 +37,10 @@
 //   and only the true sha passes: a bug that stamps a WRONG sha shows as
 //   drift, and a render that already contains the sentinel is rejected
 //   outright. The stamp hook hashes the answers file BEFORE that rewrite,
-//   so normalizeRenderedTree re-runs the hook on the normalized tree -
-//   otherwise the manifests would keep an indirect scratch-sha dependence
-//   through that hash line.
+//   so normalizeRenderedTree gates on the render's stamp being honest and
+//   then re-runs the hook on the normalized tree - otherwise the
+//   manifests would keep an indirect scratch-sha dependence through that
+//   hash line, or the re-stamp could heal a lying hook.
 // - copier runs from the scratch directory with a RELATIVE src path, so
 //   the recorded `_src_path` is the fixed string "./tree", never a temp
 //   path. The same /dev/null git config is passed to copier for its
@@ -169,13 +170,42 @@ export function shaNormalizer(fullSha: string): (rel: string, text: string) => s
  *  through the answers file's hash; re-stamping recomputes every hash
  *  class (whole file, split half, symlink target) with the stamper's own
  *  semantics and re-reads the `_commit` provenance from the now-sentinel
- *  answers file. A hash that is stale for any OTHER reason is re-stamped
- *  to the honest value here too - exactly what a fresh render's own hook
- *  would have done - so drift still reports the content change itself. */
+ *  answers file. Two safeguards keep that re-stamp from laundering a
+ *  broken render: the manifest is honesty-gated FIRST (the hook is
+ *  idempotent on a manifest it stamped honestly, so re-stamping against
+ *  the pre-normalization tree must be a byte-level no-op - a hook that
+ *  stamped a lying provenance or hash fails loudly here instead of being
+ *  healed to the sentinel), and the stamper is the manifest's ONLY writer
+ *  (the substitution runs over the manifest text for the sentinel guard
+ *  alone, its output discarded, so it can never shorten a 64-char hash
+ *  that happens to contain a prefix of the scratch sha into a token the
+ *  stamper no longer recognizes). A wrong sha in the answers file itself
+ *  matches no substitution and still surfaces as drift. */
 export function normalizeRenderedTree(
   root: string,
   normalize: (rel: string, text: string) => string,
 ): void {
+  const manifestPath = join(root, MANIFEST_NAME);
+  let manifest: string | null;
+  try {
+    manifest = readFileSync(manifestPath, "utf-8");
+  } catch {
+    manifest = null; // a render without a manifest has nothing to re-stamp
+  }
+  if (manifest !== null) {
+    // The stamper reports corruption soft (its sync-side contract); in a
+    // fresh render both corruption and a dishonest stamp are template
+    // bugs, so fail loudly here.
+    const { out, problem } = stampManifestText(manifest, root);
+    if (problem !== null) throw new Error(`${MANIFEST_NAME} ${problem}`);
+    if (out !== manifest) {
+      throw new Error(
+        `${MANIFEST_NAME} is not honestly stamped: re-stamping it against the ` +
+          "rendered tree changed it, so the render's stamp hook wrote a wrong " +
+          "provenance or hash - normalizing would silently heal that to the sentinel",
+      );
+    }
+  }
   for (const [rel, entry] of readTree(root)) {
     const path = join(root, rel);
     if (entry.kind === "symlink") {
@@ -187,19 +217,16 @@ export function normalizeRenderedTree(
     }
     const text = entry.bytes.toString("latin1");
     const normalized = normalize(rel, text);
+    // The manifest runs through normalize for the sentinel guard only;
+    // its final bytes come from the stamper below.
+    if (rel === MANIFEST_NAME) continue;
     if (normalized !== text) writeFileSync(path, Buffer.from(normalized, "latin1"));
   }
-  let manifestText: string;
-  try {
-    manifestText = readFileSync(join(root, MANIFEST_NAME), "utf-8");
-  } catch {
-    return; // a render without a manifest has nothing to re-stamp
-  }
-  // The stamper reports corruption soft (its sync-side contract); in a
-  // fresh render it is a template bug, so fail loudly here.
-  const { out, problem } = stampManifestText(manifestText, root);
-  if (problem !== null) throw new Error(`${MANIFEST_NAME} ${problem}`);
-  if (out !== manifestText) writeFileSync(join(root, MANIFEST_NAME), out);
+  if (manifest === null) return;
+  // Same text as the gate, so `problem` cannot reappear; only the hashes
+  // and provenance move, recomputed from the normalized tree.
+  const { out } = stampManifestText(manifest, root);
+  if (out !== manifest) writeFileSync(manifestPath, out);
 }
 
 /** Every file and symlink below root (repo-relative, sorted), with content
