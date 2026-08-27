@@ -389,6 +389,31 @@ describe("declarationTextErrors", () => {
     expect(errorsOf(managed("X.md"), mention, false, [custom])).toHaveLength(0);
   });
 
+  // G2 armed the managed and starter arms; the tail-marker arm was the gap.
+  // Flipping .gitignore to tail-marker with a terminal marker passed
+  // composition, and the rebuild would then treat the LOCAL region as
+  // managed and overwrite repository edits inside it.
+  test("a tail-marker declaration over bounded-region marker text is an error", () => {
+    const source = [
+      "# BEGIN REPOSITORY LOCAL",
+      "local-cache/",
+      "# END REPOSITORY LOCAL",
+      "# BEGIN REPO-PLATFORM MANAGED",
+      "node_modules/",
+      "# END REPO-PLATFORM MANAGED",
+      HTML_SENTINEL,
+      "",
+    ].join("\n");
+    const errors = errorsOf(tail(".gitignore", HTML_SENTINEL), source, false);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain("bounded-region marker but is declared split (tail-marker)");
+  });
+
+  test("a legitimate tail-marker source with no region markers passes", () => {
+    const source = ["# managed body", HTML_SENTINEL, ""].join("\n");
+    expect(errorsOf(tail("X.md", HTML_SENTINEL), source, false)).toEqual([]);
+  });
+
   test("a starter declaration over bounded-region marker text is an error", () => {
     const errors = errorsOf(starter(".gitignore"), "# BEGIN REPOSITORY LOCAL\n", true);
     expect(errors).toHaveLength(1);

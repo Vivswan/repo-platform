@@ -364,12 +364,13 @@ export function landedPathAndGates(renderedPath: string): { path: string; gates:
 
 // --- declaration decoration checks --------------------------------------------
 
-/** Every marker string any declared bounded-region grammar owns, for the
- *  managed/starter contradiction scan: declarations accept arbitrary
- *  marker strings, so a managed file carrying some OTHER declared
- *  grammar's markers is the same overwrite hazard as one carrying
- *  .gitignore's - the scanned set derives from ALL declarations, never a
- *  constant. */
+/** Every marker string any declared TAIL grammar owns. The schema accepts
+ *  arbitrary marker text, so the shipped LOCAL_SECTION_LINES alone would
+ *  miss a custom declared marker copied into a managed or starter source;
+ *  declarationTextErrors unions this derived set with those constants,
+ *  exactly as it does for bounded-region markers. Deriving ALONE is what
+ *  G2 fixed and this must not undo: the constants are what keep the scan
+ *  armed when no declaration of a given grammar is left in the tree. */
 export function declaredTailMarkerTexts(declarations: Iterable<OwnershipDeclaration>): string[] {
   const out = new Set<string>();
   for (const declaration of declarations) {
@@ -485,6 +486,22 @@ export function declarationTextErrors(
     return errors;
   }
   if (declaration.grammar === "tail-marker") {
+    // Bounded-region markers promise a LOCAL region between them; a
+    // tail-marker declaration promises a repo-owned tail below one line.
+    // A source carrying both is the same overwrite hazard the managed and
+    // starter arms already reject: sync rebuilds by the DECLARED grammar,
+    // so it would treat everything above the terminal marker - the LOCAL
+    // region included - as managed, and overwrite repository edits inside
+    // it. Checked here because those arms return before reaching this one.
+    if (regionMarker !== undefined) {
+      errors.push(
+        `${where}: carries the '${regionMarker}' bounded-region marker but is ` +
+          "declared split (tail-marker) - the rebuild would treat the repo-owned " +
+          "LOCAL region as managed and overwrite it; declare the file split " +
+          "(grammar bounded-region) or drop the markers",
+      );
+      return errors;
+    }
     // The sync rebuild splits at ONE marker line, so the source must carry
     // it exactly once (a second copy would ride into repositories where
     // the exactly-once validator flags every render)...
