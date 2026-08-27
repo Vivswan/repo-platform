@@ -21,7 +21,7 @@
     ".github/workflows/auto-assign.yml": {"class": "managed", "hash": "65399ba1df1598fea8af227f7b9798da8b687c65024c0cb93be53307d1c5c957"},
     ".github/workflows/auto-format.yml": {"class": "starter"},
     ".github/workflows/checks.yml": {"class": "starter"},
-    ".github/workflows/ci.yml": {"class": "managed", "hash": "0b68193d311e86676f80503a73b90ad9b5cfd9b5222b18b194898bda2852935c"},
+    ".github/workflows/ci.yml": {"class": "managed", "hash": "32848ef0a5342a1472f7c033da5074f519bc3e1c6331eb65b6d831ceea956e0d"},
     ".github/workflows/copilot-setup-steps.yml": {"class": "starter"},
     ".github/workflows/deno-audit.yml": {"class": "managed", "hash": "913a7812c53d8cfa7422d053db01806dc375e89fd2968c12bc26aa6edb2a4f31"},
     ".github/workflows/dependabot-bun-lockfile.yml": {"class": "managed", "hash": "98e7b7e6df0c98827cdb784f26294da596192ce7c55d2138dc89ad6f1445fa0f"},

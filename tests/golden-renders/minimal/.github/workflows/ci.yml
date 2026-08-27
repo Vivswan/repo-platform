@@ -42,22 +42,27 @@ jobs:
   checks:
     uses: ./.github/workflows/checks.yml
 
-  # TWO checks, one job, different consequences.
+  # TWO checks, one job, different consequences - both live in the
+  # validate-template-report action, which wraps the validate-template
+  # integrity action with the freshness ref compare and the reporting.
   #
-  # INTEGRITY (the action) validates the tree against the state it was
-  # stamped with. A failure means managed content changed out of band, so it
-  # BLOCKS - on pull requests and on main pushes alike, because a red gate is
-  # the owner's signal that something edited files the next sync will
+  # INTEGRITY validates the tree against the state it was stamped with. A
+  # failure means managed content changed out of band, so it BLOCKS - on
+  # pull requests and on main pushes alike, because a red gate is the
+  # owner's signal that something edited files the next sync will
   # overwrite. Restore the file from history, or run a recovery sync.
   #
-  # FRESHNESS (below) is only "how far behind the template is this repo",
-  # which is never the repository's fault and never its blocker - the next
-  # sync PR closes it. It is one ref compare, no copier and no render, and
-  # its OWN failures (network, an operator repo this token cannot read) skip
-  # with a notice rather than going red.
+  # FRESHNESS is only "how far behind the template is this repo", which is
+  # never the repository's fault and never its blocker - the next sync PR
+  # closes it. It is one ref compare, no copier and no render, and its OWN
+  # failures (network, an operator repo this token cannot read) skip with a
+  # notice rather than going red.
   #
-  # The findings are posted BEFORE the job fails, so a blocking result is
-  # readable in the PR conversation instead of only in the run log.
+  # What stays here is the shape a composite action cannot carry: the job
+  # name and its all-green needs entry, the comment permission scoped to
+  # this one job, and the LAST step re-raising the action's deferred
+  # verdict - so the findings comment is already posted when the gate goes
+  # red, readable in the PR conversation instead of only in the run log.
   validate-template:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -67,135 +72,14 @@ jobs:
       pull-requests: write
     steps:
       - uses: actions/checkout@v7
-      # continue-on-error defers the verdict to the last step; it does not
-      # discard it. The action's own exit code is untouched, so the operator
-      # repo and the sync pipeline still block on it directly.
-      - uses: Vivswan/repo-platform/actions/validate-template@build
-        id: integrity
-        continue-on-error: true
+      - uses: Vivswan/repo-platform/actions/validate-template-report@build
+        id: template
         with:
-          findings-file: ${{ runner.temp }}/validate-findings.md
-          advisories-file: ${{ runner.temp }}/validate-advisories.md
-      - name: Check how far behind the template this repo is
-        id: freshness
-        continue-on-error: true
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TEMPLATE_REPO: Vivswan/repo-platform
-          FRESHNESS: ${{ runner.temp }}/freshness.md
-        run: |
-          set -uo pipefail
-          : > "$FRESHNESS"
-          note() { echo "::notice::$1 Skipping the freshness check."; echo "state=skipped" >> "$GITHUB_OUTPUT"; exit 0; }
-
-          recorded="$(sed -n 's/^_commit: *//p' .copier-answers.yml | head -n 1 | tr -d "\"' ")"
-          [ -n "$recorded" ] || note "No _commit is recorded in .copier-answers.yml."
-          tip="$(timeout 20 gh api "repos/$TEMPLATE_REPO/branches/build" --jq '.commit.sha')" ||
-            note "Could not read $TEMPLATE_REPO's build branch (network, or a private operator repo this token cannot read)."
-          [ -n "$tip" ] || note "$TEMPLATE_REPO's build branch reported no commit."
-
-          # The recorded value is copier's short sha, so match on prefix.
-          case "$tip" in
-            "$recorded"*)
-              echo "state=fresh" >> "$GITHUB_OUTPUT"
-              exit 0
-              ;;
-          esac
-
-          # One more call for the distance. It is presentation only: a failed
-          # compare still reports "behind", just without the number.
-          ahead="$(timeout 20 gh api "repos/$TEMPLATE_REPO/compare/$recorded...$tip" --jq '.ahead_by')" || ahead=""
-          case "$ahead" in
-            ''|*[!0-9]*) distance="behind the build branch" ;;
-            *) distance="behind the build branch by $ahead commit(s)" ;;
-          esac
-          # shellcheck disable=SC2016  # the backticks are markdown code spans
-          printf '#### Freshness\n\nThis repository is %s (recorded `%s`, tip `%s`). The next sync PR updates the managed files; nothing to do here.\n' \
-            "$distance" "$recorded" "${tip:0:7}" > "$FRESHNESS"
-          echo "state=behind" >> "$GITHUB_OUTPUT"
-      - name: Report the findings
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          FINDINGS: ${{ runner.temp }}/validate-findings.md
-          ADVISORIES: ${{ runner.temp }}/validate-advisories.md
-          FRESHNESS: ${{ runner.temp }}/freshness.md
-          FRESHNESS_STATE: ${{ steps.freshness.outputs.state }}
-          INTEGRITY: ${{ steps.integrity.outcome }}
-          EVENT_NAME: ${{ github.event_name }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          # Identifies our own comment across runs. Keep it stable: changing
-          # it strands every comment already posted under the old one.
-          MARKER: "<!-- repo-platform:validate-template -->"
-        run: |
-          set -uo pipefail
-          # An absent findings file means the action never got far enough to
-          # write one, which is a setup failure, not a clean tree.
-          if [ ! -f "$FINDINGS" ]; then
-            integrity="#### Integrity"$'\n\n'"The validator exited before reporting. See the [run log]($RUN_URL)."
-            blocking=true
-          elif [ -s "$FINDINGS" ]; then
-            integrity="#### Integrity"$'\n\n'"$(cat "$FINDINGS")"$'\n'"Managed content changed outside a sync. Restore the file from git history, or run a recovery sync. This FAILS the check."
-            blocking=true
-          else
-            integrity="#### Integrity"$'\n\n'"Passed - this repository matches the state it was stamped with."
-            blocking=false
-          fi
-
-          # Advisories never gate - they are the action's own non-failing
-          # stream, and folding them into the integrity verdict would have a
-          # clean repository reading as blocked.
-          advice=""
-          if [ -s "$ADVISORIES" ]; then
-            advice=$'\n\n'"$(cat "$ADVISORIES")"
-          fi
-
-          case "$FRESHNESS_STATE" in
-            behind) freshness="$(cat "$FRESHNESS")" ;;
-            fresh) freshness="#### Freshness"$'\n\n'"Up to date with the build branch." ;;
-            *) freshness="#### Freshness"$'\n\n'"Not checked this run; see the run log for why." ;;
-          esac
-
-          body="$MARKER"$'\n'"### Template check"$'\n\n'"$integrity$advice"$'\n\n'"$freshness"
-          printf '%s\n' "$body" >> "$GITHUB_STEP_SUMMARY"
-
-          # A comment is worth making only when something needs saying. A
-          # clean, fresh repository leaves no new comment - but it does clear
-          # one a previous run left behind.
-          worth_saying=false
-          if [ "$blocking" = true ] || [ "$FRESHNESS_STATE" = behind ] || [ -n "$advice" ]; then
-            worth_saying=true
-          fi
-
-          if [ "$EVENT_NAME" != "pull_request" ]; then
-            exit 0
-          fi
-
-          # --paginate: on a long PR our marker comment sits past the first page,
-          # and a lookup that misses it POSTS A NEW ONE on every push. --slurp
-          # yields one array per page, so flatten before searching.
-          existing="$(timeout 20 gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments?per_page=100" \
-            --jq 'add // [] | map(select(.body | contains(env.MARKER))) | last | .id // empty')" || {
-            echo "::warning::could not list PR comments; the findings are in the job summary instead."
-            exit 0
-          }
-
-          if [ "$worth_saying" = false ] && [ -z "$existing" ]; then
-            exit 0
-          fi
-
-          if [ -n "$existing" ]; then
-            timeout 20 gh api --method PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$existing" \
-              -f body="$body" --silent ||
-              echo "::warning::could not update the findings comment; the findings are in the job summary instead."
-          else
-            timeout 20 gh api --method POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" \
-              -f body="$body" --silent ||
-              echo "::warning::could not post the findings comment; the findings are in the job summary instead."
-          fi
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          template-repo: Vivswan/repo-platform
       # Last, so the comment above is already posted when the gate goes red.
       - name: Fail on an integrity finding
-        if: steps.integrity.outcome == 'failure'
+        if: steps.template.outputs.integrity == 'failure'
         run: |
           echo "::error::validate-template found managed content that changed outside a sync; see the findings on this PR (or the job summary) and the step log above."
           exit 1
@@ -228,10 +112,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
-      - name: Install yamllint
-        run: python3 -m pip install --quiet yamllint
-      - name: Lint YAML
-        run: yamllint -s .
+      # The pip install and the strict lint invocation live in the action.
+      - uses: Vivswan/repo-platform/actions/yamllint@build
 
   gitleaks:
     runs-on: ubuntu-latest

@@ -85,10 +85,10 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
-      - name: Install yamllint
-        run: python3 -m pip install --quiet yamllint
-      - name: Lint YAML
-        run: yamllint -s .
+      # The same action the fleet runs; local path, so this repository
+      # always lints with the tree under review rather than what is
+      # published. `bun run lint:yaml` is the local twin.
+      - uses: ./actions/yamllint
 
   biome:
     runs-on: ubuntu-latest

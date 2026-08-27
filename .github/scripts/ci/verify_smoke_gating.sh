@@ -71,19 +71,17 @@ else last_need="      - validate-template"
 fi
 adjacent "$last_need" "    runs-on: ubuntu-latest" "$wf/ci.yml"
 
-# validate-template splits: INTEGRITY blocks (so the job is in the gate and
-# a last step re-raises the deferred verdict) while FRESHNESS only informs
-# (one ref compare, never copier, never fatal).
+# validate-template splits: INTEGRITY blocks while FRESHNESS only informs.
+# Both legs live in the validate-template-report action now (its own suite
+# polices the reporting), so what a render has to show is the shape a
+# composite action cannot carry: the job key and its all-green needs entry,
+# the thin caller's uses ref at the green-gated @build, and the fail-last
+# step re-raising the action's deferred integrity verdict so the findings
+# comment is already posted when the gate goes red.
 present_line "  validate-template:" "$wf/ci.yml"
 present_line "      - validate-template" "$wf/ci.yml"
-present "findings-file:" "$wf/ci.yml"
-present "continue-on-error: true" "$wf/ci.yml"
-present "repo-platform:validate-template" "$wf/ci.yml"
-present "steps.integrity.outcome == 'failure'" "$wf/ci.yml"
-present "branches/build" "$wf/ci.yml"
-# The freshness leg must stay a ref compare: a render here would cost every
-# fleet repo a copier run on every push.
-absent_line "          copier copy" "$wf/ci.yml"
+present "actions/validate-template-report@build" "$wf/ci.yml"
+present "steps.template.outputs.integrity == 'failure'" "$wf/ci.yml"
 # The comment write is scoped to that one job, never the workflow default.
 present_line "  contents: read" "$wf/ci.yml"
 absent_line "  pull-requests: write" "$wf/ci.yml"
@@ -327,17 +325,19 @@ if [ "$PRIVATE" = "true" ]; then
     absent_line "      - $job" "$wf/ci.yml"
   done
   # Every check's tool steps must survive the merge (check-typography is
-  # asserted for both shapes below).
+  # asserted for both shapes below; yamllint is a composite action now, so
+  # its pin is what a render shows - the pip install and the strict flag
+  # are the action's own suite's to police).
   present "actions/validate-commit-names@build" "$wf/ci.yml"
   present "raven-actions/actionlint" "$wf/ci.yml"
   present "gitleaks/gitleaks-action" "$wf/ci.yml"
-  present "yamllint -s ." "$wf/ci.yml"
+  present "repo-platform/actions/yamllint@build" "$wf/ci.yml"
   # ...and keep their run-even-after-an-earlier-failure guard: one per
-  # check step (five checks, yamllint contributing two steps).
+  # check step (five checks, one step each).
   guard="        if: '!cancelled()'"
   guards="$(grep -cxF -- "$guard" "$wf/ci.yml" || true)"
-  if [ "$guards" -ne 6 ]; then
-    echo "::error::gating check failed: expected exactly 6 lines \"$guard\" in $wf/ci.yml but found $guards for modules=$MODULES private=$PRIVATE. Fix the gate in templates/ (or this expectation in verify_smoke_gating.sh)."
+  if [ "$guards" -ne 5 ]; then
+    echo "::error::gating check failed: expected exactly 5 lines \"$guard\" in $wf/ci.yml but found $guards for modules=$MODULES private=$PRIVATE. Fix the gate in templates/ (or this expectation in verify_smoke_gating.sh)."
     exit 1
   fi
 else
@@ -352,6 +352,9 @@ else
     present_line "  $job:" "$wf/ci.yml"
     present_line "      - $job" "$wf/ci.yml"
   done
+  # The fan-out yamllint job is a thin caller of the same action the
+  # private merged shape uses.
+  present "repo-platform/actions/yamllint@build" "$wf/ci.yml"
 fi
 
 # gitignore toolchain sections; the four markers are asserted by the validator.
