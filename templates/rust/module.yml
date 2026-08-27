@@ -8,6 +8,8 @@ dependabot:
   ecosystem: cargo
   label: rust
   color: "000000"
+settings_layers:
+  - settings.yml
 gitignore_sources:
   - Rust.gitignore
 lockfiles:

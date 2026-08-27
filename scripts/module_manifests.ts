@@ -3,8 +3,9 @@
 // the single source of truth for module identity: the copier choice text,
 // the ownership declarations for every file the module lands, the
 // toolchain declaration (with its CodeQL language), the dependabot
-// ecosystem/label tuple, gitignore upstream sources, gitleaks lockfile
-// patterns, Pages commands, and the composer's gate/gate_dirs.
+// ecosystem/label tuple, the settings layer files it ships, gitignore
+// upstream sources, gitleaks lockfile patterns, Pages commands, and the
+// composer's gate/gate_dirs.
 //
 // scripts/generate.ts derives the marker-fenced GENERATED regions from
 // these; scripts/compose_template.ts, scripts/build_gitignore.ts, and the
@@ -22,9 +23,45 @@ import { existsSync, lstatSync, readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
-import { ownershipListSchema } from "./ownership.ts";
+import { ownershipListSchema, SETTINGS_LAYER_NAMES } from "./ownership.ts";
 
 const TEMPLATES_DIR = resolve(import.meta.dir, "..", "templates");
+
+/** The settings layer FILES a module may ship next to its module.yml,
+ *  keyed by ROLE so no consumer ever assigns meaning by list position:
+ *  the module's own layer (merged for every visibility), then the
+ *  visibility overlays the fleet's render picks between. The composer's
+ *  skip list (SETTINGS_LAYER_NAMES in scripts/ownership.ts) names the
+ *  same files; the check below holds the two rosters together so a layer
+ *  name one side learns cannot silently be a landed file (or an
+ *  undeclarable layer) on the other. */
+export const SETTINGS_LAYER_FILES = {
+  module: "settings.yml",
+  public: "settings-public.yml",
+  private: "settings-private.yml",
+} as const;
+
+/** The declarable filenames in stack order (the module layer, then the
+ *  overlays): the manifests' settings_layers lists follow this order. */
+export const SETTINGS_LAYER_ORDER = [
+  SETTINGS_LAYER_FILES.module,
+  SETTINGS_LAYER_FILES.public,
+  SETTINGS_LAYER_FILES.private,
+] as const;
+
+export type SettingsLayerName = (typeof SETTINGS_LAYER_ORDER)[number];
+
+if (
+  SETTINGS_LAYER_NAMES.size !== SETTINGS_LAYER_ORDER.length ||
+  SETTINGS_LAYER_ORDER.some((name) => !SETTINGS_LAYER_NAMES.has(name))
+) {
+  throw new Error(
+    "SETTINGS_LAYER_ORDER (scripts/module_manifests.ts) and SETTINGS_LAYER_NAMES " +
+      "(scripts/ownership.ts) disagree - the manifests' declarable layer files and " +
+      "the composer's skip list must name the same files, or a new layer name would " +
+      "be skipped by one side and treated as a landed file (or rejected) by the other",
+  );
+}
 
 // Fixed, deterministic module order for fragment splicing, generated
 // or-chains, and collision resolution (bun before uv preserves the
@@ -177,6 +214,32 @@ export const manifestSchema = z.strictObject({
       ),
     })
     .optional(),
+  // The settings LAYER FILES the module ships next to this manifest
+  // (docs/settings.md) - filenames only, never settings content: the files
+  // stay plain settings-YAML documents that the fleet's render selects and
+  // merges. readManifest holds this declaration and the tree together in
+  // both directions, so a declared-but-missing or present-but-undeclared
+  // layer file is a hard error for every manifest consumer - selecting by
+  // existence alone failed OPEN (a deleted layer file silently shrank the
+  // merged roster and the apply deleted its labels fleet-wide). A module
+  // shipping no layer files omits the key.
+  settings_layers: z
+    .array(z.enum(SETTINGS_LAYER_ORDER))
+    .min(1)
+    .refine(
+      (layers) =>
+        layers.every(
+          (name, index) =>
+            index === 0 ||
+            SETTINGS_LAYER_ORDER.indexOf(name) > SETTINGS_LAYER_ORDER.indexOf(layers[index - 1]),
+        ),
+      {
+        message:
+          "settings_layers must list each layer file at most once, in stack order " +
+          `(${SETTINGS_LAYER_ORDER.join(", ")})`,
+      },
+    )
+    .optional(),
   gitignore_sources: z
     .array(mdCellSafe(singleLine("each gitignore source"), "each gitignore source"))
     .min(1)
@@ -297,6 +360,42 @@ export function assertTrackingLabelUniqueness(manifests: ModuleManifest[]): void
   }
 }
 
+/** The manifest's settings_layers declaration against the module folder,
+ *  in BOTH directions. Layer files used to be selected by existence,
+ *  which failed OPEN: a deleted templates/uv/settings.yml simply vanished
+ *  from the fleet render's stack, the merged label roster came out short
+ *  but valid-looking, and the apply's delete-undeclared pass removed that
+ *  module's labels from every live repository. readManifest runs this on
+ *  every load, so the declaration can only ever shrink on purpose (one
+ *  change updating manifest and tree together). `exists` is injectable so
+ *  a test can prove a deletion fails loudly without deleting anything. */
+export function assertSettingsLayerFiles(
+  manifest: ModuleManifest,
+  templatesDir: string = TEMPLATES_DIR,
+  exists: (path: string) => boolean = existsSync,
+): void {
+  const declared = manifest.settings_layers ?? [];
+  for (const name of SETTINGS_LAYER_ORDER) {
+    const where = `templates/${manifest.module}/${name}`;
+    const present = exists(join(templatesDir, manifest.module, name));
+    if (declared.includes(name) && !present) {
+      throw new Error(
+        `${where}: declared in templates/${manifest.module}/module.yml settings_layers but ` +
+          "missing from the tree. Selecting layer files by existence alone fails OPEN - the " +
+          "merged roster silently shrinks and the settings apply deletes the missing labels " +
+          "fleet-wide - so a deleted layer file must retire its settings_layers entry in the " +
+          "same change.",
+      );
+    }
+    if (!declared.includes(name) && present) {
+      throw new Error(
+        `${where}: exists but templates/${manifest.module}/module.yml does not declare it in ` +
+          "settings_layers, so the settings render would silently ignore it; declare it there.",
+      );
+    }
+  }
+}
+
 /** Read and validate templates/<module>/module.yml. */
 export function readManifest(module: string, templatesDir: string = TEMPLATES_DIR): ModuleManifest {
   if (!/^[a-z][a-z0-9-]*$/.test(module)) {
@@ -320,7 +419,9 @@ export function readManifest(module: string, templatesDir: string = TEMPLATES_DI
         "(at minimum a description, the copier choice text)",
     );
   }
-  return parseManifest(module, readFileSync(path, "utf-8"), where);
+  const manifest = parseManifest(module, readFileSync(path, "utf-8"), where);
+  assertSettingsLayerFiles(manifest, templatesDir);
+  return manifest;
 }
 
 /** MODULE_ORDER <-> templates/ integrity: no duplicate entries (a

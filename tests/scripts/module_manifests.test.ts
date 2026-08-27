@@ -5,13 +5,14 @@
 // repo's manifests.
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { MODULE_ORDER } from "../../scripts/compose_template";
 import {
   assertDependabotLabelConsistency,
   assertModuleOrderIntegrity,
+  assertSettingsLayerFiles,
   assertTrackingLabelUniqueness,
   loadManifests,
   type ModuleManifest,
@@ -383,6 +384,106 @@ describe("ownership declarations", () => {
         parseManifest("demo", ["description: a demo module", ...lines, ""].join("\n"), WHERE),
       ).toThrow(WHERE);
     }
+  });
+});
+
+describe("settings_layers", () => {
+  test("a declaration in stack order parses", () => {
+    const manifest = parseManifest(
+      "demo",
+      "description: x\nsettings_layers:\n  - settings.yml\n  - settings-public.yml\n",
+      WHERE,
+    );
+    expect(manifest.settings_layers).toEqual(["settings.yml", "settings-public.yml"]);
+  });
+
+  test("an unknown layer filename is refused", () => {
+    expect(() =>
+      parseManifest("demo", "description: x\nsettings_layers:\n  - settings-extra.yml\n", WHERE),
+    ).toThrow(WHERE);
+  });
+
+  test("duplicates, wrong order, and an empty list are refused", () => {
+    const bad = [
+      "settings_layers:\n  - settings.yml\n  - settings.yml\n",
+      "settings_layers:\n  - settings-public.yml\n  - settings.yml\n",
+      "settings_layers: []\n",
+    ];
+    for (const lines of bad) {
+      expect(() => parseManifest("demo", `description: x\n${lines}`, WHERE)).toThrow(WHERE);
+    }
+  });
+
+  describe("assertSettingsLayerFiles holds the declaration and the tree together", () => {
+    // Selecting layer files by existence alone failed OPEN: a deleted
+    // templates/uv/settings.yml silently shrank the fleet render's stack
+    // and the settings apply deleted that module's labels fleet-wide.
+    // These run against the REAL manifests with an injected `exists`, so
+    // the failure is proven without deleting anything.
+    const manifests = loadManifests();
+    const byModule = (module: string) => {
+      const manifest = manifests.find((m) => m.module === module);
+      if (!manifest) throw new Error(`no ${module} manifest`);
+      return manifest;
+    };
+
+    test("a declared layer file missing from the tree is a hard error", () => {
+      const exists = (path: string) =>
+        !path.endsWith(join("templates", "uv", "settings.yml")) && existsSync(path);
+      expect(() => assertSettingsLayerFiles(byModule("uv"), undefined, exists)).toThrow(
+        "templates/uv/settings.yml: declared in templates/uv/module.yml settings_layers but missing",
+      );
+    });
+
+    test("a layer file no manifest declares is refused, not silently ignored", () => {
+      const exists = (path: string) =>
+        path.endsWith(join("templates", "fuzzer", "settings.yml")) || existsSync(path);
+      expect(() => assertSettingsLayerFiles(byModule("fuzzer"), undefined, exists)).toThrow(
+        "templates/fuzzer/settings.yml: exists but templates/fuzzer/module.yml does not declare it",
+      );
+    });
+
+    test("the real tree satisfies every manifest's declaration", () => {
+      for (const manifest of manifests) {
+        expect(() => assertSettingsLayerFiles(manifest)).not.toThrow();
+      }
+    });
+  });
+
+  describe("readManifest runs the cross-check on every load", () => {
+    const root = mkdtempSync(join(tmpdir(), "settings-layers-"));
+    const templates = join(root, "templates");
+    beforeAll(() => {
+      mkdirSync(join(templates, "declared"), { recursive: true });
+      writeFileSync(
+        join(templates, "declared", "module.yml"),
+        "description: x\nsettings_layers:\n  - settings.yml\n",
+      );
+      writeFileSync(join(templates, "declared", "settings.yml"), "labels: []\n");
+      mkdirSync(join(templates, "ghostly"));
+      writeFileSync(
+        join(templates, "ghostly", "module.yml"),
+        "description: x\nsettings_layers:\n  - settings.yml\n",
+      );
+      mkdirSync(join(templates, "undeclared"));
+      writeFileSync(join(templates, "undeclared", "module.yml"), "description: x\n");
+      writeFileSync(join(templates, "undeclared", "settings-private.yml"), "labels: []\n");
+    });
+    afterAll(() => rmSync(root, { recursive: true, force: true }));
+
+    test("declared and present loads", () => {
+      expect(readManifest("declared", templates).settings_layers).toEqual(["settings.yml"]);
+    });
+
+    test("declared but missing fails the load", () => {
+      expect(() => readManifest("ghostly", templates)).toThrow("missing from the tree");
+    });
+
+    test("present but undeclared fails the load", () => {
+      expect(() => readManifest("undeclared", templates)).toThrow(
+        "does not declare it in settings_layers",
+      );
+    });
   });
 });
 

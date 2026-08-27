@@ -7,6 +7,8 @@ ownership:
   - { path: .github/workflows/update-release.yml, class: starter }
   - { path: .release-please-manifest.json, class: starter }
   - { path: release-please-config.json, class: starter }
+settings_layers:
+  - settings.yml
 gate_jobs:
   - release-freshness
   - release-health

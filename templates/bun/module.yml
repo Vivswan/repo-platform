@@ -13,6 +13,9 @@ dependabot:
   ecosystem: bun
   label: javascript
   color: "168700"
+settings_layers:
+  - settings.yml
+  - settings-public.yml
 gitignore_sources:
   - Node.gitignore
   - bun.gitignore
