@@ -812,6 +812,19 @@ const DATA_ANCHORS: Record<string, DataAnchorSpec> = {
 // --- splicing ----------------------------------------------------------------
 
 const ANCHOR_HINT = Buffer.from("{# compose:");
+/** Loose recognizer for text MEANT to be an anchor marker: a jinja comment
+ *  opener with an optional trim dash and any same-line whitespace, then the
+ *  compose keyword. Both malformed-marker scans match this: the skeleton
+ *  scan then demands the strict ANCHOR_RE form, and the contribution scan
+ *  rejects every match outright (contributions may not carry markers at
+ *  all) - recognizing only the canonical ANCHOR_HINT spelling would let a
+ *  variant like '{#- compose:x #}' skip validation and vanish at render.
+ *  The colon is one boundary: prose like '{# composes the tree #}' stays a
+ *  plain comment. Horizontal whitespace is the other: markers are line
+ *  constructs (ANCHOR_RE is line-anchored), and the skeleton scan reads
+ *  line by line, so a newline inside the opener must not match here or the
+ *  two scans would disagree on the same bytes. */
+const ANCHOR_HINT_RE = /\{#-?[ \t]*compose:/;
 
 function matchAnchor(line: Buffer): { name: string; tight: boolean; trailing: string } | null {
   // Bytes, matched as latin1: non-ASCII bytes can never satisfy the pattern.
@@ -883,7 +896,7 @@ export function spliceContributions(
     const { entry } = sourced;
     if (entry.kind === "symlink") continue;
     for (const line of splitLines(entry.data)) {
-      if (line.includes(ANCHOR_HINT) && matchAnchor(line) === null) {
+      if (ANCHOR_HINT_RE.test(line.toString("latin1")) && matchAnchor(line) === null) {
         errors.push(
           `templates/${sourceName(sourced)}/${logical}: malformed anchor line ` +
             `'${line.toString("utf-8").trim()}' - anchors must start the ` +
@@ -939,10 +952,11 @@ export function spliceContributions(
   // bytes, in which case the error names the generator.
   for (const [anchor, list] of sortedByKey(contributions)) {
     for (const { source, text } of list) {
-      if (text.includes(ANCHOR_HINT)) {
+      const hint = ANCHOR_HINT_RE.exec(text.toString("latin1"));
+      if (hint) {
         errors.push(
           `${source}: the contribution to anchor '${anchor}' contains an anchor ` +
-            `marker ('${ANCHOR_HINT}') - a marker inside a contribution is never ` +
+            `marker ('${hint[0]}') - a marker inside a contribution is never ` +
             "scanned or filled (anchors live in skeleton files only, each in " +
             "exactly one); move the marker line to a skeleton file or remove it",
         );

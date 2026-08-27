@@ -582,6 +582,52 @@ describe("spliceContributions", () => {
     expect(errors).toHaveLength(1);
     expect(errors[0]).toContain("anchor marker");
   });
+
+  test("smuggled markers with variant comment-opener spellings error too", () => {
+    for (const bad of ["{#- compose:other #}", "{#  compose:other #}", "{#compose:other #}"]) {
+      const files = skeleton("needs:\n{# compose:demo #}\n    runs-on: x\n");
+      const errors = spliceContributions(
+        files,
+        contribution(`{% if g %}${bad}\n      - a\n{% endif %}`, "g"),
+      );
+      expect(errors).toHaveLength(1);
+      expect(errors[0]).toContain("templates/a/fragments/demo.jinja");
+      expect(errors[0]).toContain("anchor marker");
+      // The error quotes the offending spelling, opener through the colon.
+      expect(errors[0]).toContain(`'${bad.slice(0, bad.indexOf(":") + 1)}'`);
+    }
+  });
+
+  test("the recognizer is same-line: a newline inside the opener matches neither scan", () => {
+    // Not marker-shaped on either side (markers are line constructs); the
+    // split spelling stays a plain jinja comment in skeletons and
+    // contributions alike, keeping the two scans agreeing on the same bytes.
+    const split = "{#\n compose:ghost #}";
+    const files = skeleton(`${split}\nneeds:\n{# compose:demo #}\n    runs-on: x\n`);
+    const errors = spliceContributions(
+      files,
+      contribution(`{% if g %}${split}\n      - a\n{% endif %}`, "g"),
+    );
+    expect(errors).toEqual([]);
+  });
+
+  test("a skeleton compose marker with a variant spelling errors as malformed", () => {
+    for (const bad of ["{#- compose:demo2 #}", "{#  compose:demo2 #}", "{#compose:demo2 #}"]) {
+      const files = skeleton(`needs:\n{# compose:demo #}\n${bad}\n`);
+      const errors = spliceContributions(files, contribution("{% if g %}      - a\n{% endif %}"));
+      expect(errors).toHaveLength(1);
+      expect(errors[0]).toContain("malformed anchor line");
+    }
+  });
+
+  test("a benign jinja comment mentioning compose in prose is not a marker on either side", () => {
+    const files = skeleton("{# composes the tree #}\nneeds:\n{# compose:demo #}\n    runs-on: x\n");
+    const errors = spliceContributions(
+      files,
+      contribution("{% if g %}{# composes the tree #}\n      - a\n{% endif %}", "g"),
+    );
+    expect(errors).toEqual([]);
+  });
 });
 
 // The collapse guard is a render-time fix (an all-false anchor line must
