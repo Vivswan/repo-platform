@@ -72,21 +72,25 @@ export function capture(command: string[], options: RunOptions = {}): RunResult 
 
 /** Parses JSON and validates it in one step. A response the schema rejects
  *  is a contract problem no re-run fixes, so it exits rather than handing
- *  back a value every caller would have to re-check. */
+ *  back a value every caller would have to re-check. Diagnostics name
+ *  paths and issue codes only - never received values or JSON.parse's own
+ *  exception text, which echo fragments of the external response into
+ *  public CI logs (the value-free discipline of
+ *  .github/scripts/shared/json.ts). */
 export function parseJsonWith<T>(schema: ZodType<T>, text: string, label: string): T {
   let parsed: unknown;
   try {
     parsed = JSON.parse(text);
-  } catch (cause) {
-    error(`${label}: response is not JSON (${cause instanceof Error ? cause.message : cause})`);
+  } catch {
+    error(`${label}: not valid JSON`);
     process.exit(1);
   }
   const result = schema.safeParse(parsed);
   if (!result.success) {
     const detail = result.error.issues
-      .map((issue) => `${issue.path.join(".")} ${issue.message}`)
+      .map((issue) => `${issue.path.join(".") || "(root)"}: ${issue.code}`)
       .join("; ");
-    error(`${label}: ${detail}`);
+    error(`${label}: unexpected shape - ${detail}`);
     process.exit(1);
   }
   return result.data;

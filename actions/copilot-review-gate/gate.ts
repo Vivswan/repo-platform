@@ -36,7 +36,7 @@
 // type loudly first; and a renamed Copilot LOGIN leaves this gate red
 // yet unable to self-re-arm (rerun-copilot-gate.yml's RELEVANT filter is
 // keyed on the current logins), so a stuck-red gate after an upstream
-// rename means updating the login lists (copilot_review_common.ts and
+// rename means updating the login lists (identity.ts and
 // that workflow's fromJSON literal).
 //
 // A ruleset-side required check cannot do this job: Copilot's check

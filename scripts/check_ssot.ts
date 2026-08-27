@@ -948,6 +948,31 @@ const rules: Rule[] = [
           });
         }
       }
+      // The uses-line pin above proves ci.yml still INVOKES the gate
+      // action; this proves the action still RUNS gate.ts. Without it,
+      // trimming the gate step out of action.yml would leave a green
+      // setup/install shell - every pin intact, gate failed open. Only an
+      // unconditional, non-suppressed step counts: an `if:` or
+      // `continue-on-error:` on the gate step is the same failed-open gate
+      // with the command text still present.
+      const gateActionManifest = parseYaml(
+        readFileSync(join(REPO_ROOT, "actions/copilot-review-gate/action.yml"), "utf-8"),
+      ) as { runs?: { steps?: Record<string, unknown>[] } };
+      const gateEntry = 'bun "${{ github.action_path }}/gate.ts"';
+      const gateActionLines = (gateActionManifest.runs?.steps ?? [])
+        .filter((step) => step.if === undefined && step["continue-on-error"] === undefined)
+        .flatMap((step) =>
+          String(step.run ?? "")
+            .split("\n")
+            .map((line) => line.trim()),
+        );
+      if (!gateActionLines.includes(gateEntry)) {
+        mismatches.push({
+          file: "actions/copilot-review-gate/action.yml",
+          expected: `'${gateEntry}' as a run line of an unconditional, non-suppressed composite step`,
+          got: "missing",
+        });
+      }
       return mismatches;
     },
   },

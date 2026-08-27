@@ -45,6 +45,9 @@ interface Options {
   env?: Record<string, string>;
   rules?: unknown;
   checks?: unknown;
+  /** Raw check-runs response text, written VERBATIM (no JSON.stringify) -
+   * what the not-JSON leak test needs to smuggle a body fragment in. */
+  checksText?: string;
   /** The PR's reviews, ONE page (wrapped into the --slurp page-array
    * shape at write time); reviewPages overrides with explicit pages. */
   reviews?: unknown;
@@ -62,6 +65,11 @@ function run(opts: Options = {}) {
     writeFileSync(path, JSON.stringify(value));
     return path;
   };
+  const rawFile = (name: string, text: string): string => {
+    const path = join(root, name);
+    writeFileSync(path, text);
+    return path;
+  };
   const proc = Bun.spawnSync(["bun", script], {
     env: {
       ...process.env,
@@ -71,7 +79,10 @@ function run(opts: Options = {}) {
       PR_NUMBER: "12",
       BASE_BRANCH: "main",
       GH_RULES_FILE: file("rules.json", opts.rules ?? []),
-      GH_CHECKS_FILE: file("checks.json", opts.checks ?? { check_runs: [] }),
+      GH_CHECKS_FILE:
+        opts.checksText !== undefined
+          ? rawFile("checks.json", opts.checksText)
+          : file("checks.json", opts.checks ?? { check_runs: [] }),
       GH_REVIEWS_FILE: file("reviews.json", opts.reviewPages ?? [opts.reviews ?? []]),
       GH_PR_FILE: file("pr.json", opts.pr ?? { requested_reviewers: [] }),
       ...opts.env,
@@ -200,6 +211,23 @@ describe("copilot_review_gate.ts", () => {
     const r = run({ checks: { check_runs: [{ status: 7 }] } });
     expect(r.exitCode).toBe(1);
     expect(r.output).toContain("::error::copilot_review_gate: check-runs response");
+  });
+
+  // The value-free diagnostic discipline (shared/json.ts): externally
+  // controlled response bodies must never reach the workflow annotation,
+  // which lands in PUBLIC CI logs.
+  test("a non-JSON response body never echoes into the annotation", () => {
+    const r = run({ rules: COPILOT_RULE, checksText: "LEAKED-BODY-FRAGMENT {not json" });
+    expect(r.exitCode).toBe(1);
+    expect(r.output).toContain("not valid JSON");
+    expect(r.output).not.toContain("LEAKED-BODY-FRAGMENT");
+  });
+
+  test("a schema-rejected response names paths and issue codes, never received values", () => {
+    const r = run({ rules: COPILOT_RULE, checks: { check_runs: "LEAKED-VALUE" } });
+    expect(r.exitCode).toBe(1);
+    expect(r.output).toContain("unexpected shape");
+    expect(r.output).not.toContain("LEAKED-VALUE");
   });
 
   // Parity with the template twin, which had to grow jq shape guards for
