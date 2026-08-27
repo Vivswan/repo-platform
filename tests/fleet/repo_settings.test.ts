@@ -2,9 +2,12 @@
 // .github/settings.yml, the same way merge_settings_layers.test.ts pins
 // the override layer's protection policy. The `actions` ref is executable
 // fleet-wide - rendered workflows pin `uses: ...@actions` and run its tree
-// directly, with no provenance verify like the sync-side check guarding
-// `template` - so a settings edit that reopens it to plain pushes must
-// fail here, loudly.
+// directly - so a settings edit that drops it from the append-only ruleset
+// must fail here, loudly. Also pins, fleet-wide: no settings layer may
+// declare an Integration bypass actor, because GitHub rejects one on a
+// user-owned repository's ruleset (POST /rulesets, 422 "Actor GitHub
+// Actions integration must be part of the ruleset source or owner
+// organization") and the settings apply dies at ruleset creation.
 
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
@@ -16,16 +19,19 @@ type Ruleset = {
   enforcement?: string;
   conditions?: { ref_name?: { include?: string[]; exclude?: string[] } };
   rules?: { type: string }[];
-  bypass_actors?: Record<string, unknown>[];
+  bypass_actors?: { actor_type?: string }[];
 };
 
-const doc = parseYaml(readFileSync(".github/settings.yml", "utf-8")) as {
-  rulesets: Ruleset[];
-};
+function readRulesets(path: string): Ruleset[] {
+  const doc = parseYaml(readFileSync(path, "utf-8")) as { rulesets?: Ruleset[] } | null;
+  return doc?.rulesets ?? [];
+}
 
-describe("the repo's own build-branch rulesets", () => {
-  test("deletion and force-pushes stay blocked for everyone, publisher included", () => {
-    const buildBranches = doc.rulesets.find((r) => r.name === "build-branches");
+describe("the repo's own build-branch ruleset", () => {
+  test("both build refs, the executable actions ref included, stay append-only for everyone", () => {
+    const buildBranches = readRulesets(".github/settings.yml").find(
+      (r) => r.name === "build-branches",
+    );
     expect(buildBranches).toBeDefined();
     expect(buildBranches?.target).toBe("branch");
     expect(buildBranches?.enforcement).toBe("active");
@@ -36,37 +42,37 @@ describe("the repo's own build-branch rulesets", () => {
       "non_fast_forward",
     ]);
     // Declared EMPTY, never omitted: only the explicit empty list lets
-    // the nightly heal clear an out-of-band bypass actor - the
-    // publish-only ruleset below is separate precisely so its bypass
-    // actor cannot leak into these rules.
+    // the nightly heal clear an out-of-band bypass actor.
     expect(buildBranches?.bypass_actors).toEqual([]);
   });
+});
 
-  test("the actions ref blocks every write, creation included, bypassed only by the publish identity", () => {
-    const publishOnly = doc.rulesets.find((r) => r.name === "actions-ref-publish-only");
-    expect(publishOnly).toBeDefined();
-    expect(publishOnly?.target).toBe("branch");
-    expect(publishOnly?.enforcement).toBe("active");
-    expect(publishOnly?.conditions?.ref_name?.include).toEqual(["actions"]);
-    expect(publishOnly?.conditions?.ref_name?.exclude).toEqual([]);
-    // creation is a SEPARATE GitHub rule from update: without it, any
-    // push-capable principal could claim the executable ref whenever it is
-    // absent (initial rollout, or recovery after an out-of-band deletion).
-    // deletion and non_fast_forward ride along so the whole write surface
-    // is one shape; the publisher stays bound to them anyway through the
-    // bypass-free build-branches ruleset above.
-    expect(publishOnly?.rules).toEqual([
-      { type: "creation" },
-      { type: "update" },
-      { type: "deletion" },
-      { type: "non_fast_forward" },
-    ]);
-    // 15368 is the GitHub Actions integration - the identity of the
-    // GITHUB_TOKEN build-branches.yml publishes with. The narrowest actor
-    // the ruleset dialect can express; see the comment in settings.yml
-    // for the residual this accepts.
-    expect(publishOnly?.bypass_actors).toEqual([
-      { actor_id: 15368, actor_type: "Integration", bypass_mode: "always" },
-    ]);
+describe("every settings layer", () => {
+  test("no ruleset declares an Integration bypass actor", () => {
+    const layerFiles = [
+      // dot: true, or the glob silently skips the dotted .github/ paths.
+      ...new Bun.Glob(".github/settings*.yml").scanSync({ dot: true }),
+      ...new Bun.Glob("templates/*/settings*.yml").scanSync(),
+    ].sort();
+    // Controls: the scan must reach the layers known to carry bypass
+    // actors, or an empty glob would pass vacuously.
+    expect(layerFiles).toContain(".github/settings-override.yml");
+    expect(layerFiles).toContain("templates/release-please/settings.yml");
+    let actorsSeen = 0;
+    const violations = layerFiles.flatMap((file) =>
+      readRulesets(file).flatMap((ruleset) =>
+        (ruleset.bypass_actors ?? [])
+          .filter((actor) => {
+            actorsSeen += 1;
+            // Required-check integration_id pins are a different field
+            // and stay valid on user-owned rulesets; only bypass actors
+            // of type Integration are rejected.
+            return actor.actor_type === "Integration";
+          })
+          .map(() => `${file}: ruleset ${ruleset.name}`),
+      ),
+    );
+    expect(actorsSeen).toBeGreaterThan(0);
+    expect(violations).toEqual([]);
   });
 });
