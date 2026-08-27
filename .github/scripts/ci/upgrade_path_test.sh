@@ -1295,12 +1295,12 @@ grep -qF "deselect-local agents tail" "$DESEL_WORK/removed-splits.md" \
 # inputs - the removed-paths list and the carry summary - are
 # informational and never force review; the gh stub from the tripwire leg
 # records the body).
-echo "template@old" > "$DESEL_WORK/old_commit.txt"
+echo "build@old" > "$DESEL_WORK/old_commit.txt"
 : > "$DESEL_WORK/empty.txt"
 GH_CALLS="$DESEL_WORK/gh-calls.txt" PATH="$TRIP_BIN:$PATH" \
   TARGET="Vivswan/deselect" RUNNER_TEMP="$DESEL_WORK" \
   GITHUB_REPOSITORY="Vivswan/repo-platform" GITHUB_OUTPUT="$DESEL_WORK/gh-output.txt" \
-  BRANCH=automation/repo-platform BASE_BRANCH=main DISPLAY="template@new" \
+  BRANCH=automation/repo-platform BASE_BRANCH=main DISPLAY="build@new" \
   RECOVER="" RESOLVED="" VALIDATION=passed HIDE_DETAILS="" \
   DRIFT_FILE="$DESEL_WORK/empty.txt" CARRIED_FILE="$DESEL_WORK/local-carryover.md" \
   CARRY_REVIEW_FILE="$DESEL_WORK/carry-review.txt" RETIRED_MODULES_FILE="$DESEL_WORK/empty.txt" \
@@ -1425,12 +1425,12 @@ grep -qF 'nightly-fuzz.yml`: left alone' "$PIN_WORK/starter-pin-rollout.md" \
 # The chain's tail: open_pr.ts must append the transition note and, since
 # the note is informational, still arm auto-merge (gh stub from the
 # tripwire leg records the body and the merge call).
-echo "template@old" > "$PIN_WORK/old_commit.txt"
+echo "build@old" > "$PIN_WORK/old_commit.txt"
 : > "$PIN_WORK/empty.txt"
 GH_CALLS="$PIN_WORK/gh-calls.txt" PATH="$TRIP_BIN:$PATH" \
   TARGET="Vivswan/starter-pins" RUNNER_TEMP="$PIN_WORK" \
   GITHUB_REPOSITORY="Vivswan/repo-platform" GITHUB_OUTPUT="$PIN_WORK/gh-output.txt" \
-  BRANCH=automation/repo-platform BASE_BRANCH=main DISPLAY="template@new" \
+  BRANCH=automation/repo-platform BASE_BRANCH=main DISPLAY="build@new" \
   RECOVER="" RESOLVED="" VALIDATION=passed HIDE_DETAILS="" \
   DRIFT_FILE="$PIN_WORK/empty.txt" CARRIED_FILE="$PIN_WORK/empty.txt" \
   CARRY_REVIEW_FILE="$PIN_WORK/empty.txt" RETIRED_MODULES_FILE="$PIN_WORK/empty.txt" \
