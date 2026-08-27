@@ -21,13 +21,12 @@ const mainHistory = (ancestor: string, descendant: string): boolean =>
 
 describe("pendingRefFor", () => {
   test("keys the ref by the full source sha, in the BRANCH namespace", () => {
-    // The literal prefix is load-bearing security config, not a free
-    // choice: rulesets only target branches and tags, and the
-    // build-branches-writer ruleset (.github/settings.yml) covers
-    // build-pending/** so plain contents write cannot park a poisoned
-    // tree the publisher would promote by name-match. Moving the prefix
-    // out of refs/heads/ would silently drop that protection, so the
-    // expectation here is spelled out rather than derived.
+    // The literal prefix is deliberate: only branches and tags can ever
+    // be ruleset-covered, so the namespace keeps the OPTION of scoping
+    // pending-ref writes to the publisher if GitHub's dialect ever allows
+    // it on user repositories (pending.ts's header has the residual this
+    // parks). Moving the prefix out of refs/heads/ would silently close
+    // that option, so the expectation is spelled out rather than derived.
     expect(pendingRefFor(OLD)).toBe(`refs/heads/build-pending/${OLD}`);
     expect(PENDING_REF_PREFIX).toBe("refs/heads/build-pending/");
   });

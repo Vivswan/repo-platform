@@ -8,10 +8,13 @@ import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import {
+  describeRewritten,
   entryHash,
   isMarkerLine,
   managedHalf,
+  normalizeFromText,
   normalizeSymlinkTargets,
+  parseManifestFiles,
   recordedCommit,
   resolveConflictsTowardAfter,
   stampManifestText,
@@ -302,7 +305,7 @@ describe("stampManifestText", () => {
     expect(() => {
       result = stampManifestText(text, root);
     }).not.toThrow();
-    expect(result?.problem).toContain('more than one entry line for "CLAUDE.md"');
+    expect(result?.problem).toContain('more than one entry for "CLAUDE.md"');
     // The untouched text is emitted (out === text), so main() warns and
     // exits 0 rather than aborting the render.
     expect(result?.out).toBe(text);
@@ -400,5 +403,114 @@ describe("normalizeSymlinkTargets", () => {
     };
     expect(normalizeSymlinkTargets(root, files)).toEqual([]);
     expect(readTarget(outside, "victim.md")).toBe("prey.md.jinja");
+  });
+});
+
+// The parse boundary owns ALL manifest validation - every consumer
+// (normalization and stamping alike) inherits it, so a manifest the
+// parser rejects can never mutate a link or stamp a hash.
+describe("parseManifestFiles validation", () => {
+  const manifestOf = (filesJson: string) => `{\n  "files": {\n${filesJson}\n  }\n}\n`;
+  const readTarget = (root: string, path: string) =>
+    Bun.spawnSync(["readlink", join(root, path)])
+      .stdout.toString()
+      .trim();
+
+  test("a null (or scalar) entry is a soft problem, never a throw", () => {
+    // A null entry would throw at entry.class in a consumer, turning the
+    // warn-and-continue contract into a hard render failure.
+    for (const bad of ["null", "3", '"managed"', "[]"]) {
+      const parsed = parseManifestFiles(manifestOf(`    "a.md": ${bad}`));
+      expect(parsed.problem).toContain("not an object with a string class");
+      expect(parsed.files).toBeNull();
+    }
+    const stamped = stampManifestText(manifestOf('    "a.md": null'), "/nonexistent");
+    expect(stamped.problem).toContain("not an object with a string class");
+  });
+
+  test("a duplicated manifest normalizes NOTHING (rejected before any mutation)", () => {
+    // Duplicate JSON keys last-win at parse, so a duplicate line can flip
+    // a path's class to managed; acting on the parsed value would then
+    // rewrite a link the honest manifest never managed. The parse gate
+    // must fire before the mutation, leaving the link untouched.
+    const root = mkdtempSync(join(tmpdir(), "normalize-dup-"));
+    symlinkSync("notes.md.jinja", join(root, "CLAUDE.md"));
+    const text = manifestOf(
+      '    "CLAUDE.md": {"class": "starter"},\n    "CLAUDE.md": {"class": "managed", "hash": null}',
+    );
+    const { rewritten, problem } = normalizeFromText(text, root);
+    expect(rewritten).toEqual([]);
+    expect(problem).toContain("more than one entry");
+    // The mutation never happened: the link still carries its suffix.
+    expect(readTarget(root, "CLAUDE.md")).toBe("notes.md.jinja");
+  });
+
+  test("a path literally named files or $comment is not double-counted against the structural line", () => {
+    // The top-level '"files": {' and '"$comment": ...' lines sit at
+    // two-space indent; entries at four. A single honest entry for a path
+    // NAMED after one of them must not read as a duplicate.
+    const text = [
+      "{",
+      '  "$comment": "test",',
+      '  "files": {',
+      '    "files": {"class": "managed", "hash": null},',
+      '    "$comment": {"class": "starter"}',
+      "  }",
+      "}",
+      "",
+    ].join("\n");
+    const parsed = parseManifestFiles(text);
+    expect(parsed.problem).toBeNull();
+    expect(Object.keys(parsed.files ?? {}).sort()).toEqual(["$comment", "files"]);
+  });
+
+  test("duplicates are found STRUCTURALLY: mixed value shapes and re-indented lines all count", () => {
+    // "x": null on one line plus a valid object on another: JSON.parse
+    // last-wins to the valid object (so the shape check passes), and a
+    // scan reading only well-formed entry lines - or only canonically
+    // indented ones - would miss it. The structural walk counts the files
+    // object's direct child keys wherever and however they appear.
+    const root = mkdtempSync(join(tmpdir(), "normalize-dup-mixed-"));
+    symlinkSync("notes.md.jinja", join(root, "CLAUDE.md"));
+    for (const filesBody of [
+      // Mixed shapes at canonical indent.
+      '    "CLAUDE.md": null,\n    "CLAUDE.md": {"class": "managed", "hash": null}',
+      // A re-indented merge artifact (two spaces on the null line).
+      '  "CLAUDE.md": null,\n    "CLAUDE.md": {"class": "managed", "hash": null}',
+      // Both keys on ONE line.
+      '    "CLAUDE.md": null, "CLAUDE.md": {"class": "managed", "hash": null}',
+    ]) {
+      const { rewritten, problem } = normalizeFromText(manifestOf(filesBody), root);
+      expect(rewritten).toEqual([]);
+      expect(problem).toContain("more than one entry");
+      expect(readTarget(root, "CLAUDE.md")).toBe("notes.md.jinja");
+    }
+  });
+
+  test("a duplicated top-level files mapping is the same corruption one level up", () => {
+    // JSON.parse last-wins on the OUTER key too: two "files" objects would
+    // let the second swap the whole entry set while a walk of the first
+    // saw nothing wrong. The walk counts the mappings and keeps the last
+    // one's keys, so both the count and any duplicate within the parsed
+    // set are caught - and nothing is mutated.
+    const root = mkdtempSync(join(tmpdir(), "normalize-dup-outer-"));
+    symlinkSync("notes.md.jinja", join(root, "CLAUDE.md"));
+    const text =
+      '{"files":{"safe.md":{"class":"starter"}},"files":{"CLAUDE.md":{"class":"managed","hash":null}}}';
+    const { rewritten, problem } = normalizeFromText(text, root);
+    expect(rewritten).toEqual([]);
+    expect(problem).toContain('top-level "files" mappings');
+    expect(readTarget(root, "CLAUDE.md")).toBe("notes.md.jinja");
+  });
+
+  test("rewritten paths are JSON-quoted in the log line (no control-byte injection)", () => {
+    // Manifest keys are target-controlled: a decoded path carrying a
+    // newline could forge workflow commands in the Actions log. The
+    // describeRewritten line must keep every escape literal.
+    const evil = "evil\n::error::forged.md";
+    const line = describeRewritten([evil, "plain.md"]);
+    expect(line).not.toContain("\n");
+    expect(line).toContain(String.raw`"evil\n::error::forged.md"`);
+    expect(line).toContain('"plain.md"');
   });
 });

@@ -7,12 +7,17 @@
 // newest-green-wins rule, so the three can never drift.
 //
 // The refs live in the BRANCH namespace (refs/heads/build-pending/<sha>)
-// on purpose: the publisher promotes a pending tree into the executable
-// `build` branch on name-match alone, so the namespace must be covered by
-// the build-branches-writer ruleset (rulesets only target branches and
-// tags) - otherwise any principal with plain contents write could park a
-// poisoned tree under the right name and have the official publisher
-// stamp and ship it.
+// on purpose: only branches and tags can ever be ruleset-covered, so the
+// namespace keeps the OPTION of scoping pending-ref writes to the
+// publisher if GitHub's ruleset dialect ever allows it on user
+// repositories (today it does not: the required Integration bypass actor
+// 422s there, which is why no writer-restricting ruleset exists - see
+// .github/settings.yml). Stated plainly: parking a poisoned pending tree
+// is therefore equivalent in power to fast-forwarding refs/heads/build
+// directly, the documented residual of the executable channel; the sync
+// side's provenance rebuild is the boundary for template consumption,
+// and publish.ts's shape guard bounds what a malformed pending tree can
+// publish.
 
 export const PENDING_REF_PREFIX = "refs/heads/build-pending/";
 
