@@ -99,14 +99,13 @@ import { joinLines, splitLines } from "../.github/scripts/shared/lines.ts";
 import { loadManifests, MODULE_ORDER, type ModuleManifest } from "./module_manifests.ts";
 import {
   declarationTextErrors,
-  declaredRegionMarkerTexts,
-  declaredTailMarkerTexts,
   landedPathAndGates,
   loadBaseOwnership,
   type ManifestOwnership,
   type OwnershipDeclaration,
   ownershipOf,
   readExcludeList,
+  rosterTexts,
   SETTINGS_LAYER_NAMES,
   skipIfExistsPatterns,
 } from "./ownership.ts";
@@ -1118,14 +1117,13 @@ export function manifestEntries(
     register(module, `templates/${module}/module.yml`, `templates/${module}/`, list);
   }
   // The managed/starter contradiction scan checks against EVERY declared
-  // bounded-region and tail grammar's markers, base and module declarations
-  // alike. declarationTextErrors unions the shipped constants in, so the
-  // scan survives a tree whose only bounded declaration flips to managed -
-  // deriving from current declarations alone would empty the set on exactly
-  // that flip and disarm the check.
+  // grammar's markers, base and module declarations alike, keyed by the
+  // roster their GRAMMAR row assigns. declarationTextErrors unions the
+  // shipped constants in, so the scan survives a tree whose only bounded
+  // declaration flips to managed - deriving from current declarations alone
+  // would empty the set on exactly that flip and disarm the check.
   const allDeclarations = [...declarations.base, ...[...declarations.modules.values()].flat()];
-  const regionMarkerTexts = declaredRegionMarkerTexts(allDeclarations);
-  const tailMarkerTexts = declaredTailMarkerTexts(allDeclarations);
+  const declaredMarkers = rosterTexts(allDeclarations);
   for (const [path, list] of declaredBy) {
     const first = JSON.stringify(list[0].ownership);
     const dissenter = list.find(({ ownership }) => JSON.stringify(ownership) !== first);
@@ -1187,9 +1185,8 @@ export function manifestEntries(
           declaration,
           sourced.entry.data.toString("utf-8"),
           skipMatched,
-          regionMarkerTexts,
+          declaredMarkers,
           source,
-          tailMarkerTexts,
         ),
       );
     }

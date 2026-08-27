@@ -64,6 +64,7 @@ import { existsSync, lstatSync, readdirSync, readFileSync, writeFileSync } from 
 import { join, resolve } from "node:path";
 import { z } from "zod";
 import { managedLabelNames } from "../.github/scripts/fleet/render_managed_settings.ts";
+import type { RegionSplitGrammar } from "../actions/shared/grammar.ts";
 import { compose, dependabotLabels, excludePatterns } from "./compose_template.ts";
 import {
   loadManifests,
@@ -76,7 +77,6 @@ import {
   baseOwnershipTables,
   moduleOwnershipEntries,
   type OwnershipEntry,
-  type RegionSplitGrammar,
 } from "./ownership.ts";
 
 const REPO_ROOT = resolve(import.meta.dir, "..");

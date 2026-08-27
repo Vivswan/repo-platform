@@ -33,11 +33,25 @@
 // - scripts/generate.ts derives validate-template's MODULE_OWNERSHIP and
 //   BASE_OWNERSHIP records (moduleOwnershipEntries / baseOwnershipTables
 //   below).
+//
+// Per-grammar behavior (owned markers, foreign-marker roster, managed
+// side, validator enforcement) is the GRAMMAR descriptor table in
+// actions/shared/grammar.ts; the schema's grammar union is welded to the
+// table's key set at compile time (the Expect<Equal<...>> bridge below),
+// so no consumer can meet a grammar the table has no row for.
 
 import { existsSync, lstatSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
+import {
+  type GrammarId,
+  grammarMarkers,
+  grammarSpec,
+  HEADER_WINDOW,
+  type MarkerKind,
+  type RegionSplitGrammar,
+} from "../actions/shared/grammar.ts";
 import type { ModuleManifest } from "./module_manifests.ts";
 
 /** The managed ownership header in template sources, anchored on the
@@ -69,11 +83,6 @@ export const LOCAL_SECTION_LINES = new Set([
   `# ${LOCAL_SECTION_MARKER}`,
   `<!-- ${LOCAL_SECTION_MARKER} -->`,
 ]);
-
-/** How many opening lines may hold the managed header: template sources
- *  keep it at the top, at most below a short jinja preamble that rendering
- *  collapses. The validator's rendered-file check uses the same window. */
-export const HEADER_WINDOW = 10;
 
 /** A module's settings layers, next to its module.yml (docs/settings.md).
  *  Module METADATA like the manifest itself: read by the fleet's settings
@@ -265,12 +274,16 @@ export type ManifestOwnership = OmitPath<OwnershipDeclaration>;
 
 export type SplitOwnership = Extract<ManifestOwnership, { class: "split" }>;
 
-/** Which half of a split file sync owns, derived from the grammar (never
- *  declared separately - a side that disagreed with its grammar would be
- *  an unrepresentable state). */
-export function managedSide(split: SplitOwnership): "above" | "below" {
-  return split.grammar === "tail-marker" ? "above" : "below";
-}
+type Equal<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
+type Expect<T extends true> = T;
+type SchemaGrammarId = SplitOwnership["grammar"];
+
+/** The weld between the declaration schema and the grammar descriptor
+ *  table (actions/shared/grammar.ts): the schema's grammar union and the
+ *  table's key set must be the SAME type, so adding a grammar arm to the
+ *  schema without a full table row - or a row without a schema arm - is a
+ *  compile error, never a runtime fallthrough. */
+type _GrammarTableCoversSchema = Expect<Equal<GrammarId, SchemaGrammarId>>;
 
 export function ownershipOf(declaration: OwnershipDeclaration): ManifestOwnership {
   const { path: _path, ...ownership } = declaration;
@@ -422,63 +435,44 @@ export function landedPathAndGates(renderedPath: string): { path: string; gates:
 
 // --- declaration decoration checks --------------------------------------------
 
-/** Every marker string any declared TAIL grammar owns. The schema accepts
- *  arbitrary marker text, so the shipped LOCAL_SECTION_LINES alone would
- *  miss a custom declared marker copied into a managed or starter source;
- *  declarationTextErrors unions this derived set with those constants,
- *  exactly as it does for bounded-region markers. Deriving ALONE is
- *  self-disarming and the union must stay: the constants are what keep the
- *  scan armed when no declaration of a given grammar is left in the tree. */
-export function declaredTailMarkerTexts(declarations: Iterable<OwnershipDeclaration>): string[] {
-  const out = new Set<string>();
+/** Every marker string the declared split grammars own, keyed by the
+ *  roster their GRAMMAR row assigns (a null roster keeps a grammar's
+ *  markers off both). The schema accepts arbitrary marker text, so the
+ *  shipped constants alone would miss a custom declared marker copied into
+ *  a managed or starter source; declarationTextErrors unions this derived
+ *  record with LOCAL_SECTION_LINES and REGION_MARKER_LINES. Deriving ALONE
+ *  is self-disarming and the union must stay: the constants are what keep
+ *  the scan armed when no declaration of a given grammar is left in the
+ *  tree. */
+export function rosterTexts(
+  declarations: Iterable<OwnershipDeclaration>,
+): Record<MarkerKind, string[]> {
+  const out: Record<MarkerKind, Set<string>> = { tail: new Set(), region: new Set() };
   for (const declaration of declarations) {
-    if (declaration.class !== "split" || declaration.grammar !== "tail-marker") continue;
-    out.add(declaration.marker);
+    if (declaration.class !== "split") continue;
+    const { roster } = grammarSpec(declaration.grammar);
+    if (roster === null) continue;
+    for (const marker of grammarMarkers(declaration.grammar, declaration)) {
+      out[roster].add(marker);
+    }
   }
-  return [...out];
-}
-
-export function declaredRegionMarkerTexts(declarations: Iterable<OwnershipDeclaration>): string[] {
-  const out = new Set<string>();
-  for (const declaration of declarations) {
-    if (declaration.class !== "split" || declaration.grammar !== "bounded-region") continue;
-    out.add(declaration.local_begin);
-    out.add(declaration.local_end);
-    out.add(declaration.managed_begin);
-    out.add(declaration.managed_end);
-  }
-  return [...out];
+  return { tail: [...out.tail], region: [...out.region] };
 }
 
 // --- the foreign-marker rule, stated once -------------------------------------
 
-/** The two marker vocabularies a source can claim ownership with: a TAIL
- *  marker (one line ends the sync-owned top) and the BOUNDED-REGION markers
- *  (four lines bound the halves). Every declaration owns some markers of at
- *  most one kind; markers of either kind that it does not own are foreign. */
-type MarkerKind = "tail" | "region";
-
-/** The markers a declaration itself owns, by kind. managed and starter own
- *  none of either - which is exactly what makes every marker in the tree
- *  foreign to them - and so does a shape this union does not recognise yet,
- *  so a grammar added tomorrow inherits the foreign-marker rejection before
- *  it has an arm of its own. */
+/** The markers a declaration itself owns, by kind, from its GRAMMAR row.
+ *  managed and starter own none of either - which is exactly what makes
+ *  every marker in the tree foreign to them. A split shape with no table
+ *  row cannot exist past the compile-time weld above; one smuggled past
+ *  the type system throws in grammarSpec rather than scanning with an
+ *  empty set. */
 function ownMarkers(declaration: OwnershipDeclaration): Record<MarkerKind, readonly string[]> {
-  if (declaration.class === "split" && declaration.grammar === "tail-marker") {
-    return { tail: [declaration.marker], region: [] };
-  }
-  if (declaration.class === "split" && declaration.grammar === "bounded-region") {
-    return {
-      tail: [],
-      region: [
-        declaration.local_begin,
-        declaration.local_end,
-        declaration.managed_begin,
-        declaration.managed_end,
-      ],
-    };
-  }
-  return { tail: [], region: [] };
+  const none: Record<MarkerKind, readonly string[]> = { tail: [], region: [] };
+  if (declaration.class !== "split") return none;
+  const { roster } = grammarSpec(declaration.grammar);
+  if (roster === null) return none;
+  return { ...none, [roster]: grammarMarkers(declaration.grammar, declaration) };
 }
 
 /** The four shipped declaration shapes, plus `other` for anything this
@@ -661,19 +655,17 @@ function foreignMarkerErrors(
  *  never classification input. `skipMatched` says whether copier.yml's
  *  _skip_if_exists exempts the landed path: the starter class and the
  *  skip list must agree in both directions (copier needs the skip entry,
- *  the declaration is the single ownership truth). `regionMarkerTexts` and
- *  `tailMarkerTexts` are every declared grammar's marker strings
- *  (declaredRegionMarkerTexts / declaredTailMarkerTexts over ALL declaration
- *  sources); they join the shipped constants to form the rosters the shared
- *  foreign-marker scan checks every declaration against. `where` names the
- *  source file in errors. */
+ *  the declaration is the single ownership truth). `declaredMarkers` is
+ *  every declared grammar's marker strings by roster kind (rosterTexts
+ *  over ALL declaration sources); they join the shipped constants to form
+ *  the rosters the shared foreign-marker scan checks every declaration
+ *  against. `where` names the source file in errors. */
 export function declarationTextErrors(
   declaration: OwnershipDeclaration,
   source: string,
   skipMatched: boolean,
-  regionMarkerTexts: readonly string[],
+  declaredMarkers: Record<MarkerKind, readonly string[]>,
   where: string,
-  tailMarkerTexts: readonly string[] = [],
 ): string[] {
   // The foreign-marker rule runs FIRST and for every declaration, so each
   // arm below states only what is true of its OWN markers. Written per arm
@@ -687,8 +679,8 @@ export function declarationTextErrors(
   // scan on exactly the flip it exists to catch - and the constants alone
   // would miss a custom declared marker copied into another source.
   const rosters: Record<MarkerKind, readonly string[]> = {
-    tail: [...LOCAL_SECTION_LINES, ...tailMarkerTexts],
-    region: [...REGION_MARKER_LINES, ...regionMarkerTexts],
+    tail: [...LOCAL_SECTION_LINES, ...declaredMarkers.tail],
+    region: [...REGION_MARKER_LINES, ...declaredMarkers.region],
   };
   const foreign = foreignMarkerErrors(declaration, source, rosters, where);
   if (foreign.length > 0) return foreign;
@@ -814,13 +806,6 @@ export interface RenderWhen {
 
 export type BaseOwnershipEntry = OwnershipEntry & { when?: RenderWhen };
 
-export interface RegionSplitGrammar {
-  managedBegin: string;
-  managedEnd: string;
-  localBegin: string;
-  localEnd: string;
-}
-
 /** A source folder's landed files: landed path -> gates + source text
  *  (null for symlinks - no text to read decoration from). */
 function landedFiles(
@@ -861,9 +846,10 @@ function landedFiles(
  *  for a managed file, "class-only" for a managed file declared headerless
  *  (nothing to check in-file, but the path must still reach the manifest
  *  cross-check or a hand-flipped class would silently exempt it from byte
- *  parity), "marker" for a tail-marker split. null for starters
- *  (repo-owned; nothing to enforce) and bounded-region splits (the region
- *  tables carry their grammar, not a kind). */
+ *  parity), and for splits whatever the grammar's GRAMMAR row declares in
+ *  its enforce column. null for starters (repo-owned; nothing to enforce)
+ *  and for grammars whose enforce column is null (bounded-region: the
+ *  region tables carry their grammar, not a kind). */
 function enforcementOf(declaration: OwnershipDeclaration): OwnershipEntry | null {
   switch (declaration.class) {
     case "starter":
@@ -872,10 +858,20 @@ function enforcementOf(declaration: OwnershipDeclaration): OwnershipEntry | null
       return declaration.headerless === true
         ? { path: declaration.path, kind: "class-only" }
         : { path: declaration.path, kind: "header" };
-    case "split":
-      return declaration.grammar === "tail-marker"
-        ? { path: declaration.path, kind: "marker", marker: declaration.marker }
-        : null;
+    case "split": {
+      const { enforce } = grammarSpec(declaration.grammar);
+      if (enforce === null) return null;
+      if (enforce === "header") return { path: declaration.path, kind: "header" };
+      const markers = grammarMarkers(declaration.grammar, declaration);
+      if (markers.length !== 1) {
+        throw new Error(
+          `grammar '${declaration.grammar}' enforces by marker but owns ` +
+            `${markers.length} marker lines - a "marker" table entry carries exactly ` +
+            "one; fix the GRAMMAR row (actions/shared/grammar.ts)",
+        );
+      }
+      return { path: declaration.path, kind: "marker", marker: markers[0] };
+    }
     default: {
       const unhandled: never = declaration;
       throw new Error(`unhandled ownership class: ${JSON.stringify(unhandled)}`);
@@ -943,13 +939,10 @@ export function moduleOwnershipEntries(
             `${m.module}/ file lands there - fix the path or delete the entry`,
         );
       }
-      // Checked before the gate skip: a gated managed file's header mode
-      // must hold too, even though the module tables never enforce it.
+      // Checked before the gate handling: a gated managed file's header
+      // mode must hold too, even though the module tables never enforce it.
       const headerDrift = headerModeError(declaration, file.source, where);
       if (headerDrift !== null) throw new Error(headerDrift);
-      // Filename-gated files only declare: module selection alone does not
-      // render them, so the module-keyed tables must not enforce them.
-      if (file.gates.length > 0) continue;
       if (declaration.class === "split" && declaration.grammar === "bounded-region") {
         throw new Error(
           `${where}: '${declaration.path}' declares a bounded-region split, which the ` +
@@ -958,7 +951,22 @@ export function moduleOwnershipEntries(
         );
       }
       const entry = enforcementOf(declaration);
-      if (entry !== null) entries.push(entry);
+      if (entry === null) continue;
+      // Module selection alone does not render a filename-gated file, and
+      // the module-keyed tables carry no render conditions - an entry here
+      // would false-positive on renders whose gate is off, while dropping
+      // it silently (the old behavior) exempted the file from enforcement
+      // with nothing said. Loud until the tables can carry gates.
+      if (file.gates.length > 0) {
+        throw new Error(
+          `${where}: '${declaration.path}' is enforceable but filename-gated ` +
+            `(${file.gates.join(" and ")}), and the validator's module tables carry no ` +
+            "render conditions, so it would silently fall out of enforcement - extend " +
+            "moduleOwnershipEntries with gate translation (see baseOwnershipTables) " +
+            "before gating enforceable module files",
+        );
+      }
+      entries.push(entry);
     }
     if (entries.length > 0) result[m.module] = entries;
   }

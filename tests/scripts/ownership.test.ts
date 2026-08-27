@@ -7,19 +7,19 @@ import { describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { GRAMMAR } from "../../actions/shared/grammar";
 import type { ModuleManifest } from "../../scripts/module_manifests";
 import {
   baseOwnershipTables,
   declarationTextErrors,
-  declaredRegionMarkerTexts,
   landedPathAndGates,
   loadBaseOwnership,
-  managedSide,
   moduleOwnershipEntries,
   type OwnershipDeclaration,
   ownershipEntrySchema,
   ownershipListSchema,
   ownershipOf,
+  rosterTexts,
   skipIfExistsPatterns,
   translateGates,
 } from "../../scripts/ownership";
@@ -85,14 +85,11 @@ describe("ownershipEntrySchema", () => {
     }
   });
 
-  test("managedSide derives from the grammar, never declared separately", () => {
-    const split = (declaration: OwnershipDeclaration) => {
-      const ownership = ownershipOf(declaration);
-      if (ownership.class !== "split") throw new Error("expected a split");
-      return ownership;
-    };
-    expect(managedSide(split(tail("SECURITY.md", HTML_SENTINEL)))).toBe("above");
-    expect(managedSide(split(bounded(".gitignore")))).toBe("below");
+  test("the managed side is GRAMMAR table data, never declared separately", () => {
+    // A side that disagreed with its grammar is unrepresentable: the
+    // declaration carries no side field, consumers read the table column.
+    expect(GRAMMAR["tail-marker"].side).toBe("above");
+    expect(GRAMMAR["bounded-region"].side).toBe("below");
   });
 
   test("rejects a split without a grammar and an unknown grammar", () => {
@@ -305,7 +302,7 @@ describe("declarationTextErrors", () => {
     local_begin: "# NOTES LOCAL OPEN",
     local_end: "# NOTES LOCAL CLOSE",
   };
-  const REGION_MARKER_TEXTS = declaredRegionMarkerTexts([bounded(".gitignore"), otherBounded]);
+  const DECLARED_MARKERS = rosterTexts([bounded(".gitignore"), otherBounded]);
   const errorsOf = (
     declaration: OwnershipDeclaration,
     source: string,
@@ -316,9 +313,8 @@ describe("declarationTextErrors", () => {
       declaration,
       source,
       skipMatched,
-      REGION_MARKER_TEXTS,
+      { tail: tailMarkers, region: DECLARED_MARKERS.region },
       "templates/t/x.jinja",
-      tailMarkers,
     );
 
   test("a clean managed file, header optional, passes", () => {
@@ -574,7 +570,10 @@ describe("declarationTextErrors", () => {
       bounded(".gitignore"),
       source,
       false,
-      [...REGION_MARKER_TEXTS, "# BEGIN ACME LOCAL", "# END ACME LOCAL"],
+      {
+        tail: [],
+        region: [...DECLARED_MARKERS.region, "# BEGIN ACME LOCAL", "# END ACME LOCAL"],
+      },
       "templates/t/x.jinja",
     );
     expect(errors).toHaveLength(1);
@@ -660,15 +659,15 @@ describe("declarationTextErrors", () => {
     expect(missing[0]).toContain("'# END REPO-PLATFORM MANAGED'");
   });
 
-  // The point of hoisting the foreign-marker rule out of the four arms: it
-  // is stated ONCE, before any arm runs, so a grammar this union grows
-  // later inherits the rejection with no arm of its own. The specimen is a
-  // shape no arm knows - it reaches declarationTextErrors past the type
-  // system the way a half-finished new grammar would - and it is still
-  // refused both kinds of marker it does not own. Written per arm, every
-  // arm that was added arrived unarmed and needed its own fix round; this
-  // is the test that stops the next one from repeating that.
-  test("a grammar with NO arm of its own still rejects foreign markers", () => {
+  // The foreign-marker rule is stated ONCE, before any arm runs, and every
+  // grammar reaches it through its GRAMMAR table row. A grammar cannot be
+  // added to the schema without a row (the Expect<Equal<...>> bridge in
+  // scripts/ownership.ts makes that a compile error), so the only way a
+  // rowless shape arrives here is past the type system - a cast, the way a
+  // half-finished new grammar once did - and that must THROW, never scan
+  // with an empty marker set: written per arm, every arm that was added
+  // arrived unarmed and needed its own fix round.
+  test("a grammar with no GRAMMAR row throws loudly instead of scanning unarmed", () => {
     const novel = {
       path: "X.md",
       class: "split",
@@ -676,27 +675,34 @@ describe("declarationTextErrors", () => {
       marker: "# LEDGER",
     } as unknown as OwnershipDeclaration;
 
-    const tailForeign = errorsOf(novel, `body\n${HASH_SENTINEL}\n`, false);
-    expect(tailForeign).toHaveLength(1);
-    expect(tailForeign[0]).toContain(`carries the '${HASH_SENTINEL}' tail-marker line`);
-    expect(tailForeign[0]).toContain("sync rebuilds by the DECLARED grammar");
+    expect(() => errorsOf(novel, `body\n${HASH_SENTINEL}\n`, false)).toThrow(
+      "unknown split grammar 'ledger-block'",
+    );
+    expect(() => errorsOf(novel, `body\n${HASH_SENTINEL}\n`, false)).toThrow("GRAMMAR");
+  });
+});
 
-    const regionForeign = errorsOf(novel, "# NOTES LOCAL OPEN\nbody\n", false);
-    expect(regionForeign).toHaveLength(1);
-    expect(regionForeign[0]).toContain("carries the '# NOTES LOCAL OPEN' bounded-region marker");
+describe("rosterTexts", () => {
+  test("keys every declared grammar's markers by its GRAMMAR roster column", () => {
+    const texts = rosterTexts([
+      managed("Y.md"),
+      tail("X.md", "# acme:custom-tail"),
+      bounded(".gitignore"),
+      starter("Z.md"),
+    ]);
+    expect(texts.tail).toEqual(["# acme:custom-tail"]);
+    expect(new Set(texts.region)).toEqual(
+      new Set([
+        "# BEGIN REPO-PLATFORM MANAGED",
+        "# END REPO-PLATFORM MANAGED",
+        "# BEGIN REPOSITORY LOCAL",
+        "# END REPOSITORY LOCAL",
+      ]),
+    );
+  });
 
-    // Both kinds at once are both reported - the scan owes no arm a choice
-    // about which hazard it names.
-    expect(errorsOf(novel, `# NOTES LOCAL OPEN\n${HTML_SENTINEL}\n`, false)).toHaveLength(2);
-
-    // Both kinds share presence matching: marker text is a claim wherever
-    // it sits. Counted over the foreign findings alone - past the shared
-    // scan a shape with no arm falls into the arm chain, which is the very
-    // thing it has yet to grow.
-    const foreignOf = (source: string) =>
-      errorsOf(novel, source, false).filter((error) => error.includes(": carries the '"));
-    expect(foreignOf(`see ${HASH_SENTINEL} for details\n`)).toHaveLength(1);
-    expect(foreignOf("{% if g %}# NOTES LOCAL OPEN\n")).toHaveLength(1);
+  test("no split declarations means empty rosters (the shipped constants keep the scan armed)", () => {
+    expect(rosterTexts([managed("Y.md")])).toEqual({ tail: [], region: [] });
   });
 });
 
@@ -867,20 +873,37 @@ describe("moduleOwnershipEntries", () => {
     }
   });
 
-  test("a filename-gated file declares but is not enforced by the module tables", () => {
+  test("an enforceable filename-gated module file throws instead of silently dropping out", () => {
+    // The module tables carry no render conditions, so the old behavior -
+    // skipping gated files - exempted them from enforcement with nothing
+    // said. A gated STARTER stays fine: there is nothing to enforce.
     const dir = writeTree({
       "bun/managed.yml.jinja": `${HEADER}name: M\n`,
       "bun/{% if not private %}gated.yml{% endif %}.jinja": `${HEADER}name: G\n`,
     });
     try {
-      expect(
+      expect(() =>
         moduleOwnershipEntries(
           [moduleManifest([managed("managed.yml"), managed("gated.yml")])],
           dir,
         ),
-      ).toEqual({ bun: [{ path: "managed.yml", kind: "header" }] });
+      ).toThrow("enforceable but filename-gated");
     } finally {
       rmSync(dir, { recursive: true, force: true });
+    }
+    const gatedStarter = writeTree({
+      "bun/managed.yml.jinja": `${HEADER}name: M\n`,
+      "bun/{% if not private %}gated.yml{% endif %}.jinja": "name: G\n",
+    });
+    try {
+      expect(
+        moduleOwnershipEntries(
+          [moduleManifest([managed("managed.yml"), starter("gated.yml")])],
+          gatedStarter,
+        ),
+      ).toEqual({ bun: [{ path: "managed.yml", kind: "header" }] });
+    } finally {
+      rmSync(gatedStarter, { recursive: true, force: true });
     }
   });
 
