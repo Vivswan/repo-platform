@@ -160,6 +160,14 @@ echo "Building synthetic old fixture ${prev}"
 # behavior.
 bun .github/scripts/build-branches/branch_tree.ts --dest "$OLD_TREE"
 echo "retired sentinel" > "$OLD_TREE/template/.github/retired-sentinel.txt"
+# Model the fleet state before the Copilot gate moved into the ruleset: the
+# old template shipped a managed rerun-copilot-gate.yml (the re-arm half of
+# the retired copilot-review bridge). The new build renders no such file,
+# so the sync must DELETE it in every managed repo - this pins that
+# transition (a plain non-jinja file: copier copies it verbatim, which is
+# all the retirement diff needs).
+printf 'name: Rerun Copilot Gate\non: [pull_request_review]\n' \
+  > "$OLD_TREE/template/.github/workflows/rerun-copilot-gate.yml"
 # Model the historical fleet state the relicensing moved away from: the
 # old template shipped a different LICENSE, ungated and listed in
 # _skip_if_exists. Without this the synthetic fixture would already carry
@@ -185,6 +193,8 @@ cd "$PROJECT"
 test -f .github/settings.yml || fail "fixture render is missing .github/settings.yml"
 test -f .github/workflows/settings-sync.yml || fail "fixture render is missing settings-sync.yml"
 test -f .github/retired-sentinel.txt || fail "synthetic fixture is missing the retired sentinel"
+test -f .github/workflows/rerun-copilot-gate.yml \
+  || fail "synthetic fixture is missing the retired rerun-copilot-gate.yml"
 [ "$(cat LICENSE)" = "Old fleet license (pre-relicense fixture)" ] \
   || fail "synthetic fixture did not render the old fleet license"
 git init -q -b main
@@ -281,8 +291,12 @@ old_commit="$(awk '$1 == "_commit:" { print $2 }' <<<"$answers_old")"
 # Current copier already deletes the de-rendered sentinel during update, so
 # without help the rm loop below would run over an empty set and pass even
 # if it were broken. Resurrect the file the way an older copier (or a merge
-# driver) can leave it, so the loop must really delete it.
+# driver) can leave it, so the loop must really delete it. Same for the
+# retired managed rerun-copilot-gate.yml: its retirement must provably come
+# from retired_cleanup, not only from copier's own delete.
 echo "retired sentinel" > "$PROJECT/.github/retired-sentinel.txt"
+printf 'name: Rerun Copilot Gate\non: [pull_request_review]\n' \
+  > "$PROJECT/.github/workflows/rerun-copilot-gate.yml"
 RUNNER_TEMP="$WORK" SRC_PATH="$src_path" \
   OLD_SHA="$(git rev-parse "${prev}^{commit}")" \
   bun .github/scripts/sync/retired_cleanup.ts
@@ -299,6 +313,10 @@ grep -qF '.github/retired-sentinel.txt' "$WORK/retired-paths.json" \
   || fail "retired_paths did not flag the sentinel that left the render"
 grep -qF '.github/retired-sentinel.txt' "$WORK/removed-paths.txt" \
   || fail "retired_cleanup's rm loop did not delete the resurrected sentinel"
+grep -qF '.github/workflows/rerun-copilot-gate.yml' "$WORK/retired-paths.json" \
+  || fail "retired_paths did not flag the retired rerun-copilot-gate.yml"
+grep -qF '.github/workflows/rerun-copilot-gate.yml' "$WORK/removed-paths.txt" \
+  || fail "retired_cleanup's rm loop did not delete the resurrected rerun-copilot-gate.yml"
 
 # The workflow's preserve step: settings.yml and the opted-out LICENSE are
 # repo-owned; if the update de-rendered and deleted either, it comes back
@@ -318,9 +336,12 @@ cd "$PROJECT"
 grep -qF "_commit: $NEW_TAG" .copier-answers.yml \
   || fail ".copier-answers.yml does not record $NEW_TAG"
 # Files the template retired must be gone: settings-sync.yml left the
-# render with the module deselection, and the synthetic sentinel left the
-# template between builds despite its local edit.
-for f in .github/workflows/settings-sync.yml .github/retired-sentinel.txt; do
+# render with the module deselection, the synthetic sentinel left the
+# template between builds despite its local edit, and the managed
+# rerun-copilot-gate.yml was retired outright when the Copilot review
+# wait moved into the ruleset's required checks.
+for f in .github/workflows/settings-sync.yml .github/retired-sentinel.txt \
+  .github/workflows/rerun-copilot-gate.yml; do
   test ! -e "$f" || fail "retired file survived the update: $f"
 done
 # settings.yml is repo-owned (PROTECTED_PATHS + the preserve step):
@@ -360,12 +381,12 @@ grep -qF -- 'package-ecosystem: "uv"' .github/dependabot.yml \
   || fail "dependabot.yml lost the uv module entry"
 grep -qF -- "pr-title:" .github/workflows/ci.yml \
   || fail "ci.yml is missing the pr-title gate job"
-# Rendered workflows pin the composite actions at main - the templates
-# carry the literal pin.
-grep -qF -- "repo-platform/actions/check-typography@main" .github/workflows/ci.yml \
-  || fail "ci.yml does not pin check-typography at main"
-grep -qF -- "repo-platform/actions/dependency-review@main" .github/workflows/ci.yml \
-  || fail "ci.yml does not pin dependency-review at main"
+# Rendered workflows pin the composite actions at the green-gated actions
+# branch - the templates carry the literal pin.
+grep -qF -- "repo-platform/actions/check-typography@actions" .github/workflows/ci.yml \
+  || fail "ci.yml does not pin check-typography at the actions branch"
+grep -qF -- "repo-platform/actions/dependency-review@actions" .github/workflows/ci.yml \
+  || fail "ci.yml does not pin dependency-review at the actions branch"
 test -f AGENTS.md || fail "AGENTS.md is missing"
 grep -qF "description: Upgraded description" .copier-answers.yml \
   || fail "the live description was not applied"

@@ -26,9 +26,12 @@ repository:
 # which merges ABOVE this file - redeclaring one here would be silently
 # overridden, so this repository does not.
 rulesets:
-  # The generated build branch is append-only: the builder's plain pushes
-  # are fast-forwards and pass; force-pushes and deletion are blocked for
-  # everyone (no bypass actors on purpose).
+  # The generated build branches are append-only: the builder's plain
+  # pushes are fast-forwards and pass; force-pushes and deletion are
+  # blocked for everyone (no bypass actors on purpose). The publisher is
+  # NOT exempt either - this ruleset stays bypass-free, and the
+  # update-blocking ruleset below is a separate ruleset precisely so its
+  # bypass actor cannot leak into these rules.
   - name: build-branches
     target: branch
     enforcement: active
@@ -36,7 +39,52 @@ rulesets:
       ref_name:
         include:
           - template
+          - actions
         exclude: []
     rules:
       - type: deletion
       - type: non_fast_forward
+    # Declared EMPTY on purpose, like the override layer's non-bypassable
+    # ruleset: an omitted key is invisible to drift detection, so the
+    # explicit empty list is what lets the nightly heal clear an
+    # out-of-band bypass actor added to these rules.
+    bypass_actors: []
+  # The `actions` ref is EXECUTABLE: fleet workflows pin `@actions` and run
+  # its tree directly, with no provenance verify like the sync-side check
+  # that guards `template` consumption. So this ref blocks EVERY write -
+  # creation included, since GitHub treats creating an absent ref as a
+  # separate rule from updating it, and without it any push-capable
+  # principal could CLAIM the ref whenever it is absent (initial rollout,
+  # or recovery after an out-of-band deletion). The sole bypass is the
+  # GitHub Actions integration - the identity of the GITHUB_TOKEN that
+  # build-branches.yml publishes with. That is the narrowest actor the
+  # ruleset dialect can express: GitHub cannot scope a bypass to one
+  # workflow, so any workflow in THIS repository running with a
+  # write-scoped GITHUB_TOKEN shares the identity. Residual, stated
+  # honestly: an on:push or on:pull_request workflow runs the PUSHED
+  # branch's own definition under that same app identity, so a write actor
+  # can reach this ref from a topic branch without ever landing code on
+  # main. Closing that structurally (a dedicated publisher identity the
+  # bypass names, nothing else able to assume it) is tracked separately;
+  # this ruleset raises the bar without claiming to seal it.
+  # The bypass exempts the publisher only from THIS ruleset's copies of
+  # the rules; its own force-pushes and deletions stay blocked by the
+  # bypass-free build-branches ruleset above, which carries the same two
+  # rules over the same ref.
+  - name: actions-ref-publish-only
+    target: branch
+    enforcement: active
+    conditions:
+      ref_name:
+        include:
+          - actions
+        exclude: []
+    rules:
+      - type: creation
+      - type: update
+      - type: deletion
+      - type: non_fast_forward
+    bypass_actors:
+      - actor_id: 15368
+        actor_type: Integration
+        bypass_mode: always

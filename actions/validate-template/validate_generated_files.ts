@@ -196,7 +196,6 @@ const BASE_OWNERSHIP: BaseOwnedFile[] = [
   { path: ".github/CODEOWNERS", kind: "marker", marker: "# repo-platform:local-section" },
   { path: ".github/dependabot.yml", kind: "header" },
   { path: ".github/workflows/ci.yml", kind: "header" },
-  { path: ".github/workflows/rerun-copilot-gate.yml", kind: "header" },
   { path: ".repo-platform.yml", kind: "header" },
   { path: ".typography-allow", kind: "header" },
   { path: ".yamllint", kind: "header" },
@@ -837,7 +836,7 @@ function main(): number {
       if (!("all-green" in jobs)) {
         errors.push(
           "ci.yml: no `all-green` job - branch protection gates on that " +
-            "single required check; add an all-green job whose `needs:` " +
+            "required check; add an all-green job whose `needs:` " +
             "lists every other job",
         );
       } else {

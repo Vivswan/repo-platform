@@ -556,44 +556,6 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  # Copilot's automatic PR review must have ARRIVED before the gate goes
-  # green - but only when Copilot is actually involved in the PR. ONE
-  # SHOT, fail-fast: when the review is expected (the base branch's
-  # copilot_code_review rule, or live involvement signals) but not yet
-  # posted, the job fails in seconds instead of burning billed runner
-  # time waiting, and rerun-copilot-gate.yml re-runs just this job the
-  # moment the review is in. Any conclusion counts - required review
-  # thread resolution polices the content. Inside the gate because a
-  # ruleset-side required check cannot express it: Copilot's check suite
-  # never appears in PR merge-box rollups, so requiring it there hangs
-  # the merge box. Non-PR events have no review to await, so the steps
-  # skip (the job itself stays unconditional for the strict gate).
-  copilot-review:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      contents: read
-      checks: read
-      pull-requests: read
-    steps:
-      - uses: actions/checkout@v7
-        if: github.event_name == 'pull_request'
-      - uses: oven-sh/setup-bun@v2
-        if: github.event_name == 'pull_request'
-        with:
-          bun-version-file: .bun-version
-      - name: Install script dependencies
-        if: github.event_name == 'pull_request'
-        run: bun install --frozen-lockfile --silent
-      - name: Check that the Copilot review arrived
-        if: github.event_name == 'pull_request'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          BASE_BRANCH: ${{ github.event.pull_request.base.ref }}
-        run: bun .github/scripts/ci/copilot_review_gate.ts
-
   # CodeQL runs inside the gate: this thin job calls the analysis workflow,
   # and a caller job's permissions are the ceiling for every job in the
   # called workflow, so the scan permissions are granted here. This repo is
@@ -633,7 +595,6 @@ jobs:
       - upgrade-path
       - rehearse-fleet
       - pr-title
-      - copilot-review
       - codeql-javascript
     runs-on: ubuntu-latest
     timeout-minutes: 5

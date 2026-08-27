@@ -10,9 +10,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import {
+  ALL_GREEN_CONTEXT,
   appendRules,
   COPILOT_REVIEW_CONTEXT,
   duplicateNameWarnings,
+  GITHUB_ACTIONS_APP_ID,
   identityKeyIssues,
   loadOverrideLayer,
   mergeOutcome,
@@ -578,15 +580,24 @@ describe("the override layer", () => {
     expect((result.document.repository as Record<string, unknown>).description).toBe("mine");
   });
 
-  test("the shipped override layer requires all-green and nothing else", () => {
+  test("the shipped override layer requires all-green and Copilot's review check, both pinned to Actions", () => {
     const shipped = loadOverrideLayer();
     const main = (shipped.rulesets as Record<string, unknown>[]).find((r) => r.name === "main");
     expect(main).toBeDefined();
     const rules = main?.rules as Record<string, unknown>[];
     const checks = rules.find((r) => r.type === "required_status_checks")?.parameters as {
-      required_status_checks: { context: string }[];
+      required_status_checks: { context: string; integration_id: number }[];
     };
-    expect(checks.required_status_checks.map((c) => c.context)).toEqual(["all-green"]);
+    expect(checks.required_status_checks.map((c) => c.context).sort()).toEqual([
+      ALL_GREEN_CONTEXT,
+      COPILOT_REVIEW_CONTEXT,
+    ]);
+    // Both check runs are created by Actions workflow runs (Copilot code
+    // review executes as a dynamic Actions workflow); an unpinned entry
+    // would let ANY app or a plain commit status satisfy the context.
+    for (const entry of checks.required_status_checks) {
+      expect(entry.integration_id).toBe(GITHUB_ACTIONS_APP_ID);
+    }
   });
 
   test("the shipped override layer pins the whole protection policy", () => {
@@ -636,23 +647,50 @@ describe("the override layer", () => {
     expect(repository.squash_merge_commit_title).toBe("PR_TITLE");
   });
 
-  test("requiring Copilot's review context is refused: it bricks every PR", () => {
-    // Copilot's check suite never reaches a merge-box rollup, so the
-    // context is never reported and no pull request can merge.
-    const doc = parseYaml(readFileSync(".github/settings-override.yml", "utf-8")) as Record<
-      string,
-      unknown
-    >;
-    const main = (doc.rulesets as { name: string; rules: Record<string, unknown>[] }[]).find(
-      (r) => r.name === "main",
-    );
-    const params = main?.rules.find((r) => r.type === "required_status_checks")?.parameters as {
-      required_status_checks: { context: string }[];
+  test("an override that drops a required check or its Actions pin is refused", () => {
+    // Dropping either context un-gates every managed repository at once
+    // (all-green aggregates CI; the Copilot check run is how the merge box
+    // waits for a review of the current head), and an unpinned entry lets
+    // any app satisfy the context by name - loadOverrideLayer is the parse
+    // boundary that refuses all three mistakes.
+    const shipped = () =>
+      parseYaml(readFileSync(".github/settings-override.yml", "utf-8")) as Record<string, unknown>;
+    const checksParams = (doc: Record<string, unknown>) => {
+      const main = (doc.rulesets as { name: string; rules: Record<string, unknown>[] }[]).find(
+        (r) => r.name === "main",
+      );
+      return main?.rules.find((r) => r.type === "required_status_checks")?.parameters as {
+        required_status_checks: { context: string; integration_id?: number }[];
+      };
     };
-    params.required_status_checks.push({ context: COPILOT_REVIEW_CONTEXT });
-    const file = join(mkdtempSync(join(tmpdir(), "override-")), "settings-override.yml");
-    writeFileSync(file, stringifyYaml(doc));
-    expect(() => loadOverrideLayer(file)).toThrow("merge-box rollup");
+    const load = (doc: Record<string, unknown>) => {
+      const file = join(mkdtempSync(join(tmpdir(), "override-")), "settings-override.yml");
+      writeFileSync(file, stringifyYaml(doc));
+      return loadOverrideLayer(file);
+    };
+
+    // The shipped file itself passes.
+    expect(() => load(shipped())).not.toThrow();
+
+    for (const context of [ALL_GREEN_CONTEXT, COPILOT_REVIEW_CONTEXT]) {
+      const doc = shipped();
+      const params = checksParams(doc);
+      params.required_status_checks = params.required_status_checks.filter(
+        (entry) => entry.context !== context,
+      );
+      expect(() => load(doc)).toThrow(`must require the ${context} status check`);
+    }
+
+    const unpinned = shipped();
+    delete checksParams(unpinned).required_status_checks[0].integration_id;
+    expect(() => load(unpinned)).toThrow("must pin integration_id");
+
+    // A malformed (non-mapping) entry must be refused, never silently
+    // dropped: two valid checks plus a scalar would otherwise pass the
+    // guard and carry the scalar into the settings apply.
+    const malformed = shipped();
+    (checksParams(malformed).required_status_checks as unknown[]).push("all-green");
+    expect(() => load(malformed)).toThrow("is not a mapping");
   });
 });
 

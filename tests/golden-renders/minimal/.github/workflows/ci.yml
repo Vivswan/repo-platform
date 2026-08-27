@@ -1,9 +1,11 @@
 # This file is managed by Vivswan/repo-platform.
 # Local edits may be replaced during template updates.
 #
-# The all-green convention: branch protection requires only the `all-green`
+# The all-green convention: branch protection requires the `all-green`
 # check, which needs every other job here, so the required-checks list never
-# changes as jobs come and go. This repository's own test and lint jobs live
+# changes as jobs come and go (its one sibling required check is Copilot's
+# own per-sha review check run - settings data, never a CI job). This
+# repository's own test and lint jobs live
 # in checks.yml (repo-owned, never overwritten by sync) and run inside the
 # gate through the `checks` job. Module checks (the pr-title title check,
 # CodeQL analysis) run inside the gate too, so branch protection blocks on
@@ -68,7 +70,7 @@ jobs:
       # continue-on-error defers the verdict to the last step; it does not
       # discard it. The action's own exit code is untouched, so the operator
       # repo and the sync pipeline still block on it directly.
-      - uses: Vivswan/repo-platform/actions/validate-template@main
+      - uses: Vivswan/repo-platform/actions/validate-template@actions
         id: integrity
         continue-on-error: true
         with:
@@ -203,7 +205,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
-      - uses: Vivswan/repo-platform/actions/check-typography@main
+      - uses: Vivswan/repo-platform/actions/check-typography@actions
 
   commit-names:
     runs-on: ubuntu-latest
@@ -212,7 +214,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - uses: Vivswan/repo-platform/actions/validate-commit-names@main
+      - uses: Vivswan/repo-platform/actions/validate-commit-names@actions
 
   actionlint:
     runs-on: ubuntu-latest
@@ -272,161 +274,8 @@ jobs:
       - uses: actions/checkout@v7
         if: github.event_name == 'pull_request'
       # The severity threshold and the upstream pin live in the wrapper.
-      - uses: Vivswan/repo-platform/actions/dependency-review@main
+      - uses: Vivswan/repo-platform/actions/dependency-review@actions
         if: github.event_name == 'pull_request'
-
-  # Copilot's automatic PR review must have ARRIVED before the gate goes
-  # green - but only when Copilot is actually involved in the PR. ONE SHOT,
-  # fail-fast: when the review is expected (the base branch's
-  # copilot_code_review rule - the fleet ruleset sets it, so this is the
-  # normal path - or a live involvement signal) but has not posted yet, this
-  # job fails in seconds instead of burning billed runner time waiting, and
-  # rerun-copilot-gate.yml re-runs just this job the moment the review lands.
-  # Any review conclusion counts: the ruleset's required review thread
-  # resolution polices the content, this job only polices the timing. It sits
-  # inside the gate because a ruleset-side required check cannot express it -
-  # Copilot's check suite never appears in PR merge-box rollups, so requiring
-  # that context there hangs the merge box forever.
-  #
-  # With no rule and no involvement signal this job passes non-blocking,
-  # logging that Copilot is not a reviewer - but on a settings-sync repo the
-  # rule comes from the fleet override layer, which is applied last and cannot
-  # be dropped from this repository (a hand-deleted rule returns on the next
-  # nightly apply). Not selecting settings-sync, or a repos.yml exclusion, is
-  # what opts a repo out; changing the override itself is a fleet-wide
-  # decision. Failures are closed, never silent - an API probe that did not
-  # come back is treated as "cannot tell", not as "not involved".
-  #
-  # No checkout and no toolchain: three or four `gh api` reads and no sleeps,
-  # so the job costs seconds of runner time. That is why it stays its own job
-  # on private repositories instead of joining base-checks - the job name is
-  # what rerun-copilot-gate.yml re-runs, and folding it in would make every
-  # re-arm replay all five base checks. Non-PR events have no review to await,
-  # so the step skips; the job itself stays unconditional for the strict gate.
-  copilot-review:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      contents: read
-      checks: read
-      pull-requests: read
-    steps:
-      - name: Check that the Copilot review arrived
-        if: github.event_name == 'pull_request'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          EVENT_NAME: ${{ github.event_name }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          BASE_BRANCH: ${{ github.event.pull_request.base.ref }}
-          # Copilot's identity, spelled once: the check run it creates on the
-          # head sha, and (suffixed with [bot]) the login its review posts
-          # under. It is REQUESTED as the plain "Copilot" login.
-          COPILOT_CHECK: copilot-pull-request-reviewer
-        run: |
-          set -euo pipefail
-          # Each probe records whether its call CAME BACK, because a read that
-          # failed must never count as "Copilot is not involved". Every call
-          # carries a hard deadline and the job never sleeps. jq takes
-          # HEAD_SHA and COPILOT_CHECK from the environment, so the only
-          # thing ever spliced into a jq program is the static $defs prelude
-          # below - no response data reaches jq as source text.
-          api() { timeout 20 gh api "$1"; }
-          api_paginated() { timeout 20 gh api --paginate --slurp "$1"; }
-          # Answers strictly: anything that is not a bare true/false - jq
-          # erroring on a malformed body, or yielding nothing at all on an
-          # empty one - is a MISSING answer, and the caller clears the same
-          # flag a failed call would.
-          ask() {
-            local answer
-            answer="$(jq -r "$2" <<< "$1")" || return 1
-            case "$answer" in
-              true|false) printf '%s' "$answer" ;;
-              *) return 1 ;;
-            esac
-          }
-          # The jq prelude, spliced into every probe below.
-          #
-          # `arr` is load-bearing, not decoration. jq iterates an OBJECT's
-          # values happily, so a body like `{}` (a plain error payload gh
-          # still exits 0 on) makes an unguarded `[.[] | select(...)] |
-          # length > 0` answer a confident `false`, and the gate then passes
-          # as "not a reviewer" on a response it never actually read. Every
-          # probe therefore asserts its shape first and errors out otherwise,
-          # which `ask` turns into a cleared flag and a fail-closed exit.
-          #
-          # `is_copilot` is Copilot's identity in ONE place: it posts reviews
-          # under the "<check>[bot]" login and is requested as the plain
-          # "Copilot" login, and either spelling can turn up in either place.
-          defs='def arr: if type == "array" then . else error("expected an array") end; def pages: arr | map(arr) | add // []; def is_copilot: ascii_downcase | . == "copilot" or . == (env.COPILOT_CHECK + "[bot]"); def mine: [.[] | select(.user != null) | select(.user.login | is_copilot)];'
-
-          rules_ok=1
-          rules="$(api "repos/$GITHUB_REPOSITORY/rules/branches/$BASE_BRANCH")" || rules_ok=0
-          checks_ok=1
-          checks="$(api "repos/$GITHUB_REPOSITORY/commits/$HEAD_SHA/check-runs?check_name=$COPILOT_CHECK&filter=latest")" || checks_ok=0
-          reviews_ok=1
-          # --paginate: GitHub returns reviews oldest-first, so a single page
-          # shows only the STALEST 100 on a busy PR and Copilot's latest review
-          # would be invisible. --slurp yields one array per page; `pages`
-          # flattens them. The deadline wraps the whole paginated read, exactly
-          # as the operator twin budgets it.
-          reviews="$(api_paginated "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/reviews?per_page=100")" || reviews_ok=0
-
-          # An unreadable body is a missing answer too, so a jq failure clears
-          # the same flag a failed call would.
-          check_done=false check_seen=false
-          if [ "$checks_ok" = 1 ]; then
-            check_done="$(ask "$checks" "$defs"'.check_runs | arr | map(select(.status == "completed")) | length > 0')" || checks_ok=0
-            check_seen="$(ask "$checks" "$defs"'.check_runs | arr | length > 0')" || checks_ok=0
-          fi
-          review_at_head=false review_seen=false
-          if [ "$reviews_ok" = 1 ]; then
-            review_at_head="$(ask "$reviews" "$defs"'pages | mine | map(select(.commit_id == env.HEAD_SHA)) | length > 0')" || reviews_ok=0
-            review_seen="$(ask "$reviews" "$defs"'pages | mine | length > 0')" || reviews_ok=0
-          fi
-          rule_expects=false
-          if [ "$rules_ok" = 1 ]; then
-            rule_expects="$(ask "$rules" "$defs"'arr | map(select(.type == "copilot_code_review")) | length > 0')" || rules_ok=0
-          fi
-
-          # Names the human action on purpose: there is no API that triggers
-          # a Copilot review, so "wait and hope" is not a complete
-          # instruction when the auto-request never fired.
-          awaiting="::error::waiting for Copilot review at $HEAD_SHA (no completed '$COPILOT_CHECK' check run and no posted review yet). Copilot is usually requested automatically when you push; if nothing appears after a few minutes, request it by hand from the PR sidebar under Reviewers -> Copilot (a draft PR or an exhausted review quota suppresses the automatic request). This job re-runs itself when the review posts; if it does not, open this CI run and pick Re-run jobs, then Re-run failed jobs."
-
-          # 1. Arrived, whatever it concluded.
-          if [ "$check_done" = true ] || [ "$review_at_head" = true ]; then
-            echo "Copilot's review ($COPILOT_CHECK) arrived at $HEAD_SHA."
-            exit 0
-          fi
-          # 2. Expected by configuration: the base branch carries the rule.
-          if [ "$rule_expects" = true ]; then
-            echo "$BASE_BRANCH's rules include copilot_code_review: the review is expected by configuration."
-            echo "$awaiting"
-            exit 1
-          fi
-          # 3. No rule: probe live involvement. GitHub CONSUMES the reviewer
-          #    request once the review posts, so an OLDER sha's review counts
-          #    as involvement - the re-review is awaited - not as arrival.
-          pull_ok=1
-          pull="$(api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER")" || pull_ok=0
-          requested=false
-          if [ "$pull_ok" = 1 ]; then
-            requested="$(ask "$pull" "$defs"'.requested_reviewers | arr | map(select(.login | is_copilot)) | length > 0')" || pull_ok=0
-          fi
-          if [ "$check_seen" = true ] || [ "$review_seen" = true ] || [ "$requested" = true ]; then
-            echo "$awaiting"
-            exit 1
-          fi
-          # 4. Only four clean answers may declare Copilot uninvolved: a failed
-          #    probe may have hidden the rule or a signal, so anything less
-          #    fails closed and a re-run resolves it.
-          if [ "$rules_ok" = 1 ] && [ "$checks_ok" = 1 ] && [ "$reviews_ok" = 1 ] && [ "$pull_ok" = 1 ]; then
-            echo "copilot is not a reviewer on this PR"
-            exit 0
-          fi
-          echo "::error::cannot rule Copilot's involvement in PR #$PR_NUMBER out: at least one API probe failed. Not a verdict on the commit - re-run this job."
-          exit 1
   all-green:
     name: all-green
     if: always()
@@ -438,7 +287,6 @@ jobs:
       - gitleaks
       - yamllint
       - dependency-review
-      - copilot-review
       - validate-template
     runs-on: ubuntu-latest
     timeout-minutes: 5

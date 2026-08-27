@@ -17,8 +17,11 @@
 //      replayed OLD build (old source plus its old successful run) fails
 //      here even though it would pass every other check.
 //   3. Run proof (defense in depth): the tip's "run:" line must name a
-//      completed, successful build-branches.yml run of this repository whose
-//      head sha is the stamped source.
+//      completed build-branches.yml run of this repository that VOUCHES for
+//      the stamped source (run_vouches.ts: its head sha is the source, or
+//      the source is an on-main ancestor of it) AND whose 'Build and
+//      publish' step itself succeeded - conclusion=success alone is a red
+//      main's skipped-steps no-op.
 //   4. Tree proof: rebuild the branch tree from the stamped source with
 //      that commit's own build script, exactly as publish.ts does, and
 //      require the rebuilt git tree hash to equal the tip's tree hash.
@@ -37,12 +40,16 @@ import { fail, requireEnv } from "../shared/gha.ts";
 import { parseJsonWith } from "../shared/json.ts";
 import { capture, mustCapture } from "../shared/proc.ts";
 import { rebuildBranchTree } from "../shared/rebuild_tree.ts";
+import { runVouchesForSource } from "../shared/run_vouches.ts";
 
 const tipSha = requireEnv("TIP_SHA");
 const sourceSha = requireEnv("SOURCE_SHA");
 const repository = requireEnv("GITHUB_REPOSITORY");
 
 const subject = `template tip ${tipSha.slice(0, 12)}`;
+/** build-branches.yml's publish step name - the step-level publish proof,
+ * twin of publish.ts's PUBLISH_STEP constant. */
+const PUBLISH_STEP = "Build and publish";
 const rebuildHint =
   "If the template branch was pushed by something other than the Build Branches workflow, reset it: dispatch Build Branches to rebuild it from main, then re-run the sync.";
 
@@ -129,9 +136,57 @@ if (run.conclusion !== "success") {
     `${subject} was stamped by build run ${runId}, which concluded '${run.conclusion}'. Re-run that build to green (gh run rerun ${runId} -R ${repository}) or dispatch Build Branches, then re-run the sync.`,
   );
 }
-if (run.head_sha !== sourceSha) {
+// The run VOUCHES for the source when its head sha IS the source or the
+// source is an on-main ancestor of it (run_vouches.ts, the shared rule
+// publish.ts's re-stamp check uses). Strict head_sha === source is wrong
+// for the workflow_run publisher: GitHub gives that run main's CURRENT
+// tip as its head sha, which can be a later main commit than the source
+// it published.
+if (
+  !runVouchesForSource({
+    runHeadSha: run.head_sha,
+    sourceSha,
+    mainRef: "refs/remotes/origin/main",
+    resolveCommit,
+    isAncestor,
+  })
+) {
   fail(
-    `${subject} is stamped with source ${sourceSha.slice(0, 12)}, but build run ${runId} ran at ${run.head_sha.slice(0, 12)} - the stamp does not match the run. ${rebuildHint}`,
+    `${subject} is stamped with source ${sourceSha.slice(0, 12)}, but build run ${runId} ran at ${run.head_sha.slice(0, 12)}, which does not vouch for it (not the source, and the source is not an on-main ancestor of it). ${rebuildHint}`,
+  );
+}
+// conclusion=success alone is NOT publish proof: on a red main every step
+// skips via CI_GREEN and the run still concludes success at that head_sha.
+// Require the publish step itself to have succeeded - the same step-level
+// proof publish.ts's re-stamp check applies (PUBLISH_STEP is their twin
+// constant). This is what pays for the
+// vouch rule's ancestor loosening: a run that never published cannot
+// vouch even for a source it contains.
+const jobsProbe = capture(["gh", "api", `repos/${repository}/actions/runs/${runId}/jobs`]);
+if (jobsProbe.exitCode !== 0) {
+  fail(
+    `${subject} was stamped by build run ${runId}, but reading its jobs from ${repository} failed (${jobsProbe.stderr.trim()}) - an API failure, not evidence of tampering. Re-run the sync.`,
+  );
+}
+const jobs = parseJsonWith(
+  z.object({
+    jobs: z.array(
+      z.object({
+        steps: z
+          .array(z.object({ name: z.string(), conclusion: z.string().nullable() }))
+          .optional(),
+      }),
+    ),
+  }),
+  jobsProbe.stdout,
+  "verify_build_provenance: runs/jobs response",
+);
+const published = jobs.jobs.some((job) =>
+  (job.steps ?? []).some((step) => step.name === PUBLISH_STEP && step.conclusion === "success"),
+);
+if (!published) {
+  fail(
+    `${subject} was stamped by build run ${runId}, but that run never ran its '${PUBLISH_STEP}' step to success (a skipped-steps run on a red main still concludes success). ${rebuildHint}`,
   );
 }
 

@@ -498,12 +498,22 @@ export function mergeLayers(layers: SettingsLayer[]): MergedSettings {
   return layers.reduce<MergedSettings>((below, layer) => mergeSettingsLayers(below, layer), {});
 }
 
-/** The status check GitHub's Copilot code review reports. It must NEVER
- *  be a required status check: the check suite never appears in a pull
- *  request's merge-box rollup, so requiring the context leaves every PR
- *  permanently unmergeable. Kept here as the name loadOverrideLayer
- *  refuses, so the fleet cannot re-adopt it by accident. */
+/** The status check GitHub's Copilot code review reports: a check run
+ *  named after the reviewer, created per head sha by the dynamic Actions
+ *  workflow the review runs as. The fleet override MUST require it - it
+ *  is how the merge box waits for Copilot to review the CURRENT head -
+ *  and loadOverrideLayer refuses an override that dropped it. */
 export const COPILOT_REVIEW_CONTEXT = "copilot-pull-request-reviewer";
+
+/** The check the fleet's ci.yml aggregate job reports. */
+export const ALL_GREEN_CONTEXT = "all-green";
+
+/** GitHub Actions' app id. Both required checks are created by Actions
+ *  workflow runs (Copilot code review executes as a dynamic Actions
+ *  workflow), so every required-check entry pins this integration_id -
+ *  without the pin, ANY app or plain commit status could satisfy a
+ *  required context just by matching its name. */
+export const GITHUB_ACTIONS_APP_ID = 15368;
 
 /** The fleet-mandatory top layer: merged ABOVE the repository's own
  *  settings.yml, so no repository can weaken what it declares - including
@@ -511,8 +521,10 @@ export const COPILOT_REVIEW_CONTEXT = "copilot-pull-request-reviewer";
  *  the layers BELOW this one.
  *
  *  Validated here, the one place every consumer goes through, against the
- *  one required-check mistake that bricks the whole fleet (see
- *  COPILOT_REVIEW_CONTEXT). */
+ *  required-check mistakes that weaken the whole fleet: the main ruleset
+ *  must require both ALL_GREEN_CONTEXT and COPILOT_REVIEW_CONTEXT, and
+ *  every required-check entry must pin integration_id to GitHub Actions
+ *  (see GITHUB_ACTIONS_APP_ID). */
 export function loadOverrideLayer(path: string = OVERRIDE_PATH): SettingsLayer {
   const data = parseSettingsDoc(readFileSync(path, "utf-8"), path);
   const rulesets = Array.isArray(data.rulesets) ? data.rulesets : [];
@@ -524,18 +536,37 @@ export function loadOverrideLayer(path: string = OVERRIDE_PATH): SettingsLayer {
   );
   const checksParams =
     checksRule !== undefined && isMapping(checksRule.parameters) ? checksRule.parameters : {};
-  const contexts = Array.isArray(checksParams.required_status_checks)
-    ? checksParams.required_status_checks.map((entry) =>
-        isMapping(entry) ? entry.context : undefined,
-      )
+  const rawEntries = Array.isArray(checksParams.required_status_checks)
+    ? checksParams.required_status_checks
     : [];
-  if (contexts.includes(COPILOT_REVIEW_CONTEXT)) {
-    throw new Error(
-      `${path}: the 'main' ruleset must not require the ${COPILOT_REVIEW_CONTEXT} status ` +
-        "check - Copilot's check suite never reaches a pull request's merge-box rollup, so " +
-        "the context is never reported and every pull request stays unmergeable. Wait for " +
-        "Copilot's review with a bridge job inside the all-green gate instead.",
-    );
+  const entries = rawEntries.map((entry, index) => {
+    if (!isMapping(entry)) {
+      throw new Error(
+        `${path}: required_status_checks[${index}] is not a mapping - every entry must be ` +
+          "a { context, integration_id } object, and a malformed one must never reach the apply.",
+      );
+    }
+    return entry;
+  });
+  for (const context of [ALL_GREEN_CONTEXT, COPILOT_REVIEW_CONTEXT]) {
+    if (!entries.some((entry) => entry.context === context)) {
+      throw new Error(
+        `${path}: the 'main' ruleset must require the ${context} status check - it is the ` +
+          "fleet's merge gate (all-green aggregates CI; the Copilot check run is how the " +
+          "merge box waits for a review of the current head), and dropping it from the " +
+          "override un-gates every managed repository at once.",
+      );
+    }
+  }
+  for (const entry of entries) {
+    if (entry.integration_id !== GITHUB_ACTIONS_APP_ID) {
+      throw new Error(
+        `${path}: required status check '${String(entry.context)}' must pin ` +
+          `integration_id: ${GITHUB_ACTIONS_APP_ID} (the GitHub Actions app) - without the ` +
+          "pin, any app or plain commit status satisfies the context just by matching its " +
+          "name, which spoofs the merge gate.",
+      );
+    }
   }
   return data;
 }

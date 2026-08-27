@@ -19,10 +19,12 @@ import {
   type FleetRow,
   failureRow,
   gateAnnotations,
+  laneOutcome,
   outcomeRow,
   phaseOf,
   privateDisplayNames,
   rehearseFleet,
+  runPool,
   statusTally,
   summaryLine,
   summaryTable,
@@ -95,21 +97,25 @@ describe("privateDisplayNames", () => {
   ];
   const committed = new Set(["vivswan/committed-private"]);
 
-  test("gate mode hints a wildcard-discovered private slug on every output path", () => {
+  test("gate mode hints a wildcard-discovered private slug on every output path", async () => {
     const display = privateDisplayNames(true, discovered, committed);
     const deps = {
       display,
       enrollment: () => "enrolled" as const,
-      rehearse: () => outcome(),
+      rehearse: async () => outcome(),
+      concurrency: 2,
       log: () => {},
     };
-    const rows = rehearseFleet(["Vivswan/hidden-server"], { ...deps, isPrivate: () => true });
+    const rows = await rehearseFleet(["Vivswan/hidden-server"], { ...deps, isPrivate: () => true });
     expect(rows[0].repo).toBe("h**-s**r");
     expect(summaryLine(rows[0])).toBe("h**-s**r  skipped (private)");
     expect(summaryTable(rows)).not.toContain("hidden-server");
     // The lookup-failure shape is error severity, so it reaches the gate
     // annotations - the hint must hold there too.
-    const failed = rehearseFleet(["Vivswan/hidden-server"], { ...deps, isPrivate: () => null });
+    const failed = await rehearseFleet(["Vivswan/hidden-server"], {
+      ...deps,
+      isPrivate: () => null,
+    });
     const annotations = gateAnnotations(failed);
     expect(annotations.errors[0]).toContain("h**-s**r");
     expect(JSON.stringify(annotations)).not.toContain("hidden-server");
@@ -132,21 +138,22 @@ describe("privateDisplayNames", () => {
 });
 
 describe("rehearseFleet private skip", () => {
-  test("private and visibility-unknown repos are skipped before the rehearsal function runs", () => {
+  test("private and visibility-unknown repos are skipped before the rehearsal function runs", async () => {
     const rehearsed: string[] = [];
     const probed: string[] = [];
     const lines: string[] = [];
-    const rows = rehearseFleet(["o/public", "o/secret", "o/unknown"], {
+    const rows = await rehearseFleet(["o/public", "o/secret", "o/unknown"], {
       isPrivate: (slug) => (slug === "o/public" ? false : slug === "o/secret" ? true : null),
       display: (slug) => slug,
       enrollment: (slug) => {
         probed.push(slug);
         return "enrolled";
       },
-      rehearse: (slug) => {
+      rehearse: async (slug) => {
         rehearsed.push(slug);
         return outcome();
       },
+      concurrency: 1,
       log: (line) => lines.push(line),
     });
     expect(rehearsed).toEqual(["o/public"]);
@@ -169,16 +176,17 @@ describe("rehearseFleet private skip", () => {
     expect(rows[2].severity).toBe("error");
   });
 
-  test("a repo the fleet token is not enrolled in skips exactly like production", () => {
+  test("a repo the fleet token is not enrolled in skips exactly like production", async () => {
     const rehearsed: string[] = [];
-    const rows = rehearseFleet(["o/unenrolled", "o/unknown-grant"], {
+    const rows = await rehearseFleet(["o/unenrolled", "o/unknown-grant"], {
       isPrivate: () => false,
       display: (slug) => slug,
       enrollment: (slug) => (slug === "o/unenrolled" ? "not-enrolled" : "unknown"),
-      rehearse: (slug) => {
+      rehearse: async (slug) => {
         rehearsed.push(slug);
         return outcome();
       },
+      concurrency: 2,
       log: () => {},
     });
     expect(rows[0]).toEqual({
@@ -192,14 +200,40 @@ describe("rehearseFleet private skip", () => {
   });
 });
 
+describe("laneOutcome", () => {
+  test("an outcome envelope returns the outcome", () => {
+    const envelope = JSON.stringify({ kind: "outcome", outcome: outcome() });
+    expect(laneOutcome(envelope, "o/r")).toEqual(outcome());
+  });
+
+  test("a malformed envelope THROWS (the lane's failure row), never exits the run", () => {
+    // The original bug: parseJsonWith exits the whole process here, so one
+    // truncated lane verdict aborted every remaining lane and the summary.
+    expect(() => laneOutcome("not json {", "o/r")).toThrow("not valid JSON");
+    expect(() => laneOutcome('{"kind": "nonsense"}', "o/r")).toThrow("unexpected shape");
+  });
+
+  test("typed skips re-throw their typed errors, keeping failureRow's one mapping", () => {
+    expect(() => laneOutcome(JSON.stringify({ kind: "not-managed", reason: "r" }), "o/r")).toThrow(
+      NotManagedError,
+    );
+    expect(() =>
+      laneOutcome(JSON.stringify({ kind: "recovery-needed", reason: "r" }), "o/r"),
+    ).toThrow(RecoveryNeededError);
+    expect(() => laneOutcome(JSON.stringify({ kind: "failed", reason: "boom" }), "o/r")).toThrow(
+      "boom",
+    );
+  });
+});
+
 describe("rehearseFleet failure handling", () => {
-  test("a throwing rehearsal becomes a row and the loop continues", () => {
+  test("a throwing rehearsal becomes a row and the loop continues", async () => {
     const lines: string[] = [];
-    const rows = rehearseFleet(["o/a", "o/b", "o/c"], {
+    const rows = await rehearseFleet(["o/a", "o/b", "o/c"], {
       isPrivate: () => false,
       display: (slug) => slug,
       enrollment: () => "enrolled",
-      rehearse: (slug) => {
+      rehearse: async (slug) => {
         if (slug === "o/a") {
           throw new RehearsalError("git clone failed (exit 128): repository not found\nnoise");
         }
@@ -208,6 +242,7 @@ describe("rehearseFleet failure handling", () => {
         }
         return outcome();
       },
+      concurrency: 3,
       log: (line) => lines.push(line),
     });
     expect(rows.map((row) => row.status)).toEqual(["REHEARSAL FAILED", "recovery needed", "clean"]);
@@ -225,6 +260,62 @@ describe("rehearseFleet failure handling", () => {
       detail: "boom",
       severity: "error",
     });
+  });
+
+  test("a throwing visibility lookup becomes a lane-local failed row, siblings survive", async () => {
+    // The isolation the loop promises must cover EVERY per-repo dep, not
+    // just rehearse: a throw from isPrivate (or the enrollment probe's
+    // curl) used to escape the worker, reject runPool's Promise.all, and
+    // destroy the whole report. Now it is this lane's failed row, and the
+    // report continues.
+    const rows = await rehearseFleet(["o/a", "o/b"], {
+      isPrivate: (slug) => {
+        if (slug === "o/a") throw new Error("visibility probe curl not found");
+        return false;
+      },
+      display: (slug) => slug,
+      enrollment: () => "enrolled",
+      rehearse: async () => outcome(),
+      concurrency: 2,
+      log: () => {},
+    });
+    expect(rows[0].status).toBe("REHEARSAL FAILED");
+    expect(rows[0].detail).toContain("visibility probe curl not found");
+    expect(rows[1].status).toBe("clean");
+  });
+
+  test("a throwing enrollment probe becomes a lane-local failed row, not an abort", async () => {
+    const rows = await rehearseFleet(["o/a", "o/b"], {
+      isPrivate: () => false,
+      display: (slug) => slug,
+      enrollment: (slug) => {
+        if (slug === "o/b") throw new Error("gh auth token subprocess failed");
+        return "enrolled";
+      },
+      rehearse: async () => outcome(),
+      concurrency: 2,
+      log: () => {},
+    });
+    expect(rows[0].status).toBe("clean");
+    expect(rows[1].status).toBe("REHEARSAL FAILED");
+    expect(rows[1].detail).toContain("gh auth token subprocess failed");
+  });
+
+  test("a failed row for an unclassifiable repo carries the redacted display name", async () => {
+    // isPrivate threw before visibility was known, so the row must use the
+    // display name (redacted for a hidden repo), never the raw slug.
+    const rows = await rehearseFleet(["o/maybe-secret"], {
+      isPrivate: () => {
+        throw new Error("network down");
+      },
+      display: () => "h**-s**t",
+      enrollment: () => "enrolled",
+      rehearse: async () => outcome(),
+      concurrency: 1,
+      log: () => {},
+    });
+    expect(rows[0].repo).toBe("h**-s**t");
+    expect(rows[0].status).toBe("REHEARSAL FAILED");
   });
 
   test("a known leg script's failure names its pipeline phase", () => {
@@ -263,6 +354,88 @@ describe("phaseOf", () => {
     expect(phaseOf("git clone failed (exit 128): repository not found")).toBeNull();
     expect(phaseOf("some_unknown_thing.ts failed (exit 1)")).toBeNull();
     expect(phaseOf("")).toBeNull();
+  });
+});
+
+describe("rehearseFleet concurrency", () => {
+  test("in-flight rehearsals never exceed the concurrency bound", async () => {
+    let inFlight = 0;
+    let peak = 0;
+    const slugs = Array.from({ length: 9 }, (_, i) => `o/repo-${i}`);
+    await rehearseFleet(slugs, {
+      isPrivate: () => false,
+      display: (slug) => slug,
+      enrollment: () => "enrolled",
+      rehearse: async () => {
+        inFlight++;
+        peak = Math.max(peak, inFlight);
+        await Bun.sleep(5);
+        inFlight--;
+        return outcome();
+      },
+      concurrency: 3,
+      log: () => {},
+    });
+    expect(peak).toBeGreaterThan(1);
+    expect(peak).toBeLessThanOrEqual(3);
+  });
+
+  test("rows and summary lines stay in roster order however the lanes finish", async () => {
+    // Later roster entries finish FIRST (reversed delays): the rows array
+    // and the logged lines must still follow the roster.
+    const slugs = ["o/a", "o/b", "o/c", "o/d"];
+    const lines: string[] = [];
+    const rows = await rehearseFleet(slugs, {
+      isPrivate: () => false,
+      display: (slug) => slug,
+      enrollment: () => "enrolled",
+      rehearse: async (slug) => {
+        await Bun.sleep((3 - slugs.indexOf(slug)) * 10);
+        return outcome({ retired: slugs.indexOf(slug) });
+      },
+      concurrency: 4,
+      log: (line) => lines.push(line),
+    });
+    expect(rows.map((row) => row.repo)).toEqual(slugs);
+    expect(rows.map((row) => row.detail)).toEqual([
+      "retired 0; manifest stamped ok; validation ok",
+      "retired 1; manifest stamped ok; validation ok",
+      "retired 2; manifest stamped ok; validation ok",
+      "retired 3; manifest stamped ok; validation ok",
+    ]);
+    expect(lines.map((line) => line.split("  ")[0])).toEqual(slugs);
+  });
+
+  test("one repo's rejection never suppresses another's row", async () => {
+    const rows = await rehearseFleet(["o/fails", "o/works"], {
+      isPrivate: () => false,
+      display: (slug) => slug,
+      enrollment: () => "enrolled",
+      rehearse: async (slug) => {
+        if (slug === "o/fails") throw new RehearsalError("apply_update.ts failed (exit 1)");
+        await Bun.sleep(5);
+        return outcome();
+      },
+      concurrency: 2,
+      log: () => {},
+    });
+    expect(rows[0].status).toBe("REHEARSAL FAILED");
+    expect(rows[1].status).toBe("clean");
+  });
+});
+
+describe("runPool", () => {
+  test("results land by item index, not completion order", async () => {
+    const results = await runPool([30, 10, 20], 3, async (delay, index) => {
+      await Bun.sleep(delay);
+      return index * 10;
+    });
+    expect(results).toEqual([0, 10, 20]);
+  });
+
+  test("a zero-or-negative limit still runs one lane", async () => {
+    const results = await runPool([1, 2], 0, async (item) => item * 2);
+    expect(results).toEqual([2, 4]);
   });
 });
 

@@ -2,13 +2,14 @@
 // Bounded wait for the build output sync-repos.yml's plan job consumes:
 // Build Branches rebuilds the template branch asynchronously after each
 // main merge, so a sync dispatched right after a merge could consume the
-// previous build tree. Wait for a successful run at main's HEAD - every
-// trigger rebuilds the branch, so any successful run there proves it (a
-// no-op rebuild creates no build commit to wait for) - or for a template
-// tip whose source stamp already names main's HEAD (publish.ts stamps
-// each run's OWN trigger commit, so the tip's stamp is the artifact's
-// direct provenance and survives the runs list's per_page window). Two
-// waiting cases end in the
+// previous build tree. Wait for the template tip whose SOURCE STAMP names
+// main's HEAD - publish.ts stamps the commit it actually published (the
+// completed CI run's head_sha on the workflow_run path), so the tip's
+// stamp is the artifact's direct, unambiguous provenance. A "successful
+// build-branches run at main's HEAD" is deliberately NOT trusted: a run
+// created at HEAD B can have published an earlier source A while B's own
+// CI is still running, so "run at B succeeded" would wrongly read as
+// "built from B". Two waiting cases end in the
 // warning path, both benign: a green main whose CI is still running
 // (build-branches triggers on CI success, so nothing has even started
 // yet), and a red main tip, which never builds at all (publish.ts refuses
@@ -17,25 +18,26 @@
 // exactly the state a pre-gate sync always ran in - and resolve_refs.ts
 // re-checks the shipped build's own source is green (shared/all_green.ts);
 // this bounded wait stays a freshness aid, not the gate. Polls every 30
-// seconds, 90 attempts (45 minutes): under the workflow_run trigger the
-// wait must cover a full main CI run before the build even starts (~30
-// minutes worst case with rehearse-fleet) plus the build itself, then
+// seconds, 80 attempts (40 minutes): the tree is pre-built DURING the
+// main CI run (build_pending.ts), so the post-CI publisher only promotes
+// it - the wait covers a full main CI run (~30 minutes worst case with
+// rehearse-fleet) plus the promotion (~3 minutes; ~8 on the compose
+// fallback when the pending ref is missing) and queue slack, then
 // warns and lets the run continue (the sync's own guards fail loudly and
 // the weekly cron heals).
 //
-// Env: GH_TOKEN, GITHUB_REPOSITORY. WAIT_DELAY_MS shortens the poll
-// interval for tests, PROBE_TIMEOUT_MS the per-call network deadline.
+// Env: only the WAIT_* / PROBE_TIMEOUT_MS knobs (tests shrink them). The
+// git ls-remote/fetch to origin authenticate through the credentials
+// actions/checkout persisted, not a token this script reads.
 
-import { z } from "zod";
 import { commitStampParse } from "../shared/commit_stamp.ts";
-import { env, error, requireEnv, warning } from "../shared/gha.ts";
-import { parseJsonWith } from "../shared/json.ts";
+import { env, error, warning } from "../shared/gha.ts";
 import { capture, mustCapture } from "../shared/proc.ts";
 
-const ATTEMPTS = Number(env("WAIT_ATTEMPTS", "90"));
+const ATTEMPTS = Number(env("WAIT_ATTEMPTS", "80"));
 const DELAY_MS = Number(env("WAIT_DELAY_MS", "30000"));
 /** Hard deadline for each network call: generous next to a healthy
- * ls-remote or API hit, small enough that a stalled connection burns one
+ * ls-remote or fetch, small enough that a stalled connection burns one
  * probe, not the run (the wall-clock deadline below owns the total). */
 const PROBE_TIMEOUT_MS = Number(env("PROBE_TIMEOUT_MS", "15000"));
 /** The warning's promised wall clock, the nominal poll cadence: probe
@@ -75,7 +77,6 @@ async function waitFor(
   warning(timeoutWarning);
 }
 
-const repository = requireEnv("GITHUB_REPOSITORY");
 const mainSha = mustCapture(["git", "-c", "credential.helper=", "ls-remote", "origin", "HEAD"], {
   env: GIT_NO_PROMPT_ENV,
   timeoutMs: PROBE_TIMEOUT_MS,
@@ -84,64 +85,16 @@ if (!/^[0-9a-f]{40}$/.test(mainSha)) {
   error(`wait_for_build: could not read main's HEAD sha from origin (got "${mainSha}")`);
   process.exit(1);
 }
-const runsSchema = z.object({
-  workflow_runs: z.array(z.object({ id: z.number(), head_sha: z.string() })),
-});
-const jobsSchema = z.object({
-  jobs: z.array(
-    z.object({
-      steps: z.array(z.object({ name: z.string(), conclusion: z.string().nullable() })).optional(),
-    }),
-  ),
-});
-/** build-branches.yml's publish step name; only its own success proves a
- * publish happened. */
-const PUBLISH_STEP = "Build and publish";
-/** Whether a matched build run actually PUBLISHED: the workflow_run
- * trigger fires on CI COMPLETED regardless of conclusion, and on a red
- * main every step skips via CI_GREEN while the run still concludes
- * success at main's HEAD - so a head_sha match alone can name a run that
- * published nothing. A transient jobs-API failure reads as not-published:
- * the stamp fallback and the next poll still speak. */
-function runPublished(runId: number, timeoutMs: number): boolean {
-  const jobs = capture(["gh", "api", `repos/${repository}/actions/runs/${runId}/jobs`], {
-    timeoutMs,
-  });
-  if (jobs.exitCode !== 0) return false;
-  const parsed = parseJsonWith(jobsSchema, jobs.stdout, "wait_for_build: run jobs response");
-  return parsed.jobs.some((job) =>
-    (job.steps ?? []).some((step) => step.name === PUBLISH_STEP && step.conclusion === "success"),
-  );
-}
 await waitFor(
   (timeoutMs) => {
-    const runs = capture(
-      [
-        "gh",
-        "api",
-        `repos/${repository}/actions/workflows/build-branches.yml/runs?status=success&per_page=30`,
-      ],
-      { timeoutMs },
-    );
-    // A transient API failure - a stalled call past its deadline
-    // included - reads as not-built-yet: keep polling.
-    if (runs.exitCode !== 0) return false;
-    const built = parseJsonWith(runsSchema, runs.stdout, "wait_for_build: workflow runs response");
-    // Every build-branches trigger rebuilds the one branch, so a
-    // successful run at main's HEAD whose publish step itself succeeded
-    // proves the build (a red main's run also "succeeds" at main's HEAD
-    // with every step skipped - runPublished tells them apart).
-    const matched = built.workflow_runs.filter((run) => run.head_sha === mainSha);
-    if (matched.some((run) => runPublished(run.id, timeoutMs))) {
-      console.log(`the template branch is built from main HEAD ${mainSha}.`);
-      return true;
-    }
-    // Stamp fallback: publish.ts stamps each run's OWN trigger commit, so
-    // the branch tip's source stamp is the artifact's direct provenance -
-    // it proves freshness when the runs list no longer shows the matching
-    // run (per_page window) or the jobs read keeps failing. (The converse
-    // miss - a no-op rebuild keeping an old-but-valid stamp - is what the
-    // runs match above covers; the two checks are complements.)
+    // The template tip's SOURCE STAMP is the only sound freshness proof.
+    // A successful build-branches run whose head sha equals main's HEAD
+    // does NOT prove the branch is built from HEAD: since the publisher
+    // stamps the COMPLETED CI run's commit (SOURCE_SHA), a run created at
+    // HEAD B can have published an earlier source A while B's own CI is
+    // still running - "run at B succeeded" then wrongly reads as "built
+    // from B". publish.ts stamps the commit it actually published, so the
+    // tip's stamp naming main's HEAD is direct, unambiguous provenance.
     const fetched = capture(
       ["git", "-c", "credential.helper=", "fetch", "--quiet", "--depth=1", "origin", "template"],
       { env: GIT_NO_PROMPT_ENV, timeoutMs },
@@ -152,8 +105,8 @@ await waitFor(
     console.log(`the template branch tip is stamped with main HEAD ${mainSha}.`);
     return true;
   },
-  `waiting for a successful Build Branches run at ${mainSha}...`,
-  `no successful Build Branches run found for main HEAD ${mainSha} after ${Math.round(
+  `waiting for the template branch to be built from ${mainSha}...`,
+  `the template branch is not yet built from main HEAD ${mainSha} after ${Math.round(
     DEADLINE_MS / 60000,
   )} minutes; syncs may apply the previous build tree. The weekly cron heals this on its next run.`,
 );

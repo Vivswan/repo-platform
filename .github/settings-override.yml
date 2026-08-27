@@ -24,13 +24,20 @@ repository:
 
 rulesets:
   # Admins (RepositoryRole id 5) are in the bypass list, so direct pushes
-  # to main still work. The single required status check is `all-green`
-  # (ci.yml), which `needs:` every gating CI job.
+  # to main still work. Two required status checks: `all-green` (ci.yml's
+  # aggregate job, which `needs:` every gating CI job) and Copilot's own
+  # `copilot-pull-request-reviewer` check run, which GitHub creates per
+  # head sha when its code review runs (the copilot_code_review rule below
+  # triggers it on every push). Requiring it makes GitHub itself hold the
+  # merge until Copilot reviewed the CURRENT head - no gate job, no re-arm
+  # workflow (docs/all-green.md has the semantics and the verified edges).
   #
-  # Copilot's own `copilot-pull-request-reviewer` check must NOT be listed
-  # here: its check suite never appears in a PR's merge-box rollup, so
-  # requiring the context blocks every pull request forever. Waiting for
-  # Copilot's review is a bridge job inside the all-green gate instead.
+  # Both entries pin integration_id 15368 (the GitHub Actions app): both
+  # check runs are created by Actions workflow runs - Copilot code review
+  # executes as a dynamic Actions workflow now - and the pin stops a
+  # non-Actions app or a plain commit status from satisfying either
+  # context by name. loadOverrideLayer refuses this file when a pin or
+  # either context is missing.
   #
   # A module layer may ADD a rule to this ruleset (the toolchain modules'
   # settings-public.yml layers add code_scanning): rules lists of a
@@ -54,6 +61,9 @@ rulesets:
           do_not_enforce_on_create: true
           required_status_checks:
             - context: all-green
+              integration_id: 15368
+            - context: copilot-pull-request-reviewer
+              integration_id: 15368
       - type: pull_request
         parameters:
           required_approving_review_count: 0
@@ -70,8 +80,13 @@ rulesets:
           allowed_merge_methods:
             - squash
       # Automatically request Copilot code review on PRs to main, including
-      # on each new push and on draft PRs. The review is requested, never
-      # required as a status check (see the note above).
+      # on each new push and on draft PRs. Each review run creates the
+      # completed check run the required status check above waits for, so
+      # this rule is what keeps the merge box moving on its own. Verified
+      # edges: bot-authored PRs (Dependabot) and new pushes to DRAFT PRs
+      # get no automatic run despite this rule - those PRs stay blocked
+      # until someone requests the review from the reviewers panel (one
+      # click; correct semantics, since nothing merges unreviewed).
       - type: copilot_code_review
         parameters:
           review_on_push: true

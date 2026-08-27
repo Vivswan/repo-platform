@@ -27,7 +27,7 @@ Golden Render: Golden render fixture
 ## Conventions
 
 - PR titles and commit subjects must be Conventional Commits (`feat:`, `fix:`, `feat!:`, `chore:`, ...). PRs are squash-merged, so the PR title becomes the commit subject and drives release-please versioning. CI validates both (the ci.yml pr-title job + validate-commit-names).
-- CI gates on a single required check named `all-green` in the managed `.github/workflows/ci.yml`. This repository's own test/lint jobs belong in `.github/workflows/checks.yml` (repo-owned, called inside the gate); do not edit ci.yml, template sync overwrites it. The `release` job runs on top of the gate (`needs: all-green`), calling the managed release pipeline in `.github/workflows/release.yml`; this repository's release preparation (packaging, asset uploads, note edits) goes in the repo-owned `.github/workflows/update-release.yml` hook it calls.
+- CI gates on the required check `all-green` in the managed `.github/workflows/ci.yml` (the ruleset's second required check, Copilot's own review check run, is settings data - no CI job carries it). This repository's own test/lint jobs belong in `.github/workflows/checks.yml` (repo-owned, called inside the gate); do not edit ci.yml, template sync overwrites it. The `release` job runs on top of the gate (`needs: all-green`), calling the managed release pipeline in `.github/workflows/release.yml`; this repository's release preparation (packaging, asset uploads, note edits) goes in the repo-owned `.github/workflows/update-release.yml` hook it calls.
 - No typographic look-alike characters (curly quotes, em-dashes, invisible unicode). CI enforces this with the check-typography action; use plain ASCII punctuation.
 
 ## Managed by repo-platform

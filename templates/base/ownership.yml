@@ -24,7 +24,6 @@ ownership:
   - { path: .github/workflows/auto-format.yml, class: starter }
   - { path: .github/workflows/checks.yml, class: starter }
   - { path: .github/workflows/ci.yml, class: managed }
-  - { path: .github/workflows/rerun-copilot-gate.yml, class: managed }
   - path: .gitignore
     class: split
     grammar: bounded-region

@@ -9,6 +9,6 @@
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
-      - uses: {{ github_username }}/repo-platform/actions/validate-skills@main
+      - uses: {{ github_username }}/repo-platform/actions/validate-skills@actions
         with:
           skills-dir: {{ skills_dir | tojson }}

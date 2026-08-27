@@ -89,41 +89,25 @@ present_line "  contents: read" "$wf/ci.yml"
 absent_line "  pull-requests: write" "$wf/ci.yml"
 present_line "      pull-requests: write" "$wf/ci.yml"
 
-# The Copilot bridge is unconditional: the gate job waits for Copilot's review
-# on every managed repo, and the re-arm workflow re-runs JUST that job once the
-# review lands. Both are visibility-independent - private repos merge the five
-# base checks into one job, but this one stays separate because its NAME is
-# what the re-arm workflow re-runs.
-present_line "  copilot-review:" "$wf/ci.yml"
-present_line "      - copilot-review" "$wf/ci.yml"
-present "COPILOT_CHECK: copilot-pull-request-reviewer" "$wf/ci.yml"
-test -f "$wf/rerun-copilot-gate.yml"
-present_line "  rerun:" "$wf/rerun-copilot-gate.yml"
-present_line "          GATE_JOB: copilot-review" "$wf/rerun-copilot-gate.yml"
-present_line "  actions: write" "$wf/rerun-copilot-gate.yml"
-# Fail-fast economy: the gate waits by FAILING, never by sleeping on a billed
-# runner, and every network call carries a deadline. Matching on the opening
-# quote of the path keeps prose mentions of the API out of the count.
+# The Copilot review wait moved OUT of CI: the ruleset requires Copilot's
+# own per-sha check run directly (settings-override.yml), so no render may
+# resurrect the retired gate job, its re-arm workflow, or a sleep-based
+# wait for the review.
+absent "copilot-review" "$wf/ci.yml"
+absent "copilot-rearm" "$wf/ci.yml"
+test ! -e "$wf/rerun-copilot-gate.yml"
 absent "sleep " "$wf/ci.yml"
-absent "sleep " "$wf/rerun-copilot-gate.yml"
-present 'timeout 20 gh api "' "$wf/ci.yml"
-present 'timeout 20 gh api "' "$wf/rerun-copilot-gate.yml"
-undeadlined="$(grep -h 'gh api "' "$wf/ci.yml" "$wf/rerun-copilot-gate.yml" | grep -vc "timeout " || true)"
-if [ "$undeadlined" != 0 ]; then
-  echo "::error::gating check failed: $undeadlined 'gh api' call(s) in the rendered Copilot bridge carry no 'timeout' deadline for modules=$MODULES private=$PRIVATE. Fix templates/base/.github/workflows/ (or this expectation in verify_smoke_gating.sh)."
-  exit 1
-fi
 if has issue-templates; then test -f "$SMOKE/.github/ISSUE_TEMPLATE/config.yml"; else test ! -e "$SMOKE/.github/ISSUE_TEMPLATE"; fi
 if has pages; then test -f "$wf/pages.yml"; else test ! -e "$wf/pages.yml"; fi
 
 
 # fuzzer: the repo-owned nightly-fuzz starter with the fuzz-issue action in
 # both modes and the dispatch replay inputs; the auto-assign dispatch step
-# follows that module (scratch build tree pins the action to main, like
-# check-typography below).
+# follows that module (rendered workflows pin composite actions @actions,
+# like check-typography below - that ref is the green-gated build branch).
 if has fuzzer; then
   test -f "$wf/nightly-fuzz.yml"
-  present "actions/fuzz-issue@main" "$wf/nightly-fuzz.yml"
+  present "actions/fuzz-issue@actions" "$wf/nightly-fuzz.yml"
   present "mode: report" "$wf/nightly-fuzz.yml"
   present "mode: resolve" "$wf/nightly-fuzz.yml"
   present "workflow_dispatch:" "$wf/nightly-fuzz.yml"
@@ -148,7 +132,7 @@ fi
 # fuzzer-free nightly row must render no nightly-fuzz.yml.
 if has nightly; then
   test -f "$wf/nightly.yml"
-  present "actions/fuzz-issue@main" "$wf/nightly.yml"
+  present "actions/fuzz-issue@actions" "$wf/nightly.yml"
   present_line "          mode: report" "$wf/nightly.yml"
   present_line "          mode: resolve" "$wf/nightly.yml"
   present_line "          stream: generic" "$wf/nightly.yml"
@@ -189,11 +173,11 @@ if has skills; then
   # needs; losing either fragment would fail open silently.
   present_line "  validate-skills:" "$wf/ci.yml"
   present_line "      - validate-skills" "$wf/ci.yml"
-  present "actions/validate-skills@main" "$wf/ci.yml"
+  present "actions/validate-skills@actions" "$wf/ci.yml"
   present_line "          skills-dir: \"$skills_dir\"" "$wf/ci.yml"
   # The advisory discovery workflow: network-dependent, outside the gate.
   test -f "$wf/validate-skills.yml"
-  present "actions/validate-skills@main" "$wf/validate-skills.yml"
+  present "actions/validate-skills@actions" "$wf/validate-skills.yml"
   present "paths: [\"$skills_dir/**\", \".claude-plugin/**\", \".github/workflows/validate-skills.yml\"]" "$wf/validate-skills.yml"
   present_line "          skills-dir: \"$skills_dir\"" "$wf/validate-skills.yml"
   present "mode: discovery" "$wf/validate-skills.yml"
@@ -325,7 +309,7 @@ else
   present "      - dependency-review" "$wf/ci.yml"
   # The wrapper pin, falling back to main on the scratch build tree; the
   # upgrade test proves the release-tag form.
-  present "repo-platform/actions/dependency-review@main" "$wf/ci.yml"
+  present "repo-platform/actions/dependency-review@actions" "$wf/ci.yml"
 fi
 
 # Base checks: private renders merge the five tiny jobs into one
@@ -333,7 +317,7 @@ fi
 # private repos); public renders keep the one-job-per-check fan-out. Job
 # keys and needs entries are matched as whole lines at their exact
 # indentation: a bare 'typography' pattern would also hit
-# 'actions/check-typography@main'.
+# 'actions/check-typography@actions'.
 base_check_jobs=(typography commit-names actionlint gitleaks yamllint)
 if [ "$PRIVATE" = "true" ]; then
   present_line "  base-checks:" "$wf/ci.yml"
@@ -344,7 +328,7 @@ if [ "$PRIVATE" = "true" ]; then
   done
   # Every check's tool steps must survive the merge (check-typography is
   # asserted for both shapes below).
-  present "actions/validate-commit-names@main" "$wf/ci.yml"
+  present "actions/validate-commit-names@actions" "$wf/ci.yml"
   present "raven-actions/actionlint" "$wf/ci.yml"
   present "gitleaks/gitleaks-action" "$wf/ci.yml"
   present "yamllint -s ." "$wf/ci.yml"
@@ -460,13 +444,16 @@ if has settings-sync; then
   present_line "  - name: bug" "$merged_out"
   present_line "  - name: enhancement" "$merged_out"
   present_line "  - name: fix-lint" "$merged_out"
-  # The fleet rulesets, always, with all-green as the ONLY required check
-  # (Copilot's check never reaches a merge-box rollup) and the
-  # review-thread gate.
+  # The fleet rulesets, always, with BOTH required checks - all-green and
+  # Copilot's own per-sha review check run - each pinned to the GitHub
+  # Actions app (both check runs are Actions-created; the pin stops any
+  # other app or a plain commit status from satisfying the context), plus
+  # the review-thread gate.
   present_line "  - name: main" "$merged_out"
   present_line "  - name: non-bypassable" "$merged_out"
   present "context: all-green" "$merged_out"
-  absent "context: copilot-pull-request-reviewer" "$merged_out"
+  present "context: copilot-pull-request-reviewer" "$merged_out"
+  present "integration_id: 15368" "$merged_out"
   present "required_review_thread_resolution: true" "$merged_out"
   # The main ruleset's code_scanning rule follows enable_codeql (public
   # AND an analyzable toolchain): GitHub 422s that rule on a private
@@ -529,8 +516,8 @@ if has release-please; then
   # fuzz-label spelling must never render again.
   present_line "  release-health:" "$wf/ci.yml"
   present_line "      - release-health" "$wf/ci.yml"
-  present "release-health@main" "$wf/ci.yml"
-  present "release-health@main" "$wf/release.yml"
+  present "release-health@actions" "$wf/ci.yml"
+  present "release-health@actions" "$wf/release.yml"
   present_line "          mode: pull-request" "$wf/ci.yml"
   present_line "          mode: release" "$wf/release.yml"
   absent "fuzz-label:" "$wf/ci.yml"
@@ -652,7 +639,7 @@ fi
 test -f "$wf/ci.yml"
 test -f "$wf/checks.yml"
 present "uses: ./.github/workflows/checks.yml" "$wf/ci.yml"
-present "actions/check-typography@main" "$wf/ci.yml"
+present "actions/check-typography@actions" "$wf/ci.yml"
 
 # Row-specific expectations for the rendered pages caller.
 if [ -n "$EXPECT_IN_PAGES" ]; then

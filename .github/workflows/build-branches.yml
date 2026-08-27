@@ -1,24 +1,47 @@
-# Publishes the generated `template` build branch copier consumes: a minimal
-# build tree from the LATEST main commit, rebuilt whenever CI completes
-# successfully on main (the workflow_run trigger below). It is an
-# ORPHAN, APPEND-ONLY branch: each build commit parents the previous build
-# commit, never a main commit, so a main history rewrite can never
-# invalidate it and old build commits (downstream repos' recorded _commit,
-# needed by copier update's three-way merge) stay reachable forever.
+# Publishes the generated build branches: `template`, the composed tree
+# copier consumes, and `actions`, the extraction-safe tree fleet `uses:`
+# refs execute (publish_actions.ts's header has why it is separate). Both
+# are minimal build trees from the LATEST main commit, rebuilt whenever CI
+# completes successfully on main (the workflow_run trigger below), and
+# both are ORPHAN, APPEND-ONLY branches: each build commit parents the
+# previous build commit, never a main commit, so a main history rewrite
+# can never invalidate them and old build commits (downstream repos'
+# recorded _commit, needed by copier update's three-way merge) stay
+# reachable forever.
+#
+# The compose cost is paid DURING CI, not after it: every main push builds
+# the tree immediately (build_pending.ts) and parks it, unpublished, at
+# refs/build-pending/<sha>; the workflow_run publisher then only PROMOTES
+# that pre-built tree once all-green completes (publish.ts PREBUILT_REF,
+# with a compose fallback when the pending ref is missing). Concurrent
+# pushes are race-safe: pending refs are keyed by source sha, and
+# publish.ts's newest-green preflight gates BOTH delivery branches before
+# either moves, skipping a stale build whose source is an ancestor of
+# either tip's stamped source - then lands both changed branches (and a
+# lease-only no-op on any unchanged one) in ONE atomic push, so a stale
+# run can never split the two branches across different sources. A branch
+# whose content is unchanged legitimately keeps its own older stamp; the
+# no-op lease is what still guards it inside the transaction.
 #
 # Only GREEN commits publish, twice over: the trigger fires on a
 # successful CI run (a failed run skips this workflow's steps quietly -
 # the red already shows on the CI run itself), and publish.ts re-verifies
 # a completed successful CI run at the source commit via the API before
 # any mutation (shared/all_green.ts), covering the schedule, dispatch,
-# and API paths the trigger never guards. The weekly schedule is a
-# self-heal net.
+# and API paths the trigger never guards. The push-time build never
+# touches the published branch, so it needs no green proof. The weekly
+# schedule is a self-heal net (it composes and publishes in one run, as
+# does dispatch).
 # GITHUB_TOKEN pushes trigger no workflows - intended; nothing may run on
-# the build branch (its tree carries no .github/).
+# the build branches (their trees carry no .github/).
 
 name: Build Branches
 
 on:
+  # Builds the pending tree concurrently with the same push's CI run;
+  # publishing waits for the workflow_run trigger below.
+  push:
+    branches: [main]
   # Fires only for CI runs whose head branch is main; the publish gate in
   # code re-checks the conclusion, so the step condition below is about
   # not burning a runner (and not going red) on CI runs that failed.
@@ -30,15 +53,42 @@ on:
     - cron: "12 6 * * 1"
   workflow_dispatch:
 
-# Contents write publishes the build branch; actions read lets publish.ts's
-# re-stamp check read the run stamped on the current tip and the
-# green-source gate read the source commit's CI runs.
+# Contents write publishes the build branch and parks the pending refs;
+# actions read lets publish.ts's re-stamp check read the run stamped on
+# the current tip and the green-source gate read the source commit's CI
+# runs.
 permissions:
   contents: write
   actions: read
 
+# Three concurrency lanes, split by role, so no OTHER-ROLE run can evict a
+# queued PUBLISHER: with one shared group GitHub coalesces queued runs, and
+# a newer run - a push build, OR a FAILED-CI workflow_run whose steps all
+# skip (CI_GREEN false) - would replace a publisher still waiting its
+# turn, which then never runs and the branches stay stale. Publishers
+# (green workflow_run, schedule, dispatch) serialize in ONE lane on
+# purpose: serial publishers let GitHub keep the NEWEST queued one, and
+# publish.ts's preflight + push lease make the survivor rollback-proof.
+# (Per-source publisher lanes would instead let two publishers race the
+# push, where the OLDER source can win - strictly worse.) Residuals the
+# serial lane keeps, all self-healing on the weekly cron or the next push:
+# a manual rerun of an OLD build can evict a queued fresher publisher, and
+# a red schedule/dispatch run can evict a green one and then skip on its
+# own green gate (both staleness-only). One deeper, contrived case can
+# actually republish superseded content: the freshness stamp only advances
+# on a CONTENT change, so if a newer publisher fully no-ops (its render is
+# byte-identical to the tip, leaving the older stamp) a later manual rerun
+# of an intermediate source is not seen as stale and republishes its
+# green-but-superseded tree. It needs an operator rerun and an exact
+# content revert; the next push or cron heals it. Push builders and
+# failed-CI no-ops each get their own lane.
 concurrency:
-  group: build-branches
+  group: >-
+    build-branches-${{
+      github.event_name == 'push' && 'pending'
+      || (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion != 'success') && 'noop'
+      || 'publish'
+    }}
   cancel-in-progress: false
 
 jobs:
@@ -63,9 +113,29 @@ jobs:
         with:
           bun-version-file: .bun-version
 
+      # Push path: compose now, publish later (never touches the branch).
+      - name: Build the pending tree
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bun .github/scripts/build-branches/build_pending.ts
+
+      # workflow_run/schedule/dispatch path: publish - promoting the push
+      # build's parked tree on workflow_run, composing otherwise.
+      #
+      # SOURCE_SHA is the commit being published. On workflow_run it MUST
+      # be the completed CI run's head_sha, never github.sha: workflow_run
+      # events evaluate github.sha to the CURRENT default-branch tip, so
+      # when main has already advanced from green A to red B, github.sha
+      # names B - A's pending tree is never found, publish.ts's green gate
+      # evaluates B and refuses, and A never publishes while B's failed CI
+      # never triggers a publish at all. The event's head_sha is the
+      # commit whose green CI this trigger is reporting.
       - name: Build and publish
-        if: env.CI_GREEN == 'true'
+        if: env.CI_GREEN == 'true' && github.event_name != 'push'
         env:
           GH_TOKEN: ${{ github.token }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          SOURCE_SHA: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+          PREBUILT_REF: ${{ github.event_name == 'workflow_run' && format('refs/build-pending/{0}', github.event.workflow_run.head_sha) || '' }}
         run: bun .github/scripts/build-branches/publish.ts

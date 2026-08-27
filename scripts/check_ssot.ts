@@ -25,6 +25,7 @@ import { existsSync, lstatSync, readdirSync, readFileSync, readlinkSync } from "
 import { join, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
 import {
+  COPILOT_REVIEW_CONTEXT,
   identityKeyIssues,
   loadOverrideLayer,
 } from "../.github/scripts/fleet/merge_settings_layers.ts";
@@ -909,10 +910,26 @@ const rules: Rule[] = [
       const gatingLines = new Set(
         needs.flatMap((jobName) => {
           const job = asRecord(jobs[jobName], jobName);
-          return ((job.steps as Record<string, unknown>[] | undefined) ?? []).flatMap((step) =>
-            String(step.run ?? "")
-              .split("\n")
-              .map((line) => line.trim()),
+          return (
+            ((job.steps as Record<string, unknown>[] | undefined) ?? [])
+              // A `continue-on-error` step fails OPEN: its command runs but a
+              // non-zero exit is swallowed, so the gate it was meant to be is
+              // no gate. Drop those lines from the gating set - a required
+              // command sitting on a suppressed step is the same missing gate
+              // as a deleted step. (Unlike the action.yml side, a plain `if:`
+              // is NOT rejected here: ci.yml steps legitimately carry event
+              // conditions like `if: github.event_name == 'pull_request'`, the
+              // repo convention for keeping the JOB unconditional.)
+              .filter((step) => step["continue-on-error"] === undefined)
+              .flatMap((step) => [
+                // `uses` counts too: a gate that moved into a composite action
+                // has no run line left to pin, and deleting its step would fail
+                // the gate open exactly as deleting a run line would.
+                String(step.uses ?? "").trim(),
+                ...String(step.run ?? "")
+                  .split("\n")
+                  .map((line) => line.trim()),
+              ])
           );
         }),
       );
@@ -927,11 +944,10 @@ const rules: Rule[] = [
         // only home is a step of the smoke-generate job (dogfood-oracle
         // row), so losing the step would fail the gate open silently.
         "bun .github/scripts/ci/verify_dogfood_oracle.ts",
-        // The fleet rehearsal and Copilot-review gates live only as steps
-        // of their all-green-needed jobs: trimming either step would leave
-        // a green checkout/setup/install job and fail the gate open.
+        // The fleet rehearsal gate lives only as a step of its
+        // all-green-needed job: trimming the step would leave a green
+        // checkout/setup/install job and fail the gate open.
         "bun .github/scripts/ci/rehearse_fleet_gate.ts",
-        "bun .github/scripts/ci/copilot_review_gate.ts",
       ]) {
         if (!gatingLines.has(required)) {
           mismatches.push({
@@ -1578,15 +1594,15 @@ const rules: Rule[] = [
         );
       };
       // The override layer's main ruleset is the fleet's only home for the
-      // required-check context now, and all-green is the only one: the
-      // validator's gate-name literal must match it. loadOverrideLayer
-      // separately refuses the Copilot review context, which GitHub never
-      // reports into a merge-box rollup.
+      // required-check contexts: the validator's gate-name literal must
+      // match the all-green entry, and the second entry is Copilot's own
+      // per-sha review check run (loadOverrideLayer separately refuses an
+      // override that drops either context or its Actions integration pin).
       const override = loadOverrideLayer();
       mismatches.push(
         ...setMismatch(
           ".github/settings-override.yml main ruleset required checks",
-          [gateName],
+          [gateName, COPILOT_REVIEW_CONTEXT],
           contexts(
             (override.rulesets ?? []) as Record<string, unknown>[],
             ".github/settings-override.yml",
