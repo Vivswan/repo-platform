@@ -31,9 +31,14 @@ on:
       - .github/settings-public.yml
       - .github/settings-private.yml
       - .github/settings-override.yml
-      - .github/scripts/fleet/render_managed_settings.ts
-      - .github/scripts/fleet/merge_settings_layers.ts
-      - .github/scripts/fleet/check_target_fresh.ts
+      - .github/scripts/fleet/**
+      # The renderers' out-of-directory imports: a change there alters the
+      # computed settings without touching a file above. The nightly
+      # schedule heals any residual staleness within a day.
+      - .github/scripts/shared/**
+      - .github/scripts/sync/modules.ts
+      - scripts/module_manifests.ts
+      - scripts/render_dogfood.ts
       - .repo-platform-answers.yml
       - templates/*/module.yml
       - templates/*/settings.yml

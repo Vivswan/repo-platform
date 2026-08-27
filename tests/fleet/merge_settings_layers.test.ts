@@ -232,7 +232,7 @@ describe("mergeRulesetEntry", () => {
   });
 });
 
-describe("normalizeDocument (the choke-point)", () => {
+describe("hardening the merged document (the choke-point)", () => {
   test("a null ARRAY ELEMENT is dropped, at any depth", () => {
     // Mapping every element preserved a null instead of removing it, so
     // "no null survives" was false for lists.
@@ -266,6 +266,51 @@ describe("normalizeDocument (the choke-point)", () => {
     expect(conditions.rules).toEqual(["keep-a", "keep-b"]);
     // The entry's OWN rules are still deduplicated.
     expect(main?.rules).toEqual([{ type: "deletion" }]);
+  });
+
+  test("a mapping under 'rulesets' is not a ruleset entry (malformed input passes through)", () => {
+    // rulesets must be an ARRAY; a mapping there used to draw the
+    // ruleset-entry treatment and a diagnostic naming a ruleset that does
+    // not exist. Hardening now leaves the malformed shape for the schema
+    // validation to reject honestly.
+    const merged = mergeSettingsLayers(
+      { rulesets: { rules: [{ type: "a" }, { type: "a" }] } } as never,
+      {},
+    ) as { rulesets: { rules: unknown[] } };
+    expect(merged.rulesets.rules).toEqual([{ type: "a" }, { type: "a" }]);
+  });
+
+  test("a NESTED key named 'rulesets' is free-form data, never a rulesets section", () => {
+    // Entry semantics belong to the document's TOP-LEVEL rulesets array
+    // alone: repository.metadata.rulesets sharing the name used to get
+    // its string 'rules' fed to appendRules (throws) or deduplicated as
+    // if they were {type} objects.
+    const merged = mergeSettingsLayers(
+      { repository: { metadata: { rulesets: [{ rules: ["keep", "keep"] }] } } } as never,
+      {},
+    ) as { repository: { metadata: { rulesets: { rules: string[] }[] } } };
+    expect(merged.repository.metadata.rulesets).toEqual([{ rules: ["keep", "keep"] }]);
+  });
+
+  test("the top-level rulesets section keeps entry semantics", () => {
+    const merged = mergeSettingsLayers(
+      { rulesets: [{ name: "main", rules: [{ type: "deletion" }, { type: "deletion" }] }] },
+      {},
+    ) as { rulesets: { rules: unknown[] }[] };
+    // Duplicate rule types in ONE entry still collapse - the entry-level
+    // treatment survives the root narrowing.
+    expect(merged.rulesets[0].rules).toEqual([{ type: "deletion" }]);
+  });
+
+  test("arrays nested deeper under 'rulesets' do not inherit the entry flag", () => {
+    // Only the DIRECT elements of the rulesets array are entries; a
+    // nested array's mappings used to inherit the flag at every depth and
+    // get their `rules` deduplicated as if they were entries.
+    const merged = mergeSettingsLayers(
+      { rulesets: [[{ name: "x", rules: [{ type: "a" }, { type: "a" }] }]] } as never,
+      {},
+    ) as { rulesets: unknown[] };
+    expect(merged.rulesets).toEqual([[{ name: "x", rules: [{ type: "a" }, { type: "a" }] }]]);
   });
 
   test("a 'rules' key outside rulesets entirely is untouched", () => {

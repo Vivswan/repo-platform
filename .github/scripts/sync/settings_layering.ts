@@ -38,6 +38,7 @@ import {
   managedSettings,
   modulesFrom,
 } from "../fleet/render_managed_settings.ts";
+import { parseYamlMapping } from "../fleet/settings_document.ts";
 import { hideDetails, notice, warning } from "../shared/gha.ts";
 import { capture } from "../shared/proc.ts";
 
@@ -419,7 +420,10 @@ export function transitionSettingsStarter(
         // recorded answers as the fallback. private: facts.private, the
         // same declared-over-recorded precedence the apply paths use
         // (factsFromTargetDir reads the old file's declaration first).
-        const answers = parseSettingsDoc(
+        // The answers file is a plain YAML MAPPING, not a settings
+        // document - parseYamlMapping carries the same diagnostics
+        // without imposing the layer schema on copier's answer keys.
+        const answers = parseYamlMapping(
           readFileSync(join(targetDir, ".copier-answers.yml"), "utf-8"),
           join(targetDir, ".copier-answers.yml"),
         );
