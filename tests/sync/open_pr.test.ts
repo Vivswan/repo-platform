@@ -29,8 +29,9 @@ esac
 `;
 
 interface Options {
-  /** RUNNER_TEMP files by name (old_commit.txt is always written). */
-  temp?: Record<string, string>;
+  /** RUNNER_TEMP files by name (old_commit.txt is always written); Buffer
+   * values let a fixture carry invalid UTF-8 capture bytes. */
+  temp?: Record<string, string | Buffer>;
   /** Contents for the env-named flag files ("" = present but empty). */
   files?: Record<string, string>;
   env?: Record<string, string>;
@@ -215,10 +216,11 @@ describe("open_pr sections and auto-merge", () => {
   });
 
   test("a single over-limit multibyte drift line is cut on a char boundary", () => {
-    // One line with no newline to trim to, made of a 2-byte char, forces
-    // the truncation's UTF-8 back-off: the result stays bounded and
-    // carries no replacement character from a cut mid-character.
-    const oneLine = "\u00e9".repeat(40000); // 80000 bytes (2-byte char), no newlines
+    // One line with no newline to trim to, made of a 3-byte char against a
+    // cap NOT divisible by 3, forces the truncation's continuation-byte
+    // back-off: a 2-byte char with an even cap would already land on a
+    // boundary and leave the back-off branch untested.
+    const oneLine = "\u20ac".repeat(30000); // 90000 bytes (3-byte char), no newlines
     const r = run({ files: { DRIFT_FILE: oneLine } });
     expect(r.exitCode).toBe(0);
     expect(Buffer.byteLength(r.body, "utf-8")).toBeLessThan(65536);
@@ -274,6 +276,49 @@ describe("open_pr sections and auto-merge", () => {
     expect(r.body).toContain("validation diagnostic sentinel line");
     expect(r.body).toContain("(truncated; reproduce validation locally");
     expect(Buffer.byteLength(r.body, "utf-8")).toBeLessThanOrEqual(62000 + 300);
+    expect(r.merged).toBe(false);
+  });
+
+  test("invalid capture bytes cannot inflate the excerpt past its reservation", () => {
+    // Invalid bytes decode to 3-byte U+FFFD replacements, so the excerpt
+    // must be bounded on its re-encoded size or the reserved section is
+    // dropped exactly when the ordinary budget is full.
+    const nearFull = `carry\n${"c".repeat(38800)}`;
+    const capture = Buffer.concat([
+      Buffer.from("validation diagnostic sentinel line ", "utf-8"),
+      Buffer.alloc(25000, 0x80), // lone continuation bytes: invalid UTF-8
+    ]);
+    const r = run({
+      files: { CARRIED_FILE: nearFull },
+      temp: { "hidden-template-validation.log": capture },
+      env: { VALIDATION: "failed", HIDE_DETAILS: "true" },
+    });
+    expect(r.exitCode).toBe(0);
+    expect(Buffer.byteLength(r.body, "utf-8")).toBeLessThan(65536);
+    expect(r.body).toContain("carry");
+    // The reserved section landed, excerpting the decoded (replaced) bytes.
+    expect(r.body).toContain("validation diagnostic sentinel line");
+    expect(r.body).toContain("\ufffd");
+    expect(r.body).toContain("(truncated; reproduce validation locally");
+    expect(r.merged).toBe(false);
+  });
+
+  test("a huge capture is excerpted from a bounded prefix, not decoded whole", () => {
+    // run_hidden writes the capture uncapped; only a prefix may ever be
+    // read (an unbounded decode could stall or exhaust memory before the
+    // reserved append).
+    const capture = Buffer.concat([
+      Buffer.from("validation diagnostic sentinel line\n", "utf-8"),
+      Buffer.alloc(5_000_000, 0x61), // 5 MB of "a"
+    ]);
+    const r = run({
+      temp: { "hidden-template-validation.log": capture },
+      env: { VALIDATION: "failed", HIDE_DETAILS: "true" },
+    });
+    expect(r.exitCode).toBe(0);
+    expect(Buffer.byteLength(r.body, "utf-8")).toBeLessThan(65536);
+    expect(r.body).toContain("validation diagnostic sentinel line");
+    expect(r.body).toContain("(truncated; reproduce validation locally");
     expect(r.merged).toBe(false);
   });
 

@@ -12,7 +12,7 @@
 // GH_TOKEN, GITHUB_REPOSITORY, GITHUB_OUTPUT,
 // RUNNER_TEMP.
 
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { closeSync, existsSync, openSync, readFileSync, readSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { env, hideDetails, requireEnv, setOutput } from "../shared/gha.ts";
 import { capture, mustCapture } from "../shared/proc.ts";
@@ -97,7 +97,10 @@ const BODY_CAP = 62000;
 // issue defers to an existing PR) and the workflow error promises them
 // here; every other review-forcing section holds the PR via its flag with
 // its evidence recoverable elsewhere (base branch, local reproduction).
-const VALIDATION_RESERVE = 22000; // the 20000-byte excerpt cap plus framing
+const VALIDATION_RESERVE = 22000; // EXCERPT_CAP plus framing
+/** The validation excerpt's bound, measured on its RE-ENCODED UTF-8 size
+ * (see the excerpt construction); must stay under VALIDATION_RESERVE. */
+const EXCERPT_CAP = 20000;
 let reservedBytes = validation === "failed" ? VALIDATION_RESERVE : 0;
 let bodyBytes = Buffer.byteLength(body, "utf-8");
 let bodyTruncated = false;
@@ -247,15 +250,29 @@ if (validation === "failed") {
       if (nonEmpty(file)) {
         validationWhere =
           "the public sync log hides the diagnostics (private repository); they are below";
-        // GitHub caps PR bodies at 64 KiB and gh fails outright past it,
-        // which would strand the pushed branch with no PR - keep the
-        // excerpt bounded like the conflicts summary.
-        const data = readFileSync(file);
+        // The excerpt is bounded on its re-encoded UTF-8 size (invalid
+        // capture bytes decode to 3-byte U+FFFD replacements, so a raw
+        // byte slice could exceed the reservation), and only a bounded
+        // PREFIX of the capture is ever read or decoded (run_hidden
+        // writes it uncapped; a decoded byte never shrinks its input, so
+        // EXCERPT_CAP input bytes plus lookahead for a straddling char
+        // already saturate the excerpt).
+        const size = statSync(file).size;
+        const window = Math.min(size, EXCERPT_CAP + 3);
+        const prefix = Buffer.alloc(window);
+        const fd = openSync(file, "r");
+        let read = 0;
+        try {
+          read = readSync(fd, prefix, 0, window, 0);
+        } finally {
+          closeSync(fd);
+        }
+        const decoded = prefix.subarray(0, read).toString("utf-8");
+        const excerpt = utf8Truncated(decoded, EXCERPT_CAP);
         const note =
-          data.length > 20000
+          size > read || excerpt.length < decoded.length
             ? "\n(truncated; reproduce validation locally for the rest - docs/private-repos.md)"
             : "";
-        const excerpt = data.subarray(0, 20000).toString("utf-8");
         validationExtra = `\n\n\`\`\`\`text\n${excerpt}${note}\n\`\`\`\``;
         break;
       }
