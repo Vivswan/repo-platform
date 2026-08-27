@@ -3,7 +3,7 @@
   "private": true,
   "description": "Dev-only manifest for editor/typecheck support; the action itself has no runtime dependencies.",
   "devDependencies": {
-    "@types/bun": "^1.3.14",
+    "@types/bun": "^1.4.0",
     "typescript": "^7.0.2"
   }
 }
