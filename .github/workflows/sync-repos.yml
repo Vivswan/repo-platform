@@ -111,8 +111,13 @@ jobs:
       # the template branch asynchronously after each main merge; a sync
       # dispatched right after a merge could consume the previous build
       # tree. Wait (bounded) for the template tip whose SOURCE STAMP names
-      # main's HEAD - the artifact's own provenance, no gh api or token.
+      # main's HEAD - the artifact's own provenance - or for the verified
+      # no-op marker when the render left the branch unchanged. The token
+      # feeds only the marker's run-proof battery (the job's actions: read
+      # / contents: read); the fresh-tip arm stays git-only.
       - name: Wait for a fresh build
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: bun .github/scripts/sync/wait_for_build.ts
 
       # Snapshots the owner's writable fleet to $RUNNER_TEMP/discovered.json

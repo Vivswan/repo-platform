@@ -132,6 +132,7 @@ jobs:
       # never triggers a publish at all. The event's head_sha is the
       # commit whose green CI this trigger is reporting.
       - name: Build and publish
+        id: publish
         if: env.CI_GREEN == 'true' && github.event_name != 'push'
         env:
           GH_TOKEN: ${{ github.token }}
@@ -139,3 +140,16 @@ jobs:
           SOURCE_SHA: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
           PREBUILT_REF: ${{ github.event_name == 'workflow_run' && format('refs/build-pending/{0}', github.event.workflow_run.head_sha) || '' }}
         run: bun .github/scripts/build-branches/publish.ts
+
+      # A template no-op publishes no commit, so publish.ts records the
+      # verdict as a marker ref plus THIS artifact, whose name is the claim
+      # ("source X is a no-op against tip Y"). The artifact is the
+      # run-owned proof sync/wait_for_build.ts verifies the marker against:
+      # nothing can attach an artifact to a completed run, so a marker
+      # naming this run is only trusted if this run really made the claim.
+      - name: Record the no-op claim
+        if: steps.publish.outputs.noop_claim != ''
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ steps.publish.outputs.noop_claim }}
+          path: /tmp/noop-claim.txt

@@ -8,6 +8,7 @@ import { describe, expect, test } from "bun:test";
 import {
   PENDING_REF_PREFIX,
   pendingRefFor,
+  refSuperseded,
   staleReason,
 } from "../../.github/scripts/build-branches/pending.ts";
 
@@ -52,5 +53,30 @@ describe("staleReason (newest-green wins)", () => {
 
   test("a diverged tip source proceeds - a history rewrite is provenance's report, not staleness", () => {
     expect(staleReason("c".repeat(40), "d".repeat(40), mainHistory)).toBe("");
+  });
+});
+
+describe("refSuperseded (the per-source ref sweep)", () => {
+  // The rule behind publish.ts's sweep of refs/build-pending/ and
+  // refs/build-meta/template-noop/: an inverted own-ref policy would
+  // either strand every consumed pending ref or delete the no-op verdict
+  // the sync's waiter is about to verify.
+  test("an ancestor source's ref is superseded under either policy", () => {
+    expect(refSuperseded(OLD, NEW, "consume", mainHistory)).toBe(true);
+    expect(refSuperseded(OLD, NEW, "keep", mainHistory)).toBe(true);
+  });
+
+  test("the candidate's own ref follows the policy: pendings consumed, markers kept", () => {
+    expect(refSuperseded(NEW, NEW, "consume", mainHistory)).toBe(true);
+    expect(refSuperseded(NEW, NEW, "keep", mainHistory)).toBe(false);
+  });
+
+  test("a NEWER source's ref never sweeps - its own publisher still needs it", () => {
+    expect(refSuperseded(NEW, OLD, "consume", mainHistory)).toBe(false);
+    expect(refSuperseded(NEW, OLD, "keep", mainHistory)).toBe(false);
+  });
+
+  test("an unresolvable or diverged source stays - isAncestor answers false there", () => {
+    expect(refSuperseded("c".repeat(40), NEW, "consume", mainHistory)).toBe(false);
   });
 });

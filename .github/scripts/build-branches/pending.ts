@@ -44,3 +44,26 @@ export function staleReason(
   }
   return "";
 }
+
+/** What a publish of `candidateSource` does to the ref whose own source
+ * leaf is the candidate itself: a pending ref is CONSUMED (its tree was
+ * promoted, or a newer one covers it), a no-op marker IS the verdict the
+ * sync's waiter still needs and must survive its own run. */
+export type OwnRefPolicy = "consume" | "keep";
+
+/** Whether a publish of `candidateSource` supersedes the per-source ref
+ * whose source leaf is `refSource`: an ancestor source is always covered
+ * (its queued publisher will skip as stale anyway); the candidate's own
+ * ref follows `ownRef`; refs for NEWER sources never sweep - their own
+ * publishers still need them. `isAncestor` must answer false for an
+ * unresolvable source (a rewritten-away commit's ref is left for the
+ * rewrite's own build to clean up). */
+export function refSuperseded(
+  refSource: string,
+  candidateSource: string,
+  ownRef: OwnRefPolicy,
+  isAncestor: (ancestor: string, descendant: string) => boolean,
+): boolean {
+  if (refSource === candidateSource) return ownRef === "consume";
+  return isAncestor(refSource, candidateSource);
+}

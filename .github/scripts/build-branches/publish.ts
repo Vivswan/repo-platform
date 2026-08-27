@@ -18,7 +18,10 @@
 // workflows would execute one commit's actions against another commit's
 // renders). A branch whose content is unchanged does keep its own older
 // source stamp - the two stamps can legitimately differ - and neither ref
-// rolls back or splits under a stale run in the common case. The one
+// rolls back or splits under a stale run in the common case. A template
+// no-op additionally records a per-source marker ref plus a run-owned
+// artifact claim (see publishNoopMarker) so the sync's bounded freshness
+// wait can complete without a fleet-visible commit. The one
 // deeper residual (see build-branches.yml's concurrency note): freshness
 // is stamp-based and the stamp advances only on a CONTENT change, so a
 // newer publisher that fully no-ops leaves the older stamp, after which a
@@ -30,7 +33,7 @@
 // head_sha on the workflow_run path, the trigger commit otherwise);
 // PREBUILT_REF optional (workflow_run only).
 
-import { rmSync } from "node:fs";
+import { rmSync, writeFileSync } from "node:fs";
 import { z } from "zod";
 import { allGreenFailure } from "../shared/all_green.ts";
 import {
@@ -40,13 +43,19 @@ import {
   commitStampParseAll,
   commitStampWrite,
 } from "../shared/commit_stamp.ts";
-import { env, fail, requireEnv } from "../shared/gha.ts";
+import { env, fail, requireEnv, setOutput } from "../shared/gha.ts";
 import { BUILD_IDENTITY } from "../shared/git_identity.ts";
 import { parseJsonWith } from "../shared/json.ts";
+import {
+  NOOP_MARKER_REF_PREFIX,
+  noopClaimName,
+  noopMarkerMessage,
+  noopMarkerRefFor,
+} from "../shared/noop_marker.ts";
 import { capture, must, mustCapture } from "../shared/proc.ts";
 import { rebuildBranchTree } from "../shared/rebuild_tree.ts";
 import { runVouchesForSource } from "../shared/run_vouches.ts";
-import { PENDING_REF_PREFIX, staleReason } from "./pending.ts";
+import { type OwnRefPolicy, PENDING_REF_PREFIX, refSuperseded, staleReason } from "./pending.ts";
 
 const BRANCH = "template";
 /** The sibling branch carrying ONLY actions/ + a README: `uses: ...@ref`
@@ -57,7 +66,8 @@ const BRANCH = "template";
  * gate, in the same atomic push as the template branch below. */
 const ACTIONS_BRANCH = "actions";
 /** build-branches.yml's publish step name - the step-level publish proof;
- * twin of verify_build_provenance.ts's PUBLISH_STEP on the sync side. */
+ * twin of the PUBLISH_STEP in sync/verify_build_provenance.ts and
+ * sync/wait_for_build.ts. */
 const PUBLISH_STEP = "Build and publish";
 const repository = requireEnv("GITHUB_REPOSITORY");
 
@@ -323,7 +333,16 @@ function prepareActionsBranch(sourceSha: string): PreparedBranch | null {
   };
 }
 
-function prepareTemplateBranch(sourceSha: string): PreparedBranch | null {
+/** The template preparation outcome: a commit to push, or the VERIFIED
+ * no-op (content unchanged AND the tip passed restampReason's battery)
+ * with the tip it was verified against - carried here so the marker never
+ * reaches back into /tmp/pub by convention. Bootstrap and re-stamp both
+ * commit, so they are "publish". */
+type TemplateOutcome =
+  | { kind: "publish"; branch: PreparedBranch }
+  | { kind: "noop"; tipSha: string };
+
+function prepareTemplateBranch(sourceSha: string): TemplateOutcome {
   console.log(`::group::build ${BRANCH} from ${sourceSha.slice(0, 12)}`);
   for (const dir of ["/tmp/src", "/tmp/tree", "/tmp/pub"]) {
     rmSync(dir, { recursive: true, force: true });
@@ -390,7 +409,7 @@ function prepareTemplateBranch(sourceSha: string): PreparedBranch | null {
         : "branch bootstrap";
   if (note === "") {
     console.log(`${BRANCH}: no content change`);
-    return null;
+    return { kind: "noop", tipSha: mustCapture(["git", "-C", "/tmp/pub", "rev-parse", "HEAD"]) };
   }
   must([
     "git",
@@ -406,7 +425,7 @@ function prepareTemplateBranch(sourceSha: string): PreparedBranch | null {
     "-m",
     commitRunWrite(requireEnv("RUN_URL")),
   ]);
-  return { branch: BRANCH, dir: "/tmp/pub", note };
+  return { kind: "publish", branch: { branch: BRANCH, dir: "/tmp/pub", note } };
 }
 
 /** Newest-green-wins (pending.ts owns the rule), gating BOTH branches
@@ -496,31 +515,80 @@ function pushPrepared(prepared: PreparedBranch[], preflightTips: Map<string, str
   }
 }
 
-/** Delete pending refs this publish consumed or obsoleted: the candidate's
- * own ref, and every pending ref whose source is an ancestor of the
- * candidate (a newer tree covers them; their queued publishers will skip
- * as stale anyway). Pending refs for NEWER sources stay - their own
- * publishers still need them. Best-effort: a failed delete warns, never
- * reds the run (the refs are per-sha, so leftovers cannot corrupt). */
-function sweepPendingRefs(sourceSha: string): void {
-  const listing = capture(["git", "ls-remote", "origin", `${PENDING_REF_PREFIX}*`]);
+/** Records a template no-op where sync/wait_for_build.ts can see it: the
+ * append-only branch gains no commit when the render is byte-identical,
+ * so the tip keeps its PREVIOUS source stamp and the waiter's stamp probe
+ * would burn its whole wait on every later sync (the next build is also a
+ * no-op, so not even the cron heals it). Two writes, and the second is
+ * the authority:
+ *
+ *   1. A tiny orphan commit (empty tree, no parent - nothing
+ *      fleet-visible, no copier _commit churn) force-pushed to
+ *      noopMarkerRefFor(source): the DISCOVERY pointer. Force because a
+ *      re-run's marker does not descend from its predecessor.
+ *   2. A claim file whose upload build-branches.yml's next step performs
+ *      under the noopClaimName artifact name: the run-owned PROOF the
+ *      waiter verifies the pointer against. Only this run, while running,
+ *      can attach an artifact to itself - run metadata alone cannot say
+ *      which source a run published (run_vouches.ts's residual), so a
+ *      marker naming a real run is not enough.
+ *
+ * Best-effort like the pending-ref sweep: a failed marker push only costs
+ * waits (never content), and the next no-op publish, weekly cron
+ * included, records a fresh verdict. */
+function publishNoopMarker(sourceSha: string, tipSha: string): void {
+  const claim = noopClaimName(sourceSha, tipSha);
+  const message = noopMarkerMessage(
+    requireEnv("GITHUB_SERVER_URL"),
+    repository,
+    sourceSha,
+    tipSha,
+    requireEnv("RUN_URL"),
+  );
+  const emptyTree = mustCapture(["git", "hash-object", "-w", "-t", "tree", "/dev/null"]);
+  const marker = mustCapture(["git", "commit-tree", emptyTree, "-m", message]);
+  const ref = noopMarkerRefFor(sourceSha);
+  const pushed = capture(["git", "push", "--quiet", "--force", "origin", `${marker}:${ref}`]);
+  if (pushed.exitCode !== 0) {
+    console.log(
+      `::warning::could not push the no-op marker to ${ref} (${pushed.stderr.trim()}); syncs will burn their bounded wait until the next no-op publish records a fresh verdict`,
+    );
+    return;
+  }
+  writeFileSync("/tmp/noop-claim.txt", `${message}\n`);
+  setOutput("noop_claim", claim);
+  console.log(
+    `${ref}: source ${sourceSha.slice(0, 12)} verified as a no-op against tip ${tipSha.slice(0, 12)} (claim artifact ${claim})`,
+  );
+}
+
+/** Delete per-source refs under `prefix` that this publish superseded
+ * (refSuperseded in pending.ts owns the rule; `ownRef` is its pending
+ * -vs-marker policy). Best-effort: a failed delete warns, never reds the
+ * run (the refs are per-sha, so leftovers cannot corrupt). */
+function sweepSourceRefs(prefix: string, sourceSha: string, ownRef: OwnRefPolicy): void {
+  const listing = capture(["git", "ls-remote", "origin", `${prefix}*`]);
   if (listing.exitCode !== 0) {
-    console.log("::warning::could not list pending build refs; skipping the sweep");
+    console.log(`::warning::could not list ${prefix}* refs; skipping the sweep`);
     return;
   }
   for (const line of listing.stdout.split("\n")) {
     const ref = line.split("\t")[1];
-    if (ref === undefined || !ref.startsWith(PENDING_REF_PREFIX)) continue;
-    const refSource = ref.slice(PENDING_REF_PREFIX.length);
-    const consumed =
-      refSource === sourceSha ||
-      (resolves(`${refSource}^{commit}`) !== "" && isAncestor(refSource, sourceSha));
-    if (!consumed) continue;
+    if (ref === undefined || !ref.startsWith(prefix)) continue;
+    const refSource = ref.slice(prefix.length);
+    const superseded = refSuperseded(
+      refSource,
+      sourceSha,
+      ownRef,
+      (ancestor, descendant) =>
+        resolves(`${ancestor}^{commit}`) !== "" && isAncestor(ancestor, descendant),
+    );
+    if (!superseded) continue;
     const deleted = capture(["git", "push", "--quiet", "origin", "--delete", ref]);
     if (deleted.exitCode !== 0) {
-      console.log(`::warning::could not delete consumed pending ref ${ref}`);
+      console.log(`::warning::could not delete superseded ref ${ref}`);
     } else {
-      console.log(`swept pending ref ${ref}`);
+      console.log(`swept ${ref}`);
     }
   }
 }
@@ -552,9 +620,21 @@ const { stale, tips } = stalePreflight(sourceSha);
 if (stale !== "") {
   console.log(`skipping publish - ${stale}`);
 } else {
-  const prepared = [prepareActionsBranch(sourceSha), prepareTemplateBranch(sourceSha)].filter(
+  const actionsPrepared = prepareActionsBranch(sourceSha);
+  const template = prepareTemplateBranch(sourceSha);
+  const prepared = [actionsPrepared, template.kind === "publish" ? template.branch : null].filter(
     (branch): branch is PreparedBranch => branch !== null,
   );
   pushPrepared(prepared, tips);
+  // Marked only after the push call: when anything was prepared, that
+  // push is the lease-guarded transaction, so a run that lost the race
+  // never claims its source is on the branch. A FULL no-op has nothing to
+  // lease - a marker racing a newer publisher there is inert through its
+  // tip binding (the waiter matches it against the tip it actually
+  // fetches).
+  if (template.kind === "noop") {
+    publishNoopMarker(sourceSha, template.tipSha);
+  }
 }
-sweepPendingRefs(sourceSha);
+sweepSourceRefs(PENDING_REF_PREFIX, sourceSha, "consume");
+sweepSourceRefs(NOOP_MARKER_REF_PREFIX, sourceSha, "keep");

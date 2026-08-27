@@ -1,9 +1,10 @@
 // The build-publish wiring the provenance path depends on, pinned where a
 // silent edit would reintroduce the regression: the publisher's SOURCE_SHA
 // must track the COMPLETED CI run's head_sha (not github.sha, which is
-// main's current tip on a workflow_run event), and the three enforcement
-// points must agree on the publish-step name AND both provenance checks
-// must actually read the run's jobs to verify it.
+// main's current tip on a workflow_run event), the enforcement points
+// must agree on the publish-step name AND every provenance check must
+// actually read the run's jobs to verify it, and a template no-op must
+// publish its marker (or the sync-side wait burns out on every no-op).
 
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
@@ -29,23 +30,62 @@ describe("build-branches publish wiring", () => {
     );
   });
 
-  test("the publish step name is one string across the workflow and both provenance checks", () => {
-    // publish.ts's re-stamp check and verify_build_provenance.ts both prove
-    // a stamped run PUBLISHED by requiring this exact step to have
-    // succeeded (conclusion=success alone is a red main's no-op). If the
-    // workflow renamed the step, both proofs would reject every run (no
-    // step of that name ever succeeds), stranding the fleet.
+  test("the publish step name is one string across the workflow and all three provenance checks", () => {
+    // publish.ts's re-stamp check, verify_build_provenance.ts, and
+    // wait_for_build.ts's marker battery all prove a stamped run PUBLISHED
+    // by requiring this exact step to have succeeded (conclusion=success
+    // alone is a red main's no-op). If the workflow renamed the step, the
+    // proofs would reject every run (no step of that name ever succeeds),
+    // stranding the fleet.
     expect(workflow).toContain("- name: Build and publish");
     const publish = read(".github/scripts/build-branches/publish.ts");
     const verify = read(".github/scripts/sync/verify_build_provenance.ts");
+    const wait = read(".github/scripts/sync/wait_for_build.ts");
     expect(publish).toContain('const PUBLISH_STEP = "Build and publish"');
     expect(verify).toContain('const PUBLISH_STEP = "Build and publish"');
-    // Both must actually READ the run's jobs - the step-success proof is
+    expect(wait).toContain('const PUBLISH_STEP = "Build and publish"');
+    // All must actually READ the run's jobs - the step-success proof is
     // worthless if a future refactor drops the jobs read. Match the API
     // PATH (a template literal ending .../jobs), not the "runs/jobs
     // response" diagnostic label, which would survive the cut.
     const jobsApiCall = /actions\/runs\/\$\{[^}]+\}\/jobs`/;
     expect(publish).toMatch(jobsApiCall);
     expect(verify).toMatch(jobsApiCall);
+    expect(wait).toMatch(jobsApiCall);
+  });
+
+  test("a template no-op records marker + claim, after the push call, force, and only then", () => {
+    // The stamp only advances on a content change, so without the marker
+    // a no-op source leaves wait_for_build.ts burning its whole wait on
+    // every later sync (the next build is also a no-op - the cron cannot
+    // heal it). Pinned: the marker publishes only on the verified-no-op
+    // outcome and only after the pushPrepared call - when anything was
+    // prepared that call is the lease-guarded transaction, so a run that
+    // lost the race never claims its source is on the branch (a FULL
+    // no-op has nothing to lease; its marker is inert through the tip
+    // binding); the push is forced (successive markers do not descend
+    // from each other, so a rerun must overwrite, not fail as a
+    // non-fast-forward); and the claim is handed to the workflow's
+    // artifact step, whose upload binds it to the run - the run-owned
+    // evidence the waiter's battery requires. The sweep keeps the marker
+    // it just pushed ("keep") while pendings stay consumed ("consume").
+    const publish = read(".github/scripts/build-branches/publish.ts");
+    const pushIndex = publish.indexOf("pushPrepared(prepared, tips);");
+    const markIndex = publish.indexOf('if (template.kind === "noop") {');
+    expect(pushIndex).toBeGreaterThan(0);
+    expect(markIndex).toBeGreaterThan(pushIndex);
+    expect(publish).toContain("publishNoopMarker(sourceSha, template.tipSha);");
+    expect(publish).toMatch(/"--force",\s*"origin",\s*`\$\{marker\}:\$\{ref\}`/);
+    expect(publish).toContain('setOutput("noop_claim", claim);');
+    expect(publish).toContain('sweepSourceRefs(PENDING_REF_PREFIX, sourceSha, "consume");');
+    expect(publish).toContain('sweepSourceRefs(NOOP_MARKER_REF_PREFIX, sourceSha, "keep");');
+    // The workflow side of the claim: the artifact NAME is the claim, the
+    // step runs only when publish.ts made one, and the file it uploads is
+    // the one publish.ts wrote.
+    expect(workflow).toContain("id: publish");
+    expect(workflow).toContain("if: steps.publish.outputs.noop_claim != ''");
+    expect(workflow).toContain("name: ${{ steps.publish.outputs.noop_claim }}");
+    expect(workflow).toContain("path: /tmp/noop-claim.txt");
+    expect(publish).toContain('writeFileSync("/tmp/noop-claim.txt"');
   });
 });
