@@ -36,7 +36,10 @@
 //   before the write/diff step. The keys carrying it stay in the goldens,
 //   and only the true sha passes: a bug that stamps a WRONG sha shows as
 //   drift, and a render that already contains the sentinel is rejected
-//   outright.
+//   outright. The stamp hook hashes the answers file BEFORE that rewrite,
+//   so normalizeRenderedTree re-runs the hook on the normalized tree -
+//   otherwise the manifests would keep an indirect scratch-sha dependence
+//   through that hash line.
 // - copier runs from the scratch directory with a RELATIVE src path, so
 //   the recorded `_src_path` is the fixed string "./tree", never a temp
 //   path. The same /dev/null git config is passed to copier for its
@@ -69,6 +72,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { must, mustCapture } from "../.github/scripts/shared/proc.ts";
+import { MANIFEST_NAME, stampManifestText } from "../.github/scripts/sync/stamp_manifest.ts";
 import { loadManifests } from "./module_manifests.ts";
 
 const REPO_ROOT = resolve(import.meta.dir, "..");
@@ -155,6 +159,47 @@ export function shaNormalizer(fullSha: string): (rel: string, text: string) => s
       from = hit + length;
     }
   };
+}
+
+/** Apply `normalize` to a rendered tree in place: every file (as latin1
+ *  text, which round-trips every byte) and every symlink target, then
+ *  re-run the manifest stamp hook against the normalized tree. The hook
+ *  ran inside copier, hashing each file BEFORE this normalization, so the
+ *  manifest would otherwise keep an indirect scratch-sha dependence
+ *  through the answers file's hash; re-stamping recomputes every hash
+ *  class (whole file, split half, symlink target) with the stamper's own
+ *  semantics and re-reads the `_commit` provenance from the now-sentinel
+ *  answers file. A hash that is stale for any OTHER reason is re-stamped
+ *  to the honest value here too - exactly what a fresh render's own hook
+ *  would have done - so drift still reports the content change itself. */
+export function normalizeRenderedTree(
+  root: string,
+  normalize: (rel: string, text: string) => string,
+): void {
+  for (const [rel, entry] of readTree(root)) {
+    const path = join(root, rel);
+    if (entry.kind === "symlink") {
+      const target = normalize(rel, entry.target);
+      if (target === entry.target) continue;
+      rmSync(path);
+      symlinkSync(target, path);
+      continue;
+    }
+    const text = entry.bytes.toString("latin1");
+    const normalized = normalize(rel, text);
+    if (normalized !== text) writeFileSync(path, Buffer.from(normalized, "latin1"));
+  }
+  let manifestText: string;
+  try {
+    manifestText = readFileSync(join(root, MANIFEST_NAME), "utf-8");
+  } catch {
+    return; // a render without a manifest has nothing to re-stamp
+  }
+  // The stamper reports corruption soft (its sync-side contract); in a
+  // fresh render it is a template bug, so fail loudly here.
+  const { out, problem } = stampManifestText(manifestText, root);
+  if (problem !== null) throw new Error(`${MANIFEST_NAME} ${problem}`);
+  if (out !== manifestText) writeFileSync(join(root, MANIFEST_NAME), out);
 }
 
 /** Every file and symlink below root (repo-relative, sorted), with content
@@ -291,17 +336,9 @@ function run(checkMode: boolean): number {
       // writes, --check diffs) see sentinel-stamped trees from the same
       // code path - CI's fresh render must normalize identically or the
       // drift check would fail forever.
-      const fresh = readTree(join(work, `out-${golden.name}`));
-      for (const [rel, entry] of fresh) {
-        if (entry.kind === "file") {
-          const text = entry.bytes.toString("latin1");
-          const normalized = normalize(rel, text);
-          if (normalized !== text) entry.bytes = Buffer.from(normalized, "latin1");
-        } else {
-          entry.target = normalize(rel, entry.target);
-        }
-      }
-      rendered.push({ name: golden.name, fresh });
+      const outDir = join(work, `out-${golden.name}`);
+      normalizeRenderedTree(outDir, normalize);
+      rendered.push({ name: golden.name, fresh: readTree(outDir) });
     }
 
     // Regen rewrites the whole directory, so a golden the matrix no longer

@@ -4,7 +4,7 @@
     ".bun-version": {"class": "managed", "hash": "56b0485099b6c5427d3b68c042fd05b632d5e52e924c5064473389812227164c"},
     ".claude-plugin/marketplace.json": {"class": "starter"},
     ".claude-plugin/plugin.json": {"class": "starter"},
-    ".copier-answers.yml": {"class": "managed", "hash": "c5cf5b6edef16d4d7381854c96d6fab65e35fae8b18f7daa29d84f472d9c590b"},
+    ".copier-answers.yml": {"class": "managed", "hash": "32686ed93014339f2fa41da67181cfbb470ce063800e2b4cee3ac2848c1617df"},
     ".dvmrc": {"class": "managed", "hash": "a67412800e1a782d934d86a21239931978965064ce2fb805a28d09f720b807ae"},
     ".editorconfig": {"class": "split", "grammar": "tail-marker", "marker": "# repo-platform:local-section", "managed": "above", "hash": "e90867d0fd88f675f499379fe6fbf1045888af8092d6b3e76022a5133c86a4bc"},
     ".gitattributes": {"class": "split", "grammar": "tail-marker", "marker": "# repo-platform:local-section", "managed": "above", "hash": "fa95a4920c80c7fd30da087ffa3b655c0a78c65aa9b20ea80abbfc429e8256a9"},
