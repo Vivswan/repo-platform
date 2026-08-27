@@ -40,12 +40,13 @@ import { parse as parseYaml } from "yaml";
 import { z } from "zod";
 import type { ModuleManifest } from "./module_manifests.ts";
 
-/** The managed ownership header in template sources, anchored on the C1
- *  line's canonical trailing period with no repo-name character (GitHub
- *  allows [A-Za-z0-9._-]) after it, so neither a negated look-alike ("is
- *  not managed by") nor a longer repo name ("/repo-platform_fork",
- *  "/repo-platform.fork") counts; validate_generated_files.ts applies the
- *  same anchoring to rendered files. */
+/** The managed ownership header in template sources, anchored on the
+ *  header sentence's canonical trailing period with no repo-name character
+ *  (GitHub allows [A-Za-z0-9._-]) after it, so neither a negated
+ *  look-alike ("is not managed by") nor a longer repo name
+ *  ("/repo-platform_fork", "/repo-platform.fork") counts;
+ *  validate_generated_files.ts applies the same anchoring to rendered
+ *  files. */
 export const MANAGED_HEADER_RE =
   /This file is managed by \{\{ github_username \}\}\/repo-platform\.(?![A-Za-z0-9._-])/;
 
@@ -94,7 +95,12 @@ export function hasManagedHeader(source: string): boolean {
 
 // Declared paths and marker lines ride through YAML declarations, the
 // manifest template's jinja single-quoted string literals, and JSON, so a
-// single quote is refused (it would end the jinja literal early). Markers
+// single quote is refused (it would end the jinja literal early), and so
+// is every character JSON.stringify must escape: the manifest template
+// builds its entry lines with JSON.stringify, jinja UNESCAPES backslash
+// sequences inside string literals, and a control character lands raw
+// inside the JSON - a double quote breaks the rendered JSON, a backslash
+// decodes to a different character, a tab corrupts the string. Markers
 // are matched as whole trimmed lines against latin1-decoded file bytes by
 // the sync's split-file rebuild, so they must be trim-stable printable
 // ASCII (a non-ASCII marker would decode to different code units in the
@@ -102,16 +108,30 @@ export function hasManagedHeader(source: string): boolean {
 // comments in the marker's own syntax, so a marker must open as a hash or
 // HTML comment - a new comment syntax extends the appendix writer and
 // this schema together.
-const singleLineNoQuote = (what: string) =>
+const manifestSafeLine = (what: string) =>
   z
     .string()
     .min(1)
     .refine((value) => !/[\r\n]/.test(value), { message: `${what} must be a single line` })
     .refine((value) => !value.includes("'"), {
       message: `${what} must not contain ' (it lands inside the manifest template's jinja string literals)`,
+    })
+    .superRefine((value, ctx) => {
+      for (const ch of value) {
+        if (JSON.stringify(ch) !== `"${ch}"`) {
+          ctx.addIssue({
+            code: "custom",
+            message:
+              `${what} must not contain ${JSON.stringify(ch)} - JSON.stringify escapes it, ` +
+              "and the manifest template's jinja string literals unescape backslash " +
+              "sequences, so the rendered manifest would not round-trip the value",
+          });
+          return;
+        }
+      }
     });
 
-const declaredPath = singleLineNoQuote("each ownership path")
+const declaredPath = manifestSafeLine("each ownership path")
   .refine((value) => value === value.trim(), {
     message: "each ownership path must not have leading or trailing whitespace",
   })
@@ -127,7 +147,7 @@ const declaredPath = singleLineNoQuote("each ownership path")
   });
 
 const markerLine = (what: string) =>
-  singleLineNoQuote(what)
+  manifestSafeLine(what)
     .refine((value) => value === value.trim(), {
       message: `${what} is matched as a whole trimmed line, so it must not have leading or trailing whitespace`,
     })
@@ -174,9 +194,20 @@ const hashMarker = (what: string) =>
 
 /** One declared file. Exported for scripts/module_manifests.ts (module
  *  `ownership:` lists) and loadBaseOwnership below - one schema, so the
- *  two declaration homes can never diverge in shape. */
+ *  two declaration homes can never diverge in shape.
+ *
+ *  `headerless: true` on a managed declaration says the file has no
+ *  comment channel to carry the managed header (a symlink, a version pin,
+ *  JSON): the validator then enforces its manifest class alone. It is
+ *  DECLARED, never inferred from the source text - inferring it from a
+ *  missing header would let deleting the header silently downgrade the
+ *  file's enforcement, the exact bypass the header guards against. */
 export const ownershipEntrySchema = z.discriminatedUnion("class", [
-  z.strictObject({ path: declaredPath, class: z.literal("managed") }),
+  z.strictObject({
+    path: declaredPath,
+    class: z.literal("managed"),
+    headerless: z.literal(true).optional(),
+  }),
   z.strictObject({ path: declaredPath, class: z.literal("starter") }),
   z.discriminatedUnion("grammar", [
     z.strictObject({
@@ -223,11 +254,13 @@ export const ownershipEntrySchema = z.discriminatedUnion("class", [
 
 export type OwnershipDeclaration = z.infer<typeof ownershipEntrySchema>;
 
-type OmitPath<T> = T extends { path: string } ? Omit<T, "path"> : never;
+type OmitPath<T> = T extends { path: string } ? Omit<T, "path" | "headerless"> : never;
 
-/** A declaration's ownership without its path: what the manifest entry
- *  records for the landed file. Derived from the schema inference, so a
- *  schema change cannot leave this union behind. */
+/** A declaration's ownership without its path or enforcement mode: what
+ *  the manifest entry records for the landed file (`headerless` steers the
+ *  validator's tables, not the sync, so it stays out of the manifest).
+ *  Derived from the schema inference, so a schema change cannot leave this
+ *  union behind. */
 export type ManifestOwnership = OmitPath<OwnershipDeclaration>;
 
 export type SplitOwnership = Extract<ManifestOwnership, { class: "split" }>;
@@ -241,6 +274,10 @@ export function managedSide(split: SplitOwnership): "above" | "below" {
 
 export function ownershipOf(declaration: OwnershipDeclaration): ManifestOwnership {
   const { path: _path, ...ownership } = declaration;
+  if (ownership.class === "managed") {
+    const { headerless: _headerless, ...manifest } = ownership;
+    return manifest;
+  }
   return ownership;
 }
 
@@ -373,9 +410,9 @@ export function landedPathAndGates(renderedPath: string): { path: string; gates:
  *  arbitrary marker text, so the shipped LOCAL_SECTION_LINES alone would
  *  miss a custom declared marker copied into a managed or starter source;
  *  declarationTextErrors unions this derived set with those constants,
- *  exactly as it does for bounded-region markers. Deriving ALONE is what
- *  G2 fixed and this must not undo: the constants are what keep the scan
- *  armed when no declaration of a given grammar is left in the tree. */
+ *  exactly as it does for bounded-region markers. Deriving ALONE is
+ *  self-disarming and the union must stay: the constants are what keep the
+ *  scan armed when no declaration of a given grammar is left in the tree. */
 export function declaredTailMarkerTexts(declarations: Iterable<OwnershipDeclaration>): string[] {
   const out = new Set<string>();
   for (const declaration of declarations) {
@@ -551,19 +588,25 @@ function foreignMarkerMessage(
   }
 }
 
+// --- foreign-marker scanning ---------------------------------------------------
+
 /** Markers in the source that this declaration does not own, at most one
  *  per kind. Sync dispatches on the DECLARED grammar alone, so a foreign
  *  marker is always the same hazard however the declaration is spelled: the
  *  rebuild treats the repo-owned area that marker promises as its own and
  *  overwrites it.
  *
- *  The two matching semantics stay SPLIT on purpose, because they decide
- *  what counts as a claim. Tail markers match as exact TRIMMED LINES, so a
- *  source may still MENTION one mid-line without claiming the tail below
- *  it. Region markers match as SUBSTRINGS, the way the validator's
- *  exactly-once count and the appendix neutralization both count, so a
- *  spliced jinja tag glued onto a marker line does not smuggle the claim
- *  past. Unifying them would move the boundary of what a source can say. */
+ *  Both kinds match by TEXT PRESENCE: a foreign marker string anywhere in
+ *  the source - a whole line, glued to jinja tags, inside a tag or a
+ *  comment, a prose mention - is a claim, the same substring semantics the
+ *  validator's exactly-once count and the appendix neutralization apply.
+ *  Deciding instead which occurrences could RENDER as a live marker line
+ *  needs a jinja evaluator, and the failure directions are not symmetric:
+ *  an over-claim surfaces at compose time and costs a reword or an
+ *  explicit declaration, an under-claim ships a live marker in a managed
+ *  file - a silent ownership bypass. Exemption is POSITIONAL: a foreign
+ *  occurrence lying entirely inside an own-marker occurrence is the own
+ *  marker's text; one extending past it in either direction claims. */
 function foreignMarkerErrors(
   declaration: OwnershipDeclaration,
   source: string,
@@ -572,21 +615,26 @@ function foreignMarkerErrors(
 ): string[] {
   const own = ownMarkers(declaration);
   const errors: string[] = [];
-  const ownTail = new Set(own.tail);
-  const tailRoster = new Set(rosters.tail);
-  const foreignTail = source
-    .split("\n")
-    .map((line) => line.trim())
-    .find((line) => tailRoster.has(line) && !ownTail.has(line));
-  if (foreignTail !== undefined) {
-    errors.push(foreignMarkerMessage("tail", foreignTail, own.tail, declaration, where));
-  }
-  const ownRegion = new Set(own.region);
-  const foreignRegion = [...new Set(rosters.region)]
-    .filter((candidate) => !ownRegion.has(candidate))
-    .find((candidate) => source.includes(candidate));
-  if (foreignRegion !== undefined) {
-    errors.push(foreignMarkerMessage("region", foreignRegion, own.region, declaration, where));
+  for (const kind of ["tail", "region"] as const) {
+    // Every position the declaration's own markers occupy, overlapping
+    // occurrences included.
+    const ownSpans: [number, number][] = [];
+    for (const owned of own[kind]) {
+      for (let at = source.indexOf(owned); at !== -1; at = source.indexOf(owned, at + 1)) {
+        ownSpans.push([at, at + owned.length]);
+      }
+    }
+    const outsideOwn = (candidate: string): boolean => {
+      for (let at = source.indexOf(candidate); at !== -1; at = source.indexOf(candidate, at + 1)) {
+        const end = at + candidate.length;
+        if (!ownSpans.some(([start, stop]) => start <= at && end <= stop)) return true;
+      }
+      return false;
+    };
+    const foreign = [...new Set(rosters[kind])].find(outsideOwn);
+    if (foreign !== undefined) {
+      errors.push(foreignMarkerMessage(kind, foreign, own[kind], declaration, where));
+    }
   }
   return errors;
 }
@@ -738,6 +786,7 @@ export function declarationTextErrors(
 
 export type OwnershipEntry =
   | { path: string; kind: "header" }
+  | { path: string; kind: "class-only" }
   | { path: string; kind: "marker"; marker: string };
 
 /** Render conditions the validator can evaluate from a rendered repo's
@@ -791,24 +840,22 @@ function landedFiles(
   return out;
 }
 
-/** The in-file enforcement a declaration gets in the validator's tables:
- *  "header" for a managed file whose source carries the managed header
- *  (headerless managed files - pin dotfiles, JSON, symlinks - have no
- *  comment channel to enforce), "marker" for a tail-marker split with its
- *  exact marker line, null for starters (repo-owned; nothing to enforce)
- *  and bounded-region splits (their grammar is enforced by the region
- *  tables, not a kind). */
-function enforcementOf(
-  declaration: OwnershipDeclaration,
-  source: string | null,
-): OwnershipEntry | null {
+/** The enforcement a declaration gets in the validator's tables, mapped
+ *  from the DECLARATION alone (see the schema's headerless note): "header"
+ *  for a managed file, "class-only" for a managed file declared headerless
+ *  (nothing to check in-file, but the path must still reach the manifest
+ *  cross-check or a hand-flipped class would silently exempt it from byte
+ *  parity), "marker" for a tail-marker split. null for starters
+ *  (repo-owned; nothing to enforce) and bounded-region splits (the region
+ *  tables carry their grammar, not a kind). */
+function enforcementOf(declaration: OwnershipDeclaration): OwnershipEntry | null {
   switch (declaration.class) {
     case "starter":
       return null;
     case "managed":
-      return source !== null && hasManagedHeader(source)
-        ? { path: declaration.path, kind: "header" }
-        : null;
+      return declaration.headerless === true
+        ? { path: declaration.path, kind: "class-only" }
+        : { path: declaration.path, kind: "header" };
     case "split":
       return declaration.grammar === "tail-marker"
         ? { path: declaration.path, kind: "marker", marker: declaration.marker }
@@ -818,6 +865,32 @@ function enforcementOf(
       throw new Error(`unhandled ownership class: ${JSON.stringify(unhandled)}`);
     }
   }
+}
+
+/** The one error a managed declaration's header mode can produce against
+ *  its source, or null. Both drift directions are loud: a deleted header
+ *  fails regeneration instead of silently downgrading enforcement, and a
+ *  headerless declaration whose file grew a header names the stale
+ *  declaration. */
+function headerModeError(
+  declaration: OwnershipDeclaration,
+  source: string | null,
+  where: string,
+): string | null {
+  if (declaration.class !== "managed") return null;
+  if (declaration.headerless === true) {
+    return source !== null && hasManagedHeader(source)
+      ? `${where}: '${declaration.path}' is declared headerless but its source opens ` +
+          "with the managed header - the validator would not enforce the header it " +
+          "carries; drop `headerless: true` or the header"
+      : null;
+  }
+  return source === null || !hasManagedHeader(source)
+    ? `${where}: '${declaration.path}' is declared managed but its source does not ` +
+        "open with the managed header - the validator enforces the header on every " +
+        "rendered copy; add the header, or declare `headerless: true` if the format " +
+        "has no comment channel"
+    : null;
 }
 
 /** The rendered paths, per module, whose ownership declaration the
@@ -854,6 +927,10 @@ export function moduleOwnershipEntries(
             `${m.module}/ file lands there - fix the path or delete the entry`,
         );
       }
+      // Checked before the gate skip: a gated managed file's header mode
+      // must hold too, even though the module tables never enforce it.
+      const headerDrift = headerModeError(declaration, file.source, where);
+      if (headerDrift !== null) throw new Error(headerDrift);
       // Filename-gated files only declare: module selection alone does not
       // render them, so the module-keyed tables must not enforce them.
       if (file.gates.length > 0) continue;
@@ -864,7 +941,7 @@ export function moduleOwnershipEntries(
             "moduleOwnershipEntries and the validator's region tables together",
         );
       }
-      const entry = enforcementOf(declaration, file.source);
+      const entry = enforcementOf(declaration);
       if (entry !== null) entries.push(entry);
     }
     if (entries.length > 0) result[m.module] = entries;
@@ -943,6 +1020,8 @@ export function baseOwnershipTables(templatesDir: string): {
           "lands there - fix the path or delete the entry",
       );
     }
+    const headerDrift = headerModeError(declaration, file.source, where);
+    if (headerDrift !== null) throw new Error(headerDrift);
     if (declaration.class === "split" && declaration.grammar === "bounded-region") {
       const when = translateGates(file.gates, `templates/base/${file.templateRel}`);
       if (when !== undefined) {
@@ -960,7 +1039,7 @@ export function baseOwnershipTables(templatesDir: string): {
       };
       continue;
     }
-    const entry = enforcementOf(declaration, file.source);
+    const entry = enforcementOf(declaration);
     if (entry === null) continue;
     const when = translateGates(file.gates, `templates/base/${file.templateRel}`);
     enforced.push(when === undefined ? entry : { ...entry, when });

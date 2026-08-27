@@ -2,7 +2,7 @@
 # Module manifest (schema and loader: scripts/module_manifests.ts).
 description: TypeScript/bun toolchain (gitignore, dependabot, CodeQL JS)
 ownership:
-  - { path: .bun-version, class: managed }
+  - { path: .bun-version, class: managed, headerless: true }
   - { path: .github/workflows/dependabot-bun-lockfile.yml, class: managed }
 toolchain:
   codeql_language: javascript-typescript

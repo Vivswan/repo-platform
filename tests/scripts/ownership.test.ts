@@ -29,6 +29,11 @@ const HTML_SENTINEL = "<!-- repo-platform:local-section -->";
 const HASH_SENTINEL = "# repo-platform:local-section";
 
 const managed = (path: string): OwnershipDeclaration => ({ path, class: "managed" });
+const headerless = (path: string): OwnershipDeclaration => ({
+  path,
+  class: "managed",
+  headerless: true,
+});
 const starter = (path: string): OwnershipDeclaration => ({ path, class: "starter" });
 const tail = (path: string, marker: string): OwnershipDeclaration => ({
   path,
@@ -116,6 +121,27 @@ describe("ownershipEntrySchema", () => {
     );
   });
 
+  test("headerless is a managed-only literal-true flag", () => {
+    // The no-header enforcement mode is DECLARED, never inferred: only
+    // `headerless: true` on a managed entry is representable.
+    expect(ownershipEntrySchema.parse(headerless(".bun-version"))).toEqual(
+      headerless(".bun-version"),
+    );
+    expect(
+      ownershipEntrySchema.safeParse({ path: "X.md", class: "managed", headerless: false }).success,
+    ).toBe(false);
+    expect(ownershipEntrySchema.safeParse({ ...starter("X.md"), headerless: true }).success).toBe(
+      false,
+    );
+    expect(
+      ownershipEntrySchema.safeParse({ ...tail("X.md", "# m"), headerless: true }).success,
+    ).toBe(false);
+  });
+
+  test("headerless steers the tables but stays out of the manifest entry", () => {
+    expect(ownershipOf(headerless(".bun-version"))).toEqual({ class: "managed" });
+  });
+
   test("rejects paths outside the clean landed form", () => {
     for (const path of [
       "/rooted.md",
@@ -133,6 +159,28 @@ describe("ownershipEntrySchema", () => {
     for (const marker of ["# m\nx", " # m", "# it's a marker"]) {
       expect(ownershipEntrySchema.safeParse(tail("X.md", marker)).success).toBe(false);
     }
+  });
+
+  // Entries ride through JSON.stringify into the manifest template, whose
+  // jinja string literals UNESCAPE backslash sequences: a double quote
+  // renders the manifest as invalid JSON, a backslash decodes to a
+  // different character (\b became a backspace), and a control character
+  // lands raw inside the JSON string. One rule refuses them all.
+  test("rejects paths and markers carrying characters JSON must escape", () => {
+    for (const path of ['a"b.md', "a\\b.md", "a\tb.md"]) {
+      expect(ownershipEntrySchema.safeParse(managed(path)).success).toBe(false);
+    }
+    const quoted = ownershipEntrySchema.safeParse(managed('a"b.md'));
+    expect(quoted.success).toBe(false);
+    if (!quoted.success) {
+      expect(quoted.error.issues.map((issue) => issue.message).join("; ")).toContain('"\\""');
+    }
+    expect(ownershipEntrySchema.safeParse(tail("X.md", '# say "hi"')).success).toBe(false);
+    expect(ownershipEntrySchema.safeParse(tail("X.md", "# back\\slash")).success).toBe(false);
+    // A lone surrogate is JSON-escaped too; a well-formed astral character
+    // is not and stays a legal path (markers are ASCII-restricted anyway).
+    expect(ownershipEntrySchema.safeParse(managed("a\ud800b.md")).success).toBe(false);
+    expect(ownershipEntrySchema.safeParse(managed("emoji-\u{1f600}.md")).success).toBe(true);
   });
 
   test("rejects non-ASCII markers (latin1 file bytes would never match them)", () => {
@@ -311,9 +359,44 @@ describe("declarationTextErrors", () => {
   });
 
   test("a mid-line marker mention does not contradict managed", () => {
+    // Prose that does not reproduce the FULL marker string (the comment
+    // prefix included) carries no marker text, so it is no claim.
     expect(
       errorsOf(managed("GUIDE.md"), "see the repo-platform:local-section marker\n", false),
     ).toEqual([]);
+  });
+
+  // Foreign tail markers match by TEXT PRESENCE, exactly like region
+  // markers: any occurrence of the full marker string in a source that
+  // does not own it is a claim - glued to jinja tags, inside a tag or a
+  // comment, or a prose mention reproducing the marker text. An over-claim
+  // surfaces at compose time and costs a reword; an under-claim ships a
+  // live marker in a managed file - a silent ownership bypass.
+  test("foreign tail-marker text anywhere in a managed source contradicts", () => {
+    for (const line of [
+      HASH_SENTINEL,
+      `{% if 'agents' in modules %}${HASH_SENTINEL}{% endif %}`,
+      `{# reminder: ${HASH_SENTINEL} #}`,
+      `{% set note = "${HASH_SENTINEL}" %}`,
+      `{% raw %}${HASH_SENTINEL}{% endraw %}`,
+      `see ${HASH_SENTINEL} mid-line`,
+      `{{ "" }}${HTML_SENTINEL}`,
+    ]) {
+      const errors = errorsOf(managed("X.md"), `top\n${line}\ntail\n`, false);
+      expect(errors).toHaveLength(1);
+      expect(errors[0]).toContain("declared managed");
+    }
+  });
+
+  test("text that is not the full marker string stays legal", () => {
+    for (const source of [
+      // No comment prefix, so the marker string never appears.
+      "rules go below the repo-platform:local-section marker\n",
+      // A truncation is not the marker.
+      "# repo-platform:local\n",
+    ]) {
+      expect(errorsOf(managed("GUIDE.md"), source, false)).toEqual([]);
+    }
   });
 
   test("a legacy mergeable marker line is inert: the class is retired", () => {
@@ -383,15 +466,43 @@ describe("declarationTextErrors", () => {
     expect(errorsOf(managed("X.md"), `top\n${custom}\nlocal\n`, false)).toHaveLength(0);
   });
 
-  test("a mid-line mention of a declared tail marker still passes", () => {
+  test("a mid-line mention of a declared tail marker is presence, so it claims", () => {
     const custom = "# acme:local-tail";
     const mention = `see ${custom} for details\n`;
-    expect(errorsOf(managed("X.md"), mention, false, [custom])).toHaveLength(0);
+    const errors = errorsOf(managed("X.md"), mention, false, [custom]);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain("declared managed");
   });
 
-  // G2 armed the managed and starter arms; the tail-marker arm was the gap.
-  // Flipping .gitignore to tail-marker with a terminal marker passed
-  // composition, and the rebuild would then treat the LOCAL region as
+  test("a foreign marker that is a substring of the own marker claims only outside it", () => {
+    // Exemption is positional, so the own line's text never triggers a
+    // claim for a foreign marker it contains, while a separate occurrence
+    // of that foreign marker still does.
+    const own = "# acme:local-tail extended";
+    const foreignMarker = "# acme:local-tail";
+    const roster = [own, foreignMarker];
+    const ownOnly = `body\n${own}\n`;
+    expect(errorsOf(tail("X.md", own), ownOnly, false, roster)).toEqual([]);
+    const carrying = `body\n${foreignMarker}\nmore\n${own}\n`;
+    const errors = errorsOf(tail("X.md", own), carrying, false, roster);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain("tail marker as well as its own");
+  });
+
+  test("a foreign marker overlapping the own marker's edge still claims", () => {
+    // The shared '#' belongs to both, but the foreign occurrence extends
+    // OUTSIDE the own marker's span, so it is not the own marker's text.
+    const own = "# acme:tail#";
+    const foreignMarker = "#x";
+    const source = `body\n${own}x\n${own}\n`;
+    const errors = errorsOf(tail("X.md", own), source, false, [own, foreignMarker]);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain("tail marker as well as its own");
+  });
+
+  // The tail-marker arm must reject foreign region markers like every other
+  // arm: flipping .gitignore to tail-marker with a terminal marker would
+  // pass composition, and the rebuild would then treat the LOCAL region as
   // managed and overwrite repository edits inside it.
   test("a tail-marker declaration over bounded-region marker text is an error", () => {
     const source = [
@@ -578,14 +689,13 @@ describe("declarationTextErrors", () => {
     // about which hazard it names.
     expect(errorsOf(novel, `# NOTES LOCAL OPEN\n${HTML_SENTINEL}\n`, false)).toHaveLength(2);
 
-    // And the matching semantics the shared scan inherited stay split: a
-    // mid-line MENTION of a tail marker is not a claim, while region marker
-    // text is matched as a substring wherever it sits. Counted over the
-    // foreign findings alone - past the shared scan a shape with no arm
-    // falls into the arm chain, which is the very thing it has yet to grow.
+    // Both kinds share presence matching: marker text is a claim wherever
+    // it sits. Counted over the foreign findings alone - past the shared
+    // scan a shape with no arm falls into the arm chain, which is the very
+    // thing it has yet to grow.
     const foreignOf = (source: string) =>
       errorsOf(novel, source, false).filter((error) => error.includes(": carries the '"));
-    expect(foreignOf(`see ${HASH_SENTINEL} for details\n`)).toEqual([]);
+    expect(foreignOf(`see ${HASH_SENTINEL} for details\n`)).toHaveLength(1);
     expect(foreignOf("{% if g %}# NOTES LOCAL OPEN\n")).toHaveLength(1);
   });
 });
@@ -635,7 +745,7 @@ function writeTree(files: Record<string, string | { symlink: string }>): string 
 }
 
 describe("moduleOwnershipEntries", () => {
-  test("derives kinds from declarations plus decoration; starters and headerless stay out", () => {
+  test("derives kinds from declarations plus decoration; starters stay out, headerless and symlinks ride as class-only", () => {
     const dir = writeTree({
       "bun/.github/workflows/managed.yml.jinja": `${HEADER}name: Managed\n`,
       "bun/.github/workflows/starter.yml.jinja": "name: S\n",
@@ -648,16 +758,21 @@ describe("moduleOwnershipEntries", () => {
     try {
       const manifests = [
         moduleManifest([
-          managed(".bun-version"),
+          headerless(".bun-version"),
           managed(".github/workflows/managed.yml"),
           starter(".github/workflows/starter.yml"),
-          managed("LINK.md"),
+          headerless("LINK.md"),
           tail("SPLIT.md", HTML_SENTINEL),
         ]),
       ];
+      // The pin dotfile and the symlink have no comment channel, but they
+      // still enter the roster so the validator's manifest cross-check
+      // sees them - a hand-flipped class must not exempt them from parity.
       expect(moduleOwnershipEntries(manifests, dir)).toEqual({
         bun: [
+          { path: ".bun-version", kind: "class-only" },
           { path: ".github/workflows/managed.yml", kind: "header" },
+          { path: "LINK.md", kind: "class-only" },
           { path: "SPLIT.md", kind: "marker", marker: HTML_SENTINEL },
         ],
       });
@@ -686,6 +801,67 @@ describe("moduleOwnershipEntries", () => {
       expect(() =>
         moduleOwnershipEntries([moduleManifest([managed("real.yml"), managed("ghost.yml")])], dir),
       ).toThrow("no templates/bun/ file lands there");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  // The header enforcement mode is declared, so both drift directions are
+  // loud. Inferring class-only from a missing header would let deleting a
+  // header silently downgrade the file's enforcement - the exact bypass
+  // the header guards against.
+  test("a managed source without a header throws unless declared headerless", () => {
+    const dir = writeTree({ "bun/bare.yml.jinja": "name: bare, no header\n" });
+    try {
+      expect(() => moduleOwnershipEntries([moduleManifest([managed("bare.yml")])], dir)).toThrow(
+        "does not open with the managed header",
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a GATED managed source without a header throws too", () => {
+    // Gated files skip the module tables, but their header mode must still
+    // hold - the render carries whatever the source says.
+    const dir = writeTree({
+      "bun/managed.yml.jinja": `${HEADER}name: M\n`,
+      "bun/{% if not private %}gated.yml{% endif %}.jinja": "name: bare\n",
+    });
+    try {
+      expect(() =>
+        moduleOwnershipEntries(
+          [moduleManifest([managed("managed.yml"), managed("gated.yml")])],
+          dir,
+        ),
+      ).toThrow("does not open with the managed header");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a headerless declaration whose source carries a header throws", () => {
+    const dir = writeTree({ "bun/pinned.txt": `${HEADER}1.0.0\n` });
+    try {
+      expect(() =>
+        moduleOwnershipEntries([moduleManifest([headerless("pinned.txt")])], dir),
+      ).toThrow("declared headerless but its source opens with the managed header");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a symlink declared managed without headerless throws", () => {
+    // A symlink has no comment channel; the declaration must say so
+    // explicitly rather than the absence of a header deciding it.
+    const dir = writeTree({
+      "bun/AGENTS.md.jinja": `${HEADER}body\n`,
+      "bun/LINK.md": { symlink: "AGENTS.md.jinja" },
+    });
+    try {
+      expect(() =>
+        moduleOwnershipEntries([moduleManifest([managed("AGENTS.md"), managed("LINK.md")])], dir),
+      ).toThrow("does not open with the managed header");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -743,6 +919,7 @@ describe("baseOwnershipTables", () => {
     "base/.gitignore.jinja":
       "# BEGIN REPOSITORY LOCAL\n# END REPOSITORY LOCAL\n# BEGIN REPO-PLATFORM MANAGED\n# END REPO-PLATFORM MANAGED\n",
     "base/.gitleaks.toml.jinja": "[allowlist]\n",
+    "base/.pin": "1.0.0\n",
   };
   const BASE_DECLS = [
     "ownership:",
@@ -757,6 +934,7 @@ describe("baseOwnershipTables", () => {
     '    managed_end: "# END REPO-PLATFORM MANAGED"',
     '    local_begin: "# BEGIN REPOSITORY LOCAL"',
     '    local_end: "# END REPOSITORY LOCAL"',
+    "  - { path: .pin, class: managed, headerless: true }",
     "  - { path: .gitleaks.toml, class: starter }",
     "",
   ];
@@ -783,6 +961,9 @@ describe("baseOwnershipTables", () => {
           marker: HTML_SENTINEL,
           when: { withoutModule: "custom-license" },
         },
+        // Headerless managed files enter as class-only so the manifest
+        // cross-check still covers them.
+        { path: ".pin", kind: "class-only" },
       ]);
       expect(tables.regionSplits).toEqual({
         ".gitignore": {
@@ -812,12 +993,31 @@ describe("baseOwnershipTables", () => {
       ...BASE_DECLS.slice(0, -1).map((line) =>
         line.replaceAll("<-- never used -->", HTML_SENTINEL),
       ),
-      "  - { path: ghost.md, class: managed }",
+      "  - { path: ghost.md, class: managed, headerless: true }",
       "",
     ];
     const dir = withBase(decls, BASE_FILES);
     try {
       expect(() => baseOwnershipTables(dir)).toThrow("no templates/base/ file lands there");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a comment-capable managed base file without a header throws", () => {
+    // The base derivation shares the declared header-mode rule: deleting
+    // the header from a managed base template fails regeneration instead
+    // of silently downgrading enforcement to class-only.
+    const decls = [
+      ...BASE_DECLS.slice(0, -1).map((line) =>
+        line.replaceAll("<-- never used -->", HTML_SENTINEL),
+      ),
+      "  - { path: bare.yml, class: managed }",
+      "",
+    ];
+    const dir = withBase(decls, { ...BASE_FILES, "base/bare.yml.jinja": "name: bare\n" });
+    try {
+      expect(() => baseOwnershipTables(dir)).toThrow("does not open with the managed header");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
