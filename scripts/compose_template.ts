@@ -545,8 +545,8 @@ type GeneratorContext = { manifests: ModuleManifest[]; gateOf: GateOf };
 
 /** The non-anchor fragment name carrying a module's toolchain setup steps
  *  and the two anchors those steps are prepended to. */
-const TOOLCHAIN_SETUP_FRAGMENT = "toolchain-setup";
-const TOOLCHAIN_SETUP_TARGETS = ["auto-format", "copilot-setup-steps"];
+export const TOOLCHAIN_SETUP_FRAGMENT = "toolchain-setup";
+export const TOOLCHAIN_SETUP_TARGETS = ["auto-format", "copilot-setup-steps"];
 
 /** Prepend each module's toolchain-setup fragment to its own auto-format
  *  and copilot-setup-steps contributions (in place), then drop the

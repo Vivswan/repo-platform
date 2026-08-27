@@ -5,27 +5,38 @@
 // (bun scripts/check_ssot.ts).
 
 import { describe, expect, test } from "bun:test";
+import { PIN_FLIPS } from "../../.github/scripts/sync/starter_pin_rollout";
 import {
   ALL_GREEN_WIRING,
   applyDivergences,
+  bunTypesAheadMismatches,
   canonical,
+  composeAnchorNames,
+  DELIVERY_REF,
   expandCheckChain,
   extractUsesPins,
   firstDiff,
+  fragmentFilesFor,
   gatesOnModule,
   inlineFunctionCopies,
+  majorMinor,
   mustMatch,
   pinMismatches,
   SETUP_VERSION_FILES,
   semanticLines,
   setMismatch,
   settingsIdentityMismatches,
+  starterPinCoverage,
+  starterSelfPins,
+  starterTemplateFiles,
   stepCarriesWithKey,
   stripGeneratedRegions,
   unsafeStepCondition,
   verdictRosterMismatches,
+  withToolchainSetup,
   zToDollar,
 } from "../../scripts/check_ssot";
+import { TOOLCHAIN_SETUP_FRAGMENT, TOOLCHAIN_SETUP_TARGETS } from "../../scripts/compose_template";
 import { MARKER_TOKENS, mdMarkers } from "../../scripts/generate";
 
 describe("applyDivergences", () => {
@@ -599,5 +610,176 @@ describe("verdictRosterMismatches", () => {
     const mismatches = verdictRosterMismatches(["a", "a"], ["a"]);
     expect(mismatches).toHaveLength(1);
     expect(mismatches[0].got).toContain("'a'");
+  });
+});
+
+describe("starterSelfPins", () => {
+  test("extracts jinja-username delivery pins, item and named shapes, quoted or not", () => {
+    const text = [
+      "      - uses: {{ github_username }}/repo-platform/actions/fuzz-issue@build",
+      "      - name: report",
+      '        uses: "{{ github_username }}/repo-platform/actions/fuzz-issue@main"',
+    ].join("\n");
+    expect(starterSelfPins(text, "f")).toEqual([
+      { file: "f", stem: "repo-platform/actions/fuzz-issue", ref: "build" },
+      { file: "f", stem: "repo-platform/actions/fuzz-issue", ref: "main" },
+    ]);
+  });
+
+  test("matches the token anywhere, like the rollout's rewriter: folded scalars and comments claim too", () => {
+    const folded = [
+      "        uses: >-",
+      "          {{ github_username }}/repo-platform/actions/x@v2",
+    ].join("\n");
+    expect(starterSelfPins(folded, "f")).toEqual([
+      { file: "f", stem: "repo-platform/actions/x", ref: "v2" },
+    ]);
+    expect(starterSelfPins("# {{ github_username }}/repo-platform/actions/x@v3", "f")).toEqual([
+      { file: "f", stem: "repo-platform/actions/x", ref: "v3" },
+    ]);
+  });
+
+  test("third-party, local, other-repo, and longer-owner pins are not delivery pins", () => {
+    const text = [
+      "      - uses: actions/checkout@v7",
+      "      - uses: ./actions/local",
+      "      - uses: {{ github_username }}/other-repo/actions/x@main",
+      "      - uses: Vivswan/repo-platform/actions/fuzz-issue@build",
+      // Renders as Evil<username>/... - a longer owner that merely ends
+      // in the username, which the rollout's owner boundary skips too.
+      "      - uses: Evil{{ github_username }}/repo-platform/actions/x@main",
+    ].join("\n");
+    expect(starterSelfPins(text, "f")).toEqual([]);
+  });
+});
+
+describe("composeAnchorNames and fragmentFilesFor", () => {
+  test("anchors name the fragments spliced into a starter, canonical or hint spellings", () => {
+    const names = composeAnchorNames("{# compose:auto-format #}\n{#- compose:checks-examples -#}");
+    expect(names).toEqual(["auto-format", "checks-examples"]);
+    const files = [
+      "templates/bun/fragments/auto-format.jinja",
+      "templates/bun/fragments/gitignore.jinja",
+      "templates/uv/fragments/checks-examples.jinja",
+      "templates/base/.github/workflows/ci.yml.jinja",
+    ];
+    expect(fragmentFilesFor(new Set(names), files)).toEqual([
+      "templates/bun/fragments/auto-format.jinja",
+      "templates/uv/fragments/checks-examples.jinja",
+    ]);
+  });
+
+  test("toolchain-setup rides its target anchors: the composer prepends it into their fragments", () => {
+    for (const target of TOOLCHAIN_SETUP_TARGETS) {
+      expect(withToolchainSetup(new Set([target]))).toEqual(
+        new Set([target, TOOLCHAIN_SETUP_FRAGMENT]),
+      );
+    }
+    expect(withToolchainSetup(new Set(["gitignore"]))).toEqual(new Set(["gitignore"]));
+  });
+});
+
+describe("starterTemplateFiles", () => {
+  const starters = new Set([".github/workflows/nightly.yml", ".github/workflows/auto-format.yml"]);
+
+  test("keeps starter-landed sources, filename gates stripped, and drops the rest", () => {
+    const files = [
+      "templates/nightly/.github/workflows/nightly.yml.jinja",
+      "templates/base/.github/workflows/{% if has_toolchain %}auto-format.yml{% endif %}.jinja",
+      "templates/base/.github/workflows/ci.yml.jinja",
+      "templates/module.schema.json",
+    ];
+    expect(starterTemplateFiles(files, starters)).toEqual([
+      "templates/nightly/.github/workflows/nightly.yml.jinja",
+      "templates/base/.github/workflows/{% if has_toolchain %}auto-format.yml{% endif %}.jinja",
+    ]);
+  });
+});
+
+describe("starterPinCoverage", () => {
+  const flip = { stem: "repo-platform/actions/fuzz-issue", from: ["main"], to: "build2" };
+  const pin = (ref: string) => ({
+    file: "templates/nightly/.github/workflows/nightly.yml.jinja",
+    stem: "repo-platform/actions/fuzz-issue",
+    ref,
+  });
+
+  test("a pin at the delivery ref needs no flip", () => {
+    expect(starterPinCoverage([pin("build")], [], "build")).toEqual([]);
+  });
+
+  test("a pin change without a rollout entry fails, naming the rollout", () => {
+    const mismatches = starterPinCoverage([pin("v2")], [], "build");
+    expect(mismatches).toHaveLength(1);
+    expect(mismatches[0].file).toBe("templates/nightly/.github/workflows/nightly.yml.jinja");
+    expect(mismatches[0].expected).toContain("PIN_FLIPS");
+    expect(mismatches[0].got).toContain("@v2");
+  });
+
+  test("a pin change covered by its flip's target passes", () => {
+    expect(starterPinCoverage([pin("build2")], [flip], "build")).toEqual([]);
+  });
+
+  test("a flip whose target no starter pins is stale and fails", () => {
+    const mismatches = starterPinCoverage([pin("build")], [flip], "build");
+    expect(mismatches).toHaveLength(1);
+    expect(mismatches[0].file).toBe(".github/scripts/sync/starter_pin_rollout.ts");
+    expect(mismatches[0].expected).toContain("@build2");
+  });
+
+  test("a flip with no retired refs, a self-targeting one, or a duplicate stem is malformed", () => {
+    const target = pin("build2");
+    expect(starterPinCoverage([target], [{ ...flip, from: [] }], "build")[0].got).toContain(
+      "ports nothing",
+    );
+    expect(
+      starterPinCoverage([target], [{ ...flip, from: ["main", "build2"] }], "build")[0].got,
+    ).toContain("both a retired ref and the target");
+    const doubled = starterPinCoverage([target], [flip, { ...flip, from: ["actions"] }], "build");
+    expect(doubled[0].expected).toContain("one PIN_FLIPS entry");
+  });
+
+  test("the shipped PIN_FLIPS cover their own targets at the delivery ref", () => {
+    // The live rollout's flips all port TO the delivery ref, so a tree
+    // whose starters pin @build satisfies both directions.
+    const pins = PIN_FLIPS.map((entry) => pin(entry.to));
+    expect(starterPinCoverage(pins, PIN_FLIPS, DELIVERY_REF)).toEqual([]);
+  });
+});
+
+describe("majorMinor", () => {
+  test("reads plain versions and single caret/tilde ranges", () => {
+    expect(majorMinor("1.4.0", "w")).toEqual([1, 4]);
+    expect(majorMinor("^1.4.0", "w")).toEqual([1, 4]);
+    expect(majorMinor("~2.10", "w")).toEqual([2, 10]);
+  });
+
+  test("throws on anything else, so a half-parsed range never passes vacuously", () => {
+    expect(() => majorMinor("latest", "w")).toThrow("w");
+    expect(() => majorMinor(">=1.4.0", "w")).toThrow("MAJOR.MINOR");
+    expect(() => majorMinor("^1.4.0 || ^2.0.0", "w")).toThrow("MAJOR.MINOR");
+    expect(() => majorMinor("1.4.not-semver", "w")).toThrow("MAJOR.MINOR");
+    expect(() => majorMinor("1.4.0-canary.1", "w")).toThrow("MAJOR.MINOR");
+  });
+});
+
+describe("bunTypesAheadMismatches", () => {
+  test("types at or behind the runtime's MAJOR.MINOR pass", () => {
+    expect(
+      bunTypesAheadMismatches("1.4.2", [
+        { file: "package.json", version: "^1.4.0" },
+        { file: "actions/x/package.json", version: "^1.3.14" },
+      ]),
+    ).toEqual([]);
+  });
+
+  test("types ahead on minor or major fail, naming the runtime pin's home", () => {
+    const mismatches = bunTypesAheadMismatches("1.4.0", [
+      { file: "package.json", version: "^1.5.0" },
+      { file: "actions/x/package.json", version: "^2.0.0" },
+    ]);
+    expect(mismatches).toHaveLength(2);
+    expect(mismatches[0].expected).toContain("templates/bun/module.yml");
+    expect(mismatches[1].got).toContain("^2.0.0");
   });
 });

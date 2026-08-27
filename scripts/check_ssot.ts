@@ -31,9 +31,12 @@ import {
 } from "../.github/scripts/fleet/merge_settings_layers.ts";
 import { allLayerLabels, loadLayer } from "../.github/scripts/fleet/render_managed_settings.ts";
 import { captureName } from "../.github/scripts/sync/run_hidden.ts";
+import { PIN_FLIPS } from "../.github/scripts/sync/starter_pin_rollout.ts";
+import { TOOLCHAIN_SETUP_FRAGMENT, TOOLCHAIN_SETUP_TARGETS } from "./compose_template.ts";
 import { MARKER_TOKENS, trackingStreams } from "./generate.ts";
 import { type JinjaVars, normalizeJinja, placeholderJinja } from "./jinja_subset.ts";
 import { loadManifests as loadManifestsFresh, type ModuleManifest } from "./module_manifests.ts";
+import { landedPathAndGates, loadBaseOwnership } from "./ownership.ts";
 import { ANSWERS_FILE, parseAnswers } from "./render_dogfood.ts";
 
 const REPO_ROOT = resolve(import.meta.dir, "..");
@@ -596,6 +599,213 @@ export function pinMismatches(pins: Pin[], allowed: Record<string, string[]>): M
   return mismatches;
 }
 
+// --- starter delivery pins ----------------------------------------------------
+
+/** The green-gated branch every rendered self-pin executes from. A twin of
+ *  publish.ts's BRANCH constant (build-branches.yml's one delivery
+ *  channel), pinned against it by the starter-pin-rollout rule; a
+ *  delivery-branch rename updates both, plus a PIN_FLIPS rollout entry for
+ *  every starter pin the rename moves (the reverse coverage direction is
+ *  what makes forgetting the entry loud). */
+export const DELIVERY_REF = "build";
+
+export interface StarterPin {
+  file: string;
+  /** The rendered pin's stem after the username: repo-platform/<path>. */
+  stem: string;
+  ref: string;
+}
+
+/** The self-delivery pins in one template source, matched the way the
+ *  rollout's own rewriter matches them (rolloutContent in
+ *  sync/starter_pin_rollout.ts): every
+ *  `{{ github_username }}/repo-platform/<path>@<ref>` token anywhere in
+ *  the text - uses: lines, folded scalars, comments alike - so this rule
+ *  and the rewrite can never disagree about what is a pin. The rewriter's
+ *  owner boundary is mirrored too: a token glued to a preceding owner-name
+ *  character renders as a LONGER owner that merely ends in the username -
+ *  someone else's pin. Third-party pins (actions/checkout@vN) are each
+ *  rendered repo's own dependabot's to bump and are not delivery pins. The
+ *  ref token is taken verbatim (up to whitespace or a quote, the rollout's
+ *  own ref grammar), so a non-literal ref fails coverage rather than
+ *  escaping the check. */
+export function starterSelfPins(text: string, file: string): StarterPin[] {
+  const token =
+    /(?<![A-Za-z0-9-])\{\{\s*github_username\s*\}\}\/(repo-platform\/[A-Za-z0-9_./-]+)@([^\s"']*)/g;
+  return [...text.matchAll(token)].map((match) => ({
+    file,
+    stem: match[1],
+    ref: match[2],
+  }));
+}
+
+/** The compose-anchor names a shared template carries, in the composer's
+ *  lenient hint spelling (compose_template.ts's ANCHOR_HINT_RE; the
+ *  composer itself then rejects non-canonical variants, so lenient here is
+ *  over-coverage, never under). */
+export function composeAnchorNames(text: string): string[] {
+  return [...text.matchAll(/\{#-?[ \t]*compose:([a-z0-9][a-z0-9-]*)/g)].map((match) => match[1]);
+}
+
+/** Anchor names expanded with the composer's generator-input fragment:
+ *  toolchain-setup.jinja is no anchor's fragment, but the composer
+ *  prepends its bytes into each module's contributions to the
+ *  TOOLCHAIN_SETUP_TARGETS anchors (applyToolchainSetup), so it reaches
+ *  every starter those anchors feed. */
+export function withToolchainSetup(anchors: ReadonlySet<string>): Set<string> {
+  const out = new Set(anchors);
+  if (TOOLCHAIN_SETUP_TARGETS.some((target) => out.has(target))) {
+    out.add(TOOLCHAIN_SETUP_FRAGMENT);
+  }
+  return out;
+}
+
+/** The fragment sources spliced into the given anchors:
+ *  templates/<module>/fragments/<name>.jinja. A free-form anchor in a
+ *  starter splices these into the rendered starter, so a pin in one is a
+ *  starter pin - the rollout rule scans them alongside the starter's own
+ *  source. */
+export function fragmentFilesFor(
+  anchorNames: ReadonlySet<string>,
+  templateFiles: string[],
+): string[] {
+  return templateFiles.filter((rel) => {
+    const match = /^templates\/[^/]+\/fragments\/([^/]+)\.jinja$/.exec(rel);
+    return match !== null && anchorNames.has(match[1]);
+  });
+}
+
+/** The template sources that land starter-classed paths: repo-relative
+ *  `templates/<source>/...` paths filtered by their LANDED path (the
+ *  .jinja suffix and filename gates stripped), so a gated starter counts
+ *  and a managed or split template never does. */
+export function starterTemplateFiles(
+  templateFiles: string[],
+  starterPaths: ReadonlySet<string>,
+): string[] {
+  return templateFiles.filter((rel) => {
+    const inner = rel.split("/").slice(2).join("/");
+    if (inner === "") return false;
+    return starterPaths.has(landedPathAndGates(inner.replace(/\.jinja$/, "")).path);
+  });
+}
+
+interface PinFlip {
+  stem: string;
+  from: readonly string[];
+  to: string;
+}
+
+/** Both directions of the starter-pin/rollout coupling, plus the flip
+ *  list's own shape. Forward: every starter self-pin must be the delivery
+ *  ref or the `to` of a PIN_FLIPS entry for its stem - starters render
+ *  ONCE (_skip_if_exists), so a template pin edit alone never reaches a
+ *  repo that already rendered, and the one-run rollout
+ *  (sync/starter_pin_rollout.ts) is the only carrier; a pin change without
+ *  its rollout entry goes loud here. Reverse: every flip's `to` must be
+ *  some starter's actual pin - a flip porting the fleet to a ref fresh
+ *  renders do not get is the same fork in the other direction, and a stale
+ *  flip left after the template moved on surfaces the same way. Shape:
+ *  a flip with no retired refs, one whose `from` carries its own target,
+ *  or a second entry for a stem ports nothing or double-reports
+ *  (PIN_FLIPS' own contract), so those mismatch outright. The residual is
+ *  history: a change that retires PIN_FLIPS and renames the delivery ref
+ *  in the same commit satisfies a point-in-time check by construction. */
+export function starterPinCoverage(
+  pins: StarterPin[],
+  flips: readonly PinFlip[],
+  deliveryRef: string,
+): Mismatch[] {
+  const mismatches: Mismatch[] = [];
+  for (const [index, flip] of flips.entries()) {
+    if (flips.findIndex((other) => other.stem === flip.stem) !== index) {
+      mismatches.push({
+        file: ".github/scripts/sync/starter_pin_rollout.ts",
+        expected: `one PIN_FLIPS entry for stem ${flip.stem} (two would double-report hand pins)`,
+        got: "a second entry for the stem",
+      });
+    }
+    if (flip.from.length === 0) {
+      mismatches.push({
+        file: ".github/scripts/sync/starter_pin_rollout.ts",
+        expected: `retired refs in the ${flip.stem} flip's from list`,
+        got: "an empty from list - the flip ports nothing",
+      });
+    }
+    if (flip.from.includes(flip.to)) {
+      mismatches.push({
+        file: ".github/scripts/sync/starter_pin_rollout.ts",
+        expected: `the ${flip.stem} flip's target outside its own from list`,
+        got: `'${flip.to}' as both a retired ref and the target`,
+      });
+    }
+  }
+  for (const pin of pins) {
+    const covered =
+      pin.ref === deliveryRef ||
+      flips.some((flip) => flip.stem === pin.stem && flip.to === pin.ref);
+    if (!covered) {
+      mismatches.push({
+        file: pin.file,
+        expected:
+          `${pin.stem}@${deliveryRef}, or a sync/starter_pin_rollout.ts PIN_FLIPS entry ` +
+          `with to: '${pin.ref}' (starters render once, so only the rollout can carry a pin change to the fleet)`,
+        got: `@${pin.ref} with no rollout entry`,
+      });
+    }
+  }
+  for (const flip of flips) {
+    if (!pins.some((pin) => pin.stem === flip.stem && pin.ref === flip.to)) {
+      mismatches.push({
+        file: ".github/scripts/sync/starter_pin_rollout.ts",
+        expected: `a starter template pinning ${flip.stem}@${flip.to} (a flip's target is what a fresh render gets)`,
+        got: "no starter carries that pin - the flip ports the fleet to a ref the template does not ship",
+      });
+    }
+  }
+  return mismatches;
+}
+
+// --- bun types/runtime coupling -----------------------------------------------
+
+/** MAJOR.MINOR of a plain version or a single caret/tilde range - the only
+ *  grammars the coupled manifests use. Anything else (compound ranges,
+ *  prerelease tags, trailing junk) throws rather than reading a prefix: a
+ *  half-parsed range passing vacuously is exactly the silent drift the
+ *  rule exists to stop. */
+export function majorMinor(version: string, where: string): [number, number] {
+  const match = /^[\^~]?(\d+)\.(\d+)(?:\.\d+)?$/.exec(version);
+  if (!match) throw new Error(`${where}: cannot read MAJOR.MINOR from '${version}'`);
+  return [Number(match[1]), Number(match[2])];
+}
+
+/** Mismatches where a package.json's @types/bun MAJOR.MINOR is AHEAD of
+ *  the pinned bun runtime's. One direction on purpose: the two sides have
+ *  two updaters that each move only their own (dependabot bumps the types,
+ *  refresh-toolchains bumps the runtime pin), so symmetric equality would
+ *  make their PRs mutually blocking - each red until the other lands.
+ *  Types ahead means typechecking against APIs the pinned runtime does not
+ *  have, so that direction holds until the runtime catches up; a runtime
+ *  ahead of the types is dependabot's next cycle and passes. */
+export function bunTypesAheadMismatches(
+  runtimeVersion: string,
+  types: { file: string; version: string }[],
+): Mismatch[] {
+  const [runtimeMajor, runtimeMinor] = majorMinor(runtimeVersion, "bun runtime pin");
+  const mismatches: Mismatch[] = [];
+  for (const { file, version } of types) {
+    const [major, minor] = majorMinor(version, file);
+    if (major > runtimeMajor || (major === runtimeMajor && minor > runtimeMinor)) {
+      mismatches.push({
+        file,
+        expected: `@types/bun at MAJOR.MINOR ${runtimeMajor}.${runtimeMinor} or older (templates/bun/module.yml pins the runtime at ${runtimeVersion})`,
+        got: `${version} - types ahead of the runtime; bump the toolchain pin first (refresh-toolchains owns it)`,
+      });
+    }
+  }
+  return mismatches;
+}
+
 // --- rules --------------------------------------------------------------------
 
 /** The pinned-toolchain setup actions and the version-file input each must
@@ -920,6 +1130,94 @@ const rules: Rule[] = [
       if (pins.length === 0)
         throw new Error("no `uses: owner/action@ref` pins found anywhere - anchor lost");
       return pinMismatches(pins, ALLOWED_MULTI_REFS);
+    },
+  },
+
+  {
+    // Starter-classed templates and the sync-side rollout, coupled in both
+    // directions (starterPinCoverage has the full statement). The starter
+    // roster comes from the ownership declarations - the same single
+    // source the composed manifest and _skip_if_exists are generated from
+    // - and DELIVERY_REF is pinned against publish.ts's BRANCH (text
+    // extraction: importing the publisher would run its top-level git
+    // wiring).
+    name: "starter-pin-rollout",
+    run: () => {
+      const mismatches: Mismatch[] = [];
+      const published = mustMatch(
+        read(".github/scripts/build-branches/publish.ts"),
+        /^const BRANCH = "([^"]+)";$/m,
+        "publish.ts",
+        "the delivery branch",
+      )[1];
+      if (published !== DELIVERY_REF) {
+        mismatches.push({
+          file: "scripts/check_ssot.ts DELIVERY_REF",
+          expected: `'${published}' (publish.ts's BRANCH - the branch the fleet's pins execute from)`,
+          got: `'${DELIVERY_REF}'`,
+        });
+      }
+      const declarations = [
+        ...loadBaseOwnership(join(REPO_ROOT, "templates")),
+        ...loadManifests().flatMap((m) => m.ownership ?? []),
+      ];
+      const starters = new Set(
+        declarations.filter((d) => d.class === "starter").map((d) => d.path),
+      );
+      const templateFiles = walkFiles("templates")
+        .filter((f) => !f.symlink)
+        .map((f) => f.path);
+      const files = starterTemplateFiles(templateFiles, starters);
+      // Free-form compose anchors splice module fragments into shared
+      // files, so a fragment feeding a starter renders INTO the starter -
+      // a pin there needs the same rollout coverage as one in the
+      // starter's own source. withToolchainSetup covers the composer's
+      // one generator-input fragment the same way.
+      const anchors = withToolchainSetup(
+        new Set(files.flatMap((rel) => composeAnchorNames(read(rel)))),
+      );
+      const sources = [...files, ...fragmentFilesFor(anchors, templateFiles)];
+      const pins = sources.flatMap((rel) => starterSelfPins(read(rel), rel));
+      if (pins.length === 0) {
+        throw new Error("no starter template carries a self-delivery pin - anchor lost");
+      }
+      mismatches.push(...starterPinCoverage(pins, PIN_FLIPS, DELIVERY_REF));
+      return mismatches;
+    },
+  },
+
+  {
+    // The dependabot-covered package.json manifests' @types/bun (the root
+    // plus the actions/ packages - the same directories the bun-dirs rule
+    // keeps under dependabot) against the manifests' bun runtime pin,
+    // ahead-direction only (bunTypesAheadMismatches states why one
+    // direction). The runtime side reads the manifest itself - the single
+    // source the .bun-version dotfiles are generated from.
+    name: "bun-types-pin",
+    run: () => {
+      const bun = loadManifests().find((m) => m.module === "bun");
+      if (bun?.toolchain?.pin === undefined) {
+        throw new Error("templates/bun/module.yml declares no toolchain.pin - anchor lost");
+      }
+      const types: { file: string; version: string }[] = [];
+      for (const dir of [
+        ".",
+        ...readdirSync(join(REPO_ROOT, "actions"))
+          .sort()
+          .map((name) => `actions/${name}`),
+      ]) {
+        const rel = dir === "." ? "package.json" : `${dir}/package.json`;
+        if (!existsSync(join(REPO_ROOT, rel))) continue;
+        const pkg = asRecord(JSON.parse(read(rel)), rel);
+        for (const key of ["dependencies", "devDependencies"]) {
+          const version = (pkg[key] as Record<string, unknown> | undefined)?.["@types/bun"];
+          if (version !== undefined) types.push({ file: rel, version: String(version) });
+        }
+      }
+      if (types.length === 0) {
+        throw new Error("no package.json declares @types/bun - anchor lost");
+      }
+      return bunTypesAheadMismatches(bun.toolchain.pin.version, types);
     },
   },
 
