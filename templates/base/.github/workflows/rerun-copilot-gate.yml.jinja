@@ -81,9 +81,9 @@ jobs:
     steps:
       # No checkout: a published action carries its own code. The action is
       # `gh api` reads and one re-run, so the job costs seconds whichever
-      # trigger fired it. @template rather than @main means the fleet only
+      # trigger fired it. @actions rather than @main means the fleet only
       # ever runs re-arm code a green repo-platform CI has vouched for.
-      - uses: {{ github_username }}/repo-platform/actions/copilot-rearm@template
+      - uses: {{ github_username }}/repo-platform/actions/copilot-rearm@actions
         with:
           head-sha: >-
             {% raw %}${{ github.event_name == 'workflow_run' &&
@@ -95,4 +95,8 @@ jobs:
           # The commit the triggering review actually covers; empty on the
           # workflow_run trigger, which carries no review.
           review-commit: {% raw %}${{ github.event_name == 'pull_request_review' && github.event.review.commit_id || '' }}{% endraw %}
+          # The review's own PR; empty on the workflow_run trigger. Stacked
+          # PRs share head shas, so the run to re-arm is selected by ITS
+          # pull_requests association, never by the sha alone.
+          review-pr: {% raw %}${{ github.event_name == 'pull_request_review' && github.event.pull_request.number || '' }}{% endraw %}
           github-token: {% raw %}${{ github.token }}{% endraw %}

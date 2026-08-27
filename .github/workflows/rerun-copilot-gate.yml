@@ -78,4 +78,10 @@ jobs:
           review-commit: >-
             ${{ github.event_name == 'pull_request_review' &&
                 github.event.review.commit_id || '' }}
+          # The review's own PR (review trigger only): stacked PRs share
+          # head shas, so the run to re-arm is selected by ITS
+          # pull_requests association, never by the sha alone.
+          review-pr: >-
+            ${{ github.event_name == 'pull_request_review' &&
+                github.event.pull_request.number || '' }}
           github-token: ${{ github.token }}

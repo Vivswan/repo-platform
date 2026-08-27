@@ -23,6 +23,14 @@ inputs:
       new one.
     required: false
     default: ""
+  review-pr:
+    description: >-
+      The triggering review's own PR number, on the pull_request_review
+      trigger. Empty otherwise. Stacked PRs share head shas, so the run to
+      re-arm is selected by ITS pull_requests association, never by the sha
+      alone.
+    required: false
+    default: ""
   github-token:
     description: >-
       Token for the gh reads and the re-run. Needs actions write (to re-run
@@ -68,5 +76,6 @@ runs:
         HEAD_SHA: ${{ inputs.head-sha }}
         RUN_ID: ${{ inputs.run-id }}
         REVIEW_COMMIT: ${{ inputs.review-commit }}
+        REVIEW_PR: ${{ inputs.review-pr }}
         PROBE_TIMEOUT_MS: ${{ inputs.probe-timeout-ms }}
       run: bun "${{ github.action_path }}/rerun.ts"

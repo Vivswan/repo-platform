@@ -318,4 +318,15 @@ describe("rerun_copilot_gate.ts", () => {
     expect(r.output).toContain("failed");
     expect(r.reruns).toEqual([]);
   });
+  // Migrated from the smoke harness, which used to grep the rendered bash
+  // for a bare `gh api` and for `sleep`. The deadline half is a type now
+  // (runtime.ts makes timeoutMs required); this is the half a type cannot
+  // state. Sleeping here would be worse than in the gate: this workflow
+  // fires on every Copilot review and every failed CI run across the
+  // fleet, so a wait would bill a rounded-up minute for each one.
+  test("the re-armer never sleeps", () => {
+    for (const file of ["rerun.ts", "identity.ts", "runtime.ts"]) {
+      expect(readFileSync(join(import.meta.dir, file), "utf8")).not.toMatch(/\bsleep\b/);
+    }
+  });
 });
