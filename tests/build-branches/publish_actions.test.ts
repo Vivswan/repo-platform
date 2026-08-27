@@ -13,10 +13,19 @@
 // worse way to find out.
 
 import { describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { parse as parseYaml } from "yaml";
 import {
+  ACTIONS_README,
   buildActionsTree,
   copyActions,
   EXCLUDED_DIRS,
@@ -63,6 +72,19 @@ describe("copyActions", () => {
     expect(() => copyActions(empty, dest)).toThrow("holds no action directories");
   });
 
+  test("refuses a directory with sources but no action.yml, naming it", () => {
+    // Broken state, not a retirement: retiring an action deletes its whole
+    // directory. Publishing sources without a manifest would succeed here
+    // and then 404 every fleet `uses: .../<name>@actions` at resolve time.
+    const root = fixture();
+    const orphan = join(root, "actions", "orphaned-action");
+    mkdirSync(orphan, { recursive: true });
+    writeFileSync(join(orphan, "runtime.ts"), "export {};\n");
+    const dest = mkdtempSync(join(tmpdir(), "publish-actions-dest-"));
+    expect(() => copyActions(root, dest)).toThrow("actions/orphaned-action");
+    expect(() => copyActions(root, dest)).toThrow("no action.yml");
+  });
+
   test("node_modules is excluded by name, wherever it sits", () => {
     expect(EXCLUDED_DIRS.has("node_modules")).toBe(true);
   });
@@ -95,5 +117,25 @@ describe("buildActionsTree", () => {
       });
     const offenders = walk(dest).filter((path) => path.includes("{%") || path.includes("{{"));
     expect(offenders).toEqual([]);
+  });
+});
+
+describe("the README's auto-close claim", () => {
+  test("protect-build-branches.yml really closes PRs targeting the actions branch", () => {
+    // The generated README promises PRs against the branch "are closed
+    // automatically"; that is only true while the protect workflow's
+    // job condition covers the actions ref, so the claim and the
+    // condition are pinned together (exact equality - a contains-check
+    // would stay green on a mangled condition).
+    expect(ACTIONS_README).toContain("closed\nautomatically");
+    const workflow = parseYaml(
+      readFileSync(
+        join(import.meta.dir, "../../.github/workflows/protect-build-branches.yml"),
+        "utf8",
+      ),
+    ) as { jobs: { close: { if: string } } };
+    expect(workflow.jobs.close.if).toBe(
+      'contains(fromJSON(\'["template", "actions"]\'), github.event.pull_request.base.ref)',
+    );
   });
 });

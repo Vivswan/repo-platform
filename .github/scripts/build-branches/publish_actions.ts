@@ -73,6 +73,21 @@ export function copyActions(repoRoot: string, dest: string): number {
   if (names.length === 0) {
     throw new Error(`actions/ at ${repoRoot} holds no action directories`);
   }
+  // A directory with sources but no action.yml is a BROKEN state, never an
+  // intentional retirement - retiring an action deletes its whole
+  // directory. Publishing it anyway would succeed here and then fail every
+  // fleet `uses: .../<name>@actions` at resolve time, so refuse loudly
+  // before anything is copied.
+  for (const name of names) {
+    if (!existsSync(join(source, name, "action.yml"))) {
+      throw new Error(
+        `actions/${name} at ${repoRoot} has no action.yml - sources without a ` +
+          "manifest are a broken state, not a retirement (retiring an action " +
+          "removes its whole directory); publishing this tree would break " +
+          `every fleet 'uses: .../actions/${name}@actions' ref`,
+      );
+    }
+  }
   let files = 0;
   for (const name of names) {
     cpSync(join(source, name), join(dest, "actions", name), {
