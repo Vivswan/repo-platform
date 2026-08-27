@@ -1,7 +1,7 @@
 {
   "name": "repo-platform",
   "private": true,
-  "description": "Tooling manifest for repo-platform (biome, husky, the bun scripts' yaml parser and zod schemas); the actions carry their own dependencies.",
+  "description": "Tooling manifest for repo-platform (biome, husky, the bun scripts' yaml parser and zod schemas); the actions carry their own dependencies, which the root postinstall installs so one root bun install covers every action package.",
   "scripts": {
     "check": "bun run lint && bun run lint:actions && bun run lint:sh && bun run lint:secrets && bun run typecheck && bun run typography && bun run wrap:check && bun run lint:yaml && bun run validate && bun run validate:registry && bun run validate:skills && bun run ssot:check && bun run generate:check && bun run dogfood:check && bun run gitignore:topology && bun run compose:check && bun run renders:check && bun run test",
     "check:fix": "bun x biome check --write .",
@@ -29,6 +29,7 @@
     "compose:check": "bun .github/scripts/build-branches/branch_tree.ts --dest /tmp/repo-platform-compose-check && rm -rf /tmp/repo-platform-compose-check",
     "rehearse:fleet": "bun .github/scripts/sync/rehearse_fleet.ts",
     "test": "bun test ./tests ./actions",
+    "postinstall": "for pkg in actions/*/package.json; do bun install --frozen-lockfile --silent --cwd \"${pkg%/package.json}\" || exit 1; done",
     "prepare": "husky"
   },
   "devDependencies": {
