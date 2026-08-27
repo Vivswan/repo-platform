@@ -9,6 +9,23 @@ inputs:
     description: Directory to validate
     required: false
     default: "."
+  findings-file:
+    description: >-
+      Optional path to write the BLOCKING findings to as markdown. It only
+      adds a machine-readable copy of what the run already reports; it does
+      not make anything advisory, and integrity errors still exit nonzero
+      exactly as before. An empty findings set writes an empty file, which
+      is how a caller tells "nothing to report" apart from "the validator
+      never ran".
+    required: false
+    default: ""
+  advisories-file:
+    description: >-
+      Optional path to write the NON-blocking advisories to as markdown.
+      Advisories never affect the exit code, so a caller can report them
+      without treating them as a failure.
+    required: false
+    default: ""
 
 runs:
   using: composite
@@ -43,4 +60,6 @@ runs:
       shell: bash
       env:
         SCAN_PATH: ${{ inputs.path }}
+        FINDINGS_FILE: ${{ inputs.findings-file }}
+        ADVISORIES_FILE: ${{ inputs.advisories-file }}
       run: bun "${{ github.action_path }}/validate_generated_files.ts" "$SCAN_PATH"

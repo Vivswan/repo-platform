@@ -72,7 +72,7 @@
 
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { lstatSync, readdirSync, readFileSync, readlinkSync } from "node:fs";
+import { lstatSync, readdirSync, readFileSync, readlinkSync, writeFileSync } from "node:fs";
 import { extname, join, resolve } from "node:path";
 import { parseAllDocuments, parse as parseYaml } from "yaml";
 
@@ -409,6 +409,27 @@ function walk(root: string, ignored: ReturnType<typeof gitIgnored> = null): stri
 function usageError(message: string): never {
   console.error(`error: ${message}`);
   process.exit(2);
+}
+
+/** Findings as markdown, in TWO separate files because the two streams
+ *  have different consequences: errors are what this process exits nonzero
+ *  on, advisories never touch the exit code. One combined file made a
+ *  caller treat "has content" as "blocks", which is wrong for an
+ *  advisory-only run. Both are opt-in and neither changes any exit code, so
+ *  a consumer that sets neither sees no difference. An empty set writes an
+ *  EMPTY file rather than none, which is how a caller tells "nothing to
+ *  report" from "the validator never ran". */
+function writeFindings(errors: string[], advisories: string[]): void {
+  const section = (title: string, items: string[]): string =>
+    items.length === 0
+      ? ""
+      : `#### ${title} (${items.length})\n\n${items.map((i) => `- ${i}`).join("\n")}\n`;
+  const write = (variable: string, text: string): void => {
+    const path = process.env[variable];
+    if (path !== undefined && path !== "") writeFileSync(path, text);
+  };
+  write("FINDINGS_FILE", section("Errors", errors));
+  write("ADVISORIES_FILE", section("Advisories", advisories));
 }
 
 function main(): number {
@@ -785,18 +806,13 @@ function main(): number {
             .filter(([name, job]) => name !== "all-green" && jobNeeds(job).includes("all-green"))
             .map(([name]) => name),
         );
-        // Informational jobs that run alongside the gate without gating:
-        // validate-template flags convention drift in managed repos but
-        // must never block their merges (the next sync PR heals drift).
-        const informational = new Set(["validate-template"]);
+        // No informational exemption any more. validate-template used to
+        // hold one, back when it only flagged drift; it now blocks on an
+        // integrity failure (managed content changed outside a sync), so a
+        // ci.yml that leaves it out of `needs` has disarmed a real gate and
+        // must be told so.
         const missing = Object.keys(jobs)
-          .filter(
-            (name) =>
-              name !== "all-green" &&
-              !downstream.has(name) &&
-              !informational.has(name) &&
-              !needs.includes(name),
-          )
+          .filter((name) => name !== "all-green" && !downstream.has(name) && !needs.includes(name))
           .sort();
         if (missing.length > 0) {
           errors.push(
@@ -1406,6 +1422,7 @@ function main(): number {
     }
   }
 
+  writeFindings(errors, advisories);
   for (const advisory of advisories) console.log(`advisory: ${advisory}`);
   if (errors.length > 0) {
     for (const error of errors) console.error(`error: ${error}`);
