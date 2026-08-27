@@ -1532,8 +1532,13 @@ const rules: Rule[] = [
     name: "dependabot-action-dirs",
     run: () => {
       const mismatches: Mismatch[] = [];
-      const dirs = readdirSync(join(REPO_ROOT, "actions")).filter((name) =>
-        lstatSync(join(REPO_ROOT, "actions", name)).isDirectory(),
+      // Only action.yml-bearing directories carry upstream `uses:` pins to
+      // bump; actions/shared/ is the dependency-free library zone with
+      // nothing for dependabot to see.
+      const dirs = readdirSync(join(REPO_ROOT, "actions")).filter(
+        (name) =>
+          lstatSync(join(REPO_ROOT, "actions", name)).isDirectory() &&
+          existsSync(join(REPO_ROOT, "actions", name, "action.yml")),
       );
       const doc = asRecord(parseYaml(read(".github/dependabot.yml")), "dependabot.yml");
       const updates = (doc.updates as Record<string, unknown>[] | undefined) ?? [];

@@ -11,7 +11,9 @@
 //                     copier.yml excludes are stale)
 // - actions/         (the composite actions' sources + dependency manifests,
 //                     node_modules and build output excluded - each action
-//                     installs at its own action_path when it runs)
+//                     installs at its own action_path when it runs; the
+//                     actions/shared/ library zone ships with them,
+//                     dependency-free so the tarball stays install-free)
 // - .github/workflows/ (the fleet-facing reusable workflows - fleet-ci.yml,
 //                     reusable-all-green.yml, reusable-codeql.yml - that
 //                     rendered workflows call `@build`; a reusable-workflow
@@ -102,10 +104,16 @@ Consume the template with copier, e.g.:
  *  dependencies, both reproducible from what is published. */
 export const EXCLUDED_DIRS = new Set(["node_modules", "dist", ".turbo"]);
 
-/** Copies every action directory to `<dest>/actions`, returning the number
- *  of files written. Throws when the source has no actions at all: the
- *  rendered workflows reference them by path, so publishing a branch
- *  without them would 404 every fleet CI run rather than fail here. */
+/** The dependency-free library zone under actions/: shared code the
+ *  composite actions and the shipped hooks import relatively, not an
+ *  action of its own - the one actions/ directory with no action.yml. */
+export const SHARED_DIR = "shared";
+
+/** Copies every action directory (the shared zone included) to
+ *  `<dest>/actions`, returning the number of files written. Throws when
+ *  the source has no actions at all: the rendered workflows reference them
+ *  by path, so publishing a branch without them would 404 every fleet CI
+ *  run rather than fail here. */
 export function copyActions(repoRoot: string, dest: string): number {
   const source = join(repoRoot, "actions");
   if (!existsSync(source)) {
@@ -119,15 +127,17 @@ export function copyActions(repoRoot: string, dest: string): number {
     .filter((entry) => entry.isDirectory() && !EXCLUDED_DIRS.has(entry.name))
     .map((entry) => entry.name)
     .sort();
-  if (names.length === 0) {
+  if (!names.some((name) => name !== SHARED_DIR)) {
     throw new Error(`actions/ at ${repoRoot} holds no action directories`);
   }
   // A directory with sources but no action.yml is a BROKEN state, never an
   // intentional retirement - retiring an action deletes its whole
   // directory. Publishing it anyway would succeed here and then fail every
   // fleet `uses: .../<name>@build` at resolve time, so refuse loudly
-  // before anything is copied.
+  // before anything is copied. The shared zone is the declared exception:
+  // it is imported by path, never resolved as an action.
   for (const name of names) {
+    if (name === SHARED_DIR) continue;
     if (!existsSync(join(source, name, "action.yml"))) {
       throw new Error(
         `actions/${name} at ${repoRoot} has no action.yml - sources without a ` +

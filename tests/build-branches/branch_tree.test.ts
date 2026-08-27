@@ -18,6 +18,7 @@ import {
   destOverlapsRepo,
   EXCLUDED_DIRS,
   FLEET_WORKFLOWS,
+  SHARED_DIR,
 } from "../../.github/scripts/build-branches/branch_tree";
 
 const REPO = "/home/user/repo-platform";
@@ -128,6 +129,24 @@ describe("copyActions", () => {
     expect(existsSync(join(dest, "actions"))).toBe(false);
   });
 
+  test("the shared library zone ships without an action.yml, but satisfies no roster", () => {
+    // actions/shared/ is imported by path (the actions' relative imports,
+    // copier's stamp hook), never resolved as an action, so it is the one
+    // directory exempt from the action.yml guard - and a tree holding ONLY
+    // it still counts as having no actions to publish.
+    const root = actionsFixture();
+    mkdirSync(join(root, "actions", SHARED_DIR), { recursive: true });
+    writeFileSync(join(root, "actions", SHARED_DIR, "grammar.ts"), "export {};\n");
+    const dest = mkdtempSync(join(tmpdir(), "branch-actions-dest-"));
+    expect(copyActions(root, dest)).toBe(5);
+    expect(existsSync(join(dest, "actions", SHARED_DIR, "grammar.ts"))).toBe(true);
+
+    const sharedOnly = mkdtempSync(join(tmpdir(), "branch-actions-shared-only-"));
+    mkdirSync(join(sharedOnly, "actions", SHARED_DIR), { recursive: true });
+    writeFileSync(join(sharedOnly, "actions", SHARED_DIR, "grammar.ts"), "export {};\n");
+    expect(() => copyActions(sharedOnly, dest)).toThrow("holds no action directories");
+  });
+
   test("an ANCESTOR directory named node_modules does not filter the copy away", () => {
     // The exclusion filter tests segments relative to the action root: a
     // checkout parked under some node_modules/ ancestor must still publish.
@@ -200,6 +219,9 @@ describe("assembleBranchTree", () => {
     expect(existsSync(join(dest, "template", "AGENTS.md.jinja"))).toBe(true);
     expect(existsSync(join(dest, "actions", "check-typography", "action.yml"))).toBe(true);
     expect(existsSync(join(dest, "actions", "check-typography", "node_modules"))).toBe(false);
+    // The shared zone rides along: the validator's relative imports and the
+    // stamp hook resolve against it on the extracted branch.
+    expect(existsSync(join(dest, "actions", SHARED_DIR, "grammar.ts"))).toBe(true);
   });
 
   test("the three fleet-facing reusable workflows ship at .github/workflows", () => {
