@@ -1,0 +1,179 @@
+# The all-green verdict, shared by repo-platform's own all-green.yml and
+# every managed repo's thin wrapper (workflow_run events only fire for
+# workflows living in the same repository, so the TRIGGER must be a
+# client-side file; the judgment lives here, once). It reads the completed
+# CI run's jobs and CREATES the `all-green` check run branch protection
+# requires: every job whose name carries no `info-` segment must conclude
+# success. Skipped jobs are neutral - job-level conditions are how module-
+# and visibility-gated jobs stand down under the single-call fleet CI - but
+# at least one gating job must have actually concluded SUCCESS: an empty
+# or all-skipped run vouches for nothing, so it fails closed.
+# Authoring-time roster enforcement (which jobs must exist) is
+# check_ssot.ts's all-green-roster rule for this repository and the
+# managed render for the fleet.
+#
+# Steps stay inline: this reusable runs in the CALLER's repository, where
+# repo-platform's scripts do not exist (AGENTS.md editing rules).
+#
+# CRITICAL: the check run is created with head_sha set to the CI run's own
+# head_sha (a required POST field). It has to be the TRIGGERING run's sha:
+# any check a workflow_run-triggered run's own JOBS create attaches to that
+# run's default-branch checkout, never to the PR head, so only this
+# explicit head_sha puts the verdict into the PR merge box.
+
+name: Reusable All Green
+
+on:
+  workflow_call:
+    inputs:
+      sha:
+        description: >-
+          Commit to re-evaluate (the unwedge path, fed by the caller's
+          workflow_dispatch input): the newest completed CI run at this
+          sha is judged as if its workflow_run event had just arrived.
+          Empty rides the triggering workflow_run event.
+        required: false
+        type: string
+        default: ""
+      require-job:
+        description: >-
+          A job name that must have CONCLUDED SUCCESS in the judged run,
+          or the verdict fails closed. The managed fleet wrapper pins the
+          fleet caller's unconditional integrity job here
+          ("ci / validate-template"): every OTHER gate lives inside the
+          repo-editable ci.yml's fleet call, so without this anchor,
+          deleting, conditioning, or info-renaming that one caller job
+          would silently disarm the whole gate while the repo-owned
+          checks job kept the verdict green. Empty disables the anchor
+          (repo-platform's own CI pins its job set with the
+          authoring-time roster instead).
+        required: false
+        type: string
+        default: ""
+
+permissions: {}
+
+jobs:
+  verdict:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      checks: write
+      actions: read
+    steps:
+      - name: Judge the CI run and create the all-green check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ inputs.sha }}
+          REQUIRE_JOB: ${{ inputs.require-job }}
+          RUN_ID: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.id || '' }}
+          HEAD_SHA: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || '' }}
+          RUN_EVENT: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.event || '' }}
+          RUN_STATUS: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.status || '' }}
+          RUN_PATH: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.path || '' }}
+        run: |
+          set -euo pipefail
+          if [ -n "$SHA" ]; then
+            # Unwedge path: judge the sha's newest completed CI run. The
+            # list is newest-first; queued/in-progress runs post their own
+            # verdicts when their workflow_run events arrive.
+            run="$(timeout 20 gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$SHA&per_page=100" \
+              --jq '[.workflow_runs[] | select(.status == "completed")][0] // empty')"
+            if [ -z "$run" ]; then
+              echo "::error::no completed CI run exists at $SHA - nothing to judge; get CI to complete there first."
+              exit 1
+            fi
+            RUN_ID="$(jq -r '.id' <<<"$run")"
+            HEAD_SHA="$(jq -r '.head_sha' <<<"$run")"
+            RUN_EVENT="$(jq -r '.event' <<<"$run")"
+          elif [ -z "$RUN_ID" ]; then
+            echo "::error::neither a triggering workflow_run event nor a sha input - nothing to judge."
+            exit 1
+          else
+            # Belt over the caller's trigger filters: only completed runs of
+            # the real ci.yml may be judged - a look-alike workflow merely
+            # NAMED "CI" (workflow_run matches display names), or a caller
+            # missing types: [completed], must never mint a verdict.
+            if [ "$RUN_PATH" != ".github/workflows/ci.yml" ]; then
+              echo "::error::the triggering run is $RUN_PATH, not .github/workflows/ci.yml - refusing to judge a look-alike workflow."
+              exit 1
+            fi
+            if [ "$RUN_STATUS" != "completed" ]; then
+              echo "::error::the triggering run is still '$RUN_STATUS' - only completed runs are judged (fix the caller's types: [completed])."
+              exit 1
+            fi
+          fi
+          # filter=all, newest attempt per job NAME: a partial re-run's
+          # newest attempt lists only the jobs it re-ran, so judging one
+          # attempt alone would lose every job that already concluded in an
+          # earlier attempt - a fail-open. Grouping all attempts by name
+          # and taking each job's newest (highest id) judges the run the
+          # way the merge box sees it.
+          all_jobs="$(timeout 60 gh api --paginate \
+            "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID/jobs?filter=all&per_page=100" \
+            --jq '.jobs[] | {id, name, conclusion, run_attempt}' | jq -s '.')"
+          # Gating = no " / "-separated name segment starts with "info-"
+          # (an info-* caller opts out every job of the workflow it calls).
+          gating='[.[] | select((.name | split(" / ") | map(startswith("info-")) | any) | not)]'
+          # The name is the only key stable across attempts, so it doubles
+          # as the job's identity - which fails OPEN if two DIFFERENT jobs
+          # share a display name (max_by would judge only one of them, and
+          # a failure could hide behind its twin's success). Detectable
+          # exactly when it matters: distinct jobs coexist within one
+          # attempt, so any gating (name, attempt) pair with two ids is
+          # the collision, and the verdict refuses to judge it. info-*
+          # duplicates stay harmless - they never gate.
+          dupes="$(jq -r "$gating"' | group_by([.name, .run_attempt])
+            | map(select(length > 1) | "\(.[0].name) (attempt \(.[0].run_attempt))")
+            | unique | join(", ")' <<<"$all_jobs")"
+          jobs="$(jq 'group_by(.name) | map(max_by(.id))' <<<"$all_jobs")"
+          succeeded="$(jq "$gating"' | map(select(.conclusion == "success")) | length' <<<"$jobs")"
+          failed="$(jq -r "$gating"' | map(select(.conclusion != "success" and .conclusion != "skipped")) | map("\(.name) (\(.conclusion))") | join(", ")' <<<"$jobs")"
+          table="$(jq -r "$gating"' | map("- \(.name): \(.conclusion)") | join("\n")' <<<"$jobs")"
+          # The caller-pinned anchor job: every other fleet gate lives
+          # inside the repo-editable ci.yml's one fleet-ci caller, so the
+          # verdict itself must refuse a run where that caller's
+          # unconditional integrity job did not actually SUCCEED -
+          # deleted, conditioned away, or renamed under info-, the run is
+          # not the gate it claims to be. Success (not mere presence):
+          # a skipped anchor stands down everywhere else, but standing
+          # down is exactly what the anchor exists to forbid.
+          required_ok=1
+          if [ -n "$REQUIRE_JOB" ]; then
+            required_ok="$(jq --arg n "$REQUIRE_JOB" \
+              'map(select(.name == $n and .conclusion == "success")) | length' <<<"$jobs")"
+          fi
+          if [ -n "$dupes" ]; then
+            conclusion=failure
+            title="duplicate job names cannot be judged: ${dupes:0:80}"
+            summary="CI run $RUN_ID ran distinct jobs under one display name ($dupes). The verdict judges each name's newest attempt, so a failure could hide behind a same-named success - it fails closed instead. Rename the colliding jobs (repo-owned checks.yml is the usual source) and re-run."$'\n\n'"$table"
+          elif [ -n "$failed" ]; then
+            conclusion=failure
+            title="${failed:0:120}"
+            summary="Gating jobs of CI run $RUN_ID that did not succeed: $failed. Open the run, fix or re-run the failed jobs, and this verdict re-judges on the re-run's completion."$'\n\n'"$table"
+          elif [ "$required_ok" -eq 0 ]; then
+            conclusion=failure
+            title="the required gate job '$REQUIRE_JOB' did not succeed"
+            summary="CI run $RUN_ID has no succeeded job named '$REQUIRE_JOB'. That job is the managed fleet gate's anchor: absent, skipped, or renamed means the ci.yml fleet caller was disarmed (edited out, conditioned, or moved under an info- name), so the verdict fails closed. Restore the managed ci.yml (the next template sync rewrites it) and re-run."$'\n\n'"$table"
+          elif [ "$succeeded" -eq 0 ]; then
+            # Skipped stands down only NEXT TO a real pass: a run where no
+            # gating job actually concluded success (none exist, or every
+            # one skipped) vouches for nothing, so it fails closed.
+            conclusion=failure
+            title="no gating job actually succeeded"
+            summary="CI run $RUN_ID completed without a single gating job concluding success - an empty or all-skipped run vouches for nothing, so the verdict fails closed."$'\n\n'"$table"
+          else
+            conclusion=success
+            title="all $succeeded concluded gating jobs succeeded"
+            summary="Every gating job of CI run $RUN_ID succeeded or stood down, and $succeeded actually succeeded."$'\n\n'"$table"
+          fi
+          timeout 20 gh api --method POST "repos/$GITHUB_REPOSITORY/check-runs" \
+            -f "name=all-green" \
+            -f "head_sha=$HEAD_SHA" \
+            -f "status=completed" \
+            -f "conclusion=$conclusion" \
+            -f "external_id=$RUN_EVENT" \
+            -f "details_url=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$RUN_ID" \
+            -f "output[title]=$title" \
+            -f "output[summary]=${summary:0:60000}" --silent
+          echo "all-green: $conclusion at $HEAD_SHA (CI run $RUN_ID, event $RUN_EVENT)"

@@ -1,0 +1,292 @@
+# The fleet's CI, in ONE place: every managed repository's ci.yml is a
+# thin caller of this reusable (single-call CI), so the fleet's gate jobs
+# are authored, reviewed, and green-gated HERE instead of being rendered
+# per repo. THE MEMBERSHIP RULE: what gates a managed repository is being
+# a job in this workflow (plus the repo-owned checks.yml its ci.yml calls)
+# - a managed repo's ci.yml no longer describes its own CI, and an edit
+# here changes fleet CI with no per-repo diff trail; repo-platform's own
+# gauntlet gating every edit is the counterweight (same trade as the
+# actions delivery branch).
+#
+# The all-green verdict (docs/all-green.md) reads the completed run's
+# jobs, where a SKIPPED job stands down instead of failing the gate - so
+# unlike the old needs-list gate, module- and visibility-conditioned jobs
+# here carry job-level `if:` guards and simply skip when they do not
+# apply. Job NAMES are non-gating (reusable calls prefix them as
+# "<caller> / <job>"), so nothing here may be name-addressed.
+#
+# Action refs pin @build - the same green-gated ref the caller pinned for
+# this workflow, so one publish advances the workflow and the actions it
+# drives together. Refs must be fully qualified: a `./` action path in a
+# reusable workflow resolves against the CALLER's checkout, where these
+# actions do not exist (a `./` WORKFLOW ref, like the codeql call below,
+# resolves against this repository at this file's own ref instead).
+
+name: Fleet CI
+
+on:
+  workflow_call:
+    inputs:
+      modules:
+        description: The repository's module selection, a JSON array (the rendered .repo-platform.yml answer).
+        required: true
+        type: string
+      private:
+        description: The repository's recorded visibility.
+        required: true
+        type: boolean
+      skills-dir:
+        description: The skills module's catalog directory (its copier answer).
+        required: false
+        type: string
+        default: skills
+      codeql-languages:
+        description: CodeQL languages to analyze, a JSON array; empty when CodeQL is off (private, or no analyzable toolchain).
+        required: false
+        type: string
+        default: "[]"
+      tracking-labels:
+        description: Comma-separated nightly tracking-issue labels (the fuzzer/nightly answers); release-health blocks on open issues carrying them.
+        required: false
+        type: string
+        default: ""
+
+# The workflow-level default is what a checkout needs and nothing more;
+# jobs needing other scopes declare their own blocks (still capped by the
+# caller job's ceiling).
+permissions:
+  contents: read
+
+jobs:
+  # TWO checks, one job, different consequences: INTEGRITY (the tree
+  # matches the state it was stamped with) BLOCKS; FRESHNESS (how far
+  # behind the build branch) only informs. Both verdicts land in one
+  # sticky PR comment. The predicate and reporting live in the
+  # validate-template-report action, which DEFERS the integrity verdict:
+  # the LAST step re-raises it, so the findings comment is already posted
+  # when the gate goes red.
+  validate-template:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      # Only for the sticky comment, and only on this job.
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: Vivswan/repo-platform/actions/validate-template-report@build
+        id: template
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      # Fail-closed: != 'success' re-raises on 'failure' AND on an output
+      # that resolved empty (a broken mapping must never read as green).
+      - name: Fail on an integrity finding
+        if: steps.template.outputs.integrity != 'success'
+        run: |
+          echo "::error::validate-template found managed content that changed outside a sync; see the findings on this PR (or the job summary) and the step log above."
+          exit 1
+
+  # The five base checks. Private repositories merge them into one
+  # base-checks job - a standalone job bills a rounded-up minute per push
+  # there - with every step guarded by !cancelled() so all checks still
+  # run when an earlier one fails; public repositories keep the per-check
+  # fan-out. The unselected shape skips, which the verdict reads as
+  # standing down.
+  base-checks:
+    if: inputs.private
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      # One checkout serves every check: fetch-depth 0 because
+      # commit-names walks history and gitleaks scans the event's range.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: Vivswan/repo-platform/actions/check-typography@build
+        if: '!cancelled()'
+      - uses: Vivswan/repo-platform/actions/validate-commit-names@build
+        if: '!cancelled()'
+      - uses: raven-actions/actionlint@v2
+        if: '!cancelled()'
+      - uses: Vivswan/repo-platform/actions/yamllint@build
+        if: '!cancelled()'
+      # Secret scanning: a committed credential fails the gate. Allowlist
+      # false positives in the repo-owned .gitleaks.toml. Comments off
+      # keeps the pull-requests scope at read; leaks still land in the
+      # job summary and SARIF artifact.
+      - uses: gitleaks/gitleaks-action@v3
+        if: '!cancelled()'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_ENABLE_COMMENTS: "false"
+          # The action's default binary (8.24.3) predates .gitleaks.toml's
+          # minVersion floor AND skips that check silently; pin one meeting
+          # the floor so CI honors the same config local runs do.
+          GITLEAKS_VERSION: "8.30.1"
+
+  typography:
+    if: ${{ !inputs.private }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: Vivswan/repo-platform/actions/check-typography@build
+
+  commit-names:
+    if: ${{ !inputs.private }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: Vivswan/repo-platform/actions/validate-commit-names@build
+
+  actionlint:
+    if: ${{ !inputs.private }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: raven-actions/actionlint@v2
+
+  yamllint:
+    if: ${{ !inputs.private }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: Vivswan/repo-platform/actions/yamllint@build
+
+  gitleaks:
+    if: ${{ !inputs.private }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      # The action lists the PR's commits to build the scan range.
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v3
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_ENABLE_COMMENTS: "false"
+          GITLEAKS_VERSION: "8.30.1"
+
+  # Fails when a PR introduces dependencies with known vulnerabilities.
+  # Public only: the dependency-graph API behind it is free just for
+  # public repositories; PR events only: nothing else has a diff.
+  dependency-review:
+    if: ${{ !inputs.private && github.event_name == 'pull_request' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      # The severity threshold and the upstream pin live in the wrapper.
+      - uses: Vivswan/repo-platform/actions/dependency-review@build
+
+  # CodeQL analysis inside the gate, one call per language the caller's
+  # toolchain modules analyze as. The `./` workflow ref resolves against
+  # this repository at this file's own ref; the caller job's permissions
+  # (security-events: write, actions: read) are the ceiling the analysis
+  # runs under.
+  codeql:
+    if: inputs.codeql-languages != '[]' && inputs.codeql-languages != ''
+    strategy:
+      fail-fast: false
+      matrix:
+        language: ${{ fromJSON(inputs.codeql-languages) }}
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+    uses: ./.github/workflows/reusable-codeql.yml
+    with:
+      language: ${{ matrix.language }}
+
+  # Conventional Commit PR title (the pr-title module): PRs are
+  # squash-merged, so the PR title becomes the commit subject and drives
+  # release-please versioning.
+  pr-title:
+    if: contains(fromJSON(inputs.modules), 'pr-title') && github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pull-requests: read
+    steps:
+      - uses: amannn/action-semantic-pull-request@v6
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Structural validation of the hosted agent skills (the skills module),
+  # inside the gate so branch protection blocks on a broken catalog:
+  # offline and cheap. The network-dependent `npx skills` discovery check
+  # stays advisory in the standalone validate-skills.yml.
+  validate-skills:
+    if: contains(fromJSON(inputs.modules), 'skills')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: Vivswan/repo-platform/actions/validate-skills@build
+        with:
+          skills-dir: ${{ inputs.skills-dir }}
+
+  # Fails when the release-please PR head lacks main's tip at CHECK time
+  # (the release-please module): a stale release PR cuts a release whose
+  # version and changelog miss commits already on main. Other PRs stay
+  # mergeable while behind (required checks are not strict).
+  release-freshness:
+    if: contains(fromJSON(inputs.modules), 'release-please') && github.event_name == 'pull_request' && startsWith(github.head_ref, 'release-please--')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # Full history: the ancestor check needs origin/main.
+          fetch-depth: 0
+          # PR head, not the default merge ref - the merge ref already
+          # contains main's tip, so it would always pass.
+          ref: ${{ github.event.pull_request.head.sha }}
+      - name: Require the release PR to contain the tip of main
+        run: |
+          tip="$(git rev-parse "origin/${GITHUB_BASE_REF}")"
+          if git merge-base --is-ancestor "$tip" HEAD; then
+            echo "release PR contains the ${GITHUB_BASE_REF} tip (${tip})"
+          else
+            echo "::error::Release PR is behind ${GITHUB_BASE_REF} (tip ${tip}); its version and changelog would miss commits already on ${GITHUB_BASE_REF}. Do not merge; release-please refreshes the PR after the next green run on ${GITHUB_BASE_REF}."
+            exit 1
+          fi
+
+  # Early, visible release gating (the release-please module): fails the
+  # release PR while an open issue carries a tracking-stream label or the
+  # release-blocker label, or an open Dependabot alert reaches the
+  # severity threshold. This check can go stale, so the release path
+  # re-runs the same action as the authoritative pre-flight.
+  release-health:
+    if: contains(fromJSON(inputs.modules), 'release-please') && github.event_name == 'pull_request' && startsWith(github.head_ref, 'release-please--')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # vulnerability-alerts read is the Dependabot alerts API key
+    # (security-events covers code scanning only); where the token cannot
+    # see alerts, the action's graceful degradation turns the security
+    # gate into a skipped check instead of a failure.
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
+      vulnerability-alerts: read
+    steps:
+      - uses: Vivswan/repo-platform/actions/release-health@build
+        with:
+          mode: pull-request
+          # Empty disables the tracking gates (no stream module selected).
+          tracking-labels: ${{ inputs.tracking-labels }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

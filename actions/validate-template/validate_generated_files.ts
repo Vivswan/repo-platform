@@ -11,9 +11,19 @@
 //      under .github/ and in the registration files, advisories elsewhere
 //   4. No unresolved merge-conflict markers in text files
 //   5. .github/workflows/ci.yml exists (the template always generates and
-//      manages it), an `all-green` job exists with `if: always()`, a step
-//      failing on any non-success result, and `needs:` listing every other
-//      job, and the typography check renders for the shape: a `typography`
+//      manages it) and the all-green gate is wired for the tree's shape.
+//      Verdict shape (no `all-green` job in ci.yml): the required check is
+//      a check run a workflow_run-triggered verdict workflow creates, so
+//      .github/workflows/all-green.yml must exist, fire on CI completions,
+//      carry the workflow_dispatch `sha` unwedge input, and call the
+//      reusable-all-green.yml judgment - and on client renders ci.yml must
+//      carry an UNCONDITIONAL job calling repo-platform's fleet-ci.yml
+//      reusable (the verdict judges only jobs that ran, so a deleted or
+//      conditioned-away caller would pass with every fleet gate dropped).
+//      Legacy shape (an `all-green` job
+//      still present): the job carries `if: always()`, a step failing on
+//      any non-success result, and `needs:` listing every other job, and
+//      the typography check renders for the visibility: a `typography`
 //      job on public renders, an unconditional check-typography step inside
 //      `base-checks` on private renders (which merge the base checks there)
 //   6. LICENSE and LICENSE.md never coexist - a repo carries exactly one
@@ -103,6 +113,15 @@ const HEADER_WINDOW = 10;
  *  splits) with per-repo sha256 hashes stamped post-render. Check 9
  *  verifies byte parity against it. */
 const MANIFEST_NAME = ".github/repo-platform-manifest.json";
+
+/** The verdict's anchor job as the judged run names it: the managed
+ *  ci.yml's `ci` caller prefixing fleet-ci's unconditional
+ *  validate-template job. The managed all-green.yml wrapper must pass it
+ *  as require-job (check 5) - the reusable verdict then fails any run
+ *  where this job did not succeed, so a disarmed fleet caller fails
+ *  closed at run time. check_ssot's all-green-name rule pins the same
+ *  string against the wrapper template and both job ids. */
+const REQUIRED_GATE_JOB = "ci / validate-template";
 
 /** Keys bound more than once anywhere in the manifest's JSON, each named
  *  once in first-appearance order. JSON.parse silently keeps a duplicated
@@ -195,6 +214,7 @@ const BASE_OWNERSHIP: BaseOwnedFile[] = [
   { path: ".gitattributes", kind: "marker", marker: "# repo-platform:local-section" },
   { path: ".github/CODEOWNERS", kind: "marker", marker: "# repo-platform:local-section" },
   { path: ".github/dependabot.yml", kind: "header" },
+  { path: ".github/workflows/all-green.yml", kind: "header" },
   { path: ".github/workflows/ci.yml", kind: "header" },
   { path: ".repo-platform.yml", kind: "header" },
   { path: ".typography-allow", kind: "header" },
@@ -787,9 +807,116 @@ function main(): number {
     }
   }
 
-  // 5. all-green convention in ci.yml. The file is template-managed and
+  // 5. The all-green gate in ci.yml. The file is template-managed and
   // always generated (repo-specific jobs live in the repo-owned checks.yml
   // it calls), so a missing ci.yml means the repo is damaged.
+  //
+  // Verdict shape (no all-green job): the required check is a CHECK RUN a
+  // workflow_run-triggered verdict workflow creates after judging the
+  // completed CI run's jobs, so what must exist is that workflow, wired.
+  // A repo that lost it never gets the required check created again -
+  // fail-closed, but worth a named error.
+  const verdictWorkflowErrors = (): string[] => {
+    const rel = ".github/workflows/all-green.yml";
+    const verdictPath = join(root, ".github", "workflows", "all-green.yml");
+    if (!isRegularFile(verdictPath)) {
+      return [
+        `ci.yml: no \`all-green\` job and no ${rel} verdict workflow - the ` +
+          "required all-green check is never created and nothing can merge; " +
+          "restore the verdict workflow from git history or run a template sync",
+      ];
+    }
+    let workflow: unknown = {};
+    try {
+      workflow = shapeOfYaml(readFileSync(verdictPath, "utf-8")) ?? {};
+    } catch {
+      workflow = {};
+    }
+    const record = (value: unknown): Record<string, unknown> =>
+      typeof value === "object" && value !== null && !Array.isArray(value)
+        ? (value as Record<string, unknown>)
+        : {};
+    const doc = record(workflow);
+    const on = record(doc.on);
+    const found: string[] = [];
+    const workflowRun = record(on.workflow_run);
+    const workflows = workflowRun.workflows;
+    if (!Array.isArray(workflows) || !workflows.map(String).includes("CI")) {
+      found.push(
+        `${rel}: must trigger on workflow_run of the CI workflow - without ` +
+          "that trigger no verdict (and no required all-green check) is ever created",
+      );
+    }
+    const types = workflowRun.types;
+    if (!Array.isArray(types) || types.length !== 1 || String(types[0]) !== "completed") {
+      found.push(
+        `${rel}: the workflow_run trigger must carry exactly types: [completed] - ` +
+          "anything else also fires the verdict on requested/in_progress and " +
+          "judges a run that has not finished",
+      );
+    }
+    if (!("sha" in record(record(on.workflow_dispatch).inputs))) {
+      found.push(
+        `${rel}: must carry a workflow_dispatch \`sha\` input - the unwedge ` +
+          "path that re-judges a commit when its workflow_run event was lost",
+      );
+    }
+    // The shared judgment must be the TRUSTED one: the local reusable, or
+    // <owner>/repo-platform's - a third-party workflow merely NAMED
+    // reusable-all-green.yml must not mint the required check.
+    const trustedUses =
+      /^(?:\.\/|[A-Za-z0-9-]+\/repo-platform\/)\.github\/workflows\/reusable-all-green\.yml(?:@|$)/;
+    const verdictJob = Object.values(record(doc.jobs))
+      .map(record)
+      .find((job) => trustedUses.test(String(job.uses ?? "")));
+    if (verdictJob === undefined) {
+      found.push(
+        `${rel}: no job calls repo-platform's reusable-all-green.yml - the ` +
+          "shared verdict judgment is what creates the all-green check run",
+      );
+    } else {
+      if (verdictJob.if !== undefined) {
+        found.push(
+          `${rel}: the verdict job carries a job-level if: - a condition ` +
+            "could silently stop every verdict; remove it",
+        );
+      }
+      const grants = record(verdictJob.permissions);
+      if (grants.checks !== "write") {
+        found.push(
+          `${rel}: the verdict job must grant checks: write - without it ` +
+            "the check-run POST is refused and no verdict ever lands",
+        );
+      }
+      if (grants.actions !== "read") {
+        found.push(
+          `${rel}: the verdict job must grant actions: read - the judgment ` +
+            "reads the CI run's jobs through it",
+        );
+      }
+      if (!/\binputs\.sha\b/.test(String(record(verdictJob.with).sha ?? ""))) {
+        found.push(
+          `${rel}: the verdict job must forward the dispatch sha ` +
+            "(with.sha carrying inputs.sha) or the unwedge path is dead",
+        );
+      }
+      // Client renders must pin the verdict's anchor job: the reusable
+      // fails any run where "ci / validate-template" did not succeed,
+      // which is what makes a disarmed fleet-ci caller (deleted,
+      // conditioned, or info-renamed) fail closed at run time instead of
+      // passing on the repo-owned checks alone. Self mode is exempt:
+      // repo-platform's own gating jobs are roster-pinned by check_ssot.
+      if (!selfMode && String(record(verdictJob.with)["require-job"] ?? "") !== REQUIRED_GATE_JOB) {
+        found.push(
+          `${rel}: the verdict job must pin require-job: ${REQUIRED_GATE_JOB} - ` +
+            "that anchor is what makes a disarmed fleet-ci caller fail the " +
+            "verdict instead of passing on the repo-owned checks alone; " +
+            "restore the managed wrapper via a template sync",
+        );
+      }
+    }
+    return found;
+  };
   const ciPath = join(root, ".github", "workflows", "ci.yml");
   if (!isRegularFile(ciPath)) {
     errors.push(
@@ -834,11 +961,46 @@ function main(): number {
         );
       };
       if (!("all-green" in jobs)) {
-        errors.push(
-          "ci.yml: no `all-green` job - branch protection gates on that " +
-            "required check; add an all-green job whose `needs:` " +
-            "lists every other job",
-        );
+        errors.push(...verdictWorkflowErrors());
+        // The verdict judges only jobs that RAN, so the render validator
+        // must require the jobs' EXISTENCE here: a managed ci.yml whose
+        // fleet-ci caller was deleted or conditioned away would leave the
+        // repo-owned `checks` call as the whole run and the verdict green
+        // - every fleet gate silently dropped. The owner comes from the
+        // pinned answers, like the composite-action checks: a look-alike
+        // under another owner is not the fleet's gate home. Self mode is
+        // exempt: repo-platform's own gating jobs are roster-pinned by
+        // check_ssot's all-green-roster rule instead.
+        if (!selfMode && ownerPin !== null) {
+          const ownerPattern =
+            ownerPin.kind === "pinned"
+              ? ownerPin.owner.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+              : "[A-Za-z0-9-]+";
+          const fleetCiUses = new RegExp(
+            `^${ownerPattern}/repo-platform/\\.github/workflows/fleet-ci\\.yml@`,
+          );
+          const fleetCaller = Object.values(jobs)
+            .map((job) =>
+              typeof job === "object" && job !== null && !Array.isArray(job)
+                ? (job as Record<string, unknown>)
+                : {},
+            )
+            .find((job) => fleetCiUses.test(String(job.uses ?? "")));
+          if (fleetCaller === undefined) {
+            errors.push(
+              "ci.yml: no job calls repo-platform's fleet-ci.yml reusable - " +
+                "the fleet's gate jobs never run and the verdict passes on " +
+                "the repo-owned checks alone; restore the managed `ci` job " +
+                "via a template sync",
+            );
+          } else if (fleetCaller.if !== undefined) {
+            errors.push(
+              "ci.yml: the fleet-ci caller job carries a job-level if: - a " +
+                "skipped caller contributes no gate jobs and the verdict " +
+                "passes without them; remove the condition",
+            );
+          }
+        }
       } else {
         const rawAllGreen = jobs["all-green"];
         const allGreen: Record<string, unknown> =
@@ -898,11 +1060,17 @@ function main(): number {
       // base-checks job means the private merged shape (the five base
       // checks are its steps), anything else is the public fan-out.
       // Resolved once so no check mixes expectations from both shapes.
+      // Legacy-shape-only checks (they read the aggregate job's sibling
+      // jobs): under the verdict shape the base checks live in the
+      // fleet-ci reusable, invisible to this tree.
+      const legacyShape = "all-green" in jobs;
       const shape =
         "base-checks" in jobs
           ? ({ kind: "private-merged", steps: jobSteps(jobs["base-checks"]) } as const)
           : ({ kind: "public-fanout" } as const);
-      if (shape.kind === "private-merged") {
+      if (!legacyShape) {
+        // Nothing further to require of ci.yml's own jobs here.
+      } else if (shape.kind === "private-merged") {
         if (ownerPin !== null) {
           const action = ownedActionFor(ownerPin)("check-typography");
           const enforced = shape.steps.some(
@@ -932,7 +1100,7 @@ function main(): number {
       // silence that advisory instead of nagging about a job it must not
       // have. Self mode has no answers file and is public anyway.
       const stepMarkers = ownerPin === null ? null : mergedStepMarkers(ownedActionFor(ownerPin));
-      for (const advisory of ADVISORY_JOBS) {
+      for (const advisory of legacyShape ? ADVISORY_JOBS : []) {
         if (advisory === "dependency-review") {
           if (!isPrivateRender && !(advisory in jobs)) {
             advisories.push(`ci.yml: consider adding a \`${advisory}\` job`);

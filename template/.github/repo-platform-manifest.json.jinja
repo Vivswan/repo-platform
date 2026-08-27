@@ -36,6 +36,7 @@
 {%- if 'settings-sync' in modules -%}
 {%- set _ = entries.append('    ".github/settings.yml": {"class": "starter"}') -%}
 {%- endif -%}
+{%- set _ = entries.append('    ".github/workflows/all-green.yml": {"class": "managed", "hash": null}') -%}
 {%- if 'auto-assign' in modules -%}
 {%- set _ = entries.append('    ".github/workflows/auto-assign.yml": {"class": "managed", "hash": null}') -%}
 {%- endif -%}

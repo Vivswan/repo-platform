@@ -7,10 +7,14 @@ sources in `actions/`.
 
 `build` is rebuilt from each `main` commit whose CI run succeeds (the
 branch ships only green main commits). It carries the composed copier tree
-under `template/` and the composite actions under `actions/` - every
-path is extraction-safe (no jinja-expression filenames), so
+under `template/`, the composite actions under `actions/`, and the
+fleet-facing reusable workflows (fleet-ci.yml, reusable-all-green.yml,
+reusable-codeql.yml) under `.github/workflows/` - every path is
+extraction-safe (no jinja-expression filenames), so
 `uses: <owner>/repo-platform/actions/<name>@build` refs extract cleanly
-on the runner, and an @build pin runs only action code CI has vouched for.
+on the runner, and an @build pin runs only action and workflow code CI has
+vouched for. Every shipped workflow is workflow_call-only (enforced at
+assembly), so nothing can ever run ON this branch.
 
 Consume the template with copier, e.g.:
 
