@@ -54,7 +54,7 @@ runs:
       uses: oven-sh/setup-bun@v2
 
     # No install step for this action's own scripts: they have no runtime
-    # dependencies (runtime.ts's zod import is type-only and erased).
+    # dependencies.
     #
     # continue-on-error defers the verdict to the caller's last step; it
     # does not discard it. The wrapped action's own exit code is untouched,

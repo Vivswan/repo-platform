@@ -115,8 +115,8 @@ updates:
       prefix: "build"
       include: "scope"
 
-  # Dev-only manifest (@types/bun, typescript, zod for the shared
-  # runtime.ts type-only import) for the validate-template-report action.
+  # Dev-only manifest (@types/bun, typescript) for the validate-template-report
+  # action.
   - package-ecosystem: "bun"
     directory: "/actions/validate-template-report"
     schedule:
