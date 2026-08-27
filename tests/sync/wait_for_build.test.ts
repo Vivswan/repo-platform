@@ -104,18 +104,19 @@ function run(opts: Options = {}) {
 }
 
 describe("wait_for_build.ts", () => {
-  test("the production cadence stays 90 attempts x 30 s (tests shrink only the knobs)", () => {
-    // The timeout warning promises the deadline in minutes (45: a full
-    // main CI run must finish before build-branches even starts under the
-    // workflow_run trigger, ~30 minutes worst case with rehearse-fleet,
-    // plus the build itself); pin the constants that arithmetic depends
+  test("the production cadence stays 80 attempts x 30 s (tests shrink only the knobs)", () => {
+    // The timeout warning promises the deadline in minutes (40: the tree
+    // is pre-built DURING the main CI run, so the wait covers a full CI
+    // run - ~30 minutes worst case with rehearse-fleet - plus the
+    // post-CI promotion, ~3 minutes, or ~8 on the compose fallback, and
+    // queue slack); pin the constants that arithmetic depends
     // on, since no test can wait it out. The wall-clock deadline defaults
     // to the attempts-x-delay product (probe time counts against it) and
     // is injectable ONLY so tests control time instead of racing the
     // runner; the per-call network deadline is pinned too: unbounded
     // probes hang past the warning on a stalled origin.
     const source = readFileSync(script, "utf-8");
-    expect(source).toContain('Number(env("WAIT_ATTEMPTS", "90"))');
+    expect(source).toContain('Number(env("WAIT_ATTEMPTS", "80"))');
     expect(source).toContain('Number(env("WAIT_DELAY_MS", "30000"))');
     expect(source).toContain('Number(env("PROBE_TIMEOUT_MS", "15000"))');
     expect(source).toContain('Number(env("WAIT_DEADLINE_MS", String(ATTEMPTS * DELAY_MS)))');

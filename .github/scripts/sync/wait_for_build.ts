@@ -17,9 +17,11 @@
 // exactly the state a pre-gate sync always ran in - and resolve_refs.ts
 // re-checks the shipped build's own source is green (shared/all_green.ts);
 // this bounded wait stays a freshness aid, not the gate. Polls every 30
-// seconds, 90 attempts (45 minutes): under the workflow_run trigger the
-// wait must cover a full main CI run before the build even starts (~30
-// minutes worst case with rehearse-fleet) plus the build itself, then
+// seconds, 80 attempts (40 minutes): the tree is pre-built DURING the
+// main CI run (build_pending.ts), so the post-CI publisher only promotes
+// it - the wait covers a full main CI run (~30 minutes worst case with
+// rehearse-fleet) plus the promotion (~3 minutes; ~8 on the compose
+// fallback when the pending ref is missing) and queue slack, then
 // warns and lets the run continue (the sync's own guards fail loudly and
 // the weekly cron heals).
 //
@@ -32,7 +34,7 @@ import { env, error, requireEnv, warning } from "../shared/gha.ts";
 import { parseJsonWith } from "../shared/json.ts";
 import { capture, mustCapture } from "../shared/proc.ts";
 
-const ATTEMPTS = Number(env("WAIT_ATTEMPTS", "90"));
+const ATTEMPTS = Number(env("WAIT_ATTEMPTS", "80"));
 const DELAY_MS = Number(env("WAIT_DELAY_MS", "30000"));
 /** Hard deadline for each network call: generous next to a healthy
  * ls-remote or API hit, small enough that a stalled connection burns one

@@ -3,10 +3,13 @@
 // append-only orphan branch copier consumes; see build-branches.yml's
 // header for the branch model) and `actions` (the extraction-safe branch
 // fleet `uses:` refs execute). Invoked by build-branches.yml's "Build and
-// publish" step.
+// publish" step. On the workflow_run path PREBUILT_REF names the push
+// build's parked tree (build_pending.ts), so this run only promotes it;
+// without one (schedule, dispatch, or a missing pending ref) it composes
+// the tree itself.
 //
 // Env: RUN_URL, GH_TOKEN, GITHUB_SERVER_URL, GITHUB_REPOSITORY, GITHUB_REF,
-// GITHUB_SHA.
+// GITHUB_SHA; PREBUILT_REF optional (workflow_run only).
 
 import { rmSync } from "node:fs";
 import { z } from "zod";
@@ -23,6 +26,7 @@ import { BUILD_IDENTITY } from "../shared/git_identity.ts";
 import { parseJsonWith } from "../shared/json.ts";
 import { capture, must, mustCapture } from "../shared/proc.ts";
 import { rebuildBranchTree } from "../shared/rebuild_tree.ts";
+import { PENDING_REF_PREFIX, staleReason } from "./pending.ts";
 
 const BRANCH = "template";
 /** The sibling branch carrying ONLY actions/ + a README: `uses: ...@ref`
@@ -234,17 +238,62 @@ function publish(sourceSha: string): void {
   for (const dir of ["/tmp/src", "/tmp/tree", "/tmp/pub"]) {
     rmSync(dir, { recursive: true, force: true });
   }
-  // Compose with the SOURCE ref's own script + sources, so a rebuild of an
-  // old commit reproduces that commit's composition. The script's
-  // dependencies must resolve from that tree, not this checkout.
-  must(["git", "worktree", "add", "--detach", "/tmp/src", sourceSha]);
-  must(["bun", "install", "--frozen-lockfile", "--cwd", "/tmp/src"]);
-  must(["bun", "/tmp/src/.github/scripts/build-branches/branch_tree.ts", "--dest", "/tmp/tree"]);
+  // The workflow_run path hands over the PUSH run's pre-built tree
+  // (build_pending.ts parked it while CI was still executing), so the
+  // compose cost was already paid concurrently with CI. Name-matched by
+  // construction: the env value is pendingRefFor(GITHUB_SHA), so a
+  // pending ref can never hand this run another source's tree. A missing
+  // ref (the push build failed, or its queued run was coalesced away)
+  // falls back to composing here - slower, never wrong.
+  const prebuiltRef = env("PREBUILT_REF");
+  let treeSource = "composed here";
+  if (prebuiltRef !== "") {
+    const fetched = capture(["git", "fetch", "--quiet", "origin", prebuiltRef]);
+    if (fetched.exitCode === 0) {
+      must(["git", "worktree", "add", "--detach", "/tmp/tree", "FETCH_HEAD"]);
+      treeSource = `pre-built (${prebuiltRef})`;
+    } else {
+      console.log(
+        `::warning::no pre-built tree at ${prebuiltRef} (push build failed or was coalesced); composing here instead`,
+      );
+    }
+  }
+  if (treeSource === "composed here") {
+    // Compose with the SOURCE ref's own script + sources, so a rebuild of
+    // an old commit reproduces that commit's composition. The script's
+    // dependencies must resolve from that tree, not this checkout.
+    must(["git", "worktree", "add", "--detach", "/tmp/src", sourceSha]);
+    must(["bun", "install", "--frozen-lockfile", "--cwd", "/tmp/src"]);
+    must(["bun", "/tmp/src/.github/scripts/build-branches/branch_tree.ts", "--dest", "/tmp/tree"]);
+  }
+  console.log(`tree: ${treeSource}`);
   const branchExists =
     capture(["git", "ls-remote", "--exit-code", "origin", `refs/heads/${BRANCH}`]).exitCode === 0;
   if (branchExists) {
     must(["git", "fetch", "--quiet", "origin", BRANCH]);
     must(["git", "worktree", "add", "--detach", "/tmp/pub", `origin/${BRANCH}`]);
+    // Newest-green-wins (pending.ts owns the rule): under
+    // cancel-in-progress: false a queued publisher can execute after a
+    // NEWER main already published - its build is stale and must never
+    // roll the branch back. Loud skip, green run: this is normal
+    // operation under concurrent pushes, and the newer tip's own run
+    // already delivered the newer tree.
+    const tipSource = commitStampParse(
+      mustCapture(["git", "-C", "/tmp/pub", "log", "-1", "--format=%B"]),
+    );
+    const stale = staleReason(
+      sourceSha,
+      tipSource,
+      (ancestor, descendant) =>
+        resolves(`${ancestor}^{commit}`) !== "" &&
+        resolves(`${descendant}^{commit}`) !== "" &&
+        isAncestor(ancestor, descendant),
+    );
+    if (stale !== "") {
+      console.log(`${BRANCH}: skipping publish - ${stale}`);
+      console.log("::endgroup::");
+      return;
+    }
   } else if (
     capture(["git", "ls-remote", "--exit-code", "origin", "refs/heads/staging"]).exitCode === 0
   ) {
@@ -298,6 +347,35 @@ function publish(sourceSha: string): void {
   console.log("::endgroup::");
 }
 
+/** Delete pending refs this publish consumed or obsoleted: the candidate's
+ * own ref, and every pending ref whose source is an ancestor of the
+ * candidate (a newer tree covers them; their queued publishers will skip
+ * as stale anyway). Pending refs for NEWER sources stay - their own
+ * publishers still need them. Best-effort: a failed delete warns, never
+ * reds the run (the refs are per-sha, so leftovers cannot corrupt). */
+function sweepPendingRefs(sourceSha: string): void {
+  const listing = capture(["git", "ls-remote", "origin", `${PENDING_REF_PREFIX}*`]);
+  if (listing.exitCode !== 0) {
+    console.log("::warning::could not list pending build refs; skipping the sweep");
+    return;
+  }
+  for (const line of listing.stdout.split("\n")) {
+    const ref = line.split("\t")[1];
+    if (ref === undefined || !ref.startsWith(PENDING_REF_PREFIX)) continue;
+    const refSource = ref.slice(PENDING_REF_PREFIX.length);
+    const consumed =
+      refSource === sourceSha ||
+      (resolves(`${refSource}^{commit}`) !== "" && isAncestor(refSource, sourceSha));
+    if (!consumed) continue;
+    const deleted = capture(["git", "push", "--quiet", "origin", "--delete", ref]);
+    if (deleted.exitCode !== 0) {
+      console.log(`::warning::could not delete consumed pending ref ${ref}`);
+    } else {
+      console.log(`swept pending ref ${ref}`);
+    }
+  }
+}
+
 // This run's own trigger commit (see the run-proof comment above), never
 // origin/main - which can already be newer while this run was queued.
 const sourceSha = requireEnv("GITHUB_SHA");
@@ -320,3 +398,4 @@ if (notGreen !== null) {
 // template branch advances.
 publishActionsBranch(sourceSha);
 publish(sourceSha);
+sweepPendingRefs(sourceSha);
