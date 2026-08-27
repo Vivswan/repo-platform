@@ -761,6 +761,22 @@ describe("manifestEntries", () => {
     ],
   ]);
 
+  // The scan used to derive its marker set from CURRENT declarations only.
+  // .gitignore is the tree's ONLY bounded-region declaration, so flipping it
+  // to managed emptied the set and disarmed the check on exactly the flip it
+  // exists to catch. The constant roster is what closes that.
+  test("flipping the only bounded-region declaration to managed is still caught", () => {
+    const REGION = ["# BEGIN REPO-PLATFORM MANAGED", "# END REPO-PLATFORM MANAGED", ""].join("\n");
+    const files = new Map<string, SourcedEntry>([[".gitignore", base(REGION)]]);
+    const flipped = manifestEntries(files, skip, {
+      base: [{ path: ".gitignore", class: "managed" }],
+      modules: new Map(),
+    });
+    expect(
+      flipped.errors.some((e) => e.includes("bounded-region marker but is declared managed")),
+    ).toBe(true);
+  });
+
   test("records each landed file's declared class with its render gates, sorted, self-listed", () => {
     const { entries, errors } = manifestEntries(FILES, skip, declarations());
     expect(errors).toEqual([]);

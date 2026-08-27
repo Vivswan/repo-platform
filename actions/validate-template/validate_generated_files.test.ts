@@ -48,10 +48,14 @@ const MANIFEST = ".github/repo-platform-manifest.json";
 // Absence and provenance checks are STRICT (every build ships the
 // manifest), so every client-render fixture must carry a manifest listing
 // each expected path whose file exists. This mirror of the validator's
-// ownership tables stamps one from the fixture's final tree; a drifted
-// mirror fails loudly through the roster cross-check, so it cannot rot
-// silently. Tests probing manifest behavior itself pass their own manifest
-// (which wins) or opt out via `noManifest`.
+// ownership tables stamps one from the fixture's final tree. Coverage is
+// honest, not total: mirror drift on a path a fixture CARRIES fails
+// loudly through the roster cross-check (the mirror-coverage test below
+// carries the whole base marker roster plus the agents entry for exactly
+// that reason), while entries for paths no fixture ever carries - the
+// remaining MIRROR_MODULES workflow files - are inert until a fixture
+// carries them. Tests probing manifest behavior itself pass their own
+// manifest (which wins) or opt out via `noManifest`.
 const TAIL_MARKER = "<!-- repo-platform:local-section -->";
 const HASH_COMMENT_MARKER = "# repo-platform:local-section";
 type MirrorEntry = {
@@ -1104,6 +1108,74 @@ describe("ownership-manifest byte parity", () => {
     });
     expect(keyDeleted.exitCode).toBe(1);
     expect(keyDeleted.stderr).toContain("no _commit in .copier-answers.yml");
+  });
+
+  test("a public-only entry on a private render is manifest drift", () => {
+    // CONTRIBUTING.md renders only on public repos: a manifest entry for
+    // it on a private render cannot come from the template.
+    const privateAnswers =
+      `${MANAGED_HEADER}_commit: 0.0.0.post5.dev0+abc1234\n_src_path: gh:Vivswan/repo-platform\n` +
+      "github_username: Vivswan\nprivate: true\n";
+    const entries = {
+      ...stampedBaseline(),
+      ".copier-answers.yml": `{"class": "managed", "hash": "${sha(privateAnswers)}"}`,
+      "CONTRIBUTING.md":
+        `{"class": "split", "grammar": "tail-marker", ` +
+        `"marker": "<!-- repo-platform:local-section -->", "managed": "above", ` +
+        `"hash": "${"a".repeat(64)}"}`,
+    };
+    const { exitCode, stderr } = runValidator({
+      ".copier-answers.yml": privateAnswers,
+      [MANIFEST]: manifestOf(entries),
+    });
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain("entry 'CONTRIBUTING.md' should not exist for this render");
+  });
+
+  test("a LICENSE.md entry with custom-license selected is manifest drift", () => {
+    // The custom-license module de-renders the fleet LICENSE.md; the repo
+    // owns its license, so a manifest entry claiming it cannot come from
+    // the template.
+    const registration = `${MANAGED_HEADER}modules: [uv, custom-license]\n`;
+    const entries = {
+      ...stampedBaseline(),
+      ".repo-platform.yml": `{"class": "managed", "hash": "${sha(registration)}"}`,
+      "LICENSE.md":
+        `{"class": "split", "grammar": "tail-marker", ` +
+        `"marker": "<!-- repo-platform:local-section -->", "managed": "above", ` +
+        `"hash": "${"a".repeat(64)}"}`,
+    };
+    const { exitCode, stderr } = runValidator({
+      ".repo-platform.yml": registration,
+      [MANIFEST]: manifestOf(entries),
+    });
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain("entry 'LICENSE.md' should not exist for this render");
+  });
+
+  test("a tree carrying the base marker roster passes against the mirror-stamped manifest", () => {
+    // The mirror-coverage claim's teeth: this fixture carries every base
+    // marker/header path the mirror declares (plus the agents module's
+    // AGENTS.md), all validated through the auto-stamped manifest - a
+    // drifted mirror entry for any of them fails the roster cross-check
+    // here instead of sitting inert.
+    const registration = `${MANAGED_HEADER}modules: [uv, agents]\n`;
+    const { exitCode, stderr } = runValidator({
+      ".repo-platform.yml": registration,
+      ".editorconfig": "# repo-platform:local-section\n[*]\nindent_size = 2\n",
+      ".gitattributes": "# repo-platform:local-section\n*.bin binary\n",
+      ".github/CODEOWNERS": "# repo-platform:local-section\n/docs/ @Vivswan\n",
+      ".github/dependabot.yml": `${MANAGED_HEADER}version: 2\nupdates: []\n`,
+      ".typography-allow": `${MANAGED_HEADER}`,
+      ".yamllint": `${MANAGED_HEADER}extends: default\n`,
+      "CODE_OF_CONDUCT.md": `${MANAGED_HEADER}\n# Contributor Covenant Code of Conduct\n`,
+      "CONTRIBUTING.md": "# Contributing\n\n<!-- repo-platform:local-section -->\n",
+      "LICENSE.md": "# License\n\n<!-- repo-platform:local-section -->\n",
+      "SECURITY.md": "# Security\n\n<!-- repo-platform:local-section -->\n",
+      "AGENTS.md": "# AGENTS.md\n\n<!-- repo-platform:local-section -->\n",
+    });
+    expect(stderr).toBe("");
+    expect(exitCode).toBe(0);
   });
 
   test("a managed entry hand-flipped to starter fails the roster cross-check", () => {

@@ -16,6 +16,7 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { env, hideDetails, requireEnv, setOutput } from "../shared/gha.ts";
 import { capture, mustCapture } from "../shared/proc.ts";
+import { SETTINGS_LAYERING_NAME, TAIL_SHRANK_NAME } from "./section_files.ts";
 
 const target = requireEnv("TARGET");
 const runnerTemp = requireEnv("RUNNER_TEMP");
@@ -87,86 +88,82 @@ if (recover === "recopy") {
 > Review the whole diff before merging.`;
 }
 
-// preserve_local_content.ts rebuilds every split-class file structurally
-// on every run (managed half from a clean render, repository-local half
-// from the pre-update HEAD; sentinel-scan carry on a recovery re-render);
-// its summary names each carried file for review. Carries that need a
-// human (an appendix, reset managed-half edits, duplicate markers) also
-// land in CARRY_REVIEW_FILE, which forces the manual path below.
-const carriedFile = requireEnv("CARRIED_FILE");
-if (nonEmpty(carriedFile)) {
-  body += `\n\n${slurp(carriedFile)}`;
-}
-const carryReviewFile = requireEnv("CARRY_REVIEW_FILE");
-
-// tail_tripwire.ts's post-stamp check: split-file repository-owned halves
-// that lost non-blank lines held at the target's previous commit, or that
-// could not be verified at all. The structural rebuild should make this
-// impossible, so a non-empty report is a sync bug - the section carries
-// the missing lines the reviewer needs, and the PR waits for a human
-// (needsReview below). Read from RUNNER_TEMP by its fixed name, like
-// settings-layering.md below.
-const tailShrankFile = join(runnerTemp, "tail-shrank.md");
-if (nonEmpty(tailShrankFile)) {
-  body += `\n\n${slurp(tailShrankFile)}`;
-}
-
-const retiredModulesFile = requireEnv("RETIRED_MODULES_FILE");
-if (nonEmpty(retiredModulesFile)) {
-  body += `\n\nRetired modules dropped from the selection: ${lines(retiredModulesFile).join(", ")}`;
+// PR-body sections fed by flag files, collected from ONE declarative list:
+// each entry names its file (a workflow-provided env path, or a fixed
+// RUNNER_TEMP name shared with its writer via section_files.ts), how it
+// renders (null = review-only flag, no body section), and whether its
+// presence forces the manual-review path. An absent or empty file is no
+// section. Order is the body order.
+//
+// - CARRIED_FILE: preserve_local_content.ts rebuilds every split-class
+//   file structurally on every run; its summary names each carried file.
+// - tail-shrank: tail_tripwire.ts's post-stamp check - the structural
+//   rebuild should make a trip impossible, so a non-empty report is a
+//   sync bug and the PR waits for a human.
+// - settings-layering: the one-time settings.yml transition
+//   (settings_layering.ts) - dropped overrides need a human to re-add the
+//   wanted ones.
+// - CARRY_REVIEW_FILE: carries that need a human (an appendix, reset
+//   managed-half edits, duplicate markers) - review-only, the carried
+//   summary already names the files.
+interface FlagSection {
+  path: string;
+  /** Renders the section body (called only on a non-empty file); null
+   * marks a review-only flag with no body section of its own. */
+  render: ((path: string) => string) | null;
+  /** A present section forces the manual-review path. */
+  forcesReview: boolean;
 }
 
-const removedPathsFile = requireEnv("REMOVED_PATHS_FILE");
-if (nonEmpty(removedPathsFile)) {
-  body += `\n\nThe template retired these files; this update deletes them:\n\n${lines(
-    removedPathsFile,
-  )
-    .map((path) => `- ${path}`)
-    .join("\n")}`;
-}
-
-const withheldFile = requireEnv("WITHHELD_FILE");
-if (nonEmpty(withheldFile)) {
-  body += `
-
-> [!WARNING]
+const sections: FlagSection[] = [
+  { path: requireEnv("CARRIED_FILE"), render: slurp, forcesReview: false },
+  { path: join(runnerTemp, TAIL_SHRANK_NAME), render: slurp, forcesReview: true },
+  {
+    path: requireEnv("RETIRED_MODULES_FILE"),
+    render: (path) => `Retired modules dropped from the selection: ${lines(path).join(", ")}`,
+    forcesReview: false,
+  },
+  {
+    path: requireEnv("REMOVED_PATHS_FILE"),
+    render: (path) =>
+      `The template retired these files; this update deletes them:\n\n${lines(path)
+        .map((rel) => `- ${rel}`)
+        .join("\n")}`,
+    forcesReview: false,
+  },
+  {
+    path: requireEnv("WITHHELD_FILE"),
+    render: (path) => `> [!WARNING]
 > Workflow-file changes were WITHHELD from this update: the sync
 > token lacks the Workflows scope. Grant Workflows read/write to
 > the REPO_PLATFORM_TOKEN and re-run the sync to include them.
 
-${lines(withheldFile)
-  .map((path) => `- ${path}`)
-  .join("\n")}`;
-}
-
-const manifestLicenseFile = requireEnv("MANIFEST_LICENSE_FILE");
-if (nonEmpty(manifestLicenseFile)) {
-  body += `\n\n${slurp(manifestLicenseFile)}`;
-}
-
-// The one-time settings-layering transition (settings_layering.ts, run by
-// the preserve step): when the legacy settings.yml was replaced with the
-// identity starter and old declarations differing from the managed
-// baseline were dropped, the section lists them - and the PR must wait
-// for a human to re-add the wanted ones (needsReview below). Read from
-// RUNNER_TEMP by its fixed name, like old_commit.txt above.
-const settingsLayeringFile = join(runnerTemp, "settings-layering.md");
-if (nonEmpty(settingsLayeringFile)) {
-  body += `\n\n${slurp(settingsLayeringFile)}`;
-}
-
-const licenseTransitionFile = requireEnv("LICENSE_TRANSITION_FILE");
-if (nonEmpty(licenseTransitionFile)) {
-  body += `
-
-> [!WARNING]
-> This update DELETES ${lines(licenseTransitionFile).join(" and ")}. Copier
+${lines(path)
+  .map((rel) => `- ${rel}`)
+  .join("\n")}`,
+    forcesReview: true,
+  },
+  { path: requireEnv("MANIFEST_LICENSE_FILE"), render: slurp, forcesReview: false },
+  { path: join(runnerTemp, SETTINGS_LAYERING_NAME), render: slurp, forcesReview: true },
+  {
+    path: requireEnv("LICENSE_TRANSITION_FILE"),
+    render: (path) => `> [!WARNING]
+> This update DELETES ${lines(path).join(" and ")}. Copier
 > resolves delete-vs-modify by dropping the file, so content below its
 > local-section marker is not in this diff. Prior licensing needs no
 > notice - git history is the record - but if the old file (see it on the
 > base branch or in git history) carried other local notices such as
 > third-party components, move them below LICENSE.md's marker on this
-> branch before merging.`;
+> branch before merging.`,
+    forcesReview: true,
+  },
+  { path: requireEnv("CARRY_REVIEW_FILE"), render: null, forcesReview: true },
+];
+let sectionsForceReview = false;
+for (const section of sections) {
+  if (!nonEmpty(section.path)) continue;
+  if (section.render !== null) body += `\n\n${section.render(section.path)}`;
+  sectionsForceReview ||= section.forcesReview;
 }
 
 if (resolved === "true") {
@@ -228,17 +225,14 @@ if (validation === "failed") {
 // a deleted license file, out-of-band settings drift, dropped
 // settings-layering overrides - stays manual; a clean update (which
 // includes kept-whole and clean tail-appended carries) arms squash
-// auto-merge below.
+// auto-merge below. The flag-file reasons ride the section list above
+// (forcesReview), so a new section cannot forget the review question.
 const needsReview =
   resolved === "true" ||
   validation === "failed" ||
   recover === "recopy" ||
   env("FORCE_MANUAL") === "true" ||
-  nonEmpty(carryReviewFile) ||
-  nonEmpty(tailShrankFile) ||
-  nonEmpty(licenseTransitionFile) ||
-  nonEmpty(withheldFile) ||
-  nonEmpty(settingsLayeringFile) ||
+  sectionsForceReview ||
   nonEmpty(driftFile);
 
 const existing = mustCapture([

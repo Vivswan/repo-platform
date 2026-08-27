@@ -41,14 +41,21 @@
 // compare correctly.
 //
 // Usage:
-//   bun tail_tripwire.ts --report FILE [--root target]
+//   bun tail_tripwire.ts [--report FILE] [--root target]
 //     [--hide-details true|false]
+//
+// --report defaults to RUNNER_TEMP/<TAIL_SHRANK_NAME> - the shared
+// constant open_pr.ts reads the section from, so the workflow never names
+// the file and the pair cannot drift.
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { cleanLocalRegion } from "../../../scripts/gitignore_local.ts";
 import { parseFlags } from "../shared/flags.ts";
+import { requireEnv } from "../shared/gha.ts";
+import { headBytes } from "../shared/git_head.ts";
 import { ASCII_MARKER_RE, type SplitEntry, splitEntries } from "./preserve_local_content.ts";
+import { TAIL_SHRANK_NAME } from "./section_files.ts";
 import { MANIFEST_NAME, managedHalf } from "./stamp_manifest.ts";
 
 /** The complement of stamp_manifest's managedHalf: managedHalf returns a
@@ -71,12 +78,20 @@ function markerComplement(
  * grammar: everything below the marker line (tail-marker), or the local
  * region body between the entry's begin/end lines (bounded-region, located
  * with cleanLocalRegion's strict exactly-once rules - a copy whose region
- * cannot be honestly located is unverifiable, never guessed at). */
+ * cannot be honestly located is unverifiable, never guessed at).
+ * Exhaustive: a new grammar member must fail compilation here, not
+ * silently ride an existing locator. */
 export function repoOwnedHalf(content: string, entry: SplitEntry): string | null {
-  if (entry.grammar === "tail-marker") {
-    return markerComplement(content, entry.marker, "above");
+  switch (entry.grammar) {
+    case "tail-marker":
+      return markerComplement(content, entry.marker, "above");
+    case "bounded-region":
+      return cleanLocalRegion(content, entry)?.body ?? null;
+    default: {
+      const unhandled: never = entry;
+      throw new Error(`unhandled split grammar: ${JSON.stringify(unhandled)}`);
+    }
   }
-  return cleanLocalRegion(content, entry)?.body ?? null;
 }
 
 /** How HEAD's manifest declares a split: the grammar union (post-grammar
@@ -101,12 +116,15 @@ export function headSplitEntries(text: string, where: string): Map<string, HeadS
     // Fall through to the legacy shape below.
   }
   const files = (JSON.parse(text) as { files?: unknown } | null)?.files;
-  if (typeof files !== "object" || files === null) {
+  // An array passes `typeof === "object"` with zero-or-index entries -
+  // that would fail OPEN (no split declarations, nothing checked); reject
+  // any non-mapping shape like the strict parse does.
+  if (typeof files !== "object" || files === null || Array.isArray(files)) {
     throw new Error(`${where} has no top-level 'files' mapping`);
   }
   const out = new Map<string, HeadSplit>();
   for (const [path, entry] of Object.entries(files as Record<string, unknown>)) {
-    if (typeof entry !== "object" || entry === null) {
+    if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
       // Fail closed like the strict parse: a damaged entry must route the
       // manifest to the unverifiable path, not silently skip its file.
       throw new Error(`${where}: entry for ${path} is not an object`);
@@ -239,34 +257,6 @@ export function compareHalves(
   };
 }
 
-/** The file's bytes at the target's HEAD, or null when the path is
- * genuinely absent there. Same probe semantics as
- * preserve_local_content.ts's private twin: `git ls-tree HEAD -- rel`
- * distinguishes an absent path (exit 0, empty output) from a broken
- * repository (nonzero exit, which throws - reading damage as "absent"
- * would silently skip the check). Returns raw bytes so each caller picks
- * the honest decode (latin1 for file content, utf-8 for the manifest). */
-function headBytes(root: string, rel: string): Buffer | null {
-  const probe = Bun.spawnSync(["git", "-C", root, "ls-tree", "HEAD", "--", rel], {
-    stdout: "pipe",
-    stderr: "pipe",
-  });
-  if (probe.exitCode !== 0) {
-    throw new Error(
-      `git ls-tree HEAD -- ${rel} failed in ${root}: ${probe.stderr.toString().trim()}`,
-    );
-  }
-  if (probe.stdout.toString().trim() === "") return null;
-  const proc = Bun.spawnSync(["git", "-C", root, "show", `HEAD:${rel}`], {
-    stdout: "pipe",
-    stderr: "pipe",
-  });
-  if (proc.exitCode !== 0) {
-    throw new Error(`git show HEAD:${rel} failed in ${root}: ${proc.stderr.toString().trim()}`);
-  }
-  return Buffer.from(proc.stdout);
-}
-
 // PR bodies cap at 64 KiB and gh fails outright past it (see open_pr.ts),
 // and the report shares the body with every other section - so the
 // excerpt is bounded three ways: lines per file, characters per line (one
@@ -355,7 +345,8 @@ export function renderReport(findings: Finding[]): string {
 }
 
 function main(argv: string[]): number {
-  const flags = parseFlags(argv, ["--report"] as const, ["--root", "--hide-details"] as const);
+  const flags = parseFlags(argv, [] as const, ["--report", "--root", "--hide-details"] as const);
+  const report = flags["--report"] ?? join(requireEnv("RUNNER_TEMP"), TAIL_SHRANK_NAME);
   const root = flags["--root"] ?? "target";
   const hideDetails = flags["--hide-details"] === "true";
 
@@ -385,6 +376,11 @@ function main(argv: string[]): number {
   }
 
   const findings: Finding[] = [];
+  // The loop iterates the POST-SYNC manifest's splits, so the mirror
+  // boundary is deliberate: a path split at HEAD but absent from the
+  // freshly stamped post-sync manifest is never visited - the template
+  // retired it (or flipped its class), and retirements ride their own
+  // review machinery, not this wire.
   for (const entry of entries) {
     const headCopy = headBytes(root, entry.path);
     // Absent at HEAD: no previous repository-owned half to lose.
@@ -424,7 +420,7 @@ function main(argv: string[]): number {
   // utf-8 write of latin1 code units: every previous byte survives as a
   // code point (lossless, unlike U+FFFD folding), and the report stays
   // valid utf-8 for gh's PR-body argument.
-  writeFileSync(flags["--report"], renderReport(findings), "utf-8");
+  writeFileSync(report, renderReport(findings), "utf-8");
 
   if (findings.length === 0) {
     console.log(

@@ -282,7 +282,8 @@ describe("carryLocalRegion", () => {
     const markers = {
       begin: "// BEGIN LOCAL",
       end: "// END LOCAL",
-      all: ["// BEGIN LOCAL", "// END LOCAL", "// BEGIN MANAGED", "// END MANAGED"],
+      managedBegin: "// BEGIN MANAGED",
+      managedEnd: "// END MANAGED",
     };
     const render = `// BEGIN LOCAL\n// default\n// END LOCAL\n// BEGIN MANAGED\nnew\n// END MANAGED\n`;
     const target = `// BEGIN LOCAL\nlocal-entry\n// END LOCAL\n// BEGIN MANAGED\nold\n// END MANAGED\n`;
@@ -350,7 +351,8 @@ describe("carryLocalRegion", () => {
     const markers = {
       begin: "#LOCAL-BEGIN",
       end: "#LOCAL-END",
-      all: ["#LOCAL-BEGIN", "#LOCAL-END"],
+      managedBegin: "#MANAGED-BEGIN",
+      managedEnd: "#MANAGED-END",
     };
     const render = "#LOCAL-BEGIN\n# default\n#LOCAL-END\nmanaged\n";
     const carry = carryLocalRegion(render, "#LOCAL-BEGIN\n/entry/\n", markers);
@@ -362,7 +364,12 @@ describe("carryLocalRegion", () => {
     // "# X Y" neutralizes to "X-Y", which the line-commenting then turns
     // into "# X-Y" - recreating the OTHER marker. The postcondition must
     // refuse to deliver a file the validator's exactly-once rule rejects.
-    const markers = { begin: "# X-Y", end: "# X Y", all: ["# X-Y", "# X Y"] };
+    const markers = {
+      begin: "# X-Y",
+      end: "# X Y",
+      managedBegin: "# M-BEGIN",
+      managedEnd: "# M-END",
+    };
     const render = "# X-Y\n# default\n# X Y\nmanaged\n";
     expect(() => carryLocalRegion(render, "# X Y\n/entry/\n", markers)).toThrow(
       "collide under neutralization",
@@ -644,7 +651,8 @@ describe("splitEntries", () => {
         marker: MANAGED_BEGIN,
         begin: LOCAL_BEGIN,
         end: LOCAL_END,
-        all: [LOCAL_BEGIN, LOCAL_END, MANAGED_BEGIN, MANAGED_END],
+        managedBegin: MANAGED_BEGIN,
+        managedEnd: MANAGED_END,
       },
     ]);
   });
@@ -700,6 +708,54 @@ describe("splitEntries", () => {
   test("throws on non-JSON input and on a files-less document", () => {
     expect(() => splitEntries("not json", "m")).toThrow("does not parse as JSON");
     expect(() => splitEntries("{}", "m")).toThrow("no top-level 'files' mapping");
+  });
+
+  test("an array-shaped files value fails loud, never open", () => {
+    // '"files": []' passes `typeof === "object"` and would yield ZERO
+    // entries - every carry would silently skip after recopy already
+    // overwrote local content.
+    expect(() => splitEntries('{"files": []}', "m")).toThrow("no top-level 'files' mapping");
+    const arrayEntry = JSON.stringify({ files: { "AGENTS.md": [] } });
+    expect(() => splitEntries(arrayEntry, "m")).toThrow("is not an object");
+  });
+
+  test("throws on a non-comment tail marker (the appendix writes comments)", () => {
+    const manifest = JSON.stringify({
+      files: { "AGENTS.md": tailEntry({ marker: "// local section" }) },
+    });
+    expect(() => splitEntries(manifest, "m")).toThrow(
+      "not a hash comment or a complete HTML comment",
+    );
+  });
+
+  // The manifest text is attacker-adjacent at this boundary: it is whatever
+  // the target repo's stamped file claims, so the same one-comment rule has
+  // to hold here and not just at declaration time.
+  test("throws on an HTML tail marker that is not exactly one comment", () => {
+    for (const marker of ["<!-- closed --> active <!-- final -->", "<!-->"]) {
+      const manifest = JSON.stringify({ files: { "AGENTS.md": tailEntry({ marker }) } });
+      expect(() => splitEntries(manifest, "m")).toThrow(
+        "not a hash comment or a complete HTML comment",
+      );
+    }
+  });
+
+  test("throws on a bounded-region marker that is not a hash comment", () => {
+    const manifest = JSON.stringify({
+      files: {
+        ".gitignore": {
+          class: "split",
+          grammar: "bounded-region",
+          marker: MANAGED_BEGIN,
+          managed: "below",
+          managed_end: MANAGED_END,
+          local_begin: "<!-- BEGIN LOCAL -->",
+          local_end: LOCAL_END,
+          hash: null,
+        },
+      },
+    });
+    expect(() => splitEntries(manifest, "m")).toThrow("does not open as a hash comment");
   });
 });
 
@@ -821,6 +877,24 @@ describe("preserve_local_content render mode", () => {
     // A template change to the managed half is routine, not a local edit:
     // nothing to review, the PR stays auto-merge-eligible.
     expect(result.review).toBe("");
+  });
+
+  test("a symlinked ancestor directory refuses the rebuild write loudly", () => {
+    // writeFileSync would follow `docs -> outside` and land the write
+    // outside the checkout with the final component looking clean.
+    const root = makeTarget({ "AGENTS.md": agentsTarget });
+    initGitRepo(root);
+    const outside = mkdtempSync(join(tmpdir(), "preserve-outside-"));
+    symlinkSync(outside, join(root, "docs"));
+    const { renderDir, oldRenderDir } = makeRenderPair(
+      [{ path: "docs/AGENTS.md", grammar: "tail-marker", marker: SENTINEL }],
+      { "docs/AGENTS.md": agentsRender },
+      {},
+    );
+    const result = runRender(root, renderDir, oldRenderDir);
+    expect(result.exitCode).not.toBe(0);
+    expect(result.stderr).toContain("ancestor 'docs' is a symbolic link");
+    expect(existsSync(join(outside, "AGENTS.md"))).toBe(false);
   });
 
   test("a marker-bearing file not declared split in the manifest is untouched", () => {

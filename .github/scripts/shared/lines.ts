@@ -33,3 +33,14 @@ export function stripCr(line: Buffer): Buffer {
   while (end > 0 && line[end - 1] === 0x0d) end--;
   return line.subarray(0, end);
 }
+
+/** The last non-blank line of a text, trimmed ("" for all-blank input) -
+ * the "final verdict line" read of a subprocess's output, shared so the
+ * gate readers cannot drift on what counts as the last line. */
+export function lastLine(text: string): string {
+  const lines = text
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line !== "");
+  return lines.at(-1) ?? "";
+}

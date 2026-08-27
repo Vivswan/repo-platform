@@ -358,16 +358,16 @@ jobs:
       # Defense-in-depth, now that the tree is final: every split entry's
       # repository-owned half must still hold each non-blank line it held
       # at the target's HEAD (split rules in the script header). A trip is
-      # a sync bug: it lands in the PR body via tail-shrank.md and
-      # open_pr.ts forces the manual-review path. Warn, not red - a
-      # blocked delivery would hide the diff the reviewer needs.
+      # a sync bug: it lands in the PR body via the script's RUNNER_TEMP
+      # report (a filename constant it shares with open_pr.ts, which
+      # forces the manual-review path). Warn, not red - a blocked delivery
+      # would hide the diff the reviewer needs.
       - name: Tripwire on repository-owned content loss
         run: |
           bun .github/scripts/sync/run_hidden.ts "tail tripwire" -- \
             bun .github/scripts/sync/tail_tripwire.ts \
             --root target \
-            --hide-details "$HIDE_DETAILS" \
-            --report "$RUNNER_TEMP/tail-shrank.md"
+            --hide-details "$HIDE_DETAILS"
 
       # Registries publish the manifest's license claim, not the LICENSE
       # file: a repo adopting the fleet license with package.json still

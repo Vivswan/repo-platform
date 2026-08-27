@@ -77,8 +77,9 @@
 //     [--rebuilt-paths FILE] [--render-dir DIR --old-render-dir DIR]
 
 import { existsSync, lstatSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import {
+  allRegionMarkers,
   cleanLocalRegion,
   localRegion,
   type RegionMarkers,
@@ -86,7 +87,9 @@ import {
   stripCr,
   substringCount,
 } from "../../../scripts/gitignore_local.ts";
+import { isCommentMarker, isHashMarker } from "../../../scripts/ownership.ts";
 import { parseFlags } from "../shared/flags.ts";
+import { headBytes } from "../shared/git_head.ts";
 import { MANIFEST_NAME, managedHalf } from "./stamp_manifest.ts";
 
 function lastLineIndex(
@@ -219,7 +222,7 @@ export interface RegionCarry {
  * holds on the result. */
 function inertPreviousCopy(content: string, markers: RegionMarkers): string {
   let neutralized = content;
-  for (const marker of markers.all) {
+  for (const marker of allRegionMarkers(markers)) {
     let inert = (marker.startsWith("# ") ? marker.slice(2) : marker).replaceAll(" ", "-");
     // A space-free marker dash-joins to itself; break the substring anyway.
     if (inert.includes(marker)) inert = `${inert.slice(0, 1)}-${inert.slice(1)}`;
@@ -274,7 +277,7 @@ export function carryLocalRegion(
   // markers are schema-constrained against containing each other, so a
   // violation here means adversarially colliding markers - fail loudly
   // rather than deliver a file the validator's exactly-once rule rejects.
-  for (const marker of markers.all) {
+  for (const marker of allRegionMarkers(markers)) {
     if (substringCount(content, marker) !== substringCount(render, marker)) {
       throw new Error(
         `appendix neutralization would change the '${marker}' marker's occurrence ` +
@@ -347,9 +350,20 @@ export type SplitEntry =
   | ({ path: string; grammar: "bounded-region"; marker: string } & RegionMarkers);
 
 /** Which line the stamper's managedHalf splits a split entry's file at,
- * and on which side the managed half sits - derived from the grammar. */
+ * and on which side the managed half sits - derived from the grammar.
+ * Exhaustive: a new grammar member must fail compilation here, not
+ * silently inherit a side. */
 function entrySide(entry: SplitEntry): "above" | "below" {
-  return entry.grammar === "tail-marker" ? "above" : "below";
+  switch (entry.grammar) {
+    case "tail-marker":
+      return "above";
+    case "bounded-region":
+      return "below";
+    default: {
+      const unhandled: never = entry;
+      throw new Error(`unhandled split grammar: ${JSON.stringify(unhandled)}`);
+    }
+  }
 }
 
 /** Markers are matched against latin1-decoded file bytes, so a non-ASCII
@@ -388,12 +402,16 @@ export function splitEntries(manifestText: string, where: string): SplitEntry[] 
     throw new Error(`${where} does not parse as JSON`);
   }
   const files = (parsed as { files?: unknown } | null)?.files;
-  if (typeof files !== "object" || files === null) {
+  // An array passes `typeof === "object"`, and `"files": []` would yield
+  // ZERO entries - every carry would silently skip after recopy already
+  // overwrote local content. This function must not trust manifest text:
+  // reject any non-mapping shape loudly.
+  if (typeof files !== "object" || files === null || Array.isArray(files)) {
     throw new Error(`${where} has no top-level 'files' mapping`);
   }
   const out: SplitEntry[] = [];
   for (const [path, entry] of Object.entries(files as Record<string, unknown>)) {
-    if (typeof entry !== "object" || entry === null) {
+    if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
       throw new Error(`${where}: entry for ${path} is not an object`);
     }
     const shaped = entry as Record<string, unknown>;
@@ -417,6 +435,19 @@ export function splitEntries(manifestText: string, where: string): SplitEntry[] 
             "managed side other than 'above' - the manifest is inconsistent",
         );
       }
+      // The declaration schema constrains tail markers to comment syntax
+      // (the recovery appendix writes comments in the marker's syntax);
+      // the manifest text rides through an untrusted checkout, so this
+      // boundary re-checks it before any appendix could emit a
+      // non-comment line.
+      if (!isCommentMarker(shaped.marker)) {
+        throw new Error(
+          `${where}: split entry for ${path} declares tail marker ` +
+            `'${shaped.marker}', which is not a hash comment or a complete HTML ` +
+            "comment line - the recovery appendix writes comments in the marker's " +
+            "syntax; the manifest is damaged",
+        );
+      }
       out.push({ path, grammar: "tail-marker", marker: shaped.marker });
       continue;
     }
@@ -432,18 +463,26 @@ export function splitEntries(manifestText: string, where: string): SplitEntry[] 
             "strings - the manifest is inconsistent",
         );
       }
+      // Same comment-syntax re-check as the tail marker: the declaration
+      // schema constrains bounded-region markers to hash comments (the
+      // appendix comments carried lines with #).
+      for (const value of [shaped.marker, ...(regionStrings as string[])]) {
+        if (!isHashMarker(value)) {
+          throw new Error(
+            `${where}: split entry for ${path} declares bounded-region marker ` +
+              `'${value}', which does not open as a hash comment - the appendix ` +
+              "comments carried lines with #; the manifest is damaged",
+          );
+        }
+      }
       out.push({
         path,
         grammar: "bounded-region",
         marker: shaped.marker,
         begin: shaped.local_begin as string,
         end: shaped.local_end as string,
-        all: [
-          shaped.local_begin as string,
-          shaped.local_end as string,
-          shaped.marker,
-          shaped.managed_end as string,
-        ],
+        managedBegin: shaped.marker,
+        managedEnd: shaped.managed_end as string,
       });
       continue;
     }
@@ -469,41 +508,40 @@ function requireHead(root: string): void {
 }
 
 /** The file's pre-render content at the target's HEAD, or null when the
- * path is genuinely absent there. The probe is `git ls-tree HEAD -- rel`:
- * exit 0 with empty output means absent, exit 0 with output means
- * present, and ANY nonzero exit is a real git failure and throws -
- * cat-file -e cannot make that distinction (it exits 128 for a missing
- * path and for fatal errors alike), and reading damage as "every file is
- * new" would silently skip the carry. */
+ * path is genuinely absent there (headBytes owns the probe semantics).
+ * latin1, not utf-8: the pre-render copy is the byte-owned repo half. */
 function headContent(root: string, rel: string): string | null {
-  const probe = Bun.spawnSync(["git", "-C", root, "ls-tree", "HEAD", "--", rel], {
-    stdout: "pipe",
-    stderr: "pipe",
-  });
-  if (probe.exitCode !== 0) {
-    throw new Error(
-      `git ls-tree HEAD -- ${rel} failed in ${root}: ${probe.stderr.toString().trim()}`,
-    );
-  }
-  if (probe.stdout.toString().trim() === "") return null;
-  const proc = Bun.spawnSync(["git", "-C", root, "show", `HEAD:${rel}`], {
-    stdout: "pipe",
-    stderr: "pipe",
-  });
-  if (proc.exitCode !== 0) {
-    throw new Error(`git show HEAD:${rel} failed in ${root}: ${proc.stderr.toString().trim()}`);
-  }
-  // latin1, not utf-8: the pre-render copy is the byte-owned repo half.
-  return proc.stdout.toString("latin1");
+  return headBytes(root, rel)?.toString("latin1") ?? null;
 }
 
-/** Land `content` as a REGULAR file at `path`. writeFileSync follows an
- * existing symlink, so a split path a repo replaced with a link would have
- * its TARGET overwritten - possibly outside the checkout; the rebuild owns
- * the manifest path itself, so a symlink there is removed first. latin1:
+/** Land `content` as a REGULAR file at `rel` under `root`. writeFileSync
+ * follows an existing symlink, so a split path a repo replaced with a link
+ * would have its TARGET overwritten - possibly outside the checkout; the
+ * rebuild owns the manifest path itself, so a symlink there is removed
+ * first. The same traversal exists one level up: a symlinked ANCESTOR
+ * directory (a repo committing `.github -> elsewhere`) would carry the
+ * write outside the checkout with the final component looking clean, so
+ * every ancestor is lstat'd and a link among them refuses loudly (the
+ * rebuild does not own directories, so it never replaces one). latin1:
  * the content is byte-owned (see the header). A directory at the path is
  * left for writeFileSync to fail on loudly. */
-function writeRegularFile(path: string, content: string): void {
+function writeRegularFile(root: string, rel: string, content: string): void {
+  let ancestor = dirname(rel);
+  for (; ancestor !== "." && ancestor !== "/"; ancestor = dirname(ancestor)) {
+    let stat: ReturnType<typeof lstatSync> | null = null;
+    try {
+      stat = lstatSync(join(root, ancestor));
+    } catch {
+      stat = null;
+    }
+    if (stat?.isSymbolicLink()) {
+      throw new Error(
+        `refusing to write ${rel}: its ancestor '${ancestor}' is a symbolic link, ` +
+          "so the write would land outside the checkout's own tree",
+      );
+    }
+  }
+  const path = join(root, rel);
   let stat: ReturnType<typeof lstatSync> | null = null;
   try {
     stat = lstatSync(path);
@@ -523,7 +561,9 @@ interface FileOutcome {
 
 /** One split entry's carry over (render, target): the delivered content
  * plus its summary note and review reasons, dispatched on the entry's
- * grammar. Null content change (carry === null) keeps the render. */
+ * grammar. Null content change (carry === null) keeps the render.
+ * Exhaustive: a new grammar member must fail compilation here, not
+ * silently ride an existing carry. */
 function carrySplitEntry(
   entry: SplitEntry,
   render: string,
@@ -531,39 +571,51 @@ function carrySplitEntry(
   mode: "recopy" | "render",
 ): { content: string; note: string | null; appendixCarry: boolean; reviewReasons: string[] } {
   const reviewReasons: string[] = [];
-  if (entry.grammar === "bounded-region") {
-    // The manifest and the render are generated together: a declared
-    // region the render does not carry means one of them is damaged, and
-    // keeping the render here would silently drop HEAD's local body.
-    if (localRegion(render, entry) === null) {
-      throw new Error(
-        `the manifest declares a bounded-region split for ${entry.path}, but the ` +
-          "render carries no such local region - manifest and render disagree",
-      );
+  switch (entry.grammar) {
+    case "bounded-region": {
+      // The manifest and the render are generated together: a declared
+      // region the render does not carry means one of them is damaged, and
+      // keeping the render here would silently drop HEAD's local body.
+      if (localRegion(render, entry) === null) {
+        throw new Error(
+          `the manifest declares a bounded-region split for ${entry.path}, but the ` +
+            "render carries no such local region - manifest and render disagree",
+        );
+      }
+      const carry = carryLocalRegion(render, target, entry);
+      if (carry === null) {
+        return { content: render, note: null, appendixCarry: false, reviewReasons };
+      }
+      if (carry.disposition === "appendix") reviewReasons.push("recovery-appendix");
+      return {
+        content: carry.content,
+        note: REGION_NOTES[carry.disposition],
+        appendixCarry: carry.disposition === "appendix",
+        reviewReasons,
+      };
     }
-    const carry = carryLocalRegion(render, target, entry);
-    if (carry === null) return { content: render, note: null, appendixCarry: false, reviewReasons };
-    if (carry.disposition === "appendix") reviewReasons.push("recovery-appendix");
-    return {
-      content: carry.content,
-      note: REGION_NOTES[carry.disposition],
-      appendixCarry: carry.disposition === "appendix",
-      reviewReasons,
-    };
+    case "tail-marker": {
+      const carry = carryManagedTail(render, target, entry.marker);
+      if (carry === null) {
+        return { content: render, note: null, appendixCarry: false, reviewReasons };
+      }
+      if (carry.kind === "appendix") {
+        reviewReasons.push("recovery-appendix");
+      } else if (carry.extraMarkers) {
+        reviewReasons.push("duplicate split markers");
+      }
+      return {
+        content: carry.content,
+        note: tailNote(carry, mode),
+        appendixCarry: carry.kind === "appendix",
+        reviewReasons,
+      };
+    }
+    default: {
+      const unhandled: never = entry;
+      throw new Error(`unhandled split grammar: ${JSON.stringify(unhandled)}`);
+    }
   }
-  const carry = carryManagedTail(render, target, entry.marker);
-  if (carry === null) return { content: render, note: null, appendixCarry: false, reviewReasons };
-  if (carry.kind === "appendix") {
-    reviewReasons.push("recovery-appendix");
-  } else if (carry.extraMarkers) {
-    reviewReasons.push("duplicate split markers");
-  }
-  return {
-    content: carry.content,
-    note: tailNote(carry, mode),
-    appendixCarry: carry.kind === "appendix",
-    reviewReasons,
-  };
 }
 
 /** Render mode, per split entry: DISCARD the working tree's merged copy
@@ -632,7 +684,7 @@ function rebuildSplitFile(
   // Unconditional write: the working tree holds copier's merged result,
   // which this mode exists to discard - even a byte-identical rewrite is
   // the correct statement of ownership.
-  writeRegularFile(join(root, rel), content);
+  writeRegularFile(root, rel, content);
   return note === null ? null : { rel, note, reviewReasons };
 }
 
@@ -716,7 +768,7 @@ function main(argv: string[]): number {
       if (target === null) continue;
       const carried = carrySplitEntry(entry, render, target, "recopy");
       if (carried.note === null) continue;
-      writeRegularFile(renderPath, carried.content);
+      writeRegularFile(root, entry.path, carried.content);
       rebuiltRels.push(entry.path);
       // Recovery PRs take the manual path wholesale (recover=recopy is a
       // hand-driven run), so recopy-mode outcomes carry no review reasons.

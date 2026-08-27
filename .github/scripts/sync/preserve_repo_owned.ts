@@ -43,6 +43,7 @@ import { join } from "node:path";
 import { parse } from "yaml";
 import { env, error, notice, requireEnv } from "../shared/gha.ts";
 import { parseModules } from "../shared/modules.ts";
+import { SETTINGS_LAYERING_NAME } from "./section_files.ts";
 import { transitionSettingsStarter } from "./settings_layering.ts";
 
 const targetDir = env("TARGET_DIR", "target");
@@ -88,7 +89,7 @@ if (inHead(".github/settings.yml")) {
 // same sync instead of waiting a round.
 transitionSettingsStarter(
   targetDir,
-  join(requireEnv("RUNNER_TEMP"), "settings-layering.md"),
+  join(requireEnv("RUNNER_TEMP"), SETTINGS_LAYERING_NAME),
   label,
 );
 
