@@ -1115,9 +1115,10 @@ function main(): number {
       for (const key of duplicated) {
         errors.push(
           `${MANIFEST_NAME}: key ${JSON.stringify(key)} is bound more than once - ` +
-            "JSON consumers silently keep the last value, which would switch that " +
-            "path's ownership metadata; revert the edit (git history has the " +
-            "stamped original) or run a recovery sync (recover=recopy)",
+            "JSON consumers silently keep the last value, so a duplicate (an entry " +
+            "path or a field inside one) silently changes what the manifest declares; " +
+            "revert the edit (git history has the stamped original) or run a recovery " +
+            "sync (recover=recopy)",
         );
       }
       if (duplicated.length === 0) {
