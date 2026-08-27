@@ -1,0 +1,93 @@
+name: Validate Template Report
+description: >-
+  The fleet's validate-template job body: runs the validate-template
+  integrity action with its verdict DEFERRED, adds the freshness ref
+  compare against the operator's build branch, and reports both through
+  one sticky PR comment and the step summary. It never fails on its own -
+  the caller reads the `integrity` output and fails LAST, so the comment
+  is already posted when the gate goes red. The calling job needs
+  pull-requests: write for the comment (and nothing else beyond contents:
+  read).
+
+inputs:
+  github-token:
+    description: >-
+      Token for the freshness read and the sticky comment (contents read
+      and pull-requests write are enough).
+    required: true
+  template-repo:
+    description: >-
+      The operator repository whose build branch freshness is measured
+      against.
+    required: false
+    default: Vivswan/repo-platform
+
+outputs:
+  integrity:
+    description: >-
+      The wrapped validate-template action's outcome (success or failure),
+      deferred so the caller can fail AFTER the findings are posted.
+    value: ${{ steps.integrity.outcome }}
+
+runs:
+  using: composite
+  steps:
+    # Installed once up front: the wrapped validate-template action reuses
+    # a caller-installed bun (its own presence check), and the freshness
+    # and report scripts below need it too.
+    - name: Check for a caller-installed bun
+      id: bun
+      shell: bash
+      run: echo "present=$(command -v bun >/dev/null && echo true || echo false)" >> "$GITHUB_OUTPUT"
+
+    - name: Set up bun
+      id: setup-bun
+      if: steps.bun.outputs.present != 'true'
+      continue-on-error: true
+      uses: oven-sh/setup-bun@v2
+
+    # One retry: the setup's network fetch is a known transient flake, and
+    # a flake here would block a gate that has nothing to say about the
+    # tree under test.
+    - name: Set up bun (retry)
+      if: steps.setup-bun.outcome == 'failure'
+      uses: oven-sh/setup-bun@v2
+
+    # No install step for this action's own scripts: they have no runtime
+    # dependencies (runtime.ts's zod import is type-only and erased).
+    #
+    # continue-on-error defers the verdict to the caller's last step; it
+    # does not discard it. The wrapped action's own exit code is untouched,
+    # so the operator repo and the sync pipeline still block on it
+    # directly. The ref is hardcoded because a composite step's `uses:`
+    # cannot take expressions - the operator is parameterizable only where
+    # it is data (the template-repo input), never here.
+    - uses: Vivswan/repo-platform/actions/validate-template@build
+      id: integrity
+      continue-on-error: true
+      with:
+        findings-file: ${{ runner.temp }}/validate-findings.md
+        advisories-file: ${{ runner.temp }}/validate-advisories.md
+
+    - name: Check how far behind the template this repo is
+      id: freshness
+      continue-on-error: true
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        TEMPLATE_REPO: ${{ inputs.template-repo }}
+        FRESHNESS: ${{ runner.temp }}/freshness.md
+      run: bun "${{ github.action_path }}/freshness.ts"
+
+    - name: Report the findings
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        FINDINGS: ${{ runner.temp }}/validate-findings.md
+        ADVISORIES: ${{ runner.temp }}/validate-advisories.md
+        FRESHNESS: ${{ runner.temp }}/freshness.md
+        FRESHNESS_STATE: ${{ steps.freshness.outputs.state }}
+        EVENT_NAME: ${{ github.event_name }}
+        PR_NUMBER: ${{ github.event.pull_request.number }}
+        RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      run: bun "${{ github.action_path }}/report.ts"

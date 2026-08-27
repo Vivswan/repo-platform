@@ -416,9 +416,8 @@ describe("base checks shape", () => {
     "        if: '!cancelled()'",
     "      - uses: raven-actions/actionlint@v2",
     "        if: '!cancelled()'",
-    "      - name: Lint YAML",
+    "      - uses: Vivswan/repo-platform/actions/yamllint@main",
     "        if: '!cancelled()'",
-    "        run: yamllint -s .",
     "      - uses: gitleaks/gitleaks-action@v3",
     "        if: '!cancelled()'",
   ];
@@ -567,6 +566,8 @@ describe("base checks shape", () => {
       ...MERGED_STEPS.slice(0, 4),
       "      - uses: raven-actions/actionlint-disabled@v2",
       "        if: '!cancelled()'",
+      // The retired inline shape: a leftover run line is not the fleet's
+      // yamllint action and must draw the advisory.
       "      - name: Lint YAML",
       "        if: '!cancelled()'",
       "        run: yamllint -s .",
@@ -581,7 +582,24 @@ describe("base checks shape", () => {
     expect(exitCode).toBe(0);
     expect(stdout).toContain("base-checks is missing the actionlint check");
     expect(stdout).toContain("base-checks is missing the gitleaks check");
-    expect(stdout).not.toContain("missing the yamllint check");
+    expect(stdout).toContain("base-checks is missing the yamllint check");
+  });
+
+  test("yamllint from another owner does not satisfy the merged yamllint check", () => {
+    const steps = [
+      ...MERGED_STEPS.slice(0, 6),
+      "      - uses: attacker/repo-platform/actions/yamllint@v1",
+      "        if: '!cancelled()'",
+      ...MERGED_STEPS.slice(8),
+    ];
+    const { exitCode, stdout, stderr } = runValidator({
+      ".copier-answers.yml": PRIVATE_ANSWERS,
+      ".github/workflows/ci.yml": mergedCi(steps),
+    });
+    expect(stderr).toBe("");
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain("base-checks is missing the yamllint check");
+    expect(stdout).not.toContain("missing the actionlint check");
   });
 
   test("base-checks outside all-green's needs fails", () => {

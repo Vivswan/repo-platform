@@ -287,7 +287,7 @@ function mergedStepMarkers(
   return {
     actionlint: (step) => uses(step, /^raven-actions\/actionlint@/),
     gitleaks: (step) => uses(step, /^gitleaks\/gitleaks-action@/),
-    yamllint: (step) => typeof step.run === "string" && step.run.includes("yamllint"),
+    yamllint: (step) => uses(step, ownedAction("yamllint")),
     "commit-names": (step) => uses(step, ownedAction("validate-commit-names")),
   };
 }
