@@ -21,6 +21,10 @@
 #   rule out does not drop it; `rules: null` drops the ones the fleet's
 #   lower layers contributed, and never the protection rulesets' own.
 #
+# - labels and rulesets must stay LISTS of "- name: ..." entries: the
+#   apply refuses any other shape outright (a mapping or scalar there
+#   could never join the name-keyed merge).
+#
 # One layer sits ABOVE this file: the fleet invariants (squash-only
 # merging and the default branch's protection rulesets). It wins for the
 # keys and rule types it declares, so declaring one of those - or nulling
