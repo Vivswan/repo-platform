@@ -260,19 +260,33 @@ describe("open_pr sections and auto-merge", () => {
   });
 
   test("the reservation holds at the boundary: near-full ordinary budget plus a full excerpt", () => {
-    // Ordinary sections filled to just under their ceiling and a
-    // maximum-size capture together must stay within the cap - this pins
-    // the 22000-byte reserve against the 20000-byte excerpt bound.
-    const nearFull = `carry\n${"c".repeat(38800)}`;
-    const capture = `validation diagnostic sentinel line\n${"d".repeat(30000)}`;
+    // The capture is SINGLE-LINE so the excerpt is char-cut at its true
+    // 20000-byte maximum (a multi-line fixture would shed the oversized
+    // line whole and leave a tiny excerpt that passes under any reserve).
+    // The graded fillers must be OMITTED at the reserved headroom: if the
+    // reservation shrinks below the excerpt's real size, a filler gets
+    // accepted and the validation section no longer fits - and if the
+    // excerpt plus framing outgrows the reserve, the near-full carry
+    // alone pushes it out. Either regression fails the sentinel checks.
+    const nearFull = `carry\n${"c".repeat(39400)}`;
+    const capture = `validation diagnostic sentinel line ${"d".repeat(30000)}`;
     const r = run({
       files: { CARRIED_FILE: nearFull },
-      temp: { "hidden-template-validation.log": capture },
+      temp: {
+        "hidden-template-validation.log": capture,
+        [TAIL_SHRANK_NAME]: `tripfill\n${"t".repeat(4000)}`,
+        [REMOVED_SPLITS_NAME]: `removedfill\n${"r".repeat(2000)}`,
+      },
       env: { VALIDATION: "failed", HIDE_DETAILS: "true" },
     });
     expect(r.exitCode).toBe(0);
-    // The near-full carry was ACCEPTED (it fits the unreserved headroom).
+    // The near-full carry was ACCEPTED (it fits the unreserved headroom);
+    // the fillers were not (the reserve kept the headroom too small).
     expect(r.body).toContain("carry");
+    expect(r.body).not.toContain("tripfill");
+    expect(r.body).not.toContain("removedfill");
+    expect(r.body).toContain("truncated to stay under GitHub's size limit");
+    // The full-size excerpt landed inside the reservation.
     expect(r.body).toContain("validation diagnostic sentinel line");
     expect(r.body).toContain("(truncated; reproduce validation locally");
     expect(Buffer.byteLength(r.body, "utf-8")).toBeLessThanOrEqual(62000 + 300);
