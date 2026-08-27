@@ -19,9 +19,9 @@ import {
   mergeSettingsLayers,
   missingIdentityKeys,
   nameKeyedUnion,
-  parseSettingsDoc,
   repoSourceFrom,
 } from "../../.github/scripts/fleet/merge_settings_layers";
+import { parseSettingsDoc } from "../../.github/scripts/fleet/settings_document";
 
 const managed = {
   repository: {
@@ -202,6 +202,50 @@ describe("mergeOutcome", () => {
   test("an empty but PRESENT settings.yml is a real empty layer, not a skip", () => {
     const outcome = mergeOutcome(managed, { text: "\n", where: "owner/name" }, "owner/name");
     expect(outcome.kind).toBe("merged");
+  });
+
+  test("a mis-shaped name-keyed section is REFUSED, never a wholesale replace", () => {
+    // End to end through the apply's own merge path. A mapping `labels:`
+    // used to fall out of the union into wholesale replace: the managed
+    // roster was silently GONE, and the action's delete-undeclared pass
+    // then removed it from the live repository. A mapping `rulesets:`
+    // shipped a well-formed document missing the module's rules - a green
+    // apply with weaker protection than declared. The refusal lives at
+    // the parse boundary (the owner), names the file, the section, and
+    // the shape, and the merge re-checks nothing.
+    const refuse = (text: string, section: string, shape: string) => {
+      expect(() =>
+        mergeOutcome(managed, { text, where: "owner/name/.github/settings.yml" }, "owner/name"),
+      ).toThrow(
+        `owner/name/.github/settings.yml: ${section}: ${section} must be a list of mappings, ` +
+          `got ${shape}`,
+      );
+    };
+    refuse('labels:\n  incident: "b60205"\n', "labels", "a mapping");
+    refuse("labels: 5\n", "labels", "a scalar (5)");
+    refuse("rulesets:\n  main:\n    rules: []\n", "rulesets", "a mapping");
+  });
+
+  test("the control: a LIST-shaped repo section still merges the union correctly", () => {
+    const outcome = mergeOutcome(
+      managed,
+      {
+        text:
+          "labels:\n" +
+          '  - name: bug\n    color: "000000"\n    description: Repo-styled bug\n' +
+          '  - name: incident\n    color: "b60205"\n    description: Live incident\n',
+        where: "owner/name/.github/settings.yml",
+      },
+      "owner/name",
+    );
+    if (outcome.kind !== "merged") throw new Error("expected a merge");
+    // The managed roster survives, the same-name entry is replaced in
+    // place, and the repo's extra is appended - the union, not a replace.
+    expect(outcome.document.labels).toEqual([
+      { name: "bug", color: "000000", description: "Repo-styled bug" },
+      { name: "dependencies", color: "0366d6", description: "Dependency updates" },
+      { name: "incident", color: "b60205", description: "Live incident" },
+    ]);
   });
 });
 
@@ -429,6 +473,32 @@ describe("a rule without a type is fatal, never dropped", () => {
         "layer.yml",
       ),
     ).toThrow("layer.yml");
+  });
+
+  test("a NULL rule element is fatal too, never silently filtered", () => {
+    // The harden pass used to filter null array elements everywhere, so
+    // `rules: [null]` became `rules: []` before appendRules could refuse
+    // it - and an empty rules list on main upserts the protected branch
+    // with NO rules at all, on a green run. (The parse boundary already
+    // refuses this in a layer file; these documents are code-assembled,
+    // the one path that skips it.)
+    expect(() => mergeSettingsLayers({ rulesets: [{ name: "main", rules: [null] }] }, {})).toThrow(
+      "a rule is null",
+    );
+    expect(() =>
+      mergeSettingsLayers(managed, {
+        rulesets: [{ name: "local", rules: [{ type: "deletion" }, null] }],
+      }),
+    ).toThrow('ruleset "local"');
+  });
+
+  test("a null rule meeting a merge partner fails in appendRules the same way", () => {
+    expect(() =>
+      mergeSettingsLayers(
+        { rulesets: [{ name: "main", rules: [{ type: "deletion" }] }] },
+        { rulesets: [{ name: "main", rules: [null] }] },
+      ),
+    ).toThrow("no string 'type'");
   });
 });
 

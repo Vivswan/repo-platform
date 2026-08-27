@@ -7,10 +7,15 @@
 // wrote it. Nulls are legal there and load bearing - the dialect's
 // opt-out marker (merge_settings_layers.ts) - so the type admits them.
 // What the type does NOT admit is anything YAML cannot produce, and the
-// boundary rejects the one shape that is illegal even in a layer: a
-// ruleset rule without a string `type`, which cannot be merged or
-// deduplicated and whose silent removal would apply a weaker policy than
-// the file declares.
+// boundary rejects the shapes that are illegal even in a layer: a ruleset
+// rule without a string `type`, which cannot be merged or deduplicated
+// and whose silent removal would apply a weaker policy than the file
+// declares, and a `labels` or `rulesets` section that is not a list of
+// mappings - the merge unions those sections by name, and any other
+// shape would fall out of the union into wholesale replace, silently
+// discarding the managed roster (the apply then deletes every label the
+// merged document no longer declares, and upserts rulesets missing the
+// modules' protection rules, green either way).
 //
 // MergedSettings is OUTPUT: the finished document the apply hands to
 // GitHub. `null` is ABSENT from MergedValue, so a merged document that
@@ -105,13 +110,57 @@ const layerValueSchema: z.ZodType<LayerValue> = z.lazy(() =>
   ]),
 );
 
-/** The one shape a layer may not declare, checked here so the error names
- *  the FILE and the position inside it. appendRules re-checks nothing it
- *  reads from a layer; it throws for rules assembled in code, which never
- *  pass a boundary. */
+/** How a diagnostic names a value it refused: its shape, plus the value
+ *  itself when it is a scalar small enough to quote usefully. */
+function shapeName(value: LayerValue): string {
+  if (value === null) return "null";
+  if (Array.isArray(value)) return "a list";
+  if (isLayerMapping(value)) return "a mapping";
+  return `a scalar (${JSON.stringify(value)})`;
+}
+
+/** The shapes a layer may not declare, checked here so the error names
+ *  the FILE and the position inside it. The consumers re-check nothing
+ *  they read from a layer: mergeMappings takes the name-keyed union
+ *  unconditionally because this boundary already refused a `labels` or
+ *  `rulesets` that is not a list of mappings, and appendRules throws only
+ *  for rules assembled in code, which never pass a boundary. */
 const settingsLayerSchema: z.ZodType<SettingsLayer> = z
   .record(z.string(), layerValueSchema)
   .superRefine((doc, ctx) => {
+    // The name-keyed sections. A mapping or scalar here would skip the
+    // union and REPLACE the managed roster wholesale - for labels that
+    // hands the apply a roster missing every managed label (which it then
+    // deletes), for rulesets a document missing the modules' protection
+    // rules - and the apply succeeds green with less than the layers
+    // declare. `null` stays legal: it is the dialect's opt-out marker.
+    for (const section of ["labels", "rulesets"] as const) {
+      const declared = doc[section];
+      if (declared === undefined || declared === null) continue;
+      if (!Array.isArray(declared)) {
+        ctx.addIssue({
+          code: "custom",
+          path: [section],
+          message:
+            `${section} must be a list of mappings, got ${shapeName(declared)}. The merge ` +
+            `unions ${section} by name; any other shape would replace the managed ` +
+            `${section} wholesale, and the apply would silently enforce less than the ` +
+            "layers declare. Declare each entry as a '- name: ...' list item.",
+        });
+        continue;
+      }
+      declared.forEach((entry, index) => {
+        if (isLayerMapping(entry)) return;
+        ctx.addIssue({
+          code: "custom",
+          path: [section, index],
+          message:
+            `every ${section} entry must be a mapping, got ${shapeName(entry)} - the merge ` +
+            "keys entries by their 'name', and a shapeless entry cannot be merged or " +
+            "reconciled by the apply.",
+        });
+      });
+    }
     const rulesets = Array.isArray(doc.rulesets) ? doc.rulesets : [];
     rulesets.forEach((entry, index) => {
       if (!isMapping(entry) || !Array.isArray(entry.rules)) return;
@@ -170,9 +219,9 @@ export function parseSettingsDoc(text: string, where: string): SettingsLayer {
 }
 
 /** The same boundary for a fleet or module layer FILE, which the render
- *  selects by existence: a file that exists but declares no mapping is an
- *  authoring accident, not the empty layer that omitting it already
- *  expresses. */
+ *  selects from its declared roster: a file that exists but declares no
+ *  mapping is an authoring accident, not the empty layer that retiring it
+ *  from the roster already expresses. */
 export function parseLayerFile(text: string, where: string): SettingsLayer {
   return asSettingsLayer(parseYamlText(text, where), where);
 }
