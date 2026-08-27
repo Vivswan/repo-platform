@@ -333,294 +333,43 @@ describe("declarationTextErrors", () => {
   });
 
   test("a mid-line marker mention does not contradict managed", () => {
+    // Prose that does not reproduce the FULL marker string (the comment
+    // prefix included) carries no marker text, so it is no claim.
     expect(
       errorsOf(managed("GUIDE.md"), "see the repo-platform:local-section marker\n", false),
     ).toEqual([]);
   });
 
-  // Jinja statement and comment tags render as nothing and a constant-empty
-  // expression renders empty, so a marker glued to any of them still renders
-  // as a live whole-line marker - the rendered file then carries a split
-  // marker in a manifest-managed file, promising a repo-owned tail that sync
-  // never honors.
-  test("a tail marker glued to jinja tags on an otherwise-empty line contradicts", () => {
+  // Foreign tail markers match by TEXT PRESENCE, exactly like region
+  // markers: any occurrence of the full marker string in a source that
+  // does not own it is a claim - glued to jinja tags, inside a tag or a
+  // comment, or a prose mention reproducing the marker text. An over-claim
+  // surfaces at compose time and costs a reword; an under-claim ships a
+  // live marker in a managed file - a silent ownership bypass.
+  test("foreign tail-marker text anywhere in a managed source contradicts", () => {
     for (const line of [
+      HASH_SENTINEL,
       `{% if 'agents' in modules %}${HASH_SENTINEL}{% endif %}`,
-      `{# gate #}${HTML_SENTINEL}`,
-      `  {% if x %}${HASH_SENTINEL}`,
-      `{{ "" }}${HASH_SENTINEL}`,
-      `{% raw %}{% endraw %}${HASH_SENTINEL}`,
-      // A comment renders as nothing whatever tag-shaped text it holds -
-      // leftmost-delimiter precedence keeps the comments comments even
-      // when they carry raw-shaped text.
-      `{# docs: {% print "x" %} #}${HASH_SENTINEL}`,
-      `{# {% raw %} #}${HASH_SENTINEL}{# {% endraw %} #}`,
-      // A constant expression OUTPUTS its string: this line renders as
-      // exactly the marker.
-      `{{ "${HASH_SENTINEL}" }}`,
-    ]) {
-      const errors = errorsOf(managed("X.md"), `top\n${line}\ntail\n`, false);
-      expect(errors).toHaveLength(1);
-      expect(errors[0]).toContain("split marker but is declared managed");
-    }
-  });
-
-  test("marker text inside a NON-OUTPUT tag is not a claim", () => {
-    // The scan covers the line's bounded render (the honest-mistake class);
-    // text inside a statement or comment tag renders as nothing, and an
-    // output-emitting statement makes the line unbounded - both legal.
-    for (const line of [
-      `{% set note = "${HASH_SENTINEL}" %}`,
       `{# reminder: ${HASH_SENTINEL} #}`,
-      `{% print "${HASH_SENTINEL}" %}`,
-    ]) {
-      expect(errorsOf(managed("X.md"), `${line}\nbody\n`, false)).toEqual([]);
-    }
-  });
-
-  // A control-flow body is optional or alternative, so a line whose marker
-  // is reachable in ANY branch claims - the reducer tracks the SET of
-  // possible renders, not one flattened concatenation of every branch.
-  test("a marker reachable through a control-flow branch claims", () => {
-    for (const line of [
-      // if-only: the body renders when true, nothing when false, so the
-      // trailing marker stands alone in the false render.
-      `{% if x %}prefix{% endif %}${HASH_SENTINEL}`,
-      // if/else: the marker IS one branch.
-      `{% if x %}${HASH_SENTINEL}{% else %}other{% endif %}`,
-      // elif introduces another alternative branch.
-      `{% if x %}a{% elif y %}${HASH_SENTINEL}{% endif %}`,
-      // nested control flow.
-      `{% if x %}{% if y %}${HASH_SENTINEL}{% endif %}{% endif %}`,
-      // a for body renders zero or more times; one time is the marker.
-      `{% for m in modules %}${HASH_SENTINEL}{% endfor %}`,
-      // the body split across lines: the marker line renders when the
-      // condition holds.
-      `{% if x %}\n${HASH_SENTINEL}\n{% endif %}`,
+      `{% set note = "${HASH_SENTINEL}" %}`,
+      `{% raw %}${HASH_SENTINEL}{% endraw %}`,
+      `see ${HASH_SENTINEL} mid-line`,
+      `{{ "" }}${HTML_SENTINEL}`,
     ]) {
       const errors = errorsOf(managed("X.md"), `top\n${line}\ntail\n`, false);
       expect(errors).toHaveLength(1);
-      expect(errors[0]).toContain("split marker but is declared managed");
+      expect(errors[0]).toContain("declared managed");
     }
   });
 
-  test("a branch whose every render carries other text does not claim", () => {
-    // Neither branch is the bare marker, and both prefix it, so no render
-    // is a whole marker line - the set model must not over-claim.
-    for (const line of [
-      `{% if x %}a${HASH_SENTINEL}{% else %}b${HASH_SENTINEL}{% endif %}`,
-      `prefix{% if x %}${HASH_SENTINEL}{% endif %}`,
-    ]) {
-      expect(errorsOf(managed("X.md"), `${line}\n`, false)).toEqual([]);
-    }
-  });
-
-  test("a cross-line else branch does not manufacture a bare-marker render", () => {
-    // The if/else opened on an earlier line is untracked here: the closer
-    // renders as nothing rather than inventing an empty branch that would
-    // let the trailing marker stand alone. Real renders are 'a<MARKER>' or
-    // 'b<MARKER>', never the bare marker, so this must not claim.
-    const source = `{% if x %}\na${HASH_SENTINEL}{% else %}b${HASH_SENTINEL}{% endif %}\n`;
-    expect(errorsOf(managed("X.md"), source, false)).toEqual([]);
-  });
-
-  test("a capture that CLOSES before a marker on the same line claims", () => {
-    // The capture body is discarded, but text after the closer renders
-    // inline - a marker glued to an {% endset %} is a live whole line.
+  test("text that is not the full marker string stays legal", () => {
     for (const source of [
-      `{% set note %}\n{% endset %}${HASH_SENTINEL}\n`,
-      `{% set note %}body{% endset %}${HASH_SENTINEL}\n`,
-      `{% macro m() %}${HASH_SENTINEL}{% endmacro %}\n${HASH_SENTINEL}\n`,
-      // A whitespace-modified capture opener is still a capture.
-      `{%- set note %}\nbody\n{% endset %}${HASH_SENTINEL}\n`,
+      // No comment prefix, so the marker string never appears.
+      "rules go below the repo-platform:local-section marker\n",
+      // A truncation is not the marker.
+      "# repo-platform:local\n",
     ]) {
-      const errors = errorsOf(managed("X.md"), source, false);
-      expect(errors).toHaveLength(1);
-      expect(errors[0]).toContain("split marker but is declared managed");
-    }
-  });
-
-  test("a capture SWALLOWS its inner newlines, joining the text around it", () => {
-    // A set-block captures the newlines between its tags, so text before
-    // the opener and after the closer render on ONE line - the marker is
-    // never alone, so these must NOT claim.
-    for (const source of [
-      `${HASH_SENTINEL}{% set note %}\nbody\n{% endset %}suffix\n`,
-      // A marker INSIDE a whitespace-modified capture is discarded, not a claim.
-      `{%- set note %}\n${HASH_SENTINEL}\n{% endset %}\n`,
-      // A `-%}` close trims the following newline, joining the marker onto
-      // the prefix: renders 'prefix<MARKER>', not a bare marker.
-      `prefix{% set x %}body{% endset -%}\n${HASH_SENTINEL}\n`,
-    ]) {
-      expect(errorsOf(managed("X.md"), source, false)).toEqual([]);
-    }
-  });
-
-  test("a body-emitting block is not a capture, so it does not manufacture a claim", () => {
-    // call/filter/block/autoescape EMIT their body (transformed, overridden
-    // or escaped), so they are not stripped; a marker glued after the close
-    // renders behind that body, never as a bare line, so these do NOT claim.
-    for (const line of [
-      `{% autoescape true %}prefix{% endautoescape %}${HASH_SENTINEL}`,
-      `{% filter upper %}prefix{% endfilter %}${HASH_SENTINEL}`,
-    ]) {
-      expect(errorsOf(managed("X.md"), `${line}\n`, false)).toEqual([]);
-    }
-  });
-
-  test("sibling control blocks track condition identity", () => {
-    // Reused condition: `{% if x %}prefix{% endif %}{% if x %}MARKER{% endif %}`
-    // renders only 'prefixMARKER' or '' - the same x cannot be false then
-    // true - so it must NOT claim, even nested inside another block.
-    expect(
-      errorsOf(
-        managed("X.md"),
-        `{% if x %}prefix{% endif %}{% if x %}${HASH_SENTINEL}{% endif %}\n`,
-        false,
-      ),
-    ).toEqual([]);
-    expect(
-      errorsOf(
-        managed("X.md"),
-        `{% if z %}{% if x %}prefix{% endif %}{% if x %}${HASH_SENTINEL}{% endif %}{% endif %}\n`,
-        false,
-      ),
-    ).toEqual([]);
-    // An unreachable elif reusing the if's condition is dropped, not a claim.
-    expect(
-      errorsOf(managed("X.md"), `{% if x %}prefix{% elif x %}${HASH_SENTINEL}{% endif %}\n`, false),
-    ).toEqual([]);
-    // Textually identical conditions correlate; a textually DISTINCT one
-    // (here a different string literal) stays independent, and x == "ab"
-    // reaches the bare marker, so it claims.
-    const distinctStrings = errorsOf(
-      managed("X.md"),
-      `top\n{% if x == "a b" %}prefix{% endif %}{% if x == "ab" %}${HASH_SENTINEL}{% endif %}\ntail\n`,
-      false,
-    );
-    expect(distinctStrings).toHaveLength(1);
-    expect(distinctStrings[0]).toContain("split marker but is declared managed");
-    // DISTINCT conditions: x false, y true reaches the bare marker, so it
-    // still claims - a crude "two blocks bail" would have missed this.
-    const distinct = errorsOf(
-      managed("X.md"),
-      `top\n{% if x %}prefix{% endif %}{% if y %}${HASH_SENTINEL}{% endif %}\ntail\n`,
-      false,
-    );
-    expect(distinct).toHaveLength(1);
-    expect(distinct[0]).toContain("split marker but is declared managed");
-  });
-
-  test("an empty body-emitting block emits nothing, so a marker after it claims", () => {
-    // An autoescape with no body emits nothing; the marker glued after its
-    // close is a live whole line.
-    const errors = errorsOf(
-      managed("X.md"),
-      `top\n{% autoescape true %}{% endautoescape %}${HASH_SENTINEL}\ntail\n`,
-      false,
-    );
-    expect(errors).toHaveLength(1);
-    expect(errors[0]).toContain("split marker but is declared managed");
-  });
-
-  test("a for-else always renders a branch, so a trailing marker is never alone", () => {
-    // for-else renders the loop body (>=1 iterations) or the else branch on
-    // an empty loop - never nothing - so the marker after {% endfor %}
-    // always carries a prefix and must NOT claim.
-    const withElse = `{% for x in xs %}prefix{% else %}suffix{% endfor %}${HASH_SENTINEL}\n`;
-    expect(errorsOf(managed("X.md"), withElse, false)).toEqual([]);
-    // A plain for (no else) can iterate zero times, so the trailing marker
-    // stands alone and DOES claim.
-    const noElse = `{% for x in xs %}prefix{% endfor %}${HASH_SENTINEL}\n`;
-    expect(errorsOf(managed("X.md"), noElse, false)).toHaveLength(1);
-  });
-
-  test("a marker glued after an empty-output statement claims", () => {
-    // set-assignment, import, from and do emit nothing, so the marker is
-    // the whole rendered line.
-    for (const line of [
-      `{% set note = "x" %}${HASH_SENTINEL}`,
-      `{% import "x.jinja" as helpers %}${HASH_SENTINEL}`,
-      `{% from "x.jinja" import thing %}${HASH_SENTINEL}`,
-      `{% do items.append(1) %}${HASH_SENTINEL}`,
-    ]) {
-      const errors = errorsOf(managed("X.md"), `top\n${line}\ntail\n`, false);
-      expect(errors).toHaveLength(1);
-      expect(errors[0]).toContain("split marker but is declared managed");
-    }
-  });
-
-  test("a prose mention NEXT TO a jinja tag is still not a claim", () => {
-    const source = `{% if x %}see ${HASH_SENTINEL} for details{% endif %}\n`;
-    expect(errorsOf(managed("X.md"), source, false)).toEqual([]);
-  });
-
-  test("guaranteed-nonempty output before the marker keeps it mid-line", () => {
-    // A nonempty constant expression always renders text ahead of the
-    // marker; rejecting these would block legitimate templates.
-    for (const line of [
-      `{{ "prefix" }}${HASH_SENTINEL}`,
-      `{% raw %}a{% endraw %}{% raw %}b{% endraw %}${HASH_SENTINEL}`,
-    ]) {
-      expect(errorsOf(managed("X.md"), `${line}\n`, false)).toEqual([]);
-    }
-  });
-
-  test("raw-block text renders literally, so it keeps a marker mid-line", () => {
-    // {% raw %} makes tag-shaped text literal output: both lines render as
-    // '{# note #}# repo-platform:local-section', a legal mid-line mention.
-    const inline = `{% raw %}{# note #}{% endraw %}${HASH_SENTINEL}\n`;
-    expect(errorsOf(managed("X.md"), inline, false)).toEqual([]);
-    const multiline = `{% raw %}\n{# note #}${HASH_SENTINEL}\n{% endraw %}\n`;
-    expect(errorsOf(managed("X.md"), multiline, false)).toEqual([]);
-    // The + trimming modifier is a valid raw-tag spelling too.
-    const plus = `{%+ raw %}\n{# note #}${HASH_SENTINEL}\n{% endraw %}\n`;
-    expect(errorsOf(managed("X.md"), plus, false)).toEqual([]);
-    // Raw-shaped text inside an expression string renders as that string,
-    // never as a raw block (leftmost-delimiter precedence).
-    const inString = `{{ "{% raw %}${HASH_SENTINEL}{% endraw %}" }}\n`;
-    expect(errorsOf(managed("X.md"), inString, false)).toEqual([]);
-    // A bare marker line inside a raw block still renders as a live marker.
-    const bare = `{% raw %}\n${HASH_SENTINEL}\n{% endraw %}\n`;
-    expect(errorsOf(managed("X.md"), bare, false)).toHaveLength(1);
-    // ... and a modified closer joining a bare marker onto an empty line
-    // still renders it whole, so it still claims.
-    const joined = `{% raw %}{% endraw -%}\n${HASH_SENTINEL}\n`;
-    expect(errorsOf(managed("X.md"), joined, false)).toHaveLength(1);
-  });
-
-  test("unbounded lines fail toward legality", () => {
-    // Output emitters, capture blocks (set, macro), context changers,
-    // whitespace-modified tags, and non-constant expressions leave the
-    // line's render unbounded; each stays legal rather than risk rejecting
-    // a legitimate template ({% macro %} captures its body, {%+ print %}
-    // always emits, the filtered block-set renders nothing).
-    for (const source of [
-      `{% print "prefix" %}${HASH_SENTINEL}\n`,
-      `{%+ print "prefix" %}${HASH_SENTINEL}\n`,
-      `{% set note %}${HASH_SENTINEL}{% endset %}\n`,
-      // ... including when the capture spans lines: text inside the block
-      // is captured, never rendered inline, whatever shape it has.
-      `{% set note %}\n{{ "${HASH_SENTINEL}" }}{% endset %}\n`,
-      `{% set note %}\n{% if x %}${HASH_SENTINEL}{% endif %}\n{% endset %}\n`,
-      `{% set note %}\n{% raw %}{% endraw %}${HASH_SENTINEL}\n{% endset %}\n`,
-      // The filtered capture form has no top-level =, even when a filter
-      // argument carries one.
-      `{% set note | replace("=", "") %}\n${HASH_SENTINEL}\n{% endset %}\n`,
-      `{% set note | replace("=", "") %}${HASH_SENTINEL}{% endset %}\n`,
-      `{% macro note() %}${HASH_SENTINEL}{% endmacro %}\n`,
-      `{% autoescape true %}{{ "${HTML_SENTINEL}" }}{% endautoescape %}\n`,
-      `{{ ("prefix") }}${HASH_SENTINEL}\n`,
-      `{{ maybe_empty }}${HASH_SENTINEL}\n`,
-      `prefix\n{{- "" }}${HASH_SENTINEL}\n`,
-      `{% if x -%}${HASH_SENTINEL}\n`,
-      // A minus-modified raw tag joins its line with a neighbor exactly as
-      // the render does: both markers here render glued onto 'prefix',
-      // never as a whole line.
-      `prefix\n{%- raw %}{% endraw %}${HASH_SENTINEL}\n`,
-      `prefix{% raw %}{% endraw -%}\n{% if x %}${HASH_SENTINEL}{% endif %}\n`,
-    ]) {
-      expect(errorsOf(managed("X.md"), source, false)).toEqual([]);
+      expect(errorsOf(managed("GUIDE.md"), source, false)).toEqual([]);
     }
   });
 
@@ -691,10 +440,38 @@ describe("declarationTextErrors", () => {
     expect(errorsOf(managed("X.md"), `top\n${custom}\nlocal\n`, false)).toHaveLength(0);
   });
 
-  test("a mid-line mention of a declared tail marker still passes", () => {
+  test("a mid-line mention of a declared tail marker is presence, so it claims", () => {
     const custom = "# acme:local-tail";
     const mention = `see ${custom} for details\n`;
-    expect(errorsOf(managed("X.md"), mention, false, [custom])).toHaveLength(0);
+    const errors = errorsOf(managed("X.md"), mention, false, [custom]);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain("declared managed");
+  });
+
+  test("a foreign marker that is a substring of the own marker claims only outside it", () => {
+    // Exemption is positional, so the own line's text never triggers a
+    // claim for a foreign marker it contains, while a separate occurrence
+    // of that foreign marker still does.
+    const own = "# acme:local-tail extended";
+    const foreignMarker = "# acme:local-tail";
+    const roster = [own, foreignMarker];
+    const ownOnly = `body\n${own}\n`;
+    expect(errorsOf(tail("X.md", own), ownOnly, false, roster)).toEqual([]);
+    const carrying = `body\n${foreignMarker}\nmore\n${own}\n`;
+    const errors = errorsOf(tail("X.md", own), carrying, false, roster);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain("tail marker as well as its own");
+  });
+
+  test("a foreign marker overlapping the own marker's edge still claims", () => {
+    // The shared '#' belongs to both, but the foreign occurrence extends
+    // OUTSIDE the own marker's span, so it is not the own marker's text.
+    const own = "# acme:tail#";
+    const foreignMarker = "#x";
+    const source = `body\n${own}x\n${own}\n`;
+    const errors = errorsOf(tail("X.md", own), source, false, [own, foreignMarker]);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain("tail marker as well as its own");
   });
 
   // The tail-marker arm must reject foreign region markers like every other
@@ -886,14 +663,13 @@ describe("declarationTextErrors", () => {
     // about which hazard it names.
     expect(errorsOf(novel, `# NOTES LOCAL OPEN\n${HTML_SENTINEL}\n`, false)).toHaveLength(2);
 
-    // And the matching semantics the shared scan inherited stay split: a
-    // mid-line MENTION of a tail marker is not a claim, while region marker
-    // text is matched as a substring wherever it sits. Counted over the
-    // foreign findings alone - past the shared scan a shape with no arm
-    // falls into the arm chain, which is the very thing it has yet to grow.
+    // Both kinds share presence matching: marker text is a claim wherever
+    // it sits. Counted over the foreign findings alone - past the shared
+    // scan a shape with no arm falls into the arm chain, which is the very
+    // thing it has yet to grow.
     const foreignOf = (source: string) =>
       errorsOf(novel, source, false).filter((error) => error.includes(": carries the '"));
-    expect(foreignOf(`see ${HASH_SENTINEL} for details\n`)).toEqual([]);
+    expect(foreignOf(`see ${HASH_SENTINEL} for details\n`)).toHaveLength(1);
     expect(foreignOf("{% if g %}# NOTES LOCAL OPEN\n")).toHaveLength(1);
   });
 });
