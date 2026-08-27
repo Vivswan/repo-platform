@@ -61,12 +61,11 @@ export interface RunOptions {
   env?: Record<string, string | undefined>;
   /** Hard deadline in milliseconds: on expiry the child is SIGKILLed and
    *  the result reports `timedOut`. REQUIRED, unlike the repository's
-   *  shared proc.ts where it is optional. Both of these actions run on a
-   *  billed runner with a job timeout, and a `gh` call that hangs there
-   *  burns the budget and then fails the job on the clock instead of on
-   *  its own verdict - the gate would look broken and the re-armer would
-   *  strand a red gate. Making the deadline unskippable is what retires
-   *  the grep that used to scan the rendered bash for a bare `gh api`. */
+   *  shared proc.ts where it is optional. This action runs on a billed
+   *  runner with a job timeout, and a `gh` call that hangs there burns
+   *  the budget and then fails the job on the clock instead of on its
+   *  own verdict. Making the deadline unskippable is what retires the
+   *  grep that used to scan the rendered bash for a bare `gh api`. */
   timeoutMs: number;
 }
 
