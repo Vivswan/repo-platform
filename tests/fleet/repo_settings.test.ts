@@ -42,14 +42,25 @@ describe("the repo's own build-branch rulesets", () => {
     expect(buildBranches?.bypass_actors).toEqual([]);
   });
 
-  test("the actions ref blocks all updates, bypassed only by the publish identity", () => {
+  test("the actions ref blocks every write, creation included, bypassed only by the publish identity", () => {
     const publishOnly = doc.rulesets.find((r) => r.name === "actions-ref-publish-only");
     expect(publishOnly).toBeDefined();
     expect(publishOnly?.target).toBe("branch");
     expect(publishOnly?.enforcement).toBe("active");
     expect(publishOnly?.conditions?.ref_name?.include).toEqual(["actions"]);
     expect(publishOnly?.conditions?.ref_name?.exclude).toEqual([]);
-    expect(publishOnly?.rules).toEqual([{ type: "update" }]);
+    // creation is a SEPARATE GitHub rule from update: without it, any
+    // push-capable principal could claim the executable ref whenever it is
+    // absent (initial rollout, or recovery after an out-of-band deletion).
+    // deletion and non_fast_forward ride along so the whole write surface
+    // is one shape; the publisher stays bound to them anyway through the
+    // bypass-free build-branches ruleset above.
+    expect(publishOnly?.rules).toEqual([
+      { type: "creation" },
+      { type: "update" },
+      { type: "deletion" },
+      { type: "non_fast_forward" },
+    ]);
     // 15368 is the GitHub Actions integration - the identity of the
     // GITHUB_TOKEN build-branches.yml publishes with. The narrowest actor
     // the ruleset dialect can express; see the comment in settings.yml

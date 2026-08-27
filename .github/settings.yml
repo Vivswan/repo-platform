@@ -51,9 +51,12 @@ rulesets:
     bypass_actors: []
   # The `actions` ref is EXECUTABLE: fleet workflows pin `@actions` and run
   # its tree directly, with no provenance verify like the sync-side check
-  # that guards `template` consumption. So this ref additionally blocks ALL
-  # updates (fast-forwards included), with the sole bypass being the GitHub
-  # Actions integration - the identity of the GITHUB_TOKEN that
+  # that guards `template` consumption. So this ref blocks EVERY write -
+  # creation included, since GitHub treats creating an absent ref as a
+  # separate rule from updating it, and without it any push-capable
+  # principal could CLAIM the ref whenever it is absent (initial rollout,
+  # or recovery after an out-of-band deletion). The sole bypass is the
+  # GitHub Actions integration - the identity of the GITHUB_TOKEN that
   # build-branches.yml publishes with. That is the narrowest actor the
   # ruleset dialect can express: GitHub cannot scope a bypass to one
   # workflow, so any workflow in THIS repository running with a
@@ -64,8 +67,10 @@ rulesets:
   # main. Closing that structurally (a dedicated publisher identity the
   # bypass names, nothing else able to assume it) is tracked separately;
   # this ruleset raises the bar without claiming to seal it.
-  # The bypass exempts the publisher only from THIS ruleset's update rule;
-  # deletion and force-pushes stay blocked for it by build-branches above.
+  # The bypass exempts the publisher only from THIS ruleset's copies of
+  # the rules; its own force-pushes and deletions stay blocked by the
+  # bypass-free build-branches ruleset above, which carries the same two
+  # rules over the same ref.
   - name: actions-ref-publish-only
     target: branch
     enforcement: active
@@ -75,7 +80,10 @@ rulesets:
           - actions
         exclude: []
     rules:
+      - type: creation
       - type: update
+      - type: deletion
+      - type: non_fast_forward
     bypass_actors:
       - actor_id: 15368
         actor_type: Integration
