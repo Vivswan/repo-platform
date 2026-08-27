@@ -118,6 +118,20 @@ describe("copilot_review_gate.ts", () => {
     expect(r.output).toContain("waiting for Copilot review at");
   });
 
+  test("a completed check run with NO associations is arrival (fork PR: GitHub omits the links)", () => {
+    // GitHub does not populate pull_requests on a run whose PR is from a
+    // fork, so an empty array means "cannot scope", not "some other PR" -
+    // accepting it is what keeps a fork PR's gate from hanging red forever.
+    // A same-repo sibling always carries a non-empty array, so this does
+    // not reopen the stacked-sibling hole above.
+    const r = run({
+      rules: COPILOT_RULE,
+      checks: { check_runs: [{ status: "completed", pull_requests: [] }] },
+    });
+    expect(r.exitCode).toBe(0);
+    expect(r.output).toContain("arrived");
+  });
+
   test("rule present, review posted for the head sha: passes without any check run", () => {
     const r = run({
       rules: COPILOT_RULE,

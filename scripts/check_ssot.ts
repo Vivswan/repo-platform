@@ -909,15 +909,27 @@ const rules: Rule[] = [
       const gatingLines = new Set(
         needs.flatMap((jobName) => {
           const job = asRecord(jobs[jobName], jobName);
-          return ((job.steps as Record<string, unknown>[] | undefined) ?? []).flatMap((step) => [
-            // `uses` counts too: a gate that moved into a composite action
-            // has no run line left to pin, and deleting its step would fail
-            // the gate open exactly as deleting a run line would.
-            String(step.uses ?? "").trim(),
-            ...String(step.run ?? "")
-              .split("\n")
-              .map((line) => line.trim()),
-          ]);
+          return (
+            ((job.steps as Record<string, unknown>[] | undefined) ?? [])
+              // A `continue-on-error` step fails OPEN: its command runs but a
+              // non-zero exit is swallowed, so the gate it was meant to be is
+              // no gate. Drop those lines from the gating set - a required
+              // command sitting on a suppressed step is the same missing gate
+              // as a deleted step. (Unlike the action.yml side, a plain `if:`
+              // is NOT rejected here: ci.yml steps legitimately carry event
+              // conditions like `if: github.event_name == 'pull_request'`, the
+              // repo convention for keeping the JOB unconditional.)
+              .filter((step) => step["continue-on-error"] === undefined)
+              .flatMap((step) => [
+                // `uses` counts too: a gate that moved into a composite action
+                // has no run line left to pin, and deleting its step would fail
+                // the gate open exactly as deleting a run line would.
+                String(step.uses ?? "").trim(),
+                ...String(step.run ?? "")
+                  .split("\n")
+                  .map((line) => line.trim()),
+              ])
+          );
         }),
       );
       for (const required of [
