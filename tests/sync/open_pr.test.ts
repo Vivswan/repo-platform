@@ -199,29 +199,101 @@ describe("open_pr sections and auto-merge", () => {
     expect(r.merged).toBe(false);
   });
 
-  test("a pathological oversized drift is hard-capped so gh never sees an over-limit body", () => {
+  test("a pathological oversized drift is bounded at the prepend, body under the limit", () => {
     // Drift is prepended on top and its value is target-controlled (a huge
-    // recorded description), so the aggregate section budget alone cannot
-    // guarantee delivery - the final hard cap must. The body must stay
-    // under 64 KiB even when the mandatory drift prepend alone is enormous.
+    // recorded description); unbounded it would starve the reserved
+    // validation section or trip the end-cutting hard cap that would drop
+    // it - so it is truncated at its own cap with a note.
     const hugeDrift = `> [!WARNING]\n> drift\n${"d".repeat(200000)}`;
     const r = run({ files: { DRIFT_FILE: hugeDrift } });
     expect(r.exitCode).toBe(0);
     expect(Buffer.byteLength(r.body, "utf-8")).toBeLessThan(65536);
-    expect(r.body).toContain("hard-truncated");
+    expect(r.body).toContain(
+      "reproduce the sync locally for the full report - docs/private-repos.md",
+    );
     expect(r.merged).toBe(false);
   });
 
-  test("a single over-limit multibyte line is cut on a char boundary, not mid-character", () => {
+  test("a single over-limit multibyte drift line is cut on a char boundary", () => {
     // One line with no newline to trim to, made of a 2-byte char, forces
-    // capBody's UTF-8 back-off branch: the result stays under 64 KiB and
+    // the truncation's UTF-8 back-off: the result stays bounded and
     // carries no replacement character from a cut mid-character.
     const oneLine = "\u00e9".repeat(40000); // 80000 bytes (2-byte char), no newlines
     const r = run({ files: { DRIFT_FILE: oneLine } });
     expect(r.exitCode).toBe(0);
     expect(Buffer.byteLength(r.body, "utf-8")).toBeLessThan(65536);
-    expect(r.body).toContain("hard-truncated");
+    expect(r.body).toContain(
+      "reproduce the sync locally for the full report - docs/private-repos.md",
+    );
     expect(r.body).not.toContain("\ufffd");
+    expect(r.merged).toBe(false);
+  });
+
+  test("a hidden target's validation diagnostics survive budget exhaustion (reserved)", () => {
+    // The PR body is a hidden target's only diagnostics channel
+    // (run_hidden hides the log, the failure issue defers to the PR), so
+    // the reservation must keep the workflow error's "details in the PR
+    // body" claim true even when ordinary sections fill the budget.
+    const big = (tag: string) =>
+      `${tag}\n${Array.from({ length: 700 }, (_, i) => `${tag} line ${i} ${"y".repeat(24)}`).join("\n")}`;
+    const capture = `validation diagnostic sentinel line\n${"d".repeat(5000)}`;
+    const r = run({
+      files: { CARRIED_FILE: big("carry") },
+      temp: {
+        [TAIL_SHRANK_NAME]: big("tripwire"),
+        [REMOVED_SPLITS_NAME]: big("removed"),
+        "hidden-template-validation.log": capture,
+      },
+      env: { VALIDATION: "failed", HIDE_DETAILS: "true" },
+    });
+    expect(r.exitCode).toBe(0);
+    expect(Buffer.byteLength(r.body, "utf-8")).toBeLessThan(65536);
+    // Ordinary sections overflowed (banner present), yet the validation
+    // warning and its captured diagnostics made it in.
+    expect(r.body).toContain("truncated to stay under GitHub's size limit");
+    expect(r.body).toContain("Validation failed on the updated tree");
+    expect(r.body).toContain("they are below");
+    expect(r.body).toContain("validation diagnostic sentinel line");
+    expect(r.merged).toBe(false);
+  });
+
+  test("the reservation holds at the boundary: near-full ordinary budget plus a full excerpt", () => {
+    // Ordinary sections filled to just under their ceiling and a
+    // maximum-size capture together must stay within the cap - this pins
+    // the 22000-byte reserve against the 20000-byte excerpt bound.
+    const nearFull = `carry\n${"c".repeat(38800)}`;
+    const capture = `validation diagnostic sentinel line\n${"d".repeat(30000)}`;
+    const r = run({
+      files: { CARRIED_FILE: nearFull },
+      temp: { "hidden-template-validation.log": capture },
+      env: { VALIDATION: "failed", HIDE_DETAILS: "true" },
+    });
+    expect(r.exitCode).toBe(0);
+    // The near-full carry was ACCEPTED (it fits the unreserved headroom).
+    expect(r.body).toContain("carry");
+    expect(r.body).toContain("validation diagnostic sentinel line");
+    expect(r.body).toContain("(truncated; reproduce validation locally");
+    expect(Buffer.byteLength(r.body, "utf-8")).toBeLessThanOrEqual(62000 + 300);
+    expect(r.merged).toBe(false);
+  });
+
+  test("a pathological drift cannot starve the reserved validation section", () => {
+    // Drift is target-controlled and prepended on top; unbounded it would
+    // either eat the whole budget or push the validation section past the
+    // end-cutting hard cap. It is bounded with its own truncation note.
+    const hugeDrift = `> [!WARNING]\n> drift\n${Array.from({ length: 4000 }, (_, i) => `drift line ${i}`).join("\n")}`;
+    const r = run({
+      files: { DRIFT_FILE: hugeDrift },
+      temp: { "hidden-template-validation.log": "validation diagnostic sentinel line\n" },
+      env: { VALIDATION: "failed", HIDE_DETAILS: "true" },
+    });
+    expect(r.exitCode).toBe(0);
+    expect(Buffer.byteLength(r.body, "utf-8")).toBeLessThan(65536);
+    expect(r.body).toContain(
+      "reproduce the sync locally for the full report - docs/private-repos.md",
+    );
+    expect(r.body).toContain("Validation failed on the updated tree");
+    expect(r.body).toContain("validation diagnostic sentinel line");
     expect(r.merged).toBe(false);
   });
 });

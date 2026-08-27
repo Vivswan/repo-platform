@@ -67,10 +67,20 @@ Review any merge conflicts and confirm repository-local sections were preserved 
 
 // Out-of-band settings drift goes on TOP of the body: merging ratifies
 // live values no human declared, so the reader must see that before
-// anything else.
+// anything else. Bounded: the drift report embeds target-controlled
+// values, and an unbounded prepend would starve the reserved validation
+// section below or trip the end-cutting hard cap that would drop it.
+const DRIFT_CAP = 8000;
 const driftFile = requireEnv("DRIFT_FILE");
 if (nonEmpty(driftFile)) {
-  body = `${slurp(driftFile)}\n\n${body}`;
+  let drift = slurp(driftFile);
+  if (Buffer.byteLength(drift, "utf-8") > DRIFT_CAP) {
+    // The recovery pointer must hold for HIDDEN targets too: the
+    // settings-drift step hides values there, so local reproduction is
+    // the one channel that always has the full report.
+    drift = `${utf8Truncated(drift, DRIFT_CAP)}\n(drift report truncated: size limit; reproduce the sync locally for the full report - docs/private-repos.md)`;
+  }
+  body = `${drift}\n\n${body}`;
 }
 
 // GitHub caps PR bodies at 64 KiB and gh fails outright past it, stranding
@@ -81,12 +91,35 @@ if (nonEmpty(driftFile)) {
 // The needs-review decision comes from the flag files, never this prose, so
 // dropping a section can only lose information, never flip manual to clean.
 const BODY_CAP = 62000;
+// PRIORITY: the failed-validation section alone gets budget carved out
+// before ordinary sections consume it. For a hidden target the PR body is
+// the diagnostics' ONLY channel (run_hidden hides the log, the failure
+// issue defers to an existing PR) and the workflow error promises them
+// here; every other review-forcing section holds the PR via its flag with
+// its evidence recoverable elsewhere (base branch, local reproduction).
+const VALIDATION_RESERVE = 22000; // the 20000-byte excerpt cap plus framing
+let reservedBytes = validation === "failed" ? VALIDATION_RESERVE : 0;
 let bodyBytes = Buffer.byteLength(body, "utf-8");
 let bodyTruncated = false;
 
-/** Append `chunk` only if the whole body stays under the aggregate cap;
- * otherwise drop it and remember to add the truncation banner. */
+/** Append `chunk` only if the body stays under the cap MINUS the space
+ * reserved for the priority sections; otherwise drop it and remember to
+ * add the truncation banner. */
 function appendSection(chunk: string): void {
+  const chunkBytes = Buffer.byteLength(chunk, "utf-8");
+  if (bodyBytes + chunkBytes <= BODY_CAP - reservedBytes) {
+    body += chunk;
+    bodyBytes += chunkBytes;
+  } else {
+    bodyTruncated = true;
+  }
+}
+
+/** Append a priority section, releasing its reservation first: with the
+ * drift prepend and every ordinary section bounded, a chunk within the
+ * reservation always fits. */
+function appendReserved(chunk: string): void {
+  reservedBytes = 0;
   const chunkBytes = Buffer.byteLength(chunk, "utf-8");
   if (bodyBytes + chunkBytes <= BODY_CAP) {
     body += chunk;
@@ -228,7 +261,7 @@ if (validation === "failed") {
       }
     }
   }
-  appendSection(`
+  appendReserved(`
 
 > [!WARNING]
 > Validation failed on the updated tree (${validationWhere}). Fix it
@@ -248,25 +281,14 @@ if (bodyTruncated) {
 > base branch for the full detail before merging.`;
 }
 
-// Backstop the aggregate budget: appendSection governs the OPTIONAL
-// sections, but the drift warning prepended on top and the base body are
-// mandatory and the drift value is target-controlled (a huge recorded
-// description), so a pathological drift alone could still overrun 64 KiB
-// and strand the branch. Hard-cap the finished body on a UTF-8 char
-// boundary, dropping whole trailing lines so no markdown is cut mid-line.
-const HARD_CAP = 63000;
-function capBody(full: string): string {
-  if (Buffer.byteLength(full, "utf-8") <= HARD_CAP) return full;
-  const notice =
-    "\n\n> [!WARNING]\n> This PR body exceeded GitHub's size limit and was hard-truncated;" +
-    " inspect this sync run's log and the base branch for the rest before merging.";
-  const budget = HARD_CAP - Buffer.byteLength(notice, "utf-8");
-  const lines = full.split("\n");
+/** `text` truncated to at most `budget` UTF-8 bytes: whole trailing lines
+ * are dropped first so no markdown is cut mid-line; a single over-budget
+ * line is byte-cut on a char boundary. */
+function utf8Truncated(text: string, budget: number): string {
+  const lines = text.split("\n");
   while (lines.length > 1 && Buffer.byteLength(lines.join("\n"), "utf-8") > budget) {
     lines.pop();
   }
-  // A single line already over budget (no newline to trim to) is cut on a
-  // char boundary by bytes.
   let head = lines.join("\n");
   if (Buffer.byteLength(head, "utf-8") > budget) {
     const buf = Buffer.from(head, "utf-8");
@@ -274,7 +296,20 @@ function capBody(full: string): string {
     while (end > 0 && (buf[end] & 0xc0) === 0x80) end--; // back off a continuation byte
     head = buf.subarray(0, end).toString("utf-8");
   }
-  return head + notice;
+  return head;
+}
+
+// Backstop the aggregate budget: appendSection/appendReserved govern the
+// optional sections and the drift prepend is bounded at its source, so
+// this should never fire - it stays as the final guarantee that no future
+// unbounded append can hand gh an over-limit body and strand the branch.
+const HARD_CAP = 63000;
+function capBody(full: string): string {
+  if (Buffer.byteLength(full, "utf-8") <= HARD_CAP) return full;
+  const notice =
+    "\n\n> [!WARNING]\n> This PR body exceeded GitHub's size limit and was hard-truncated;" +
+    " inspect this sync run's log and the base branch for the rest before merging.";
+  return utf8Truncated(full, HARD_CAP - Buffer.byteLength(notice, "utf-8")) + notice;
 }
 body = capBody(body);
 
