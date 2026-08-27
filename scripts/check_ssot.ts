@@ -909,11 +909,15 @@ const rules: Rule[] = [
       const gatingLines = new Set(
         needs.flatMap((jobName) => {
           const job = asRecord(jobs[jobName], jobName);
-          return ((job.steps as Record<string, unknown>[] | undefined) ?? []).flatMap((step) =>
-            String(step.run ?? "")
+          return ((job.steps as Record<string, unknown>[] | undefined) ?? []).flatMap((step) => [
+            // `uses` counts too: a gate that moved into a composite action
+            // has no run line left to pin, and deleting its step would fail
+            // the gate open exactly as deleting a run line would.
+            String(step.uses ?? "").trim(),
+            ...String(step.run ?? "")
               .split("\n")
               .map((line) => line.trim()),
-          );
+          ]);
         }),
       );
       for (const required of [
@@ -927,11 +931,14 @@ const rules: Rule[] = [
         // only home is a step of the smoke-generate job (dogfood-oracle
         // row), so losing the step would fail the gate open silently.
         "bun .github/scripts/ci/verify_dogfood_oracle.ts",
-        // The fleet rehearsal and Copilot-review gates live only as steps
-        // of their all-green-needed jobs: trimming either step would leave
-        // a green checkout/setup/install job and fail the gate open.
+        // The fleet rehearsal gate lives only as a step of its
+        // all-green-needed job: trimming the step would leave a green
+        // checkout/setup/install job and fail the gate open. (The
+        // Copilot-review gate used to be pinned here the same way; it is an
+        // ACTION now, so its pin moved to the uses-line rule below - the
+        // action's own steps cannot be trimmed from this repository.)
         "bun .github/scripts/ci/rehearse_fleet_gate.ts",
-        "bun .github/scripts/ci/copilot_review_gate.ts",
+        "./actions/copilot-review-gate",
       ]) {
         if (!gatingLines.has(required)) {
           mismatches.push({

@@ -1,0 +1,12 @@
+{
+  "name": "copilot-review-gate",
+  "private": true,
+  "description": "Dependency manifest for the copilot-review-gate action (zod validates the gh api responses the gate reads).",
+  "dependencies": {
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.3.14",
+    "typescript": "^7.0.2"
+  }
+}

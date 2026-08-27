@@ -9,7 +9,7 @@
     "lint:actions": "if command -v actionlint >/dev/null; then actionlint; else echo 'actionlint not installed locally; CI runs it (brew install actionlint)'; fi",
     "lint:secrets": "if command -v gitleaks >/dev/null; then gitleaks git --no-banner --redact && gitleaks git --no-banner --redact --pre-commit --staged; else echo 'gitleaks not installed locally; CI runs it (brew install gitleaks)'; fi",
     "lint:sh": "if command -v shellcheck >/dev/null; then find .github/scripts -name \"*.sh\" -print0 | xargs -0 shellcheck -x; else echo 'shellcheck not installed locally; CI runs it (brew install shellcheck)'; fi",
-    "typecheck": "bun x tsc -p . && (cd actions/check-typography && bun x tsc -p .) && (cd actions/fuzz-issue && bun x tsc -p .) && (cd actions/release-health && bun x tsc -p .) && (cd actions/validate-commit-names && bun x tsc -p .) && (cd actions/validate-skills && bun x tsc -p .) && (cd actions/validate-template && bun x tsc -p .)",
+    "typecheck": "bun x tsc -p . && (cd actions/check-typography && bun x tsc -p .) && (cd actions/copilot-review-gate && bun x tsc -p .) && (cd actions/fuzz-issue && bun x tsc -p .) && (cd actions/release-health && bun x tsc -p .) && (cd actions/validate-commit-names && bun x tsc -p .) && (cd actions/validate-skills && bun x tsc -p .) && (cd actions/validate-template && bun x tsc -p .)",
     "typography": "bun actions/check-typography/check-typography.ts .",
     "wrap:check": "bun scripts/check_markdown_wrap.ts",
     "lint:yaml": "uvx yamllint -s .",

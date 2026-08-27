@@ -50,16 +50,14 @@
 
 import type { ZodType } from "zod";
 import { z } from "zod";
-import { env, error, requireEnv } from "../shared/gha.ts";
-import { parseJsonWith } from "../shared/json.ts";
-import { capture } from "../shared/proc.ts";
 import {
   COPILOT_CHECK_NAME as CHECK_NAME,
   checkRunArrivedForPr,
   checkRunsSchema,
   fetchAllReviews,
   isCopilot,
-} from "./copilot_review_common.ts";
+} from "./identity.ts";
+import { capture, env, error, parseJsonWith, requireEnv } from "./runtime.ts";
 
 const PROBE_TIMEOUT_MS = Number(env("PROBE_TIMEOUT_MS", "15000"));
 

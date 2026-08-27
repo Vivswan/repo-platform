@@ -576,23 +576,17 @@ jobs:
       checks: read
       pull-requests: read
     steps:
+      # The SAME action the fleet runs. Local path, so this repository always
+      # gates on the tree under review rather than on what is published.
       - uses: actions/checkout@v7
         if: github.event_name == 'pull_request'
-      - uses: oven-sh/setup-bun@v2
+      - uses: ./actions/copilot-review-gate
         if: github.event_name == 'pull_request'
         with:
-          bun-version-file: .bun-version
-      - name: Install script dependencies
-        if: github.event_name == 'pull_request'
-        run: bun install --frozen-lockfile --silent
-      - name: Check that the Copilot review arrived
-        if: github.event_name == 'pull_request'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          BASE_BRANCH: ${{ github.event.pull_request.base.ref }}
-        run: bun .github/scripts/ci/copilot_review_gate.ts
+          head-sha: ${{ github.event.pull_request.head.sha }}
+          pr-number: ${{ github.event.pull_request.number }}
+          base-branch: ${{ github.event.pull_request.base.ref }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
   # CodeQL runs inside the gate: this thin job calls the analysis workflow,
   # and a caller job's permissions are the ceiling for every job in the

@@ -12,7 +12,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-const script = join(import.meta.dir, "../../.github/scripts/ci/copilot_review_gate.ts");
+const script = join(import.meta.dir, "gate.ts");
 
 const HEAD_SHA = "b".repeat(40);
 const OLD_SHA = "c".repeat(40);
