@@ -6,9 +6,10 @@
 // here first instead of seeding template text into a fleet repo.
 
 import { describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { REMOVED_SPLITS_NAME } from "../../.github/scripts/sync/section_files.ts";
 
 const script = join(import.meta.dir, "../../.github/scripts/sync/preserve_repo_owned.ts");
 const repoRoot = join(import.meta.dir, "..", "..");
@@ -214,4 +215,108 @@ describe("preserve_repo_owned fleet-license re-seed", () => {
       expect(result.license).toBeNull();
     });
   }
+});
+
+describe("preserve_repo_owned removed-splits hold", () => {
+  const SENTINEL = "<!-- repo-platform:local-section -->";
+  const MANIFEST_REL = ".github/repo-platform-manifest.json";
+  const manifest = JSON.stringify({
+    files: {
+      "AGENTS.md": {
+        class: "split",
+        grammar: "tail-marker",
+        marker: SENTINEL,
+        managed: "above",
+        hash: null,
+      },
+      "CLAUDE.md": { class: "managed", hash: null },
+    },
+  });
+  const agentsWithTail = `# AGENTS.md\n\nmanaged\n\n${SENTINEL}\n\n## Local agent docs\n\nlocal agents tail\n`;
+
+  function runHold(
+    headFiles: Record<string, string>,
+    removedFromTree: string[],
+  ): { exitCode: number | null; stdout: string; report: string } {
+    // LICENSE.md present keeps the fleet-license re-seed out of the way;
+    // TARGET_REF is empty so the re-seed block never resolves a build ref.
+    const target = makeTarget({ "LICENSE.md": "fleet license\n", ...headFiles });
+    for (const rel of removedFromTree) {
+      rmSync(join(target, rel));
+    }
+    const runnerTemp = mkdtempSync(join(tmpdir(), "preserve-owned-hold-"));
+    const proc = Bun.spawnSync(["bun", script], {
+      cwd: dirname(target),
+      env: {
+        ...gitFreeEnv(),
+        TARGET_DIR: target,
+        TARGET_REF: "",
+        MODULES: '["uv"]',
+        RUNNER_TEMP: runnerTemp,
+        RECOVER: "",
+        TARGET_DISPLAY: "",
+        TARGET: "",
+        HIDE_DETAILS: "",
+      },
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const reportPath = join(runnerTemp, REMOVED_SPLITS_NAME);
+    return {
+      exitCode: proc.exitCode,
+      stdout: proc.stdout.toString() + proc.stderr.toString(),
+      report: existsSync(reportPath) ? readFileSync(reportPath, "utf-8") : "",
+    };
+  }
+
+  test("a deleted split-classed file raises the hold and names the leaving half", () => {
+    const result = runHold({ [MANIFEST_REL]: manifest, "AGENTS.md": agentsWithTail }, [
+      "AGENTS.md",
+    ]);
+    expect(result.exitCode).toBe(0);
+    expect(result.report).toContain("This update DELETES");
+    expect(result.report).toContain("`AGENTS.md`");
+    expect(result.report).toContain("local agents tail");
+    expect(result.stdout).toContain("manual-review");
+  });
+
+  test("nothing removed writes an empty report (auto-merge stays possible)", () => {
+    const result = runHold({ [MANIFEST_REL]: manifest, "AGENTS.md": agentsWithTail }, []);
+    expect(result.exitCode).toBe(0);
+    expect(result.report).toBe("");
+  });
+
+  test("a deleted managed-classed file never raises the hold (class-level rule)", () => {
+    const result = runHold(
+      { [MANIFEST_REL]: manifest, "AGENTS.md": agentsWithTail, "CLAUDE.md": "claude\n" },
+      ["CLAUDE.md"],
+    );
+    expect(result.exitCode).toBe(0);
+    expect(result.report).toBe("");
+  });
+
+  test("an empty repository-owned section still holds, saying nothing leaves", () => {
+    const noTail = `# AGENTS.md\n\nmanaged\n\n${SENTINEL}\n`;
+    const result = runHold({ [MANIFEST_REL]: manifest, "AGENTS.md": noTail }, ["AGENTS.md"]);
+    expect(result.exitCode).toBe(0);
+    expect(result.report).toContain("`AGENTS.md`");
+    expect(result.report).toContain("repository-owned section is empty");
+  });
+
+  test("a deleted license without a manifest answer is held pointwise", () => {
+    // No manifest at HEAD at all: the class rule cannot answer, but a
+    // license deletion must still hold the PR.
+    const result = runHold({ LICENSE: "old license\nlocal notice\n" }, ["LICENSE"]);
+    expect(result.exitCode).toBe(0);
+    expect(result.report).toContain("`LICENSE`");
+    expect(result.report).toContain("does not class this file");
+  });
+
+  test("a previous copy that does not split at its marker is held as unlocatable", () => {
+    const markerless = "# AGENTS.md\n\nno marker here\n";
+    const result = runHold({ [MANIFEST_REL]: manifest, "AGENTS.md": markerless }, ["AGENTS.md"]);
+    expect(result.exitCode).toBe(0);
+    expect(result.report).toContain("`AGENTS.md`");
+    expect(result.report).toContain("could not be located");
+  });
 });

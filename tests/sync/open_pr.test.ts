@@ -10,6 +10,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  REMOVED_SPLITS_NAME,
   SETTINGS_LAYERING_NAME,
   TAIL_SHRANK_NAME,
 } from "../../.github/scripts/sync/section_files.ts";
@@ -55,7 +56,6 @@ function run(opts: Options = {}) {
     "REMOVED_PATHS_FILE",
     "WITHHELD_FILE",
     "MANIFEST_LICENSE_FILE",
-    "LICENSE_TRANSITION_FILE",
   ];
   for (const name of fileVars) {
     const path = join(root, `${name.toLowerCase()}.txt`);
@@ -144,13 +144,16 @@ describe("open_pr sections and auto-merge", () => {
     expect(r.output).toContain("auto-merge left off");
   });
 
-  test("withheld workflow files and a license transition both force review", () => {
+  test("withheld workflow files and a removed-splits report both force review", () => {
     const withheld = run({ files: { WITHHELD_FILE: ".github/workflows/ci.yml\n" } });
     expect(withheld.body).toContain("WITHHELD");
     expect(withheld.merged).toBe(false);
-    const license = run({ files: { LICENSE_TRANSITION_FILE: "LICENSE\n" } });
-    expect(license.body).toContain("This update DELETES LICENSE");
-    expect(license.merged).toBe(false);
+    const report =
+      "> [!WARNING]\n> This update DELETES file(s) whose previous copy carries a\n> repository-owned half.\n\n- `AGENTS.md`: this repository-owned content leaves with the deletion:\n\n  ````text\n  local agents tail\n  ````\n";
+    const removed = run({ temp: { [REMOVED_SPLITS_NAME]: report } });
+    expect(removed.body).toContain("This update DELETES");
+    expect(removed.body).toContain("local agents tail");
+    expect(removed.merged).toBe(false);
   });
 
   test("informational sections (retired modules, removed paths, manifest license) stay auto-merge-eligible", () => {

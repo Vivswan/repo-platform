@@ -272,7 +272,11 @@ jobs:
       # renders to consume, so it keeps the sentinel-scan carry over the
       # recopy result (the working tree IS the fresh render there). The
       # carried files are listed in the PR body - and, for a hidden
-      # target, ONLY there (paths and dispositions are target data).
+      # target, ONLY there (paths and dispositions are target data). The
+      # script prints hide-details-aware counts itself, but its FAILURE
+      # paths (a damaged manifest naming split paths, a refused write)
+      # quote target data, so a hidden target's run is captured like every
+      # other step that reads the target tree.
       - name: Rebuild split files structurally
         env:
           RECOVER: ${{ inputs.recover }}
@@ -285,7 +289,8 @@ jobs:
             flags+=(--render-dir "$RUNNER_TEMP/render-new"
                     --old-render-dir "$RUNNER_TEMP/render-old")
           fi
-          bun .github/scripts/sync/preserve_local_content.ts "${flags[@]}"
+          bun .github/scripts/sync/run_hidden.ts "split-file rebuild" -- \
+            bun .github/scripts/sync/preserve_local_content.ts "${flags[@]}"
 
       # Conflicts (local edits overlapping template changes) resolve in the
       # template's favor so the tree stays valid. The files the rebuild
@@ -469,7 +474,6 @@ jobs:
           REMOVED_PATHS_FILE: ${{ runner.temp }}/removed-paths.txt
           WITHHELD_FILE: ${{ runner.temp }}/withheld-workflows.txt
           MANIFEST_LICENSE_FILE: ${{ runner.temp }}/manifest-license-warnings.md
-          LICENSE_TRANSITION_FILE: ${{ runner.temp }}/license-transition.txt
           RECOVER: ${{ inputs.recover }}
           FORCE_MANUAL: ${{ inputs.force_manual }}
         run: bun .github/scripts/sync/open_pr.ts

@@ -30,21 +30,31 @@
 // it is re-seeded from the target build ref (which must be resolvable in
 // the cwd's git repository).
 //
+// Last, the removed-split-files hold: every path this update deletes whose
+// previous copy HEAD's manifest classes `split` (plus the two license
+// spellings pointwise) is reported to open_pr.ts, which keeps the PR on
+// the manual-review path with the leaving repository-owned content named
+// in the body - see the block at the end of this file.
+//
 // Invoked by reusable-template-sync.yml's "Preserve repo-owned files" step
 // and by ci/upgrade_path_test.sh.
 //
 // Env: RECOVER; TARGET_DIR (default target); TARGET_REF and MODULES (for
-// the fleet-license re-seed); RUNNER_TEMP (license-transition flag file);
-// TARGET_DISPLAY / TARGET (log label, in that order; defaults to
-// TARGET_DIR).
+// the fleet-license re-seed); RUNNER_TEMP (the settings-layering and
+// removed-splits report files); HIDE_DETAILS; TARGET_DISPLAY / TARGET
+// (log label, in that order; defaults to TARGET_DIR).
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse } from "yaml";
-import { env, error, notice, requireEnv } from "../shared/gha.ts";
+import { env, error, hideDetails, notice, requireEnv } from "../shared/gha.ts";
+import { headBytes } from "../shared/git_head.ts";
 import { parseModules } from "../shared/modules.ts";
-import { SETTINGS_LAYERING_NAME } from "./section_files.ts";
+import { clip, fenceFor } from "./preserve_local_content.ts";
+import { REMOVED_SPLITS_NAME, SETTINGS_LAYERING_NAME } from "./section_files.ts";
 import { transitionSettingsStarter } from "./settings_layering.ts";
+import { MANIFEST_NAME } from "./stamp_manifest.ts";
+import { type HeadSplit, headRepoOwnedHalf, headSplitEntries } from "./tail_tripwire.ts";
 
 const targetDir = env("TARGET_DIR", "target");
 const label = env("TARGET_DISPLAY") || env("TARGET") || targetDir;
@@ -182,23 +192,175 @@ if (
   }
 }
 
-// A license file this update deletes never reaches the PR as a conflict:
-// copier resolves delete-vs-modify by dropping the file, so content below
-// its local-section marker (third-party notices) silently leaves the
-// repo, and the update can otherwise look clean. The deletion is flagged
-// for open_pr.ts, which holds the PR for human review however the run was
-// dispatched - the restore and re-seed blocks above have already put back
-// every license the sync preserves, so anything still missing here is a
-// real deletion.
-const transitions = ["LICENSE", "LICENSE.md"].filter(
-  (name) => inHead(name) && !existsSync(join(targetDir, name)),
-);
+// A file this update deletes never reaches the PR as a conflict: copier
+// resolves delete-vs-modify by dropping the file, and retired-file cleanup
+// deletes retired paths outright - so content in a split file's
+// repository-owned half silently leaves the repo while the update can
+// otherwise look clean and AUTO-MERGE. The rule is CLASS-level: every
+// deleted path HEAD's own manifest classes `split` holds the PR
+// (open_pr.ts's section list), with the repository-owned content that
+// leaves named in the body. HEAD's manifest, not the post-sync one: a
+// path split at HEAD but absent from the new render appears in neither
+// the rebuild's manifest walk nor the tail tripwire's. The two license
+// spellings stay pointwise candidates ON TOP of the class rule: a
+// pre-rename extensionless LICENSE has no manifest entry classing it (and
+// a damaged HEAD manifest cannot class anything), yet a license deletion
+// must still hold the PR - the restore and re-seed blocks above have
+// already put back every license the sync preserves, so anything still
+// missing here is a real deletion. Prior licensing needs no notice - git
+// history is the record.
+
+/** How much of each leaving repository-owned half the PR body shows.
+ * Bounded like tail_tripwire's report: lines per file, characters per
+ * line (clip), and one shared byte budget across ALL removed files - the
+ * body caps at 64 KiB, gh fails outright past it, and several removals'
+ * excerpts must not add up there; git history holds whatever the excerpt
+ * omits. */
+const MAX_HALF_LINES = 40;
+const MAX_HALF_BYTES = 16384;
+
+interface RemovedSplit {
+  path: string;
+  /** The repository-owned half at HEAD: content when located, null when
+   * the previous copy does not split at its declared markers, undefined
+   * when HEAD's manifest cannot class the path (the pointwise license
+   * candidates without a manifest answer). */
+  half: string | null | undefined;
+}
+
+/** One removed path's bullet, charging any excerpt against the shared
+ * budget; returns the spent bytes with the text. */
+function removedSplitBullet(
+  { path, half }: RemovedSplit,
+  budget: number,
+): { text: string; cost: number } {
+  if (half === undefined) {
+    return {
+      text:
+        `- \`${path}\`: the previous commit's manifest does not class this file, so its ` +
+        "repository-local content (if any) cannot be split out - review the previous copy " +
+        "on the base branch before merging.",
+      cost: 0,
+    };
+  }
+  if (half === null) {
+    return {
+      text:
+        `- \`${path}\`: its repository-owned half could not be located (the previous copy ` +
+        "does not split at its declared marker lines) - review the previous copy on the " +
+        "base branch before merging.",
+      cost: 0,
+    };
+  }
+  if (half.trim() === "") {
+    return {
+      text: `- \`${path}\`: its repository-owned section is empty; nothing leaves beyond the managed render.`,
+      cost: 0,
+    };
+  }
+  const lines = half.split("\n").filter(
+    (line, index, all) =>
+      // Drop only a trailing empty line (the split's newline artifact).
+      line !== "" || index < all.length - 1,
+  );
+  const shown: string[] = [];
+  let cost = 0;
+  for (const line of lines) {
+    if (shown.length >= MAX_HALF_LINES) break;
+    const clipped = clip(line);
+    const lineCost = Buffer.byteLength(clipped, "utf-8") + 3;
+    if (cost + lineCost > budget) break;
+    cost += lineCost;
+    shown.push(clipped);
+  }
+  if (shown.length === 0) {
+    return {
+      text:
+        `- \`${path}\`: ${lines.length} line(s) of repository-owned content leave with the ` +
+        "deletion (excerpt omitted: report size limit; see the base branch's copy).",
+      cost: 0,
+    };
+  }
+  const fence = fenceFor(shown);
+  const omitted = lines.length - shown.length;
+  const tail = omitted > 0 ? `\n  (${omitted} more; see the base branch's copy)` : "";
+  return {
+    text:
+      `- \`${path}\`: this repository-owned content leaves with the deletion:\n\n` +
+      `  ${fence}text\n${shown.map((line) => `  ${line}`).join("\n")}\n  ${fence}${tail}`,
+    cost,
+  };
+}
+
+const REMOVED_SPLITS_INTRO = [
+  "> [!WARNING]",
+  "> This update DELETES file(s) whose previous copy carries a",
+  "> repository-owned half (ownership class `split`). Copier resolves",
+  "> delete-vs-modify by dropping the file, and retired-file cleanup",
+  "> deletes retired paths outright, so that repository-owned content is",
+  "> NOT in this diff and survives only in git history (see the base",
+  "> branch). Move anything that must stay into another file's",
+  "> repository-local section on this branch before merging. Prior",
+  "> licensing needs no notice - git history is the record.",
+  "",
+].join("\n");
+
+// HEAD's split declarations, split with HEAD's OWN manifest (a marker
+// rename in the update cannot mis-split the previous copy). A missing or
+// unusable manifest is a target-state anomaly: the class rule cannot
+// answer, the pointwise license candidates still can, and the tail
+// tripwire independently routes the run to manual review in that state.
+let headSplits: Map<string, HeadSplit> | null = null;
+const headManifest = git(["show", `HEAD:${MANIFEST_NAME}`]);
+if (headManifest.exitCode === 0) {
+  try {
+    headSplits = headSplitEntries(headManifest.stdout, `HEAD:${MANIFEST_NAME}`);
+  } catch {
+    headSplits = null;
+  }
+}
+
+const candidates = new Map<string, HeadSplit | undefined>();
+for (const [path, split] of headSplits ?? []) {
+  candidates.set(path, split);
+}
+for (const name of ["LICENSE", "LICENSE.md"]) {
+  if (!candidates.has(name)) candidates.set(name, undefined);
+}
+
+const removals: RemovedSplit[] = [];
+for (const [path, split] of candidates) {
+  if (existsSync(join(targetDir, path)) || !inHead(path)) continue;
+  const headCopy = headBytes(targetDir, path);
+  // inHead passed but the bytes are unreadable only for a non-blob (a
+  // directory at the path); nothing splittable leaves.
+  if (headCopy === null) continue;
+  removals.push({
+    path,
+    half: split === undefined ? undefined : headRepoOwnedHalf(headCopy.toString("latin1"), split),
+  });
+}
+
+let halfBudget = MAX_HALF_BYTES;
+const bullets = removals.map((removal) => {
+  const bullet = removedSplitBullet(removal, halfBudget);
+  halfBudget -= bullet.cost;
+  return bullet.text;
+});
 writeFileSync(
-  join(requireEnv("RUNNER_TEMP"), "license-transition.txt"),
-  transitions.map((name) => `${name}\n`).join(""),
+  join(requireEnv("RUNNER_TEMP"), REMOVED_SPLITS_NAME),
+  removals.length === 0 ? "" : `${REMOVED_SPLITS_INTRO}\n${bullets.join("\n")}\n`,
 );
-if (transitions.length > 0) {
+if (removals.length > 0) {
+  // Paths are target file data: a hide-details target gets a count here
+  // and the names only in the PR body, which lives in the private repo.
   notice(
-    `${label}: this update deletes ${transitions.join(" and ")}; the PR stays manual-review so a human can check the deleted file for local notices worth keeping (prior licensing needs none - git history is the record).`,
+    hideDetails()
+      ? `${label}: this update deletes ${removals.length} split-classed file(s); the PR stays ` +
+          "manual-review so a human can restore the repository-owned content that leaves " +
+          "(paths hidden: private repository; named in the PR body)."
+      : `${label}: this update deletes ${removals.map(({ path }) => path).join(" and ")}; the ` +
+          "PR stays manual-review so a human can restore the repository-owned content that " +
+          "leaves with the deletion (named in the PR body; git history is the record).",
   );
 }
