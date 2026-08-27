@@ -18,8 +18,7 @@
 //   only the constants' authorship is generated).
 // - README.md, docs/new-repo.md, docs/settings.md, docs/pages.md,
 //   docs/toolchains.md: the prose that enumerates manifest data (module
-//   roster, dependabot labels, gitignore upstream mapping, pages toolchain
-//   defaults, toolchain pins).
+//   roster, dependabot labels, pages toolchain defaults, toolchain pins).
 // - templates/module.schema.json: a WHOLE generated file (no markers), the
 //   JSON Schema the manifests' yaml-language-server directive points at,
 //   derived from the zod schema in scripts/module_manifests.ts.
@@ -643,43 +642,6 @@ export function newRepoModuleRoster(manifests: ModuleManifest[]): string {
   );
 }
 
-/** README.md layout-table cell for scripts/build_gitignore.ts: which
- *  upstream templates map to which module. An upstream shared by several
- *  modules (Node.gitignore under bun, node, and deno) is named once, by its
- *  first declaring module. */
-export function gitignoreUpstreamMap(manifests: ModuleManifest[]): string {
-  const withSources = manifests.filter(
-    (m): m is ModuleManifest & { gitignore_sources: string[] } => m.gitignore_sources !== undefined,
-  );
-  if (withSources.length === 0) {
-    throw new Error(
-      "no manifest declares gitignore_sources, so the README's " +
-        "build_gitignore row would map nothing - declare gitignore_sources " +
-        "in at least one module.yml",
-    );
-  }
-  const modules = withSources.map((m) => m.module).join("/");
-  const seen = new Set<string>();
-  const perModule = withSources.map((m) => {
-    const fresh: string[] = [];
-    for (const source of m.gitignore_sources) {
-      const template = source.replace(/^.*\//, "").replace(/\.gitignore$/, "");
-      if (!seen.has(template)) {
-        seen.add(template);
-        fresh.push(template);
-      }
-    }
-    return fresh.join(" + ");
-  });
-  const upstreams = perModule.filter((names) => names !== "").join(" / ");
-  return (
-    `Regenerates the gitignore outputs (\`templates/base/.gitignore.jinja\`, the ${modules} ` +
-    "toolchain fragments, this repo's `.gitignore`) from the latest " +
-    "[github/gitignore](https://github.com/github/gitignore) " +
-    `(Windows + macOS + Linux always, ${upstreams} by ${modules} module)`
-  );
-}
-
 export interface DependabotLabelGroup {
   label: string;
   color: string;
@@ -878,9 +840,6 @@ function targets(manifests: ModuleManifest[]): Target[] {
       file: "README.md",
       syntax: "markdown",
       regions: [["module-roster", ({ manifests }) => readmeModuleRoster(manifests)]],
-      inlineRegions: [
-        ["gitignore-upstream-map", ({ manifests }) => gitignoreUpstreamMap(manifests)],
-      ],
     },
     {
       file: "docs/new-repo.md",
