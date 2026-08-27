@@ -1,5 +1,5 @@
 // Provenance verification (verify_build_provenance.ts): the sync-side
-// guard that the template tip is the build-branches workflow's own output
+// guard that the build tip is the build-branches workflow's own output
 // before it is templated into managed repos. The vouching TRUTH TABLE is
 // unit-tested in tests/shared/run_vouches.test.ts; this suite proves the
 // SCRIPT wires the pieces - the on-main check, the rollback walk, the run

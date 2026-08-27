@@ -15,7 +15,7 @@
 //     an ungreen source (the workflow_run trigger already fires only on
 //     CI success, but the schedule, dispatch, and API paths reach the
 //     builder unguarded);
-//   - sync/resolve_refs.ts refuses to sync a template tip whose STAMPED
+//   - sync/resolve_refs.ts refuses to sync a build tip whose STAMPED
 //     source is ungreen (belt over the builder's gate: it catches builds
 //     published before the gate existed or out-of-band).
 //
