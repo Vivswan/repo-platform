@@ -63,7 +63,7 @@ jobs:
       - name: File or update the nightly issue
         id: file-issue
         if: {% raw %}needs.checks.result == 'failure' || needs.checks.result == 'cancelled'{% endraw %}
-        uses: {{ github_username }}/repo-platform/actions/fuzz-issue@main
+        uses: {{ github_username }}/repo-platform/actions/fuzz-issue@template
         with:
           mode: report
           label: {{ nightly_label | tojson }}
@@ -89,7 +89,7 @@ jobs:
 
 {% endif %}      - name: Close the nightly issue on a green night
         if: {% raw %}needs.checks.result == 'success'{% endraw %}
-        uses: {{ github_username }}/repo-platform/actions/fuzz-issue@main
+        uses: {{ github_username }}/repo-platform/actions/fuzz-issue@template
         with:
           mode: resolve
           label: {{ nightly_label | tojson }}
