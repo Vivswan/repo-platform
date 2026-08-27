@@ -225,8 +225,9 @@ export function parseManifestFiles(text: string):
  *  content on updates, so an absolute or ..-carrying key, or one whose
  *  parent directory really lives outside the rendered root (a symlinked
  *  ancestor), must never be unlinked. Read-only consumers (hashing) keep
- *  their lexical join - a wrong hash is caught by parity, while a wrong
- *  unlink is damage. */
+ *  their lexical join: this script only writes hash VALUES into the
+ *  manifest, so the worst a hostile key gets there is its own file's
+ *  hash echoed back - while a wrong unlink is damage. */
 function containedForMutation(root: string, path: string): string | null {
   if (path.startsWith("/")) return null;
   const segments = path.split("/");
