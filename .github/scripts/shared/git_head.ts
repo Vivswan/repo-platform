@@ -6,6 +6,20 @@
 // carry or a tripwire check (cat-file -e cannot make that distinction: it
 // exits 128 for a missing path and for fatal errors alike).
 
+/** A VALUE-FREE failure for a HEAD probe: the git subcommand and its exit
+ *  code only - never the path, the repository root, or git's stderr, each
+ *  of which can name private-repo content. Defense in depth behind the
+ *  callers' run_hidden.ts wrapping: the message stays safe even if a future
+ *  caller logs it unwrapped. Same discipline as shared/json.ts; the withheld
+ *  git detail is reproduced locally (docs/private-repos.md). */
+function headProbeFailed(subcommand: "ls-tree" | "show", exitCode: number | null): Error {
+  return new Error(
+    `git ${subcommand} against HEAD failed (exit ${exitCode ?? "unknown"}); the path, ` +
+      "repository root, and git stderr are withheld to keep private-repo content out of the " +
+      "log - reproduce the sync locally to see them (docs/private-repos.md)",
+  );
+}
+
 /** The file's bytes at `root`'s HEAD, or null when the path is genuinely
  * absent there. Raw bytes so each caller picks the honest decode (latin1
  * for byte-owned file content, utf-8 for the manifest).
@@ -21,9 +35,7 @@ export function headBytes(root: string, rel: string): Buffer | null {
     },
   );
   if (probe.exitCode !== 0) {
-    throw new Error(
-      `git ls-tree HEAD -- ${rel} failed in ${root}: ${probe.stderr.toString().trim()}`,
-    );
+    throw headProbeFailed("ls-tree", probe.exitCode);
   }
   if (probe.stdout.toString().trim() === "") return null;
   const proc = Bun.spawnSync(["git", "--literal-pathspecs", "-C", root, "show", `HEAD:${rel}`], {
@@ -31,7 +43,7 @@ export function headBytes(root: string, rel: string): Buffer | null {
     stderr: "pipe",
   });
   if (proc.exitCode !== 0) {
-    throw new Error(`git show HEAD:${rel} failed in ${root}: ${proc.stderr.toString().trim()}`);
+    throw headProbeFailed("show", proc.exitCode);
   }
   return Buffer.from(proc.stdout);
 }

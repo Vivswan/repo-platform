@@ -17,6 +17,7 @@
 # refs + tags. The old fixture is SYNTHETIC: the current templates
 # assembled by the current tooling, plus a sentinel file the new build no
 # longer renders and the pre-relicense LICENSE shape.
+# shellcheck disable=SC2016  # assertion strings carry literal backticks
 set -euo pipefail
 GITHUB_WORKSPACE="${GITHUB_WORKSPACE:-$(pwd)}"
 # The script cd's around; pin repo-scoped git calls and cleanup to the root.
@@ -582,8 +583,17 @@ grep -qxF "CONTRIBUTING.md" "$VIS_WORK/removed-paths.txt" \
   || fail "retired_cleanup's rm loop did not delete the resurrected CONTRIBUTING.md"
 RECOVER="" RUNNER_TEMP="$VIS_WORK" bun .github/scripts/sync/preserve_repo_owned.ts
 TARGET_DIR="$VIS" bun .github/scripts/sync/stamp_manifest.ts
-grep -qxF "LICENSE" "$VIS_WORK/license-transition.txt" \
-  || fail "the license rename did not raise the license-transition flag that holds the PR for review"
+# Deleting a split-classed file takes its repository-owned half with it,
+# so the removals must raise the removed-splits hold that keeps the PR
+# manual: the old extensionless LICENSE (no manifest entry classes it -
+# the pointwise license candidate) and CONTRIBUTING.md (class `split` at
+# HEAD - the general class-level rule).
+test -s "$VIS_WORK/removed-splits.md" \
+  || fail "the split-file deletions did not raise the removed-splits hold that keeps the PR manual"
+grep -qF '`LICENSE`' "$VIS_WORK/removed-splits.md" \
+  || fail "the removed-splits hold does not name the deleted LICENSE"
+grep -qF '`CONTRIBUTING.md`' "$VIS_WORK/removed-splits.md" \
+  || fail "the removed-splits hold does not name the deleted split-classed CONTRIBUTING.md"
 
 bun "$GITHUB_WORKSPACE/actions/validate-template/validate_generated_files.ts" "$VIS"
 
@@ -1055,7 +1065,7 @@ GH_CALLS="$TRIP_WORK/gh-calls.txt" PATH="$TRIP_BIN:$PATH" \
   DRIFT_FILE="$TRIP_WORK/empty.txt" CARRIED_FILE="$TRIP_WORK/empty.txt" \
   CARRY_REVIEW_FILE="$TRIP_WORK/empty.txt" RETIRED_MODULES_FILE="$TRIP_WORK/empty.txt" \
   REMOVED_PATHS_FILE="$TRIP_WORK/empty.txt" WITHHELD_FILE="$TRIP_WORK/empty.txt" \
-  MANIFEST_LICENSE_FILE="$TRIP_WORK/empty.txt" LICENSE_TRANSITION_FILE="$TRIP_WORK/empty.txt" \
+  MANIFEST_LICENSE_FILE="$TRIP_WORK/empty.txt" \
   bun .github/scripts/sync/open_pr.ts > "$TRIP_WORK/open-pr.out"
 grep -qF "auto-merge left off" "$TRIP_WORK/open-pr.out" \
   || fail "open_pr armed auto-merge despite a tripped tail tripwire"
@@ -1066,3 +1076,99 @@ if grep -q '^gh pr merge' "$TRIP_WORK/gh-calls.txt"; then
   fail "open_pr attempted to arm auto-merge on a tripped run"
 fi
 echo "tail tripwire OK: report produced, PR-body section present, manual review forced"
+
+# --- Split-file retirement (module deselection) ----------------------------
+# Deselecting a module retires its files from the render, and a retired
+# file HEAD's manifest classes `split` carries a repository-owned half
+# that leaves WITH the deletion (copier resolves delete-vs-modify by
+# dropping the file; retired_cleanup rms retired paths outright). The
+# class-level hold (preserve_repo_owned.ts -> removed-splits.md ->
+# open_pr.ts) must name the leaving content and keep the PR manual - on
+# this rule ALONE: no license machinery is involved in this leg, and the
+# tail tripwire must stay clear (the retired path is absent from the
+# post-sync manifest by design, so the wire never visits it).
+DESEL="$RUN_DIR/upgrade-deselect"
+DESEL_WORK="$RUN_DIR/upgrade-deselect-work"
+mkdir -p "$DESEL_WORK"
+cd "$GITHUB_WORKSPACE"
+copier copy "$GITHUB_WORKSPACE" "$DESEL" \
+  --vcs-ref "$NEW_TAG" --defaults --trust \
+  -d project_name="Module Deselection" \
+  -d description="Module-deselection project" \
+  -d 'modules=[agents, uv]' \
+  -d private="false"
+cd "$DESEL"
+printf '\n## Local agent docs\n\ndeselect-local agents tail\n' >> AGENTS.md
+git init -q -b main
+git add --all
+git -c user.name=ci -c user.email=ci@localhost commit -q -m "chore: init with agents tail"
+
+# The deselection edit a repo merges before the sync, then the workflow's
+# leg order: apply update, materialize renders, rebuild split files,
+# resolve conflicts, retired cleanup, preserve, stamp, tripwire.
+cd "$GITHUB_WORKSPACE"
+export MODULES='["uv"]'
+export PRIVATE=false
+export DESCRIPTION="Module-deselection project"
+export TARGET_DIR="$DESEL"
+export TARGET_REF="$NEW_TAG"
+RECOVER="" bun .github/scripts/sync/apply_update.ts
+answers_desel="$(git -C "$DESEL" show HEAD:.copier-answers.yml)"
+src_path_desel="$(sed -n 's/^_src_path: //p' <<<"$answers_desel")"
+test -n "$src_path_desel" || fail "deselection fixture records no _src_path"
+RUNNER_TEMP="$DESEL_WORK" SRC_PATH="$src_path_desel" \
+  OLD_SHA="$(git rev-parse "$NEW_TAG^{commit}")" \
+  bun .github/scripts/sync/clean_renders.ts
+bun .github/scripts/sync/preserve_local_content.ts \
+  --summary "$DESEL_WORK/local-carryover.md" --root "$DESEL" \
+  --needs-review "$DESEL_WORK/carry-review.txt" \
+  --rebuilt-paths "$DESEL_WORK/split-rebuilt-paths.txt" \
+  --render-dir "$DESEL_WORK/render-new" --old-render-dir "$DESEL_WORK/render-old"
+bun .github/scripts/sync/resolve_copier_conflicts.ts \
+  --summary "$DESEL_WORK/dropped-local-hunks.md" --root "$DESEL" \
+  --skip "$DESEL_WORK/split-rebuilt-paths.txt"
+git show "$NEW_TAG:copier.yml" > "$DESEL_WORK/copier-old.yml"
+git show "$NEW_TAG:copier.yml" > "$DESEL_WORK/copier-new.yml"
+RUNNER_TEMP="$DESEL_WORK" SRC_PATH="$src_path_desel" \
+  OLD_SHA="$(git rev-parse "$NEW_TAG^{commit}")" \
+  bun .github/scripts/sync/retired_cleanup.ts
+test ! -e "$DESEL/AGENTS.md" \
+  || fail "the deselected agents module's AGENTS.md survived retirement"
+RECOVER="" RUNNER_TEMP="$DESEL_WORK" bun .github/scripts/sync/preserve_repo_owned.ts
+TARGET_DIR="$DESEL" bun .github/scripts/sync/stamp_manifest.ts
+RUNNER_TEMP="$DESEL_WORK" bun .github/scripts/sync/tail_tripwire.ts --root "$DESEL"
+if [ -s "$DESEL_WORK/tail-shrank.md" ]; then
+  fail "the tail tripwire fired on a clean module deselection (the hold must come from the removal rule alone)"
+fi
+test -s "$DESEL_WORK/removed-splits.md" \
+  || fail "deleting the split-classed AGENTS.md produced no removed-splits hold"
+grep -qF '`AGENTS.md`' "$DESEL_WORK/removed-splits.md" \
+  || fail "the removed-splits hold does not name AGENTS.md"
+grep -qF "deselect-local agents tail" "$DESEL_WORK/removed-splits.md" \
+  || fail "the removed-splits hold does not name the leaving repository-owned content"
+
+# The chain's tail: open_pr.ts must append the section and refuse to arm
+# auto-merge on the removed-splits hold alone (the only other non-empty
+# inputs - the removed-paths list and the carry summary - are
+# informational and never force review; the gh stub from the tripwire leg
+# records the body).
+echo "template@old" > "$DESEL_WORK/old_commit.txt"
+: > "$DESEL_WORK/empty.txt"
+GH_CALLS="$DESEL_WORK/gh-calls.txt" PATH="$TRIP_BIN:$PATH" \
+  TARGET="Vivswan/deselect" RUNNER_TEMP="$DESEL_WORK" \
+  GITHUB_REPOSITORY="Vivswan/repo-platform" GITHUB_OUTPUT="$DESEL_WORK/gh-output.txt" \
+  BRANCH=automation/repo-platform BASE_BRANCH=main DISPLAY="template@new" \
+  RECOVER="" RESOLVED="" VALIDATION=passed HIDE_DETAILS="" \
+  DRIFT_FILE="$DESEL_WORK/empty.txt" CARRIED_FILE="$DESEL_WORK/local-carryover.md" \
+  CARRY_REVIEW_FILE="$DESEL_WORK/carry-review.txt" RETIRED_MODULES_FILE="$DESEL_WORK/empty.txt" \
+  REMOVED_PATHS_FILE="$DESEL_WORK/removed-paths.txt" WITHHELD_FILE="$DESEL_WORK/empty.txt" \
+  MANIFEST_LICENSE_FILE="$DESEL_WORK/empty.txt" \
+  bun .github/scripts/sync/open_pr.ts > "$DESEL_WORK/open-pr.out"
+grep -qF "auto-merge left off" "$DESEL_WORK/open-pr.out" \
+  || fail "open_pr armed auto-merge despite a deleted split-classed file"
+grep -qF "deselect-local agents tail" "$DESEL_WORK/gh-calls.txt" \
+  || fail "the PR body does not name the repository-owned content the deletion takes with it"
+if grep -q '^gh pr merge' "$DESEL_WORK/gh-calls.txt"; then
+  fail "open_pr attempted to arm auto-merge on a removed-splits hold"
+fi
+echo "module deselection OK: retired split file deleted, hold raised, leaving content named, manual review forced"

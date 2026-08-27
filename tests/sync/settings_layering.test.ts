@@ -160,6 +160,28 @@ describe("headManifestClass", () => {
     expect(headManifestClass(repoWithManifest(null)).kind).toBe("unreadable");
   });
 
+  test("a duplicated settings.yml entry is unreadable, never last-wins", () => {
+    // JSON.parse keeps only the LAST duplicate: mergeable-then-starter
+    // would read as an already-transitioned starter and silently skip the
+    // transition on a marker-deleted legacy baseline.
+    const dup =
+      '{"files": {".github/settings.yml": {"class": "mergeable"}, ".github/settings.yml": {"class": "starter"}}}\n';
+    const head = headManifestClass(repoWithManifest(dup));
+    expect(head.kind).toBe("unreadable");
+    // The conservative branch: with no marker to prove the legacy shape,
+    // the transition holds the PR instead of guessing.
+    expect(classificationUncertain("repository: {}\n", head)).toBe(true);
+  });
+
+  test("an escape-variant duplicate entry is unreadable too", () => {
+    // The second spelling escapes the final "l" as backslash-u006c;
+    // JSON.parse still collides the decoded keys last-wins.
+    const escaped = String.raw`".github/settings.ym\u006c"`;
+    const dup = `{"files": {".github/settings.yml": {"class": "mergeable"}, ${escaped}: {"class": "starter"}}}\n`;
+    const head = headManifestClass(repoWithManifest(dup));
+    expect(head.kind).toBe("unreadable");
+  });
+
   test("an unknown class HOLDS the PR when the marker is gone", () => {
     const head = headManifestClass(repoWithManifest(entry('{"class": "mergable"}')));
     expect(classificationUncertain("repository: {}\n", head)).toBe(true);
@@ -247,6 +269,30 @@ describe("droppedOverrides", () => {
       rulesets: [{ name: "main", target: "branch" }],
     };
     expect(droppedOverrides(old, managed)).toEqual([]);
+  });
+
+  test("a mis-shaped labels section is reported with a shape warning, never skipped", () => {
+    // Legacy files are exactly where mis-shapes live, and the per-entry
+    // comparison (and the fleet-law skip) assume the list shape - so a
+    // mapping-shaped section used to vanish from the very list the
+    // reviewer re-adds overrides from.
+    const old = { labels: { incident: { color: "b60205" } } };
+    const dropped = droppedOverrides(old, managed, { labels: [] });
+    expect(dropped).toHaveLength(1);
+    expect(dropped[0]).toContain("labels (mis-shaped");
+    expect(dropped[0]).toContain("incident");
+  });
+
+  test("scalar and null rulesets sections are reported as mis-shaped too", () => {
+    expect(droppedOverrides({ rulesets: "main" }, managed)[0]).toContain("rulesets (mis-shaped");
+    expect(droppedOverrides({ rulesets: null }, managed)[0]).toContain("rulesets (mis-shaped");
+  });
+
+  test("an enormous mis-shaped section is excerpted, not dumped whole", () => {
+    const old = { labels: { blob: "x".repeat(1000) } };
+    const [entry] = droppedOverrides(old, managed);
+    expect(entry.length).toBeLessThan(400);
+    expect(entry).toContain("...");
   });
 
   test("differing and repo-only declarations are dropped and listed", () => {
@@ -401,6 +447,33 @@ describe("transitionSettingsStarter", () => {
     expect(section).not.toContain("repository.has_issues");
   });
 
+  test("a mapping-shaped legacy labels section reaches the drift output, never a refusal", () => {
+    // Legacy files are exactly where mis-shapes live: the transition reads
+    // the OLD file leniently (not through the settings parse boundary,
+    // which refuses mis-shaped sections), so the shape problem lands in
+    // the dropped-overrides list the reviewer works from instead of
+    // looping the fail-soft retry forever.
+    const misShaped = legacySettings.replace(
+      /labels:[\s\S]*$/,
+      "labels:\n  incident:\n    color: b60205\n",
+    );
+    const { dir, out } = target({
+      settings: misShaped,
+      modules: "modules: [settings-sync]\n",
+      answers,
+    });
+    transitionSettingsStarter(dir, out, "t");
+    // The transition ran (the marker is gone) and the section reports the
+    // mis-shaped labels, rendered as-is with a shape warning.
+    expect(readFileSync(join(dir, ".github/settings.yml"), "utf-8")).not.toContain(
+      LEGACY_MERGEABLE_LINE,
+    );
+    const section = readFileSync(out, "utf-8");
+    expect(section).not.toContain("transition FAILED");
+    expect(section).toContain("labels (mis-shaped");
+    expect(section).toContain("incident");
+  });
+
   test("a lossless transition still replaces, and is still held for review", () => {
     const lossless = legacySettings.replace(
       /labels:[\s\S]*$/,
@@ -486,6 +559,38 @@ describe("transitionSettingsStarter", () => {
     transitionSettingsStarter(dir, out, "t");
     expect(readFileSync(join(dir, ".github/settings.yml"), "utf-8")).toBe(handWritten);
     expect(readFileSync(out, "utf-8")).toContain("could not be classified");
+  });
+
+  test("a hidden target's classification warning redacts the manifest detail", () => {
+    // headManifestClass's detail quotes target-controlled manifest content
+    // (the unknown class value below); the warning lands in the PUBLIC
+    // sync log, so a hidden target's copy must keep only the fact - the
+    // full detail still reaches the PR-body section, which ships to the
+    // private repo.
+    const { dir, out } = target({
+      settings: "repository:\n  description: mine\n",
+      modules: "modules: [settings-sync]\n",
+      answers,
+      manifestClass: "mystery-class",
+    });
+    const logs: string[] = [];
+    const originalLog = console.log;
+    const priorHide = process.env.HIDE_DETAILS;
+    console.log = (...args: unknown[]) => {
+      logs.push(args.map(String).join(" "));
+    };
+    process.env.HIDE_DETAILS = "true";
+    try {
+      transitionSettingsStarter(dir, out, "t");
+    } finally {
+      console.log = originalLog;
+      if (priorHide === undefined) delete process.env.HIDE_DETAILS;
+      else process.env.HIDE_DETAILS = priorHide;
+    }
+    const warningLine = logs.find((line) => line.includes("::warning::")) ?? "";
+    expect(warningLine).toContain("detail hidden: private repository");
+    expect(warningLine).not.toContain("mystery-class");
+    expect(readFileSync(out, "utf-8")).toContain("mystery-class");
   });
 
   test("a repo without the settings-sync module keeps its legacy file", () => {

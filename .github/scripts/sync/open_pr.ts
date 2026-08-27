@@ -9,14 +9,14 @@
 // VALIDATION, RESOLVED, RECOVER, FORCE_MANUAL, DRIFT_FILE, SUMMARY_FILE,
 // CARRIED_FILE, CARRY_REVIEW_FILE, RETIRED_MODULES_FILE,
 // REMOVED_PATHS_FILE, WITHHELD_FILE, MANIFEST_LICENSE_FILE,
-// LICENSE_TRANSITION_FILE, GH_TOKEN, GITHUB_REPOSITORY, GITHUB_OUTPUT,
+// GH_TOKEN, GITHUB_REPOSITORY, GITHUB_OUTPUT,
 // RUNNER_TEMP.
 
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { env, hideDetails, requireEnv, setOutput } from "../shared/gha.ts";
 import { capture, mustCapture } from "../shared/proc.ts";
-import { SETTINGS_LAYERING_NAME, TAIL_SHRANK_NAME } from "./section_files.ts";
+import { REMOVED_SPLITS_NAME, SETTINGS_LAYERING_NAME, TAIL_SHRANK_NAME } from "./section_files.ts";
 
 const target = requireEnv("TARGET");
 const runnerTemp = requireEnv("RUNNER_TEMP");
@@ -73,8 +73,31 @@ if (nonEmpty(driftFile)) {
   body = `${slurp(driftFile)}\n\n${body}`;
 }
 
+// GitHub caps PR bodies at 64 KiB and gh fails outright past it, stranding
+// the pushed branch. Each section below bounds itself, but several near
+// their caps (carry, tail tripwire, removed-splits ~16K each, validation
+// excerpt ~20K) can SUM past 64 KiB, so an AGGREGATE budget governs the
+// whole body: an overflowing section is dropped for the truncation banner.
+// The needs-review decision comes from the flag files, never this prose, so
+// dropping a section can only lose information, never flip manual to clean.
+const BODY_CAP = 62000;
+let bodyBytes = Buffer.byteLength(body, "utf-8");
+let bodyTruncated = false;
+
+/** Append `chunk` only if the whole body stays under the aggregate cap;
+ * otherwise drop it and remember to add the truncation banner. */
+function appendSection(chunk: string): void {
+  const chunkBytes = Buffer.byteLength(chunk, "utf-8");
+  if (bodyBytes + chunkBytes <= BODY_CAP) {
+    body += chunk;
+    bodyBytes += chunkBytes;
+  } else {
+    bodyTruncated = true;
+  }
+}
+
 if (recover === "recopy") {
-  body += `
+  appendSection(`
 
 > [!WARNING]
 > RECOVERY RE-RENDER: this update was dispatched with recover=recopy
@@ -85,7 +108,7 @@ if (recover === "recopy") {
 > previous copy that could not be split cleanly is preserved IN FULL
 > below a repo-platform:recovery-appendix comment and needs manual
 > deduplication), and retired-file cleanup was skipped.
-> Review the whole diff before merging.`;
+> Review the whole diff before merging.`);
 }
 
 // PR-body sections fed by flag files, collected from ONE declarative list:
@@ -145,29 +168,23 @@ ${lines(path)
   },
   { path: requireEnv("MANIFEST_LICENSE_FILE"), render: slurp, forcesReview: false },
   { path: join(runnerTemp, SETTINGS_LAYERING_NAME), render: slurp, forcesReview: true },
-  {
-    path: requireEnv("LICENSE_TRANSITION_FILE"),
-    render: (path) => `> [!WARNING]
-> This update DELETES ${lines(path).join(" and ")}. Copier
-> resolves delete-vs-modify by dropping the file, so content below its
-> local-section marker is not in this diff. Prior licensing needs no
-> notice - git history is the record - but if the old file (see it on the
-> base branch or in git history) carried other local notices such as
-> third-party components, move them below LICENSE.md's marker on this
-> branch before merging.`,
-    forcesReview: true,
-  },
+  // preserve_repo_owned.ts's removed-split-files report: the update
+  // deletes a path whose previous copy carried a repository-owned half
+  // (class `split` at HEAD, or a license spelling the manifest cannot
+  // class); the section names the content that leaves and the PR waits
+  // for a human to restore what must stay.
+  { path: join(runnerTemp, REMOVED_SPLITS_NAME), render: slurp, forcesReview: true },
   { path: requireEnv("CARRY_REVIEW_FILE"), render: null, forcesReview: true },
 ];
 let sectionsForceReview = false;
 for (const section of sections) {
   if (!nonEmpty(section.path)) continue;
-  if (section.render !== null) body += `\n\n${section.render(section.path)}`;
+  if (section.render !== null) appendSection(`\n\n${section.render(section.path)}`);
   sectionsForceReview ||= section.forcesReview;
 }
 
 if (resolved === "true") {
-  body += `
+  appendSection(`
 
 > [!WARNING]
 > copier hit merge conflicts, resolved below in favor of the
@@ -175,7 +192,7 @@ if (resolved === "true") {
 > should stay, and hand-edit anything marked unresolved, before
 > merging.
 
-${slurp(requireEnv("SUMMARY_FILE"))}`;
+${slurp(requireEnv("SUMMARY_FILE"))}`);
 }
 
 if (validation === "failed") {
@@ -211,22 +228,66 @@ if (validation === "failed") {
       }
     }
   }
-  body += `
+  appendSection(`
 
 > [!WARNING]
 > Validation failed on the updated tree (${validationWhere}). Fix it
-> in this PR before merging.${validationExtra}`;
+> in this PR before merging.${validationExtra}`);
 }
+
+// One truncation banner when the aggregate budget dropped any section, so
+// the reader knows the body is incomplete and where the rest lives. It is
+// short and BODY_CAP leaves ample headroom under GitHub's 64 KiB limit, so
+// this final append never overflows.
+if (bodyTruncated) {
+  body += `
+
+> [!WARNING]
+> This PR body was truncated to stay under GitHub's size limit: one or
+> more sections above were omitted. Inspect this sync run's log and the
+> base branch for the full detail before merging.`;
+}
+
+// Backstop the aggregate budget: appendSection governs the OPTIONAL
+// sections, but the drift warning prepended on top and the base body are
+// mandatory and the drift value is target-controlled (a huge recorded
+// description), so a pathological drift alone could still overrun 64 KiB
+// and strand the branch. Hard-cap the finished body on a UTF-8 char
+// boundary, dropping whole trailing lines so no markdown is cut mid-line.
+const HARD_CAP = 63000;
+function capBody(full: string): string {
+  if (Buffer.byteLength(full, "utf-8") <= HARD_CAP) return full;
+  const notice =
+    "\n\n> [!WARNING]\n> This PR body exceeded GitHub's size limit and was hard-truncated;" +
+    " inspect this sync run's log and the base branch for the rest before merging.";
+  const budget = HARD_CAP - Buffer.byteLength(notice, "utf-8");
+  const lines = full.split("\n");
+  while (lines.length > 1 && Buffer.byteLength(lines.join("\n"), "utf-8") > budget) {
+    lines.pop();
+  }
+  // A single line already over budget (no newline to trim to) is cut on a
+  // char boundary by bytes.
+  let head = lines.join("\n");
+  if (Buffer.byteLength(head, "utf-8") > budget) {
+    const buf = Buffer.from(head, "utf-8");
+    let end = budget;
+    while (end > 0 && (buf[end] & 0xc0) === 0x80) end--; // back off a continuation byte
+    head = buf.subarray(0, end).toString("utf-8");
+  }
+  return head + notice;
+}
+body = capBody(body);
 
 // Anything that needs human review - dropped local hunks, a split-file
 // carry that needs a human (appendix, reset managed-half edits, duplicate
 // markers), a tripped tail tripwire, withheld workflow files, failed
 // validation, a recovery re-render, a dispatch that forced manual review,
-// a deleted license file, out-of-band settings drift, dropped
-// settings-layering overrides - stays manual; a clean update (which
-// includes kept-whole and clean tail-appended carries) arms squash
-// auto-merge below. The flag-file reasons ride the section list above
-// (forcesReview), so a new section cannot forget the review question.
+// a deleted split-class file (its repository-owned half leaves with it),
+// out-of-band settings drift, dropped settings-layering overrides - stays
+// manual; a clean update (which includes kept-whole and clean
+// tail-appended carries) arms squash auto-merge below. The flag-file
+// reasons ride the section list above (forcesReview), so a new section
+// cannot forget the review question.
 const needsReview =
   resolved === "true" ||
   validation === "failed" ||
@@ -295,6 +356,6 @@ if (!needsReview) {
   }
 } else {
   console.log(
-    "auto-merge left off: this PR needs review (conflicts, split-file carries needing review, a tripped tail tripwire, withheld files, failed validation, out-of-band settings drift, dropped settings-layering overrides, a recovery re-render, a forced-manual dispatch, or a deleted license file).",
+    "auto-merge left off: this PR needs review (conflicts, split-file carries needing review, a tripped tail tripwire, withheld files, failed validation, out-of-band settings drift, dropped settings-layering overrides, a recovery re-render, a forced-manual dispatch, or a deleted split-class file whose repository-owned half leaves with it).",
   );
 }

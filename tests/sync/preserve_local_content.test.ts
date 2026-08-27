@@ -14,6 +14,7 @@ import { dirname, join } from "node:path";
 import {
   carryLocalRegion,
   carryManagedTail,
+  fencedResetExcerpt,
   splitEntries,
 } from "../../.github/scripts/sync/preserve_local_content.ts";
 import { GITIGNORE_REGION } from "../../scripts/gitignore_local.ts";
@@ -209,6 +210,80 @@ describe("carryManagedTail", () => {
     expect(second?.content.split("repo-platform:recovery-appendix").length).toBe(2);
     expect(second?.content).toStartWith(newerRender);
     expect(second?.content).toEndWith(legacy);
+  });
+
+  test("a marker line with a stray trailing space still anchors the split", () => {
+    // The shared isMarkerLine predicate (stamp_manifest.ts) trims: the
+    // stamper and the validator already counted this line as the marker,
+    // and the old exact-match split sent the file down the appendix path -
+    // delivering a two-marker tree the validator rejected.
+    const target = `# AGENTS.md\n\nold managed guidance\n\n${SENTINEL} \n\nrepo tail\n`;
+    const carry = carryManagedTail(agentsRender, target, SENTINEL);
+    expect(carry?.kind).toBe("tail-appended");
+    expect(carry?.content).toBe(`${agentsRender}\nrepo tail\n`);
+  });
+
+  test("an indented marker line anchors the split too (trim semantics)", () => {
+    const target = `old\n  ${SENTINEL}\nrepo tail\n`;
+    const carry = carryManagedTail(agentsRender, target, SENTINEL);
+    expect(carry?.kind).toBe("tail-appended");
+    expect(carry?.content).toBe(`${agentsRender}repo tail\n`);
+  });
+
+  test("an appendix carry neutralizes the previous copy's marker lines", () => {
+    // Render not ending at the marker: the whole previous copy - marker
+    // line included - lands below the appendix comment. Verbatim, the
+    // delivered file would carry TWO marker lines and fail the
+    // validator's exactly-once rule with advice pointing away from the
+    // real cause; the neutralized line stays for the human, inert.
+    const render = `docs\n${SENTINEL}\ntrailing managed line\n`;
+    const target = `docs\n${SENTINEL}\nrepo tail\n`;
+    const carry = carryManagedTail(render, target, SENTINEL);
+    expect(carry?.kind).toBe("appendix");
+    const markerLines = (carry?.content ?? "")
+      .split("\n")
+      .filter((line) => line.trim() === SENTINEL);
+    expect(markerLines).toHaveLength(1);
+    // The neutralized spelling and the tail content both survive.
+    expect(carry?.content).toContain("<!---repo-platform:local-section--->");
+    expect(carry?.content).toContain("repo tail");
+  });
+
+  test("hash-marker appendixes neutralize to a still-commented line", () => {
+    const render = `top\n${HASH_SENTINEL}\ntrailing\n`;
+    const target = `top\n${HASH_SENTINEL}\nlocal attr\n`;
+    const carry = carryManagedTail(render, target, HASH_SENTINEL);
+    expect(carry?.kind).toBe("appendix");
+    const markerLines = (carry?.content ?? "")
+      .split("\n")
+      .filter((line) => line.trim() === HASH_SENTINEL);
+    expect(markerLines).toHaveLength(1);
+    expect(carry?.content).toContain("#-repo-platform:local-section");
+  });
+
+  test("a space-free HTML marker neutralizes to a still-valid HTML comment", () => {
+    const marker = "<!--local-->";
+    const render = `docs\n${marker}\ntrailing managed line\n`;
+    const carry = carryManagedTail(render, `docs\n${marker}\nrepo tail\n`, marker);
+    expect(carry?.kind).toBe("appendix");
+    expect(carry?.content).toContain("<!---local-->");
+    const markerLines = (carry?.content ?? "").split("\n").filter((l) => l.trim() === marker);
+    expect(markerLines).toHaveLength(1);
+  });
+
+  test("a marker line only the UTF-8 view trims clean is neutralized too", () => {
+    // The carry reads latin1, the validator decodes UTF-8: a UTF-8 NBSP
+    // (0xC2 0xA0) beside the marker trims clean only under UTF-8, so a
+    // verbatim append would deliver a tree the validator counts two
+    // markers in while this module counted one.
+    const utf8Nbsp = String.fromCharCode(0xc2, 0xa0); // the NBSP's UTF-8 bytes as latin1 code units
+    const render = `docs\n${SENTINEL}\ntrailing managed line\n`;
+    const target = `docs\n${utf8Nbsp}${SENTINEL}\nrepo tail\n`;
+    const carry = carryManagedTail(render, target, SENTINEL);
+    expect(carry?.kind).toBe("appendix");
+    const utf8View = Buffer.from(carry?.content ?? "", "latin1").toString("utf-8");
+    const markerLines = utf8View.split("\n").filter((line) => line.trim() === SENTINEL);
+    expect(markerLines).toHaveLength(1);
   });
 
   test("CRLF marker lines are recognized and the tail keeps its bytes", () => {
@@ -615,6 +690,38 @@ describe("preserve_local_content script (recopy mode)", () => {
   });
 });
 
+describe("fencedResetExcerpt", () => {
+  test("the charged cost is the COMPLETE rendered size, fences included", () => {
+    const result = fencedResetExcerpt(["plain line"], 1000);
+    expect(result).not.toBeNull();
+    expect(result?.cost).toBe(Buffer.byteLength(result?.text ?? "", "utf-8"));
+    expect(result?.cost ?? 0).toBeGreaterThan(Buffer.byteLength("plain line", "utf-8"));
+  });
+
+  test("a backtick-heavy line's inflated fence cannot overrun the budget", () => {
+    // A 290-backtick line forces two ~291-backtick fences the old
+    // accounting never charged; the true rendered size must respect the
+    // budget or fall to null (the caller's count-only note).
+    const lines = ["`".repeat(290), "ordinary dropped line"];
+    const budget = 320; // fits the backtick line's bytes but not its fences
+    const result = fencedResetExcerpt(lines, budget);
+    if (result !== null) {
+      expect(Buffer.byteLength(result.text, "utf-8")).toBeLessThanOrEqual(budget);
+      expect(result.cost).toBe(Buffer.byteLength(result.text, "utf-8"));
+    }
+    // A comfortable budget itemizes everything, still fully charged.
+    const roomy = fencedResetExcerpt(lines, 4096);
+    expect(roomy).not.toBeNull();
+    expect(roomy?.text).toContain("ordinary dropped line");
+    expect(Buffer.byteLength(roomy?.text ?? "", "utf-8")).toBeLessThanOrEqual(4096);
+    expect(roomy?.cost).toBe(Buffer.byteLength(roomy?.text ?? "", "utf-8"));
+  });
+
+  test("null when not even one line fits the true rendered size", () => {
+    expect(fencedResetExcerpt(["x".repeat(200)], 50)).toBeNull();
+  });
+});
+
 describe("splitEntries", () => {
   const tailEntry = (over: Record<string, unknown> = {}) => ({
     class: "split",
@@ -926,7 +1033,66 @@ describe("preserve_local_content render mode", () => {
     // Managed halves are template-owned: byte-equal to render-new.
     expect(readFileSync(join(root, "SECURITY.md"), "utf-8")).toBe(securityNew);
     expect(result.summary).toContain("RESET to the fresh render");
+    // The reviewer restores from LINES, not from the fact of a reset: the
+    // dropped local edit is itemized in the summary, fenced like the
+    // conflict resolver's dropped hunks.
+    expect(result.summary).toContain("The reset dropped these line(s):");
+    expect(result.summary).toContain("old security prefix EDITED");
     expect(result.review).toContain("SECURITY.md: managed-half edits reset");
+  });
+
+  test("a locally duplicated baseline line is itemized when the duplicate drops", () => {
+    // Multiset honesty: HEAD carries "shared line" twice (the repo added
+    // a duplicate), the old and new renders carry it once. Comparing
+    // HEAD's additions against the whole delivered half would let the
+    // baseline occurrence absorb the dropped duplicate.
+    const oldHalf = `shared line\n${SENTINEL}\n`;
+    const newHalf = `shared line\n${SENTINEL}\n`;
+    const targetHalfDup = `shared line\nshared line\n${SENTINEL}\n`;
+    const root = makeTarget({ "SECURITY.md": targetHalfDup });
+    initGitRepo(root);
+    writeFileSync(join(root, "SECURITY.md"), MERGE_JUNK);
+    const { renderDir, oldRenderDir } = makeRenderPair(
+      [SECURITY_ENTRY],
+      { "SECURITY.md": newHalf },
+      { "SECURITY.md": oldHalf },
+    );
+    const result = runRender(root, renderDir, oldRenderDir);
+    expect(result.exitCode).toBe(0);
+    expect(result.review).toContain("SECURITY.md: managed-half edits reset");
+    expect(result.summary).toContain("The reset dropped these line(s):");
+    expect(result.summary).toContain("shared line");
+  });
+
+  test("reset excerpts share one total byte budget across files", () => {
+    // Two files each dropping 40 long lines would blow past any per-file
+    // bound alone; the shared budget caps the summary and the overflowing
+    // file falls back to a count-only note.
+    const longLines = (tag: string) =>
+      Array.from({ length: 45 }, (_, i) => `${tag}-${i}-${"x".repeat(290)}`).join("\n");
+    const files = ["AGENTS.md", "SECURITY.md", "CONTRIBUTING.md"];
+    const targets: Record<string, string> = {};
+    const news: Record<string, string> = {};
+    const olds: Record<string, string> = {};
+    for (const rel of files) {
+      targets[rel] = `${longLines(rel)}\n${SENTINEL}\n`;
+      news[rel] = `fresh managed\n${SENTINEL}\n`;
+      olds[rel] = `old managed\n${SENTINEL}\n`;
+    }
+    const root = makeTarget(targets);
+    initGitRepo(root);
+    for (const rel of files) writeFileSync(join(root, rel), MERGE_JUNK);
+    const { renderDir, oldRenderDir } = makeRenderPair(
+      files.map((path) => ({ path, grammar: "tail-marker", marker: SENTINEL }) as SplitSpec),
+      news,
+      olds,
+    );
+    const result = runRender(root, renderDir, oldRenderDir);
+    expect(result.exitCode).toBe(0);
+    // Bounded: well under the 64 KiB PR-body cap even with headroom for
+    // the other sections.
+    expect(Buffer.byteLength(result.summary, "utf-8")).toBeLessThan(24000);
+    expect(result.summary).toContain("excerpt omitted: report size limit");
   });
 
   test("a routine template change to the managed half is not read as a local edit", () => {
@@ -981,6 +1147,8 @@ describe("preserve_local_content render mode", () => {
     expect(rebuilt).toEndWith(gitignoreManagedNew);
     expect(rebuilt).not.toContain("hand-added-in-managed/");
     expect(result.review).toContain(".gitignore: managed-half edits reset");
+    // The dropped managed-section edit is itemized for the reviewer.
+    expect(result.summary).toContain("hand-added-in-managed/");
   });
 
   test("a split file absent from HEAD is written as the clean render", () => {

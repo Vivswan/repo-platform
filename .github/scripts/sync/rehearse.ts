@@ -650,8 +650,8 @@ export function rehearseRepo(slug: string, options: RehearsalOptions): Rehearsal
           "Merge conflicts resolved toward the template (review the dropped local lines)",
         ],
         [
-          "license-transition.txt",
-          "License files this update deletes (the PR would stay manual-review)",
+          "removed-splits.md",
+          "Files this update deletes with a repository-owned half (split-classed at HEAD, or a license file the manifest cannot class); the PR would stay manual-review",
         ],
         ["manifest-license-warnings.md", "Registry metadata conflicting with the fleet license"],
         [

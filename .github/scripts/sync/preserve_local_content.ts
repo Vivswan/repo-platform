@@ -90,7 +90,7 @@ import {
 import { isCommentMarker, isHashMarker } from "../../../scripts/ownership.ts";
 import { parseFlags } from "../shared/flags.ts";
 import { headBytes } from "../shared/git_head.ts";
-import { MANIFEST_NAME, managedHalf } from "./stamp_manifest.ts";
+import { isMarkerLine, MANIFEST_NAME, managedHalf } from "./stamp_manifest.ts";
 
 function lastLineIndex(
   lines: ReturnType<typeof splitLines>,
@@ -103,18 +103,24 @@ function lastLineIndex(
 }
 
 /** Content split at the FIRST marker line: head runs through the marker
- * (newline included), tail is everything below it. Splitting at the first
- * keeps every later line - including any further marker, so a stale
- * duplicate adds reviewable lines instead of dropping the content between
- * the markers; extraMarkers flags that for the summary. */
+ * (newline included), tail is everything below it. Marker lines match via
+ * the shared isMarkerLine predicate (stamp_manifest.ts) - the stamper, the
+ * validator's twin, and this carry must agree on what a marker line IS, or
+ * a line only some of them count (one with a stray trailing space, say)
+ * splits the file differently at each site. Splitting at the first keeps
+ * every later line - including any further marker, so a stale duplicate
+ * adds reviewable lines instead of dropping the content between the
+ * markers; extraMarkers flags that for the summary. */
 function splitAtFirstMarker(
   content: string,
   marker: string,
 ): { head: string; tail: string; extraMarkers: boolean } | null {
   const lines = splitLines(content);
-  const first = lines.findIndex((line) => stripCr(line.text) === marker);
+  const first = lines.findIndex((line) => isMarkerLine(line.text, marker));
   if (first === -1) return null;
-  const extraMarkers = lines.some((line, index) => index > first && stripCr(line.text) === marker);
+  const extraMarkers = lines.some(
+    (line, index) => index > first && isMarkerLine(line.text, marker),
+  );
   return {
     head: content.slice(0, lines[first].end),
     tail: content.slice(lines[first].end),
@@ -126,8 +132,47 @@ function withTrailingNewline(content: string): string {
   return content.endsWith("\n") ? content : `${content}\n`;
 }
 
-/** The keep-both fallback: render, then the previous copy in full below a
- * marked comment. The comment spelling follows the entry's marker form:
+/** The declared marker text made inert for an appendix carry: spaces
+ * dash-joined; a space-free marker gets a dash right after its comment
+ * opener ("<!--" or the leading "#"), so the inert form still reads as a
+ * comment in the marker's own syntax but no longer counts as a marker line
+ * anywhere - the stamper, the validator, and this module's own splitter
+ * all match markers per isMarkerLine, and a verbatim re-appended marker
+ * line would double the validator's exactly-once count. */
+function inertTailMarker(marker: string): string {
+  const inert = marker.replaceAll(" ", "-");
+  if (inert !== marker) return inert;
+  const opener = marker.startsWith("<!--") ? "<!--" : marker.slice(0, 1);
+  return `${opener}-${marker.slice(opener.length)}`;
+}
+
+/** Whether a latin1-decoded line is a marker line to ANY pipeline reader:
+ * this module and the stamper match the latin1 view, but the validator
+ * decodes UTF-8 - a marker line carrying, say, a UTF-8 NBSP (0xC2 0xA0)
+ * beside the marker trims clean only under the UTF-8 view, so a carry
+ * that left it verbatim would deliver a tree the validator counts two
+ * markers in. Neutralization must cover the union. */
+function isMarkerLineAnyView(latin1Line: string, marker: string): boolean {
+  if (isMarkerLine(latin1Line, marker)) return true;
+  return isMarkerLine(Buffer.from(latin1Line, "latin1").toString("utf-8"), marker);
+}
+
+/** The previous copy with its marker LINES neutralized (mid-line mentions
+ * are not marker lines to any consumer and stay verbatim). */
+function neutralizeMarkerLines(content: string, marker: string): string {
+  const inert = inertTailMarker(marker);
+  return splitLines(content)
+    .map((line) =>
+      isMarkerLineAnyView(line.text, marker) ? line.text.replaceAll(marker, inert) : line.text,
+    )
+    .join("\n");
+}
+
+/** The keep-both fallback: render, then the previous copy below a marked
+ * comment - with any marker line in the previous copy neutralized (the
+ * fresh render's marker must stay the file's ONLY marker line, or the
+ * recovery output itself fails validation with advice pointing away from
+ * the real cause). The comment spelling follows the entry's marker form:
  * an HTML comment for HTML-comment markers, hash comments otherwise
  * (.gitattributes, .editorconfig, .github/CODEOWNERS - an HTML comment
  * there would parse as file content). */
@@ -136,13 +181,35 @@ function withAppendix(renderNl: string, target: string, marker: string): string 
   const explanation = [
     "The template sync's re-render could not tell this file's",
     "repository-local tail apart from its managed content, so the previous",
-    "copy is preserved in full below. Keep what is repository-local, drop",
-    "what the content above already covers, then delete this comment.",
+    "copy is preserved in full below (any marker line in it is dash-joined",
+    "to stay inert). Keep what is repository-local, drop what the content",
+    "above already covers, then delete this comment.",
   ];
   const appendix = htmlStyle
     ? ["<!-- repo-platform:recovery-appendix", `${explanation.join("\n")} -->`].join("\n")
     : ["# repo-platform:recovery-appendix", ...explanation.map((line) => `# ${line}`)].join("\n");
-  return `${renderNl}\n${appendix}\n\n${withTrailingNewline(target)}`;
+  return `${renderNl}\n${appendix}\n\n${withTrailingNewline(neutralizeMarkerLines(target, marker))}`;
+}
+
+/** Previous non-blank lines the delivered text no longer holds, counted
+ * as a MULTISET: each previous occurrence consumes one delivered
+ * occurrence, so a line held twice and delivered once is one missing line
+ * - a plain Set would lose occurrence counts and pass exactly the shrink
+ * this comparison exists to catch. Shared with tail_tripwire.ts (which
+ * re-exports it): the tripwire's loss check and the reset itemization
+ * below must count "missing" identically. */
+export function missingLines(previous: string, delivered: string): string[] {
+  const kept = new Map<string, number>();
+  for (const line of delivered.split("\n")) {
+    kept.set(line, (kept.get(line) ?? 0) + 1);
+  }
+  return previous.split("\n").filter((line) => {
+    if (line.trim() === "") return false;
+    const remaining = kept.get(line) ?? 0;
+    if (remaining === 0) return true;
+    kept.set(line, remaining - 1);
+    return false;
+  });
 }
 
 export type TailCarry =
@@ -187,7 +254,7 @@ export function carryManagedTail(render: string, target: string, marker: string)
   // repository tail.
   const renderLines = splitLines(render);
   const finalIndex = lastLineIndex(renderLines, (text) => text.trim() !== "");
-  if (finalIndex !== -1 && stripCr(renderLines[finalIndex].text) === marker) {
+  if (finalIndex !== -1 && isMarkerLine(renderLines[finalIndex].text, marker)) {
     const split = splitAtFirstMarker(target, marker);
     if (split !== null) {
       // Empty tail below the target's marker: never customized. A
@@ -379,8 +446,11 @@ export const ASCII_MARKER_RE = /^[\x20-\x7e]+$/;
 /** Manifest keys become filesystem paths under the target root, so a key
  * that could escape it (absolute, or carrying .. segments) is refused at
  * this boundary - the declaration schema upstream never emits one, but the
- * manifest text rides through a checkout this script must not trust. */
-function isCleanRelativePath(path: string): boolean {
+ * manifest text rides through a checkout this script must not trust.
+ * Exported for tail_tripwire's legacy fallback: a tampered legacy key
+ * could never match the post-sync lookup, and accepting it would turn the
+ * mismatch into a silent skip. */
+export function isCleanRelativePath(path: string): boolean {
   return (
     path !== "" &&
     !/[\r\n]/.test(path) &&
@@ -557,6 +627,12 @@ interface FileOutcome {
   note: string;
   /** Reasons this carry needs human review (empty = auto-merge-eligible). */
   reviewReasons: string[];
+  /** For a managed-half reset: the local-edit lines the rebuild dropped
+   * (in HEAD's managed half, in neither the old render's half nor the
+   * delivered one), itemized in the summary the way the conflict resolver
+   * itemizes dropped hunks - a reviewer restoring an edit needs the lines,
+   * not just the fact of the reset. */
+  resetLines?: string[];
 }
 
 /** One split entry's carry over (render, target): the delivered content
@@ -642,6 +718,7 @@ function rebuildSplitFile(
   let content = render;
   let note: string | null = null;
   let appendixCarry = false;
+  let resetLines: string[] | undefined;
   const reviewReasons: string[] = [];
   if (target !== null) {
     const carried = carrySplitEntry(entry, render, target, "render");
@@ -677,6 +754,17 @@ function rebuildSplitFile(
         } else if (targetHalf !== oldHalf) {
           note = note === null ? MANAGED_RESET_NOTE : `${note}; ${MANAGED_RESET_NOTE}`;
           reviewReasons.push("managed-half edits reset");
+          // The reviewer restores from lines, not from the fact of a
+          // reset: itemize the local ADDITIONS (in HEAD's half beyond the
+          // old render's) the delivered half no longer carries. Both
+          // sides are taken relative to the OLD render so multiset counts
+          // stay honest - comparing HEAD's additions against the whole
+          // delivered half would let a baseline occurrence of a line
+          // absorb the dropped local duplicate of the same line.
+          resetLines = missingLines(
+            missingLines(targetHalf, oldHalf).join("\n"),
+            missingLines(deliveredHalf, oldHalf).join("\n"),
+          );
         }
       }
     }
@@ -685,7 +773,7 @@ function rebuildSplitFile(
   // which this mode exists to discard - even a byte-identical rewrite is
   // the correct statement of ownership.
   writeRegularFile(root, rel, content);
-  return note === null ? null : { rel, note, reviewReasons };
+  return note === null ? null : { rel, note, reviewReasons, resetLines };
 }
 
 const RENDER_INTRO = [
@@ -703,6 +791,83 @@ const RECOPY_INTRO = [
   "has no three-way merge and had reset these sanctioned repository-local",
   "regions; verify each file's diff before merging:",
 ];
+
+// The summary shares the PR body with every other section, and gh fails
+// outright past the 64 KiB body cap (see open_pr.ts) - so the reset-line
+// excerpts are bounded three ways, like tail_tripwire's report: lines per
+// file, characters per line via clip (a minified line must not blow the
+// body), and total bytes across ALL files' excerpts (many reset files
+// must not add up past the cap). The full diff is in the PR itself; the
+// excerpt is the itemized starting point.
+const MAX_EXCERPT_LINES = 40;
+const MAX_LINE_CHARS = 300;
+const MAX_EXCERPT_BYTES = 16384;
+
+/** One display line, bounded and control-free: an excerpted line is
+ * target-controlled repository content, so one enormous value must not
+ * blow the PR-body cap - and C0 control bytes must not survive into a
+ * report: a NUL riding latin1 all the way to open_pr's --body argv kills
+ * the spawn (OS argv cannot carry NUL). Escaped as visible \\xNN
+ * (lossless); tab stays literal. One owner for every PR-body excerpt of
+ * repository bytes - tail_tripwire.ts and preserve_repo_owned.ts reuse
+ * it. */
+export function clip(text: string): string {
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: matching control bytes to escape them is this regex's whole job
+  const printable = text.replace(/[\x00-\x08\x0a-\x1f\x7f]/g, (control) => {
+    return `\\x${control.charCodeAt(0).toString(16).padStart(2, "0")}`;
+  });
+  return printable.length > MAX_LINE_CHARS
+    ? `${printable.slice(0, MAX_LINE_CHARS)} [clipped]`
+    : printable;
+}
+
+/** A fence long enough that no shown line can close it early. */
+export function fenceFor(lines: string[]): string {
+  let longest = 3;
+  for (const line of lines) {
+    for (const match of line.matchAll(/`+/g)) {
+      longest = Math.max(longest, match[0].length);
+    }
+  }
+  return "`".repeat(longest + 1);
+}
+
+/** A markdown-fenced excerpt of dropped lines, charged against the shared
+ * budget by its COMPLETE rendered size - a backtick-run line inflates the
+ * fences far past the line bytes alone. Sheds trailing lines until the
+ * true total fits; null when nothing fits (the caller writes a count-only
+ * note). Exported for its unit tests. */
+export function fencedResetExcerpt(
+  lines: string[],
+  budget: number,
+): { text: string; cost: number } | null {
+  const shown: string[] = [];
+  let spent = 0;
+  for (const line of lines) {
+    if (shown.length >= MAX_EXCERPT_LINES) break;
+    const clipped = clip(line);
+    const lineCost = Buffer.byteLength(clipped, "utf-8") + 3;
+    if (spent + lineCost > budget) break;
+    spent += lineCost;
+    shown.push(clipped);
+  }
+  const render = () => {
+    const fence = fenceFor(shown);
+    const omitted = lines.length - shown.length;
+    const tail = omitted > 0 ? `\n  (${omitted} more; see this file's diff)` : "";
+    return `  ${fence}text\n${shown.map((line) => `  ${line}`).join("\n")}\n  ${fence}${tail}`;
+  };
+  // The line loop only approximates: verify the true rendered size and
+  // shed lines until it fits (popping a backtick-heavy line also shrinks
+  // the fence, so this always converges).
+  while (shown.length > 0) {
+    const text = render();
+    const cost = Buffer.byteLength(text, "utf-8");
+    if (cost <= budget) return { text, cost };
+    shown.pop();
+  }
+  return null;
+}
 
 function main(argv: string[]): number {
   const flags = parseFlags(
@@ -785,10 +950,21 @@ function main(argv: string[]): number {
 
   let summary = "";
   if (outcomes.length > 0) {
+    let excerptBudget = MAX_EXCERPT_BYTES;
     summary = [
       ...(renderDir !== undefined ? RENDER_INTRO : RECOPY_INTRO),
       "",
-      ...outcomes.map(({ rel, note }) => `- \`${rel}\`: ${note}`),
+      ...outcomes.map(({ rel, note, resetLines }) => {
+        if (resetLines === undefined || resetLines.length === 0) {
+          return `- \`${rel}\`: ${note}`;
+        }
+        const excerpt = fencedResetExcerpt(resetLines, excerptBudget);
+        if (excerpt === null) {
+          return `- \`${rel}\`: ${note}. The reset dropped ${resetLines.length} line(s) (excerpt omitted: report size limit; see this file's diff).`;
+        }
+        excerptBudget -= excerpt.cost;
+        return `- \`${rel}\`: ${note}. The reset dropped these line(s):\n\n${excerpt.text}\n`;
+      }),
       "",
     ].join("\n");
     if (hideDetails) {

@@ -27,12 +27,9 @@
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { parse as parseYaml } from "yaml";
 import { loadManifests } from "../../../scripts/module_manifests.ts";
-import {
-  loadOverrideLayer,
-  mergeSettingsLayers,
-  parseSettingsDoc,
-} from "../fleet/merge_settings_layers.ts";
+import { loadOverrideLayer, mergeSettingsLayers } from "../fleet/merge_settings_layers.ts";
 import {
   factsFromTargetDir,
   managedSettings,
@@ -40,6 +37,7 @@ import {
 } from "../fleet/render_managed_settings.ts";
 import { parseYamlMapping } from "../fleet/settings_document.ts";
 import { hideDetails, notice, warning } from "../shared/gha.ts";
+import { hasDuplicateJsonKeys } from "../shared/json.ts";
 import { capture } from "../shared/proc.ts";
 
 const REPO_ROOT = resolve(import.meta.dir, "..", "..", "..");
@@ -100,6 +98,12 @@ export function headManifestClass(
     detail: `HEAD:${MANIFEST_PATH} ${why}`,
   });
   if (!isMapping(parsed)) return unreadable("is not a JSON object");
+  // Last-wins duplicates could read a mergeable-then-starter settings.yml
+  // entry as already transitioned and skip the transition unseen;
+  // unreadable holds the PR unless the marker still proves the shape.
+  if (hasDuplicateJsonKeys(proc.stdout)) {
+    return unreadable("declares the same key twice (JSON.parse keeps only the last duplicate)");
+  }
   if (!isMapping(parsed.files)) return unreadable("has no files map");
   const entry = parsed.files[path];
   // No entry is an answer: the file was not rendered from the template at
@@ -271,6 +275,24 @@ export function droppedOverrides(
   };
   for (const [key, oldValue] of Object.entries(old)) {
     const managedValue = managed[key];
+    // A mis-shaped labels/rulesets section (a mapping or scalar where the
+    // dialect wants a list) is a LEGACY-file reality this report must
+    // describe, never skip: legacy files are exactly where mis-shapes
+    // live, and the per-entry comparison below - and the `key in override`
+    // fleet-law skip after it - both assume the list shape, so falling
+    // through would silently omit the section from the very list the
+    // reviewer re-adds overrides from. Reported as-is with a shape
+    // warning; the go-forward parse boundary refuses new mis-shapes.
+    if ((key === "labels" || key === "rulesets") && !Array.isArray(oldValue)) {
+      const shape = oldValue === null ? "null" : typeof oldValue;
+      const rendered = canonical(oldValue);
+      const excerpt = rendered.length > 200 ? `${rendered.slice(0, 200)}...` : rendered;
+      dropped.push(
+        `${key} (mis-shaped: a ${shape} where the settings dialect wants a list, so nothing ` +
+          `could be compared or carried - re-add valid entries by hand): ${excerpt}`,
+      );
+      continue;
+    }
     if (isMapping(oldValue) && isMapping(managedValue)) {
       for (const [child, childValue] of Object.entries(oldValue)) {
         if (key === "repository" && IDENTITY_KEYS.has(child)) continue; // carried
@@ -396,9 +418,20 @@ export function transitionSettingsStarter(
       if (classificationUncertain(oldText, head)) {
         // Cannot tell a legacy baseline from a transitioned starter, and
         // the wrong guess leaves a stale file shadowing the fleet layers
-        // with nothing to notice. Hold the PR and say so.
-        warning(`${label}: ${head.kind === "unreadable" ? head.detail : ""}`);
-        section = uncertainSummary(head.kind === "unreadable" ? head.detail : "unknown");
+        // with nothing to notice. Hold the PR and say so. The detail can
+        // embed target-controlled manifest content (headManifestClass
+        // quotes an unknown class value), so a hidden target's WARNING -
+        // which lands in the public sync log - keeps only the fact; the
+        // full detail still reaches the PR body below, which lives in the
+        // private repo (the same guard as the catch at the end of this
+        // function).
+        const detail = head.kind === "unreadable" ? head.detail : "unknown";
+        warning(
+          `${label}: settings.yml could not be classified (${
+            hideDetails() ? "detail hidden: private repository" : detail
+          }); the PR is held for review.`,
+        );
+        section = uncertainSummary(detail);
         writeFileSync(outPath, section);
         return;
       }
@@ -408,7 +441,23 @@ export function transitionSettingsStarter(
       if (modules.includes("settings-sync")) {
         const manifests = loadManifests();
         const facts = factsFromTargetDir(targetDir, manifests);
-        const old = parseSettingsDoc(oldText, settingsPath);
+        // The OLD file is read LENIENTLY, never through the settings parse
+        // boundary (settings_document.ts's parseSettingsDoc): describing
+        // legacy files is this transition's whole job, and legacy files
+        // are exactly where mis-shaped sections live - a schema refusal
+        // here would loop the fail-soft retry forever while the mis-shaped
+        // section never reached the dropped-overrides list the reviewer
+        // works from. droppedOverrides validates shapes itself and REPORTS
+        // a mis-shaped labels/rulesets section with a shape warning. An
+        // empty or comment-only document declares nothing; unreadable YAML
+        // still fails soft via the outer catch. logLevel error: default
+        // warnings print source lines to stderr past the hide-details
+        // handling.
+        const parsedOld = parseYaml(oldText, { logLevel: "error" }) as unknown;
+        if (parsedOld !== null && parsedOld !== undefined && !isMapping(parsedOld)) {
+          throw new Error(`${settingsPath}: not a YAML mapping`);
+        }
+        const old = (parsedOld ?? {}) as Record<string, unknown>;
         // A section-level null is a declaration, not an absence: the repo
         // took its whole identity block out of management and the heal
         // was honouring that. Seeding from the recorded answers here

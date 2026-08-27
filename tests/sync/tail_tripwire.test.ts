@@ -211,8 +211,75 @@ describe("headSplitEntries", () => {
   });
 
   test("an unknown grammar is never guessed at - it throws (fail closed)", () => {
+    // A grammar-bearing manifest is post-grammar: the strict parse
+    // decides, and its rejection is final (never re-read as legacy).
     const files = { "AGENTS.md": { class: "split", grammar: "mystery", marker: SENTINEL } };
-    expect(() => headSplitEntries(manifestText(files), "t")).toThrow(/refusing to guess/);
+    expect(() => headSplitEntries(manifestText(files), "t")).toThrow(/refuses to guess/);
+  });
+
+  test("a strict-parse rejection never falls back to the legacy branch", () => {
+    // One damaged grammar entry beside a healthy one: the undiscriminated
+    // fallback used to re-read the WHOLE manifest as legacy on any strict
+    // rejection; the era is decided first now, so the damage surfaces.
+    const files = {
+      "AGENTS.md": rawTail(),
+      "SECURITY.md": { class: "split", grammar: "tail-marker", marker: SENTINEL, managed: "below" },
+    };
+    expect(() => headSplitEntries(manifestText(files), "t")).toThrow(/managed side/);
+  });
+
+  test("a mixed manifest (grammar beside pre-grammar entries) is post-grammar and fails strict", () => {
+    const files = {
+      "AGENTS.md": rawTail(),
+      "SECURITY.md": rawLegacy(SENTINEL, "above"),
+    };
+    expect(() => headSplitEntries(manifestText(files), "t")).toThrow(/no grammar/);
+  });
+
+  test("an unclean legacy path throws instead of silently skipping the real file", () => {
+    // A tampered legacy key ("../AGENTS.md") could never match the
+    // post-sync manifest's clean key, so accepting it would skip the real
+    // file's check without a finding.
+    expect(() =>
+      headSplitEntries(manifestText({ "../AGENTS.md": rawLegacy(SENTINEL, "above") }), "t"),
+    ).toThrow(/clean relative path/);
+  });
+
+  test("a duplicated path key throws instead of last-wins reclassifying the file", () => {
+    // JSON.parse keeps only the LAST duplicate: a conflict-mangled
+    // manifest declaring AGENTS.md split THEN managed would classify it
+    // managed, drop it from the split candidates, and let a retirement
+    // delete its repository-owned half with no hold.
+    const dup = `{"files": {"AGENTS.md": ${JSON.stringify(rawTail())}, "AGENTS.md": {"class": "managed", "hash": null}}}`;
+    expect(() => headSplitEntries(dup, "t")).toThrow(/same key twice/);
+  });
+
+  test("an escape-variant duplicate key is caught too (JSON.parse collides decoded keys)", () => {
+    // The second spelling escapes the final "d" as backslash-u0064: a
+    // byte-level raw-token compare would miss it, but JSON.parse still
+    // collides the two keys last-wins.
+    const escaped = String.raw`"AGENTS.m\u0064"`;
+    const dup = `{"files": {"AGENTS.md": ${JSON.stringify(rawTail())}, ${escaped}: {"class": "managed", "hash": null}}}`;
+    expect(() => headSplitEntries(dup, "t")).toThrow(/same key twice/);
+  });
+
+  test("the same key in DIFFERENT objects is not a duplicate (every entry carries class)", () => {
+    // Core tokenizer cases live in tests/shared/json.test.ts (the shared
+    // helper's twin); this pins the consumer accepting a normal manifest.
+    const map = headSplitEntries(manifestText({ "AGENTS.md": rawTail() }), "t");
+    expect(map.get("AGENTS.md")?.kind).toBe("grammar");
+  });
+
+  test("an unknown or missing ownership class throws instead of reading as non-split", () => {
+    // A damaged class ("spllt") read as merely non-split would drop the
+    // file from the candidates and let a retirement delete its
+    // repository-owned half with auto-merge armed.
+    expect(() =>
+      headSplitEntries(manifestText({ "AGENTS.md": { class: "spllt", marker: SENTINEL } }), "t"),
+    ).toThrow(/ownership class/);
+    expect(() =>
+      headSplitEntries(manifestText({ "AGENTS.md": { marker: SENTINEL } }), "t"),
+    ).toThrow(/ownership class/);
   });
 
   test("a damaged (non-object) entry throws instead of silently skipping its file", () => {
@@ -232,6 +299,16 @@ describe("headSplitEntries", () => {
     ).toThrow(/marker\/managed pair/);
     expect(() =>
       headSplitEntries(manifestText({ "AGENTS.md": rawLegacy(`# local §`, "above") }), "t"),
+    ).toThrow(/marker\/managed pair/);
+  });
+
+  test("a non-comment legacy marker throws (a content line cannot be a split point)", () => {
+    // Every marker any template ever declared is a comment line; a
+    // tampered manifest naming an ordinary content line could read the
+    // previous repository-owned half as (nearly) empty and let a loss
+    // report clear.
+    expect(() =>
+      headSplitEntries(manifestText({ "AGENTS.md": rawLegacy("just some text", "above") }), "t"),
     ).toThrow(/marker\/managed pair/);
   });
 

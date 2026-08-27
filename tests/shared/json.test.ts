@@ -8,6 +8,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { hasDuplicateJsonKeys } from "../../.github/scripts/shared/json.ts";
 
 const jsonPath = join(import.meta.dir, "../../.github/scripts/shared/json.ts");
 
@@ -54,5 +55,34 @@ describe("parseJsonWith", () => {
     expect(r.exitCode).toBe(1);
     expect(r.stdout).toContain("::error::json.test: payload: unexpected shape");
     expect(r.stdout + r.stderr).not.toContain("hiddenserver");
+  });
+});
+
+describe("hasDuplicateJsonKeys", () => {
+  test("a duplicated key in one object is caught (JSON.parse would keep only the last)", () => {
+    expect(
+      hasDuplicateJsonKeys(
+        '{"files": {"AGENTS.md": {"class": "split"}, "AGENTS.md": {"class": "managed"}}}',
+      ),
+    ).toBe(true);
+  });
+
+  test("an escape-variant duplicate is caught (decoded keys are what JSON.parse collides)", () => {
+    const escaped = String.raw`"AGENTS.m\u0064"`;
+    expect(hasDuplicateJsonKeys(`{"AGENTS.md": 1, ${escaped}: 2}`)).toBe(true);
+  });
+
+  test("the same key in DIFFERENT objects is not a duplicate", () => {
+    expect(hasDuplicateJsonKeys('{"a": {"class": "split"}, "b": {"class": "managed"}}')).toBe(
+      false,
+    );
+    expect(hasDuplicateJsonKeys('{"a": ["x", "x"], "b": {"a": 1}}')).toBe(false);
+  });
+
+  test("a duplicate inside a NESTED object is caught", () => {
+    expect(hasDuplicateJsonKeys('{"files": {"a": {"class": "split", "class": "managed"}}}')).toBe(
+      true,
+    );
+    expect(hasDuplicateJsonKeys('[{"k": 1}, {"k": 2}]')).toBe(false);
   });
 });

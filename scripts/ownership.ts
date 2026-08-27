@@ -308,34 +308,39 @@ export function skipIfExistsPatterns(
         "starter consistency check needs it to keep repo-owned starters exempt",
     );
   }
-  return skip.map((pattern) => {
-    if (
-      /[?[\]\\!]/.test(pattern) ||
-      pattern.includes("**") ||
-      pattern.startsWith("/") ||
-      pattern.endsWith("/") ||
-      pattern.startsWith("#") ||
-      pattern.trim() !== pattern ||
-      pattern === ""
-    ) {
-      throw new Error(
-        `copier.yml: _skip_if_exists pattern '${pattern}' uses gitwildmatch ` +
-          "features beyond the implemented subset (bare names, root-anchored " +
-          "paths, single *) - extend skipIfExistsPatterns alongside it",
-      );
-    }
-    const body = pattern
-      .split("*")
-      .map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
-      .join("[^/]*");
-    // A gitwildmatch pattern that matches a directory also covers every
-    // descendant, hence the optional /... tail.
-    const tail = "(?:/.*)?$";
-    return {
-      pattern,
-      matcher: new RegExp(pattern.includes("/") ? `^${body}${tail}` : `(?:^|/)${body}${tail}`),
-    };
-  });
+  return skip.map((pattern) => ({ pattern, matcher: compileSkipIfExistsPattern(pattern) }));
+}
+
+/** One _skip_if_exists pattern compiled to the shared matcher - the ONLY
+ *  implementation of the gitwildmatch subset, so the composer's starter
+ *  checks and the sync's retirement filter (retired_paths.ts) can never
+ *  disagree about what a skip pattern protects. Throws on features beyond
+ *  the subset (fail closed - a guessed match could either delete a
+ *  repo-owned starter or leave a retired file undead). */
+export function compileSkipIfExistsPattern(pattern: string): RegExp {
+  if (
+    /[?[\]\\!]/.test(pattern) ||
+    pattern.includes("**") ||
+    pattern.startsWith("/") ||
+    pattern.endsWith("/") ||
+    pattern.startsWith("#") ||
+    pattern.trim() !== pattern ||
+    pattern === ""
+  ) {
+    throw new Error(
+      `copier.yml: _skip_if_exists pattern '${pattern}' uses gitwildmatch ` +
+        "features beyond the implemented subset (bare names, root-anchored " +
+        "paths, single *) - extend compileSkipIfExistsPattern alongside it",
+    );
+  }
+  const body = pattern
+    .split("*")
+    .map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+    .join("[^/]*");
+  // A gitwildmatch pattern that matches a directory also covers every
+  // descendant, hence the optional /... tail.
+  const tail = "(?:/.*)?$";
+  return new RegExp(pattern.includes("/") ? `^${body}${tail}` : `(?:^|/)${body}${tail}`);
 }
 
 /** The matchers alone, for consumers that never need the pattern text. */
