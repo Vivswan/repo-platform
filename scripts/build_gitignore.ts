@@ -23,23 +23,32 @@
 // The template and self outputs open their managed block with one section
 // that has no upstream source: agent local state.
 //
-// By default the script fetches upstream HEAD and records the commit SHA in
-// scripts/gitignore.lock (provenance, and what CI verifies against).
+// There is no pinned upstream SHA and no offline REGENERATION mode: every run resolves
+// github/gitignore's current HEAD and fetches every section from that one
+// commit. Nothing generated records the SHA, so the outputs change only
+// when upstream content we consume changes - which is what makes the
+// refresh-gitignore workflow's PR diff worth reading. That workflow is the
+// only caller of networked regeneration; `bun run check` and CI's validate
+// job also call this script with --topology for offline validation. Content
+// drift INSIDE a managed block is still ungated - only the fragments'
+// encoded source paths are checked - so a hand edit there survives until the
+// next refresh PR regenerates over it.
 //
 // Usage:
-//   bun scripts/build_gitignore.ts           # fetch latest, update lock, regenerate
-//   bun scripts/build_gitignore.ts --locked  # regenerate from the recorded lock SHA
-//   bun scripts/build_gitignore.ts --check   # exit 1 if outputs don't match the lock SHA
+//   bun scripts/build_gitignore.ts              # fetch upstream HEAD, regenerate
+//   bun scripts/build_gitignore.ts --topology   # offline: fragments match the manifests' gitignore_sources
+//
+// --topology is the one OFFLINE mode, and it only verifies; there is no
+// offline REGENERATION mode - producing content always fetches upstream HEAD.
 
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { join, relative, resolve } from "node:path";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join, relative, resolve } from "node:path";
 import { gateExpression } from "./compose_template.ts";
 import { cleanLocalRegion, LOCAL_BEGIN, LOCAL_END } from "./gitignore_local.ts";
 import { loadManifests, type ModuleManifest } from "./module_manifests.ts";
 
 const REPO_ROOT = resolve(import.meta.dir, "..");
 const TEMPLATES_DIR = join(REPO_ROOT, "templates");
-const LOCK_FILE = join(REPO_ROOT, "scripts", "gitignore.lock");
 const OUTPUT_TEMPLATE = join(REPO_ROOT, "templates", "base", ".gitignore.jinja");
 const OUTPUT_SELF = join(REPO_ROOT, ".gitignore");
 
@@ -47,7 +56,7 @@ const ALWAYS = ["Global/Windows.gitignore", "Global/macOS.gitignore", "Global/Li
 
 /** Per-module upstream sources plus every module's gate expression. Reads
  *  nothing itself: run() loads the manifests, so a broken one reports
- *  through the normal error path of whichever mode is running. */
+ *  through the script's single error path. */
 function byModule(manifests: ModuleManifest[]): {
   entries: [string, string[]][];
   gates: Map<string, string>;
@@ -86,8 +95,8 @@ function fragmentOutput(module: string): string {
  *  gitignore_sources: removing the manifest key stops regenerating the
  *  fragment but leaves the old file behind, and composition would keep
  *  shipping its stale sections to every render. Returned (for run() to
- *  throw on, in every mode) rather than deleted - the missing key may be
- *  the typo to fix, not the fragment. */
+ *  throw on) rather than deleted - the missing key may be the typo to
+ *  fix, not the fragment. */
 export function strayFragmentFiles(manifests: ModuleManifest[], templatesDir: string): string[] {
   const strays: string[] = [];
   for (const m of manifests) {
@@ -97,6 +106,32 @@ export function strayFragmentFiles(manifests: ModuleManifest[], templatesDir: st
     }
   }
   return strays;
+}
+
+/** Declared gitignore_sources whose generated fragment file is missing: a
+ *  module NEWLY declaring the key has no fragment until the generator
+ *  runs, and composition would render nothing for it. The topology
+ *  check's second direction (strayFragmentFiles is the first). */
+export function missingFragmentFiles(manifests: ModuleManifest[], templatesDir: string): string[] {
+  const missing: string[] = [];
+  for (const m of manifests) {
+    if (!m.gitignore_sources) continue;
+    if (!existsSync(join(templatesDir, m.module, "fragments", `${ANCHOR}.jinja`))) {
+      missing.push(`templates/${m.module}/fragments/${ANCHOR}.jinja`);
+    }
+  }
+  return missing;
+}
+
+/** The github/gitignore source paths a generated fragment encodes in its
+ *  section headings, in order. The offline topology check compares them
+ *  against the manifest's gitignore_sources, so a manifest EDIT (a source
+ *  added, removed, replaced, or reordered) cannot pass on fragment
+ *  presence alone with stale content until the weekly refresh. */
+export function fragmentSourcePaths(fragmentText: string): string[] {
+  return [...fragmentText.matchAll(/^## .+ \(github\/gitignore (.+)\)$/gm)].map(
+    (match) => match[1],
+  );
 }
 
 async function fetchText(url: string, headers?: Record<string, string>): Promise<string> {
@@ -130,12 +165,12 @@ function localSection(body: string): string {
   return `${LOCAL_BEGIN}\n${body}${LOCAL_END}\n\n`;
 }
 
-function managedHeader(sha: string): string {
+function managedHeader(): string {
   return (
     "# BEGIN REPO-PLATFORM MANAGED\n" +
-    `# Generated from github/gitignore @ ${sha} - do not edit; local\n` +
-    "# patterns go in the REPOSITORY LOCAL section above. Managed patterns\n" +
-    "# deliberately come last: last-match-wins makes them non-overridable.\n" +
+    "# Generated from github/gitignore - do not edit; local patterns go in\n" +
+    "# the REPOSITORY LOCAL section above. Managed patterns deliberately\n" +
+    "# come last: last-match-wins makes them non-overridable.\n" +
     "\n"
   );
 }
@@ -158,11 +193,11 @@ export function existingLocalBody(output: string): string {
   return region.body;
 }
 
-function buildTemplate(sha: string, sections: Record<string, string>): string {
+function buildTemplate(sections: Record<string, string>): string {
   const parts = [
-    "{# Generated by scripts/build_gitignore.ts - edit the lock/script, not this file. #}\n",
+    "{# Generated by scripts/build_gitignore.ts - edit the script, not this file. #}\n",
     localSection(`${DEFAULT_LOCAL_BODY}\n`),
-    managedHeader(sha),
+    managedHeader(),
     AGENT_SECTION,
     "\n",
   ];
@@ -196,6 +231,29 @@ export function selfSources(entries: [string, string[]][]): string[] {
   return [...new Set(entries.flatMap(([, sources]) => sources))];
 }
 
+/** The jinja guard expression a shared source's chunk carries: the
+ *  negation of every EARLIER owner's gate expression, and-joined. ONE
+ *  constructor for buildFragment and the offline topology check, so the
+ *  expected guard can never drift from the generated one. */
+export function guardExpressionFor(earlier: string[], gates: Map<string, string>): string {
+  return earlier
+    .map((module) => {
+      const gate = gates.get(module);
+      if (gate === undefined) throw new Error(`no gate expression for module '${module}'`);
+      return `not (${gate})`;
+    })
+    .join(" and ");
+}
+
+/** The jinja guard expressions a generated fragment actually carries, in
+ *  order - the offline topology check compares them against the
+ *  manifests' expected guards, so a changed module gate cannot leave a
+ *  stale fragment passing until the weekly refresh (the next build would
+ *  emit duplicate shared sections). */
+export function fragmentGuardExpressions(fragmentText: string): string[] {
+  return [...fragmentText.matchAll(/\{% if (.+?) %\}/g)].map((match) => match[1]);
+}
+
 /** A module's fragment: one chunk per source, each owning its leading
  *  newline (the composer's fragment whitespace convention). A section
  *  already owned by earlier modules has its WHOLE chunk wrapped in the
@@ -206,31 +264,20 @@ export function buildFragment(
   parts: { path: string; earlier: string[] }[],
   gates: Map<string, string>,
 ): string {
-  const gateOf = (module: string): string => {
-    const gate = gates.get(module);
-    if (gate === undefined) throw new Error(`no gate expression for module '${module}'`);
-    return gate;
-  };
   return parts
     .map(({ path, earlier }) => {
       const chunk = `\n${sections[path]}`;
       if (earlier.length === 0) return chunk;
-      const guard = earlier.map((module) => `not (${gateOf(module)})`).join(" and ");
-      return `{% if ${guard} %}${chunk}{% endif %}`;
+      return `{% if ${guardExpressionFor(earlier, gates)} %}${chunk}{% endif %}`;
     })
     .join("");
 }
 
-function buildSelf(
-  sha: string,
-  sections: Record<string, string>,
-  sources: string[],
-  localBody: string,
-): string {
+function buildSelf(sections: Record<string, string>, sources: string[], localBody: string): string {
   const parts = [
     "# Generated by scripts/build_gitignore.ts - only edit the LOCAL section.\n",
     localSection(localBody),
-    managedHeader(sha),
+    managedHeader(),
     AGENT_SECTION,
     "\n",
   ];
@@ -241,33 +288,29 @@ function buildSelf(
   return parts.join("");
 }
 
-type Mode = "fetch" | "locked" | "check";
-
-async function main(): Promise<number> {
-  const args = process.argv.slice(2);
-  const locked = args.includes("--locked");
-  const check = args.includes("--check");
-  const unknown = args.filter((a) => a !== "--locked" && a !== "--check");
-  if (unknown.length > 0 || (locked && check)) {
+export async function main(argv: string[] = process.argv.slice(2)): Promise<number> {
+  const topology = argv.includes("--topology");
+  const unknown = argv.filter((a) => a !== "--topology");
+  if (unknown.length > 0) {
     console.error(
-      unknown.length > 0
-        ? `error: unrecognized argument(s): ${unknown.join(" ")}`
-        : "error: --locked and --check are mutually exclusive",
+      `error: unrecognized argument(s): ${unknown.join(" ")} - the script takes only ` +
+        "--topology (the offline manifest/fragment check); with no arguments it " +
+        "always regenerates from github/gitignore HEAD",
     );
     return 2;
   }
   // One error dialect for every failure past argument parsing (a broken
-  // manifest, a missing lock file, an upstream fetch failure), matching
-  // generate.ts and render_dogfood.ts.
+  // manifest, an upstream fetch failure), matching generate.ts and
+  // render_dogfood.ts.
   try {
-    return await run(locked ? "locked" : check ? "check" : "fetch");
+    return await run(topology);
   } catch (error) {
     console.error(`error: ${error instanceof Error ? error.message : String(error)}`);
     return 1;
   }
 }
 
-async function run(mode: Mode): Promise<number> {
+async function run(topology = false): Promise<number> {
   const manifests = loadManifests();
   const strays = strayFragmentFiles(manifests, TEMPLATES_DIR);
   if (strays.length > 0) {
@@ -278,65 +321,89 @@ async function run(mode: Mode): Promise<number> {
         "manifest's gitignore_sources)",
     );
   }
+  // --topology: the OFFLINE manifests-vs-fragments check (no upstream
+  // fetch, no lock read), for bun run check. It catches every topology
+  // direction on the PR that changes a manifest: a removed
+  // gitignore_sources key with the fragment left behind (the stray check
+  // above, which would otherwise ABORT the weekly refresh - the failure
+  // could never self-heal), a newly declared key whose fragment was never
+  // generated (composition would render nothing for it), an EDITED
+  // source list whose fragment still encodes the old sources (each
+  // fragment's section headings carry them - fragmentSourcePaths), and a
+  // changed module GATE whose fragment still embeds the old guard
+  // expressions (fragmentGuardExpressions vs the manifests' expected
+  // guards - a stale guard makes the next build emit duplicate shared
+  // sections).
+  if (topology) {
+    const missing = missingFragmentFiles(manifests, TEMPLATES_DIR);
+    if (missing.length > 0) {
+      throw new Error(
+        `missing gitignore fragment(s) for module(s) declaring gitignore_sources: ` +
+          `${missing.join(", ")} - run 'bun scripts/build_gitignore.ts' ` +
+          "to generate them (or drop the manifest key)",
+      );
+    }
+    const { entries, gates } = byModule(manifests);
+    const plans = new Map(fragmentPlans(entries).map((plan) => [plan.module, plan.parts]));
+    for (const [module, declared] of entries) {
+      const rel = relative(REPO_ROOT, fragmentOutput(module));
+      const text = readFileSync(fragmentOutput(module), "utf-8");
+      const encoded = fragmentSourcePaths(text);
+      if (JSON.stringify(encoded) !== JSON.stringify(declared)) {
+        throw new Error(
+          `${rel} encodes sources [${encoded.join(", ")}] but templates/${module}/module.yml ` +
+            `declares [${declared.join(", ")}] - the fragment is stale against the manifest ` +
+            "edit; run 'bun scripts/build_gitignore.ts' to regenerate it",
+        );
+      }
+      const expectedGuards = (plans.get(module) ?? [])
+        .filter((part) => part.earlier.length > 0)
+        .map((part) => guardExpressionFor(part.earlier, gates));
+      const actualGuards = fragmentGuardExpressions(text);
+      if (JSON.stringify(actualGuards) !== JSON.stringify(expectedGuards)) {
+        throw new Error(
+          `${rel} embeds guard expression(s) [${actualGuards.join(" | ")}] but the manifests ` +
+            `expect [${expectedGuards.join(" | ")}] - a changed module gate leaves the ` +
+            "fragment's shared-section guards stale (the next build would emit duplicate " +
+            "sections); run 'bun scripts/build_gitignore.ts' to regenerate it",
+        );
+      }
+    }
+    console.log(
+      "gitignore topology OK: fragments match the manifests' gitignore_sources and gates.",
+    );
+    return 0;
+  }
   const { entries: moduleSources, gates } = byModule(manifests);
   const sources = selfSources(moduleSources);
-  // Before any fetch or lock write: a malformed self output must abort
-  // while the lock still matches the committed outputs - advancing it
-  // first would leave lock and outputs out of step behind the error.
+  // Before any fetch: a malformed self output must abort while every
+  // output still stands as committed, rather than behind a half-written
+  // set.
   const selfLocalBody = existingLocalBody(OUTPUT_SELF);
 
-  const paths = [...ALWAYS, ...sources];
-  let sha: string;
-  if (mode === "fetch") {
-    sha = await upstreamHead();
-  } else {
-    sha = readFileSync(LOCK_FILE, "utf-8").trim();
-  }
+  // One resolved SHA for the whole run: fetching each file from "main"
+  // could straddle an upstream push and mix two commits' content.
+  const sha = await upstreamHead();
+  console.log(`github/gitignore HEAD is ${sha}`);
   const sections: Record<string, string> = {};
-  for (const path of paths) sections[path] = await section(sha, path);
-  if (mode === "fetch") {
-    // The lock is written only after every fetch succeeded - a failed fetch
-    // must not advance the lock past the generated files.
-    writeFileSync(LOCK_FILE, `${sha}\n`);
-    console.log(`lock updated to ${sha}`);
-  }
+  for (const path of [...ALWAYS, ...sources]) sections[path] = await section(sha, path);
 
   const outputs: [string, string][] = [
-    [OUTPUT_TEMPLATE, buildTemplate(sha, sections)],
+    [OUTPUT_TEMPLATE, buildTemplate(sections)],
     ...fragmentPlans(moduleSources).map(({ module, parts }): [string, string] => [
       fragmentOutput(module),
       buildFragment(sections, parts, gates),
     ]),
-    [OUTPUT_SELF, buildSelf(sha, sections, sources, selfLocalBody)],
+    [OUTPUT_SELF, buildSelf(sections, sources, selfLocalBody)],
   ];
 
-  if (mode === "check") {
-    const stale = outputs
-      .filter(
-        ([out, content]) =>
-          !(existsSync(out) ? readFileSync(out) : Buffer.alloc(0)).equals(
-            Buffer.from(content, "utf-8"),
-          ),
-      )
-      .map(([out]) => relative(REPO_ROOT, out));
-    if (stale.length > 0) {
-      for (const rel of stale) {
-        console.log(
-          `${rel} is stale: it does not match the output generated from ` +
-            `the locked github/gitignore SHA (${sha.slice(0, 12)}); run ` +
-            "bun scripts/build_gitignore.ts --locked to regenerate it " +
-            "(drop --locked to also advance the lock)",
-        );
-      }
-      return 1;
-    }
-    console.log("gitignore outputs are up to date");
-    return 0;
-  }
-
   for (const [out, content] of outputs) {
+    // A module declaring gitignore_sources for the first time has no
+    // fragments/ directory yet (newly-declared sources are exactly the
+    // path the topology check routes here); create it rather than ENOENT.
+    mkdirSync(dirname(out), { recursive: true });
     writeFileSync(out, Buffer.from(content, "utf-8"));
-    console.log(`wrote ${relative(REPO_ROOT, out)} from github/gitignore @ ${sha}`);
+    console.log(`wrote ${relative(REPO_ROOT, out)}`);
   }
   return 0;
 }

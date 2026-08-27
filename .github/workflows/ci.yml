@@ -140,17 +140,6 @@ jobs:
             echo "::endgroup::"
           done
 
-  gitignore-fresh:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v7
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version-file: .bun-version
-      - name: Verify the generated gitignore outputs match the lock
-        run: bun scripts/build_gitignore.ts --check
-
   # Network gate, deliberately outside `bun run check`: proves every
   # third-party action pin resolves to a real upstream ref (a dangling
   # pin like a retired moving-major tag passes every offline gate and
@@ -209,6 +198,10 @@ jobs:
         run: bun run generate:check
       - name: Check generated dogfood copies against their template twins
         run: bun run dogfood:check
+      # Offline and sub-second: fragments must match the manifests'
+      # gitignore_sources on the PR that edits them, not a week later.
+      - name: Check gitignore topology against the module manifests
+        run: bun run gitignore:topology
       - name: Check markdown is not hard-wrapped
         run: bun run wrap:check
 
@@ -547,7 +540,6 @@ jobs:
       - typography
       - commit-names
       - typecheck
-      - gitignore-fresh
       - action-refs
       - compose
       - validate-template
