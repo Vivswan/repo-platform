@@ -36,6 +36,7 @@ rulesets:
       ref_name:
         include:
           - template
+          - actions
         exclude: []
     rules:
       - type: deletion

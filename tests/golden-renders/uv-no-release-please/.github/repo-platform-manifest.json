@@ -10,7 +10,7 @@
     ".github/repo-platform-manifest.json": {"class": "managed", "hash": null, "commit": "xxxxxxx"},
     ".github/workflows/auto-format.yml": {"class": "starter"},
     ".github/workflows/checks.yml": {"class": "starter"},
-    ".github/workflows/ci.yml": {"class": "managed", "hash": "29dc7d280352639a1c8486d7ea04740e94ddcb2aaa476dab85f597c27ee714f6"},
+    ".github/workflows/ci.yml": {"class": "managed", "hash": "315084f3d196f860cf554c534cd208c6f036310eb167413784d6cc7c7ddb6a20"},
     ".github/workflows/rerun-copilot-gate.yml": {"class": "managed", "hash": "cfff63f9667026a795b18f91e78255daa25ce352867b2a0a6bb5e096302ea5d9"},
     ".gitignore": {"class": "split", "grammar": "bounded-region", "marker": "# BEGIN REPO-PLATFORM MANAGED", "managed": "below", "managed_end": "# END REPO-PLATFORM MANAGED", "local_begin": "# BEGIN REPOSITORY LOCAL", "local_end": "# END REPOSITORY LOCAL", "hash": "1962bbfe6eb608e48724164438abc16c902f01fbf5d3b4f4969fc4e7db924f1a"},
     ".gitleaks.toml": {"class": "starter"},

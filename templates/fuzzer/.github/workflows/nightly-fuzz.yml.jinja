@@ -87,7 +87,7 @@ jobs:
       - name: File or update the fuzz issue
         id: file-issue
         if: failure()
-        uses: {{ github_username }}/repo-platform/actions/fuzz-issue@template
+        uses: {{ github_username }}/repo-platform/actions/fuzz-issue@actions
         with:
           mode: report
           label: {{ fuzzer_label | tojson }}
@@ -112,7 +112,7 @@ jobs:
 
 {% endif %}      - name: Close the fuzz issue on a green night
         if: success()
-        uses: {{ github_username }}/repo-platform/actions/fuzz-issue@template
+        uses: {{ github_username }}/repo-platform/actions/fuzz-issue@actions
         with:
           mode: resolve
           label: {{ fuzzer_label | tojson }}

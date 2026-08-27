@@ -360,12 +360,12 @@ grep -qF -- 'package-ecosystem: "uv"' .github/dependabot.yml \
   || fail "dependabot.yml lost the uv module entry"
 grep -qF -- "pr-title:" .github/workflows/ci.yml \
   || fail "ci.yml is missing the pr-title gate job"
-# Rendered workflows pin the composite actions at main - the templates
-# carry the literal pin.
-grep -qF -- "repo-platform/actions/check-typography@main" .github/workflows/ci.yml \
-  || fail "ci.yml does not pin check-typography at main"
-grep -qF -- "repo-platform/actions/dependency-review@main" .github/workflows/ci.yml \
-  || fail "ci.yml does not pin dependency-review at main"
+# Rendered workflows pin the composite actions at the green-gated actions
+# branch - the templates carry the literal pin.
+grep -qF -- "repo-platform/actions/check-typography@actions" .github/workflows/ci.yml \
+  || fail "ci.yml does not pin check-typography at the actions branch"
+grep -qF -- "repo-platform/actions/dependency-review@actions" .github/workflows/ci.yml \
+  || fail "ci.yml does not pin dependency-review at the actions branch"
 test -f AGENTS.md || fail "AGENTS.md is missing"
 grep -qF "description: Upgraded description" .copier-answers.yml \
   || fail "the live description was not applied"

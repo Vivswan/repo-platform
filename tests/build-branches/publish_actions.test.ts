@@ -1,17 +1,23 @@
-// The actions/ tree published onto the `template` build branch, which is
-// what lets a fleet repository pin an action @template instead of @main.
+// The tree of the `actions` build branch, which is what lets a fleet
+// repository pin an action @actions instead of @main - on a branch whose
+// tarball EXTRACTS: `uses:` downloads the whole branch, and the composed
+// template tree's jinja-expression filenames kill extraction before any
+// step runs, so this tree must never carry one.
 //
-// Two properties matter and both are pinned here: what ships (source and
-// dependency manifests, never node_modules, which each action reinstalls at
-// its own action_path), and that publishing FAILS LOUDLY when there is
-// nothing to publish - a template branch missing actions/ would 404 every
-// fleet CI run, which is a far worse way to find out.
+// Three properties matter and all are pinned here: what ships (source and
+// dependency manifests plus the README, never node_modules, which each
+// action reinstalls at its own action_path), that NO published path
+// carries a jinja expression (the extraction-safety regression), and that
+// publishing FAILS LOUDLY when there is nothing to publish - an actions
+// branch missing actions/ would 404 every fleet CI run, which is a far
+// worse way to find out.
 
 import { describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  buildActionsTree,
   copyActions,
   EXCLUDED_DIRS,
 } from "../../.github/scripts/build-branches/publish_actions.ts";
@@ -59,5 +65,35 @@ describe("copyActions", () => {
 
   test("node_modules is excluded by name, wherever it sits", () => {
     expect(EXCLUDED_DIRS.has("node_modules")).toBe(true);
+  });
+});
+
+describe("buildActionsTree", () => {
+  test("ships actions/ plus the README and nothing else", () => {
+    const root = fixture();
+    const dest = mkdtempSync(join(tmpdir(), "actions-tree-"));
+    const files = buildActionsTree(root, dest);
+    expect(files).toBe(4);
+    expect(existsSync(join(dest, "actions", "check-typography", "action.yml"))).toBe(true);
+    expect(existsSync(join(dest, "README.md"))).toBe(true);
+    expect(readdirSync(dest).sort()).toEqual(["README.md", "actions"]);
+  });
+
+  test("no published path carries a jinja expression (tarball extraction safety)", () => {
+    // THE reason this branch exists: `uses: ...@ref` downloads the whole
+    // branch tarball, and extraction dies on filenames like
+    // "{% if 'agents' in modules %}CLAUDE.md{% endif %}". The real
+    // actions/ tree is the input here, so a jinja-named file sneaking
+    // into any action fails this before it breaks the fleet.
+    const repoRoot = join(import.meta.dir, "..", "..");
+    const dest = mkdtempSync(join(tmpdir(), "actions-tree-real-"));
+    buildActionsTree(repoRoot, dest);
+    const walk = (dir: string): string[] =>
+      readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+        const path = join(dir, entry.name);
+        return entry.isDirectory() ? [path, ...walk(path)] : [path];
+      });
+    const offenders = walk(dest).filter((path) => path.includes("{%") || path.includes("{{"));
+    expect(offenders).toEqual([]);
   });
 });

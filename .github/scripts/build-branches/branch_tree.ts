@@ -22,7 +22,6 @@
 import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { build, writeOutput } from "../../../scripts/compose_template.ts";
-import { copyActions } from "./publish_actions.ts";
 
 const REPO_ROOT = resolve(import.meta.dir, "..", "..", "..");
 
@@ -56,13 +55,9 @@ Consume with copier, e.g.:
 
     copier copy gh:Vivswan/repo-platform . --vcs-ref template
 
-\`actions/\` at the root is EXECUTABLE CODE, not rendered content: the
-composite actions the generated workflows call, published here so a
-repository can pin \`@template\` rather than \`@main\`. Because this branch
-only advances on a green \`main\`, that pin means a repository runs action
-code CI has already vouched for, and a fix reaches every repository as
-soon as \`main\` is green, without a sync PR. Copier ignores the directory:
-copier.yml sets \`_subdirectory: template\`, so only that subtree renders.
+The composite actions the generated workflows call ship on the sibling
+\`actions\` branch (green-gated the same way; its tree carries no jinja
+filenames, so \`@actions\` refs extract cleanly on the runner).
 `;
 
 function usageError(message: string): never {
@@ -120,15 +115,8 @@ function main(): number {
     readFileSync(join(REPO_ROOT, ".github", "scripts", "sync", "stamp_manifest.ts")),
   );
   writeFileSync(join(dest, "README.md"), README);
-  // The actions the rendered workflows call, published at the ROOT beside
-  // copier.yml. Copier never sees them: copier.yml sets `_subdirectory:
-  // template`, so it renders only that subtree - stamp_manifest.ts above
-  // has always relied on the same thing. Publishing them here is what lets
-  // the fleet pin @template instead of @main, so action code reaches
-  // repositories only after a green main.
-  const actions = copyActions(REPO_ROOT, dest);
 
-  console.log(`assembled the build tree into ${dest} (${actions} action file(s))`);
+  console.log(`assembled the build tree into ${dest}`);
   return 0;
 }
 

@@ -23,6 +23,13 @@ import { capture, must, mustCapture } from "../shared/proc.ts";
 import { rebuildBranchTree } from "../shared/rebuild_tree.ts";
 
 const BRANCH = "template";
+/** The sibling branch carrying ONLY actions/ + a README: `uses: ...@ref`
+ * downloads the whole branch tarball, and extraction dies on the composed
+ * tree's jinja-expression filenames - so action refs get their own branch
+ * with no composed tree at all (publish_actions.ts's header has the full
+ * story). Published from the same source commit, behind the same green
+ * gate, right before the template branch below. */
+const ACTIONS_BRANCH = "actions";
 const repository = requireEnv("GITHUB_REPOSITORY");
 
 // The build stamps and composes GITHUB_SHA - this run's own trigger
@@ -150,6 +157,76 @@ function restampReason(currentSourceSha: string): string {
   return "";
 }
 
+/** Publishes the `actions` branch: actions/ + README from the SOURCE
+ * commit's own tree (same discipline as the template compose - a rebuild
+ * of an old commit reproduces that commit's actions), appended to the
+ * existing branch (orphan bootstrap on first publish), stamped with the
+ * same source + run lines. Append-only, plain push, no-change skips -
+ * mirroring the template branch's model; the two advance together from
+ * one green gate. */
+function publishActionsBranch(sourceSha: string): void {
+  console.log(`::group::build ${ACTIONS_BRANCH} from ${sourceSha.slice(0, 12)}`);
+  for (const dir of ["/tmp/actions-src", "/tmp/actions-tree", "/tmp/actions-pub"]) {
+    rmSync(dir, { recursive: true, force: true });
+  }
+  must(["git", "worktree", "add", "--detach", "/tmp/actions-src", sourceSha]);
+  must(["bun", "install", "--frozen-lockfile", "--cwd", "/tmp/actions-src"]);
+  must([
+    "bun",
+    "/tmp/actions-src/.github/scripts/build-branches/publish_actions.ts",
+    "--dest",
+    "/tmp/actions-tree",
+  ]);
+  const exists =
+    capture(["git", "ls-remote", "--exit-code", "origin", `refs/heads/${ACTIONS_BRANCH}`])
+      .exitCode === 0;
+  if (exists) {
+    must(["git", "fetch", "--quiet", "origin", ACTIONS_BRANCH]);
+    must(["git", "worktree", "add", "--detach", "/tmp/actions-pub", `origin/${ACTIONS_BRANCH}`]);
+  } else {
+    must(["git", "worktree", "add", "--detach", "/tmp/actions-pub", sourceSha]);
+    must(["git", "-C", "/tmp/actions-pub", "switch", "--orphan", `build-${ACTIONS_BRANCH}`]);
+  }
+  must([
+    "rsync",
+    "-a",
+    "--delete",
+    "--checksum",
+    "--exclude=.git",
+    "/tmp/actions-tree/",
+    "/tmp/actions-pub/",
+  ]);
+  must(["git", "-C", "/tmp/actions-pub", "add", "-A"]);
+  const changed =
+    capture(["git", "-C", "/tmp/actions-pub", "diff", "--cached", "--quiet"]).exitCode !== 0;
+  // A missing branch always publishes: the ref must exist for the fleet's
+  // @actions pins to resolve, even when the tree matches the seed's.
+  if (changed || !exists) {
+    must([
+      "git",
+      "-C",
+      "/tmp/actions-pub",
+      "commit",
+      "-q",
+      "--allow-empty",
+      "-m",
+      `build(${ACTIONS_BRANCH}): main from ${sourceSha.slice(0, 12)}`,
+      "-m",
+      commitStampWrite(requireEnv("GITHUB_SERVER_URL"), repository, sourceSha),
+      "-m",
+      commitRunWrite(requireEnv("RUN_URL")),
+    ]);
+    must(["git", "-C", "/tmp/actions-pub", "push", "origin", `HEAD:refs/heads/${ACTIONS_BRANCH}`]);
+    const short = mustCapture(["git", "-C", "/tmp/actions-pub", "rev-parse", "--short", "HEAD"]);
+    console.log(
+      `${ACTIONS_BRANCH}: pushed ${short} (${changed ? "content change" : "branch bootstrap"})`,
+    );
+  } else {
+    console.log(`${ACTIONS_BRANCH}: no content change`);
+  }
+  console.log("::endgroup::");
+}
+
 function publish(sourceSha: string): void {
   console.log(`::group::build ${BRANCH} from ${sourceSha.slice(0, 12)}`);
   for (const dir of ["/tmp/src", "/tmp/tree", "/tmp/pub"]) {
@@ -236,4 +313,8 @@ if (notGreen !== null) {
     `refusing to publish the template branch: main commit ${sourceSha.slice(0, 12)} is not green - ${notGreen}. The branch only ships green main commits; get CI to a successful run on main's tip, then re-run.`,
   );
 }
+// Actions first: a fresh template render pins @actions, so the branch its
+// refs resolve against must exist (and be current) by the time the
+// template branch advances.
+publishActionsBranch(sourceSha);
 publish(sourceSha);

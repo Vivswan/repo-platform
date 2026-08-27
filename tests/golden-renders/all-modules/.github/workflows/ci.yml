@@ -72,7 +72,7 @@ jobs:
       # continue-on-error defers the verdict to the last step; it does not
       # discard it. The action's own exit code is untouched, so the operator
       # repo and the sync pipeline still block on it directly.
-      - uses: Vivswan/repo-platform/actions/validate-template@template
+      - uses: Vivswan/repo-platform/actions/validate-template@actions
         id: integrity
         continue-on-error: true
         with:
@@ -207,7 +207,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
-      - uses: Vivswan/repo-platform/actions/check-typography@template
+      - uses: Vivswan/repo-platform/actions/check-typography@actions
 
   commit-names:
     runs-on: ubuntu-latest
@@ -216,7 +216,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - uses: Vivswan/repo-platform/actions/validate-commit-names@template
+      - uses: Vivswan/repo-platform/actions/validate-commit-names@actions
 
   actionlint:
     runs-on: ubuntu-latest
@@ -276,7 +276,7 @@ jobs:
       - uses: actions/checkout@v7
         if: github.event_name == 'pull_request'
       # The severity threshold and the upstream pin live in the wrapper.
-      - uses: Vivswan/repo-platform/actions/dependency-review@template
+      - uses: Vivswan/repo-platform/actions/dependency-review@actions
         if: github.event_name == 'pull_request'
 
   # CodeQL analysis runs inside the gate (one job per language), so a failed
@@ -508,7 +508,7 @@ jobs:
       pull-requests: read
       vulnerability-alerts: read
     steps:
-      - uses: Vivswan/repo-platform/actions/release-health@template
+      - uses: Vivswan/repo-platform/actions/release-health@actions
         if: github.event_name == 'pull_request' && startsWith(github.head_ref, 'release-please--')
         with:
           mode: pull-request
@@ -526,7 +526,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
-      - uses: Vivswan/repo-platform/actions/validate-skills@template
+      - uses: Vivswan/repo-platform/actions/validate-skills@actions
         with:
           skills-dir: "skills"
 
