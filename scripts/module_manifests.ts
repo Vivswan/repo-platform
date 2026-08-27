@@ -273,9 +273,10 @@ export const manifestSchema = z.strictObject({
   // The gate expression is interpolated verbatim into the generated
   // _exclude patterns' `{% if not (<gate>) %}` conditions and into
   // `not (<gate>)` guard chains: { } % # would open or close a jinja
-  // delimiter around it, / would read as a path segment in older gated
-  // filenames, and \ escapes unpredictably. Single quotes stay allowed -
-  // membership gates like 'bun' in modules need them.
+  // delimiter around it. / and \ stay banned conservatively - no current
+  // gate needs them, and freeing one is a one-line schema change if a
+  // gate ever does. Single quotes stay allowed - membership gates like
+  // 'bun' in modules need them.
   gate: singleLine("the gate expression")
     .refine((value) => !/[{}%#/\\]/.test(value), {
       message:

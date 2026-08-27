@@ -11,6 +11,7 @@ import {
   entryHash,
   isMarkerLine,
   managedHalf,
+  normalizeSymlinkTargets,
   recordedCommit,
   resolveConflictsTowardAfter,
   stampManifestText,
@@ -335,5 +336,47 @@ describe("entryHash", () => {
   test("malformed split metadata yields null rather than a wrong hash", () => {
     const root = tree({ "f.md": "a\n" });
     expect(entryHash(root, "f.md", { class: "split", marker: 3, managed: "above" })).toBeNull();
+  });
+});
+
+// The build branch ships symlink targets with the .jinja suffix kept (a
+// dangling link anywhere in the downloaded tree kills the runner's uses:
+// tarball staging) and copier renders targets verbatim; the hook strips
+// the suffix from MANIFEST-LISTED links only, so repo-owned links are
+// never rewritten.
+describe("normalizeSymlinkTargets", () => {
+  const link = (root: string, path: string, target: string) => {
+    mkdirSync(dirname(join(root, path)), { recursive: true });
+    symlinkSync(target, join(root, path));
+  };
+  const readTarget = (root: string, path: string) =>
+    Bun.spawnSync(["readlink", join(root, path)])
+      .stdout.toString()
+      .trim();
+
+  test("strips the template suffix from a manifest-listed link, idempotently", () => {
+    const root = mkdtempSync(join(tmpdir(), "normalize-"));
+    link(root, "CLAUDE.md", "AGENTS.md.jinja");
+    const files = { "CLAUDE.md": { class: "managed" } };
+    expect(normalizeSymlinkTargets(root, files)).toEqual(["CLAUDE.md"]);
+    expect(readTarget(root, "CLAUDE.md")).toBe("AGENTS.md");
+    // Idempotent: a second pass (the sync's extra stamp step) rewrites nothing.
+    expect(normalizeSymlinkTargets(root, files)).toEqual([]);
+  });
+
+  test("never touches a link the manifest does not list, or a plain target", () => {
+    const root = mkdtempSync(join(tmpdir(), "normalize-"));
+    link(root, "repo-own.md", "notes.md.jinja");
+    link(root, "CLAUDE.md", "AGENTS.md");
+    writeFileSync(join(root, "plain.md"), "not a link\n");
+    expect(
+      normalizeSymlinkTargets(root, {
+        "CLAUDE.md": { class: "managed" },
+        "plain.md": { class: "managed" },
+        "missing.md": { class: "managed" },
+      }),
+    ).toEqual([]);
+    expect(readTarget(root, "repo-own.md")).toBe("notes.md.jinja");
+    expect(readTarget(root, "CLAUDE.md")).toBe("AGENTS.md");
   });
 });

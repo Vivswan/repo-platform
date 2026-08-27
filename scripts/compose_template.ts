@@ -225,9 +225,62 @@ export function gitwildmatchLiteral(path: string): string {
 
 /** One gate expression for an entry's gate list: the single gate verbatim,
  *  several gates parenthesized and and-chained (a file renders only while
- *  ALL its gates hold). */
+ *  ALL its gates hold). The one constructor for both consumers - the
+ *  manifest template's entry gates and the generated _exclude conditions -
+ *  so selection and exclusion can never drift apart. */
 function allOf(gates: string[]): string {
   return gates.length === 1 ? gates[0] : gates.map((gate) => `(${gate})`).join(" and ");
+}
+
+/** Fail-closed filename validation for a source's logical path: after the
+ *  recognized `{% if %}NAME{% endif %}` gates are stripped, no jinja
+ *  syntax may remain (a `{# comment #}` or `{{ var }}` segment would ship
+ *  verbatim on the build branch while copier renders a DIFFERENT
+ *  destination name than the manifest records), a gate's inner name must
+ *  not end in .jinja (the suffix belongs OUTSIDE the gate; wrapped
+ *  inside, the emitted plain name would be treated as a template and land
+ *  suffix-stripped, again diverging from the manifest), and no segment
+ *  may carry edge whitespace (pathspec strips trailing whitespace from
+ *  gitwildmatch patterns, so such a path could never be excluded
+ *  literally). */
+export function templatePathErrors(logical: string): string[] {
+  const errors: string[] = [];
+  const emitted = plainTemplatePath(logical);
+  for (const delimiter of ["{%", "{{", "{#", "%}", "}}", "#}"]) {
+    if (emitted.includes(delimiter)) {
+      errors.push(
+        `'${logical}' carries jinja syntax ('${delimiter}') the composer cannot ` +
+          "strip - only {% if <gate> %}NAME{% endif %} filename gates are " +
+          "recognized; rename the file",
+      );
+      break;
+    }
+  }
+  const rendered = logical.endsWith(JINJA_SUFFIX)
+    ? logical.slice(0, -JINJA_SUFFIX.length)
+    : logical;
+  for (const segment of rendered.split("/")) {
+    const match = /^\{% if .+? %\}(.*)\{% endif %\}$/.exec(segment);
+    if (match?.[1].endsWith(JINJA_SUFFIX)) {
+      errors.push(
+        `'${logical}' wraps a ${JINJA_SUFFIX} suffix inside its filename gate - ` +
+          "the suffix goes OUTSIDE the gate ({% if ... %}NAME{% endif %}" +
+          `${JINJA_SUFFIX}), or copier would land the emitted plain name ` +
+          "suffix-stripped while the manifest records it with the suffix",
+      );
+    }
+  }
+  for (const segment of emitted.split("/")) {
+    if (segment !== segment.trim()) {
+      errors.push(
+        `'${logical}' has a path segment with leading or trailing whitespace - ` +
+          "pathspec strips trailing whitespace from gitwildmatch patterns, so " +
+          "the generated _exclude could never match it literally; rename the file",
+      );
+      break;
+    }
+  }
+  return errors;
 }
 
 /** A pattern anchored to the render root: gitwildmatch treats a pattern
@@ -1395,9 +1448,9 @@ export function manifestTemplate(entries: ManifestEntry[]): Buffer {
     if (entry.gates.length === 0) {
       lines.push(append);
     } else {
-      const gate =
-        entry.gates.length === 1 ? entry.gates[0] : entry.gates.map((g) => `(${g})`).join(" and ");
-      lines.push(`{%- if ${gate} -%}`, append, `{%- endif -%}`);
+      // allOf: the same conjunction the generated _exclude negates, so an
+      // entry is listed exactly when its file lands.
+      lines.push(`{%- if ${allOf(entry.gates)} -%}`, append, `{%- endif -%}`);
     }
   }
   const comment =
@@ -1455,6 +1508,7 @@ export function compose(): { output: Map<string, Entry>; entries: ManifestEntry[
   const gates = new Map<string, string>();
 
   for (const [logical, entry] of collectFiles(base)) {
+    errors.push(...templatePathErrors(logical).map((error) => `templates/base/${error}`));
     files.set(logical, { origin: "base", entry });
   }
   try {
@@ -1489,6 +1543,7 @@ export function compose(): { output: Map<string, Entry>; entries: ManifestEntry[
         );
         continue;
       }
+      errors.push(...templatePathErrors(logical).map((error) => `templates/${module}/${error}`));
       const existing = files.get(logical);
       if (existing) {
         errors.push(
@@ -1607,19 +1662,20 @@ export function compose(): { output: Map<string, Entry>; entries: ManifestEntry[
   // the module.yml ownership lists), so it can never disagree with what
   // actually lands. Emitted as one more template file - copier renders and
   // syncs it like any managed file.
-  let manifestData: Buffer | null = null;
-  let manifestEntriesResult: ManifestEntry[] = [];
+  // One nullable result, not two half-set variables: the manifest either
+  // generated whole (template bytes plus the entries it was built from) or
+  // an error was recorded and the exit below fires.
+  let manifest: { data: Buffer; entries: ManifestEntry[] } | null = null;
   try {
     const skipPatterns = skipIfExistsPatterns(readFileSync(join(REPO_ROOT, "copier.yml"), "utf-8"));
     const declarations: DeclarationSources = {
       base: loadBaseOwnership(SRC),
       modules: new Map(manifests.map((m) => [m.module, m.ownership ?? []])),
     };
-    const manifest = manifestEntries(files, skipPatterns, declarations);
-    errors.push(...manifest.errors);
-    if (manifest.errors.length === 0) {
-      manifestData = manifestTemplate(manifest.entries);
-      manifestEntriesResult = manifest.entries;
+    const generated = manifestEntries(files, skipPatterns, declarations);
+    errors.push(...generated.errors);
+    if (generated.errors.length === 0) {
+      manifest = { data: manifestTemplate(generated.entries), entries: generated.entries };
     }
   } catch (error) {
     errors.push(error instanceof Error ? error.message : String(error));
@@ -1630,11 +1686,11 @@ export function compose(): { output: Map<string, Entry>; entries: ManifestEntry[
   }
 
   const output = new Map<string, Entry>();
-  if (manifestData === null) {
+  if (manifest === null) {
     // Unreachable: a null manifest always comes with a recorded error.
     throw new Error("manifest generation produced neither content nor errors");
   }
-  output.set(MANIFEST_TEMPLATE_PATH, { kind: "file", data: manifestData });
+  output.set(MANIFEST_TEMPLATE_PATH, { kind: "file", data: manifest.data });
   const emittedErrors: string[] = [];
   for (const [logical, sourced] of files) {
     // Plain names only: filename gates are declaration, stripped here and
@@ -1656,7 +1712,7 @@ export function compose(): { output: Map<string, Entry>; entries: ManifestEntry[
     for (const error of emittedErrors) console.error(`error: ${error}`);
     process.exit(1);
   }
-  return { output, entries: manifestEntriesResult };
+  return { output, entries: manifest.entries };
 }
 
 /** compose() plus the copier.yml gate: the committed _exclude region must
@@ -1691,12 +1747,15 @@ export function writeOutput(composed: Map<string, Entry>, out: string): void {
     const dest = join(out, path);
     mkdirSync(dirname(dest), { recursive: true });
     if (entry.kind === "symlink") {
-      // Source symlinks target the .jinja file so they are never
-      // dangling in git (GitHub's action downloader refuses tarballs
-      // with broken links); emitted links target the RENDERED name.
-      let target = entry.target;
-      if (target.endsWith(JINJA_SUFFIX)) target = target.slice(0, -JINJA_SUFFIX.length);
-      symlinkSync(target, dest);
+      // Targets keep the .jinja suffix VERBATIM (the source convention:
+      // links point at their templated twin), so no link on the build
+      // branch is ever dangling - the runner's `uses:` tarball staging
+      // dies on a dangling symlink anywhere in the downloaded tree.
+      // Rendered repositories get the suffix-stripped target from the
+      // post-render stamp hook (stamp_manifest.ts normalizes the
+      // manifest-listed links), since copier renders link targets as
+      // strings without stripping the suffix.
+      symlinkSync(entry.target, dest);
     } else {
       writeFileSync(dest, entry.data);
     }

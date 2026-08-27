@@ -33,7 +33,7 @@ Only wildcard-discovered private repos get true non-disclosure. Today every priv
 
 ## What a redacted run still shows
 
-Coarse facts stay visible on purpose - they are what make the run operable without the details: the hint, each step's outcome, HTTP status codes on failed probes, the counts of modules, conflicts, and retired files, the template-version identifiers a sync moves between (`template@<sha>` - those name THIS repo's builds, not the target), and the commit sha a settings apply pinned its reads to (the runner echoes step env and rendered commands into the log; a bare sha names no repository and unlocks no content). The settings action prints its own placeholders (`private repository #N`) inside an apply leg; two redaction vocabularies, one job, both safe.
+Coarse facts stay visible on purpose - they are what make the run operable without the details: the hint, each step's outcome, HTTP status codes on failed probes, the counts of modules, conflicts, and retired files, the template-version identifiers a sync moves between (`build@<sha>` - those name THIS repo's builds, not the target), and the commit sha a settings apply pinned its reads to (the runner echoes step env and rendered commands into the log; a bare sha names no repository and unlocks no content). The settings action prints its own placeholders (`private repository #N`) inside an apply leg; two redaction vocabularies, one job, both safe.
 
 ## How the per-repo job finds its target
 

@@ -1,7 +1,8 @@
 #!/usr/bin/env bun
 // Composes the build-branch tree for THIS push's commit while main's CI
 // run is still executing, and parks it UNPUBLISHED at
-// refs/build-pending/<sha> (pending.ts owns the ref grammar). Publishing
+// refs/heads/build-pending/<sha> (pending.ts owns the ref grammar and the
+// namespace rationale). Publishing
 // stays gated on all-green: build-branches.yml's workflow_run publisher
 // promotes this pre-built tree through publish.ts's PREBUILT_REF once CI
 // succeeds, so the compose cost is paid concurrently with CI instead of

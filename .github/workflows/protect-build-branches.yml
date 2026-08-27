@@ -1,9 +1,10 @@
-# Auto-close pull requests targeting the generated build branches.
-# `template` and `actions` are append-only outputs of build-branches.yml;
-# nothing merges into them - template changes go to templates/ on main,
-# action changes to actions/ on main. pull_request_target (not
-# pull_request) so fork PRs are handled too; safe because the PR's code is
-# never checked out or executed here.
+# Auto-close pull requests targeting the generated build branch. `build`
+# is an append-only output of build-branches.yml; nothing merges into it -
+# changes go to templates/ (and actions/) on main. The retired `template`
+# and `actions` refs stay matched through the transition seam: they remain
+# on origin until their deliberate post-cutover deletion.
+# pull_request_target (not pull_request) so fork PRs are handled too; safe
+# because the PR's code is never checked out or executed here.
 
 name: Protect Build Branches
 
@@ -17,7 +18,7 @@ permissions:
 
 jobs:
   close:
-    if: contains(fromJSON('["template", "actions"]'), github.event.pull_request.base.ref)
+    if: contains(fromJSON('["build", "template", "actions"]'), github.event.pull_request.base.ref)
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

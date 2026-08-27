@@ -20,7 +20,7 @@ Work in this order, always:
 
 ## When to Apply
 
-- A PR titled `chore: update repo-platform template to template@<sha>` appeared, head branch `automation/repo-platform`
+- A PR titled `chore: update repo-platform template to build@<sha>` appeared, head branch `automation/repo-platform`
 - The PR body warns about merge conflicts, dropped local lines, retired files, withheld workflow files, settings drift, a settings.yml layering transition, or failed validation
 - A sync run failed with "recorded _commit ... does not resolve" / "no base to update from" (see [references/recovery.md](references/recovery.md))
 
