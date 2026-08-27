@@ -339,6 +339,64 @@ describe("open_pr sections and auto-merge", () => {
     expect(r.merged).toBe(false);
   });
 
+  test("raw NULs in the capture cannot kill the gh spawn (delivery survives)", () => {
+    // Raw control bytes decode VERBATIM (unlike invalid bytes), and argv
+    // cannot carry a NUL: unescaped, gh pr create fails before any PR
+    // exists - the whole delivery channel lost, worse than an omitted
+    // section. Mixed with invalid bytes to cover both decode paths.
+    // A NUL FLOOD, not a token amount: unescaped it would pass the budget
+    // checks at raw size, quadruple at the spawn-boundary escape, and send
+    // the body through capBody's end-cutting - the reservation math must
+    // measure the escaped text instead.
+    const capture = Buffer.concat([
+      Buffer.from("validation diagnostic sentinel line ", "utf-8"),
+      Buffer.alloc(50, 0x80), // invalid continuation bytes: decode to U+FFFD
+      Buffer.alloc(25000, 0x00), // raw NULs: decode verbatim
+    ]);
+    const r = run({
+      temp: { "hidden-template-validation.log": capture },
+      env: { VALIDATION: "failed", HIDE_DETAILS: "true" },
+    });
+    // Delivery happened at all: the gh stub was reached and recorded.
+    expect(r.exitCode).toBe(0);
+    expect(r.body).not.toBe("");
+    expect(r.body).not.toContain("\u0000");
+    expect(Buffer.byteLength(r.body, "utf-8")).toBeLessThan(65536);
+    expect(r.body).toContain("validation diagnostic sentinel line");
+    expect(r.body).toContain("\\x00"); // the escaped representation is visible
+    expect(r.body).toContain("\ufffd");
+    expect(r.body).not.toContain("hard-truncated"); // never detoured through capBody
+    expect(r.merged).toBe(false);
+  });
+
+  test("a raw NUL in any ordinary section file is escaped at the spawn boundary", () => {
+    // Section files are written by this repo's own escaping writers, but
+    // the boundary guard must hold even when one slips through.
+    const r = run({ files: { CARRIED_FILE: "carry section with a \u0000 byte" } });
+    expect(r.exitCode).toBe(0);
+    expect(r.body).not.toContain("\u0000");
+    expect(r.body).toContain("carry section with a \\x00 byte");
+  });
+
+  test("a NUL-heavy ordinary section is measured escaped, sparing the reserved excerpt", () => {
+    // Unescaped, 25000 raw NULs fit the ordinary budget, quadruple at the
+    // boundary backstop past the hard cap, and capBody's end-cutting would
+    // take the reserved section - chunks must be escaped BEFORE measuring.
+    const nulHeavy = `carry\n${"\u0000".repeat(25000)}`;
+    const capture = "validation diagnostic sentinel line\n";
+    const r = run({
+      files: { CARRIED_FILE: nulHeavy },
+      temp: { "hidden-template-validation.log": capture },
+      env: { VALIDATION: "failed", HIDE_DETAILS: "true" },
+    });
+    expect(r.exitCode).toBe(0);
+    expect(r.body).not.toContain("\u0000");
+    expect(Buffer.byteLength(r.body, "utf-8")).toBeLessThan(65536);
+    expect(r.body).toContain("validation diagnostic sentinel line");
+    expect(r.body).not.toContain("hard-truncated");
+    expect(r.merged).toBe(false);
+  });
+
   test("a huge capture is excerpted from a bounded prefix, not decoded whole", () => {
     // run_hidden writes the capture uncapped; only a prefix may ever be
     // read (an unbounded decode could stall or exhaust memory before the

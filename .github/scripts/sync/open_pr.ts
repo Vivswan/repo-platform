@@ -16,7 +16,7 @@ import { closeSync, existsSync, openSync, readFileSync, readSync, statSync } fro
 import { join } from "node:path";
 import { env, hideDetails, requireEnv, setOutput } from "../shared/gha.ts";
 import { capture, mustCapture } from "../shared/proc.ts";
-import { clip } from "./preserve_local_content.ts";
+import { clip, escapeControlBytes } from "./preserve_local_content.ts";
 import { REMOVED_SPLITS_NAME, SETTINGS_LAYERING_NAME, TAIL_SHRANK_NAME } from "./section_files.ts";
 
 const target = requireEnv("TARGET");
@@ -80,7 +80,7 @@ Review any merge conflicts and confirm repository-local sections were preserved 
 const DRIFT_CAP = 8000;
 const driftFile = requireEnv("DRIFT_FILE");
 if (nonEmpty(driftFile)) {
-  let drift = slurp(driftFile);
+  let drift = nulSafe(slurp(driftFile));
   if (Buffer.byteLength(drift, "utf-8") > DRIFT_CAP) {
     // The recovery pointer must hold for HIDDEN targets too: the
     // settings-drift step hides values there, so local reproduction is
@@ -112,10 +112,19 @@ let reservedBytes = validation === "failed" ? VALIDATION_RESERVE : 0;
 let bodyBytes = Buffer.byteLength(body, "utf-8");
 let bodyTruncated = false;
 
+/** Raw NULs escaped visibly: argv cannot carry them, and the escape must
+ * run BEFORE a chunk is measured - a NUL-heavy section admitted at raw
+ * size would quadruple at a later escape and detour capBody through the
+ * reserved section. NUL is never legitimate body content. */
+function nulSafe(chunk: string): string {
+  return chunk.replaceAll("\0", "\\x00");
+}
+
 /** Append `chunk` only if the body stays under the cap MINUS the space
  * reserved for the priority sections; otherwise drop it and remember to
  * add the truncation banner. */
-function appendSection(chunk: string): void {
+function appendSection(rawChunk: string): void {
+  const chunk = nulSafe(rawChunk);
   const chunkBytes = Buffer.byteLength(chunk, "utf-8");
   if (bodyBytes + chunkBytes <= BODY_CAP - reservedBytes) {
     body += chunk;
@@ -128,8 +137,9 @@ function appendSection(chunk: string): void {
 /** Append a priority section, releasing its reservation first: with the
  * drift prepend and every ordinary section bounded, a chunk within the
  * reservation always fits. */
-function appendReserved(chunk: string): void {
+function appendReserved(rawChunk: string): void {
   reservedBytes = 0;
+  const chunk = nulSafe(rawChunk);
   const chunkBytes = Buffer.byteLength(chunk, "utf-8");
   if (bodyBytes + chunkBytes <= BODY_CAP) {
     body += chunk;
@@ -275,9 +285,14 @@ if (validation === "failed") {
           closeSync(fd);
         }
         const decoded = prefix.subarray(0, read).toString("utf-8");
-        const excerpt = utf8Truncated(decoded, EXCERPT_CAP);
+        // Raw control bytes decode VERBATIM (unlike invalid bytes), so
+        // escape BEFORE the byte cap and measure the escaped text - the
+        // reservation math must hold post-escaping. LF/CR stay literal
+        // (block structure).
+        const escaped = escapeControlBytes(decoded, true);
+        const excerpt = utf8Truncated(escaped, EXCERPT_CAP);
         const note =
-          size > read || excerpt.length < decoded.length
+          size > read || excerpt.length < escaped.length
             ? "\n(truncated; reproduce validation locally for the rest - docs/private-repos.md)"
             : "";
         validationExtra = `\n\n\`\`\`\`text\n${excerpt}${note}\n\`\`\`\``;
@@ -335,6 +350,10 @@ function capBody(full: string): string {
     " inspect this sync run's log and the base branch for the rest before merging.";
   return utf8Truncated(full, HARD_CAP - Buffer.byteLength(notice, "utf-8")) + notice;
 }
+// Backstop at the spawn boundary: every measured chunk is already
+// nulSafe'd, so this catches only base-body residue - one raw NUL would
+// fail `gh pr create/edit` outright and lose the delivery channel.
+body = nulSafe(body);
 body = capBody(body);
 
 // Anything that needs human review - dropped local hunks, a split-file
