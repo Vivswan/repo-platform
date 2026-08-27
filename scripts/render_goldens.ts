@@ -31,7 +31,7 @@
 //   .copier-answers.yml and stamped into the ownership manifest's
 //   provenance slot - is still a pure function of the WHOLE tree content,
 //   so every template edit would move it; normalizeRenderedTree therefore
-//   rewrites the `_commit` answer to the fixed sentinel "0000000" before
+//   rewrites the `_commit` answer to the fixed sentinel "xxxxxxx" before
 //   the write/diff step and re-runs the manifest stamp hook against the
 //   result (which carries the sentinel into the commit slot and the
 //   answers hash), gated on the render's stamp being honest so the
@@ -119,9 +119,11 @@ export function goldenMatrix(): { name: string; modules: string[] }[] {
 type Entry = { kind: "file"; bytes: Buffer; exec: boolean } | { kind: "symlink"; target: string };
 
 /** The fixed value the `_commit` provenance is rewritten to in every
- *  golden: the shortest form a render can record (copier stamps a 7-char
- *  short sha), so the sentinel never depends on which form was stamped. */
-export const SHA_SENTINEL = "0000000";
+ *  golden: the width of the short sha copier stamps, in a NON-hex
+ *  character, so no honest commit sha can ever read as the sentinel (a
+ *  hex sentinel like "0000000" would reject a genuine scratch commit that
+ *  happens to start with seven zeros via the pre-stamped guard below). */
+export const SHA_SENTINEL = "xxxxxxx";
 
 /** The answers file copier records the render provenance in; must match
  *  the name stamp_manifest.ts's recordedCommit reads. */

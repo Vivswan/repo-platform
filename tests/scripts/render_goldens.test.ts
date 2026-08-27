@@ -72,6 +72,13 @@ describe("normalizeAnswers", () => {
       `already reads as the sentinel "${SHA_SENTINEL}"`,
     );
   });
+
+  test("normalizes an honest sha of seven zeros - the non-hex sentinel cannot collide", () => {
+    // A hex sentinel ("0000000") would make the guard above reject this
+    // genuine commit; the sentinel being non-hex keeps the two disjoint.
+    const zeroSha = `0000000${"a".repeat(33)}`;
+    expect(normalizeAnswers("_commit: 0000000\n", zeroSha)).toBe(`_commit: ${SHA_SENTINEL}\n`);
+  });
 });
 
 describe("normalizeRenderedTree", () => {
