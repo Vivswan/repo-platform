@@ -62,7 +62,7 @@ export function copyActions(repoRoot: string, dest: string): number {
   if (!existsSync(source)) {
     throw new Error(
       `no actions/ directory at ${repoRoot} - the rendered workflows call ` +
-        "actions by path, so a template branch without them breaks every " +
+        "actions by path, so an actions branch without them breaks every " +
         "fleet CI run; check the checkout before publishing",
     );
   }

@@ -57,8 +57,13 @@ rulesets:
   # build-branches.yml publishes with. That is the narrowest actor the
   # ruleset dialect can express: GitHub cannot scope a bypass to one
   # workflow, so any workflow in THIS repository running with a
-  # write-scoped GITHUB_TOKEN shares the identity - the counterweight is
-  # that workflow code only lands on main through its own gated review.
+  # write-scoped GITHUB_TOKEN shares the identity. Residual, stated
+  # honestly: an on:push or on:pull_request workflow runs the PUSHED
+  # branch's own definition under that same app identity, so a write actor
+  # can reach this ref from a topic branch without ever landing code on
+  # main. Closing that structurally (a dedicated publisher identity the
+  # bypass names, nothing else able to assume it) is tracked separately;
+  # this ruleset raises the bar without claiming to seal it.
   # The bypass exempts the publisher only from THIS ruleset's update rule;
   # deletion and force-pushes stay blocked for it by build-branches above.
   - name: actions-ref-publish-only
