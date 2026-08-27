@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 // The FRESHNESS leg of the validate-template report: one ref compare
-// answering "how far behind the template branch is this repo". It is never
+// answering "how far behind the build branch is this repo". It is never
 // the repository's fault and never its blocker - the next sync PR closes
 // it - so this script informs and nothing more: no copier, no render, and
 // its OWN failures (network, an operator repo this token cannot read) skip
@@ -47,16 +47,16 @@ const recorded = (recordedLine ?? "").replace(/^_commit:/, "").replace(/["' ]/g,
 if (recorded === "") skip("No _commit is recorded in .copier-answers.yml.");
 
 const tipProbe = capture(
-  ["gh", "api", `repos/${templateRepo}/branches/template`, "--jq", ".commit.sha"],
+  ["gh", "api", `repos/${templateRepo}/branches/build`, "--jq", ".commit.sha"],
   { timeoutMs: NETWORK_TIMEOUT_MS },
 );
 if (tipProbe.exitCode !== 0) {
   skip(
-    `Could not read ${templateRepo}'s template branch (network, or a private operator repo this token cannot read).`,
+    `Could not read ${templateRepo}'s build branch (network, or a private operator repo this token cannot read).`,
   );
 }
 const tip = tipProbe.stdout.trim();
-if (tip === "") skip(`${templateRepo}'s template branch reported no commit.`);
+if (tip === "") skip(`${templateRepo}'s build branch reported no commit.`);
 
 // The recorded value is copier's short sha, so match on prefix.
 if (tip.startsWith(recorded)) {
@@ -72,8 +72,8 @@ const compare = capture(
 );
 const ahead = compare.exitCode === 0 ? compare.stdout.trim() : "";
 const distance = /^[0-9]+$/.test(ahead)
-  ? `behind the template branch by ${ahead} commit(s)`
-  : "behind the template branch";
+  ? `behind the build branch by ${ahead} commit(s)`
+  : "behind the build branch";
 writeFileSync(
   freshnessFile,
   `#### Freshness\n\nThis repository is ${distance} (recorded \`${recorded}\`, tip \`${tip.slice(0, 7)}\`). The next sync PR updates the managed files; nothing to do here.\n`,

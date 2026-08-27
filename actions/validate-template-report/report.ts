@@ -85,7 +85,7 @@ const freshness =
   freshnessState === "behind"
     ? readTrimmed(freshnessFile, "#### Freshness\n\nNot checked this run; see the run log for why.")
     : freshnessState === "fresh"
-      ? "#### Freshness\n\nUp to date with the template branch."
+      ? "#### Freshness\n\nUp to date with the build branch."
       : "#### Freshness\n\nNot checked this run; see the run log for why.";
 
 const body = `${MARKER}\n### Template check\n\n${integrity}${advice}\n\n${freshness}`;

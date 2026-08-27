@@ -2,7 +2,7 @@ name: Validate Template Report
 description: >-
   The fleet's validate-template job body: runs the validate-template
   integrity action with its verdict DEFERRED, adds the freshness ref
-  compare against the operator's template branch, and reports both through
+  compare against the operator's build branch, and reports both through
   one sticky PR comment and the step summary. It never fails on its own -
   the caller reads the `integrity` output and fails LAST, so the comment
   is already posted when the gate goes red. The calling job needs
@@ -17,7 +17,7 @@ inputs:
     required: true
   template-repo:
     description: >-
-      The operator repository whose template branch freshness is measured
+      The operator repository whose build branch freshness is measured
       against.
     required: false
     default: Vivswan/repo-platform

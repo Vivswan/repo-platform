@@ -35,7 +35,7 @@ fi
 case "$*" in
   *--method\\ PATCH*) echo "PATCH $*" >> "$CALLS"; exit 0 ;;
   *--method\\ POST*) echo "POST $*" >> "$CALLS"; exit 0 ;;
-  *branches/template*) printf '%s\\n' "\${GH_TIP:-}"; exit 0 ;;
+  *branches/build*) printf '%s\\n' "\${GH_TIP:-}"; exit 0 ;;
   *compare/*)
     if [ -n "\${GH_COMPARE_FAIL:-}" ]; then exit 1; fi
     printf '%s\\n' "\${GH_AHEAD:-}"
@@ -81,7 +81,7 @@ function runReport(opts: ReportOptions = {}) {
   const advisoriesPath = join(root, "advisories.md");
   writeFileSync(advisoriesPath, opts.advisories ?? "");
   const freshnessPath = join(root, "freshness.md");
-  writeFileSync(freshnessPath, "#### Freshness\n\nbehind the template branch by 3 commit(s).\n");
+  writeFileSync(freshnessPath, "#### Freshness\n\nbehind the build branch by 3 commit(s).\n");
   const calls = join(root, "calls.txt");
   const summary = join(root, "summary.md");
   writeFileSync(summary, "");
@@ -162,7 +162,7 @@ describe("the action's reporting script", () => {
     expect(r.exitCode).toBe(0);
     expect(r.calls).toContain("POST");
     expect(r.summary).toContain("Passed");
-    expect(r.summary).toContain("behind the template branch");
+    expect(r.summary).toContain("behind the build branch");
     expect(r.summary).not.toContain("This FAILS the check.");
   });
 
@@ -186,7 +186,7 @@ describe("the action's reporting script", () => {
     expect(r.exitCode).toBe(0);
     expect(r.calls).not.toContain("POST");
     expect(r.calls).not.toContain("PATCH");
-    expect(r.summary).toContain("Up to date with the template branch.");
+    expect(r.summary).toContain("Up to date with the build branch.");
   });
 
   test("clean and fresh still clears a comment a previous run left behind", () => {
@@ -213,7 +213,7 @@ describe("the action's reporting script", () => {
     const r = runReport({ findings: "", freshness: "behind", event: "push" });
     expect(r.exitCode).toBe(0);
     expect(r.calls).toBe("");
-    expect(r.summary).toContain("behind the template branch");
+    expect(r.summary).toContain("behind the build branch");
   });
 
   test("a missing findings file reports that the validator never ran", () => {
@@ -262,7 +262,7 @@ describe("the action's freshness script", () => {
     });
     expect(r.exitCode).toBe(0);
     expect(r.state).toBe("state=behind");
-    expect(r.fragment).toContain("behind the template branch by 3 commit(s)");
+    expect(r.fragment).toContain("behind the build branch by 3 commit(s)");
     expect(r.fragment).toContain("`abc1234`");
     expect(r.fragment).toContain("`def5678`");
   });
@@ -273,7 +273,7 @@ describe("the action's freshness script", () => {
       env: { GH_TIP: "def5678901234", GH_COMPARE_FAIL: "1" },
     });
     expect(r.state).toBe("state=behind");
-    expect(r.fragment).toContain("behind the template branch (");
+    expect(r.fragment).toContain("behind the build branch (");
     expect(r.fragment).not.toContain("commit(s)");
   });
 
@@ -321,7 +321,7 @@ describe("the action's wiring", () => {
     // biome-ignore lint/suspicious/noTemplateCurlyInString: literal GitHub Actions expression
     expect(action.outputs.integrity.value).toBe("${{ steps.integrity.outcome }}");
     // The freshness leg can never fail the job, and stays a ref compare
-    // against the operator's template branch: a render here would cost
+    // against the operator's build branch: a render here would cost
     // every fleet repo a copier run per push.
     const freshness = steps.find((step) => step.id === "freshness");
     expect(freshness?.["continue-on-error"]).toBe(true);
@@ -330,6 +330,6 @@ describe("the action's wiring", () => {
       readFileSync(join(ACTION, name), "utf8"),
     );
     for (const source of sources) expect(source).not.toMatch(/^\s*copier\s/m);
-    expect(sources[0]).toContain("/branches/template");
+    expect(sources[0]).toContain("/branches/build");
   });
 });
