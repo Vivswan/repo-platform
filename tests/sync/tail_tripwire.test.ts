@@ -10,10 +10,10 @@ import { describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { hasDuplicateJsonKeys } from "../../.github/scripts/shared/json.ts";
 import type { SplitEntry } from "../../.github/scripts/sync/preserve_local_content.ts";
 import {
   compareHalves,
-  hasDuplicateJsonKeys,
   headSplitEntries,
   missingLines,
   renderReport,

@@ -37,6 +37,7 @@ import {
 } from "../fleet/render_managed_settings.ts";
 import { parseYamlMapping } from "../fleet/settings_document.ts";
 import { hideDetails, notice, warning } from "../shared/gha.ts";
+import { hasDuplicateJsonKeys } from "../shared/json.ts";
 import { capture } from "../shared/proc.ts";
 
 const REPO_ROOT = resolve(import.meta.dir, "..", "..", "..");
@@ -97,6 +98,12 @@ export function headManifestClass(
     detail: `HEAD:${MANIFEST_PATH} ${why}`,
   });
   if (!isMapping(parsed)) return unreadable("is not a JSON object");
+  // Last-wins duplicates could read a mergeable-then-starter settings.yml
+  // entry as already transitioned and skip the transition unseen;
+  // unreadable holds the PR unless the marker still proves the shape.
+  if (hasDuplicateJsonKeys(proc.stdout)) {
+    return unreadable("declares the same key twice (JSON.parse keeps only the last duplicate)");
+  }
   if (!isMapping(parsed.files)) return unreadable("has no files map");
   const entry = parsed.files[path];
   // No entry is an answer: the file was not rendered from the template at

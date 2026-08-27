@@ -160,6 +160,28 @@ describe("headManifestClass", () => {
     expect(headManifestClass(repoWithManifest(null)).kind).toBe("unreadable");
   });
 
+  test("a duplicated settings.yml entry is unreadable, never last-wins", () => {
+    // JSON.parse keeps only the LAST duplicate: mergeable-then-starter
+    // would read as an already-transitioned starter and silently skip the
+    // transition on a marker-deleted legacy baseline.
+    const dup =
+      '{"files": {".github/settings.yml": {"class": "mergeable"}, ".github/settings.yml": {"class": "starter"}}}\n';
+    const head = headManifestClass(repoWithManifest(dup));
+    expect(head.kind).toBe("unreadable");
+    // The conservative branch: with no marker to prove the legacy shape,
+    // the transition holds the PR instead of guessing.
+    expect(classificationUncertain("repository: {}\n", head)).toBe(true);
+  });
+
+  test("an escape-variant duplicate entry is unreadable too", () => {
+    // The second spelling escapes the final "l" as backslash-u006c;
+    // JSON.parse still collides the decoded keys last-wins.
+    const escaped = String.raw`".github/settings.ym\u006c"`;
+    const dup = `{"files": {".github/settings.yml": {"class": "mergeable"}, ${escaped}: {"class": "starter"}}}\n`;
+    const head = headManifestClass(repoWithManifest(dup));
+    expect(head.kind).toBe("unreadable");
+  });
+
   test("an unknown class HOLDS the PR when the marker is gone", () => {
     const head = headManifestClass(repoWithManifest(entry('{"class": "mergable"}')));
     expect(classificationUncertain("repository: {}\n", head)).toBe(true);
