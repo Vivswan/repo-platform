@@ -32,7 +32,7 @@ The merge dialect (one implementation, `merge_settings_layers.ts`), applied iden
 - The merge dialect refuses shapes it cannot merge safely, at the parse boundary and with the file named: a `labels` or `rulesets` section that is not a list of mappings (a mapping or scalar there would fall out of the union and replace the managed roster wholesale - the apply would then delete every managed label, or upsert rulesets missing the modules' protection rules, green either way), and a ruleset rule without a string `type`.
 - Every other array, and every scalar, replaces wholesale.
 
-Repo-platform itself is always a target: it is not generated from the template (no `.repo-platform.yml`), so its layer facts come from `.repo-platform-answers.yml`, and its own `.github/settings.yml` carries its identity keys plus its repo-specific `build-branches` ruleset. It does NOT redeclare `main` or `non-bypassable`: the override layer supplies them and wins, so a copy here would be silently overridden.
+Repo-platform itself is always a target: it is not generated from the template (no `.repo-platform.yml`), so its layer facts come from `.repo-platform-answers.yml`, and its own `.github/settings.yml` carries its identity keys plus its repo-specific rulesets (`build-branches`, plus `actions-ref-publish-only`, which blocks every update to the executable `actions` ref except by the GitHub Actions integration that build-branches.yml publishes with). It does NOT redeclare `main` or `non-bypassable`: the override layer supplies them and wins, so a copy here would be silently overridden.
 
 `settings-repos.yml` runs on three triggers:
 

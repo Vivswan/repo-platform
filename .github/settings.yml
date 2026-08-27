@@ -26,9 +26,12 @@ repository:
 # which merges ABOVE this file - redeclaring one here would be silently
 # overridden, so this repository does not.
 rulesets:
-  # The generated build branch is append-only: the builder's plain pushes
-  # are fast-forwards and pass; force-pushes and deletion are blocked for
-  # everyone (no bypass actors on purpose).
+  # The generated build branches are append-only: the builder's plain
+  # pushes are fast-forwards and pass; force-pushes and deletion are
+  # blocked for everyone (no bypass actors on purpose). The publisher is
+  # NOT exempt either - this ruleset stays bypass-free, and the
+  # update-blocking ruleset below is a separate ruleset precisely so its
+  # bypass actor cannot leak into these rules.
   - name: build-branches
     target: branch
     enforcement: active
@@ -41,3 +44,34 @@ rulesets:
     rules:
       - type: deletion
       - type: non_fast_forward
+    # Declared EMPTY on purpose, like the override layer's non-bypassable
+    # ruleset: an omitted key is invisible to drift detection, so the
+    # explicit empty list is what lets the nightly heal clear an
+    # out-of-band bypass actor added to these rules.
+    bypass_actors: []
+  # The `actions` ref is EXECUTABLE: fleet workflows pin `@actions` and run
+  # its tree directly, with no provenance verify like the sync-side check
+  # that guards `template` consumption. So this ref additionally blocks ALL
+  # updates (fast-forwards included), with the sole bypass being the GitHub
+  # Actions integration - the identity of the GITHUB_TOKEN that
+  # build-branches.yml publishes with. That is the narrowest actor the
+  # ruleset dialect can express: GitHub cannot scope a bypass to one
+  # workflow, so any workflow in THIS repository running with a
+  # write-scoped GITHUB_TOKEN shares the identity - the counterweight is
+  # that workflow code only lands on main through its own gated review.
+  # The bypass exempts the publisher only from THIS ruleset's update rule;
+  # deletion and force-pushes stay blocked for it by build-branches above.
+  - name: actions-ref-publish-only
+    target: branch
+    enforcement: active
+    conditions:
+      ref_name:
+        include:
+          - actions
+        exclude: []
+    rules:
+      - type: update
+    bypass_actors:
+      - actor_id: 15368
+        actor_type: Integration
+        bypass_mode: always
