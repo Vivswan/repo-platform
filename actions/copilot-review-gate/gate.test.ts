@@ -8,7 +8,7 @@
 // four endpoints from files; nothing here touches the network or sleeps.
 
 import { describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -271,25 +271,6 @@ describe("copilot_review_gate.ts", () => {
     });
   }
 
-  test("a blank PROBE_TIMEOUT_MS is rejected, never read as no-timeout", () => {
-    // Number("") is 0 and Bun.spawnSync reads 0 as "no deadline", so a
-    // blank override would silently disable every gh call's network
-    // deadline. positiveMsEnv must refuse it at the read.
-    const r = run({ rules: COPILOT_RULE, checks: COMPLETED_CHECK, env: { PROBE_TIMEOUT_MS: "" } });
-    expect(r.exitCode).toBe(2);
-    expect(r.output).toContain("PROBE_TIMEOUT_MS must be a whole number of milliseconds");
-  });
-
-  test("a non-numeric PROBE_TIMEOUT_MS is rejected (NaN would disable the deadline too)", () => {
-    const r = run({
-      rules: COPILOT_RULE,
-      checks: COMPLETED_CHECK,
-      env: { PROBE_TIMEOUT_MS: "soon" },
-    });
-    expect(r.exitCode).toBe(2);
-    expect(r.output).toContain("PROBE_TIMEOUT_MS must be a whole number of milliseconds");
-  });
-
   test("a fractional PROBE_TIMEOUT_MS is rejected (Bun throws on a non-integer timeout)", () => {
     const r = run({
       rules: COPILOT_RULE,
@@ -298,5 +279,17 @@ describe("copilot_review_gate.ts", () => {
     });
     expect(r.exitCode).toBe(2);
     expect(r.output).toContain("PROBE_TIMEOUT_MS must be a whole number of milliseconds");
+  });
+
+  // Migrated from the smoke harness, which used to grep the rendered bash
+  // for a bare `gh api` and for `sleep`. The deadline half is a type now
+  // (runtime.ts makes timeoutMs required, so no call site can omit it);
+  // this is the half a type cannot state. The gate exists to spend NO
+  // runner time: it waits by failing and letting the re-armer pick it up,
+  // because a private repo bills every started job a rounded-up minute.
+  test("the gate never sleeps - waiting is the re-armer's job", () => {
+    for (const file of ["gate.ts", "identity.ts", "runtime.ts"]) {
+      expect(readFileSync(join(import.meta.dir, file), "utf8")).not.toMatch(/\bsleep\b/);
+    }
   });
 });

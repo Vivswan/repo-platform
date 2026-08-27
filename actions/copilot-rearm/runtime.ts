@@ -76,32 +76,37 @@ export interface RunResult {
   exitCode: number;
   stdout: string;
   stderr: string;
-  timedOut?: boolean;
+  timedOut: boolean;
 }
 
 export interface RunOptions {
   cwd?: string;
   env?: Record<string, string | undefined>;
   /** Hard deadline in milliseconds: on expiry the child is SIGKILLed and
-   *  the result reports `timedOut`. Absent = unbounded. */
-  timeoutMs?: number;
+   *  the result reports `timedOut`. REQUIRED, unlike the repository's
+   *  shared proc.ts where it is optional. Both of these actions run on a
+   *  billed runner with a job timeout, and a `gh` call that hangs there
+   *  burns the budget and then fails the job on the clock instead of on
+   *  its own verdict - the gate would look broken and the re-armer would
+   *  strand a red gate. Making the deadline unskippable is what retires
+   *  the grep that used to scan the rendered bash for a bare `gh api`. */
+  timeoutMs: number;
 }
 
-export function capture(command: string[], options: RunOptions = {}): RunResult {
+export function capture(command: string[], options: RunOptions): RunResult {
   const proc = Bun.spawnSync(command, {
     cwd: options.cwd,
     env: options.env ? { ...process.env, ...options.env } : undefined,
     stdout: "pipe",
     stderr: "pipe",
-    ...(options.timeoutMs !== undefined
-      ? { timeout: options.timeoutMs, killSignal: "SIGKILL" as const }
-      : {}),
+    timeout: options.timeoutMs,
+    killSignal: "SIGKILL",
   });
   return {
     exitCode: proc.exitCode ?? 1,
     stdout: proc.stdout.toString(),
     stderr: proc.stderr.toString(),
-    ...(options.timeoutMs !== undefined ? { timedOut: proc.exitedDueToTimeout === true } : {}),
+    timedOut: proc.exitedDueToTimeout === true,
   };
 }
 

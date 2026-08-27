@@ -19,7 +19,7 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { COPILOT_LOGINS } from "../../actions/copilot-review-gate/identity.ts";
+import { COPILOT_CHECK_NAME, COPILOT_LOGINS } from "../../actions/copilot-review-gate/identity.ts";
 
 const ACTIONS = join(import.meta.dir, "../../actions");
 const SHARED = ["identity.ts", "runtime.ts", "tsconfig.json"];
@@ -78,5 +78,15 @@ describe("the Copilot actions' shared files", () => {
     );
     expect(logins(readFileSync(operator, "utf8"), operator)).toEqual(expected);
     expect(logins(readFileSync(fleet, "utf8"), fleet)).toEqual(expected);
+  });
+
+  // Migrated from the smoke harness, which pinned this string as a
+  // COPILOT_CHECK env var in the rendered workflow. It is not ours to
+  // choose: GitHub names the check run and the [bot] login, and getting it
+  // wrong makes the gate see a review that never arrives (red forever) or
+  // one that never was (green wrongly). Pinned where the fleet cannot see
+  // it change, so a deliberate rename is a deliberate edit here.
+  test("Copilot's check-run name is the upstream spelling", () => {
+    expect(COPILOT_CHECK_NAME).toBe("copilot-pull-request-reviewer");
   });
 });
