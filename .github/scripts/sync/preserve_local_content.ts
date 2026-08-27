@@ -803,19 +803,26 @@ const MAX_EXCERPT_LINES = 40;
 const MAX_LINE_CHARS = 300;
 const MAX_EXCERPT_BYTES = 16384;
 
-/** One display line, bounded and control-free: an excerpted line is
- * target-controlled repository content, so one enormous value must not
- * blow the PR-body cap - and C0 control bytes must not survive into a
- * report: a NUL riding latin1 all the way to open_pr's --body argv kills
- * the spawn (OS argv cannot carry NUL). Escaped as visible \\xNN
- * (lossless); tab stays literal. One owner for every PR-body excerpt of
- * repository bytes - tail_tripwire.ts and preserve_repo_owned.ts reuse
- * it. */
-export function clip(text: string): string {
-  // biome-ignore lint/suspicious/noControlCharactersInRegex: matching control bytes to escape them is this regex's whole job
-  const printable = text.replace(/[\x00-\x08\x0a-\x1f\x7f]/g, (control) => {
+/** Control bytes escaped as visible \\xNN (lossless) - a raw NUL
+ * reaching gh's --body argv kills the spawn and the delivery channel.
+ * Tab stays literal; `keepNewlines` keeps LF and CR literal too, for
+ * multi-line blocks where they are structure, not content. */
+export function escapeControlBytes(text: string, keepNewlines = false): string {
+  const re = keepNewlines
+    ? // biome-ignore lint/suspicious/noControlCharactersInRegex: matching control bytes to escape them is this regex's whole job
+      /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g
+    : // biome-ignore lint/suspicious/noControlCharactersInRegex: matching control bytes to escape them is this regex's whole job
+      /[\x00-\x08\x0a-\x1f\x7f]/g;
+  return text.replace(re, (control) => {
     return `\\x${control.charCodeAt(0).toString(16).padStart(2, "0")}`;
   });
+}
+
+/** One display line for a PR-body excerpt: escapeControlBytes plus a
+ * per-line length cap (one enormous target-controlled value must not blow
+ * the body budget). tail_tripwire.ts and preserve_repo_owned.ts reuse it. */
+export function clip(text: string): string {
+  const printable = escapeControlBytes(text);
   return printable.length > MAX_LINE_CHARS
     ? `${printable.slice(0, MAX_LINE_CHARS)} [clipped]`
     : printable;

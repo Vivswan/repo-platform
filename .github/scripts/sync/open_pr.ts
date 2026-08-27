@@ -12,10 +12,11 @@
 // GH_TOKEN, GITHUB_REPOSITORY, GITHUB_OUTPUT,
 // RUNNER_TEMP.
 
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { closeSync, existsSync, openSync, readFileSync, readSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { env, hideDetails, requireEnv, setOutput } from "../shared/gha.ts";
 import { capture, mustCapture } from "../shared/proc.ts";
+import { clip, escapeControlBytes } from "./preserve_local_content.ts";
 import { REMOVED_SPLITS_NAME, SETTINGS_LAYERING_NAME, TAIL_SHRANK_NAME } from "./section_files.ts";
 
 const target = requireEnv("TARGET");
@@ -45,8 +46,14 @@ function lines(path: string): string[] {
 
 // From resolve_refs.ts via file (not a step output: the value is
 // target-controlled and step outputs surface in env-group prints). This
-// body ships to the private repo, so the raw value is fine HERE.
-const oldCommit = readFileSync(join(runnerTemp, "old_commit.txt"), "utf-8");
+// body ships to the private repo, so the VALUE is fine here - but its
+// SIZE is not: resolve_refs bounds nothing (a long-but-valid revision
+// expression still resolves), and the base body sits outside the section
+// budget, so an unbounded value would inflate it until the reserved
+// validation excerpt no longer fits. Display-only, so clip it (bounded,
+// control bytes escaped - a NUL would kill gh's argv); the real value
+// stays in old_commit.txt for anything that consumes it.
+const oldCommit = clip(slurp(join(runnerTemp, "old_commit.txt")));
 
 // TARGET_REF is the verified commit (pinned by resolve_refs.ts), so
 // DISPLAY (template@<sha>) drives the source line.
@@ -67,10 +74,20 @@ Review any merge conflicts and confirm repository-local sections were preserved 
 
 // Out-of-band settings drift goes on TOP of the body: merging ratifies
 // live values no human declared, so the reader must see that before
-// anything else.
+// anything else. Bounded: the drift report embeds target-controlled
+// values, and an unbounded prepend would starve the reserved validation
+// section below or trip the end-cutting hard cap that would drop it.
+const DRIFT_CAP = 8000;
 const driftFile = requireEnv("DRIFT_FILE");
 if (nonEmpty(driftFile)) {
-  body = `${slurp(driftFile)}\n\n${body}`;
+  let drift = nulSafe(slurp(driftFile));
+  if (Buffer.byteLength(drift, "utf-8") > DRIFT_CAP) {
+    // The recovery pointer must hold for HIDDEN targets too: the
+    // settings-drift step hides values there, so local reproduction is
+    // the one channel that always has the full report.
+    drift = `${utf8Truncated(drift, DRIFT_CAP)}\n(drift report truncated: size limit; reproduce the sync locally for the full report - docs/private-repos.md)`;
+  }
+  body = `${drift}\n\n${body}`;
 }
 
 // GitHub caps PR bodies at 64 KiB and gh fails outright past it, stranding
@@ -81,12 +98,48 @@ if (nonEmpty(driftFile)) {
 // The needs-review decision comes from the flag files, never this prose, so
 // dropping a section can only lose information, never flip manual to clean.
 const BODY_CAP = 62000;
+// PRIORITY: the failed-validation section alone gets budget carved out
+// before ordinary sections consume it. For a hidden target the PR body is
+// the diagnostics' ONLY channel (run_hidden hides the log, the failure
+// issue defers to an existing PR) and the workflow error promises them
+// here; every other review-forcing section holds the PR via its flag with
+// its evidence recoverable elsewhere (base branch, local reproduction).
+const VALIDATION_RESERVE = 22000; // EXCERPT_CAP plus framing
+/** The validation excerpt's bound, measured on its RE-ENCODED UTF-8 size
+ * (see the excerpt construction); must stay under VALIDATION_RESERVE. */
+const EXCERPT_CAP = 20000;
+let reservedBytes = validation === "failed" ? VALIDATION_RESERVE : 0;
 let bodyBytes = Buffer.byteLength(body, "utf-8");
 let bodyTruncated = false;
 
-/** Append `chunk` only if the whole body stays under the aggregate cap;
- * otherwise drop it and remember to add the truncation banner. */
-function appendSection(chunk: string): void {
+/** Raw NULs escaped visibly: argv cannot carry them, and the escape must
+ * run BEFORE a chunk is measured - a NUL-heavy section admitted at raw
+ * size would quadruple at a later escape and detour capBody through the
+ * reserved section. NUL is never legitimate body content. */
+function nulSafe(chunk: string): string {
+  return chunk.replaceAll("\0", "\\x00");
+}
+
+/** Append `chunk` only if the body stays under the cap MINUS the space
+ * reserved for the priority sections; otherwise drop it and remember to
+ * add the truncation banner. */
+function appendSection(rawChunk: string): void {
+  const chunk = nulSafe(rawChunk);
+  const chunkBytes = Buffer.byteLength(chunk, "utf-8");
+  if (bodyBytes + chunkBytes <= BODY_CAP - reservedBytes) {
+    body += chunk;
+    bodyBytes += chunkBytes;
+  } else {
+    bodyTruncated = true;
+  }
+}
+
+/** Append a priority section, releasing its reservation first: with the
+ * drift prepend and every ordinary section bounded, a chunk within the
+ * reservation always fits. */
+function appendReserved(rawChunk: string): void {
+  reservedBytes = 0;
+  const chunk = nulSafe(rawChunk);
   const chunkBytes = Buffer.byteLength(chunk, "utf-8");
   if (bodyBytes + chunkBytes <= BODY_CAP) {
     body += chunk;
@@ -214,21 +267,40 @@ if (validation === "failed") {
       if (nonEmpty(file)) {
         validationWhere =
           "the public sync log hides the diagnostics (private repository); they are below";
-        // GitHub caps PR bodies at 64 KiB and gh fails outright past it,
-        // which would strand the pushed branch with no PR - keep the
-        // excerpt bounded like the conflicts summary.
-        const data = readFileSync(file);
+        // The excerpt is bounded on its re-encoded UTF-8 size (invalid
+        // capture bytes decode to 3-byte U+FFFD replacements, so a raw
+        // byte slice could exceed the reservation), and only a bounded
+        // PREFIX of the capture is ever read or decoded (run_hidden
+        // writes it uncapped; a decoded byte never shrinks its input, so
+        // EXCERPT_CAP input bytes plus lookahead for a straddling char
+        // already saturate the excerpt).
+        const size = statSync(file).size;
+        const window = Math.min(size, EXCERPT_CAP + 3);
+        const prefix = Buffer.alloc(window);
+        const fd = openSync(file, "r");
+        let read = 0;
+        try {
+          read = readSync(fd, prefix, 0, window, 0);
+        } finally {
+          closeSync(fd);
+        }
+        const decoded = prefix.subarray(0, read).toString("utf-8");
+        // Raw control bytes decode VERBATIM (unlike invalid bytes), so
+        // escape BEFORE the byte cap and measure the escaped text - the
+        // reservation math must hold post-escaping. LF/CR stay literal
+        // (block structure).
+        const escaped = escapeControlBytes(decoded, true);
+        const excerpt = utf8Truncated(escaped, EXCERPT_CAP);
         const note =
-          data.length > 20000
+          size > read || excerpt.length < escaped.length
             ? "\n(truncated; reproduce validation locally for the rest - docs/private-repos.md)"
             : "";
-        const excerpt = data.subarray(0, 20000).toString("utf-8");
         validationExtra = `\n\n\`\`\`\`text\n${excerpt}${note}\n\`\`\`\``;
         break;
       }
     }
   }
-  appendSection(`
+  appendReserved(`
 
 > [!WARNING]
 > Validation failed on the updated tree (${validationWhere}). Fix it
@@ -248,25 +320,14 @@ if (bodyTruncated) {
 > base branch for the full detail before merging.`;
 }
 
-// Backstop the aggregate budget: appendSection governs the OPTIONAL
-// sections, but the drift warning prepended on top and the base body are
-// mandatory and the drift value is target-controlled (a huge recorded
-// description), so a pathological drift alone could still overrun 64 KiB
-// and strand the branch. Hard-cap the finished body on a UTF-8 char
-// boundary, dropping whole trailing lines so no markdown is cut mid-line.
-const HARD_CAP = 63000;
-function capBody(full: string): string {
-  if (Buffer.byteLength(full, "utf-8") <= HARD_CAP) return full;
-  const notice =
-    "\n\n> [!WARNING]\n> This PR body exceeded GitHub's size limit and was hard-truncated;" +
-    " inspect this sync run's log and the base branch for the rest before merging.";
-  const budget = HARD_CAP - Buffer.byteLength(notice, "utf-8");
-  const lines = full.split("\n");
+/** `text` truncated to at most `budget` UTF-8 bytes: whole trailing lines
+ * are dropped first so no markdown is cut mid-line; a single over-budget
+ * line is byte-cut on a char boundary. */
+function utf8Truncated(text: string, budget: number): string {
+  const lines = text.split("\n");
   while (lines.length > 1 && Buffer.byteLength(lines.join("\n"), "utf-8") > budget) {
     lines.pop();
   }
-  // A single line already over budget (no newline to trim to) is cut on a
-  // char boundary by bytes.
   let head = lines.join("\n");
   if (Buffer.byteLength(head, "utf-8") > budget) {
     const buf = Buffer.from(head, "utf-8");
@@ -274,8 +335,25 @@ function capBody(full: string): string {
     while (end > 0 && (buf[end] & 0xc0) === 0x80) end--; // back off a continuation byte
     head = buf.subarray(0, end).toString("utf-8");
   }
-  return head + notice;
+  return head;
 }
+
+// Backstop the aggregate budget: appendSection/appendReserved govern the
+// optional sections and the drift prepend is bounded at its source, so
+// this should never fire - it stays as the final guarantee that no future
+// unbounded append can hand gh an over-limit body and strand the branch.
+const HARD_CAP = 63000;
+function capBody(full: string): string {
+  if (Buffer.byteLength(full, "utf-8") <= HARD_CAP) return full;
+  const notice =
+    "\n\n> [!WARNING]\n> This PR body exceeded GitHub's size limit and was hard-truncated;" +
+    " inspect this sync run's log and the base branch for the rest before merging.";
+  return utf8Truncated(full, HARD_CAP - Buffer.byteLength(notice, "utf-8")) + notice;
+}
+// Backstop at the spawn boundary: every measured chunk is already
+// nulSafe'd, so this catches only base-body residue - one raw NUL would
+// fail `gh pr create/edit` outright and lose the delivery channel.
+body = nulSafe(body);
 body = capBody(body);
 
 // Anything that needs human review - dropped local hunks, a split-file
