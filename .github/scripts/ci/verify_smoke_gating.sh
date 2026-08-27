@@ -47,10 +47,36 @@ elif has skills; then last_need="      - validate-skills"
 elif has release-please; then last_need="      - release-health"
 elif [ "$PRIVATE" != "true" ] && has uv; then last_need="      - codeql-python"
 elif [ "$PRIVATE" != "true" ] && has_codeql_toolchain; then last_need="      - codeql-javascript"
-elif [ "$PRIVATE" = "true" ]; then last_need="      - base-checks"
-else last_need="      - dependency-review"
+# copilot-review is the last BASE entry, on every row and both visibilities,
+# so it closes the list whenever no module contributes a gate job.
+else last_need="      - copilot-review"
 fi
 adjacent "$last_need" "    runs-on: ubuntu-latest" "$wf/ci.yml"
+
+# The Copilot bridge is unconditional: the gate job waits for Copilot's review
+# on every managed repo, and the re-arm workflow re-runs JUST that job once the
+# review lands. Both are visibility-independent - private repos merge the five
+# base checks into one job, but this one stays separate because its NAME is
+# what the re-arm workflow re-runs.
+present_line "  copilot-review:" "$wf/ci.yml"
+present_line "      - copilot-review" "$wf/ci.yml"
+present "COPILOT_CHECK: copilot-pull-request-reviewer" "$wf/ci.yml"
+test -f "$wf/rerun-copilot-gate.yml"
+present_line "  rerun:" "$wf/rerun-copilot-gate.yml"
+present_line "          GATE_JOB: copilot-review" "$wf/rerun-copilot-gate.yml"
+present_line "  actions: write" "$wf/rerun-copilot-gate.yml"
+# Fail-fast economy: the gate waits by FAILING, never by sleeping on a billed
+# runner, and every network call carries a deadline. Matching on the opening
+# quote of the path keeps prose mentions of the API out of the count.
+absent "sleep " "$wf/ci.yml"
+absent "sleep " "$wf/rerun-copilot-gate.yml"
+present 'timeout 20 gh api "' "$wf/ci.yml"
+present 'timeout 20 gh api "' "$wf/rerun-copilot-gate.yml"
+undeadlined="$(grep -h 'gh api "' "$wf/ci.yml" "$wf/rerun-copilot-gate.yml" | grep -vc "timeout " || true)"
+if [ "$undeadlined" != 0 ]; then
+  echo "::error::gating check failed: $undeadlined 'gh api' call(s) in the rendered Copilot bridge carry no 'timeout' deadline for modules=$MODULES private=$PRIVATE. Fix templates/base/.github/workflows/ (or this expectation in verify_smoke_gating.sh)."
+  exit 1
+fi
 if has issue-templates; then test -f /tmp/smoke/.github/ISSUE_TEMPLATE/config.yml; else test ! -e /tmp/smoke/.github/ISSUE_TEMPLATE; fi
 if has pages; then test -f "$wf/pages.yml"; else test ! -e "$wf/pages.yml"; fi
 

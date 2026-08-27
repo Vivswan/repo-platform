@@ -166,6 +166,7 @@ const BASE_OWNERSHIP: BaseOwnedFile[] = [
   { path: ".github/CODEOWNERS", kind: "marker", marker: "# repo-platform:local-section" },
   { path: ".github/dependabot.yml", kind: "header" },
   { path: ".github/workflows/ci.yml", kind: "header" },
+  { path: ".github/workflows/rerun-copilot-gate.yml", kind: "header" },
   { path: ".repo-platform.yml", kind: "header" },
   { path: ".typography-allow", kind: "header" },
   { path: ".yamllint", kind: "header" },
