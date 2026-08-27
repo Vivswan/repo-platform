@@ -24,8 +24,9 @@ repository:
 
 rulesets:
   # Admins (RepositoryRole id 5) are in the bypass list, so direct pushes
-  # to main still work. Two required status checks: `all-green` (ci.yml's
-  # aggregate job, which `needs:` every gating CI job) and Copilot's own
+  # to main still work. Two required status checks: `all-green` (the
+  # check run the workflow_run-triggered all-green.yml verdict creates
+  # after judging each completed CI run's jobs) and Copilot's own
   # `copilot-pull-request-reviewer` check run, which GitHub creates per
   # head sha when its code review runs (the copilot_code_review rule below
   # triggers it on every push). Requiring it makes GitHub itself hold the

@@ -14,8 +14,10 @@ import {
   assembleBranchTree,
   canonicalize,
   copyActions,
+  copyFleetWorkflows,
   destOverlapsRepo,
   EXCLUDED_DIRS,
+  FLEET_WORKFLOWS,
 } from "../../.github/scripts/build-branches/branch_tree";
 
 const REPO = "/home/user/repo-platform";
@@ -151,6 +153,7 @@ describe("assembleBranchTree", () => {
 
   test("the branch root carries exactly the unified layout", () => {
     expect(readdirSync(dest).sort()).toEqual([
+      ".github",
       "README.md",
       "actions",
       "copier.yml",
@@ -197,5 +200,63 @@ describe("assembleBranchTree", () => {
     expect(existsSync(join(dest, "template", "AGENTS.md.jinja"))).toBe(true);
     expect(existsSync(join(dest, "actions", "check-typography", "action.yml"))).toBe(true);
     expect(existsSync(join(dest, "actions", "check-typography", "node_modules"))).toBe(false);
+  });
+
+  test("the three fleet-facing reusable workflows ship at .github/workflows", () => {
+    // A reusable-workflow `uses:` fetches the FILE at the named ref, so
+    // fleet-ci.yml@build, reusable-all-green.yml@build, and fleet-ci's
+    // ./reusable-codeql.yml call all resolve against THIS tree; losing one
+    // 404s every fleet CI run.
+    for (const name of FLEET_WORKFLOWS) {
+      expect(existsSync(join(dest, ".github", "workflows", name))).toBe(true);
+    }
+    // Nothing beyond the roster: any extra workflow on the branch is an
+    // unreviewed delivery surface.
+    expect(readdirSync(join(dest, ".github", "workflows")).sort()).toEqual(
+      [...FLEET_WORKFLOWS].sort(),
+    );
+  });
+});
+
+describe("copyFleetWorkflows", () => {
+  // The other direction of the shipping guard: the branch is pushed with a
+  // PAT (whose pushes CAN trigger workflows), so "nothing can run on the
+  // build branch" holds only while every shipped workflow is
+  // workflow_call-only. A non-inert trigger must fail the compose loudly,
+  // naming the file and the trigger.
+  function fixture(fleetCiContent: string): string {
+    const root = mkdtempSync(join(tmpdir(), "branch-workflows-"));
+    const wf = join(root, ".github", "workflows");
+    mkdirSync(wf, { recursive: true });
+    writeFileSync(join(wf, "fleet-ci.yml"), fleetCiContent);
+    writeFileSync(join(wf, "reusable-all-green.yml"), "on:\n  workflow_call:\njobs: {}\n");
+    writeFileSync(join(wf, "reusable-codeql.yml"), "on:\n  workflow_call:\njobs: {}\n");
+    return root;
+  }
+
+  test("ships workflow_call-only workflows", () => {
+    const root = fixture("on:\n  workflow_call:\n    inputs: {}\njobs: {}\n");
+    const dest = mkdtempSync(join(tmpdir(), "branch-workflows-dest-"));
+    copyFleetWorkflows(root, dest);
+    expect(existsSync(join(dest, ".github", "workflows", "fleet-ci.yml"))).toBe(true);
+  });
+
+  test("refuses a workflow with any trigger beyond workflow_call, naming file and trigger", () => {
+    const root = fixture("on:\n  workflow_call:\n  push:\n    branches: [main]\njobs: {}\n");
+    const dest = mkdtempSync(join(tmpdir(), "branch-workflows-dest-"));
+    expect(() => copyFleetWorkflows(root, dest)).toThrow(/fleet-ci\.yml.*'push'/);
+  });
+
+  test("refuses a workflow with no triggers at all (nothing provable is nothing shippable)", () => {
+    const root = fixture("jobs: {}\n");
+    const dest = mkdtempSync(join(tmpdir(), "branch-workflows-dest-"));
+    expect(() => copyFleetWorkflows(root, dest)).toThrow("declares no triggers");
+  });
+
+  test("refuses a tree missing a rostered workflow, naming it", () => {
+    const root = fixture("on:\n  workflow_call:\njobs: {}\n");
+    rmSync(join(root, ".github", "workflows", "reusable-codeql.yml"));
+    const dest = mkdtempSync(join(tmpdir(), "branch-workflows-dest-"));
+    expect(() => copyFleetWorkflows(root, dest)).toThrow("reusable-codeql.yml is missing");
   });
 });

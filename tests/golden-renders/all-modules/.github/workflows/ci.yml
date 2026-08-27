@@ -1,19 +1,21 @@
 # This file is managed by Vivswan/repo-platform.
 # Local edits may be replaced during template updates.
 #
-# The all-green convention: branch protection requires the `all-green`
-# check, which needs every other job here, so the required-checks list never
-# changes as jobs come and go (its one sibling required check is Copilot's
-# own per-sha review check run - settings data, never a CI job). This
-# repository's own test and lint jobs live
-# in checks.yml (repo-owned, never overwritten by sync) and run inside the
-# gate through the `checks` job. Module checks (the pr-title title check,
-# CodeQL analysis) run inside the gate too, so branch protection blocks on
-# them without extra required checks.
+# Single-call CI: the fleet's gate jobs live in repo-platform's
+# fleet-ci.yml reusable at the green-gated @build ref, so THIS FILE NO
+# LONGER DESCRIBES ITS OWN CI. The membership rule: what gates this
+# repository is being a job in fleet-ci.yml (plus the repo-owned
+# checks.yml the `checks` call runs), not being listed here - a fleet-ci
+# or action edit changes this repository's CI with no PR here, and
+# repo-platform's own CI gating every such edit is the counterweight.
 #
-# The base checks (typography, commit-names, actionlint, yamllint, gitleaks)
-# render as one job each on public repositories and as steps of a single
-# base-checks job on private ones, where every job bills a rounded-up minute.
+# The all-green convention: branch protection requires only the
+# `all-green` check - a CHECK RUN the managed all-green.yml verdict
+# workflow creates after judging this workflow's completed runs
+# (https://github.com/Vivswan/repo-platform/blob/main/docs/all-green.md).
+# Every job of a run gates unless its name starts with `info-`; a
+# skipped job stands down, which is how module- and visibility-gated
+# fleet-ci jobs opt out per run.
 
 name: CI
 
@@ -27,7 +29,7 @@ on:
     types: [opened, edited, reopened, synchronize]
   workflow_dispatch:
   # Weekly CodeQL re-scan with refreshed query packs; every other gate job
-  # is event-agnostic or skips its work cleanly on non-PR events.
+  # is event-agnostic or skips cleanly on non-PR events.
   schedule:
     - cron: "3 8 * * 1"
 
@@ -46,286 +48,48 @@ jobs:
   checks:
     uses: ./.github/workflows/checks.yml
 
-  # TWO checks, one job, different consequences - both live in the
-  # validate-template-report action, which wraps the validate-template
-  # integrity action with the freshness ref compare and the reporting.
-  #
-  # INTEGRITY validates the tree against the state it was stamped with. A
-  # failure means managed content changed out of band, so it BLOCKS - on
-  # pull requests and on main pushes alike, because a red gate is the
-  # owner's signal that something edited files the next sync will
-  # overwrite. Restore the file from history, or run a recovery sync.
-  #
-  # FRESHNESS is only "how far behind the template is this repo", which is
-  # never the repository's fault and never its blocker - the next sync PR
-  # closes it. It is one ref compare, no copier and no render, and its OWN
-  # failures (network, an operator repo this token cannot read) skip with a
-  # notice rather than going red.
-  #
-  # What stays here is the shape a composite action cannot carry: the job
-  # name and its all-green needs entry, the comment permission scoped to
-  # this one job, and the LAST step re-raising the action's deferred
-  # verdict - so the findings comment is already posted when the gate goes
-  # red, readable in the PR conversation instead of only in the run log.
-  validate-template:
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
+  # The fleet's gate jobs, parameterized by this repository's recorded
+  # module selection and visibility. This caller job's permissions are
+  # the ceiling for every job in the called workflow; each fleet-ci job
+  # narrows them to what it needs. The ceiling is UNCONDITIONAL: GitHub
+  # validates every called job's permission request against it at call
+  # time, skipped jobs included, so a selection-gated grant would reject
+  # the whole call on the selections that skip the job.
+  ci:
+    uses: Vivswan/repo-platform/.github/workflows/fleet-ci.yml@build
     permissions:
       contents: read
-      # Only for the sticky comment, and only on this job.
+      # validate-template posts its sticky findings comment.
       pull-requests: write
-    steps:
-      - uses: actions/checkout@v7
-      - uses: Vivswan/repo-platform/actions/validate-template-report@build
-        id: template
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          template-repo: Vivswan/repo-platform
-      # Last, so the comment above is already posted when the gate goes red.
-      # Fail-closed: != 'success' re-raises on 'failure' AND on an output
-      # that resolved empty (a broken mapping must never read as green).
-      - name: Fail on an integrity finding
-        if: steps.template.outputs.integrity != 'success'
-        run: |
-          echo "::error::validate-template found managed content that changed outside a sync; see the findings on this PR (or the job summary) and the step log above."
-          exit 1
-
-  typography:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v7
-      - uses: Vivswan/repo-platform/actions/check-typography@build
-
-  commit-names:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-      - uses: Vivswan/repo-platform/actions/validate-commit-names@build
-
-  actionlint:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v7
-      - uses: raven-actions/actionlint@v2
-
-  yamllint:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v7
-      # The pip install and the strict lint invocation live in the action.
-      - uses: Vivswan/repo-platform/actions/yamllint@build
-
-  gitleaks:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      contents: read
-      pull-requests: read
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-      # Secret scanning: a committed credential fails the gate. The action
-      # scans the event's commit range (fetch-depth 0 above lets any range
-      # resolve); audit the OLD history once with a local `gitleaks git`.
-      # Personal-account repos need no GITLEAKS_LICENSE; allowlist false
-      # positives in the repo-owned .gitleaks.toml at the repository root
-      # (seeded by the template, never overwritten by sync).
-      # pull-requests read on this job: the action lists the PR's commits
-      # to build the scan range. Comments off keeps that scope at read;
-      # leaks still land in the job summary and SARIF artifact.
-      - uses: gitleaks/gitleaks-action@v3
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITLEAKS_ENABLE_COMMENTS: "false"
-          # The action's default binary (8.24.3) predates .gitleaks.toml's
-          # minVersion floor AND skips that check silently; pin one meeting
-          # the floor so CI honors the same config local runs do.
-          GITLEAKS_VERSION: "8.30.1"
-
-  # Fails when a PR introduces dependencies with known vulnerabilities, by
-  # diffing the dependency graph between base and head. Public renders only:
-  # the dependency-graph API behind it is free just for public repositories.
-  # Only PR events have a diff to review, so the skip lives on the steps:
-  # all-green treats a skipped needed job as failure, so the job itself
-  # stays unconditional.
-  dependency-review:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v7
-        if: github.event_name == 'pull_request'
-      # The severity threshold and the upstream pin live in the wrapper.
-      - uses: Vivswan/repo-platform/actions/dependency-review@build
-        if: github.event_name == 'pull_request'
-
-  # CodeQL analysis runs inside the gate (one job per language), so a failed
-  # scan blocks merges. Each job grants the scan permissions - a caller
-  # job's permissions are the ceiling for the called workflow - and the
-  # weekly re-scan schedule lives on this workflow's triggers.
-  # Repo-specific scan tuning (paths-ignore, extra queries, packs) goes in
-  # the repo-owned .github/codeql/codeql-config.yml - the standard CodeQL
-  # config file, picked up automatically when present.
-
-  codeql-javascript:
-    uses: Vivswan/repo-platform/.github/workflows/reusable-codeql.yml@main
-    with:
-      language: javascript-typescript
-    permissions:
-      contents: read
+      # The ceiling for the CodeQL analysis calls.
       security-events: write
       actions: read
-
-  codeql-python:
-    uses: Vivswan/repo-platform/.github/workflows/reusable-codeql.yml@main
-    with:
-      language: python
-    permissions:
-      contents: read
-      security-events: write
-      actions: read
-
-
-  # Fails when the release-please PR head lacks main's tip at CHECK time:
-  # a stale release PR cuts a release whose version and changelog miss
-  # commits already on main. A main push after this run is only caught by
-  # release-please's refresh re-running CI. Other PRs stay mergeable while
-  # behind (required checks are not strict). The skip lives on the STEPS:
-  # all-green treats a skipped needed job as failure.
-  release-freshness:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v7
-        if: github.event_name == 'pull_request' && startsWith(github.head_ref, 'release-please--')
-        with:
-          # Full history: the ancestor check needs origin/main.
-          fetch-depth: 0
-          # PR head, not the default merge ref - the merge ref already
-          # contains main's tip, so it would always pass.
-          ref: ${{ github.event.pull_request.head.sha }}
-      - name: Require the release PR to contain the tip of main
-        if: github.event_name == 'pull_request' && startsWith(github.head_ref, 'release-please--')
-        run: |
-          tip="$(git rev-parse "origin/${GITHUB_BASE_REF}")"
-          if git merge-base --is-ancestor "$tip" HEAD; then
-            echo "release PR contains the ${GITHUB_BASE_REF} tip (${tip})"
-          else
-            echo "::error::Release PR is behind ${GITHUB_BASE_REF} (tip ${tip}); its version and changelog would miss commits already on ${GITHUB_BASE_REF}. Do not merge; release-please refreshes the PR after the next green run on ${GITHUB_BASE_REF}."
-            exit 1
-          fi
-
-  # Early, visible release gating: fails the release PR while an open issue
-  # carries a tracking-stream label (nightly fuzz/CI) or the release-blocker
-  # label, or an open Dependabot alert reaches the severity threshold. This
-  # check can go stale (an issue opened after the PR turned green re-runs
-  # nothing here), so the release path re-runs the same action as the
-  # authoritative pre-flight before cutting a release. The skip lives on
-  # the STEP: all-green treats a skipped needed job as failure.
-  release-health:
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    # vulnerability-alerts read is the Dependabot alerts API key
-    # (security-events covers code scanning only); where the token cannot
-    # see alerts, the action's graceful degradation turns the security gate
-    # into a skipped check instead of a failure.
-    permissions:
-      contents: read
+      # The ceiling for release-health's issue and Dependabot-alert reads.
       issues: read
-      pull-requests: read
       vulnerability-alerts: read
-    steps:
-      - uses: Vivswan/repo-platform/actions/release-health@build
-        if: github.event_name == 'pull_request' && startsWith(github.head_ref, 'release-please--')
-        with:
-          mode: pull-request
-          tracking-labels: "fuzz-nightly,nightly-failure"
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    with:
+      modules: '["agents", "bun", "node", "deno", "uv", "rust", "pages", "release-please", "issue-templates", "skills", "pr-title", "auto-assign", "fuzzer", "nightly", "settings-sync"]'
+      private: false
+      skills-dir: "skills"
+      codeql-languages: '["javascript-typescript", "python"]'
+      tracking-labels: "fuzz-nightly,nightly-failure"
 
-  # Structural validation of the hosted agent skills (the skills module),
-  # inside the gate so branch protection blocks on a broken catalog:
-  # offline and cheap, so it runs unconditionally on every event. The
-  # network-dependent `npx skills` discovery check stays advisory in the
-  # standalone validate-skills.yml.
-  validate-skills:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v7
-      - uses: Vivswan/repo-platform/actions/validate-skills@build
-        with:
-          skills-dir: "skills"
-
-  # Conventional Commit PR title, checked inside the gate so branch
-  # protection blocks on it. PRs are squash-merged, so the PR title becomes
-  # the commit subject and drives release-please versioning: `feat:` (minor),
-  # `fix:` (patch), `feat!:` (major), `chore:`/`docs:` (no release). The
-  # skip lives on the STEP, not the job: all-green treats a skipped needed
-  # job as failure, and ci.yml also runs on push/dispatch/schedule events.
-  pr-title:
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions:
-      pull-requests: read
-    steps:
-      - name: Validate PR title is a Conventional Commit
-        if: github.event_name == 'pull_request'
-        uses: amannn/action-semantic-pull-request@v6
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  all-green:
-    name: all-green
-    if: always()
-    needs:
-      - checks
-      - typography
-      - commit-names
-      - actionlint
-      - gitleaks
-      - yamllint
-      - dependency-review
-      - validate-template
-      - codeql-javascript
-      - codeql-python
-      - release-freshness
-      - release-health
-      - validate-skills
-      - pr-title
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - name: All jobs green
-        env:
-          NEEDS: ${{ toJson(needs) }}
-        run: |
-          set -o pipefail
-          jq -r 'to_entries[] | "\(.value.result)\t\(.key)"' <<< "$NEEDS"
-          failed="$(jq -r 'to_entries[] | select(.value.result != "success") | .key' <<< "$NEEDS" | tr '\n' ' ')"
-          if [ -n "$failed" ]; then
-            echo "::error::all-green failed: ${failed% } did not succeed. Open the failing job's log in this run, fix the failure, and push again."
-            exit 1
-          fi
-
-  # Release from a green main only: the managed release.yml pipeline
+  # Release from a green run only: the managed release.yml pipeline
   # (release-please cuts a draft, the repo-owned update-release.yml hook
   # mutates it, then the attested publish flips it live) runs downstream
-  # of all-green, so a red commit can never cut a release or refresh the
-  # release PR.
-  # Deliberately NOT in all-green's needs: it depends on the gate, it is not
-  # gated by it. Only push/dispatch runs release: pull requests must never
-  # reach the publish pipeline, and the weekly scheduled CodeQL re-scan has
-  # no business refreshing release state. Secrets are inherited
-  # deliberately: publish steps need them.
-  release:
-    needs: [all-green]
+  # of `checks` and the fleet-ci call - the two jobs every gate runs
+  # through - so a red commit can never cut a release or refresh the
+  # release PR. It depends on the gate, it is NOT gated by it: the info-
+  # prefix opts the whole pipeline out of the all-green verdict (a flaky
+  # publish must not mark the commit ungreen), and `needs:` rather than
+  # the check run is what gates it - the check lands only after this
+  # whole run completes, while needs expresses the same "everything
+  # green" inside the run. Only push/dispatch runs release: pull requests
+  # must never reach the publish pipeline, and the weekly scheduled
+  # CodeQL re-scan has no business refreshing release state. Secrets are
+  # inherited deliberately: publish steps need them.
+  info-release:
+    needs: [checks, ci]
     if: >-
       (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
       && github.ref == 'refs/heads/main'

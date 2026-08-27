@@ -1,16 +1,20 @@
 
-  # Release from a green main only: the managed release.yml pipeline
+  # Release from a green run only: the managed release.yml pipeline
   # (release-please cuts a draft, the repo-owned update-release.yml hook
   # mutates it, then the attested publish flips it live) runs downstream
-  # of all-green, so a red commit can never cut a release or refresh the
-  # release PR.
-  # Deliberately NOT in all-green's needs: it depends on the gate, it is not
-  # gated by it. Only push/dispatch runs release: pull requests must never
-  # reach the publish pipeline, and the weekly scheduled CodeQL re-scan has
-  # no business refreshing release state. Secrets are inherited
-  # deliberately: publish steps need them.
-  release:
-    needs: [all-green]
+  # of `checks` and the fleet-ci call - the two jobs every gate runs
+  # through - so a red commit can never cut a release or refresh the
+  # release PR. It depends on the gate, it is NOT gated by it: the info-
+  # prefix opts the whole pipeline out of the all-green verdict (a flaky
+  # publish must not mark the commit ungreen), and `needs:` rather than
+  # the check run is what gates it - the check lands only after this
+  # whole run completes, while needs expresses the same "everything
+  # green" inside the run. Only push/dispatch runs release: pull requests
+  # must never reach the publish pipeline, and the weekly scheduled
+  # CodeQL re-scan has no business refreshing release state. Secrets are
+  # inherited deliberately: publish steps need them.
+  info-release:
+    needs: [checks, ci]
     if: >-
       (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
       && github.ref == 'refs/heads/main'

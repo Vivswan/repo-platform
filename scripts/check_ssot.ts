@@ -71,7 +71,8 @@ export const RECORDED_DIVERGENCES: {
 }[] = [];
 
 // Actions allowed to be pinned at more than one ref, with the full expected
-// ref set. Empty today; record any intentional split here with a comment.
+// ref set. Record any intentional split here with a comment. Empty since
+// the delivery channels converged on the one green-gated `build` ref.
 export const ALLOWED_MULTI_REFS: Record<string, string[]> = {};
 
 function read(rel: string): string {
@@ -200,6 +201,26 @@ export function mustMatch(text: string, re: RegExp, where: string, what: string)
   if (!match) throw new Error(`${where}: anchor for ${what} not found (pattern ${re})`);
   return match;
 }
+
+/** The all-green-name rule's text anchors into executable wiring, exported
+ *  so the suite can prove BOTH directions on the exact patterns the rule
+ *  runs. Line-anchored (^\s*...): a commented-out copy of the wiring (`#`
+ *  in the run block, `//` in the predicate) starts its line with the
+ *  comment marker, which the anchor rejects - dead wiring must never
+ *  satisfy the rule. */
+export const ALL_GREEN_WIRING = {
+  /** The verdict's check-run POST names the check. */
+  created: /^\s*-f "name=([^"]+)"/m,
+  /** The green gates' lookup keys on the shared CHECK_NAME constant. */
+  lookup:
+    /^\s*`repos\/\$\{repository\}\/commits\/\$\{sha\}\/check-runs\?check_name=\$\{CHECK_NAME\}/m,
+  /** The fleet wrapper template pins the verdict's anchor job. */
+  anchor: /^\s*require-job: (\S[^\n#]*?)\s*$/m,
+  /** The reusable wires the anchor input into the judging step. */
+  anchorWired: /^\s*REQUIRE_JOB: \$\{\{ inputs\.require-job \}\}$/m,
+  /** The render validator enforces the same anchor at sync time. */
+  anchorValidated: /^\s*const REQUIRED_GATE_JOB = "([^"]+)";$/m,
+};
 
 // --- comparison shaping ----------------------------------------------------
 
@@ -390,12 +411,13 @@ function repoCi(): Record<string, unknown> {
 }
 
 function templateCi(): Record<string, unknown> {
-  // { private: false }: the ssot rules compare this against repo-platform's
-  // own (public) ci.yml, and keep-both would model an impossible hybrid
-  // carrying the private base-checks job next to the public fan-out.
-  const text = normalizeJinja(read("templates/base/.github/workflows/ci.yml.jinja"), jinjaVars(), {
-    private: false,
-  });
+  // The collapsed template carries no private-conditioned branches (the
+  // job shapes live in fleet-ci.yml), so no boolean context applies;
+  // unresolved jinja expressions (the fleet-ci input values) are
+  // placeholder-substituted so the skeleton parses as YAML.
+  const text = placeholderJinja(
+    normalizeJinja(read("templates/base/.github/workflows/ci.yml.jinja"), jinjaVars()),
+  );
   return asRecord(parseYaml(text), "ci.yml.jinja");
 }
 
@@ -621,6 +643,118 @@ export function stepCarriesWithKey(lines: string[], usesAt: number, key: string)
   }
   return false;
 }
+
+// --- all-green verdict roster -----------------------------------------------
+
+/** Every gating job in this repository's ci.yml, by job id - the authored
+ *  roster behind the all-green verdict. The runtime verdict judges whatever
+ *  jobs actually ran, so it cannot notice a gate that was DELETED from
+ *  ci.yml; this roster is where that deletion becomes loud. Adding a gating
+ *  job means adding it here; removing one means removing its entry here in
+ *  the same change, deliberately. Jobs named `info-*` are the opt-out and
+ *  never appear here. */
+export const ALL_GREEN_ROSTER = [
+  "actionlint",
+  "actionlint-binary",
+  "gitleaks",
+  "dependency-review",
+  "shellcheck",
+  "verdict-judgment",
+  "yamllint",
+  "biome",
+  "typography",
+  "commit-names",
+  "typecheck",
+  "action-refs",
+  "compose",
+  "validate-template",
+  "golden-renders",
+  "script-tests",
+  "validate-skills",
+  "skills-discovery",
+  "smoke-generate",
+  "upgrade-path",
+  "rehearse-fleet",
+  "pr-title",
+  "codeql-javascript",
+];
+
+/** Set comparison between the authored roster and ci.yml's job ids.
+ *  Both directions are load-bearing: a ci.yml gating job missing from the
+ *  roster is a gate the roster never vouched for, and a roster entry with
+ *  no ci.yml job is a REMOVED gate - the sneaky case, where deleting the
+ *  job would otherwise change nothing the verdict can see. `info-*` jobs
+ *  are the deliberate opt-out and are skipped. A job named `all-green` is
+ *  an error outright: the verdict CHECK RUN owns that name now, and a
+ *  job's own check would collide with it in the merge box. */
+export function verdictRosterMismatches(
+  roster: string[],
+  jobs: string[],
+  site: { jobsFile: string; rosterName: string } = {
+    jobsFile: ".github/workflows/ci.yml",
+    rosterName: "ALL_GREEN_ROSTER",
+  },
+): Mismatch[] {
+  const mismatches: Mismatch[] = [];
+  const duplicate = roster.find((job, index) => roster.indexOf(job) !== index);
+  if (duplicate !== undefined) {
+    mismatches.push({
+      file: `scripts/check_ssot.ts ${site.rosterName}`,
+      expected: "each gating job listed once",
+      got: `'${duplicate}' is listed more than once`,
+    });
+  }
+  if (jobs.includes("all-green")) {
+    mismatches.push({
+      file: site.jobsFile,
+      expected: "no job named 'all-green' (the verdict check run owns the name)",
+      got: "a job whose check would collide with the verdict's",
+    });
+  }
+  const gating = jobs.filter((job) => !job.startsWith("info-") && job !== "all-green");
+  const expected = new Set(roster);
+  for (const job of gating) {
+    if (!expected.has(job)) {
+      mismatches.push({
+        file: site.jobsFile,
+        expected: `job '${job}' in check_ssot.ts's ${site.rosterName} (every non-info-* job there gates the all-green verdict)`,
+        got: "not in the roster - add it there, or name the job info-* to opt it out of gating",
+      });
+    }
+  }
+  const present = new Set(gating);
+  for (const job of roster) {
+    if (!present.has(job)) {
+      mismatches.push({
+        file: `scripts/check_ssot.ts ${site.rosterName}`,
+        expected: `a ${site.jobsFile} job '${job}'`,
+        got: "no such job - removing a gate is a roster edit too; delete the entry in the same change, deliberately",
+      });
+    }
+  }
+  return mismatches;
+}
+
+/** Every gating job in fleet-ci.yml, by job id - the fleet counterpart of
+ *  ALL_GREEN_ROSTER. The verdict judges whatever jobs ran, and fleet-ci's
+ *  jobs legitimately carry module/visibility conditions, so a job DELETED
+ *  here would stop gating the entire fleet with no per-repo diff to see
+ *  it; this roster is where that deletion becomes loud. */
+export const FLEET_CI_ROSTER = [
+  "validate-template",
+  "base-checks",
+  "typography",
+  "commit-names",
+  "actionlint",
+  "yamllint",
+  "gitleaks",
+  "dependency-review",
+  "codeql",
+  "pr-title",
+  "validate-skills",
+  "release-freshness",
+  "release-health",
+];
 
 const rules: Rule[] = [
   {
@@ -862,8 +996,9 @@ const rules: Rule[] = [
       const scripts = packageScripts();
       const chain = expandCheckChain(scripts, "check");
       const jobs = ciJobs(repoCi(), "ci.yml");
-      const gate = asRecord(jobs["all-green"], "all-green");
-      const needs = (gate.needs as unknown[]).map(String);
+      // The verdict roster IS the gating-job list now (the all-green-roster
+      // rule pins it against ci.yml's actual jobs).
+      const needs = ALL_GREEN_ROSTER;
       for (const jobName of needs) {
         const job = asRecord(jobs[jobName], jobName);
         const steps = (job.steps as Record<string, unknown>[] | undefined) ?? [];
@@ -916,10 +1051,10 @@ const rules: Rule[] = [
               // non-zero exit is swallowed, so the gate it was meant to be is
               // no gate. Drop those lines from the gating set - a required
               // command sitting on a suppressed step is the same missing gate
-              // as a deleted step. (Unlike the action.yml side, a plain `if:`
-              // is NOT rejected here: ci.yml steps legitimately carry event
-              // conditions like `if: github.event_name == 'pull_request'`, the
-              // repo convention for keeping the JOB unconditional.)
+              // as a deleted step. (A plain `if:` is NOT rejected here: ci.yml
+              // steps legitimately carry event conditions like
+              // `if: github.event_name == 'pull_request'`, the repo
+              // convention for keeping the JOB unconditional.)
               .filter((step) => step["continue-on-error"] === undefined)
               .flatMap((step) => [
                 // `uses` counts too: a gate that moved into a composite action
@@ -1159,26 +1294,6 @@ const rules: Rule[] = [
           expected: tplCron,
           got: repoCron,
         });
-      }
-
-      const gateRun = (ci: Record<string, unknown>, where: string) => {
-        const gate = asRecord(ciJobs(ci, where)["all-green"], `${where} all-green`);
-        const run = (gate.steps as Record<string, unknown>[])?.[0]?.run;
-        if (typeof run !== "string")
-          throw new Error(`${where}: all-green has no run step - anchor lost`);
-        return run;
-      };
-      const tplGate = gateRun(template, "ci.yml.jinja");
-      const repoGate = gateRun(repo, "ci.yml");
-      if (tplGate !== repoGate) {
-        mismatches.push(
-          ...lineDiffMismatch(
-            ".github/workflows/ci.yml all-green run body",
-            "templates/base/.github/workflows/ci.yml.jinja",
-            tplGate.split("\n"),
-            repoGate.split("\n"),
-          ),
-        );
       }
       return mismatches;
     },
@@ -1557,26 +1672,279 @@ const rules: Rule[] = [
   },
 
   {
+    // Roster enforcement at authoring time: ci.yml's gating jobs against
+    // the authored ALL_GREEN_ROSTER, both directions (see
+    // verdictRosterMismatches). This is where a deleted gate goes loud.
+    name: "all-green-roster",
+    run: () => {
+      const jobs = ciJobs(repoCi(), "ci.yml");
+      const mismatches = verdictRosterMismatches(ALL_GREEN_ROSTER, Object.keys(jobs));
+      for (const [name, raw] of Object.entries(jobs)) {
+        if (name.startsWith("info-")) continue;
+        const job = asRecord(raw ?? {}, name);
+        // The verdict treats a skipped job as standing down, so a
+        // job-level `if:` on a gating job fails OPEN; event conditions go
+        // on steps.
+        if (job.if !== undefined) {
+          mismatches.push({
+            file: `.github/workflows/ci.yml job '${name}'`,
+            expected:
+              "no job-level if: on a gating job (a skipped job stands down in the all-green verdict - put event conditions on the steps)",
+            got: "a job-level condition",
+          });
+        }
+        // The verdict judges DISPLAY names, the roster pins job ids: a
+        // custom name could rename a rostered job to info-* (silent
+        // opt-out) or to all-green (check collision) without touching the
+        // key this rule reads, so gating jobs display as their ids.
+        if (job.name !== undefined) {
+          mismatches.push({
+            file: `.github/workflows/ci.yml job '${name}'`,
+            expected:
+              "no job-level name: on a gating job (the verdict judges display names; a rename could opt the job out of the roster's reach)",
+            got: `name: ${String(job.name)}`,
+          });
+        }
+      }
+      return mismatches;
+    },
+  },
+
+  {
+    // The fleet counterpart: fleet-ci.yml's gating jobs against
+    // FLEET_CI_ROSTER, both directions - deleting dependency-review or
+    // codeql there would silently drop the gate for every managed
+    // repository at once. Unlike the operator rule, job-level `if:` is the
+    // DESIGN here (module/visibility conditions; the verdict reads skipped
+    // as standing down), but the info-* opt-out and display-name renames
+    // are banned outright: an opt-out in the fleet's shared gate home is a
+    // fleet-wide silent disarm, and opt-outs belong to the repo-owned
+    // checks.yml.
+    name: "fleet-ci-roster",
+    run: () => {
+      const rel = ".github/workflows/fleet-ci.yml";
+      const jobs = ciJobs(asRecord(parseYaml(read(rel)), rel), rel);
+      const mismatches = verdictRosterMismatches(FLEET_CI_ROSTER, Object.keys(jobs), {
+        jobsFile: rel,
+        rosterName: "FLEET_CI_ROSTER",
+      });
+      for (const [name, raw] of Object.entries(jobs)) {
+        const job = asRecord(raw ?? {}, name);
+        if (name.startsWith("info-")) {
+          mismatches.push({
+            file: `${rel} job '${name}'`,
+            expected:
+              "no info-* job in the fleet's shared gate home (that opt-out disarms every managed repository at once; repo-local opt-outs belong to checks.yml)",
+            got: "an info-* job id",
+          });
+        }
+        if (job.name !== undefined) {
+          mismatches.push({
+            file: `${rel} job '${name}'`,
+            expected:
+              "no job-level name: on a fleet gating job (the verdict judges display names; a rename could opt the job out fleet-wide)",
+            got: `name: ${String(job.name)}`,
+          });
+        }
+      }
+      return mismatches;
+    },
+  },
+
+  {
+    // The verdict check's NAME, pinned once as data: the string the
+    // ruleset REQUIRES and the string the verdict REPORTS must be provably
+    // the same at authoring time (a renamed check would leave branch
+    // protection waiting forever while every job stayed green). Its
+    // independently-authored homes: the shared green-gate predicate's
+    // CHECK_NAME (all_green.ts) - which must also feed its own check-run
+    // lookup - the check reusable-all-green.yml creates, the override
+    // layer's required-check contexts (next to Copilot's review check),
+    // and docs/all-green.md's prose. The repo's own all-green.yml wrapper
+    // must also actually wire the verdict: workflow_run on CI, the
+    // dispatch unwedge input, and the local reusable call.
     name: "all-green-name",
     run: () => {
       const mismatches: Mismatch[] = [];
-      const vgf = read("actions/validate-template/validate_generated_files.ts");
+      const predicate = read(".github/scripts/shared/all_green.ts");
       const gateName = mustMatch(
-        vgf,
-        /!\("([^"]+)" in jobs\)/,
-        "validate_generated_files.ts",
-        "gate job name",
+        predicate,
+        /export const CHECK_NAME = "([^"]+)"/,
+        "all_green.ts",
+        "verdict check name",
       )[1];
+      // The publish/sync gates' LOOKUP must consume the same constant, or
+      // they could read a differently named check than the one pinned.
+      mustMatch(
+        predicate,
+        ALL_GREEN_WIRING.lookup,
+        "all_green.ts",
+        "a check-run lookup keyed on CHECK_NAME",
+      );
 
-      for (const [jobs, where] of [
-        [ciJobs(repoCi(), "ci.yml"), ".github/workflows/ci.yml"],
-        [ciJobs(templateCi(), "ci.yml.jinja"), "templates/base/.github/workflows/ci.yml.jinja"],
-      ] as const) {
-        if (!(gateName in jobs)) {
+      const reusable = read(".github/workflows/reusable-all-green.yml");
+      const created = mustMatch(
+        reusable,
+        ALL_GREEN_WIRING.created,
+        "reusable-all-green.yml",
+        "created check name",
+      )[1];
+      if (created !== gateName) {
+        mismatches.push({
+          file: ".github/workflows/reusable-all-green.yml",
+          expected: `the created check named '${gateName}' (all_green.ts CHECK_NAME)`,
+          got: created,
+        });
+      }
+
+      // The verdict's ANCHOR job: the fleet wrapper template pins
+      // require-job, the reusable wires it into the judge, and the render
+      // validator enforces the same string at sync time. Every fleet gate
+      // lives inside the managed ci.yml's one fleet-ci caller, so this
+      // anchor is what makes a disarmed caller fail the verdict; its
+      // value must be "<caller job id> / <fleet-ci job id>" exactly as
+      // the judged run spells it, so both ids are pinned here too -
+      // renaming either would redden every fleet verdict.
+      const wrapperRel = "templates/base/.github/workflows/all-green.yml.jinja";
+      const anchor = mustMatch(
+        read(wrapperRel),
+        ALL_GREEN_WIRING.anchor,
+        wrapperRel,
+        "the require-job anchor",
+      )[1];
+      mustMatch(
+        reusable,
+        ALL_GREEN_WIRING.anchorWired,
+        ".github/workflows/reusable-all-green.yml",
+        "the REQUIRE_JOB env wiring",
+      );
+      const validated = mustMatch(
+        read("actions/validate-template/validate_generated_files.ts"),
+        ALL_GREEN_WIRING.anchorValidated,
+        "actions/validate-template/validate_generated_files.ts",
+        "the validator's REQUIRED_GATE_JOB",
+      )[1];
+      if (validated !== anchor) {
+        mismatches.push({
+          file: "actions/validate-template/validate_generated_files.ts",
+          expected: `REQUIRED_GATE_JOB '${anchor}' (the wrapper template's require-job)`,
+          got: validated,
+        });
+      }
+      const anchorParts = anchor.split(" / ");
+      if (anchorParts.length !== 2) {
+        mismatches.push({
+          file: wrapperRel,
+          expected: "a require-job of the form '<caller job id> / <fleet-ci job id>'",
+          got: anchor,
+        });
+      } else {
+        const [callerId, anchorJob] = anchorParts;
+        mustMatch(
+          read("templates/base/.github/workflows/ci.yml.jinja"),
+          new RegExp(`^  ${callerId}:$`, "m"),
+          "templates/base/.github/workflows/ci.yml.jinja",
+          `the '${callerId}' fleet-ci caller job the anchor names`,
+        );
+        const fleetJobs = ciJobs(
+          asRecord(parseYaml(read(".github/workflows/fleet-ci.yml")), "fleet-ci.yml"),
+          "fleet-ci.yml",
+        );
+        const anchorFleetJob = asRecord(fleetJobs[anchorJob] ?? {}, "fleet-ci anchor job");
+        if (!(anchorJob in fleetJobs)) {
           mismatches.push({
-            file: where,
-            expected: `a '${gateName}' gate job`,
+            file: ".github/workflows/fleet-ci.yml",
+            expected: `a job '${anchorJob}' (the verdict anchor the wrapper requires)`,
             got: "no such job",
+          });
+        } else if (anchorFleetJob.if !== undefined) {
+          mismatches.push({
+            file: ".github/workflows/fleet-ci.yml",
+            expected: `an unconditional '${anchorJob}' job (a skipped anchor fails every fleet verdict)`,
+            got: `if: ${String(anchorFleetJob.if)}`,
+          });
+        }
+      }
+
+      // The operator-facing contract's CANONICAL sentence must quote the
+      // same name: anchored with mustMatch (the doc mentions all-green in
+      // many places, so a bare .includes could stay green after the
+      // contractual sentence changed or vanished).
+      const documented = mustMatch(
+        read("docs/all-green.md"),
+        /required status check named `([^`]+)`/,
+        "docs/all-green.md",
+        "the required-check sentence",
+      )[1];
+      if (documented !== gateName) {
+        mismatches.push({
+          file: "docs/all-green.md",
+          expected: `the required check documented as \`${gateName}\``,
+          got: `\`${documented}\``,
+        });
+      }
+
+      const wrapper = asRecord(parseYaml(read(".github/workflows/all-green.yml")), "all-green.yml");
+      const on = asRecord(wrapper.on, "all-green.yml on");
+      const workflowRun = asRecord(on.workflow_run ?? {}, "all-green.yml on.workflow_run");
+      if (canonical(workflowRun.workflows) !== canonical(["CI"])) {
+        mismatches.push({
+          file: ".github/workflows/all-green.yml",
+          expected: "on.workflow_run.workflows: [CI] (the verdict must fire on CI completions)",
+          got: canonical(workflowRun.workflows ?? null),
+        });
+      }
+      // types must be exactly [completed]: omitting it fires the verdict
+      // on requested/in_progress too, judging a run that has not finished.
+      if (canonical(workflowRun.types) !== canonical(["completed"])) {
+        mismatches.push({
+          file: ".github/workflows/all-green.yml",
+          expected: "on.workflow_run.types: [completed] (only finished runs may be judged)",
+          got: canonical(workflowRun.types ?? null),
+        });
+      }
+      const dispatch = asRecord(on.workflow_dispatch ?? {}, "all-green.yml on.workflow_dispatch");
+      if (!("sha" in asRecord(dispatch.inputs ?? {}, "all-green.yml dispatch inputs"))) {
+        mismatches.push({
+          file: ".github/workflows/all-green.yml",
+          expected:
+            "a workflow_dispatch `sha` input (the unwedge path for a lost workflow_run event)",
+          got: "missing",
+        });
+      }
+      const verdictJob = Object.values(ciJobs(wrapper, "all-green.yml"))
+        .map((job) => asRecord(job ?? {}, "all-green.yml job"))
+        .find((job) => job.uses === "./.github/workflows/reusable-all-green.yml");
+      if (verdictJob === undefined) {
+        mismatches.push({
+          file: ".github/workflows/all-green.yml",
+          expected: "a job calling ./.github/workflows/reusable-all-green.yml (the shared verdict)",
+          got: "no such job",
+        });
+      } else {
+        if (verdictJob.if !== undefined) {
+          mismatches.push({
+            file: ".github/workflows/all-green.yml",
+            expected:
+              "an unconditional verdict job (a condition could silently stop every verdict)",
+            got: `if: ${String(verdictJob.if)}`,
+          });
+        }
+        const grants = asRecord(verdictJob.permissions ?? {}, "all-green.yml verdict permissions");
+        if (grants.checks !== "write" || grants.actions !== "read") {
+          mismatches.push({
+            file: ".github/workflows/all-green.yml",
+            expected: "the verdict job granting checks: write and actions: read",
+            got: canonical(verdictJob.permissions ?? null),
+          });
+        }
+        const shaInput = String(asRecord(verdictJob.with ?? {}, "all-green.yml with").sha ?? "");
+        if (!/\binputs\.sha\b/.test(shaInput)) {
+          mismatches.push({
+            file: ".github/workflows/all-green.yml",
+            expected:
+              "with.sha forwarding inputs.sha (the dispatch unwedge input must reach the judgment)",
+            got: shaInput === "" ? "no sha forwarding" : shaInput,
           });
         }
       }
@@ -1594,10 +1962,10 @@ const rules: Rule[] = [
         );
       };
       // The override layer's main ruleset is the fleet's only home for the
-      // required-check contexts: the validator's gate-name literal must
-      // match the all-green entry, and the second entry is Copilot's own
-      // per-sha review check run (loadOverrideLayer separately refuses an
-      // override that drops either context or its Actions integration pin).
+      // required-check contexts: the predicate's name literal must match
+      // the all-green entry, and the second entry is Copilot's own per-sha
+      // review check run (loadOverrideLayer separately refuses an override
+      // that drops either context or its Actions integration pin).
       const override = loadOverrideLayer();
       mismatches.push(
         ...setMismatch(
@@ -1917,178 +2285,6 @@ const rules: Rule[] = [
           }
         }
       }
-      return mismatches;
-    },
-  },
-
-  {
-    // Both apply paths must hand github-settings-as-code the MERGED
-    // document. A one-line regression to managed-settings.yml ships a
-    // baseline-only apply - the exact document the merge pipeline exists
-    // to never produce, because the action's label reconciliation would
-    // delete every label the repository declares for itself - and every
-    // other gate stays green while it does. Self-contained on purpose:
-    // both workflows are parsed right here, leaning on no shared workflow
-    // helpers.
-    name: "settings-apply-merged-input",
-    run: () => {
-      const mismatches: Mismatch[] = [];
-      // biome-ignore lint/suspicious/noTemplateCurlyInString: a literal GitHub Actions expression, pinned byte-for-byte
-      const wanted = "${{ runner.temp }}/merged-settings.yml";
-      const mapping = (value: unknown): Record<string, unknown> =>
-        typeof value === "object" && value !== null && !Array.isArray(value)
-          ? (value as Record<string, unknown>)
-          : {};
-      for (const rel of [
-        ".github/workflows/settings-repos.yml",
-        ".github/workflows/reusable-apply-settings.yml",
-      ]) {
-        const jobs = mapping(mapping(parseYaml(read(rel))).jobs);
-        const applySteps: Record<string, unknown>[] = [];
-        for (const job of Object.values(jobs)) {
-          const steps = mapping(job).steps;
-          if (!Array.isArray(steps)) continue;
-          for (const raw of steps) {
-            const step = mapping(raw);
-            if (String(step.uses ?? "").includes("github-settings-as-code")) {
-              applySteps.push(step);
-            }
-          }
-        }
-        if (applySteps.length === 0) {
-          throw new Error(`${rel}: no github-settings-as-code step - anchor lost`);
-        }
-        for (const step of applySteps) {
-          const settingsFile = String(mapping(step.with)["settings-file"] ?? "");
-          if (settingsFile !== wanted) {
-            mismatches.push({
-              file: rel,
-              expected: `the apply step reads settings-file: ${wanted}`,
-              got: settingsFile === "" ? "no settings-file input" : settingsFile,
-            });
-          }
-        }
-      }
-      return mismatches;
-    },
-  },
-
-  {
-    // settings-repos.yml is the one fleet-wide settings WRITER, and its
-    // green gate is a plain step of the select job - trimming it would
-    // leave the workflow applying from raw pushed commits again, with
-    // every other gate green. Pinned on the parsed steps (a mention in a
-    // comment cannot satisfy it), before the target selection so an
-    // ungreen commit never even computes a matrix. Self-contained like
-    // the rule above.
-    name: "settings-green-gate",
-    run: () => {
-      const mismatches: Mismatch[] = [];
-      const rel = ".github/workflows/settings-repos.yml";
-      const mapping = (value: unknown): Record<string, unknown> =>
-        typeof value === "object" && value !== null && !Array.isArray(value)
-          ? (value as Record<string, unknown>)
-          : {};
-      const select = mapping(mapping(mapping(parseYaml(read(rel))).jobs).select);
-      const steps = Array.isArray(select.steps) ? select.steps.map(mapping) : [];
-      if (steps.length === 0) throw new Error(`${rel}: no select job steps - anchor lost`);
-      const runs = steps.map((step) => String(step.run ?? ""));
-      const gateAt = runs.findIndex((run) =>
-        run.includes("bun .github/scripts/fleet/require_green_commit.ts"),
-      );
-      const selectAt = runs.findIndex((run) =>
-        run.includes("bun .github/scripts/fleet/select_settings_repos.ts"),
-      );
-      if (selectAt === -1) throw new Error(`${rel}: no target-selection step - anchor lost`);
-      if (gateAt === -1) {
-        mismatches.push({
-          file: rel,
-          expected: "a select-job step running fleet/require_green_commit.ts",
-          got: "missing - the fleet-wide settings writer would run ungated from raw pushes",
-        });
-      } else if (gateAt > selectAt) {
-        mismatches.push({
-          file: rel,
-          expected: "the green gate BEFORE the target selection",
-          got: "the gate runs after targets are computed",
-        });
-      } else if (String(steps[gateAt].if ?? "") !== "") {
-        mismatches.push({
-          file: rel,
-          expected: "an unconditional green gate (every trigger reads main's tip)",
-          got: `if: ${String(steps[gateAt].if)}`,
-        });
-      }
-      return mismatches;
-    },
-  },
-
-  {
-    // Every run_hidden-wrapped step in settings-repos.yml must be
-    // followed by a PUBLIC ::notice:: step that fires on one of the
-    // wrapped step's own outputs. The capture swallows a wrapped step's
-    // success output - warnings included - for a hide-details target, so
-    // without a compensating notice its skip is a green job with no
-    // signal at all. DERIVED from the workflow rather than pinned per
-    // step: this gap was reintroduced three times one step at a time (the
-    // merge notice, then the freshness wrap, then the notice condition
-    // missing the freshness clause), so a fourth wrapped script fails
-    // here until it gets its notice instead of repeating the cycle.
-    // Order is part of the requirement - the notice must sit AFTER the
-    // wrapped step, or it reads outputs that do not exist yet.
-    // Self-contained like the neighbouring settings rules.
-    name: "settings-hidden-step-notices",
-    run: () => {
-      const mismatches: Mismatch[] = [];
-      const rel = ".github/workflows/settings-repos.yml";
-      const mapping = (value: unknown): Record<string, unknown> =>
-        typeof value === "object" && value !== null && !Array.isArray(value)
-          ? (value as Record<string, unknown>)
-          : {};
-      const jobs = mapping(mapping(parseYaml(read(rel))).jobs);
-      let wrapped = 0;
-      for (const [jobName, job] of Object.entries(jobs)) {
-        const steps = mapping(job).steps;
-        if (!Array.isArray(steps)) continue;
-        const parsed = steps.map(mapping);
-        parsed.forEach((step, index) => {
-          if (!String(step.run ?? "").includes("run_hidden.ts")) return;
-          wrapped++;
-          const id = String(step.id ?? "");
-          if (id === "") {
-            mismatches.push({
-              file: rel,
-              expected: `an id on the run_hidden-wrapped step ${JSON.stringify(String(step.name ?? "?"))} (job '${jobName}')`,
-              got: "no id - a compensating notice cannot reference the step's outcome",
-            });
-            return;
-          }
-          // Positive equality against 'true', the one output test an
-          // unrun step cannot satisfy (unsafeStepCondition's rule). The
-          // id is escaped so an exotic step id cannot broaden the match.
-          const escaped = id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-          const fires = new RegExp(`steps\\.${escaped}\\.outputs\\.[\\w-]+ == 'true'`);
-          const compensated = parsed.slice(index + 1).some((later) => {
-            const laterRun = String(later.run ?? "");
-            return (
-              !laterRun.includes("run_hidden") &&
-              laterRun.includes("::notice::") &&
-              fires.test(String(later.if ?? ""))
-            );
-          });
-          if (!compensated) {
-            mismatches.push({
-              file: rel,
-              expected:
-                `a public ::notice:: step AFTER the hidden '${id}' step whose condition ` +
-                `carries steps.${id}.outputs.<name> == 'true' - the capture swallows the ` +
-                "step's own warnings, so its skip would otherwise be a green job with no signal",
-              got: "no such step",
-            });
-          }
-        });
-      }
-      if (wrapped === 0) throw new Error(`${rel}: no run_hidden-wrapped steps - anchor lost`);
       return mismatches;
     },
   },
@@ -2451,32 +2647,44 @@ const rules: Rule[] = [
   {
     // The release-freshness ancestor check exists twice: the shell-checked
     // .github/scripts/ci/release_freshness.sh copy this repo lints, and the
-    // release-please fragment inlining the same logic (downstream repos do
-    // not carry this repo's scripts). Pin the core lines so a fix to one
-    // side cannot silently leave the other behind.
+    // fleet-ci.yml job inlining the same logic (a reusable workflow runs in
+    // the CALLER's checkout, where this repo's scripts do not exist). Pin
+    // the core lines so a fix to one side cannot silently leave the other
+    // behind.
     name: "release-freshness-parity",
     run: () => {
       const mismatches: Mismatch[] = [];
       const script = ".github/scripts/ci/release_freshness.sh";
-      const fragment = "templates/release-please/fragments/ci-gate-jobs.jinja";
+      const fleetCi = ".github/workflows/fleet-ci.yml";
       const pins: { line: string; files: string[] }[] = [
         {
           // biome-ignore lint/suspicious/noTemplateCurlyInString: literal shell line pinned in both copies
           line: 'tip="$(git rev-parse "origin/${GITHUB_BASE_REF}")"',
-          files: [script, fragment],
+          files: [script, fleetCi],
         },
         {
           line: 'if git merge-base --is-ancestor "$tip" HEAD; then',
-          files: [script, fragment],
-        },
-        {
-          // The release-PR predicate: a renamed release-please branch
-          // prefix would make every step skip and the gate silently fail
-          // open, so the exact condition is pinned in the fragment.
-          line: "if: github.event_name == 'pull_request' && startsWith(github.head_ref, 'release-please--')",
-          files: [fragment],
+          files: [script, fleetCi],
         },
       ];
+      // The release-PR predicates, compared on the PARSED jobs (the two
+      // release gates share the same condition text, so a whole-file grep
+      // would stay green with one of them changed or deleted): a renamed
+      // release-please branch prefix or a dropped module clause would make
+      // the job skip and the gate silently stand down.
+      const releaseGateIf =
+        "contains(fromJSON(inputs.modules), 'release-please') && github.event_name == 'pull_request' && startsWith(github.head_ref, 'release-please--')";
+      const fleetJobs = ciJobs(asRecord(parseYaml(read(fleetCi)), fleetCi), fleetCi);
+      for (const job of ["release-freshness", "release-health"]) {
+        const actual = String(asRecord(fleetJobs[job] ?? {}, job).if ?? "").trim();
+        if (actual !== releaseGateIf) {
+          mismatches.push({
+            file: `${fleetCi} job '${job}'`,
+            expected: `the pinned release-PR condition ${releaseGateIf}`,
+            got: actual === "" ? "no condition" : actual,
+          });
+        }
+      }
       for (const pin of pins) {
         for (const rel of pin.files) {
           // Whole-line (trimmed) equality: a decorated copy ("|| true") or
@@ -2624,6 +2832,178 @@ const rules: Rule[] = [
           });
         }
       }
+      return mismatches;
+    },
+  },
+
+  {
+    // Both apply paths must hand github-settings-as-code the MERGED
+    // document. A one-line regression to managed-settings.yml ships a
+    // baseline-only apply - the exact document the merge pipeline exists
+    // to never produce, because the action's label reconciliation would
+    // delete every label the repository declares for itself - and every
+    // other gate stays green while it does. Self-contained on purpose:
+    // both workflows are parsed right here, leaning on no shared workflow
+    // helpers.
+    name: "settings-apply-merged-input",
+    run: () => {
+      const mismatches: Mismatch[] = [];
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: a literal GitHub Actions expression, pinned byte-for-byte
+      const wanted = "${{ runner.temp }}/merged-settings.yml";
+      const mapping = (value: unknown): Record<string, unknown> =>
+        typeof value === "object" && value !== null && !Array.isArray(value)
+          ? (value as Record<string, unknown>)
+          : {};
+      for (const rel of [
+        ".github/workflows/settings-repos.yml",
+        ".github/workflows/reusable-apply-settings.yml",
+      ]) {
+        const jobs = mapping(mapping(parseYaml(read(rel))).jobs);
+        const applySteps: Record<string, unknown>[] = [];
+        for (const job of Object.values(jobs)) {
+          const steps = mapping(job).steps;
+          if (!Array.isArray(steps)) continue;
+          for (const raw of steps) {
+            const step = mapping(raw);
+            if (String(step.uses ?? "").includes("github-settings-as-code")) {
+              applySteps.push(step);
+            }
+          }
+        }
+        if (applySteps.length === 0) {
+          throw new Error(`${rel}: no github-settings-as-code step - anchor lost`);
+        }
+        for (const step of applySteps) {
+          const settingsFile = String(mapping(step.with)["settings-file"] ?? "");
+          if (settingsFile !== wanted) {
+            mismatches.push({
+              file: rel,
+              expected: `the apply step reads settings-file: ${wanted}`,
+              got: settingsFile === "" ? "no settings-file input" : settingsFile,
+            });
+          }
+        }
+      }
+      return mismatches;
+    },
+  },
+
+  {
+    // settings-repos.yml is the one fleet-wide settings WRITER, and its
+    // green gate is a plain step of the select job - trimming it would
+    // leave the workflow applying from raw pushed commits again, with
+    // every other gate green. Pinned on the parsed steps (a mention in a
+    // comment cannot satisfy it), before the target selection so an
+    // ungreen commit never even computes a matrix. Self-contained like
+    // the rule above.
+    name: "settings-green-gate",
+    run: () => {
+      const mismatches: Mismatch[] = [];
+      const rel = ".github/workflows/settings-repos.yml";
+      const mapping = (value: unknown): Record<string, unknown> =>
+        typeof value === "object" && value !== null && !Array.isArray(value)
+          ? (value as Record<string, unknown>)
+          : {};
+      const select = mapping(mapping(mapping(parseYaml(read(rel))).jobs).select);
+      const steps = Array.isArray(select.steps) ? select.steps.map(mapping) : [];
+      if (steps.length === 0) throw new Error(`${rel}: no select job steps - anchor lost`);
+      const runs = steps.map((step) => String(step.run ?? ""));
+      const gateAt = runs.findIndex((run) =>
+        run.includes("bun .github/scripts/fleet/require_green_commit.ts"),
+      );
+      const selectAt = runs.findIndex((run) =>
+        run.includes("bun .github/scripts/fleet/select_settings_repos.ts"),
+      );
+      if (selectAt === -1) throw new Error(`${rel}: no target-selection step - anchor lost`);
+      if (gateAt === -1) {
+        mismatches.push({
+          file: rel,
+          expected: "a select-job step running fleet/require_green_commit.ts",
+          got: "missing - the fleet-wide settings writer would run ungated from raw pushes",
+        });
+      } else if (gateAt > selectAt) {
+        mismatches.push({
+          file: rel,
+          expected: "the green gate BEFORE the target selection",
+          got: "the gate runs after targets are computed",
+        });
+      } else if (String(steps[gateAt].if ?? "") !== "") {
+        mismatches.push({
+          file: rel,
+          expected: "an unconditional green gate (every trigger reads main's tip)",
+          got: `if: ${String(steps[gateAt].if)}`,
+        });
+      }
+      return mismatches;
+    },
+  },
+
+  {
+    // Every run_hidden-wrapped step in settings-repos.yml must be
+    // followed by a PUBLIC ::notice:: step that fires on one of the
+    // wrapped step's own outputs. The capture swallows a wrapped step's
+    // success output - warnings included - for a hide-details target, so
+    // without a compensating notice its skip is a green job with no
+    // signal at all. DERIVED from the workflow rather than pinned per
+    // step: this gap was reintroduced three times one step at a time (the
+    // merge notice, then the freshness wrap, then the notice condition
+    // missing the freshness clause), so a fourth wrapped script fails
+    // here until it gets its notice instead of repeating the cycle.
+    // Order is part of the requirement - the notice must sit AFTER the
+    // wrapped step, or it reads outputs that do not exist yet.
+    // Self-contained like the neighbouring settings rules.
+    name: "settings-hidden-step-notices",
+    run: () => {
+      const mismatches: Mismatch[] = [];
+      const rel = ".github/workflows/settings-repos.yml";
+      const mapping = (value: unknown): Record<string, unknown> =>
+        typeof value === "object" && value !== null && !Array.isArray(value)
+          ? (value as Record<string, unknown>)
+          : {};
+      const jobs = mapping(mapping(parseYaml(read(rel))).jobs);
+      let wrapped = 0;
+      for (const [jobName, job] of Object.entries(jobs)) {
+        const steps = mapping(job).steps;
+        if (!Array.isArray(steps)) continue;
+        const parsed = steps.map(mapping);
+        parsed.forEach((step, index) => {
+          if (!String(step.run ?? "").includes("run_hidden.ts")) return;
+          wrapped++;
+          const id = String(step.id ?? "");
+          if (id === "") {
+            mismatches.push({
+              file: rel,
+              expected: `an id on the run_hidden-wrapped step ${JSON.stringify(String(step.name ?? "?"))} (job '${jobName}')`,
+              got: "no id - a compensating notice cannot reference the step's outcome",
+            });
+            return;
+          }
+          // Positive equality against 'true', the one output test an
+          // unrun step cannot satisfy (unsafeStepCondition's rule). The
+          // id is escaped so an exotic step id cannot broaden the match.
+          const escaped = id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+          const fires = new RegExp(`steps\\.${escaped}\\.outputs\\.[\\w-]+ == 'true'`);
+          const compensated = parsed.slice(index + 1).some((later) => {
+            const laterRun = String(later.run ?? "");
+            return (
+              !laterRun.includes("run_hidden") &&
+              laterRun.includes("::notice::") &&
+              fires.test(String(later.if ?? ""))
+            );
+          });
+          if (!compensated) {
+            mismatches.push({
+              file: rel,
+              expected:
+                `a public ::notice:: step AFTER the hidden '${id}' step whose condition ` +
+                `carries steps.${id}.outputs.<name> == 'true' - the capture swallows the ` +
+                "step's own warnings, so its skip would otherwise be a green job with no signal",
+              got: "no such step",
+            });
+          }
+        });
+      }
+      if (wrapped === 0) throw new Error(`${rel}: no run_hidden-wrapped steps - anchor lost`);
       return mismatches;
     },
   },

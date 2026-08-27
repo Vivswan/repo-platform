@@ -63,10 +63,10 @@ on:
 
 permissions:
   contents: read
-  # For the green gate's workflow-run lookup (require_green_commit.ts):
-  # GITHUB_TOKEN reads this repository's own CI runs; the fleet PAT's
-  # grant does not carry Actions read.
-  actions: read
+  # For the green gate's verdict lookup (require_green_commit.ts):
+  # GITHUB_TOKEN reads this repository's own all-green check runs; the
+  # fleet PAT's grant carries no Checks read.
+  checks: read
 
 concurrency:
   group: settings-repos

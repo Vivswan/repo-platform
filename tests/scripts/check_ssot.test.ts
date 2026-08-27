@@ -6,6 +6,7 @@
 
 import { describe, expect, test } from "bun:test";
 import {
+  ALL_GREEN_WIRING,
   applyDivergences,
   canonical,
   expandCheckChain,
@@ -22,6 +23,7 @@ import {
   stepCarriesWithKey,
   stripGeneratedRegions,
   unsafeStepCondition,
+  verdictRosterMismatches,
   zToDollar,
 } from "../../scripts/check_ssot";
 import { MARKER_TOKENS, mdMarkers } from "../../scripts/generate";
@@ -123,6 +125,44 @@ describe("mustMatch", () => {
     expect(() => mustMatch("nothing here", /const X = (\d+);/, "f", "X")).toThrow(
       "anchor for X not found",
     );
+  });
+});
+
+describe("ALL_GREEN_WIRING", () => {
+  // Both directions on the exact patterns the all-green-name rule runs:
+  // the live wiring matches, and a commented-out copy of the SAME line -
+  // dead wiring - does not.
+  test("the created-check anchor matches the active POST line and rejects a commented one", () => {
+    const active = '            -f "name=all-green" \\';
+    expect(mustMatch(active, ALL_GREEN_WIRING.created, "f", "name")[1]).toBe("all-green");
+    const commented = '            # -f "name=all-green" \\';
+    expect(ALL_GREEN_WIRING.created.exec(commented)).toBeNull();
+  });
+
+  test("the lookup anchor matches the active template literal and rejects a commented one", () => {
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal source line under test
+    const line =
+      "`repos/${repository}/commits/${sha}/check-runs?check_name=${CHECK_NAME}&filter=latest`";
+    expect(ALL_GREEN_WIRING.lookup.exec(`      ${line}`)).not.toBeNull();
+    expect(ALL_GREEN_WIRING.lookup.exec(`      // ${line}`)).toBeNull();
+  });
+
+  test("the anchor pin matches the active require-job line and rejects a commented one", () => {
+    const active = "      require-job: ci / validate-template";
+    expect(mustMatch(active, ALL_GREEN_WIRING.anchor, "f", "anchor")[1]).toBe(
+      "ci / validate-template",
+    );
+    expect(ALL_GREEN_WIRING.anchor.exec("      # require-job: ci / validate-template")).toBeNull();
+  });
+
+  test("the anchor's env wiring and validator pins match active lines only", () => {
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal source line under test
+    const wired = "          REQUIRE_JOB: ${{ inputs.require-job }}";
+    expect(ALL_GREEN_WIRING.anchorWired.exec(wired)).not.toBeNull();
+    expect(ALL_GREEN_WIRING.anchorWired.exec(`          # ${wired.trim()}`)).toBeNull();
+    const validated = 'const REQUIRED_GATE_JOB = "ci / validate-template";';
+    expect(ALL_GREEN_WIRING.anchorValidated.exec(validated)?.[1]).toBe("ci / validate-template");
+    expect(ALL_GREEN_WIRING.anchorValidated.exec(`// ${validated}`)).toBeNull();
   });
 });
 
@@ -526,4 +566,38 @@ describe("unsafeStepCondition", () => {
       expect(unsafeStepCondition(condition)).toBeNull();
     });
   }
+});
+
+describe("verdictRosterMismatches", () => {
+  test("matching roster and jobs pass", () => {
+    expect(verdictRosterMismatches(["a", "b"], ["a", "b"])).toEqual([]);
+  });
+
+  test("a ci.yml gating job missing from the roster mismatches", () => {
+    const mismatches = verdictRosterMismatches(["a"], ["a", "b"]);
+    expect(mismatches).toHaveLength(1);
+    expect(mismatches[0].file).toBe(".github/workflows/ci.yml");
+    expect(mismatches[0].expected).toContain("'b'");
+  });
+
+  test("a gate REMOVED from ci.yml while still rostered mismatches", () => {
+    // The sneaky case the roster exists for: deleting a gate job changes
+    // nothing the runtime verdict can see (it judges only the jobs that
+    // ran), so the stale roster entry is what makes the removal loud.
+    const mismatches = verdictRosterMismatches(["a", "b"], ["a"]);
+    expect(mismatches).toHaveLength(1);
+    expect(mismatches[0].file).toContain("ALL_GREEN_ROSTER");
+    expect(mismatches[0].expected).toContain("'b'");
+    expect(mismatches[0].got).toContain("no such job");
+  });
+
+  test("info-* jobs are the opt-out and never need a roster entry", () => {
+    expect(verdictRosterMismatches(["a"], ["a", "info-render-preview"])).toEqual([]);
+  });
+
+  test("a duplicate roster entry mismatches", () => {
+    const mismatches = verdictRosterMismatches(["a", "a"], ["a"]);
+    expect(mismatches).toHaveLength(1);
+    expect(mismatches[0].got).toContain("'a'");
+  });
 });

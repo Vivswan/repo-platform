@@ -123,7 +123,7 @@ The fleet and module settings layers (shared defaults, every label the module se
 
 ### 8. What runs on PRs
 
-CI gates on the `all-green` check (required once step 7's ruleset is applied, alongside Copilot's own `copilot-pull-request-reviewer` review check): an aggregate job that `needs:` every gating job and fails on any non-success result (skipped counts as failure). Standard jobs (typography, commit-names, actionlint, gitleaks, yamllint), module jobs (pr-title, release-freshness/release-health, validate-skills on skills repos, CodeQL on public repos), and your checks.yml jobs all feed it. `validate-template` also runs but is informational: a red run flags template drift without blocking merges.
+CI gates on the `all-green` check (required once step 7's ruleset is applied, alongside Copilot's own `copilot-pull-request-reviewer` review check): a check run the managed `all-green.yml` verdict workflow creates after judging each completed CI run's jobs. Every non-`info-*` job gates; a skipped job stands down, and at least one gating job must actually succeed. The gate jobs themselves run centrally through repo-platform's fleet-ci.yml (typography, commit-names, actionlint, gitleaks, yamllint, pr-title, release-freshness/release-health, validate-skills on skills repos, CodeQL on public repos) next to your checks.yml jobs. `validate-template` runs there too and BLOCKS on integrity (managed content changed outside a sync); its freshness report never blocks.
 
 On private repositories the five base checks run as one combined `base-checks` job (billing: tiny jobs round up to a minute each).
 

@@ -24,7 +24,7 @@
 //   derived from the zod schema in scripts/module_manifests.ts.
 // - templates/<module>/<pin.file> for every manifest toolchain pin: WHOLE
 //   generated dotfiles carrying exactly the pinned version plus a newline.
-// - templates/release-please/fragments/ci-gate-jobs.jinja and
+// - templates/base/.github/workflows/ci.yml.jinja and
 //   templates/release-please/.github/workflows/release.yml.jinja:
 //   the tracking-labels input both release-health call sites pass, built
 //   from the manifests' tracking_label streams (jinja-comment markers, so
@@ -267,16 +267,16 @@ export function trackingGate(manifests: ModuleManifest[]): string {
 /** The release-health call sites' tracking-labels input: the selected
  *  tracking streams' label ANSWERS joined into one comma-separated value
  *  (labels cannot contain commas - copier.yml validates them against the
- *  same shape the action's LABEL_RE enforces). The body hardcodes the
- *  call sites' 10-space `with:`-entry indentation; a call site at a
- *  different depth needs its own body. */
-export function trackingLabelsInput(manifests: ModuleManifest[]): string[] {
+ *  same shape the action's LABEL_RE enforces). `indent` is the call
+ *  site's `with:`-entry depth: 6 for the base ci.yml's fleet-ci call, 10
+ *  for release.yml's action step. */
+export function trackingLabelsInput(manifests: ModuleManifest[], indent: number): string[] {
   const listExpr = trackingStreams(manifests)
     .map((m) => `([${m.tracking_label.answer}] if '${m.module}' in modules else [])`)
     .join(" + ");
   return [
     `{%- if ${trackingGate(manifests)} %}`,
-    `          tracking-labels: {{ (${listExpr}) | join(',') | tojson }}`,
+    `${" ".repeat(indent)}tracking-labels: {{ (${listExpr}) | join(',') | tojson }}`,
     "{%- endif %}",
   ];
 }
@@ -844,14 +844,14 @@ function targets(manifests: ModuleManifest[]): Target[] {
       ],
     },
     {
-      file: "templates/release-please/fragments/ci-gate-jobs.jinja",
+      file: "templates/base/.github/workflows/ci.yml.jinja",
       syntax: "jinja",
-      regions: [["tracking-labels", ({ manifests }) => trackingLabelsInput(manifests)]],
+      regions: [["tracking-labels", ({ manifests }) => trackingLabelsInput(manifests, 6)]],
     },
     {
       file: "templates/release-please/.github/workflows/release.yml.jinja",
       syntax: "jinja",
-      regions: [["tracking-labels", ({ manifests }) => trackingLabelsInput(manifests)]],
+      regions: [["tracking-labels", ({ manifests }) => trackingLabelsInput(manifests, 10)]],
     },
     {
       file: "README.md",

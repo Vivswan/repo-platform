@@ -259,14 +259,6 @@
       ],
       "additionalProperties": false
     },
-    "gate_jobs": {
-      "minItems": 1,
-      "type": "array",
-      "items": {
-        "type": "string",
-        "pattern": "^[a-z][a-z0-9-]*$"
-      }
-    },
     "gate": {
       "type": "string",
       "minLength": 1

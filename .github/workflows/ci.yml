@@ -56,8 +56,10 @@ jobs:
 
   # Fails when a PR introduces dependencies with known vulnerabilities, by
   # diffing the dependency graph between base and head. Only PR events have
-  # a diff to review, so the skip lives on the steps: all-green treats a
-  # skipped needed job as failure, so the job itself stays unconditional.
+  # a diff to review, so the skip lives on the steps: the all-green verdict
+  # treats a skipped job as standing down, so a job-level skip would fail
+  # open - gating jobs stay unconditional (the all-green-roster ssot rule
+  # pins this) and event conditions go on their steps.
   dependency-review:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -79,6 +81,18 @@ jobs:
         # -x follows the `# shellcheck source=` directives into the
         # sourced shared helpers (paths resolve from the checkout root).
         run: find .github/scripts -name '*.sh' -print0 | xargs -0 shellcheck -x
+
+  # The all-green verdict's judging logic, exercised as the REAL run block
+  # extracted from reusable-all-green.yml against a stubbed gh: the
+  # fail-open scenarios (disarmed fleet caller, duplicate names, all
+  # skipped) must POST failure, the healthy shapes success.
+  verdict-judgment:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - name: Judge the verdict scenarios through the real run block
+        run: .github/scripts/ci/verify_verdict_judgment.sh
 
   yamllint:
     runs-on: ubuntu-latest
@@ -504,7 +518,8 @@ jobs:
   # sync run. Gate mode turns failed rehearsals and failed validations
   # into ::error:: annotations naming repo, phase, and files, and fails
   # the job (bun run rehearse:fleet is the local, report-only twin). The
-  # job stays unconditional for the strict gate; the steps skip when the
+  # job stays unconditional (a job-level skip would stand this gate down
+  # in the all-green verdict); the steps skip when the
   # fleet PAT is absent from the event's secrets (Dependabot-triggered
   # runs get Dependabot secrets, not this repo's) - the push run after
   # merge and the weekly schedule still rehearse every change. No fork
@@ -542,8 +557,8 @@ jobs:
 
   # Conventional Commit PR title, checked inside the gate so branch
   # protection blocks on it. The skip lives on the STEP, not the job:
-  # all-green treats a skipped needed job as failure, and CI also runs on
-  # push/dispatch/schedule events.
+  # a job-level skip would stand the gate down in the all-green verdict,
+  # and CI also runs on push/dispatch/schedule events.
   pr-title:
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -570,43 +585,9 @@ jobs:
     with:
       language: javascript-typescript
 
-  all-green:
-    name: all-green
-    if: always()
-    needs:
-      - actionlint
-      - actionlint-binary
-      - gitleaks
-      - dependency-review
-      - shellcheck
-      - yamllint
-      - biome
-      - typography
-      - commit-names
-      - typecheck
-      - action-refs
-      - compose
-      - validate-template
-      - golden-renders
-      - script-tests
-      - validate-skills
-      - skills-discovery
-      - smoke-generate
-      - upgrade-path
-      - rehearse-fleet
-      - pr-title
-      - codeql-javascript
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - name: All jobs green
-        env:
-          NEEDS: ${{ toJson(needs) }}
-        run: |
-          set -o pipefail
-          jq -r 'to_entries[] | "\(.value.result)\t\(.key)"' <<< "$NEEDS"
-          failed="$(jq -r 'to_entries[] | select(.value.result != "success") | .key' <<< "$NEEDS" | tr '\n' ' ')"
-          if [ -n "$failed" ]; then
-            echo "::error::all-green failed: ${failed% } did not succeed. Open the failing job's log in this run, fix the failure, and push again."
-            exit 1
-          fi
+# No aggregate gate job: the required `all-green` check is a CHECK RUN the
+# workflow_run-triggered all-green.yml verdict creates once this run
+# completes - every job above gates it (info-* names would opt out; none
+# exist here). The authored roster lives in check_ssot.ts's
+# ALL_GREEN_ROSTER: add new jobs there, and remove entries deliberately
+# when retiring a gate.

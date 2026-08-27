@@ -41,59 +41,94 @@ present() { grep -qF -- "$1" "$2" || { echo "::error::gating check failed: '$1' 
 present_line() { grep -qxF -- "$1" "$2" || { echo "::error::gating check failed: no line is exactly '$1' in $2, so the template did not emit it for modules=$MODULES private=$PRIVATE. Fix the gate in templates/ (or this expectation in verify_smoke_gating.sh)."; exit 1; }; }
 absent() { if grep -qF -- "$1" "$2"; then echo "::error::gating check failed: '$1' appears in $2 but modules=$MODULES private=$PRIVATE should not emit it. Fix the gate in templates/ (or this expectation in verify_smoke_gating.sh)."; exit 1; fi; }
 absent_line() { if grep -qxF -- "$1" "$2"; then echo "::error::gating check failed: a line is exactly '$1' in $2 but modules=$MODULES private=$PRIVATE should not emit it. Fix the gate in templates/ (or this expectation in verify_smoke_gating.sh)."; exit 1; fi; }
-adjacent() { grep -xF -A1 -- "$1" "$3" | grep -qxF -- "$2" || { echo "::error::gating check failed: the line '$1' in $3 is not immediately followed by '$2' for modules=$MODULES private=$PRIVATE. Fix the gate in templates/ (or this expectation in verify_smoke_gating.sh)."; exit 1; }; }
 
-# pr-title runs inside the managed ci.yml gate (no standalone workflow).
+# Single-call CI: the rendered ci.yml is a thin caller of fleet-ci.yml at
+# the green-gated @build ref, handing over the module selection as a JSON
+# array. The exact modules line is asserted (module membership in the gate
+# IS this input now), plus the caller job's permission ceiling and the
+# repo-owned checks call.
+test -f "$wf/ci.yml"
+test -f "$wf/checks.yml"
+present "repo-platform/.github/workflows/fleet-ci.yml@build" "$wf/ci.yml"
+present "uses: ./.github/workflows/checks.yml" "$wf/ci.yml"
+# Copier normalizes the multiselect to the choices order, so the expected
+# JSON is rebuilt in MODULE_ORDER (a new module must join this list or the
+# everything row's exact-line assert fails loudly).
+ordered=""
+for m in agents bun node deno uv rust pages release-please issue-templates skills pr-title auto-assign fuzzer nightly settings-sync custom-license; do
+  if has "$m"; then ordered="${ordered:+$ordered, }\"$m\""; fi
+done
+present_line "      modules: '[$ordered]'" "$wf/ci.yml"
+present_line "      private: $PRIVATE" "$wf/ci.yml"
+present_line "  contents: read" "$wf/ci.yml"
+# The caller job's permission ceiling is UNCONDITIONAL (GitHub validates
+# every called job's request against it at call time, skipped jobs
+# included), so every scope renders on every row.
+present_line "      pull-requests: write" "$wf/ci.yml"
+present_line "      security-events: write" "$wf/ci.yml"
+present_line "      actions: read" "$wf/ci.yml"
+present_line "      issues: read" "$wf/ci.yml"
+present_line "      vulnerability-alerts: read" "$wf/ci.yml"
+# The base checks merged into fleet-ci; none of their wiring (or the old
+# aggregate job's) may render here any more.
+absent "!cancelled()" "$wf/ci.yml"
+absent_line "  all-green:" "$wf/ci.yml"
+absent "base-checks" "$wf/ci.yml"
+absent "check-typography" "$wf/ci.yml"
+
+# The all-green verdict wrapper: the client-side workflow_run trigger for
+# the shared judgment (the check run branch protection requires), with the
+# dispatch unwedge input, the grants the judgment needs, and the anchor
+# job pin that makes a disarmed fleet-ci caller fail the verdict.
+test -f "$wf/all-green.yml"
+present 'workflows: [CI]' "$wf/all-green.yml"
+present_line "    types: [completed]" "$wf/all-green.yml"
+present_line "  workflow_dispatch:" "$wf/all-green.yml"
+present "reusable-all-green.yml@build" "$wf/all-green.yml"
+present_line "      checks: write" "$wf/all-green.yml"
+present_line "      actions: read" "$wf/all-green.yml"
+present_line "      require-job: ci / validate-template" "$wf/all-green.yml"
+
+# pr-title runs inside fleet-ci; its whole rendered footprint is gate
+# membership through the modules input.
 test ! -e "$wf/pr-title.yml"
 if has pr-title; then
-  present "pr-title:" "$wf/ci.yml"
-  present "- pr-title" "$wf/ci.yml"
+  present '"pr-title"' "$wf/ci.yml"
 else
-  absent "pr-title:" "$wf/ci.yml"
-  absent "- pr-title" "$wf/ci.yml"
+  absent '"pr-title"' "$wf/ci.yml"
 fi
 if has auto-assign; then test -f "$wf/auto-assign.yml"; else test ! -e "$wf/auto-assign.yml"; fi
 
-# The all-green needs list must join runs-on: tight, whichever gate entry
-# the ci-gate-needs generator emits last (the anchor is tight: every
-# manifest-generated contribution owns its line ending and the composer
-# adds none). This pins the regression where an unselected trailing
-# contribution left the previous entry's newline dangling as a blank line.
-if has pr-title; then last_need="      - pr-title"
-elif has skills; then last_need="      - validate-skills"
-elif has release-please; then last_need="      - release-health"
-elif [ "$PRIVATE" != "true" ] && has uv; then last_need="      - codeql-python"
-elif [ "$PRIVATE" != "true" ] && has_codeql_toolchain; then last_need="      - codeql-javascript"
-# validate-template is the last BASE entry, on every row and both
-# visibilities, so it closes the list whenever no module contributes a gate
-# job.
-else last_need="      - validate-template"
-fi
-adjacent "$last_need" "    runs-on: ubuntu-latest" "$wf/ci.yml"
-
+# Single-call CI re-homed the gate jobs into the operator's fleet-ci.yml,
+# so the render no longer shows their bodies; the thin-caller shapes are
+# pinned here against the repo's own file instead (this harness greps
+# files, never imports the code it verifies).
+fleet_ci="$REPO_ROOT/.github/workflows/fleet-ci.yml"
 # validate-template splits: INTEGRITY blocks while FRESHNESS only informs.
-# Both legs live in the validate-template-report action now (its own suite
-# polices the reporting), so what a render has to show is the shape a
-# composite action cannot carry: the job key and its all-green needs entry,
-# the thin caller's uses ref at the green-gated @build, and the fail-last
-# step re-raising the action's deferred integrity verdict so the findings
-# comment is already posted when the gate goes red.
-present_line "  validate-template:" "$wf/ci.yml"
-present_line "      - validate-template" "$wf/ci.yml"
-present "actions/validate-template-report@build" "$wf/ci.yml"
-present "steps.template.outputs.integrity != 'success'" "$wf/ci.yml"
-# The comment write is scoped to that one job, never the workflow default.
-present_line "  contents: read" "$wf/ci.yml"
-absent_line "  pull-requests: write" "$wf/ci.yml"
-present_line "      pull-requests: write" "$wf/ci.yml"
+# Both legs live in the validate-template-report action (its own suite
+# polices the reporting); fleet-ci keeps only what a composite action
+# cannot carry - the thin caller's uses ref at the green-gated @build and
+# the fail-last step re-raising the action's deferred integrity verdict,
+# so the findings comment is already posted when the gate goes red.
+present "actions/validate-template-report@build" "$fleet_ci"
+present "steps.template.outputs.integrity != 'success'" "$fleet_ci"
+# yamllint is a composite action; both billing shapes call the same pin
+# exactly once each - the merged base-checks step and the fan-out job (the
+# pip install and the strict flag are the action's own suite's to police).
+yamllint_pins="$(grep -cF -- "repo-platform/actions/yamllint@build" "$fleet_ci" || true)"
+if [ "$yamllint_pins" -ne 2 ]; then
+  echo "::error::gating check failed: expected exactly 2 'repo-platform/actions/yamllint@build' pins in $fleet_ci (the merged base-checks step and the fan-out job) but found $yamllint_pins. Fix fleet-ci.yml (or this expectation in verify_smoke_gating.sh)."
+  exit 1
+fi
 
-# The Copilot review wait moved OUT of CI: the ruleset requires Copilot's
-# own per-sha check run directly (settings-override.yml), so no render may
-# resurrect the retired gate job, its re-arm workflow, or a sleep-based
-# wait for the review.
+# The Copilot wait is ruleset data now (the required copilot check run,
+# asserted in the merged settings below): no bridge job, no re-arm
+# workflow, nothing Copilot-shaped may render into CI.
 absent "copilot-review" "$wf/ci.yml"
 absent "copilot-rearm" "$wf/ci.yml"
 test ! -e "$wf/rerun-copilot-gate.yml"
+# Fail-fast economy: the gate waits by FAILING, never by sleeping on a
+# billed runner; no sleep may creep into the rendered workflow.
 absent "sleep " "$wf/ci.yml"
 if has issue-templates; then test -f "$SMOKE/.github/ISSUE_TEMPLATE/config.yml"; else test ! -e "$SMOKE/.github/ISSUE_TEMPLATE"; fi
 if has pages; then test -f "$wf/pages.yml"; else test ! -e "$wf/pages.yml"; fi
@@ -167,12 +202,10 @@ if has skills; then
   python3 -m json.tool "$SMOKE/.claude-plugin/marketplace.json" > /dev/null
   # The seeded catalog starts empty; repos add their skills afterwards.
   present '"skills": []' "$SMOKE/.claude-plugin/plugin.json"
-  # The structure job must render inside the gate AND sit in all-green's
-  # needs; losing either fragment would fail open silently.
-  present_line "  validate-skills:" "$wf/ci.yml"
-  present_line "      - validate-skills" "$wf/ci.yml"
-  present "actions/validate-skills@build" "$wf/ci.yml"
-  present_line "          skills-dir: \"$skills_dir\"" "$wf/ci.yml"
+  # The gating structure job lives in fleet-ci; the render carries the
+  # membership plus the dir answer as the skills-dir input.
+  present '"skills"' "$wf/ci.yml"
+  present_line "      skills-dir: \"$skills_dir\"" "$wf/ci.yml"
   # The advisory discovery workflow: network-dependent, outside the gate.
   test -f "$wf/validate-skills.yml"
   present "actions/validate-skills@build" "$wf/validate-skills.yml"
@@ -182,7 +215,8 @@ if has skills; then
 else
   test ! -e "$SMOKE/.claude-plugin"
   test ! -e "$wf/validate-skills.yml"
-  absent "validate-skills" "$wf/ci.yml"
+  absent "skills-dir:" "$wf/ci.yml"
+  absent '"skills"' "$wf/ci.yml"
 fi
 
 if has settings-sync; then
@@ -243,54 +277,28 @@ if has auto-assign; then
   fi
 fi
 
-# CodeQL: public AND at least one analyzable toolchain; the per-language
-# analysis jobs are spliced straight into ci.yml's gate (no standalone
-# workflow), and the weekly re-scan schedule lives on ci.yml's triggers.
+# CodeQL: public AND at least one analyzable toolchain. The analysis jobs
+# live in fleet-ci (a per-language matrix over the codeql-languages input);
+# the render carries the exact input line - shared languages must appear
+# ONCE (bun+node+deno all analyze as javascript-typescript) - plus the
+# weekly re-scan schedule.
 test ! -e "$wf/codeql.yml"
 if [ "$PRIVATE" != "true" ] && has_codeql_toolchain; then
-  present "reusable-codeql.yml@main" "$wf/ci.yml"
+  langs=""
+  if has bun || has node || has deno; then langs="\"javascript-typescript\""; fi
+  if has uv; then langs="${langs:+$langs, }\"python\""; fi
+  present_line "      codeql-languages: '[$langs]'" "$wf/ci.yml"
   present "schedule:" "$wf/ci.yml"
   present 'cron: "3 8 * * 1"' "$wf/ci.yml"
-  # The caller jobs must grant the scan permissions (a caller job's
-  # permissions are the ceiling for the called workflow).
-  present "contents: read" "$wf/ci.yml"
-  present "security-events: write" "$wf/ci.yml"
-  present "actions: read" "$wf/ci.yml"
-  if has bun || has node || has deno; then
-    present "codeql-javascript:" "$wf/ci.yml"
-    present "- codeql-javascript" "$wf/ci.yml"
-    # bun, node, and deno all analyze as javascript-typescript; the composer
-    # must group them into ONE job under co-selection. A duplicate YAML job
-    # key would not fail YAML parsers, so count the exact job-key line.
-    js_jobs="$(grep -cxF -- "  codeql-javascript:" "$wf/ci.yml" || true)"
-    if [ "$js_jobs" -ne 1 ]; then
-      echo "::error::gating check failed: expected exactly 1 line \"  codeql-javascript:\" in $wf/ci.yml but found $js_jobs for modules=$MODULES private=$PRIVATE - the shared javascript-typescript CodeQL group must emit one job, never per-module duplicates. Fix the codeql-languages generator in scripts/compose_template.ts (or this expectation in verify_smoke_gating.sh)."
-      exit 1
-    fi
-  else
-    absent "codeql-javascript" "$wf/ci.yml"
-  fi
-  if has uv; then
-    present "codeql-python:" "$wf/ci.yml"
-    present "- codeql-python" "$wf/ci.yml"
-  else
-    absent "codeql-python" "$wf/ci.yml"
-  fi
 else
-  absent "codeql" "$wf/ci.yml"
+  present_line "      codeql-languages: '[]'" "$wf/ci.yml"
   absent "schedule:" "$wf/ci.yml"
-  # No gate job needs the scan permissions without CodeQL (contents: read
-  # stays - it is ci.yml's workflow-level default).
-  absent "security-events: write" "$wf/ci.yml"
-  absent "actions: read" "$wf/ci.yml"
 fi
 
 # Base community files: the fleet LICENSE ships to every render unless the
 # repo opts out via the custom-license module; the other three are
-# public-only. Job and needs entry
-# are asserted separately as a cheap render-time cross-check (the validator
-# independently hard-errors on a present job missing from all-green's
-# needs).
+# public-only. The dependency-review and base-check jobs themselves live in
+# fleet-ci, conditioned on the private input this render passes.
 if has custom-license; then test ! -e "$SMOKE/LICENSE.md"; else test -f "$SMOKE/LICENSE.md"; fi
 # SECURITY.md is visibility-independent (private collaborators need the
 # reporting route too); the contributor-facing files stay public-only.
@@ -298,63 +306,9 @@ test -f "$SMOKE/SECURITY.md"
 if [ "$PRIVATE" = "true" ]; then
   test ! -e "$SMOKE/CONTRIBUTING.md"
   test ! -e "$SMOKE/CODE_OF_CONDUCT.md"
-  absent "dependency-review:" "$wf/ci.yml"
-  absent "- dependency-review" "$wf/ci.yml"
 else
   test -f "$SMOKE/CONTRIBUTING.md"
   test -f "$SMOKE/CODE_OF_CONDUCT.md"
-  present "dependency-review:" "$wf/ci.yml"
-  present "      - dependency-review" "$wf/ci.yml"
-  # The wrapper pin, falling back to main on the scratch build tree; the
-  # upgrade test proves the release-tag form.
-  present "repo-platform/actions/dependency-review@build" "$wf/ci.yml"
-fi
-
-# Base checks: private renders merge the five tiny jobs into one
-# base-checks job (a standalone job bills a rounded-up minute per run on
-# private repos); public renders keep the one-job-per-check fan-out. Job
-# keys and needs entries are matched as whole lines at their exact
-# indentation: a bare 'typography' pattern would also hit
-# 'actions/check-typography@build'.
-base_check_jobs=(typography commit-names actionlint gitleaks yamllint)
-if [ "$PRIVATE" = "true" ]; then
-  present_line "  base-checks:" "$wf/ci.yml"
-  present_line "      - base-checks" "$wf/ci.yml"
-  for job in "${base_check_jobs[@]}"; do
-    absent_line "  $job:" "$wf/ci.yml"
-    absent_line "      - $job" "$wf/ci.yml"
-  done
-  # Every check's tool steps must survive the merge (check-typography is
-  # asserted for both shapes below; yamllint is a composite action now, so
-  # its pin is what a render shows - the pip install and the strict flag
-  # are the action's own suite's to police).
-  present "actions/validate-commit-names@build" "$wf/ci.yml"
-  present "raven-actions/actionlint" "$wf/ci.yml"
-  present "gitleaks/gitleaks-action" "$wf/ci.yml"
-  present "repo-platform/actions/yamllint@build" "$wf/ci.yml"
-  # ...and keep their run-even-after-an-earlier-failure guard: one per
-  # check step (five checks, one step each).
-  guard="        if: '!cancelled()'"
-  guards="$(grep -cxF -- "$guard" "$wf/ci.yml" || true)"
-  if [ "$guards" -ne 5 ]; then
-    echo "::error::gating check failed: expected exactly 5 lines \"$guard\" in $wf/ci.yml but found $guards for modules=$MODULES private=$PRIVATE. Fix the gate in templates/ (or this expectation in verify_smoke_gating.sh)."
-    exit 1
-  fi
-else
-  # Exact lines, not a substring: the header comment describing the two
-  # shapes names base-checks in every render.
-  absent_line "  base-checks:" "$wf/ci.yml"
-  absent_line "      - base-checks" "$wf/ci.yml"
-  # The guard belongs to the merged shape alone; public fan-out jobs fail
-  # independently without it.
-  absent "!cancelled()" "$wf/ci.yml"
-  for job in "${base_check_jobs[@]}"; do
-    present_line "  $job:" "$wf/ci.yml"
-    present_line "      - $job" "$wf/ci.yml"
-  done
-  # The fan-out yamllint job is a thin caller of the same action the
-  # private merged shape uses.
-  present "repo-platform/actions/yamllint@build" "$wf/ci.yml"
 fi
 
 # gitignore toolchain sections; the four markers are asserted by the validator.
@@ -447,7 +401,7 @@ if has settings-sync; then
   present_line "  - name: bug" "$merged_out"
   present_line "  - name: enhancement" "$merged_out"
   present_line "  - name: fix-lint" "$merged_out"
-  # The fleet rulesets, always, with BOTH required checks - all-green and
+  # The fleet rulesets, always, with both required checks - all-green and
   # Copilot's own per-sha review check run - each pinned to the GitHub
   # Actions app (both check runs are Actions-created; the pin stops any
   # other app or a plain commit status from satisfying the context), plus
@@ -501,41 +455,50 @@ if has settings-sync; then
   if has fuzzer; then present_line "  - name: fuzz-nightly" "$merged_out"; else absent "fuzz-nightly" "$merged_out"; fi
   if has nightly; then present_line "  - name: nightly-failure" "$merged_out"; else absent "nightly-failure" "$merged_out"; fi
 fi
+# The tracking-labels input follows the selected stream modules: it feeds
+# fleet-ci's release-health job (which only runs with release-please), and
+# the exact quoted default list (selected streams in module order) is
+# pinned so an unquoted, empty, or partial render fails.
+if has fuzzer && has nightly; then
+  present_line '      tracking-labels: "fuzz-nightly,nightly-failure"' "$wf/ci.yml"
+elif has fuzzer; then
+  present_line '      tracking-labels: "fuzz-nightly"' "$wf/ci.yml"
+elif has nightly; then
+  present_line '      tracking-labels: "nightly-failure"' "$wf/ci.yml"
+else
+  absent "tracking-labels:" "$wf/ci.yml"
+fi
+absent "fuzz-label:" "$wf/ci.yml"
 if has release-please; then
   test -f "$wf/release.yml"
   test -f "$wf/update-release.yml"
   test -f "$wf/update-release-pr.yml"
+  # The release job rides the client ci.yml (it must call the repo-owned
+  # release.yml by local path) on top of the gate: needs over the two
+  # jobs every gate runs through, under the info- name that opts the
+  # pipeline out of the verdict (it depends on the gate, it is not gated
+  # by it).
   present "uses: ./.github/workflows/release.yml" "$wf/ci.yml"
-  # The freshness gate must render as a job AND sit in all-green's needs;
-  # losing either fragment would fail open silently.
-  present "release-freshness:" "$wf/ci.yml"
-  present "      - release-freshness" "$wf/ci.yml"
-  # The release-health gate likewise: the PR-time job in ci.yml (exact
-  # indented lines - the header comments also say release-health) plus the
-  # authoritative pre-flight on the release path. Modes are pinned as whole
-  # lines so a flipped mode cannot pass, and the tracking-labels assert pins
-  # the exact quoted default list (selected tracking streams in module
-  # order) so an unquoted, empty, or partial render fails too. The legacy
+  present_line "  info-release:" "$wf/ci.yml"
+  present_line "    needs: [checks, ci]" "$wf/ci.yml"
+  absent_line "  release:" "$wf/ci.yml"
+  # The freshness and health gates live in fleet-ci; the render carries
+  # the release-please membership that arms them.
+  present '"release-please"' "$wf/ci.yml"
+  # The authoritative release-health pre-flight on the release path, with
+  # its mode pinned as a whole line so a flipped mode cannot pass, and the
+  # tracking-labels render matching the ci.yml input above. The legacy
   # fuzz-label spelling must never render again.
-  present_line "  release-health:" "$wf/ci.yml"
-  present_line "      - release-health" "$wf/ci.yml"
-  present "release-health@build" "$wf/ci.yml"
   present "release-health@build" "$wf/release.yml"
-  present_line "          mode: pull-request" "$wf/ci.yml"
   present_line "          mode: release" "$wf/release.yml"
-  absent "fuzz-label:" "$wf/ci.yml"
   absent "fuzz-label:" "$wf/release.yml"
   if has fuzzer && has nightly; then
-    present_line '          tracking-labels: "fuzz-nightly,nightly-failure"' "$wf/ci.yml"
     present_line '          tracking-labels: "fuzz-nightly,nightly-failure"' "$wf/release.yml"
   elif has fuzzer; then
-    present_line '          tracking-labels: "fuzz-nightly"' "$wf/ci.yml"
     present_line '          tracking-labels: "fuzz-nightly"' "$wf/release.yml"
   elif has nightly; then
-    present_line '          tracking-labels: "nightly-failure"' "$wf/ci.yml"
     present_line '          tracking-labels: "nightly-failure"' "$wf/release.yml"
   else
-    absent "tracking-labels:" "$wf/ci.yml"
     absent "tracking-labels:" "$wf/release.yml"
   fi
   test -f "$SMOKE/release-please-config.json"
@@ -562,14 +525,7 @@ else
   test ! -e "$wf/update-release.yml"
   test ! -e "$wf/update-release-pr.yml"
   absent "uses: ./.github/workflows/release.yml" "$wf/ci.yml"
-  absent "release-freshness" "$wf/ci.yml"
-  absent_line "  release-health:" "$wf/ci.yml"
-  absent_line "      - release-health" "$wf/ci.yml"
-  # The tracking-labels input only rides in the release-please fragments,
-  # so even a fuzzer- or nightly-selected render must not carry it without
-  # release-please.
-  absent "tracking-labels:" "$wf/ci.yml"
-  absent "fuzz-label:" "$wf/ci.yml"
+  absent '"release-please"' "$wf/ci.yml"
   test ! -e "$SMOKE/release-please-config.json"
   test ! -e "$SMOKE/.release-please-manifest.json"
 fi
@@ -636,14 +592,6 @@ else
   test ! -e "$wf/copilot-setup-steps.yml"
 fi
 
-# Managed ci.yml is always generated (repo checks live in the repo-owned
-# checks.yml it calls); the validator asserts the all-green shape, so only
-# check the wiring and the composite-action pin at main here.
-test -f "$wf/ci.yml"
-test -f "$wf/checks.yml"
-present "uses: ./.github/workflows/checks.yml" "$wf/ci.yml"
-present "actions/check-typography@build" "$wf/ci.yml"
-
 # Row-specific expectations for the rendered pages caller.
 if [ -n "$EXPECT_IN_PAGES" ]; then
   while IFS= read -r pattern; do
@@ -677,6 +625,7 @@ expect_class() { # <path> <expected class, or "absent">
   fi
 }
 expect_class ".github/workflows/ci.yml" managed
+expect_class ".github/workflows/all-green.yml" managed
 expect_class ".github/workflows/checks.yml" starter
 expect_class "SECURITY.md" split
 expect_class ".gitignore" split

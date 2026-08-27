@@ -182,17 +182,17 @@ describe("region builders", () => {
   });
 
   test("trackingLabelsInput gates the input on any stream and joins the selected answers", () => {
-    expect(trackingLabelsInput([BUN, FUZZER, NIGHTLY])).toEqual([
+    expect(trackingLabelsInput([BUN, FUZZER, NIGHTLY], 10)).toEqual([
       "{%- if 'fuzzer' in modules or 'nightly' in modules %}",
       "          tracking-labels: {{ (([fuzzer_label] if 'fuzzer' in modules else []) + ([nightly_label] if 'nightly' in modules else [])) | join(',') | tojson }}",
       "{%- endif %}",
     ]);
   });
 
-  test("a single stream still renders the same shape (no special casing)", () => {
-    expect(trackingLabelsInput([FUZZER])).toEqual([
+  test("a single stream still renders the same shape at the caller's indent (no special casing)", () => {
+    expect(trackingLabelsInput([FUZZER], 6)).toEqual([
       "{%- if 'fuzzer' in modules %}",
-      "          tracking-labels: {{ (([fuzzer_label] if 'fuzzer' in modules else [])) | join(',') | tojson }}",
+      "      tracking-labels: {{ (([fuzzer_label] if 'fuzzer' in modules else [])) | join(',') | tojson }}",
       "{%- endif %}",
     ]);
   });

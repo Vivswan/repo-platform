@@ -1,0 +1,46 @@
+# This repository's all-green verdict: when a CI run completes, judge its
+# jobs and create the `all-green` check run branch protection (and the
+# build/sync green gates in shared/all_green.ts) require. The judgment is
+# the local reusable-all-green.yml - the SAME implementation every managed
+# repo's wrapper calls, dogfooded here.
+#
+# The dispatch input is the unwedge path: when a verdict never landed at a
+# sha (a lost workflow_run event), dispatch this workflow with the sha and
+# it re-judges the newest completed CI run there.
+#
+# workflow_run triggers execute the DEFAULT branch's copy of this file
+# (and the local reusable at that same ref), so changes here are
+# observable only after they merge to main.
+
+name: All Green
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: Commit whose newest completed CI run should be re-judged (the unwedge path for a lost workflow_run event).
+        required: true
+        type: string
+
+permissions: {}
+
+# One verdict at a time per judged sha: a push run and a PR run of the
+# same head complete near-simultaneously (and a dispatch can join them),
+# and serializing the judgments keeps their check-run POSTs ordered.
+# Never cancel: a cancelled verdict between judging and posting is a lost
+# check only the dispatch unwedge would heal.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.workflow_run.head_sha || inputs.sha }}
+  cancel-in-progress: false
+
+jobs:
+  verdict:
+    permissions:
+      checks: write
+      actions: read
+    uses: ./.github/workflows/reusable-all-green.yml
+    with:
+      sha: ${{ github.event_name == 'workflow_dispatch' && inputs.sha || '' }}

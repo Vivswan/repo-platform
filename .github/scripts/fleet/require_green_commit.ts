@@ -18,28 +18,14 @@
 // workflow_run trigger cannot filter on paths, so every green push -
 // docs-only included - would re-apply the whole fleet.
 //
-// Env: GH_TOKEN (needs actions: read - the workflow's own GITHUB_TOKEN,
-// not the fleet PAT, whose grant does not carry it), GITHUB_REPOSITORY,
-// GITHUB_SHA, GITHUB_REF (required, and refused off main - a dispatched
-// CI run vouches for its own branch tip, which must never reach the
-// fleet). GREEN_WAIT_MS / GREEN_POLL_MS bound the wait.
+// Env: GH_TOKEN (needs checks: read - the workflow's own GITHUB_TOKEN,
+// not the fleet PAT, whose grant carries no Checks read),
+// GITHUB_REPOSITORY, GITHUB_SHA, GITHUB_REF (required, and refused off
+// main - a dispatched CI run vouches for its own branch tip, which must
+// never reach the fleet). GREEN_WAIT_MS / GREEN_POLL_MS bound the wait.
 
-import { allGreenFailure, type GhRunner } from "../shared/all_green.ts";
+import { allGreenFailure, type GhRunner, verdictPending } from "../shared/all_green.ts";
 import { env, fail, requireEnv } from "../shared/gha.ts";
-
-/** Reasons the next poll could still change, matched against
- *  allGreenFailure's own strings (shared/all_green.ts): CI has not
- *  concluded at the sha yet, its run has not appeared yet, or the probe
- *  itself failed (an API blip deserves the deadline, not an instant
- *  refusal - and an unhealed one still fails closed at the deadline).
- *  Anything else is a final verdict and fails now. */
-function retryable(reason: string): boolean {
-  return (
-    reason.includes("is still '") ||
-    reason.includes("no ci.yml run") ||
-    reason.includes("reading its CI runs failed")
-  );
-}
 
 export interface GreenWaitOptions {
   deadlineMs?: number;
@@ -65,9 +51,11 @@ function boundedMs(name: string, fallback: number): number {
   return value;
 }
 
-/** Null when a completed direct-event CI run succeeded at `sha` (waiting
- *  out an in-flight run up to the deadline), else the reason the commit
- *  cannot be treated as green. */
+/** Null when a completed, successful all-green verdict exists at `sha`
+ *  (waiting out an in-flight CI run and its verdict up to the deadline),
+ *  else the reason the commit cannot be treated as green. The predicate's
+ *  own internal verdict poll is zeroed: THIS loop owns all waiting, on
+ *  its own clock and injections. */
 export function waitForGreen(
   repository: string,
   sha: string,
@@ -81,10 +69,12 @@ export function waitForGreen(
   for (;;) {
     const reason =
       options.gh === undefined
-        ? allGreenFailure(repository, sha)
-        : allGreenFailure(repository, sha, options.gh);
+        ? allGreenFailure(repository, sha, undefined, { deadlineMs: 0 })
+        : allGreenFailure(repository, sha, options.gh, { deadlineMs: 0 });
     if (reason === null) return null;
-    if (!retryable(reason)) return reason;
+    // A final verdict fails now; a pending one (verdictPending lives next
+    // to the reason strings it matches) deserves this loop's deadline.
+    if (!verdictPending(reason)) return reason;
     if (Date.now() - started >= deadlineMs) {
       return `${reason} (and the ${Math.round(deadlineMs / 60_000)}-minute wait for a verdict is over)`;
     }

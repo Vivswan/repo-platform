@@ -5,5 +5,3 @@ ownership:
   - { path: .claude-plugin/marketplace.json, class: starter }
   - { path: .claude-plugin/plugin.json, class: starter }
   - { path: .github/workflows/validate-skills.yml, class: managed }
-gate_jobs:
-  - validate-skills

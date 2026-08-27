@@ -1,26 +1,19 @@
-// Unit tests for the composer's data-anchor derivations: value grouping,
-// the CodeQL slug rule (including the duplicate-job-key collision guard),
+// Unit tests for the composer's data-anchor derivations: value grouping
 // and or-chain gate rendering - covering the future shapes (two modules
 // sharing a CodeQL language, a dependabot label, or a lockfile pattern)
 // that the sharing rule must emit once behind an or-chain gate.
 
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import {
   agentsToolchainErrors,
   applyToolchainSetup,
   type Contribution,
   codeqlGroups,
-  codeqlSlug,
   type DeclarationSources,
   dependabotLabels,
   ecosystemGroups,
   excludePatterns,
-  fragmentJobIds,
   fragmentMarkerErrors,
-  gateJobsGroups,
-  gateJobsParityErrors,
   gitwildmatchLiteral,
   lockfileGroups,
   manifestEntries,
@@ -70,13 +63,6 @@ function gateOfFor(manifests: ModuleManifest[]): (module: string) => string {
   };
 }
 
-describe("codeqlSlug", () => {
-  test("takes the first dash-separated word", () => {
-    expect(codeqlSlug("javascript-typescript")).toBe("javascript");
-    expect(codeqlSlug("python")).toBe("python");
-  });
-});
-
 describe("orChain", () => {
   const gateOf = gateOfFor([BUN, NODE]);
 
@@ -95,140 +81,6 @@ describe("orChain", () => {
 
   test("an unknown module fails loudly instead of guessing a gate", () => {
     expect(() => orChain(["ghost"], gateOf)).toThrow("ghost");
-  });
-});
-
-describe("gateJobsGroups", () => {
-  test("each declaring module keeps its own group, in manifest order", () => {
-    const rp = manifest("release-please", ["gate_jobs: [release-freshness, release-health]"]);
-    const prTitle = manifest("pr-title", ["gate_jobs: [pr-title]"]);
-    expect(gateJobsGroups([AGENTS, rp, prTitle])).toEqual([
-      { module: "release-please", jobs: ["release-freshness", "release-health"] },
-      { module: "pr-title", jobs: ["pr-title"] },
-    ]);
-  });
-
-  test("a job id declared by two modules throws (duplicate needs entry)", () => {
-    expect(() =>
-      gateJobsGroups([
-        manifest("skills", ["gate_jobs: [validate-skills]"]),
-        manifest("pr-title", ["gate_jobs: [validate-skills]"]),
-      ]),
-    ).toThrow("templates/skills/module.yml");
-  });
-});
-
-describe("fragmentJobIds", () => {
-  test("collects the 2-space mapping keys, skipping comments, steps, and value-side jinja", () => {
-    const body = Buffer.from(
-      [
-        "  # a job comment",
-        "  release-freshness:",
-        "    runs-on: ubuntu-latest",
-        "    steps:",
-        "      - uses: actions/checkout@v7",
-        "  release-health:",
-        "    runs-on: ubuntu-latest",
-        "{%- if x %}",
-        "    timeout-minutes: 5",
-        "{%- endif %}",
-        "",
-      ].join("\n"),
-    );
-    expect(fragmentJobIds(body)).toEqual(["release-freshness", "release-health"]);
-  });
-
-  test("the live release-please fragment (value-side jinja only) still enumerates", () => {
-    const body = readFileSync(
-      join(import.meta.dir, "../../templates/release-please/fragments/ci-gate-jobs.jinja"),
-    );
-    expect(fragmentJobIds(body)).toEqual(["release-freshness", "release-health"]);
-  });
-
-  test("a job key inside a jinja {% if %} block throws (it would enumerate as unconditional)", () => {
-    const body = Buffer.from(
-      ["{%- if x %}", "  cond-job:", "    runs-on: ubuntu-latest", "{%- endif %}", ""].join("\n"),
-    );
-    expect(() => fragmentJobIds(body)).toThrow("gate jobs render unconditionally");
-  });
-
-  test("depth tracking: a key after nested statements close passes, one between them throws", () => {
-    const closed = Buffer.from(
-      [
-        "  ok-job:",
-        "    runs-on: ubuntu-latest",
-        "{% if a %}{% if b %}",
-        "    x: 1",
-        "{% endif %}{% endif %}",
-        "  after-job:",
-        "    runs-on: ubuntu-latest",
-        "",
-      ].join("\n"),
-    );
-    expect(fragmentJobIds(closed)).toEqual(["ok-job", "after-job"]);
-    const open = Buffer.from(
-      [
-        "  outer-job:",
-        "    runs-on: ubuntu-latest",
-        "{% if a %}{% if b %}",
-        "    x: 1",
-        "{% endif %}",
-        "  nested-job:",
-        "    runs-on: ubuntu-latest",
-        "{% endif %}",
-        "",
-      ].join("\n"),
-    );
-    expect(() => fragmentJobIds(open)).toThrow("gate jobs render unconditionally");
-  });
-
-  test("unbalanced statement tags throw - underflow could hide a conditioned key at depth zero", () => {
-    const underflow = Buffer.from(
-      ["{% endif %}", "  cond-job:", "    runs-on: ubuntu-latest", "{% if x %}", ""].join("\n"),
-    );
-    expect(() => fragmentJobIds(underflow)).toThrow("closes a jinja {% if %} it never opened");
-    const unclosed = Buffer.from(
-      ["  a-job:", "    runs-on: ubuntu-latest", "{% if x %}", "    y: 1", ""].join("\n"),
-    );
-    expect(() => fragmentJobIds(unclosed)).toThrow("leaves a jinja {% if %} unclosed");
-  });
-
-  test("job ids beyond gate_jobs' declarable shape still surface (they must fail parity, not escape)", () => {
-    const body = Buffer.from(
-      "  Security_Scan: # inline note\n    runs-on: ubuntu-latest\n  _lint:\n    runs-on: ubuntu-latest\n",
-    );
-    expect(fragmentJobIds(body)).toEqual(["Security_Scan", "_lint"]);
-  });
-
-  test("quoted job keys still surface (they must fail parity, not escape)", () => {
-    const body = Buffer.from(
-      "  \"build\":\n    runs-on: ubuntu-latest\n  'deploy':\n    runs-on: ubuntu-latest\n",
-    );
-    expect(fragmentJobIds(body)).toEqual(["build", "deploy"]);
-  });
-
-  test("a space before the key's colon still surfaces (valid YAML the old scanner missed)", () => {
-    const body = Buffer.from("  new-job :\n    runs-on: ubuntu-latest\n");
-    expect(fragmentJobIds(body)).toEqual(["new-job"]);
-  });
-
-  test("a fragment that is not the jobs mapping's children throws instead of scanning past", () => {
-    expect(() => fragmentJobIds(Buffer.from("      - not a mapping\n"))).toThrow("jobs mapping");
-    expect(() => fragmentJobIds(Buffer.from("  just a scalar line\n"))).toThrow("jobs mapping");
-  });
-
-  test("a jinja-derived job key throws (it enumerates as one spelling and renders as another)", () => {
-    const body = Buffer.from(
-      "  {{ 'safe' if private else 'evil' }}:\n    runs-on: ubuntu-latest\n",
-    );
-    expect(() => fragmentJobIds(body)).toThrow("literally");
-  });
-
-  test("a commented-out key line cannot vouch for a jinja-derived key", () => {
-    const body = Buffer.from(
-      "{#-\n  safe:\n-#}\n  {{ 'safe' if private else 'evil' }}:\n    runs-on: ubuntu-latest\n",
-    );
-    expect(() => fragmentJobIds(body)).toThrow("literally");
   });
 });
 
@@ -265,36 +117,8 @@ describe("fragmentMarkerErrors", () => {
   });
 
   test("marker-free fragments pass", () => {
-    const fragments = new Map([frag("ci-gate-jobs", "uv", "  job:\n    runs-on: x\n")]);
+    const fragments = new Map([frag("checks-examples", "uv", "  - run: echo checks\n")]);
     expect(fragmentMarkerErrors(fragments)).toEqual([]);
-  });
-});
-
-describe("gateJobsParityErrors", () => {
-  const fragment = Buffer.from("  pr-title:\n    runs-on: ubuntu-latest\n");
-
-  test("matching declarations and fragment jobs pass", () => {
-    expect(gateJobsParityErrors("pr-title", ["pr-title"], fragment)).toEqual([]);
-    expect(gateJobsParityErrors("agents", undefined, undefined)).toEqual([]);
-  });
-
-  test("an unparseable fragment fails closed, naming the fragment", () => {
-    const errors = gateJobsParityErrors("pr-title", ["pr-title"], Buffer.from("      - item\n"));
-    expect(errors).toHaveLength(1);
-    expect(errors[0]).toContain("templates/pr-title/fragments/ci-gate-jobs.jinja");
-    expect(errors[0]).toContain("fails closed");
-  });
-
-  test("a fragment job the manifest does not declare fails (it would escape the gate)", () => {
-    const errors = gateJobsParityErrors("pr-title", undefined, fragment);
-    expect(errors).toHaveLength(1);
-    expect(errors[0]).toContain("outside the strict all-green gate");
-  });
-
-  test("a declared job the fragment does not define fails (a needs entry nothing satisfies)", () => {
-    const errors = gateJobsParityErrors("pr-title", ["pr-title", "ghost"], fragment);
-    expect(errors).toHaveLength(1);
-    expect(errors[0]).toContain("'ghost'");
   });
 });
 
@@ -370,15 +194,9 @@ describe("ecosystemGroups", () => {
 describe("codeqlGroups", () => {
   test("modules sharing a language collapse into one group in order", () => {
     expect(codeqlGroups([AGENTS, BUN, NODE, UV])).toEqual([
-      { language: "javascript-typescript", slug: "javascript", modules: ["bun", "node"] },
-      { language: "python", slug: "python", modules: ["uv"] },
+      { language: "javascript-typescript", modules: ["bun", "node"] },
+      { language: "python", modules: ["uv"] },
     ]);
-  });
-
-  test("two distinct languages deriving one slug throw (duplicate YAML job keys)", () => {
-    const bare = manifest("bare-js", ["toolchain: {codeql_language: javascript}"]);
-    expect(() => codeqlGroups([BUN, bare])).toThrow("codeql-javascript");
-    expect(() => codeqlGroups([BUN, bare])).toThrow("javascript-typescript");
   });
 });
 

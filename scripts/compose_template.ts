@@ -46,7 +46,9 @@
 //   contributions so the two spliced copies can never drift apart.
 // - Data anchors (DATA_ANCHORS below) are filled from manifest data instead
 //   of fragment files, so the composed output carries no marker comments and
-//   list-shaped content cannot drift from the manifests. The sharing rule: a
+//   list-shaped content (dependabot ecosystems, the fleet-ci call's
+//   codeql-languages input, gitleaks lockfiles) cannot drift from the
+//   manifests. The sharing rule: a
 //   manifest value declared by several modules is grouped BY VALUE, emitted
 //   ONCE, and gated on the or-chain of the contributing modules in
 //   MODULE_ORDER - never per-module duplicates, never precedence guards.
@@ -93,9 +95,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import { parse as parseYaml } from "yaml";
 import { joinLines, splitLines } from "../.github/scripts/shared/lines.ts";
-import { normalizeJinja, placeholderJinja } from "./jinja_subset.ts";
 import { loadManifests, MODULE_ORDER, type ModuleManifest } from "./module_manifests.ts";
 import {
   declarationTextErrors,
@@ -368,12 +368,6 @@ export function orChain(modules: string[], gateOf: GateOf): string {
   return modules.map((module) => gateOf(module)).join(" or ");
 }
 
-/** The CodeQL job slug for a language: its first dash-separated word
- *  (javascript-typescript -> javascript, python -> python). */
-export function codeqlSlug(language: string): string {
-  return language.split("-")[0];
-}
-
 export type EcosystemGroup = { ecosystem: string; modules: string[] };
 
 /** Distinct dependabot ecosystems with their contributing modules, in
@@ -390,38 +384,18 @@ export function ecosystemGroups(manifests: ModuleManifest[]): EcosystemGroup[] {
   return [...groups.values()];
 }
 
-export type CodeqlGroup = { language: string; slug: string; modules: string[] };
+export type CodeqlGroup = { language: string; modules: string[] };
 
 /** Distinct CodeQL languages with their contributing modules, in
- *  MODULE_ORDER of first contributor. Two distinct languages deriving the
- *  same job slug would emit duplicate codeql-<slug> YAML keys (one language
- *  silently lost), so that collision throws. */
+ *  MODULE_ORDER of first contributor. */
 export function codeqlGroups(manifests: ModuleManifest[]): CodeqlGroup[] {
   const groups = new Map<string, CodeqlGroup>();
-  const bySlug = new Map<string, CodeqlGroup>();
   for (const manifest of manifests) {
     if (!manifest.toolchain) continue;
     const language = manifest.toolchain.codeql_language;
-    const slug = codeqlSlug(language);
-    if (slug === "") {
-      throw new GeneratorValidationError(
-        `CodeQL language '${language}' (templates/${manifest.module}/module.yml) ` +
-          "derives an empty job slug - fix the language to start with a word",
-      );
-    }
-    const collision = bySlug.get(slug);
-    if (collision && collision.language !== language) {
-      throw new GeneratorValidationError(
-        `CodeQL languages '${collision.language}' (modules ${collision.modules.join(", ")}) ` +
-          `and '${language}' (templates/${manifest.module}/module.yml) both derive the ` +
-          `job slug 'codeql-${slug}' - the generated jobs would collide as duplicate ` +
-          "YAML keys; consolidate the modules onto one language",
-      );
-    }
-    const group = groups.get(language) ?? { language, slug, modules: [] };
+    const group = groups.get(language) ?? { language, modules: [] };
     group.modules.push(manifest.module);
     groups.set(language, group);
-    bySlug.set(slug, group);
   }
   return [...groups.values()];
 }
@@ -667,184 +641,6 @@ function ecosystemBlock(ecosystem: string): string {
 `;
 }
 
-function codeqlJob(group: CodeqlGroup): string {
-  return `
-  codeql-${group.slug}:
-    uses: {{ github_username }}/repo-platform/.github/workflows/reusable-codeql.yml@main
-    with:
-      language: ${group.language}
-    permissions:
-      contents: read
-      security-events: write
-      actions: read
-`;
-}
-
-export type GateJobsGroup = { module: string; jobs: string[] };
-
-/** Each module's declared gate jobs, in MODULE_ORDER. A job id declared by
- *  two modules throws: the all-green gate's needs list would carry a
- *  duplicate entry, and a gate job has exactly one defining module. */
-export function gateJobsGroups(manifests: ModuleManifest[]): GateJobsGroup[] {
-  const owners = new Map<string, string>();
-  const groups: GateJobsGroup[] = [];
-  for (const manifest of manifests) {
-    if (!manifest.gate_jobs) continue;
-    for (const job of manifest.gate_jobs) {
-      const prior = owners.get(job);
-      if (prior) {
-        throw new GeneratorValidationError(
-          `gate job '${job}' is declared by both templates/${prior}/module.yml and ` +
-            `templates/${manifest.module}/module.yml - the all-green needs list ` +
-            "would carry a duplicate entry; each gate job has one owning module",
-        );
-      }
-      owners.set(job, manifest.module);
-    }
-    groups.push({ module: manifest.module, jobs: manifest.gate_jobs });
-  }
-  return groups;
-}
-
-/** Workflow job ids a ci-gate-jobs fragment defines. The fragment is the
- *  jobs mapping's spliced children, so it is normalized modulo jinja
- *  (placeholder identity values - job ids never carry substitutions),
- *  wrapped under a jobs: key, and YAML-parsed: the top-level mapping keys
- *  ARE the job ids, whatever YAML spelling they use. Every parsed key must
- *  also appear as a literal 2-space key line in the RAW fragment (jinja
- *  comments stripped) - a jinja-derived key would enumerate as one
- *  spelling and render as another. A key line inside a jinja {% if %}
- *  block throws too: the normalization strips statement tags with bodies
- *  KEPT, so a conditioned job would enumerate as unconditional and the
- *  composer would emit a needs entry a render without the condition never
- *  satisfies. Throws on anything that fails any bar, so honest-mistake
- *  shapes (a new job spelling, a typo) fail closed rather than escape the
- *  parity check. Scope: value-side jinja CAN still synthesize rendered
- *  structure this scan never sees; that is out of scope here - this
- *  repo's review gates and the render-side validator's all-green
- *  needs-completeness check (run by smoke-generate on every push) are the
- *  backstop. */
-export function fragmentJobIds(body: Buffer): string[] {
-  const raw = body.toString("utf-8");
-  const vars = { username: "OWNER", slug: "SLUG", copyrightHolder: "HOLDER" };
-  const normalized = placeholderJinja(normalizeJinja(raw, vars));
-  const doc: unknown = parseYaml(`jobs:\n${normalized}`);
-  const jobs = (doc as { jobs?: unknown } | null)?.jobs;
-  if (typeof jobs !== "object" || jobs === null || Array.isArray(jobs)) {
-    throw new Error("the fragment does not parse as the jobs mapping's children");
-  }
-  // Literal-key collection ignores jinja comments: a key-shaped line inside
-  // a comment renders to nothing, so it must never vouch for a parsed key.
-  // Key lines and if/endif statement tags are walked in position order with
-  // an if-depth counter: a key at depth > 0 is a conditioned job and throws
-  // (value-side statements inside a job's body sit at depth > 0 too, but
-  // their lines are never 2-space key lines, so only keys can trip this).
-  const commentFree = raw.replace(/\{#-?[\s\S]*?-?#\}/g, "");
-  type Event = { at: number; step: 1 | -1 } | { at: number; key: string };
-  const events: Event[] = [];
-  for (const m of commentFree.matchAll(/\{%-?\s*(if|endif)\b[^%]*?-?%\}/g)) {
-    events.push({ at: m.index ?? 0, step: m[1] === "if" ? 1 : -1 });
-  }
-  const keyLineRe = /^ {2}("[^"\n]*"|'[^'\n]*'|[^\s'"][^\n:]*?)\s*:(?:\s|$)/gm;
-  for (const m of commentFree.matchAll(keyLineRe)) {
-    events.push({ at: m.index ?? 0, key: m[1].replace(/^(["'])(.*)\1$/, "$2") });
-  }
-  events.sort((a, b) => a.at - b.at);
-  const rawKeys = new Set<string>();
-  let depth = 0;
-  for (const event of events) {
-    if ("step" in event) {
-      depth += event.step;
-      // Unbalanced tags void the depth walk: a fragment closing the
-      // composer's own module gate could hide a conditioned key at an
-      // apparent depth of zero, so the walk trusts only balanced nesting.
-      if (depth < 0) {
-        throw new Error(
-          "the fragment closes a jinja {% if %} it never opened - statement " +
-            "tags must nest and balance inside the fragment (the composer's " +
-            "module gate wraps it whole); balance the tags",
-        );
-      }
-      continue;
-    }
-    if (depth > 0) {
-      throw new Error(
-        `job key '${event.key}' sits inside a jinja {% if %} block - the id ` +
-          "enumeration strips statement tags and would list the job as " +
-          "unconditional, so the composer would emit a needs entry a render " +
-          "without the condition never satisfies; gate jobs render " +
-          "unconditionally (module selection already gates the whole " +
-          "fragment), so drop the condition or move it onto the job's steps",
-      );
-    }
-    rawKeys.add(event.key);
-  }
-  if (depth !== 0) {
-    throw new Error(
-      "the fragment leaves a jinja {% if %} unclosed - statement tags must " +
-        "nest and balance inside the fragment (the composer's module gate " +
-        "wraps it whole); add the missing {% endif %}",
-    );
-  }
-  const keys = Object.keys(jobs);
-  for (const key of keys) {
-    if (!rawKeys.has(key)) {
-      throw new Error(
-        `job key '${key}' does not appear as a literal 2-space key line in the ` +
-          "fragment - a jinja-derived job id would enumerate as one spelling " +
-          "and render as another; write the job id literally",
-      );
-    }
-  }
-  return keys;
-}
-
-/** gate_jobs <-> ci-gate-jobs parity for one module: the declared gate
- *  jobs must be exactly the jobs the module's fragment defines. An
- *  undeclared fragment job would run outside the strict all-green gate
- *  (branch protection never sees it); a declared job no fragment defines
- *  would render a needs entry nothing satisfies and fail every run. */
-export function gateJobsParityErrors(
-  module: string,
-  gateJobs: string[] | undefined,
-  fragment: Buffer | undefined,
-): string[] {
-  const declared = gateJobs ?? [];
-  const where = `templates/${module}/${MANIFEST_NAME}`;
-  const fragmentPath = `templates/${module}/${FRAGMENTS_DIR}/ci-gate-jobs${JINJA_SUFFIX}`;
-  let defined: string[];
-  try {
-    defined = fragment === undefined ? [] : fragmentJobIds(fragment);
-  } catch (error) {
-    const detail = error instanceof Error ? error.message.split("\n")[0] : String(error);
-    return [
-      `${fragmentPath}: cannot enumerate its job ids (${detail}) - the gate_jobs ` +
-        "parity check fails closed; fix the fragment so it parses as the " +
-        "jobs mapping's children (modulo jinja)",
-    ];
-  }
-  const errors: string[] = [];
-  for (const job of defined) {
-    if (!declared.includes(job)) {
-      errors.push(
-        `${fragmentPath}: defines job '${job}' but ${where} does not declare it in ` +
-          "gate_jobs - the job would run outside the strict all-green gate; " +
-          "declare it (the composer emits the needs entry)",
-      );
-    }
-  }
-  for (const job of declared) {
-    if (!defined.includes(job)) {
-      errors.push(
-        `${where}: gate_jobs declares '${job}' but ${fragmentPath} defines no such ` +
-          "job - the generated needs entry would fail every run; fix the id " +
-          "or add the job to the fragment",
-      );
-    }
-  }
-  return errors;
-}
-
 const DATA_ANCHORS: Record<string, DataAnchorSpec> = {
   "dependabot-ecosystems": {
     data: "dependabot.ecosystem",
@@ -859,34 +655,37 @@ const DATA_ANCHORS: Record<string, DataAnchorSpec> = {
   "codeql-languages": {
     data: "toolchain.codeql_language",
     kind: "reject",
-    generate: ({ manifests, gateOf }) =>
-      codeqlGroups(manifests).map((group) => ({
-        order: orderOf(manifests, group.modules[0]),
-        source: generatorSource("codeql-languages", "toolchain.codeql_language"),
-        ...gated(orChain(group.modules, gateOf), codeqlJob(group)),
-      })),
-  },
-  // The all-green gate's needs entries: the enable_codeql-guarded
-  // codeql-<slug> jobs from the toolchain manifests, then each module's
-  // declared gate_jobs, all in MODULE_ORDER.
-  "ci-gate-needs": {
-    data: "toolchain.codeql_language and gate_jobs",
-    kind: "reject",
-    generate: ({ manifests, gateOf }) => [
-      ...codeqlGroups(manifests).map((group) => ({
-        order: orderOf(manifests, group.modules[0]),
-        source: generatorSource("ci-gate-needs", "toolchain.codeql_language"),
-        ...gated(
-          orChain(group.modules, gateOf),
-          `{% if enable_codeql %}      - codeql-${group.slug}\n{% endif %}`,
-        ),
-      })),
-      ...gateJobsGroups(manifests).map((group) => ({
-        order: orderOf(manifests, group.module),
-        source: generatorSource("ci-gate-needs", "gate_jobs"),
-        ...gated(gateOf(group.module), group.jobs.map((job) => `      - ${job}\n`).join("")),
-      })),
-    ],
+    generate: ({ manifests, gateOf }) => {
+      // The fleet-ci call's codeql-languages input: jinja that builds the
+      // selected languages list (one append per language group, gated on
+      // the or-chain of its contributing modules, inside the
+      // enable_codeql guard) and emits the quoted JSON input line. The
+      // line renders in EVERY selection - '[]' when CodeQL is off, which
+      // fleet-ci's codeql job skips on.
+      const groups = codeqlGroups(manifests);
+      if (groups.length === 0) return [];
+      const appends = groups.map(
+        (group) =>
+          `{%- if ${orChain(group.modules, gateOf)} %}{% set _ = codeql_languages.append('${group.language}') %}{% endif %}`,
+      );
+      const lines = [
+        "{%- set codeql_languages = [] %}",
+        "{%- if enable_codeql %}",
+        ...appends,
+        "{%- endif %}",
+        "      codeql-languages: '{{ codeql_languages | tojson }}'",
+      ];
+      return [
+        {
+          order: orderOf(manifests, groups[0].modules[0]),
+          source: generatorSource("codeql-languages", "toolchain.codeql_language"),
+          // The leading {%- tags manage the anchor's whitespace; the input
+          // line itself renders unconditionally, so no collapse gate.
+          gate: null,
+          text: Buffer.from(lines.join("\n")),
+        },
+      ];
+    },
   },
   "gitleaks-locks": {
     data: "lockfiles",
@@ -1601,21 +1400,6 @@ export function compose(): { output: Map<string, Entry>; entries: ManifestEntry[
     (fragments.get("agents-toolchain") ?? []).map(([manifest]) => manifest.module),
   );
   errors.push(...agentsToolchainErrors(manifests, agentsToolchainModules));
-
-  // Every module's gate_jobs must mirror the jobs its ci-gate-jobs fragment
-  // splices into ci.yml, in both directions (see gateJobsParityErrors).
-  const gateJobsFragments = new Map(
-    (fragments.get("ci-gate-jobs") ?? []).map(([manifest, body]) => [manifest.module, body]),
-  );
-  for (const manifest of manifests) {
-    errors.push(
-      ...gateJobsParityErrors(
-        manifest.module,
-        manifest.gate_jobs,
-        gateJobsFragments.get(manifest.module),
-      ),
-    );
-  }
 
   for (const [anchor, spec] of Object.entries(DATA_ANCHORS)) {
     const fromFiles = fragments.get(anchor) ?? [];

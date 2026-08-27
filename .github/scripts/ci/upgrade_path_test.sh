@@ -178,6 +178,56 @@ echo "Old fleet license (pre-relicense fixture)" > "$OLD_TREE/template/LICENSE"
 awk '{print} /^_skip_if_exists:/{print "  - LICENSE"}' "$OLD_TREE/copier.yml" \
   > "$OLD_TREE/copier.yml.tmp"
 mv "$OLD_TREE/copier.yml.tmp" "$OLD_TREE/copier.yml"
+# Model the pre-inversion fleet state: the old template shipped no
+# all-green.yml verdict workflow, no fleet-ci caller, and DID ship the
+# aggregate all-green job - so the update below is what must land the
+# single-call wiring and retire the aggregate (asserting either without
+# this replacement would be vacuous: the current template already carries
+# the caller). The manifest template's append line for the verdict path
+# goes with the file (or the stamped manifest would list a path that
+# never rendered). The legacy ci.yml is a plain non-jinja-expression
+# template: copier renders it verbatim, which is all the transition diff
+# needs.
+rm "$OLD_TREE/template/.github/workflows/all-green.yml.jinja"
+grep -vF "workflows/all-green.yml" \
+  "$OLD_TREE/template/.github/repo-platform-manifest.json.jinja" \
+  > "$OLD_TREE/manifest.jinja.tmp"
+mv "$OLD_TREE/manifest.jinja.tmp" \
+  "$OLD_TREE/template/.github/repo-platform-manifest.json.jinja"
+cat > "$OLD_TREE/template/.github/workflows/ci.yml.jinja" <<'LEGACY_CI'
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    uses: ./.github/workflows/checks.yml
+  legacy-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo legacy inline gate job
+{%- if enable_codeql %}
+  # The pre-inversion public-only machinery the visibility-flip leg
+  # watches: rendered only while enable_codeql held, stripped by the flip.
+  codeql-javascript:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo legacy codeql analysis
+{%- endif %}
+  all-green:
+    if: always()
+    runs-on: ubuntu-latest
+    needs: [checks, legacy-gate]
+    steps:
+      - run: echo legacy aggregate gate
+LEGACY_CI
 commit_build_tree "$OLD_TREE" "$prev"
 echo "Testing upgrade path ${prev} -> fresh build"
 
@@ -195,6 +245,15 @@ test -f .github/workflows/settings-sync.yml || fail "fixture render is missing s
 test -f .github/retired-sentinel.txt || fail "synthetic fixture is missing the retired sentinel"
 test -f .github/workflows/rerun-copilot-gate.yml \
   || fail "synthetic fixture is missing the retired rerun-copilot-gate.yml"
+# ...and predate the files whose ARRIVAL is under test while carrying the
+# machinery whose RETIREMENT is under test.
+test ! -e .github/workflows/all-green.yml \
+  || fail "the synthetic old fixture must predate the all-green.yml verdict workflow"
+if grep -qF "fleet-ci.yml" .github/workflows/ci.yml; then
+  fail "the synthetic old fixture must predate the fleet-ci caller (or the single-call arrival assertion below is vacuous)"
+fi
+grep -qxF "  all-green:" .github/workflows/ci.yml \
+  || fail "the synthetic old fixture must carry the legacy all-green aggregate job"
 [ "$(cat LICENSE)" = "Old fleet license (pre-relicense fixture)" ] \
   || fail "synthetic fixture did not render the old fleet license"
 git init -q -b main
@@ -366,27 +425,28 @@ grep -qF "# local issue form note" .github/ISSUE_TEMPLATE/bug_report.yml \
 # must survive the update, the de-render, and the retired-file cleanup.
 [ "$(cat LICENSE)" = "Repo-owned custom license" ] \
   || fail "the repo-owned LICENSE was modified despite the custom-license opt-out"
-# Public-only community files and the dependency-review gate must be in the
-# updated render (they arrive via the update when the old fixture predates
-# them).
+# Public-only community files must be in the updated render (they arrive
+# via the update when the old fixture predates them), and the single-call
+# ci.yml must keep its verdict wiring across the update.
 test -f CONTRIBUTING.md || fail "CONTRIBUTING.md is missing after the public update"
 test -f CODE_OF_CONDUCT.md || fail "CODE_OF_CONDUCT.md is missing after the public update"
-grep -qF -- "dependency-review:" .github/workflows/ci.yml \
-  || fail "ci.yml is missing the dependency-review gate job"
-grep -qF -- "- dependency-review" .github/workflows/ci.yml \
-  || fail "ci.yml's all-green does not need dependency-review"
+grep -qF -- "repo-platform/.github/workflows/fleet-ci.yml@build" .github/workflows/ci.yml \
+  || fail "ci.yml does not call fleet-ci at the build ref after the update"
+test -f .github/workflows/all-green.yml \
+  || fail "the all-green.yml verdict workflow is missing after the update"
+if grep -qF -- "  all-green:" .github/workflows/ci.yml; then
+  fail "the updated ci.yml still carries the retired all-green aggregate job"
+fi
 # The update must PRESERVE the repo's configuration, not reset it.
 grep -qF -- "## Python " .gitignore || fail ".gitignore lost the uv module section"
 grep -qF -- 'package-ecosystem: "uv"' .github/dependabot.yml \
   || fail "dependabot.yml lost the uv module entry"
-grep -qF -- "pr-title:" .github/workflows/ci.yml \
-  || fail "ci.yml is missing the pr-title gate job"
-# Rendered workflows pin the composite actions at the green-gated build
+grep -qF -- '"pr-title"' .github/workflows/ci.yml \
+  || fail "ci.yml's fleet-ci modules input lost pr-title"
+# Rendered workflows pin the shared verdict at the green-gated build
 # branch - the templates carry the literal pin.
-grep -qF -- "repo-platform/actions/check-typography@build" .github/workflows/ci.yml \
-  || fail "ci.yml does not pin check-typography at the build branch"
-grep -qF -- "repo-platform/actions/dependency-review@build" .github/workflows/ci.yml \
-  || fail "ci.yml does not pin dependency-review at the build branch"
+grep -qF -- "repo-platform/.github/workflows/reusable-all-green.yml@build" .github/workflows/all-green.yml \
+  || fail "all-green.yml does not pin the shared verdict at the build branch"
 test -f AGENTS.md || fail "AGENTS.md is missing"
 grep -qF "description: Upgraded description" .copier-answers.yml \
   || fail "the live description was not applied"
@@ -548,14 +608,14 @@ test -f SECURITY.md || fail "public fixture render is missing SECURITY.md"
 # newer public-only artifacts are always present; assert them directly.
 test -f CONTRIBUTING.md || fail "public fixture render is missing CONTRIBUTING.md"
 test -f CODE_OF_CONDUCT.md || fail "public fixture render is missing CODE_OF_CONDUCT.md"
-grep -qF "dependency-review:" .github/workflows/ci.yml \
-  || fail "public fixture ci.yml is missing the dependency-review job"
 # The identity starter (repo-owned; the managed settings baseline is
 # computed centrally, so no rulesets or labels render here).
 grep -qxF "  private: false" .github/settings.yml \
   || fail "public fixture settings.yml does not declare private: false"
-grep -qF "codeql-javascript" .github/workflows/ci.yml \
-  || fail "public fixture ci.yml is missing the codeql-javascript job"
+# The pre-inversion public bun fixture carries the legacy codeql job (the
+# public-only machinery whose removal-through-the-update is under test).
+grep -qxF "  codeql-javascript:" .github/workflows/ci.yml \
+  || fail "public fixture ci.yml is missing the legacy codeql machinery"
 git init -q -b main
 git add --all
 git -c user.name=ci -c user.email=ci@localhost commit -q -m "chore: init"
@@ -652,8 +712,8 @@ test ! -e LICENSE || fail "the old extensionless LICENSE survived the rename"
 # No pipe into grep -q: under pipefail its early exit SIGPIPEs git log.
 [ -n "$(git log --all --format=%H -- LICENSE)" ] \
   || fail "the deleted LICENSE left no history to recover the divergent content from"
-if grep -qF "dependency-review" .github/workflows/ci.yml; then
-  fail "ci.yml kept the dependency-review job after the flip to private"
+if ! grep -qxF "      private: true" .github/workflows/ci.yml; then
+  fail "ci.yml does not pass private: true to fleet-ci after the flip"
 fi
 # settings.yml is a repo-owned starter: the flip must NOT rewrite it (the
 # managed baseline follows live visibility centrally; the file keeps the
@@ -665,15 +725,12 @@ grep -qxF '  homepage: ""' .github/settings.yml \
   || fail "settings.yml lost the empty homepage declaration across the update"
 grep -qxF '  topics: ""' .github/settings.yml \
   || fail "settings.yml lost the empty topics declaration across the update"
-# The unconditional header comment mentions CodeQL by name, so assert on
-# the machinery: the job (and its reusable-workflow call) and the gate's
-# needs entry all carry the codeql-javascript identifier.
-if grep -qF "codeql-javascript" .github/workflows/ci.yml; then
-  fail "ci.yml kept the codeql-javascript job after the flip to private"
+# CodeQL disarms with the flip: the fleet-ci input must render empty.
+if grep -qF "javascript-typescript" .github/workflows/ci.yml; then
+  fail "ci.yml kept the javascript-typescript CodeQL language after the flip to private"
 fi
-if grep -qF "reusable-codeql" .github/workflows/ci.yml; then
-  fail "ci.yml kept the reusable-codeql call after the flip to private"
-fi
+grep -qxF "      codeql-languages: '[]'" .github/workflows/ci.yml \
+  || fail "ci.yml does not disarm the CodeQL matrix (codeql-languages '[]') after the flip"
 if grep -rIqF "$marker" . --exclude-dir=.git; then
   fail "the visibility flip left unresolved copier conflict markers"
 fi

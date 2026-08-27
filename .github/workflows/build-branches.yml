@@ -28,8 +28,17 @@
 # touches the published branch, so it needs no green proof. The weekly
 # schedule is a self-heal net (it composes and publishes in one run, as
 # does dispatch).
-# GITHUB_TOKEN pushes trigger no workflows - intended; nothing may run on
-# the build branch (its tree carries no .github/).
+# The branch tree carries .github/workflows/ (the fleet-facing reusable
+# workflows pinned @build), which GITHUB_TOKEN cannot push ("refusing to
+# ... create or update workflow" - the github-actions app has no workflows
+# permission), so the checkout below persists REPO_PLATFORM_TOKEN and
+# every push in this workflow rides it. PAT pushes CAN trigger workflows -
+# the old GITHUB_TOKEN-pushes-trigger-nothing safety is gone - but push
+# and branch events execute the PUSHED tree's own workflow files, and
+# branch_tree.ts hard-fails the assembly if any shipped workflow carries a
+# trigger other than workflow_call, so there is still nothing that can run
+# on the build branch: the invariant moved from carried-by-omission to
+# pinned-by-construction.
 
 name: Build Branches
 
@@ -49,13 +58,15 @@ on:
     - cron: "12 6 * * 1"
   workflow_dispatch:
 
-# Contents write publishes the build branch and parks the pending refs;
-# actions read lets publish.ts's re-stamp check read the run stamped on
-# the current tip and the green-source gate read the source commit's CI
-# runs.
+# Publishing and pending-ref parking push with the checkout's persisted
+# PAT (see the header), so github.token needs no contents write; actions
+# read lets publish.ts's re-stamp check read the run stamped on the
+# current tip; checks read lets the green-source gate read the
+# all-green verdict check runs at the source commit.
 permissions:
-  contents: write
+  contents: read
   actions: read
+  checks: read
 
 # Three concurrency lanes, split by role, so no OTHER-ROLE run can evict a
 # queued PUBLISHER: with one shared group GitHub coalesces queued runs, and
@@ -102,6 +113,11 @@ jobs:
         if: env.CI_GREEN == 'true'
         with:
           fetch-depth: 0
+          # The persisted push credential for publish.ts and
+          # build_pending.ts: a PAT with workflow scope, because the branch
+          # tree carries .github/workflows/ files GITHUB_TOKEN may not push
+          # (see the header - the assembly guard keeps the branch inert).
+          token: ${{ secrets.REPO_PLATFORM_TOKEN }}
 
       - name: Set up bun
         if: env.CI_GREEN == 'true'

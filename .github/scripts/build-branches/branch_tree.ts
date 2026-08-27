@@ -12,6 +12,11 @@
 // - actions/         (the composite actions' sources + dependency manifests,
 //                     node_modules and build output excluded - each action
 //                     installs at its own action_path when it runs)
+// - .github/workflows/ (the fleet-facing reusable workflows - fleet-ci.yml,
+//                     reusable-all-green.yml, reusable-codeql.yml - that
+//                     rendered workflows call `@build`; a reusable-workflow
+//                     `uses:` fetches the FILE at the named ref, so a build
+//                     branch without them 404s every fleet CI run)
 // - stamp_manifest.ts (the manifest stamping hook copier.yml's _tasks and
 //                     _migrations run; byte copy of .github/scripts/sync's)
 // - README.md        (static explainer)
@@ -24,8 +29,15 @@
 //
 // Content is fully deterministic - no timestamps or source SHAs in-tree, so
 // the append-only build branch only gains a commit when something real
-// changed (provenance lives in the build commit message instead). No .github/
-// is included: nothing may trigger on the build branch.
+// changed (provenance lives in the build commit message instead). Nothing
+// may RUN on the build branch even though it carries .github/workflows/:
+// copyFleetWorkflows refuses - by hard error, naming the file and trigger -
+// any shipped workflow whose triggers are not exactly workflow_call. The
+// branch is pushed with a PAT (GITHUB_TOKEN cannot push workflow files),
+// and PAT pushes CAN trigger workflows, but push/branch events execute the
+// pushed tree's OWN workflow files - and a workflow_call-only tree has
+// nothing to run. The invariant is pinned by construction here, not
+// carried by omitting .github/.
 //
 // Usage:
 //   bun .github/scripts/build-branches/branch_tree.ts --dest DIR
@@ -41,6 +53,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { basename, dirname, join, relative, resolve } from "node:path";
+import { parse as parseYaml } from "yaml";
 import { build, writeOutput } from "../../../scripts/compose_template.ts";
 
 const REPO_ROOT = resolve(import.meta.dir, "..", "..", "..");
@@ -71,10 +84,14 @@ sources in \`actions/\`.
 
 \`build\` is rebuilt from each \`main\` commit whose CI run succeeds (the
 branch ships only green main commits). It carries the composed copier tree
-under \`template/\` and the composite actions under \`actions/\` - every
-path is extraction-safe (no jinja-expression filenames), so
+under \`template/\`, the composite actions under \`actions/\`, and the
+fleet-facing reusable workflows (fleet-ci.yml, reusable-all-green.yml,
+reusable-codeql.yml) under \`.github/workflows/\` - every path is
+extraction-safe (no jinja-expression filenames), so
 \`uses: <owner>/repo-platform/actions/<name>@build\` refs extract cleanly
-on the runner, and an @build pin runs only action code CI has vouched for.
+on the runner, and an @build pin runs only action and workflow code CI has
+vouched for. Every shipped workflow is workflow_call-only (enforced at
+assembly), so nothing can ever run ON this branch.
 
 Consume the template with copier, e.g.:
 
@@ -146,14 +163,75 @@ function countFiles(dir: string): number {
   return total;
 }
 
+/** The fleet-facing reusable workflows the build branch must carry: the
+ *  rendered ci.yml calls fleet-ci.yml@build, the managed all-green.yml
+ *  wrapper calls reusable-all-green.yml@build, and fleet-ci's codeql job
+ *  calls ./reusable-codeql.yml, which resolves at fleet-ci's own ref -
+ *  this branch. A reusable-workflow `uses:` fetches the FILE at the named
+ *  ref, so a build branch without them 404s every fleet CI run. */
+export const FLEET_WORKFLOWS = ["fleet-ci.yml", "reusable-all-green.yml", "reusable-codeql.yml"];
+
+/** The workflow document's trigger names, whatever shape `on:` takes. */
+function triggerNames(doc: unknown): string[] {
+  const on = doc && typeof doc === "object" ? (doc as Record<string, unknown>).on : undefined;
+  if (typeof on === "string") return [on];
+  if (Array.isArray(on)) return on.map(String);
+  if (on && typeof on === "object") return Object.keys(on);
+  return [];
+}
+
+/** Copies the fleet-facing reusable workflows to `<dest>/.github/workflows`,
+ *  refusing - by hard error, naming the file and the trigger - any workflow
+ *  whose triggers are not exactly `workflow_call`. This is what keeps
+ *  "nothing can run on the build branch" true now that the branch carries
+ *  .github/workflows/ and is pushed with a PAT (whose pushes, unlike
+ *  GITHUB_TOKEN's, CAN trigger workflows): push and branch events execute
+ *  the pushed tree's own workflow files, and a workflow_call-only tree has
+ *  nothing to run. */
+export function copyFleetWorkflows(repoRoot: string, dest: string): void {
+  const outDir = join(dest, ".github", "workflows");
+  mkdirSync(outDir, { recursive: true });
+  for (const name of FLEET_WORKFLOWS) {
+    const sourcePath = join(repoRoot, ".github", "workflows", name);
+    if (!existsSync(sourcePath)) {
+      throw new Error(
+        `.github/workflows/${name} is missing at ${repoRoot} - the fleet pins it ` +
+          "@build (a reusable-workflow uses: fetches the file at that ref), so a " +
+          "build branch without it breaks every fleet CI run; check the checkout " +
+          "before publishing",
+      );
+    }
+    const content = readFileSync(sourcePath, "utf-8");
+    const triggers = triggerNames(parseYaml(content));
+    if (triggers.length === 0) {
+      throw new Error(
+        `.github/workflows/${name} declares no triggers - expected exactly ` +
+          "workflow_call; refusing to ship a workflow this assembly cannot prove inert",
+      );
+    }
+    const offending = triggers.filter((trigger) => trigger !== "workflow_call");
+    if (offending.length > 0) {
+      throw new Error(
+        `.github/workflows/${name} carries the trigger '${offending[0]}' - only ` +
+          "workflow_call-only workflows may ship on the build branch (the branch is " +
+          "pushed with a PAT, so any other trigger could RUN there); split the " +
+          "trigger out or keep the workflow off FLEET_WORKFLOWS",
+      );
+    }
+    writeFileSync(join(outDir, name), content);
+  }
+}
+
 /** Assemble the whole branch tree at `dest` (which must exist and be
- *  empty): the composed template/, actions/, copier.yml, the stamp hook,
- *  and the README. Exported for the extraction-safety regression, which
- *  asserts no assembled path carries a jinja expression. */
+ *  empty): the composed template/, actions/, the fleet-facing reusable
+ *  workflows, copier.yml, the stamp hook, and the README. Exported for the
+ *  extraction-safety regression, which asserts no assembled path carries a
+ *  jinja expression. */
 export function assembleBranchTree(dest: string): void {
   const composed = build();
   writeOutput(composed, join(dest, "template"));
   copyActions(REPO_ROOT, dest);
+  copyFleetWorkflows(REPO_ROOT, dest);
   writeFileSync(join(dest, "copier.yml"), readFileSync(join(REPO_ROOT, "copier.yml")));
   writeFileSync(
     join(dest, "stamp_manifest.ts"),

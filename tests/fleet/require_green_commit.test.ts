@@ -1,7 +1,9 @@
 // Unit tests for the settings apply's green gate: the bounded wait a
-// push-triggered run does for its own commit's CI verdict, and the hard,
-// fail-closed refusals around it. The gh probe, the clock, and the sleep
-// are injected so nothing here touches the network or actually waits.
+// push-triggered run does for its own commit's all-green verdict, and the
+// hard, fail-closed refusals around it. The gh probe, the clock, and the
+// sleep are injected so nothing here touches the network or actually
+// waits (waitForGreen zeroes the predicate's internal poll - this loop
+// owns all waiting).
 
 import { describe, expect, test } from "bun:test";
 import { waitForGreen } from "../../.github/scripts/fleet/require_green_commit";
@@ -9,20 +11,23 @@ import type { GhRunner } from "../../.github/scripts/shared/all_green.ts";
 
 const SHA = "000000000000000000000000000000000000000a";
 
-function ghAnswering(
-  ...runs: { event?: string; status?: string; conclusion?: string | null }[][]
-): { gh: GhRunner; calls: () => number } {
+function ghAnswering(...pages: { status?: string; conclusion?: string | null }[][]): {
+  gh: GhRunner;
+  calls: () => number;
+} {
   let call = 0;
   const gh: GhRunner = () => {
-    const page = runs[Math.min(call, runs.length - 1)];
+    const page = pages[Math.min(call, pages.length - 1)];
     call++;
     return {
       exitCode: 0,
       stdout: JSON.stringify({
-        workflow_runs: page.map((run) => ({
-          event: run.event ?? "push",
-          status: run.status ?? "completed",
-          conclusion: run.conclusion === undefined ? "success" : run.conclusion,
+        check_runs: page.map((check) => ({
+          name: "all-green",
+          status: check.status ?? "completed",
+          conclusion: check.conclusion === undefined ? "success" : check.conclusion,
+          external_id: "push",
+          app: { slug: "github-actions" },
         })),
       }),
       stderr: "",
@@ -57,9 +62,10 @@ describe("waitForGreen", () => {
     expect(calls()).toBe(1);
   });
 
-  test("an in-progress run is waited out to a green verdict", () => {
-    // The push-triggered settings run races its own commit's CI run, so
-    // the first probes land mid-run; the gate polls instead of failing.
+  test("an in-progress verdict is waited out to a green one", () => {
+    // The push-triggered settings run races its own commit's CI run AND
+    // the verdict workflow behind it, so the first probes land before a
+    // completed verdict; the gate polls instead of failing.
     const { gh, calls } = ghAnswering(
       [{ status: "in_progress", conclusion: null }],
       [{ status: "in_progress", conclusion: null }],
@@ -87,11 +93,11 @@ describe("waitForGreen", () => {
       sleep: () => {},
       log: () => {},
     });
-    expect(result).toContain("is still 'in_progress'");
+    expect(result).toContain("verdict is still 'in_progress'");
     expect(result).toContain("wait for a verdict is over");
   });
 
-  test("a missing CI run is retried (it appears seconds after the push), then green", () => {
+  test("a missing verdict is retried (CI and its verdict land after the push), then green", () => {
     const { gh } = ghAnswering([], [{}]);
     const result = waitForGreen("o/r", SHA, {
       gh,
@@ -112,7 +118,7 @@ describe("waitForGreen", () => {
       sleep: () => {},
       log: () => {},
     });
-    expect(result).toContain("reading its CI runs failed");
+    expect(result).toContain("check runs failed");
     expect(result).toContain("wait for a verdict is over");
   });
 

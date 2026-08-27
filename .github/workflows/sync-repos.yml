@@ -145,12 +145,14 @@ jobs:
   sync:
     needs: plan
     if: needs.plan.outputs.repos != '[]'
-    # Actions read flows to the called workflow's token: its build
-    # provenance check reads the build run stamped on the shipped ref
-    # (the build branch tip).
+    # Actions and checks read flow to the called workflow's token: its
+    # build provenance check reads the build run stamped on the shipped
+    # ref (the build branch tip), and its green-source gate reads the
+    # all-green verdict check runs at the stamped source.
     permissions:
       contents: read
       actions: read
+      checks: read
     strategy:
       fail-fast: false
       # Every leg writes with the same PAT, and PR creation is

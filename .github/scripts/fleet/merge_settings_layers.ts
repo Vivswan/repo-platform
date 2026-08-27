@@ -505,7 +505,8 @@ export function mergeLayers(layers: SettingsLayer[]): MergedSettings {
  *  and loadOverrideLayer refuses an override that dropped it. */
 export const COPILOT_REVIEW_CONTEXT = "copilot-pull-request-reviewer";
 
-/** The check the fleet's ci.yml aggregate job reports. */
+/** The check the fleet's all-green.yml verdict workflow reports (a check
+ *  run created after judging each completed CI run's jobs). */
 export const ALL_GREEN_CONTEXT = "all-green";
 
 /** GitHub Actions' app id. Both required checks are created by Actions
