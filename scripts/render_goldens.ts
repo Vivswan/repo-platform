@@ -27,9 +27,16 @@
 // - Its git commit uses a pinned author/committer identity and date and a
 //   fixed message, and git runs with GIT_CONFIG_GLOBAL/SYSTEM pointed at
 //   /dev/null (a user's autocrlf or gpg-signing config must not leak into
-//   blob or commit hashes), so the commit sha - recorded as `_commit` in
+//   blob or commit hashes). The commit sha - recorded as `_commit` in
 //   .copier-answers.yml and stamped into the ownership manifest's
-//   provenance slot - is a pure function of the tree content.
+//   provenance slot - is still a pure function of the WHOLE tree content,
+//   so every template edit would move it; shaNormalizer therefore rewrites
+//   the true sha (and any 7-plus-character prefix of it) to the fixed
+//   sentinel "0000000" across every rendered file and symlink target
+//   before the write/diff step. The keys carrying it stay in the goldens,
+//   and only the true sha passes: a bug that stamps a WRONG sha shows as
+//   drift, and a render that already contains the sentinel is rejected
+//   outright.
 // - copier runs from the scratch directory with a RELATIVE src path, so
 //   the recorded `_src_path` is the fixed string "./tree", never a temp
 //   path. The same /dev/null git config is passed to copier for its
@@ -61,7 +68,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { must } from "../.github/scripts/shared/proc.ts";
+import { must, mustCapture } from "../.github/scripts/shared/proc.ts";
 import { loadManifests } from "./module_manifests.ts";
 
 const REPO_ROOT = resolve(import.meta.dir, "..");
@@ -106,6 +113,49 @@ export function goldenMatrix(): { name: string; modules: string[] }[] {
 }
 
 type Entry = { kind: "file"; bytes: Buffer; exec: boolean } | { kind: "symlink"; target: string };
+
+/** The fixed value the scratch commit sha is rewritten to in every golden:
+ *  the shortest form the substitution can produce (copier records a 7-char
+ *  short sha), so the sentinel never depends on which form was stamped. */
+export const SHA_SENTINEL = "0000000";
+
+/** Build the normalizer that rewrites the scratch tree's commit sha - and
+ *  any 7-plus-character prefix of it - to SHA_SENTINEL. It runs on every
+ *  rendered file (as latin1 text, which round-trips every byte) and every
+ *  symlink target, format-blind, so the `_commit` answer and the manifest
+ *  provenance slot are both covered without knowing either format, and a
+ *  NEW file that embeds the sha is covered automatically. Two properties
+ *  are the point: the keys carrying the sha stay in the goldens (dropping
+ *  or renaming one still shows as drift), and nothing but the true sha
+ *  passes - a render that stamps a WRONG sha drifts, and one that stamps
+ *  the sentinel itself trips the pre-substitution guard. */
+export function shaNormalizer(fullSha: string): (rel: string, text: string) => string {
+  if (!/^[0-9a-f]{40}$/.test(fullSha)) throw new Error(`not a full sha1: ${fullSha}`);
+  const prefix = fullSha.slice(0, 7);
+  return (rel, text) => {
+    if (text.includes(SHA_SENTINEL)) {
+      throw new Error(
+        `${rel}: contains the sentinel "${SHA_SENTINEL}" before normalization - ` +
+          "a render must stamp the real scratch sha (a pre-stamped sentinel would " +
+          "false-match the committed goldens); if this is legitimate content, pick " +
+          "a new sentinel",
+      );
+    }
+    // Scan hit by hit: consume the longest run that continues the sha and
+    // resume right after it, so back-to-back occurrences all normalize and
+    // trailing hex that diverges from the sha is untouched content.
+    let out = "";
+    let from = 0;
+    for (;;) {
+      const hit = text.indexOf(prefix, from);
+      if (hit === -1) return out + text.slice(from);
+      out += text.slice(from, hit) + SHA_SENTINEL;
+      let length = prefix.length;
+      while (length < fullSha.length && text[hit + length] === fullSha[length]) length++;
+      from = hit + length;
+    }
+  };
+}
 
 /** Every file and symlink below root (repo-relative, sorted), with content
  *  or link target, plus the executable bit - the one mode distinction git
@@ -208,6 +258,8 @@ function run(checkMode: boolean): number {
     git("init", "-q", "-b", "build");
     git("add", "-A");
     git("commit", "-q", "-m", "chore: golden build tree");
+    const scratchSha = mustCapture(["git", "-C", tree, "rev-parse", "HEAD"], { env: RENDER_ENV });
+    const normalize = shaNormalizer(scratchSha);
 
     // Render every selection BEFORE touching the committed goldens, so a
     // failing copier leg (which must() turns into an exit) can never leave
@@ -235,7 +287,21 @@ function run(checkMode: boolean): number {
         ],
         { cwd: work, env: RENDER_ENV },
       );
-      rendered.push({ name: golden.name, fresh: readTree(join(work, `out-${golden.name}`)) });
+      // Normalize here, before the write/diff step, so BOTH modes (regen
+      // writes, --check diffs) see sentinel-stamped trees from the same
+      // code path - CI's fresh render must normalize identically or the
+      // drift check would fail forever.
+      const fresh = readTree(join(work, `out-${golden.name}`));
+      for (const [rel, entry] of fresh) {
+        if (entry.kind === "file") {
+          const text = entry.bytes.toString("latin1");
+          const normalized = normalize(rel, text);
+          if (normalized !== text) entry.bytes = Buffer.from(normalized, "latin1");
+        } else {
+          entry.target = normalize(rel, entry.target);
+        }
+      }
+      rendered.push({ name: golden.name, fresh });
     }
 
     // Regen rewrites the whole directory, so a golden the matrix no longer

@@ -7,7 +7,7 @@
     ".github/CODEOWNERS": {"class": "split", "grammar": "tail-marker", "marker": "# repo-platform:local-section", "managed": "above", "hash": "3c0a5e7d10dfebc129b97277c07cb5613a13ed3c0a511ce9f32ddc1b3c6d9f25"},
     ".github/actionlint.yaml": {"class": "starter"},
     ".github/dependabot.yml": {"class": "managed", "hash": "2fa24c564ea849019df05ed473de58c4dce330f1d5cf50eab73d53837be71751"},
-    ".github/repo-platform-manifest.json": {"class": "managed", "hash": null, "commit": "632ca22"},
+    ".github/repo-platform-manifest.json": {"class": "managed", "hash": null, "commit": "0000000"},
     ".github/workflows/auto-format.yml": {"class": "starter"},
     ".github/workflows/checks.yml": {"class": "starter"},
     ".github/workflows/ci.yml": {"class": "managed", "hash": "7782ea50e6ef44554893a2d928f3ea1369cda00efd8b0f4a4fbb70269905c023"},

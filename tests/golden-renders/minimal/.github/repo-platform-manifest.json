@@ -7,7 +7,7 @@
     ".github/CODEOWNERS": {"class": "split", "grammar": "tail-marker", "marker": "# repo-platform:local-section", "managed": "above", "hash": "3c0a5e7d10dfebc129b97277c07cb5613a13ed3c0a511ce9f32ddc1b3c6d9f25"},
     ".github/actionlint.yaml": {"class": "starter"},
     ".github/dependabot.yml": {"class": "managed", "hash": "477a76f5cd1e3adc00e8b8596e91b74e124c1502b9a40ccf097dfdeb634d85bc"},
-    ".github/repo-platform-manifest.json": {"class": "managed", "hash": null, "commit": "632ca22"},
+    ".github/repo-platform-manifest.json": {"class": "managed", "hash": null, "commit": "0000000"},
     ".github/workflows/checks.yml": {"class": "starter"},
     ".github/workflows/ci.yml": {"class": "managed", "hash": "6d6915d97baceda91971f0fa9ef38b35750163210d9ea2b68802e85be532ccf4"},
     ".github/workflows/rerun-copilot-gate.yml": {"class": "managed", "hash": "cfff63f9667026a795b18f91e78255daa25ce352867b2a0a6bb5e096302ea5d9"},

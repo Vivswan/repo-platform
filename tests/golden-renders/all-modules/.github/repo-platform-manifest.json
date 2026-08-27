@@ -16,7 +16,7 @@
     ".github/agents.md": {"class": "managed", "hash": "79909577a70fc4971a7fcfd3cbec6a1af7182ca2dadc87f2979dce5e28f93ca0"},
     ".github/copilot-instructions.md": {"class": "managed", "hash": "79909577a70fc4971a7fcfd3cbec6a1af7182ca2dadc87f2979dce5e28f93ca0"},
     ".github/dependabot.yml": {"class": "managed", "hash": "212523a97905eaa4df2b641f05bb3700ffc13fc83191d9b9f9c047c985f60ca3"},
-    ".github/repo-platform-manifest.json": {"class": "managed", "hash": null, "commit": "632ca22"},
+    ".github/repo-platform-manifest.json": {"class": "managed", "hash": null, "commit": "0000000"},
     ".github/settings.yml": {"class": "starter"},
     ".github/workflows/auto-assign.yml": {"class": "managed", "hash": "65399ba1df1598fea8af227f7b9798da8b687c65024c0cb93be53307d1c5c957"},
     ".github/workflows/auto-format.yml": {"class": "starter"},
