@@ -40,7 +40,7 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, dirname, join, relative, resolve } from "node:path";
 import { build, writeOutput } from "../../../scripts/compose_template.ts";
 
 const REPO_ROOT = resolve(import.meta.dir, "..", "..", "..");
@@ -105,12 +105,31 @@ export function copyActions(repoRoot: string, dest: string): number {
   if (names.length === 0) {
     throw new Error(`actions/ at ${repoRoot} holds no action directories`);
   }
+  // A directory with sources but no action.yml is a BROKEN state, never an
+  // intentional retirement - retiring an action deletes its whole
+  // directory. Publishing it anyway would succeed here and then fail every
+  // fleet `uses: .../<name>@build` at resolve time, so refuse loudly
+  // before anything is copied.
+  for (const name of names) {
+    if (!existsSync(join(source, name, "action.yml"))) {
+      throw new Error(
+        `actions/${name} at ${repoRoot} has no action.yml - sources without a ` +
+          "manifest are a broken state, not a retirement (retiring an action " +
+          "removes its whole directory); publishing this tree would break " +
+          `every fleet 'uses: .../actions/${name}@build' ref`,
+      );
+    }
+  }
   let files = 0;
   for (const name of names) {
-    cpSync(join(source, name), join(dest, "actions", name), {
+    const actionRoot = join(source, name);
+    cpSync(actionRoot, join(dest, "actions", name), {
       recursive: true,
+      // Segments RELATIVE to the action's own root: an ancestor directory
+      // named node_modules (say, a checkout parked under one) must not
+      // filter the whole copy away.
       filter: (src) => {
-        const segments = src.split("/");
+        const segments = relative(actionRoot, src).split("/");
         return !segments.some((segment) => EXCLUDED_DIRS.has(segment));
       },
     });
