@@ -24,6 +24,7 @@
 import { existsSync, lstatSync, readdirSync, readFileSync, readlinkSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
+import { EXCLUDED_DIRS as EXCLUDED_ACTION_DIRS } from "../.github/scripts/build-branches/branch_tree.ts";
 import {
   COPILOT_REVIEW_CONTEXT,
   identityKeyIssues,
@@ -3133,6 +3134,82 @@ const rules: Rule[] = [
             expected: "the canonical three-step bun setup guard (probe, guarded install, retry)",
             got: "missing or drifted from the block this rule pins",
           });
+        }
+      }
+      return mismatches;
+    },
+  },
+
+  {
+    // copier.yml's hooks run with {{ _copier_conf.src_path }} = the build
+    // branch root, and actions/ is the one tree the branch ships verbatim
+    // at its checkout-relative path (branch_tree.ts copies it whole, minus
+    // its EXCLUDED_DIRS). A hook command therefore resolves on renders
+    // exactly when its path is a clean actions/ file the copy ships; a
+    // moved or renamed hook file that copier.yml still names the old way
+    // would fail every render's stamping at hook time, on the fleet, not
+    // in this repo's CI. The rule also pins the stamping WIRING itself:
+    // _tasks (copy/recopy) and _migrations (update) must each run the
+    // stamper at its real location - hooks that all name some other valid
+    // file would leave every render's manifest unstamped and stay green.
+    name: "stamp-hook-path",
+    run: () => {
+      const mismatches: Mismatch[] = [];
+      const stampHook = "actions/shared/stamp_manifest.ts";
+      const doc = asRecord(parseYaml(read("copier.yml")), "copier.yml");
+      const commandsOf = (list: unknown): string[] =>
+        (Array.isArray(list) ? list : []).map((hook) =>
+          String(asRecord(hook, "copier.yml hook").command ?? ""),
+        );
+      const sites: [string, string[]][] = [
+        ["_tasks", commandsOf(doc._tasks)],
+        ["_migrations", commandsOf(doc._migrations)],
+      ];
+      const pathOf = (command: string): string =>
+        mustMatch(
+          command,
+          /^bun "\{\{ _copier_conf\.src_path \}\}\/(.+)"$/,
+          "copier.yml",
+          "a src_path-anchored bun hook command",
+        )[1];
+      for (const [site, commands] of sites) {
+        if (!commands.some((command) => pathOf(command) === stampHook)) {
+          mismatches.push({
+            file: "copier.yml",
+            expected: `a ${site} hook running ${stampHook} (copier runs _tasks only on copy/recopy and _migrations only on update, so each site needs its own)`,
+            got: "none - renders on that path would ship an unstamped manifest",
+          });
+        }
+        for (const command of commands) {
+          const path = pathOf(command);
+          // Judged on the path the BRANCH serves, not what this checkout
+          // can lexically reach: traversal ("actions/../scripts/x.ts") and
+          // excluded segments (node_modules, dist, .turbo) exist here but
+          // never ship, so they must fail like any other unshipped path.
+          const segments = path.split("/");
+          const clean =
+            segments[0] === "actions" &&
+            segments.every(
+              (segment) =>
+                segment !== "" &&
+                segment !== "." &&
+                segment !== ".." &&
+                !EXCLUDED_ACTION_DIRS.has(segment),
+            );
+          const shipped = (): boolean => {
+            try {
+              return lstatSync(join(REPO_ROOT, path)).isFile();
+            } catch {
+              return false;
+            }
+          };
+          if (!clean || !shipped()) {
+            mismatches.push({
+              file: "copier.yml",
+              expected: `${site} hook path '${path}' to be a clean, traversal-free actions/ file (the only tree the build branch ships at its checkout-relative path, minus branch_tree.ts's excluded directories)`,
+              got: "a path the branch does not serve, so every render's hook would fail",
+            });
+          }
         }
       }
       return mismatches;

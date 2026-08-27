@@ -50,6 +50,7 @@
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { MANIFEST_NAME, managedHalf } from "../../../actions/shared/stamp_manifest.ts";
 import { cleanLocalRegion } from "../../../scripts/gitignore_local.ts";
 import { isCommentMarker } from "../../../scripts/ownership.ts";
 import { parseFlags } from "../shared/flags.ts";
@@ -66,7 +67,6 @@ import {
   splitEntries,
 } from "./preserve_local_content.ts";
 import { TAIL_SHRANK_NAME } from "./section_files.ts";
-import { MANIFEST_NAME, managedHalf } from "./stamp_manifest.ts";
 
 // One definition each for the whole pipeline: preserve_local_content.ts
 // owns the missing-line multiset and the PR-body excerpt hygiene (clip's

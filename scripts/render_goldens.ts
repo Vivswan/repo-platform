@@ -72,7 +72,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { must, mustCapture } from "../.github/scripts/shared/proc.ts";
-import { MANIFEST_NAME, stampManifestText } from "../.github/scripts/sync/stamp_manifest.ts";
+import { MANIFEST_NAME, stampManifestText } from "../actions/shared/stamp_manifest.ts";
 import { loadManifests } from "./module_manifests.ts";
 
 const REPO_ROOT = resolve(import.meta.dir, "..");

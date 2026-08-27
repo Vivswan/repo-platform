@@ -66,11 +66,11 @@
 import { existsSync, lstatSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { parse } from "yaml";
+import { MANIFEST_NAME } from "../../../actions/shared/stamp_manifest.ts";
 import { parseFlags } from "../shared/flags.ts";
 import { fail, requireEnv } from "../shared/gha.ts";
 import { clip, isCleanRelativePath } from "./preserve_local_content.ts";
 import { STARTER_PINS_NAME } from "./section_files.ts";
-import { MANIFEST_NAME } from "./stamp_manifest.ts";
 
 /** The structured outcomes twin of the markdown report, written under
  * RUNNER_TEMP for commit_push.ts's withhold reconciliation (see the

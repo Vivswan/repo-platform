@@ -383,7 +383,7 @@ jobs:
       - name: Stamp the ownership manifest
         env:
           TARGET_DIR: target
-        run: bun .github/scripts/sync/stamp_manifest.ts
+        run: bun actions/shared/stamp_manifest.ts
 
       # Defense-in-depth, now that the tree is final: every split entry's
       # repository-owned half must still hold each non-blank line it held

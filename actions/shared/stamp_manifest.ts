@@ -13,10 +13,12 @@
 // (normalizeSymlinkTargets: the build branch ships targets with the
 // template suffix kept so no branch link is ever dangling).
 //
-// STANDALONE BY DESIGN: branch_tree.ts ships this file on the build
-// branches next to copier.yml, and copier executes it inside freshly
-// rendered repositories where none of this repository's node_modules or
-// shared/ helpers exist - node builtins only, no argv subprocesses.
+// STANDALONE BY DESIGN: this file lives in actions/shared/, the
+// dependency-free zone the build branch ships verbatim, and copier.yml's
+// hooks run it from there ({{ _copier_conf.src_path }}/actions/shared/...)
+// inside freshly rendered repositories where none of this repository's
+// node_modules exist - node builtins and zone-internal imports only, no
+// argv subprocesses.
 //
 // Only the "hash" tokens - plus the self entry's "commit" provenance slot,
 // filled with the render's recorded _commit - are rewritten, in place,

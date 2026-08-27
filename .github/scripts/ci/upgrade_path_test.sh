@@ -385,7 +385,7 @@ RECOVER="" RUNNER_TEMP="$WORK" bun .github/scripts/sync/preserve_repo_owned.ts
 # The workflow's final stamping step: conflict resolution and the preserve
 # steps can rewrite files after copier's own post-render hook stamped the
 # ownership manifest, so the sync stamps once more when the tree is final.
-TARGET_DIR="$PROJECT" bun .github/scripts/sync/stamp_manifest.ts
+TARGET_DIR="$PROJECT" bun actions/shared/stamp_manifest.ts
 
 bun install --frozen-lockfile --cwd "$GITHUB_WORKSPACE/actions/validate-template"
 bun "$GITHUB_WORKSPACE/actions/validate-template/validate_generated_files.ts" "$PROJECT"
@@ -538,7 +538,7 @@ RECOVER=recopy bun "$GITHUB_WORKSPACE/.github/scripts/sync/apply_update.ts"
 bun "$GITHUB_WORKSPACE/.github/scripts/sync/preserve_local_content.ts" \
   --summary "$WORK/local-carryover.md" --root .
 RECOVER=recopy RUNNER_TEMP="$WORK" bun "$GITHUB_WORKSPACE/.github/scripts/sync/preserve_repo_owned.ts"
-TARGET_DIR="$PROJECT" bun "$GITHUB_WORKSPACE/.github/scripts/sync/stamp_manifest.ts"
+TARGET_DIR="$PROJECT" bun "$GITHUB_WORKSPACE/actions/shared/stamp_manifest.ts"
 
 grep -qF "_commit: $NEW_TAG" .copier-answers.yml \
   || fail "recovery did not re-record _commit as $NEW_TAG"
@@ -663,7 +663,7 @@ grep -qF '"CONTRIBUTING.md"' "$VIS_WORK/retired-paths.json" \
 grep -qxF "CONTRIBUTING.md" "$VIS_WORK/removed-paths.txt" \
   || fail "retired_cleanup's rm loop did not delete the resurrected CONTRIBUTING.md"
 RECOVER="" RUNNER_TEMP="$VIS_WORK" bun .github/scripts/sync/preserve_repo_owned.ts
-TARGET_DIR="$VIS" bun .github/scripts/sync/stamp_manifest.ts
+TARGET_DIR="$VIS" bun actions/shared/stamp_manifest.ts
 # Deleting a split-classed file takes its repository-owned half with it,
 # so the removals must raise the removed-splits hold that keeps the PR
 # manual: the old extensionless LICENSE (no manifest entry classes it -
@@ -881,7 +881,7 @@ RUNNER_TEMP="$SPLIT_WORK" SRC_PATH="$src_path_split" \
   OLD_SHA="$(git rev-parse "$NEW_TAG^{commit}")" \
   bun .github/scripts/sync/retired_cleanup.ts
 RECOVER="" RUNNER_TEMP="$SPLIT_WORK" bun .github/scripts/sync/preserve_repo_owned.ts
-TARGET_DIR="$SPLIT" bun .github/scripts/sync/stamp_manifest.ts
+TARGET_DIR="$SPLIT" bun actions/shared/stamp_manifest.ts
 bun "$GITHUB_WORKSPACE/actions/validate-template/validate_generated_files.ts" "$SPLIT"
 
 cd "$SPLIT"
@@ -986,7 +986,7 @@ RUNNER_TEMP="$UNSEL_WORK" SRC_PATH="$src_path_unsel" \
   OLD_SHA="$(git rev-parse "$NEW_TAG^{commit}")" \
   bun .github/scripts/sync/retired_cleanup.ts
 RECOVER="" RUNNER_TEMP="$UNSEL_WORK" bun .github/scripts/sync/preserve_repo_owned.ts
-TARGET_DIR="$UNSEL" bun .github/scripts/sync/stamp_manifest.ts
+TARGET_DIR="$UNSEL" bun actions/shared/stamp_manifest.ts
 bun "$GITHUB_WORKSPACE/actions/validate-template/validate_generated_files.ts" "$UNSEL"
 cd "$UNSEL"
 cmp -s "$UNSEL_WORK/license-before.md" LICENSE.md \
@@ -1063,7 +1063,7 @@ RECOVER="" bun .github/scripts/sync/apply_update.ts
 bun .github/scripts/sync/resolve_copier_conflicts.ts \
   --summary "$SET_WORK/dropped-local-hunks.md" --root "$SET"
 RECOVER="" RUNNER_TEMP="$SET_WORK" bun .github/scripts/sync/preserve_repo_owned.ts
-TARGET_DIR="$SET" bun .github/scripts/sync/stamp_manifest.ts
+TARGET_DIR="$SET" bun actions/shared/stamp_manifest.ts
 bun "$GITHUB_WORKSPACE/actions/validate-template/validate_generated_files.ts" "$SET"
 
 cd "$SET"
@@ -1278,7 +1278,7 @@ RUNNER_TEMP="$DESEL_WORK" SRC_PATH="$src_path_desel" \
 test ! -e "$DESEL/AGENTS.md" \
   || fail "the deselected agents module's AGENTS.md survived retirement"
 RECOVER="" RUNNER_TEMP="$DESEL_WORK" bun .github/scripts/sync/preserve_repo_owned.ts
-TARGET_DIR="$DESEL" bun .github/scripts/sync/stamp_manifest.ts
+TARGET_DIR="$DESEL" bun actions/shared/stamp_manifest.ts
 RUNNER_TEMP="$DESEL_WORK" bun .github/scripts/sync/tail_tripwire.ts --root "$DESEL"
 if [ -s "$DESEL_WORK/tail-shrank.md" ]; then
   fail "the tail tripwire fired on a clean module deselection (the hold must come from the removal rule alone)"
@@ -1391,7 +1391,7 @@ RUNNER_TEMP="$PIN_WORK" SRC_PATH="$src_path_pin" \
 RECOVER="" RUNNER_TEMP="$PIN_WORK" bun .github/scripts/sync/preserve_repo_owned.ts
 RUNNER_TEMP="$PIN_WORK" bun .github/scripts/sync/starter_pin_rollout.ts \
   --root "$PIN" --render-dir "$PIN_WORK/render-new"
-TARGET_DIR="$PIN" bun .github/scripts/sync/stamp_manifest.ts
+TARGET_DIR="$PIN" bun actions/shared/stamp_manifest.ts
 bun "$GITHUB_WORKSPACE/actions/validate-template/validate_generated_files.ts" "$PIN"
 
 cmp -s "$PIN_WORK/nightly-expected.yml" "$PIN/.github/workflows/nightly.yml" \

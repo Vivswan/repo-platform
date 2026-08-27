@@ -21,7 +21,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { stampManifestText } from "../../.github/scripts/sync/stamp_manifest";
+import { stampManifestText } from "../../actions/shared/stamp_manifest";
 import {
   normalizeAnswers,
   normalizeRenderedTree,

@@ -13,14 +13,15 @@
 //                     node_modules and build output excluded - each action
 //                     installs at its own action_path when it runs; the
 //                     actions/shared/ library zone ships with them,
-//                     dependency-free so the tarball stays install-free)
+//                     dependency-free so the tarball stays install-free -
+//                     copier.yml's _tasks and _migrations run the manifest
+//                     stamping hook from actions/shared/stamp_manifest.ts,
+//                     the same relative path it has in this checkout)
 // - .github/workflows/ (the fleet-facing reusable workflows - fleet-ci.yml,
 //                     reusable-all-green.yml, reusable-codeql.yml - that
 //                     rendered workflows call `@build`; a reusable-workflow
 //                     `uses:` fetches the FILE at the named ref, so a build
 //                     branch without them 404s every fleet CI run)
-// - stamp_manifest.ts (the manifest stamping hook copier.yml's _tasks and
-//                     _migrations run; byte copy of .github/scripts/sync's)
 // - README.md        (static explainer)
 //
 // One branch serves both consumers because the whole tree is
@@ -233,20 +234,16 @@ export function copyFleetWorkflows(repoRoot: string, dest: string): void {
 }
 
 /** Assemble the whole branch tree at `dest` (which must exist and be
- *  empty): the composed template/, actions/, the fleet-facing reusable
- *  workflows, copier.yml, the stamp hook, and the README. Exported for the
- *  extraction-safety regression, which asserts no assembled path carries a
- *  jinja expression. */
+ *  empty): the composed template/, actions/ (the stamp hook rides inside
+ *  actions/shared/), the fleet-facing reusable workflows, copier.yml, and
+ *  the README. Exported for the extraction-safety regression, which
+ *  asserts no assembled path carries a jinja expression. */
 export function assembleBranchTree(dest: string): void {
   const composed = build();
   writeOutput(composed, join(dest, "template"));
   copyActions(REPO_ROOT, dest);
   copyFleetWorkflows(REPO_ROOT, dest);
   writeFileSync(join(dest, "copier.yml"), readFileSync(join(REPO_ROOT, "copier.yml")));
-  writeFileSync(
-    join(dest, "stamp_manifest.ts"),
-    readFileSync(join(REPO_ROOT, ".github", "scripts", "sync", "stamp_manifest.ts")),
-  );
   writeFileSync(join(dest, "README.md"), README);
 }
 

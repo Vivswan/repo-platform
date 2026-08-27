@@ -54,6 +54,7 @@ import {
 } from "node:fs";
 import { join, resolve } from "node:path";
 import { z } from "zod";
+import { MANIFEST_NAME, stampManifestText } from "../../../actions/shared/stamp_manifest.ts";
 import { loadRegistry } from "../fleet/repos_registry.ts";
 import { lastLine } from "../shared/lines.ts";
 import {
@@ -65,7 +66,6 @@ import {
 } from "../shared/proc.ts";
 import { AnswersFileError, readAnswersFile } from "./answers_file.ts";
 import { rewriteSrcPath } from "./src_path.ts";
-import { MANIFEST_NAME, stampManifestText } from "./stamp_manifest.ts";
 
 const REPO_ROOT = resolve(import.meta.dir, "..", "..", "..");
 const REHEARSAL_TAG = "rehearsal-build";
@@ -604,7 +604,10 @@ export function rehearseRepo(slug: string, options: RehearsalOptions): Rehearsal
     // copier's post-render stamp hook ran, so the manifest is stamped once
     // more when the tree is final - the same final stamping step
     // reusable-template-sync.yml runs (idempotent; see stamp_manifest.ts).
-    run(["bun", join(import.meta.dir, "stamp_manifest.ts")], { cwd: REPO_ROOT, env: legEnv });
+    run(["bun", join(REPO_ROOT, "actions", "shared", "stamp_manifest.ts")], {
+      cwd: REPO_ROOT,
+      env: legEnv,
+    });
     const manifest = manifestStatus(targetDir);
     // The workflow's post-stamp tail tripwire. It exits 0 even on findings
     // BY DESIGN (warn-only; a blocked delivery would hide the diff), so a

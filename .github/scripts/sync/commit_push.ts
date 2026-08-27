@@ -9,11 +9,11 @@
 
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { MANIFEST_NAME, stampManifestText } from "../../../actions/shared/stamp_manifest.ts";
 import { env, hideDetails, requireEnv, setOutput } from "../shared/gha.ts";
 import { SYNC_IDENTITY } from "../shared/git_identity.ts";
 import { capture, must, mustCapture, passthrough } from "../shared/proc.ts";
 import { STARTER_PINS_NAME } from "./section_files.ts";
-import { MANIFEST_NAME, stampManifestText } from "./stamp_manifest.ts";
 import {
   type FileOutcome,
   renderRolloutReport,

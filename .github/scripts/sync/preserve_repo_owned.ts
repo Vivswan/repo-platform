@@ -47,13 +47,13 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse } from "yaml";
+import { MANIFEST_NAME } from "../../../actions/shared/stamp_manifest.ts";
 import { env, error, hideDetails, notice, requireEnv } from "../shared/gha.ts";
 import { headBytes } from "../shared/git_head.ts";
 import { parseModules } from "../shared/modules.ts";
 import { clip, fenceFor } from "./preserve_local_content.ts";
 import { REMOVED_SPLITS_NAME, SETTINGS_LAYERING_NAME } from "./section_files.ts";
 import { transitionSettingsStarter } from "./settings_layering.ts";
-import { MANIFEST_NAME } from "./stamp_manifest.ts";
 import { type HeadSplit, headRepoOwnedHalf, headSplitEntries } from "./tail_tripwire.ts";
 
 const targetDir = env("TARGET_DIR", "target");

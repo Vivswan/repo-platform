@@ -79,6 +79,11 @@
 import { existsSync, lstatSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import {
+  isMarkerLine,
+  MANIFEST_NAME,
+  managedHalf,
+} from "../../../actions/shared/stamp_manifest.ts";
+import {
   allRegionMarkers,
   cleanLocalRegion,
   localRegion,
@@ -90,7 +95,6 @@ import {
 import { isCommentMarker, isHashMarker } from "../../../scripts/ownership.ts";
 import { parseFlags } from "../shared/flags.ts";
 import { headBytes } from "../shared/git_head.ts";
-import { isMarkerLine, MANIFEST_NAME, managedHalf } from "./stamp_manifest.ts";
 
 function lastLineIndex(
   lines: ReturnType<typeof splitLines>,

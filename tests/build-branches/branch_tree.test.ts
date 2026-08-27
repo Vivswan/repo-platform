@@ -171,14 +171,16 @@ describe("assembleBranchTree", () => {
   assembleBranchTree(dest);
 
   test("the branch root carries exactly the unified layout", () => {
+    // The stamp hook is no root byte-copy any more: it ships inside
+    // actions/shared/ at the same relative path copier.yml's hooks name.
     expect(readdirSync(dest).sort()).toEqual([
       ".github",
       "README.md",
       "actions",
       "copier.yml",
-      "stamp_manifest.ts",
       "template",
     ]);
+    expect(existsSync(join(dest, "actions", SHARED_DIR, "stamp_manifest.ts"))).toBe(true);
   });
 
   test("no assembled path carries a jinja expression (tarball extraction safety)", () => {

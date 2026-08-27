@@ -18,7 +18,7 @@ import {
   recordedCommit,
   resolveConflictsTowardAfter,
   stampManifestText,
-} from "../../.github/scripts/sync/stamp_manifest";
+} from "../../actions/shared/stamp_manifest";
 
 function sha256(data: string): string {
   return new Bun.CryptoHasher("sha256").update(Buffer.from(data, "latin1")).digest("hex");
