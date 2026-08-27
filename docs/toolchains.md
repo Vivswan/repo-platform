@@ -4,7 +4,7 @@ A toolchain module can pin its runtime version fleet-wide through its manifest (
 
 | Module | Version file | Pinned version |
 |---|---|---|<!-- BEGIN GENERATED: toolchain-pins (scripts/generate.ts - edit module.yml manifests, not this block) -->
-| `bun` | `.bun-version` | 1.3.14 |
+| `bun` | `.bun-version` | 1.4.0 |
 | `node` | `.node-version` | 24.19.0 |
 | `deno` | `.dvmrc` | 2.9.5 |<!-- END GENERATED: toolchain-pins -->
 

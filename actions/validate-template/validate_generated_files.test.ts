@@ -1086,7 +1086,7 @@ describe("ownership self-declarations", () => {
         "modules: [uv]",
         "modules: [bun]",
       ),
-      ".bun-version": "1.3.14\n",
+      ".bun-version": "1.4.0\n",
     };
     const bare = runValidator({
       ...bunRender,
@@ -1881,12 +1881,16 @@ describe("ownership-manifest byte parity", () => {
     };
     const { exitCode, stderr } = runValidator({
       ".repo-platform.yml": registration,
-      ".bun-version": "1.3.14\n",
+      ".bun-version": "1.4.0\n",
       [MANIFEST]: manifestOf(entries),
     });
     expect(exitCode).toBe(1);
     expect(stderr).toContain(`entry '.bun-version' claims class "starter"`);
     expect(stderr).toContain("ownership tables declare it managed");
+    // The fixture pin is a hand twin of the generated TOOLCHAIN_PINS
+    // table; a stale one would add its own error here invisibly (the
+    // test already expects failure), so pin its freshness explicitly.
+    expect(stderr).not.toContain(".bun-version: content");
   });
 
   test("a duplicated manifest key is a hard error naming the path", () => {
