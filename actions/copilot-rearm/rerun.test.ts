@@ -1,4 +1,4 @@
-// Unit tests for the copilot-review re-runner: run resolution on both
+// Unit tests for the copilot-rearm action's re-runner: run resolution on both
 // triggers (review-submitted looks the run up, CI-completed carries it),
 // every quiet no-op guard (no run, live run, missing job, non-failed
 // job, attempt cap), the arrival requirement on the CI-completed path,
@@ -10,7 +10,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-const script = join(import.meta.dir, "../../.github/scripts/ci/rerun_copilot_gate.ts");
+const script = join(import.meta.dir, "rerun.ts");
 
 const HEAD_SHA = "b".repeat(40);
 const RUN = { id: 77, status: "completed", pull_requests: [{ number: 12 }] };

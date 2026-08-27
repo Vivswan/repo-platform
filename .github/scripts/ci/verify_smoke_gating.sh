@@ -96,26 +96,22 @@ present_line "      pull-requests: write" "$wf/ci.yml"
 # what the re-arm workflow re-runs.
 present_line "  copilot-review:" "$wf/ci.yml"
 present_line "      - copilot-review" "$wf/ci.yml"
-# The gate's predicate lives in the action, so what this render must show is
-# that the job calls it - and calls the green-gated ref, not @main.
+# Both halves of the bridge are thin callers now, so what a render has to
+# show is the shape a composite action cannot carry: the gate job's own key
+# and its all-green needs entry above, the re-arm's job and its actions:
+# write below, and each side's uses ref at the green-gated @actions rather
+# than @main. The predicates themselves are the actions' suites to police.
 present "actions/copilot-review-gate@actions" "$wf/ci.yml"
 test -f "$wf/rerun-copilot-gate.yml"
 present_line "  rerun:" "$wf/rerun-copilot-gate.yml"
-present_line "          GATE_JOB: copilot-review" "$wf/rerun-copilot-gate.yml"
 present_line "  actions: write" "$wf/rerun-copilot-gate.yml"
-# Fail-fast economy: the re-arm waits by FAILING, never by sleeping on a
-# billed runner, and every network call carries a deadline. Matching on the
-# opening quote of the path keeps prose mentions of the API out of the count.
-# ci.yml is only checked for the absence of sleeps; its gate has no inline
-# calls left to deadline, and the action's own suite owns that contract.
+present "actions/copilot-rearm@actions" "$wf/rerun-copilot-gate.yml"
+# Fail-fast economy: the bridge waits by FAILING, never by sleeping on a
+# billed runner. The per-call network deadlines moved into the actions along
+# with the calls, so what is left to assert on a render is that no sleep
+# creeps back into either workflow.
 absent "sleep " "$wf/ci.yml"
 absent "sleep " "$wf/rerun-copilot-gate.yml"
-present 'timeout 20 gh api "' "$wf/rerun-copilot-gate.yml"
-undeadlined="$(grep -h 'gh api "' "$wf/rerun-copilot-gate.yml" | grep -vc "timeout " || true)"
-if [ "$undeadlined" != 0 ]; then
-  echo "::error::gating check failed: $undeadlined 'gh api' call(s) in the rendered Copilot bridge carry no 'timeout' deadline for modules=$MODULES private=$PRIVATE. Fix templates/base/.github/workflows/ (or this expectation in verify_smoke_gating.sh)."
-  exit 1
-fi
 if has issue-templates; then test -f "$SMOKE/.github/ISSUE_TEMPLATE/config.yml"; else test ! -e "$SMOKE/.github/ISSUE_TEMPLATE"; fi
 if has pages; then test -f "$wf/pages.yml"; else test ! -e "$wf/pages.yml"; fi
 

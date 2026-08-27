@@ -1,0 +1,72 @@
+name: Copilot Rearm
+description: >-
+  Re-runs JUST the failed copilot-review gate job once Copilot's review has
+  arrived. The gate waits by FAILING rather than by sleeping on a billed
+  runner, and this is what picks it back up - on either ordering of "the
+  review posts" against "CI finishes". Every case it declines to act on is a
+  quiet no-op; every read that fails is loud, because nothing re-runs this.
+
+inputs:
+  head-sha:
+    description: The head sha whose CI run carries the gate job.
+    required: true
+  run-id:
+    description: >-
+      The completed CI run, on the workflow_run trigger. Empty on the review
+      trigger, which looks the run up from the head sha instead.
+    required: false
+    default: ""
+  review-commit:
+    description: >-
+      The commit the triggering review covers, on the pull_request_review
+      trigger. Empty otherwise. A review of an older head does not re-arm the
+      new one.
+    required: false
+    default: ""
+  github-token:
+    description: >-
+      Token for the gh reads and the re-run. Needs actions write (to re-run
+      the job) plus checks and pull-requests read (to see the arrival).
+    required: true
+  probe-timeout-ms:
+    description: Per-call network deadline in milliseconds.
+    required: false
+    default: "15000"
+
+runs:
+  using: composite
+  steps:
+    # The calling job carries no toolchain of its own (it is `gh` reads and
+    # one re-run, seconds of runner time either way), so bun is normally
+    # absent and set up here.
+    - name: Check for a caller-installed bun
+      id: bun
+      shell: bash
+      run: echo "present=$(command -v bun >/dev/null && echo true || echo false)" >> "$GITHUB_OUTPUT"
+
+    - name: Set up bun
+      id: setup-bun
+      if: steps.bun.outputs.present != 'true'
+      continue-on-error: true
+      uses: oven-sh/setup-bun@v2
+
+    # One retry: the setup's network fetch is a known transient flake, and
+    # here a flake means a red gate stays red with nothing to re-arm it.
+    - name: Set up bun (retry)
+      if: steps.setup-bun.outcome == 'failure'
+      uses: oven-sh/setup-bun@v2
+
+    - name: Install dependencies (zod)
+      shell: bash
+      working-directory: ${{ github.action_path }}
+      run: bun install --frozen-lockfile --production --silent
+
+    - name: Re-run the copilot-review job if the review arrived
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        HEAD_SHA: ${{ inputs.head-sha }}
+        RUN_ID: ${{ inputs.run-id }}
+        REVIEW_COMMIT: ${{ inputs.review-commit }}
+        PROBE_TIMEOUT_MS: ${{ inputs.probe-timeout-ms }}
+      run: bun "${{ github.action_path }}/rerun.ts"

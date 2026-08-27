@@ -1,8 +1,8 @@
 #!/usr/bin/env bun
-// Re-arms ci.yml's fail-fast copilot-review gate (see
-// actions/copilot-review-gate/gate.ts: it fails immediately when Copilot's
-// review is expected but has not posted, instead of burning billed runner
-// time polling). Invoked by rerun-copilot-gate.yml on two triggers that
+// Re-arms ci.yml's fail-fast copilot-review gate (see the
+// copilot-review-gate action: it fails immediately when Copilot's review
+// is expected but has not posted, instead of burning billed runner time
+// polling). Invoked by rerun-copilot-gate.yml on two triggers that
 // together cover both orderings of "review posts" vs "CI finishes":
 //
 //   - pull_request_review submitted by Copilot: the review is here; if
@@ -38,10 +38,8 @@ import {
   checkRunsSchema,
   fetchAllReviews,
   isCopilot,
-} from "../../../actions/copilot-review-gate/identity.ts";
-import { env, error, notice, requireEnv, warning } from "../shared/gha.ts";
-import { parseJsonWith } from "../shared/json.ts";
-import { capture } from "../shared/proc.ts";
+} from "./identity.ts";
+import { capture, env, error, notice, parseJsonWith, requireEnv, warning } from "./runtime.ts";
 
 const GATE_JOB = "copilot-review";
 /** Loop-breaker: a re-run completing fires the workflow_run trigger
