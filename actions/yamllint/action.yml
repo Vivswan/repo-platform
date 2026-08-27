@@ -1,0 +1,17 @@
+name: Yamllint
+description: >-
+  The fleet's YAML lint step: installs yamllint and lints the caller's
+  checkout in strict mode (warnings fail too), honoring the repository's
+  own .yamllint config. One implementation for every managed repo, so the
+  install and the invocation cannot drift per repository.
+
+runs:
+  using: composite
+  steps:
+    - name: Install yamllint
+      shell: bash
+      run: python3 -m pip install --quiet yamllint
+
+    - name: Lint YAML
+      shell: bash
+      run: yamllint -s .

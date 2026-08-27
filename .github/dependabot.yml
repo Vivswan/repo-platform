@@ -19,6 +19,8 @@ updates:
       - "/actions/validate-commit-names"
       - "/actions/validate-skills"
       - "/actions/validate-template"
+      - "/actions/validate-template-report"
+      - "/actions/yamllint"
     groups:
       actions:
         patterns: ["*"]
@@ -105,6 +107,18 @@ updates:
   # current.
   - package-ecosystem: "bun"
     directory: "/actions/validate-template"
+    schedule:
+      interval: "monthly"
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: "build"
+      include: "scope"
+
+  # Dev-only manifest (@types/bun, typescript, zod for the shared
+  # runtime.ts type-only import) for the validate-template-report action.
+  - package-ecosystem: "bun"
+    directory: "/actions/validate-template-report"
     schedule:
       interval: "monthly"
     cooldown:
