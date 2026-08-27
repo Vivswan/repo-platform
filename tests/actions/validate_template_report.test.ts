@@ -20,7 +20,6 @@ import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 
 const ACTION = join(import.meta.dir, "../../actions/validate-template-report");
-const ACTIONS = join(import.meta.dir, "../../actions");
 const MARKER = "<!-- repo-platform:validate-template -->";
 
 // Serves the gate's gh calls and records writes so a test can assert which
@@ -306,16 +305,6 @@ describe("the action's freshness script", () => {
 });
 
 describe("the action's wiring", () => {
-  // Like the Copilot actions' identity.ts/runtime.ts: the helper slice is
-  // BYTE-IDENTICAL across the action copies because a published composite
-  // action cannot import outside its own directory. Edit one, copy it over.
-  test("runtime.ts is byte-identical to the Copilot actions' copies", () => {
-    const here = readFileSync(join(ACTION, "runtime.ts"), "utf8");
-    for (const sibling of ["copilot-review-gate", "copilot-rearm"]) {
-      expect(here).toBe(readFileSync(join(ACTIONS, sibling, "runtime.ts"), "utf8"));
-    }
-  });
-
   // The deferred-verdict plumbing the behaviour tests cannot see: the
   // wrapped integrity action keeps its own exit code but the step defers
   // it, and the action's output hands that outcome to the caller's

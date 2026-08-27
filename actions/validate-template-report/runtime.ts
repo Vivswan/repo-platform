@@ -1,21 +1,20 @@
-// The slice of the repository's shared helpers the composite actions need,
+// The slice of the repository's shared helpers this composite action needs,
 // kept LOCAL on purpose. A composite action is published on a build output
 // branch of this repository and runs from its own directory, so it cannot
 // import out of the repository tree - not from .github/scripts/shared/,
 // and not from a sibling action either. That is a property of how actions
-// are published, not drift: each PREDICATE exists exactly once (gate.ts in
-// copilot-review-gate, rerun.ts in copilot-rearm, freshness.ts and
-// report.ts in validate-template-report), and callers use the action
-// rather than keeping a second copy of it.
+// are published, not drift: the predicates themselves (freshness.ts,
+// report.ts) exist exactly once, and callers use the action rather than
+// keeping a second copy of them.
 //
-// This file is therefore BYTE-IDENTICAL across those three action
-// directories, and the byte-equality tests under tests/actions/
-// (copilot_shared_files.test.ts, validate_template_report.test.ts) fail
-// if any copy diverges - the same guard the Copilot actions' identity.ts
-// carries. Edit one, copy it to the others.
+// This is currently the only action carrying this file (the Copilot
+// actions that shared it byte-identically were retired with the
+// ruleset-owned review gate). If another composite action ever copies it,
+// bring back the byte-equality test that policed the copies: edit one,
+// copy it to the others, never re-type.
 //
 // Keep these behaviour-compatible with .github/scripts/shared/ - they are
-// the same functions, narrowed to what the actions use.
+// the same functions, narrowed to what the action uses.
 
 import type { ZodType } from "zod";
 
