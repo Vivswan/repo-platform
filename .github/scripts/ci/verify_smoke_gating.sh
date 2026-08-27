@@ -96,19 +96,22 @@ present_line "      pull-requests: write" "$wf/ci.yml"
 # what the re-arm workflow re-runs.
 present_line "  copilot-review:" "$wf/ci.yml"
 present_line "      - copilot-review" "$wf/ci.yml"
-present "COPILOT_CHECK: copilot-pull-request-reviewer" "$wf/ci.yml"
+# The gate's predicate lives in the action, so what this render must show is
+# that the job calls it - and calls the green-gated ref, not @main.
+present "actions/copilot-review-gate@actions" "$wf/ci.yml"
 test -f "$wf/rerun-copilot-gate.yml"
 present_line "  rerun:" "$wf/rerun-copilot-gate.yml"
 present_line "          GATE_JOB: copilot-review" "$wf/rerun-copilot-gate.yml"
 present_line "  actions: write" "$wf/rerun-copilot-gate.yml"
-# Fail-fast economy: the gate waits by FAILING, never by sleeping on a billed
-# runner, and every network call carries a deadline. Matching on the opening
-# quote of the path keeps prose mentions of the API out of the count.
+# Fail-fast economy: the re-arm waits by FAILING, never by sleeping on a
+# billed runner, and every network call carries a deadline. Matching on the
+# opening quote of the path keeps prose mentions of the API out of the count.
+# ci.yml is only checked for the absence of sleeps; its gate has no inline
+# calls left to deadline, and the action's own suite owns that contract.
 absent "sleep " "$wf/ci.yml"
 absent "sleep " "$wf/rerun-copilot-gate.yml"
-present 'timeout 20 gh api "' "$wf/ci.yml"
 present 'timeout 20 gh api "' "$wf/rerun-copilot-gate.yml"
-undeadlined="$(grep -h 'gh api "' "$wf/ci.yml" "$wf/rerun-copilot-gate.yml" | grep -vc "timeout " || true)"
+undeadlined="$(grep -h 'gh api "' "$wf/rerun-copilot-gate.yml" | grep -vc "timeout " || true)"
 if [ "$undeadlined" != 0 ]; then
   echo "::error::gating check failed: $undeadlined 'gh api' call(s) in the rendered Copilot bridge carry no 'timeout' deadline for modules=$MODULES private=$PRIVATE. Fix templates/base/.github/workflows/ (or this expectation in verify_smoke_gating.sh)."
   exit 1
