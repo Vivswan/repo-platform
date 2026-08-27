@@ -110,6 +110,34 @@ describe("copyActions", () => {
     expect(() => copyActions(empty, dest)).toThrow("holds no action directories");
   });
 
+  test("refuses a directory with sources but no action.yml, naming it, BEFORE copying", () => {
+    // Broken state, not a retirement: retiring an action deletes its whole
+    // directory. Publishing sources without a manifest would succeed here
+    // and then 404 every fleet `uses: .../<name>@build` at resolve time.
+    const root = actionsFixture();
+    const orphan = join(root, "actions", "orphaned-action");
+    mkdirSync(orphan, { recursive: true });
+    writeFileSync(join(orphan, "runtime.ts"), "export {};\n");
+    const dest = mkdtempSync(join(tmpdir(), "branch-actions-dest-"));
+    expect(() => copyActions(root, dest)).toThrow("actions/orphaned-action");
+    expect(() => copyActions(root, dest)).toThrow("no action.yml");
+    // The guard fires before the first copy: even the VALID sibling action
+    // must not have landed.
+    expect(existsSync(join(dest, "actions"))).toBe(false);
+  });
+
+  test("an ANCESTOR directory named node_modules does not filter the copy away", () => {
+    // The exclusion filter tests segments relative to the action root: a
+    // checkout parked under some node_modules/ ancestor must still publish.
+    const parent = mkdtempSync(join(tmpdir(), "branch-actions-ancestor-"));
+    const root = join(parent, "node_modules", "repo");
+    mkdirSync(join(root, "actions", "demo"), { recursive: true });
+    writeFileSync(join(root, "actions", "demo", "action.yml"), "name: Demo\n");
+    const dest = mkdtempSync(join(tmpdir(), "branch-actions-dest-"));
+    expect(copyActions(root, dest)).toBe(1);
+    expect(existsSync(join(dest, "actions", "demo", "action.yml"))).toBe(true);
+  });
+
   test("node_modules is excluded by name, wherever it sits", () => {
     expect(EXCLUDED_DIRS.has("node_modules")).toBe(true);
   });
