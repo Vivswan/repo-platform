@@ -82,8 +82,10 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           template-repo: Vivswan/repo-platform
       # Last, so the comment above is already posted when the gate goes red.
+      # Fail-closed: != 'success' re-raises on 'failure' AND on an output
+      # that resolved empty (a broken mapping must never read as green).
       - name: Fail on an integrity finding
-        if: steps.template.outputs.integrity == 'failure'
+        if: steps.template.outputs.integrity != 'success'
         run: |
           echo "::error::validate-template found managed content that changed outside a sync; see the findings on this PR (or the job summary) and the step log above."
           exit 1

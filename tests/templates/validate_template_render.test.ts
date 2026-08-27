@@ -78,7 +78,12 @@ describe("the rendered validate-template job", () => {
       const steps = ci(golden).jobs["validate-template"]?.steps ?? [];
       const last = steps[steps.length - 1];
       expect(steps).toHaveLength(3);
-      expect(last?.if).toBe("steps.template.outputs.integrity == 'failure'");
+      // Fail-closed, hence '!=': an output that resolved EMPTY (a broken
+      // or renamed mapping inside the action) still re-raises - only a
+      // literal success opens the gate. An equality against 'failure'
+      // would skip the step on an empty output and pass a real integrity
+      // failure green.
+      expect(last?.if).toBe("steps.template.outputs.integrity != 'success'");
       expect(last?.run).toContain("exit 1");
     });
 

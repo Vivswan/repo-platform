@@ -81,7 +81,7 @@ adjacent "$last_need" "    runs-on: ubuntu-latest" "$wf/ci.yml"
 present_line "  validate-template:" "$wf/ci.yml"
 present_line "      - validate-template" "$wf/ci.yml"
 present "actions/validate-template-report@build" "$wf/ci.yml"
-present "steps.template.outputs.integrity == 'failure'" "$wf/ci.yml"
+present "steps.template.outputs.integrity != 'success'" "$wf/ci.yml"
 # The comment write is scoped to that one job, never the workflow default.
 present_line "  contents: read" "$wf/ci.yml"
 absent_line "  pull-requests: write" "$wf/ci.yml"
