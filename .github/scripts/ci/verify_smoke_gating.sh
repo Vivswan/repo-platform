@@ -1,18 +1,35 @@
 #!/usr/bin/env bash
-# Assert module/visibility gating on the rendered smoke-test project in
-# /tmp/smoke: the right files exist for the selected modules, and the right
-# fragments appear inside shared files.
+# Assert module/visibility gating on a rendered smoke-test project (by
+# default /tmp/smoke): the right files exist for the selected modules, and
+# the right fragments appear inside shared files.
 #
 # Inputs (env): MODULES, PRIVATE (the matrix row that produced the tree),
 # EXPECT_IN_PAGES (optional per-row patterns for pages.yml), EXTRA_DATA
-# (optional extra -d args the row passed to copier).
+# (optional extra -d args the row passed to copier). SMOKE_DIR overrides
+# the rendered tree's path and SMOKE_WORK the scratch dir for this run's
+# intermediates - both so two concurrent local runs never share a path.
+# CI passes neither and gets the historical defaults.
 # shellcheck disable=SC2016  # assertion strings carry literal backticks
 set -euo pipefail
 : "${MODULES:?}" "${PRIVATE:?}"
 EXPECT_IN_PAGES="${EXPECT_IN_PAGES:-}"
 EXTRA_DATA="${EXTRA_DATA:-}"
 
-wf=/tmp/smoke/.github/workflows
+SMOKE="${SMOKE_DIR:-/tmp/smoke}"
+# Clean up only a scratch dir we made ourselves; a caller-supplied one is
+# the caller's to keep.
+if [ -z "${SMOKE_WORK:-}" ]; then
+  tmp_root="${TMPDIR:-/tmp}"
+  SMOKE_WORK="$(mktemp -d "${tmp_root%/}/smoke-gating.XXXXXX")"
+  trap 'rm -rf "$SMOKE_WORK"' EXIT
+fi
+mkdir -p "$SMOKE_WORK"
+# The settings assertions below shell out to repo scripts. Resolve the repo
+# root from this script's own location rather than trusting the caller's
+# cwd, so the harness runs from anywhere.
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+
+wf="$SMOKE/.github/workflows"
 mods=",$(echo "$MODULES" | tr -d '[] '),"
 has() { case "$mods" in *",$1,"*) return 0 ;; *) return 1 ;; esac; }
 # The toolchain rosters, spelled once: CodeQL-analyzable toolchains drive
@@ -96,8 +113,9 @@ if [ "$undeadlined" != 0 ]; then
   echo "::error::gating check failed: $undeadlined 'gh api' call(s) in the rendered Copilot bridge carry no 'timeout' deadline for modules=$MODULES private=$PRIVATE. Fix templates/base/.github/workflows/ (or this expectation in verify_smoke_gating.sh)."
   exit 1
 fi
-if has issue-templates; then test -f /tmp/smoke/.github/ISSUE_TEMPLATE/config.yml; else test ! -e /tmp/smoke/.github/ISSUE_TEMPLATE; fi
+if has issue-templates; then test -f "$SMOKE/.github/ISSUE_TEMPLATE/config.yml"; else test ! -e "$SMOKE/.github/ISSUE_TEMPLATE"; fi
 if has pages; then test -f "$wf/pages.yml"; else test ! -e "$wf/pages.yml"; fi
+
 
 # fuzzer: the repo-owned nightly-fuzz starter with the fuzz-issue action in
 # both modes and the dispatch replay inputs; the auto-assign dispatch step
@@ -161,12 +179,12 @@ case "$EXTRA_DATA" in
   *skills_dir=*) skills_dir="${EXTRA_DATA##*skills_dir=}"; skills_dir="${skills_dir%% *}" ;;
 esac
 if has skills; then
-  test -f /tmp/smoke/.claude-plugin/plugin.json
-  test -f /tmp/smoke/.claude-plugin/marketplace.json
-  python3 -m json.tool /tmp/smoke/.claude-plugin/plugin.json > /dev/null
-  python3 -m json.tool /tmp/smoke/.claude-plugin/marketplace.json > /dev/null
+  test -f "$SMOKE/.claude-plugin/plugin.json"
+  test -f "$SMOKE/.claude-plugin/marketplace.json"
+  python3 -m json.tool "$SMOKE/.claude-plugin/plugin.json" > /dev/null
+  python3 -m json.tool "$SMOKE/.claude-plugin/marketplace.json" > /dev/null
   # The seeded catalog starts empty; repos add their skills afterwards.
-  present '"skills": []' /tmp/smoke/.claude-plugin/plugin.json
+  present '"skills": []' "$SMOKE/.claude-plugin/plugin.json"
   # The structure job must render inside the gate AND sit in all-green's
   # needs; losing either fragment would fail open silently.
   present_line "  validate-skills:" "$wf/ci.yml"
@@ -180,13 +198,13 @@ if has skills; then
   present_line "          skills-dir: \"$skills_dir\"" "$wf/validate-skills.yml"
   present "mode: discovery" "$wf/validate-skills.yml"
 else
-  test ! -e /tmp/smoke/.claude-plugin
+  test ! -e "$SMOKE/.claude-plugin"
   test ! -e "$wf/validate-skills.yml"
   absent "validate-skills" "$wf/ci.yml"
 fi
 
 if has settings-sync; then
-  test -f /tmp/smoke/.github/settings.yml
+  test -f "$SMOKE/.github/settings.yml"
   test -f "$wf/settings-sync.yml"
   present "reusable-apply-settings.yml@main" "$wf/settings-sync.yml"
   # The rendered settings.yml is the repo-owned IDENTITY STARTER: the four
@@ -194,25 +212,25 @@ if has settings-sync; then
   # smoke_generate.ts passes; visibility is declared even when public. The
   # whole-line matches keep the explanatory comments above the keys from
   # satisfying the checks.
-  present_line '  description: "Smoke-test project"' /tmp/smoke/.github/settings.yml
-  present_line "  private: $PRIVATE" /tmp/smoke/.github/settings.yml
+  present_line '  description: "Smoke-test project"' "$SMOKE/.github/settings.yml"
+  present_line "  private: $PRIVATE" "$SMOKE/.github/settings.yml"
   # homepage and topics are declared even when empty (declare-and-clear);
   # no row passes either answer, so every row must render the empty form.
   # A re-gated key would vanish and its drift would go unmanaged again.
-  present_line '  homepage: ""' /tmp/smoke/.github/settings.yml
-  present_line '  topics: ""' /tmp/smoke/.github/settings.yml
+  present_line '  homepage: ""' "$SMOKE/.github/settings.yml"
+  present_line '  topics: ""' "$SMOKE/.github/settings.yml"
   # The managed baseline (labels, rulesets, security_and_analysis) is
   # assembled centrally at apply time and merged UNDER this file - none of
   # it may render into the starter again (a rendered copy would shadow
   # baseline evolution forever), and the retired mergeable marker must
   # never come back (it is the one-time transition's trigger).
-  absent "type: code_scanning" /tmp/smoke/.github/settings.yml
-  absent "security_and_analysis:" /tmp/smoke/.github/settings.yml
-  absent_line "labels:" /tmp/smoke/.github/settings.yml
-  absent_line "rulesets:" /tmp/smoke/.github/settings.yml
-  absent "repo-platform:mergeable" /tmp/smoke/.github/settings.yml
+  absent "type: code_scanning" "$SMOKE/.github/settings.yml"
+  absent "security_and_analysis:" "$SMOKE/.github/settings.yml"
+  absent_line "labels:" "$SMOKE/.github/settings.yml"
+  absent_line "rulesets:" "$SMOKE/.github/settings.yml"
+  absent "repo-platform:mergeable" "$SMOKE/.github/settings.yml"
 else
-  test ! -e /tmp/smoke/.github/settings.yml
+  test ! -e "$SMOKE/.github/settings.yml"
   test ! -e "$wf/settings-sync.yml"
 fi
 
@@ -291,18 +309,18 @@ fi
 # are asserted separately as a cheap render-time cross-check (the validator
 # independently hard-errors on a present job missing from all-green's
 # needs).
-if has custom-license; then test ! -e /tmp/smoke/LICENSE.md; else test -f /tmp/smoke/LICENSE.md; fi
+if has custom-license; then test ! -e "$SMOKE/LICENSE.md"; else test -f "$SMOKE/LICENSE.md"; fi
 # SECURITY.md is visibility-independent (private collaborators need the
 # reporting route too); the contributor-facing files stay public-only.
-test -f /tmp/smoke/SECURITY.md
+test -f "$SMOKE/SECURITY.md"
 if [ "$PRIVATE" = "true" ]; then
-  test ! -e /tmp/smoke/CONTRIBUTING.md
-  test ! -e /tmp/smoke/CODE_OF_CONDUCT.md
+  test ! -e "$SMOKE/CONTRIBUTING.md"
+  test ! -e "$SMOKE/CODE_OF_CONDUCT.md"
   absent "dependency-review:" "$wf/ci.yml"
   absent "- dependency-review" "$wf/ci.yml"
 else
-  test -f /tmp/smoke/CONTRIBUTING.md
-  test -f /tmp/smoke/CODE_OF_CONDUCT.md
+  test -f "$SMOKE/CONTRIBUTING.md"
+  test -f "$SMOKE/CODE_OF_CONDUCT.md"
   present "dependency-review:" "$wf/ci.yml"
   present "      - dependency-review" "$wf/ci.yml"
   # The wrapper pin, falling back to main on the scratch build tree; the
@@ -359,52 +377,52 @@ fi
 # suppresses its guarded copy when an earlier declarer is also selected). The
 # count matches the full header line, so a reworded near-miss cannot satisfy it.
 if has bun || has node || has deno; then
-  node_sections="$(grep -cxF -- "## Node (github/gitignore Node.gitignore)" /tmp/smoke/.gitignore || true)"
+  node_sections="$(grep -cxF -- "## Node (github/gitignore Node.gitignore)" "$SMOKE/.gitignore" || true)"
   if [ "$node_sections" -ne 1 ]; then
-    echo "::error::gating check failed: expected exactly 1 line '## Node (github/gitignore Node.gitignore)' in /tmp/smoke/.gitignore but found $node_sections for modules=$MODULES private=$PRIVATE - the shared Node.gitignore source must render once, never per-module duplicates. Fix the fragment guards emitted by scripts/build_gitignore.ts (or this expectation in verify_smoke_gating.sh)."
+    echo "::error::gating check failed: expected exactly 1 line '## Node (github/gitignore Node.gitignore)' in $SMOKE/.gitignore but found $node_sections for modules=$MODULES private=$PRIVATE - the shared Node.gitignore source must render once, never per-module duplicates. Fix the fragment guards emitted by scripts/build_gitignore.ts (or this expectation in verify_smoke_gating.sh)."
     exit 1
   fi
 else
-  absent "## Node " /tmp/smoke/.gitignore
+  absent "## Node " "$SMOKE/.gitignore"
 fi
-if has deno; then present_line "## Deno (github/gitignore Deno.gitignore)" /tmp/smoke/.gitignore; else absent "## Deno " /tmp/smoke/.gitignore; fi
-if has uv; then present "## Python " /tmp/smoke/.gitignore; else absent "## Python " /tmp/smoke/.gitignore; fi
-if has rust; then present "## Rust " /tmp/smoke/.gitignore; else absent "## Rust " /tmp/smoke/.gitignore; fi
+if has deno; then present_line "## Deno (github/gitignore Deno.gitignore)" "$SMOKE/.gitignore"; else absent "## Deno " "$SMOKE/.gitignore"; fi
+if has uv; then present "## Python " "$SMOKE/.gitignore"; else absent "## Python " "$SMOKE/.gitignore"; fi
+if has rust; then present "## Rust " "$SMOKE/.gitignore"; else absent "## Rust " "$SMOKE/.gitignore"; fi
 
 # dependabot ecosystems follow the toolchain modules; every entry carries a
 # commit-message prefix so dependabot PR titles are Conventional Commits.
-present 'package-ecosystem: "github-actions"' /tmp/smoke/.github/dependabot.yml
-present 'prefix: "ci"' /tmp/smoke/.github/dependabot.yml
-if has bun; then present 'package-ecosystem: "bun"' /tmp/smoke/.github/dependabot.yml; else absent 'package-ecosystem: "bun"' /tmp/smoke/.github/dependabot.yml; fi
-if has node; then present 'package-ecosystem: "npm"' /tmp/smoke/.github/dependabot.yml; else absent 'package-ecosystem: "npm"' /tmp/smoke/.github/dependabot.yml; fi
-if has deno; then present 'package-ecosystem: "deno"' /tmp/smoke/.github/dependabot.yml; else absent 'package-ecosystem: "deno"' /tmp/smoke/.github/dependabot.yml; fi
-if has uv; then present 'package-ecosystem: "uv"' /tmp/smoke/.github/dependabot.yml; else absent 'package-ecosystem: "uv"' /tmp/smoke/.github/dependabot.yml; fi
-if has rust; then present 'package-ecosystem: "cargo"' /tmp/smoke/.github/dependabot.yml; else absent 'package-ecosystem: "cargo"' /tmp/smoke/.github/dependabot.yml; fi
-if has_any_toolchain; then present 'prefix: "build"' /tmp/smoke/.github/dependabot.yml; else absent 'prefix: "build"' /tmp/smoke/.github/dependabot.yml; fi
+present 'package-ecosystem: "github-actions"' "$SMOKE/.github/dependabot.yml"
+present 'prefix: "ci"' "$SMOKE/.github/dependabot.yml"
+if has bun; then present 'package-ecosystem: "bun"' "$SMOKE/.github/dependabot.yml"; else absent 'package-ecosystem: "bun"' "$SMOKE/.github/dependabot.yml"; fi
+if has node; then present 'package-ecosystem: "npm"' "$SMOKE/.github/dependabot.yml"; else absent 'package-ecosystem: "npm"' "$SMOKE/.github/dependabot.yml"; fi
+if has deno; then present 'package-ecosystem: "deno"' "$SMOKE/.github/dependabot.yml"; else absent 'package-ecosystem: "deno"' "$SMOKE/.github/dependabot.yml"; fi
+if has uv; then present 'package-ecosystem: "uv"' "$SMOKE/.github/dependabot.yml"; else absent 'package-ecosystem: "uv"' "$SMOKE/.github/dependabot.yml"; fi
+if has rust; then present 'package-ecosystem: "cargo"' "$SMOKE/.github/dependabot.yml"; else absent 'package-ecosystem: "cargo"' "$SMOKE/.github/dependabot.yml"; fi
+if has_any_toolchain; then present 'prefix: "build"' "$SMOKE/.github/dependabot.yml"; else absent 'prefix: "build"' "$SMOKE/.github/dependabot.yml"; fi
 
 # agents module: AGENTS.md plus the three agent-file symlinks. The
 # rows without it also prove conditional filenames work on symlinks.
 if has agents; then
-  test -f /tmp/smoke/AGENTS.md
-  test -L /tmp/smoke/CLAUDE.md
-  test "$(readlink /tmp/smoke/CLAUDE.md)" = "AGENTS.md"
-  test -L /tmp/smoke/.github/copilot-instructions.md
-  test -L /tmp/smoke/.github/agents.md
+  test -f "$SMOKE/AGENTS.md"
+  test -L "$SMOKE/CLAUDE.md"
+  test "$(readlink "$SMOKE/CLAUDE.md")" = "AGENTS.md"
+  test -L "$SMOKE/.github/copilot-instructions.md"
+  test -L "$SMOKE/.github/agents.md"
   # AGENTS.md toolchain section only when a toolchain module is selected,
   # with exactly the selected toolchains' bullets inside it.
-  if has_any_toolchain; then present "## Toolchain" /tmp/smoke/AGENTS.md; else absent "## Toolchain" /tmp/smoke/AGENTS.md; fi
-  if has bun; then present_line '- Runtime and package manager: bun (`bun install`, `bun test`, `bun run <script>`)' /tmp/smoke/AGENTS.md; else absent "Runtime and package manager: bun" /tmp/smoke/AGENTS.md; fi
-  if has node; then present_line '- Node.js with npm (`npm install`, `npm test`, `npm run <script>`)' /tmp/smoke/AGENTS.md; else absent "Node.js with npm" /tmp/smoke/AGENTS.md; fi
-  if has deno; then present_line '- Deno runtime (`deno install`, `deno test`, `deno task <task>`)' /tmp/smoke/AGENTS.md; else absent "Deno runtime" /tmp/smoke/AGENTS.md; fi
-  if has uv; then present_line '- Python managed with uv (`uv sync`, `uv run <command>`)' /tmp/smoke/AGENTS.md; else absent "Python managed with uv" /tmp/smoke/AGENTS.md; fi
-  if has rust; then present_line '- Rust managed with cargo (`cargo build`, `cargo test`, `cargo clippy`)' /tmp/smoke/AGENTS.md; else absent "Rust managed with cargo" /tmp/smoke/AGENTS.md; fi
+  if has_any_toolchain; then present "## Toolchain" "$SMOKE/AGENTS.md"; else absent "## Toolchain" "$SMOKE/AGENTS.md"; fi
+  if has bun; then present_line '- Runtime and package manager: bun (`bun install`, `bun test`, `bun run <script>`)' "$SMOKE/AGENTS.md"; else absent "Runtime and package manager: bun" "$SMOKE/AGENTS.md"; fi
+  if has node; then present_line '- Node.js with npm (`npm install`, `npm test`, `npm run <script>`)' "$SMOKE/AGENTS.md"; else absent "Node.js with npm" "$SMOKE/AGENTS.md"; fi
+  if has deno; then present_line '- Deno runtime (`deno install`, `deno test`, `deno task <task>`)' "$SMOKE/AGENTS.md"; else absent "Deno runtime" "$SMOKE/AGENTS.md"; fi
+  if has uv; then present_line '- Python managed with uv (`uv sync`, `uv run <command>`)' "$SMOKE/AGENTS.md"; else absent "Python managed with uv" "$SMOKE/AGENTS.md"; fi
+  if has rust; then present_line '- Rust managed with cargo (`cargo build`, `cargo test`, `cargo clippy`)' "$SMOKE/AGENTS.md"; else absent "Rust managed with cargo" "$SMOKE/AGENTS.md"; fi
 else
   # `test ! -e` follows symlinks (a dangling one passes), so also
   # assert not-a-symlink for the three link paths.
-  test ! -e /tmp/smoke/AGENTS.md
-  test ! -e /tmp/smoke/CLAUDE.md && test ! -L /tmp/smoke/CLAUDE.md
-  test ! -e /tmp/smoke/.github/agents.md && test ! -L /tmp/smoke/.github/agents.md
-  test ! -e /tmp/smoke/.github/copilot-instructions.md && test ! -L /tmp/smoke/.github/copilot-instructions.md
+  test ! -e "$SMOKE/AGENTS.md"
+  test ! -e "$SMOKE/CLAUDE.md" && test ! -L "$SMOKE/CLAUDE.md"
+  test ! -e "$SMOKE/.github/agents.md" && test ! -L "$SMOKE/.github/agents.md"
+  test ! -e "$SMOKE/.github/copilot-instructions.md" && test ! -L "$SMOKE/.github/copilot-instructions.md"
 fi
 
 # The module/visibility gating that used to render into settings.yml now
@@ -417,21 +435,21 @@ fi
 # render_managed_settings.ts (or this expectation). The assembly needs the
 # repo root's dependencies, which the smoke job does not install.
 if has settings-sync; then
-  managed_out=/tmp/smoke-managed-settings.yml
-  merged_out=/tmp/smoke-merged-settings.yml
-  [ -d node_modules ] || bun install --frozen-lockfile --silent
+  managed_out="$SMOKE_WORK/managed-settings.yml"
+  merged_out="$SMOKE_WORK/merged-settings.yml"
+  [ -d "$REPO_ROOT/node_modules" ] || bun install --frozen-lockfile --silent --cwd "$REPO_ROOT"
   # Both scripts publish step outputs now, so both need somewhere to
   # write them; Actions sets this, a hand run does not.
-  export GITHUB_OUTPUT="${GITHUB_OUTPUT:-/tmp/smoke-step-output.txt}"
-  bun .github/scripts/fleet/render_managed_settings.ts \
-    --repo smoke/test --target-dir /tmp/smoke --out "$managed_out"
+  export GITHUB_OUTPUT="${GITHUB_OUTPUT:-$SMOKE_WORK/step-output.txt}"
+  bun "$REPO_ROOT/.github/scripts/fleet/render_managed_settings.ts" \
+    --repo smoke/test --target-dir "$SMOKE" --out "$managed_out"
   # The document the apply actually receives: the rendered layers plus the
   # smoke repo's own settings.yml plus the fleet override on top. The
   # protection rulesets live in the override, so only the merged document
   # shows the whole contract. GITHUB_OUTPUT is set by Actions; give the
   # script a scratch file when running this harness by hand.
-  bun .github/scripts/fleet/merge_settings_layers.ts \
-    --managed "$managed_out" --repo-file /tmp/smoke/.github/settings.yml \
+  bun "$REPO_ROOT/.github/scripts/fleet/merge_settings_layers.ts" \
+    --managed "$managed_out" --repo-file "$SMOKE/.github/settings.yml" \
     --out "$merged_out"
   # The unconditional labels: dependabot's base pair (the base
   # dependabot.yml always carries the github-actions ecosystem, and
@@ -530,8 +548,8 @@ if has release-please; then
     absent "tracking-labels:" "$wf/ci.yml"
     absent "tracking-labels:" "$wf/release.yml"
   fi
-  test -f /tmp/smoke/release-please-config.json
-  test -f /tmp/smoke/.release-please-manifest.json
+  test -f "$SMOKE/release-please-config.json"
+  test -f "$SMOKE/.release-please-manifest.json"
   # Every render carries the full three-stage draft flow inside the managed
   # release.yml: the repo-owned update hook called between the draft and
   # the publish, the attestation on the publish path, and the publish job
@@ -562,8 +580,8 @@ else
   # release-please.
   absent "tracking-labels:" "$wf/ci.yml"
   absent "fuzz-label:" "$wf/ci.yml"
-  test ! -e /tmp/smoke/release-please-config.json
-  test ! -e /tmp/smoke/.release-please-manifest.json
+  test ! -e "$SMOKE/release-please-config.json"
+  test ! -e "$SMOKE/.release-please-manifest.json"
 fi
 
 # auto-format follows the toolchain modules; its formatter steps, like the
@@ -612,9 +630,9 @@ fi
 # Toolchain version pins: each pinning toolchain module ships its managed
 # version dotfile containing an X.Y.Z line (the exact-bytes gate lives in
 # validate-template's pin check).
-if has bun; then grep -qxE '[0-9]+\.[0-9]+\.[0-9]+' /tmp/smoke/.bun-version; else test ! -e /tmp/smoke/.bun-version; fi
-if has node; then grep -qxE '[0-9]+\.[0-9]+\.[0-9]+' /tmp/smoke/.node-version; else test ! -e /tmp/smoke/.node-version; fi
-if has deno; then grep -qxE '[0-9]+\.[0-9]+\.[0-9]+' /tmp/smoke/.dvmrc; else test ! -e /tmp/smoke/.dvmrc; fi
+if has bun; then grep -qxE '[0-9]+\.[0-9]+\.[0-9]+' "$SMOKE/.bun-version"; else test ! -e "$SMOKE/.bun-version"; fi
+if has node; then grep -qxE '[0-9]+\.[0-9]+\.[0-9]+' "$SMOKE/.node-version"; else test ! -e "$SMOKE/.node-version"; fi
+if has deno; then grep -qxE '[0-9]+\.[0-9]+\.[0-9]+' "$SMOKE/.dvmrc"; else test ! -e "$SMOKE/.dvmrc"; fi
 
 # copilot-setup-steps belongs to the agents module; the toolchain installs
 # inside it splice from the toolchain module fragments.
@@ -652,7 +670,7 @@ test ! -e "$wf/template-sync.yml"
 # post-render task. Entry classes and hashes are read with python3 (the
 # manifest is JSON), independently of the stamping and validation code
 # under test.
-manifest=/tmp/smoke/.github/repo-platform-manifest.json
+manifest=$SMOKE/.github/repo-platform-manifest.json
 test -f "$manifest"
 python3 -m json.tool "$manifest" > /dev/null
 mf() { # <path> <field> -> the entry's field, "null", "absent", or "missing"
@@ -697,7 +715,7 @@ want_security="$(python3 -c 'import hashlib, sys
 lines = open(sys.argv[1], "rb").read().split(b"\n")
 idx = next(i for i, line in enumerate(lines) if line.strip() == sys.argv[2].encode())
 half = b"\n".join(lines[: idx + 1]) + (b"\n" if idx + 1 < len(lines) else b"")
-print(hashlib.sha256(half).hexdigest())' /tmp/smoke/SECURITY.md "$(mf SECURITY.md marker)")"
+print(hashlib.sha256(half).hexdigest())' "$SMOKE/SECURITY.md" "$(mf SECURITY.md marker)")"
 if [ "$(mf SECURITY.md hash)" != "$want_security" ]; then
   echo "::error::manifest check failed: the recorded hash for SECURITY.md in $manifest does not cover its managed half (through the marker line) for modules=$MODULES private=$PRIVATE. Fix stamp_manifest.ts (or this expectation in verify_smoke_gating.sh)."
   exit 1
@@ -711,7 +729,7 @@ fi
 # would parse as a
 # number (an all-digit or exponent-form sha, ~4% of them), so strip the
 # optional surrounding quotes or the comparison fails on a sha lottery.
-answers_commit="$(sed -n "s/^_commit:[[:space:]]*//p" /tmp/smoke/.copier-answers.yml \
+answers_commit="$(sed -n "s/^_commit:[[:space:]]*//p" "$SMOKE/.copier-answers.yml" \
   | sed -e "s/^'\(.*\)'\$/\1/" -e 's/^"\(.*\)"$/\1/')"
 if [ -z "$answers_commit" ] || [ "$(mf ".github/repo-platform-manifest.json" commit)" != "$answers_commit" ]; then
   echo "::error::manifest check failed: the manifest's provenance commit in $manifest does not match the _commit recorded in .copier-answers.yml ('$answers_commit') for modules=$MODULES private=$PRIVATE. Fix this harness's _commit extraction first (quote stripping), then stamp_manifest.ts."

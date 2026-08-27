@@ -19,9 +19,62 @@
 # longer renders and the pre-relicense LICENSE shape.
 set -euo pipefail
 GITHUB_WORKSPACE="${GITHUB_WORKSPACE:-$(pwd)}"
+# The script cd's around; pin repo-scoped git calls and cleanup to the root.
+REPO_ROOT="$(pwd)"
 
-PROJECT=/tmp/upgrade
-WORK=/tmp/upgrade-work
+# Every run gets its own fixture directory AND its own ref namespace, both
+# keyed on one random token. Linked worktrees share a single ref store and
+# a single /tmp, so two concurrent local runs used to delete each other's
+# build tags mid-flight ("pathspec 'ci-build/old' did not match any
+# file(s) known to git") and overwrite each other's fixtures. In CI the
+# harness runs alone, so isolation only ever costs a uniquely named
+# directory. Cleanup runs from the EXIT trap, which covers ordinary
+# failures and Ctrl-C. A SIGKILLed run leaves EVERYTHING behind - the
+# directory, its worktree admin entry, and its tags (SIGKILL skips EXIT
+# traps, and the prune below only drops admin entries whose directories
+# are already gone) - so sweep by hand:
+#   git tag -l 'ci-build-*/*'          # stray tag namespaces
+#   git branch --list 'ci-build-*'     # stray build branches
+#   git worktree list                  # stray worktree admin entries
+TMP_ROOT="${TMPDIR:-/tmp}"
+# Normalized to an absolute path: the harness cd's between the repo and
+# its fixtures, so a relative "$RUN_DIR/..." (cleanup rm included) would
+# resolve against whatever directory happens to be current. A TMPDIR that
+# lands INSIDE the repo checkout is rejected outright rather than
+# relocated: branch_tree.ts refuses any destination beneath the repo, the
+# nested worktree would sit inside the main worktree, and a silent
+# relocation would surprise - fail loud, before any namespace exists.
+TMP_ROOT_ABS="$(cd "$TMP_ROOT" 2>/dev/null && pwd)" || {
+  echo "FAIL: TMPDIR '$TMP_ROOT' does not exist or cannot be entered" >&2
+  exit 1
+}
+case "$TMP_ROOT_ABS/" in
+  "$REPO_ROOT/" | "$REPO_ROOT"/*)
+    echo "FAIL: TMPDIR resolves to '$TMP_ROOT_ABS', inside the repo checkout '$REPO_ROOT' - the harness's fixtures cannot live under the repo (branch_tree.ts refuses such destinations and the nested worktree would sit inside the main worktree); point TMPDIR outside the checkout" >&2
+    exit 1
+    ;;
+esac
+RUN_DIR="$(cd "$(mktemp -d "${TMP_ROOT_ABS%/}/upgrade-path.XXXXXX")" && pwd)"
+REF_NS="ci-build-${RUN_DIR##*.}"
+OLD_TAG="$REF_NS/old"
+NEW_TAG="$REF_NS/new"
+SPLIT_TAG="$REF_NS/split"
+WT="$RUN_DIR/wt"
+
+PROJECT="$RUN_DIR/upgrade"
+WORK="$RUN_DIR/upgrade-work"
+OLD_TREE="$RUN_DIR/old-tree"
+NEXT_TREE="$RUN_DIR/next"
+
+# Armed immediately after the namespace exists, so nothing between here and
+# the first fixture can leak it.
+cleanup() {
+  git -C "$REPO_ROOT" worktree remove --force "$WT" 2>/dev/null || true
+  git -C "$REPO_ROOT" branch -q -D "$REF_NS" 2>/dev/null || true
+  git -C "$REPO_ROOT" tag -d "$OLD_TAG" "$NEW_TAG" "$SPLIT_TAG" 2>/dev/null || true
+  rm -rf "$RUN_DIR"
+}
+trap cleanup EXIT
 
 # The fleet LICENSE template carries its Required Notice and its
 # local-section marker as jinja variables; comparisons against rendered
@@ -62,25 +115,15 @@ select_modules() {
   printf '%s\n' "$out"
 }
 
-# Idempotent local reruns: drop the artifacts of a previous run.
-rm -rf "$PROJECT" "$WORK" /tmp/next /tmp/old-tree /tmp/upgrade-vis /tmp/upgrade-vis-work /tmp/upgrade-del /tmp/upgrade-del-hunks.md /tmp/upgrade-settings /tmp/upgrade-settings-work /tmp/settings-layering.md /tmp/upgrade-trip /tmp/upgrade-trip-work
+# $RUN_DIR is fresh by construction, so there is nothing of ours to clear
+# first - and nothing of anyone else's to destroy, which is exactly what
+# the old fixed-path cleanup did to a concurrent run.
 mkdir -p "$WORK"
-git worktree remove --force /tmp/wt 2>/dev/null || true
+# Safe under concurrency: this only drops admin entries whose working tree
+# directory is already GONE - it cannot touch a live run's, and it does
+# NOT collect after a SIGKILLed run (the directory survives; see the
+# manual sweep recipe in the header).
 git worktree prune
-git branch -q -D ci-build 2>/dev/null || true
-git tag -d ci-build/old 2>/dev/null || true
-git tag -d ci-build/new 2>/dev/null || true
-
-# ... and never leave the fixture tags behind either: locally they land in
-# the real repo's tag namespace. The script cd's around, so pin cleanup to
-# the repo root.
-REPO_ROOT="$(pwd)"
-cleanup() {
-  git -C "$REPO_ROOT" worktree remove --force /tmp/wt 2>/dev/null || true
-  git -C "$REPO_ROOT" branch -q -D ci-build 2>/dev/null || true
-  git -C "$REPO_ROOT" tag -d ci-build/old ci-build/new 2>/dev/null || true
-}
-trap cleanup EXIT
 
 bun install --frozen-lockfile
 
@@ -92,21 +135,21 @@ bun install --frozen-lockfile
 # old or copier's downgrade check trips on hash ordering.
 commit_build_tree() { # <tree-dir> <tag> [parent-ref]
   if [ -n "${3:-}" ]; then
-    git worktree add --detach --quiet /tmp/wt "$3"
-    git -C /tmp/wt switch --quiet -c ci-build
+    git worktree add --detach --quiet "$WT" "$3"
+    git -C "$WT" switch --quiet -c "$REF_NS"
   else
-    git worktree add --detach --quiet /tmp/wt HEAD
-    git -C /tmp/wt switch --quiet --orphan ci-build
+    git worktree add --detach --quiet "$WT" HEAD
+    git -C "$WT" switch --quiet --orphan "$REF_NS"
   fi
-  rsync -a --delete --exclude=.git "$1/" /tmp/wt/
-  git -C /tmp/wt add -A
-  git -C /tmp/wt -c user.name=ci -c user.email=ci@localhost commit -q -m "build(ci): $2"
-  git tag "$2" "$(git -C /tmp/wt rev-parse HEAD)"
-  git worktree remove --force /tmp/wt
-  git branch -q -D ci-build
+  rsync -a --delete --exclude=.git "$1/" "$WT/"
+  git -C "$WT" add -A
+  git -C "$WT" -c user.name=ci -c user.email=ci@localhost commit -q -m "build(ci): $2"
+  git tag "$2" "$(git -C "$WT" rev-parse HEAD)"
+  git worktree remove --force "$WT"
+  git branch -q -D "$REF_NS"
 }
 
-prev=ci-build/old
+prev="$OLD_TAG"
 echo "Building synthetic old fixture ${prev}"
 # Same templates, same tooling: the fixture is the current tree assembled
 # by the current tooling, plus one extra template-managed file the new
@@ -114,19 +157,19 @@ echo "Building synthetic old fixture ${prev}"
 # exists for; the test resurrects it after the update (see below) so the
 # deletion loop runs against a real file regardless of copier's own delete
 # behavior.
-bun .github/scripts/build-branches/branch_tree.ts --dest /tmp/old-tree
-echo "retired sentinel" > /tmp/old-tree/template/.github/retired-sentinel.txt
+bun .github/scripts/build-branches/branch_tree.ts --dest "$OLD_TREE"
+echo "retired sentinel" > "$OLD_TREE/template/.github/retired-sentinel.txt"
 # Model the historical fleet state the relicensing moved away from: the
 # old template shipped a different LICENSE, ungated and listed in
 # _skip_if_exists. Without this the synthetic fixture would already carry
 # the current license and the transition assertions below would be
 # vacuous.
-rm "/tmp/old-tree/template/{% if 'custom-license' not in modules %}LICENSE.md{% endif %}.jinja"
-echo "Old fleet license (pre-relicense fixture)" > /tmp/old-tree/template/LICENSE
-awk '{print} /^_skip_if_exists:/{print "  - LICENSE"}' /tmp/old-tree/copier.yml \
-  > /tmp/old-tree/copier.yml.tmp
-mv /tmp/old-tree/copier.yml.tmp /tmp/old-tree/copier.yml
-commit_build_tree /tmp/old-tree "$prev"
+rm "$OLD_TREE/template/{% if 'custom-license' not in modules %}LICENSE.md{% endif %}.jinja"
+echo "Old fleet license (pre-relicense fixture)" > "$OLD_TREE/template/LICENSE"
+awk '{print} /^_skip_if_exists:/{print "  - LICENSE"}' "$OLD_TREE/copier.yml" \
+  > "$OLD_TREE/copier.yml.tmp"
+mv "$OLD_TREE/copier.yml.tmp" "$OLD_TREE/copier.yml"
+commit_build_tree "$OLD_TREE" "$prev"
 echo "Testing upgrade path ${prev} -> fresh build"
 
 copier copy "$GITHUB_WORKSPACE" "$PROJECT" \
@@ -192,10 +235,10 @@ git -c user.name=ci -c user.email=ci@localhost commit -q -m "chore: local modifi
 # Assemble the would-be next release INTO THE WORKSPACE CLONE, chained
 # onto the previous build tag (see commit_build_tree) + a local tag.
 cd "$GITHUB_WORKSPACE"
-bun .github/scripts/build-branches/branch_tree.ts --dest /tmp/next
-commit_build_tree /tmp/next ci-build/new "$prev"
+bun .github/scripts/build-branches/branch_tree.ts --dest "$NEXT_TREE"
+commit_build_tree "$NEXT_TREE" "$NEW_TAG" "$prev"
 git show "${prev}:copier.yml" > "$WORK/copier-old.yml"
-git show ci-build/new:copier.yml > "$WORK/copier-new.yml"
+git show "$NEW_TAG":copier.yml > "$WORK/copier-new.yml"
 
 # Module selection exactly as reusable-template-sync computes it: the
 # target's .repo-platform.yml filtered against the new template's choices.
@@ -220,7 +263,7 @@ export DESCRIPTION="Upgraded description"
 # modules plus live private/description, so drift in any of them
 # re-renders.
 export TARGET_DIR="$PROJECT"
-export TARGET_REF=ci-build/new
+export TARGET_REF="$NEW_TAG"
 RECOVER="" bun .github/scripts/sync/apply_update.ts
 bun .github/scripts/sync/resolve_copier_conflicts.ts \
   --summary "$WORK/dropped-local-hunks.md" --root "$PROJECT"
@@ -271,8 +314,8 @@ bun "$GITHUB_WORKSPACE/actions/validate-template/validate_generated_files.ts" "$
 
 cd "$PROJECT"
 # _commit must record the build tag (git describe lands exactly on it).
-grep -qF "_commit: ci-build/new" .copier-answers.yml \
-  || fail ".copier-answers.yml does not record ci-build/new"
+grep -qF "_commit: $NEW_TAG" .copier-answers.yml \
+  || fail ".copier-answers.yml does not record $NEW_TAG"
 # Files the template retired must be gone: settings-sync.yml left the
 # render with the module deselection, and the synthetic sentinel left the
 # template between builds despite its local edit.
@@ -367,7 +410,7 @@ print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$1"
   || fail "the manifest's own hash entry must stay null (self-hash is circular)"
 # Provenance rides the self entry: the stamper writes the render's recorded
 # _commit, which is what lets the validator tell skew from deletion.
-[ "$(mf ".github/repo-platform-manifest.json" commit)" = "ci-build/new" ] \
+[ "$(mf ".github/repo-platform-manifest.json" commit)" = "$NEW_TAG" ] \
   || fail "the manifest's provenance commit was not stamped with the updated render's _commit"
 echo "upgrade path OK: retired files deleted, sentinels preserved, configuration kept"
 
@@ -415,8 +458,8 @@ bun "$GITHUB_WORKSPACE/.github/scripts/sync/preserve_local_content.ts" \
 RECOVER=recopy RUNNER_TEMP="$WORK" bun "$GITHUB_WORKSPACE/.github/scripts/sync/preserve_repo_owned.ts"
 TARGET_DIR="$PROJECT" bun "$GITHUB_WORKSPACE/.github/scripts/sync/stamp_manifest.ts"
 
-grep -qF "_commit: ci-build/new" .copier-answers.yml \
-  || fail "recovery did not re-record _commit as ci-build/new"
+grep -qF "_commit: $NEW_TAG" .copier-answers.yml \
+  || fail "recovery did not re-record _commit as $NEW_TAG"
 grep -qF "# local checks note" .github/workflows/checks.yml \
   || fail "recovery overwrote the generated-once checks.yml (_skip_if_exists must hold under recopy --overwrite)"
 grep -qF "# local issue form note" .github/ISSUE_TEMPLATE/bug_report.yml \
@@ -463,8 +506,8 @@ echo "recovery recopy OK: skip_if_exists, repo-owned files, and repo-local conte
 # strip the codeql machinery from ci.yml. Runs on a fresh public fixture
 # through the same workflow scripts as the main leg, with settings-sync
 # KEPT selected - only the visibility changes.
-VIS=/tmp/upgrade-vis
-VIS_WORK=/tmp/upgrade-vis-work
+VIS="$RUN_DIR/upgrade-vis"
+VIS_WORK="$RUN_DIR/upgrade-vis-work"
 mkdir -p "$VIS_WORK"
 
 cd "$GITHUB_WORKSPACE"
@@ -507,7 +550,7 @@ git -c user.name=ci -c user.email=ci@localhost commit -q -m "chore: divergent li
 # the recorded answers still say false - the drift the sync re-renders.
 cd "$GITHUB_WORKSPACE"
 git show "${prev}:copier.yml" > "$VIS_WORK/copier-old.yml"
-git show ci-build/new:copier.yml > "$VIS_WORK/copier-new.yml"
+git show "$NEW_TAG":copier.yml > "$VIS_WORK/copier-new.yml"
 MODULES="$(select_modules \
   --repo-file "$VIS/.repo-platform.yml" \
   --template-copier "$VIS_WORK/copier-new.yml" \
@@ -516,7 +559,7 @@ export MODULES
 export PRIVATE=true
 export DESCRIPTION="Visibility-flip project"
 export TARGET_DIR="$VIS"
-export TARGET_REF=ci-build/new
+export TARGET_REF="$NEW_TAG"
 RECOVER="" bun .github/scripts/sync/apply_update.ts
 bun .github/scripts/sync/resolve_copier_conflicts.ts \
   --summary "$VIS_WORK/dropped-local-hunks.md" --root "$VIS"
@@ -614,14 +657,14 @@ echo "visibility flip OK: CONTRIBUTING.md retired, settings starter untouched, c
 # never lists the path (LICENSE.md is in both renders), and HEAD has no
 # copy to restore - the preserve step
 # must re-seed the fleet license from the target build ref.
-DEL=/tmp/upgrade-del
+DEL="$RUN_DIR/upgrade-del"
 cd "$GITHUB_WORKSPACE"
 # Rendered from the NEW build: the re-seed hole only exists when the base
 # already carried LICENSE.md and the local diff deletes it (a fixture on
 # the old build gets LICENSE.md as a fresh render, which never needs the
 # re-seed).
 copier copy "$GITHUB_WORKSPACE" "$DEL" \
-  --vcs-ref ci-build/new --defaults --trust \
+  --vcs-ref "$NEW_TAG" --defaults --trust \
   -d project_name="License Deletion" \
   -d description="License-deletion project" \
   -d 'modules=[agents]' \
@@ -637,11 +680,11 @@ export MODULES='["agents"]'
 export PRIVATE=false
 export DESCRIPTION="License-deletion project"
 export TARGET_DIR="$DEL"
-export TARGET_REF=ci-build/new
+export TARGET_REF="$NEW_TAG"
 RECOVER="" bun .github/scripts/sync/apply_update.ts
 bun .github/scripts/sync/resolve_copier_conflicts.ts \
-  --summary /tmp/upgrade-del-hunks.md --root "$DEL"
-RECOVER="" RUNNER_TEMP=/tmp bun .github/scripts/sync/preserve_repo_owned.ts
+  --summary "$RUN_DIR/upgrade-del-hunks.md" --root "$DEL"
+RECOVER="" RUNNER_TEMP="$RUN_DIR" bun .github/scripts/sync/preserve_repo_owned.ts
 rendered_fleet_license | cmp -s "$DEL/LICENSE.md" - \
   || fail "a committed LICENSE deletion did not re-converge to the mandatory fleet license"
 echo "license deletion OK: fleet license re-seeded"
@@ -659,19 +702,16 @@ echo "license deletion OK: fleet license re-seeded"
 # halves must equal render-new byte-for-byte, the managed-half edit must
 # be reset and flagged for review, and no split file may appear in the
 # dropped-hunks summary. Self-contained: fresh fixture, its own build tag
-# (ci-build/split, chained on ci-build/new), its own trap layer.
-SPLIT=/tmp/upgrade-split
-SPLIT_WORK=/tmp/upgrade-split-work
-rm -rf "$SPLIT" "$SPLIT_WORK" /tmp/next-split /tmp/upgrade-split-local-expected.txt
+# (the run namespace's split tag, chained on its new tag). No trap layer of
+# its own any more - the one cleanup already owns every tag in the
+# namespace, and nothing of a previous run can be in the way.
+SPLIT="$RUN_DIR/upgrade-split"
+SPLIT_WORK="$RUN_DIR/upgrade-split-work"
+NEXT_SPLIT="$RUN_DIR/next-split"
 mkdir -p "$SPLIT_WORK"
-cleanup_split() {
-  git -C "$REPO_ROOT" tag -d ci-build/split 2>/dev/null || true
-}
-trap 'cleanup_split; cleanup' EXIT
-cleanup_split
 
 cd "$GITHUB_WORKSPACE"
-cp -R /tmp/next /tmp/next-split
+cp -R "$NEXT_TREE" "$NEXT_SPLIT"
 # Perturb the managed half of each split grammar in the new build: a line
 # above AGENTS.md's and SECURITY.md's local-section sentinel, a pattern
 # inside .gitignore's managed section.
@@ -682,20 +722,20 @@ insert_above_sentinel() { # <file> <line>
   mv "$1.tmp" "$1"
   grep -qF "$2" "$1" || fail "could not perturb the managed half of $1"
 }
-agents_tpl="$(find /tmp/next-split/template -maxdepth 1 -name "*AGENTS.md*.jinja" | head -n 1)"
+agents_tpl="$(find "$NEXT_SPLIT/template" -maxdepth 1 -name "*AGENTS.md*.jinja" | head -n 1)"
 test -n "$agents_tpl" || fail "no AGENTS.md template in the assembled build tree"
 insert_above_sentinel "$agents_tpl" "Split-rebuild fixture managed line (agents)."
-insert_above_sentinel /tmp/next-split/template/SECURITY.md.jinja \
+insert_above_sentinel "$NEXT_SPLIT/template/SECURITY.md.jinja" \
   "Split-rebuild fixture managed line (security)."
 awk '{ print } $0 == "# BEGIN REPO-PLATFORM MANAGED" && !done { print "split-rebuild-fixture.tmp"; done = 1 }' \
-  /tmp/next-split/template/.gitignore.jinja > /tmp/next-split/template/.gitignore.jinja.tmp
-mv /tmp/next-split/template/.gitignore.jinja.tmp /tmp/next-split/template/.gitignore.jinja
-grep -qxF "split-rebuild-fixture.tmp" /tmp/next-split/template/.gitignore.jinja \
+  "$NEXT_SPLIT/template/.gitignore.jinja" > "$NEXT_SPLIT/template/.gitignore.jinja.tmp"
+mv "$NEXT_SPLIT/template/.gitignore.jinja.tmp" "$NEXT_SPLIT/template/.gitignore.jinja"
+grep -qxF "split-rebuild-fixture.tmp" "$NEXT_SPLIT/template/.gitignore.jinja" \
   || fail "could not perturb .gitignore's managed section"
-commit_build_tree /tmp/next-split ci-build/split ci-build/new
+commit_build_tree "$NEXT_SPLIT" "$SPLIT_TAG" "$NEW_TAG"
 
 copier copy "$GITHUB_WORKSPACE" "$SPLIT" \
-  --vcs-ref ci-build/new --defaults --trust \
+  --vcs-ref "$NEW_TAG" --defaults --trust \
   -d project_name="Split Rebuild" \
   -d description="Split-rebuild project" \
   -d 'modules=[agents]' \
@@ -716,7 +756,7 @@ awk '/^# END REPOSITORY LOCAL$/ { print "split-local-cache/" } { print }' .gitig
 mv .gitignore.tmp .gitignore
 # The expected post-update LOCAL region: the rebuild must carry this body
 # byte-for-byte (markers included).
-awk '/^# BEGIN REPOSITORY LOCAL$/, /^# END REPOSITORY LOCAL$/' .gitignore > /tmp/upgrade-split-local-expected.txt
+awk '/^# BEGIN REPOSITORY LOCAL$/, /^# END REPOSITORY LOCAL$/' .gitignore > "$SPLIT_WORK/local-expected.txt"
 awk 'NR == 2 { print "split-local hand edit inside the managed half" } { print }' SECURITY.md > SECURITY.md.tmp
 mv SECURITY.md.tmp SECURITY.md
 grep -qF "split-local hand edit" SECURITY.md || fail "could not plant the managed-half edit"
@@ -731,13 +771,13 @@ export MODULES='["agents"]'
 export PRIVATE=false
 export DESCRIPTION="Split-rebuild project"
 export TARGET_DIR="$SPLIT"
-export TARGET_REF=ci-build/split
+export TARGET_REF="$SPLIT_TAG"
 RECOVER="" bun .github/scripts/sync/apply_update.ts
 answers_split="$(git -C "$SPLIT" show HEAD:.copier-answers.yml)"
 src_path_split="$(sed -n 's/^_src_path: //p' <<<"$answers_split")"
 test -n "$src_path_split" || fail "split fixture records no _src_path"
 RUNNER_TEMP="$SPLIT_WORK" SRC_PATH="$src_path_split" \
-  OLD_SHA="$(git rev-parse "ci-build/new^{commit}")" \
+  OLD_SHA="$(git rev-parse "$NEW_TAG^{commit}")" \
   bun .github/scripts/sync/clean_renders.ts
 bun .github/scripts/sync/preserve_local_content.ts \
   --summary "$SPLIT_WORK/local-carryover.md" --root "$SPLIT" \
@@ -747,10 +787,10 @@ bun .github/scripts/sync/preserve_local_content.ts \
 bun .github/scripts/sync/resolve_copier_conflicts.ts \
   --summary "$SPLIT_WORK/dropped-local-hunks.md" --root "$SPLIT" \
   --skip "$SPLIT_WORK/split-rebuilt-paths.txt"
-git show "ci-build/new:copier.yml" > "$SPLIT_WORK/copier-old.yml"
-git show "ci-build/split:copier.yml" > "$SPLIT_WORK/copier-new.yml"
+git show "$NEW_TAG:copier.yml" > "$SPLIT_WORK/copier-old.yml"
+git show "$SPLIT_TAG:copier.yml" > "$SPLIT_WORK/copier-new.yml"
 RUNNER_TEMP="$SPLIT_WORK" SRC_PATH="$src_path_split" \
-  OLD_SHA="$(git rev-parse "ci-build/new^{commit}")" \
+  OLD_SHA="$(git rev-parse "$NEW_TAG^{commit}")" \
   bun .github/scripts/sync/retired_cleanup.ts
 RECOVER="" RUNNER_TEMP="$SPLIT_WORK" bun .github/scripts/sync/preserve_repo_owned.ts
 TARGET_DIR="$SPLIT" bun .github/scripts/sync/stamp_manifest.ts
@@ -784,7 +824,7 @@ fi
 # the managed half (from the BEGIN marker to end of file) byte-equal to
 # render-new's.
 awk '/^# BEGIN REPOSITORY LOCAL$/, /^# END REPOSITORY LOCAL$/' .gitignore > "$SPLIT_WORK/local-actual.txt"
-cmp -s /tmp/upgrade-split-local-expected.txt "$SPLIT_WORK/local-actual.txt" \
+cmp -s "$SPLIT_WORK/local-expected.txt" "$SPLIT_WORK/local-actual.txt" \
   || fail ".gitignore's REPOSITORY LOCAL region is not byte-preserved"
 awk '/^# BEGIN REPO-PLATFORM MANAGED$/, 0' .gitignore > "$SPLIT_WORK/managed-actual.txt"
 awk '/^# BEGIN REPO-PLATFORM MANAGED$/, 0' "$SPLIT_WORK/render-new/.gitignore" \
@@ -820,12 +860,12 @@ echo "split-file rebuild OK: tails byte-preserved, managed halves byte-equal to 
 # baseline) in the PR-body section that holds the PR for review. Fixture
 # on the NEW build: the legacy file shape is planted by hand, because no
 # current template renders it.
-SET=/tmp/upgrade-settings
-SET_WORK=/tmp/upgrade-settings-work
+SET="$RUN_DIR/upgrade-settings"
+SET_WORK="$RUN_DIR/upgrade-settings-work"
 mkdir -p "$SET_WORK"
 cd "$GITHUB_WORKSPACE"
 copier copy "$GITHUB_WORKSPACE" "$SET" \
-  --vcs-ref ci-build/new --defaults --trust \
+  --vcs-ref "$NEW_TAG" --defaults --trust \
   -d project_name="Settings Transition" \
   -d description="Settings-transition project" \
   -d 'modules=[uv, settings-sync]' \
@@ -865,7 +905,7 @@ export MODULES='["uv", "settings-sync"]'
 export PRIVATE=false
 export DESCRIPTION="Live transition description"
 export TARGET_DIR="$SET"
-export TARGET_REF=ci-build/new
+export TARGET_REF="$NEW_TAG"
 RECOVER="" bun .github/scripts/sync/apply_update.ts
 bun .github/scripts/sync/resolve_copier_conflicts.ts \
   --summary "$SET_WORK/dropped-local-hunks.md" --root "$SET"
@@ -955,9 +995,9 @@ echo "settings layering transition OK: starter replaced once, custom topics carr
 # manual-review path (auto-merge off). Reuses the NEW build (no extra
 # tag); gh is stubbed, so open_pr.ts's body and arm decisions are
 # observable without a network.
-TRIP="${RUN_DIR:-/tmp}/upgrade-trip"
-TRIP_WORK="${RUN_DIR:-/tmp}/upgrade-trip-work"
-TRIP_REF="${REF_NS:-ci-build}/new"
+TRIP="$RUN_DIR/upgrade-trip"
+TRIP_WORK="$RUN_DIR/upgrade-trip-work"
+TRIP_REF="$REF_NS/new"
 rm -rf "$TRIP" "$TRIP_WORK"
 mkdir -p "$TRIP_WORK"
 cd "$GITHUB_WORKSPACE"

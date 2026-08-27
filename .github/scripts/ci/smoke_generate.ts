@@ -1,30 +1,40 @@
 #!/usr/bin/env bun
-// Render a smoke-test project into /tmp/smoke for one CI matrix row: main
-// carries only templates/ sources, so assemble the consumable build tree
-// (what the template branch holds) and `copier copy` from it.
+// Render a smoke-test project (by default into /tmp/smoke) for one CI
+// matrix row: main carries only templates/ sources, so assemble the
+// consumable build tree (what the template branch holds) and `copier copy`
+// from it.
 //
 // Inputs (env): MODULES (YAML list as a string), PRIVATE, EXTRA_DATA
 // (optional extra -d args; values must stay whitespace-free - the string
 // is split on spaces, so add a matrix field instead for anything that
 // needs them).
+//
+// SMOKE_DIR overrides where the project is rendered and BUILD_TREE_DIR
+// where the build tree is assembled. Both default to the historical paths,
+// so ci.yml passes neither. They exist because two concurrent local runs
+// otherwise fight over the same two directories, and the verification step
+// (ci/verify_smoke_gating.sh) already takes SMOKE_DIR for the same reason -
+// pass the same value to both to run a whole smoke leg in isolation.
 
 import { env, requireEnv } from "../shared/gha.ts";
 import { must } from "../shared/proc.ts";
 
 const modules = requireEnv("MODULES");
 const isPrivate = requireEnv("PRIVATE");
+const smokeDir = env("SMOKE_DIR", "/tmp/smoke");
+const buildTree = env("BUILD_TREE_DIR", "/tmp/build-tree");
 const extraData = env("EXTRA_DATA")
   .split(/\s+/)
   .filter((arg) => arg !== "");
 
 must(["bun", "install", "--frozen-lockfile"]);
-must(["bun", ".github/scripts/build-branches/branch_tree.ts", "--dest", "/tmp/build-tree"]);
-must(["git", "-C", "/tmp/build-tree", "init", "-q", "-b", "build"]);
-must(["git", "-C", "/tmp/build-tree", "add", "-A"]);
+must(["bun", ".github/scripts/build-branches/branch_tree.ts", "--dest", buildTree]);
+must(["git", "-C", buildTree, "init", "-q", "-b", "build"]);
+must(["git", "-C", buildTree, "add", "-A"]);
 must([
   "git",
   "-C",
-  "/tmp/build-tree",
+  buildTree,
   "-c",
   "user.name=ci",
   "-c",
@@ -38,8 +48,8 @@ must([
 must([
   "copier",
   "copy",
-  "/tmp/build-tree",
-  "/tmp/smoke",
+  buildTree,
+  smokeDir,
   "--vcs-ref",
   "HEAD",
   "--defaults",
