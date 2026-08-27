@@ -572,13 +572,17 @@ export function gateJobsGroups(manifests: ModuleManifest[]): GateJobsGroup[] {
  *  ARE the job ids, whatever YAML spelling they use. Every parsed key must
  *  also appear as a literal 2-space key line in the RAW fragment (jinja
  *  comments stripped) - a jinja-derived key would enumerate as one
- *  spelling and render as another. Throws on anything that fails either
- *  bar, so honest-mistake shapes (a new job spelling, a typo) fail closed
- *  rather than escape the parity check. Scope: value-side jinja CAN still
- *  synthesize rendered structure this scan never sees; that is out of
- *  scope here - this repo's review gates and the render-side validator's
- *  all-green needs-completeness check (run by smoke-generate on every
- *  push) are the backstop. */
+ *  spelling and render as another. A key line inside a jinja {% if %}
+ *  block throws too: the normalization strips statement tags with bodies
+ *  KEPT, so a conditioned job would enumerate as unconditional and the
+ *  composer would emit a needs entry a render without the condition never
+ *  satisfies. Throws on anything that fails any bar, so honest-mistake
+ *  shapes (a new job spelling, a typo) fail closed rather than escape the
+ *  parity check. Scope: value-side jinja CAN still synthesize rendered
+ *  structure this scan never sees; that is out of scope here - this
+ *  repo's review gates and the render-side validator's all-green
+ *  needs-completeness check (run by smoke-generate on every push) are the
+ *  backstop. */
 export function fragmentJobIds(body: Buffer): string[] {
   const raw = body.toString("utf-8");
   const vars = { username: "OWNER", slug: "SLUG", copyrightHolder: "HOLDER" };
@@ -590,12 +594,57 @@ export function fragmentJobIds(body: Buffer): string[] {
   }
   // Literal-key collection ignores jinja comments: a key-shaped line inside
   // a comment renders to nothing, so it must never vouch for a parsed key.
+  // Key lines and if/endif statement tags are walked in position order with
+  // an if-depth counter: a key at depth > 0 is a conditioned job and throws
+  // (value-side statements inside a job's body sit at depth > 0 too, but
+  // their lines are never 2-space key lines, so only keys can trip this).
   const commentFree = raw.replace(/\{#-?[\s\S]*?-?#\}/g, "");
-  const rawKeys = new Set(
-    [...commentFree.matchAll(/^ {2}("[^"\n]*"|'[^'\n]*'|[^\s'"][^\n:]*?)\s*:(?:\s|$)/gm)].map((m) =>
-      m[1].replace(/^(["'])(.*)\1$/, "$2"),
-    ),
-  );
+  type Event = { at: number; step: 1 | -1 } | { at: number; key: string };
+  const events: Event[] = [];
+  for (const m of commentFree.matchAll(/\{%-?\s*(if|endif)\b[^%]*?-?%\}/g)) {
+    events.push({ at: m.index ?? 0, step: m[1] === "if" ? 1 : -1 });
+  }
+  const keyLineRe = /^ {2}("[^"\n]*"|'[^'\n]*'|[^\s'"][^\n:]*?)\s*:(?:\s|$)/gm;
+  for (const m of commentFree.matchAll(keyLineRe)) {
+    events.push({ at: m.index ?? 0, key: m[1].replace(/^(["'])(.*)\1$/, "$2") });
+  }
+  events.sort((a, b) => a.at - b.at);
+  const rawKeys = new Set<string>();
+  let depth = 0;
+  for (const event of events) {
+    if ("step" in event) {
+      depth += event.step;
+      // Unbalanced tags void the depth walk: a fragment closing the
+      // composer's own module gate could hide a conditioned key at an
+      // apparent depth of zero, so the walk trusts only balanced nesting.
+      if (depth < 0) {
+        throw new Error(
+          "the fragment closes a jinja {% if %} it never opened - statement " +
+            "tags must nest and balance inside the fragment (the composer's " +
+            "module gate wraps it whole); balance the tags",
+        );
+      }
+      continue;
+    }
+    if (depth > 0) {
+      throw new Error(
+        `job key '${event.key}' sits inside a jinja {% if %} block - the id ` +
+          "enumeration strips statement tags and would list the job as " +
+          "unconditional, so the composer would emit a needs entry a render " +
+          "without the condition never satisfies; gate jobs render " +
+          "unconditionally (module selection already gates the whole " +
+          "fragment), so drop the condition or move it onto the job's steps",
+      );
+    }
+    rawKeys.add(event.key);
+  }
+  if (depth !== 0) {
+    throw new Error(
+      "the fragment leaves a jinja {% if %} unclosed - statement tags must " +
+        "nest and balance inside the fragment (the composer's module gate " +
+        "wraps it whole); add the missing {% endif %}",
+    );
+  }
   const keys = Object.keys(jobs);
   for (const key of keys) {
     if (!rawKeys.has(key)) {
@@ -763,6 +812,45 @@ const DATA_ANCHORS: Record<string, DataAnchorSpec> = {
 // --- splicing ----------------------------------------------------------------
 
 const ANCHOR_HINT = Buffer.from("{# compose:");
+/** Loose recognizer for text MEANT to be an anchor marker: a jinja comment
+ *  opener with an optional trim dash and any same-line whitespace, then the
+ *  compose keyword. Both malformed-marker scans match this: the skeleton
+ *  scan then demands the strict ANCHOR_RE form, and the contribution scan
+ *  rejects every match outright (contributions may not carry markers at
+ *  all) - recognizing only the canonical ANCHOR_HINT spelling would let a
+ *  variant like '{#- compose:x #}' skip validation and vanish at render.
+ *  The colon is one boundary: prose like '{# composes the tree #}' stays a
+ *  plain comment. Horizontal whitespace is the other: markers are line
+ *  constructs (ANCHOR_RE is line-anchored), and the skeleton scan reads
+ *  line by line, so a newline inside the opener must not match here or the
+ *  two scans would disagree on the same bytes. */
+const ANCHOR_HINT_RE = /\{#-?[ \t]*compose:/;
+
+/** Marker scan over the RAW fragment bodies, before any transformation
+ *  moves their bytes: applyToolchainSetup prepends toolchain-setup.jinja
+ *  into the target fragments' contributions and the consume generators
+ *  fold several fragments into one built-in-generator contribution, so a
+ *  scan of the transformed contributions could only name the wrong source.
+ *  This one runs on the collected map, where every body still carries its
+ *  own path, so the error always names the file to edit. */
+export function fragmentMarkerErrors(fragments: Map<string, [ModuleManifest, Buffer][]>): string[] {
+  const errors: string[] = [];
+  for (const [anchor, list] of sortedByKey(fragments)) {
+    for (const [manifest, body] of list) {
+      const hint = ANCHOR_HINT_RE.exec(body.toString("latin1"));
+      if (hint) {
+        errors.push(
+          `templates/${manifest.module}/${FRAGMENTS_DIR}/${anchor}${JINJA_SUFFIX}: the ` +
+            `fragment contains an anchor marker ('${hint[0]}') - a marker inside a ` +
+            "fragment is never scanned or filled (anchors live in skeleton files " +
+            "only, each in exactly one); move the marker line to a skeleton file " +
+            "or remove it",
+        );
+      }
+    }
+  }
+  return errors;
+}
 
 function matchAnchor(line: Buffer): { name: string; tight: boolean; trailing: string } | null {
   // Bytes, matched as latin1: non-ASCII bytes can never satisfy the pattern.
@@ -834,7 +922,7 @@ export function spliceContributions(
     const { entry } = sourced;
     if (entry.kind === "symlink") continue;
     for (const line of splitLines(entry.data)) {
-      if (line.includes(ANCHOR_HINT) && matchAnchor(line) === null) {
+      if (ANCHOR_HINT_RE.test(line.toString("latin1")) && matchAnchor(line) === null) {
         errors.push(
           `templates/${sourceName(sourced)}/${logical}: malformed anchor line ` +
             `'${line.toString("utf-8").trim()}' - anchors must start the ` +
@@ -876,6 +964,31 @@ export function spliceContributions(
         logical,
         tight: anchor.tight,
       });
+    }
+  }
+
+  // Contributions are spliced verbatim, so an anchor marker inside one
+  // would dodge the skeleton scan above whole: it never registers an owner
+  // (contributions to it get the misleading no-anchor error), a malformed
+  // marker goes undiagnosed, and a well-formed one survives into the
+  // composed tree as a comment rendering to nothing. Anchors live in
+  // skeleton files only. In the composed pipeline fragmentMarkerErrors has
+  // already named the editable fragment for any smuggled marker (before
+  // the transformations copy fragment bytes into contributions with other
+  // sources); this scan is the seam's own backstop, so a caller feeding
+  // un-scanned contributions - or a generator synthesizing a marker -
+  // still fails closed.
+  for (const [anchor, list] of sortedByKey(contributions)) {
+    for (const { source, text } of list) {
+      const hint = ANCHOR_HINT_RE.exec(text.toString("latin1"));
+      if (hint) {
+        errors.push(
+          `${source}: the contribution to anchor '${anchor}' contains an anchor ` +
+            `marker ('${hint[0]}') - a marker inside a contribution is never ` +
+            "scanned or filled (anchors live in skeleton files only, each in " +
+            "exactly one); move the marker line to a skeleton file or remove it",
+        );
+      }
     }
   }
 
@@ -1356,6 +1469,7 @@ export function build(): Map<string, Entry> {
     ]),
   });
 
+  errors.push(...fragmentMarkerErrors(fragments));
   errors.push(...applyToolchainSetup(fragments));
 
   const agentsToolchainModules = new Set(

@@ -5,6 +5,8 @@
 // that the sharing rule must emit once behind an or-chain gate.
 
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import {
   agentsToolchainErrors,
   applyToolchainSetup,
@@ -15,6 +17,7 @@ import {
   dependabotLabels,
   ecosystemGroups,
   fragmentJobIds,
+  fragmentMarkerErrors,
   gateJobsGroups,
   gateJobsParityErrors,
   lockfileGroups,
@@ -112,7 +115,7 @@ describe("gateJobsGroups", () => {
 });
 
 describe("fragmentJobIds", () => {
-  test("collects the 2-space mapping keys, skipping comments, steps, and jinja", () => {
+  test("collects the 2-space mapping keys, skipping comments, steps, and value-side jinja", () => {
     const body = Buffer.from(
       [
         "  # a job comment",
@@ -120,14 +123,70 @@ describe("fragmentJobIds", () => {
         "    runs-on: ubuntu-latest",
         "    steps:",
         "      - uses: actions/checkout@v7",
-        "{%- if x %}",
         "  release-health:",
         "    runs-on: ubuntu-latest",
+        "{%- if x %}",
+        "    timeout-minutes: 5",
         "{%- endif %}",
         "",
       ].join("\n"),
     );
     expect(fragmentJobIds(body)).toEqual(["release-freshness", "release-health"]);
+  });
+
+  test("the live release-please fragment (value-side jinja only) still enumerates", () => {
+    const body = readFileSync(
+      join(import.meta.dir, "../../templates/release-please/fragments/ci-gate-jobs.jinja"),
+    );
+    expect(fragmentJobIds(body)).toEqual(["release-freshness", "release-health"]);
+  });
+
+  test("a job key inside a jinja {% if %} block throws (it would enumerate as unconditional)", () => {
+    const body = Buffer.from(
+      ["{%- if x %}", "  cond-job:", "    runs-on: ubuntu-latest", "{%- endif %}", ""].join("\n"),
+    );
+    expect(() => fragmentJobIds(body)).toThrow("gate jobs render unconditionally");
+  });
+
+  test("depth tracking: a key after nested statements close passes, one between them throws", () => {
+    const closed = Buffer.from(
+      [
+        "  ok-job:",
+        "    runs-on: ubuntu-latest",
+        "{% if a %}{% if b %}",
+        "    x: 1",
+        "{% endif %}{% endif %}",
+        "  after-job:",
+        "    runs-on: ubuntu-latest",
+        "",
+      ].join("\n"),
+    );
+    expect(fragmentJobIds(closed)).toEqual(["ok-job", "after-job"]);
+    const open = Buffer.from(
+      [
+        "  outer-job:",
+        "    runs-on: ubuntu-latest",
+        "{% if a %}{% if b %}",
+        "    x: 1",
+        "{% endif %}",
+        "  nested-job:",
+        "    runs-on: ubuntu-latest",
+        "{% endif %}",
+        "",
+      ].join("\n"),
+    );
+    expect(() => fragmentJobIds(open)).toThrow("gate jobs render unconditionally");
+  });
+
+  test("unbalanced statement tags throw - underflow could hide a conditioned key at depth zero", () => {
+    const underflow = Buffer.from(
+      ["{% endif %}", "  cond-job:", "    runs-on: ubuntu-latest", "{% if x %}", ""].join("\n"),
+    );
+    expect(() => fragmentJobIds(underflow)).toThrow("closes a jinja {% if %} it never opened");
+    const unclosed = Buffer.from(
+      ["  a-job:", "    runs-on: ubuntu-latest", "{% if x %}", "    y: 1", ""].join("\n"),
+    );
+    expect(() => fragmentJobIds(unclosed)).toThrow("leaves a jinja {% if %} unclosed");
   });
 
   test("job ids beyond gate_jobs' declarable shape still surface (they must fail parity, not escape)", () => {
@@ -166,6 +225,44 @@ describe("fragmentJobIds", () => {
       "{#-\n  safe:\n-#}\n  {{ 'safe' if private else 'evil' }}:\n    runs-on: ubuntu-latest\n",
     );
     expect(() => fragmentJobIds(body)).toThrow("literally");
+  });
+});
+
+describe("fragmentMarkerErrors", () => {
+  const frag = (
+    anchor: string,
+    module: string,
+    body: string,
+  ): [string, [ModuleManifest, Buffer][]] => [anchor, [[manifest(module, []), Buffer.from(body)]]];
+
+  test("a smuggled marker in toolchain-setup.jinja names toolchain-setup.jinja, not its targets", () => {
+    // applyToolchainSetup would copy the bytes into the auto-format and
+    // copilot-setup-steps contributions, whose sources name those targets;
+    // the raw-map scan runs first and names the file that carries the line.
+    const fragments = new Map([
+      frag("toolchain-setup", "uv", "{# compose:evil #}\nsteps\n"),
+      frag("auto-format", "uv", "fmt\n"),
+      frag("copilot-setup-steps", "uv", "setup\n"),
+    ]);
+    const errors = fragmentMarkerErrors(fragments);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain("templates/uv/fragments/toolchain-setup.jinja");
+  });
+
+  test("a smuggled marker in a generator-consumed fragment names that fragment", () => {
+    // The agents-toolchain consume generator folds its input fragments into
+    // one contribution sourced to the built-in generator; the raw-map scan
+    // still names the fragment.
+    const fragments = new Map([frag("agents-toolchain", "bun", "- bullet {#- compose:evil #}\n")]);
+    const errors = fragmentMarkerErrors(fragments);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain("templates/bun/fragments/agents-toolchain.jinja");
+    expect(errors[0]).toContain("'{#- compose:'");
+  });
+
+  test("marker-free fragments pass", () => {
+    const fragments = new Map([frag("ci-gate-jobs", "uv", "  job:\n    runs-on: x\n")]);
+    expect(fragmentMarkerErrors(fragments)).toEqual([]);
   });
 });
 
@@ -500,6 +597,75 @@ describe("spliceContributions", () => {
     expect(dataOf(files)).toBe(
       "needs:\n{% if a %}      - a\n{% endif %}{% if b %}      - b\n{% endif %}    runs-on: x\n",
     );
+  });
+
+  test("a contribution smuggling a well-formed anchor marker errors, naming the fragment", () => {
+    const files = skeleton("needs:\n{# compose:demo #}\n    runs-on: x\n");
+    const errors = spliceContributions(
+      files,
+      contribution("{% if g %}{# compose:other #}\n      - a\n{% endif %}", "g"),
+    );
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain("templates/a/fragments/demo.jinja");
+    expect(errors[0]).toContain("anchor marker");
+    // Fail closed: nothing spliced, the skeleton keeps its own marker.
+    expect(dataOf(files)).toContain("{# compose:demo #}");
+  });
+
+  test("a contribution smuggling a malformed anchor marker errors too", () => {
+    const files = skeleton("needs:\n{# compose:demo #}\n    runs-on: x\n");
+    const errors = spliceContributions(
+      files,
+      contribution("{% if g %}  {# compose:bad\n      - a\n{% endif %}", "g"),
+    );
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain("anchor marker");
+  });
+
+  test("smuggled markers with variant comment-opener spellings error too", () => {
+    for (const bad of ["{#- compose:other #}", "{#  compose:other #}", "{#compose:other #}"]) {
+      const files = skeleton("needs:\n{# compose:demo #}\n    runs-on: x\n");
+      const errors = spliceContributions(
+        files,
+        contribution(`{% if g %}${bad}\n      - a\n{% endif %}`, "g"),
+      );
+      expect(errors).toHaveLength(1);
+      expect(errors[0]).toContain("templates/a/fragments/demo.jinja");
+      expect(errors[0]).toContain("anchor marker");
+      // The error quotes the offending spelling, opener through the colon.
+      expect(errors[0]).toContain(`'${bad.slice(0, bad.indexOf(":") + 1)}'`);
+    }
+  });
+
+  test("the recognizer is same-line: a newline inside the opener matches neither scan", () => {
+    // Not marker-shaped on either side (markers are line constructs); the
+    // split spelling stays a plain jinja comment in skeletons and
+    // contributions alike, keeping the two scans agreeing on the same bytes.
+    const split = "{#\n compose:ghost #}";
+    const files = skeleton(`${split}\nneeds:\n{# compose:demo #}\n    runs-on: x\n`);
+    const errors = spliceContributions(
+      files,
+      contribution(`{% if g %}${split}\n      - a\n{% endif %}`, "g"),
+    );
+    expect(errors).toEqual([]);
+  });
+
+  test("a skeleton compose marker with a variant spelling errors as malformed", () => {
+    for (const bad of ["{#- compose:demo2 #}", "{#  compose:demo2 #}", "{#compose:demo2 #}"]) {
+      const files = skeleton(`needs:\n{# compose:demo #}\n${bad}\n`);
+      const errors = spliceContributions(files, contribution("{% if g %}      - a\n{% endif %}"));
+      expect(errors).toHaveLength(1);
+      expect(errors[0]).toContain("malformed anchor line");
+    }
+  });
+
+  test("a benign jinja comment mentioning compose in prose is not a marker on either side", () => {
+    const files = skeleton("{# composes the tree #}\nneeds:\n{# compose:demo #}\n    runs-on: x\n");
+    const errors = spliceContributions(
+      files,
+      contribution("{% if g %}{# composes the tree #}\n      - a\n{% endif %}", "g"),
+    );
+    expect(errors).toEqual([]);
   });
 });
 
