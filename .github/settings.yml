@@ -92,6 +92,13 @@ rulesets:
         include:
           - build
           - build-pending/**
+          # The retired branches ride along until their deliberate
+          # post-cutover deletion (same note as above): un-synced repos
+          # still EXECUTE @actions, so its writes get the same app-only
+          # restriction while the ref lives. Remove together with the
+          # entries above.
+          - template
+          - actions
         exclude: []
     rules:
       - type: creation
