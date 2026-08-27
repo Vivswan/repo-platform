@@ -1,0 +1,65 @@
+name: Validate Template
+description: >-
+  Runs repo-platform's validate_generated_files.ts against the repository:
+  managed/local markers appear exactly once, YAML parses, no unresolved
+  conflict markers, and ci.yml follows the all-green + typography convention.
+
+inputs:
+  path:
+    description: Directory to validate
+    required: false
+    default: "."
+  findings-file:
+    description: >-
+      Optional path to write the BLOCKING findings to as markdown. It only
+      adds a machine-readable copy of what the run already reports; it does
+      not make anything advisory, and integrity errors still exit nonzero
+      exactly as before. An empty findings set writes an empty file, which
+      is how a caller tells "nothing to report" apart from "the validator
+      never ran".
+    required: false
+    default: ""
+  advisories-file:
+    description: >-
+      Optional path to write the NON-blocking advisories to as markdown.
+      Advisories never affect the exit code, so a caller can report them
+      without treating them as a failure.
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Check for a caller-installed bun
+      id: bun
+      shell: bash
+      run: echo "present=$(command -v bun >/dev/null && echo true || echo false)" >> "$GITHUB_OUTPUT"
+
+    # Skipped when the calling job already installed bun: reusing it keeps
+    # the caller's version pin and avoids a second network fetch.
+    - name: Set up bun
+      id: setup-bun
+      if: steps.bun.outputs.present != 'true'
+      continue-on-error: true
+      uses: oven-sh/setup-bun@v2
+
+    # One retry: the setup's network fetch is a known transient flake, and
+    # on nightly reporting paths a flake here turns a green night red.
+    - name: Set up bun (retry)
+      if: steps.setup-bun.outcome == 'failure'
+      uses: oven-sh/setup-bun@v2
+
+    - name: Install dependencies (yaml)
+      shell: bash
+      working-directory: ${{ github.action_path }}
+      # --production: dev deps (@types/bun, typescript) are editor/typecheck
+      # tooling, not needed to run the validator.
+      run: bun install --frozen-lockfile --production --silent
+
+    - name: Validate
+      shell: bash
+      env:
+        SCAN_PATH: ${{ inputs.path }}
+        FINDINGS_FILE: ${{ inputs.findings-file }}
+        ADVISORIES_FILE: ${{ inputs.advisories-file }}
+      run: bun "${{ github.action_path }}/validate_generated_files.ts" "$SCAN_PATH"

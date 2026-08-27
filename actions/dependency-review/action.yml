@@ -1,0 +1,23 @@
+name: Dependency Review
+description: >-
+  The fleet's dependency-review gate: wraps actions/dependency-review-action
+  so the upstream version pin and the severity threshold live in one place
+  instead of in every rendered ci.yml. Diffs the dependency graph between
+  the PR's base and head; only PR events have a diff to review, so callers
+  put the pull_request condition on their steps.
+
+inputs:
+  fail-on-severity:
+    description: Lowest vulnerability severity that fails the gate
+    required: false
+    # Deliberate strictest threshold (also the upstream action's default,
+    # pinned so a default change cannot loosen the gate silently).
+    default: low
+
+runs:
+  using: composite
+  steps:
+    - name: Review the dependency diff
+      uses: actions/dependency-review-action@v5
+      with:
+        fail-on-severity: ${{ inputs.fail-on-severity }}

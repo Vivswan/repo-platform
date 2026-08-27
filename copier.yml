@@ -1,13 +1,58 @@
 # Copier template configuration for Vivswan/repo-platform.
 # Downstream repos are generated/updated from the template/ subdirectory,
-# which exists only on the generated `template` build branch (on main
-# it is a local gitignored build artifact; sources live in templates/).
+# which exists only on the generated `build` branch (on main it is a local
+# gitignored build artifact; sources live in templates/).
 
 _min_copier_version: "9.8.0"
 _subdirectory: template
 _answers_file: .copier-answers.yml
 _templates_suffix: .jinja
 _preserve_symlinks: true
+
+# Conditional landing. The composed tree carries only PLAIN filenames (the
+# build branch doubles as the `uses:` delivery channel, and tarball
+# extraction dies on jinja-expression path segments), so module and
+# visibility gating happens here instead: each pattern renders to the
+# literal landed path exactly when the file's gates do NOT hold, and to
+# nothing (a no-op pattern) when they do. Evaluated per render with that
+# render's answers - copy and update alike - so unselected files are never
+# rendered at all, exactly like the retired filename gates.
+_exclude:
+  # BEGIN GENERATED: conditional-excludes (scripts/generate.ts - edit the module manifests and the base templates' gated filenames, not this block)
+  - "{% if not ('bun' in modules) %}/.bun-version{% endif %}"
+  - "{% if not ('skills' in modules) %}.claude-plugin/marketplace.json{% endif %}"
+  - "{% if not ('skills' in modules) %}.claude-plugin/plugin.json{% endif %}"
+  - "{% if not ('deno' in modules) %}/.dvmrc{% endif %}"
+  - "{% if not ('issue-templates' in modules) %}.github/ISSUE_TEMPLATE/bug_report.yml{% endif %}"
+  - "{% if not ('issue-templates' in modules) %}.github/ISSUE_TEMPLATE/config.yml{% endif %}"
+  - "{% if not ('issue-templates' in modules) %}.github/ISSUE_TEMPLATE/feature_request.yml{% endif %}"
+  - "{% if not ('agents' in modules) %}.github/agents.md{% endif %}"
+  - "{% if not ('agents' in modules) %}.github/copilot-instructions.md{% endif %}"
+  - "{% if not ('settings-sync' in modules) %}.github/settings.yml{% endif %}"
+  - "{% if not ('auto-assign' in modules) %}.github/workflows/auto-assign.yml{% endif %}"
+  - "{% if not (has_toolchain) %}.github/workflows/auto-format.yml{% endif %}"
+  - "{% if not ('agents' in modules) %}.github/workflows/copilot-setup-steps.yml{% endif %}"
+  - "{% if not ('deno' in modules) %}.github/workflows/deno-audit.yml{% endif %}"
+  - "{% if not ('bun' in modules) %}.github/workflows/dependabot-bun-lockfile.yml{% endif %}"
+  - "{% if not ('fuzzer' in modules) %}.github/workflows/nightly-fuzz.yml{% endif %}"
+  - "{% if not ('nightly' in modules) %}.github/workflows/nightly.yml{% endif %}"
+  - "{% if not ('pages' in modules) %}.github/workflows/pages.yml{% endif %}"
+  - "{% if not ('release-please' in modules) %}.github/workflows/release.yml{% endif %}"
+  - "{% if not ('settings-sync' in modules) %}.github/workflows/settings-sync.yml{% endif %}"
+  - "{% if not ('release-please' in modules) %}.github/workflows/update-release-pr.yml{% endif %}"
+  - "{% if not ('release-please' in modules) %}.github/workflows/update-release.yml{% endif %}"
+  - "{% if not ('skills' in modules) %}.github/workflows/validate-skills.yml{% endif %}"
+  - "{% if not ('node' in modules) %}/.node-version{% endif %}"
+  - "{% if not ('release-please' in modules) %}/.release-please-manifest.json{% endif %}"
+  - "{% if not ('agents' in modules) %}/AGENTS.md{% endif %}"
+  - "{% if not ('agents' in modules) %}/CLAUDE.md{% endif %}"
+  - "{% if not (not private) %}/CODE_OF_CONDUCT.md{% endif %}"
+  - "{% if not (not private) %}/CONTRIBUTING.md{% endif %}"
+  - "{% if not ('custom-license' not in modules) %}/LICENSE.md{% endif %}"
+  - "{% if not ('release-please' in modules) %}/release-please-config.json{% endif %}"
+  - "{% if not ('skills' in modules) %}/.claude-plugin{% endif %}"
+  - "{% if not ('issue-templates' in modules) %}.github/ISSUE_TEMPLATE{% endif %}"
+  # END GENERATED: conditional-excludes
 
 # Repo-owned starters: generated when absent, never overwritten by template
 # sync. checks.yml holds each repo's own CI jobs (the managed ci.yml calls

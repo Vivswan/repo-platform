@@ -8,7 +8,10 @@
 // _tasks (copy and recopy; copier does not run tasks on update) and into
 // _migrations at the 'after' stage (update) - and reusable-template-sync
 // runs it once more as the sync leg's final stamping step, after conflict
-// resolution and the preserve steps have finished rewriting files.
+// resolution and the preserve steps have finished rewriting files. Before
+// stamping it also normalizes the manifest-listed symlinks' targets
+// (normalizeSymlinkTargets: the build branch ships targets with the
+// template suffix kept so no branch link is ever dangling).
 //
 // STANDALONE BY DESIGN: branch_tree.ts ships this file on the build
 // branches next to copier.yml, and copier executes it inside freshly
@@ -46,10 +49,25 @@
 // TARGET_DIR=target).
 
 import { createHash } from "node:crypto";
-import { lstatSync, readFileSync, readlinkSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import {
+  lstatSync,
+  readFileSync,
+  readlinkSync,
+  realpathSync,
+  symlinkSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
+import { basename, dirname, join, resolve } from "node:path";
 
 export const MANIFEST_NAME = ".github/repo-platform-manifest.json";
+
+/** The template suffix the build branch's symlink targets keep: links on
+ *  the branch point at their templated twin so the `uses:` tarball
+ *  staging never sees a dangling link, and copier renders link targets as
+ *  strings without stripping the suffix - so this hook normalizes the
+ *  rendered targets instead (normalizeSymlinkTargets below). */
+const JINJA_SUFFIX = ".jinja";
 
 /** One manifest entry line, as compose_template.ts emits it: indentation,
  *  the JSON-quoted path, the one-line entry object, an optional joining
@@ -165,6 +183,234 @@ export interface ManifestEntryShape {
   hash?: unknown;
 }
 
+/** The manifest's files mapping parsed from `text` (conflict blocks
+ *  resolved toward the template side first), or a problem string when the
+ *  text cannot be trusted - shared by the symlink normalization and the
+ *  stamping, so the two can never read different manifests and every
+ *  consumer inherits the SAME validation: no mutation or stamp ever sees
+ *  a manifest this function did not clear. Rejected here, value-free
+ *  where the value is target-controlled:
+ *  - unparseable JSON, or no top-level 'files' mapping;
+ *  - an entry value that is not a plain object with a string class (a
+ *    null or scalar entry would throw at entry.class in a consumer,
+ *    turning the warn-and-continue contract into a hard render failure);
+ *  - a duplicated entry for one path (found structurally, by
+ *    filesObjectKeys): duplicate JSON keys last-win at parse time, so a
+ *    duplicate can flip a path's class with no parse error, and acting
+ *    on the parsed value would launder it. The path is named JSON-quoted
+ *    rather than decoded: a decoded key could carry real newlines or
+ *    control bytes into the problem string, which reaches a public log
+ *    via main()'s warning. */
+export function parseManifestFiles(text: string):
+  | { files: Record<string, ManifestEntryShape>; resolved: string; problem: null }
+  | {
+      files: null;
+      resolved: string;
+      problem: string;
+    } {
+  const resolved = resolveConflictsTowardAfter(text);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(resolved);
+  } catch {
+    // Value-free on purpose: a SyntaxError's message quotes manifest text
+    // (target-repo content), and this problem string reaches a public log
+    // via main()'s warning. Standalone script - no shared/ helpers here.
+    return { files: null, resolved, problem: "does not parse as a manifest (invalid JSON)" };
+  }
+  const manifest = parsed as { files?: unknown } | null;
+  if (
+    manifest === null ||
+    typeof manifest !== "object" ||
+    typeof manifest.files !== "object" ||
+    manifest.files === null ||
+    Array.isArray(manifest.files)
+  ) {
+    return {
+      files: null,
+      resolved,
+      problem: "does not parse as a manifest (no top-level 'files' mapping)",
+    };
+  }
+  const files = manifest.files as Record<string, unknown>;
+  for (const value of Object.values(files)) {
+    const entry = value as ManifestEntryShape | null;
+    if (entry === null || typeof entry !== "object" || typeof entry.class !== "string") {
+      return {
+        files: null,
+        resolved,
+        problem: "carries an entry that is not an object with a string class",
+      };
+    }
+  }
+  // Duplicates count STRUCTURALLY: filesObjectKeys walks the (already
+  // JSON.parse-validated) text and returns the files object's direct
+  // child keys in source order, duplicates preserved - the one thing
+  // JSON.parse flattens away. Any duplicate shape is caught this way:
+  // mixed null/object lines, re-indented merge artifacts, several keys on
+  // one line, and a duplicated top-level "files" mapping itself; a path
+  // literally named "files" or "$comment" is never confused with its
+  // top-level structural twin.
+  const walked = filesObjectKeys(resolved);
+  if (walked.filesObjects !== 1) {
+    return {
+      files: null,
+      resolved,
+      problem: `carries ${walked.filesObjects} top-level "files" mappings (duplicate keys last-win at parse, so a duplicate can swap the whole entry set silently)`,
+    };
+  }
+  const seenPaths = new Set<string>();
+  for (const key of walked.keys) {
+    if (seenPaths.has(key)) {
+      return {
+        files: null,
+        resolved,
+        problem: `carries more than one entry for ${JSON.stringify(key)} (duplicate keys last-win at parse, so a duplicate can flip its ownership class silently)`,
+      };
+    }
+    seenPaths.add(key);
+  }
+  return { files: files as Record<string, ManifestEntryShape>, resolved, problem: null };
+}
+
+/** The DIRECT child keys of the top-level "files" object, in source order
+ *  with duplicates preserved - exactly what JSON.parse flattens away -
+ *  plus how many top-level "files" objects the text carries: a duplicated
+ *  TOP-LEVEL mapping is the same corruption one level up (JSON.parse
+ *  last-wins there too), so the walk reports the count and keeps the LAST
+ *  object's keys to match what JSON.parse returned. Called only on text
+ *  JSON.parse has already accepted, so this token walk runs over
+ *  known-valid JSON and its string/escape/depth tracking cannot desync;
+ *  keys nested inside entry values, and the structural top-level keys,
+ *  are never counted. */
+function filesObjectKeys(resolved: string): { keys: string[]; filesObjects: number } {
+  let keys: string[] = [];
+  let current: string[] = [];
+  let filesObjects = 0;
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  let stringStart = -1;
+  let lastString: string | null = null;
+  let pendingFiles = false;
+  let filesDepth = -1;
+  for (let i = 0; i < resolved.length; i++) {
+    const ch = resolved[i];
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (ch === "\\") {
+        escaped = true;
+      } else if (ch === '"') {
+        inString = false;
+        lastString = resolved.slice(stringStart, i + 1);
+      }
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+      stringStart = i;
+      pendingFiles = false;
+    } else if (ch === ":") {
+      if (lastString !== null) {
+        const key = JSON.parse(lastString) as string;
+        if (depth === 1 && key === "files") {
+          pendingFiles = true;
+        } else if (filesDepth !== -1 && depth === filesDepth) {
+          current.push(key);
+        }
+        lastString = null;
+      }
+    } else if (ch === "{") {
+      depth++;
+      if (pendingFiles && depth === 2) {
+        filesObjects++;
+        filesDepth = depth;
+        current = [];
+      }
+      pendingFiles = false;
+      lastString = null;
+    } else if (ch === "[") {
+      depth++;
+      pendingFiles = false;
+      lastString = null;
+    } else if (ch === "}" || ch === "]") {
+      depth--;
+      if (filesDepth !== -1 && depth < filesDepth) {
+        keys = current;
+        filesDepth = -1;
+      }
+      pendingFiles = false;
+      lastString = null;
+    } else if (ch !== "," && !/\s/.test(ch)) {
+      pendingFiles = false;
+      lastString = null;
+    }
+  }
+  return { keys, filesObjects };
+}
+
+/** The absolute on-disk location of a manifest path, or null when the
+ *  path cannot be trusted for MUTATION: manifest text is target-repo
+ *  content on updates, so an absolute or ..-carrying key, or one whose
+ *  parent directory really lives outside the rendered root (a symlinked
+ *  ancestor), must never be unlinked. Read-only consumers (hashing) keep
+ *  their lexical join: this script only writes hash VALUES into the
+ *  manifest, so the worst a hostile key gets there is its own file's
+ *  hash echoed back - while a wrong unlink is damage. */
+function containedForMutation(root: string, path: string): string | null {
+  if (path.startsWith("/")) return null;
+  const segments = path.split("/");
+  if (segments.some((segment) => segment === "" || segment === "." || segment === "..")) {
+    return null;
+  }
+  const abs = join(root, path);
+  let parentReal: string;
+  let rootReal: string;
+  try {
+    parentReal = realpathSync(dirname(abs));
+    rootReal = realpathSync(root);
+  } catch {
+    return null;
+  }
+  if (parentReal !== rootReal && !parentReal.startsWith(`${rootReal}/`)) return null;
+  return join(parentReal, basename(abs));
+}
+
+/** Strip the template suffix from every MANAGED manifest-listed symlink's
+ *  target: the build branch ships link targets with the suffix kept (a
+ *  dangling link anywhere in the tree kills the runner's `uses:` tarball
+ *  staging) and copier renders targets verbatim, so the rendered
+ *  repository's managed links arrive pointing at the templated twin's
+ *  name. Only managed entries are touched - starters are repo-owned after
+ *  the first render and unlisted links are repo content, so neither is
+ *  ever rewritten, whatever its target - and the rewrite is idempotent.
+ *  Returns the rewritten paths. */
+export function normalizeSymlinkTargets(
+  root: string,
+  files: Record<string, ManifestEntryShape>,
+): string[] {
+  const rewritten: string[] = [];
+  for (const [path, entry] of Object.entries(files)) {
+    if (entry.class !== "managed") continue;
+    const abs = containedForMutation(root, path);
+    if (abs === null) continue;
+    let stat: ReturnType<typeof lstatSync>;
+    try {
+      stat = lstatSync(abs);
+    } catch {
+      continue;
+    }
+    if (!stat.isSymbolicLink()) continue;
+    const target = readlinkSync(abs);
+    if (!target.endsWith(JINJA_SUFFIX)) continue;
+    unlinkSync(abs);
+    symlinkSync(target.slice(0, -JINJA_SUFFIX.length), abs);
+    rewritten.push(path);
+  }
+  return rewritten;
+}
+
 /** The hash a manifest entry should carry for the file as it sits on disk:
  *  sha256 of the whole content (managed), of the managed half (split), or
  *  of the symlink target. null when the file is missing or its split
@@ -201,68 +447,24 @@ export function entryHash(root: string, path: string, entry: ManifestEntryShape)
  *  resolve toward the template side, then every entry line's hash token is
  *  replaced with the honest value, and the self entry's commit token with
  *  the render's recorded _commit (its hash stays null - see the manifest's
- *  $comment). Returns the input unchanged with a problem message when the
- *  text does not parse OR carries a duplicated entry line for one path: a
- *  bad conflict resolution can leave the same path's line twice, duplicate
- *  JSON keys last-win at parse time (so a duplicate can flip a path's
- *  class with no parse error), and stamping both lines would launder the
- *  duplicate into a plausibly-stamped manifest. Reported soft, never
- *  thrown: this function's contract (see the file header) is that a
- *  stamping gap warns and lets the validator's parity check report it in a
- *  DELIVERED PR - and this same code ships standalone as copier's
- *  after-hook, where the manifest being stamped is copier's MERGED result
- *  (the exact place a bad three-way merge duplicates a line), so a throw
- *  there would fail the render, turn the sync red, and deliver no PR for a
- *  human to fix the corruption in. */
+ *  $comment). Returns the input unchanged with a problem message when
+ *  parseManifestFiles rejects the text (unparseable, malformed entries,
+ *  duplicated entry lines). Reported soft, never thrown: this function's
+ *  contract (see the file header) is that a stamping gap warns and lets
+ *  the validator's parity check report it in a DELIVERED PR - and this
+ *  same code ships standalone as copier's after-hook, where the manifest
+ *  being stamped is copier's MERGED result (the exact place a bad
+ *  three-way merge corrupts it), so a throw there would fail the render,
+ *  turn the sync red, and deliver no PR for a human to fix the corruption
+ *  in. */
 export function stampManifestText(
   text: string,
   root: string,
 ): { out: string; problem: string | null } {
-  const resolved = resolveConflictsTowardAfter(text);
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(resolved);
-  } catch {
-    // Value-free on purpose: a SyntaxError's message quotes manifest text
-    // (target-repo content), and this problem string reaches a public log
-    // via main()'s warning. Standalone script - no shared/ helpers here.
-    return { out: text, problem: "does not parse as a manifest (invalid JSON)" };
-  }
-  const manifest = parsed as { files?: unknown } | null;
-  if (
-    manifest === null ||
-    typeof manifest !== "object" ||
-    typeof manifest.files !== "object" ||
-    manifest.files === null
-  ) {
-    return { out: text, problem: "does not parse as a manifest (no top-level 'files' mapping)" };
-  }
-  const files = manifest.files as Record<string, ManifestEntryShape>;
+  const parsed = parseManifestFiles(text);
+  if (parsed.problem !== null) return { out: text, problem: parsed.problem };
+  const { files, resolved } = parsed;
   const commit = recordedCommit(root);
-  // A path's value in `files` is whichever duplicate JSON parsed last, so a
-  // duplicated entry line cannot be stamped honestly - report it soft
-  // (like every other corruption here) BEFORE writing anything, so the
-  // untouched text stays for the validator's parity check to flag in a
-  // delivered PR. The path is named in its RAW JSON-quoted form (match[2],
-  // as written in the source line) rather than decoded: a decoded key
-  // could carry real newlines or control bytes into this problem string,
-  // which reaches a public log via main()'s warning, and the merged
-  // manifest is target-controlled. The quoted form keeps every escape
-  // literal.
-  const seenPaths = new Set<string>();
-  for (const line of resolved.split("\n")) {
-    const match = ENTRY_LINE_RE.exec(line);
-    if (!match) continue;
-    const path = JSON.parse(match[2]) as string;
-    if (files[path] === undefined) continue;
-    if (seenPaths.has(path)) {
-      return {
-        out: text,
-        problem: `carries more than one entry line for ${match[2]} (duplicate keys last-win at parse, so a duplicate can flip its ownership class silently)`,
-      };
-    }
-    seenPaths.add(path);
-  }
   const lines = resolved.split("\n").map((line) => {
     const match = ENTRY_LINE_RE.exec(line);
     if (!match) return line;
@@ -282,6 +484,31 @@ export function stampManifestText(
   return { out: lines.join("\n"), problem: null };
 }
 
+/** The manifest-gated normalization entry main() runs: parse (which
+ *  validates - a manifest parseManifestFiles rejects normalizes NOTHING,
+ *  so a duplicate-key or malformed manifest can never mutate a link
+ *  before the stamp's own rejection reports it) and then rewrite the
+ *  managed links. Returns the rewritten paths, or the parse problem with
+ *  a guaranteed-empty rewrite. */
+export function normalizeFromText(
+  text: string,
+  root: string,
+): { rewritten: string[]; problem: string | null } {
+  const parsed = parseManifestFiles(text);
+  if (parsed.problem !== null) return { rewritten: [], problem: parsed.problem };
+  return { rewritten: normalizeSymlinkTargets(root, parsed.files), problem: null };
+}
+
+/** The normalization log line, with every path JSON-QUOTED: manifest keys
+ *  are target-controlled on updates, and a raw newline or control byte in
+ *  a decoded path printed to the Actions log could forge workflow
+ *  commands; the quoted form keeps every escape literal. */
+export function describeRewritten(rewritten: string[]): string {
+  return `normalized ${rewritten.length} symlink target(s): ${rewritten
+    .map((path) => JSON.stringify(path))
+    .join(", ")}`;
+}
+
 function main(): number {
   const root = resolve(process.env.TARGET_DIR || ".");
   const manifestPath = join(root, MANIFEST_NAME);
@@ -295,11 +522,19 @@ function main(): number {
     );
     return 0;
   }
+  // Normalize the managed symlinks BEFORE stamping: the hash covers the
+  // link target, so it must be taken after the rewrite. Parse-gated: a
+  // manifest the parser rejects mutates nothing, so the rejection warning
+  // below ("normalization skipped too") is always true.
+  const normalized = normalizeFromText(text, root);
+  if (normalized.rewritten.length > 0) {
+    console.log(describeRewritten(normalized.rewritten));
+  }
   const { out, problem } = stampManifestText(text, root);
   if (problem !== null) {
     console.error(
-      `warning: ${MANIFEST_NAME} ${problem}; left unstamped for ` +
-        "validate-template's parity check to report",
+      `warning: ${MANIFEST_NAME} ${problem}; left unstamped (symlink target ` +
+        "normalization skipped too) for validate-template's parity check to report",
     );
     return 0;
   }

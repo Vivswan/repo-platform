@@ -1,0 +1,76 @@
+name: Release Health
+description: >-
+  Gates releases in managed repos: fails when an open tracking issue of a
+  nightly stream (fuzz or CI), an open release-blocker issue, or an open
+  Dependabot alert at or above the severity threshold says the repository
+  is not release-worthy. Two modes: pull-request (on a release-please PR's
+  CI) and release (on the main-push release path; a push that is not a
+  release-PR merge is not gated). The override label on the release PR
+  turns failures into warnings. Needs GH_TOKEN in the environment with
+  issues read, pull-requests read, and vulnerability-alerts read (the
+  security gate degrades to a notice where alerts are unreadable or
+  disabled) and gh >= 2.51 on the runner (GitHub-hosted runners ship
+  current gh).
+
+inputs:
+  mode:
+    description: pull-request (on the release PR's CI) or release (on the main-push release path)
+    required: true
+  tracking-labels:
+    description: >-
+      Comma-separated labels of the nightly tracking-issue streams; an open
+      issue carrying any of them blocks. Empty disables the tracking gates.
+    required: false
+    default: ""
+  fuzz-label:
+    description: >-
+      Deprecated single-label spelling of tracking-labels, folded into it
+      (kept so workflows rendered before the rename keep their fuzz gate
+      until template sync re-renders them)
+    required: false
+    default: ""
+  blocker-label:
+    description: An open issue carrying this label blocks the release
+    required: false
+    default: release-blocker
+  override-label:
+    description: This label on the release PR bypasses all gates (failures become warnings)
+    required: false
+    default: release-override
+  security-severity:
+    description: Minimum severity of an open Dependabot alert that blocks; off|low|medium|high|critical
+    required: false
+    default: high
+
+runs:
+  using: composite
+  steps:
+    - name: Check for a caller-installed bun
+      id: bun
+      shell: bash
+      run: echo "present=$(command -v bun >/dev/null && echo true || echo false)" >> "$GITHUB_OUTPUT"
+
+    # Skipped when the calling job already installed bun: reusing it keeps
+    # the caller's version pin and avoids a second network fetch.
+    - name: Set up bun
+      id: setup-bun
+      if: steps.bun.outputs.present != 'true'
+      continue-on-error: true
+      uses: oven-sh/setup-bun@v2
+
+    # One retry: the setup's network fetch is a known transient flake, and
+    # on nightly reporting paths a flake here turns a green night red.
+    - name: Set up bun (retry)
+      if: steps.setup-bun.outcome == 'failure'
+      uses: oven-sh/setup-bun@v2
+
+    - name: Check release health
+      shell: bash
+      env:
+        MODE: ${{ inputs.mode }}
+        TRACKING_LABELS: ${{ inputs.tracking-labels }}
+        FUZZ_LABEL: ${{ inputs.fuzz-label }}
+        BLOCKER_LABEL: ${{ inputs.blocker-label }}
+        OVERRIDE_LABEL: ${{ inputs.override-label }}
+        SECURITY_SEVERITY: ${{ inputs.security-severity }}
+      run: bun "${{ github.action_path }}/release-health.ts"

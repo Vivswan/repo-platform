@@ -1,0 +1,12 @@
+{
+  "name": "validate-template",
+  "private": true,
+  "description": "Dependency manifest for the validate-template action (yaml parses the workflow and registration files).",
+  "dependencies": {
+    "yaml": "^2.9.0"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.3.14",
+    "typescript": "^7.0.2"
+  }
+}

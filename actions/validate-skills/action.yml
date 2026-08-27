@@ -1,0 +1,54 @@
+name: Validate Skills
+description: >-
+  Validates a repository hosting agent skills (the skills module). Two
+  modes: structure (offline; the plugin manifests parse and reference real
+  skill folders, and every folder under the skills directory satisfies the
+  SKILL.md frontmatter contract) and discovery (runs the real `npx skills
+  add <repo> --list` against the checkout and asserts every published
+  skill appears in the listing - needs network for the npx download, so
+  callers give it its own job). An empty skills catalog (the starter's
+  seeded state) passes both modes.
+
+inputs:
+  skills-dir:
+    description: Directory holding the repository's agent skills (relative to the repo root)
+    required: false
+    default: skills
+  plugin-manifest:
+    description: Path of the plugin manifest listing the published skills
+    required: false
+    default: .claude-plugin/plugin.json
+  mode:
+    description: structure (offline manifest and skill-folder checks) or discovery (npx skills CLI listing)
+    required: false
+    default: structure
+
+runs:
+  using: composite
+  steps:
+    - name: Check for a caller-installed bun
+      id: bun
+      shell: bash
+      run: echo "present=$(command -v bun >/dev/null && echo true || echo false)" >> "$GITHUB_OUTPUT"
+
+    # Skipped when the calling job already installed bun: reusing it keeps
+    # the caller's version pin and avoids a second network fetch.
+    - name: Set up bun
+      id: setup-bun
+      if: steps.bun.outputs.present != 'true'
+      continue-on-error: true
+      uses: oven-sh/setup-bun@v2
+
+    # One retry: the setup's network fetch is a known transient flake, and
+    # on nightly reporting paths a flake here turns a green night red.
+    - name: Set up bun (retry)
+      if: steps.setup-bun.outcome == 'failure'
+      uses: oven-sh/setup-bun@v2
+
+    - name: Validate skills
+      shell: bash
+      env:
+        SKILLS_DIR: ${{ inputs.skills-dir }}
+        PLUGIN_MANIFEST: ${{ inputs.plugin-manifest }}
+        MODE: ${{ inputs.mode }}
+      run: bun "${{ github.action_path }}/validate_skills.ts"

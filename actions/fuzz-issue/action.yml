@@ -1,0 +1,101 @@
+name: Nightly Issue
+description: >-
+  Files or updates a label-deduplicated tracking issue for any nightly
+  stream - fuzz or plain CI - (report mode), or comments on and closes
+  every open labeled issue after a green run (resolve mode). Report mode
+  assigns the repository owner at creation (best-effort: an unassignable
+  owner never fails the filing) - creation-time assignment guarantees the
+  owner regardless of token, and an issue created with the default
+  GITHUB_TOKEN additionally fires no issues:opened event for anything
+  downstream to catch. With an
+  artifacts-dir the issue body is built from nightly-fuzz failure reports
+  (the contract is documented in repo-platform's docs/fuzzer.md); without
+  one it is a generic nightly-failure report (workflow, commit, run link).
+  Needs issues: write and gh on the runner (preinstalled on GitHub-hosted
+  runners).
+
+inputs:
+  mode:
+    description: report (file/update from artifacts-dir) or resolve (close after a green run)
+    required: false
+    default: report
+  label:
+    description: Label identifying the issue stream; one open issue per label
+    required: true
+  title:
+    description: Title used when a new issue is created
+    required: false
+    default: Nightly fuzz failures
+  artifacts-dir:
+    description: >-
+      Directory of per-failure subdirectories (contract v1). Empty means the
+      stream has no failure artifacts: report mode files a generic
+      nightly-failure report instead.
+    required: false
+    default: ""
+  artifact-name:
+    description: Name of the uploaded workflow artifact to point readers at (optional)
+    required: false
+    default: ""
+  label-color:
+    description: Color used only when report mode creates the label (existing labels are never repainted)
+    required: false
+    default: "B60205"
+  label-description:
+    description: Description used only when report mode creates the label
+    required: false
+    default: Automated nightly fuzz failure
+  stream:
+    description: >-
+      Which nightly stream the issue tracks - shapes the resolve comment's
+      wording only (report bodies key on artifacts-dir). fuzz (the default,
+      what pre-existing fuzz starters get) hedges on unpinned regression
+      seeds; generic carries no fuzz notions.
+    required: false
+    default: fuzz
+  token:
+    description: Token used by gh; needs issues write
+    required: false
+    default: ${{ github.token }}
+
+outputs:
+  issue-number:
+    description: The issue commented on or created (empty in resolve mode)
+    value: ${{ steps.file.outputs.issue-number }}
+
+runs:
+  using: composite
+  steps:
+    - name: Check for a caller-installed bun
+      id: bun
+      shell: bash
+      run: echo "present=$(command -v bun >/dev/null && echo true || echo false)" >> "$GITHUB_OUTPUT"
+
+    # Skipped when the calling job already installed bun: reusing it keeps
+    # the caller's version pin and avoids a second network fetch.
+    - name: Set up bun
+      id: setup-bun
+      if: steps.bun.outputs.present != 'true'
+      continue-on-error: true
+      uses: oven-sh/setup-bun@v2
+
+    # One retry: the setup's network fetch is a known transient flake, and
+    # on nightly reporting paths a flake here turns a green night red.
+    - name: Set up bun (retry)
+      if: steps.setup-bun.outcome == 'failure'
+      uses: oven-sh/setup-bun@v2
+
+    - name: File, update, or resolve the fuzz issue
+      id: file
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+        MODE: ${{ inputs.mode }}
+        LABEL: ${{ inputs.label }}
+        TITLE: ${{ inputs.title }}
+        ARTIFACTS_DIR: ${{ inputs.artifacts-dir }}
+        ARTIFACT_NAME: ${{ inputs.artifact-name }}
+        LABEL_COLOR: ${{ inputs.label-color }}
+        LABEL_DESCRIPTION: ${{ inputs.label-description }}
+        STREAM: ${{ inputs.stream }}
+      run: bun "${{ github.action_path }}/fuzz-issue.ts"
