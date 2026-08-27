@@ -115,6 +115,23 @@ describe("waitForGreen", () => {
     expect(result).toContain("reading its CI runs failed");
     expect(result).toContain("wait for a verdict is over");
   });
+
+  test("a malformed wait bound THROWS - the CLI wrapper owns the process exit", () => {
+    // A non-numeric bound is NaN, every NaN comparison is false, and the
+    // wait would run unbounded to the job timeout; and a library function
+    // must not process.exit under a future second caller.
+    const prior = process.env.GREEN_WAIT_MS;
+    process.env.GREEN_WAIT_MS = "junk";
+    try {
+      const { gh } = ghAnswering([{}]);
+      expect(() => waitForGreen("o/r", SHA, { gh, pollMs: 5, sleep: () => {} })).toThrow(
+        "GREEN_WAIT_MS must be a non-negative number",
+      );
+    } finally {
+      if (prior === undefined) delete process.env.GREEN_WAIT_MS;
+      else process.env.GREEN_WAIT_MS = prior;
+    }
+  });
 });
 
 describe("the CLI's ref guard", () => {

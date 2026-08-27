@@ -52,13 +52,15 @@ export interface GreenWaitOptions {
 /** A wait bound from env: unset means the fallback, and anything that is
  *  not a non-negative number is refused - Number("junk") is NaN, every
  *  comparison against NaN is false, and a NaN deadline would make the
- *  wait unbounded up to the job's own timeout. */
+ *  wait unbounded up to the job's own timeout. Throws rather than
+ *  exiting: waitForGreen is a library function, and the CLI wrapper owns
+ *  the process exit. */
 function boundedMs(name: string, fallback: number): number {
   const raw = env(name, "");
   if (raw === "") return fallback;
   const value = Number(raw);
   if (!Number.isFinite(value) || value < 0) {
-    fail(`${name} must be a non-negative number of milliseconds (got '${raw}')`);
+    throw new Error(`${name} must be a non-negative number of milliseconds (got '${raw}')`);
   }
   return value;
 }
@@ -110,7 +112,14 @@ function main(): void {
         "alone. Dispatch this workflow on the default branch.",
     );
   }
-  const notGreen = waitForGreen(repository, sha);
+  // waitForGreen throws for a malformed wait bound (boundedMs); the exit
+  // belongs to this CLI wrapper, not the library function.
+  let notGreen: string | null;
+  try {
+    notGreen = waitForGreen(repository, sha);
+  } catch (error) {
+    fail(error instanceof Error ? error.message : String(error));
+  }
   if (notGreen !== null) {
     fail(
       `refusing the settings apply: commit ${sha.slice(0, 12)} is not green - ${notGreen}. ` +

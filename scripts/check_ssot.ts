@@ -2008,6 +2008,76 @@ const rules: Rule[] = [
   },
 
   {
+    // Every run_hidden-wrapped step in settings-repos.yml must be
+    // followed by a PUBLIC ::notice:: step that fires on one of the
+    // wrapped step's own outputs. The capture swallows a wrapped step's
+    // success output - warnings included - for a hide-details target, so
+    // without a compensating notice its skip is a green job with no
+    // signal at all. DERIVED from the workflow rather than pinned per
+    // step: this gap was reintroduced three times one step at a time (the
+    // merge notice, then the freshness wrap, then the notice condition
+    // missing the freshness clause), so a fourth wrapped script fails
+    // here until it gets its notice instead of repeating the cycle.
+    // Order is part of the requirement - the notice must sit AFTER the
+    // wrapped step, or it reads outputs that do not exist yet.
+    // Self-contained like the neighbouring settings rules.
+    name: "settings-hidden-step-notices",
+    run: () => {
+      const mismatches: Mismatch[] = [];
+      const rel = ".github/workflows/settings-repos.yml";
+      const mapping = (value: unknown): Record<string, unknown> =>
+        typeof value === "object" && value !== null && !Array.isArray(value)
+          ? (value as Record<string, unknown>)
+          : {};
+      const jobs = mapping(mapping(parseYaml(read(rel))).jobs);
+      let wrapped = 0;
+      for (const [jobName, job] of Object.entries(jobs)) {
+        const steps = mapping(job).steps;
+        if (!Array.isArray(steps)) continue;
+        const parsed = steps.map(mapping);
+        parsed.forEach((step, index) => {
+          if (!String(step.run ?? "").includes("run_hidden.ts")) return;
+          wrapped++;
+          const id = String(step.id ?? "");
+          if (id === "") {
+            mismatches.push({
+              file: rel,
+              expected: `an id on the run_hidden-wrapped step ${JSON.stringify(String(step.name ?? "?"))} (job '${jobName}')`,
+              got: "no id - a compensating notice cannot reference the step's outcome",
+            });
+            return;
+          }
+          // Positive equality against 'true', the one output test an
+          // unrun step cannot satisfy (unsafeStepCondition's rule). The
+          // id is escaped so an exotic step id cannot broaden the match.
+          const escaped = id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+          const fires = new RegExp(`steps\\.${escaped}\\.outputs\\.[\\w-]+ == 'true'`);
+          const compensated = parsed.slice(index + 1).some((later) => {
+            const laterRun = String(later.run ?? "");
+            return (
+              !laterRun.includes("run_hidden") &&
+              laterRun.includes("::notice::") &&
+              fires.test(String(later.if ?? ""))
+            );
+          });
+          if (!compensated) {
+            mismatches.push({
+              file: rel,
+              expected:
+                `a public ::notice:: step AFTER the hidden '${id}' step whose condition ` +
+                `carries steps.${id}.outputs.<name> == 'true' - the capture swallows the ` +
+                "step's own warnings, so its skip would otherwise be a green job with no signal",
+              got: "no such step",
+            });
+          }
+        });
+      }
+      if (wrapped === 0) throw new Error(`${rel}: no run_hidden-wrapped steps - anchor lost`);
+      return mismatches;
+    },
+  },
+
+  {
     name: "pins-and-identities",
     run: () => {
       const mismatches: Mismatch[] = [];
