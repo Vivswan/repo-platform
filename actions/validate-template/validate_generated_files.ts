@@ -1174,8 +1174,9 @@ function main(): number {
           metadataError(rel, `claims class ${JSON.stringify(entry.class)}`, declared);
           continue;
         }
-        // A grammar-less split entry is a pre-grammar render (legacy);
-        // when the field is present it must name the declared grammar.
+        // A present grammar must name the declared one; a MISSING grammar
+        // field is a shape problem, reported once by the structural loop
+        // below (every render stamps the field), not doubled here.
         if (
           kind === "marker" &&
           (entry.managed !== "above" ||
@@ -1199,17 +1200,19 @@ function main(): number {
         }
         const entry = asEntry(raw);
         if (entry === null) continue;
-        const legacyOk =
+        const markerPairOk =
           entry.class === "split" &&
           entry.marker === grammar.managedBegin &&
           entry.managed === "below";
+        // A missing grammar field is the structural loop's single report;
+        // a present one must name the declared grammar and its strings.
         const grammarOk =
           !("grammar" in entry) ||
           (entry.grammar === "bounded-region" &&
             entry.managed_end === grammar.managedEnd &&
             entry.local_begin === grammar.localBegin &&
             entry.local_end === grammar.localEnd);
-        if (!legacyOk || !grammarOk) {
+        if (!markerPairOk || !grammarOk) {
           metadataError(
             rel,
             "does not match the managed-section grammar",
@@ -1318,29 +1321,39 @@ function main(): number {
             );
             continue;
           }
-          // The grammar field (absent on pre-grammar renders) must agree
-          // with the managed side and carry its region marker strings.
-          if ("grammar" in entry) {
-            const grammarProblem =
-              entry.grammar === "tail-marker"
-                ? entry.managed !== "above"
-                  ? 'declares the tail-marker grammar with a managed half not "above"'
+          // Every render stamps the grammar field; the derived
+          // marker/managed pair alone cannot say which grammar the sync
+          // rebuild uses, so a split entry without one is a hand edit.
+          if (!("grammar" in entry)) {
+            errors.push(
+              `${where} lacks the split grammar field every render stamps - a hand ` +
+                "edit, and sync baselines manifest edits instead of healing them; " +
+                "revert the entry (git history has the stamped original) or run a " +
+                "recovery sync (recover=recopy)",
+            );
+            continue;
+          }
+          // A present grammar must agree with the managed side and carry
+          // its region marker strings.
+          const grammarProblem =
+            entry.grammar === "tail-marker"
+              ? entry.managed !== "above"
+                ? 'declares the tail-marker grammar with a managed half not "above"'
+                : null
+              : entry.grammar === "bounded-region"
+                ? entry.managed !== "below" ||
+                  typeof entry.managed_end !== "string" ||
+                  typeof entry.local_begin !== "string" ||
+                  typeof entry.local_end !== "string"
+                  ? 'declares the bounded-region grammar without a "below" managed ' +
+                    "half and its region marker strings"
                   : null
-                : entry.grammar === "bounded-region"
-                  ? entry.managed !== "below" ||
-                    typeof entry.managed_end !== "string" ||
-                    typeof entry.local_begin !== "string" ||
-                    typeof entry.local_end !== "string"
-                    ? 'declares the bounded-region grammar without a "below" managed ' +
-                      "half and its region marker strings"
-                    : null
-                  : `declares unknown split grammar ${JSON.stringify(entry.grammar)}`;
-            if (grammarProblem !== null) {
-              errors.push(
-                `${where} ${grammarProblem}; run a template sync to regenerate the manifest`,
-              );
-              continue;
-            }
+                : `declares unknown split grammar ${JSON.stringify(entry.grammar)}`;
+          if (grammarProblem !== null) {
+            errors.push(
+              `${where} ${grammarProblem}; run a template sync to regenerate the manifest`,
+            );
+            continue;
           }
           split = { marker: entry.marker, managed: entry.managed };
         }

@@ -151,8 +151,11 @@ function manifestForTree(tree: Record<string, string>): string {
     const half = managedHalfOf(gitignore, "# BEGIN REPO-PLATFORM MANAGED", "below");
     if (half !== null) {
       entries[".gitignore"] =
-        `{"class": "split", "marker": "# BEGIN REPO-PLATFORM MANAGED", ` +
-        `"managed": "below", "hash": "${shaLatin1(half)}"}`;
+        `{"class": "split", "grammar": "bounded-region", ` +
+        `"marker": "# BEGIN REPO-PLATFORM MANAGED", "managed": "below", ` +
+        `"managed_end": "# END REPO-PLATFORM MANAGED", ` +
+        `"local_begin": "# BEGIN REPOSITORY LOCAL", ` +
+        `"local_end": "# END REPOSITORY LOCAL", "hash": "${shaLatin1(half)}"}`;
     }
   }
   return `{\n  "$comment": "test-stamped", "files": {\n${Object.entries(entries)
@@ -918,8 +921,11 @@ describe("ownership-manifest byte parity", () => {
       BASELINE[".github/workflows/ci.yml"],
     )}"}`,
     ".gitignore":
-      `{"class": "split", "marker": "# BEGIN REPO-PLATFORM MANAGED", ` +
-      `"managed": "below", "hash": "${sha(GITIGNORE_HALF)}"}`,
+      `{"class": "split", "grammar": "bounded-region", ` +
+      `"marker": "# BEGIN REPO-PLATFORM MANAGED", "managed": "below", ` +
+      `"managed_end": "# END REPO-PLATFORM MANAGED", ` +
+      `"local_begin": "# BEGIN REPOSITORY LOCAL", ` +
+      `"local_end": "# END REPOSITORY LOCAL", "hash": "${sha(GITIGNORE_HALF)}"}`,
   });
 
   test("a missing manifest is an error", () => {
@@ -949,7 +955,8 @@ describe("ownership-manifest byte parity", () => {
     const entries = {
       ...stampedBaseline(),
       "SECURITY.md":
-        `{"class": "split", "marker": "<!-- repo-platform:local-section -->", ` +
+        `{"class": "split", "grammar": "tail-marker", ` +
+        `"marker": "<!-- repo-platform:local-section -->", ` +
         `"managed": "above", "hash": "${sha(managedTop)}"}`,
     };
     const tailEdited = runValidator({
@@ -1201,7 +1208,8 @@ describe("ownership-manifest byte parity", () => {
     const entries = {
       ...stampedBaseline(),
       "SECURITY.md":
-        `{"class": "split", "marker": "<!-- repo-platform:local-section -->", ` +
+        `{"class": "split", "grammar": "tail-marker", ` +
+        `"marker": "<!-- repo-platform:local-section -->", ` +
         `"managed": "below", "hash": "${sha(managedTop)}"}`,
     };
     const { exitCode, stderr } = runValidator({
@@ -1219,7 +1227,8 @@ describe("ownership-manifest byte parity", () => {
     const entries = {
       ...stampedBaseline(),
       "SECURITY.md":
-        `{"class": "split", "marker": "# repo-platform:local-section", ` +
+        `{"class": "split", "grammar": "tail-marker", ` +
+        `"marker": "# repo-platform:local-section", ` +
         `"managed": "above", "hash": "${sha(managedTop)}"}`,
     };
     const { exitCode, stderr } = runValidator({
@@ -1352,6 +1361,57 @@ describe("ownership-manifest byte parity", () => {
     expect(stderr).toContain('bounded-region grammar without a "below" managed');
   });
 
+  test("a split entry with no grammar field is an error", () => {
+    // Every render stamps the grammar; a grammar-less split entry can only
+    // be a hand edit, whatever path it sits on.
+    const entries = {
+      ...stampedBaseline(),
+      "docs/notes.md": `{"class": "split", "marker": "# m", "managed": "above", "hash": "${"d".repeat(64)}"}`,
+    };
+    const { exitCode, stderr } = runValidator({
+      [MANIFEST]: manifestOf(entries),
+      "docs/notes.md": "# m\n",
+    });
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain("lacks the split grammar field every render stamps");
+  });
+
+  test("a grammar-less split entry on a roster path draws ONE diagnostic", () => {
+    // The missing field is the structural loop's report alone; the roster
+    // cross-check judges only present-but-disagreeing metadata, so one
+    // cause does not pile two conflicting recovery instructions.
+    const managedTop = "# Security\n<!-- repo-platform:local-section -->\n";
+    const entries = {
+      ...stampedBaseline(),
+      "SECURITY.md":
+        `{"class": "split", "marker": "<!-- repo-platform:local-section -->", ` +
+        `"managed": "above", "hash": "${sha(managedTop)}"}`,
+    };
+    const { exitCode, stderr } = runValidator({
+      [MANIFEST]: manifestOf(entries),
+      "SECURITY.md": `${managedTop}tail\n`,
+    });
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain("lacks the split grammar field every render stamps");
+    expect(stderr).not.toContain("carries split metadata outside its declared tail-marker grammar");
+  });
+
+  test("a grammar-less .gitignore split entry is the structural loop's single report", () => {
+    // The marker/managed pair alone no longer passes silently: every
+    // render stamps the grammar, so its absence is a hand edit even when
+    // the derived pair still looks right.
+    const entries = {
+      ...stampedBaseline(),
+      ".gitignore":
+        `{"class": "split", "marker": "# BEGIN REPO-PLATFORM MANAGED", ` +
+        `"managed": "below", "hash": "${sha(GITIGNORE_HALF)}"}`,
+    };
+    const { exitCode, stderr } = runValidator({ [MANIFEST]: manifestOf(entries) });
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain("lacks the split grammar field every render stamps");
+    expect(stderr).not.toContain("does not match the managed-section grammar");
+  });
+
   test("an entry whose render condition is off is manifest drift", () => {
     // release.yml belongs to the release-please module; the baseline
     // selects only uv, so no template render can have listed it.
@@ -1445,8 +1505,8 @@ describe("ownership-manifest byte parity", () => {
     const entries = {
       ...SELF_ENTRY,
       ".github/workflows/ci.yml":
-        `{"class": "split", "marker": "# no-such-marker", "managed": "above", ` +
-        `"hash": "${"c".repeat(64)}"}`,
+        `{"class": "split", "grammar": "tail-marker", "marker": "# no-such-marker", ` +
+        `"managed": "above", "hash": "${"c".repeat(64)}"}`,
     };
     const { exitCode, stderr } = runValidator({ [MANIFEST]: manifestOf(entries) });
     expect(exitCode).toBe(1);
