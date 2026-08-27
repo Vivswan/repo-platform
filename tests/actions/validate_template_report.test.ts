@@ -331,8 +331,9 @@ describe("the action's wiring", () => {
     expect(withBlock["advisories-file"]).toContain("validate-advisories.md");
     // biome-ignore lint/suspicious/noTemplateCurlyInString: literal GitHub Actions expression
     expect(action.outputs.integrity.value).toBe("${{ steps.integrity.outcome }}");
-    // The freshness leg can never fail the job, and stays a ref compare:
-    // a render here would cost every fleet repo a copier run per push.
+    // The freshness leg can never fail the job, and stays a ref compare
+    // against the operator's template branch: a render here would cost
+    // every fleet repo a copier run per push.
     const freshness = steps.find((step) => step.id === "freshness");
     expect(freshness?.["continue-on-error"]).toBe(true);
     expect(String(freshness?.run)).toContain("freshness.ts");
@@ -340,5 +341,6 @@ describe("the action's wiring", () => {
       readFileSync(join(ACTION, name), "utf8"),
     );
     for (const source of sources) expect(source).not.toMatch(/^\s*copier\s/m);
+    expect(sources[0]).toContain("/branches/template");
   });
 });
