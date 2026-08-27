@@ -21,6 +21,7 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { parse } from "yaml";
+import { compileSkipIfExistsPattern } from "../../../scripts/ownership.ts";
 import { parseFlags } from "../shared/flags.ts";
 import { fail } from "../shared/gha.ts";
 import { parseModules } from "../shared/modules.ts";
@@ -92,19 +93,26 @@ export function customLicenseFlipError(
 
 // Candidate deletions: in the old render, gone from the new render, not
 // protected, and not matched by any `_skip_if_exists` pattern from either
-// version.
+// version. Patterns compile through the composer's shared gitwildmatch
+// matcher (scripts/ownership.ts), the ONLY implementation of copier's
+// semantics - a second matcher here (this used to be Bun.Glob) could
+// disagree with composition about what a skip pattern protects, and the
+// shared one fails closed on gitwildmatch features it does not implement
+// instead of guessing.
 export function retiredPaths(
   oldPaths: ReadonlySet<string>,
   newPaths: ReadonlySet<string>,
   skipPatterns: readonly string[],
   modules: readonly string[],
 ): string[] {
-  const globs = skipPatterns.map((pattern) => new Bun.Glob(pattern));
+  const matchers = skipPatterns.map((pattern) => compileSkipIfExistsPattern(pattern));
   const protectedSet = protectedPaths(modules);
   return [...oldPaths]
     .filter(
       (path) =>
-        !newPaths.has(path) && !protectedSet.has(path) && !globs.some((glob) => glob.match(path)),
+        !newPaths.has(path) &&
+        !protectedSet.has(path) &&
+        !matchers.some((matcher) => matcher.test(path)),
     )
     .sort();
 }
@@ -175,7 +183,17 @@ function main(args: string[]): void {
   if (modules === null) {
     fail([`--modules must be a JSON list of strings: ${flags["--modules"]}`]);
   }
-  console.log(JSON.stringify(retiredPaths(oldPaths, newPaths, skipPatterns, modules)));
+  // The shared matcher fails closed on gitwildmatch features it does not
+  // implement; route that to the ::error:: channel (the patterns come from
+  // the template's own copier.yml at both refs - repo-platform content,
+  // not target data - so the message is safe for a public log).
+  let retired: string[];
+  try {
+    retired = retiredPaths(oldPaths, newPaths, skipPatterns, modules);
+  } catch (err) {
+    fail([err instanceof Error ? err.message : String(err)]);
+  }
+  console.log(JSON.stringify(retired));
 }
 
 if (import.meta.main) {

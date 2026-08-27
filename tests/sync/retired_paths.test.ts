@@ -89,6 +89,23 @@ describe("retiredPaths", () => {
     expect(retiredPaths(oldPaths, newPaths, [".github/workflows/*.yml"], [])).toEqual([]);
   });
 
+  test("a bare-name skip pattern protects at any depth (copier's gitwildmatch)", () => {
+    // The shared matcher (scripts/ownership.ts) reproduces copier's
+    // semantics; the old Bun.Glob here anchored bare names to the root
+    // and would have deleted a nested generated-once file copier skips.
+    const withNested = new Set([...oldPaths, "sub/dir/.gitleaks.toml"]);
+    expect(retiredPaths(withNested, newPaths, [".gitleaks.toml"], [])).not.toContain(
+      "sub/dir/.gitleaks.toml",
+    );
+  });
+
+  test("gitwildmatch features beyond the shared subset fail closed, never guess", () => {
+    // A guessed match could either delete a repo-owned starter or leave a
+    // retired file undead - and disagree with the composer's reading of
+    // the same pattern.
+    expect(() => retiredPaths(oldPaths, newPaths, ["docs/**"], [])).toThrow(/gitwildmatch/);
+  });
+
   test("output is sorted", () => {
     const candidates = retiredPaths(oldPaths, newPaths, [], []);
     expect(candidates).toEqual([...candidates].sort());
