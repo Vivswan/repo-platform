@@ -315,6 +315,14 @@ function fenceFor(lines: string[]): string {
   return "`".repeat(longest + 1);
 }
 
+/** The shrank-section heading fragment. Exported for rehearse_fleet's
+ * row wording: a report containing it carries at least one CONFIRMED
+ * line loss; a report without it is unverifiable-only (integrity
+ * unproven, nothing proven lost). One constant, so the classifier can
+ * never drift from the heading renderReport writes. */
+export const SHRANK_PHRASE =
+  "non-blank line(s) of the repository-owned half at the previous commit are missing from this update's copy";
+
 export function renderReport(findings: Finding[]): string {
   if (findings.length === 0) return "";
   let budget = MAX_REPORT_BYTES;
@@ -331,7 +339,7 @@ export function renderReport(findings: Finding[]): string {
       budget -= cost;
       shown.push(clipped);
     }
-    const heading = `- \`${finding.path}\`: ${finding.missing.length} non-blank line(s) of the repository-owned half at the previous commit are missing from this update's copy`;
+    const heading = `- \`${finding.path}\`: ${finding.missing.length} ${SHRANK_PHRASE}`;
     if (shown.length === 0) {
       return `${heading} (excerpt omitted: report size limit; compare against the previous commit's copy).`;
     }

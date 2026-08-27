@@ -57,6 +57,7 @@ import {
   type RehearsalOutcome,
   rehearseRepo,
 } from "./rehearse.ts";
+import { SHRANK_PHRASE } from "./tail_tripwire.ts";
 
 const REPO_ROOT = resolve(import.meta.dir, "..", "..", "..");
 
@@ -169,7 +170,15 @@ export function outcomeRow(slug: string, outcome: RehearsalOutcome): FleetRow {
   // regression a repo-platform PR is about to cause - error severity.
   const tripped = outcome.tripwireReport !== "";
   if (tripped) {
-    parts.push("[phase tripwire] tail tripwire TRIPPED (repository-owned lines would be lost)");
+    // A report can be driven by UNVERIFIABLE-only findings, which prove
+    // nothing was lost - the wording must not assert confirmed loss for
+    // both kinds. SHRANK_PHRASE is renderReport's own heading fragment
+    // (one constant), so the classifier cannot drift from the report.
+    parts.push(
+      outcome.tripwireReport.includes(SHRANK_PHRASE)
+        ? "[phase tripwire] tail tripwire TRIPPED (repository-owned lines would be lost)"
+        : "[phase tripwire] tail tripwire TRIPPED (integrity unproven - manifest unusable; nothing proven lost)",
+    );
   }
   if (outcome.validationOk) {
     parts.push("validation ok");
