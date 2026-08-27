@@ -885,6 +885,7 @@ export function declarationTextErrors(
 
 export type OwnershipEntry =
   | { path: string; kind: "header" }
+  | { path: string; kind: "class-only" }
   | { path: string; kind: "marker"; marker: string };
 
 /** Render conditions the validator can evaluate from a rendered repo's
@@ -938,13 +939,15 @@ function landedFiles(
   return out;
 }
 
-/** The in-file enforcement a declaration gets in the validator's tables:
- *  "header" for a managed file whose source carries the managed header
- *  (headerless managed files - pin dotfiles, JSON, symlinks - have no
- *  comment channel to enforce), "marker" for a tail-marker split with its
- *  exact marker line, null for starters (repo-owned; nothing to enforce)
- *  and bounded-region splits (their grammar is enforced by the region
- *  tables, not a kind). */
+/** The enforcement a declaration gets in the validator's tables: "header"
+ *  for a managed file whose source carries the managed header,
+ *  "class-only" for a managed file with no comment channel (pin dotfiles,
+ *  JSON, symlinks) - nothing to check in-file, but the path must still
+ *  reach the validator's manifest cross-check or a hand-flipped class
+ *  would silently exempt it from byte parity - and "marker" for a
+ *  tail-marker split with its exact marker line. null for starters
+ *  (repo-owned; nothing to enforce) and bounded-region splits (their
+ *  grammar is enforced by the region tables, not a kind). */
 function enforcementOf(
   declaration: OwnershipDeclaration,
   source: string | null,
@@ -955,7 +958,7 @@ function enforcementOf(
     case "managed":
       return source !== null && hasManagedHeader(source)
         ? { path: declaration.path, kind: "header" }
-        : null;
+        : { path: declaration.path, kind: "class-only" };
     case "split":
       return declaration.grammar === "tail-marker"
         ? { path: declaration.path, kind: "marker", marker: declaration.marker }

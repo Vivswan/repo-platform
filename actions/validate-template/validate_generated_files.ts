@@ -74,7 +74,7 @@ import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { lstatSync, readdirSync, readFileSync, readlinkSync, writeFileSync } from "node:fs";
 import { extname, join, resolve } from "node:path";
-import { parseAllDocuments, parse as parseYaml } from "yaml";
+import { parseAllDocuments, parseDocument, parse as parseYaml } from "yaml";
 
 const SKIP_DIRS = new Set([
   ".git",
@@ -104,6 +104,31 @@ const HEADER_WINDOW = 10;
  *  verifies byte parity against it. */
 const MANIFEST_NAME = ".github/repo-platform-manifest.json";
 
+/** Keys bound more than once anywhere in the manifest's JSON, each named
+ *  once in first-appearance order. JSON.parse silently keeps a duplicated
+ *  key's LAST value, so a conflicted manifest resolution that keeps two
+ *  entry lines for one path would hand every consumer whichever entry
+ *  sorts last - switching that path's parity metadata invisibly. JSON is
+ *  a YAML subset, so the YAML parser's uniqueKeys scan positions every
+ *  duplicate; any other parse problem stays JSON.parse's report. */
+function duplicateManifestKeys(text: string): string[] {
+  const keys: string[] = [];
+  for (const problem of parseDocument(text, { uniqueKeys: true }).errors) {
+    if (problem.code !== "DUPLICATE_KEY") continue;
+    // The error position points at the duplicated key token; read the JSON
+    // string from there (the parser's own pos span can be a single char).
+    const token = /^"(?:[^"\\]|\\.)*"/.exec(text.slice(problem.pos[0]));
+    let key = token === null ? text.slice(problem.pos[0], problem.pos[1]) : token[0];
+    try {
+      key = String(JSON.parse(key));
+    } catch {
+      // Not a JSON string token: report the raw slice.
+    }
+    if (!keys.includes(key)) keys.push(key);
+  }
+  return keys;
+}
+
 /** A split entry's managed half: through the first marker line's newline
  *  for managed "above", from the start of the marker line for "below";
  *  null when the marker line is missing. `content` is latin1 text
@@ -130,10 +155,15 @@ function sha256(data: Buffer): string {
 /** How a declared file's ownership is enforced in the rendered repo:
  *  "header" files open with the managed header, "marker" files carry their
  *  declared split marker line exactly once (a substring mention must not
- *  count). (A third kind, "mergeable", was retired with the class -
- *  settings.yml, its only member, is a repo-owned starter now.) */
+ *  count), and "class-only" files are managed with no comment channel
+ *  (pin dotfiles, JSON, symlinks) - nothing to check in-file, but check
+ *  9's manifest cross-check still needs them on the roster, or a
+ *  hand-flipped class would silently exempt them from byte parity. (A
+ *  fourth kind, "mergeable", was retired with the class - settings.yml,
+ *  its only member, is a repo-owned starter now.) */
 type OwnedFile =
   | { path: string; kind: "header"; marker?: undefined }
+  | { path: string; kind: "class-only"; marker?: undefined }
   | { path: string; kind: "marker"; marker: string };
 
 /** Render conditions translated from the templates' declared filename
@@ -155,9 +185,9 @@ interface RegionSplitGrammar {
 // The declared ownership of every enforceable base file (kind + marker
 // decoration, render conditions from the templates' filename gates) and
 // the bounded-region split grammars; module files come from the generated
-// MODULE_OWNERSHIP record below, starters and headerless comment-free
-// formats stay out (nothing to enforce in-file; the manifest still
-// declares them).
+// MODULE_OWNERSHIP record below. Starters stay out (repo-owned; nothing
+// to enforce); headerless comment-free managed files ride as class-only
+// so the manifest cross-check covers them.
 // BEGIN GENERATED: base-ownership (scripts/generate.ts - edit templates/base/ownership.yml and the base templates, not this block)
 const BASE_OWNERSHIP: BaseOwnedFile[] = [
   { path: ".copier-answers.yml", kind: "header" },
@@ -294,15 +324,27 @@ const TOOLCHAIN_PINS: Record<string, { file: string; version: string }> = {
 
 // How each rendered module file declares its ownership while its module is
 // selected: "header" files open with the managed header, "marker" files
-// split a managed top from a repo-owned tail at their declared marker line
-// (derived from the module.yml ownership declarations by
-// moduleOwnershipEntries in scripts/ownership.ts - starters and headerless
-// comment-free formats stay out).
+// split a managed top from a repo-owned tail at their declared marker line,
+// "class-only" files are managed with no comment channel (derived from the
+// module.yml ownership declarations by moduleOwnershipEntries in
+// scripts/ownership.ts - starters stay out).
 // BEGIN GENERATED: module-ownership (scripts/generate.ts - edit the module.yml ownership declarations and the module templates, not this block)
 const MODULE_OWNERSHIP: Record<string, OwnedFile[]> = {
-  agents: [{ path: "AGENTS.md", kind: "marker", marker: "<!-- repo-platform:local-section -->" }],
-  bun: [{ path: ".github/workflows/dependabot-bun-lockfile.yml", kind: "header" }],
-  deno: [{ path: ".github/workflows/deno-audit.yml", kind: "header" }],
+  agents: [
+    { path: ".github/agents.md", kind: "class-only" },
+    { path: ".github/copilot-instructions.md", kind: "class-only" },
+    { path: "AGENTS.md", kind: "marker", marker: "<!-- repo-platform:local-section -->" },
+    { path: "CLAUDE.md", kind: "class-only" },
+  ],
+  bun: [
+    { path: ".bun-version", kind: "class-only" },
+    { path: ".github/workflows/dependabot-bun-lockfile.yml", kind: "header" },
+  ],
+  node: [{ path: ".node-version", kind: "class-only" }],
+  deno: [
+    { path: ".dvmrc", kind: "class-only" },
+    { path: ".github/workflows/deno-audit.yml", kind: "header" },
+  ],
   pages: [{ path: ".github/workflows/pages.yml", kind: "header" }],
   "release-please": [{ path: ".github/workflows/release.yml", kind: "header" }],
   skills: [{ path: ".github/workflows/validate-skills.yml", kind: "header" }],
@@ -951,6 +993,9 @@ function main(): number {
         "/repo-platform\\.(?![A-Za-z0-9._-])",
     );
     for (const { rel, kind, marker } of declaredOwnership) {
+      // class-only files have no comment channel to self-declare in; their
+      // enforcement is check 9's manifest cross-check alone.
+      if (kind === "class-only") continue;
       const path = join(root, rel);
       if (!isRegularFile(path)) continue;
       const content = readFileSync(path, "utf-8");
@@ -1010,8 +1055,9 @@ function main(): number {
   // every absence surfaces on every run, and a tampered _commit both
   // self-heals on the next sync (template and local change the same line,
   // and conflicts resolve toward the template) and breaks the repo's own
-  // update base loudly. Paths beyond the tables (starters, version pins -
-  // check 7 pins their bytes - and symlinks) remain manifest-trusted, an
+  // update base loudly. Version pins and symlinks ride the tables as
+  // class-only entries (no in-file decoration, but their manifest class is
+  // cross-checked); only starter paths remain manifest-trusted, an
   // accepted residue of the informational stance.
   // The _commit read must mirror sync/answers_file.ts's failsafe-schema
   // read: PyYAML (copier's writer) dumps exponent-shaped shas like
@@ -1053,22 +1099,36 @@ function main(): number {
     const manifestText = readFileSync(manifestPath, "utf-8");
     let manifestFiles: Record<string, unknown> | null = null;
     if (!hasConflictMarker(manifestText)) {
-      try {
-        const manifest = JSON.parse(manifestText) as { files?: unknown };
-        if (
-          typeof manifest.files !== "object" ||
-          manifest.files === null ||
-          Array.isArray(manifest.files)
-        ) {
-          throw new Error("no top-level 'files' mapping");
-        }
-        manifestFiles = manifest.files as Record<string, unknown>;
-      } catch (exc) {
+      // Duplicates are hunted BEFORE the parse so no consumer below ever
+      // reads a last-win view of the mapping (duplicateManifestKeys states
+      // the hazard).
+      const duplicated = duplicateManifestKeys(manifestText);
+      for (const key of duplicated) {
         errors.push(
-          `${MANIFEST_NAME}: does not parse as an ownership manifest ` +
-            `(${exc instanceof Error ? exc.message.split("\n")[0] : String(exc)}); ` +
-            "the file is managed - run a template sync to regenerate it",
+          `${MANIFEST_NAME}: key ${JSON.stringify(key)} is bound more than once - ` +
+            "JSON consumers silently keep the last value, which would switch that " +
+            "path's ownership metadata; revert the edit (git history has the " +
+            "stamped original) or run a recovery sync (recover=recopy)",
         );
+      }
+      if (duplicated.length === 0) {
+        try {
+          const manifest = JSON.parse(manifestText) as { files?: unknown };
+          if (
+            typeof manifest.files !== "object" ||
+            manifest.files === null ||
+            Array.isArray(manifest.files)
+          ) {
+            throw new Error("no top-level 'files' mapping");
+          }
+          manifestFiles = manifest.files as Record<string, unknown>;
+        } catch (exc) {
+          errors.push(
+            `${MANIFEST_NAME}: does not parse as an ownership manifest ` +
+              `(${exc instanceof Error ? exc.message.split("\n")[0] : String(exc)}); ` +
+              "the file is managed - run a template sync to regenerate it",
+          );
+        }
       }
     }
     if (manifestFiles !== null) {
@@ -1169,7 +1229,7 @@ function main(): number {
         }
         const entry = asEntry(raw);
         if (entry === null) continue;
-        const declared = kind === "header" ? "managed" : "split";
+        const declared = kind === "marker" ? "split" : "managed";
         if (entry.class !== declared) {
           metadataError(rel, `claims class ${JSON.stringify(entry.class)}`, declared);
           continue;

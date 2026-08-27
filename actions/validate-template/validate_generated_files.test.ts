@@ -60,7 +60,7 @@ const TAIL_MARKER = "<!-- repo-platform:local-section -->";
 const HASH_COMMENT_MARKER = "# repo-platform:local-section";
 type MirrorEntry = {
   path: string;
-  kind: "header" | "marker";
+  kind: "header" | "marker" | "class-only";
   marker?: string;
   publicOnly?: boolean;
   withoutModule?: string;
@@ -81,9 +81,21 @@ const MIRROR_BASE: MirrorEntry[] = [
   { path: "SECURITY.md", kind: "marker", marker: TAIL_MARKER },
 ];
 const MIRROR_MODULES: Record<string, MirrorEntry[]> = {
-  agents: [{ path: "AGENTS.md", kind: "marker", marker: TAIL_MARKER }],
-  bun: [{ path: ".github/workflows/dependabot-bun-lockfile.yml", kind: "header" }],
-  deno: [{ path: ".github/workflows/deno-audit.yml", kind: "header" }],
+  agents: [
+    { path: ".github/agents.md", kind: "class-only" },
+    { path: ".github/copilot-instructions.md", kind: "class-only" },
+    { path: "AGENTS.md", kind: "marker", marker: TAIL_MARKER },
+    { path: "CLAUDE.md", kind: "class-only" },
+  ],
+  bun: [
+    { path: ".bun-version", kind: "class-only" },
+    { path: ".github/workflows/dependabot-bun-lockfile.yml", kind: "header" },
+  ],
+  node: [{ path: ".node-version", kind: "class-only" }],
+  deno: [
+    { path: ".dvmrc", kind: "class-only" },
+    { path: ".github/workflows/deno-audit.yml", kind: "header" },
+  ],
   pages: [{ path: ".github/workflows/pages.yml", kind: "header" }],
   "release-please": [{ path: ".github/workflows/release.yml", kind: "header" }],
   skills: [{ path: ".github/workflows/validate-skills.yml", kind: "header" }],
@@ -134,7 +146,7 @@ function manifestForTree(tree: Record<string, string>): string {
   for (const { path, kind, marker } of expected) {
     const content = tree[path];
     if (content === undefined) continue;
-    if (kind === "header") {
+    if (kind === "header" || kind === "class-only") {
       entries[path] = `{"class": "managed", "hash": "${shaLatin1(content)}"}`;
     } else {
       // A missing or duplicated marker is that check's own report; the
@@ -805,6 +817,19 @@ describe("ownership self-declarations", () => {
     });
     expect(exitCode).toBe(1);
     expect(stderr).toContain(".editorconfig: the '# repo-platform:local-section' marker");
+  });
+
+  test("an indented marker line still counts - markers match by trimmed equality", () => {
+    // The fleet-wide marker-matching convention is exact TRIMMED lines:
+    // this validator's marker count, its managed-half slicing, and the
+    // sync side's split rebuild all share it, so an indented marker is
+    // still the marker (and the auto-stamped manifest's half, sliced the
+    // same way, passes parity against it).
+    const { exitCode, stderr } = runValidator({
+      ".editorconfig": "root = true\n  # repo-platform:local-section\nrepo tail\n",
+    });
+    expect(stderr).toBe("");
+    expect(exitCode).toBe(0);
   });
 
   test("CODE_OF_CONDUCT.md needs the header only on public renders", () => {
@@ -1555,12 +1580,16 @@ describe("ownership-manifest byte parity", () => {
     expect(absent.exitCode).toBe(0);
   });
 
-  test("a managed symlink's hash covers the link target", () => {
-    // BASELINE has no symlinks; exercise the rule through a manifest entry
-    // pointing at one created next to it.
+  // The agents module's CLAUDE.md is a symlink: a class-only roster path
+  // with no comment channel. These fixtures select agents and land the
+  // link so both the parity rule and the cross-check see a real symlink.
+  const agentsLinkTree = (claudeEntry: string): string => {
     const root = mkdtempSync(join(tmpdir(), "validate-template-link-"));
     roots.push(root);
-    for (const [rel, content] of Object.entries(BASELINE)) {
+    const registration = `${MANAGED_HEADER}modules: [uv, agents]\n`;
+    const agentsMd = "# AGENTS.md\n\n<!-- repo-platform:local-section -->\n";
+    const tree = { ...BASELINE, ".repo-platform.yml": registration, "AGENTS.md": agentsMd };
+    for (const [rel, content] of Object.entries(tree)) {
       mkdirSync(join(root, dirname(rel)), { recursive: true });
       writeFileSync(join(root, rel), content);
     }
@@ -1569,11 +1598,80 @@ describe("ownership-manifest byte parity", () => {
       join(root, MANIFEST),
       manifestOf({
         ...stampedBaseline(),
-        "CLAUDE.md": `{"class": "managed", "hash": "${sha("AGENTS.md")}"}`,
+        ".repo-platform.yml": `{"class": "managed", "hash": "${sha(registration)}"}`,
+        "AGENTS.md":
+          `{"class": "split", "grammar": "tail-marker", ` +
+          `"marker": "<!-- repo-platform:local-section -->", "managed": "above", ` +
+          `"hash": "${sha(agentsMd)}"}`,
+        "CLAUDE.md": claudeEntry,
       }),
     );
+    return root;
+  };
+
+  test("a managed symlink's hash covers the link target", () => {
+    const root = agentsLinkTree(`{"class": "managed", "hash": "${sha("AGENTS.md")}"}`);
     const result = Bun.spawnSync([process.execPath, VALIDATOR, root], { env: gitFreeEnv() });
     expect(result.stderr.toString()).toBe("");
     expect(result.exitCode).toBe(0);
+  });
+
+  test("a symlink-classed path hand-flipped to starter fails the roster cross-check", () => {
+    // Symlinks have no header or marker to enforce in-file, so without a
+    // class-only roster entry this flip would disable CLAUDE.md's parity
+    // permanently and invisibly (sync baselines manifest edits).
+    const root = agentsLinkTree('{"class": "starter"}');
+    const result = Bun.spawnSync([process.execPath, VALIDATOR, root], { env: gitFreeEnv() });
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr.toString()).toContain(`entry 'CLAUDE.md' claims class "starter"`);
+    expect(result.stderr.toString()).toContain("ownership tables declare it managed");
+  });
+
+  test("a headerless pin dotfile hand-flipped to starter fails the roster cross-check", () => {
+    // .bun-version carries no header; the class-only roster entry is what
+    // keeps its manifest class honest.
+    const registration = `${MANAGED_HEADER}modules: [bun]\n`;
+    const entries = {
+      ...stampedBaseline(),
+      ".repo-platform.yml": `{"class": "managed", "hash": "${sha(registration)}"}`,
+      ".bun-version": '{"class": "starter"}',
+    };
+    const { exitCode, stderr } = runValidator({
+      ".repo-platform.yml": registration,
+      ".bun-version": "1.3.14\n",
+      [MANIFEST]: manifestOf(entries),
+    });
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain(`entry '.bun-version' claims class "starter"`);
+    expect(stderr).toContain("ownership tables declare it managed");
+  });
+
+  test("a duplicated manifest key is a hard error naming the path", () => {
+    // Two entries for one path: JSON.parse keeps the LAST one silently, so
+    // a conflicted resolution keeping a second, starter-classed ci.yml
+    // line would switch that file's parity off invisibly. The duplicate is
+    // refused before any consumer reads a last-win view.
+    const base = stampedBaseline();
+    const text = `{\n  "files": {\n${[
+      `    ${JSON.stringify(MANIFEST)}: ${base[MANIFEST]}`,
+      `    ".github/workflows/ci.yml": ${base[".github/workflows/ci.yml"]}`,
+      `    ".github/workflows/ci.yml": {"class": "starter"}`,
+    ].join(",\n")}\n  }\n}\n`;
+    const { exitCode, stderr } = runValidator({ [MANIFEST]: text });
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain(`key ".github/workflows/ci.yml" is bound more than once`);
+    // The last-win starter view must not have reached the parity loop.
+    expect(stderr).not.toContain("a starter carrying a hash");
+  });
+
+  test("a duplicated key inside one entry object is refused too", () => {
+    const base = stampedBaseline();
+    const text = `{\n  "files": {\n${[
+      `    ${JSON.stringify(MANIFEST)}: ${base[MANIFEST]}`,
+      `    ".github/workflows/ci.yml": {"class": "managed", "class": "starter", "hash": null}`,
+    ].join(",\n")}\n  }\n}\n`;
+    const { exitCode, stderr } = runValidator({ [MANIFEST]: text });
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain(`key "class" is bound more than once`);
   });
 });

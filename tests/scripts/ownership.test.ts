@@ -771,7 +771,7 @@ function writeTree(files: Record<string, string | { symlink: string }>): string 
 }
 
 describe("moduleOwnershipEntries", () => {
-  test("derives kinds from declarations plus decoration; starters and headerless stay out", () => {
+  test("derives kinds from declarations plus decoration; starters stay out, headerless and symlinks ride as class-only", () => {
     const dir = writeTree({
       "bun/.github/workflows/managed.yml.jinja": `${HEADER}name: Managed\n`,
       "bun/.github/workflows/starter.yml.jinja": "name: S\n",
@@ -791,9 +791,14 @@ describe("moduleOwnershipEntries", () => {
           tail("SPLIT.md", HTML_SENTINEL),
         ]),
       ];
+      // The pin dotfile and the symlink have no comment channel, but they
+      // still enter the roster so the validator's manifest cross-check
+      // sees them - a hand-flipped class must not exempt them from parity.
       expect(moduleOwnershipEntries(manifests, dir)).toEqual({
         bun: [
+          { path: ".bun-version", kind: "class-only" },
           { path: ".github/workflows/managed.yml", kind: "header" },
+          { path: "LINK.md", kind: "class-only" },
           { path: "SPLIT.md", kind: "marker", marker: HTML_SENTINEL },
         ],
       });
@@ -879,6 +884,7 @@ describe("baseOwnershipTables", () => {
     "base/.gitignore.jinja":
       "# BEGIN REPOSITORY LOCAL\n# END REPOSITORY LOCAL\n# BEGIN REPO-PLATFORM MANAGED\n# END REPO-PLATFORM MANAGED\n",
     "base/.gitleaks.toml.jinja": "[allowlist]\n",
+    "base/.pin": "1.0.0\n",
   };
   const BASE_DECLS = [
     "ownership:",
@@ -893,6 +899,7 @@ describe("baseOwnershipTables", () => {
     '    managed_end: "# END REPO-PLATFORM MANAGED"',
     '    local_begin: "# BEGIN REPOSITORY LOCAL"',
     '    local_end: "# END REPOSITORY LOCAL"',
+    "  - { path: .pin, class: managed }",
     "  - { path: .gitleaks.toml, class: starter }",
     "",
   ];
@@ -919,6 +926,9 @@ describe("baseOwnershipTables", () => {
           marker: HTML_SENTINEL,
           when: { withoutModule: "custom-license" },
         },
+        // Headerless managed files enter as class-only so the manifest
+        // cross-check still covers them.
+        { path: ".pin", kind: "class-only" },
       ]);
       expect(tables.regionSplits).toEqual({
         ".gitignore": {
