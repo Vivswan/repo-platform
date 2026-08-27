@@ -40,12 +40,13 @@ import { parse as parseYaml } from "yaml";
 import { z } from "zod";
 import type { ModuleManifest } from "./module_manifests.ts";
 
-/** The managed ownership header in template sources, anchored on the C1
- *  line's canonical trailing period with no repo-name character (GitHub
- *  allows [A-Za-z0-9._-]) after it, so neither a negated look-alike ("is
- *  not managed by") nor a longer repo name ("/repo-platform_fork",
- *  "/repo-platform.fork") counts; validate_generated_files.ts applies the
- *  same anchoring to rendered files. */
+/** The managed ownership header in template sources, anchored on the
+ *  header sentence's canonical trailing period with no repo-name character
+ *  (GitHub allows [A-Za-z0-9._-]) after it, so neither a negated
+ *  look-alike ("is not managed by") nor a longer repo name
+ *  ("/repo-platform_fork", "/repo-platform.fork") counts;
+ *  validate_generated_files.ts applies the same anchoring to rendered
+ *  files. */
 export const MANAGED_HEADER_RE =
   /This file is managed by \{\{ github_username \}\}\/repo-platform\.(?![A-Za-z0-9._-])/;
 
@@ -387,9 +388,9 @@ export function landedPathAndGates(renderedPath: string): { path: string; gates:
  *  arbitrary marker text, so the shipped LOCAL_SECTION_LINES alone would
  *  miss a custom declared marker copied into a managed or starter source;
  *  declarationTextErrors unions this derived set with those constants,
- *  exactly as it does for bounded-region markers. Deriving ALONE is what
- *  G2 fixed and this must not undo: the constants are what keep the scan
- *  armed when no declaration of a given grammar is left in the tree. */
+ *  exactly as it does for bounded-region markers. Deriving ALONE is
+ *  self-disarming and the union must stay: the constants are what keep the
+ *  scan armed when no declaration of a given grammar is left in the tree. */
 export function declaredTailMarkerTexts(declarations: Iterable<OwnershipDeclaration>): string[] {
   const out = new Set<string>();
   for (const declaration of declarations) {

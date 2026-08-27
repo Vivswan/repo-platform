@@ -942,10 +942,10 @@ function main(): number {
   // repo's files are sources, not renders - and while the owner pin is
   // unhealed (its error is already recorded).
   if (!selfMode && ownerPin !== null && ownerPin.kind === "pinned") {
-    // Anchored on the C1 line's canonical trailing period with no repo-name
-    // character (GitHub allows [A-Za-z0-9._-]) after it, so neither a
-    // negated look-alike ("is not managed by") nor a longer repo name
-    // ("/repo-platform_fork", "/repo-platform.fork") counts.
+    // Anchored on the header sentence's canonical trailing period with no
+    // repo-name character (GitHub allows [A-Za-z0-9._-]) after it, so
+    // neither a negated look-alike ("is not managed by") nor a longer repo
+    // name ("/repo-platform_fork", "/repo-platform.fork") counts.
     const headerRe = new RegExp(
       `This file is managed by ${ownerPin.owner.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}` +
         "/repo-platform\\.(?![A-Za-z0-9._-])",

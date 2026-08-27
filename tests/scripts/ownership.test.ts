@@ -525,9 +525,9 @@ describe("declarationTextErrors", () => {
     expect(errorsOf(managed("X.md"), mention, false, [custom])).toHaveLength(0);
   });
 
-  // G2 armed the managed and starter arms; the tail-marker arm was the gap.
-  // Flipping .gitignore to tail-marker with a terminal marker passed
-  // composition, and the rebuild would then treat the LOCAL region as
+  // The tail-marker arm must reject foreign region markers like every other
+  // arm: flipping .gitignore to tail-marker with a terminal marker would
+  // pass composition, and the rebuild would then treat the LOCAL region as
   // managed and overwrite repository edits inside it.
   test("a tail-marker declaration over bounded-region marker text is an error", () => {
     const source = [
