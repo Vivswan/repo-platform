@@ -78,7 +78,10 @@
 // input. Split declarations carry their GRAMMAR: tail-marker (one marker
 // line ends the sync-owned top) or bounded-region (a BEGIN/END-bounded
 // repo-local region above the sync-owned half); the manifest entries
-// expose the grammar to the sync's split-file rebuild.
+// expose the grammar to the sync's split-file rebuild. The entry LINES are
+// emitted by the shared entryLine (actions/shared/manifest.ts) - the same
+// module whose parser the stamp hook, the sync legs, and validate-template
+// read the manifest back through, so the wire layout cannot fork.
 //
 // Usage:
 //   bun scripts/compose_template.ts   # regenerate the local template/ artifact
@@ -96,6 +99,7 @@ import {
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { joinLines, splitLines } from "../.github/scripts/shared/lines.ts";
+import { entryLine, MANIFEST_NAME as MANIFEST_LANDED_PATH } from "../actions/shared/manifest.ts";
 import { loadManifests, MODULE_ORDER, type ModuleManifest } from "./module_manifests.ts";
 import {
   declarationTextErrors,
@@ -1024,10 +1028,10 @@ export function spliceContributions(
 
 // --- ownership manifest -------------------------------------------------------
 
-/** Where the ownership manifest lands in generated repositories. */
-export const MANIFEST_LANDED_PATH = ".github/repo-platform-manifest.json";
-/** The manifest's emitted template name in the composed tree. */
-export const MANIFEST_TEMPLATE_PATH = `${MANIFEST_LANDED_PATH}${JINJA_SUFFIX}`;
+/** The manifest's emitted template name in the composed tree
+ *  (MANIFEST_LANDED_PATH, aliased from the shared module's MANIFEST_NAME,
+ *  is where it lands in generated repositories). */
+const MANIFEST_TEMPLATE_PATH = `${MANIFEST_LANDED_PATH}${JINJA_SUFFIX}`;
 
 export interface ManifestEntry {
   path: string;
@@ -1035,41 +1039,6 @@ export interface ManifestEntry {
    *  gates); the entry appears in a rendered manifest only while all hold. */
   gates: string[];
   ownership: ManifestOwnership;
-}
-
-/** One landed path per line, so a stamped manifest differs from the raw
- *  render in the hash values - and the self entry's provenance commit -
- *  alone, and copier's three-way update merge sees minimal local edits.
- *  stamp_manifest.ts substitutes those tokens on these lines in place -
- *  keep the layout in sync with its ENTRY_LINE_RE. The provenance slot
- *  (stamped with the render's recorded _commit) is what lets the validator
- *  tell version skew from entry deletion. Split entries keep the legacy
- *  `marker`/`managed` pair (the stamper's managedHalf and older validators
- *  read those) next to the declared grammar fields the sync's split-file
- *  rebuild consumes; the pair is derived from the grammar, so the two
- *  spellings cannot disagree. */
-function manifestEntryLine(entry: ManifestEntry): string {
-  const o = entry.ownership;
-  let body: string;
-  if (o.class === "starter") {
-    body = '{"class": "starter"}';
-  } else if (o.class === "managed") {
-    body =
-      entry.path === MANIFEST_LANDED_PATH
-        ? '{"class": "managed", "hash": null, "commit": null}'
-        : '{"class": "managed", "hash": null}';
-  } else if (o.grammar === "tail-marker") {
-    body =
-      `{"class": "split", "grammar": "tail-marker", "marker": ${JSON.stringify(o.marker)}, ` +
-      `"managed": "above", "hash": null}`;
-  } else {
-    body =
-      `{"class": "split", "grammar": "bounded-region", "marker": ${JSON.stringify(o.managed_begin)}, ` +
-      `"managed": "below", "managed_end": ${JSON.stringify(o.managed_end)}, ` +
-      `"local_begin": ${JSON.stringify(o.local_begin)}, ` +
-      `"local_end": ${JSON.stringify(o.local_end)}, "hash": null}`;
-  }
-  return `    ${JSON.stringify(entry.path)}: ${body}`;
 }
 
 /** Where a path's ownership is declared: templates/base/ownership.yml for
@@ -1230,14 +1199,15 @@ export function manifestEntries(
 
 /** The manifest's jinja template: gated `entries.append(...)` statements
  *  (the gitleaks-locks pattern) building one JSON entry line per selected
- *  path, joined with ',\n' so the render is valid JSON with no trailing
- *  comma. Every hash renders null; the post-render stamp hook
- *  (stamp_manifest.ts, wired in copier.yml's _tasks and _migrations)
- *  fills them in. */
+ *  path (the shared entryLine emitter - actions/shared/manifest.ts owns
+ *  the line layout the stamper and every parser read back), joined with
+ *  ',\n' so the render is valid JSON with no trailing comma. Every hash
+ *  renders null; the post-render stamp hook (stamp_manifest.ts, wired in
+ *  copier.yml's _tasks and _migrations) fills them in. */
 export function manifestTemplate(entries: ManifestEntry[]): Buffer {
   const lines = ["{%- set entries = [] -%}"];
   for (const entry of entries) {
-    const line = manifestEntryLine(entry);
+    const line = entryLine(entry.path, entry.ownership);
     if (line.includes("'")) {
       // The line rides inside a single-quoted jinja string literal.
       throw new Error(

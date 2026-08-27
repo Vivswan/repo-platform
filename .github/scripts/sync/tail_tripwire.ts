@@ -50,7 +50,8 @@
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { MANIFEST_NAME, managedHalf } from "../../../actions/shared/stamp_manifest.ts";
+import { MANIFEST_NAME } from "../../../actions/shared/manifest.ts";
+import { managedHalf } from "../../../actions/shared/stamp_manifest.ts";
 import { cleanLocalRegion } from "../../../scripts/gitignore_local.ts";
 import { isCommentMarker } from "../../../scripts/ownership.ts";
 import { parseFlags } from "../shared/flags.ts";

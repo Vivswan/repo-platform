@@ -22,19 +22,18 @@
 //
 // Only the "hash" tokens - plus the self entry's "commit" provenance slot,
 // filled with the render's recorded _commit - are rewritten, in place,
-// line by line: the rendered manifest keeps one entry per line
-// (compose_template.ts's manifestEntryLine - keep ENTRY_LINE_RE below in
-// sync with it), so a stamped manifest differs from the raw render in
-// those token values alone and copier's three-way update merge sees
-// minimal local edits. Split entries also carry declared-grammar fields
-// ("grammar", the bounded-region marker strings) for the sync's
-// split-file rebuild; this stamper reads only the legacy marker/managed
-// pair (derived from the grammar at compose time) and passes the rest
-// through untouched. An update can still leave inline conflict blocks in
-// the manifest (both sides touch the hash lines); those resolve toward the
-// template ("after updating") side before parsing - the direction
-// resolve_copier_conflicts.ts uses - and the stamp then rewrites every
-// hash anyway.
+// line by line: the rendered manifest keeps one entry per line (the layout
+// manifest.ts's entryLine emits and parseEntry reads back), so a stamped
+// manifest differs from the raw render in those token values alone and
+// copier's three-way update merge sees minimal local edits. Split entries
+// also carry declared-grammar fields ("grammar", the bounded-region marker
+// strings) for the sync's split-file rebuild; this stamper reads only the
+// legacy marker/managed pair (derived from the grammar at compose time)
+// and passes the rest through untouched. An update can still leave inline
+// conflict blocks in the manifest (both sides touch the hash lines);
+// parseManifestFiles resolves those toward the template ("after updating")
+// side before parsing - the direction resolve_copier_conflicts.ts uses -
+// and the stamp then rewrites every hash anyway.
 //
 // Data problems (missing or unparseable manifest) warn and exit 0: a
 // stamping gap must never
@@ -61,8 +60,12 @@ import {
   writeFileSync,
 } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
-
-export const MANIFEST_NAME = ".github/repo-platform-manifest.json";
+import {
+  MANIFEST_NAME,
+  type ManifestEntryShape,
+  parseEntry,
+  parseManifestFiles,
+} from "./manifest.ts";
 
 /** The template suffix the build branch's symlink targets keep: links on
  *  the branch point at their templated twin so the `uses:` tarball
@@ -70,11 +73,6 @@ export const MANIFEST_NAME = ".github/repo-platform-manifest.json";
  *  strings without stripping the suffix - so this hook normalizes the
  *  rendered targets instead (normalizeSymlinkTargets below). */
 const JINJA_SUFFIX = ".jinja";
-
-/** One manifest entry line, as compose_template.ts emits it: indentation,
- *  the JSON-quoted path, the one-line entry object, an optional joining
- *  comma. */
-const ENTRY_LINE_RE = /^(\s*)("(?:[^"\\]|\\.)*"): (\{.*\})(,?)$/;
 
 /** The hash token inside an entry object; entries without one (starters,
  *  and legacy "mergeable" entries from renders that predate the class's
@@ -102,52 +100,15 @@ export function recordedCommit(root: string): string | null {
   return value === "" ? null : value;
 }
 
-// Copier's inline conflict markers, exactly as `copier update` writes them
-// (git merge-file labels): anything looser could swallow content lines.
-const CONFLICT_START = "<<<<<<< before updating";
-const CONFLICT_SEP = "=======";
-const CONFLICT_END = ">>>>>>> after updating";
-
-/** Copier's inline conflict blocks resolved toward the template side: the
- *  lines between ======= and >>>>>>> survive, the "before updating" local
- *  lines and the marker lines drop. Only exact, well-sequenced copier
- *  markers count; a malformed block (unterminated, or an END outside a
- *  block) returns the text unchanged - dropping lines on a guess could
- *  silently discard entries, and the parse step then reports the mess. A
- *  bare ======= outside a block is ordinary content. */
-export function resolveConflictsTowardAfter(text: string): string {
-  const out: string[] = [];
-  let state: "keep" | "local" | "template" = "keep";
-  for (const line of text.split("\n")) {
-    if (line === CONFLICT_START) {
-      if (state !== "keep") return text;
-      state = "local";
-    } else if (line === CONFLICT_SEP && state !== "keep") {
-      // A second separator inside a block is malformed; outside any block
-      // a bare ======= is ordinary content.
-      if (state !== "local") return text;
-      state = "template";
-    } else if (line === CONFLICT_END) {
-      if (state !== "template") return text;
-      state = "keep";
-    } else if (state !== "local") {
-      out.push(line);
-    }
-  }
-  if (state !== "keep") return text;
-  return out.join("\n");
-}
-
 /** THE marker-line predicate: a line is a split entry's marker line when
  *  its trimmed text equals the marker exactly. One owner for every
- *  splitter in the sync pipeline (this stamper's managedHalf,
- *  preserve_local_content's carries) - three sites once held three
- *  definitions, and the strictest (exact match after CR-strip) sent a
- *  marker line with one trailing space down the appendix path while the
- *  other two still counted it, delivering a tree the validator rejects.
- *  trim semantics on purpose: it is the most tolerant of the three, and
- *  the validator's self-contained twin (validate_generated_files.ts, kept
- *  matching by its own comment) already matches on line.trim(). */
+ *  splitter in the pipeline (this stamper's managedHalf, which the
+ *  validator's parity check imports too, and preserve_local_content's
+ *  carries) - three sites once held three definitions, and the strictest
+ *  (exact match after CR-strip) sent a marker line with one trailing
+ *  space down the appendix path while the other two still counted it,
+ *  delivering a tree the validator rejects. trim semantics on purpose:
+ *  it is the most tolerant of the three. */
 export function isMarkerLine(line: string, marker: string): boolean {
   return line.trim() === marker;
 }
@@ -176,180 +137,6 @@ export function managedHalf(
 
 function sha256(data: Buffer): string {
   return createHash("sha256").update(data).digest("hex");
-}
-
-export interface ManifestEntryShape {
-  class: string;
-  marker?: unknown;
-  managed?: unknown;
-  hash?: unknown;
-}
-
-/** The manifest's files mapping parsed from `text` (conflict blocks
- *  resolved toward the template side first), or a problem string when the
- *  text cannot be trusted - shared by the symlink normalization and the
- *  stamping, so the two can never read different manifests and every
- *  consumer inherits the SAME validation: no mutation or stamp ever sees
- *  a manifest this function did not clear. Rejected here, value-free
- *  where the value is target-controlled:
- *  - unparseable JSON, or no top-level 'files' mapping;
- *  - an entry value that is not a plain object with a string class (a
- *    null or scalar entry would throw at entry.class in a consumer,
- *    turning the warn-and-continue contract into a hard render failure);
- *  - a duplicated entry for one path (found structurally, by
- *    filesObjectKeys): duplicate JSON keys last-win at parse time, so a
- *    duplicate can flip a path's class with no parse error, and acting
- *    on the parsed value would launder it. The path is named JSON-quoted
- *    rather than decoded: a decoded key could carry real newlines or
- *    control bytes into the problem string, which reaches a public log
- *    via main()'s warning. */
-export function parseManifestFiles(text: string):
-  | { files: Record<string, ManifestEntryShape>; resolved: string; problem: null }
-  | {
-      files: null;
-      resolved: string;
-      problem: string;
-    } {
-  const resolved = resolveConflictsTowardAfter(text);
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(resolved);
-  } catch {
-    // Value-free on purpose: a SyntaxError's message quotes manifest text
-    // (target-repo content), and this problem string reaches a public log
-    // via main()'s warning. Standalone script - no shared/ helpers here.
-    return { files: null, resolved, problem: "does not parse as a manifest (invalid JSON)" };
-  }
-  const manifest = parsed as { files?: unknown } | null;
-  if (
-    manifest === null ||
-    typeof manifest !== "object" ||
-    typeof manifest.files !== "object" ||
-    manifest.files === null ||
-    Array.isArray(manifest.files)
-  ) {
-    return {
-      files: null,
-      resolved,
-      problem: "does not parse as a manifest (no top-level 'files' mapping)",
-    };
-  }
-  const files = manifest.files as Record<string, unknown>;
-  for (const value of Object.values(files)) {
-    const entry = value as ManifestEntryShape | null;
-    if (entry === null || typeof entry !== "object" || typeof entry.class !== "string") {
-      return {
-        files: null,
-        resolved,
-        problem: "carries an entry that is not an object with a string class",
-      };
-    }
-  }
-  // Duplicates count STRUCTURALLY: filesObjectKeys walks the (already
-  // JSON.parse-validated) text and returns the files object's direct
-  // child keys in source order, duplicates preserved - the one thing
-  // JSON.parse flattens away. Any duplicate shape is caught this way:
-  // mixed null/object lines, re-indented merge artifacts, several keys on
-  // one line, and a duplicated top-level "files" mapping itself; a path
-  // literally named "files" or "$comment" is never confused with its
-  // top-level structural twin.
-  const walked = filesObjectKeys(resolved);
-  if (walked.filesObjects !== 1) {
-    return {
-      files: null,
-      resolved,
-      problem: `carries ${walked.filesObjects} top-level "files" mappings (duplicate keys last-win at parse, so a duplicate can swap the whole entry set silently)`,
-    };
-  }
-  const seenPaths = new Set<string>();
-  for (const key of walked.keys) {
-    if (seenPaths.has(key)) {
-      return {
-        files: null,
-        resolved,
-        problem: `carries more than one entry for ${JSON.stringify(key)} (duplicate keys last-win at parse, so a duplicate can flip its ownership class silently)`,
-      };
-    }
-    seenPaths.add(key);
-  }
-  return { files: files as Record<string, ManifestEntryShape>, resolved, problem: null };
-}
-
-/** The DIRECT child keys of the top-level "files" object, in source order
- *  with duplicates preserved - exactly what JSON.parse flattens away -
- *  plus how many top-level "files" objects the text carries: a duplicated
- *  TOP-LEVEL mapping is the same corruption one level up (JSON.parse
- *  last-wins there too), so the walk reports the count and keeps the LAST
- *  object's keys to match what JSON.parse returned. Called only on text
- *  JSON.parse has already accepted, so this token walk runs over
- *  known-valid JSON and its string/escape/depth tracking cannot desync;
- *  keys nested inside entry values, and the structural top-level keys,
- *  are never counted. */
-function filesObjectKeys(resolved: string): { keys: string[]; filesObjects: number } {
-  let keys: string[] = [];
-  let current: string[] = [];
-  let filesObjects = 0;
-  let depth = 0;
-  let inString = false;
-  let escaped = false;
-  let stringStart = -1;
-  let lastString: string | null = null;
-  let pendingFiles = false;
-  let filesDepth = -1;
-  for (let i = 0; i < resolved.length; i++) {
-    const ch = resolved[i];
-    if (inString) {
-      if (escaped) {
-        escaped = false;
-      } else if (ch === "\\") {
-        escaped = true;
-      } else if (ch === '"') {
-        inString = false;
-        lastString = resolved.slice(stringStart, i + 1);
-      }
-      continue;
-    }
-    if (ch === '"') {
-      inString = true;
-      stringStart = i;
-      pendingFiles = false;
-    } else if (ch === ":") {
-      if (lastString !== null) {
-        const key = JSON.parse(lastString) as string;
-        if (depth === 1 && key === "files") {
-          pendingFiles = true;
-        } else if (filesDepth !== -1 && depth === filesDepth) {
-          current.push(key);
-        }
-        lastString = null;
-      }
-    } else if (ch === "{") {
-      depth++;
-      if (pendingFiles && depth === 2) {
-        filesObjects++;
-        filesDepth = depth;
-        current = [];
-      }
-      pendingFiles = false;
-      lastString = null;
-    } else if (ch === "[") {
-      depth++;
-      pendingFiles = false;
-      lastString = null;
-    } else if (ch === "}" || ch === "]") {
-      depth--;
-      if (filesDepth !== -1 && depth < filesDepth) {
-        keys = current;
-        filesDepth = -1;
-      }
-      pendingFiles = false;
-      lastString = null;
-    } else if (ch !== "," && !/\s/.test(ch)) {
-      pendingFiles = false;
-      lastString = null;
-    }
-  }
-  return { keys, filesObjects };
 }
 
 /** The absolute on-disk location of a manifest path, or null when the
@@ -468,20 +255,20 @@ export function stampManifestText(
   const { files, resolved } = parsed;
   const commit = recordedCommit(root);
   const lines = resolved.split("\n").map((line) => {
-    const match = ENTRY_LINE_RE.exec(line);
-    if (!match) return line;
-    const path = JSON.parse(match[2]) as string;
+    const parsedLine = parseEntry(line);
+    if (parsedLine === null) return line;
+    const { indent, path, quotedPath, comma } = parsedLine;
     const entry = files[path];
-    if (entry === undefined || !HASH_RE.test(match[3])) return line;
+    if (entry === undefined || !HASH_RE.test(parsedLine.body)) return line;
     const hash = path === MANIFEST_NAME ? null : entryHash(root, path, entry);
-    let body = match[3].replace(HASH_RE, `"hash": ${hash === null ? "null" : `"${hash}"`}`);
+    let body = parsedLine.body.replace(HASH_RE, `"hash": ${hash === null ? "null" : `"${hash}"`}`);
     if (path === MANIFEST_NAME) {
       body = body.replace(
         COMMIT_RE,
         `"commit": ${commit === null ? "null" : JSON.stringify(commit)}`,
       );
     }
-    return `${match[1]}${match[2]}: ${body}${match[4]}`;
+    return `${indent}${quotedPath}: ${body}${comma}`;
   });
   return { out: lines.join("\n"), problem: null };
 }

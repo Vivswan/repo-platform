@@ -813,8 +813,16 @@ describe("splitEntries", () => {
   });
 
   test("throws on non-JSON input and on a files-less document", () => {
-    expect(() => splitEntries("not json", "m")).toThrow("does not parse as JSON");
+    expect(() => splitEntries("not json", "m")).toThrow("does not parse as a manifest");
     expect(() => splitEntries("{}", "m")).toThrow("no top-level 'files' mapping");
+  });
+
+  test("a duplicated key throws instead of last-win laundering", () => {
+    // Raw JSON.parse keeps the LAST value silently: a duplicated class
+    // field would declassify a split entry out of every carry with no
+    // error. The shared parser rejects the duplicate before any read.
+    const doubled = '{"files": {"AGENTS.md": {"class": "split", "class": "starter"}}}';
+    expect(() => splitEntries(doubled, "m")).toThrow("binds a key more than once");
   });
 
   test("an array-shaped files value fails loud, never open", () => {

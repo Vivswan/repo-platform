@@ -66,7 +66,7 @@
 import { existsSync, lstatSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { parse } from "yaml";
-import { MANIFEST_NAME } from "../../../actions/shared/stamp_manifest.ts";
+import { MANIFEST_NAME, parseManifestFiles } from "../../../actions/shared/manifest.ts";
 import { parseFlags } from "../shared/flags.ts";
 import { fail, requireEnv } from "../shared/gha.ts";
 import { clip, isCleanRelativePath } from "./preserve_local_content.ts";
@@ -93,28 +93,22 @@ export const PIN_FLIPS = [
 
 /** The paths the manifest classes `starter`. Malformed manifest text
  * throws: silently reading zero starters would skip the whole rollout
- * (fail open) on exactly the damaged input that needs a loud stop. The
- * path hygiene matches preserve_local_content.ts's split entries - these
- * keys become filesystem paths under the target root. */
+ * (fail open) on exactly the damaged input that needs a loud stop. Read
+ * through the shared parser (actions/shared/manifest.ts), which also
+ * rejects duplicated keys - raw JSON.parse would last-win them, and a
+ * duplicated class field could silently declassify a starter out of the
+ * rollout. The path hygiene matches preserve_local_content.ts's split
+ * entries - these keys become filesystem paths under the target root. */
 export function starterPaths(manifestText: string, where: string): string[] {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(manifestText);
-  } catch {
-    // Value-free: a SyntaxError's message quotes manifest text (target
-    // content) into the public sync log.
-    throw new Error(`${where} does not parse as JSON`);
-  }
-  const files = (parsed as { files?: unknown } | null)?.files;
-  if (typeof files !== "object" || files === null || Array.isArray(files)) {
-    throw new Error(`${where} has no top-level 'files' mapping`);
+  const parsed = parseManifestFiles(manifestText);
+  if (parsed.problem !== null) {
+    // Value-free (the parser's contract): the problem never quotes raw
+    // manifest text into the public sync log.
+    throw new Error(`${where} ${parsed.problem}`);
   }
   const out: string[] = [];
-  for (const [path, entry] of Object.entries(files as Record<string, unknown>)) {
-    if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
-      throw new Error(`${where}: entry for ${path} is not an object`);
-    }
-    if ((entry as Record<string, unknown>).class !== "starter") continue;
+  for (const [path, entry] of Object.entries(parsed.files)) {
+    if (entry.class !== "starter") continue;
     if (!isCleanRelativePath(path)) {
       throw new Error(
         `${where}: starter entry path '${path}' is not a clean relative path - it ` +

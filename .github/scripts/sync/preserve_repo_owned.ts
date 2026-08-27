@@ -47,7 +47,7 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse } from "yaml";
-import { MANIFEST_NAME } from "../../../actions/shared/stamp_manifest.ts";
+import { MANIFEST_NAME } from "../../../actions/shared/manifest.ts";
 import { env, error, hideDetails, notice, requireEnv } from "../shared/gha.ts";
 import { headBytes } from "../shared/git_head.ts";
 import { parseModules } from "../shared/modules.ts";

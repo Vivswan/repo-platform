@@ -45,9 +45,17 @@ describe("starterPaths", () => {
   });
 
   test("throws on invalid JSON, a missing files mapping, and damaged entries", () => {
-    expect(() => starterPaths("not json", "test")).toThrow("does not parse as JSON");
+    expect(() => starterPaths("not json", "test")).toThrow("does not parse as a manifest");
     expect(() => starterPaths('{"files": []}', "test")).toThrow("no top-level 'files' mapping");
     expect(() => starterPaths('{"files": {"a": "starter"}}', "test")).toThrow("is not an object");
+  });
+
+  test("a duplicated key throws instead of last-win laundering", () => {
+    // Raw JSON.parse keeps the LAST value silently: a duplicated class
+    // field could flip an entry into (or out of) the starter roster with
+    // no error. The shared parser rejects the duplicate before any read.
+    const doubled = '{"files": {"a.yml": {"class": "managed", "class": "starter", "hash": null}}}';
+    expect(() => starterPaths(doubled, "test")).toThrow("binds a key more than once");
   });
 
   test("throws on a starter path that could escape the target root", () => {

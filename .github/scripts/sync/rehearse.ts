@@ -54,7 +54,8 @@ import {
 } from "node:fs";
 import { join, resolve } from "node:path";
 import { z } from "zod";
-import { MANIFEST_NAME, stampManifestText } from "../../../actions/shared/stamp_manifest.ts";
+import { MANIFEST_NAME } from "../../../actions/shared/manifest.ts";
+import { stampManifestText } from "../../../actions/shared/stamp_manifest.ts";
 import { loadRegistry } from "../fleet/repos_registry.ts";
 import { lastLine } from "../shared/lines.ts";
 import {

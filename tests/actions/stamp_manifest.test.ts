@@ -7,6 +7,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
+import { parseManifestFiles, resolveConflictsTowardAfter } from "../../actions/shared/manifest";
 import {
   describeRewritten,
   entryHash,
@@ -14,9 +15,7 @@ import {
   managedHalf,
   normalizeFromText,
   normalizeSymlinkTargets,
-  parseManifestFiles,
   recordedCommit,
-  resolveConflictsTowardAfter,
   stampManifestText,
 } from "../../actions/shared/stamp_manifest";
 
@@ -305,25 +304,27 @@ describe("stampManifestText", () => {
     expect(() => {
       result = stampManifestText(text, root);
     }).not.toThrow();
-    expect(result?.problem).toContain('more than one entry for "CLAUDE.md"');
+    expect(result?.problem).toContain("binds a key more than once");
     // The untouched text is emitted (out === text), so main() warns and
     // exits 0 rather than aborting the render.
     expect(result?.out).toBe(text);
   });
 
-  test("a duplicated key with control characters stays escaped in the problem (no log injection)", () => {
-    // The merged manifest is target-controlled; a decoded key carrying a
-    // real newline would inject it into the public log. The raw quoted
-    // form (match[2]) keeps the backslash-escape literal.
-    const key = String.raw`"a\nb"`;
+  test("a duplicated key never reaches the problem string (value-free, no log leak)", () => {
+    // The merged manifest is target-controlled and manifest keys are
+    // target-repo paths: naming the duplicated key would print a PRIVATE
+    // repo's path (or inject control bytes) into the public sync log, so
+    // the problem states only that a duplicate exists.
+    const key = String.raw`"SECRET-private/path\nleak.md"`;
     const root = tree({ "x.md": "content\n" });
     const text = manifestText([
       `    ${key}: {"class": "managed", "hash": null}`,
       `    ${key}: {"class": "starter"}`,
     ]);
     const result = stampManifestText(text, root);
-    expect(result.problem).toContain(String.raw`"a\nb"`);
-    expect(result.problem).not.toContain("\n"); // the escape stayed literal
+    expect(result.problem).toContain("binds a key more than once");
+    expect(result.problem).not.toContain("SECRET");
+    expect(result.problem).not.toContain("\n");
     expect(result.out).toBe(text);
   });
 });
@@ -440,7 +441,7 @@ describe("parseManifestFiles validation", () => {
     );
     const { rewritten, problem } = normalizeFromText(text, root);
     expect(rewritten).toEqual([]);
-    expect(problem).toContain("more than one entry");
+    expect(problem).toContain("more than once");
     // The mutation never happened: the link still carries its suffix.
     expect(readTarget(root, "CLAUDE.md")).toBe("notes.md.jinja");
   });
@@ -482,7 +483,7 @@ describe("parseManifestFiles validation", () => {
     ]) {
       const { rewritten, problem } = normalizeFromText(manifestOf(filesBody), root);
       expect(rewritten).toEqual([]);
-      expect(problem).toContain("more than one entry");
+      expect(problem).toContain("more than once");
       expect(readTarget(root, "CLAUDE.md")).toBe("notes.md.jinja");
     }
   });
@@ -490,16 +491,15 @@ describe("parseManifestFiles validation", () => {
   test("a duplicated top-level files mapping is the same corruption one level up", () => {
     // JSON.parse last-wins on the OUTER key too: two "files" objects would
     // let the second swap the whole entry set while a walk of the first
-    // saw nothing wrong. The walk counts the mappings and keeps the last
-    // one's keys, so both the count and any duplicate within the parsed
-    // set are caught - and nothing is mutated.
+    // saw nothing wrong. Scopes are tracked per object, so the duplicate
+    // root-level binding is caught like any other - and nothing is mutated.
     const root = mkdtempSync(join(tmpdir(), "normalize-dup-outer-"));
     symlinkSync("notes.md.jinja", join(root, "CLAUDE.md"));
     const text =
       '{"files":{"safe.md":{"class":"starter"}},"files":{"CLAUDE.md":{"class":"managed","hash":null}}}';
     const { rewritten, problem } = normalizeFromText(text, root);
     expect(rewritten).toEqual([]);
-    expect(problem).toContain('top-level "files" mappings');
+    expect(problem).toContain("binds a key more than once");
     expect(readTarget(root, "CLAUDE.md")).toBe("notes.md.jinja");
   });
 

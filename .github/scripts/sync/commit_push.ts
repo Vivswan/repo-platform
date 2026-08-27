@@ -9,7 +9,8 @@
 
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { MANIFEST_NAME, stampManifestText } from "../../../actions/shared/stamp_manifest.ts";
+import { MANIFEST_NAME } from "../../../actions/shared/manifest.ts";
+import { stampManifestText } from "../../../actions/shared/stamp_manifest.ts";
 import { env, hideDetails, requireEnv, setOutput } from "../shared/gha.ts";
 import { SYNC_IDENTITY } from "../shared/git_identity.ts";
 import { capture, must, mustCapture, passthrough } from "../shared/proc.ts";

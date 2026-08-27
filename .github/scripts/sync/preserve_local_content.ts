@@ -78,11 +78,8 @@
 
 import { existsSync, lstatSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import {
-  isMarkerLine,
-  MANIFEST_NAME,
-  managedHalf,
-} from "../../../actions/shared/stamp_manifest.ts";
+import { MANIFEST_NAME, parseManifestFiles } from "../../../actions/shared/manifest.ts";
+import { isMarkerLine, managedHalf } from "../../../actions/shared/stamp_manifest.ts";
 import {
   allRegionMarkers,
   cleanLocalRegion,
@@ -467,28 +464,18 @@ export function isCleanRelativePath(path: string): boolean {
  * source of which files the template splits and each file's grammar and
  * marker lines. Malformed data throws, an unknown or missing grammar
  * included: silently skipping an entry (or guessing its grammar) would
- * hand that file back to the merge result this mode exists to discard. */
+ * hand that file back to the merge result this mode exists to discard.
+ * Read through the shared parser (actions/shared/manifest.ts), which also
+ * rejects duplicated keys - raw JSON.parse would last-win them, and a
+ * duplicated class field could silently declassify a split entry out of
+ * every carry. */
 export function splitEntries(manifestText: string, where: string): SplitEntry[] {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(manifestText);
-  } catch {
-    throw new Error(`${where} does not parse as JSON`);
-  }
-  const files = (parsed as { files?: unknown } | null)?.files;
-  // An array passes `typeof === "object"`, and `"files": []` would yield
-  // ZERO entries - every carry would silently skip after recopy already
-  // overwrote local content. This function must not trust manifest text:
-  // reject any non-mapping shape loudly.
-  if (typeof files !== "object" || files === null || Array.isArray(files)) {
-    throw new Error(`${where} has no top-level 'files' mapping`);
+  const parsed = parseManifestFiles(manifestText);
+  if (parsed.problem !== null) {
+    throw new Error(`${where} ${parsed.problem}`);
   }
   const out: SplitEntry[] = [];
-  for (const [path, entry] of Object.entries(files as Record<string, unknown>)) {
-    if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
-      throw new Error(`${where}: entry for ${path} is not an object`);
-    }
-    const shaped = entry as Record<string, unknown>;
+  for (const [path, shaped] of Object.entries(parsed.files)) {
     if (shaped.class !== "split") continue;
     if (!isCleanRelativePath(path)) {
       throw new Error(
