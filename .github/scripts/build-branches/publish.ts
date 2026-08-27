@@ -1,7 +1,9 @@
 #!/usr/bin/env bun
-// Composes and publishes the `template` build branch (an append-only orphan
-// branch; see build-branches.yml's header for the branch model). Invoked by
-// build-branches.yml's "Build and publish" step.
+// Composes and publishes the two delivery branches - `template` (the
+// append-only orphan branch copier consumes; see build-branches.yml's
+// header for the branch model) and `actions` (the extraction-safe branch
+// fleet `uses:` refs execute). Invoked by build-branches.yml's "Build and
+// publish" step.
 //
 // Env: RUN_URL, GH_TOKEN, GITHUB_SERVER_URL, GITHUB_REPOSITORY, GITHUB_REF,
 // GITHUB_SHA.
@@ -304,13 +306,13 @@ if (!/^[0-9a-f]{40}$/.test(sourceSha)) {
 }
 // Green-source gate, on top of the ref guard above: the workflow_run
 // trigger only fires on a successful CI run, but the schedule, dispatch,
-// and API paths reach here with no such proof - and the branch ships only
+// and API paths reach here with no such proof - and the branches ship only
 // commits whose all-green gate succeeded. Enforced on the commit actually
 // being published (GITHUB_SHA, the same commit the stamp records).
 const notGreen = allGreenFailure(repository, sourceSha);
 if (notGreen !== null) {
   fail(
-    `refusing to publish the template branch: main commit ${sourceSha.slice(0, 12)} is not green - ${notGreen}. The branch only ships green main commits; get CI to a successful run on main's tip, then re-run.`,
+    `refusing to publish the build branches: main commit ${sourceSha.slice(0, 12)} is not green - ${notGreen}. The branches only ship green main commits; get CI to a successful run on main's tip, then re-run.`,
   );
 }
 // Actions first: a fresh template render pins @actions, so the branch its
