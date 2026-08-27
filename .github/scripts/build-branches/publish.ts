@@ -13,7 +13,8 @@
 // head_sha on the workflow_run path, the trigger commit otherwise);
 // PREBUILT_REF optional (workflow_run only).
 
-import { rmSync } from "node:fs";
+import { existsSync, lstatSync, readdirSync, rmSync } from "node:fs";
+import { join } from "node:path";
 import { z } from "zod";
 import { allGreenFailure } from "../shared/all_green.ts";
 import {
@@ -86,6 +87,23 @@ function refExistsOnOrigin(ref: string): boolean {
   if (probe.exitCode === 2) return false;
   throw new Error(
     `git ls-remote for ${ref} failed (exit ${probe.exitCode}): ${probe.stderr.trim()} - an operational failure, not an absent ref; re-run the build`,
+  );
+}
+
+/** Whether `dir` is a real actions/ directory holding at least one
+ * <name>/action.yml - the unified-tree shape the guard in publish()
+ * requires. A mere path named actions (a file, a dangling entry in a
+ * malformed pending tree) does not count. */
+function hasActionManifest(dir: string): boolean {
+  let stat: ReturnType<typeof lstatSync>;
+  try {
+    stat = lstatSync(dir);
+  } catch {
+    return false;
+  }
+  if (!stat.isDirectory()) return false;
+  return readdirSync(dir, { withFileTypes: true }).some(
+    (entry) => entry.isDirectory() && existsSync(join(dir, entry.name, "action.yml")),
   );
 }
 
@@ -261,6 +279,22 @@ function publish(sourceSha: string): void {
     must(["bun", "/tmp/src/.github/scripts/build-branches/branch_tree.ts", "--dest", "/tmp/tree"]);
   }
   console.log(`tree: ${treeSource}`);
+  // Unified-tree guard, on EVERY path (composed and pre-built alike): a
+  // tree without actions/ is not this branch's shape. The bootstrap case
+  // is the sharp end - a queued CI completion for a PRE-unification main
+  // commit runs this (new) publisher with an OLD SOURCE_SHA, whose own
+  // branch_tree.ts composes the retired template-only tree (jinja
+  // filenames, no actions/); minting `build` from it would 404 every
+  // fleet @build ref and kill uses: extraction until the next green
+  // publish. The staleness check below cannot catch the case where that
+  // old source IS the seed tip's stamped source, so the shape check
+  // fails closed here instead: a real directory carrying at least one
+  // action manifest, not merely a path named actions.
+  if (!hasActionManifest("/tmp/tree/actions")) {
+    fail(
+      `refusing to publish: the tree built from ${sourceSha.slice(0, 12)} carries no actions/ subtree with an action.yml, so the source predates the unified build branch (or a pending tree is malformed). Re-run the workflow for a main commit that carries the unification.`,
+    );
+  }
   const branchExists = refExistsOnOrigin(`refs/heads/${BRANCH}`);
   if (branchExists) {
     must(["git", "fetch", "--quiet", "origin", BRANCH]);

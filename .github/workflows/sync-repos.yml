@@ -110,7 +110,7 @@ jobs:
       # own guards fail loudly and the cron heals. Build Branches rebuilds
       # the build branch asynchronously after each main merge; a sync
       # dispatched right after a merge could consume the previous build
-      # tree. Wait (bounded) for the template tip whose SOURCE STAMP names
+      # tree. Wait (bounded) for the build tip whose SOURCE STAMP names
       # main's HEAD - the artifact's own provenance, no gh api or token.
       - name: Wait for a fresh build
         run: bun .github/scripts/sync/wait_for_build.ts
