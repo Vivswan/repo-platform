@@ -3,37 +3,68 @@
 // diagnosis instead of a confusing TypeError later. The diagnosis names
 // paths and issue codes only - never received values, which can be
 // target-derived (hide-details discipline).
+//
+// Two forms, one implementation: the throwing forms are for callers that
+// own their failure containment (a fleet lane's malformed verdict must
+// become that lane's failure row, never abort the whole run); the exiting
+// forms are the default for scripts where any malformed payload is fatal.
 
 import type { ZodType } from "zod";
 
-export function parseWith<T>(schema: ZodType<T>, data: unknown, label: string): T {
+/** The one error the throwing forms raise. exitOnThrow prints ONLY this
+ * type, so an unexpected exception (a throwing zod transform, an fs
+ * error) keeps its stack instead of masquerading as a payload diagnosis
+ * - its message was not written under the value-free discipline. */
+export class JsonShapeError extends Error {}
+
+export function parseWithThrow<T>(schema: ZodType<T>, data: unknown, label: string): T {
   const result = schema.safeParse(data);
   if (!result.success) {
     const issues = result.error.issues
       .map((issue) => `${issue.path.join(".") || "(root)"}: ${issue.code}`)
       .join("; ");
-    console.log(`::error::${label}: unexpected shape - ${issues}`);
-    process.exit(1);
+    throw new JsonShapeError(`${label}: unexpected shape - ${issues}`);
   }
   return result.data;
 }
 
 /** JSON.parse with the same discipline: a raw SyntaxError echoes a
  * fragment of the offending text ("Unexpected identifier ..."), so the
- * invalid-JSON diagnostic is fixed and value-free like parseWith's. */
-export function parseJson(text: string, label: string): unknown {
+ * invalid-JSON diagnostic is fixed and value-free like parseWithThrow's. */
+export function parseJsonThrow(text: string, label: string): unknown {
   try {
     return JSON.parse(text);
   } catch {
-    console.log(`::error::${label}: not valid JSON`);
-    process.exit(1);
+    throw new JsonShapeError(`${label}: not valid JSON`);
   }
 }
 
 /** Validate text that must first survive JSON.parse; both failure modes
- * exit here with the value-free diagnostics above. */
+ * throw with the value-free diagnostics above. */
+export function parseJsonWithThrow<T>(schema: ZodType<T>, text: string, label: string): T {
+  return parseWithThrow(schema, parseJsonThrow(text, label), label);
+}
+
+function exitOnThrow<T>(parse: () => T): T {
+  try {
+    return parse();
+  } catch (err) {
+    if (!(err instanceof JsonShapeError)) throw err;
+    console.log(`::error::${err.message}`);
+    process.exit(1);
+  }
+}
+
+export function parseWith<T>(schema: ZodType<T>, data: unknown, label: string): T {
+  return exitOnThrow(() => parseWithThrow(schema, data, label));
+}
+
+export function parseJson(text: string, label: string): unknown {
+  return exitOnThrow(() => parseJsonThrow(text, label));
+}
+
 export function parseJsonWith<T>(schema: ZodType<T>, text: string, label: string): T {
-  return parseWith(schema, parseJson(text, label), label);
+  return exitOnThrow(() => parseJsonWithThrow(schema, text, label));
 }
 
 /** True when any object in valid-JSON `text` declares the same key twice.

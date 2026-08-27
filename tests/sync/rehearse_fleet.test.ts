@@ -19,6 +19,7 @@ import {
   type FleetRow,
   failureRow,
   gateAnnotations,
+  laneOutcome,
   outcomeRow,
   phaseOf,
   privateDisplayNames,
@@ -196,6 +197,32 @@ describe("rehearseFleet private skip", () => {
     });
     // An unanswerable probe proceeds: the rehearsal itself speaks.
     expect(rehearsed).toEqual(["o/unknown-grant"]);
+  });
+});
+
+describe("laneOutcome", () => {
+  test("an outcome envelope returns the outcome", () => {
+    const envelope = JSON.stringify({ kind: "outcome", outcome: outcome() });
+    expect(laneOutcome(envelope, "o/r")).toEqual(outcome());
+  });
+
+  test("a malformed envelope THROWS (the lane's failure row), never exits the run", () => {
+    // The original bug: parseJsonWith exits the whole process here, so one
+    // truncated lane verdict aborted every remaining lane and the summary.
+    expect(() => laneOutcome("not json {", "o/r")).toThrow("not valid JSON");
+    expect(() => laneOutcome('{"kind": "nonsense"}', "o/r")).toThrow("unexpected shape");
+  });
+
+  test("typed skips re-throw their typed errors, keeping failureRow's one mapping", () => {
+    expect(() => laneOutcome(JSON.stringify({ kind: "not-managed", reason: "r" }), "o/r")).toThrow(
+      NotManagedError,
+    );
+    expect(() =>
+      laneOutcome(JSON.stringify({ kind: "recovery-needed", reason: "r" }), "o/r"),
+    ).toThrow(RecoveryNeededError);
+    expect(() => laneOutcome(JSON.stringify({ kind: "failed", reason: "boom" }), "o/r")).toThrow(
+      "boom",
+    );
   });
 });
 

@@ -48,7 +48,7 @@ import { pushProbeStatus } from "../fleet/push_probe.ts";
 import { assignHints } from "../fleet/redact.ts";
 import { loadRegistry, type Registry, selectRepos } from "../fleet/repos_registry.ts";
 import { error, warning } from "../shared/gha.ts";
-import { parseJsonWith } from "../shared/json.ts";
+import { parseJsonWith, parseJsonWithThrow } from "../shared/json.ts";
 import { capture } from "../shared/proc.ts";
 import {
   fleetOutcomeSchema,
@@ -440,13 +440,44 @@ export function gateAnnotations(rows: FleetRow[]): {
  * spawnSync-blocking - in-process lanes could never actually overlap. */
 const FLEET_CONCURRENCY = 4;
 
+/** Parses a lane's fleet-outcome envelope and maps its kind the way the
+ * in-process API would have surfaced it: the outcome returns, the typed
+ * skips re-throw their typed errors (failureRow keeps its one mapping),
+ * and a malformed envelope THROWS (never exits) - the lane's own catch
+ * files any throw as that lane's failure row, the remaining lanes run,
+ * and the summary prints: the failure isolation the parallel rehearsal
+ * exists for. */
+export function laneOutcome(envelopeText: string, slug: string): RehearsalOutcome {
+  const message = parseJsonWithThrow(
+    fleetOutcomeSchema,
+    envelopeText,
+    `rehearse_fleet: ${slug} fleet-outcome envelope`,
+  );
+  switch (message.kind) {
+    case "outcome":
+      return message.outcome;
+    case "not-managed":
+      throw new NotManagedError(message.reason);
+    case "recovery-needed":
+      throw new RecoveryNeededError(message.reason);
+    case "failed":
+      throw new Error(message.reason);
+    default:
+      // Exhaustive: a NEW envelope kind must choose its mapping here -
+      // `never` turns the omission into a compile error instead of letting
+      // the kind vanish into a generic failure row.
+      return message satisfies never;
+  }
+}
+
 /** The production rehearse dep: one subprocess per repo, its verdict read
- * back as rehearse.ts's tagged envelope, typed skips re-thrown as the
- * in-process API would have thrown them (failureRow keeps its one
- * mapping). A subprocess that died without an envelope becomes a failure
- * naming its last stderr line. */
+ * back as rehearse.ts's tagged envelope via laneOutcome above. A
+ * subprocess that died without an envelope becomes a failure naming its
+ * last stderr line. */
 async function rehearseInSubprocess(slug: string, temp: string): Promise<RehearsalOutcome> {
-  const outFile = join(temp, `${slug.replace("/", "-")}.json`);
+  // encodeURIComponent, not a plain '/' swap: 'a-b/c' and 'a/b-c' must
+  // never share a verdict file across parallel lanes.
+  const outFile = join(temp, `${encodeURIComponent(slug)}.json`);
   const proc = Bun.spawn(
     ["bun", join(import.meta.dir, "rehearse.ts"), slug, "--fleet-outcome", outFile],
     { cwd: REPO_ROOT, stdout: "pipe", stderr: "pipe" },
@@ -464,21 +495,7 @@ async function rehearseInSubprocess(slug: string, temp: string): Promise<Rehears
       `rehearse.ts subprocess for ${slug} exited ${exitCode} without a verdict${tail === "" ? "" : `: ${tail}`}`,
     );
   }
-  const message = parseJsonWith(
-    fleetOutcomeSchema,
-    readFileSync(outFile, "utf-8"),
-    `rehearse_fleet: ${slug} fleet-outcome envelope`,
-  );
-  switch (message.kind) {
-    case "outcome":
-      return message.outcome;
-    case "not-managed":
-      throw new NotManagedError(message.reason);
-    case "recovery-needed":
-      throw new RecoveryNeededError(message.reason);
-    default:
-      throw new Error(message.reason);
-  }
+  return laneOutcome(readFileSync(outFile, "utf-8"), slug);
 }
 
 async function main(): Promise<number> {
