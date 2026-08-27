@@ -18,7 +18,7 @@ export const PENDING_REF_PREFIX = "refs/heads/build-pending/";
 
 /** The unpublished ref a push build parks its tree at. Keyed by the FULL
  * source sha: concurrent pushes get disjoint refs (no overwrite races),
- * the publisher name-matches its own SOURCE_SHA (a pending ref can never
+ * the publisher name-matches its SOURCE_SHA (a pending ref can never
  * hand it another source's tree), and a re-run of the same push only
  * ever replaces its own content. */
 export function pendingRefFor(sourceSha: string): string {

@@ -53,11 +53,12 @@ import {
   lstatSync,
   readFileSync,
   readlinkSync,
+  realpathSync,
   symlinkSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
-import { join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 
 export const MANIFEST_NAME = ".github/repo-platform-manifest.json";
 
@@ -219,21 +220,50 @@ export function parseManifestFiles(text: string):
   return { files: manifest.files as Record<string, ManifestEntryShape>, resolved, problem: null };
 }
 
-/** Strip the template suffix from every MANIFEST-LISTED symlink's target:
- *  the build branch ships link targets with the suffix kept (a dangling
- *  link anywhere in the tree kills the runner's `uses:` tarball staging)
- *  and copier renders targets verbatim, so the rendered repository's
- *  managed links arrive pointing at the templated twin's name. Only
- *  manifest-listed paths are touched - a repo-owned link is never
- *  rewritten, whatever its target - and the rewrite is idempotent.
+/** The absolute on-disk location of a manifest path, or null when the
+ *  path cannot be trusted for MUTATION: manifest text is target-repo
+ *  content on updates, so an absolute or ..-carrying key, or one whose
+ *  parent directory really lives outside the rendered root (a symlinked
+ *  ancestor), must never be unlinked. Read-only consumers (hashing) keep
+ *  their lexical join - a wrong hash is caught by parity, while a wrong
+ *  unlink is damage. */
+function containedForMutation(root: string, path: string): string | null {
+  if (path.startsWith("/")) return null;
+  const segments = path.split("/");
+  if (segments.some((segment) => segment === "" || segment === "." || segment === "..")) {
+    return null;
+  }
+  const abs = join(root, path);
+  let parentReal: string;
+  let rootReal: string;
+  try {
+    parentReal = realpathSync(dirname(abs));
+    rootReal = realpathSync(root);
+  } catch {
+    return null;
+  }
+  if (parentReal !== rootReal && !parentReal.startsWith(`${rootReal}/`)) return null;
+  return join(parentReal, basename(abs));
+}
+
+/** Strip the template suffix from every MANAGED manifest-listed symlink's
+ *  target: the build branch ships link targets with the suffix kept (a
+ *  dangling link anywhere in the tree kills the runner's `uses:` tarball
+ *  staging) and copier renders targets verbatim, so the rendered
+ *  repository's managed links arrive pointing at the templated twin's
+ *  name. Only managed entries are touched - starters are repo-owned after
+ *  the first render and unlisted links are repo content, so neither is
+ *  ever rewritten, whatever its target - and the rewrite is idempotent.
  *  Returns the rewritten paths. */
 export function normalizeSymlinkTargets(
   root: string,
   files: Record<string, ManifestEntryShape>,
 ): string[] {
   const rewritten: string[] = [];
-  for (const path of Object.keys(files)) {
-    const abs = join(root, path);
+  for (const [path, entry] of Object.entries(files)) {
+    if (entry.class !== "managed") continue;
+    const abs = containedForMutation(root, path);
+    if (abs === null) continue;
     let stat: ReturnType<typeof lstatSync>;
     try {
       stat = lstatSync(abs);

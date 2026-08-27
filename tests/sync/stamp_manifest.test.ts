@@ -6,7 +6,7 @@
 import { describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import {
   entryHash,
   isMarkerLine,
@@ -364,19 +364,41 @@ describe("normalizeSymlinkTargets", () => {
     expect(normalizeSymlinkTargets(root, files)).toEqual([]);
   });
 
-  test("never touches a link the manifest does not list, or a plain target", () => {
+  test("never touches a link the manifest does not list, a non-managed class, or a plain target", () => {
     const root = mkdtempSync(join(tmpdir(), "normalize-"));
     link(root, "repo-own.md", "notes.md.jinja");
+    link(root, "starter-link.md", "starter.md.jinja");
     link(root, "CLAUDE.md", "AGENTS.md");
     writeFileSync(join(root, "plain.md"), "not a link\n");
     expect(
       normalizeSymlinkTargets(root, {
         "CLAUDE.md": { class: "managed" },
+        // A starter is repo-owned after the first render: whatever the
+        // repo made of it - a .jinja-targeting link included - stays.
+        "starter-link.md": { class: "starter" },
         "plain.md": { class: "managed" },
         "missing.md": { class: "managed" },
       }),
     ).toEqual([]);
     expect(readTarget(root, "repo-own.md")).toBe("notes.md.jinja");
+    expect(readTarget(root, "starter-link.md")).toBe("starter.md.jinja");
     expect(readTarget(root, "CLAUDE.md")).toBe("AGENTS.md");
+  });
+
+  test("a manifest path that escapes the root is never mutated", () => {
+    // Manifest text is target-repo content on updates: an absolute or
+    // ..-carrying key, or one reaching out through a symlinked ancestor,
+    // must not let the hook unlink anything outside the rendered root.
+    const outside = mkdtempSync(join(tmpdir(), "normalize-outside-"));
+    link(outside, "victim.md", "prey.md.jinja");
+    const root = mkdtempSync(join(tmpdir(), "normalize-root-"));
+    symlinkSync(outside, join(root, "escape"));
+    const files = {
+      [`../${basename(outside)}/victim.md`]: { class: "managed" },
+      "escape/victim.md": { class: "managed" },
+      "/etc/hosts": { class: "managed" },
+    };
+    expect(normalizeSymlinkTargets(root, files)).toEqual([]);
+    expect(readTarget(outside, "victim.md")).toBe("prey.md.jinja");
   });
 });
