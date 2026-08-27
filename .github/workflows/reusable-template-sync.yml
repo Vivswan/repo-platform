@@ -73,9 +73,11 @@ on:
         required: true
 
 # The workflow's own token only reads this repo; every target-repo write
-# (checkout, push, PR) uses the REPO_PLATFORM_TOKEN PAT. Actions read is
-# for the build provenance check: resolve_refs.ts verifies the build run
-# stamped on the shipped ref (the template branch tip).
+# (checkout, push, PR) uses the REPO_PLATFORM_TOKEN PAT. Actions read has
+# two consumers: the build provenance check (resolve_refs.ts verifies the
+# build run stamped on the shipped ref, the template branch tip) and the
+# green-source gate (shared/all_green.ts proves the shipped build's own
+# source commit passed CI).
 permissions:
   contents: read
   actions: read

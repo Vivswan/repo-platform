@@ -58,7 +58,11 @@ concurrency:
 jobs:
   plan:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # Must outlive wait_for_build.ts's own 45-minute warn-and-continue
+    # budget (a full main CI run before the build even starts, plus the
+    # build) with slack for the other steps - a job-level kill would turn
+    # the script's designed graceful degradation into a red sync.
+    timeout-minutes: 55
     permissions:
       contents: read
       actions: read

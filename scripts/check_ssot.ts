@@ -927,6 +927,11 @@ const rules: Rule[] = [
         // only home is a step of the smoke-generate job (dogfood-oracle
         // row), so losing the step would fail the gate open silently.
         "bun .github/scripts/ci/verify_dogfood_oracle.ts",
+        // The fleet rehearsal and Copilot-review gates live only as steps
+        // of their all-green-needed jobs: trimming either step would leave
+        // a green checkout/setup/install job and fail the gate open.
+        "bun .github/scripts/ci/rehearse_fleet_gate.ts",
+        "bun .github/scripts/ci/copilot_review_gate.ts",
       ]) {
         if (!gatingLines.has(required)) {
           mismatches.push({

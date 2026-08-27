@@ -99,6 +99,10 @@ export interface RehearsalOutcome {
   retired: number;
   manifest: ManifestStatus;
   validationOk: boolean;
+  /** On failed validation, the validator's first per-file diagnostics
+   * (quiet mode only - verbose forwards the full output to the console
+   * instead), so a fleet report names the failing files. */
+  validationErrors: string[];
   /** The /tmp workspace, or null when the rehearsal removed it. */
   workspace: string | null;
 }
@@ -202,6 +206,27 @@ export function parseConflictReport(stdout: string): {
     if (untouched !== null) malformed.push(untouched[1]);
   }
   return { conflicts, malformed };
+}
+
+/** The per-file diagnostics of a failed validate_generated_files.ts run,
+ * for a quiet-mode fleet report: its "error: <file>: ..." lines (prefix
+ * stripped, first VALIDATION_ERROR_CAP kept, a counted marker for the
+ * rest), falling back to the output's last non-empty line when no line
+ * matches (a crash before the report). */
+export const VALIDATION_ERROR_CAP = 3;
+
+export function validationErrorLines(output: string): string[] {
+  const errors = output
+    .split("\n")
+    .filter((line) => line.startsWith("error: "))
+    .map((line) => line.slice("error: ".length));
+  if (errors.length === 0) {
+    const tail = lastLine(output);
+    return tail === "" ? [] : [tail];
+  }
+  const kept = errors.slice(0, VALIDATION_ERROR_CAP);
+  if (errors.length > kept.length) kept.push(`... and ${errors.length - kept.length} more`);
+  return kept;
 }
 
 /** Whether the target tree's ownership manifest is honestly stamped:
@@ -559,13 +584,24 @@ export function rehearseRepo(slug: string, options: RehearsalOptions): Rehearsal
     });
     // A failure prints its diagnostics but does not stop the rehearsal: the
     // sync opens the PR on failed validation too, and the diff below is what
-    // the operator came for. The outcome carries the verdict.
+    // the operator came for. The outcome carries the verdict - and, in
+    // quiet mode, the first per-file diagnostics for the fleet report.
     const validator = [
       "bun",
       join(REPO_ROOT, "actions/validate-template/validate_generated_files.ts"),
       targetDir,
     ];
-    const validationOk = verbose ? passthrough(validator) === 0 : capture(validator).exitCode === 0;
+    let validationOk: boolean;
+    let validationErrors: string[] = [];
+    if (verbose) {
+      validationOk = passthrough(validator) === 0;
+    } else {
+      const validation = capture(validator);
+      validationOk = validation.exitCode === 0;
+      if (!validationOk) {
+        validationErrors = validationErrorLines(validation.stderr + validation.stdout);
+      }
+    }
 
     run(["git", "-C", targetDir, "add", "-A"]);
     const changed =
@@ -625,6 +661,7 @@ export function rehearseRepo(slug: string, options: RehearsalOptions): Rehearsal
       retired,
       manifest,
       validationOk,
+      validationErrors,
       workspace: keepWorkspace ? work : null,
     };
   } finally {
