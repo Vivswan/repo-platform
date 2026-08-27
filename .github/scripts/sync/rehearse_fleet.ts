@@ -40,7 +40,7 @@
 // Usage:
 //   bun .github/scripts/sync/rehearse_fleet.ts [--gate]
 
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { z } from "zod";
@@ -51,11 +51,11 @@ import { error, warning } from "../shared/gha.ts";
 import { parseJsonWith } from "../shared/json.ts";
 import { capture } from "../shared/proc.ts";
 import {
+  fleetOutcomeSchema,
   NETWORK_TIMEOUT_MS,
   NotManagedError,
   RecoveryNeededError,
   type RehearsalOutcome,
-  rehearseRepo,
 } from "./rehearse.ts";
 import { SHRANK_PHRASE } from "./tail_tripwire.ts";
 
@@ -261,20 +261,64 @@ export interface FleetDeps {
    * skipped like production skips them, "unknown" (no token, transport
    * failure) proceeds and lets the rehearsal itself speak. */
   enrollment: (slug: string) => "enrolled" | "not-enrolled" | "unknown";
-  rehearse: (slug: string) => RehearsalOutcome;
+  rehearse: (slug: string) => Promise<RehearsalOutcome>;
+  /** In-flight rehearsal bound (runPool). */
+  concurrency: number;
   log: (line: string) => void;
 }
 
-/** The report loop. The private check gates EVERY repo before the
- * enrollment probe and deps.rehearse (the only code path that clones)
- * can run, and a throwing rehearsal becomes a row, never an abort.
- * Private rows carry deps.display's name, so every output path
- * (summary lines, the table, gate annotations) inherits the redaction. */
-export function rehearseFleet(slugs: string[], deps: FleetDeps): FleetRow[] {
-  const rows: FleetRow[] = [];
-  for (const slug of slugs) {
-    const isPrivate = deps.isPrivate(slug);
+/** A bounded worker pool: `limit` lanes pull the next unclaimed index
+ * until the items run out; results land by ITEM index, never completion
+ * order. One rejecting worker must never suppress another's result, so
+ * workers that want per-item error rows catch inside themselves. */
+export async function runPool<T, R>(
+  items: readonly T[],
+  limit: number,
+  worker: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let next = 0;
+  // A non-finite or sub-1 limit degrades to ONE lane, never zero: zero
+  // lanes would resolve immediately with every result unassigned.
+  const laneCount = Math.max(
+    1,
+    Math.min(Number.isFinite(limit) ? Math.floor(limit) : 1, items.length),
+  );
+  const lanes = Array.from({ length: laneCount }, async (): Promise<void> => {
+    while (true) {
+      const index = next++;
+      if (index >= items.length) return;
+      results[index] = await worker(items[index], index);
+    }
+  });
+  await Promise.all(lanes);
+  return results;
+}
+
+/** The report loop, `deps.concurrency` repos in flight at once (per-repo
+ * rehearsals are independent subprocesses; see main's FLEET_CONCURRENCY
+ * note). The private check gates EVERY repo before the enrollment probe
+ * and deps.rehearse (the only code path that clones) can run, and a
+ * throwing rehearsal becomes a row, never an abort - one repo's failure
+ * never suppresses another's row. Output stays DETERMINISTIC: rows land
+ * by roster index and summary lines flush in roster order as the
+ * contiguous prefix completes, whatever order the lanes finish in.
+ * Private rows carry deps.display's name, so every output path (summary
+ * lines, the table, gate annotations) inherits the redaction. */
+export async function rehearseFleet(slugs: string[], deps: FleetDeps): Promise<FleetRow[]> {
+  const rows = new Array<FleetRow | undefined>(slugs.length);
+  let flushed = 0;
+  const flush = () => {
+    while (flushed < slugs.length) {
+      const row = rows[flushed];
+      if (row === undefined) return;
+      deps.log(summaryLine(row));
+      flushed++;
+    }
+  };
+  await runPool(slugs, deps.concurrency, async (slug, index) => {
     let row: FleetRow;
+    const isPrivate = deps.isPrivate(slug);
     if (isPrivate !== false) {
       row = {
         repo: deps.display(slug),
@@ -292,15 +336,16 @@ export function rehearseFleet(slugs: string[], deps: FleetDeps): FleetRow[] {
       };
     } else {
       try {
-        row = outcomeRow(slug, deps.rehearse(slug));
+        row = outcomeRow(slug, await deps.rehearse(slug));
       } catch (err) {
         row = failureRow(slug, err);
       }
     }
-    rows.push(row);
-    deps.log(summaryLine(row));
-  }
-  return rows;
+    rows[index] = row;
+    flush();
+  });
+  // Every lane completed and every index was assigned exactly once.
+  return rows as FleetRow[];
 }
 
 function fail(message: string): never {
@@ -388,7 +433,55 @@ export function gateAnnotations(rows: FleetRow[]): {
   };
 }
 
-function main(): number {
+/** In-flight rehearsals. A rehearsal is a shallow clone plus copier/bun
+ * subprocess CPU: the CI runner has 4 vCPUs, so four lanes keep the cores
+ * busy without thrashing the shared network, and each lane is its OWN
+ * subprocess (rehearse.ts --fleet-outcome) because the rehearsal legs are
+ * spawnSync-blocking - in-process lanes could never actually overlap. */
+const FLEET_CONCURRENCY = 4;
+
+/** The production rehearse dep: one subprocess per repo, its verdict read
+ * back as rehearse.ts's tagged envelope, typed skips re-thrown as the
+ * in-process API would have thrown them (failureRow keeps its one
+ * mapping). A subprocess that died without an envelope becomes a failure
+ * naming its last stderr line. */
+async function rehearseInSubprocess(slug: string, temp: string): Promise<RehearsalOutcome> {
+  const outFile = join(temp, `${slug.replace("/", "-")}.json`);
+  const proc = Bun.spawn(
+    ["bun", join(import.meta.dir, "rehearse.ts"), slug, "--fleet-outcome", outFile],
+    { cwd: REPO_ROOT, stdout: "pipe", stderr: "pipe" },
+  );
+  // Drain both pipes (backpressure would deadlock a chatty subprocess);
+  // stdout is the quiet run's residue, stderr feeds the crash reason.
+  const [stderrText, , exitCode] = await Promise.all([
+    new Response(proc.stderr).text(),
+    new Response(proc.stdout).text(),
+    proc.exited,
+  ]);
+  if (exitCode !== 0 || !existsSync(outFile)) {
+    const tail = stderrText.trim().split("\n").pop() ?? "";
+    throw new Error(
+      `rehearse.ts subprocess for ${slug} exited ${exitCode} without a verdict${tail === "" ? "" : `: ${tail}`}`,
+    );
+  }
+  const message = parseJsonWith(
+    fleetOutcomeSchema,
+    readFileSync(outFile, "utf-8"),
+    `rehearse_fleet: ${slug} fleet-outcome envelope`,
+  );
+  switch (message.kind) {
+    case "outcome":
+      return message.outcome;
+    case "not-managed":
+      throw new NotManagedError(message.reason);
+    case "recovery-needed":
+      throw new RecoveryNeededError(message.reason);
+    default:
+      throw new Error(message.reason);
+  }
+}
+
+async function main(): Promise<number> {
   const args = process.argv.slice(2);
   const gate = args[0] === "--gate";
   if (args.length > (gate ? 1 : 0)) {
@@ -411,19 +504,26 @@ function main(): number {
     fail(err instanceof Error ? err.message : String(err));
   }
   console.log(
-    `rehearsing ${fleet.slugs.length} repo(s); ${fleet.excluded} excluded by repos.yml\n`,
+    `rehearsing ${fleet.slugs.length} repo(s), ${FLEET_CONCURRENCY} in flight; ${fleet.excluded} excluded by repos.yml\n`,
   );
 
   const committed = new Set(
     [...registry.managed.repos, ...registry.exclude].map((slug) => slug.toLowerCase()),
   );
-  const rows = rehearseFleet(fleet.slugs, {
-    isPrivate: (slug) => fleet.visibility.get(slug.toLowerCase()) ?? lookupPrivate(slug),
-    display: privateDisplayNames(gate, discovered, committed),
-    enrollment: makeEnrollment(),
-    rehearse: (slug) => rehearseRepo(slug, { verbose: false, keepWorkspace: false }),
-    log: console.log,
-  });
+  const envelopeTemp = mkdtempSync(join(tmpdir(), "rehearse-fleet-outcomes-"));
+  let rows: FleetRow[];
+  try {
+    rows = await rehearseFleet(fleet.slugs, {
+      isPrivate: (slug) => fleet.visibility.get(slug.toLowerCase()) ?? lookupPrivate(slug),
+      display: privateDisplayNames(gate, discovered, committed),
+      enrollment: makeEnrollment(),
+      rehearse: (slug) => rehearseInSubprocess(slug, envelopeTemp),
+      concurrency: FLEET_CONCURRENCY,
+      log: console.log,
+    });
+  } finally {
+    rmSync(envelopeTemp, { recursive: true, force: true });
+  }
 
   console.log("\n=== fleet summary ===");
   console.log(summaryTable(rows));
@@ -442,5 +542,5 @@ function main(): number {
 }
 
 if (import.meta.main) {
-  process.exit(main());
+  process.exit(await main());
 }

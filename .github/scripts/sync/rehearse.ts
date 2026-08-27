@@ -38,6 +38,8 @@
 //
 // Usage:
 //   bun .github/scripts/sync/rehearse.ts <owner>/<repo>
+//   bun .github/scripts/sync/rehearse.ts <owner>/<repo> --fleet-outcome <file>
+//     (rehearse_fleet's per-repo subprocess: quiet run, tagged JSON verdict)
 
 import {
   cpSync,
@@ -51,6 +53,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join, resolve } from "node:path";
+import { z } from "zod";
 import { loadRegistry } from "../fleet/repos_registry.ts";
 import { lastLine } from "../shared/lines.ts";
 import { capture, passthrough, type RunOptions, type RunResult } from "../shared/proc.ts";
@@ -705,14 +708,66 @@ function fail(message: string): never {
   process.exit(1);
 }
 
+/** The tagged envelope a --fleet-outcome subprocess writes: the outcome,
+ * or the typed skip/failure the in-process API would have thrown. Owned
+ * HERE (the writer); rehearse_fleet parses with exactly this schema, so
+ * the two sides cannot drift. */
+export const fleetOutcomeSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("outcome"),
+    outcome: z.object({
+      changed: z.boolean(),
+      conflicts: z.array(z.object({ file: z.string(), hunks: z.number() })),
+      malformed: z.array(z.string()),
+      retired: z.number(),
+      manifest: z.enum(["stamped", "stale", "missing", "unparseable"]),
+      validationOk: z.boolean(),
+      validationErrors: z.array(z.string()),
+      tripwireReport: z.string(),
+      workspace: z.string().nullable(),
+    }),
+  }),
+  z.object({ kind: z.literal("not-managed"), reason: z.string() }),
+  z.object({ kind: z.literal("recovery-needed"), reason: z.string() }),
+  z.object({ kind: z.literal("failed"), reason: z.string() }),
+]);
+export type FleetOutcomeMessage = z.infer<typeof fleetOutcomeSchema>;
+
 function main(): number {
-  const slug = process.argv[2];
+  const [slug, flag, outFile, ...rest] = process.argv.slice(2);
+  const fleetMode = flag === "--fleet-outcome" && outFile !== undefined;
   if (
     slug === undefined ||
-    process.argv.length > 3 ||
+    rest.length > 0 ||
+    (flag !== undefined && !fleetMode) ||
     !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(slug)
   ) {
-    fail("usage: bun .github/scripts/sync/rehearse.ts <owner>/<repo>");
+    fail("usage: bun .github/scripts/sync/rehearse.ts <owner>/<repo> [--fleet-outcome <file>]");
+  }
+  if (fleetMode) {
+    // The fleet driver's per-repo subprocess (rehearse_fleet.ts runs N of
+    // these in parallel - the legs are spawnSync-blocking, so in-process
+    // concurrency could never overlap them). Every per-repo verdict,
+    // typed skips included, travels as the tagged envelope; exit 0 means
+    // "the envelope is the answer", nonzero means the subprocess itself
+    // broke before writing one.
+    let message: FleetOutcomeMessage;
+    try {
+      message = {
+        kind: "outcome",
+        outcome: rehearseRepo(slug, { verbose: false, keepWorkspace: false }),
+      };
+    } catch (err) {
+      const reason = (err instanceof Error ? err.message : String(err)).split("\n")[0];
+      message =
+        err instanceof NotManagedError
+          ? { kind: "not-managed", reason }
+          : err instanceof RecoveryNeededError
+            ? { kind: "recovery-needed", reason }
+            : { kind: "failed", reason };
+    }
+    writeFileSync(outFile, JSON.stringify(message), "utf-8");
+    return 0;
   }
   try {
     return rehearseRepo(slug, { verbose: true, keepWorkspace: true }).validationOk ? 0 : 1;
