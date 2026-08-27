@@ -44,7 +44,7 @@ function run(opts: Options = {}) {
   writeFileSync(join(bin, "gh"), ghStub, { mode: 0o755 });
   const runnerTemp = join(root, "runner-temp");
   mkdirSync(runnerTemp);
-  writeFileSync(join(runnerTemp, "old_commit.txt"), "template@oldsha");
+  writeFileSync(join(runnerTemp, "old_commit.txt"), "build@oldsha");
   for (const [name, content] of Object.entries(opts.temp ?? {})) {
     writeFileSync(join(runnerTemp, name), content);
   }
@@ -76,7 +76,7 @@ function run(opts: Options = {}) {
       GITHUB_OUTPUT: join(root, "gh-output.txt"),
       BRANCH: "automation/repo-platform",
       BASE_BRANCH: "main",
-      DISPLAY: "template@newsha",
+      DISPLAY: "build@newsha",
       RECOVER: "",
       RESOLVED: "",
       VALIDATION: "passed",
@@ -108,7 +108,7 @@ describe("open_pr sections and auto-merge", () => {
     const r = run();
     expect(r.exitCode).toBe(0);
     expect(r.body).toContain("Automated template update");
-    expect(r.body).toContain("- New: `template@newsha`");
+    expect(r.body).toContain("- New: `build@newsha`");
     expect(r.body).not.toContain("TAIL TRIPWIRE");
     expect(r.merged).toBe(true);
     expect(r.output).toContain("auto-merge armed");

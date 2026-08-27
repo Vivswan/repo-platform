@@ -54,27 +54,26 @@ describe("build-branches publish wiring", () => {
     expect(wait).toMatch(jobsApiCall);
   });
 
-  test("a template no-op records marker + claim, after the push call, force, and only then", () => {
+  test("a build no-op records marker + claim, after the publish call, force, and only then", () => {
     // The stamp only advances on a content change, so without the marker
     // a no-op source leaves wait_for_build.ts burning its whole wait on
     // every later sync (the next build is also a no-op - the cron cannot
     // heal it). Pinned: the marker publishes only on the verified-no-op
-    // outcome and only after the pushPrepared call - when anything was
-    // prepared that call is the lease-guarded transaction, so a run that
-    // lost the race never claims its source is on the branch (a FULL
-    // no-op has nothing to lease; its marker is inert through the tip
-    // binding); the push is forced (successive markers do not descend
-    // from each other, so a rerun must overwrite, not fail as a
-    // non-fast-forward); and the claim is handed to the workflow's
-    // artifact step, whose upload binds it to the run - the run-owned
-    // evidence the waiter's battery requires. The sweep keeps the marker
-    // it just pushed ("keep") while pendings stay consumed ("consume").
+    // outcome publish() returns - a "published" outcome carries the fresh
+    // stamp itself and a stale skip has nothing to record (a FULL no-op
+    // has nothing to lease; its marker is inert through the tip binding);
+    // the push is forced (successive markers do not descend from each
+    // other, so a rerun must overwrite, not fail as a non-fast-forward);
+    // and the claim is handed to the workflow's artifact step, whose
+    // upload binds it to the run - the run-owned evidence the waiter's
+    // battery requires. The sweep keeps the marker it just pushed
+    // ("keep") while pendings stay consumed ("consume").
     const publish = read(".github/scripts/build-branches/publish.ts");
-    const pushIndex = publish.indexOf("pushPrepared(prepared, tips);");
-    const markIndex = publish.indexOf('if (template.kind === "noop") {');
-    expect(pushIndex).toBeGreaterThan(0);
-    expect(markIndex).toBeGreaterThan(pushIndex);
-    expect(publish).toContain("publishNoopMarker(sourceSha, template.tipSha);");
+    const publishIndex = publish.indexOf("const outcome = publish(sourceSha);");
+    const markIndex = publish.indexOf('if (outcome.kind === "noop") {');
+    expect(publishIndex).toBeGreaterThan(0);
+    expect(markIndex).toBeGreaterThan(publishIndex);
+    expect(publish).toContain("publishNoopMarker(sourceSha, outcome.tipSha);");
     expect(publish).toMatch(/"--force",\s*"origin",\s*`\$\{marker\}:\$\{ref\}`/);
     expect(publish).toContain('setOutput("noop_claim", claim);');
     expect(publish).toContain('sweepSourceRefs(PENDING_REF_PREFIX, sourceSha, "consume");');

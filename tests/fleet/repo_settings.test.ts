@@ -28,14 +28,18 @@ function readRulesets(path: string): Ruleset[] {
 }
 
 describe("the repo's own build-branch ruleset", () => {
-  test("both build refs, the executable actions ref included, stay append-only for everyone", () => {
+  test("every generated ref, the executable build ref included, stays append-only for everyone", () => {
     const buildBranches = readRulesets(".github/settings.yml").find(
       (r) => r.name === "build-branches",
     );
     expect(buildBranches).toBeDefined();
     expect(buildBranches?.target).toBe("branch");
     expect(buildBranches?.enforcement).toBe("active");
-    expect(buildBranches?.conditions?.ref_name?.include?.sort()).toEqual(["actions", "template"]);
+    expect(buildBranches?.conditions?.ref_name?.include?.sort()).toEqual([
+      "actions",
+      "build",
+      "template",
+    ]);
     expect(buildBranches?.conditions?.ref_name?.exclude).toEqual([]);
     expect(buildBranches?.rules?.map((r) => r.type).sort()).toEqual([
       "deletion",

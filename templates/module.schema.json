@@ -270,14 +270,6 @@
     "gate": {
       "type": "string",
       "minLength": 1
-    },
-    "gate_dirs": {
-      "minItems": 1,
-      "type": "array",
-      "items": {
-        "type": "string",
-        "minLength": 1
-      }
     }
   },
   "required": [

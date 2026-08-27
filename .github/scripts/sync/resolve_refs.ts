@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-// Resolves the sync's template refs and the two template copier.yml
+// Resolves the sync's build refs and the two template copier.yml
 // snapshots. Invoked by reusable-template-sync.yml's "Resolve refs and
 // template copier configs" step from the repo-platform checkout root (the
 // target repo is checked out under target/).
@@ -42,7 +42,7 @@ if (recover !== "" && recover !== "recopy") {
 // main is refreshed too: a build published after the checkout can stamp a
 // main commit the checkout has not seen yet.
 must(["git", "fetch", "--quiet", "origin", "+refs/heads/main:refs/remotes/origin/main"]);
-capture(["git", "fetch", "--quiet", "origin", "+refs/heads/template:refs/remotes/origin/template"]);
+capture(["git", "fetch", "--quiet", "origin", "+refs/heads/build:refs/remotes/origin/build"]);
 
 let answers: CopierAnswers;
 try {
@@ -73,16 +73,10 @@ function resolves(revspec: string): boolean {
   return capture(["git", "rev-parse", "--verify", "--quiet", revspec]).exitCode === 0;
 }
 
-const tipProbe = capture([
-  "git",
-  "rev-parse",
-  "--verify",
-  "--quiet",
-  "refs/remotes/origin/template",
-]);
+const tipProbe = capture(["git", "rev-parse", "--verify", "--quiet", "refs/remotes/origin/build"]);
 if (tipProbe.exitCode !== 0) {
   console.log(
-    `::error::cannot resolve the template target: ${repository} has no template branch, so there is nothing to sync from. Dispatch the Build Branches workflow, then re-run.`,
+    `::error::cannot resolve the build target: ${repository} has no build branch, so there is nothing to sync from. Dispatch the Build Branches workflow, then re-run.`,
   );
   process.exit(1);
 }
@@ -96,18 +90,18 @@ const targetSha = tipProbe.stdout.trimEnd();
 const validateRef = stampOf(targetSha);
 if (validateRef === "") {
   console.log(
-    `::error::the template branch's tip ${targetSha.slice(0, 12)} carries no source stamp, so the Build Branches workflow did not push it and the sync will not ship it. Dispatch Build Branches to rebuild the branch from main, then re-run.`,
+    `::error::the build branch's tip ${targetSha.slice(0, 12)} carries no source stamp, so the Build Branches workflow did not push it and the sync will not ship it. Dispatch Build Branches to rebuild the branch from main, then re-run.`,
   );
   process.exit(1);
 }
 if (!resolves(`${validateRef}^{commit}`)) {
   console.log(
-    `::error::the template branch's stamped source commit ${validateRef} is unreachable (main history rewrite). Dispatch the Build Branches workflow - it re-stamps the branch - then re-run.`,
+    `::error::the build branch's stamped source commit ${validateRef} is unreachable (main history rewrite). Dispatch the Build Branches workflow - it re-stamps the branch - then re-run.`,
   );
   process.exit(1);
 }
 // The stamp lines are plain text anyone with push access can write, and
-// the template ruleset allows fast-forward pushes from any writer - so
+// the ruleset model cannot pin the ref to one workflow - so
 // prove the tip is really the builder's output of that source before it
 // is templated fleet-wide.
 must(["bun", join(import.meta.dir, "verify_build_provenance.ts")], {
@@ -122,11 +116,11 @@ must(["bun", join(import.meta.dir, "verify_build_provenance.ts")], {
 const notGreen = allGreenFailure(repository, validateRef);
 if (notGreen !== null) {
   console.log(
-    `::error::the template branch tip ${targetSha.slice(0, 12)} was built from ${validateRef.slice(0, 12)}, which is not green - ${notGreen}. The sync only ships builds of green main commits; get CI to a successful run on main, dispatch Build Branches, then re-run.`,
+    `::error::the build branch tip ${targetSha.slice(0, 12)} was built from ${validateRef.slice(0, 12)}, which is not green - ${notGreen}. The sync only ships builds of green main commits; get CI to a successful run on main, dispatch Build Branches, then re-run.`,
   );
   process.exit(1);
 }
-const display = `template@${targetSha.slice(0, 12)}`;
+const display = `build@${targetSha.slice(0, 12)}`;
 
 // copier consumes target_ref, and a branch name would be re-resolved from
 // origin AFTER the verification above - a push in that window would ship

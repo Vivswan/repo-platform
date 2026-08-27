@@ -9,7 +9,7 @@ Everything originates here. This repo pushes standards files into managed repos 
 Sources on `main`, a generated build branch, sync PRs into each repo:
 
 - `templates/` holds the sources: `base/` plus one folder per module. Shared files take module contributions at `{# compose:<anchor> #}` anchors, spliced from per-module `fragments/` or generated from the `module.yml` manifests.
-- Every green `main` commit rebuilds the orphan `template` branch, which is the composed tree copier actually renders, and its sibling `actions` branch, which carries only the composite actions the rendered workflows pin `@actions`. `main` itself is not copier-consumable.
+- Every green `main` commit rebuilds the orphan `build` branch - the one generated delivery channel: `template/` is the composed tree copier renders, `actions/` carries the composite actions the rendered workflows pin `@build`, and every path is extraction-safe. `main` itself is not copier-consumable.
 - [sync-repos.yml](.github/workflows/sync-repos.yml) runs `copier update` against each managed repo on a weekly cron or a dispatch, then pushes a branch and PR into it with the fleet PAT. Clean updates arm squash auto-merge and land on their own once the repo's `all-green` check passes; anything a human should see (auto-resolved conflicts, withheld workflow files, failed validation, recovery runs) stays for review.
 
 Repository settings are not part of that render, and a repo opts into them by selecting the settings-sync module in its own `.repo-platform.yml` - a repo that does not select it keeps its settings entirely to itself. For those that do, [settings-repos.yml](.github/workflows/settings-repos.yml) computes each repo's settings at apply time as a six-layer merge of plain YAML documents - fleet baseline, fleet visibility overlay, the selected modules' layers and their visibility overlays, the repo's own `.github/settings.yml`, then a fleet override layer no repo can weaken - and applies the result ([docs/settings.md](docs/settings.md)).
@@ -22,13 +22,13 @@ Which files the template owns, and how strongly, is declared as data rather than
 
 ## Onboarding a repo
 
-Walkthrough: [docs/new-repo.md](docs/new-repo.md). The shape of it: scaffold with the native tool (`uv init`, `bun init`), render the template from the build branch (`copier copy gh:Vivswan/repo-platform . --vcs-ref template --trust`), commit, and grant the fleet PAT access to the repo.
+Walkthrough: [docs/new-repo.md](docs/new-repo.md). The shape of it: scaffold with the native tool (`uv init`, `bun init`), render the template from the build branch (`copier copy gh:Vivswan/repo-platform . --vcs-ref build --trust`), commit, and grant the fleet PAT access to the repo.
 
 `repos.yml` decides the fleet: a quoted `"*"` wildcard auto-discovers every owned, non-archived repo the PAT can write to, and `exclude:` opts repos out. A discovered repo is synced only once it carries `.repo-platform.yml`, so granting the PAT and committing that file is what enrolls a repo.
 
 ## Shipping a template change
 
-Merge to `main`; once CI's `all-green` gate passes, the `template` branch is rebuilt and the fleet picks it up on the next weekly sync. For one repo immediately: `gh workflow run sync-repos.yml -f repo=Vivswan/<repo>`. For the whole fleet: `gh workflow run sync-repos.yml`.
+Merge to `main`; once CI's `all-green` gate passes, the `build` branch is rebuilt and the fleet picks it up on the next weekly sync. For one repo immediately: `gh workflow run sync-repos.yml -f repo=Vivswan/<repo>`. For the whole fleet: `gh workflow run sync-repos.yml`.
 
 ## Credentials
 

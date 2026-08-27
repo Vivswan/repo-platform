@@ -27,7 +27,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
-      - uses: Vivswan/repo-platform/actions/validate-skills@actions
+      - uses: Vivswan/repo-platform/actions/validate-skills@build
         with:
           skills-dir: "skills"
           mode: discovery

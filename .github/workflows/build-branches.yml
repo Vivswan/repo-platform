@@ -1,27 +1,23 @@
-# Publishes the generated build branches: `template`, the composed tree
-# copier consumes, and `actions`, the extraction-safe tree fleet `uses:`
-# refs execute (publish_actions.ts's header has why it is separate). Both
-# are minimal build trees from the LATEST main commit, rebuilt whenever CI
-# completes successfully on main (the workflow_run trigger below), and
-# both are ORPHAN, APPEND-ONLY branches: each build commit parents the
-# previous build commit, never a main commit, so a main history rewrite
-# can never invalidate them and old build commits (downstream repos'
-# recorded _commit, needed by copier update's three-way merge) stay
-# reachable forever.
+# Publishes the generated `build` branch - the fleet's ONE delivery
+# channel: copier consumes its template/ subtree and `uses: ...@build`
+# refs execute its actions/ subtree (every path is extraction-safe; the
+# composed tree carries plain filenames only). A minimal build tree from
+# the LATEST main commit, rebuilt whenever CI completes successfully on
+# main (the workflow_run trigger below). It is an ORPHAN, APPEND-ONLY
+# branch: each build commit parents the previous build commit, never a
+# main commit, so a main history rewrite can never invalidate it and old
+# build commits (downstream repos' recorded _commit, needed by copier
+# update's three-way merge) stay reachable forever.
 #
 # The compose cost is paid DURING CI, not after it: every main push builds
 # the tree immediately (build_pending.ts) and parks it, unpublished, at
-# refs/build-pending/<sha>; the workflow_run publisher then only PROMOTES
+# refs/build-pending/<sha>; the workflow_run publisher then only promotes
 # that pre-built tree once all-green completes (publish.ts PREBUILT_REF,
 # with a compose fallback when the pending ref is missing). Concurrent
 # pushes are race-safe: pending refs are keyed by source sha, and
-# publish.ts's newest-green preflight gates BOTH delivery branches before
-# either moves, skipping a stale build whose source is an ancestor of
-# either tip's stamped source - then lands both changed branches (and a
-# lease-only no-op on any unchanged one) in ONE atomic push, so a stale
-# run can never split the two branches across different sources. A branch
-# whose content is unchanged legitimately keeps its own older stamp; the
-# no-op lease is what still guards it inside the transaction.
+# publish.ts skips a stale build whose source is an ancestor of the tip's
+# stamped source - newest-green wins, a stale build never overwrites a
+# newer published tree (its plain push doubles as the compare-and-swap).
 #
 # Only GREEN commits publish, twice over: the trigger fires on a
 # successful CI run (a failed run skips this workflow's steps quietly -
@@ -33,7 +29,7 @@
 # schedule is a self-heal net (it composes and publishes in one run, as
 # does dispatch).
 # GITHUB_TOKEN pushes trigger no workflows - intended; nothing may run on
-# the build branches (their trees carry no .github/).
+# the build branch (its tree carries no .github/).
 
 name: Build Branches
 
@@ -65,23 +61,23 @@ permissions:
 # queued PUBLISHER: with one shared group GitHub coalesces queued runs, and
 # a newer run - a push build, OR a FAILED-CI workflow_run whose steps all
 # skip (CI_GREEN false) - would replace a publisher still waiting its
-# turn, which then never runs and the branches stay stale. Publishers
+# turn, which then never runs and the branch stays stale. Publishers
 # (green workflow_run, schedule, dispatch) serialize in ONE lane on
 # purpose: serial publishers let GitHub keep the NEWEST queued one, and
-# publish.ts's preflight + push lease make the survivor rollback-proof.
-# (Per-source publisher lanes would instead let two publishers race the
-# push, where the OLDER source can win - strictly worse.) Residuals the
-# serial lane keeps, all self-healing on the weekly cron or the next push:
-# a manual rerun of an OLD build can evict a queued fresher publisher, and
-# a red schedule/dispatch run can evict a green one and then skip on its
-# own green gate (both staleness-only). One deeper, contrived case can
-# actually republish superseded content: the freshness stamp only advances
-# on a CONTENT change, so if a newer publisher fully no-ops (its render is
-# byte-identical to the tip, leaving the older stamp) a later manual rerun
-# of an intermediate source is not seen as stale and republishes its
-# green-but-superseded tree. It needs an operator rerun and an exact
-# content revert; the next push or cron heals it. Push builders and
-# failed-CI no-ops each get their own lane.
+# publish.ts's stale preflight + plain-push CAS make the survivor
+# rollback-proof. (Per-source publisher lanes would instead let two
+# publishers race the push, where the OLDER source can win - strictly
+# worse.) Residuals the serial lane keeps, all self-healing on the weekly
+# cron or the next push: a manual rerun of an OLD build can evict a queued
+# fresher publisher, and a red schedule/dispatch run can evict a green one
+# and then skip on its own green gate (both staleness-only). One deeper,
+# contrived case can actually republish superseded content: the freshness
+# stamp only advances on a CONTENT change, so if a newer publisher fully
+# no-ops (its render is byte-identical to the tip, leaving the older
+# stamp) a later manual rerun of an intermediate source is not seen as
+# stale and republishes its green-but-superseded tree. It needs an
+# operator rerun and an exact content revert; the next push or cron heals
+# it. Push builders and failed-CI no-ops each get their own lane.
 concurrency:
   group: >-
     build-branches-${{
@@ -141,7 +137,7 @@ jobs:
           PREBUILT_REF: ${{ github.event_name == 'workflow_run' && format('refs/build-pending/{0}', github.event.workflow_run.head_sha) || '' }}
         run: bun .github/scripts/build-branches/publish.ts
 
-      # A template no-op publishes no commit, so publish.ts records the
+      # A build no-op publishes no commit, so publish.ts records the
       # verdict as a marker ref plus THIS artifact, whose name is the claim
       # ("source X is a no-op against tip Y"). The artifact is the
       # run-owned proof sync/wait_for_build.ts verifies the marker against:

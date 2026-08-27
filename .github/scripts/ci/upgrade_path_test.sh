@@ -173,7 +173,7 @@ printf 'name: Rerun Copilot Gate\non: [pull_request_review]\n' \
 # _skip_if_exists. Without this the synthetic fixture would already carry
 # the current license and the transition assertions below would be
 # vacuous.
-rm "$OLD_TREE/template/{% if 'custom-license' not in modules %}LICENSE.md{% endif %}.jinja"
+rm "$OLD_TREE/template/LICENSE.md.jinja"
 echo "Old fleet license (pre-relicense fixture)" > "$OLD_TREE/template/LICENSE"
 awk '{print} /^_skip_if_exists:/{print "  - LICENSE"}' "$OLD_TREE/copier.yml" \
   > "$OLD_TREE/copier.yml.tmp"
@@ -381,12 +381,12 @@ grep -qF -- 'package-ecosystem: "uv"' .github/dependabot.yml \
   || fail "dependabot.yml lost the uv module entry"
 grep -qF -- "pr-title:" .github/workflows/ci.yml \
   || fail "ci.yml is missing the pr-title gate job"
-# Rendered workflows pin the composite actions at the green-gated actions
+# Rendered workflows pin the composite actions at the green-gated build
 # branch - the templates carry the literal pin.
-grep -qF -- "repo-platform/actions/check-typography@actions" .github/workflows/ci.yml \
-  || fail "ci.yml does not pin check-typography at the actions branch"
-grep -qF -- "repo-platform/actions/dependency-review@actions" .github/workflows/ci.yml \
-  || fail "ci.yml does not pin dependency-review at the actions branch"
+grep -qF -- "repo-platform/actions/check-typography@build" .github/workflows/ci.yml \
+  || fail "ci.yml does not pin check-typography at the build branch"
+grep -qF -- "repo-platform/actions/dependency-review@build" .github/workflows/ci.yml \
+  || fail "ci.yml does not pin dependency-review at the build branch"
 test -f AGENTS.md || fail "AGENTS.md is missing"
 grep -qF "description: Upgraded description" .copier-answers.yml \
   || fail "the live description was not applied"
@@ -879,6 +879,71 @@ if grep -rIqF "$split_marker" . --exclude-dir=.git; then
   fail "the split-file rebuild left unresolved copier conflict markers"
 fi
 echo "split-file rebuild OK: tails byte-preserved, managed halves byte-equal to render-new, managed-half edit reset and flagged"
+
+# --- Unselected-path preservation (conditional landing via _exclude) ------
+# The composed tree carries plain filenames; conditional landing happens
+# through copier.yml's generated _exclude patterns, which must reproduce
+# the retired filename-gate semantics EXACTLY: a path whose gates do not
+# hold is never rendered, so a repo's OWN file at such a path - its
+# custom-license LICENSE.md, a home-grown nightly.yml without the nightly
+# module - survives every update byte-identical. A post-render deletion
+# scheme would destroy exactly these files; this leg pins that class shut.
+# Runs NEW_TAG -> SPLIT_TAG, a real content-changed build, through the
+# workflow's own scripts.
+UNSEL="$RUN_DIR/upgrade-unselected"
+UNSEL_WORK="$RUN_DIR/upgrade-unselected-work"
+mkdir -p "$UNSEL_WORK"
+cd "$GITHUB_WORKSPACE"
+copier copy "$GITHUB_WORKSPACE" "$UNSEL" \
+  --vcs-ref "$NEW_TAG" --defaults --trust \
+  -d project_name="Unselected Paths" \
+  -d description="Unselected-path project" \
+  -d 'modules=[agents, custom-license]' \
+  -d private="false"
+cd "$UNSEL"
+# The unselected paths must not have rendered in the first place.
+test ! -e LICENSE.md || fail "the fleet LICENSE.md rendered despite the custom-license opt-out"
+test ! -e .github/workflows/nightly.yml || fail "nightly.yml rendered without the nightly module"
+echo "Repo-owned custom license (unselected-path leg)" > LICENSE.md
+printf 'name: repo-own nightly\non: workflow_dispatch\n' > .github/workflows/nightly.yml
+cp LICENSE.md "$UNSEL_WORK/license-before.md"
+cp .github/workflows/nightly.yml "$UNSEL_WORK/nightly-before.yml"
+git init -q -b main
+git add --all
+git -c user.name=ci -c user.email=ci@localhost commit -q -m "chore: init with repo-owned files"
+cd "$GITHUB_WORKSPACE"
+export MODULES='["agents", "custom-license"]'
+export PRIVATE=false
+export DESCRIPTION="Unselected-path project"
+export TARGET_DIR="$UNSEL"
+export TARGET_REF="$SPLIT_TAG"
+RECOVER="" bun .github/scripts/sync/apply_update.ts
+bun .github/scripts/sync/resolve_copier_conflicts.ts \
+  --summary "$UNSEL_WORK/dropped-local-hunks.md" --root "$UNSEL"
+answers_unsel="$(git -C "$UNSEL" show HEAD:.copier-answers.yml)"
+src_path_unsel="$(sed -n 's/^_src_path: //p' <<<"$answers_unsel")"
+test -n "$src_path_unsel" || fail "unselected-path fixture records no _src_path"
+git show "$NEW_TAG:copier.yml" > "$UNSEL_WORK/copier-old.yml"
+git show "$SPLIT_TAG:copier.yml" > "$UNSEL_WORK/copier-new.yml"
+RUNNER_TEMP="$UNSEL_WORK" SRC_PATH="$src_path_unsel" \
+  OLD_SHA="$(git rev-parse "$NEW_TAG^{commit}")" \
+  bun .github/scripts/sync/retired_cleanup.ts
+RECOVER="" RUNNER_TEMP="$UNSEL_WORK" bun .github/scripts/sync/preserve_repo_owned.ts
+TARGET_DIR="$UNSEL" bun .github/scripts/sync/stamp_manifest.ts
+bun "$GITHUB_WORKSPACE/actions/validate-template/validate_generated_files.ts" "$UNSEL"
+cd "$UNSEL"
+cmp -s "$UNSEL_WORK/license-before.md" LICENSE.md \
+  || fail "the repo-owned LICENSE.md at the unselected path was not byte-identical after the update"
+cmp -s "$UNSEL_WORK/nightly-before.yml" .github/workflows/nightly.yml \
+  || fail "the repo-owned nightly.yml at the unselected starter path was not byte-identical after the update"
+if grep -qF 'LICENSE.md' "$UNSEL_WORK/retired-paths.json"; then
+  fail "retired_paths listed the repo-owned LICENSE.md (custom-license protectedPaths)"
+fi
+if grep -qF 'nightly.yml' "$UNSEL_WORK/retired-paths.json"; then
+  fail "retired_paths listed the repo-owned nightly.yml (unselected in both renders)"
+fi
+echo "unselected-path preservation OK: repo-owned files at unselected template paths survive byte-identical"
+
 # --- settings.yml layering transition (customized client) ----------------
 # A repo generated before the two-layer settings model carries the full
 # old baseline in a settings.yml still marked with the retired mergeable
@@ -1076,12 +1141,12 @@ case "$1 $2" in
 esac
 GHSTUB
 chmod +x "$TRIP_BIN/gh"
-echo "template@old" > "$TRIP_WORK/old_commit.txt"
+echo "build@old" > "$TRIP_WORK/old_commit.txt"
 : > "$TRIP_WORK/empty.txt"
 GH_CALLS="$TRIP_WORK/gh-calls.txt" PATH="$TRIP_BIN:$PATH" \
   TARGET="Vivswan/tripwire" RUNNER_TEMP="$TRIP_WORK" \
   GITHUB_REPOSITORY="Vivswan/repo-platform" GITHUB_OUTPUT="$TRIP_WORK/gh-output.txt" \
-  BRANCH=automation/repo-platform BASE_BRANCH=main DISPLAY="template@new" \
+  BRANCH=automation/repo-platform BASE_BRANCH=main DISPLAY="build@new" \
   RECOVER="" RESOLVED="" VALIDATION=passed HIDE_DETAILS="" \
   DRIFT_FILE="$TRIP_WORK/empty.txt" CARRIED_FILE="$TRIP_WORK/empty.txt" \
   CARRY_REVIEW_FILE="$TRIP_WORK/empty.txt" RETIRED_MODULES_FILE="$TRIP_WORK/empty.txt" \

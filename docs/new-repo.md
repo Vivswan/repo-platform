@@ -14,11 +14,11 @@ mkdir my-project && cd my-project && bun init
 
 ## 2. Apply the template
 
-Requires [copier](https://copier.readthedocs.io) >= 9.8.0 (serialized multiselect answers) and [bun](https://bun.sh) on PATH (copier's post-render stamp hook runs a bun script; the hook is also why copier needs `--trust`). `main` holds only sources; consume the GENERATED `template` build branch:
+Requires [copier](https://copier.readthedocs.io) >= 9.8.0 (serialized multiselect answers) and [bun](https://bun.sh) on PATH (copier's post-render stamp hook runs a bun script; the hook is also why copier needs `--trust`). `main` holds only sources; consume the GENERATED `build` branch:
 
 ```bash
 git init -b main
-copier copy gh:Vivswan/repo-platform . --vcs-ref template --trust
+copier copy gh:Vivswan/repo-platform . --vcs-ref build --trust
 git add --all
 git commit -m "chore: initialize from repo-platform"
 ```

@@ -1,5 +1,5 @@
 // The build-during-CI handoff: a push-triggered build
-// composes the template tree CONCURRENTLY with main's CI run and parks
+// composes the build-branch tree CONCURRENTLY with main's CI run and parks
 // it, UNPUBLISHED, at a per-source ref; the workflow_run publisher
 // promotes that pre-built tree once all-green completes. Shared by
 // build_pending.ts (the writer), publish.ts (the consumer and the

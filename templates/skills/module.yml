@@ -7,7 +7,3 @@ ownership:
   - { path: .github/workflows/validate-skills.yml, class: managed }
 gate_jobs:
   - validate-skills
-# gate_dirs: output directories gated ONCE at the directory name instead of
-# per-file leaf, matching how copier skips a whole subtree.
-gate_dirs:
-  - .claude-plugin

@@ -385,6 +385,22 @@ export function skipIfExistsMatchers(copierYamlText: string): RegExp[] {
   return skipIfExistsPatterns(copierYamlText).map(({ matcher }) => matcher);
 }
 
+/** copier.yml's _exclude list, verbatim: the generated conditional-landing
+ *  patterns (compose_template.ts's excludePatterns via scripts/generate.ts).
+ *  Throws when the list is missing or malformed - the composed tree carries
+ *  plain filenames, so a copier.yml without the generated excludes would
+ *  land every conditional file unconditionally. */
+export function readExcludeList(copierYamlText: string): string[] {
+  const exclude = (parseYaml(copierYamlText) as { _exclude?: unknown } | null)?._exclude;
+  if (!Array.isArray(exclude) || !exclude.every((pattern) => typeof pattern === "string")) {
+    throw new Error(
+      "copier.yml: _exclude is missing or not a list of strings - the generated " +
+        "conditional-landing patterns live there (run `bun run generate`)",
+    );
+  }
+  return exclude;
+}
+
 const FILENAME_GATE_RE = /^\{% if (.+?) %\}(.*)\{% endif %\}$/;
 
 /** The path a render lands, with any filename gates stripped and their

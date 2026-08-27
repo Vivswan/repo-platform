@@ -3,7 +3,7 @@
 # and open a PR when upstream changed anything we consume. This workflow is
 # the only place that fetches upstream: nothing is pinned and no CI job
 # verifies the outputs, so the diff below IS the upstream change.
-# Merging the PR reaches the template branch automatically via build-branches.
+# Merging the PR reaches the build branch automatically via build-branches.
 
 name: Refresh gitignore
 
@@ -87,5 +87,5 @@ jobs:
           BRANCH: automation/gitignore-refresh
           PR_TITLE: "chore: refresh gitignore templates from github/gitignore"
           COMMIT_MESSAGE: "chore: refresh gitignore templates from github/gitignore"
-          PR_BODY: "Automated regeneration of the gitignore outputs (base skeleton, toolchain fragments, this repo's own `.gitignore`) from [github/gitignore](https://github.com/github/gitignore)'s current HEAD. The diff is the upstream change to the sections we consume. Merging this rebuilds the template branch; the next sync pushes it to the fleet."
+          PR_BODY: "Automated regeneration of the gitignore outputs (base skeleton, toolchain fragments, this repo's own `.gitignore`) from [github/gitignore](https://github.com/github/gitignore)'s current HEAD. The diff is the upstream change to the sections we consume. Merging this rebuilds the build branch; the next sync pushes it to the fleet."
         run: bun .github/scripts/shared/open_automation_pr.ts

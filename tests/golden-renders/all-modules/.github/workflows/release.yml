@@ -89,7 +89,7 @@ jobs:
       # release-override label from that PR) and passes trivially on every
       # other run, so ordinary main pushes and release-PR refreshes are
       # never blocked.
-      - uses: Vivswan/repo-platform/actions/release-health@actions
+      - uses: Vivswan/repo-platform/actions/release-health@build
         if: steps.head.outputs.current == 'true'
         with:
           mode: release

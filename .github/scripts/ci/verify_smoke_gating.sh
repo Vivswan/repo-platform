@@ -80,7 +80,7 @@ present "findings-file:" "$wf/ci.yml"
 present "continue-on-error: true" "$wf/ci.yml"
 present "repo-platform:validate-template" "$wf/ci.yml"
 present "steps.integrity.outcome == 'failure'" "$wf/ci.yml"
-present "branches/template" "$wf/ci.yml"
+present "branches/build" "$wf/ci.yml"
 # The freshness leg must stay a ref compare: a render here would cost every
 # fleet repo a copier run on every push.
 absent_line "          copier copy" "$wf/ci.yml"
@@ -103,11 +103,11 @@ if has pages; then test -f "$wf/pages.yml"; else test ! -e "$wf/pages.yml"; fi
 
 # fuzzer: the repo-owned nightly-fuzz starter with the fuzz-issue action in
 # both modes and the dispatch replay inputs; the auto-assign dispatch step
-# follows that module (rendered workflows pin composite actions @actions,
+# follows that module (rendered workflows pin composite actions @build,
 # like check-typography below - that ref is the green-gated build branch).
 if has fuzzer; then
   test -f "$wf/nightly-fuzz.yml"
-  present "actions/fuzz-issue@actions" "$wf/nightly-fuzz.yml"
+  present "actions/fuzz-issue@build" "$wf/nightly-fuzz.yml"
   present "mode: report" "$wf/nightly-fuzz.yml"
   present "mode: resolve" "$wf/nightly-fuzz.yml"
   present "workflow_dispatch:" "$wf/nightly-fuzz.yml"
@@ -132,7 +132,7 @@ fi
 # fuzzer-free nightly row must render no nightly-fuzz.yml.
 if has nightly; then
   test -f "$wf/nightly.yml"
-  present "actions/fuzz-issue@actions" "$wf/nightly.yml"
+  present "actions/fuzz-issue@build" "$wf/nightly.yml"
   present_line "          mode: report" "$wf/nightly.yml"
   present_line "          mode: resolve" "$wf/nightly.yml"
   present_line "          stream: generic" "$wf/nightly.yml"
@@ -173,11 +173,11 @@ if has skills; then
   # needs; losing either fragment would fail open silently.
   present_line "  validate-skills:" "$wf/ci.yml"
   present_line "      - validate-skills" "$wf/ci.yml"
-  present "actions/validate-skills@actions" "$wf/ci.yml"
+  present "actions/validate-skills@build" "$wf/ci.yml"
   present_line "          skills-dir: \"$skills_dir\"" "$wf/ci.yml"
   # The advisory discovery workflow: network-dependent, outside the gate.
   test -f "$wf/validate-skills.yml"
-  present "actions/validate-skills@actions" "$wf/validate-skills.yml"
+  present "actions/validate-skills@build" "$wf/validate-skills.yml"
   present "paths: [\"$skills_dir/**\", \".claude-plugin/**\", \".github/workflows/validate-skills.yml\"]" "$wf/validate-skills.yml"
   present_line "          skills-dir: \"$skills_dir\"" "$wf/validate-skills.yml"
   present "mode: discovery" "$wf/validate-skills.yml"
@@ -309,7 +309,7 @@ else
   present "      - dependency-review" "$wf/ci.yml"
   # The wrapper pin, falling back to main on the scratch build tree; the
   # upgrade test proves the release-tag form.
-  present "repo-platform/actions/dependency-review@actions" "$wf/ci.yml"
+  present "repo-platform/actions/dependency-review@build" "$wf/ci.yml"
 fi
 
 # Base checks: private renders merge the five tiny jobs into one
@@ -317,7 +317,7 @@ fi
 # private repos); public renders keep the one-job-per-check fan-out. Job
 # keys and needs entries are matched as whole lines at their exact
 # indentation: a bare 'typography' pattern would also hit
-# 'actions/check-typography@actions'.
+# 'actions/check-typography@build'.
 base_check_jobs=(typography commit-names actionlint gitleaks yamllint)
 if [ "$PRIVATE" = "true" ]; then
   present_line "  base-checks:" "$wf/ci.yml"
@@ -328,7 +328,7 @@ if [ "$PRIVATE" = "true" ]; then
   done
   # Every check's tool steps must survive the merge (check-typography is
   # asserted for both shapes below).
-  present "actions/validate-commit-names@actions" "$wf/ci.yml"
+  present "actions/validate-commit-names@build" "$wf/ci.yml"
   present "raven-actions/actionlint" "$wf/ci.yml"
   present "gitleaks/gitleaks-action" "$wf/ci.yml"
   present "yamllint -s ." "$wf/ci.yml"
@@ -516,8 +516,8 @@ if has release-please; then
   # fuzz-label spelling must never render again.
   present_line "  release-health:" "$wf/ci.yml"
   present_line "      - release-health" "$wf/ci.yml"
-  present "release-health@actions" "$wf/ci.yml"
-  present "release-health@actions" "$wf/release.yml"
+  present "release-health@build" "$wf/ci.yml"
+  present "release-health@build" "$wf/release.yml"
   present_line "          mode: pull-request" "$wf/ci.yml"
   present_line "          mode: release" "$wf/release.yml"
   absent "fuzz-label:" "$wf/ci.yml"
@@ -639,7 +639,7 @@ fi
 test -f "$wf/ci.yml"
 test -f "$wf/checks.yml"
 present "uses: ./.github/workflows/checks.yml" "$wf/ci.yml"
-present "actions/check-typography@actions" "$wf/ci.yml"
+present "actions/check-typography@build" "$wf/ci.yml"
 
 # Row-specific expectations for the rendered pages caller.
 if [ -n "$EXPECT_IN_PAGES" ]; then

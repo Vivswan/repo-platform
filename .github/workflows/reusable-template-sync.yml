@@ -1,6 +1,6 @@
 # Push-only template sync: runs in repo-platform and pushes a template
 # update into one managed repo - target checkout in a subdirectory, `copier
-# update` against the template branch head, then a branch + PR opened in
+# update` against the build branch head, then a branch + PR opened in
 # the target with the REPO_PLATFORM_TOKEN PAT stored here. Called only by
 # sync-repos.yml.
 #
@@ -83,7 +83,7 @@ on:
 # The workflow's own token only reads this repo; every target-repo write
 # (checkout, push, PR) uses the REPO_PLATFORM_TOKEN PAT. Actions read has
 # two consumers: the build provenance check (resolve_refs.ts verifies the
-# build run stamped on the shipped ref, the template branch tip) and the
+# build run stamped on the shipped ref, the build branch tip) and the
 # green-source gate (shared/all_green.ts proves the shipped build's own
 # source commit passed CI).
 permissions:
@@ -161,8 +161,8 @@ jobs:
 
       - name: Require registration files
         run: |
-          test -f target/.repo-platform.yml || { echo "::error::${TARGET_DISPLAY} is not registered with repo-platform: .repo-platform.yml is missing from its default branch. Restore the file from git history, or regenerate the repo with 'copier copy gh:${GITHUB_REPOSITORY} . --vcs-ref template'."; exit 1; }
-          test -f target/.copier-answers.yml || { echo "::error::${TARGET_DISPLAY} has no .copier-answers.yml on its default branch, so copier has no recorded answers to update from. Restore the file from git history, or regenerate the repo with 'copier copy gh:${GITHUB_REPOSITORY} . --vcs-ref template'."; exit 1; }
+          test -f target/.repo-platform.yml || { echo "::error::${TARGET_DISPLAY} is not registered with repo-platform: .repo-platform.yml is missing from its default branch. Restore the file from git history, or regenerate the repo with 'copier copy gh:${GITHUB_REPOSITORY} . --vcs-ref build'."; exit 1; }
+          test -f target/.copier-answers.yml || { echo "::error::${TARGET_DISPLAY} has no .copier-answers.yml on its default branch, so copier has no recorded answers to update from. Restore the file from git history, or regenerate the repo with 'copier copy gh:${GITHUB_REPOSITORY} . --vcs-ref build'."; exit 1; }
 
       # Live visibility and description feed the render on purpose (adopt
       # semantics: the visibility-gated renders - CONTRIBUTING.md and the

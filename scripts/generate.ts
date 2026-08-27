@@ -64,7 +64,7 @@ import { existsSync, lstatSync, readdirSync, readFileSync, writeFileSync } from 
 import { join, resolve } from "node:path";
 import { z } from "zod";
 import { managedLabelNames } from "../.github/scripts/fleet/render_managed_settings.ts";
-import { dependabotLabels } from "./compose_template.ts";
+import { compose, dependabotLabels, excludePatterns } from "./compose_template.ts";
 import {
   loadManifests,
   MODULE_ORDER,
@@ -206,6 +206,18 @@ export function spliceInlineRegion(
 /** copier.yml `modules` question: the choices block. */
 export function moduleChoices(manifests: ModuleManifest[]): string[] {
   return ["  choices:", ...manifests.map((m) => `    ${m.module} - ${m.description}: ${m.module}`)];
+}
+
+/** copier.yml `_exclude`: the conditional-landing patterns (semantics in
+ *  compose_template.ts's excludePatterns). Derived through the full
+ *  composition - the gates live in module manifests and base filenames -
+ *  so the region cannot disagree with the tree the build branch ships;
+ *  compose_template.ts's build() re-checks the committed region at every
+ *  branch assembly. JSON.stringify emits each pattern as a YAML
+ *  double-quoted scalar (JSON strings are a YAML subset), so quoting and
+ *  backslash escapes cannot drift from the pattern text. */
+function excludeRegion(): string[] {
+  return excludePatterns(compose().entries).map((pattern) => `  - ${JSON.stringify(pattern)}`);
 }
 
 /** copier.yml `has_toolchain`: or-chain over the toolchain manifests. */
@@ -795,6 +807,11 @@ function targets(manifests: ModuleManifest[]): Target[] {
       prefix: "#",
       regions: [
         ["module-choices", ({ manifests }) => moduleChoices(manifests)],
+        [
+          "conditional-excludes",
+          () => excludeRegion(),
+          "the module manifests and the base templates' gated filenames",
+        ],
         ["has-toolchain-default", ({ manifests }) => hasToolchainDefault(manifests)],
         ["pages-setup", ({ pages }) => pagesSetup(pages)],
         ["pages-install-command", ({ pages }) => pagesInstallCommand(pages)],

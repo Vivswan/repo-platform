@@ -19,7 +19,7 @@ const REPOSITORY = "Vivswan/repo-platform";
 // \x1e between records), sleeps GIT_SLEEP seconds first when set (the
 // stalled-origin case), fails a `fetch` when GIT_FETCH_FAIL is set (the
 // transient network case), and prints GIT_HEAD as the ls-remote HEAD.
-// The two fetch targets are told apart by refspec: a template fetch makes
+// The two fetch targets are told apart by refspec: a build-branch fetch makes
 // later `log`/`rev-parse` serve the tip (GIT_TIP_MSG_FILE / GIT_TIP_SHA),
 // a marker-ref fetch fails when GIT_MARKER_MSG_FILE is unset (ref absent)
 // and otherwise makes `log` serve the marker message - mirroring
@@ -82,7 +82,7 @@ exit 1
 
 interface Options {
   env?: Record<string, string>;
-  /** When set, the git stub serves this as the template tip's commit
+  /** When set, the git stub serves this as the build tip's commit
    * message (the stamp check reads its `source:` line). */
   tipMessage?: string;
   /** When set, the marker ref exists and its commit message is this;
@@ -140,7 +140,7 @@ function run(opts: Options = {}) {
 }
 
 function stampMessage(sourceSha: string): string {
-  return `build: template\n\nsource: https://github.com/Vivswan/repo-platform/commit/${sourceSha}\nrun: https://github.com/Vivswan/repo-platform/actions/runs/1\n`;
+  return `build: build\n\nsource: https://github.com/Vivswan/repo-platform/commit/${sourceSha}\nrun: https://github.com/Vivswan/repo-platform/actions/runs/1\n`;
 }
 
 /** The REAL writer's marker message (shared/noop_marker.ts), so these
@@ -194,7 +194,7 @@ describe("wait_for_build.ts", () => {
 
   test("a tip stamped with main HEAD is fresh, proven WITHOUT any gh api call", () => {
     // Freshness is the tip's SOURCE STAMP alone on the primary arm: read
-    // main HEAD, fetch the template tip, parse its stamp. No gh api - the
+    // main HEAD, fetch the build tip, parse its stamp. No gh api - the
     // runs-list check was deleted because a successful build run at HEAD
     // does not prove the tip was built from HEAD (it may have published
     // an earlier source). A present marker must not change that: the
@@ -204,7 +204,7 @@ describe("wait_for_build.ts", () => {
       markerMessage: marker(MAIN_SHA, TIP_SHA, "7"),
     });
     expect(r.exitCode).toBe(0);
-    expect(r.output).toContain(`the template branch tip is stamped with main HEAD ${MAIN_SHA}.`);
+    expect(r.output).toContain(`the build branch tip is stamped with main HEAD ${MAIN_SHA}.`);
     expect(r.calls.every((args) => args[0] === "git")).toBe(true);
   });
 
@@ -218,7 +218,7 @@ describe("wait_for_build.ts", () => {
     const r = run({ tipMessage: stampMessage(OLD_SOURCE) });
     expect(r.exitCode).toBe(0);
     expect(r.output).not.toContain("stamped with main HEAD");
-    expect(r.output).toContain("::warning::the template branch is not yet built");
+    expect(r.output).toContain("::warning::the build branch is not yet built");
   });
 
   test("a verified no-op marker completes the wait promptly on the first attempt", () => {
@@ -238,9 +238,9 @@ describe("wait_for_build.ts", () => {
     });
     expect(r.exitCode).toBe(0);
     expect(r.output).toContain(
-      `the template branch tip ${TIP_SHA.slice(0, 12)} is a verified no-op build of main HEAD ${MAIN_SHA} (marker run 7).`,
+      `the build branch tip ${TIP_SHA.slice(0, 12)} is a verified no-op build of main HEAD ${MAIN_SHA} (marker run 7).`,
     );
-    expect(r.output).not.toContain("waiting for the template branch");
+    expect(r.output).not.toContain("waiting for the build branch");
     expect(r.output).not.toContain("::warning::");
   });
 
@@ -274,7 +274,7 @@ describe("wait_for_build.ts", () => {
       },
     });
     expect(r.exitCode).toBe(0);
-    expect(r.output).toContain("::warning::the template branch is not yet built");
+    expect(r.output).toContain("::warning::the build branch is not yet built");
     expect(r.calls.every((args) => args[0] === "git")).toBe(true);
   });
 
@@ -291,13 +291,13 @@ describe("wait_for_build.ts", () => {
       },
     });
     expect(r.exitCode).toBe(0);
-    expect(r.output).toContain("::warning::the template branch is not yet built");
+    expect(r.output).toContain("::warning::the build branch is not yet built");
     expect(r.calls.every((args) => args[0] === "git")).toBe(true);
   });
 
   describe("a forged marker fails the trust battery closed", () => {
     // The marker ref is writable by anyone with push access, exactly like
-    // the template branch: the authority is run-owned evidence, so each
+    // the build branch: the authority is run-owned evidence, so each
     // leg of the battery must independently reject - and rejection means
     // the full wait, never acceptance.
     const forged = {
@@ -308,7 +308,7 @@ describe("wait_for_build.ts", () => {
     test("naming a run that does not exist (or an unset token: every gh call fails)", () => {
       const r = run(forged);
       expect(r.exitCode).toBe(0);
-      expect(r.output).toContain("::warning::the template branch is not yet built");
+      expect(r.output).toContain("::warning::the build branch is not yet built");
       // Fail-closed must stay diagnosable: the final warning names the
       // battery's last operational failure, so a burned wait caused by an
       // API problem does not read identically to "no marker exists".
@@ -330,7 +330,7 @@ describe("wait_for_build.ts", () => {
           GH_ARTIFACTS_JSON: claimArtifacts(MAIN_SHA, TIP_SHA),
         },
       });
-      expect(r.output).toContain("::warning::the template branch is not yet built");
+      expect(r.output).toContain("::warning::the build branch is not yet built");
     });
 
     test("naming a run that executed a NON-MAIN workflow revision", () => {
@@ -354,7 +354,7 @@ describe("wait_for_build.ts", () => {
         },
       });
       expect(r.exitCode).toBe(0);
-      expect(r.output).toContain("::warning::the template branch is not yet built");
+      expect(r.output).toContain("::warning::the build branch is not yet built");
     });
 
     test("naming a run created by a non-publisher event", () => {
@@ -375,7 +375,7 @@ describe("wait_for_build.ts", () => {
           GH_ARTIFACTS_JSON: claimArtifacts(MAIN_SHA, TIP_SHA),
         },
       });
-      expect(r.output).toContain("::warning::the template branch is not yet built");
+      expect(r.output).toContain("::warning::the build branch is not yet built");
     });
 
     test("naming a failed build run", () => {
@@ -393,7 +393,7 @@ describe("wait_for_build.ts", () => {
           GH_ARTIFACTS_JSON: claimArtifacts(MAIN_SHA, TIP_SHA),
         },
       });
-      expect(r.output).toContain("::warning::the template branch is not yet built");
+      expect(r.output).toContain("::warning::the build branch is not yet built");
     });
 
     test("naming a run that never ran its publish step", () => {
@@ -410,7 +410,7 @@ describe("wait_for_build.ts", () => {
           GH_ARTIFACTS_JSON: claimArtifacts(MAIN_SHA, TIP_SHA),
         },
       });
-      expect(r.output).toContain("::warning::the template branch is not yet built");
+      expect(r.output).toContain("::warning::the build branch is not yet built");
     });
 
     test("pointing at a REAL publisher run that never made this claim (the confused deputy)", () => {
@@ -428,7 +428,7 @@ describe("wait_for_build.ts", () => {
         },
       });
       expect(r.exitCode).toBe(0);
-      expect(r.output).toContain("::warning::the template branch is not yet built");
+      expect(r.output).toContain("::warning::the build branch is not yet built");
     });
 
     test("naming a run with no artifacts at all", () => {
@@ -440,21 +440,21 @@ describe("wait_for_build.ts", () => {
           GH_ARTIFACTS_JSON: JSON.stringify({ artifacts: [] }),
         },
       });
-      expect(r.output).toContain("::warning::the template branch is not yet built");
+      expect(r.output).toContain("::warning::the build branch is not yet built");
     });
   });
 
   test("no stamp on the tip warns green after exhausting the attempts", () => {
     const r = run();
     expect(r.exitCode).toBe(0);
-    expect(r.output).toContain("waiting for the template branch to be built");
-    expect(r.output).toContain("::warning::the template branch is not yet built");
+    expect(r.output).toContain("waiting for the build branch to be built");
+    expect(r.output).toContain("::warning::the build branch is not yet built");
   });
 
   test("keeps polling through a transient fetch failure, then warns green", () => {
     const r = run({ env: { GIT_FETCH_FAIL: "1" }, tipMessage: stampMessage(MAIN_SHA) });
     expect(r.exitCode).toBe(0);
-    expect(r.output).toContain("::warning::the template branch is not yet built");
+    expect(r.output).toContain("::warning::the build branch is not yet built");
   });
 
   test("fails loudly on an unreadable main HEAD", () => {

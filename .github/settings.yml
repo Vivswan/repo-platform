@@ -26,32 +26,45 @@ repository:
 # which merges ABOVE this file - redeclaring one here would be silently
 # overridden, so this repository does not.
 rulesets:
-  # The generated build branches are append-only: the builder's plain
-  # pushes are fast-forwards and pass; force-pushes and deletion are
-  # blocked for everyone, the publisher included (no bypass actors on
-  # purpose).
+  # The generated build branch is append-only: the builder's plain pushes
+  # are fast-forwards and pass; force-pushes and deletion are blocked for
+  # everyone, the publisher included (no bypass actors on purpose). The
+  # retired split-channel branches stay protected until they are
+  # DELIBERATELY deleted post-cutover: `build` seeds from template's
+  # history on first publish, and un-synced repos still pin @actions until
+  # their next sync PR lands. Ruleset conditions replace wholesale on
+  # apply, so dropping those refs here would unprotect them early - remove
+  # the two entries in the same change that deletes the branches.
   #
-  # A stricter publish-only ruleset on the executable `actions` ref
-  # (every write blocked, sole bypass the GitHub Actions integration that
-  # build-branches.yml publishes with) was declared here once, and GitHub
-  # rejected it at apply time: POST /rulesets returns 422 "Actor GitHub
-  # Actions integration must be part of the ruleset source or owner
-  # organization" - an Integration bypass actor is valid only on
-  # org-owned rulesets, and bypass-free write-blocking rules would block
-  # the publisher itself. (The main ruleset's required-check
-  # integration_id pins are a DIFFERENT field and stay valid here.)
-  # What each ref gets instead, stated plainly: `template` consumption is
-  # guarded sync-side by .github/scripts/sync/verify_build_provenance.ts,
-  # which rejects any tip the builder did not produce; `actions` runs
-  # directly (`uses: ...@actions`) with NO publisher-identity enforcement
-  # - any push-capable principal can fast-forward it, bounded only by
-  # push access and this ruleset blocking deletion and force-pushes.
+  # A stricter publish-only ruleset (every write blocked, sole bypass the
+  # GitHub Actions integration that build-branches.yml publishes with)
+  # was declared here once, and GitHub rejected it at apply time: POST
+  # /rulesets returns 422 "Actor GitHub Actions integration must be part
+  # of the ruleset source or owner organization" - an Integration bypass
+  # actor is valid only on org-owned rulesets, and bypass-free
+  # write-blocking rules would block the publisher itself. (The main
+  # ruleset's required-check integration_id pins are a DIFFERENT field
+  # and stay valid here.) What the refs get instead, stated plainly:
+  # template CONSUMPTION is guarded sync-side by
+  # .github/scripts/sync/verify_build_provenance.ts, which rejects any
+  # tip the builder did not produce; the executable channel (`uses:
+  # ...@build`, and @actions until its deletion) runs directly with NO
+  # publisher-identity enforcement - any push-capable principal can
+  # fast-forward it, bounded only by push access and this ruleset
+  # blocking deletion and force-pushes. A dedicated publisher identity
+  # (an App whose key only main-branch workflows can mint) is the tracked
+  # structural fix. Sequencing note: this ruleset exists on the live repo
+  # only after a Settings Repos apply; refs/heads/build itself was
+  # hand-seeded as a user-authorized bootstrap (PR #42's deployment
+  # section) so it exists before anything pins it, and once this ruleset
+  # applies its deletion rule keeps the ref from ever being absent again.
   - name: build-branches
     target: branch
     enforcement: active
     conditions:
       ref_name:
         include:
+          - build
           - template
           - actions
         exclude: []

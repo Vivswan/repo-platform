@@ -28,7 +28,7 @@ describe("no-op marker", () => {
     expect(() => noopMarkerRefFor("main")).toThrow();
     expect(() => noopMarkerRefFor(SOURCE.slice(0, 12))).toThrow();
     expect(() => noopClaimName(SOURCE, "refs/heads/main")).toThrow();
-    expect(noopClaimName(SOURCE, TIP)).toBe(`template-noop-${SOURCE}-${TIP}`);
+    expect(noopClaimName(SOURCE, TIP)).toBe(`build-noop-${SOURCE}-${TIP}`);
   });
 
   test("write then parse round-trips all three claims", () => {

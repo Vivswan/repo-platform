@@ -99,7 +99,7 @@ function run(opts: Options = {}, golden = "minimal") {
   const advisoriesPath = join(root, "advisories.md");
   writeFileSync(advisoriesPath, opts.advisories ?? "");
   const freshnessPath = join(root, "freshness.md");
-  writeFileSync(freshnessPath, "#### Freshness\n\nbehind the template branch by 3 commit(s).\n");
+  writeFileSync(freshnessPath, "#### Freshness\n\nbehind the build branch by 3 commit(s).\n");
   const calls = join(root, "calls.txt");
   const summary = join(root, "summary.md");
   writeFileSync(summary, "");
@@ -174,7 +174,7 @@ describe("the template's validate-template job", () => {
     // No copier and no render: it is a ref compare and nothing more.
     const run = freshnessStep("minimal").run ?? "";
     expect(run).not.toMatch(/^\s*copier\s/m);
-    expect(run).toContain("branches/template");
+    expect(run).toContain("branches/build");
     for (const call of run.matchAll(/^\s*\S*\bgh\s+api\b/gm)) expect(call[0]).toContain("timeout");
   });
 
@@ -197,7 +197,7 @@ describe("the template's validate-template job", () => {
     expect(r.exitCode).toBe(0);
     expect(r.calls).toContain("POST");
     expect(r.summary).toContain("Passed");
-    expect(r.summary).toContain("behind the template branch");
+    expect(r.summary).toContain("behind the build branch");
     expect(r.summary).not.toContain("This FAILS the check.");
   });
 
@@ -218,7 +218,7 @@ describe("the template's validate-template job", () => {
     expect(r.exitCode).toBe(0);
     expect(r.calls).not.toContain("POST");
     expect(r.calls).not.toContain("PATCH");
-    expect(r.summary).toContain("Up to date with the template branch.");
+    expect(r.summary).toContain("Up to date with the build branch.");
   });
 
   test("clean and fresh still clears a comment a previous run left behind", () => {
@@ -249,7 +249,7 @@ describe("the template's validate-template job", () => {
     const r = run({ findings: "", freshness: "behind", event: "push" });
     expect(r.exitCode).toBe(0);
     expect(r.calls).toBe("");
-    expect(r.summary).toContain("behind the template branch");
+    expect(r.summary).toContain("behind the build branch");
   });
 
   test("a missing findings file reports that the validator never ran", () => {

@@ -119,7 +119,7 @@ if (!recover && modules.includes("custom-license")) {
   }
 }
 
-const fleetLicense = "template/{% if 'custom-license' not in modules %}LICENSE.md{% endif %}.jinja";
+const fleetLicense = "template/LICENSE.md.jinja";
 if (
   !recover &&
   !existsSync(join(targetDir, "LICENSE.md")) &&
