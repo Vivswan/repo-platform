@@ -1259,10 +1259,11 @@ if grep -q '^gh pr merge' "$DESEL_WORK/gh-calls.txt"; then
 fi
 echo "module deselection OK: retired split file deleted, hold raised, leaving content named, manual review forced"
 
-# --- Starter pin rollout (fuzz-issue @main -> @actions) --------------------
+# --- Starter pin rollout (fuzz-issue @main/@actions -> @build) -------------
 # Starter workflows are rendered once and repo-owned (_skip_if_exists), so
-# the template's own re-pin of the fuzz-issue action (main -> the
-# green-gated actions delivery branch) never reaches an already-rendered
+# the template's own re-pin of the fuzz-issue action (main, or the
+# retired actions branch, -> the green-gated unified build branch) never
+# reaches an already-rendered
 # repo; the one-run sync-side rollout (starter_pin_rollout.ts) ports it.
 # Fixture: a fresh render with nightly.yml set back to the pre-flip @main
 # pin (the fleet state before the flip) and nightly-fuzz.yml hand-pinned at
@@ -1284,12 +1285,12 @@ copier copy "$GITHUB_WORKSPACE" "$PIN" \
 cd "$PIN"
 # The fresh render pins the delivery branch; model the fleet state by
 # setting the rendered starters back to the old pin / a hand pin.
-grep -q "repo-platform/actions/fuzz-issue@actions" .github/workflows/nightly.yml \
-  || fail "fixture render does not pin fuzz-issue at the actions branch"
-sed 's|/repo-platform/actions/fuzz-issue@actions|/repo-platform/actions/fuzz-issue@main|g' \
+grep -q "repo-platform/actions/fuzz-issue@build" .github/workflows/nightly.yml \
+  || fail "fixture render does not pin fuzz-issue at the build branch"
+sed 's|/repo-platform/actions/fuzz-issue@build|/repo-platform/actions/fuzz-issue@main|g' \
   .github/workflows/nightly.yml > .github/workflows/nightly.yml.tmp
 mv .github/workflows/nightly.yml.tmp .github/workflows/nightly.yml
-sed 's|/repo-platform/actions/fuzz-issue@actions|/repo-platform/actions/fuzz-issue@v9.9.9|g' \
+sed 's|/repo-platform/actions/fuzz-issue@build|/repo-platform/actions/fuzz-issue@v9.9.9|g' \
   .github/workflows/nightly-fuzz.yml > .github/workflows/nightly-fuzz.yml.tmp
 mv .github/workflows/nightly-fuzz.yml.tmp .github/workflows/nightly-fuzz.yml
 git init -q -b main
@@ -1297,7 +1298,7 @@ git add --all
 git -c user.name=ci -c user.email=ci@localhost commit -q -m "chore: init with pre-flip pins"
 # The oracle for byte-surgery: the old copy with only the pin substring
 # swapped, and the hand-pinned copy exactly as committed.
-sed 's|/repo-platform/actions/fuzz-issue@main|/repo-platform/actions/fuzz-issue@actions|g' \
+sed 's|/repo-platform/actions/fuzz-issue@main|/repo-platform/actions/fuzz-issue@build|g' \
   .github/workflows/nightly.yml > "$PIN_WORK/nightly-expected.yml"
 cp .github/workflows/nightly-fuzz.yml "$PIN_WORK/nightly-fuzz-before.yml"
 
@@ -1344,7 +1345,7 @@ test -s "$PIN_WORK/starter-pin-rollout.md" \
   || fail "the rollout wrote no transition note"
 grep -qF 'nightly.yml`: rewrote 2 occurrence(s)' "$PIN_WORK/starter-pin-rollout.md" \
   || fail "the transition note does not name nightly.yml's rewritten pins"
-grep -qF "repo-platform/actions/fuzz-issue@actions" "$PIN_WORK/starter-pin-rollout.md" \
+grep -qF "repo-platform/actions/fuzz-issue@build" "$PIN_WORK/starter-pin-rollout.md" \
   || fail "the transition note does not show the new delivery-branch pin"
 grep -qF 'nightly-fuzz.yml`: left alone' "$PIN_WORK/starter-pin-rollout.md" \
   || fail "the transition note does not list the hand-pinned nightly-fuzz.yml as skipped"

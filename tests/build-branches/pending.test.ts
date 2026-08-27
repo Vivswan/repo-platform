@@ -65,7 +65,7 @@ describe("staleReason (newest-green wins)", () => {
 
 describe("refSuperseded (the per-source ref sweep)", () => {
   // The rule behind publish.ts's sweep of refs/build-pending/ and
-  // refs/build-meta/template-noop/: an inverted own-ref policy would
+  // refs/build-meta/build-noop/: an inverted own-ref policy would
   // either strand every consumed pending ref or delete the no-op verdict
   // the sync's waiter is about to verify.
   test("an ancestor source's ref is superseded under either policy", () => {

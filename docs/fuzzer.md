@@ -6,7 +6,7 @@ Selecting the `fuzzer` module gives a repository a `nightly-fuzz.yml` starter wo
 - on failure, uploads the failure artifacts and files (or updates) a label-deduplicated tracking issue built from your failure reports, then dispatches auto-assign at it (when that module is selected)
 - on a green run, comments on and closes every open issue carrying the tracking label
 
-The issue filing and closing come from the `fuzz-issue` composite action in this repository (`actions/fuzz-issue`), pinned at the green-gated `actions` delivery branch like every other managed action. The action needs `gh` on the runner, which GitHub-hosted runners preinstall; self-hosted runners must provide it. The same action serves the nightly module's plain-CI stream (docs/nightly.md); the artifacts contract below is what sets the fuzz stream apart.
+The issue filing and closing come from the `fuzz-issue` composite action in this repository (`actions/fuzz-issue`), pinned at the green-gated `build` delivery branch like every other managed action. The action needs `gh` on the runner, which GitHub-hosted runners preinstall; self-hosted runners must provide it. The same action serves the nightly module's plain-CI stream (docs/nightly.md); the artifacts contract below is what sets the fuzz stream apart.
 
 ## Module parameter (copier question)
 
@@ -24,7 +24,7 @@ Replace the placeholder in the `Fuzz` step with your fuzzer, seeded from `$SEED`
 
 Bound the fuzz run itself below the job's `timeout-minutes` (a wall-clock flag, or a `timeout` wrapper). A job that hits its timeout is cancelled, not failed, and cancelled jobs skip the `if: failure()` steps: no artifact, no issue, a silent night for exactly the hang a fuzzer exists to find.
 
-One more caveat, because this file is generated once and then repo-owned: template sync never re-renders it, so the `fuzz-issue` pin inside it stays whatever was last written. New renders pin the green-gated `actions` delivery branch; repos rendered when the pin was `@main` had it ported in place by a one-run sync-side rewrite (`starter_pin_rollout.ts` - exact old pin only, listed in the sync PR's transition note; a hand-changed pin is left alone and listed as skipped). A breaking change to the action's inputs still needs a manual edit here, announced loudly in the change's PR.
+One more caveat, because this file is generated once and then repo-owned: template sync never re-renders it, so the `fuzz-issue` pin inside it stays whatever was last written. New renders pin the green-gated `build` delivery branch; repos rendered when the pin was `@main` or the retired `@actions` had it ported in place by a one-run sync-side rewrite (`starter_pin_rollout.ts` - exact retired pins only, listed in the sync PR's transition note; a hand-changed pin is left alone and listed as skipped). A breaking change to the action's inputs still needs a manual edit here, announced loudly in the change's PR.
 
 ## The failure-report contract (v1)
 

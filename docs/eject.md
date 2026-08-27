@@ -1,6 +1,6 @@
 # Ejecting a repository from repo-platform management
 
-Detaching is cheap by design: managed repos degrade to normal repos, not broken ones. Nothing at runtime depends on repo-platform except workflow `uses:` references, which keep working as long as repo-platform exists (reusable-workflow calls pin `main`; composite-action steps pin the `actions` branch, repo-platform's green-gated delivery channel for action code).
+Detaching is cheap by design: managed repos degrade to normal repos, not broken ones. Nothing at runtime depends on repo-platform except workflow `uses:` references, which keep working as long as repo-platform exists (reusable-workflow calls pin `main`; composite-action steps pin the `build` branch, repo-platform's green-gated delivery channel for action code).
 
 Management is push-based, so ejecting starts in repo-platform, not in the repo: stop the machinery here, then optionally strip the managed files there.
 
@@ -22,7 +22,7 @@ Settings stop being applied with the pause too: the nightly heal only manages en
 
 2. Edit `.github/workflows/ci.yml`: remove the `validate-template` job (it is informational only and not in all-green's `needs` list). That job enforces the managed-file conventions and fails once `.copier-answers.yml` and `.repo-platform.yml` are gone. With sync PRs stopped, ci.yml is yours to edit; the remaining jobs (typography, commit-names, actionlint, gitleaks, yamllint, dependency-review, checks, module jobs - on private repositories the five base checks run as a single combined `base-checks` job) keep working standalone.
 
-3. (Optional) Inline the reusable workflows. Replace each thin caller (`auto-assign.yml`, `pages.yml`, `settings-sync.yml`) with a copy of the corresponding `reusable-*.yml` job from repo-platform, and replace `uses: Vivswan/repo-platform/actions/...` steps with vendored copies of the action scripts. The `codeql-*` jobs inside ci.yml call repo-platform's `reusable-codeql.yml`; inline that one into ci.yml too if you want CodeQL without repo-platform. The `pr-title` job needs nothing: it uses a public action directly. Skip this if repo-platform continues to exist; the pinned references (reusable workflows at `main`, composite actions at the `actions` branch) keep working unchanged.
+3. (Optional) Inline the reusable workflows. Replace each thin caller (`auto-assign.yml`, `pages.yml`, `settings-sync.yml`) with a copy of the corresponding `reusable-*.yml` job from repo-platform, and replace `uses: Vivswan/repo-platform/actions/...` steps with vendored copies of the action scripts. The `codeql-*` jobs inside ci.yml call repo-platform's `reusable-codeql.yml`; inline that one into ci.yml too if you want CodeQL without repo-platform. The `pr-title` job needs nothing: it uses a public action directly. Skip this if repo-platform continues to exist; the pinned references (reusable workflows at `main`, composite actions at the `build` branch) keep working unchanged.
 
 4. (Optional) Strip the marker comments from `.gitignore`. The content keeps working either way.
 

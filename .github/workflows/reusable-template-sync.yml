@@ -352,14 +352,14 @@ jobs:
 
       # One-run rollout of the fuzz-issue action pin inside STARTER-class
       # workflows: starters are rendered once and repo-owned
-      # (_skip_if_exists), so the template's own move of the pin from
-      # @main to the green-gated @actions delivery branch never reaches a
-      # repo that already rendered them. The script rewrites EXACTLY the
-      # old pin string (paths from the render's ownership manifest, the
-      # working tree's own in recopy mode), leaves hand-set pins alone,
-      # and writes the PR-body transition note open_pr.ts appends.
-      # Delete this step once the fleet carries no fuzz-issue@main pins
-      # (see the script header).
+      # (_skip_if_exists), so the template's own move of the pin from the
+      # retired @main and @actions refs to the green-gated @build delivery
+      # branch never reaches a repo that already rendered them. The script
+      # rewrites EXACTLY the retired pin strings (paths from the render's
+      # ownership manifest, the working tree's own in recopy mode), leaves
+      # hand-set pins alone, and writes the PR-body transition note
+      # open_pr.ts appends. Delete this step once the fleet carries no
+      # retired fuzz-issue pins (see the script header).
       - name: Roll out starter action pins
         env:
           RECOVER: ${{ inputs.recover }}

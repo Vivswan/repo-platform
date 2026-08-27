@@ -1,9 +1,11 @@
 // Pins this repository's OWN build-branch protection in
 // .github/settings.yml, the same way merge_settings_layers.test.ts pins
-// the override layer's protection policy. The `actions` ref is executable
-// fleet-wide - rendered workflows pin `uses: ...@actions` and run its tree
-// directly - so a settings edit that drops it from the append-only ruleset
-// must fail here, loudly. Also pins, fleet-wide: no settings layer may
+// the override layer's protection policy. The `build` ref is executable
+// fleet-wide - rendered workflows pin `uses: ...@build` and run its
+// actions/ subtree directly - and the retired `template`/`actions` refs
+// stay protected for legacy pins until their deliberate deletion, so a
+// settings edit that drops any of them from the append-only ruleset must
+// fail here, loudly. Also pins, fleet-wide: no settings layer may
 // declare an Integration bypass actor, because GitHub rejects one on a
 // user-owned repository's ruleset (POST /rulesets, 422 "Actor GitHub
 // Actions integration must be part of the ruleset source or owner

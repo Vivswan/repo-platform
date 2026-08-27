@@ -20,7 +20,7 @@ const script = join(import.meta.dir, "../../.github/scripts/sync/starter_pin_rol
 
 const USER = "Vivswan";
 const OLD_PIN = `${USER}/repo-platform/actions/fuzz-issue@main`;
-const NEW_PIN = `${USER}/repo-platform/actions/fuzz-issue@actions`;
+const NEW_PIN = `${USER}/repo-platform/actions/fuzz-issue@build`;
 
 /** A nightly-starter-shaped workflow using the given pin twice (report and
  * resolve steps), with surrounding bytes to prove untouched. */
@@ -62,6 +62,28 @@ describe("rolloutContent", () => {
     const { content, rewrote, differing } = rolloutContent(before, USER);
     expect(content).toBe(starter(NEW_PIN));
     expect(rewrote).toEqual([{ from: OLD_PIN, to: NEW_PIN, count: 2 }]);
+    expect(differing).toEqual([]);
+  });
+
+  test("the split-channel era's @actions pin is a retired ref too", () => {
+    // Repos synced during the template/actions era carry @actions; the
+    // unified rollout ports them to @build exactly like @main.
+    const actionsPin = `${USER}/repo-platform/actions/fuzz-issue@actions`;
+    const { content, rewrote, differing } = rolloutContent(starter(actionsPin), USER);
+    expect(content).toBe(starter(NEW_PIN));
+    expect(rewrote).toEqual([{ from: actionsPin, to: NEW_PIN, count: 2 }]);
+    expect(differing).toEqual([]);
+  });
+
+  test("both retired refs in ONE file port in one pass, reported per retired ref", () => {
+    const actionsPin = `${USER}/repo-platform/actions/fuzz-issue@actions`;
+    const before = `${starter(OLD_PIN)}      - uses: ${actionsPin}\n`;
+    const { content, rewrote, differing } = rolloutContent(before, USER);
+    expect(content).toBe(`${starter(NEW_PIN)}      - uses: ${NEW_PIN}\n`);
+    expect(rewrote).toEqual([
+      { from: OLD_PIN, to: NEW_PIN, count: 2 },
+      { from: actionsPin, to: NEW_PIN, count: 1 },
+    ]);
     expect(differing).toEqual([]);
   });
 

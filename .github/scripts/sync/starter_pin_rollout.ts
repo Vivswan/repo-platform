@@ -2,9 +2,10 @@
 // One-run sync-side rollout of action-pin flips inside STARTER-class
 // files. Starters are rendered once and repo-owned forever
 // (_skip_if_exists), so the template edit that moved the fuzz-issue pin
-// from the floating `main` branch to the green-gated `actions` delivery
-// branch never reaches a repo that already rendered its starter - the
-// fleet would keep executing fuzz-issue@main, outside the delivery gate.
+// from the floating `main` branch (and later the retired `actions`
+// branch) to the green-gated `build` delivery branch never reaches a repo
+// that already rendered its starter - the fleet would keep executing a
+// retired pin, outside the delivery gate.
 // Per this repo's transition law, the mechanical port ships as this
 // one-run sync-side step, not a versioned migration. Invoked by
 // reusable-template-sync.yml between the repo-owned preserve step and the
@@ -12,13 +13,13 @@
 // final before validation), and by rehearse.ts in the same slot.
 //
 // Rules, in order of importance:
-// - BYTE-SURGICAL: only an exact old pin is replaced -
-//   `<github_username>/repo-platform/actions/fuzz-issue@main`, with the
-//   username taken from the target's own recorded copier answers (the
-//   same answer the render interpolated), matched as a whole pin token: a
-//   longer owner name that merely ends in the username never matches,
-//   and the ref must equal the old ref exactly (@main-fork and
-//   @main/topic are different refs). Every other byte of the repo-owned
+// - BYTE-SURGICAL: only an exact retired pin is replaced -
+//   `<github_username>/repo-platform/actions/fuzz-issue@main` or the
+//   same stem @actions, with the username taken from the target's own
+//   recorded copier answers (the same answer the render interpolated),
+//   matched as a whole pin token: a longer owner name that merely ends
+//   in the username never matches, and the ref must equal a retired ref
+//   exactly (@main-fork and @main/topic are different refs). Every other byte of the repo-owned
 //   file is untouched (latin1 in, latin1 out - the byte-faithfulness
 //   convention of preserve_local_content.ts).
 // - IDEMPOTENT: a rewritten file carries only the new pin, so a second
@@ -78,11 +79,16 @@ import { MANIFEST_NAME } from "./stamp_manifest.ts";
 export const STARTER_PINS_OUTCOMES_NAME = "starter-pin-rollout.json";
 
 /** The pin flips this rollout ports. A rendered `uses:` value is
- * `<github_username>/<stem>@<ref>`; the flip rewrites the exact old-ref
+ * `<github_username>/<stem>@<ref>`; the flip rewrites each exact old-ref
  * pin to the new-ref pin and reports any OTHER ref on the same stem as a
- * deliberate hand edit to leave alone. */
+ * deliberate hand edit to leave alone. One entry per stem, with every
+ * retired ref in `from` - two entries sharing a stem would double-report
+ * each hand pin. */
 export const PIN_FLIPS = [
-  { stem: "repo-platform/actions/fuzz-issue", from: "main", to: "actions" },
+  // Both retired refs port to the unified build branch: @main predates
+  // any delivery branch, @actions is the split-channel era's pin (fresh
+  // renders of that era, and repos the @main rollout already ported).
+  { stem: "repo-platform/actions/fuzz-issue", from: ["main", "actions"], to: "build" },
 ] as const;
 
 /** The paths the manifest classes `starter`. Malformed manifest text
@@ -166,7 +172,7 @@ export function rolloutContent(
     const stemAt = `${username}/${flip.stem}@`;
     let result = "";
     let cursor = 0;
-    let count = 0;
+    const counts = new Map<string, number>();
     for (
       let i = current.indexOf(stemAt);
       i !== -1;
@@ -175,20 +181,25 @@ export function rolloutContent(
       if (i > 0 && OWNER_CHAR.test(current[i - 1])) continue;
       const refStart = i + stemAt.length;
       const ref = refAt(current, refStart);
-      if (ref === flip.from) {
+      if ((flip.from as readonly string[]).includes(ref)) {
         result += current.slice(cursor, refStart) + flip.to;
         cursor = refStart + ref.length;
-        count += 1;
+        counts.set(ref, (counts.get(ref) ?? 0) + 1);
       } else if (ref !== flip.to) {
-        // Neither the old nor the new ref: a hand-set pin, reported with
+        // Neither a retired nor the new ref: a hand-set pin, reported with
         // its actual ref and left alone (already-new pins are the silent
         // idempotent case).
         const pin = `${stemAt}${ref}`;
         differing.set(pin, (differing.get(pin) ?? 0) + 1);
       }
     }
-    if (count > 0) {
-      rewrote.push({ from: `${stemAt}${flip.from}`, to: `${stemAt}${flip.to}`, count });
+    if (counts.size > 0) {
+      for (const from of flip.from) {
+        const count = counts.get(from);
+        if (count !== undefined) {
+          rewrote.push({ from: `${stemAt}${from}`, to: `${stemAt}${flip.to}`, count });
+        }
+      }
       current = result + current.slice(cursor);
     }
   }
@@ -218,7 +229,7 @@ export function withholdWorkflowRewrites(outcomes: FileOutcome[]): FileOutcome[]
 // commit_push.ts's withhold drops the rewrite lines and only left-alone
 // listings remain.
 const REPORT_INTRO =
-  "One-run starter pin rollout: repo-platform's composite actions now ship on the green-gated `actions` delivery branch instead of floating on `main`, but starter workflows are rendered once and repo-owned, so template sync cannot re-render their pins. This sync checked each starter for the old fuzz-issue pin; a `rewrote` line below is a byte-surgical port (only the exact pin token changed, every other byte is untouched), a `left alone` line is a hand-set pin this rollout never touches:";
+  "One-run starter pin rollout: repo-platform's composite actions now ship on the green-gated `build` delivery branch instead of floating on `main` or the retired `actions` branch, but starter workflows are rendered once and repo-owned, so template sync cannot re-render their pins. This sync checked each starter for the retired fuzz-issue pins; a `rewrote` line below is a byte-surgical port (only the exact pin token changed, every other byte is untouched), a `left alone` line is a hand-set pin this rollout never touches:";
 
 /** The PR-body transition note. Pins ride through clip (bounded,
  * control bytes escaped): the differing refs are target-controlled. */
@@ -231,7 +242,7 @@ export function renderRolloutReport(outcomes: FileOutcome[]): string {
     }
     for (const { pin, count } of differing) {
       lines.push(
-        `- \`${rel}\`: left alone - carries ${count} occurrence(s) of \`${clip(pin)}\`, a hand-set pin on neither the old \`@main\` nor the delivery-branch \`@actions\` ref; repoint it at \`@actions\` for green-gated delivery, or keep your own pin`,
+        `- \`${rel}\`: left alone - carries ${count} occurrence(s) of \`${clip(pin)}\`, a hand-set pin on none of the retired \`@main\`/\`@actions\` refs; repoint it at \`@build\` for green-gated delivery, or keep your own pin`,
       );
     }
   }
