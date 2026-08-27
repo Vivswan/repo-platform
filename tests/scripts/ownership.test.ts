@@ -338,6 +338,120 @@ describe("declarationTextErrors", () => {
     ).toEqual([]);
   });
 
+  // Jinja statement and comment tags render as nothing and a constant-empty
+  // expression renders empty, so a marker glued to any of them still renders
+  // as a live whole-line marker - the rendered file then carries a split
+  // marker in a manifest-managed file, promising a repo-owned tail that sync
+  // never honors.
+  test("a tail marker glued to jinja tags on an otherwise-empty line contradicts", () => {
+    for (const line of [
+      `{% if 'agents' in modules %}${HASH_SENTINEL}{% endif %}`,
+      `{# gate #}${HTML_SENTINEL}`,
+      `  {% if x %}${HASH_SENTINEL}`,
+      `{{ "" }}${HASH_SENTINEL}`,
+      `{% raw %}{% endraw %}${HASH_SENTINEL}`,
+      // A comment renders as nothing whatever tag-shaped text it holds -
+      // leftmost-delimiter precedence keeps the comments comments even
+      // when they carry raw-shaped text.
+      `{# docs: {% print "x" %} #}${HASH_SENTINEL}`,
+      `{# {% raw %} #}${HASH_SENTINEL}{# {% endraw %} #}`,
+      // A constant expression OUTPUTS its string: this line renders as
+      // exactly the marker.
+      `{{ "${HASH_SENTINEL}" }}`,
+    ]) {
+      const errors = errorsOf(managed("X.md"), `top\n${line}\ntail\n`, false);
+      expect(errors).toHaveLength(1);
+      expect(errors[0]).toContain("split marker but is declared managed");
+    }
+  });
+
+  test("marker text inside a NON-OUTPUT tag is not a claim", () => {
+    // The scan covers the line's bounded render (the honest-mistake class);
+    // text inside a statement or comment tag renders as nothing, and an
+    // output-emitting statement makes the line unbounded - both legal.
+    for (const line of [
+      `{% set note = "${HASH_SENTINEL}" %}`,
+      `{# reminder: ${HASH_SENTINEL} #}`,
+      `{% print "${HASH_SENTINEL}" %}`,
+    ]) {
+      expect(errorsOf(managed("X.md"), `${line}\nbody\n`, false)).toEqual([]);
+    }
+  });
+
+  test("a prose mention NEXT TO a jinja tag is still not a claim", () => {
+    const source = `{% if x %}see ${HASH_SENTINEL} for details{% endif %}\n`;
+    expect(errorsOf(managed("X.md"), source, false)).toEqual([]);
+  });
+
+  test("guaranteed-nonempty output before the marker keeps it mid-line", () => {
+    // A nonempty constant expression always renders text ahead of the
+    // marker; rejecting these would block legitimate templates.
+    for (const line of [
+      `{{ "prefix" }}${HASH_SENTINEL}`,
+      `{% raw %}a{% endraw %}{% raw %}b{% endraw %}${HASH_SENTINEL}`,
+    ]) {
+      expect(errorsOf(managed("X.md"), `${line}\n`, false)).toEqual([]);
+    }
+  });
+
+  test("raw-block text renders literally, so it keeps a marker mid-line", () => {
+    // {% raw %} makes tag-shaped text literal output: both lines render as
+    // '{# note #}# repo-platform:local-section', a legal mid-line mention.
+    const inline = `{% raw %}{# note #}{% endraw %}${HASH_SENTINEL}\n`;
+    expect(errorsOf(managed("X.md"), inline, false)).toEqual([]);
+    const multiline = `{% raw %}\n{# note #}${HASH_SENTINEL}\n{% endraw %}\n`;
+    expect(errorsOf(managed("X.md"), multiline, false)).toEqual([]);
+    // The + trimming modifier is a valid raw-tag spelling too.
+    const plus = `{%+ raw %}\n{# note #}${HASH_SENTINEL}\n{% endraw %}\n`;
+    expect(errorsOf(managed("X.md"), plus, false)).toEqual([]);
+    // Raw-shaped text inside an expression string renders as that string,
+    // never as a raw block (leftmost-delimiter precedence).
+    const inString = `{{ "{% raw %}${HASH_SENTINEL}{% endraw %}" }}\n`;
+    expect(errorsOf(managed("X.md"), inString, false)).toEqual([]);
+    // A bare marker line inside a raw block still renders as a live marker.
+    const bare = `{% raw %}\n${HASH_SENTINEL}\n{% endraw %}\n`;
+    expect(errorsOf(managed("X.md"), bare, false)).toHaveLength(1);
+    // ... and a modified closer joining a bare marker onto an empty line
+    // still renders it whole, so it still claims.
+    const joined = `{% raw %}{% endraw -%}\n${HASH_SENTINEL}\n`;
+    expect(errorsOf(managed("X.md"), joined, false)).toHaveLength(1);
+  });
+
+  test("unbounded lines fail toward legality", () => {
+    // Output emitters, capture blocks (set, macro), context changers,
+    // whitespace-modified tags, and non-constant expressions leave the
+    // line's render unbounded; each stays legal rather than risk rejecting
+    // a legitimate template ({% macro %} captures its body, {%+ print %}
+    // always emits, the filtered block-set renders nothing).
+    for (const source of [
+      `{% print "prefix" %}${HASH_SENTINEL}\n`,
+      `{%+ print "prefix" %}${HASH_SENTINEL}\n`,
+      `{% set note %}${HASH_SENTINEL}{% endset %}\n`,
+      // ... including when the capture spans lines: text inside the block
+      // is captured, never rendered inline, whatever shape it has.
+      `{% set note %}\n{{ "${HASH_SENTINEL}" }}{% endset %}\n`,
+      `{% set note %}\n{% if x %}${HASH_SENTINEL}{% endif %}\n{% endset %}\n`,
+      `{% set note %}\n{% raw %}{% endraw %}${HASH_SENTINEL}\n{% endset %}\n`,
+      // The filtered capture form has no top-level =, even when a filter
+      // argument carries one.
+      `{% set note | replace("=", "") %}\n${HASH_SENTINEL}\n{% endset %}\n`,
+      `{% set note | replace("=", "") %}${HASH_SENTINEL}{% endset %}\n`,
+      `{% macro note() %}${HASH_SENTINEL}{% endmacro %}\n`,
+      `{% autoescape true %}{{ "${HTML_SENTINEL}" }}{% endautoescape %}\n`,
+      `{{ ("prefix") }}${HASH_SENTINEL}\n`,
+      `{{ maybe_empty }}${HASH_SENTINEL}\n`,
+      `prefix\n{{- "" }}${HASH_SENTINEL}\n`,
+      `{% if x -%}${HASH_SENTINEL}\n`,
+      // A minus-modified raw tag joins its line with a neighbor exactly as
+      // the render does: both markers here render glued onto 'prefix',
+      // never as a whole line.
+      `prefix\n{%- raw %}{% endraw %}${HASH_SENTINEL}\n`,
+      `prefix{% raw %}{% endraw -%}\n{% if x %}${HASH_SENTINEL}{% endif %}\n`,
+    ]) {
+      expect(errorsOf(managed("X.md"), source, false)).toEqual([]);
+    }
+  });
+
   test("a legacy mergeable marker line is inert: the class is retired", () => {
     expect(
       errorsOf(managed("GUIDE.md"), "# repo-platform:mergeable\nrepository: {}\n", false),

@@ -565,6 +565,140 @@ function foreignMarkerMessage(
   }
 }
 
+// --- tail-marker claim scanning -----------------------------------------------
+//
+// What counts as a tail-marker CLAIM in a template source: any line whose
+// RENDER can be a whole roster-marker line (the sync rebuild and the
+// validator both match rendered markers as exact trimmed lines - trim is
+// the fleet-wide marker-matching convention). Claims are POSSIBILISTIC,
+// judged from the guaranteed render of each of the line's parts: a
+// control-flow statement renders nothing of its own, so the glued
+// "{% if x %}MARKER{% endif %}" claims whatever its condition - the render
+// CAN be the marker, and evaluating conditions is out of scope. The parts:
+// - literal text renders verbatim; a literal whole marker line always
+//   claims (the rule the exact-trim scan always had, whatever
+//   whitespace-control on neighboring lines might join onto it);
+//   raw-block inner text (multiline blocks included, via the
+//   leftmost-precedence pre-pass in disarmRawBlocks) is literal too, so
+//   "{% raw %}{# note #}{% endraw %}MARKER" stays a legal mid-line mention
+//   while "{% raw %}{% endraw %}MARKER" claims;
+// - comment spans render nothing, whatever tag-shaped text they hold, so
+//   "{# docs: {% print 'x' %} #}MARKER" claims;
+// - control-flow statement spans (the COLLAPSING allowlist: if/for/with/do
+//   and their closers) render nothing - which also keeps marker text
+//   INSIDE a tag legal; capture and context CLOSERS (endset, endmacro,
+//   ...) are not on the list, because text before them on a closer line
+//   was captured, never rendered;
+// - an expression span renders its constant string value ("{{ '' }}MARKER"
+//   and "{{ 'MARKER' }}" claim, "{{ 'prefix' }}MARKER" stays mid-line).
+// EVERYTHING else leaves the line unbounded and fails toward LEGALITY:
+// output emitters (print, include, ...), capture blocks (set, macro, call,
+// filter, block), context changers (autoescape), unknown or extension
+// statements, whitespace-modified tags ({%- -%} join adjacent lines, {%+
+// disables trimming), non-constant expressions, and anything the span
+// lexing cannot represent (multiline tags, string-embedded delimiters)
+// mis-lexes into literal junk that matches no marker. Capture blocks
+// are additionally tracked ACROSS lines: every line inside one is skipped,
+// because its text is captured, never rendered inline (unbalanced or
+// missed closers only ever skip more, which is the legal direction). A
+// false rejection blocks a legitimate template; a miss leaves a lying
+// marker the repo owner can see, and sync dispatch never reads markers -
+// it goes by the declared grammar.
+const TAG_SPAN_RE = /\{\{.*?\}\}|\{%.*?%\}|\{#.*?#\}/g;
+const CONSTANT_EXPRESSION_RE = /^\{\{\s*(?:"([^"\\]*)"|'([^'\\]*)')\s*\}\}$/;
+const COLLAPSING_STATEMENT_RE = /^\{%\s*(?:if|elif|else|endif|for|endfor|with|endwith|do)\b/;
+const WHITESPACE_CONTROL_RE = /^\{[{%#][-+]|[-+][}%#]\}$/;
+// set counts as an ASSIGNMENT (renders nothing, captures nothing) only in
+// the clearly name-list-then-= shape; every other set - the block capture
+// form, filtered captures whose arguments may contain = - opens a capture.
+// Misreading an assignment as a capture only skips more lines, which is
+// the legal direction; the reverse would reject captured text.
+const CAPTURE_OPEN_RE =
+  /^\{%[-+]?\s*(?:set\b(?!\s*[\w.\s,()]+=)|macro\b|call\b|filter\b|block\b|autoescape\b)/;
+const CAPTURE_CLOSE_RE = /^\{%[-+]?\s*end(?:set|macro|call|filter|block|autoescape)\b/;
+const RAW_OPEN_RE = /^\{%[-+]?\s*raw\s*[-+]?%\}/;
+const RAW_CLOSE_RE = /\{%[-+]?\s*endraw\s*[-+]?%\}/g;
+
+/** The source with every raw block's inner text disarmed (each `{`
+ *  dropped to NUL, so the span lexing below can neither eat it nor
+ *  mistake it for a live tag - NUL never survives the marker schema, so a
+ *  disarmed line only fails toward legality). Spans are lexed with
+ *  jinja's leftmost-delimiter precedence: raw-shaped text INSIDE another
+ *  tag (a comment, an expression string) stays that tag's content instead
+ *  of being misread as a raw block. */
+function disarmRawBlocks(source: string): string {
+  let out = "";
+  let at = 0;
+  while (at < source.length) {
+    const open = source.slice(at).search(/\{[{%#]/);
+    if (open === -1) break;
+    out += source.slice(at, at + open);
+    at += open;
+    const rawOpen = RAW_OPEN_RE.exec(source.slice(at));
+    if (rawOpen !== null) {
+      RAW_CLOSE_RE.lastIndex = at + rawOpen[0].length;
+      const rawClose = RAW_CLOSE_RE.exec(source);
+      if (rawClose === null) break; // unclosed raw: keep the rest verbatim
+      let inner = source.slice(at + rawOpen[0].length, rawClose.index).replaceAll("{", "\u0000");
+      // `-` modifiers strip adjacent whitespace, joining neighboring lines
+      // exactly as the render does; model each of the four positions so
+      // the disarmed text keeps the render's line shape.
+      if (rawOpen[0].startsWith("{%-")) out = out.replace(/\s+$/, "");
+      if (/-%\}$/.test(rawOpen[0])) inner = inner.replace(/^\s+/, "");
+      if (rawClose[0].startsWith("{%-")) inner = inner.replace(/\s+$/, "");
+      out += inner;
+      at = rawClose.index + rawClose[0].length;
+      if (/-%\}$/.test(rawClose[0])) {
+        while (at < source.length && /\s/.test(source[at])) at += 1;
+      }
+      continue;
+    }
+    const closer = source.startsWith("{{", at) ? "}}" : source.startsWith("{%", at) ? "%}" : "#}";
+    const close = source.indexOf(closer, at + 2);
+    if (close === -1) break; // unclosed tag: keep the rest verbatim
+    out += source.slice(at, close + 2);
+    at = close + 2;
+  }
+  return out + source.slice(at);
+}
+
+/** A tag span's guaranteed render: "" for comments and control-flow
+ *  statements, the constant value of a constant string expression, null
+ *  when the span's output cannot be bounded. */
+function spanRender(span: string): string | null {
+  if (WHITESPACE_CONTROL_RE.test(span)) return null;
+  if (span.startsWith("{#")) return "";
+  if (span.startsWith("{{")) {
+    const constant = CONSTANT_EXPRESSION_RE.exec(span);
+    return constant === null ? null : (constant[1] ?? constant[2] ?? "");
+  }
+  return COLLAPSING_STATEMENT_RE.test(span) ? "" : null;
+}
+
+/** Every roster marker the source claims per the model above, in first-
+ *  appearance order. */
+function claimedTailMarkers(source: string, roster: ReadonlySet<string>): string[] {
+  const disarmed = disarmRawBlocks(source);
+  const claims: string[] = [];
+  let captureDepth = 0;
+  for (const line of disarmed.split("\n")) {
+    const insideCapture = captureDepth > 0;
+    let bounded = true;
+    const literal = line
+      .replace(TAG_SPAN_RE, (span) => {
+        if (CAPTURE_OPEN_RE.test(span)) captureDepth += 1;
+        else if (CAPTURE_CLOSE_RE.test(span)) captureDepth = Math.max(0, captureDepth - 1);
+        const rendered = spanRender(span);
+        if (rendered === null) bounded = false;
+        return rendered ?? "";
+      })
+      .trim();
+    if (insideCapture || !bounded) continue;
+    if (roster.has(literal) && !claims.includes(literal)) claims.push(literal);
+  }
+  return claims;
+}
+
 /** Markers in the source that this declaration does not own, at most one
  *  per kind. Sync dispatches on the DECLARED grammar alone, so a foreign
  *  marker is always the same hazard however the declaration is spelled: the
@@ -572,12 +706,12 @@ function foreignMarkerMessage(
  *  overwrites it.
  *
  *  The two matching semantics stay SPLIT on purpose, because they decide
- *  what counts as a claim. Tail markers match as exact TRIMMED LINES, so a
+ *  what counts as a claim. Tail markers match as whole renderable lines
+ *  (claimedTailMarkers above states the model and its boundaries), so a
  *  source may still MENTION one mid-line without claiming the tail below
  *  it. Region markers match as SUBSTRINGS, the way the validator's
- *  exactly-once count and the appendix neutralization both count, so a
- *  spliced jinja tag glued onto a marker line does not smuggle the claim
- *  past. Unifying them would move the boundary of what a source can say. */
+ *  exactly-once count and the appendix neutralization both count.
+ *  Unifying them would move the boundary of what a source can say. */
 function foreignMarkerErrors(
   declaration: OwnershipDeclaration,
   source: string,
@@ -587,11 +721,9 @@ function foreignMarkerErrors(
   const own = ownMarkers(declaration);
   const errors: string[] = [];
   const ownTail = new Set(own.tail);
-  const tailRoster = new Set(rosters.tail);
-  const foreignTail = source
-    .split("\n")
-    .map((line) => line.trim())
-    .find((line) => tailRoster.has(line) && !ownTail.has(line));
+  const foreignTail = claimedTailMarkers(source, new Set(rosters.tail)).find(
+    (marker) => !ownTail.has(marker),
+  );
   if (foreignTail !== undefined) {
     errors.push(foreignMarkerMessage("tail", foreignTail, own.tail, declaration, where));
   }
