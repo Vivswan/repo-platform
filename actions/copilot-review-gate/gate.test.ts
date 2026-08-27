@@ -287,8 +287,10 @@ describe("copilot_review_gate.ts", () => {
   // this is the half a type cannot state. The gate exists to spend NO
   // runner time: it waits by failing and letting the re-armer pick it up,
   // because a private repo bills every started job a rounded-up minute.
+  // action.yml is in the scan too: its composite run steps execute on the
+  // same billed runner as the TypeScript they wrap.
   test("the gate never sleeps - waiting is the re-armer's job", () => {
-    for (const file of ["gate.ts", "identity.ts", "runtime.ts"]) {
+    for (const file of ["gate.ts", "identity.ts", "runtime.ts", "action.yml"]) {
       expect(readFileSync(join(import.meta.dir, file), "utf8")).not.toMatch(/\bsleep\b/);
     }
   });

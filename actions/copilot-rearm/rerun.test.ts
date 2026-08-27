@@ -405,8 +405,10 @@ describe("rerun_copilot_gate.ts", () => {
   // state. Sleeping here would be worse than in the gate: this workflow
   // fires on every Copilot review and every failed CI run across the
   // fleet, so a wait would bill a rounded-up minute for each one.
+  // action.yml is in the scan too: its composite run steps execute on the
+  // same billed runner as the TypeScript they wrap.
   test("the re-armer never sleeps", () => {
-    for (const file of ["rerun.ts", "identity.ts", "runtime.ts"]) {
+    for (const file of ["rerun.ts", "identity.ts", "runtime.ts", "action.yml"]) {
       expect(readFileSync(join(import.meta.dir, file), "utf8")).not.toMatch(/\bsleep\b/);
     }
   });

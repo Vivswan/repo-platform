@@ -27,8 +27,11 @@ import { parse as parseYaml } from "yaml";
 
 const RENDERS = join(import.meta.dir, "../golden-renders");
 const GOLDENS = ["minimal", "all-modules", "uv-no-release-please"];
-const GATE_ACTION = "repo-platform/actions/copilot-review-gate@actions";
-const REARM_ACTION = "repo-platform/actions/copilot-rearm@actions";
+// FULL exact refs, owner included, as the goldens render them (the matrix
+// renders with github_username=Vivswan): a contains-match would stay green
+// on a wrong owner or a mangled ref like @actions-old.
+const GATE_ACTION = "Vivswan/repo-platform/actions/copilot-review-gate@actions";
+const REARM_ACTION = "Vivswan/repo-platform/actions/copilot-rearm@actions";
 
 interface Step {
   uses?: string;
@@ -80,7 +83,7 @@ describe("the rendered copilot-review gate job", () => {
 
     test(`${golden}: it calls the action at @actions, with no work of its own`, () => {
       const steps = ci().jobs[gateJobName()]?.steps ?? [];
-      expect(steps.map((step) => step.uses ?? "")).toEqual([expect.stringContaining(GATE_ACTION)]);
+      expect(steps.map((step) => step.uses ?? "")).toEqual([GATE_ACTION]);
       // No checkout and no run block: a published action carries its own
       // code, and the job has to stay seconds long to be free on a private
       // repository, where Actions bills per job rounded UP to the minute.
@@ -112,24 +115,48 @@ describe("the rendered rerun-copilot-gate workflow", () => {
     test(`${golden}: armed on both orderings of review-posts and CI-finishes`, () => {
       const on = rerun().on ?? {};
       expect(Object.keys(on).sort()).toEqual(["pull_request_review", "workflow_run"]);
-      expect(on.workflow_run).toMatchObject({ workflows: ["CI"] });
+      // The activity filters are part of the re-arm ordering: `submitted`
+      // is what a posted review fires (a dismissal must not re-arm), and
+      // `completed` is the only workflow_run activity that can carry the
+      // failed gate job. Pinned exactly, so a filter edit cannot slip by.
+      expect(on.pull_request_review).toEqual({ types: ["submitted"] });
+      expect(on.workflow_run).toEqual({ workflows: ["CI"], types: ["completed"] });
     });
 
-    test(`${golden}: actions write, or it could not re-run anything`, () => {
-      expect(rerun().permissions?.actions).toBe("write");
+    test(`${golden}: the complete permission map the re-arm path needs`, () => {
+      // actions: write re-runs the failed gate job; checks and
+      // pull-requests read answer "did the review arrive" on the
+      // CI-completed path; contents read matches the operator twin, whose
+      // job checks the repository out (the parity keeps the two maps one
+      // shape). Pinned as the WHOLE map: losing either read strands a
+      // failed gate while an actions-only assertion stays green.
+      expect(rerun().permissions).toEqual({
+        "actions": "write",
+        "checks": "read",
+        "pull-requests": "read",
+        "contents": "read",
+      });
     });
 
     test(`${golden}: an irrelevant event starts no job at all`, () => {
       // JOB-level, unlike the gate: nothing here is inside all-green, and a
       // started-then-skipped job still bills a private repo a full minute.
-      const job = rerun().jobs.rerun;
-      expect(job?.if).toContain("copilot-pull-request-reviewer[bot]");
-      expect(job?.if).toContain("github.event.workflow_run.conclusion == 'failure'");
+      // The WHOLE normalized condition is pinned - a contains-check would
+      // stay green if an && flipped to ||, and without the event-kind
+      // guard every failed PUSH run of CI would start this billed job
+      // fleet-wide; only pull_request runs carry a gate to re-arm.
+      const relevance =
+        "${{ (github.event_name == 'pull_request_review' && " +
+        'contains(fromJSON(\'["copilot-pull-request-reviewer[bot]", "Copilot"]\'), github.event.review.user.login)) || ' +
+        "(github.event_name == 'workflow_run' && " +
+        "github.event.workflow_run.event == 'pull_request' && " +
+        "github.event.workflow_run.conclusion == 'failure') }}";
+      expect(rerun().jobs.rerun?.if?.replace(/\s+/g, " ").trim()).toBe(relevance);
     });
 
     test(`${golden}: it calls the action at @actions, with no work of its own`, () => {
       const steps = rerun().jobs.rerun?.steps ?? [];
-      expect(steps.map((step) => step.uses ?? "")).toEqual([expect.stringContaining(REARM_ACTION)]);
+      expect(steps.map((step) => step.uses ?? "")).toEqual([REARM_ACTION]);
       expect(steps.some((step) => step.run !== undefined)).toBe(false);
     });
   }
