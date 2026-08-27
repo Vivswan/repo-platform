@@ -572,13 +572,17 @@ export function gateJobsGroups(manifests: ModuleManifest[]): GateJobsGroup[] {
  *  ARE the job ids, whatever YAML spelling they use. Every parsed key must
  *  also appear as a literal 2-space key line in the RAW fragment (jinja
  *  comments stripped) - a jinja-derived key would enumerate as one
- *  spelling and render as another. Throws on anything that fails either
- *  bar, so honest-mistake shapes (a new job spelling, a typo) fail closed
- *  rather than escape the parity check. Scope: value-side jinja CAN still
- *  synthesize rendered structure this scan never sees; that is out of
- *  scope here - this repo's review gates and the render-side validator's
- *  all-green needs-completeness check (run by smoke-generate on every
- *  push) are the backstop. */
+ *  spelling and render as another. A key line inside a jinja {% if %}
+ *  block throws too: the normalization strips statement tags with bodies
+ *  KEPT, so a conditioned job would enumerate as unconditional and the
+ *  composer would emit a needs entry a render without the condition never
+ *  satisfies. Throws on anything that fails any bar, so honest-mistake
+ *  shapes (a new job spelling, a typo) fail closed rather than escape the
+ *  parity check. Scope: value-side jinja CAN still synthesize rendered
+ *  structure this scan never sees; that is out of scope here - this
+ *  repo's review gates and the render-side validator's all-green
+ *  needs-completeness check (run by smoke-generate on every push) are the
+ *  backstop. */
 export function fragmentJobIds(body: Buffer): string[] {
   const raw = body.toString("utf-8");
   const vars = { username: "OWNER", slug: "SLUG", copyrightHolder: "HOLDER" };
@@ -590,12 +594,57 @@ export function fragmentJobIds(body: Buffer): string[] {
   }
   // Literal-key collection ignores jinja comments: a key-shaped line inside
   // a comment renders to nothing, so it must never vouch for a parsed key.
+  // Key lines and if/endif statement tags are walked in position order with
+  // an if-depth counter: a key at depth > 0 is a conditioned job and throws
+  // (value-side statements inside a job's body sit at depth > 0 too, but
+  // their lines are never 2-space key lines, so only keys can trip this).
   const commentFree = raw.replace(/\{#-?[\s\S]*?-?#\}/g, "");
-  const rawKeys = new Set(
-    [...commentFree.matchAll(/^ {2}("[^"\n]*"|'[^'\n]*'|[^\s'"][^\n:]*?)\s*:(?:\s|$)/gm)].map((m) =>
-      m[1].replace(/^(["'])(.*)\1$/, "$2"),
-    ),
-  );
+  type Event = { at: number; step: 1 | -1 } | { at: number; key: string };
+  const events: Event[] = [];
+  for (const m of commentFree.matchAll(/\{%-?\s*(if|endif)\b[^%]*?-?%\}/g)) {
+    events.push({ at: m.index ?? 0, step: m[1] === "if" ? 1 : -1 });
+  }
+  const keyLineRe = /^ {2}("[^"\n]*"|'[^'\n]*'|[^\s'"][^\n:]*?)\s*:(?:\s|$)/gm;
+  for (const m of commentFree.matchAll(keyLineRe)) {
+    events.push({ at: m.index ?? 0, key: m[1].replace(/^(["'])(.*)\1$/, "$2") });
+  }
+  events.sort((a, b) => a.at - b.at);
+  const rawKeys = new Set<string>();
+  let depth = 0;
+  for (const event of events) {
+    if ("step" in event) {
+      depth += event.step;
+      // Unbalanced tags void the depth walk: a fragment closing the
+      // composer's own module gate could hide a conditioned key at an
+      // apparent depth of zero, so the walk trusts only balanced nesting.
+      if (depth < 0) {
+        throw new Error(
+          "the fragment closes a jinja {% if %} it never opened - statement " +
+            "tags must nest and balance inside the fragment (the composer's " +
+            "module gate wraps it whole); balance the tags",
+        );
+      }
+      continue;
+    }
+    if (depth > 0) {
+      throw new Error(
+        `job key '${event.key}' sits inside a jinja {% if %} block - the id ` +
+          "enumeration strips statement tags and would list the job as " +
+          "unconditional, so the composer would emit a needs entry a render " +
+          "without the condition never satisfies; gate jobs render " +
+          "unconditionally (module selection already gates the whole " +
+          "fragment), so drop the condition or move it onto the job's steps",
+      );
+    }
+    rawKeys.add(event.key);
+  }
+  if (depth !== 0) {
+    throw new Error(
+      "the fragment leaves a jinja {% if %} unclosed - statement tags must " +
+        "nest and balance inside the fragment (the composer's module gate " +
+        "wraps it whole); add the missing {% endif %}",
+    );
+  }
   const keys = Object.keys(jobs);
   for (const key of keys) {
     if (!rawKeys.has(key)) {

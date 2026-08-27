@@ -5,6 +5,8 @@
 // that the sharing rule must emit once behind an or-chain gate.
 
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import {
   agentsToolchainErrors,
   applyToolchainSetup,
@@ -112,7 +114,7 @@ describe("gateJobsGroups", () => {
 });
 
 describe("fragmentJobIds", () => {
-  test("collects the 2-space mapping keys, skipping comments, steps, and jinja", () => {
+  test("collects the 2-space mapping keys, skipping comments, steps, and value-side jinja", () => {
     const body = Buffer.from(
       [
         "  # a job comment",
@@ -120,14 +122,70 @@ describe("fragmentJobIds", () => {
         "    runs-on: ubuntu-latest",
         "    steps:",
         "      - uses: actions/checkout@v7",
-        "{%- if x %}",
         "  release-health:",
         "    runs-on: ubuntu-latest",
+        "{%- if x %}",
+        "    timeout-minutes: 5",
         "{%- endif %}",
         "",
       ].join("\n"),
     );
     expect(fragmentJobIds(body)).toEqual(["release-freshness", "release-health"]);
+  });
+
+  test("the live release-please fragment (value-side jinja only) still enumerates", () => {
+    const body = readFileSync(
+      join(import.meta.dir, "../../templates/release-please/fragments/ci-gate-jobs.jinja"),
+    );
+    expect(fragmentJobIds(body)).toEqual(["release-freshness", "release-health"]);
+  });
+
+  test("a job key inside a jinja {% if %} block throws (it would enumerate as unconditional)", () => {
+    const body = Buffer.from(
+      ["{%- if x %}", "  cond-job:", "    runs-on: ubuntu-latest", "{%- endif %}", ""].join("\n"),
+    );
+    expect(() => fragmentJobIds(body)).toThrow("gate jobs render unconditionally");
+  });
+
+  test("depth tracking: a key after nested statements close passes, one between them throws", () => {
+    const closed = Buffer.from(
+      [
+        "  ok-job:",
+        "    runs-on: ubuntu-latest",
+        "{% if a %}{% if b %}",
+        "    x: 1",
+        "{% endif %}{% endif %}",
+        "  after-job:",
+        "    runs-on: ubuntu-latest",
+        "",
+      ].join("\n"),
+    );
+    expect(fragmentJobIds(closed)).toEqual(["ok-job", "after-job"]);
+    const open = Buffer.from(
+      [
+        "  outer-job:",
+        "    runs-on: ubuntu-latest",
+        "{% if a %}{% if b %}",
+        "    x: 1",
+        "{% endif %}",
+        "  nested-job:",
+        "    runs-on: ubuntu-latest",
+        "{% endif %}",
+        "",
+      ].join("\n"),
+    );
+    expect(() => fragmentJobIds(open)).toThrow("gate jobs render unconditionally");
+  });
+
+  test("unbalanced statement tags throw - underflow could hide a conditioned key at depth zero", () => {
+    const underflow = Buffer.from(
+      ["{% endif %}", "  cond-job:", "    runs-on: ubuntu-latest", "{% if x %}", ""].join("\n"),
+    );
+    expect(() => fragmentJobIds(underflow)).toThrow("closes a jinja {% if %} it never opened");
+    const unclosed = Buffer.from(
+      ["  a-job:", "    runs-on: ubuntu-latest", "{% if x %}", "    y: 1", ""].join("\n"),
+    );
+    expect(() => fragmentJobIds(unclosed)).toThrow("leaves a jinja {% if %} unclosed");
   });
 
   test("job ids beyond gate_jobs' declarable shape still surface (they must fail parity, not escape)", () => {
