@@ -31,6 +31,29 @@ export function requireEnv(name: string): string {
   return value;
 }
 
+/** A millisecond deadline read from the environment, validated at the read.
+ *  Number("") is 0 and Number("junk") is NaN, and Bun.spawnSync treats BOTH
+ *  as "no timeout" - so a blank or malformed PROBE_TIMEOUT_MS would silently
+ *  disable the very network deadline this action's every gh call depends on
+ *  (the retired grep that used to police for undeadlined calls trusted the
+ *  timeout to be real). Bun ALSO throws on a fractional or absurdly large
+ *  timeout, which would crash the action instead of failing clean - and a
+ *  caller may multiply this value (the paginated read uses 4x). So require a
+ *  positive INTEGER no larger than an hour: real network probes are seconds,
+ *  4x an hour is still a valid timeout, and anything past that is a typo. */
+const MAX_DEADLINE_MS = 3_600_000;
+export function positiveMsEnv(name: string, fallback: string): number {
+  const raw = env(name, fallback);
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value <= 0 || value > MAX_DEADLINE_MS) {
+    error(
+      `${name} must be a whole number of milliseconds between 1 and ${MAX_DEADLINE_MS} (got '${raw}')`,
+    );
+    process.exit(2);
+  }
+  return value;
+}
+
 /** Workflow-command payloads escape newlines and carriage returns, or a
  *  multi-line message would terminate the command at the first break. */
 function escapeData(message: string): string {

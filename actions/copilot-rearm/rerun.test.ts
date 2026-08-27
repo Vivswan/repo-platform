@@ -36,7 +36,7 @@ case "\${@: -1}" in
   */actions/runs/*/jobs*) cat "$GH_JOBS_FILE" ;;
   */actions/runs/*) cat "$GH_RUN_FILE" ;;
   *check-runs*) cat "$GH_CHECKS_FILE" ;;
-  */commits/*/pulls*) cat "$GH_COMMIT_PULLS_FILE" ;;
+  *state=open*) cat "$GH_PULLS_FILE" ;;
   */pulls/*/reviews*) cat "$GH_REVIEWS_FILE" ;;
   *) echo "gh stub: unexpected path \${@: -1}" >&2; exit 1 ;;
 esac
@@ -48,7 +48,9 @@ interface Options {
   run?: unknown;
   jobs?: unknown;
   checks?: unknown;
-  commitPulls?: unknown;
+  /** The open PRs `head=owner:branch` resolves to (fork run: GitHub omits
+   * the run's pull_requests, so the PR is found by its source ref). */
+  pulls?: unknown;
   reviews?: unknown;
 }
 
@@ -75,7 +77,7 @@ function run(opts: Options = {}) {
       GH_RUN_FILE: file("run.json", opts.run ?? RUN),
       GH_JOBS_FILE: file("jobs.json", opts.jobs ?? FAILED_GATE_JOBS),
       GH_CHECKS_FILE: file("checks.json", opts.checks ?? COMPLETED_CHECK),
-      GH_COMMIT_PULLS_FILE: file("commit-pulls.json", opts.commitPulls ?? []),
+      GH_PULLS_FILE: file("pulls.json", opts.pulls ?? []),
       GH_REVIEWS_FILE: file("reviews.json", [opts.reviews ?? []]),
       ...opts.env,
     },
@@ -189,12 +191,11 @@ describe("rerun_copilot_gate.ts", () => {
   });
 
   test("CI-completed trigger: re-runs only when the review actually arrived", () => {
-    // The completed check run counts only through ITS PR association
-    // (checkRunArrivedForPr), so the commit's PR must resolve first.
+    // The completed check run counts through ITS PR association
+    // (checkRunArrivedForPr); the run's own pull_requests scopes it to PR 12.
     const r = run({
       env: { RUN_ID: "77" },
       checks: { check_runs: [{ status: "completed", pull_requests: [{ number: 12 }] }] },
-      commitPulls: [{ number: 12, head: { sha: HEAD_SHA } }],
     });
     expect(r.exitCode).toBe(0);
     expect(r.reruns.length).toBe(1);
@@ -204,7 +205,6 @@ describe("rerun_copilot_gate.ts", () => {
     const r = run({
       env: { RUN_ID: "77" },
       checks: { check_runs: [{ status: "completed", pull_requests: [{ number: 99 }] }] },
-      commitPulls: [{ number: 12, head: { sha: HEAD_SHA } }],
     });
     expect(r.exitCode).toBe(0);
     expect(r.reruns).toEqual([]);
@@ -215,7 +215,6 @@ describe("rerun_copilot_gate.ts", () => {
     const r = run({
       env: { RUN_ID: "77" },
       checks: { check_runs: [] },
-      commitPulls: [{ number: 12, head: { sha: HEAD_SHA } }],
       reviews: [{ commit_id: HEAD_SHA, user: { login: "copilot-pull-request-reviewer[bot]" } }],
     });
     expect(r.exitCode).toBe(0);
@@ -226,7 +225,6 @@ describe("rerun_copilot_gate.ts", () => {
     const r = run({
       env: { RUN_ID: "77" },
       checks: { check_runs: [] },
-      commitPulls: [{ number: 12, head: { sha: HEAD_SHA } }],
       reviews: [
         { commit_id: "c".repeat(40), user: { login: "copilot-pull-request-reviewer[bot]" } },
       ],
@@ -236,15 +234,98 @@ describe("rerun_copilot_gate.ts", () => {
     expect(r.output).toContain("has not arrived");
   });
 
-  test("CI-completed trigger: a run with NO PR association defers quietly", () => {
+  test("CI-completed trigger: a FORK run resolves its PR by head=owner:branch and re-arms", () => {
+    // GitHub omits pull_requests on a fork run, so the PR is found by its
+    // source ref. A single unambiguous open PR scopes the arrival like an
+    // association would - here via a posted head-sha review, which proves
+    // resolution feeds the review read the RESOLVED PR number (a fork's
+    // check run carries no association, so review paging is the realistic
+    // second arrival form once the PR is known).
+    const r = run({
+      env: { RUN_ID: "77" },
+      run: {
+        id: 77,
+        status: "completed",
+        head_branch: "feature",
+        head_repository: { owner: { login: "forker" } },
+      },
+      pulls: [{ number: 12 }],
+      checks: { check_runs: [] },
+      reviews: [{ commit_id: HEAD_SHA, user: { login: "copilot-pull-request-reviewer[bot]" } }],
+    });
+    expect(r.exitCode).toBe(0);
+    expect(r.reruns.length).toBe(1);
+    // The PR was resolved by source ref, and its reviews were read by that
+    // resolved number - not the missing association.
+    const pullsRead = r.calls.filter((args) =>
+      String(args[args.length - 1] ?? "").includes("head=forker:feature"),
+    );
+    expect(pullsRead.length).toBe(1);
+    const reviewReads = r.calls.filter((args) =>
+      String(args[args.length - 1] ?? "").includes("/pulls/12/reviews"),
+    );
+    expect(reviewReads.length).toBe(1);
+  });
+
+  test("CI-completed trigger: a fork branch with special chars is URL-encoded in the head query", () => {
+    // A branch name may carry '/', '&' or '#'; unescaped they truncate or
+    // corrupt the pulls query and the fork PR stays wedged.
+    const r = run({
+      env: { RUN_ID: "77" },
+      run: {
+        id: 77,
+        status: "completed",
+        head_branch: "feat/a&b",
+        head_repository: { owner: { login: "forker" } },
+      },
+      pulls: [{ number: 12 }],
+      checks: { check_runs: [{ status: "completed" }] },
+    });
+    expect(r.exitCode).toBe(0);
+    expect(r.reruns.length).toBe(1);
+    const pullsRead = r.calls.filter((args) =>
+      String(args[args.length - 1] ?? "").includes("head=forker:feat%2Fa%26b"),
+    );
+    expect(pullsRead.length).toBe(1);
+  });
+
+  test("CI-completed trigger: an UNRESOLVABLE fork run re-arms on the unscoped completed check run", () => {
+    // Null head fields (or an ambiguous head) leave no PR to scope against;
+    // a fork run's check run carries no associations, which is the arrival
+    // signal checkRunArrivedForPr accepts unscoped. This is the wedge fix:
+    // the old code deferred here and never re-armed a fork PR's gate.
     const r = run({
       env: { RUN_ID: "77" },
       run: { id: 77, status: "completed" },
-      checks: COMPLETED_CHECK,
+      checks: { check_runs: [{ status: "completed" }] },
     });
     expect(r.exitCode).toBe(0);
+    expect(r.reruns.length).toBe(1);
+  });
+
+  test("CI-completed trigger: an ambiguous fork head (two open PRs) falls back to the unscoped test", () => {
+    // Two open PRs share the branch: no single PR to scope reviews to, so
+    // only the unscoped check-run arrival counts (no review paging).
+    const r = run({
+      env: { RUN_ID: "77" },
+      run: {
+        id: 77,
+        status: "completed",
+        head_branch: "feature",
+        head_repository: { owner: { login: "forker" } },
+      },
+      pulls: [{ number: 12 }, { number: 13 }],
+      checks: { check_runs: [] },
+      reviews: [{ commit_id: HEAD_SHA, user: { login: "copilot-pull-request-reviewer[bot]" } }],
+    });
+    expect(r.exitCode).toBe(0);
+    // No unscoped check run and reviews are unpageable without a PR - defers.
     expect(r.reruns).toEqual([]);
     expect(r.output).toContain("has not arrived");
+    const reviewReads = r.calls.filter((args) =>
+      String(args[args.length - 1] ?? "").includes("/reviews"),
+    );
+    expect(reviewReads.length).toBe(0);
   });
 
   test("review trigger: a sibling PR's run at the same sha never re-arms this PR's gate", () => {

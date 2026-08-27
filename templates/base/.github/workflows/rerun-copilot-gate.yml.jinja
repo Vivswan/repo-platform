@@ -38,12 +38,15 @@
 # together with the all-green job that needs it, and both go green once
 # the review has arrived.
 #
-# FORK PRs: a pull_request_review run on a fork's PR gets a read-only
-# token, so `gh run rerun` cannot re-run anything and this workflow fails
-# instead of re-arming. It only bites when Copilot reviews AFTER CI has
-# finished; a review that lands mid-run is covered by the workflow_run
-# trigger, which runs in the base repository's own context. Fork-PR
-# operators use the same manual re-run as above. See
+# FORK PRs: the two triggers differ. A pull_request_review run on a fork's
+# PR gets a READ-ONLY token, so `gh run rerun` cannot re-run anything and
+# that path fails instead of re-arming. The workflow_run trigger runs in
+# the base repository's own context with a writable token AND resolves the
+# fork PR by its source ref (head=owner:branch), since GitHub omits the
+# run's pull_requests association for a fork - so a fork review that lands
+# before CI finishes IS re-armed here. Only a fork review that arrives
+# AFTER CI already went red is stranded (the read-only review trigger owns
+# that ordering); those operators use the same manual re-run as above. See
 # https://github.com/{{ github_username }}/repo-platform/blob/main/docs/all-green.md.
 
 name: Rerun Copilot Gate

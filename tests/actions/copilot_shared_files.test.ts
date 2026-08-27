@@ -19,9 +19,10 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { COPILOT_LOGINS } from "../../actions/copilot-review-gate/identity.ts";
 
 const ACTIONS = join(import.meta.dir, "../../actions");
-const SHARED = ["identity.ts", "runtime.ts"];
+const SHARED = ["identity.ts", "runtime.ts", "tsconfig.json"];
 
 describe("the Copilot actions' shared files", () => {
   for (const name of SHARED) {
@@ -56,5 +57,26 @@ describe("the Copilot actions' shared files", () => {
     expect(relevance(readFileSync(operator, "utf8"), operator)).toBe(
       relevance(readFileSync(fleet, "utf8"), fleet),
     );
+  });
+
+  test("both re-arm workflows' relevance logins are exactly identity.ts's COPILOT_LOGINS", () => {
+    // The workflows can only re-arm a run whose triggering review is
+    // Copilot's, so their fromJSON login literal must track the SAME set
+    // the gate/re-armer match on. A bot-login rename in identity.ts that
+    // missed these two YAML copies would strand every fork/review re-arm
+    // silently; pin them so it cannot.
+    const expected = [...COPILOT_LOGINS].map((login) => login.toLowerCase()).sort();
+    const logins = (text: string, file: string): string[] => {
+      const match = text.match(/fromJSON\('(\[[^)]*\])'\)/);
+      if (match === null) throw new Error(`${file}: no fromJSON login literal found`);
+      return (JSON.parse(match[1]) as string[]).map((login) => login.toLowerCase()).sort();
+    };
+    const operator = join(import.meta.dir, "../../.github/workflows/rerun-copilot-gate.yml");
+    const fleet = join(
+      import.meta.dir,
+      "../../templates/base/.github/workflows/rerun-copilot-gate.yml.jinja",
+    );
+    expect(logins(readFileSync(operator, "utf8"), operator)).toEqual(expected);
+    expect(logins(readFileSync(fleet, "utf8"), fleet)).toEqual(expected);
   });
 });

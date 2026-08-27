@@ -960,30 +960,35 @@ const rules: Rule[] = [
           });
         }
       }
-      // The uses-line pin above proves ci.yml still INVOKES the gate
-      // action; this proves the action still RUNS gate.ts. Without it,
-      // trimming the gate step out of action.yml would leave a green
-      // setup/install shell - every pin intact, gate failed open. Only an
-      // unconditional, non-suppressed step counts: an `if:` or
-      // `continue-on-error:` on the gate step is the same failed-open gate
-      // with the command text still present.
-      const gateActionManifest = parseYaml(
-        readFileSync(join(REPO_ROOT, "actions/copilot-review-gate/action.yml"), "utf-8"),
-      ) as { runs?: { steps?: Record<string, unknown>[] } };
-      const gateEntry = 'bun "${{ github.action_path }}/gate.ts"';
-      const gateActionLines = (gateActionManifest.runs?.steps ?? [])
-        .filter((step) => step.if === undefined && step["continue-on-error"] === undefined)
-        .flatMap((step) =>
-          String(step.run ?? "")
-            .split("\n")
-            .map((line) => line.trim()),
-        );
-      if (!gateActionLines.includes(gateEntry)) {
-        mismatches.push({
-          file: "actions/copilot-review-gate/action.yml",
-          expected: `'${gateEntry}' as a run line of an unconditional, non-suppressed composite step`,
-          got: "missing",
-        });
+      // The uses-line pins above prove ci.yml INVOKES the gate action;
+      // this proves each composite action still RUNS its own entry script.
+      // Without it, trimming the entry step out of an action.yml would
+      // leave a green setup/install shell - every uses pin intact, the gate
+      // (or its re-armer) failed open. Only an unconditional, non-suppressed
+      // step counts: an `if:` or `continue-on-error:` on the entry step is
+      // the same failed-open action with the command text still present.
+      for (const [dir, entryScript] of [
+        ["actions/copilot-review-gate", "gate.ts"],
+        ["actions/copilot-rearm", "rerun.ts"],
+      ] as const) {
+        const manifest = parseYaml(readFileSync(join(REPO_ROOT, dir, "action.yml"), "utf-8")) as {
+          runs?: { steps?: Record<string, unknown>[] };
+        };
+        const entry = `bun "\${{ github.action_path }}/${entryScript}"`;
+        const runLines = (manifest.runs?.steps ?? [])
+          .filter((step) => step.if === undefined && step["continue-on-error"] === undefined)
+          .flatMap((step) =>
+            String(step.run ?? "")
+              .split("\n")
+              .map((line) => line.trim()),
+          );
+        if (!runLines.includes(entry)) {
+          mismatches.push({
+            file: `${dir}/action.yml`,
+            expected: `'${entry}' as a run line of an unconditional, non-suppressed composite step`,
+            got: "missing",
+          });
+        }
       }
       return mismatches;
     },

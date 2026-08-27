@@ -39,7 +39,16 @@ import {
   fetchAllReviews,
   isCopilot,
 } from "./identity.ts";
-import { capture, env, error, notice, parseJsonWith, requireEnv, warning } from "./runtime.ts";
+import {
+  capture,
+  env,
+  error,
+  notice,
+  parseJsonWith,
+  positiveMsEnv,
+  requireEnv,
+  warning,
+} from "./runtime.ts";
 
 const GATE_JOB = "copilot-review";
 /** Loop-breaker: a re-run completing fires the workflow_run trigger
@@ -49,7 +58,7 @@ const GATE_JOB = "copilot-review";
  * unrelated flaky job could exhaust the budget before the first genuine
  * re-arm. */
 const MAX_GATE_ATTEMPTS = 5;
-const PROBE_TIMEOUT_MS = Number(env("PROBE_TIMEOUT_MS", "15000"));
+const PROBE_TIMEOUT_MS = positiveMsEnv("PROBE_TIMEOUT_MS", "15000");
 
 const repository = requireEnv("GITHUB_REPOSITORY");
 const headSha = requireEnv("HEAD_SHA");
@@ -59,13 +68,22 @@ const reviewPr = env("REVIEW_PR");
 
 // A run's pull_requests associations are what scopes every lookup to ONE
 // PR: stacked PRs share head shas constantly, so anything keyed on the
-// sha alone can land on a SIBLING PR's run or review.
+// sha alone can land on a SIBLING PR's run or review. GitHub OMITS those
+// associations on a run whose PR head is a FORK, so the run also carries
+// its source ref (head_branch + head_repository.owner.login) - enough to
+// resolve the PR by `head=owner:branch` when the associations are absent.
 const runShape = z.object({
   id: z.number(),
   status: z.string(),
   pull_requests: z.array(z.object({ number: z.number() })).optional(),
+  head_branch: z.string().nullable().optional(),
+  head_repository: z
+    .object({ owner: z.object({ login: z.string() }) })
+    .nullable()
+    .optional(),
 });
 const runsSchema = z.object({ workflow_runs: z.array(runShape) });
+const pullsSchema = z.array(z.object({ number: z.number() }));
 const jobsSchema = z.object({
   jobs: z.array(z.object({ id: z.number(), name: z.string(), conclusion: z.string().nullable() })),
 });
@@ -170,39 +188,60 @@ if (gateJob.conclusion !== "failure") {
 // On the CI-completed trigger the review may not have arrived at all
 // (CI can fail red for any reason): re-running the gate without it would
 // just fail again. Both arrival forms the gate accepts count - the
-// completed check run, or a Copilot review posted for the head sha (the
-// PR is found through the commit's associated PRs). The review trigger
-// IS the arrival, so it skips this.
+// completed check run, or a Copilot review posted for the head sha. The
+// review trigger IS the arrival, so it skips this.
 if (runId !== "") {
-  // The PR comes from the RUN'S OWN pull_requests association, never from
-  // the commit's PR listing: stacked PRs share head shas, and .find()
-  // over commit-associated PRs is arbitrary there - a sibling's completed
-  // review could re-arm this PR repeatedly and burn the attempt budget
-  // (same predicate discipline as checkRunArrivedForPr). No association
-  // means nothing to scope against: defer quietly, the review trigger
-  // carries its own arrival.
-  const pr = (run.pull_requests ?? [])[0];
-  let arrived = false;
-  if (pr !== undefined) {
-    const checks = mustFetch(
-      `repos/${repository}/commits/${headSha}/check-runs?check_name=${CHECK_NAME}&filter=latest`,
-      checkRunsSchema,
-      "rerun_copilot_gate: check-runs response",
-    ).check_runs;
-    arrived = checkRunArrivedForPr(checks, pr.number);
+  // The PR is the run's OWN pull_requests association, or - for a fork run,
+  // where GitHub omits it - the source-ref resolution below; never the
+  // commit's PR listing, whose .find() is arbitrary under shared shas (a
+  // sibling's completed review could re-arm this PR repeatedly and burn
+  // the attempt budget). Three states, handled explicitly below:
+  // ASSOCIATED (same-repo), FORK-RESOLVED (one PR by source ref), and
+  // FORK-UNRESOLVED (null head fields or an ambiguous head).
+  let prNumber = (run.pull_requests ?? [])[0]?.number;
+  if (prNumber === undefined) {
+    // Fork run: GitHub omits the associations. Resolve the PR by its
+    // source ref instead - `head=owner:branch` - and accept ONLY a single
+    // unambiguous open PR. Not /commits/{sha}/pulls: that lists every PR
+    // at the sha, the arbitrary .find() this re-runner deliberately avoids.
+    const owner = run.head_repository?.owner.login;
+    const branch = run.head_branch;
+    if (owner != null && branch != null && branch !== "") {
+      // Encode each part: a branch name may carry '/', '&', '#' or '%',
+      // any of which would truncate or corrupt the query unescaped. The
+      // colon stays literal - it is the head filter's owner:ref delimiter.
+      const head = `${encodeURIComponent(owner)}:${encodeURIComponent(branch)}`;
+      const pulls = mustFetch(
+        `repos/${repository}/pulls?head=${head}&state=open&per_page=10`,
+        pullsSchema,
+        "rerun_copilot_gate: pulls response",
+      );
+      if (pulls.length === 1) prNumber = pulls[0].number;
+    }
+  }
+  const checks = mustFetch(
+    `repos/${repository}/commits/${headSha}/check-runs?check_name=${CHECK_NAME}&filter=latest`,
+    checkRunsSchema,
+    "rerun_copilot_gate: check-runs response",
+  ).check_runs;
+  let arrived: boolean;
+  if (prNumber !== undefined) {
+    // ASSOCIATED or FORK-RESOLVED: scope arrival to this PR - a completed
+    // check run vouching for it, else a Copilot review posted for the head
+    // sha. Paginated (all pages, PAGINATED_TIMEOUT_MS budget): GET reviews
+    // is OLDEST-first, so one page of a >100-review PR shows only stale
+    // reviews and the fresh head's arrival would stay invisible.
+    arrived = checkRunArrivedForPr(checks, prNumber);
     if (!arrived) {
-      // Paginated (all pages, PAGINATED_TIMEOUT_MS budget): GET reviews is
-      // OLDEST-first, so one page of a >100-review PR shows only stale
-      // reviews and the fresh head's arrival would stay invisible.
       const reviews = fetchAllReviews(
         repository,
-        pr.number,
+        prNumber,
         "rerun_copilot_gate: reviews response",
         PAGINATED_TIMEOUT_MS,
       );
       if (reviews === null) {
         error(
-          `rerun_copilot_gate: reading PR #${pr.number}'s reviews failed - nothing re-runs this re-runner, so silence would strand a red gate`,
+          `rerun_copilot_gate: reading PR #${prNumber}'s reviews failed - nothing re-runs this re-runner, so silence would strand a red gate`,
         );
         process.exit(1);
       }
@@ -211,6 +250,16 @@ if (runId !== "") {
           review.commit_id === headSha && review.user !== null && isCopilot(review.user.login),
       );
     }
+  } else {
+    // FORK-UNRESOLVED: no PR to scope against (null head fields, or an
+    // ambiguous head matching several open PRs). A same-repo run always
+    // carries an association and never reaches here, so the only arrival
+    // signal is a completed check run with NO associations - the fork
+    // shape. Reviews are unpageable without a PR number, so they are not
+    // consulted on this path.
+    arrived = checks.some(
+      (check) => check.status === "completed" && (check.pull_requests ?? []).length === 0,
+    );
   }
   if (!arrived) {
     notice(

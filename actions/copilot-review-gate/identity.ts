@@ -17,7 +17,12 @@ import { capture, parseJsonWith } from "./runtime.ts";
 
 export const COPILOT_CHECK_NAME = "copilot-pull-request-reviewer";
 
-const COPILOT_LOGINS = new Set(["copilot", `${COPILOT_CHECK_NAME}[bot]`]);
+/** The logins Copilot's review appears under: the requested reviewer is
+ *  "Copilot", the posted review's author is the [bot] form. Compared
+ *  case-insensitively (isCopilot lowercases), and EXPORTED so the re-arm
+ *  workflows' fromJSON relevance literals can be pinned to it - a bot-login
+ *  rename must not silently miss those two YAML copies. */
+export const COPILOT_LOGINS = new Set(["copilot", `${COPILOT_CHECK_NAME}[bot]`]);
 
 export function isCopilot(login: string): boolean {
   return COPILOT_LOGINS.has(login.toLowerCase());

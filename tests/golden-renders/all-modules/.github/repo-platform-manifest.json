@@ -29,7 +29,7 @@
     ".github/workflows/nightly.yml": {"class": "starter"},
     ".github/workflows/pages.yml": {"class": "managed", "hash": "cd93d397bf2bcd7438f0631bc03bf7ff89508b7e58ecdeca3c4c68202e4c1a2c"},
     ".github/workflows/release.yml": {"class": "managed", "hash": "63b2839a3a195ec2ea6592c92702339a25e080ee56ddeee7d465e53f72b35d05"},
-    ".github/workflows/rerun-copilot-gate.yml": {"class": "managed", "hash": "3a4f0cf338b241768f7de74811831e955648e262d7b63b3286557ef83ed5b627"},
+    ".github/workflows/rerun-copilot-gate.yml": {"class": "managed", "hash": "2c075dcbf2a6bc1129839dceddba470c8bc970dcd84a95f5254c00402bdf7a0e"},
     ".github/workflows/settings-sync.yml": {"class": "managed", "hash": "eb86a0034b6c624240b1269c087f64247005835c7a715a2203bee85b55e1025f"},
     ".github/workflows/update-release-pr.yml": {"class": "starter"},
     ".github/workflows/update-release.yml": {"class": "starter"},
