@@ -319,4 +319,65 @@ describe("preserve_repo_owned removed-splits hold", () => {
     expect(result.report).toContain("`AGENTS.md`");
     expect(result.report).toContain("could not be located");
   });
+
+  test("an unreadable HEAD manifest fails closed: a deleted split file still holds the PR", () => {
+    // HEAD's manifest is damaged past parsing, so the split map cannot be
+    // enumerated. Checking only the two license names would auto-merge a
+    // retired split file's repository-owned content away, and the tail
+    // tripwire cannot cover it (it skips post-sync split paths absent at
+    // HEAD before it consults HEAD's manifest). Fail closed: every deleted
+    // tracked path becomes an unclassifiable candidate that forces review.
+    const result = runHold({ [MANIFEST_REL]: "{ not valid json", "AGENTS.md": agentsWithTail }, [
+      "AGENTS.md",
+    ]);
+    expect(result.exitCode).toBe(0);
+    expect(result.report).not.toBe("");
+    expect(result.report).toContain("`AGENTS.md`");
+    expect(result.report).toContain("does not class this file");
+    expect(result.stdout).toContain("manual-review");
+  });
+
+  test("an unreadable HEAD manifest with no deletions writes no report (no spurious hold)", () => {
+    // Fail closed on the DELETION axis, not unconditionally: a damaged
+    // manifest on a sync that deleted nothing has no content that could
+    // have left, so it must not force review on every no-op run.
+    const result = runHold({ [MANIFEST_REL]: "{ not valid json", "AGENTS.md": agentsWithTail }, []);
+    expect(result.exitCode).toBe(0);
+    expect(result.report).toBe("");
+  });
+
+  test("the whole removed-splits section stays within its byte budget with an omission notice", () => {
+    // The section is bounded by BYTES as a whole (intro, bullets, fences,
+    // paths, notes), not just excerpt lines - so no number of deletions
+    // can blow the 64 KiB PR body.
+    const files: Record<string, string> = {};
+    const manifestFiles: Record<string, unknown> = {};
+    const removed: string[] = [];
+    for (let i = 0; i < 60; i++) {
+      const rel = `doc-${i}.md`;
+      const tail = Array.from(
+        { length: 50 },
+        (_, j) => `local line ${i}-${j} ${"x".repeat(120)}`,
+      ).join("\n");
+      files[rel] = `# managed\n\n${SENTINEL}\n\n${tail}\n`;
+      manifestFiles[rel] = {
+        class: "split",
+        grammar: "tail-marker",
+        marker: SENTINEL,
+        managed: "above",
+        hash: null,
+      };
+      removed.push(rel);
+    }
+    const result = runHold(
+      { [MANIFEST_REL]: JSON.stringify({ files: manifestFiles }), ...files },
+      removed,
+    );
+    expect(result.exitCode).toBe(0);
+    expect(result.report).not.toBe("");
+    // The whole section - intro, bullets, framing, and the omission item -
+    // is charged against the 16 KiB budget.
+    expect(Buffer.byteLength(result.report, "utf-8")).toBeLessThanOrEqual(16384);
+    expect(result.report).toContain("more deleted file(s) omitted");
+  });
 });

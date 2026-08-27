@@ -194,53 +194,53 @@ if (
 
 // A file this update deletes never reaches the PR as a conflict: copier
 // resolves delete-vs-modify by dropping the file, and retired-file cleanup
-// deletes retired paths outright - so content in a split file's
-// repository-owned half silently leaves the repo while the update can
-// otherwise look clean and AUTO-MERGE. The rule is CLASS-level: every
-// deleted path HEAD's own manifest classes `split` holds the PR
-// (open_pr.ts's section list), with the repository-owned content that
-// leaves named in the body. HEAD's manifest, not the post-sync one: a
-// path split at HEAD but absent from the new render appears in neither
-// the rebuild's manifest walk nor the tail tripwire's. The two license
-// spellings stay pointwise candidates ON TOP of the class rule: a
-// pre-rename extensionless LICENSE has no manifest entry classing it (and
-// a damaged HEAD manifest cannot class anything), yet a license deletion
-// must still hold the PR - the restore and re-seed blocks above have
-// already put back every license the sync preserves, so anything still
-// missing here is a real deletion. Prior licensing needs no notice - git
-// history is the record.
+// deletes retired paths outright - so a split file's repository-owned half
+// silently leaves while the update looks clean enough to AUTO-MERGE. The
+// rule is CLASS-level: every deleted path HEAD's own manifest classes
+// `split` holds the PR (open_pr.ts's section list) with the leaving content
+// named. HEAD's manifest, not the post-sync one: a path split at HEAD but
+// absent from the new render is in neither the rebuild's walk nor the tail
+// tripwire's. The two license spellings are pointwise candidates on top - a
+// pre-rename extensionless LICENSE has no manifest entry, yet its deletion
+// must still hold the PR.
+//
+// FAIL CLOSED when HEAD's manifest cannot be classified (missing or damaged
+// past parsing): the split map is unknown, so every deleted tracked path
+// becomes an unclassifiable candidate that forces review. The tail tripwire
+// cannot backstop this - it iterates the POST-sync manifest and skips paths
+// absent at HEAD before it reads HEAD's manifest, so a sync whose retained
+// split files are all new at HEAD leaves the wire silent while a retired
+// split file's half departs unseen.
 
-/** How much of each leaving repository-owned half the PR body shows.
- * Bounded like tail_tripwire's report: lines per file, characters per
- * line (clip), and one shared byte budget across ALL removed files - the
- * body caps at 64 KiB, gh fails outright past it, and several removals'
- * excerpts must not add up there; git history holds whatever the excerpt
- * omits. */
+/** Per-file excerpt bound (lines) and the byte budget for the WHOLE
+ * rendered section - intro, bullets, fences, and the omission item, not
+ * just excerpt lines. The PR body caps at 64 KiB (gh fails past it,
+ * stranding the branch), and open_pr caps the aggregate body too. */
 const MAX_HALF_LINES = 40;
-const MAX_HALF_BYTES = 16384;
+const MAX_SECTION_BYTES = 16384;
+/** Reserved within the budget so the omission item always fits. */
+const OMISSION_HEADROOM = 240;
 
 interface RemovedSplit {
   path: string;
   /** The repository-owned half at HEAD: content when located, null when
    * the previous copy does not split at its declared markers, undefined
-   * when HEAD's manifest cannot class the path (the pointwise license
-   * candidates without a manifest answer). */
+   * when the manifest does not classify the path (a pointwise license
+   * candidate, or any deleted path when HEAD's manifest is unreadable). */
   half: string | null | undefined;
 }
 
-/** One removed path's bullet, charging any excerpt against the shared
- * budget; returns the spent bytes with the text. */
-function removedSplitBullet(
-  { path, half }: RemovedSplit,
-  budget: number,
-): { text: string; cost: number } {
+/** One removed path's bullet. The excerpt is bounded by MAX_HALF_LINES and
+ * by `excerptBudget` bytes (whatever is left of the section budget), so a
+ * single file cannot consume the whole section; the caller charges the
+ * bullet's full rendered size against that budget. */
+function removedSplitBullet({ path, half }: RemovedSplit, excerptBudget: number): { text: string } {
   if (half === undefined) {
     return {
       text:
         `- \`${path}\`: the previous commit's manifest does not class this file, so its ` +
         "repository-local content (if any) cannot be split out - review the previous copy " +
         "on the base branch before merging.",
-      cost: 0,
     };
   }
   if (half === null) {
@@ -249,13 +249,11 @@ function removedSplitBullet(
         `- \`${path}\`: its repository-owned half could not be located (the previous copy ` +
         "does not split at its declared marker lines) - review the previous copy on the " +
         "base branch before merging.",
-      cost: 0,
     };
   }
   if (half.trim() === "") {
     return {
       text: `- \`${path}\`: its repository-owned section is empty; nothing leaves beyond the managed render.`,
-      cost: 0,
     };
   }
   const lines = half.split("\n").filter(
@@ -269,7 +267,7 @@ function removedSplitBullet(
     if (shown.length >= MAX_HALF_LINES) break;
     const clipped = clip(line);
     const lineCost = Buffer.byteLength(clipped, "utf-8") + 3;
-    if (cost + lineCost > budget) break;
+    if (cost + lineCost > excerptBudget) break;
     cost += lineCost;
     shown.push(clipped);
   }
@@ -278,7 +276,6 @@ function removedSplitBullet(
       text:
         `- \`${path}\`: ${lines.length} line(s) of repository-owned content leave with the ` +
         "deletion (excerpt omitted: report size limit; see the base branch's copy).",
-      cost: 0,
     };
   }
   const fence = fenceFor(shown);
@@ -288,28 +285,83 @@ function removedSplitBullet(
     text:
       `- \`${path}\`: this repository-owned content leaves with the deletion:\n\n` +
       `  ${fence}text\n${shown.map((line) => `  ${line}`).join("\n")}\n  ${fence}${tail}`,
-    cost,
   };
 }
 
 const REMOVED_SPLITS_INTRO = [
   "> [!WARNING]",
-  "> This update DELETES file(s) whose previous copy carries a",
-  "> repository-owned half (ownership class `split`). Copier resolves",
-  "> delete-vs-modify by dropping the file, and retired-file cleanup",
-  "> deletes retired paths outright, so that repository-owned content is",
-  "> NOT in this diff and survives only in git history (see the base",
-  "> branch). Move anything that must stay into another file's",
-  "> repository-local section on this branch before merging. Prior",
-  "> licensing needs no notice - git history is the record.",
+  "> This update DELETES file(s) whose previous copy may carry a",
+  "> repository-owned half (ownership class `split` at the previous commit,",
+  "> or a file that commit's manifest does not classify). Copier resolves",
+  "> delete-vs-modify by dropping the file, and retired-file cleanup deletes",
+  "> retired paths outright, so that content is NOT in this diff and",
+  "> survives only in git history (see the base branch). Move anything that",
+  "> must stay into another file's repository-local section on this branch",
+  "> before merging. Prior licensing needs no notice - git history is the",
+  "> record.",
   "",
 ].join("\n");
 
+/** The report for a run whose HEAD manifest AND deletion list could both
+ * not be read: nothing can be enumerated, so hold the PR generically. */
+const REMOVED_SPLITS_UNVERIFIABLE = [
+  "> [!WARNING]",
+  "> This update's split-file deletions could not be verified: the previous",
+  "> commit's ownership manifest could not be read and its deleted-file list",
+  "> could not be computed. Review this update's full diff against the base",
+  "> branch before merging.",
+  "",
+].join("\n");
+
+/** The removed-splits section, bounded as a WHOLE by MAX_SECTION_BYTES
+ * (intro, bullets, and the omission item all count): bullets are added
+ * until the next would overflow, then the rest collapse into one aggregate
+ * omission item, so no number of deletions can blow the PR body. Empty
+ * string when nothing left (no section, no forced review). */
+function renderRemovedSplits(removals: RemovedSplit[]): string {
+  if (removals.length === 0) return "";
+  // The intro, the two framing newlines, and the reserved omission item are
+  // all subtracted up front, so the sum of bullet bytes below can never
+  // push the rendered section past MAX_SECTION_BYTES.
+  let budget =
+    MAX_SECTION_BYTES - Buffer.byteLength(REMOVED_SPLITS_INTRO, "utf-8") - OMISSION_HEADROOM - 2;
+  const rendered: string[] = [];
+  let omitted = 0;
+  for (let i = 0; i < removals.length; i++) {
+    const bullet = removedSplitBullet(removals[i], Math.max(0, budget));
+    const cost = Buffer.byteLength(bullet.text, "utf-8") + 1; // the joining newline
+    if (cost > budget) {
+      omitted = removals.length - i;
+      break;
+    }
+    budget -= cost;
+    rendered.push(bullet.text);
+  }
+  if (omitted > 0) {
+    rendered.push(
+      `- (${omitted} more deleted file(s) omitted to keep this PR body under GitHub's size ` +
+        "limit; inspect the base branch's copies before merging.)",
+    );
+  }
+  return `${REMOVED_SPLITS_INTRO}\n${rendered.join("\n")}\n`;
+}
+
+/** Paths present at HEAD and gone from the working tree - the deletion axis
+ * for the unreadable-manifest fail-closed path. `--no-renames` so a staged
+ * delete/add pair cannot be reclassified `R` and escape the D filter. Null
+ * (not empty) when git itself fails, so the caller can fail closed rather
+ * than read a git error as "nothing deleted". */
+function deletedTrackedPaths(): string[] | null {
+  const proc = git(["diff", "--diff-filter=D", "--no-renames", "--name-only", "-z", "HEAD"]);
+  if (proc.exitCode !== 0) return null;
+  return proc.stdout.split("\0").filter((path) => path !== "");
+}
+
 // HEAD's split declarations, split with HEAD's OWN manifest (a marker
-// rename in the update cannot mis-split the previous copy). A missing or
-// unusable manifest is a target-state anomaly: the class rule cannot
-// answer, the pointwise license candidates still can, and the tail
-// tripwire independently routes the run to manual review in that state.
+// rename in the update cannot mis-split the previous copy). Null when the
+// manifest is missing or damaged past parsing - both target-state
+// anomalies the fully-migrated fleet manifest should never present, both
+// handled fail closed below.
 let headSplits: Map<string, HeadSplit> | null = null;
 const headManifest = git(["show", `HEAD:${MANIFEST_NAME}`]);
 if (headManifest.exitCode === 0) {
@@ -321,8 +373,15 @@ if (headManifest.exitCode === 0) {
 }
 
 const candidates = new Map<string, HeadSplit | undefined>();
-for (const [path, split] of headSplits ?? []) {
-  candidates.set(path, split);
+let scanUnavailable = false;
+if (headSplits !== null) {
+  for (const [path, split] of headSplits) candidates.set(path, split);
+} else {
+  // The split map is unknown; fall back to the deletion axis. When even
+  // that cannot be read, hold the PR generically rather than fail open.
+  const deleted = deletedTrackedPaths();
+  if (deleted === null) scanUnavailable = true;
+  else for (const path of deleted) candidates.set(path, undefined);
 }
 for (const name of ["LICENSE", "LICENSE.md"]) {
   if (!candidates.has(name)) candidates.set(name, undefined);
@@ -330,10 +389,12 @@ for (const name of ["LICENSE", "LICENSE.md"]) {
 
 const removals: RemovedSplit[] = [];
 for (const [path, split] of candidates) {
-  if (existsSync(join(targetDir, path)) || !inHead(path)) continue;
+  if (existsSync(join(targetDir, path))) continue; // still present: not a deletion
+  // headBytes is null only for a path genuinely absent at HEAD and throws
+  // on a real git failure, so a broken repo fails the step loudly rather
+  // than silently skip a candidate - inHead's `cat-file -e` cannot tell
+  // absence from failure and would re-open the fail-open hole.
   const headCopy = headBytes(targetDir, path);
-  // inHead passed but the bytes are unreadable only for a non-blob (a
-  // directory at the path); nothing splittable leaves.
   if (headCopy === null) continue;
   removals.push({
     path,
@@ -341,16 +402,11 @@ for (const [path, split] of candidates) {
   });
 }
 
-let halfBudget = MAX_HALF_BYTES;
-const bullets = removals.map((removal) => {
-  const bullet = removedSplitBullet(removal, halfBudget);
-  halfBudget -= bullet.cost;
-  return bullet.text;
-});
-writeFileSync(
-  join(requireEnv("RUNNER_TEMP"), REMOVED_SPLITS_NAME),
-  removals.length === 0 ? "" : `${REMOVED_SPLITS_INTRO}\n${bullets.join("\n")}\n`,
-);
+const section = renderRemovedSplits(removals);
+// The generic unverifiable notice forces review even when no removal could
+// be enumerated - the whole point of failing closed on an unreadable scan.
+const report = scanUnavailable ? `${REMOVED_SPLITS_UNVERIFIABLE}\n${section}` : section;
+writeFileSync(join(requireEnv("RUNNER_TEMP"), REMOVED_SPLITS_NAME), report);
 if (removals.length > 0) {
   // Paths are target file data: a hide-details target gets a count here
   // and the names only in the PR body, which lives in the private repo.
@@ -362,5 +418,10 @@ if (removals.length > 0) {
       : `${label}: this update deletes ${removals.map(({ path }) => path).join(" and ")}; the ` +
           "PR stays manual-review so a human can restore the repository-owned content that " +
           "leaves with the deletion (named in the PR body; git history is the record).",
+  );
+} else if (scanUnavailable) {
+  notice(
+    `${label}: the previous commit's ownership manifest and deleted-file list could not be ` +
+      "read, so split-file deletions cannot be verified; the PR stays manual-review.",
   );
 }

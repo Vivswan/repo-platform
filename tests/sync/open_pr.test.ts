@@ -175,4 +175,53 @@ describe("open_pr sections and auto-merge", () => {
     expect(r.body.startsWith("> [!WARNING]\n> drift detected")).toBe(true);
     expect(r.merged).toBe(false);
   });
+
+  test("an oversized pile-up of sections stays under GitHub's 64 KiB body limit", () => {
+    // Each section bounds itself, but several near their caps can SUM past
+    // 64 KiB and gh would fail outright, stranding the pushed branch. The
+    // aggregate budget drops the overflowing sections and adds one
+    // truncation banner - and the run still stays manual (the banner does
+    // not touch the flag-driven needs-review decision).
+    const big = (tag: string) =>
+      `${tag}\n${Array.from({ length: 700 }, (_, i) => `${tag} line ${i} ${"y".repeat(24)}`).join("\n")}`;
+    const r = run({
+      files: { CARRIED_FILE: big("carry") },
+      temp: {
+        [TAIL_SHRANK_NAME]: big("tripwire"),
+        [REMOVED_SPLITS_NAME]: big("removed"),
+      },
+    });
+    expect(r.exitCode).toBe(0);
+    expect(Buffer.byteLength(r.body, "utf-8")).toBeLessThan(65536);
+    expect(r.body).toContain("truncated to stay under GitHub's size limit");
+    // The tail tripwire and removed-splits sections force review, so even
+    // with their prose dropped the PR must not auto-merge.
+    expect(r.merged).toBe(false);
+  });
+
+  test("a pathological oversized drift is hard-capped so gh never sees an over-limit body", () => {
+    // Drift is prepended on top and its value is target-controlled (a huge
+    // recorded description), so the aggregate section budget alone cannot
+    // guarantee delivery - the final hard cap must. The body must stay
+    // under 64 KiB even when the mandatory drift prepend alone is enormous.
+    const hugeDrift = `> [!WARNING]\n> drift\n${"d".repeat(200000)}`;
+    const r = run({ files: { DRIFT_FILE: hugeDrift } });
+    expect(r.exitCode).toBe(0);
+    expect(Buffer.byteLength(r.body, "utf-8")).toBeLessThan(65536);
+    expect(r.body).toContain("hard-truncated");
+    expect(r.merged).toBe(false);
+  });
+
+  test("a single over-limit multibyte line is cut on a char boundary, not mid-character", () => {
+    // One line with no newline to trim to, made of a 2-byte char, forces
+    // capBody's UTF-8 back-off branch: the result stays under 64 KiB and
+    // carries no replacement character from a cut mid-character.
+    const oneLine = "\u00e9".repeat(40000); // 80000 bytes (2-byte char), no newlines
+    const r = run({ files: { DRIFT_FILE: oneLine } });
+    expect(r.exitCode).toBe(0);
+    expect(Buffer.byteLength(r.body, "utf-8")).toBeLessThan(65536);
+    expect(r.body).toContain("hard-truncated");
+    expect(r.body).not.toContain("\ufffd");
+    expect(r.merged).toBe(false);
+  });
 });
