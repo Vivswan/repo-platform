@@ -49,7 +49,7 @@ must(["bun", "install", "--frozen-lockfile", "--cwd", "/tmp/src"]);
 must(["bun", "/tmp/src/.github/scripts/build-branches/branch_tree.ts", "--dest", "/tmp/tree"]);
 
 // One orphan commit carrying the composed tree - a pure tree carrier,
-// unchained from the template branch on purpose: the publisher chains a
+// unchained from the build branch on purpose: the publisher chains a
 // REAL build commit (stamps included) onto the branch tip current at
 // publish time, so this commit's parentage carries no meaning.
 must(["git", "worktree", "add", "--detach", "/tmp/pend", sourceSha]);

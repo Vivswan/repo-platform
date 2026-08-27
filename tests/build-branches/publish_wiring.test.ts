@@ -25,7 +25,7 @@ describe("build-branches publish wiring", () => {
       "SOURCE_SHA: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}",
     );
     expect(workflow).toContain(
-      "PREBUILT_REF: ${{ github.event_name == 'workflow_run' && format('refs/build-pending/{0}', github.event.workflow_run.head_sha) || '' }}",
+      "PREBUILT_REF: ${{ github.event_name == 'workflow_run' && format('refs/heads/build-pending/{0}', github.event.workflow_run.head_sha) || '' }}",
     );
   });
 

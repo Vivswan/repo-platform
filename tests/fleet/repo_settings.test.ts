@@ -1,10 +1,12 @@
 // Pins this repository's OWN build-branch protection in
 // .github/settings.yml, the same way merge_settings_layers.test.ts pins
-// the override layer's protection policy. The `actions` ref is executable
-// fleet-wide - rendered workflows pin `uses: ...@actions` and run its tree
-// directly, with no provenance verify like the sync-side check guarding
-// `template` - so a settings edit that reopens it to plain pushes must
-// fail here, loudly.
+// the override layer's protection policy. The `build` ref is executable
+// fleet-wide - rendered workflows pin `uses: ...@build` and run its
+// actions/ subtree directly, with no provenance verify like the sync-side
+// check guarding template consumption (and the retired `actions` ref stays
+// executable for un-synced repos until its deliberate deletion) - so a
+// settings edit that reopens any of them to plain pushes must fail here,
+// loudly.
 
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
@@ -29,33 +31,49 @@ describe("the repo's own build-branch rulesets", () => {
     expect(buildBranches).toBeDefined();
     expect(buildBranches?.target).toBe("branch");
     expect(buildBranches?.enforcement).toBe("active");
-    expect(buildBranches?.conditions?.ref_name?.include?.sort()).toEqual(["actions", "template"]);
+    // The retired refs stay in the include until their deliberate
+    // post-cutover deletion: conditions replace wholesale on apply, so
+    // dropping them early would unprotect the live refs.
+    expect(buildBranches?.conditions?.ref_name?.include?.sort()).toEqual([
+      "actions",
+      "build",
+      "template",
+    ]);
     expect(buildBranches?.conditions?.ref_name?.exclude).toEqual([]);
     expect(buildBranches?.rules?.map((r) => r.type).sort()).toEqual([
       "deletion",
       "non_fast_forward",
     ]);
     // Declared EMPTY, never omitted: only the explicit empty list lets
-    // the nightly heal clear an out-of-band bypass actor - the
-    // publish-only ruleset below is separate precisely so its bypass
-    // actor cannot leak into these rules.
+    // the nightly heal clear an out-of-band bypass actor - the writer
+    // ruleset below is separate precisely so its bypass actor cannot
+    // leak into these rules.
     expect(buildBranches?.bypass_actors).toEqual([]);
   });
 
-  test("the actions ref blocks every write, creation included, bypassed only by the publish identity", () => {
-    const publishOnly = doc.rulesets.find((r) => r.name === "actions-ref-publish-only");
-    expect(publishOnly).toBeDefined();
-    expect(publishOnly?.target).toBe("branch");
-    expect(publishOnly?.enforcement).toBe("active");
-    expect(publishOnly?.conditions?.ref_name?.include).toEqual(["actions"]);
-    expect(publishOnly?.conditions?.ref_name?.exclude).toEqual([]);
+  test("the build ref and its pending handoff block every write, bypassed only by the publish identity", () => {
+    const writer = doc.rulesets.find((r) => r.name === "build-branches-writer");
+    expect(writer).toBeDefined();
+    expect(writer?.target).toBe("branch");
+    expect(writer?.enforcement).toBe("active");
+    // build-pending/** rides along: the publisher promotes a pending tree
+    // into `build` on name-match alone, so plain contents write must not
+    // be enough to park one (pending.ts's header has the namespace
+    // rationale). The retired refs stay until their deliberate deletion.
+    expect(writer?.conditions?.ref_name?.include?.sort()).toEqual([
+      "actions",
+      "build",
+      "build-pending/**",
+      "template",
+    ]);
+    expect(writer?.conditions?.ref_name?.exclude).toEqual([]);
     // creation is a SEPARATE GitHub rule from update: without it, any
     // push-capable principal could claim the executable ref whenever it is
     // absent (initial rollout, or recovery after an out-of-band deletion).
     // deletion and non_fast_forward ride along so the whole write surface
     // is one shape; the publisher stays bound to them anyway through the
     // bypass-free build-branches ruleset above.
-    expect(publishOnly?.rules).toEqual([
+    expect(writer?.rules).toEqual([
       { type: "creation" },
       { type: "update" },
       { type: "deletion" },
@@ -65,6 +83,24 @@ describe("the repo's own build-branch rulesets", () => {
     // GITHUB_TOKEN build-branches.yml publishes with. The narrowest actor
     // the ruleset dialect can express; see the comment in settings.yml
     // for the residual this accepts.
+    expect(writer?.bypass_actors).toEqual([
+      { actor_id: 15368, actor_type: "Integration", bypass_mode: "always" },
+    ]);
+  });
+
+  test("the retired actions ref keeps its publish-only ruleset until deletion", () => {
+    const publishOnly = doc.rulesets.find((r) => r.name === "actions-ref-publish-only");
+    expect(publishOnly).toBeDefined();
+    expect(publishOnly?.target).toBe("branch");
+    expect(publishOnly?.enforcement).toBe("active");
+    expect(publishOnly?.conditions?.ref_name?.include).toEqual(["actions"]);
+    expect(publishOnly?.conditions?.ref_name?.exclude).toEqual([]);
+    expect(publishOnly?.rules).toEqual([
+      { type: "creation" },
+      { type: "update" },
+      { type: "deletion" },
+      { type: "non_fast_forward" },
+    ]);
     expect(publishOnly?.bypass_actors).toEqual([
       { actor_id: 15368, actor_type: "Integration", bypass_mode: "always" },
     ]);
