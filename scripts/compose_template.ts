@@ -826,6 +826,32 @@ const ANCHOR_HINT = Buffer.from("{# compose:");
  *  two scans would disagree on the same bytes. */
 const ANCHOR_HINT_RE = /\{#-?[ \t]*compose:/;
 
+/** Marker scan over the RAW fragment bodies, before any transformation
+ *  moves their bytes: applyToolchainSetup prepends toolchain-setup.jinja
+ *  into the target fragments' contributions and the consume generators
+ *  fold several fragments into one built-in-generator contribution, so a
+ *  scan of the transformed contributions could only name the wrong source.
+ *  This one runs on the collected map, where every body still carries its
+ *  own path, so the error always names the file to edit. */
+export function fragmentMarkerErrors(fragments: Map<string, [ModuleManifest, Buffer][]>): string[] {
+  const errors: string[] = [];
+  for (const [anchor, list] of sortedByKey(fragments)) {
+    for (const [manifest, body] of list) {
+      const hint = ANCHOR_HINT_RE.exec(body.toString("latin1"));
+      if (hint) {
+        errors.push(
+          `templates/${manifest.module}/${FRAGMENTS_DIR}/${anchor}${JINJA_SUFFIX}: the ` +
+            `fragment contains an anchor marker ('${hint[0]}') - a marker inside a ` +
+            "fragment is never scanned or filled (anchors live in skeleton files " +
+            "only, each in exactly one); move the marker line to a skeleton file " +
+            "or remove it",
+        );
+      }
+    }
+  }
+  return errors;
+}
+
 function matchAnchor(line: Buffer): { name: string; tight: boolean; trailing: string } | null {
   // Bytes, matched as latin1: non-ASCII bytes can never satisfy the pattern.
   const match = ANCHOR_RE.exec(line.toString("latin1"));
@@ -946,10 +972,12 @@ export function spliceContributions(
   // (contributions to it get the misleading no-anchor error), a malformed
   // marker goes undiagnosed, and a well-formed one survives into the
   // composed tree as a comment rendering to nothing. Anchors live in
-  // skeleton files only; generators synthesize no markers of their own, so
-  // this fires on fragment content - directly, or via a consume generator
-  // (agents-toolchain) whose contribution embeds its input fragments'
-  // bytes, in which case the error names the generator.
+  // skeleton files only. In the composed pipeline fragmentMarkerErrors has
+  // already named the editable fragment for any smuggled marker (before
+  // the transformations copy fragment bytes into contributions with other
+  // sources); this scan is the seam's own backstop, so a caller feeding
+  // un-scanned contributions - or a generator synthesizing a marker -
+  // still fails closed.
   for (const [anchor, list] of sortedByKey(contributions)) {
     for (const { source, text } of list) {
       const hint = ANCHOR_HINT_RE.exec(text.toString("latin1"));
@@ -1441,6 +1469,7 @@ export function build(): Map<string, Entry> {
     ]),
   });
 
+  errors.push(...fragmentMarkerErrors(fragments));
   errors.push(...applyToolchainSetup(fragments));
 
   const agentsToolchainModules = new Set(

@@ -17,6 +17,7 @@ import {
   dependabotLabels,
   ecosystemGroups,
   fragmentJobIds,
+  fragmentMarkerErrors,
   gateJobsGroups,
   gateJobsParityErrors,
   lockfileGroups,
@@ -224,6 +225,44 @@ describe("fragmentJobIds", () => {
       "{#-\n  safe:\n-#}\n  {{ 'safe' if private else 'evil' }}:\n    runs-on: ubuntu-latest\n",
     );
     expect(() => fragmentJobIds(body)).toThrow("literally");
+  });
+});
+
+describe("fragmentMarkerErrors", () => {
+  const frag = (
+    anchor: string,
+    module: string,
+    body: string,
+  ): [string, [ModuleManifest, Buffer][]] => [anchor, [[manifest(module, []), Buffer.from(body)]]];
+
+  test("a smuggled marker in toolchain-setup.jinja names toolchain-setup.jinja, not its targets", () => {
+    // applyToolchainSetup would copy the bytes into the auto-format and
+    // copilot-setup-steps contributions, whose sources name those targets;
+    // the raw-map scan runs first and names the file that carries the line.
+    const fragments = new Map([
+      frag("toolchain-setup", "uv", "{# compose:evil #}\nsteps\n"),
+      frag("auto-format", "uv", "fmt\n"),
+      frag("copilot-setup-steps", "uv", "setup\n"),
+    ]);
+    const errors = fragmentMarkerErrors(fragments);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain("templates/uv/fragments/toolchain-setup.jinja");
+  });
+
+  test("a smuggled marker in a generator-consumed fragment names that fragment", () => {
+    // The agents-toolchain consume generator folds its input fragments into
+    // one contribution sourced to the built-in generator; the raw-map scan
+    // still names the fragment.
+    const fragments = new Map([frag("agents-toolchain", "bun", "- bullet {#- compose:evil #}\n")]);
+    const errors = fragmentMarkerErrors(fragments);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain("templates/bun/fragments/agents-toolchain.jinja");
+    expect(errors[0]).toContain("'{#- compose:'");
+  });
+
+  test("marker-free fragments pass", () => {
+    const fragments = new Map([frag("ci-gate-jobs", "uv", "  job:\n    runs-on: x\n")]);
+    expect(fragmentMarkerErrors(fragments)).toEqual([]);
   });
 });
 
