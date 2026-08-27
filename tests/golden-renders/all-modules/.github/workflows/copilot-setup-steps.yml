@@ -52,6 +52,6 @@ jobs:
           DENO_NO_UPDATE_CHECK: "1"
         run: deno ci
 
-      - uses: astral-sh/setup-uv@v9.0.0
+      - uses: astral-sh/setup-uv@v10.0.1
       - name: Install dependencies (uv)
         run: uv sync

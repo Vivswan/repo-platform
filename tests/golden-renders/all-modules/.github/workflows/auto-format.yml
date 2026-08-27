@@ -72,7 +72,7 @@ jobs:
           deno lint --fix || true
           deno fmt
 
-      - uses: astral-sh/setup-uv@v9.0.0
+      - uses: astral-sh/setup-uv@v10.0.1
       - name: Format (ruff)
         run: |
           uvx ruff check --fix . || true
