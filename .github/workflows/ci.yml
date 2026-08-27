@@ -465,7 +465,7 @@ jobs:
       # Rendered workflows are invisible to the repo-level actionlint job
       # (.jinja files are not YAML pre-render), so lint the smoke output
       # with the binary the actionlint-binary job fetched once for the run.
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@v8
         with:
           name: actionlint-binary
       - name: actionlint rendered workflows

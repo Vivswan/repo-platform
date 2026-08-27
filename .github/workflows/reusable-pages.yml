@@ -244,7 +244,7 @@ jobs:
 
       - name: Setup uv
         if: contains(format(',{0},', inputs.setup), ',uv,') && steps.cfg.outputs.publish == 'true'
-        uses: astral-sh/setup-uv@v9.0.0
+        uses: astral-sh/setup-uv@v10.0.1
 
       - name: Build production root
         if: steps.cfg.outputs.prod_ref != ''
