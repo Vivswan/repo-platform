@@ -59,7 +59,7 @@ git add --all
 git commit -m "chore: initialize from repo-platform"
 ```
 
-`--trust` is needed because the template declares a post-render stamp hook (copier treats templates with hooks as unsafe).
+`--trust` is needed because the template declares a post-render stamp hook (copier treats templates with hooks as unsafe). That hook runs from the `build` tip as-is - this local copy does no provenance verification (the sync pipeline does); pin `--vcs-ref` to a reviewed build commit sha instead of the branch name if that matters in your setting.
 
 Running non-interactively (agent-driven): add `--defaults --overwrite`. Without `--overwrite`, copier prompts per conflicting file - the scaffolder already wrote `.gitignore` (and maybe a README) that the template also renders, and `--defaults` does not answer overwrite prompts, so a non-TTY run hangs. The modules multiselect must be a YAML list in ONE `-d` argument:
 
