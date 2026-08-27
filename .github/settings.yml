@@ -66,20 +66,24 @@ rulesets:
   # must not be enough to park one (pending.ts's header has the namespace
   # rationale). The sole bypass is the GitHub Actions integration - the
   # identity of the GITHUB_TOKEN that build-branches.yml publishes with.
-  # That is the narrowest actor the ruleset dialect can express: GitHub
-  # cannot scope a bypass to one workflow, so any workflow in THIS
-  # repository running with a write-scoped GITHUB_TOKEN shares the
-  # identity. Residual, stated honestly: an on:push or on:pull_request
-  # workflow runs the PUSHED branch's own definition under that same app
-  # identity, so a write actor can reach this ref from a topic branch
-  # without ever landing code on main. Closing that structurally (a
-  # dedicated publisher identity the bypass names, nothing else able to
-  # assume it) is tracked separately; this ruleset raises the bar without
-  # claiming to seal it.
-  # The bypass exempts the publisher only from THIS ruleset's copies of
-  # the rules; its own force-pushes and deletions stay blocked by the
-  # bypass-free build-branches ruleset above, which carries the same two
-  # rules over the same ref.
+  # On `build` itself the app's own force-pushes and deletions stay
+  # blocked by the no-bypass ruleset above.
+  #
+  # RESIDUAL, stated plainly: the bypass names the APP, not the publisher
+  # workflow (GitHub cannot scope a bypass to one workflow), and an
+  # `on: push` workflow executes the definition from the PUSHED branch as
+  # that same app identity - so a write-access actor can push a topic
+  # branch whose own workflow pushes to these refs, bypassing this ruleset
+  # without ever touching main or its review gate. What the ruleset DOES
+  # close is every non-workflow credential: a contents-only token cannot
+  # push workflow files (that needs the workflow scope) and cannot touch
+  # these refs. Tightenings considered and parked: a dedicated publisher
+  # App whose token is minted from an environment-gated key (deployment
+  # branches restricted to main) would close the topic-branch route, at
+  # the cost of a second app and key management; environments alone gate
+  # secrets, not GITHUB_TOKEN pushes, and CODEOWNERS gates merging, not
+  # branch pushes, so neither helps on its own. Admins can edit the
+  # ruleset itself - the nightly settings apply re-asserts it.
   - name: build-branches-writer
     target: branch
     enforcement: active
