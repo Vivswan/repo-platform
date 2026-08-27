@@ -250,21 +250,6 @@ jobs:
               --out "$RUNNER_TEMP/merged-settings.yml"
           fi
 
-      # Outside the hidden capture on purpose: for a hide-details target
-      # run_hidden swallows the merge step's SUCCESS output, including its
-      # not-onboarded warning, so the skip would otherwise be a green job
-      # with no signal at all. matrix.repo is the masked hint for a
-      # redacted row, so this says WHICH target without saying anything
-      # about its contents.
-      - name: Report a skipped target
-        if: steps.render.outputs.skipped == 'true' || steps.merge.outputs.skipped == 'true'
-        run: |
-          if [ "${{ steps.render.outputs.skipped }}" = "true" ]; then
-            echo "::notice::settings apply skipped for ${{ matrix.repo }}: it no longer selects the settings-sync module at the revision this run read, so its settings are not managed here any more."
-          else
-            echo "::notice::settings apply skipped for ${{ matrix.repo }}: it selects settings-sync but has no .github/settings.yml yet, so there is nothing to layer over the fleet defaults. The settings-sync starter seeds the file on its next template sync."
-          fi
-
       # The opt-in was rechecked at the pinned commit, but the apply runs
       # later and the branch keeps moving. Re-resolving the head here
       # narrows that window to this step: if the target moved, the run
@@ -288,6 +273,26 @@ jobs:
         run: |
           bun .github/scripts/sync/run_hidden.ts "settings freshness" -- \
             bun .github/scripts/fleet/check_target_fresh.ts
+
+      # Outside the hidden capture on purpose: for a hide-details target
+      # the capture swallows the merge step's SUCCESS output (its
+      # not-onboarded warning) and the freshness step's moved warning
+      # alike, so each of these skips would otherwise be a green job with
+      # no signal at all. matrix.repo is the masked hint for a redacted
+      # row, so this says WHICH target without saying anything about its
+      # contents.
+      - name: Report a skipped target
+        if: >-
+          steps.render.outputs.skipped == 'true' || steps.merge.outputs.skipped == 'true' ||
+          steps.freshness.outputs.moved == 'true'
+        run: |
+          if [ "${{ steps.render.outputs.skipped }}" = "true" ]; then
+            echo "::notice::settings apply skipped for ${{ matrix.repo }}: it no longer selects the settings-sync module at the revision this run read, so its settings are not managed here any more."
+          elif [ "${{ steps.merge.outputs.skipped }}" = "true" ]; then
+            echo "::notice::settings apply skipped for ${{ matrix.repo }}: it selects settings-sync but has no .github/settings.yml yet, so there is nothing to layer over the fleet defaults. The settings-sync starter seeds the file on its next template sync."
+          else
+            echo "::notice::settings apply skipped for ${{ matrix.repo }}: its default branch moved while this run was computing its settings, so the apply was skipped rather than applied from a stale snapshot. The next run reads the new revision."
+          fi
 
       - name: Apply repository settings
         id: apply

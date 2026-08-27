@@ -20,9 +20,9 @@
 //
 // Env: GH_TOKEN (needs actions: read - the workflow's own GITHUB_TOKEN,
 // not the fleet PAT, whose grant does not carry it), GITHUB_REPOSITORY,
-// GITHUB_SHA, GITHUB_REF (refused off main, like publish.ts - a
-// dispatched CI run vouches for its own branch tip, which must never
-// reach the fleet). GREEN_WAIT_MS / GREEN_POLL_MS bound the wait.
+// GITHUB_SHA, GITHUB_REF (required, and refused off main - a dispatched
+// CI run vouches for its own branch tip, which must never reach the
+// fleet). GREEN_WAIT_MS / GREEN_POLL_MS bound the wait.
 
 import { allGreenFailure, type GhRunner } from "../shared/all_green.ts";
 import { env, fail, requireEnv } from "../shared/gha.ts";
@@ -49,6 +49,20 @@ export interface GreenWaitOptions {
   log?: (message: string) => void;
 }
 
+/** A wait bound from env: unset means the fallback, and anything that is
+ *  not a non-negative number is refused - Number("junk") is NaN, every
+ *  comparison against NaN is false, and a NaN deadline would make the
+ *  wait unbounded up to the job's own timeout. */
+function boundedMs(name: string, fallback: number): number {
+  const raw = env(name, "");
+  if (raw === "") return fallback;
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value < 0) {
+    fail(`${name} must be a non-negative number of milliseconds (got '${raw}')`);
+  }
+  return value;
+}
+
 /** Null when a completed direct-event CI run succeeded at `sha` (waiting
  *  out an in-flight run up to the deadline), else the reason the commit
  *  cannot be treated as green. */
@@ -57,8 +71,8 @@ export function waitForGreen(
   sha: string,
   options: GreenWaitOptions = {},
 ): string | null {
-  const deadlineMs = options.deadlineMs ?? Number(env("GREEN_WAIT_MS", String(20 * 60 * 1000)));
-  const pollMs = options.pollMs ?? Number(env("GREEN_POLL_MS", "30000"));
+  const deadlineMs = options.deadlineMs ?? boundedMs("GREEN_WAIT_MS", 20 * 60 * 1000);
+  const pollMs = options.pollMs ?? boundedMs("GREEN_POLL_MS", 30_000);
   const sleep = options.sleep ?? Bun.sleepSync;
   const log = options.log ?? console.log;
   const started = Date.now();
@@ -83,13 +97,14 @@ function main(): void {
   if (!/^[0-9a-f]{40}$/.test(sha)) {
     fail(`GITHUB_SHA is not a full commit sha (got '${sha}')`);
   }
-  // Same ref guard as build-branches/publish.ts: a workflow_dispatch can
-  // aim at any branch, and a dispatched CI run on that branch counts as a
-  // direct event - so without this, the green gate would vouch for an
-  // UNMERGED branch tip and the apply would ship its layer files
-  // fleet-wide. Refuse before any wait.
-  const ref = env("GITHUB_REF");
-  if (ref !== "" && ref !== "refs/heads/main") {
+  // The publisher's ref guard (build-branches/publish.ts), tightened to a
+  // required read: a workflow_dispatch can aim at any branch, and a
+  // dispatched CI run on that branch counts as a direct event - so this
+  // is the one guard between an unmerged branch's layer files and the
+  // fleet, and an unset GITHUB_REF (never the case on a real runner) must
+  // refuse rather than skip it.
+  const ref = requireEnv("GITHUB_REF");
+  if (ref !== "refs/heads/main") {
     fail(
       `refusing the settings apply from ${ref}: the fleet's settings layers ship from main ` +
         "alone. Dispatch this workflow on the default branch.",

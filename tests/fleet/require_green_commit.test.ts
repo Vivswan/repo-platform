@@ -118,23 +118,40 @@ describe("waitForGreen", () => {
 });
 
 describe("the CLI's ref guard", () => {
+  const script = new URL("../../.github/scripts/fleet/require_green_commit.ts", import.meta.url)
+    .pathname;
+
+  function runCli(
+    overrides: Record<string, string>,
+    drop: string[] = [],
+  ): ReturnType<typeof Bun.spawnSync> {
+    const env: Record<string, string | undefined> = {
+      ...process.env,
+      GITHUB_REPOSITORY: "o/r",
+      GITHUB_SHA: SHA,
+      ...overrides,
+    };
+    for (const name of drop) delete env[name];
+    return Bun.spawnSync(["bun", script], { env });
+  }
+
   test("a non-main ref is refused before any probe", () => {
     // A dispatched CI run on a branch counts as a direct event, so
     // without this guard the gate would vouch for an UNMERGED branch tip
     // and the apply would ship its layer files fleet-wide. No network:
     // the refusal must fire before the first probe.
-    const script = new URL("../../.github/scripts/fleet/require_green_commit.ts", import.meta.url)
-      .pathname;
-    const proc = Bun.spawnSync(["bun", script], {
-      env: {
-        ...process.env,
-        GITHUB_REPOSITORY: "o/r",
-        GITHUB_SHA: SHA,
-        GITHUB_REF: "refs/heads/feature",
-      },
-    });
+    const proc = runCli({ GITHUB_REF: "refs/heads/feature" });
     expect(proc.exitCode).toBe(1);
     expect(proc.stdout.toString()).toContain("refusing the settings apply from");
     expect(proc.stdout.toString()).toContain("refs/heads/feature");
+  });
+
+  test("an unset GITHUB_REF is refused, never treated as main", () => {
+    // Unreachable on a real runner, but this is the one guard between an
+    // unmerged branch's layers and the fleet - an empty read must refuse,
+    // not skip the check.
+    const proc = runCli({}, ["GITHUB_REF"]);
+    expect(proc.exitCode).toBe(2);
+    expect(proc.stdout.toString()).toContain("GITHUB_REF must be set");
   });
 });
