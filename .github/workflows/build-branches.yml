@@ -17,8 +17,11 @@
 # pushes are race-safe: pending refs are keyed by source sha, and
 # publish.ts's newest-green preflight gates BOTH delivery branches before
 # either moves, skipping a stale build whose source is an ancestor of
-# either tip's stamped source - then lands template and actions in ONE
-# atomic push, so the two branches always ship the same source.
+# either tip's stamped source - then lands both changed branches (and a
+# lease-only no-op on any unchanged one) in ONE atomic push, so a stale
+# run can never split the two branches across different sources. A branch
+# whose content is unchanged legitimately keeps its own older stamp; the
+# no-op lease is what still guards it inside the transaction.
 #
 # Only GREEN commits publish, twice over: the trigger fires on a
 # successful CI run (a failed run skips this workflow's steps quietly -
@@ -58,11 +61,34 @@ permissions:
   contents: write
   actions: read
 
-# One writer at a time across pending builds and publishers: ref pushes
-# stay serial, and GitHub coalesces queued runs per group - a coalesced
-# pending build just means the publisher composes for itself (fallback).
+# Three concurrency lanes, split by role, so no OTHER-ROLE run can evict a
+# queued PUBLISHER: with one shared group GitHub coalesces queued runs, and
+# a newer run - a push build, OR a FAILED-CI workflow_run whose steps all
+# skip (CI_GREEN false) - would replace a publisher still waiting its
+# turn, which then never runs and the branches stay stale. Publishers
+# (green workflow_run, schedule, dispatch) serialize in ONE lane on
+# purpose: serial publishers let GitHub keep the NEWEST queued one, and
+# publish.ts's preflight + push lease make the survivor rollback-proof.
+# (Per-source publisher lanes would instead let two publishers race the
+# push, where the OLDER source can win - strictly worse.) Residuals the
+# serial lane keeps, all self-healing on the weekly cron or the next push:
+# a manual rerun of an OLD build can evict a queued fresher publisher, and
+# a red schedule/dispatch run can evict a green one and then skip on its
+# own green gate (both staleness-only). One deeper, contrived case can
+# actually republish superseded content: the freshness stamp only advances
+# on a CONTENT change, so if a newer publisher fully no-ops (its render is
+# byte-identical to the tip, leaving the older stamp) a later manual rerun
+# of an intermediate source is not seen as stale and republishes its
+# green-but-superseded tree. It needs an operator rerun and an exact
+# content revert; the next push or cron heals it. Push builders and
+# failed-CI no-ops each get their own lane.
 concurrency:
-  group: build-branches
+  group: >-
+    build-branches-${{
+      github.event_name == 'push' && 'pending'
+      || (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion != 'success') && 'noop'
+      || 'publish'
+    }}
   cancel-in-progress: false
 
 jobs:

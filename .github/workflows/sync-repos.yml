@@ -58,10 +58,11 @@ concurrency:
 jobs:
   plan:
     runs-on: ubuntu-latest
-    # Must outlive wait_for_build.ts's own 45-minute warn-and-continue
-    # budget (a full main CI run before the build even starts, plus the
-    # build) with slack for the other steps - a job-level kill would turn
-    # the script's designed graceful degradation into a red sync.
+    # Must outlive wait_for_build.ts's own 40-minute warn-and-continue
+    # budget (a full main CI run - the tree is pre-built DURING it - plus
+    # the post-CI promotion) with slack for the other steps - a job-level
+    # kill would turn the script's designed graceful degradation into a
+    # red sync.
     timeout-minutes: 55
     permissions:
       contents: read
@@ -109,10 +110,9 @@ jobs:
       # own guards fail loudly and the cron heals. Build Branches rebuilds
       # the template branch asynchronously after each main merge; a sync
       # dispatched right after a merge could consume the previous build
-      # tree. Wait (bounded) for a successful run at main's HEAD.
+      # tree. Wait (bounded) for the template tip whose SOURCE STAMP names
+      # main's HEAD - the artifact's own provenance, no gh api or token.
       - name: Wait for a fresh build
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: bun .github/scripts/sync/wait_for_build.ts
 
       # Snapshots the owner's writable fleet to $RUNNER_TEMP/discovered.json

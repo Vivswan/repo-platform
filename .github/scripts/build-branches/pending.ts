@@ -1,4 +1,4 @@
-// The build-during-CI handoff (task #21 cut 1): a push-triggered build
+// The build-during-CI handoff: a push-triggered build
 // composes the template tree CONCURRENTLY with main's CI run and parks
 // it, UNPUBLISHED, at a per-source ref; the workflow_run publisher
 // promotes that pre-built tree once all-green completes. Shared by

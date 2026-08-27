@@ -8,12 +8,22 @@
 // without one (schedule, dispatch, or a missing pending ref) it composes
 // the tree itself.
 //
-// The two branches advance TOGETHER: one newest-green preflight gates
-// both, both commits are prepared unpushed, and a single atomic push
-// lands whichever of the two changed - so no interleaving of runs or
-// partial failure can leave the executable actions ref carrying a
-// different source than the template tree (fleet workflows would execute
-// one commit's actions against another commit's renders).
+// One newest-green preflight gates BOTH branches, both commits are
+// prepared unpushed, and a SINGLE atomic push lands whichever of the two
+// changed - each changed ref leased against its preflight tip, and any
+// unchanged-but-existing ref carried along as a lease-only no-op. So no
+// interleaving of runs, no partial failure, and no concurrent publisher
+// moving the branch this run left unchanged can leave the executable
+// actions ref carrying a different source than the template tree (fleet
+// workflows would execute one commit's actions against another commit's
+// renders). A branch whose content is unchanged does keep its own older
+// source stamp - the two stamps can legitimately differ - and neither ref
+// rolls back or splits under a stale run in the common case. The one
+// deeper residual (see build-branches.yml's concurrency note): freshness
+// is stamp-based and the stamp advances only on a CONTENT change, so a
+// newer publisher that fully no-ops leaves the older stamp, after which a
+// manual rerun of an intermediate source can republish its green-but-
+// superseded tree - an operator-induced, cron-healed edge.
 //
 // Env: RUN_URL, GH_TOKEN, GITHUB_SERVER_URL, GITHUB_REPOSITORY,
 // GITHUB_REF, SOURCE_SHA (the commit to publish - the completed CI run's
@@ -35,6 +45,7 @@ import { BUILD_IDENTITY } from "../shared/git_identity.ts";
 import { parseJsonWith } from "../shared/json.ts";
 import { capture, must, mustCapture } from "../shared/proc.ts";
 import { rebuildBranchTree } from "../shared/rebuild_tree.ts";
+import { runVouchesForSource } from "../shared/run_vouches.ts";
 import { PENDING_REF_PREFIX, staleReason } from "./pending.ts";
 
 const BRANCH = "template";
@@ -46,21 +57,21 @@ const BRANCH = "template";
  * gate, in the same atomic push as the template branch below. */
 const ACTIONS_BRANCH = "actions";
 /** build-branches.yml's publish step name - the step-level publish proof;
- * twin of wait_for_build.ts's PUBLISH_STEP on the sync side. */
+ * twin of verify_build_provenance.ts's PUBLISH_STEP on the sync side. */
 const PUBLISH_STEP = "Build and publish";
 const repository = requireEnv("GITHUB_REPOSITORY");
 
 // The build stamps and composes SOURCE_SHA - the commit the publish's
-// run proof can vouch for: the sync's verification requires the stamped
-// run's head_sha to EQUAL the stamped source. On the workflow_run path
-// that is the completed CI run's head_sha (GITHUB_SHA there is the
-// CURRENT main tip, which can already be a newer - even red - commit
-// this run must not touch); on schedule and dispatch it is the trigger
-// commit itself. Composing origin/main NOW instead would break exactly
-// the run proof: stamping a newer tip against this run's fixed RUN_URL
-// hands the fleet a tip verify_build_provenance rejects (the plan job
-// then fails for every repo until the next build self-heals). The newer
-// tip's own CI run triggers the build that publishes it. A
+// run proof can vouch for (run_vouches.ts: the stamped run's head sha IS
+// the source, or the source is an on-main ancestor of it). On the
+// workflow_run path that is the completed CI run's head_sha (GITHUB_SHA
+// there is the CURRENT main tip, which can already be a newer - even red -
+// commit this run must not touch); on schedule and dispatch it is the
+// trigger commit itself. Composing origin/main NOW instead would break
+// exactly the run proof: stamping a newer tip against this run's fixed
+// RUN_URL hands the fleet a tip verify_build_provenance rejects (the plan
+// job then fails for every repo until the next build self-heals). The
+// newer tip's own CI run triggers the build that publishes it. A
 // workflow_dispatch aimed at any other ref would publish a build whose
 // run can never vouch for it either - refuse before any mutation.
 const ref = env("GITHUB_REF");
@@ -80,6 +91,21 @@ function resolves(revspec: string): string {
 
 function isAncestor(ancestor: string, descendant: string): boolean {
   return capture(["git", "merge-base", "--is-ancestor", ancestor, descendant]).exitCode === 0;
+}
+
+/** Whether a ref exists on origin, distinguishing ABSENT (git ls-remote
+ * --exit-code returns 2) from an OPERATIONAL failure (any other non-zero:
+ * a network blip, an auth error). A blip must never read as "branch
+ * absent" - that would send the publisher down the bootstrap/orphan path
+ * over a live branch and rewrite its history. On an operational failure
+ * we throw and let the run fail loudly instead. */
+function refExistsOnOrigin(ref: string): boolean {
+  const probe = capture(["git", "ls-remote", "--exit-code", "origin", ref]);
+  if (probe.exitCode === 0) return true;
+  if (probe.exitCode === 2) return false;
+  throw new Error(
+    `git ls-remote for ${ref} failed (exit ${probe.exitCode}): ${probe.stderr.trim()} - an operational failure, not an absent ref; re-run the build`,
+  );
 }
 
 // Returns a re-stamp reason when the branch tip's stamp would fail the
@@ -140,10 +166,22 @@ function restampReason(currentSourceSha: string): string {
     runProbe.stdout,
     "publish: actions/runs response",
   );
+  // The stamped run VOUCHES for the source when its head sha IS the source
+  // or the source is an on-main ancestor of it (run_vouches.ts). Strict
+  // head_sha === source is wrong for the workflow_run publisher: GitHub
+  // gives that run main's CURRENT tip as its head sha, which can be a
+  // later commit than the source it published, so equality would reject a
+  // legitimate stamp and re-stamp needlessly.
   if (
     run.path !== ".github/workflows/build-branches.yml" ||
     run.conclusion !== "success" ||
-    run.head_sha !== prevSrc
+    !runVouchesForSource({
+      runHeadSha: run.head_sha,
+      sourceSha: prevSrc,
+      mainRef: "origin/main",
+      resolveCommit: resolves,
+      isAncestor,
+    })
   ) {
     return `re-stamp: stamped run ${prevRun} does not vouch for source ${prevSrc.slice(0, 12)}`;
   }
@@ -151,8 +189,8 @@ function restampReason(currentSourceSha: string): string {
   // step skips via CI_GREEN and the run still concludes success at that
   // head_sha, so a stamp naming such a run would pass the checks above.
   // Require the publish step itself to have succeeded - the same
-  // step-level proof the sync side's wait_for_build.ts runPublished()
-  // uses (PUBLISH_STEP is its twin constant).
+  // step-level proof the sync side's verify_build_provenance.ts applies
+  // (PUBLISH_STEP is its twin constant).
   const jobsProbe = capture(["gh", "api", `repos/${repository}/actions/runs/${prevRun}/jobs`]);
   if (jobsProbe.exitCode !== 0) {
     throw new Error(
@@ -237,9 +275,7 @@ function prepareActionsBranch(sourceSha: string): PreparedBranch | null {
     "--dest",
     "/tmp/actions-tree",
   ]);
-  const exists =
-    capture(["git", "ls-remote", "--exit-code", "origin", `refs/heads/${ACTIONS_BRANCH}`])
-      .exitCode === 0;
+  const exists = refExistsOnOrigin(`refs/heads/${ACTIONS_BRANCH}`);
   if (exists) {
     must(["git", "fetch", "--quiet", "origin", ACTIONS_BRANCH]);
     must(["git", "worktree", "add", "--detach", "/tmp/actions-pub", `origin/${ACTIONS_BRANCH}`]);
@@ -321,14 +357,11 @@ function prepareTemplateBranch(sourceSha: string): PreparedBranch | null {
     must(["bun", "/tmp/src/.github/scripts/build-branches/branch_tree.ts", "--dest", "/tmp/tree"]);
   }
   console.log(`tree: ${treeSource}`);
-  const branchExists =
-    capture(["git", "ls-remote", "--exit-code", "origin", `refs/heads/${BRANCH}`]).exitCode === 0;
+  const branchExists = refExistsOnOrigin(`refs/heads/${BRANCH}`);
   if (branchExists) {
     must(["git", "fetch", "--quiet", "origin", BRANCH]);
     must(["git", "worktree", "add", "--detach", "/tmp/pub", `origin/${BRANCH}`]);
-  } else if (
-    capture(["git", "ls-remote", "--exit-code", "origin", "refs/heads/staging"]).exitCode === 0
-  ) {
+  } else if (refExistsOnOrigin("refs/heads/staging")) {
     // Transition seam from the retired staging/latest channel era: the
     // first build after the rename lands CONTINUES the old staging
     // history instead of minting a disconnected orphan, so every fleet
@@ -383,16 +416,31 @@ function prepareTemplateBranch(sourceSha: string): PreparedBranch | null {
  * already pushing actions - the old shape - let a stale run rewind the
  * executable actions ref and then skip template, leaving the two branches
  * shipping different sources. Either branch's tip being newer than this
- * run's source skips the whole publish: the tips only ever advance
- * together (one atomic push), so a newer stamp on one speaks for both.
+ * run's source skips the whole publish. The two branches do NOT always
+ * move together - a branch whose content is unchanged stays put while the
+ * other advances, so their source stamps can differ - but gating on
+ * EITHER being newer is the conservative check that still guarantees a
+ * stale run never rolls back the branch that DID advance past it.
  * Loud skip, green run: this is normal operation under concurrent pushes,
- * and the newer tip's own run already delivered the newer trees. */
-function stalePreflight(sourceSha: string): string {
+ * and the newer tip's own run already delivered the newer trees.
+ *
+ * Returns the staleness reason ("" when clear) AND the exact remote tip
+ * each branch was VALIDATED at (a per-branch snapshot; "" for an absent
+ * branch). The push leases against THESE tips, not the ones prepare later
+ * re-fetches: a newer publisher racing in between this snapshot and the
+ * push moves the ref off the snapshot, the lease fails, and the whole
+ * atomic push aborts - closing the window where prepare would otherwise
+ * build on (and lease) the newer tip and append this stale run's content
+ * on top of it. */
+function stalePreflight(sourceSha: string): { stale: string; tips: Map<string, string> } {
+  const tips = new Map<string, string>();
   for (const branch of [ACTIONS_BRANCH, BRANCH]) {
-    const exists =
-      capture(["git", "ls-remote", "--exit-code", "origin", `refs/heads/${branch}`]).exitCode === 0;
-    if (!exists) continue;
+    if (!refExistsOnOrigin(`refs/heads/${branch}`)) {
+      tips.set(branch, "");
+      continue;
+    }
     must(["git", "fetch", "--quiet", "origin", branch]);
+    tips.set(branch, mustCapture(["git", "rev-parse", `origin/${branch}`]));
     const tipSource = commitStampParse(
       mustCapture(["git", "log", "-1", "--format=%B", `origin/${branch}`]),
     );
@@ -404,24 +452,44 @@ function stalePreflight(sourceSha: string): string {
         resolves(`${descendant}^{commit}`) !== "" &&
         isAncestor(ancestor, descendant),
     );
-    if (stale !== "") return `${branch}: ${stale}`;
+    if (stale !== "") return { stale: `${branch}: ${stale}`, tips };
   }
-  return "";
+  return { stale: "", tips };
 }
 
-/** One push, atomic across both refs: either every prepared branch
- * advances or none does, so a partial failure (or any push race the
- * serializing concurrency group ever fails to prevent) cannot leave
- * `actions` and `template` shipping different sources. Plain fast-forward
- * refspecs, never force: the branches are append-only, and a ref that
- * moved since the preflight's fetch rejects the whole push loudly. */
-function pushPrepared(prepared: PreparedBranch[]): void {
+/** One push, atomic across both refs AND check-and-set on each. Every
+ * EXISTING delivery branch the preflight validated goes into the
+ * transaction, leased against the tip the preflight saw: a CHANGED branch
+ * pushes its prepared commit, an UNCHANGED-but-existing branch pushes its
+ * own preflight tip (a no-op update whose only job is to carry the lease).
+ * So a concurrent publisher that advanced EITHER branch since the
+ * preflight - even the one this run left unchanged - moves it off the
+ * leased tip, fails the lease, and aborts the WHOLE atomic push. Without
+ * the no-op guard this run could land its (older) source on the branch it
+ * changed while the other branch moved ahead, splitting the two delivery
+ * branches across different sources. The lease is pure CAS: every real
+ * update is a fast-forward when its lease holds (the prepared commit is a
+ * child of the leased tip); a "" lease (bootstrap) requires the ref to
+ * still not exist. An absent, unchanged branch is neither pushed nor
+ * guarded - there is nothing to protect. */
+function pushPrepared(prepared: PreparedBranch[], preflightTips: Map<string, string>): void {
   if (prepared.length === 0) return;
-  const refspecs = prepared.map(
-    (branch) =>
-      `${mustCapture(["git", "-C", branch.dir, "rev-parse", "HEAD"])}:refs/heads/${branch.branch}`,
-  );
-  must(["git", "push", "--atomic", "origin", ...refspecs]);
+  const preparedByBranch = new Map(prepared.map((entry) => [entry.branch, entry]));
+  const leases: string[] = [];
+  const refspecs: string[] = [];
+  for (const branch of [ACTIONS_BRANCH, BRANCH]) {
+    const tip = preflightTips.get(branch) ?? "";
+    const entry = preparedByBranch.get(branch);
+    if (entry !== undefined) {
+      const head = mustCapture(["git", "-C", entry.dir, "rev-parse", "HEAD"]);
+      leases.push(`--force-with-lease=refs/heads/${branch}:${tip}`);
+      refspecs.push(`${head}:refs/heads/${branch}`);
+    } else if (tip !== "") {
+      leases.push(`--force-with-lease=refs/heads/${branch}:${tip}`);
+      refspecs.push(`${tip}:refs/heads/${branch}`);
+    }
+  }
+  must(["git", "push", "--atomic", ...leases, "origin", ...refspecs]);
   for (const branch of prepared) {
     const short = mustCapture(["git", "-C", branch.dir, "rev-parse", "--short", "HEAD"]);
     console.log(`${branch.branch}: pushed ${short} (${branch.note})`);
@@ -480,13 +548,13 @@ if (notGreen !== null) {
 // prepared or pushed; the prepared commits then land in one atomic push
 // (actions listed first: a fresh template render pins @actions, so the
 // ref its pins resolve against advances in the same stroke, never after).
-const staleness = stalePreflight(sourceSha);
-if (staleness !== "") {
-  console.log(`skipping publish - ${staleness}`);
+const { stale, tips } = stalePreflight(sourceSha);
+if (stale !== "") {
+  console.log(`skipping publish - ${stale}`);
 } else {
   const prepared = [prepareActionsBranch(sourceSha), prepareTemplateBranch(sourceSha)].filter(
     (branch): branch is PreparedBranch => branch !== null,
   );
-  pushPrepared(prepared);
+  pushPrepared(prepared, tips);
 }
 sweepPendingRefs(sourceSha);
