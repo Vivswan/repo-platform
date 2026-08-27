@@ -2,7 +2,7 @@
 # Module manifest (schema and loader: scripts/module_manifests.ts).
 description: Deno toolchain (deno fmt/lint, deno dependabot, CodeQL JS)
 ownership:
-  - { path: .dvmrc, class: managed }
+  - { path: .dvmrc, class: managed, headerless: true }
   - { path: .github/workflows/deno-audit.yml, class: managed }
 toolchain:
   codeql_language: javascript-typescript

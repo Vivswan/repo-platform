@@ -194,9 +194,20 @@ const hashMarker = (what: string) =>
 
 /** One declared file. Exported for scripts/module_manifests.ts (module
  *  `ownership:` lists) and loadBaseOwnership below - one schema, so the
- *  two declaration homes can never diverge in shape. */
+ *  two declaration homes can never diverge in shape.
+ *
+ *  `headerless: true` on a managed declaration says the file has no
+ *  comment channel to carry the managed header (a symlink, a version pin,
+ *  JSON): the validator then enforces its manifest class alone. It is
+ *  DECLARED, never inferred from the source text - inferring it from a
+ *  missing header would let deleting the header silently downgrade the
+ *  file's enforcement, the exact bypass the header guards against. */
 export const ownershipEntrySchema = z.discriminatedUnion("class", [
-  z.strictObject({ path: declaredPath, class: z.literal("managed") }),
+  z.strictObject({
+    path: declaredPath,
+    class: z.literal("managed"),
+    headerless: z.literal(true).optional(),
+  }),
   z.strictObject({ path: declaredPath, class: z.literal("starter") }),
   z.discriminatedUnion("grammar", [
     z.strictObject({
@@ -243,11 +254,13 @@ export const ownershipEntrySchema = z.discriminatedUnion("class", [
 
 export type OwnershipDeclaration = z.infer<typeof ownershipEntrySchema>;
 
-type OmitPath<T> = T extends { path: string } ? Omit<T, "path"> : never;
+type OmitPath<T> = T extends { path: string } ? Omit<T, "path" | "headerless"> : never;
 
-/** A declaration's ownership without its path: what the manifest entry
- *  records for the landed file. Derived from the schema inference, so a
- *  schema change cannot leave this union behind. */
+/** A declaration's ownership without its path or enforcement mode: what
+ *  the manifest entry records for the landed file (`headerless` steers the
+ *  validator's tables, not the sync, so it stays out of the manifest).
+ *  Derived from the schema inference, so a schema change cannot leave this
+ *  union behind. */
 export type ManifestOwnership = OmitPath<OwnershipDeclaration>;
 
 export type SplitOwnership = Extract<ManifestOwnership, { class: "split" }>;
@@ -261,6 +274,10 @@ export function managedSide(split: SplitOwnership): "above" | "below" {
 
 export function ownershipOf(declaration: OwnershipDeclaration): ManifestOwnership {
   const { path: _path, ...ownership } = declaration;
+  if (ownership.class === "managed") {
+    const { headerless: _headerless, ...manifest } = ownership;
+    return manifest;
+  }
   return ownership;
 }
 
@@ -818,26 +835,22 @@ function landedFiles(
   return out;
 }
 
-/** The enforcement a declaration gets in the validator's tables: "header"
- *  for a managed file whose source carries the managed header,
- *  "class-only" for a managed file with no comment channel (pin dotfiles,
- *  JSON, symlinks) - nothing to check in-file, but the path must still
- *  reach the validator's manifest cross-check or a hand-flipped class
- *  would silently exempt it from byte parity - and "marker" for a
- *  tail-marker split with its exact marker line. null for starters
- *  (repo-owned; nothing to enforce) and bounded-region splits (their
- *  grammar is enforced by the region tables, not a kind). */
-function enforcementOf(
-  declaration: OwnershipDeclaration,
-  source: string | null,
-): OwnershipEntry | null {
+/** The enforcement a declaration gets in the validator's tables, mapped
+ *  from the DECLARATION alone (see the schema's headerless note): "header"
+ *  for a managed file, "class-only" for a managed file declared headerless
+ *  (nothing to check in-file, but the path must still reach the manifest
+ *  cross-check or a hand-flipped class would silently exempt it from byte
+ *  parity), "marker" for a tail-marker split. null for starters
+ *  (repo-owned; nothing to enforce) and bounded-region splits (the region
+ *  tables carry their grammar, not a kind). */
+function enforcementOf(declaration: OwnershipDeclaration): OwnershipEntry | null {
   switch (declaration.class) {
     case "starter":
       return null;
     case "managed":
-      return source !== null && hasManagedHeader(source)
-        ? { path: declaration.path, kind: "header" }
-        : { path: declaration.path, kind: "class-only" };
+      return declaration.headerless === true
+        ? { path: declaration.path, kind: "class-only" }
+        : { path: declaration.path, kind: "header" };
     case "split":
       return declaration.grammar === "tail-marker"
         ? { path: declaration.path, kind: "marker", marker: declaration.marker }
@@ -847,6 +860,32 @@ function enforcementOf(
       throw new Error(`unhandled ownership class: ${JSON.stringify(unhandled)}`);
     }
   }
+}
+
+/** The one error a managed declaration's header mode can produce against
+ *  its source, or null. Both drift directions are loud: a deleted header
+ *  fails regeneration instead of silently downgrading enforcement, and a
+ *  headerless declaration whose file grew a header names the stale
+ *  declaration. */
+function headerModeError(
+  declaration: OwnershipDeclaration,
+  source: string | null,
+  where: string,
+): string | null {
+  if (declaration.class !== "managed") return null;
+  if (declaration.headerless === true) {
+    return source !== null && hasManagedHeader(source)
+      ? `${where}: '${declaration.path}' is declared headerless but its source opens ` +
+          "with the managed header - the validator would not enforce the header it " +
+          "carries; drop `headerless: true` or the header"
+      : null;
+  }
+  return source === null || !hasManagedHeader(source)
+    ? `${where}: '${declaration.path}' is declared managed but its source does not ` +
+        "open with the managed header - the validator enforces the header on every " +
+        "rendered copy; add the header, or declare `headerless: true` if the format " +
+        "has no comment channel"
+    : null;
 }
 
 /** The rendered paths, per module, whose ownership declaration the
@@ -883,6 +922,10 @@ export function moduleOwnershipEntries(
             `${m.module}/ file lands there - fix the path or delete the entry`,
         );
       }
+      // Checked before the gate skip: a gated managed file's header mode
+      // must hold too, even though the module tables never enforce it.
+      const headerDrift = headerModeError(declaration, file.source, where);
+      if (headerDrift !== null) throw new Error(headerDrift);
       // Filename-gated files only declare: module selection alone does not
       // render them, so the module-keyed tables must not enforce them.
       if (file.gates.length > 0) continue;
@@ -893,7 +936,7 @@ export function moduleOwnershipEntries(
             "moduleOwnershipEntries and the validator's region tables together",
         );
       }
-      const entry = enforcementOf(declaration, file.source);
+      const entry = enforcementOf(declaration);
       if (entry !== null) entries.push(entry);
     }
     if (entries.length > 0) result[m.module] = entries;
@@ -972,6 +1015,8 @@ export function baseOwnershipTables(templatesDir: string): {
           "lands there - fix the path or delete the entry",
       );
     }
+    const headerDrift = headerModeError(declaration, file.source, where);
+    if (headerDrift !== null) throw new Error(headerDrift);
     if (declaration.class === "split" && declaration.grammar === "bounded-region") {
       const when = translateGates(file.gates, `templates/base/${file.templateRel}`);
       if (when !== undefined) {
@@ -989,7 +1034,7 @@ export function baseOwnershipTables(templatesDir: string): {
       };
       continue;
     }
-    const entry = enforcementOf(declaration, file.source);
+    const entry = enforcementOf(declaration);
     if (entry === null) continue;
     const when = translateGates(file.gates, `templates/base/${file.templateRel}`);
     enforced.push(when === undefined ? entry : { ...entry, when });

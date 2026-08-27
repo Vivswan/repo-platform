@@ -29,6 +29,11 @@ const HTML_SENTINEL = "<!-- repo-platform:local-section -->";
 const HASH_SENTINEL = "# repo-platform:local-section";
 
 const managed = (path: string): OwnershipDeclaration => ({ path, class: "managed" });
+const headerless = (path: string): OwnershipDeclaration => ({
+  path,
+  class: "managed",
+  headerless: true,
+});
 const starter = (path: string): OwnershipDeclaration => ({ path, class: "starter" });
 const tail = (path: string, marker: string): OwnershipDeclaration => ({
   path,
@@ -114,6 +119,27 @@ describe("ownershipEntrySchema", () => {
     expect(ownershipEntrySchema.safeParse({ ...managed("X.md"), marker: "# m" }).success).toBe(
       false,
     );
+  });
+
+  test("headerless is a managed-only literal-true flag", () => {
+    // The no-header enforcement mode is DECLARED, never inferred: only
+    // `headerless: true` on a managed entry is representable.
+    expect(ownershipEntrySchema.parse(headerless(".bun-version"))).toEqual(
+      headerless(".bun-version"),
+    );
+    expect(
+      ownershipEntrySchema.safeParse({ path: "X.md", class: "managed", headerless: false }).success,
+    ).toBe(false);
+    expect(ownershipEntrySchema.safeParse({ ...starter("X.md"), headerless: true }).success).toBe(
+      false,
+    );
+    expect(
+      ownershipEntrySchema.safeParse({ ...tail("X.md", "# m"), headerless: true }).success,
+    ).toBe(false);
+  });
+
+  test("headerless steers the tables but stays out of the manifest entry", () => {
+    expect(ownershipOf(headerless(".bun-version"))).toEqual({ class: "managed" });
   });
 
   test("rejects paths outside the clean landed form", () => {
@@ -732,10 +758,10 @@ describe("moduleOwnershipEntries", () => {
     try {
       const manifests = [
         moduleManifest([
-          managed(".bun-version"),
+          headerless(".bun-version"),
           managed(".github/workflows/managed.yml"),
           starter(".github/workflows/starter.yml"),
-          managed("LINK.md"),
+          headerless("LINK.md"),
           tail("SPLIT.md", HTML_SENTINEL),
         ]),
       ];
@@ -775,6 +801,67 @@ describe("moduleOwnershipEntries", () => {
       expect(() =>
         moduleOwnershipEntries([moduleManifest([managed("real.yml"), managed("ghost.yml")])], dir),
       ).toThrow("no templates/bun/ file lands there");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  // The header enforcement mode is declared, so both drift directions are
+  // loud. Inferring class-only from a missing header would let deleting a
+  // header silently downgrade the file's enforcement - the exact bypass
+  // the header guards against.
+  test("a managed source without a header throws unless declared headerless", () => {
+    const dir = writeTree({ "bun/bare.yml.jinja": "name: bare, no header\n" });
+    try {
+      expect(() => moduleOwnershipEntries([moduleManifest([managed("bare.yml")])], dir)).toThrow(
+        "does not open with the managed header",
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a GATED managed source without a header throws too", () => {
+    // Gated files skip the module tables, but their header mode must still
+    // hold - the render carries whatever the source says.
+    const dir = writeTree({
+      "bun/managed.yml.jinja": `${HEADER}name: M\n`,
+      "bun/{% if not private %}gated.yml{% endif %}.jinja": "name: bare\n",
+    });
+    try {
+      expect(() =>
+        moduleOwnershipEntries(
+          [moduleManifest([managed("managed.yml"), managed("gated.yml")])],
+          dir,
+        ),
+      ).toThrow("does not open with the managed header");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a headerless declaration whose source carries a header throws", () => {
+    const dir = writeTree({ "bun/pinned.txt": `${HEADER}1.0.0\n` });
+    try {
+      expect(() =>
+        moduleOwnershipEntries([moduleManifest([headerless("pinned.txt")])], dir),
+      ).toThrow("declared headerless but its source opens with the managed header");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a symlink declared managed without headerless throws", () => {
+    // A symlink has no comment channel; the declaration must say so
+    // explicitly rather than the absence of a header deciding it.
+    const dir = writeTree({
+      "bun/AGENTS.md.jinja": `${HEADER}body\n`,
+      "bun/LINK.md": { symlink: "AGENTS.md.jinja" },
+    });
+    try {
+      expect(() =>
+        moduleOwnershipEntries([moduleManifest([managed("AGENTS.md"), managed("LINK.md")])], dir),
+      ).toThrow("does not open with the managed header");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -847,7 +934,7 @@ describe("baseOwnershipTables", () => {
     '    managed_end: "# END REPO-PLATFORM MANAGED"',
     '    local_begin: "# BEGIN REPOSITORY LOCAL"',
     '    local_end: "# END REPOSITORY LOCAL"',
-    "  - { path: .pin, class: managed }",
+    "  - { path: .pin, class: managed, headerless: true }",
     "  - { path: .gitleaks.toml, class: starter }",
     "",
   ];
@@ -906,12 +993,31 @@ describe("baseOwnershipTables", () => {
       ...BASE_DECLS.slice(0, -1).map((line) =>
         line.replaceAll("<-- never used -->", HTML_SENTINEL),
       ),
-      "  - { path: ghost.md, class: managed }",
+      "  - { path: ghost.md, class: managed, headerless: true }",
       "",
     ];
     const dir = withBase(decls, BASE_FILES);
     try {
       expect(() => baseOwnershipTables(dir)).toThrow("no templates/base/ file lands there");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a comment-capable managed base file without a header throws", () => {
+    // The base derivation shares the declared header-mode rule: deleting
+    // the header from a managed base template fails regeneration instead
+    // of silently downgrading enforcement to class-only.
+    const decls = [
+      ...BASE_DECLS.slice(0, -1).map((line) =>
+        line.replaceAll("<-- never used -->", HTML_SENTINEL),
+      ),
+      "  - { path: bare.yml, class: managed }",
+      "",
+    ];
+    const dir = withBase(decls, { ...BASE_FILES, "base/bare.yml.jinja": "name: bare\n" });
+    try {
+      expect(() => baseOwnershipTables(dir)).toThrow("does not open with the managed header");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

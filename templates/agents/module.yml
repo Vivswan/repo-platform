@@ -4,11 +4,11 @@ description: AGENTS.md agent instructions, agent-file symlinks, Copilot setup
 # Every file the module lands (paths are landed paths; the .github/*.md
 # entries and CLAUDE.md are symlinks to AGENTS.md, managed like any render).
 ownership:
-  - { path: .github/agents.md, class: managed }
-  - { path: .github/copilot-instructions.md, class: managed }
+  - { path: .github/agents.md, class: managed, headerless: true }
+  - { path: .github/copilot-instructions.md, class: managed, headerless: true }
   - { path: .github/workflows/copilot-setup-steps.yml, class: starter }
   - path: AGENTS.md
     class: split
     grammar: tail-marker
     marker: "<!-- repo-platform:local-section -->"
-  - { path: CLAUDE.md, class: managed }
+  - { path: CLAUDE.md, class: managed, headerless: true }
