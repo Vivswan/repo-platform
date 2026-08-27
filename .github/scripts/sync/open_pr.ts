@@ -16,6 +16,7 @@ import { closeSync, existsSync, openSync, readFileSync, readSync, statSync } fro
 import { join } from "node:path";
 import { env, hideDetails, requireEnv, setOutput } from "../shared/gha.ts";
 import { capture, mustCapture } from "../shared/proc.ts";
+import { clip } from "./preserve_local_content.ts";
 import { REMOVED_SPLITS_NAME, SETTINGS_LAYERING_NAME, TAIL_SHRANK_NAME } from "./section_files.ts";
 
 const target = requireEnv("TARGET");
@@ -45,8 +46,14 @@ function lines(path: string): string[] {
 
 // From resolve_refs.ts via file (not a step output: the value is
 // target-controlled and step outputs surface in env-group prints). This
-// body ships to the private repo, so the raw value is fine HERE.
-const oldCommit = readFileSync(join(runnerTemp, "old_commit.txt"), "utf-8");
+// body ships to the private repo, so the VALUE is fine here - but its
+// SIZE is not: resolve_refs bounds nothing (a long-but-valid revision
+// expression still resolves), and the base body sits outside the section
+// budget, so an unbounded value would inflate it until the reserved
+// validation excerpt no longer fits. Display-only, so clip it (bounded,
+// control bytes escaped - a NUL would kill gh's argv); the real value
+// stays in old_commit.txt for anything that consumes it.
+const oldCommit = clip(slurp(join(runnerTemp, "old_commit.txt")));
 
 // TARGET_REF is the verified commit (pinned by resolve_refs.ts), so
 // DISPLAY (template@<sha>) drives the source line.

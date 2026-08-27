@@ -317,6 +317,28 @@ describe("open_pr sections and auto-merge", () => {
     expect(r.merged).toBe(false);
   });
 
+  test("an oversized recorded _commit cannot starve the reserved validation excerpt", () => {
+    // The base body sits OUTSIDE the section budget and interpolates the
+    // target's recorded _commit, which resolve_refs leaves unbounded (a
+    // long-but-valid revision expression still resolves) - display must
+    // clip it, or the inflated base pushes the reserved section out.
+    const hugeOldCommit = `abc1234${"^0".repeat(30000)}`;
+    const capture = `validation diagnostic sentinel line ${"d".repeat(30000)}`;
+    const r = run({
+      temp: {
+        "old_commit.txt": hugeOldCommit,
+        "hidden-template-validation.log": capture,
+      },
+      env: { VALIDATION: "failed", HIDE_DETAILS: "true" },
+    });
+    expect(r.exitCode).toBe(0);
+    expect(Buffer.byteLength(r.body, "utf-8")).toBeLessThan(65536);
+    expect(r.body).toContain("- Previous: `abc1234^0");
+    expect(r.body).toContain("[clipped]");
+    expect(r.body).toContain("validation diagnostic sentinel line");
+    expect(r.merged).toBe(false);
+  });
+
   test("a huge capture is excerpted from a bounded prefix, not decoded whole", () => {
     // run_hidden writes the capture uncapped; only a prefix may ever be
     // read (an unbounded decode could stall or exhaust memory before the
