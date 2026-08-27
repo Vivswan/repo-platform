@@ -175,6 +175,32 @@ describe("dataFileYaml", () => {
     expect(() => dataFileYaml('desc: "a\\u0085b"\n', null)).toThrow(/cannot ride a data file/);
   });
 
+  test("an escape-hidden lone surrogate is refused on the DECODED value", () => {
+    // JSON.stringify and the yaml emitter both keep a lone surrogate as a
+    // plain-ASCII backslash-u escape, so a serialized-text scan alone
+    // fails open - PyYAML decodes the escape into a value Python cannot
+    // encode to UTF-8 and copier crashes mid-render.
+    const carried = 'desc: "a\\ud800b"\n';
+    expect(() => dataFileYaml(carried, null)).toThrow(AnswersFileError);
+    expect(() => dataFileYaml(carried, null)).toThrow(/lone surrogate/);
+    // A live value carrying an ACTUAL lone surrogate is refused the same
+    // way (its JSON escape decodes right back).
+    expect(() =>
+      dataFileYaml("keep: x\n", {
+        modules: [],
+        private: false,
+        description: `a${String.fromCharCode(0xd800)}b`,
+      }),
+    ).toThrow(/lone surrogate/);
+  });
+
+  test("literal backslash-u text as CONTENT is not a surrogate (no false positive)", () => {
+    // Single quotes make the seven characters backslash-u-d-8-0-0 literal
+    // content; decoded they stay ASCII and must ride through verbatim.
+    const literal = "desc: 'a\\ud800b'\n";
+    expect(dataFileYaml(literal, null)).toBe(literal);
+  });
+
   test("a carried LS/PS escape is NOT refused (PyYAML preserves the raw character)", () => {
     // Verified against PyYAML 6.0.3: raw U+2028/U+2029 in a double-quoted
     // scalar parse identically to their escapes, so re-emitting them raw

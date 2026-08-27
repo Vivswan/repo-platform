@@ -10,7 +10,6 @@ import { describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { hasDuplicateJsonKeys } from "../../.github/scripts/shared/json.ts";
 import type { SplitEntry } from "../../.github/scripts/sync/preserve_local_content.ts";
 import {
   compareHalves,
@@ -265,10 +264,10 @@ describe("headSplitEntries", () => {
   });
 
   test("the same key in DIFFERENT objects is not a duplicate (every entry carries class)", () => {
-    expect(hasDuplicateJsonKeys('{"a": {"class": "split"}, "b": {"class": "managed"}}')).toBe(
-      false,
-    );
-    expect(hasDuplicateJsonKeys('{"a": ["x", "x"], "b": {"a": 1}}')).toBe(false);
+    // Core tokenizer cases live in tests/shared/json.test.ts (the shared
+    // helper's twin); this pins the consumer accepting a normal manifest.
+    const map = headSplitEntries(manifestText({ "AGENTS.md": rawTail() }), "t");
+    expect(map.get("AGENTS.md")?.kind).toBe("grammar");
   });
 
   test("an unknown or missing ownership class throws instead of reading as non-split", () => {

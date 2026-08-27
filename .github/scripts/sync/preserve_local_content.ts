@@ -832,32 +832,41 @@ export function fenceFor(lines: string[]): string {
   return "`".repeat(longest + 1);
 }
 
-/** A markdown-fenced excerpt of dropped lines, indented for a list item
- * and charged against the shared byte budget: shows what fits, reports
- * what it spent, or null when not even one line fits (the caller then
- * writes a count-only note). */
-function fencedResetExcerpt(
+/** A markdown-fenced excerpt of dropped lines, charged against the shared
+ * budget by its COMPLETE rendered size - a backtick-run line inflates the
+ * fences far past the line bytes alone. Sheds trailing lines until the
+ * true total fits; null when nothing fits (the caller writes a count-only
+ * note). Exported for its unit tests. */
+export function fencedResetExcerpt(
   lines: string[],
   budget: number,
 ): { text: string; cost: number } | null {
   const shown: string[] = [];
-  let cost = 0;
+  let spent = 0;
   for (const line of lines) {
     if (shown.length >= MAX_EXCERPT_LINES) break;
     const clipped = clip(line);
     const lineCost = Buffer.byteLength(clipped, "utf-8") + 3;
-    if (cost + lineCost > budget) break;
-    cost += lineCost;
+    if (spent + lineCost > budget) break;
+    spent += lineCost;
     shown.push(clipped);
   }
-  if (shown.length === 0) return null;
-  const fence = fenceFor(shown);
-  const omitted = lines.length - shown.length;
-  const tail = omitted > 0 ? `\n  (${omitted} more; see this file's diff)` : "";
-  return {
-    text: `  ${fence}text\n${shown.map((line) => `  ${line}`).join("\n")}\n  ${fence}${tail}`,
-    cost,
+  const render = () => {
+    const fence = fenceFor(shown);
+    const omitted = lines.length - shown.length;
+    const tail = omitted > 0 ? `\n  (${omitted} more; see this file's diff)` : "";
+    return `  ${fence}text\n${shown.map((line) => `  ${line}`).join("\n")}\n  ${fence}${tail}`;
   };
+  // The line loop only approximates: verify the true rendered size and
+  // shed lines until it fits (popping a backtick-heavy line also shrinks
+  // the fence, so this always converges).
+  while (shown.length > 0) {
+    const text = render();
+    const cost = Buffer.byteLength(text, "utf-8");
+    if (cost <= budget) return { text, cost };
+    shown.pop();
+  }
+  return null;
 }
 
 function main(argv: string[]): number {

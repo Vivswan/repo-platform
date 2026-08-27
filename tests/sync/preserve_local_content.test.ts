@@ -14,6 +14,7 @@ import { dirname, join } from "node:path";
 import {
   carryLocalRegion,
   carryManagedTail,
+  fencedResetExcerpt,
   splitEntries,
 } from "../../.github/scripts/sync/preserve_local_content.ts";
 import { GITIGNORE_REGION } from "../../scripts/gitignore_local.ts";
@@ -686,6 +687,38 @@ describe("preserve_local_content script (recopy mode)", () => {
     expect(result.exitCode).toBe(0);
     expect(result.summary).toBe("");
     expect(result.stdout).toContain("no repo-local content needed carrying over");
+  });
+});
+
+describe("fencedResetExcerpt", () => {
+  test("the charged cost is the COMPLETE rendered size, fences included", () => {
+    const result = fencedResetExcerpt(["plain line"], 1000);
+    expect(result).not.toBeNull();
+    expect(result?.cost).toBe(Buffer.byteLength(result?.text ?? "", "utf-8"));
+    expect(result?.cost ?? 0).toBeGreaterThan(Buffer.byteLength("plain line", "utf-8"));
+  });
+
+  test("a backtick-heavy line's inflated fence cannot overrun the budget", () => {
+    // A 290-backtick line forces two ~291-backtick fences the old
+    // accounting never charged; the true rendered size must respect the
+    // budget or fall to null (the caller's count-only note).
+    const lines = ["`".repeat(290), "ordinary dropped line"];
+    const budget = 320; // fits the backtick line's bytes but not its fences
+    const result = fencedResetExcerpt(lines, budget);
+    if (result !== null) {
+      expect(Buffer.byteLength(result.text, "utf-8")).toBeLessThanOrEqual(budget);
+      expect(result.cost).toBe(Buffer.byteLength(result.text, "utf-8"));
+    }
+    // A comfortable budget itemizes everything, still fully charged.
+    const roomy = fencedResetExcerpt(lines, 4096);
+    expect(roomy).not.toBeNull();
+    expect(roomy?.text).toContain("ordinary dropped line");
+    expect(Buffer.byteLength(roomy?.text ?? "", "utf-8")).toBeLessThanOrEqual(4096);
+    expect(roomy?.cost).toBe(Buffer.byteLength(roomy?.text ?? "", "utf-8"));
+  });
+
+  test("null when not even one line fits the true rendered size", () => {
+    expect(fencedResetExcerpt(["x".repeat(200)], 50)).toBeNull();
   });
 });
 

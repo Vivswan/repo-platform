@@ -4,7 +4,7 @@
 // semantics.
 
 import { readFileSync } from "node:fs";
-import { isMap, isScalar, parse, parseAllDocuments, parseDocument } from "yaml";
+import { isMap, isScalar, parse, parseAllDocuments, parseDocument, visit } from "yaml";
 
 export interface CopierAnswers {
   /** The recorded _commit VERBATIM, or "" when absent or not a string.
@@ -70,12 +70,14 @@ const LIVE_KEYS = ["modules", "private", "description"] as const;
 
 /** A string as a PyYAML-safe YAML double-quoted scalar. JSON string
  * literals are a valid YAML double-quote subset (JSON.stringify emits only
- * escapes YAML also defines, and escapes lone surrogates itself), EXCEPT
- * that JSON leaves some characters raw which YAML 1.1 treats specially:
- * NEL/LS/PS are LINE BREAKS there (PyYAML would fold them to spaces), and
- * DEL, the other C1 controls, and the U+FFFE/U+FFFF non-characters are
- * outside YAML's printable set (PyYAML rejects the file). Those are
- * re-escaped as \\uXXXX, which PyYAML reads back verbatim. */
+ * escapes YAML also defines), EXCEPT that JSON leaves some characters raw
+ * which YAML 1.1 treats specially: NEL/LS/PS are LINE BREAKS there (PyYAML
+ * would fold them to spaces), and DEL, the other C1 controls, and the
+ * U+FFFE/U+FFFF non-characters are outside YAML's printable set (PyYAML
+ * rejects the file). Those are re-escaped as \\uXXXX, which PyYAML reads
+ * back verbatim. Lone surrogates become escapes here too, but the escape
+ * still DECODES to a value copier cannot render - the postcondition's
+ * decoded-scalar check refuses those. */
 function yamlDoubleQuoted(value: string): string {
   return JSON.stringify(value).replace(
     /[\u007f-\u009f\u2028\u2029\ufffe\uffff]/g,
@@ -191,6 +193,24 @@ export function dataFileYaml(text: string, live: LiveRenderData | null): string 
   if (docs.length !== 1 || docs[0].errors.length > 0) throw shapeError();
   const outMap = docs[0].contents;
   if (!isMap(outMap)) throw shapeError();
+  // Escape-hidden surrogates pass the serialized-text scan (both emitters
+  // keep them as plain-ASCII escapes), yet PyYAML decodes them into values
+  // Python cannot UTF-8-encode - so the DECODED scalars are checked too.
+  let decodedSurrogate = false;
+  visit(docs[0], {
+    Scalar(_key, node) {
+      if (typeof node.value === "string" && LONE_SURROGATE_RE.test(node.value)) {
+        decodedSurrogate = true;
+        return visit.BREAK;
+      }
+    },
+  });
+  if (decodedSurrogate) {
+    throw new AnswersFileError(
+      "a recorded or live answer carries a lone surrogate (visible only once its escape " +
+        "is decoded) - refusing to hand copier a data file it cannot render",
+    );
+  }
   if (live !== null) {
     for (const key of LIVE_KEYS) {
       const count = outMap.items.filter(
