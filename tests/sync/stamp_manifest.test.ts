@@ -9,6 +9,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import {
   entryHash,
+  isMarkerLine,
   managedHalf,
   recordedCommit,
   resolveConflictsTowardAfter,
@@ -31,6 +32,20 @@ function tree(files: Record<string, string>): string {
 function manifestText(entries: string[]): string {
   return `{\n  "$comment": "test",\n  "files": {\n${entries.join(",\n")}\n  }\n}\n`;
 }
+
+describe("isMarkerLine", () => {
+  test("trim semantics: stray whitespace and a CR still count, substrings do not", () => {
+    // THE shared predicate: the stamper, the carries, and the validator's
+    // twin must agree on what a marker line is - a trailing space used to
+    // count at two of three sites and not the third.
+    expect(isMarkerLine("# m", "# m")).toBe(true);
+    expect(isMarkerLine("# m ", "# m")).toBe(true);
+    expect(isMarkerLine("  # m", "# m")).toBe(true);
+    expect(isMarkerLine("# m\r", "# m")).toBe(true);
+    expect(isMarkerLine("x # m", "# m")).toBe(false);
+    expect(isMarkerLine("# mx", "# m")).toBe(false);
+  });
+});
 
 describe("managedHalf", () => {
   const content = "top\n# repo-platform:local-section\ntail\n";
@@ -267,6 +282,20 @@ describe("stampManifestText", () => {
     const { out, problem } = stampManifestText(text, root);
     expect(out).toBe(text);
     expect(problem).toMatch(/does not parse/);
+  });
+
+  test("a duplicated entry line for one path fails loudly, never launders", () => {
+    // Duplicate JSON keys last-win at parse time, so a duplicate line (a
+    // bad conflict resolution) can flip a path's ownership class with no
+    // parse error; stamping both lines would deliver a plausibly-stamped
+    // manifest carrying the flip. The second line here has NO hash token -
+    // the starter-shaped flip - and must still be refused.
+    const root = tree({ "CLAUDE.md": "content\n" });
+    const text = manifestText([
+      '    "CLAUDE.md": {"class": "managed", "hash": null}',
+      '    "CLAUDE.md": {"class": "starter"}',
+    ]);
+    expect(() => stampManifestText(text, root)).toThrow(/more than one entry line for CLAUDE\.md/);
   });
 });
 

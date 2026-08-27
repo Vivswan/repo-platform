@@ -118,6 +118,20 @@ export function resolveConflictsTowardAfter(text: string): string {
   return out.join("\n");
 }
 
+/** THE marker-line predicate: a line is a split entry's marker line when
+ *  its trimmed text equals the marker exactly. One owner for every
+ *  splitter in the sync pipeline (this stamper's managedHalf,
+ *  preserve_local_content's carries) - three sites once held three
+ *  definitions, and the strictest (exact match after CR-strip) sent a
+ *  marker line with one trailing space down the appendix path while the
+ *  other two still counted it, delivering a tree the validator rejects.
+ *  trim semantics on purpose: it is the most tolerant of the three, and
+ *  the validator's self-contained twin (validate_generated_files.ts, kept
+ *  matching by its own comment) already matches on line.trim(). */
+export function isMarkerLine(line: string, marker: string): boolean {
+  return line.trim() === marker;
+}
+
 /** A split entry's managed half: through the first marker line's newline
  *  for managed "above", from the start of the marker line for "below".
  *  `content` is latin1 text (byte-faithful); null when the marker line is
@@ -130,7 +144,7 @@ export function managedHalf(
   let offset = 0;
   for (const line of content.split("\n")) {
     const end = offset + line.length;
-    if (line.trim() === marker) {
+    if (isMarkerLine(line, marker)) {
       return managed === "above"
         ? content.slice(0, Math.min(end + 1, content.length))
         : content.slice(offset);
@@ -188,7 +202,12 @@ export function entryHash(root: string, path: string, entry: ManifestEntryShape)
  *  replaced with the honest value, and the self entry's commit token with
  *  the render's recorded _commit (its hash stays null - see the manifest's
  *  $comment). Returns the input unchanged with a problem message when the
- *  text does not parse. */
+ *  text does not parse. THROWS on a duplicated entry line for one path: a
+ *  bad conflict resolution can leave the same path's line twice, duplicate
+ *  JSON keys last-win at parse time (so a duplicate can flip a path's
+ *  class with no parse error), and stamping both lines would launder the
+ *  duplicate into a plausibly-stamped manifest - that is corruption to
+ *  refuse, not data to pass through. */
 export function stampManifestText(
   text: string,
   root: string,
@@ -214,12 +233,25 @@ export function stampManifestText(
   }
   const files = manifest.files as Record<string, ManifestEntryShape>;
   const commit = recordedCommit(root);
+  const seenPaths = new Set<string>();
   const lines = resolved.split("\n").map((line) => {
     const match = ENTRY_LINE_RE.exec(line);
     if (!match) return line;
     const path = JSON.parse(match[2]) as string;
     const entry = files[path];
-    if (entry === undefined || !HASH_RE.test(match[3])) return line;
+    if (entry === undefined) return line;
+    // Duplicate detection BEFORE the hash-token guard: a duplicate whose
+    // second line carries no hash token (a starter-shaped flip) is still a
+    // duplicate to refuse.
+    if (seenPaths.has(path)) {
+      throw new Error(
+        `${MANIFEST_NAME} carries more than one entry line for ${path}; duplicate JSON ` +
+          "keys last-win at parse time, so a duplicate (a bad conflict resolution) can " +
+          "flip the path's ownership class silently - refusing to stamp it",
+      );
+    }
+    seenPaths.add(path);
+    if (!HASH_RE.test(match[3])) return line;
     const hash = path === MANIFEST_NAME ? null : entryHash(root, path, entry);
     let body = match[3].replace(HASH_RE, `"hash": ${hash === null ? "null" : `"${hash}"`}`);
     if (path === MANIFEST_NAME) {

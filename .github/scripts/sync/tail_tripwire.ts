@@ -51,12 +51,27 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { cleanLocalRegion } from "../../../scripts/gitignore_local.ts";
+import { isCommentMarker } from "../../../scripts/ownership.ts";
 import { parseFlags } from "../shared/flags.ts";
 import { requireEnv } from "../shared/gha.ts";
 import { headBytes } from "../shared/git_head.ts";
-import { ASCII_MARKER_RE, type SplitEntry, splitEntries } from "./preserve_local_content.ts";
+import {
+  ASCII_MARKER_RE,
+  clip,
+  fenceFor,
+  isCleanRelativePath,
+  missingLines,
+  type SplitEntry,
+  splitEntries,
+} from "./preserve_local_content.ts";
 import { TAIL_SHRANK_NAME } from "./section_files.ts";
 import { MANIFEST_NAME, managedHalf } from "./stamp_manifest.ts";
+
+// One definition each for the whole pipeline: preserve_local_content.ts
+// owns the missing-line multiset and the PR-body excerpt hygiene (clip's
+// control-byte escaping, fenceFor's unclosable fence); this wire
+// re-exports them for its own consumers.
+export { clip, fenceFor, missingLines };
 
 /** The complement of stamp_manifest's managedHalf: managedHalf returns a
  * prefix ("above") or a suffix ("below"), so the repository-owned side of
@@ -101,28 +116,35 @@ export type HeadSplit =
   | { kind: "grammar"; entry: SplitEntry }
   | { kind: "legacy"; path: string; marker: string; managed: "above" | "below" };
 
-/** HEAD's split declarations, keyed by path. The strict grammar parse is
- * tried first; a manifest that predates the grammar field falls back to
- * its own marker/managed pairs. The fallback exists ONLY for pre-grammar
- * manifests: a split entry that carries any grammar field (unknown value
- * included) is not legacy, and guessing would mis-split - it throws, and
- * the caller routes the whole manifest to the unverifiable path. */
+/** HEAD's split declarations, keyed by path. The manifest's ERA is
+ * decided first, from its own shape: any split entry carrying a grammar
+ * field makes the manifest post-grammar, and the strict parse's verdict
+ * on it is FINAL - its throw propagates to the caller, which routes every
+ * split file to the unverifiable (manual-review) path. Only a manifest
+ * whose split entries ALL predate the grammar field takes the legacy
+ * branch, and that branch enforces the same path and marker hygiene the
+ * strict parse does: an undiscriminated fallback used to catch every
+ * strict rejection (unclean path, non-comment marker, bad managed side)
+ * and re-read the manifest as legacy, where a tampered entry either threw
+ * late or - for an unclean legacy path - produced a key the post-sync
+ * lookup could never match, silently SKIPPING the file's check. */
 export function headSplitEntries(text: string, where: string): Map<string, HeadSplit> {
+  let parsed: unknown;
   try {
-    return new Map(
-      splitEntries(text, where).map((entry) => [entry.path, { kind: "grammar", entry }]),
-    );
+    parsed = JSON.parse(text);
   } catch {
-    // Fall through to the legacy shape below.
+    // Value-free: a SyntaxError's message quotes manifest text (target
+    // content) and this error can reach warning paths.
+    throw new Error(`${where} does not parse as JSON`);
   }
-  const files = (JSON.parse(text) as { files?: unknown } | null)?.files;
+  const files = (parsed as { files?: unknown } | null)?.files;
   // An array passes `typeof === "object"` with zero-or-index entries -
   // that would fail OPEN (no split declarations, nothing checked); reject
   // any non-mapping shape like the strict parse does.
   if (typeof files !== "object" || files === null || Array.isArray(files)) {
     throw new Error(`${where} has no top-level 'files' mapping`);
   }
-  const out = new Map<string, HeadSplit>();
+  const splitShapes: [string, Record<string, unknown>][] = [];
   for (const [path, entry] of Object.entries(files as Record<string, unknown>)) {
     if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
       // Fail closed like the strict parse: a damaged entry must route the
@@ -130,11 +152,22 @@ export function headSplitEntries(text: string, where: string): Map<string, HeadS
       throw new Error(`${where}: entry for ${path} is not an object`);
     }
     const shaped = entry as Record<string, unknown>;
-    if (shaped.class !== "split") continue;
-    if ("grammar" in shaped) {
-      throw new Error(
-        `${where}: split entry for ${path} carries a grammar field the strict parse rejected - not a pre-grammar manifest, refusing to guess`,
-      );
+    if (shaped.class === "split") splitShapes.push([path, shaped]);
+  }
+  if (splitShapes.some(([, shaped]) => "grammar" in shaped)) {
+    // Post-grammar manifest: the strict parse decides, damage included.
+    return new Map(
+      splitEntries(text, where).map((entry) => [entry.path, { kind: "grammar", entry }]),
+    );
+  }
+  const out = new Map<string, HeadSplit>();
+  for (const [path, shaped] of splitShapes) {
+    // The same key hygiene as the strict parse: an unclean legacy path
+    // (a tampered "../AGENTS.md", say) could never match a post-sync
+    // manifest's clean key, so accepting it would silently skip the real
+    // file's check instead of surfacing the damage.
+    if (!isCleanRelativePath(path)) {
+      throw new Error(`${where}: split entry path '${path}' is not a clean relative path`);
     }
     if (
       typeof shaped.marker !== "string" ||
@@ -144,6 +177,13 @@ export function headSplitEntries(text: string, where: string): Map<string, HeadS
       // while every local line vanished. Damaged legacy markers fail
       // closed to the unverifiable path like every other damaged entry.
       !ASCII_MARKER_RE.test(shaped.marker) ||
+      // The strict parser's comment-syntax hygiene applies to legacy
+      // markers too: every marker any template ever declared is a comment
+      // line, so a non-comment "marker" is a tampered manifest picking an
+      // ordinary content line as its split point - which could read the
+      // previous repository-owned half as (nearly) empty and let a loss
+      // report clear.
+      !isCommentMarker(shaped.marker) ||
       (shaped.managed !== "above" && shaped.managed !== "below")
     ) {
       throw new Error(`${where}: split entry for ${path} lacks a valid marker/managed pair`);
@@ -153,8 +193,10 @@ export function headSplitEntries(text: string, where: string): Map<string, HeadS
   return out;
 }
 
-/** HEAD's repository-owned side, per HEAD's own declaration. */
-function headRepoOwnedHalf(content: string, head: HeadSplit): string | null {
+/** HEAD's repository-owned side, per HEAD's own declaration. Exported for
+ * preserve_repo_owned.ts's removed-split-file hold, which names the
+ * repository-owned content a deletion takes with it. */
+export function headRepoOwnedHalf(content: string, head: HeadSplit): string | null {
   return head.kind === "grammar"
     ? repoOwnedHalf(content, head.entry)
     : markerComplement(content, head.marker, head.managed);
@@ -168,25 +210,6 @@ function headRepoOwnedHalf(content: string, head: HeadSplit): string | null {
 function sameShape(head: HeadSplit, entry: SplitEntry): boolean {
   if (head.kind === "grammar") return head.entry.grammar === entry.grammar;
   return head.managed === "above" && entry.grammar === "tail-marker";
-}
-
-/** Previous non-blank lines the delivered text no longer holds, counted
- * as a MULTISET: each previous occurrence consumes one delivered
- * occurrence, so a line held twice and delivered once is one missing line
- * - a plain Set would lose occurrence counts and pass exactly the shrink
- * this wire exists to catch. */
-export function missingLines(previous: string, delivered: string): string[] {
-  const kept = new Map<string, number>();
-  for (const line of delivered.split("\n")) {
-    kept.set(line, (kept.get(line) ?? 0) + 1);
-  }
-  return previous.split("\n").filter((line) => {
-    if (line.trim() === "") return false;
-    const remaining = kept.get(line) ?? 0;
-    if (remaining === 0) return true;
-    kept.set(line, remaining - 1);
-    return false;
-  });
 }
 
 export type Finding =
@@ -260,10 +283,11 @@ export function compareHalves(
 // PR bodies cap at 64 KiB and gh fails outright past it (see open_pr.ts),
 // and the report shares the body with every other section - so the
 // excerpt is bounded three ways: lines per file, characters per line (one
-// minified line must not blow the body), and total bytes across the whole
-// report. The previous commit holds whatever the excerpt omits.
+// minified line must not blow the body; clip in preserve_local_content.ts
+// owns the per-line bound and the control-byte escaping), and total bytes
+// across the whole report. The previous commit holds whatever the excerpt
+// omits.
 const MAX_REPORT_LINES = 40;
-const MAX_LINE_CHARS = 300;
 const MAX_REPORT_BYTES = 16384;
 
 const REPORT_INTRO = [
@@ -275,35 +299,6 @@ const REPORT_INTRO = [
   "> content on this branch before merging. Auto-merge is off.",
   "",
 ];
-
-/** One display line, bounded and control-free: a missing line or an
- * unverifiable reason can embed target-controlled text (repository
- * content, HEAD-manifest marker strings), so one enormous value must not
- * blow the body cap - and C0 control bytes must not survive into the
- * report: a NUL riding latin1 all the way to open_pr's --body argv kills
- * the spawn (OS argv cannot carry NUL), turning this warn-only wire into
- * the thing that BLOCKS PR creation. Escaped as visible \\xNN (lossless);
- * tab stays literal. */
-function clip(text: string): string {
-  // biome-ignore lint/suspicious/noControlCharactersInRegex: matching control bytes to escape them is this regex's whole job
-  const printable = text.replace(/[\x00-\x08\x0a-\x1f\x7f]/g, (control) => {
-    return `\\x${control.charCodeAt(0).toString(16).padStart(2, "0")}`;
-  });
-  return printable.length > MAX_LINE_CHARS
-    ? `${printable.slice(0, MAX_LINE_CHARS)} [clipped]`
-    : printable;
-}
-
-/** A fence long enough that no shown line can close it early. */
-function fenceFor(lines: string[]): string {
-  let longest = 3;
-  for (const line of lines) {
-    for (const match of line.matchAll(/`+/g)) {
-      longest = Math.max(longest, match[0].length);
-    }
-  }
-  return "`".repeat(longest + 1);
-}
 
 /** The shrank-section heading fragment. Exported for rehearse_fleet's
  * row wording: a report containing it carries at least one CONFIRMED
