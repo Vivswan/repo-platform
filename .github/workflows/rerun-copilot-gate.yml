@@ -40,32 +40,33 @@ permissions:
 
 jobs:
   rerun:
+    # Only two event shapes matter: a Copilot-authored review, or a failed
+    # pull_request CI run (a push run's gate passes trivially, and a green
+    # run needs no re-arm). A JOB-level if, same as the fleet twin
+    # (templates/base/.github/workflows/rerun-copilot-gate.yml.jinja): an
+    # irrelevant event starts no job at all, instead of starting a runner
+    # whose every step skips.
+    if: >-
+      ${{
+        (github.event_name == 'pull_request_review' &&
+         contains(fromJSON('["copilot-pull-request-reviewer[bot]", "Copilot"]'), github.event.review.user.login)) ||
+        (github.event_name == 'workflow_run' &&
+         github.event.workflow_run.event == 'pull_request' &&
+         github.event.workflow_run.conclusion == 'failure')
+      }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    env:
-      # Only two event shapes matter: a Copilot-authored review, or a
-      # failed pull_request CI run (a push run's gate passes trivially,
-      # and a green run needs no re-arm). Everything else skips the
-      # steps; the event condition lives here, not on the job.
-      RELEVANT: >-
-        ${{
-          (github.event_name == 'pull_request_review' &&
-           contains(fromJSON('["copilot-pull-request-reviewer[bot]", "Copilot"]'), github.event.review.user.login)) ||
-          (github.event_name == 'workflow_run' &&
-           github.event.workflow_run.event == 'pull_request' &&
-           github.event.workflow_run.conclusion == 'failure')
-        }}
     steps:
-      # Pinned to the default branch: this job's token can re-run gate
-      # jobs, so only the trusted copy of the action may run under it,
-      # never a PR ref's.
+      # DELIBERATE divergence from the fleet twin, which calls the action
+      # @actions with no checkout: the operator runs the SAME action by
+      # local path off a default-branch checkout, exercising its own tip
+      # rather than the last published ref. Pinned to the default branch:
+      # this job's token can re-run gate jobs, so only the trusted copy of
+      # the action may run under it, never a PR ref's.
       - uses: actions/checkout@v7
-        if: env.RELEVANT == 'true'
         with:
           ref: ${{ github.event.repository.default_branch }}
-      # The SAME action the fleet runs, by local path off that checkout.
       - uses: ./actions/copilot-rearm
-        if: env.RELEVANT == 'true'
         with:
           head-sha: >-
             ${{ github.event_name == 'workflow_run' &&

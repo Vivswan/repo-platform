@@ -1,18 +1,20 @@
-// The slice of the repository's shared helpers the two Copilot actions
-// need, kept LOCAL on purpose. A composite action is copied to the template
-// branch and runs from its own directory, so it cannot import out of the
-// repository tree - not from .github/scripts/shared/, and not from the
-// sibling action either. That is a property of how actions are published,
-// not drift: each PREDICATE exists exactly once (gate.ts here, rerun.ts in
-// copilot-rearm), and both callers use the action rather than keeping a
-// second copy of it.
+// The slice of the repository's shared helpers the composite actions
+// need, kept LOCAL on purpose. Actions are published on the `actions`
+// branch - their own extraction-safe delivery channel, never the composed
+// template tree, whose jinja-expression filenames would kill the runner's
+// tarball extraction - and each runs from its own directory, so it cannot
+// import out of the repository tree: not from .github/scripts/shared/,
+// and not from a sibling action either. That is a property of how actions
+// are published, not drift: each PREDICATE exists exactly once (the
+// gate's in gate.ts, the re-armer's in rerun.ts), and every caller uses
+// the action rather than keeping a second copy of it.
 //
-// This file is therefore BYTE-IDENTICAL to actions/copilot-rearm/runtime.ts,
-// and copilot_shared_files.test.ts fails if the two ever diverge - the same
-// guard identity.ts carries. Edit one, copy it to the other.
+// Byte-identical copies of this file live in each composite action that
+// needs it, and copilot_shared_files.test.ts fails if any copy diverges -
+// the same guard identity.ts carries. Edit one, copy it to the others.
 //
 // Keep these behaviour-compatible with .github/scripts/shared/ - they are
-// the same functions, narrowed to what the two actions use.
+// the same functions, narrowed to what the actions use.
 
 import type { ZodType } from "zod";
 

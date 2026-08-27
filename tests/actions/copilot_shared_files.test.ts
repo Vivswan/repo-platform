@@ -1,8 +1,10 @@
 // The two Copilot actions carry BYTE-IDENTICAL copies of identity.ts (who
 // Copilot is, and how the review list is fetched) and runtime.ts (the
 // helper slice both use). That is forced, not chosen: a composite action is
-// published to the template branch and runs from its own directory, so
-// neither can import the other's file or the repository's shared/ tree.
+// published on the `actions` branch - the fleet's extraction-safe delivery
+// channel, deliberately separate from the composed template tree - and runs
+// from its own directory, so neither can import the other's file or the
+// repository's shared/ tree.
 //
 // The copies are what this repository spent eight review rounds paying for
 // under the old two-implementation gate, so they are pinned here rather
@@ -29,4 +31,30 @@ describe("the Copilot actions' shared files", () => {
       expect(rearm).toBe(gate);
     });
   }
+
+  // The operator's rerun workflow and the fleet twin deliberately diverge
+  // in DELIVERY (local-path action off a default-branch checkout vs
+  // @actions with no checkout - each file's comments name the divergence)
+  // but must never diverge on RELEVANCE: the job-level `if:` is what keeps
+  // an irrelevant event from starting a runner at all, and it drifted once
+  // (a step-level env filter survived on the operator side).
+  test("the rerun job's relevance condition is identical in the operator and fleet workflows", () => {
+    const relevance = (text: string, file: string): string => {
+      const match = text.match(/\n {4}if: >-\n([\s\S]*?)\n {4}runs-on:/);
+      if (match === null) throw new Error(`${file}: no job-level if ahead of runs-on`);
+      return match[1]
+        .replaceAll("{% raw %}", "")
+        .replaceAll("{% endraw %}", "")
+        .replace(/\s+/g, " ")
+        .trim();
+    };
+    const operator = join(import.meta.dir, "../../.github/workflows/rerun-copilot-gate.yml");
+    const fleet = join(
+      import.meta.dir,
+      "../../templates/base/.github/workflows/rerun-copilot-gate.yml.jinja",
+    );
+    expect(relevance(readFileSync(operator, "utf8"), operator)).toBe(
+      relevance(readFileSync(fleet, "utf8"), fleet),
+    );
+  });
 });
