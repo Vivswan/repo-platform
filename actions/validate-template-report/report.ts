@@ -18,7 +18,7 @@
 // ADVISORIES, FRESHNESS (the three markdown files), FRESHNESS_STATE,
 // EVENT_NAME, PR_NUMBER, RUN_URL.
 
-import { appendFileSync, existsSync, readFileSync, statSync } from "node:fs";
+import { appendFileSync, readFileSync, statSync } from "node:fs";
 import { capture, env, requireEnv, warning } from "./runtime.ts";
 
 const NETWORK_TIMEOUT_MS = 20_000;
@@ -40,8 +40,16 @@ const runUrl = requireEnv("RUN_URL");
 const repository = requireEnv("GITHUB_REPOSITORY");
 const summaryFile = requireEnv("GITHUB_STEP_SUMMARY");
 
-/** Whether the file exists with any content ([ -s ] in the old bash). */
-const hasContent = (path: string): boolean => existsSync(path) && statSync(path).size > 0;
+/** A regular file's size, or null when there is none ([ -f ] in the old
+ *  bash: a directory or special file at the path counts as absent). */
+const sizeOfFile = (path: string): number | null => {
+  try {
+    const stat = statSync(path);
+    return stat.isFile() ? stat.size : null;
+  } catch {
+    return null;
+  }
+};
 /** A file's text with trailing newlines stripped ($(cat) in the old bash);
  *  the fallback stands in for a file that cannot be read. */
 const readTrimmed = (path: string, fallback = ""): string => {
@@ -54,12 +62,13 @@ const readTrimmed = (path: string, fallback = ""): string => {
 
 // An absent findings file means the validator never got far enough to
 // write one, which is a setup failure, not a clean tree.
+const findingsSize = sizeOfFile(findingsFile);
 let integrity: string;
 let blocking: boolean;
-if (!existsSync(findingsFile)) {
+if (findingsSize === null) {
   integrity = `#### Integrity\n\nThe validator exited before reporting. See the [run log](${runUrl}).`;
   blocking = true;
-} else if (hasContent(findingsFile)) {
+} else if (findingsSize > 0) {
   integrity = `#### Integrity\n\n${readTrimmed(findingsFile)}\nManaged content changed outside a sync. Restore the file from git history, or run a recovery sync. This FAILS the check.`;
   blocking = true;
 } else {
@@ -70,7 +79,7 @@ if (!existsSync(findingsFile)) {
 // Advisories never gate - they are the validator's own non-failing stream,
 // and folding them into the integrity verdict would have a clean
 // repository reading as blocked.
-const advice = hasContent(advisoriesFile) ? `\n\n${readTrimmed(advisoriesFile)}` : "";
+const advice = (sizeOfFile(advisoriesFile) ?? 0) > 0 ? `\n\n${readTrimmed(advisoriesFile)}` : "";
 
 const freshness =
   freshnessState === "behind"
