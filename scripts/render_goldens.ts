@@ -27,9 +27,19 @@
 // - Its git commit uses a pinned author/committer identity and date and a
 //   fixed message, and git runs with GIT_CONFIG_GLOBAL/SYSTEM pointed at
 //   /dev/null (a user's autocrlf or gpg-signing config must not leak into
-//   blob or commit hashes), so the commit sha - recorded as `_commit` in
+//   blob or commit hashes). The commit sha - recorded as `_commit` in
 //   .copier-answers.yml and stamped into the ownership manifest's
-//   provenance slot - is a pure function of the tree content.
+//   provenance slot - is still a pure function of the WHOLE tree content,
+//   so every template edit would move it; normalizeRenderedTree therefore
+//   rewrites the `_commit` answer to the fixed sentinel "xxxxxxx" before
+//   the write/diff step and re-runs the manifest stamp hook against the
+//   result (which carries the sentinel into the commit slot and the
+//   answers hash), gated on the render's stamp being honest so the
+//   re-stamp cannot heal a lying hook. Those two provenance fields are the
+//   ONLY normalized bytes - everything else is snapshot verbatim - and
+//   only the true sha is rewritten: a bug that stamps a WRONG sha shows as
+//   drift, and a render already carrying the sentinel is rejected
+//   outright.
 // - copier runs from the scratch directory with a RELATIVE src path, so
 //   the recorded `_src_path` is the fixed string "./tree", never a temp
 //   path. The same /dev/null git config is passed to copier for its
@@ -61,7 +71,8 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { must } from "../.github/scripts/shared/proc.ts";
+import { must, mustCapture } from "../.github/scripts/shared/proc.ts";
+import { MANIFEST_NAME, stampManifestText } from "../.github/scripts/sync/stamp_manifest.ts";
 import { loadManifests } from "./module_manifests.ts";
 
 const REPO_ROOT = resolve(import.meta.dir, "..");
@@ -106,6 +117,99 @@ export function goldenMatrix(): { name: string; modules: string[] }[] {
 }
 
 type Entry = { kind: "file"; bytes: Buffer; exec: boolean } | { kind: "symlink"; target: string };
+
+/** The fixed value the `_commit` provenance is rewritten to in every
+ *  golden: the width of the short sha copier stamps, in a NON-hex
+ *  character, so no honest commit sha can ever read as the sentinel (a
+ *  hex sentinel like "0000000" would reject a genuine scratch commit that
+ *  happens to start with seven zeros via the pre-stamped guard below). */
+export const SHA_SENTINEL = "xxxxxxx";
+
+/** The answers file copier records the render provenance in; must match
+ *  the name stamp_manifest.ts's recordedCommit reads. */
+const ANSWERS_NAME = ".copier-answers.yml";
+
+/** Rewrite the `_commit` answer's VALUE to SHA_SENTINEL when it records
+ *  the scratch tree's commit sha (or any 7-plus-char prefix of it - copier
+ *  stamps the short form). This is the ONLY substitution the runner
+ *  performs, addressed to the one field that carries provenance by
+ *  design: a tree-wide byte substitution would corrupt unrelated content,
+ *  because 7-hex-char runs occur in English prose ("feedback" starts with
+ *  hex "feedbac"). Three properties are the point: the `_commit` key stays
+ *  in the goldens (dropping or renaming it still shows as drift), a value
+ *  that is anything but the true sha is left alone and shows as drift, and
+ *  a value already reading as the sentinel throws - a pre-stamped sentinel
+ *  would false-match the committed goldens. */
+export function normalizeAnswers(text: string, fullSha: string): string {
+  if (!/^[0-9a-f]{40}$/.test(fullSha)) throw new Error(`not a full sha1: ${fullSha}`);
+  return text.replace(/^(_commit:[ \t]*)(\S*)([ \t]*)$/m, (line, key, value, pad) => {
+    if (value === SHA_SENTINEL) {
+      throw new Error(
+        `${ANSWERS_NAME}: _commit already reads as the sentinel "${SHA_SENTINEL}" - ` +
+          "a render must stamp the real scratch sha (a pre-stamped sentinel would " +
+          "false-match the committed goldens)",
+      );
+    }
+    const isTrueSha = value.length >= 7 && fullSha.startsWith(value);
+    return isTrueSha ? `${key}${SHA_SENTINEL}${pad}` : line;
+  });
+}
+
+/** Normalize a rendered tree in place: rewrite the `_commit` answer to the
+ *  sentinel, then re-run the manifest stamp hook against the result. The
+ *  hook ran inside copier, hashing the answers file and stamping the
+ *  manifest's commit slot BEFORE this normalization, so the manifest would
+ *  otherwise keep its scratch-sha dependence (directly in the commit slot,
+ *  indirectly through the answers file's hash); the re-stamp recomputes
+ *  both from the now-sentinel answers file, with the stamper's own
+ *  semantics for every hash class. Two safeguards keep that re-stamp from
+ *  laundering a broken render: the manifest is honesty-gated FIRST (the
+ *  hook is idempotent on a manifest it stamped honestly, so re-stamping
+ *  against the pre-normalization tree must be a byte-level no-op - a hook
+ *  that stamped a lying provenance or hash fails loudly here instead of
+ *  being healed to the sentinel), and the stamper is the manifest's ONLY
+ *  writer. Symlink targets are untouched: they are fixed template
+ *  filenames, and one that somehow embedded a sha would show as drift. */
+export function normalizeRenderedTree(root: string, scratchSha: string): void {
+  const manifestPath = join(root, MANIFEST_NAME);
+  let manifest: string | null;
+  try {
+    manifest = readFileSync(manifestPath, "utf-8");
+  } catch {
+    manifest = null; // a render without a manifest has nothing to re-stamp
+  }
+  if (manifest !== null) {
+    // The stamper reports corruption soft (its sync-side contract); in a
+    // fresh render both corruption and a dishonest stamp are template
+    // bugs, so fail loudly here.
+    const { out, problem } = stampManifestText(manifest, root);
+    if (problem !== null) throw new Error(`${MANIFEST_NAME} ${problem}`);
+    if (out !== manifest) {
+      throw new Error(
+        `${MANIFEST_NAME} is not honestly stamped: re-stamping it against the ` +
+          "rendered tree changed it, so the render's stamp hook wrote a wrong " +
+          "provenance or hash - normalizing would silently heal that to the sentinel",
+      );
+    }
+  }
+  const answersPath = join(root, ANSWERS_NAME);
+  let answers: string | null;
+  try {
+    // latin1 round-trips every byte, so untouched content stays verbatim.
+    answers = readFileSync(answersPath).toString("latin1");
+  } catch {
+    answers = null;
+  }
+  if (answers !== null) {
+    const normalized = normalizeAnswers(answers, scratchSha);
+    if (normalized !== answers) writeFileSync(answersPath, Buffer.from(normalized, "latin1"));
+  }
+  if (manifest === null) return;
+  // Same text as the gate, so `problem` cannot reappear; only the answers
+  // hash and the commit slot move, recomputed from the normalized file.
+  const { out } = stampManifestText(manifest, root);
+  if (out !== manifest) writeFileSync(manifestPath, out);
+}
 
 /** Every file and symlink below root (repo-relative, sorted), with content
  *  or link target, plus the executable bit - the one mode distinction git
@@ -208,6 +312,7 @@ function run(checkMode: boolean): number {
     git("init", "-q", "-b", "build");
     git("add", "-A");
     git("commit", "-q", "-m", "chore: golden build tree");
+    const scratchSha = mustCapture(["git", "-C", tree, "rev-parse", "HEAD"], { env: RENDER_ENV });
 
     // Render every selection BEFORE touching the committed goldens, so a
     // failing copier leg (which must() turns into an exit) can never leave
@@ -235,7 +340,13 @@ function run(checkMode: boolean): number {
         ],
         { cwd: work, env: RENDER_ENV },
       );
-      rendered.push({ name: golden.name, fresh: readTree(join(work, `out-${golden.name}`)) });
+      // Normalize here, before the write/diff step, so BOTH modes (regen
+      // writes, --check diffs) see sentinel-stamped trees from the same
+      // code path - CI's fresh render must normalize identically or the
+      // drift check would fail forever.
+      const outDir = join(work, `out-${golden.name}`);
+      normalizeRenderedTree(outDir, scratchSha);
+      rendered.push({ name: golden.name, fresh: readTree(outDir) });
     }
 
     // Regen rewrites the whole directory, so a golden the matrix no longer
