@@ -59,7 +59,9 @@ runs:
     # continue-on-error defers the verdict to the caller's last step; it
     # does not discard it. The wrapped action's own exit code is untouched,
     # so the operator repo and the sync pipeline still block on it
-    # directly.
+    # directly. The ref is hardcoded because a composite step's `uses:`
+    # cannot take expressions - the operator is parameterizable only where
+    # it is data (the template-repo input), never here.
     - uses: Vivswan/repo-platform/actions/validate-template@build
       id: integrity
       continue-on-error: true
