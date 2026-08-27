@@ -137,14 +137,32 @@ describe("assembleBranchTree", () => {
     // extraction dies on path segments like
     // "{% if 'agents' in modules %}CLAUDE.md{% endif %}". The WHOLE real
     // tree is the input here - template/ included, which is exactly the
-    // part the retired split-branch design existed to keep out.
+    // part the retired split-branch design existed to keep out. All
+    // three jinja delimiters count: a {# comment #} or {{ var }} segment
+    // is just as unextractable as a {% if %} gate.
     const walk = (dir: string): string[] =>
       readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
         const path = join(dir, entry.name);
         return entry.isDirectory() && !entry.isSymbolicLink() ? [path, ...walk(path)] : [path];
       });
-    const offenders = walk(dest).filter((path) => path.includes("{%") || path.includes("{{"));
+    const offenders = walk(dest).filter((path) =>
+      ["{%", "{{", "{#"].some((delimiter) => path.includes(delimiter)),
+    );
     expect(offenders).toEqual([]);
+  });
+
+  test("every symlink on the branch resolves inside the tree (no dangling links)", () => {
+    // The runner's tarball staging dies on a DANGLING symlink anywhere in
+    // the downloaded tree, so branch links keep their .jinja targets (the
+    // rendered repo gets the stripped target from the stamp hook).
+    const walk = (dir: string): string[] =>
+      readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+        const path = join(dir, entry.name);
+        if (entry.isSymbolicLink()) return [path];
+        return entry.isDirectory() ? walk(path) : [];
+      });
+    const dangling = walk(dest).filter((path) => !existsSync(path));
+    expect(dangling).toEqual([]);
   });
 
   test("the composed copier tree and the actions both ship", () => {

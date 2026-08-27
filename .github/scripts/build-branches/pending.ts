@@ -1,12 +1,20 @@
-// The build-during-CI handoff: a push-triggered build
-// composes the build-branch tree CONCURRENTLY with main's CI run and parks
-// it, UNPUBLISHED, at a per-source ref; the workflow_run publisher
-// promotes that pre-built tree once all-green completes. Shared by
+// The build-during-CI handoff: a push-triggered build composes the
+// build-branch tree CONCURRENTLY with main's CI run and parks it,
+// UNPUBLISHED, at a per-source ref; the workflow_run publisher promotes
+// that pre-built tree once all-green completes. Shared by
 // build_pending.ts (the writer), publish.ts (the consumer and the
 // sweep), and the race-rule tests - one home for the ref grammar and the
 // newest-green-wins rule, so the three can never drift.
+//
+// The refs live in the BRANCH namespace (refs/heads/build-pending/<sha>)
+// on purpose: the publisher promotes a pending tree into the executable
+// `build` branch on name-match alone, so the namespace must be covered by
+// the build-branches-writer ruleset (rulesets only target branches and
+// tags) - otherwise any principal with plain contents write could park a
+// poisoned tree under the right name and have the official publisher
+// stamp and ship it.
 
-export const PENDING_REF_PREFIX = "refs/build-pending/";
+export const PENDING_REF_PREFIX = "refs/heads/build-pending/";
 
 /** The unpublished ref a push build parks its tree at. Keyed by the FULL
  * source sha: concurrent pushes get disjoint refs (no overwrite races),

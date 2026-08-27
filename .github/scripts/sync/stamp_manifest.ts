@@ -8,7 +8,10 @@
 // _tasks (copy and recopy; copier does not run tasks on update) and into
 // _migrations at the 'after' stage (update) - and reusable-template-sync
 // runs it once more as the sync leg's final stamping step, after conflict
-// resolution and the preserve steps have finished rewriting files.
+// resolution and the preserve steps have finished rewriting files. Before
+// stamping it also normalizes the manifest-listed symlinks' targets
+// (normalizeSymlinkTargets: the build branch ships targets with the
+// template suffix kept so no branch link is ever dangling).
 //
 // STANDALONE BY DESIGN: branch_tree.ts ships this file on the build
 // branches next to copier.yml, and copier executes it inside freshly
@@ -46,10 +49,24 @@
 // TARGET_DIR=target).
 
 import { createHash } from "node:crypto";
-import { lstatSync, readFileSync, readlinkSync, writeFileSync } from "node:fs";
+import {
+  lstatSync,
+  readFileSync,
+  readlinkSync,
+  symlinkSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { join, resolve } from "node:path";
 
 export const MANIFEST_NAME = ".github/repo-platform-manifest.json";
+
+/** The template suffix the build branch's symlink targets keep: links on
+ *  the branch point at their templated twin so the `uses:` tarball
+ *  staging never sees a dangling link, and copier renders link targets as
+ *  strings without stripping the suffix - so this hook normalizes the
+ *  rendered targets instead (normalizeSymlinkTargets below). */
+const JINJA_SUFFIX = ".jinja";
 
 /** One manifest entry line, as compose_template.ts emits it: indentation,
  *  the JSON-quoted path, the one-line entry object, an optional joining
@@ -165,6 +182,74 @@ export interface ManifestEntryShape {
   hash?: unknown;
 }
 
+/** The manifest's files mapping parsed from `text` (conflict blocks
+ *  resolved toward the template side first), or a problem string when the
+ *  text does not parse - shared by the symlink normalization and the
+ *  stamping, so the two can never read different manifests. */
+export function parseManifestFiles(text: string):
+  | { files: Record<string, ManifestEntryShape>; resolved: string; problem: null }
+  | {
+      files: null;
+      resolved: string;
+      problem: string;
+    } {
+  const resolved = resolveConflictsTowardAfter(text);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(resolved);
+  } catch {
+    // Value-free on purpose: a SyntaxError's message quotes manifest text
+    // (target-repo content), and this problem string reaches a public log
+    // via main()'s warning. Standalone script - no shared/ helpers here.
+    return { files: null, resolved, problem: "does not parse as a manifest (invalid JSON)" };
+  }
+  const manifest = parsed as { files?: unknown } | null;
+  if (
+    manifest === null ||
+    typeof manifest !== "object" ||
+    typeof manifest.files !== "object" ||
+    manifest.files === null
+  ) {
+    return {
+      files: null,
+      resolved,
+      problem: "does not parse as a manifest (no top-level 'files' mapping)",
+    };
+  }
+  return { files: manifest.files as Record<string, ManifestEntryShape>, resolved, problem: null };
+}
+
+/** Strip the template suffix from every MANIFEST-LISTED symlink's target:
+ *  the build branch ships link targets with the suffix kept (a dangling
+ *  link anywhere in the tree kills the runner's `uses:` tarball staging)
+ *  and copier renders targets verbatim, so the rendered repository's
+ *  managed links arrive pointing at the templated twin's name. Only
+ *  manifest-listed paths are touched - a repo-owned link is never
+ *  rewritten, whatever its target - and the rewrite is idempotent.
+ *  Returns the rewritten paths. */
+export function normalizeSymlinkTargets(
+  root: string,
+  files: Record<string, ManifestEntryShape>,
+): string[] {
+  const rewritten: string[] = [];
+  for (const path of Object.keys(files)) {
+    const abs = join(root, path);
+    let stat: ReturnType<typeof lstatSync>;
+    try {
+      stat = lstatSync(abs);
+    } catch {
+      continue;
+    }
+    if (!stat.isSymbolicLink()) continue;
+    const target = readlinkSync(abs);
+    if (!target.endsWith(JINJA_SUFFIX)) continue;
+    unlinkSync(abs);
+    symlinkSync(target.slice(0, -JINJA_SUFFIX.length), abs);
+    rewritten.push(path);
+  }
+  return rewritten;
+}
+
 /** The hash a manifest entry should carry for the file as it sits on disk:
  *  sha256 of the whole content (managed), of the managed half (split), or
  *  of the symlink target. null when the file is missing or its split
@@ -218,26 +303,9 @@ export function stampManifestText(
   text: string,
   root: string,
 ): { out: string; problem: string | null } {
-  const resolved = resolveConflictsTowardAfter(text);
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(resolved);
-  } catch {
-    // Value-free on purpose: a SyntaxError's message quotes manifest text
-    // (target-repo content), and this problem string reaches a public log
-    // via main()'s warning. Standalone script - no shared/ helpers here.
-    return { out: text, problem: "does not parse as a manifest (invalid JSON)" };
-  }
-  const manifest = parsed as { files?: unknown } | null;
-  if (
-    manifest === null ||
-    typeof manifest !== "object" ||
-    typeof manifest.files !== "object" ||
-    manifest.files === null
-  ) {
-    return { out: text, problem: "does not parse as a manifest (no top-level 'files' mapping)" };
-  }
-  const files = manifest.files as Record<string, ManifestEntryShape>;
+  const parsed = parseManifestFiles(text);
+  if (parsed.problem !== null) return { out: text, problem: parsed.problem };
+  const { files, resolved } = parsed;
   const commit = recordedCommit(root);
   // A path's value in `files` is whichever duplicate JSON parsed last, so a
   // duplicated entry line cannot be stamped honestly - report it soft
@@ -294,6 +362,15 @@ function main(): number {
         "(renders from templates that predate the manifest have none)",
     );
     return 0;
+  }
+  // Normalize the managed symlinks BEFORE stamping: the hash covers the
+  // link target, so it must be taken after the rewrite.
+  const parsed = parseManifestFiles(text);
+  if (parsed.problem === null) {
+    const rewritten = normalizeSymlinkTargets(root, parsed.files);
+    if (rewritten.length > 0) {
+      console.log(`normalized ${rewritten.length} symlink target(s): ${rewritten.join(", ")}`);
+    }
   }
   const { out, problem } = stampManifestText(text, root);
   if (problem !== null) {

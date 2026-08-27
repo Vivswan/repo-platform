@@ -11,13 +11,13 @@
 #
 # The compose cost is paid DURING CI, not after it: every main push builds
 # the tree immediately (build_pending.ts) and parks it, unpublished, at
-# refs/build-pending/<sha>; the workflow_run publisher then only promotes
-# that pre-built tree once all-green completes (publish.ts PREBUILT_REF,
-# with a compose fallback when the pending ref is missing). Concurrent
-# pushes are race-safe: pending refs are keyed by source sha, and
-# publish.ts skips a stale build whose source is an ancestor of the tip's
-# stamped source - newest-green wins, a stale build never overwrites a
-# newer published tree (its plain push doubles as the compare-and-swap).
+# refs/heads/build-pending/<sha>; the workflow_run publisher then only
+# promotes that pre-built tree once all-green completes (publish.ts
+# PREBUILT_REF, with a compose fallback when the pending ref is missing).
+# Concurrent pushes are race-safe: pending refs are keyed by source sha,
+# and publish.ts skips a stale build whose source is an ancestor of the
+# tip's stamped source - newest-green wins, a stale build never overwrites
+# a newer published tree (its plain push doubles as the compare-and-swap).
 #
 # Only GREEN commits publish, twice over: the trigger fires on a
 # successful CI run (a failed run skips this workflow's steps quietly -
@@ -134,7 +134,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           SOURCE_SHA: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
-          PREBUILT_REF: ${{ github.event_name == 'workflow_run' && format('refs/build-pending/{0}', github.event.workflow_run.head_sha) || '' }}
+          PREBUILT_REF: ${{ github.event_name == 'workflow_run' && format('refs/heads/build-pending/{0}', github.event.workflow_run.head_sha) || '' }}
         run: bun .github/scripts/build-branches/publish.ts
 
       # A build no-op publishes no commit, so publish.ts records the
