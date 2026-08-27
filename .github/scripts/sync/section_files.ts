@@ -17,3 +17,8 @@ export const SETTINGS_LAYERING_NAME = "settings-layering.md";
  * with the repository-owned content that leaves. Forces the manual-review
  * path in open_pr.ts. */
 export const REMOVED_SPLITS_NAME = "removed-splits.md";
+
+/** starter_pin_rollout.ts's transition note: the starter files whose
+ * action pins the one-run rollout rewrote in place, and the hand-set pins
+ * it deliberately left alone. Informational, never forces review. */
+export const STARTER_PINS_NAME = "starter-pin-rollout.md";

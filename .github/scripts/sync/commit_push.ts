@@ -12,7 +12,14 @@ import { join } from "node:path";
 import { env, hideDetails, requireEnv, setOutput } from "../shared/gha.ts";
 import { SYNC_IDENTITY } from "../shared/git_identity.ts";
 import { capture, must, mustCapture, passthrough } from "../shared/proc.ts";
+import { STARTER_PINS_NAME } from "./section_files.ts";
 import { MANIFEST_NAME, stampManifestText } from "./stamp_manifest.ts";
+import {
+  type FileOutcome,
+  renderRolloutReport,
+  STARTER_PINS_OUTCOMES_NAME,
+  withholdWorkflowRewrites,
+} from "./starter_pin_rollout.ts";
 
 const target = requireEnv("TARGET");
 const targetDisplay = env("TARGET_DISPLAY") || target;
@@ -121,6 +128,19 @@ if (existsSync(removedPaths) && readFileSync(removedPaths, "utf-8") !== "") {
     .split("\n")
     .filter((line) => line !== "" && !line.startsWith(".github/workflows/"));
   writeFileSync(removedPaths, kept.length > 0 ? `${kept.join("\n")}\n` : "");
+}
+// The starter pin rollout's rewrites live in .github/workflows files, so
+// the restore undid them: re-render its transition note without those
+// claims (withholdWorkflowRewrites) so the PR body describes the pushed
+// tree. The outcomes file is this run's own output, written by
+// starter_pin_rollout.ts moments ago - trusted as-is.
+const pinOutcomesPath = join(runnerTemp, STARTER_PINS_OUTCOMES_NAME);
+if (existsSync(pinOutcomesPath)) {
+  const outcomes = withholdWorkflowRewrites(
+    JSON.parse(readFileSync(pinOutcomesPath, "utf-8")) as FileOutcome[],
+  );
+  writeFileSync(pinOutcomesPath, `${JSON.stringify(outcomes, null, 2)}\n`, "utf-8");
+  writeFileSync(join(runnerTemp, STARTER_PINS_NAME), renderRolloutReport(outcomes), "utf-8");
 }
 // The restore rewrote workflow files after the workflow's stamping step, so
 // the ownership manifest must follow the tree that is actually pushed:

@@ -350,6 +350,27 @@ jobs:
             bun .github/scripts/sync/run_hidden.ts "preserve repo-owned files" -- \
             bun .github/scripts/sync/preserve_repo_owned.ts
 
+      # One-run rollout of the fuzz-issue action pin inside STARTER-class
+      # workflows: starters are rendered once and repo-owned
+      # (_skip_if_exists), so the template's own move of the pin from
+      # @main to the green-gated @actions delivery branch never reaches a
+      # repo that already rendered them. The script rewrites EXACTLY the
+      # old pin string (paths from the render's ownership manifest, the
+      # working tree's own in recopy mode), leaves hand-set pins alone,
+      # and writes the PR-body transition note open_pr.ts appends.
+      # Delete this step once the fleet carries no fuzz-issue@main pins
+      # (see the script header).
+      - name: Roll out starter action pins
+        env:
+          RECOVER: ${{ inputs.recover }}
+        run: |
+          flags=(--root target --hide-details "$HIDE_DETAILS")
+          if [ "$RECOVER" != "recopy" ]; then
+            flags+=(--render-dir "$RUNNER_TEMP/render-new")
+          fi
+          bun .github/scripts/sync/run_hidden.ts "starter pin rollout" -- \
+            bun .github/scripts/sync/starter_pin_rollout.ts "${flags[@]}"
+
       # Conflict resolution and the preserve steps can rewrite files after
       # copier's own post-render stamp hook ran, so the ownership
       # manifest's hashes are stamped once more when the tree is final

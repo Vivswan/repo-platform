@@ -568,6 +568,21 @@ export function rehearseRepo(slug: string, options: RehearsalOptions): Rehearsal
       cwd: platformDir,
       env: legEnv,
     });
+    // The workflow's one-run starter pin rollout (starter_pin_rollout.ts):
+    // ports repo-owned starters' action pins onto the delivery branch. Its
+    // report and outcomes land under RUNNER_TEMP by the script's own
+    // defaults; the report is a would-be PR-body section, printed below.
+    run(
+      [
+        "bun",
+        join(import.meta.dir, "starter_pin_rollout.ts"),
+        "--root",
+        targetDir,
+        "--render-dir",
+        join(temp, "render-new"),
+      ],
+      { cwd: REPO_ROOT, env: legEnv },
+    );
     // Conflict resolution and the preserve steps can rewrite files after
     // copier's post-render stamp hook ran, so the manifest is stamped once
     // more when the tree is final - the same final stamping step
@@ -654,6 +669,7 @@ export function rehearseRepo(slug: string, options: RehearsalOptions): Rehearsal
       const prSections: [string, string][] = [
         ["retired-modules.txt", "Retired modules dropped from the selection"],
         ["removed-paths.txt", "The template retired these files; this update deletes them"],
+        ["starter-pin-rollout.md", "Starter pin rollout (one-run transition note)"],
         ["local-carryover.md", "Split-file carry summary (rebuilt structurally)"],
         ["carry-review.txt", "Split-file carries needing review (the PR would stay manual-review)"],
         [

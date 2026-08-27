@@ -1193,3 +1193,129 @@ if grep -q '^gh pr merge' "$DESEL_WORK/gh-calls.txt"; then
   fail "open_pr attempted to arm auto-merge on a removed-splits hold"
 fi
 echo "module deselection OK: retired split file deleted, hold raised, leaving content named, manual review forced"
+
+# --- Starter pin rollout (fuzz-issue @main -> @actions) --------------------
+# Starter workflows are rendered once and repo-owned (_skip_if_exists), so
+# the template's own re-pin of the fuzz-issue action (main -> the
+# green-gated actions delivery branch) never reaches an already-rendered
+# repo; the one-run sync-side rollout (starter_pin_rollout.ts) ports it.
+# Fixture: a fresh render with nightly.yml set back to the pre-flip @main
+# pin (the fleet state before the flip) and nightly-fuzz.yml hand-pinned at
+# its own ref. Post-sync, nightly.yml must be byte-equal to its previous
+# copy with ONLY the pin substring rewritten, the hand-pinned file must be
+# byte-identical, a second run must rewrite nothing, and open_pr must carry
+# the transition note while still arming auto-merge (the note is
+# informational, never a review hold).
+PIN="$RUN_DIR/upgrade-pin"
+PIN_WORK="$RUN_DIR/upgrade-pin-work"
+mkdir -p "$PIN_WORK"
+cd "$GITHUB_WORKSPACE"
+copier copy "$GITHUB_WORKSPACE" "$PIN" \
+  --vcs-ref "$NEW_TAG" --defaults --trust \
+  -d project_name="Starter Pin Rollout" \
+  -d description="Starter-pin project" \
+  -d 'modules=[nightly, fuzzer]' \
+  -d private="false"
+cd "$PIN"
+# The fresh render pins the delivery branch; model the fleet state by
+# setting the rendered starters back to the old pin / a hand pin.
+grep -q "repo-platform/actions/fuzz-issue@actions" .github/workflows/nightly.yml \
+  || fail "fixture render does not pin fuzz-issue at the actions branch"
+sed 's|/repo-platform/actions/fuzz-issue@actions|/repo-platform/actions/fuzz-issue@main|g' \
+  .github/workflows/nightly.yml > .github/workflows/nightly.yml.tmp
+mv .github/workflows/nightly.yml.tmp .github/workflows/nightly.yml
+sed 's|/repo-platform/actions/fuzz-issue@actions|/repo-platform/actions/fuzz-issue@v9.9.9|g' \
+  .github/workflows/nightly-fuzz.yml > .github/workflows/nightly-fuzz.yml.tmp
+mv .github/workflows/nightly-fuzz.yml.tmp .github/workflows/nightly-fuzz.yml
+git init -q -b main
+git add --all
+git -c user.name=ci -c user.email=ci@localhost commit -q -m "chore: init with pre-flip pins"
+# The oracle for byte-surgery: the old copy with only the pin substring
+# swapped, and the hand-pinned copy exactly as committed.
+sed 's|/repo-platform/actions/fuzz-issue@main|/repo-platform/actions/fuzz-issue@actions|g' \
+  .github/workflows/nightly.yml > "$PIN_WORK/nightly-expected.yml"
+cp .github/workflows/nightly-fuzz.yml "$PIN_WORK/nightly-fuzz-before.yml"
+
+# The workflow's leg order around the rollout step: apply update,
+# materialize renders, rebuild split files, resolve conflicts, retired
+# cleanup, preserve, ROLL OUT PINS, stamp, validate.
+cd "$GITHUB_WORKSPACE"
+export MODULES='["nightly", "fuzzer"]'
+export PRIVATE=false
+export DESCRIPTION="Starter-pin project"
+export TARGET_DIR="$PIN"
+export TARGET_REF="$NEW_TAG"
+RECOVER="" bun .github/scripts/sync/apply_update.ts
+answers_pin="$(git -C "$PIN" show HEAD:.copier-answers.yml)"
+src_path_pin="$(sed -n 's/^_src_path: //p' <<<"$answers_pin")"
+test -n "$src_path_pin" || fail "pin fixture records no _src_path"
+RUNNER_TEMP="$PIN_WORK" SRC_PATH="$src_path_pin" \
+  OLD_SHA="$(git rev-parse "$NEW_TAG^{commit}")" \
+  bun .github/scripts/sync/clean_renders.ts
+bun .github/scripts/sync/preserve_local_content.ts \
+  --summary "$PIN_WORK/local-carryover.md" --root "$PIN" \
+  --needs-review "$PIN_WORK/carry-review.txt" \
+  --rebuilt-paths "$PIN_WORK/split-rebuilt-paths.txt" \
+  --render-dir "$PIN_WORK/render-new" --old-render-dir "$PIN_WORK/render-old"
+bun .github/scripts/sync/resolve_copier_conflicts.ts \
+  --summary "$PIN_WORK/dropped-local-hunks.md" --root "$PIN" \
+  --skip "$PIN_WORK/split-rebuilt-paths.txt"
+git show "$NEW_TAG:copier.yml" > "$PIN_WORK/copier-old.yml"
+git show "$NEW_TAG:copier.yml" > "$PIN_WORK/copier-new.yml"
+RUNNER_TEMP="$PIN_WORK" SRC_PATH="$src_path_pin" \
+  OLD_SHA="$(git rev-parse "$NEW_TAG^{commit}")" \
+  bun .github/scripts/sync/retired_cleanup.ts
+RECOVER="" RUNNER_TEMP="$PIN_WORK" bun .github/scripts/sync/preserve_repo_owned.ts
+RUNNER_TEMP="$PIN_WORK" bun .github/scripts/sync/starter_pin_rollout.ts \
+  --root "$PIN" --render-dir "$PIN_WORK/render-new"
+TARGET_DIR="$PIN" bun .github/scripts/sync/stamp_manifest.ts
+bun "$GITHUB_WORKSPACE/actions/validate-template/validate_generated_files.ts" "$PIN"
+
+cmp -s "$PIN_WORK/nightly-expected.yml" "$PIN/.github/workflows/nightly.yml" \
+  || fail "the rollout did not deliver nightly.yml byte-equal to its previous copy with only the pin rewritten"
+cmp -s "$PIN_WORK/nightly-fuzz-before.yml" "$PIN/.github/workflows/nightly-fuzz.yml" \
+  || fail "the rollout touched the hand-pinned nightly-fuzz.yml"
+test -s "$PIN_WORK/starter-pin-rollout.md" \
+  || fail "the rollout wrote no transition note"
+grep -qF 'nightly.yml`: rewrote 2 occurrence(s)' "$PIN_WORK/starter-pin-rollout.md" \
+  || fail "the transition note does not name nightly.yml's rewritten pins"
+grep -qF "repo-platform/actions/fuzz-issue@actions" "$PIN_WORK/starter-pin-rollout.md" \
+  || fail "the transition note does not show the new delivery-branch pin"
+grep -qF 'nightly-fuzz.yml`: left alone' "$PIN_WORK/starter-pin-rollout.md" \
+  || fail "the transition note does not list the hand-pinned nightly-fuzz.yml as skipped"
+
+# Idempotent: a second run rewrites nothing (the file stays byte-identical
+# and the refreshed note reports no rewrite, only the standing hand pin).
+cp "$PIN/.github/workflows/nightly.yml" "$PIN_WORK/nightly-after-first.yml"
+RUNNER_TEMP="$PIN_WORK" bun .github/scripts/sync/starter_pin_rollout.ts \
+  --root "$PIN" --render-dir "$PIN_WORK/render-new"
+cmp -s "$PIN_WORK/nightly-after-first.yml" "$PIN/.github/workflows/nightly.yml" \
+  || fail "the second rollout run changed nightly.yml (the rewrite must be idempotent)"
+# The bullet form, not the bare word: the note's intro legitimately says
+# "a rewrote line below is a byte-surgical port".
+if grep -qF '`: rewrote' "$PIN_WORK/starter-pin-rollout.md"; then
+  fail "the second rollout run reported a rewrite (it must find nothing to rewrite)"
+fi
+grep -qF 'nightly-fuzz.yml`: left alone' "$PIN_WORK/starter-pin-rollout.md" \
+  || fail "the second rollout run dropped the standing hand-pin listing"
+
+# The chain's tail: open_pr.ts must append the transition note and, since
+# the note is informational, still arm auto-merge (gh stub from the
+# tripwire leg records the body and the merge call).
+echo "template@old" > "$PIN_WORK/old_commit.txt"
+: > "$PIN_WORK/empty.txt"
+GH_CALLS="$PIN_WORK/gh-calls.txt" PATH="$TRIP_BIN:$PATH" \
+  TARGET="Vivswan/starter-pins" RUNNER_TEMP="$PIN_WORK" \
+  GITHUB_REPOSITORY="Vivswan/repo-platform" GITHUB_OUTPUT="$PIN_WORK/gh-output.txt" \
+  BRANCH=automation/repo-platform BASE_BRANCH=main DISPLAY="template@new" \
+  RECOVER="" RESOLVED="" VALIDATION=passed HIDE_DETAILS="" \
+  DRIFT_FILE="$PIN_WORK/empty.txt" CARRIED_FILE="$PIN_WORK/empty.txt" \
+  CARRY_REVIEW_FILE="$PIN_WORK/empty.txt" RETIRED_MODULES_FILE="$PIN_WORK/empty.txt" \
+  REMOVED_PATHS_FILE="$PIN_WORK/empty.txt" WITHHELD_FILE="$PIN_WORK/empty.txt" \
+  MANIFEST_LICENSE_FILE="$PIN_WORK/empty.txt" \
+  bun .github/scripts/sync/open_pr.ts > "$PIN_WORK/open-pr.out"
+grep -qF "One-run starter pin rollout" "$PIN_WORK/gh-calls.txt" \
+  || fail "the PR body lacks the starter pin rollout transition note"
+grep -q '^gh pr merge' "$PIN_WORK/gh-calls.txt" \
+  || fail "open_pr did not arm auto-merge despite the rollout note being informational"
+echo "starter pin rollout OK: old pin ported byte-surgically, hand pin left alone, note in the PR body, auto-merge kept"

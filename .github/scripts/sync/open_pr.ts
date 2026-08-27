@@ -17,7 +17,12 @@ import { join } from "node:path";
 import { env, hideDetails, requireEnv, setOutput } from "../shared/gha.ts";
 import { capture, mustCapture } from "../shared/proc.ts";
 import { clip, escapeControlBytes } from "./preserve_local_content.ts";
-import { REMOVED_SPLITS_NAME, SETTINGS_LAYERING_NAME, TAIL_SHRANK_NAME } from "./section_files.ts";
+import {
+  REMOVED_SPLITS_NAME,
+  SETTINGS_LAYERING_NAME,
+  STARTER_PINS_NAME,
+  TAIL_SHRANK_NAME,
+} from "./section_files.ts";
 
 const target = requireEnv("TARGET");
 const runnerTemp = requireEnv("RUNNER_TEMP");
@@ -207,6 +212,12 @@ const sections: FlagSection[] = [
         .join("\n")}`,
     forcesReview: false,
   },
+  // starter_pin_rollout.ts's transition note: the one-run port of starter
+  // workflows' action pins onto the delivery branch. Informational, like
+  // the retired-file list above - the rewrite is byte-surgical and
+  // exact-match-only, and hand-set pins are listed but deliberately left
+  // alone - so it never forces the manual path by itself.
+  { path: join(runnerTemp, STARTER_PINS_NAME), render: slurp, forcesReview: false },
   {
     path: requireEnv("WITHHELD_FILE"),
     render: (path) => `> [!WARNING]
