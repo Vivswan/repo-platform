@@ -65,7 +65,6 @@
 {%- if 'release-please' in modules -%}
 {%- set _ = entries.append('    ".github/workflows/release.yml": {"class": "managed", "hash": null}') -%}
 {%- endif -%}
-{%- set _ = entries.append('    ".github/workflows/rerun-copilot-gate.yml": {"class": "managed", "hash": null}') -%}
 {%- if 'settings-sync' in modules -%}
 {%- set _ = entries.append('    ".github/workflows/settings-sync.yml": {"class": "managed", "hash": null}') -%}
 {%- endif -%}

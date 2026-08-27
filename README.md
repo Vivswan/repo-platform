@@ -10,3 +10,7 @@ branch ships only green main commits).
 Consume with copier, e.g.:
 
     copier copy gh:Vivswan/repo-platform . --vcs-ref template
+
+The composite actions the generated workflows call ship on the sibling
+`actions` branch (green-gated the same way; its tree carries no jinja
+filenames, so `@actions` refs extract cleanly on the runner).
