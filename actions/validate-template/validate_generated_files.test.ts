@@ -1594,7 +1594,7 @@ describe("ownership-manifest byte parity", () => {
       "docs/notes.md": "# m\n",
     });
     expect(exitCode).toBe(1);
-    expect(stderr).toContain('bounded-region grammar without a "below" managed');
+    expect(stderr).toContain("bounded-region grammar without its region marker strings");
   });
 
   test("a split entry with no grammar field is an error", () => {

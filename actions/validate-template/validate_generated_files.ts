@@ -85,6 +85,12 @@ import { createHash } from "node:crypto";
 import { lstatSync, readdirSync, readFileSync, readlinkSync, writeFileSync } from "node:fs";
 import { extname, join, resolve } from "node:path";
 import { parseAllDocuments, parseDocument, parse as parseYaml } from "yaml";
+import {
+  GRAMMAR,
+  type GrammarId,
+  HEADER_WINDOW,
+  type RegionSplitGrammar,
+} from "../shared/grammar.ts";
 
 const SKIP_DIRS = new Set([
   ".git",
@@ -104,15 +110,15 @@ const SKIP_DIRS = new Set([
   ".mypy_cache",
 ]);
 
-/** How many opening lines may hold the managed header (rendering collapses
- *  the templates' jinja preambles, so it always lands near the top). */
-const HEADER_WINDOW = 10;
-
 /** The ownership manifest the template renders into every repo: the full
  *  ownership map (path -> managed/split/starter, marker metadata for
  *  splits) with per-repo sha256 hashes stamped post-render. Check 9
  *  verifies byte parity against it. */
 const MANIFEST_NAME = ".github/repo-platform-manifest.json";
+
+/** The GRAMMAR table's key set, for membership tests over untyped manifest
+ *  JSON (the table itself is keyed by the typed GrammarId). */
+const KNOWN_GRAMMARS = Object.keys(GRAMMAR) as GrammarId[];
 
 /** The verdict's anchor job as the judged run names it: the managed
  *  ci.yml's `ci` caller prefixing fleet-ci's unconditional
@@ -190,16 +196,6 @@ type OwnedFile =
 type RenderWhen = { publicOnly?: boolean; withoutModule?: string };
 
 type BaseOwnedFile = OwnedFile & { when?: RenderWhen };
-
-/** A bounded-region split grammar: the repo-owned local region's BEGIN/END
- *  lines above the managed half, which runs from managedBegin to end of
- *  file (managedEnd included). */
-interface RegionSplitGrammar {
-  managedBegin: string;
-  managedEnd: string;
-  localBegin: string;
-  localEnd: string;
-}
 
 // The declared ownership of every enforceable base file (kind + marker
 // decoration, render conditions from the templates' filename gates) and
@@ -1416,7 +1412,7 @@ function main(): number {
         // below (every render stamps the field), not doubled here.
         if (
           kind === "marker" &&
-          (entry.managed !== "above" ||
+          (entry.managed !== GRAMMAR["tail-marker"].side ||
             entry.marker !== marker ||
             ("grammar" in entry && entry.grammar !== "tail-marker"))
         ) {
@@ -1440,7 +1436,7 @@ function main(): number {
         const markerPairOk =
           entry.class === "split" &&
           entry.marker === grammar.managedBegin &&
-          entry.managed === "below";
+          entry.managed === GRAMMAR["bounded-region"].side;
         // A missing grammar field is the structural loop's single report;
         // a present one must name the declared grammar and its strings.
         const grammarOk =
@@ -1570,22 +1566,22 @@ function main(): number {
             );
             continue;
           }
-          // A present grammar must agree with the managed side and carry
-          // its region marker strings.
+          // A present grammar must agree with the managed side its GRAMMAR
+          // row declares (the one statement of each grammar's side) and
+          // carry its region marker strings.
+          const grammarId = KNOWN_GRAMMARS.find((known) => known === entry.grammar) ?? null;
           const grammarProblem =
-            entry.grammar === "tail-marker"
-              ? entry.managed !== "above"
-                ? 'declares the tail-marker grammar with a managed half not "above"'
-                : null
-              : entry.grammar === "bounded-region"
-                ? entry.managed !== "below" ||
-                  typeof entry.managed_end !== "string" ||
-                  typeof entry.local_begin !== "string" ||
-                  typeof entry.local_end !== "string"
-                  ? 'declares the bounded-region grammar without a "below" managed ' +
-                    "half and its region marker strings"
-                  : null
-                : `declares unknown split grammar ${JSON.stringify(entry.grammar)}`;
+            grammarId === null
+              ? `declares unknown split grammar ${JSON.stringify(entry.grammar)}`
+              : entry.managed !== GRAMMAR[grammarId].side
+                ? `declares the ${grammarId} grammar with a managed half not ` +
+                  JSON.stringify(GRAMMAR[grammarId].side)
+                : grammarId === "bounded-region" &&
+                    (typeof entry.managed_end !== "string" ||
+                      typeof entry.local_begin !== "string" ||
+                      typeof entry.local_end !== "string")
+                  ? "declares the bounded-region grammar without its region marker strings"
+                  : null;
           if (grammarProblem !== null) {
             errors.push(
               `${where} ${grammarProblem}; run a template sync to regenerate the manifest`,

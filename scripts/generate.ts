@@ -14,8 +14,9 @@
 //   MODULE_OWNERSHIP and BASE_OWNERSHIP records (each rendered file's
 //   declared ownership, from the module.yml `ownership:` lists and
 //   templates/base/ownership.yml plus the sources' header/marker
-//   decoration; the action stays self-contained for client-side execution;
-//   only the constants' authorship is generated).
+//   decoration; the action imports only the shipped actions/shared/ zone
+//   for client-side execution; only the constants' authorship is
+//   generated).
 // - README.md, docs/new-repo.md, docs/settings.md, docs/pages.md,
 //   docs/toolchains.md: the prose that enumerates manifest data (module
 //   roster, dependabot labels, pages toolchain defaults, toolchain pins).
