@@ -100,14 +100,15 @@ _skip_if_exists:
 # The _migrations entry stamps the ownership manifest's per-repo hashes:
 # they are facts of the rendered tree, so stamping must run after copier
 # writes it. Copier runs _migrations only on update and _tasks only on
-# copy/recopy, hence the same stamper (shipped next to this file on the
-# build branch) is wired into both.
+# copy/recopy, hence the same stamper (shipped inside the build branch's
+# actions/shared/ zone, the same relative path it has on main - check_ssot's
+# stamp-hook-path rule pins the tie) is wired into both.
 _migrations:
-  - command: bun "{{ _copier_conf.src_path }}/stamp_manifest.ts"
+  - command: bun "{{ _copier_conf.src_path }}/actions/shared/stamp_manifest.ts"
     when: "{{ _stage == 'after' }}"
 
 _tasks:
-  - command: bun "{{ _copier_conf.src_path }}/stamp_manifest.ts"
+  - command: bun "{{ _copier_conf.src_path }}/actions/shared/stamp_manifest.ts"
 
 project_name:
   type: str

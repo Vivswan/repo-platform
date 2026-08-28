@@ -1594,7 +1594,7 @@ describe("ownership-manifest byte parity", () => {
       "docs/notes.md": "# m\n",
     });
     expect(exitCode).toBe(1);
-    expect(stderr).toContain('bounded-region grammar without a "below" managed');
+    expect(stderr).toContain("bounded-region grammar without its region marker strings");
   });
 
   test("a split entry with no grammar field is an error", () => {
@@ -1765,7 +1765,7 @@ describe("ownership-manifest byte parity", () => {
   test("an unparseable manifest is its own error", () => {
     const { exitCode, stderr } = runValidator({ [MANIFEST]: "not json\n" });
     expect(exitCode).toBe(1);
-    expect(stderr).toContain(`${MANIFEST}: does not parse as an ownership manifest`);
+    expect(stderr).toContain(`${MANIFEST}: does not parse as a manifest`);
   });
 
   test("a conflict-marked manifest is check 4's report, with no parity double", () => {
@@ -1906,7 +1906,7 @@ describe("ownership-manifest byte parity", () => {
     ].join(",\n")}\n  }\n}\n`;
     const { exitCode, stderr } = runValidator({ [MANIFEST]: text });
     expect(exitCode).toBe(1);
-    expect(stderr).toContain(`key ".github/workflows/ci.yml" is bound more than once`);
+    expect(stderr).toContain("binds a key more than once");
     // The last-win starter view must not have reached the parity loop.
     expect(stderr).not.toContain("a starter carrying a hash");
   });
@@ -1919,6 +1919,6 @@ describe("ownership-manifest byte parity", () => {
     ].join(",\n")}\n  }\n}\n`;
     const { exitCode, stderr } = runValidator({ [MANIFEST]: text });
     expect(exitCode).toBe(1);
-    expect(stderr).toContain(`key "class" is bound more than once`);
+    expect(stderr).toContain("binds a key more than once");
   });
 });

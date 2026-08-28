@@ -84,7 +84,15 @@ import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { lstatSync, readdirSync, readFileSync, readlinkSync, writeFileSync } from "node:fs";
 import { extname, join, resolve } from "node:path";
-import { parseAllDocuments, parseDocument, parse as parseYaml } from "yaml";
+import { parseAllDocuments, parse as parseYaml } from "yaml";
+import {
+  GRAMMAR,
+  type GrammarId,
+  HEADER_WINDOW,
+  type RegionSplitGrammar,
+} from "../shared/grammar.ts";
+import { MANIFEST_NAME, type ManifestEntryShape, parseManifestFiles } from "../shared/manifest.ts";
+import { managedHalf } from "../shared/stamp_manifest.ts";
 
 const SKIP_DIRS = new Set([
   ".git",
@@ -104,15 +112,9 @@ const SKIP_DIRS = new Set([
   ".mypy_cache",
 ]);
 
-/** How many opening lines may hold the managed header (rendering collapses
- *  the templates' jinja preambles, so it always lands near the top). */
-const HEADER_WINDOW = 10;
-
-/** The ownership manifest the template renders into every repo: the full
- *  ownership map (path -> managed/split/starter, marker metadata for
- *  splits) with per-repo sha256 hashes stamped post-render. Check 9
- *  verifies byte parity against it. */
-const MANIFEST_NAME = ".github/repo-platform-manifest.json";
+/** The GRAMMAR table's key set, for membership tests over untyped manifest
+ *  JSON (the table itself is keyed by the typed GrammarId). */
+const KNOWN_GRAMMARS = Object.keys(GRAMMAR) as GrammarId[];
 
 /** The verdict's anchor job as the judged run names it: the managed
  *  ci.yml's `ci` caller prefixing fleet-ci's unconditional
@@ -122,50 +124,6 @@ const MANIFEST_NAME = ".github/repo-platform-manifest.json";
  *  closed at run time. check_ssot's all-green-name rule pins the same
  *  string against the wrapper template and both job ids. */
 const REQUIRED_GATE_JOB = "ci / validate-template";
-
-/** Keys bound more than once anywhere in the manifest's JSON, each named
- *  once in first-appearance order. JSON.parse silently keeps a duplicated
- *  key's LAST value, so a conflicted manifest resolution that keeps two
- *  entry lines for one path would hand every consumer whichever entry
- *  sorts last - switching that path's parity metadata invisibly. JSON is
- *  a YAML subset, so the YAML parser's uniqueKeys scan positions every
- *  duplicate; any other parse problem stays JSON.parse's report. */
-function duplicateManifestKeys(text: string): string[] {
-  const keys: string[] = [];
-  for (const problem of parseDocument(text, { uniqueKeys: true }).errors) {
-    if (problem.code !== "DUPLICATE_KEY") continue;
-    // The error position points at the duplicated key token; read the JSON
-    // string from there (the parser's own pos span can be a single char).
-    const token = /^"(?:[^"\\]|\\.)*"/.exec(text.slice(problem.pos[0]));
-    let key = token === null ? text.slice(problem.pos[0], problem.pos[1]) : token[0];
-    try {
-      key = String(JSON.parse(key));
-    } catch {
-      // Not a JSON string token: report the raw slice.
-    }
-    if (!keys.includes(key)) keys.push(key);
-  }
-  return keys;
-}
-
-/** A split entry's managed half: through the first marker line's newline
- *  for managed "above", from the start of the marker line for "below";
- *  null when the marker line is missing. `content` is latin1 text
- *  (byte-faithful). Twin of stamp_manifest.ts's managedHalf - keep them
- *  matching (this action stays self-contained for client-side execution). */
-function managedHalf(content: string, marker: string, managed: "above" | "below"): string | null {
-  let offset = 0;
-  for (const line of content.split("\n")) {
-    const end = offset + line.length;
-    if (line.trim() === marker) {
-      return managed === "above"
-        ? content.slice(0, Math.min(end + 1, content.length))
-        : content.slice(offset);
-    }
-    offset = end + 1;
-  }
-  return null;
-}
 
 function sha256(data: Buffer): string {
   return createHash("sha256").update(data).digest("hex");
@@ -190,16 +148,6 @@ type OwnedFile =
 type RenderWhen = { publicOnly?: boolean; withoutModule?: string };
 
 type BaseOwnedFile = OwnedFile & { when?: RenderWhen };
-
-/** A bounded-region split grammar: the repo-owned local region's BEGIN/END
- *  lines above the managed half, which runs from managedBegin to end of
- *  file (managedEnd included). */
-interface RegionSplitGrammar {
-  managedBegin: string;
-  managedEnd: string;
-  localBegin: string;
-  localEnd: string;
-}
 
 // The declared ownership of every enforceable base file (kind + marker
 // decoration, render conditions from the templates' filename gates) and
@@ -1273,39 +1221,25 @@ function main(): number {
     );
   } else {
     const manifestText = readFileSync(manifestPath, "utf-8");
-    let manifestFiles: Record<string, unknown> | null = null;
+    let manifestFiles: Record<string, ManifestEntryShape> | null = null;
     if (!hasConflictMarker(manifestText)) {
-      // Duplicates are hunted BEFORE the parse so no consumer below ever
-      // reads a last-win view of the mapping (duplicateManifestKeys states
-      // the hazard).
-      const duplicated = duplicateManifestKeys(manifestText);
-      for (const key of duplicated) {
+      // The shared parser (actions/shared/manifest.ts - the same one the
+      // stamper and the sync legs read through) rejects unparseable JSON,
+      // a missing 'files' mapping, non-object entries, and structurally
+      // duplicated keys, which JSON consumers would otherwise last-win
+      // silently. It is only reached on conflict-free text: the parser
+      // resolves conflict blocks toward the template side (its sync-side
+      // contract), and this validator must report a conflicted manifest
+      // (check 4), never quietly read one side of it.
+      const parsed = parseManifestFiles(manifestText);
+      if (parsed.problem !== null) {
         errors.push(
-          `${MANIFEST_NAME}: key ${JSON.stringify(key)} is bound more than once - ` +
-            "JSON consumers silently keep the last value, so a duplicate (an entry " +
-            "path or a field inside one) silently changes what the manifest declares; " +
-            "revert the edit (git history has the stamped original) or run a recovery " +
-            "sync (recover=recopy)",
+          `${MANIFEST_NAME}: ${parsed.problem} - the file is managed; revert ` +
+            "the edit (git history has the stamped original) or run a " +
+            "recovery sync (recover=recopy)",
         );
-      }
-      if (duplicated.length === 0) {
-        try {
-          const manifest = JSON.parse(manifestText) as { files?: unknown };
-          if (
-            typeof manifest.files !== "object" ||
-            manifest.files === null ||
-            Array.isArray(manifest.files)
-          ) {
-            throw new Error("no top-level 'files' mapping");
-          }
-          manifestFiles = manifest.files as Record<string, unknown>;
-        } catch (exc) {
-          errors.push(
-            `${MANIFEST_NAME}: does not parse as an ownership manifest ` +
-              `(${exc instanceof Error ? exc.message.split("\n")[0] : String(exc)}); ` +
-              "the file is managed - run a template sync to regenerate it",
-          );
-        }
+      } else {
+        manifestFiles = parsed.files;
       }
     }
     if (manifestFiles !== null) {
@@ -1317,12 +1251,9 @@ function main(): number {
       }
       // Roster cross-check (see the trust model above): the manifest's
       // class metadata must agree with this validator's own tables for
-      // every path they cover. Shape problems on an entry are the
-      // structural loop's report, not doubled here.
-      const asEntry = (raw: unknown): Record<string, unknown> | null =>
-        typeof raw === "object" && raw !== null && !Array.isArray(raw)
-          ? (raw as Record<string, unknown>)
-          : null;
+      // every path they cover. Entry values are objects with a string
+      // class (the shared parser rejected everything else); every other
+      // field stays unknown and is validated where it is used.
       // Provenance: the stamped commit on the self entry must EQUAL the
       // recorded answers _commit - the stamper always writes the value it
       // reads there (null exactly when the answers record none), so any
@@ -1331,7 +1262,7 @@ function main(): number {
       // provenance error was already reported; `absenceCaveat` (null =
       // strict) carries that error's name into the per-entry advisory,
       // so one cause never piles a second diagnostic per missing entry.
-      const rawSelfCommit = asEntry(manifestFiles[MANIFEST_NAME])?.commit;
+      const rawSelfCommit = manifestFiles[MANIFEST_NAME]?.commit;
       const manifestCommit = typeof rawSelfCommit === "string" ? rawSelfCommit : null;
       let absenceCaveat: string | null = null;
       if (manifestCommit === null && answersCommit !== null) {
@@ -1399,13 +1330,11 @@ function main(): number {
         );
       };
       for (const { rel, kind, marker } of declaredOwnership) {
-        const raw = manifestFiles[rel];
-        if (raw === undefined) {
+        const entry = manifestFiles[rel];
+        if (entry === undefined) {
           reportUnlisted(rel, "this validator's ownership tables declare");
           continue;
         }
-        const entry = asEntry(raw);
-        if (entry === null) continue;
         const declared = kind === "marker" ? "split" : "managed";
         if (entry.class !== declared) {
           metadataError(rel, `claims class ${JSON.stringify(entry.class)}`, declared);
@@ -1416,7 +1345,7 @@ function main(): number {
         // below (every render stamps the field), not doubled here.
         if (
           kind === "marker" &&
-          (entry.managed !== "above" ||
+          (entry.managed !== GRAMMAR["tail-marker"].side ||
             entry.marker !== marker ||
             ("grammar" in entry && entry.grammar !== "tail-marker"))
         ) {
@@ -1430,17 +1359,15 @@ function main(): number {
       // Bounded-region splits (.gitignore's grammar: the repo-owned LOCAL
       // region sits above the managed half), from the declared grammars.
       for (const [rel, grammar] of Object.entries(BASE_REGION_SPLITS)) {
-        const raw = manifestFiles[rel];
-        if (raw === undefined) {
+        const entry = manifestFiles[rel];
+        if (entry === undefined) {
           reportUnlisted(rel, "the template always renders");
           continue;
         }
-        const entry = asEntry(raw);
-        if (entry === null) continue;
         const markerPairOk =
           entry.class === "split" &&
           entry.marker === grammar.managedBegin &&
-          entry.managed === "below";
+          entry.managed === GRAMMAR["bounded-region"].side;
         // A missing grammar field is the structural loop's single report;
         // a present one must name the declared grammar and its strings.
         const grammarOk =
@@ -1483,13 +1410,8 @@ function main(): number {
           );
         }
       }
-      for (const [rel, raw] of Object.entries(manifestFiles)) {
+      for (const [rel, entry] of Object.entries(manifestFiles)) {
         const where = `${MANIFEST_NAME}: entry '${rel}'`;
-        if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
-          errors.push(`${where} is not an object; run a template sync to regenerate the manifest`);
-          continue;
-        }
-        const entry = raw as Record<string, unknown>;
         // The self entry's invariant comes before any class dispatch: a
         // corrupted class (say, starter) must not slip past it. Its commit
         // slot holds the provenance stamp (null or a string; the alignment
@@ -1570,22 +1492,22 @@ function main(): number {
             );
             continue;
           }
-          // A present grammar must agree with the managed side and carry
-          // its region marker strings.
+          // A present grammar must agree with the managed side its GRAMMAR
+          // row declares (the one statement of each grammar's side) and
+          // carry its region marker strings.
+          const grammarId = KNOWN_GRAMMARS.find((known) => known === entry.grammar) ?? null;
           const grammarProblem =
-            entry.grammar === "tail-marker"
-              ? entry.managed !== "above"
-                ? 'declares the tail-marker grammar with a managed half not "above"'
-                : null
-              : entry.grammar === "bounded-region"
-                ? entry.managed !== "below" ||
-                  typeof entry.managed_end !== "string" ||
-                  typeof entry.local_begin !== "string" ||
-                  typeof entry.local_end !== "string"
-                  ? 'declares the bounded-region grammar without a "below" managed ' +
-                    "half and its region marker strings"
-                  : null
-                : `declares unknown split grammar ${JSON.stringify(entry.grammar)}`;
+            grammarId === null
+              ? `declares unknown split grammar ${JSON.stringify(entry.grammar)}`
+              : entry.managed !== GRAMMAR[grammarId].side
+                ? `declares the ${grammarId} grammar with a managed half not ` +
+                  JSON.stringify(GRAMMAR[grammarId].side)
+                : grammarId === "bounded-region" &&
+                    (typeof entry.managed_end !== "string" ||
+                      typeof entry.local_begin !== "string" ||
+                      typeof entry.local_end !== "string")
+                  ? "declares the bounded-region grammar without its region marker strings"
+                  : null;
           if (grammarProblem !== null) {
             errors.push(
               `${where} ${grammarProblem}; run a template sync to regenerate the manifest`,
