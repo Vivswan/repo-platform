@@ -118,36 +118,55 @@ describe("mustCapture timeoutMs", () => {
     expect(mustCapture(["echo", "ok"], { timeoutMs: 5000 })).toBe("ok");
   });
 
+  // The expiry path exits the calling process, so these tests run
+  // mustCapture in a child bun: process.execPath, never a bare "bun"
+  // (PATH's bun can be a DIFFERENT version than the runner, hiding
+  // version-specific semantics from a version-gated run), and the outer
+  // capture bound plus the elapsed guards stay well under bun-test's
+  // 5000ms per-test limit, so a wedged chain fails with capture's own
+  // diagnostics (timedOut true) instead of an opaque test timeout.
+
   test("an expiring deadline names it and exits nonzero", () => {
-    // mustCapture exits the calling process on failure, so the timeout
-    // path runs in a child bun invoking it against a stalled command.
     const snippet = [
       `import { mustCapture } from ${JSON.stringify(procModule)};`,
       'mustCapture(["sleep", "5"], { timeoutMs: 200 });',
       'console.log("unreachable");',
     ].join("\n");
     const start = Date.now();
-    const result = capture(["bun", "-e", snippet], { timeoutMs: 10_000 });
+    const result = capture([process.execPath, "-e", snippet], { timeoutMs: 2000 });
+    expect(result.timedOut).toBe(false);
     expect(result.exitCode).not.toBe(0);
     expect(result.stdout).not.toContain("unreachable");
     expect(result.stderr).toContain("timed out after 200ms: sleep 5");
-    expect(Date.now() - start).toBeLessThan(5000);
+    expect(Date.now() - start).toBeLessThan(4000);
   });
 
   test("the expiry line redacts credentials carried in argv", () => {
     // The sync push passes mustCapture an argv holding the fleet PAT
     // inside the push URL; the deadline-expiry line is reachable for
     // every call now that the default hang bound exists, so it must
-    // never echo the token into the (public) Actions log.
+    // never echo the token into the (public) Actions log. The stalled
+    // child must EXEC its sleep with fds detached: a shell is the only
+    // child whose argv can carry the URL past the deadline, but a forked
+    // sleeper surviving the deadline kill would hold the inherited
+    // stderr - THIS test's outer pipe - which bun >= 1.4.0 waits on to
+    // EOF (a plain `sh -c "sleep 5"` forked exactly so on Linux and hung
+    // this test for the sleep's full 5s). exec pins the sleeper to the
+    // killed pid; the /dev/null fds mean even a survivor could not
+    // wedge the pipes.
     const url = "https://x-access-token:ghp_SUPERSECRET@github.com/octo/repo.git";
+    const stalled = ["sh", "-c", "exec sleep 5 </dev/null >/dev/null 2>&1", "sh", url];
     const snippet = [
       `import { mustCapture } from ${JSON.stringify(procModule)};`,
-      `mustCapture(["sh", "-c", "sleep 5", "sh", ${JSON.stringify(url)}], { timeoutMs: 200 });`,
+      `mustCapture(${JSON.stringify(stalled)}, { timeoutMs: 200 });`,
     ].join("\n");
-    const result = capture(["bun", "-e", snippet], { timeoutMs: 10_000 });
+    const start = Date.now();
+    const result = capture([process.execPath, "-e", snippet], { timeoutMs: 2000 });
+    expect(result.timedOut).toBe(false);
     expect(result.exitCode).not.toBe(0);
     expect(result.stderr).not.toContain("ghp_SUPERSECRET");
     expect(result.stderr).toContain("timed out after 200ms:");
     expect(result.stderr).toContain("https://***@github.com/octo/repo.git");
+    expect(Date.now() - start).toBeLessThan(4000);
   });
 });

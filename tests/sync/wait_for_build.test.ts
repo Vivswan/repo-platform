@@ -114,7 +114,16 @@ function run(opts: Options = {}) {
     msgEnv.GIT_MARKER_MSG_FILE = markerFile;
   }
   const calls = join(root, "calls.log");
-  const proc = Bun.spawnSync(["bun", script], {
+  // process.execPath pins the script to the bun under test (a bare "bun"
+  // resolves from PATH, which version-gated runners do not front for
+  // grandchildren), and the bound stays below bun-test's 5000ms per-test
+  // limit so a wedged script fails its test loudly instead of stalling
+  // the suite. A timed-out spawnSync returns exitCode null with partial
+  // output, which output-only assertions could mistake for a pass, so
+  // expiry throws here at the owner.
+  const proc = Bun.spawnSync([process.execPath, script], {
+    timeout: 4000,
+    killSignal: "SIGKILL",
     env: {
       ...process.env,
       PATH: `${bin}:${process.env.PATH}`,
@@ -134,6 +143,11 @@ function run(opts: Options = {}) {
       ...opts.env,
     },
   });
+  if (proc.exitedDueToTimeout === true) {
+    throw new Error(
+      `wait_for_build.ts exceeded the 4000ms harness bound\n${proc.stdout.toString()}${proc.stderr.toString()}`,
+    );
+  }
   const raw = existsSync(calls) ? readFileSync(calls, "utf-8") : "";
   return {
     exitCode: proc.exitCode,
