@@ -15,8 +15,13 @@ import { env, hideDetails, requireEnv, setOutput } from "../shared/gha.ts";
 import { SYNC_IDENTITY } from "../shared/git_identity.ts";
 import { capture, must, mustCapture, passthrough, redactText } from "../shared/proc.ts";
 import { ALL_GREEN_WORKFLOW_PATH } from "./all_green_bootstrap.ts";
+import { writeReferencedLabelsReport } from "./referenced_labels.ts";
 import { appendHiddenFailure, captureName } from "./run_hidden.ts";
-import { ALL_GREEN_BOOTSTRAP_NAME, STARTER_PINS_NAME } from "./section_files.ts";
+import {
+  ALL_GREEN_BOOTSTRAP_NAME,
+  REFERENCED_LABELS_NAME,
+  STARTER_PINS_NAME,
+} from "./section_files.ts";
 import {
   type FileOutcome,
   renderRolloutReport,
@@ -225,6 +230,12 @@ if (existsSync(pinOutcomesPath)) {
 if (withheld.split("\n").includes(ALL_GREEN_WORKFLOW_PATH)) {
   writeFileSync(join(runnerTemp, ALL_GREEN_BOOTSTRAP_NAME), "");
 }
+// The referenced-labels report was computed against the PRE-restore tree;
+// the restore just rewrote .github/workflows, whose label references are
+// half of that report's input, so recompute it against the tree that is
+// actually pushed (issue forms are untouched by the restore, but the
+// check is cheap and a full re-run cannot go stale).
+writeReferencedLabelsReport("target", join(runnerTemp, REFERENCED_LABELS_NAME), hideDetails());
 // The restore rewrote workflow files after the workflow's stamping step, so
 // the ownership manifest must follow the tree that is actually pushed:
 // restamp in place (idempotent) so withheld modifications hash the restored

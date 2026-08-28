@@ -294,6 +294,50 @@ jobs:
             echo "::notice::settings apply skipped for ${{ matrix.repo }}: its default branch moved while this run was computing its settings, so the apply was skipped rather than applied from a stale snapshot. The next run reads the new revision."
           fi
 
+      # Referenced-label invariant, FAIL-CLOSED side: the apply's
+      # reconciliation DELETES every live label the merged document does
+      # not declare (and renames away `new_name` sources), and removing
+      # one the target's issue forms or workflows still reference breaks
+      # them silently. Before the action runs, the preflight lists the
+      # live labels, extracts the referenced ones (from this checkout for
+      # the operator, from the target at the pinned ref otherwise - the
+      # same fact-source split as the render), and fails THIS repo's apply
+      # naming the label and its referencing file. The action's mode is
+      # mirrored so a check_only run warns instead of failing (a check
+      # deletes nothing, and a hard fail would cost the drift report).
+      # Same gate as the apply itself: a moved target was never checked.
+      # Behind the same hidden-capture boundary as the render and merge -
+      # label names and file paths are target content.
+      - name: Preflight labels the target still references
+        id: labels
+        if: steps.freshness.outputs.moved == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
+          TARGET: ${{ steps.resolve.outputs.repo }}
+          MODE: ${{ inputs.check_only && 'check' || 'apply' }}
+        run: |
+          if [ "$TARGET" = "$GITHUB_REPOSITORY" ]; then
+            bun .github/scripts/sync/run_hidden.ts "settings labels" -- \
+              bun .github/scripts/fleet/label_preflight.ts \
+              --merged "$RUNNER_TEMP/merged-settings.yml" \
+              --repo "$TARGET" --target-dir . --mode "$MODE"
+          else
+            bun .github/scripts/sync/run_hidden.ts "settings labels" -- \
+              bun .github/scripts/fleet/label_preflight.ts \
+              --merged "$RUNNER_TEMP/merged-settings.yml" \
+              --repo "$TARGET" --ref "${{ steps.render.outputs.ref }}" --mode "$MODE"
+          fi
+
+      # Outside the hidden capture, like the skip notices above: for a
+      # hide-details target the capture swallows the preflight's own
+      # stood-down line, and a guard that silently stood down looks
+      # exactly like one that checked and passed. The reason is one of the
+      # script's fixed categories - value-free by construction.
+      - name: Report a stood-down label preflight
+        if: steps.labels.outputs.not_applicable == 'true'
+        run: |
+          echo "::notice::label preflight stood down for ${{ matrix.repo }}: ${{ steps.labels.outputs.reason }}"
+
       - name: Apply repository settings
         id: apply
         # Skipped for a target that selected settings-sync but has no

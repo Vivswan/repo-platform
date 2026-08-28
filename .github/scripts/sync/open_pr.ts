@@ -27,6 +27,7 @@ import { capture, mustCapture, redactText } from "../shared/proc.ts";
 import { clip, escapeControlBytes } from "./preserve_local_content.ts";
 import {
   ALL_GREEN_BOOTSTRAP_NAME,
+  REFERENCED_LABELS_NAME,
   REMOVED_SPLITS_NAME,
   SETTINGS_LAYERING_NAME,
   STARTER_PINS_NAME,
@@ -190,10 +191,10 @@ if (recover === "recopy") {
 // - all-green-bootstrap: all_green_bootstrap.ts's first-verdict-delivery
 //   note - this PR introduces the verdict workflow, so its own required
 //   check can never appear on it and the one-time path is an admin-bypass
-//   merge. The first APPENDED section (only the base prose and the drift
-//   prepend precede it): it tells the reader HOW to merge, and forces the
-//   manual path (arming auto-merge on an unsatisfiable check would
-//   promise a merge that can never fire).
+//   merge. The first FLAG-FILE section (the base prose, the drift
+//   prepend, and the recovery re-render warning precede it): it tells the
+//   reader HOW to merge, and forces the manual path (arming auto-merge on
+//   an unsatisfiable check would promise a merge that can never fire).
 // - tail-shrank: tail_tripwire.ts's post-stamp check - the structural
 //   rebuild should make a trip impossible, so a non-empty report is a
 //   sync bug and the PR waits for a human.
@@ -249,6 +250,12 @@ ${lines(path)
   },
   { path: requireEnv("MANIFEST_LICENSE_FILE"), render: slurp, forcesReview: false },
   { path: join(runnerTemp, SETTINGS_LAYERING_NAME), render: slurp, forcesReview: true },
+  // referenced_labels.ts's report: label(s) the target's issue forms or
+  // workflows reference that the merged settings label roster does not
+  // declare - the apply deletes undeclared labels, so each reference is
+  // broken or about to be; a human declares the label or drops the
+  // reference.
+  { path: join(runnerTemp, REFERENCED_LABELS_NAME), render: slurp, forcesReview: true },
   // preserve_repo_owned.ts's removed-split-files report: the update
   // deletes a path whose previous copy carried a repository-owned half
   // (class `split` at HEAD, or a license spelling the manifest cannot
@@ -390,6 +397,8 @@ body = capBody(body);
 // validation, a recovery re-render, a dispatch that forced manual review,
 // a deleted split-class file (its repository-owned half leaves with it),
 // out-of-band settings drift, dropped settings-layering overrides, a
+// referenced-but-undeclared label (the apply deletes undeclared labels,
+// so the reference breaks), a
 // first verdict delivery (the all-green bootstrap: the required check can
 // never appear on the PR that introduces its workflow) - stays
 // manual; a clean update (which includes kept-whole and clean
@@ -481,6 +490,6 @@ if (!needsReview) {
   }
 } else {
   console.log(
-    "auto-merge left off: this PR needs review (conflicts, split-file carries needing review, a tripped tail tripwire, withheld files, failed validation, out-of-band settings drift, dropped settings-layering overrides, a recovery re-render, a forced-manual dispatch, a deleted split-class file whose repository-owned half leaves with it, or a first verdict delivery whose required check can never appear on this PR).",
+    "auto-merge left off: this PR needs review (conflicts, split-file carries needing review, a tripped tail tripwire, withheld files, failed validation, out-of-band settings drift, dropped settings-layering overrides, a referenced-but-undeclared label, a recovery re-render, a forced-manual dispatch, a deleted split-class file whose repository-owned half leaves with it, or a first verdict delivery whose required check can never appear on this PR).",
   );
 }

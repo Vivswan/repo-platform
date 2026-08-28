@@ -29,3 +29,9 @@ export const STARTER_PINS_NAME = "starter-pin-rollout.md";
  * one-time path is an admin-bypass merge. Forces the manual-review path
  * (auto-merge could never fire: the required check cannot appear). */
 export const ALL_GREEN_BOOTSTRAP_NAME = "all-green-bootstrap.md";
+
+/** referenced_labels.ts's report: label(s) the target's issue forms or
+ * workflows reference that the merged settings label roster does not
+ * declare - the apply deletes undeclared labels, so each reference is
+ * broken or about to be. Forces the manual-review path. */
+export const REFERENCED_LABELS_NAME = "referenced-labels.md";

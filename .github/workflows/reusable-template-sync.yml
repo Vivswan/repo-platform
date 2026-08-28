@@ -386,6 +386,20 @@ jobs:
             bun .github/scripts/sync/all_green_bootstrap.ts \
             --root target --hide-details "$HIDE_DETAILS"
 
+      # Referenced-label invariant, WARN side: every label the target's
+      # issue forms and its own workflows reference must exist in the
+      # merged settings label roster - the settings apply deletes
+      # undeclared labels, so a missing one is a silent break. The script
+      # writes a PR-body section open_pr.ts appends and holds manual; it
+      # never fails the sync (a repo quirk must not block its PR - the
+      # apply side carries the fail-closed guard, label_preflight.ts).
+      # Wrapped in run_hidden: label names and paths are target content.
+      - name: Check referenced labels against the merged roster
+        run: |
+          bun .github/scripts/sync/run_hidden.ts "referenced labels" -- \
+            bun .github/scripts/sync/referenced_labels.ts \
+            --root target --hide-details "$HIDE_DETAILS"
+
       # Conflict resolution and the preserve steps can rewrite files after
       # copier's own post-render stamp hook ran, so the ownership
       # manifest's hashes are stamped once more when the tree is final

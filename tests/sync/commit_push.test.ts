@@ -17,7 +17,10 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { capture } from "../../.github/scripts/shared/proc.ts";
-import { ALL_GREEN_BOOTSTRAP_NAME } from "../../.github/scripts/sync/section_files.ts";
+import {
+  ALL_GREEN_BOOTSTRAP_NAME,
+  REFERENCED_LABELS_NAME,
+} from "../../.github/scripts/sync/section_files.ts";
 
 const SCRIPT = join(import.meta.dir, "../../.github/scripts/sync/commit_push.ts");
 const SENTINEL = "ghp_SENTINEL";
@@ -61,9 +64,24 @@ case "$*" in
     echo "${GIT_ERROR}" >&2
     echo "remote: see https://x-access-token:${SENTINEL}@github.com/o/r.git"
     exit 1 ;;
+  *"--diff-filter=A"*)
+    # The added-files query: nothing was ADDED in these fixtures - the
+    # withheld file pre-exists, so reporting it here would have the
+    # restore path rmSync the very file the checkout case just restored.
+    exit 0 ;;
   *"diff --name-only"*)
     if [ "$STUB_MODE" = "withhold-allgreen" ]; then echo ".github/workflows/all-green.yml"; fi
     if [ "$STUB_MODE" = "withhold-other" ]; then echo ".github/workflows/ci.yml"; fi
+    if [ "$STUB_MODE" = "withhold-restore" ]; then echo ".github/workflows/ci.yml"; fi
+    exit 0 ;;
+  *" checkout "*)
+    # The withhold-restore mode makes the workflow-dir restore OBSERVABLE:
+    # the restored ci.yml references a different label than the pre-restore
+    # copy, so a consumer reading the tree too early is caught.
+    if [ "$STUB_MODE" = "withhold-restore" ]; then
+      mkdir -p target/.github/workflows
+      printf 'jobs:\\n  close:\\n    steps:\\n      - with:\\n          stale-issue-label: restored-label\\n' > target/.github/workflows/ci.yml
+    fi
     exit 0 ;;
   *"diff --quiet"*)
     exit 1 ;;
@@ -250,5 +268,47 @@ describe("commit_push Workflows-scope withhold reconciliation", () => {
       ".github/workflows/ci.yml",
     );
     expect(readFileSync(join(result.runnerTemp, ALL_GREEN_BOOTSTRAP_NAME), "utf-8")).toBe(NOTE);
+  });
+
+  test("the withhold overwrites a stale referenced-labels report (the recompute runs post-restore)", () => {
+    // The workflow's check step ran BEFORE the restore rewrote
+    // .github/workflows, so its report may claim label references the
+    // pushed tree no longer carries. This fixture opts out of
+    // settings-sync (the shared scratch target is not a full checkout),
+    // so it pins that the recompute RUNS and overwrites - the stale note
+    // is replaced with that tree's honest verdict (empty: not
+    // applicable). The ordering pin is the next test.
+    const staleNote = '> [!WARNING]\n> REFERENCED LABELS: "answered" is missing\n';
+    writeFileSync(join(scratch, "work", "target", ".repo-platform.yml"), "modules: []\n");
+    writeFileSync(join(scratch, "work", "target", ".copier-answers.yml"), "private: false\n");
+    const result = runCommitPush("withhold-other", "false", {
+      [REFERENCED_LABELS_NAME]: staleNote,
+    });
+    expect(result.exitCode).toBe(0);
+    expect(readFileSync(join(result.runnerTemp, REFERENCED_LABELS_NAME), "utf-8")).toBe("");
+    expect(result.stdout).toContain("referenced labels: not applicable");
+  });
+
+  test("the recompute reads the RESTORED workflow content, never the pre-restore tree", () => {
+    // Full settings-sync fixture, with a workflow whose label reference
+    // the stub git's checkout REWRITES (pre-restore-label ->
+    // restored-label). The recomputed report must name the restored
+    // reference; the pre-restore one surviving would mean the recompute
+    // ran before the restore and the PR body describes a tree that was
+    // never pushed.
+    const targetDir = join(scratch, "work", "target");
+    mkdirSync(join(targetDir, ".github", "workflows"), { recursive: true });
+    writeFileSync(join(targetDir, ".repo-platform.yml"), "modules:\n  - settings-sync\n");
+    writeFileSync(join(targetDir, ".copier-answers.yml"), "private: false\n");
+    writeFileSync(join(targetDir, ".github", "settings.yml"), "repository:\n  private: false\n");
+    writeFileSync(
+      join(targetDir, ".github", "workflows", "ci.yml"),
+      "jobs:\n  close:\n    steps:\n      - with:\n          stale-issue-label: pre-restore-label\n",
+    );
+    const result = runCommitPush("withhold-restore", "false");
+    expect(result.exitCode).toBe(0);
+    const report = readFileSync(join(result.runnerTemp, REFERENCED_LABELS_NAME), "utf-8");
+    expect(report).toContain('"restored-label"');
+    expect(report).not.toContain("pre-restore-label");
   });
 });

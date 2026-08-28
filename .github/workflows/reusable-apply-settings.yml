@@ -156,6 +156,33 @@ jobs:
           PINNED: ${{ steps.render.outputs.ref }}
         run: bun platform/.github/scripts/fleet/check_target_fresh.ts
 
+      # Referenced-label invariant, FAIL-CLOSED side (same guard as the
+      # central run): the apply's reconciliation DELETES every live label
+      # the merged document does not declare (and renames away `new_name`
+      # sources), and removing one this repository's issue forms or
+      # workflows still reference breaks them silently. The reference
+      # files come from the checkout above - the self-apply token model
+      # grants no Contents scope for API reads - and the live-label
+      # listing rides the PAT's Issues grant. The caller's sections
+      # allowlist, check mode, and on-missing-permission choice are
+      # mirrored so the preflight is never stricter than the apply it
+      # guards. A referenced label scheduled for removal fails the apply,
+      # naming the label and its referencing file.
+      - name: Preflight labels this repository still references
+        if: steps.freshness.outputs.moved == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
+          SECTIONS: ${{ inputs.sections }}
+          REQUIRED_SECTIONS: ${{ inputs.required_sections }}
+          MODE: ${{ inputs.check_only && 'check' || 'apply' }}
+          ON_MISSING_PERMISSION: ${{ inputs.on_missing_permission }}
+        run: |
+          bun platform/.github/scripts/fleet/label_preflight.ts \
+            --merged "$RUNNER_TEMP/merged-settings.yml" \
+            --repo "$GITHUB_REPOSITORY" --target-dir . \
+            --sections "$SECTIONS" --required-sections "$REQUIRED_SECTIONS" \
+            --mode "$MODE" --on-missing-permission "$ON_MISSING_PERMISSION"
+
       - name: Apply repository settings
         # Positive equality, never `!= 'true'`: a step that did not RUN has
         # an empty output, and a negative test would let the apply through

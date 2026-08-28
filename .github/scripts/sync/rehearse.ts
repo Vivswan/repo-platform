@@ -612,6 +612,15 @@ export function rehearseRepo(slug: string, options: RehearsalOptions): Rehearsal
       cwd: REPO_ROOT,
       env: legEnv,
     });
+    // The workflow's referenced-label check (referenced_labels.ts): every
+    // label the target's issue forms and workflows reference must exist in
+    // the merged settings label roster (the apply deletes undeclared
+    // labels). The report lands under RUNNER_TEMP by the script's own
+    // default, printed below.
+    run(["bun", join(import.meta.dir, "referenced_labels.ts"), "--root", targetDir], {
+      cwd: REPO_ROOT,
+      env: legEnv,
+    });
     // Conflict resolution and the preserve steps can rewrite files after
     // copier's post-render stamp hook ran, so the manifest is stamped once
     // more when the tree is final - the same final stamping step
@@ -705,6 +714,10 @@ export function rehearseRepo(slug: string, options: RehearsalOptions): Rehearsal
         [
           "all-green-bootstrap.md",
           "All-green bootstrap (first verdict delivery; the PR would stay manual-review - one-time admin-bypass merge)",
+        ],
+        [
+          "referenced-labels.md",
+          "Labels referenced by issue forms/workflows but missing from the merged settings roster (the PR would stay manual-review)",
         ],
         ["local-carryover.md", "Split-file carry summary (rebuilt structurally)"],
         ["carry-review.txt", "Split-file carries needing review (the PR would stay manual-review)"],
