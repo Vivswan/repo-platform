@@ -1,9 +1,9 @@
 // End-to-end sentinel on commit_push.ts's credential redaction: git's OWN
 // error text quotes the credentialed push URL back (the 401/403 shape),
 // and redactCommand only covers our argv lines - so the script must pass
-// every re-emission of git's output (stderr, stdout, the push.err file)
-// through redactText. A stub git on PATH forces the credentialed error
-// shapes; the assertions are on the script's whole public output.
+// every re-emission of git's output (stderr, stdout, the hidden capture
+// files) through redactText. A stub git on PATH forces the credentialed
+// error shapes; the assertions are on the script's whole public output.
 
 import { beforeAll, describe, expect, test } from "bun:test";
 import {
@@ -24,7 +24,8 @@ const GIT_ERROR = `fatal: unable to access 'https://x-access-token:${SENTINEL}@g
 
 // Case order matters: the push argv also contains the URL, so ls-remote
 // must match first. STUB_MODE=lease-fail fails the lease probe; push-fail
-// serves the lease and fails the push itself.
+// serves the lease and fails the push itself; stale-push-fail fails the
+// push with stale-lease evidence flanked by 403-shaped progress bytes.
 const STUB_GIT = `#!/bin/sh
 case "$*" in
   *ls-remote*)
@@ -35,6 +36,11 @@ case "$*" in
     printf '0123456789012345678901234567890123456789\\trefs/heads/automation/repo-platform\\n'
     exit 0 ;;
   *" push "*)
+    if [ "$STUB_MODE" = "stale-push-fail" ]; then
+      echo "remote: Resolving deltas: 100% (403/403), done." >&2
+      echo " ! [rejected]        automation/repo-platform -> automation/repo-platform (stale info)" >&2
+      exit 1
+    fi
     echo "${GIT_ERROR}" >&2
     echo "remote: see https://x-access-token:${SENTINEL}@github.com/o/r.git"
     exit 1 ;;
@@ -97,15 +103,14 @@ describe("commit_push credential redaction", () => {
     expect(result.stdout).toContain("(ls-remote output hidden: private repository)");
   });
 
-  test("a failing push redacts both streams and the push.err file", () => {
+  test("a failing push redacts both re-emitted streams", () => {
+    // The capture-file leg of the redaction property is asserted on the
+    // hidden push failure below - the file only exists on that path.
     const result = runCommitPush("push-fail", "false");
     expect(result.exitCode).toBe(1);
     expect(result.stdout + result.stderr).not.toContain(SENTINEL);
     expect(result.stderr).toContain("unable to access 'https://***@github.com/o/r.git/'");
     expect(result.stdout).toContain("https://***@github.com/o/r.git");
-    const pushErr = readFileSync(join(result.runnerTemp, "push.err"), "utf-8");
-    expect(pushErr).not.toContain(SENTINEL);
-    expect(pushErr).toContain("https://***@github.com/o/r.git");
   });
 
   test("a hidden target's failing push keeps its slug off both streams", () => {
@@ -130,6 +135,18 @@ describe("commit_push failure diagnostics", () => {
     expect(result.stdout).not.toContain("see the log above");
   });
 
+  test("stale-lease evidence outranks 403-shaped bytes in ordinary git output", () => {
+    // The stub's stale failure carries "(403/403)" progress bytes, which
+    // the authorization pattern's bare-number alternative matches (403
+    // flanked by non-digits) - the exact stale-lease needle must win. The
+    // push-fail case above is the control: a real 403 error with no stale
+    // evidence still gets the authorization lead.
+    const result = runCommitPush("stale-push-fail", "false");
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain("the lease was stale");
+    expect(result.stdout).not.toContain("authorization-shaped");
+  });
+
   test("a hidden target's lease failure lands redacted in the failure-issue manifest", () => {
     const result = runCommitPush("lease-fail", "true");
     const manifest = readFileSync(join(result.runnerTemp, "hidden-failures.tsv"), "utf-8");
@@ -140,8 +157,11 @@ describe("commit_push failure diagnostics", () => {
     expect(captured).not.toContain(SENTINEL);
     expect(captured).toContain("unable to access 'https://***@github.com/o/r.git/'");
     // The public pointer replaces the false "see the log above": the log
-    // says only "output hidden", the issue carries the detail.
-    expect(result.stdout).toContain("delivered to the target's failure-report issue");
+    // says only "output hidden", the issue carries the detail - and the
+    // promise is scoped to what the capture holds (the error stream).
+    expect(result.stdout).toContain(
+      "the redacted error output is delivered to the target's failure-report issue",
+    );
   });
 
   test("a hidden target's push failure lands redacted in the failure-issue manifest", () => {

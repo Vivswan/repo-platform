@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { captureName } from "../../.github/scripts/sync/run_hidden.ts";
+import { captureName, parseHiddenFailures } from "../../.github/scripts/sync/run_hidden.ts";
 
 const script = join(import.meta.dir, "../../.github/scripts/sync/run_hidden.ts");
 
@@ -29,6 +29,51 @@ describe("run_hidden.ts", () => {
     expect(captureName(" post-withhold re-validation!")).toBe(
       "hidden-post-withhold-re-validation.log",
     );
+  });
+
+  test("parseHiddenFailures is total: malformed rows are counted, never returned", () => {
+    // Torn-write shapes: a short row (the write died mid-row), a bare
+    // label, an extra field, and an empty field. None may surface as a
+    // HiddenFailure with undefined fields.
+    const parsed = parseHiddenFailures(
+      [
+        "branch push\t1\t/tmp/rt/hidden-branch-push.log",
+        "copier update\t3",
+        "lonely-label",
+        "a\t1\t/tmp/rt/a.log\textra",
+        "empty-rc\t\t/tmp/rt/b.log",
+        "",
+      ].join("\n"),
+    );
+    expect(parsed.failures).toEqual([
+      { label: "branch push", rc: "1", capture: "/tmp/rt/hidden-branch-push.log" },
+    ]);
+    expect(parsed.malformedRows).toBe(4);
+  });
+
+  test("parseHiddenFailures control: a well-formed manifest parses whole", () => {
+    const parsed = parseHiddenFailures("a\t1\t/tmp/rt/a.log\nb\t2\t/tmp/rt/b.log\n");
+    expect(parsed.failures).toHaveLength(2);
+    expect(parsed.malformedRows).toBe(0);
+  });
+
+  test("an unterminated tail row is malformed even with three fields", () => {
+    // appendHiddenFailure newline-terminates every record, so a tail with
+    // no newline is a torn write whose capture path may be cut short -
+    // three fields or not.
+    const parsed = parseHiddenFailures("a\t1\t/tmp/rt/a.log\nb\t9\t/tmp/rt/hidden-b.lo");
+    expect(parsed.failures).toEqual([{ label: "a", rc: "1", capture: "/tmp/rt/a.log" }]);
+    expect(parsed.malformedRows).toBe(1);
+  });
+
+  test("empty rows are malformed, never silently dropped", () => {
+    // A newline-only manifest passes failure_issue.ts's non-empty-file
+    // guard; without a malformed count it would deliver a report that
+    // silently claims completeness with nothing in it.
+    expect(parseHiddenFailures("\n")).toEqual({ failures: [], malformedRows: 1 });
+    const interior = parseHiddenFailures("a\t1\t/tmp/rt/a.log\n\nb\t2\t/tmp/rt/b.log\n");
+    expect(interior.failures).toHaveLength(2);
+    expect(interior.malformedRows).toBe(1);
   });
 
   test("passes through untouched when details are not hidden", () => {

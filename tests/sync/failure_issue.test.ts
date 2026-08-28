@@ -61,6 +61,10 @@ esac
 
 interface Options {
   failures?: { label: string; slug: string; rc: number; output: string }[];
+  /** Raw manifest rows appended verbatim (torn-write / short-row shapes). */
+  rawRows?: string[];
+  /** Omit the final newline: a torn write cut mid-record. */
+  unterminated?: boolean;
   lookup?: string;
   fail?: string;
   prUrl?: string;
@@ -75,13 +79,17 @@ function run(mode: string | undefined, opts: Options = {}) {
   writeFileSync(join(bin, "gh"), ghStub, { mode: 0o755 });
   const calls = join(root, "calls.log");
   const bodyOut = join(root, "delivered-body.md");
-  if (opts.failures) {
-    const lines = opts.failures.map((f) => {
+  if (opts.failures || opts.rawRows) {
+    const lines = (opts.failures ?? []).map((f) => {
       const log = join(temp, `hidden-${f.slug}.log`);
       writeFileSync(log, f.output);
       return `${f.label}\t${f.rc}\t${log}`;
     });
-    writeFileSync(join(temp, "hidden-failures.tsv"), `${lines.join("\n")}\n`);
+    lines.push(...(opts.rawRows ?? []));
+    writeFileSync(
+      join(temp, "hidden-failures.tsv"),
+      lines.join("\n") + (opts.unterminated ? "" : "\n"),
+    );
   }
   const proc = Bun.spawnSync(["bun", script, ...(mode === undefined ? [] : [mode])], {
     env: {
@@ -213,6 +221,59 @@ describe("failure_issue.ts", () => {
     expect(r.exitCode).toBe(0);
     expect(r.calls).toContain(`repos/${SLUG}/issues/17 --method PATCH`);
     expect(r.calls).not.toContain("/assignees");
+  });
+
+  test("a torn manifest row is skipped with a note, never aborting the delivery", () => {
+    // Torn-write shapes a crashed recorder can leave: a row cut before its
+    // capture path, and a bare label fragment. The well-formed row must
+    // still deliver, with the skip noted in the body.
+    const r = run("deliver", {
+      failures: oneFailure,
+      rawRows: ["branch push\t1", "branch pu"],
+    });
+    expect(r.exitCode).toBe(0);
+    expect(r.calls).toContain(`repos/${SLUG}/issues --method POST`);
+    expect(r.body).toContain("## copier update: exit 3");
+    expect(r.body).toContain("Traceback: secret target path");
+    expect(r.body).toContain("2 malformed failure-manifest row(s) were skipped");
+    expect(r.body).not.toContain("undefined");
+  });
+
+  test("an all-torn manifest still delivers the skipped-row note", () => {
+    const r = run("deliver", { rawRows: ["branch push\t1"] });
+    expect(r.exitCode).toBe(0);
+    expect(r.calls).toContain(`repos/${SLUG}/issues --method POST`);
+    expect(r.body).toContain("1 malformed failure-manifest row(s) were skipped");
+  });
+
+  test("a newline-only manifest delivers the skipped-row note, not an empty report", () => {
+    // "\n" passes the non-empty-file guard; the empty row must count as
+    // malformed or the report would claim completeness with no sections.
+    const r = run("deliver", { rawRows: [""] });
+    expect(r.exitCode).toBe(0);
+    expect(r.calls).toContain(`repos/${SLUG}/issues --method POST`);
+    expect(r.body).toContain("1 malformed failure-manifest row(s) were skipped");
+  });
+
+  test("torn-row control: a well-formed delivery carries no skipped-row note", () => {
+    const r = run("deliver", { failures: oneFailure });
+    expect(r.body).not.toContain("malformed failure-manifest row");
+  });
+
+  test("a three-field tail cut before its newline counts as torn", () => {
+    // The dangerous torn shape: the crash landed mid-capture-path, so the
+    // tail still splits into three non-empty fields. Field-counting alone
+    // would deliver a silent empty section for the cut path; the
+    // termination rule flags it instead.
+    const r = run("deliver", {
+      failures: oneFailure,
+      rawRows: ["branch push\t1\t/tmp/cut-of"],
+      unterminated: true,
+    });
+    expect(r.exitCode).toBe(0);
+    expect(r.body).toContain("## copier update: exit 3");
+    expect(r.body).not.toContain("## branch push");
+    expect(r.body).toContain("1 malformed failure-manifest row(s) were skipped");
   });
 
   test("deliver bounds an oversized capture", () => {

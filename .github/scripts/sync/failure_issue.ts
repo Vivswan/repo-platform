@@ -187,7 +187,9 @@ if (mode === "deliver") {
     console.log("no hidden step failed; the public log already carries this failure's diagnosis");
     process.exit(0);
   }
-  const manifest = parseHiddenFailures(readFileSync(manifestFile, "utf-8"));
+  const { failures: manifest, malformedRows } = parseHiddenFailures(
+    readFileSync(manifestFile, "utf-8"),
+  );
 
   // The fence must outrun the longest backtick run in each SHIPPED
   // excerpt, or a captured line could terminate its own code block early
@@ -226,6 +228,15 @@ if (mode === "deliver") {
       }
     }
     sections.push(fence);
+  }
+  // A malformed manifest row (a torn write) is skipped by the parser, never
+  // allowed to abort the delivery of the rows that did land - but the skip
+  // must be loud, or the report would silently claim completeness.
+  if (malformedRows > 0) {
+    sections.push(
+      "",
+      `${malformedRows} malformed failure-manifest row(s) were skipped (likely a torn write); reproduce locally for what they carried.`,
+    );
   }
   sections.push(
     "",

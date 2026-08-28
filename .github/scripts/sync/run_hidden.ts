@@ -36,6 +36,16 @@ export interface HiddenFailure {
   capture: string;
 }
 
+/** parseHiddenFailures's TOTAL result: only rows carrying exactly the
+ *  three non-empty fields become failures (so HiddenFailure's declared
+ *  strings hold); anything else - a torn write, a truncated tail row - is
+ *  counted here instead of surfacing as undefined fields, and the
+ *  deliverer notes the count in the issue body rather than aborting. */
+export interface HiddenFailureManifest {
+  failures: HiddenFailure[];
+  malformedRows: number;
+}
+
 export function appendHiddenFailure(
   runnerTemp: string,
   label: string,
@@ -45,14 +55,27 @@ export function appendHiddenFailure(
   appendFileSync(join(runnerTemp, HIDDEN_FAILURES_NAME), `${label}\t${rc}\t${capture}\n`);
 }
 
-export function parseHiddenFailures(manifest: string): HiddenFailure[] {
-  return manifest
-    .split("\n")
-    .filter((line) => line !== "")
-    .map((line) => {
-      const [label, rc, capture] = line.split("\t");
-      return { label, rc, capture };
-    });
+export function parseHiddenFailures(manifest: string): HiddenFailureManifest {
+  const failures: HiddenFailure[] = [];
+  let malformedRows = 0;
+  // Every appendHiddenFailure record is newline-terminated, so the final
+  // split segment of a well-formed manifest is "" - the ONLY legal empty
+  // segment. A non-empty tail is a torn write even when it happens to
+  // carry three fields (its capture path may be cut short), and interior
+  // rows fall to the field rule below, which an empty row fails too.
+  const rows = manifest.split("\n");
+  const tail = rows.pop() ?? "";
+  if (tail !== "") malformedRows += 1;
+  for (const row of rows) {
+    const fields = row.split("\t");
+    if (fields.length !== 3 || fields.includes("")) {
+      malformedRows += 1;
+      continue;
+    }
+    const [label, rc, capture] = fields;
+    failures.push({ label, rc, capture });
+  }
+  return { failures, malformedRows };
 }
 
 /** Capture file name for a label (non-alphanumeric runs squeezed to '-' and
