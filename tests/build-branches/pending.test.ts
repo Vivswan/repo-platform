@@ -1,8 +1,10 @@
 // pending.ts: the build-during-CI handoff's race rules. The pending refs
 // are keyed by source sha (disjoint across concurrent pushes) and the
 // publisher enforces newest-green-wins - a stale build must never
-// overwrite a newer published tree, while replays, damaged stamps, and
-// diverged histories stay their own machinery's business.
+// overwrite a newer published tree, while replays fall through to
+// publish.ts's tree diff (nothing changed publishes nothing; drift
+// republishes), damaged stamps are the stamp-recovery lane's business,
+// and diverged histories stay the provenance machinery's.
 
 import { describe, expect, test } from "bun:test";
 import {
@@ -50,11 +52,11 @@ describe("staleReason (newest-green wins)", () => {
     expect(staleReason(NEW, OLD, mainHistory)).toBe("");
   });
 
-  test("an equal source proceeds - the no-change/re-stamp path owns replays", () => {
+  test("an equal source proceeds - publish.ts's tree diff owns the replay decision", () => {
     expect(staleReason(NEW, NEW, mainHistory)).toBe("");
   });
 
-  test("an empty tip stamp proceeds - the re-stamp machinery owns damaged stamps", () => {
+  test("an empty tip stamp proceeds - the stamp-recovery lane owns damaged stamps", () => {
     expect(staleReason(NEW, "", mainHistory)).toBe("");
   });
 
@@ -63,27 +65,24 @@ describe("staleReason (newest-green wins)", () => {
   });
 });
 
-describe("refSuperseded (the per-source ref sweep)", () => {
-  // The rule behind publish.ts's sweep of refs/build-pending/ and
-  // refs/build-meta/build-noop/: an inverted own-ref policy would
-  // either strand every consumed pending ref or delete the no-op verdict
-  // the sync's waiter is about to verify.
-  test("an ancestor source's ref is superseded under either policy", () => {
-    expect(refSuperseded(OLD, NEW, "consume", mainHistory)).toBe(true);
-    expect(refSuperseded(OLD, NEW, "keep", mainHistory)).toBe(true);
+describe("refSuperseded (the pending-ref sweep)", () => {
+  // The rule behind publish.ts's sweep of refs/build-pending/: a sweep
+  // that spared the consumed refs would strand every promoted tree, and
+  // one that ate newer sources' refs would slow their own publishers
+  // onto the compose fallback.
+  test("an ancestor source's ref is superseded", () => {
+    expect(refSuperseded(OLD, NEW, mainHistory)).toBe(true);
   });
 
-  test("the candidate's own ref follows the policy: pendings consumed, markers kept", () => {
-    expect(refSuperseded(NEW, NEW, "consume", mainHistory)).toBe(true);
-    expect(refSuperseded(NEW, NEW, "keep", mainHistory)).toBe(false);
+  test("the candidate's own ref is consumed - its tree was just promoted", () => {
+    expect(refSuperseded(NEW, NEW, mainHistory)).toBe(true);
   });
 
   test("a NEWER source's ref never sweeps - its own publisher still needs it", () => {
-    expect(refSuperseded(NEW, OLD, "consume", mainHistory)).toBe(false);
-    expect(refSuperseded(NEW, OLD, "keep", mainHistory)).toBe(false);
+    expect(refSuperseded(NEW, OLD, mainHistory)).toBe(false);
   });
 
   test("an unresolvable or diverged source stays - isAncestor answers false there", () => {
-    expect(refSuperseded("c".repeat(40), NEW, "consume", mainHistory)).toBe(false);
+    expect(refSuperseded("c".repeat(40), NEW, mainHistory)).toBe(false);
   });
 });

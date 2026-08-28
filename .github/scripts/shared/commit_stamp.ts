@@ -1,7 +1,10 @@
 // Provenance stamp lines on build-branch commits. publish.ts writes both
-// lines into every build commit message; publish.ts (re-stamp check) and
-// sync/resolve_refs.ts + sync/verify_build_provenance.ts parse them back,
-// so the exact line shapes live here alone.
+// lines into every build commit message; the source stamp is parsed back
+// by publish.ts (the newest-green stale check and the no-change skip
+// guard), sync/resolve_refs.ts, sync/wait_for_build.ts, and
+// shared/stamp_checks.ts, so the exact line shape lives here alone. The
+// run line is write-only: a human breadcrumb to the publishing run,
+// verified by nothing (the retired run-proof check was the last reader).
 
 export function commitStampWrite(serverUrl: string, repository: string, sha: string): string {
   return `source: ${serverUrl}/${repository}/commit/${sha}`;
@@ -30,18 +33,4 @@ export function commitStampParse(message: string): string {
 
 export function commitRunWrite(runUrl: string): string {
   return `run: ${runUrl}`;
-}
-
-// Like the stamp, only a numeric run id parses: consumers interpolate it
-// into an API path, so anything else is not a run line at all.
-const RUN_RE = /^run: .*\/actions\/runs\/(\d+)$/;
-
-/** The first stamped numeric run id in the message (empty when there is
- * none). */
-export function commitRunParse(message: string): string {
-  for (const line of message.split("\n")) {
-    const match = line.match(RUN_RE);
-    if (match) return match[1];
-  }
-  return "";
 }

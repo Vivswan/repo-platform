@@ -7,7 +7,14 @@
 # branch: each build commit parents the previous build commit, never a
 # main commit, so a main history rewrite can never invalidate it and old
 # build commits (downstream repos' recorded _commit, needed by copier
-# update's three-way merge) stay reachable forever.
+# update's three-way merge) stay reachable forever. The branch gains a
+# commit ONLY when the composed tree changed - never an empty commit in
+# normal operation (a quiet week's cron publishes nothing, so no fleet
+# repo sees a content-free _commit bump) - and sync freshness needs no
+# commit: the sync's bounded wait reads the tip's stamp or rebuilds the
+# tree at main's HEAD and compares (sync/wait_for_build.ts; publish.ts's
+# header has the publish model, including the one guarded exception, a
+# stamp-recovery commit over an unchanged tree).
 #
 # The compose cost is paid DURING CI, not after it: every main push builds
 # the tree immediately (build_pending.ts) and parks it, unpublished, at
@@ -59,13 +66,11 @@ on:
   workflow_dispatch:
 
 # Publishing and pending-ref parking push with the checkout's persisted
-# PAT (see the header), so github.token needs no contents write; actions
-# read lets publish.ts's re-stamp check read the run stamped on the
-# current tip; checks read lets the green-source gate read the
-# all-green verdict check runs at the source commit.
+# PAT (see the header), so github.token needs no contents write; checks
+# read lets the green-source gate read the all-green verdict check runs
+# at the source commit.
 permissions:
   contents: read
-  actions: read
   checks: read
 
 # Three concurrency lanes, split by role, so no OTHER-ROLE run can evict a
@@ -83,12 +88,12 @@ permissions:
 # fresher publisher, and a red schedule/dispatch run can evict a green one
 # and then skip on its own green gate (both staleness-only). One deeper,
 # contrived case can actually republish superseded content: the freshness
-# stamp only advances on a CONTENT change, so if a newer publisher fully
-# no-ops (its render is byte-identical to the tip, leaving the older
-# stamp) a later manual rerun of an intermediate source is not seen as
-# stale and republishes its green-but-superseded tree. It needs an
-# operator rerun and an exact content revert; the next push or cron heals
-# it. Push builders and failed-CI no-ops each get their own lane.
+# stamp only advances on a CONTENT change, so if a newer publisher lands
+# byte-identical (no commit - the older stamp stays) a later manual rerun
+# of an intermediate source is not seen as stale and republishes its
+# green-but-superseded tree. It needs an operator rerun and an exact
+# content revert; the next push or cron heals it. Push builders and
+# failed-CI no-op runs each get their own lane.
 concurrency:
   group: >-
     build-branches-${{
@@ -144,7 +149,6 @@ jobs:
       # never triggers a publish at all. The event's head_sha is the
       # commit whose green CI this trigger is reporting.
       - name: Build and publish
-        id: publish
         if: env.CI_GREEN == 'true' && github.event_name != 'push'
         env:
           GH_TOKEN: ${{ github.token }}
@@ -152,16 +156,3 @@ jobs:
           SOURCE_SHA: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
           PREBUILT_REF: ${{ github.event_name == 'workflow_run' && format('refs/heads/build-pending/{0}', github.event.workflow_run.head_sha) || '' }}
         run: bun .github/scripts/build-branches/publish.ts
-
-      # A build no-op publishes no commit, so publish.ts records the
-      # verdict as a marker ref plus THIS artifact, whose name is the claim
-      # ("source X is a no-op against tip Y"). The artifact is the
-      # run-owned proof sync/wait_for_build.ts verifies the marker against:
-      # nothing can attach an artifact to a completed run, so a marker
-      # naming this run is only trusted if this run really made the claim.
-      - name: Record the no-op claim
-        if: steps.publish.outputs.noop_claim != ''
-        uses: actions/upload-artifact@v7
-        with:
-          name: ${{ steps.publish.outputs.noop_claim }}
-          path: /tmp/noop-claim.txt

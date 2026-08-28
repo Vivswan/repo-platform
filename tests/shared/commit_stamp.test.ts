@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test";
 import {
-  commitRunParse,
   commitRunWrite,
   commitStampParse,
   commitStampWrite,
@@ -26,23 +25,14 @@ describe("commit stamp", () => {
   test("parse prints nothing for a message without a stamp", () => {
     expect(commitStampParse("chore: no stamp here")).toBe("");
   });
-});
 
-describe("run line", () => {
-  test("write then parse round-trips the run id", () => {
+  test("the run line is write-only: a breadcrumb, never parsed as the stamp", () => {
+    // The retired run-proof check was the run line's last reader; the
+    // writer stays so humans can jump from a build commit to the run
+    // that pushed it, and the stamp parser must never mistake it for a
+    // source line.
     const line = commitRunWrite("https://github.com/Vivswan/repo-platform/actions/runs/8675309");
-    expect(commitRunParse(line)).toBe("8675309");
-  });
-
-  test("parse yields only numeric run ids", () => {
-    // The line is plain text anyone can write; a smuggled non-numeric id
-    // must parse as "no run line", never reach an API path.
-    expect(commitRunParse("run: https://github.com/o/r/actions/runs/../secrets")).toBe("");
-    expect(commitRunParse("run: https://github.com/o/r/actions/runs/12/attempts/3")).toBe("");
-    expect(commitRunParse("run: https://github.com/o/r/actions/runs/")).toBe("");
-  });
-
-  test("parse prints nothing for a message without a run line", () => {
-    expect(commitRunParse("chore: no run here")).toBe("");
+    expect(line).toBe("run: https://github.com/Vivswan/repo-platform/actions/runs/8675309");
+    expect(commitStampParse(line)).toBe("");
   });
 });

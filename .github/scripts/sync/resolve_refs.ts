@@ -85,8 +85,8 @@ const targetSha = tipProbe.stdout.trimEnd();
 // (stamped in its commit message), so validator rules match the rendered
 // tree even when main moved since. The stamp is required: only the
 // builder writes it, and an unstamped tip is a hand-pushed one. A main
-// history rewrite can orphan the stamped commit; the builder re-stamps
-// the branch on its next run, so refuse to guess here.
+// history rewrite can orphan the stamped commit; the builder stamps the
+// branch afresh on its next publish, so refuse to guess here.
 const validateRef = stampOf(targetSha);
 if (validateRef === "") {
   console.log(
@@ -96,7 +96,7 @@ if (validateRef === "") {
 }
 if (!resolves(`${validateRef}^{commit}`)) {
   console.log(
-    `::error::the build branch's stamped source commit ${validateRef} is unreachable (main history rewrite). Dispatch the Build Branches workflow - it re-stamps the branch - then re-run.`,
+    `::error::the build branch's stamped source commit ${validateRef} is unreachable (main history rewrite). Dispatch the Build Branches workflow - it publishes a fresh stamp - then re-run.`,
   );
   process.exit(1);
 }

@@ -38,10 +38,11 @@ export function pendingRefFor(sourceSha: string): string {
  * may proceed. Under cancel-in-progress: false a queued publisher can
  * run after a newer main already published - its build is stale, and a
  * stale build must never overwrite a newer published tree. An empty or
- * unresolvable tip stamp is NOT stale (the re-stamp machinery owns
- * damaged stamps), an equal source is NOT stale (the no-change/re-stamp
- * path owns replays), and a DIVERGED source is not stale either (a main
- * history rewrite; the provenance machinery reports it). */
+ * unresolvable tip stamp is NOT stale (publish.ts's stamp-recovery lane
+ * owns damaged stamps), an equal source is NOT stale (a replay proceeds
+ * to the tree diff, which publishes nothing when nothing changed and
+ * republishes on drift), and a DIVERGED source is not stale either (a
+ * main history rewrite; the provenance machinery reports it). */
 export function staleReason(
   candidateSource: string,
   tipSource: string,
@@ -58,25 +59,18 @@ export function staleReason(
   return "";
 }
 
-/** What a publish of `candidateSource` does to the ref whose own source
- * leaf is the candidate itself: a pending ref is CONSUMED (its tree was
- * promoted, or a newer one covers it), a no-op marker IS the verdict the
- * sync's waiter still needs and must survive its own run. */
-export type OwnRefPolicy = "consume" | "keep";
-
-/** Whether a publish of `candidateSource` supersedes the per-source ref
- * whose source leaf is `refSource`: an ancestor source is always covered
- * (its queued publisher will skip as stale anyway); the candidate's own
- * ref follows `ownRef`; refs for NEWER sources never sweep - their own
- * publishers still need them. `isAncestor` must answer false for an
- * unresolvable source (a rewritten-away commit's ref is left for the
- * rewrite's own build to clean up). */
+/** Whether a publish of `candidateSource` supersedes the pending ref
+ * whose source leaf is `refSource`: the candidate's own ref is CONSUMED
+ * (its tree was just promoted), an ancestor source is always covered (its
+ * queued publisher will skip as stale anyway), and refs for NEWER sources
+ * never sweep - their own publishers still need them. `isAncestor` must
+ * answer false for an unresolvable source (a rewritten-away commit's ref
+ * is left for the rewrite's own build to clean up). */
 export function refSuperseded(
   refSource: string,
   candidateSource: string,
-  ownRef: OwnRefPolicy,
   isAncestor: (ancestor: string, descendant: string) => boolean,
 ): boolean {
-  if (refSource === candidateSource) return ownRef === "consume";
+  if (refSource === candidateSource) return true;
   return isAncestor(refSource, candidateSource);
 }

@@ -66,7 +66,6 @@ jobs:
     timeout-minutes: 55
     permissions:
       contents: read
-      actions: read
     outputs:
       repos: ${{ steps.select.outputs.repos }}
     steps:
@@ -110,14 +109,13 @@ jobs:
       # own guards fail loudly and the cron heals. Build Branches rebuilds
       # the build branch asynchronously after each main merge; a sync
       # dispatched right after a merge could consume the previous build
-      # tree. Wait (bounded) for the build tip whose SOURCE STAMP names
-      # main's HEAD - the artifact's own provenance - or for the verified
-      # no-op marker when the render left the branch unchanged. The token
-      # feeds only the marker's run-proof battery (the job's actions: read
-      # / contents: read); the fresh-tip arm stays git-only.
+      # tree. Wait (bounded) for freshness, two-path: the build tip's
+      # SOURCE STAMP names main's HEAD, or the tree composed from HEAD
+      # right here (once, before the poll) matches the tip byte-for-byte
+      # - publish.ts commits only on content change, so an unchanged tree
+      # is proven fresh by computation, not trusted. Git plus a local
+      # compose; no token.
       - name: Wait for a fresh build
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: bun .github/scripts/sync/wait_for_build.ts
 
       # Snapshots the owner's writable fleet to $RUNNER_TEMP/discovered.json
@@ -145,13 +143,12 @@ jobs:
   sync:
     needs: plan
     if: needs.plan.outputs.repos != '[]'
-    # Actions and checks read flow to the called workflow's token: its
-    # build provenance check reads the build run stamped on the shipped
-    # ref (the build branch tip), and its green-source gate reads the
-    # all-green verdict check runs at the stamped source.
+    # Checks read flows to the called workflow's token: its green-source
+    # gate reads the all-green verdict check runs at the build tip's
+    # stamped source (shared/all_green.ts). Provenance itself is
+    # API-free: verify_build_provenance.ts is git plus a local rebuild.
     permissions:
       contents: read
-      actions: read
       checks: read
     strategy:
       fail-fast: false

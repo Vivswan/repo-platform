@@ -114,4 +114,64 @@ describe("rebuildBranchTree", () => {
     expect(message).toBe("rebuildBranchTree: sourceSha must be a full 40-hex commit sha");
     expect(existsSync(join(scratch, "work-cred"))).toBe(false);
   });
+
+  test("hostile ignore and attribute config - in-tree AND machine-global - cannot skew the hash", () => {
+    // The scratch staging feeds both the provenance tree proof and
+    // wait_for_build's freshness compare, so a silent staging skew turns
+    // into a false tamper accusation or a burned 40-minute wait. Three
+    // measured skew vectors, all planted at once: a .gitignore INSIDE
+    // the composed tree hiding a sibling (only `add --force` covers it -
+    // an excludesFile override does not), a machine-global
+    // core.excludesFile hiding another file, and a machine-global
+    // core.attributesFile whose `* text` filter rewrites a CRLF blob at
+    // add time. The hash must not move, and the hidden files must be IN
+    // the tree.
+    const hostileBuilder = `${STUB_BUILDER}
+writeFileSync(join(dest, "ignored.txt"), "must be staged\\n");
+writeFileSync(join(dest, "crlf.txt"), "windows line\\r\\n");
+writeFileSync(join(dest, ".gitignore"), "ignored.txt\\n");
+`;
+    writeFileSync(join(scratch, ".github/scripts/build-branches/branch_tree.ts"), hostileBuilder);
+    // Stage only the builder: earlier tests leave scratch tree repos
+    // (work-*/tree) lying around, and a bare add -A would trip over them.
+    git("add", ".github/scripts/build-branches/branch_tree.ts");
+    git("commit", "-qm", "hostile fixture");
+    const hostileSha = git("rev-parse", "HEAD");
+    const dirs = (name: string) => ({
+      srcDir: join(scratch, `work-${name}`, "src"),
+      treeDir: join(scratch, `work-${name}`, "tree"),
+    });
+    const clean = rebuildBranchTree({ sourceSha: hostileSha, ...dirs("clean") });
+    const cfg = mkdtempSync(join(tmpdir(), "hostile-git-"));
+    writeFileSync(join(cfg, "ignore"), "content.txt\n");
+    writeFileSync(join(cfg, "attributes"), "* text\n");
+    writeFileSync(
+      join(cfg, "config"),
+      `[core]\n\texcludesFile = ${join(cfg, "ignore")}\n\tattributesFile = ${join(cfg, "attributes")}\n`,
+    );
+    // GIT_CONFIG_GLOBAL replaces the whole global scope (~/.gitconfig AND
+    // the XDG fallback), so the hostile file is the one global config the
+    // helper's subprocesses see.
+    process.env.GIT_CONFIG_GLOBAL = join(cfg, "config");
+    let hostile: string;
+    try {
+      hostile = rebuildBranchTree({ sourceSha: hostileSha, ...dirs("hostile") });
+    } finally {
+      delete process.env.GIT_CONFIG_GLOBAL;
+    }
+    expect(hostile).toBe(clean);
+    const listing = Bun.spawnSync(
+      ["git", "-C", join(scratch, "work-hostile", "tree"), "ls-tree", "--name-only", hostile],
+      { stdout: "pipe", stderr: "pipe" },
+    );
+    expect(listing.exitCode).toBe(0);
+    const names = listing.stdout.toString();
+    expect(names).toContain("ignored.txt");
+    expect(names).toContain("content.txt");
+    expect(names).toContain("crlf.txt");
+    for (const name of ["clean", "hostile"]) {
+      git("worktree", "remove", "--force", join(scratch, `work-${name}`, "src"));
+    }
+    rmSync(cfg, { recursive: true, force: true });
+  });
 });

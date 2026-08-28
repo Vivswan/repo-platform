@@ -1,10 +1,11 @@
 // The build-publish wiring the provenance path depends on, pinned where a
 // silent edit would reintroduce the regression: the publisher's SOURCE_SHA
 // must track the COMPLETED CI run's head_sha (not github.sha, which is
-// main's current tip on a workflow_run event), the enforcement points
-// must agree on the publish-step name AND every provenance check must
-// actually read the run's jobs to verify it, and a template no-op must
-// publish its marker (or the sync-side wait burns out on every no-op).
+// main's current tip on a workflow_run event), and a publish must COMMIT
+// exactly when the composed tree changed or the tip's stamp needs
+// recovery - never an empty commit in normal operation (no content-free
+// fleet _commit bumps), never a silent skip that strands a broken stamp
+// (the stamp-health guard keeps dispatch as a real escape hatch).
 
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
@@ -30,62 +31,44 @@ describe("build-branches publish wiring", () => {
     );
   });
 
-  test("the publish step name is one string across the workflow and all three provenance checks", () => {
-    // publish.ts's re-stamp check, verify_build_provenance.ts, and
-    // wait_for_build.ts's marker battery all prove a stamped run PUBLISHED
-    // by requiring this exact step to have succeeded (conclusion=success
-    // alone is a red main's no-op). If the workflow renamed the step, the
-    // proofs would reject every run (no step of that name ever succeeds),
-    // stranding the fleet.
-    expect(workflow).toContain("- name: Build and publish");
+  test("no-change skips ONLY behind the stamp-health guard, then the commit segment is condition-free", () => {
+    // The no-empty-commits rule and its one exception, pinned as source
+    // shape (tests/build-branches/publish_behavior.test.ts proves the
+    // same behaviorally against real git):
+    //   - the skip fires on an existing branch with an unchanged tree
+    //     AND a healthy tip stamp (shared/stamp_checks.ts) - health
+    //     gating is what keeps "dispatch Build Branches" able to heal a
+    //     tampered or unparseable stamp instead of skipping forever;
+    //   - after the skip, nothing between the note and the push is an
+    //     `if` or a `return` (an `if (staged)` wrapped around the commit
+    //     would silently bring a diff-gate back);
+    //   - --allow-empty appears EXACTLY once, ternary-scoped to the
+    //     unstaged (stamp recovery) case - normal publishes never carry
+    //     it, so a regression to blanket empty commits fails here.
     const publish = read(".github/scripts/build-branches/publish.ts");
-    const verify = read(".github/scripts/sync/verify_build_provenance.ts");
-    const wait = read(".github/scripts/sync/wait_for_build.ts");
-    expect(publish).toContain('const PUBLISH_STEP = "Build and publish"');
-    expect(verify).toContain('const PUBLISH_STEP = "Build and publish"');
-    expect(wait).toContain('const PUBLISH_STEP = "Build and publish"');
-    // All must actually READ the run's jobs - the step-success proof is
-    // worthless if a future refactor drops the jobs read. Match the API
-    // PATH (a template literal ending .../jobs), not the "runs/jobs
-    // response" diagnostic label, which would survive the cut.
-    const jobsApiCall = /actions\/runs\/\$\{[^}]+\}\/jobs`/;
-    expect(publish).toMatch(jobsApiCall);
-    expect(verify).toMatch(jobsApiCall);
-    expect(wait).toMatch(jobsApiCall);
-  });
-
-  test("a build no-op records marker + claim, after the publish call, force, and only then", () => {
-    // The stamp only advances on a content change, so without the marker
-    // a no-op source leaves wait_for_build.ts burning its whole wait on
-    // every later sync (the next build is also a no-op - the cron cannot
-    // heal it). Pinned: the marker publishes only on the verified-no-op
-    // outcome publish() returns - a "published" outcome carries the fresh
-    // stamp itself and a stale skip has nothing to record (a FULL no-op
-    // has nothing to lease; its marker is inert through the tip binding);
-    // the push is forced (successive markers do not descend from each
-    // other, so a rerun must overwrite, not fail as a non-fast-forward);
-    // and the claim is handed to the workflow's artifact step, whose
-    // upload binds it to the run - the run-owned evidence the waiter's
-    // battery requires. The sweep keeps the marker it just pushed
-    // ("keep") while pendings stay consumed ("consume").
-    const publish = read(".github/scripts/build-branches/publish.ts");
-    const publishIndex = publish.indexOf("const outcome = publish(sourceSha);");
-    const markIndex = publish.indexOf('if (outcome.kind === "noop") {');
-    expect(publishIndex).toBeGreaterThan(0);
-    expect(markIndex).toBeGreaterThan(publishIndex);
-    expect(publish).toContain("publishNoopMarker(sourceSha, outcome.tipSha);");
-    expect(publish).toMatch(/"--force",\s*"origin",\s*`\$\{marker\}:\$\{ref\}`/);
-    expect(publish).toContain('setOutput("noop_claim", claim);');
-    expect(publish).toContain('sweepSourceRefs(PENDING_REF_PREFIX, sourceSha, "consume");');
-    expect(publish).toContain('sweepSourceRefs(NOOP_MARKER_REF_PREFIX, sourceSha, "keep");');
-    // The workflow side of the claim: the artifact NAME is the claim, the
-    // step runs only when publish.ts made one, and the file it uploads is
-    // the one publish.ts wrote.
-    expect(workflow).toContain("id: publish");
-    expect(workflow).toContain("if: steps.publish.outputs.noop_claim != ''");
-    expect(workflow).toContain("name: ${{ steps.publish.outputs.noop_claim }}");
-    expect(workflow).toContain("path: /tmp/noop-claim.txt");
-    expect(publish).toContain('writeFileSync("/tmp/noop-claim.txt"');
+    expect(publish).toContain('if (branchExists && !staged && stampProblem === "") {');
+    const body = publish.slice(
+      publish.indexOf("function publish("),
+      publish.indexOf("function sweepPendingRefs("),
+    );
+    const returns = body.match(/return[;\s]/g) ?? [];
+    expect(returns).toHaveLength(2);
+    const skipEnd = body.indexOf("const note =");
+    expect(skipEnd).toBeGreaterThan(-1);
+    const commitSegment = body.slice(skipEnd, body.indexOf('"push"'));
+    expect(commitSegment).toContain('"commit"');
+    expect(commitSegment).not.toMatch(/\bif\s*\(/);
+    expect(commitSegment).not.toContain("return");
+    expect(body.match(/"--allow-empty"/g) ?? []).toHaveLength(1);
+    expect(commitSegment).toContain('...(staged ? [] : ["--allow-empty"])');
+    // The retired refs/build-meta no-op marker system must stay gone.
+    for (const rel of [
+      ".github/scripts/build-branches/publish.ts",
+      ".github/workflows/build-branches.yml",
+    ]) {
+      expect(read(rel)).not.toContain("refs/build-meta");
+      expect(read(rel)).not.toContain("noop_claim");
+    }
   });
 
   test("no tree without actions/ ever publishes (the bootstrap shape guard)", () => {
