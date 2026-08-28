@@ -19,6 +19,12 @@ const REPOSITORY = "Vivswan/repo-platform";
 // \x1e between records), sleeps GIT_SLEEP seconds first when set (the
 // stalled-origin case), fails a `fetch` when GIT_FETCH_FAIL is set (the
 // transient network case), and prints GIT_HEAD as the ls-remote HEAD.
+// The stall sleep runs foreground (so it really delays the stub's
+// replies) but with its own fds detached: when the script under test
+// SIGKILLs the stub mid-sleep, the orphaned sleep must not hold run()'s
+// outer pipes - bun >= 1.4.0 returns a piped no-timeout spawnSync at pipe
+// EOF, not child exit, so an fd-holding orphan would stall the HARNESS
+// for the full GIT_SLEEP after the script already exited loudly on time.
 // The two fetch targets are told apart by refspec: a build-branch fetch makes
 // later `log`/`rev-parse` serve the tip (GIT_TIP_MSG_FILE / GIT_TIP_SHA),
 // a marker-ref fetch fails when GIT_MARKER_MSG_FILE is unset (ref absent)
@@ -27,7 +33,7 @@ const REPOSITORY = "Vivswan/repo-platform";
 const gitStub = `#!/usr/bin/env bash
 set -euo pipefail
 { printf '%s' "git"; for a in "$@"; do printf '\\x1f%s' "$a"; done; printf '\\x1e'; } >>"$CALLS_LOG"
-if [ -n "\${GIT_SLEEP:-}" ]; then sleep "$GIT_SLEEP"; fi
+if [ -n "\${GIT_SLEEP:-}" ]; then sleep "$GIT_SLEEP" </dev/null >/dev/null 2>&1; fi
 cmd=""
 for a in "$@"; do
   case "$a" in
