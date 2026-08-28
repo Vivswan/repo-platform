@@ -22,6 +22,8 @@ rulesets:
               security_alerts_threshold: high_or_higher
               # errors_and_warnings: CodeQL warnings gate merges too. The
               # fleet value, so no repo has to re-declare the tightening
-              # locally (cloud-speech's repo layer did, and the layering
-              # transition would have silently relaxed it back to errors).
+              # locally (cloud-speech's repo layer did; without the fleet
+              # value the layering transition would have relaxed it back
+              # to errors, reported as a dropped declaration in the sync
+              # PR's held-for-review layering section).
               alerts_threshold: errors_and_warnings

@@ -22,8 +22,10 @@
 // regenerates the rolling branch and re-detects. ANY entry at HEAD counts
 // as "carries it": a non-blob there (a directory, a symlink) is hand
 // damage this very update replaces with the rendered file, so the
-// runnable copy exists once the PR merges either way - at worst the note
-// is missed once on an already-damaged repo.
+// runnable copy exists once the PR merges either way. Until such a PR
+// merges, though, every run re-reads the still-damaged HEAD and skips
+// the note again - on an already-damaged repo the miss REPEATS, run
+// after run, and only a merged update ends it.
 //
 // Value-free by construction: the note and the log lines name only the
 // workflow file and the check - template data, never target content.
