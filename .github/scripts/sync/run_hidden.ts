@@ -52,6 +52,19 @@ export function appendHiddenFailure(
   rc: number,
   capture: string,
 ): void {
+  // The row format is tab-and-newline delimited and the parser is total,
+  // so a delimiter smuggled into a field would write a row the reader
+  // counts as malformed - silently downgrading a REAL failure record.
+  // Unreachable today (labels are string literals, capture paths squeeze
+  // to [A-Za-z0-9-] via captureName), so a violation is a programmer
+  // error: reject loudly at the one writer instead of guarding readers.
+  // CR is rejected with the delimiters - it would ride into the capture
+  // field and break the existsSync lookup just as silently.
+  if (/[\t\n\r]/.test(label) || /[\t\n\r]/.test(capture)) {
+    throw new Error(
+      "appendHiddenFailure: label and capture path must not contain tabs, newlines, or carriage returns",
+    );
+  }
   appendFileSync(join(runnerTemp, HIDDEN_FAILURES_NAME), `${label}\t${rc}\t${capture}\n`);
 }
 

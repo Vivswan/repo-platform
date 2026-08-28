@@ -402,7 +402,10 @@ const needsReview =
 // renders as https://github.com/***/pull/N - docs/private-repos.md names
 // PR URLs as a masker-covered surface - while a hide-details target whose
 // name is NOT masked is self-disclosed (an explicit repos.yml entry,
-// already plain in the public job name).
+// already plain in the public job name). The mask is a point-in-time
+// snapshot taken at the resolve step: a target renamed mid-run surfaces
+// here under its new canonical slug, which no mask covers - the
+// documented residual (a rename BEFORE resolve fails closed there).
 const existing = mustCapture([
   "gh",
   "pr",

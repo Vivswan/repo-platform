@@ -51,13 +51,16 @@ function recordHiddenFailure(label: string, exitCode: number, redacted: string):
  * failure shape). */
 function failureShape(result: { exitCode: number; timedOut: boolean }, stderr: string): string {
   if (result.timedOut) return "timed out under proc.ts's hang bound";
-  // Stale-lease evidence first: its needle is exact, while the
-  // authorization pattern's bare-number alternative also matches
-  // 403-shaped bytes inside ordinary git output (progress counts like
-  // "(403/403)", sha fragments like "a403b" - the flanking class is
+  // Stale-lease evidence first, matched against git's structured
+  // rejection line ("! [rejected] ... (stale info)") so quoted content
+  // elsewhere in the output - a file named "(stale info)", say, in a
+  // push-protection message - cannot mislabel the failure. The
+  // authorization pattern stays second: its bare-number alternative also
+  // matches 403-shaped bytes inside ordinary git output (progress counts
+  // like "(403/403)", sha fragments like "a403b" - the flanking class is
   // non-digit, not non-alphanumeric), which a stale-lease failure's
   // stderr can carry.
-  const flavor = /stale info/i.test(stderr)
+  const flavor = /\[rejected\][^\n]*\(stale info\)/i.test(stderr)
     ? "; the lease was stale - another push landed on the branch during this run, so re-running the sync usually heals it"
     : /(^|[^0-9])(401|403)([^0-9]|$)|permission|denied|not authorized|write access/i.test(stderr)
       ? "; the error looks authorization-shaped - check that the REPO_PLATFORM_TOKEN grants Contents read/write on the target"

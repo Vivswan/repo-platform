@@ -25,7 +25,8 @@ const GIT_ERROR = `fatal: unable to access 'https://x-access-token:${SENTINEL}@g
 // Case order matters: the push argv also contains the URL, so ls-remote
 // must match first. STUB_MODE=lease-fail fails the lease probe; push-fail
 // serves the lease and fails the push itself; stale-push-fail fails the
-// push with stale-lease evidence flanked by 403-shaped progress bytes.
+// push with stale-lease evidence flanked by 403-shaped progress bytes;
+// protect-push-fail fails it quoting a file whose NAME says "stale info".
 const STUB_GIT = `#!/bin/sh
 case "$*" in
   *ls-remote*)
@@ -39,6 +40,10 @@ case "$*" in
     if [ "$STUB_MODE" = "stale-push-fail" ]; then
       echo "remote: Resolving deltas: 100% (403/403), done." >&2
       echo " ! [rejected]        automation/repo-platform -> automation/repo-platform (stale info)" >&2
+      exit 1
+    fi
+    if [ "$STUB_MODE" = "protect-push-fail" ]; then
+      echo 'remote: error: GH013: Repository rule violations found for "(stale info).txt".' >&2
       exit 1
     fi
     echo "${GIT_ERROR}" >&2
@@ -144,6 +149,18 @@ describe("commit_push failure diagnostics", () => {
     const result = runCommitPush("stale-push-fail", "false");
     expect(result.exitCode).toBe(1);
     expect(result.stdout).toContain("the lease was stale");
+    expect(result.stdout).not.toContain("authorization-shaped");
+  });
+
+  test("a quoted filename saying '(stale info)' does not mislabel the failure", () => {
+    // The needle requires git's structured rejection line ("[rejected]
+    // ... (stale info)"); a push-protection rejection quoting a file
+    // literally named "(stale info).txt" - parens and all - must not read
+    // as a stale lease.
+    const result = runCommitPush("protect-push-fail", "false");
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain("exit 1");
+    expect(result.stdout).not.toContain("the lease was stale");
     expect(result.stdout).not.toContain("authorization-shaped");
   });
 

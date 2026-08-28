@@ -2,7 +2,11 @@ import { describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { captureName, parseHiddenFailures } from "../../.github/scripts/sync/run_hidden.ts";
+import {
+  appendHiddenFailure,
+  captureName,
+  parseHiddenFailures,
+} from "../../.github/scripts/sync/run_hidden.ts";
 
 const script = join(import.meta.dir, "../../.github/scripts/sync/run_hidden.ts");
 
@@ -74,6 +78,25 @@ describe("run_hidden.ts", () => {
     const interior = parseHiddenFailures("a\t1\t/tmp/rt/a.log\n\nb\t2\t/tmp/rt/b.log\n");
     expect(interior.failures).toHaveLength(2);
     expect(interior.malformedRows).toBe(1);
+  });
+
+  test("appendHiddenFailure rejects delimiter-bearing fields loudly", () => {
+    // The parser is total, so a tab or newline smuggled into a field would
+    // write a row the reader downgrades to "malformed" - a real failure
+    // silently lost. Unreachable today (labels are literals, capture paths
+    // squeeze through captureName), so the writer treats it as a
+    // programmer error instead of guarding every reader.
+    const temp = join(mkdtempSync(join(tmpdir(), "run-hidden-")), "temp");
+    mkdirSync(temp);
+    expect(() => appendHiddenFailure(temp, "tab\tlabel", 1, "/tmp/rt/a.log")).toThrow();
+    expect(() => appendHiddenFailure(temp, "label", 1, "/tmp/rt/a\n.log")).toThrow();
+    expect(() => appendHiddenFailure(temp, "cr\rlabel", 1, "/tmp/rt/a.log")).toThrow();
+    expect(existsSync(join(temp, "hidden-failures.tsv"))).toBe(false);
+    // Control: a clean record appends and round-trips through the parser.
+    appendHiddenFailure(temp, "branch push", 1, "/tmp/rt/a.log");
+    const parsed = parseHiddenFailures(readFileSync(join(temp, "hidden-failures.tsv"), "utf-8"));
+    expect(parsed.failures).toEqual([{ label: "branch push", rc: "1", capture: "/tmp/rt/a.log" }]);
+    expect(parsed.malformedRows).toBe(0);
   });
 
   test("passes through untouched when details are not hidden", () => {
