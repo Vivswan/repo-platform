@@ -31,6 +31,7 @@ import {
   loadOverrideLayer,
 } from "../.github/scripts/fleet/merge_settings_layers.ts";
 import { allLayerLabels, loadLayer } from "../.github/scripts/fleet/render_managed_settings.ts";
+import { capture } from "../.github/scripts/shared/proc.ts";
 import { captureName } from "../.github/scripts/sync/run_hidden.ts";
 import { PIN_FLIPS } from "../.github/scripts/sync/starter_pin_rollout.ts";
 import { TOOLCHAIN_SETUP_FRAGMENT, TOOLCHAIN_SETUP_TARGETS } from "./compose_template.ts";
@@ -49,7 +50,11 @@ export interface Mismatch {
 }
 
 interface Rule {
-  name: string;
+  /** Typed as the roster union, so an unrostered name is a tsc error
+   *  before it is a runtime mismatch (an unrepresentable invalid state
+   *  for typechecked edits); ruleRosterMismatches still owns dropped and
+   *  duplicated rules at run time. */
+  name: (typeof RULE_ROSTER)[number];
   run: () => Mismatch[];
 }
 
@@ -780,8 +785,8 @@ export function majorMinor(version: string, where: string): [number, number] {
   return [Number(match[1]), Number(match[2])];
 }
 
-/** Mismatches where a package.json's @types/bun MAJOR.MINOR is AHEAD of
- *  the pinned bun runtime's. One direction on purpose: the two sides have
+/** Mismatches where an installed @types/bun MAJOR.MINOR is AHEAD of the
+ *  pinned bun runtime's. One direction on purpose: the two sides have
  *  two updaters that each move only their own (dependabot bumps the types,
  *  refresh-toolchains bumps the runtime pin), so symmetric equality would
  *  make their PRs mutually blocking - each red until the other lands.
@@ -805,6 +810,401 @@ export function bunTypesAheadMismatches(
     }
   }
   return mismatches;
+}
+
+/** The resolved @types/bun version a bun.lock INSTALLS: the packages
+ *  section's top-level `"@types/bun"` entry, whose first tuple element is
+ *  `@types/bun@<version>`. The lock is what typechecking actually runs
+ *  against - a caret range in package.json admits a lock resolving a
+ *  newer MINOR, so the declared floor alone cannot vouch for the
+ *  installed version. mustMatch keeps a lockfile that stops carrying the
+ *  entry loud instead of vacuous; nested per-package resolutions
+ *  ("x/@types/bun") are not the version the root typecheck sees and do
+ *  not match the anchored key. */
+export function lockedTypesBunVersion(lockText: string, where: string): string {
+  return mustMatch(
+    lockText,
+    /^\s*"@types\/bun": \["@types\/bun@([^"]+)",/m,
+    where,
+    "the resolved @types/bun lock entry",
+  )[1];
+}
+
+// --- spawnSync hang bounds ------------------------------------------------
+
+/** Keywords a regex literal may directly follow; after anything
+ *  value-shaped (an identifier, a literal, `)`, `]`), a `/` is division. */
+const REGEX_PRECEDING_KEYWORDS = new Set([
+  "return",
+  "typeof",
+  "case",
+  "in",
+  "of",
+  "new",
+  "delete",
+  "void",
+  "instanceof",
+  "do",
+  "else",
+  "yield",
+  "await",
+]);
+
+/** ONE lexical pass over a source file, yielding two same-length views
+ *  (newlines kept, so offsets and line numbers agree across both and
+ *  with the original):
+ *  - `stripped`: comments and regex BODIES blanked to spaces; string and
+ *    template text kept - the view argument/property extraction reads,
+ *    where "pipe" literals must stay visible.
+ *  - `masked`: additionally, string and template TEXT blanked - the view
+ *    token discovery reads, where a call-shaped token inside a string,
+ *    comment, or regex body must not be read as code.
+ *  The context stack makes template INTERPOLATIONS code again (nested
+ *  templates and comments inside `${...}` included), so a spawn inside
+ *  one is discovered and a comment inside one is stripped - one model
+ *  for both views. Whether a `/` opens a regex or divides is decided the
+ *  standard way, by the preceding significant token (value-shaped means
+ *  division; an operator, opening bracket, or REGEX_PRECEDING_KEYWORDS
+ *  member admits a regex); a regex literal never spans a newline, so the
+ *  skip bails at one and a misread degrades one line, never the file. */
+export function scanSource(source: string): { stripped: string; masked: string } {
+  let stripped = "";
+  let masked = "";
+  const emit = (s: string, m: string = s) => {
+    stripped += s;
+    masked += m;
+  };
+  const blank = (ch: string) => (ch === "\n" ? "\n" : " ");
+  type LexContext =
+    | { kind: "code"; braceDepth: number } // the file bottom, or a template interpolation
+    | { kind: "quote"; ch: string }
+    | { kind: "template" };
+  const stack: LexContext[] = [{ kind: "code", braceDepth: 0 }];
+  let lastSignificant = "";
+  const regexCanFollow = (): boolean => {
+    if (lastSignificant === "") return true;
+    if (!/[\w$)\]}]/.test(lastSignificant)) return true;
+    const word = /([A-Za-z_$][\w$]*)\s*$/.exec(stripped);
+    return word !== null && REGEX_PRECEDING_KEYWORDS.has(word[1]);
+  };
+  for (let i = 0; i < source.length; i++) {
+    const ch = source[i];
+    const context = stack[stack.length - 1];
+    if (context.kind === "quote") {
+      if (ch === context.ch) {
+        stack.pop();
+        lastSignificant = ")"; // a string literal is value-shaped
+        emit(ch);
+      } else if (ch === "\\" && source[i + 1] !== undefined) {
+        emit(ch + source[i + 1], " " + blank(source[i + 1]));
+        i++;
+      } else emit(ch, blank(ch));
+      continue;
+    }
+    if (context.kind === "template") {
+      if (ch === "`") {
+        stack.pop();
+        lastSignificant = ")";
+        emit(ch);
+      } else if (ch === "\\" && source[i + 1] !== undefined) {
+        emit(ch + source[i + 1], " " + blank(source[i + 1]));
+        i++;
+      } else if (ch === "$" && source[i + 1] === "{") {
+        stack.push({ kind: "code", braceDepth: 0 });
+        emit("${");
+        i++;
+      } else emit(ch, blank(ch));
+      continue;
+    }
+    if (ch === "/" && source[i + 1] === "/") {
+      while (i < source.length && source[i] !== "\n") {
+        emit(" ");
+        i++;
+      }
+      i--;
+      continue;
+    }
+    if (ch === "/" && source[i + 1] === "*") {
+      const end = source.indexOf("*/", i + 2);
+      const stop = end === -1 ? source.length : end + 2;
+      for (; i < stop; i++) emit(blank(source[i]));
+      i--;
+      continue;
+    }
+    if (ch === "/" && regexCanFollow()) {
+      emit(ch);
+      let inClass = false;
+      for (i++; i < source.length; i++) {
+        const rc = source[i];
+        if (rc === "\\") {
+          emit("  ");
+          i++;
+        } else if ((rc === "/" && !inClass) || rc === "\n") {
+          emit(rc);
+          break;
+        } else {
+          if (rc === "[") inClass = true;
+          else if (rc === "]") inClass = false;
+          emit(" ");
+        }
+      }
+      lastSignificant = ")"; // a regex literal is value-shaped
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      stack.push({ kind: "quote", ch });
+      emit(ch);
+      continue;
+    }
+    if (ch === "`") {
+      stack.push({ kind: "template" });
+      emit(ch);
+      continue;
+    }
+    if (ch === "{") context.braceDepth++;
+    else if (ch === "}") {
+      if (context.braceDepth === 0 && stack.length > 1) {
+        stack.pop(); // the interpolation ends; its template resumes
+        lastSignificant = ")";
+        emit(ch);
+        continue;
+      }
+      context.braceDepth = Math.max(0, context.braceDepth - 1);
+    }
+    if (!/\s/.test(ch)) lastSignificant = ch;
+    emit(ch);
+  }
+  return { stripped, masked };
+}
+
+/** The comment-stripped view alone, for callers that keep string text. */
+export function stripComments(source: string): string {
+  return scanSource(source).stripped;
+}
+
+/** The argument text between a call's balanced parentheses, tracking
+ *  string/template quoting so brackets inside literals do not count
+ *  (comments are already stripped by the caller). Throws on a call whose
+ *  end it cannot see - skipping such a site would pass vacuously. */
+function callArguments(source: string, open: number, where: string): string {
+  let depth = 0;
+  let quote: string | null = null;
+  for (let i = open; i < source.length; i++) {
+    const ch = source[i];
+    if (quote !== null) {
+      if (ch === "\\") i++;
+      else if (ch === quote) quote = null;
+      continue;
+    }
+    if (ch === '"' || ch === "'" || ch === "`") quote = ch;
+    else if (ch === "(" || ch === "[" || ch === "{") depth++;
+    else if (ch === ")" || ch === "]" || ch === "}") {
+      depth--;
+      if (depth === 0) return source.slice(open + 1, i);
+    }
+  }
+  throw new Error(`${where}: unbalanced spawnSync call - the scanner cannot see its end`);
+}
+
+/** The options argument's text: everything after the args' first
+ *  top-level comma, or null when the call passes the command alone. */
+function optionsArgument(args: string): string | null {
+  let depth = 0;
+  let quote: string | null = null;
+  for (let i = 0; i < args.length; i++) {
+    const ch = args[i];
+    if (quote !== null) {
+      if (ch === "\\") i++;
+      else if (ch === quote) quote = null;
+      continue;
+    }
+    if (ch === '"' || ch === "'" || ch === "`") quote = ch;
+    else if (ch === "(" || ch === "[" || ch === "{") depth++;
+    else if (ch === ")" || ch === "]" || ch === "}") depth--;
+    else if (ch === "," && depth === 0) {
+      const rest = args.slice(i + 1).trim();
+      return rest === "" ? null : rest;
+    }
+  }
+  return null;
+}
+
+/** Depth-0 comma split of a brackets-stripped body, string-aware; the
+ *  shared grammar under object-property and array-slot reading. */
+function splitTopLevel(body: string): string[] {
+  const parts: string[] = [];
+  let depth = 0;
+  let quote: string | null = null;
+  let start = 0;
+  for (let i = 0; i < body.length; i++) {
+    const ch = body[i];
+    if (quote !== null) {
+      if (ch === "\\") i++;
+      else if (ch === quote) quote = null;
+      continue;
+    }
+    if (ch === '"' || ch === "'" || ch === "`") quote = ch;
+    else if (ch === "(" || ch === "[" || ch === "{") depth++;
+    else if (ch === ")" || ch === "]" || ch === "}") depth--;
+    else if (ch === "," && depth === 0) {
+      parts.push(body.slice(start, i));
+      start = i + 1;
+    }
+  }
+  parts.push(body.slice(start));
+  return parts;
+}
+
+/** The top-level properties of an options OBJECT LITERAL: property name
+ *  -> raw value text (a shorthand property maps to its own name). Null
+ *  when the text is not an auditable literal - a variable, a call
+ *  result, a top-level spread, a computed or unreadable key - which the
+ *  caller treats as a hazard, so the unreadable shapes fail closed. */
+export function topLevelProperties(options: string): Map<string, string> | null {
+  const text = options.trim();
+  if (!text.startsWith("{") || !text.endsWith("}")) return null;
+  const props = new Map<string, string>();
+  for (const part of splitTopLevel(text.slice(1, -1))) {
+    const trimmed = part.trim();
+    if (trimmed === "") continue;
+    const keyed = /^(["']?)([A-Za-z_$][\w$]*)\1\s*:\s*([\s\S]*)$/.exec(trimmed);
+    if (keyed) {
+      props.set(keyed[2], keyed[3].trim());
+      continue;
+    }
+    if (/^[A-Za-z_$][\w$]*$/.test(trimmed)) {
+      props.set(trimmed, trimmed); // shorthand property
+      continue;
+    }
+    return null; // a spread, a computed key, a method - unauditable
+  }
+  return props;
+}
+
+/** A spawnSync occurrence in comment-stripped source: a direct
+ *  `Bun.spawnSync` call with its options text, or any other reference -
+ *  an alias, a destructure pulling spawnSync off Bun, bracket access - a
+ *  sum, so the rule cannot forget to judge the non-call shapes. */
+export type SpawnSyncSite =
+  | { line: number; kind: "call"; options: string | null }
+  | { line: number; kind: "reference" };
+
+/** Every spawnSync site in a source file, comments stripped and string
+ *  contents masked first (a mention in a comment, a string, or a regex
+ *  body is not a site; a template INTERPOLATION is; and a `//` inside a
+ *  string can no longer hide a same-line call). A direct call - plain or
+ *  optional-chained - carries its options argument's text: the second
+ *  argument, or the whole first argument for the object-form overload
+ *  (whose options ride beside `cmd`). Everything else the scan can see
+ *  is a reference - a bare `Bun.spawnSync` (an alias binding, `.call`),
+ *  a destructure pulling spawnSync off Bun, bracket access - because a
+ *  textual rule cannot follow those to their call shapes, so the rule
+ *  fails them closed. The residual: an alias of `Bun` itself
+ *  (`const b = Bun; b.spawnSync(...)`) escapes a text scan; nothing in
+ *  house style writes that, and the proc.ts helpers are the sanctioned
+ *  route. */
+export function spawnSyncSites(source: string, where: string): SpawnSyncSite[] {
+  const { stripped, masked } = scanSource(source);
+  const lineAt = (index: number) => masked.slice(0, index).split("\n").length;
+  const sites: SpawnSyncSite[] = [];
+  for (const match of masked.matchAll(/Bun\s*\??\.\s*spawnSync\b/g)) {
+    const line = lineAt(match.index);
+    const paren = /^\s*(?:\?\.\s*)?\(/.exec(masked.slice(match.index + match[0].length));
+    if (!paren) {
+      sites.push({ line, kind: "reference" });
+      continue;
+    }
+    const open = match.index + match[0].length + paren[0].length - 1;
+    const args = callArguments(stripped, open, `${where}:${line}`);
+    const options = args.trim().startsWith("{") ? args : optionsArgument(args);
+    sites.push({ line, kind: "call", options });
+  }
+  // The indirections a text scan can still see, matched on the masked
+  // view so a token inside a string cannot fake them: a destructure
+  // pulling spawnSync off Bun, and ANY computed access directly on Bun -
+  // the property expression can spell spawnSync any way it likes
+  // (a masked string, a variable, a concat), so every such access is
+  // unauditable and fails closed.
+  const indirections = [/\{[^{}]*\bspawnSync\b[^{}]*\}\s*=\s*Bun\b/g, /\bBun\s*(?:\?\.)?\s*\[/g];
+  for (const pattern of indirections) {
+    for (const match of masked.matchAll(pattern)) {
+      sites.push({ line: lineAt(match.index), kind: "reference" });
+    }
+  }
+  return sites.sort((a, b) => a.line - b.line);
+}
+
+/** Why a spawnSync call is an unbounded piped hazard, or null when safe.
+ *  Measured on the pinned bun runtime (templates/bun/module.yml, 1.4.0):
+ *  a PIPED synchronous spawn without an effective `timeout` returns at
+ *  pipe EOF, not child exit, so a descendant holding the inherited pipe
+ *  fds wedges the caller indefinitely - and a bare call pipes BOTH
+ *  output streams by default (proc.ts's header records the semantics;
+ *  its helpers carry the bound already). Safe shapes: a top-level
+ *  `timeout` that is a positive finite numeric literal (any spelling of
+ *  zero, and Infinity, measured or reasoned as no bound) or a plain
+ *  identifier/member path (a named constant like DEFAULT_HANG_BOUND_MS -
+ *  trusted, the stated residual), or every output stream explicitly
+ *  shaped - a `stdio:` array whose slots 1 and 2 are each present and
+ *  not undefined/null, or `stdout:`/`stderr:` values likewise - with no
+ *  "pipe" literal among them (inherit/ignore/file fds have no EOF to
+ *  wait on). Any other timeout value (an expression like `1 - 1`) is unprovable and fails closed. Properties
+ *  are read structurally at the object literal's top level
+ *  (topLevelProperties), so a nested `timeout` (say inside `env:`) never
+ *  reads as a bound, and options the parser cannot audit are hazards
+ *  outright. The residual of staying text-level: variable VALUES are
+ *  trusted by their key - a variable smuggling "pipe" into a stream, or
+ *  zero into `timeout`, escapes - and the fix for any flagged or
+ *  doubtful site is the same: a proc.ts helper. */
+export function spawnSyncHazard(options: string | null): string | null {
+  if (options === null) {
+    return "no options - stdout and stderr pipe by default, and nothing bounds a pipe-holding descendant";
+  }
+  const props = topLevelProperties(options);
+  if (props === null) {
+    return "options the scanner cannot audit (a variable, a spread, or a non-literal shape)";
+  }
+  const timeout = props.get("timeout");
+  let bounded = false;
+  if (timeout !== undefined && !["undefined", "null", "NaN", "Infinity"].includes(timeout)) {
+    const n = Number(timeout);
+    // Number() folds every numeric spelling of zero (0, 0.0, 0x0, 0e0,
+    // -0, +0) onto 0; a non-numeric value only counts when it is a plain
+    // identifier or member path - an expression can evaluate to zero
+    // (`1 - 1`) and is unprovable, so it fails closed.
+    bounded = Number.isNaN(n)
+      ? /^[A-Za-z_$][\w$]*(\.[A-Za-z_$][\w$]*)*$/.test(timeout)
+      : Number.isFinite(n) && n > 0;
+  }
+  if (bounded) return null;
+  const why = timeout === undefined ? "no timeout" : `timeout: ${timeout} is not a provable bound`;
+  const pipes = (value: string | undefined) => value !== undefined && /["'`]pipe["'`]/.test(value);
+  if (pipes(props.get("stdio")) || pipes(props.get("stdout")) || pipes(props.get("stderr"))) {
+    return `explicitly piped stdio with ${why}`;
+  }
+  const unset = (value: string | undefined) =>
+    value === undefined || value === "" || value === "undefined" || value === "null";
+  // A stdio ARRAY literal shapes each stream through its own slot
+  // (1 = stdout, 2 = stderr): an omitted, elided, or undefined/null slot
+  // leaves that stream on the piped default. A non-array stdio value (a
+  // named constant) is trusted by its key, like other variable values.
+  const stdio = props.get("stdio");
+  const stdioTrimmed = stdio?.trim();
+  const slots =
+    stdioTrimmed !== undefined && stdioTrimmed.startsWith("[") && stdioTrimmed.endsWith("]")
+      ? splitTopLevel(stdioTrimmed.slice(1, -1)).map((slot) => slot.trim())
+      : null;
+  const shaped = (stream: "stdout" | "stderr", slot: number) => {
+    const viaStdio = slots !== null ? slots[slot] : stdioTrimmed;
+    return !unset(viaStdio) || !unset(props.get(stream));
+  };
+  const unshaped = (["stdout", "stderr"] as const).filter(
+    (stream, index) => !shaped(stream, index + 1),
+  );
+  if (unshaped.length > 0) {
+    return `${unshaped.join(" and ")} left to the piped default with ${why}`;
+  }
+  return null;
 }
 
 // --- rules --------------------------------------------------------------------
@@ -1188,12 +1588,16 @@ const rules: Rule[] = [
   },
 
   {
-    // The dependabot-covered package.json manifests' @types/bun (the root
-    // plus the actions/ packages - the same directories the bun-dirs rule
-    // keeps under dependabot) against the manifests' bun runtime pin,
-    // ahead-direction only (bunTypesAheadMismatches states why one
-    // direction). The runtime side reads the manifest itself - the single
-    // source the .bun-version dotfiles are generated from.
+    // The INSTALLED @types/bun - each lockfile's resolved entry, for the
+    // root plus the actions/ packages that declare the dependency (the
+    // same directories the bun-dirs rule keeps under dependabot) -
+    // against the manifests' bun runtime pin, ahead-direction only
+    // (bunTypesAheadMismatches states why one direction). The lock is the
+    // compared side on purpose: package.json's caret range is only a
+    // floor, so a lock resolving a newer MINOR while the declared range
+    // stays put would typecheck against APIs the pinned runtime lacks and
+    // previously passed here. The runtime side reads the manifest itself
+    // - the single source the .bun-version dotfiles are generated from.
     name: "bun-types-pin",
     run: () => {
       const bun = loadManifests().find((m) => m.module === "bun");
@@ -1207,13 +1611,18 @@ const rules: Rule[] = [
           .sort()
           .map((name) => `actions/${name}`),
       ]) {
-        const rel = dir === "." ? "package.json" : `${dir}/package.json`;
-        if (!existsSync(join(REPO_ROOT, rel))) continue;
-        const pkg = asRecord(JSON.parse(read(rel)), rel);
-        for (const key of ["dependencies", "devDependencies"]) {
-          const version = (pkg[key] as Record<string, unknown> | undefined)?.["@types/bun"];
-          if (version !== undefined) types.push({ file: rel, version: String(version) });
+        const pkgRel = dir === "." ? "package.json" : `${dir}/package.json`;
+        if (!existsSync(join(REPO_ROOT, pkgRel))) continue;
+        const pkg = asRecord(JSON.parse(read(pkgRel)), pkgRel);
+        const declares = ["dependencies", "devDependencies"].some(
+          (key) => (pkg[key] as Record<string, unknown> | undefined)?.["@types/bun"] !== undefined,
+        );
+        if (!declares) continue;
+        const lockRel = dir === "." ? "bun.lock" : `${dir}/bun.lock`;
+        if (!existsSync(join(REPO_ROOT, lockRel))) {
+          throw new Error(`${pkgRel} declares @types/bun but ${lockRel} is missing - anchor lost`);
         }
+        types.push({ file: lockRel, version: lockedTypesBunVersion(read(lockRel), lockRel) });
       }
       if (types.length === 0) {
         throw new Error("no package.json declares @types/bun - anchor lost");
@@ -2915,10 +3324,16 @@ const rules: Rule[] = [
     run: () => {
       const mismatches: Mismatch[] = [];
       const { username, slug } = jinjaVars();
-      const proc = Bun.spawnSync(["git", "-C", REPO_ROOT, "ls-files"]);
-      if (proc.exitCode !== 0) throw new Error("git ls-files failed");
+      // capture() carries the hang bound a bare piped spawn lacks (the
+      // spawn-sync-hang-bound rule's semantics - the checker must not be
+      // its own counterexample).
+      const proc = capture(["git", "-C", REPO_ROOT, "ls-files"]);
+      if (proc.exitCode !== 0) {
+        throw new Error(
+          `git ls-files failed${proc.timedOut ? " (timed out)" : ""}: ${proc.stderr.trim()}`,
+        );
+      }
       const files = proc.stdout
-        .toString()
         .split("\n")
         .filter((rel) => rel !== "" && !rel.endsWith(".test.ts"));
       const slugRe = new RegExp(`([A-Za-z0-9-]+)/${slug}(?![A-Za-z0-9-])`, "g");
@@ -3387,7 +3802,157 @@ const rules: Rule[] = [
       return mismatches;
     },
   },
+
+  {
+    // No PIPED Bun spawnSync without a hard `timeout`. On the pinned bun
+    // runtime a piped synchronous spawn returns at pipe EOF rather than
+    // child exit and pipes both output streams by default
+    // (spawnSyncHazard has the measured semantics), so one bare git call
+    // can wedge a checker forever behind any descendant that inherited
+    // the pipe. Scope: scripts/** and .github/scripts/**, the executable
+    // trees - tests/ is deliberately excluded, because the test runner's
+    // per-test timeout already bounds anything a test spawns.
+    name: "spawn-sync-hang-bound",
+    run: () => {
+      const mismatches: Mismatch[] = [];
+      let sites = 0;
+      const files = [...walkFiles("scripts"), ...walkFiles(".github/scripts")]
+        .filter((f) => !f.symlink && /\.[mc]?[jt]s$/.test(f.path))
+        .map((f) => f.path);
+      for (const rel of files) {
+        for (const site of spawnSyncSites(read(rel), rel)) {
+          sites++;
+          if (site.kind === "reference") {
+            mismatches.push({
+              file: `${rel}:${site.line}`,
+              expected:
+                "a direct Bun spawnSync call (an alias or destructure cannot be audited for a hang bound)",
+              got: "a non-call reference",
+            });
+            continue;
+          }
+          const hazard = spawnSyncHazard(site.options);
+          if (hazard !== null) {
+            mismatches.push({
+              file: `${rel}:${site.line}`,
+              expected:
+                "a bounded or unpiped spawnSync: a proc.ts helper, an explicit timeout, or every output stream shaped to inherit/ignore/file fds",
+              got: hazard,
+            });
+          }
+        }
+      }
+      if (sites === 0) {
+        throw new Error("no Bun spawnSync call found in the scoped trees - anchor lost");
+      }
+      return mismatches;
+    },
+  },
 ];
+
+// --- the checker's own rule roster ------------------------------------------
+
+/** Every rule this checker runs, by name - the checker's own authored
+ *  roster, mirroring ALL_GREEN_ROSTER one level down: the run loop counts
+ *  whatever the rules array happens to hold, so a rule silently dropped
+ *  (a bad merge, a refactor that loses an entry) or registered twice
+ *  would stay green with nothing to notice it. main() compares this list
+ *  against the live rules in both directions (ruleRosterMismatches), so
+ *  adding a rule means adding its name here, and deleting one means
+ *  removing its entry in the same change, deliberately. */
+export const RULE_ROSTER = [
+  "module-list",
+  "dogfood-oracle-row",
+  "bun-dirs",
+  "action-pins",
+  "starter-pin-rollout",
+  "bun-types-pin",
+  "toolchain-version-files",
+  "local-gates",
+  "dogfood-parity",
+  "gitattributes-subset",
+  "dependabot-actions-block",
+  "dependabot-action-dirs",
+  "ci-skeleton",
+  "typography-allow",
+  "symlink-trio",
+  "settings-starter",
+  "labels",
+  "issue-labels",
+  "release-guard-labels",
+  "all-green-roster",
+  "fleet-ci-roster",
+  "all-green-name",
+  "dependabot-label-tuples",
+  "settings-read-pin",
+  "self-apply-fact-source",
+  "settings-hide-details",
+  "settings-apply-skip-gate",
+  "pins-and-identities",
+  "tracking-label-regex",
+  "pages-grammar",
+  "docs-constants",
+  "agents-recipe",
+  "owner-slug",
+  "release-freshness-parity",
+  "hidden-capture-names",
+  "auto-assign-codeowners-parity",
+  "actions-bun-guard",
+  "stamp-hook-path",
+  "settings-apply-merged-input",
+  "settings-green-gate",
+  "settings-hidden-step-notices",
+  "spawn-sync-hang-bound",
+] as const;
+
+/** Set-plus-uniqueness comparison between the authored roster and the
+ *  live rules' names, mirroring verdictRosterMismatches' two directions:
+ *  a live rule missing from the roster is a gate the roster never vouched
+ *  for, a roster entry with no live rule is a DROPPED rule - the silent
+ *  case the roster exists for, since the run loop only ever counts what
+ *  survived - and a duplicate on either side is a double-run rule or a
+ *  double-vouched entry. Not a rule itself: it runs unconditionally in
+ *  main(), before the loop it audits, so it cannot drop out of the rules
+ *  array alongside what it guards. */
+export function ruleRosterMismatches(
+  roster: readonly string[],
+  names: readonly string[],
+): Mismatch[] {
+  const mismatches: Mismatch[] = [];
+  const flagDuplicate = (list: readonly string[], site: string) => {
+    const duplicate = list.find((name, index) => list.indexOf(name) !== index);
+    if (duplicate !== undefined) {
+      mismatches.push({
+        file: site,
+        expected: "each rule name listed once",
+        got: `'${duplicate}' appears more than once`,
+      });
+    }
+  };
+  flagDuplicate(roster, "scripts/check_ssot.ts RULE_ROSTER");
+  flagDuplicate(names, "scripts/check_ssot.ts rules");
+  const expected = new Set(roster);
+  for (const name of names) {
+    if (!expected.has(name)) {
+      mismatches.push({
+        file: "scripts/check_ssot.ts rules",
+        expected: `rule '${name}' in RULE_ROSTER (adding a rule is a roster edit too)`,
+        got: "not in the roster - add its name there, deliberately",
+      });
+    }
+  }
+  const present = new Set(names);
+  for (const name of roster) {
+    if (!present.has(name)) {
+      mismatches.push({
+        file: "scripts/check_ssot.ts RULE_ROSTER",
+        expected: `a rule named '${name}'`,
+        got: "no such rule - a dropped rule is a silently retired gate; remove the entry in the same change, deliberately",
+      });
+    }
+  }
+  return mismatches;
+}
 
 /** Normalize python-style \Z end anchors to $, for regex-pair comparison. */
 export function zToDollar(pattern: string): string {
@@ -3401,6 +3966,18 @@ function main(): number {
     return 2;
   }
   let failures = 0;
+  // The roster audit runs before the loop it vouches for: a rules array
+  // that lost or doubled an entry must scream regardless of what the
+  // surviving rules report.
+  for (const mismatch of ruleRosterMismatches(
+    RULE_ROSTER,
+    rules.map((rule) => rule.name),
+  )) {
+    console.error(
+      `rule-roster: ${mismatch.file} -> expected ${mismatch.expected}, got ${mismatch.got}`,
+    );
+    failures++;
+  }
   for (const rule of rules) {
     let mismatches: Mismatch[];
     try {

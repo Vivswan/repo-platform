@@ -19,18 +19,25 @@ import {
   fragmentFilesFor,
   gatesOnModule,
   inlineFunctionCopies,
+  lockedTypesBunVersion,
   majorMinor,
   mustMatch,
   pinMismatches,
+  RULE_ROSTER,
+  ruleRosterMismatches,
   SETUP_VERSION_FILES,
   semanticLines,
   setMismatch,
   settingsIdentityMismatches,
+  spawnSyncHazard,
+  spawnSyncSites,
   starterPinCoverage,
   starterSelfPins,
   starterTemplateFiles,
   stepCarriesWithKey,
+  stripComments,
   stripGeneratedRegions,
+  topLevelProperties,
   unsafeStepCondition,
   verdictRosterMismatches,
   withToolchainSetup,
@@ -613,6 +620,45 @@ describe("verdictRosterMismatches", () => {
   });
 });
 
+describe("ruleRosterMismatches", () => {
+  test("a matching roster and rule list pass", () => {
+    expect(ruleRosterMismatches(["a", "b"], ["a", "b"])).toEqual([]);
+    // Set semantics: authoring order is not part of the contract.
+    expect(ruleRosterMismatches(["b", "a"], ["a", "b"])).toEqual([]);
+  });
+
+  test("a live rule missing from the roster mismatches, naming the roster edit", () => {
+    const mismatches = ruleRosterMismatches(["a"], ["a", "b"]);
+    expect(mismatches).toHaveLength(1);
+    expect(mismatches[0].expected).toContain("'b'");
+    expect(mismatches[0].expected).toContain("RULE_ROSTER");
+  });
+
+  test("a DROPPED rule still rostered mismatches - the silent case the roster exists for", () => {
+    // The run loop counts whatever the rules array holds, so losing a
+    // rule changes nothing it can see; the stale roster entry is what
+    // makes the drop loud.
+    const mismatches = ruleRosterMismatches(["a", "b"], ["a"]);
+    expect(mismatches).toHaveLength(1);
+    expect(mismatches[0].file).toContain("RULE_ROSTER");
+    expect(mismatches[0].expected).toContain("'b'");
+    expect(mismatches[0].got).toContain("no such rule");
+  });
+
+  test("a duplicate on either side mismatches", () => {
+    const doubledRoster = ruleRosterMismatches(["a", "a"], ["a"]);
+    expect(doubledRoster).toHaveLength(1);
+    expect(doubledRoster[0].file).toContain("RULE_ROSTER");
+    const doubledRule = ruleRosterMismatches(["a"], ["a", "a"]);
+    expect(doubledRule).toHaveLength(1);
+    expect(doubledRule[0].got).toContain("'a'");
+  });
+
+  test("the authored RULE_ROSTER itself carries no duplicates", () => {
+    expect(new Set(RULE_ROSTER).size).toBe(RULE_ROSTER.length);
+  });
+});
+
 describe("starterSelfPins", () => {
   test("extracts jinja-username delivery pins, item and named shapes, quoted or not", () => {
     const text = [
@@ -747,6 +793,261 @@ describe("starterPinCoverage", () => {
   });
 });
 
+describe("spawnSyncSites", () => {
+  test("finds calls with and without options, splitting at the top-level comma", () => {
+    const source = [
+      'const a = Bun.spawnSync(["git", "st"]);',
+      'const b = Bun.spawnSync(["git", "st"], { stdout: "pipe", timeout: 1000 });',
+    ].join("\n");
+    expect(spawnSyncSites(source, "f")).toEqual([
+      { line: 1, kind: "call", options: null },
+      { line: 2, kind: "call", options: '{ stdout: "pipe", timeout: 1000 }' },
+    ]);
+  });
+
+  test("commas inside the command array or string literals never split the args", () => {
+    const source = 'Bun.spawnSync(["sh", "-c", "a, b (c"], { timeout: 5 });';
+    expect(spawnSyncSites(source, "f")[0]).toEqual({
+      line: 1,
+      kind: "call",
+      options: "{ timeout: 5 }",
+    });
+  });
+
+  test("comment mentions - line, doc-block, and between callee and paren - are not calls", () => {
+    const source = [
+      "// a piped Bun.spawnSync(cmd) example in a line comment",
+      "/** doc block: Bun.spawnSync(cmd) here too */",
+      "const real = Bun.spawnSync /* why not */ (cmd);",
+    ].join("\n");
+    expect(spawnSyncSites(source, "f")).toEqual([{ line: 3, kind: "call", options: null }]);
+  });
+
+  test("a `//` inside a string never hides a same-line call (reviewer's probe)", () => {
+    const source = 'const url = "https://x"; Bun.spawnSync(cmd);';
+    expect(spawnSyncSites(source, "f")).toEqual([{ line: 1, kind: "call", options: null }]);
+  });
+
+  test("an alias binding is a reference site, not a skipped one", () => {
+    expect(spawnSyncSites("const s = Bun.spawnSync;\ns(cmd);", "f")).toEqual([
+      { line: 1, kind: "reference" },
+    ]);
+    expect(spawnSyncSites("Bun.spawnSync.call(x, cmd);", "f")).toEqual([
+      { line: 1, kind: "reference" },
+    ]);
+  });
+
+  test("a pure destructure of Bun is a reference site (reviewer's probe)", () => {
+    expect(spawnSyncSites("const { spawnSync } = Bun;\nspawnSync(cmd);", "f")).toEqual([
+      { line: 1, kind: "reference" },
+    ]);
+    expect(spawnSyncSites("const { spawnSync: s, env } = Bun;", "f")).toEqual([
+      { line: 1, kind: "reference" },
+    ]);
+  });
+
+  test("bracket access is a reference site, optional and computed included (reviewer's probes)", () => {
+    expect(spawnSyncSites('Bun["spawnSync"](cmd);', "f")).toEqual([{ line: 1, kind: "reference" }]);
+    expect(spawnSyncSites('Bun?.["spawnSync"](cmd);', "f")).toEqual([
+      { line: 1, kind: "reference" },
+    ]);
+    expect(spawnSyncSites('Bun["spawn" + "Sync"](cmd);', "f")).toEqual([
+      { line: 1, kind: "reference" },
+    ]);
+  });
+
+  test("a string carrying a call- or access-shaped token is not a site (reviewer's probes)", () => {
+    expect(spawnSyncSites('const doc = "call Bun.spawnSync(cmd) like this";', "f")).toEqual([]);
+    expect(spawnSyncSites("const doc = 'see Bun[\"spawnSync\"] docs';", "f")).toEqual([]);
+  });
+
+  test("a comment inside a template interpolation is stripped (reviewer's probe)", () => {
+    expect(spawnSyncSites("const x = `${1 /* Bun.spawnSync(cmd) */}`;", "f")).toEqual([]);
+  });
+
+  test("a template INTERPOLATION is code, not string content (reviewer's probe)", () => {
+    expect(spawnSyncSites("const x = `${Bun.spawnSync(cmd)}`;", "f")).toEqual([
+      { line: 1, kind: "call", options: null },
+    ]);
+    // The template's TEXT is still masked.
+    expect(spawnSyncSites("const x = `Bun.spawnSync(cmd)`;", "f")).toEqual([]);
+  });
+
+  test("optional-chained forms are calls (reviewer's probe)", () => {
+    expect(spawnSyncSites("Bun?.spawnSync(cmd);", "f")).toEqual([
+      { line: 1, kind: "call", options: null },
+    ]);
+    expect(spawnSyncSites("Bun.spawnSync?.(cmd, { timeout: 5 });", "f")).toEqual([
+      { line: 1, kind: "call", options: "{ timeout: 5 }" },
+    ]);
+  });
+
+  test("the object-form overload carries its own literal as the options", () => {
+    const source = 'Bun.spawnSync({ cmd: ["git", "st"], timeout: 5 });';
+    expect(spawnSyncSites(source, "f")).toEqual([
+      { line: 1, kind: "call", options: '{ cmd: ["git", "st"], timeout: 5 }' },
+    ]);
+  });
+
+  test("multi-line options come back whole, brackets inside strings ignored", () => {
+    const source = [
+      "const proc = Bun.spawnSync([`git`, rel], {",
+      '  stdin: Buffer.from("x)y"),',
+      "  timeout: DEFAULT_HANG_BOUND_MS,",
+      "});",
+    ].join("\n");
+    const [site] = spawnSyncSites(source, "f");
+    expect(site.kind === "call" && site.options).toContain("timeout: DEFAULT_HANG_BOUND_MS");
+  });
+
+  test("a call the scanner cannot see the end of throws instead of passing vacuously", () => {
+    expect(() => spawnSyncSites("Bun.spawnSync([cmd", "f")).toThrow("unbalanced");
+  });
+});
+
+describe("stripComments", () => {
+  test("blanks line and block comments to spaces, keeping offsets and newlines", () => {
+    const source = "a; // tail\nb; /* mid */ c;";
+    const stripped = stripComments(source);
+    expect(stripped).toBe("a;        \nb;           c;");
+    expect(stripped.length).toBe(source.length);
+  });
+
+  test("string and template contents are never read as comment openers", () => {
+    expect(stripComments('const u = "https://x"; f();')).toBe('const u = "https://x"; f();');
+    expect(stripComments("const t = `a // b`;")).toBe("const t = `a // b`;");
+    expect(stripComments('const e = "q\\" // r"; g();')).toBe('const e = "q\\" // r"; g();');
+  });
+
+  test("a quote inside a regex literal never desyncs later comment stripping", () => {
+    // The live near miss: extractUsesPins' /['\"]?/ used to leave the
+    // quote state open, so every comment after it survived the strip and
+    // the rule read its own doc comments as code.
+    const source = "const m = line.match(/['\"]?/);\n/** a Bun.spawnSync mention */\nf();";
+    const stripped = stripComments(source);
+    expect(stripped).not.toContain("mention");
+    expect(stripped.length).toBe(source.length);
+  });
+
+  test("regex bodies are masked, so a call-shaped token inside one is not code", () => {
+    const source = "const re = /Bun.spawnSync(cmd)/;";
+    expect(stripComments(source)).toBe("const re = /                  /;");
+    expect(spawnSyncSites(source, "f")).toEqual([]);
+  });
+
+  test("division is not read as a regex opener", () => {
+    const source = "const half = total / 2; // tail\nconst r = a / b / c;";
+    const stripped = stripComments(source);
+    expect(stripped).toContain("total / 2;");
+    expect(stripped).not.toContain("tail");
+    expect(stripped).toContain("a / b / c;");
+  });
+});
+
+describe("topLevelProperties", () => {
+  test("reads top-level keys with raw values, shorthand included", () => {
+    const props = topLevelProperties('{ stdout: "pipe", timeout, env: { a: 1 } }');
+    expect(props?.get("stdout")).toBe('"pipe"');
+    expect(props?.get("timeout")).toBe("timeout");
+    expect(props?.get("env")).toBe("{ a: 1 }");
+    expect(props?.has("a")).toBe(false);
+  });
+
+  test("non-literal shapes are unauditable: variables, spreads, computed keys", () => {
+    expect(topLevelProperties("opts")).toBeNull();
+    expect(topLevelProperties("{ ...base }")).toBeNull();
+    expect(topLevelProperties("{ [key]: 1 }")).toBeNull();
+    expect(topLevelProperties("makeOptions()")).toBeNull();
+  });
+
+  test("commas inside nested values never split a property", () => {
+    const props = topLevelProperties('{ stdio: ["inherit", log, log], timeout: f(1, 2) }');
+    expect(props?.get("stdio")).toBe('["inherit", log, log]');
+    expect(props?.get("timeout")).toBe("f(1, 2)");
+  });
+});
+
+describe("spawnSyncHazard", () => {
+  test("near miss: a bare piped call - no options at all - is the measured hazard", () => {
+    expect(spawnSyncHazard(null)).toContain("pipe by default");
+  });
+
+  test("explicit pipes without a timeout are hazards", () => {
+    expect(spawnSyncHazard('{ stdout: "pipe", stderr: "pipe" }')).toContain("explicitly piped");
+    expect(spawnSyncHazard('{ stdio: ["ignore", "pipe", "inherit"] }')).toContain(
+      "explicitly piped",
+    );
+  });
+
+  test("a partially shaped call leaves the other stream on the piped default", () => {
+    expect(spawnSyncHazard('{ stdout: "inherit" }')).toContain("stderr");
+    expect(spawnSyncHazard('{ stderr: "inherit" }')).toContain("stdout");
+  });
+
+  test("options the scanner cannot audit fail closed", () => {
+    expect(spawnSyncHazard("opts")).toContain("cannot audit");
+    expect(spawnSyncHazard("{ ...base }")).toContain("cannot audit");
+    expect(spawnSyncHazard("makeOptions()")).toContain("cannot audit");
+  });
+
+  test("a nested timeout never reads as a bound (reviewer's probe)", () => {
+    expect(spawnSyncHazard('{ env: { timeout: "5" } }')).toContain("piped default");
+  });
+
+  test("timeout: undefined, null, or 0 is no bound (measured on 1.4.0; reviewer's probe)", () => {
+    expect(spawnSyncHazard("{ timeout: undefined }")).not.toBeNull();
+    expect(spawnSyncHazard("{ timeout: null }")).not.toBeNull();
+    expect(spawnSyncHazard('{ stdout: "pipe", timeout: 0 }')).toContain("not a provable bound");
+  });
+
+  test("every numeric spelling of zero is no bound (reviewer's probe)", () => {
+    for (const zero of ["0.0", "0x0", "-0", "0e0", "+0"]) {
+      expect(spawnSyncHazard(`{ timeout: ${zero} }`)).toContain("not a provable bound");
+    }
+    expect(spawnSyncHazard("{ timeout: 100 }")).toBeNull();
+  });
+
+  test("an expression timeout is unprovable and fails closed (reviewer's probe)", () => {
+    expect(spawnSyncHazard("{ timeout: 1 - 1 }")).toContain("not a provable bound");
+    expect(spawnSyncHazard("{ timeout: Infinity }")).not.toBeNull();
+    // Named constants and member paths stay trusted - the stated residual.
+    expect(spawnSyncHazard("{ timeout: DEFAULT_HANG_BOUND_MS }")).toBeNull();
+    expect(spawnSyncHazard("{ timeout: options.timeoutMs }")).toBeNull();
+  });
+
+  test("a stream shaped to undefined/null falls back to the piped default (reviewer's probe)", () => {
+    expect(spawnSyncHazard('{ stdout: undefined, stderr: "inherit" }')).toContain("stdout");
+    expect(spawnSyncHazard("{ stdio: undefined }")).toContain("stdout and stderr");
+  });
+
+  test("an explicit timeout bounds any piped shape, object-form included", () => {
+    expect(spawnSyncHazard('{ stdout: "pipe", stderr: "pipe", timeout: 1000 }')).toBeNull();
+    expect(spawnSyncHazard("{ timeout: DEFAULT_HANG_BOUND_MS }")).toBeNull();
+    expect(spawnSyncHazard('{ cmd: ["git", "st"], timeout: 5 }')).toBeNull();
+  });
+
+  test("fully shaped unpiped stdio needs no bound - there is no pipe EOF to wait on", () => {
+    expect(spawnSyncHazard('{ stdio: ["inherit", "inherit", "inherit"] }')).toBeNull();
+    expect(spawnSyncHazard('{ stdio: ["inherit", log, log] }')).toBeNull();
+    expect(spawnSyncHazard('{ stdout: "ignore", stderr: "inherit" }')).toBeNull();
+  });
+
+  test("stdio array slots are read individually (reviewer's probe)", () => {
+    expect(spawnSyncHazard("{ stdio: [undefined, undefined, undefined] }")).toContain(
+      "stdout and stderr",
+    );
+    expect(spawnSyncHazard('{ stdio: ["inherit"] }')).toContain("stdout and stderr");
+    expect(spawnSyncHazard('{ stdio: ["ignore", , "inherit"] }')).toContain("stdout");
+    expect(spawnSyncHazard('{ stdio: ["ignore", null, "inherit"] }')).toContain("stdout");
+    // An own stream key can shape what the array slot leaves open.
+    expect(spawnSyncHazard('{ stdio: ["inherit"], stdout: log, stderr: log }')).toBeNull();
+  });
+
+  test("a timeoutMs-style key is not the timeout property", () => {
+    expect(spawnSyncHazard("{ timeoutMs: 5 }")).not.toBeNull();
+  });
+});
+
 describe("majorMinor", () => {
   test("reads plain versions and single caret/tilde ranges", () => {
     expect(majorMinor("1.4.0", "w")).toEqual([1, 4]);
@@ -781,5 +1082,64 @@ describe("bunTypesAheadMismatches", () => {
     expect(mismatches).toHaveLength(2);
     expect(mismatches[0].expected).toContain("templates/bun/module.yml");
     expect(mismatches[1].got).toContain("^2.0.0");
+  });
+});
+
+describe("lockedTypesBunVersion", () => {
+  // The shape bun.lock actually writes: a workspace dependency line (the
+  // declared RANGE, which must not satisfy the extraction) above the
+  // packages entry whose tuple head carries the resolved version.
+  const lock = (resolved: string) =>
+    [
+      "{",
+      '  "lockfileVersion": 1,',
+      '  "workspaces": {',
+      '    "": {',
+      '      "devDependencies": {',
+      '        "@types/bun": "^1.4.0",',
+      "      },",
+      "    },",
+      "  },",
+      '  "packages": {',
+      `    "@types/bun": ["@types/bun@${resolved}", "", { "dependencies": { "bun-types": "${resolved}" } }, "sha512-x"],`,
+      '    "x/@types/bun": ["@types/bun@9.9.9", "", {}, "sha512-y"],',
+      "  },",
+      "}",
+    ].join("\n");
+
+  test("reads the resolved version from the top-level packages entry, not the declared range", () => {
+    expect(lockedTypesBunVersion(lock("1.5.0"), "bun.lock")).toBe("1.5.0");
+  });
+
+  test("a nested per-package resolution never satisfies the anchor", () => {
+    const nestedOnly = lock("1.4.0").replace(/^\s*"@types\/bun": \["@types\/bun@1\.4\.0".*\n/m, "");
+    expect(() => lockedTypesBunVersion(nestedOnly, "bun.lock")).toThrow("anchor");
+  });
+
+  test("a lock without the entry throws loudly instead of passing vacuously", () => {
+    expect(() => lockedTypesBunVersion('{ "packages": {} }', "bun.lock")).toThrow(
+      "resolved @types/bun",
+    );
+  });
+
+  test("near miss: a lock resolving ahead of the runtime pin fails the rule's comparison", () => {
+    // The reproduced gap: bun.lock resolves 1.5.0 while package.json
+    // still declares ^1.4.0 - the declared floor passed, the installed
+    // version must not.
+    const installed = lockedTypesBunVersion(lock("1.5.0"), "bun.lock");
+    const mismatches = bunTypesAheadMismatches("1.4.0", [{ file: "bun.lock", version: installed }]);
+    expect(mismatches).toHaveLength(1);
+    expect(mismatches[0].file).toBe("bun.lock");
+    expect(mismatches[0].got).toContain("1.5.0");
+  });
+
+  test("a lock resolving exactly the pin (or behind it) passes the rule's comparison", () => {
+    const installed = lockedTypesBunVersion(lock("1.4.0"), "bun.lock");
+    expect(bunTypesAheadMismatches("1.4.0", [{ file: "bun.lock", version: installed }])).toEqual(
+      [],
+    );
+    expect(bunTypesAheadMismatches("1.5.1", [{ file: "bun.lock", version: installed }])).toEqual(
+      [],
+    );
   });
 });

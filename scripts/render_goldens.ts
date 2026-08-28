@@ -71,7 +71,12 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { must, mustCapture } from "../.github/scripts/shared/proc.ts";
+import {
+  DEFAULT_HANG_BOUND_MS,
+  must,
+  mustCapture,
+  timeoutExitCode,
+} from "../.github/scripts/shared/proc.ts";
 import { MANIFEST_NAME } from "../actions/shared/manifest.ts";
 import { stampManifestText } from "../actions/shared/stamp_manifest.ts";
 import { loadManifests } from "./module_manifests.ts";
@@ -278,11 +283,22 @@ export function diffTrees(fresh: Map<string, Entry>, committed: Map<string, Entr
  *  goldens are tracked: an ignored golden would silently drop from future
  *  `git add` runs and the drift check would chase a phantom. */
 function ignoreRuleHits(paths: string[]): string[] {
+  // Raw spawnSync, not capture(): the path list feeds --stdin as a
+  // Buffer, a seam proc.ts does not express. The hang bound still
+  // applies, carried inline with proc.ts's own constant and
+  // timeout-is-failure mapping (git_head.ts's pattern).
   const proc = Bun.spawnSync(["git", "-C", REPO_ROOT, "check-ignore", "--no-index", "--stdin"], {
     stdin: Buffer.from(`${paths.join("\n")}\n`),
     stdout: "pipe",
     stderr: "pipe",
+    timeout: DEFAULT_HANG_BOUND_MS,
+    killSignal: "SIGKILL",
   });
+  if (proc.exitedDueToTimeout === true) {
+    throw new Error(
+      `git check-ignore timed out after ${DEFAULT_HANG_BOUND_MS}ms (exit ${timeoutExitCode(proc)})`,
+    );
+  }
   // check-ignore exits 1 when no path is ignored - the pass case.
   if (proc.exitCode === 1) return [];
   if (proc.exitCode === 0) {

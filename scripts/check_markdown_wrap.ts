@@ -23,6 +23,7 @@
 
 import { lstatSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { capture } from "../.github/scripts/shared/proc.ts";
 
 const REPO_ROOT = resolve(import.meta.dir, "..");
 
@@ -196,12 +197,14 @@ export function isExempt(path: string): boolean {
 }
 
 function main(): void {
-  const proc = Bun.spawnSync(["git", "-C", REPO_ROOT, "ls-files", "-z"]);
+  // capture() carries the hang bound a bare piped spawn lacks (the
+  // spawn-sync-hang-bound SSOT rule's semantics).
+  const proc = capture(["git", "-C", REPO_ROOT, "ls-files", "-z"]);
   if (proc.exitCode !== 0) {
-    console.error(`git ls-files failed: ${proc.stderr.toString()}`);
+    console.error(`git ls-files failed${proc.timedOut ? " (timed out)" : ""}: ${proc.stderr}`);
     process.exit(2);
   }
-  const tracked = proc.stdout.toString().split("\0").filter(Boolean);
+  const tracked = proc.stdout.split("\0").filter(Boolean);
   const failures: string[] = [];
   for (const path of tracked) {
     if (!(rendersToMarkdown(path) || isAgentsFragment(path)) || isExempt(path)) continue;
