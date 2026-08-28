@@ -23,6 +23,7 @@ function ghReturning(
 ): (command: string[]) => RunResult {
   return () => ({
     exitCode: 0,
+    timedOut: false,
     stdout: JSON.stringify({
       check_runs: checks.map((check) => ({
         name: check.name ?? "all-green",
@@ -154,14 +155,19 @@ describe("allGreenFailure", () => {
   });
 
   test("an API failure fails closed with the error's tail, not a pass", () => {
-    const gh = (): RunResult => ({ exitCode: 1, stdout: "", stderr: "gh: HTTP 502\n" });
+    const gh = (): RunResult => ({
+      exitCode: 1,
+      stdout: "",
+      stderr: "gh: HTTP 502\n",
+      timedOut: false,
+    });
     const reason = allGreenFailure("o/r", SHA, gh, NO_WAIT);
     expect(reason).toContain("gh: HTTP 502");
     expect(reason).toContain("fails closed");
   });
 
   test("a silent API failure still reports the exit code", () => {
-    const gh = (): RunResult => ({ exitCode: 4, stdout: "", stderr: "" });
+    const gh = (): RunResult => ({ exitCode: 4, stdout: "", stderr: "", timedOut: false });
     expect(allGreenFailure("o/r", SHA, gh, NO_WAIT)).toContain("exit 4");
   });
 
@@ -174,7 +180,7 @@ describe("allGreenFailure", () => {
       allGreenFailure(
         "o/r",
         SHA,
-        () => ({ exitCode: 1, stdout: "", stderr: "gh: HTTP 502\n" }),
+        () => ({ exitCode: 1, stdout: "", stderr: "gh: HTTP 502\n", timedOut: false }),
         NO_WAIT,
       ),
     ];

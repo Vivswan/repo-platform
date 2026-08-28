@@ -56,7 +56,13 @@ import { join, resolve } from "node:path";
 import { z } from "zod";
 import { loadRegistry } from "../fleet/repos_registry.ts";
 import { lastLine } from "../shared/lines.ts";
-import { capture, passthrough, type RunOptions, type RunResult } from "../shared/proc.ts";
+import {
+  capture,
+  DEFAULT_HANG_BOUND_MS,
+  passthrough,
+  type RunOptions,
+  type RunResult,
+} from "../shared/proc.ts";
 import { AnswersFileError, readAnswersFile } from "./answers_file.ts";
 import { rewriteSrcPath } from "./src_path.ts";
 import { MANIFEST_NAME, stampManifestText } from "./stamp_manifest.ts";
@@ -150,16 +156,25 @@ function describeCommand(command: string[]): string {
  * fleet loop can continue past a failing repo. Verbose forwards child
  * output; quiet keeps it for the failure reason only. */
 function makeRunner(verbose: boolean) {
-  const check = (command: string[], result: RunResult, forward: boolean): void => {
+  const check = (
+    command: string[],
+    result: RunResult,
+    forward: boolean,
+    timeoutMs?: number,
+  ): void => {
     if (result.exitCode === 0) return;
     if (forward) {
       process.stdout.write(result.stdout);
       process.stderr.write(result.stderr);
     }
     if (result.timedOut === true) {
-      throw new RehearsalError(
-        `${describeCommand(command)} timed out after ${NETWORK_TIMEOUT_MS}ms (stalled network?)`,
-      );
+      // An explicit deadline here is always a network bound; the default
+      // hang bound firing means the subprocess wedged outright.
+      const note =
+        timeoutMs === undefined
+          ? `${DEFAULT_HANG_BOUND_MS}ms (hang bound)`
+          : `${timeoutMs}ms (stalled network?)`;
+      throw new RehearsalError(`${describeCommand(command)} timed out after ${note}`);
     }
     const tail = lastLine(result.stderr + result.stdout);
     throw new RehearsalError(
@@ -168,13 +183,17 @@ function makeRunner(verbose: boolean) {
   };
   const runCaptured = (command: string[], options: RunOptions = {}): RunResult => {
     const result = capture(command, options);
-    check(command, result, verbose);
+    check(command, result, verbose, options.timeoutMs);
     return result;
   };
   const run = (command: string[], options: RunOptions = {}): void => {
     // passthrough cannot enforce a deadline, so deadlined calls capture.
     if (verbose && options.timeoutMs === undefined) {
-      check(command, { exitCode: passthrough(command, options), stdout: "", stderr: "" }, false);
+      check(
+        command,
+        { exitCode: passthrough(command, options), stdout: "", stderr: "", timedOut: false },
+        false,
+      );
       return;
     }
     const result = runCaptured(command, options);
