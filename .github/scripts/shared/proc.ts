@@ -41,6 +41,21 @@ export interface RunResult {
   timedOut: boolean;
 }
 
+/** Argv rendered for a log line with credentials redacted: URL userinfo
+ * (`scheme://user:pass@host` -> `scheme://***@host`) and the bare
+ * `x-access-token:<token>@` shape are masked, everything else stays
+ * verbatim so the line keeps its diagnostic value. Sync argv carries the
+ * fleet PAT inside push URLs, and Actions logs are public. */
+export function redactCommand(command: string[]): string {
+  return command
+    .map((arg) =>
+      arg
+        .replace(/([a-z][a-z0-9+.-]*:\/\/)[^/?#\s]+@/gi, "$1***@")
+        .replace(/x-access-token:[^/?#\s]+@/gi, "x-access-token:***@"),
+    )
+    .join(" ");
+}
+
 /** Bash-style exit code: the command's own, or 128+signal when it was
  * killed (a signal-terminated child reports exitCode null). */
 export function exitCodeOf(proc: { exitCode: number | null; signalCode?: string | null }): number {
@@ -122,7 +137,7 @@ export function mustCapture(command: string[], options: RunOptions = {}): string
     killSignal: "SIGKILL",
   });
   if (proc.exitedDueToTimeout === true) {
-    console.error(`command timed out after ${timeoutMs}ms: ${command.join(" ")}`);
+    console.error(`command timed out after ${timeoutMs}ms: ${redactCommand(command)}`);
     process.exit(timeoutExitCode(proc));
   }
   if (proc.exitCode !== 0) process.exit(exitCodeOf(proc));

@@ -12,6 +12,7 @@ import {
   capture,
   DEFAULT_HANG_BOUND_MS,
   mustCapture,
+  redactCommand,
   timeoutExitCode,
 } from "../../.github/scripts/shared/proc";
 
@@ -76,6 +77,40 @@ describe("timeoutExitCode", () => {
   });
 });
 
+describe("redactCommand", () => {
+  test("masks URL userinfo, keeping scheme and host", () => {
+    expect(
+      redactCommand(["git", "push", "https://x-access-token:ghp_secret@github.com/o/r.git"]),
+    ).toBe("git push https://***@github.com/o/r.git");
+  });
+
+  test("masks userinfo whose password itself contains an @", () => {
+    expect(redactCommand(["https://user:p@ss@example.com/x"])).toBe("https://***@example.com/x");
+  });
+
+  test("masks the bare x-access-token shape even without a scheme", () => {
+    expect(redactCommand(["x-access-token:ghp_secret@github.com/o/r.git"])).toBe(
+      "x-access-token:***@github.com/o/r.git",
+    );
+  });
+
+  test("masks a token that itself contains an @, leaving no fragment of it", () => {
+    expect(redactCommand(["x-access-token:abc@def@github.com/o/r.git"])).toBe(
+      "x-access-token:***@github.com/o/r.git",
+    );
+  });
+
+  test("an @ in a query or fragment is not userinfo and stays verbatim", () => {
+    const argv = ["https://example.com?mail=a@b", "https://example.com#sec@ref"];
+    expect(redactCommand(argv)).toBe(argv.join(" "));
+  });
+
+  test("leaves credential-free argv verbatim", () => {
+    const argv = ["git", "ls-remote", "https://github.com/o/r.git", "refs/heads/main", "a@b"];
+    expect(redactCommand(argv)).toBe(argv.join(" "));
+  });
+});
+
 describe("mustCapture timeoutMs", () => {
   const procModule = new URL("../../.github/scripts/shared/proc.ts", import.meta.url).pathname;
 
@@ -97,5 +132,22 @@ describe("mustCapture timeoutMs", () => {
     expect(result.stdout).not.toContain("unreachable");
     expect(result.stderr).toContain("timed out after 200ms: sleep 5");
     expect(Date.now() - start).toBeLessThan(5000);
+  });
+
+  test("the expiry line redacts credentials carried in argv", () => {
+    // The sync push passes mustCapture an argv holding the fleet PAT
+    // inside the push URL; the deadline-expiry line is reachable for
+    // every call now that the default hang bound exists, so it must
+    // never echo the token into the (public) Actions log.
+    const url = "https://x-access-token:ghp_SUPERSECRET@github.com/octo/repo.git";
+    const snippet = [
+      `import { mustCapture } from ${JSON.stringify(procModule)};`,
+      `mustCapture(["sh", "-c", "sleep 5", "sh", ${JSON.stringify(url)}], { timeoutMs: 200 });`,
+    ].join("\n");
+    const result = capture(["bun", "-e", snippet], { timeoutMs: 10_000 });
+    expect(result.exitCode).not.toBe(0);
+    expect(result.stderr).not.toContain("ghp_SUPERSECRET");
+    expect(result.stderr).toContain("timed out after 200ms:");
+    expect(result.stderr).toContain("https://***@github.com/octo/repo.git");
   });
 });
