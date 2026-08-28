@@ -744,7 +744,7 @@ describe("transitionSettingsStarter", () => {
       "          code_scanning_tools:",
       "            - tool: CodeQL",
       "              security_alerts_threshold: high_or_higher",
-      "              alerts_threshold: errors",
+      "              alerts_threshold: errors_and_warnings",
       "      - type: required_signatures",
       "",
     ].join("\n");
@@ -761,6 +761,39 @@ describe("transitionSettingsStarter", () => {
     expect(section).not.toContain('rule "deletion"');
     // ...and the genuinely repo-only type is still reported.
     expect(section).toContain('rulesets "main": rule "required_signatures"');
+  });
+
+  test("a fleet rule the old file carries at a DIFFERENT value is reported", () => {
+    // The pre-raise threshold: the fleet supplies errors_and_warnings
+    // now, so an old file still at plain `errors` is a stale weaker copy,
+    // not an identical fleet supply - the reviewer decides whether to
+    // re-add it (which would weaken the fleet value from the repo layer).
+    const legacy = [
+      "---",
+      "# Rendered by the settings-sync module.",
+      LEGACY_MERGEABLE_LINE,
+      "repository:",
+      "  private: false",
+      "rulesets:",
+      "  - name: main",
+      "    target: branch",
+      "    rules:",
+      "      - type: code_scanning",
+      "        parameters:",
+      "          code_scanning_tools:",
+      "            - tool: CodeQL",
+      "              security_alerts_threshold: high_or_higher",
+      "              alerts_threshold: errors",
+      "",
+    ].join("\n");
+    const { dir, out } = target({
+      settings: legacy,
+      modules: "modules: [uv, settings-sync]\n",
+      answers,
+    });
+    transitionSettingsStarter(dir, out, "t");
+    const section = readFileSync(out, "utf-8");
+    expect(section).toContain('rulesets "main": rule "code_scanning"');
   });
 
   test("an explicitly null identity key is preserved, not re-seeded", () => {

@@ -1,11 +1,12 @@
 ---
 # Layer 2 of the settings merge, applied to PUBLIC repositories only
 # (docs/settings.md). Private repositories without Advanced Security
-# reject these keys with a 422, which is why they cannot live in the
-# unconditional baseline.
+# reject the security_and_analysis keys with a 422, and the code_quality
+# rule gates a feature family unavailable there, which is why neither can
+# live in the unconditional baseline.
 #
-# Declared so the apply heals an out-of-band disable: GitHub enables both
-# by default on public repositories.
+# security_and_analysis is declared so the apply heals an out-of-band
+# disable: GitHub enables both keys by default on public repositories.
 
 repository:
   security_and_analysis:
@@ -13,3 +14,34 @@ repository:
       status: enabled
     secret_scanning_push_protection:
       status: enabled
+
+rulesets:
+  # The main ruleset's code_quality rule lives HERE, fleet-wide for public
+  # repos, not in the toolchain modules' overlays next to code_scanning.
+  # Placement reasoning, verified 2026-08 against GitHub's docs and the
+  # live fleet:
+  #
+  # - The rule gates on GitHub Code Quality's OWN analysis (a per-repo
+  #   enablement, Team/GHEC-only product), not on code-scanning uploads.
+  #   Unlike code_scanning, its documented blocking conditions omit "a
+  #   required tool is not configured", and empirically it stands down
+  #   where the feature is not enabled: copilot-env has carried exactly
+  #   this rule since 2026-08-21 (ruleset history v47188788) on a personal
+  #   account where Code Quality cannot be enabled at all, and PRs kept
+  #   auto-merging under it (auto-merge does not bypass rules). So it is
+  #   safe on every public repo regardless of toolchain - no module gate
+  #   needed, and keeping it here means no repo re-declares it locally.
+  # - Public-only, mirroring code_scanning: the Code Quality feature
+  #   family needs Advanced Security on private repositories, which this
+  #   fleet does not carry, so the private overlay stays silent.
+  #
+  # Rules of a same-name ruleset APPEND across layers keyed by `type`, so
+  # this adds to the main ruleset that .github/settings-override.yml
+  # declares rather than replacing it. severity `warnings`: quality
+  # warnings gate merges once Code Quality analysis exists on a repo
+  # (matching copilot-env's live rule, the fleet's one specimen).
+  - name: main
+    rules:
+      - type: code_quality
+        parameters:
+          severity: warnings

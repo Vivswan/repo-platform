@@ -20,4 +20,8 @@ rulesets:
           code_scanning_tools:
             - tool: CodeQL
               security_alerts_threshold: high_or_higher
-              alerts_threshold: errors
+              # errors_and_warnings: CodeQL warnings gate merges too. The
+              # fleet value, so no repo has to re-declare the tightening
+              # locally (cloud-speech's repo layer did, and the layering
+              # transition would have silently relaxed it back to errors).
+              alerts_threshold: errors_and_warnings

@@ -105,17 +105,37 @@ describe("managedLabels", () => {
 
 describe("managedRulesets", () => {
   const rulesetNames = (f: RepoFacts) => managedRulesets(f, manifests).map((r) => r.name);
-  const mainRuleTypes = (f: RepoFacts) => {
+  const mainRules = (f: RepoFacts) => {
     const main = managedRulesets(f, manifests).find((r) => r.name === "main");
-    return ((main?.rules ?? []) as { type: string }[]).map((r) => r.type);
+    return (main?.rules ?? []) as { type: string; parameters?: Record<string, unknown> }[];
   };
+  const mainRuleTypes = (f: RepoFacts) => mainRules(f).map((r) => r.type);
 
   test("the fleet protection rulesets are NOT in these layers", () => {
-    // main and non-bypassable live in .github/settings-override.yml, which
-    // merges above the repo layer at apply time - a repo must not be able
-    // to beat them, so they cannot sit in a layer the repo wins over.
-    expect(rulesetNames(facts())).toEqual([]);
+    // main and non-bypassable PROTECTION rules live in
+    // .github/settings-override.yml, which merges above the repo layer at
+    // apply time - a repo must not be able to beat them, so they cannot
+    // sit in a layer the repo wins over. The public overlay contributes a
+    // main ENTRY, but it carries only the code_quality rule; the private
+    // side contributes no ruleset at all.
+    expect(rulesetNames(facts())).toEqual(["main"]);
+    expect(mainRuleTypes(facts())).toEqual(["code_quality"]);
     expect(rulesetNames(facts({ private: true }))).toEqual([]);
+  });
+
+  test("code_quality renders for every public repo, toolchain or not", () => {
+    // The fleet public overlay contributes it: the rule gates on GitHub
+    // Code Quality's own analysis and stands down where the feature is
+    // not enabled, so unlike code_scanning it needs no module gate (the
+    // placement reasoning lives in .github/settings-public.yml).
+    expect(mainRuleTypes(facts({ modules: ["rust"] }))).toContain("code_quality");
+    expect(mainRuleTypes(facts({ modules: ["bun"] }))).toContain("code_quality");
+    expect(mainRuleTypes(facts({ private: true }))).not.toContain("code_quality");
+    expect(mainRuleTypes(facts({ modules: ["bun"], private: true }))).not.toContain("code_quality");
+    // The parameters, not just the type: a misspelled enum value renders
+    // fine and dies at apply time, fleet-wide.
+    const rule = mainRules(facts()).find((r) => r.type === "code_quality");
+    expect(rule?.parameters).toEqual({ severity: "warnings" });
   });
 
   test("release-please adds the release-tags ruleset", () => {
@@ -125,11 +145,27 @@ describe("managedRulesets", () => {
   test("code_scanning renders exactly for a public repo with a toolchain", () => {
     // The toolchain modules' settings-public.yml layers contribute it to
     // the main ruleset; the override's own main rules are appended to at
-    // apply time (merge_settings_layers' tests pin that).
-    expect(mainRuleTypes(facts({ modules: ["bun"] }))).toContain("code_scanning");
-    expect(mainRuleTypes(facts({ modules: ["bun"], private: true }))).not.toContain(
-      "code_scanning",
-    );
+    // apply time (merge_settings_layers' tests pin that). EVERY CodeQL
+    // toolchain module, with the exact threshold tuple: a stale module
+    // layer or a misspelled enum value would otherwise pass on types
+    // alone and weaken (or 422) that module's repos at apply time.
+    const codeqlModules = manifests.filter((m) => m.toolchain !== undefined).map((m) => m.module);
+    expect(codeqlModules.length).toBeGreaterThan(0);
+    for (const module of codeqlModules) {
+      const rule = mainRules(facts({ modules: [module] })).find((r) => r.type === "code_scanning");
+      expect(rule?.parameters).toEqual({
+        code_scanning_tools: [
+          {
+            tool: "CodeQL",
+            security_alerts_threshold: "high_or_higher",
+            alerts_threshold: "errors_and_warnings",
+          },
+        ],
+      });
+      expect(mainRuleTypes(facts({ modules: [module], private: true }))).not.toContain(
+        "code_scanning",
+      );
+    }
     expect(mainRuleTypes(facts({ modules: ["rust"] }))).not.toContain("code_scanning");
   });
 
