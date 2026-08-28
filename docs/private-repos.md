@@ -1,39 +1,47 @@
 # Private repositories in fleet logs
 
-repo-platform is public, and GitHub Actions has no log-level access control: run logs, job names, step summaries, and job outputs are as readable as the repository they run in. Without countermeasures, a Sync Repos or Settings Repos run would print every private repo's name - in the job list itself (`sync (Vivswan/hidden-server)`) - along with its description, module selection, file paths, and whatever a failing tool dumped. This page covers the redaction that closes that leak, what a redacted run still shows, and how to work with it as the operator. The design mirrors github-settings-as-code's `private-repos: redact`, with one difference: instead of anonymous `private repository #N` placeholders, repo-platform shows a name hint, so you can tell the jobs apart.
+repo-platform is public, and GitHub Actions has no log-level access control: run logs, job names, step summaries, and job outputs are as readable as the repository they run in. Without countermeasures, a Sync Repos or Settings Repos run would print every private repo's name - in the job list itself (`sync (Vivswan/hidden-server)`) - plus its description, module selection, file paths, and whatever a failing tool dumped.
+
+The redaction that closes that leak follows a self-disclosure rule (names already committed in this public repository cannot be un-published):
+
+| How the repo is named here | Name in logs | Details |
+|---|---|---|
+| wildcard discovery only | hint | hidden |
+| explicit `managed:`/`exclude:` entry in repos.yml | plain | hidden |
+| public repo | plain | shown |
+
+Only wildcard-discovered private repos get true non-disclosure. Today repos.yml commits no explicit entries (the wildcard is the whole registry), so in practice every private repo is hinted. The design mirrors github-settings-as-code's `private-repos: redact`, with one difference: instead of anonymous `private repository #N` placeholders, repo-platform shows a name hint, so you can tell the jobs apart.
 
 ## The hint
-
-A redacted repo appears everywhere as a deterministic hint of its bare name: each `-`/`_`/`.`-separated segment keeps its first character plus `**`, and the final segment also keeps its last character when it has at least five. `hidden-server` becomes `h**-s**r`; `myrepo` becomes `m**o`. Two repos that hint alike get `#2`, `#3` suffixes. To map a hint back to a name (or check what a repo would hint as):
 
 ```bash
 bun .github/scripts/fleet/redact.ts hint hidden-server   # h**-s**r
 ```
 
-Hints are pseudonymization for the operator, not encryption. A hint always reveals segment initials, and a very short name is substantially revealed (`ab` hints as `a**`, but `a-b` as `a**-b**` shows both letters). The details protection below does not depend on the hint's strength.
+- Each `-`/`_`/`.`-separated segment keeps its first character plus `**`; the final segment also keeps its last character when it has at least five. `hidden-server` becomes `h**-s**r`; `myrepo` becomes `m**o`.
+- Two repos that hint alike get `#2`, `#3` suffixes.
+- Hints are pseudonymization for the operator, not encryption. A hint always reveals segment initials, and a very short name is substantially revealed (`ab` hints as `a**`, but `a-b` as `a**-b**` shows both letters). The details protection below does not depend on the hint's strength.
 
 ## What is hidden, and from what
 
-Discovery already knows each repo's visibility, and the decision fails closed: a repo the discovery payload does not positively mark `private: false` is treated as private - including a selected repo that does not appear in discovery at all.
+Discovery already knows each repo's visibility, and the decision fails closed: a repo the discovery payload does not positively mark `private: false` is treated as private. A selected repo that does not appear in discovery at all (an explicit cross-owner entry) gets one live `gh api repos/<slug>` probe, and only a probe positively answering `private: false` reads as public - a failed probe or any other answer stays private.
 
 A private repo's redaction has two independent parts:
 
 - **Name redaction**: the matrix row (which becomes the public job name and the auto-printed workflow inputs) carries the hint, never the slug. Inside the per-repo job, a resolve step recovers the real repository and registers its name with the runner's secret masker before anything else prints, so checkout logs, API error bodies, and PR URLs render it as `***`. The mask is a point-in-time snapshot taken at that resolve step: a repo renamed after it, while the run is still in flight, surfaces under its new name, which no mask covers - the one open window (a rename before the resolve step fails closed there instead).
 - **Details hiding**: target-derived values stay out of the public log. Tools that read the target's checkout (copier, the template validator, the retired-file cleanup, the tail tripwire) run behind a capture boundary that publishes only a generic outcome; module lists print as counts; drift warnings name the changed field but not the values; conflict dumps go to the PR body only (best-effort under the body's size budget - see "Seeing the full detail"). The private home for detail is the sync PR (and its CI) in the target repo itself; whatever the body's budget omits is reproduced locally.
 
-Names already committed in this public repository cannot be un-published, so redaction follows a self-disclosure rule, same as the reference implementation's table:
-
-| How the repo is named here | Name in logs | Details |
-|---|---|---|
-| wildcard discovery only | hint | hidden |
-| explicit `managed:`/`exclude:`/`config:` entry in repos.yml | plain | hidden |
-| public repo | plain | shown |
-
-Only wildcard-discovered private repos get true non-disclosure. Today every private repo in the fleet is wildcard-discovered (the registry's committed entries name public repos), so in practice every private repo is hinted.
-
 ## What a redacted run still shows
 
-Coarse facts stay visible on purpose - they are what make the run operable without the details: the hint, each step's outcome, HTTP status codes on failed probes, the counts of modules, conflicts, and retired files, the template-version identifiers a sync moves between (`build@<sha>` - those name THIS repo's builds, not the target), and the commit sha a settings apply pinned its reads to (the runner echoes step env and rendered commands into the log; a bare sha names no repository and unlocks no content). The settings action prints its own placeholders (`private repository #N`) inside an apply leg; two redaction vocabularies, one job, both safe.
+Coarse facts stay visible on purpose - they are what make the run operable without the details:
+
+- the hint, and each step's outcome
+- HTTP status codes on failed probes
+- the counts of modules, conflicts, and retired files
+- the template-version identifiers a sync moves between (`build@<sha>` - those name THIS repo's builds, not the target)
+- the commit sha a settings apply pinned its reads to (the runner echoes step env and rendered commands into the log; a bare sha names no repository and unlocks no content)
+
+The settings action prints its own placeholders (`private repository #N`) inside an apply leg; two redaction vocabularies, one job, both safe.
 
 ## How the per-repo job finds its target
 
@@ -43,11 +51,22 @@ When resolution fails, the job goes red with an error naming only the hint. The 
 
 ## Seeing the full detail
 
-- The sync PR in the target repo is where the hidden detail lands: dropped conflict hunks, removed paths, drift values (size-bounded, with its own truncation note), withheld workflow files, the removed-splits report (the repository-owned content a deleted split-classed file takes with it, which forces the manual-review path), and the tail tripwire's report (the quoted repository-owned lines a split file lost, which force it too). These ordinary sections share one PR-body size budget and a section that does not fit is OMITTED whole - the body then carries a truncation banner; when it does, reproduce the sync locally for the full report. The manual-review decision never rides on this prose (each hold comes from an independent flag or non-empty report file), and the PR's checks run in the private repo, where logs are private.
+- The sync PR in the target repo is where the hidden detail lands: dropped conflict hunks, removed paths, drift values (size-bounded, with its own truncation note), withheld workflow files, the removed-splits report (the repository-owned content a deleted split-classed file takes with it, which forces the manual-review path), and the tail tripwire's report (the quoted repository-owned lines a split file lost, which force it too).
+  - These ordinary sections share one PR-body size budget; a section that does not fit is OMITTED whole and the body carries a truncation banner - reproduce the sync locally for the full report.
+  - The manual-review decision never rides on this prose (each hold comes from an independent flag or non-empty report file), and the PR's checks run in the private repo, where logs are private.
 - The failed-validation warning is the one GUARANTEED section: its space is reserved out of that budget, so it is in the PR body even when every ordinary section was omitted - and when a hidden run has captured diagnostics in hand, their bounded excerpt (with its own truncation note) is guaranteed to fit inside that reservation.
-- A private target's settings apply report has its own channel: `settings-repos.yml` runs github-settings-as-code with `private-report: issue`, so for a redacted target the action's visibility probe proves private or internal, the full unredacted failure/drift report becomes a marker-labelled issue on the target repo itself - reused forever, open while the apply fails or drifts, closed (latest report inside) when healthy. Best-effort: an unproven visibility stays redacted without an issue, and a failed delivery warns without failing the run.
-- A hidden sync step failure ("output hidden: private repository") routes its captured output privately. When the run has a sync PR, failed validation diagnostics are appended to the PR body; when no PR carries them (a copier or cleanup crash, a validation failure with nothing delivered, or a branch lease/push failure - commit_push.ts records its own redacted git error output on this channel, since it runs outside the hidden wrapper and its public log says only "output hidden"), a bounded excerpt of each capture (the body notes any truncation) becomes the body of a reused issue on the target repo titled `[automated] repo-platform sync: private failure report` - found by that exact title, not a marker label, because the settings apply deletes undeclared labels. One issue per repo, forever: each delivery replaces the body (earlier reports stay in the edit history), open means the sync needs attention, and the next fully healthy run closes it. The delivery assigns the repo's owner at creation (best-effort - a failed assignment never fails the delivery): assigning here guarantees the owner regardless of what the target's automation would do with the PAT-fired `issues: opened` event, and a still-unassigned reused issue is picked up the same way. Unlike the settings channel, delivery does not wait for a proven private visibility: hide-details is fail-closed, so a public repo missing from discovery can get its excerpt posted to its own public issue tracker - which never widens access, since the issue's readers are exactly the repo's readers, the same audience an un-hidden run log would have had. Delivery is best-effort; if it warns instead, reproduce locally: check out the target repo and run the same copier update against `gh:Vivswan/repo-platform` (docs/new-repo.md has the copier invocations), or re-run the failing script from this repo with the target checked out under `target/`.
-- A hidden settings step failure routes the same way, on its own channel: the layer render, the merge, and the last-moment freshness recheck run before the action (the recheck's moved warning quotes commit shas and its resolver errors name the target's default branch), so `run_hidden.ts` captures their output and `failure_issue.ts` delivers it to a bound issue titled for the settings apply, separate from the sync report so neither workflow's green run closes the other's. A run that recovers closes its own report. A skipped target - no `.github/settings.yml` yet, or a default branch that moved mid-run - is announced publicly instead: the notice names only the masked hint, never the repo's contents.
+- A private target's settings apply report has its own channel: `settings-repos.yml` runs github-settings-as-code with `private-report: issue`, so for a redacted target the action's visibility probe proves private or internal, and the full unredacted failure/drift report becomes a marker-labelled issue on the target repo itself - reused forever, open while the apply fails or drifts, closed (latest report inside) when healthy. Best-effort: an unproven visibility stays redacted without an issue, and a failed delivery warns without failing the run.
+- A hidden sync step failure ("output hidden: private repository") routes its captured output privately:
+  - When the run has a sync PR, failed validation diagnostics are appended to the PR body.
+  - When no PR carries them (a copier or cleanup crash, a validation failure with nothing delivered, or a branch lease/push failure - commit_push.ts records its own redacted git error output on this channel, since it runs outside the hidden wrapper and its public log says only "output hidden"), a bounded excerpt of each capture (the body notes any truncation) becomes the body of a reused issue on the target repo titled `[automated] repo-platform sync: private failure report` - found by that exact title, not a marker label, because the settings apply deletes undeclared labels.
+  - One issue per repo, forever: each delivery replaces the body (earlier reports stay in the edit history), open means the sync needs attention, and the next fully healthy run closes it.
+  - The delivery assigns the repo's owner at creation (best-effort - a failed assignment never fails the delivery): assigning here guarantees the owner regardless of what the target's automation would do with the PAT-fired `issues: opened` event, and a still-unassigned reused issue is picked up the same way.
+  - Unlike the settings channel, delivery does not wait for a proven private visibility: hide-details is fail-closed, so a public repo missing from discovery can get its excerpt posted to its own public issue tracker - which never widens access, since the issue's readers are exactly the repo's readers, the same audience an un-hidden run log would have had.
+  - If delivery only warns, reproduce locally: check out the target repo and run the same copier update against `gh:Vivswan/repo-platform` ([docs/new-repo.md](new-repo.md) has the copier invocations), or re-run the failing script from this repo with the target checked out under `target/`.
+- A hidden settings step failure routes the same way, on its own channel:
+  - The layer render, the merge, and the last-moment freshness recheck run before the action (the recheck's moved warning quotes commit shas and its resolver errors name the target's default branch), so `run_hidden.ts` captures their output and `failure_issue.ts` delivers it to a bound issue titled for the settings apply - separate from the sync report, so neither workflow's green run closes the other's.
+  - A run that recovers closes its own report.
+  - A skipped target - no `.github/settings.yml` yet, or a default branch that moved mid-run - is announced publicly instead: the notice names only the masked hint, never the repo's contents.
 - The `hint` subcommand above answers "which repo is this job?".
 
 ## Limits, stated plainly

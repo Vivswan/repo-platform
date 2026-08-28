@@ -2,10 +2,14 @@
 
 Selecting the `pages` module gives a repository a managed `pages.yml` workflow that deploys GitHub Pages through repo-platform's `reusable-pages.yml`. One Pages deployment carries up to two environments:
 
-- the **production root** (`https://<owner>.github.io/<repo>/`), built from the latest release tag
-- an optional **staging path** (`.../<repo>/staging/`), built from main HEAD
+| Environment | URL | Built from | Content changes when |
+|---|---|---|---|
+| production root | `https://<owner>.github.io/<repo>/` | the latest release tag | a new release is published |
+| staging (optional) | `.../<repo>/staging/` | main HEAD | every push to main |
 
-Staging refreshes on every push to main; the root changes only when a new release is published. Before the first release there is no tag, so only staging publishes and the root returns GitHub's default 404. This is intended, not a failure. With `pages_staging: false` there is nothing to publish at all before the first release; those runs skip the deploy with a notice and stay green.
+The table shows the default `pages_production: release` mode; `pages_production: main` builds the root from main HEAD and disables staging (see caveats). The workflow itself runs on every push to main, on every published release, and on manual dispatch, and each run re-resolves the root from the latest release - so any run can pick up a release the `release:` trigger missed.
+
+Before the first release there is no tag, so only staging publishes and the root returns GitHub's default 404. This is intended, not a failure. With `pages_staging: false` there is nothing to publish at all before the first release; those runs skip the deploy with a notice and stay green.
 
 ## One-time setup
 
