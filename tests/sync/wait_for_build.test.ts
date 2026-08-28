@@ -120,7 +120,11 @@ function run(opts: Options = {}) {
   // limit so a wedged script fails its test loudly instead of stalling
   // the suite. A timed-out spawnSync returns exitCode null with partial
   // output, which output-only assertions could mistake for a pass, so
-  // expiry throws here at the owner.
+  // expiry throws here at the owner. The timeout is a hang bound the
+  // harness CAN rely on: with killSignal set the return is prompt AT the
+  // deadline even with pipe-holding orphans (measured on 1.3.14 and
+  // 1.4.0) - do not remove it citing f1632fae's commit message ("would
+  // still block for the full ceiling"), which predates this data.
   const proc = Bun.spawnSync([process.execPath, script], {
     timeout: 4000,
     killSignal: "SIGKILL",
@@ -484,8 +488,14 @@ describe("wait_for_build.ts", () => {
   });
 
   test("a stalled HEAD read exits loudly instead of hanging", () => {
-    const r = run({ env: { GIT_SLEEP: "5", PROBE_TIMEOUT_MS: "100" } });
+    // GIT_SLEEP stays under run()'s 4000ms harness bound (and healthy
+    // cost stays ~0.12s: the probe kills the stub at 100ms). Under a
+    // regression that loses the probe bound, the harness bound throws
+    // WITH the script's real output; the explicit per-test timeout
+    // keeps bun-test's default 5000ms cap from killing the test first
+    // as an opaque harness kill with no diagnostics.
+    const r = run({ env: { GIT_SLEEP: "2", PROBE_TIMEOUT_MS: "100" } });
     expect(r.exitCode).not.toBe(0);
     expect(r.output).toContain("timed out after 100ms");
-  });
+  }, 15000);
 });

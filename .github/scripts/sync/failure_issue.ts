@@ -29,6 +29,7 @@ import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { env, requireEnv } from "../shared/gha.ts";
 import { capture } from "../shared/proc.ts";
+import { HIDDEN_FAILURES_NAME, parseHiddenFailures } from "./run_hidden.ts";
 
 const mode = process.argv[2];
 if (mode !== "deliver" && mode !== "resolve") {
@@ -181,18 +182,12 @@ if (mode === "deliver") {
     console.log("the sync PR carries this failure's hidden diagnostics; no issue delivery needed");
     process.exit(0);
   }
-  const manifestFile = join(runnerTemp, "hidden-failures.tsv");
+  const manifestFile = join(runnerTemp, HIDDEN_FAILURES_NAME);
   if (!existsSync(manifestFile) || statSync(manifestFile).size === 0) {
     console.log("no hidden step failed; the public log already carries this failure's diagnosis");
     process.exit(0);
   }
-  const manifest = readFileSync(manifestFile, "utf-8")
-    .split("\n")
-    .filter((line) => line !== "")
-    .map((line) => {
-      const [label, rc, capture] = line.split("\t");
-      return { label, rc, capture };
-    });
+  const manifest = parseHiddenFailures(readFileSync(manifestFile, "utf-8"));
 
   // The fence must outrun the longest backtick run in each SHIPPED
   // excerpt, or a captured line could terminate its own code block early

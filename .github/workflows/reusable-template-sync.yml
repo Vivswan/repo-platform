@@ -541,9 +541,10 @@ jobs:
             echo "::warning::copier hit merge conflicts in ${TARGET_DISPLAY}; where possible they were resolved in favor of the template. The dropped local lines are listed in the PR body and in the 'Resolve copier conflicts' step log. Review ${PR_URL}, restore anything that should stay local, then merge."
           fi
 
-      # A hidden step failure with no PR to carry its captured diagnostics
+      # A hidden failure with no PR to carry its captured diagnostics
       # (copier or cleanup crash, validation failure with nothing
-      # delivered) would otherwise die with the runner. Deliver the
+      # delivered, a lease/push failure commit_push.ts recorded itself)
+      # would otherwise die with the runner. Deliver the
       # capture to a reused issue on the target repo - its issues are as
       # private as the repo. When a PR exists, open_pr.ts already routed
       # the detail into its body and the script skips itself. Best-effort:

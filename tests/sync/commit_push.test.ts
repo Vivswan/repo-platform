@@ -6,7 +6,14 @@
 // shapes; the assertions are on the script's whole public output.
 
 import { beforeAll, describe, expect, test } from "bun:test";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { capture } from "../../.github/scripts/shared/proc.ts";
@@ -76,6 +83,10 @@ describe("commit_push credential redaction", () => {
     expect(result.exitCode).toBe(128);
     expect(result.stdout + result.stderr).not.toContain(SENTINEL);
     expect(result.stderr).toContain("unable to access 'https://***@github.com/o/r.git/'");
+    // Public target: the ::error names the shape and points at the log.
+    expect(result.stdout).toContain("::error::reading the branch lease");
+    expect(result.stdout).toContain("exit 128");
+    expect(result.stdout).toContain("git's output is in the log above");
   });
 
   test("a hidden target's failing lease probe emits no git output at all", () => {
@@ -105,5 +116,53 @@ describe("commit_push credential redaction", () => {
     // hidden path must withhold git's output on BOTH streams entirely.
     expect(result.stdout + result.stderr).not.toContain("o/r");
     expect(result.stdout).toContain("(push output hidden: private repository)");
+  });
+});
+
+describe("commit_push failure diagnostics", () => {
+  test("the push ::error names the failure shape instead of asserting one cause", () => {
+    // The stub's git error carries a 403, so the shape line may OFFER the
+    // authorization lead - but keyed on evidence, alongside the exit code.
+    const result = runCommitPush("push-fail", "false");
+    expect(result.stdout).toContain("::error::pushing to o/r#automation/repo-platform failed");
+    expect(result.stdout).toContain("exit 1");
+    expect(result.stdout).toContain("authorization-shaped");
+    expect(result.stdout).not.toContain("see the log above");
+  });
+
+  test("a hidden target's lease failure lands redacted in the failure-issue manifest", () => {
+    const result = runCommitPush("lease-fail", "true");
+    const manifest = readFileSync(join(result.runnerTemp, "hidden-failures.tsv"), "utf-8");
+    const [label, rc, capturePath] = manifest.trimEnd().split("\t");
+    expect(label).toBe("branch lease");
+    expect(rc).toBe("128");
+    const captured = readFileSync(capturePath, "utf-8");
+    expect(captured).not.toContain(SENTINEL);
+    expect(captured).toContain("unable to access 'https://***@github.com/o/r.git/'");
+    // The public pointer replaces the false "see the log above": the log
+    // says only "output hidden", the issue carries the detail.
+    expect(result.stdout).toContain("delivered to the target's failure-report issue");
+  });
+
+  test("a hidden target's push failure lands redacted in the failure-issue manifest", () => {
+    const result = runCommitPush("push-fail", "true");
+    const manifest = readFileSync(join(result.runnerTemp, "hidden-failures.tsv"), "utf-8");
+    const [label, rc, capturePath] = manifest.trimEnd().split("\t");
+    expect(label).toBe("branch push");
+    expect(rc).toBe("1");
+    const captured = readFileSync(capturePath, "utf-8");
+    expect(captured).not.toContain(SENTINEL);
+    expect(captured).toContain("unable to access 'https://***@github.com/o/r.git/'");
+    expect(result.stdout).toContain("delivered to the target's failure-report issue");
+  });
+
+  test("a public target's failures write no failure-issue manifest", () => {
+    // The channel is the hidden targets' compensation; a public log
+    // already carries the redacted output, and a stray manifest would
+    // have the deliver step re-post it.
+    for (const mode of ["lease-fail", "push-fail"]) {
+      const result = runCommitPush(mode, "false");
+      expect(existsSync(join(result.runnerTemp, "hidden-failures.tsv"))).toBe(false);
+    }
   });
 });

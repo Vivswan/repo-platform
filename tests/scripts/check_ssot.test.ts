@@ -9,6 +9,8 @@ import { PIN_FLIPS } from "../../.github/scripts/sync/starter_pin_rollout";
 import {
   ALL_GREEN_WIRING,
   applyDivergences,
+  asyncStreamWriteMismatches,
+  bunRuntimeMismatches,
   bunTypesAheadMismatches,
   canonical,
   composeAnchorNames,
@@ -1141,5 +1143,103 @@ describe("lockedTypesBunVersion", () => {
     expect(bunTypesAheadMismatches("1.5.1", [{ file: "bun.lock", version: installed }])).toEqual(
       [],
     );
+  });
+});
+
+describe("asyncStreamWriteMismatches", () => {
+  test("an unlisted file with an async stream write is flagged at its line", () => {
+    const source = 'console.log("hi");\nprocess.stdout.write(out);\n';
+    const found = asyncStreamWriteMismatches("x/y.ts", source, false);
+    expect(found).toHaveLength(1);
+    expect(found[0].file).toBe("x/y.ts:2");
+    expect(found[0].expected).toContain("writeSync");
+    expect(
+      asyncStreamWriteMismatches("x/y.ts", "process.stderr.write(err);\n", false),
+    ).toHaveLength(1);
+  });
+
+  test("mentions in comments, strings, and regex bodies never fire", () => {
+    const source = [
+      "// process.stdout.write(x) stays banned",
+      "/* process.stderr.write(y) */",
+      'const s = "process.stdout.write(z)";',
+      "const r = /process\\.stdout\\.write\\(/;",
+    ].join("\n");
+    expect(asyncStreamWriteMismatches("x/y.ts", source, false)).toEqual([]);
+  });
+
+  test("a template INTERPOLATION's write is code and fires", () => {
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: literal source under test
+    const source = "const t = `${process.stdout.write(chunk)}`;\n";
+    expect(asyncStreamWriteMismatches("x/y.ts", source, false)).toHaveLength(1);
+  });
+
+  test("optional-chained and spaced spellings still fire", () => {
+    for (const spelling of [
+      "process?.stdout.write(out);",
+      "process.stderr?.write(err);",
+      "process.stdout.write?.(out);",
+      "process . stdout . write (out);",
+    ]) {
+      expect(asyncStreamWriteMismatches("x/y.ts", `${spelling}\n`, false)).toHaveLength(1);
+    }
+  });
+
+  test("an allowlisted file whose writes ride to a natural exit passes", () => {
+    const source = 'fail("early");\nprocess.stdout.write(out);\nconsole.log("bye");\n';
+    expect(asyncStreamWriteMismatches("x/y.ts", source, true)).toEqual([]);
+  });
+
+  test("an allowlisted file with an exit-capable call after the first write is flagged", () => {
+    for (const late of [
+      "process.exit(1);",
+      "process?.exit(1);",
+      "process . exit(1);",
+      'fail("boom");',
+      "must(cmd);",
+      "mustCapture(cmd);",
+      'throw new Error("boom");',
+    ]) {
+      const found = asyncStreamWriteMismatches(
+        "x/y.ts",
+        `process.stdout.write(out);\n${late}\n`,
+        true,
+      );
+      expect(found).toHaveLength(1);
+      expect(found[0].got).toContain("exit-capable");
+    }
+  });
+
+  test("an allowlisted file with no async write left is a stale entry", () => {
+    const found = asyncStreamWriteMismatches("x/y.ts", 'console.log("ok");\n', true);
+    expect(found).toHaveLength(1);
+    expect(found[0].got).toContain("stale");
+  });
+});
+
+describe("bunRuntimeMismatches", () => {
+  // Synthetic version pairs are the ONLY correct proof here, not a
+  // concession: the guard's live population is permanently empty (CI
+  // installs the pin via bun-version-file, and a matching local runtime
+  // is the healthy state), so a live-tree control could never see it
+  // fire - injected inputs are what keep the failing direction tested.
+  test("a local runtime behind or ahead of the pin fails, naming both versions and the fix", () => {
+    for (const local of ["1.3.14", "1.5.0", "2.4.0"]) {
+      const found = bunRuntimeMismatches(local, "1.4.0");
+      expect(found).toHaveLength(1);
+      expect(found[0].got).toContain("1.4");
+      expect(found[0].got).toContain(`${local.split(".")[0]}.${local.split(".")[1]}`);
+      expect(found[0].got).toContain("bun upgrade");
+    }
+  });
+
+  test("the pinned MAJOR.MINOR passes regardless of patch", () => {
+    expect(bunRuntimeMismatches("1.4.0", "1.4.0")).toEqual([]);
+    expect(bunRuntimeMismatches("1.4.3", "1.4.0")).toEqual([]);
+  });
+
+  test("an unreadable version throws loudly instead of passing vacuously", () => {
+    expect(() => bunRuntimeMismatches("1.4.0-canary.1", "1.4.0")).toThrow("MAJOR.MINOR");
+    expect(() => bunRuntimeMismatches("1.4.0", "")).toThrow("MAJOR.MINOR");
   });
 });

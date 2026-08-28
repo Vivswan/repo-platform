@@ -19,6 +19,42 @@ import { join } from "node:path";
 import { hideDetails, requireEnv } from "../shared/gha.ts";
 import { exitCodeOf, passthrough } from "../shared/proc.ts";
 
+/** The failure manifest failure_issue.ts delivers: one row per recorded
+ *  hidden failure. The name, writer, and parser live together here so the
+ *  row shape cannot drift between the recorders (this wrapper and
+ *  commit_push.ts, which records its lease/push failures itself - it
+ *  runs outside this wrapper because its output needs redaction plus
+ *  stream-splitting this one-fd capture cannot express) and the
+ *  deliverer. */
+export const HIDDEN_FAILURES_NAME = "hidden-failures.tsv";
+
+export interface HiddenFailure {
+  label: string;
+  /** The exit code as recorded (rendered, not computed with). */
+  rc: string;
+  /** Path of the capture file holding the failure's output. */
+  capture: string;
+}
+
+export function appendHiddenFailure(
+  runnerTemp: string,
+  label: string,
+  rc: number,
+  capture: string,
+): void {
+  appendFileSync(join(runnerTemp, HIDDEN_FAILURES_NAME), `${label}\t${rc}\t${capture}\n`);
+}
+
+export function parseHiddenFailures(manifest: string): HiddenFailure[] {
+  return manifest
+    .split("\n")
+    .filter((line) => line !== "")
+    .map((line) => {
+      const [label, rc, capture] = line.split("\t");
+      return { label, rc, capture };
+    });
+}
+
 /** Capture file name for a label (non-alphanumeric runs squeezed to '-' and
  *  trimmed). Exported so same-run consumers of the captures derive the same
  *  name instead of mirroring the transform. */
@@ -53,7 +89,7 @@ function main(): number {
   if (rc === 0) {
     console.log(`${label}: ok (output hidden: private repository)`);
   } else {
-    appendFileSync(join(runnerTemp, "hidden-failures.tsv"), `${label}\t${rc}\t${capture}\n`);
+    appendHiddenFailure(runnerTemp, label, rc, capture);
     console.log(
       `::error::${label}: failed with exit ${rc} (output hidden: private repository). The captured output is delivered privately - in the sync PR body when one exists, else in the target's failure-report issue (docs/private-repos.md).`,
     );

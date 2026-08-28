@@ -1,68 +1,61 @@
-// The workflow scripts forward captured child streams with writeSync,
+// The executable scripts forward captured child streams with writeSync,
 // never process.stdout.write / process.stderr.write: those are async on
 // pipe-backed stdio (the Actions runner shape), and a process.exit
 // anywhere later in the run drops everything past the pipe buffer
 // (measured at 64 KiB on bun 1.3.14, 128 KiB on 1.4.0). Members of this
-// class kept surfacing one landing at a time; this scan makes the next
+// class kept surfacing one landing at a time; this guard makes the next
 // one loud at authoring time instead of silent at truncation time.
 //
-// The scan is regex over comment-stripped source (same approach and
-// error-direction reasoning as timeout_log_lines.test.ts): a file whose
-// async writes all come after its last exit-capable call drains them on
-// natural exit and may stay async, but it must be allowlisted here, and
-// the control test pins that ordering so the entry cannot go stale.
+// ONE scanner on purpose: this suite drives check_ssot.ts's own
+// asyncStreamWriteMismatches (lexer-masked view, so strings and comments
+// never fire) over the same three roots its stream-write-sync rule scans,
+// instead of keeping a second regex/strip implementation whose semantics
+// could silently diverge (the two guards previously carried same-named
+// stripComments locals with removal semantics; timeout_log_lines.test.ts
+// imports the shared lexer for the same reason). The scanner's own
+// fixture controls - fire shapes, the allowlist mechanism, stale entries
+// - live in tests/scripts/check_ssot.test.ts; what this suite adds is the
+// bun-test-side enforcement plus the reach control below.
 
 import { describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { asyncStreamWriteMismatches, NATURAL_EXIT_WRITE_FILES } from "../../scripts/check_ssot.ts";
 
-const SCRIPTS_ROOT = join(import.meta.dir, "../../.github/scripts");
+const REPO_ROOT = join(import.meta.dir, "../..");
 
-/** Files allowed to keep async stream writes: every exit-capable call
- * precedes the first async write, so the writes ride to a natural exit,
- * which drains. The control test pins that ordering. */
-const NATURAL_EXIT_FILES = new Set(["sync/open_pr.ts"]);
+// The executable trees. Tests are excluded by design: tests/ sits outside
+// these roots and the actions' co-located *.test.ts files are filtered
+// below - bun-test owns a test's process lifecycle, so the
+// exit-under-buffered-write truncation is not a shape a test can produce.
+const ROOTS = [".github/scripts", "scripts", "actions"];
 
-const ASYNC_WRITE = /process\.(?:stdout|stderr)\.write\(/;
-/** The common exiting constructs: process.exit itself and the helpers
- * that call it (gha's fail/requireEnv, proc's must/mustCapture). Not a
- * proof - an unlisted exiting helper stays a reviewable residual. */
-const EXIT_CAPABLE = /process\.exit\b|\bfail\(|\brequireEnv\(|\bmust\(|\bmustCapture\(/;
-
-/** Whole-line // comments and block comments removed, so a mention in a
- * comment neither trips the ban nor satisfies the controls. */
-function stripComments(source: string): string {
-  return source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
-}
-
-function scriptFiles(): string[] {
-  return readdirSync(SCRIPTS_ROOT, { recursive: true })
+function scriptFiles(root: string): string[] {
+  return readdirSync(join(REPO_ROOT, root), { recursive: true })
     .map(String)
-    .filter((rel) => rel.endsWith(".ts"))
+    .filter(
+      (rel) =>
+        rel.endsWith(".ts") && !rel.endsWith(".test.ts") && !/(^|\/)node_modules\//.test(rel),
+    )
+    .map((rel) => join(root, rel))
     .sort();
 }
 
 describe("forwarded child streams are written synchronously", () => {
-  test("no async stream write outside the exit-free allowlist", () => {
-    const offenders = scriptFiles().filter(
-      (rel) =>
-        !NATURAL_EXIT_FILES.has(rel) &&
-        ASYNC_WRITE.test(stripComments(readFileSync(join(SCRIPTS_ROOT, rel), "utf-8"))),
-    );
-    expect(offenders).toEqual([]);
+  test("every root is really scanned (an empty walk would pass vacuously)", () => {
+    for (const root of ROOTS) {
+      expect(scriptFiles(root).length).toBeGreaterThan(0);
+    }
   });
 
-  test("each allowlisted file writes only after its last exit-capable call", () => {
-    for (const rel of NATURAL_EXIT_FILES) {
-      const source = stripComments(readFileSync(join(SCRIPTS_ROOT, rel), "utf-8"));
-      // Existence control: the allowlisted file must still match the ban
-      // regex, proving the scan can find the shape (and the entry is not
-      // stale).
-      const firstWrite = source.search(ASYNC_WRITE);
-      expect(firstWrite).toBeGreaterThan(-1);
-      // The safety property itself: nothing after the first async write
-      // can exit, so the write always rides to a draining natural exit.
-      expect(EXIT_CAPABLE.test(source.slice(firstWrite))).toBe(false);
-    }
+  test("no stream-write violations across the executable trees", () => {
+    const findings = ROOTS.flatMap(scriptFiles).flatMap((rel) =>
+      asyncStreamWriteMismatches(
+        rel,
+        readFileSync(join(REPO_ROOT, rel), "utf-8"),
+        NATURAL_EXIT_WRITE_FILES.has(rel),
+      ),
+    );
+    expect(findings).toEqual([]);
   });
 });

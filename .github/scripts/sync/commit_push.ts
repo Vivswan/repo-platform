@@ -14,6 +14,7 @@ import { stampManifestText } from "../../../actions/shared/stamp_manifest.ts";
 import { env, hideDetails, requireEnv, setOutput } from "../shared/gha.ts";
 import { SYNC_IDENTITY } from "../shared/git_identity.ts";
 import { capture, must, mustCapture, passthrough, redactText } from "../shared/proc.ts";
+import { appendHiddenFailure, captureName } from "./run_hidden.ts";
 import { STARTER_PINS_NAME } from "./section_files.ts";
 import {
   type FileOutcome,
@@ -28,6 +29,45 @@ const branch = requireEnv("BRANCH");
 const runnerTemp = requireEnv("RUNNER_TEMP");
 
 const git = (...args: string[]) => ["git", "-C", "target", ...args];
+
+/** Route a hidden target's REDACTED failure output into the private
+ * channel: run_hidden.ts's failure manifest, delivered by
+ * failure_issue.ts to the target's failure-report issue when the run
+ * fails with no PR to carry it (a failed lease or push never reaches PR
+ * creation). This step runs outside the run_hidden wrapper, so without
+ * this record the public "(output hidden)" line would be the operator's
+ * ONLY signal. The issue is as private as the repo, but the content is
+ * still redacted first: the fleet PAT must never land even there. */
+function recordHiddenFailure(label: string, exitCode: number, redacted: string): void {
+  const file = join(runnerTemp, captureName(label));
+  writeFileSync(file, redacted);
+  appendHiddenFailure(runnerTemp, label, exitCode, file);
+}
+
+/** The lease/push failure named for the public ::error, from evidence in
+ * hand: the deadline expiry or exit code, plus the failure flavor when
+ * the redacted stderr shows a recognizable one - offered as a lead, never
+ * asserted as THE cause (the old text blamed a Contents grant for every
+ * failure shape). */
+function failureShape(result: { exitCode: number; timedOut: boolean }, stderr: string): string {
+  if (result.timedOut) return "timed out under proc.ts's hang bound";
+  const flavor =
+    /(^|[^0-9])(401|403)([^0-9]|$)|permission|denied|not authorized|write access/i.test(stderr)
+      ? "; the error looks authorization-shaped - check that the REPO_PLATFORM_TOKEN grants Contents read/write on the target"
+      : /stale info/i.test(stderr)
+        ? "; the lease was stale - another push landed on the branch during this run, so re-running the sync usually heals it"
+        : "";
+  return `exit ${result.exitCode}${flavor}`;
+}
+
+/** Where the operator finds git's output: the log for a public target;
+ * for a hidden one the log says only "(output hidden)", so point at the
+ * failure-report issue recordHiddenFailure just fed. */
+function diagnosticsChannel(): string {
+  return hideDetails()
+    ? "git's output is hidden from this log (private repository); the redacted output is delivered to the target's failure-report issue (docs/private-repos.md)."
+    : "git's output is in the log above.";
+}
 
 must(git("config", "user.name", SYNC_IDENTITY.name));
 must(git("config", "user.email", SYNC_IDENTITY.email));
@@ -50,19 +90,24 @@ const pushUrl = `https://x-access-token:${requireEnv("PAT")}@github.com/${target
 // the stripped remainder names the repo - the leak for a hidden target.
 const lease = capture(git("ls-remote", pushUrl, `refs/heads/${branch}`));
 if (lease.exitCode !== 0) {
+  const leaseErr = redactText(lease.stderr);
   if (hideDetails()) {
     console.log("(ls-remote output hidden: private repository)");
+    recordHiddenFailure("branch lease", lease.exitCode, leaseErr);
   } else {
-    writeSync(2, redactText(lease.stderr));
+    writeSync(2, leaseErr);
   }
   if (lease.timedOut) console.error("git timed out (proc.ts hang bound)");
+  console.log(
+    `::error::reading the branch lease from ${targetDisplay} failed (${failureShape(lease, leaseErr)}). ${diagnosticsChannel()}`,
+  );
   process.exit(lease.exitCode);
 }
 // An empty lease sha means "expect the ref to be absent", so a branch
 // created concurrently also fails the lease.
 const leaseSha = lease.stdout.replace(/\n+$/, "").split("\t")[0];
 
-function doPush(): boolean {
+function doPush(): { exitCode: number; timedOut: boolean; stderr: string } {
   const push = capture(git("push", `--force-with-lease=${branch}:${leaseSha}`, pushUrl, branch));
   // writeSync: async writes racing a caller's exit truncate at ~64 KiB.
   // redactText before ANY re-emission, file included - git's own output
@@ -78,7 +123,7 @@ function doPush(): boolean {
     writeSync(1, redactText(push.stdout));
     writeSync(2, pushStderr);
   }
-  return push.exitCode === 0;
+  return { exitCode: push.exitCode, timedOut: push.timedOut, stderr: pushStderr };
 }
 
 function revalidate(): void {
@@ -97,7 +142,8 @@ function revalidate(): void {
 }
 
 writeFileSync(join(runnerTemp, "withheld-workflows.txt"), "");
-if (doPush()) {
+const first = doPush();
+if (first.exitCode === 0) {
   setOutput("pushed", "true");
   process.exit(0);
 }
@@ -106,12 +152,12 @@ if (doPush()) {
 // create or update .github/workflows files. Withhold those changes,
 // deliver the rest, and say so in the PR - the scope is optional by
 // design, not an error.
-const pushErr = readFileSync(join(runnerTemp, "push.err"), "utf-8");
-if (!/create or update workflow/i.test(pushErr)) {
+if (!/create or update workflow/i.test(first.stderr)) {
+  if (hideDetails()) recordHiddenFailure("branch push", first.exitCode, first.stderr);
   console.log(
-    `::error::pushing to ${targetDisplay}#${branch} failed (see the log above). The REPO_PLATFORM_TOKEN needs Contents read/write on ${targetDisplay}; grant it and re-run.`,
+    `::error::pushing to ${targetDisplay}#${branch} failed (${failureShape(first, first.stderr)}). ${diagnosticsChannel()}`,
   );
-  process.exit(1);
+  process.exit(first.exitCode);
 }
 const baseSha = mustCapture(git("rev-parse", `origin/${requireEnv("BASE_BRANCH")}`));
 // --no-renames: a rename into .github/workflows must count as an addition
@@ -185,11 +231,13 @@ if (capture(git("diff", "--quiet", baseSha)).exitCode === 0) {
 }
 // --quiet: a non-quiet amend prints created/deleted paths of the target.
 must(git("commit", "--amend", "--no-edit", "--quiet"));
-if (!doPush()) {
+const retry = doPush();
+if (retry.exitCode !== 0) {
+  if (hideDetails()) recordHiddenFailure("branch push", retry.exitCode, retry.stderr);
   console.log(
-    `::error::pushing to ${targetDisplay}#${branch} failed even after withholding workflow files. The REPO_PLATFORM_TOKEN needs Contents read/write on ${targetDisplay}; grant it and re-run.`,
+    `::error::pushing to ${targetDisplay}#${branch} failed even after withholding workflow files (${failureShape(retry, retry.stderr)}). ${diagnosticsChannel()}`,
   );
-  process.exit(1);
+  process.exit(retry.exitCode);
 }
 setOutput("pushed", "true");
 // The earlier validation judged the full tree including the withheld

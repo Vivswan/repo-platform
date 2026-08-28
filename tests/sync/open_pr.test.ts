@@ -24,6 +24,12 @@ case "$1 $2" in
   "pr list") printf '' ;;
   "pr create") echo "https://github.com/o/r/pull/1" ;;
   "pr view") echo "https://github.com/o/r/pull/1" ;;
+  "pr merge")
+    # gh's merge output can quote a credentialed URL and name target
+    # settings; open_pr must redact it publicly and suppress it for a
+    # hidden target.
+    echo "auto-merge enabled via https://x-access-token:ghp_MERGESENTINEL@github.com/o/r.git"
+    ;;
   *) : ;;
 esac
 `;
@@ -112,6 +118,20 @@ describe("open_pr sections and auto-merge", () => {
     expect(r.body).not.toContain("TAIL TRIPWIRE");
     expect(r.merged).toBe(true);
     expect(r.output).toContain("auto-merge armed");
+  });
+
+  test("the merge output is re-emitted redacted for a public target", () => {
+    const r = run();
+    expect(r.output).not.toContain("ghp_MERGESENTINEL");
+    expect(r.output).toContain("auto-merge enabled via https://***@github.com/o/r.git");
+  });
+
+  test("a hidden target's merge output stays off the log entirely", () => {
+    const r = run({ env: { HIDE_DETAILS: "true" } });
+    expect(r.merged).toBe(true);
+    expect(r.output).toContain("auto-merge armed");
+    expect(r.output).not.toContain("ghp_MERGESENTINEL");
+    expect(r.output).not.toContain("auto-merge enabled via");
   });
 
   test("a tail-shrank report becomes a body section and forces review", () => {

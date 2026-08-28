@@ -21,6 +21,7 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { stripComments } from "../../scripts/check_ssot.ts";
 
 const SITES = [
   ".github/scripts/sync/clean_renders.ts",
@@ -38,17 +39,18 @@ const GUARD = /^\s*if \((?:proc|matrix)\.timedOut\) console\.error\((.*)\);$/gm;
  * (command.join, args, target) falls outside this shape. */
 const PROGRAM_ONLY = /^(?:"[^"]*"|`\$\{command\[0\]\}[^`$]*`)$/;
 
-/** Whole-line // comments and block comments removed, so a decoy guard in
- * a comment cannot satisfy the existence check. Trailing // comments stay
- * (stripping them could eat string content like URLs), which is safe:
- * GUARD anchors at line start, so a trailing-comment decoy never matches.
- * The likely error direction is losing matches (an over-eager strip fails
- * red on the existence check, not green); inventing a match takes
- * adversarial source - an inline block comment prefixing a guard-shaped
- * line - which falls under the header's recorded residual. */
-function stripComments(source: string): string {
-  return source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
-}
+// stripComments is check_ssot's lexer-backed view, imported DELIBERATELY
+// (this guard and stream_write_discipline.test.ts previously carried
+// same-named regex locals whose semantics a future dedupe could silently
+// swap): it blanks comments and regex bodies to SPACES, preserving line
+// structure and offsets, is string-aware (a // inside a string stays
+// text, so trailing comments strip without eating string content), and
+// keeps string text visible - which the GUARD argument capture needs. A
+// blanked comment line carries only spaces, so a decoy guard in a
+// comment cannot satisfy the existence check; GUARD's own line anchors
+// keep matching because blanking never joins or removes lines. The
+// likely error direction stays losing matches, which fails RED on the
+// existence check, never green.
 
 /** Every expiry guard's console.error argument list in `source`. */
 function expiryGuards(source: string): string[] {

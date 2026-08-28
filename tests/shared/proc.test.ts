@@ -60,7 +60,10 @@ describe("capture timeoutMs", () => {
   });
 
   test("a deadline that is not hit: timedOut false, output intact", () => {
-    const result = capture(["echo", "ok"], { timeoutMs: 5000 });
+    // 2000ms, comfortably inside bun-test's default 5000ms per-test cap:
+    // a deadline equal to the cap would report a wedged run as an opaque
+    // test kill instead of capture's own diagnostics.
+    const result = capture(["echo", "ok"], { timeoutMs: 2000 });
     expect(result.timedOut).toBe(false);
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toBe("ok\n");
@@ -146,7 +149,8 @@ describe("mustCapture timeoutMs", () => {
   const procModule = new URL("../../.github/scripts/shared/proc.ts", import.meta.url).pathname;
 
   test("a deadline that is not hit returns trimmed stdout", () => {
-    expect(mustCapture(["echo", "ok"], { timeoutMs: 5000 })).toBe("ok");
+    // 2000ms for the same cap-headroom reason as the capture twin above.
+    expect(mustCapture(["echo", "ok"], { timeoutMs: 2000 })).toBe("ok");
   });
 
   // The expiry path exits the calling process, so these tests run

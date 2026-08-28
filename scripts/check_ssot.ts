@@ -866,7 +866,15 @@ const REGEX_PRECEDING_KEYWORDS = new Set([
  *  standard way, by the preceding significant token (value-shaped means
  *  division; an operator, opening bracket, or REGEX_PRECEDING_KEYWORDS
  *  member admits a regex); a regex literal never spans a newline, so the
- *  skip bails at one and a misread degrades one line, never the file. */
+ *  skip bails at one and a misread degrades one line, never the file.
+ *  Two reproduced syntactic residuals of that heuristic (neither shape is
+ *  in the tree): a regex directly after a condition's `)` - as in
+ *  `if (x) /re/.test(y)` - reads as division, leaving the regex BODY
+ *  visible, so a call-shaped token inside it becomes a phantom site (a
+ *  loud false positive); and a `/` after `++`/`--` (lastSignificant holds
+ *  the operator character) reads as a regex opener, blanking real
+ *  division code to the line's end - the one silent direction, needing a
+ *  call inside `a++ /b/ c`-shaped code, which nothing plausible writes. */
 export function scanSource(source: string): { stripped: string; masked: string } {
   let stripped = "";
   let masked = "";
@@ -985,7 +993,12 @@ export function stripComments(source: string): string {
 /** The argument text between a call's balanced parentheses, tracking
  *  string/template quoting so brackets inside literals do not count
  *  (comments are already stripped by the caller). Throws on a call whose
- *  end it cannot see - skipping such a site would pass vacuously. */
+ *  end it cannot see - skipping such a site would pass vacuously.
+ *  Backticks are tracked as flat quotes: a template INTERPOLATION's code
+ *  is skipped as text, and a NESTED template's inner backtick closes the
+ *  outer one early, so an unbalanced bracket inside such an interpolation
+ *  makes this throw the unbalanced-call error on valid code (reproduced;
+ *  not in the tree) - loud and self-describing, never a silent skip. */
 function callArguments(source: string, open: number, where: string): string {
   let depth = 0;
   let quote: string | null = null;
@@ -1205,6 +1218,99 @@ export function spawnSyncHazard(options: string | null): string | null {
     return `${unshaped.join(" and ")} left to the piped default with ${why}`;
   }
   return null;
+}
+
+// --- local runtime pin -------------------------------------------------------
+
+/** Mismatch when the LOCAL bun runtime's MAJOR.MINOR differs from the
+ *  pinned one - injectable versions so the failing pair is testable
+ *  without downgrading the real runtime. Exactly one direction exists:
+ *  a local gate run under a runtime the pin does not name proves nothing
+ *  about CI's behavior in either direction (semantics moved BOTH ways
+ *  across 1.3/1.4 - spawnSync pipe-EOF waits, pipe-buffer sizes). */
+export function bunRuntimeMismatches(runtimeVersion: string, pinnedVersion: string): Mismatch[] {
+  const [runtimeMajor, runtimeMinor] = majorMinor(runtimeVersion, "the local bun runtime");
+  const [pinnedMajor, pinnedMinor] = majorMinor(pinnedVersion, ".bun-version");
+  if (runtimeMajor === pinnedMajor && runtimeMinor === pinnedMinor) return [];
+  return [
+    {
+      file: ".bun-version",
+      expected: `a local bun runtime at MAJOR.MINOR ${pinnedMajor}.${pinnedMinor} (the pinned toolchain)`,
+      got: `local bun ${runtimeMajor}.${runtimeMinor} does not match the pinned ${pinnedMajor}.${pinnedMinor} - bun upgrade / install the pin; local greens under a different runtime are unreliable`,
+    },
+  ];
+}
+
+// --- async stream writes ----------------------------------------------------
+
+/** An async stream-write call site, matched on the masked view so a
+ *  mention in a comment, string, or regex body never fires; spacing and
+ *  optional chaining (`process?.stdout.write?.(x)`) are tolerated. The
+ *  residual of staying text-level: an alias of the stream or the method
+ *  (`const out = process.stdout; out.write(x)`) escapes - nothing in
+ *  house style writes that, and writeSync is the sanctioned route. */
+const ASYNC_STREAM_WRITE = /process\s*\??\.\s*(?:stdout|stderr)\s*\??\.\s*write\s*(?:\?\.)?\s*\(/;
+/** The common exiting constructs: process.exit itself, an uncaught
+ *  `throw` (the abort path drains no queued writes either), and the
+ *  helpers that exit (gha's fail/requireEnv, proc's must/mustCapture).
+ *  Lexical order over a roster, not control-flow proof: a locally
+ *  defined wrapper around process.exit called after the write stays a
+ *  reviewable residual. */
+const EXIT_CAPABLE =
+  /process\s*\??\.\s*exit\b|\bthrow\b|\bfail\(|\brequireEnv\(|\bmust\(|\bmustCapture\(/;
+
+/** Files allowed to keep async stream writes because every exit-capable
+ *  call precedes the first async write, so the writes ride to a natural
+ *  exit, which drains. The reason is EXECUTABLE, not prose:
+ *  asyncStreamWriteMismatches re-proves it per entry (nothing exit-capable
+ *  may follow the first write) and flags an entry whose file has no async
+ *  write left as stale. Empty since open_pr.ts converted its auto-merge
+ *  re-emission to writeSync; the mechanism stays fixture-tested in
+ *  tests/scripts/check_ssot.test.ts. */
+export const NATURAL_EXIT_WRITE_FILES: ReadonlySet<string> = new Set([]);
+
+/** How `source` violates the stream-write-sync contract. An unlisted
+ *  file may carry no async stream write at all; an allowlisted file must
+ *  still carry one (else the entry is stale) with nothing exit-capable
+ *  after the first. */
+export function asyncStreamWriteMismatches(
+  rel: string,
+  source: string,
+  allowlisted: boolean,
+): Mismatch[] {
+  const masked = scanSource(source).masked;
+  const at = masked.search(ASYNC_STREAM_WRITE);
+  if (!allowlisted) {
+    if (at === -1) return [];
+    return [
+      {
+        file: `${rel}:${masked.slice(0, at).split("\n").length}`,
+        expected:
+          "writeSync for stream writes (bun's async stream writes truncate at the pipe buffer when any later path exits), or a NATURAL_EXIT_WRITE_FILES entry whose reason holds",
+        got: "an async stream write",
+      },
+    ];
+  }
+  if (at === -1) {
+    return [
+      {
+        file: rel,
+        expected: "an async stream write (the NATURAL_EXIT_WRITE_FILES entry's reason)",
+        got: "none - stale allowlist entry; remove it",
+      },
+    ];
+  }
+  if (EXIT_CAPABLE.test(masked.slice(at))) {
+    return [
+      {
+        file: rel,
+        expected:
+          "nothing exit-capable after the first async stream write (the natural-exit reason NATURAL_EXIT_WRITE_FILES encodes)",
+        got: "an exit-capable call after it - the write can truncate; convert it to writeSync and drop the entry",
+      },
+    ];
+  }
+  return [];
 }
 
 // --- rules --------------------------------------------------------------------
@@ -3848,6 +3954,61 @@ const rules: Rule[] = [
       return mismatches;
     },
   },
+
+  {
+    // No async process stream write in the executable trees: on
+    // pipe-backed stdio (the Actions runner shape) bun queues these
+    // writes, and a process.exit anywhere later in the run drops
+    // everything past the pipe buffer (measured at 64 KiB on bun 1.3.14,
+    // 128 KiB on 1.4.0) - 13 sites were converted to writeSync one
+    // truncation at a time before this rule pinned the class. Scope:
+    // scripts/**, .github/scripts/**, and actions/**; tests are excluded
+    // by design (tests/ sits outside these roots and the actions' *.test.ts
+    // files are filtered out): bun-test owns a test's process lifecycle,
+    // so the exit-under-buffered-write truncation is not a shape a test
+    // file can produce. tests/shared/stream_write_discipline.test.ts is
+    // the bun-test-side guard on the same contract.
+    name: "stream-write-sync",
+    run: () => {
+      const files = ["scripts", ".github/scripts", "actions"].flatMap((root) => {
+        const found = walkFiles(root)
+          .filter(
+            (f) =>
+              !f.symlink && /\.[mc]?[jt]s$/.test(f.path) && !/\.test\.[mc]?[jt]s$/.test(f.path),
+          )
+          .map((f) => f.path);
+        if (found.length === 0) throw new Error(`${root}: no scripts to scan - anchor lost`);
+        return found;
+      });
+      const present = new Set(files);
+      const mismatches = files.flatMap((rel) =>
+        asyncStreamWriteMismatches(rel, read(rel), NATURAL_EXIT_WRITE_FILES.has(rel)),
+      );
+      // Existence control on the allowlist keys themselves: an entry
+      // naming a file the walk never sees would excuse nothing, silently.
+      for (const rel of [...NATURAL_EXIT_WRITE_FILES].sort()) {
+        if (!present.has(rel)) {
+          mismatches.push({
+            file: rel,
+            expected: "a scanned file (NATURAL_EXIT_WRITE_FILES keys the scanned trees)",
+            got: "no such file - stale allowlist entry; remove it",
+          });
+        }
+      }
+      return mismatches;
+    },
+  },
+
+  {
+    // The LOCAL bun runtime must be the pinned MAJOR.MINOR (.bun-version,
+    // the dogfooded templates/bun pin): a full local `bun run check` under
+    // a different runtime is unreliable evidence - it once passed clean
+    // under 1.3.14 while CI's 1.4.0 went red on the same commit. In CI
+    // this rule can never fire (setup-bun installs from bun-version-file),
+    // so it exists exclusively as a local-gate guard.
+    name: "local-bun-runtime",
+    run: () => bunRuntimeMismatches(Bun.version, read(".bun-version").trim()),
+  },
 ];
 
 // --- the checker's own rule roster ------------------------------------------
@@ -3903,6 +4064,8 @@ export const RULE_ROSTER = [
   "settings-green-gate",
   "settings-hidden-step-notices",
   "spawn-sync-hang-bound",
+  "stream-write-sync",
+  "local-bun-runtime",
 ] as const;
 
 /** Set-plus-uniqueness comparison between the authored roster and the

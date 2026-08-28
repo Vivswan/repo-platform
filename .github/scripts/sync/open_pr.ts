@@ -12,10 +12,18 @@
 // GH_TOKEN, GITHUB_REPOSITORY, GITHUB_OUTPUT,
 // RUNNER_TEMP.
 
-import { closeSync, existsSync, openSync, readFileSync, readSync, statSync } from "node:fs";
+import {
+  closeSync,
+  existsSync,
+  openSync,
+  readFileSync,
+  readSync,
+  statSync,
+  writeSync,
+} from "node:fs";
 import { join } from "node:path";
 import { env, hideDetails, requireEnv, setOutput } from "../shared/gha.ts";
-import { capture, mustCapture } from "../shared/proc.ts";
+import { capture, mustCapture, redactText } from "../shared/proc.ts";
 import { clip, escapeControlBytes } from "./preserve_local_content.ts";
 import {
   REMOVED_SPLITS_NAME,
@@ -431,14 +439,18 @@ setOutput("url", url);
 // disarmed (disarm_pr.ts ran before the push; a fresh PR is never armed).
 if (!needsReview) {
   const merge = capture(["gh", "pr", "merge", url, "-R", target, "--squash", "--auto"]);
-  process.stdout.write(merge.stdout);
+  // Both merge streams can name the target's rulesets and required
+  // checks, so a hidden target's stdout stays off the public log like the
+  // stderr detail below; redacted, and writeSync so a later exit cannot
+  // truncate it at the pipe buffer.
+  if (!hideDetails()) writeSync(1, redactText(merge.stdout));
   if (merge.exitCode === 0) {
     console.log(`auto-merge armed for ${url}`);
   } else {
     // gh's error text can name the target's rulesets and required checks.
     const detail = hideDetails()
       ? "detail hidden: private repository"
-      : merge.stderr.replace(/\n$/, "");
+      : redactText(merge.stderr).replace(/\n$/, "");
     console.log(
       `::warning::${env("TARGET_DISPLAY") || target}: could not enable auto-merge on ${url}: ${detail}. Merge it manually; to fix this, allow auto-merge in the repo settings and keep a required check on the default branch.`,
     );
