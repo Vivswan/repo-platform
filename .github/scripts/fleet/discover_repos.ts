@@ -18,7 +18,7 @@
 //
 // Env: GH_TOKEN (the fleet PAT), RUNNER_TEMP.
 
-import { writeFileSync } from "node:fs";
+import { writeFileSync, writeSync } from "node:fs";
 import { join } from "node:path";
 import { requireEnv } from "../shared/gha.ts";
 import { captureNetwork, discoverOwnerRepos } from "./discovery.ts";
@@ -30,7 +30,9 @@ const runnerTemp = requireEnv("RUNNER_TEMP");
 // write to must not ride into the sync plan.
 const who = captureNetwork(["gh", "api", "user", "--jq", ".login"]);
 if (who.exitCode !== 0) {
-  process.stderr.write(who.stderr);
+  // writeSync: an async stream write racing the process.exit below
+  // truncates at the pipe buffer (~64 KiB).
+  writeSync(2, who.stderr);
   process.exit(who.exitCode);
 }
 const login = who.stdout.trim();

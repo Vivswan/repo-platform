@@ -40,7 +40,7 @@
 // Usage:
 //   bun .github/scripts/sync/rehearse_fleet.ts [--gate]
 
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { z } from "zod";
@@ -390,7 +390,9 @@ function discoverFleet(): { repo: string; private: boolean }[] {
     rmSync(temp, { recursive: true, force: true });
   }
   if (listing === null) {
-    process.stderr.write(discovery.stderr);
+    // writeSync: an async stream write racing fail()'s process.exit
+    // truncates at the pipe buffer (~64 KiB).
+    writeSync(2, discovery.stderr);
     fail(
       discovery.timedOut === true
         ? `fleet discovery timed out after ${NETWORK_TIMEOUT_MS}ms (stalled network?)`

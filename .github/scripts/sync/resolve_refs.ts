@@ -8,7 +8,7 @@
 // HIDE_DETAILS, RECOVER, GH_TOKEN, GITHUB_REPOSITORY, GITHUB_OUTPUT,
 // RUNNER_TEMP.
 
-import { writeFileSync } from "node:fs";
+import { writeFileSync, writeSync } from "node:fs";
 import { join } from "node:path";
 import { allGreenFailure } from "../shared/all_green.ts";
 import { commitStampParse } from "../shared/commit_stamp.ts";
@@ -151,7 +151,9 @@ writeFileSync(join(runnerTemp, "old_commit.txt"), oldCommit);
 function showFile(revPath: string): string {
   const show = capture(["git", "show", revPath]);
   if (show.exitCode !== 0) {
-    process.stderr.write(show.stderr);
+    // writeSync: an async stream write racing the process.exit below
+    // truncates at the pipe buffer (~64 KiB).
+    writeSync(2, show.stderr);
     process.exit(show.exitCode);
   }
   return show.stdout;

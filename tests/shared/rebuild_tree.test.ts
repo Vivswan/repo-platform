@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { rebuildBranchTree } from "../../.github/scripts/shared/rebuild_tree.ts";
@@ -95,5 +95,23 @@ describe("rebuildBranchTree", () => {
         treeDir: join(scratch, "work-bad", "tree"),
       }),
     ).toThrow(/command failed/);
+  });
+
+  test("a credential-shaped source is rejected before any child can echo it", () => {
+    // The steps run with inherited stdio, so a smuggled argv value would
+    // hit the log raw via git's own error text; the boundary validation
+    // must throw a value-free message without spawning anything.
+    let message = "";
+    try {
+      rebuildBranchTree({
+        sourceSha: "https://x-access-token:ghp_SENTINEL@github.com/o/r.git",
+        srcDir: join(scratch, "work-cred", "src"),
+        treeDir: join(scratch, "work-cred", "tree"),
+      });
+    } catch (err) {
+      message = err instanceof Error ? err.message : String(err);
+    }
+    expect(message).toBe("rebuildBranchTree: sourceSha must be a full 40-hex commit sha");
+    expect(existsSync(join(scratch, "work-cred"))).toBe(false);
   });
 });

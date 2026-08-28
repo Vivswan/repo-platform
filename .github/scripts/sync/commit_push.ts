@@ -7,13 +7,13 @@
 // Env: TARGET, TARGET_DISPLAY (log label; falls back to TARGET), BRANCH,
 // DISPLAY, BASE_BRANCH, PAT, HIDE_DETAILS, RUNNER_TEMP, GITHUB_OUTPUT.
 
-import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, rmSync, writeFileSync, writeSync } from "node:fs";
 import { join } from "node:path";
 import { MANIFEST_NAME } from "../../../actions/shared/manifest.ts";
 import { stampManifestText } from "../../../actions/shared/stamp_manifest.ts";
 import { env, hideDetails, requireEnv, setOutput } from "../shared/gha.ts";
 import { SYNC_IDENTITY } from "../shared/git_identity.ts";
-import { capture, must, mustCapture, passthrough } from "../shared/proc.ts";
+import { capture, must, mustCapture, passthrough, redactText } from "../shared/proc.ts";
 import { STARTER_PINS_NAME } from "./section_files.ts";
 import {
   type FileOutcome,
@@ -45,20 +45,38 @@ if (mustCapture(git("status", "--porcelain")) !== "") {
 // landing between the two attempts - fails the lease loudly instead of
 // vanishing.
 const pushUrl = `https://x-access-token:${requireEnv("PAT")}@github.com/${target}.git`;
+// Captured, not mustCapture (inherited stderr would stream git's failure
+// text raw): git strips URL userinfo only version-dependently, and even
+// the stripped remainder names the repo - the leak for a hidden target.
+const lease = capture(git("ls-remote", pushUrl, `refs/heads/${branch}`));
+if (lease.exitCode !== 0) {
+  if (hideDetails()) {
+    console.log("(ls-remote output hidden: private repository)");
+  } else {
+    writeSync(2, redactText(lease.stderr));
+  }
+  if (lease.timedOut) console.error("git timed out (proc.ts hang bound)");
+  process.exit(lease.exitCode);
+}
 // An empty lease sha means "expect the ref to be absent", so a branch
 // created concurrently also fails the lease.
-const leaseSha = mustCapture(git("ls-remote", pushUrl, `refs/heads/${branch}`)).split("\t")[0];
+const leaseSha = lease.stdout.replace(/\n+$/, "").split("\t")[0];
 
 function doPush(): boolean {
   const push = capture(git("push", `--force-with-lease=${branch}:${leaseSha}`, pushUrl, branch));
-  process.stdout.write(push.stdout);
-  writeFileSync(join(runnerTemp, "push.err"), push.stderr);
-  // Remote push messages can carry the target's settings detail (ruleset
-  // names, required checks); a hidden target's stay captured.
+  // writeSync: async writes racing a caller's exit truncate at ~64 KiB.
+  // redactText before ANY re-emission, file included - git's own output
+  // can quote the credentialed push URL, which redactCommand never sees.
+  const pushStderr = redactText(push.stderr);
+  writeFileSync(join(runnerTemp, "push.err"), pushStderr);
+  // Even redacted, push messages name the repo and can carry its settings
+  // detail (ruleset names, required checks); a hidden target's stay off
+  // the log entirely, stderr captured above.
   if (hideDetails()) {
     console.log("(push output hidden: private repository)");
   } else {
-    process.stderr.write(push.stderr);
+    writeSync(1, redactText(push.stdout));
+    writeSync(2, pushStderr);
   }
   return push.exitCode === 0;
 }

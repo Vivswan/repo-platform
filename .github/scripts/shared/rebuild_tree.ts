@@ -5,15 +5,18 @@
 // with the hash - and how it cleans up - stays its own policy.
 
 import { join } from "node:path";
-import { capture, passthrough } from "./proc.ts";
+import { capture, passthrough, redactCommand } from "./proc.ts";
 
+// redactCommand in the error text: the message can end up in a public
+// log, and argv is exactly where the sync pipeline carries its
+// PAT-in-URL shapes.
 function step(command: string[]): void {
-  if (passthrough(command) !== 0) throw new Error(`command failed: ${command.join(" ")}`);
+  if (passthrough(command) !== 0) throw new Error(`command failed: ${redactCommand(command)}`);
 }
 
 function stepCapture(command: string[]): string {
   const result = capture(command);
-  if (result.exitCode !== 0) throw new Error(`command failed: ${command.join(" ")}`);
+  if (result.exitCode !== 0) throw new Error(`command failed: ${redactCommand(command)}`);
   return result.stdout.trimEnd();
 }
 
@@ -28,6 +31,12 @@ export function rebuildBranchTree(options: {
   treeDir: string;
 }): string {
   const { sourceSha, srcDir, treeDir } = options;
+  // Pin the one caller-controlled value to a shape that cannot carry a
+  // credential or a private name: the steps run with inherited stdio, so
+  // git's own errors would echo a smuggled argv value into the log raw.
+  if (!/^[0-9a-f]{40}$/.test(sourceSha)) {
+    throw new Error("rebuildBranchTree: sourceSha must be a full 40-hex commit sha");
+  }
   step(["git", "worktree", "add", "--detach", "--quiet", srcDir, sourceSha]);
   step(["bun", "install", "--frozen-lockfile", "--cwd", srcDir, "--silent"]);
   step(["bun", join(srcDir, ".github/scripts/build-branches/branch_tree.ts"), "--dest", treeDir]);

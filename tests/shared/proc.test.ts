@@ -13,6 +13,7 @@ import {
   DEFAULT_HANG_BOUND_MS,
   mustCapture,
   redactCommand,
+  redactText,
   timeoutExitCode,
 } from "../../.github/scripts/shared/proc";
 
@@ -108,6 +109,36 @@ describe("redactCommand", () => {
   test("leaves credential-free argv verbatim", () => {
     const argv = ["git", "ls-remote", "https://github.com/o/r.git", "refs/heads/main", "a@b"];
     expect(redactCommand(argv)).toBe(argv.join(" "));
+  });
+});
+
+describe("redactText", () => {
+  test("masks the credentialed URL git's own error text quotes back", () => {
+    // The shape commit_push re-emits: git 401/403 errors embed the push
+    // URL, credentials included - redactCommand covers our argv lines,
+    // this covers the child's output.
+    const gitError =
+      "fatal: unable to access 'https://x-access-token:ghp_SENTINEL@github.com/o/r.git/': The requested URL returned error: 403\n";
+    const redacted = redactText(gitError);
+    expect(redacted).not.toContain("ghp_SENTINEL");
+    expect(redacted).toBe(
+      "fatal: unable to access 'https://***@github.com/o/r.git/': The requested URL returned error: 403\n",
+    );
+  });
+
+  test("masks every credentialed URL in multi-line output", () => {
+    const text =
+      "remote: https://user:ghp_SENTINEL@github.com/o/r.git\nhint: x-access-token:ghp_SENTINEL@github.com/o/r.git\n";
+    const redacted = redactText(text);
+    expect(redacted).not.toContain("ghp_SENTINEL");
+    expect(redacted).toContain("https://***@github.com/o/r.git");
+    expect(redacted).toContain("x-access-token:***@github.com/o/r.git");
+  });
+
+  test("a URL without credentials survives verbatim", () => {
+    const text =
+      "To https://github.com/o/r.git\n ! [rejected] automation/repo-platform (stale info)\n";
+    expect(redactText(text)).toBe(text);
   });
 });
 

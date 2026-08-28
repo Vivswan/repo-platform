@@ -120,6 +120,9 @@ function main(): void {
     if (present) {
       rmSync(absolute, { force: true });
       appendFileSync(join(runnerTemp, "removed-paths.txt"), `${path}\n`);
+      // Safe for the public log: the sync step runs this script under
+      // run_hidden.ts (output captured for a hide-details target), and the
+      // paths come from clean template renders, never the target's tree.
       console.log(`removed retired file: ${path}`);
     }
   }

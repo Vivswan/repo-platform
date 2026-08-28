@@ -51,6 +51,7 @@ import {
   rmSync,
   statSync,
   writeFileSync,
+  writeSync,
 } from "node:fs";
 import { join, resolve } from "node:path";
 import { z } from "zod";
@@ -165,8 +166,10 @@ function makeRunner(verbose: boolean) {
   ): void => {
     if (result.exitCode === 0) return;
     if (forward) {
-      process.stdout.write(result.stdout);
-      process.stderr.write(result.stderr);
+      // writeSync: main() exits via process.exit, which never drains a
+      // pipe-backed stream's async writes (truncation at ~64 KiB).
+      writeSync(1, result.stdout);
+      writeSync(2, result.stderr);
     }
     if (result.timedOut === true) {
       // An explicit deadline here is always a network bound; the default
@@ -199,8 +202,8 @@ function makeRunner(verbose: boolean) {
     }
     const result = runCaptured(command, options);
     if (verbose) {
-      process.stdout.write(result.stdout);
-      process.stderr.write(result.stderr);
+      writeSync(1, result.stdout);
+      writeSync(2, result.stderr);
     }
   };
   return { run, runCaptured };
@@ -560,8 +563,8 @@ export function rehearseRepo(slug: string, options: RehearsalOptions): Rehearsal
       { cwd: REPO_ROOT },
     );
     if (verbose) {
-      process.stdout.write(resolution.stdout);
-      process.stderr.write(resolution.stderr);
+      writeSync(1, resolution.stdout);
+      writeSync(2, resolution.stderr);
     }
     const { conflicts, malformed } = parseConflictReport(resolution.stdout);
 

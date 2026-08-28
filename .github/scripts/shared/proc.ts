@@ -41,19 +41,20 @@ export interface RunResult {
   timedOut: boolean;
 }
 
-/** Argv rendered for a log line with credentials redacted: URL userinfo
- * (`scheme://user:pass@host` -> `scheme://***@host`) and the bare
- * `x-access-token:<token>@` shape are masked, everything else stays
- * verbatim so the line keeps its diagnostic value. Sync argv carries the
- * fleet PAT inside push URLs, and Actions logs are public. */
+/** Text with credentials redacted - URL userinfo (`scheme://user:pass@` ->
+ * `scheme://***@`) and the bare `x-access-token:<token>@` shape - for any
+ * child output re-emitted to a public log: git quotes push URLs back. */
+export function redactText(text: string): string {
+  return text
+    .replace(/([a-z][a-z0-9+.-]*:\/\/)[^/?#\s]+@/gi, "$1***@")
+    .replace(/x-access-token:[^/?#\s]+@/gi, "x-access-token:***@");
+}
+
+/** Argv rendered for a log line, each argument redacted like redactText:
+ * sync argv carries the fleet PAT inside push URLs, and Actions logs are
+ * public. */
 export function redactCommand(command: string[]): string {
-  return command
-    .map((arg) =>
-      arg
-        .replace(/([a-z][a-z0-9+.-]*:\/\/)[^/?#\s]+@/gi, "$1***@")
-        .replace(/x-access-token:[^/?#\s]+@/gi, "x-access-token:***@"),
-    )
-    .join(" ");
+  return command.map(redactText).join(" ");
 }
 
 /** Bash-style exit code: the command's own, or 128+signal when it was
