@@ -92,6 +92,7 @@ import {
 import { isCommentMarker, isHashMarker } from "../../../scripts/ownership.ts";
 import { parseFlags } from "../shared/flags.ts";
 import { headBytes } from "../shared/git_head.ts";
+import { capture } from "../shared/proc.ts";
 
 function lastLineIndex(
   lines: ReturnType<typeof splitLines>,
@@ -559,12 +560,9 @@ export function splitEntries(manifestText: string, where: string): SplitEntry[] 
 /** Fail closed before any per-file HEAD read: a missing repository or an
  * unborn HEAD must abort the carry, not read as "every file is new". */
 function requireHead(root: string): void {
-  const proc = Bun.spawnSync(["git", "-C", root, "rev-parse", "--verify", "HEAD"], {
-    stdout: "pipe",
-    stderr: "pipe",
-  });
+  const proc = capture(["git", "-C", root, "rev-parse", "--verify", "HEAD"]);
   if (proc.exitCode !== 0) {
-    throw new Error(`cannot resolve HEAD in ${root}: ${proc.stderr.toString().trim()}`);
+    throw new Error(`cannot resolve HEAD in ${root}: ${proc.stderr.trim()}`);
   }
 }
 

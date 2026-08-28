@@ -51,6 +51,13 @@ import { MANIFEST_NAME } from "../../../actions/shared/manifest.ts";
 import { env, error, hideDetails, notice, requireEnv } from "../shared/gha.ts";
 import { headBytes } from "../shared/git_head.ts";
 import { parseModules } from "../shared/modules.ts";
+import {
+  capture,
+  DEFAULT_HANG_BOUND_MS,
+  exitCodeOf,
+  must,
+  timeoutExitCode,
+} from "../shared/proc.ts";
 import { clip, fenceFor } from "./preserve_local_content.ts";
 import { REMOVED_SPLITS_NAME, SETTINGS_LAYERING_NAME } from "./section_files.ts";
 import { transitionSettingsStarter } from "./settings_layering.ts";
@@ -62,11 +69,17 @@ const recover = env("RECOVER") === "recopy";
 const modules = parseModules(env("MODULES")) ?? [];
 
 function git(args: string[]): { exitCode: number; stdout: string } {
-  const proc = Bun.spawnSync(["git", "-C", targetDir, ...args], {
-    stdout: "pipe",
-    stderr: "pipe",
-  });
-  return { exitCode: proc.exitCode ?? 1, stdout: proc.stdout.toString() };
+  const proc = capture(["git", "-C", targetDir, ...args]);
+  // A deadline expiry aborts loudly here, at the one probe owner, because
+  // several consumers read nonzero as a benign answer (inHead skips a
+  // restore, the manifest read downgrades to held-for-review) - a hung git
+  // is a broken step, never an answer. Subcommand only in the message:
+  // args can carry target paths.
+  if (proc.timedOut) {
+    error(`${label}: git ${args[0]} timed out; aborting rather than reading it as an answer`);
+    process.exit(proc.exitCode);
+  }
+  return proc;
 }
 
 function inHead(path: string): boolean {
@@ -74,10 +87,7 @@ function inHead(path: string): boolean {
 }
 
 function restoreFromHead(path: string): void {
-  const proc = Bun.spawnSync(["git", "-C", targetDir, "checkout", "HEAD", "--", path], {
-    stdio: ["inherit", "inherit", "inherit"],
-  });
-  if (proc.exitCode !== 0) process.exit(proc.exitCode ?? 1);
+  must(["git", "-C", targetDir, "checkout", "HEAD", "--", path]);
 }
 
 if (inHead(".github/settings.yml")) {
@@ -127,14 +137,34 @@ if (
   !modules.includes("custom-license")
 ) {
   const targetRef = env("TARGET_REF");
-  if (
-    targetRef !== "" &&
-    Bun.spawnSync(["git", "cat-file", "-e", `${targetRef}:${fleetLicense}`]).exitCode === 0
-  ) {
+  // This probe runs in repo-platform's own checkout (no -C targetDir), so
+  // it cannot ride the git() owner above; same rule though - a deadline
+  // expiry aborts loudly, since read as "absent" it would skip the
+  // mandatory re-seed below.
+  const fleetLicenseAt = (ref: string): boolean => {
+    const probe = capture(["git", "cat-file", "-e", `${ref}:${fleetLicense}`]);
+    if (probe.timedOut) {
+      error(`${label}: git cat-file timed out probing the fleet license at ${ref}`);
+      process.exit(probe.exitCode);
+    }
+    return probe.exitCode === 0;
+  };
+  if (targetRef !== "" && fleetLicenseAt(targetRef)) {
+    // Raw Bun.spawnSync, not capture(): the license bytes must round-trip
+    // via latin1 (see the callback-replacement comment below), and
+    // capture's string result is a utf-8 decode that folds non-utf-8 bytes
+    // onto U+FFFD. The hang bound still applies, carried inline with
+    // proc.ts's own constant and timeout-is-failure mapping.
     const show = Bun.spawnSync(["git", "show", `${targetRef}:${fleetLicense}`], {
       stderr: "inherit",
+      timeout: DEFAULT_HANG_BOUND_MS,
+      killSignal: "SIGKILL",
     });
-    if (show.exitCode !== 0) process.exit(show.exitCode ?? 1);
+    if (show.exitedDueToTimeout === true) {
+      error(`${label}: reading the fleet license from ${targetRef} timed out`);
+      process.exit(timeoutExitCode(show));
+    }
+    if (show.exitCode !== 0) process.exit(exitCodeOf(show));
     // The template carries the Required Notice as a jinja variable; render
     // it from the repo's recorded answer rather than seeding template text.
     const answersPath = join(targetDir, ".copier-answers.yml");

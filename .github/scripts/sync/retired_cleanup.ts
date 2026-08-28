@@ -53,9 +53,15 @@ if (recordedModules !== undefined && !isStringList(recordedModules)) {
   );
 }
 const oldModules = isStringList(recordedModules) ? recordedModules : [];
-const presentLicenses = ["LICENSE", "LICENSE.md"].filter(
-  (name) => capture(["git", "-C", targetDir, "cat-file", "-e", `HEAD:${name}`]).exitCode === 0,
-);
+const presentLicenses = ["LICENSE", "LICENSE.md"].filter((name) => {
+  const probe = capture(["git", "-C", targetDir, "cat-file", "-e", `HEAD:${name}`]);
+  // A deadline expiry must fail this step, not read as "license absent":
+  // absent is what lets the custom-license flip guard stand down.
+  if (probe.timedOut) {
+    fail(`git cat-file timed out probing HEAD:${name}`);
+  }
+  return probe.exitCode === 0;
+});
 const flipError = customLicenseFlipError(oldModules, newModules, presentLicenses);
 if (flipError !== null) {
   fail(flipError);
