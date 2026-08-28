@@ -68,13 +68,17 @@ const label = env("TARGET_DISPLAY") || env("TARGET") || targetDir;
 const recover = env("RECOVER") === "recopy";
 const modules = parseModules(env("MODULES")) ?? [];
 
-function git(args: string[]): { exitCode: number; stdout: string } {
-  const proc = capture(["git", "-C", targetDir, ...args]);
-  // A deadline expiry aborts loudly here, at the one probe owner, because
-  // several consumers read nonzero as a benign answer (inHead skips a
-  // restore, the manifest read downgrades to held-for-review) - a hung git
-  // is a broken step, never an answer. Subcommand only in the message:
-  // args can carry target paths.
+/** Run a git probe against the target checkout. A deadline expiry aborts
+ * loudly here, at the one probe owner, because every consumer reads
+ * nonzero as a benign answer (inHead skips a restore, the manifest read
+ * downgrades to held-for-review) - a hung git is a broken step, never an
+ * answer. Subcommand only in the message: args can carry target paths.
+ * Exported, with `timeoutMs` as the tests' injection seam, so the
+ * fail-closed contract is behaviorally testable without waiting out the
+ * production bound; production callers pass no timeout and get proc.ts's
+ * default hang bound. */
+export function git(args: string[], timeoutMs?: number): { exitCode: number; stdout: string } {
+  const proc = capture(["git", "-C", targetDir, ...args], { timeoutMs });
   if (proc.timedOut) {
     error(`${label}: git ${args[0]} timed out; aborting rather than reading it as an answer`);
     process.exit(proc.exitCode);
@@ -90,135 +94,150 @@ function restoreFromHead(path: string): void {
   must(["git", "-C", targetDir, "checkout", "HEAD", "--", path]);
 }
 
-if (inHead(".github/settings.yml")) {
-  if (recover) {
-    restoreFromHead(".github/settings.yml");
-    notice(
-      `${label}: .github/settings.yml is repo-owned; restored as-is after the recovery re-render.`,
-    );
-  } else if (!existsSync(join(targetDir, ".github/settings.yml"))) {
-    restoreFromHead(".github/settings.yml");
-    notice(
-      `${label}: .github/settings.yml left the template render but is repo-owned; kept as-is.`,
-    );
+const fleetLicense = "template/LICENSE.md.jinja";
+
+/** Whether `ref` carries the fleet license template, probed in
+ * repo-platform's own checkout (no -C targetDir, so it cannot ride the
+ * git() owner above); same fail-closed rule - a deadline expiry aborts
+ * loudly, since read as "absent" it would skip the mandatory re-seed.
+ * Exported with the same test-only `timeoutMs` seam as git(). */
+export function fleetLicenseAt(ref: string, timeoutMs?: number): boolean {
+  const probe = capture(["git", "cat-file", "-e", `${ref}:${fleetLicense}`], { timeoutMs });
+  if (probe.timedOut) {
+    error(`${label}: git cat-file timed out probing the fleet license at ${ref}`);
+    process.exit(probe.exitCode);
   }
+  return probe.exitCode === 0;
 }
 
-// The one-time layering transition (see the header): after the restore
-// above, so a de-rendered-then-restored legacy file transitions in the
-// same sync instead of waiting a round.
-transitionSettingsStarter(
-  targetDir,
-  join(requireEnv("RUNNER_TEMP"), SETTINGS_LAYERING_NAME),
-  label,
-);
+/** The fleet license template's bytes at `ref`. Raw Bun.spawnSync, not
+ * capture(): the license bytes must round-trip via latin1 (see the
+ * callback-replacement comment at the call site), and capture's string
+ * result is a utf-8 decode that folds non-utf-8 bytes onto U+FFFD. The
+ * hang bound still applies, carried inline with proc.ts's constant and
+ * timeout-is-failure mapping; a raw spawn reports expiry as
+ * exitedDueToTimeout, not the timedOut flag the other guards read.
+ * Exported with the same test-only `timeoutMs` seam as git(). */
+export function showFleetLicense(ref: string, timeoutMs = DEFAULT_HANG_BOUND_MS): Buffer {
+  const show = Bun.spawnSync(["git", "show", `${ref}:${fleetLicense}`], {
+    stderr: "inherit",
+    timeout: timeoutMs,
+    killSignal: "SIGKILL",
+  });
+  if (show.exitedDueToTimeout === true) {
+    error(`${label}: reading the fleet license from ${ref} timed out`);
+    process.exit(timeoutExitCode(show));
+  }
+  if (show.exitCode !== 0) process.exit(exitCodeOf(show));
+  return Buffer.from(show.stdout);
+}
 
-// Only on the custom-license module: there the repo's own license is
-// repo-owned - LICENSE.md by convention, with the extensionless spelling
-// tolerated until every repo's rename lands. Without the module the
-// license is template-managed, and a de-rendered old spelling (the
-// extensionless LICENSE before the LICENSE.md rename) must stay deleted.
-if (!recover && modules.includes("custom-license")) {
-  for (const name of ["LICENSE", "LICENSE.md"]) {
-    if (inHead(name) && !existsSync(join(targetDir, name))) {
-      restoreFromHead(name);
+/** The restore/re-seed half: repo-owned settings.yml, the layering
+ * transition, custom-license restores, and the fleet-license re-seed. */
+function restoreRepoOwned(): void {
+  if (inHead(".github/settings.yml")) {
+    if (recover) {
+      restoreFromHead(".github/settings.yml");
       notice(
-        `${label}: ${name} left the template render (custom-license module) but is repo-owned; kept as-is.`,
+        `${label}: .github/settings.yml is repo-owned; restored as-is after the recovery re-render.`,
+      );
+    } else if (!existsSync(join(targetDir, ".github/settings.yml"))) {
+      restoreFromHead(".github/settings.yml");
+      notice(
+        `${label}: .github/settings.yml left the template render but is repo-owned; kept as-is.`,
       );
     }
   }
-}
 
-const fleetLicense = "template/LICENSE.md.jinja";
-if (
-  !recover &&
-  !existsSync(join(targetDir, "LICENSE.md")) &&
-  !inHead("LICENSE.md") &&
-  !modules.includes("custom-license")
-) {
-  const targetRef = env("TARGET_REF");
-  // This probe runs in repo-platform's own checkout (no -C targetDir), so
-  // it cannot ride the git() owner above; same rule though - a deadline
-  // expiry aborts loudly, since read as "absent" it would skip the
-  // mandatory re-seed below.
-  const fleetLicenseAt = (ref: string): boolean => {
-    const probe = capture(["git", "cat-file", "-e", `${ref}:${fleetLicense}`]);
-    if (probe.timedOut) {
-      error(`${label}: git cat-file timed out probing the fleet license at ${ref}`);
-      process.exit(probe.exitCode);
-    }
-    return probe.exitCode === 0;
-  };
-  if (targetRef !== "" && fleetLicenseAt(targetRef)) {
-    // Raw Bun.spawnSync, not capture(): the license bytes must round-trip
-    // via latin1 (see the callback-replacement comment below), and
-    // capture's string result is a utf-8 decode that folds non-utf-8 bytes
-    // onto U+FFFD. The hang bound still applies, carried inline with
-    // proc.ts's own constant and timeout-is-failure mapping.
-    const show = Bun.spawnSync(["git", "show", `${targetRef}:${fleetLicense}`], {
-      stderr: "inherit",
-      timeout: DEFAULT_HANG_BOUND_MS,
-      killSignal: "SIGKILL",
-    });
-    if (show.exitedDueToTimeout === true) {
-      error(`${label}: reading the fleet license from ${targetRef} timed out`);
-      process.exit(timeoutExitCode(show));
-    }
-    if (show.exitCode !== 0) process.exit(exitCodeOf(show));
-    // The template carries the Required Notice as a jinja variable; render
-    // it from the repo's recorded answer rather than seeding template text.
-    const answersPath = join(targetDir, ".copier-answers.yml");
-    let answers: Record<string, unknown> = {};
-    if (existsSync(answersPath)) {
-      let doc: unknown;
-      try {
-        doc = parse(readFileSync(answersPath, "utf-8"));
-      } catch {
-        doc = undefined;
+  // The one-time layering transition (see the header): after the restore
+  // above, so a de-rendered-then-restored legacy file transitions in the
+  // same sync instead of waiting a round.
+  transitionSettingsStarter(
+    targetDir,
+    join(requireEnv("RUNNER_TEMP"), SETTINGS_LAYERING_NAME),
+    label,
+  );
+
+  // Only on the custom-license module: there the repo's own license is
+  // repo-owned - LICENSE.md by convention, with the extensionless spelling
+  // tolerated until every repo's rename lands. Without the module the
+  // license is template-managed, and a de-rendered old spelling (the
+  // extensionless LICENSE before the LICENSE.md rename) must stay deleted.
+  if (!recover && modules.includes("custom-license")) {
+    for (const name of ["LICENSE", "LICENSE.md"]) {
+      if (inHead(name) && !existsSync(join(targetDir, name))) {
+        restoreFromHead(name);
+        notice(
+          `${label}: ${name} left the template render (custom-license module) but is repo-owned; kept as-is.`,
+        );
       }
-      if (doc === undefined || doc === null || typeof doc !== "object" || Array.isArray(doc)) {
-        error(`${label}: cannot re-seed the fleet license; .copier-answers.yml is unreadable`);
+    }
+  }
+
+  if (
+    !recover &&
+    !existsSync(join(targetDir, "LICENSE.md")) &&
+    !inHead("LICENSE.md") &&
+    !modules.includes("custom-license")
+  ) {
+    const targetRef = env("TARGET_REF");
+    if (targetRef !== "" && fleetLicenseAt(targetRef)) {
+      const show = showFleetLicense(targetRef);
+      // The template carries the Required Notice as a jinja variable; render
+      // it from the repo's recorded answer rather than seeding template text.
+      const answersPath = join(targetDir, ".copier-answers.yml");
+      let answers: Record<string, unknown> = {};
+      if (existsSync(answersPath)) {
+        let doc: unknown;
+        try {
+          doc = parse(readFileSync(answersPath, "utf-8"));
+        } catch {
+          doc = undefined;
+        }
+        if (doc === undefined || doc === null || typeof doc !== "object" || Array.isArray(doc)) {
+          error(`${label}: cannot re-seed the fleet license; .copier-answers.yml is unreadable`);
+          process.exit(1);
+        }
+        answers = doc as Record<string, unknown>;
+      }
+      const holder = answers.copyright_holder;
+      if (typeof holder !== "string" || holder === "") {
+        error(
+          `${label}: cannot re-seed the fleet license; .copier-answers.yml records no copyright_holder`,
+        );
         process.exit(1);
       }
-      answers = doc as Record<string, unknown>;
-    }
-    const holder = answers.copyright_holder;
-    if (typeof holder !== "string" || holder === "") {
-      error(
-        `${label}: cannot re-seed the fleet license; .copier-answers.yml records no copyright_holder`,
+      // The managed-marker comment line names the owner via github_username;
+      // render it from the same recorded answers, shape-checked the way the
+      // validator's owner pin is (a malformed non-empty value would pass the
+      // unrendered-expression check below yet seed a wrong owner).
+      const username = answers.github_username;
+      if (typeof username !== "string" || !/^[A-Za-z0-9-]+$/.test(username)) {
+        error(
+          `${label}: cannot re-seed the fleet license; .copier-answers.yml records no github_username`,
+        );
+        process.exit(1);
+      }
+      // Callback replacement: a literal holder string would have its $
+      // sequences expanded. latin1 throughout (the byte-faithfulness
+      // convention shared with preserve_local_content.ts): the template
+      // bytes round-trip verbatim instead of folding onto U+FFFD, and each
+      // substituted answer is spliced in as its UTF-8 bytes viewed as
+      // latin1 code units, so the final write emits real UTF-8 for it.
+      const asLatin1 = (value: string) => Buffer.from(value, "utf-8").toString("latin1");
+      const rendered = show
+        .toString("latin1")
+        .replaceAll("{{ copyright_holder }}", () => asLatin1(holder))
+        .replaceAll("{{ github_username }}", () => asLatin1(username));
+      if (rendered.includes("{{") || rendered.includes("{%")) {
+        error(`${label}: cannot re-seed the fleet license; unrendered template expressions remain`);
+        process.exit(1);
+      }
+      writeFileSync(join(targetDir, "LICENSE.md"), Buffer.from(rendered, "latin1"));
+      notice(
+        `${label}: LICENSE.md was deleted but the fleet license is mandatory without the custom-license module; re-seeded from ${targetRef}.`,
       );
-      process.exit(1);
     }
-    // The managed-marker comment line names the owner via github_username;
-    // render it from the same recorded answers, shape-checked the way the
-    // validator's owner pin is (a malformed non-empty value would pass the
-    // unrendered-expression check below yet seed a wrong owner).
-    const username = answers.github_username;
-    if (typeof username !== "string" || !/^[A-Za-z0-9-]+$/.test(username)) {
-      error(
-        `${label}: cannot re-seed the fleet license; .copier-answers.yml records no github_username`,
-      );
-      process.exit(1);
-    }
-    // Callback replacement: a literal holder string would have its $
-    // sequences expanded. latin1 throughout (the byte-faithfulness
-    // convention shared with preserve_local_content.ts): the template
-    // bytes round-trip verbatim instead of folding onto U+FFFD, and each
-    // substituted answer is spliced in as its UTF-8 bytes viewed as
-    // latin1 code units, so the final write emits real UTF-8 for it.
-    const asLatin1 = (value: string) => Buffer.from(value, "utf-8").toString("latin1");
-    const rendered = show.stdout
-      .toString("latin1")
-      .replaceAll("{{ copyright_holder }}", () => asLatin1(holder))
-      .replaceAll("{{ github_username }}", () => asLatin1(username));
-    if (rendered.includes("{{") || rendered.includes("{%")) {
-      error(`${label}: cannot re-seed the fleet license; unrendered template expressions remain`);
-      process.exit(1);
-    }
-    writeFileSync(join(targetDir, "LICENSE.md"), Buffer.from(rendered, "latin1"));
-    notice(
-      `${label}: LICENSE.md was deleted but the fleet license is mandatory without the custom-license module; re-seeded from ${targetRef}.`,
-    );
   }
 }
 
@@ -392,79 +411,86 @@ function deletedTrackedPaths(): string[] | null {
   return proc.stdout.split("\0").filter((path) => path !== "");
 }
 
-// HEAD's split declarations, split with HEAD's OWN manifest (a marker
-// rename in the update cannot mis-split the previous copy). Null when the
-// manifest is missing or damaged past parsing - both target-state
-// anomalies the fully-migrated fleet manifest should never present, both
-// handled fail closed below.
-let headSplits: Map<string, HeadSplit> | null = null;
-// WHY the manifest was rejected, for the PR body only (the message can
-// name manifest paths, so it never reaches a log line). Clipped: the
-// rejection message embeds decoded manifest keys, which are
-// target-controlled - unbounded text would blow the section budget and a
-// NUL would kill gh's --body argv (clip escapes control bytes).
-let manifestProblem: string | null = null;
-const headManifest = git(["show", `HEAD:${MANIFEST_NAME}`]);
-if (headManifest.exitCode !== 0) {
-  manifestProblem = "it could not be read from the previous commit";
-} else {
-  try {
-    headSplits = headSplitEntries(headManifest.stdout, `HEAD:${MANIFEST_NAME}`);
-  } catch (err) {
-    manifestProblem = clip(err instanceof Error ? err.message : String(err));
+/** The removed-splits hold: HEAD's split declarations, split with HEAD's
+ * OWN manifest (a marker rename in the update cannot mis-split the
+ * previous copy). headSplits is null when the manifest is missing or
+ * damaged past parsing - both target-state anomalies the fully-migrated
+ * fleet manifest should never present, both handled fail closed below. */
+function holdRemovedSplits(): void {
+  let headSplits: Map<string, HeadSplit> | null = null;
+  // WHY the manifest was rejected, for the PR body only (the message can
+  // name manifest paths, so it never reaches a log line). Clipped: the
+  // rejection message embeds decoded manifest keys, which are
+  // target-controlled - unbounded text would blow the section budget and a
+  // NUL would kill gh's --body argv (clip escapes control bytes).
+  let manifestProblem: string | null = null;
+  const headManifest = git(["show", `HEAD:${MANIFEST_NAME}`]);
+  if (headManifest.exitCode !== 0) {
+    manifestProblem = "it could not be read from the previous commit";
+  } else {
+    try {
+      headSplits = headSplitEntries(headManifest.stdout, `HEAD:${MANIFEST_NAME}`);
+    } catch (err) {
+      manifestProblem = clip(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  const candidates = new Map<string, HeadSplit | undefined>();
+  let scanUnavailable = false;
+  if (headSplits !== null) {
+    for (const [path, split] of headSplits) candidates.set(path, split);
+  } else {
+    // The split map is unknown; fall back to the deletion axis. When even
+    // that cannot be read, hold the PR generically rather than fail open.
+    const deleted = deletedTrackedPaths();
+    if (deleted === null) scanUnavailable = true;
+    else for (const path of deleted) candidates.set(path, undefined);
+  }
+  for (const name of ["LICENSE", "LICENSE.md"]) {
+    if (!candidates.has(name)) candidates.set(name, undefined);
+  }
+
+  const removals: RemovedSplit[] = [];
+  for (const [path, split] of candidates) {
+    if (existsSync(join(targetDir, path))) continue; // still present: not a deletion
+    // headBytes is null only for a path genuinely absent at HEAD and throws
+    // on a real git failure, so a broken repo fails the step loudly rather
+    // than silently skip a candidate - inHead's `cat-file -e` cannot tell
+    // absence from failure and would re-open the fail-open hole.
+    const headCopy = headBytes(targetDir, path);
+    if (headCopy === null) continue;
+    removals.push({
+      path,
+      half: split === undefined ? undefined : headRepoOwnedHalf(headCopy.toString("latin1"), split),
+    });
+  }
+
+  const section = renderRemovedSplits(removals, manifestProblem);
+  // The generic unverifiable notice forces review even when no removal could
+  // be enumerated - the whole point of failing closed on an unreadable scan.
+  const report = scanUnavailable ? `${REMOVED_SPLITS_UNVERIFIABLE}\n${section}` : section;
+  writeFileSync(join(requireEnv("RUNNER_TEMP"), REMOVED_SPLITS_NAME), report);
+  if (removals.length > 0) {
+    // Paths are target file data: a hide-details target gets a count here
+    // and the names only in the PR body, which lives in the private repo.
+    notice(
+      hideDetails()
+        ? `${label}: this update deletes ${removals.length} split-classed file(s); the PR stays ` +
+            "manual-review so a human can restore the repository-owned content that leaves " +
+            "(paths hidden: private repository; named in the PR body)."
+        : `${label}: this update deletes ${removals.map(({ path }) => path).join(" and ")}; the ` +
+            "PR stays manual-review so a human can restore the repository-owned content that " +
+            "leaves with the deletion (named in the PR body; git history is the record).",
+    );
+  } else if (scanUnavailable) {
+    notice(
+      `${label}: the previous commit's ownership manifest and deleted-file list could not be ` +
+        "read, so split-file deletions cannot be verified; the PR stays manual-review.",
+    );
   }
 }
 
-const candidates = new Map<string, HeadSplit | undefined>();
-let scanUnavailable = false;
-if (headSplits !== null) {
-  for (const [path, split] of headSplits) candidates.set(path, split);
-} else {
-  // The split map is unknown; fall back to the deletion axis. When even
-  // that cannot be read, hold the PR generically rather than fail open.
-  const deleted = deletedTrackedPaths();
-  if (deleted === null) scanUnavailable = true;
-  else for (const path of deleted) candidates.set(path, undefined);
-}
-for (const name of ["LICENSE", "LICENSE.md"]) {
-  if (!candidates.has(name)) candidates.set(name, undefined);
-}
-
-const removals: RemovedSplit[] = [];
-for (const [path, split] of candidates) {
-  if (existsSync(join(targetDir, path))) continue; // still present: not a deletion
-  // headBytes is null only for a path genuinely absent at HEAD and throws
-  // on a real git failure, so a broken repo fails the step loudly rather
-  // than silently skip a candidate - inHead's `cat-file -e` cannot tell
-  // absence from failure and would re-open the fail-open hole.
-  const headCopy = headBytes(targetDir, path);
-  if (headCopy === null) continue;
-  removals.push({
-    path,
-    half: split === undefined ? undefined : headRepoOwnedHalf(headCopy.toString("latin1"), split),
-  });
-}
-
-const section = renderRemovedSplits(removals, manifestProblem);
-// The generic unverifiable notice forces review even when no removal could
-// be enumerated - the whole point of failing closed on an unreadable scan.
-const report = scanUnavailable ? `${REMOVED_SPLITS_UNVERIFIABLE}\n${section}` : section;
-writeFileSync(join(requireEnv("RUNNER_TEMP"), REMOVED_SPLITS_NAME), report);
-if (removals.length > 0) {
-  // Paths are target file data: a hide-details target gets a count here
-  // and the names only in the PR body, which lives in the private repo.
-  notice(
-    hideDetails()
-      ? `${label}: this update deletes ${removals.length} split-classed file(s); the PR stays ` +
-          "manual-review so a human can restore the repository-owned content that leaves " +
-          "(paths hidden: private repository; named in the PR body)."
-      : `${label}: this update deletes ${removals.map(({ path }) => path).join(" and ")}; the ` +
-          "PR stays manual-review so a human can restore the repository-owned content that " +
-          "leaves with the deletion (named in the PR body; git history is the record).",
-  );
-} else if (scanUnavailable) {
-  notice(
-    `${label}: the previous commit's ownership manifest and deleted-file list could not be ` +
-      "read, so split-file deletions cannot be verified; the PR stays manual-review.",
-  );
+if (import.meta.main) {
+  restoreRepoOwned();
+  holdRemovedSplits();
 }
