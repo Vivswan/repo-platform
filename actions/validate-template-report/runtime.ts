@@ -16,8 +16,6 @@
 // Keep these behaviour-compatible with .github/scripts/shared/ - they are
 // the same functions, narrowed to what the action uses.
 
-import type { ZodType } from "zod";
-
 export function env(name: string, fallback = ""): string {
   return process.env[name] ?? fallback;
 }
@@ -84,26 +82,4 @@ export function capture(command: string[], options: RunOptions): RunResult {
     stderr: proc.stderr.toString(),
     timedOut: proc.exitedDueToTimeout === true,
   };
-}
-
-/** Parses JSON and validates it in one step. A response the schema rejects
- *  is a contract problem no re-run fixes, so it exits rather than handing
- *  back a value every caller would have to re-check. */
-export function parseJsonWith<T>(schema: ZodType<T>, text: string, label: string): T {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(text);
-  } catch (cause) {
-    error(`${label}: response is not JSON (${cause instanceof Error ? cause.message : cause})`);
-    process.exit(1);
-  }
-  const result = schema.safeParse(parsed);
-  if (!result.success) {
-    const detail = result.error.issues
-      .map((issue) => `${issue.path.join(".")} ${issue.message}`)
-      .join("; ");
-    error(`${label}: ${detail}`);
-    process.exit(1);
-  }
-  return result.data;
 }

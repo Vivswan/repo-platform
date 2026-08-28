@@ -335,7 +335,7 @@ const KNOWN_MODULES = new Set([
 
 // BEGIN GENERATED: toolchain-pins (scripts/generate.ts - edit module.yml manifests, not this block)
 const TOOLCHAIN_PINS: Record<string, { file: string; version: string }> = {
-  bun: { file: ".bun-version", version: "1.3.14" },
+  bun: { file: ".bun-version", version: "1.4.0" },
   node: { file: ".node-version", version: "24.19.0" },
   deno: { file: ".dvmrc", version: "2.9.5" },
 };
