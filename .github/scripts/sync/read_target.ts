@@ -9,7 +9,7 @@
 // Env: TARGET, TARGET_DISPLAY, HIDE_DETAILS, GH_TOKEN, RUNNER_TEMP,
 // GITHUB_OUTPUT.
 
-import { writeFileSync } from "node:fs";
+import { writeFileSync, writeSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
 import { addMask, env, error, hideDetails, requireEnv, setOutput } from "../shared/gha.ts";
@@ -18,13 +18,17 @@ import { capture } from "../shared/proc.ts";
 
 const target = requireEnv("TARGET");
 // capture() pipes stderr (the hang bound needs the pipe); re-emit it whole
-// so gh's own diagnostics still reach the log as before.
+// so gh's own diagnostics still reach the log as before - with writeSync,
+// because an async stream write racing the process.exit below truncates at
+// the pipe buffer (~64 KiB).
 const proc = capture(["gh", "api", `repos/${target}`]);
-process.stderr.write(proc.stderr);
+writeSync(2, proc.stderr);
 if (proc.exitCode !== 0) {
   const display = env("TARGET_DISPLAY");
   error(
-    `cannot read ${display}: the REPO_PLATFORM_TOKEN cannot access it. Grant the PAT access to ${display} (repository access list) with Contents and Pull requests read/write, then re-run.`,
+    proc.timedOut
+      ? `cannot read ${display}: the repository read timed out (proc.ts hang bound); re-run the sync`
+      : `cannot read ${display}: the REPO_PLATFORM_TOKEN cannot access it. Grant the PAT access to ${display} (repository access list) with Contents and Pull requests read/write, then re-run.`,
   );
   process.exit(1);
 }

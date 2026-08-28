@@ -5,7 +5,7 @@
 // fix to the discovery contract, the dispatch-input read, or the slug
 // scrub protects every consumer at the same time (docs/private-repos.md).
 
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync, writeSync } from "node:fs";
 import { z } from "zod";
 import { env } from "../shared/gha.ts";
 import { parseJsonWith } from "../shared/json.ts";
@@ -74,7 +74,9 @@ export function discoverWritableRepos(label: string) {
     "per_page=100",
   ]);
   if (list.exitCode !== 0) {
-    process.stderr.write(list.stderr);
+    // writeSync: an async stream write racing the process.exit below
+    // truncates at the pipe buffer (~64 KiB).
+    writeSync(2, list.stderr);
     process.exit(list.exitCode);
   }
   const pages = parseJsonWith(userReposPages, list.stdout, label);
@@ -134,14 +136,17 @@ export function readDispatchRepo(owner?: string): string {
  * the redaction discipline this public log requires - they never print an
  * undisclosed private name. Stderr is captured (proc.ts's hang bound needs
  * the pipe) and re-emitted whole, success or failure - buffered rather than
- * streamed, same content. */
+ * streamed, same content. writeSync, not process.stderr.write: an async
+ * stream write racing the process.exit below truncates at the pipe buffer
+ * (~64 KiB); a natural exit drains, but this function cannot know its
+ * caller exits later. */
 export function runStage(command: string[], outFile: string): void {
   const proc = capture(command);
-  process.stderr.write(proc.stderr);
+  writeSync(2, proc.stderr);
   if (proc.exitCode !== 0) {
     // Program name only: the argv tail can carry a private slug.
     if (proc.timedOut) console.error(`${command[0]} timed out (proc.ts hang bound)`);
-    process.stdout.write(proc.stdout);
+    writeSync(1, proc.stdout);
     process.exit(proc.exitCode);
   }
   writeFileSync(outFile, proc.stdout);

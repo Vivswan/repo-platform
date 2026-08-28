@@ -9,6 +9,7 @@
 //
 // Env: TARGET, BRANCH, GH_TOKEN.
 
+import { writeSync } from "node:fs";
 import { requireEnv } from "../shared/gha.ts";
 import { capture } from "../shared/proc.ts";
 
@@ -18,10 +19,12 @@ const branch = requireEnv("BRANCH");
 // capture(), not mustCapture: the argv carries the target slug (private
 // for hide-details repos), and mustCapture's deadline-expiry line prints
 // the whole argv. This wrapper prints the program name alone and re-emits
-// gh's own stderr as the previous inherit did.
+// gh's own stderr as the previous inherit did - with writeSync, because an
+// async stream write racing the process.exit below truncates at the pipe
+// buffer (~64 KiB).
 function gh(args: string[]): string {
   const proc = capture(["gh", ...args]);
-  process.stderr.write(proc.stderr);
+  writeSync(2, proc.stderr);
   if (proc.exitCode !== 0) {
     if (proc.timedOut) console.error("gh timed out (proc.ts hang bound)");
     process.exit(proc.exitCode);

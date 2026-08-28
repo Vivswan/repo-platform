@@ -28,7 +28,7 @@
 // dispatch input (a non-empty ONLY_REPO env overrides it - the test
 // harness and local runs use that).
 
-import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, readFileSync, writeFileSync, writeSync } from "node:fs";
 import { join } from "node:path";
 import { env, notice, requireEnv, setOutput } from "../shared/gha.ts";
 import { parseJson } from "../shared/json.ts";
@@ -273,7 +273,9 @@ for (const repo of sweepable) {
 
 // The matrix joins the probed opt-in list with the operator repo's own
 // row; a builder failure invalidates the whole selection and exits 1.
-// capture() pipes stderr (the hang bound needs the pipe); re-emit it whole.
+// capture() pipes stderr (the hang bound needs the pipe); re-emit it whole
+// with writeSync - an async stream write racing the process.exit below
+// truncates at the pipe buffer (~64 KiB).
 const matrix = capture([
   "bun",
   ".github/scripts/fleet/build_settings_matrix.ts",
@@ -283,13 +285,13 @@ const matrix = capture([
   selfRepo,
   ...(onlyRepo === "" ? [] : ["--only", onlyRepo]),
 ]);
-process.stderr.write(matrix.stderr);
+writeSync(2, matrix.stderr);
 if (matrix.exitCode !== 0) {
   // The builder's ::error:: detail rides its captured stdout (workflow
   // commands parse from stdout); forward it or the failure is silent.
   // Program name only on expiry: the argv tail can carry a private slug.
   if (matrix.timedOut) console.error("bun timed out (proc.ts hang bound)");
-  process.stdout.write(matrix.stdout);
+  writeSync(1, matrix.stdout);
   process.exit(matrix.exitCode);
 }
 const targetsJson = matrix.stdout.replace(/\n$/, "");

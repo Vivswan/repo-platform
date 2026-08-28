@@ -24,7 +24,7 @@
 // Env: OLD_SHA, TARGET_REF, MODULES, PRIVATE, DESCRIPTION,
 // SRC_PATH, RUNNER_TEMP; TARGET_DIR (default target).
 
-import { existsSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, renameSync, rmSync, writeFileSync, writeSync } from "node:fs";
 import { join } from "node:path";
 import { env, requireEnv } from "../shared/gha.ts";
 import { capture, must } from "../shared/proc.ts";
@@ -33,18 +33,21 @@ import { capture, must } from "../shared/proc.ts";
  * ::error:: commands parse from stdout, so swallowing it would silence the
  * failure detail) and exit with its code. The pipe mode captures stderr too
  * (proc.ts's hang bound needs the pipe) and re-emits it whole, success or
- * failure - buffered rather than streamed, same content. */
+ * failure - buffered rather than streamed, same content. writeSync, not
+ * the process streams: an async stream write racing process.exit (here or
+ * in a caller like retired_cleanup's fail paths) truncates at the pipe
+ * buffer (~64 KiB). */
 export function run(command: string[], options: { stdout?: "pipe" } = {}): string {
   if (options.stdout !== "pipe") {
     must(command);
     return "";
   }
   const proc = capture(command);
-  process.stderr.write(proc.stderr);
+  writeSync(2, proc.stderr);
   if (proc.exitCode !== 0) {
     // Program name only: the argv tail can carry target-derived values.
     if (proc.timedOut) console.error(`${command[0]} timed out (proc.ts hang bound)`);
-    process.stdout.write(proc.stdout);
+    writeSync(1, proc.stdout);
     process.exit(proc.exitCode);
   }
   return proc.stdout;
