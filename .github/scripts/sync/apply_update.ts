@@ -11,23 +11,25 @@
 // DESCRIPTION, RECOVER.
 
 import { env, requireEnv } from "../shared/gha.ts";
+import { passthrough } from "../shared/proc.ts";
 
 const subcommand = env("RECOVER") === "recopy" ? ["recopy", "--overwrite"] : ["update"];
-const proc = Bun.spawnSync(
-  [
-    "copier",
-    ...subcommand,
-    "--vcs-ref",
-    requireEnv("TARGET_REF"),
-    "--defaults",
-    "--trust",
-    "-d",
-    `modules=${requireEnv("MODULES")}`,
-    "-d",
-    `private=${requireEnv("PRIVATE")}`,
-    "-d",
-    `description=${env("DESCRIPTION")}`,
-  ],
-  { cwd: env("TARGET_DIR", "target"), stdio: ["inherit", "inherit", "inherit"] },
+process.exit(
+  passthrough(
+    [
+      "copier",
+      ...subcommand,
+      "--vcs-ref",
+      requireEnv("TARGET_REF"),
+      "--defaults",
+      "--trust",
+      "-d",
+      `modules=${requireEnv("MODULES")}`,
+      "-d",
+      `private=${requireEnv("PRIVATE")}`,
+      "-d",
+      `description=${env("DESCRIPTION")}`,
+    ],
+    { cwd: env("TARGET_DIR", "target") },
+  ),
 );
-process.exit(proc.exitCode ?? 1);

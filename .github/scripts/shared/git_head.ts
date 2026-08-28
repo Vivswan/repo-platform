@@ -12,6 +12,8 @@
  *  callers' run_hidden.ts wrapping: the message stays safe even if a future
  *  caller logs it unwrapped. Same discipline as shared/json.ts; the withheld
  *  git detail is reproduced locally (docs/private-repos.md). */
+import { capture, DEFAULT_HANG_BOUND_MS, timeoutExitCode } from "./proc.ts";
+
 function headProbeFailed(subcommand: "ls-tree" | "show", exitCode: number | null): Error {
   return new Error(
     `git ${subcommand} against HEAD failed (exit ${exitCode ?? "unknown"}); the path, ` +
@@ -27,21 +29,24 @@ function headProbeFailed(subcommand: "ls-tree" | "show", exitCode: number | null
  * (":(top)a.txt" - the validators bar traversal, not leading colons)
  * would otherwise silently resolve to a different path. */
 export function headBytes(root: string, rel: string): Buffer | null {
-  const probe = Bun.spawnSync(
-    ["git", "--literal-pathspecs", "-C", root, "ls-tree", "HEAD", "--", rel],
-    {
-      stdout: "pipe",
-      stderr: "pipe",
-    },
-  );
+  const probe = capture(["git", "--literal-pathspecs", "-C", root, "ls-tree", "HEAD", "--", rel]);
   if (probe.exitCode !== 0) {
     throw headProbeFailed("ls-tree", probe.exitCode);
   }
-  if (probe.stdout.toString().trim() === "") return null;
+  if (probe.stdout.trim() === "") return null;
+  // Raw Bun.spawnSync, not capture(): the contract above is RAW BYTES, and
+  // capture's string result is a utf-8 decode that folds non-utf-8 file
+  // content onto U+FFFD. The hang bound still applies, carried inline with
+  // proc.ts's own constant and timeout-is-failure mapping.
   const proc = Bun.spawnSync(["git", "--literal-pathspecs", "-C", root, "show", `HEAD:${rel}`], {
     stdout: "pipe",
     stderr: "pipe",
+    timeout: DEFAULT_HANG_BOUND_MS,
+    killSignal: "SIGKILL",
   });
+  if (proc.exitedDueToTimeout === true) {
+    throw headProbeFailed("show", timeoutExitCode(proc));
+  }
   if (proc.exitCode !== 0) {
     throw headProbeFailed("show", proc.exitCode);
   }

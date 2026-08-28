@@ -127,17 +127,22 @@ export function readDispatchRepo(owner?: string): string {
   return repo.toLowerCase();
 }
 
-/** Run one selection-pipeline stage, teeing its stdout to `outFile`;
- * stderr stays inherited. A failing stage exits this process with the
- * stage's own code, first writing the captured stdout through: the runner
- * only parses workflow commands (::error::) from stdout, and the stages'
- * own diagnostics already follow the redaction discipline this public log
- * requires - they never print an undisclosed private name. */
+/** Run one selection-pipeline stage, teeing its stdout to `outFile`. A
+ * failing stage exits this process with the stage's own code, first writing
+ * the captured stdout through: the runner only parses workflow commands
+ * (::error::) from stdout, and the stages' own diagnostics already follow
+ * the redaction discipline this public log requires - they never print an
+ * undisclosed private name. Stderr is captured (proc.ts's hang bound needs
+ * the pipe) and re-emitted whole, success or failure - buffered rather than
+ * streamed, same content. */
 export function runStage(command: string[], outFile: string): void {
-  const proc = Bun.spawnSync(command, { stdout: "pipe", stderr: "inherit" });
+  const proc = capture(command);
+  process.stderr.write(proc.stderr);
   if (proc.exitCode !== 0) {
-    process.stdout.write(proc.stdout.toString());
-    process.exit(proc.exitCode ?? 1);
+    // Program name only: the argv tail can carry a private slug.
+    if (proc.timedOut) console.error(`${command[0]} timed out (proc.ts hang bound)`);
+    process.stdout.write(proc.stdout);
+    process.exit(proc.exitCode);
   }
   writeFileSync(outFile, proc.stdout);
 }

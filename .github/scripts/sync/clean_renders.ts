@@ -27,19 +27,27 @@
 import { existsSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { env, requireEnv } from "../shared/gha.ts";
+import { capture, must } from "../shared/proc.ts";
 
 /** Run a command; on failure forward a captured child's stdout (workflow
  * ::error:: commands parse from stdout, so swallowing it would silence the
- * failure detail) and exit with its code. */
+ * failure detail) and exit with its code. The pipe mode captures stderr too
+ * (proc.ts's hang bound needs the pipe) and re-emits it whole, success or
+ * failure - buffered rather than streamed, same content. */
 export function run(command: string[], options: { stdout?: "pipe" } = {}): string {
-  const proc = Bun.spawnSync(command, {
-    stdio: ["inherit", options.stdout === "pipe" ? "pipe" : "inherit", "inherit"],
-  });
-  if (proc.exitCode !== 0) {
-    if (options.stdout === "pipe") process.stdout.write(proc.stdout?.toString() ?? "");
-    process.exit(proc.exitCode ?? 1);
+  if (options.stdout !== "pipe") {
+    must(command);
+    return "";
   }
-  return options.stdout === "pipe" ? (proc.stdout?.toString() ?? "") : "";
+  const proc = capture(command);
+  process.stderr.write(proc.stderr);
+  if (proc.exitCode !== 0) {
+    // Program name only: the argv tail can carry target-derived values.
+    if (proc.timedOut) console.error(`${command[0]} timed out (proc.ts hang bound)`);
+    process.stdout.write(proc.stdout);
+    process.exit(proc.exitCode);
+  }
+  return proc.stdout;
 }
 
 export interface CleanRenders {

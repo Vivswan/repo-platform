@@ -18,6 +18,7 @@ import { parse } from "yaml";
 import { env, fail, requireEnv } from "../shared/gha.ts";
 import { parseJson } from "../shared/json.ts";
 import { parseModules } from "../shared/modules.ts";
+import { capture } from "../shared/proc.ts";
 import { ensureRenders, run } from "./clean_renders.ts";
 import { customLicenseFlipError } from "./retired_paths.ts";
 
@@ -53,8 +54,7 @@ if (recordedModules !== undefined && !isStringList(recordedModules)) {
 }
 const oldModules = isStringList(recordedModules) ? recordedModules : [];
 const presentLicenses = ["LICENSE", "LICENSE.md"].filter(
-  (name) =>
-    Bun.spawnSync(["git", "-C", targetDir, "cat-file", "-e", `HEAD:${name}`]).exitCode === 0,
+  (name) => capture(["git", "-C", targetDir, "cat-file", "-e", `HEAD:${name}`]).exitCode === 0,
 );
 const flipError = customLicenseFlipError(oldModules, newModules, presentLicenses);
 if (flipError !== null) {

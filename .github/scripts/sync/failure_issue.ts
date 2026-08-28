@@ -28,6 +28,7 @@
 import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { env, requireEnv } from "../shared/gha.ts";
+import { capture } from "../shared/proc.ts";
 
 const mode = process.argv[2];
 if (mode !== "deliver" && mode !== "resolve") {
@@ -59,18 +60,14 @@ function gh(
   args: string[],
   options: { stdoutToErrlog?: boolean } = {},
 ): { exitCode: number; stdout: string } {
-  const proc = Bun.spawnSync(["gh", ...args], {
-    env: { ...process.env, ISSUE_TITLE },
-    stdout: "pipe",
-    stderr: "pipe",
-  });
-  errlog += proc.stderr.toString();
-  const stdout = proc.stdout.toString();
+  const proc = capture(["gh", ...args], { env: { ISSUE_TITLE } });
+  errlog += proc.stderr;
+  const stdout = proc.stdout;
   // The write calls fold stdout into the errlog too (the bash version's
   // `>>errlog 2>&1`): gh runs them with --silent but can still print an
   // HTTP status on failure. Reads keep stdout as the result.
   if (options.stdoutToErrlog) errlog += stdout;
-  return { exitCode: proc.exitCode ?? 1, stdout };
+  return { exitCode: proc.exitCode, stdout };
 }
 
 // One warning, public-safe: only the bare HTTP status is lifted out of
@@ -148,9 +145,9 @@ function findIssue(): string | null {
 // the target's owner is half the private slug) and the delivery stands.
 function assignOwner(issueNumber: string): void {
   const owner = target.split("/")[0];
-  // try/catch, not just the exit-code check: Bun.spawnSync itself can
-  // throw (gh vanishing mid-run), and by this point the delivery already
-  // succeeded - nothing about assignment may unwind that.
+  // try/catch, not just the exit-code check: capture() can throw (the
+  // Bun.spawnSync under it: gh vanishing mid-run), and by this point the
+  // delivery already succeeded - nothing about assignment may unwind that.
   let failed: boolean;
   try {
     const assign = gh(

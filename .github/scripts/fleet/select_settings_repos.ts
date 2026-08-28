@@ -32,6 +32,7 @@ import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { env, notice, requireEnv, setOutput } from "../shared/gha.ts";
 import { parseJson } from "../shared/json.ts";
+import { capture } from "../shared/proc.ts";
 import { selectsSettingsSync } from "./build_settings_matrix.ts";
 import {
   captureNetwork,
@@ -272,25 +273,26 @@ for (const repo of sweepable) {
 
 // The matrix joins the probed opt-in list with the operator repo's own
 // row; a builder failure invalidates the whole selection and exits 1.
-const matrix = Bun.spawnSync(
-  [
-    "bun",
-    ".github/scripts/fleet/build_settings_matrix.ts",
-    "--targets",
-    join(runnerTemp, "settings_targets.json"),
-    "--self",
-    selfRepo,
-    ...(onlyRepo === "" ? [] : ["--only", onlyRepo]),
-  ],
-  { stdout: "pipe", stderr: "inherit" },
-);
+// capture() pipes stderr (the hang bound needs the pipe); re-emit it whole.
+const matrix = capture([
+  "bun",
+  ".github/scripts/fleet/build_settings_matrix.ts",
+  "--targets",
+  join(runnerTemp, "settings_targets.json"),
+  "--self",
+  selfRepo,
+  ...(onlyRepo === "" ? [] : ["--only", onlyRepo]),
+]);
+process.stderr.write(matrix.stderr);
 if (matrix.exitCode !== 0) {
   // The builder's ::error:: detail rides its captured stdout (workflow
   // commands parse from stdout); forward it or the failure is silent.
-  process.stdout.write(matrix.stdout.toString());
-  process.exit(matrix.exitCode ?? 1);
+  // Program name only on expiry: the argv tail can carry a private slug.
+  if (matrix.timedOut) console.error("bun timed out (proc.ts hang bound)");
+  process.stdout.write(matrix.stdout);
+  process.exit(matrix.exitCode);
 }
-const targetsJson = matrix.stdout.toString().replace(/\n$/, "");
+const targetsJson = matrix.stdout.replace(/\n$/, "");
 setOutput("targets", targetsJson);
 const parsed = parseJson(targetsJson, "select_settings_repos: settings matrix") as {
   repo: string;

@@ -17,7 +17,7 @@
 import { appendFileSync, openSync } from "node:fs";
 import { join } from "node:path";
 import { hideDetails, requireEnv } from "../shared/gha.ts";
-import { exitCodeOf } from "../shared/proc.ts";
+import { exitCodeOf, passthrough } from "../shared/proc.ts";
 
 /** Capture file name for a label (non-alphanumeric runs squeezed to '-' and
  *  trimmed). Exported so same-run consumers of the captures derive the same
@@ -38,13 +38,16 @@ function main(): number {
   }
 
   if (!hideDetails()) {
-    const proc = Bun.spawnSync(command, { stdio: ["inherit", "inherit", "inherit"] });
-    return exitCodeOf(proc);
+    return passthrough(command);
   }
 
   const runnerTemp = requireEnv("RUNNER_TEMP");
   const capture = join(runnerTemp, captureName(label));
   const log = openSync(capture, "w");
+  // Raw Bun.spawnSync, not a proc.ts helper: both output streams go to one
+  // FILE descriptor so they interleave in real order, an stdio shape
+  // proc.ts does not express. A file fd is not a pipe, so bun 1.4.0's
+  // pipe-EOF wait (proc.ts's hang-bound rationale) cannot arise here.
   const proc = Bun.spawnSync(command, { stdio: ["inherit", log, log] });
   const rc = exitCodeOf(proc);
   if (rc === 0) {

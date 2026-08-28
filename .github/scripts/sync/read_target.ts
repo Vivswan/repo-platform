@@ -14,9 +14,13 @@ import { join } from "node:path";
 import { z } from "zod";
 import { addMask, env, error, hideDetails, requireEnv, setOutput } from "../shared/gha.ts";
 import { parseJsonWith } from "../shared/json.ts";
+import { capture } from "../shared/proc.ts";
 
 const target = requireEnv("TARGET");
-const proc = Bun.spawnSync(["gh", "api", `repos/${target}`], { stderr: "inherit" });
+// capture() pipes stderr (the hang bound needs the pipe); re-emit it whole
+// so gh's own diagnostics still reach the log as before.
+const proc = capture(["gh", "api", `repos/${target}`]);
+process.stderr.write(proc.stderr);
 if (proc.exitCode !== 0) {
   const display = env("TARGET_DISPLAY");
   error(
@@ -30,7 +34,7 @@ const info = parseJsonWith(
     description: z.string().nullable(),
     private: z.boolean(),
   }),
-  proc.stdout.toString(),
+  proc.stdout,
   "read_target: repos/<target> response",
 );
 const branch = info.default_branch;
