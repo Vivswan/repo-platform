@@ -14,8 +14,9 @@ import { stampManifestText } from "../../../actions/shared/stamp_manifest.ts";
 import { env, hideDetails, requireEnv, setOutput } from "../shared/gha.ts";
 import { SYNC_IDENTITY } from "../shared/git_identity.ts";
 import { capture, must, mustCapture, passthrough, redactText } from "../shared/proc.ts";
+import { ALL_GREEN_WORKFLOW_PATH } from "./all_green_bootstrap.ts";
 import { appendHiddenFailure, captureName } from "./run_hidden.ts";
-import { STARTER_PINS_NAME } from "./section_files.ts";
+import { ALL_GREEN_BOOTSTRAP_NAME, STARTER_PINS_NAME } from "./section_files.ts";
 import {
   type FileOutcome,
   renderRolloutReport,
@@ -215,6 +216,14 @@ if (existsSync(pinOutcomesPath)) {
   );
   writeFileSync(pinOutcomesPath, `${JSON.stringify(outcomes, null, 2)}\n`, "utf-8");
   writeFileSync(join(runnerTemp, STARTER_PINS_NAME), renderRolloutReport(outcomes), "utf-8");
+}
+// The all-green bootstrap note claims this PR introduces the verdict
+// workflow; when the restore just withheld that very file, the claim is
+// no longer true - clear the note (the withheld-workflows section already
+// lists the file, and the next sync with a scoped token re-detects the
+// gap).
+if (withheld.split("\n").includes(ALL_GREEN_WORKFLOW_PATH)) {
+  writeFileSync(join(runnerTemp, ALL_GREEN_BOOTSTRAP_NAME), "");
 }
 // The restore rewrote workflow files after the workflow's stamping step, so
 // the ownership manifest must follow the tree that is actually pushed:

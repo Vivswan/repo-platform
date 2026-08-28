@@ -4,7 +4,7 @@ Every repository in the fleet - repo-platform included - gates merges on a requi
 
 ## The verdict
 
-The judgment lives once, in `.github/workflows/reusable-all-green.yml`: repo-platform's own `.github/workflows/all-green.yml` calls it by local path, and every managed repository's thin managed `all-green.yml` wrapper calls it at the green-gated `@build` ref. The wrapper must live client-side because `workflow_run` events only fire for workflows in the same repository; the logic living centrally means a verdict fix reaches the fleet without a sync PR.
+The judgment lives once, in `.github/workflows/reusable-all-green.yml`: repo-platform's own `.github/workflows/all-green.yml` calls it by local path, and every managed repository's thin managed `all-green.yml` wrapper calls it at the green-gated `@build` ref. The wrapper must live client-side because a `workflow_run` trigger only runs a workflow's copy in the same repository AND on its default branch; the logic living centrally means a verdict fix reaches the fleet without a sync PR.
 
 When a CI run completes (any conclusion), the verdict:
 
@@ -30,9 +30,15 @@ The check NAME is pinned once as data by the `all-green-name` rule: the string t
 
 Anything that asks "is this commit green" reads the CHECK RUN, never the CI run's conclusion: a run whose gating job was skipped still concludes `success`, so the run conclusion fails open. `shared/all_green.ts` is the one implementation (the build publisher and the sync's stamped-source gate share it): it lists the sha's `all-green` check runs by name with `filter=latest`, accepts only checks the `github-actions` app created, rejects checks whose recorded event (the verdict stamps the judged run's event into `external_id`) is a pull_request - a PR run tests the synthetic merge tree, never the sha's own tree - and passes on any completed success. Checks created by the retired aggregate JOB satisfy the same read (the event filter is a blocklist because their external_ids are opaque), so commits vouched for before the inversion stay green. The verdict races its consumers (both trigger on the same CI completion), so the read polls briefly under `ALL_GREEN_WAIT_MS` before failing closed.
 
+The release pipeline follows the same rule with a different delivery. ONE rule: nothing happens off a commit unless its whole run was green. Consumers OUTSIDE the run - the merge gate, build promotion, the sync's stamped-source gate - read the posted `all-green` check run, because they cannot see inside the run. The one consumer INSIDE the run, the release-please module's `info-release` job, delivers the rule as `needs: [checks, ci]`: it is one of the run's own jobs, and the check run does not exist until the whole run - release included - completes. `needs` is marginally stricter than the verdict, deliberately: it requires both caller jobs to succeed outright, so even a failure in a nested repo-owned `info-*` job - which the verdict waves through - holds release back. Same rule, two enforcement points; as the fragment's comment puts it (templates/release-please/fragments/ci-release-please.jinja), release depends on the gate but is not gated by it.
+
 ## The unwedge path
 
 If a verdict never lands at a sha - the `workflow_run` event was lost, or the verdict run itself was swallowed - the gate stays missing and everything fails closed. Dispatch the `All Green` workflow with the sha: it re-judges the newest completed CI run there and posts the check as if the event had just arrived.
+
+## The bootstrap gap
+
+The sync PR that INTRODUCES `all-green.yml` is unverdictable by construction: the default-branch constraint above means only the merged copy of the workflow can ever run, and that copy does not exist until this very PR merges - the `workflow_dispatch` unwedge runs under the same constraint, so it cannot help there either. The path is a one-time admin-bypass merge; the sync PR carries a note naming it when it detects the transition (the update delivers the workflow and the target's default branch lacks it), and stays on the manual-review path because its required check can never appear. It self-heals immediately: every later PR is judged by the merged copy, so the bypass happens once per absent-to-present transition of the workflow - once per repository, unless the file is later deleted out of band.
 
 ## Single-call fleet CI
 

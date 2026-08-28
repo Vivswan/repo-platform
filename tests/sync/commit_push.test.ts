@@ -17,6 +17,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { capture } from "../../.github/scripts/shared/proc.ts";
+import { ALL_GREEN_BOOTSTRAP_NAME } from "../../.github/scripts/sync/section_files.ts";
 
 const SCRIPT = join(import.meta.dir, "../../.github/scripts/sync/commit_push.ts");
 const SENTINEL = "ghp_SENTINEL";
@@ -27,6 +28,10 @@ const GIT_ERROR = `fatal: unable to access 'https://x-access-token:${SENTINEL}@g
 // serves the lease and fails the push itself; stale-push-fail fails the
 // push with stale-lease evidence flanked by 403-shaped progress bytes;
 // protect-push-fail fails it quoting a file whose NAME says "stale info".
+// The withhold-* modes drive the Workflows-scope fallback end to end: the
+// FIRST push fails with the workflow-permission shape (STUB_STATE marks
+// it spent), the diff calls report the named workflow file as the
+// withheld change, and the retry push succeeds.
 const STUB_GIT = `#!/bin/sh
 case "$*" in
   *ls-remote*)
@@ -46,8 +51,21 @@ case "$*" in
       echo 'remote: error: GH013: Repository rule violations found for "(stale info).txt".' >&2
       exit 1
     fi
+    case "$STUB_MODE" in
+      withhold-*)
+        if [ -f "$STUB_STATE" ]; then exit 0; fi
+        : > "$STUB_STATE"
+        echo "refusing to allow a Personal Access Token to create or update workflow files without workflows permission" >&2
+        exit 1 ;;
+    esac
     echo "${GIT_ERROR}" >&2
     echo "remote: see https://x-access-token:${SENTINEL}@github.com/o/r.git"
+    exit 1 ;;
+  *"diff --name-only"*)
+    if [ "$STUB_MODE" = "withhold-allgreen" ]; then echo ".github/workflows/all-green.yml"; fi
+    if [ "$STUB_MODE" = "withhold-other" ]; then echo ".github/workflows/ci.yml"; fi
+    exit 0 ;;
+  *"diff --quiet"*)
     exit 1 ;;
   *) exit 0 ;;
 esac
@@ -65,14 +83,18 @@ beforeAll(() => {
   chmodSync(join(stubBin, "git"), 0o755);
 });
 
-function runCommitPush(mode: string, hideDetails: string) {
+function runCommitPush(mode: string, hideDetails: string, temp: Record<string, string> = {}) {
   const runnerTemp = mkdtempSync(join(scratch, "rt-"));
   writeFileSync(join(runnerTemp, "gh-output.txt"), "");
+  for (const [name, content] of Object.entries(temp)) {
+    writeFileSync(join(runnerTemp, name), content);
+  }
   const result = capture([process.execPath, SCRIPT], {
     cwd: join(scratch, "work"),
     env: {
       PATH: `${stubBin}:${process.env.PATH}`,
       STUB_MODE: mode,
+      STUB_STATE: join(runnerTemp, "push-state"),
       TARGET: "o/r",
       TARGET_DISPLAY: hideDetails === "true" ? "repo #1" : "",
       BRANCH: "automation/repo-platform",
@@ -201,5 +223,32 @@ describe("commit_push failure diagnostics", () => {
       const result = runCommitPush(mode, "false");
       expect(existsSync(join(result.runnerTemp, "hidden-failures.tsv"))).toBe(false);
     }
+  });
+});
+
+describe("commit_push Workflows-scope withhold reconciliation", () => {
+  const NOTE = "> [!IMPORTANT]\n> FIRST VERDICT DELIVERY: merge once with admin bypass.\n";
+
+  test("withholding all-green.yml clears the bootstrap note (the PR no longer introduces it)", () => {
+    const result = runCommitPush("withhold-allgreen", "false", {
+      [ALL_GREEN_BOOTSTRAP_NAME]: NOTE,
+    });
+    expect(result.exitCode).toBe(0);
+    expect(readFileSync(join(result.runnerTemp, "withheld-workflows.txt"), "utf-8")).toContain(
+      ".github/workflows/all-green.yml",
+    );
+    expect(readFileSync(join(result.runnerTemp, ALL_GREEN_BOOTSTRAP_NAME), "utf-8")).toBe("");
+    expect(result.stdout).toContain("workflow-file changes were withheld");
+  });
+
+  test("withholding a different workflow leaves the bootstrap note intact", () => {
+    const result = runCommitPush("withhold-other", "false", {
+      [ALL_GREEN_BOOTSTRAP_NAME]: NOTE,
+    });
+    expect(result.exitCode).toBe(0);
+    expect(readFileSync(join(result.runnerTemp, "withheld-workflows.txt"), "utf-8")).toContain(
+      ".github/workflows/ci.yml",
+    );
+    expect(readFileSync(join(result.runnerTemp, ALL_GREEN_BOOTSTRAP_NAME), "utf-8")).toBe(NOTE);
   });
 });

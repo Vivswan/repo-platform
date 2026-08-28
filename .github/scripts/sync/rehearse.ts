@@ -604,6 +604,14 @@ export function rehearseRepo(slug: string, options: RehearsalOptions): Rehearsal
       ],
       { cwd: REPO_ROOT, env: legEnv },
     );
+    // The workflow's all-green bootstrap detection (all_green_bootstrap.ts):
+    // a sync PR that introduces the verdict workflow can never receive its
+    // own verdict, so it gets the one-time admin-bypass note. The report
+    // lands under RUNNER_TEMP by the script's own default, printed below.
+    run(["bun", join(import.meta.dir, "all_green_bootstrap.ts"), "--root", targetDir], {
+      cwd: REPO_ROOT,
+      env: legEnv,
+    });
     // Conflict resolution and the preserve steps can rewrite files after
     // copier's post-render stamp hook ran, so the manifest is stamped once
     // more when the tree is final - the same final stamping step
@@ -694,6 +702,10 @@ export function rehearseRepo(slug: string, options: RehearsalOptions): Rehearsal
         ["retired-modules.txt", "Retired modules dropped from the selection"],
         ["removed-paths.txt", "The template retired these files; this update deletes them"],
         ["starter-pin-rollout.md", "Starter pin rollout (one-run transition note)"],
+        [
+          "all-green-bootstrap.md",
+          "All-green bootstrap (first verdict delivery; the PR would stay manual-review - one-time admin-bypass merge)",
+        ],
         ["local-carryover.md", "Split-file carry summary (rebuilt structurally)"],
         ["carry-review.txt", "Split-file carries needing review (the PR would stay manual-review)"],
         [

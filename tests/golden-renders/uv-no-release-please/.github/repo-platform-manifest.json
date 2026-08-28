@@ -8,7 +8,7 @@
     ".github/actionlint.yaml": {"class": "starter"},
     ".github/dependabot.yml": {"class": "managed", "hash": "2fa24c564ea849019df05ed473de58c4dce330f1d5cf50eab73d53837be71751"},
     ".github/repo-platform-manifest.json": {"class": "managed", "hash": null, "commit": "xxxxxxx"},
-    ".github/workflows/all-green.yml": {"class": "managed", "hash": "0156356157cabc8e17b7526c029480bce1c212da1afa7996299524658fc564db"},
+    ".github/workflows/all-green.yml": {"class": "managed", "hash": "645437a8cdcf6eb7d7ccac84e776d830ca4dd3a8ac52f75e0a9bf856efbe068f"},
     ".github/workflows/auto-format.yml": {"class": "starter"},
     ".github/workflows/checks.yml": {"class": "starter"},
     ".github/workflows/ci.yml": {"class": "managed", "hash": "ba0b88b15f5f53db872c2163109a01ec432f4be9825949ed8e358ea3be43fe5a"},

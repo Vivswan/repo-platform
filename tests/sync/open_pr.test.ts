@@ -10,6 +10,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  ALL_GREEN_BOOTSTRAP_NAME,
   REMOVED_SPLITS_NAME,
   SETTINGS_LAYERING_NAME,
   TAIL_SHRANK_NAME,
@@ -148,6 +149,25 @@ describe("open_pr sections and auto-merge", () => {
     expect(r.exitCode).toBe(0);
     expect(r.body).toContain("settings.yml layering");
     expect(r.merged).toBe(false);
+  });
+
+  test("the all-green bootstrap note becomes a body section and forces review", () => {
+    const note =
+      "> [!IMPORTANT]\n> FIRST VERDICT DELIVERY: merge this PR once with admin bypass.\n";
+    const r = run({ temp: { [ALL_GREEN_BOOTSTRAP_NAME]: note } });
+    expect(r.exitCode).toBe(0);
+    expect(r.body).toContain("FIRST VERDICT DELIVERY");
+    expect(r.merged).toBe(false);
+    expect(r.output).toContain("auto-merge left off");
+  });
+
+  test("no bootstrap note (the target already has the workflow) leaves the body clean and auto-merge armed", () => {
+    // The detection writes an EMPTY report when the condition is false;
+    // an empty flag file is no section and must not hold the PR.
+    const r = run({ temp: { [ALL_GREEN_BOOTSTRAP_NAME]: "" } });
+    expect(r.exitCode).toBe(0);
+    expect(r.body).not.toContain("FIRST VERDICT DELIVERY");
+    expect(r.merged).toBe(true);
   });
 
   test("the carry summary is a section WITHOUT forcing review", () => {

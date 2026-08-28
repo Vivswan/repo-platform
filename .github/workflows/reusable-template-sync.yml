@@ -372,6 +372,22 @@ jobs:
           bun .github/scripts/sync/run_hidden.ts "starter pin rollout" -- \
             bun .github/scripts/sync/starter_pin_rollout.ts "${flags[@]}"
 
+      # The all-green bootstrap gap: a PR that INTRODUCES the verdict
+      # workflow can never receive its own verdict - workflow_run (and the
+      # dispatch unwedge) run only the default branch's copy, which does
+      # not exist until that PR merges (docs/all-green.md). The script
+      # writes the PR-body note naming the one-time admin-bypass merge,
+      # which open_pr.ts appends and holds manual; commit_push.ts clears
+      # the note when its Workflows-scope withhold keeps the file from
+      # being delivered. Wrapped in run_hidden: whether the target's
+      # default branch carries the workflow is target state, so a hidden
+      # target's status lines stay off the public log.
+      - name: Note the all-green bootstrap gap
+        run: |
+          bun .github/scripts/sync/run_hidden.ts "all-green bootstrap" -- \
+            bun .github/scripts/sync/all_green_bootstrap.ts \
+            --root target --hide-details "$HIDE_DETAILS"
+
       # Conflict resolution and the preserve steps can rewrite files after
       # copier's own post-render stamp hook ran, so the ownership
       # manifest's hashes are stamped once more when the tree is final

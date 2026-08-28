@@ -22,3 +22,10 @@ export const REMOVED_SPLITS_NAME = "removed-splits.md";
  * action pins the one-run rollout rewrote in place, and the hand-set pins
  * it deliberately left alone. Informational, never forces review. */
 export const STARTER_PINS_NAME = "starter-pin-rollout.md";
+
+/** all_green_bootstrap.ts's first-verdict-delivery note: this update
+ * introduces .github/workflows/all-green.yml, which the target's default
+ * branch does not carry, so no verdict can land on the PR itself and the
+ * one-time path is an admin-bypass merge. Forces the manual-review path
+ * (auto-merge could never fire: the required check cannot appear). */
+export const ALL_GREEN_BOOTSTRAP_NAME = "all-green-bootstrap.md";

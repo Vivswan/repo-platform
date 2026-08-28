@@ -5,14 +5,17 @@
 # create the `all-green` check run branch protection requires (the
 # all-green convention - see
 # https://github.com/Vivswan/repo-platform/blob/main/docs/all-green.md).
-# workflow_run events only fire for workflows living in this repository,
-# so this thin trigger is rendered here; the judgment itself lives in
+# workflow_run triggers only run a workflow's copy on this repository's
+# own default branch (same repo AND default branch), so this thin trigger
+# is rendered here; the judgment itself lives in
 # repo-platform's reusable-all-green.yml, at the green-gated @build ref,
 # so a verdict fix reaches the fleet without a sync PR.
 #
 # The dispatch input is the unwedge path: when a verdict never landed at
 # a sha (a lost workflow_run event), dispatch this workflow with the sha
-# and it re-judges the newest completed CI run there.
+# and it re-judges the newest completed CI run there. It runs under the
+# same default-branch constraint, so it cannot help the one PR that
+# introduces this file - that PR merges once with admin bypass.
 
 name: All Green
 
