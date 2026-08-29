@@ -53,16 +53,37 @@ const tipSha = requireEnv("TIP_SHA");
 const sourceSha = requireEnv("SOURCE_SHA");
 
 const subject = `build tip ${tipSha.slice(0, 12)}`;
+// Both remedies, because dispatch alone does not cover the space: a
+// rebuild from main heals a broken stamp or a drifted tree, but a
+// hand-pushed tip whose tree already matches main's composition under a
+// healthy stamp gives publish.ts nothing to stage and nothing its skip
+// guard objects to, so the dispatch is a no-op against it.
 const rebuildHint =
-  "If the build branch was pushed by something other than the Build Branches workflow, reset it: dispatch Build Branches to rebuild it from main, then re-run the sync.";
+  "If the build branch was pushed by something other than the Build Branches workflow, reset it: dispatch Build Branches to rebuild it from main, then re-run the sync. If the dispatch skips as no-change (the tip's tree already matches main's composition under a healthy stamp), have an admin reset refs/heads/build, or land any change that moves the composed tree.";
+
+// The battery's git questions answer with exit 0/1; anything else (or a
+// deadline expiry) is an errored look, not a verdict, and this gate
+// fails closed on it: read as a verdict, an errored call during the
+// rollback walk would skip a newer ancestral stamp and pass a replayed
+// old build to the tree proof - which a replay PASSES, since its tree
+// rebuilds cleanly from its old source. Failing here is safe: the
+// battery runs before any worktree exists, so there is no cleanup to
+// skip.
+function verdictExit(probe: { exitCode: number; timedOut: boolean }, what: string): number {
+  if (probe.timedOut || (probe.exitCode !== 0 && probe.exitCode !== 1)) {
+    fail(`${subject}: ${what} could not answer (exit ${probe.exitCode}); refusing to guess.`);
+  }
+  return probe.exitCode;
+}
 
 function isAncestor(ancestor: string, descendant: string): boolean {
-  return capture(["git", "merge-base", "--is-ancestor", ancestor, descendant]).exitCode === 0;
+  const probe = capture(["git", "merge-base", "--is-ancestor", ancestor, descendant]);
+  return verdictExit(probe, "git merge-base --is-ancestor") === 0;
 }
 
 function resolveCommit(revspec: string): string {
   const probe = capture(["git", "rev-parse", "--verify", "--quiet", `${revspec}^{commit}`]);
-  return probe.exitCode === 0 ? probe.stdout.trimEnd() : "";
+  return verdictExit(probe, "git rev-parse --verify") === 0 ? probe.stdout.trimEnd() : "";
 }
 
 const stampProblem = stampUnhealthyReason({

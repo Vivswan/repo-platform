@@ -7,6 +7,7 @@ const script = join(import.meta.dir, "../../.github/scripts/sync/wait_for_build.
 
 const MAIN_SHA = "a".repeat(40);
 const OLD_SOURCE = "c".repeat(40);
+const TIP_SHA = "e".repeat(40);
 const TREE_A = "1".repeat(40);
 const TREE_B = "2".repeat(40);
 
@@ -25,7 +26,14 @@ const TREE_B = "2".repeat(40);
 // `rev-parse FETCH_HEAD^{tree}` prints GIT_TIP_TREE (fails when unset),
 // and worktree/init/add are silent successes. A `bun` stub (below) makes
 // the rebuild's install + compose legs no-ops that still land in the
-// calls log, so tests can count how often the rebuild ran.
+// calls log, so tests can count how often the rebuild ran (and sleeps
+// BUN_SLEEP seconds first when set - the wedged-install case). The
+// tree-equal arm's stamp gate gets canned answers too: `rev-parse
+// FETCH_HEAD` prints GIT_TIP_SHA, `--is-shallow-repository` prints
+// GIT_SHALLOW (default false), `rev-parse --verify X^{commit}` resolves
+// (unless GIT_STAMP_UNRESOLVABLE), and `merge-base --is-ancestor`
+// affirms (exit 1 under GIT_STAMP_OFF_MAIN; exit 2 - an errored look,
+// not a verdict - under GIT_MERGE_BASE_ERR).
 const gitStub = `#!/usr/bin/env bash
 set -euo pipefail
 { printf '%s' "git"; for a in "$@"; do printf '\\x1f%s' "$a"; done; printf '\\x1e'; } >>"$CALLS_LOG"
@@ -33,7 +41,7 @@ if [ -n "\${GIT_SLEEP:-}" ]; then sleep "$GIT_SLEEP" </dev/null >/dev/null 2>&1;
 cmd=""
 for a in "$@"; do
   case "$a" in
-    fetch|log|rev-parse|worktree|init|add|write-tree) cmd="$a"; break;;
+    fetch|log|rev-parse|merge-base|worktree|init|add|write-tree) cmd="$a"; break;;
   esac
 done
 case "$cmd" in
@@ -53,6 +61,20 @@ case "$cmd" in
       printf '%s\\n' "$GIT_TIP_TREE"
       exit 0
     fi
+    if [ "$last" = 'FETCH_HEAD' ]; then printf '%s\\n' "\${GIT_TIP_SHA:-}"; exit 0; fi
+    if [ "$last" = '--is-shallow-repository' ]; then printf '%s\\n' "\${GIT_SHALLOW:-false}"; exit 0; fi
+    case "$last" in
+      *'^{commit}')
+        if [ -n "\${GIT_STAMP_UNRESOLVABLE:-}" ]; then exit 1; fi
+        printf '%s\\n' "\${last%'^{commit}'}"
+        exit 0
+        ;;
+    esac
+    exit 0
+    ;;
+  merge-base)
+    if [ -n "\${GIT_MERGE_BASE_ERR:-}" ]; then exit 2; fi
+    if [ -n "\${GIT_STAMP_OFF_MAIN:-}" ]; then exit 1; fi
     exit 0
     ;;
   write-tree)
@@ -69,6 +91,7 @@ printf '%s\\tHEAD\\n' "\${GIT_HEAD:-}"
 const bunStub = `#!/usr/bin/env bash
 set -euo pipefail
 { printf '%s' "bun"; for a in "$@"; do printf '\\x1f%s' "$a"; done; printf '\\x1e'; } >>"$CALLS_LOG"
+if [ -n "\${BUN_SLEEP:-}" ]; then sleep "$BUN_SLEEP" </dev/null >/dev/null 2>&1; fi
 exit 0
 `;
 
@@ -113,6 +136,7 @@ function run(opts: Options = {}) {
       CALLS_LOG: calls,
       RUNNER_TEMP: root,
       GIT_HEAD: MAIN_SHA,
+      GIT_TIP_SHA: TIP_SHA,
       // Time is INJECTED, never raced: three fast attempts under a
       // wall-clock deadline far above any real probe latency, so the
       // attempt-path assertions (waiting lines, the final warning) are
@@ -219,6 +243,102 @@ describe("wait_for_build.ts", () => {
     );
     expect(r.output).not.toContain("waiting for the build branch");
     expect(r.output).not.toContain("::warning::");
+    // The verdict must have come THROUGH the stamp gate: the battery's
+    // ancestry question is its unmistakable fingerprint in the calls log.
+    expect(r.calls.some((args) => args.includes("merge-base"))).toBe(true);
+    // On a complete checkout the gate's one fetch must NOT unshallow.
+    const gateFetch = r.calls.find((args) => args.includes("fetch") && args.at(-1) === TIP_SHA);
+    expect(gateFetch).toBeDefined();
+    expect(gateFetch).not.toContain("--unshallow");
+  });
+
+  test("a shallow checkout gets one unshallowing fetch of main plus the tip before the verdict", () => {
+    // The plan job's checkout is depth-1 and every probe fetch is
+    // --depth=1 (each one re-shallows the repo), so without this fetch
+    // the stamped source resolves as missing and a healthy quiet-landing
+    // tip would misread as broken - a 40-minute burn on every quiet
+    // landing.
+    const r = run({
+      tipMessage: stampMessage(OLD_SOURCE),
+      env: { GIT_TIP_TREE: TREE_A, GIT_REBUILT_TREE: TREE_A, GIT_SHALLOW: "true" },
+    });
+    expect(r.exitCode).toBe(0);
+    expect(r.output).toContain("fresh (nothing to publish)");
+    const gateFetch = r.calls.find((args) => args.includes("fetch") && args.at(-1) === TIP_SHA);
+    expect(gateFetch).toBeDefined();
+    expect(gateFetch).toContain("--unshallow");
+    expect(gateFetch).toContain("+refs/heads/main:refs/remotes/origin/main");
+  });
+
+  test("tree-equal alone is NOT fresh: an unstamped tip keeps the wait alive", () => {
+    // A hand-pushed tip can carry exactly main HEAD's composed tree and
+    // still be one resolve_refs.ts rejects (no stamp): ending the wait
+    // on tree equality alone would trade the wait - which the coming
+    // recovery publish satisfies - for a red sync. The battery runs ONCE
+    // for the unchanged tip (the verdict is cached by tip sha, so its
+    // full fetch is not repeated every 30 seconds) while the poll still
+    // burns every attempt into the green warning.
+    const r = run({
+      tipMessage: "build: build\n\nno stamp here\n",
+      env: { GIT_TIP_TREE: TREE_A, GIT_REBUILT_TREE: TREE_A },
+    });
+    expect(r.exitCode).toBe(0);
+    expect(r.output).toContain("no parseable source stamp");
+    expect(r.output.split("holds out for a recovery publish").length - 1).toBe(1);
+    expect(r.output).not.toContain("fresh (nothing to publish)");
+    expect(r.output.split("waiting for the build branch to be built").length - 1).toBe(3);
+    expect(r.output).toContain("::warning::the build branch is not yet built");
+    const gateFetches = r.calls.filter((args) => args.includes("fetch") && args.at(-1) === TIP_SHA);
+    expect(gateFetches.length).toBe(1);
+  });
+
+  test("tree-equal under an off-main stamp keeps waiting too, and stays warn-green", () => {
+    // The tampered-stamp shape: the tree matches but the stamp names a
+    // commit outside main's history, which resolve_refs.ts rejects.
+    const r = run({
+      tipMessage: stampMessage(OLD_SOURCE),
+      env: { GIT_TIP_TREE: TREE_A, GIT_REBUILT_TREE: TREE_A, GIT_STAMP_OFF_MAIN: "1" },
+    });
+    expect(r.exitCode).toBe(0);
+    expect(r.output).toContain("is not on main's history");
+    expect(r.output).not.toContain("fresh (nothing to publish)");
+    expect(r.output).toContain("::warning::the build branch is not yet built");
+  });
+
+  test("a gate infra failure is no verdict: uncached, retried every attempt, still warn-green", () => {
+    // An errored ancestry answer (merge-base exit 2) is "could not
+    // look", not "looked and found nothing": caching it would doom the
+    // tree-equal arm for the whole wait after one transient blip. The
+    // gate must abort loudly, re-fetch and retry on each attempt, and
+    // the wait still degrades to the green warning.
+    const r = run({
+      tipMessage: stampMessage(OLD_SOURCE),
+      env: { GIT_TIP_TREE: TREE_A, GIT_REBUILT_TREE: TREE_A, GIT_MERGE_BASE_ERR: "1" },
+    });
+    expect(r.exitCode).toBe(0);
+    expect(r.output).toContain("stamp-health check on build tip");
+    expect(r.output).toContain("could not complete");
+    expect(r.output).not.toContain("fresh (nothing to publish)");
+    expect(r.output).toContain("::warning::the build branch is not yet built");
+    const gateFetches = r.calls.filter((args) => args.includes("fetch") && args.at(-1) === TIP_SHA);
+    expect(gateFetches.length).toBe(3);
+  });
+
+  test("a wedged rebuild step dies at its own bound and degrades to warn - never a hard failure", () => {
+    // BUN_SLEEP wedges the rebuild's `bun install` past the injected
+    // REBUILD_STEP_TIMEOUT_MS (production default 5 minutes against a
+    // measured ~0.6-2 s normal): the bound must kill the step naming the
+    // deadline, and the existing catch degrades to the stamp-only poll
+    // and the green warning - without the bound, a wedged install eats
+    // the plan job's 55-minute ceiling as an unnamed runner-level kill.
+    const r = run({
+      tipMessage: stampMessage(OLD_SOURCE),
+      env: { GIT_TIP_TREE: TREE_A, BUN_SLEEP: "2", REBUILD_STEP_TIMEOUT_MS: "100" },
+    });
+    expect(r.exitCode).toBe(0);
+    expect(r.output).toContain("timed out after 100ms");
+    expect(r.output).toContain("freshness falls back to the stamp probe alone");
+    expect(r.output).toContain("::warning::the build branch is not yet built");
   });
 
   test("stamped older AND tree-differs waits out the attempts, warns green - one rebuild total", () => {

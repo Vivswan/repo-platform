@@ -97,6 +97,52 @@ describe("rebuildBranchTree", () => {
     ).toThrow(/command failed/);
   });
 
+  test("a step past REBUILD_STEP_TIMEOUT_MS throws the deadline instead of hanging", () => {
+    // The knob is read at call time, so setting it here reaches the
+    // helper in-process; 1 ms sits below any real fork+exec, so the
+    // FIRST step (git worktree add) is the one that expires - and the
+    // thrown message must NAME it, pinning step()'s own bound: without
+    // that pin an unbounded step() would still satisfy a bare
+    // "timed out" match via stepCapture's write-tree deadline at the
+    // end. Without the bound, a wedged install runs unbounded under
+    // wait_for_build's 15-minute headroom and dies as a runner-level
+    // job kill instead of degrading to the warn path.
+    process.env.REBUILD_STEP_TIMEOUT_MS = "1";
+    try {
+      expect(() =>
+        rebuildBranchTree({
+          sourceSha,
+          srcDir: join(scratch, "work-slow", "src"),
+          treeDir: join(scratch, "work-slow", "tree"),
+        }),
+      ).toThrow(/timed out after 1ms: git worktree add/);
+    } finally {
+      delete process.env.REBUILD_STEP_TIMEOUT_MS;
+      // The SIGKILLed worktree add may have half-registered its worktree.
+      git("worktree", "prune");
+    }
+  });
+
+  test("a malformed REBUILD_STEP_TIMEOUT_MS fails loud instead of disabling the bound", () => {
+    // Number("") is 0 and a spawnSync timeout of 0 means unbounded, so
+    // an empty knob would silently remove the deadline it exists to set.
+    // The absent scratch dir pins that the throw came before the first
+    // step ran (worktree add is what creates it).
+    process.env.REBUILD_STEP_TIMEOUT_MS = "";
+    try {
+      expect(() =>
+        rebuildBranchTree({
+          sourceSha,
+          srcDir: join(scratch, "work-badknob", "src"),
+          treeDir: join(scratch, "work-badknob", "tree"),
+        }),
+      ).toThrow(/REBUILD_STEP_TIMEOUT_MS must be a positive integer/);
+    } finally {
+      delete process.env.REBUILD_STEP_TIMEOUT_MS;
+    }
+    expect(existsSync(join(scratch, "work-badknob"))).toBe(false);
+  });
+
   test("a credential-shaped source is rejected before any child can echo it", () => {
     // The steps run with inherited stdio, so a smuggled argv value would
     // hit the log raw via git's own error text; the boundary validation

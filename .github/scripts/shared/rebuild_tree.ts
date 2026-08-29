@@ -6,17 +6,53 @@
 // the hash - and how it cleans up - stays its own policy.
 
 import { join } from "node:path";
-import { capture, passthrough, redactCommand } from "./proc.ts";
+import { env } from "./gha.ts";
+import { capture, exitCodeOf, redactCommand } from "./proc.ts";
+
+/** Per-step operational deadline, read at call time so tests can shrink
+ * it: generous next to the measured normal (install + compose run
+ * ~0.6-2 s warm, low minutes on a cold bun cache), small enough that a
+ * wedged `bun install` throws here - into wait_for_build's
+ * degrade-to-warn catch, or the provenance verifier's loud failure -
+ * instead of eating the job's headroom toward an unnamed runner-level
+ * kill. Local on purpose: proc.ts's passthrough is deadline-free by
+ * contract, and this is its only inherited-stdio caller with a real
+ * deadline. */
+function stepTimeoutMs(): number {
+  const raw = env("REBUILD_STEP_TIMEOUT_MS", "300000");
+  const timeoutMs = Number(raw);
+  // A malformed value must fail loud, never disable the bound: Number("")
+  // is 0, and a spawnSync timeout of 0 means unbounded.
+  if (!Number.isInteger(timeoutMs) || timeoutMs <= 0) {
+    throw new Error(
+      `REBUILD_STEP_TIMEOUT_MS must be a positive integer of milliseconds, not "${raw}"`,
+    );
+  }
+  return timeoutMs;
+}
 
 // redactCommand in the error text: the message can end up in a public
 // log, and argv is exactly where the sync pipeline carries its
 // PAT-in-URL shapes.
 function step(command: string[]): void {
-  if (passthrough(command) !== 0) throw new Error(`command failed: ${redactCommand(command)}`);
+  const timeoutMs = stepTimeoutMs();
+  const proc = Bun.spawnSync(command, {
+    stdio: ["inherit", "inherit", "inherit"],
+    timeout: timeoutMs,
+    killSignal: "SIGKILL",
+  });
+  if (proc.exitedDueToTimeout === true) {
+    throw new Error(`command timed out after ${timeoutMs}ms: ${redactCommand(command)}`);
+  }
+  if (exitCodeOf(proc) !== 0) throw new Error(`command failed: ${redactCommand(command)}`);
 }
 
 function stepCapture(command: string[]): string {
-  const result = capture(command);
+  const timeoutMs = stepTimeoutMs();
+  const result = capture(command, { timeoutMs });
+  if (result.timedOut) {
+    throw new Error(`command timed out after ${timeoutMs}ms: ${redactCommand(command)}`);
+  }
   if (result.exitCode !== 0) throw new Error(`command failed: ${redactCommand(command)}`);
   return result.stdout.trimEnd();
 }

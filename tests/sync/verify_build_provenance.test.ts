@@ -34,6 +34,7 @@ const gitStub = `#!/usr/bin/env bash
 set -euo pipefail
 { printf '%s' "git"; for a in "$@"; do printf '\\x1f%s' "$a"; done; printf '\\x1e'; } >>"$CALLS_LOG"
 if [ "\${1:-}" = "merge-base" ]; then
+  if [ -n "\${GIT_MERGE_BASE_ERR:-}" ]; then exit 2; fi
   a="\${@: -2:1}"; b="\${@: -1}"
   case " \${IS_ANCESTOR:-} " in *" $a:$b "*) exit 0 ;; *) exit 1 ;; esac
 fi
@@ -53,6 +54,7 @@ interface Options {
   isAncestor?: string[];
   resolvable?: string[];
   history?: string;
+  env?: Record<string, string>;
 }
 
 const STAMP = (source: string, runId = "5") =>
@@ -78,6 +80,7 @@ function run(opts: Options = {}) {
       IS_ANCESTOR: (opts.isAncestor ?? [`${SOURCE}:${MAIN}`]).join(" "),
       RESOLVABLE: (opts.resolvable ?? [SOURCE]).join(" "),
       GIT_HISTORY_FILE: historyFile,
+      ...opts.env,
     },
   });
   const raw = existsSync(calls) ? readFileSync(calls, "utf-8") : "";
@@ -138,5 +141,32 @@ describe("verify_build_provenance.ts", () => {
     });
     expect(r.exitCode).not.toBe(0);
     expect(r.output).toContain("replays an older build");
+  });
+
+  test("an errored ancestry answer fails the sync closed - never a verdict, never the rebuild", () => {
+    // merge-base exit 2 is "could not look", not "not an ancestor":
+    // read as a verdict it would let the rollback walk skip a newer
+    // ancestral stamp and pass a replayed old build to the tree proof -
+    // which a replay PASSES, since its tree rebuilds cleanly from its
+    // old source. The gate must refuse to guess and stop before the
+    // rebuild.
+    const r = run({ env: { GIT_MERGE_BASE_ERR: "1" } });
+    expect(r.exitCode).not.toBe(0);
+    expect(r.output).toContain("could not answer");
+    expect(r.calls.some((args) => args[1] === "worktree" && args[2] === "add")).toBe(false);
+  });
+
+  test("the rejection hint names BOTH remedies: the dispatch and the admin reset", () => {
+    // A dispatch heals a broken stamp or a drifted tree, but not a
+    // hand-pushed tip whose tree already matches main's composition under
+    // a healthy stamp: publish.ts stages nothing and its skip guard reads
+    // the stamp as fine, so the dispatch is a no-op against that tip. The
+    // hint must name the remedy that always works too - an admin reset of
+    // refs/heads/build (or the next tree-moving landing).
+    const r = run({ resolvable: [] });
+    expect(r.exitCode).not.toBe(0);
+    expect(r.output).toContain("dispatch Build Branches to rebuild it from main");
+    expect(r.output).toContain("reset refs/heads/build");
+    expect(r.output).toContain("moves the composed tree");
   });
 });

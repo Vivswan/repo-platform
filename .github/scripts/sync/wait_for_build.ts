@@ -14,8 +14,12 @@
 //      running.
 //   2. SLOW: rebuild the composed tree at main's HEAD right here
 //      (shared/rebuild_tree.ts - the same rebuild the sync's provenance
-//      verifier runs) and compare tree hashes with the tip. Equal means
-//      the tip already IS HEAD's build: publish.ts commits only on
+//      verifier runs) and compare tree hashes with the tip. Equal, under
+//      a HEALTHY stamp (the shared battery of shared/stamp_checks.ts -
+//      resolve_refs.ts rejects a tampered or unstamped tip no matter
+//      what tree it carries, so ending the wait on one would trade the
+//      wait for a red sync when the recovery publish is already coming),
+//      means the tip already IS HEAD's build: publish.ts commits only on
 //      content change, so after a docs-only or quiet landing the stamp
 //      never moves and this computed equality is the ONLY freshness
 //      proof - the slow path is the COMMON path, one compose per plan
@@ -62,6 +66,7 @@ import { commitStampParse } from "../shared/commit_stamp.ts";
 import { env, error, warning } from "../shared/gha.ts";
 import { capture, mustCapture } from "../shared/proc.ts";
 import { rebuildBranchTree } from "../shared/rebuild_tree.ts";
+import { stampUnhealthyReason } from "../shared/stamp_checks.ts";
 
 const ATTEMPTS = Number(env("WAIT_ATTEMPTS", "80"));
 const DELAY_MS = Number(env("WAIT_DELAY_MS", "30000"));
@@ -163,6 +168,102 @@ function rebuiltTreeAtHead(): string {
 
 const rebuiltTree = rebuiltTreeAtHead();
 
+/** Verdict cache keyed by tip sha: the battery is deterministic for a
+ * given tip (recovery always arrives as a NEW tip, a fresh cache key -
+ * a stamped sha cannot join main's history after the fact), so a broken
+ * tip is not re-fetched and re-walked every 30-second attempt. Only
+ * completed batteries land here; an aborted look never does. */
+const stampVerdicts = new Map<string, boolean>();
+
+/** Thrown when a gate step errored or hit its deadline instead of
+ * answering: "could not look" must abort the battery, never masquerade
+ * as a verdict - a timed-out resolve reads exactly like an unresolvable
+ * stamp otherwise, and caching that would doom the tree-equal arm for
+ * the rest of the wait. */
+class GateProbeError extends Error {}
+
+/** Whether the build tip `tipSha` passes the stamp-health battery
+ * (shared/stamp_checks.ts) that resolve_refs.ts's provenance gate also
+ * runs; `sourceSha` is the tip's parsed stamp. The battery needs real
+ * ancestry - the stamped source's commit, main's history for
+ * isAncestor, the branch history for the rollback walk - which this
+ * job's depth-1 checkout lacks and the probe's depth-1 fetches keep
+ * trimming back out, so the check starts with one full fetch of main
+ * plus the tip (--unshallow whenever the repo reads shallow). Every
+ * infra failure reads as not-yet-fresh: fail-closed into the poll, then
+ * the final warning, per this script's contract. */
+function tipStampHealthy(tipSha: string, sourceSha: string, budget: () => number): boolean {
+  const cached = stampVerdicts.get(tipSha);
+  if (cached !== undefined) return cached;
+  try {
+    const shallow = capture(["git", "rev-parse", "--is-shallow-repository"], {
+      timeoutMs: budget(),
+    });
+    if (shallow.exitCode !== 0) throw new GateProbeError("the shallow-repository probe failed");
+    const fetched = capture(
+      [
+        "git",
+        "-c",
+        "credential.helper=",
+        "fetch",
+        "--quiet",
+        ...(shallow.stdout.trimEnd() === "true" ? ["--unshallow"] : []),
+        "origin",
+        "+refs/heads/main:refs/remotes/origin/main",
+        tipSha,
+      ],
+      { env: GIT_NO_PROMPT_ENV, timeoutMs: budget() },
+    );
+    if (fetched.exitCode !== 0) {
+      throw new GateProbeError("fetching main and the tip's history from origin failed");
+    }
+    const history = capture(["git", "log", "--format=%B", tipSha], { timeoutMs: budget() });
+    if (history.exitCode !== 0) {
+      throw new GateProbeError(`reading ${tipSha.slice(0, 12)}'s ancestry failed`);
+    }
+    const resolveCommit = (revspec: string): string => {
+      const probe = capture(["git", "rev-parse", "--verify", "--quiet", `${revspec}^{commit}`], {
+        timeoutMs: budget(),
+      });
+      // Exit 1 is rev-parse's "does not resolve" verdict; anything else
+      // is an errored look, not an answer.
+      if (probe.timedOut || (probe.exitCode !== 0 && probe.exitCode !== 1)) {
+        throw new GateProbeError(`resolving ${revspec.slice(0, 12)} did not answer`);
+      }
+      return probe.exitCode === 0 ? probe.stdout.trimEnd() : "";
+    };
+    const isAncestor = (ancestor: string, descendant: string): boolean => {
+      const probe = capture(["git", "merge-base", "--is-ancestor", ancestor, descendant], {
+        timeoutMs: budget(),
+      });
+      // Same 0/1-verdict contract as rev-parse above.
+      if (probe.timedOut || (probe.exitCode !== 0 && probe.exitCode !== 1)) {
+        throw new GateProbeError("the ancestry question did not answer");
+      }
+      return probe.exitCode === 0;
+    };
+    const reason = stampUnhealthyReason({
+      sourceSha,
+      history: history.stdout,
+      mainRef: "refs/remotes/origin/main",
+      git: { resolveCommit, isAncestor },
+    });
+    if (reason !== "") {
+      console.log(
+        `the build branch tip's tree matches main HEAD's composition, but ${reason}: the sync would reject the tip, so the wait holds out for a recovery publish.`,
+      );
+    }
+    stampVerdicts.set(tipSha, reason === "");
+    return reason === "";
+  } catch (err) {
+    if (!(err instanceof GateProbeError)) throw err;
+    console.log(
+      `the stamp-health check on build tip ${tipSha.slice(0, 12)} could not complete (${err.message}); the tip stays not-yet-fresh this attempt`,
+    );
+    return false;
+  }
+}
+
 await waitFor(
   (timeoutMs) => {
     // One shrinking budget across the probe's calls, so a multi-call
@@ -178,13 +279,38 @@ await waitFor(
       timeoutMs: budget(),
     });
     if (tip.exitCode !== 0) return false;
-    if (commitStampParse(tip.stdout) === mainSha) {
+    const stampedSource = commitStampParse(tip.stdout);
+    if (stampedSource === mainSha) {
+      // Deliberately stamp-only: this returns before the tree is even
+      // read, rebuiltTree in hand or not. A tampered tree under a
+      // main-HEAD stamp ends the wait here and goes red at the sync's
+      // provenance verify - an availability residual, not injection -
+      // and the stamp battery would be near-vacuous against it (a stamp
+      // naming main's HEAD passes the on-main check by definition).
+      // Holding the wait instead would buy nothing: this state triggers
+      // no publish of its own (build-branches fires on main CI, and main
+      // is unmoved), so recovery waits for the weekly cron, a manual
+      // dispatch, or the next landing - none due within a 40-minute
+      // hold - and the same red sync would just arrive 40 minutes
+      // later. This arm must also stay decisive when the rebuild
+      // degraded (rebuiltTree ""), the state it exists to backstop. A
+      // free tree compare when rebuiltTree IS in hand was considered and
+      // skipped: it could only log, never gate (see above), and the
+      // verifier's tree proof already reports the mismatch precisely.
       console.log(`the build branch tip is stamped with main HEAD ${mainSha}.`);
       return true;
     }
     const tipTree = capture(["git", "rev-parse", "FETCH_HEAD^{tree}"], { timeoutMs: budget() });
     if (tipTree.exitCode !== 0) return false;
     if (rebuiltTree !== "" && tipTree.stdout.trimEnd() === rebuiltTree) {
+      // The gate gets the tip pinned as a sha: FETCH_HEAD is mutable
+      // state its own fetch overwrites, and the full 40-hex shape is
+      // load-bearing for fetching unadvertised history, like the
+      // rebuild's source fetch above.
+      const tipProbe = capture(["git", "rev-parse", "FETCH_HEAD"], { timeoutMs: budget() });
+      const tipSha = tipProbe.stdout.trimEnd();
+      if (tipProbe.exitCode !== 0 || !/^[0-9a-f]{40}$/.test(tipSha)) return false;
+      if (!tipStampHealthy(tipSha, stampedSource, budget)) return false;
       console.log(
         `the build branch tip's tree is byte-identical to the tree composed from main HEAD ${mainSha}; fresh (nothing to publish).`,
       );
