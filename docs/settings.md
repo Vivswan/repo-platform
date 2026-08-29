@@ -89,8 +89,6 @@ Stateless, declared-keys-only, upsert-by-name - on the MERGED document:
 
 ## Label preflight
 
-Not yet landed - ships with the sync/label-preflight branch:
-
 Labels a repo's own files reference must be in the merged roster, or the label reconciliation above would delete them out from under those files:
 
 - Apply side, fail-closed: before the action reconciles labels, a preflight fails that repo's apply when a label referenced by its issue forms (`.github/ISSUE_TEMPLATE/*.yml` `labels:` keys) or its own workflows is LIVE on the repo but missing from the merged roster - the failure names the label and the referencing files. When the merged document manages no labels, the guard stands down with a public notice.
