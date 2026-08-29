@@ -49,20 +49,28 @@ describe("post-green publish wiring", () => {
     ]);
   });
 
-  test("post-green releases only on a green verdict over a green push-to-main CI run", () => {
-    // A custom `if` replaces the implicit success(), so the verdict
-    // dependency must be spelled out - and the event gate must pin all
-    // three of event, branch, and conclusion (any one missing releases
-    // publishes for PR runs, non-main pushes, or red runs).
+  test("post-green releases only on the verdict's OWN green conclusion, on a push-to-main run", () => {
+    // The verdict arms are deliberate redundancy (GitHub implies
+    // success() on an `if` with no status function, but the release
+    // condition must not depend on remembering that rule), and the gate
+    // must consume the verdict's posted conclusion (the reusable's
+    // output; empty on a pending verdict, so pending never releases),
+    // never the triggering run's conclusion, which can be green while
+    // the verdict fails (duplicate job names). The event/branch clauses
+    // keep PR runs and non-main pushes out.
     for (const clause of [
       "needs.verdict.result == 'success'",
+      "needs.verdict.outputs.conclusion == 'success'",
       "github.event_name == 'workflow_run'",
       "github.event.workflow_run.event == 'push'",
       "github.event.workflow_run.head_branch == 'main'",
-      "github.event.workflow_run.conclusion == 'success'",
     ]) {
       expect(allGreen).toContain(clause);
     }
+    // The retired proxy must stay gone: gating post-green on the RUN's
+    // conclusion would skip publishes for runs red only through info-*
+    // jobs and release on runs whose verdict failed.
+    expect(allGreen).not.toContain("workflow_run.conclusion");
   });
 
   test("post-green.yml is workflow_call ONLY (the verdict is the sole way in)", () => {
@@ -71,11 +79,11 @@ describe("post-green publish wiring", () => {
   });
 
   test("post-green leg roster: every leg must be reviewed for its own green verification", () => {
-    // The caller's gate is a PROXY (post-green.yml's header): until the
-    // verdict reusable exposes its conclusion as an output, each leg must
-    // hard-verify green itself. That requirement lives in review, so the
-    // roster is pinned here - adding a leg fails this test until the new
-    // job's verification story is written down and the roster updated.
+    // The caller gates on the verdict's conclusion output, but a leg
+    // that MUTATES shared state keeps its own verification (post-green
+    // .yml's header): that requirement lives in review, so the roster is
+    // pinned here - adding a leg fails this test until the new job's
+    // verification story is written down and the roster updated.
     const doc = parseYaml(postGreen) as Record<string, unknown>;
     const jobs = doc.jobs as Record<string, { steps?: { run?: string; env?: unknown }[] }>;
     expect(Object.keys(jobs)).toEqual(["publish-build"]);

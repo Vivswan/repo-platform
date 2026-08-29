@@ -19,12 +19,12 @@
 # instead of re-deriving it from that context, so a future caller cannot
 # silently hand a leg the wrong commit.
 #
-# The caller's gate is a PROXY (the CI run's conclusion, not the
-# verdict's own judgment - reusable-all-green.yml exposes no conclusion
-# output yet), so every leg here must carry its own authoritative green
-# verification the way publish.ts does (shared/all_green.ts). When the
-# verdict reusable grows a conclusion output, the caller's gate should
-# consume it and this requirement relaxes to defense in depth.
+# The caller gates on the verdict's own posted conclusion (the
+# reusable's workflow_call output), so a leg's own green verification is
+# defense in depth rather than the sole authority - but a leg that
+# MUTATES shared state keeps one anyway (publish.ts hard-verifies the
+# all-green check run via shared/all_green.ts): the caller's gate guards
+# entry, not the world the leg reads at run time.
 
 name: Post Green
 
@@ -51,9 +51,10 @@ jobs:
   # The green-path build-branch publisher - moved here from
   # build-branches.yml's retired workflow_run leg: promotes the push
   # build's parked pending tree (composing as the fallback) and advances
-  # refs/heads/build. publish.ts hard-verifies the all-green check run at
-  # the source commit before any mutation, so the caller's event gate is
-  # runner economy, not the green authority.
+  # refs/heads/build. The caller releases this job on the verdict's own
+  # green conclusion; publish.ts still hard-verifies the all-green check
+  # run at the source commit before any mutation (defense in depth here,
+  # the sole gate on Build Branches' schedule/dispatch paths).
   #
   # State-shaped: publish.ts publishes SOURCE_SHA behind a
   # newest-green-wins staleness preflight against the branch tip's stamp,

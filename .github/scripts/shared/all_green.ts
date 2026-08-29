@@ -38,9 +38,11 @@
 //     source is ungreen (belt over the builder's gate: it catches builds
 //     published before the gate existed or out-of-band).
 //
-// The verdict workflow races the callers (build-branches and the verdict
-// both trigger on the same CI completion, and a re-judged sha's fresh
-// verdict can trail its stale one), so the read polls for a SUCCESS
+// The read can still race a fresh verdict: the green-path publisher is
+// needs-ordered behind the verdict that released it, but the
+// schedule/dispatch self-heal and the sync's stamped-source gate wake on
+// their own, and a re-judged sha's fresh verdict can trail its stale
+// one. So the read polls for a SUCCESS
 // under a hard deadline (ALL_GREEN_WAIT_MS) instead of failing the race;
 // past the deadline it still fails CLOSED, with the all-green.yml
 // dispatch named as the unwedge path.
@@ -195,7 +197,9 @@ export function allGreenFailure(
 // this one.
 
 /** Copilot code review's check run - the second required ruleset context
- * (docs/all-green.md), created by the Actions app like all-green itself. */
+ * (docs/all-green.md) and the verdict's PR-scoped expected member when
+ * the caller requires it, created by the Actions app like all-green
+ * itself. */
 export const COPILOT_CHECK_NAME = "copilot-pull-request-reviewer";
 
 /** Whether a run actor is a bot (Bot type, or GitHub's "[bot]" login

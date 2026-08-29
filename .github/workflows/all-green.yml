@@ -50,36 +50,50 @@ jobs:
     uses: ./.github/workflows/reusable-all-green.yml
     with:
       sha: ${{ github.event_name == 'workflow_dispatch' && inputs.sha || '' }}
+      # Belt and suspenders through the dogfood: the ruleset still
+      # requires Copilot's own check run (.github/settings-override.yml),
+      # and the verdict ALSO owns the review expectation here - proving
+      # the verdict-owned mechanism on this repository ahead of the fleet
+      # cutover that drops the ruleset context. Two documented residuals
+      # ride with it (docs/all-green.md): a bot-actor run stands the
+      # expectation down (the still-required ruleset context covers that
+      # edge for now), and with an expected set declared the verdict
+      # REFUSES schedule/dispatch judgments - expect the weekly CodeQL
+      # schedule run's verdict to go red without posting (the push
+      # verdict at that sha is unaffected). check_ssot's all-green-name
+      # rule pins this wiring so it cannot silently regress to the
+      # input's false default before the cutover makes it the sole home.
+      require-copilot-review: true
 
   # Post-green: everything that runs AFTER the verdict landed green on a
   # push to main (post-green.yml hosts the legs; today, the build-branch
-  # publish). The event gate below is runner economy, not the green
-  # authority: the CI run's conclusion approximates the verdict's
-  # judgment (the reusable exposes no conclusion output yet - once it
-  # does, gate on it here), and publish.ts re-verifies the actual
-  # all-green check run - the one the verdict job above just posted; the
-  # needs edge is what orders that read after the write - before any
-  # mutation. Two proxy residuals, both staleness-only and healed by the
-  # next push or Build Branches' weekly cron: a run red only through an
-  # info-* job skips post-green despite a green verdict, and the dispatch
-  # unwedge path never reaches here (a re-judged sha gets its check run,
-  # nothing more) - Build Branches' schedule/dispatch legs are the
-  # publish self-heal for both.
+  # publish). Gated on the verdict's own posted conclusion (the reusable's
+  # output) - never the triggering run's conclusion, which can be green
+  # while the verdict fails (duplicate job names) or red through an
+  # info-* job the verdict rightly waves through. publish.ts still
+  # re-verifies the all-green check run before any mutation, as every
+  # post-green leg must (defense in depth; the needs edge orders that
+  # read after the verdict's write). The dispatch unwedge path never
+  # reaches here (a re-judged sha gets its check run, nothing more);
+  # Build Branches' schedule/dispatch legs are the publish self-heal.
   #
   # This job is post-gate, not gating: it runs AFTER the verdict, is
   # never judged by it (only CI runs are judged), and so stays out of
   # check_ssot.ts's ALL_GREEN_ROSTER, which pins ci.yml's gating jobs.
   post-green:
     needs: [verdict]
-    # needs.verdict.result spelled out because a custom `if` replaces the
-    # implicit success() - without it, a failed verdict would still
-    # release post-green.
+    # needs.verdict.result spelled out as deliberate redundancy: GitHub
+    # implies success() on an `if` that names no status function, so the
+    # clause is not load-bearing today - it is here so the release
+    # condition never depends on remembering that implication rule. The
+    # conclusion output is empty on a PENDING verdict and unset on a
+    # refused judgment, so neither can release.
     if: >-
       needs.verdict.result == 'success' &&
+      needs.verdict.outputs.conclusion == 'success' &&
       github.event_name == 'workflow_run' &&
       github.event.workflow_run.event == 'push' &&
-      github.event.workflow_run.head_branch == 'main' &&
-      github.event.workflow_run.conclusion == 'success'
+      github.event.workflow_run.head_branch == 'main'
     # Serializes releases per branch; verdicts stay per-sha via the
     # workflow-level group above. This group is deliberately a DIFFERENT
     # resource from the publisher lane the called workflow's job takes

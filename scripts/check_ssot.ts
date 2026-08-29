@@ -2766,6 +2766,24 @@ const rules: Rule[] = [
             got: shaInput === "" ? "no sha forwarding" : shaInput,
           });
         }
+        // The verdict-owned Copilot expectation must stay WIRED: the
+        // reusable's input defaults to false, and the planned fleet
+        // cutover drops the ruleset's Copilot context only once every
+        // verdict owns the expectation - so repo-platform's wiring (the
+        // proving ground, belt and suspenders next to the still-required
+        // ruleset context) must not be able to regress silently to the
+        // default while CI stays green.
+        const copilotWired = asRecord(verdictJob.with ?? {}, "all-green.yml with")[
+          "require-copilot-review"
+        ];
+        if (copilotWired !== true) {
+          mismatches.push({
+            file: ".github/workflows/all-green.yml",
+            expected:
+              "with.require-copilot-review: true (the verdict-owned expectation the fleet cutover depends on must stay wired here)",
+            got: copilotWired === undefined ? "not wired" : canonical(copilotWired),
+          });
+        }
       }
 
       const contexts = (rulesets: Record<string, unknown>[], where: string): string[] => {

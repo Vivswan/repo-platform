@@ -27,10 +27,14 @@
 # parked tree (publish.ts PREBUILT_REF, with a compose fallback when the
 # pending ref is missing). The schedule and dispatch legs below are the
 # SELF-HEAL publishers - they compose and publish in one run, covering a
-# lost workflow_run event, a wedged verdict, or a stamp that needs
-# recovery; publish.ts hard-verifies a completed successful all-green at
-# the source commit before any mutation (shared/all_green.ts), which is
-# the whole green gate on these paths.
+# publish that went missing AFTER a green verdict landed (a failed or
+# evicted post-green run) and a stamp that needs recovery; publish.ts
+# hard-verifies a completed successful all-green at the source commit
+# before any mutation (shared/all_green.ts), which is the whole green
+# gate on these paths - so anything WITHOUT a green verdict at the
+# source (a lost workflow_run event, a wedged verdict) is not theirs to
+# heal alone: dispatch All Green first (it posts the missing check),
+# then Build Branches.
 #
 # Concurrent pushes are race-safe: pending refs are keyed by source sha,
 # and publish.ts skips a stale build whose source is an ancestor of the
