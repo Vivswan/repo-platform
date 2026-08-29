@@ -29,10 +29,11 @@
 //
 // Two enforcement points share this ONE implementation:
 //
-//   - build-branches/publish.ts refuses to publish a template build from
-//     an ungreen source (the workflow_run trigger already fires only on
-//     CI success, but the schedule, dispatch, and API paths reach the
-//     builder unguarded);
+//   - build-branches/publish.ts refuses to advance the build branch from
+//     an ungreen source: every trigger path alike (the CI-completion
+//     wake, the push that parks a pending tree, schedule, dispatch,
+//     API) flows through this in-code gate - trigger conditions only
+//     save runners, they are never the authority;
 //   - sync/resolve_refs.ts refuses to sync a build tip whose STAMPED
 //     source is ungreen (belt over the builder's gate: it catches builds
 //     published before the gate existed or out-of-band).
@@ -180,4 +181,158 @@ export function allGreenFailure(
     }
     sleep(Math.min(sleepMs, remaining));
   }
+}
+
+// --- the verdict's expected set ---------------------------------------------
+//
+// The verdict judges the WHOLE sha, not just the CI run that woke it: on
+// pull_request events the caller can declare conditional workflows the
+// repository owes, and require Copilot's review check run. This is the
+// executable twin of the inline jq/bash in reusable-all-green.yml (whose
+// steps must stay inline - it runs in the CALLER's repository, where these
+// scripts do not exist). Keep the two in lockstep: the ci/ harness
+// (verify_verdict_judgment.sh) pins the workflow side, the bun tests pin
+// this one.
+
+/** Copilot code review's check run - the second required ruleset context
+ * (docs/all-green.md), created by the Actions app like all-green itself. */
+export const COPILOT_CHECK_NAME = "copilot-pull-request-reviewer";
+
+/** Whether a run actor is a bot (Bot type, or GitHub's "[bot]" login
+ * suffix). Copilot does not auto-review bot-authored PRs, so a bot actor
+ * stands the review expectation down; a human pushing to such a PR
+ * re-arms it, which fails closed until a manual review request. */
+export function isBotActor(login: string, type: string): boolean {
+  return type === "Bot" || login.endsWith("[bot]");
+}
+
+/** The pre-judgment refusal for events that can neither carry nor stand
+ * down a declared expected set: push owes only CI by design and PR
+ * events judge the set, but a workflow_dispatch or schedule run at a PR
+ * head would mint a CI-only green over a red conditional. Returns the
+ * refusal reason, or null when the event may be judged. The judge
+ * refuses by FAILING ITS JOB without posting any check - a legitimate
+ * verdict from the sha's real run must never be shadowed - and an event
+ * type unknown today lands here, not on an accidental green. */
+export function expectedSetRefusal(
+  event: string,
+  conditionalWorkflows: string[],
+  requireCopilotReview: boolean,
+): string | null {
+  if (event === "push" || MERGE_TREE_EVENTS.has(event)) return null;
+  if (conditionalWorkflows.length === 0 && !requireCopilotReview) return null;
+  return `a '${event}' run cannot judge the declared expected set (conditional workflows and the Copilot review are pull_request-scoped)`;
+}
+
+/** A workflow run at the judged sha, as the actions/runs listing spells
+ * it (the pull-total read: every run at the sha, never just the trigger). */
+export interface ShaWorkflowRun {
+  id: number;
+  name: string;
+  path: string;
+  event: string;
+  status: string;
+  conclusion: string | null;
+}
+
+/** A workflow identity from the repository's actions/workflows registry
+ * (default-branch state - which is why the run-level path collision
+ * check below exists too). */
+export interface RegisteredWorkflow {
+  name: string;
+  path: string;
+}
+
+/** A check run at the judged sha, as the commits/{sha}/check-runs listing
+ * spells it (appSlug from `.app.slug`, null when app-less). */
+export interface ShaCheckRun {
+  name: string;
+  status: string;
+  conclusion: string | null;
+  appSlug: string | null;
+}
+
+export interface ExpectedSetInput {
+  /** The judged CI run's event - expectations exist only on merge-tree
+   * (pull_request) events; push judgments owe the CI run alone, or
+   * main's green gates would wedge on PR-shaped members. */
+  event: string;
+  /** Workflow display names owed on every pull_request event. */
+  conditionalWorkflows: string[];
+  requireCopilotReview: boolean;
+  /** The judged run's actor (isBotActor) - bots stand the review down. */
+  actorIsBot: boolean;
+  runsAtSha: ShaWorkflowRun[];
+  workflowRegistry: RegisteredWorkflow[];
+  checkRunsAtSha: ShaCheckRun[];
+}
+
+/** What the verdict does with each gap: `failed` members conclude the
+ * check as a completed failure; `missing` members leave it PENDING
+ * (in_progress) with a summary naming them - never green. */
+export interface ExpectedSetGaps {
+  missing: string[];
+  failed: string[];
+}
+
+/** The expected-set judgment: identity FIRST, then state. The registry
+ * (default-branch truth) must know each declared name - unknown means a
+ * roster config error or a decoy not on the default branch, and waiting
+ * would never heal either - and must resolve it to exactly ONE path (two
+ * claimants is the display-name collision, like duplicate job names).
+ * Every candidate run must then COME FROM that registered path:
+ * cardinality alone would pass a branch-added decoy whose run is the
+ * only one at the sha. Only then state: the newest run of the judged
+ * event must conclude success (skipped stands down; no run yet is
+ * pending). Copilot's check, when expected, must be a completed success
+ * by the github-actions app. */
+export function expectedSetGaps(input: ExpectedSetInput): ExpectedSetGaps {
+  const gaps: ExpectedSetGaps = { missing: [], failed: [] };
+  if (!MERGE_TREE_EVENTS.has(input.event)) return gaps;
+  for (const name of [...new Set(input.conditionalWorkflows)].sort()) {
+    const owners = [
+      ...new Set(input.workflowRegistry.filter((wf) => wf.name === name).map((wf) => wf.path)),
+    ].sort();
+    const candidates = input.runsAtSha.filter(
+      (run) => run.name === name && run.event === input.event,
+    );
+    const paths = [...new Set(candidates.map((run) => run.path))].sort();
+    if (owners.length === 0) {
+      gaps.failed.push(
+        `${name} is not a workflow this repository knows - fix the roster, or land the workflow on the default branch first`,
+      );
+    } else if (owners.length > 1) {
+      gaps.failed.push(`${name} is claimed by ${owners.length} workflows (${owners.join(", ")})`);
+    } else if (paths.length > 1) {
+      gaps.failed.push(`${name} is two different workflows at this sha (${paths.join(", ")})`);
+    } else if (candidates.length === 0) {
+      gaps.missing.push(`${name} has no ${input.event} run at this sha`);
+    } else if (paths[0] !== owners[0]) {
+      gaps.failed.push(`${name} ran from ${paths[0]}, not its registered workflow ${owners[0]}`);
+    } else {
+      const newest = candidates.reduce((a, b) => (b.id > a.id ? b : a));
+      if (newest.status !== "completed") {
+        gaps.missing.push(`${name} is still ${newest.status}`);
+      } else if (newest.conclusion !== "success" && newest.conclusion !== "skipped") {
+        gaps.failed.push(`${name} concluded ${newest.conclusion ?? "null"}`);
+      }
+    }
+  }
+  if (input.requireCopilotReview && !input.actorIsBot) {
+    const checks = input.checkRunsAtSha.filter(
+      (check) => check.name === COPILOT_CHECK_NAME && check.appSlug === CHECK_APP,
+    );
+    if (checks.some((check) => check.status === "completed" && check.conclusion === "success")) {
+      // satisfied
+    } else if (checks.length === 0) {
+      gaps.missing.push(`Copilot's ${COPILOT_CHECK_NAME} check run has not been created`);
+    } else if (checks.some((check) => check.status !== "completed")) {
+      gaps.missing.push(`Copilot's ${COPILOT_CHECK_NAME} check run is still in progress`);
+    } else {
+      gaps.failed.push(
+        `the ${COPILOT_CHECK_NAME} check run concluded ${checks[0].conclusion ?? "null"}`,
+      );
+    }
+  }
+  return gaps;
 }

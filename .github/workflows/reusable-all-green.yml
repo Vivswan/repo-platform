@@ -1,19 +1,28 @@
 # The all-green verdict, shared by repo-platform's own all-green.yml and
 # every managed repo's thin wrapper (workflow_run events only fire for
 # workflows living in the same repository, so the TRIGGER must be a
-# client-side file; the judgment lives here, once). It reads the completed
-# CI run's jobs and CREATES the `all-green` check run branch protection
-# requires: every job whose name carries no `info-` segment must conclude
-# success. Skipped jobs are neutral - job-level conditions are how module-
-# and visibility-gated jobs stand down under the single-call fleet CI - but
-# at least one gating job must have actually concluded SUCCESS: an empty
-# or all-skipped run vouches for nothing, so it fails closed.
-# Authoring-time roster enforcement (which jobs must exist) is
+# client-side file; the judgment lives here, once). Every wake - a CI
+# run's completion, or the dispatch unwedge - judges the WHOLE sha, not
+# just the run that woke it: the completed CI run's jobs (every job whose
+# name carries no `info-` segment must conclude success; skipped stands
+# down next to at least one real success, and an empty or all-skipped
+# run fails closed), plus, on pull_request judgments, everything else
+# the caller declared the repository owes - the conditional-workflows
+# roster, read from ALL workflow runs at the judged sha, and Copilot's
+# review check run when required and the judged run's actor is not a
+# bot. A complete, green expected set CREATES the `all-green` check run
+# branch protection requires as a completed success; an incomplete set
+# posts it as in_progress naming exactly what is missing, and the next
+# completion at the sha (or the dispatch unwedge) re-judges idempotently.
+# Authoring-time roster enforcement (which CI JOBS must exist) is
 # check_ssot.ts's all-green-roster rule for this repository and the
 # managed render for the fleet.
 #
 # Steps stay inline: this reusable runs in the CALLER's repository, where
-# repo-platform's scripts do not exist (AGENTS.md editing rules).
+# repo-platform's scripts do not exist (AGENTS.md editing rules). The
+# expected-set computation has an executable twin, expectedSetGaps in
+# .github/scripts/shared/all_green.ts - keep the two in lockstep (the
+# ci/ harness pins this side, the bun tests the other).
 #
 # CRITICAL: the check run is created with head_sha set to the CI run's own
 # head_sha (a required POST field). It has to be the TRIGGERING run's sha:
@@ -50,29 +59,132 @@ on:
         required: false
         type: string
         default: ""
+      conditional-workflows:
+        description: >-
+          JSON list of workflow display names the repository owes on
+          every pull_request event, beyond the CI workflow itself. Each
+          name is bound to ITS ONE registered workflow: the repository's
+          workflow registry must know the name, resolve it to exactly
+          one path, and every candidate run must come from that path -
+          an unknown name, a two-claimant name, or a run from any other
+          path fails closed (a same-named decoy never satisfies the
+          roster). The newest pull_request run of the owning workflow at
+          the judged sha must then conclude success (a skipped run
+          stands down); no run yet keeps the verdict PENDING
+          (in_progress), never green. Fail-closed on shape too: a value
+          that is not a JSON list of strings refuses to judge at all,
+          and judged events that are neither push nor pull_request
+          (workflow_dispatch, schedule, or anything newer) refuse
+          OUTRIGHT while a roster exists - job failure, no check posted
+          - because they can neither carry nor stand down PR-scoped
+          members. What remains, deliberately: the registry is
+          default-branch state, so a rostered workflow introduced,
+          renamed, or moved on the judged branch itself fails closed
+          until that change lands on the default branch; and a PR
+          gutting the registered workflow FILE at its own path passes -
+          the standing same-repo residual review owns, like any check.
+        required: false
+        type: string
+        default: "[]"
+      require-copilot-review:
+        description: >-
+          Expect Copilot's copilot-pull-request-reviewer check run at the
+          judged sha on pull_request events, unless the judged run's
+          actor is a bot (Bot type or a "[bot]" login - Copilot does not
+          auto-review bot-authored PRs; a human touching such a PR
+          re-arms the expectation, which one manual review request
+          satisfies). Absent or still running keeps the verdict PENDING;
+          a completed non-success fails it.
+        required: false
+        type: boolean
+        default: false
+      copilot-wait-minutes:
+        description: >-
+          When Copilot's check is the ONLY missing expected member and
+          CI is otherwise green, poll for it (~20s apart) until this
+          wall-clock budget runs out - plus at most one final iteration
+          (~40s), since the bound is checked between polls - before
+          leaving the pending verdict. Capped at 20 minutes so the
+          verdict job's 30-minute timeout stays unreachable and the
+          pending POST is never lost. If the review lands after the
+          wait gave up, its check completion does not fire a
+          workflow_run wake, so the unwedge is the caller's
+          workflow_dispatch re-judge.
+        required: false
+        type: number
+        default: 10
+    outputs:
+      conclusion:
+        description: >-
+          What the verdict POSTed: "success" or "failure" when the check
+          completed, empty when it was left PENDING (in_progress) - and
+          unset when the judge refused before posting (the job fails
+          then, so a needs-gated caller never runs). Callers sequencing
+          work on the gate (a post-green job) test == 'success' instead
+          of proxying the triggering run's conclusion, which can be
+          green while the verdict itself fails (duplicate job names).
+        value: ${{ jobs.verdict.outputs.conclusion }}
 
 permissions: {}
 
 jobs:
   verdict:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    # Generous over the judgment itself (seconds) because the bounded
+    # Copilot wait runs inside the job; the wait's wall time is bounded
+    # by the copilot-wait-minutes budget plus at most one poll iteration
+    # (~40s), so with the input's 20-minute cap this stays unreachable
+    # and the POST always happens.
+    timeout-minutes: 30
     permissions:
       checks: write
       actions: read
+    outputs:
+      conclusion: ${{ steps.judge.outputs.conclusion }}
     steps:
-      - name: Judge the CI run and create the all-green check
+      - name: Judge the sha and create or refresh the all-green check
+        id: judge
         env:
           GH_TOKEN: ${{ github.token }}
           SHA: ${{ inputs.sha }}
           REQUIRE_JOB: ${{ inputs.require-job }}
+          CONDITIONAL_WORKFLOWS: ${{ inputs.conditional-workflows }}
+          REQUIRE_COPILOT: ${{ inputs.require-copilot-review }}
+          COPILOT_WAIT_MINUTES: ${{ inputs.copilot-wait-minutes }}
           RUN_ID: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.id || '' }}
           HEAD_SHA: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || '' }}
           RUN_EVENT: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.event || '' }}
           RUN_STATUS: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.status || '' }}
           RUN_PATH: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.path || '' }}
+          RUN_ACTOR_LOGIN: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.actor.login || '' }}
+          RUN_ACTOR_TYPE: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.actor.type || '' }}
         run: |
           set -euo pipefail
+          # Fail-closed input shapes, before anything is judged: a roster
+          # that is not a JSON list of strings, or a non-integer wait,
+          # must refuse rather than judge with a silently-empty roster.
+          if ! conditionals="$(jq -ce 'if type == "array" and all(.[]; type == "string") then unique else error("not a list") end' <<<"$CONDITIONAL_WORKFLOWS" 2>/dev/null)"; then
+            echo "::error::conditional-workflows must be a JSON list of workflow display names - got: $CONDITIONAL_WORKFLOWS"
+            exit 1
+          fi
+          # A plain assignment, NEVER a fresh $(...) inside test brackets:
+          # substitutions in a test are errexit-exempt, so a crashing jq
+          # there reads as empty/zero and a guard falls through open. The
+          # harness bans every non-assignment substitution in this block.
+          roster_size="$(jq 'length' <<<"$conditionals")"
+          case "$COPILOT_WAIT_MINUTES" in
+            '' | *[!0-9]*)
+              echo "::error::copilot-wait-minutes must be a whole number of minutes - got: $COPILOT_WAIT_MINUTES"
+              exit 1
+              ;;
+          esac
+          if [ "$COPILOT_WAIT_MINUTES" -gt 20 ]; then
+            # The job's 30-minute timeout must outlive the wait: a budget
+            # it cannot honor would cancel the run between judging and
+            # posting, a lost check only the dispatch unwedge would heal.
+            echo "::error::copilot-wait-minutes must be at most 20 (the verdict job times out at 30) - got: $COPILOT_WAIT_MINUTES"
+            exit 1
+          fi
           if [ -n "$SHA" ]; then
             # Unwedge path: judge the sha's newest completed CI run. The
             # list is newest-first; queued/in-progress runs post their own
@@ -86,6 +198,8 @@ jobs:
             RUN_ID="$(jq -r '.id' <<<"$run")"
             HEAD_SHA="$(jq -r '.head_sha' <<<"$run")"
             RUN_EVENT="$(jq -r '.event' <<<"$run")"
+            RUN_ACTOR_LOGIN="$(jq -r '.actor.login // ""' <<<"$run")"
+            RUN_ACTOR_TYPE="$(jq -r '.actor.type // ""' <<<"$run")"
           elif [ -z "$RUN_ID" ]; then
             echo "::error::neither a triggering workflow_run event nor a sha input - nothing to judge."
             exit 1
@@ -103,6 +217,26 @@ jobs:
               exit 1
             fi
           fi
+          # Events that can neither carry nor stand down a declared
+          # expected set refuse to judge AT ALL: conditional workflows and
+          # the Copilot review are pull_request-scoped, a push run owes
+          # only CI by design, but a workflow_dispatch or schedule run at
+          # a PR head would otherwise mint a CI-only green over a red
+          # conditional. The refusal is JOB-red, never check-red: posting
+          # nothing means a legitimate verdict from the sha's real run is
+          # never shadowed - and an event type unknown today lands here,
+          # not on an accidental green. With nothing declared, these
+          # events keep posting: a CI-only judgment is then complete, and
+          # schedule/dispatch verdicts are what re-runs on main rely on.
+          case "$RUN_EVENT" in
+            push | pull_request | pull_request_target) ;;
+            *)
+              if [ "$roster_size" -gt 0 ] || [ "$REQUIRE_COPILOT" = "true" ]; then
+                echo "::error::a '$RUN_EVENT' run cannot judge the declared expected set (conditional workflows and the Copilot review are pull_request-scoped) - refusing without posting, so no verdict is shadowed; judge this sha through its push or pull_request run."
+                exit 1
+              fi
+              ;;
+          esac
           # filter=all, newest attempt per job NAME: a partial re-run's
           # newest attempt lists only the jobs it re-ran, so judging one
           # attempt alone would lose every job that already concluded in an
@@ -143,6 +277,129 @@ jobs:
             required_ok="$(jq --arg n "$REQUIRE_JOB" \
               'map(select(.name == $n and .conclusion == "success")) | length' <<<"$jobs")"
           fi
+          # --- the expected set beyond the CI run --------------------------
+          # The triggering event is only a wake-up: pull_request judgments
+          # also owe the declared conditional workflows (read from ALL
+          # workflow runs at the judged sha - never just the triggering
+          # run) and, when required and the judged run's actor is not a
+          # bot, Copilot's review check run. Push and other non-PR
+          # judgments owe only the CI run: their verdicts must never wait
+          # on PR-shaped members, or main's green gates would wedge.
+          pr_event=0
+          case "$RUN_EVENT" in pull_request | pull_request_target) pr_event=1 ;; esac
+          conditional_gaps() { # -> {"missing":[...],"failed":[...]} - a FRESH read every call
+            # Command substitution strips errexit from this body (bash
+            # runs $(...) without inherit_errexit), so each fetch must
+            # propagate failure BY HAND: an unreadable API must abort the
+            # judgment loudly - jq -s would otherwise turn the dead read
+            # into an empty list, disarming the registry guard or blanking
+            # the roster, and the verdict would judge fiction.
+            local runs_at_sha registry
+            runs_at_sha="$(timeout 60 gh api --paginate \
+              "repos/$GITHUB_REPOSITORY/actions/runs?head_sha=$HEAD_SHA&per_page=100" \
+              --jq '.workflow_runs[] | {id, name, path, event, status, conclusion}' | jq -s '.')" || return 1
+            registry="$(timeout 60 gh api --paginate \
+              "repos/$GITHUB_REPOSITORY/actions/workflows?per_page=100" \
+              --jq '.workflows[] | {name, path}' | jq -s '.')" || return 1
+            # Per listed name, identity FIRST, then state. The registry
+            # (default-branch truth) must know the name - unknown means a
+            # roster config error or a decoy not on the default branch,
+            # and waiting would never heal either - and must resolve it
+            # to exactly ONE path (two claimants is the display-name
+            # collision, like duplicate job names). Every candidate run
+            # must then COME FROM that registered path: cardinality alone
+            # would pass a branch-added decoy whose run is the only one
+            # at the sha. Only then state: no run of the judged event ->
+            # pending; newest run not completed -> pending; success or
+            # skipped (stands down) -> satisfied; anything else -> failed.
+            jq -n --argjson names "$conditionals" --argjson runs "$runs_at_sha" \
+              --argjson registry "$registry" --arg event "$RUN_EVENT" '
+              reduce $names[] as $name ({missing: [], failed: []};
+                ([$registry[] | select(.name == $name) | .path] | unique) as $owners
+                | [$runs[] | select(.name == $name and .event == $event)] as $cand
+                | ([$cand[].path] | unique) as $paths
+                | if ($owners | length) == 0 then
+                    .failed += ["\($name) is not a workflow this repository knows - fix the roster, or land the workflow on the default branch first"]
+                  elif ($owners | length) > 1 then
+                    .failed += ["\($name) is claimed by \($owners | length) workflows (\($owners | join(", ")))"]
+                  elif ($paths | length) > 1 then
+                    .failed += ["\($name) is two different workflows at this sha (\($paths | join(", ")))"]
+                  elif ($cand | length) == 0 then
+                    .missing += ["\($name) has no \($event) run at this sha"]
+                  elif $paths[0] != $owners[0] then
+                    .failed += ["\($name) ran from \($paths[0]), not its registered workflow \($owners[0])"]
+                  else ($cand | max_by(.id)) as $newest
+                  | if $newest.status != "completed" then
+                      .missing += ["\($name) is still \($newest.status)"]
+                    elif $newest.conclusion == "success" or $newest.conclusion == "skipped" then .
+                    else .failed += ["\($name) concluded \($newest.conclusion // "null")"]
+                    end
+                  end)'
+          }
+          gaps='{"missing":[],"failed":[]}'
+          if [ "$pr_event" -eq 1 ] && [ "$roster_size" -gt 0 ]; then
+            gaps="$(conditional_gaps)"
+          fi
+          gapfail="$(jq -r '.failed | join("; ")' <<<"$gaps")"
+          missing="$(jq -r '.missing | join("; ")' <<<"$gaps")"
+          copilot_check="copilot-pull-request-reviewer"
+          copilot_state() { # -> missing | pending | success | failed:<conclusion>
+            timeout 20 gh api \
+              "repos/$GITHUB_REPOSITORY/commits/$HEAD_SHA/check-runs?check_name=$copilot_check&filter=latest&per_page=100" \
+              --jq '[.check_runs[] | select(.name == "copilot-pull-request-reviewer" and .app.slug == "github-actions")]
+                | if length == 0 then "missing"
+                  elif any(.[]; .status == "completed" and .conclusion == "success") then "success"
+                  elif any(.[]; .status != "completed") then "pending"
+                  else "failed:\(.[0].conclusion // "null")" end'
+          }
+          copilot="not-expected"
+          if [ "$pr_event" -eq 1 ] && [ "$REQUIRE_COPILOT" = "true" ]; then
+            bot=0
+            if [ "$RUN_ACTOR_TYPE" = "Bot" ]; then bot=1; fi
+            case "$RUN_ACTOR_LOGIN" in *'[bot]') bot=1 ;; esac
+            if [ "$bot" -eq 0 ]; then
+              copilot="$(copilot_state)"
+            fi
+          fi
+          # Bounded wait, only when Copilot is the SOLE gap in an
+          # otherwise-green judgment: its review usually trails CI by a
+          # couple of minutes, and this wake is the last one the sha gets
+          # (a check run's completion fires no workflow_run event). Two
+          # bounds, both load-bearing: counted sleeps keep the loop
+          # deterministic under test, and the wall clock keeps the budget
+          # honest when the API reads themselves crawl (worst case one
+          # iteration past the budget, ~40s) - the job's 30-minute timeout
+          # must stay unreachable, or the run dies between judging and
+          # posting.
+          waited=0
+          if [ -z "$dupes" ] && [ -z "$failed" ] && [ "$required_ok" -ne 0 ] && [ "$succeeded" -ne 0 ] \
+            && [ -z "$gapfail" ] && [ -z "$missing" ] \
+            && { [ "$copilot" = "missing" ] || [ "$copilot" = "pending" ]; }; then
+            budget=$((COPILOT_WAIT_MINUTES * 60))
+            wait_start=$SECONDS
+            while [ "$waited" -lt "$budget" ] && [ "$((SECONDS - wait_start))" -lt "$budget" ]; do
+              sleep 20
+              waited=$((waited + 20))
+              copilot="$(copilot_state)"
+              case "$copilot" in missing | pending) ;; *) break ;; esac
+            done
+            # The poll window is exactly where the conditionals go stale:
+            # re-read them before ANY verdict posts, so a member that went
+            # red or re-armed mid-wait flips the outcome instead of riding
+            # a pre-wait snapshot into a green check.
+            if [ "$waited" -gt 0 ] && [ "$roster_size" -gt 0 ]; then
+              gaps="$(conditional_gaps)"
+              gapfail="$(jq -r '.failed | join("; ")' <<<"$gaps")"
+              missing="$(jq -r '.missing | join("; ")' <<<"$gaps")"
+            fi
+          fi
+          waiting="$missing"
+          case "$copilot" in
+            missing) waiting="${waiting:+$waiting; }Copilot's $copilot_check check run has not been created" ;;
+            pending) waiting="${waiting:+$waiting; }Copilot's $copilot_check check run is still in progress" ;;
+          esac
+          status=completed
+          conclusion=""
           if [ -n "$dupes" ]; then
             conclusion=failure
             title="duplicate job names cannot be judged: ${dupes:0:80}"
@@ -162,18 +419,44 @@ jobs:
             conclusion=failure
             title="no gating job actually succeeded"
             summary="CI run $RUN_ID completed without a single gating job concluding success - an empty or all-skipped run vouches for nothing, so the verdict fails closed."$'\n\n'"$table"
+          elif [ -n "$gapfail" ]; then
+            conclusion=failure
+            title="expected workflows did not succeed: ${gapfail:0:60}"
+            summary="Expected pull_request workflows at this sha did not succeed: $gapfail. Fix or re-run them - every CI completion at this sha re-judges this verdict, or dispatch the All Green workflow with this sha."$'\n\n'"$table"
+          elif [[ "$copilot" == failed:* ]]; then
+            conclusion=failure
+            title="the $copilot_check check run concluded ${copilot#failed:}"
+            summary="Copilot's review check at this sha concluded ${copilot#failed:}. Re-request the Copilot review from the PR's reviewers panel, then dispatch the All Green workflow with this sha (or let the next CI completion re-judge)."$'\n\n'"$table"
+          elif [ -n "$waiting" ]; then
+            # The expected set is incomplete but nothing is red: leave the
+            # verdict visibly PENDING, naming exactly what is missing. The
+            # next completion at this sha re-judges; a member that lands
+            # without one (Copilot after the bounded wait gave up) needs
+            # the dispatch unwedge.
+            status=in_progress
+            title="waiting: ${waiting:0:110}"
+            summary="Every gating CI job at this sha is green, but the expected set is incomplete - still waiting on: $waiting. Each CI completion at this sha re-judges this verdict; if a missing member has landed and no re-judgment followed, dispatch the All Green workflow with this sha."$'\n\n'"$table"
           else
             conclusion=success
             title="all $succeeded concluded gating jobs succeeded"
             summary="Every gating job of CI run $RUN_ID succeeded or stood down, and $succeeded actually succeeded."$'\n\n'"$table"
           fi
+          post_args=(
+            -f "name=all-green"
+            -f "head_sha=$HEAD_SHA"
+            -f "status=$status"
+            -f "external_id=$RUN_EVENT"
+            -f "details_url=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$RUN_ID"
+            -f "output[title]=${title:0:120}"
+            -f "output[summary]=${summary:0:60000}"
+          )
+          # A pending verdict carries no conclusion: POSTing one forces
+          # status=completed, and an in_progress check is what keeps the
+          # merge box honestly yellow until the set completes.
+          if [ -n "$conclusion" ]; then
+            post_args+=(-f "conclusion=$conclusion")
+          fi
           timeout 20 gh api --method POST "repos/$GITHUB_REPOSITORY/check-runs" \
-            -f "name=all-green" \
-            -f "head_sha=$HEAD_SHA" \
-            -f "status=completed" \
-            -f "conclusion=$conclusion" \
-            -f "external_id=$RUN_EVENT" \
-            -f "details_url=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$RUN_ID" \
-            -f "output[title]=$title" \
-            -f "output[summary]=${summary:0:60000}" --silent
-          echo "all-green: $conclusion at $HEAD_SHA (CI run $RUN_ID, event $RUN_EVENT)"
+            "${post_args[@]}" --silent
+          echo "conclusion=$conclusion" >> "$GITHUB_OUTPUT"
+          echo "all-green: ${conclusion:-$status} at $HEAD_SHA (CI run $RUN_ID, event $RUN_EVENT)"
