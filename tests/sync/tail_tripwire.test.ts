@@ -7,7 +7,16 @@
 // state - exactly the shape the sync leg hands the tripwire.
 
 import { describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import type { SplitEntry } from "../../.github/scripts/sync/preserve_local_content.ts";
@@ -785,6 +794,66 @@ describe("tail_tripwire script", () => {
       { "AGENTS.md": agentsHead, [MANIFEST_NAME]: "{ not json" },
       { "AGENTS.md": agentsDelivered, [MANIFEST_NAME]: headManifest },
     );
+    const result = runScript(root);
+    expect(result.exitCode).toBe(0);
+    expect(result.report).toContain("no usable ownership manifest");
+  });
+
+  test("a symlink at HEAD at a split path is unverifiable, never parsed as content", () => {
+    // `git show HEAD:AGENTS.md` answers the TARGET PATH STRING for a
+    // symlink (a real managed-repo shape: CLAUDE.md and friends are links
+    // to AGENTS.md by design); the old bytes probe handed that string to
+    // the marker parser as if it were the previous copy.
+    const base = mkdtempSync(join(tmpdir(), "tail-tripwire-"));
+    const root = join(base, "target");
+    mkdirSync(join(root, ".github"), { recursive: true });
+    writeFileSync(join(root, MANIFEST_NAME), headManifest);
+    writeFileSync(join(root, "REAL.md"), agentsHead);
+    symlinkSync("REAL.md", join(root, "AGENTS.md"));
+    initGitRepo(root);
+    unlinkSync(join(root, "AGENTS.md"));
+    writeFileSync(join(root, "AGENTS.md"), agentsDelivered);
+    const result = runScript(root);
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("::warning::");
+    expect(result.report).toContain("carries a symlink at this path, not a regular file");
+    // Unverifiable, not a loss claim: no shrank heading, no fabricated excerpt.
+    expect(result.report).not.toContain("missing from this update's copy");
+  });
+
+  test("a directory at HEAD at a split path is unverifiable, never read as tree-listing prose", () => {
+    // `git show HEAD:AGENTS.md` answers "tree HEAD:AGENTS.md" plus entry
+    // names for a directory; that prose must never stand in for the
+    // previous copy.
+    const base = mkdtempSync(join(tmpdir(), "tail-tripwire-"));
+    const root = join(base, "target");
+    mkdirSync(join(root, ".github"), { recursive: true });
+    mkdirSync(join(root, "AGENTS.md"));
+    writeFileSync(join(root, MANIFEST_NAME), headManifest);
+    writeFileSync(join(root, "AGENTS.md", "inner.md"), agentsHead);
+    initGitRepo(root);
+    rmSync(join(root, "AGENTS.md"), { recursive: true });
+    writeFileSync(join(root, "AGENTS.md"), agentsDelivered);
+    const result = runScript(root);
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("::warning::");
+    expect(result.report).toContain("carries a directory at this path, not a regular file");
+    expect(result.report).not.toContain("missing from this update's copy");
+  });
+
+  test("a symlinked HEAD manifest is as unusable as a damaged one", () => {
+    // The manifest path itself as a link: `git show` would answer the
+    // link target, not manifest JSON - only a blob is ever parsed.
+    const base = mkdtempSync(join(tmpdir(), "tail-tripwire-"));
+    const root = join(base, "target");
+    mkdirSync(join(root, ".github"), { recursive: true });
+    writeFileSync(join(root, ".github", "manifest-real.json"), headManifest);
+    symlinkSync("manifest-real.json", join(root, MANIFEST_NAME));
+    writeFileSync(join(root, "AGENTS.md"), agentsHead);
+    initGitRepo(root);
+    unlinkSync(join(root, MANIFEST_NAME));
+    writeFileSync(join(root, MANIFEST_NAME), headManifest);
+    writeFileSync(join(root, "AGENTS.md"), agentsDelivered);
     const result = runScript(root);
     expect(result.exitCode).toBe(0);
     expect(result.report).toContain("no usable ownership manifest");

@@ -43,7 +43,7 @@ import { join } from "node:path";
 import { CHECK_NAME } from "../shared/all_green.ts";
 import { parseFlags } from "../shared/flags.ts";
 import { requireEnv } from "../shared/gha.ts";
-import { headBytes } from "../shared/git_head.ts";
+import { headEntry } from "../shared/git_head.ts";
 import { ALL_GREEN_BOOTSTRAP_NAME } from "./section_files.ts";
 
 /** The verdict workflow's path in every rendered tree. Exported for
@@ -96,12 +96,15 @@ function main(argv: string[]): number {
   const report = flags["--report"] ?? join(requireEnv("RUNNER_TEMP"), ALL_GREEN_BOOTSTRAP_NAME);
   const hideDetails = flags["--hide-details"] === "true";
 
-  // headBytes throws on a broken repository rather than reading damage as
+  // headEntry throws on a broken repository rather than reading damage as
   // "absent at HEAD" - a false note is mild, but fail closed like every
-  // other HEAD probe in this pipeline.
+  // other HEAD probe in this pipeline. ANY entry at HEAD counts as
+  // "carries it", a non-blob (directory, symlink) included: the note is
+  // about a repo that never had the workflow, and even a damaged shape at
+  // the path means verdict history could exist there.
   const note = bootstrapNote(
     deliversWorkflow(root),
-    headBytes(root, ALL_GREEN_WORKFLOW_PATH) !== null,
+    headEntry(root, ALL_GREEN_WORKFLOW_PATH).kind !== "absent",
   );
   writeFileSync(report, note, "utf-8");
 

@@ -49,7 +49,7 @@ import { join } from "node:path";
 import { parse } from "yaml";
 import { MANIFEST_NAME } from "../../../actions/shared/manifest.ts";
 import { env, error, hideDetails, notice, requireEnv } from "../shared/gha.ts";
-import { headBytes } from "../shared/git_head.ts";
+import { type HeadNonBlobKind, headEntry } from "../shared/git_head.ts";
 import { parseModules } from "../shared/modules.ts";
 import {
   capture,
@@ -270,20 +270,40 @@ const MAX_SECTION_BYTES = 16384;
 /** Reserved within the budget so the omission item always fits. */
 const OMISSION_HEADROOM = 240;
 
-interface RemovedSplit {
-  path: string;
-  /** The repository-owned half at HEAD: content when located, null when
-   * the previous copy does not split at its declared markers, undefined
-   * when the manifest does not classify the path (a pointwise license
-   * candidate, or any deleted path when HEAD's manifest is unreadable). */
-  half: string | null | undefined;
-}
+type RemovedSplit = { path: string } & (
+  | {
+      /** The previous copy is a regular file, so its repository-owned half
+       * was looked for: content when located, null when the copy does not
+       * split at its declared markers, undefined when the manifest does
+       * not classify the path (a pointwise license candidate, or any
+       * deleted path when HEAD's manifest is unreadable). */
+      previous: "content";
+      half: string | null | undefined;
+    }
+  | {
+      /** HEAD carries a directory/symlink/submodule at the path: there is
+       * no file content to split, and the bullet says so instead of a
+       * marker-mismatch diagnosis. */
+      previous: "non-blob";
+      object: HeadNonBlobKind;
+    }
+);
 
 /** One removed path's bullet. The excerpt is bounded by MAX_HALF_LINES and
  * by `excerptBudget` bytes (whatever is left of the section budget), so a
  * single file cannot consume the whole section; the caller charges the
  * bullet's full rendered size against that budget. */
-function removedSplitBullet({ path, half }: RemovedSplit, excerptBudget: number): { text: string } {
+function removedSplitBullet(removal: RemovedSplit, excerptBudget: number): { text: string } {
+  const { path } = removal;
+  if (removal.previous === "non-blob") {
+    return {
+      text:
+        `- \`${path}\`: the previous commit carries a ${removal.object} at this path, not a ` +
+        "regular file, so no repository-owned content can be split out - review the previous " +
+        "copy on the base branch before merging.",
+    };
+  }
+  const { half } = removal;
   if (half === undefined) {
     return {
       text:
@@ -453,15 +473,26 @@ function holdRemovedSplits(): void {
   const removals: RemovedSplit[] = [];
   for (const [path, split] of candidates) {
     if (existsSync(join(targetDir, path))) continue; // still present: not a deletion
-    // headBytes is null only for a path genuinely absent at HEAD and throws
-    // on a real git failure, so a broken repo fails the step loudly rather
-    // than silently skip a candidate - inHead's `cat-file -e` cannot tell
-    // absence from failure and would re-open the fail-open hole.
-    const headCopy = headBytes(targetDir, path);
-    if (headCopy === null) continue;
+    // headEntry reads absent only for a path genuinely absent at HEAD and
+    // throws on a real git failure, so a broken repo fails the step loudly
+    // rather than silently skip a candidate - inHead's `cat-file -e` cannot
+    // tell absence from failure and would re-open the fail-open hole. A
+    // non-blob entry (directory/symlink/submodule) has no file content to
+    // split, so it is held with its own bullet instead of being fed to the
+    // marker parser as if `git show`'s answer were the previous copy.
+    const headCopy = headEntry(targetDir, path);
+    if (headCopy.kind === "absent") continue;
+    if (headCopy.kind === "non-blob") {
+      removals.push({ path, previous: "non-blob", object: headCopy.object });
+      continue;
+    }
     removals.push({
       path,
-      half: split === undefined ? undefined : headRepoOwnedHalf(headCopy.toString("latin1"), split),
+      previous: "content",
+      half:
+        split === undefined
+          ? undefined
+          : headRepoOwnedHalf(headCopy.bytes.toString("latin1"), split),
     });
   }
 
@@ -476,11 +507,11 @@ function holdRemovedSplits(): void {
     notice(
       hideDetails()
         ? `${label}: this update deletes ${removals.length} split-classed file(s); the PR stays ` +
-            "manual-review so a human can restore the repository-owned content that leaves " +
-            "(paths hidden: private repository; named in the PR body)."
+            "manual-review so a human can review the repository-owned content (if any) that " +
+            "leaves (paths hidden: private repository; named in the PR body)."
         : `${label}: this update deletes ${removals.map(({ path }) => path).join(" and ")}; the ` +
-            "PR stays manual-review so a human can restore the repository-owned content that " +
-            "leaves with the deletion (named in the PR body; git history is the record).",
+            "PR stays manual-review so a human can review the repository-owned content (if " +
+            "any) that leaves with the deletion (named in the PR body; git history is the record).",
     );
   } else if (scanUnavailable) {
     notice(

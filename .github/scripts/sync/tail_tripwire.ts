@@ -56,7 +56,7 @@ import { cleanLocalRegion } from "../../../scripts/gitignore_local.ts";
 import { isCommentMarker } from "../../../scripts/ownership.ts";
 import { parseFlags } from "../shared/flags.ts";
 import { requireEnv } from "../shared/gha.ts";
-import { headBytes } from "../shared/git_head.ts";
+import { headEntry } from "../shared/git_head.ts";
 import { hasDuplicateJsonKeys } from "../shared/json.ts";
 import {
   ASCII_MARKER_RE,
@@ -383,12 +383,15 @@ function main(argv: string[]): number {
   // declarations. A missing or unusable one is a target-state anomaly,
   // not this run's: every previously-present split file becomes
   // unverifiable (manual review) instead of failing the job - going red
-  // here would block the very sync that could deliver the fix.
-  const headManifestBytes = headBytes(root, MANIFEST_NAME);
+  // here would block the very sync that could deliver the fix. A non-blob
+  // at the manifest path (a symlinked manifest, say) is as unusable as a
+  // damaged one: `git show` would answer with the link target or a tree
+  // listing, not manifest text, so only a blob is ever parsed.
+  const headManifest = headEntry(root, MANIFEST_NAME);
   let headEntries: Map<string, HeadSplit> | null = null;
-  if (headManifestBytes !== null) {
+  if (headManifest.kind === "blob") {
     try {
-      headEntries = headSplitEntries(headManifestBytes.toString("utf-8"), `HEAD:${MANIFEST_NAME}`);
+      headEntries = headSplitEntries(headManifest.bytes.toString("utf-8"), `HEAD:${MANIFEST_NAME}`);
     } catch {
       headEntries = null;
     }
@@ -401,9 +404,9 @@ function main(argv: string[]): number {
   // retired it (or flipped its class), and retirements ride their own
   // review machinery, not this wire.
   for (const entry of entries) {
-    const headCopy = headBytes(root, entry.path);
+    const headCopy = headEntry(root, entry.path);
     // Absent at HEAD: no previous repository-owned half to lose.
-    if (headCopy === null) continue;
+    if (headCopy.kind === "absent") continue;
     if (headEntries === null) {
       findings.push({
         path: entry.path,
@@ -416,8 +419,22 @@ function main(argv: string[]): number {
     // Not split at HEAD per its own manifest: HEAD claimed no
     // repository-owned half for this path, so there is nothing whose loss
     // this wire guards (an ownership flip has its own review machinery).
-    const headEntry = headEntries.get(entry.path);
-    if (headEntry === undefined) continue;
+    const headDecl = headEntries.get(entry.path);
+    if (headDecl === undefined) continue;
+    // A non-blob at HEAD has no file content: there is no previous copy to
+    // split, and `git show`'s answer (a tree listing, a symlink's target)
+    // must never stand in for one - unverifiable, like every other shape
+    // whose repository-owned half cannot be honestly located.
+    if (headCopy.kind === "non-blob") {
+      findings.push({
+        path: entry.path,
+        kind: "unverifiable",
+        reason:
+          `the previous commit carries a ${headCopy.object} at this path, not a regular ` +
+          "file, so it has no repository-owned half to locate",
+      });
+      continue;
+    }
     const deliveredPath = join(root, entry.path);
     if (!existsSync(deliveredPath)) {
       findings.push({
@@ -429,8 +446,8 @@ function main(argv: string[]): number {
     }
     const finding = compareHalves(
       entry,
-      headEntry,
-      headCopy.toString("latin1"),
+      headDecl,
+      headCopy.bytes.toString("latin1"),
       readFileSync(deliveredPath).toString("latin1"),
     );
     if (finding !== null) findings.push(finding);

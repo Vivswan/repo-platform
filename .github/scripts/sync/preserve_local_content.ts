@@ -91,7 +91,7 @@ import {
 } from "../../../scripts/gitignore_local.ts";
 import { isCommentMarker, isHashMarker } from "../../../scripts/ownership.ts";
 import { parseFlags } from "../shared/flags.ts";
-import { headBytes } from "../shared/git_head.ts";
+import { type HeadNonBlobKind, headEntry } from "../shared/git_head.ts";
 import { capture } from "../shared/proc.ts";
 
 function lastLineIndex(
@@ -566,11 +566,31 @@ function requireHead(root: string): void {
   }
 }
 
-/** The file's pre-render content at the target's HEAD, or null when the
- * path is genuinely absent there (headBytes owns the probe semantics).
- * latin1, not utf-8: the pre-render copy is the byte-owned repo half. */
-function headContent(root: string, rel: string): string | null {
-  return headBytes(root, rel)?.toString("latin1") ?? null;
+/** The file's pre-render state at the target's HEAD (headEntry owns the
+ * probe semantics): decoded content for a regular file, the bare non-blob
+ * kind for a directory/symlink/submodule (which has NO file content to
+ * carry - `git show`'s answer for those is a tree listing or the link
+ * target, never a previous copy), or absent. latin1, not utf-8: the
+ * pre-render copy is the byte-owned repo half. */
+type HeadContent =
+  | { kind: "blob"; content: string }
+  | { kind: "non-blob"; object: HeadNonBlobKind }
+  | { kind: "absent" };
+
+function headContent(root: string, rel: string): HeadContent {
+  const entry = headEntry(root, rel);
+  return entry.kind === "blob" ? { kind: "blob", content: entry.bytes.toString("latin1") } : entry;
+}
+
+/** The outcome note for a split path whose previous copy is not a regular
+ * file: nothing could be split out or carried, so the clean render stands
+ * and the note routes the PR to manual review. */
+function nonBlobNote(object: HeadNonBlobKind): string {
+  return (
+    `the previous commit carries a ${object} at this path, not a regular file - no ` +
+    "repository-local content could be split out or carried, and the fresh render " +
+    "replaces it; reconcile against the previous copy in git history manually"
+  );
 }
 
 /** Land `content` as a REGULAR file at `rel` under `root`. writeFileSync
@@ -709,8 +729,15 @@ function rebuildSplitFile(
   let appendixCarry = false;
   let resetLines: string[] | undefined;
   const reviewReasons: string[] = [];
-  if (target !== null) {
-    const carried = carrySplitEntry(entry, render, target, "render");
+  if (target.kind === "non-blob") {
+    // No previous file content exists to split or carry, and embedding
+    // `git show`'s non-blob answer as a "previous copy preserved in full"
+    // would be false - the clean render stands, the note routes the PR to
+    // manual review, and the tail tripwire independently flags the shape.
+    note = nonBlobNote(target.object);
+    reviewReasons.push("previous copy not a regular file");
+  } else if (target.kind === "blob") {
+    const carried = carrySplitEntry(entry, render, target.content, "render");
     content = carried.content;
     note = carried.note;
     appendixCarry = carried.appendixCarry;
@@ -727,7 +754,7 @@ function rebuildSplitFile(
     // manual.
     if (!appendixCarry) {
       const side = entrySide(entry);
-      const targetHalf = managedHalf(target, entry.marker, side);
+      const targetHalf = managedHalf(target.content, entry.marker, side);
       const deliveredHalf = managedHalf(content, entry.marker, side);
       if (targetHalf !== null && deliveredHalf !== null && targetHalf === deliveredHalf) {
         // Nothing from the previous managed half was dropped.
@@ -771,14 +798,16 @@ const RENDER_INTRO = [
   "repository-local half byte-for-byte from the previous commit, and",
   "copier's merged result for these files was discarded. Local edits inside",
   "a managed half do NOT survive this rebuild (managed halves are",
-  "template-owned); such edits are reset and flagged below. Verify each",
-  "file's diff before merging:",
+  "template-owned); such edits are reset and flagged below. Each bullet",
+  "names its file's actual disposition (not every file has previous content",
+  "to carry); verify each file's diff before merging:",
 ];
 
 const RECOPY_INTRO = [
   "Repo-local content carried over the recovery re-render - the re-render",
   "has no three-way merge and had reset these sanctioned repository-local",
-  "regions; verify each file's diff before merging:",
+  "regions. Each bullet names its file's actual disposition (not every file",
+  "has previous content to carry); verify each file's diff before merging:",
 ];
 
 // The summary shares the PR body with every other section, and gh fails
@@ -926,8 +955,17 @@ function main(argv: string[]): number {
       }
       const render = readFileSync(renderPath).toString("latin1");
       const target = headContent(root, entry.path);
-      if (target === null) continue;
-      const carried = carrySplitEntry(entry, render, target, "recopy");
+      if (target.kind === "absent") continue;
+      if (target.kind === "non-blob") {
+        // Same statement as render mode: no previous file content exists,
+        // the recopied render stands as a regular file, and the note goes
+        // to the recovery PR (recopy runs are manual wholesale).
+        writeRegularFile(root, entry.path, render);
+        rebuiltRels.push(entry.path);
+        outcomes.push({ rel: entry.path, note: nonBlobNote(target.object), reviewReasons: [] });
+        continue;
+      }
+      const carried = carrySplitEntry(entry, render, target.content, "recopy");
       if (carried.note === null) continue;
       writeRegularFile(root, entry.path, carried.content);
       rebuiltRels.push(entry.path);
@@ -964,8 +1002,10 @@ function main(argv: string[]): number {
       "",
     ].join("\n");
     if (hideDetails) {
+      // Neutral counting, not "carried": a non-blob disposition carried
+      // nothing, and this line must stay true for every outcome kind.
       console.log(
-        `carried repo-local content back into ${outcomes.length} file(s) ` +
+        `${outcomes.length} split file(s) carry a disposition note ` +
           "(paths hidden: private repository; listed in the PR body)",
       );
     }
@@ -983,8 +1023,8 @@ function main(argv: string[]): number {
     if (lines.length > 0) {
       console.log(
         hideDetails
-          ? `${lines.length} carried file(s) need review; the PR stays manual (details in the PR body)`
-          : `${lines.length} carried file(s) need review; the PR stays manual`,
+          ? `${lines.length} split file(s) need review; the PR stays manual (details in the PR body)`
+          : `${lines.length} split file(s) need review; the PR stays manual`,
       );
     }
   }

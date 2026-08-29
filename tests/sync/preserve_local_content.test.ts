@@ -5,6 +5,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  rmSync,
   symlinkSync,
   unlinkSync,
   writeFileSync,
@@ -629,6 +630,26 @@ describe("preserve_local_content script (recopy mode)", () => {
     expect(result.summary).toBe("");
   });
 
+  test("a symlink at HEAD at a split path keeps the recopied render and says so", () => {
+    // `git show` answers a symlink's target path string, not file
+    // content: nothing exists to carry, so the recopied render stands and
+    // the summary names the non-blob shape (recovery PRs are manual
+    // wholesale, so the note is the whole signal).
+    const root = makeTarget({ "REAL.md": agentsTarget });
+    symlinkSync("REAL.md", join(root, "AGENTS.md"));
+    initGitRepo(root);
+    unlinkSync(join(root, "AGENTS.md"));
+    writeRecopy(root, [{ path: "AGENTS.md", grammar: "tail-marker", marker: SENTINEL }], {
+      "AGENTS.md": agentsRender,
+    });
+    const result = runScript(root);
+    expect(result.exitCode).toBe(0);
+    const delivered = readFileSync(join(root, "AGENTS.md"), "utf-8");
+    expect(delivered).toBe(agentsRender);
+    expect(delivered).not.toContain("recovery-appendix");
+    expect(result.summary).toContain("carries a symlink at this path, not a regular file");
+  });
+
   test("a marker-bearing file not declared split in the manifest is untouched", () => {
     // The manifest, not a marker scan, drives the file list.
     const root = makeTarget({ "NOTES.md": `note\n${SENTINEL}\nlocal tail\n` });
@@ -665,7 +686,7 @@ describe("preserve_local_content script (recopy mode)", () => {
     });
     const result = runScript(root, ["--hide-details", "true"]);
     expect(result.exitCode).toBe(0);
-    expect(result.stdout).toContain("carried repo-local content back into 1 file(s)");
+    expect(result.stdout).toContain("1 split file(s) carry a disposition note");
     expect(result.stdout).not.toContain("AGENTS.md");
     expect(result.summary).toContain("- `AGENTS.md`:");
   });
@@ -1010,6 +1031,54 @@ describe("preserve_local_content render mode", () => {
     expect(result.exitCode).not.toBe(0);
     expect(result.stderr).toContain("ancestor 'docs' is a symbolic link");
     expect(existsSync(join(outside, "AGENTS.md"))).toBe(false);
+  });
+
+  test("a symlink at HEAD at a split path keeps the clean render and routes to review", () => {
+    // `git show HEAD:AGENTS.md` answers the TARGET PATH STRING for a
+    // symlink; the old bytes probe fed that to the carry as if it were the
+    // previous copy and "preserved" the link target in a recovery
+    // appendix. No file content exists at HEAD here: the render stands,
+    // and the note routes the PR to manual review.
+    const root = makeTarget({ "REAL.md": agentsTarget });
+    symlinkSync("REAL.md", join(root, "AGENTS.md"));
+    initGitRepo(root);
+    unlinkSync(join(root, "AGENTS.md"));
+    writeFileSync(join(root, "AGENTS.md"), MERGE_JUNK);
+    const { renderDir, oldRenderDir } = makeRenderPair(
+      [AGENTS_ENTRY],
+      { "AGENTS.md": agentsRender },
+      { "AGENTS.md": agentsOld },
+    );
+    const result = runRender(root, renderDir, oldRenderDir);
+    expect(result.exitCode).toBe(0);
+    const delivered = readFileSync(join(root, "AGENTS.md"), "utf-8");
+    expect(delivered).toBe(agentsRender);
+    expect(delivered).not.toContain("recovery-appendix");
+    expect(lstatSync(join(root, "AGENTS.md")).isSymbolicLink()).toBe(false);
+    expect(result.summary).toContain("carries a symlink at this path, not a regular file");
+    expect(result.review).toContain("AGENTS.md: previous copy not a regular file");
+  });
+
+  test("a directory at HEAD at a split path keeps the clean render and routes to review", () => {
+    // `git show HEAD:AGENTS.md` answers "tree HEAD:AGENTS.md" plus entry
+    // names for a directory; that prose must never ride into the
+    // delivered file as a "previous copy".
+    const root = makeTarget({ "AGENTS.md/inner.md": agentsTarget });
+    initGitRepo(root);
+    rmSync(join(root, "AGENTS.md"), { recursive: true });
+    writeFileSync(join(root, "AGENTS.md"), MERGE_JUNK);
+    const { renderDir, oldRenderDir } = makeRenderPair(
+      [AGENTS_ENTRY],
+      { "AGENTS.md": agentsRender },
+      { "AGENTS.md": agentsOld },
+    );
+    const result = runRender(root, renderDir, oldRenderDir);
+    expect(result.exitCode).toBe(0);
+    const delivered = readFileSync(join(root, "AGENTS.md"), "utf-8");
+    expect(delivered).toBe(agentsRender);
+    expect(delivered).not.toContain("tree HEAD:");
+    expect(result.summary).toContain("carries a directory at this path, not a regular file");
+    expect(result.review).toContain("AGENTS.md: previous copy not a regular file");
   });
 
   test("a marker-bearing file not declared split in the manifest is untouched", () => {

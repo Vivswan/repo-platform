@@ -14,6 +14,8 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  symlinkSync,
+  unlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -116,6 +118,25 @@ describe("all_green_bootstrap script", () => {
       { [ALL_GREEN_WORKFLOW_PATH]: WORKFLOW },
       { [ALL_GREEN_WORKFLOW_PATH]: WORKFLOW },
     );
+    const r = runScript(root);
+    expect(r.exitCode).toBe(0);
+    expect(r.report).toBe("");
+    expect(r.stdout).toContain("not applicable");
+  });
+
+  test("a non-blob at HEAD's workflow path still counts as 'carries it': no note", () => {
+    // A symlink at the path is hand damage this update replaces, but the
+    // note's claim is "no verdict can land on this PR" - any entry at
+    // HEAD means the branch's history is not the never-had-it bootstrap
+    // case, so the admin-bypass note must not appear.
+    const base = mkdtempSync(join(tmpdir(), "all-green-bootstrap-"));
+    const root = join(base, "target");
+    mkdirSync(join(root, dirname(ALL_GREEN_WORKFLOW_PATH)), { recursive: true });
+    writeFileSync(join(root, "README.md"), "hi\n");
+    symlinkSync("../../README.md", join(root, ALL_GREEN_WORKFLOW_PATH));
+    initGitRepo(root);
+    unlinkSync(join(root, ALL_GREEN_WORKFLOW_PATH));
+    writeFileSync(join(root, ALL_GREEN_WORKFLOW_PATH), WORKFLOW);
     const r = runScript(root);
     expect(r.exitCode).toBe(0);
     expect(r.report).toBe("");

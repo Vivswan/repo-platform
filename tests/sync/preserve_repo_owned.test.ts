@@ -6,7 +6,15 @@
 // here first instead of seeding template text into a fleet repo.
 
 import { describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { REMOVED_SPLITS_NAME } from "../../.github/scripts/sync/section_files.ts";
@@ -76,15 +84,17 @@ function makeWorkspace(templateContent: string | Buffer): string {
 
 // The target repo whose committed state already deleted LICENSE.md: the
 // file is in neither the worktree nor HEAD, which is exactly the re-seed
-// precondition.
-function makeTarget(files: Record<string, string>): string {
+// precondition. A `symlinkTo` value plants a symlink instead of a file
+// (the shape managed repos carry by design: CLAUDE.md -> AGENTS.md).
+function makeTarget(files: Record<string, string | { symlinkTo: string }>): string {
   const base = mkdtempSync(join(tmpdir(), "preserve-owned-target-"));
   const root = join(base, "target");
   mkdirSync(root);
   writeFileSync(join(root, "README.md"), "readme\n");
   for (const [rel, content] of Object.entries(files)) {
     mkdirSync(dirname(join(root, rel)), { recursive: true });
-    writeFileSync(join(root, rel), content);
+    if (typeof content === "string") writeFileSync(join(root, rel), content);
+    else symlinkSync(content.symlinkTo, join(root, rel));
   }
   initGitRepo(root);
   return root;
@@ -240,14 +250,14 @@ describe("preserve_repo_owned removed-splits hold", () => {
   const agentsWithTail = `# AGENTS.md\n\nmanaged\n\n${SENTINEL}\n\n## Local agent docs\n\nlocal agents tail\n`;
 
   function runHold(
-    headFiles: Record<string, string>,
+    headFiles: Record<string, string | { symlinkTo: string }>,
     removedFromTree: string[],
   ): { exitCode: number | null; stdout: string; report: string } {
     // LICENSE.md present keeps the fleet-license re-seed out of the way;
     // TARGET_REF is empty so the re-seed block never resolves a build ref.
     const target = makeTarget({ "LICENSE.md": "fleet license\n", ...headFiles });
     for (const rel of removedFromTree) {
-      rmSync(join(target, rel));
+      rmSync(join(target, rel), { recursive: true });
     }
     const runnerTemp = mkdtempSync(join(tmpdir(), "preserve-owned-hold-"));
     const proc = Bun.spawnSync(["bun", script], {
@@ -323,6 +333,38 @@ describe("preserve_repo_owned removed-splits hold", () => {
     expect(result.exitCode).toBe(0);
     expect(result.report).toContain("`AGENTS.md`");
     expect(result.report).toContain("could not be located");
+  });
+
+  test("a deleted split path that was a symlink at HEAD is held as a non-blob", () => {
+    // `git show HEAD:AGENTS.md` answers the TARGET PATH STRING for a
+    // symlink; the old bytes probe fed that to the marker parser as if it
+    // were the previous copy. There is no file content to split - the
+    // bullet must say that, not diagnose a marker mismatch.
+    const result = runHold(
+      {
+        [MANIFEST_REL]: manifest,
+        "REAL.md": agentsWithTail,
+        "AGENTS.md": { symlinkTo: "REAL.md" },
+      },
+      ["AGENTS.md"],
+    );
+    expect(result.exitCode).toBe(0);
+    expect(result.report).toContain("`AGENTS.md`");
+    expect(result.report).toContain("carries a symlink at this path, not a regular file");
+    expect(result.report).not.toContain("could not be located");
+    expect(result.stdout).toContain("manual-review");
+  });
+
+  test("a deleted split path that was a directory at HEAD is held as a non-blob", () => {
+    // `git show HEAD:AGENTS.md` answers tree-listing prose for a
+    // directory; same rule - no file content, its own bullet.
+    const result = runHold({ [MANIFEST_REL]: manifest, "AGENTS.md/inner.md": agentsWithTail }, [
+      "AGENTS.md",
+    ]);
+    expect(result.exitCode).toBe(0);
+    expect(result.report).toContain("`AGENTS.md`");
+    expect(result.report).toContain("carries a directory at this path, not a regular file");
+    expect(result.stdout).toContain("manual-review");
   });
 
   test("an unreadable HEAD manifest fails closed: a deleted split file still holds the PR", () => {
