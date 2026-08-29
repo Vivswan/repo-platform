@@ -39,6 +39,7 @@ import { commitRunWrite, commitStampParse, commitStampWrite } from "../shared/co
 import { env, fail, requireEnv } from "../shared/gha.ts";
 import { BUILD_IDENTITY } from "../shared/git_identity.ts";
 import { capture, must, mustCapture } from "../shared/proc.ts";
+import { stageComposedTreeArgv } from "../shared/stage_tree.ts";
 import { stampUnhealthyReason } from "../shared/stamp_checks.ts";
 import { PENDING_REF_PREFIX, refSuperseded, staleReason } from "./pending.ts";
 
@@ -223,7 +224,15 @@ function publish(sourceSha: string): void {
   // both trees were written in the same second and the content is
   // same-size - and every decision below trusts this tree.
   must(["rsync", "-a", "--delete", "--checksum", "--exclude=.git", "/tmp/tree/", "/tmp/pub/"]);
-  must(["git", "-C", "/tmp/pub", "add", "-A"]);
+  // Hermetic staging, the SAME argv the sync's verifier hashes the
+  // rebuilt tree with (shared/stage_tree.ts): published tree and rebuilt
+  // tree must be the same function of the composed bytes, or the
+  // provenance proof reads the skew as tampering. For today's composed
+  // trees - nothing ignored, no attribute source rewriting blobs - this
+  // stages exactly what plain `add -A` did, so the staged-diff
+  // decisions below (skip guard, stamp recovery) see the same picture
+  // as before.
+  must(stageComposedTreeArgv("/tmp/pub"));
   const staged = capture(["git", "-C", "/tmp/pub", "diff", "--cached", "--quiet"]).exitCode !== 0;
   // NEVER an empty commit in normal operation: an unchanged composed
   // tree publishes nothing (no commit means no fleet _commit bump and no

@@ -8,6 +8,7 @@
 import { join } from "node:path";
 import { env } from "./gha.ts";
 import { capture, exitCodeOf, redactCommand } from "./proc.ts";
+import { stageComposedTreeArgv } from "./stage_tree.ts";
 
 /** Per-step operational deadline, read at call time so tests can shrink
  * it: generous next to the measured normal (install + compose run
@@ -78,20 +79,13 @@ export function rebuildBranchTree(options: {
   step(["bun", "install", "--frozen-lockfile", "--cwd", srcDir, "--silent"]);
   step(["bun", join(srcDir, ".github/scripts/build-branches/branch_tree.ts"), "--dest", treeDir]);
   step(["git", "-C", treeDir, "init", "--quiet"]);
-  // The staging must be hermetic against every ignore/attribute source,
-  // or the hash skews: --force stages ignored files no matter where the
-  // ignore comes from (a machine-global core.excludesFile, its XDG
-  // fallback ~/.config/git/ignore which applies even with the key unset,
-  // an init.templateDir-planted info/exclude, or a .gitignore INSIDE the
-  // composed tree - measured to silently drop staged files otherwise),
-  // and the attributesFile override closes the blob-content axis (a
-  // global `* text` filter rewrites line endings at add time, which
-  // --force does not touch). A skewed hash here turns wait_for_build's
-  // slow path into a false "not fresh" and the provenance tree proof
-  // into a false tamper accusation. templateDir HOOKS are a non-issue:
-  // no hook fires on init, add, or write-tree. The SOURCE worktree
-  // checkout is left as-is on purpose: the repo's own .gitattributes
-  // governs it, and the scratch repo is where the skew was measured.
-  step(["git", "-C", treeDir, "-c", "core.attributesFile=/dev/null", "add", "-A", "--force"]);
+  // The staging must be the SAME function of the composed tree the
+  // producers used (stage_tree.ts owns the shared argv and the hermetic
+  // rationale), or the hash skews - turning wait_for_build's slow path
+  // into a false "not fresh" and the provenance tree proof into a false
+  // tamper accusation. The SOURCE worktree checkout is left as-is on
+  // purpose: the repo's own .gitattributes governs it, and the scratch
+  // repo is where the skew was measured.
+  step(stageComposedTreeArgv(treeDir));
   return stepCapture(["git", "-C", treeDir, "write-tree"]);
 }

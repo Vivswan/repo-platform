@@ -20,6 +20,7 @@ import { rmSync } from "node:fs";
 import { env, fail, requireEnv } from "../shared/gha.ts";
 import { BUILD_IDENTITY } from "../shared/git_identity.ts";
 import { must } from "../shared/proc.ts";
+import { stageComposedTreeArgv } from "../shared/stage_tree.ts";
 import { pendingRefFor } from "./pending.ts";
 
 // Same source discipline as publish.ts: this push's own commit (on the
@@ -55,7 +56,12 @@ must(["bun", "/tmp/src/.github/scripts/build-branches/branch_tree.ts", "--dest",
 must(["git", "worktree", "add", "--detach", "/tmp/pend", sourceSha]);
 must(["git", "-C", "/tmp/pend", "switch", "--quiet", "--orphan", "pending-build"]);
 must(["rsync", "-a", "--delete", "--checksum", "--exclude=.git", "/tmp/tree/", "/tmp/pend/"]);
-must(["git", "-C", "/tmp/pend", "add", "-A"]);
+// Hermetic staging shared with publish.ts and the sync's verifier
+// (shared/stage_tree.ts): the publisher promotes this parked tree
+// VERBATIM, so it must be the same staging function of the composed
+// tree the verifier will rehash - a skew here surfaces fleet-wide as a
+// false tamper accusation.
+must(stageComposedTreeArgv("/tmp/pend"));
 must([
   "git",
   "-C",
