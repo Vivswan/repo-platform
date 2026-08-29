@@ -66,6 +66,7 @@ import {
   type RunOptions,
   type RunResult,
 } from "../shared/proc.ts";
+import { stageComposedTreeArgv } from "../shared/stage_tree.ts";
 import { AnswersFileError, readAnswersFile } from "./answers_file.ts";
 import { rewriteSrcPath } from "./src_path.ts";
 
@@ -454,7 +455,11 @@ export function rehearseRepo(slug: string, options: RehearsalOptions): Rehearsal
       if (entry !== ".git") rmSync(join(platformDir, entry), { recursive: true, force: true });
     }
     cpSync(buildDir, platformDir, { recursive: true });
-    run(["git", "-C", platformDir, "add", "-A"]);
+    // The shared hermetic staging form (stage_tree.ts): the rehearsal's
+    // synthetic build commit must hold the SAME tree the producers would
+    // publish, so a composed tree that ever grew an ignore-matching file
+    // cannot make the rehearsal update from a different tree.
+    run(stageComposedTreeArgv(platformDir));
     run([
       "git",
       "-C",

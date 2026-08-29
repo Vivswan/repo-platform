@@ -77,6 +77,7 @@ import {
   mustCapture,
   timeoutExitCode,
 } from "../.github/scripts/shared/proc.ts";
+import { stageComposedTreeArgv } from "../.github/scripts/shared/stage_tree.ts";
 import { MANIFEST_NAME } from "../actions/shared/manifest.ts";
 import { stampManifestText } from "../actions/shared/stamp_manifest.ts";
 import { loadManifests } from "./module_manifests.ts";
@@ -332,7 +333,12 @@ function run(checkMode: boolean): number {
     });
     const git = (...args: string[]) => must(["git", "-C", tree, ...args], { env: RENDER_ENV });
     git("init", "-q", "-b", "build");
-    git("add", "-A");
+    // The shared hermetic staging form (stage_tree.ts): the goldens must
+    // snapshot renders of the SAME tree the producers publish, so a
+    // composed tree that ever grew an ignore-matching file cannot drift
+    // the goldens from what the build branch ships. Behavior-identical on
+    // today's clean composed trees (the helper's control arm proves it).
+    must(stageComposedTreeArgv(tree), { env: RENDER_ENV });
     git("commit", "-q", "-m", "chore: golden build tree");
     const scratchSha = mustCapture(["git", "-C", tree, "rev-parse", "HEAD"], { env: RENDER_ENV });
 

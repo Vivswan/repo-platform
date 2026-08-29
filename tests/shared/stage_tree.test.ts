@@ -187,18 +187,69 @@ describe("stageComposedTreeArgv", () => {
     expect(viaHelper).toBe(verifierHash("control-verify", false));
   });
 
-  test("all three staging sites stage through the ONE shared argv", () => {
-    // The agreement holds BY CONSTRUCTION only while every site calls
-    // the helper: a site quietly reverting to a raw `add` argv is the
-    // regression this pin makes loud.
-    for (const rel of [
-      ".github/scripts/build-branches/build_pending.ts",
-      ".github/scripts/build-branches/publish.ts",
-      ".github/scripts/shared/rebuild_tree.ts",
-    ]) {
+  test("every composed-tree staging site stages through the ONE shared argv", () => {
+    // The agreement holds BY CONSTRUCTION only while every composed-tree
+    // site calls the helper: a site quietly reverting to a raw `add`
+    // argv is the regression this pin makes loud. Beyond the
+    // producer/verifier trio, the pin covers the sites whose staged tree
+    // only has to EQUAL the published one (CI's smoke source, the golden
+    // renders, the sync rehearsal's synthetic build): none feeds the
+    // provenance hash, but a composed tree that ever grew an
+    // ignore-matching file would make them validate a DIFFERENT tree
+    // than production publishes.
+    //
+    // The matcher sees BOTH raw spellings (`-A` and `--all`) so a
+    // spelling switch cannot dodge it, and the deliberately-raw sites
+    // are enumerated with their exact calls (one allowedPlainAdds entry
+    // per occurrence) instead of left unscanned - pinned to the call, so
+    // a swap (helper on the exempt site, raw add back on a composed one)
+    // cannot false-pass. They stage managed-repo trees whose own ignore
+    // rules must keep applying, so they stay plain AND must not adopt
+    // the helper (--force would smuggle ignored files): rehearse.ts's
+    // TARGET repo post-update staging (the would-be PR diff),
+    // open_automation_pr.ts's working-tree regeneration outputs, and
+    // commit_push.ts's rendered target repo.
+    const rawAdd = /"add",\s*"(?:-A|--all)"/g;
+    const sites: { rel: string; composed: boolean; allowedPlainAdds?: string[] }[] = [
+      { rel: ".github/scripts/build-branches/build_pending.ts", composed: true },
+      { rel: ".github/scripts/build-branches/publish.ts", composed: true },
+      { rel: ".github/scripts/shared/rebuild_tree.ts", composed: true },
+      { rel: ".github/scripts/ci/smoke_generate.ts", composed: true },
+      { rel: "scripts/render_goldens.ts", composed: true },
+      {
+        rel: ".github/scripts/sync/rehearse.ts",
+        composed: true,
+        allowedPlainAdds: ['"-C", targetDir, "add", "-A"'],
+      },
+      {
+        rel: ".github/scripts/shared/open_automation_pr.ts",
+        composed: false,
+        allowedPlainAdds: ['["git", "add", "-A"]'],
+      },
+      {
+        rel: ".github/scripts/sync/commit_push.ts",
+        composed: false,
+        allowedPlainAdds: ['git("add", "--all")', 'git("add", "--all")'],
+      },
+    ];
+    for (const { rel, composed, allowedPlainAdds = [] } of sites) {
       const text = readFileSync(join(root, rel), "utf8");
-      expect(text).toContain("stageComposedTreeArgv(");
-      expect(text).not.toMatch(/"add",\s*"-A"/);
+      if (composed) {
+        expect(text).toContain("stageComposedTreeArgv(");
+      } else {
+        expect(text).not.toContain("stageComposedTreeArgv(");
+      }
+      expect(text.match(rawAdd) ?? []).toHaveLength(allowedPlainAdds.length);
+      // Per-snippet occurrence counts, not bare containment: with two
+      // identical exempt calls, containment alone would let one of them
+      // drift to another raw spelling while the other still satisfies it.
+      const expected = new Map<string, number>();
+      for (const allowed of allowedPlainAdds) {
+        expected.set(allowed, (expected.get(allowed) ?? 0) + 1);
+      }
+      for (const [allowed, count] of expected) {
+        expect(text.split(allowed)).toHaveLength(count + 1);
+      }
     }
   });
 });

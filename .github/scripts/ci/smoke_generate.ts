@@ -18,6 +18,7 @@
 
 import { env, requireEnv } from "../shared/gha.ts";
 import { must } from "../shared/proc.ts";
+import { stageComposedTreeArgv } from "../shared/stage_tree.ts";
 
 const modules = requireEnv("MODULES");
 const isPrivate = requireEnv("PRIVATE");
@@ -30,7 +31,11 @@ const extraData = env("EXTRA_DATA")
 must(["bun", "install", "--frozen-lockfile"]);
 must(["bun", ".github/scripts/build-branches/branch_tree.ts", "--dest", buildTree]);
 must(["git", "-C", buildTree, "init", "-q", "-b", "build"]);
-must(["git", "-C", buildTree, "add", "-A"]);
+// The shared hermetic staging form (stage_tree.ts): CI must smoke-test
+// the SAME tree the producers publish, so a composed tree that ever
+// grew an ignore-matching file cannot make this leg validate a
+// different tree than the build branch ships.
+must(stageComposedTreeArgv(buildTree));
 must([
   "git",
   "-C",
