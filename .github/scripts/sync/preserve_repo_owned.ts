@@ -287,6 +287,14 @@ type RemovedSplit = { path: string } & (
       previous: "non-blob";
       object: HeadNonBlobKind;
     }
+  | {
+      /** The deleted tracked name is not valid UTF-8: it cannot round-trip
+       * through the string probes (a lossy decode mangles it onto U+FFFD
+       * and headEntry then reads the wrong path as absent), so nothing
+       * about the previous copy can be read - held outright. `path` then
+       * carries the byte-escaped rendering, not the on-disk name. */
+      previous: "undecodable";
+    }
 );
 
 /** One removed path's bullet. The excerpt is bounded by MAX_HALF_LINES and
@@ -295,6 +303,14 @@ type RemovedSplit = { path: string } & (
  * bullet's full rendered size against that budget. */
 function removedSplitBullet(removal: RemovedSplit, excerptBudget: number): { text: string } {
   const { path } = removal;
+  if (removal.previous === "undecodable") {
+    return {
+      text:
+        `- \`${path}\` (name shown byte-escaped; the tracked name is not valid UTF-8): its ` +
+        "previous copy cannot be probed or classified - review it on the base branch before " +
+        "merging.",
+    };
+  }
   if (removal.previous === "non-blob") {
     return {
       text:
@@ -420,15 +436,88 @@ function renderRemovedSplits(removals: RemovedSplit[], manifestProblem: string |
   return `${REMOVED_SPLITS_INTRO}\n${preface}${rendered.join("\n")}\n`;
 }
 
+/** `git ... -z` path output split on NUL and decoded STRICTLY: an entry
+ * that is not valid UTF-8 cannot round-trip through a JS string (a lossy
+ * decode folds it onto U+FFFD, and the mangled name then probes as
+ * absent-at-HEAD), so it comes back as raw bytes for the caller to hold
+ * rather than probe. A name that legitimately CONTAINS U+FFFD is valid
+ * UTF-8 and stays a path - the discriminant is validity, not the
+ * replacement character. Exported for the decode-boundary tests. */
+export function decodeTrackedPathBytes(raw: Buffer): { paths: string[]; undecodable: Buffer[] } {
+  // ignoreBOM: the default decoder SILENTLY DROPS a leading U+FEFF, and a
+  // name starting with one is a different path - the probe would then read
+  // the BOM-less spelling as absent and skip the hold.
+  const strict = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
+  const paths: string[] = [];
+  const undecodable: Buffer[] = [];
+  let start = 0;
+  while (start < raw.length) {
+    let end = raw.indexOf(0, start);
+    if (end === -1) end = raw.length;
+    if (end > start) {
+      const entry = raw.subarray(start, end);
+      try {
+        paths.push(strict.decode(entry));
+      } catch {
+        undecodable.push(Buffer.from(entry));
+      }
+    }
+    start = end + 1;
+  }
+  return { paths, undecodable };
+}
+
+/** A non-UTF-8 name rendered loggable and PR-body-safe: printable ASCII
+ * verbatim, every other byte as \xNN - including space (CommonMark strips
+ * a code span's boundary spaces, silently changing the shown name),
+ * backslash, and backtick (so the escapes stay unambiguous and the
+ * bullet's code span survives). */
+function escapePathBytes(raw: Buffer): string {
+  let out = "";
+  for (const byte of raw) {
+    out +=
+      byte > 0x20 && byte <= 0x7e && byte !== 0x5c && byte !== 0x60
+        ? String.fromCharCode(byte)
+        : `\\x${byte.toString(16).padStart(2, "0")}`;
+  }
+  return out;
+}
+
 /** Paths present at HEAD and gone from the working tree - the deletion axis
  * for the unreadable-manifest fail-closed path. `--no-renames` so a staged
  * delete/add pair cannot be reclassified `R` and escape the D filter. Null
  * (not empty) when git itself fails, so the caller can fail closed rather
- * than read a git error as "nothing deleted". */
-function deletedTrackedPaths(): string[] | null {
-  const proc = git(["diff", "--diff-filter=D", "--no-renames", "--name-only", "-z", "HEAD"]);
+ * than read a git error as "nothing deleted". Raw Bun.spawnSync, not the
+ * git() owner: capture()'s string result is a utf-8 decode that folds a
+ * non-UTF-8 tracked name onto U+FFFD - the bytes are split and strictly
+ * decoded instead, with undecodable names returned raw. Same fail-closed
+ * deadline rule as git(), with the same test-only `timeoutMs` seam. */
+export function deletedTrackedPaths(
+  timeoutMs = DEFAULT_HANG_BOUND_MS,
+): { paths: string[]; undecodable: Buffer[] } | null {
+  const argv = [
+    "git",
+    "-C",
+    targetDir,
+    "diff",
+    "--diff-filter=D",
+    "--no-renames",
+    "--name-only",
+    "-z",
+    "HEAD",
+  ];
+  const proc = Bun.spawnSync(argv, {
+    stdout: "pipe",
+    stderr: "pipe",
+    timeout: timeoutMs,
+    killSignal: "SIGKILL",
+  });
+  if (proc.exitedDueToTimeout === true) {
+    error(`${label}: git diff timed out; aborting rather than reading it as an answer`);
+    process.exit(timeoutExitCode(proc));
+  }
   if (proc.exitCode !== 0) return null;
-  return proc.stdout.split("\0").filter((path) => path !== "");
+  return decodeTrackedPathBytes(proc.stdout);
 }
 
 /** The removed-splits hold: HEAD's split declarations, split with HEAD's
@@ -455,6 +544,7 @@ function holdRemovedSplits(): void {
     }
   }
 
+  const removals: RemovedSplit[] = [];
   const candidates = new Map<string, HeadSplit | undefined>();
   let scanUnavailable = false;
   if (headSplits !== null) {
@@ -464,13 +554,21 @@ function holdRemovedSplits(): void {
     // that cannot be read, hold the PR generically rather than fail open.
     const deleted = deletedTrackedPaths();
     if (deleted === null) scanUnavailable = true;
-    else for (const path of deleted) candidates.set(path, undefined);
+    else {
+      for (const path of deleted.paths) candidates.set(path, undefined);
+      // A non-UTF-8 name never enters `candidates`: the string probes
+      // below would re-mangle it and headEntry would read the wrong path
+      // as absent. The diff already established it is at HEAD and gone
+      // from the tree, so it is held outright, byte-escaped.
+      for (const raw of deleted.undecodable) {
+        removals.push({ path: escapePathBytes(raw), previous: "undecodable" });
+      }
+    }
   }
   for (const name of ["LICENSE", "LICENSE.md"]) {
     if (!candidates.has(name)) candidates.set(name, undefined);
   }
 
-  const removals: RemovedSplit[] = [];
   for (const [path, split] of candidates) {
     if (existsSync(join(targetDir, path))) continue; // still present: not a deletion
     // headEntry reads absent only for a path genuinely absent at HEAD and

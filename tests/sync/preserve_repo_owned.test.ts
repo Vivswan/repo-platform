@@ -17,6 +17,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { decodeTrackedPathBytes } from "../../.github/scripts/sync/preserve_repo_owned.ts";
 import { REMOVED_SPLITS_NAME } from "../../.github/scripts/sync/section_files.ts";
 
 const script = join(import.meta.dir, "../../.github/scripts/sync/preserve_repo_owned.ts");
@@ -249,16 +250,8 @@ describe("preserve_repo_owned removed-splits hold", () => {
   });
   const agentsWithTail = `# AGENTS.md\n\nmanaged\n\n${SENTINEL}\n\n## Local agent docs\n\nlocal agents tail\n`;
 
-  function runHold(
-    headFiles: Record<string, string | { symlinkTo: string }>,
-    removedFromTree: string[],
-  ): { exitCode: number | null; stdout: string; report: string } {
-    // LICENSE.md present keeps the fleet-license re-seed out of the way;
-    // TARGET_REF is empty so the re-seed block never resolves a build ref.
-    const target = makeTarget({ "LICENSE.md": "fleet license\n", ...headFiles });
-    for (const rel of removedFromTree) {
-      rmSync(join(target, rel), { recursive: true });
-    }
+  /** Run the script against a prepared target and read the hold report. */
+  function runOn(target: string): { exitCode: number | null; stdout: string; report: string } {
     const runnerTemp = mkdtempSync(join(tmpdir(), "preserve-owned-hold-"));
     const proc = Bun.spawnSync(["bun", script], {
       cwd: dirname(target),
@@ -282,6 +275,19 @@ describe("preserve_repo_owned removed-splits hold", () => {
       stdout: proc.stdout.toString() + proc.stderr.toString(),
       report: existsSync(reportPath) ? readFileSync(reportPath, "utf-8") : "",
     };
+  }
+
+  function runHold(
+    headFiles: Record<string, string | { symlinkTo: string }>,
+    removedFromTree: string[],
+  ): { exitCode: number | null; stdout: string; report: string } {
+    // LICENSE.md present keeps the fleet-license re-seed out of the way;
+    // TARGET_REF is empty so the re-seed block never resolves a build ref.
+    const target = makeTarget({ "LICENSE.md": "fleet license\n", ...headFiles });
+    for (const rel of removedFromTree) {
+      rmSync(join(target, rel), { recursive: true });
+    }
+    return runOn(target);
   }
 
   test("a deleted split-classed file raises the hold and names the leaving half", () => {
@@ -437,6 +443,52 @@ describe("preserve_repo_owned removed-splits hold", () => {
     expect(result.report).toBe("");
   });
 
+  test("a deleted tracked name that is not valid UTF-8 is held, never read as absent", () => {
+    // The unreadable-manifest fallback is the deletion axis's only
+    // consumer, so the fixture damages the manifest AND carries a
+    // non-UTF-8 tracked name at HEAD. macOS APFS refuses non-UTF-8
+    // filenames, so the name can never touch the filesystem on the
+    // machines running this suite: it enters HEAD through the index alone
+    // (update-index --index-info reads raw bytes from stdin), which also
+    // leaves it absent from the working tree - exactly a deletion.
+    const target = makeTarget({
+      "LICENSE.md": "fleet license\n",
+      [MANIFEST_REL]: "{ not valid json",
+    });
+    const git = (args: string[], stdin?: Buffer): string => {
+      const proc = Bun.spawnSync(["git", "-C", target, ...args], {
+        env: gitFreeEnv(),
+        stdin: stdin ?? "ignore",
+        stdout: "pipe",
+        stderr: "pipe",
+      });
+      if (proc.exitCode !== 0) {
+        throw new Error(`git ${args[0]} failed: ${proc.stderr.toString()}`);
+      }
+      return proc.stdout.toString().trim();
+    };
+    const oid = git(["hash-object", "-w", "--stdin"], Buffer.from("previous copy\n"));
+    git(
+      ["update-index", "-z", "--index-info"],
+      Buffer.concat([
+        Buffer.from(`100644 ${oid} 0\t`),
+        Buffer.from([0x63, 0x61, 0x66, 0xe9]), // caf\xe9: 0xe9 is not valid UTF-8
+        Buffer.from(" a.txt\0"), // the space pins \x20-escaping in the rendering
+      ]),
+    );
+    git(["commit", "-qm", "carry a non-UTF-8 tracked name"]);
+    const result = runOn(target);
+    expect(result.exitCode).toBe(0);
+    // The old behavior: the U+FFFD-mangled name probed as absent-at-HEAD,
+    // the candidate was skipped, and the report stayed empty (auto-merge).
+    // The space renders as \x20: CommonMark strips a code span's boundary
+    // spaces, so a literal one could silently change the shown name.
+    expect(result.report).toContain("caf\\xe9\\x20a.txt");
+    expect(result.report).toContain("not valid UTF-8");
+    expect(result.report).not.toContain(String.fromCharCode(0xfffd));
+    expect(result.stdout).toContain("manual-review");
+  });
+
   test("the whole removed-splits section stays within its byte budget with an omission notice", () => {
     // The section is bounded by BYTES as a whole (intro, bullets, fences,
     // paths, notes), not just excerpt lines - so no number of deletions
@@ -470,5 +522,59 @@ describe("preserve_repo_owned removed-splits hold", () => {
     // is charged against the 16 KiB budget.
     expect(Buffer.byteLength(result.report, "utf-8")).toBeLessThanOrEqual(16384);
     expect(result.report).toContain("more deleted file(s) omitted");
+  });
+});
+
+describe("deleted-path decode boundary", () => {
+  // macOS APFS refuses non-UTF-8 filenames, so no filesystem fixture can
+  // carry these names on the machines running this suite: the boundary is
+  // exercised with synthetic `git diff -z`-shaped bytes here, and
+  // end-to-end above via an index-only fixture that never touches disk.
+  const REPLACEMENT = String.fromCharCode(0xfffd);
+
+  test("valid entries decode; a non-UTF-8 entry comes back as raw bytes, never mangled", () => {
+    const nonUtf8 = Buffer.from([0x63, 0x61, 0x66, 0xe9, 0x2e, 0x74, 0x78, 0x74]); // caf\xe9.txt
+    const stdout = Buffer.concat([
+      Buffer.from("good.txt\0", "utf-8"),
+      nonUtf8,
+      Buffer.from("\0", "utf-8"),
+      Buffer.from("dir/more.md\0", "utf-8"),
+    ]);
+    const result = decodeTrackedPathBytes(stdout);
+    expect(result.paths).toEqual(["good.txt", "dir/more.md"]);
+    expect(result.undecodable).toEqual([nonUtf8]);
+    for (const path of result.paths) expect(path).not.toContain(REPLACEMENT);
+  });
+
+  test("a name that genuinely CONTAINS U+FFFD is valid UTF-8 and stays a path", () => {
+    // The discriminant is UTF-8 validity, not the replacement character: a
+    // legal U+FFFD-carrying name must not be misreported as mangled.
+    const name = `weird-${REPLACEMENT}.txt`;
+    const result = decodeTrackedPathBytes(Buffer.from(`${name}\0`, "utf-8"));
+    expect(result.paths).toEqual([name]);
+    expect(result.undecodable).toEqual([]);
+  });
+
+  test("a leading U+FEFF survives the decode: a BOM-stripped name is a DIFFERENT path", () => {
+    // TextDecoder's default silently drops a leading BOM; the probe would
+    // then read the BOM-less spelling as absent and skip the hold.
+    const name = `${String.fromCharCode(0xfeff)}secret.txt`;
+    const result = decodeTrackedPathBytes(Buffer.from(`${name}\0`, "utf-8"));
+    expect(result.paths).toEqual([name]);
+    expect(result.paths[0]).toHaveLength(name.length);
+    expect(result.undecodable).toEqual([]);
+  });
+
+  test("empty output and bare NULs yield nothing", () => {
+    expect(decodeTrackedPathBytes(Buffer.alloc(0))).toEqual({ paths: [], undecodable: [] });
+    expect(decodeTrackedPathBytes(Buffer.from("\0\0", "utf-8"))).toEqual({
+      paths: [],
+      undecodable: [],
+    });
+  });
+
+  test("a final entry without a trailing NUL still decodes", () => {
+    const result = decodeTrackedPathBytes(Buffer.from("a.txt\0b.txt", "utf-8"));
+    expect(result.paths).toEqual(["a.txt", "b.txt"]);
   });
 });

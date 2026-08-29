@@ -19,6 +19,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { capture } from "../../.github/scripts/shared/proc.ts";
 import {
+  deletedTrackedPaths,
   fleetLicenseAt,
   git,
   showFleetLicense,
@@ -180,6 +181,35 @@ describe("probe timeouts fail closed (never read as absent)", () => {
     expect(result.stdout).not.toContain("PROBE-RETURNED");
   });
 
+  test("preserve_repo_owned's deletedTrackedPaths (the raw bytes spawn) aborts loudly on expiry", () => {
+    // Another guard on the raw exitedDueToTimeout predicate: the deletion
+    // axis reads its paths as BYTES (a capture() decode would fold a
+    // non-UTF-8 tracked name onto U+FFFD), so the git() legs above cannot
+    // stand in for it. A timeout returning null would hold the PR too, but
+    // as a generic unverifiable scan on a healthy-looking run - a hung git
+    // is a broken step, never an answer.
+    const result = runDriver(
+      [
+        `import { deletedTrackedPaths } from ${JSON.stringify(preserveScript)};`,
+        `const deleted = deletedTrackedPaths(${PROBE_TIMEOUT_MS});`,
+        `console.log("PROBE-RETURNED " + (deleted === null ? "null" : deleted.paths.length));`,
+        "",
+      ].join("\n"),
+      {
+        PATH: `${hangingGitDir()}:${process.env.PATH}`,
+        TARGET_DIR: initRepo({ "README.md": "readme\n" }),
+        TARGET_DISPLAY: "",
+        TARGET: "",
+      },
+    );
+    expect(result.exitCode).not.toBe(0);
+    expect(result.stdout).toContain("::error::");
+    expect(result.stdout).toContain(
+      "git diff timed out; aborting rather than reading it as an answer",
+    );
+    expect(result.stdout).not.toContain("PROBE-RETURNED");
+  });
+
   test("positive control: real probes answer both ways without aborting", () => {
     const withLicense = initRepo({ LICENSE: "license\n", "README.md": "readme\n" });
     const without = initRepo({ "README.md": "readme\n" });
@@ -221,6 +251,7 @@ describe("probe timeouts fail closed (never read as absent)", () => {
     );
     expect(preserve).toMatch(/fleetLicenseAt\(targetRef\)/);
     expect(preserve).toMatch(/showFleetLicense\(targetRef\)/);
+    expect(preserve).toMatch(/const deleted = deletedTrackedPaths\(\);/);
     const cleanup = readFileSync(cleanupScript, "utf-8");
     expect(cleanup).toMatch(/licensePresentAtHead\(targetDir, name\)/);
   });
@@ -233,6 +264,7 @@ describe("probe timeouts fail closed (never read as absent)", () => {
     expect(typeof git).toBe("function");
     expect(typeof fleetLicenseAt).toBe("function");
     expect(typeof showFleetLicense).toBe("function");
+    expect(typeof deletedTrackedPaths).toBe("function");
     expect(typeof licensePresentAtHead).toBe("function");
   });
 });

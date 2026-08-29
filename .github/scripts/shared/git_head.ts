@@ -6,12 +6,14 @@
 // carry or a tripwire check (cat-file -e cannot make that distinction: it
 // exits 128 for a missing path and for fatal errors alike).
 //
-// The result is DISCRIMINATED by object kind because `git show HEAD:rel`
-// answers for every kind: a directory yields tree-listing prose ("tree
-// HEAD:rel" plus entry names) and a symlink yields its target path string.
-// A probe returning bare bytes handed those to callers as if they were
-// file content; the union makes that confusion unrepresentable - only a
-// regular blob carries bytes at all.
+// The result is DISCRIMINATED by object kind because a HEAD-relative
+// content read answers for every kind: a directory yields tree-listing
+// prose and a symlink yields its target path string. A probe returning
+// bare bytes handed those to callers as if they were file content; the
+// union makes that confusion unrepresentable - only a regular blob
+// carries bytes at all, and the bytes are read BY THE OID the
+// discriminating ls-tree returned, so both steps name the same object
+// even if HEAD moves between the two git calls.
 
 /** A VALUE-FREE failure for a HEAD probe: the git subcommand and its exit
  *  code only - never the path, the repository root, or git's stderr, each
@@ -21,7 +23,7 @@
  *  git detail is reproduced locally (docs/private-repos.md). */
 import { capture, DEFAULT_HANG_BOUND_MS, timeoutExitCode } from "./proc.ts";
 
-function headProbeFailed(subcommand: "ls-tree" | "show", exitCode: number | null): Error {
+function headProbeFailed(subcommand: "ls-tree" | "cat-file", exitCode: number | null): Error {
   return new Error(
     `git ${subcommand} against HEAD failed (exit ${exitCode ?? "unknown"}); the path, ` +
       "repository root, and git stderr are withheld to keep private-repo content out of the " +
@@ -97,7 +99,11 @@ export function headEntry(root: string, rel: string): HeadEntry {
   if (tab === -1 || entries[0].slice(tab + 1) !== rel) {
     throw headEntryUnrecognized("an entry for a different path");
   }
-  const [mode, type] = entries[0].split(/\s+/, 2);
+  const fields = entries[0].slice(0, tab).split(" ");
+  if (fields.length !== 3 || !/^([0-9a-f]{40}|[0-9a-f]{64})$/.test(fields[2])) {
+    throw headEntryUnrecognized("a malformed entry line");
+  }
+  const [mode, type, oid] = fields;
   const raw = `${mode} ${type}`;
   // Exact mode/type pairs only. Symlinks are TYPE blob (their blob is the
   // target path string), so the mode is the discriminant that keeps them
@@ -110,21 +116,24 @@ export function headEntry(root: string, rel: string): HeadEntry {
   if (!((mode === "100644" || mode === "100755") && type === "blob")) {
     throw headEntryUnrecognized(raw);
   }
+  // Read the blob BY THE OID ls-tree returned, never by re-resolving HEAD
+  // (`git show HEAD:rel`): a HEAD move between the two git calls could
+  // otherwise route a different object's bytes through this blob arm.
   // Raw Bun.spawnSync, not capture(): the blob contract is RAW BYTES, and
   // capture's string result is a utf-8 decode that folds non-utf-8 file
   // content onto U+FFFD. The hang bound still applies, carried inline with
   // proc.ts's own constant and timeout-is-failure mapping.
-  const proc = Bun.spawnSync(["git", "--literal-pathspecs", "-C", root, "show", `HEAD:${rel}`], {
+  const proc = Bun.spawnSync(["git", "-C", root, "cat-file", "blob", oid], {
     stdout: "pipe",
     stderr: "pipe",
     timeout: DEFAULT_HANG_BOUND_MS,
     killSignal: "SIGKILL",
   });
   if (proc.exitedDueToTimeout === true) {
-    throw headProbeFailed("show", timeoutExitCode(proc));
+    throw headProbeFailed("cat-file", timeoutExitCode(proc));
   }
   if (proc.exitCode !== 0) {
-    throw headProbeFailed("show", proc.exitCode);
+    throw headProbeFailed("cat-file", proc.exitCode);
   }
   return { kind: "blob", bytes: Buffer.from(proc.stdout) };
 }

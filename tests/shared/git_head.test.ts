@@ -7,7 +7,7 @@
 // prose and a symlink yields its target path string, neither of which is
 // file content - the union keeps them out of the blob arm by construction.
 
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import { chmodSync, mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -66,6 +66,95 @@ function makeFixtureRepo(): string {
   });
   return root;
 }
+
+/** A PATH shim whose git answers any ls-tree with `payload` (printf
+ * escapes interpreted, so \t works) and delegates every other subcommand
+ * to the real git - the fake-git pattern from
+ * tests/sync/timeout_fail_closed.test.ts, aimed at output shape instead
+ * of hanging. */
+function lsTreeStubDir(payload: string): string {
+  const real = Bun.which("git");
+  if (real === null) throw new Error("git not on PATH");
+  const dir = mkdtempSync(join(tmpdir(), "ls-tree-stub-"));
+  writeFileSync(
+    join(dir, "git"),
+    [
+      "#!/bin/sh",
+      'for arg in "$@"; do',
+      '  if [ "$arg" = "ls-tree" ]; then',
+      `    printf '${payload}'`,
+      "    exit 0",
+      "  fi",
+      "done",
+      `exec ${real} "$@"`,
+      "",
+    ].join("\n"),
+    { mode: 0o755 },
+  );
+  return dir;
+}
+
+/** headEntry(root, "present.txt") run in a DRIVER subprocess with the stub
+ * git first on PATH: an in-process PATH mutation cannot reach headEntry's
+ * spawns (bun resolves an inherited-env spawn against the startup PATH),
+ * so the stub rides the driver's own startup environment instead - the
+ * same wiring timeout_fail_closed.test.ts uses. */
+function probeWithStubGit(root: string, payload: string): string {
+  const driver = join(mkdtempSync(join(tmpdir(), "ls-tree-driver-")), "driver.ts");
+  const probed = join(import.meta.dir, "../../.github/scripts/shared/git_head.ts");
+  writeFileSync(
+    driver,
+    [
+      `import { headEntry } from ${JSON.stringify(probed)};`,
+      "try {",
+      `  const entry = headEntry(${JSON.stringify(root)}, "present.txt");`,
+      '  console.log("NO-THROW " + entry.kind);',
+      "} catch (err) {",
+      '  console.log("THREW " + (err instanceof Error ? err.message : String(err)));',
+      "}",
+      "",
+    ].join("\n"),
+  );
+  const env: Record<string, string> = {};
+  for (const [key, value] of Object.entries(process.env)) {
+    if (!key.startsWith("GIT_") && value !== undefined) env[key] = value;
+  }
+  env.PATH = `${lsTreeStubDir(payload)}:${env.PATH}`;
+  const proc = Bun.spawnSync([process.execPath, driver], {
+    env,
+    stdout: "pipe",
+    stderr: "pipe",
+    timeout: 10_000,
+    killSignal: "SIGKILL",
+  });
+  return proc.stdout.toString();
+}
+
+describe("headEntry strict entry parse", () => {
+  const root = makeFixtureRepo();
+
+  test("a malformed ls-tree entry fails at the parse guard, never at the byte read", () => {
+    // Real git cannot emit these shapes, so a stub git stands in. The
+    // 2-field entry carries no oid at all; the 4-field entry smuggles a
+    // VALID-HEX oid past a weakened length check (`!== 3` mutated down to
+    // `< 2` survived the whole suite before this test). Without the
+    // strict guard either shape flows on toward the byte read - the
+    // value-free cat-file failure, or worse, a successful read of
+    // whatever object the third field happens to name - instead of the
+    // precise parse rejection pinned here.
+    for (const payload of [
+      "100644 blob\\tpresent.txt",
+      "100644 blob aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa junk\\tpresent.txt",
+    ]) {
+      const out = probeWithStubGit(root, payload);
+      expect(out).toContain("THREW");
+      expect(out).toContain("a malformed entry line");
+      expect(out).not.toContain("NO-THROW");
+      expect(out).not.toContain("cat-file");
+      expect(out).not.toContain(root);
+    }
+  });
+});
 
 describe("headEntry value-free failure", () => {
   test("a git failure names the subcommand and exit code, never the path, root, or git stderr", () => {
@@ -148,6 +237,49 @@ describe("headEntry discrimination", () => {
       object: "submodule",
       raw: "160000 commit",
     });
+  });
+
+  test("the blob byte-read consumes the ls-tree oid, never a second HEAD resolution", () => {
+    // A real HEAD move between the discriminating ls-tree and the byte
+    // read cannot be staged deterministically from in-process code, so the
+    // TOCTOU guarantee is pinned structurally instead: the byte-read argv
+    // must carry the oid ls-tree answered with (same object by
+    // construction) and must not mention HEAD at all - a `git show
+    // HEAD:rel` read would resolve HEAD a second time and could route a
+    // non-blob's bytes through the blob arm.
+    const expectedOid = withoutGitEnv(() => {
+      const proc = Bun.spawnSync(["git", "-C", root, "rev-parse", "HEAD:present.txt"], {
+        stdout: "pipe",
+        stderr: "pipe",
+      });
+      if (proc.exitCode !== 0) throw new Error(proc.stderr.toString());
+      return proc.stdout.toString().trim();
+    });
+    const spy = spyOn(Bun, "spawnSync");
+    try {
+      const entry = withoutGitEnv(() => headEntry(root, "present.txt"));
+      expect(entry.kind).toBe("blob");
+      // Calls located by shape, never by argv position: exactly one
+      // discrimination and one byte read is the pinned contract (a second
+      // of either would be a re-resolution risk), while extra unrelated
+      // probes would fail here loudly instead of silently shifting
+      // indices.
+      const argvs = spy.mock.calls.map((call) => call[0] as string[]);
+      const discriminations = argvs.filter((argv) => argv.includes("ls-tree"));
+      expect(discriminations.length).toBe(1);
+      const reads = argvs.filter((argv) => argv.includes("cat-file"));
+      expect(reads.length).toBe(1);
+      expect(reads[0]).toContain("blob");
+      expect(reads[0]).toContain(expectedOid);
+      // Only the discrimination may name HEAD: any other call resolving it
+      // is a second resolution the by-oid contract forbids.
+      for (const argv of argvs) {
+        if (argv === discriminations[0]) continue;
+        expect(argv.some((arg) => arg.includes("HEAD"))).toBe(false);
+      }
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   test("a trailing-slash rel throws (value-free) instead of answering with a child entry", () => {
