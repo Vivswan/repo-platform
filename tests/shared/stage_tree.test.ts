@@ -54,8 +54,12 @@ function buildHermeticEnv(): Record<string, string> {
   return env;
 }
 
-function run(argv: string[], cwd?: string): string {
-  const proc = Bun.spawnSync(argv, { cwd, env: hermeticEnv, stdout: "pipe", stderr: "pipe" });
+function run(argv: string[], env?: Record<string, string>): string {
+  const proc = Bun.spawnSync(argv, {
+    env: env ?? hermeticEnv,
+    stdout: "pipe",
+    stderr: "pipe",
+  });
   if (proc.exitCode !== 0) {
     throw new Error(`${argv.join(" ")} failed: ${proc.stderr.toString()}`);
   }
@@ -113,6 +117,30 @@ function producerHash(options: {
   writeComposedFiles(pend, hostile);
   run(argv(pend));
   return run(["git", "-C", pend, "write-tree"]);
+}
+
+const CRLF = "line one\r\nline two\r\n";
+
+/** Stage a one-file CRLF tree with `argv` under `env` and return the
+ * STAGED blob's bytes - the subject both blob-rewrite arms below read,
+ * each under its own hostile machine-global config fixture. */
+function stagedBlob(
+  name: string,
+  argv: (treeDir: string) => string[],
+  env: Record<string, string>,
+): string {
+  const dir = join(fixtures, name);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "crlf.txt"), CRLF);
+  run(["git", "-C", dir, "init", "--quiet"], env);
+  run(argv(dir), env);
+  const tree = run(["git", "-C", dir, "write-tree"], env);
+  return Bun.spawnSync(["git", "-C", dir, "cat-file", "-p", `${tree}:crlf.txt`], {
+    env,
+    stdout: "pipe",
+    stderr: "pipe",
+    timeout: 10_000,
+  }).stdout.toString();
 }
 
 beforeAll(() => {
@@ -185,6 +213,52 @@ describe("stageComposedTreeArgv", () => {
     const viaOldForm = producerHash({ name: "control-old", hostile: false, argv: oldProducerArgv });
     expect(viaHelper).toBe(viaOldForm);
     expect(viaHelper).toBe(verifierHash("control-verify", false));
+  });
+
+  test("the attributesFile override is ARMED: a global attributes rewrite cannot touch the helper's staged bytes", () => {
+    // The empty-config pin above means no attributes file ever exists
+    // for `-c core.attributesFile=/dev/null` to neutralize - deleting
+    // the flag left the rest of this suite green. So this arm points
+    // the global scope at a test-owned config whose attributes file
+    // carries a staging-visible rewrite (`* text` normalizes CRLF to LF
+    // at add time), and requires the helper's staging IMMUNE while a
+    // plain-add control IS bitten - the control proving the fixture
+    // actually rewrites, so immunity is the flag's doing. autocrlf is
+    // pinned false in the fixture config so the two normalization
+    // mechanisms cannot confound: this arm discriminates the
+    // ATTRIBUTES neutralization alone (the arm below owns autocrlf).
+    const attributes = join(fixtures, "attr-rules");
+    writeFileSync(attributes, "* text\n");
+    const gitconfig = join(fixtures, "attr-gitconfig");
+    writeFileSync(gitconfig, `[core]\n\tattributesFile = ${attributes}\n\tautocrlf = false\n`);
+    const attrEnv = { ...hermeticEnv, GIT_CONFIG_GLOBAL: gitconfig };
+    expect(stagedBlob("attr-helper", stageComposedTreeArgv, attrEnv)).toBe(CRLF);
+    expect(stagedBlob("attr-control", oldProducerArgv, attrEnv)).toBe(
+      CRLF.replaceAll("\r\n", "\n"),
+    );
+  });
+
+  test("the autocrlf override is ARMED: a machine-global core.autocrlf cannot touch the helper's staged bytes", () => {
+    // autocrlf=input rewrites CRLF at add time through CONFIG alone -
+    // no attributes file anywhere - so `-c core.attributesFile=/dev/null`
+    // does not cover it: a config-bearing machine (a developer laptop
+    // with dotfiles) would skew a local verifier against a config-free
+    // CI producer, the exact class the helper exists to prevent. The
+    // vector MUST ride a test-owned GIT_CONFIG_GLOBAL fixture file:
+    // unlike attributes (whose XDG fallback survives GIT_CONFIG_GLOBAL),
+    // autocrlf is a pure config key with no fallback path, so under
+    // buildHermeticEnv's pins this fixture is the only scope that can
+    // carry a live vector - planted anywhere else the arm would pass
+    // with and without the override, vacuously. No attributesFile is
+    // set here, so this arm discriminates the AUTOCRLF neutralization
+    // alone.
+    const gitconfig = join(fixtures, "autocrlf-gitconfig");
+    writeFileSync(gitconfig, "[core]\n\tautocrlf = input\n");
+    const crlfEnv = { ...hermeticEnv, GIT_CONFIG_GLOBAL: gitconfig };
+    expect(stagedBlob("autocrlf-helper", stageComposedTreeArgv, crlfEnv)).toBe(CRLF);
+    expect(stagedBlob("autocrlf-control", oldProducerArgv, crlfEnv)).toBe(
+      CRLF.replaceAll("\r\n", "\n"),
+    );
   });
 
   test("every composed-tree staging site stages through the ONE shared argv", () => {

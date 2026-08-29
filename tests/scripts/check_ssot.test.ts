@@ -5,16 +5,21 @@
 // (bun scripts/check_ssot.ts).
 
 import { describe, expect, test } from "bun:test";
+import { stageComposedTreeArgv } from "../../.github/scripts/shared/stage_tree.ts";
 import { PIN_FLIPS } from "../../.github/scripts/sync/starter_pin_rollout";
 import {
   ALL_GREEN_WIRING,
+  ASYNC_SPAWN_FILES,
+  agentsStagingMismatches,
   applyDivergences,
+  asyncSpawnMismatches,
   asyncStreamWriteMismatches,
   bunRuntimeMismatches,
   bunTypesAheadMismatches,
   canonical,
   composeAnchorNames,
   DELIVERY_REF,
+  declaredCheckName,
   expandCheckChain,
   extractUsesPins,
   firstDiff,
@@ -26,6 +31,8 @@ import {
   lockedTypesBunVersion,
   majorMinor,
   mustMatch,
+  PREFLIGHT_APPLY_JOB_KEYS,
+  PREFLIGHT_APPLY_RUNS_ON,
   PREFLIGHT_APPLY_WITH,
   PREFLIGHT_EXPECTED_RUN,
   PREFLIGHT_FORBIDDEN_RUN_TOKENS,
@@ -41,6 +48,7 @@ import {
   setMismatch,
   settingsIdentityMismatches,
   shellSegments,
+  spawnDebtMismatches,
   spawnSyncHazard,
   spawnSyncSites,
   starterPinCoverage,
@@ -49,6 +57,7 @@ import {
   stepCarriesWithKey,
   stripComments,
   stripGeneratedRegions,
+  TEST_SPAWN_DEBT,
   topLevelProperties,
   unsafeStepCondition,
   verdictRosterMismatches,
@@ -167,6 +176,59 @@ describe("ALL_GREEN_WIRING", () => {
     expect(mustMatch(active, ALL_GREEN_WIRING.created, "f", "name")[1]).toBe("all-green");
     const commented = '            # -f "name=all-green" \\';
     expect(ALL_GREEN_WIRING.created.exec(commented)).toBeNull();
+  });
+
+  test("the CHECK_NAME pin matches only the exact exported declaration line", () => {
+    const active = 'export const CHECK_NAME = "all-green";';
+    expect(mustMatch(active, ALL_GREEN_WIRING.checkName, "f", "name")[1]).toBe("all-green");
+    // The looser pre-pin pattern matched all four of these spoofs: a
+    // commented copy, an indented (nested, non-exported) copy, a
+    // declaration embedded in string content, and the left half of a
+    // concatenation whose runtime value is a different name. (A decoy
+    // at line start INSIDE a multiline template can still match the
+    // pattern - the rule closes that by importing CHECK_NAME and
+    // requiring the matched line to agree with it.)
+    expect(ALL_GREEN_WIRING.checkName.exec(`// ${active}`)).toBeNull();
+    expect(ALL_GREEN_WIRING.checkName.exec(`  ${active}`)).toBeNull();
+    expect(ALL_GREEN_WIRING.checkName.exec(`const doc = '${active}';`)).toBeNull();
+    expect(
+      ALL_GREEN_WIRING.checkName.exec('export const CHECK_NAME = "all-green" + "-spoof";'),
+    ).toBeNull();
+    // The neighbouring COPILOT_CHECK_NAME constant is a different anchor.
+    expect(
+      ALL_GREEN_WIRING.checkName.exec('export const COPILOT_CHECK_NAME = "copilot";'),
+    ).toBeNull();
+  });
+
+  test("declaredCheckName reads the CODE declaration, not a template decoy - same value or not", () => {
+    const real = 'export const CHECK_NAME = "real-name";';
+    expect(declaredCheckName(`${real}\n`)).toBe("real-name");
+    // A decoy inside a multiline template BEFORE the real declaration,
+    // carrying the expected value: raw first-match extraction returned
+    // the decoy; the masked-view locate must skip it and still find the
+    // real line (whose different value the rule then flags).
+    const decoyed = 'const doc = `\nexport const CHECK_NAME = "all-green";\n`;\n' + `${real}\n`;
+    expect(declaredCheckName(decoyed)).toBe("real-name");
+    // A decoy with NO code declaration behind it is a lost anchor, as
+    // is a declaration rewritten off the exact-line form.
+    expect(() => declaredCheckName('const doc = `\nexport const CHECK_NAME = "x";\n`;\n')).toThrow(
+      "verdict check name",
+    );
+    expect(() =>
+      declaredCheckName('export const CHECK_NAME = ["all", "green"].join("-");\n'),
+    ).toThrow("verdict check name");
+    expect(() => declaredCheckName('// export const CHECK_NAME = "x";\n')).toThrow(
+      "verdict check name",
+    );
+    // A declaration whose value cannot be re-read at its own line (an
+    // escaped quote) must throw, never drift to a later look-alike
+    // (reviewer's probe: the template text below is a line-start decoy
+    // the comment-stripped view still carries).
+    expect(() =>
+      declaredCheckName(
+        'export const CHECK_NAME = "a\\"b";\nconst doc = `\nexport const CHECK_NAME = "decoy";\n`;\n',
+      ),
+    ).toThrow("could not be read");
   });
 
   test("the lookup anchor matches the active template literal and rejects a commented one", () => {
@@ -894,6 +956,21 @@ describe("spawnSyncSites", () => {
     ]);
   });
 
+  test("a re-punctuated callee is still a site; a different receiver is not (reviewer's probes)", () => {
+    expect(spawnSyncSites("(Bun).spawnSync(cmd);", "f")).toEqual([
+      { line: 1, kind: "call", options: null },
+    ]);
+    expect(spawnSyncSites("Bun!.spawnSync(cmd, { timeout: 5 });", "f")).toEqual([
+      { line: 1, kind: "call", options: "{ timeout: 5 }" },
+    ]);
+    expect(spawnSyncSites("fakeBun.spawnSync(cmd);", "f")).toEqual([]);
+    // Line numbers stay exact: the receiver pattern must not swallow
+    // the preceding newline into the match (reviewer's probe).
+    expect(spawnSyncSites("const a = 1;\nBun.spawnSync(cmd);", "f")).toEqual([
+      { line: 2, kind: "call", options: null },
+    ]);
+  });
+
   test("the object-form overload carries its own literal as the options", () => {
     const source = 'Bun.spawnSync({ cmd: ["git", "st"], timeout: 5 });';
     expect(spawnSyncSites(source, "f")).toEqual([
@@ -1032,6 +1109,42 @@ describe("preflightInvocation", () => {
     ).toBeNull();
   });
 
+  test("a SUBSTITUTED wrapper is not the hidden form - only sync/run_hidden.ts wraps", () => {
+    // The discriminator a wrapper-regex widening (any .ts, or any
+    // run_hidden.ts path) would break: removing the wrapper is covered
+    // elsewhere, but a DIFFERENT wrapper in the same position must fail
+    // the grammar too, or a capture-less stand-in could swallow the
+    // guard's output while every other pinned fact reads intact.
+    expect(
+      preflightInvocation(
+        'bun .github/scripts/sync/other_wrapper.ts "settings labels" -- bun .github/scripts/fleet/label_preflight.ts --merged x',
+      ),
+    ).toBeNull();
+    expect(
+      preflightInvocation(
+        'bun .github/scripts/fleet/run_hidden.ts "settings labels" -- bun .github/scripts/fleet/label_preflight.ts --merged x',
+      ),
+    ).toBeNull();
+  });
+
+  test("a stem glued to a preceding non-separator is a different tree's file, not the wrapper or script", () => {
+    expect(
+      preflightInvocation(
+        'bun not-sync/run_hidden.ts "settings labels" -- bun .github/scripts/fleet/label_preflight.ts --merged x',
+      ),
+    ).toBeNull();
+    expect(
+      preflightInvocation("bun .github/scripts/myfleet/label_preflight.ts --merged x"),
+    ).toBeNull();
+    expect(
+      preflightInvocation("bun .github/scripts/my.fleet/label_preflight.ts --merged x"),
+    ).toBeNull();
+    // The landed prefixed spellings still read as invocations.
+    expect(
+      preflightInvocation("bun platform/.github/scripts/fleet/label_preflight.ts --merged x"),
+    ).toBe("direct");
+  });
+
   test("an inline env-assignment prefix is an unrecognized form, failing closed", () => {
     expect(
       preflightInvocation("MODE=check bun .github/scripts/fleet/label_preflight.ts --merged x"),
@@ -1111,6 +1224,7 @@ describe("labelPreflightJobMismatches", () => {
   const TOKEN = "${{ secrets.REPO_PLATFORM_TOKEN }}";
   type Job = { steps: Record<string, unknown>[]; [key: string]: unknown };
   const operatorJob = (): Job => ({
+    "runs-on": "ubuntu-latest",
     steps: [
       {
         name: "Preflight labels the target still references",
@@ -1141,6 +1255,7 @@ describe("labelPreflightJobMismatches", () => {
     ],
   });
   const reusableJob = (): Job => ({
+    "runs-on": "ubuntu-latest",
     steps: [
       {
         name: "Preflight labels this repository still references",
@@ -1247,6 +1362,20 @@ describe("labelPreflightJobMismatches", () => {
       [OPERATOR]: new Set(["HIDE_DETAILS", "SETTINGS_REPORT_TITLE"]),
       [REUSABLE]: new Set<string>([]),
     });
+    expect(PREFLIGHT_APPLY_JOB_KEYS).toEqual({
+      [OPERATOR]: new Set([
+        "name",
+        "needs",
+        "if",
+        "strategy",
+        "env",
+        "runs-on",
+        "timeout-minutes",
+        "steps",
+      ]),
+      [REUSABLE]: new Set(["runs-on", "timeout-minutes", "steps"]),
+    });
+    expect(PREFLIGHT_APPLY_RUNS_ON).toBe("ubuntu-latest");
   });
 
   // One mutation test per census entry and per forbidden token, driven
@@ -1357,6 +1486,29 @@ describe("labelPreflightJobMismatches", () => {
     expect(judged(OPERATOR, smuggled)).toContain("pinned job-level env keys");
   });
 
+  test("a container: or services: job key fires the execution-context census", () => {
+    // A container image's env (BASH_ENV again) and PATH arrive under
+    // every step-level pin's sight, so the job's keys are allowlisted.
+    const contained = { ...reusableJob(), container: { image: "evil:latest" } };
+    expect(judged(REUSABLE, contained)).toContain("pinned job keys");
+    const serviced = { ...operatorJob(), services: { db: { image: "evil:latest" } } };
+    expect(judged(OPERATOR, serviced)).toContain("pinned job keys");
+  });
+
+  test("a drifted or missing runs-on fires the hosted-runner pin", () => {
+    const selfHosted = { ...reusableJob(), "runs-on": "self-hosted" };
+    expect(judged(REUSABLE, selfHosted)).toContain("runs-on: ubuntu-latest");
+    const { "runs-on": _, ...rest } = operatorJob();
+    expect(judged(OPERATOR, rest as Job)).toContain("no runs-on");
+  });
+
+  test("a defaults: key reports once, through its dedicated check, not the key census too", () => {
+    const job = { ...operatorJob(), defaults: { run: { shell: "bash" } } };
+    const report = judged(OPERATOR, job);
+    expect(report).toContain("no defaults:");
+    expect(report).not.toContain("pinned job keys");
+  });
+
   test("degenerate jobs judge clean with zero applies", () => {
     expect(labelPreflightJobMismatches(OPERATOR, "select", {})).toEqual({
       applies: 0,
@@ -1431,10 +1583,10 @@ describe("labelPreflightJobMismatches", () => {
     expect(judged(REUSABLE, job)).toContain("between the preflight and the apply");
   });
 
-  test("a drifted or over-keyed gap step fires the gap byte pin", () => {
+  test("a drifted or over-keyed gap step fires the gap pin", () => {
     const drifted = operatorJob();
     drifted.steps[1].run = 'echo "::notice::something else"\n';
-    expect(judged(OPERATOR, drifted)).toContain("byte-identical to the pinned stood-down notice");
+    expect(judged(OPERATOR, drifted)).toContain("matching the pinned stood-down notice");
     const overKeyed = operatorJob();
     overKeyed.steps[1].env = { X: "y" };
     expect(judged(OPERATOR, overKeyed)).toContain("exactly the keys [if, name, run]");
@@ -1554,10 +1706,15 @@ describe("spawnSyncHazard", () => {
   });
 
   test("every numeric spelling of zero is no bound (reviewer's probe)", () => {
-    for (const zero of ["0.0", "0x0", "-0", "0e0", "+0"]) {
+    for (const zero of ["0.0", "0x0", "-0", "0e0", "+0", "0_0"]) {
       expect(spawnSyncHazard(`{ timeout: ${zero} }`)).toContain("not a provable bound");
     }
     expect(spawnSyncHazard("{ timeout: 100 }")).toBeNull();
+  });
+
+  test("a numeric-separator literal is a provable bound (10_000 folds to 10000, not NaN)", () => {
+    expect(spawnSyncHazard('{ stdout: "pipe", timeout: 10_000 }')).toBeNull();
+    expect(spawnSyncHazard("{ timeout: 1_000_000 }")).toBeNull();
   });
 
   test("an expression timeout is unprovable and fails closed (reviewer's probe)", () => {
@@ -1598,6 +1755,154 @@ describe("spawnSyncHazard", () => {
 
   test("a timeoutMs-style key is not the timeout property", () => {
     expect(spawnSyncHazard("{ timeoutMs: 5 }")).not.toBeNull();
+  });
+});
+
+describe("spawnDebtMismatches", () => {
+  const site = (line: number): { file: string; expected: string; got: string } => ({
+    file: `tests/x.test.ts:${line}`,
+    expected: "a bounded or unpiped spawnSync",
+    got: "no options",
+  });
+
+  test("an unbooked file reports every hazard it found", () => {
+    expect(spawnDebtMismatches("tests/x.test.ts", [site(3)], undefined)).toEqual([site(3)]);
+    expect(spawnDebtMismatches("tests/x.test.ts", [], undefined)).toEqual([]);
+  });
+
+  test("a booked file at its ceiling passes", () => {
+    expect(spawnDebtMismatches("tests/x.test.ts", [site(3), site(9)], 2)).toEqual([]);
+  });
+
+  test("SHRINK-ONLY: a count below the ceiling passes, zero included, with no stale report", () => {
+    // The property a naive equality pin gets wrong, and what lets a
+    // conversion land without touching the book.
+    expect(spawnDebtMismatches("tests/x.test.ts", [site(3)], 2)).toEqual([]);
+    expect(spawnDebtMismatches("tests/x.test.ts", [], 2)).toEqual([]);
+  });
+
+  test("a count above the ceiling reports the breach AND every site", () => {
+    const found = [site(3), site(9), site(12)];
+    const report = spawnDebtMismatches("tests/x.test.ts", found, 2);
+    expect(report).toHaveLength(4);
+    expect(report[0].expected).toContain("at most 2");
+    expect(report[0].expected).toContain("never raise the entry");
+    expect(report.slice(1)).toEqual(found);
+  });
+
+  test("the book itself keys tests/ files with positive ceilings", () => {
+    for (const [rel, ceiling] of Object.entries(TEST_SPAWN_DEBT)) {
+      expect(rel.startsWith("tests/")).toBe(true);
+      expect(Number.isInteger(ceiling) && ceiling > 0).toBe(true);
+    }
+  });
+});
+
+describe("asyncSpawnMismatches", () => {
+  test("the enumeration pins the exact landed set, by name", () => {
+    expect(Object.keys(ASYNC_SPAWN_FILES).sort()).toEqual([
+      ".github/scripts/sync/rehearse_fleet.ts",
+      "actions/fuzz-issue/fuzz-issue.ts",
+      "actions/release-health/release-health.ts",
+    ]);
+  });
+
+  test("an unenumerated async Bun.spawn fires per site, naming the file", () => {
+    const found = asyncSpawnMismatches("scripts/x.ts", 'const p = Bun.spawn(["gh"]);\n', false);
+    expect(found).toHaveLength(1);
+    expect(found[0].file).toBe("scripts/x.ts:1");
+    expect(found[0].expected).toContain("ASYNC_SPAWN_FILES");
+  });
+
+  test("LAUNDERING: a debt file's spawnSync rewritten as async Bun.spawn fails by introducing a fourth name", () => {
+    // The sync->async rewrite EXITS the sync gate and shrinks the
+    // file's TEST_SPAWN_DEBT count (reads as an improvement); the
+    // exact-set pin is what makes it fail - the file's name is not in
+    // the enumeration, and no count edit can satisfy that.
+    const rewritten = 'const proc = Bun.spawn(["bun", entry], { stdout: "pipe" });\n';
+    expect(spawnDebtMismatches("tests/shared/flags.test.ts", [], 1)).toEqual([]); // sync side: shrink passes
+    const found = asyncSpawnMismatches("tests/shared/flags.test.ts", rewritten, false);
+    expect(found).toHaveLength(1);
+    expect(found[0].file).toBe("tests/shared/flags.test.ts:1");
+  });
+
+  test("an enumerated file with a site passes; one with none left is a stale entry", () => {
+    expect(asyncSpawnMismatches("actions/x/x.ts", "Bun.spawn(cmd);\n", true)).toEqual([]);
+    const stale = asyncSpawnMismatches("actions/x/x.ts", 'console.log("gone");\n', true);
+    expect(stale).toHaveLength(1);
+    expect(stale[0].got).toContain("stale");
+  });
+
+  test("spawnSync, comments, and string mentions are not async sites", () => {
+    const source = [
+      'Bun.spawnSync(["git"], { timeout: 5 });',
+      "// a Bun.spawn(cmd) mention in a comment",
+      'const doc = "Bun.spawn(cmd)";',
+    ].join("\n");
+    expect(asyncSpawnMismatches("scripts/x.ts", source, false)).toEqual([]);
+    // Optional chaining and an alias-shaped mention are still sites.
+    expect(asyncSpawnMismatches("scripts/x.ts", "Bun?.spawn(cmd);\n", false)).toHaveLength(1);
+    expect(asyncSpawnMismatches("scripts/x.ts", "const s = Bun.spawn;\n", false)).toHaveLength(1);
+  });
+
+  test("a re-punctuated callee is still an async site; a different receiver is not", () => {
+    // The laundering hardening: `(Bun).spawn` and `Bun!.spawn` must not
+    // exit the scan by re-punctuating the receiver, and fakeBun's
+    // method is not Bun's.
+    expect(asyncSpawnMismatches("scripts/x.ts", "(Bun).spawn(cmd);\n", false)).toHaveLength(1);
+    expect(asyncSpawnMismatches("scripts/x.ts", "Bun!.spawn(cmd);\n", false)).toHaveLength(1);
+    expect(asyncSpawnMismatches("scripts/x.ts", "fakeBun.spawn(cmd);\n", false)).toEqual([]);
+  });
+});
+
+describe("agentsStagingMismatches", () => {
+  const recipe = (staging: string) =>
+    "prose before\n" +
+    `- Smoke-generate locally: \`bun x --dest /tmp/bt\`, \`git -C /tmp/bt init -b build && ${staging} && git -C /tmp/bt commit -m build\`, \`copier copy /tmp/bt /tmp/out\` then validate.\n`;
+  const hermetic = stageComposedTreeArgv("/tmp/bt").join(" ");
+
+  test("the recipe carrying the shared hermetic argv passes", () => {
+    expect(agentsStagingMismatches(recipe(hermetic))).toEqual([]);
+  });
+
+  test("the pre-unification recipe fails, naming the derived command", () => {
+    const [mismatch] = agentsStagingMismatches(recipe("git -C /tmp/bt add -A"));
+    expect(mismatch.expected).toContain(hermetic);
+    expect(mismatch.got).toBe("'git -C /tmp/bt add -A'");
+  });
+
+  test("dropping --force alone fails (the probe that passed every rule before this pin)", () => {
+    const forceless = hermetic.replace(" --force", "");
+    expect(agentsStagingMismatches(recipe(forceless))).toHaveLength(1);
+  });
+
+  test("dropping the attributesFile override alone fails too", () => {
+    const bareForce = hermetic.replace(" -c core.attributesFile=/dev/null", "");
+    expect(agentsStagingMismatches(recipe(bareForce))).toHaveLength(1);
+  });
+
+  test("a correct staging command quoted OFF the smoke bullet cannot mask a drifted recipe", () => {
+    // The extraction is anchored to the bullet line itself: a decoy
+    // earlier in the doc satisfied the unanchored pre-fix pattern.
+    const decoy = `Prose quoting \`git -C /tmp/bt init -b build && ${hermetic} && git -C /tmp/bt commit -m build\` early.\n`;
+    const doc = decoy + recipe("git -C /tmp/bt add -A");
+    expect(agentsStagingMismatches(doc)).toHaveLength(1);
+    // And the decoy alone, with no smoke bullet, is a lost anchor.
+    expect(() => agentsStagingMismatches(decoy)).toThrow("staging command");
+  });
+
+  test("a correct copy LATER ON the bullet line cannot mask a drifted first leg (lazy match)", () => {
+    const doubled = recipe("git -C /tmp/bt add -A").replace(
+      /\n$/,
+      ` Also quoted: \`git -C /tmp/bt init -b build && ${hermetic} && git -C /tmp/bt commit -m build\`.\n`,
+    );
+    expect(agentsStagingMismatches(doubled)).toHaveLength(1);
+  });
+
+  test("a recipe whose staging leg vanished throws loudly instead of passing vacuously", () => {
+    expect(() => agentsStagingMismatches("no recipe here")).toThrow(
+      "the smoke recipe's staging command",
+    );
   });
 });
 

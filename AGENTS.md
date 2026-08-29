@@ -26,7 +26,7 @@ repo-platform: a Copier template plus reusable GitHub Actions workflows and comp
 ## Verification
 
 - `bun run check` chains every local gate.
-- Smoke-generate locally (main is not directly copier-consumable - build a scratch tree first; copier needs bun on PATH because the stamp hook runs with bun): `bun .github/scripts/build-branches/branch_tree.ts --dest /tmp/bt`, `git -C /tmp/bt init -b build && git -C /tmp/bt -c core.attributesFile=/dev/null add -A --force && git -C /tmp/bt commit -m build`, `copier copy /tmp/bt /tmp/out --vcs-ref HEAD --defaults --trust -d project_name=X -d description=Y -d 'modules=[uv]' -d private=false` then run actions/validate-template on `/tmp/out`. The multiselect value must be a YAML list in ONE `-d` argument.
+- Smoke-generate locally (main is not directly copier-consumable - build a scratch tree first; copier needs bun on PATH because the stamp hook runs with bun): `bun .github/scripts/build-branches/branch_tree.ts --dest /tmp/bt`, `git -C /tmp/bt init -b build && git -C /tmp/bt -c core.attributesFile=/dev/null -c core.autocrlf=false add -A --force && git -C /tmp/bt commit -m build`, `copier copy /tmp/bt /tmp/out --vcs-ref HEAD --defaults --trust -d project_name=X -d description=Y -d 'modules=[uv]' -d private=false` then run actions/validate-template on `/tmp/out`. The multiselect value must be a YAML list in ONE `-d` argument.
 
 ## Conventions
 

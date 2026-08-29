@@ -31,7 +31,9 @@ import {
   loadOverrideLayer,
 } from "../.github/scripts/fleet/merge_settings_layers.ts";
 import { allLayerLabels, loadLayer } from "../.github/scripts/fleet/render_managed_settings.ts";
+import { CHECK_NAME } from "../.github/scripts/shared/all_green.ts";
 import { capture } from "../.github/scripts/shared/proc.ts";
+import { stageComposedTreeArgv } from "../.github/scripts/shared/stage_tree.ts";
 import { captureName } from "../.github/scripts/sync/run_hidden.ts";
 import { PIN_FLIPS } from "../.github/scripts/sync/starter_pin_rollout.ts";
 import { TOOLCHAIN_SETUP_FRAGMENT, TOOLCHAIN_SETUP_TARGETS } from "./compose_template.ts";
@@ -218,6 +220,13 @@ export function mustMatch(text: string, re: RegExp, where: string, what: string)
  *  comment marker, which the anchor rejects - dead wiring must never
  *  satisfy the rule. */
 export const ALL_GREEN_WIRING = {
+  /** The predicate's CHECK_NAME declaration, the exact, COMPLETE
+   *  exported-const line (the `";` end anchor rejects a concatenation's
+   *  left half). Not the value's source - the rule imports CHECK_NAME
+   *  and compares this line against it, so a decoy the pattern could
+   *  still match (a look-alike line inside a multiline template)
+   *  mismatches instead of standing in. */
+  checkName: /^export const CHECK_NAME = "([^"]+)";$/m,
   /** The verdict's check-run POST names the check. */
   created: /^\s*-f "name=([^"]+)"/m,
   /** The green gates' lookup keys on the shared CHECK_NAME constant. */
@@ -230,6 +239,35 @@ export const ALL_GREEN_WIRING = {
   /** The render validator enforces the same anchor at sync time. */
   anchorValidated: /^\s*const REQUIRED_GATE_JOB = "([^"]+)";$/m,
 };
+
+/** The predicate's declared check name, extracted syntax-aware: the
+ *  declaration LINE is located on the masked view (comments, strings,
+ *  and template TEXT blanked - so a look-alike inside a multiline
+ *  template, same value or not, can never be the line found), then the
+ *  value is read from the comment-stripped view at the same offset
+ *  (the two views are same-length by construction). A declaration
+ *  rewritten as anything but the exact exported-const line throws
+ *  anchor-lost. */
+export function declaredCheckName(source: string): string {
+  const { stripped, masked } = scanSource(source);
+  const at = mustMatch(masked, ALL_GREEN_WIRING.checkName, "all_green.ts", "verdict check name");
+  const declared = mustMatch(
+    stripped.slice(at.index),
+    ALL_GREEN_WIRING.checkName,
+    "all_green.ts",
+    "verdict check name",
+  );
+  // The value must come from the LOCATED line, index 0 of the slice: a
+  // declaration whose value the pattern cannot re-read there (an
+  // escaped quote) must throw rather than let the search drift to a
+  // later look-alike.
+  if (declared.index !== 0) {
+    throw new Error(
+      "all_green.ts: the CHECK_NAME declaration's value could not be read at its located line",
+    );
+  }
+  return declared[1];
+}
 
 // --- comparison shaping ----------------------------------------------------
 
@@ -618,9 +656,14 @@ export function shellSegments(run: string): string[] {
  *  (`false && bun ...`) and `|| true` suppression pass the grammar;
  *  the rule's EXPECTED_RUN byte pin owns those. */
 export function preflightInvocation(segment: string): "direct" | "hidden" | null {
-  const direct = /^\s*bun\s+\S*fleet\/label_preflight\.ts(?=\s|$)/;
+  // The path stems carry a path-segment boundary: a stem glued to ANY
+  // preceding non-separator character (not-sync/, my.fleet/) is a
+  // DIFFERENT tree's file merely ending in the expected name, which
+  // must not read as the wrapper or the script - only a fresh token or
+  // a parent directory's `/` may precede the stem.
+  const direct = /^\s*bun\s+\S*?(?<![^\s/])fleet\/label_preflight\.ts(?=\s|$)/;
   const hidden =
-    /^\s*bun\s+\S*sync\/run_hidden\.ts\s+"[^"]*"\s+--\s+bun\s+\S*fleet\/label_preflight\.ts(?=\s|$)/;
+    /^\s*bun\s+\S*?(?<![^\s/])sync\/run_hidden\.ts\s+"[^"]*"\s+--\s+bun\s+\S*?(?<![^\s/])fleet\/label_preflight\.ts(?=\s|$)/;
   if (hidden.test(segment)) return "hidden";
   if (direct.test(segment)) return "direct";
   return null;
@@ -779,6 +822,37 @@ export const PREFLIGHT_JOB_ENV_KEYS: Record<string, ReadonlySet<string>> = {
   ".github/workflows/reusable-apply-settings.yml": new Set([]),
 };
 
+// The job-level EXECUTION-CONTEXT census (decision: a rule, not an
+// accepted residual - the class is in-file and closable the same way
+// the step-key allowlist closes its level). The whole job runs WHERE
+// its keys say: `container:` re-homes every step into an arbitrary
+// image whose env (BASH_ENV again) and PATH arrive underneath the
+// step- and job-level env allowlists' sight, `services:` attaches
+// containers, and runner keys keep being added - so the apply job's
+// keys are ALLOWLISTED rather than enumerated as hazards, and runs-on
+// is value-pinned to the hosted runner the byte-pinned run blocks
+// assume (a self-hosted label is a different machine wearing the same
+// workflow text). `defaults:` is deliberately absent here AND skipped
+// by the census: its dedicated check above owns it, and double-listing
+// would double-report one edit. `env:` is allowlisted as a KEY because
+// PREFLIGHT_JOB_ENV_KEYS judges its content.
+export const PREFLIGHT_APPLY_JOB_KEYS: Record<string, ReadonlySet<string>> = {
+  ".github/workflows/settings-repos.yml": new Set([
+    "name",
+    "needs",
+    "if",
+    "strategy",
+    "env",
+    "runs-on",
+    "timeout-minutes",
+    "steps",
+  ]),
+  ".github/workflows/reusable-apply-settings.yml": new Set(["runs-on", "timeout-minutes", "steps"]),
+};
+
+/** The one hosted runner the apply jobs may request. */
+export const PREFLIGHT_APPLY_RUNS_ON = "ubuntu-latest";
+
 // The persisted-environment class: a PRIOR step's run block can write
 // `BASH_ENV=<hook> >> $GITHUB_ENV` (bash sources the hook before the
 // pinned run block executes - `exit 0` there skips the guard green) or
@@ -894,6 +968,29 @@ export function labelPreflightJobMismatches(
       });
     }
   }
+  for (const key of Object.keys(job)) {
+    if (key === "defaults") continue; // the dedicated defaults check above owns it
+    if (!PREFLIGHT_APPLY_JOB_KEYS[rel].has(key)) {
+      mismatches.push({
+        file: rel,
+        expected:
+          `only the pinned job keys [${[...PREFLIGHT_APPLY_JOB_KEYS[rel]].join(", ")}] on job ` +
+          `'${jobName}' - any other key (container:, services:, a future runner key) re-homes ` +
+          "the execution context underneath every step-level pin",
+        got: `job key '${key}'`,
+      });
+    }
+  }
+  const runsOn = String(job["runs-on"] ?? "").trim();
+  if (runsOn !== PREFLIGHT_APPLY_RUNS_ON) {
+    mismatches.push({
+      file: rel,
+      expected:
+        `runs-on: ${PREFLIGHT_APPLY_RUNS_ON} on job '${jobName}' (the pinned hosted runner - a ` +
+        "self-hosted label is a different machine wearing the same workflow text)",
+      got: runsOn === "" ? "no runs-on" : `runs-on: ${runsOn}`,
+    });
+  }
   for (const [index, step] of steps.entries()) {
     const runText = String(step.run ?? "");
     for (const token of PREFLIGHT_FORBIDDEN_RUN_TOKENS) {
@@ -967,7 +1064,7 @@ export function labelPreflightJobMismatches(
         ) {
           mismatches.push({
             file: rel,
-            expected: `gap step ${index + 1} byte-identical to the pinned stood-down notice (PREFLIGHT_GAP_STEPS)`,
+            expected: `gap step ${index + 1} matching the pinned stood-down notice (PREFLIGHT_GAP_STEPS: run byte-for-byte, if compared after trimming)`,
             got: "a drifted gap step",
           });
         }
@@ -1009,6 +1106,15 @@ export function labelPreflightJobMismatches(
       });
     }
     const applyIf = String(steps[applyAt].if ?? "").trim();
+    // TEXT parity only, deliberately: this check proves the guard and
+    // the apply share ONE condition; the condition's pinned VALUE is the
+    // sibling settings-apply-skip-gate rule's job (it pins every apply
+    // step's if: in both files), so a JOINT drift of both sides fires
+    // there, not here - re-pinning the value here would double-report
+    // every legitimate condition edit. That split is load-bearing
+    // defense in depth: retiring the sibling rule (its roster entry
+    // makes that loud) would leave this parity satisfiable by any
+    // condition, agreed or wrong.
     if (preflightIf !== applyIf) {
       mismatches.push({
         file: rel,
@@ -1155,6 +1261,52 @@ export function expandCheckChain(
   };
   visit(entry);
   return { text: bodies.join("\n"), names };
+}
+
+// --- the smoke recipe's staging pin -------------------------------------------
+
+/** AGENTS.md's smoke-generate recipe stages a scratch build tree by hand;
+ *  its staging command is a mirror of shared/stage_tree.ts's hermetic
+ *  argv with no code twin the wiring tests can see (they pin call SITES,
+ *  and a doc line is not one). Decision: a rule, not an accepted
+ *  residual - a drifted recipe re-opens for the human's scratch tree the
+ *  exact producer-vs-verifier skew the shared argv closed, so the doc
+ *  command is derived FROM stageComposedTreeArgv and compared exactly.
+ *  Anchored between the recipe's init and commit legs, so a staging
+ *  command that vanished or moved fails loudly rather than vacuously. */
+export function agentsStagingMismatches(agents: string): Mismatch[] {
+  const argv = stageComposedTreeArgv("/tmp/bt");
+  // Joining argv with spaces is only an exact shell rendering while
+  // every element is a bare word; a helper argv that ever grows an
+  // element needing quoting must fail HERE, not derive a doc
+  // expectation that would break a human's shell.
+  for (const word of argv) {
+    if (!/^[A-Za-z0-9_@%+=:,./-]+$/.test(word)) {
+      throw new Error(
+        `stageComposedTreeArgv: '${word}' is not a bare shell word - the recipe pin cannot render it`,
+      );
+    }
+  }
+  const expected = argv.join(" ");
+  // Anchored to the smoke bullet itself (markdown bullets are one
+  // source line by repo convention) and LAZY up to the first
+  // staging-shaped span, so neither a staging command quoted elsewhere
+  // in the doc nor a second copy later on the same bullet line can
+  // stand in for the recipe's own leg.
+  const recipe = mustMatch(
+    agents,
+    /^- Smoke-generate locally[^\n]*?`git -C \/tmp\/bt init -b build && ([^`]+?) && git -C \/tmp\/bt commit -m build`/m,
+    "AGENTS.md",
+    "the smoke recipe's staging command",
+  )[1];
+  if (recipe === expected) return [];
+  return [
+    {
+      file: "AGENTS.md",
+      expected: `the staging command '${expected}' (stageComposedTreeArgv - the recipe must stage the same bytes the producers publish)`,
+      got: `'${recipe}'`,
+    },
+  ];
 }
 
 // --- action pins -------------------------------------------------------------
@@ -1714,6 +1866,17 @@ export function topLevelProperties(options: string): Map<string, string> | null 
   return props;
 }
 
+// The Bun-global receiver, shared by the sync and async spawn scans and
+// hardened against decorative spellings: a left token boundary (fakeBun
+// is not Bun), optional wrapping parentheses, and the TS non-null `!`
+// all read as the same receiver, so a call cannot exit either scan by
+// re-punctuating its callee. Inner whitespace is admitted only AFTER a
+// real `(` (a bare leading \s* would let the match start on the
+// preceding newline and shift site line numbers). A stray unbalanced
+// parenthesis matching `\(`/`\)?` independently over-matches toward a
+// phantom site - the loud direction, never a silent skip.
+const BUN_RECEIVER = String.raw`(?<![\w$])(?:\(\s*)?Bun\s*\)?\s*!?\s*\??\.\s*`;
+
 /** A spawnSync occurrence in comment-stripped source: a direct
  *  `Bun.spawnSync` call with its options text, or any other reference -
  *  an alias, a destructure pulling spawnSync off Bun, bracket access - a
@@ -1740,7 +1903,7 @@ export function spawnSyncSites(source: string, where: string): SpawnSyncSite[] {
   const { stripped, masked } = scanSource(source);
   const lineAt = (index: number) => masked.slice(0, index).split("\n").length;
   const sites: SpawnSyncSite[] = [];
-  for (const match of masked.matchAll(/Bun\s*\??\.\s*spawnSync\b/g)) {
+  for (const match of masked.matchAll(new RegExp(`${BUN_RECEIVER}spawnSync\\b`, "g"))) {
     const line = lineAt(match.index);
     const paren = /^\s*(?:\?\.\s*)?\(/.exec(masked.slice(match.index + match[0].length));
     if (!paren) {
@@ -1800,7 +1963,10 @@ export function spawnSyncHazard(options: string | null): string | null {
   const timeout = props.get("timeout");
   let bounded = false;
   if (timeout !== undefined && !["undefined", "null", "NaN", "Infinity"].includes(timeout)) {
-    const n = Number(timeout);
+    // Numeric-separator spellings (10_000) are literals too - strip the
+    // separators before folding, so a bounded call does not misread as
+    // unprovable (and every separator spelling of zero still folds to 0).
+    const n = Number(timeout.replaceAll("_", ""));
     // Number() folds every numeric spelling of zero (0, 0.0, 0x0, 0e0,
     // -0, +0) onto 0; a non-numeric value only counts when it is a plain
     // identifier or member path - an expression can evaluate to zero
@@ -1838,6 +2004,134 @@ export function spawnSyncHazard(options: string | null): string | null {
     return `${unshaped.join(" and ")} left to the piped default with ${why}`;
   }
   return null;
+}
+
+// The shrink-only debt book for tests/: per-file CEILINGS on the
+// spawnSync hazard sites that predate extending the hang-bound rule to
+// tests/ (measured by the rule's own scan when the exclusion fell). A
+// file at or below its ceiling passes; a new hazard - a file with no
+// entry, or a count above its ceiling - fails outright, so every NEW
+// bare spawn is loud immediately while the legacy debt burns down
+// separately. Shrink-only is the point: a conversion needs no book
+// edit, so the burn-down (its own task) and this rule never block each
+// other. The residual of counting instead of naming sites: until the
+// burn-down prunes an entry, a booked file can swap one hazard for
+// another at the same count, or regrow from zero up to its old
+// ceiling, unnoticed - accepted, because the alternatives (exact
+// counts, per-site line keys, in-file markers) each turn every
+// conversion or unrelated edit into a same-change book edit and
+// re-couple what the ratchet decouples.
+export const TEST_SPAWN_DEBT: Record<string, number> = {
+  "tests/actions/stamp_manifest.test.ts": 2,
+  "tests/actions/validate_template_report.test.ts": 2,
+  "tests/build-branches/publish_behavior.test.ts": 1,
+  "tests/ci/verify_dogfood_oracle.test.ts": 1,
+  "tests/fleet/check_target_fresh.test.ts": 1,
+  "tests/fleet/discover_repos.test.ts": 1,
+  "tests/fleet/discovery.test.ts": 3,
+  "tests/fleet/label_preflight.test.ts": 1,
+  "tests/fleet/redact.test.ts": 3,
+  "tests/fleet/render_managed_settings.test.ts": 1,
+  "tests/fleet/repos_registry.test.ts": 1,
+  "tests/fleet/require_green_commit.test.ts": 2,
+  "tests/fleet/resolve_private_repo.test.ts": 1,
+  "tests/shared/flags.test.ts": 1,
+  "tests/shared/json.test.ts": 1,
+  "tests/shared/open_automation_pr.test.ts": 1,
+  "tests/shared/stage_tree.test.ts": 1,
+  "tests/sync/all_green_bootstrap.test.ts": 2,
+  "tests/sync/failure_issue.test.ts": 1,
+  "tests/sync/normalize_src.test.ts": 2,
+  "tests/sync/open_pr.test.ts": 1,
+  "tests/sync/preserve_local_content.test.ts": 4,
+  "tests/sync/preserve_repo_owned.test.ts": 4,
+  "tests/sync/referenced_labels.test.ts": 2,
+  "tests/sync/render_data.test.ts": 1,
+  "tests/sync/resolve_copier_conflicts.test.ts": 1,
+  "tests/sync/retired_cleanup.test.ts": 2,
+  "tests/sync/run_hidden.test.ts": 1,
+  "tests/sync/select_modules.test.ts": 1,
+  "tests/sync/starter_pin_rollout.test.ts": 1,
+  "tests/sync/tail_tripwire.test.ts": 3,
+  "tests/sync/verify_build_provenance.test.ts": 1,
+};
+
+/** The ratchet judgment for one file's hazard reports: an unbooked file
+ *  reports everything it found; a booked file passes while its count
+ *  sits at or below its ceiling (shrink included - that is what lets a
+ *  conversion land without a book edit) and reports the breach PLUS
+ *  every site above it. */
+export function spawnDebtMismatches(
+  rel: string,
+  found: Mismatch[],
+  ceiling: number | undefined,
+): Mismatch[] {
+  if (ceiling === undefined) return found;
+  if (found.length <= ceiling) return [];
+  return [
+    {
+      file: rel,
+      expected: `at most ${ceiling} unbounded spawnSync site(s) (TEST_SPAWN_DEBT is a shrink-only ceiling - bound the new site, never raise the entry)`,
+      got: `${found.length} site(s)`,
+    },
+    ...found,
+  ];
+}
+
+// ASYNC Bun.spawn is a different hazard model, judged as an EXACT-SET
+// enumeration rather than by the sync rule's bounded-or-unpiped bar:
+// an async site draining both pipes under Promise.all has no pipe-EOF
+// deadlock to bound, and the async Subprocess type has no `timeout`
+// option to pin - so every file calling Bun.spawn must appear here
+// with the rationale that bounds it (a manual deadline, or an outer
+// bound like the GitHub job timeout). The set pins NAMES, not a count:
+// a bounded spawnSync rewritten as async would EXIT the sync gate and
+// SHRINK its TEST_SPAWN_DEBT ceiling - reading as an improvement - so
+// the laundering must fail by introducing a name this pin does not
+// carry, a diagnostic that names the offending file. The textual
+// residual matches the sync rule's: a computed access (Bun["spawn"])
+// or a Bun alias stays review's outside the sync scan's trees.
+export const ASYNC_SPAWN_FILES: Record<string, string> = {
+  ".github/scripts/sync/rehearse_fleet.ts":
+    "implements its own manual deadline: the async Subprocess type has no built-in timeout, so a timer SIGKILLs an overrunning lane (the comment at its Bun.spawn call is the reference statement of why async needs one)",
+  "actions/fuzz-issue/fuzz-issue.ts":
+    "gh runner draining both pipes concurrently under Promise.all; bounded by the GitHub job timeout",
+  "actions/release-health/release-health.ts":
+    "gh runner draining both pipes concurrently under Promise.all; bounded by the GitHub job timeout",
+};
+
+/** The exact-set judgment for one file's async Bun.spawn mentions
+ *  (matched on the masked view with the hardened BUN_RECEIVER, so
+ *  comments and strings never count, `spawn\b` cannot match inside
+ *  spawnSync, and a re-punctuated callee - `(Bun).spawn`, `Bun!.spawn`
+ *  - is still a site). An unenumerated file with any site fails per
+ *  site; an enumerated file with none left is a stale entry - the set
+ *  stays exact in both directions. */
+export function asyncSpawnMismatches(rel: string, source: string, enumerated: boolean): Mismatch[] {
+  const masked = scanSource(source).masked;
+  const lines = [...masked.matchAll(new RegExp(`${BUN_RECEIVER}spawn\\b`, "g"))].map(
+    (match) => masked.slice(0, match.index).split("\n").length,
+  );
+  if (!enumerated) {
+    return lines.map((line) => ({
+      file: `${rel}:${line}`,
+      expected:
+        "no async Bun.spawn outside ASYNC_SPAWN_FILES (async sites are deadline-or-enumerated: " +
+        "no timeout option exists there, so each site's bound is a recorded rationale; a sync " +
+        "site rewritten async exits the sync gate and must land here, by name)",
+      got: "an unenumerated async Bun.spawn",
+    }));
+  }
+  if (lines.length === 0) {
+    return [
+      {
+        file: rel,
+        expected: "an async Bun.spawn call (the ASYNC_SPAWN_FILES entry's subject)",
+        got: "none - stale enumeration entry; remove it",
+      },
+    ];
+  }
+  return [];
 }
 
 // --- local runtime pin -------------------------------------------------------
@@ -3206,12 +3500,20 @@ const rules: Rule[] = [
     run: () => {
       const mismatches: Mismatch[] = [];
       const predicate = read(".github/scripts/shared/all_green.ts");
-      const gateName = mustMatch(
-        predicate,
-        /export const CHECK_NAME = "([^"]+)"/,
-        "all_green.ts",
-        "verdict check name",
-      )[1];
+      // The IMPORTED constant is the authoritative name; the
+      // syntax-aware textual pin (declaredCheckName) then proves the
+      // exported declaration LINE carries the same value, so neither a
+      // decoy the raw pattern could match nor a declaration rewritten
+      // away from the exact-line form can pass silently.
+      const gateName = CHECK_NAME;
+      const declared = declaredCheckName(predicate);
+      if (declared !== gateName) {
+        mismatches.push({
+          file: ".github/scripts/shared/all_green.ts",
+          expected: `the CHECK_NAME declaration line naming '${gateName}' (the imported constant)`,
+          got: declared,
+        });
+      }
       // The publish/sync gates' LOOKUP must consume the same constant, or
       // they could read a differently named check than the one pinned.
       mustMatch(
@@ -4059,6 +4361,9 @@ const rules: Rule[] = [
           });
         }
       }
+      // The recipe's staging leg, pinned to the shared hermetic argv
+      // (agentsStagingMismatches states the decision and its reason).
+      mismatches.push(...agentsStagingMismatches(agents));
       return mismatches;
     },
   },
@@ -4565,7 +4870,10 @@ const rules: Rule[] = [
     // apply-input census (PREFLIGHT_APPLY_WITH: every with: key
     // parity-mirrored from a preflight env var, literal-pinned, or
     // presence-only where another rule owns the value), ALLOWLISTED
-    // step, step-env, and job-env keys, and no workflow/job defaults
+    // step, step-env, job-env, and job keys (PREFLIGHT_APPLY_JOB_KEYS,
+    // with runs-on value-pinned - a container:, services:, or runner
+    // change re-homes the execution context under every step-level
+    // pin), and no workflow/job defaults
     // and no persisted-environment writes (shell:, working-directory:,
     // continue-on-error:, BASH_ENV, GITHUB_ENV, GITHUB_PATH each
     // reroute or soften the guard while every pinned fact reads
@@ -4592,21 +4900,46 @@ const rules: Rule[] = [
     // child exit and pipes both output streams by default
     // (spawnSyncHazard has the measured semantics), so one bare git call
     // can wedge a checker forever behind any descendant that inherited
-    // the pipe. Scope: scripts/** and .github/scripts/**, the executable
-    // trees - tests/ is deliberately excluded, because the test runner's
-    // per-test timeout already bounds anything a test spawns.
+    // the pipe. Scope: scripts/**, .github/scripts/**, AND tests/** -
+    // bun-test's caps are no substitute for a spawn bound: a synchronous
+    // spawn blocks the runner, so the per-test timeout cannot interrupt
+    // a hung child, and the 5s hook cap trips spuriously on cold starts
+    // in fresh worktrees, so suites carry their own explicit bounds
+    // (the fleet selector suites' lesson). A positive numeric literal or
+    // a named constant IS the bar - tests legitimately need stdio/env
+    // shapes proc.ts does not expose, so the helpers are the recommended
+    // remedy, not the required one (constants stay spawnSyncHazard's
+    // recorded trusted residual: resolving one is value analysis a
+    // textual scan cannot do, and rejecting identifiers would red
+    // proc.ts's own `timeout: timeoutMs`). Pre-existing test debt rides
+    // TEST_SPAWN_DEBT's shrink-only ceilings; everything else reports
+    // per site. ASYNC Bun.spawn is judged beside the sync bar under its
+    // own model (ASYNC_SPAWN_FILES has the statement): sync =
+    // bounded-or-unpiped, async = deadline-or-enumerated, because the
+    // async form neither blocks the caller at pipe EOF nor offers a
+    // timeout option to pin - and the async pass also scans actions/,
+    // where two enumerated sites live (the sync scan's scope is
+    // unchanged there; actions run in caller checkouts with their own
+    // conventions, and their sync spawns are the actions-bun-guard
+    // review surface, not this rule's).
     name: "spawn-sync-hang-bound",
     run: () => {
       const mismatches: Mismatch[] = [];
       let sites = 0;
-      const files = [...walkFiles("scripts"), ...walkFiles(".github/scripts")]
+      const files = [
+        ...walkFiles("scripts"),
+        ...walkFiles(".github/scripts"),
+        ...walkFiles("tests"),
+      ]
         .filter((f) => !f.symlink && /\.[mc]?[jt]s$/.test(f.path))
         .map((f) => f.path);
+      const present = new Set(files);
       for (const rel of files) {
+        const found: Mismatch[] = [];
         for (const site of spawnSyncSites(read(rel), rel)) {
           sites++;
           if (site.kind === "reference") {
-            mismatches.push({
+            found.push({
               file: `${rel}:${site.line}`,
               expected:
                 "a direct Bun spawnSync call (an alias or destructure cannot be audited for a hang bound)",
@@ -4616,13 +4949,47 @@ const rules: Rule[] = [
           }
           const hazard = spawnSyncHazard(site.options);
           if (hazard !== null) {
-            mismatches.push({
+            found.push({
               file: `${rel}:${site.line}`,
               expected:
                 "a bounded or unpiped spawnSync: a proc.ts helper, an explicit timeout, or every output stream shaped to inherit/ignore/file fds",
               got: hazard,
             });
           }
+        }
+        mismatches.push(...spawnDebtMismatches(rel, found, TEST_SPAWN_DEBT[rel]));
+      }
+      // Existence control on the book's keys: an entry outside tests/
+      // would grant the executable trees a ceiling they must never have,
+      // and one naming a file the walk cannot see excuses nothing.
+      for (const rel of Object.keys(TEST_SPAWN_DEBT).sort()) {
+        if (!rel.startsWith("tests/") || !present.has(rel)) {
+          mismatches.push({
+            file: rel,
+            expected: "a scanned tests/ file (TEST_SPAWN_DEBT keys the tests/ tree only)",
+            got: "no such scanned file - stale or misplaced debt entry; remove it",
+          });
+        }
+      }
+      // The async pass, actions/ included: every Bun.spawn caller must
+      // sit in ASYNC_SPAWN_FILES by name (exact set, both directions).
+      const asyncFiles = [
+        ...files,
+        ...walkFiles("actions")
+          .filter((f) => !f.symlink && /\.[mc]?[jt]s$/.test(f.path))
+          .map((f) => f.path),
+      ];
+      const asyncPresent = new Set(asyncFiles);
+      for (const rel of asyncFiles) {
+        mismatches.push(...asyncSpawnMismatches(rel, read(rel), rel in ASYNC_SPAWN_FILES));
+      }
+      for (const rel of Object.keys(ASYNC_SPAWN_FILES).sort()) {
+        if (!asyncPresent.has(rel)) {
+          mismatches.push({
+            file: rel,
+            expected: "a scanned file (ASYNC_SPAWN_FILES keys the scanned trees)",
+            got: "no such file - stale enumeration entry; remove it",
+          });
         }
       }
       if (sites === 0) {
