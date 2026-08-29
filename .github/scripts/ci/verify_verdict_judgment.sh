@@ -47,6 +47,8 @@
 #   25. the registry does not know the rostered name -> failure, even
 #       with a same-named green run (config error or off-branch decoy)
 #   26. an empty registry -> failure, same rule
+#   27. the unknown rostered name with NO runs at the sha -> failure,
+#       never PENDING (identity precedes the no-candidate branch)
 # shellcheck disable=SC2016  # jq programs and assertion strings carry literals
 set -euo pipefail
 
@@ -671,6 +673,19 @@ expect "empty registry" failure "expected workflows did not succeed"
 posted_summary | grep -qF "Extra Suite is not a workflow this repository knows" \
   || fail "empty registry: the summary does not name the registry miss"
 
+# 27. The unknown rostered name with NO runs at the sha at all: still the
+# identity failure, never PENDING. Scenarios 25/26 carry a green decoy
+# run, so only this pins the ORDER - a no-candidate branch hoisted above
+# the registry check would leave this verdict pending forever.
+run_verdict "$(jobs "$GREEN_JOBS")" \
+  RUN_EVENT=pull_request CONDITIONAL_WORKFLOWS='["Extra Suite"]' \
+  REGISTRY_FIXTURE="$(registry '{"workflows":[
+    {"name":"CI","path":".github/workflows/ci.yml"}]}')" \
+  RUNS_FIXTURE="$(runs '{"workflow_runs":[]}')"
+expect "unknown name with no runs" failure "expected workflows did not succeed"
+posted_summary | grep -qF "Extra Suite is not a workflow this repository knows" \
+  || fail "unknown name with no runs: the summary does not name the registry miss"
+
 # 21. workflow_dispatch with NOTHING declared posts like a push judgment:
 # with an empty roster and no Copilot demand, a CI-only judgment is
 # complete, and dispatch/schedule verdicts are what re-runs on main rely
@@ -709,7 +724,7 @@ posted_summary | grep -qF "Extra Suite concluded failure" \
 [ -s "$SLEEP_LOG" ] \
   || fail "conditional flips red during the wait: the bounded wait never engaged, so the re-read was not exercised"
 
-# 27-35. The pre-judgment guards refuse outright (exit 1, no POST): a
+# 28-36. The pre-judgment guards refuse outright (exit 1, no POST): a
 # look-alike workflow merely NAMED "CI", an uncompleted run, a trigger
 # carrying neither a workflow_run event nor a dispatch sha, a
 # conditional-workflows value that is not a JSON list of strings, a
@@ -737,4 +752,4 @@ refused "dead registry read" "simulated API failure for the workflow-registry li
     {"id":9,"name":"Extra Suite","path":".github/workflows/extra.yml","event":"pull_request","status":"completed","conclusion":"success"}]}')" \
   REGISTRY_FIXTURE=FAIL
 
-echo "verdict judgment OK: all 26 verdict scenarios POSTed the expected status/conclusion and all 9 guard scenarios refused, through the real run block"
+echo "verdict judgment OK: all 27 verdict scenarios POSTed the expected status/conclusion and all 9 guard scenarios refused, through the real run block"

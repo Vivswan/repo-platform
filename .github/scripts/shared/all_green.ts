@@ -314,7 +314,9 @@ export function expectedSetGaps(input: ExpectedSetInput): ExpectedSetGaps {
     } else if (paths[0] !== owners[0]) {
       gaps.failed.push(`${name} ran from ${paths[0]}, not its registered workflow ${owners[0]}`);
     } else {
-      const newest = candidates.reduce((a, b) => (b.id > a.id ? b : a));
+      // >= mirrors the engine's jq max_by(.id), which returns the LAST of
+      // tied ids (a shifting --paginate window can serve one run twice).
+      const newest = candidates.reduce((a, b) => (b.id >= a.id ? b : a));
       if (newest.status !== "completed") {
         gaps.missing.push(`${name} is still ${newest.status}`);
       } else if (newest.conclusion !== "success" && newest.conclusion !== "skipped") {

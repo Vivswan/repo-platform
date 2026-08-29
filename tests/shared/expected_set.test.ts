@@ -267,6 +267,21 @@ describe("expectedSetGaps", () => {
       ).toEqual({ missing: [], failed: [] });
     });
 
+    test("tied ids judge the LAST record, matching the engine's jq max_by (a shifting --paginate window can serve one run twice, in differing states)", () => {
+      const asFailure = run({ id: 7, conclusion: "failure" });
+      const asSuccess = run({ id: 7, conclusion: "success" });
+      expect(
+        expectedSetGaps(
+          input({ conditionalWorkflows: ["Extra Suite"], runsAtSha: [asFailure, asSuccess] }),
+        ),
+      ).toEqual({ missing: [], failed: [] });
+      expect(
+        expectedSetGaps(
+          input({ conditionalWorkflows: ["Extra Suite"], runsAtSha: [asSuccess, asFailure] }),
+        ).failed,
+      ).toEqual(["Extra Suite concluded failure"]);
+    });
+
     test("a re-triggered member resets to MISSING while its newer run is in flight", () => {
       const gaps = expectedSetGaps(
         input({
