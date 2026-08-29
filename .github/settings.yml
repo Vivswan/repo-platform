@@ -37,7 +37,7 @@ rulesets:
   # the two entries in the same change that deletes the branches.
   #
   # A stricter publish-only ruleset (every write blocked, sole bypass the
-  # GitHub Actions integration that build-branches.yml publishes with)
+  # GitHub Actions integration the publisher pushed with at the time)
   # was declared here once, and GitHub rejected it at apply time: POST
   # /rulesets returns 422 "Actor GitHub Actions integration must be part
   # of the ruleset source or owner organization" - an Integration bypass

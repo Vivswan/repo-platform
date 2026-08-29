@@ -14,7 +14,8 @@
 // fails at the deadline. Fail-closed throughout, like the predicate.
 //
 // The workflow keeps its push trigger (with the load-bearing paths
-// filter) instead of moving to workflow_run like build-branches.yml: a
+// filter) instead of chaining off the verdict's workflow_run event the
+// way the build publish does (all-green.yml's post-green job): a
 // workflow_run trigger cannot filter on paths, so every green push -
 // docs-only included - would re-apply the whole fleet.
 //

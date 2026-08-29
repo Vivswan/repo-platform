@@ -19,7 +19,7 @@ Bring a repository under Vivswan/repo-platform management: the platform is a Cop
 ## Key facts before you start
 
 - The template is standards-only: CI conventions, settings, gitignore, agent instructions. The project skeleton comes from the native tool (`uv init`, `bun init`); repo-platform layers on top.
-- repo-platform's `main` branch is NOT copier-consumable. Consume the generated build ref: the `build` branch (rebuilt from every main merge).
+- repo-platform's `main` branch is NOT copier-consumable. Consume the generated build ref: the `build` branch (published only from green main commits).
 - Some steps need repository-settings access; they are collected in "Owner actions" below so a human can do them in one sitting.
 
 ## Workflow

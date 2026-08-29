@@ -1,17 +1,20 @@
 #!/usr/bin/env bun
 // Bounded wait for the build output sync-repos.yml's plan job consumes:
-// Build Branches rebuilds the build branch asynchronously after each
-// main merge, so a sync dispatched right after a merge could consume the
-// previous build tree. Freshness has two paths, neither trusting any
-// live state:
+// the build branch is published asynchronously (each main push parks a
+// pending tree during CI; All Green's post-green job promotes it -
+// composing as the fallback - once the verdict lands green, and in
+// normal operation commits only on a content change), so a sync
+// dispatched right after a merge could consume the previous build
+// tree. Freshness has two paths, neither trusting any live state:
 //
 //   1. FAST: the build tip's SOURCE STAMP names main's HEAD - publish.ts
-//      stamps the commit it actually published (the completed CI run's
-//      head_sha on the workflow_run path), so the stamp is the
+//      stamps the commit it actually published (the judged CI run's
+//      head_sha on the green path), so the stamp is the
 //      artifact's direct provenance. A "successful build-branches run at
-//      main's HEAD" is deliberately NOT trusted: a run created at HEAD B
-//      can have published an earlier source A while B's own CI was still
-//      running.
+//      main's HEAD" is deliberately NOT trusted: the push leg only PARKS
+//      a pending tree (publishing happens post-green, or at the trigger
+//      commit on the schedule/dispatch self-heal), so a green run at
+//      HEAD B proves nothing about what the branch tip carries.
 //   2. SLOW: rebuild the composed tree at main's HEAD right here
 //      (shared/rebuild_tree.ts - the same rebuild the sync's provenance
 //      verifier runs) and compare tree hashes with the tip. Equal, under
@@ -37,17 +40,21 @@
 // byte-identically across machines), and a registry blip degrades to the
 // stamp-only poll like any other rebuild failure.
 //
-// Two waiting cases end in the warning path, both benign: a green main
-// whose CI is still running (build-branches triggers on CI success, so
-// nothing has even started yet), and a red main tip, which never builds
-// at all (publish.ts refuses ungreen sources). Either way the sync ships
+// Three waiting cases end in the warning path, all benign: a green main
+// whose CI is still running (the publish waits for the all-green
+// verdict, which lands only after that run completes, so nothing has
+// published yet), a red main tip, whose pending tree is parked but
+// never published (publish.ts refuses ungreen sources), and a green
+// push whose post-green publish failed or was evicted - the miss the
+// Build Branches schedule/dispatch self-heal exists to repair
+// (build-branches.yml's header). In every case the sync ships
 // the PREVIOUS green build - its scripts and templates may lag main
 // (script/template skew), which is exactly the state a pre-gate sync
 // always ran in - and resolve_refs.ts re-checks the shipped build's own
 // source is green (shared/all_green.ts); this bounded wait stays a
 // freshness aid, not the gate. Polls every 30 seconds, 80 attempts (40
 // minutes): the tree is pre-built DURING the main CI run
-// (build_pending.ts), so the post-CI publisher only promotes it - the
+// (build_pending.ts), so the post-green publisher only promotes it - the
 // wait covers a full main CI run (~30 minutes worst case with
 // rehearse-fleet) plus the promotion (~3 minutes; ~8 on the compose
 // fallback when the pending ref is missing) and queue slack, then warns
@@ -288,11 +295,11 @@ await waitFor(
       // and the stamp battery would be near-vacuous against it (a stamp
       // naming main's HEAD passes the on-main check by definition).
       // Holding the wait instead would buy nothing: this state triggers
-      // no publish of its own (build-branches fires on main CI, and main
-      // is unmoved), so recovery waits for the weekly cron, a manual
-      // dispatch, or the next landing - none due within a 40-minute
-      // hold - and the same red sync would just arrive 40 minutes
-      // later. This arm must also stay decisive when the rebuild
+      // no publish of its own (the green path publishes on main pushes'
+      // verdicts, and main is unmoved), so recovery waits for the weekly
+      // cron, a manual dispatch, or the next landing - none due within a
+      // 40-minute hold - and the same red sync would just arrive 40
+      // minutes later. This arm must also stay decisive when the rebuild
       // degraded (rebuiltTree ""), the state it exists to backstop. A
       // free tree compare when rebuiltTree IS in hand was considered and
       // skipped: it could only log, never gate (see above), and the

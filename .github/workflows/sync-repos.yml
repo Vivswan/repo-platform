@@ -106,10 +106,13 @@ jobs:
 
       # The wait logic lives in a script (its header states the contract):
       # the bounded wait warns-and-continues on timeout because the sync's
-      # own guards fail loudly and the cron heals. Build Branches rebuilds
-      # the build branch asynchronously after each main merge; a sync
-      # dispatched right after a merge could consume the previous build
-      # tree. Wait (bounded) for freshness, two-path: the build tip's
+      # own guards fail loudly and the cron heals. The build branch is
+      # published asynchronously (each main push parks a pending tree;
+      # All Green's post-green job promotes it - composing as the
+      # fallback - once the verdict lands green, and in normal operation
+      # commits only on a content change); a sync dispatched right after
+      # a merge could consume the previous build tree. Wait (bounded)
+      # for freshness, two-path: the build tip's
       # SOURCE STAMP names main's HEAD, or the tree composed from HEAD
       # right here (once, before the poll) matches the tip byte-for-byte
       # - publish.ts commits only on content change, so an unchanged tree
