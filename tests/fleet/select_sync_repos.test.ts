@@ -84,6 +84,13 @@ describe("select_sync_repos.ts", () => {
     output: string;
   }
 
+  // Same spawn-heavy harness and bounds as select_settings_repos.test.ts
+  // (the full cold-start/load rationale lives there): unbounded, these
+  // spawns died under bun-test's default 5s per-test/hook cap, observed
+  // here as a ~5003ms test timeout with exitCode null under host load.
+  const SPAWN_TIMEOUT_MS = 15_000;
+  const TEST_TIMEOUT_MS = 20_000;
+
   function run(
     name: string,
     env: Record<string, string> = {},
@@ -95,6 +102,8 @@ describe("select_sync_repos.ts", () => {
     writeFileSync(outputFile, "");
     writeFileSync(join(work, "temp", "discovered.json"), JSON.stringify(discoveredList));
     const proc = Bun.spawnSync(["bun", script], {
+      timeout: SPAWN_TIMEOUT_MS,
+      killSignal: "SIGKILL",
       cwd: fixture,
       env: {
         ...process.env,
@@ -112,6 +121,18 @@ describe("select_sync_repos.ts", () => {
         ...env,
       },
     });
+    // Any null exit (timeout or another signal) is "failed to look",
+    // never a result: exit-code assertions would read null as nonzero.
+    if (proc.exitCode === null) {
+      const cause =
+        proc.exitedDueToTimeout === true
+          ? `exceeded the ${SPAWN_TIMEOUT_MS}ms harness bound`
+          : `died on signal ${proc.signalCode}`;
+      throw new Error(
+        `select_sync_repos.ts (run "${name}") ${cause}\n` +
+          `${proc.stdout.toString()}${proc.stderr.toString()}`,
+      );
+    }
     return {
       exitCode: proc.exitCode,
       stdout: proc.stdout.toString(),
@@ -123,7 +144,7 @@ describe("select_sync_repos.ts", () => {
   let main: Run;
   beforeAll(() => {
     main = run("main");
-  });
+  }, TEST_TIMEOUT_MS);
 
   function reposOf(result: Run): Record<string, unknown>[] {
     const line = result.output.split("\n").find((l) => l.startsWith("repos="));
@@ -169,98 +190,130 @@ describe("select_sync_repos.ts", () => {
     expect(main.stdout).toContain("syncing: h**-s**r, Vivswan/steady");
   });
 
-  test("a private dispatch input arrives via the event payload and never prints", () => {
-    // The workflow passes no ONLY_REPO env (the runner would print it);
-    // the script reads the typed input from GITHUB_EVENT_PATH instead.
-    const eventFile = join(root, "dispatch-event.json");
-    writeFileSync(eventFile, JSON.stringify({ inputs: { repo: "Vivswan/hidden-server" } }));
-    const r = run("dispatch", { ONLY_REPO: "", GITHUB_EVENT_PATH: eventFile });
-    expect(r.exitCode).toBe(0);
-    for (const channel of [r.stdout, r.stderr, r.output]) {
-      expect(channel).not.toContain("hidden-server");
-    }
-    expect(reposOf(r).map((row) => row.repo)).toEqual(["h**-s**r"]);
-  });
+  test(
+    "a private dispatch input arrives via the event payload and never prints",
+    () => {
+      // The workflow passes no ONLY_REPO env (the runner would print it);
+      // the script reads the typed input from GITHUB_EVENT_PATH instead.
+      const eventFile = join(root, "dispatch-event.json");
+      writeFileSync(eventFile, JSON.stringify({ inputs: { repo: "Vivswan/hidden-server" } }));
+      const r = run("dispatch", { ONLY_REPO: "", GITHUB_EVENT_PATH: eventFile });
+      expect(r.exitCode).toBe(0);
+      for (const channel of [r.stdout, r.stderr, r.output]) {
+        expect(channel).not.toContain("hidden-server");
+      }
+      expect(reposOf(r).map((row) => row.repo)).toEqual(["h**-s**r"]);
+    },
+    TEST_TIMEOUT_MS,
+  );
 
-  test("a mistyped private dispatch input is withheld from the no-match error", () => {
-    const eventFile = join(root, "dispatch-miss-event.json");
-    writeFileSync(eventFile, JSON.stringify({ inputs: { repo: "Vivswan/hidden-servr" } }));
-    const r = run("dispatch-miss", { ONLY_REPO: "", GITHUB_EVENT_PATH: eventFile });
-    expect(r.exitCode).not.toBe(0);
-    // The registry stage's ::error:: rides its captured stdout, which
-    // runStage forwards on failure.
-    expect(r.stdout).toContain("matched no selected repository");
-    for (const channel of [r.stdout, r.stderr, r.output]) {
-      expect(channel).not.toContain("hidden-servr");
-    }
-  });
+  test(
+    "a mistyped private dispatch input is withheld from the no-match error",
+    () => {
+      const eventFile = join(root, "dispatch-miss-event.json");
+      writeFileSync(eventFile, JSON.stringify({ inputs: { repo: "Vivswan/hidden-servr" } }));
+      const r = run("dispatch-miss", { ONLY_REPO: "", GITHUB_EVENT_PATH: eventFile });
+      expect(r.exitCode).not.toBe(0);
+      // The registry stage's ::error:: rides its captured stdout, which
+      // runStage forwards on failure.
+      expect(r.stdout).toContain("matched no selected repository");
+      for (const channel of [r.stdout, r.stderr, r.output]) {
+        expect(channel).not.toContain("hidden-servr");
+      }
+    },
+    TEST_TIMEOUT_MS,
+  );
 
-  test("recover=recopy with an empty repo input is rejected before selection", () => {
-    // The real fat-finger shape: a dispatch payload whose repo input was
-    // left blank, not the harness's empty GITHUB_EVENT_PATH short-circuit.
-    const eventFile = join(root, "recover-unscoped-event.json");
-    writeFileSync(eventFile, JSON.stringify({ inputs: { repo: "", recover: "recopy" } }));
-    const r = run("recover-unscoped", { GITHUB_EVENT_PATH: eventFile, RECOVER: "recopy" });
-    expect(r.exitCode).not.toBe(0);
-    expect(r.stdout).toContain(
-      "::error::recover=recopy needs an explicit scope: dispatch it with repo=<owner/name>",
-    );
-    expect(r.output).not.toContain("repos=");
-  });
+  test(
+    "recover=recopy with an empty repo input is rejected before selection",
+    () => {
+      // The real fat-finger shape: a dispatch payload whose repo input was
+      // left blank, not the harness's empty GITHUB_EVENT_PATH short-circuit.
+      const eventFile = join(root, "recover-unscoped-event.json");
+      writeFileSync(eventFile, JSON.stringify({ inputs: { repo: "", recover: "recopy" } }));
+      const r = run("recover-unscoped", { GITHUB_EVENT_PATH: eventFile, RECOVER: "recopy" });
+      expect(r.exitCode).not.toBe(0);
+      expect(r.stdout).toContain(
+        "::error::recover=recopy needs an explicit scope: dispatch it with repo=<owner/name>",
+      );
+      expect(r.output).not.toContain("repos=");
+    },
+    TEST_TIMEOUT_MS,
+  );
 
-  test("recover=none (the dispatch default) with an empty repo selects normally", () => {
-    const eventFile = join(root, "recover-none-event.json");
-    writeFileSync(eventFile, JSON.stringify({ inputs: { repo: "", recover: "none" } }));
-    const r = run("recover-none", { GITHUB_EVENT_PATH: eventFile, RECOVER: "none" });
-    expect(r.exitCode).toBe(0);
-    expect(reposOf(r).map((row) => row.repo)).toEqual(reposOf(main).map((row) => row.repo));
-  });
+  test(
+    "recover=none (the dispatch default) with an empty repo selects normally",
+    () => {
+      const eventFile = join(root, "recover-none-event.json");
+      writeFileSync(eventFile, JSON.stringify({ inputs: { repo: "", recover: "none" } }));
+      const r = run("recover-none", { GITHUB_EVENT_PATH: eventFile, RECOVER: "none" });
+      expect(r.exitCode).toBe(0);
+      expect(reposOf(r).map((row) => row.repo)).toEqual(reposOf(main).map((row) => row.repo));
+    },
+    TEST_TIMEOUT_MS,
+  );
 
-  test("repo=all with recover=recopy fans out to the whole selected fleet", () => {
-    // The real dispatch shape: repo arrives via the event payload,
-    // recover via the RECOVER step env.
-    const eventFile = join(root, "recover-all-event.json");
-    writeFileSync(eventFile, JSON.stringify({ inputs: { repo: "all", recover: "recopy" } }));
-    const r = run("recover-all", { GITHUB_EVENT_PATH: eventFile, RECOVER: "recopy" });
-    expect(r.exitCode).toBe(0);
-    expect(reposOf(r).map((row) => row.repo)).toEqual(reposOf(main).map((row) => row.repo));
-  });
+  test(
+    "repo=all with recover=recopy fans out to the whole selected fleet",
+    () => {
+      // The real dispatch shape: repo arrives via the event payload,
+      // recover via the RECOVER step env.
+      const eventFile = join(root, "recover-all-event.json");
+      writeFileSync(eventFile, JSON.stringify({ inputs: { repo: "all", recover: "recopy" } }));
+      const r = run("recover-all", { GITHUB_EVENT_PATH: eventFile, RECOVER: "recopy" });
+      expect(r.exitCode).toBe(0);
+      expect(reposOf(r).map((row) => row.repo)).toEqual(reposOf(main).map((row) => row.repo));
+    },
+    TEST_TIMEOUT_MS,
+  );
 
-  test("repo=all without recover selects the same fleet as an empty repo", () => {
-    const r = run("all-plain", { ONLY_REPO: "all" });
-    expect(r.exitCode).toBe(0);
-    expect(reposOf(r).map((row) => row.repo)).toEqual(reposOf(main).map((row) => row.repo));
-  });
+  test(
+    "repo=all without recover selects the same fleet as an empty repo",
+    () => {
+      const r = run("all-plain", { ONLY_REPO: "all" });
+      expect(r.exitCode).toBe(0);
+      expect(reposOf(r).map((row) => row.repo)).toEqual(reposOf(main).map((row) => row.repo));
+    },
+    TEST_TIMEOUT_MS,
+  );
 
-  test("a single-repo recovery keeps its scope and never prints the slug", () => {
-    const eventFile = join(root, "recover-single-event.json");
-    writeFileSync(
-      eventFile,
-      JSON.stringify({ inputs: { repo: "Vivswan/hidden-server", recover: "recopy" } }),
-    );
-    const r = run("recover-single", { GITHUB_EVENT_PATH: eventFile, RECOVER: "recopy" });
-    expect(r.exitCode).toBe(0);
-    expect(reposOf(r).map((row) => row.repo)).toEqual(["h**-s**r"]);
-    for (const channel of [r.stdout, r.stderr, r.output]) {
-      expect(channel).not.toContain("hidden-server");
-    }
-  });
+  test(
+    "a single-repo recovery keeps its scope and never prints the slug",
+    () => {
+      const eventFile = join(root, "recover-single-event.json");
+      writeFileSync(
+        eventFile,
+        JSON.stringify({ inputs: { repo: "Vivswan/hidden-server", recover: "recopy" } }),
+      );
+      const r = run("recover-single", { GITHUB_EVENT_PATH: eventFile, RECOVER: "recopy" });
+      expect(r.exitCode).toBe(0);
+      expect(reposOf(r).map((row) => row.repo)).toEqual(["h**-s**r"]);
+      for (const channel of [r.stdout, r.stderr, r.output]) {
+        expect(channel).not.toContain("hidden-server");
+      }
+    },
+    TEST_TIMEOUT_MS,
+  );
 
-  test("a redacted repo's hard adoption failure prints only the hint, wherever the slug hid", () => {
-    // The stub's error text carries the slug in a URL, the bare name, and
-    // an uppercase variant; the failure must surface (exit 1) with every
-    // spelling scrubbed to the hint.
-    const eventFile = join(root, "hidden-blocked-event.json");
-    writeFileSync(eventFile, JSON.stringify({ inputs: { repo: "Vivswan/hidden-blocked" } }));
-    const r = run("hidden-blocked", { GITHUB_EVENT_PATH: eventFile }, [
-      ...discovered,
-      { repo: "Vivswan/hidden-blocked", private: true },
-    ]);
-    expect(r.exitCode).not.toBe(0);
-    expect(r.stdout).toContain("adoption check failed for h**-b**d");
-    expect(r.stdout).toContain("https://api.github.com/repos/h**-b**d failed");
-    for (const channel of [r.stdout, r.stderr, r.output]) {
-      expect(channel.toLowerCase()).not.toContain("hidden-blocked");
-    }
-  });
+  test(
+    "a redacted repo's hard adoption failure prints only the hint, wherever the slug hid",
+    () => {
+      // The stub's error text carries the slug in a URL, the bare name, and
+      // an uppercase variant; the failure must surface (exit 1) with every
+      // spelling scrubbed to the hint.
+      const eventFile = join(root, "hidden-blocked-event.json");
+      writeFileSync(eventFile, JSON.stringify({ inputs: { repo: "Vivswan/hidden-blocked" } }));
+      const r = run("hidden-blocked", { GITHUB_EVENT_PATH: eventFile }, [
+        ...discovered,
+        { repo: "Vivswan/hidden-blocked", private: true },
+      ]);
+      expect(r.exitCode).not.toBe(0);
+      expect(r.stdout).toContain("adoption check failed for h**-b**d");
+      expect(r.stdout).toContain("https://api.github.com/repos/h**-b**d failed");
+      for (const channel of [r.stdout, r.stderr, r.output]) {
+        expect(channel.toLowerCase()).not.toContain("hidden-blocked");
+      }
+    },
+    TEST_TIMEOUT_MS,
+  );
 });

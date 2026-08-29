@@ -160,6 +160,19 @@ describe("select_settings_repos.ts", () => {
     summary: string;
   }
 
+  // run() spawns bun which spawns more bun children, so one healthy run
+  // costs seconds. Host load stretches that, and a cold start (deps
+  // installed but caches unwarmed - exactly this file run in isolation
+  // in a fresh worktree) reliably pushed the beforeAll past bun-test's
+  // default 5s per-test/hook cap (the 5005ms hook-timeout signature;
+  // full-suite runs ride earlier suites' warmth and merely flaked).
+  // SPAWN_TIMEOUT_MS turns a wedged child into a diagnostic throw
+  // instead of exitCode null with partial output, and TEST_TIMEOUT_MS
+  // sits above it on every spawning test/hook so that throw always
+  // beats bun's value-free kill.
+  const SPAWN_TIMEOUT_MS = 15_000;
+  const TEST_TIMEOUT_MS = 20_000;
+
   function run(name: string, options: { cwd?: string; env?: Record<string, string> } = {}): Run {
     const work = join(root, `work-${name}`);
     mkdirSync(join(work, "state"), { recursive: true });
@@ -169,6 +182,8 @@ describe("select_settings_repos.ts", () => {
     writeFileSync(outputFile, "");
     writeFileSync(summaryFile, "");
     const proc = Bun.spawnSync(["bun", script], {
+      timeout: SPAWN_TIMEOUT_MS,
+      killSignal: "SIGKILL",
       cwd: options.cwd ?? fixture,
       env: {
         ...process.env,
@@ -189,6 +204,18 @@ describe("select_settings_repos.ts", () => {
         ...options.env,
       },
     });
+    // Any null exit (timeout or another signal) is "failed to look",
+    // never a result: exit-code assertions would read null as nonzero.
+    if (proc.exitCode === null) {
+      const cause =
+        proc.exitedDueToTimeout === true
+          ? `exceeded the ${SPAWN_TIMEOUT_MS}ms harness bound`
+          : `died on signal ${proc.signalCode}`;
+      throw new Error(
+        `select_settings_repos.ts (run "${name}") ${cause}\n` +
+          `${proc.stdout.toString()}${proc.stderr.toString()}`,
+      );
+    }
     return {
       exitCode: proc.exitCode,
       stdout: proc.stdout.toString(),
@@ -201,7 +228,7 @@ describe("select_settings_repos.ts", () => {
   let main: Run;
   beforeAll(() => {
     main = run("main");
-  });
+  }, TEST_TIMEOUT_MS);
 
   test("the heal survives flaky and dead repos: exit 0, no errors", () => {
     expect(main.stdout).not.toContain("::error::");
@@ -320,55 +347,75 @@ describe("select_settings_repos.ts", () => {
     expect(main.summary).toContain("- h**-n**s");
   });
 
-  test("a private dispatch input arrives via the event payload and never prints", () => {
-    // The workflow passes no ONLY_REPO env (the runner would print it);
-    // the script reads the typed input from GITHUB_EVENT_PATH instead.
-    const eventFile = join(root, "dispatch-event.json");
-    writeFileSync(eventFile, JSON.stringify({ inputs: { repo: "Vivswan/hidden-server" } }));
-    const r = run("dispatch", { env: { GITHUB_EVENT_PATH: eventFile } });
-    expect(r.exitCode).toBe(0);
-    for (const channel of [r.stdout, r.stderr, r.output, r.summary]) {
-      expect(channel).not.toContain("hidden-server");
-    }
-    const targets = targetsOf(r);
-    expect(targets).toHaveLength(1);
-    expect(targets[0].redact_name).toBe(true);
-  });
+  test(
+    "a private dispatch input arrives via the event payload and never prints",
+    () => {
+      // The workflow passes no ONLY_REPO env (the runner would print it);
+      // the script reads the typed input from GITHUB_EVENT_PATH instead.
+      const eventFile = join(root, "dispatch-event.json");
+      writeFileSync(eventFile, JSON.stringify({ inputs: { repo: "Vivswan/hidden-server" } }));
+      const r = run("dispatch", { env: { GITHUB_EVENT_PATH: eventFile } });
+      expect(r.exitCode).toBe(0);
+      for (const channel of [r.stdout, r.stderr, r.output, r.summary]) {
+        expect(channel).not.toContain("hidden-server");
+      }
+      const targets = targetsOf(r);
+      expect(targets).toHaveLength(1);
+      expect(targets[0].redact_name).toBe(true);
+    },
+    TEST_TIMEOUT_MS,
+  );
 
-  test("a bare name scopes the heal, the operator repo's own included", () => {
-    const r = run("dispatch-self", { env: { ONLY_REPO: "repo-platform" } });
-    expect(r.exitCode).toBe(0);
-    expect(targetsOf(r)).toEqual([
-      expect.objectContaining({ repo: "Vivswan/repo-platform", redact_name: false }),
-    ]);
-  });
+  test(
+    "a bare name scopes the heal, the operator repo's own included",
+    () => {
+      const r = run("dispatch-self", { env: { ONLY_REPO: "repo-platform" } });
+      expect(r.exitCode).toBe(0);
+      expect(targetsOf(r)).toEqual([
+        expect.objectContaining({ repo: "Vivswan/repo-platform", redact_name: false }),
+      ]);
+    },
+    TEST_TIMEOUT_MS,
+  );
 
-  test("a mistyped dispatch input fails loudly without echoing the input", () => {
-    const eventFile = join(root, "dispatch-miss-event.json");
-    writeFileSync(eventFile, JSON.stringify({ inputs: { repo: "Vivswan/hidden-servr" } }));
-    const r = run("dispatch-miss", { env: { GITHUB_EVENT_PATH: eventFile } });
-    expect(r.exitCode).not.toBe(0);
-    expect(r.stdout + r.stderr).toContain("matches no settings target");
-    for (const channel of [r.stdout, r.stderr, r.output, r.summary]) {
-      expect(channel).not.toContain("hidden-servr");
-    }
-  });
+  test(
+    "a mistyped dispatch input fails loudly without echoing the input",
+    () => {
+      const eventFile = join(root, "dispatch-miss-event.json");
+      writeFileSync(eventFile, JSON.stringify({ inputs: { repo: "Vivswan/hidden-servr" } }));
+      const r = run("dispatch-miss", { env: { GITHUB_EVENT_PATH: eventFile } });
+      expect(r.exitCode).not.toBe(0);
+      expect(r.stdout + r.stderr).toContain("matches no settings target");
+      for (const channel of [r.stdout, r.stderr, r.output, r.summary]) {
+        expect(channel).not.toContain("hidden-servr");
+      }
+    },
+    TEST_TIMEOUT_MS,
+  );
 
-  test("an unreadable registry still fails the whole run", () => {
-    const bare = join(root, "bare-fixture");
-    mkdirSync(bare);
-    symlinkSync(join(repoRoot, ".github"), join(bare, ".github"));
-    const result = run("no-registry", { cwd: bare });
-    expect(result.exitCode).not.toBe(0);
-    // The registry stage's ::error:: rides its captured stdout, which
-    // runStage forwards on failure.
-    expect(result.stdout).toContain("repos.yml");
-  });
+  test(
+    "an unreadable registry still fails the whole run",
+    () => {
+      const bare = join(root, "bare-fixture");
+      mkdirSync(bare);
+      symlinkSync(join(repoRoot, ".github"), join(bare, ".github"));
+      const result = run("no-registry", { cwd: bare });
+      expect(result.exitCode).not.toBe(0);
+      // The registry stage's ::error:: rides its captured stdout, which
+      // runStage forwards on failure.
+      expect(result.stdout).toContain("repos.yml");
+    },
+    TEST_TIMEOUT_MS,
+  );
 
-  test("a failed discovery still fails the whole run", () => {
-    const result = run("no-discovery", { env: { STUB_FAIL_DISCOVERY: "1" } });
-    expect(result.exitCode).not.toBe(0);
-  });
+  test(
+    "a failed discovery still fails the whole run",
+    () => {
+      const result = run("no-discovery", { env: { STUB_FAIL_DISCOVERY: "1" } });
+      expect(result.exitCode).not.toBe(0);
+    },
+    TEST_TIMEOUT_MS,
+  );
 
   // A stub bun ahead of the real one corrupts (or fails) one pipeline
   // stage per flag; everything else (including this test's own script
@@ -400,48 +447,60 @@ describe("select_settings_repos.ts", () => {
     return dir;
   }
 
-  test("a malformed excluded list fails value-free (no SyntaxError echo)", () => {
-    const stub = corruptStubBin("excluded");
-    const r = run("corrupt-excluded", {
-      env: {
-        PATH: `${stub}:${bin}:${process.env.PATH}`,
-        REAL_BUN: process.execPath,
-        STUB_CORRUPT_EXCLUDED: "1",
-      },
-    });
-    expect(r.exitCode).toBe(1);
-    expect(r.stdout).toContain("::error::select_settings_repos: excluded list: not valid JSON");
-    for (const channel of [r.stdout, r.stderr, r.summary]) {
-      expect(channel).not.toContain("corruptslug");
-    }
-  });
+  test(
+    "a malformed excluded list fails value-free (no SyntaxError echo)",
+    () => {
+      const stub = corruptStubBin("excluded");
+      const r = run("corrupt-excluded", {
+        env: {
+          PATH: `${stub}:${bin}:${process.env.PATH}`,
+          REAL_BUN: process.execPath,
+          STUB_CORRUPT_EXCLUDED: "1",
+        },
+      });
+      expect(r.exitCode).toBe(1);
+      expect(r.stdout).toContain("::error::select_settings_repos: excluded list: not valid JSON");
+      for (const channel of [r.stdout, r.stderr, r.summary]) {
+        expect(channel).not.toContain("corruptslug");
+      }
+    },
+    TEST_TIMEOUT_MS,
+  );
 
-  test("a malformed settings matrix fails value-free (no SyntaxError echo)", () => {
-    const stub = corruptStubBin("matrix");
-    const r = run("corrupt-matrix", {
-      env: {
-        PATH: `${stub}:${bin}:${process.env.PATH}`,
-        REAL_BUN: process.execPath,
-        STUB_CORRUPT_MATRIX: "1",
-      },
-    });
-    expect(r.exitCode).toBe(1);
-    expect(r.stdout).toContain("::error::select_settings_repos: settings matrix: not valid JSON");
-    for (const channel of [r.stdout, r.stderr, r.summary]) {
-      expect(channel).not.toContain("corruptmatrix");
-    }
-  });
+  test(
+    "a malformed settings matrix fails value-free (no SyntaxError echo)",
+    () => {
+      const stub = corruptStubBin("matrix");
+      const r = run("corrupt-matrix", {
+        env: {
+          PATH: `${stub}:${bin}:${process.env.PATH}`,
+          REAL_BUN: process.execPath,
+          STUB_CORRUPT_MATRIX: "1",
+        },
+      });
+      expect(r.exitCode).toBe(1);
+      expect(r.stdout).toContain("::error::select_settings_repos: settings matrix: not valid JSON");
+      for (const channel of [r.stdout, r.stderr, r.summary]) {
+        expect(channel).not.toContain("corruptmatrix");
+      }
+    },
+    TEST_TIMEOUT_MS,
+  );
 
-  test("a matrix-builder failure is loud: its captured ::error:: is forwarded", () => {
-    const stub = corruptStubBin("fail-matrix");
-    const r = run("fail-matrix", {
-      env: {
-        PATH: `${stub}:${bin}:${process.env.PATH}`,
-        REAL_BUN: process.execPath,
-        STUB_FAIL_MATRIX: "1",
-      },
-    });
-    expect(r.exitCode).not.toBe(0);
-    expect(r.stdout).toContain("::error::matrix builder boom");
-  });
+  test(
+    "a matrix-builder failure is loud: its captured ::error:: is forwarded",
+    () => {
+      const stub = corruptStubBin("fail-matrix");
+      const r = run("fail-matrix", {
+        env: {
+          PATH: `${stub}:${bin}:${process.env.PATH}`,
+          REAL_BUN: process.execPath,
+          STUB_FAIL_MATRIX: "1",
+        },
+      });
+      expect(r.exitCode).not.toBe(0);
+      expect(r.stdout).toContain("::error::matrix builder boom");
+    },
+    TEST_TIMEOUT_MS,
+  );
 });
