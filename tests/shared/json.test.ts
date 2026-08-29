@@ -14,6 +14,7 @@ import {
   parseJsonWithThrow,
   parseWith,
 } from "../../.github/scripts/shared/json.ts";
+import { boundedSpawnSync } from "./bounded_spawn";
 
 const jsonPath = join(import.meta.dir, "../../.github/scripts/shared/json.ts");
 
@@ -32,11 +33,11 @@ writeFileSync(
 );
 
 function run(payload: string) {
-  const proc = Bun.spawnSync(["bun", entry], { env: { ...process.env, PAYLOAD: payload } });
+  const proc = boundedSpawnSync(["bun", entry], { env: { ...process.env, PAYLOAD: payload } });
   return {
     exitCode: proc.exitCode,
-    stdout: proc.stdout.toString(),
-    stderr: proc.stderr.toString(),
+    stdout: proc.stdout,
+    stderr: proc.stderr,
   };
 }
 

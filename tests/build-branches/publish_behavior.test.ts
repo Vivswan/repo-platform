@@ -25,6 +25,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pendingRefFor } from "../../.github/scripts/build-branches/pending.ts";
 import { commitRunWrite, commitStampWrite } from "../../.github/scripts/shared/commit_stamp.ts";
+import { boundedSpawnSync } from "../shared/bounded_spawn";
 
 const script = join(import.meta.dir, "../../.github/scripts/build-branches/publish.ts");
 
@@ -40,11 +41,11 @@ printf '%s' '{"check_runs":[{"name":"all-green","status":"completed","conclusion
 `;
 
 function git(cwd: string, args: string[]): string {
-  const proc = Bun.spawnSync(["git", "-C", cwd, ...args]);
+  const proc = boundedSpawnSync(["git", "-C", cwd, ...args]);
   if (proc.exitCode !== 0) {
-    throw new Error(`git ${args.join(" ")} failed: ${proc.stderr.toString()}`);
+    throw new Error(`git ${args.join(" ")} failed: ${proc.stderr}`);
   }
-  return proc.stdout.toString().trimEnd();
+  return proc.stdout.trimEnd();
 }
 
 interface Scenario {

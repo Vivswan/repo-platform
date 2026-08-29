@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { boundedSpawnSync } from "./bounded_spawn";
 
 const script = join(import.meta.dir, "../../.github/scripts/shared/open_automation_pr.ts");
 
@@ -47,11 +48,11 @@ function run(opts: Options = {}) {
     ...opts.env,
   };
   for (const name of opts.drop ?? []) delete scriptEnv[name];
-  const proc = Bun.spawnSync(["bun", script], { env: scriptEnv });
+  const proc = boundedSpawnSync(["bun", script], { env: scriptEnv });
   const raw = existsSync(calls) ? readFileSync(calls, "utf-8") : "";
   return {
     exitCode: proc.exitCode,
-    output: proc.stdout.toString() + proc.stderr.toString(),
+    output: proc.stdout + proc.stderr,
     calls: raw
       .split("\x1e")
       .filter(Boolean)

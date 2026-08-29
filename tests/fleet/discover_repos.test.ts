@@ -2,6 +2,7 @@ import { beforeAll, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { boundedSpawnSync } from "../shared/bounded_spawn";
 
 // End-to-end harness for the sync plan's discovery step, stub-gh style
 // (see discovery.test.ts). This script replaced sync-repos.yml's inline
@@ -39,7 +40,7 @@ describe("discover_repos.ts", () => {
   function run(name: string, extra: Record<string, string>) {
     const temp = join(root, `temp-${name}`);
     mkdirSync(temp, { recursive: true });
-    const proc = Bun.spawnSync(["bun", script], {
+    const proc = boundedSpawnSync(["bun", script], {
       env: {
         ...process.env,
         PATH: `${bin}:${process.env.PATH}`,
@@ -49,8 +50,8 @@ describe("discover_repos.ts", () => {
     });
     return {
       exitCode: proc.exitCode,
-      stdout: proc.stdout.toString(),
-      stderr: proc.stderr.toString(),
+      stdout: proc.stdout,
+      stderr: proc.stderr,
       discoveredPath: join(temp, "discovered.json"),
     };
   }

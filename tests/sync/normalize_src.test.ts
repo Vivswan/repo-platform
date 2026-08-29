@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { boundedSpawnSync } from "../shared/bounded_spawn";
 
 const script = join(import.meta.dir, "../../.github/scripts/sync/normalize_src.ts");
 const CANONICAL = "gh:Vivswan/repo-platform";
@@ -18,15 +19,11 @@ function gitFreeEnv(): Record<string, string> {
 }
 
 function git(dir: string, ...args: string[]): string {
-  const proc = Bun.spawnSync(["git", "-C", dir, ...args], {
-    env: gitFreeEnv(),
-    stdout: "pipe",
-    stderr: "pipe",
-  });
+  const proc = boundedSpawnSync(["git", "-C", dir, ...args], { env: gitFreeEnv() });
   if (proc.exitCode !== 0) {
-    throw new Error(`git ${args.join(" ")} failed: ${proc.stderr.toString()}`);
+    throw new Error(`git ${args.join(" ")} failed: ${proc.stderr}`);
   }
-  return proc.stdout.toString();
+  return proc.stdout;
 }
 
 /** A scratch root holding target/ as a one-commit git repo, the way the
@@ -47,8 +44,8 @@ function makeRoot(answers: string): string {
 function runScript(
   root: string,
   extraEnv: Record<string, string> = {},
-): { exitCode: number | null; stdout: string; stderr: string } {
-  const proc = Bun.spawnSync(["bun", script], {
+): { exitCode: number; stdout: string; stderr: string } {
+  const proc = boundedSpawnSync(["bun", script], {
     cwd: root,
     env: {
       ...gitFreeEnv(),
@@ -57,13 +54,11 @@ function runScript(
       TARGET_DISPLAY: "Vivswan/demo",
       ...extraEnv,
     },
-    stdout: "pipe",
-    stderr: "pipe",
   });
   return {
     exitCode: proc.exitCode,
-    stdout: proc.stdout.toString(),
-    stderr: proc.stderr.toString(),
+    stdout: proc.stdout,
+    stderr: proc.stderr,
   };
 }
 

@@ -15,6 +15,7 @@ import {
   starterPaths,
   withholdWorkflowRewrites,
 } from "../../.github/scripts/sync/starter_pin_rollout.ts";
+import { boundedSpawnSync } from "../shared/bounded_spawn";
 
 const script = join(import.meta.dir, "../../.github/scripts/sync/starter_pin_rollout.ts");
 
@@ -234,25 +235,22 @@ describe("script", () => {
   }
 
   function run(root: string, renderDir: string, report: string, outcomes: string) {
-    const proc = Bun.spawnSync(
-      [
-        "bun",
-        script,
-        "--root",
-        root,
-        "--render-dir",
-        renderDir,
-        "--report",
-        report,
-        "--outcomes",
-        outcomes,
-      ],
-      { stdout: "pipe", stderr: "pipe" },
-    );
+    const proc = boundedSpawnSync([
+      "bun",
+      script,
+      "--root",
+      root,
+      "--render-dir",
+      renderDir,
+      "--report",
+      report,
+      "--outcomes",
+      outcomes,
+    ]);
     return {
       exitCode: proc.exitCode,
-      stdout: proc.stdout.toString(),
-      stderr: proc.stderr.toString(),
+      stdout: proc.stdout,
+      stderr: proc.stderr,
       report: existsSync(report) ? readFileSync(report, "utf-8") : "",
       outcomes: existsSync(outcomes) ? readFileSync(outcomes, "utf-8") : "",
     };

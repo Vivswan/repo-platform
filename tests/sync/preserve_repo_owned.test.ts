@@ -19,6 +19,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { decodeTrackedPathBytes } from "../../.github/scripts/sync/preserve_repo_owned.ts";
 import { REMOVED_SPLITS_NAME } from "../../.github/scripts/sync/section_files.ts";
+import { boundedSpawnSync } from "../shared/bounded_spawn";
 
 const script = join(import.meta.dir, "../../.github/scripts/sync/preserve_repo_owned.ts");
 const repoRoot = join(import.meta.dir, "..", "..");
@@ -53,13 +54,9 @@ function gitFreeEnv(): Record<string, string> {
 
 function initGitRepo(dir: string, tag?: string): void {
   const run = (...args: string[]) => {
-    const proc = Bun.spawnSync(["git", "-C", dir, ...args], {
-      env: gitFreeEnv(),
-      stdout: "pipe",
-      stderr: "pipe",
-    });
+    const proc = boundedSpawnSync(["git", "-C", dir, ...args], { env: gitFreeEnv() });
     if (proc.exitCode !== 0) {
-      throw new Error(`git ${args.join(" ")} failed: ${proc.stderr.toString()}`);
+      throw new Error(`git ${args.join(" ")} failed: ${proc.stderr}`);
     }
   };
   run("init", "-b", "main");
@@ -104,9 +101,9 @@ function makeTarget(files: Record<string, string | { symlinkTo: string }>): stri
 function runPreserve(
   workspace: string,
   target: string,
-): { exitCode: number | null; stdout: string; license: string | null } {
+): { exitCode: number; stdout: string; license: string | null } {
   const runnerTemp = mkdtempSync(join(tmpdir(), "preserve-owned-rt-"));
-  const proc = Bun.spawnSync(["bun", script], {
+  const proc = boundedSpawnSync(["bun", script], {
     cwd: workspace,
     env: {
       ...gitFreeEnv(),
@@ -118,13 +115,11 @@ function runPreserve(
       TARGET_DISPLAY: "",
       TARGET: "",
     },
-    stdout: "pipe",
-    stderr: "pipe",
   });
   const licensePath = join(target, "LICENSE.md");
   return {
     exitCode: proc.exitCode,
-    stdout: proc.stdout.toString(),
+    stdout: proc.stdout,
     license: existsSync(licensePath) ? readFileSync(licensePath, "utf-8") : null,
   };
 }
@@ -251,9 +246,9 @@ describe("preserve_repo_owned removed-splits hold", () => {
   const agentsWithTail = `# AGENTS.md\n\nmanaged\n\n${SENTINEL}\n\n## Local agent docs\n\nlocal agents tail\n`;
 
   /** Run the script against a prepared target and read the hold report. */
-  function runOn(target: string): { exitCode: number | null; stdout: string; report: string } {
+  function runOn(target: string): { exitCode: number; stdout: string; report: string } {
     const runnerTemp = mkdtempSync(join(tmpdir(), "preserve-owned-hold-"));
-    const proc = Bun.spawnSync(["bun", script], {
+    const proc = boundedSpawnSync(["bun", script], {
       cwd: dirname(target),
       env: {
         ...gitFreeEnv(),
@@ -266,13 +261,11 @@ describe("preserve_repo_owned removed-splits hold", () => {
         TARGET: "",
         HIDE_DETAILS: "",
       },
-      stdout: "pipe",
-      stderr: "pipe",
     });
     const reportPath = join(runnerTemp, REMOVED_SPLITS_NAME);
     return {
       exitCode: proc.exitCode,
-      stdout: proc.stdout.toString() + proc.stderr.toString(),
+      stdout: proc.stdout + proc.stderr,
       report: existsSync(reportPath) ? readFileSync(reportPath, "utf-8") : "",
     };
   }
@@ -280,7 +273,7 @@ describe("preserve_repo_owned removed-splits hold", () => {
   function runHold(
     headFiles: Record<string, string | { symlinkTo: string }>,
     removedFromTree: string[],
-  ): { exitCode: number | null; stdout: string; report: string } {
+  ): { exitCode: number; stdout: string; report: string } {
     // LICENSE.md present keeps the fleet-license re-seed out of the way;
     // TARGET_REF is empty so the re-seed block never resolves a build ref.
     const target = makeTarget({ "LICENSE.md": "fleet license\n", ...headFiles });
@@ -456,16 +449,14 @@ describe("preserve_repo_owned removed-splits hold", () => {
       [MANIFEST_REL]: "{ not valid json",
     });
     const git = (args: string[], stdin?: Buffer): string => {
-      const proc = Bun.spawnSync(["git", "-C", target, ...args], {
+      const proc = boundedSpawnSync(["git", "-C", target, ...args], {
         env: gitFreeEnv(),
         stdin: stdin ?? "ignore",
-        stdout: "pipe",
-        stderr: "pipe",
       });
       if (proc.exitCode !== 0) {
-        throw new Error(`git ${args[0]} failed: ${proc.stderr.toString()}`);
+        throw new Error(`git ${args[0]} failed: ${proc.stderr}`);
       }
-      return proc.stdout.toString().trim();
+      return proc.stdout.trim();
     };
     const oid = git(["hash-object", "-w", "--stdin"], Buffer.from("previous copy\n"));
     git(

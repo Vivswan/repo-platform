@@ -10,6 +10,7 @@ import {
   readDispatchRepo,
   scrubSlug,
 } from "../../.github/scripts/fleet/discovery.ts";
+import { boundedSpawnSync } from "../shared/bounded_spawn";
 
 // captureNetwork is the fleet's hang backstop: every gh/curl subprocess in
 // the plan jobs goes through it, so a stalled network fails the run at the
@@ -253,13 +254,13 @@ describe("readDispatchRepo", () => {
   function runDispatch(eventBody: string, name: string) {
     const eventFile = join(root, `event-${name}.json`);
     writeFileSync(eventFile, eventBody);
-    const proc = Bun.spawnSync(["bun", dispatchEntry], {
+    const proc = boundedSpawnSync(["bun", dispatchEntry], {
       env: { ...process.env, ONLY_REPO: "", GITHUB_EVENT_PATH: eventFile },
     });
     return {
       exitCode: proc.exitCode,
-      stdout: proc.stdout.toString(),
-      stderr: proc.stderr.toString(),
+      stdout: proc.stdout,
+      stderr: proc.stderr,
     };
   }
 
@@ -329,13 +330,13 @@ describe("discoverWritableRepos and runStage", () => {
   );
 
   function runDiscover(extra: Record<string, string>) {
-    const proc = Bun.spawnSync(["bun", discoverEntry], {
+    const proc = boundedSpawnSync(["bun", discoverEntry], {
       env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, ...extra },
     });
     return {
       exitCode: proc.exitCode,
-      stdout: proc.stdout.toString(),
-      stderr: proc.stderr.toString(),
+      stdout: proc.stdout,
+      stderr: proc.stderr,
     };
   }
 
@@ -410,13 +411,13 @@ describe("discoverWritableRepos and runStage", () => {
   );
 
   function runStageEntry(command: string[], outFile: string) {
-    const proc = Bun.spawnSync(["bun", stageEntry], {
+    const proc = boundedSpawnSync(["bun", stageEntry], {
       env: { ...process.env, STAGE_CMD: JSON.stringify(command), STAGE_OUT: outFile },
     });
     return {
       exitCode: proc.exitCode,
-      stdout: proc.stdout.toString(),
-      stderr: proc.stderr.toString(),
+      stdout: proc.stdout,
+      stderr: proc.stderr,
     };
   }
 

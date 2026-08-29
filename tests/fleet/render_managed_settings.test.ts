@@ -29,6 +29,7 @@ import {
 } from "../../.github/scripts/fleet/render_managed_settings";
 import { capture } from "../../.github/scripts/shared/proc";
 import { loadManifests } from "../../scripts/module_manifests";
+import { boundedSpawnSync } from "../shared/bounded_spawn";
 
 const manifests = loadManifests();
 const privateLayerLabels = (loadLayer(".github/settings-private.yml").labels ?? []) as {
@@ -317,7 +318,7 @@ describe("the render CLI acts on the recheck", () => {
     const head = git(["git", "-C", root, "rev-parse", "HEAD"]);
     const outPath = join(root, "managed.yml");
     const outputPath = join(root, "step-output.txt");
-    const proc = Bun.spawnSync(
+    const proc = boundedSpawnSync(
       ["bun", script, "--repo", "o/r", "--target-dir", root, "--out", outPath],
       { env: { ...process.env, GITHUB_OUTPUT: outputPath } },
     );

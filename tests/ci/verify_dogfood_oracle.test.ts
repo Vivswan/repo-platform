@@ -2,14 +2,15 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { boundedSpawnSync } from "../shared/bounded_spawn";
 
 const script = new URL("../../.github/scripts/ci/verify_dogfood_oracle.ts", import.meta.url)
   .pathname;
 const repoRoot = new URL("../..", import.meta.url).pathname;
 
 function run(renderRoot: string): { exitCode: number; stderr: string } {
-  const proc = Bun.spawnSync(["bun", script, renderRoot], { cwd: repoRoot });
-  return { exitCode: proc.exitCode, stderr: proc.stderr.toString() };
+  const proc = boundedSpawnSync(["bun", script, renderRoot], { cwd: repoRoot });
+  return { exitCode: proc.exitCode, stderr: proc.stderr };
 }
 
 // The rendered .copier-answers.yml crosses a trust boundary: a payload

@@ -20,6 +20,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { stageComposedTreeArgv } from "../../.github/scripts/shared/stage_tree.ts";
+import { boundedSpawnSync } from "./bounded_spawn";
 
 const root = join(import.meta.dir, "../..");
 
@@ -55,15 +56,11 @@ function buildHermeticEnv(): Record<string, string> {
 }
 
 function run(argv: string[], env?: Record<string, string>): string {
-  const proc = Bun.spawnSync(argv, {
-    env: env ?? hermeticEnv,
-    stdout: "pipe",
-    stderr: "pipe",
-  });
+  const proc = boundedSpawnSync(argv, { env: env ?? hermeticEnv });
   if (proc.exitCode !== 0) {
-    throw new Error(`${argv.join(" ")} failed: ${proc.stderr.toString()}`);
+    throw new Error(`${argv.join(" ")} failed: ${proc.stderr}`);
   }
-  return proc.stdout.toString().trimEnd();
+  return proc.stdout.trimEnd();
 }
 
 /** The composed-tree bytes, written identically for every path: content

@@ -24,6 +24,7 @@ import {
   ALL_GREEN_WORKFLOW_PATH,
   bootstrapNote,
 } from "../../.github/scripts/sync/all_green_bootstrap.ts";
+import { boundedSpawnSync } from "../shared/bounded_spawn";
 
 const script = join(import.meta.dir, "../../.github/scripts/sync/all_green_bootstrap.ts");
 
@@ -42,13 +43,9 @@ function gitFreeEnv(): Record<string, string> {
 
 function initGitRepo(dir: string): void {
   const run = (...args: string[]) => {
-    const proc = Bun.spawnSync(["git", "-C", dir, ...args], {
-      env: gitFreeEnv(),
-      stdout: "pipe",
-      stderr: "pipe",
-    });
+    const proc = boundedSpawnSync(["git", "-C", dir, ...args], { env: gitFreeEnv() });
     if (proc.exitCode !== 0) {
-      throw new Error(`git ${args.join(" ")} failed: ${proc.stderr.toString()}`);
+      throw new Error(`git ${args.join(" ")} failed: ${proc.stderr}`);
     }
   };
   run("init", "-b", "main");
@@ -79,16 +76,16 @@ function makeTarget(headFiles: Record<string, string>, delivered: Record<string,
 function runScript(
   root: string,
   extraArgs: string[] = [],
-): { exitCode: number | null; stdout: string; stderr: string; report: string } {
+): { exitCode: number; stdout: string; stderr: string; report: string } {
   const reportPath = join(root, "..", "all-green-bootstrap.md");
-  const proc = Bun.spawnSync(
+  const proc = boundedSpawnSync(
     ["bun", script, "--root", root, "--report", reportPath, ...extraArgs],
-    { env: gitFreeEnv(), stdout: "pipe", stderr: "pipe" },
+    { env: gitFreeEnv() },
   );
   return {
     exitCode: proc.exitCode,
-    stdout: proc.stdout.toString(),
-    stderr: proc.stderr.toString(),
+    stdout: proc.stdout,
+    stderr: proc.stderr,
     report: existsSync(reportPath) ? readFileSync(reportPath, "utf-8") : "",
   };
 }

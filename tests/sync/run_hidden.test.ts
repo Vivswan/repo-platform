@@ -7,6 +7,7 @@ import {
   captureName,
   parseHiddenFailures,
 } from "../../.github/scripts/sync/run_hidden.ts";
+import { boundedSpawnSync } from "../shared/bounded_spawn";
 
 const script = join(import.meta.dir, "../../.github/scripts/sync/run_hidden.ts");
 
@@ -16,13 +17,13 @@ function run(
 ): { exitCode: number; stdout: string; stderr: string; temp: string } {
   const temp = join(mkdtempSync(join(tmpdir(), "run-hidden-")), "temp");
   mkdirSync(temp);
-  const proc = Bun.spawnSync(["bun", script, "leak test", "--", ...cmd], {
+  const proc = boundedSpawnSync(["bun", script, "leak test", "--", ...cmd], {
     env: { ...process.env, HIDE_DETAILS: hide, RUNNER_TEMP: temp },
   });
   return {
     exitCode: proc.exitCode,
-    stdout: proc.stdout.toString(),
-    stderr: proc.stderr.toString(),
+    stdout: proc.stdout,
+    stderr: proc.stderr,
     temp,
   };
 }

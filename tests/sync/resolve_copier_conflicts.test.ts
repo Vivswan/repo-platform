@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { boundedSpawnSync } from "../shared/bounded_spawn";
 
 const script = join(import.meta.dir, "../../.github/scripts/sync/resolve_copier_conflicts.ts");
 
@@ -30,7 +31,7 @@ function run(files: Record<string, string>, extraArgs: string[] = [], skipNames:
     writeFileSync(skipPath, `${skipNames.join("\n")}\n`);
     args.push("--skip", skipPath);
   }
-  const proc = Bun.spawnSync([
+  const proc = boundedSpawnSync([
     "bun",
     script,
     "--summary",
@@ -41,7 +42,7 @@ function run(files: Record<string, string>, extraArgs: string[] = [], skipNames:
   ]);
   return {
     exitCode: proc.exitCode,
-    stdout: proc.stdout.toString(),
+    stdout: proc.stdout,
     summary: readFileSync(summaryPath, "utf-8"),
     file: (name: string) => readFileSync(join(root, "work", name), "utf-8"),
   };

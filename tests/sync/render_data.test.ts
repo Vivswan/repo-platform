@@ -9,6 +9,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { boundedSpawnSync } from "../shared/bounded_spawn";
 
 const script = join(import.meta.dir, "../../.github/scripts/sync/render_data.ts");
 
@@ -17,31 +18,28 @@ function runScript(
   modules: string,
   privateFlag: string,
   description: string,
-): { exitCode: number | null; stdout: string; old: string; new: string } {
+): { exitCode: number; stdout: string; old: string; new: string } {
   const dir = mkdtempSync(join(tmpdir(), "render-data-"));
   const answersPath = join(dir, "answers-old.yml");
   writeFileSync(answersPath, answersText);
   const outOld = join(dir, "data-old.yml");
   const outNew = join(dir, "data-new.yml");
-  const proc = Bun.spawnSync(
-    [
-      "bun",
-      script,
-      "--answers-old",
-      answersPath,
-      "--out-old",
-      outOld,
-      "--out-new",
-      outNew,
-      "--modules",
-      modules,
-      "--private",
-      privateFlag,
-      "--description",
-      description,
-    ],
-    { stdout: "pipe", stderr: "pipe" },
-  );
+  const proc = boundedSpawnSync([
+    "bun",
+    script,
+    "--answers-old",
+    answersPath,
+    "--out-old",
+    outOld,
+    "--out-new",
+    outNew,
+    "--modules",
+    modules,
+    "--private",
+    privateFlag,
+    "--description",
+    description,
+  ]);
   const slurp = (path: string) => {
     try {
       return readFileSync(path, "utf-8");
@@ -51,7 +49,7 @@ function runScript(
   };
   return {
     exitCode: proc.exitCode,
-    stdout: proc.stdout.toString(),
+    stdout: proc.stdout,
     old: slurp(outOld),
     new: slurp(outNew),
   };

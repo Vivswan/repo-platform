@@ -8,6 +8,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { boundedSpawnSync } from "../shared/bounded_spawn";
 
 const script = join(import.meta.dir, "../../.github/scripts/sync/retired_cleanup.ts");
 
@@ -59,13 +60,9 @@ describe("retired_cleanup retired-paths parse", () => {
     mkdirSync(target);
     writeFileSync(join(target, ".copier-answers.yml"), "modules: [uv]\n");
     const git = (...args: string[]) => {
-      const proc = Bun.spawnSync(["git", "-C", target, ...args], {
-        env: gitFreeEnv(),
-        stdout: "pipe",
-        stderr: "pipe",
-      });
+      const proc = boundedSpawnSync(["git", "-C", target, ...args], { env: gitFreeEnv() });
       if (proc.exitCode !== 0) {
-        throw new Error(`git ${args.join(" ")} failed: ${proc.stderr.toString()}`);
+        throw new Error(`git ${args.join(" ")} failed: ${proc.stderr}`);
       }
     };
     git("init", "-b", "main");
@@ -76,7 +73,7 @@ describe("retired_cleanup retired-paths parse", () => {
 
     const runnerTemp = join(root, "temp");
     mkdirSync(runnerTemp);
-    const proc = Bun.spawnSync(["bun", script], {
+    const proc = boundedSpawnSync(["bun", script], {
       cwd: root,
       env: {
         ...gitFreeEnv(),
@@ -91,12 +88,10 @@ describe("retired_cleanup retired-paths parse", () => {
         OLD_SHA: "HEAD",
         TARGET_REF: "HEAD",
       },
-      stdout: "pipe",
-      stderr: "pipe",
     });
     expect(proc.exitCode).toBe(1);
-    const stdout = proc.stdout.toString();
+    const stdout = proc.stdout;
     expect(stdout).toContain("::error::retired_cleanup: retired_paths.ts output: not valid JSON");
-    expect(stdout + proc.stderr.toString()).not.toContain("corruptpath");
+    expect(stdout + proc.stderr).not.toContain("corruptpath");
   });
 });

@@ -11,6 +11,7 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { REFERENCED_LABELS_NAME } from "../../.github/scripts/sync/section_files.ts";
+import { boundedSpawnSync } from "../shared/bounded_spawn";
 
 const script = join(import.meta.dir, "../../.github/scripts/sync/referenced_labels.ts");
 
@@ -29,14 +30,12 @@ function makeTarget(files: Record<string, string>): string {
 
 function runScript(root: string, env: Record<string, string> = {}) {
   const report = join(root, "..", REFERENCED_LABELS_NAME);
-  const proc = Bun.spawnSync(["bun", script, "--root", root, "--report", report], {
+  const proc = boundedSpawnSync(["bun", script, "--root", root, "--report", report], {
     env: { ...process.env, ...env },
-    stdout: "pipe",
-    stderr: "pipe",
   });
   return {
     exitCode: proc.exitCode,
-    output: proc.stdout.toString() + proc.stderr.toString(),
+    output: proc.stdout + proc.stderr,
     report: readFileSync(report, "utf-8"),
   };
 }
@@ -68,7 +67,7 @@ describe("referenced_labels", () => {
       ".github/settings.yml": SETTINGS,
       ".github/ISSUE_TEMPLATE/bug.yml": 'labels: ["definitely-not-declared-xyz"]\n',
     });
-    const proc = Bun.spawnSync(
+    const proc = boundedSpawnSync(
       [
         "bun",
         script,
@@ -79,9 +78,9 @@ describe("referenced_labels", () => {
         "--hide-details",
         "true",
       ],
-      { env: { ...process.env }, stdout: "pipe", stderr: "pipe" },
+      { env: { ...process.env } },
     );
-    const output = proc.stdout.toString() + proc.stderr.toString();
+    const output = proc.stdout + proc.stderr;
     expect(proc.exitCode).toBe(0);
     expect(output).not.toContain("definitely-not-declared-xyz");
     expect(output).toContain("names hidden: private repository");

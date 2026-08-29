@@ -16,6 +16,7 @@ import {
   SETTINGS_LAYERING_NAME,
   TAIL_SHRANK_NAME,
 } from "../../.github/scripts/sync/section_files.ts";
+import { boundedSpawnSync } from "../shared/bounded_spawn";
 
 const script = join(import.meta.dir, "../../.github/scripts/sync/open_pr.ts");
 
@@ -73,7 +74,7 @@ function run(opts: Options = {}) {
     if (content !== undefined) writeFileSync(path, content);
   }
   const calls = join(root, "calls.log");
-  const proc = Bun.spawnSync(["bun", script], {
+  const proc = boundedSpawnSync(["bun", script], {
     env: {
       ...process.env,
       PATH: `${bin}:${process.env.PATH}`,
@@ -92,8 +93,6 @@ function run(opts: Options = {}) {
       ...fileEnv,
       ...opts.env,
     },
-    stdout: "pipe",
-    stderr: "pipe",
   });
   const raw = existsSync(calls) ? readFileSync(calls, "utf-8") : "";
   const records = raw
@@ -104,7 +103,7 @@ function run(opts: Options = {}) {
   const body = create ? (create[create.indexOf("--body") + 1] ?? "") : "";
   return {
     exitCode: proc.exitCode,
-    output: proc.stdout.toString() + proc.stderr.toString(),
+    output: proc.stdout + proc.stderr,
     records,
     body,
     merged: records.some((args) => args[1] === "pr" && args[2] === "merge"),

@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { boundedSpawnSync } from "../shared/bounded_spawn";
 
 const script = join(import.meta.dir, "../../.github/scripts/sync/failure_issue.ts");
 const SLUG = "Vivswan/hidden-server";
@@ -91,7 +92,7 @@ function run(mode: string | undefined, opts: Options = {}) {
       lines.join("\n") + (opts.unterminated ? "" : "\n"),
     );
   }
-  const proc = Bun.spawnSync(["bun", script, ...(mode === undefined ? [] : [mode])], {
+  const proc = boundedSpawnSync(["bun", script, ...(mode === undefined ? [] : [mode])], {
     env: {
       ...process.env,
       PATH: `${bin}:${process.env.PATH}`,
@@ -108,7 +109,7 @@ function run(mode: string | undefined, opts: Options = {}) {
   });
   return {
     exitCode: proc.exitCode,
-    output: proc.stdout.toString() + proc.stderr.toString(),
+    output: proc.stdout + proc.stderr,
     calls: existsSync(calls) ? readFileSync(calls, "utf-8") : "",
     body: existsSync(bodyOut) ? readFileSync(bodyOut, "utf-8") : "",
   };

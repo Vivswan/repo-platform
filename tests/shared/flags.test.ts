@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { join } from "node:path";
 import { parseFlags } from "../../.github/scripts/shared/flags.ts";
+import { boundedSpawnSync } from "./bounded_spawn";
 
 const HELPER = join(import.meta.dir, "../../.github/scripts/shared/flags.ts");
 
@@ -8,12 +9,12 @@ const HELPER = join(import.meta.dir, "../../.github/scripts/shared/flags.ts");
 // the adopting scripts hit them. Failures print ::error:: workflow
 // commands on stdout (the stream the runner parses them from).
 function run(snippet: string): { exitCode: number; stdout: string } {
-  const proc = Bun.spawnSync([
+  const proc = boundedSpawnSync([
     "bun",
     "-e",
     `import { parseFlags } from ${JSON.stringify(HELPER)}; ${snippet}`,
   ]);
-  return { exitCode: proc.exitCode, stdout: proc.stdout.toString() };
+  return { exitCode: proc.exitCode, stdout: proc.stdout };
 }
 
 describe("parseFlags", () => {

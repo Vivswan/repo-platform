@@ -7,6 +7,7 @@ import {
   selectRepos,
   validateRegistry,
 } from "../../.github/scripts/fleet/repos_registry";
+import { boundedSpawnSync } from "../shared/bounded_spawn";
 
 function registry(overrides: Partial<Registry> = {}): Registry {
   return {
@@ -188,11 +189,11 @@ describe("CLI", () => {
   const repoRoot = new URL("../..", import.meta.url).pathname;
 
   function run(args: string[]): { exitCode: number; stdout: string; stderr: string } {
-    const proc = Bun.spawnSync(["bun", script, ...args], { cwd: repoRoot });
+    const proc = boundedSpawnSync(["bun", script, ...args], { cwd: repoRoot });
     return {
       exitCode: proc.exitCode,
-      stdout: proc.stdout.toString(),
-      stderr: proc.stderr.toString(),
+      stdout: proc.stdout,
+      stderr: proc.stderr,
     };
   }
 

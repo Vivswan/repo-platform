@@ -18,6 +18,7 @@ import {
   recordedCommit,
   stampManifestText,
 } from "../../actions/shared/stamp_manifest";
+import { boundedSpawnSync } from "../shared/bounded_spawn";
 
 function sha256(data: string): string {
   return new Bun.CryptoHasher("sha256").update(Buffer.from(data, "latin1")).digest("hex");
@@ -354,9 +355,7 @@ describe("normalizeSymlinkTargets", () => {
     symlinkSync(target, join(root, path));
   };
   const readTarget = (root: string, path: string) =>
-    Bun.spawnSync(["readlink", join(root, path)])
-      .stdout.toString()
-      .trim();
+    boundedSpawnSync(["readlink", join(root, path)]).stdout.trim();
 
   test("strips the template suffix from a manifest-listed link, idempotently", () => {
     const root = mkdtempSync(join(tmpdir(), "normalize-"));
@@ -413,9 +412,7 @@ describe("normalizeSymlinkTargets", () => {
 describe("parseManifestFiles validation", () => {
   const manifestOf = (filesJson: string) => `{\n  "files": {\n${filesJson}\n  }\n}\n`;
   const readTarget = (root: string, path: string) =>
-    Bun.spawnSync(["readlink", join(root, path)])
-      .stdout.toString()
-      .trim();
+    boundedSpawnSync(["readlink", join(root, path)]).stdout.trim();
 
   test("a null (or scalar) entry is a soft problem, never a throw", () => {
     // A null entry would throw at entry.class in a consumer, turning the

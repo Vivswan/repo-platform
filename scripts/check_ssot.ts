@@ -2006,78 +2006,6 @@ export function spawnSyncHazard(options: string | null): string | null {
   return null;
 }
 
-// The shrink-only debt book for tests/: per-file CEILINGS on the
-// spawnSync hazard sites that predate extending the hang-bound rule to
-// tests/ (measured by the rule's own scan when the exclusion fell). A
-// file at or below its ceiling passes; a new hazard - a file with no
-// entry, or a count above its ceiling - fails outright, so every NEW
-// bare spawn is loud immediately while the legacy debt burns down
-// separately. Shrink-only is the point: a conversion needs no book
-// edit, so the burn-down (its own task) and this rule never block each
-// other. The residual of counting instead of naming sites: until the
-// burn-down prunes an entry, a booked file can swap one hazard for
-// another at the same count, or regrow from zero up to its old
-// ceiling, unnoticed - accepted, because the alternatives (exact
-// counts, per-site line keys, in-file markers) each turn every
-// conversion or unrelated edit into a same-change book edit and
-// re-couple what the ratchet decouples.
-export const TEST_SPAWN_DEBT: Record<string, number> = {
-  "tests/actions/stamp_manifest.test.ts": 2,
-  "tests/actions/validate_template_report.test.ts": 2,
-  "tests/build-branches/publish_behavior.test.ts": 1,
-  "tests/ci/verify_dogfood_oracle.test.ts": 1,
-  "tests/fleet/check_target_fresh.test.ts": 1,
-  "tests/fleet/discover_repos.test.ts": 1,
-  "tests/fleet/discovery.test.ts": 3,
-  "tests/fleet/label_preflight.test.ts": 1,
-  "tests/fleet/redact.test.ts": 3,
-  "tests/fleet/render_managed_settings.test.ts": 1,
-  "tests/fleet/repos_registry.test.ts": 1,
-  "tests/fleet/require_green_commit.test.ts": 2,
-  "tests/fleet/resolve_private_repo.test.ts": 1,
-  "tests/shared/flags.test.ts": 1,
-  "tests/shared/json.test.ts": 1,
-  "tests/shared/open_automation_pr.test.ts": 1,
-  "tests/shared/stage_tree.test.ts": 1,
-  "tests/sync/all_green_bootstrap.test.ts": 2,
-  "tests/sync/failure_issue.test.ts": 1,
-  "tests/sync/normalize_src.test.ts": 2,
-  "tests/sync/open_pr.test.ts": 1,
-  "tests/sync/preserve_local_content.test.ts": 4,
-  "tests/sync/preserve_repo_owned.test.ts": 4,
-  "tests/sync/referenced_labels.test.ts": 2,
-  "tests/sync/render_data.test.ts": 1,
-  "tests/sync/resolve_copier_conflicts.test.ts": 1,
-  "tests/sync/retired_cleanup.test.ts": 2,
-  "tests/sync/run_hidden.test.ts": 1,
-  "tests/sync/select_modules.test.ts": 1,
-  "tests/sync/starter_pin_rollout.test.ts": 1,
-  "tests/sync/tail_tripwire.test.ts": 3,
-  "tests/sync/verify_build_provenance.test.ts": 1,
-};
-
-/** The ratchet judgment for one file's hazard reports: an unbooked file
- *  reports everything it found; a booked file passes while its count
- *  sits at or below its ceiling (shrink included - that is what lets a
- *  conversion land without a book edit) and reports the breach PLUS
- *  every site above it. */
-export function spawnDebtMismatches(
-  rel: string,
-  found: Mismatch[],
-  ceiling: number | undefined,
-): Mismatch[] {
-  if (ceiling === undefined) return found;
-  if (found.length <= ceiling) return [];
-  return [
-    {
-      file: rel,
-      expected: `at most ${ceiling} unbounded spawnSync site(s) (TEST_SPAWN_DEBT is a shrink-only ceiling - bound the new site, never raise the entry)`,
-      got: `${found.length} site(s)`,
-    },
-    ...found,
-  ];
-}
-
 // ASYNC Bun.spawn is a different hazard model, judged as an EXACT-SET
 // enumeration rather than by the sync rule's bounded-or-unpiped bar:
 // an async site draining both pipes under Promise.all has no pipe-EOF
@@ -2085,12 +2013,12 @@ export function spawnDebtMismatches(
 // option to pin - so every file calling Bun.spawn must appear here
 // with the rationale that bounds it (a manual deadline, or an outer
 // bound like the GitHub job timeout). The set pins NAMES, not a count:
-// a bounded spawnSync rewritten as async would EXIT the sync gate and
-// SHRINK its TEST_SPAWN_DEBT ceiling - reading as an improvement - so
-// the laundering must fail by introducing a name this pin does not
-// carry, a diagnostic that names the offending file. The textual
-// residual matches the sync rule's: a computed access (Bun["spawn"])
-// or a Bun alias stays review's outside the sync scan's trees.
+// a bounded spawnSync rewritten as async would EXIT the sync gate
+// silently - reading as an improvement - so the laundering must fail
+// by introducing a name this pin does not carry, a diagnostic that
+// names the offending file. The textual residual matches the sync
+// rule's: a computed access (Bun["spawn"]) or a Bun alias stays
+// review's outside the sync scan's trees.
 export const ASYNC_SPAWN_FILES: Record<string, string> = {
   ".github/scripts/sync/rehearse_fleet.ts":
     "implements its own manual deadline: the async Subprocess type has no built-in timeout, so a timer SIGKILLs an overrunning lane (the comment at its Bun.spawn call is the reference statement of why async needs one)",
@@ -4911,9 +4839,11 @@ const rules: Rule[] = [
     // remedy, not the required one (constants stay spawnSyncHazard's
     // recorded trusted residual: resolving one is value analysis a
     // textual scan cannot do, and rejecting identifiers would red
-    // proc.ts's own `timeout: timeoutMs`). Pre-existing test debt rides
-    // TEST_SPAWN_DEBT's shrink-only ceilings; everything else reports
-    // per site. ASYNC Bun.spawn is judged beside the sync bar under its
+    // proc.ts's own `timeout: timeoutMs`). tests/ converts through
+    // tests/shared/bounded_spawn.ts, the bounded-by-default harness
+    // spawn (its internal call carries the bound this rule proves);
+    // every site reports per site - the tests/ debt book that once rode
+    // here burned to zero and was retired. ASYNC Bun.spawn is judged beside the sync bar under its
     // own model (ASYNC_SPAWN_FILES has the statement): sync =
     // bounded-or-unpiped, async = deadline-or-enumerated, because the
     // async form neither blocks the caller at pipe EOF nor offers a
@@ -4933,13 +4863,11 @@ const rules: Rule[] = [
       ]
         .filter((f) => !f.symlink && /\.[mc]?[jt]s$/.test(f.path))
         .map((f) => f.path);
-      const present = new Set(files);
       for (const rel of files) {
-        const found: Mismatch[] = [];
         for (const site of spawnSyncSites(read(rel), rel)) {
           sites++;
           if (site.kind === "reference") {
-            found.push({
+            mismatches.push({
               file: `${rel}:${site.line}`,
               expected:
                 "a direct Bun spawnSync call (an alias or destructure cannot be audited for a hang bound)",
@@ -4949,26 +4877,15 @@ const rules: Rule[] = [
           }
           const hazard = spawnSyncHazard(site.options);
           if (hazard !== null) {
-            found.push({
+            const helper = rel.startsWith("tests/")
+              ? "tests/shared/bounded_spawn.ts"
+              : ".github/scripts/shared/proc.ts";
+            mismatches.push({
               file: `${rel}:${site.line}`,
-              expected:
-                "a bounded or unpiped spawnSync: a proc.ts helper, an explicit timeout, or every output stream shaped to inherit/ignore/file fds",
+              expected: `a bounded or unpiped spawnSync: a ${helper} helper, an explicit timeout, or every output stream shaped to inherit/ignore/file fds`,
               got: hazard,
             });
           }
-        }
-        mismatches.push(...spawnDebtMismatches(rel, found, TEST_SPAWN_DEBT[rel]));
-      }
-      // Existence control on the book's keys: an entry outside tests/
-      // would grant the executable trees a ceiling they must never have,
-      // and one naming a file the walk cannot see excuses nothing.
-      for (const rel of Object.keys(TEST_SPAWN_DEBT).sort()) {
-        if (!rel.startsWith("tests/") || !present.has(rel)) {
-          mismatches.push({
-            file: rel,
-            expected: "a scanned tests/ file (TEST_SPAWN_DEBT keys the tests/ tree only)",
-            got: "no such scanned file - stale or misplaced debt entry; remove it",
-          });
         }
       }
       // The async pass, actions/ included: every Bun.spawn caller must

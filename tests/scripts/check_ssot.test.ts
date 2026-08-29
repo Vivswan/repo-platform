@@ -48,7 +48,6 @@ import {
   setMismatch,
   settingsIdentityMismatches,
   shellSegments,
-  spawnDebtMismatches,
   spawnSyncHazard,
   spawnSyncSites,
   starterPinCoverage,
@@ -57,7 +56,6 @@ import {
   stepCarriesWithKey,
   stripComments,
   stripGeneratedRegions,
-  TEST_SPAWN_DEBT,
   topLevelProperties,
   unsafeStepCondition,
   verdictRosterMismatches,
@@ -1758,46 +1756,6 @@ describe("spawnSyncHazard", () => {
   });
 });
 
-describe("spawnDebtMismatches", () => {
-  const site = (line: number): { file: string; expected: string; got: string } => ({
-    file: `tests/x.test.ts:${line}`,
-    expected: "a bounded or unpiped spawnSync",
-    got: "no options",
-  });
-
-  test("an unbooked file reports every hazard it found", () => {
-    expect(spawnDebtMismatches("tests/x.test.ts", [site(3)], undefined)).toEqual([site(3)]);
-    expect(spawnDebtMismatches("tests/x.test.ts", [], undefined)).toEqual([]);
-  });
-
-  test("a booked file at its ceiling passes", () => {
-    expect(spawnDebtMismatches("tests/x.test.ts", [site(3), site(9)], 2)).toEqual([]);
-  });
-
-  test("SHRINK-ONLY: a count below the ceiling passes, zero included, with no stale report", () => {
-    // The property a naive equality pin gets wrong, and what lets a
-    // conversion land without touching the book.
-    expect(spawnDebtMismatches("tests/x.test.ts", [site(3)], 2)).toEqual([]);
-    expect(spawnDebtMismatches("tests/x.test.ts", [], 2)).toEqual([]);
-  });
-
-  test("a count above the ceiling reports the breach AND every site", () => {
-    const found = [site(3), site(9), site(12)];
-    const report = spawnDebtMismatches("tests/x.test.ts", found, 2);
-    expect(report).toHaveLength(4);
-    expect(report[0].expected).toContain("at most 2");
-    expect(report[0].expected).toContain("never raise the entry");
-    expect(report.slice(1)).toEqual(found);
-  });
-
-  test("the book itself keys tests/ files with positive ceilings", () => {
-    for (const [rel, ceiling] of Object.entries(TEST_SPAWN_DEBT)) {
-      expect(rel.startsWith("tests/")).toBe(true);
-      expect(Number.isInteger(ceiling) && ceiling > 0).toBe(true);
-    }
-  });
-});
-
 describe("asyncSpawnMismatches", () => {
   test("the enumeration pins the exact landed set, by name", () => {
     expect(Object.keys(ASYNC_SPAWN_FILES).sort()).toEqual([
@@ -1814,13 +1772,12 @@ describe("asyncSpawnMismatches", () => {
     expect(found[0].expected).toContain("ASYNC_SPAWN_FILES");
   });
 
-  test("LAUNDERING: a debt file's spawnSync rewritten as async Bun.spawn fails by introducing a fourth name", () => {
-    // The sync->async rewrite EXITS the sync gate and shrinks the
-    // file's TEST_SPAWN_DEBT count (reads as an improvement); the
-    // exact-set pin is what makes it fail - the file's name is not in
-    // the enumeration, and no count edit can satisfy that.
+  test("LAUNDERING: a test file's spawnSync rewritten as async Bun.spawn fails by introducing a fourth name", () => {
+    // The sync->async rewrite EXITS the sync gate silently (no sync
+    // site remains to report); the exact-set pin is what makes it fail -
+    // the file's name is not in the enumeration, and nothing but a
+    // reviewed entry can satisfy that.
     const rewritten = 'const proc = Bun.spawn(["bun", entry], { stdout: "pipe" });\n';
-    expect(spawnDebtMismatches("tests/shared/flags.test.ts", [], 1)).toEqual([]); // sync side: shrink passes
     const found = asyncSpawnMismatches("tests/shared/flags.test.ts", rewritten, false);
     expect(found).toHaveLength(1);
     expect(found[0].file).toBe("tests/shared/flags.test.ts:1");

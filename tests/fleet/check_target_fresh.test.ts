@@ -8,6 +8,7 @@ import { describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { boundedSpawnSync } from "../shared/bounded_spawn";
 
 const script = resolve(import.meta.dir, "../../.github/scripts/fleet/check_target_fresh.ts");
 const HEAD = "a".repeat(40);
@@ -34,7 +35,7 @@ describe("check_target_fresh", () => {
       { mode: 0o755 },
     );
     const outputPath = join(root, "output.txt");
-    const proc = Bun.spawnSync(["bun", script], {
+    const proc = boundedSpawnSync(["bun", script], {
       env: {
         ...process.env,
         PATH: `${bin}:${process.env.PATH}`,
@@ -45,8 +46,8 @@ describe("check_target_fresh", () => {
     });
     return {
       exitCode: proc.exitCode,
-      stderr: proc.stderr.toString(),
-      stdout: proc.stdout.toString(),
+      stderr: proc.stderr,
+      stdout: proc.stdout,
       outputs: existsSync(outputPath) ? readFileSync(outputPath, "utf-8") : "",
     };
   }

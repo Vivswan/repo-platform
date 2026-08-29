@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { boundedSpawnSync } from "../shared/bounded_spawn";
 
 const script = join(import.meta.dir, "../../.github/scripts/sync/select_modules.ts");
 
@@ -23,8 +24,8 @@ function runScript(
   root: string,
   temp: string,
   extraEnv: Record<string, string> = {},
-): { exitCode: number | null; stdout: string; stderr: string } {
-  const proc = Bun.spawnSync(["bun", script], {
+): { exitCode: number; stdout: string; stderr: string } {
+  const proc = boundedSpawnSync(["bun", script], {
     cwd: root,
     env: {
       ...process.env,
@@ -33,13 +34,11 @@ function runScript(
       HIDE_DETAILS: "false",
       ...extraEnv,
     },
-    stdout: "pipe",
-    stderr: "pipe",
   });
   return {
     exitCode: proc.exitCode,
-    stdout: proc.stdout.toString(),
-    stderr: proc.stderr.toString(),
+    stdout: proc.stdout,
+    stderr: proc.stderr,
   };
 }
 

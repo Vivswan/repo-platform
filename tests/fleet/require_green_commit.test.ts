@@ -8,6 +8,7 @@
 import { describe, expect, test } from "bun:test";
 import { waitForGreen } from "../../.github/scripts/fleet/require_green_commit";
 import type { GhRunner } from "../../.github/scripts/shared/all_green.ts";
+import { type BoundedSpawnResult, boundedSpawnSync } from "../shared/bounded_spawn";
 
 const SHA = "000000000000000000000000000000000000000a";
 
@@ -144,10 +145,7 @@ describe("the CLI's ref guard", () => {
   const script = new URL("../../.github/scripts/fleet/require_green_commit.ts", import.meta.url)
     .pathname;
 
-  function runCli(
-    overrides: Record<string, string>,
-    drop: string[] = [],
-  ): ReturnType<typeof Bun.spawnSync> {
+  function runCli(overrides: Record<string, string>, drop: string[] = []): BoundedSpawnResult {
     const env: Record<string, string | undefined> = {
       ...process.env,
       GITHUB_REPOSITORY: "o/r",
@@ -155,7 +153,7 @@ describe("the CLI's ref guard", () => {
       ...overrides,
     };
     for (const name of drop) delete env[name];
-    return Bun.spawnSync(["bun", script], { env });
+    return boundedSpawnSync(["bun", script], { env });
   }
 
   test("a non-main ref is refused before any probe", () => {
@@ -165,8 +163,8 @@ describe("the CLI's ref guard", () => {
     // the refusal must fire before the first probe.
     const proc = runCli({ GITHUB_REF: "refs/heads/feature" });
     expect(proc.exitCode).toBe(1);
-    expect(proc.stdout.toString()).toContain("refusing the settings apply from");
-    expect(proc.stdout.toString()).toContain("refs/heads/feature");
+    expect(proc.stdout).toContain("refusing the settings apply from");
+    expect(proc.stdout).toContain("refs/heads/feature");
   });
 
   test("an unset GITHUB_REF is refused, never treated as main", () => {
@@ -175,6 +173,6 @@ describe("the CLI's ref guard", () => {
     // not skip the check.
     const proc = runCli({}, ["GITHUB_REF"]);
     expect(proc.exitCode).toBe(2);
-    expect(proc.stdout.toString()).toContain("GITHUB_REF must be set");
+    expect(proc.stdout).toContain("GITHUB_REF must be set");
   });
 });

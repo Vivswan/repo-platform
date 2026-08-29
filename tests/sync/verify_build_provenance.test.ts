@@ -18,6 +18,7 @@ import { describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { boundedSpawnSync } from "../shared/bounded_spawn";
 
 const script = join(import.meta.dir, "../../.github/scripts/sync/verify_build_provenance.ts");
 
@@ -69,7 +70,7 @@ function run(opts: Options = {}) {
   const historyFile = join(root, "history.txt");
   writeFileSync(historyFile, opts.history ?? STAMP(source));
   const calls = join(root, "calls.log");
-  const proc = Bun.spawnSync(["bun", script], {
+  const proc = boundedSpawnSync(["bun", script], {
     env: {
       ...process.env,
       PATH: `${bin}:${process.env.PATH}`,
@@ -86,7 +87,7 @@ function run(opts: Options = {}) {
   const raw = existsSync(calls) ? readFileSync(calls, "utf-8") : "";
   return {
     exitCode: proc.exitCode,
-    output: proc.stdout.toString() + proc.stderr.toString(),
+    output: proc.stdout + proc.stderr,
     calls: raw
       .split("\x1e")
       .filter(Boolean)

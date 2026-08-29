@@ -12,6 +12,7 @@ import {
   VERIFY_HEX_LENGTH,
   verifyTag,
 } from "../../.github/scripts/fleet/redact.ts";
+import { boundedSpawnSync } from "../shared/bounded_spawn";
 
 describe("hintName", () => {
   test("keeps segment initials and the long final's last char", () => {
@@ -272,7 +273,7 @@ describe("enrich CLI", () => {
       ]),
     );
     writeFileSync(join(dir, "repos.yml"), 'managed:\n  - "*"\n');
-    const proc = Bun.spawnSync(
+    const proc = boundedSpawnSync(
       [
         "bun",
         join(import.meta.dir, "../../.github/scripts/fleet/redact.ts"),
@@ -287,21 +288,21 @@ describe("enrich CLI", () => {
       { env: { ...process.env, PAT: "p", GITHUB_RUN_ID: "1" } },
     );
     expect(proc.exitCode).toBe(0);
-    const result = JSON.parse(proc.stdout.toString());
+    const result = JSON.parse(proc.stdout);
     expect(result.rows[0].display).toBe("Vivswan/pub");
     expect(result.rows[1].display).toBe("h**-s**r");
     expect(result.rows[1].verify).toHaveLength(VERIFY_HEX_LENGTH);
   });
 
   test("hint subcommand prints the hint", () => {
-    const proc = Bun.spawnSync([
+    const proc = boundedSpawnSync([
       "bun",
       join(import.meta.dir, "../../.github/scripts/fleet/redact.ts"),
       "hint",
       "hidden-server",
     ]);
     expect(proc.exitCode).toBe(0);
-    expect(proc.stdout.toString().trim()).toBe("h**-s**r");
+    expect(proc.stdout.trim()).toBe("h**-s**r");
   });
 
   test("a malformed input file fails value-free (no SyntaxError echo)", () => {
@@ -312,7 +313,7 @@ describe("enrich CLI", () => {
     writeFileSync(join(dir, "selection.json"), '[{"repo": hiddenserver}]');
     writeFileSync(join(dir, "discovered.json"), "[]");
     writeFileSync(join(dir, "repos.yml"), 'managed:\n  - "*"\n');
-    const proc = Bun.spawnSync(
+    const proc = boundedSpawnSync(
       [
         "bun",
         join(import.meta.dir, "../../.github/scripts/fleet/redact.ts"),
@@ -327,7 +328,7 @@ describe("enrich CLI", () => {
       { env: { ...process.env, PAT: "p", GITHUB_RUN_ID: "1" } },
     );
     expect(proc.exitCode).toBe(1);
-    expect(proc.stdout.toString()).toContain("not valid JSON");
-    expect(proc.stdout.toString() + proc.stderr.toString()).not.toContain("hiddenserver");
+    expect(proc.stdout).toContain("not valid JSON");
+    expect(proc.stdout + proc.stderr).not.toContain("hiddenserver");
   });
 });

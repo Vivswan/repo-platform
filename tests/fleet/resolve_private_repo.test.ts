@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { verifyTag } from "../../.github/scripts/fleet/redact.ts";
+import { boundedSpawnSync } from "../shared/bounded_spawn";
 
 // End-to-end harness for the leg-side resolver, stub-gh style (see
 // select_settings_repos.test.ts). The resolver imports redact.ts's own
@@ -53,7 +54,7 @@ describe("resolve_private_repo.ts", () => {
     const outFile = join(work, "out");
     writeFileSync(envFile, "");
     writeFileSync(outFile, "");
-    const proc = Bun.spawnSync(["bun", script], {
+    const proc = boundedSpawnSync(["bun", script], {
       env: {
         ...process.env,
         PATH: `${bin}:${process.env.PATH}`,
@@ -67,7 +68,7 @@ describe("resolve_private_repo.ts", () => {
     });
     return {
       exitCode: proc.exitCode,
-      stdout: proc.stdout.toString() + proc.stderr.toString(),
+      stdout: proc.stdout + proc.stderr,
       env: readFileSync(envFile, "utf-8"),
       output: readFileSync(outFile, "utf-8"),
     };

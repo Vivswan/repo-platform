@@ -18,6 +18,7 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
+import { boundedSpawnSync } from "../shared/bounded_spawn";
 
 const ACTION = join(import.meta.dir, "../../actions/validate-template-report");
 const MARKER = "<!-- repo-platform:validate-template -->";
@@ -87,7 +88,7 @@ function runReport(opts: ReportOptions = {}) {
   writeFileSync(summary, "");
   const listing = join(root, "comments.json");
   writeFileSync(listing, opts.existing === undefined ? "" : `${opts.existing}\n`);
-  const proc = Bun.spawnSync(["bun", join(ACTION, "report.ts")], {
+  const proc = boundedSpawnSync(["bun", join(ACTION, "report.ts")], {
     env: {
       ...process.env,
       PATH: `${bin}:${process.env.PATH}`,
@@ -108,7 +109,7 @@ function runReport(opts: ReportOptions = {}) {
   });
   return {
     exitCode: proc.exitCode,
-    output: proc.stdout.toString() + proc.stderr.toString(),
+    output: proc.stdout + proc.stderr,
     calls: read(calls),
     summary: read(summary),
   };
@@ -126,7 +127,7 @@ function runFreshness(opts: FreshnessOptions = {}) {
   const fragment = join(root, "freshness.md");
   const outputs = join(root, "outputs.txt");
   writeFileSync(outputs, "");
-  const proc = Bun.spawnSync(["bun", join(ACTION, "freshness.ts")], {
+  const proc = boundedSpawnSync(["bun", join(ACTION, "freshness.ts")], {
     cwd: root,
     env: {
       ...process.env,
@@ -142,7 +143,7 @@ function runFreshness(opts: FreshnessOptions = {}) {
   });
   return {
     exitCode: proc.exitCode,
-    output: proc.stdout.toString() + proc.stderr.toString(),
+    output: proc.stdout + proc.stderr,
     state: read(outputs).trim(),
     fragment: read(fragment),
   };

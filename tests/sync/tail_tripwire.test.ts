@@ -27,6 +27,7 @@ import {
   renderReport,
   repoOwnedHalf,
 } from "../../.github/scripts/sync/tail_tripwire.ts";
+import { boundedSpawnSync } from "../shared/bounded_spawn";
 
 const script = join(import.meta.dir, "../../.github/scripts/sync/tail_tripwire.ts");
 
@@ -109,13 +110,9 @@ function gitFreeEnv(): Record<string, string> {
 
 function initGitRepo(dir: string): void {
   const run = (...args: string[]) => {
-    const proc = Bun.spawnSync(["git", "-C", dir, ...args], {
-      env: gitFreeEnv(),
-      stdout: "pipe",
-      stderr: "pipe",
-    });
+    const proc = boundedSpawnSync(["git", "-C", dir, ...args], { env: gitFreeEnv() });
     if (proc.exitCode !== 0) {
-      throw new Error(`git ${args.join(" ")} failed: ${proc.stderr.toString()}`);
+      throw new Error(`git ${args.join(" ")} failed: ${proc.stderr}`);
     }
   };
   run("init", "-b", "main");
@@ -152,16 +149,16 @@ function makeTarget(
 function runScript(
   root: string,
   extraArgs: string[] = [],
-): { exitCode: number | null; stdout: string; stderr: string; report: string } {
+): { exitCode: number; stdout: string; stderr: string; report: string } {
   const reportPath = join(root, "..", "tail-shrank.md");
-  const proc = Bun.spawnSync(
+  const proc = boundedSpawnSync(
     ["bun", script, "--report", reportPath, "--root", root, ...extraArgs],
-    { env: gitFreeEnv(), stdout: "pipe", stderr: "pipe" },
+    { env: gitFreeEnv() },
   );
   return {
     exitCode: proc.exitCode,
-    stdout: proc.stdout.toString(),
-    stderr: proc.stderr.toString(),
+    stdout: proc.stdout,
+    stderr: proc.stderr,
     report: existsSync(reportPath) ? readFileSync(reportPath, "utf-8") : "",
   };
 }
@@ -652,7 +649,7 @@ describe("tail_tripwire script", () => {
     expect(result.report).not.toContain("\x01");
     // End to end: the report must be spawnable as an argv element, the
     // way open_pr passes the assembled body to gh.
-    const spawn = Bun.spawnSync(["true", result.report]);
+    const spawn = boundedSpawnSync(["true", result.report]);
     expect(spawn.exitCode).toBe(0);
   });
 

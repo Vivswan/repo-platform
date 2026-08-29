@@ -19,6 +19,7 @@ import {
   splitEntries,
 } from "../../.github/scripts/sync/preserve_local_content.ts";
 import { GITIGNORE_REGION } from "../../scripts/gitignore_local.ts";
+import { boundedSpawnSync } from "../shared/bounded_spawn";
 
 const script = join(import.meta.dir, "../../.github/scripts/sync/preserve_local_content.ts");
 const repoRoot = join(import.meta.dir, "..", "..");
@@ -466,13 +467,9 @@ function gitFreeEnv(): Record<string, string> {
 
 function initGitRepo(dir: string): void {
   const run = (...args: string[]) => {
-    const proc = Bun.spawnSync(["git", "-C", dir, ...args], {
-      env: gitFreeEnv(),
-      stdout: "pipe",
-      stderr: "pipe",
-    });
+    const proc = boundedSpawnSync(["git", "-C", dir, ...args], { env: gitFreeEnv() });
     if (proc.exitCode !== 0) {
-      throw new Error(`git ${args.join(" ")} failed: ${proc.stderr.toString()}`);
+      throw new Error(`git ${args.join(" ")} failed: ${proc.stderr}`);
     }
   };
   run("init", "-b", "main");
@@ -485,16 +482,16 @@ function initGitRepo(dir: string): void {
 function runScript(
   root: string,
   extraArgs: string[] = [],
-): { exitCode: number | null; stdout: string; stderr: string; summary: string } {
+): { exitCode: number; stdout: string; stderr: string; summary: string } {
   const summaryPath = join(root, "..", "local-carryover.md");
-  const proc = Bun.spawnSync(
+  const proc = boundedSpawnSync(
     ["bun", script, "--summary", summaryPath, "--root", root, ...extraArgs],
-    { env: gitFreeEnv(), stdout: "pipe", stderr: "pipe" },
+    { env: gitFreeEnv() },
   );
   return {
     exitCode: proc.exitCode,
-    stdout: proc.stdout.toString(),
-    stderr: proc.stderr.toString(),
+    stdout: proc.stdout,
+    stderr: proc.stderr,
     summary: existsSync(summaryPath) ? readFileSync(summaryPath, "utf-8") : "",
   };
 }
@@ -1496,14 +1493,16 @@ describe.skipIf(!hasCopier)("preserve_local_content end-to-end (copier recopy)",
       const base = mkdtempSync(join(tmpdir(), "preserve-local-e2e-"));
       const tree = join(base, "bt");
       const target = join(base, "out");
-      const run = (cmd: string[], cwd?: string) => {
-        const proc = Bun.spawnSync(cmd, { cwd, env: gitFreeEnv(), stdout: "pipe", stderr: "pipe" });
+      // Only the copier renders need a wide bound; everything else keeps
+      // the wrapper's default, and both stay under the test's 300s cap
+      // so a wedge dies named.
+      const COPIER_TIMEOUT_MS = 270_000;
+      const run = (cmd: string[], cwd?: string, timeoutMs?: number) => {
+        const proc = boundedSpawnSync(cmd, { cwd, env: gitFreeEnv(), timeoutMs });
         if (proc.exitCode !== 0) {
-          throw new Error(
-            `${cmd.join(" ")} failed:\n${proc.stdout.toString()}\n${proc.stderr.toString()}`,
-          );
+          throw new Error(`${cmd.join(" ")} failed:\n${proc.stdout}\n${proc.stderr}`);
         }
-        return proc.stdout.toString();
+        return proc.stdout;
       };
       run(["bun", join(repoRoot, ".github/scripts/build-branches/branch_tree.ts"), "--dest", tree]);
       run(["git", "-C", tree, "init", "-b", "build"]);
@@ -1521,7 +1520,11 @@ describe.skipIf(!hasCopier)("preserve_local_content end-to-end (copier recopy)",
         "-d",
         "private=false",
       ];
-      run(["copier", "copy", tree, target, "--vcs-ref", "HEAD", ...copierArgs]);
+      run(
+        ["copier", "copy", tree, target, "--vcs-ref", "HEAD", ...copierArgs],
+        undefined,
+        COPIER_TIMEOUT_MS,
+      );
 
       // Customize every sanctioned repo-local region, plus the repo-owned
       // exemptions file, and commit: this is the pre-recovery repo state.
@@ -1550,7 +1553,11 @@ describe.skipIf(!hasCopier)("preserve_local_content end-to-end (copier recopy)",
       initGitRepo(target);
 
       // The recovery re-render, exactly as apply_update.ts issues it.
-      run(["copier", "recopy", "--overwrite", "--vcs-ref", "HEAD", ...copierArgs], target);
+      run(
+        ["copier", "recopy", "--overwrite", "--vcs-ref", "HEAD", ...copierArgs],
+        target,
+        COPIER_TIMEOUT_MS,
+      );
       // Defect reproduced: the re-render reset the local regions.
       expect(readFileSync(join(target, "AGENTS.md"), "utf-8")).not.toContain(
         "repo-local agent guidance",
@@ -1572,10 +1579,11 @@ describe.skipIf(!hasCopier)("preserve_local_content end-to-end (copier recopy)",
         expect(summary).toContain(`- \`${rel}\`:`);
       }
       // The whole carried tree must still validate.
-      const validate = Bun.spawnSync(
-        ["bun", join(repoRoot, "actions/validate-template/validate_generated_files.ts"), target],
-        { stdout: "pipe", stderr: "pipe" },
-      );
+      const validate = boundedSpawnSync([
+        "bun",
+        join(repoRoot, "actions/validate-template/validate_generated_files.ts"),
+        target,
+      ]);
       expect(validate.exitCode).toBe(0);
     },
     { timeout: 300000 },

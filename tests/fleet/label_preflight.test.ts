@@ -10,6 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { blockedRemovals } from "../../.github/scripts/fleet/label_preflight.ts";
 import { collectReferences } from "../../.github/scripts/fleet/label_references.ts";
+import { boundedSpawnSync } from "../shared/bounded_spawn";
 
 const script = join(import.meta.dir, "../../.github/scripts/fleet/label_preflight.ts");
 
@@ -91,19 +92,17 @@ function run(opts: Options) {
   }
   const args = opts.args.map((arg) => (arg === "TARGET_DIR" ? targetDir : arg));
   const outputs = join(root, "gh-output.txt");
-  const proc = Bun.spawnSync(["bun", script, "--merged", mergedPath, "--repo", "o/r", ...args], {
+  const proc = boundedSpawnSync(["bun", script, "--merged", mergedPath, "--repo", "o/r", ...args], {
     env: {
       ...process.env,
       PATH: `${bin}:${process.env.PATH}`,
       GITHUB_OUTPUT: outputs,
       ...opts.env,
     },
-    stdout: "pipe",
-    stderr: "pipe",
   });
   return {
     exitCode: proc.exitCode,
-    output: proc.stdout.toString() + proc.stderr.toString(),
+    output: proc.stdout + proc.stderr,
     outputs: existsSync(outputs) ? readFileSync(outputs, "utf-8") : "",
   };
 }
