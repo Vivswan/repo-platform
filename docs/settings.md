@@ -110,7 +110,7 @@ Both live in `.github/settings-override.yml` - the layer no repo can beat - with
 ## repo-platform itself is a target
 
 - It is not generated from the template (no `.repo-platform.yml`), so its layer facts come from `.repo-platform-answers.yml`.
-- Its own `.github/settings.yml` carries its identity keys plus its repo-specific `build-branches` ruleset, which keeps the generated `build` branch - and the retired `template` and `actions` refs until their deliberate deletion - append-only for everyone, the publisher included.
+- Its own `.github/settings.yml` carries its identity keys plus its repo-specific `build-branches` ruleset, which keeps the generated `build` branch append-only for everyone, the publisher included. (The retired `template` and `actions` refs were deleted 2026-08-29, in the same change that dropped them from the ruleset.)
 - A stricter publish-only ruleset over the executable ref is not expressible: GitHub rejects an Integration bypass actor on a user-owned repository's ruleset (422 "Actor GitHub Actions integration must be part of the ruleset source or owner organization"). So `build` consumption keeps its sync-side provenance verify (`verify_build_provenance.ts`, which rejects any tip the builder did not produce), the executable `uses: ...@build` channel has no publisher-identity enforcement beyond push access plus the append-only rules, and `tests/fleet/repo_settings.test.ts` pins that no settings layer declares an Integration bypass actor.
 - It does NOT redeclare `main` or `non-bypassable`: the override layer supplies them and wins, so a copy here would be silently overridden.
 

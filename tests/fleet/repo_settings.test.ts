@@ -2,10 +2,11 @@
 // .github/settings.yml, the same way merge_settings_layers.test.ts pins
 // the override layer's protection policy. The `build` ref is executable
 // fleet-wide - rendered workflows pin `uses: ...@build` and run its
-// actions/ subtree directly - and the retired `template`/`actions` refs
-// stay protected for legacy pins until their deliberate deletion, so a
-// settings edit that drops any of them from the append-only ruleset must
-// fail here, loudly. Also pins, fleet-wide: no settings layer may
+// actions/ subtree directly - so a settings edit that drops it from the
+// append-only ruleset must fail here, loudly. (The retired
+// `template`/`actions` refs were deleted 2026-08-29, user-ordered, in
+// the same change that dropped them from the ruleset and from this
+// pin.) Also pins, fleet-wide: no settings layer may
 // declare an Integration bypass actor, because GitHub rejects one on a
 // user-owned repository's ruleset (POST /rulesets, 422 "Actor GitHub
 // Actions integration must be part of the ruleset source or owner
@@ -30,18 +31,17 @@ function readRulesets(path: string): Ruleset[] {
 }
 
 describe("the repo's own build-branch ruleset", () => {
-  test("every generated ref, the executable build ref included, stays append-only for everyone", () => {
+  test("the executable build ref stays append-only for everyone", () => {
     const buildBranches = readRulesets(".github/settings.yml").find(
       (r) => r.name === "build-branches",
     );
     expect(buildBranches).toBeDefined();
     expect(buildBranches?.target).toBe("branch");
     expect(buildBranches?.enforcement).toBe("active");
-    expect(buildBranches?.conditions?.ref_name?.include?.sort()).toEqual([
-      "actions",
-      "build",
-      "template",
-    ]);
+    // template and actions were retired 2026-08-29 (user-ordered): the
+    // refs were deleted in the same change that dropped them here, so
+    // build is the sole delivery ref this ruleset protects.
+    expect(buildBranches?.conditions?.ref_name?.include?.sort()).toEqual(["build"]);
     expect(buildBranches?.conditions?.ref_name?.exclude).toEqual([]);
     expect(buildBranches?.rules?.map((r) => r.type).sort()).toEqual([
       "deletion",

@@ -29,12 +29,11 @@ rulesets:
   # The generated build branch is append-only: the builder's plain pushes
   # are fast-forwards and pass; force-pushes and deletion are blocked for
   # everyone, the publisher included (no bypass actors on purpose). The
-  # retired split-channel branches stay protected until they are
-  # DELIBERATELY deleted post-cutover: `build` seeds from template's
-  # history on first publish, and un-synced repos still pin @actions until
-  # their next sync PR lands. Ruleset conditions replace wholesale on
-  # apply, so dropping those refs here would unprotect them early - remove
-  # the two entries in the same change that deletes the branches.
+  # retired split-channel refs (template, actions) were deleted in the
+  # same change that dropped them from this ruleset (2026-08-29,
+  # user-ordered): both had been frozen since the single-build-branch
+  # consolidation, and ruleset conditions replace wholesale on apply, so
+  # the drop and the deletion had to travel together.
   #
   # A stricter publish-only ruleset (every write blocked, sole bypass the
   # GitHub Actions integration the publisher pushed with at the time)
@@ -44,11 +43,11 @@ rulesets:
   # actor is valid only on org-owned rulesets, and bypass-free
   # write-blocking rules would block the publisher itself. (The main
   # ruleset's required-check integration_id pins are a DIFFERENT field
-  # and stay valid here.) What the refs get instead, stated plainly:
+  # and stay valid here.) What the ref gets instead, stated plainly:
   # template CONSUMPTION is guarded sync-side by
   # .github/scripts/sync/verify_build_provenance.ts, which rejects any
   # tip the builder did not produce; the executable channel (`uses:
-  # ...@build`, and @actions until its deletion) runs directly with NO
+  # ...@build`) runs directly with NO
   # publisher-identity enforcement - any push-capable principal can
   # fast-forward it, bounded only by push access and this ruleset
   # blocking deletion and force-pushes. A dedicated publisher identity
@@ -65,8 +64,6 @@ rulesets:
       ref_name:
         include:
           - build
-          - template
-          - actions
         exclude: []
     rules:
       - type: deletion
