@@ -3,12 +3,12 @@
 // run is still executing, and parks it UNPUBLISHED at
 // refs/heads/build-pending/<sha> (pending.ts owns the ref grammar and the
 // namespace rationale). Publishing
-// stays gated on all-green: build-branches.yml's workflow_run publisher
-// promotes this pre-built tree through publish.ts's PREBUILT_REF once CI
-// succeeds, so the compose cost is paid concurrently with CI instead of
-// after it. Nothing here weakens the gate - this script never touches
-// refs/heads/build, and publish.ts's green hard-verify still fronts every
-// publish.
+// stays gated on all-green: post-green.yml's publisher (called by
+// all-green.yml once the verdict lands green on the push) promotes this
+// pre-built tree through publish.ts's PREBUILT_REF, so the compose cost
+// is paid concurrently with CI instead of after it. Nothing here weakens
+// the gate - this script never touches refs/heads/build, and publish.ts's
+// green hard-verify still fronts every publish.
 //
 // The push is force: the ref is keyed by the source sha, so a re-run of
 // the same push only ever replaces its own content - never another
@@ -24,7 +24,7 @@ import { pendingRefFor } from "./pending.ts";
 
 // Same source discipline as publish.ts: this push's own commit (on the
 // push trigger GITHUB_SHA IS the pushed commit), which is exactly what
-// the publisher's SOURCE_SHA - the completed CI run's head_sha - will
+// the publisher's SOURCE_SHA - the judged CI run's head_sha - will
 // name-match.
 const sourceSha = requireEnv("GITHUB_SHA");
 if (!/^[0-9a-f]{40}$/.test(sourceSha)) {

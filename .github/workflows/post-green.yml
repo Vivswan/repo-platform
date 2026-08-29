@@ -1,0 +1,113 @@
+# Everything that runs AFTER the all-green verdict concluded green on a
+# push to main - the post-green home. workflow_call ONLY: all-green.yml's
+# post-green job is the sole caller, and nothing here may carry its own
+# trigger - the verdict is the one green authority, and a second trigger
+# would be a second, unguarded path into release-shaped work.
+#
+# EVERY leg added here must be STATE-shaped: idempotent, and able to
+# leave the world no worse than one trigger behind. GitHub keeps at most
+# one running plus one pending run per concurrency group and replaces the
+# pending one (latest wins, independent of cancel-in-progress), so a
+# superseded pending leg never executes - its work must either be covered
+# by the run that evicted it, or be a staleness the leg's next trigger
+# (or its self-heal cron) repairs. Each job below states why it
+# qualifies; a leg that CANNOT tolerate a swallowed pending run does not
+# belong in a coalescing lane.
+#
+# A workflow_call'd workflow executes at the caller's ref with the
+# caller's event context; the sha input keeps the judged commit explicit
+# instead of re-deriving it from that context, so a future caller cannot
+# silently hand a leg the wrong commit.
+#
+# The caller's gate is a PROXY (the CI run's conclusion, not the
+# verdict's own judgment - reusable-all-green.yml exposes no conclusion
+# output yet), so every leg here must carry its own authoritative green
+# verification the way publish.ts does (shared/all_green.ts). When the
+# verdict reusable grows a conclusion output, the caller's gate should
+# consume it and this requirement relaxes to defense in depth.
+
+name: Post Green
+
+on:
+  workflow_call:
+    inputs:
+      sha:
+        description: >-
+          The green main commit the verdict judged (the completed CI
+          run's head_sha) - the commit every leg here acts on.
+        required: true
+        type: string
+    secrets:
+      REPO_PLATFORM_TOKEN:
+        description: >-
+          PAT with workflow scope: the build branch carries
+          .github/workflows/ files GITHUB_TOKEN may not push
+          (build-branches.yml's header).
+        required: true
+
+permissions: {}
+
+jobs:
+  # The green-path build-branch publisher - moved here from
+  # build-branches.yml's retired workflow_run leg: promotes the push
+  # build's parked pending tree (composing as the fallback) and advances
+  # refs/heads/build. publish.ts hard-verifies the all-green check run at
+  # the source commit before any mutation, so the caller's event gate is
+  # runner economy, not the green authority.
+  #
+  # State-shaped: publish.ts publishes SOURCE_SHA behind a
+  # newest-green-wins staleness preflight against the branch tip's stamp,
+  # onto an append-only branch whose plain push doubles as the
+  # compare-and-swap - a rerun of an already-published source is a no-op
+  # (unchanged tree, no commit), and a superseded pending publish is
+  # covered by the evicting run whenever its source is newer (the common
+  # case: verdicts arrive in push order). The residual is an OUT-OF-ORDER
+  # eviction - a late verdict for an older commit replacing a pending
+  # newer one - which leaves the branch stale by one push, never rolled
+  # back, and the next push or the weekly Build Branches cron heals it
+  # (the same residual the pre-split serial publisher lane documented).
+  publish-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # THE single publisher lane: one repo-scoped group serializes every
+    # writer of refs/heads/build, shared BY NAME with Build Branches'
+    # schedule/dispatch self-heal leg (the concurrency ternary in
+    # build-branches.yml resolves to this same string). LITERAL on
+    # purpose: never derive this group from github.workflow - inside a
+    # workflow_call'd workflow it resolves to the CALLER's workflow
+    # name, which would silently split the shared lane. It must also stay
+    # a DIFFERENT resource from the post-green-<ref> group the calling
+    # job in all-green.yml holds while this job runs: a caller must never
+    # hold the resource its called workflow requires, or the call
+    # deadlocks against itself.
+    concurrency:
+      group: build-branches-publish
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      checks: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          # The persisted push credential for publish.ts: a PAT with
+          # workflow scope (see the secret's description; the branch
+          # stays inert by construction - branch_tree.ts refuses shipped
+          # workflows with any trigger beyond workflow_call).
+          token: ${{ secrets.REPO_PLATFORM_TOKEN }}
+
+      - name: Set up bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+
+      # SOURCE_SHA is the judged commit, never a read of origin/main:
+      # main can already have advanced to a newer - even red - commit
+      # this run must not touch (that commit's own verdict publishes it).
+      - name: Publish the build branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          SOURCE_SHA: ${{ inputs.sha }}
+          PREBUILT_REF: refs/heads/build-pending/${{ inputs.sha }}
+        run: bun .github/scripts/build-branches/publish.ts

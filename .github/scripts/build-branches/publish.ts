@@ -2,11 +2,14 @@
 // Composes and publishes the `build` branch (an append-only orphan branch;
 // see build-branches.yml's header for the branch model) - the ONE
 // generated delivery channel: copier renders from its template/ subtree
-// and `uses: ...@build` refs execute its actions/ subtree. Invoked by
-// build-branches.yml's "Build and publish" step. On the workflow_run path
-// PREBUILT_REF names the push build's parked tree (build_pending.ts), so
-// this run only promotes it; without one (schedule, dispatch, or a missing
-// pending ref) it composes the tree itself.
+// and `uses: ...@build` refs execute its actions/ subtree. Two invokers:
+// post-green.yml's publish-build job (the GREEN path - all-green.yml
+// calls it after the verdict lands green on a main push) and
+// build-branches.yml's "Build and publish" step (the schedule/dispatch
+// self-heal). On the green path PREBUILT_REF names the push build's
+// parked tree (build_pending.ts), so this run only promotes it; without
+// one (schedule, dispatch, or a missing pending ref) it composes the
+// tree itself.
 //
 // A publish COMMITS only on a content change - never an empty commit in
 // normal operation: a quiet week's cron, a rerun of an already-published
@@ -14,18 +17,20 @@
 // nothing, so no fleet repo ever sees a content-free _commit bump (no
 // commit, no sync PR). Freshness needs no commit either:
 // sync/wait_for_build.ts reads the tip's stamp (fast path) or rebuilds
-// the composed tree at main's HEAD and compares hashes (slow path) - an
-// unchanged tree is proven fresh by computation, never by a trusted
-// marker ref (the retired per-source no-op markers) or a filler commit. The
+// the composed tree at main's HEAD and compares hashes (slow path,
+// counted only under a healthy tip stamp - the shared stamp_checks.ts
+// battery) - an unchanged tree is proven fresh by computation, never by
+// a trusted marker ref (the retired per-source no-op markers) or a
+// filler commit. The
 // one exception is STAMP RECOVERY: the no-change skip fires only when
 // the tip's stamp is healthy (shared/stamp_checks.ts), so a dispatch
 // heals a tampered or unparseable stamp with a freshly stamped
 // tree-identical commit instead of wedging every sync.
 //
 // Env: RUN_URL, GH_TOKEN, GITHUB_SERVER_URL, GITHUB_REPOSITORY,
-// GITHUB_REF, SOURCE_SHA (the commit to publish - the completed CI run's
-// head_sha on the workflow_run path, the trigger commit otherwise);
-// PREBUILT_REF optional (workflow_run only).
+// GITHUB_REF, SOURCE_SHA (the commit to publish - the judged CI run's
+// head_sha on the green path, the trigger commit otherwise);
+// PREBUILT_REF optional (green path only).
 
 import { existsSync, lstatSync, readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
@@ -45,10 +50,11 @@ const LEGACY_BRANCH = "template";
 const repository = requireEnv("GITHUB_REPOSITORY");
 
 // The build stamps and composes SOURCE_SHA - the exact commit whose green
-// CI this run is acting on. On the workflow_run path that is the
-// completed CI run's head_sha (GITHUB_SHA there is the CURRENT main tip,
-// which can already be a newer - even red - commit this run must not
-// touch); on schedule and dispatch it is the trigger commit itself.
+// CI this run is acting on. On the green path that is the judged CI
+// run's head_sha (GITHUB_SHA in a workflow_run-triggered run is the
+// CURRENT main tip, which can already be a newer - even red - commit
+// this run must not touch); on schedule and dispatch it is the trigger
+// commit itself.
 // Composing origin/main NOW instead would publish a commit nothing
 // vouched for: the green gate below verifies SOURCE_SHA, so a drifted
 // tip would either be refused (red) or shipped past the gate (stamped as
@@ -121,7 +127,7 @@ function publish(sourceSha: string): void {
   for (const dir of ["/tmp/src", "/tmp/tree", "/tmp/pub"]) {
     rmSync(dir, { recursive: true, force: true });
   }
-  // The workflow_run path hands over the PUSH run's pre-built tree
+  // The green path hands over the PUSH run's pre-built tree
   // (build_pending.ts parked it while CI was still executing), so the
   // compose cost was already paid concurrently with CI. Name-matched by
   // construction: the env value is pendingRefFor(SOURCE_SHA), so a
@@ -304,19 +310,20 @@ function sweepPendingRefs(sourceSha: string): void {
   }
 }
 
-// The commit to publish (see the SOURCE_SHA comment above): the completed
-// CI run's head_sha on the workflow_run path, the trigger commit on
+// The commit to publish (see the SOURCE_SHA comment above): the judged
+// CI run's head_sha on the green path, the trigger commit on
 // schedule/dispatch - NEVER a bare read of origin/main, which can already
 // be a newer (even red) commit while this run was queued.
 const sourceSha = requireEnv("SOURCE_SHA");
 if (!/^[0-9a-f]{40}$/.test(sourceSha)) {
   fail(`SOURCE_SHA is not a full commit sha (got '${sourceSha}')`);
 }
-// Green-source gate, on top of the ref guard above: the workflow_run
-// trigger only fires on a successful CI run, but the schedule, dispatch,
-// and API paths reach here with no such proof - and the branch ships only
-// commits whose all-green gate succeeded. Enforced on the commit actually
-// being published (SOURCE_SHA, the same commit the stamp records).
+// Green-source gate, on top of the ref guard above: the post-green
+// caller only fires after a green verdict on a main push, but the
+// schedule, dispatch, and API paths reach here with no such proof - and
+// the branch ships only commits whose all-green gate succeeded. Enforced
+// on the commit actually being published (SOURCE_SHA, the same commit
+// the stamp records).
 const notGreen = allGreenFailure(repository, sourceSha);
 if (notGreen !== null) {
   fail(

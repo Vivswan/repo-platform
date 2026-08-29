@@ -2,7 +2,9 @@
 # jobs and create the `all-green` check run branch protection (and the
 # build/sync green gates in shared/all_green.ts) require. The judgment is
 # the local reusable-all-green.yml - the SAME implementation every managed
-# repo's wrapper calls, dogfooded here.
+# repo's wrapper calls, dogfooded here. After a green verdict on a push
+# to main, the post-green job releases everything that runs after green
+# (post-green.yml - the build-branch publish today).
 #
 # The dispatch input is the unwedge path: when a verdict never landed at a
 # sha (a lost workflow_run event), dispatch this workflow with the sha and
@@ -15,6 +17,10 @@
 name: All Green
 
 on:
+  # The judged-workflow list. Today CI is the only workflow whose runs
+  # get verdicts (and whose green main pushes reach post-green below);
+  # when conditional workflows exist, they join this list - and the
+  # all-green-name rule in scripts/check_ssot.ts, which pins it.
   workflow_run:
     workflows: [CI]
     types: [completed]
@@ -44,3 +50,56 @@ jobs:
     uses: ./.github/workflows/reusable-all-green.yml
     with:
       sha: ${{ github.event_name == 'workflow_dispatch' && inputs.sha || '' }}
+
+  # Post-green: everything that runs AFTER the verdict landed green on a
+  # push to main (post-green.yml hosts the legs; today, the build-branch
+  # publish). The event gate below is runner economy, not the green
+  # authority: the CI run's conclusion approximates the verdict's
+  # judgment (the reusable exposes no conclusion output yet - once it
+  # does, gate on it here), and publish.ts re-verifies the actual
+  # all-green check run - the one the verdict job above just posted; the
+  # needs edge is what orders that read after the write - before any
+  # mutation. Two proxy residuals, both staleness-only and healed by the
+  # next push or Build Branches' weekly cron: a run red only through an
+  # info-* job skips post-green despite a green verdict, and the dispatch
+  # unwedge path never reaches here (a re-judged sha gets its check run,
+  # nothing more) - Build Branches' schedule/dispatch legs are the
+  # publish self-heal for both.
+  #
+  # This job is post-gate, not gating: it runs AFTER the verdict, is
+  # never judged by it (only CI runs are judged), and so stays out of
+  # check_ssot.ts's ALL_GREEN_ROSTER, which pins ci.yml's gating jobs.
+  post-green:
+    needs: [verdict]
+    # needs.verdict.result spelled out because a custom `if` replaces the
+    # implicit success() - without it, a failed verdict would still
+    # release post-green.
+    if: >-
+      needs.verdict.result == 'success' &&
+      github.event_name == 'workflow_run' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.conclusion == 'success'
+    # Serializes releases per branch; verdicts stay per-sha via the
+    # workflow-level group above. This group is deliberately a DIFFERENT
+    # resource from the publisher lane the called workflow's job takes
+    # (build-branches-publish, a literal in post-green.yml): this job
+    # HOLDS post-green-<ref> while its called job WAITS for the publisher
+    # lane, so sharing one name would self-deadlock. Coalescing rule for
+    # pending jobs evicted from this group: post-green.yml's header - a
+    # newer evictor covers the work, an older one leaves a staleness the
+    # next green push or the Build Branches cron repairs.
+    concurrency:
+      group: post-green-${{ github.event.workflow_run.head_branch }}
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      checks: read
+    uses: ./.github/workflows/post-green.yml
+    with:
+      # The judged commit, never github.sha: on workflow_run events
+      # github.sha is main's CURRENT tip, which can already be a newer -
+      # even red - commit whose own verdict is still pending.
+      sha: ${{ github.event.workflow_run.head_sha }}
+    secrets:
+      REPO_PLATFORM_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
