@@ -79,6 +79,22 @@ describe("normalizeAnswers", () => {
     const zeroSha = `0000000${"a".repeat(33)}`;
     expect(normalizeAnswers("_commit: 0000000\n", zeroSha)).toBe(`_commit: ${SHA_SENTINEL}\n`);
   });
+
+  test("unwraps a YAML-quoted short sha - copier quotes all-decimal ones to keep them strings", () => {
+    // ~4% of commits have an all-decimal 7-char prefix; before the unwrap,
+    // exactly those renders drifted while every other commit passed.
+    const decimalSha = `2753404${"a".repeat(33)}`;
+    expect(normalizeAnswers("_commit: '2753404'\n", decimalSha)).toBe(`_commit: ${SHA_SENTINEL}\n`);
+    expect(normalizeAnswers('_commit: "2753404"\n', decimalSha)).toBe(`_commit: ${SHA_SENTINEL}\n`);
+  });
+
+  test("a quoted WRONG sha stays untouched, and a quoted sentinel still throws", () => {
+    const wrong = "_commit: '9999999'\n";
+    expect(normalizeAnswers(wrong, SHA)).toBe(wrong);
+    expect(() => normalizeAnswers(`_commit: '${SHA_SENTINEL}'\n`, SHA)).toThrow(
+      `already reads as the sentinel "${SHA_SENTINEL}"`,
+    );
+  });
 });
 
 describe("normalizeRenderedTree", () => {

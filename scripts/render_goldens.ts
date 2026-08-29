@@ -137,26 +137,31 @@ const ANSWERS_NAME = ".copier-answers.yml";
 
 /** Rewrite the `_commit` answer's VALUE to SHA_SENTINEL when it records
  *  the scratch tree's commit sha (or any 7-plus-char prefix of it - copier
- *  stamps the short form). This is the ONLY substitution the runner
- *  performs, addressed to the one field that carries provenance by
- *  design: a tree-wide byte substitution would corrupt unrelated content,
- *  because 7-hex-char runs occur in English prose ("feedback" starts with
- *  hex "feedbac"). Three properties are the point: the `_commit` key stays
- *  in the goldens (dropping or renaming it still shows as drift), a value
+ *  stamps the short form). The value may arrive YAML-quoted: when the
+ *  short sha happens to be all decimal digits (~4% of commits), copier's
+ *  yaml writer quotes it to keep it a string, so the quotes must be
+ *  unwrapped before comparing or the render drifts exactly and only on
+ *  those commits. This is the ONLY substitution the runner performs,
+ *  addressed to the one field that carries provenance by design: a
+ *  tree-wide byte substitution would corrupt unrelated content, because
+ *  7-hex-char runs occur in English prose ("feedback" starts with hex
+ *  "feedbac"). Three properties are the point: the `_commit` key stays in
+ *  the goldens (dropping or renaming it still shows as drift), a value
  *  that is anything but the true sha is left alone and shows as drift, and
  *  a value already reading as the sentinel throws - a pre-stamped sentinel
  *  would false-match the committed goldens. */
 export function normalizeAnswers(text: string, fullSha: string): string {
   if (!/^[0-9a-f]{40}$/.test(fullSha)) throw new Error(`not a full sha1: ${fullSha}`);
   return text.replace(/^(_commit:[ \t]*)(\S*)([ \t]*)$/m, (line, key, value, pad) => {
-    if (value === SHA_SENTINEL) {
+    const unquoted = /^(['"])(.*)\1$/.exec(value)?.[2] ?? value;
+    if (unquoted === SHA_SENTINEL) {
       throw new Error(
         `${ANSWERS_NAME}: _commit already reads as the sentinel "${SHA_SENTINEL}" - ` +
           "a render must stamp the real scratch sha (a pre-stamped sentinel would " +
           "false-match the committed goldens)",
       );
     }
-    const isTrueSha = value.length >= 7 && fullSha.startsWith(value);
+    const isTrueSha = unquoted.length >= 7 && fullSha.startsWith(unquoted);
     return isTrueSha ? `${key}${SHA_SENTINEL}${pad}` : line;
   });
 }
