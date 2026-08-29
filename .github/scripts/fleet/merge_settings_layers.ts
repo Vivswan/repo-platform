@@ -176,8 +176,14 @@ function hardenMapping(
  *  This is what lets a module's visibility layer add `code_scanning` to
  *  the `main` ruleset that .github/settings-override.yml declares - the
  *  override sits at the top of the stack, so a whole-entry replace would
- *  drop the module's rule instead. Adding a rule can only tighten the
- *  ruleset; nothing here can remove one a higher layer declared.
+ *  drop the module's rule instead. When both layers carry rule arrays,
+ *  every distinct rule TYPE survives the merge (and first occurrence
+ *  wins within one layer), but a same-type rule in a higher layer
+ *  replaces the lower one's parameters wholesale - which can weaken it
+ *  as easily as tighten it - and an explicit `rules: null` in a higher
+ *  layer strips the inherited list entirely (mergeRulesetEntry). Only
+ *  the override's own rules are unbeatable, because no layer merges
+ *  above them.
  *
  *  Two signatures for one body because this never invents an element: it
  *  picks from what it was handed, so hardened rules in means hardened
