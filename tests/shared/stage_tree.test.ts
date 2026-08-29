@@ -202,4 +202,4 @@ describe("stageComposedTreeArgv", () => {
     }
   });
 });
-// throwaway dogfood commit for task #32 - this branch never merges
+// throwaway dogfood commit for task #32 - this branch never merges (second push: forces the copilot-owed wait path)
