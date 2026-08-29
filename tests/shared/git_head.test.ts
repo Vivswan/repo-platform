@@ -12,11 +12,35 @@ import { chmodSync, mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "n
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { headEntry } from "../../.github/scripts/shared/git_head.ts";
+import { capture } from "../../.github/scripts/shared/proc.ts";
 
-/** Run `fn` with every GIT_* variable removed from the environment, so a
- * hook-driven run (husky exports GIT_DIR/GIT_INDEX_FILE) cannot redirect
- * the spawned git away from the scratch directory and back into a real
- * repository - which would make the probe succeed instead of failing. */
+/** Explicit env OVERLAY deleting every GIT_* variable, handed to this
+ * file's own spawns at the call site (the repo's adopted style for tests
+ * that scrub - ambient process.env mutation around a spawn stays fragile
+ * under parallel test execution). Scrubbing matters because a hook-driven
+ * run (husky exports GIT_DIR/GIT_INDEX_FILE) can redirect a spawned git
+ * away from its scratch directory and back into a real repository. The
+ * overlay shape: capture() MERGES options.env over live process.env, so
+ * the scrub must arrive as undefined-VALUED entries - bun then omits the
+ * keys - never as a filtered env copy, which would merge over the live
+ * base without deleting anything. */
+function gitFreeOverlay(): Record<string, string | undefined> {
+  const overlay: Record<string, string | undefined> = {};
+  for (const key of Object.keys(process.env)) {
+    if (key.startsWith("GIT_")) overlay[key] = undefined;
+  }
+  return overlay;
+}
+
+/** Run `fn` with every GIT_* variable removed from process.env - the same
+ * scrub as gitFreeOverlay, but for calls into headEntry, which takes no
+ * env parameter, so the ambient mutation is the one channel this file has.
+ * The mutation reaches headEntry's git because every spawn under it is
+ * handed live process.env - proc.ts's contract, and the raw byte-read
+ * spawn hands it explicitly too (bun's own default is a process-start
+ * snapshot, which kept this scrub silently inert until the class was
+ * closed - the poison-GIT_DIR test below pins that it genuinely bites
+ * now). */
 function withoutGitEnv<T>(fn: () => T): T {
   const saved: Record<string, string | undefined> = {};
   for (const key of Object.keys(process.env)) {
@@ -38,32 +62,34 @@ function withoutGitEnv<T>(fn: () => T): T {
 function makeFixtureRepo(): string {
   const root = mkdtempSync(join(tmpdir(), "head-entry-repo-"));
   const run = (...args: string[]) => {
-    const proc = Bun.spawnSync(["git", "-C", root, ...args], { stdout: "pipe", stderr: "pipe" });
-    if (proc.exitCode !== 0) throw new Error(`git ${args.join(" ")}: ${proc.stderr.toString()}`);
+    // Through capture(): explicit scrub overlay, and the spawn stays
+    // bounded (proc.ts's default hang bound) - a raw sync spawn blocks
+    // the event loop, so bun-test's per-test cap could never interrupt
+    // a hung child.
+    const proc = capture(["git", "-C", root, ...args], { env: gitFreeOverlay() });
+    if (proc.exitCode !== 0) throw new Error(`git ${args.join(" ")}: ${proc.stderr}`);
   };
-  withoutGitEnv(() => {
-    run("init", "-q", "-b", "main");
-    run("config", "user.email", "t@example.com");
-    run("config", "user.name", "t");
-    writeFileSync(join(root, "present.txt"), "x");
-    writeFileSync(join(root, "tool.sh"), "#!/bin/sh\n");
-    chmodSync(join(root, "tool.sh"), 0o755);
-    mkdirSync(join(root, "dir", "nested"), { recursive: true });
-    writeFileSync(join(root, "dir", "nested", "inner.txt"), "inner\n");
-    // The real managed-repo shape: CLAUDE.md and friends are symlinks to
-    // AGENTS.md by design, so a link at HEAD is a first-class fixture.
-    symlinkSync("present.txt", join(root, "link.md"));
-    run("add", "-A");
-    // A gitlink (submodule entry) without any submodule machinery: the
-    // empty tree's oid stands in for the pinned commit.
-    run(
-      "update-index",
-      "--add",
-      "--cacheinfo",
-      "160000,4b825dc642cb6eb9a060e54bf8d69288fbee4904,sub",
-    );
-    run("commit", "-qm", "init");
-  });
+  run("init", "-q", "-b", "main");
+  run("config", "user.email", "t@example.com");
+  run("config", "user.name", "t");
+  writeFileSync(join(root, "present.txt"), "x");
+  writeFileSync(join(root, "tool.sh"), "#!/bin/sh\n");
+  chmodSync(join(root, "tool.sh"), 0o755);
+  mkdirSync(join(root, "dir", "nested"), { recursive: true });
+  writeFileSync(join(root, "dir", "nested", "inner.txt"), "inner\n");
+  // The real managed-repo shape: CLAUDE.md and friends are symlinks to
+  // AGENTS.md by design, so a link at HEAD is a first-class fixture.
+  symlinkSync("present.txt", join(root, "link.md"));
+  run("add", "-A");
+  // A gitlink (submodule entry) without any submodule machinery: the
+  // empty tree's oid stands in for the pinned commit.
+  run(
+    "update-index",
+    "--add",
+    "--cacheinfo",
+    "160000,4b825dc642cb6eb9a060e54bf8d69288fbee4904,sub",
+  );
+  run("commit", "-qm", "init");
   return root;
 }
 
@@ -95,10 +121,11 @@ function lsTreeStubDir(payload: string): string {
 }
 
 /** headEntry(root, "present.txt") run in a DRIVER subprocess with the stub
- * git first on PATH: an in-process PATH mutation cannot reach headEntry's
- * spawns (bun resolves an inherited-env spawn against the startup PATH),
- * so the stub rides the driver's own startup environment instead - the
- * same wiring timeout_fail_closed.test.ts uses. */
+ * git first on PATH: the override rides the driver's own startup
+ * environment, so it stays scoped to that one process - an in-process
+ * PATH mutation would reach headEntry's spawns (they are handed live
+ * process.env), but it would also poison every other spawn in this test
+ * process. The same wiring timeout_fail_closed.test.ts uses. */
 function probeWithStubGit(root: string, payload: string): string {
   const driver = join(mkdtempSync(join(tmpdir(), "ls-tree-driver-")), "driver.ts");
   const probed = join(import.meta.dir, "../../.github/scripts/shared/git_head.ts");
@@ -115,19 +142,13 @@ function probeWithStubGit(root: string, payload: string): string {
       "",
     ].join("\n"),
   );
-  const env: Record<string, string> = {};
-  for (const [key, value] of Object.entries(process.env)) {
-    if (!key.startsWith("GIT_") && value !== undefined) env[key] = value;
-  }
-  env.PATH = `${lsTreeStubDir(payload)}:${env.PATH}`;
-  const proc = Bun.spawnSync([process.execPath, driver], {
-    env,
-    stdout: "pipe",
-    stderr: "pipe",
-    timeout: 10_000,
-    killSignal: "SIGKILL",
-  });
-  return proc.stdout.toString();
+  const env = gitFreeOverlay();
+  env.PATH = `${lsTreeStubDir(payload)}:${process.env.PATH}`;
+  // Through capture(): the PATH override and the scrub ride the overlay,
+  // and the spawn is deadline-bounded with SIGKILL - a hung driver dies
+  // loudly instead of wedging the sync spawn past bun-test's cap.
+  const proc = capture([process.execPath, driver], { env, timeoutMs: 10_000 });
+  return proc.stdout;
 }
 
 describe("headEntry strict entry parse", () => {
@@ -247,14 +268,13 @@ describe("headEntry discrimination", () => {
     // construction) and must not mention HEAD at all - a `git show
     // HEAD:rel` read would resolve HEAD a second time and could route a
     // non-blob's bytes through the blob arm.
-    const expectedOid = withoutGitEnv(() => {
-      const proc = Bun.spawnSync(["git", "-C", root, "rev-parse", "HEAD:present.txt"], {
-        stdout: "pipe",
-        stderr: "pipe",
+    const expectedOid = (() => {
+      const proc = capture(["git", "-C", root, "rev-parse", "HEAD:present.txt"], {
+        env: gitFreeOverlay(),
       });
-      if (proc.exitCode !== 0) throw new Error(proc.stderr.toString());
-      return proc.stdout.toString().trim();
-    });
+      if (proc.exitCode !== 0) throw new Error(proc.stderr);
+      return proc.stdout.trim();
+    })();
     const spy = spyOn(Bun, "spawnSync");
     try {
       const entry = withoutGitEnv(() => headEntry(root, "present.txt"));
@@ -297,6 +317,53 @@ describe("headEntry discrimination", () => {
       expect(message).toContain("does not recognize");
       expect(message).not.toContain(root);
       expect(message).not.toContain("dir");
+    }
+  });
+});
+
+describe("withoutGitEnv effectiveness", () => {
+  const root = makeFixtureRepo();
+
+  test("a poison GIT_DIR genuinely reaches headEntry's git, and the scrub genuinely strips it", () => {
+    // The scrub is an ambient process.env mutation, and bun's default
+    // spawn env is a process-start snapshot - the shape that kept this
+    // file's scrub silently inert until proc.ts handed every spawn live
+    // process.env. Both arms are load-bearing: the CONTROL (unscrubbed
+    // headEntry throws on the poison) proves the mutation travels to the
+    // child at all - without it, a snapshot regression in proc.ts would
+    // let the scrubbed arm pass vacuously, the poison never having left
+    // this process.
+    const saved = process.env.GIT_DIR;
+    process.env.GIT_DIR = join(tmpdir(), "head-entry-poison-not-a-git-dir");
+    try {
+      expect(() => headEntry(root, "present.txt")).toThrow(/ls-tree against HEAD failed/);
+      const entry = withoutGitEnv(() => headEntry(root, "present.txt"));
+      expect(entry.kind).toBe("blob");
+    } finally {
+      if (saved === undefined) delete process.env.GIT_DIR;
+      else process.env.GIT_DIR = saved;
+    }
+  });
+
+  test("the blob byte-read is handed live process.env, never bun's startup snapshot", () => {
+    // The poison arm above dies at ls-tree, so it can never reach the
+    // byte read - this pin inspects the spawn itself instead: a marker
+    // set AFTER process start must ride the cat-file call's env argument.
+    // An absent env (bun's default) would mean the startup snapshot,
+    // which no caller scrub can touch - the regression this pins red
+    // under a clean environment, where every other test stays green.
+    process.env.HEAD_ENTRY_ENV_CANARY = "live";
+    const spy = spyOn(Bun, "spawnSync");
+    try {
+      const entry = withoutGitEnv(() => headEntry(root, "present.txt"));
+      expect(entry.kind).toBe("blob");
+      const reads = spy.mock.calls.filter((call) => (call[0] as string[]).includes("cat-file"));
+      expect(reads.length).toBe(1);
+      const env = (reads[0][1] as { env?: Record<string, string | undefined> }).env;
+      expect(env?.HEAD_ENTRY_ENV_CANARY).toBe("live");
+    } finally {
+      spy.mockRestore();
+      delete process.env.HEAD_ENTRY_ENV_CANARY;
     }
   });
 });

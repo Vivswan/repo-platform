@@ -11,6 +11,16 @@
 // returns at the deadline regardless of surviving pipe holders, so a
 // universal ceiling converts an unbounded silent hang into a loud,
 // bounded failure. As of 2026-08 this change is unreported upstream.
+//
+// Every spawn is handed `{ ...process.env, ...(options.env ?? {}) }`
+// EXPLICITLY, never bun's default environment: the default is a
+// snapshot taken at PROCESS START (bun 1.4.0, both directions - keys
+// added to process.env later are missing from the child, keys deleted
+// later are still present), which silently disarms any caller that
+// pins or scrubs process.env before spawning. The live spread restores
+// the semantics callers expect; an explicit per-call `env` entry still
+// wins, and an undefined-valued entry deletes the key for the child
+// (bun omits undefined values).
 
 import { constants } from "node:os";
 
@@ -80,12 +90,21 @@ export function timeoutExitCode(proc: {
   return code === 0 ? 124 : code;
 }
 
+/** The env handed to every spawn: live process.env merged under the
+ * call's explicit entries (see the module comment). One helper so the
+ * three wrappers cannot drift apart. */
+function spawnEnv(
+  env: Record<string, string | undefined> | undefined,
+): Record<string, string | undefined> {
+  return { ...process.env, ...(env ?? {}) };
+}
+
 /** Run with stdout/stderr captured. */
 export function capture(command: string[], options: RunOptions = {}): RunResult {
   const timeoutMs = options.timeoutMs ?? DEFAULT_HANG_BOUND_MS;
   const proc = Bun.spawnSync(command, {
     cwd: options.cwd,
-    env: options.env ? { ...process.env, ...options.env } : undefined,
+    env: spawnEnv(options.env),
     stdout: "pipe",
     stderr: "pipe",
     timeout: timeoutMs,
@@ -109,7 +128,7 @@ export function passthrough(
 ): number {
   const proc = Bun.spawnSync(command, {
     cwd: options.cwd,
-    env: options.env ? { ...process.env, ...options.env } : undefined,
+    env: spawnEnv(options.env),
     stdio: ["inherit", "inherit", "inherit"],
   });
   return exitCodeOf(proc);
@@ -131,7 +150,7 @@ export function mustCapture(command: string[], options: RunOptions = {}): string
   const timeoutMs = options.timeoutMs ?? DEFAULT_HANG_BOUND_MS;
   const proc = Bun.spawnSync(command, {
     cwd: options.cwd,
-    env: options.env ? { ...process.env, ...options.env } : undefined,
+    env: spawnEnv(options.env),
     stdout: "pipe",
     stderr: "inherit",
     timeout: timeoutMs,

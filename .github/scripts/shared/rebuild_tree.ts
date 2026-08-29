@@ -37,7 +37,12 @@ function stepTimeoutMs(): number {
 // PAT-in-URL shapes.
 function step(command: string[]): void {
   const timeoutMs = stepTimeoutMs();
+  // Live process.env handed DELIBERATELY, matching proc.ts's env
+  // contract: bun's default is a process-start snapshot, so a caller's
+  // GIT_* scrub would otherwise never reach these children and a stray
+  // startup GIT_DIR would redirect the git steps at another repository.
   const proc = Bun.spawnSync(command, {
+    env: { ...process.env },
     stdio: ["inherit", "inherit", "inherit"],
     timeout: timeoutMs,
     killSignal: "SIGKILL",

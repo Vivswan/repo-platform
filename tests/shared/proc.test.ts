@@ -6,16 +6,122 @@
 // reports timedOut with a nonzero exitCode, mustCapture names the
 // deadline and exits nonzero - even when the child itself exited 0 and
 // only an orphan wedged the pipe until the deadline.
+//
+// Also pins the environment contract: every spawn is handed live
+// process.env (merged under any explicit options.env), because bun's
+// default is a process-start snapshot that silently ignores later
+// process.env mutations - see the "spawn env" describe below.
 
 import { describe, expect, test } from "bun:test";
 import {
   capture,
   DEFAULT_HANG_BOUND_MS,
   mustCapture,
+  passthrough,
   redactCommand,
   redactText,
   timeoutExitCode,
 } from "../../.github/scripts/shared/proc";
+
+describe("spawn env is live process.env", () => {
+  // Bun.spawnSync WITHOUT `env:` hands children a snapshot of the
+  // environment taken at PROCESS START (bun 1.4.0, both directions:
+  // post-start additions are missing, post-start deletions still
+  // present), so a test or script that mutates process.env before
+  // calling through proc.ts would get a silently inert pin. proc.ts
+  // closes the class at the chokepoint by handing every spawn
+  // `{ ...process.env, ...(options.env ?? {}) }` - these tests pin that
+  // contract for all three spawn wrappers, plus the two properties the
+  // merge must keep: an explicit options.env entry wins over the
+  // ambient value, and an undefined-valued entry deletes the key.
+
+  test("a key added to process.env after start reaches capture's child", () => {
+    process.env.PROC_ENV_PROBE_ADDED = "live";
+    try {
+      const result = capture(["sh", "-c", 'echo "${PROC_ENV_PROBE_ADDED-unset}"'], {
+        timeoutMs: 2000,
+      });
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toBe("live\n");
+    } finally {
+      delete process.env.PROC_ENV_PROBE_ADDED;
+    }
+  });
+
+  test("a key deleted from process.env after start is absent in capture's child", () => {
+    // HOME is the deletion subject because the snapshot only carries
+    // keys present at process start - a key this test added would be
+    // missing from the child under BOTH behaviors, proving nothing.
+    const saved = process.env.HOME;
+    expect(saved).toBeDefined();
+    delete process.env.HOME;
+    try {
+      const result = capture(["sh", "-c", 'echo "${HOME-unset}"'], { timeoutMs: 2000 });
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toBe("unset\n");
+    } finally {
+      process.env.HOME = saved;
+    }
+  });
+
+  test("passthrough and mustCapture hand the live environment too", () => {
+    // passthrough's stdio is inherited, so the child reports through
+    // its exit code; mustCapture through its captured stdout (the
+    // `-unset` fallback keeps its exit-the-process failure path
+    // unreachable here).
+    process.env.PROC_ENV_PROBE_ADDED = "live";
+    try {
+      expect(passthrough(["sh", "-c", 'test "$PROC_ENV_PROBE_ADDED" = live'])).toBe(0);
+      expect(
+        mustCapture(["sh", "-c", 'echo "${PROC_ENV_PROBE_ADDED-unset}"'], { timeoutMs: 2000 }),
+      ).toBe("live");
+    } finally {
+      delete process.env.PROC_ENV_PROBE_ADDED;
+    }
+  });
+
+  test("an explicit options.env call still inherits the rest of live process.env", () => {
+    // The merge's other half: handing a per-call entry must not strip
+    // the ambient environment (PATH, HOME, credentials) from the child -
+    // the regression where the spread's process.env base is dropped.
+    process.env.PROC_ENV_PROBE_ADDED = "live";
+    try {
+      const result = capture(
+        ["sh", "-c", 'echo "${PROC_ENV_PROBE_ADDED-unset} ${PROC_ENV_PROBE_OTHER-unset}"'],
+        { env: { PROC_ENV_PROBE_OTHER: "explicit" }, timeoutMs: 2000 },
+      );
+      expect(result.stdout).toBe("live explicit\n");
+    } finally {
+      delete process.env.PROC_ENV_PROBE_ADDED;
+    }
+  });
+
+  test("an explicit options.env entry wins over the ambient value", () => {
+    process.env.PROC_ENV_PROBE_ADDED = "ambient";
+    try {
+      const result = capture(["sh", "-c", 'echo "${PROC_ENV_PROBE_ADDED-unset}"'], {
+        env: { PROC_ENV_PROBE_ADDED: "explicit" },
+        timeoutMs: 2000,
+      });
+      expect(result.stdout).toBe("explicit\n");
+    } finally {
+      delete process.env.PROC_ENV_PROBE_ADDED;
+    }
+  });
+
+  test("an undefined-valued options.env entry deletes the key for the child", () => {
+    process.env.PROC_ENV_PROBE_ADDED = "ambient";
+    try {
+      const result = capture(["sh", "-c", 'echo "${PROC_ENV_PROBE_ADDED-unset}"'], {
+        env: { PROC_ENV_PROBE_ADDED: undefined },
+        timeoutMs: 2000,
+      });
+      expect(result.stdout).toBe("unset\n");
+    } finally {
+      delete process.env.PROC_ENV_PROBE_ADDED;
+    }
+  });
+});
 
 describe("capture timeoutMs", () => {
   test("absent: the hang bound is the deadline; a normal exit reports timedOut false", () => {

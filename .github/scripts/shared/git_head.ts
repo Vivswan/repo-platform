@@ -122,8 +122,14 @@ export function headEntry(root: string, rel: string): HeadEntry {
   // Raw Bun.spawnSync, not capture(): the blob contract is RAW BYTES, and
   // capture's string result is a utf-8 decode that folds non-utf-8 file
   // content onto U+FFFD. The hang bound still applies, carried inline with
-  // proc.ts's own constant and timeout-is-failure mapping.
+  // proc.ts's own constant and timeout-is-failure mapping - and so does
+  // proc.ts's env contract: live process.env is handed DELIBERATELY,
+  // because bun's default is a process-start snapshot, so a caller's
+  // GIT_* scrub would otherwise never reach this child and a stray
+  // startup GIT_DIR would silently point the byte read at another
+  // repository.
   const proc = Bun.spawnSync(["git", "-C", root, "cat-file", "blob", oid], {
+    env: { ...process.env },
     stdout: "pipe",
     stderr: "pipe",
     timeout: DEFAULT_HANG_BOUND_MS,
