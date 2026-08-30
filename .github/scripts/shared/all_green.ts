@@ -196,10 +196,10 @@ export function allGreenFailure(
 // (verify_verdict_judgment.sh) pins the workflow side, the bun tests pin
 // this one.
 
-/** Copilot code review's check run - the second required ruleset context
- * (docs/all-green.md) and the verdict's PR-scoped expected member when
- * the caller requires it, created by the Actions app like all-green
- * itself. */
+/** Copilot code review's check run - the verdict's PR-scoped expected
+ * member when the caller requires it (the ruleset's sole required
+ * context is all-green since the cutover - docs/all-green.md), created
+ * by the Actions app like all-green itself. */
 export const COPILOT_CHECK_NAME = "copilot-pull-request-reviewer";
 
 /** Whether a PR author is a bot (Bot type, or GitHub's "[bot]" login
