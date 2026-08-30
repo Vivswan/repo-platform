@@ -367,10 +367,12 @@ describe("droppedOverrides", () => {
     ]);
   });
 
-  test("a repo rule the fleet does not supply is carried; a same-type restyle is reported", () => {
-    // The apply PUTs a declared ruleset WHOLE, so a rule type the merged
-    // document omits leaves the live ruleset. Carrying it is the only way
-    // the transition does not weaken protection the repo chose.
+  test("a repo rule the fleet does not supply is REPORTED, never carried", () => {
+    // A legacy file is a rendered copy of the old fleet baseline, so a
+    // rule type the fleet no longer supplies is usually retired FLEET
+    // policy - carrying it would resurrect exactly what the layers
+    // dropped, e.g. a private repo's copilot_code_review. Re-declaring it
+    // in the new file appends it back, which is the reviewer's call.
     const old = {
       rulesets: [
         {
@@ -381,11 +383,10 @@ describe("droppedOverrides", () => {
       ],
     };
     const fleet = { rulesets: [{ name: "main", target: "branch", rules: [{ type: "deletion" }] }] };
-    expect(starterCarry(old, fleet).rulesets).toEqual([
-      { name: "main", rules: [{ type: "required_signatures" }] },
-    ]);
+    expect(starterCarry(old, fleet).optOuts).toEqual({});
     expect(droppedOverrides(old, fleet)).toEqual([
-      'rulesets "main": rule "deletion" (the fleet supplies this rule type with different parameters, and the fleet layers win)',
+      'rulesets "main": rule "required_signatures" (the ruleset is fleet-owned, but re-declaring just this rule in the new settings.yml appends it)',
+      'rulesets "main": rule "deletion" (the ruleset is fleet-owned, but re-declaring just this rule in the new settings.yml appends it)',
     ]);
   });
 
@@ -393,12 +394,33 @@ describe("droppedOverrides", () => {
     const old = {
       rulesets: [{ name: "staging", target: "branch", rules: [{ type: "deletion" }] }],
     };
-    expect(starterCarry(old, managed).rulesets).toEqual([]);
+    expect(starterCarry(old, managed).optOuts).toEqual({});
     expect(droppedOverrides(old, managed)).toEqual(['rulesets "staging"']);
   });
 
+  test("a null on a repo-only or duplicated ruleset never reaches the carry", () => {
+    // A skeleton entry naming a ruleset the fleet does not declare would
+    // UPSERT it from the fragment alone, narrowing a live ruleset the
+    // apply otherwise never touches; a repeated name makes the apply
+    // fight itself over one ruleset.
+    expect(
+      starterCarry({ rulesets: [{ name: "staging", conditions: null }] }, managed).optOuts,
+    ).toEqual({});
+    expect(
+      starterCarry(
+        {
+          rulesets: [
+            { name: "main", conditions: null },
+            { name: "main", rules: null },
+          ],
+        },
+        managed,
+      ).optOuts,
+    ).toEqual({ rulesets: [{ name: "main", conditions: null }] });
+  });
+
   test("starterCarry stands down on an absent or mis-shaped section", () => {
-    expect(starterCarry({}, managed)).toEqual({ optOuts: {}, labels: [], rulesets: [] });
+    expect(starterCarry({}, managed)).toEqual({ optOuts: {}, labels: [] });
     expect(starterCarry({ labels: { incident: { color: "b60205" } } }, managed).labels).toEqual([]);
   });
 
@@ -425,19 +447,17 @@ describe("withCarriedDeclarations", () => {
       githubUsername: "Vivswan",
     });
 
-  test("appends real sections, and is a no-op with nothing to carry", () => {
+  test("appends a real labels section, and is a no-op with nothing to carry", () => {
     const base = starter();
-    expect(withCarriedDeclarations(base, { optOuts: {}, labels: [], rulesets: [] })).toBe(base);
+    expect(withCarriedDeclarations(base, { optOuts: {}, labels: [] })).toBe(base);
     const carried = withCarriedDeclarations(base, {
       optOuts: {},
       labels: [{ name: "provider", color: "5319e7" }],
-      rulesets: [{ name: "main", rules: [{ type: "required_signatures" }] }],
     });
-    // Parsed, not string-matched: the starter ships both examples as
-    // COMMENTS, so only a parse proves the sections are real YAML.
-    const doc = parseYaml(carried) as { labels: unknown; rulesets: unknown };
+    // Parsed, not string-matched: the starter ships the labels example as
+    // a COMMENT, so only a parse proves the section is real YAML.
+    const doc = parseYaml(carried) as { labels: unknown };
     expect(doc.labels).toEqual([{ name: "provider", color: "5319e7" }]);
-    expect(doc.rulesets).toEqual([{ name: "main", rules: [{ type: "required_signatures" }] }]);
   });
 
   test("an opt-out is written as a literal null, never as an empty list", () => {
@@ -447,26 +467,22 @@ describe("withCarriedDeclarations", () => {
       withCarriedDeclarations(starter(), {
         optOuts: { labels: null, rulesets: null },
         labels: [],
-        rulesets: [],
       }),
     ) as { labels: unknown; rulesets: unknown };
     expect(doc.labels).toBeNull();
     expect(doc.rulesets).toBeNull();
   });
 
-  test("an entry-level opt-out merges with the carried entries of its section", () => {
-    // The skeleton entry and the carried entry are the same ruleset: one
+  test("an entry-level opt-out merges with the carried label of the same name", () => {
+    // The skeleton entry and the carried entry are the same label: one
     // list, one entry, or the apply would see the name twice.
     const doc = parseYaml(
       withCarriedDeclarations(starter(), {
-        optOuts: { rulesets: [{ name: "main", conditions: null }] },
-        labels: [],
-        rulesets: [{ name: "main", rules: [{ type: "required_signatures" }] }],
+        optOuts: { labels: [{ name: "provider", description: null }] },
+        labels: [{ name: "provider", color: "5319e7" }],
       }),
-    ) as { rulesets: unknown };
-    expect(doc.rulesets).toEqual([
-      { name: "main", conditions: null, rules: [{ type: "required_signatures" }] },
-    ]);
+    ) as { labels: unknown };
+    expect(doc.labels).toEqual([{ name: "provider", description: null, color: "5319e7" }]);
   });
 });
 
@@ -869,12 +885,12 @@ describe("transitionSettingsStarter", () => {
     }
   });
 
-  test("a repo-added rule on a fleet-owned ruleset is CARRIED, not just reported", () => {
-    // The ruleset itself is fleet law, but rules append by type - so a
-    // rule type the fleet does not supply is a genuine repo addition, and
-    // the apply's whole-payload PUT would remove it from the live ruleset.
-    // Reporting it in the PR body was the loss: protection the repo chose
-    // vanished before anyone read the warning.
+  test("a repo-added rule on a fleet-owned ruleset is reported, never carried", () => {
+    // The ruleset itself is fleet law, and rules append by type - but a
+    // legacy file is a rendered copy of the old baseline, so a type the
+    // fleet no longer supplies is usually retired FLEET policy. Carrying
+    // it would resurrect what the layers dropped; re-declaring it in the
+    // new file appends it back, and that is the reviewer's call.
     const legacy = [
       "---",
       "# Rendered by the settings-sync module.",
@@ -896,13 +912,13 @@ describe("transitionSettingsStarter", () => {
     });
     transitionSettingsStarter(dir, out, "t");
     const doc = parseYaml(readFileSync(join(dir, ".github/settings.yml"), "utf-8")) as {
-      rulesets: Record<string, unknown>[];
+      rulesets?: unknown;
     };
-    expect(doc.rulesets).toEqual([{ name: "main", rules: [{ type: "required_signatures" }] }]);
+    expect(doc.rulesets).toBeUndefined();
     const section = readFileSync(out, "utf-8");
-    expect(section).toContain('`rulesets "main": rule "required_signatures"`');
-    // deletion is override-declared, so it is neither carried nor reported,
-    // and neither is the ruleset entry on its own.
+    expect(section).toContain('rulesets "main": rule "required_signatures"');
+    // deletion is override-declared, so it is silent, and so is the
+    // ruleset entry on its own.
     expect(section).not.toContain('rule "deletion"');
     expect(section).not.toContain('- rulesets "main"\n');
   });
@@ -943,8 +959,8 @@ describe("transitionSettingsStarter", () => {
     expect(section).not.toContain('rule "code_scanning"');
     // ...the override declares this one, so it is silent too...
     expect(section).not.toContain('rule "deletion"');
-    // ...and the genuinely repo-only type rides into the new file.
-    expect(section).toContain('`rulesets "main": rule "required_signatures"`');
+    // ...and the genuinely repo-only type is reported.
+    expect(section).toContain('rulesets "main": rule "required_signatures"');
   });
 
   test("a fleet rule the old file carries at a DIFFERENT value is reported", () => {

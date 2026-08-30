@@ -7,9 +7,9 @@
 // freshly rendered identity starter (the settings-sync template, seeded
 // from the old file's own declared description, homepage, topics, and
 // visibility - the state the nightly heal enforced - with the post-update
-// recorded answers as the fallback, plus everything the apply would
-// otherwise DESTROY - the repo-local labels it deletes as undeclared and
-// the ruleset rules its whole-payload PUT removes), diffs the OLD
+// recorded answers as the fallback, plus what the apply would otherwise
+// TAKE AWAY - the repo-local labels it deletes as undeclared, and the
+// old file's own null opt-outs), diffs the OLD
 // file's declarations against the computed managed layer, and writes the
 // dropped deliberate overrides to $RUNNER_TEMP/settings-layering.md -
 // open_pr.ts appends that section and holds the PR for review so wanted
@@ -299,30 +299,34 @@ function nullOptOuts(value: unknown): Record<string, unknown> | undefined {
 }
 
 /** What the replacement takes WITH it, as opposed to what it reports.
- *  The line is drawn at live-state change the repo did not ask for: a
- *  declaration whose absence from the new file makes the next apply
- *  delete, narrow, or start managing something live is carried, and
- *  everything else is reported for the reviewer to re-add deliberately.
+ *  The line is drawn at live state the REPO owns: a declaration the
+ *  repository made for itself, whose absence from the new file makes the
+ *  next apply delete or re-manage something live. Everything else is
+ *  reported for the reviewer to re-add deliberately.
  *
- *  - `optOuts`: every explicit null, at any depth (see nullOptOuts).
- *  - `labels`: names no fleet layer supplies, which delete-undeclared
- *    removes. A name the fleet DOES supply is never carried - the fleet
- *    entry keeps that label alive, and a copy would only shadow it - so
- *    a restyle of a fleet label stays a reported drop.
- *  - `rulesets`: for a ruleset the fleet also declares, the rule TYPES
- *    the old file added. The apply PUTs a declared ruleset whole, so a
- *    type the merged document omits leaves the live ruleset. A type the
- *    fleet already supplies is not carried (same reasoning as a label
- *    name), and a repo-only RULESET is not carried at all: the apply
- *    never deletes an undeclared ruleset, so its live protection
- *    survives.
+ *  - `optOuts`: every explicit null in a carried section (nullOptOuts).
+ *  - `labels`: names no fleet layer supplies. The apply deletes labels
+ *    the merged document does not declare, and a name no layer has ever
+ *    rendered can only be the repository's own. A name the fleet DOES
+ *    supply is never carried - the fleet entry keeps that label alive,
+ *    and a copy would only shadow it - so a restyle of a fleet label
+ *    stays a reported drop.
+ *
+ *  RULESET RULES are deliberately NOT carried, though a declared ruleset
+ *  is PUT whole and a dropped type does leave the live one. A legacy
+ *  settings.yml is a RENDERED COPY of the old fleet baseline, so a rule
+ *  type the fleet no longer supplies is almost always fleet policy the
+ *  fleet retired - carrying it would resurrect exactly what the layers
+ *  dropped (a private repo's `copilot_code_review`, which moved to the
+ *  public overlay because Copilot reviews are off there). Labels have no
+ *  such ambiguity: the fleet's are all still in the layers. A genuine
+ *  repo-added rule is reported, and re-declaring it appends it back.
  *
  *  ONE computation, read by the writer AND by droppedOverrides, so the
  *  file and the report can never disagree about which is which. */
 export interface StarterCarry {
   optOuts: Record<string, unknown>;
   labels: Record<string, unknown>[];
-  rulesets: Record<string, unknown>[];
 }
 
 const foldLabel = (name: string) => name.toLowerCase();
@@ -331,9 +335,8 @@ const foldRuleset = (name: string) => name;
 export function starterCarry(
   old: Record<string, unknown>,
   fleet: Record<string, unknown>,
-  override: Record<string, unknown> = {},
 ): StarterCarry {
-  const carry: StarterCarry = { optOuts: nullOptOuts(old) ?? {}, labels: [], rulesets: [] };
+  const carry: StarterCarry = { optOuts: nullOptOuts(old) ?? {}, labels: [] };
 
   const suppliedLabels = entriesByName(fleet.labels, foldLabel);
   const takenLabels = new Set<string>();
@@ -345,44 +348,55 @@ export function starterCarry(
     carry.labels.push(entry);
   }
 
-  const fleetRulesets = entriesByName(fleet.rulesets, foldRuleset);
-  const overrideRulesets = entriesByName(override.rulesets, foldRuleset);
-  const takenRulesets = new Set<string>();
-  for (const entry of Array.isArray(old.rulesets) ? old.rulesets : []) {
-    if (!isMapping(entry) || typeof entry.name !== "string") continue;
-    const name = entry.name;
-    const fleetEntry = fleetRulesets.get(name);
-    if (fleetEntry === undefined || takenRulesets.has(name)) continue;
-    takenRulesets.add(name);
-    const supplied = rulesByType(fleetEntry);
-    const unbeatable = rulesByType(overrideRulesets.get(name));
-    const rules = [...rulesByType(entry)]
-      .filter(([type]) => !supplied.has(type) && !unbeatable.has(type))
-      .map(([, rule]) => rule);
-    if (rules.length > 0) carry.rulesets.push({ name, rules });
+  // A RULESET skeleton entry may only name a ruleset the fleet declares:
+  // an entry for a repo-only one would UPSERT it from the fragment alone,
+  // narrowing a live ruleset the apply otherwise never touches. Duplicate
+  // names go too - the apply rejects a section that names one twice.
+  const skeletonRulesets = carry.optOuts.rulesets;
+  if (Array.isArray(skeletonRulesets)) {
+    const fleetRulesets = entriesByName(fleet.rulesets, foldRuleset);
+    const taken = new Set<string>();
+    const kept = skeletonRulesets.filter((entry) => {
+      if (!isMapping(entry) || typeof entry.name !== "string") return false;
+      if (!fleetRulesets.has(entry.name) || taken.has(entry.name)) return false;
+      taken.add(entry.name);
+      return true;
+    });
+    if (kept.length > 0) carry.optOuts.rulesets = kept;
+    else delete carry.optOuts.rulesets;
+  }
+  // Same duplicate rule for the label skeleton; a repo-only name is fine
+  // there, since a label entry declares the whole label.
+  const skeletonLabels = carry.optOuts.labels;
+  if (Array.isArray(skeletonLabels)) {
+    const taken = new Set<string>();
+    carry.optOuts.labels = skeletonLabels.filter((entry) => {
+      if (!isMapping(entry) || typeof entry.name !== "string") return false;
+      const folded = foldLabel(entry.name);
+      if (taken.has(folded)) return false;
+      taken.add(folded);
+      return true;
+    });
   }
   return carry;
 }
 
 /** The carry as one settings document: the opt-out skeleton with the
- *  carried entries folded into its name-keyed sections. An opt-out at
- *  section level (`labels: null`) stands alone - there is nothing to
- *  carry under a section the repo took out of management. */
+ *  carried labels folded into its `labels` section. An opt-out at section
+ *  level (`labels: null`) stands alone - there is nothing to carry under
+ *  a section the repo took out of management. */
 export function carryDocument(carry: StarterCarry): Record<string, unknown> {
   const document: Record<string, unknown> = { ...carry.optOuts };
-  const fold = (section: "labels" | "rulesets", entries: Record<string, unknown>[]) => {
-    if (document[section] === null || entries.length === 0) return;
-    const key = section === "labels" ? foldLabel : foldRuleset;
-    const skeleton = entriesByName(document[section], key);
-    const merged = entries.map((entry) => {
-      const inner = skeleton.get(key(String(entry.name)));
-      skeleton.delete(key(String(entry.name)));
+  if (document.labels !== null && carry.labels.length > 0) {
+    const skeleton = entriesByName(document.labels, foldLabel);
+    const merged = carry.labels.map((entry) => {
+      const folded = foldLabel(String(entry.name));
+      const inner = skeleton.get(folded);
+      skeleton.delete(folded);
       return isMapping(inner) ? { ...inner, ...entry } : entry;
     });
-    document[section] = [...skeleton.values(), ...merged];
-  };
-  fold("labels", carry.labels);
-  fold("rulesets", carry.rulesets);
+    document.labels = [...skeleton.values(), ...merged];
+  }
   return document;
 }
 
@@ -397,9 +411,9 @@ export function withCarriedDeclarations(starter: string, carry: StarterCarry): s
   return (
     `${starter.replace(/\n*$/, "\n")}\n` +
     "# Carried from this repository's own previous settings.yml: what the\n" +
-    "# apply would otherwise change under it - it deletes undeclared labels\n" +
-    "# and PUTs a declared ruleset whole, and a null is this repo's own\n" +
-    "# opt-out from managing that key.\n" +
+    "# apply would otherwise take away - it deletes labels the merged\n" +
+    "# document does not declare, and a null is this repo's own opt-out\n" +
+    "# from managing that key.\n" +
     stringifyYaml(document)
   );
 }
@@ -439,11 +453,8 @@ export function droppedOverrides(
   };
   // The carry decides what is NOT a drop: read here rather than
   // re-derived, so the report and the written file cannot disagree.
-  const carry = starterCarry(old, managed, override);
+  const carry = starterCarry(old, managed);
   const carriedLabelNames = new Set(carry.labels.map((entry) => foldLabel(String(entry.name))));
-  const carriedRuleTypes = new Map(
-    carry.rulesets.map((entry) => [String(entry.name), new Set(rulesByType(entry).keys())]),
-  );
   for (const [key, oldValue] of Object.entries(old)) {
     const managedValue = managed[key];
     // A null section is the dialect's opt-out and rides into the starter
@@ -493,25 +504,25 @@ export function droppedOverrides(
         }
         if (key === "labels" && carriedLabelNames.has(fold(name))) continue; // carried
         const fleetEntry = managedByName.get(fold(name));
-        // A ruleset the fleet also declares: its RULES are settled by the
-        // carry (a type the fleet does not supply rides into the starter,
-        // because the apply's whole-payload PUT would drop it from the
-        // live ruleset), so the only rules left to REPORT are the types
-        // the fleet supplies with different parameters - the repo's
-        // version loses to fleet policy, and re-adding it is the
-        // reviewer's deliberate call. A type the override declares is
-        // silent either way: no repo file can beat it.
+        // A ruleset the fleet also declares. Its rules are REPORTED, never
+        // carried: a legacy file is a rendered copy of the old baseline,
+        // so a type the fleet no longer supplies is usually retired fleet
+        // policy rather than a repo addition (StarterCarry's header has
+        // the reasoning). Silent either way: a type the override declares
+        // (no repo file beats it) and one the fleet still supplies
+        // identically - the module visibility layers add code_scanning to
+        // `main` on every public toolchain repo, and a legacy file carries
+        // it too.
         if (key === "rulesets" && fleetEntry !== undefined) {
-          const carriedTypes = carriedRuleTypes.get(name) ?? new Set<string>();
           const unbeatable = new Set(rulesByType(overrideEntry(key, name, fold)).keys());
           const fleetRules = rulesByType(fleetEntry);
           for (const [type, rule] of rulesByType(entry)) {
-            if (unbeatable.has(type) || carriedTypes.has(type)) continue;
+            if (unbeatable.has(type)) continue;
             const supplied = fleetRules.get(type);
             if (supplied !== undefined && canonical(supplied) === canonical(rule)) continue;
             dropped.push(
-              `${key} ${JSON.stringify(name)}: rule ${JSON.stringify(type)} (the fleet supplies ` +
-                "this rule type with different parameters, and the fleet layers win)",
+              `${key} ${JSON.stringify(name)}: rule ${JSON.stringify(type)} (the ruleset is ` +
+                "fleet-owned, but re-declaring just this rule in the new settings.yml appends it)",
             );
           }
           // The entry itself: fleet law when the override declares it, so
@@ -522,8 +533,8 @@ export function droppedOverrides(
           // field the fleet adds and the old file never had.
           if (overrideEntry(key, name, fold) === undefined) {
             for (const [field, value] of Object.entries(entry)) {
-              // name identifies the entry; rules and the entry's null
-              // opt-outs are already carried.
+              // name identifies the entry; rules are reported above, and
+              // the entry's null opt-outs are carried.
               if (field === "name" || field === "rules" || value === null) continue;
               classify(
                 `${key} ${JSON.stringify(name)}: ${field}`,
@@ -590,7 +601,7 @@ export function layeringSummary(dropped: string[], carried: string[] = []): stri
   const carriedLine =
     carried.length === 0
       ? ""
-      : `\nCARRIED into the new file, because the apply would otherwise destroy them: ${carried.map((name) => `\`${name}\``).join(", ")}.\n`;
+      : `\nCARRIED into the new file, because the apply would otherwise take them away: ${carried.map((name) => `\`${name}\``).join(", ")}.\n`;
   if (dropped.length === 0) {
     return `### settings.yml layering transition
 
@@ -777,7 +788,7 @@ export function transitionSettingsStarter(
         const override = loadOverrideLayer();
         const fleet = mergeSettingsLayers(managedSettings(facts, manifests), override);
         const dropped = droppedOverrides(old, fleet, override);
-        const carry = starterCarry(old, fleet, override);
+        const carry = starterCarry(old, fleet);
         const carriedNames = carriedPaths(carryDocument(carry));
         section = layeringSummary(dropped, carriedNames);
         writeFileSync(settingsPath, withCarriedDeclarations(starter, carry));
