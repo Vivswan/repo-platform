@@ -9,6 +9,7 @@ import {
   applyToolchainSetup,
   type Contribution,
   codeqlGroups,
+  conditionalWorkflowInputLines,
   type DeclarationSources,
   dependabotLabels,
   ecosystemGroups,
@@ -196,6 +197,35 @@ describe("codeqlGroups", () => {
     expect(codeqlGroups([AGENTS, BUN, NODE, UV])).toEqual([
       { language: "javascript-typescript", modules: ["bun", "node"] },
       { language: "python", modules: ["uv"] },
+    ]);
+  });
+});
+
+describe("conditionalWorkflowInputLines", () => {
+  // No live module declares a conditional workflow, so the golden renders
+  // pin only the empty '[]' render; these pin the declared shape.
+  test("nothing declared: the set line plus the unconditional '[]' input line, no appends", () => {
+    expect(conditionalWorkflowInputLines([AGENTS, BUN], gateOfFor([AGENTS, BUN]))).toEqual([
+      "{%- set conditional_workflows = [] %}",
+      "      conditional-workflows: '{{ conditional_workflows | tojson }}'",
+    ]);
+  });
+
+  test("each declared name appends under its owning module's gate, manifest order", () => {
+    const demo = manifest("demo", [
+      "conditional_workflows: [{name: Extra Suite, path: .github/workflows/extra.yml}]",
+    ]);
+    const other = manifest("other", [
+      "gate: \"'uv' in modules\"",
+      "conditional_workflows: [{name: Other Suite, path: .github/workflows/other.yml}]",
+    ]);
+    expect(
+      conditionalWorkflowInputLines([demo, AGENTS, other], gateOfFor([demo, AGENTS, other])),
+    ).toEqual([
+      "{%- set conditional_workflows = [] %}",
+      "{%- if 'demo' in modules %}{% set _ = conditional_workflows.append('Extra Suite') %}{% endif %}",
+      "{%- if 'uv' in modules %}{% set _ = conditional_workflows.append('Other Suite') %}{% endif %}",
+      "      conditional-workflows: '{{ conditional_workflows | tojson }}'",
     ]);
   });
 });

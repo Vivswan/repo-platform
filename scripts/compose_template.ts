@@ -403,6 +403,31 @@ export function codeqlGroups(manifests: ModuleManifest[]): CodeqlGroup[] {
   return [...groups.values()];
 }
 
+/** The all-green wrapper's conditional-workflows input, as generated
+ *  jinja lines: one gated append per manifest-declared workflow name (the
+ *  loader enforces one owning module per name), then the input line that
+ *  renders in EVERY selection - '[]' with nothing declared or selected,
+ *  matching the reusable's default, so the wrapper's judged expectations
+ *  are always explicit. Exported for the unit tests: no module declares a
+ *  conditional workflow today, so the goldens can only pin the empty
+ *  render. */
+export function conditionalWorkflowInputLines(
+  manifests: ModuleManifest[],
+  gateOf: (module: string) => string,
+): string[] {
+  const appends = manifests.flatMap((manifest) =>
+    (manifest.conditional_workflows ?? []).map(
+      ({ name }) =>
+        `{%- if ${gateOf(manifest.module)} %}{% set _ = conditional_workflows.append('${name}') %}{% endif %}`,
+    ),
+  );
+  return [
+    "{%- set conditional_workflows = [] %}",
+    ...appends,
+    "      conditional-workflows: '{{ conditional_workflows | tojson }}'",
+  ];
+}
+
 export type DependabotLabel = {
   name: string;
   color: string;
@@ -686,6 +711,29 @@ const DATA_ANCHORS: Record<string, DataAnchorSpec> = {
           // line itself renders unconditionally, so no collapse gate.
           gate: null,
           text: Buffer.from(lines.join("\n")),
+        },
+      ];
+    },
+  },
+  "conditional-workflows": {
+    data: "conditional_workflows",
+    kind: "reject",
+    generate: ({ manifests, gateOf }) => {
+      // The fleet all-green wrapper's conditional-workflows input: the
+      // verdict's PR-scoped workflow roster, derived from the manifests'
+      // conditional_workflows declarations (conditionalWorkflowInputLines
+      // above has the shape and the always-explicit '[]' rationale).
+      const entries = manifests.flatMap((manifest) =>
+        (manifest.conditional_workflows ?? []).map(() => manifest.module),
+      );
+      return [
+        {
+          order: entries.length > 0 ? orderOf(manifests, entries[0]) : 0,
+          source: generatorSource("conditional-workflows", "conditional_workflows"),
+          // The leading {%- tags manage the anchor's whitespace; the input
+          // line itself renders unconditionally, so no collapse gate.
+          gate: null,
+          text: Buffer.from(conditionalWorkflowInputLines(manifests, gateOf).join("\n")),
         },
       ];
     },

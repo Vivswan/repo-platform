@@ -23,6 +23,13 @@ on:
   workflow_run:
     workflows: [CI]
     types: [completed]
+  # The event-driven re-judgment wake: a check run's completion fires no
+  # workflow_run event, so Copilot's review SUBMISSION is what re-fires
+  # judgment at a sha whose verdict was left pending on the owed review.
+  # Any submitted review re-judges; judgments are idempotent and
+  # serialize per sha below.
+  pull_request_review:
+    types: [submitted]
   workflow_dispatch:
     inputs:
       sha:
@@ -33,12 +40,12 @@ on:
 permissions: {}
 
 # One verdict at a time per judged sha: a push run and a PR run of the
-# same head complete near-simultaneously (and a dispatch can join them),
-# and serializing the judgments keeps their check-run POSTs ordered.
-# Never cancel: a cancelled verdict between judging and posting is a lost
-# check only the dispatch unwedge would heal.
+# same head complete near-simultaneously (and a review wake or a dispatch
+# can join them), and serializing the judgments keeps their check-run
+# POSTs ordered. Never cancel: a cancelled verdict between judging and
+# posting is a lost check only the dispatch unwedge would heal.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.workflow_run.head_sha || inputs.sha }}
+  group: ${{ github.workflow }}-${{ github.event.workflow_run.head_sha || github.event.pull_request.head.sha || inputs.sha }}
   cancel-in-progress: false
 
 jobs:
@@ -54,3 +61,4 @@ jobs:
       # editing the ci: job out of the managed ci.yml would disarm every
       # fleet gate while the repo-owned checks job kept the verdict green.
       require-job: ci / validate-template
+      conditional-workflows: '[]'
