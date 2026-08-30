@@ -1,36 +1,22 @@
 # This file is managed by {{ github_username }}/repo-platform.
 # Local edits may be replaced during template updates.
 #
-# Single-call CI: the fleet's gate jobs live in repo-platform's
-# fleet-ci.yml reusable at the green-gated @build ref, so THIS FILE NO
-# LONGER DESCRIBES ITS OWN CI. The membership rule: what gates this
-# repository is being a job in fleet-ci.yml (plus the repo-owned
-# checks.yml the `checks` call runs), not being listed here - a fleet-ci
-# or action edit changes this repository's CI with no PR here, and
-# repo-platform's own CI gating every such edit is the counterweight.
-#
-# The all-green convention: branch protection requires only the
-# `all-green` check - a CHECK RUN the managed all-green.yml verdict
-# workflow creates after judging this workflow's completed runs
-# (https://github.com/{{ github_username }}/repo-platform/blob/main/docs/all-green.md).
-# Every job of a run gates unless its name starts with `info-`; a
-# skipped job stands down, which is how module- and visibility-gated
-# fleet-ci jobs opt out per run.
+# The gate jobs live in fleet-ci.yml@build: an edit there changes this
+# repository's CI with no PR here. Branch protection requires only the
+# `all-green` check run the verdict workflow creates; every job gates
+# unless named `info-*`, and a skipped job stands down.
 
 name: CI
 
 on:
   push:
     branches: [main]
-  # `edited` on top of the default three: a PR title edit must re-run the
-  # gate so title-sensitive checks (the pr-title module) stay honest. The
-  # cancel-in-progress concurrency below bounds the extra runs.
+  # `edited` too: a PR title edit must re-run title-sensitive checks.
   pull_request:
     types: [opened, edited, reopened, synchronize]
   workflow_dispatch:
 {%- if enable_codeql %}
-  # Weekly CodeQL re-scan with refreshed query packs; every other gate job
-  # is event-agnostic or skips cleanly on non-PR events.
+  # Weekly CodeQL re-scan with refreshed query packs.
   schedule:
     - cron: "3 8 * * 1"
 {%- endif %}
@@ -43,20 +29,13 @@ concurrency:
   cancel-in-progress: {% raw %}${{ github.event_name == 'pull_request' }}{% endraw %}
 
 jobs:
-  # Repo-owned checks: edit .github/workflows/checks.yml, not this file. No
-  # secrets are passed and permissions cap at contents: read; a check that
-  # needs either belongs in its own workflow (see
-  # https://github.com/{{ github_username }}/repo-platform/blob/main/docs/all-green.md).
+  # Repo-owned: edit checks.yml, not this file (no secrets; permissions
+  # cap at contents: read).
   checks:
     uses: ./.github/workflows/checks.yml
 
-  # The fleet's gate jobs, parameterized by this repository's recorded
-  # module selection and visibility. This caller job's permissions are
-  # the ceiling for every job in the called workflow; each fleet-ci job
-  # narrows them to what it needs. The ceiling is UNCONDITIONAL: GitHub
-  # validates every called job's permission request against it at call
-  # time, skipped jobs included, so a selection-gated grant would reject
-  # the whole call on the selections that skip the job.
+  # This caller's permissions are the ceiling for every called job and
+  # must stay UNCONDITIONAL: GitHub validates skipped jobs' grants too.
   ci:
     uses: {{ github_username }}/repo-platform/.github/workflows/fleet-ci.yml@build
     permissions:
@@ -87,36 +66,24 @@ jobs:
 {%- endif %}
 {#- END GENERATED: tracking-labels #}
 {% if 'release-please' in modules %}
-  # Release from a green run only: the managed release.yml pipeline
-  # (release-please cuts a draft, the repo-owned update-release.yml hook
-  # mutates it, then the attested publish flips it live) runs downstream
-  # of `checks` and the fleet-ci call - the two jobs every gate runs
-  # through - so a red commit can never cut a release or refresh the
-  # release PR. It depends on the gate, it is NOT gated by it: the info-
-  # prefix opts the whole pipeline out of the all-green verdict (a flaky
-  # publish must not mark the commit ungreen), and `needs:` rather than
-  # the check run is what gates it - the check lands only after this
-  # whole run completes, while needs expresses the same "everything
-  # green" inside the run. Only push/dispatch runs release: pull requests
-  # must never reach the publish pipeline, and the weekly scheduled
-  # CodeQL re-scan has no business refreshing release state. Secrets are
-  # inherited deliberately: publish steps need them.
+  # info- keeps the release pipeline out of the all-green verdict (a
+  # flaky publish must not mark the commit ungreen); `needs:` is the gate
+  # - the check run lands only after this whole run completes. Secrets
+  # are inherited: publish steps need them.
   info-release:
     needs: [checks, ci]
     if: >-
       (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
       && github.ref == 'refs/heads/main'
-    # The publishing ceiling for the release pipeline's jobs (release
-    # assets and their build provenance, ghcr, npm/PyPI trusted publishing);
-    # nested jobs can only narrow it, never raise it.
+    # The publishing ceiling for the release pipeline's jobs; nested jobs
+    # can only narrow it.
     permissions:
       contents: write
       pull-requests: write
       packages: write
       id-token: write
       attestations: write
-      # The release-health pre-flight (in the managed release.yml)
-      # reads open issues and Dependabot alerts through this ceiling.
+      # The release-health pre-flight reads through this ceiling.
       issues: read
       vulnerability-alerts: read
     uses: ./.github/workflows/release.yml

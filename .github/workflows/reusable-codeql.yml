@@ -1,5 +1,3 @@
-# Reusable CodeQL analysis, parameterized by language.
-
 name: Reusable CodeQL
 
 on:
@@ -28,10 +26,9 @@ jobs:
       security-events: write
       actions: read
     steps:
-      # Code scanning needs a public repo (or GitHub Code Security), and
-      # these jobs only exist because the repo was public at generation
-      # time. A silent skip here would report success with zero scanning,
-      # so a private repo fails loudly instead.
+      # CodeQL needs a public repo; these jobs exist because the repo was
+      # public at generation time. A silent skip would report success with
+      # zero scanning, so a private repo fails loudly instead.
       - name: Fail if the repository is private
         if: github.event.repository.private
         run: |
@@ -40,13 +37,10 @@ jobs:
 
       - uses: actions/checkout@v7
 
-      # Repo-owned CodeQL tuning: a .github/codeql/codeql-config.yml in
-      # the calling repository - the standard CodeQL config file
-      # (paths-ignore, queries, packs, query-filters) - is picked up
-      # automatically. The managed ci.yml cannot carry per-repo scan
-      # parameters, so the file is how a repository customizes its scan;
-      # the inline config input wins when a caller passes one (this step
-      # skips, and its empty output leaves config-file unset).
+      # Repo-owned tuning: a .github/codeql/codeql-config.yml in the
+      # calling repository is picked up automatically (the managed ci.yml
+      # cannot carry per-repo scan parameters). The inline config input
+      # wins when a caller passes one.
       - name: Detect the repository's CodeQL config
         id: config
         if: inputs.config == ''
@@ -62,12 +56,10 @@ jobs:
           languages: ${{ inputs.language }}
           config: ${{ inputs.config }}
           config-file: ${{ steps.config.outputs.file }}
-          # Advanced setup does not run the alert-suppression queries by
-          # default, so inline `codeql[query-id]` comments are inert without
-          # this: append the language's suppression query to the default
-          # suite (the pack prefix is the language part of the input). The
-          # `packs` input only works in single-language analyses - callers
-          # must keep fanning out one call per language.
+          # Advanced setup skips the alert-suppression queries by default,
+          # so inline `codeql[query-id]` comments are inert without this.
+          # `packs` only works single-language - keep fanning out one call
+          # per language.
           packs: "+codeql/${{ inputs.language == 'javascript-typescript' && 'javascript' || inputs.language }}-queries:AlertSuppression.ql"
 
       - uses: github/codeql-action/analyze@v4

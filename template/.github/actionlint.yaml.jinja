@@ -5,8 +5,7 @@
 paths:
   .github/workflows/**/*.{yml,yaml}:
     ignore:
-      # GitHub grants Dependabot-alert reads to GITHUB_TOKEN under the
-      # vulnerability-alerts permission key (the release-health gate needs
-      # it); actionlint's permission-scope list has not caught up yet
-      # (rhysd/actionlint#666). Drop this once it knows the scope.
+      # GITHUB_TOKEN has a vulnerability-alerts permission key (the
+      # release-health gate needs it) that actionlint does not know yet
+      # (rhysd/actionlint#666). Drop this once it does.
       - 'unknown permission scope "vulnerability-alerts"'

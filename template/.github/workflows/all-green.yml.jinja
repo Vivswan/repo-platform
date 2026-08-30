@@ -1,21 +1,9 @@
 # This file is managed by {{ github_username }}/repo-platform.
 # Local edits may be replaced during template updates.
 #
-# The all-green verdict: when a CI run completes, judge its jobs and
-# create the `all-green` check run branch protection requires (the
-# all-green convention - see
-# https://github.com/{{ github_username }}/repo-platform/blob/main/docs/all-green.md).
-# workflow_run triggers only run a workflow's copy on this repository's
-# own default branch (same repo AND default branch), so this thin trigger
-# is rendered here; the judgment itself lives in
-# repo-platform's reusable-all-green.yml, at the green-gated @build ref,
-# so a verdict fix reaches the fleet without a sync PR.
-#
-# The dispatch input is the unwedge path: when a verdict never landed at
-# a sha (a lost workflow_run event), dispatch this workflow with the sha
-# and it re-judges the newest completed CI run there. It runs under the
-# same default-branch constraint, so it cannot help the one PR that
-# introduces this file - that PR merges once with admin bypass.
+# workflow_run fires same-repo only (hence this thin trigger; the
+# judgment is repo-platform's reusable), and it executes the DEFAULT
+# branch's copy of this file - changes land only after they merge.
 
 name: All Green
 
@@ -23,11 +11,8 @@ on:
   workflow_run:
     workflows: [CI]
     types: [completed]
-  # The event-driven re-judgment wake: a check run's completion fires no
-  # workflow_run event, so Copilot's review SUBMISSION is what re-fires
-  # judgment at a sha whose verdict was left pending on the owed review.
-  # Any submitted review re-judges; judgments are idempotent and
-  # serialize per sha below.
+  # Copilot's review submission is the wake that re-judges a verdict left
+  # pending on the owed review (a check run's completion fires no event).
   pull_request_review:
     types: [submitted]
   workflow_dispatch:
@@ -39,11 +24,8 @@ on:
 
 permissions: {}
 
-# One verdict at a time per judged sha: a push run and a PR run of the
-# same head complete near-simultaneously (and a review wake or a dispatch
-# can join them), and serializing the judgments keeps their check-run
-# POSTs ordered. Never cancel: a cancelled verdict between judging and
-# posting is a lost check only the dispatch unwedge would heal.
+# Serialize judgments per sha so their check-run POSTs stay ordered. Never
+# cancel: a verdict cancelled between judging and posting is a lost check.
 concurrency:
   group: {% raw %}${{ github.workflow }}-${{ github.event.workflow_run.head_sha || github.event.pull_request.head.sha || inputs.sha }}{% endraw %}
   cancel-in-progress: false
@@ -56,21 +38,12 @@ jobs:
     uses: {{ github_username }}/repo-platform/.github/workflows/reusable-all-green.yml@build
     with:
       sha: {% raw %}${{ github.event_name == 'workflow_dispatch' && inputs.sha || '' }}{% endraw %}
-      # The gate's anchor: the fleet caller's unconditional integrity job
-      # must have SUCCEEDED or the verdict fails closed - without it,
-      # editing the ci: job out of the managed ci.yml would disarm every
-      # fleet gate while the repo-owned checks job kept the verdict green.
+      # Must have SUCCEEDED or the verdict fails closed: without this
+      # anchor, editing the ci: job out of the managed ci.yml would disarm
+      # every fleet gate.
       require-job: ci / validate-template
-      # The verdict OWNS the Copilot review expectation - the fleet
-      # ruleset requires only the all-green check, and this input is what
-      # makes it wait for Copilot's copilot-pull-request-reviewer check
-      # run at the judged head (bot-authored PRs stand it down;
-      # docs/all-green.md has the model). VISIBILITY SPLIT: Copilot
-      # reviews are disabled on private repositories, so the expectation
-      # renders true only on public ones - an unconditional true would
-      # leave every private PR's verdict pending on a reviewer that can
-      # never come. Dropping the line on a public repo un-gates the
-      # review - the ruleset carries no separate context any more.
+      # Renders true only on public repos - Copilot reviews are off on
+      # private ones, so true there would pend forever.
       require-copilot-review: {{ (not private) | tojson }}
 {%- set conditional_workflows = [] %}
       conditional-workflows: '{{ conditional_workflows | tojson }}'

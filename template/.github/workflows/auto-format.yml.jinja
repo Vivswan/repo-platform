@@ -1,15 +1,8 @@
-# Repo-owned auto-format: label a pull request `fix-lint` (the label ships
-# with the template's settings.yml) and this workflow pushes a formatting
-# commit to the PR branch, then removes the label. Generated once by
-# {{ github_username }}/repo-platform and never overwritten by template
-# sync: adjust the format commands to this repository's tooling.
-#
-# The push uses github.token, which starts no workflows: the PR's checks
-# will not re-run on the new head, so the job says so loudly (a PR comment
-# and a warning annotation; close/reopen the PR to re-run them). Swapping
-# in a PAT with Contents write would re-trigger CI automatically, but the
-# formatter tooling of any same-repo PR runs in this checkout before the
-# push - only wire in a token you are willing to expose to it.
+# Repo-owned: generated once by {{ github_username }}/repo-platform, never
+# overwritten by template sync - adjust the format commands freely. The
+# push uses github.token, which starts no workflows; a PAT would
+# re-trigger CI, but any same-repo PR's formatter tooling runs in this
+# checkout before the push - only wire in a token you would expose to it.
 
 name: Auto Format
 
@@ -28,9 +21,8 @@ permissions:
 
 jobs:
   format:
-    # Same-repo PRs only: GITHUB_TOKEN cannot push to a fork's branch, and
-    # PR-controlled tool configuration should not run next to write
-    # credentials (checkout below persists none; the push step scopes them).
+    # GITHUB_TOKEN cannot push to a fork's branch, and PR-controlled tool
+    # configuration must not run next to write credentials.
     if: github.event.label.name == 'fix-lint' && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -93,11 +85,8 @@ jobs:
           git add -A
           git commit -m "style: apply automated formatting"
           git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:"$HEAD_REF"
-          # The commit landed via github.token, which starts no workflows:
-          # this PR's checks will not re-run on the new head. Surface that
-          # on the PR (once) and as a run annotation. The push itself
-          # succeeded, so the run stays green - a red run on every
-          # formatted PR would drown real failures.
+          # Checks will not re-run on the new head (github.token): say so,
+          # but stay green - the push itself succeeded.
           marker="<!-- auto-format: no-retrigger-token -->"
           comments=$(gh api "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments" --paginate --jq '.[].body' || true)
           case "$comments" in
