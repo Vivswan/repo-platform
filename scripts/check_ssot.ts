@@ -11,7 +11,12 @@
 //
 // Structure: a flat list of named rules, each returning mismatches. Every
 // grep-shaped extraction goes through mustMatch(), so a rule whose anchor
-// text disappears fails loudly instead of passing vacuously. Template
+// text disappears fails loudly instead of passing vacuously; structure
+// pulled out of TypeScript SOURCES (pinned consts, argv arrays, spawn and
+// stream-write call shapes) is read from the AST via scripts/ts_extract.ts
+// under the same loud-anchor contract, so a comment, string, or template
+// decoy can neither satisfy an anchor nor hide the real declaration.
+// Template
 // (.jinja) inputs are compared modulo jinja via normalizeJinja() (from
 // scripts/jinja_subset.ts, shared with scripts/render_dogfood.ts);
 // recorded, intentional divergences live in RECORDED_DIVERGENCES with a
@@ -1790,164 +1795,6 @@ export function lockedTypesBunVersion(lockText: string, where: string): string {
 
 // --- spawnSync hang bounds ------------------------------------------------
 
-/** Keywords a regex literal may directly follow; after anything
- *  value-shaped (an identifier, a literal, `)`, `]`), a `/` is division. */
-const REGEX_PRECEDING_KEYWORDS = new Set([
-  "return",
-  "typeof",
-  "case",
-  "in",
-  "of",
-  "new",
-  "delete",
-  "void",
-  "instanceof",
-  "do",
-  "else",
-  "yield",
-  "await",
-]);
-
-/** ONE lexical pass over a source file, yielding two same-length views
- *  (newlines kept, so offsets and line numbers agree across both and
- *  with the original):
- *  - `stripped`: comments and regex BODIES blanked to spaces; string and
- *    template text kept - the view argument/property extraction reads,
- *    where "pipe" literals must stay visible.
- *  - `masked`: additionally, string and template TEXT blanked - the view
- *    token discovery reads, where a call-shaped token inside a string,
- *    comment, or regex body must not be read as code.
- *  The context stack makes template INTERPOLATIONS code again (nested
- *  templates and comments inside `${...}` included), so a spawn inside
- *  one is discovered and a comment inside one is stripped - one model
- *  for both views. Whether a `/` opens a regex or divides is decided the
- *  standard way, by the preceding significant token (value-shaped means
- *  division; an operator, opening bracket, or REGEX_PRECEDING_KEYWORDS
- *  member admits a regex); a regex literal never spans a newline, so the
- *  skip bails at one and a misread degrades one line, never the file.
- *  Two reproduced syntactic residuals of that heuristic (neither shape is
- *  in the tree): a regex directly after a condition's `)` - as in
- *  `if (x) /re/.test(y)` - reads as division, leaving the regex BODY
- *  visible, so a call-shaped token inside it becomes a phantom site (a
- *  loud false positive); and a `/` after `++`/`--` (lastSignificant holds
- *  the operator character) reads as a regex opener, blanking real
- *  division code to the line's end - the one silent direction, needing a
- *  call inside `a++ /b/ c`-shaped code, which nothing plausible writes. */
-export function scanSource(source: string): { stripped: string; masked: string } {
-  let stripped = "";
-  let masked = "";
-  const emit = (s: string, m: string = s) => {
-    stripped += s;
-    masked += m;
-  };
-  const blank = (ch: string) => (ch === "\n" ? "\n" : " ");
-  type LexContext =
-    | { kind: "code"; braceDepth: number } // the file bottom, or a template interpolation
-    | { kind: "quote"; ch: string }
-    | { kind: "template" };
-  const stack: LexContext[] = [{ kind: "code", braceDepth: 0 }];
-  let lastSignificant = "";
-  const regexCanFollow = (): boolean => {
-    if (lastSignificant === "") return true;
-    if (!/[\w$)\]}]/.test(lastSignificant)) return true;
-    const word = /([A-Za-z_$][\w$]*)\s*$/.exec(stripped);
-    return word !== null && REGEX_PRECEDING_KEYWORDS.has(word[1]);
-  };
-  for (let i = 0; i < source.length; i++) {
-    const ch = source[i];
-    const context = stack[stack.length - 1];
-    if (context.kind === "quote") {
-      if (ch === context.ch) {
-        stack.pop();
-        lastSignificant = ")"; // a string literal is value-shaped
-        emit(ch);
-      } else if (ch === "\\" && source[i + 1] !== undefined) {
-        emit(ch + source[i + 1], " " + blank(source[i + 1]));
-        i++;
-      } else emit(ch, blank(ch));
-      continue;
-    }
-    if (context.kind === "template") {
-      if (ch === "`") {
-        stack.pop();
-        lastSignificant = ")";
-        emit(ch);
-      } else if (ch === "\\" && source[i + 1] !== undefined) {
-        emit(ch + source[i + 1], " " + blank(source[i + 1]));
-        i++;
-      } else if (ch === "$" && source[i + 1] === "{") {
-        stack.push({ kind: "code", braceDepth: 0 });
-        emit("${");
-        i++;
-      } else emit(ch, blank(ch));
-      continue;
-    }
-    if (ch === "/" && source[i + 1] === "/") {
-      while (i < source.length && source[i] !== "\n") {
-        emit(" ");
-        i++;
-      }
-      i--;
-      continue;
-    }
-    if (ch === "/" && source[i + 1] === "*") {
-      const end = source.indexOf("*/", i + 2);
-      const stop = end === -1 ? source.length : end + 2;
-      for (; i < stop; i++) emit(blank(source[i]));
-      i--;
-      continue;
-    }
-    if (ch === "/" && regexCanFollow()) {
-      emit(ch);
-      let inClass = false;
-      for (i++; i < source.length; i++) {
-        const rc = source[i];
-        if (rc === "\\") {
-          emit("  ");
-          i++;
-        } else if ((rc === "/" && !inClass) || rc === "\n") {
-          emit(rc);
-          break;
-        } else {
-          if (rc === "[") inClass = true;
-          else if (rc === "]") inClass = false;
-          emit(" ");
-        }
-      }
-      lastSignificant = ")"; // a regex literal is value-shaped
-      continue;
-    }
-    if (ch === '"' || ch === "'") {
-      stack.push({ kind: "quote", ch });
-      emit(ch);
-      continue;
-    }
-    if (ch === "`") {
-      stack.push({ kind: "template" });
-      emit(ch);
-      continue;
-    }
-    if (ch === "{") context.braceDepth++;
-    else if (ch === "}") {
-      if (context.braceDepth === 0 && stack.length > 1) {
-        stack.pop(); // the interpolation ends; its template resumes
-        lastSignificant = ")";
-        emit(ch);
-        continue;
-      }
-      context.braceDepth = Math.max(0, context.braceDepth - 1);
-    }
-    if (!/\s/.test(ch)) lastSignificant = ch;
-    emit(ch);
-  }
-  return { stripped, masked };
-}
-
-/** The comment-stripped view alone, for callers that keep string text. */
-export function stripComments(source: string): string {
-  return scanSource(source).stripped;
-}
-
 /** The single expression `text` parses to (wrapping parentheses
  *  unwrapped), or null when it is not a lone, clean expression - the
  *  shared entry for reading option and stdio literals structurally. */
@@ -2307,21 +2154,59 @@ export function bunRuntimeMismatches(runtimeVersion: string, pinnedVersion: stri
 
 // --- async stream writes ----------------------------------------------------
 
-/** An async stream-write call site, matched on the masked view so a
- *  mention in a comment, string, or regex body never fires; spacing and
- *  optional chaining (`process?.stdout.write?.(x)`) are tolerated. The
- *  residual of staying text-level: an alias of the stream or the method
+/** Async stream-write call sites - `process.stdout.write(...)` and the
+ *  stderr twin, optional chaining and decorative wrappers tolerated -
+ *  read off the AST, so a mention in a comment, a string, or a regex
+ *  body never fires while a template INTERPOLATION's call does. The
+ *  residual: an alias of the stream or the method
  *  (`const out = process.stdout; out.write(x)`) escapes - nothing in
  *  house style writes that, and writeSync is the sanctioned route. */
-const ASYNC_STREAM_WRITE = /process\s*\??\.\s*(?:stdout|stderr)\s*\??\.\s*write\s*(?:\?\.)?\s*\(/;
-/** The common exiting constructs: process.exit itself, an uncaught
- *  `throw` (the abort path drains no queued writes either), and the
- *  helpers that exit (gha's fail/requireEnv, proc's must/mustCapture).
- *  Lexical order over a roster, not control-flow proof: a locally
- *  defined wrapper around process.exit called after the write stays a
- *  reviewable residual. */
-const EXIT_CAPABLE =
-  /process\s*\??\.\s*exit\b|\bthrow\b|\bfail\(|\brequireEnv\(|\bmust\(|\bmustCapture\(/;
+function asyncStreamWriteCalls(source: string): CallExpression[] {
+  return parseTs(source)
+    .forEachDescendantAsArray()
+    .filter((node): node is CallExpression => {
+      if (!Node.isCallExpression(node)) return false;
+      const callee = unwrapExpression(node.getExpression());
+      if (!Node.isPropertyAccessExpression(callee) || callee.getName() !== "write") return false;
+      const stream = unwrapExpression(callee.getExpression());
+      if (
+        !Node.isPropertyAccessExpression(stream) ||
+        (stream.getName() !== "stdout" && stream.getName() !== "stderr")
+      ) {
+        return false;
+      }
+      const root = unwrapExpression(stream.getExpression());
+      return Node.isIdentifier(root) && root.getText() === "process";
+    });
+}
+
+/** Whether anything exit-capable sits at or after `at`: process.exit
+ *  itself (a reference suffices), an uncaught `throw` (the abort path
+ *  drains no queued writes either), and calls to the helpers that exit
+ *  (gha's fail/requireEnv, proc's must/mustCapture). Lexical order over
+ *  a roster, not control-flow proof: a locally defined wrapper around
+ *  process.exit called after the write stays a reviewable residual. */
+function exitCapableAfter(source: string, at: number): boolean {
+  const EXIT_CALLEES = new Set(["fail", "requireEnv", "must", "mustCapture"]);
+  return parseTs(source)
+    .forEachDescendantAsArray()
+    .some((node) => {
+      if (node.getStart() < at) return false;
+      if (Node.isThrowStatement(node)) return true;
+      if (Node.isPropertyAccessExpression(node) && node.getName() === "exit") {
+        const root = unwrapExpression(node.getExpression());
+        return Node.isIdentifier(root) && root.getText() === "process";
+      }
+      if (!Node.isCallExpression(node)) return false;
+      const callee = unwrapExpression(node.getExpression());
+      const name = Node.isIdentifier(callee)
+        ? callee.getText()
+        : Node.isPropertyAccessExpression(callee)
+          ? callee.getName()
+          : null;
+      return name !== null && EXIT_CALLEES.has(name);
+    });
+}
 
 /** Files allowed to keep async stream writes because every exit-capable
  *  call precedes the first async write, so the writes ride to a natural
@@ -2342,20 +2227,26 @@ export function asyncStreamWriteMismatches(
   source: string,
   allowlisted: boolean,
 ): Mismatch[] {
-  const masked = scanSource(source).masked;
-  const at = masked.search(ASYNC_STREAM_WRITE);
+  if (syntaxErrorCount(source) > 0) {
+    throw new Error(`${rel}: source has syntax errors - the stream-write scan cannot audit it`);
+  }
+  const first = asyncStreamWriteCalls(source).reduce(
+    (earliest: CallExpression | null, call) =>
+      earliest === null || call.getStart() < earliest.getStart() ? call : earliest,
+    null,
+  );
   if (!allowlisted) {
-    if (at === -1) return [];
+    if (first === null) return [];
     return [
       {
-        file: `${rel}:${masked.slice(0, at).split("\n").length}`,
+        file: `${rel}:${first.getStartLineNumber()}`,
         expected:
           "writeSync for stream writes (bun's async stream writes truncate at the pipe buffer when any later path exits), or a NATURAL_EXIT_WRITE_FILES entry whose reason holds",
         got: "an async stream write",
       },
     ];
   }
-  if (at === -1) {
+  if (first === null) {
     return [
       {
         file: rel,
@@ -2364,7 +2255,7 @@ export function asyncStreamWriteMismatches(
       },
     ];
   }
-  if (EXIT_CAPABLE.test(masked.slice(at))) {
+  if (exitCapableAfter(source, first.getStart())) {
     return [
       {
         file: rel,

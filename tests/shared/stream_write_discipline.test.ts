@@ -7,12 +7,12 @@
 // one loud at authoring time instead of silent at truncation time.
 //
 // ONE scanner on purpose: this suite drives check_ssot.ts's own
-// asyncStreamWriteMismatches (lexer-masked view, so strings and comments
-// never fire) over the same three roots its stream-write-sync rule scans,
-// instead of keeping a second regex/strip implementation whose semantics
+// asyncStreamWriteMismatches (AST-read call sites, so strings and
+// comments never fire) over the same three roots its stream-write-sync
+// rule scans, instead of keeping a second implementation whose semantics
 // could silently diverge (the two guards previously carried same-named
 // stripComments locals with removal semantics; timeout_log_lines.test.ts
-// imports the shared lexer for the same reason). The scanner's own
+// reads the shared parser for the same reason). The scanner's own
 // fixture controls - fire shapes, the allowlist mechanism, stale entries
 // - live in tests/scripts/check_ssot.test.ts; what this suite adds is the
 // bun-test-side enforcement plus the reach control below.

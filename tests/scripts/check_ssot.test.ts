@@ -58,7 +58,6 @@ import {
   starterSelfPins,
   starterTemplateFiles,
   stepCarriesWithKey,
-  stripComments,
   stripGeneratedRegions,
   topLevelProperties,
   unsafeStepCondition,
@@ -1866,42 +1865,14 @@ describe("labelPreflightJobMismatches", () => {
   });
 });
 
-describe("stripComments", () => {
-  test("blanks line and block comments to spaces, keeping offsets and newlines", () => {
-    const source = "a; // tail\nb; /* mid */ c;";
-    const stripped = stripComments(source);
-    expect(stripped).toBe("a;        \nb;           c;");
-    expect(stripped.length).toBe(source.length);
+describe("regex and comment decoys stay outside the spawn scan", () => {
+  test("a call-shaped token inside a regex body is not code", () => {
+    expect(spawnSyncSites("const re = /Bun.spawnSync(cmd)/;", "f")).toEqual([]);
   });
 
-  test("string and template contents are never read as comment openers", () => {
-    expect(stripComments('const u = "https://x"; f();')).toBe('const u = "https://x"; f();');
-    expect(stripComments("const t = `a // b`;")).toBe("const t = `a // b`;");
-    expect(stripComments('const e = "q\\" // r"; g();')).toBe('const e = "q\\" // r"; g();');
-  });
-
-  test("a quote inside a regex literal never desyncs later comment stripping", () => {
-    // The live near miss: extractUsesPins' /['\"]?/ used to leave the
-    // quote state open, so every comment after it survived the strip and
-    // the rule read its own doc comments as code.
-    const source = "const m = line.match(/['\"]?/);\n/** a Bun.spawnSync mention */\nf();";
-    const stripped = stripComments(source);
-    expect(stripped).not.toContain("mention");
-    expect(stripped.length).toBe(source.length);
-  });
-
-  test("regex bodies are masked, so a call-shaped token inside one is not code", () => {
-    const source = "const re = /Bun.spawnSync(cmd)/;";
-    expect(stripComments(source)).toBe("const re = /                  /;");
-    expect(spawnSyncSites(source, "f")).toEqual([]);
-  });
-
-  test("division is not read as a regex opener", () => {
-    const source = "const half = total / 2; // tail\nconst r = a / b / c;";
-    const stripped = stripComments(source);
-    expect(stripped).toContain("total / 2;");
-    expect(stripped).not.toContain("tail");
-    expect(stripped).toContain("a / b / c;");
+  test("division never desyncs the scan into misreading later code", () => {
+    const source = "const half = total / 2; // tail\nBun.spawnSync(cmd);";
+    expect(spawnSyncSites(source, "f")).toEqual([{ line: 2, kind: "call", options: null }]);
   });
 });
 
@@ -2253,10 +2224,17 @@ describe("asyncStreamWriteMismatches", () => {
       "process?.stdout.write(out);",
       "process.stderr?.write(err);",
       "process.stdout.write?.(out);",
+      "process?.stdout.write?.(out);",
       "process . stdout . write (out);",
     ]) {
       expect(asyncStreamWriteMismatches("x/y.ts", `${spelling}\n`, false)).toHaveLength(1);
     }
+  });
+
+  test("a source the parser must recover throws instead of judging recovered shapes", () => {
+    expect(() =>
+      asyncStreamWriteMismatches("x/y.ts", "process.stdout.write(out;\n", false),
+    ).toThrow("syntax errors");
   });
 
   test("an allowlisted file whose writes ride to a natural exit passes", () => {
@@ -2270,9 +2248,11 @@ describe("asyncStreamWriteMismatches", () => {
       "process?.exit(1);",
       "process . exit(1);",
       'fail("boom");',
+      'gha.fail("boom");',
       "must(cmd);",
       "mustCapture(cmd);",
       'throw new Error("boom");',
+      'function later() {\n  throw new Error("boom");\n}',
     ]) {
       const found = asyncStreamWriteMismatches(
         "x/y.ts",

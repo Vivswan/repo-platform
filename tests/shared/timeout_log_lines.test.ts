@@ -9,19 +9,17 @@
 // When a redacting variant in proc.ts absorbs these lines, it takes these
 // pins with it.
 //
-// The scan is regex over comment-stripped source, not a parse, so its
-// error direction matters: everything that escapes the GUARD shape
-// (renamed variable, block form, an over-eager comment strip) lands on
-// the existence assertion and fails RED. The negative controls below keep
-// that direction pinned. Recorded residual: a decoy guard embedded in a
-// template-literal STRING in one of the four files would still count -
-// that requires writing such a string into a production script, which is
-// itself reviewable code.
+// The guard shape is read off the AST (ts_extract's parser), so a decoy
+// in a comment or a string is not a node at all, and everything that
+// falls outside the shape (renamed variable, block form) lands on the
+// existence assertion and fails RED. The negative controls below keep
+// that direction pinned.
 
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { stripComments } from "../../scripts/check_ssot.ts";
+import { Node } from "ts-morph";
+import { parseTs } from "../../scripts/ts_extract.ts";
 
 const SITES = [
   ".github/scripts/sync/clean_renders.ts",
@@ -30,8 +28,6 @@ const SITES = [
   ".github/scripts/fleet/select_settings_repos.ts",
 ];
 
-/** The expiry guard; captures the FULL console.error argument list. */
-const GUARD = /^\s*if \((?:proc|matrix)\.timedOut\) console\.error\((.*)\);$/gm;
 /** The whole argument list must be ONE literal naming the program only: a
  * plain double-quoted string, or a template literal whose sole
  * interpolation is ${command[0]} with nothing but plain text after it. A
@@ -39,22 +35,35 @@ const GUARD = /^\s*if \((?:proc|matrix)\.timedOut\) console\.error\((.*)\);$/gm;
  * (command.join, args, target) falls outside this shape. */
 const PROGRAM_ONLY = /^(?:"[^"]*"|`\$\{command\[0\]\}[^`$]*`)$/;
 
-// stripComments is check_ssot's lexer-backed view, imported DELIBERATELY
-// (this guard and stream_write_discipline.test.ts previously carried
-// same-named regex locals whose semantics a future dedupe could silently
-// swap): it blanks comments and regex bodies to SPACES, preserving line
-// structure and offsets, is string-aware (a // inside a string stays
-// text, so trailing comments strip without eating string content), and
-// keeps string text visible - which the GUARD argument capture needs. A
-// blanked comment line carries only spaces, so a decoy guard in a
-// comment cannot satisfy the existence check; GUARD's own line anchors
-// keep matching because blanking never joins or removes lines. The
-// likely error direction stays losing matches, which fails RED on the
-// existence check, never green.
-
-/** Every expiry guard's console.error argument list in `source`. */
+/** Every expiry guard's console.error argument list in `source`: an
+ * `if ((proc|matrix).timedOut) console.error(...)` statement - no else,
+ * no block - read off the AST. A renamed variable or a block form is
+ * OUTSIDE the shape on purpose: it yields zero guards, which the
+ * per-file test turns into a loud failure, never a silent pass. */
 function expiryGuards(source: string): string[] {
-  return [...stripComments(source).matchAll(GUARD)].map(([, argumentList]) => argumentList ?? "");
+  const guards: string[] = [];
+  for (const node of parseTs(source).forEachDescendantAsArray()) {
+    if (!Node.isIfStatement(node) || node.getElseStatement() !== undefined) continue;
+    const condition = node.getExpression();
+    if (!Node.isPropertyAccessExpression(condition) || condition.getName() !== "timedOut") {
+      continue;
+    }
+    const subject = condition.getExpression();
+    if (!Node.isIdentifier(subject) || !["proc", "matrix"].includes(subject.getText())) continue;
+    const then = node.getThenStatement();
+    if (!Node.isExpressionStatement(then)) continue;
+    const call = then.getExpression();
+    if (!Node.isCallExpression(call) || call.getExpression().getText() !== "console.error") {
+      continue;
+    }
+    guards.push(
+      call
+        .getArguments()
+        .map((argument) => argument.getText())
+        .join(", "),
+    );
+  }
+  return guards;
 }
 
 describe("hand-rolled deadline-expiry log lines", () => {
@@ -84,22 +93,31 @@ describe("the expiry-line scan rejects its known evasions", () => {
     expect(found[0]).toMatch(PROGRAM_ONLY);
   });
 
-  test("decoy guards in comments do not satisfy the existence check", () => {
+  test("decoy guards in comments or strings do not satisfy the existence check", () => {
     expect(expiryGuards('  // if (proc.timedOut) console.error("gh timed out");\n')).toEqual([]);
     expect(expiryGuards('/*\nif (proc.timedOut) console.error("gh timed out");\n*/\n')).toEqual([]);
+    expect(
+      expiryGuards("const doc = 'if (proc.timedOut) console.error(\"gh timed out\")';\n"),
+    ).toEqual([]);
   });
 
-  test("argv-leaking argument lists fail the program-only shape", () => {
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: literal leaking source under test
-    expect('`${command.join(" ")} timed out`').not.toMatch(PROGRAM_ONLY);
-    expect('"timed out", command.join(" ")').not.toMatch(PROGRAM_ONLY);
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: literal leaking source under test
-    expect("`${command[0]} timed out: ${target}`").not.toMatch(PROGRAM_ONLY);
-    expect('"timed out: " + command.join(" ")').not.toMatch(PROGRAM_ONLY);
+  test("argv-leaking argument lists fail the program-only shape through the extractor itself", () => {
+    const leaks = [
+      'if (proc.timedOut) console.error(`${command.join(" ")} timed out`);',
+      'if (proc.timedOut) console.error("timed out", command.join(" "));',
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: literal leaking source under test
+      "if (proc.timedOut) console.error(`${command[0]} timed out: ${target}`);",
+      'if (proc.timedOut) console.error("timed out: " + command.join(" "));',
+    ];
+    for (const leak of leaks) {
+      const [argumentList] = expiryGuards(`${leak}\n`);
+      expect(argumentList).toBeDefined();
+      expect(argumentList).not.toMatch(PROGRAM_ONLY);
+    }
   });
 
   test("a reshaped guard escapes the scan and must therefore fail red on existence", () => {
-    // Renamed variable and block form are OUTSIDE the GUARD shape on
+    // Renamed variable and block form are OUTSIDE the guard shape on
     // purpose: they yield zero guards, which the per-file test turns into
     // a loud failure - never a silent pass over an unexamined line.
     expect(expiryGuards('if (r.timedOut) console.error("gh timed out");\n')).toEqual([]);
