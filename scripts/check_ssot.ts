@@ -41,6 +41,12 @@ import { type JinjaVars, normalizeJinja, placeholderJinja } from "./jinja_subset
 import { loadManifests as loadManifestsFresh, type ModuleManifest } from "./module_manifests.ts";
 import { landedPathAndGates, loadBaseOwnership } from "./ownership.ts";
 import { ANSWERS_FILE, parseAnswers } from "./render_dogfood.ts";
+import {
+  constNumberValue,
+  constRegexSource,
+  constStringValue,
+  templateCarries,
+} from "./ts_extract.ts";
 
 const REPO_ROOT = resolve(import.meta.dir, "..");
 
@@ -212,25 +218,17 @@ export function mustMatch(text: string, re: RegExp, where: string, what: string)
   return match;
 }
 
-/** The all-green-name rule's text anchors into executable wiring, exported
- *  so the suite can prove BOTH directions on the exact patterns the rule
- *  runs. Line-anchored (^\s*...): a commented-out copy of the wiring (`#`
- *  in the run block, `//` in the predicate) starts its line with the
- *  comment marker, which the anchor rejects - dead wiring must never
- *  satisfy the rule. */
+/** The all-green-name rule's text anchors into executable YAML wiring,
+ *  exported so the suite can prove BOTH directions on the exact patterns
+ *  the rule runs. Line-anchored (^\s*...): a commented-out copy of the
+ *  wiring starts its line with the comment marker, which the anchor
+ *  rejects - dead wiring must never satisfy the rule. (The TS-source
+ *  anchors - CHECK_NAME's declaration, the check-run lookup, the
+ *  validator's REQUIRED_GATE_JOB - are AST queries via ts_extract.ts,
+ *  where a commented or string-embedded decoy is not a node at all.) */
 export const ALL_GREEN_WIRING = {
-  /** The predicate's CHECK_NAME declaration, the exact, COMPLETE
-   *  exported-const line (the `";` end anchor rejects a concatenation's
-   *  left half). Not the value's source - the rule imports CHECK_NAME
-   *  and compares this line against it, so a decoy the pattern could
-   *  still match (a look-alike line inside a multiline template)
-   *  mismatches instead of standing in. */
-  checkName: /^export const CHECK_NAME = "([^"]+)";$/m,
   /** The verdict's check-run POST names the check. */
   created: /^\s*-f "name=([^"]+)"/m,
-  /** The green gates' lookup keys on the shared CHECK_NAME constant. */
-  lookup:
-    /^\s*`repos\/\$\{repository\}\/commits\/\$\{sha\}\/check-runs\?check_name=\$\{CHECK_NAME\}/m,
   /** The fleet wrapper template pins the verdict's anchor job. */
   anchor: /^\s*require-job: (\S[^\n#]*?)\s*$/m,
   /** The reusable wires the anchor input into the judging step. */
@@ -250,9 +248,15 @@ export const ALL_GREEN_WIRING = {
    *  author key. */
   authorTypeWired:
     /^\s*PR_AUTHOR_TYPE: \$\{\{ github\.event_name == 'pull_request_review' && github\.event\.pull_request\.user\.type \|\| '' \}\}$/m,
-  /** The render validator enforces the same anchor at sync time. */
-  anchorValidated: /^\s*const REQUIRED_GATE_JOB = "([^"]+)";$/m,
 };
+
+/** The check-run lookup template's leading text, backtick included: the
+ *  green gates must key their lookup on the shared CHECK_NAME constant.
+ *  Matched against string/template literals only (templateCarries), so a
+ *  commented-out copy of the wiring is not a literal and never counts. */
+// biome-ignore lint/suspicious/noTemplateCurlyInString: the literal lookup shape under pin
+export const CHECK_RUN_LOOKUP =
+  "`repos/${repository}/commits/${sha}/check-runs?check_name=${CHECK_NAME}";
 
 // The two Actions expressions the heal's sha plumbing routes through,
 // pinned as data so the structural checks below and the workflow can
@@ -419,33 +423,19 @@ export function settingsHealShaPlumbingMismatches(text: string): Mismatch[] {
   return mismatches;
 }
 
-/** The predicate's declared check name, extracted syntax-aware: the
- *  declaration LINE is located on the masked view (comments, strings,
- *  and template TEXT blanked - so a look-alike inside a multiline
- *  template, same value or not, can never be the line found), then the
- *  value is read from the comment-stripped view at the same offset
- *  (the two views are same-length by construction). A declaration
- *  rewritten as anything but the exact exported-const line throws
- *  anchor-lost. */
+/** The predicate's declared check name, read from the AST: the single
+ *  top-level `export const CHECK_NAME` declaration whose value is a
+ *  plain string literal. A look-alike inside a comment, a string, or a
+ *  multiline template is not a declaration node and can never be the one
+ *  found; a declaration rewritten to any non-literal shape (a
+ *  concatenation, a join) throws anchor-lost rather than passing on a
+ *  value the pin cannot see whole. */
 export function declaredCheckName(source: string): string {
-  const { stripped, masked } = scanSource(source);
-  const at = mustMatch(masked, ALL_GREEN_WIRING.checkName, "all_green.ts", "verdict check name");
-  const declared = mustMatch(
-    stripped.slice(at.index),
-    ALL_GREEN_WIRING.checkName,
-    "all_green.ts",
-    "verdict check name",
-  );
-  // The value must come from the LOCATED line, index 0 of the slice: a
-  // declaration whose value the pattern cannot re-read there (an
-  // escaped quote) must throw rather than let the search drift to a
-  // later look-alike.
-  if (declared.index !== 0) {
-    throw new Error(
-      "all_green.ts: the CHECK_NAME declaration's value could not be read at its located line",
-    );
-  }
-  return declared[1];
+  return constStringValue(source, "CHECK_NAME", {
+    where: "all_green.ts",
+    what: "verdict check name",
+    exported: true,
+  });
 }
 
 // --- comparison shaping ----------------------------------------------------
@@ -3027,12 +3017,11 @@ const rules: Rule[] = [
     name: "starter-pin-rollout",
     run: () => {
       const mismatches: Mismatch[] = [];
-      const published = mustMatch(
+      const published = constStringValue(
         read(".github/scripts/build-branches/publish.ts"),
-        /^const BRANCH = "([^"]+)";$/m,
-        "publish.ts",
-        "the delivery branch",
-      )[1];
+        "BRANCH",
+        { where: "publish.ts", what: "the delivery branch" },
+      );
       if (published !== DELIVERY_REF) {
         mismatches.push({
           file: "scripts/check_ssot.ts DELIVERY_REF",
@@ -3695,18 +3684,14 @@ const rules: Rule[] = [
       const fuzzTracking = trackingManifests().find((m) => m.module === "fuzzer")?.tracking;
       if (!fuzzTracking) throw new Error("templates/fuzzer/module.yml lost tracking_label");
       const action = read("actions/fuzz-issue/fuzz-issue.ts");
-      const color = mustMatch(
-        action,
-        /DEFAULT_LABEL_COLOR = "([^"]+)"/,
-        "fuzz-issue.ts",
-        "label color",
-      )[1];
-      const description = mustMatch(
-        action,
-        /DEFAULT_LABEL_DESCRIPTION = "([^"]+)"/,
-        "fuzz-issue.ts",
-        "label description",
-      )[1];
+      const color = constStringValue(action, "DEFAULT_LABEL_COLOR", {
+        where: "fuzz-issue.ts",
+        what: "label color",
+      });
+      const description = constStringValue(action, "DEFAULT_LABEL_DESCRIPTION", {
+        where: "fuzz-issue.ts",
+        what: "label description",
+      });
       if (color !== fuzzTracking.color || description !== fuzzTracking.description) {
         mismatches.push({
           file: "actions/fuzz-issue/fuzz-issue.ts label defaults",
@@ -3982,12 +3967,12 @@ const rules: Rule[] = [
       }
       // The publish/sync gates' LOOKUP must consume the same constant, or
       // they could read a differently named check than the one pinned.
-      mustMatch(
-        predicate,
-        ALL_GREEN_WIRING.lookup,
-        "all_green.ts",
-        "a check-run lookup keyed on CHECK_NAME",
-      );
+      if (!templateCarries(predicate, CHECK_RUN_LOOKUP)) {
+        throw new Error(
+          "all_green.ts: anchor for a check-run lookup keyed on CHECK_NAME not found " +
+            `(no template literal carries ${CHECK_RUN_LOOKUP})`,
+        );
+      }
 
       const reusable = read(".github/workflows/reusable-all-green.yml");
       const created = mustMatch(
@@ -4044,12 +4029,14 @@ const rules: Rule[] = [
         ".github/workflows/reusable-all-green.yml",
         "the PR_AUTHOR_TYPE env wiring (github.event.pull_request.user.type, never an actor)",
       );
-      const validated = mustMatch(
+      const validated = constStringValue(
         read("actions/validate-template/validate_generated_files.ts"),
-        ALL_GREEN_WIRING.anchorValidated,
-        "actions/validate-template/validate_generated_files.ts",
-        "the validator's REQUIRED_GATE_JOB",
-      )[1];
+        "REQUIRED_GATE_JOB",
+        {
+          where: "actions/validate-template/validate_generated_files.ts",
+          what: "the validator's REQUIRED_GATE_JOB",
+        },
+      );
       if (validated !== anchor) {
         mismatches.push({
           file: "actions/validate-template/validate_generated_files.ts",
@@ -4640,12 +4627,11 @@ const rules: Rule[] = [
     run: () => {
       const mismatches: Mismatch[] = [];
       const action = read("actions/fuzz-issue/fuzz-issue.ts");
-      const labelRe = mustMatch(
-        action,
-        /export const LABEL_RE = \/(.+)\/;/,
-        "fuzz-issue.ts",
-        "LABEL_RE",
-      )[1];
+      const labelRe = constRegexSource(action, "LABEL_RE", {
+        where: "fuzz-issue.ts",
+        what: "LABEL_RE",
+        exported: true,
+      });
       const streams = trackingManifests();
       for (const [index, { tracking }] of streams.entries()) {
         const question = asRecord(copierConfig()[tracking.answer], `copier.yml ${tracking.answer}`);
@@ -4720,20 +4706,15 @@ const rules: Rule[] = [
       const mismatches: Mismatch[] = [];
       const action = read("actions/fuzz-issue/fuzz-issue.ts");
       const num = (name: string) =>
-        Number(
-          mustMatch(
-            action,
-            new RegExp(`const ${name} = ([\\d_]+)`),
-            "fuzz-issue.ts",
-            name,
-          )[1].replace(/_/g, ""),
-        );
+        constNumberValue(action, name, { where: "fuzz-issue.ts", what: name });
       const reportLines = num("REPORT_LINES");
       const maxBody = num("MAX_BODY");
       const maxBlockChars = num("MAX_BLOCK_CHARS");
+      // The doc quotes DIR_NAME's body between its ^...$ anchors; a
+      // reshaped regex (anchors gone) is a lost anchor, not a new quote.
       const dirRe = mustMatch(
-        action,
-        /const DIR_NAME = \/\^(.+)\$\/;/,
+        constRegexSource(action, "DIR_NAME", { where: "fuzz-issue.ts", what: "DIR_NAME" }),
+        /^\^([\s\S]+)\$$/,
         "fuzz-issue.ts",
         "DIR_NAME",
       )[1];

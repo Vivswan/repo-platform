@@ -17,6 +17,7 @@ import {
   asyncStreamWriteMismatches,
   bunRuntimeMismatches,
   bunTypesAheadMismatches,
+  CHECK_RUN_LOOKUP,
   canonical,
   composeAnchorNames,
   DELIVERY_REF,
@@ -69,6 +70,7 @@ import {
 } from "../../scripts/check_ssot";
 import { TOOLCHAIN_SETUP_FRAGMENT, TOOLCHAIN_SETUP_TARGETS } from "../../scripts/compose_template";
 import { MARKER_TOKENS, mdMarkers } from "../../scripts/generate";
+import { constStringValue, templateCarries } from "../../scripts/ts_extract.ts";
 
 describe("applyDivergences", () => {
   const entry = {
@@ -181,26 +183,30 @@ describe("ALL_GREEN_WIRING", () => {
     expect(ALL_GREEN_WIRING.created.exec(commented)).toBeNull();
   });
 
-  test("the CHECK_NAME pin matches only the exact exported declaration line", () => {
+  test("declaredCheckName reads only the real exported declaration - comment, string, nested, and concatenation spoofs all throw or are skipped", () => {
     const active = 'export const CHECK_NAME = "all-green";';
-    expect(mustMatch(active, ALL_GREEN_WIRING.checkName, "f", "name")[1]).toBe("all-green");
-    // The looser pre-pin pattern matched all four of these spoofs: a
-    // commented copy, an indented (nested, non-exported) copy, a
-    // declaration embedded in string content, and the left half of a
-    // concatenation whose runtime value is a different name. (A decoy
-    // at line start INSIDE a multiline template can still match the
-    // pattern - the rule closes that by importing CHECK_NAME and
-    // requiring the matched line to agree with it.)
-    expect(ALL_GREEN_WIRING.checkName.exec(`// ${active}`)).toBeNull();
-    expect(ALL_GREEN_WIRING.checkName.exec(`  ${active}`)).toBeNull();
-    expect(ALL_GREEN_WIRING.checkName.exec(`const doc = '${active}';`)).toBeNull();
-    expect(
-      ALL_GREEN_WIRING.checkName.exec('export const CHECK_NAME = "all-green" + "-spoof";'),
-    ).toBeNull();
+    expect(declaredCheckName(`${active}\n`)).toBe("all-green");
+    // The spoof set the retired regex pin guarded against, now
+    // unrepresentable by construction: none of these carries a top-level
+    // exported string-literal declaration NODE, so each throws
+    // anchor-lost instead of standing in.
+    expect(() => declaredCheckName(`// ${active}\n`)).toThrow("verdict check name");
+    expect(() => declaredCheckName(`function f() {\n  const CHECK_NAME = "x";\n}\n`)).toThrow(
+      "verdict check name",
+    );
+    expect(() => declaredCheckName(`const doc = '${active}';\n`)).toThrow("verdict check name");
+    expect(() => declaredCheckName('export const CHECK_NAME = "all-green" + "-spoof";\n')).toThrow(
+      "verdict check name",
+    );
     // The neighbouring COPILOT_CHECK_NAME constant is a different anchor.
-    expect(
-      ALL_GREEN_WIRING.checkName.exec('export const COPILOT_CHECK_NAME = "copilot";'),
-    ).toBeNull();
+    expect(() => declaredCheckName('export const COPILOT_CHECK_NAME = "copilot";\n')).toThrow(
+      "verdict check name",
+    );
+    // An UNEXPORTED declaration is not the shared constant the gates
+    // import - being exported is part of the pinned fact.
+    expect(() => declaredCheckName('const CHECK_NAME = "all-green";\n')).toThrow(
+      "verdict check name",
+    );
   });
 
   test("declaredCheckName reads the CODE declaration, not a template decoy - same value or not", () => {
@@ -208,38 +214,42 @@ describe("ALL_GREEN_WIRING", () => {
     expect(declaredCheckName(`${real}\n`)).toBe("real-name");
     // A decoy inside a multiline template BEFORE the real declaration,
     // carrying the expected value: raw first-match extraction returned
-    // the decoy; the masked-view locate must skip it and still find the
-    // real line (whose different value the rule then flags).
+    // the decoy; the AST sees one declaration node and reads it (whose
+    // different value the rule then flags).
     const decoyed = 'const doc = `\nexport const CHECK_NAME = "all-green";\n`;\n' + `${real}\n`;
     expect(declaredCheckName(decoyed)).toBe("real-name");
     // A decoy with NO code declaration behind it is a lost anchor, as
-    // is a declaration rewritten off the exact-line form.
+    // is a declaration rewritten off the string-literal form.
     expect(() => declaredCheckName('const doc = `\nexport const CHECK_NAME = "x";\n`;\n')).toThrow(
       "verdict check name",
     );
     expect(() =>
       declaredCheckName('export const CHECK_NAME = ["all", "green"].join("-");\n'),
     ).toThrow("verdict check name");
-    expect(() => declaredCheckName('// export const CHECK_NAME = "x";\n')).toThrow(
-      "verdict check name",
-    );
-    // A declaration whose value cannot be re-read at its own line (an
-    // escaped quote) must throw, never drift to a later look-alike
-    // (reviewer's probe: the template text below is a line-start decoy
-    // the comment-stripped view still carries).
-    expect(() =>
+    // An escaped quote in the value is just a value to the AST (the
+    // retired lexer had to throw here); the rule still flags it because
+    // the imported CHECK_NAME cannot carry the same bytes vacuously.
+    expect(
       declaredCheckName(
         'export const CHECK_NAME = "a\\"b";\nconst doc = `\nexport const CHECK_NAME = "decoy";\n`;\n',
       ),
-    ).toThrow("could not be read");
+    ).toBe('a"b');
   });
 
-  test("the lookup anchor matches the active template literal and rejects a commented one", () => {
+  test("the lookup pin matches the active template literal and rejects commented or string-embedded copies", () => {
     // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal source line under test
     const line =
-      "`repos/${repository}/commits/${sha}/check-runs?check_name=${CHECK_NAME}&filter=latest`";
-    expect(ALL_GREEN_WIRING.lookup.exec(`      ${line}`)).not.toBeNull();
-    expect(ALL_GREEN_WIRING.lookup.exec(`      // ${line}`)).toBeNull();
+      "const url = `repos/${repository}/commits/${sha}/check-runs?check_name=${CHECK_NAME}&filter=latest`;";
+    expect(templateCarries(line, CHECK_RUN_LOOKUP)).toBe(true);
+    expect(templateCarries(`// ${line}`, CHECK_RUN_LOOKUP)).toBe(false);
+    // A double-quoted decoy spells the backtick as an escape, which is
+    // not the template shape the pin names.
+    expect(
+      templateCarries(
+        'const doc = "\\`repos/${repository}/commits/${sha}/check-runs?check_name=${CHECK_NAME}";',
+        CHECK_RUN_LOOKUP,
+      ),
+    ).toBe(false);
   });
 
   test("the anchor pin matches the active require-job line and rejects a commented one", () => {
@@ -250,14 +260,17 @@ describe("ALL_GREEN_WIRING", () => {
     expect(ALL_GREEN_WIRING.anchor.exec("      # require-job: ci / validate-template")).toBeNull();
   });
 
-  test("the anchor's env wiring and validator pins match active lines only", () => {
+  test("the anchor's env wiring pin matches active lines only; the validator pin reads the AST declaration", () => {
     // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal source line under test
     const wired = "          REQUIRE_JOB: ${{ inputs.require-job }}";
     expect(ALL_GREEN_WIRING.anchorWired.exec(wired)).not.toBeNull();
     expect(ALL_GREEN_WIRING.anchorWired.exec(`          # ${wired.trim()}`)).toBeNull();
     const validated = 'const REQUIRED_GATE_JOB = "ci / validate-template";';
-    expect(ALL_GREEN_WIRING.anchorValidated.exec(validated)?.[1]).toBe("ci / validate-template");
-    expect(ALL_GREEN_WIRING.anchorValidated.exec(`// ${validated}`)).toBeNull();
+    const anchor = { where: "f", what: "REQUIRED_GATE_JOB" };
+    expect(constStringValue(validated, "REQUIRED_GATE_JOB", anchor)).toBe("ci / validate-template");
+    expect(() => constStringValue(`// ${validated}`, "REQUIRED_GATE_JOB", anchor)).toThrow(
+      "REQUIRED_GATE_JOB",
+    );
   });
 
   test("the author env pins match the pull-request-author lines only - actor and reviewer sources never satisfy them", () => {
