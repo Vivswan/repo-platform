@@ -1,0 +1,8 @@
+#!/bin/sh
+set -e
+
+# The pre-commit gates run BEFORE the commit message exists, so a subject
+# CI's commit-names job refuses (a comma in the scope, a bad type) used
+# to reach main unchecked and go red there. This stage sees the message:
+# judge its subject against the same grammar CI enforces.
+bun scripts/check_commit_subject.ts "$1"

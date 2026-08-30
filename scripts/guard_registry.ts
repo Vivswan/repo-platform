@@ -300,6 +300,34 @@ export const GUARD_REGISTRY: readonly GuardEntry[] = [
     testFile: "tests/sync/preserve_local_content.test.ts",
     testName: "throws on an unknown grammar instead of degrading",
   },
+  // The commit-msg gate (scripts/check_commit_subject.ts, dispatched by
+  // .husky/commit-msg): the pre-commit gates run before the message
+  // exists, so a subject CI's commit-names job refuses - the comma-scope
+  // class, `docs(all-green,build-provenance): ...` - reached main and
+  // went red there on 2026-08-30. Two entries because either half can
+  // rot alone: the refusal branch inside the script, and the husky
+  // dispatch line that makes the script fire at commit time.
+  {
+    id: "commit-subject-refusal",
+    hazard:
+      "a subject CI's commit-names job will refuse (a comma in the scope, a bad type) sails through every local gate - pre-commit runs before the message exists, so the class reddens main on every occurrence",
+    guardFile: "scripts/check_commit_subject.ts",
+    snippet: "if (!candidates.some(acceptable)) {",
+    mutated: "if (false) {",
+    testFile: "tests/scripts/check_commit_subject.test.ts",
+    testName: "a comma-scoped subject is REFUSED by the commit-msg gate, naming the subject",
+  },
+  {
+    id: "commit-subject-hook-wiring",
+    hazard:
+      "the gate script exists but nothing runs it at commit time: the husky dispatch line deleted or stubbed leaves every subject unjudged while the script and its own tests stay green",
+    guardFile: ".husky/commit-msg",
+    snippet: 'bun scripts/check_commit_subject.ts "$1"',
+    mutated: ': "$1"',
+    testFile: "tests/scripts/check_commit_subject.test.ts",
+    testName:
+      "the .husky/commit-msg wiring dispatches to the gate - a refused subject blocks the commit",
+  },
 ];
 
 /** Occurrences of `token` in `text` (exact bytes, no regex). */
