@@ -85,12 +85,7 @@ import { createHash } from "node:crypto";
 import { lstatSync, readdirSync, readFileSync, readlinkSync, writeFileSync } from "node:fs";
 import { extname, join, resolve } from "node:path";
 import { parseAllDocuments, parse as parseYaml } from "yaml";
-import {
-  GRAMMAR,
-  type GrammarId,
-  HEADER_WINDOW,
-  type RegionSplitGrammar,
-} from "../shared/grammar.ts";
+import { GRAMMAR, HEADER_WINDOW, knownGrammar, type RegionSplit } from "../shared/grammar.ts";
 import { MANIFEST_NAME, type ManifestEntryShape, parseManifestFiles } from "../shared/manifest.ts";
 import { managedHalf } from "../shared/stamp_manifest.ts";
 
@@ -111,10 +106,6 @@ const SKIP_DIRS = new Set([
   ".ruff_cache",
   ".mypy_cache",
 ]);
-
-/** The GRAMMAR table's key set, for membership tests over untyped manifest
- *  JSON (the table itself is keyed by the typed GrammarId). */
-const KNOWN_GRAMMARS = Object.keys(GRAMMAR) as GrammarId[];
 
 /** The verdict's anchor job as the judged run names it: the managed
  *  ci.yml's `ci` caller prefixing fleet-ci's unconditional
@@ -183,23 +174,23 @@ const BASE_OWNERSHIP: BaseOwnedFile[] = [
   { path: "SECURITY.md", kind: "marker", marker: "<!-- repo-platform:local-section -->" },
 ];
 
-const BASE_REGION_SPLITS: Record<string, RegionSplitGrammar> = {
+const BASE_REGION_SPLITS: Record<string, RegionSplit> = {
   ".gitignore": {
-    managedBegin: "# BEGIN REPO-PLATFORM MANAGED",
-    managedEnd: "# END REPO-PLATFORM MANAGED",
-    localBegin: "# BEGIN REPOSITORY LOCAL",
-    localEnd: "# END REPOSITORY LOCAL",
+    managed_begin: "# BEGIN REPO-PLATFORM MANAGED",
+    managed_end: "# END REPO-PLATFORM MANAGED",
+    local_begin: "# BEGIN REPOSITORY LOCAL",
+    local_end: "# END REPOSITORY LOCAL",
   },
 };
 // END GENERATED: base-ownership
 
 /** Marker lines required exactly once per file (substring-counted, so a
- *  buried mention is a duplicate too), derived from the declared
- *  bounded-region grammars so the two can never drift apart. */
+ *  buried mention is a duplicate too), read from the declared
+ *  bounded-region grammars' GRAMMAR row so the two can never drift apart. */
 const MARKER_FILES: Record<string, string[]> = Object.fromEntries(
   Object.entries(BASE_REGION_SPLITS).map(([path, grammar]) => [
     path,
-    [grammar.localBegin, grammar.localEnd, grammar.managedBegin, grammar.managedEnd],
+    [...GRAMMAR["bounded-region"].markers(grammar)],
   ]),
 );
 
@@ -1366,21 +1357,21 @@ function main(): number {
         }
         const markerPairOk =
           entry.class === "split" &&
-          entry.marker === grammar.managedBegin &&
+          entry.marker === grammar.managed_begin &&
           entry.managed === GRAMMAR["bounded-region"].side;
         // A missing grammar field is the structural loop's single report;
-        // a present one must name the declared grammar and its strings.
+        // a present one must name the declared grammar and its strings
+        // (the GRAMMAR row's wireExtras column names the fields, so this
+        // check follows a new field automatically).
         const grammarOk =
           !("grammar" in entry) ||
           (entry.grammar === "bounded-region" &&
-            entry.managed_end === grammar.managedEnd &&
-            entry.local_begin === grammar.localBegin &&
-            entry.local_end === grammar.localEnd);
+            GRAMMAR["bounded-region"].wireExtras.every((field) => entry[field] === grammar[field]));
         if (!markerPairOk || !grammarOk) {
           metadataError(
             rel,
             "does not match the managed-section grammar",
-            `split with the managed half below "${grammar.managedBegin}"`,
+            `split with the managed half below "${grammar.managed_begin}"`,
           );
         }
       }
@@ -1494,19 +1485,18 @@ function main(): number {
           }
           // A present grammar must agree with the managed side its GRAMMAR
           // row declares (the one statement of each grammar's side) and
-          // carry its region marker strings.
-          const grammarId = KNOWN_GRAMMARS.find((known) => known === entry.grammar) ?? null;
+          // carry the row's wireExtras marker strings (the one statement
+          // of each grammar's field set). knownGrammar is the table's own
+          // membership test for untyped manifest JSON.
+          const grammarId = knownGrammar(entry.grammar);
           const grammarProblem =
             grammarId === null
               ? `declares unknown split grammar ${JSON.stringify(entry.grammar)}`
               : entry.managed !== GRAMMAR[grammarId].side
                 ? `declares the ${grammarId} grammar with a managed half not ` +
                   JSON.stringify(GRAMMAR[grammarId].side)
-                : grammarId === "bounded-region" &&
-                    (typeof entry.managed_end !== "string" ||
-                      typeof entry.local_begin !== "string" ||
-                      typeof entry.local_end !== "string")
-                  ? "declares the bounded-region grammar without its region marker strings"
+                : GRAMMAR[grammarId].wireExtras.some((field) => typeof entry[field] !== "string")
+                  ? `declares the ${grammarId} grammar without its region marker strings`
                   : null;
           if (grammarProblem !== null) {
             errors.push(
