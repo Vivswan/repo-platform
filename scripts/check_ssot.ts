@@ -1864,18 +1864,22 @@ function stdioShape(
   };
 }
 
-// The Bun-global receiver, shared by the sync and async spawn scans and
-// hardened against decorative spellings: parentheses, the TS non-null
-// `!`, and type-only wrappers unwrap to the same receiver, and a
-// property access ENDING in `.Bun` (globalThis.Bun, like the old scan's
-// token boundary) counts too - over-matching someone else's `.Bun` is
-// the loud direction. The recorded residual: an alias of Bun itself
+// A GLOBAL receiver (Bun, process), shared by the spawn and stream-write
+// scans and hardened against decorative spellings: parentheses, the TS
+// non-null `!`, and type-only wrappers unwrap to the same receiver, and a
+// property access ENDING in the global's name (globalThis.Bun,
+// globalThis.process - like the old scans' token boundary) counts too -
+// over-matching someone else's `.Bun`/`.process` is the loud direction.
+// Identifier names match EXACTLY: a look-alike like `fakeprocess` is not
+// the global (the retired stream-write regex over-flagged it for want of
+// a left boundary - a recorded precision delta, not a lost guard).
+// The recorded residual: an alias of the global itself
 // (`const b = Bun; b.spawnSync(...)`) - nothing in house style writes
 // that, and the proc.ts helpers are the sanctioned route.
-function isBunReceiver(expression: Expression): boolean {
+function isGlobalReceiver(expression: Expression, name: string): boolean {
   const node = unwrapExpression(expression);
-  if (Node.isIdentifier(node)) return node.getText() === "Bun";
-  return Node.isPropertyAccessExpression(node) && node.getName() === "Bun";
+  if (Node.isIdentifier(node)) return node.getText() === name;
+  return Node.isPropertyAccessExpression(node) && node.getName() === name;
 }
 
 /** Whether a property-name text names spawnSync as a whole word - the
@@ -1949,7 +1953,7 @@ export function spawnSyncSites(source: string, where: string): SpawnSyncSite[] {
     if (
       Node.isPropertyAccessExpression(node) &&
       node.getName() === "spawnSync" &&
-      isBunReceiver(node.getExpression())
+      isGlobalReceiver(node.getExpression(), "Bun")
     ) {
       const line = node.getStartLineNumber();
       const call = enclosingCall(node);
@@ -1957,14 +1961,15 @@ export function spawnSyncSites(source: string, where: string): SpawnSyncSite[] {
       else sites.push({ line, kind: "call", options: spawnOptionsText(call) });
       continue;
     }
-    if (Node.isElementAccessExpression(node) && isBunReceiver(node.getExpression())) {
+    if (Node.isElementAccessExpression(node) && isGlobalReceiver(node.getExpression(), "Bun")) {
       sites.push({ line: node.getStartLineNumber(), kind: "reference" });
       continue;
     }
     // The destructure shapes: `const { spawnSync } = Bun` (a binding
     // pattern, parameter defaults included) and `({ spawnSync } = Bun)`
-    // (an assignment target). The initializer's ROOT identifier is the
-    // test, so `= Bun.anything` fails closed too.
+    // (an assignment target). The initializer counts when its ROOT
+    // identifier is Bun (`= Bun.anything` fails closed too) or when it
+    // is the global receiver itself in any spelling (globalThis.Bun).
     if (Node.isObjectBindingPattern(node)) {
       const owner = node.getParent();
       const initializer =
@@ -1976,7 +1981,11 @@ export function spawnSyncSites(source: string, where: string): SpawnSyncSite[] {
         .some((element) =>
           namesSpawnSync((element.getPropertyNameNode() ?? element.getNameNode()).getText()),
         );
-      if (pulls && initializer !== undefined && rootIdentifier(initializer) === "Bun") {
+      if (
+        pulls &&
+        initializer !== undefined &&
+        (rootIdentifier(initializer) === "Bun" || isGlobalReceiver(initializer, "Bun"))
+      ) {
         sites.push({ line: node.getStartLineNumber(), kind: "reference" });
       }
       continue;
@@ -1996,7 +2005,10 @@ export function spawnSyncSites(source: string, where: string): SpawnSyncSite[] {
                 Node.isPropertyAssignment(property)) &&
               namesSpawnSync(property.getNameNode().getText()),
           );
-      if (pulls && rootIdentifier(node.getRight()) === "Bun") {
+      if (
+        pulls &&
+        (rootIdentifier(node.getRight()) === "Bun" || isGlobalReceiver(node.getRight(), "Bun"))
+      ) {
         sites.push({ line: node.getStartLineNumber(), kind: "reference" });
       }
     }
@@ -2120,7 +2132,7 @@ export function asyncSpawnMismatches(rel: string, source: string, enumerated: bo
       (node): node is PropertyAccessExpression =>
         Node.isPropertyAccessExpression(node) &&
         node.getName() === "spawn" &&
-        isBunReceiver(node.getExpression()),
+        isGlobalReceiver(node.getExpression(), "Bun"),
     )
     .map((node) => node.getStartLineNumber());
   if (!enumerated) {
@@ -2189,8 +2201,7 @@ function asyncStreamWriteCalls(source: string): CallExpression[] {
       ) {
         return false;
       }
-      const root = unwrapExpression(stream.getExpression());
-      return Node.isIdentifier(root) && root.getText() === "process";
+      return isGlobalReceiver(stream.getExpression(), "process");
     });
 }
 
@@ -2208,8 +2219,7 @@ function exitCapableAfter(source: string, at: number): boolean {
       if (node.getStart() < at) return false;
       if (Node.isThrowStatement(node)) return true;
       if (Node.isPropertyAccessExpression(node) && node.getName() === "exit") {
-        const root = unwrapExpression(node.getExpression());
-        return Node.isIdentifier(root) && root.getText() === "process";
+        return isGlobalReceiver(node.getExpression(), "process");
       }
       if (!Node.isCallExpression(node)) return false;
       const callee = unwrapExpression(node.getExpression());

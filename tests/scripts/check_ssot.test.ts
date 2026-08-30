@@ -1246,6 +1246,9 @@ describe("spawnSyncSites", () => {
     expect(spawnSyncSites('const { ["spawnSync"]: s } = Bun;', "f")).toEqual([
       { line: 1, kind: "reference" },
     ]);
+    expect(spawnSyncSites("const { spawnSync } = globalThis.Bun;", "f")).toEqual([
+      { line: 1, kind: "reference" },
+    ]);
   });
 });
 
@@ -2237,6 +2240,7 @@ describe("asyncStreamWriteMismatches", () => {
       "process.stdout.write?.(out);",
       "process?.stdout.write?.(out);",
       "process . stdout . write (out);",
+      "globalThis.process.stdout.write(out);",
     ]) {
       expect(asyncStreamWriteMismatches("x/y.ts", `${spelling}\n`, false)).toHaveLength(1);
     }
@@ -2258,6 +2262,7 @@ describe("asyncStreamWriteMismatches", () => {
       "process.exit(1);",
       "process?.exit(1);",
       "process . exit(1);",
+      "globalThis.process.exit(1);",
       'fail("boom");',
       'gha.fail("boom");',
       "must(cmd);",
