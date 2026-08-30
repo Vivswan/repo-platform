@@ -12,7 +12,6 @@ import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import {
   ALL_GREEN_CONTEXT,
   appendRules,
-  COPILOT_REVIEW_CONTEXT,
   duplicateNameWarnings,
   GITHUB_ACTIONS_APP_ID,
   identityKeyIssues,
@@ -580,7 +579,7 @@ describe("the override layer", () => {
     expect((result.document.repository as Record<string, unknown>).description).toBe("mine");
   });
 
-  test("the shipped override layer requires all-green and Copilot's review check, both pinned to Actions", () => {
+  test("the shipped override layer requires exactly all-green, pinned to Actions - the retired Copilot context must not creep back", () => {
     const shipped = loadOverrideLayer();
     const main = (shipped.rulesets as Record<string, unknown>[]).find((r) => r.name === "main");
     expect(main).toBeDefined();
@@ -588,13 +587,14 @@ describe("the override layer", () => {
     const checks = rules.find((r) => r.type === "required_status_checks")?.parameters as {
       required_status_checks: { context: string; integration_id: number }[];
     };
-    expect(checks.required_status_checks.map((c) => c.context).sort()).toEqual([
-      ALL_GREEN_CONTEXT,
-      COPILOT_REVIEW_CONTEXT,
-    ]);
-    // Both check runs are created by Actions workflow runs (Copilot code
-    // review executes as a dynamic Actions workflow); an unpinned entry
-    // would let ANY app or a plain commit status satisfy the context.
+    // Exactly one context: the verdict owns the Copilot expectation now
+    // (the managed wrapper's require-copilot-review), so a reappearing
+    // copilot-pull-request-reviewer entry is the retired belt sneaking
+    // back, not extra safety.
+    expect(checks.required_status_checks.map((c) => c.context)).toEqual([ALL_GREEN_CONTEXT]);
+    // The verdict's check run is created by an Actions workflow run; an
+    // unpinned entry would let ANY app or a plain commit status satisfy
+    // the context.
     for (const entry of checks.required_status_checks) {
       expect(entry.integration_id).toBe(GITHUB_ACTIONS_APP_ID);
     }
@@ -672,14 +672,12 @@ describe("the override layer", () => {
     // The shipped file itself passes.
     expect(() => load(shipped())).not.toThrow();
 
-    for (const context of [ALL_GREEN_CONTEXT, COPILOT_REVIEW_CONTEXT]) {
-      const doc = shipped();
-      const params = checksParams(doc);
-      params.required_status_checks = params.required_status_checks.filter(
-        (entry) => entry.context !== context,
-      );
-      expect(() => load(doc)).toThrow(`must require the ${context} status check`);
-    }
+    const dropped = shipped();
+    const params = checksParams(dropped);
+    params.required_status_checks = params.required_status_checks.filter(
+      (entry) => entry.context !== ALL_GREEN_CONTEXT,
+    );
+    expect(() => load(dropped)).toThrow(`must require the ${ALL_GREEN_CONTEXT} status check`);
 
     const unpinned = shipped();
     delete checksParams(unpinned).required_status_checks[0].integration_id;

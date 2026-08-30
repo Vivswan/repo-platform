@@ -8,7 +8,7 @@
     ".github/actionlint.yaml": {"class": "starter"},
     ".github/dependabot.yml": {"class": "managed", "hash": "2fa24c564ea849019df05ed473de58c4dce330f1d5cf50eab73d53837be71751"},
     ".github/repo-platform-manifest.json": {"class": "managed", "hash": null, "commit": "xxxxxxx"},
-    ".github/workflows/all-green.yml": {"class": "managed", "hash": "f2504bb21c6eb7334e21945801f462608f2f24e8e364298b53ccfc5b24d0171d"},
+    ".github/workflows/all-green.yml": {"class": "managed", "hash": "4b238e8af4a15944f69272eaa734965fb50e476a1ce1deee035cd2d68a2a569d"},
     ".github/workflows/auto-format.yml": {"class": "starter"},
     ".github/workflows/checks.yml": {"class": "starter"},
     ".github/workflows/ci.yml": {"class": "managed", "hash": "ba0b88b15f5f53db872c2163109a01ec432f4be9825949ed8e358ea3be43fe5a"},
@@ -18,7 +18,7 @@
     ".typography-allow": {"class": "managed", "hash": "5a4acd862164b9a19980ec9a0fa0048b3f81e1d2de02ded2d15b0f78401a07b3"},
     ".yamllint": {"class": "managed", "hash": "1e533293401ff3d0ee4662292995fd932d2998142ce594fb14e65a8d3a3140fb"},
     "CODE_OF_CONDUCT.md": {"class": "managed", "hash": "1635b6fddff1a322424fddf12ac0d8e269541976d40b5b6bf0dbebc9c7afcf68"},
-    "CONTRIBUTING.md": {"class": "split", "grammar": "tail-marker", "marker": "<!-- repo-platform:local-section -->", "managed": "above", "hash": "93495ebbccfd4f8eb01a373586762a03fa6ac8e606ab1ea01a36fe9a01f83722"},
+    "CONTRIBUTING.md": {"class": "split", "grammar": "tail-marker", "marker": "<!-- repo-platform:local-section -->", "managed": "above", "hash": "fd24302e493d2095d2cf35d49f215276b1a79522e03ea14cc9fcf98e09a58e3a"},
     "LICENSE.md": {"class": "split", "grammar": "tail-marker", "marker": "<!-- repo-platform:local-section -->", "managed": "above", "hash": "65973fae8e672fd7ee5fc2ed08cb4a78374d6c31f68f6d7269bea2184c13fb4b"},
     "SECURITY.md": {"class": "split", "grammar": "tail-marker", "marker": "<!-- repo-platform:local-section -->", "managed": "above", "hash": "a4deef1b1b41a1537f104354646bbb8d41a22e976a4179e31864cf1b36ed786b"}
   }

@@ -96,16 +96,16 @@ Labels a repo's own files reference must be in the merged roster, or the label r
 
 ## The two default-branch rulesets
 
-Both live in `.github/settings-override.yml` - the layer no repo can beat - with `loadOverrideLayer` refusing an override that drops a required check or its Actions pin, and unit tests pinning the empty bypass list and the rest of the protection policy.
+Both live in `.github/settings-override.yml` - the layer no repo can beat - with `loadOverrideLayer` refusing an override that drops the required check or its Actions pin, and unit tests pinning the empty bypass list and the rest of the protection policy.
 
 | Ruleset | Rules | Bypass |
 |---|---|---|
-| `main` | required status checks `all-green` and `copilot-pull-request-reviewer` (both pinned to the GitHub Actions app by `integration_id`); PR gates: a CODEOWNER review, every review thread resolved, squash-only; deletion, force-push, and linear-history protection; the `copilot_code_review` rule | admins, so direct pushes keep working |
+| `main` | ONE required status check, `all-green` (pinned to the GitHub Actions app by `integration_id`; the Copilot review expectation lives inside the verdict - the managed wrapper passes `require-copilot-review: true`, see [docs/all-green.md](all-green.md)); PR gates: a CODEOWNER review, every review thread resolved, squash-only; deletion, force-push, and linear-history protection; the `copilot_code_review` rule | admins, so direct pushes keep working |
 | `non-bypassable` | deletion, linear history | `bypass_actors: []` - GitHub binds everyone, repository owner included |
 
 - The explicit empty bypass list (unlike an omitted key) lets the nightly heal detect and clear an out-of-band bypass actor. The owner can still edit or disable the ruleset itself, but the nightly apply re-asserts it.
 - Two knock-ons: renaming the default branch is blocked for everyone (a rename deletes the old ref - disable the ruleset first, and the next heal restores it), and merge commits cannot be pushed directly even by admins (`git pull --rebase`).
-- `copilot_code_review` REQUESTS a Copilot code review on every pull request to the default branch (new pushes and drafts included). Each review executes as a dynamic Actions workflow that creates a completed `copilot-pull-request-reviewer` check run on the reviewed head sha - the rule is what keeps that required check satisfying itself on ordinary pushes. Verified gaps where no automatic run fires (the merge stays blocked until someone requests the review from the reviewers panel, one click): new pushes to DRAFT PRs, and bot-authored PRs such as Dependabot's. [docs/all-green.md](all-green.md) has the full semantics and evidence.
+- `copilot_code_review` REQUESTS a Copilot code review on every pull request to the default branch (new pushes and drafts included). Each review executes as a dynamic Actions workflow that creates a completed `copilot-pull-request-reviewer` check run on the reviewed head sha - the check the all-green VERDICT waits for, and the review's submission is the wake that re-judges a pending verdict - so this rule is what keeps the merge box moving on its own. Verified gaps where no automatic run fires: new pushes to DRAFT PRs (request the review from the reviewers panel, one click), and bot-authored PRs such as Dependabot's (the verdict stands its expectation down for bot authors once any review is submitted after CI completes). [docs/all-green.md](all-green.md) has the full semantics and evidence.
 
 ## repo-platform itself is a target
 

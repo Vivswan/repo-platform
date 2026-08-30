@@ -504,22 +504,18 @@ export function mergeLayers(layers: SettingsLayer[]): MergedSettings {
   return layers.reduce<MergedSettings>((below, layer) => mergeSettingsLayers(below, layer), {});
 }
 
-/** The status check GitHub's Copilot code review reports: a check run
- *  named after the reviewer, created per head sha by the dynamic Actions
- *  workflow the review runs as. The fleet override MUST require it - it
- *  is how the merge box waits for Copilot to review the CURRENT head -
- *  and loadOverrideLayer refuses an override that dropped it. */
-export const COPILOT_REVIEW_CONTEXT = "copilot-pull-request-reviewer";
-
 /** The check the fleet's all-green.yml verdict workflow reports (a check
- *  run created after judging each completed CI run's jobs). */
+ *  run created after judging each completed CI run's jobs plus the
+ *  declared expected set - the managed wrapper's require-copilot-review
+ *  folds Copilot's review into it, so this is the ruleset's ONE required
+ *  context; the retired direct copilot-pull-request-reviewer context was
+ *  the pre-cutover belt). */
 export const ALL_GREEN_CONTEXT = "all-green";
 
-/** GitHub Actions' app id. Both required checks are created by Actions
- *  workflow runs (Copilot code review executes as a dynamic Actions
- *  workflow), so every required-check entry pins this integration_id -
- *  without the pin, ANY app or plain commit status could satisfy a
- *  required context just by matching its name. */
+/** GitHub Actions' app id. The verdict's check run is created by an
+ *  Actions workflow run, so the required-check entry pins this
+ *  integration_id - without the pin, ANY app or plain commit status
+ *  could satisfy the required context just by matching its name. */
 export const GITHUB_ACTIONS_APP_ID = 15368;
 
 /** The fleet-mandatory top layer: merged ABOVE the repository's own
@@ -529,9 +525,8 @@ export const GITHUB_ACTIONS_APP_ID = 15368;
  *
  *  Validated here, the one place every consumer goes through, against the
  *  required-check mistakes that weaken the whole fleet: the main ruleset
- *  must require both ALL_GREEN_CONTEXT and COPILOT_REVIEW_CONTEXT, and
- *  every required-check entry must pin integration_id to GitHub Actions
- *  (see GITHUB_ACTIONS_APP_ID). */
+ *  must require ALL_GREEN_CONTEXT, and every required-check entry must
+ *  pin integration_id to GitHub Actions (see GITHUB_ACTIONS_APP_ID). */
 export function loadOverrideLayer(path: string = OVERRIDE_PATH): SettingsLayer {
   const data = parseSettingsDoc(readFileSync(path, "utf-8"), path);
   const rulesets = Array.isArray(data.rulesets) ? data.rulesets : [];
@@ -555,15 +550,13 @@ export function loadOverrideLayer(path: string = OVERRIDE_PATH): SettingsLayer {
     }
     return entry;
   });
-  for (const context of [ALL_GREEN_CONTEXT, COPILOT_REVIEW_CONTEXT]) {
-    if (!entries.some((entry) => entry.context === context)) {
-      throw new Error(
-        `${path}: the 'main' ruleset must require the ${context} status check - it is the ` +
-          "fleet's merge gate (all-green aggregates CI; the Copilot check run is how the " +
-          "merge box waits for a review of the current head), and dropping it from the " +
-          "override un-gates every managed repository at once.",
-      );
-    }
+  if (!entries.some((entry) => entry.context === ALL_GREEN_CONTEXT)) {
+    throw new Error(
+      `${path}: the 'main' ruleset must require the ${ALL_GREEN_CONTEXT} status check - it is ` +
+        "the fleet's ONE merge gate (the verdict judges CI and the expected set, Copilot's " +
+        "review included), and dropping it from the override un-gates every managed " +
+        "repository at once.",
+    );
   }
   for (const entry of entries) {
     if (entry.integration_id !== GITHUB_ACTIONS_APP_ID) {

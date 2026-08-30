@@ -26,7 +26,6 @@ import { join, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { EXCLUDED_DIRS as EXCLUDED_ACTION_DIRS } from "../.github/scripts/build-branches/branch_tree.ts";
 import {
-  COPILOT_REVIEW_CONTEXT,
   identityKeyIssues,
   loadOverrideLayer,
 } from "../.github/scripts/fleet/merge_settings_layers.ts";
@@ -3621,12 +3620,10 @@ const rules: Rule[] = [
           });
         }
         // The verdict-owned Copilot expectation must stay WIRED: the
-        // reusable's input defaults to false, and the planned fleet
-        // cutover drops the ruleset's Copilot context only once every
-        // verdict owns the expectation - so repo-platform's wiring (the
-        // proving ground, belt and suspenders next to the still-required
-        // ruleset context) must not be able to regress silently to the
-        // default while CI stays green.
+        // ruleset requires only the all-green check since the cutover,
+        // so this input is the review gate's ONLY home - a silent
+        // regression to the reusable's false default would un-gate the
+        // review while CI stayed green.
         const copilotWired = asRecord(verdictJob.with ?? {}, "all-green.yml with")[
           "require-copilot-review"
         ];
@@ -3634,7 +3631,7 @@ const rules: Rule[] = [
           mismatches.push({
             file: ".github/workflows/all-green.yml",
             expected:
-              "with.require-copilot-review: true (the verdict-owned expectation the fleet cutover depends on must stay wired here)",
+              "with.require-copilot-review: true (the ruleset carries no Copilot context since the cutover - this input is the review gate's only home)",
             got: copilotWired === undefined ? "not wired" : canonical(copilotWired),
           });
         }
@@ -3652,16 +3649,17 @@ const rules: Rule[] = [
           String(c.context),
         );
       };
-      // The override layer's main ruleset is the fleet's only home for the
-      // required-check contexts: the predicate's name literal must match
-      // the all-green entry, and the second entry is Copilot's own per-sha
-      // review check run (loadOverrideLayer separately refuses an override
-      // that drops either context or its Actions integration pin).
+      // The override layer's main ruleset is the fleet's only home for
+      // the required-check context: exactly the all-green entry, nothing
+      // else - the retired Copilot context must not creep back (the
+      // verdict owns that expectation now), and loadOverrideLayer
+      // separately refuses an override that drops the context or its
+      // Actions integration pin.
       const override = loadOverrideLayer();
       mismatches.push(
         ...setMismatch(
           ".github/settings-override.yml main ruleset required checks",
-          [gateName, COPILOT_REVIEW_CONTEXT],
+          [gateName],
           contexts(
             (override.rulesets ?? []) as Record<string, unknown>[],
             ".github/settings-override.yml",

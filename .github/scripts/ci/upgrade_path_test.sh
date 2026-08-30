@@ -447,6 +447,24 @@ grep -qF -- '"pr-title"' .github/workflows/ci.yml \
 # branch - the templates carry the literal pin.
 grep -qF -- "repo-platform/.github/workflows/reusable-all-green.yml@build" .github/workflows/all-green.yml \
   || fail "all-green.yml does not pin the shared verdict at the build branch"
+# The verdict-cutover wrapper shape must arrive with the update: the
+# verdict-owned Copilot expectation (the ruleset carries no separate
+# copilot context any more, so a wrapper without this line un-gates the
+# review), the review-submission wake that replaced the retired poll,
+# the manifest-derived conditional roster, and NO retired wait input
+# (the reusable no longer declares copilot-wait-minutes; a wrapper still
+# passing it would fail the workflow_call outright).
+grep -qxF -- "      require-copilot-review: true" .github/workflows/all-green.yml \
+  || fail "the updated all-green.yml does not pass require-copilot-review: true (the review gate's only home since the cutover)"
+grep -qxF -- "  pull_request_review:" .github/workflows/all-green.yml \
+  || fail "the updated all-green.yml lacks the pull_request_review trigger (the wake that replaced the copilot poll)"
+grep -qxF -- "    types: [submitted]" .github/workflows/all-green.yml \
+  || fail "the updated all-green.yml's pull_request_review trigger is not scoped to submitted reviews"
+grep -qxF -- "      conditional-workflows: '[]'" .github/workflows/all-green.yml \
+  || fail "the updated all-green.yml lacks the manifest-derived conditional-workflows input"
+if grep -qF -- "copilot-wait-minutes" .github/workflows/all-green.yml; then
+  fail "the updated all-green.yml still passes the retired copilot-wait-minutes input"
+fi
 test -f AGENTS.md || fail "AGENTS.md is missing"
 grep -qF "description: Upgraded description" .copier-answers.yml \
   || fail "the live description was not applied"

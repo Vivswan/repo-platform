@@ -77,17 +77,27 @@ absent "base-checks" "$wf/ci.yml"
 absent "check-typography" "$wf/ci.yml"
 
 # The all-green verdict wrapper: the client-side workflow_run trigger for
-# the shared judgment (the check run branch protection requires), with the
-# dispatch unwedge input, the grants the judgment needs, and the anchor
-# job pin that makes a disarmed fleet-ci caller fail the verdict.
+# the shared judgment (the check run branch protection requires), the
+# review-submission wake, the dispatch unwedge input, the grants the
+# judgment needs, the anchor job pin that makes a disarmed fleet-ci
+# caller fail the verdict, the verdict-owned Copilot review expectation
+# (the ruleset carries no separate context since the cutover), and the
+# manifest-derived conditional roster ('[]' - no module declares one).
+# The retired copilot-wait-minutes input must never render: the reusable
+# no longer declares it, and a workflow_call refuses unknown inputs.
 test -f "$wf/all-green.yml"
 present 'workflows: [CI]' "$wf/all-green.yml"
 present_line "    types: [completed]" "$wf/all-green.yml"
+present_line "  pull_request_review:" "$wf/all-green.yml"
+present_line "    types: [submitted]" "$wf/all-green.yml"
 present_line "  workflow_dispatch:" "$wf/all-green.yml"
 present "reusable-all-green.yml@build" "$wf/all-green.yml"
 present_line "      checks: write" "$wf/all-green.yml"
 present_line "      actions: read" "$wf/all-green.yml"
 present_line "      require-job: ci / validate-template" "$wf/all-green.yml"
+present_line "      require-copilot-review: true" "$wf/all-green.yml"
+present_line "      conditional-workflows: '[]'" "$wf/all-green.yml"
+absent "copilot-wait-minutes" "$wf/all-green.yml"
 
 # pr-title runs inside fleet-ci; its whole rendered footprint is gate
 # membership through the modules input.
@@ -121,9 +131,9 @@ if [ "$yamllint_pins" -ne 2 ]; then
   exit 1
 fi
 
-# The Copilot wait is ruleset data now (the required copilot check run,
-# asserted in the merged settings below): no bridge job, no re-arm
-# workflow, nothing Copilot-shaped may render into CI.
+# The Copilot review expectation is the VERDICT's now (the wrapper's
+# require-copilot-review input, asserted above): no bridge job, no
+# re-arm workflow, nothing Copilot-shaped may render into CI.
 absent "copilot-review" "$wf/ci.yml"
 absent "copilot-rearm" "$wf/ci.yml"
 test ! -e "$wf/rerun-copilot-gate.yml"
@@ -401,15 +411,18 @@ if has settings-sync; then
   present_line "  - name: bug" "$merged_out"
   present_line "  - name: enhancement" "$merged_out"
   present_line "  - name: fix-lint" "$merged_out"
-  # The fleet rulesets, always, with both required checks - all-green and
-  # Copilot's own per-sha review check run - each pinned to the GitHub
-  # Actions app (both check runs are Actions-created; the pin stops any
-  # other app or a plain commit status from satisfying the context), plus
-  # the review-thread gate.
+  # The fleet rulesets, always, with the ONE required check - all-green,
+  # pinned to the GitHub Actions app (the verdict's check run is
+  # Actions-created; the pin stops any other app or a plain commit
+  # status from satisfying the context) - plus the review-thread gate.
+  # The retired copilot-pull-request-reviewer context must NOT render:
+  # the verdict owns the review expectation now (the wrapper's
+  # require-copilot-review input above), and a reappearing context here
+  # is the pre-cutover belt sneaking back.
   present_line "  - name: main" "$merged_out"
   present_line "  - name: non-bypassable" "$merged_out"
   present "context: all-green" "$merged_out"
-  present "context: copilot-pull-request-reviewer" "$merged_out"
+  absent "copilot-pull-request-reviewer" "$merged_out"
   present "integration_id: 15368" "$merged_out"
   present "required_review_thread_resolution: true" "$merged_out"
   # The main ruleset's code_scanning rule follows enable_codeql (public

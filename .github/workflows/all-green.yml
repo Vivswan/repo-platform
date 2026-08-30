@@ -58,20 +58,18 @@ jobs:
     uses: ./.github/workflows/reusable-all-green.yml
     with:
       sha: ${{ github.event_name == 'workflow_dispatch' && inputs.sha || '' }}
-      # Belt and suspenders through the dogfood: the ruleset still
-      # requires Copilot's own check run (.github/settings-override.yml),
-      # and the verdict ALSO owns the review expectation here - proving
-      # the verdict-owned mechanism on this repository ahead of the fleet
-      # cutover that drops the ruleset context. Two documented residuals
-      # ride with it (docs/all-green.md): the bot stand-down keys on the
-      # PR AUTHOR, which only review wakes carry, so a bot-authored PR
-      # stays pending until a review is submitted; and with an expected
-      # set declared the verdict REFUSES schedule/dispatch judgments -
-      # expect the weekly CodeQL schedule run's verdict to go red without
-      # posting (the push verdict at that sha is unaffected). check_ssot's
-      # all-green-name rule pins this wiring so it cannot silently regress
-      # to the input's false default before the cutover makes it the sole
-      # home.
+      # The verdict OWNS the Copilot review expectation: since the fleet
+      # cutover the ruleset requires only the all-green check
+      # (.github/settings-override.yml), so this input is the review
+      # gate's only home - check_ssot's all-green-name rule pins it, and
+      # a regression to the input's false default would un-gate the
+      # review while CI stayed green. Two documented residuals ride with
+      # it (docs/all-green.md): the bot stand-down keys on the PR AUTHOR,
+      # which only review wakes carry, so a bot-authored PR stays pending
+      # until a review is submitted after CI completes; and with an
+      # expected set declared the verdict REFUSES schedule/dispatch
+      # judgments - expect the weekly CodeQL schedule run's verdict to go
+      # red without posting (the push verdict at that sha is unaffected).
       require-copilot-review: true
 
   # Post-green: everything that runs AFTER the verdict landed green on a

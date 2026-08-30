@@ -8,7 +8,7 @@
     ".github/actionlint.yaml": {"class": "starter"},
     ".github/dependabot.yml": {"class": "managed", "hash": "477a76f5cd1e3adc00e8b8596e91b74e124c1502b9a40ccf097dfdeb634d85bc"},
     ".github/repo-platform-manifest.json": {"class": "managed", "hash": null, "commit": "xxxxxxx"},
-    ".github/workflows/all-green.yml": {"class": "managed", "hash": "f2504bb21c6eb7334e21945801f462608f2f24e8e364298b53ccfc5b24d0171d"},
+    ".github/workflows/all-green.yml": {"class": "managed", "hash": "4b238e8af4a15944f69272eaa734965fb50e476a1ce1deee035cd2d68a2a569d"},
     ".github/workflows/checks.yml": {"class": "starter"},
     ".github/workflows/ci.yml": {"class": "managed", "hash": "15b74343066f6e09e271c5015e6515ce598fe9ded46387d29ad421a0b28544e6"},
     ".gitignore": {"class": "split", "grammar": "bounded-region", "marker": "# BEGIN REPO-PLATFORM MANAGED", "managed": "below", "managed_end": "# END REPO-PLATFORM MANAGED", "local_begin": "# BEGIN REPOSITORY LOCAL", "local_end": "# END REPOSITORY LOCAL", "hash": "3525331f895e2c1fbff3d2df97a76deeb01bd42ded70c2cb33e56165e3ceb0d8"},
@@ -17,7 +17,7 @@
     ".typography-allow": {"class": "managed", "hash": "5a4acd862164b9a19980ec9a0fa0048b3f81e1d2de02ded2d15b0f78401a07b3"},
     ".yamllint": {"class": "managed", "hash": "1e533293401ff3d0ee4662292995fd932d2998142ce594fb14e65a8d3a3140fb"},
     "CODE_OF_CONDUCT.md": {"class": "managed", "hash": "1635b6fddff1a322424fddf12ac0d8e269541976d40b5b6bf0dbebc9c7afcf68"},
-    "CONTRIBUTING.md": {"class": "split", "grammar": "tail-marker", "marker": "<!-- repo-platform:local-section -->", "managed": "above", "hash": "93495ebbccfd4f8eb01a373586762a03fa6ac8e606ab1ea01a36fe9a01f83722"},
+    "CONTRIBUTING.md": {"class": "split", "grammar": "tail-marker", "marker": "<!-- repo-platform:local-section -->", "managed": "above", "hash": "fd24302e493d2095d2cf35d49f215276b1a79522e03ea14cc9fcf98e09a58e3a"},
     "LICENSE.md": {"class": "split", "grammar": "tail-marker", "marker": "<!-- repo-platform:local-section -->", "managed": "above", "hash": "65973fae8e672fd7ee5fc2ed08cb4a78374d6c31f68f6d7269bea2184c13fb4b"},
     "SECURITY.md": {"class": "split", "grammar": "tail-marker", "marker": "<!-- repo-platform:local-section -->", "managed": "above", "hash": "a4deef1b1b41a1537f104354646bbb8d41a22e976a4179e31864cf1b36ed786b"}
   }
