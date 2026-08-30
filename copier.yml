@@ -143,7 +143,7 @@ modules:
     uv - Python/uv toolchain (gitignore, dependabot, CodeQL Python): uv
     rust - Rust/cargo toolchain (cargo dependabot, Rust gitignore; no CodeQL): rust
     pages - GitHub Pages deploy (root = latest release, /staging/ = main): pages
-    release-please - release job on top of the all-green gate + autorelease labels: release-please
+    release-please - verdict-gated release job in the all-green wrapper + autorelease labels: release-please
     issue-templates - bug/feature issue forms: issue-templates
     skills - agent skills hosting (plugin manifests, skill validation): skills
     pr-title - Conventional Commit PR title check in the all-green gate: pr-title
