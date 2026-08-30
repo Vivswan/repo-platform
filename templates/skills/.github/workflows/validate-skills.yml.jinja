@@ -1,15 +1,9 @@
 # This file is managed by {{ github_username }}/repo-platform.
 # Local edits may be replaced during template updates.
 #
-# Advisory discovery check for this repository's hosted agent skills: runs
-# the real `npx skills` CLI against the checkout and asserts every skill
-# published in the plugin manifest appears in its listing. It lives outside
-# the managed ci.yml's all-green gate on purpose - npx downloads the CLI
-# from the npm registry, so the check needs network and can flake on
-# registry hiccups, and an advisory red must never block merges. The
-# offline structural validation runs inside the gate (the validate-skills
-# job in ci.yml). Repo-specific assertions (docs coverage, extra per-skill
-# files) belong in the repo-owned checks.yml, not here.
+# Advisory on purpose: npx needs the network and can flake, and an
+# advisory red must never block merges; the offline structural validation
+# runs inside the gate (ci.yml's validate-skills job).
 
 name: Validate Skills
 

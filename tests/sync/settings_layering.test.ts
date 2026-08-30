@@ -539,7 +539,7 @@ describe("transitionSettingsStarter", () => {
     });
     transitionSettingsStarter(dir, out, "t");
     const written = readFileSync(join(dir, ".github/settings.yml"), "utf-8");
-    expect(written).toContain("Rendered ONCE by the settings-sync module");
+    expect(written).toContain("Rendered once, repo-owned: template sync never");
     expect(written).not.toContain("extra-label");
     const section = readFileSync(out, "utf-8");
     expect(section).toContain("layering transition");

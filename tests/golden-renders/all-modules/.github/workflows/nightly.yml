@@ -1,17 +1,13 @@
-# Nightly CI starter. Generated once by Vivswan/repo-platform
-# and never overwritten by template sync, so edit freely. Replace the
-# placeholder step with this repository's own nightly checks (the suites too
-# slow for every PR: full end-to-end runs, docker image builds, live
-# integration tests); the report job below keeps working unchanged - a red
-# night files or updates one label-deduplicated tracking issue, a green
-# night closes it (see repo-platform's docs/nightly.md).
+# Nightly CI starter: generated once by Vivswan/repo-platform,
+# never overwritten by template sync. Replace the placeholder step; the
+# report job files one label-deduplicated tracking issue on a red night
+# and closes it on a green one (docs/nightly.md).
 name: Nightly
 
 on:
   schedule:
-    # Overnight US-Eastern, off the top of the hour, and offset from the
-    # fuzzer starter; pick your repo's own minute so the fleet's nightlies
-    # do not all land on GitHub at once.
+    # Pick your own minute so the fleet's nightlies do not all land at
+    # once.
     - cron: "59 6 * * *"
   workflow_dispatch:
 
@@ -19,8 +15,6 @@ concurrency:
   group: nightly
   cancel-in-progress: false
 
-# The checks job needs only the checkout; the report job scopes its own
-# issue and dispatch permissions below.
 permissions:
   contents: read
 
@@ -31,28 +25,23 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # Set up whatever the nightly checks need here (toolchains, docker,
-      # service containers, caches, ...). Add sibling jobs freely: list
-      # every one in the report job's `needs` and fold its result into the
-      # red/green conditions there.
+      # Add sibling jobs freely: list each in the report job's `needs` and
+      # fold its result into the red/green conditions there.
 
       - name: Nightly checks
         run: |
-          # Replace this placeholder with the repository's nightly checks.
-          # Any failing step in this job makes the report job below file
-          # or update the tracking issue. Until then this step is a green
-          # no-op on purpose: an uncustomized starter must not file issues.
+          # Replace with the repository's nightly checks. A green no-op
+          # until then: an uncustomized starter must not file issues.
           echo "::warning::nightly starter not customized yet - replace the placeholder step (see repo-platform's docs/nightly.md)"
 
-  # Runs whatever happened to the checks job, and treats a CANCELLED checks
-  # job as red: a job that hits its timeout is cancelled, not failed, and a
-  # hang is exactly what a nightly run exists to catch.
+  # A CANCELLED checks job counts as red: hitting the timeout cancels
+  # rather than fails, and a hang is exactly what a nightly exists to
+  # catch.
   report:
     needs: [checks]
     if: always()
     runs-on: ubuntu-latest
-    # A few gh calls behind a bun setup; a hung reporter is the residual
-    # silence window, so keep this tight.
+    # A hung reporter is the residual silence window; keep this tight.
     timeout-minutes: 5
     # issues: write lets the fuzz-issue action file/close the tracking issue;
     # actions: write lets the red path dispatch auto-assign at it.
@@ -68,11 +57,9 @@ jobs:
           mode: report
           label: "nightly-failure"
           title: Nightly CI failures
-          # No artifacts directory is passed: this stream files the generic
-          # nightly-failure report (workflow, commit, run link) rather than
-          # the fuzzer's failure-report contract. The tuple below is used
-          # only when the label has to be created and matches the
-          # settings-sync declaration.
+          # No artifacts directory: this stream files the generic report,
+          # not the fuzzer's failure-report contract. The label tuple is
+          # used only at creation and matches the settings-sync one.
           label-color: "D93F0B"
           label-description: Automated nightly CI failure
 

@@ -1,12 +1,7 @@
-# The update stage of the release pipeline: repo-owned, generated once by
-# {{ github_username }}/repo-platform and never overwritten by template
-# sync. The managed release.yml calls this workflow between cutting the
-# draft release and the attested publish, so everything this repository
-# wants on the release happens here: packaging, asset uploads, note edits.
-# Add jobs freely - publishing waits for every job in this file, and every
-# asset uploaded here is attested at publish time into the release's
-# single attestation.jsonl. Recovery when a run dies mid-pipeline is
-# documented in release.yml.
+# Repo-owned: generated once by {{ github_username }}/repo-platform, never
+# overwritten by template sync. Packaging, asset uploads, and note edits
+# go here; publishing waits for every job, and every asset uploaded here
+# is attested at publish time.
 
 name: Update Release
 

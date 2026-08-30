@@ -1,44 +1,17 @@
 ---
-# This repository's OWN settings, applied by {{ github_username }}/repo-platform's
-# central settings-repos run (and by the settings-sync workflow on pushes
-# to this file, when the repo carries its own REPO_PLATFORM_TOKEN; without
-# one that self-apply skips with a warning).
-#
-# Rendered ONCE by the settings-sync module, repo-owned from then on:
-# template sync never rewrites or deletes this file. The fleet's own
-# settings (the shared repository defaults, the labels and rulesets this
-# repository's modules need) are NOT in this file - repo-platform merges
-# them per repository at apply time and layers this file OVER them:
-#
-# - Keys here win over the fleet defaults; objects merge key by key.
-# - Setting a key to null opts this repository out of that part of the
-#   defaults entirely.
-# - labels are name-keyed: an entry here replaces the same-name fleet
-#   label wholesale, and both sides' other labels are kept.
-# - rulesets are name-keyed too, but a same-name entry MERGES: its fields
-#   win, and its rules join the fleet ones - a rule of a type the fleet
-#   already declares replaces that rule, a new type is added. Leaving a
-#   rule out does not drop it; `rules: null` drops the ones the fleet's
-#   lower layers contributed, and never the protection rulesets' own.
-#
-# - labels and rulesets must stay LISTS of "- name: ..." entries: the
-#   apply refuses any other shape outright (a mapping or scalar there
-#   could never join the name-keyed merge).
-#
-# One layer sits ABOVE this file: the fleet invariants (squash-only
-# merging and the default branch's protection rulesets). It wins for the
-# keys and rule types it declares, so declaring one of those - or nulling
-# it out - has no effect. Anything it does not declare is still yours,
-# including extra rules you add to a protected ruleset.
-#
-# Undeclared labels are deleted by the apply (against the MERGED roster,
-# so fleet labels are always safe); undeclared rulesets are left alone.
+# This repository's OWN settings, applied by {{ github_username }}/repo-platform
+# (and by settings-sync on pushes to this file when the repo carries its
+# own REPO_PLATFORM_TOKEN). Rendered once, repo-owned: template sync never
+# rewrites it. Fleet defaults merge UNDER this file - keys here win, null
+# opts out, labels replace by name, rulesets MERGE by name; both must stay
+# lists. The fleet invariants (squash-only merging, the protection
+# rulesets) sit ABOVE and cannot be overridden. Undeclared labels are
+# deleted by the apply; undeclared rulesets are left alone.
 
 repository:
   description: {{ description | tojson }}
-  # homepage, topics, and private are declared here even when empty or
-  # public: the apply manages only declared keys, so this keeps it healing
-  # out-of-band edits (an empty value declares-and-clears).
+  # Declared even when empty: the apply manages only declared keys, so
+  # this keeps it healing out-of-band edits.
   homepage: {{ homepage | tojson }}
   topics: {{ topics | tojson }}
   private: {{ private | tojson }}

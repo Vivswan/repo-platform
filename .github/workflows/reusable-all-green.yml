@@ -1,40 +1,16 @@
-# The all-green verdict, shared by repo-platform's own all-green.yml and
-# every managed repo's thin wrapper (workflow_run events only fire for
-# workflows living in the same repository, so the TRIGGER must be a
-# client-side file; the judgment lives here, once). Every wake - a CI
-# run's completion, a submitted pull-request review, or the dispatch
-# unwedge - judges the WHOLE sha ONCE, not just the run that woke it:
-# the completed CI run's jobs (every job whose name carries no `info-`
-# segment must conclude success; skipped stands down next to at least
-# one real success, and an empty or all-skipped run fails closed), plus,
-# on pull_request judgments, everything else the caller declared the
-# repository owes - the conditional-workflows roster, read from ALL
-# workflow runs at the judged sha, and Copilot's review check run when
-# required and the PULL REQUEST'S AUTHOR is not a bot. A complete, green
-# expected set CREATES the `all-green` check run branch protection
-# requires as a completed success; an incomplete set posts it as
-# in_progress naming exactly what is missing and EXITS - no runner is
-# ever held polling. Re-judgment is event-driven: a check run's
-# completion fires no workflow_run event, but Copilot's review SUBMISSION
-# fires pull_request_review, which the callers subscribe to - so the
-# review landing re-fires the judgment on its own, and the dispatch
-# unwedge covers a wake that was lost. Every wake re-judges idempotently
-# under the callers' per-sha serialization (newest evaluation wins).
-# Authoring-time roster enforcement (which CI JOBS must exist) is
-# check_ssot.ts's all-green-roster rule for this repository and the
-# managed render for the fleet.
+# The judgment behind every caller's all-green verdict (workflow_run
+# fires same-repo only, so the triggers live in each caller; the judgment
+# lives here, once).
 #
 # Steps stay inline: this reusable runs in the CALLER's repository, where
-# repo-platform's scripts do not exist (AGENTS.md editing rules). The
-# expected-set computation has an executable twin, expectedSetGaps in
-# .github/scripts/shared/all_green.ts - keep the two in lockstep (the
-# ci/ harness pins this side, the bun tests the other).
+# repo-platform's scripts do not exist. The expected-set computation has
+# an executable twin, expectedSetGaps in shared/all_green.ts - keep them
+# in lockstep (the ci/ harness pins this side, the bun tests the other).
 #
-# CRITICAL: the check run is created with head_sha set to the CI run's own
-# head_sha (a required POST field). It has to be the TRIGGERING run's sha:
-# any check a workflow_run-triggered run's own JOBS create attaches to that
-# run's default-branch checkout, never to the PR head, so only this
-# explicit head_sha puts the verdict into the PR merge box.
+# CRITICAL: the check run POSTs head_sha as the CI run's own head_sha -
+# only that puts the verdict into the PR merge box (checks a
+# workflow_run-triggered run's own jobs create attach to that run's
+# default-branch checkout instead).
 
 name: Reusable All Green
 
@@ -130,11 +106,8 @@ permissions: {}
 jobs:
   verdict:
     runs-on: ubuntu-latest
-    # The judgment is a handful of bounded API reads and one POST -
-    # seconds of work, never a held runner (the poll this bound once
-    # sheltered is retired; re-judgment is event-driven). Ten minutes is
-    # generous headroom over slow API days while still killing a wedged
-    # run long before it could shadow the sha's next wake.
+    # A handful of bounded API reads and one POST; ten minutes kills a
+    # wedged run long before it could shadow the sha's next wake.
     timeout-minutes: 10
     permissions:
       checks: write
@@ -155,35 +128,29 @@ jobs:
           RUN_EVENT: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.event || '' }}
           RUN_STATUS: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.status || '' }}
           RUN_PATH: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.path || '' }}
-          # The review wake (a called workflow reads the CALLER's event
-          # context): the reviewed PR's CURRENT head is judged, and the
-          # PR AUTHOR - the only principal the bot stand-down may key on
-          # - rides the same payload.
+          # The review wake: the reviewed PR's CURRENT head is judged, and
+          # the PR AUTHOR - the only principal the bot stand-down may key
+          # on - rides the same payload.
           REVIEW_SHA: ${{ github.event_name == 'pull_request_review' && github.event.pull_request.head.sha || '' }}
           REVIEW_HEAD_REPO: ${{ github.event_name == 'pull_request_review' && github.event.pull_request.head.repo.full_name || '' }}
           PR_AUTHOR_LOGIN: ${{ github.event_name == 'pull_request_review' && github.event.pull_request.user.login || '' }}
           PR_AUTHOR_TYPE: ${{ github.event_name == 'pull_request_review' && github.event.pull_request.user.type || '' }}
         run: |
           set -euo pipefail
-          # Fail-closed input shape, before anything is judged: a roster
-          # that is not a JSON list of strings must refuse rather than
+          # A roster that is not a JSON list of strings must refuse, not
           # judge with a silently-empty roster.
           if ! conditionals="$(jq -ce 'if type == "array" and all(.[]; type == "string") then unique else error("not a list") end' <<<"$CONDITIONAL_WORKFLOWS" 2>/dev/null)"; then
             echo "::error::conditional-workflows must be a JSON list of workflow display names - got: $CONDITIONAL_WORKFLOWS"
             exit 1
           fi
-          # A plain assignment, NEVER a fresh $(...) inside test brackets:
+          # A plain assignment, never a fresh $(...) inside test brackets:
           # substitutions in a test are errexit-exempt, so a crashing jq
-          # there reads as empty/zero and a guard falls through open. The
-          # harness bans every non-assignment substitution in this block.
+          # would read as empty and the guard falls open.
           roster_size="$(jq 'length' <<<"$conditionals")"
           if [ -n "$REVIEW_SHA" ] && [ "$REVIEW_HEAD_REPO" != "$GITHUB_REPOSITORY" ]; then
-            # Fork-headed PRs: pull_request_review runs get a read-only
-            # token there, so the check-run POST could never land - stand
-            # this wake down quietly (exit 0, nothing judged). The sha's
-            # CI-completion wakes run with full permissions and still
-            # judge it; a review that lands after the last of those needs
-            # the dispatch unwedge, the documented fork residual.
+            # Fork-headed PRs get a read-only token here, so the check-run
+            # POST could never land - stand down quietly; the sha's
+            # CI-completion wakes (or the dispatch unwedge) judge it.
             echo "review wake stands down: the reviewed head lives in '$REVIEW_HEAD_REPO', not this repository - fork wakes carry a read-only token; the sha's CI completions (or the dispatch unwedge) judge it."
             exit 0
           fi
@@ -194,17 +161,12 @@ jobs:
             runs_at_head="$(timeout 20 gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$lookup_sha&per_page=100" \
               --jq '[.workflow_runs[] | {id, head_sha, event, status}]')"
             if [ -n "$REVIEW_SHA" ]; then
-              # A review wake exists to re-judge PR-scoped expectations,
-              # so it selects the newest PR-EVENT run by id: taking the
-              # newest run of ANY event would let a same-sha push or
-              # dispatch run flip RUN_EVENT and disarm every PR-only
-              # member (push judgments owe only CI). And it judges that
-              # run completed or not - picking the newest COMPLETED one
-              # would judge a stale run while a fresh retrigger is in
-              # flight, a green minted over an unknown outcome. Not yet
-              # judgeable (no PR run, or the newest still running) is a
-              # QUIET stand-down, never a red run per review: that run's
-              # own completion fires the judgment that sees this review.
+              # Select the newest PR-EVENT run: the newest run of ANY
+              # event would let a same-sha push run disarm every PR-only
+              # member. Judge it completed or not - the newest COMPLETED
+              # one could be stale while a retrigger is in flight. Not yet
+              # judgeable is a QUIET stand-down: that run's own completion
+              # fires the judgment that sees this review.
               run="$(jq '[.[] | select(.event == "pull_request" or .event == "pull_request_target")] | max_by(.id) // empty' <<<"$runs_at_head")"
               if [ -z "$run" ]; then
                 echo "review wake stands down: no pull_request CI run exists at $lookup_sha yet - that run's own completion fires the judgment."
@@ -216,9 +178,8 @@ jobs:
                 exit 0
               fi
             else
-              # The unwedge judges the newest COMPLETED run, as dispatched
-              # and documented: queued or in-progress runs post their own
-              # verdicts when their workflow_run events arrive.
+              # The unwedge judges the newest COMPLETED run; queued or
+              # in-progress runs post their own verdicts on completion.
               run="$(jq '[.[] | select(.status == "completed")] | max_by(.id) // empty' <<<"$runs_at_head")"
               if [ -z "$run" ]; then
                 echo "::error::no completed CI run exists at $lookup_sha - nothing to judge; get CI to complete there first."
@@ -232,10 +193,10 @@ jobs:
             echo "::error::neither a triggering workflow_run event nor a sha input - nothing to judge."
             exit 1
           else
-            # Belt over the caller's trigger filters: only completed runs of
-            # the real ci.yml may be judged - a look-alike workflow merely
-            # NAMED "CI" (workflow_run matches display names), or a caller
-            # missing types: [completed], must never mint a verdict.
+            # Only completed runs of the real ci.yml may be judged: a
+            # look-alike workflow merely NAMED "CI" (workflow_run matches
+            # display names), or a caller missing types: [completed],
+            # must never mint a verdict.
             if [ "$RUN_PATH" != ".github/workflows/ci.yml" ]; then
               echo "::error::the triggering run is $RUN_PATH, not .github/workflows/ci.yml - refusing to judge a look-alike workflow."
               exit 1
@@ -246,16 +207,11 @@ jobs:
             fi
           fi
           # Events that can neither carry nor stand down a declared
-          # expected set refuse to judge AT ALL: conditional workflows and
-          # the Copilot review are pull_request-scoped, a push run owes
-          # only CI by design, but a workflow_dispatch or schedule run at
-          # a PR head would otherwise mint a CI-only green over a red
-          # conditional. The refusal is JOB-red, never check-red: posting
-          # nothing means a legitimate verdict from the sha's real run is
-          # never shadowed - and an event type unknown today lands here,
-          # not on an accidental green. With nothing declared, these
-          # events keep posting: a CI-only judgment is then complete, and
-          # schedule/dispatch verdicts are what re-runs on main rely on.
+          # expected set (schedule, dispatch, anything unknown) refuse to
+          # judge AT ALL - JOB-red, never check-red, so a legitimate
+          # verdict from the sha's real run is never shadowed. With
+          # nothing declared they keep posting: re-runs on main rely on
+          # those verdicts.
           case "$RUN_EVENT" in
             push | pull_request | pull_request_target) ;;
             *)
@@ -267,24 +223,18 @@ jobs:
           esac
           # filter=all, newest attempt per job NAME: a partial re-run's
           # newest attempt lists only the jobs it re-ran, so judging one
-          # attempt alone would lose every job that already concluded in an
-          # earlier attempt - a fail-open. Grouping all attempts by name
-          # and taking each job's newest (highest id) judges the run the
-          # way the merge box sees it.
+          # attempt alone would fail open on already-concluded jobs.
           all_jobs="$(timeout 60 gh api --paginate \
             "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID/jobs?filter=all&per_page=100" \
             --jq '.jobs[] | {id, name, conclusion, run_attempt}' | jq -s '.')"
           # Gating = no " / "-separated name segment starts with "info-"
           # (an info-* caller opts out every job of the workflow it calls).
           gating='[.[] | select((.name | split(" / ") | map(startswith("info-")) | any) | not)]'
-          # The name is the only key stable across attempts, so it doubles
-          # as the job's identity - which fails OPEN if two DIFFERENT jobs
-          # share a display name (max_by would judge only one of them, and
-          # a failure could hide behind its twin's success). Detectable
-          # exactly when it matters: distinct jobs coexist within one
-          # attempt, so any gating (name, attempt) pair with two ids is
-          # the collision, and the verdict refuses to judge it. info-*
-          # duplicates stay harmless - they never gate.
+          # The name doubles as the job's identity across attempts, which
+          # fails OPEN if two DIFFERENT jobs share a display name: any
+          # gating (name, attempt) pair with two ids is that collision,
+          # and the verdict refuses to judge it (info-* duplicates never
+          # gate).
           dupes="$(jq -r "$gating"' | group_by([.name, .run_attempt])
             | map(select(length > 1) | "\(.[0].name) (attempt \(.[0].run_attempt))")
             | unique | join(", ")' <<<"$all_jobs")"
@@ -292,36 +242,27 @@ jobs:
           succeeded="$(jq "$gating"' | map(select(.conclusion == "success")) | length' <<<"$jobs")"
           failed="$(jq -r "$gating"' | map(select(.conclusion != "success" and .conclusion != "skipped")) | map("\(.name) (\(.conclusion))") | join(", ")' <<<"$jobs")"
           table="$(jq -r "$gating"' | map("- \(.name): \(.conclusion)") | join("\n")' <<<"$jobs")"
-          # The caller-pinned anchor job: every other fleet gate lives
-          # inside the repo-editable ci.yml's one fleet-ci caller, so the
-          # verdict itself must refuse a run where that caller's
-          # unconditional integrity job did not actually SUCCEED -
-          # deleted, conditioned away, or renamed under info-, the run is
-          # not the gate it claims to be. Success (not mere presence):
-          # a skipped anchor stands down everywhere else, but standing
-          # down is exactly what the anchor exists to forbid.
+          # The caller-pinned anchor job must have actually SUCCEEDED (not
+          # merely be present - a skipped anchor is exactly what it exists
+          # to forbid): deleted, conditioned away, or renamed under info-,
+          # the run is not the gate it claims to be.
           required_ok=1
           if [ -n "$REQUIRE_JOB" ]; then
             required_ok="$(jq --arg n "$REQUIRE_JOB" \
               'map(select(.name == $n and .conclusion == "success")) | length' <<<"$jobs")"
           fi
           # --- the expected set beyond the CI run --------------------------
-          # The triggering event is only a wake-up: pull_request judgments
-          # also owe the declared conditional workflows (read from ALL
-          # workflow runs at the judged sha - never just the triggering
-          # run) and, when required and the PR's author is not a bot,
-          # Copilot's review check run. Push and other non-PR judgments
-          # owe only the CI run: their verdicts must never wait on
-          # PR-shaped members, or main's green gates would wedge.
+          # pull_request judgments also owe the declared conditional
+          # workflows (read from ALL runs at the judged sha) and Copilot's
+          # review when required; push and other judgments owe only CI,
+          # or main's green gates would wedge.
           pr_event=0
           case "$RUN_EVENT" in pull_request | pull_request_target) pr_event=1 ;; esac
           conditional_gaps() { # -> {"missing":[...],"failed":[...]} - a FRESH read every call
-            # Command substitution strips errexit from this body (bash
-            # runs $(...) without inherit_errexit), so each fetch must
-            # propagate failure BY HAND: an unreadable API must abort the
-            # judgment loudly - jq -s would otherwise turn the dead read
-            # into an empty list, disarming the registry guard or blanking
-            # the roster, and the verdict would judge fiction.
+            # Command substitution strips errexit from this body, so each
+            # fetch must propagate failure BY HAND: jq -s would turn a
+            # dead read into an empty list and the verdict would judge
+            # fiction.
             local runs_at_sha registry
             runs_at_sha="$(timeout 60 gh api --paginate \
               "repos/$GITHUB_REPOSITORY/actions/runs?head_sha=$HEAD_SHA&per_page=100" \
@@ -329,17 +270,12 @@ jobs:
             registry="$(timeout 60 gh api --paginate \
               "repos/$GITHUB_REPOSITORY/actions/workflows?per_page=100" \
               --jq '.workflows[] | {name, path}' | jq -s '.')" || return 1
-            # Per listed name, identity FIRST, then state. The registry
-            # (default-branch truth) must know the name - unknown means a
-            # roster config error or a decoy not on the default branch,
-            # and waiting would never heal either - and must resolve it
-            # to exactly ONE path (two claimants is the display-name
-            # collision, like duplicate job names). Every candidate run
-            # must then COME FROM that registered path: cardinality alone
-            # would pass a branch-added decoy whose run is the only one
-            # at the sha. Only then state: no run of the judged event ->
-            # pending; newest run not completed -> pending; success or
-            # skipped (stands down) -> satisfied; anything else -> failed.
+            # Per name: identity FIRST - the registry (default-branch
+            # truth) must know the name and resolve it to exactly ONE
+            # path, and every candidate run must come from that path, or
+            # a same-named decoy could satisfy the roster. Then state:
+            # no run -> pending; newest not completed -> pending;
+            # success or skipped -> satisfied; anything else -> failed.
             jq -n --argjson names "$conditionals" --argjson runs "$runs_at_sha" \
               --argjson registry "$registry" --arg event "$RUN_EVENT" '
               reduce $names[] as $name ({missing: [], failed: []};
@@ -382,10 +318,9 @@ jobs:
           }
           copilot="not-expected"
           if [ "$pr_event" -eq 1 ] && [ "$REQUIRE_COPILOT" = "true" ]; then
-            # The stand-down keys on the PR AUTHOR, never any run actor
-            # (the input description above has the model): only review
-            # wakes carry the author, and empty env here - every other
-            # wake - reads as not-a-bot, the armed, fail-closed side.
+            # The stand-down keys on the PR AUTHOR, never any run actor;
+            # empty env here - every other wake - reads as not-a-bot, the
+            # armed, fail-closed side.
             bot=0
             if [ "$PR_AUTHOR_TYPE" = "Bot" ]; then bot=1; fi
             case "$PR_AUTHOR_LOGIN" in *'[bot]') bot=1 ;; esac
@@ -414,8 +349,7 @@ jobs:
             summary="CI run $RUN_ID has no succeeded job named '$REQUIRE_JOB'. That job is the managed fleet gate's anchor: absent, skipped, or renamed means the ci.yml fleet caller was disarmed (edited out, conditioned, or moved under an info- name), so the verdict fails closed. Restore the managed ci.yml (the next template sync rewrites it) and re-run."$'\n\n'"$table"
           elif [ "$succeeded" -eq 0 ]; then
             # Skipped stands down only NEXT TO a real pass: a run where no
-            # gating job actually concluded success (none exist, or every
-            # one skipped) vouches for nothing, so it fails closed.
+            # gating job actually succeeded vouches for nothing.
             conclusion=failure
             title="no gating job actually succeeded"
             summary="CI run $RUN_ID completed without a single gating job concluding success - an empty or all-skipped run vouches for nothing, so the verdict fails closed."$'\n\n'"$table"
@@ -428,13 +362,10 @@ jobs:
             title="the $copilot_check check run concluded ${copilot#failed:}"
             summary="Copilot's review check at this sha concluded ${copilot#failed:}. Re-request the Copilot review from the PR's reviewers panel - its fresh review re-judges this verdict on submission (or dispatch the All Green workflow with this sha)."$'\n\n'"$table"
           elif [ -n "$waiting" ]; then
-            # The expected set is incomplete but nothing is red: leave the
-            # verdict visibly PENDING, naming exactly what is missing, and
-            # EXIT - no runner waits. The next wake re-judges: each CI
-            # completion at this sha, and each submitted review (Copilot's
-            # own review submission is the wake that replaced the retired
-            # poll). A member that lands with no wake of its own needs the
-            # dispatch unwedge.
+            # Incomplete but nothing red: leave the verdict visibly
+            # PENDING, naming what is missing, and EXIT - the next wake
+            # re-judges; a member landing with no wake of its own needs
+            # the dispatch unwedge.
             status=in_progress
             title="waiting: ${waiting:0:110}"
             summary="Every gating CI job at this sha is green, but the expected set is incomplete - still waiting on: $waiting. Each CI completion and each submitted review at this sha re-judges this verdict; if a missing member has landed and no re-judgment followed, dispatch the All Green workflow with this sha."$'\n\n'"$table"
@@ -453,8 +384,8 @@ jobs:
             -f "output[summary]=${summary:0:60000}"
           )
           # A pending verdict carries no conclusion: POSTing one forces
-          # status=completed, and an in_progress check is what keeps the
-          # merge box honestly yellow until the set completes.
+          # status=completed, and in_progress is what keeps the merge box
+          # honestly yellow.
           if [ -n "$conclusion" ]; then
             post_args+=(-f "conclusion=$conclusion")
           fi

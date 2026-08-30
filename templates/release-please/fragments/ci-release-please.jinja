@@ -1,34 +1,22 @@
 
-  # Release from a green run only: the managed release.yml pipeline
-  # (release-please cuts a draft, the repo-owned update-release.yml hook
-  # mutates it, then the attested publish flips it live) runs downstream
-  # of `checks` and the fleet-ci call - the two jobs every gate runs
-  # through - so a red commit can never cut a release or refresh the
-  # release PR. It depends on the gate, it is NOT gated by it: the info-
-  # prefix opts the whole pipeline out of the all-green verdict (a flaky
-  # publish must not mark the commit ungreen), and `needs:` rather than
-  # the check run is what gates it - the check lands only after this
-  # whole run completes, while needs expresses the same "everything
-  # green" inside the run. Only push/dispatch runs release: pull requests
-  # must never reach the publish pipeline, and the weekly scheduled
-  # CodeQL re-scan has no business refreshing release state. Secrets are
-  # inherited deliberately: publish steps need them.
+  # info- keeps the release pipeline out of the all-green verdict (a
+  # flaky publish must not mark the commit ungreen); `needs:` is the gate
+  # - the check run lands only after this whole run completes. Secrets
+  # are inherited: publish steps need them.
   info-release:
     needs: [checks, ci]
     if: >-
       (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
       && github.ref == 'refs/heads/main'
-    # The publishing ceiling for the release pipeline's jobs (release
-    # assets and their build provenance, ghcr, npm/PyPI trusted publishing);
-    # nested jobs can only narrow it, never raise it.
+    # The publishing ceiling for the release pipeline's jobs; nested jobs
+    # can only narrow it.
     permissions:
       contents: write
       pull-requests: write
       packages: write
       id-token: write
       attestations: write
-      # The release-health pre-flight (in the managed release.yml)
-      # reads open issues and Dependabot alerts through this ceiling.
+      # The release-health pre-flight reads through this ceiling.
       issues: read
       vulnerability-alerts: read
     uses: ./.github/workflows/release.yml

@@ -1,26 +1,10 @@
-# The fleet's CI, in ONE place: every managed repository's ci.yml is a
-# thin caller of this reusable (single-call CI), so the fleet's gate jobs
-# are authored, reviewed, and green-gated HERE instead of being rendered
-# per repo. THE MEMBERSHIP RULE: what gates a managed repository is being
-# a job in this workflow (plus the repo-owned checks.yml its ci.yml calls)
-# - a managed repo's ci.yml no longer describes its own CI, and an edit
-# here changes fleet CI with no per-repo diff trail; repo-platform's own
-# gauntlet gating every edit is the counterweight (same trade as the
-# actions delivery branch).
-#
-# The all-green verdict (docs/all-green.md) reads the completed run's
-# jobs, where a SKIPPED job stands down instead of failing the gate - so
-# unlike the old needs-list gate, module- and visibility-conditioned jobs
-# here carry job-level `if:` guards and simply skip when they do not
-# apply. Job NAMES are non-gating (reusable calls prefix them as
-# "<caller> / <job>"), so nothing here may be name-addressed.
-#
-# Action refs pin @build - the same green-gated ref the caller pinned for
-# this workflow, so one publish advances the workflow and the actions it
-# drives together. Refs must be fully qualified: a `./` action path in a
-# reusable workflow resolves against the CALLER's checkout, where these
-# actions do not exist (a `./` WORKFLOW ref, like the codeql call below,
-# resolves against this repository at this file's own ref instead).
+# Every managed repository's ci.yml calls this reusable, so an edit here
+# changes fleet CI with no per-repo diff trail; repo-platform's own CI
+# gating every edit is the counterweight. A SKIPPED job stands down from
+# the all-green verdict; job names are non-gating and nothing here may be
+# name-addressed. Action refs must stay fully qualified @build: a `./`
+# ACTION path resolves against the CALLER's checkout (a `./` WORKFLOW ref
+# resolves against this repository).
 
 name: Fleet CI
 
@@ -51,20 +35,13 @@ on:
         type: string
         default: ""
 
-# The workflow-level default is what a checkout needs and nothing more;
-# jobs needing other scopes declare their own blocks (still capped by the
-# caller job's ceiling).
 permissions:
   contents: read
 
 jobs:
-  # TWO checks, one job, different consequences: INTEGRITY (the tree
-  # matches the state it was stamped with) BLOCKS; FRESHNESS (how far
-  # behind the build branch) only informs. Both verdicts land in one
-  # sticky PR comment. The predicate and reporting live in the
-  # validate-template-report action, which DEFERS the integrity verdict:
-  # the LAST step re-raises it, so the findings comment is already posted
-  # when the gate goes red.
+  # INTEGRITY (the tree matches its stamp) BLOCKS; FRESHNESS (distance
+  # behind the build branch) only informs. The action DEFERS the integrity
+  # verdict so the findings comment is posted before the gate goes red.
   validate-template:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -86,12 +63,10 @@ jobs:
           echo "::error::validate-template found managed content that changed outside a sync; see the findings on this PR (or the job summary) and the step log above."
           exit 1
 
-  # The five base checks. Private repositories merge them into one
-  # base-checks job - a standalone job bills a rounded-up minute per push
-  # there - with every step guarded by !cancelled() so all checks still
-  # run when an earlier one fails; public repositories keep the per-check
-  # fan-out. The unselected shape skips, which the verdict reads as
-  # standing down.
+  # The five base checks, merged into one job on private repositories (a
+  # standalone job bills a rounded-up minute per push there); !cancelled()
+  # keeps later checks running when an earlier one fails. Public repos
+  # keep the per-check fan-out below.
   base-checks:
     if: inputs.private
     runs-on: ubuntu-latest
@@ -113,18 +88,15 @@ jobs:
         if: '!cancelled()'
       - uses: Vivswan/repo-platform/actions/yamllint@build
         if: '!cancelled()'
-      # Secret scanning: a committed credential fails the gate. Allowlist
-      # false positives in the repo-owned .gitleaks.toml. Comments off
-      # keeps the pull-requests scope at read; leaks still land in the
-      # job summary and SARIF artifact.
+      # Allowlist false positives in the repo-owned .gitleaks.toml;
+      # comments off keeps the pull-requests scope at read.
       - uses: gitleaks/gitleaks-action@v3
         if: '!cancelled()'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITLEAKS_ENABLE_COMMENTS: "false"
-          # The action's default binary (8.24.3) predates .gitleaks.toml's
-          # minVersion floor AND skips that check silently; pin one meeting
-          # the floor so CI honors the same config local runs do.
+          # The action's default binary predates .gitleaks.toml's
+          # minVersion floor and skips that check silently; pin past it.
           GITLEAKS_VERSION: "8.30.1"
 
   typography:
@@ -179,9 +151,9 @@ jobs:
           GITLEAKS_ENABLE_COMMENTS: "false"
           GITLEAKS_VERSION: "8.30.1"
 
-  # Fails when a PR introduces dependencies with known vulnerabilities.
-  # Public only: the dependency-graph API behind it is free just for
-  # public repositories; PR events only: nothing else has a diff.
+  # Fails a PR introducing dependencies with known vulnerabilities. Public
+  # only (the dependency-graph API is free just there); PR events only:
+  # nothing else has a diff.
   dependency-review:
     if: ${{ !inputs.private && github.event_name == 'pull_request' }}
     runs-on: ubuntu-latest
@@ -191,11 +163,7 @@ jobs:
       # The severity threshold and the upstream pin live in the wrapper.
       - uses: Vivswan/repo-platform/actions/dependency-review@build
 
-  # CodeQL analysis inside the gate, one call per language the caller's
-  # toolchain modules analyze as. The `./` workflow ref resolves against
-  # this repository at this file's own ref; the caller job's permissions
-  # (security-events: write, actions: read) are the ceiling the analysis
-  # runs under.
+  # CodeQL, one call per language.
   codeql:
     if: inputs.codeql-languages != '[]' && inputs.codeql-languages != ''
     strategy:
@@ -210,9 +178,8 @@ jobs:
     with:
       language: ${{ matrix.language }}
 
-  # Conventional Commit PR title (the pr-title module): PRs are
-  # squash-merged, so the PR title becomes the commit subject and drives
-  # release-please versioning.
+  # PRs are squash-merged, so the PR title becomes the commit subject and
+  # drives release-please versioning.
   pr-title:
     if: contains(fromJSON(inputs.modules), 'pr-title') && github.event_name == 'pull_request'
     runs-on: ubuntu-latest
@@ -224,9 +191,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  # Structural validation of the hosted agent skills (the skills module),
-  # inside the gate so branch protection blocks on a broken catalog:
-  # offline and cheap. The network-dependent `npx skills` discovery check
+  # Offline and inside the gate; the network-dependent discovery check
   # stays advisory in the standalone validate-skills.yml.
   validate-skills:
     if: contains(fromJSON(inputs.modules), 'skills')
@@ -238,10 +203,9 @@ jobs:
         with:
           skills-dir: ${{ inputs.skills-dir }}
 
-  # Fails when the release-please PR head lacks main's tip at CHECK time
-  # (the release-please module): a stale release PR cuts a release whose
-  # version and changelog miss commits already on main. Other PRs stay
-  # mergeable while behind (required checks are not strict).
+  # Fails when the release-please PR head lacks main's tip at CHECK time:
+  # a stale release PR cuts a release missing commits already on main.
+  # Other PRs stay mergeable while behind.
   release-freshness:
     if: contains(fromJSON(inputs.modules), 'release-please') && github.event_name == 'pull_request' && startsWith(github.head_ref, 'release-please--')
     runs-on: ubuntu-latest
@@ -264,19 +228,15 @@ jobs:
             exit 1
           fi
 
-  # Early, visible release gating (the release-please module): fails the
-  # release PR while an open issue carries a tracking-stream label or the
-  # release-blocker label, or an open Dependabot alert reaches the
-  # severity threshold. This check can go stale, so the release path
-  # re-runs the same action as the authoritative pre-flight.
+  # Early release gating: fails the release PR on open tracking/blocker
+  # issues or Dependabot alerts at the severity threshold. Can go stale,
+  # so the release path re-runs the same action as the pre-flight.
   release-health:
     if: contains(fromJSON(inputs.modules), 'release-please') && github.event_name == 'pull_request' && startsWith(github.head_ref, 'release-please--')
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    # vulnerability-alerts read is the Dependabot alerts API key
-    # (security-events covers code scanning only); where the token cannot
-    # see alerts, the action's graceful degradation turns the security
-    # gate into a skipped check instead of a failure.
+    # vulnerability-alerts read is the Dependabot alerts API key; where
+    # the token cannot see alerts the action degrades to a skipped check.
     permissions:
       contents: read
       issues: read

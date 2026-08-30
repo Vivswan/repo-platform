@@ -1,15 +1,13 @@
-# Nightly fuzzing starter. Generated once by Vivswan/repo-platform
-# and never overwritten by template sync, so edit freely. Replace the
-# placeholder fuzz step with your fuzzer; as long as it writes failure
-# reports under the artifacts directory per the contract in repo-platform's
-# docs/fuzzer.md, the issue filing, replay inputs, and auto-close steps
-# below keep working unchanged.
+# Nightly fuzzing starter: generated once by Vivswan/repo-platform,
+# never overwritten by template sync. Replace the placeholder fuzz step;
+# follow the failure-report contract in docs/fuzzer.md and the issue
+# filing, replay, and auto-close steps keep working.
 name: Nightly Fuzz
 
 on:
   schedule:
-    # Off-peak and off the top of the hour; pick your repo's own minute so
-    # the fleet's nightlies do not all land on GitHub at once.
+    # Pick your repo's own minute so the fleet's nightlies do not all
+    # land on GitHub at once.
     - cron: "11 9 * * *"
   workflow_dispatch:
     inputs:
@@ -36,16 +34,13 @@ permissions:
 jobs:
   fuzz:
     runs-on: ubuntu-latest
-    # If the job hits this timeout it is CANCELLED, not failed, and the
-    # `if: failure()` reporting steps below never run - a silent night for
-    # exactly the hang a fuzzer exists to find. Bound the fuzz run itself
-    # (wall-clock flag, `timeout` wrapper) below this value so a hang
-    # surfaces as a failure.
+    # A job hitting this timeout is CANCELLED, not failed, so the
+    # `if: failure()` reporting below never runs - bound the fuzz run
+    # itself below this value so a hang surfaces as a failure.
     timeout-minutes: 60
-    # Sharding multiplies nightly coverage at the same wall-clock cost, BUT
-    # the issue-filing and resolve steps below then race across shards and
-    # must move to a separate `needs: fuzz` job. See the Sharding section of
-    # repo-platform's docs/fuzzer.md before enabling:
+    # Sharding multiplies coverage, but the issue-filing and resolve steps
+    # then race across shards and must move to a `needs: fuzz` job - see
+    # docs/fuzzer.md before enabling:
     # strategy:
     #   fail-fast: false
     #   matrix:
@@ -53,8 +48,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # Set up your fuzzer's toolchain here (rust nightly + cargo-fuzz,
-      # docker, extra runtimes, a persistent corpus cache, ...).
+      # Set up your fuzzer's toolchain here.
 
       - name: Fuzz
         env:
@@ -65,13 +59,12 @@ jobs:
             SEED="$RANDOM$RANDOM"
           fi
           echo "fuzzing with seed $SEED, $ITERATIONS iterations"
-          # Replace this placeholder with your fuzzer. Contract (docs/fuzzer.md):
-          # run seeded with $SEED for $ITERATIONS iterations, and on failure
-          # write one .fuzz-failures/<name>/report.md per crash whose first
-          # line is a `# title` heading and whose body carries the exact
-          # replay command in a fenced block (include the seed there too, so
-          # the issue records it). Until then this step is a green no-op on
-          # purpose: an uncustomized starter must not file issues.
+          # Replace with your fuzzer. Contract (docs/fuzzer.md): run
+          # seeded with $SEED for $ITERATIONS iterations; on failure write
+          # one .fuzz-failures/<name>/report.md per crash - first line a
+          # `# title` heading, body carrying the exact replay command in a
+          # fenced block. A green no-op until then: an uncustomized
+          # starter must not file issues.
           echo "::warning::nightly-fuzz starter not customized yet - replace the placeholder fuzz step (see repo-platform's docs/fuzzer.md)"
 
       - name: Upload failure artifacts
@@ -79,8 +72,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: fuzz-failures-${{ github.run_attempt }}
-          # Point this at your failure-report directory (and anything else
-          # worth keeping: crashing inputs, logs).
+          # Point this at your failure-report directory.
           path: .fuzz-failures/
           if-no-files-found: ignore
 
@@ -91,9 +83,8 @@ jobs:
         with:
           mode: report
           label: "fuzz-nightly"
-          # Explicit even though it matches the action's default: repos
-          # rendered before the action served multiple streams rely on the
-          # default, so it can never change - new renders should not.
+          # Explicit even though it matches the action's default: older
+          # renders rely on the default, so it can never change.
           title: Nightly fuzz failures
           artifacts-dir: .fuzz-failures
           artifact-name: fuzz-failures-${{ github.run_attempt }}
@@ -103,9 +94,8 @@ jobs:
         if: failure() && steps.file-issue.outputs.issue-number != ''
         env:
           GH_TOKEN: ${{ github.token }}
-          # This job checks out, so gh could infer the repo - but the
-          # sharding guidance above moves these steps into a checkout-less
-          # job, so name the repo explicitly to keep the step portable.
+          # The sharding guidance above moves these steps into a
+          # checkout-less job, so name the repo explicitly.
           GH_REPO: ${{ github.repository }}
           ISSUE_NUMBER: ${{ steps.file-issue.outputs.issue-number }}
         run: gh workflow run auto-assign.yml -f "issue=$ISSUE_NUMBER" || echo "::warning::could not dispatch auto-assign.yml"

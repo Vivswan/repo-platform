@@ -1,40 +1,11 @@
-# Push-only template sync: runs in repo-platform and pushes a template
-# update into one managed repo - target checkout in a subdirectory, `copier
-# update` against the build branch head, then a branch + PR opened in
-# the target with the REPO_PLATFORM_TOKEN PAT stored here. Called only by
-# sync-repos.yml.
-#
-# Permission-adaptive token model: the token itself is REQUIRED (a missing
-# secret is a misconfiguration and fails loudly), but a deliberately
-# narrowed token adapts: without the Workflows scope, workflow-file
-# changes are withheld from the PR with a warning; Contents + Pull
-# requests write are the core the sync cannot work without.
-#
-# The rolling branch (automation/repo-platform)
-# is regenerated on every run: sync-repos.yml's concurrency group is the
-# only automated writer, and the push uses --force-with-lease so an
-# out-of-band push racing this run surfaces instead of vanishing. Manual
-# commits on the branch are overwritten by design; the PR body says so.
-# The post-update pipeline is fixed: copier update -> clean renders at
-# the old and new refs -> structural rebuild of split-class files (a
-# marker line separates the sync-owned half from the repo-owned half,
-# which never rides copier's three-way merge: managed half from the clean
-# render at the new ref, repo-owned half byte-for-byte from the
-# pre-update HEAD; the rebuilt paths are --skip'd by the conflict
-# resolver) -> remaining conflicts resolved toward the template ->
-# retired-file cleanup -> repo-owned files preserved -> ownership
-# manifest stamped -> tail tripwire (every repo-owned half must still
-# hold each non-blank line it held at HEAD, HEAD's copy split with
-# HEAD's own manifest markers) -> validation. Clean updates arm squash
-# auto-merge (the target's all-green check gates the actual merge);
-# conflicts in non-split files resolve toward the template with the
-# dropped local lines in the PR body and stay MANUAL, as do split-file
-# carries needing review (an appendix, reset managed-half edits, duplicate
-# markers), a tripped tail tripwire, withheld workflow files, failed
-# validation, and out-of-band settings drift (live visibility or
-# description differing from the recorded copier answers) -
-# auto-resolution warns; only validation failures (and broken inputs) go
-# red.
+# Push-only template sync into one managed repo; called only by
+# sync-repos.yml. The PAT is required but adapts: without the Workflows
+# scope, workflow-file changes are withheld with a warning. The rolling
+# branch is regenerated every run (--force-with-lease); manual commits on
+# it are overwritten by design. Clean updates arm squash auto-merge;
+# conflicts, carries needing review, a tripped tripwire, withheld
+# workflows, failed validation, and settings drift stay MANUAL. Only
+# validation failures and broken inputs go red.
 
 name: Reusable Template Sync
 
@@ -81,10 +52,8 @@ on:
         required: true
 
 # The workflow's own token only reads this repo; every target-repo write
-# (checkout, push, PR) uses the REPO_PLATFORM_TOKEN PAT. Checks read is
-# the green-source gate (shared/all_green.ts proves the shipped build's
-# own source commit passed CI via its all-green verdict lookup); the
-# build provenance check itself is API-free (git plus a local rebuild).
+# uses the REPO_PLATFORM_TOKEN PAT. Checks read is the green-source gate
+# (shared/all_green.ts).
 permissions:
   contents: read
   checks: read
@@ -100,15 +69,13 @@ jobs:
     env:
       HIDE_DETAILS: ${{ inputs.target_hide_details }}
     steps:
-      # No token presence check here: the secret is declared required
-      # above, and the only caller (sync-repos.yml) fails its plan job
-      # loudly when REPO_PLATFORM_TOKEN is unset, before any leg starts.
+      # No token presence check: the secret is required above, and
+      # sync-repos.yml's plan job fails loudly when it is unset.
       - name: Check out repo-platform
         uses: actions/checkout@v7
         with:
-          # Full history: repos generated before the build-branch
-          # architecture record a main-history _commit, which must resolve
-          # for the update base and the cleanup's old render.
+          # Full history: pre-build-branch repos record a main-history
+          # _commit, which must resolve for the update base.
           fetch-depth: 0
 
       - uses: oven-sh/setup-bun@v2
@@ -120,11 +87,9 @@ jobs:
       - name: Install script dependencies
         run: bun install --frozen-lockfile --silent
 
-      # Sets TARGET (the real slug) and TARGET_DISPLAY for every later
-      # step. For a redacted target it re-discovers the fleet, matches the
-      # HMAC tag, and registers the slug with the runner's masker FIRST -
-      # so later env-group prints, the target checkout's own log, and API
-      # error bodies all render it as ***.
+      # Sets TARGET and TARGET_DISPLAY for every later step. A redacted
+      # target's slug registers with the runner's masker FIRST, so later
+      # prints, checkout logs, and API error bodies render it as ***.
       - name: Resolve the target repository
         env:
           TARGET_INPUT: ${{ inputs.target_repo }}
@@ -135,10 +100,8 @@ jobs:
         run: bun .github/scripts/fleet/resolve_private_repo.ts
 
       # The description lands in a RUNNER_TEMP file, not a step output:
-      # step outputs ride into later steps' env-group prints, and a
-      # hidden target's description must not. Masks for the description
-      # and a non-default branch name register before either value is
-      # written anywhere.
+      # outputs ride into later steps' env-group prints, and a hidden
+      # target's description must not.
       - name: Read live target repo data
         id: target
         env:
@@ -153,9 +116,8 @@ jobs:
           token: ${{ secrets.REPO_PLATFORM_TOKEN }}
           path: target
           fetch-depth: 0
-          # copier --trust executes template tasks in this tree; the PAT must
-          # not sit in .git/config while they run. Pushes authenticate at
-          # push time instead.
+          # copier --trust executes template tasks in this tree; the PAT
+          # must not sit in .git/config while they run.
           persist-credentials: false
 
       - name: Require registration files
@@ -163,17 +125,12 @@ jobs:
           test -f target/.repo-platform.yml || { echo "::error::${TARGET_DISPLAY} is not registered with repo-platform: .repo-platform.yml is missing from its default branch. Restore the file from git history, or regenerate the repo with 'copier copy gh:${GITHUB_REPOSITORY} . --vcs-ref build'."; exit 1; }
           test -f target/.copier-answers.yml || { echo "::error::${TARGET_DISPLAY} has no .copier-answers.yml on its default branch, so copier has no recorded answers to update from. Restore the file from git history, or regenerate the repo with 'copier copy gh:${GITHUB_REPOSITORY} . --vcs-ref build'."; exit 1; }
 
-      # Live visibility and description feed the render on purpose (adopt
-      # semantics: the visibility-gated renders - CONTRIBUTING.md and the
-      # other public-only files, the CodeQL and dependency-review jobs - must
-      # follow the repo's real state), so a value changed out-of-band in
-      # the GitHub UI would otherwise auto-merge into declared truth.
-      # Drift against the recorded answers warns here and forces the PR
-      # onto the manual-review path (open_pr.ts), with the details
-      # prepended to its body. MUST stay ahead of "Apply copier update":
-      # that step
-      # passes the live values to copier, which rewrites the answers file
-      # with them, and the comparison would find nothing ever after.
+      # Live visibility and description feed the render on purpose (the
+      # visibility-gated renders must follow the repo's real state), so a
+      # value changed out-of-band would auto-merge into declared truth.
+      # Drift warns and forces the manual-review path. MUST stay ahead of
+      # "Apply copier update", which rewrites the answers file with the
+      # live values - the comparison would find nothing ever after.
       - name: Detect out-of-band settings drift
         env:
           PRIVATE: ${{ steps.target.outputs.private }}
@@ -188,12 +145,9 @@ jobs:
             --live-description "$(cat "$RUNNER_TEMP/description.txt")" \
             --summary "$RUNNER_TEMP/settings-drift.md"
 
-      # copier update and the cleanup renders fetch the template from the
-      # answers file's _src_path and execute its tasks with --trust. That
-      # value is target-controlled (and repos generated from a local
-      # checkout record a filesystem path), so it is never trusted OR
-      # required to be right: it is rewritten to the canonical source
-      # before any copier command, and the rewrite lands in the PR diff.
+      # _src_path is target-controlled, so it is never trusted: it is
+      # rewritten to the canonical source before any copier command, and
+      # the rewrite lands in the PR diff.
       - name: Normalize the recorded template source
         id: src
         run: bun .github/scripts/sync/normalize_src.ts
@@ -205,9 +159,8 @@ jobs:
           RECOVER: ${{ inputs.recover }}
         run: bun .github/scripts/sync/resolve_refs.ts
 
-      # The selection lands in a RUNNER_TEMP file, not a step output: the
-      # module list is a target-derived fact, and step outputs ride into
-      # later steps' env-group prints.
+      # A RUNNER_TEMP file, not a step output: the module list is
+      # target-derived and outputs ride into later env-group prints.
       - name: Select modules
         run: bun .github/scripts/sync/select_modules.ts
 
@@ -219,13 +172,11 @@ jobs:
           BRANCH: ${{ steps.versions.outputs.branch }}
         run: git -C target checkout -B "$BRANCH"
 
-      # No up-to-date shortcut: modules, private, and description
-      # are live inputs that must re-render even at an unchanged template
-      # ref, and a no-op render is cheap. The no-changes case exits with a
-      # notice after diffing. MODULES and DESCRIPTION come from files via
-      # the shell, not step env, so the env-group print never carries
-      # them; run_hidden.ts captures copier's own output for a hidden
-      # target (it prints target paths and merge detail).
+      # No up-to-date shortcut: modules, private, and description are live
+      # inputs that must re-render even at an unchanged template ref.
+      # MODULES and DESCRIPTION come from files via the shell so the
+      # env-group print never carries them; run_hidden.ts captures
+      # copier's output for a hidden target.
       - name: Apply copier update
         env:
           TARGET_REF: ${{ steps.versions.outputs.target_ref }}
@@ -237,14 +188,9 @@ jobs:
             bun .github/scripts/sync/run_hidden.ts "copier update" -- \
             bun .github/scripts/sync/apply_update.ts
 
-      # Clean template renders at the old and new refs, materialized once
-      # in RUNNER_TEMP by clean_renders.ts: the split-file rebuild below
-      # consumes render-new (and render-old for edit detection), and the
-      # retired-file cleanup diffs the pair - one materialization, so every
-      # consumer sees the same bytes the update rendered. Recovery mode
-      # skips it: the recorded base is unusable, so there is no old ref to
-      # render. copier's output names target paths, so a hidden target's
-      # run is captured.
+      # One materialization in RUNNER_TEMP serves the split-file rebuild
+      # and the retired-file cleanup, so every consumer sees the same
+      # bytes. Recovery mode skips it: there is no usable old ref.
       - name: Materialize clean renders
         if: inputs.recover != 'recopy'
         env:
@@ -258,24 +204,13 @@ jobs:
             bun .github/scripts/sync/run_hidden.ts "clean renders" -- \
             bun .github/scripts/sync/clean_renders.ts
 
-      # Split-class files are REBUILT structurally after every update:
-      # copier's merged result for them is discarded, the managed half
-      # comes from the clean render at the new ref, and the repo-local
-      # half comes byte-for-byte from the pre-update HEAD. Which files are
-      # split, and where each marker sits, comes from the new render's
-      # ownership manifest. Local edits INSIDE a managed half are reset by
-      # this rebuild (detected against the old render, so a template
-      # change never reads as a local edit) - the reset is flagged in the
-      # PR body and via the carry-review file, which forces the PR onto
-      # the manual-review path (open_pr.ts). A recovery re-render has no
-      # renders to consume, so it keeps the sentinel-scan carry over the
-      # recopy result (the working tree IS the fresh render there). The
-      # carried files are listed in the PR body - and, for a hidden
-      # target, ONLY there (paths and dispositions are target data). The
-      # script prints hide-details-aware counts itself, but its FAILURE
-      # paths (a damaged manifest naming split paths, a refused write)
-      # quote target data, so a hidden target's run is captured like every
-      # other step that reads the target tree.
+      # Split-class files are REBUILT structurally: copier's merged result
+      # is discarded, the managed half comes from the clean render, the
+      # repo-local half byte-for-byte from the pre-update HEAD. Local
+      # edits INSIDE a managed half are reset (detected against the old
+      # render, so a template change never reads as a local edit) and
+      # flagged for manual review. Carried files are listed in the PR
+      # body - for a hidden target, ONLY there, so the run is captured.
       - name: Rebuild split files structurally
         env:
           RECOVER: ${{ inputs.recover }}
@@ -291,15 +226,11 @@ jobs:
           bun .github/scripts/sync/run_hidden.ts "split-file rebuild" -- \
             bun .github/scripts/sync/preserve_local_content.ts "${flags[@]}"
 
-      # Conflicts (local edits overlapping template changes) resolve in the
-      # template's favor so the tree stays valid. The files the rebuild
-      # above wrote are excluded via --skip - their conflict blocks are
-      # gone with the merged result, and a carried repository half may
-      # legitimately contain conflict-marker-shaped text this pass must not
-      # rewrite - so the conflicts resolved here live in non-split files.
-      # Either way the dropped local lines go into the PR body for review -
-      # and, for a hidden target, ONLY there (the step-log dump is target
-      # file content).
+      # Conflicts resolve in the template's favor so the tree stays valid;
+      # the rebuilt split files are --skip'd (a carried half may
+      # legitimately contain conflict-marker-shaped text). Dropped local
+      # lines go into the PR body for review - for a hidden target, ONLY
+      # there.
       - name: Resolve copier conflicts toward the template
         id: conflicts
         run: |
@@ -313,15 +244,11 @@ jobs:
             echo "resolved=false" >> "$GITHUB_OUTPUT"
           fi
 
-      # A locally modified file that leaves the render survives copier
-      # update as a conflict leftover. Deletion candidates come only from
-      # the difference of the two clean renders materialized above minus
-      # both versions' _skip_if_exists lists (see retired_paths.ts): paths
-      # never rendered by either version cannot appear. A formerly
-      # rendered path the repo repurposed after the template retired it IS
-      # deleted - the PR body lists every removal for review. Recovery
-      # mode has no trustworthy old render to diff against, so cleanup is
-      # skipped there.
+      # Deletion candidates come only from the diff of the two clean
+      # renders minus both _skip_if_exists lists: paths never rendered
+      # cannot appear. A retired path the repo repurposed IS deleted - the
+      # PR body lists every removal. Recovery mode skips cleanup (no
+      # trustworthy old render).
       - name: Remove files the template retired
         if: inputs.recover != 'recopy'
         id: cleanup
@@ -333,13 +260,10 @@ jobs:
             echo "removed $(wc -l <"$RUNNER_TEMP/removed-paths.txt" | tr -d ' ') retired file(s) (paths hidden: private repository; listed in the PR body)"
           fi
 
-      # settings.yml and (for repos on the custom-license module) the
-      # repo's own license file are repo-owned wherever they exist: a
-      # module change de-renders them, but the sync must never delete them
-      # (see the script's header for the full rules and the recovery-mode
-      # behavior). Wrapped in run_hidden: the removed-splits hold names
-      # deleted repo-owned paths, so a hidden target captures the step's
-      # output instead of logging it.
+      # settings.yml and custom-license files are repo-owned wherever they
+      # exist: a module change de-renders them, but the sync must never
+      # delete them (rules in the script header). run_hidden: the removed
+      # splits hold deleted repo-owned names.
       - name: Preserve repo-owned files
         env:
           RECOVER: ${{ inputs.recover }}
@@ -349,16 +273,11 @@ jobs:
             bun .github/scripts/sync/run_hidden.ts "preserve repo-owned files" -- \
             bun .github/scripts/sync/preserve_repo_owned.ts
 
-      # One-run rollout of the fuzz-issue action pin inside STARTER-class
-      # workflows: starters are rendered once and repo-owned
-      # (_skip_if_exists), so the template's own move of the pin from the
-      # retired @main and @actions refs to the green-gated @build delivery
-      # branch never reaches a repo that already rendered them. The script
-      # rewrites EXACTLY the retired pin strings (paths from the render's
-      # ownership manifest, the working tree's own in recopy mode), leaves
-      # hand-set pins alone, and writes the PR-body transition note
-      # open_pr.ts appends. Delete this step once the fleet carries no
-      # retired fuzz-issue pins (see the script header).
+      # One-run rollout of the fuzz-issue pin inside STARTER-class
+      # workflows (rendered once, repo-owned, so the template's own pin
+      # move never reaches them). Rewrites EXACTLY the retired pin
+      # strings, leaves hand-set pins alone, and writes the PR-body note.
+      # Delete once the fleet carries no retired fuzz-issue pins.
       - name: Roll out starter action pins
         env:
           RECOVER: ${{ inputs.recover }}
@@ -370,56 +289,40 @@ jobs:
           bun .github/scripts/sync/run_hidden.ts "starter pin rollout" -- \
             bun .github/scripts/sync/starter_pin_rollout.ts "${flags[@]}"
 
-      # The all-green bootstrap gap: a PR that INTRODUCES the verdict
-      # workflow can never receive its own verdict - workflow_run (and the
-      # dispatch unwedge) run only the default branch's copy, which does
-      # not exist until that PR merges (docs/all-green.md). The script
-      # writes the PR-body note naming the one-time admin-bypass merge,
-      # which open_pr.ts appends and holds manual; commit_push.ts clears
-      # the note when its Workflows-scope withhold keeps the file from
-      # being delivered. Wrapped in run_hidden: whether the target's
-      # default branch carries the workflow is target state, so a hidden
-      # target's status lines stay off the public log.
+      # A PR that INTRODUCES the verdict workflow can never receive its
+      # own verdict (workflow_run runs only the default branch's copy), so
+      # the script writes the PR-body note naming the one-time
+      # admin-bypass merge. run_hidden: the target's default-branch state
+      # stays off the public log.
       - name: Note the all-green bootstrap gap
         run: |
           bun .github/scripts/sync/run_hidden.ts "all-green bootstrap" -- \
             bun .github/scripts/sync/all_green_bootstrap.ts \
             --root target --hide-details "$HIDE_DETAILS"
 
-      # Referenced-label invariant, WARN side: every label the target's
-      # issue forms and its own workflows reference must exist in the
-      # merged settings label roster - the settings apply deletes
-      # undeclared labels, so a missing one is a silent break. The script
-      # writes a PR-body section open_pr.ts appends and holds manual; it
-      # never fails the sync (a repo quirk must not block its PR - the
-      # apply side carries the fail-closed guard, label_preflight.ts).
-      # Wrapped in run_hidden: label names and paths are target content.
+      # WARN side of the referenced-label invariant: the settings apply
+      # deletes undeclared labels, so a referenced-but-undeclared one is a
+      # silent break. Never fails the sync - the apply side carries the
+      # fail-closed guard (label_preflight.ts).
       - name: Check referenced labels against the merged roster
         run: |
           bun .github/scripts/sync/run_hidden.ts "referenced labels" -- \
             bun .github/scripts/sync/referenced_labels.ts \
             --root target --hide-details "$HIDE_DETAILS"
 
-      # Conflict resolution and the preserve steps can rewrite files after
-      # copier's own post-render stamp hook ran, so the ownership
-      # manifest's hashes are stamped once more when the tree is final
-      # (idempotent; see stamp_manifest.ts). Deliberately: the hashes
-      # record the tree THIS SYNC delivers - non-conflicting local edits
-      # copier's three-way merge preserves are part of that baseline, so
-      # parity measures drift since the last sync, never re-litigates the
-      # merge.
+      # Later steps rewrite files after copier's stamp hook ran, so the
+      # manifest is stamped once more when the tree is final. The hashes
+      # record the tree THIS SYNC delivers, so parity measures drift since
+      # the last sync, never re-litigates the merge.
       - name: Stamp the ownership manifest
         env:
           TARGET_DIR: target
         run: bun actions/shared/stamp_manifest.ts
 
-      # Defense-in-depth, now that the tree is final: every split entry's
-      # repository-owned half must still hold each non-blank line it held
-      # at the target's HEAD (split rules in the script header). A trip is
-      # a sync bug: it lands in the PR body via the script's RUNNER_TEMP
-      # report (a filename constant it shares with open_pr.ts, which
-      # forces the manual-review path). Warn, not red - a blocked delivery
-      # would hide the diff the reviewer needs.
+      # Defense-in-depth on the final tree: every repository-owned half
+      # must still hold each non-blank line it held at HEAD. A trip is a
+      # sync bug and forces the manual-review path. Warn, not red - a
+      # blocked delivery would hide the diff the reviewer needs.
       - name: Tripwire on repository-owned content loss
         run: |
           bun .github/scripts/sync/run_hidden.ts "tail tripwire" -- \
@@ -428,9 +331,8 @@ jobs:
             --hide-details "$HIDE_DETAILS"
 
       # Registries publish the manifest's license claim, not the LICENSE
-      # file: a repo adopting the fleet license with package.json still
-      # saying "MIT" publishes a false grant. Flags conflicting claims in
-      # the PR body (status-only in this log; values are target-derived).
+      # file: package.json still saying "MIT" publishes a false grant.
+      # Conflicting claims are flagged in the PR body.
       - name: Check manifest license metadata
         run: |
           MODULES="$(cat "$RUNNER_TEMP/modules.json")" \
@@ -445,10 +347,9 @@ jobs:
           ref: ${{ steps.versions.outputs.validate_ref }}
           path: validator
 
-      # A failed validation still opens the PR (that is where a human fixes
-      # the tree); the job fails at the end. The validator's diagnostics
-      # name target paths and values, so a hidden target's run is captured
-      # by run_hidden.ts.
+      # A failed validation still opens the PR (that is where a human
+      # fixes the tree); the job fails at the end. run_hidden captures the
+      # diagnostics for a hidden target.
       - name: Validate the updated tree
         id: validate
         run: |
@@ -476,13 +377,11 @@ jobs:
             echo "changed=true" >> "$GITHUB_OUTPUT"
           fi
 
-      # The push authenticates with the PAT at push time (the checkout kept
-      # no credentials) and withholds workflow files when the token lacks
-      # the Workflows scope - see the script for the fallback rules.
-      # Unconditional and BEFORE the push: whatever this run delivers
-      # (needs-review, nothing at all, or a failed push), an auto-merge
-      # armed by an earlier clean run must never fire on it. open_pr.ts
-      # re-arms clean revisions.
+      # The push authenticates with the PAT at push time and withholds
+      # workflow files when the token lacks the Workflows scope. This
+      # disarm is unconditional and BEFORE the push: whatever this run
+      # delivers, an auto-merge armed by an earlier clean run must never
+      # fire on it. open_pr.ts re-arms clean revisions.
       - name: Disarm auto-merge before the branch changes
         env:
           GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
@@ -542,9 +441,8 @@ jobs:
             # open_pr.ts appended them to the PR body instead.
             where="the PR body - this public log hides them (private repository)"
           elif [ "$HIDE_DETAILS" = "true" ]; then
-            # No PR exists to carry them (the update delivered nothing);
-            # the deliver step below routes the capture to the target's
-            # failure-report issue instead.
+            # No PR exists to carry them; the deliver step below routes
+            # the capture to the target's failure-report issue.
             where="hidden from this public log (private repository); delivered to the target's failure-report issue, or reproduce validation locally per docs/private-repos.md"
           elif [ -n "$PUSH_VALIDATION" ]; then
             where="the 'Commit and push' step log - the tree was re-validated after workflow files were withheld"
@@ -570,18 +468,12 @@ jobs:
           fi
 
       # A hidden failure with no PR to carry its captured diagnostics
-      # (copier or cleanup crash, validation failure with nothing
-      # delivered, a lease/push failure commit_push.ts recorded itself)
-      # would otherwise die with the runner. Deliver the
-      # capture to a reused issue on the target repo - its issues are as
-      # private as the repo. When a PR exists, open_pr.ts already routed
-      # the detail into its body and the script skips itself. Best-effort:
-      # the script warns generically and exits 0 on delivery problems.
-      # env.TARGET != '' keeps both tail steps off runs that died before
-      # the checkout and target resolution. Both gates read env
-      # (strings): the boolean input itself never == 'true' in an
-      # expression (mismatched types coerce to number, true -> 1,
-      # 'true' -> NaN).
+      # would die with the runner, so deliver the capture to a reused
+      # issue on the target repo (as private as the repo). Best-effort:
+      # the script warns and exits 0 on delivery problems. Both tail
+      # gates read env STRINGS: a boolean input never == 'true' in an
+      # expression, and env.TARGET != '' keeps them off runs that died
+      # before target resolution.
       - name: Deliver hidden failure diagnostics
         if: failure() && env.HIDE_DETAILS == 'true' && env.TARGET != ''
         env:

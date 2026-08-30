@@ -1,35 +1,14 @@
-# This repository's all-green verdict: when a CI run completes, judge its
-# jobs and create the `all-green` check run branch protection (and the
-# build/sync green gates in shared/all_green.ts) require. The judgment is
-# the local reusable-all-green.yml - the SAME implementation every managed
-# repo's wrapper calls, dogfooded here. After a green verdict on a push
-# to main, the post-green job releases everything that runs after green
-# (post-green.yml - the build-branch publish today).
-#
-# The dispatch input is the unwedge path: when a verdict never landed at a
-# sha (a lost workflow_run event), dispatch this workflow with the sha and
-# it re-judges the newest completed CI run there.
-#
-# workflow_run triggers execute the DEFAULT branch's copy of this file
-# (and the local reusable at that same ref), so changes here are
-# observable only after they merge to main.
+# workflow_run executes the DEFAULT branch's copy of this file (and the
+# local reusable at that ref) - changes land only after they merge.
 
 name: All Green
 
 on:
-  # The judged-workflow list. Today CI is the only workflow whose runs
-  # get verdicts (and whose green main pushes reach post-green below);
-  # when conditional workflows exist, they join this list - and the
-  # all-green-name rule in scripts/check_ssot.ts, which pins it.
   workflow_run:
     workflows: [CI]
     types: [completed]
-  # The event-driven re-judgment wake: a check run's completion fires no
-  # workflow_run event, so Copilot's review SUBMISSION is what re-fires
-  # judgment at a sha whose verdict was left pending on the owed review
-  # (this replaced the retired in-job poll - no runner ever waits). Any
-  # submitted review re-judges; judgments are idempotent and serialize
-  # per sha below.
+  # Copilot's review submission is the wake that re-judges a verdict left
+  # pending on the owed review (a check run's completion fires no event).
   pull_request_review:
     types: [submitted]
   workflow_dispatch:
@@ -41,11 +20,8 @@ on:
 
 permissions: {}
 
-# One verdict at a time per judged sha: a push run and a PR run of the
-# same head complete near-simultaneously (and a review wake or a dispatch
-# can join them), and serializing the judgments keeps their check-run
-# POSTs ordered. Never cancel: a cancelled verdict between judging and
-# posting is a lost check only the dispatch unwedge would heal.
+# Serialize judgments per sha so their check-run POSTs stay ordered. Never
+# cancel: a verdict cancelled between judging and posting is a lost check.
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.workflow_run.head_sha || github.event.pull_request.head.sha || inputs.sha }}
   cancel-in-progress: false
@@ -58,58 +34,28 @@ jobs:
     uses: ./.github/workflows/reusable-all-green.yml
     with:
       sha: ${{ github.event_name == 'workflow_dispatch' && inputs.sha || '' }}
-      # The verdict OWNS the Copilot review expectation: since the fleet
-      # cutover the ruleset requires only the all-green check
-      # (.github/settings-override.yml), so this input is the review
-      # gate's only home - check_ssot's all-green-name rule pins it, and
-      # a regression to the input's false default would un-gate the
-      # review while CI stayed green. Two documented residuals ride with
-      # it (docs/all-green.md): the bot stand-down keys on the PR AUTHOR,
-      # which only review wakes carry, so a bot-authored PR stays pending
-      # until a review is submitted after CI completes; and with an
-      # expected set declared the verdict REFUSES schedule/dispatch
-      # judgments - expect the weekly CodeQL schedule run's verdict to go
-      # red without posting (the push verdict at that sha is unaffected).
+      # The ruleset requires only all-green, so this input is the review
+      # gate's only home. Residuals (docs/all-green.md): a bot-authored PR
+      # pends until a review lands after CI; the weekly schedule run's
+      # verdict goes red without posting.
       require-copilot-review: true
 
-  # Post-green: everything that runs AFTER the verdict landed green on a
-  # push to main (post-green.yml hosts the legs; today, the build-branch
-  # publish). Gated on the verdict's own posted conclusion (the reusable's
-  # output) - never the triggering run's conclusion, which can be green
-  # while the verdict fails (duplicate job names) or red through an
-  # info-* job the verdict rightly waves through. publish.ts still
-  # re-verifies the all-green check run before any mutation, as every
-  # post-green leg must (defense in depth; the needs edge orders that
-  # read after the verdict's write). The dispatch unwedge path never
-  # reaches here (a re-judged sha gets its check run, nothing more);
-  # Build Branches' schedule/dispatch legs are the publish self-heal.
-  #
-  # This job is post-gate, not gating: it runs AFTER the verdict, is
-  # never judged by it (only CI runs are judged), and so stays out of
-  # check_ssot.ts's ALL_GREEN_ROSTER, which pins ci.yml's gating jobs.
+  # Gated on the verdict's own posted conclusion, never the triggering
+  # run's, which can be green while the verdict fails.
   post-green:
     needs: [verdict]
-    # needs.verdict.result spelled out as deliberate redundancy: GitHub
-    # implies success() on an `if` that names no status function, so the
-    # clause is not load-bearing today - it is here so the release
-    # condition never depends on remembering that implication rule. The
-    # conclusion output is empty on a PENDING verdict and unset on a
-    # refused judgment, so neither can release.
+    # result is spelled out so the release never depends on GitHub's
+    # implied-success() rule; conclusion is empty on a pending verdict and
+    # unset on a refused one, so neither can release.
     if: >-
       needs.verdict.result == 'success' &&
       needs.verdict.outputs.conclusion == 'success' &&
       github.event_name == 'workflow_run' &&
       github.event.workflow_run.event == 'push' &&
       github.event.workflow_run.head_branch == 'main'
-    # Serializes releases per branch; verdicts stay per-sha via the
-    # workflow-level group above. This group is deliberately a DIFFERENT
-    # resource from the publisher lane the called workflow's job takes
-    # (build-branches-publish, a literal in post-green.yml): this job
-    # HOLDS post-green-<ref> while its called job WAITS for the publisher
-    # lane, so sharing one name would self-deadlock. Coalescing rule for
-    # pending jobs evicted from this group: post-green.yml's header - a
-    # newer evictor covers the work, an older one leaves a staleness the
-    # next green push or the Build Branches cron repairs.
+    # Deliberately a DIFFERENT resource from the publisher lane the called
+    # job takes (build-branches-publish): this job HOLDS post-green-<ref>
+    # while its called job WAITS for the lane, so one name would deadlock.
     concurrency:
       group: post-green-${{ github.event.workflow_run.head_branch }}
       cancel-in-progress: false
@@ -118,9 +64,8 @@ jobs:
       checks: read
     uses: ./.github/workflows/post-green.yml
     with:
-      # The judged commit, never github.sha: on workflow_run events
-      # github.sha is main's CURRENT tip, which can already be a newer -
-      # even red - commit whose own verdict is still pending.
+      # Never github.sha: on workflow_run events that is main's CURRENT
+      # tip, which can already be a newer - even red - commit.
       sha: ${{ github.event.workflow_run.head_sha }}
     secrets:
       REPO_PLATFORM_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}

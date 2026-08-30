@@ -53,15 +53,12 @@ runs:
       if: steps.setup-bun.outcome == 'failure'
       uses: oven-sh/setup-bun@v2
 
-    # No install step for this action's own scripts: they have no runtime
-    # dependencies.
+    # No install step for this action's own scripts: no runtime deps.
     #
     # continue-on-error defers the verdict to the caller's last step; it
-    # does not discard it. The wrapped action's own exit code is untouched,
-    # so the operator repo and the sync pipeline still block on it
-    # directly. The ref is hardcoded because a composite step's `uses:`
-    # cannot take expressions - the operator is parameterizable only where
-    # it is data (the template-repo input), never here.
+    # does not discard it (the wrapped action's own exit code is
+    # untouched). The ref is hardcoded because a composite step's `uses:`
+    # cannot take expressions.
     - uses: Vivswan/repo-platform/actions/validate-template@build
       id: integrity
       continue-on-error: true
