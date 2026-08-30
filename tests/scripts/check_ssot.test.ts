@@ -258,6 +258,56 @@ describe("ALL_GREEN_WIRING", () => {
     expect(ALL_GREEN_WIRING.anchorValidated.exec(validated)?.[1]).toBe("ci / validate-template");
     expect(ALL_GREEN_WIRING.anchorValidated.exec(`// ${validated}`)).toBeNull();
   });
+
+  test("the author env pins match the pull-request-author lines only - actor and reviewer sources never satisfy them", () => {
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal source lines under test
+    const login =
+      "          PR_AUTHOR_LOGIN: ${{ github.event_name == 'pull_request_review' && github.event.pull_request.user.login || '' }}";
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal source lines under test
+    const type =
+      "          PR_AUTHOR_TYPE: ${{ github.event_name == 'pull_request_review' && github.event.pull_request.user.type || '' }}";
+    expect(ALL_GREEN_WIRING.authorLoginWired.exec(login)).not.toBeNull();
+    expect(ALL_GREEN_WIRING.authorTypeWired.exec(type)).not.toBeNull();
+    // Commented copies are dead wiring and must not satisfy the pins.
+    expect(ALL_GREEN_WIRING.authorLoginWired.exec(`          # ${login.trim()}`)).toBeNull();
+    expect(ALL_GREEN_WIRING.authorTypeWired.exec(`          # ${type.trim()}`)).toBeNull();
+    // The probe-PB shapes: an actor or the REVIEWER'S identity in either
+    // line lets a bot-submitted review wake (Copilot's own submission)
+    // disarm the stand-down at a human PR's head.
+    for (const spoof of [
+      login.replace("github.event.pull_request.user.login", "github.actor"),
+      login.replace("github.event.pull_request.user.login", "github.event.review.user.login"),
+    ]) {
+      expect(ALL_GREEN_WIRING.authorLoginWired.exec(spoof)).toBeNull();
+    }
+    for (const spoof of [
+      type.replace("github.event.pull_request.user.type", "github.actor_type"),
+      type.replace("github.event.pull_request.user.type", "github.event.review.user.type"),
+    ]) {
+      expect(ALL_GREEN_WIRING.authorTypeWired.exec(spoof)).toBeNull();
+    }
+  });
+
+  test("the PR author LOGIN env wiring is ARMED: only the pull request's author may feed the bot stand-down", () => {
+    // The live-file forcing test the guard registry names: the bash
+    // harness injects PR_AUTHOR_* itself, so this read of the REAL
+    // workflow is what goes red when the env mapping is rewired.
+    mustMatch(
+      readFileSync(".github/workflows/reusable-all-green.yml", "utf-8"),
+      ALL_GREEN_WIRING.authorLoginWired,
+      "reusable-all-green.yml",
+      "the PR_AUTHOR_LOGIN env wiring",
+    );
+  });
+
+  test("the PR author TYPE env wiring is ARMED: only the pull request's author may feed the bot stand-down", () => {
+    mustMatch(
+      readFileSync(".github/workflows/reusable-all-green.yml", "utf-8"),
+      ALL_GREEN_WIRING.authorTypeWired,
+      "reusable-all-green.yml",
+      "the PR_AUTHOR_TYPE env wiring",
+    );
+  });
 });
 
 describe("extractUsesPins", () => {

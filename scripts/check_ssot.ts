@@ -235,6 +235,21 @@ export const ALL_GREEN_WIRING = {
   anchor: /^\s*require-job: (\S[^\n#]*?)\s*$/m,
   /** The reusable wires the anchor input into the judging step. */
   anchorWired: /^\s*REQUIRE_JOB: \$\{\{ inputs\.require-job \}\}$/m,
+  /** The bot stand-down's author LOGIN must be wired from the PULL
+   *  REQUEST'S AUTHOR - the exact, COMPLETE env line. The bash harness
+   *  injects PR_AUTHOR_* itself and tests only the extracted run block,
+   *  so this workflow-level mapping is otherwise unguarded: rewired to
+   *  github.actor (or any reviewer-shaped source), a bot-submitted
+   *  review wake - Copilot's own submission - at a human PR's head
+   *  would read as bot-author, skip the copilot_state read, and mint
+   *  success over a FAILED copilot check. */
+  authorLoginWired:
+    /^\s*PR_AUTHOR_LOGIN: \$\{\{ github\.event_name == 'pull_request_review' && github\.event\.pull_request\.user\.login \|\| '' \}\}$/m,
+  /** The author TYPE half of the same wiring, same hazard: either line
+   *  alone rewired to a reviewer-shaped source disarms the stand-down's
+   *  author key. */
+  authorTypeWired:
+    /^\s*PR_AUTHOR_TYPE: \$\{\{ github\.event_name == 'pull_request_review' && github\.event\.pull_request\.user\.type \|\| '' \}\}$/m,
   /** The render validator enforces the same anchor at sync time. */
   anchorValidated: /^\s*const REQUIRED_GATE_JOB = "([^"]+)";$/m,
 };
@@ -3844,6 +3859,25 @@ const rules: Rule[] = [
         ALL_GREEN_WIRING.anchorWired,
         ".github/workflows/reusable-all-green.yml",
         "the REQUIRE_JOB env wiring",
+      );
+      // The bot stand-down's author env lines, pinned at the WORKFLOW
+      // level: the run block reads whatever these map, and the harness
+      // injects PR_AUTHOR_* itself, so only this pin notices the source
+      // being rewired away from the pull request's author (probe PB:
+      // github.actor here survived every other gate - a bot-submitted
+      // review wake would then disarm the copilot expectation on a
+      // human PR and could mint green over a failed review check).
+      mustMatch(
+        reusable,
+        ALL_GREEN_WIRING.authorLoginWired,
+        ".github/workflows/reusable-all-green.yml",
+        "the PR_AUTHOR_LOGIN env wiring (github.event.pull_request.user.login, never an actor)",
+      );
+      mustMatch(
+        reusable,
+        ALL_GREEN_WIRING.authorTypeWired,
+        ".github/workflows/reusable-all-green.yml",
+        "the PR_AUTHOR_TYPE env wiring (github.event.pull_request.user.type, never an actor)",
       );
       const validated = mustMatch(
         read("actions/validate-template/validate_generated_files.ts"),

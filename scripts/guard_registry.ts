@@ -168,6 +168,42 @@ export const GUARD_REGISTRY: readonly GuardEntry[] = [
     testName:
       "the review-wake run selection is ARMED: only the newest pull_request-event run is judged",
   },
+  // The author env WIRING, distinct from the run-block guards above: the
+  // bash harness injects PR_AUTHOR_* itself and tests only the extracted
+  // run block, so the workflow-level env mapping needed its own pin
+  // (probe PB: rewiring PR_AUTHOR_LOGIN to github.actor survived every
+  // other gate). The forcing tests read the REAL workflow through the
+  // same ALL_GREEN_WIRING patterns the all-green-name rule runs.
+  {
+    id: "verdict-author-login-wiring",
+    hazard:
+      "PR_AUTHOR_LOGIN rewired from the pull request's author to an actor- or reviewer-shaped source: a bot-submitted review wake (Copilot's own submission) at a human PR's head then reads as bot-author, skips the copilot_state read, and can mint success over a FAILED copilot check",
+    guardFile: ".github/workflows/reusable-all-green.yml",
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal workflow env line under pin
+    snippet:
+      "PR_AUTHOR_LOGIN: ${{ github.event_name == 'pull_request_review' && github.event.pull_request.user.login || '' }}",
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: the probe-PB mutation, verbatim
+    mutated:
+      "PR_AUTHOR_LOGIN: ${{ github.event_name == 'pull_request_review' && github.actor || '' }}",
+    testFile: "tests/scripts/check_ssot.test.ts",
+    testName:
+      "the PR author LOGIN env wiring is ARMED: only the pull request's author may feed the bot stand-down",
+  },
+  {
+    id: "verdict-author-type-wiring",
+    hazard:
+      "PR_AUTHOR_TYPE rewired away from the pull request's author - the same disarm as the login half through the other field: a reviewer's Bot type stands the copilot expectation down on a human PR",
+    guardFile: ".github/workflows/reusable-all-green.yml",
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal workflow env line under pin
+    snippet:
+      "PR_AUTHOR_TYPE: ${{ github.event_name == 'pull_request_review' && github.event.pull_request.user.type || '' }}",
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: the reviewer-identity mutation
+    mutated:
+      "PR_AUTHOR_TYPE: ${{ github.event_name == 'pull_request_review' && github.event.review.user.type || '' }}",
+    testFile: "tests/scripts/check_ssot.test.ts",
+    testName:
+      "the PR author TYPE env wiring is ARMED: only the pull request's author may feed the bot stand-down",
+  },
 ];
 
 /** Occurrences of `token` in `text` (exact bytes, no regex). */
