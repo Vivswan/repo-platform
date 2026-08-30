@@ -228,6 +228,17 @@ describe("argvStringAfter", () => {
   });
 });
 
+describe("parseTs refuses recovered trees", () => {
+  test("a source with syntax errors throws at the shared parse entry, for every extractor", () => {
+    const broken = 'const BRANCH = "build;\n';
+    expect(() => parseTs(broken)).toThrow("unauditable");
+    expect(() => constStringValue(broken, "BRANCH", anchor)).toThrow("unauditable");
+    expect(() => templateCarries(broken, "x")).toThrow("unauditable");
+    expect(() => argvFlagLeads(broken, "-d")).toThrow("unauditable");
+    expect(() => literalMatches(broken, /x/g)).toThrow("unauditable");
+  });
+});
+
 describe("argvFlagLeads", () => {
   test("collects string values and template heads after each flag", () => {
     const source = [
@@ -241,6 +252,11 @@ describe("argvFlagLeads", () => {
       "]);",
     ].join("\n");
     expect(argvFlagLeads(source, "-d")).toEqual(["project_name=X", "modules="]);
+  });
+
+  test("a commented or string-quoted flag pair yields nothing", () => {
+    expect(argvFlagLeads('// must(["-d", "project_name=X"]);\n', "-d")).toEqual([]);
+    expect(argvFlagLeads('const doc = \'["-d", "project_name=X"]\';\n', "-d")).toEqual([]);
   });
 });
 

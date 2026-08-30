@@ -23,10 +23,26 @@ const project = new Project({ useInMemoryFileSystem: true });
 const parsedByText = new Map<string, SourceFile>();
 let serial = 0;
 
-/** The parsed source file for `source`, cached by content. Read-only by
+/** The parsed source file for `source`, cached by content, ONLY when the
+ *  parser recovered nothing: extraction over a recovered tree is
+ *  unauditable (a truncated declaration can read as a benign shape), so
+ *  a source with any syntax diagnostic throws here, at the one entry
+ *  every extractor parses through. Callers that need a softer or
+ *  better-located failure (a scan naming its file, a null for
+ *  unauditable option text) check syntaxErrorCount first. Read-only by
  *  contract: the cache hands the SAME tree to every caller, so mutating
  *  it would corrupt later reads of the same text. */
 export function parseTs(source: string): SourceFile {
+  const errors = syntaxErrorCount(source);
+  if (errors > 0) {
+    throw new Error(
+      `ts_extract: source has ${errors} syntax error(s) - extraction over a recovered tree is unauditable`,
+    );
+  }
+  return parseAny(source);
+}
+
+function parseAny(source: string): SourceFile {
   const hit = parsedByText.get(source);
   if (hit !== undefined) return hit;
   const parsed = project.createSourceFile(`/ts-extract-${serial++}.ts`, source);
@@ -38,12 +54,11 @@ function anchorLost(where: string, what: string, detail: string): never {
   throw new Error(`${where}: anchor for ${what} not found (${detail})`);
 }
 
-/** Syntactic (parse-level) diagnostics count for `source`. The guard
- *  scans refuse to judge a file the parser had to RECOVER: recovered
- *  nodes can read as benign shapes (a truncated call whose options look
- *  complete), so judging them would fail open. */
+/** Syntactic (parse-level) diagnostics count for `source` - the check
+ *  parseTs enforces, exported for callers that name their own file or
+ *  fail soft on unauditable text. */
 export function syntaxErrorCount(source: string): number {
-  const compilerNode = parseTs(source).compilerNode as {
+  const compilerNode = parseAny(source).compilerNode as {
     parseDiagnostics?: readonly unknown[];
   };
   return compilerNode.parseDiagnostics?.length ?? 0;
@@ -287,7 +302,7 @@ export function argvFlagLeads(source: string, flag: string): string[] {
  *  literal, an element that is a CALL whose last argument is a string
  *  ending in `scriptSuffix` (the join(...) locating the wrapper script),
  *  followed by a string label, followed by the literal "--" separator -
- *  the run_hidden argv shape. Returns the labels in source order. */
+ *  the run_hidden argv shape. Returns the labels in traversal order. */
 export function wrappedArgvLabels(source: string, scriptSuffix: string): string[] {
   const labels: string[] = [];
   for (const elements of arrayElements(source)) {

@@ -276,7 +276,6 @@ export const ALL_GREEN_WIRING = {
  *  green gates must key their lookup on the shared CHECK_NAME constant.
  *  Matched against string/template literals only (templateCarries), so a
  *  commented-out copy of the wiring is not a literal and never counts. */
-// biome-ignore lint/suspicious/noTemplateCurlyInString: the literal lookup shape under pin
 export const CHECK_RUN_LOOKUP =
   "`repos/${repository}/commits/${sha}/check-runs?check_name=${CHECK_NAME}";
 
@@ -1842,16 +1841,27 @@ export function topLevelProperties(options: string): Map<string, string> | null 
   return props;
 }
 
-/** The slot texts of an ARRAY literal (an elided slot reads as empty),
- *  or null when `text` is not one - stdio's per-stream slots. */
-function arrayLiteralSlots(text: string): string[] | null {
-  const trimmed = text.trim();
-  if (!trimmed.startsWith("[") || !trimmed.endsWith("]")) return null;
-  const literal = parsedExpression(trimmed);
-  if (literal === null || !Node.isArrayLiteralExpression(literal)) return null;
-  return literal
-    .getElements()
-    .map((element) => (Node.isOmittedExpression(element) ? "" : element.getText().trim()));
+/** A stdio value's shape, decided on the PARSED expression (wrapping
+ *  parentheses and type dressing unwrap first, so `(["pipe"])` is still
+ *  the array it is): slot texts for a spread-free array literal (an
+ *  elided slot reads as empty), unauditable for a spread-carrying array
+ *  or unparseable text (a spread can shift or inject stream slots), and
+ *  scalar for everything else (a named constant, trusted by its key
+ *  like other variable values). */
+function stdioShape(
+  text: string,
+): { kind: "slots"; slots: string[] } | { kind: "unauditable" } | { kind: "scalar" } {
+  const literal = parsedExpression(text);
+  if (literal === null) return { kind: "unauditable" };
+  if (!Node.isArrayLiteralExpression(literal)) return { kind: "scalar" };
+  const elements = literal.getElements();
+  if (elements.some(Node.isSpreadElement)) return { kind: "unauditable" };
+  return {
+    kind: "slots",
+    slots: elements.map((element) =>
+      Node.isOmittedExpression(element) ? "" : element.getText().trim(),
+    ),
+  };
 }
 
 // The Bun-global receiver, shared by the sync and async spawn scans and
@@ -2053,7 +2063,11 @@ export function spawnSyncHazard(options: string | null): string | null {
   // named constant) is trusted by its key, like other variable values.
   const stdio = props.get("stdio");
   const stdioTrimmed = stdio?.trim();
-  const slots = stdioTrimmed === undefined ? null : arrayLiteralSlots(stdioTrimmed);
+  const shape = stdioTrimmed === undefined ? { kind: "scalar" as const } : stdioShape(stdioTrimmed);
+  if (shape.kind === "unauditable") {
+    return `a stdio value the scanner cannot audit (a spread or non-literal shape) with ${why}`;
+  }
+  const slots = shape.kind === "slots" ? shape.slots : null;
   const shaped = (stream: "stdout" | "stderr", slot: number) => {
     const viaStdio = slots !== null ? slots[slot] : stdioTrimmed;
     return !unset(viaStdio) || !unset(props.get(stream));
@@ -2077,9 +2091,9 @@ export function spawnSyncHazard(options: string | null): string | null {
 // a bounded spawnSync rewritten as async would EXIT the sync gate
 // silently - reading as an improvement - so the laundering must fail
 // by introducing a name this pin does not carry, a diagnostic that
-// names the offending file. The textual residual matches the sync
-// rule's: a computed access (Bun["spawn"]) or a Bun alias stays
-// review's outside the sync scan's trees.
+// names the offending file. The async scan's residual: an alias of Bun
+// escapes both scans, and a computed access (Bun["spawn"]) escapes THIS
+// one (the sync scan fails computed access closed as a reference).
 export const ASYNC_SPAWN_FILES: Record<string, string> = {
   ".github/scripts/sync/rehearse_fleet.ts":
     "implements its own manual deadline: the async Subprocess type has no built-in timeout, so a timer SIGKILLs an overrunning lane (the comment at its Bun.spawn call is the reference statement of why async needs one)",
@@ -2955,9 +2969,9 @@ const rules: Rule[] = [
     // directions (starterPinCoverage has the full statement). The starter
     // roster comes from the ownership declarations - the same single
     // source the composed manifest and _skip_if_exists are generated from
-    // - and DELIVERY_REF is pinned against publish.ts's BRANCH (text
-    // extraction: importing the publisher would run its top-level git
-    // wiring).
+    // - and DELIVERY_REF is pinned against publish.ts's BRANCH (AST
+    // extraction of the declaration: importing the publisher would run
+    // its top-level git wiring).
     name: "starter-pin-rollout",
     run: () => {
       const mismatches: Mismatch[] = [];
@@ -3895,11 +3909,11 @@ const rules: Rule[] = [
     run: () => {
       const mismatches: Mismatch[] = [];
       const predicate = read(".github/scripts/shared/all_green.ts");
-      // The IMPORTED constant is the authoritative name; the
-      // syntax-aware textual pin (declaredCheckName) then proves the
-      // exported declaration LINE carries the same value, so neither a
-      // decoy the raw pattern could match nor a declaration rewritten
-      // away from the exact-line form can pass silently.
+      // The IMPORTED constant is the authoritative name; the AST pin
+      // (declaredCheckName) then proves the exported declaration NODE
+      // carries the same value, so neither a decoy in a comment or
+      // template nor a declaration rewritten off the string-literal
+      // form can pass silently.
       const gateName = CHECK_NAME;
       const declared = declaredCheckName(predicate);
       if (declared !== gateName) {

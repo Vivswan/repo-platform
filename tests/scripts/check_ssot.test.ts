@@ -1983,6 +1983,17 @@ describe("spawnSyncHazard", () => {
     expect(spawnSyncHazard('{ stdio: ["inherit"], stdout: log, stderr: log }')).toBeNull();
   });
 
+  test("a spread inside a stdio array is unauditable - it can shift or inject stream slots", () => {
+    expect(spawnSyncHazard('{ stdio: ["ignore", ...streams, "inherit"] }')).toContain(
+      "cannot audit",
+    );
+    // Wrapping parentheses do not hide the array from the slot reader.
+    expect(spawnSyncHazard('{ stdio: (["ignore", ...streams]) }')).toContain("cannot audit");
+    expect(spawnSyncHazard('{ stdio: (["inherit"]) }')).toContain("stdout and stderr");
+    // A bound still bounds the hazard regardless of the stdio shape.
+    expect(spawnSyncHazard('{ stdio: ["ignore", ...streams], timeout: 5_000 }')).toBeNull();
+  });
+
   test("a timeoutMs-style key is not the timeout property", () => {
     expect(spawnSyncHazard("{ timeoutMs: 5 }")).not.toBeNull();
   });
