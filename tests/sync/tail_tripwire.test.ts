@@ -52,22 +52,19 @@ function tailEntry(path = "AGENTS.md", marker: string = SENTINEL): SplitEntry {
 }
 function regionEntry(
   path = ".gitignore",
-  markers: { begin: string; end: string; managedBegin: string; managedEnd: string } = {
-    begin: LOCAL_BEGIN,
-    end: LOCAL_END,
-    managedBegin: MANAGED_BEGIN,
-    managedEnd: MANAGED_END,
+  markers: {
+    local_begin: string;
+    local_end: string;
+    managed_begin: string;
+    managed_end: string;
+  } = {
+    local_begin: LOCAL_BEGIN,
+    local_end: LOCAL_END,
+    managed_begin: MANAGED_BEGIN,
+    managed_end: MANAGED_END,
   },
 ): SplitEntry {
-  return {
-    path,
-    grammar: "bounded-region",
-    marker: markers.managedBegin,
-    begin: markers.begin,
-    end: markers.end,
-    managedBegin: markers.managedBegin,
-    managedEnd: markers.managedEnd,
-  };
+  return { path, grammar: "bounded-region", ...markers };
 }
 const asHead = (entry: SplitEntry) => ({ kind: "grammar", entry }) as const;
 
@@ -407,12 +404,12 @@ describe("compareHalves", () => {
 
   test("bounded-region: HEAD splits by ITS declared region markers (rename safety)", () => {
     const oldMarkers = {
-      begin: "# OLD LOCAL BEGIN",
-      end: "# OLD LOCAL END",
-      managedBegin: "# OLD MANAGED BEGIN",
-      managedEnd: "# OLD MANAGED END",
+      local_begin: "# OLD LOCAL BEGIN",
+      local_end: "# OLD LOCAL END",
+      managed_begin: "# OLD MANAGED BEGIN",
+      managed_end: "# OLD MANAGED END",
     };
-    const head = `${oldMarkers.begin}\nbody-line\n${oldMarkers.end}\n${oldMarkers.managedBegin}\n${oldMarkers.managedEnd}\n`;
+    const head = `${oldMarkers.local_begin}\nbody-line\n${oldMarkers.local_end}\n${oldMarkers.managed_begin}\n${oldMarkers.managed_end}\n`;
     const delivered = regionFile(["body-line"], ["*.new"]);
     expect(
       compareHalves(regionEntry(), asHead(regionEntry(".gitignore", oldMarkers)), head, delivered),

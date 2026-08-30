@@ -290,6 +290,16 @@ export const GUARD_REGISTRY: readonly GuardEntry[] = [
     testName:
       "the apply checkout pin is ARMED: the apply job checks out the select job's vouched sha",
   },
+  {
+    id: "split-entries-unknown-grammar-refusal",
+    hazard:
+      "a target checkout's manifest declares a grammar the GRAMMAR table has no row for; without the refusal the typed parser dispatch is fed a null key and the carry's failure mode stops being the deliberate refuses-to-guess error",
+    guardFile: ".github/scripts/sync/preserve_local_content.ts",
+    snippet: "if (grammar === null) {",
+    mutated: "if (false) {",
+    testFile: "tests/sync/preserve_local_content.test.ts",
+    testName: "throws on an unknown grammar instead of degrading",
+  },
 ];
 
 /** Occurrences of `token` in `text` (exact bytes, no regex). */

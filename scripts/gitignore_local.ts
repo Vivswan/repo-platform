@@ -12,34 +12,27 @@
 // actions/validate-template deliberately does NOT import this module: the
 // action ships standalone and enforces its own marker rules.
 
+import { GRAMMAR, type RegionSplit } from "../actions/shared/grammar.ts";
+
 export const LOCAL_BEGIN = "# BEGIN REPOSITORY LOCAL";
 export const LOCAL_END = "# END REPOSITORY LOCAL";
 export const MANAGED_BEGIN = "# BEGIN REPO-PLATFORM MANAGED";
 export const MANAGED_END = "# END REPO-PLATFORM MANAGED";
 export const GITIGNORE_MARKERS = [LOCAL_BEGIN, LOCAL_END, MANAGED_BEGIN, MANAGED_END];
 
-/** One bounded-region grammar instance: the local region's BEGIN/END lines
- *  plus the managed section's, named individually - the full marker list
- *  is DERIVED (allRegionMarkers), so a grammar instance can never disagree
- *  with its own roster. */
-export interface RegionMarkers {
-  begin: string;
-  end: string;
-  managedBegin: string;
-  managedEnd: string;
-}
-
 /** Every marker line a grammar instance owns, for the
- *  no-marker-text-inside-the-body rule and appendix neutralization. */
-export function allRegionMarkers(markers: RegionMarkers): string[] {
-  return [markers.begin, markers.end, markers.managedBegin, markers.managedEnd];
+ *  no-marker-text-inside-the-body rule and appendix neutralization -
+ *  read from the GRAMMAR row's markers column, so a grammar instance can
+ *  never disagree with its own roster. */
+export function allRegionMarkers(markers: RegionSplit): readonly string[] {
+  return GRAMMAR["bounded-region"].markers(markers);
 }
 
-export const GITIGNORE_REGION: RegionMarkers = {
-  begin: LOCAL_BEGIN,
-  end: LOCAL_END,
-  managedBegin: MANAGED_BEGIN,
-  managedEnd: MANAGED_END,
+export const GITIGNORE_REGION: RegionSplit = {
+  local_begin: LOCAL_BEGIN,
+  local_end: LOCAL_END,
+  managed_begin: MANAGED_BEGIN,
+  managed_end: MANAGED_END,
 };
 
 export interface Line {
@@ -73,12 +66,14 @@ export function stripCr(text: string): string {
  * instead of guessing. */
 export function localRegion(
   content: string,
-  markers: RegionMarkers,
+  markers: RegionSplit,
 ): { before: string; body: string; after: string } | null {
   const lines = splitLines(content);
-  const begin = lines.findIndex((line) => stripCr(line.text) === markers.begin);
+  const begin = lines.findIndex((line) => stripCr(line.text) === markers.local_begin);
   if (begin === -1) return null;
-  const end = lines.findIndex((line, index) => index > begin && stripCr(line.text) === markers.end);
+  const end = lines.findIndex(
+    (line, index) => index > begin && stripCr(line.text) === markers.local_end,
+  );
   if (end === -1) return null;
   const bodyStart = lines[begin].end;
   const bodyEnd = lines[end - 1].end;
@@ -112,9 +107,9 @@ export function substringCount(content: string, marker: string): number {
  * regenerator must never split the same malformed file differently. */
 export function cleanLocalRegion(
   content: string,
-  markers: RegionMarkers,
+  markers: RegionSplit,
 ): { before: string; body: string; after: string } | null {
-  const clean = [markers.begin, markers.end].every(
+  const clean = [markers.local_begin, markers.local_end].every(
     (marker) => markerLineCount(content, marker) === 1 && substringCount(content, marker) === 1,
   );
   if (!clean) return null;

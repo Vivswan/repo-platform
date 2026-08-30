@@ -78,13 +78,25 @@
 
 import { existsSync, lstatSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { MANIFEST_NAME, parseManifestFiles } from "../../../actions/shared/manifest.ts";
+import {
+  GRAMMAR,
+  type GrammarId,
+  grammarSpec,
+  grammarWireMarker,
+  knownGrammar,
+  type RegionSplit,
+  type SplitShapes,
+} from "../../../actions/shared/grammar.ts";
+import {
+  MANIFEST_NAME,
+  type ManifestEntryShape,
+  parseManifestFiles,
+} from "../../../actions/shared/manifest.ts";
 import { isMarkerLine, managedHalf } from "../../../actions/shared/stamp_manifest.ts";
 import {
   allRegionMarkers,
   cleanLocalRegion,
   localRegion,
-  type RegionMarkers,
   splitLines,
   stripCr,
   substringCount,
@@ -289,7 +301,7 @@ export interface RegionCarry {
  * loud, like the .md appendices) and the grammar's marker text inside them
  * is dash-joined so validate_generated_files' exactly-once substring rule
  * holds on the result. */
-function inertPreviousCopy(content: string, markers: RegionMarkers): string {
+function inertPreviousCopy(content: string, markers: RegionSplit): string {
   let neutralized = content;
   for (const marker of allRegionMarkers(markers)) {
     let inert = (marker.startsWith("# ") ? marker.slice(2) : marker).replaceAll(" ", "-");
@@ -315,7 +327,7 @@ function inertPreviousCopy(content: string, markers: RegionMarkers): string {
 export function carryLocalRegion(
   render: string,
   target: string,
-  markers: RegionMarkers,
+  markers: RegionSplit,
 ): RegionCarry | null {
   const renderRegion = localRegion(render, markers);
   if (renderRegion === null) return null;
@@ -414,26 +426,14 @@ function tailNote(carry: TailCarry, mode: "recopy" | "render"): string {
   }
 }
 
-export type SplitEntry =
-  | { path: string; grammar: "tail-marker"; marker: string }
-  | ({ path: string; grammar: "bounded-region"; marker: string } & RegionMarkers);
-
-/** Which line the stamper's managedHalf splits a split entry's file at,
- * and on which side the managed half sits - derived from the grammar.
- * Exhaustive: a new grammar member must fail compilation here, not
- * silently inherit a side. */
-function entrySide(entry: SplitEntry): "above" | "below" {
-  switch (entry.grammar) {
-    case "tail-marker":
-      return "above";
-    case "bounded-region":
-      return "below";
-    default: {
-      const unhandled: never = entry;
-      throw new Error(`unhandled split grammar: ${JSON.stringify(unhandled)}`);
-    }
-  }
-}
+/** One parsed split entry: the manifest path plus the grammar's own
+ * declaration fields, DERIVED from the GRAMMAR table's SplitShapes - so
+ * the entry union's grammar arm set IS GrammarId by construction. The sync
+ * leg cannot know a grammar the table lacks, nor silently miss one it has:
+ * a new table row makes this union grow, and every exhaustive dispatch
+ * below (the per-grammar parsers, the carries) goes red at tsc until it
+ * answers for the new arm. */
+export type SplitEntry = { [K in GrammarId]: { path: string } & SplitShapes[K] }[GrammarId];
 
 /** Markers are matched against latin1-decoded file bytes, so a non-ASCII
  * marker (utf-8 in the manifest, one code unit per byte in the file) could
@@ -460,6 +460,76 @@ export function isCleanRelativePath(path: string): boolean {
     path.split("/").every((part) => part !== "" && part !== "." && part !== "..")
   );
 }
+
+/** The per-grammar split-entry parsers, total over GrammarId BY TYPE: a
+ * GRAMMAR table row with no parser here is a tsc error, never a runtime
+ * fallthrough. Each parser re-checks what the manifest text claims for
+ * its grammar (the declaration schema upstream never emits a violation,
+ * but the text rides through a checkout this script must not trust):
+ * the managed side must equal the GRAMMAR row's side column, every
+ * marker string must be printable ASCII, and every marker must open in
+ * the comment syntax the recovery appendix writes - a tail marker as a
+ * hash or complete HTML comment, bounded-region markers as hash comments
+ * (the appendix comments carried lines with #). The wireExtras column
+ * names the extra marker-string fields, so the field list is stated once
+ * (the validator's manifest check reads the same column). */
+const SPLIT_PARSERS: {
+  [K in GrammarId]: (
+    where: string,
+    path: string,
+    marker: string,
+    shaped: ManifestEntryShape,
+  ) => { path: string } & SplitShapes[K];
+} = {
+  "tail-marker": (where, path, marker, shaped) => {
+    if (shaped.managed !== GRAMMAR["tail-marker"].side) {
+      throw new Error(
+        `${where}: split entry for ${path} declares the tail-marker grammar with a ` +
+          `managed side other than '${GRAMMAR["tail-marker"].side}' - the manifest is inconsistent`,
+      );
+    }
+    if (!isCommentMarker(marker)) {
+      throw new Error(
+        `${where}: split entry for ${path} declares tail marker ` +
+          `'${marker}', which is not a hash comment or a complete HTML ` +
+          "comment line - the recovery appendix writes comments in the marker's " +
+          "syntax; the manifest is damaged",
+      );
+    }
+    return { path, grammar: "tail-marker", marker };
+  },
+  "bounded-region": (where, path, marker, shaped) => {
+    const spec = GRAMMAR["bounded-region"];
+    const regionStrings = spec.wireExtras.map((field) => shaped[field]);
+    if (
+      shaped.managed !== spec.side ||
+      !regionStrings.every((value) => typeof value === "string" && ASCII_MARKER_RE.test(value))
+    ) {
+      throw new Error(
+        `${where}: split entry for ${path} declares the bounded-region grammar ` +
+          `without a '${spec.side}' managed side and its printable-ASCII region marker ` +
+          "strings - the manifest is inconsistent",
+      );
+    }
+    for (const value of [marker, ...(regionStrings as string[])]) {
+      if (!isHashMarker(value)) {
+        throw new Error(
+          `${where}: split entry for ${path} declares bounded-region marker ` +
+            `'${value}', which does not open as a hash comment - the appendix ` +
+            "comments carried lines with #; the manifest is damaged",
+        );
+      }
+    }
+    return {
+      path,
+      grammar: "bounded-region",
+      managed_begin: marker,
+      managed_end: shaped.managed_end as string,
+      local_begin: shaped.local_begin as string,
+      local_end: shaped.local_end as string,
+    };
+  },
+};
 
 /** The class "split" entries of a render's ownership manifest - the single
  * source of which files the template splits and each file's grammar and
@@ -490,69 +560,19 @@ export function splitEntries(manifestText: string, where: string): SplitEntry[] 
           "(markers are matched against latin1-decoded file bytes)",
       );
     }
-    if (shaped.grammar === "tail-marker") {
-      if (shaped.managed !== "above") {
-        throw new Error(
-          `${where}: split entry for ${path} declares the tail-marker grammar with a ` +
-            "managed side other than 'above' - the manifest is inconsistent",
-        );
-      }
-      // The declaration schema constrains tail markers to comment syntax
-      // (the recovery appendix writes comments in the marker's syntax);
-      // the manifest text rides through an untrusted checkout, so this
-      // boundary re-checks it before any appendix could emit a
-      // non-comment line.
-      if (!isCommentMarker(shaped.marker)) {
-        throw new Error(
-          `${where}: split entry for ${path} declares tail marker ` +
-            `'${shaped.marker}', which is not a hash comment or a complete HTML ` +
-            "comment line - the recovery appendix writes comments in the marker's " +
-            "syntax; the manifest is damaged",
-        );
-      }
-      out.push({ path, grammar: "tail-marker", marker: shaped.marker });
-      continue;
+    const grammar = knownGrammar(shaped.grammar);
+    if (grammar === null) {
+      // Reachable on purpose (the manifest text is untrusted): the typed
+      // dispatch below cannot fall through, so unknown grammars must be
+      // refused HERE, before any carry could guess. Registered in
+      // scripts/guard_registry.ts (split-entries-unknown-grammar-refusal).
+      throw new Error(
+        `${where}: split entry for ${path} declares ${
+          "grammar" in shaped ? `unknown grammar ${JSON.stringify(shaped.grammar)}` : "no grammar"
+        } - this carry refuses to guess (a new grammar needs its own carry here)`,
+      );
     }
-    if (shaped.grammar === "bounded-region") {
-      const regionStrings = [shaped.managed_end, shaped.local_begin, shaped.local_end];
-      if (
-        shaped.managed !== "below" ||
-        !regionStrings.every((value) => typeof value === "string" && ASCII_MARKER_RE.test(value))
-      ) {
-        throw new Error(
-          `${where}: split entry for ${path} declares the bounded-region grammar ` +
-            "without a 'below' managed side and its printable-ASCII region marker " +
-            "strings - the manifest is inconsistent",
-        );
-      }
-      // Same comment-syntax re-check as the tail marker: the declaration
-      // schema constrains bounded-region markers to hash comments (the
-      // appendix comments carried lines with #).
-      for (const value of [shaped.marker, ...(regionStrings as string[])]) {
-        if (!isHashMarker(value)) {
-          throw new Error(
-            `${where}: split entry for ${path} declares bounded-region marker ` +
-              `'${value}', which does not open as a hash comment - the appendix ` +
-              "comments carried lines with #; the manifest is damaged",
-          );
-        }
-      }
-      out.push({
-        path,
-        grammar: "bounded-region",
-        marker: shaped.marker,
-        begin: shaped.local_begin as string,
-        end: shaped.local_end as string,
-        managedBegin: shaped.marker,
-        managedEnd: shaped.managed_end as string,
-      });
-      continue;
-    }
-    throw new Error(
-      `${where}: split entry for ${path} declares ${
-        "grammar" in shaped ? `unknown grammar ${JSON.stringify(shaped.grammar)}` : "no grammar"
-      } - this carry refuses to guess (a new grammar needs its own carry here)`,
-    );
+    out.push(SPLIT_PARSERS[grammar](where, path, shaped.marker, shaped));
   }
   return out;
 }
@@ -697,6 +717,10 @@ function carrySplitEntry(
       };
     }
     default: {
+      // Unreachable by construction: SplitEntry derives from the GRAMMAR
+      // table's SplitShapes, so a new grammar makes `entry` non-never here
+      // and this switch a tsc error until it carries its own arm. The
+      // throw only backstops data smuggled past the type system.
       const unhandled: never = entry;
       throw new Error(`unhandled split grammar: ${JSON.stringify(unhandled)}`);
     }
@@ -753,15 +777,18 @@ function rebuildSplitFile(
     // preserves the full previous copy below the render and is already
     // manual.
     if (!appendixCarry) {
-      const side = entrySide(entry);
-      const targetHalf = managedHalf(target.content, entry.marker, side);
-      const deliveredHalf = managedHalf(content, entry.marker, side);
+      // The GRAMMAR row's side column: which half managedHalf calls
+      // managed for this entry's grammar.
+      const side = grammarSpec(entry.grammar).side;
+      const marker = grammarWireMarker(entry.grammar, entry);
+      const targetHalf = managedHalf(target.content, marker, side);
+      const deliveredHalf = managedHalf(content, marker, side);
       if (targetHalf !== null && deliveredHalf !== null && targetHalf === deliveredHalf) {
         // Nothing from the previous managed half was dropped.
       } else {
         const oldRenderPath = join(oldRenderDir, rel);
         const oldHalf = existsSync(oldRenderPath)
-          ? managedHalf(readFileSync(oldRenderPath).toString("latin1"), entry.marker, side)
+          ? managedHalf(readFileSync(oldRenderPath).toString("latin1"), marker, side)
           : null;
         if (targetHalf === null || deliveredHalf === null || oldHalf === null) {
           note =

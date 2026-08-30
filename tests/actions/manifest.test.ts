@@ -4,6 +4,8 @@
 // back, and the MANIFEST_NAME self-entry's provenance slot.
 
 import { describe, expect, test } from "bun:test";
+import { splitEntries } from "../../.github/scripts/sync/preserve_local_content";
+import type { GrammarId, SplitShapes } from "../../actions/shared/grammar";
 import {
   entryLine,
   MANIFEST_NAME,
@@ -96,6 +98,31 @@ describe("entryLine", () => {
     ];
     for (const [path, ownership] of shapes) {
       expect(() => JSON.parse(`{${entryLine(path, ownership)}}`)).not.toThrow();
+    }
+  });
+
+  test("every grammar's wire round-trips: splitEntries reads back what entryLine wrote", () => {
+    // The runtime weld on the GRAMMAR row's wire columns: the emitter
+    // writes the wireMarker/wireExtras fields and the sync parse
+    // reconstructs the declaration from them, so a row whose columns and
+    // parser disagree (a field emitted but not parsed, or parsed but
+    // never emitted) fails HERE, not at fleet sync time. One case per
+    // GrammarId, enforced by the Record type: a new grammar cannot land
+    // without joining this round-trip.
+    const declarations: { [K in GrammarId]: SplitShapes[K] } = {
+      "tail-marker": { grammar: "tail-marker", marker: "<!-- repo-platform:local-section -->" },
+      "bounded-region": {
+        grammar: "bounded-region",
+        managed_begin: "# BEGIN REPO-PLATFORM MANAGED",
+        managed_end: "# END REPO-PLATFORM MANAGED",
+        local_begin: "# BEGIN REPOSITORY LOCAL",
+        local_end: "# END REPOSITORY LOCAL",
+      },
+    };
+    for (const declaration of Object.values(declarations)) {
+      const line = entryLine("some/file", { class: "split", ...declaration });
+      const manifest = `{"files": {\n${line}\n}}`;
+      expect(splitEntries(manifest, "round-trip")).toEqual([{ path: "some/file", ...declaration }]);
     }
   });
 });

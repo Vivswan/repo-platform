@@ -50,7 +50,7 @@ import {
   grammarSpec,
   HEADER_WINDOW,
   type MarkerKind,
-  type RegionSplitGrammar,
+  type RegionSplit,
 } from "../actions/shared/grammar.ts";
 import type { ModuleManifest } from "./module_manifests.ts";
 
@@ -1020,7 +1020,7 @@ export function translateGates(gates: string[], where: string): RenderWhen | und
  *  moduleOwnershipEntries. */
 export function baseOwnershipTables(templatesDir: string): {
   enforced: BaseOwnershipEntry[];
-  regionSplits: Record<string, RegionSplitGrammar>;
+  regionSplits: Record<string, RegionSplit>;
 } {
   const where = "templates/base/ownership.yml";
   const declarations = loadBaseOwnership(templatesDir);
@@ -1035,7 +1035,7 @@ export function baseOwnershipTables(templatesDir: string): {
     }
   }
   const enforced: BaseOwnershipEntry[] = [];
-  const regionSplits: Record<string, RegionSplitGrammar> = {};
+  const regionSplits: Record<string, RegionSplit> = {};
   for (const declaration of declarations) {
     const file = files.get(declaration.path);
     if (file === undefined) {
@@ -1056,10 +1056,10 @@ export function baseOwnershipTables(templatesDir: string): {
         );
       }
       regionSplits[declaration.path] = {
-        managedBegin: declaration.managed_begin,
-        managedEnd: declaration.managed_end,
-        localBegin: declaration.local_begin,
-        localEnd: declaration.local_end,
+        managed_begin: declaration.managed_begin,
+        managed_end: declaration.managed_end,
+        local_begin: declaration.local_begin,
+        local_end: declaration.local_end,
       };
       continue;
     }

@@ -990,10 +990,10 @@ describe("baseOwnershipTables", () => {
       ]);
       expect(tables.regionSplits).toEqual({
         ".gitignore": {
-          managedBegin: "# BEGIN REPO-PLATFORM MANAGED",
-          managedEnd: "# END REPO-PLATFORM MANAGED",
-          localBegin: "# BEGIN REPOSITORY LOCAL",
-          localEnd: "# END REPOSITORY LOCAL",
+          managed_begin: "# BEGIN REPO-PLATFORM MANAGED",
+          managed_end: "# END REPO-PLATFORM MANAGED",
+          local_begin: "# BEGIN REPOSITORY LOCAL",
+          local_end: "# END REPOSITORY LOCAL",
         },
       });
     } finally {

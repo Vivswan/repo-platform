@@ -45,6 +45,12 @@ export type SplitShapes = {
 
 export type GrammarId = keyof SplitShapes;
 
+/** A bounded-region grammar instance without its discriminant: the four
+ *  marker strings alone - the shape the region slicer
+ *  (scripts/gitignore_local.ts) and the validator's region tables consume.
+ *  Derived, never restated: the fields are BoundedRegionSplit's own. */
+export type RegionSplit = Omit<BoundedRegionSplit, "grammar">;
+
 /** The two marker vocabularies a source can claim ownership with; the
  *  foreign-marker scan keeps one roster of declared marker strings per
  *  kind. */
@@ -52,17 +58,32 @@ export type MarkerKind = "tail" | "region";
 
 /** One grammar's behavior columns. Every column is total on purpose: a new
  *  grammar must answer each question explicitly (null is an explicit
- *  answer), never inherit a fallthrough. */
+ *  answer), never inherit a fallthrough. The declaration-reading columns
+ *  take the fields WITHOUT the discriminant, so a caller holding the four
+ *  marker strings alone (the region slicer) reads the same row. */
 export interface GrammarSpec<Declaration> {
   /** Every marker string a declaration of this grammar owns, in the
    *  grammar's in-file order. */
-  markers: (declaration: Declaration) => readonly string[];
+  markers: (declaration: Omit<Declaration, "grammar">) => readonly string[];
+  /** The one line the split anchors on: the stamper's managedHalf splits
+   *  the file at it, and the manifest wire's legacy "marker" field
+   *  carries it. */
+  wireMarker: (declaration: Omit<Declaration, "grammar">) => string;
+  /** The declaration's marker-string fields beyond the wire marker, in the
+   *  manifest wire's field order: the emitter (actions/shared/manifest.ts)
+   *  writes them under these names, and the sync parse plus the
+   *  validator's manifest check require each as a string. Empty when the
+   *  wire marker is the grammar's only field. */
+  wireExtras: readonly Exclude<keyof Declaration, "grammar">[];
   /** Which foreign-marker roster the grammar's markers join; null keeps
    *  them off both rosters. */
   roster: MarkerKind | null;
-  /** Which half of the split file sync owns; null for a grammar with no
-   *  single managed side. */
-  side: "above" | "below" | null;
+  /** Which half of the split file sync owns. NON-NULL on purpose: the
+   *  emitter, the sync parse, the stamper, and the validator all require
+   *  a side, so a sideless grammar is unrepresentable rather than a
+   *  runtime refusal - if one ever exists, widening this type walks its
+   *  author through every consumer at tsc time. */
+  side: "above" | "below";
   /** How the validator's per-file ownership tables enforce the grammar:
    *  "marker" entries require the (single) marker line, "header" entries
    *  the managed header; null means the grammar has dedicated tables
@@ -73,6 +94,8 @@ export interface GrammarSpec<Declaration> {
 export const GRAMMAR: { [K in GrammarId]: GrammarSpec<SplitShapes[K]> } = {
   "tail-marker": {
     markers: (declaration) => [declaration.marker],
+    wireMarker: (declaration) => declaration.marker,
+    wireExtras: [],
     roster: "tail",
     side: "above",
     enforce: "marker",
@@ -84,6 +107,8 @@ export const GRAMMAR: { [K in GrammarId]: GrammarSpec<SplitShapes[K]> } = {
       declaration.managed_begin,
       declaration.managed_end,
     ],
+    wireMarker: (declaration) => declaration.managed_begin,
+    wireExtras: ["managed_end", "local_begin", "local_end"],
     roster: "region",
     side: "below",
     enforce: null,
@@ -114,18 +139,27 @@ export function grammarMarkers<K extends GrammarId>(
   return grammarSpec(grammar).markers(declaration);
 }
 
+/** The line a split declaration anchors on, via its grammar's row: what
+ *  the manifest wire's "marker" field carries and the stamper's
+ *  managedHalf splits at. */
+export function grammarWireMarker<K extends GrammarId>(
+  grammar: K,
+  declaration: SplitShapes[K],
+): string {
+  return grammarSpec(grammar).wireMarker(declaration);
+}
+
+/** Table membership for UNTRUSTED data (manifest text riding through a
+ *  target checkout): the value narrowed to a GrammarId, or null. One
+ *  narrowing owner, so the sync parse and the validator cannot disagree
+ *  on what counts as a known grammar. Own-property lookup, like
+ *  grammarSpec. */
+export function knownGrammar(value: unknown): GrammarId | null {
+  return typeof value === "string" && Object.hasOwn(GRAMMAR, value) ? (value as GrammarId) : null;
+}
+
 /** How many opening lines may hold the managed header: template sources
  *  keep it at the top, at most below a short jinja preamble that rendering
  *  collapses. One constant for the template-side decoration checks
  *  (scripts/ownership.ts) and the validator's rendered-file check. */
 export const HEADER_WINDOW = 10;
-
-/** A bounded-region split grammar in the validator tables' dialect: the
- *  repo-owned local region's BEGIN/END lines above the managed half, which
- *  runs from managedBegin to end of file (managedEnd included). */
-export interface RegionSplitGrammar {
-  managedBegin: string;
-  managedEnd: string;
-  localBegin: string;
-  localEnd: string;
-}

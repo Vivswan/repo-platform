@@ -50,6 +50,7 @@
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { grammarSpec } from "../../../actions/shared/grammar.ts";
 import { MANIFEST_NAME } from "../../../actions/shared/manifest.ts";
 import { managedHalf } from "../../../actions/shared/stamp_manifest.ts";
 import { cleanLocalRegion } from "../../../scripts/gitignore_local.ts";
@@ -92,19 +93,22 @@ function markerComplement(
 }
 
 /** The side of a split file the repository owns, by the entry's declared
- * grammar: everything below the marker line (tail-marker), or the local
- * region body between the entry's begin/end lines (bounded-region, located
- * with cleanLocalRegion's strict exactly-once rules - a copy whose region
- * cannot be honestly located is unverifiable, never guessed at).
- * Exhaustive: a new grammar member must fail compilation here, not
- * silently ride an existing locator. */
+ * grammar: the byte complement of the GRAMMAR row's managed side at the
+ * marker line (tail-marker), or the local region body between the entry's
+ * begin/end lines (bounded-region, located with cleanLocalRegion's strict
+ * exactly-once rules - a copy whose region cannot be honestly located is
+ * unverifiable, never guessed at). Exhaustive over GrammarId (SplitEntry
+ * derives from the GRAMMAR table): a new grammar member must fail
+ * compilation here, not silently ride an existing locator. */
 export function repoOwnedHalf(content: string, entry: SplitEntry): string | null {
   switch (entry.grammar) {
     case "tail-marker":
-      return markerComplement(content, entry.marker, "above");
+      return markerComplement(content, entry.marker, grammarSpec(entry.grammar).side);
     case "bounded-region":
       return cleanLocalRegion(content, entry)?.body ?? null;
     default: {
+      // Unreachable by construction (see the header note above); the
+      // throw only backstops data smuggled past the type system.
       const unhandled: never = entry;
       throw new Error(`unhandled split grammar: ${JSON.stringify(unhandled)}`);
     }

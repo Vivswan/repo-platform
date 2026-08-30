@@ -65,7 +65,7 @@ import { existsSync, lstatSync, readdirSync, readFileSync, writeFileSync } from 
 import { join, resolve } from "node:path";
 import { z } from "zod";
 import { managedLabelNames } from "../.github/scripts/fleet/render_managed_settings.ts";
-import type { RegionSplitGrammar } from "../actions/shared/grammar.ts";
+import type { RegionSplit } from "../actions/shared/grammar.ts";
 import { compose, dependabotLabels, excludePatterns } from "./compose_template.ts";
 import {
   loadManifests,
@@ -528,19 +528,19 @@ export function moduleOwnershipRegion(ownership: Record<string, OwnershipEntry[]
  *  checks read. */
 export function baseOwnershipRegion(tables: {
   enforced: BaseOwnershipEntry[];
-  regionSplits: Record<string, RegionSplitGrammar>;
+  regionSplits: Record<string, RegionSplit>;
 }): string[] {
   const lines = ["const BASE_OWNERSHIP: BaseOwnedFile[] = ["];
   for (const entry of tables.enforced) {
     lines.push(...objectLiteralLines(ownedFileFields(entry), "  ", ","));
   }
-  lines.push("];", "", "const BASE_REGION_SPLITS: Record<string, RegionSplitGrammar> = {");
+  lines.push("];", "", "const BASE_REGION_SPLITS: Record<string, RegionSplit> = {");
   for (const [path, grammar] of Object.entries(tables.regionSplits)) {
     const fields = [
-      `managedBegin: ${JSON.stringify(grammar.managedBegin)}`,
-      `managedEnd: ${JSON.stringify(grammar.managedEnd)}`,
-      `localBegin: ${JSON.stringify(grammar.localBegin)}`,
-      `localEnd: ${JSON.stringify(grammar.localEnd)}`,
+      `managed_begin: ${JSON.stringify(grammar.managed_begin)}`,
+      `managed_end: ${JSON.stringify(grammar.managed_end)}`,
+      `local_begin: ${JSON.stringify(grammar.local_begin)}`,
+      `local_end: ${JSON.stringify(grammar.local_end)}`,
     ];
     const key = JSON.stringify(path);
     const inline = `  ${key}: { ${fields.join(", ")} },`;
@@ -776,7 +776,7 @@ interface RegionInputs {
   moduleOwnership: Record<string, OwnershipEntry[]>;
   baseOwnership: {
     enforced: BaseOwnershipEntry[];
-    regionSplits: Record<string, RegionSplitGrammar>;
+    regionSplits: Record<string, RegionSplit>;
   };
 }
 

@@ -357,10 +357,10 @@ describe("carryLocalRegion", () => {
     // A future bounded-region file with its own marker lines: the carry
     // takes the grammar from the entry, so nothing degrades to appendix.
     const markers = {
-      begin: "// BEGIN LOCAL",
-      end: "// END LOCAL",
-      managedBegin: "// BEGIN MANAGED",
-      managedEnd: "// END MANAGED",
+      local_begin: "// BEGIN LOCAL",
+      local_end: "// END LOCAL",
+      managed_begin: "// BEGIN MANAGED",
+      managed_end: "// END MANAGED",
     };
     const render = `// BEGIN LOCAL\n// default\n// END LOCAL\n// BEGIN MANAGED\nnew\n// END MANAGED\n`;
     const target = `// BEGIN LOCAL\nlocal-entry\n// END LOCAL\n// BEGIN MANAGED\nold\n// END MANAGED\n`;
@@ -426,10 +426,10 @@ describe("carryLocalRegion", () => {
 
   test("a space-free marker is still neutralized in the appendix", () => {
     const markers = {
-      begin: "#LOCAL-BEGIN",
-      end: "#LOCAL-END",
-      managedBegin: "#MANAGED-BEGIN",
-      managedEnd: "#MANAGED-END",
+      local_begin: "#LOCAL-BEGIN",
+      local_end: "#LOCAL-END",
+      managed_begin: "#MANAGED-BEGIN",
+      managed_end: "#MANAGED-END",
     };
     const render = "#LOCAL-BEGIN\n# default\n#LOCAL-END\nmanaged\n";
     const carry = carryLocalRegion(render, "#LOCAL-BEGIN\n/entry/\n", markers);
@@ -442,10 +442,10 @@ describe("carryLocalRegion", () => {
     // into "# X-Y" - recreating the OTHER marker. The postcondition must
     // refuse to deliver a file the validator's exactly-once rule rejects.
     const markers = {
-      begin: "# X-Y",
-      end: "# X Y",
-      managedBegin: "# M-BEGIN",
-      managedEnd: "# M-END",
+      local_begin: "# X-Y",
+      local_end: "# X Y",
+      managed_begin: "# M-BEGIN",
+      managed_end: "# M-END",
     };
     const render = "# X-Y\n# default\n# X Y\nmanaged\n";
     expect(() => carryLocalRegion(render, "# X Y\n/entry/\n", markers)).toThrow(
@@ -773,11 +773,10 @@ describe("splitEntries", () => {
       {
         path: ".gitignore",
         grammar: "bounded-region",
-        marker: MANAGED_BEGIN,
-        begin: LOCAL_BEGIN,
-        end: LOCAL_END,
-        managedBegin: MANAGED_BEGIN,
-        managedEnd: MANAGED_END,
+        managed_begin: MANAGED_BEGIN,
+        managed_end: MANAGED_END,
+        local_begin: LOCAL_BEGIN,
+        local_end: LOCAL_END,
       },
     ]);
   });

@@ -24,7 +24,7 @@
 // inside freshly rendered repositories - node builtins and zone-internal
 // imports only.
 
-import { GRAMMAR, type GrammarId, type SplitShapes } from "./grammar.ts";
+import { GRAMMAR, type GrammarId, grammarWireMarker, type SplitShapes } from "./grammar.ts";
 
 /** Where the ownership manifest lands in generated repositories. */
 export const MANIFEST_NAME = ".github/repo-platform-manifest.json";
@@ -37,14 +37,27 @@ export type OwnershipShape =
   | { class: "managed" }
   | ({ class: "split" } & SplitShapes[GrammarId]);
 
+/** One split entry's wire body, read off the grammar's GRAMMAR row: the
+ *  row's wireMarker lands in the legacy `marker`/`managed` pair (the
+ *  stamper's managedHalf and older validators read those), then the row's
+ *  wireExtras under their own names in the row's order - so no spelling
+ *  of the split fields exists outside the table. */
+function splitBody<K extends GrammarId>(grammar: K, declaration: SplitShapes[K]): string {
+  const spec = GRAMMAR[grammar];
+  const extras = spec.wireExtras
+    .map((field) => `, ${JSON.stringify(field)}: ${JSON.stringify(declaration[field])}`)
+    .join("");
+  return (
+    `{"class": "split", "grammar": ${JSON.stringify(grammar)}, ` +
+    `"marker": ${JSON.stringify(grammarWireMarker(grammar, declaration))}, ` +
+    `"managed": "${spec.side}"${extras}, "hash": null}`
+  );
+}
+
 /** One manifest entry line. Every hash renders null (hashes are per-repo
  *  facts the stamp hook fills in post-render), and the manifest's own
  *  entry carries the null provenance-commit slot the stamper writes the
- *  render's recorded _commit into. Split entries keep the legacy
- *  `marker`/`managed` pair (the stamper's managedHalf and older validators
- *  read those) next to the declared grammar fields the sync's split-file
- *  rebuild consumes; the pair is derived from the grammar's GRAMMAR row,
- *  so the two spellings cannot disagree. */
+ *  render's recorded _commit into. */
 export function entryLine(path: string, ownership: OwnershipShape): string {
   let body: string;
   if (ownership.class === "starter") {
@@ -55,21 +68,7 @@ export function entryLine(path: string, ownership: OwnershipShape): string {
         ? '{"class": "managed", "hash": null, "commit": null}'
         : '{"class": "managed", "hash": null}';
   } else {
-    const { side } = GRAMMAR[ownership.grammar];
-    if (side === null) {
-      throw new Error(
-        `grammar '${ownership.grammar}' declares no managed side - a split entry ` +
-          "cannot be emitted without one; fill the GRAMMAR row's side column",
-      );
-    }
-    body =
-      ownership.grammar === "tail-marker"
-        ? `{"class": "split", "grammar": "tail-marker", "marker": ${JSON.stringify(ownership.marker)}, ` +
-          `"managed": "${side}", "hash": null}`
-        : `{"class": "split", "grammar": "bounded-region", "marker": ${JSON.stringify(ownership.managed_begin)}, ` +
-          `"managed": "${side}", "managed_end": ${JSON.stringify(ownership.managed_end)}, ` +
-          `"local_begin": ${JSON.stringify(ownership.local_begin)}, ` +
-          `"local_end": ${JSON.stringify(ownership.local_end)}, "hash": null}`;
+    body = splitBody(ownership.grammar, ownership);
   }
   return `    ${JSON.stringify(path)}: ${body}`;
 }
@@ -137,20 +136,25 @@ export function resolveConflictsTowardAfter(text: string): string {
   return out.join("\n");
 }
 
+/** Every marker-string field any grammar's declaration owns, derived from
+ *  the table's SplitShapes: a new grammar's fields join the wire
+ *  vocabulary below without a hand edit here. */
+type SplitDeclarationField = {
+  [K in GrammarId]: Exclude<keyof SplitShapes[K], "grammar">;
+}[GrammarId];
+
 /** One parsed entry's known field vocabulary; every value stays unknown
  *  because manifest text is target-repo content on updates - consumers
- *  validate what they use. */
-export interface ManifestEntryShape {
+ *  validate what they use. The split marker-string fields are the
+ *  grammars' own declaration fields (SplitDeclarationField); the rest is
+ *  the wire-common set. */
+export type ManifestEntryShape = {
   class: string;
-  marker?: unknown;
   managed?: unknown;
   hash?: unknown;
   grammar?: unknown;
-  managed_end?: unknown;
-  local_begin?: unknown;
-  local_end?: unknown;
   commit?: unknown;
-}
+} & { [F in SplitDeclarationField]?: unknown };
 
 /** The manifest's files mapping parsed from `text` (conflict blocks
  *  resolved toward the template side first), or a problem string when the
