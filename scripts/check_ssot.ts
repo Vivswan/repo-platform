@@ -42,10 +42,16 @@ import { loadManifests as loadManifestsFresh, type ModuleManifest } from "./modu
 import { landedPathAndGates, loadBaseOwnership } from "./ownership.ts";
 import { ANSWERS_FILE, parseAnswers } from "./render_dogfood.ts";
 import {
+  argvFlagLeads,
+  argvStringAfter,
   constNumberValue,
   constRegexSource,
   constStringValue,
+  intersectionCarriesType,
+  literalMatches,
+  propertyAssignmentCarries,
   templateCarries,
+  wrappedArgvLabels,
 } from "./ts_extract.ts";
 
 const REPO_ROOT = resolve(import.meta.dir, "..");
@@ -4286,7 +4292,8 @@ const rules: Rule[] = [
       // the API URL, and the fetch call has to carry the render's output.
       const mismatches: Mismatch[] = [];
       const render = read(".github/scripts/fleet/render_managed_settings.ts");
-      if (!/contents\/\$\{path\}\?ref=\$\{ref\}/.test(render)) {
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal template shape under pin
+      if (!templateCarries(render, "contents/${path}?ref=${ref}")) {
         mismatches.push({
           file: ".github/scripts/fleet/render_managed_settings.ts",
           expected: "the contents URL carries ?ref=, or every fact reads the moving branch",
@@ -4294,7 +4301,8 @@ const rules: Rule[] = [
         });
       }
       const merge = read(".github/scripts/fleet/merge_settings_layers.ts");
-      if (!/contents\/\.github\/settings\.yml\?ref=\$\{ref\}/.test(merge)) {
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal template shape under pin
+      if (!templateCarries(merge, "contents/.github/settings.yml?ref=${ref}")) {
         mismatches.push({
           file: ".github/scripts/fleet/merge_settings_layers.ts",
           expected: "the repo-layer URL carries ?ref=",
@@ -4363,8 +4371,8 @@ const rules: Rule[] = [
       const mismatches: Mismatch[] = [];
       const matrix = read(".github/scripts/fleet/build_settings_matrix.ts");
       if (
-        !matrix.includes("& RedactionState") ||
-        !matrix.includes("hide_details: row.hide_details")
+        !intersectionCarriesType(matrix, "RedactionState") ||
+        !propertyAssignmentCarries(matrix, "hide_details", "row.hide_details")
       ) {
         mismatches.push({
           file: ".github/scripts/fleet/build_settings_matrix.ts",
@@ -4823,16 +4831,16 @@ const rules: Rule[] = [
     run: () => {
       const mismatches: Mismatch[] = [];
       const smoke = read(".github/scripts/ci/smoke_generate.ts");
-      // The copier invocation is an argv array; reassemble the flag string
-      // AGENTS.md's recipe carries.
-      const vcsRef = mustMatch(
-        smoke,
-        /"--vcs-ref",\s*"([^"]+)",\s*"--defaults",\s*"--trust",/,
-        "smoke_generate.ts",
-        "copier flags",
-      )[1];
+      // Reassembled into the flag string AGENTS.md's recipe carries.
+      const vcsRef = argvStringAfter(smoke, "--vcs-ref", ["--defaults", "--trust"], {
+        where: "smoke_generate.ts",
+        what: "copier flags",
+      });
       const flags = `--vcs-ref ${vcsRef} --defaults --trust`;
-      const keys = [...smoke.matchAll(/"-d",\s*[`"]([a-z_]+)=/g)].map((m) => m[1]);
+      const keys = argvFlagLeads(smoke, "-d").flatMap((lead) => {
+        const key = /^([a-z_]+)=/.exec(lead);
+        return key === null ? [] : [key[1]];
+      });
       if (keys.length === 0)
         throw new Error("smoke_generate.ts: no -d answers found - anchor lost");
       const agents = read("AGENTS.md");
@@ -4974,22 +4982,21 @@ const rules: Rule[] = [
     run: () => {
       const mismatches: Mismatch[] = [];
       const labels = [
-        ...read(".github/workflows/reusable-template-sync.yml").matchAll(
-          /run_hidden\.ts "([^"]+)" --/g,
-        ),
-        // commit_push.ts passes the label as the argv element after the
-        // script path, with "--" next.
-        ...read(".github/scripts/sync/commit_push.ts").matchAll(
-          /run_hidden\.ts"\),\s*"([^"]+)",\s*"--",/g,
-        ),
-      ].map((m) => m[1]);
+        ...[
+          ...read(".github/workflows/reusable-template-sync.yml").matchAll(
+            /run_hidden\.ts "([^"]+)" --/g,
+          ),
+        ].map((match) => match[1]),
+        ...wrappedArgvLabels(read(".github/scripts/sync/commit_push.ts"), "run_hidden.ts"),
+      ];
       if (labels.length === 0) {
         throw new Error("no run_hidden labels found in the sync call sites - anchor lost");
       }
       const derived = new Set(labels.map(captureName));
-      const referenced = [
-        ...read(".github/scripts/sync/open_pr.ts").matchAll(/hidden-[A-Za-z0-9-]+\.log/g),
-      ].map((m) => m[0]);
+      const referenced = literalMatches(
+        read(".github/scripts/sync/open_pr.ts"),
+        /hidden-[A-Za-z0-9-]+\.log/g,
+      );
       if (referenced.length === 0) {
         throw new Error("open_pr.ts references no hidden capture files - anchor lost");
       }
