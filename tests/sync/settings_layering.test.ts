@@ -19,8 +19,10 @@ import {
   LEGACY_MERGEABLE_LINE,
   layeringSummary,
   renderStarter,
+  starterCarry,
   transitionSettingsStarter,
   uncertainSummary,
+  withCarriedDeclarations,
 } from "../../.github/scripts/sync/settings_layering";
 
 const STARTER_TEMPLATE = readFileSync(
@@ -283,9 +285,9 @@ describe("droppedOverrides", () => {
     expect(dropped[0]).toContain("incident");
   });
 
-  test("scalar and null rulesets sections are reported as mis-shaped too", () => {
+  test("a scalar rulesets section is reported as mis-shaped; null is the opt-out", () => {
     expect(droppedOverrides({ rulesets: "main" }, managed)[0]).toContain("rulesets (mis-shaped");
-    expect(droppedOverrides({ rulesets: null }, managed)[0]).toContain("rulesets (mis-shaped");
+    expect(droppedOverrides({ rulesets: null }, managed)).toEqual([]);
   });
 
   test("an enormous mis-shaped section is excerpted, not dumped whole", () => {
@@ -305,14 +307,99 @@ describe("droppedOverrides", () => {
       rulesets: [{ name: "release-tags", target: "tag" }],
       pages: { cname: "x" },
     };
+    // "incident" is absent from the managed layer, so the starter CARRIES
+    // it and it is not a drop; "BUG" restyles a label the fleet supplies,
+    // which stays a drop for the reviewer to decide on.
     expect(droppedOverrides(old, managed)).toEqual([
       "repository.has_issues",
       "repository.has_extras",
       'labels "BUG"',
-      'labels "incident"',
       'rulesets "release-tags"',
       "pages",
     ]);
+  });
+
+  test("a repo-local label is carried, a fleet-supplied name is not", () => {
+    // The carry rule and the drop report read the SAME computation, so a
+    // label can never be both listed as lost and written into the starter.
+    const old = {
+      labels: [
+        { name: "incident", color: "b60205", description: "live incident" },
+        { name: "BUG", color: "000000", description: "restyled" },
+        { name: "Incident", color: "ffffff", description: "case duplicate" },
+      ],
+    };
+    expect(starterCarry(old, managed).labels).toEqual([
+      { name: "incident", color: "b60205", description: "live incident" },
+    ]);
+  });
+
+  test("a null section is the repo's own opt-out, carried rather than reported", () => {
+    // `labels: null` keeps the apply off labels entirely; `rulesets: null`
+    // keeps it off the module layers' rulesets. Dropping either re-arms
+    // management the repo had switched off - delete-undeclared over every
+    // label, or a whole-payload PUT over a live ruleset it had shaped.
+    expect(starterCarry({ labels: null }, managed).optOuts).toEqual({ labels: null });
+    expect(droppedOverrides({ labels: null }, managed)).toEqual([]);
+    expect(starterCarry({ rulesets: null }, managed).optOuts).toEqual({ rulesets: null });
+    expect(droppedOverrides({ rulesets: null }, managed)).toEqual([]);
+  });
+
+  test("a ruleset entry's own null opt-out is carried, and not also reported", () => {
+    // The dialect's per-entry opt-outs. Dropping `rules: null` re-inherits
+    // the lower layers' rules and the PUT writes a ruleset the repo had
+    // deliberately stripped; the report must not name what the file took.
+    const old = { rulesets: [{ name: "main", rules: null, conditions: null }] };
+    expect(starterCarry(old, managed).optOuts).toEqual({
+      rulesets: [{ name: "main", rules: null, conditions: null }],
+    });
+    expect(droppedOverrides(old, managed)).toEqual([]);
+  });
+
+  test("a repository-key opt-out is REPORTED as one: the starter owns that block", () => {
+    // Carrying it would emit a second top-level `repository:` key, so the
+    // reviewer re-adds it instead - and the report says it was an opt-out
+    // rather than just naming the key.
+    const old = { repository: { has_issues: null } };
+    expect(starterCarry(old, managed).optOuts).toEqual({});
+    expect(droppedOverrides(old, managed)).toEqual([
+      "repository.has_issues: null (an opt-out from managing this key)",
+    ]);
+  });
+
+  test("a repo rule the fleet does not supply is carried; a same-type restyle is reported", () => {
+    // The apply PUTs a declared ruleset WHOLE, so a rule type the merged
+    // document omits leaves the live ruleset. Carrying it is the only way
+    // the transition does not weaken protection the repo chose.
+    const old = {
+      rulesets: [
+        {
+          name: "main",
+          target: "branch",
+          rules: [{ type: "required_signatures" }, { type: "deletion", parameters: { x: 1 } }],
+        },
+      ],
+    };
+    const fleet = { rulesets: [{ name: "main", target: "branch", rules: [{ type: "deletion" }] }] };
+    expect(starterCarry(old, fleet).rulesets).toEqual([
+      { name: "main", rules: [{ type: "required_signatures" }] },
+    ]);
+    expect(droppedOverrides(old, fleet)).toEqual([
+      'rulesets "main": rule "deletion" (the fleet supplies this rule type with different parameters, and the fleet layers win)',
+    ]);
+  });
+
+  test("a repo-only ruleset is never carried: the apply does not delete undeclared rulesets", () => {
+    const old = {
+      rulesets: [{ name: "staging", target: "branch", rules: [{ type: "deletion" }] }],
+    };
+    expect(starterCarry(old, managed).rulesets).toEqual([]);
+    expect(droppedOverrides(old, managed)).toEqual(['rulesets "staging"']);
+  });
+
+  test("starterCarry stands down on an absent or mis-shaped section", () => {
+    expect(starterCarry({}, managed)).toEqual({ optOuts: {}, labels: [], rulesets: [] });
+    expect(starterCarry({ labels: { incident: { color: "b60205" } } }, managed).labels).toEqual([]);
   });
 
   test("label matching folds case; ruleset matching is exact", () => {
@@ -324,6 +411,61 @@ describe("droppedOverrides", () => {
     expect(droppedOverrides(equalDespiteCase, managed)).toEqual(['labels "BUG"']);
     expect(droppedOverrides({ rulesets: [{ name: "MAIN", target: "branch" }] }, managed)).toEqual([
       'rulesets "MAIN"',
+    ]);
+  });
+});
+
+describe("withCarriedDeclarations", () => {
+  const starter = () =>
+    renderStarter(STARTER_TEMPLATE, {
+      description: "x",
+      homepage: "",
+      topics: "",
+      private: false,
+      githubUsername: "Vivswan",
+    });
+
+  test("appends real sections, and is a no-op with nothing to carry", () => {
+    const base = starter();
+    expect(withCarriedDeclarations(base, { optOuts: {}, labels: [], rulesets: [] })).toBe(base);
+    const carried = withCarriedDeclarations(base, {
+      optOuts: {},
+      labels: [{ name: "provider", color: "5319e7" }],
+      rulesets: [{ name: "main", rules: [{ type: "required_signatures" }] }],
+    });
+    // Parsed, not string-matched: the starter ships both examples as
+    // COMMENTS, so only a parse proves the sections are real YAML.
+    const doc = parseYaml(carried) as { labels: unknown; rulesets: unknown };
+    expect(doc.labels).toEqual([{ name: "provider", color: "5319e7" }]);
+    expect(doc.rulesets).toEqual([{ name: "main", rules: [{ type: "required_signatures" }] }]);
+  });
+
+  test("an opt-out is written as a literal null, never as an empty list", () => {
+    // `labels: []` would declare an EMPTY roster and delete every label;
+    // only null keeps the apply off the section.
+    const doc = parseYaml(
+      withCarriedDeclarations(starter(), {
+        optOuts: { labels: null, rulesets: null },
+        labels: [],
+        rulesets: [],
+      }),
+    ) as { labels: unknown; rulesets: unknown };
+    expect(doc.labels).toBeNull();
+    expect(doc.rulesets).toBeNull();
+  });
+
+  test("an entry-level opt-out merges with the carried entries of its section", () => {
+    // The skeleton entry and the carried entry are the same ruleset: one
+    // list, one entry, or the apply would see the name twice.
+    const doc = parseYaml(
+      withCarriedDeclarations(starter(), {
+        optOuts: { rulesets: [{ name: "main", conditions: null }] },
+        labels: [],
+        rulesets: [{ name: "main", rules: [{ type: "required_signatures" }] }],
+      }),
+    ) as { rulesets: unknown };
+    expect(doc.rulesets).toEqual([
+      { name: "main", conditions: null, rules: [{ type: "required_signatures" }] },
     ]);
   });
 });
@@ -422,7 +564,7 @@ describe("transitionSettingsStarter", () => {
     "",
   ].join("\n");
 
-  test("replaces a legacy file with the identity starter and lists the drops", () => {
+  test("replaces a legacy file with the identity starter, carrying the repo-local label", () => {
     const { dir, out } = target({
       settings: legacySettings,
       modules: "modules: [uv, settings-sync]\n",
@@ -431,7 +573,10 @@ describe("transitionSettingsStarter", () => {
     transitionSettingsStarter(dir, out, "t");
     const replaced = readFileSync(join(dir, ".github/settings.yml"), "utf-8");
     expect(replaced).not.toContain(LEGACY_MERGEABLE_LINE);
-    const doc = parseYaml(replaced) as { repository: Record<string, unknown> };
+    const doc = parseYaml(replaced) as {
+      repository: Record<string, unknown>;
+      labels: Record<string, unknown>[];
+    };
     // Every identity key follows declared-wins: the old file's own
     // values, which the nightly heal was enforcing. The live answer is
     // only a fallback, so a declared description is never silently
@@ -440,11 +585,42 @@ describe("transitionSettingsStarter", () => {
     expect(doc.repository.description).toBe("Old declared description");
     expect(doc.repository.topics).toBe("kept, custom, topics");
     expect(doc.repository.private).toBe(false);
+    // THE LOSS CLASS this carry exists for: no fleet layer supplies
+    // extra-label, and the apply deletes every undeclared label, so
+    // leaving it out of the starter would delete it from the repository
+    // on the next apply.
+    expect(doc.labels).toEqual([
+      { name: "extra-label", color: "0e8a16", description: "A deliberate repo label" },
+    ]);
     const section = readFileSync(out, "utf-8");
-    expect(section).toContain('- labels "extra-label"');
+    expect(section).toContain('`labels "extra-label"`');
+    expect(section).not.toContain('- labels "extra-label"');
     // Identity keys and baseline-equal declarations are never listed.
     expect(section).not.toContain("repository.description");
     expect(section).not.toContain("repository.has_issues");
+  });
+
+  test("a label the fleet layers DO supply is not copied into the starter", () => {
+    // A duplicate would shadow the fleet entry forever, so a fleet-supplied
+    // name stays with the fleet; only a restyle of one is reported as a
+    // dropped override for the reviewer to decide on.
+    const withFleetLabel = legacySettings.replace(
+      /labels:[\s\S]*$/,
+      "labels:\n  - name: dependencies\n" +
+        '    color: "ff0000"\n' +
+        "    description: Restyled by the repo\n",
+    );
+    const { dir, out } = target({
+      settings: withFleetLabel,
+      modules: "modules: [settings-sync]\n",
+      answers,
+    });
+    transitionSettingsStarter(dir, out, "t");
+    const doc = parseYaml(readFileSync(join(dir, ".github/settings.yml"), "utf-8")) as {
+      labels?: unknown;
+    };
+    expect(doc.labels).toBeUndefined();
+    expect(readFileSync(out, "utf-8")).toContain('- labels "dependencies"');
   });
 
   test("a mapping-shaped legacy labels section reaches the drift output, never a refusal", () => {
@@ -540,10 +716,11 @@ describe("transitionSettingsStarter", () => {
     transitionSettingsStarter(dir, out, "t");
     const written = readFileSync(join(dir, ".github/settings.yml"), "utf-8");
     expect(written).toContain("Rendered once, repo-owned: template sync never");
-    expect(written).not.toContain("extra-label");
+    // The transition ran, so the repo-local label rode into the starter.
+    expect(written).toContain("extra-label");
     const section = readFileSync(out, "utf-8");
     expect(section).toContain("layering transition");
-    expect(section).toContain('- labels "extra-label"');
+    expect(section).toContain('`labels "extra-label"`');
   });
 
   test("marker-less AND no committed manifest HOLDS the PR without writing", () => {
@@ -673,9 +850,13 @@ describe("transitionSettingsStarter", () => {
     });
     transitionSettingsStarter(dir, out, "t");
     const section = readFileSync(out, "utf-8");
-    // The one genuine repo-only declaration is listed...
-    expect(section).toContain('labels "incident"');
-    // ...and nothing that the fleet layers (override included) supply is.
+    // The one genuine repo-only declaration RIDES ALONG rather than being
+    // dropped: no fleet layer supplies it, and the apply deletes
+    // undeclared labels.
+    expect(section).toContain('`labels "incident"`');
+    expect(readFileSync(join(dir, ".github/settings.yml"), "utf-8")).toContain("incident");
+    // ...and nothing that the fleet layers (override included) supply is
+    // reported as dropped.
     for (const fleet of [
       "repository.allow_merge_commit",
       "repository.allow_squash_merge",
@@ -688,11 +869,12 @@ describe("transitionSettingsStarter", () => {
     }
   });
 
-  test("a repo-added rule on a fleet-owned ruleset is still reported", () => {
-    // The ruleset itself is fleet law and cannot be re-added, but rules
-    // append by type - so a rule type the override does not declare IS a
-    // genuine repo addition, and losing it silently would drop protection
-    // the repo chose for itself.
+  test("a repo-added rule on a fleet-owned ruleset is CARRIED, not just reported", () => {
+    // The ruleset itself is fleet law, but rules append by type - so a
+    // rule type the fleet does not supply is a genuine repo addition, and
+    // the apply's whole-payload PUT would remove it from the live ruleset.
+    // Reporting it in the PR body was the loss: protection the repo chose
+    // vanished before anyone read the warning.
     const legacy = [
       "---",
       "# Rendered by the settings-sync module.",
@@ -713,12 +895,14 @@ describe("transitionSettingsStarter", () => {
       answers,
     });
     transitionSettingsStarter(dir, out, "t");
+    const doc = parseYaml(readFileSync(join(dir, ".github/settings.yml"), "utf-8")) as {
+      rulesets: Record<string, unknown>[];
+    };
+    expect(doc.rulesets).toEqual([{ name: "main", rules: [{ type: "required_signatures" }] }]);
     const section = readFileSync(out, "utf-8");
-    // required_signatures is not in the override, so it is reported...
-    expect(section).toContain('rulesets "main": rule "required_signatures"');
-    expect(section).toContain("re-declaring just this rule");
-    // ...while deletion, which the override declares, is not, and neither
-    // is the ruleset entry on its own.
+    expect(section).toContain('`rulesets "main": rule "required_signatures"`');
+    // deletion is override-declared, so it is neither carried nor reported,
+    // and neither is the ruleset entry on its own.
     expect(section).not.toContain('rule "deletion"');
     expect(section).not.toContain('- rulesets "main"\n');
   });
@@ -759,8 +943,8 @@ describe("transitionSettingsStarter", () => {
     expect(section).not.toContain('rule "code_scanning"');
     // ...the override declares this one, so it is silent too...
     expect(section).not.toContain('rule "deletion"');
-    // ...and the genuinely repo-only type is still reported.
-    expect(section).toContain('rulesets "main": rule "required_signatures"');
+    // ...and the genuinely repo-only type rides into the new file.
+    expect(section).toContain('`rulesets "main": rule "required_signatures"`');
   });
 
   test("a fleet rule the old file carries at a DIFFERENT value is reported", () => {
