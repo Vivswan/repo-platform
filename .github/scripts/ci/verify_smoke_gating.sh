@@ -501,15 +501,20 @@ if has release-please; then
   test -f "$wf/release.yml"
   test -f "$wf/update-release.yml"
   test -f "$wf/update-release-pr.yml"
-  # The release job rides the client ci.yml (it must call the repo-owned
-  # release.yml by local path) on top of the gate: needs over the two
-  # jobs every gate runs through, under the info- name that opts the
-  # pipeline out of the verdict (it depends on the gate, it is not gated
-  # by it).
-  present "uses: ./.github/workflows/release.yml" "$wf/ci.yml"
-  present_line "  info-release:" "$wf/ci.yml"
-  present_line "    needs: [checks, ci]" "$wf/ci.yml"
-  absent_line "  release:" "$wf/ci.yml"
+  # The release leg rides the all-green wrapper (it must call the
+  # repo-owned release.yml by local path), gated on the VERDICT's posted
+  # conclusion for a push-to-main run - never spliced into ci.yml, where
+  # it would need an info- opt-out and start before the verdict.
+  present "uses: ./.github/workflows/release.yml" "$wf/all-green.yml"
+  present_line "  release:" "$wf/all-green.yml"
+  present_line "    needs: [verdict]" "$wf/all-green.yml"
+  present_line "      needs.verdict.outputs.conclusion == 'success' &&" "$wf/all-green.yml"
+  present_line "      github.event.workflow_run.event == 'push' &&" "$wf/all-green.yml"
+  # The judged commit rides into release.yml; its head gate reads it.
+  present_line '      sha: ${{ github.event.workflow_run.head_sha }}' "$wf/all-green.yml"
+  present_line '          JUDGED: ${{ inputs.sha || github.sha }}' "$wf/release.yml"
+  absent "info-release" "$wf/ci.yml"
+  absent "uses: ./.github/workflows/release.yml" "$wf/ci.yml"
   # The freshness and health gates live in fleet-ci; the render carries
   # the release-please membership that arms them.
   present '"release-please"' "$wf/ci.yml"
@@ -553,6 +558,8 @@ else
   test ! -e "$wf/update-release.yml"
   test ! -e "$wf/update-release-pr.yml"
   absent "uses: ./.github/workflows/release.yml" "$wf/ci.yml"
+  absent_line "  release:" "$wf/all-green.yml"
+  absent "uses: ./.github/workflows/release.yml" "$wf/all-green.yml"
   absent '"release-please"' "$wf/ci.yml"
   test ! -e "$SMOKE/release-please-config.json"
   test ! -e "$SMOKE/.release-please-manifest.json"

@@ -2349,6 +2349,7 @@ describe("wrapperTemplateMismatches", () => {
     "      require-job: ci / validate-template",
     "      require-copilot-review: {{ (not private) | tojson }}",
     "{# compose:conditional-workflows #}",
+    "{# compose:all-green-release #}",
     "",
   ].join("\n");
 
@@ -2533,90 +2534,324 @@ describe("wrapperTemplateMismatches", () => {
 
 describe("fleetCiRenderMismatches", () => {
   const ciTemplate = ["name: CI", "", "jobs:", "  checks:", "  ci:", ""].join("\n");
-  const fragment = ["  info-release:", "    needs: [checks, ci]", ""].join("\n");
+  const leg = [
+    "",
+    "  release:",
+    "    needs: [verdict]",
+    "    if: >-",
+    "      needs.verdict.result == 'success' &&",
+    "      needs.verdict.outputs.conclusion == 'success' &&",
+    "      github.event_name == 'workflow_run' &&",
+    "      github.event.workflow_run.event == 'push' &&",
+    "      github.event.workflow_run.head_branch == 'main'",
+    "    concurrency:",
+    "      group: post-green-release",
+    "      cancel-in-progress: false",
+    "    permissions:",
+    "      contents: write",
+    "      pull-requests: write",
+    "      packages: write",
+    "      id-token: write",
+    "      attestations: write",
+    "      issues: read",
+    "      vulnerability-alerts: read",
+    "    uses: ./.github/workflows/release.yml",
+    "    with:",
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal fragment line under test
+    "      sha: {% raw %}${{ github.event.workflow_run.head_sha }}{% endraw %}",
+    "    secrets: inherit",
+    "",
+  ].join("\n");
+  const releaseWf = [
+    "on:",
+    "  workflow_call:",
+    "    inputs:",
+    "      sha:",
+    "        required: false",
+    "jobs:",
+    "  release-please:",
+    "    steps:",
+    "      - name: Check this run judged the current head",
+    "        id: head",
+    "        env:",
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal template lines under test
+    "          GH_TOKEN: {% raw %}${{ github.token }}{% endraw %}",
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal template lines under test
+    "          JUDGED: {% raw %}${{ inputs.sha || github.sha }}{% endraw %}",
+    "        run: |",
+    '          head="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)"',
+    '          if [ "$head" = "$JUDGED" ]; then',
+    '            echo "current=true" >> "$GITHUB_OUTPUT"',
+    "          else",
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal template lines under test
+    '            echo "::notice::main moved to ${head:0:7} since ${JUDGED:0:7} was judged; the newer run releases"',
+    '            echo "current=false" >> "$GITHUB_OUTPUT"',
+    "          fi",
+    "      - uses: googleapis/release-please-action@v5",
+    "        id: release",
+    "        if: steps.head.outputs.current == 'true'",
+    "",
+  ].join("\n");
 
   test("the canonical shape passes clean", () => {
-    expect(fleetCiRenderMismatches(ciTemplate, fragment)).toEqual([]);
+    expect(fleetCiRenderMismatches(ciTemplate, leg, releaseWf)).toEqual([]);
   });
 
   test("a job added to the template ci.yml goes red - it would gate every repo with no roster", () => {
-    const found = fleetCiRenderMismatches(`${ciTemplate}  extra-gate:\n`, fragment);
+    const found = fleetCiRenderMismatches(`${ciTemplate}  extra-gate:\n`, leg, releaseWf);
     expect(found).toHaveLength(1);
     expect(found[0].got).toContain("extra-gate");
   });
 
+  test("re-adding an info-release job to the template ci.yml goes red the same way", () => {
+    const found = fleetCiRenderMismatches(
+      `${ciTemplate}  info-release:\n    needs: [checks, ci]\n`,
+      leg,
+      releaseWf,
+    );
+    expect(found.some((m) => m.got.includes("info-release"))).toBe(true);
+  });
+
   test("a flow-mapping job ('extra: { ... }') is caught in the template census too", () => {
-    const found = fleetCiRenderMismatches(`${ciTemplate}  extra: { uses: ./x.yml }\n`, fragment);
+    const found = fleetCiRenderMismatches(
+      `${ciTemplate}  extra: { uses: ./x.yml }\n`,
+      leg,
+      releaseWf,
+    );
     expect(found).toHaveLength(1);
     expect(found[0].got).toContain("extra");
   });
 
   test("a job-level name: or if: on a caller job goes red - a rename opts the gate out, a condition skips it open", () => {
     for (const override of ["    name: info-checks", "    if: false"]) {
-      const found = fleetCiRenderMismatches(`${ciTemplate}${override}\n`, fragment);
+      const found = fleetCiRenderMismatches(`${ciTemplate}${override}\n`, leg, releaseWf);
       expect(found.some((m) => m.expected.includes("no job-level name: or if:"))).toBe(true);
     }
   });
 
-  test("a name: override on the fragment job goes red - it could strip the id's info- opt-out", () => {
+  test("a fragment anchor re-added after ci.yml's jobs goes red - a spliced job would evade the job census", () => {
     const found = fleetCiRenderMismatches(
-      ciTemplate,
-      "  info-release:\n    name: release\n    needs: [checks, ci]\n",
+      `${ciTemplate}{# compose:ci-release-please #}\n`,
+      leg,
+      releaseWf,
     );
-    expect(found.some((m) => m.expected.includes("no job-level name:"))).toBe(true);
+    expect(found.some((m) => m.expected.includes("no fragment anchor"))).toBe(true);
   });
 
-  test("quoted job ids are refused in the template and the fragment - they parse identically but evade the censuses", () => {
-    const templateFound = fleetCiRenderMismatches(`${ciTemplate}  "extra":\n`, fragment);
-    expect(templateFound.some((m) => m.expected.includes("no quoted job ids"))).toBe(true);
-    const fragmentFound = fleetCiRenderMismatches(
-      ciTemplate,
-      `${fragment}  "release":\n    needs: [checks, ci]\n`,
+  test("the codeql-languages data anchor stays exempt from the anchor ban", () => {
+    const found = fleetCiRenderMismatches(
+      `${ciTemplate}{# compose:codeql-languages #}\n`,
+      leg,
+      releaseWf,
     );
-    expect(fragmentFound.some((m) => m.expected.includes("no quoted job ids"))).toBe(true);
+    expect(found.filter((m) => m.expected.includes("no fragment anchor"))).toEqual([]);
+  });
+
+  test("quoted job ids are refused in the template and the leg - they parse identically but evade the censuses", () => {
+    const templateFound = fleetCiRenderMismatches(`${ciTemplate}  "extra":\n`, leg, releaseWf);
+    expect(templateFound.some((m) => m.expected.includes("no quoted job ids"))).toBe(true);
+    const legFound = fleetCiRenderMismatches(ciTemplate, `${leg}  "decoy":\n`, releaseWf);
+    expect(legFound.some((m) => m.expected.includes("no quoted job ids"))).toBe(true);
   });
 
   test("a deleted caller job goes red the same way", () => {
-    const found = fleetCiRenderMismatches("name: CI\n\njobs:\n  checks:\n", fragment);
+    const found = fleetCiRenderMismatches("name: CI\n\njobs:\n  checks:\n", leg, releaseWf);
     expect(found).toHaveLength(1);
     expect(found[0].expected).toContain("'checks' and 'ci'");
   });
 
-  test("renaming the release job off the info- prefix goes red - a flaky publish must not mark commits ungreen", () => {
-    const found = fleetCiRenderMismatches(ciTemplate, "  release:\n    needs: [checks, ci]\n");
-    expect(found).toHaveLength(1);
-    expect(found[0].expected).toContain("info-*");
-  });
-
-  test("dropping the needs edge goes red - release must run only on top of a whole-run green", () => {
-    const found = fleetCiRenderMismatches(ciTemplate, "  info-release:\n    if: x\n");
-    expect(found).toHaveLength(1);
-    expect(found[0].expected).toContain("needs: [checks, ci]");
-  });
-
-  test("a second fragment job goes red - a decoy could carry the pinned needs line while the release job lost its edge", () => {
-    const found = fleetCiRenderMismatches(
-      ciTemplate,
-      "  info-release:\n    if: x\n  info-decoy:\n    needs: [checks, ci]\n",
-    );
-    expect(found.some((m) => m.expected.includes("exactly one spliced job"))).toBe(true);
-  });
-
-  test("jinja tags and comments are banned in the fragment - a multiline {# #} could hide the needs line while rendering without the edge", () => {
-    for (const spoof of [
-      "  info-release:\n{#\n    needs: [checks, ci]\n#}\n",
-      "  info-release:\n{% if false %}\n    needs: [checks, ci]\n{% endif %}\n",
+  test("dropping any verdict-gate clause goes red - a weakened gate releases off unjudged or red commits", () => {
+    for (const clause of [
+      "      needs.verdict.result == 'success' &&\n",
+      "      needs.verdict.outputs.conclusion == 'success' &&\n",
+      "      github.event.workflow_run.event == 'push' &&\n",
+      "      github.event.workflow_run.head_branch == 'main'",
     ]) {
-      const found = fleetCiRenderMismatches(ciTemplate, spoof);
+      const found = fleetCiRenderMismatches(ciTemplate, leg.replace(clause, ""), releaseWf);
+      expect(found.some((m) => m.expected.includes("verbatim verdict gate block"))).toBe(true);
+    }
+  });
+
+  test("a second job-level if: goes red - YAML's duplicate key could shadow the verdict gate", () => {
+    const mutated = leg.replace("    secrets: inherit", "    secrets: inherit\n    if: true");
+    const found = fleetCiRenderMismatches(ciTemplate, mutated, releaseWf);
+    expect(found.some((m) => m.expected.includes("exactly one job-level if:"))).toBe(true);
+  });
+
+  test("renaming the release job or adding a decoy goes red - a decoy could carry the pins while the leg lost them", () => {
+    const renamed = fleetCiRenderMismatches(
+      ciTemplate,
+      leg.replace("  release:", "  publish:"),
+      releaseWf,
+    );
+    expect(renamed.some((m) => m.expected.includes("exactly one spliced job, 'release'"))).toBe(
+      true,
+    );
+    const decoy = fleetCiRenderMismatches(ciTemplate, `${leg}  decoy:\n`, releaseWf);
+    expect(decoy.some((m) => m.expected.includes("exactly one spliced job, 'release'"))).toBe(true);
+  });
+
+  test("dropping the needs edge or the judged-sha pass goes red - each is an exact-line pin", () => {
+    for (const line of [
+      "    needs: [verdict]\n",
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal fragment line under test
+      "      sha: {% raw %}${{ github.event.workflow_run.head_sha }}{% endraw %}\n",
+      "      group: post-green-release\n",
+      "    secrets: inherit\n",
+    ]) {
+      const found = fleetCiRenderMismatches(ciTemplate, leg.replace(line, ""), releaseWf);
+      expect(
+        found.some((m) => m.expected.includes(JSON.stringify(line.trimEnd().replace(/^\n/, "")))),
+      ).toBe(true);
+    }
+  });
+
+  test("jinja tags and comments are banned in the leg - a multiline {# #} could hide a pinned line while rendering without it", () => {
+    for (const spoof of ["{#\n    needs: [verdict]\n#}\n", "{% if false %}\n{% endif %}\n"]) {
+      const found = fleetCiRenderMismatches(ciTemplate, `${leg}${spoof}`, releaseWf);
       expect(found.some((m) => m.expected.includes("no jinja tags or comments"))).toBe(true);
     }
   });
 
-  test("a fragment with no job id throws anchor-lost instead of passing vacuously", () => {
-    expect(() => fleetCiRenderMismatches(ciTemplate, "    steps: []\n")).toThrow("anchor lost");
+  test("a bare ${{ }} outside {% raw %} goes red - jinja eats it before GitHub ever sees it", () => {
+    const mutated = leg.replace(
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal fragment line under test
+      "      sha: {% raw %}${{ github.event.workflow_run.head_sha }}{% endraw %}",
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: the mutation under test
+      "      sha: ${{ github.event.workflow_run.head_sha }}",
+    );
+    const found = fleetCiRenderMismatches(ciTemplate, mutated, releaseWf);
+    expect(found.some((m) => m.expected.includes("wrapped in {% raw %}"))).toBe(true);
+  });
+
+  test("the permissions ceiling is pinned both ways: a missing grant and an added one both go red", () => {
+    const missing = fleetCiRenderMismatches(
+      ciTemplate,
+      leg.replace("      id-token: write\n", ""),
+      releaseWf,
+    );
+    expect(
+      missing.some((m) => m.file.includes("permissions ceiling") && !m.got.includes("id-token")),
+    ).toBe(true);
+    const added = fleetCiRenderMismatches(
+      ciTemplate,
+      leg.replace("      issues: read", "      issues: read\n      deployments: write"),
+      releaseWf,
+    );
+    expect(
+      added.some((m) => m.file.includes("permissions ceiling") && m.got.includes("deployments")),
+    ).toBe(true);
+  });
+
+  test("release.yml must declare the sha input and read it in the head gate", () => {
+    const undeclared = fleetCiRenderMismatches(
+      ciTemplate,
+      leg,
+      releaseWf.replace("      sha:\n", ""),
+    );
+    expect(undeclared.some((m) => m.expected.includes('"on:"'))).toBe(true);
+    const unread = fleetCiRenderMismatches(
+      ciTemplate,
+      leg,
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: the mutation under test
+      releaseWf.replace(
+        "{% raw %}${{ inputs.sha || github.sha }}{% endraw %}",
+        "{% raw %}${{ github.sha }}{% endraw %}",
+      ),
+    );
+    expect(unread.some((m) => m.expected.includes("WHOLE head gate"))).toBe(true);
+  });
+
+  test("a rewired else branch or an ungated release action goes red - the gate must hold through fi to its consumer", () => {
+    const flipped = fleetCiRenderMismatches(
+      ciTemplate,
+      leg,
+      releaseWf.replace(
+        '            echo "current=false" >> "$GITHUB_OUTPUT"',
+        '            echo "current=true" >> "$GITHUB_OUTPUT"',
+      ),
+    );
+    expect(flipped.some((m) => m.expected.includes("WHOLE head gate"))).toBe(true);
+    const ungated = fleetCiRenderMismatches(
+      ciTemplate,
+      leg,
+      releaseWf.replace("        if: steps.head.outputs.current == 'true'", "        if: always()"),
+    );
+    expect(ungated.some((m) => m.expected.includes("consume the head gate"))).toBe(true);
+    // The consumer pin is anchored on the action's own uses: line, so a
+    // dummy step wearing the id/if pair cannot cover an ungated action.
+    const decoyConsumer = fleetCiRenderMismatches(
+      ciTemplate,
+      leg,
+      releaseWf.replace(
+        "      - uses: googleapis/release-please-action@v5\n        id: release\n        if: steps.head.outputs.current == 'true'",
+        "      - run: echo decoy\n        id: release\n        if: steps.head.outputs.current == 'true'\n      - uses: googleapis/release-please-action@v5\n        if: always()",
+      ),
+    );
+    expect(decoyConsumer.some((m) => m.expected.includes("consume the head gate"))).toBe(true);
+  });
+
+  test("a decoy JUDGED line in a skipped step goes red - the gate's lines are unique-in-file", () => {
+    // The attack: the real head gate reads github.sha while a dead step
+    // carries the expected JUDGED expression. The block pin catches the
+    // reshaped gate, and the uniqueness census catches the rival copy.
+    const decoy = releaseWf
+      .replace(
+        "{% raw %}${{ inputs.sha || github.sha }}{% endraw %}",
+        "{% raw %}${{ github.sha }}{% endraw %}",
+      )
+      .replace(
+        "    steps:\n",
+        "    steps:\n      - if: false\n        env:\n" +
+          // biome-ignore lint/suspicious/noTemplateCurlyInString: the decoy under test
+          "          JUDGED: {% raw %}${{ inputs.sha || github.sha }}{% endraw %}\n" +
+          "        run: echo decoy\n",
+      );
+    const found = fleetCiRenderMismatches(ciTemplate, leg, decoy);
+    expect(found.some((m) => m.expected.includes("WHOLE head gate"))).toBe(true);
+    expect(found.some((m) => m.expected.includes("exactly one line carrying"))).toBe(true);
+  });
+
+  test("the caller's concurrency lane appearing inside release.yml goes red in ANY casing - groups are case-insensitive", () => {
+    for (const lane of ["post-green-release", "Post-Green-Release"]) {
+      const found = fleetCiRenderMismatches(
+        ciTemplate,
+        leg,
+        `${releaseWf}    concurrency:\n      group: ${lane}\n`,
+      );
+      expect(found.some((m) => m.expected.includes("self-deadlock"))).toBe(true);
+    }
+  });
+
+  test("a leg with no job id throws anchor-lost instead of passing vacuously", () => {
+    expect(() => fleetCiRenderMismatches(ciTemplate, "    steps: []\n", releaseWf)).toThrow(
+      "anchor lost",
+    );
   });
 
   test("a template with no jobs section throws anchor-lost", () => {
-    expect(() => fleetCiRenderMismatches("name: CI\n", fragment)).toThrow("anchor lost");
+    expect(() => fleetCiRenderMismatches("name: CI\n", leg, releaseWf)).toThrow("anchor lost");
+  });
+
+  // The live-file forcing tests the guard registry names: each runs the
+  // exact structural judgment the ssot rule runs on the REAL sources, so
+  // the arming audit's mutation of any pinned link goes red here.
+  const liveMismatches = () =>
+    fleetCiRenderMismatches(
+      readFileSync("templates/base/.github/workflows/ci.yml.jinja", "utf-8"),
+      readFileSync("templates/release-please/fragments/all-green-release.jinja", "utf-8"),
+      readFileSync("templates/release-please/.github/workflows/release.yml.jinja", "utf-8"),
+    );
+
+  test("the release leg's verdict gate is ARMED: only a posted green verdict releases", () => {
+    expect(liveMismatches()).toEqual([]);
+  });
+
+  test("the judged-sha pass is ARMED: the leg hands the verdict's commit to release.yml", () => {
+    expect(liveMismatches()).toEqual([]);
+  });
+
+  test("the judged-sha read is ARMED: release.yml's head gate compares the judged commit", () => {
+    expect(liveMismatches()).toEqual([]);
   });
 });

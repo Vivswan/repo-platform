@@ -131,7 +131,7 @@ The TEMPLATE side is pinned the same way, at the source, so a fleet-wide drift i
 
 - The `all-green-wrapper-template` rule pins the managed wrapper's shape (`WRAPPER_TEMPLATE_PINS`): the trigger set including the review wake, the per-sha concurrency group, the grants, the visibility-split `require-copilot-review` expression, and the conditional-workflows anchor.
 - The same rule runs a both-ways input census against the reusable's declared inputs (a retired input lingering in the wrapper would fail every fleet `workflow_call` at once; a new input silently unpassed would ride its default fleet-wide) and bans the retired `copilot-wait-minutes` anywhere.
-- The `fleet-ci-render-roster` rule pins the rendered CI's roster at its source: the template ci.yml may carry exactly the `checks` and `ci` caller jobs, and the release-please fragment's spliced job must keep its `info-` opt-out with `needs: [checks, ci]` - renaming it to a gating id would let a flaky publish mark commits ungreen, and dropping the needs edge would release from red runs.
+- The `fleet-ci-render-roster` rule pins the release leg's render at its source: the template ci.yml may carry exactly the `checks` and `ci` caller jobs and no fragment anchor beyond the with-block data anchors (a job re-added there would gate every repo, or splice past the census), and the wrapper's release leg must keep its verbatim verdict gate, its judged-sha pass, and its own concurrency lane - dropping any clause would release off unjudged or red commits.
 
 The check NAME is pinned once as data by the `all-green-name` rule: the string the ruleset requires (`.github/settings-override.yml`, the sole required context), the string the verdict reports (`reusable-all-green.yml`), the string the green gates look up (`shared/all_green.ts` CHECK_NAME), and the name this document quotes must all be the same `all-green`, provably, at authoring time.
 
@@ -149,10 +149,9 @@ Anything that asks "is this commit green" reads the CHECK RUN, never the CI run'
 The release pipeline follows the same rule with a different delivery. ONE rule: nothing happens off a commit unless its whole run was green.
 
 - Consumers OUTSIDE the run - the merge gate, build promotion, the sync's stamped-source gate - read the posted `all-green` check run, because they cannot see inside the run.
-- The one consumer INSIDE the run, the release-please module's `info-release` job, delivers the rule as `needs: [checks, ci]`: it is one of the run's own jobs, and the check run does not exist until the whole run - release included - completes.
-- `needs` is marginally stricter than the verdict, deliberately: it requires both caller jobs to succeed outright, so even a failure in a nested repo-owned `info-*` job - which the verdict waves through - holds release back.
+- The release-please module's release leg rides the managed `all-green.yml` wrapper itself: `needs: [verdict]` gated on the verdict's POSTED conclusion (`needs.verdict.outputs.conclusion == 'success'`) for a push-to-main run - the same rule, delivered as the verdict's own output rather than a check-run read, exactly the shape of repo-platform's own post-green job below. One deliberate delta from the retired in-run `needs: [checks, ci]` edge: `needs` also held release back when a nested repo-owned `info-*` job failed, which the verdict waves through - the verdict IS the gate's definition now, so an opted-out job's failure no longer blocks release.
 
-Same rule, two enforcement points; as the fragment's comment puts it (templates/release-please/fragments/ci-release-please.jinja), release depends on the gate but is not gated by it.
+Same rule, one enforcement point per consumer; the leg's shape is pinned by check_ssot.ts's fleet-ci-render-roster rule (templates/release-please/fragments/all-green-release.jinja is the source).
 
 ## Post-green: what runs after the gate
 
@@ -197,7 +196,7 @@ Inside fleet-ci.yml, module- and visibility-conditioned jobs carry job-level `if
 
 Reusable workflows prefix job names ("ci / pr-title"), which is harmless: a job name carries no required-check meaning any more - the verdict reads names only for the `info-` opt-out prefix.
 
-Repos that select release-please keep a client-side `info-release` job in ci.yml (it must call the repo-owned release.yml by local path): it runs on top of the gate via `needs: [checks, ci]`, which expresses "everything in this run succeeded" without waiting for the check run that only lands after the whole run completes - and its `info-` name opts the release pipeline out of the verdict, because it depends on the gate rather than being gated by it (a flaky publish must not mark the commit ungreen).
+Repos that select release-please carry a `release` leg in the managed all-green.yml wrapper (it must call the repo-owned release.yml by local path): `needs: [verdict]`, released only when the verdict POSTED success for a push-to-main run, holding its own `post-green-release` concurrency lane (a name no job inside release.yml takes - the caller sharing its called job's group would self-deadlock). The leg passes the JUDGED commit into release.yml's `sha` input, because `github.sha` on a workflow_run event is main's current tip - possibly a newer commit whose own verdict is still pending - and release.yml's head gate compares that judged commit against the tip, skipping (not failing) when main moved on. Because the wrapper is workflow_run-triggered, it executes the default branch's copy: the leg goes live on the first push to main after the sync PR delivering it merges.
 
 In the repo-owned checks.yml, a job skipped by its own `if:` stands down rather than failing the gate; name a job `info-*` to keep even its failures out of the gate, and put checks that need secrets or more than `contents: read` in their own workflow.
 

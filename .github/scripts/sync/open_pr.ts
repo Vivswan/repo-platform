@@ -28,6 +28,7 @@ import { clip, escapeControlBytes } from "./preserve_local_content.ts";
 import {
   ALL_GREEN_BOOTSTRAP_NAME,
   REFERENCED_LABELS_NAME,
+  RELEASE_LEG_MOVE_NAME,
   REMOVED_SPLITS_NAME,
   SETTINGS_LAYERING_NAME,
   STARTER_PINS_NAME,
@@ -236,6 +237,11 @@ const sections: FlagSection[] = [
   // exact-match-only, and hand-set pins are listed but deliberately left
   // alone - so it never forces the manual path by itself.
   { path: join(runnerTemp, STARTER_PINS_NAME), render: slurp, forcesReview: false },
+  // release_leg_move.ts's transition note: the release job moves from
+  // ci.yml's info-release to the verdict-gated all-green leg, going live
+  // on the first post-merge main push. Informational - the pipeline
+  // itself is unchanged - so it never forces the manual path.
+  { path: join(runnerTemp, RELEASE_LEG_MOVE_NAME), render: slurp, forcesReview: false },
   {
     path: requireEnv("WITHHELD_FILE"),
     render: (path) => `> [!WARNING]

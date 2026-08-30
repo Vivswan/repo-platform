@@ -60,4 +60,3 @@ jobs:
       tracking-labels: {{ (([fuzzer_label] if 'fuzzer' in modules else []) + ([nightly_label] if 'nightly' in modules else [])) | join(',') | tojson }}
 {%- endif %}
 {#- END GENERATED: tracking-labels #}
-{# compose:ci-release-please #}

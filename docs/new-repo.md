@@ -45,7 +45,7 @@ The `ci` job runs the standard checks (typography, commit-names, actionlint, git
 
 What each module adds:
 
-- release-please: an `info-release` job on top of the gate (`needs: [checks, ci]`; the `info-` name keeps the release pipeline out of the all-green verdict, which it depends on rather than being gated by), calling the managed `release.yml` pipeline. GitHub releases are immutable once published, so every release moves through three stages in one workflow run (no PAT needed to chain them), always draft-first:
+- release-please: a `release` job in the managed `all-green.yml` wrapper - `needs: [verdict]`, released only by a green verdict on a push to main, with the judged commit passed through - calling the managed `release.yml` pipeline. GitHub releases are immutable once published, so every release moves through three stages in one workflow run (no PAT needed to chain them), always draft-first:
   1. release-please cuts the release as a draft with its tag already forced.
   2. the repo-owned `update-release.yml` hook is called with the tag: packaging, asset uploads, and note edits go there, and publishing waits for every job in it.
   3. the managed publish stage attests build provenance for every asset on the draft - a single `attestation.jsonl` attached to the release, verifiable per asset with `gh attestation verify <asset> -R <owner>/<repo> --bundle attestation.jsonl` (skipped for releases with no assets and for non-public repositories, which need Enterprise Cloud for attestations) - and flips it live.

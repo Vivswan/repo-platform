@@ -227,6 +227,10 @@ jobs:
     needs: [checks, legacy-gate]
     steps:
       - run: echo legacy aggregate gate
+  info-release:
+    needs: [checks, legacy-gate]
+    uses: ./.github/workflows/release.yml
+    secrets: inherit
 LEGACY_CI
 commit_build_tree "$OLD_TREE" "$prev"
 echo "Testing upgrade path ${prev} -> fresh build"
@@ -254,6 +258,8 @@ if grep -qF "fleet-ci.yml" .github/workflows/ci.yml; then
 fi
 grep -qxF "  all-green:" .github/workflows/ci.yml \
   || fail "the synthetic old fixture must carry the legacy all-green aggregate job"
+grep -qxF "  info-release:" .github/workflows/ci.yml \
+  || fail "the synthetic old fixture must carry the legacy in-ci info-release job (or the release-home-move assertions below are vacuous)"
 [ "$(cat LICENSE)" = "Old fleet license (pre-relicense fixture)" ] \
   || fail "synthetic fixture did not render the old fleet license"
 git init -q -b main
@@ -437,6 +443,24 @@ test -f .github/workflows/all-green.yml \
 if grep -qF -- "  all-green:" .github/workflows/ci.yml; then
   fail "the updated ci.yml still carries the retired all-green aggregate job"
 fi
+# The release job's home move: the update must strip the in-ci
+# info-release job and land the verdict-gated release leg in the
+# all-green wrapper, passing the judged sha into a release.yml that
+# declares and reads the input - the release fires from its new home on
+# the first post-merge push.
+if grep -qF -- "info-release" .github/workflows/ci.yml; then
+  fail "the updated ci.yml still carries the retired info-release job"
+fi
+grep -qxF -- "  release:" .github/workflows/all-green.yml \
+  || fail "the updated all-green.yml lacks the release leg (release-please is selected)"
+grep -qxF -- "    needs: [verdict]" .github/workflows/all-green.yml \
+  || fail "the updated release leg does not run downstream of the verdict"
+grep -qxF -- "      needs.verdict.outputs.conclusion == 'success' &&" .github/workflows/all-green.yml \
+  || fail "the updated release leg is not gated on the verdict's posted conclusion"
+grep -qxF -- '      sha: ${{ github.event.workflow_run.head_sha }}' .github/workflows/all-green.yml \
+  || fail "the updated release leg does not pass the judged sha to release.yml"
+grep -qxF -- '          JUDGED: ${{ inputs.sha || github.sha }}' .github/workflows/release.yml \
+  || fail "the updated release.yml head gate does not read the judged sha input"
 # The update must PRESERVE the repo's configuration, not reset it.
 grep -qF -- "## Python " .gitignore || fail ".gitignore lost the uv module section"
 grep -qF -- 'package-ecosystem: "uv"' .github/dependabot.yml \
@@ -709,6 +733,11 @@ test -f SECURITY.md || fail "SECURITY.md did not survive the flip to private"
 # in the main leg above).
 grep -qxF -- "      require-copilot-review: false" .github/workflows/all-green.yml \
   || fail "the flipped all-green.yml does not render require-copilot-review: false (private repos get no Copilot reviews)"
+# The wrapper's release leg is release-please-gated; this fixture selects
+# no release-please, so no leg may render.
+if grep -qF -- "  release:" .github/workflows/all-green.yml; then
+  fail "the flipped all-green.yml carries a release leg without the release-please module"
+fi
 # The public-only base files and gates must retire on the flip; the
 # license is visibility-independent and (without custom-license)
 # template-managed, so LICENSE.md must converge to the fleet license -

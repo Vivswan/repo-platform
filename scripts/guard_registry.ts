@@ -328,6 +328,44 @@ export const GUARD_REGISTRY: readonly GuardEntry[] = [
     testName:
       "the .husky/commit-msg wiring dispatches to the gate - a refused subject blocks the commit",
   },
+  // The fleet release leg (the release-please module's job in the managed
+  // all-green.yml wrapper): each pin below can rot alone, and every one
+  // fails open at run time - a weakened gate releases off red or unjudged
+  // commits with GitHub reporting nothing wrong. The forcing tests run the
+  // fleet-ci-render-roster ssot judgment on the REAL template sources.
+  {
+    id: "fleet-release-verdict-gate",
+    hazard:
+      "the verdict-conclusion clause deleted from the release leg's if: GitHub still implies success() on the needs edge, so the leg releases on a POSTED-RED or pending verdict whose job result was success",
+    guardFile: "templates/release-please/fragments/all-green-release.jinja",
+    snippet: "      needs.verdict.outputs.conclusion == 'success' &&",
+    mutated: "",
+    testFile: "tests/scripts/check_ssot.test.ts",
+    testName: "the release leg's verdict gate is ARMED: only a posted green verdict releases",
+  },
+  {
+    id: "fleet-release-judged-sha-pass",
+    hazard:
+      "the sha input deleted from the release leg's call: release.yml falls back to github.sha, which on workflow_run events is main's CURRENT tip - a newer, possibly red commit whose own verdict is still pending",
+    guardFile: "templates/release-please/fragments/all-green-release.jinja",
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal fragment line under pin
+    snippet: "      sha: {% raw %}${{ github.event.workflow_run.head_sha }}{% endraw %}",
+    mutated: "",
+    testFile: "tests/scripts/check_ssot.test.ts",
+    testName: "the judged-sha pass is ARMED: the leg hands the verdict's commit to release.yml",
+  },
+  {
+    id: "fleet-release-judged-sha-read",
+    hazard:
+      "release.yml's head gate rewired off the input back to github.sha: the leg still passes the judged commit but the gate compares the tip against itself, always-true, silently releasing unjudged pushes",
+    guardFile: "templates/release-please/.github/workflows/release.yml.jinja",
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal template line under pin
+    snippet: "          JUDGED: {% raw %}${{ inputs.sha || github.sha }}{% endraw %}",
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: the unarmed shape the audit stages
+    mutated: "          JUDGED: {% raw %}${{ github.sha }}{% endraw %}",
+    testFile: "tests/scripts/check_ssot.test.ts",
+    testName: "the judged-sha read is ARMED: release.yml's head gate compares the judged commit",
+  },
 ];
 
 /** Occurrences of `token` in `text` (exact bytes, no regex). */

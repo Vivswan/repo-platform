@@ -2490,6 +2490,10 @@ export const WRAPPER_TEMPLATE_PINS: readonly [string, string][] = [
     "{# compose:conditional-workflows #}",
     "the manifest-derived conditional roster anchor (renders the conditional-workflows input in every selection)",
   ],
+  [
+    "{# compose:all-green-release #}",
+    "the release-please leg's anchor (splices the verdict-gated release job on selecting repos; fleet-ci-render-roster pins the fragment's shape)",
+  ],
 ];
 
 /** The wrapper template's shape against the reusable's declared inputs,
@@ -2517,6 +2521,7 @@ export function wrapperTemplateMismatches(templateText: string, reusableText: st
   // satisfy the textual check while rendering to nothing.
   for (const [index, line] of lines.entries()) {
     if (line === "{# compose:conditional-workflows #}") continue;
+    if (line === "{# compose:all-green-release #}") continue;
     // raw/endraw must pair ON the line: the wrapper's only raw use is
     // inline expression-wrapping, and a multiline raw block would let
     // text ride through the ban below unexamined.
@@ -2685,18 +2690,30 @@ export function wrapperTemplateMismatches(templateText: string, reusableText: st
   return mismatches;
 }
 
-/** The rendered fleet CI's gating roster at the SOURCE: the template
- *  ci.yml.jinja may carry exactly the `checks` and `ci` caller jobs
- *  (every fleet gate lives inside those two calls; a job added here
- *  would gate every repo with no roster to make it loud), and the
- *  release-please fragment's spliced job must keep its `info-` opt-out
- *  with `needs: [checks, ci]` - renaming it to a gating id would make
- *  the release pipeline gate the verdict (a flaky publish marking
- *  commits ungreen), and dropping the needs edge would release from red
- *  runs. Pure over the two texts for the suite's forcing cases. */
-export function fleetCiRenderMismatches(ciTemplateText: string, fragmentText: string): Mismatch[] {
+/** The fleet release leg's render shape at the SOURCE. The template
+ *  ci.yml.jinja may carry exactly the `checks` and `ci` caller jobs and
+ *  no fragment anchor beyond the with-block data anchors - the retired
+ *  info-release job must not return there; the release fires from the
+ *  all-green wrapper's verdict-gated leg now. That leg (the release-please
+ *  all-green-release fragment) must keep `needs: [verdict]` plus the
+ *  verdict-conclusion condition scoped to push-to-main workflow_run
+ *  events (dropping any clause releases off unjudged or red commits),
+ *  must pass the judged sha (github.sha on a workflow_run event is the
+ *  tip, which can be a NEWER unjudged commit), and must hold a
+ *  concurrency group no job inside the called release.yml takes (a
+ *  shared name self-deadlocks: the caller would hold the group its
+ *  called job waits for). release.yml must declare the sha input and
+ *  read it in the head gate, or the pass rots into a silent
+ *  release-from-tip. Pure over the three texts for the suite's forcing
+ *  cases. */
+export function fleetCiRenderMismatches(
+  ciTemplateText: string,
+  releaseLegText: string,
+  releaseWorkflowText: string,
+): Mismatch[] {
   const ciRel = "templates/base/.github/workflows/ci.yml.jinja";
-  const fragmentRel = "templates/release-please/fragments/ci-release-please.jinja";
+  const legRel = "templates/release-please/fragments/all-green-release.jinja";
+  const releaseRel = "templates/release-please/.github/workflows/release.yml.jinja";
   const mismatches: Mismatch[] = [];
   const jobsAt = ciTemplateText.indexOf("\njobs:\n");
   if (jobsAt === -1) throw new Error(`${ciRel}: no jobs: section - anchor lost`);
@@ -2707,7 +2724,7 @@ export function fleetCiRenderMismatches(ciTemplateText: string, fragmentText: st
     mismatches.push({
       file: ciRel,
       expected:
-        "exactly the 'checks' and 'ci' caller jobs (every fleet gate lives inside those calls; module jobs join through fragments with info- ids, never as new gating jobs here)",
+        "exactly the 'checks' and 'ci' caller jobs (every fleet gate lives inside those calls; the release leg lives in the all-green wrapper, and a job added here would gate every repo with no roster to make it loud)",
       got: jobIds.join(", ") || "no job ids",
     });
   }
@@ -2733,75 +2750,272 @@ export function fleetCiRenderMismatches(ciTemplateText: string, fragmentText: st
         got: line.trim(),
       });
     }
-  }
-  const fragmentJobs = [...fragmentText.matchAll(/^ {2}([A-Za-z0-9_-]+):(?: |$)/gm)].map(
-    (match) => match[1],
-  );
-  if (fragmentJobs.length === 0) {
-    throw new Error(`${fragmentRel}: no job id - anchor lost`);
-  }
-  // The fragment is jinja-free by design (the composer wraps it in its
-  // module gate; YAML # comments carry its story), so any jinja tag or
-  // comment is banned outright - a multi-line {# ... #} could otherwise
-  // hide the pinned needs line while rendering without the dependency.
-  for (const [index, line] of fragmentText.split("\n").entries()) {
-    if (line.includes("{%") || line.includes("{#") || line.includes("#}")) {
+    // The job census reads the template's own text, so a fragment anchor
+    // after jobs: could splice a job the census never sees; only the
+    // with-block data anchor may stand.
+    if (line.startsWith("{# compose:") && line !== "{# compose:codeql-languages #}") {
       mismatches.push({
-        file: `${fragmentRel}:${index + 1}`,
+        file: ciRel,
         expected:
-          "no jinja tags or comments in the fragment (the composer supplies the module gate; a commented copy would satisfy the textual pins while rendering to nothing)",
+          "no fragment anchor in ci.yml's jobs beyond the codeql-languages data anchor (a spliced job would evade the job census; module jobs live in fleet-ci, the release leg in the all-green wrapper)",
         got: line.trim(),
       });
     }
   }
-  // Exactly ONE job, by design: the fragment splices the one release
-  // pipeline caller. The bound is also what makes the needs pin below
-  // structural - with a second job in the fragment, a decoy could carry
-  // the pinned needs line while the release job lost its edge.
-  if (fragmentJobs.length > 1) {
-    mismatches.push({
-      file: fragmentRel,
-      expected:
-        "exactly one spliced job (the release pipeline caller) - a second job could carry the pinned needs line while the release job lost its edge",
-      got: fragmentJobs.join(", "),
-    });
-  }
-  for (const job of fragmentJobs) {
-    if (!job.startsWith("info-")) {
+  // The release leg is jinja-minimal by design: inline {% raw %} pairs
+  // wrap the one judged-sha expression, and everything else is banned -
+  // a multi-line {# ... #} or an if-tag could otherwise hide a pinned
+  // line while rendering without it (the composer supplies the module
+  // gate around the whole fragment).
+  for (const [index, line] of releaseLegText.split("\n").entries()) {
+    if (line.split("{% raw %}").length !== line.split("{% endraw %}").length) {
       mismatches.push({
-        file: fragmentRel,
-        expected: `an info-* job id (the release pipeline depends on the gate and is NOT gated by it - '${job}' would make a flaky publish mark commits ungreen)`,
-        got: `job '${job}'`,
+        file: `${legRel}:${index + 1}`,
+        expected:
+          "raw/endraw paired on one line (inline expression wrapping only - a multiline raw block smuggles text past the jinja ban)",
+        got: line.trim(),
+      });
+      continue;
+    }
+    const stripped = line.replaceAll("{% raw %}", "").replaceAll("{% endraw %}", "");
+    if (stripped.includes("{%") || stripped.includes("{#") || stripped.includes("#}")) {
+      mismatches.push({
+        file: `${legRel}:${index + 1}`,
+        expected:
+          "no jinja tags or comments in the fragment beyond {% raw %} pairs (the composer supplies the module gate; a tag-wrapped or commented copy would satisfy the textual pins while rendering to nothing)",
+        got: line.trim(),
       });
     }
-  }
-  // The verdict judges DISPLAY names, so a name: override could strip
-  // the info- opt-out the job id carries (job-level if: stays allowed
-  // here - release only runs on push/dispatch by design).
-  for (const line of fragmentText.split("\n")) {
-    if (/^ {4}name:/.test(line)) {
+    // An expression outside raw is jinja to copier: it renders mangled
+    // or empty instead of reaching GitHub.
+    if (line.includes("${{") && !line.includes("{% raw %}")) {
       mismatches.push({
-        file: fragmentRel,
-        expected:
-          "no job-level name: (the verdict judges display names - an override could strip the id's info- opt-out and gate the release pipeline)",
+        file: `${legRel}:${index + 1}`,
+        expected: "every ${{ }} expression wrapped in {% raw %} (jinja eats a bare one)",
         got: line.trim(),
       });
     }
     // Quoted job ids parse identically but evade the bare-key census.
     if (/^ {2}["']/.test(line)) {
       mismatches.push({
-        file: fragmentRel,
+        file: legRel,
         expected: "no quoted job ids (a quoted key parses identically but evades the job census)",
         got: line.trim(),
       });
     }
   }
-  if (!fragmentText.split("\n").includes("    needs: [checks, ci]")) {
+  const legJobs = [...releaseLegText.matchAll(/^ {2}([A-Za-z0-9_-]+):(?: |$)/gm)].map(
+    (match) => match[1],
+  );
+  if (legJobs.length === 0) {
+    throw new Error(`${legRel}: no job id - anchor lost`);
+  }
+  // Exactly ONE job, by design: with a second job in the fragment, a
+  // decoy could carry the pinned lines while the release job lost them.
+  if (canonical(legJobs) !== canonical(["release"])) {
     mismatches.push({
-      file: fragmentRel,
+      file: legRel,
       expected:
-        "the release job carrying exactly 'needs: [checks, ci]' (release runs only on top of a whole-run green; the check run lands too late to gate it)",
+        "exactly one spliced job, 'release' (a decoy second job could carry the pinned lines while the release job lost them)",
+      got: legJobs.join(", "),
+    });
+  }
+  // One if: only - YAML lets a duplicate key win silently, so a second
+  // condition could shadow the pinned block below.
+  const ifCount = releaseLegText.split("\n").filter((line) => /^ {4}if:/.test(line)).length;
+  if (ifCount !== 1) {
+    mismatches.push({
+      file: legRel,
+      expected: "exactly one job-level if: (a duplicate key could shadow the verdict gate)",
+      got: `${ifCount} if: lines`,
+    });
+  }
+  // The verdict gate, pinned as one ADJACENT block: released only by a
+  // posted green verdict (the reusable's conclusion output - never the
+  // triggering run's conclusion) on a push-to-main workflow_run event.
+  const verdictGate = [
+    "    if: >-",
+    "      needs.verdict.result == 'success' &&",
+    "      needs.verdict.outputs.conclusion == 'success' &&",
+    "      github.event_name == 'workflow_run' &&",
+    "      github.event.workflow_run.event == 'push' &&",
+    "      github.event.workflow_run.head_branch == 'main'",
+  ].join("\n");
+  if (!releaseLegText.includes(verdictGate)) {
+    mismatches.push({
+      file: legRel,
+      expected:
+        "the release job carrying the verbatim verdict gate block (needs.verdict.result and .outputs.conclusion both 'success', event workflow_run, run event push, head branch main) - dropping any clause releases off unjudged or red commits",
       got: "missing or reshaped",
+    });
+  }
+  // The per-line pins: each exactly once (YAML's last duplicate wins
+  // silently, so a compliant copy next to a gutted one must be loud).
+  const legPins: [string, string][] = [
+    ["    needs: [verdict]", "the release leg runs downstream of the verdict job, nothing else"],
+    [
+      "    concurrency:",
+      "releases serialize in their own lane; an unserialized pair can double-publish",
+    ],
+    [
+      "      group: post-green-release",
+      "the caller's lane, deliberately no group the called release.yml takes (sharing self-deadlocks)",
+    ],
+    ["      cancel-in-progress: false", "a cancelled half-finished release is a wedged draft"],
+    [
+      "    uses: ./.github/workflows/release.yml",
+      "the leg calls the managed release pipeline by local path",
+    ],
+    [
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal fragment line under pin
+      "      sha: {% raw %}${{ github.event.workflow_run.head_sha }}{% endraw %}",
+      "the JUDGED commit - github.sha on a workflow_run event is the tip, which can be a newer unjudged commit",
+    ],
+    ["    secrets: inherit", "publish steps need the repo's secrets"],
+  ];
+  const legLines = releaseLegText.split("\n");
+  for (const [line, why] of legPins) {
+    const count = legLines.filter((candidate) => candidate === line).length;
+    if (count !== 1) {
+      mismatches.push({
+        file: legRel,
+        expected: `the line ${JSON.stringify(line)} exactly once (${why})`,
+        got: count === 0 ? "missing" : `${count} occurrences`,
+      });
+    }
+  }
+  // The permissions ceiling, additive-closed: the pins prove the needed
+  // grants present, this census refuses extras riding to every
+  // release-selecting repository silently.
+  const permissionsAt = legLines.indexOf("    permissions:");
+  if (permissionsAt === -1) {
+    mismatches.push({
+      file: legRel,
+      expected: "a job-level permissions: ceiling for the called release pipeline",
+      got: "missing",
+    });
+  } else {
+    const grants: string[] = [];
+    for (const line of legLines.slice(permissionsAt + 1)) {
+      if (line.trim() === "" || line.trim().startsWith("#")) continue;
+      const grant = /^ {6}([a-z-]+: (?:read|write))$/.exec(line)?.[1];
+      if (grant === undefined) break;
+      grants.push(grant);
+    }
+    mismatches.push(
+      ...setMismatch(
+        `${legRel} release permissions ceiling`,
+        [
+          "contents: write",
+          "pull-requests: write",
+          "packages: write",
+          "id-token: write",
+          "attestations: write",
+          "issues: read",
+          "vulnerability-alerts: read",
+        ],
+        grants,
+      ),
+    );
+  }
+  // The called release.yml's half of the judged-sha pass, pinned as two
+  // ADJACENT blocks (the file is jinja-heavy, so no YAML parse): the sha
+  // input declared under workflow_call, and the head-gate step whose
+  // JUDGED env and comparison ride in one piece - a decoy carrying the
+  // JUDGED line in a skipped step while the real gate reads github.sha
+  // would satisfy line-anywhere pins, so the load-bearing lines are also
+  // counted UNIQUE below (the one comparison in the file is the pinned
+  // one).
+  const releaseBlocks: [string, string][] = [
+    [
+      ["on:", "  workflow_call:", "    inputs:", "      sha:"].join("\n"),
+      "the workflow_call must declare the sha input the leg passes (an undeclared input fails the call outright, fleet-wide)",
+    ],
+    [
+      [
+        "      - name: Check this run judged the current head",
+        "        id: head",
+        "        env:",
+        // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal template lines under pin
+        "          GH_TOKEN: {% raw %}${{ github.token }}{% endraw %}",
+        // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal template lines under pin
+        "          JUDGED: {% raw %}${{ inputs.sha || github.sha }}{% endraw %}",
+        "        run: |",
+        '          head="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)"',
+        '          if [ "$head" = "$JUDGED" ]; then',
+        '            echo "current=true" >> "$GITHUB_OUTPUT"',
+        "          else",
+        // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal template lines under pin
+        '            echo "::notice::main moved to ${head:0:7} since ${JUDGED:0:7} was judged; the newer run releases"',
+        '            echo "current=false" >> "$GITHUB_OUTPUT"',
+        "          fi",
+      ].join("\n"),
+      "the WHOLE head gate in one piece, both branches through fi - a rewired else emitting current=true would release from a stale judged commit",
+    ],
+  ];
+  for (const [block, why] of releaseBlocks) {
+    if (releaseWorkflowText.split(block).length !== 2) {
+      mismatches.push({
+        file: releaseRel,
+        expected: `the verbatim block starting ${JSON.stringify(block.split("\n")[0])} exactly once (${why})`,
+        got: "missing, reshaped, or duplicated",
+      });
+    }
+  }
+  // Uniqueness of the gate's load-bearing lines: with each appearing ONCE
+  // (inside the pinned block, per above), no second step or job can carry
+  // a rival JUDGED or head comparison that the gate does not use.
+  const releaseLines = releaseWorkflowText.split("\n");
+  // The release action's consumer binding, anchored on its OWN uses: line
+  // (version-agnostic, so dependabot bumps stay free): exactly one
+  // release-please-action step, whose next two lines must be the id and
+  // the head-gate condition - a decoy step carrying the id/if pair while
+  // the real action runs ungated must be unrepresentable.
+  const actionUses = "      - uses: googleapis/release-please-action@";
+  const actionIndexes = releaseLines.flatMap((line, index) =>
+    line.startsWith(actionUses) ? [index] : [],
+  );
+  if (actionIndexes.length !== 1) {
+    mismatches.push({
+      file: releaseRel,
+      expected: `exactly one step whose uses: starts ${JSON.stringify(actionUses.trim())} (the one release cutter)`,
+      got: `${actionIndexes.length} occurrences`,
+    });
+  } else {
+    const [idLine, ifLine] = releaseLines.slice(actionIndexes[0] + 1, actionIndexes[0] + 3);
+    if (
+      idLine !== "        id: release" ||
+      ifLine !== "        if: steps.head.outputs.current == 'true'"
+    ) {
+      mismatches.push({
+        file: releaseRel,
+        expected:
+          "the release-please-action step must itself consume the head gate: its next two lines are 'id: release' then \"if: steps.head.outputs.current == 'true'\" (an always() or dropped condition releases regardless of the gate)",
+        got: [idLine ?? "<end of file>", ifLine ?? "<end of file>"]
+          .map((l) => l.trim())
+          .join(" / "),
+      });
+    }
+  }
+  for (const marker of ["JUDGED: {% raw %}", 'if [ "$head" =']) {
+    const count = releaseLines.filter((candidate) => candidate.includes(marker)).length;
+    if (count !== 1) {
+      mismatches.push({
+        file: releaseRel,
+        expected: `exactly one line carrying ${JSON.stringify(marker)} (a rival copy outside the pinned head gate could shadow the judged-sha read)`,
+        got: `${count} occurrences`,
+      });
+    }
+  }
+  // The self-deadlock ban's other half: the caller's lane name must never
+  // appear inside the called workflow (concurrency groups are
+  // case-insensitive on GitHub, so the scan is too).
+  if (releaseWorkflowText.toLowerCase().includes("post-green-release")) {
+    mismatches.push({
+      file: releaseRel,
+      expected:
+        "no 'post-green-release' concurrency group inside the called workflow, any casing (the calling leg holds that lane; a job here waiting for it would self-deadlock)",
+      got: "a post-green-release mention",
     });
   }
   return mismatches;
@@ -4193,15 +4407,17 @@ const rules: Rule[] = [
   },
 
   {
-    // The rendered fleet CI's gating roster at the source
+    // The fleet release leg's render shape at the source
     // (fleetCiRenderMismatches has the model): the template ci.yml may
-    // carry exactly the two caller jobs, and the release fragment's job
-    // must keep its info- opt-out and its needs edge.
+    // carry exactly the two caller jobs and no release job, and the
+    // all-green wrapper's release leg must stay verdict-gated with the
+    // judged sha passed through.
     name: "fleet-ci-render-roster",
     run: () =>
       fleetCiRenderMismatches(
         read("templates/base/.github/workflows/ci.yml.jinja"),
-        read("templates/release-please/fragments/ci-release-please.jinja"),
+        read("templates/release-please/fragments/all-green-release.jinja"),
+        read("templates/release-please/.github/workflows/release.yml.jinja"),
       ),
   },
 

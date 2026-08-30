@@ -300,6 +300,16 @@ jobs:
             bun .github/scripts/sync/all_green_bootstrap.ts \
             --root target --hide-details "$HIDE_DETAILS"
 
+      # The release job's home move: HEAD's ci.yml still carries
+      # info-release and this update delivers the wrapper's verdict-gated
+      # leg, so the PR body gets the go-live note. run_hidden: whether
+      # HEAD carries the old job is target state.
+      - name: Note the release leg's home move
+        run: |
+          bun .github/scripts/sync/run_hidden.ts "release leg move" -- \
+            bun .github/scripts/sync/release_leg_move.ts \
+            --root target --hide-details "$HIDE_DETAILS"
+
       # WARN side of the referenced-label invariant: the settings apply
       # deletes undeclared labels, so a referenced-but-undeclared one is a
       # silent break. Never fails the sync - the apply side carries the

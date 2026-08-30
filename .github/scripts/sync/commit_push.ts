@@ -16,10 +16,12 @@ import { SYNC_IDENTITY } from "../shared/git_identity.ts";
 import { capture, must, mustCapture, passthrough, redactText } from "../shared/proc.ts";
 import { ALL_GREEN_WORKFLOW_PATH } from "./all_green_bootstrap.ts";
 import { writeReferencedLabelsReport } from "./referenced_labels.ts";
+import { CI_WORKFLOW_PATH } from "./release_leg_move.ts";
 import { appendHiddenFailure, captureName } from "./run_hidden.ts";
 import {
   ALL_GREEN_BOOTSTRAP_NAME,
   REFERENCED_LABELS_NAME,
+  RELEASE_LEG_MOVE_NAME,
   STARTER_PINS_NAME,
 } from "./section_files.ts";
 import {
@@ -227,8 +229,14 @@ if (existsSync(pinOutcomesPath)) {
 // no longer true - clear the note (the withheld-workflows section already
 // lists the file, and the next sync with a scoped token re-detects the
 // gap).
-if (withheld.split("\n").includes(ALL_GREEN_WORKFLOW_PATH)) {
+const withheldPaths = new Set(withheld.split("\n"));
+if (withheldPaths.has(ALL_GREEN_WORKFLOW_PATH)) {
   writeFileSync(join(runnerTemp, ALL_GREEN_BOOTSTRAP_NAME), "");
+}
+// The release-leg-move note claims ci.yml drops info-release AND
+// all-green.yml gains the leg; withholding either file voids the claim.
+if (withheldPaths.has(ALL_GREEN_WORKFLOW_PATH) || withheldPaths.has(CI_WORKFLOW_PATH)) {
+  writeFileSync(join(runnerTemp, RELEASE_LEG_MOVE_NAME), "");
 }
 // The referenced-labels report was computed against the PRE-restore tree;
 // the restore just rewrote .github/workflows, whose label references are

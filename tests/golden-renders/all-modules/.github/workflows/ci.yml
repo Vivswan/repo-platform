@@ -52,26 +52,3 @@ jobs:
       skills-dir: "skills"
       codeql-languages: '["javascript-typescript", "python"]'
       tracking-labels: "fuzz-nightly,nightly-failure"
-
-  # info- keeps the release pipeline out of the all-green verdict (a
-  # flaky publish must not mark the commit ungreen); `needs:` is the gate
-  # - the check run lands only after this whole run completes. Secrets
-  # are inherited: publish steps need them.
-  info-release:
-    needs: [checks, ci]
-    if: >-
-      (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
-      && github.ref == 'refs/heads/main'
-    # The publishing ceiling for the release pipeline's jobs; nested jobs
-    # can only narrow it.
-    permissions:
-      contents: write
-      pull-requests: write
-      packages: write
-      id-token: write
-      attestations: write
-      # The release-health pre-flight reads through this ceiling.
-      issues: read
-      vulnerability-alerts: read
-    uses: ./.github/workflows/release.yml
-    secrets: inherit

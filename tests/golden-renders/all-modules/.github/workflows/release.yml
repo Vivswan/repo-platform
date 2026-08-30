@@ -13,6 +13,12 @@ name: Release
 
 on:
   workflow_call:
+    inputs:
+      sha:
+        description: The judged commit this release run vouches for; empty falls back to github.sha.
+        required: false
+        type: string
+        default: ""
 
 jobs:
   release-please:
@@ -33,18 +39,19 @@ jobs:
       pr_number: ${{ steps.release.outputs.pr && fromJSON(steps.release.outputs.pr).number }}
       pr_head_branch: ${{ steps.release.outputs.pr && fromJSON(steps.release.outputs.pr).headBranchName }}
     steps:
-      # A green run releases only the head it tested; gh api (not
+      # A green verdict releases only the commit it judged; gh api (not
       # anonymous ls-remote) so private repositories work.
-      - name: Check this run tested the current head
+      - name: Check this run judged the current head
         id: head
         env:
           GH_TOKEN: ${{ github.token }}
+          JUDGED: ${{ inputs.sha || github.sha }}
         run: |
           head="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)"
-          if [ "$head" = "$GITHUB_SHA" ]; then
+          if [ "$head" = "$JUDGED" ]; then
             echo "current=true" >> "$GITHUB_OUTPUT"
           else
-            echo "::notice::main moved to ${head:0:7} since this run started; the newer run releases"
+            echo "::notice::main moved to ${head:0:7} since ${JUDGED:0:7} was judged; the newer run releases"
             echo "current=false" >> "$GITHUB_OUTPUT"
           fi
       # The release PR's CI health check can be stale by merge time, so

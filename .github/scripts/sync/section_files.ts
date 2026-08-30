@@ -23,6 +23,13 @@ export const REMOVED_SPLITS_NAME = "removed-splits.md";
  * it deliberately left alone. Informational, never forces review. */
 export const STARTER_PINS_NAME = "starter-pin-rollout.md";
 
+/** release_leg_move.ts's transition note: this update moves the release
+ * job from ci.yml's info-release to the verdict-gated leg in the
+ * all-green wrapper, which goes live on the first post-merge main push
+ * (workflow_run executes the default branch's copy). Informational,
+ * never forces review; self-retires once the fleet has crossed. */
+export const RELEASE_LEG_MOVE_NAME = "release-leg-move.md";
+
 /** all_green_bootstrap.ts's first-verdict-delivery note: this update
  * introduces .github/workflows/all-green.yml, which the target's default
  * branch does not carry, so no verdict can land on the PR itself and the

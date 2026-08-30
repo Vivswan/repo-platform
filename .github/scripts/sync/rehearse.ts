@@ -619,6 +619,13 @@ export function rehearseRepo(slug: string, options: RehearsalOptions): Rehearsal
       cwd: REPO_ROOT,
       env: legEnv,
     });
+    // The workflow's release-leg-move detection (release_leg_move.ts): a
+    // sync PR that moves the release job from ci.yml's info-release to
+    // the wrapper's verdict-gated leg gets the go-live note.
+    run(["bun", join(import.meta.dir, "release_leg_move.ts"), "--root", targetDir], {
+      cwd: REPO_ROOT,
+      env: legEnv,
+    });
     // The workflow's referenced-label check (referenced_labels.ts): every
     // label the target's issue forms and workflows reference must exist in
     // the merged settings label roster (the apply deletes undeclared
@@ -718,6 +725,10 @@ export function rehearseRepo(slug: string, options: RehearsalOptions): Rehearsal
         ["retired-modules.txt", "Retired modules dropped from the selection"],
         ["removed-paths.txt", "The template retired these files; this update deletes them"],
         ["starter-pin-rollout.md", "Starter pin rollout (one-run transition note)"],
+        [
+          "release-leg-move.md",
+          "Release leg home move (info-release leaves ci.yml; the verdict-gated leg arms on the first post-merge main push)",
+        ],
         [
           "all-green-bootstrap.md",
           "All-green bootstrap (first verdict delivery; the PR would stay manual-review - one-time admin-bypass merge)",
