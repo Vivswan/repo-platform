@@ -1,27 +1,13 @@
 // Validates that every commit subject in a push/PR range is a Conventional
 // Commit. Vendored from Vivswan/copilot-env (.github/scripts/
 // validate-commit-names.cjs), converted to TypeScript; runs under bun.
+// The subject grammar itself lives in ./subject.ts (single source, shared
+// with this repo's commit-msg hook - the header there has the model).
 
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
+import { conventionalSubject, isMergeSubject, subject } from "./subject.ts";
 
-const allowedTypes = [
-  "build",
-  "chore",
-  "ci",
-  "docs",
-  "feat",
-  "fix",
-  "perf",
-  "refactor",
-  "revert",
-  "style",
-  "test",
-] as const;
-
-const conventionalSubject = new RegExp(
-  `^(${allowedTypes.join("|")})(\\([A-Za-z0-9._/-]+\\))?!?: .+`,
-);
 const zeroSha = /^0{40}$/;
 
 interface Commit {
@@ -39,16 +25,6 @@ interface EventPayload {
   before?: string;
   after?: string;
   commits?: PushPayloadCommit[];
-}
-
-function subject(message: unknown): string {
-  return String(message ?? "")
-    .split(/\r?\n/, 1)[0]
-    .trim();
-}
-
-function isMergeSubject(value: string): boolean {
-  return /^Merge (pull request|branch|remote-tracking branch)\b/.test(value);
 }
 
 function git(args: string[]): string {
