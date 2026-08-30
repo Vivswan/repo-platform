@@ -49,6 +49,9 @@ export interface RunResult {
    * `timeoutMs` or the default hang bound); `exitCode` is then always
    * nonzero. */
   timedOut: boolean;
+  /** The child's pid, recorded so cleanup-sensitive callers (the arming
+   * audit) can verify the process is gone after the run. */
+  pid: number;
 }
 
 /** Text with credentials redacted - URL userinfo (`scheme://user:pass@` ->
@@ -116,6 +119,7 @@ export function capture(command: string[], options: RunOptions = {}): RunResult 
     stdout: proc.stdout.toString(),
     stderr: proc.stderr.toString(),
     timedOut,
+    pid: proc.pid,
   };
 }
 

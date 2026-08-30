@@ -89,6 +89,8 @@ The tree proof and the freshness slow path both compare a scratch rebuild's hash
 
 `$GIT_DIR/info/attributes` is the one axis no flag can close; no site plants one, so it stays a documented residual, not a covered vector (stage_tree.ts's header).
 
+Guards of this class - defenses against environmental hazards (hostile git config, leaked env vars, hung children) that a hermetic test can never trip by accident - are registered in `scripts/guard_registry.ts`, each bound to the hostile-fixture test that forces its failure branch. `bun run guards:binding` proves the binding on every commit (deleting a guard or renaming its forcing test is an immediate red naming the entry), and the weekly `audit-guards.yml` workflow proves the ARMING: it unarms each guard in a scratch clone, requires the named forcing test red, restores, and requires it green - a guard whose unarming no test notices is decorative, and a red audit files the `guard-audit-failure` tracking issue. A new guard of this class lands with its registry entry and forcing test in the same commit (the registry header states the rule).
+
 `shared/rebuild_tree.ts` reproduces the builder exactly - the source commit's own script and frozen-lockfile dependencies - and hashes through a scratch index's write-tree, so file modes and the `templates/agents/` symlinks join the comparison too.
 
 ## Extraction safety: one branch, every consumer

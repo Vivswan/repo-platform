@@ -73,3 +73,15 @@ rulesets:
     # explicit empty list is what lets the nightly heal clear an
     # out-of-band bypass actor added to these rules.
     bypass_actors: []
+
+# This repository's own tracking labels, merged into the fleet roster
+# (name-keyed union). An undeclared label the apply would delete enters a
+# delete/recreate loop against the workflow that files it, so the label
+# and the workflow referencing it land together.
+labels:
+  # audit-guards.yml's failure stream: the weekly arming audit files or
+  # updates one issue under this label while any registered guard is
+  # unproven, and closes it on the next green audit.
+  - name: guard-audit-failure
+    color: D93F0B
+    description: Automated guard arming audit failure

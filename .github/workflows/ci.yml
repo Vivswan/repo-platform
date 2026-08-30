@@ -208,6 +208,11 @@ jobs:
         run: bun .github/scripts/fleet/repos_registry.ts validate
       - name: Check single-source-of-truth invariants
         run: bun run ssot:check
+      # Layer 1 of the guard-arming harness: every guard-registry entry
+      # resolves both ways (snippet in guard file, forcing test in test
+      # file); the weekly audit-guards workflow proves the arming itself.
+      - name: Check guard registry binding
+        run: bun run guards:binding
       - name: Check generated regions against the module manifests
         run: bun run generate:check
       - name: Check generated dogfood copies against their template twins

@@ -1,0 +1,83 @@
+# Weekly arming proof for the guard registry (scripts/guard_registry.ts):
+# for every registered environmental-hazard guard, unarm it in a scratch
+# clone, require its forcing test red, restore, and require it green -
+# per-commit CI only proves the guard and its test EXIST (bun run
+# guards:binding); this run proves deleting the guard would still be
+# SEEN. A red audit files/updates the tracking issue below; the next
+# green audit closes it.
+
+name: Audit Guards
+
+on:
+  schedule:
+    - cron: "44 8 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Schedule and dispatch prove the same registry; queue runs, never cancel
+# one mid-proof.
+concurrency:
+  group: audit-guards
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Prove every registered guard armed
+        run: bun .github/scripts/audit-guards/arm_audit.ts
+
+  # The nightly-failure reporting convention (templates/nightly's starter):
+  # a red audit files or updates one label-deduplicated tracking issue, a
+  # green audit closes it. A cancelled audit is red - a hang is a finding.
+  # The label is declared in .github/settings.yml so the settings apply
+  # never enters a delete/recreate loop against it.
+  report:
+    needs: [audit]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      # The composite action lives in this repository, so the report job
+      # needs the checkout the audit job's failure must not skip.
+      - uses: actions/checkout@v7
+
+      - name: File or update the guard-audit issue
+        if: needs.audit.result == 'failure' || needs.audit.result == 'cancelled'
+        uses: ./actions/fuzz-issue
+        with:
+          mode: report
+          label: guard-audit-failure
+          title: Guard arming audit failures
+          # No artifacts directory: the generic nightly-failure report
+          # (workflow, commit, run link); the run log names the decorative
+          # entries. The tuple matches the .github/settings.yml declaration
+          # and is used only if the label has to be created.
+          label-color: "D93F0B"
+          label-description: Automated guard arming audit failure
+
+      - name: Close the guard-audit issue on a green run
+        if: needs.audit.result == 'success'
+        uses: ./actions/fuzz-issue
+        with:
+          mode: resolve
+          label: guard-audit-failure
+          # The generic close wording; without it the action keeps the
+          # fuzz stream's regression-seed hedging.
+          stream: generic

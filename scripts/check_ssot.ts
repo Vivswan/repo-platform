@@ -2726,6 +2726,10 @@ const rules: Rule[] = [
       );
       for (const required of [
         "bun run ssot:check",
+        // The guard-binding layer's only CI home is its validate-template
+        // step: losing the step would leave the registry unenforced in CI
+        // while the local chain stayed green.
+        "bun run guards:binding",
         "bun run generate:check",
         "bun run dogfood:check",
         "bun run gitignore:topology",

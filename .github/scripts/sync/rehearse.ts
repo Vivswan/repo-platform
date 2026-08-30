@@ -161,7 +161,9 @@ function describeCommand(command: string[]): string {
 function makeRunner(verbose: boolean) {
   const check = (
     command: string[],
-    result: RunResult,
+    // pid omitted: the verbose lane fabricates a result from passthrough,
+    // which has no captured child pid to report.
+    result: Omit<RunResult, "pid">,
     forward: boolean,
     timeoutMs?: number,
   ): void => {
