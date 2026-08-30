@@ -609,8 +609,10 @@ describe("the override layer", () => {
 
     const main = rulesets.find((r) => r.name === "main");
     const mainRules = main?.rules as Record<string, unknown>[];
+    // copilot_code_review is deliberately NOT here: it lives in the fleet
+    // PUBLIC visibility overlay (Copilot reviews are disabled on private
+    // repos, so the auto-request rule follows visibility).
     expect(mainRules.map((r) => r.type).sort()).toEqual([
-      "copilot_code_review",
       "deletion",
       "non_fast_forward",
       "pull_request",

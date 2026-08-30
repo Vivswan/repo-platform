@@ -61,11 +61,15 @@ jobs:
       # editing the ci: job out of the managed ci.yml would disarm every
       # fleet gate while the repo-owned checks job kept the verdict green.
       require-job: ci / validate-template
-      # The verdict OWNS the Copilot review expectation: the fleet ruleset
-      # requires only the all-green check, and this input is what makes it
-      # wait for Copilot's copilot-pull-request-reviewer check run at the
-      # judged head (bot-authored PRs stand it down; docs/all-green.md has
-      # the model). Dropping this line un-gates the review for this
-      # repository - the ruleset carries no separate context any more.
-      require-copilot-review: true
+      # The verdict OWNS the Copilot review expectation - the fleet
+      # ruleset requires only the all-green check, and this input is what
+      # makes it wait for Copilot's copilot-pull-request-reviewer check
+      # run at the judged head (bot-authored PRs stand it down;
+      # docs/all-green.md has the model). VISIBILITY SPLIT: Copilot
+      # reviews are disabled on private repositories, so the expectation
+      # renders true only on public ones - an unconditional true would
+      # leave every private PR's verdict pending on a reviewer that can
+      # never come. Dropping the line on a public repo un-gates the
+      # review - the ruleset carries no separate context any more.
+      require-copilot-review: {{ (not private) | tojson }}
 {# compose:conditional-workflows #}

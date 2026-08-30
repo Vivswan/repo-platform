@@ -117,10 +117,12 @@ describe("managedRulesets", () => {
     // .github/settings-override.yml, which merges above the repo layer at
     // apply time - a repo must not be able to beat them, so they cannot
     // sit in a layer the repo wins over. The public overlay contributes a
-    // main ENTRY, but it carries only the code_quality rule; the private
-    // side contributes no ruleset at all.
+    // main ENTRY, but it carries only the code_quality rule and the
+    // public-only copilot_code_review auto-request (Copilot reviews are
+    // disabled on private repos); the private side contributes no
+    // ruleset at all.
     expect(rulesetNames(facts())).toEqual(["main"]);
-    expect(mainRuleTypes(facts())).toEqual(["code_quality"]);
+    expect(mainRuleTypes(facts())).toEqual(["code_quality", "copilot_code_review"]);
     expect(rulesetNames(facts({ private: true }))).toEqual([]);
   });
 

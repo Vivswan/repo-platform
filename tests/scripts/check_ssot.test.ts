@@ -5,6 +5,7 @@
 // (bun scripts/check_ssot.ts).
 
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
 import { stageComposedTreeArgv } from "../../.github/scripts/shared/stage_tree.ts";
 import { PIN_FLIPS } from "../../.github/scripts/sync/starter_pin_rollout";
 import {
@@ -23,6 +24,7 @@ import {
   expandCheckChain,
   extractUsesPins,
   firstDiff,
+  fleetCiRenderMismatches,
   fragmentFilesFor,
   gatesOnModule,
   inlineFunctionCopies,
@@ -59,7 +61,9 @@ import {
   topLevelProperties,
   unsafeStepCondition,
   verdictRosterMismatches,
+  WRAPPER_TEMPLATE_PINS,
   withToolchainSetup,
+  wrapperTemplateMismatches,
   zToDollar,
 } from "../../scripts/check_ssot";
 import { TOOLCHAIN_SETUP_FRAGMENT, TOOLCHAIN_SETUP_TARGETS } from "../../scripts/compose_template";
@@ -2054,5 +2058,312 @@ describe("bunRuntimeMismatches", () => {
   test("an unreadable version throws loudly instead of passing vacuously", () => {
     expect(() => bunRuntimeMismatches("1.4.0-canary.1", "1.4.0")).toThrow("MAJOR.MINOR");
     expect(() => bunRuntimeMismatches("1.4.0", "")).toThrow("MAJOR.MINOR");
+  });
+});
+
+describe("wrapperTemplateMismatches", () => {
+  // A live-shaped fixture: the real wrapper template's load-bearing lines
+  // plus a matching reusable declaration, so each forcing case below can
+  // delete exactly one pin and see exactly its mismatch.
+  const reusable = [
+    "on:",
+    "  workflow_call:",
+    "    inputs:",
+    "      sha: {required: false, type: string}",
+    "      require-job: {required: false, type: string}",
+    "      conditional-workflows: {required: false, type: string}",
+    "      require-copilot-review: {required: false, type: boolean}",
+  ].join("\n");
+  const template = [
+    "on:",
+    "  workflow_run:",
+    "    workflows: [CI]",
+    "    types: [completed]",
+    "  pull_request_review:",
+    "    types: [submitted]",
+    "  workflow_dispatch:",
+    "concurrency:",
+    "  group: {% raw %}${{ github.workflow }}-${{ github.event.workflow_run.head_sha || github.event.pull_request.head.sha || inputs.sha }}{% endraw %}",
+    "  cancel-in-progress: false",
+    "jobs:",
+    "  verdict:",
+    "    permissions:",
+    "      checks: write",
+    "      actions: read",
+    "    uses: {{ github_username }}/repo-platform/.github/workflows/reusable-all-green.yml@build",
+    "    with:",
+    "      sha: x",
+    "      require-job: ci / validate-template",
+    "      require-copilot-review: {{ (not private) | tojson }}",
+    "{# compose:conditional-workflows #}",
+    "",
+  ].join("\n");
+
+  test("the live-shaped fixture passes clean", () => {
+    expect(wrapperTemplateMismatches(template, reusable)).toEqual([]);
+  });
+
+  test("every pinned line is load-bearing: deleting any one is a named mismatch", () => {
+    for (const [line] of WRAPPER_TEMPLATE_PINS) {
+      const mutated = template.replace(`${line}\n`, "");
+      const found = wrapperTemplateMismatches(mutated, reusable);
+      expect(found.length).toBeGreaterThan(0);
+      expect(found.some((m) => m.expected.includes(JSON.stringify(line)))).toBe(true);
+    }
+  });
+
+  test("the retired copilot-wait-minutes input is banned anywhere in the template", () => {
+    const mutated = template.replace(
+      "      require-copilot-review: {{ (not private) | tojson }}",
+      "      require-copilot-review: {{ (not private) | tojson }}\n      copilot-wait-minutes: 5",
+    );
+    const found = wrapperTemplateMismatches(mutated, reusable);
+    expect(found.some((m) => m.expected.includes("no copilot-wait-minutes"))).toBe(true);
+    expect(found.some((m) => m.got.includes("'copilot-wait-minutes' is passed"))).toBe(true);
+  });
+
+  test("jinja block tags and comments are banned outright - a pin inside {% if false %}, a macro body, or {# #} would satisfy the text while rendering to nothing", () => {
+    for (const spoof of [
+      "{% if false %}",
+      "{%- if ready %}",
+      "{% for x in y %}",
+      "{% set x = 1 %}",
+      "{% macro hide() %}",
+      "{% block extra %}",
+      "{# pull_request_review: #}",
+      "{#",
+      "#}",
+    ]) {
+      const mutated = template.replace("jobs:", `${spoof}\njobs:`);
+      const found = wrapperTemplateMismatches(mutated, reusable);
+      expect(found.some((m) => m.expected.includes("no jinja tags or comments"))).toBe(true);
+    }
+  });
+
+  test("the compose anchor line itself is exempt from the jinja ban", () => {
+    // The clean fixture carries the anchor and passes - pinned explicitly
+    // so the ban can never grow to swallow the anchor.
+    expect(
+      wrapperTemplateMismatches(template, reusable).filter((m) =>
+        m.expected.includes("no jinja tags"),
+      ),
+    ).toEqual([]);
+  });
+
+  test("a decoy second job goes red - the census reads the first with: block, so one job is structural", () => {
+    const mutated = `${template}  decoy:\n    with:\n      sha: y\n`;
+    const found = wrapperTemplateMismatches(mutated, reusable);
+    expect(found.some((m) => m.expected.includes("exactly one job, 'verdict'"))).toBe(true);
+    expect(found.some((m) => m.expected.includes("exactly one with: block"))).toBe(true);
+  });
+
+  test("a flow-mapping decoy job ('extra: { ... }') is still a second job", () => {
+    const mutated = `${template}  extra: { uses: ./x.yml }\n`;
+    const found = wrapperTemplateMismatches(mutated, reusable);
+    expect(found.some((m) => m.expected.includes("exactly one job, 'verdict'"))).toBe(true);
+  });
+
+  test("a multiline raw block goes red - unpaired raw/endraw on a line smuggles text past the jinja ban", () => {
+    const mutated = template.replace("jobs:", "{% raw %}\njobs:");
+    const found = wrapperTemplateMismatches(mutated, reusable);
+    expect(found.some((m) => m.expected.includes("raw/endraw paired on one line"))).toBe(true);
+  });
+
+  test("the trigger set is additive-closed: an added push: trigger goes red", () => {
+    const mutated = template.replace("  workflow_dispatch:", "  push:\n  workflow_dispatch:");
+    const found = wrapperTemplateMismatches(mutated, reusable);
+    expect(found.some((m) => m.file.includes("on: triggers") && m.got.includes("push"))).toBe(true);
+  });
+
+  test("the grant set is additive-closed: an added contents: write goes red", () => {
+    const mutated = template.replace(
+      "      actions: read",
+      "      actions: read\n      contents: write",
+    );
+    const found = wrapperTemplateMismatches(mutated, reusable);
+    expect(
+      found.some((m) => m.file.includes("verdict permissions") && m.got.includes("contents")),
+    ).toBe(true);
+  });
+
+  test("a grant hiding behind a comment or blank line is still censused - YAML keeps the mapping open across both, comments at ANY indent", () => {
+    for (const interloper of [
+      "      # rationale",
+      "  # reindented",
+      "# column zero",
+      "        # deep",
+    ]) {
+      const mutated = template.replace(
+        "      actions: read",
+        `      actions: read\n${interloper}\n\n      contents: write`,
+      );
+      const found = wrapperTemplateMismatches(mutated, reusable);
+      expect(
+        found.some((m) => m.file.includes("verdict permissions") && m.got.includes("contents")),
+      ).toBe(true);
+    }
+  });
+
+  test("a duplicated pinned line goes red - YAML's last duplicate wins silently", () => {
+    const mutated = template.replace(
+      "      require-copilot-review: {{ (not private) | tojson }}",
+      "      require-copilot-review: {{ (not private) | tojson }}\n      require-copilot-review: {{ (not private) | tojson }}",
+    );
+    const found = wrapperTemplateMismatches(mutated, reusable);
+    expect(found.some((m) => m.got.includes("2 occurrences"))).toBe(true);
+    expect(found.some((m) => m.got.includes("passed more than once"))).toBe(true);
+  });
+
+  test("a literal or hand-flipped expectation goes red - only the visibility-split jinja form is pinned", () => {
+    for (const literal of [
+      "      require-copilot-review: true",
+      "      require-copilot-review: false",
+    ]) {
+      const mutated = template.replace(
+        "      require-copilot-review: {{ (not private) | tojson }}",
+        literal,
+      );
+      const found = wrapperTemplateMismatches(mutated, reusable);
+      expect(found.some((m) => m.expected.includes("visibility-split"))).toBe(true);
+    }
+  });
+
+  test("an input the reusable declares but the wrapper never passes goes red (a default riding silently fleet-wide)", () => {
+    const widened = reusable.replace(
+      "      require-copilot-review: {required: false, type: boolean}",
+      "      require-copilot-review: {required: false, type: boolean}\n      new-input: {required: false, type: string}",
+    );
+    const found = wrapperTemplateMismatches(template, widened);
+    expect(found).toHaveLength(1);
+    expect(found[0].expected).toContain("'new-input'");
+  });
+
+  test("permissions keys outside the with block never count as passed inputs", () => {
+    // checks/actions sit at the same 6-space indent as the with keys; a
+    // census reading the whole file would call them undeclared inputs.
+    expect(
+      wrapperTemplateMismatches(template, reusable).filter((m) => m.got.includes("'checks'")),
+    ).toEqual([]);
+    // And the census STOPS at the block's end: 6-space keys after a
+    // 4-space boundary line below the with block belong to a different
+    // block and must not count either.
+    const trailing = `${template}    outputs-like:\n      checks: write\n`;
+    expect(
+      wrapperTemplateMismatches(trailing, reusable).filter((m) => m.got.includes("'checks'")),
+    ).toEqual([]);
+  });
+
+  test("a quoted YAML key is refused - it parses identically but evades the bare-key censuses", () => {
+    const mutated = template.replace(
+      "      actions: read",
+      '      actions: read\n      "contents": write',
+    );
+    const found = wrapperTemplateMismatches(mutated, reusable);
+    expect(found.some((m) => m.expected.includes("no leading-quote lines"))).toBe(true);
+  });
+
+  test("a missing with block throws anchor-lost instead of passing vacuously", () => {
+    expect(() => wrapperTemplateMismatches("on:\n  workflow_run:\n", reusable)).toThrow(
+      "anchor lost",
+    );
+  });
+
+  test("the live template and reusable pass through the same path", () => {
+    expect(
+      wrapperTemplateMismatches(
+        readFileSync("templates/base/.github/workflows/all-green.yml.jinja", "utf-8"),
+        readFileSync(".github/workflows/reusable-all-green.yml", "utf-8"),
+      ),
+    ).toEqual([]);
+  });
+});
+
+describe("fleetCiRenderMismatches", () => {
+  const ciTemplate = ["name: CI", "", "jobs:", "  checks:", "  ci:", ""].join("\n");
+  const fragment = ["  info-release:", "    needs: [checks, ci]", ""].join("\n");
+
+  test("the canonical shape passes clean", () => {
+    expect(fleetCiRenderMismatches(ciTemplate, fragment)).toEqual([]);
+  });
+
+  test("a job added to the template ci.yml goes red - it would gate every repo with no roster", () => {
+    const found = fleetCiRenderMismatches(`${ciTemplate}  extra-gate:\n`, fragment);
+    expect(found).toHaveLength(1);
+    expect(found[0].got).toContain("extra-gate");
+  });
+
+  test("a flow-mapping job ('extra: { ... }') is caught in the template census too", () => {
+    const found = fleetCiRenderMismatches(`${ciTemplate}  extra: { uses: ./x.yml }\n`, fragment);
+    expect(found).toHaveLength(1);
+    expect(found[0].got).toContain("extra");
+  });
+
+  test("a job-level name: or if: on a caller job goes red - a rename opts the gate out, a condition skips it open", () => {
+    for (const override of ["    name: info-checks", "    if: false"]) {
+      const found = fleetCiRenderMismatches(`${ciTemplate}${override}\n`, fragment);
+      expect(found.some((m) => m.expected.includes("no job-level name: or if:"))).toBe(true);
+    }
+  });
+
+  test("a name: override on the fragment job goes red - it could strip the id's info- opt-out", () => {
+    const found = fleetCiRenderMismatches(
+      ciTemplate,
+      "  info-release:\n    name: release\n    needs: [checks, ci]\n",
+    );
+    expect(found.some((m) => m.expected.includes("no job-level name:"))).toBe(true);
+  });
+
+  test("quoted job ids are refused in the template and the fragment - they parse identically but evade the censuses", () => {
+    const templateFound = fleetCiRenderMismatches(`${ciTemplate}  "extra":\n`, fragment);
+    expect(templateFound.some((m) => m.expected.includes("no quoted job ids"))).toBe(true);
+    const fragmentFound = fleetCiRenderMismatches(
+      ciTemplate,
+      `${fragment}  "release":\n    needs: [checks, ci]\n`,
+    );
+    expect(fragmentFound.some((m) => m.expected.includes("no quoted job ids"))).toBe(true);
+  });
+
+  test("a deleted caller job goes red the same way", () => {
+    const found = fleetCiRenderMismatches("name: CI\n\njobs:\n  checks:\n", fragment);
+    expect(found).toHaveLength(1);
+    expect(found[0].expected).toContain("'checks' and 'ci'");
+  });
+
+  test("renaming the release job off the info- prefix goes red - a flaky publish must not mark commits ungreen", () => {
+    const found = fleetCiRenderMismatches(ciTemplate, "  release:\n    needs: [checks, ci]\n");
+    expect(found).toHaveLength(1);
+    expect(found[0].expected).toContain("info-*");
+  });
+
+  test("dropping the needs edge goes red - release must run only on top of a whole-run green", () => {
+    const found = fleetCiRenderMismatches(ciTemplate, "  info-release:\n    if: x\n");
+    expect(found).toHaveLength(1);
+    expect(found[0].expected).toContain("needs: [checks, ci]");
+  });
+
+  test("a second fragment job goes red - a decoy could carry the pinned needs line while the release job lost its edge", () => {
+    const found = fleetCiRenderMismatches(
+      ciTemplate,
+      "  info-release:\n    if: x\n  info-decoy:\n    needs: [checks, ci]\n",
+    );
+    expect(found.some((m) => m.expected.includes("exactly one spliced job"))).toBe(true);
+  });
+
+  test("jinja tags and comments are banned in the fragment - a multiline {# #} could hide the needs line while rendering without the edge", () => {
+    for (const spoof of [
+      "  info-release:\n{#\n    needs: [checks, ci]\n#}\n",
+      "  info-release:\n{% if false %}\n    needs: [checks, ci]\n{% endif %}\n",
+    ]) {
+      const found = fleetCiRenderMismatches(ciTemplate, spoof);
+      expect(found.some((m) => m.expected.includes("no jinja tags or comments"))).toBe(true);
+    }
+  });
+
+  test("a fragment with no job id throws anchor-lost instead of passing vacuously", () => {
+    expect(() => fleetCiRenderMismatches(ciTemplate, "    steps: []\n")).toThrow("anchor lost");
+  });
+
+  test("a template with no jobs section throws anchor-lost", () => {
+    expect(() => fleetCiRenderMismatches("name: CI\n", fragment)).toThrow("anchor lost");
   });
 });

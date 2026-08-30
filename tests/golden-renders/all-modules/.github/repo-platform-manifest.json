@@ -18,7 +18,7 @@
     ".github/dependabot.yml": {"class": "managed", "hash": "212523a97905eaa4df2b641f05bb3700ffc13fc83191d9b9f9c047c985f60ca3"},
     ".github/repo-platform-manifest.json": {"class": "managed", "hash": null, "commit": "xxxxxxx"},
     ".github/settings.yml": {"class": "starter"},
-    ".github/workflows/all-green.yml": {"class": "managed", "hash": "4b238e8af4a15944f69272eaa734965fb50e476a1ce1deee035cd2d68a2a569d"},
+    ".github/workflows/all-green.yml": {"class": "managed", "hash": "0b645fe53fe66a7d4a0fa29e1e62f71587c45305ae5e2a1202f210261d713fb2"},
     ".github/workflows/auto-assign.yml": {"class": "managed", "hash": "65399ba1df1598fea8af227f7b9798da8b687c65024c0cb93be53307d1c5c957"},
     ".github/workflows/auto-format.yml": {"class": "starter"},
     ".github/workflows/checks.yml": {"class": "starter"},

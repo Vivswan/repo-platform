@@ -2314,6 +2314,361 @@ export const FLEET_CI_ROSTER = [
   "release-health",
 ];
 
+/** The fleet wrapper TEMPLATE's exact-line pins: the wrapper is the
+ *  fleet's only trigger surface for the verdict, so its shape is pinned
+ *  at the source the way the repo's own workflows are (the
+ *  settings-label-preflight rule is the house pattern) - one loud diff
+ *  here instead of ten drifted sync PRs. Each entry is a FULL line of
+ *  templates/base/.github/workflows/all-green.yml.jinja with its reason. */
+export const WRAPPER_TEMPLATE_PINS: readonly [string, string][] = [
+  ["    workflows: [CI]", "the verdict must fire on CI completions"],
+  ["    types: [completed]", "only finished runs may be judged"],
+  [
+    "  pull_request_review:",
+    "the review-submission wake that replaced the retired copilot poll - without it a pending verdict never hears the review land",
+  ],
+  ["    types: [submitted]", "only submitted reviews re-judge"],
+  ["  workflow_dispatch:", "the unwedge trigger for a lost wake"],
+  [
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal template line under pin
+    "  group: {% raw %}${{ github.workflow }}-${{ github.event.workflow_run.head_sha || github.event.pull_request.head.sha || inputs.sha }}{% endraw %}",
+    "per-sha serialization must cover every wake, the review wake included, or judgments' POSTs can interleave",
+  ],
+  [
+    "  cancel-in-progress: false",
+    "a cancelled verdict between judging and posting is a lost check",
+  ],
+  ["      checks: write", "the check-run POST's grant"],
+  ["      actions: read", "the judgment's run reads"],
+  [
+    "    uses: {{ github_username }}/repo-platform/.github/workflows/reusable-all-green.yml@build",
+    "the shared judgment at the green-gated build ref - any other target is not the fleet's verdict",
+  ],
+  [
+    "      require-copilot-review: {{ (not private) | tojson }}",
+    "the verdict-owned review expectation, visibility-split: Copilot reviews are disabled on private repositories, so only public renders may expect one (an unconditional true would pend every private PR forever) - and this input is the review gate's ONLY home since the ruleset's copilot context was retired",
+  ],
+  [
+    "{# compose:conditional-workflows #}",
+    "the manifest-derived conditional roster anchor (renders the conditional-workflows input in every selection)",
+  ],
+];
+
+/** The wrapper template's shape against the reusable's declared inputs,
+ *  pure over the two texts so the suite can force every branch: the
+ *  exact-line pins above, a ban on the retired copilot-wait-minutes
+ *  input everywhere in the template, and the input census BOTH ways -
+ *  every input the reusable declares is passed (three textually, the
+ *  conditional roster through the compose anchor) and nothing the
+ *  reusable does not declare is passed, so a retired input lingering in
+ *  the wrapper (a workflow_call refuses unknown inputs, failing every
+ *  fleet verdict at once) or a new input silently unpassed both go red
+ *  here. */
+export function wrapperTemplateMismatches(templateText: string, reusableText: string): Mismatch[] {
+  const rel = "templates/base/.github/workflows/all-green.yml.jinja";
+  const mismatches: Mismatch[] = [];
+  const lines = templateText.split("\n");
+  // The SOURCE wrapper is jinja-minimal by construction: beyond
+  // {% raw %}-wrapped expressions and {{ }} substitutions, its only
+  // jinja is the compose anchor (selection-conditional content arrives
+  // through the anchor's GENERATOR into the composed copy, never here).
+  // So ANY other {% tag (if, for, set, macro, block, anything newer) and
+  // ANY jinja comment is banned outright - that is what keeps every pin
+  // below honest: without the ban, a pinned line inside a dead branch, a
+  // macro body, or a {# ... #} comment (single- or multi-line) would
+  // satisfy the textual check while rendering to nothing.
+  for (const [index, line] of lines.entries()) {
+    if (line === "{# compose:conditional-workflows #}") continue;
+    // raw/endraw must pair ON the line: the wrapper's only raw use is
+    // inline expression-wrapping, and a multiline raw block would let
+    // text ride through the ban below unexamined.
+    if (line.split("{% raw %}").length !== line.split("{% endraw %}").length) {
+      mismatches.push({
+        file: `${rel}:${index + 1}`,
+        expected:
+          "raw/endraw paired on one line (inline expression wrapping only - a multiline raw block smuggles text past the jinja ban)",
+        got: line.trim(),
+      });
+      continue;
+    }
+    const stripped = line.replaceAll("{% raw %}", "").replaceAll("{% endraw %}", "");
+    if (stripped.includes("{%") || stripped.includes("{#") || stripped.includes("#}")) {
+      mismatches.push({
+        file: `${rel}:${index + 1}`,
+        expected:
+          "no jinja tags or comments in the wrapper source beyond {% raw %} pairs and the compose anchor (conditional content belongs to the anchor's generator; a tag-wrapped or commented copy would satisfy the textual pins while rendering to nothing)",
+        got: line.trim(),
+      });
+    }
+    // Quoted keys parse identically in YAML but evade every bare-key
+    // census below ('"contents": write' is a grant the regex never
+    // sees), so a line whose content OPENS with a quote is refused -
+    // nothing in this file legitimately starts one.
+    if (/^\s*["']/.test(line)) {
+      mismatches.push({
+        file: `${rel}:${index + 1}`,
+        expected:
+          "no leading-quote lines (a quoted YAML key parses identically but evades the bare-key censuses)",
+        got: line.trim(),
+      });
+    }
+  }
+  // Exactly ONE job, the verdict, and one with: block: the census below
+  // reads the FIRST with:, so a decoy job carrying compliant pins next
+  // to a gutted real job must be unrepresentable.
+  const jobsHeaderAt = lines.indexOf("jobs:");
+  if (jobsHeaderAt === -1) {
+    throw new Error(`${rel}: no jobs: section - anchor lost`);
+  }
+  const jobIds = lines
+    .slice(jobsHeaderAt + 1)
+    .map((line) => /^ {2}([A-Za-z0-9_-]+):(?: |$)/.exec(line)?.[1])
+    .filter((id): id is string => id !== undefined);
+  if (canonical(jobIds) !== canonical(["verdict"])) {
+    mismatches.push({
+      file: rel,
+      expected:
+        "exactly one job, 'verdict' (a second job could carry compliant-looking pins while the real call is gutted)",
+      got: jobIds.join(", ") || "no job ids",
+    });
+  }
+  const withCount = lines.filter((line) => line === "    with:").length;
+  if (withCount !== 1) {
+    mismatches.push({
+      file: rel,
+      expected: "exactly one with: block (the input census below reads the first)",
+      got: `${withCount} with: blocks`,
+    });
+  }
+  // Additive-closed trigger and grant sets: the pins below prove the
+  // required members PRESENT, and these censuses refuse extras - an
+  // added trigger (a push: judging events the verdict never designed
+  // for) or an added grant would ride to every fleet repository
+  // silently. Both blocks are scoped by indent: the on: block's 2-space
+  // keys until the next column-0 key, the permissions block's 6-space
+  // keys until the first non-6-space line.
+  const onAt = lines.indexOf("on:");
+  if (onAt === -1) throw new Error(`${rel}: no on: block - anchor lost`);
+  const triggers: string[] = [];
+  for (const line of lines.slice(onAt + 1)) {
+    if (/^[A-Za-z]/.test(line)) break;
+    const key = /^ {2}([A-Za-z_]+):/.exec(line)?.[1];
+    if (key !== undefined) triggers.push(key);
+  }
+  mismatches.push(
+    ...setMismatch(
+      `${rel} on: triggers`,
+      ["workflow_run", "pull_request_review", "workflow_dispatch"],
+      triggers,
+    ),
+  );
+  const permissionsAt = lines.indexOf("    permissions:");
+  if (permissionsAt === -1) throw new Error(`${rel}: no job permissions block - anchor lost`);
+  const grants: string[] = [];
+  for (const line of lines.slice(permissionsAt + 1)) {
+    // Blanks and comments continue the block in YAML - at ANY indent, a
+    // comment is not content - so a grant hiding behind one must still
+    // be censused; only a real dedent ends the block.
+    if (line.trim() === "" || line.trim().startsWith("#")) continue;
+    const key = /^ {6}([a-z-]+):/.exec(line)?.[1];
+    if (key === undefined) break;
+    grants.push(key);
+  }
+  mismatches.push(...setMismatch(`${rel} verdict permissions`, ["checks", "actions"], grants));
+  for (const [line, why] of WRAPPER_TEMPLATE_PINS) {
+    const count = lines.filter((candidate) => candidate === line).length;
+    if (count !== 1) {
+      mismatches.push({
+        file: rel,
+        expected: `the line ${JSON.stringify(line)} exactly once (${why})`,
+        got:
+          count === 0
+            ? "missing"
+            : `${count} occurrences - the LAST one wins in YAML, so duplicates can silently override`,
+      });
+    }
+  }
+  if (templateText.includes("copilot-wait-minutes")) {
+    mismatches.push({
+      file: rel,
+      expected:
+        "no copilot-wait-minutes anywhere (the input is retired with the poll; a wrapper passing it fails the workflow_call outright, fleet-wide)",
+      got: "a copilot-wait-minutes mention",
+    });
+  }
+  // The census: keys the wrapper passes textually inside the verdict
+  // job's with: block (6-space keys until the block's indent ends; the
+  // column-0 anchor line belongs to the block), plus the anchor's
+  // generated conditional-workflows input, against the reusable's
+  // declared inputs - exact set equality, both directions, duplicates
+  // refused (YAML lets the last duplicate win silently).
+  const withAt = lines.indexOf("    with:");
+  if (withAt === -1) {
+    throw new Error(
+      "templates/base/.github/workflows/all-green.yml.jinja: no with: block - anchor lost",
+    );
+  }
+  const passed: string[] = [];
+  for (const line of lines.slice(withAt + 1)) {
+    if (!/^( {6}|\{[#%])/.test(line) && line.trim() !== "") break;
+    const key = /^ {6}([a-z][a-z-]*):/.exec(line)?.[1];
+    if (key !== undefined) passed.push(key);
+    if (line === "{# compose:conditional-workflows #}") passed.push("conditional-workflows");
+  }
+  const duplicate = passed.find((key, index) => passed.indexOf(key) !== index);
+  if (duplicate !== undefined) {
+    mismatches.push({
+      file: rel,
+      expected: "each with: input passed once (YAML's last duplicate wins silently)",
+      got: `'${duplicate}' is passed more than once`,
+    });
+  }
+  const reusable = asRecord(parseYaml(reusableText), "reusable-all-green.yml");
+  const call = asRecord(asRecord(reusable.on, "reusable on").workflow_call, "workflow_call");
+  const declared = Object.keys(asRecord(call.inputs ?? {}, "workflow_call inputs"));
+  for (const key of new Set(passed)) {
+    if (!declared.includes(key)) {
+      mismatches.push({
+        file: rel,
+        expected: `every passed input declared by reusable-all-green.yml (a workflow_call refuses unknown inputs, failing every fleet verdict at once)`,
+        got: `'${key}' is passed but not declared`,
+      });
+    }
+  }
+  for (const key of declared) {
+    if (!passed.includes(key)) {
+      mismatches.push({
+        file: rel,
+        expected: `the wrapper passing the reusable's '${key}' input (an unpassed input silently rides its default fleet-wide)`,
+        got: "not passed",
+      });
+    }
+  }
+  return mismatches;
+}
+
+/** The rendered fleet CI's gating roster at the SOURCE: the template
+ *  ci.yml.jinja may carry exactly the `checks` and `ci` caller jobs
+ *  (every fleet gate lives inside those two calls; a job added here
+ *  would gate every repo with no roster to make it loud), and the
+ *  release-please fragment's spliced job must keep its `info-` opt-out
+ *  with `needs: [checks, ci]` - renaming it to a gating id would make
+ *  the release pipeline gate the verdict (a flaky publish marking
+ *  commits ungreen), and dropping the needs edge would release from red
+ *  runs. Pure over the two texts for the suite's forcing cases. */
+export function fleetCiRenderMismatches(ciTemplateText: string, fragmentText: string): Mismatch[] {
+  const ciRel = "templates/base/.github/workflows/ci.yml.jinja";
+  const fragmentRel = "templates/release-please/fragments/ci-release-please.jinja";
+  const mismatches: Mismatch[] = [];
+  const jobsAt = ciTemplateText.indexOf("\njobs:\n");
+  if (jobsAt === -1) throw new Error(`${ciRel}: no jobs: section - anchor lost`);
+  const jobIds = [...ciTemplateText.slice(jobsAt).matchAll(/^ {2}([A-Za-z0-9_-]+):(?: |$)/gm)].map(
+    (match) => match[1],
+  );
+  if (canonical(jobIds) !== canonical(["checks", "ci"])) {
+    mismatches.push({
+      file: ciRel,
+      expected:
+        "exactly the 'checks' and 'ci' caller jobs (every fleet gate lives inside those calls; module jobs join through fragments with info- ids, never as new gating jobs here)",
+      got: jobIds.join(", ") || "no job ids",
+    });
+  }
+  // No job-level name: or if: on the caller jobs: the verdict judges
+  // DISPLAY names (a name: info-checks silently opts a caller out) and
+  // reads a skipped job as standing down (an if: fails open at run
+  // time) - the same bans all-green-roster holds over this repo's own
+  // ci.yml.
+  for (const line of ciTemplateText.slice(jobsAt).split("\n")) {
+    if (/^ {4}(name|if):/.test(line)) {
+      mismatches.push({
+        file: ciRel,
+        expected:
+          "no job-level name: or if: on the caller jobs (a rename can opt a gate out of the verdict; a condition skips it and skipped stands down)",
+        got: line.trim(),
+      });
+    }
+    // Quoted job ids parse identically but evade the bare-key census.
+    if (/^ {2}["']/.test(line)) {
+      mismatches.push({
+        file: ciRel,
+        expected: "no quoted job ids (a quoted key parses identically but evades the job census)",
+        got: line.trim(),
+      });
+    }
+  }
+  const fragmentJobs = [...fragmentText.matchAll(/^ {2}([A-Za-z0-9_-]+):(?: |$)/gm)].map(
+    (match) => match[1],
+  );
+  if (fragmentJobs.length === 0) {
+    throw new Error(`${fragmentRel}: no job id - anchor lost`);
+  }
+  // The fragment is jinja-free by design (the composer wraps it in its
+  // module gate; YAML # comments carry its story), so any jinja tag or
+  // comment is banned outright - a multi-line {# ... #} could otherwise
+  // hide the pinned needs line while rendering without the dependency.
+  for (const [index, line] of fragmentText.split("\n").entries()) {
+    if (line.includes("{%") || line.includes("{#") || line.includes("#}")) {
+      mismatches.push({
+        file: `${fragmentRel}:${index + 1}`,
+        expected:
+          "no jinja tags or comments in the fragment (the composer supplies the module gate; a commented copy would satisfy the textual pins while rendering to nothing)",
+        got: line.trim(),
+      });
+    }
+  }
+  // Exactly ONE job, by design: the fragment splices the one release
+  // pipeline caller. The bound is also what makes the needs pin below
+  // structural - with a second job in the fragment, a decoy could carry
+  // the pinned needs line while the release job lost its edge.
+  if (fragmentJobs.length > 1) {
+    mismatches.push({
+      file: fragmentRel,
+      expected:
+        "exactly one spliced job (the release pipeline caller) - a second job could carry the pinned needs line while the release job lost its edge",
+      got: fragmentJobs.join(", "),
+    });
+  }
+  for (const job of fragmentJobs) {
+    if (!job.startsWith("info-")) {
+      mismatches.push({
+        file: fragmentRel,
+        expected: `an info-* job id (the release pipeline depends on the gate and is NOT gated by it - '${job}' would make a flaky publish mark commits ungreen)`,
+        got: `job '${job}'`,
+      });
+    }
+  }
+  // The verdict judges DISPLAY names, so a name: override could strip
+  // the info- opt-out the job id carries (job-level if: stays allowed
+  // here - release only runs on push/dispatch by design).
+  for (const line of fragmentText.split("\n")) {
+    if (/^ {4}name:/.test(line)) {
+      mismatches.push({
+        file: fragmentRel,
+        expected:
+          "no job-level name: (the verdict judges display names - an override could strip the id's info- opt-out and gate the release pipeline)",
+        got: line.trim(),
+      });
+    }
+    // Quoted job ids parse identically but evade the bare-key census.
+    if (/^ {2}["']/.test(line)) {
+      mismatches.push({
+        file: fragmentRel,
+        expected: "no quoted job ids (a quoted key parses identically but evades the job census)",
+        got: line.trim(),
+      });
+    }
+  }
+  if (!fragmentText.split("\n").includes("    needs: [checks, ci]")) {
+    mismatches.push({
+      file: fragmentRel,
+      expected:
+        "the release job carrying exactly 'needs: [checks, ci]' (release runs only on top of a whole-run green; the check run lands too late to gate it)",
+      got: "missing or reshaped",
+    });
+  }
+  return mismatches;
+}
+
 const rules: Rule[] = [
   {
     // The module roster's independently-authored sites, compared against
@@ -3671,6 +4026,32 @@ const rules: Rule[] = [
   },
 
   {
+    // The fleet wrapper template's shape (WRAPPER_TEMPLATE_PINS and
+    // wrapperTemplateMismatches have the model): every fleet repository
+    // renders this file verbatim-ish, so a drift here IS a fleet-wide
+    // drift - pinned at authoring time, one loud diff.
+    name: "all-green-wrapper-template",
+    run: () =>
+      wrapperTemplateMismatches(
+        read("templates/base/.github/workflows/all-green.yml.jinja"),
+        read(".github/workflows/reusable-all-green.yml"),
+      ),
+  },
+
+  {
+    // The rendered fleet CI's gating roster at the source
+    // (fleetCiRenderMismatches has the model): the template ci.yml may
+    // carry exactly the two caller jobs, and the release fragment's job
+    // must keep its info- opt-out and its needs edge.
+    name: "fleet-ci-render-roster",
+    run: () =>
+      fleetCiRenderMismatches(
+        read("templates/base/.github/workflows/ci.yml.jinja"),
+        read("templates/release-please/fragments/ci-release-please.jinja"),
+      ),
+  },
+
+  {
     name: "dependabot-label-tuples",
     run: () => {
       // A toolchain module's dependabot label now has two homes: the
@@ -5007,6 +5388,8 @@ export const RULE_ROSTER = [
   "all-green-roster",
   "fleet-ci-roster",
   "all-green-name",
+  "all-green-wrapper-template",
+  "fleet-ci-render-roster",
   "dependabot-label-tuples",
   "settings-read-pin",
   "self-apply-fact-source",

@@ -27,14 +27,15 @@ rulesets:
   # to main still work. ONE required status check: `all-green`, the check
   # run the workflow_run-triggered all-green.yml verdict creates after
   # judging each completed CI run's jobs plus the declared expected set -
-  # which, fleet-wide, includes Copilot's review: the managed wrapper
-  # passes require-copilot-review: true, so the verdict itself waits for
-  # the copilot-pull-request-reviewer check run at the judged head
-  # (bot-authored PRs stand it down; docs/all-green.md has the model).
-  # The retired second context - requiring Copilot's check run directly
-  # here - was the pre-cutover belt; the verdict owns the expectation
-  # now, and one context means the required-checks list never changes as
-  # expectations evolve.
+  # which, on PUBLIC repos, includes Copilot's review: the managed
+  # wrapper renders require-copilot-review from the repo's visibility
+  # (Copilot reviews are disabled on private repos, so only public
+  # verdicts wait for the copilot-pull-request-reviewer check run at the
+  # judged head; bot-authored PRs stand it down - docs/all-green.md has
+  # the model). The retired second context - requiring Copilot's check
+  # run directly here - was the pre-cutover belt; the verdict owns the
+  # expectation now, and one context means the required-checks list
+  # never changes as expectations evolve.
   #
   # The entry pins integration_id 15368 (the GitHub Actions app, which
   # creates the verdict's check run): the pin stops a non-Actions app or
@@ -80,22 +81,6 @@ rulesets:
           # settings).
           allowed_merge_methods:
             - squash
-      # Automatically request Copilot code review on PRs to main, including
-      # on each new push and on draft PRs. Each review run creates the
-      # completed check run the all-green VERDICT waits for (the managed
-      # wrapper's require-copilot-review expectation), and its review
-      # SUBMISSION is the wake that re-judges the sha - so this rule is
-      # what keeps the merge box moving on its own. Verified edges:
-      # bot-authored PRs (Dependabot) and new pushes to DRAFT PRs get no
-      # automatic run despite this rule - a bot PR's verdict resolves
-      # once any review is submitted after CI completes (the verdict
-      # stands its expectation down for bot AUTHORS), and a draft needs
-      # the review requested from the reviewers panel (one click; correct
-      # semantics, since nothing merges unreviewed).
-      - type: copilot_code_review
-        parameters:
-          review_on_push: true
-          review_draft_pull_requests: true
     bypass_actors:
       - actor_id: 5
         actor_type: RepositoryRole

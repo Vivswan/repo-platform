@@ -450,9 +450,11 @@ grep -qF -- "repo-platform/.github/workflows/reusable-all-green.yml@build" .gith
 # The verdict-cutover wrapper shape must arrive with the update: the
 # verdict-owned Copilot expectation (the ruleset carries no separate
 # copilot context any more, so a wrapper without this line un-gates the
-# review), the review-submission wake that replaced the retired poll,
-# the manifest-derived conditional roster, and NO retired wait input
-# (the reusable no longer declares copilot-wait-minutes; a wrapper still
+# review; VISIBILITY-SPLIT - this fixture is public, so it renders true,
+# and the flip leg below proves the private rendering), the
+# review-submission wake that replaced the retired poll, the
+# manifest-derived conditional roster, and NO retired wait input (the
+# reusable no longer declares copilot-wait-minutes; a wrapper still
 # passing it would fail the workflow_call outright).
 grep -qxF -- "      require-copilot-review: true" .github/workflows/all-green.yml \
   || fail "the updated all-green.yml does not pass require-copilot-review: true (the review gate's only home since the cutover)"
@@ -700,6 +702,13 @@ cd "$VIS"
 # SECURITY.md is visibility-independent since the ungating: it must
 # survive the flip.
 test -f SECURITY.md || fail "SECURITY.md did not survive the flip to private"
+# The wrapper's Copilot expectation is visibility-split: Copilot reviews
+# are disabled on private repositories, so the flipped render must pass
+# false - a true here would leave every PR's verdict pending on a
+# reviewer that can never come (the public fixture's `true` is asserted
+# in the main leg above).
+grep -qxF -- "      require-copilot-review: false" .github/workflows/all-green.yml \
+  || fail "the flipped all-green.yml does not render require-copilot-review: false (private repos get no Copilot reviews)"
 # The public-only base files and gates must retire on the flip; the
 # license is visibility-independent and (without custom-license)
 # template-managed, so LICENSE.md must converge to the fleet license -

@@ -81,10 +81,12 @@ absent "check-typography" "$wf/ci.yml"
 # review-submission wake, the dispatch unwedge input, the grants the
 # judgment needs, the anchor job pin that makes a disarmed fleet-ci
 # caller fail the verdict, the verdict-owned Copilot review expectation
-# (the ruleset carries no separate context since the cutover), and the
-# manifest-derived conditional roster ('[]' - no module declares one).
-# The retired copilot-wait-minutes input must never render: the reusable
-# no longer declares it, and a workflow_call refuses unknown inputs.
+# (the ruleset carries no separate context since the cutover; VISIBILITY
+# SPLIT - Copilot reviews are disabled on private repos, so only public
+# renders expect one), and the manifest-derived conditional roster
+# ('[]' - no module declares one). The retired copilot-wait-minutes
+# input must never render: the reusable no longer declares it, and a
+# workflow_call refuses unknown inputs.
 test -f "$wf/all-green.yml"
 present 'workflows: [CI]' "$wf/all-green.yml"
 present_line "    types: [completed]" "$wf/all-green.yml"
@@ -95,7 +97,11 @@ present "reusable-all-green.yml@build" "$wf/all-green.yml"
 present_line "      checks: write" "$wf/all-green.yml"
 present_line "      actions: read" "$wf/all-green.yml"
 present_line "      require-job: ci / validate-template" "$wf/all-green.yml"
-present_line "      require-copilot-review: true" "$wf/all-green.yml"
+if [ "$PRIVATE" = "true" ]; then
+  present_line "      require-copilot-review: false" "$wf/all-green.yml"
+else
+  present_line "      require-copilot-review: true" "$wf/all-green.yml"
+fi
 present_line "      conditional-workflows: '[]'" "$wf/all-green.yml"
 absent "copilot-wait-minutes" "$wf/all-green.yml"
 
@@ -425,6 +431,15 @@ if has settings-sync; then
   absent "copilot-pull-request-reviewer" "$merged_out"
   present "integration_id: 15368" "$merged_out"
   present "required_review_thread_resolution: true" "$merged_out"
+  # The copilot_code_review auto-request rule is PUBLIC-only (the fleet
+  # public overlay carries it): Copilot reviews are disabled on private
+  # repos, so requesting one there is a request nothing can answer -
+  # matching the wrapper's visibility-split require-copilot-review.
+  if [ "$PRIVATE" != "true" ]; then
+    present "type: copilot_code_review" "$merged_out"
+  else
+    absent "copilot_code_review" "$merged_out"
+  fi
   # The main ruleset's code_scanning rule follows enable_codeql (public
   # AND an analyzable toolchain): GitHub 422s that rule on a private
   # personal repo, so a private assembly must never emit it.
