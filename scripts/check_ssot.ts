@@ -23,6 +23,13 @@
 
 import { existsSync, lstatSync, readdirSync, readFileSync, readlinkSync } from "node:fs";
 import { join, resolve } from "node:path";
+import {
+  type CallExpression,
+  type Expression,
+  Node,
+  type PropertyAccessExpression,
+  SyntaxKind,
+} from "ts-morph";
 import { parse as parseYaml } from "yaml";
 import { EXCLUDED_DIRS as EXCLUDED_ACTION_DIRS } from "../.github/scripts/build-branches/branch_tree.ts";
 import {
@@ -49,8 +56,12 @@ import {
   constStringValue,
   intersectionCarriesType,
   literalMatches,
+  parseTs,
   propertyAssignmentCarries,
+  rootIdentifier,
+  syntaxErrorCount,
   templateCarries,
+  unwrapExpression,
   wrappedArgvLabels,
 } from "./ts_extract.ts";
 
@@ -1937,169 +1948,200 @@ export function stripComments(source: string): string {
   return scanSource(source).stripped;
 }
 
-/** The argument text between a call's balanced parentheses, tracking
- *  string/template quoting so brackets inside literals do not count
- *  (comments are already stripped by the caller). Throws on a call whose
- *  end it cannot see - skipping such a site would pass vacuously.
- *  Backticks are tracked as flat quotes: a template INTERPOLATION's code
- *  is skipped as text, and a NESTED template's inner backtick closes the
- *  outer one early, so an unbalanced bracket inside such an interpolation
- *  makes this throw the unbalanced-call error on valid code (reproduced;
- *  not in the tree) - loud and self-describing, never a silent skip. */
-function callArguments(source: string, open: number, where: string): string {
-  let depth = 0;
-  let quote: string | null = null;
-  for (let i = open; i < source.length; i++) {
-    const ch = source[i];
-    if (quote !== null) {
-      if (ch === "\\") i++;
-      else if (ch === quote) quote = null;
-      continue;
-    }
-    if (ch === '"' || ch === "'" || ch === "`") quote = ch;
-    else if (ch === "(" || ch === "[" || ch === "{") depth++;
-    else if (ch === ")" || ch === "]" || ch === "}") {
-      depth--;
-      if (depth === 0) return source.slice(open + 1, i);
-    }
-  }
-  throw new Error(`${where}: unbalanced spawnSync call - the scanner cannot see its end`);
-}
-
-/** The options argument's text: everything after the args' first
- *  top-level comma, or null when the call passes the command alone. */
-function optionsArgument(args: string): string | null {
-  let depth = 0;
-  let quote: string | null = null;
-  for (let i = 0; i < args.length; i++) {
-    const ch = args[i];
-    if (quote !== null) {
-      if (ch === "\\") i++;
-      else if (ch === quote) quote = null;
-      continue;
-    }
-    if (ch === '"' || ch === "'" || ch === "`") quote = ch;
-    else if (ch === "(" || ch === "[" || ch === "{") depth++;
-    else if (ch === ")" || ch === "]" || ch === "}") depth--;
-    else if (ch === "," && depth === 0) {
-      const rest = args.slice(i + 1).trim();
-      return rest === "" ? null : rest;
-    }
-  }
-  return null;
-}
-
-/** Depth-0 comma split of a brackets-stripped body, string-aware; the
- *  shared grammar under object-property and array-slot reading. */
-function splitTopLevel(body: string): string[] {
-  const parts: string[] = [];
-  let depth = 0;
-  let quote: string | null = null;
-  let start = 0;
-  for (let i = 0; i < body.length; i++) {
-    const ch = body[i];
-    if (quote !== null) {
-      if (ch === "\\") i++;
-      else if (ch === quote) quote = null;
-      continue;
-    }
-    if (ch === '"' || ch === "'" || ch === "`") quote = ch;
-    else if (ch === "(" || ch === "[" || ch === "{") depth++;
-    else if (ch === ")" || ch === "]" || ch === "}") depth--;
-    else if (ch === "," && depth === 0) {
-      parts.push(body.slice(start, i));
-      start = i + 1;
-    }
-  }
-  parts.push(body.slice(start));
-  return parts;
+/** The single expression `text` parses to (wrapping parentheses
+ *  unwrapped), or null when it is not a lone, clean expression - the
+ *  shared entry for reading option and stdio literals structurally. */
+function parsedExpression(text: string): Expression | null {
+  const wrapped = `(${text});`;
+  if (syntaxErrorCount(wrapped) > 0) return null; // recovered nodes are unauditable
+  const statements = parseTs(wrapped).getStatements();
+  const statement = statements.length === 1 ? statements[0] : undefined;
+  if (statement === undefined || !Node.isExpressionStatement(statement)) return null;
+  return unwrapExpression(statement.getExpression());
 }
 
 /** The top-level properties of an options OBJECT LITERAL: property name
- *  -> raw value text (a shorthand property maps to its own name). Null
- *  when the text is not an auditable literal - a variable, a call
- *  result, a top-level spread, a computed or unreadable key - which the
- *  caller treats as a hazard, so the unreadable shapes fail closed. */
+ *  -> initializer text (a shorthand property maps to its own name),
+ *  read off the parsed literal, so a comma or colon inside a nested
+ *  value or a string can never split or fake a property. Null when the
+ *  text is not an auditable literal - a variable, a call result, a
+ *  top-level spread, a method, a computed or non-identifier-shaped key
+ *  - which the caller treats as a hazard, so the unreadable shapes fail
+ *  closed. */
 export function topLevelProperties(options: string): Map<string, string> | null {
   const text = options.trim();
   if (!text.startsWith("{") || !text.endsWith("}")) return null;
+  const literal = parsedExpression(text);
+  if (literal === null || !Node.isObjectLiteralExpression(literal)) return null;
   const props = new Map<string, string>();
-  for (const part of splitTopLevel(text.slice(1, -1))) {
-    const trimmed = part.trim();
-    if (trimmed === "") continue;
-    const keyed = /^(["']?)([A-Za-z_$][\w$]*)\1\s*:\s*([\s\S]*)$/.exec(trimmed);
-    if (keyed) {
-      props.set(keyed[2], keyed[3].trim());
+  for (const property of literal.getProperties()) {
+    if (Node.isShorthandPropertyAssignment(property)) {
+      props.set(property.getName(), property.getName());
       continue;
     }
-    if (/^[A-Za-z_$][\w$]*$/.test(trimmed)) {
-      props.set(trimmed, trimmed); // shorthand property
-      continue;
+    if (!Node.isPropertyAssignment(property)) return null; // a spread, a method - unauditable
+    const nameNode = property.getNameNode();
+    const name = Node.isStringLiteral(nameNode) ? nameNode.getLiteralValue() : nameNode.getText();
+    if (
+      !(Node.isIdentifier(nameNode) || Node.isStringLiteral(nameNode)) ||
+      !/^[A-Za-z_$][\w$]*$/.test(name)
+    ) {
+      return null; // a computed or exotic key - unauditable
     }
-    return null; // a spread, a computed key, a method - unauditable
+    const value = property.getInitializer()?.getText().trim();
+    if (value === undefined || value === "") return null;
+    props.set(name, value);
   }
   return props;
 }
 
-// The Bun-global receiver, shared by the sync and async spawn scans and
-// hardened against decorative spellings: a left token boundary (fakeBun
-// is not Bun), optional wrapping parentheses, and the TS non-null `!`
-// all read as the same receiver, so a call cannot exit either scan by
-// re-punctuating its callee. Inner whitespace is admitted only AFTER a
-// real `(` (a bare leading \s* would let the match start on the
-// preceding newline and shift site line numbers). A stray unbalanced
-// parenthesis matching `\(`/`\)?` independently over-matches toward a
-// phantom site - the loud direction, never a silent skip.
-const BUN_RECEIVER = String.raw`(?<![\w$])(?:\(\s*)?Bun\s*\)?\s*!?\s*\??\.\s*`;
+/** The slot texts of an ARRAY literal (an elided slot reads as empty),
+ *  or null when `text` is not one - stdio's per-stream slots. */
+function arrayLiteralSlots(text: string): string[] | null {
+  const trimmed = text.trim();
+  if (!trimmed.startsWith("[") || !trimmed.endsWith("]")) return null;
+  const literal = parsedExpression(trimmed);
+  if (literal === null || !Node.isArrayLiteralExpression(literal)) return null;
+  return literal
+    .getElements()
+    .map((element) => (Node.isOmittedExpression(element) ? "" : element.getText().trim()));
+}
 
-/** A spawnSync occurrence in comment-stripped source: a direct
- *  `Bun.spawnSync` call with its options text, or any other reference -
- *  an alias, a destructure pulling spawnSync off Bun, bracket access - a
- *  sum, so the rule cannot forget to judge the non-call shapes. */
+// The Bun-global receiver, shared by the sync and async spawn scans and
+// hardened against decorative spellings: parentheses, the TS non-null
+// `!`, and type-only wrappers unwrap to the same receiver, and a
+// property access ENDING in `.Bun` (globalThis.Bun, like the old scan's
+// token boundary) counts too - over-matching someone else's `.Bun` is
+// the loud direction. The recorded residual: an alias of Bun itself
+// (`const b = Bun; b.spawnSync(...)`) - nothing in house style writes
+// that, and the proc.ts helpers are the sanctioned route.
+function isBunReceiver(expression: Expression): boolean {
+  const node = unwrapExpression(expression);
+  if (Node.isIdentifier(node)) return node.getText() === "Bun";
+  return Node.isPropertyAccessExpression(node) && node.getName() === "Bun";
+}
+
+/** Whether a property-name text names spawnSync as a whole word - the
+ *  destructure scans' test, so a computed spelling (["spawnSync"], or a
+ *  variable named spawnSync) fails closed exactly like the plain key. */
+function namesSpawnSync(nameText: string): boolean {
+  return /(^|[^\w$])spawnSync([^\w$]|$)/.test(nameText) || nameText === "spawnSync";
+}
+
+/** The CallExpression `node` is the callee of (parentheses and non-null
+ *  wrappers between them unwrapped), or null when the access is not
+ *  directly called - `f(Bun.spawnSync)` passes it as a value, and
+ *  `Bun.spawnSync.call(...)` calls a DIFFERENT member off it. */
+function enclosingCall(node: Node): CallExpression | null {
+  let current: Node = node;
+  for (;;) {
+    const parent = current.getParent();
+    if (parent === undefined) return null;
+    if (Node.isParenthesizedExpression(parent) || Node.isNonNullExpression(parent)) {
+      current = parent;
+      continue;
+    }
+    return Node.isCallExpression(parent) && parent.getExpression() === current ? parent : null;
+  }
+}
+
+/** A spawnSync occurrence in parsed source: a direct `Bun.spawnSync`
+ *  call with its options text, or any other reference - an alias, a
+ *  destructure pulling spawnSync off Bun, bracket access - a sum, so
+ *  the rule cannot forget to judge the non-call shapes. */
 export type SpawnSyncSite =
   | { line: number; kind: "call"; options: string | null }
   | { line: number; kind: "reference" };
 
-/** Every spawnSync site in a source file, comments stripped and string
- *  contents masked first (a mention in a comment, a string, or a regex
- *  body is not a site; a template INTERPOLATION is; and a `//` inside a
- *  string can no longer hide a same-line call). A direct call - plain or
- *  optional-chained - carries its options argument's text: the second
- *  argument, or the whole first argument for the object-form overload
- *  (whose options ride beside `cmd`). Everything else the scan can see
- *  is a reference - a bare `Bun.spawnSync` (an alias binding, `.call`),
- *  a destructure pulling spawnSync off Bun, bracket access - because a
- *  textual rule cannot follow those to their call shapes, so the rule
- *  fails them closed. The residual: an alias of `Bun` itself
- *  (`const b = Bun; b.spawnSync(...)`) escapes a text scan; nothing in
- *  house style writes that, and the proc.ts helpers are the sanctioned
- *  route. */
+/** The options argument's text for a direct spawnSync call: the second
+ *  argument, the whole argument list for the object-form overload
+ *  (whose options ride beside `cmd`; extra arguments keep riding along
+ *  so topLevelProperties refuses the unauditable shape), or null when
+ *  the call passes the command alone. */
+function spawnOptionsText(call: CallExpression): string | null {
+  const args = call.getArguments();
+  if (args.length === 0) return null;
+  if (Node.isObjectLiteralExpression(args[0])) {
+    return args.map((argument) => argument.getText()).join(", ");
+  }
+  if (args.length === 1) return null;
+  return args
+    .slice(1)
+    .map((argument) => argument.getText())
+    .join(", ");
+}
+
+/** Every spawnSync site in a source file, read off the AST (a mention
+ *  in a comment, a string, or a regex body is not a node; a template
+ *  INTERPOLATION is code and is). A direct call - plain, optional, or
+ *  re-punctuated - carries its options argument's text. Everything else
+ *  is a reference the rule fails closed: a bare `Bun.spawnSync` (an
+ *  alias binding, `.call`), a destructure pulling spawnSync off Bun (a
+ *  binding pattern or an assignment target), and ANY computed access
+ *  directly on Bun - the property expression can spell spawnSync any
+ *  way it likes, so every such access is unauditable. */
 export function spawnSyncSites(source: string, where: string): SpawnSyncSite[] {
-  const { stripped, masked } = scanSource(source);
-  const lineAt = (index: number) => masked.slice(0, index).split("\n").length;
+  // A file the parser had to RECOVER must not be judged: a truncated
+  // call's recovered options can read as a benign shape, so the scan
+  // throws instead of passing vacuously (the old lexer's contract).
+  if (syntaxErrorCount(source) > 0) {
+    throw new Error(`${where}: source has syntax errors - the spawn scan cannot audit it`);
+  }
   const sites: SpawnSyncSite[] = [];
-  for (const match of masked.matchAll(new RegExp(`${BUN_RECEIVER}spawnSync\\b`, "g"))) {
-    const line = lineAt(match.index);
-    const paren = /^\s*(?:\?\.\s*)?\(/.exec(masked.slice(match.index + match[0].length));
-    if (!paren) {
-      sites.push({ line, kind: "reference" });
+  for (const node of parseTs(source).forEachDescendantAsArray()) {
+    if (
+      Node.isPropertyAccessExpression(node) &&
+      node.getName() === "spawnSync" &&
+      isBunReceiver(node.getExpression())
+    ) {
+      const line = node.getStartLineNumber();
+      const call = enclosingCall(node);
+      if (call === null) sites.push({ line, kind: "reference" });
+      else sites.push({ line, kind: "call", options: spawnOptionsText(call) });
       continue;
     }
-    const open = match.index + match[0].length + paren[0].length - 1;
-    const args = callArguments(stripped, open, `${where}:${line}`);
-    const options = args.trim().startsWith("{") ? args : optionsArgument(args);
-    sites.push({ line, kind: "call", options });
-  }
-  // The indirections a text scan can still see, matched on the masked
-  // view so a token inside a string cannot fake them: a destructure
-  // pulling spawnSync off Bun, and ANY computed access directly on Bun -
-  // the property expression can spell spawnSync any way it likes
-  // (a masked string, a variable, a concat), so every such access is
-  // unauditable and fails closed.
-  const indirections = [/\{[^{}]*\bspawnSync\b[^{}]*\}\s*=\s*Bun\b/g, /\bBun\s*(?:\?\.)?\s*\[/g];
-  for (const pattern of indirections) {
-    for (const match of masked.matchAll(pattern)) {
-      sites.push({ line: lineAt(match.index), kind: "reference" });
+    if (Node.isElementAccessExpression(node) && isBunReceiver(node.getExpression())) {
+      sites.push({ line: node.getStartLineNumber(), kind: "reference" });
+      continue;
+    }
+    // The destructure shapes: `const { spawnSync } = Bun` (a binding
+    // pattern, parameter defaults included) and `({ spawnSync } = Bun)`
+    // (an assignment target). The initializer's ROOT identifier is the
+    // test, so `= Bun.anything` fails closed too.
+    if (Node.isObjectBindingPattern(node)) {
+      const owner = node.getParent();
+      const initializer =
+        Node.isVariableDeclaration(owner) || Node.isParameterDeclaration(owner)
+          ? owner.getInitializer()
+          : undefined;
+      const pulls = node
+        .getElements()
+        .some((element) =>
+          namesSpawnSync((element.getPropertyNameNode() ?? element.getNameNode()).getText()),
+        );
+      if (pulls && initializer !== undefined && rootIdentifier(initializer) === "Bun") {
+        sites.push({ line: node.getStartLineNumber(), kind: "reference" });
+      }
+      continue;
+    }
+    if (
+      Node.isBinaryExpression(node) &&
+      node.getOperatorToken().getKind() === SyntaxKind.EqualsToken
+    ) {
+      const left = unwrapExpression(node.getLeft());
+      const pulls =
+        Node.isObjectLiteralExpression(left) &&
+        left
+          .getProperties()
+          .some(
+            (property) =>
+              (Node.isShorthandPropertyAssignment(property) ||
+                Node.isPropertyAssignment(property)) &&
+              namesSpawnSync(property.getNameNode().getText()),
+          );
+      if (pulls && rootIdentifier(node.getRight()) === "Bun") {
+        sites.push({ line: node.getStartLineNumber(), kind: "reference" });
+      }
     }
   }
   return sites.sort((a, b) => a.line - b.line);
@@ -2164,10 +2206,7 @@ export function spawnSyncHazard(options: string | null): string | null {
   // named constant) is trusted by its key, like other variable values.
   const stdio = props.get("stdio");
   const stdioTrimmed = stdio?.trim();
-  const slots =
-    stdioTrimmed !== undefined && stdioTrimmed.startsWith("[") && stdioTrimmed.endsWith("]")
-      ? splitTopLevel(stdioTrimmed.slice(1, -1)).map((slot) => slot.trim())
-      : null;
+  const slots = stdioTrimmed === undefined ? null : arrayLiteralSlots(stdioTrimmed);
   const shaped = (stream: "stdout" | "stderr", slot: number) => {
     const viaStdio = slots !== null ? slots[slot] : stdioTrimmed;
     return !unset(viaStdio) || !unset(props.get(stream));
@@ -2204,17 +2243,25 @@ export const ASYNC_SPAWN_FILES: Record<string, string> = {
 };
 
 /** The exact-set judgment for one file's async Bun.spawn mentions
- *  (matched on the masked view with the hardened BUN_RECEIVER, so
- *  comments and strings never count, `spawn\b` cannot match inside
+ *  (property accesses on the Bun receiver, read off the AST, so
+ *  comments and strings never count, `spawn` cannot match inside
  *  spawnSync, and a re-punctuated callee - `(Bun).spawn`, `Bun!.spawn`
  *  - is still a site). An unenumerated file with any site fails per
  *  site; an enumerated file with none left is a stale entry - the set
  *  stays exact in both directions. */
 export function asyncSpawnMismatches(rel: string, source: string, enumerated: boolean): Mismatch[] {
-  const masked = scanSource(source).masked;
-  const lines = [...masked.matchAll(new RegExp(`${BUN_RECEIVER}spawn\\b`, "g"))].map(
-    (match) => masked.slice(0, match.index).split("\n").length,
-  );
+  if (syntaxErrorCount(source) > 0) {
+    throw new Error(`${rel}: source has syntax errors - the spawn scan cannot audit it`);
+  }
+  const lines = parseTs(source)
+    .forEachDescendantAsArray()
+    .filter(
+      (node): node is PropertyAccessExpression =>
+        Node.isPropertyAccessExpression(node) &&
+        node.getName() === "spawn" &&
+        isBunReceiver(node.getExpression()),
+    )
+    .map((node) => node.getStartLineNumber());
   if (!enumerated) {
     return lines.map((line) => ({
       file: `${rel}:${line}`,

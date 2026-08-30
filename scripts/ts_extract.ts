@@ -38,11 +38,30 @@ function anchorLost(where: string, what: string, detail: string): never {
   throw new Error(`${where}: anchor for ${what} not found (${detail})`);
 }
 
-/** An expression with decorative wrappers removed - parentheses and the
- *  TS non-null `!` - so a re-punctuated spelling reads as its subject. */
+/** Syntactic (parse-level) diagnostics count for `source`. The guard
+ *  scans refuse to judge a file the parser had to RECOVER: recovered
+ *  nodes can read as benign shapes (a truncated call whose options look
+ *  complete), so judging them would fail open. */
+export function syntaxErrorCount(source: string): number {
+  const compilerNode = parseTs(source).compilerNode as {
+    parseDiagnostics?: readonly unknown[];
+  };
+  return compilerNode.parseDiagnostics?.length ?? 0;
+}
+
+/** An expression with decorative wrappers removed - parentheses, the TS
+ *  non-null `!`, and the type-only wrappers (`as`, `satisfies`, angle
+ *  assertions), none of which change what runs - so a re-punctuated or
+ *  type-dressed spelling reads as its subject. */
 export function unwrapExpression(expression: Expression): Expression {
   let node = expression;
-  while (Node.isParenthesizedExpression(node) || Node.isNonNullExpression(node)) {
+  while (
+    Node.isParenthesizedExpression(node) ||
+    Node.isNonNullExpression(node) ||
+    Node.isAsExpression(node) ||
+    Node.isSatisfiesExpression(node) ||
+    Node.isTypeAssertion(node)
+  ) {
     node = node.getExpression();
   }
   return node;

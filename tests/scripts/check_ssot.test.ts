@@ -1229,8 +1229,24 @@ describe("spawnSyncSites", () => {
     expect(site.kind === "call" && site.options).toContain("timeout: DEFAULT_HANG_BOUND_MS");
   });
 
-  test("a call the scanner cannot see the end of throws instead of passing vacuously", () => {
-    expect(() => spawnSyncSites("Bun.spawnSync([cmd", "f")).toThrow("unbalanced");
+  test("a source the parser must recover throws instead of judging recovered shapes", () => {
+    // A truncated call's recovered nodes can read as benign (an intact
+    // options object before the missing paren), so the scan refuses the
+    // whole file - the old lexer's loud contract, kept.
+    expect(() => spawnSyncSites("Bun.spawnSync([cmd", "f")).toThrow("syntax errors");
+    expect(() => spawnSyncSites("Bun.spawnSync(cmd, { timeout: 5 }", "f")).toThrow("syntax errors");
+  });
+
+  test("a globalThis-qualified receiver is still Bun; type-dressed destructures still fail closed", () => {
+    expect(spawnSyncSites("globalThis.Bun.spawnSync(cmd);", "f")).toEqual([
+      { line: 1, kind: "call", options: null },
+    ]);
+    expect(spawnSyncSites("const { spawnSync: s } = Bun as typeof Bun;\ns(cmd);", "f")).toEqual([
+      { line: 1, kind: "reference" },
+    ]);
+    expect(spawnSyncSites('const { ["spawnSync"]: s } = Bun;', "f")).toEqual([
+      { line: 1, kind: "reference" },
+    ]);
   });
 });
 
@@ -1946,9 +1962,12 @@ describe("spawnSyncHazard", () => {
   });
 
   test("every numeric spelling of zero is no bound (reviewer's probe)", () => {
-    for (const zero of ["0.0", "0x0", "-0", "0e0", "+0", "0_0"]) {
+    for (const zero of ["0.0", "0x0", "-0", "0e0", "+0"]) {
       expect(spawnSyncHazard(`{ timeout: ${zero} }`)).toContain("not a provable bound");
     }
+    // `0_0` is not a legal numeric literal (a separator after a leading
+    // zero); the parser refuses it, so it fails closed as unauditable.
+    expect(spawnSyncHazard("{ timeout: 0_0 }")).toContain("cannot audit");
     expect(spawnSyncHazard("{ timeout: 100 }")).toBeNull();
   });
 
