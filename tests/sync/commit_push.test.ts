@@ -20,6 +20,7 @@ import { capture } from "../../.github/scripts/shared/proc.ts";
 import {
   ALL_GREEN_BOOTSTRAP_NAME,
   REFERENCED_LABELS_NAME,
+  RELEASE_LEG_MOVE_NAME,
 } from "../../.github/scripts/sync/section_files.ts";
 
 const SCRIPT = join(import.meta.dir, "../../.github/scripts/sync/commit_push.ts");
@@ -73,6 +74,7 @@ case "$*" in
     if [ "$STUB_MODE" = "withhold-allgreen" ]; then echo ".github/workflows/all-green.yml"; fi
     if [ "$STUB_MODE" = "withhold-other" ]; then echo ".github/workflows/ci.yml"; fi
     if [ "$STUB_MODE" = "withhold-restore" ]; then echo ".github/workflows/ci.yml"; fi
+    if [ "$STUB_MODE" = "withhold-unrelated" ]; then echo ".github/workflows/checks.yml"; fi
     exit 0 ;;
   *" checkout "*)
     # The withhold-restore mode makes the workflow-dir restore OBSERVABLE:
@@ -268,6 +270,23 @@ describe("commit_push Workflows-scope withhold reconciliation", () => {
       ".github/workflows/ci.yml",
     );
     expect(readFileSync(join(result.runnerTemp, ALL_GREEN_BOOTSTRAP_NAME), "utf-8")).toBe(NOTE);
+  });
+
+  test("withholding EITHER moved-file voids the release-leg-move note; an unrelated withhold leaves it", () => {
+    // The note claims ci.yml drops info-release AND all-green.yml gains
+    // the leg - a withhold of either file makes the claim false, so both
+    // arms clear it, and a withhold touching neither must not.
+    const MOVE_NOTE =
+      "> [!NOTE]\n> RELEASE HOME MOVE: the leg arms on the first post-merge push.\n";
+    for (const [mode, expected] of [
+      ["withhold-allgreen", ""],
+      ["withhold-other", ""],
+      ["withhold-unrelated", MOVE_NOTE],
+    ] as const) {
+      const result = runCommitPush(mode, "false", { [RELEASE_LEG_MOVE_NAME]: MOVE_NOTE });
+      expect(result.exitCode).toBe(0);
+      expect(readFileSync(join(result.runnerTemp, RELEASE_LEG_MOVE_NAME), "utf-8")).toBe(expected);
+    }
   });
 
   test("the withhold overwrites a stale referenced-labels report (the recompute runs post-restore)", () => {
