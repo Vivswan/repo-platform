@@ -24,14 +24,16 @@
 #   10. the conditional completed success      -> success
 #   11. roster names a workflow with no run    -> PENDING, never green
 #   12. a conditional concluded failure        -> failure naming it
-#   13. Copilot required, absent, human PR     -> PENDING naming the unwedge,
-#       through the bounded wait's timeout (the polls actually happen)
-#   14. Copilot lands DURING the bounded wait  -> success
-#   15. bot PR stands the Copilot demand down  -> success, no check-run read
+#   13. Copilot required, absent, author UNKNOWN (a workflow_run wake
+#       carries no PR author) -> PENDING immediately, naming the review
+#       wake and the unwedge - and the sleep stub proves no poll happens
+#   14. a review wake at a green sha where Copilot's check landed ->
+#       success (the event-driven replacement for the retired poll)
+#   15. a review wake on a bot-AUTHORED PR, no Copilot check -> success
+#       with no check-run read (the stand-down keys on the PR author)
 #   16. Copilot's check concluded failure      -> failure naming it
 #   17. push event owes neither conditionals nor Copilot -> success, no reads
-#   18. conditional missing AND Copilot missing -> PENDING with NO wait
-#       (the bounded wait is for Copilot as the SOLE gap only)
+#   18. conditional missing AND Copilot missing -> PENDING naming both
 #   19. the registry maps the name to two paths -> failure (ambiguous name),
 #       even though the claimant that ran succeeded
 #   20. two paths under the name among the runs -> failure, same rule
@@ -40,8 +42,8 @@
 #       vouching for re-runs on main) - with declarations it REFUSES (below)
 #   22. wrong-app / app-less copilot look-alikes -> PENDING (the app
 #       filter is load-bearing, not just its TS twin)
-#   23. a conditional goes RED during the copilot wait -> failure (the
-#       post-wait re-read, not the pre-wait snapshot, decides)
+#   23. a review wake on a HUMAN-authored PR, no Copilot check ->
+#       PENDING (a known-human author arms exactly like an unknown one)
 #   24. the sole run comes from a path other than the registered owner
 #       -> failure (the decoy fail-open: both cardinality checks pass)
 #   25. the registry does not know the rostered name -> failure, even
@@ -49,6 +51,25 @@
 #   26. an empty registry -> failure, same rule
 #   27. the unknown rostered name with NO runs at the sha -> failure,
 #       never PENDING (identity precedes the no-candidate branch)
+#   28. a review wake with NO CI run at the head yet -> quiet stand-down
+#       (exit 0, NO POST - the CI completion judges later, and a red run
+#       per review would be pure noise)
+#   29. a review wake whose PR head lives in a FORK -> quiet stand-down
+#       with no reads at all (fork review wakes carry a read-only token)
+#   30. a review wake with the NEWEST run still in flight next to an
+#       older completed green -> quiet stand-down, never a stale green
+#   31. a review wake beside a same-sha completed PUSH run holding the
+#       highest id -> the PR-event run is judged (PENDING on the owed
+#       review), never the push run whose semantics owe nothing
+#
+# Retired WITH the poll (re-judgment went event-driven; a submitted
+# review is its own wake): the lands-during-the-bounded-wait and
+# conditional-goes-red-during-the-wait scenarios pinned the wait loop's
+# post-wait re-read, and the wait no longer exists - every wake is one
+# fresh read (scenarios 14/23/28/29 pin the review wake that replaced
+# it). The non-numeric and oversized copilot-wait-minutes refusal guards
+# went with their input. The bot-ACTOR stand-down scenario became
+# scenario 15's author form: a run actor must never disarm the gate.
 # shellcheck disable=SC2016  # jq programs and assertion strings carry literals
 set -euo pipefail
 
@@ -234,10 +255,9 @@ cat > "$WORK/bin/gh" <<'GHSTUB'
 # pages, emitted the way --paginate concatenates per-page --jq output.
 # Workflow runs at the sha: --jq over $RUNS_FIXTURE. The workflow
 # registry: --jq over $REGISTRY_FIXTURE. Copilot check runs: --jq over
-# $CHECKS_FIXTURE. The *_FIXTURE_NEXT variables, when set, replace their
-# fixture after one serving, so a later read sees moved state (a landed
-# check, a conditional gone red mid-wait); the literal fixture value FAIL
-# simulates the API read itself dying (exit 1, nothing served).
+# $CHECKS_FIXTURE. The review-wake / unwedge CI-run lookup: --jq over
+# $CI_RUNS_FIXTURE. The literal fixture value FAIL simulates the API
+# read itself dying (exit 1, nothing served).
 # Check-run POST: validates the exact endpoint, then records the full
 # argv as a JSON array (boundary-preserving - summaries are multi-line).
 # Any endpoint without a fixture is an unexpected read and fails the
@@ -259,6 +279,16 @@ for ((i = 0; i < ${#args[@]}; i++)); do
   if [ "${args[i]}" = "--jq" ]; then
     for ((j = 0; j < ${#args[@]}; j++)); do
       case "${args[j]}" in
+        repos/*"/actions/workflows/ci.yml/runs?head_sha="*)
+          # The review-wake / unwedge lookup: the sha's newest completed
+          # CI run.
+          if [ -z "${CI_RUNS_FIXTURE:-}" ]; then
+            echo "stub gh: a CI-run lookup this scenario must not make: $*" >&2
+            exit 64
+          fi
+          jq -rc "${args[i + 1]}" "$CI_RUNS_FIXTURE"
+          exit 0
+          ;;
         repos/*/actions/runs/*"/jobs?filter=all"*)
           jq -rc "${args[i + 1]}" "$JOBS_FIXTURE"
           if [ -n "${JOBS_FIXTURE2:-}" ]; then jq -rc "${args[i + 1]}" "$JOBS_FIXTURE2"; fi
@@ -274,9 +304,6 @@ for ((i = 0; i < ${#args[@]}; i++)); do
             exit 1
           fi
           jq -rc "${args[i + 1]}" "$RUNS_FIXTURE"
-          if [ -n "${RUNS_FIXTURE_NEXT:-}" ] && [ "$RUNS_FIXTURE_NEXT" != "$RUNS_FIXTURE" ]; then
-            cp "$RUNS_FIXTURE_NEXT" "$RUNS_FIXTURE"
-          fi
           exit 0
           ;;
         repos/*"/actions/workflows?per_page="*)
@@ -301,9 +328,6 @@ for ((i = 0; i < ${#args[@]}; i++)); do
             exit 1
           fi
           jq -rc "${args[i + 1]}" "$CHECKS_FIXTURE"
-          if [ -n "${CHECKS_FIXTURE_NEXT:-}" ] && [ "$CHECKS_FIXTURE_NEXT" != "$CHECKS_FIXTURE" ]; then
-            cp "$CHECKS_FIXTURE_NEXT" "$CHECKS_FIXTURE"
-          fi
           exit 0
           ;;
       esac
@@ -327,13 +351,14 @@ exec "$@"
 TSTUB
 chmod +x "$WORK/bin/timeout"
 
-# The bounded Copilot wait sleeps between polls; the stub logs each call
-# (so a scenario can prove the wait did or did not engage) and returns
-# instantly - the block's counted-sleeps bound then terminates the loop
-# long before its wall-clock bound could.
+# The judge never sleeps any more: the bounded Copilot poll was retired
+# for event-driven re-judgment (a submitted review is its own wake), so a
+# sleep reappearing in the block is the poll growing back - fail the
+# scenario outright rather than let a wait ride under the stub.
 cat > "$WORK/bin/sleep" <<'SSTUB'
 #!/usr/bin/env bash
-echo "$@" >> "$SLEEP_LOG"
+echo "stub sleep: the judge block must never sleep - re-judgment is event-driven, the poll is retired" >&2
+exit 64
 SSTUB
 chmod +x "$WORK/bin/sleep"
 
@@ -352,20 +377,18 @@ posted_summary() { # -> the captured POST's full multi-line output[summary] valu
 run_verdict() { # <jobs fixture.json> [<env overrides...>] -> runs the real block
   export JOBS_FIXTURE="$1"
   export POST_CAPTURE="$WORK/post.txt"
-  export SLEEP_LOG="$WORK/sleeps.txt"
   export GITHUB_OUTPUT="$WORK/gh-output.txt"
   shift
   : > "$POST_CAPTURE"
-  : > "$SLEEP_LOG"
   : > "$GITHUB_OUTPUT"
   PATH="$WORK/bin:$PATH" \
     GH_TOKEN=stub SHA="" REQUIRE_JOB="" RUN_ID=42 \
     HEAD_SHA=0000000000000000000000000000000000000042 RUN_EVENT=push \
     RUN_STATUS=completed RUN_PATH=.github/workflows/ci.yml \
-    RUN_ACTOR_LOGIN=someone RUN_ACTOR_TYPE=User \
-    CONDITIONAL_WORKFLOWS='[]' REQUIRE_COPILOT=false COPILOT_WAIT_MINUTES=10 \
+    CONDITIONAL_WORKFLOWS='[]' REQUIRE_COPILOT=false \
     GITHUB_REPOSITORY=o/r GITHUB_SERVER_URL=https://example.invalid \
-    env JOBS_FIXTURE2= RUNS_FIXTURE= RUNS_FIXTURE_NEXT= REGISTRY_FIXTURE= CHECKS_FIXTURE= CHECKS_FIXTURE_NEXT= "$@" \
+    env JOBS_FIXTURE2= RUNS_FIXTURE= REGISTRY_FIXTURE= CHECKS_FIXTURE= \
+    CI_RUNS_FIXTURE= REVIEW_SHA= REVIEW_HEAD_REPO= PR_AUTHOR_LOGIN= PR_AUTHOR_TYPE= "$@" \
     bash "$WORK/judge.sh" > "$WORK/judge.log" 2>&1 \
     || fail "the judge block itself exited non-zero (see below)
 $(cat "$WORK/judge.log")"
@@ -383,20 +406,18 @@ refused() { # <scenario> <error fragment> <env overrides...> - exit EXACTLY 1, n
     > "$WORK/healthy.json"
   export JOBS_FIXTURE="$WORK/healthy.json"
   export POST_CAPTURE="$WORK/post.txt"
-  export SLEEP_LOG="$WORK/sleeps.txt"
   export GITHUB_OUTPUT="$WORK/gh-output.txt"
   : > "$POST_CAPTURE"
-  : > "$SLEEP_LOG"
   : > "$GITHUB_OUTPUT"
   local status=0
   PATH="$WORK/bin:$PATH" \
     GH_TOKEN=stub SHA="" REQUIRE_JOB="" RUN_ID=42 \
     HEAD_SHA=0000000000000000000000000000000000000042 RUN_EVENT=push \
     RUN_STATUS=completed RUN_PATH=.github/workflows/ci.yml \
-    RUN_ACTOR_LOGIN=someone RUN_ACTOR_TYPE=User \
-    CONDITIONAL_WORKFLOWS='[]' REQUIRE_COPILOT=false COPILOT_WAIT_MINUTES=10 \
+    CONDITIONAL_WORKFLOWS='[]' REQUIRE_COPILOT=false \
     GITHUB_REPOSITORY=o/r GITHUB_SERVER_URL=https://example.invalid \
-    env JOBS_FIXTURE2= RUNS_FIXTURE= RUNS_FIXTURE_NEXT= REGISTRY_FIXTURE= CHECKS_FIXTURE= CHECKS_FIXTURE_NEXT= "$@" \
+    env JOBS_FIXTURE2= RUNS_FIXTURE= REGISTRY_FIXTURE= CHECKS_FIXTURE= \
+    CI_RUNS_FIXTURE= REVIEW_SHA= REVIEW_HEAD_REPO= PR_AUTHOR_LOGIN= PR_AUTHOR_TYPE= "$@" \
     bash "$WORK/judge.sh" > "$WORK/judge.log" 2>&1 || status=$?
   if [ "$status" -ne 1 ]; then
     fail "$scenario: expected the guard's exit 1 but the judge block exited $status
@@ -409,6 +430,46 @@ $(cat "$WORK/judge.log")"
   fi
   if [ -s "$GITHUB_OUTPUT" ]; then
     fail "$scenario: a refusal must emit no step output (the job fails; a needs-gated caller never runs)"
+  fi
+}
+
+stood_down() { # <scenario> <notice fragment> <env overrides...> - exit 0, named, NO POST
+  # The review wake's quiet exits: judging nothing is CORRECT when the
+  # reviewed head has no completed CI run yet (that run's completion
+  # judges later) or lives in a fork (a read-only token there). Same
+  # healthy-fixture trick as refused(): were the stand-down guard
+  # deleted, the block would run on and POST (or die at a fixture-less
+  # stub read with exit 64), so this can never pass vacuously.
+  local scenario="$1" fragment="$2"
+  shift 2
+  printf '%s' '{"jobs":[{"id":1,"name":"checks / lint","conclusion":"success","run_attempt":1}]}' \
+    > "$WORK/healthy.json"
+  export JOBS_FIXTURE="$WORK/healthy.json"
+  export POST_CAPTURE="$WORK/post.txt"
+  export GITHUB_OUTPUT="$WORK/gh-output.txt"
+  : > "$POST_CAPTURE"
+  : > "$GITHUB_OUTPUT"
+  local status=0
+  PATH="$WORK/bin:$PATH" \
+    GH_TOKEN=stub SHA="" REQUIRE_JOB="" RUN_ID=42 \
+    HEAD_SHA=0000000000000000000000000000000000000042 RUN_EVENT=push \
+    RUN_STATUS=completed RUN_PATH=.github/workflows/ci.yml \
+    CONDITIONAL_WORKFLOWS='[]' REQUIRE_COPILOT=false \
+    GITHUB_REPOSITORY=o/r GITHUB_SERVER_URL=https://example.invalid \
+    env JOBS_FIXTURE2= RUNS_FIXTURE= REGISTRY_FIXTURE= CHECKS_FIXTURE= \
+    CI_RUNS_FIXTURE= REVIEW_SHA= REVIEW_HEAD_REPO= PR_AUTHOR_LOGIN= PR_AUTHOR_TYPE= "$@" \
+    bash "$WORK/judge.sh" > "$WORK/judge.log" 2>&1 || status=$?
+  if [ "$status" -ne 0 ]; then
+    fail "$scenario: expected the quiet stand-down's exit 0 but the judge block exited $status
+$(cat "$WORK/judge.log")"
+  fi
+  grep -qF -- "$fragment" "$WORK/judge.log" \
+    || fail "$scenario: the stand-down does not name its reason ('$fragment' missing from the log)"
+  if [ -s "$POST_CAPTURE" ]; then
+    fail "$scenario: the judge block POSTed a verdict on a wake that must judge nothing"
+  fi
+  if [ -s "$GITHUB_OUTPUT" ]; then
+    fail "$scenario: a stand-down must emit no step output (nothing was judged)"
   fi
 }
 
@@ -445,6 +506,17 @@ jobs() { printf '%s' "$1" > "$WORK/jobs.json"; echo "$WORK/jobs.json"; }
 runs() { printf '%s' "$1" > "$WORK/runs.json"; echo "$WORK/runs.json"; }
 registry() { printf '%s' "$1" > "$WORK/registry.json"; echo "$WORK/registry.json"; }
 checks() { printf '%s' "$1" > "$2"; echo "$2"; }
+ci_runs() { printf '%s' "$1" > "$WORK/ci-runs.json"; echo "$WORK/ci-runs.json"; }
+
+# The review-wake fixtures: the reviewed head and the completed
+# pull_request CI run the lookup resolves there. Order is deliberately
+# oldest-first (the live API serves newest-first): an implementation
+# trusting list order over max_by(.id) would pick the stale in-progress
+# run and stand down, failing every judging review-wake scenario.
+REVIEW_HEAD=0000000000000000000000000000000000000077
+REVIEW_CI_RUN='{"workflow_runs":[
+  {"id":76,"head_sha":"0000000000000000000000000000000000000077","event":"pull_request","status":"in_progress","conclusion":null},
+  {"id":77,"head_sha":"0000000000000000000000000000000000000077","event":"pull_request","status":"completed","conclusion":"success"}]}'
 
 # The single-owner registry most conditional scenarios ride on ("Ghost
 # Workflow" is registered but never runs - the pending case needs a name
@@ -550,34 +622,43 @@ run_verdict "$(jobs "$GREEN_JOBS")" \
     {"id":9,"name":"Extra Suite","path":".github/workflows/extra.yml","event":"pull_request","status":"completed","conclusion":"failure"}]}')"
 expect "conditional failed" failure "expected workflows did not succeed"
 
-# 13. Copilot required on a human PR and absent: the bounded wait polls
-# (one sleep per poll) and then leaves the verdict PENDING, naming the
-# dispatch unwedge.
-run_verdict "$(jobs "$GREEN_JOBS")" \
-  RUN_EVENT=pull_request REQUIRE_COPILOT=true COPILOT_WAIT_MINUTES=1 \
-  CHECKS_FIXTURE="$(checks '{"check_runs":[]}' "$WORK/checks.json")"
-expect_pending "copilot absent on a human PR" "copilot-pull-request-reviewer check run has not been created"
-posted_summary | grep -qF "dispatch the All Green workflow" \
-  || fail "copilot absent on a human PR: the pending summary does not name the dispatch unwedge"
-polls="$(wc -l < "$SLEEP_LOG" | tr -d ' ')"
-[ "$polls" = "3" ] \
-  || fail "copilot absent on a human PR: expected the 1-minute bounded wait to sleep 3 times (20s apart), saw $polls"
-
-# 14. Copilot's check lands during the bounded wait: green.
-run_verdict "$(jobs "$GREEN_JOBS")" \
-  RUN_EVENT=pull_request REQUIRE_COPILOT=true COPILOT_WAIT_MINUTES=10 \
-  CHECKS_FIXTURE="$(checks '{"check_runs":[]}' "$WORK/checks.json")" \
-  CHECKS_FIXTURE_NEXT="$(checks '{"check_runs":[
-    {"name":"copilot-pull-request-reviewer","status":"completed","conclusion":"success","app":{"slug":"github-actions"}}]}' "$WORK/checks-next.json")"
-expect "copilot lands during the wait" success
-
-# 15. A bot PR stands the Copilot expectation down: green, and the stub
-# proves no check-run read happened (no CHECKS_FIXTURE is provided - a
-# read would exit 64 and fail the block).
+# 13. Copilot required and absent, author unknown (a workflow_run wake
+# carries no PR author, and unknown must never disarm): PENDING
+# immediately - no poll exists any more (the sleep stub would fail the
+# block), and the summary names both re-judgment paths.
 run_verdict "$(jobs "$GREEN_JOBS")" \
   RUN_EVENT=pull_request REQUIRE_COPILOT=true \
-  RUN_ACTOR_LOGIN='dependabot[bot]' RUN_ACTOR_TYPE=Bot
-expect "bot PR skips the copilot expectation" success
+  CHECKS_FIXTURE="$(checks '{"check_runs":[]}' "$WORK/checks.json")"
+expect_pending "copilot absent, author unknown" "copilot-pull-request-reviewer check run has not been created"
+posted_summary | grep -qF "each submitted review at this sha re-judges" \
+  || fail "copilot absent, author unknown: the pending summary does not name the review wake"
+posted_summary | grep -qF "dispatch the All Green workflow" \
+  || fail "copilot absent, author unknown: the pending summary does not name the dispatch unwedge"
+
+# 14. The review wake at a green sha where Copilot's check has landed:
+# success - this wake is the event-driven replacement for the retired
+# poll (a check run's completion fires no workflow_run event; the review
+# SUBMISSION is what re-fires judgment).
+run_verdict "$(jobs "$GREEN_JOBS")" \
+  REVIEW_SHA="$REVIEW_HEAD" REVIEW_HEAD_REPO=o/r \
+  PR_AUTHOR_LOGIN=someone PR_AUTHOR_TYPE=User REQUIRE_COPILOT=true \
+  CI_RUNS_FIXTURE="$(ci_runs "$REVIEW_CI_RUN")" \
+  CHECKS_FIXTURE="$(checks '{"check_runs":[
+    {"name":"copilot-pull-request-reviewer","status":"completed","conclusion":"success","app":{"slug":"github-actions"}}]}' "$WORK/checks.json")"
+expect "review wake with the check landed" success
+got_head="$(posted head_sha)"
+[ "$got_head" = "$REVIEW_HEAD" ] \
+  || fail "review wake with the check landed: the verdict must attach to the looked-up run's head sha, got '$got_head'"
+
+# 15. A review wake on a bot-AUTHORED PR stands the Copilot expectation
+# down: success, and the stub proves no check-run read happened (no
+# CHECKS_FIXTURE is provided - a read would exit 64 and fail the block).
+# The stand-down keys on the PULL REQUEST'S AUTHOR, never any run actor.
+run_verdict "$(jobs "$GREEN_JOBS")" \
+  REVIEW_SHA="$REVIEW_HEAD" REVIEW_HEAD_REPO=o/r \
+  PR_AUTHOR_LOGIN='dependabot[bot]' PR_AUTHOR_TYPE=Bot REQUIRE_COPILOT=true \
+  CI_RUNS_FIXTURE="$(ci_runs "$REVIEW_CI_RUN")"
+expect "bot-authored PR review wake skips the copilot expectation" success
 
 # 16. Copilot's check concluded failure: a completed failure, not pending.
 run_verdict "$(jobs "$GREEN_JOBS")" \
@@ -592,8 +673,8 @@ run_verdict "$(jobs "$GREEN_JOBS")" \
   RUN_EVENT=push CONDITIONAL_WORKFLOWS='["Extra Suite"]' REQUIRE_COPILOT=true
 expect "push event owes only CI" success
 
-# 18. A conditional missing AND Copilot missing: PENDING immediately - the
-# bounded wait is for Copilot as the SOLE gap, so no sleep may happen.
+# 18. A conditional missing AND Copilot missing: PENDING naming both
+# gaps in one summary - nothing masks anything.
 run_verdict "$(jobs "$GREEN_JOBS")" \
   RUN_EVENT=pull_request CONDITIONAL_WORKFLOWS='["Extra Suite"]' REQUIRE_COPILOT=true \
   REGISTRY_FIXTURE="$(registry "$EXTRA_REGISTRY")" \
@@ -602,8 +683,6 @@ run_verdict "$(jobs "$GREEN_JOBS")" \
 expect_pending "mixed gaps" "Extra Suite has no pull_request run at this sha"
 posted_summary | grep -qF "copilot-pull-request-reviewer check run has not been created" \
   || fail "mixed gaps: the pending summary must name the Copilot gap too"
-[ ! -s "$SLEEP_LOG" ] \
-  || fail "mixed gaps: the bounded wait engaged although Copilot was not the sole gap"
 
 # 19. The repository's workflow registry resolves the rostered name to two
 # paths: a completed failure, even though the one that ran succeeded - by
@@ -698,37 +777,80 @@ expect "dispatch with nothing declared" success
 # engine's app filter itself - the TS twin's look-alike test cannot see a
 # deletion here.
 run_verdict "$(jobs "$GREEN_JOBS")" \
-  RUN_EVENT=pull_request REQUIRE_COPILOT=true COPILOT_WAIT_MINUTES=0 \
+  RUN_EVENT=pull_request REQUIRE_COPILOT=true \
   CHECKS_FIXTURE="$(checks '{"check_runs":[
     {"name":"copilot-pull-request-reviewer","status":"completed","conclusion":"success","app":{"slug":"evil-app"}},
     {"name":"copilot-pull-request-reviewer","status":"completed","conclusion":"success","app":null}]}' "$WORK/checks.json")"
 expect_pending "copilot look-alike apps" "copilot-pull-request-reviewer check run has not been created"
 
-# 23. A conditional flips RED while the bounded wait polls for Copilot:
-# the post-wait re-read must flip the verdict to failure - posting the
-# pre-wait snapshot would be a green check over a red gate.
+# 23. A review wake on a HUMAN-authored PR whose Copilot check is absent:
+# PENDING - a known-human author arms the expectation exactly like an
+# unknown one, so only the bot reading (15) may disarm.
 run_verdict "$(jobs "$GREEN_JOBS")" \
-  RUN_EVENT=pull_request CONDITIONAL_WORKFLOWS='["Extra Suite"]' \
-  REQUIRE_COPILOT=true COPILOT_WAIT_MINUTES=10 \
-  REGISTRY_FIXTURE="$(registry "$EXTRA_REGISTRY")" \
-  RUNS_FIXTURE="$(runs '{"workflow_runs":[
-    {"id":9,"name":"Extra Suite","path":".github/workflows/extra.yml","event":"pull_request","status":"completed","conclusion":"success"}]}')" \
-  RUNS_FIXTURE_NEXT="$(printf '%s' '{"workflow_runs":[
-    {"id":10,"name":"Extra Suite","path":".github/workflows/extra.yml","event":"pull_request","status":"completed","conclusion":"failure"}]}' > "$WORK/runs-next.json" && echo "$WORK/runs-next.json")" \
-  CHECKS_FIXTURE="$(checks '{"check_runs":[]}' "$WORK/checks.json")" \
-  CHECKS_FIXTURE_NEXT="$(checks '{"check_runs":[
-    {"name":"copilot-pull-request-reviewer","status":"completed","conclusion":"success","app":{"slug":"github-actions"}}]}' "$WORK/checks-next.json")"
-expect "conditional flips red during the wait" failure "expected workflows did not succeed"
-posted_summary | grep -qF "Extra Suite concluded failure" \
-  || fail "conditional flips red during the wait: the summary does not name the flipped member"
-[ -s "$SLEEP_LOG" ] \
-  || fail "conditional flips red during the wait: the bounded wait never engaged, so the re-read was not exercised"
+  REVIEW_SHA="$REVIEW_HEAD" REVIEW_HEAD_REPO=o/r \
+  PR_AUTHOR_LOGIN=someone PR_AUTHOR_TYPE=User REQUIRE_COPILOT=true \
+  CI_RUNS_FIXTURE="$(ci_runs "$REVIEW_CI_RUN")" \
+  CHECKS_FIXTURE="$(checks '{"check_runs":[]}' "$WORK/checks.json")"
+expect_pending "human-authored PR review wake" "copilot-pull-request-reviewer check run has not been created"
 
-# 28-36. The pre-judgment guards refuse outright (exit 1, no POST): a
-# look-alike workflow merely NAMED "CI", an uncompleted run, a trigger
-# carrying neither a workflow_run event nor a dispatch sha, a
-# conditional-workflows value that is not a JSON list of strings, a
-# copilot wait that is non-numeric or beyond the job timeout's reach, a
+# 28. A review wake whose head has no CI run at all yet (a review
+# usually beats CI here): a QUIET stand-down - exit 0, nothing POSTed,
+# nothing output. The CI run's own completion fires the judgment that
+# will see this review; a red All Green run per early review would be
+# pure noise. The unwedge dispatch keeps its loud error for an empty
+# lookup (the guard below), so the two exits cannot be merged. Residual,
+# recorded: on a bot-authored PR this discard means a review submitted
+# BEFORE CI completes never disarms the expectation - the later CI wake
+# carries no author - so the heal is one more review (or the Copilot
+# re-request) after CI completes.
+stood_down "review wake before any CI run" "no pull_request CI run exists at" \
+  REVIEW_SHA="$REVIEW_HEAD" REVIEW_HEAD_REPO=o/r \
+  PR_AUTHOR_LOGIN=someone PR_AUTHOR_TYPE=User REQUIRE_COPILOT=true \
+  CI_RUNS_FIXTURE="$(ci_runs '{"workflow_runs":[]}')"
+
+# 29. A review wake whose PR head lives in a FORK: a quiet stand-down
+# with NO reads at all (no CI_RUNS_FIXTURE is provided - a lookup would
+# exit 64 and fail the block). Fork review wakes carry a read-only
+# token, so the check-run POST could never land; the sha's CI-completion
+# wakes run with full permissions and still judge it.
+stood_down "fork-headed review wake" "fork wakes carry a read-only token" \
+  REVIEW_SHA="$REVIEW_HEAD" REVIEW_HEAD_REPO=fork-owner/other-repo \
+  PR_AUTHOR_LOGIN=someone PR_AUTHOR_TYPE=User REQUIRE_COPILOT=true
+
+# 30. A review wake where the NEWEST run (highest id) is still in flight
+# next to an OLDER completed green run: stand down, never judge the
+# stale run - a retriggered head's fresh outcome is unknown, and green
+# minted from the superseded run would ride the merge box until the new
+# completion replaced it. The completed run comes FIRST in the fixture,
+# so an implementation trusting list order (or newest-completed) judges
+# it and fails here; only max_by(.id) stands down.
+stood_down "review wake with a stale green behind a running retrigger" "still 'in_progress'" \
+  REVIEW_SHA="$REVIEW_HEAD" REVIEW_HEAD_REPO=o/r \
+  PR_AUTHOR_LOGIN=someone PR_AUTHOR_TYPE=User REQUIRE_COPILOT=true \
+  CI_RUNS_FIXTURE="$(ci_runs '{"workflow_runs":[
+    {"id":77,"head_sha":"0000000000000000000000000000000000000077","event":"pull_request","status":"completed","conclusion":"success"},
+    {"id":78,"head_sha":"0000000000000000000000000000000000000077","event":"pull_request","status":"in_progress","conclusion":null}]}')"
+
+# 31. A review wake where a completed PUSH run holds the highest id next
+# to the completed PR run: the PR-EVENT run must be judged - selecting
+# the newest run of ANY event would flip RUN_EVENT to push, which owes
+# neither conditionals nor Copilot, and mint green over the owed review.
+# The correct judgment here is PENDING (copilot required and absent).
+run_verdict "$(jobs "$GREEN_JOBS")" \
+  REVIEW_SHA="$REVIEW_HEAD" REVIEW_HEAD_REPO=o/r \
+  PR_AUTHOR_LOGIN=someone PR_AUTHOR_TYPE=User REQUIRE_COPILOT=true \
+  CI_RUNS_FIXTURE="$(ci_runs '{"workflow_runs":[
+    {"id":77,"head_sha":"0000000000000000000000000000000000000077","event":"pull_request","status":"completed","conclusion":"success"},
+    {"id":99,"head_sha":"0000000000000000000000000000000000000077","event":"push","status":"completed","conclusion":"success"}]}')" \
+  CHECKS_FIXTURE="$(checks '{"check_runs":[]}' "$WORK/checks.json")"
+expect_pending "review wake beside a same-sha push run" "copilot-pull-request-reviewer check run has not been created"
+
+# The pre-judgment guards refuse outright (exit 1, no POST): a look-alike
+# workflow merely NAMED "CI", an uncompleted run, a trigger carrying
+# neither a workflow_run event, a review head, nor a dispatch sha, a
+# conditional-workflows value that is not a JSON list of strings, an
+# unwedge dispatch naming a sha with no completed CI run (the review
+# wake's quiet exit must never swallow an operator's explicit ask), a
 # dispatch or schedule judgment while an expected set is declared (such
 # events can neither carry nor stand down PR-scoped members - the refusal
 # is JOB-red with no check posted, so no legitimate verdict is shadowed),
@@ -740,8 +862,9 @@ refused "look-alike workflow" "refusing to judge a look-alike" RUN_PATH=.github/
 refused "uncompleted run" "only completed runs are judged" RUN_STATUS=in_progress
 refused "no event and no sha" "nothing to judge" RUN_ID=
 refused "malformed roster" "must be a JSON list of workflow display names" CONDITIONAL_WORKFLOWS='not-json'
-refused "non-numeric wait" "must be a whole number of minutes" COPILOT_WAIT_MINUTES=soon
-refused "oversized wait" "must be at most 20" COPILOT_WAIT_MINUTES=30
+refused "unwedge dispatch at a run-less sha" "no completed CI run exists at" \
+  SHA=0000000000000000000000000000000000000099 \
+  CI_RUNS_FIXTURE="$(ci_runs '{"workflow_runs":[]}')"
 refused "dispatch with a roster" "cannot judge the declared expected set" \
   RUN_EVENT=workflow_dispatch CONDITIONAL_WORKFLOWS='["Extra Suite"]'
 refused "schedule requiring copilot" "cannot judge the declared expected set" \
@@ -752,4 +875,4 @@ refused "dead registry read" "simulated API failure for the workflow-registry li
     {"id":9,"name":"Extra Suite","path":".github/workflows/extra.yml","event":"pull_request","status":"completed","conclusion":"success"}]}')" \
   REGISTRY_FIXTURE=FAIL
 
-echo "verdict judgment OK: all 27 verdict scenarios POSTed the expected status/conclusion and all 9 guard scenarios refused, through the real run block"
+echo "verdict judgment OK: all 28 verdict scenarios POSTed the expected status/conclusion, all three review-wake stand-downs stayed quiet, and all 8 guard scenarios refused, through the real run block"

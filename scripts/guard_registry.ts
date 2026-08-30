@@ -1,9 +1,15 @@
 // The guard registry: every guard against an ENVIRONMENTAL hazard
 // (hostile git config, leaked env vars, hung children) that a hermetic
 // test suite cannot reach by accident, bound to the hostile-fixture test
-// that forces its failure branch. Such a guard can be born decorative -
-// deleting it changes nothing - unless the attack it stops was STAGED
-// once; this registry makes "was the attack ever staged?" a CI question.
+// that forces its failure branch - plus the verdict engine's event-shape
+// guards (stand-down branches, refusal paths, pending-not-green), whose
+// forcing cases live in the bash harness verify_verdict_judgment.sh and
+// bind here through the bun wrapper tests/ci/verdict_guard_arming.test.ts
+// (the arming audit runs bun test files, so a bash-harness guard needs a
+// named bun test that goes red when the harness does). Such a guard can
+// be born decorative - deleting it changes nothing - unless the attack
+// it stops was STAGED once; this registry makes "was the attack ever
+// staged?" a CI question.
 //
 // Two consumers, two proof strengths:
 //   - scripts/check_guard_binding.ts (per commit, in `bun run check`)
@@ -111,6 +117,56 @@ export const GUARD_REGISTRY: readonly GuardEntry[] = [
     mutated: "if (false) {",
     testFile: "tests/scripts/check_guard_binding.test.ts",
     testName: "an entry whose snippet vanished from its guard file is reported",
+  },
+  // The verdict engine's event-shape guards (reusable-all-green.yml's
+  // judge block). Their scenario-level forcing cases are
+  // verify_verdict_judgment.sh's; the wrapper test file runs that
+  // harness once and fails the named test on any harness red, so each
+  // mutation below reddens exactly the scenario its guard exists for
+  // and the wrapper carries the verdict to the audit's junit reader.
+  {
+    id: "verdict-pending-not-green",
+    hazard:
+      "an incomplete expected set (the owed Copilot review, a pending conditional) minted as a completed green check instead of a visible in_progress hold - the merge box would open while members are outstanding",
+    guardFile: ".github/workflows/reusable-all-green.yml",
+    snippet: "status=in_progress",
+    mutated: "conclusion=success",
+    testFile: "tests/ci/verdict_guard_arming.test.ts",
+    testName:
+      "the pending path is ARMED: an incomplete expected set posts in_progress, never a green conclusion",
+  },
+  {
+    id: "verdict-author-unknown-armed",
+    hazard:
+      "a wake with no PR author in reach (every wake but pull_request_review) disarming the copilot expectation - unknown must never disarm, or any CI completion at a human PR's head waves the review off",
+    guardFile: ".github/workflows/reusable-all-green.yml",
+    snippet: "bot=0",
+    mutated: "bot=1",
+    testFile: "tests/ci/verdict_guard_arming.test.ts",
+    testName:
+      "the author stand-down is ARMED: an unknown PR author keeps the copilot expectation armed",
+  },
+  {
+    id: "verdict-fork-review-stand-down",
+    hazard:
+      "a fork-headed pull_request_review wake carries a read-only token: without the quiet stand-down, every outside-contributor review spawns a judgment whose check-run POST is refused - a red All Green run per review",
+    guardFile: ".github/workflows/reusable-all-green.yml",
+    snippet: 'if [ -n "$REVIEW_SHA" ] && [ "$REVIEW_HEAD_REPO" != "$GITHUB_REPOSITORY" ]; then',
+    mutated: "if false; then",
+    testFile: "tests/ci/verdict_guard_arming.test.ts",
+    testName: "the fork stand-down is ARMED: a fork-headed review wake judges nothing",
+  },
+  {
+    id: "verdict-review-newest-pr-run",
+    hazard:
+      "a review wake judging the wrong run at the head: a same-sha push or dispatch run flips RUN_EVENT to CI-only semantics (no copilot, no conditionals owed), and a stale completed run behind a running retrigger mints green over an unknown outcome",
+    guardFile: ".github/workflows/reusable-all-green.yml",
+    snippet:
+      'run="$(jq \'[.[] | select(.event == "pull_request" or .event == "pull_request_target")] | max_by(.id) // empty\' <<<"$runs_at_head")"',
+    mutated: 'run="$(jq \'.[0] // empty\' <<<"$runs_at_head")"',
+    testFile: "tests/ci/verdict_guard_arming.test.ts",
+    testName:
+      "the review-wake run selection is ARMED: only the newest pull_request-event run is judged",
   },
 ];
 

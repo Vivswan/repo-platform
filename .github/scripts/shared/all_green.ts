@@ -202,11 +202,14 @@ export function allGreenFailure(
  * itself. */
 export const COPILOT_CHECK_NAME = "copilot-pull-request-reviewer";
 
-/** Whether a run actor is a bot (Bot type, or GitHub's "[bot]" login
- * suffix). Copilot does not auto-review bot-authored PRs, so a bot actor
- * stands the review expectation down; a human pushing to such a PR
- * re-arms it, which fails closed until a manual review request. */
-export function isBotActor(login: string, type: string): boolean {
+/** Whether a PR author is a bot (Bot type, or GitHub's "[bot]" login
+ * suffix). Copilot does not auto-review bot-authored PRs, so a
+ * bot-AUTHORED PR stands the review expectation down; the key is the
+ * pull request's author, never any run actor (an actor key let a
+ * bot-triggered re-run at a human PR's head disarm the gate for one
+ * round). Callers that cannot resolve the author map unknown to false -
+ * the armed, fail-closed side. */
+export function isBotAuthor(login: string, type: string): boolean {
   return type === "Bot" || login.endsWith("[bot]");
 }
 
@@ -264,8 +267,10 @@ export interface ExpectedSetInput {
   /** Workflow display names owed on every pull_request event. */
   conditionalWorkflows: string[];
   requireCopilotReview: boolean;
-  /** The judged run's actor (isBotActor) - bots stand the review down. */
-  actorIsBot: boolean;
+  /** Whether the PULL REQUEST'S AUTHOR is a bot (isBotAuthor) - a bot
+   * author stands the review expectation down. Unknown authors map to
+   * false: only a positive bot reading may disarm. */
+  authorIsBot: boolean;
   runsAtSha: ShaWorkflowRun[];
   workflowRegistry: RegisteredWorkflow[];
   checkRunsAtSha: ShaCheckRun[];
@@ -324,7 +329,7 @@ export function expectedSetGaps(input: ExpectedSetInput): ExpectedSetGaps {
       }
     }
   }
-  if (input.requireCopilotReview && !input.actorIsBot) {
+  if (input.requireCopilotReview && !input.authorIsBot) {
     const checks = input.checkRunsAtSha.filter(
       (check) => check.name === COPILOT_CHECK_NAME && check.appSlug === CHECK_APP,
     );

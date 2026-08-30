@@ -1,5 +1,5 @@
 // Unit tests for the verdict's expected-set computation - the pure twin
-// (shared/all_green.ts expectedSetGaps/isBotActor) of the inline jq/bash
+// (shared/all_green.ts expectedSetGaps/isBotAuthor) of the inline jq/bash
 // in reusable-all-green.yml, whose side the ci/ verify_verdict_judgment.sh
 // harness pins. Synthetic fixtures throughout: every scenario builds its
 // own runs and check runs, including the healthy shape next to each gap,
@@ -11,7 +11,7 @@ import {
   type ExpectedSetInput,
   expectedSetGaps,
   expectedSetRefusal,
-  isBotActor,
+  isBotAuthor,
   type ShaCheckRun,
   type ShaWorkflowRun,
 } from "../../.github/scripts/shared/all_green.ts";
@@ -43,7 +43,7 @@ function input(overrides: Partial<ExpectedSetInput> = {}): ExpectedSetInput {
     event: "pull_request",
     conditionalWorkflows: [],
     requireCopilotReview: false,
-    actorIsBot: false,
+    authorIsBot: false,
     runsAtSha: [],
     // The default registry registers the run() helper's identity, so the
     // state-focused tests exercise state; the identity tests (unknown
@@ -57,21 +57,21 @@ function input(overrides: Partial<ExpectedSetInput> = {}): ExpectedSetInput {
   };
 }
 
-describe("isBotActor", () => {
+describe("isBotAuthor", () => {
   test("the Bot type is a bot regardless of login", () => {
-    expect(isBotActor("anything", "Bot")).toBe(true);
+    expect(isBotAuthor("anything", "Bot")).toBe(true);
   });
 
   test("a [bot] login suffix is a bot regardless of type", () => {
-    expect(isBotActor("dependabot[bot]", "User")).toBe(true);
+    expect(isBotAuthor("dependabot[bot]", "User")).toBe(true);
   });
 
   test("a human is neither", () => {
-    expect(isBotActor("vivswan", "User")).toBe(false);
+    expect(isBotAuthor("vivswan", "User")).toBe(false);
   });
 
   test("[bot] must be a suffix, not a mention anywhere in the login", () => {
-    expect(isBotActor("not[bot]really", "User")).toBe(false);
+    expect(isBotAuthor("not[bot]really", "User")).toBe(false);
   });
 });
 
@@ -383,9 +383,16 @@ describe("expectedSetGaps", () => {
       ]);
     });
 
-    test("a bot actor stands the expectation down", () => {
-      const gaps = expectedSetGaps(input({ ...required, actorIsBot: true, checkRunsAtSha: [] }));
+    test("a bot AUTHOR stands the expectation down (the author, never a run actor, is the key)", () => {
+      const gaps = expectedSetGaps(input({ ...required, authorIsBot: true, checkRunsAtSha: [] }));
       expect(gaps).toEqual({ missing: [], failed: [] });
+    });
+
+    test("an unknown author (mapped to false) keeps the expectation armed - unknown can disarm nothing", () => {
+      const gaps = expectedSetGaps(input({ ...required, authorIsBot: false, checkRunsAtSha: [] }));
+      expect(gaps.missing).toEqual([
+        `Copilot's ${COPILOT_CHECK_NAME} check run has not been created`,
+      ]);
     });
 
     test("a completed successful check satisfies it", () => {
