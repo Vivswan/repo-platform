@@ -1,12 +1,15 @@
 // Unit tests for the settings apply's green gate: the bounded wait a
-// push-triggered run does for its own commit's all-green verdict, and the
-// hard, fail-closed refusals around it. The gh probe, the clock, and the
-// sleep are injected so nothing here touches the network or actually
-// waits (waitForGreen zeroes the predicate's internal poll - this loop
-// owns all waiting).
+// push-triggered run does for its own commit's all-green verdict, the
+// hard, fail-closed refusals around it, and the trigger split - push and
+// dispatch stay tip-gated while the scheduled heal falls back to the
+// newest green commit behind a red tip. The gh probe, the clock, the
+// sleep, and the walk are injected so nothing here touches the network or
+// actually waits (waitForGreen zeroes the predicate's internal poll -
+// this loop owns all waiting).
 
 import { describe, expect, test } from "bun:test";
-import { waitForGreen } from "../../.github/scripts/fleet/require_green_commit";
+import type { GreenWalkOutcome } from "../../.github/scripts/fleet/newest_green_commit";
+import { decideGreenCommit, waitForGreen } from "../../.github/scripts/fleet/require_green_commit";
 import type { GhRunner } from "../../.github/scripts/shared/all_green.ts";
 import { type BoundedSpawnResult, boundedSpawnSync } from "../shared/bounded_spawn";
 
@@ -137,6 +140,111 @@ describe("waitForGreen", () => {
     } finally {
       if (prior === undefined) delete process.env.GREEN_WAIT_MS;
       else process.env.GREEN_WAIT_MS = prior;
+    }
+  });
+});
+
+describe("decideGreenCommit", () => {
+  const GREEN_BEHIND = "00000000000000000000000000000000000000bb";
+
+  function walkSpy(outcome: GreenWalkOutcome): {
+    walk: (repository: string, tip: string) => GreenWalkOutcome;
+    calls: () => number;
+  } {
+    let calls = 0;
+    return {
+      walk: () => {
+        calls++;
+        return outcome;
+      },
+      calls: () => calls,
+    };
+  }
+
+  test("a green tip applies from the tip, on every trigger, and the walk NEVER runs", () => {
+    for (const event of ["push", "workflow_dispatch", "schedule"]) {
+      const { gh } = ghAnswering([{}]);
+      const spy = walkSpy({ sha: GREEN_BEHIND, behind: 1 });
+      const decision = decideGreenCommit("o/r", SHA, event, {
+        gh,
+        sleep: () => {},
+        log: () => {},
+        walk: spy.walk,
+      });
+      expect(decision).toEqual({ sha: SHA, fallback: false });
+      expect(spy.calls()).toBe(0);
+    }
+  });
+
+  test("a red tip on a push run refuses tip-gated - applying THAT commit is the run's point", () => {
+    const { gh } = ghAnswering([{ conclusion: "failure" }]);
+    const spy = walkSpy({ sha: GREEN_BEHIND, behind: 1 });
+    const decision = decideGreenCommit("o/r", SHA, "push", {
+      gh,
+      sleep: () => {},
+      log: () => {},
+      walk: spy.walk,
+    });
+    expect(decision).toEqual({
+      refusal: expect.stringContaining("refusing the settings apply"),
+    });
+    expect(spy.calls()).toBe(0);
+  });
+
+  test("a red tip on a dispatch run refuses tip-gated too - only the schedule may fall back", () => {
+    // An unset event name (never the case on a real runner) lands on the
+    // same strict branch: anything that is not the schedule stays
+    // tip-gated, so an unknown trigger can never inherit the fallback.
+    for (const event of ["workflow_dispatch", ""]) {
+      const { gh } = ghAnswering([{ conclusion: "failure" }]);
+      const spy = walkSpy({ sha: GREEN_BEHIND, behind: 1 });
+      const decision = decideGreenCommit("o/r", SHA, event, {
+        gh,
+        sleep: () => {},
+        log: () => {},
+        walk: spy.walk,
+      });
+      expect("refusal" in decision).toBe(true);
+      expect(spy.calls()).toBe(0);
+    }
+  });
+
+  test("a red tip on the SCHEDULED heal falls back to the walk's green commit, evidence attached", () => {
+    const { gh } = ghAnswering([{ conclusion: "failure" }]);
+    const spy = walkSpy({ sha: GREEN_BEHIND, behind: 3 });
+    const decision = decideGreenCommit("o/r", SHA, "schedule", {
+      gh,
+      sleep: () => {},
+      log: () => {},
+      walk: spy.walk,
+    });
+    expect(decision).toEqual({
+      sha: GREEN_BEHIND,
+      fallback: true,
+      behind: 3,
+      tipReason: expect.stringContaining("concluded 'failure'"),
+    });
+    expect(spy.calls()).toBe(1);
+  });
+
+  test("a scheduled heal whose walk finds nothing refuses loudly, naming BOTH reasons", () => {
+    // The old halt as the floor: red tip, exhausted walk, no apply - and
+    // the refusal carries the tip's reason plus the walk's, so the halted
+    // run's log says exactly what to fix.
+    const { gh } = ghAnswering([{ conclusion: "failure" }]);
+    const spy = walkSpy({ sha: null, refusal: "no green commit within 50 commits behind the tip" });
+    const decision = decideGreenCommit("o/r", SHA, "schedule", {
+      gh,
+      sleep: () => {},
+      log: () => {},
+      walk: spy.walk,
+    });
+    expect("refusal" in decision).toBe(true);
+    if ("refusal" in decision) {
+      expect(decision.refusal).toContain("refusing the scheduled settings heal");
+      expect(decision.refusal).toContain("concluded 'failure'");
+      expect(decision.refusal).toContain("no green commit within 50 commits");
+      expect(decision.refusal).toContain("stays halted");
     }
   });
 });

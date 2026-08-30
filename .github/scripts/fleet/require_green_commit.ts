@@ -13,6 +13,21 @@
 // hard - a red conclusion fails immediately, a verdict that never arrives
 // fails at the deadline. Fail-closed throughout, like the predicate.
 //
+// The three triggers split on what an ungreen tip MEANS:
+//   - push and workflow_dispatch runs exist to apply the checked-out
+//     commit - so an ungreen tip is a hard refusal, exactly as before;
+//   - the SCHEDULED nightly heal exists to re-assert known-good state -
+//     so an ungreen tip falls back to the newest GREEN commit behind it
+//     (newest_green_commit.ts, a bounded first-parent walk probing the
+//     same all-green predicate), and the workflow re-checks the run out
+//     at that commit: scripts, dependencies, and layer files stay one
+//     vouched revision. (The workflow FILE itself still executes from
+//     the tip - a scheduled run always loads the default branch's
+//     workflow - the documented residual in settings-repos.yml.) The
+//     fallback is loud (a warning plus a step-summary line naming both
+//     commits), and a walk that exhausts its bounds refuses - the halt
+//     is the floor.
+//
 // The workflow keeps its push trigger (with the load-bearing paths
 // filter) instead of chaining off the verdict's workflow_run event the
 // way the build publish does (all-green.yml's post-green job): a
@@ -23,10 +38,15 @@
 // not the fleet PAT, whose grant carries no Checks read),
 // GITHUB_REPOSITORY, GITHUB_SHA, GITHUB_REF (required, and refused off
 // main - a dispatched CI run vouches for its own branch tip, which must
-// never reach the fleet). GREEN_WAIT_MS / GREEN_POLL_MS bound the wait.
+// never reach the fleet), GITHUB_EVENT_NAME (only "schedule" may fall
+// back; unset degrades to the tip-gated refusal), GITHUB_OUTPUT (the
+// resolved sha for the workflow's later checkouts). GREEN_WAIT_MS /
+// GREEN_POLL_MS bound the wait.
 
+import { appendFileSync } from "node:fs";
 import { allGreenFailure, type GhRunner, verdictPending } from "../shared/all_green.ts";
-import { env, fail, requireEnv } from "../shared/gha.ts";
+import { env, fail, requireEnv, setOutput, warning } from "../shared/gha.ts";
+import { type GreenWalkOutcome, newestGreenCommit } from "./newest_green_commit.ts";
 
 export interface GreenWaitOptions {
   deadlineMs?: number;
@@ -103,23 +123,91 @@ function main(): void {
         "alone. Dispatch this workflow on the default branch.",
     );
   }
-  // waitForGreen throws for a malformed wait bound (boundedMs); the exit
-  // belongs to this CLI wrapper, not the library function.
-  let notGreen: string | null;
+  // decideGreenCommit throws for a malformed wait bound (boundedMs); the
+  // exit belongs to this CLI wrapper, not the library function. Read with
+  // a fallback, not required: the event name only matters on the ungreen
+  // path, and an unset one degrades to the STRICTER tip-gated refusal.
+  let decision: GateDecision;
   try {
-    notGreen = waitForGreen(repository, sha);
+    decision = decideGreenCommit(repository, sha, env("GITHUB_EVENT_NAME", ""));
   } catch (error) {
     fail(error instanceof Error ? error.message : String(error));
   }
-  if (notGreen !== null) {
-    fail(
-      `refusing the settings apply: commit ${sha.slice(0, 12)} is not green - ${notGreen}. ` +
+  if ("refusal" in decision) {
+    fail(decision.refusal);
+  }
+  // The workflow's later checkouts pin to this output on every path, so
+  // the sha the apply reads is always the one this gate vouched for.
+  setOutput("sha", decision.sha);
+  setOutput("fallback", String(decision.fallback));
+  if (!decision.fallback) {
+    console.log(`commit ${sha.slice(0, 12)} is green; the settings apply may proceed`);
+    return;
+  }
+  // An apply-from-behind is a visible event, never silent: a warning
+  // annotation on the run plus a step-summary line, both naming the
+  // commit applied from AND the red tip it stands in for.
+  const applied = `healing from ${decision.sha} (${decision.behind} commit(s) behind), tip ${sha} is not green - ${decision.tipReason}`;
+  warning(`scheduled settings heal falling back: ${applied}`);
+  const summary = env("GITHUB_STEP_SUMMARY");
+  if (summary !== "") {
+    appendFileSync(summary, `### Scheduled heal fell back to a green commit\n- ${applied}\n`);
+  }
+}
+
+/** The gate's whole verdict, workflow-facing: the commit to apply from
+ *  (the tip, or on the scheduled fallback path a green ancestor with the
+ *  evidence for the report), or the refusal that fails the run. */
+export type GateDecision =
+  | { sha: string; fallback: false }
+  | { sha: string; fallback: true; behind: number; tipReason: string }
+  | { refusal: string };
+
+export interface GateOptions extends GreenWaitOptions {
+  /** Injectable walk for tests; the default is the real bounded one,
+   *  handed this gate's gh runner when one was injected. */
+  walk?: (repository: string, tip: string) => GreenWalkOutcome;
+}
+
+/** Tip green: apply from the tip. Tip ungreen on push/dispatch: refuse -
+ *  applying THAT commit is those runs' point. Tip ungreen on schedule:
+ *  the heal re-asserts known-good state, so fall back to the newest green
+ *  commit behind the tip - itself vouched by the same predicate - and
+ *  refuse only when the bounded walk finds none (the halt as the floor). */
+export function decideGreenCommit(
+  repository: string,
+  sha: string,
+  eventName: string,
+  options: GateOptions = {},
+): GateDecision {
+  const notGreen = waitForGreen(repository, sha, options);
+  if (notGreen === null) return { sha, fallback: false };
+  if (eventName !== "schedule") {
+    return {
+      refusal:
+        `refusing the settings apply: commit ${sha.slice(0, 12)} is not green - ${notGreen}. ` +
         "This workflow writes settings fleet-wide from this checkout's layer files, and its " +
         "label reconciliation deletes undeclared labels, so it only runs from commits CI has " +
         "vouched for. Get CI green at this commit (or push a fix), then re-run.",
-    );
+    };
   }
-  console.log(`commit ${sha.slice(0, 12)} is green; the settings apply may proceed`);
+  const walk =
+    options.walk ??
+    ((repo: string, tip: string) =>
+      options.gh === undefined
+        ? newestGreenCommit(repo, tip)
+        : newestGreenCommit(repo, tip, { gh: options.gh }));
+  const outcome = walk(repository, sha);
+  if (outcome.sha === null) {
+    return {
+      refusal:
+        `refusing the scheduled settings heal: tip ${sha.slice(0, 12)} is not green - ${notGreen} - ` +
+        `and no green fallback commit exists behind it (${outcome.refusal}). ` +
+        "The heal stays halted until main has a green commit inside the walk's bounds: " +
+        "get CI green at the tip, or push a fix.",
+    };
+  }
+  return { sha: outcome.sha, fallback: true, behind: outcome.behind, tipReason: notGreen };
 }
 
 if (import.meta.main) {

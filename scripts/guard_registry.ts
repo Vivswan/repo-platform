@@ -204,6 +204,37 @@ export const GUARD_REGISTRY: readonly GuardEntry[] = [
     testName:
       "the PR author TYPE env wiring is ARMED: only the pull request's author may feed the bot stand-down",
   },
+  {
+    id: "walk-commit-bound",
+    hazard:
+      "a long-red main turns the scheduled heal's green-commit walk into an unbounded probe loop, and a green commit arbitrarily far behind the tip is applied as if it were current state",
+    guardFile: ".github/scripts/fleet/newest_green_commit.ts",
+    snippet: "if (behind > maxCommits) {",
+    mutated: "if (false) {",
+    testFile: "tests/fleet/newest_green_commit.test.ts",
+    testName: "a green commit beyond the walk's commit bound is NOT vouched - the heal refuses",
+  },
+  {
+    id: "walk-age-bound",
+    hazard:
+      "a main red for weeks lets the scheduled heal quietly roll the fleet's settings back to a weeks-old green commit instead of halting where a human must look",
+    guardFile: ".github/scripts/fleet/newest_green_commit.ts",
+    snippet: "if (!(ageMs >= -DAY_MS && ageMs <= maxAgeMs)) {",
+    mutated: "if (false) {",
+    testFile: "tests/fleet/newest_green_commit.test.ts",
+    testName: "a green commit older than the walk's age bound is NOT vouched - the heal refuses",
+  },
+  {
+    id: "walk-vouches-candidates",
+    hazard:
+      "an unprobed fallback commit reaches the fleet-wide settings writer: without the per-candidate all-green vouch the walk returns the first ancestor regardless of its CI verdict",
+    guardFile: ".github/scripts/fleet/newest_green_commit.ts",
+    snippet: "allGreenFailure(repository, candidate.sha, gh, { deadlineMs: 0 })",
+    mutated: "null",
+    testFile: "tests/fleet/newest_green_commit.test.ts",
+    testName:
+      "a red ancestor is never chosen: the walk vouches each candidate and picks the green one behind it",
+  },
 ];
 
 /** Occurrences of `token` in `text` (exact bytes, no regex). */
