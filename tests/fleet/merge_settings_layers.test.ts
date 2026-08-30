@@ -22,7 +22,9 @@ import {
   nameKeyedUnion,
   repoSourceFrom,
 } from "../../.github/scripts/fleet/merge_settings_layers";
+import { managedSettings } from "../../.github/scripts/fleet/render_managed_settings";
 import { parseSettingsDoc } from "../../.github/scripts/fleet/settings_document";
+import { loadManifests } from "../../scripts/module_manifests";
 
 const managed = {
   repository: {
@@ -691,6 +693,52 @@ describe("the override layer", () => {
     const malformed = shipped();
     (checksParams(malformed).required_status_checks as unknown[]).push("all-green");
     expect(() => load(malformed)).toThrow("is not a mapping");
+  });
+});
+
+describe("what the six layers emit for a rule the fleet stopped declaring", () => {
+  // The payload is the whole answer to "does the apply remove a dropped
+  // rule": the pinned action upserts a declared ruleset with a
+  // FULL-PAYLOAD PUT, so the live rules array becomes exactly what these
+  // layers emit. The dialect's rule APPEND runs between LAYERS, never
+  // against live state, so no live rule can survive its absence here.
+  // What this pins is the emitted document; the PUT itself is the
+  // action's contract (docs/settings.md's apply semantics).
+  //
+  // Both halves matter because the fleet's private repos still carry a
+  // live copilot_code_review rule: not an apply that failed to remove it,
+  // but their own settings.yml (layer 5) still declaring it - the legacy
+  // full baseline the settings-layering transition replaces. The starter
+  // that replaces it declares no ruleset, so the rule leaves the payload.
+  const manifests = loadManifests();
+  const privateFleet = managedSettings(
+    { modules: ["settings-sync"], private: true, trackingLabels: [] },
+    manifests,
+  );
+  const mainRuleTypes = (repoText: string) => {
+    const result = mergeOutcome(
+      privateFleet,
+      { text: repoText, where: "r" },
+      "owner/name",
+      loadOverrideLayer(),
+    );
+    if (result.kind !== "merged") throw new Error("expected a merge");
+    const main = (result.document.rulesets as Record<string, unknown>[]).find(
+      (r) => r.name === "main",
+    );
+    return ((main?.rules ?? []) as Record<string, unknown>[]).map((r) => r.type);
+  };
+
+  const STARTER =
+    'repository:\n  description: "x"\n  homepage: ""\n  topics: ""\n  private: true\n';
+  const LEGACY = `${STARTER}rulesets:\n  - name: main\n    rules:\n      - type: copilot_code_review\n        parameters:\n          review_on_push: true\n`;
+
+  test("the identity starter leaves it out of the emitted main ruleset", () => {
+    expect(mainRuleTypes(STARTER)).not.toContain("copilot_code_review");
+  });
+
+  test("a legacy repo layer declaring it keeps it in the payload - which is why the live private rulesets still carry it", () => {
+    expect(mainRuleTypes(LEGACY)).toContain("copilot_code_review");
   });
 });
 
