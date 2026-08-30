@@ -254,6 +254,171 @@ export const ALL_GREEN_WIRING = {
   anchorValidated: /^\s*const REQUIRED_GATE_JOB = "([^"]+)";$/m,
 };
 
+// The two Actions expressions the heal's sha plumbing routes through,
+// pinned as data so the structural checks below and the workflow can
+// never drift apart silently.
+// biome-ignore lint/suspicious/noTemplateCurlyInString: the literal Actions expression under pin
+const GATE_SHA_EXPR = "${{ steps.gate.outputs.sha }}";
+// biome-ignore lint/suspicious/noTemplateCurlyInString: the literal Actions expression under pin
+const SELECT_SHA_EXPR = "${{ needs.select.outputs.sha }}";
+const FALLBACK_IF = "steps.gate.outputs.fallback == 'true'";
+
+/** The settings heal's sha plumbing, judged STRUCTURALLY on the parsed
+ *  workflow (exported so the forcing tests run the exact judgment the
+ *  rule runs): the green gate resolves the one commit the run may write
+ *  from, and every link that carries it to a checkout is validated on
+ *  the owning YAML node, never by a floating text match - a matching
+ *  line on a decoy step must not stand in for the real wiring. Links:
+ *  the gate step carries `id: gate` (the outputs' key - renamed, every
+ *  reference silently reads empty; found by its exact command, exactly
+ *  once), the select job's `sha` output republishes it, the fallback
+ *  trio (re-checkout + setup-bun + reinstall, each conditioned on the
+ *  fallback output, in that order) lands the SELECT job on it with the
+ *  re-checkout as the job's LAST checkout, and the apply job's ONLY
+ *  checkout pins to the select output - "only" and
+ *  "last" because a later unpinned checkout would silently replace the
+ *  vouched tree with the trigger ref, which is also why every absent
+ *  link fails: actions/checkout treats a missing or empty ref as the
+ *  default (probe C: deleting the apply ref line was invisible to every
+ *  local gate). */
+export function settingsHealShaPlumbingMismatches(text: string): Mismatch[] {
+  const rel = ".github/workflows/settings-repos.yml";
+  const mismatches: Mismatch[] = [];
+  const mapping = (value: unknown): Record<string, unknown> =>
+    typeof value === "object" && value !== null && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : {};
+  const steps = (job: Record<string, unknown>): Record<string, unknown>[] =>
+    Array.isArray(job.steps) ? (job.steps as unknown[]).map(mapping) : [];
+  const isCheckout = (step: Record<string, unknown>): boolean =>
+    String(step.uses ?? "").startsWith("actions/checkout@");
+  const jobs = mapping(mapping(parseYaml(text)).jobs);
+  const select = mapping(jobs.select);
+  const selectSteps = steps(select);
+  if (selectSteps.length === 0) throw new Error(`${rel}: no select job steps - anchor lost`);
+
+  // The gate step by its EXACT command (trim-equal, never a substring:
+  // an echo decoy carrying the command in its text must not be the step
+  // found while the real gate, renamed, keeps running), and exactly one
+  // of it - two would make "the" gate ambiguous.
+  const gates = selectSteps.filter(
+    (step) => String(step.run ?? "").trim() === "bun .github/scripts/fleet/require_green_commit.ts",
+  );
+  if (gates.length !== 1) {
+    throw new Error(
+      `${rel}: expected exactly one green-gate step (run: bun .github/scripts/fleet/require_green_commit.ts), found ${gates.length} - anchor lost`,
+    );
+  }
+  const gate = gates[0];
+  if (String(gate.id ?? "") !== "gate") {
+    mismatches.push({
+      file: rel,
+      expected: "the green-gate step carrying `id: gate` (the sha/fallback outputs' key)",
+      got:
+        gate.id === undefined
+          ? "no id - every steps.gate.* read is silently empty"
+          : `id: ${String(gate.id)}`,
+    });
+  }
+
+  const outputSha = String(mapping(select.outputs).sha ?? "");
+  if (outputSha !== GATE_SHA_EXPR) {
+    mismatches.push({
+      file: rel,
+      expected: `the select job output sha: ${GATE_SHA_EXPR}`,
+      got:
+        outputSha === "" ? "no sha output - the apply job's checkout ref reads empty" : outputSha,
+    });
+  }
+
+  const trio = selectSteps.filter((step) => String(step.if ?? "") === FALLBACK_IF);
+  const trioCheckouts = trio.filter(isCheckout);
+  const trioSetups = trio.filter((step) =>
+    String(step.uses ?? "").startsWith("oven-sh/setup-bun@"),
+  );
+  // Trim-equal like the gate match: an `echo bun install ...` shaped run
+  // contains the command without running it, so a substring read would
+  // pass a fallback that never reinstalls.
+  const trioInstalls = trio.filter(
+    (step) => String(step.run ?? "").trim() === "bun install --frozen-lockfile",
+  );
+  if (
+    trio.length !== 3 ||
+    trioCheckouts.length !== 1 ||
+    trioSetups.length !== 1 ||
+    trioInstalls.length !== 1
+  ) {
+    mismatches.push({
+      file: rel,
+      expected: `a fallback trio conditioned on ${FALLBACK_IF}: one re-checkout, one setup-bun, one dependency reinstall`,
+      got: `${trio.length} conditioned step(s) (${trioCheckouts.length} checkout, ${trioSetups.length} setup-bun, ${trioInstalls.length} reinstall)`,
+    });
+  } else if (
+    // The trio in STRICT order: checkout, then setup-bun, then
+    // reinstall (>= so one step matching two roles can never satisfy
+    // "precedes" by being itself). Membership alone would pass a
+    // reordering that pins the toolchain or installs dependencies
+    // BEFORE the green tree lands - red-tip toolchain and deps running
+    // over green-commit files, the exact hybrid the re-checkout exists
+    // to prevent.
+    selectSteps.indexOf(trioCheckouts[0]) >= selectSteps.indexOf(trioSetups[0]) ||
+    selectSteps.indexOf(trioSetups[0]) >= selectSteps.indexOf(trioInstalls[0])
+  ) {
+    mismatches.push({
+      file: rel,
+      expected:
+        "the fallback trio in order - re-checkout, then setup-bun, then reinstall - so toolchain and dependencies are pinned FROM the green tree",
+      got: "a trio step runs before the tree it must read from lands",
+    });
+  } else if (String(mapping(trioCheckouts[0].with).ref ?? "") !== GATE_SHA_EXPR) {
+    // Validated on the OWNING step: a decoy checkout elsewhere carrying
+    // the right ref must never vouch for a rewired fallback checkout.
+    mismatches.push({
+      file: rel,
+      expected: `the fallback re-checkout pinned to ref: ${GATE_SHA_EXPR}`,
+      got:
+        String(mapping(trioCheckouts[0].with).ref ?? "") === ""
+          ? "no ref - the re-checkout lands on the trigger ref again, a silent no-op fallback"
+          : `ref: ${String(mapping(trioCheckouts[0].with).ref)}`,
+    });
+  } else {
+    const selectCheckouts = selectSteps.filter(isCheckout);
+    if (selectCheckouts.length !== 2 || selectCheckouts[1] !== trioCheckouts[0]) {
+      mismatches.push({
+        file: rel,
+        expected:
+          "exactly two select-job checkouts, the fallback re-checkout LAST (a later checkout would silently replace the vouched tree)",
+        got: `${selectCheckouts.length} checkout step(s)`,
+      });
+    }
+  }
+
+  const applySteps = steps(mapping(jobs.apply));
+  if (applySteps.length === 0) throw new Error(`${rel}: no apply job steps - anchor lost`);
+  const applyCheckouts = applySteps.filter(isCheckout);
+  if (applyCheckouts.length !== 1) {
+    mismatches.push({
+      file: rel,
+      expected:
+        "exactly one apply-job checkout (a second one could silently replace the pinned tree)",
+      got: `${applyCheckouts.length} checkout step(s)`,
+    });
+  } else {
+    const applyRef = String(mapping(applyCheckouts[0].with).ref ?? "");
+    if (applyRef !== SELECT_SHA_EXPR) {
+      mismatches.push({
+        file: rel,
+        expected: `the apply job's checkout pinned to ref: ${SELECT_SHA_EXPR}`,
+        got:
+          applyRef === ""
+            ? "no ref - the apply silently checks out the trigger ref, unpinning the fallback path"
+            : `ref: ${applyRef}`,
+      });
+    }
+  }
+  return mismatches;
+}
+
 /** The predicate's declared check name, extracted syntax-aware: the
  *  declaration LINE is located on the masked view (comments, strings,
  *  and template TEXT blanked - so a look-alike inside a multiline
@@ -5128,6 +5293,19 @@ const rules: Rule[] = [
   },
 
   {
+    // The heal's SHA PLUMBING: the green gate resolves the one commit
+    // the run may write from (the tip, or the scheduled fallback's green
+    // ancestor) and every checkout must consume it. Judged structurally
+    // on the parsed workflow by settingsHealShaPlumbingMismatches (whose
+    // header records the links and the decoy shapes it exists to catch);
+    // probe C proved the gap: deleting the apply checkout's ref was
+    // invisible to every local gate while the job silently reverted to
+    // the trigger ref. Self-contained like the rule above.
+    name: "settings-heal-sha-plumbing",
+    run: () => settingsHealShaPlumbingMismatches(read(".github/workflows/settings-repos.yml")),
+  },
+
+  {
     // Every run_hidden-wrapped step in settings-repos.yml must be
     // followed by a PUBLIC ::notice:: step that fires on one of the
     // wrapped step's own outputs. The capture swallows a wrapped step's
@@ -5442,6 +5620,7 @@ export const RULE_ROSTER = [
   "stamp-hook-path",
   "settings-apply-merged-input",
   "settings-green-gate",
+  "settings-heal-sha-plumbing",
   "settings-hidden-step-notices",
   "settings-label-preflight",
   "spawn-sync-hang-bound",

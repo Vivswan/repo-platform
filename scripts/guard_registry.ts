@@ -235,6 +235,61 @@ export const GUARD_REGISTRY: readonly GuardEntry[] = [
     testName:
       "a red ancestor is never chosen: the walk vouches each candidate and picks the green one behind it",
   },
+  // The heal's sha plumbing (settings-repos.yml): four links between the
+  // green gate's resolved commit and the checkouts that must consume it.
+  // Probe C staged the attack: deleting the apply checkout's ref was
+  // invisible to every local gate - actions/checkout treats a missing or
+  // empty ref as the trigger ref, so the run stays green while the
+  // fallback path silently applies unvouched tip state. The forcing
+  // tests run the settings-heal-sha-plumbing ssot rule's structural
+  // judgment (settingsHealShaPlumbingMismatches) on the REAL workflow.
+  {
+    id: "settings-gate-sha-output",
+    hazard:
+      "the select job's sha output deleted: steps.gate's resolved commit never reaches the apply job, whose checkout ref reads empty and silently reverts to the trigger ref",
+    guardFile: ".github/workflows/settings-repos.yml",
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal workflow line under pin
+    snippet: "      sha: ${{ steps.gate.outputs.sha }}",
+    mutated: "",
+    testFile: "tests/scripts/check_ssot.test.ts",
+    testName: "the gate sha output is ARMED: the select job republishes the gate's resolved sha",
+  },
+  {
+    id: "settings-fallback-checkout-condition",
+    hazard:
+      "the fallback re-checkout's condition rewired to never fire: the scheduled heal's select job keeps reading the RED tip's scripts and registry while the apply job reads the green commit - the unvouched hybrid no CI run ever saw",
+    guardFile: ".github/workflows/settings-repos.yml",
+    snippet:
+      "      - name: Check out the resolved green commit\n        if: steps.gate.outputs.fallback == 'true'",
+    mutated: "      - name: Check out the resolved green commit\n        if: false",
+    testFile: "tests/scripts/check_ssot.test.ts",
+    testName:
+      "the fallback checkout condition is ARMED: all three fallback steps gate on the resolved sha",
+  },
+  {
+    id: "settings-fallback-checkout-ref",
+    hazard:
+      "the fallback re-checkout's ref deleted: actions/checkout lands on the trigger ref again, so the fallback run's selection scripts and registry come from the red tip while claiming the green commit",
+    guardFile: ".github/workflows/settings-repos.yml",
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal workflow line under pin
+    snippet: "          ref: ${{ steps.gate.outputs.sha }}",
+    mutated: "",
+    testFile: "tests/scripts/check_ssot.test.ts",
+    testName:
+      "the fallback checkout ref is ARMED: the re-checkout lands on the gate's resolved sha",
+  },
+  {
+    id: "settings-apply-checkout-pinned",
+    hazard:
+      "the apply job's checkout ref deleted (probe C, verbatim): the fleet-wide writer's layer files come from the trigger ref instead of the gate's vouched commit, green on every local gate",
+    guardFile: ".github/workflows/settings-repos.yml",
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal workflow line under pin
+    snippet: "          ref: ${{ needs.select.outputs.sha }}",
+    mutated: "",
+    testFile: "tests/scripts/check_ssot.test.ts",
+    testName:
+      "the apply checkout pin is ARMED: the apply job checks out the select job's vouched sha",
+  },
 ];
 
 /** Occurrences of `token` in `text` (exact bytes, no regex). */
