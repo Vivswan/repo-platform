@@ -15,10 +15,13 @@ import { assertCentralTheme, copyInto, tierStrictLinks } from "./build.ts";
 import { collectBroken, reportBody, walkHtml } from "./check_links.ts";
 import {
   assemblyOrder,
+  judgeCommandTag,
+  parseCommandProbe,
   parseMounts,
   planMount,
   redirectHtml,
   reservedRootEntries,
+  type ScriptProbe,
   urlBase,
   validateRelPath,
   versionLinks,
@@ -290,6 +293,156 @@ describe("derive", () => {
         items: [{ text: "zh-cn/guide/intro.md", link: "/zh-cn/guide/intro" }],
       },
     ]);
+  });
+});
+
+describe("command-mount legacy tags", () => {
+  test("parseCommandProbe reads the bun run shapes: plain, --cwd, --filter", () => {
+    expect(parseCommandProbe("bun run build")).toEqual({
+      script: "build",
+      target: { kind: "path", dir: "" },
+    });
+    expect(parseCommandProbe("bun run build:web")).toEqual({
+      script: "build:web",
+      target: { kind: "path", dir: "" },
+    });
+    expect(parseCommandProbe("bun run --cwd apps/web build")).toEqual({
+      script: "build",
+      target: { kind: "path", dir: "apps/web" },
+    });
+    expect(parseCommandProbe("bun --cwd=apps/web run build")).toEqual({
+      script: "build",
+      target: { kind: "path", dir: "apps/web" },
+    });
+    expect(parseCommandProbe("bun run --filter web build")).toEqual({
+      script: "build",
+      target: { kind: "filter", name: "web" },
+    });
+    expect(parseCommandProbe("bun run -F @scope/web build")).toEqual({
+      script: "build",
+      target: { kind: "filter", name: "@scope/web" },
+    });
+  });
+
+  test("anything the scripts table cannot answer for is unprobeable", () => {
+    for (const command of [
+      "npm run build",
+      "deno task build",
+      "uv run mkdocs build --site-dir dist",
+      "bun x vite build",
+      "bun build run",
+      "bun run build && bun run postbuild",
+      'ASTRO_BASE="$PAGES_BASE_PATH" bun run build',
+      "bun run ./scripts/build.ts",
+      "bun run build.ts",
+      "bun run",
+      "bun run build extra",
+      "bun run --silent build",
+      "bun run build --cwd apps/web",
+      "bun run --cwd ../outside build",
+      "bun run --cwd apps/web --filter web build",
+      "bun run --filter './apps/*' build",
+      "bun run --filter .web build",
+      "",
+    ]) {
+      expect(parseCommandProbe(command)).toBeNull();
+    }
+  });
+
+  const treeProbe: ScriptProbe = { script: "build:web", target: { kind: "path", dir: "" } };
+  const reader = (files: Record<string, string>) => (path: string) => files[path] ?? null;
+  const lister = (files: Record<string, string>) => () => Object.keys(files);
+  const judge = (probe: ScriptProbe, files: Record<string, string>) =>
+    judgeCommandTag(probe, reader(files), lister(files));
+
+  test("the legacy-tag skip is NARROW: a tag declaring the build script is never skipped", () => {
+    expect(
+      judge(treeProbe, { "package.json": '{"scripts": {"build:web": "vite build"}}' }),
+    ).toEqual({
+      kind: "declared",
+    });
+    // With no package.json in --cwd's chain below it, bun walks up to the
+    // root's - the declaring ancestor keeps the tag served.
+    expect(
+      judge(
+        { script: "build", target: { kind: "path", dir: "apps/web" } },
+        { "package.json": '{"scripts": {"build": "vite build"}}', "apps/web/index.ts": "" },
+      ),
+    ).toEqual({ kind: "declared" });
+    const undeclared = judge(treeProbe, { "package.json": '{"scripts": {}}' });
+    expect(undeclared.kind).toBe("skip");
+    expect(undeclared).toHaveProperty("reason");
+  });
+
+  test("bun run resolves the NEAREST package.json: a nearer package hides the root's scripts", () => {
+    const probe: ScriptProbe = { script: "build", target: { kind: "path", dir: "apps/web" } };
+    const nearerHides = judge(probe, {
+      "package.json": '{"scripts": {"build": "vite build"}}',
+      "apps/web/package.json": '{"scripts": {}}',
+    });
+    expect(nearerHides).toEqual({
+      kind: "skip",
+      reason: expect.stringContaining("apps/web/package.json"),
+    });
+    expect(judge(probe, { "package.json": '{"scripts": {"build": "vite build"}}' })).toEqual({
+      kind: "skip",
+      reason: expect.stringContaining("the --cwd directory 'apps/web' does not exist at that tag"),
+    });
+    // A symlinked path component lists as a plain entry; bun follows the
+    // link, so the tree is not judgeable in either direction.
+    expect(judge(probe, { "package.json": "{}", "apps/web": "../elsewhere" })).toEqual({
+      kind: "inconclusive",
+    });
+    expect(judge(probe, { "package.json": "{}", apps: "../elsewhere" })).toEqual({
+      kind: "inconclusive",
+    });
+  });
+
+  test("a tag that predates the script's package.json entirely is skipped with the reason", () => {
+    expect(judge(treeProbe, {})).toEqual({
+      kind: "skip",
+      reason: expect.stringContaining("no package.json is reachable from the tree root"),
+    });
+  });
+
+  test("no affirmative proof, no skip: an unparseable package.json is inconclusive, never declared", () => {
+    // Inconclusive is its own verdict on purpose: the HEAD calibration
+    // must not arm skipping off a tree the probe could not read.
+    expect(judge(treeProbe, { "package.json": "{ not json" })).toEqual({ kind: "inconclusive" });
+    // A symlinked package.json: the path is listed but the reader returns
+    // null (git show would yield the link's target text, not content).
+    expect(
+      judgeCommandTag(
+        treeProbe,
+        () => null,
+        () => ["package.json"],
+      ),
+    ).toEqual({
+      kind: "inconclusive",
+    });
+  });
+
+  test("a filter probe finds the script in the workspace package of that name", () => {
+    const probe: ScriptProbe = { script: "build", target: { kind: "filter", name: "web" } };
+    const tree = {
+      "package.json": '{"name": "monorepo", "workspaces": ["apps/*"]}',
+      "apps/web/package.json": '{"name": "web", "scripts": {"build": "vite build"}}',
+      "apps/api/package.json": '{"name": "api", "scripts": {}}',
+      "node_modules/vendored/package.json": '{"name": "vendored", "scripts": {"build": "x"}}',
+    };
+    expect(judge(probe, tree)).toEqual({ kind: "declared" });
+    expect(judge({ script: "build", target: { kind: "filter", name: "missing" } }, tree)).toEqual({
+      kind: "skip",
+      reason: expect.stringContaining("no workspace package named 'missing'"),
+    });
+    // A vendored node_modules package never vouches for a filter name.
+    expect(judge({ script: "build", target: { kind: "filter", name: "vendored" } }, tree)).toEqual({
+      kind: "skip",
+      reason: expect.stringContaining("no workspace package named 'vendored'"),
+    });
+    // An unparseable candidate breaks the proof of absence.
+    const rotten = { ...tree, "apps/web/package.json": "{ not json" };
+    expect(judge(probe, rotten)).toEqual({ kind: "inconclusive" });
   });
 });
 
