@@ -421,6 +421,27 @@ export const GUARD_REGISTRY: readonly GuardEntry[] = [
     testFile: "actions/pages-site/pages-site.test.ts",
     testName: "the legacy-tag skip is NARROW: a tag declaring the build script is never skipped",
   },
+  // The composite actions' pinned-bun setup (the actions-bun-guard rule's
+  // canonical block). The attack was staged live, not hypothetically: the
+  // 1.4.0 bump rewrote the action lockfiles to lockfileVersion 2, and
+  // every consumer whose own pin resolved an older bun (cloud-speech at
+  // 1.3.9 first) died at the actions' install step - with the parse error
+  // swallowed by --silent and zero signal in repo-platform's CI, which
+  // pins 1.4.0 itself. The forcing test runs the rule's judgment on the
+  // REAL action manifests, so unpinning any one of them goes red.
+  {
+    id: "actions-bun-pin",
+    hazard:
+      "a composite action's bun floats on the CONSUMER repository's version resolution (a bare setup-bun reads the caller checkout's version files): a repo-platform bun bump that rewrites the action lockfiles then breaks arbitrary consumers' CI with no signal in repo-platform's own",
+    guardFile: "actions/check-typography/action.yml",
+    snippet:
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal action lines under pin
+      "      continue-on-error: true\n      uses: oven-sh/setup-bun@v2\n      with:\n        bun-version-file: ${{ github.action_path }}/.bun-version",
+    mutated: "      continue-on-error: true\n      uses: oven-sh/setup-bun@v2",
+    testFile: "tests/scripts/check_ssot.test.ts",
+    testName:
+      "the composite actions' bun pin is ARMED: every bun-touching action.yml carries the pinned setup block",
+  },
 ];
 
 /** A guard retired ON PURPOSE: its id moved here from GUARD_REGISTRY

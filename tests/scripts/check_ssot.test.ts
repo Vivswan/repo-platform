@@ -12,6 +12,8 @@ import { PIN_FLIPS } from "../../.github/scripts/sync/starter_pin_rollout";
 import {
   ALL_GREEN_ROSTER,
   ASYNC_SPAWN_FILES,
+  actionManifestFiles,
+  actionsBunGuardMismatches,
   agentsStagingMismatches,
   allGreenGateMismatches,
   applyDivergences,
@@ -74,7 +76,7 @@ import {
   zToDollar,
 } from "../../scripts/check_ssot";
 import { TOOLCHAIN_SETUP_FRAGMENT, TOOLCHAIN_SETUP_TARGETS } from "../../scripts/compose_template";
-import { MARKER_TOKENS, mdMarkers } from "../../scripts/generate";
+import { actionSetsUpBun, MARKER_TOKENS, mdMarkers } from "../../scripts/generate";
 import { templateCarries } from "../../scripts/ts_extract.ts";
 
 describe("applyDivergences", () => {
@@ -772,6 +774,128 @@ describe("stepCarriesWithKey", () => {
     expect(bun.test("uses: oven-sh/setup-bun@v2")).toBe(true);
     expect(bun.test("# - uses: oven-sh/setup-bun@v2".replace(/^#\s*/, ""))).toBe(true);
     expect(bun.test("echo oven-sh/setup-bun@v2")).toBe(false);
+  });
+});
+
+describe("actionsBunGuardMismatches", () => {
+  // A minimal composite carrying the canonical pinned-bun setup block.
+  const canonical = `runs:
+  using: composite
+  steps:
+    - name: Check for a bun matching the action's pin
+      id: bun
+      shell: bash
+      run: |
+        pin="$(cat "\${{ github.action_path }}/.bun-version")"
+        have="$(command -v bun >/dev/null && bun --version || true)"
+        echo "pinned=$([ "$have" = "$pin" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+
+    # Free-form prose between the steps is excused by the semantic-line
+    # comparison; only the steps themselves are pinned.
+    - name: Set up bun
+      id: setup-bun
+      if: steps.bun.outputs.pinned != 'true'
+      continue-on-error: true
+      uses: oven-sh/setup-bun@v2
+      with:
+        bun-version-file: \${{ github.action_path }}/.bun-version
+
+    - name: Set up bun (retry)
+      if: steps.setup-bun.outcome == 'failure'
+      uses: oven-sh/setup-bun@v2
+      with:
+        bun-version-file: \${{ github.action_path }}/.bun-version
+
+    - name: Run
+      shell: bash
+      run: bun "\${{ github.action_path }}/x.ts"
+`;
+
+  test("the canonical pinned block passes", () => {
+    expect(actionsBunGuardMismatches("actions/x/action.yml", canonical)).toEqual([]);
+  });
+
+  test("a bare setup-bun (both with: blocks deleted) is refused - the pre-fix shape", () => {
+    const bare = canonical.replaceAll(
+      `      uses: oven-sh/setup-bun@v2
+      with:
+        bun-version-file: \${{ github.action_path }}/.bun-version`,
+      "      uses: oven-sh/setup-bun@v2",
+    );
+    const got = actionsBunGuardMismatches("actions/x/action.yml", bare);
+    // One canonical-block mismatch plus one per bare setup step.
+    expect(got.length).toBe(3);
+    expect(got[0].expected).toContain("action-local generated .bun-version");
+  });
+
+  test("a workspace-relative bun-version-file is refused - it reads the CALLER's dotfile", () => {
+    const relative = canonical.replaceAll(
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal action line under test
+      "bun-version-file: ${{ github.action_path }}/.bun-version",
+      "bun-version-file: .bun-version",
+    );
+    expect(actionsBunGuardMismatches("actions/x/action.yml", relative).length).toBe(3);
+  });
+
+  test("an EXTRA bare setup-bun beside an intact canonical block is refused", () => {
+    const extra = `${canonical}
+    - name: Set up bun again
+      uses: oven-sh/setup-bun@v2
+`;
+    const got = actionsBunGuardMismatches("actions/x/action.yml", extra);
+    expect(got.length).toBe(1);
+    expect(got[0].got).toContain("without the action-local pin");
+  });
+
+  test("a QUOTED bare setup-bun is still a setup-bun step - text look-alikes cannot dodge the pin", () => {
+    const extra = `${canonical}
+    - name: Set up bun again
+      uses: "oven-sh/setup-bun@v2"
+`;
+    expect(actionsBunGuardMismatches("actions/x/action.yml", extra).length).toBe(1);
+  });
+
+  test("a MIXED-CASE bare setup-bun is still a setup-bun step - GitHub action ids are case-insensitive", () => {
+    const extra = `${canonical}
+    - name: Set up bun again
+      uses: OVEN-SH/Setup-Bun@v2
+`;
+    expect(actionsBunGuardMismatches("actions/x/action.yml", extra).length).toBe(1);
+  });
+
+  test("an action that runs bun with no setup block at all is refused", () => {
+    const text =
+      'runs:\n  using: composite\n  steps:\n    - name: Run\n      shell: bash\n      run: bun "x.ts"\n';
+    expect(actionsBunGuardMismatches("actions/x/action.yml", text).length).toBe(1);
+  });
+
+  test("an action touching no bun needs no guard", () => {
+    const text =
+      "runs:\n  using: composite\n  steps:\n    - name: Run\n      shell: bash\n      run: echo ok\n";
+    expect(actionsBunGuardMismatches("actions/x/action.yml", text)).toEqual([]);
+  });
+
+  test("a commented setup-bun example alone demands nothing", () => {
+    const text =
+      "runs:\n  using: composite\n  steps:\n    # - uses: oven-sh/setup-bun@v2\n    - name: Run\n      shell: bash\n      run: echo ok\n";
+    expect(actionSetsUpBun(text)).toBe(false);
+    expect(actionsBunGuardMismatches("actions/x/action.yml", text)).toEqual([]);
+  });
+
+  test("the manifest walk sees nested actions", () => {
+    expect(actionManifestFiles()).toContain("actions/pages-site/check-links/action.yml");
+  });
+
+  test("the composite actions' bun pin is ARMED: every bun-touching action.yml carries the pinned setup block", () => {
+    // The live-file forcing test the guard registry names: unpinning any
+    // real action's setup-bun (the staged mutation strips the primary
+    // setup step's with: block in check-typography) goes red here.
+    const files = actionManifestFiles();
+    const setups = files.filter((file) => actionSetsUpBun(readFileSync(file, "utf-8")));
+    expect(setups.length).toBeGreaterThan(0);
+    expect(
+      files.flatMap((file) => actionsBunGuardMismatches(file, readFileSync(file, "utf-8"))),
+    ).toEqual([]);
   });
 });
 

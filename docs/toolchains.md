@@ -18,7 +18,7 @@ Modules without a pin: uv floats on its setup action's default, and rust ships n
 - Managed workflows and the repo-owned starters' initial render pass the matching version-file input (`bun-version-file: .bun-version`, `node-version-file: .node-version`, `deno-version-file: .dvmrc`).
 - The [pages module's](pages.md) `reusable-pages.yml` makes one full checkout and resolves each dotfile with a `hashFiles()` fallback at the checkout root - every tier (historical tags included) builds with that one pin, and no dotfile leaves the input unset (the setup action floats on its default).
 - validate-template checks that a repo selecting a pinned module carries the dotfile with exactly the pinned version.
-- repo-platform's own composite actions (under `actions/`) set up their bun WITHOUT a pin, by design: they run vendored scripts inside caller checkouts, where the repo's dotfile may not exist.
+- repo-platform's own composite actions (under `actions/`) pin their bun too, from a generated action-local `.bun-version` beside each action.yml (their setup steps pass `bun-version-file` against `github.action_path`). They run vendored scripts and action-local lockfiles inside caller checkouts, so the CALLER's version resolution must never pick their bun: a repository pinning an older bun cannot parse the lockfiles repo-platform's bun writes. `bun run generate` emits the dotfiles from the same bun manifest pin, and the actions-bun-guard ssot rule keeps every setup step reading them.
 
 ## Overriding, per toolchain
 

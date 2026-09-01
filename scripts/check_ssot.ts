@@ -38,6 +38,7 @@ import {
 import { parse as parseYaml } from "yaml";
 import {
   EXCLUDED_DIRS as EXCLUDED_ACTION_DIRS,
+  EXCLUDED_DIRS,
   FLEET_WORKFLOWS,
 } from "../.github/scripts/build-branches/branch_tree.ts";
 import {
@@ -51,7 +52,13 @@ import { stageComposedTreeArgv } from "../.github/scripts/shared/stage_tree.ts";
 import { captureName } from "../.github/scripts/sync/run_hidden.ts";
 import { PIN_FLIPS } from "../.github/scripts/sync/starter_pin_rollout.ts";
 import { TOOLCHAIN_SETUP_FRAGMENT, TOOLCHAIN_SETUP_TARGETS } from "./compose_template.ts";
-import { MARKER_TOKENS, trackingStreams } from "./generate.ts";
+import {
+  actionSetsUpBun,
+  actionSteps,
+  MARKER_TOKENS,
+  trackingStreams,
+  usesSetupBun,
+} from "./generate.ts";
 import { type JinjaVars, normalizeJinja, placeholderJinja } from "./jinja_subset.ts";
 import { loadManifests as loadManifestsFresh, type ModuleManifest } from "./module_manifests.ts";
 import { landedPathAndGates, loadBaseOwnership } from "./ownership.ts";
@@ -2434,6 +2441,108 @@ export function stepCarriesWithKey(lines: string[], usesAt: number, key: string)
   return false;
 }
 
+/** The canonical pinned-bun setup block every bun-touching composite
+ *  action carries, as trimmed semantic lines (comments and blank lines
+ *  excused, so per-action prose stays free). The generated action-local
+ *  .bun-version both setup steps read is what decouples the action's
+ *  runtime from the CALLING repository's bun resolution; the exact-match
+ *  probe keeps the reuse fast path from resurrecting that coupling. */
+export const ACTIONS_BUN_SETUP_GUARD: readonly string[] = [
+  "- name: Check for a bun matching the action's pin",
+  "id: bun",
+  "shell: bash",
+  "run: |",
+  // biome-ignore lint/suspicious/noTemplateCurlyInString: literal workflow lines under pin
+  'pin="$(cat "${{ github.action_path }}/.bun-version")"',
+  'have="$(command -v bun >/dev/null && bun --version || true)"',
+  'echo "pinned=$([ "$have" = "$pin" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"',
+  "- name: Set up bun",
+  "id: setup-bun",
+  "if: steps.bun.outputs.pinned != 'true'",
+  "continue-on-error: true",
+  "uses: oven-sh/setup-bun@v2",
+  "with:",
+  // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal pin line
+  "bun-version-file: ${{ github.action_path }}/.bun-version",
+  "- name: Set up bun (retry)",
+  "if: steps.setup-bun.outcome == 'failure'",
+  "uses: oven-sh/setup-bun@v2",
+  "with:",
+  // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal pin line
+  "bun-version-file: ${{ github.action_path }}/.bun-version",
+];
+
+/** Every action manifest under actions/, nested actions included - one
+ *  walk shared by the actions-bun-guard rule and its forcing test, so
+ *  the two can never judge different rosters; branch_tree.ts's
+ *  EXCLUDED_DIRS bounds it to the tree publication ships. */
+export function actionManifestFiles(): string[] {
+  return walkFiles("actions")
+    .map((f) => f.path)
+    .filter(
+      (path) =>
+        path.endsWith("/action.yml") &&
+        !path.split("/").some((segment) => EXCLUDED_DIRS.has(segment)),
+    );
+}
+
+/** How one action.yml violates the pinned-bun setup contract: any action
+ *  that runs bun OR sets it up must carry ACTIONS_BUN_SETUP_GUARD
+ *  verbatim, and EVERY setup-bun step (canonical or extra, quoted or
+ *  plain) must read the action-local pin - so a bare setup added beside
+ *  a canonical block is as loud as a drifted block. Triggers and the
+ *  per-step pin are judged on the PARSED steps (actionSteps), the way
+ *  Actions itself reads the manifest; only the canonical block stays a
+ *  byte comparison, because pinning exact bytes is its point. The
+ *  setup-bun trigger is what makes a reintroduced BARE setup loud even
+ *  before anything runs the bun it installs. */
+export function actionsBunGuardMismatches(file: string, text: string): Mismatch[] {
+  const steps = actionSteps(text);
+  // A run line starting with "bun " counts, block scalars included; a
+  // prose line shaped that way would over-demand the guard, which fails
+  // closed.
+  const runsBun = steps.some(
+    (step) =>
+      typeof step.run === "string" &&
+      step.run.split("\n").some((line) => line.trimStart().startsWith("bun ")),
+  );
+  const setupSteps = steps.filter(usesSetupBun);
+  if (!runsBun && setupSteps.length === 0) return [];
+  const mismatches: Mismatch[] = [];
+  // Trimmed: the guard sits at different depths across actions.
+  const lines = semanticLines(text).map((line) => line.trim());
+  const carried = lines.some((_, i) =>
+    ACTIONS_BUN_SETUP_GUARD.every((line, j) => lines[i + j] === line),
+  );
+  if (!carried) {
+    mismatches.push({
+      file,
+      expected:
+        "the canonical three-step bun setup guard (pin probe, pinned install, pinned retry - " +
+        "both setup steps reading the action-local generated .bun-version)",
+      got: "missing or drifted from the block this rule pins - a bare or caller-resolved setup-bun breaks every consumer whose own bun predates the action lockfiles' writer",
+    });
+  }
+  // The canonical block's pin line doubles as the per-step requirement,
+  // so the two judgments can never demand different bytes.
+  const pinLine = ACTIONS_BUN_SETUP_GUARD[ACTIONS_BUN_SETUP_GUARD.length - 1];
+  const pinValue = pinLine.slice("bun-version-file: ".length);
+  for (const step of setupSteps) {
+    const withBlock = step.with;
+    const pinned =
+      typeof withBlock === "object" &&
+      withBlock !== null &&
+      (withBlock as Record<string, unknown>)["bun-version-file"] === pinValue;
+    if (pinned) continue;
+    mismatches.push({
+      file,
+      expected: `every setup-bun step carrying '${pinLine}' in its with: block`,
+      got: "a setup-bun step without the action-local pin - it resolves the CALLER repository's bun version files",
+    });
+  }
+  return mismatches;
+}
+
 // --- all-green verdict roster -----------------------------------------------
 
 /** Every gating job in this repository's ci.yml, by job id - the authored
@@ -3665,10 +3774,11 @@ const rules: Rule[] = [
     // the workflows actually pass the version-file input. Real steps are
     // matched structurally (the key must sit inside that step's own with:
     // block); commented starter examples are checked as comment text and
-    // can never satisfy the per-action anchors. actions/ is deliberately
-    // out of scope: the composite actions install their own floating bun
-    // for vendored scripts run in caller checkouts, where the repo's
-    // dotfile may not exist. reusable-pages.yml satisfies the rule with
+    // can never satisfy the per-action anchors. actions/ is out of this
+    // rule's scope but not unpinned: each composite action's setup reads
+    // its own generated .bun-version (the actions-bun-guard rule pins
+    // that block, action_path-anchored so the CALLER's dotfiles never
+    // pick the version). reusable-pages.yml satisfies the rule with
     // its hashFiles() checkout-root expression.
     name: "toolchain-version-files",
     run: () => {
@@ -5467,51 +5577,30 @@ const rules: Rule[] = [
   },
 
   {
-    // Every composite action that runs bun carries the same three-step
-    // setup guard: probe for a caller-installed bun, install only when
-    // absent, retry the install once (a setup-bun fetch flake on a nightly
-    // reporting path turns a green night red). The block cannot be hoisted
-    // into a shared action - a relative `uses:` inside a composite action
-    // resolves against the CALLER's workspace, not this repo - so the
-    // copies are load-bearing; this rule keeps every copy present and
-    // identical, and catches a future bun-running action shipped bare.
+    // Every composite action that touches bun carries the same three-step
+    // setup guard: probe for a bun already AT the action's pin, install
+    // the pinned version when the probe misses, retry the install once (a
+    // setup-bun fetch flake on a nightly reporting path turns a green
+    // night red). The pin is the load-bearing part: both setup steps read
+    // the action-local generated .bun-version (bun-version-file against
+    // github.action_path), because a BARE setup-bun resolves the CALLING
+    // repository's version files - and a consumer pinning an older bun
+    // cannot parse the lockfiles repo-platform's bun writes (the
+    // cloud-speech class: bun < 1.4.0 dying on a lockfileVersion-2
+    // bun.lock with the message swallowed by --silent). The block cannot
+    // be hoisted into a shared action - a relative `uses:` inside a
+    // composite action resolves against the CALLER's workspace, not this
+    // repo - so the copies are load-bearing; this rule keeps every copy
+    // present and identical (nested actions included), and catches a
+    // future bun-touching action shipped bare.
     name: "actions-bun-guard",
     run: () => {
-      const mismatches: Mismatch[] = [];
-      const guard = [
-        "- name: Check for a caller-installed bun",
-        "id: bun",
-        "shell: bash",
-        'run: echo "present=$(command -v bun >/dev/null && echo true || echo false)" >> "$GITHUB_OUTPUT"',
-        "- name: Set up bun",
-        "id: setup-bun",
-        "if: steps.bun.outputs.present != 'true'",
-        "continue-on-error: true",
-        "uses: oven-sh/setup-bun@v2",
-        "- name: Set up bun (retry)",
-        "if: steps.setup-bun.outcome == 'failure'",
-        "uses: oven-sh/setup-bun@v2",
-      ];
-      for (const dir of readdirSync(join(REPO_ROOT, "actions"))) {
-        const file = `actions/${dir}/action.yml`;
-        if (!existsSync(join(REPO_ROOT, file))) continue;
-        const text = read(file);
-        // Single-line `run: bun ...` steps and `bun ...` lines inside
-        // block-scalar run steps both count; a prose line starting with
-        // "bun " would over-demand the guard, which fails closed.
-        if (!/^\s*run: bun /m.test(text) && !/^\s*bun /m.test(text)) continue;
-        // Trimmed: the guard sits at different depths across actions.
-        const lines = semanticLines(text).map((line) => line.trim());
-        const carried = lines.some((_, i) => guard.every((line, j) => lines[i + j] === line));
-        if (!carried) {
-          mismatches.push({
-            file,
-            expected: "the canonical three-step bun setup guard (probe, guarded install, retry)",
-            got: "missing or drifted from the block this rule pins",
-          });
-        }
+      const files = actionManifestFiles();
+      const guarded = files.filter((file) => actionSetsUpBun(read(file)));
+      if (guarded.length === 0) {
+        throw new Error("no actions/**/action.yml sets up bun - anchor lost");
       }
-      return mismatches;
+      return files.flatMap((file) => actionsBunGuardMismatches(file, read(file)));
     },
   },
 

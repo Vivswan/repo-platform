@@ -32,19 +32,30 @@ outputs:
 runs:
   using: composite
   steps:
-    # Installed once up front: the wrapped validate-template action reuses
-    # a caller-installed bun (its own presence check), and the freshness
-    # and report scripts below need it too.
-    - name: Check for a caller-installed bun
+    # Installed once up front: the wrapped validate-template action probes
+    # for a bun matching the same generated pin and finds this one, and
+    # the freshness and report scripts below need it too.
+    - name: Check for a bun matching the action's pin
       id: bun
       shell: bash
-      run: echo "present=$(command -v bun >/dev/null && echo true || echo false)" >> "$GITHUB_OUTPUT"
+      run: |
+        pin="$(cat "${{ github.action_path }}/.bun-version")"
+        have="$(command -v bun >/dev/null && bun --version || true)"
+        echo "pinned=$([ "$have" = "$pin" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
 
+    # Skipped only when the caller's bun already IS the pinned version
+    # (reuse then just skips a second network fetch): the action's scripts
+    # and lockfile run on the action-local .bun-version pin (generated
+    # from the manifests' bun pin), never on whatever the CALLER resolves
+    # - a caller pinning an older bun cannot parse the lockfiles
+    # repo-platform's bun writes.
     - name: Set up bun
       id: setup-bun
-      if: steps.bun.outputs.present != 'true'
+      if: steps.bun.outputs.pinned != 'true'
       continue-on-error: true
       uses: oven-sh/setup-bun@v2
+      with:
+        bun-version-file: ${{ github.action_path }}/.bun-version
 
     # One retry: the setup's network fetch is a known transient flake, and
     # a flake here would block a gate that has nothing to say about the
@@ -52,6 +63,8 @@ runs:
     - name: Set up bun (retry)
       if: steps.setup-bun.outcome == 'failure'
       uses: oven-sh/setup-bun@v2
+      with:
+        bun-version-file: ${{ github.action_path }}/.bun-version
 
     # No install step for this action's own scripts: no runtime deps.
     #
