@@ -131,7 +131,7 @@ Activation is additionally PRESENCE-GATED (`prTitleWorkflowPresent` in the rende
 
 ### Copilot code review
 
-`copilot_code_review` REQUESTS a Copilot code review on every pull request to the default branch (new pushes and drafts included) - on PUBLIC repositories only: the rule lives in the fleet's public visibility overlay, because Copilot reviews are disabled on the fleet's private repos, where a request could never be answered.
+`copilot_code_review` REQUESTS a Copilot code review on every pull request to the default branch (new pushes and drafts included) - on PUBLIC repositories only: the rule lives in the fleet's public visibility overlay by fleet policy, not platform limit (private repos can run Copilot reviews; the fleet chooses not to request them there).
 
 The reviews are ADVISORY: each executes as a dynamic Actions workflow and posts a `copilot-pull-request-reviewer` check run on the reviewed head, but nothing blocks on it - the verdict machinery that once owed it is retired. Known gaps where no automatic run fires: new pushes to DRAFT PRs, and bot-authored PRs such as Dependabot's (re-request from the reviewers panel if a review is wanted).
 

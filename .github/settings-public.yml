@@ -49,14 +49,15 @@ rulesets:
         parameters:
           severity: warnings
       # Automatically request Copilot code review on PRs to main, including
-      # on each new push and on draft PRs - PUBLIC repositories only:
-      # Copilot reviews are disabled on the fleet's private repos, where a
-      # request could never be answered. The reviews are ADVISORY: each
-      # run posts a copilot-pull-request-reviewer check run on the
-      # reviewed head, but no gate waits on it since the verdict machinery
-      # retired. Verified edges: bot-authored PRs (Dependabot) and new
-      # pushes to DRAFT PRs get no automatic run despite this rule -
-      # request the review from the reviewers panel where wanted.
+      # on each new push and on draft PRs - PUBLIC repositories only, by
+      # fleet policy: private repos can run Copilot reviews (verified live
+      # 2026-08), the fleet just chooses not to request them there. The
+      # reviews are ADVISORY: each run posts a copilot-pull-request-reviewer
+      # check run on the reviewed head, but no gate waits on it since the
+      # verdict machinery retired. Verified edges: bot-authored PRs
+      # (Dependabot) and new pushes to DRAFT PRs get no automatic run
+      # despite this rule - request the review from the reviewers panel
+      # where wanted.
       - type: copilot_code_review
         parameters:
           review_on_push: true
