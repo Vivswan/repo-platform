@@ -117,6 +117,20 @@ export const GUARD_REGISTRY: readonly GuardEntry[] = [
     testFile: "tests/scripts/check_guard_binding.test.ts",
     testName: "an entry whose snippet vanished from its guard file is reported",
   },
+  // The deletion tripwire is a guard too: the binding check validates
+  // the entries PRESENT both ways but is structurally blind to ABSENT
+  // ones - a rebase's conflict resolution once dropped 5 of main's
+  // entries with every gate green, caught only by a manual count.
+  {
+    id: "guard-registry-deletion-tripwire",
+    hazard:
+      "a merge-conflict resolution silently drops registry entries: the binding check proves every PRESENT entry resolves both ways but never asks what main had, so guards vanish wholesale with every gate green",
+    guardFile: "scripts/check_guard_binding.ts",
+    snippet: "if (!liveIds.has(baseId) && !retiredIds.has(baseId)) {",
+    mutated: "if (false) {",
+    testFile: "tests/scripts/check_guard_binding.test.ts",
+    testName: "a merge-base registry id missing at HEAD without a RETIRED_GUARDS entry is reported",
+  },
   // The all-green action's judgment guards (actions/all-green/action.yml's
   // judge block). Their scenario-level forcing cases are
   // verify_allgreen_judgment.sh's; the wrapper test file
@@ -398,6 +412,24 @@ export const GUARD_REGISTRY: readonly GuardEntry[] = [
     testName: "the dead-link strictness wiring is ARMED: HEAD tiers build strict, tags lenient",
   },
 ];
+
+/** A guard retired ON PURPOSE: its id moved here from GUARD_REGISTRY
+ *  when the guard left with its machinery (the sanctioned removal case).
+ *  The deletion tripwire in scripts/check_guard_binding.ts compares
+ *  HEAD's ids against the registry file at the merge-base with
+ *  origin/main and goes red on any id that is neither live nor listed
+ *  here - so a merge-conflict resolution can never drop entries
+ *  silently, while a deliberate retirement stays a one-line move.
+ *  Records are permanent: deleting one re-trips the wire, because the
+ *  merge-base extraction reads retired ids too. */
+export interface RetiredGuard {
+  /** The retired entry's id, verbatim. */
+  id: string;
+  /** Why the guard left, one line (usually: retired with its machinery). */
+  reason: string;
+}
+
+export const RETIRED_GUARDS: readonly RetiredGuard[] = [];
 
 /** Occurrences of `token` in `text` (exact bytes, no regex). */
 export function countOccurrences(text: string, token: string): number {

@@ -190,7 +190,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
+      # Full history: the guard-binding step's deletion tripwire compares
+      # the registry against the merge-base with origin/main, and a
+      # depth-1 checkout would make it stand down (fail open) on every PR.
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: .bun-version
