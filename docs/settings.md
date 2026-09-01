@@ -118,7 +118,7 @@ The two protection rulesets live in [.github/settings-override.yml](../.github/s
 
 ### The pr-title ruleset
 
-A third default-branch ruleset, `pr-title`, requires the managed [pr-title.yml](../templates/pr-title/.github/workflows/pr-title.yml.jinja) workflow's own `pr-title` check (Actions-pinned, like `all-green`) on repos selecting the pr-title module. Its ownership is split on purpose:
+A third default-branch ruleset, `pr-title`, requires the managed [pr-title.yml](https://github.com/Vivswan/repo-platform/blob/main/templates/pr-title/.github/workflows/pr-title.yml.jinja) workflow's own `pr-title` check (Actions-pinned, like `all-green`) on repos selecting the pr-title module. Its ownership is split on purpose:
 
 | Piece | Home | Why |
 | --- | --- | --- |

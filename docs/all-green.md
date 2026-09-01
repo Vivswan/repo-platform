@@ -37,7 +37,7 @@ The gate judges only what its `needs` list names, so a job deleted from ci.yml A
 | --- | --- |
 | `all-green-roster` | Repo-platform's ci.yml: the gating job set, the gate's needs list, and `ALL_GREEN_ROSTER` held together in every direction, plus the gate's `if: always()` and `toJSON(needs)` wiring. |
 | `fleet-ci-roster` | fleet-ci.yml's job set, both directions - deleting `codeql` there would drop the gate for every managed repository at once. |
-| `fleet-ci-render-roster` | The rendered ci.yml's shape at [the source](../templates/base/.github/workflows/ci.yml.jinja): exactly the `checks`/`ci`/`all-green` jobs, the gate's exact lines, and the release leg's condition block, judged-sha pass, and concurrency lane. |
+| `fleet-ci-render-roster` | The rendered ci.yml's shape at [the source](https://github.com/Vivswan/repo-platform/blob/main/templates/base/.github/workflows/ci.yml.jinja): exactly the `checks`/`ci`/`all-green` jobs, the gate's exact lines, and the release leg's condition block, judged-sha pass, and concurrency lane. |
 | `all-green-name` | The check NAME, pinned once as data: the ruleset's required context (Actions-pinned by `integration_id`), the `all-green` job id at both sources, `all_green.ts`'s CHECK_NAME, and the sentence this page opens with. |
 
 ## Consuming the gate
