@@ -1,0 +1,50 @@
+name: All Green
+description: >-
+  The gate's judgment, shared by repo-platform's own ci.yml and every
+  rendered fleet ci.yml (pinned @build): every needed job's result must
+  be success or skipped - a skipped job stands down - with at least one
+  success, because an all-skipped run vouches for nothing. The calling
+  job is named all-green and carries `if: always()` plus a needs list of
+  every gating job; its own job check run (named all-green, created by
+  the GitHub Actions app) is the ruleset's required check.
+
+inputs:
+  needs:
+    description: The calling job's needs context, passed as toJSON(needs).
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Judge every needed result
+      shell: bash
+      env:
+        NEEDS: ${{ inputs.needs }}
+      run: |
+        set -euo pipefail
+        # Plain assignments, never $(...) inside test brackets: command
+        # substitutions there are errexit-exempt, so a crashing jq would
+        # read as empty and the gate would fall open. Malformed input
+        # crashes the first jq and fails the step; the object check is
+        # explicit because to_entries also walks ARRAYS (index-keyed), so
+        # a job-shaped array would otherwise be judged as if it were the
+        # needs context.
+        total="$(jq 'if type == "object" then to_entries | length else error("needs must be the toJSON(needs) object, got \(type)") end' <<<"$NEEDS")"
+        jq -r 'to_entries[] | "- \(.key): \(.value.result)"' <<<"$NEEDS"
+        if [ "$total" -eq 0 ]; then
+          echo "::error::the all-green job needs nothing - an empty needs list vouches for no gate at all; list every gating job."
+          exit 1
+        fi
+        failed="$(jq -r '[to_entries[]
+          | select(.value.result != "success" and .value.result != "skipped")
+          | "\(.key) (\(.value.result))"] | join(", ")' <<<"$NEEDS")"
+        if [ -n "$failed" ]; then
+          echo "::error::gating jobs did not succeed: $failed."
+          exit 1
+        fi
+        succeeded="$(jq '[to_entries[] | select(.value.result == "success")] | length' <<<"$NEEDS")"
+        if [ "$succeeded" -eq 0 ]; then
+          echo "::error::no gating job actually succeeded - an all-skipped run vouches for nothing, so the gate fails closed."
+          exit 1
+        fi
+        echo "all green: $succeeded of $total gating jobs succeeded, the rest stood down"

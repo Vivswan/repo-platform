@@ -37,6 +37,7 @@ _exclude:
   - "{% if not ('fuzzer' in modules) %}.github/workflows/nightly-fuzz.yml{% endif %}"
   - "{% if not ('nightly' in modules) %}.github/workflows/nightly.yml{% endif %}"
   - "{% if not ('pages' in modules) %}.github/workflows/pages.yml{% endif %}"
+  - "{% if not ('pr-title' in modules) %}.github/workflows/pr-title.yml{% endif %}"
   - "{% if not ('release-please' in modules) %}.github/workflows/release.yml{% endif %}"
   - "{% if not ('settings-sync' in modules) %}.github/workflows/settings-sync.yml{% endif %}"
   - "{% if not ('release-please' in modules) %}.github/workflows/update-release-pr.yml{% endif %}"
@@ -143,10 +144,10 @@ modules:
     uv - Python/uv toolchain (gitignore, dependabot, CodeQL Python): uv
     rust - Rust/cargo toolchain (cargo dependabot, Rust gitignore; no CodeQL): rust
     pages - GitHub Pages deploy (root = latest release, /staging/ = main): pages
-    release-please - verdict-gated release job in the all-green wrapper + autorelease labels: release-please
+    release-please - gate-downstream release job in ci.yml + autorelease labels: release-please
     issue-templates - bug/feature issue forms: issue-templates
     skills - agent skills hosting (plugin manifests, skill validation): skills
-    pr-title - Conventional Commit PR title check in the all-green gate: pr-title
+    pr-title - Conventional Commit PR title check, its own required workflow: pr-title
     auto-assign - auto-assign issues/PRs/alerts to owner: auto-assign
     fuzzer - nightly fuzz starter with issue filing, replay inputs, auto-close: fuzzer
     nightly - nightly CI starter with failure issue filing and auto-close: nightly

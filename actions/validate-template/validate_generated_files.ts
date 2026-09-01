@@ -11,21 +11,17 @@
 //      under .github/ and in the registration files, advisories elsewhere
 //   4. No unresolved merge-conflict markers in text files
 //   5. .github/workflows/ci.yml exists (the template always generates and
-//      manages it) and the all-green gate is wired for the tree's shape.
-//      Verdict shape (no `all-green` job in ci.yml): the required check is
-//      a check run a workflow_run-triggered verdict workflow creates, so
-//      .github/workflows/all-green.yml must exist, fire on CI completions,
-//      carry the workflow_dispatch `sha` unwedge input, and call the
-//      reusable-all-green.yml judgment - and on client renders ci.yml must
-//      carry an UNCONDITIONAL job calling repo-platform's fleet-ci.yml
-//      reusable (the verdict judges only jobs that ran, so a deleted or
-//      conditioned-away caller would pass with every fleet gate dropped).
-//      Legacy shape (an `all-green` job
-//      still present): the job carries `if: always()`, a step failing on
-//      any non-success result, and `needs:` listing every other job, and
-//      the typography check renders for the visibility: a `typography`
-//      job on public renders, an unconditional check-typography step inside
-//      `base-checks` on private renders (which merge the base checks there)
+//      manages it) and the all-green gate is wired: an `all-green` job
+//      whose own check run is the ruleset's required context, carrying
+//      `if: always()`, a judgment (the shared all-green action, or the
+//      legacy inline gate step on pre-single-call renders), and `needs:`
+//      listing every other job (gate-downstream jobs exempt) - and on
+//      client renders ci.yml must carry an UNCONDITIONAL job calling
+//      repo-platform's fleet-ci.yml reusable (a deleted or
+//      conditioned-away caller stands down from the gate and every fleet
+//      gate silently drops). Pre-single-call legacy renders (an all-green
+//      job next to fan-out gate jobs, no fleet caller) additionally get
+//      the visibility-shaped typography checks and job advisories
 //   6. LICENSE and LICENSE.md never coexist - a repo carries exactly one
 //      license file
 //   7. Every selected toolchain module with a version pin carries its
@@ -107,15 +103,6 @@ const SKIP_DIRS = new Set([
   ".mypy_cache",
 ]);
 
-/** The verdict's anchor job as the judged run names it: the managed
- *  ci.yml's `ci` caller prefixing fleet-ci's unconditional
- *  validate-template job. The managed all-green.yml wrapper must pass it
- *  as require-job (check 5) - the reusable verdict then fails any run
- *  where this job did not succeed, so a disarmed fleet caller fails
- *  closed at run time. check_ssot's all-green-name rule pins the same
- *  string against the wrapper template and both job ids. */
-const REQUIRED_GATE_JOB = "ci / validate-template";
-
 function sha256(data: Buffer): string {
   return createHash("sha256").update(data).digest("hex");
 }
@@ -153,7 +140,6 @@ const BASE_OWNERSHIP: BaseOwnedFile[] = [
   { path: ".gitattributes", kind: "marker", marker: "# repo-platform:local-section" },
   { path: ".github/CODEOWNERS", kind: "marker", marker: "# repo-platform:local-section" },
   { path: ".github/dependabot.yml", kind: "header" },
-  { path: ".github/workflows/all-green.yml", kind: "header" },
   { path: ".github/workflows/ci.yml", kind: "header" },
   { path: ".repo-platform.yml", kind: "header" },
   { path: ".typography-allow", kind: "header" },
@@ -306,6 +292,7 @@ const MODULE_OWNERSHIP: Record<string, OwnedFile[]> = {
   pages: [{ path: ".github/workflows/pages.yml", kind: "header" }],
   "release-please": [{ path: ".github/workflows/release.yml", kind: "header" }],
   skills: [{ path: ".github/workflows/validate-skills.yml", kind: "header" }],
+  "pr-title": [{ path: ".github/workflows/pr-title.yml", kind: "header" }],
   "auto-assign": [{ path: ".github/workflows/auto-assign.yml", kind: "header" }],
   "settings-sync": [{ path: ".github/workflows/settings-sync.yml", kind: "header" }],
 };
@@ -748,114 +735,11 @@ function main(): number {
 
   // 5. The all-green gate in ci.yml. The file is template-managed and
   // always generated (repo-specific jobs live in the repo-owned checks.yml
-  // it calls), so a missing ci.yml means the repo is damaged.
-  //
-  // Verdict shape (no all-green job): the required check is a CHECK RUN a
-  // workflow_run-triggered verdict workflow creates after judging the
-  // completed CI run's jobs, so what must exist is that workflow, wired.
-  // A repo that lost it never gets the required check created again -
-  // fail-closed, but worth a named error.
-  const verdictWorkflowErrors = (): string[] => {
-    const rel = ".github/workflows/all-green.yml";
-    const verdictPath = join(root, ".github", "workflows", "all-green.yml");
-    if (!isRegularFile(verdictPath)) {
-      return [
-        `ci.yml: no \`all-green\` job and no ${rel} verdict workflow - the ` +
-          "required all-green check is never created and nothing can merge; " +
-          "restore the verdict workflow from git history or run a template sync",
-      ];
-    }
-    let workflow: unknown = {};
-    try {
-      workflow = shapeOfYaml(readFileSync(verdictPath, "utf-8")) ?? {};
-    } catch {
-      workflow = {};
-    }
-    const record = (value: unknown): Record<string, unknown> =>
-      typeof value === "object" && value !== null && !Array.isArray(value)
-        ? (value as Record<string, unknown>)
-        : {};
-    const doc = record(workflow);
-    const on = record(doc.on);
-    const found: string[] = [];
-    const workflowRun = record(on.workflow_run);
-    const workflows = workflowRun.workflows;
-    if (!Array.isArray(workflows) || !workflows.map(String).includes("CI")) {
-      found.push(
-        `${rel}: must trigger on workflow_run of the CI workflow - without ` +
-          "that trigger no verdict (and no required all-green check) is ever created",
-      );
-    }
-    const types = workflowRun.types;
-    if (!Array.isArray(types) || types.length !== 1 || String(types[0]) !== "completed") {
-      found.push(
-        `${rel}: the workflow_run trigger must carry exactly types: [completed] - ` +
-          "anything else also fires the verdict on requested/in_progress and " +
-          "judges a run that has not finished",
-      );
-    }
-    if (!("sha" in record(record(on.workflow_dispatch).inputs))) {
-      found.push(
-        `${rel}: must carry a workflow_dispatch \`sha\` input - the unwedge ` +
-          "path that re-judges a commit when its workflow_run event was lost",
-      );
-    }
-    // The shared judgment must be the TRUSTED one: the local reusable, or
-    // <owner>/repo-platform's - a third-party workflow merely NAMED
-    // reusable-all-green.yml must not mint the required check.
-    const trustedUses =
-      /^(?:\.\/|[A-Za-z0-9-]+\/repo-platform\/)\.github\/workflows\/reusable-all-green\.yml(?:@|$)/;
-    const verdictJob = Object.values(record(doc.jobs))
-      .map(record)
-      .find((job) => trustedUses.test(String(job.uses ?? "")));
-    if (verdictJob === undefined) {
-      found.push(
-        `${rel}: no job calls repo-platform's reusable-all-green.yml - the ` +
-          "shared verdict judgment is what creates the all-green check run",
-      );
-    } else {
-      if (verdictJob.if !== undefined) {
-        found.push(
-          `${rel}: the verdict job carries a job-level if: - a condition ` +
-            "could silently stop every verdict; remove it",
-        );
-      }
-      const grants = record(verdictJob.permissions);
-      if (grants.checks !== "write") {
-        found.push(
-          `${rel}: the verdict job must grant checks: write - without it ` +
-            "the check-run POST is refused and no verdict ever lands",
-        );
-      }
-      if (grants.actions !== "read") {
-        found.push(
-          `${rel}: the verdict job must grant actions: read - the judgment ` +
-            "reads the CI run's jobs through it",
-        );
-      }
-      if (!/\binputs\.sha\b/.test(String(record(verdictJob.with).sha ?? ""))) {
-        found.push(
-          `${rel}: the verdict job must forward the dispatch sha ` +
-            "(with.sha carrying inputs.sha) or the unwedge path is dead",
-        );
-      }
-      // Client renders must pin the verdict's anchor job: the reusable
-      // fails any run where "ci / validate-template" did not succeed,
-      // which is what makes a disarmed fleet-ci caller (deleted,
-      // conditioned, or info-renamed) fail closed at run time instead of
-      // passing on the repo-owned checks alone. Self mode is exempt:
-      // repo-platform's own gating jobs are roster-pinned by check_ssot.
-      if (!selfMode && String(record(verdictJob.with)["require-job"] ?? "") !== REQUIRED_GATE_JOB) {
-        found.push(
-          `${rel}: the verdict job must pin require-job: ${REQUIRED_GATE_JOB} - ` +
-            "that anchor is what makes a disarmed fleet-ci caller fail the " +
-            "verdict instead of passing on the repo-owned checks alone; " +
-            "restore the managed wrapper via a template sync",
-        );
-      }
-    }
-    return found;
-  };
+  // it calls), so a missing ci.yml means the repo is damaged. The gate is
+  // the all-green JOB: its own check run (named by the job id) is the
+  // ruleset's required context, so a repo that lost the job never gets
+  // the required check created again - fail-closed, but worth named
+  // errors.
   const ciPath = join(root, ".github", "workflows", "ci.yml");
   if (!isRegularFile(ciPath)) {
     errors.push(
@@ -899,47 +783,18 @@ function main(): number {
             typeof step === "object" && step !== null && !Array.isArray(step),
         );
       };
+      // Legacy pre-single-call renders judge through the aggregate job's
+      // INLINE gate step; the current shape judges through the shared
+      // action. The judgment style is what routes the shape-specific
+      // checks below (a job census would misroute a degenerate legacy
+      // render that lost its fan-out jobs).
+      let legacyShape = false;
       if (!("all-green" in jobs)) {
-        errors.push(...verdictWorkflowErrors());
-        // The verdict judges only jobs that RAN, so the render validator
-        // must require the jobs' EXISTENCE here: a managed ci.yml whose
-        // fleet-ci caller was deleted or conditioned away would leave the
-        // repo-owned `checks` call as the whole run and the verdict green
-        // - every fleet gate silently dropped. The owner comes from the
-        // pinned answers, like the composite-action checks: a look-alike
-        // under another owner is not the fleet's gate home. Self mode is
-        // exempt: repo-platform's own gating jobs are roster-pinned by
-        // check_ssot's all-green-roster rule instead.
-        if (!selfMode && ownerPin !== null) {
-          const ownerPattern =
-            ownerPin.kind === "pinned"
-              ? ownerPin.owner.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-              : "[A-Za-z0-9-]+";
-          const fleetCiUses = new RegExp(
-            `^${ownerPattern}/repo-platform/\\.github/workflows/fleet-ci\\.yml@`,
-          );
-          const fleetCaller = Object.values(jobs)
-            .map((job) =>
-              typeof job === "object" && job !== null && !Array.isArray(job)
-                ? (job as Record<string, unknown>)
-                : {},
-            )
-            .find((job) => fleetCiUses.test(String(job.uses ?? "")));
-          if (fleetCaller === undefined) {
-            errors.push(
-              "ci.yml: no job calls repo-platform's fleet-ci.yml reusable - " +
-                "the fleet's gate jobs never run and the verdict passes on " +
-                "the repo-owned checks alone; restore the managed `ci` job " +
-                "via a template sync",
-            );
-          } else if (fleetCaller.if !== undefined) {
-            errors.push(
-              "ci.yml: the fleet-ci caller job carries a job-level if: - a " +
-                "skipped caller contributes no gate jobs and the verdict " +
-                "passes without them; remove the condition",
-            );
-          }
-        }
+        errors.push(
+          "ci.yml: no `all-green` job - its own check run is the required " +
+            "all-green check, so nothing can merge without it; restore the " +
+            "managed ci.yml from git history or run a template sync",
+        );
       } else {
         const rawAllGreen = jobs["all-green"];
         const allGreen: Record<string, unknown> =
@@ -947,17 +802,13 @@ function main(): number {
             ? (rawAllGreen as Record<string, unknown>)
             : {};
         const needs = jobNeeds(allGreen);
-        // release-please style jobs that run after the gate are exempt.
+        // Jobs downstream of the gate (post-green and release-style legs)
+        // are exempt from the needs census.
         const downstream = new Set(
           Object.entries(jobs)
             .filter(([name, job]) => name !== "all-green" && jobNeeds(job).includes("all-green"))
             .map(([name]) => name),
         );
-        // No informational exemption any more. validate-template used to
-        // hold one, back when it only flagged drift; it now blocks on an
-        // integrity failure (managed content changed outside a sync), so a
-        // ci.yml that leaves it out of `needs` has disarmed a real gate and
-        // must be told so.
         const missing = Object.keys(jobs)
           .filter((name) => name !== "all-green" && !downstream.has(name) && !needs.includes(name))
           .sort();
@@ -976,20 +827,90 @@ function main(): number {
               "failing it, and extra conditions weaken the gate",
           );
         }
-        const steps = Array.isArray(allGreen.steps) ? allGreen.steps : [];
-        const hasGateStep = steps.some((step) => {
-          const run =
-            typeof step === "object" && step !== null && !Array.isArray(step)
-              ? (step as Record<string, unknown>).run
-              : null;
-          return typeof run === "string" && run.includes('!= "success"') && run.includes("exit 1");
-        });
+        // The judgment itself: the shared all-green action (local path on
+        // the operator, <owner>/repo-platform/actions/all-green@... on
+        // renders) WITH the needs context wired in - a canned needs input
+        // would judge a fiction of the run, so the wiring is part of what
+        // counts as a judgment step - or the legacy inline gate step
+        // pre-single-call renders carry. Without either, the job is a
+        // green no-op.
+        const judgesThroughAction = (step: Record<string, unknown>): boolean => {
+          if (
+            !/^(?:\.\/actions\/all-green|[A-Za-z0-9-]+\/repo-platform\/actions\/all-green@.+)$/.test(
+              String(step.uses ?? ""),
+            )
+          ) {
+            return false;
+          }
+          // A conditioned or softened step is no judgment: it can skip or
+          // swallow its own failure while the job reports success (the
+          // YAML parser normalizes quoted keys, so this covers '"if":' too).
+          if (step.if !== undefined || step["continue-on-error"] !== undefined) return false;
+          const withBlock =
+            typeof step.with === "object" && step.with !== null && !Array.isArray(step.with)
+              ? (step.with as Record<string, unknown>)
+              : {};
+          // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal Actions expression under pin
+          return String(withBlock.needs ?? "") === "${{ toJSON(needs) }}";
+        };
+        const steps = jobSteps(allGreen);
+        const judgesInline = steps.some(
+          (step) =>
+            step.if === undefined &&
+            step["continue-on-error"] === undefined &&
+            typeof step.run === "string" &&
+            step.run.includes('!= "success"') &&
+            step.run.includes("exit 1"),
+        );
+        const hasGateStep = steps.some(judgesThroughAction) || judgesInline;
+        legacyShape = judgesInline && !steps.some(judgesThroughAction);
         if (!hasGateStep) {
           errors.push(
-            "ci.yml: the all-green job has no step failing on non-success " +
-              "results - it must iterate needs results and `exit 1` on any " +
-              'result `!= "success"` so failed, cancelled, and skipped jobs ' +
-              "all block the merge",
+            "ci.yml: the all-green job has no judgment step - it must use " +
+              "repo-platform's all-green action with `needs: ${{ toJSON(needs) }}` " +
+              "wired in (or the legacy inline gate failing on non-success " +
+              "results) so failed, cancelled, and all-skipped runs block the merge",
+          );
+        }
+      }
+      // Client renders must carry the fleet gate home: an UNCONDITIONAL
+      // job calling repo-platform's fleet-ci.yml. The all-green job reads
+      // needs RESULTS and a skipped job stands down, so a deleted or
+      // conditioned-away caller would leave the repo-owned checks as the
+      // whole gate - every fleet gate silently dropped. The owner comes
+      // from the pinned answers, like the composite-action checks: a
+      // look-alike under another owner is not the fleet's gate home. Self
+      // mode is exempt: repo-platform's own gating jobs are roster-pinned
+      // by check_ssot's all-green-roster rule instead, and legacy
+      // pre-single-call renders (the inline aggregate gate above) get the
+      // fan-out shape checks below instead of this error.
+      if (!selfMode && ownerPin !== null && !legacyShape) {
+        const ownerPattern =
+          ownerPin.kind === "pinned"
+            ? ownerPin.owner.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+            : "[A-Za-z0-9-]+";
+        const fleetCiUses = new RegExp(
+          `^${ownerPattern}/repo-platform/\\.github/workflows/fleet-ci\\.yml@`,
+        );
+        const fleetCaller = Object.values(jobs)
+          .map((job) =>
+            typeof job === "object" && job !== null && !Array.isArray(job)
+              ? (job as Record<string, unknown>)
+              : {},
+          )
+          .find((job) => fleetCiUses.test(String(job.uses ?? "")));
+        if (fleetCaller === undefined) {
+          errors.push(
+            "ci.yml: no job calls repo-platform's fleet-ci.yml reusable - " +
+              "the fleet's gate jobs never run and the gate passes on " +
+              "the repo-owned checks alone; restore the managed `ci` job " +
+              "via a template sync",
+          );
+        } else if (fleetCaller.if !== undefined) {
+          errors.push(
+            "ci.yml: the fleet-ci caller job carries a job-level if: - a " +
+              "skipped caller stands down from the all-green gate and " +
+              "every fleet gate silently drops; remove the condition",
           );
         }
       }
@@ -999,10 +920,10 @@ function main(): number {
       // base-checks job means the private merged shape (the five base
       // checks are its steps), anything else is the public fan-out.
       // Resolved once so no check mixes expectations from both shapes.
-      // Legacy-shape-only checks (they read the aggregate job's sibling
-      // jobs): under the verdict shape the base checks live in the
-      // fleet-ci reusable, invisible to this tree.
-      const legacyShape = "all-green" in jobs;
+      // Legacy-shape-only checks (legacyShape above: an aggregate gate
+      // next to fan-out jobs, no fleet caller - they read the aggregate
+      // job's sibling jobs): under the single-call shape the base checks
+      // live in the fleet-ci reusable, invisible to this tree.
       const shape =
         "base-checks" in jobs
           ? ({ kind: "private-merged", steps: jobSteps(jobs["base-checks"]) } as const)

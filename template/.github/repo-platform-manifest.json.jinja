@@ -36,7 +36,6 @@
 {%- if 'settings-sync' in modules -%}
 {%- set _ = entries.append('    ".github/settings.yml": {"class": "starter"}') -%}
 {%- endif -%}
-{%- set _ = entries.append('    ".github/workflows/all-green.yml": {"class": "managed", "hash": null}') -%}
 {%- if 'auto-assign' in modules -%}
 {%- set _ = entries.append('    ".github/workflows/auto-assign.yml": {"class": "managed", "hash": null}') -%}
 {%- endif -%}
@@ -62,6 +61,9 @@
 {%- endif -%}
 {%- if 'pages' in modules -%}
 {%- set _ = entries.append('    ".github/workflows/pages.yml": {"class": "managed", "hash": null}') -%}
+{%- endif -%}
+{%- if 'pr-title' in modules -%}
+{%- set _ = entries.append('    ".github/workflows/pr-title.yml": {"class": "managed", "hash": null}') -%}
 {%- endif -%}
 {%- if 'release-please' in modules -%}
 {%- set _ = entries.append('    ".github/workflows/release.yml": {"class": "managed", "hash": null}') -%}
