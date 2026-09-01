@@ -16,7 +16,7 @@
     ".typography-allow": {"class": "managed", "hash": "5a4acd862164b9a19980ec9a0fa0048b3f81e1d2de02ded2d15b0f78401a07b3"},
     ".yamllint": {"class": "managed", "hash": "1e533293401ff3d0ee4662292995fd932d2998142ce594fb14e65a8d3a3140fb"},
     "CODE_OF_CONDUCT.md": {"class": "managed", "hash": "1635b6fddff1a322424fddf12ac0d8e269541976d40b5b6bf0dbebc9c7afcf68"},
-    "CONTRIBUTING.md": {"class": "split", "grammar": "tail-marker", "marker": "<!-- repo-platform:local-section -->", "managed": "above", "hash": "fd24302e493d2095d2cf35d49f215276b1a79522e03ea14cc9fcf98e09a58e3a"},
+    "CONTRIBUTING.md": {"class": "split", "grammar": "tail-marker", "marker": "<!-- repo-platform:local-section -->", "managed": "above", "hash": "90ccef5b5c97be98914fe2a709bfecf58b7bde03fa111b2c6885a050a1456bac"},
     "LICENSE.md": {"class": "split", "grammar": "tail-marker", "marker": "<!-- repo-platform:local-section -->", "managed": "above", "hash": "65973fae8e672fd7ee5fc2ed08cb4a78374d6c31f68f6d7269bea2184c13fb4b"},
     "SECURITY.md": {"class": "split", "grammar": "tail-marker", "marker": "<!-- repo-platform:local-section -->", "managed": "above", "hash": "a4deef1b1b41a1537f104354646bbb8d41a22e976a4179e31864cf1b36ed786b"}
   }
