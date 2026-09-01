@@ -3511,7 +3511,7 @@ const rules: Rule[] = [
     // out of scope: the composite actions install their own floating bun
     // for vendored scripts run in caller checkouts, where the repo's
     // dotfile may not exist. reusable-pages.yml satisfies the rule with
-    // its hashFiles() production/staging fallback expression.
+    // its hashFiles() checkout-root expression.
     name: "toolchain-version-files",
     run: () => {
       const mismatches: Mismatch[] = [];

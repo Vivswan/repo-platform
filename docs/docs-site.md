@@ -26,7 +26,7 @@ Historical version tags are gentler: a tag whose tree has no `docs/` (or carries
 
 ## Link rot
 
-Nightly deploys crawl the assembled site's EXTERNAL links after publishing (internal ones were already fatal at build time). Findings ride the fleet's [tracking-issue stream](tracking-issues.md): one open issue under the `docs_site_label` answer's label (default `docs-link-rot`) listing every broken URL and the pages linking it, closed automatically on the first clean night. Like every tracking stream, an open issue holds releases on repos with the release-please module - `release-override` is the documented escape hatch.
+Nightly deploys crawl the assembled site's EXTERNAL links after publishing (internal ones were already fatal at build time). Findings ride the fleet's [tracking-issue stream](tracking-issues.md): one open issue under the `docs_site_label` answer's label (default `docs-link-rot`) listing every broken URL with up to five of the pages linking it, closed automatically on the first clean night. Like every tracking stream, an open issue holds releases on repos with the release-please module - `release-override` is the documented escape hatch.
 
 ## Module parameters (copier questions)
 
