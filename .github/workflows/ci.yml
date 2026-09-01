@@ -517,6 +517,24 @@ jobs:
       - name: Update from a previous build tree to a fresh build
         run: .github/scripts/ci/upgrade_path_test.sh
 
+  # The pages-site action's vitepress build, end to end in the runner's
+  # own directory topology (workspace, action tree, and RUNNER_TEMP apart):
+  # nothing else in the gate ever RUNS vitepress, and the build's module
+  # resolution only breaks under that separation - the class a laptop
+  # layout cannot reproduce (.github/scripts/ci/verify_pages_site_build.sh).
+  pages-site-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      - name: Install the action's pinned dependencies
+        run: bun install --frozen-lockfile --cwd actions/pages-site
+      - name: Build the fixture site and assert the artifact
+        run: .github/scripts/ci/verify_pages_site_build.sh
+
   # Dry-run sync against every fleet repo's REAL current state (render,
   # splice, resolve, validate - no push, no PR, private repos hard-skipped
   # by rehearse_fleet.ts's fail-closed visibility rule): the class of bug
@@ -606,6 +624,7 @@ jobs:
       - skills-discovery
       - smoke-generate
       - upgrade-path
+      - pages-site-build
       - rehearse-fleet
       - codeql-javascript
     if: always()

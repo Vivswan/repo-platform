@@ -16,7 +16,7 @@ Modules without a pin: uv floats on its setup action's default, and rust ships n
 
 - The dotfiles are MANAGED files (deliberately not `_skip_if_exists`): in a repo selecting the module, every template sync updates them, and there is no copier question - the fleet shares one version per toolchain.
 - Managed workflows and the repo-owned starters' initial render pass the matching version-file input (`bun-version-file: .bun-version`, `node-version-file: .node-version`, `deno-version-file: .dvmrc`).
-- The [pages module's](pages.md) `reusable-pages.yml` checks the caller out into `production/` and `staging/`, so its setup steps resolve the dotfile with a `hashFiles()` fallback: production's pin wins, then staging's, and no dotfile in either tree leaves the input unset (the setup action floats on its default).
+- The [pages module's](pages.md) `reusable-pages.yml` makes one full checkout and resolves each dotfile with a `hashFiles()` fallback at the checkout root - every tier (historical tags included) builds with that one pin, and no dotfile leaves the input unset (the setup action floats on its default).
 - validate-template checks that a repo selecting a pinned module carries the dotfile with exactly the pinned version.
 - repo-platform's own composite actions (under `actions/`) set up their bun WITHOUT a pin, by design: they run vendored scripts inside caller checkouts, where the repo's dotfile may not exist.
 

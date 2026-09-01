@@ -9,8 +9,8 @@ description: >-
   caller carries only markdown) or from the caller's own build command
   (source command). With check true it instead builds the caller's docs tree
   once, strictly (dead internal links fatal), as the docs PR check. Requires
-  a full checkout (fetch-depth 0): version tags and page timestamps come
-  from git history.
+  a full checkout (fetch-depth 0): version tags and per-ref trees come from
+  git history.
 
 inputs:
   mounts:

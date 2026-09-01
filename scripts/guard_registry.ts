@@ -387,6 +387,16 @@ export const GUARD_REGISTRY: readonly GuardEntry[] = [
     testFile: "actions/pages-site/pages-site.test.ts",
     testName: "a caller-shipped .vitepress is REFUSED: the theme comes only from repo-platform",
   },
+  {
+    id: "docs-site-strict-links-wiring",
+    hazard:
+      "the deploy's dead-link strictness rewired to always-lenient: every tier then builds with dead internal links ignored, so current docs rot ships on a green run and the PR check's promise (a dead link fails before merge, or at worst at deploy) quietly dies",
+    guardFile: "actions/pages-site/build.ts",
+    snippet: 'return tier.ref === "HEAD";',
+    mutated: "return false;",
+    testFile: "actions/pages-site/pages-site.test.ts",
+    testName: "the dead-link strictness wiring is ARMED: HEAD tiers build strict, tags lenient",
+  },
 ];
 
 /** Occurrences of `token` in `text` (exact bytes, no regex). */

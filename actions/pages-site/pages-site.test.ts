@@ -11,7 +11,7 @@ import {
   routeOf,
   walkMarkdown,
 } from "./.vitepress/derive.ts";
-import { assertCentralTheme, copyInto } from "./build.ts";
+import { assertCentralTheme, copyInto, tierStrictLinks } from "./build.ts";
 import { collectBroken, reportBody, walkHtml } from "./check_links.ts";
 import {
   assemblyOrder,
@@ -294,6 +294,19 @@ describe("derive", () => {
 });
 
 describe("central theme guard", () => {
+  test("the dead-link strictness wiring is ARMED: HEAD tiers build strict, tags lenient", () => {
+    expect(
+      tierStrictLinks({ kind: "latest", ref: "HEAD", version: "latest", rel: "latest/" }),
+    ).toBe(true);
+    expect(tierStrictLinks({ kind: "single", ref: "HEAD", version: "", rel: "" })).toBe(true);
+    expect(tierStrictLinks({ kind: "tag", ref: "v1.0.0", version: "v1.0.0", rel: "v1.0.0/" })).toBe(
+      false,
+    );
+    expect(tierStrictLinks({ kind: "root", ref: "v1.0.0", version: "v1.0.0", rel: "" })).toBe(
+      false,
+    );
+  });
+
   test("a caller-shipped .vitepress is REFUSED: the theme comes only from repo-platform", () => {
     const dir = mkdtempSync(join(tmpdir(), "docs-"));
     writeFileSync(join(dir, "README.md"), "# Home\n");

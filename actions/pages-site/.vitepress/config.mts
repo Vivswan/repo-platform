@@ -10,9 +10,6 @@
 //   DOCS_SITE_CURRENT       this tier's version label
 //   DOCS_SITE_EDIT_PATTERN  editLink pattern (set only where editing the
 //                           source can change THIS content: latest tiers)
-//   DOCS_SITE_LAST_UPDATED  "1" when the src tree is a real git checkout
-//                           (tag tiers build from extracted archives, where
-//                           git timestamps do not exist)
 //   DOCS_SITE_IGNORE_DEAD_LINKS  "1" on historical tag tiers only: dead
 //                           internal links are fatal on current content
 //                           (that failure is the docs PR check's value),
@@ -86,7 +83,9 @@ export default defineConfigWithTheme<FleetThemeConfig>({
   locales,
   rewrites: deriveRewrites(files),
   ignoreDeadLinks: process.env.DOCS_SITE_IGNORE_DEAD_LINKS === "1",
-  lastUpdated: process.env.DOCS_SITE_LAST_UPDATED === "1",
+  // No lastUpdated: every tier builds from a materialized copy of the docs
+  // tree (never a git checkout - see buildVitepressTier), so git-derived
+  // timestamps do not exist by construction.
   vite: {
     plugins: [llmstxt()],
   },

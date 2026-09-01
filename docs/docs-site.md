@@ -1,6 +1,6 @@
 # The docs-site module
 
-Selecting the `docs-site` module publishes a repository's `docs/` markdown as a versioned VitePress site. The repository carries ONLY markdown: the VitePress config, theme, sidebar/nav derivation, and build pipeline all live in repo-platform's [pages-site action](../actions/pages-site/action.yml), and every fleet site picks up theme changes on its next deploy - the nightly rebuild makes that automatic.
+Selecting the `docs-site` module publishes a repository's `docs/` markdown as a versioned VitePress site. The repository carries ONLY markdown: the VitePress config, theme, sidebar/nav derivation, and build pipeline all live in repo-platform's [pages-site action](https://github.com/Vivswan/repo-platform/blob/main/actions/pages-site/action.yml), and every fleet site picks up theme changes on its next deploy - the nightly rebuild makes that automatic.
 
 | URL | Built from |
 |---|---|
@@ -41,11 +41,11 @@ Both modules selected render ONE Pages deployment (`pages.yml`): the repo's own 
 
 ## What each page gets for free
 
-- Local full-text search, per-page "Edit this page" links (default-branch tiers only), and git-derived last-updated timestamps.
+- Local full-text search and per-page "Edit this page" links (default-branch tiers only, where an edit can still change the content).
 - `llms.txt` and `llms-full.txt` per tier (the [llms.txt](https://llmstxt.org) convention), covering every locale.
 - The version dropdown in the nav, fed from the same tag set as `versions.json`.
 
 ## Caveats
 
 - Serving Pages from a private repository requires a paid GitHub plan, and the served site is PUBLIC on non-Enterprise plans - selecting the module is the opt-in to that, per repo.
-- The theme is a deliberate placeholder today: the real design drops into [actions/pages-site/.vitepress/theme/](../actions/pages-site/.vitepress/theme/README.md), which documents exactly which file controls what.
+- The theme is a deliberate placeholder today: the real design drops into [actions/pages-site/.vitepress/theme/](https://github.com/Vivswan/repo-platform/blob/main/actions/pages-site/.vitepress/theme/README.md), which documents exactly which file controls what.

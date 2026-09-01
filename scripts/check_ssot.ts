@@ -2341,6 +2341,7 @@ export const ALL_GREEN_ROSTER = [
   "skills-discovery",
   "smoke-generate",
   "upgrade-path",
+  "pages-site-build",
   "rehearse-fleet",
   "codeql-javascript",
 ];

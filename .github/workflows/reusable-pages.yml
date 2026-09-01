@@ -114,9 +114,9 @@ jobs:
           esac
 
       # One full checkout serves every tier: the action reads version tags
-      # and per-ref trees from history (git archive), and page timestamps
-      # come from git log - both need fetch-depth 0. A push builds its own
-      # commit; schedule and dispatch pin to the default branch head.
+      # and per-ref trees from history (git archive), which needs
+      # fetch-depth 0. A push builds its own commit; schedule and dispatch
+      # pin to the default branch head.
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0

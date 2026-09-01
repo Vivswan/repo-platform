@@ -11,11 +11,12 @@
 //   otherwise   read MOUNTS, build every mount's tiers, lay out _site, and
 //               emit the site-dir output for upload.
 //
-// Builds run against extracted `git archive` trees (hermetic - no cross-tier
-// node_modules or dist bleed), except a vitepress mount's HEAD tiers, which
-// render the workspace checkout directly so git-derived page timestamps
-// (lastUpdated) exist; command tiers always extract, because the caller's
-// build command mutates its tree.
+// Builds run against materialized trees (hermetic - no cross-tier
+// node_modules or dist bleed): command tiers extract the whole ref with
+// `git archive` because the caller's build command mutates its tree, and
+// vitepress tiers copy the docs tree INTO the build root (a real copy;
+// module resolution walks up from the source files, so anything outside
+// the root misses the root's node_modules - see buildVitepressTier).
 
 import { spawnSync } from "node:child_process";
 import {
@@ -24,6 +25,8 @@ import {
   existsSync,
   mkdirSync,
   readdirSync,
+  realpathSync,
+  renameSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -161,7 +164,10 @@ function readConfig(): Config {
   const docsDir = env("DOCS_DIR", "docs");
   validateRelPath(docsDir, "the docs directory");
   const defaultBranch = env("DEFAULT_BRANCH", "main");
-  const scratch = join(env("RUNNER_TEMP", tmpdir()), "pages-site");
+  // realpath'd: a scratch base behind a symlink (macOS /tmp) gives the
+  // build two spellings of one directory, and path-keyed route resolution
+  // inside vitepress falls apart on the mismatch.
+  const scratch = join(realpathSync(env("RUNNER_TEMP", tmpdir())), "pages-site");
   return {
     workspace,
     scratch,
@@ -216,8 +222,8 @@ function assertTierIndex(dist: string, what: string): string {
 }
 
 /** One command-mount build: the caller's install/build commands in an
- *  extracted tree, under the tier's PAGES_* contract. Returns the dist. */
-function buildCommandTier(cfg: Config, tier: Tier): string {
+ *  extracted tree, under the tier's PAGES_* contract. */
+function buildCommandTier(cfg: Config, tier: Tier): { dist: string; buildDir: string } {
   const tree = join(cfg.scratch, `build-${buildCounter++}`);
   extractTree(cfg, tier.ref, tree);
   // A committed dist/ in the extracted tree could mask a build that wrote
@@ -242,58 +248,86 @@ function buildCommandTier(cfg: Config, tier: Tier): string {
         "directory the build command writes, or fix the build command to produce it",
     );
   }
-  return assertTierIndex(dist, `the ${tier.ref} build's '${cfg.distDir}'`);
+  return {
+    dist: assertTierIndex(dist, `the ${tier.ref} build's '${cfg.distDir}'`),
+    buildDir: tree,
+  };
+}
+
+/** Dead-link strictness per tier: current content (a HEAD tier) must FAIL
+ *  on a dead internal link - that failure is the docs PR check's value and
+ *  the deploy's last line of defense - while historical tags build lenient
+ *  because history cannot be fixed. Guard-registered: unarming this to
+ *  always-lenient would ship silently rotten current docs on a green run. */
+export function tierStrictLinks(tier: Tier): boolean {
+  return tier.ref === "HEAD";
 }
 
 /** One vitepress build: the bundled config and theme over a caller docs
- *  tree. HEAD tiers render the workspace checkout (git timestamps exist
- *  there); tag tiers render extracted archives. */
+ *  tree, materialized into the build root (HEAD tiers copy the workspace
+ *  tree, tag tiers extract straight into the root). Dead-link strictness
+ *  is DERIVED here from the tier - the one owner - so a strict-HEAD build
+ *  and a lenient-tag build are the only representable states. */
 function buildVitepressTier(
   cfg: Config,
   tier: Tier,
   versions: { label: string; link: string }[],
-  opts: { strictLinks: boolean; base?: string } = { strictLinks: false },
-): string {
+  opts: { base?: string } = {},
+): { dist: string; buildDir: string } {
   const fromWorkspace = tier.ref === "HEAD";
-  let docsTree: string;
+  const root = join(cfg.scratch, `build-${buildCounter++}`);
+  mkdirSync(root, { recursive: true });
+  cpSync(join(ACTION_DIR, ".vitepress"), join(root, ".vitepress"), { recursive: true });
+  // The docs tree is MATERIALIZED inside the build root as a real copy:
+  // module resolution for the pages' own SSR imports (vue/server-renderer)
+  // walks up from the source files, so a srcDir outside the root (the
+  // workspace checkout, an extract dir) never reaches the root's
+  // node_modules on the real runner layout, and a symlinked tree resolves
+  // to its realpath and breaks the same way.
+  const srcDir = join(root, "docs");
   if (fromWorkspace) {
-    docsTree = join(cfg.workspace, cfg.docsDir);
+    const docsTree = join(cfg.workspace, cfg.docsDir);
     if (!existsSync(docsTree)) {
       throw new Error(
         `${cfg.docsDir}/ does not exist in the repository - the docs site builds from that ` +
           "tree; create it (with a README.md index) or drop the docs-site module",
       );
     }
+    assertCentralTheme(docsTree);
+    cpSync(docsTree, srcDir, { recursive: true });
   } else {
-    const extract = join(cfg.scratch, `build-${buildCounter++}-src`);
-    extractTree(cfg, tier.ref, extract, cfg.docsDir);
-    docsTree = join(extract, cfg.docsDir);
+    // Extract into a staging dir first: the archive lands at the caller's
+    // full docs path (possibly nested, docs/api), and the leaf directory
+    // then moves to the root's fixed docs/ slot whatever its depth was.
+    const staging = join(root, ".src");
+    extractTree(cfg, tier.ref, staging, cfg.docsDir);
+    renameSync(join(staging, cfg.docsDir), srcDir);
+    rmSync(staging, { recursive: true, force: true });
+    assertCentralTheme(srcDir);
   }
-  assertCentralTheme(docsTree);
-  const root = join(cfg.scratch, `build-${buildCounter++}`);
-  mkdirSync(root, { recursive: true });
-  cpSync(join(ACTION_DIR, ".vitepress"), join(root, ".vitepress"), { recursive: true });
   // The action's own dependency set serves every build root: vitepress,
   // vue, and the llms plugin resolve through this link, so no build root
   // ever installs anything.
   symlinkSync(join(ACTION_DIR, "node_modules"), join(root, "node_modules"));
-  const current = tier.version;
+  const strictLinks = tierStrictLinks(tier);
   run(["bun", join(ACTION_DIR, "node_modules", ".bin", "vitepress"), "build", root], {
     env: {
-      DOCS_SITE_SRC: docsTree,
+      DOCS_SITE_SRC: srcDir,
       DOCS_SITE_TITLE: cfg.siteTitle !== "" ? cfg.siteTitle : cfg.repository.split("/")[1],
       DOCS_SITE_BASE: opts.base ?? urlBase(cfg.rootBase, tier.rel),
       DOCS_SITE_VERSIONS: JSON.stringify(versions),
-      DOCS_SITE_CURRENT: current,
+      DOCS_SITE_CURRENT: tier.version,
       DOCS_SITE_EDIT_PATTERN: fromWorkspace ? cfg.editPattern : "",
-      DOCS_SITE_LAST_UPDATED: fromWorkspace ? "1" : "",
-      DOCS_SITE_IGNORE_DEAD_LINKS: opts.strictLinks ? "" : "1",
+      DOCS_SITE_IGNORE_DEAD_LINKS: strictLinks ? "" : "1",
     },
   });
-  return assertTierIndex(
-    join(root, ".vitepress", "dist"),
-    `the ${tier.ref} docs build (${cfg.docsDir}/)`,
-  );
+  return {
+    dist: assertTierIndex(
+      join(root, ".vitepress", "dist"),
+      `the ${tier.ref} docs build (${cfg.docsDir}/)`,
+    ),
+    buildDir: root,
+  };
 }
 
 /** Copy a build's entries into place, refusing overwrites: a collision is
@@ -353,16 +387,19 @@ function assembleMount(cfg: Config, mount: Mount, kept: string[]): void {
   const reserved = reservedRootEntries(tags);
   for (const tier of plan.tiers) {
     console.log(`building ${mount.source} tier '${tier.rel || "/"}' from ${tier.ref}`);
-    const dist =
+    const { dist, buildDir } =
       mount.source === "command"
         ? buildCommandTier(cfg, tier)
-        : buildVitepressTier(cfg, tier, links, { strictLinks: tier.ref === "HEAD" });
+        : buildVitepressTier(cfg, tier, links);
     copyInto(
       dist,
       join(cfg.site, tier.rel),
       `mount '${mount.path}' tier '${tier.rel || "/"}' (${tier.ref})`,
       tier.kind === "root" ? reserved : undefined,
     );
+    // The output is in the site now; keep the scratch footprint one tier
+    // deep instead of N source trees plus N builds.
+    rmSync(buildDir, { recursive: true, force: true });
   }
   if (mount.versioned) {
     writeExclusive(
@@ -393,9 +430,10 @@ function main(): void {
     throw new Error(`CHECK must be "true" or "false" (got '${check}')`);
   }
   if (check === "true") {
-    // The docs PR check: one strict build of the working tree, no artifact.
+    // The docs PR check: one strict build of the working tree (a HEAD tier
+    // derives strict dead links), no artifact.
     const tier: Tier = { kind: "single", ref: "HEAD", version: "", rel: "" };
-    buildVitepressTier(cfg, tier, [], { strictLinks: true, base: "/" });
+    buildVitepressTier(cfg, tier, [], { base: "/" });
     console.log("docs build check passed");
     return;
   }
@@ -414,8 +452,8 @@ function main(): void {
     capture(["git", "-C", cfg.workspace, "rev-parse", "--is-shallow-repository"]).trim() !== "false"
   ) {
     throw new Error(
-      "the checkout is shallow - version tags, per-ref trees, and page timestamps all come " +
-        "from history, so the calling workflow must check out with fetch-depth: 0",
+      "the checkout is shallow - version tags and per-ref trees come from history, so the " +
+        "calling workflow must check out with fetch-depth: 0",
     );
   }
   const kept = versionTags(

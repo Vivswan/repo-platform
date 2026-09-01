@@ -138,12 +138,14 @@ if has issue-templates; then test -f "$SMOKE/.github/ISSUE_TEMPLATE/config.yml";
 if has pages; then
   test -f "$wf/pages.yml"
   # The deploy pipeline's shape: push + the nightly rebuild (theme and
-  # tag propagation) + dispatch, and the caller grants the called
-  # workflow's ceiling (issues write is the link-rot job's).
+  # tag propagation) + dispatch, never pull_request (deploys are not
+  # checks), and the caller grants the called workflow's ceiling (issues
+  # write is the link-rot job's).
   present_line "  push:" "$wf/pages.yml"
   present_line '    - cron: "23 4 * * *"' "$wf/pages.yml"
   present_line "  workflow_dispatch:" "$wf/pages.yml"
   present_line "      issues: write" "$wf/pages.yml"
+  absent "pull_request" "$wf/pages.yml"
 else
   test ! -e "$wf/pages.yml"
 fi
