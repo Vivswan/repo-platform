@@ -1,0 +1,101 @@
+name: Pages Site
+description: >-
+  Assembles the fleet's versioned GitHub Pages site artifact. Enumerates the
+  repository's version tags (plain vX.Y.Z) and builds every mount's tiers -
+  /latest/ from HEAD, one directory per kept tag, and the mount root serving
+  the newest version (or redirecting to latest/ while no tags exist). A
+  mount's content comes from the bundled VitePress build over the caller's
+  docs tree (source vitepress; the config and theme live in this action, the
+  caller carries only markdown) or from the caller's own build command
+  (source command). With check true it instead builds the caller's docs tree
+  once, strictly (dead internal links fatal), as the docs PR check. Requires
+  a full checkout (fetch-depth 0): version tags and per-ref trees come from
+  git history.
+
+inputs:
+  mounts:
+    description: >-
+      JSON list of mounts: [{"path": "/", "source": "vitepress"|"command",
+      "versioned": true|false}]. At most one mount per source. Ignored when
+      check is true.
+    required: false
+    default: '[{"path": "/", "source": "vitepress", "versioned": true}]'
+  check:
+    description: Build the docs tree once as a strict PR check (no artifact) instead of assembling the site
+    required: false
+    default: "false"
+  docs-dir:
+    description: The docs tree a vitepress mount renders (repo-relative)
+    required: false
+    default: docs
+  site-title:
+    description: Site title for vitepress mounts (empty = the repository name)
+    required: false
+    default: ""
+  install-command:
+    description: Dependency install command run before each command-mount build ("" skips)
+    required: false
+    default: ""
+  build-command:
+    description: Build command for command mounts; PAGES_BASE_PATH/PAGES_ORIGIN/PAGES_VERSION are exported
+    required: false
+    default: ""
+  dist-dir:
+    description: Command-mount build output directory, relative to the repo root
+    required: false
+    default: dist
+  max-versions:
+    description: How many newest version tags each versioned mount serves
+    required: false
+    default: "5"
+  custom-domain:
+    description: Custom domain ("" = <owner>.github.io/<repo>)
+    required: false
+    default: ""
+
+outputs:
+  site-dir:
+    description: The assembled _site directory to upload as the Pages artifact (empty in check mode)
+    value: ${{ steps.assemble.outputs.site-dir }}
+
+runs:
+  using: composite
+  steps:
+    - name: Check for a caller-installed bun
+      id: bun
+      shell: bash
+      run: echo "present=$(command -v bun >/dev/null && echo true || echo false)" >> "$GITHUB_OUTPUT"
+
+    # Skipped when the calling job already installed bun: reusing it keeps
+    # the caller's version pin and avoids a second network fetch.
+    - name: Set up bun
+      id: setup-bun
+      if: steps.bun.outputs.present != 'true'
+      continue-on-error: true
+      uses: oven-sh/setup-bun@v2
+
+    # One retry: the setup's network fetch is a known transient flake, and
+    # on nightly deploy paths a flake here turns a green night red.
+    - name: Set up bun (retry)
+      if: steps.setup-bun.outcome == 'failure'
+      uses: oven-sh/setup-bun@v2
+
+    - name: Install the pinned site toolchain
+      shell: bash
+      run: bun install --frozen-lockfile --cwd "${{ github.action_path }}"
+
+    - name: Build and assemble the site
+      id: assemble
+      shell: bash
+      env:
+        MOUNTS: ${{ inputs.mounts }}
+        CHECK: ${{ inputs.check }}
+        DOCS_DIR: ${{ inputs.docs-dir }}
+        SITE_TITLE: ${{ inputs.site-title }}
+        INSTALL_COMMAND: ${{ inputs.install-command }}
+        BUILD_COMMAND: ${{ inputs.build-command }}
+        DIST_DIR: ${{ inputs.dist-dir }}
+        MAX_VERSIONS: ${{ inputs.max-versions }}
+        CUSTOM_DOMAIN: ${{ inputs.custom-domain }}
+        DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+      run: bun "${{ github.action_path }}/build.ts"

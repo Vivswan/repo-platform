@@ -1,16 +1,20 @@
 # This file is managed by {{ github_username }}/repo-platform.
 # Local edits may be replaced during template updates.
 #
-# Build contract (PAGES_BASE_PATH, PAGES_ORIGIN, PAGES_STAGING) and the
-# CUSTOM_DOMAIN cutover: repo-platform's docs/pages.md. One-time setup:
-# repo Settings -> Pages -> Source: GitHub Actions.
+# The versioned Pages layout, the build contract (PAGES_BASE_PATH,
+# PAGES_ORIGIN, PAGES_VERSION), and the CUSTOM_DOMAIN cutover:
+# repo-platform's docs/pages.md. One-time setup without the settings-sync
+# module: repo Settings -> Pages -> Source: GitHub Actions (with it, the
+# module's settings layer enables Pages automatically).
 name: Pages
 
 on:
   push:
     branches: [main]
-  release:
-    types: [published]
+  schedule:
+    # Nightly rebuild: version tags created without a push land, and
+    # central pipeline updates propagate (docs/pages.md).
+    - cron: "23 4 * * *"
   workflow_dispatch:
 
 permissions:
@@ -24,14 +28,17 @@ jobs:
   deploy:
     uses: {{ github_username }}/repo-platform/.github/workflows/reusable-pages.yml@main
     with:
-      setup: {{ pages_setup }}
+{% if 'docs-site' in modules %}      mounts: '[{"path": "/", "source": "command", "versioned": false}, {"path": "/{{ docs_site_path }}/", "source": "vitepress", "versioned": true}]'
+      site_title: {{ project_name | tojson }}
+      link_rot_label: {{ docs_site_label | tojson }}
+{% else %}      mounts: '[{"path": "/", "source": "command", "versioned": true}]'
+{% endif %}      setup: {{ pages_setup }}
       install_command: {{ pages_install_command | tojson }}
       build_command: {{ pages_build_command | tojson }}
       dist_dir: {{ pages_dist_dir | tojson }}
-      production: {{ pages_production }}
-      staging: {{ 'true' if pages_staging and pages_production == 'release' else 'false' }}
       custom_domain: {% raw %}${{ vars.CUSTOM_DOMAIN }}{% endraw %}
     permissions:
       contents: read
       pages: write
       id-token: write
+      issues: write

@@ -53,6 +53,9 @@
 {%- if 'bun' in modules -%}
 {%- set _ = entries.append('    ".github/workflows/dependabot-bun-lockfile.yml": {"class": "managed", "hash": null}') -%}
 {%- endif -%}
+{%- if 'docs-site' in modules -%}
+{%- set _ = entries.append('    ".github/workflows/docs-site.yml": {"class": "managed", "hash": null}') -%}
+{%- endif -%}
 {%- if 'fuzzer' in modules -%}
 {%- set _ = entries.append('    ".github/workflows/nightly-fuzz.yml": {"class": "starter"}') -%}
 {%- endif -%}

@@ -1,0 +1,56 @@
+name: Pages Site Link Check
+description: >-
+  Crawls an assembled Pages site from a local static server and reports
+  BROKEN EXTERNAL links only (internal links are already fatal at build
+  time). Deliberately non-fatal to the deploy that already shipped: findings
+  land in a contract-v1 failure-report directory the fuzz-issue action turns
+  into the link-rot tracking issue, and the step succeeds with the broken
+  output set. A checker crash still fails the step - could-not-look must
+  never read as no-rot.
+
+inputs:
+  site-dir:
+    description: The assembled _site directory to crawl
+    required: true
+
+outputs:
+  broken:
+    description: Number of distinct broken external links (0 = healthy)
+    value: ${{ steps.check.outputs.broken }}
+  report-dir:
+    description: The contract-v1 report directory (exists only when broken > 0)
+    value: ${{ runner.temp }}/pages-site-link-rot
+
+runs:
+  using: composite
+  steps:
+    - name: Check for a caller-installed bun
+      id: bun
+      shell: bash
+      run: echo "present=$(command -v bun >/dev/null && echo true || echo false)" >> "$GITHUB_OUTPUT"
+
+    # Skipped when the calling job already installed bun: reusing it keeps
+    # the caller's version pin and avoids a second network fetch.
+    - name: Set up bun
+      id: setup-bun
+      if: steps.bun.outputs.present != 'true'
+      continue-on-error: true
+      uses: oven-sh/setup-bun@v2
+
+    # One retry: the setup's network fetch is a known transient flake, and
+    # on nightly reporting paths a flake here turns a green night red.
+    - name: Set up bun (retry)
+      if: steps.setup-bun.outcome == 'failure'
+      uses: oven-sh/setup-bun@v2
+
+    - name: Install the pinned link checker
+      shell: bash
+      run: bun install --frozen-lockfile --cwd "${{ github.action_path }}/.."
+
+    - name: Check external links
+      id: check
+      shell: bash
+      env:
+        SITE_DIR: ${{ inputs.site-dir }}
+        REPORT_DIR: ${{ runner.temp }}/pages-site-link-rot
+      run: bun "${{ github.action_path }}/../check_links.ts"

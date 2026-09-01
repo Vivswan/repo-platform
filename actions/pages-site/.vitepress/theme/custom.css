@@ -1,0 +1,28 @@
+/*
+ * THE FLEET TOKEN LAYER over vitepress-carbon. Carbon is token-based (its
+ * design system lives in --vp-* custom properties; the authoritative list
+ * is packages/theme/src/theme/styles/vars.css in
+ * github.com/brenoepics/vitepress-carbon), so the fleet's visual identity
+ * is expressed here as token overrides - see README.md in this directory
+ * for the replacement contract. The block below is a deliberate
+ * placeholder: carbon's own monochrome stands until the user's palette
+ * lands.
+ */
+
+:root {
+  /* Brand accent example - set carbon tokens here to override them:
+  --vp-c-brand-1: #3451b2;
+  --vp-c-brand-2: #3a5ccc;
+  --vp-c-brand-3: #5672cd;
+  */
+}
+
+.docs-site-version-switcher {
+  margin-left: 16px;
+  padding: 2px 8px;
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 6px;
+  background-color: var(--vp-c-bg-soft);
+  color: var(--vp-c-text-1);
+  font-size: 13px;
+}
