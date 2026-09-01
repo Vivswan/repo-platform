@@ -25,13 +25,19 @@ Managed: `ci.yml` and its standard jobs, `dependabot.yml` (github-actions ecosys
 
 ## pages
 
-- Managed: `pages.yml` caller (deploys through repo-platform's `reusable-pages.yml`).
-- Parameters (asked when selected; defaults derived from the selected toolchains): `pages_setup`, `pages_install_command`, `pages_build_command` (must be nonempty), `pages_dist_dir`, `pages_production` (release or main), `pages_staging`. Details and the build contract (`PAGES_BASE_PATH`, `PAGES_ORIGIN`, `PAGES_STAGING`): repo-platform's `docs/pages.md`.
-- Companion steps (one-time, needs repo settings access):
-  1. Settings -> Pages -> Source: GitHub Actions.
-  2. Settings -> Environments -> `github-pages` -> add a `v*` tag rule to deployment branches (release-triggered deploys run on the tag ref and are rejected without it).
-- Before the first release only `/staging/` publishes (with the default `pages_production: release`); the root 404 is expected, not a failure. `pages_production: main` builds the root from main HEAD, so it has no such window.
+- Managed: `pages.yml` caller (deploys through repo-platform's `reusable-pages.yml`): ONE versioned Pages site of the repo's own build - root = newest `vX.Y.Z` tag (redirect to `/latest/` before the first tag), `/latest/` = main, one directory per kept tag (`PAGES_MAX_VERSIONS` repo variable, default 5).
+- Parameters (asked when selected; defaults derived from the selected toolchains): `pages_setup`, `pages_install_command`, `pages_build_command` (must be nonempty), `pages_dist_dir`. Details and the build contract (`PAGES_BASE_PATH`, `PAGES_ORIGIN`, `PAGES_VERSION`): repo-platform's `docs/pages.md`.
+- Companion step (one-time, needs repo settings access; automatic with `settings-sync` - the module's settings layer enables Pages): Settings -> Pages -> Source: GitHub Actions.
+- With `docs-site` also selected, the website turns unversioned at `/` and the docs mount versioned at `/<docs_site_path>/`, all in this one workflow.
 - Removal: the caller leaves the render and is deleted; the live Pages site and settings stay until you turn Pages off in the repo.
+
+## docs-site
+
+- Managed: `docs-site.yml` - the repo's `docs/` markdown deployed as a versioned VitePress site under the CENTRAL fleet theme (the repo carries only markdown; theme and config live in repo-platform's `actions/pages-site`), plus a strict docs build check on every PR touching `docs/` (dead internal links fail there; never a required check).
+- Parameters: `docs_site_path` (URL mount when `pages` is also selected; default `docs`), `docs_site_label` (the nightly link-rot tracking stream's label; default `docs-link-rot`).
+- Conventions: `docs/README.md` is the landing page; sidebar and nav derive from the file tree; translations in `docs/<lang>/` (e.g. `zh-cn/`) become locales automatically; links must resolve inside `docs/` or be absolute URLs. Details: repo-platform's `docs/docs-site.md`.
+- Companion step: same one-time Pages toggle as the pages module (automatic with `settings-sync`), and make sure `docs/` exists with a `README.md` index - the deploy refuses an absent docs tree.
+- Removal: the managed workflow leaves the render and is deleted; the live Pages site stays until you turn Pages off.
 
 ## release-please
 

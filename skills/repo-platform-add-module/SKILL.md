@@ -19,7 +19,7 @@ Work in this order, always:
 ## When to Apply
 
 - "Enable the fuzzer" / "add nightly CI" / "turn on pages" / "host skills in this repo" / "add the uv toolchain" on a repo that already carries `.repo-platform.yml`
-- Outcome-shaped asks that map to a module: "add Python/Rust support to this repo" (uv/rust), "start cutting releases here" (release-please), "publish the docs site" (pages), "check PR titles" (pr-title), "what modules does this repo have" (read `.repo-platform.yml`)
+- Outcome-shaped asks that map to a module: "add Python/Rust support to this repo" (uv/rust), "start cutting releases here" (release-please), "publish the docs as a website" (docs-site), "deploy the repo's own site build" (pages), "check PR titles" (pr-title), "what modules does this repo have" (read `.repo-platform.yml`)
 - "Remove a module" / "drop the fuzzer" / "we do not need issue-templates anymore"
 - "Change nightly_label" / "move the skills directory" / "change the pages build command" - module parameters, not selection
 
@@ -37,7 +37,8 @@ One line each. The roster's source of truth is the module manifests (`templates/
 | `deno` | Deno toolchain (deno fmt/lint, deno dependabot, CodeQL JS) |
 | `uv` | Python/uv toolchain (gitignore, dependabot, CodeQL Python) |
 | `rust` | Rust/cargo toolchain (cargo dependabot, Rust gitignore; no CodeQL) |
-| `pages` | GitHub Pages deploy (root = latest release, /staging/ = main) |
+| `pages` | GitHub Pages deploy of the repo's own build (root = newest tag, /latest/ = main) |
+| `docs-site` | docs/ markdown as a versioned VitePress site under the central fleet theme |
 | `release-please` | release job on top of all-green + autorelease labels |
 | `issue-templates` | bug/feature issue forms |
 | `skills` | agent skills hosting (plugin manifests, skill validation) |
@@ -100,15 +101,15 @@ What the PR delivers, in two classes:
 
 The full checklist per module is in [references/modules.md](references/modules.md). The ones that bite when skipped:
 
-- Settings labels need no hand work, but they do need a home: put the new module's labels in its own `templates/<module>/settings.yml` layer (the dependabot label for a new toolchain, the `autorelease: *` pair plus `release-blocker`/`release-override` for `release-please`), declare that layer file in the module's own `module.yml` under `settings_layers` (the render selects layer files from that declaration, not from the tree, and the manifest loader refuses an undeclared or missing one), and the merge picks the labels up at apply time. Only the tracking label for `fuzzer`/`nightly` still comes from the manifest, because its NAME is a per-repo answer. The one thing to record: a `fuzzer`/`nightly` repo's tracking-label answer (`fuzzer_label`/`nightly_label`) must be readable from its `.copier-answers.yml` - record it in the step-1 PR even when accepting the default, or the apply fails for that repo until the sync PR merges (the assembly refuses to guess a tracking label).
+- Settings labels need no hand work, but they do need a home: put the new module's labels in its own `templates/<module>/settings.yml` layer (the dependabot label for a new toolchain, the `autorelease: *` pair plus `release-blocker`/`release-override` for `release-please`), declare that layer file in the module's own `module.yml` under `settings_layers` (the render selects layer files from that declaration, not from the tree, and the manifest loader refuses an undeclared or missing one), and the merge picks the labels up at apply time. Only the tracking labels for `fuzzer`/`nightly`/`docs-site` still come from the manifest, because their NAMES are per-repo answers. The one thing to record: a tracking-stream repo's label answer (`fuzzer_label`/`nightly_label`/`docs_site_label`) must be readable from its `.copier-answers.yml` - record it in the step-1 PR even when accepting the default, or the apply fails for that repo until the sync PR merges (the assembly refuses to guess a tracking label).
 - `bun`: register a repo-scoped Contents:RW PAT as a DEPENDABOT secret so the lockfile fixer's push re-runs CI (human-only - needs the token value): `gh secret set REPO_PLATFORM_TOKEN --app dependabot`.
-- `pages`: one-time repo setup - Settings -> Pages -> Source: GitHub Actions, and a `v*` tag rule on the `github-pages` environment's deployment branches.
+- `pages` / `docs-site`: one-time repo setup - Settings -> Pages -> Source: GitHub Actions; automatic with `settings-sync` (the modules' settings layers enable Pages on the next apply).
 - `skills`: the starter manifests are repo-owned - a skill folder is unpublished until `plugin.json`'s `skills` array lists it.
 - `fuzzer` / `nightly`: replace the starter's placeholder step with real work; until then it is a green no-op that never files issues.
 
 ## Module parameters
 
-How the sync actually renders answers: it passes only `modules` (from `.repo-platform.yml`) and the live `private`/`description` as data. Every other answer - `nightly_label`, `fuzzer_label`, `skills_dir`, the `pages_*` set, `homepage`, `topics`, `copyright_holder` - is loaded from the repo's recorded `.copier-answers.yml`, and a question with no recorded answer (a module just added) takes its `copier.yml` default.
+How the sync actually renders answers: it passes only `modules` (from `.repo-platform.yml`) and the live `private`/`description` as data. Every other answer - `nightly_label`, `fuzzer_label`, `docs_site_label`, `docs_site_path`, `skills_dir`, the `pages_*` set, `homepage`, `topics`, `copyright_holder` - is loaded from the repo's recorded `.copier-answers.yml`, and a question with no recorded answer (a module just added) takes its `copier.yml` default.
 
 So the parameter mechanism is the recorded answers file, edited by PR on the default branch:
 
@@ -129,9 +130,9 @@ The answers file holds three classes of key - know which one you are touching:
 - `modules`, `private`, `description`: recorded here, but force-overridden by the sync every run - an edit here silently evaporates. Change them at their real source: `.repo-platform.yml` for modules, and the repo's own `.github/settings.yml` for visibility and description (the settings apply enforces that file; the sync then adopts the applied values).
 - Everything else (the module parameters above): editing the value key here IS the mechanism. The next sync re-renders everything derived from the answer and rewrites `.copier-answers.yml` itself consistently; an answer that violates its copier validator fails the sync run loudly. The settings assembly reads tracking labels from exactly this file on the default branch, so the recorded value is what the apply declares.
 
-When both `fuzzer` and `nightly` are selected, their labels must differ (case-insensitively - GitHub deduplicates label names that way): both streams dedup AND auto-close by label, so a shared label lets one stream's green night close the other's open issue. The copier validator and the settings assembly both reject the collision.
+When several tracking-stream modules are selected (`fuzzer`, `nightly`, `docs-site`), their labels must pairwise differ (case-insensitively - GitHub deduplicates label names that way): every stream dedups AND auto-closes by label, so a shared label lets one stream's green night close another's open issue. The copier validators and the settings assembly both reject the collision.
 
-One ripple to remember: renaming a tracking label (`fuzzer_label`/`nightly_label`) never updates the repo-owned starter workflow - update the starter's two `label:` inputs in the same PR, or it keeps filing under the old name while the settings apply deletes that label. The managed baseline picks the renamed value up automatically on the next apply (it reads the recorded answer).
+One ripple to remember: renaming a fuzz or nightly tracking label never updates the repo-owned starter workflow - update the starter's two `label:` inputs in the same PR, or it keeps filing under the old name while the settings apply deletes that label. The managed baseline picks the renamed value up automatically on the next apply (it reads the recorded answer), and `docs_site_label` needs no second edit at all: its workflow is managed, so the next sync PR re-renders the input.
 
 ## Removing a module
 

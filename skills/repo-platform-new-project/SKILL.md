@@ -74,7 +74,7 @@ The template's `.gitignore` is generated and managed: after the copy, move any s
 
 Full walkthrough in [references/questions.md](references/questions.md). The load-bearing answers:
 
-- `modules`: a multiselect (space toggles, enter confirms), any combination. Modules with parameters ask follow-up questions only when selected (pages, fuzzer, nightly, skills, settings-sync). The authoritative roster is the interactive prompt itself (repo-platform's `copier.yml`).
+- `modules`: a multiselect (space toggles, enter confirms), any combination. Modules with parameters ask follow-up questions only when selected (pages, docs-site, fuzzer, nightly, skills, settings-sync). The authoritative roster is the interactive prompt itself (repo-platform's `copier.yml`).
 - `private`: gates the render - public repos get CodeQL and dependency-review jobs plus CONTRIBUTING.md; private ones do not. It must match the visibility you create the repo with in step 6.
 
 Two files record the outcome:
@@ -95,6 +95,17 @@ Some files are generated once and then owned by the repo (sync never overwrites 
 - `auto-format.yml` and `copilot-setup-steps.yml` come prefilled for the selected toolchains; issue forms are generic starters to tailor.
 
 The full ownership table is in [references/file-ownership.md](references/file-ownership.md).
+
+### 5b. Seed the docs site (docs-site module only)
+
+The module deploys `docs/` markdown as a versioned VitePress site; the repo carries NOTHING but the markdown - config, theme, sidebar, and navigation all live in repo-platform (`actions/pages-site`), so there is no docs config to write, ever.
+
+- Create `docs/README.md` (the site's landing page) before the first deploy - the deploy refuses an absent docs tree. Each directory's `README.md` is its index; the sidebar mirrors the file tree.
+- Keep links inside `docs/` or absolute: a `../README.md`-style link works on GitHub but is dead on the site, and dead links fail the build (the module's PR check names the broken link before merge).
+- Translations, when wanted, go in `docs/<lang>/` (e.g. `zh-cn/`) mirroring the root structure - detected automatically, no config.
+- The first deploy needs Pages enabled: automatic with settings-sync (the module's settings layer enables it); otherwise Settings -> Pages -> Source: GitHub Actions (in Owner actions below).
+
+Onboarding an EXISTING repository that already has a `docs/` tree differs in two ways: enable the module through the `repo-platform-add-module` skill when the repo is already managed (edit `.repo-platform.yml`; an unmanaged repo selects `docs-site` during this skill's copier adoption instead), and expect a link-fixing pass - existing docs usually carry out-of-tree relative links, and the first PR touching `docs/` will name every one. A repo that self-managed VitePress before must also delete its `docs/.vitepress/` - the build refuses it, because a repo-local theme could never apply (the theme is central by design).
 
 ### 6. Create the GitHub repo and push
 
@@ -132,7 +143,7 @@ On private repositories the five base checks run as one combined `base-checks` j
 Collect these for the human with admin rights:
 
 - Grant the fleet PAT access to the new repo: the `REPO_PLATFORM_TOKEN` fine-grained PAT's repository access list at https://github.com/settings/personal-access-tokens - this is the enrollment step; nothing syncs without it.
-- pages module: Settings -> Pages -> Source: GitHub Actions, and add a `v*` tag rule to the `github-pages` environment's deployment branches (release-triggered deploys run on the tag ref and are rejected without it).
+- pages or docs-site module (skip with settings-sync selected - the modules' settings layers enable Pages automatically): Settings -> Pages -> Source: GitHub Actions.
 - bun module: register a repo-scoped Contents:RW PAT as a Dependabot secret so the lockfile fixer's push re-runs CI: `gh secret set REPO_PLATFORM_TOKEN --app dependabot` (prompts for the token value on stdin - the human runs it, or pass `--body "$TOKEN"` non-interactively). Without it the fix lands but each fixed PR needs a close/reopen for checks to appear.
 - settings-sync module self-apply (optional): a repo-scoped PAT with Administration + Issues RW as the repo's own `REPO_PLATFORM_TOKEN` Actions secret; without it self-apply skips and the central heal still covers the repo.
 
