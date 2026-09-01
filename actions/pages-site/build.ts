@@ -164,6 +164,12 @@ interface Config {
   siteTitle: string;
   installCommand: string;
   buildCommand: string;
+  /** The job's PATH from before the action's pinned bun setup (recorded
+   *  by action.yml's first step): caller-authored command-mount builds
+   *  run with the toolchain the CALLER set up (reusable-pages pins it
+   *  from the checkout's dotfiles), while the action's own code rides
+   *  the action-local pin. Empty when the recording step is absent. */
+  callerPath: string;
   distDir: string;
   maxVersions: number;
   customDomain: string;
@@ -200,6 +206,7 @@ function readConfig(): Config {
     siteTitle: env("SITE_TITLE"),
     installCommand: env("INSTALL_COMMAND"),
     buildCommand: env("BUILD_COMMAND"),
+    callerPath: env("CALLER_PATH"),
     distDir: env("DIST_DIR", "dist"),
     maxVersions: Number(maxVersionsRaw),
     customDomain,
@@ -257,6 +264,9 @@ function buildCommandTier(cfg: Config, tier: Tier): { dist: string; buildDir: st
     PAGES_BASE_PATH: urlBase(cfg.rootBase, tier.rel),
     PAGES_ORIGIN: cfg.origin,
     PAGES_VERSION: tier.version,
+    // The caller's pre-action PATH: the action's pinned bun governs only
+    // action-owned code, never the caller's own build toolchain.
+    ...(cfg.callerPath === "" ? {} : { PATH: cfg.callerPath }),
   };
   // The commands are caller-authored shell (the pages module's build
   // contract), so bash -c is the interface; everything else stays argv.
