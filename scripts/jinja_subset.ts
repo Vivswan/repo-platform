@@ -100,10 +100,13 @@ export function evaluateIfBranches(
 
 /**
  * Reduce a template file to the text this repo's own copy should carry:
- * strip raw markers, jinja comments and set/if/endif tags, substitute the
- * identity expressions, and map remote
- * `<owner>/repo-platform/<path>@main` references to their local
- * `./<path>` form. Without a `context`, every if/endif body is kept (fine
+ * strip raw markers, jinja comments and set/if/endif tags, and substitute
+ * the identity expressions. Remote `<owner>/repo-platform/<path>@build`
+ * references stay VERBATIM: the dogfooded copies consume the same
+ * green-gated delivery branch the fleet does (the fleet-refs-ride-build
+ * rule in check_ssot.ts forbids any other ref in a template, so there is
+ * nothing left to localize). Without a `context`, every if/endif body is
+ * kept (fine
  * while the kept bodies never contradict each other); with one, false
  * branches are dropped and only conditions the context cannot resolve keep
  * their bodies.
@@ -145,10 +148,6 @@ export function normalizeJinja(
     /\{%(?<lead>-?)\s*(?:if|endif)\b[^%]*?(?<trail>-?)%\}/g,
   );
   out = out.replace(/\{\{ '([^']*)' if [^}]*? else '[^']*' \}\}/g, "$1");
-  out = out.replace(
-    new RegExp(`\\{\\{ github_username \\}\\}/${vars.slug}/([^\\s@]+)@main`, "g"),
-    "./$1",
-  );
   out = out.replace(/\{\{ copyright_holder \}\}/g, () => vars.copyrightHolder);
   out = out.replace(/\{\{ github_username \| lower \}\}/g, vars.username.toLowerCase());
   out = out.replace(/\{\{ github_username \}\}/g, vars.username);

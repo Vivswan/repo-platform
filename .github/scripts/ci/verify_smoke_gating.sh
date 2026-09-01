@@ -161,13 +161,14 @@ if has docs-site; then
   present "actions/pages-site@build" "$wf/docs-site.yml"
   present 'check: "true"' "$wf/docs-site.yml"
   if has pages; then
-    absent "reusable-pages.yml@main" "$wf/docs-site.yml"
+    # No deploy call at ANY ref: pages.yml owns the deployment here.
+    absent "reusable-pages.yml@" "$wf/docs-site.yml"
     absent "schedule:" "$wf/docs-site.yml"
     present '{"path": "/docs/", "source": "vitepress", "versioned": true}' "$wf/pages.yml"
     present '{"path": "/", "source": "command", "versioned": false}' "$wf/pages.yml"
     present_line '      link_rot_label: "docs-link-rot"' "$wf/pages.yml"
   else
-    present "reusable-pages.yml@main" "$wf/docs-site.yml"
+    present "reusable-pages.yml@build" "$wf/docs-site.yml"
     present '{"path": "/", "source": "vitepress", "versioned": true}' "$wf/docs-site.yml"
     present_line '      link_rot_label: "docs-link-rot"' "$wf/docs-site.yml"
     present_line '    - cron: "41 4 * * *"' "$wf/docs-site.yml"
@@ -271,7 +272,7 @@ fi
 if has settings-sync; then
   test -f "$SMOKE/.github/settings.yml"
   test -f "$wf/settings-sync.yml"
-  present "reusable-apply-settings.yml@main" "$wf/settings-sync.yml"
+  present "reusable-apply-settings.yml@build" "$wf/settings-sync.yml"
   # The rendered settings.yml is the repo-owned IDENTITY STARTER: the four
   # identity keys and nothing else. description is the constant
   # smoke_generate.ts passes; visibility is declared even when public. The

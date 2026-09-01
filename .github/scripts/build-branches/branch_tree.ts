@@ -17,11 +17,11 @@
 //                     copier.yml's _tasks and _migrations run the manifest
 //                     stamping hook from actions/shared/stamp_manifest.ts,
 //                     the same relative path it has in this checkout)
-// - .github/workflows/ (the fleet-facing reusable workflows - fleet-ci.yml,
-//                     reusable-codeql.yml - that
-//                     rendered workflows call `@build`; a reusable-workflow
+// - .github/workflows/ (the fleet-facing reusable workflows - the
+//                     FLEET_WORKFLOWS roster below - that rendered
+//                     workflows call `@build`; a reusable-workflow
 //                     `uses:` fetches the FILE at the named ref, so a build
-//                     branch without them 404s every fleet CI run)
+//                     branch without them 404s every fleet caller run)
 // - README.md        (static explainer)
 //
 // One branch serves both consumers because the whole tree is
@@ -84,6 +84,25 @@ export function canonicalize(path: string): string {
   return join(realpathSync(base), ...tail);
 }
 
+/** The fleet-facing reusable workflows the build branch must carry - every
+ *  reusable workflow a RENDERED workflow calls `@build`: the rendered
+ *  ci.yml calls fleet-ci.yml (whose codeql job calls ./reusable-codeql.yml,
+ *  resolving at fleet-ci's own ref - this branch), pages.yml and
+ *  docs-site.yml call reusable-pages.yml, auto-assign.yml calls the
+ *  reusable-auto-assign pair, and settings-sync.yml calls
+ *  reusable-apply-settings.yml (which two-hops its scripts checkout to the
+ *  tip's stamped source commit - its own header). A reusable-workflow
+ *  `uses:` fetches the FILE at the named ref, so a build branch missing
+ *  one 404s every fleet run that calls it. */
+export const FLEET_WORKFLOWS = [
+  "fleet-ci.yml",
+  "reusable-apply-settings.yml",
+  "reusable-auto-assign-alerts.yml",
+  "reusable-auto-assign.yml",
+  "reusable-codeql.yml",
+  "reusable-pages.yml",
+];
+
 const README = `\
 # repo-platform build branch
 
@@ -95,8 +114,8 @@ sources in \`actions/\`.
 \`build\` is rebuilt from each \`main\` commit whose CI run succeeds (the
 branch ships only green main commits). It carries the composed copier tree
 under \`template/\`, the composite actions under \`actions/\`, and the
-fleet-facing reusable workflows (fleet-ci.yml,
-reusable-codeql.yml) under \`.github/workflows/\` - every path is
+fleet-facing reusable workflows (${FLEET_WORKFLOWS.join(", ")})
+under \`.github/workflows/\` - every path is
 extraction-safe (no jinja-expression filenames), so
 \`uses: <owner>/repo-platform/actions/<name>@build\` refs extract cleanly
 on the runner, and an @build pin runs only action and workflow code CI has
@@ -180,14 +199,6 @@ function countFiles(dir: string): number {
   }
   return total;
 }
-
-/** The fleet-facing reusable workflows the build branch must carry: the
- *  rendered ci.yml calls fleet-ci.yml@build and the shared all-green
- *  action @build, and fleet-ci's codeql job
- *  calls ./reusable-codeql.yml, which resolves at fleet-ci's own ref -
- *  this branch. A reusable-workflow `uses:` fetches the FILE at the named
- *  ref, so a build branch without them 404s every fleet CI run. */
-export const FLEET_WORKFLOWS = ["fleet-ci.yml", "reusable-codeql.yml"];
 
 /** The workflow document's trigger names, whatever shape `on:` takes. */
 function triggerNames(doc: unknown): string[] {

@@ -24,10 +24,12 @@ import {
   composeAnchorNames,
   DELIVERY_REF,
   declaredCheckName,
+  deliveryRefMismatches,
   expandCheckChain,
   extractUsesPins,
   firstDiff,
   fleetCiRenderMismatches,
+  fleetWorkflowPinMismatches,
   fragmentFilesFor,
   gatesOnModule,
   inlineFunctionCopies,
@@ -49,6 +51,7 @@ import {
   preflightInvocation,
   prTitleWorkflowMismatches,
   RULE_ROSTER,
+  renderedSelfPins,
   rosterMismatches,
   ruleRosterMismatches,
   SETUP_VERSION_FILES,
@@ -64,6 +67,7 @@ import {
   starterTemplateFiles,
   stepCarriesWithKey,
   stripGeneratedRegions,
+  templateSelfPins,
   topLevelProperties,
   unsafeStepCondition,
   withToolchainSetup,
@@ -1193,6 +1197,126 @@ describe("starterPinCoverage", () => {
     // whose starters pin @build satisfies both directions.
     const pins = PIN_FLIPS.map((entry) => pin(entry.to));
     expect(starterPinCoverage(pins, PIN_FLIPS, DELIVERY_REF)).toEqual([]);
+  });
+});
+
+describe("renderedSelfPins and deliveryRefMismatches (fleet-refs-ride-build)", () => {
+  test("extracts rendered delivery pins - actions and reusable workflows alike", () => {
+    const text = [
+      "      - uses: Vivswan/repo-platform/actions/fuzz-issue@build",
+      "    uses: Vivswan/repo-platform/.github/workflows/reusable-pages.yml@main",
+    ].join("\n");
+    expect(renderedSelfPins(text, "f", "Vivswan")).toEqual([
+      { file: "f", stem: "repo-platform/actions/fuzz-issue", ref: "build" },
+      { file: "f", stem: "repo-platform/.github/workflows/reusable-pages.yml", ref: "main" },
+    ]);
+  });
+
+  test("third-party, local, other-repo, and longer-owner refs are not self-pins", () => {
+    const text = [
+      "      - uses: actions/checkout@v7",
+      "      - uses: ./actions/local",
+      "      - uses: Vivswan/other-repo/actions/x@main",
+      "      - uses: EvilVivswan/repo-platform/actions/x@main",
+    ].join("\n");
+    expect(renderedSelfPins(text, "f", "Vivswan")).toEqual([]);
+  });
+
+  test("an owner that is not a plain username throws rather than riding the regex", () => {
+    expect(() => renderedSelfPins("", "f", "a.b|c")).toThrow("not a plain GitHub username");
+  });
+
+  test("a planted @main template ref reds, naming the file and the offending ref", () => {
+    const planted =
+      "    uses: {{ github_username }}/repo-platform/.github/workflows/reusable-pages.yml@main";
+    const file = "templates/pages/.github/workflows/pages.yml.jinja";
+    const mismatches = deliveryRefMismatches(starterSelfPins(planted, file), "build");
+    expect(mismatches).toHaveLength(1);
+    expect(mismatches[0].file).toBe(file);
+    expect(mismatches[0].expected).toContain(
+      "repo-platform/.github/workflows/reusable-pages.yml@build",
+    );
+    expect(mismatches[0].got).toBe("@main");
+    // Restored to the delivery ref, the same content is green.
+    const restored = planted.replace("@main", "@build");
+    expect(deliveryRefMismatches(starterSelfPins(restored, file), "build")).toEqual([]);
+  });
+
+  test("a planted @main golden-render ref reds the same way", () => {
+    const planted = "    uses: Vivswan/repo-platform/.github/workflows/reusable-pages.yml@main";
+    const file = "tests/golden-renders/all-modules/.github/workflows/pages.yml";
+    const mismatches = deliveryRefMismatches(renderedSelfPins(planted, file, "Vivswan"), "build");
+    expect(mismatches).toHaveLength(1);
+    expect(mismatches[0].file).toBe(file);
+    expect(mismatches[0].got).toBe("@main");
+    expect(
+      deliveryRefMismatches(
+        renderedSelfPins(planted.replace("@main", "@build"), file, "Vivswan"),
+        "build",
+      ),
+    ).toEqual([]);
+  });
+
+  test("any non-delivery ref reds, not just @main - a tag or sha forks the channel too", () => {
+    const pins = [{ file: "f", stem: "repo-platform/actions/x", ref: "v2" }];
+    expect(deliveryRefMismatches(pins, "build")[0].got).toBe("@v2");
+  });
+
+  test("the lowered-username spelling is scanned too - `| lower` renders a working owner", () => {
+    const planted =
+      "    uses: {{ github_username | lower }}/repo-platform/.github/workflows/reusable-pages.yml@main";
+    const pins = templateSelfPins(planted, "f");
+    expect(pins).toEqual([
+      { file: "f", stem: "repo-platform/.github/workflows/reusable-pages.yml", ref: "main" },
+    ]);
+    expect(deliveryRefMismatches(pins, "build")).toHaveLength(1);
+    // The expression slot is matched wholesale, not by enumerating
+    // spellings: filter-call and whitespace-control forms render the same
+    // working owner and must be caught too.
+    for (const expression of [
+      "{{ github_username }}",
+      "{{ github_username | lower() }}",
+      "{{- github_username -}}",
+    ]) {
+      expect(templateSelfPins(`uses: ${expression}/repo-platform/actions/x@main`, "f")).toEqual([
+        { file: "f", stem: "repo-platform/actions/x", ref: "main" },
+      ]);
+    }
+    // Another owner's expression is not a self-pin.
+    expect(templateSelfPins("uses: {{ other_owner }}/repo-platform/actions/x@main", "f")).toEqual(
+      [],
+    );
+  });
+
+  test("a rendered case-variant owner or repo is scanned and stem-normalized", () => {
+    const pins = renderedSelfPins("    uses: vivswan/Repo-Platform/actions/x@main", "f", "Vivswan");
+    // The stem's repo prefix comes back canonical, so the roster coupling
+    // below cannot be dodged by a case-variant repo name.
+    expect(pins).toEqual([{ file: "f", stem: "repo-platform/actions/x", ref: "main" }]);
+  });
+
+  test("a reusable-workflow pin off the FLEET_WORKFLOWS roster reds - right ref, still a 404", () => {
+    const offRoster = [
+      { file: "f", stem: "repo-platform/.github/workflows/reusable-ghost.yml", ref: "build" },
+    ];
+    const mismatches = fleetWorkflowPinMismatches(offRoster, ["fleet-ci.yml"]);
+    expect(mismatches).toHaveLength(1);
+    expect(mismatches[0].got).toBe("repo-platform/.github/workflows/reusable-ghost.yml");
+    expect(mismatches[0].expected).toContain("FLEET_WORKFLOWS");
+    // A rostered pin and an action pin both pass - actions ship whole.
+    expect(
+      fleetWorkflowPinMismatches(
+        [
+          { file: "f", stem: "repo-platform/.github/workflows/fleet-ci.yml", ref: "build" },
+          { file: "f", stem: "repo-platform/actions/fuzz-issue", ref: "build" },
+        ],
+        ["fleet-ci.yml"],
+      ),
+    ).toEqual([]);
+  });
+
+  test("an empty scan throws - anchor lost, never a silently green rule", () => {
+    expect(() => deliveryRefMismatches([], "build")).toThrow("anchor lost");
   });
 });
 

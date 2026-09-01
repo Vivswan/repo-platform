@@ -252,7 +252,10 @@ describe("copyFleetWorkflows", () => {
     const wf = join(root, ".github", "workflows");
     mkdirSync(wf, { recursive: true });
     writeFileSync(join(wf, "fleet-ci.yml"), fleetCiContent);
-    writeFileSync(join(wf, "reusable-codeql.yml"), "on:\n  workflow_call:\njobs: {}\n");
+    for (const name of FLEET_WORKFLOWS) {
+      if (name === "fleet-ci.yml") continue;
+      writeFileSync(join(wf, name), "on:\n  workflow_call:\njobs: {}\n");
+    }
     return root;
   }
 

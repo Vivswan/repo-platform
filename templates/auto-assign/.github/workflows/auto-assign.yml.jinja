@@ -32,7 +32,7 @@ jobs:
       contents: read
       issues: write
       pull-requests: write
-    uses: {{ github_username }}/repo-platform/.github/workflows/reusable-auto-assign.yml@main
+    uses: {{ github_username }}/repo-platform/.github/workflows/reusable-auto-assign.yml@build
     with:
       issue: {% raw %}${{ inputs.issue || '' }}{% endraw %}
 {%- if enable_codeql %}
@@ -44,5 +44,5 @@ jobs:
     permissions:
       contents: read
       security-events: write
-    uses: {{ github_username }}/repo-platform/.github/workflows/reusable-auto-assign-alerts.yml@main
+    uses: {{ github_username }}/repo-platform/.github/workflows/reusable-auto-assign-alerts.yml@build
 {%- endif %}

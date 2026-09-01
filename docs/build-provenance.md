@@ -112,6 +112,10 @@ The branch is both the copier source and the fleet's executable channel (`uses: 
 - Plain filenames only: a `uses:` ref downloads the whole branch tarball, and extraction dies on jinja-expression path segments, so conditional landing happens through copier.yml's generated `_exclude` region instead of filename gates.
 - Nothing the builder publishes can run on the branch: [branch_tree.ts](../.github/scripts/build-branches/branch_tree.ts) hard-fails assembly if any shipped workflow carries a trigger other than `workflow_call` alone. PAT pushes can trigger workflows, so the safety is pinned by construction, not carried by omission (build-branches.yml's header); an out-of-band push bypasses the assembly guard entirely - the residuals section.
 
+## The settings self-apply's two-hop
+
+Every fleet-rendered reference to this repository rides `@build` (the `fleet-refs-ride-build` rule in scripts/check_ssot.ts is the categorical law), and the branch ships only workflow files, actions, and the composed template - never the repo scripts. [reusable-apply-settings.yml](../.github/workflows/reusable-apply-settings.yml) needs those scripts, so it hops twice: the workflow FILE resolves at the caller's `@build` pin, and its resolve step reads that build commit's provenance stamp and checks the scripts out at the stamped source - the exact green main commit the tree was composed from, so green-gating holds end to end. A stampless sha is used only when it is provably main history (a pre-two-hop caller pin); anything else fails closed (tests/fleet/apply_settings_scripts_ref.test.ts forces the refusal). Like every `uses:`, both hops trust the ref they resolved - the residuals table's first row covers them.
+
 ## Residuals
 
 | Residual | Why it stands | What bounds it |

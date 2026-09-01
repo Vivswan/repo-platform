@@ -47,7 +47,7 @@ jobs:
     concurrency:
       group: pages
       cancel-in-progress: false
-    uses: ./.github/workflows/reusable-pages.yml
+    uses: Vivswan/repo-platform/.github/workflows/reusable-pages.yml@build
     with:
       mounts: '[{"path": "/", "source": "vitepress", "versioned": true}]'
       site_title: "repo-platform"

@@ -26,7 +26,7 @@ concurrency:
 
 jobs:
   deploy:
-    uses: Vivswan/repo-platform/.github/workflows/reusable-pages.yml@main
+    uses: Vivswan/repo-platform/.github/workflows/reusable-pages.yml@build
     with:
       mounts: '[{"path": "/", "source": "command", "versioned": false}, {"path": "/docs/", "source": "vitepress", "versioned": true}]'
       site_title: "Golden Render"

@@ -7,10 +7,10 @@
 // scripts/jinja_subset.ts) agrees with what real copier produces from the
 // same templates and answers.
 //
-// One mechanical normalization before comparing: this repository dogfoods
-// its own reusable workflows by LOCAL path, so the render's
-// `<username>/<slug>/<path>@main` references map to `./<path>` (the
-// templates pin `main` literally).
+// No normalization before comparing: the committed copies carry the
+// render's remote-form `@build` pins verbatim (this repository consumes
+// the same green-gated delivery branch the fleet does), so the oracle is
+// a raw byte comparison.
 //
 // The rendered .copier-answers.yml is checked against the answers file
 // first, so a dogfood-oracle matrix row that drifts from
@@ -86,21 +86,11 @@ function main(): number {
     );
   }
 
-  // The local-path dogfood rewrite (the same mapping renderJinjaFile bakes
-  // into the committed copies), applied to copier's remote-form output.
-  // Deliberately broader than jinja_subset's rewrite: it matches
-  // rendered VALUES, not template expressions, and only the @main pin - a
-  // render pinned at anything else stays remote-form and fails the diff
-  // loudly rather than being silently localized.
-  const escapeRe = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const localize = (text: string) =>
-    text.replace(
-      new RegExp(
-        `${escapeRe(answers.github_username)}/${escapeRe(answers.project_slug)}/([^\\s@]+)@main`,
-        "g",
-      ),
-      "./$1",
-    );
+  // No localization: the dogfooded copies carry copier's remote-form
+  // @build pins verbatim (this repo consumes the same green-gated
+  // delivery branch the fleet does), so the oracle byte-compares raw
+  // render output. The retired @main -> ./ rewrite would only mask the
+  // regression the fleet-refs-ride-build ssot rule now reds.
 
   let failures = 0;
   let compared = 0;
@@ -125,7 +115,7 @@ function main(): number {
       continue;
     }
     compared++;
-    const rendered = localize(readFileSync(renderedPath, "utf-8"));
+    const rendered = readFileSync(renderedPath, "utf-8");
     const committed = readFileSync(committedPath, "utf-8");
     if (rendered === committed) continue;
     const renderedLines = rendered.split("\n");

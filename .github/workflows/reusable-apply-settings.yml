@@ -3,7 +3,9 @@
 # SAME two-layer merge the central settings-repos run computes - a partial
 # repo document alone would delete every baseline label (the action's
 # label sync removes undeclared ones), so this workflow checks out
-# repo-platform (pinned to the calling ref's commit), computes the managed
+# repo-platform's scripts (two-hop: callers pin @build, whose tree carries
+# only workflow files, so the scripts land on the build tip's stamped
+# green source commit - the resolve step below), computes the managed
 # baseline from the caller's module selection, merges the caller's
 # settings.yml over it, and applies the merged document in single-repo
 # mode. The central home for the same merge is settings-repos.yml.
@@ -79,20 +81,58 @@ jobs:
         with:
           ref: ${{ github.event.repository.default_branch }}
 
-      # The baseline generator and merge dialect live in repo-platform;
-      # job.workflow_sha is the commit of the workflow file that DEFINES
-      # this job - this reusable workflow - so the checkout pins to the
-      # exact commit the caller's `uses:` ref resolved to and the scripts
-      # can never version-skew. NOT github.workflow_sha: that is the
-      # CALLER's workflow file, a sha absent from this repository. The
-      # fallback covers contexts that omit the property (GHES): main,
-      # what callers pin anyway.
+      # The baseline generator and merge dialect live in repo-platform, but
+      # callers pin this workflow @build - the green-gated delivery branch,
+      # whose tree carries only the composed template, the actions, and the
+      # workflow files, never the scripts. job.workflow_sha is the commit
+      # the caller's `uses:` ref resolved to (NOT github.workflow_sha: that
+      # is the CALLER's workflow file, a sha absent from this repository).
+      # On the build branch that commit's message carries the provenance
+      # stamp naming the exact green main commit the tree was composed from
+      # (.github/scripts/shared/commit_stamp.ts owns the line shape; the
+      # sed below mirrors its STAMP_RE - only a full 40-hex sha parses), so
+      # the second hop checks the scripts out THERE: the same commit CI
+      # vouched for, no version skew with the shipped workflow. A stampless
+      # sha is accepted only when it is provably main history (an @main or
+      # commit pin - the pre-@build caller shape); anything else fails
+      # CLOSED rather than running scripts from an unvouched commit. The
+      # GHES fallback (contexts that omit job.workflow_sha) stays main.
+      # tests/fleet/apply_settings_scripts_ref.test.ts runs this block
+      # against a stubbed gh and forces every branch, the refusal included.
+      - name: Resolve the repo-platform scripts commit
+        id: scripts
+        if: steps.token.outputs.proceed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          WORKFLOW_SHA: ${{ job.workflow_sha }}
+        run: |
+          if [ -z "$WORKFLOW_SHA" ]; then
+            echo "ref=main" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          message="$(gh api "repos/Vivswan/repo-platform/commits/$WORKFLOW_SHA" --jq '.commit.message')"
+          stamp="$(printf '%s\n' "$message" | sed -n -E 's|^source: .*/commit/([0-9a-f]{40})$|\1|p' | head -n 1)"
+          if [ -n "$stamp" ]; then
+            echo "ref=$stamp" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          status="$(gh api "repos/Vivswan/repo-platform/compare/main...$WORKFLOW_SHA" --jq '.status' || echo unreachable)"
+          case "$status" in
+            identical|behind)
+              echo "ref=$WORKFLOW_SHA" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "::error::refusing to run repo-platform scripts from $WORKFLOW_SHA: the commit carries no provenance stamp and is not main history (compare status: $status). Pin this workflow @build (the green-gated delivery branch) or to a main commit."
+              exit 1
+              ;;
+          esac
+
       - name: Check out repo-platform
         if: steps.token.outputs.proceed == 'true'
         uses: actions/checkout@v7
         with:
           repository: Vivswan/repo-platform
-          ref: ${{ job.workflow_sha || 'main' }}
+          ref: ${{ steps.scripts.outputs.ref }}
           path: platform
 
       - if: steps.token.outputs.proceed == 'true'

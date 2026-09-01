@@ -1593,4 +1593,16 @@ if grep -qE '^pages_(production|staging):' "$PAGES_FIX/.copier-answers.yml"; the
 fi
 grep -qE '^pages_build_command: ./build.sh$' "$PAGES_FIX/.copier-answers.yml" \
   || fail "the surviving pages answers were lost by the update"
+# The delivery-channel pin flip rides the same managed re-render: a repo
+# rendered when the reusable-workflow calls pinned @main (the ungated
+# tip) must come out of the update calling them @build, the green-gated
+# delivery branch - for pages.yml and auto-assign.yml alike.
+grep -qF -- "repo-platform/.github/workflows/reusable-pages.yml@build" "$pages_rendered" \
+  || fail "updated pages.yml does not call reusable-pages at the build ref"
+if grep -qF -- "repo-platform/.github/workflows/reusable-pages.yml@main" "$pages_rendered"; then
+  fail "updated pages.yml still pins reusable-pages@main - the ungated tip"
+fi
+grep -qF -- "repo-platform/.github/workflows/reusable-auto-assign.yml@build" \
+  "$PAGES_FIX/.github/workflows/auto-assign.yml" \
+  || fail "updated auto-assign.yml does not call reusable-auto-assign at the build ref"
 echo "pages answer retirement OK: mounts interface rendered, retired answers dropped, surviving answers kept"

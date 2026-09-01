@@ -36,7 +36,10 @@ import {
   SyntaxKind,
 } from "ts-morph";
 import { parse as parseYaml } from "yaml";
-import { EXCLUDED_DIRS as EXCLUDED_ACTION_DIRS } from "../.github/scripts/build-branches/branch_tree.ts";
+import {
+  EXCLUDED_DIRS as EXCLUDED_ACTION_DIRS,
+  FLEET_WORKFLOWS,
+} from "../.github/scripts/build-branches/branch_tree.ts";
 import {
   identityKeyIssues,
   loadOverrideLayer,
@@ -1597,6 +1600,105 @@ export function starterSelfPins(text: string, file: string): StarterPin[] {
     stem: match[1],
     ref: match[2],
   }));
+}
+
+/** Self-delivery pins for the categorical delivery-channel rule: any
+ *  jinja expression carrying `github_username` in the owner slot -
+ *  `{{ github_username }}`, `{{ github_username | lower }}`, a `lower()`
+ *  call, whitespace-controlled delimiters - renders an owner that
+ *  resolves to this account (GitHub owners are case-insensitive), so the
+ *  expression slot is matched wholesale rather than by enumerating
+ *  spellings. Recorded residual, the same class the label-preflight
+ *  rules record: this catches the honest-drift spellings, while a
+ *  deliberately obfuscated owner (a `{% set %}` alias, a nested-brace
+ *  expression like `{{ {"u": github_username}["u"] }}`) is adversarial
+ *  code in a reviewed file, outside any textual rule's reach, and stays
+ *  review's - and the rendered-side scan (renderedSelfPins over the
+ *  golden snapshots, where jinja is already evaluated) still reds every
+ *  obfuscated pin that lands in a branch the golden matrix renders.
+ *  Deliberately NOT folded into starterSelfPins: that matcher is pinned
+ *  to the rollout rewriter's own grammar, and the two must not drift
+ *  apart silently. */
+export function templateSelfPins(text: string, file: string): StarterPin[] {
+  const token =
+    /(?<![A-Za-z0-9-])\{\{[^{}]*\bgithub_username\b[^{}]*\}\}\/(repo-platform\/[A-Za-z0-9_./-]+)@([^\s"']*)/g;
+  return [...text.matchAll(token)].map((match) => ({ file, stem: match[1], ref: match[2] }));
+}
+
+/** Self-delivery pins in RENDERED text (the golden snapshots), where the
+ *  username expression is already substituted: starterSelfPins' token
+ *  grammar with the literal `owner` in the username slot, owner-boundary
+ *  guard included and matched case-insensitively (the `| lower` template
+ *  spelling renders a lowercased owner, and GitHub resolves owner and
+ *  repository names in any case). The stem's `repo-platform` prefix is
+ *  normalized to canonical case so downstream comparisons (the
+ *  FLEET_WORKFLOWS coupling) cannot be dodged by a case-variant repo
+ *  name; the path AFTER it keeps its case - file paths at a ref ARE
+ *  case-sensitive, so a case-variant filename must mismatch the roster
+ *  and go loud. The owner must be a plain GitHub username so it can ride
+ *  the regex verbatim. */
+export function renderedSelfPins(text: string, file: string, owner: string): StarterPin[] {
+  if (!/^[A-Za-z0-9-]+$/.test(owner)) {
+    throw new Error(`renderedSelfPins: owner '${owner}' is not a plain GitHub username`);
+  }
+  const token = new RegExp(
+    `(?<![A-Za-z0-9-])${owner}/repo-platform(/[A-Za-z0-9_./-]+)@([^\\s"']*)`,
+    "gi",
+  );
+  return [...text.matchAll(token)].map((match) => ({
+    file,
+    stem: `repo-platform${match[1]}`,
+    ref: match[2],
+  }));
+}
+
+/** The categorical delivery-channel law over fleet-rendered content:
+ *  every `<owner>/repo-platform/<path>@<ref>` token - composite action
+ *  and reusable workflow alike - must ride the green-gated delivery
+ *  branch. `@main` is the ungated live tip, and any other ref forks the
+ *  delivery story, so a single off-channel pin mismatches, named with
+ *  its file and offending ref. Throws when no pin is found at all: the
+ *  templates always carry self-references, so an empty scan means the
+ *  extraction grammar rotted, not a clean fleet. */
+export function deliveryRefMismatches(pins: StarterPin[], deliveryRef: string): Mismatch[] {
+  if (pins.length === 0) {
+    throw new Error(
+      "no repo-platform self-reference found in the scanned content - anchor lost " +
+        "(the templates always pin their own actions and reusables)",
+    );
+  }
+  return pins
+    .filter((pin) => pin.ref !== deliveryRef)
+    .map((pin) => ({
+      file: pin.file,
+      expected: `${pin.stem}@${deliveryRef} (fleet-rendered content executes only the green-gated delivery branch)`,
+      got: `@${pin.ref}`,
+    }));
+}
+
+/** The shipping side of the delivery-channel law: a reusable-workflow
+ *  `uses:` fetches the FILE at the named ref, so a rendered pin on a
+ *  workflow the build branch does not ship 404s every caller run even
+ *  though the ref itself is right. Every
+ *  `repo-platform/.github/workflows/<name>` pin must name a
+ *  FLEET_WORKFLOWS roster entry (branch_tree.ts ships exactly that
+ *  roster). Actions need no twin check: copyActions ships the whole
+ *  actions/ tree, so an action pin can only 404 by pointing at a
+ *  directory that does not exist - the compose smoke catches that. */
+export function fleetWorkflowPinMismatches(
+  pins: StarterPin[],
+  shipped: readonly string[],
+): Mismatch[] {
+  const prefix = "repo-platform/.github/workflows/";
+  return pins
+    .filter(
+      (pin) => pin.stem.startsWith(prefix) && !shipped.includes(pin.stem.slice(prefix.length)),
+    )
+    .map((pin) => ({
+      file: pin.file,
+      expected: `a reusable workflow on branch_tree.ts's FLEET_WORKFLOWS roster [${shipped.join(", ")}] (the build branch ships only the roster, so any other pin 404s at call time)`,
+      got: pin.stem,
+    }));
 }
 
 /** The compose-anchor names a shared template carries, in the composer's
@@ -3479,6 +3581,37 @@ const rules: Rule[] = [
       }
       mismatches.push(...starterPinCoverage(pins, PIN_FLIPS, DELIVERY_REF));
       return mismatches;
+    },
+  },
+
+  {
+    // The categorical delivery-channel law: EVERY self-reference in
+    // fleet-rendered content - composite action or reusable workflow,
+    // template source or golden snapshot - rides the green-gated build
+    // branch. One blanket scan, never per-file pins: a planted @main (or
+    // any other ref to this repo) reds with the file and the offending
+    // ref. The scope boundary is structural, not a whitelist:
+    // templates/ and tests/golden-renders/ are exactly what the fleet
+    // renders and executes, while repo-platform's own workflows (./
+    // locals, @main on itself) live outside both trees.
+    // starter-pin-rollout above stays the narrower starter/rollout
+    // coupling; this rule is what makes an off-channel pin loud even
+    // where that rule does not look (managed templates, the snapshots).
+    // The shipping side rides along: a reusable-workflow pin must also
+    // name a FLEET_WORKFLOWS entry, or the right ref still 404s.
+    name: "fleet-refs-ride-build",
+    run: () => {
+      const templatePins = walkFiles("templates")
+        .filter((f) => !f.symlink)
+        .flatMap((f) => templateSelfPins(read(f.path), f.path));
+      const goldenPins = walkFiles("tests/golden-renders")
+        .filter((f) => !f.symlink)
+        .flatMap((f) => renderedSelfPins(read(f.path), f.path, jinjaVars().username));
+      const pins = [...templatePins, ...goldenPins];
+      return [
+        ...deliveryRefMismatches(pins, DELIVERY_REF),
+        ...fleetWorkflowPinMismatches(pins, FLEET_WORKFLOWS),
+      ];
     },
   },
 
@@ -5851,6 +5984,7 @@ export const RULE_ROSTER = [
   "bun-dirs",
   "action-pins",
   "starter-pin-rollout",
+  "fleet-refs-ride-build",
   "bun-types-pin",
   "toolchain-version-files",
   "local-gates",
