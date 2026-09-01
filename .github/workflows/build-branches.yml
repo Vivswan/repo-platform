@@ -22,19 +22,18 @@
 # is paid DURING CI: every main push builds the tree immediately
 # (build_pending.ts) and parks it, unpublished, at
 # refs/heads/build-pending/<sha>. Publishing that tree is post-green
-# work: all-green.yml's post-green job calls post-green.yml once the
-# verdict lands green on the push, and its publish job promotes the
+# work: once the gate passes on the push, ci.yml's post-green job calls
+# post-green.yml, whose publish job promotes the
 # parked tree (publish.ts PREBUILT_REF, with a compose fallback when the
 # pending ref is missing). The schedule and dispatch legs below are the
 # SELF-HEAL publishers - they compose and publish in one run, covering a
-# publish that went missing AFTER a green verdict landed (a failed or
+# publish that went missing AFTER the gate passed (a failed or
 # evicted post-green run) and a stamp that needs recovery; publish.ts
 # hard-verifies a completed successful all-green at the source commit
 # before any mutation (shared/all_green.ts), which is the whole green
-# gate on these paths - so anything WITHOUT a green verdict at the
-# source (a lost workflow_run event, a wedged verdict) is not theirs to
-# heal alone: dispatch All Green first (it posts the missing check),
-# then Build Branches.
+# gate on these paths - so a source with NO green all-green check is not
+# theirs to heal alone: re-run that commit's CI first (its all-green job
+# posts the missing check), then Build Branches.
 #
 # Concurrent pushes are race-safe: pending refs are keyed by source sha,
 # and publish.ts skips a stale build whose source is an ancestor of the
@@ -58,7 +57,7 @@ name: Build Branches
 
 on:
   # Builds the pending tree concurrently with the same push's CI run;
-  # publishing waits for the green verdict (all-green.yml -> post-green.yml).
+  # publishing waits for the gate (ci.yml's post-green job -> post-green.yml).
   push:
     branches: [main]
   # The self-heal publishers (see the header): compose and publish in one
@@ -70,7 +69,7 @@ on:
 
 # Publishing and pending-ref parking push with the checkout's persisted
 # PAT (see the header), so github.token needs no contents write; checks
-# read lets the green-source gate read the all-green verdict check runs
+# read lets the green-source gate read the all-green check runs
 # at the source commit.
 permissions:
   contents: read

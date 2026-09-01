@@ -226,11 +226,10 @@ describe("assembleBranchTree", () => {
     expect(existsSync(join(dest, "actions", SHARED_DIR, "grammar.ts"))).toBe(true);
   });
 
-  test("the three fleet-facing reusable workflows ship at .github/workflows", () => {
+  test("the fleet-facing reusable workflows ship at .github/workflows", () => {
     // A reusable-workflow `uses:` fetches the FILE at the named ref, so
-    // fleet-ci.yml@build, reusable-all-green.yml@build, and fleet-ci's
-    // ./reusable-codeql.yml call all resolve against THIS tree; losing one
-    // 404s every fleet CI run.
+    // fleet-ci.yml@build and fleet-ci's ./reusable-codeql.yml call both
+    // resolve against THIS tree; losing one 404s every fleet CI run.
     for (const name of FLEET_WORKFLOWS) {
       expect(existsSync(join(dest, ".github", "workflows", name))).toBe(true);
     }
@@ -253,7 +252,6 @@ describe("copyFleetWorkflows", () => {
     const wf = join(root, ".github", "workflows");
     mkdirSync(wf, { recursive: true });
     writeFileSync(join(wf, "fleet-ci.yml"), fleetCiContent);
-    writeFileSync(join(wf, "reusable-all-green.yml"), "on:\n  workflow_call:\njobs: {}\n");
     writeFileSync(join(wf, "reusable-codeql.yml"), "on:\n  workflow_call:\njobs: {}\n");
     return root;
   }

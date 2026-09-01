@@ -17,7 +17,7 @@ A skill folder is UNPUBLISHED until `plugin.json` lists it: installers and the [
 ## What the module ships
 
 - `.claude-plugin/plugin.json` and `.claude-plugin/marketplace.json` starters, seeded from the repository's identity (plugin name `<project_slug>-skills`, description from the project name, the owner as author) with an empty `skills` catalog
-- a `validate-skills` structure job in repo-platform's fleet-ci gate, so the [all-green verdict](all-green.md) blocks merges on a broken catalog
+- a `validate-skills` structure job in repo-platform's fleet-ci gate, so the [all-green gate](all-green.md) blocks merges on a broken catalog
 - a standalone advisory `.github/workflows/validate-skills.yml` for CLI discovery
 - both run the `validate-skills` composite action ([actions/validate-skills](../actions/validate-skills/validate_skills.ts)), pinned at the green-gated `build` delivery branch
 
@@ -40,7 +40,7 @@ Two checks, split by what a failure means. An empty catalog (`"skills": []`, the
 
 | Check | Where it runs | What a red means |
 |---|---|---|
-| `validate-skills` | fleet-ci job, gating merges through the all-green verdict; offline and cheap, so it runs on every PR | the catalog structure is broken |
+| `validate-skills` | fleet-ci job, gating merges through the all-green gate; offline and cheap, so it runs on every PR | the catalog structure is broken |
 | `discovery` | the standalone validate-skills.yml, advisory, outside the gate | the real `npx -y skills add . --list` does not list every skill published in `plugin.json` |
 
 The structure check's full rule set lives in [actions/validate-skills/validate_skills.ts](../actions/validate-skills/validate_skills.ts). Headlines: `plugin.json` parses with a kebab-case name and its `skills` paths are real direct children of the skills directory; every skill folder's `SKILL.md` frontmatter `name` matches the kebab-case folder and its `description` is nonempty (both within Claude Code's 64/1024-character limits); the skills directory carries an index `README.md` at its root; `marketplace.json` (when present) is well-formed and consistent with `plugin.json`; and symlinks are rejected anywhere on a validated path, because a link can point outside the checkout, so what ships would not be what was validated. The one exception is a marketplace plugin's `source`, which may pass through in-repo symlinks; its physical path must still stay inside the repository.

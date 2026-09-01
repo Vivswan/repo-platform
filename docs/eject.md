@@ -5,7 +5,7 @@ Detaching is cheap by design: managed repos degrade to normal repos, not broken 
 | Reference | Pinned at |
 |---|---|
 | per-feature reusable-workflow calls (auto-assign, pages, settings-sync) | `@main` |
-| fleet CI, the [all-green verdict](all-green.md), every composite-action step | `@build` (repo-platform's green-gated delivery branch - [build-provenance.md](build-provenance.md)) |
+| fleet CI, the [all-green gate action](all-green.md), every composite-action step | `@build` (repo-platform's green-gated delivery branch - [build-provenance.md](build-provenance.md)) |
 
 Management is push-based, so ejecting starts in repo-platform, not in the repo: stop the machinery here, then optionally strip the managed files there.
 
@@ -28,13 +28,13 @@ Settings stop being applied too: the nightly heal only manages enrolled repos wh
 
 2. Rewrite `.github/workflows/ci.yml`. The managed file is a thin caller of repo-platform's `fleet-ci.yml` reusable, and that call is all-or-nothing: its `validate-template` job goes red once `.copier-answers.yml` and `.repo-platform.yml` are gone, and no input turns it off. Replace the `ci` job:
    - copy the jobs you want out of `fleet-ci.yml` into ci.yml (the composite actions they call stay public; replace each job's `inputs.*` conditions and values with your repo's literals - a plain workflow has no workflow_call inputs), or write your own
-   - the managed `all-green.yml` verdict workflow keeps judging whatever jobs remain; delete it too if you drop the `all-green` required check from your branch protection
+   - ci.yml's `all-green` job keeps judging whatever its needs list names; drop it too if you drop the `all-green` required check from your branch protection
 
 3. (Optional) Inline the reusable workflows. Skip this if repo-platform continues to exist - the pinned references keep working unchanged. Otherwise:
-   - replace each thin caller (`auto-assign.yml`, `pages.yml`, `settings-sync.yml`, the `ci` job's `fleet-ci.yml` call, `all-green.yml`'s `reusable-all-green.yml` call) with a copy of the corresponding `reusable-*.yml`/fleet job from repo-platform
+   - replace each thin caller (`auto-assign.yml`, `pages.yml`, `settings-sync.yml`, the `ci` job's `fleet-ci.yml` call, the `all-green` job's action step) with a copy of the corresponding `reusable-*.yml`/fleet job/action from repo-platform
    - replace `uses: Vivswan/repo-platform/actions/...` steps with vendored copies of the action scripts
    - CodeQL runs inside fleet-ci's `codeql` matrix; inline repo-platform's `reusable-codeql.yml` too if you want CodeQL without repo-platform
-   - the `pr-title` job needs nothing: it uses a public action directly
+   - the `pr-title.yml` workflow needs nothing: it uses a public action directly (drop its required check from the `pr-title` ruleset if you delete it)
 
 4. (Optional) Strip the marker comments from `.gitignore`. The content keeps working either way.
 

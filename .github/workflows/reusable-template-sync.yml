@@ -289,25 +289,14 @@ jobs:
           bun .github/scripts/sync/run_hidden.ts "starter pin rollout" -- \
             bun .github/scripts/sync/starter_pin_rollout.ts "${flags[@]}"
 
-      # A PR that INTRODUCES the verdict workflow can never receive its
-      # own verdict (workflow_run runs only the default branch's copy), so
-      # the script writes the PR-body note naming the one-time
-      # admin-bypass merge. run_hidden: the target's default-branch state
-      # stays off the public log.
-      - name: Note the all-green bootstrap gap
+      # The one-time gate rework: HEAD still carries the retired verdict
+      # wrapper and this update deletes it, handing the required check to
+      # ci.yml's own all-green job - the PR body gets the transition note.
+      # run_hidden: whether HEAD carries the wrapper is target state.
+      - name: Note the gate rework
         run: |
-          bun .github/scripts/sync/run_hidden.ts "all-green bootstrap" -- \
-            bun .github/scripts/sync/all_green_bootstrap.ts \
-            --root target --hide-details "$HIDE_DETAILS"
-
-      # The release job's home move: HEAD's ci.yml still carries
-      # info-release and this update delivers the wrapper's verdict-gated
-      # leg, so the PR body gets the go-live note. run_hidden: whether
-      # HEAD carries the old job is target state.
-      - name: Note the release leg's home move
-        run: |
-          bun .github/scripts/sync/run_hidden.ts "release leg move" -- \
-            bun .github/scripts/sync/release_leg_move.ts \
+          bun .github/scripts/sync/run_hidden.ts "gate rework" -- \
+            bun .github/scripts/sync/gate_rework.ts \
             --root target --hide-details "$HIDE_DETAILS"
 
       # WARN side of the referenced-label invariant: the settings apply

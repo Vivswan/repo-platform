@@ -1,7 +1,7 @@
 // The build-during-CI handoff: a push-triggered build composes the
 // build-branch tree CONCURRENTLY with main's CI run and parks it,
 // UNPUBLISHED, at a per-source ref; the post-green publisher
-// (post-green.yml, called by all-green.yml once the verdict lands green)
+// (post-green.yml, called by ci.yml's post-green job once the gate passes)
 // promotes that pre-built tree. Shared by
 // build_pending.ts (the writer), publish.ts (the consumer and the
 // sweep), and the race-rule tests - one home for the ref grammar and the

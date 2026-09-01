@@ -1,8 +1,8 @@
-# Everything that runs AFTER the all-green verdict concluded green on a
-# push to main - the post-green home. workflow_call ONLY: all-green.yml's
-# post-green job is the sole caller, and nothing here may carry its own
-# trigger - the verdict is the one green authority, and a second trigger
-# would be a second, unguarded path into release-shaped work.
+# Everything that runs AFTER the all-green gate passed on a push to main
+# - the post-green home. workflow_call ONLY: ci.yml's post-green job is
+# the sole caller, and nothing here may carry its own trigger - the gate
+# is the one green authority, and a second trigger would be a second,
+# unguarded path into release-shaped work.
 #
 # EVERY leg added here must be STATE-shaped: idempotent, and able to
 # leave the world no worse than one trigger behind. GitHub keeps at most
@@ -19,12 +19,12 @@
 # instead of re-deriving it from that context, so a future caller cannot
 # silently hand a leg the wrong commit.
 #
-# The caller gates on the verdict's own posted conclusion (the
-# reusable's workflow_call output), so a leg's own green verification is
-# defense in depth rather than the sole authority - but a leg that
-# MUTATES shared state keeps one anyway (publish.ts hard-verifies the
-# all-green check run via shared/all_green.ts): the caller's gate guards
-# entry, not the world the leg reads at run time.
+# The caller is needs-ordered behind the all-green job in the SAME run,
+# so a leg's own green verification is defense in depth rather than the
+# sole authority - but a leg that MUTATES shared state keeps one anyway
+# (publish.ts hard-verifies the all-green check run via
+# shared/all_green.ts): the caller's gate guards entry, not the world the
+# leg reads at run time.
 
 name: Post Green
 
@@ -33,8 +33,9 @@ on:
     inputs:
       sha:
         description: >-
-          The green main commit the verdict judged (the completed CI
-          run's head_sha) - the commit every leg here acts on.
+          The green main commit the calling run judged (github.sha there
+          - same run, so it IS the judged commit) - the commit every leg
+          here acts on.
         required: true
         type: string
     secrets:
@@ -48,13 +49,12 @@ on:
 permissions: {}
 
 jobs:
-  # The green-path build-branch publisher - moved here from
-  # build-branches.yml's retired workflow_run leg: promotes the push
-  # build's parked pending tree (composing as the fallback) and advances
-  # refs/heads/build. The caller releases this job on the verdict's own
-  # green conclusion; publish.ts still hard-verifies the all-green check
-  # run at the source commit before any mutation (defense in depth here,
-  # the sole gate on Build Branches' schedule/dispatch paths).
+  # The green-path build-branch publisher: promotes the push build's
+  # parked pending tree (composing as the fallback) and advances
+  # refs/heads/build. The caller releases this job needs-ordered behind
+  # the all-green gate; publish.ts still hard-verifies the all-green
+  # check run at the source commit before any mutation (defense in depth
+  # here, the sole gate on Build Branches' schedule/dispatch paths).
   #
   # State-shaped: publish.ts publishes SOURCE_SHA behind a
   # newest-green-wins staleness preflight against the branch tip's stamp,
@@ -62,11 +62,11 @@ jobs:
   # compare-and-swap - a rerun of an already-published source is a no-op
   # (unchanged tree, no commit), and a superseded pending publish is
   # covered by the evicting run whenever its source is newer (the common
-  # case: verdicts arrive in push order). The residual is an OUT-OF-ORDER
-  # eviction - a late verdict for an older commit replacing a pending
-  # newer one - which leaves the branch stale by one push, never rolled
-  # back, and the next push or the weekly Build Branches cron heals it
-  # (the same residual the pre-split serial publisher lane documented).
+  # case: same-run gating means publishes arrive in push order). The
+  # residual is an OUT-OF-ORDER eviction - a re-run of an older commit's
+  # CI replacing a pending newer publish - which leaves the branch stale
+  # by one push, never rolled back, and the next push or the weekly Build
+  # Branches cron heals it.
   publish-build:
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -76,11 +76,10 @@ jobs:
     # build-branches.yml resolves to this same string). LITERAL on
     # purpose: never derive this group from github.workflow - inside a
     # workflow_call'd workflow it resolves to the CALLER's workflow
-    # name, which would silently split the shared lane. It must also stay
-    # a DIFFERENT resource from the post-green-<ref> group the calling
-    # job in all-green.yml holds while this job runs: a caller must never
-    # hold the resource its called workflow requires, or the call
-    # deadlocks against itself.
+    # name, which would silently split the shared lane. The calling job
+    # in ci.yml holds NO lane at all, for the deadlock law's other half:
+    # a caller must never hold the resource its called workflow
+    # requires, or the call deadlocks against itself.
     concurrency:
       group: build-branches-publish
       cancel-in-progress: false
@@ -104,7 +103,7 @@ jobs:
 
       # SOURCE_SHA is the judged commit, never a read of origin/main:
       # main can already have advanced to a newer - even red - commit
-      # this run must not touch (that commit's own verdict publishes it).
+      # this run must not touch (that commit's own run publishes it).
       - name: Publish the build branch
         env:
           GH_TOKEN: ${{ github.token }}

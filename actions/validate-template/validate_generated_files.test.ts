@@ -71,7 +71,6 @@ const MIRROR_BASE: MirrorEntry[] = [
   { path: ".gitattributes", kind: "marker", marker: HASH_COMMENT_MARKER },
   { path: ".github/CODEOWNERS", kind: "marker", marker: HASH_COMMENT_MARKER },
   { path: ".github/dependabot.yml", kind: "header" },
-  { path: ".github/workflows/all-green.yml", kind: "header" },
   { path: ".github/workflows/ci.yml", kind: "header" },
   { path: ".repo-platform.yml", kind: "header" },
   { path: ".typography-allow", kind: "header" },
@@ -669,10 +668,12 @@ describe("base checks shape", () => {
   });
 });
 
-describe("the verdict shape (no all-green job)", () => {
-  // The all-green inversion: ci.yml carries no aggregate job; the required
-  // check is a check run the all-green.yml verdict workflow creates.
-  const verdictCi = (ciJob: string[] = []): string =>
+describe("the single-call gate shape", () => {
+  // The meta-check inversion: the required check is the all-green JOB's
+  // own check run, so client renders carry checks + ci + all-green, and
+  // the fleet-ci caller must exist unconditional (a skipped caller
+  // stands down from the gate and every fleet gate silently drops).
+  const gateCi = (ciJob: string[] = [], gate: string[] = []): string =>
     [
       "# This file is managed by Vivswan/repo-platform.",
       "name: CI",
@@ -682,49 +683,26 @@ describe("the verdict shape (no all-green job)", () => {
       ...(ciJob.length > 0
         ? ciJob
         : ["  ci:", "    uses: Vivswan/repo-platform/.github/workflows/fleet-ci.yml@build"]),
+      ...(gate.length > 0
+        ? gate
+        : [
+            "  all-green:",
+            "    needs: [checks, ci]",
+            "    if: always()",
+            "    runs-on: ubuntu-latest",
+            "    steps:",
+            "      - uses: Vivswan/repo-platform/actions/all-green@build",
+            "        with:",
+            // biome-ignore lint/suspicious/noTemplateCurlyInString: raw workflow text, not a JS template
+            "          needs: ${{ toJSON(needs) }}",
+          ]),
       "",
     ].join("\n");
-  const VERDICT_CI = verdictCi();
-  const verdictWorkflow = (lines: {
-    workflows?: string;
-    types?: string;
-    dispatch?: string[];
-    uses?: string;
-    withSha?: string[];
-  }): string =>
-    [
-      "# This file is managed by Vivswan/repo-platform.",
-      "name: All Green",
-      "on:",
-      "  workflow_run:",
-      `    workflows: ${lines.workflows ?? "[CI]"}`,
-      `    types: ${lines.types ?? "[completed]"}`,
-      ...(lines.dispatch ?? [
-        "  workflow_dispatch:",
-        "    inputs:",
-        "      sha:",
-        "        required: true",
-        "        type: string",
-      ]),
-      "jobs:",
-      "  verdict:",
-      "    permissions:",
-      "      checks: write",
-      "      actions: read",
-      `    uses: ${lines.uses ?? "Vivswan/repo-platform/.github/workflows/reusable-all-green.yml@build"}`,
-      ...(lines.withSha ?? [
-        "    with:",
-        // biome-ignore lint/suspicious/noTemplateCurlyInString: raw workflow text, not a JS template
-        "      sha: ${{ github.event_name == 'workflow_dispatch' && inputs.sha || '' }}",
-        "      require-job: ci / validate-template",
-      ]),
-      "",
-    ].join("\n");
+  const GATE_CI = gateCi();
 
-  test("a wired verdict workflow passes without an all-green job", () => {
+  test("the single-call gate shape passes", () => {
     const { exitCode, stderr } = runValidator({
-      ".github/workflows/ci.yml": VERDICT_CI,
-      ".github/workflows/all-green.yml": verdictWorkflow({}),
+      ".github/workflows/ci.yml": GATE_CI,
     });
     expect(stderr).toBe("");
     expect(exitCode).toBe(0);
@@ -732,8 +710,20 @@ describe("the verdict shape (no all-green job)", () => {
 
   test("a ci.yml without the fleet-ci caller fails (every fleet gate silently dropped)", () => {
     const { exitCode, stderr } = runValidator({
-      ".github/workflows/ci.yml": verdictCi(["  ci:", "    runs-on: ubuntu-latest"]),
-      ".github/workflows/all-green.yml": verdictWorkflow({}),
+      ".github/workflows/ci.yml": gateCi(
+        ["  ci:", "    runs-on: ubuntu-latest", "    steps: [{ run: echo decoy }]"],
+        [
+          "  all-green:",
+          "    needs: [checks, ci]",
+          "    if: always()",
+          "    runs-on: ubuntu-latest",
+          "    steps:",
+          "      - uses: Vivswan/repo-platform/actions/all-green@build",
+          "        with:",
+          // biome-ignore lint/suspicious/noTemplateCurlyInString: raw workflow text, not a JS template
+          "          needs: ${{ toJSON(needs) }}",
+        ],
+      ),
     });
     expect(exitCode).toBe(1);
     expect(stderr).toContain("no job calls repo-platform's fleet-ci.yml");
@@ -741,123 +731,113 @@ describe("the verdict shape (no all-green job)", () => {
 
   test("a fleet-ci look-alike under another owner never counts as the caller", () => {
     const { exitCode, stderr } = runValidator({
-      ".github/workflows/ci.yml": verdictCi([
+      ".github/workflows/ci.yml": gateCi([
         "  ci:",
         "    uses: evil/repo-platform/.github/workflows/fleet-ci.yml@build",
       ]),
-      ".github/workflows/all-green.yml": verdictWorkflow({}),
     });
     expect(exitCode).toBe(1);
     expect(stderr).toContain("no job calls repo-platform's fleet-ci.yml");
   });
 
-  test("a conditioned fleet-ci caller fails (a skipped caller contributes no gate jobs)", () => {
+  test("a conditioned fleet-ci caller fails (a skipped caller stands down from the gate)", () => {
     const { exitCode, stderr } = runValidator({
-      ".github/workflows/ci.yml": verdictCi([
+      ".github/workflows/ci.yml": gateCi([
         "  ci:",
         "    if: false",
         "    uses: Vivswan/repo-platform/.github/workflows/fleet-ci.yml@build",
       ]),
-      ".github/workflows/all-green.yml": verdictWorkflow({}),
     });
     expect(exitCode).toBe(1);
     expect(stderr).toContain("fleet-ci caller job carries a job-level if:");
   });
 
-  test("a verdict wrapper without the require-job anchor fails (a disarmed caller would pass)", () => {
+  test("no all-green job fails - the required check is never created", () => {
     const { exitCode, stderr } = runValidator({
-      ".github/workflows/ci.yml": VERDICT_CI,
-      ".github/workflows/all-green.yml": verdictWorkflow({
-        withSha: [
-          "    with:",
-          // biome-ignore lint/suspicious/noTemplateCurlyInString: raw workflow text, not a JS template
-          "      sha: ${{ github.event_name == 'workflow_dispatch' && inputs.sha || '' }}",
-        ],
-      }),
+      ".github/workflows/ci.yml": gateCi([], ["  info-none:", "    needs: [checks, ci]"]),
     });
     expect(exitCode).toBe(1);
-    expect(stderr).toContain("must pin require-job: ci / validate-template");
+    expect(stderr).toContain("no `all-green` job");
   });
 
-  test("no all-green job and no verdict workflow fails", () => {
-    const { exitCode, stderr } = runValidator({
-      ".github/workflows/ci.yml": VERDICT_CI,
-    });
+  test("the shared action satisfies the judgment requirement; a bare step does not", () => {
+    const bare = gateCi(
+      [],
+      [
+        "  all-green:",
+        "    needs: [checks, ci]",
+        "    if: always()",
+        "    runs-on: ubuntu-latest",
+        "    steps:",
+        "      - run: echo unjudged",
+      ],
+    );
+    const { exitCode, stderr } = runValidator({ ".github/workflows/ci.yml": bare });
     expect(exitCode).toBe(1);
-    expect(stderr).toContain("no `all-green` job and no .github/workflows/all-green.yml");
+    expect(stderr).toContain("no judgment step");
   });
 
-  test("a verdict workflow that never fires on CI completions fails", () => {
-    const { exitCode, stderr } = runValidator({
-      ".github/workflows/ci.yml": VERDICT_CI,
-      ".github/workflows/all-green.yml": verdictWorkflow({ workflows: "[Nightly]" }),
-    });
+  test("an all-green action look-alike under another owner never counts as the judgment", () => {
+    const decoy = GATE_CI.replace(
+      "Vivswan/repo-platform/actions/all-green@build",
+      "evil/other-repo/actions/all-green@main",
+    );
+    const { exitCode, stderr } = runValidator({ ".github/workflows/ci.yml": decoy });
     expect(exitCode).toBe(1);
-    expect(stderr).toContain("must trigger on workflow_run of the CI workflow");
+    expect(stderr).toContain("no judgment step");
   });
 
-  test("a workflow_run trigger without exactly types: [completed] fails (it would judge live runs)", () => {
-    for (const types of ["[requested]", "[completed, requested]"]) {
-      const { exitCode, stderr } = runValidator({
-        ".github/workflows/ci.yml": VERDICT_CI,
-        ".github/workflows/all-green.yml": verdictWorkflow({ types }),
-      });
+  test("a conditioned or softened action step no longer counts as the judgment", () => {
+    const conditioned = GATE_CI.replace(
+      "      - uses: Vivswan/repo-platform/actions/all-green@build",
+      '      - "if": false\n        uses: Vivswan/repo-platform/actions/all-green@build',
+    );
+    const { exitCode, stderr } = runValidator({ ".github/workflows/ci.yml": conditioned });
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain("no judgment step");
+    const softened = GATE_CI.replace(
+      "      - uses: Vivswan/repo-platform/actions/all-green@build",
+      "      - continue-on-error: true\n        uses: Vivswan/repo-platform/actions/all-green@build",
+    );
+    const second = runValidator({ ".github/workflows/ci.yml": softened });
+    expect(second.exitCode).toBe(1);
+    expect(second.stderr).toContain("no judgment step");
+  });
+
+  test("the action without the toJSON(needs) wiring fails - a canned input judges a fiction", () => {
+    const canned = GATE_CI.replace(
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: the mutation under test
+      "          needs: ${{ toJSON(needs) }}",
+      '          needs: \'{"ci": {"result": "success"}}\'',
+    );
+    const { exitCode, stderr } = runValidator({ ".github/workflows/ci.yml": canned });
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain("no judgment step");
+  });
+
+  test("a caller job missing from the gate's needs fails", () => {
+    const unneeded = GATE_CI.replace("needs: [checks, ci]", "needs: [checks]");
+    const { exitCode, stderr } = runValidator({ ".github/workflows/ci.yml": unneeded });
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain("all-green `needs:` is missing job(s): ci");
+  });
+
+  test("a gate without exactly if: always() fails", () => {
+    for (const mutated of [
+      GATE_CI.replace("    if: always()\n", ""),
+      GATE_CI.replace("if: always()", "if: success()"),
+    ]) {
+      const { exitCode, stderr } = runValidator({ ".github/workflows/ci.yml": mutated });
       expect(exitCode).toBe(1);
-      expect(stderr).toContain("exactly types: [completed]");
+      expect(stderr).toContain("must carry exactly `if: always()`");
     }
   });
 
-  test("a verdict workflow without the sha unwedge input fails", () => {
-    const { exitCode, stderr } = runValidator({
-      ".github/workflows/ci.yml": VERDICT_CI,
-      ".github/workflows/all-green.yml": verdictWorkflow({ dispatch: [] }),
-    });
-    expect(exitCode).toBe(1);
-    expect(stderr).toContain("workflow_dispatch `sha` input");
-  });
-
-  test("a verdict workflow that never calls the shared judgment fails", () => {
-    const { exitCode, stderr } = runValidator({
-      ".github/workflows/ci.yml": VERDICT_CI,
-      ".github/workflows/all-green.yml": verdictWorkflow({
-        uses: "Vivswan/repo-platform/.github/workflows/reusable-codeql.yml@build",
-      }),
-    });
-    expect(exitCode).toBe(1);
-    expect(stderr).toContain("no job calls repo-platform's reusable-all-green.yml");
-  });
-
-  test("a look-alike third-party reusable-all-green.yml never counts as the judgment", () => {
-    const { exitCode, stderr } = runValidator({
-      ".github/workflows/ci.yml": VERDICT_CI,
-      ".github/workflows/all-green.yml": verdictWorkflow({
-        uses: "evil/other-repo/.github/workflows/reusable-all-green.yml@main",
-      }),
-    });
-    expect(exitCode).toBe(1);
-    expect(stderr).toContain("no job calls repo-platform's reusable-all-green.yml");
-  });
-
-  test("a verdict job that never forwards the dispatch sha fails (dead unwedge path)", () => {
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: raw workflow text, not a JS template
-    for (const withSha of [[], ["    with:", "      sha: ${{ inputs.sha256 }}"]]) {
-      const { exitCode, stderr } = runValidator({
-        ".github/workflows/ci.yml": VERDICT_CI,
-        ".github/workflows/all-green.yml": verdictWorkflow({ withSha }),
-      });
-      expect(exitCode).toBe(1);
-      expect(stderr).toContain("must forward the dispatch sha");
-    }
-  });
-
-  test("a verdict job without the actions: read grant fails (the judgment reads the run's jobs)", () => {
-    const workflow = verdictWorkflow({}).replace("      actions: read\n", "");
-    const { exitCode, stderr } = runValidator({
-      ".github/workflows/ci.yml": VERDICT_CI,
-      ".github/workflows/all-green.yml": workflow,
-    });
-    expect(exitCode).toBe(1);
-    expect(stderr).toContain("must grant actions: read");
+  test("gate-downstream jobs (needs: [all-green]) are exempt from the needs census", () => {
+    const withRelease = `${GATE_CI}  release:\n    needs: [all-green]\n    uses: ./.github/workflows/release.yml\n`;
+    const { exitCode, stderr } = runValidator({ ".github/workflows/ci.yml": withRelease });
+    expect(stderr).toBe("");
+    expect(exitCode).toBe(0);
   });
 });
 

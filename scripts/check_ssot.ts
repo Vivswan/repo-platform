@@ -240,38 +240,6 @@ export function mustMatch(text: string, re: RegExp, where: string, what: string)
   return match;
 }
 
-/** The all-green-name rule's text anchors into executable YAML wiring,
- *  exported so the suite can prove BOTH directions on the exact patterns
- *  the rule runs. Line-anchored (^\s*...): a commented-out copy of the
- *  wiring starts its line with the comment marker, which the anchor
- *  rejects - dead wiring must never satisfy the rule. (The TS-source
- *  anchors - CHECK_NAME's declaration, the check-run lookup, the
- *  validator's REQUIRED_GATE_JOB - are AST queries via ts_extract.ts,
- *  where a commented or string-embedded decoy is not a node at all.) */
-export const ALL_GREEN_WIRING = {
-  /** The verdict's check-run POST names the check. */
-  created: /^\s*-f "name=([^"]+)"/m,
-  /** The fleet wrapper template pins the verdict's anchor job. */
-  anchor: /^\s*require-job: (\S[^\n#]*?)\s*$/m,
-  /** The reusable wires the anchor input into the judging step. */
-  anchorWired: /^\s*REQUIRE_JOB: \$\{\{ inputs\.require-job \}\}$/m,
-  /** The bot stand-down's author LOGIN must be wired from the PULL
-   *  REQUEST'S AUTHOR - the exact, COMPLETE env line. The bash harness
-   *  injects PR_AUTHOR_* itself and tests only the extracted run block,
-   *  so this workflow-level mapping is otherwise unguarded: rewired to
-   *  github.actor (or any reviewer-shaped source), a bot-submitted
-   *  review wake - Copilot's own submission - at a human PR's head
-   *  would read as bot-author, skip the copilot_state read, and mint
-   *  success over a FAILED copilot check. */
-  authorLoginWired:
-    /^\s*PR_AUTHOR_LOGIN: \$\{\{ github\.event_name == 'pull_request_review' && github\.event\.pull_request\.user\.login \|\| '' \}\}$/m,
-  /** The author TYPE half of the same wiring, same hazard: either line
-   *  alone rewired to a reviewer-shaped source disarms the stand-down's
-   *  author key. */
-  authorTypeWired:
-    /^\s*PR_AUTHOR_TYPE: \$\{\{ github\.event_name == 'pull_request_review' && github\.event\.pull_request\.user\.type \|\| '' \}\}$/m,
-};
-
 /** The check-run lookup template's leading text, backtick included: the
  *  green gates must key their lookup on the shared CHECK_NAME constant.
  *  Matched against string/template literals only (templateCarries), so a
@@ -2343,19 +2311,21 @@ export function stepCarriesWithKey(lines: string[], usesAt: number, key: string)
 // --- all-green verdict roster -----------------------------------------------
 
 /** Every gating job in this repository's ci.yml, by job id - the authored
- *  roster behind the all-green verdict. The runtime verdict judges whatever
- *  jobs actually ran, so it cannot notice a gate that was DELETED from
- *  ci.yml; this roster is where that deletion becomes loud. Adding a gating
- *  job means adding it here; removing one means removing its entry here in
- *  the same change, deliberately. Jobs named `info-*` are the opt-out and
- *  never appear here. */
+ *  twin of the all-green job's needs list (the all-green-roster rule holds
+ *  the three sides together). The run-time gate judges whatever its needs
+ *  name, so a job deleted from ci.yml AND from the needs list would stop
+ *  gating with nothing to notice it; this roster is where that deletion
+ *  becomes loud. Adding a gating job means adding it here AND to the
+ *  needs list; removing one means removing both entries in the same
+ *  change, deliberately. Jobs named `info-*` and jobs downstream of the
+ *  gate (post-green) are the opt-outs and never appear here. */
 export const ALL_GREEN_ROSTER = [
   "actionlint",
   "actionlint-binary",
   "gitleaks",
   "dependency-review",
   "shellcheck",
-  "verdict-judgment",
+  "allgreen-judgment",
   "yamllint",
   "biome",
   "typography",
@@ -2374,21 +2344,16 @@ export const ALL_GREEN_ROSTER = [
   "codeql-javascript",
 ];
 
-/** Set comparison between the authored roster and ci.yml's job ids.
- *  Both directions are load-bearing: a ci.yml gating job missing from the
+/** Set comparison between an authored roster and a gating-job list.
+ *  Both directions are load-bearing: a gating job missing from the
  *  roster is a gate the roster never vouched for, and a roster entry with
- *  no ci.yml job is a REMOVED gate - the sneaky case, where deleting the
- *  job would otherwise change nothing the verdict can see. `info-*` jobs
- *  are the deliberate opt-out and are skipped. A job named `all-green` is
- *  an error outright: the verdict CHECK RUN owns that name now, and a
- *  job's own check would collide with it in the merge box. */
-export function verdictRosterMismatches(
+ *  no job is a REMOVED gate - the sneaky case, where deleting the job
+ *  would otherwise change nothing the gate can see. Callers hand in the
+ *  GATING job list (info-* and the gate's own jobs already excluded). */
+export function rosterMismatches(
   roster: string[],
-  jobs: string[],
-  site: { jobsFile: string; rosterName: string } = {
-    jobsFile: ".github/workflows/ci.yml",
-    rosterName: "ALL_GREEN_ROSTER",
-  },
+  gating: string[],
+  site: { jobsFile: string; rosterName: string },
 ): Mismatch[] {
   const mismatches: Mismatch[] = [];
   const duplicate = roster.find((job, index) => roster.indexOf(job) !== index);
@@ -2399,21 +2364,13 @@ export function verdictRosterMismatches(
       got: `'${duplicate}' is listed more than once`,
     });
   }
-  if (jobs.includes("all-green")) {
-    mismatches.push({
-      file: site.jobsFile,
-      expected: "no job named 'all-green' (the verdict check run owns the name)",
-      got: "a job whose check would collide with the verdict's",
-    });
-  }
-  const gating = jobs.filter((job) => !job.startsWith("info-") && job !== "all-green");
   const expected = new Set(roster);
   for (const job of gating) {
     if (!expected.has(job)) {
       mismatches.push({
         file: site.jobsFile,
-        expected: `job '${job}' in check_ssot.ts's ${site.rosterName} (every non-info-* job there gates the all-green verdict)`,
-        got: "not in the roster - add it there, or name the job info-* to opt it out of gating",
+        expected: `job '${job}' in check_ssot.ts's ${site.rosterName} (every gating job there feeds the all-green gate)`,
+        got: "not in the roster - add it there (and to the all-green needs list), deliberately",
       });
     }
   }
@@ -2430,11 +2387,180 @@ export function verdictRosterMismatches(
   return mismatches;
 }
 
-/** Every gating job in fleet-ci.yml, by job id - the fleet counterpart of
- *  ALL_GREEN_ROSTER. The verdict judges whatever jobs ran, and fleet-ci's
- *  jobs legitimately carry module/visibility conditions, so a job DELETED
- *  here would stop gating the entire fleet with no per-repo diff to see
- *  it; this roster is where that deletion becomes loud. */
+/** The meta-check gate's shape over this repository's parsed ci.yml,
+ *  against the authored roster. The all-green JOB is the gate now: its
+ *  own check run (named by its job id) is the ruleset's required check,
+ *  so the job must exist, carry exactly `if: always()` (a failed
+ *  dependency must FAIL the gate, not skip it), need EXACTLY the roster
+ *  (a dropped needs entry un-gates a job that keeps running), and judge
+ *  through the shared action with the needs context wired in. Gating
+ *  jobs stay unconditional and un-renamed (the meta-check reads job
+ *  RESULTS, and a skipped result stands down - conditions go on steps);
+ *  downstream jobs (needs including all-green: post-green, release-style
+ *  legs) are exempt from the roster but must spell out the gate's result
+ *  in their condition. Pure over the parsed doc for the forcing tests. */
+export function allGreenGateMismatches(
+  ci: Record<string, unknown>,
+  roster: string[],
+  site: { jobsFile: string; rosterName: string } = {
+    jobsFile: ".github/workflows/ci.yml",
+    rosterName: "ALL_GREEN_ROSTER",
+  },
+): Mismatch[] {
+  const mismatches: Mismatch[] = [];
+  const jobs = ciJobs(ci, site.jobsFile);
+  const jobNeeds = (job: unknown): string[] => {
+    const needs = asRecord(job ?? {}, "job").needs;
+    if (typeof needs === "string") return [needs];
+    return Array.isArray(needs) ? needs.map(String) : [];
+  };
+  const gate = jobs["all-green"];
+  if (gate === undefined) {
+    mismatches.push({
+      file: site.jobsFile,
+      expected:
+        "an 'all-green' job (its own check run is the ruleset's required check - without it nothing can merge)",
+      got: "no such job",
+    });
+    return mismatches;
+  }
+  const downstream = new Set(
+    Object.entries(jobs)
+      .filter(([name, job]) => name !== "all-green" && jobNeeds(job).includes("all-green"))
+      .map(([name]) => name),
+  );
+  const gating = Object.keys(jobs).filter(
+    (name) => name !== "all-green" && !downstream.has(name) && !name.startsWith("info-"),
+  );
+  mismatches.push(...rosterMismatches(roster, gating, site));
+  const gateRecord = asRecord(gate, "all-green");
+  const needs = jobNeeds(gateRecord);
+  const needsDuplicate = needs.find((job, index) => needs.indexOf(job) !== index);
+  if (needsDuplicate !== undefined) {
+    mismatches.push({
+      file: `${site.jobsFile} job 'all-green'`,
+      expected: "each needs entry once",
+      got: `'${needsDuplicate}' is needed more than once`,
+    });
+  }
+  if (canonical([...needs].sort()) !== canonical([...roster].sort())) {
+    mismatches.push({
+      file: `${site.jobsFile} job 'all-green'`,
+      expected: `needs exactly the ${site.rosterName} jobs (a dropped entry un-gates a job that keeps running; an extra one references a job the census does not know)`,
+      got: canonical([...needs].sort()),
+    });
+  }
+  if (String(gateRecord.if ?? "").trim() !== "always()") {
+    mismatches.push({
+      file: `${site.jobsFile} job 'all-green'`,
+      expected:
+        "exactly `if: always()` (without it a failed dependency SKIPS the gate instead of failing it, and extra clauses weaken it)",
+      got: gateRecord.if === undefined ? "no condition" : String(gateRecord.if),
+    });
+  }
+  if (gateRecord.name !== undefined) {
+    mismatches.push({
+      file: `${site.jobsFile} job 'all-green'`,
+      expected: "no name: override (the job id IS the required check-run name)",
+      got: `name: ${String(gateRecord.name)}`,
+    });
+  }
+  // A matrix would suffix the job's check-run names (all-green (x)),
+  // and the ruleset requires the exact context.
+  if (gateRecord.strategy !== undefined) {
+    mismatches.push({
+      file: `${site.jobsFile} job 'all-green'`,
+      expected:
+        "no strategy: on the gate (a matrix suffixes the check-run name away from the required context)",
+      got: "a strategy key",
+    });
+  }
+  // The judgment step: the shared action, with the needs context wired
+  // in - without the input the action judges nothing. No step in the
+  // gate job may carry a condition or failure softening: a skipped or
+  // continue-on-error'd judgment is a green check over an unjudged run.
+  const steps = (gateRecord.steps as Record<string, unknown>[] | undefined) ?? [];
+  for (const step of steps) {
+    if (step.if !== undefined || step["continue-on-error"] !== undefined) {
+      mismatches.push({
+        file: `${site.jobsFile} job 'all-green'`,
+        expected:
+          "no if: or continue-on-error: on any gate step (a skipped or softened judgment is a green check over an unjudged run)",
+        got: canonical(step.uses ?? step.run ?? null),
+      });
+    }
+  }
+  const judge = steps.find((step) => String(step.uses ?? "") === "./actions/all-green");
+  if (judge === undefined) {
+    mismatches.push({
+      file: `${site.jobsFile} job 'all-green'`,
+      expected: "a step using ./actions/all-green (the shared judgment)",
+      got: "no such step",
+    });
+  } else if (
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal Actions expression under pin
+    String(asRecord(judge.with ?? {}, "all-green with").needs ?? "") !== "${{ toJSON(needs) }}"
+  ) {
+    mismatches.push({
+      file: `${site.jobsFile} job 'all-green'`,
+      expected:
+        "the judgment step passing needs: toJSON(needs) (anything else judges a fiction of the run)",
+      got: canonical(judge.with ?? null),
+    });
+  }
+  for (const name of gating) {
+    const job = asRecord(jobs[name] ?? {}, name);
+    // The meta-check treats a skipped result as standing down, so a
+    // job-level `if:` on a gating job fails OPEN; event conditions go on
+    // steps.
+    if (job.if !== undefined) {
+      mismatches.push({
+        file: `${site.jobsFile} job '${name}'`,
+        expected:
+          "no job-level if: on a gating job (a skipped job stands down in the all-green gate - put event conditions on the steps)",
+        got: "a job-level condition",
+      });
+    }
+    if (job.name !== undefined) {
+      mismatches.push({
+        file: `${site.jobsFile} job '${name}'`,
+        expected: "no job-level name: on a gating job (ids are the roster's identity)",
+        got: `name: ${String(job.name)}`,
+      });
+    }
+  }
+  for (const name of downstream) {
+    const condition = String(asRecord(jobs[name] ?? {}, name).if ?? "");
+    // The clause must be present AND undefeatable: an || or a status
+    // function (always(), !cancelled()) can wave post-gate work through a
+    // red gate, and a chained comparison (== 'success' == false) inverts
+    // it - so the &&-split clauses must CONTAIN the exact clause, not a
+    // substring of one.
+    const clauses = condition.split("&&").map((clause) => clause.trim());
+    if (
+      !clauses.includes("needs.all-green.result == 'success'") ||
+      condition.includes("||") ||
+      condition.includes("!") ||
+      /\b(always|cancelled|failure)\s*\(/.test(condition)
+    ) {
+      mismatches.push({
+        file: `${site.jobsFile} job '${name}'`,
+        expected:
+          "a spelled-out needs.all-green.result == 'success' clause of its own, &&-only (an || arm, a status function, or a chained comparison could release post-gate work off a red gate)",
+        got: condition === "" ? "no condition" : condition,
+      });
+    }
+  }
+  return mismatches;
+}
+
+/** Every gating job in fleet-ci.yml, by job id - the fleet counterpart
+ *  of ALL_GREEN_ROSTER. The rendered all-green job needs the `ci` caller,
+ *  whose result aggregates every job here; fleet-ci's jobs legitimately
+ *  carry module/visibility conditions (a skipped job leaves the called
+ *  run green), so a job DELETED here would stop gating the entire fleet
+ *  with no per-repo diff to see it; this roster is where that deletion
+ *  becomes loud. */
 export const FLEET_CI_ROSTER = [
   "validate-template",
   "base-checks",
@@ -2450,257 +2576,20 @@ export const FLEET_CI_ROSTER = [
   "release-health",
 ];
 
-/** The fleet wrapper TEMPLATE's exact-line pins: the wrapper is the
- *  fleet's only trigger surface for the verdict, so its shape is pinned
- *  at the source the way the repo's own workflows are (the
- *  settings-label-preflight rule is the house pattern) - one loud diff
- *  here instead of ten drifted sync PRs. Each entry is a FULL line of
- *  templates/base/.github/workflows/all-green.yml.jinja with its reason. */
-export const WRAPPER_TEMPLATE_PINS: readonly [string, string][] = [
-  ["    workflows: [CI]", "the verdict must fire on CI completions"],
-  ["    types: [completed]", "only finished runs may be judged"],
-  [
-    "  pull_request_review:",
-    "the review-submission wake that replaced the retired copilot poll - without it a pending verdict never hears the review land",
-  ],
-  ["    types: [submitted]", "only submitted reviews re-judge"],
-  ["  workflow_dispatch:", "the unwedge trigger for a lost wake"],
-  [
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal template line under pin
-    "  group: {% raw %}${{ github.workflow }}-${{ github.event.workflow_run.head_sha || github.event.pull_request.head.sha || inputs.sha }}{% endraw %}",
-    "per-sha serialization must cover every wake, the review wake included, or judgments' POSTs can interleave",
-  ],
-  [
-    "  cancel-in-progress: false",
-    "a cancelled verdict between judging and posting is a lost check",
-  ],
-  ["      checks: write", "the check-run POST's grant"],
-  ["      actions: read", "the judgment's run reads"],
-  [
-    "    uses: {{ github_username }}/repo-platform/.github/workflows/reusable-all-green.yml@build",
-    "the shared judgment at the green-gated build ref - any other target is not the fleet's verdict",
-  ],
-  [
-    "      require-copilot-review: {{ (not private) | tojson }}",
-    "the verdict-owned review expectation, visibility-split: Copilot reviews are disabled on private repositories, so only public renders may expect one (an unconditional true would pend every private PR forever) - and this input is the review gate's ONLY home since the ruleset's copilot context was retired",
-  ],
-  [
-    "{# compose:conditional-workflows #}",
-    "the manifest-derived conditional roster anchor (renders the conditional-workflows input in every selection)",
-  ],
-  [
-    "{# compose:all-green-release #}",
-    "the release-please leg's anchor (splices the verdict-gated release job on selecting repos; fleet-ci-render-roster pins the fragment's shape)",
-  ],
-];
-
-/** The wrapper template's shape against the reusable's declared inputs,
- *  pure over the two texts so the suite can force every branch: the
- *  exact-line pins above, a ban on the retired copilot-wait-minutes
- *  input everywhere in the template, and the input census BOTH ways -
- *  every input the reusable declares is passed (three textually, the
- *  conditional roster through the compose anchor) and nothing the
- *  reusable does not declare is passed, so a retired input lingering in
- *  the wrapper (a workflow_call refuses unknown inputs, failing every
- *  fleet verdict at once) or a new input silently unpassed both go red
- *  here. */
-export function wrapperTemplateMismatches(templateText: string, reusableText: string): Mismatch[] {
-  const rel = "templates/base/.github/workflows/all-green.yml.jinja";
-  const mismatches: Mismatch[] = [];
-  const lines = templateText.split("\n");
-  // The SOURCE wrapper is jinja-minimal by construction: beyond
-  // {% raw %}-wrapped expressions and {{ }} substitutions, its only
-  // jinja is the compose anchor (selection-conditional content arrives
-  // through the anchor's GENERATOR into the composed copy, never here).
-  // So ANY other {% tag (if, for, set, macro, block, anything newer) and
-  // ANY jinja comment is banned outright - that is what keeps every pin
-  // below honest: without the ban, a pinned line inside a dead branch, a
-  // macro body, or a {# ... #} comment (single- or multi-line) would
-  // satisfy the textual check while rendering to nothing.
-  for (const [index, line] of lines.entries()) {
-    if (line === "{# compose:conditional-workflows #}") continue;
-    if (line === "{# compose:all-green-release #}") continue;
-    // raw/endraw must pair ON the line: the wrapper's only raw use is
-    // inline expression-wrapping, and a multiline raw block would let
-    // text ride through the ban below unexamined.
-    if (line.split("{% raw %}").length !== line.split("{% endraw %}").length) {
-      mismatches.push({
-        file: `${rel}:${index + 1}`,
-        expected:
-          "raw/endraw paired on one line (inline expression wrapping only - a multiline raw block smuggles text past the jinja ban)",
-        got: line.trim(),
-      });
-      continue;
-    }
-    const stripped = line.replaceAll("{% raw %}", "").replaceAll("{% endraw %}", "");
-    if (stripped.includes("{%") || stripped.includes("{#") || stripped.includes("#}")) {
-      mismatches.push({
-        file: `${rel}:${index + 1}`,
-        expected:
-          "no jinja tags or comments in the wrapper source beyond {% raw %} pairs and the compose anchor (conditional content belongs to the anchor's generator; a tag-wrapped or commented copy would satisfy the textual pins while rendering to nothing)",
-        got: line.trim(),
-      });
-    }
-    // Quoted keys parse identically in YAML but evade every bare-key
-    // census below ('"contents": write' is a grant the regex never
-    // sees), so a line whose content OPENS with a quote is refused -
-    // nothing in this file legitimately starts one.
-    if (/^\s*["']/.test(line)) {
-      mismatches.push({
-        file: `${rel}:${index + 1}`,
-        expected:
-          "no leading-quote lines (a quoted YAML key parses identically but evades the bare-key censuses)",
-        got: line.trim(),
-      });
-    }
-  }
-  // Exactly ONE job, the verdict, and one with: block: the census below
-  // reads the FIRST with:, so a decoy job carrying compliant pins next
-  // to a gutted real job must be unrepresentable.
-  const jobsHeaderAt = lines.indexOf("jobs:");
-  if (jobsHeaderAt === -1) {
-    throw new Error(`${rel}: no jobs: section - anchor lost`);
-  }
-  const jobIds = lines
-    .slice(jobsHeaderAt + 1)
-    .map((line) => /^ {2}([A-Za-z0-9_-]+):(?: |$)/.exec(line)?.[1])
-    .filter((id): id is string => id !== undefined);
-  if (canonical(jobIds) !== canonical(["verdict"])) {
-    mismatches.push({
-      file: rel,
-      expected:
-        "exactly one job, 'verdict' (a second job could carry compliant-looking pins while the real call is gutted)",
-      got: jobIds.join(", ") || "no job ids",
-    });
-  }
-  const withCount = lines.filter((line) => line === "    with:").length;
-  if (withCount !== 1) {
-    mismatches.push({
-      file: rel,
-      expected: "exactly one with: block (the input census below reads the first)",
-      got: `${withCount} with: blocks`,
-    });
-  }
-  // Additive-closed trigger and grant sets: the pins below prove the
-  // required members PRESENT, and these censuses refuse extras - an
-  // added trigger (a push: judging events the verdict never designed
-  // for) or an added grant would ride to every fleet repository
-  // silently. Both blocks are scoped by indent: the on: block's 2-space
-  // keys until the next column-0 key, the permissions block's 6-space
-  // keys until the first non-6-space line.
-  const onAt = lines.indexOf("on:");
-  if (onAt === -1) throw new Error(`${rel}: no on: block - anchor lost`);
-  const triggers: string[] = [];
-  for (const line of lines.slice(onAt + 1)) {
-    if (/^[A-Za-z]/.test(line)) break;
-    const key = /^ {2}([A-Za-z_]+):/.exec(line)?.[1];
-    if (key !== undefined) triggers.push(key);
-  }
-  mismatches.push(
-    ...setMismatch(
-      `${rel} on: triggers`,
-      ["workflow_run", "pull_request_review", "workflow_dispatch"],
-      triggers,
-    ),
-  );
-  const permissionsAt = lines.indexOf("    permissions:");
-  if (permissionsAt === -1) throw new Error(`${rel}: no job permissions block - anchor lost`);
-  const grants: string[] = [];
-  for (const line of lines.slice(permissionsAt + 1)) {
-    // Blanks and comments continue the block in YAML - at ANY indent, a
-    // comment is not content - so a grant hiding behind one must still
-    // be censused; only a real dedent ends the block.
-    if (line.trim() === "" || line.trim().startsWith("#")) continue;
-    const key = /^ {6}([a-z-]+):/.exec(line)?.[1];
-    if (key === undefined) break;
-    grants.push(key);
-  }
-  mismatches.push(...setMismatch(`${rel} verdict permissions`, ["checks", "actions"], grants));
-  for (const [line, why] of WRAPPER_TEMPLATE_PINS) {
-    const count = lines.filter((candidate) => candidate === line).length;
-    if (count !== 1) {
-      mismatches.push({
-        file: rel,
-        expected: `the line ${JSON.stringify(line)} exactly once (${why})`,
-        got:
-          count === 0
-            ? "missing"
-            : `${count} occurrences - the LAST one wins in YAML, so duplicates can silently override`,
-      });
-    }
-  }
-  if (templateText.includes("copilot-wait-minutes")) {
-    mismatches.push({
-      file: rel,
-      expected:
-        "no copilot-wait-minutes anywhere (the input is retired with the poll; a wrapper passing it fails the workflow_call outright, fleet-wide)",
-      got: "a copilot-wait-minutes mention",
-    });
-  }
-  // The census: keys the wrapper passes textually inside the verdict
-  // job's with: block (6-space keys until the block's indent ends; the
-  // column-0 anchor line belongs to the block), plus the anchor's
-  // generated conditional-workflows input, against the reusable's
-  // declared inputs - exact set equality, both directions, duplicates
-  // refused (YAML lets the last duplicate win silently).
-  const withAt = lines.indexOf("    with:");
-  if (withAt === -1) {
-    throw new Error(
-      "templates/base/.github/workflows/all-green.yml.jinja: no with: block - anchor lost",
-    );
-  }
-  const passed: string[] = [];
-  for (const line of lines.slice(withAt + 1)) {
-    if (!/^( {6}|\{[#%])/.test(line) && line.trim() !== "") break;
-    const key = /^ {6}([a-z][a-z-]*):/.exec(line)?.[1];
-    if (key !== undefined) passed.push(key);
-    if (line === "{# compose:conditional-workflows #}") passed.push("conditional-workflows");
-  }
-  const duplicate = passed.find((key, index) => passed.indexOf(key) !== index);
-  if (duplicate !== undefined) {
-    mismatches.push({
-      file: rel,
-      expected: "each with: input passed once (YAML's last duplicate wins silently)",
-      got: `'${duplicate}' is passed more than once`,
-    });
-  }
-  const reusable = asRecord(parseYaml(reusableText), "reusable-all-green.yml");
-  const call = asRecord(asRecord(reusable.on, "reusable on").workflow_call, "workflow_call");
-  const declared = Object.keys(asRecord(call.inputs ?? {}, "workflow_call inputs"));
-  for (const key of new Set(passed)) {
-    if (!declared.includes(key)) {
-      mismatches.push({
-        file: rel,
-        expected: `every passed input declared by reusable-all-green.yml (a workflow_call refuses unknown inputs, failing every fleet verdict at once)`,
-        got: `'${key}' is passed but not declared`,
-      });
-    }
-  }
-  for (const key of declared) {
-    if (!passed.includes(key)) {
-      mismatches.push({
-        file: rel,
-        expected: `the wrapper passing the reusable's '${key}' input (an unpassed input silently rides its default fleet-wide)`,
-        got: "not passed",
-      });
-    }
-  }
-  return mismatches;
-}
-
-/** The fleet release leg's render shape at the SOURCE. The template
- *  ci.yml.jinja may carry exactly the `checks` and `ci` caller jobs and
- *  no fragment anchor beyond the with-block data anchors - the retired
- *  info-release job must not return there; the release fires from the
- *  all-green wrapper's verdict-gated leg now. That leg (the release-please
- *  all-green-release fragment) must keep `needs: [verdict]` plus the
- *  verdict-conclusion condition scoped to push-to-main workflow_run
- *  events (dropping any clause releases off unjudged or red commits),
- *  must pass the judged sha (github.sha on a workflow_run event is the
- *  tip, which can be a NEWER unjudged commit), and must hold a
- *  concurrency group no job inside the called release.yml takes (a
- *  shared name self-deadlocks: the caller would hold the group its
- *  called job waits for). release.yml must declare the sha input and
+/** The fleet gate's render shape at the SOURCE. The template ci.yml.jinja
+ *  carries exactly the `checks` and `ci` caller jobs plus the `all-green`
+ *  gate job (its check run is the ruleset's required context), whose
+ *  needs edge, always() condition, and shared-action judgment are pinned
+ *  as exact lines - each fails OPEN at run time if lost. The
+ *  release-please leg (fragments/all-green-release.jinja, spliced after
+ *  the gate) must keep `needs: [all-green]` plus the spelled-out
+ *  gate-result condition scoped to pushes to main (dropping any clause
+ *  releases off unjudged, red, or PR-shaped runs), must pass the judged
+ *  sha explicitly (github.sha - the leg runs in the judged commit's own
+ *  run; the explicit input is what keeps a future caller honest), and
+ *  must hold a concurrency group no job inside the called release.yml
+ *  takes (a shared name self-deadlocks: the caller would hold the group
+ *  its called job waits for). release.yml must declare the sha input and
  *  read it in the head gate, or the pass rots into a silent
  *  release-from-tip. Pure over the three texts for the suite's forcing
  *  cases. */
@@ -2718,50 +2607,172 @@ export function fleetCiRenderMismatches(
   const jobIds = [...ciTemplateText.slice(jobsAt).matchAll(/^ {2}([A-Za-z0-9_-]+):(?: |$)/gm)].map(
     (match) => match[1],
   );
-  if (canonical(jobIds) !== canonical(["checks", "ci"])) {
+  if (canonical(jobIds) !== canonical(["checks", "ci", "all-green"])) {
     mismatches.push({
       file: ciRel,
       expected:
-        "exactly the 'checks' and 'ci' caller jobs (every fleet gate lives inside those calls; the release leg lives in the all-green wrapper, and a job added here would gate every repo with no roster to make it loud)",
+        "exactly the 'checks' and 'ci' caller jobs plus the 'all-green' gate (every fleet gate lives inside the two calls; the release leg splices through its anchor, and a job added here would gate every repo with no roster to make it loud)",
       got: jobIds.join(", ") || "no job ids",
     });
   }
-  // No job-level name: or if: on the caller jobs: the verdict judges
-  // DISPLAY names (a name: info-checks silently opts a caller out) and
-  // reads a skipped job as standing down (an if: fails open at run
-  // time) - the same bans all-green-roster holds over this repo's own
-  // ci.yml.
+  // No job-level name: anywhere (the all-green job's id is the required
+  // check-run name; a caller rename would silently reshape the gate),
+  // and the ONLY job-level if: is the gate's own always() - a condition
+  // on a caller job skips it, and skipped stands down.
+  // Line censuses over the whole jobs region: every needs: line must be
+  // a pinned one (a second needs key on a job silently wins in YAML),
+  // every if: must be the gate's exact always() (step-level conditions
+  // included - a conditioned judgment step is a green no-op gate), and
+  // strategy/continue-on-error are banned outright (a matrix suffixes
+  // the check name away from the required context; softening waves a
+  // failure through).
+  // 4-space only: the gate's with-block passes a `needs:` INPUT at step
+  // depth, which is data, not a YAML job key.
+  const needsLines = ciTemplateText
+    .slice(jobsAt)
+    .split("\n")
+    .filter((line) => /^ {4}needs:/.test(line));
+  if (canonical(needsLines) !== canonical(["    needs: [checks, ci]"])) {
+    mismatches.push({
+      file: ciRel,
+      expected:
+        'exactly one needs: line, "    needs: [checks, ci]" (a rival needs key on any job silently wins in YAML and un-gates a caller)',
+      got: needsLines.join(" | ") || "no needs lines",
+    });
+  }
   for (const line of ciTemplateText.slice(jobsAt).split("\n")) {
-    if (/^ {4}(name|if):/.test(line)) {
+    if (/^\s+(strategy|continue-on-error):/.test(line)) {
       mismatches.push({
         file: ciRel,
         expected:
-          "no job-level name: or if: on the caller jobs (a rename can opt a gate out of the verdict; a condition skips it and skipped stands down)",
+          "no strategy: or continue-on-error: anywhere in ci.yml's jobs (a matrixed gate renames its check; softening waves failures through)",
         got: line.trim(),
       });
     }
-    // Quoted job ids parse identically but evade the bare-key census.
-    if (/^ {2}["']/.test(line)) {
+    if (/^ {5,}if:/.test(line)) {
       mismatches.push({
         file: ciRel,
-        expected: "no quoted job ids (a quoted key parses identically but evades the job census)",
+        expected:
+          "no step-level if: in ci.yml's jobs (a conditioned judgment step is a green no-op gate)",
+        got: line.trim(),
+      });
+    }
+    if (/^ {4}name:/.test(line)) {
+      mismatches.push({
+        file: ciRel,
+        expected:
+          "no job-level name: (the all-green job's id is the required check-run name, and caller ids are the anchor census's identity)",
+        got: line.trim(),
+      });
+    }
+    if (/^ {4}if:/.test(line) && line !== "    if: always()") {
+      mismatches.push({
+        file: ciRel,
+        expected:
+          "no job-level if: beyond the gate's exact `if: always()` (a condition on a caller job skips it, and a skipped caller stands down from the gate)",
+        got: line.trim(),
+      });
+    }
+    // YAML's alternate key spellings all parse identically but evade the
+    // bare-key censuses above: quoted keys ('"if": false'), explicit
+    // keys (? extra), anchored or tagged keys (&a extra:, !!str extra:),
+    // aliases, and explicit values (: {...}). Nothing in this file
+    // legitimately opens a line with any of those markers, so they are
+    // refused as an alphabet, and - the closing half - every line at
+    // EXACTLY the job indent must BE a bare job key: a job-level key the
+    // job census cannot read is a job the roster cannot see.
+    if (/^\s*["'?&!*:]/.test(line)) {
+      mismatches.push({
+        file: ciRel,
+        expected:
+          "no quoted, explicit-key, anchored, tagged, alias, or explicit-value lines (every YAML spelling beyond bare keys evades the censuses)",
+        got: line.trim(),
+      });
+    }
+    if (/^ {2}[^ \t#]/.test(line) && !/^ {2}[A-Za-z0-9_-]+:(?: |$)/.test(line)) {
+      mismatches.push({
+        file: ciRel,
+        expected:
+          "every job-indent line spelled as a bare `key:` (any other spelling is a job the census cannot see)",
         got: line.trim(),
       });
     }
     // The job census reads the template's own text, so a fragment anchor
     // after jobs: could splice a job the census never sees; only the
-    // with-block data anchor may stand.
-    if (line.startsWith("{# compose:") && line !== "{# compose:codeql-languages #}") {
+    // with-block data anchor and the release leg's anchor may stand.
+    if (
+      line.startsWith("{# compose:") &&
+      line !== "{# compose:codeql-languages #}" &&
+      line !== "{# compose:all-green-release #}"
+    ) {
       mismatches.push({
         file: ciRel,
         expected:
-          "no fragment anchor in ci.yml's jobs beyond the codeql-languages data anchor (a spliced job would evade the job census; module jobs live in fleet-ci, the release leg in the all-green wrapper)",
+          "no fragment anchor in ci.yml's jobs beyond the codeql-languages data anchor and the all-green-release leg anchor (a spliced job would evade the job census; module jobs live in fleet-ci)",
         got: line.trim(),
       });
     }
   }
+  // The gate's shape, pinned as exact lines - each exactly once in the
+  // whole file (YAML's last duplicate wins silently, so a compliant copy
+  // next to a gutted one must be loud) AND, for the job-body pins, INSIDE
+  // the all-green job's own block: a pin satisfied from another job's
+  // body (if: always() moved onto a caller) is the same disarm.
+  const ciLines = ciTemplateText.split("\n");
+  const gateAt = ciLines.indexOf("  all-green:");
+  const gateEnd = ciLines.findIndex(
+    (line, index) =>
+      index > gateAt && (/^ {2}[A-Za-z0-9_-]+:/.test(line) || line.startsWith("{# compose:")),
+  );
+  const gateBlock =
+    gateAt === -1 ? [] : ciLines.slice(gateAt + 1, gateEnd === -1 ? undefined : gateEnd);
+  const ciPins: [string, string, boolean][] = [
+    ["  all-green:", "the gate job whose check run the ruleset requires, by this exact id", false],
+    [
+      "    needs: [checks, ci]",
+      "the gate must need BOTH caller jobs - dropping one un-gates every job of that call, fleet-wide",
+      true,
+    ],
+    [
+      "    if: always()",
+      "a failed caller must FAIL the gate, not skip it (a skipped required check leaves the merge box waiting)",
+      true,
+    ],
+    [
+      "      - uses: {{ github_username }}/repo-platform/actions/all-green@build",
+      "the shared judgment at the green-gated build ref - any other target is not the fleet's gate",
+      true,
+    ],
+    [
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal template line under pin
+      "          needs: {% raw %}${{ toJSON(needs) }}{% endraw %}",
+      "the needs context is what the action judges - anything else judges a fiction of the run",
+      true,
+    ],
+    [
+      "{# compose:all-green-release #}",
+      "the release-please leg's anchor (splices the gate-downstream release job on selecting repos)",
+      false,
+    ],
+  ];
+  for (const [line, why, inGate] of ciPins) {
+    const count = ciLines.filter((candidate) => candidate === line).length;
+    if (count !== 1) {
+      mismatches.push({
+        file: ciRel,
+        expected: `the line ${JSON.stringify(line)} exactly once (${why})`,
+        got: count === 0 ? "missing" : `${count} occurrences`,
+      });
+    } else if (inGate && !gateBlock.includes(line)) {
+      mismatches.push({
+        file: ciRel,
+        expected: `the line ${JSON.stringify(line)} inside the all-green job's own block (${why})`,
+        got: "present, but on another job",
+      });
+    }
+  }
   // The release leg is jinja-minimal by design: inline {% raw %} pairs
-  // wrap the one judged-sha expression, and everything else is banned -
+  // wrap the judged-sha expression, and everything else is banned -
   // a multi-line {# ... #} or an if-tag could otherwise hide a pinned
   // line while rendering without it (the composer supplies the module
   // gate around the whole fragment).
@@ -2793,11 +2804,22 @@ export function fleetCiRenderMismatches(
         got: line.trim(),
       });
     }
-    // Quoted job ids parse identically but evade the bare-key census.
-    if (/^ {2}["']/.test(line)) {
+    // YAML's alternate key spellings parse identically but evade the
+    // bare-key censuses (quoted, explicit-key, anchored, tagged, alias,
+    // explicit-value); every job-indent line must be a bare key.
+    if (/^\s*["'?&!*:]/.test(line)) {
       mismatches.push({
         file: legRel,
-        expected: "no quoted job ids (a quoted key parses identically but evades the job census)",
+        expected:
+          "no quoted, explicit-key, anchored, tagged, alias, or explicit-value lines (every YAML spelling beyond bare keys evades the censuses)",
+        got: line.trim(),
+      });
+    }
+    if (/^ {2}[^ \t#]/.test(line) && !/^ {2}[A-Za-z0-9_-]+:(?: |$)/.test(line)) {
+      mismatches.push({
+        file: legRel,
+        expected:
+          "every job-indent line spelled as a bare `key:` (any other spelling is a job the census cannot see)",
         got: line.trim(),
       });
     }
@@ -2818,39 +2840,67 @@ export function fleetCiRenderMismatches(
       got: legJobs.join(", "),
     });
   }
+  const legNeedsLines = releaseLegText.split("\n").filter((line) => /^ {4}needs:/.test(line));
+  if (canonical(legNeedsLines) !== canonical(["    needs: [all-green]"])) {
+    mismatches.push({
+      file: legRel,
+      expected:
+        'exactly one needs: line, "    needs: [all-green]" (a rival needs key silently wins in YAML)',
+      got: legNeedsLines.join(" | ") || "no needs lines",
+    });
+  }
+  if (/^\s+(strategy|continue-on-error):/m.test(releaseLegText)) {
+    mismatches.push({
+      file: legRel,
+      expected: "no strategy: or continue-on-error: in the release leg",
+      got: "a banned key",
+    });
+  }
   // One if: only - YAML lets a duplicate key win silently, so a second
   // condition could shadow the pinned block below.
   const ifCount = releaseLegText.split("\n").filter((line) => /^ {4}if:/.test(line)).length;
   if (ifCount !== 1) {
     mismatches.push({
       file: legRel,
-      expected: "exactly one job-level if: (a duplicate key could shadow the verdict gate)",
+      expected: "exactly one job-level if: (a duplicate key could shadow the gate condition)",
       got: `${ifCount} if: lines`,
     });
   }
-  // The verdict gate, pinned as one ADJACENT block: released only by a
-  // posted green verdict (the reusable's conclusion output - never the
-  // triggering run's conclusion) on a push-to-main workflow_run event.
-  const verdictGate = [
+  // The gate condition, pinned as one ADJACENT block: released only by a
+  // green all-green (spelled out, never GitHub's implied-success rule
+  // alone) on a push to main.
+  const releaseGate = [
     "    if: >-",
-    "      needs.verdict.result == 'success' &&",
-    "      needs.verdict.outputs.conclusion == 'success' &&",
-    "      github.event_name == 'workflow_run' &&",
-    "      github.event.workflow_run.event == 'push' &&",
-    "      github.event.workflow_run.head_branch == 'main'",
+    "      needs.all-green.result == 'success' &&",
+    "      github.event_name == 'push' &&",
+    "      github.ref == 'refs/heads/main'",
   ].join("\n");
-  if (!releaseLegText.includes(verdictGate)) {
+  const gateBlockAt = releaseLegText.indexOf(releaseGate);
+  if (gateBlockAt === -1) {
     mismatches.push({
       file: legRel,
       expected:
-        "the release job carrying the verbatim verdict gate block (needs.verdict.result and .outputs.conclusion both 'success', event workflow_run, run event push, head branch main) - dropping any clause releases off unjudged or red commits",
+        "the release job carrying the verbatim gate block (needs.all-green.result 'success', event push, ref refs/heads/main) - dropping any clause releases off unjudged, red, or PR-shaped runs",
       got: "missing or reshaped",
     });
+  } else {
+    // The folded scalar must END with the block: a continuation line
+    // appended after it (an || arm) would weaken the gate while the
+    // block pin stayed satisfied.
+    const nextLine = releaseLegText.slice(gateBlockAt + releaseGate.length).split("\n")[1] ?? "";
+    if (/^ {6,}/.test(nextLine)) {
+      mismatches.push({
+        file: legRel,
+        expected:
+          "the gate block ending the if: scalar (a continuation line after it could re-weaken the gate)",
+        got: nextLine.trim(),
+      });
+    }
   }
   // The per-line pins: each exactly once (YAML's last duplicate wins
   // silently, so a compliant copy next to a gutted one must be loud).
   const legPins: [string, string][] = [
-    ["    needs: [verdict]", "the release leg runs downstream of the verdict job, nothing else"],
+    ["    needs: [all-green]", "the release leg runs downstream of the gate, nothing else"],
     [
       "    concurrency:",
       "releases serialize in their own lane; an unserialized pair can double-publish",
@@ -2866,8 +2916,8 @@ export function fleetCiRenderMismatches(
     ],
     [
       // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal fragment line under pin
-      "      sha: {% raw %}${{ github.event.workflow_run.head_sha }}{% endraw %}",
-      "the JUDGED commit - github.sha on a workflow_run event is the tip, which can be a newer unjudged commit",
+      "      sha: {% raw %}${{ github.sha }}{% endraw %}",
+      "the JUDGED commit, explicit - same-run today, and the explicit pass is what keeps a future caller honest",
     ],
     ["    secrets: inherit", "publish steps need the repo's secrets"],
   ];
@@ -2882,6 +2932,7 @@ export function fleetCiRenderMismatches(
       });
     }
   }
+
   // The permissions ceiling, additive-closed: the pins prove the needed
   // grants present, this census refuses extras riding to every
   // release-selecting repository silently.
@@ -4209,42 +4260,12 @@ const rules: Rule[] = [
   },
 
   {
-    // Roster enforcement at authoring time: ci.yml's gating jobs against
-    // the authored ALL_GREEN_ROSTER, both directions (see
-    // verdictRosterMismatches). This is where a deleted gate goes loud.
+    // The gate's shape at authoring time: the all-green job's needs list,
+    // ci.yml's gating jobs, and the authored ALL_GREEN_ROSTER held
+    // together in every direction (allGreenGateMismatches has the model).
+    // This is where a deleted or un-needed gate goes loud.
     name: "all-green-roster",
-    run: () => {
-      const jobs = ciJobs(repoCi(), "ci.yml");
-      const mismatches = verdictRosterMismatches(ALL_GREEN_ROSTER, Object.keys(jobs));
-      for (const [name, raw] of Object.entries(jobs)) {
-        if (name.startsWith("info-")) continue;
-        const job = asRecord(raw ?? {}, name);
-        // The verdict treats a skipped job as standing down, so a
-        // job-level `if:` on a gating job fails OPEN; event conditions go
-        // on steps.
-        if (job.if !== undefined) {
-          mismatches.push({
-            file: `.github/workflows/ci.yml job '${name}'`,
-            expected:
-              "no job-level if: on a gating job (a skipped job stands down in the all-green verdict - put event conditions on the steps)",
-            got: "a job-level condition",
-          });
-        }
-        // The verdict judges DISPLAY names, the roster pins job ids: a
-        // custom name could rename a rostered job to info-* (silent
-        // opt-out) or to all-green (check collision) without touching the
-        // key this rule reads, so gating jobs display as their ids.
-        if (job.name !== undefined) {
-          mismatches.push({
-            file: `.github/workflows/ci.yml job '${name}'`,
-            expected:
-              "no job-level name: on a gating job (the verdict judges display names; a rename could opt the job out of the roster's reach)",
-            got: `name: ${String(job.name)}`,
-          });
-        }
-      }
-      return mismatches;
-    },
+    run: () => allGreenGateMismatches(repoCi(), ALL_GREEN_ROSTER),
   },
 
   {
@@ -4252,34 +4273,44 @@ const rules: Rule[] = [
     // FLEET_CI_ROSTER, both directions - deleting dependency-review or
     // codeql there would silently drop the gate for every managed
     // repository at once. Unlike the operator rule, job-level `if:` is the
-    // DESIGN here (module/visibility conditions; the verdict reads skipped
-    // as standing down), but the info-* opt-out and display-name renames
-    // are banned outright: an opt-out in the fleet's shared gate home is a
-    // fleet-wide silent disarm, and opt-outs belong to the repo-owned
-    // checks.yml.
+    // DESIGN here (module/visibility conditions; a skipped job leaves the
+    // caller's aggregated result green), but info-* job ids, a job named
+    // all-green, and display-name renames are banned outright: this is
+    // the fleet's shared gate home, where ids are the roster's identity
+    // and a look-alike gate job would only confuse the required-check
+    // story.
     name: "fleet-ci-roster",
     run: () => {
       const rel = ".github/workflows/fleet-ci.yml";
       const jobs = ciJobs(asRecord(parseYaml(read(rel)), rel), rel);
-      const mismatches = verdictRosterMismatches(FLEET_CI_ROSTER, Object.keys(jobs), {
-        jobsFile: rel,
-        rosterName: "FLEET_CI_ROSTER",
-      });
+      const mismatches = rosterMismatches(
+        FLEET_CI_ROSTER,
+        Object.keys(jobs).filter((name) => !name.startsWith("info-")),
+        { jobsFile: rel, rosterName: "FLEET_CI_ROSTER" },
+      );
       for (const [name, raw] of Object.entries(jobs)) {
         const job = asRecord(raw ?? {}, name);
         if (name.startsWith("info-")) {
           mismatches.push({
             file: `${rel} job '${name}'`,
             expected:
-              "no info-* job in the fleet's shared gate home (that opt-out disarms every managed repository at once; repo-local opt-outs belong to checks.yml)",
+              "no info-* job in the fleet's shared gate home (a fleet job either gates through the ci caller's result or does not exist; repo-local advisory jobs belong to checks.yml with continue-on-error)",
             got: "an info-* job id",
+          });
+        }
+        if (name === "all-green") {
+          mismatches.push({
+            file: `${rel} job '${name}'`,
+            expected:
+              "no job named all-green here (the gate job lives in the rendered ci.yml; a nested look-alike would shadow the required-check story)",
+            got: "an all-green job id",
           });
         }
         if (job.name !== undefined) {
           mismatches.push({
             file: `${rel} job '${name}'`,
             expected:
-              "no job-level name: on a fleet gating job (the verdict judges display names; a rename could opt the job out fleet-wide)",
+              "no job-level name: on a fleet gating job (ids are the roster's identity; a rename could hide a job from review)",
             got: `name: ${String(job.name)}`,
           });
         }
@@ -4289,17 +4320,17 @@ const rules: Rule[] = [
   },
 
   {
-    // The verdict check's NAME, pinned once as data: the string the
-    // ruleset REQUIRES and the string the verdict REPORTS must be provably
-    // the same at authoring time (a renamed check would leave branch
+    // The gate check's NAME, pinned once as data: the string the ruleset
+    // REQUIRES and the job id whose check run CARRIES it must be provably
+    // the same at authoring time (a renamed job would leave branch
     // protection waiting forever while every job stayed green). Its
     // independently-authored homes: the shared green-gate predicate's
     // CHECK_NAME (all_green.ts) - which must also feed its own check-run
-    // lookup - the check reusable-all-green.yml creates, the override
-    // layer's required-check contexts (next to Copilot's review check),
-    // and docs/all-green.md's prose. The repo's own all-green.yml wrapper
-    // must also actually wire the verdict: workflow_run on CI, the
-    // dispatch unwedge input, and the local reusable call.
+    // lookup - the all-green JOB id in this repo's ci.yml and in the
+    // template ci.yml.jinja (a job's check run is named by its id; the
+    // all-green-roster and fleet-ci-render-roster rules pin that neither
+    // job carries a name: override), the override layer's required-check
+    // context, and docs/all-green.md's prose.
     name: "all-green-name",
     run: () => {
       const mismatches: Mismatch[] = [];
@@ -4327,110 +4358,22 @@ const rules: Rule[] = [
         );
       }
 
-      const reusable = read(".github/workflows/reusable-all-green.yml");
-      const created = mustMatch(
-        reusable,
-        ALL_GREEN_WIRING.created,
-        "reusable-all-green.yml",
-        "created check name",
-      )[1];
-      if (created !== gateName) {
+      // The job whose check run carries the name, at both sources. The
+      // repo side is structural (the parsed doc); the template side is a
+      // line anchor (the file is jinja).
+      if (!(gateName in ciJobs(repoCi(), "ci.yml"))) {
         mismatches.push({
-          file: ".github/workflows/reusable-all-green.yml",
-          expected: `the created check named '${gateName}' (all_green.ts CHECK_NAME)`,
-          got: created,
+          file: ".github/workflows/ci.yml",
+          expected: `a job id '${gateName}' (the job's own check run is the required context)`,
+          got: "no such job",
         });
       }
-
-      // The verdict's ANCHOR job: the fleet wrapper template pins
-      // require-job, the reusable wires it into the judge, and the render
-      // validator enforces the same string at sync time. Every fleet gate
-      // lives inside the managed ci.yml's one fleet-ci caller, so this
-      // anchor is what makes a disarmed caller fail the verdict; its
-      // value must be "<caller job id> / <fleet-ci job id>" exactly as
-      // the judged run spells it, so both ids are pinned here too -
-      // renaming either would redden every fleet verdict.
-      const wrapperRel = "templates/base/.github/workflows/all-green.yml.jinja";
-      const anchor = mustMatch(
-        read(wrapperRel),
-        ALL_GREEN_WIRING.anchor,
-        wrapperRel,
-        "the require-job anchor",
-      )[1];
       mustMatch(
-        reusable,
-        ALL_GREEN_WIRING.anchorWired,
-        ".github/workflows/reusable-all-green.yml",
-        "the REQUIRE_JOB env wiring",
+        read("templates/base/.github/workflows/ci.yml.jinja"),
+        new RegExp(`^  ${gateName}:$`, "m"),
+        "templates/base/.github/workflows/ci.yml.jinja",
+        `the '${gateName}' gate job id`,
       );
-      // The bot stand-down's author env lines, pinned at the WORKFLOW
-      // level: the run block reads whatever these map, and the harness
-      // injects PR_AUTHOR_* itself, so only this pin notices the source
-      // being rewired away from the pull request's author (probe PB:
-      // github.actor here survived every other gate - a bot-submitted
-      // review wake would then disarm the copilot expectation on a
-      // human PR and could mint green over a failed review check).
-      mustMatch(
-        reusable,
-        ALL_GREEN_WIRING.authorLoginWired,
-        ".github/workflows/reusable-all-green.yml",
-        "the PR_AUTHOR_LOGIN env wiring (github.event.pull_request.user.login, never an actor)",
-      );
-      mustMatch(
-        reusable,
-        ALL_GREEN_WIRING.authorTypeWired,
-        ".github/workflows/reusable-all-green.yml",
-        "the PR_AUTHOR_TYPE env wiring (github.event.pull_request.user.type, never an actor)",
-      );
-      const validated = constStringValue(
-        read("actions/validate-template/validate_generated_files.ts"),
-        "REQUIRED_GATE_JOB",
-        {
-          where: "actions/validate-template/validate_generated_files.ts",
-          what: "the validator's REQUIRED_GATE_JOB",
-        },
-      );
-      if (validated !== anchor) {
-        mismatches.push({
-          file: "actions/validate-template/validate_generated_files.ts",
-          expected: `REQUIRED_GATE_JOB '${anchor}' (the wrapper template's require-job)`,
-          got: validated,
-        });
-      }
-      const anchorParts = anchor.split(" / ");
-      if (anchorParts.length !== 2) {
-        mismatches.push({
-          file: wrapperRel,
-          expected: "a require-job of the form '<caller job id> / <fleet-ci job id>'",
-          got: anchor,
-        });
-      } else {
-        const [callerId, anchorJob] = anchorParts;
-        mustMatch(
-          read("templates/base/.github/workflows/ci.yml.jinja"),
-          new RegExp(`^  ${callerId}:$`, "m"),
-          "templates/base/.github/workflows/ci.yml.jinja",
-          `the '${callerId}' fleet-ci caller job the anchor names`,
-        );
-        const fleetJobs = ciJobs(
-          asRecord(parseYaml(read(".github/workflows/fleet-ci.yml")), "fleet-ci.yml"),
-          "fleet-ci.yml",
-        );
-        const anchorFleetJob = asRecord(fleetJobs[anchorJob] ?? {}, "fleet-ci anchor job");
-        if (!(anchorJob in fleetJobs)) {
-          mismatches.push({
-            file: ".github/workflows/fleet-ci.yml",
-            expected: `a job '${anchorJob}' (the verdict anchor the wrapper requires)`,
-            got: "no such job",
-          });
-        } else if (anchorFleetJob.if !== undefined) {
-          mismatches.push({
-            file: ".github/workflows/fleet-ci.yml",
-            expected: `an unconditional '${anchorJob}' job (a skipped anchor fails every fleet verdict)`,
-            got: `if: ${String(anchorFleetJob.if)}`,
-          });
-        }
-      }
 
       // The operator-facing contract's CANONICAL sentence must quote the
       // same name: anchored with mustMatch (the doc mentions all-green in
@@ -4450,87 +4393,6 @@ const rules: Rule[] = [
         });
       }
 
-      const wrapper = asRecord(parseYaml(read(".github/workflows/all-green.yml")), "all-green.yml");
-      const on = asRecord(wrapper.on, "all-green.yml on");
-      const workflowRun = asRecord(on.workflow_run ?? {}, "all-green.yml on.workflow_run");
-      if (canonical(workflowRun.workflows) !== canonical(["CI"])) {
-        mismatches.push({
-          file: ".github/workflows/all-green.yml",
-          expected: "on.workflow_run.workflows: [CI] (the verdict must fire on CI completions)",
-          got: canonical(workflowRun.workflows ?? null),
-        });
-      }
-      // types must be exactly [completed]: omitting it fires the verdict
-      // on requested/in_progress too, judging a run that has not finished.
-      if (canonical(workflowRun.types) !== canonical(["completed"])) {
-        mismatches.push({
-          file: ".github/workflows/all-green.yml",
-          expected: "on.workflow_run.types: [completed] (only finished runs may be judged)",
-          got: canonical(workflowRun.types ?? null),
-        });
-      }
-      const dispatch = asRecord(on.workflow_dispatch ?? {}, "all-green.yml on.workflow_dispatch");
-      if (!("sha" in asRecord(dispatch.inputs ?? {}, "all-green.yml dispatch inputs"))) {
-        mismatches.push({
-          file: ".github/workflows/all-green.yml",
-          expected:
-            "a workflow_dispatch `sha` input (the unwedge path for a lost workflow_run event)",
-          got: "missing",
-        });
-      }
-      const verdictJob = Object.values(ciJobs(wrapper, "all-green.yml"))
-        .map((job) => asRecord(job ?? {}, "all-green.yml job"))
-        .find((job) => job.uses === "./.github/workflows/reusable-all-green.yml");
-      if (verdictJob === undefined) {
-        mismatches.push({
-          file: ".github/workflows/all-green.yml",
-          expected: "a job calling ./.github/workflows/reusable-all-green.yml (the shared verdict)",
-          got: "no such job",
-        });
-      } else {
-        if (verdictJob.if !== undefined) {
-          mismatches.push({
-            file: ".github/workflows/all-green.yml",
-            expected:
-              "an unconditional verdict job (a condition could silently stop every verdict)",
-            got: `if: ${String(verdictJob.if)}`,
-          });
-        }
-        const grants = asRecord(verdictJob.permissions ?? {}, "all-green.yml verdict permissions");
-        if (grants.checks !== "write" || grants.actions !== "read") {
-          mismatches.push({
-            file: ".github/workflows/all-green.yml",
-            expected: "the verdict job granting checks: write and actions: read",
-            got: canonical(verdictJob.permissions ?? null),
-          });
-        }
-        const shaInput = String(asRecord(verdictJob.with ?? {}, "all-green.yml with").sha ?? "");
-        if (!/\binputs\.sha\b/.test(shaInput)) {
-          mismatches.push({
-            file: ".github/workflows/all-green.yml",
-            expected:
-              "with.sha forwarding inputs.sha (the dispatch unwedge input must reach the judgment)",
-            got: shaInput === "" ? "no sha forwarding" : shaInput,
-          });
-        }
-        // The verdict-owned Copilot expectation must stay WIRED: the
-        // ruleset requires only the all-green check since the cutover,
-        // so this input is the review gate's ONLY home - a silent
-        // regression to the reusable's false default would un-gate the
-        // review while CI stayed green.
-        const copilotWired = asRecord(verdictJob.with ?? {}, "all-green.yml with")[
-          "require-copilot-review"
-        ];
-        if (copilotWired !== true) {
-          mismatches.push({
-            file: ".github/workflows/all-green.yml",
-            expected:
-              "with.require-copilot-review: true (the ruleset carries no Copilot context since the cutover - this input is the review gate's only home)",
-            got: copilotWired === undefined ? "not wired" : canonical(copilotWired),
-          });
-        }
-      }
-
       const contexts = (rulesets: Record<string, unknown>[], where: string): string[] => {
         const main = rulesets.find((r) => r.name === "main");
         if (!main) throw new Error(`${where}: no main ruleset - anchor lost`);
@@ -4544,11 +4406,10 @@ const rules: Rule[] = [
         );
       };
       // The override layer's main ruleset is the fleet's only home for
-      // the required-check context: exactly the all-green entry, nothing
-      // else - the retired Copilot context must not creep back (the
-      // verdict owns that expectation now), and loadOverrideLayer
-      // separately refuses an override that drops the context or its
-      // Actions integration pin.
+      // the gate context: exactly the all-green entry, nothing else (the
+      // pr-title module's context rides its own baseline ruleset), and
+      // loadOverrideLayer separately refuses an override that drops the
+      // context or its Actions integration pin.
       const override = loadOverrideLayer();
       mismatches.push(
         ...setMismatch(
@@ -4565,24 +4426,11 @@ const rules: Rule[] = [
   },
 
   {
-    // The fleet wrapper template's shape (WRAPPER_TEMPLATE_PINS and
-    // wrapperTemplateMismatches have the model): every fleet repository
-    // renders this file verbatim-ish, so a drift here IS a fleet-wide
-    // drift - pinned at authoring time, one loud diff.
-    name: "all-green-wrapper-template",
-    run: () =>
-      wrapperTemplateMismatches(
-        read("templates/base/.github/workflows/all-green.yml.jinja"),
-        read(".github/workflows/reusable-all-green.yml"),
-      ),
-  },
-
-  {
-    // The fleet release leg's render shape at the source
-    // (fleetCiRenderMismatches has the model): the template ci.yml may
-    // carry exactly the two caller jobs and no release job, and the
-    // all-green wrapper's release leg must stay verdict-gated with the
-    // judged sha passed through.
+    // The fleet gate's render shape at the source
+    // (fleetCiRenderMismatches has the model): the template ci.yml
+    // carries exactly the two caller jobs plus the pinned all-green gate,
+    // and the release leg splicing after it must stay gate-downstream
+    // with the judged sha passed through.
     name: "fleet-ci-render-roster",
     run: () =>
       fleetCiRenderMismatches(
@@ -5951,7 +5799,6 @@ export const RULE_ROSTER = [
   "all-green-roster",
   "fleet-ci-roster",
   "all-green-name",
-  "all-green-wrapper-template",
   "fleet-ci-render-roster",
   "pr-title-workflow",
   "dependabot-label-tuples",
@@ -5981,7 +5828,7 @@ export const RULE_ROSTER = [
 ] as const;
 
 /** Set-plus-uniqueness comparison between the authored roster and the
- *  live rules' names, mirroring verdictRosterMismatches' two directions:
+ *  live rules' names, mirroring rosterMismatches' two directions:
  *  a live rule missing from the roster is a gate the roster never vouched
  *  for, a roster entry with no live rule is a DROPPED rule - the silent
  *  case the roster exists for, since the run loop only ever counts what

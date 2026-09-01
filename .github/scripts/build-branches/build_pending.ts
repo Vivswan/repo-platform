@@ -4,7 +4,7 @@
 // refs/heads/build-pending/<sha> (pending.ts owns the ref grammar and the
 // namespace rationale). Publishing
 // stays gated on all-green: post-green.yml's publisher (called by
-// all-green.yml once the verdict lands green on the push) promotes this
+// ci.yml's post-green job once the gate passes on the push) promotes this
 // pre-built tree through publish.ts's PREBUILT_REF, so the compose cost
 // is paid concurrently with CI instead of after it. Nothing here weakens
 // the gate - this script never touches refs/heads/build, and publish.ts's

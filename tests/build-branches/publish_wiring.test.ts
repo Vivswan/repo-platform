@@ -1,13 +1,15 @@
 // The build-publish wiring the provenance path depends on, pinned where a
 // silent edit would reintroduce the regression: the green-path publisher's
-// SOURCE_SHA must track the JUDGED CI run's head_sha (not github.sha,
-// which is main's current tip on a workflow_run event), the single
-// publisher lane must survive the post-green split (one repo-scoped
-// concurrency group, literal in both workflows), and a publish must
-// COMMIT exactly when the composed tree changed or the tip's stamp needs
-// recovery - never an empty commit in normal operation (no content-free
-// fleet _commit bumps), never a silent skip that strands a broken stamp
-// (the stamp-health guard keeps dispatch as a real escape hatch).
+// SOURCE_SHA must track the judged commit (github.sha in ci.yml's
+// post-green caller - same run, so it IS the judged commit - passed as an
+// explicit input so a future caller cannot silently hand a leg the wrong
+// commit), the single publisher lane must survive the post-green split
+// (one repo-scoped concurrency group, literal, and NO lane on the
+// caller), and a publish must COMMIT exactly when the composed tree
+// changed or the tip's stamp needs recovery - never an empty commit in
+// normal operation (no content-free fleet _commit bumps), never a silent
+// skip that strands a broken stamp (the stamp-health guard keeps
+// dispatch as a real escape hatch).
 
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
@@ -18,19 +20,21 @@ const root = join(import.meta.dir, "../..");
 const read = (rel: string) => readFileSync(join(root, rel), "utf8");
 
 describe("post-green publish wiring", () => {
-  const allGreen = read(".github/workflows/all-green.yml");
+  const ciYml = read(".github/workflows/ci.yml");
   const postGreen = read(".github/workflows/post-green.yml");
   const buildBranches = read(".github/workflows/build-branches.yml");
 
-  test("the green path publishes the JUDGED commit, never github.sha", () => {
-    // On a workflow_run event github.sha is main's CURRENT tip, not the
-    // commit whose CI completed - so a green A superseded by red B would
-    // never publish. The judged head_sha must flow caller -> input ->
-    // publish env, and the pending-ref promotion must key off the same
-    // input.
-    expect(allGreen).toContain("sha: ${{ github.event.workflow_run.head_sha }}");
+  test("the green path publishes the judged commit through the explicit sha input", () => {
+    // The caller is needs-ordered behind the gate in the SAME run, so
+    // github.sha is the judged commit by construction - and it must still
+    // flow caller -> input -> publish env explicitly (a leg re-deriving
+    // it from context could be handed the wrong commit by a future
+    // caller), with the pending-ref promotion keyed off the same input.
+    expect(ciYml).toContain("sha: ${{ github.sha }}");
     expect(postGreen).toContain("SOURCE_SHA: ${{ inputs.sha }}");
     expect(postGreen).toContain("PREBUILT_REF: refs/heads/build-pending/${{ inputs.sha }}");
+    // The retired workflow_run machinery must stay gone from ci.yml.
+    expect(ciYml).not.toContain("workflow_run");
     // The self-heal leg is the one place github.sha is correct: on
     // schedule/dispatch the trigger commit IS the tip, and no pending
     // ref is promoted (publish.ts composes).
@@ -49,28 +53,18 @@ describe("post-green publish wiring", () => {
     ]);
   });
 
-  test("post-green releases only on the verdict's OWN green conclusion, on a push-to-main run", () => {
-    // The verdict arms are deliberate redundancy (GitHub implies
+  test("post-green releases only on the gate's OWN green result, on a push to main", () => {
+    // The result clause is deliberate redundancy (GitHub implies
     // success() on an `if` with no status function, but the release
-    // condition must not depend on remembering that rule), and the gate
-    // must consume the verdict's posted conclusion (the reusable's
-    // output; empty on a pending verdict, so pending never releases),
-    // never the triggering run's conclusion, which can be green while
-    // the verdict fails (duplicate job names). The event/branch clauses
-    // keep PR runs and non-main pushes out.
+    // condition must not depend on remembering that rule), and the
+    // event/ref clauses keep PR, dispatch, and schedule runs out.
     for (const clause of [
-      "needs.verdict.result == 'success'",
-      "needs.verdict.outputs.conclusion == 'success'",
-      "github.event_name == 'workflow_run'",
-      "github.event.workflow_run.event == 'push'",
-      "github.event.workflow_run.head_branch == 'main'",
+      "needs.all-green.result == 'success'",
+      "github.event_name == 'push'",
+      "github.ref == 'refs/heads/main'",
     ]) {
-      expect(allGreen).toContain(clause);
+      expect(ciYml).toContain(clause);
     }
-    // The retired proxy must stay gone: gating post-green on the RUN's
-    // conclusion would skip publishes for runs red only through info-*
-    // jobs and release on runs whose verdict failed.
-    expect(allGreen).not.toContain("workflow_run.conclusion");
   });
 
   test("post-green.yml is workflow_call ONLY (the verdict is the sole way in)", () => {
@@ -107,10 +101,9 @@ describe("post-green publish wiring", () => {
     expect(buildBranches).toContain(
       "group: build-branches-${{ github.event_name == 'push' && 'pending' || 'publish' }}",
     );
-    // The ban is scoped to the two publisher-lane holders: all-green.yml
-    // legitimately keys its VERDICT serialization on github.workflow (it
-    // is a trigger workflow, never workflow_call'd, and its post-green
-    // job group is pinned exactly in the self-deadlock test below).
+    // The ban is scoped to the two publisher-lane holders: ci.yml
+    // legitimately keys its RUN-level serialization on github.workflow
+    // (it is a trigger workflow, never workflow_call'd).
     for (const text of [postGreen, buildBranches]) {
       const groups = [...text.matchAll(/^\s*group: (.*)$/gm)].map((m) => m[1]);
       expect(groups.length).toBeGreaterThan(0);
@@ -124,16 +117,17 @@ describe("post-green publish wiring", () => {
     expect(buildBranches).not.toContain("cancel-in-progress: true");
   });
 
-  test("no self-deadlock: the caller's group and the called publisher's group differ", () => {
-    // all-green.yml's post-green job HOLDS post-green-<ref> while the
-    // called publish job WAITS for the publisher lane; if the called
-    // workflow ever requested the caller's group (or vice versa) the
-    // call would deadlock against itself. Asserted on the actual group
-    // declarations (comments may NAME the other lane while explaining
-    // this very rule).
+  test("no self-deadlock: the caller holds NO lane while the called publisher takes its group", () => {
+    // ci.yml's post-green job must hold no job-level concurrency at all
+    // (a caller must never hold the resource its called workflow
+    // requires; ci.yml's run-level lane already serializes main runs) -
+    // and above all never the publisher lane the called job waits for.
+    // Asserted structurally on the parsed job (comments may NAME the
+    // lane while explaining this very rule).
+    const doc = parseYaml(ciYml) as { jobs: Record<string, Record<string, unknown>> };
+    expect(doc.jobs["post-green"]).toBeDefined();
+    expect(doc.jobs["post-green"].concurrency).toBeUndefined();
     const groupsOf = (text: string) => [...text.matchAll(/^\s*group: (.*)$/gm)].map((m) => m[1]);
-    expect(groupsOf(allGreen)).toContain("post-green-${{ github.event.workflow_run.head_branch }}");
-    expect(groupsOf(allGreen)).not.toContain("build-branches-publish");
     expect(groupsOf(postGreen)).toEqual(["build-branches-publish"]);
   });
 

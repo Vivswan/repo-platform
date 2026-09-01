@@ -1,8 +1,9 @@
 # Repo-owned: generated once by {{ github_username }}/repo-platform, never
 # overwritten by template sync - edit freely. Jobs here get no secrets and
 # cap at contents: read; a job skipped by its own `if:` stands down from
-# the all-green gate (name it `info-*` to keep even failures out). A check
-# needing more belongs in its own workflow wired via .github/settings.yml.
+# the all-green gate, and `continue-on-error: true` keeps even a job's
+# failures out (an advisory check). A check needing more belongs in its
+# own workflow wired via .github/settings.yml.
 
 name: Checks
 

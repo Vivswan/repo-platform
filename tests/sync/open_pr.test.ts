@@ -10,7 +10,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  ALL_GREEN_BOOTSTRAP_NAME,
+  GATE_REWORK_NAME,
   REFERENCED_LABELS_NAME,
   REMOVED_SPLITS_NAME,
   SETTINGS_LAYERING_NAME,
@@ -151,48 +151,21 @@ describe("open_pr sections and auto-merge", () => {
     expect(r.merged).toBe(false);
   });
 
-  test("the all-green bootstrap note becomes a body section and forces review", () => {
-    const note =
-      "> [!IMPORTANT]\n> FIRST VERDICT DELIVERY: merge this PR once with admin bypass.\n";
-    const r = run({ temp: { [ALL_GREEN_BOOTSTRAP_NAME]: note } });
+  test("the gate-rework note becomes an informational body section (auto-merge stays armed)", () => {
+    const note = "> [!NOTE]\n> GATE REWORK: ci.yml's all-green job carries the check now.\n";
+    const r = run({ temp: { [GATE_REWORK_NAME]: note } });
     expect(r.exitCode).toBe(0);
-    expect(r.body).toContain("FIRST VERDICT DELIVERY");
-    expect(r.merged).toBe(false);
-    expect(r.output).toContain("auto-merge left off");
-  });
-
-  test("no bootstrap note (the target already has the workflow) leaves the body clean and auto-merge armed", () => {
-    // The detection writes an EMPTY report when the condition is false;
-    // an empty flag file is no section and must not hold the PR.
-    const r = run({ temp: { [ALL_GREEN_BOOTSTRAP_NAME]: "" } });
-    expect(r.exitCode).toBe(0);
-    expect(r.body).not.toContain("FIRST VERDICT DELIVERY");
+    expect(r.body).toContain("GATE REWORK");
     expect(r.merged).toBe(true);
   });
 
-  test("the bootstrap note is the FIRST flag-file section: only the base prose, the drift prepend, and the recovery warning precede it", () => {
-    // The note tells the reader HOW to merge (admin bypass), so nothing but
-    // the top-of-body warnings may push it down. Pinned with every earlier
-    // body element present at once plus a flag-file section of each side.
-    const r = run({
-      env: { RECOVER: "recopy" },
-      files: { DRIFT_FILE: "> [!WARNING]\n> drift detected\n", CARRIED_FILE: "carry summary line" },
-      temp: {
-        [ALL_GREEN_BOOTSTRAP_NAME]: "FIRST VERDICT DELIVERY sentinel",
-        [TAIL_SHRANK_NAME]: "TAIL TRIPWIRE sentinel",
-      },
-    });
+  test("no gate-rework note (the target already crossed) leaves the body clean", () => {
+    // The detection writes an EMPTY report when the condition is false;
+    // an empty flag file is no section and must not hold the PR.
+    const r = run({ temp: { [GATE_REWORK_NAME]: "" } });
     expect(r.exitCode).toBe(0);
-    const at = (needle: string) => {
-      const index = r.body.indexOf(needle);
-      expect(index).toBeGreaterThanOrEqual(0);
-      return index;
-    };
-    expect(at("drift detected")).toBeLessThan(at("Automated template update"));
-    expect(at("Automated template update")).toBeLessThan(at("RECOVERY RE-RENDER"));
-    expect(at("RECOVERY RE-RENDER")).toBeLessThan(at("FIRST VERDICT DELIVERY sentinel"));
-    expect(at("FIRST VERDICT DELIVERY sentinel")).toBeLessThan(at("carry summary line"));
-    expect(at("carry summary line")).toBeLessThan(at("TAIL TRIPWIRE sentinel"));
+    expect(r.body).not.toContain("GATE REWORK");
+    expect(r.merged).toBe(true);
   });
 
   test("a referenced-labels report becomes a body section and forces review", () => {

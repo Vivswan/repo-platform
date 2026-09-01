@@ -29,9 +29,9 @@
 //     is the floor.
 //
 // The workflow keeps its push trigger (with the load-bearing paths
-// filter) instead of chaining off the verdict's workflow_run event the
-// way the build publish does (all-green.yml's post-green job): a
-// workflow_run trigger cannot filter on paths, so every green push -
+// filter) instead of riding inside ci.yml the way the build publish
+// does (its post-green job): a needs edge cannot filter on paths, so
+// every green push -
 // docs-only included - would re-apply the whole fleet.
 //
 // Env: GH_TOKEN (needs checks: read - the workflow's own GITHUB_TOKEN,

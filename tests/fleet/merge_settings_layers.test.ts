@@ -589,10 +589,9 @@ describe("the override layer", () => {
     const checks = rules.find((r) => r.type === "required_status_checks")?.parameters as {
       required_status_checks: { context: string; integration_id: number }[];
     };
-    // Exactly one context: the verdict owns the Copilot expectation now
-    // (the managed wrapper's require-copilot-review), so a reappearing
-    // copilot-pull-request-reviewer entry is the retired belt sneaking
-    // back, not extra safety.
+    // Exactly one context: Copilot reviews are advisory (nothing gates
+    // on them), so a reappearing copilot-pull-request-reviewer entry is
+    // the retired belt sneaking back, not extra safety.
     expect(checks.required_status_checks.map((c) => c.context)).toEqual([ALL_GREEN_CONTEXT]);
     // The verdict's check run is created by an Actions workflow run; an
     // unpinned entry would let ANY app or a plain commit status satisfy

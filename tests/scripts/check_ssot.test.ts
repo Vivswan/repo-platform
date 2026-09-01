@@ -6,12 +6,14 @@
 
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
+import { parse as parseYaml } from "yaml";
 import { stageComposedTreeArgv } from "../../.github/scripts/shared/stage_tree.ts";
 import { PIN_FLIPS } from "../../.github/scripts/sync/starter_pin_rollout";
 import {
-  ALL_GREEN_WIRING,
+  ALL_GREEN_ROSTER,
   ASYNC_SPAWN_FILES,
   agentsStagingMismatches,
+  allGreenGateMismatches,
   applyDivergences,
   asyncSpawnMismatches,
   asyncStreamWriteMismatches,
@@ -46,6 +48,7 @@ import {
   preflightInvocation,
   prTitleWorkflowMismatches,
   RULE_ROSTER,
+  rosterMismatches,
   ruleRosterMismatches,
   SETUP_VERSION_FILES,
   semanticLines,
@@ -62,15 +65,12 @@ import {
   stripGeneratedRegions,
   topLevelProperties,
   unsafeStepCondition,
-  verdictRosterMismatches,
-  WRAPPER_TEMPLATE_PINS,
   withToolchainSetup,
-  wrapperTemplateMismatches,
   zToDollar,
 } from "../../scripts/check_ssot";
 import { TOOLCHAIN_SETUP_FRAGMENT, TOOLCHAIN_SETUP_TARGETS } from "../../scripts/compose_template";
 import { MARKER_TOKENS, mdMarkers } from "../../scripts/generate";
-import { constStringValue, templateCarries } from "../../scripts/ts_extract.ts";
+import { templateCarries } from "../../scripts/ts_extract.ts";
 
 describe("applyDivergences", () => {
   const entry = {
@@ -172,24 +172,12 @@ describe("mustMatch", () => {
   });
 });
 
-describe("ALL_GREEN_WIRING", () => {
-  // Both directions on the exact patterns the all-green-name rule runs:
-  // the live wiring matches, and a commented-out copy of the SAME line -
-  // dead wiring - does not.
-  test("the created-check anchor matches the active POST line and rejects a commented one", () => {
-    const active = '            -f "name=all-green" \\';
-    expect(mustMatch(active, ALL_GREEN_WIRING.created, "f", "name")[1]).toBe("all-green");
-    const commented = '            # -f "name=all-green" \\';
-    expect(ALL_GREEN_WIRING.created.exec(commented)).toBeNull();
-  });
-
+describe("the all-green name pins", () => {
   test("declaredCheckName reads only the real exported declaration - comment, string, nested, and concatenation spoofs all throw or are skipped", () => {
     const active = 'export const CHECK_NAME = "all-green";';
     expect(declaredCheckName(`${active}\n`)).toBe("all-green");
-    // The spoof set the retired regex pin guarded against, now
-    // unrepresentable by construction: none of these carries a top-level
-    // exported string-literal declaration NODE, so each throws
-    // anchor-lost instead of standing in.
+    // None of these carries a top-level exported string-literal
+    // declaration NODE, so each throws anchor-lost instead of standing in.
     expect(() => declaredCheckName(`// ${active}\n`)).toThrow("verdict check name");
     expect(() => declaredCheckName(`function f() {\n  const CHECK_NAME = "x";\n}\n`)).toThrow(
       "verdict check name",
@@ -198,8 +186,8 @@ describe("ALL_GREEN_WIRING", () => {
     expect(() => declaredCheckName('export const CHECK_NAME = "all-green" + "-spoof";\n')).toThrow(
       "verdict check name",
     );
-    // The neighbouring COPILOT_CHECK_NAME constant is a different anchor.
-    expect(() => declaredCheckName('export const COPILOT_CHECK_NAME = "copilot";\n')).toThrow(
+    // A neighbouring same-shaped constant is a different anchor.
+    expect(() => declaredCheckName('export const OTHER_CHECK_NAME = "copilot";\n')).toThrow(
       "verdict check name",
     );
     // An UNEXPORTED declaration is not the shared constant the gates
@@ -216,7 +204,7 @@ describe("ALL_GREEN_WIRING", () => {
     // carrying the expected value: raw first-match extraction returned
     // the decoy; the AST sees one declaration node and reads it (whose
     // different value the rule then flags).
-    const decoyed = 'const doc = `\nexport const CHECK_NAME = "all-green";\n`;\n' + `${real}\n`;
+    const decoyed = `const doc = \`\nexport const CHECK_NAME = "all-green";\n\`;\n${real}\n`;
     expect(declaredCheckName(decoyed)).toBe("real-name");
     // A decoy with NO code declaration behind it is a lost anchor, as
     // is a declaration rewritten off the string-literal form.
@@ -226,9 +214,9 @@ describe("ALL_GREEN_WIRING", () => {
     expect(() =>
       declaredCheckName('export const CHECK_NAME = ["all", "green"].join("-");\n'),
     ).toThrow("verdict check name");
-    // An escaped quote in the value is just a value to the AST (the
-    // retired lexer had to throw here); the rule still flags it because
-    // the imported CHECK_NAME cannot carry the same bytes vacuously.
+    // An escaped quote in the value is just a value to the AST; the rule
+    // still flags it because the imported CHECK_NAME cannot carry the
+    // same bytes vacuously.
     expect(
       declaredCheckName(
         'export const CHECK_NAME = "a\\"b";\nconst doc = `\nexport const CHECK_NAME = "decoy";\n`;\n',
@@ -250,77 +238,6 @@ describe("ALL_GREEN_WIRING", () => {
         CHECK_RUN_LOOKUP,
       ),
     ).toBe(false);
-  });
-
-  test("the anchor pin matches the active require-job line and rejects a commented one", () => {
-    const active = "      require-job: ci / validate-template";
-    expect(mustMatch(active, ALL_GREEN_WIRING.anchor, "f", "anchor")[1]).toBe(
-      "ci / validate-template",
-    );
-    expect(ALL_GREEN_WIRING.anchor.exec("      # require-job: ci / validate-template")).toBeNull();
-  });
-
-  test("the anchor's env wiring pin matches active lines only; the validator pin reads the AST declaration", () => {
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal source line under test
-    const wired = "          REQUIRE_JOB: ${{ inputs.require-job }}";
-    expect(ALL_GREEN_WIRING.anchorWired.exec(wired)).not.toBeNull();
-    expect(ALL_GREEN_WIRING.anchorWired.exec(`          # ${wired.trim()}`)).toBeNull();
-    const validated = 'const REQUIRED_GATE_JOB = "ci / validate-template";';
-    const anchor = { where: "f", what: "REQUIRED_GATE_JOB" };
-    expect(constStringValue(validated, "REQUIRED_GATE_JOB", anchor)).toBe("ci / validate-template");
-    expect(() => constStringValue(`// ${validated}`, "REQUIRED_GATE_JOB", anchor)).toThrow(
-      "REQUIRED_GATE_JOB",
-    );
-  });
-
-  test("the author env pins match the pull-request-author lines only - actor and reviewer sources never satisfy them", () => {
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal source lines under test
-    const login =
-      "          PR_AUTHOR_LOGIN: ${{ github.event_name == 'pull_request_review' && github.event.pull_request.user.login || '' }}";
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal source lines under test
-    const type =
-      "          PR_AUTHOR_TYPE: ${{ github.event_name == 'pull_request_review' && github.event.pull_request.user.type || '' }}";
-    expect(ALL_GREEN_WIRING.authorLoginWired.exec(login)).not.toBeNull();
-    expect(ALL_GREEN_WIRING.authorTypeWired.exec(type)).not.toBeNull();
-    // Commented copies are dead wiring and must not satisfy the pins.
-    expect(ALL_GREEN_WIRING.authorLoginWired.exec(`          # ${login.trim()}`)).toBeNull();
-    expect(ALL_GREEN_WIRING.authorTypeWired.exec(`          # ${type.trim()}`)).toBeNull();
-    // The probe-PB shapes: an actor or the REVIEWER'S identity in either
-    // line lets a bot-submitted review wake (Copilot's own submission)
-    // disarm the stand-down at a human PR's head.
-    for (const spoof of [
-      login.replace("github.event.pull_request.user.login", "github.actor"),
-      login.replace("github.event.pull_request.user.login", "github.event.review.user.login"),
-    ]) {
-      expect(ALL_GREEN_WIRING.authorLoginWired.exec(spoof)).toBeNull();
-    }
-    for (const spoof of [
-      type.replace("github.event.pull_request.user.type", "github.actor_type"),
-      type.replace("github.event.pull_request.user.type", "github.event.review.user.type"),
-    ]) {
-      expect(ALL_GREEN_WIRING.authorTypeWired.exec(spoof)).toBeNull();
-    }
-  });
-
-  test("the PR author LOGIN env wiring is ARMED: only the pull request's author may feed the bot stand-down", () => {
-    // The live-file forcing test the guard registry names: the bash
-    // harness injects PR_AUTHOR_* itself, so this read of the REAL
-    // workflow is what goes red when the env mapping is rewired.
-    mustMatch(
-      readFileSync(".github/workflows/reusable-all-green.yml", "utf-8"),
-      ALL_GREEN_WIRING.authorLoginWired,
-      "reusable-all-green.yml",
-      "the PR_AUTHOR_LOGIN env wiring",
-    );
-  });
-
-  test("the PR author TYPE env wiring is ARMED: only the pull request's author may feed the bot stand-down", () => {
-    mustMatch(
-      readFileSync(".github/workflows/reusable-all-green.yml", "utf-8"),
-      ALL_GREEN_WIRING.authorTypeWired,
-      "reusable-all-green.yml",
-      "the PR_AUTHOR_TYPE env wiring",
-    );
   });
 });
 
@@ -900,37 +817,212 @@ describe("unsafeStepCondition", () => {
   }
 });
 
-describe("verdictRosterMismatches", () => {
-  test("matching roster and jobs pass", () => {
-    expect(verdictRosterMismatches(["a", "b"], ["a", "b"])).toEqual([]);
+describe("rosterMismatches and allGreenGateMismatches", () => {
+  const SITE = { jobsFile: ".github/workflows/ci.yml", rosterName: "ALL_GREEN_ROSTER" };
+
+  test("matching roster and gating jobs pass", () => {
+    expect(rosterMismatches(["a", "b"], ["a", "b"], SITE)).toEqual([]);
   });
 
-  test("a ci.yml gating job missing from the roster mismatches", () => {
-    const mismatches = verdictRosterMismatches(["a"], ["a", "b"]);
+  test("a gating job missing from the roster mismatches", () => {
+    const mismatches = rosterMismatches(["a"], ["a", "b"], SITE);
     expect(mismatches).toHaveLength(1);
     expect(mismatches[0].file).toBe(".github/workflows/ci.yml");
     expect(mismatches[0].expected).toContain("'b'");
   });
 
   test("a gate REMOVED from ci.yml while still rostered mismatches", () => {
-    // The sneaky case the roster exists for: deleting a gate job changes
-    // nothing the runtime verdict can see (it judges only the jobs that
-    // ran), so the stale roster entry is what makes the removal loud.
-    const mismatches = verdictRosterMismatches(["a", "b"], ["a"]);
+    // The sneaky case the roster exists for: deleting a gate job (and its
+    // needs entry) changes nothing the runtime gate can see, so the stale
+    // roster entry is what makes the removal loud.
+    const mismatches = rosterMismatches(["a", "b"], ["a"], SITE);
     expect(mismatches).toHaveLength(1);
     expect(mismatches[0].file).toContain("ALL_GREEN_ROSTER");
     expect(mismatches[0].expected).toContain("'b'");
     expect(mismatches[0].got).toContain("no such job");
   });
 
-  test("info-* jobs are the opt-out and never need a roster entry", () => {
-    expect(verdictRosterMismatches(["a"], ["a", "info-render-preview"])).toEqual([]);
-  });
-
   test("a duplicate roster entry mismatches", () => {
-    const mismatches = verdictRosterMismatches(["a", "a"], ["a"]);
+    const mismatches = rosterMismatches(["a", "a"], ["a"], SITE);
     expect(mismatches).toHaveLength(1);
     expect(mismatches[0].got).toContain("'a'");
+  });
+
+  // A minimal well-shaped ci.yml doc for the gate judgment, mutated per
+  // red case below (the negative controls proving the judgment can fail
+  // through the same path its green runs through).
+  const doc = (yaml: string) => parseYaml(yaml) as Record<string, unknown>;
+  const valid = `
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps: [{ run: echo a }]
+  b:
+    runs-on: ubuntu-latest
+    steps: [{ run: echo b }]
+  info-preview:
+    if: false
+    runs-on: ubuntu-latest
+    steps: [{ run: echo advisory }]
+  all-green:
+    needs: [a, b]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./actions/all-green
+        with:
+          needs: \${{ toJSON(needs) }}
+  post-green:
+    needs: [all-green]
+    if: needs.all-green.result == 'success' && github.event_name == 'push'
+    uses: ./.github/workflows/post-green.yml
+`;
+
+  test("the compliant shape passes (info-* and downstream jobs exempt from the roster)", () => {
+    expect(allGreenGateMismatches(doc(valid), ["a", "b"])).toEqual([]);
+  });
+
+  test("a missing all-green job is the one loud mismatch", () => {
+    const found = allGreenGateMismatches(doc("jobs:\n  a:\n    steps: []\n"), ["a"]);
+    expect(found).toHaveLength(1);
+    expect(found[0].expected).toContain("an 'all-green' job");
+  });
+
+  test("a needs entry dropped while the job keeps running goes red", () => {
+    const found = allGreenGateMismatches(doc(valid.replace("needs: [a, b]", "needs: [a]")), [
+      "a",
+      "b",
+    ]);
+    expect(found.some((m) => m.expected.includes("needs exactly the ALL_GREEN_ROSTER"))).toBe(true);
+  });
+
+  test("an always() lost, weakened, or replaced goes red", () => {
+    for (const mutated of [
+      valid.replace("    if: always()\n", ""),
+      valid.replace("if: always()", "if: success()"),
+      valid.replace("if: always()", "if: always() && github.event_name == 'push'"),
+    ]) {
+      const found = allGreenGateMismatches(doc(mutated), ["a", "b"]);
+      expect(found.some((m) => m.expected.includes("exactly `if: always()`"))).toBe(true);
+    }
+  });
+
+  test("a lost judgment step or an unwired needs input goes red", () => {
+    const stepless = allGreenGateMismatches(
+      doc(valid.replace("./actions/all-green", "./actions/decoy")),
+      ["a", "b"],
+    );
+    expect(stepless.some((m) => m.expected.includes("./actions/all-green"))).toBe(true);
+    const unwired = allGreenGateMismatches(
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: the mutation under test
+      doc(valid.replace("needs: ${{ toJSON(needs) }}", "needs: '{}'")),
+      ["a", "b"],
+    );
+    expect(unwired.some((m) => m.expected.includes("toJSON(needs)"))).toBe(true);
+  });
+
+  test("a renamed gate job, a conditioned gating job, or a renamed gating job goes red", () => {
+    const renamedGate = allGreenGateMismatches(
+      doc(valid.replace("    if: always()", "    name: info-gate\n    if: always()")),
+      ["a", "b"],
+    );
+    expect(renamedGate.some((m) => m.expected.includes("no name: override"))).toBe(true);
+    const conditioned = allGreenGateMismatches(
+      doc(valid.replace("  a:\n", "  a:\n    if: github.event_name == 'push'\n")),
+      ["a", "b"],
+    );
+    expect(conditioned.some((m) => m.expected.includes("no job-level if: on a gating job"))).toBe(
+      true,
+    );
+    const renamedGating = allGreenGateMismatches(
+      doc(valid.replace("  a:\n", "  a:\n    name: info-a\n")),
+      ["a", "b"],
+    );
+    expect(renamedGating.some((m) => m.expected.includes("no job-level name:"))).toBe(true);
+  });
+
+  test("a downstream job without the spelled-out gate clause goes red", () => {
+    const found = allGreenGateMismatches(
+      doc(
+        valid.replace(
+          "needs.all-green.result == 'success' && github.event_name == 'push'",
+          "github.event_name == 'push'",
+        ),
+      ),
+      ["a", "b"],
+    );
+    expect(found.some((m) => m.expected.includes("needs.all-green.result == 'success'"))).toBe(
+      true,
+    );
+  });
+
+  test("a downstream clause weakened by || or a status function goes red - substring presence is not enough", () => {
+    for (const weakened of [
+      "needs.all-green.result == 'success' || always()",
+      "always() && needs.all-green.result == 'success' && github.event_name == 'push'",
+      "needs.all-green.result == 'success' && !cancelled()",
+      // The chained comparison: actionlint-valid, and true exactly when
+      // the gate FAILED - the exact-clause split is what catches it.
+      "needs.all-green.result == 'success' == false && github.event_name == 'push'",
+    ]) {
+      const found = allGreenGateMismatches(
+        doc(
+          valid.replace(
+            "needs.all-green.result == 'success' && github.event_name == 'push'",
+            weakened,
+          ),
+        ),
+        ["a", "b"],
+      );
+      expect(found.some((m) => m.expected.includes("&&-only"))).toBe(true);
+    }
+  });
+
+  test("a conditioned or softened gate step, and a matrixed gate, go red", () => {
+    const conditionedStep = allGreenGateMismatches(
+      doc(
+        valid.replace(
+          "      - uses: ./actions/all-green",
+          "      - if: false\n        uses: ./actions/all-green",
+        ),
+      ),
+      ["a", "b"],
+    );
+    expect(conditionedStep.some((m) => m.expected.includes("no if: or continue-on-error:"))).toBe(
+      true,
+    );
+    const softened = allGreenGateMismatches(
+      doc(
+        valid.replace(
+          "      - uses: ./actions/all-green",
+          "      - continue-on-error: true\n        uses: ./actions/all-green",
+        ),
+      ),
+      ["a", "b"],
+    );
+    expect(softened.some((m) => m.expected.includes("no if: or continue-on-error:"))).toBe(true);
+    const matrixed = allGreenGateMismatches(
+      doc(
+        valid.replace(
+          "    if: always()",
+          "    if: always()\n    strategy:\n      matrix:\n        x: [1]",
+        ),
+      ),
+      ["a", "b"],
+    );
+    expect(matrixed.some((m) => m.expected.includes("no strategy:"))).toBe(true);
+  });
+
+  test("the repo gate's needs roster is ARMED: every ALL_GREEN_ROSTER job is needed", () => {
+    // The live-file forcing test the guard registry names: dropping a
+    // needs entry from the real ci.yml goes red here.
+    expect(
+      allGreenGateMismatches(
+        parseYaml(readFileSync(".github/workflows/ci.yml", "utf-8")) as Record<string, unknown>,
+        ALL_GREEN_ROSTER,
+      ),
+    ).toEqual([]);
   });
 });
 
@@ -2315,236 +2407,33 @@ describe("bunRuntimeMismatches", () => {
   });
 });
 
-describe("wrapperTemplateMismatches", () => {
-  // A live-shaped fixture: the real wrapper template's load-bearing lines
-  // plus a matching reusable declaration, so each forcing case below can
-  // delete exactly one pin and see exactly its mismatch.
-  const reusable = [
-    "on:",
-    "  workflow_call:",
-    "    inputs:",
-    "      sha: {required: false, type: string}",
-    "      require-job: {required: false, type: string}",
-    "      conditional-workflows: {required: false, type: string}",
-    "      require-copilot-review: {required: false, type: boolean}",
-  ].join("\n");
-  const template = [
-    "on:",
-    "  workflow_run:",
-    "    workflows: [CI]",
-    "    types: [completed]",
-    "  pull_request_review:",
-    "    types: [submitted]",
-    "  workflow_dispatch:",
-    "concurrency:",
-    "  group: {% raw %}${{ github.workflow }}-${{ github.event.workflow_run.head_sha || github.event.pull_request.head.sha || inputs.sha }}{% endraw %}",
-    "  cancel-in-progress: false",
+describe("fleetCiRenderMismatches", () => {
+  const ciTemplate = [
+    "name: CI",
+    "",
     "jobs:",
-    "  verdict:",
-    "    permissions:",
-    "      checks: write",
-    "      actions: read",
-    "    uses: {{ github_username }}/repo-platform/.github/workflows/reusable-all-green.yml@build",
-    "    with:",
-    "      sha: x",
-    "      require-job: ci / validate-template",
-    "      require-copilot-review: {{ (not private) | tojson }}",
-    "{# compose:conditional-workflows #}",
+    "  checks:",
+    "  ci:",
+    "  all-green:",
+    "    needs: [checks, ci]",
+    "    if: always()",
+    "    runs-on: ubuntu-latest",
+    "    steps:",
+    "      - uses: {{ github_username }}/repo-platform/actions/all-green@build",
+    "        with:",
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal template line under test
+    "          needs: {% raw %}${{ toJSON(needs) }}{% endraw %}",
     "{# compose:all-green-release #}",
     "",
   ].join("\n");
-
-  test("the live-shaped fixture passes clean", () => {
-    expect(wrapperTemplateMismatches(template, reusable)).toEqual([]);
-  });
-
-  test("every pinned line is load-bearing: deleting any one is a named mismatch", () => {
-    for (const [line] of WRAPPER_TEMPLATE_PINS) {
-      const mutated = template.replace(`${line}\n`, "");
-      const found = wrapperTemplateMismatches(mutated, reusable);
-      expect(found.length).toBeGreaterThan(0);
-      expect(found.some((m) => m.expected.includes(JSON.stringify(line)))).toBe(true);
-    }
-  });
-
-  test("the retired copilot-wait-minutes input is banned anywhere in the template", () => {
-    const mutated = template.replace(
-      "      require-copilot-review: {{ (not private) | tojson }}",
-      "      require-copilot-review: {{ (not private) | tojson }}\n      copilot-wait-minutes: 5",
-    );
-    const found = wrapperTemplateMismatches(mutated, reusable);
-    expect(found.some((m) => m.expected.includes("no copilot-wait-minutes"))).toBe(true);
-    expect(found.some((m) => m.got.includes("'copilot-wait-minutes' is passed"))).toBe(true);
-  });
-
-  test("jinja block tags and comments are banned outright - a pin inside {% if false %}, a macro body, or {# #} would satisfy the text while rendering to nothing", () => {
-    for (const spoof of [
-      "{% if false %}",
-      "{%- if ready %}",
-      "{% for x in y %}",
-      "{% set x = 1 %}",
-      "{% macro hide() %}",
-      "{% block extra %}",
-      "{# pull_request_review: #}",
-      "{#",
-      "#}",
-    ]) {
-      const mutated = template.replace("jobs:", `${spoof}\njobs:`);
-      const found = wrapperTemplateMismatches(mutated, reusable);
-      expect(found.some((m) => m.expected.includes("no jinja tags or comments"))).toBe(true);
-    }
-  });
-
-  test("the compose anchor line itself is exempt from the jinja ban", () => {
-    // The clean fixture carries the anchor and passes - pinned explicitly
-    // so the ban can never grow to swallow the anchor.
-    expect(
-      wrapperTemplateMismatches(template, reusable).filter((m) =>
-        m.expected.includes("no jinja tags"),
-      ),
-    ).toEqual([]);
-  });
-
-  test("a decoy second job goes red - the census reads the first with: block, so one job is structural", () => {
-    const mutated = `${template}  decoy:\n    with:\n      sha: y\n`;
-    const found = wrapperTemplateMismatches(mutated, reusable);
-    expect(found.some((m) => m.expected.includes("exactly one job, 'verdict'"))).toBe(true);
-    expect(found.some((m) => m.expected.includes("exactly one with: block"))).toBe(true);
-  });
-
-  test("a flow-mapping decoy job ('extra: { ... }') is still a second job", () => {
-    const mutated = `${template}  extra: { uses: ./x.yml }\n`;
-    const found = wrapperTemplateMismatches(mutated, reusable);
-    expect(found.some((m) => m.expected.includes("exactly one job, 'verdict'"))).toBe(true);
-  });
-
-  test("a multiline raw block goes red - unpaired raw/endraw on a line smuggles text past the jinja ban", () => {
-    const mutated = template.replace("jobs:", "{% raw %}\njobs:");
-    const found = wrapperTemplateMismatches(mutated, reusable);
-    expect(found.some((m) => m.expected.includes("raw/endraw paired on one line"))).toBe(true);
-  });
-
-  test("the trigger set is additive-closed: an added push: trigger goes red", () => {
-    const mutated = template.replace("  workflow_dispatch:", "  push:\n  workflow_dispatch:");
-    const found = wrapperTemplateMismatches(mutated, reusable);
-    expect(found.some((m) => m.file.includes("on: triggers") && m.got.includes("push"))).toBe(true);
-  });
-
-  test("the grant set is additive-closed: an added contents: write goes red", () => {
-    const mutated = template.replace(
-      "      actions: read",
-      "      actions: read\n      contents: write",
-    );
-    const found = wrapperTemplateMismatches(mutated, reusable);
-    expect(
-      found.some((m) => m.file.includes("verdict permissions") && m.got.includes("contents")),
-    ).toBe(true);
-  });
-
-  test("a grant hiding behind a comment or blank line is still censused - YAML keeps the mapping open across both, comments at ANY indent", () => {
-    for (const interloper of [
-      "      # rationale",
-      "  # reindented",
-      "# column zero",
-      "        # deep",
-    ]) {
-      const mutated = template.replace(
-        "      actions: read",
-        `      actions: read\n${interloper}\n\n      contents: write`,
-      );
-      const found = wrapperTemplateMismatches(mutated, reusable);
-      expect(
-        found.some((m) => m.file.includes("verdict permissions") && m.got.includes("contents")),
-      ).toBe(true);
-    }
-  });
-
-  test("a duplicated pinned line goes red - YAML's last duplicate wins silently", () => {
-    const mutated = template.replace(
-      "      require-copilot-review: {{ (not private) | tojson }}",
-      "      require-copilot-review: {{ (not private) | tojson }}\n      require-copilot-review: {{ (not private) | tojson }}",
-    );
-    const found = wrapperTemplateMismatches(mutated, reusable);
-    expect(found.some((m) => m.got.includes("2 occurrences"))).toBe(true);
-    expect(found.some((m) => m.got.includes("passed more than once"))).toBe(true);
-  });
-
-  test("a literal or hand-flipped expectation goes red - only the visibility-split jinja form is pinned", () => {
-    for (const literal of [
-      "      require-copilot-review: true",
-      "      require-copilot-review: false",
-    ]) {
-      const mutated = template.replace(
-        "      require-copilot-review: {{ (not private) | tojson }}",
-        literal,
-      );
-      const found = wrapperTemplateMismatches(mutated, reusable);
-      expect(found.some((m) => m.expected.includes("visibility-split"))).toBe(true);
-    }
-  });
-
-  test("an input the reusable declares but the wrapper never passes goes red (a default riding silently fleet-wide)", () => {
-    const widened = reusable.replace(
-      "      require-copilot-review: {required: false, type: boolean}",
-      "      require-copilot-review: {required: false, type: boolean}\n      new-input: {required: false, type: string}",
-    );
-    const found = wrapperTemplateMismatches(template, widened);
-    expect(found).toHaveLength(1);
-    expect(found[0].expected).toContain("'new-input'");
-  });
-
-  test("permissions keys outside the with block never count as passed inputs", () => {
-    // checks/actions sit at the same 6-space indent as the with keys; a
-    // census reading the whole file would call them undeclared inputs.
-    expect(
-      wrapperTemplateMismatches(template, reusable).filter((m) => m.got.includes("'checks'")),
-    ).toEqual([]);
-    // And the census STOPS at the block's end: 6-space keys after a
-    // 4-space boundary line below the with block belong to a different
-    // block and must not count either.
-    const trailing = `${template}    outputs-like:\n      checks: write\n`;
-    expect(
-      wrapperTemplateMismatches(trailing, reusable).filter((m) => m.got.includes("'checks'")),
-    ).toEqual([]);
-  });
-
-  test("a quoted YAML key is refused - it parses identically but evades the bare-key censuses", () => {
-    const mutated = template.replace(
-      "      actions: read",
-      '      actions: read\n      "contents": write',
-    );
-    const found = wrapperTemplateMismatches(mutated, reusable);
-    expect(found.some((m) => m.expected.includes("no leading-quote lines"))).toBe(true);
-  });
-
-  test("a missing with block throws anchor-lost instead of passing vacuously", () => {
-    expect(() => wrapperTemplateMismatches("on:\n  workflow_run:\n", reusable)).toThrow(
-      "anchor lost",
-    );
-  });
-
-  test("the live template and reusable pass through the same path", () => {
-    expect(
-      wrapperTemplateMismatches(
-        readFileSync("templates/base/.github/workflows/all-green.yml.jinja", "utf-8"),
-        readFileSync(".github/workflows/reusable-all-green.yml", "utf-8"),
-      ),
-    ).toEqual([]);
-  });
-});
-
-describe("fleetCiRenderMismatches", () => {
-  const ciTemplate = ["name: CI", "", "jobs:", "  checks:", "  ci:", ""].join("\n");
   const leg = [
     "",
     "  release:",
-    "    needs: [verdict]",
+    "    needs: [all-green]",
     "    if: >-",
-    "      needs.verdict.result == 'success' &&",
-    "      needs.verdict.outputs.conclusion == 'success' &&",
-    "      github.event_name == 'workflow_run' &&",
-    "      github.event.workflow_run.event == 'push' &&",
-    "      github.event.workflow_run.head_branch == 'main'",
+    "      needs.all-green.result == 'success' &&",
+    "      github.event_name == 'push' &&",
+    "      github.ref == 'refs/heads/main'",
     "    concurrency:",
     "      group: post-green-release",
     "      cancel-in-progress: false",
@@ -2559,7 +2448,7 @@ describe("fleetCiRenderMismatches", () => {
     "    uses: ./.github/workflows/release.yml",
     "    with:",
     // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal fragment line under test
-    "      sha: {% raw %}${{ github.event.workflow_run.head_sha }}{% endraw %}",
+    "      sha: {% raw %}${{ github.sha }}{% endraw %}",
     "    secrets: inherit",
     "",
   ].join("\n");
@@ -2623,11 +2512,64 @@ describe("fleetCiRenderMismatches", () => {
     expect(found[0].got).toContain("extra");
   });
 
-  test("a job-level name: or if: on a caller job goes red - a rename opts the gate out, a condition skips it open", () => {
-    for (const override of ["    name: info-checks", "    if: false"]) {
-      const found = fleetCiRenderMismatches(`${ciTemplate}${override}\n`, leg, releaseWf);
-      expect(found.some((m) => m.expected.includes("no job-level name: or if:"))).toBe(true);
+  test("a job-level name: anywhere, or an if: beyond the gate's always(), goes red", () => {
+    const renamed = fleetCiRenderMismatches(`${ciTemplate}    name: info-checks\n`, leg, releaseWf);
+    expect(renamed.some((m) => m.expected.includes("no job-level name:"))).toBe(true);
+    const conditioned = fleetCiRenderMismatches(`${ciTemplate}    if: false\n`, leg, releaseWf);
+    expect(conditioned.some((m) => m.expected.includes("beyond the gate's exact"))).toBe(true);
+  });
+
+  test("dropping any gate pin goes red - needs edge, always(), the shared action, the needs wiring", () => {
+    for (const line of [
+      "    needs: [checks, ci]\n",
+      "    if: always()\n",
+      "      - uses: {{ github_username }}/repo-platform/actions/all-green@build\n",
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal template line under test
+      "          needs: {% raw %}${{ toJSON(needs) }}{% endraw %}\n",
+    ]) {
+      const found = fleetCiRenderMismatches(ciTemplate.replace(line, ""), leg, releaseWf);
+      expect(
+        found.some((m) => m.expected.includes(JSON.stringify(line.trimEnd().replace(/^\n/, "")))),
+      ).toBe(true);
     }
+  });
+
+  test("a rival needs: line, a step-level if:, a strategy:, or continue-on-error goes red", () => {
+    // YAML's last duplicate key wins silently, so a second needs on the
+    // gate would un-gate a caller while the pinned line stayed present;
+    // a conditioned or matrixed gate is the same class one level down.
+    const rivalNeeds = fleetCiRenderMismatches(
+      ciTemplate.replace("    if: always()", "    needs: [checks]\n    if: always()"),
+      leg,
+      releaseWf,
+    );
+    expect(rivalNeeds.some((m) => m.expected.includes("exactly one needs: line"))).toBe(true);
+    const stepIf = fleetCiRenderMismatches(
+      ciTemplate.replace("        with:", "        if: false\n        with:"),
+      leg,
+      releaseWf,
+    );
+    expect(stepIf.some((m) => m.expected.includes("no step-level if:"))).toBe(true);
+    const matrixed = fleetCiRenderMismatches(
+      ciTemplate.replace("    if: always()", "    if: always()\n    strategy:"),
+      leg,
+      releaseWf,
+    );
+    expect(matrixed.some((m) => m.expected.includes("no strategy:"))).toBe(true);
+    const softenedLeg = fleetCiRenderMismatches(
+      ciTemplate,
+      leg.replace("    secrets: inherit", "    secrets: inherit\n    continue-on-error: true"),
+      releaseWf,
+    );
+    expect(softenedLeg.some((m) => m.expected.includes("no strategy: or continue-on-error:"))).toBe(
+      true,
+    );
+    const rivalLegNeeds = fleetCiRenderMismatches(
+      ciTemplate,
+      leg.replace("    concurrency:", "    needs: []\n    concurrency:"),
+      releaseWf,
+    );
+    expect(rivalLegNeeds.some((m) => m.expected.includes("exactly one needs: line"))).toBe(true);
   });
 
   test("a fragment anchor re-added after ci.yml's jobs goes red - a spliced job would evade the job census", () => {
@@ -2639,7 +2581,7 @@ describe("fleetCiRenderMismatches", () => {
     expect(found.some((m) => m.expected.includes("no fragment anchor"))).toBe(true);
   });
 
-  test("the codeql-languages data anchor stays exempt from the anchor ban", () => {
+  test("the codeql-languages data anchor and the release leg's anchor stay exempt from the anchor ban", () => {
     const found = fleetCiRenderMismatches(
       `${ciTemplate}{# compose:codeql-languages #}\n`,
       leg,
@@ -2648,32 +2590,103 @@ describe("fleetCiRenderMismatches", () => {
     expect(found.filter((m) => m.expected.includes("no fragment anchor"))).toEqual([]);
   });
 
-  test("quoted job ids are refused in the template and the leg - they parse identically but evade the censuses", () => {
+  test("leading-quote and explicit-key lines are refused in the template and the leg - both parse identically but evade the censuses", () => {
     const templateFound = fleetCiRenderMismatches(`${ciTemplate}  "extra":\n`, leg, releaseWf);
-    expect(templateFound.some((m) => m.expected.includes("no quoted job ids"))).toBe(true);
+    expect(
+      templateFound.some((m) => m.expected.includes("every YAML spelling beyond bare keys")),
+    ).toBe(true);
+    const quotedIf = fleetCiRenderMismatches(
+      ciTemplate.replace("        with:", '        "if": false\n        with:'),
+      leg,
+      releaseWf,
+    );
+    expect(quotedIf.some((m) => m.expected.includes("every YAML spelling beyond bare keys"))).toBe(
+      true,
+    );
+    // Every alternate YAML key spelling is the same evasion: explicit
+    // keys, anchored keys, tagged keys, and any other job-indent line
+    // that is not a bare `key:` must go red.
+    for (const spoof of [
+      "  ? extra\n  : { needs: all-green }\n",
+      "  &a extra: { needs: all-green }\n",
+      "  !!str extra: { needs: all-green }\n",
+      "  extra : { needs: all-green }\n",
+      // A unicode blank after the indent is a content char to YAML but
+      // whitespace to \\s - the trigger must be ASCII-space-only.
+      "  \u00a0x: { needs: all-green }\n",
+    ]) {
+      const found = fleetCiRenderMismatches(`${ciTemplate}${spoof}`, leg, releaseWf);
+      expect(
+        found.some(
+          (m) =>
+            m.expected.includes("every YAML spelling beyond bare keys") ||
+            m.expected.includes("bare `key:`"),
+        ),
+      ).toBe(true);
+    }
     const legFound = fleetCiRenderMismatches(ciTemplate, `${leg}  "decoy":\n`, releaseWf);
-    expect(legFound.some((m) => m.expected.includes("no quoted job ids"))).toBe(true);
+    expect(legFound.some((m) => m.expected.includes("every YAML spelling beyond bare keys"))).toBe(
+      true,
+    );
+  });
+
+  test("a gate pin satisfied from ANOTHER job's body goes red - the pins are scoped to the all-green block", () => {
+    const moved = fleetCiRenderMismatches(
+      ciTemplate.replace("    if: always()\n", "").replace("  ci:\n", "  ci:\n    if: always()\n"),
+      leg,
+      releaseWf,
+    );
+    expect(moved.some((m) => m.expected.includes("inside the all-green job's own block"))).toBe(
+      true,
+    );
+  });
+
+  test("a continuation line after the release gate block goes red - it could re-weaken the folded if:", () => {
+    const weakened = fleetCiRenderMismatches(
+      ciTemplate,
+      leg.replace(
+        "      github.ref == 'refs/heads/main'\n",
+        "      github.ref == 'refs/heads/main' ||\n      always()\n",
+      ),
+      releaseWf,
+    );
+    expect(
+      weakened.some(
+        (m) =>
+          m.expected.includes("gate block ending the if: scalar") ||
+          m.expected.includes("verbatim gate block"),
+      ),
+    ).toBe(true);
+    const appended = fleetCiRenderMismatches(
+      ciTemplate,
+      leg.replace(
+        "      github.ref == 'refs/heads/main'\n",
+        "      github.ref == 'refs/heads/main'\n      || always()\n",
+      ),
+      releaseWf,
+    );
+    expect(appended.some((m) => m.expected.includes("gate block ending the if: scalar"))).toBe(
+      true,
+    );
   });
 
   test("a deleted caller job goes red the same way", () => {
     const found = fleetCiRenderMismatches("name: CI\n\njobs:\n  checks:\n", leg, releaseWf);
-    expect(found).toHaveLength(1);
-    expect(found[0].expected).toContain("'checks' and 'ci'");
+    expect(found.some((m) => m.expected.includes("'checks' and 'ci'"))).toBe(true);
   });
 
-  test("dropping any verdict-gate clause goes red - a weakened gate releases off unjudged or red commits", () => {
+  test("dropping any gate clause from the release leg goes red - a weakened gate releases off unjudged or red runs", () => {
     for (const clause of [
-      "      needs.verdict.result == 'success' &&\n",
-      "      needs.verdict.outputs.conclusion == 'success' &&\n",
-      "      github.event.workflow_run.event == 'push' &&\n",
-      "      github.event.workflow_run.head_branch == 'main'",
+      "      needs.all-green.result == 'success' &&\n",
+      "      github.event_name == 'push' &&\n",
+      "      github.ref == 'refs/heads/main'",
     ]) {
       const found = fleetCiRenderMismatches(ciTemplate, leg.replace(clause, ""), releaseWf);
-      expect(found.some((m) => m.expected.includes("verbatim verdict gate block"))).toBe(true);
+      expect(found.some((m) => m.expected.includes("verbatim gate block"))).toBe(true);
     }
   });
 
-  test("a second job-level if: goes red - YAML's duplicate key could shadow the verdict gate", () => {
+  test("a second job-level if: goes red - YAML's duplicate key could shadow the release gate", () => {
     const mutated = leg.replace("    secrets: inherit", "    secrets: inherit\n    if: true");
     const found = fleetCiRenderMismatches(ciTemplate, mutated, releaseWf);
     expect(found.some((m) => m.expected.includes("exactly one job-level if:"))).toBe(true);
@@ -2694,9 +2707,9 @@ describe("fleetCiRenderMismatches", () => {
 
   test("dropping the needs edge or the judged-sha pass goes red - each is an exact-line pin", () => {
     for (const line of [
-      "    needs: [verdict]\n",
+      "    needs: [all-green]\n",
       // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal fragment line under test
-      "      sha: {% raw %}${{ github.event.workflow_run.head_sha }}{% endraw %}\n",
+      "      sha: {% raw %}${{ github.sha }}{% endraw %}\n",
       "      group: post-green-release\n",
       "    secrets: inherit\n",
     ]) {
@@ -2708,7 +2721,7 @@ describe("fleetCiRenderMismatches", () => {
   });
 
   test("jinja tags and comments are banned in the leg - a multiline {# #} could hide a pinned line while rendering without it", () => {
-    for (const spoof of ["{#\n    needs: [verdict]\n#}\n", "{% if false %}\n{% endif %}\n"]) {
+    for (const spoof of ["{#\n    needs: [all-green]\n#}\n", "{% if false %}\n{% endif %}\n"]) {
       const found = fleetCiRenderMismatches(ciTemplate, `${leg}${spoof}`, releaseWf);
       expect(found.some((m) => m.expected.includes("no jinja tags or comments"))).toBe(true);
     }
@@ -2717,9 +2730,9 @@ describe("fleetCiRenderMismatches", () => {
   test("a bare ${{ }} outside {% raw %} goes red - jinja eats it before GitHub ever sees it", () => {
     const mutated = leg.replace(
       // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal fragment line under test
-      "      sha: {% raw %}${{ github.event.workflow_run.head_sha }}{% endraw %}",
+      "      sha: {% raw %}${{ github.sha }}{% endraw %}",
       // biome-ignore lint/suspicious/noTemplateCurlyInString: the mutation under test
-      "      sha: ${{ github.event.workflow_run.head_sha }}",
+      "      sha: ${{ github.sha }}",
     );
     const found = fleetCiRenderMismatches(ciTemplate, mutated, releaseWf);
     expect(found.some((m) => m.expected.includes("wrapped in {% raw %}"))).toBe(true);
@@ -2844,11 +2857,19 @@ describe("fleetCiRenderMismatches", () => {
       readFileSync("templates/release-please/.github/workflows/release.yml.jinja", "utf-8"),
     );
 
-  test("the release leg's verdict gate is ARMED: only a posted green verdict releases", () => {
+  test("the fleet gate's needs edge is ARMED: all-green needs both caller jobs", () => {
     expect(liveMismatches()).toEqual([]);
   });
 
-  test("the judged-sha pass is ARMED: the leg hands the verdict's commit to release.yml", () => {
+  test("the fleet gate's always() is ARMED: a failed caller cannot skip the gate", () => {
+    expect(liveMismatches()).toEqual([]);
+  });
+
+  test("the release leg's gate is ARMED: only a green all-green on a main push releases", () => {
+    expect(liveMismatches()).toEqual([]);
+  });
+
+  test("the judged-sha pass is ARMED: the leg hands the judged commit to release.yml", () => {
     expect(liveMismatches()).toEqual([]);
   });
 

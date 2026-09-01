@@ -21,7 +21,6 @@ ownership:
     grammar: tail-marker
     marker: "# repo-platform:local-section"
   - { path: .github/dependabot.yml, class: managed }
-  - { path: .github/workflows/all-green.yml, class: managed }
   - { path: .github/workflows/auto-format.yml, class: starter }
   - { path: .github/workflows/checks.yml, class: starter }
   - { path: .github/workflows/ci.yml, class: managed }

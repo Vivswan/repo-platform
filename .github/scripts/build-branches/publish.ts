@@ -3,8 +3,8 @@
 // see build-branches.yml's header for the branch model) - the ONE
 // generated delivery channel: copier renders from its template/ subtree
 // and `uses: ...@build` refs execute its actions/ subtree. Two invokers:
-// post-green.yml's publish-build job (the GREEN path - all-green.yml
-// calls it after the verdict lands green on a main push) and
+// post-green.yml's publish-build job (the GREEN path - ci.yml's
+// post-green job calls it after the gate passes on a main push) and
 // build-branches.yml's "Build and publish" step (the schedule/dispatch
 // self-heal). On the green path PREBUILT_REF names the push build's
 // parked tree (build_pending.ts), so this run only promotes it; without
@@ -52,7 +52,7 @@ const repository = requireEnv("GITHUB_REPOSITORY");
 
 // The build stamps and composes SOURCE_SHA - the exact commit whose green
 // CI this run is acting on. On the green path that is the judged CI
-// run's head_sha (GITHUB_SHA in a workflow_run-triggered run is the
+// run's head_sha (GITHUB_SHA in the retired workflow_run wake was the
 // CURRENT main tip, which can already be a newer - even red - commit
 // this run must not touch); on schedule and dispatch it is the trigger
 // commit itself.

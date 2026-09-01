@@ -504,12 +504,11 @@ export function mergeLayers(layers: SettingsLayer[]): MergedSettings {
   return layers.reduce<MergedSettings>((below, layer) => mergeSettingsLayers(below, layer), {});
 }
 
-/** The check the fleet's all-green.yml verdict workflow reports (a check
- *  run created after judging each completed CI run's jobs plus the
- *  declared expected set - the managed wrapper's require-copilot-review
- *  folds Copilot's review into it, so this is the ruleset's ONE required
- *  context; the retired direct copilot-pull-request-reviewer context was
- *  the pre-cutover belt). */
+/** The check the fleet's ci.yml all-green job carries (its own job
+ *  check run - the job needs every gating job and fails unless each
+ *  result is success or skipped with at least one success). The main
+ *  ruleset's ONE required context; the retired direct
+ *  copilot-pull-request-reviewer context was the pre-cutover belt. */
 export const ALL_GREEN_CONTEXT = "all-green";
 
 /** GitHub Actions' app id. The verdict's check run is created by an
@@ -553,8 +552,8 @@ export function loadOverrideLayer(path: string = OVERRIDE_PATH): SettingsLayer {
   if (!entries.some((entry) => entry.context === ALL_GREEN_CONTEXT)) {
     throw new Error(
       `${path}: the 'main' ruleset must require the ${ALL_GREEN_CONTEXT} status check - it is ` +
-        "the fleet's ONE merge gate (the verdict judges CI and the expected set, Copilot's " +
-        "review included), and dropping it from the override un-gates every managed " +
+        "the fleet's ONE merge gate (ci.yml's all-green job judging every gating job's " +
+        "result), and dropping it from the override un-gates every managed " +
         "repository at once.",
     );
   }

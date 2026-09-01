@@ -1,17 +1,16 @@
 
-  # This wrapper runs the default branch's copy, so the leg goes live on
-  # the first main push after the sync PR delivering it merges.
+  # Runs in the SAME workflow run as the judged commit, downstream of the
+  # gate, so github.sha IS the judged commit; release.yml's head gate
+  # still skips when main has moved on (the newer run releases).
   release:
-    needs: [verdict]
+    needs: [all-green]
     # result is spelled out so the release never depends on GitHub's
-    # implied-success() rule; conclusion is empty on a pending verdict and
-    # unset on a refused one, so neither can release.
+    # implied-success() rule; the event clauses keep PR, dispatch, and
+    # schedule runs from ever releasing.
     if: >-
-      needs.verdict.result == 'success' &&
-      needs.verdict.outputs.conclusion == 'success' &&
-      github.event_name == 'workflow_run' &&
-      github.event.workflow_run.event == 'push' &&
-      github.event.workflow_run.head_branch == 'main'
+      needs.all-green.result == 'success' &&
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/main'
     # Deliberately a lane no group inside the called release.yml takes:
     # this job HOLDS it while its called jobs run, so one name would
     # deadlock.
@@ -28,7 +27,5 @@
       vulnerability-alerts: read
     uses: ./.github/workflows/release.yml
     with:
-      # Never github.sha: on workflow_run events that is main's CURRENT
-      # tip, which can already be a newer - even red - commit.
-      sha: {% raw %}${{ github.event.workflow_run.head_sha }}{% endraw %}
+      sha: {% raw %}${{ github.sha }}{% endraw %}
     secrets: inherit

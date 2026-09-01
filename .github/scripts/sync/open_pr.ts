@@ -26,9 +26,8 @@ import { env, hideDetails, requireEnv, setOutput } from "../shared/gha.ts";
 import { capture, mustCapture, redactText } from "../shared/proc.ts";
 import { clip, escapeControlBytes } from "./preserve_local_content.ts";
 import {
-  ALL_GREEN_BOOTSTRAP_NAME,
+  GATE_REWORK_NAME,
   REFERENCED_LABELS_NAME,
-  RELEASE_LEG_MOVE_NAME,
   REMOVED_SPLITS_NAME,
   SETTINGS_LAYERING_NAME,
   STARTER_PINS_NAME,
@@ -189,13 +188,6 @@ if (recover === "recopy") {
 //
 // - CARRIED_FILE: preserve_local_content.ts rebuilds every split-class
 //   file structurally on every run; its summary names each carried file.
-// - all-green-bootstrap: all_green_bootstrap.ts's first-verdict-delivery
-//   note - this PR introduces the verdict workflow, so its own required
-//   check can never appear on it and the one-time path is an admin-bypass
-//   merge. The first FLAG-FILE section (the base prose, the drift
-//   prepend, and the recovery re-render warning precede it): it tells the
-//   reader HOW to merge, and forces the manual path (arming auto-merge on
-//   an unsatisfiable check would promise a merge that can never fire).
 // - tail-shrank: tail_tripwire.ts's post-stamp check - the structural
 //   rebuild should make a trip impossible, so a non-empty report is a
 //   sync bug and the PR waits for a human.
@@ -215,7 +207,6 @@ interface FlagSection {
 }
 
 const sections: FlagSection[] = [
-  { path: join(runnerTemp, ALL_GREEN_BOOTSTRAP_NAME), render: slurp, forcesReview: true },
   { path: requireEnv("CARRIED_FILE"), render: slurp, forcesReview: false },
   { path: join(runnerTemp, TAIL_SHRANK_NAME), render: slurp, forcesReview: true },
   {
@@ -237,11 +228,11 @@ const sections: FlagSection[] = [
   // exact-match-only, and hand-set pins are listed but deliberately left
   // alone - so it never forces the manual path by itself.
   { path: join(runnerTemp, STARTER_PINS_NAME), render: slurp, forcesReview: false },
-  // release_leg_move.ts's transition note: the release job moves from
-  // ci.yml's info-release to the verdict-gated all-green leg, going live
-  // on the first post-merge main push. Informational - the pipeline
-  // itself is unchanged - so it never forces the manual path.
-  { path: join(runnerTemp, RELEASE_LEG_MOVE_NAME), render: slurp, forcesReview: false },
+  // gate_rework.ts's transition note: the verdict wrapper is deleted and
+  // the required check becomes ci.yml's own all-green job - the PR gates
+  // itself (its own CI run posts the check), so the note is informational
+  // and never forces the manual path.
+  { path: join(runnerTemp, GATE_REWORK_NAME), render: slurp, forcesReview: false },
   {
     path: requireEnv("WITHHELD_FILE"),
     render: (path) => `> [!WARNING]
@@ -404,9 +395,7 @@ body = capBody(body);
 // a deleted split-class file (its repository-owned half leaves with it),
 // out-of-band settings drift, dropped settings-layering overrides, a
 // referenced-but-undeclared label (the apply deletes undeclared labels,
-// so the reference breaks), a
-// first verdict delivery (the all-green bootstrap: the required check can
-// never appear on the PR that introduces its workflow) - stays
+// so the reference breaks) - stays
 // manual; a clean update (which includes kept-whole and clean
 // tail-appended carries) arms squash auto-merge below. The flag-file
 // reasons ride the section list above (forcesReview), so a new section
@@ -496,6 +485,6 @@ if (!needsReview) {
   }
 } else {
   console.log(
-    "auto-merge left off: this PR needs review (conflicts, split-file carries needing review, a tripped tail tripwire, withheld files, failed validation, out-of-band settings drift, dropped settings-layering overrides, a referenced-but-undeclared label, a recovery re-render, a forced-manual dispatch, a deleted split-class file whose repository-owned half leaves with it, or a first verdict delivery whose required check can never appear on this PR).",
+    "auto-merge left off: this PR needs review (conflicts, split-file carries needing review, a tripped tail tripwire, withheld files, failed validation, out-of-band settings drift, dropped settings-layering overrides, a referenced-but-undeclared label, a recovery re-render, a forced-manual dispatch, or a deleted split-class file whose repository-owned half leaves with it).",
   );
 }

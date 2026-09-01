@@ -611,18 +611,11 @@ export function rehearseRepo(slug: string, options: RehearsalOptions): Rehearsal
       ],
       { cwd: REPO_ROOT, env: legEnv },
     );
-    // The workflow's all-green bootstrap detection (all_green_bootstrap.ts):
-    // a sync PR that introduces the verdict workflow can never receive its
-    // own verdict, so it gets the one-time admin-bypass note. The report
+    // The workflow's gate-rework detection (gate_rework.ts): a sync PR
+    // that deletes the verdict wrapper and hands the required check to
+    // ci.yml's own all-green job gets the transition note. The report
     // lands under RUNNER_TEMP by the script's own default, printed below.
-    run(["bun", join(import.meta.dir, "all_green_bootstrap.ts"), "--root", targetDir], {
-      cwd: REPO_ROOT,
-      env: legEnv,
-    });
-    // The workflow's release-leg-move detection (release_leg_move.ts): a
-    // sync PR that moves the release job from ci.yml's info-release to
-    // the wrapper's verdict-gated leg gets the go-live note.
-    run(["bun", join(import.meta.dir, "release_leg_move.ts"), "--root", targetDir], {
+    run(["bun", join(import.meta.dir, "gate_rework.ts"), "--root", targetDir], {
       cwd: REPO_ROOT,
       env: legEnv,
     });
@@ -726,12 +719,8 @@ export function rehearseRepo(slug: string, options: RehearsalOptions): Rehearsal
         ["removed-paths.txt", "The template retired these files; this update deletes them"],
         ["starter-pin-rollout.md", "Starter pin rollout (one-run transition note)"],
         [
-          "release-leg-move.md",
-          "Release leg home move (info-release leaves ci.yml; the verdict-gated leg arms on the first post-merge main push)",
-        ],
-        [
-          "all-green-bootstrap.md",
-          "All-green bootstrap (first verdict delivery; the PR would stay manual-review - one-time admin-bypass merge)",
+          "gate-rework.md",
+          "Gate rework (the verdict wrapper leaves; ci.yml's own all-green job carries the required check)",
         ],
         [
           "referenced-labels.md",

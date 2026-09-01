@@ -24,24 +24,19 @@ repository:
 
 rulesets:
   # Admins (RepositoryRole id 5) are in the bypass list, so direct pushes
-  # to main still work. ONE required status check: `all-green`, the check
-  # run the workflow_run-triggered all-green.yml verdict creates after
-  # judging each completed CI run's jobs plus the declared expected set -
-  # which, on PUBLIC repos, includes Copilot's review: the managed
-  # wrapper renders require-copilot-review from the repo's visibility
-  # (Copilot reviews are disabled on private repos, so only public
-  # verdicts wait for the copilot-pull-request-reviewer check run at the
-  # judged head; bot-authored PRs stand it down - docs/all-green.md has
-  # the model). The retired second context - requiring Copilot's check
-  # run directly here - was the pre-cutover belt; the verdict owns the
-  # expectation now, and one context means the required-checks list
-  # never changes as expectations evolve.
+  # to main still work. ONE required status check: `all-green`, the
+  # ci.yml all-green JOB's own check run - the job needs every gating job
+  # and fails unless each result is success or skipped with at least one
+  # success (docs/all-green.md). Copilot reviews are requested by the
+  # public overlay's copilot_code_review rule but ADVISORY: nothing
+  # blocks on them. The pr-title module's required check rides its own
+  # baseline-owned ruleset (below in the baseline), not this list, so
+  # this context never changes with module selections.
   #
   # The entry pins integration_id 15368 (the GitHub Actions app, which
-  # creates the verdict's check run): the pin stops a non-Actions app or
-  # a plain commit status from satisfying the context by name.
-  # loadOverrideLayer refuses this file when the context or its pin is
-  # missing.
+  # creates job check runs): the pin stops a non-Actions app or a plain
+  # commit status from satisfying the context by name. loadOverrideLayer
+  # refuses this file when the context or its pin is missing.
   #
   # A module layer may ADD a rule to this ruleset (the toolchain modules'
   # settings-public.yml layers add code_scanning): rules lists of a

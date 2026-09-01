@@ -2,9 +2,9 @@
 # Local edits may be replaced during template updates.
 #
 # The gate jobs live in fleet-ci.yml@build: an edit there changes this
-# repository's CI with no PR here. Branch protection requires only the
-# `all-green` check run the verdict workflow creates; every job gates
-# unless named `info-*`, and a skipped job stands down.
+# repository's CI with no PR here. Branch protection requires the
+# `all-green` job's own check run: it needs every gating job and fails
+# unless each result is success or skipped, with at least one success.
 
 name: CI
 
@@ -50,3 +50,49 @@ jobs:
       skills-dir: "skills"
       codeql-languages: '["javascript-typescript", "python"]'
       tracking-labels: "fuzz-nightly,nightly-failure"
+
+  # THE gate: this job's own check run (named all-green, created by the
+  # GitHub Actions app) is the ruleset's required check. It needs both
+  # caller jobs and fails unless each result is success or skipped, with
+  # at least one success - so a failed job anywhere in either called
+  # workflow blocks the merge.
+  all-green:
+    needs: [checks, ci]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: Vivswan/repo-platform/actions/all-green@build
+        with:
+          needs: ${{ toJSON(needs) }}
+
+  # Runs in the SAME workflow run as the judged commit, downstream of the
+  # gate, so github.sha IS the judged commit; release.yml's head gate
+  # still skips when main has moved on (the newer run releases).
+  release:
+    needs: [all-green]
+    # result is spelled out so the release never depends on GitHub's
+    # implied-success() rule; the event clauses keep PR, dispatch, and
+    # schedule runs from ever releasing.
+    if: >-
+      needs.all-green.result == 'success' &&
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/main'
+    # Deliberately a lane no group inside the called release.yml takes:
+    # this job HOLDS it while its called jobs run, so one name would
+    # deadlock.
+    concurrency:
+      group: post-green-release
+      cancel-in-progress: false
+    permissions:
+      contents: write
+      pull-requests: write
+      packages: write
+      id-token: write
+      attestations: write
+      issues: read
+      vulnerability-alerts: read
+    uses: ./.github/workflows/release.yml
+    with:
+      sha: ${{ github.sha }}
+    secrets: inherit

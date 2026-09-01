@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 // Bounded wait for the build output sync-repos.yml's plan job consumes:
 // the build branch is published asynchronously (each main push parks a
-// pending tree during CI; All Green's post-green job promotes it -
+// pending tree during CI; ci.yml's post-green job promotes it -
 // composing as the fallback - once the verdict lands green, and in
 // normal operation commits only on a content change), so a sync
 // dispatched right after a merge could consume the previous build

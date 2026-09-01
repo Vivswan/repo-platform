@@ -1,7 +1,9 @@
 # Every managed repository's ci.yml calls this reusable, so an edit here
 # changes fleet CI with no per-repo diff trail; repo-platform's own CI
-# gating every edit is the counterweight. A SKIPPED job stands down from
-# the all-green verdict; job names are non-gating and nothing here may be
+# gating every edit is the counterweight. The caller job's RESULT is what
+# the all-green gate judges: a job that fails here fails the whole call,
+# and a SKIPPED job leaves it green (module/visibility conditions are the
+# design). Job names are non-gating and nothing here may be
 # name-addressed. Action refs must stay fully qualified @build: a `./`
 # ACTION path resolves against the CALLER's checkout (a `./` WORKFLOW ref
 # resolves against this repository).
@@ -41,7 +43,7 @@ permissions:
 jobs:
   # INTEGRITY (the tree matches its stamp) BLOCKS; FRESHNESS (distance
   # behind the build branch) only informs. The action DEFERS the integrity
-  # verdict so the findings comment is posted before the gate goes red.
+  # step so the findings comment is posted before the gate goes red.
   validate-template:
     runs-on: ubuntu-latest
     timeout-minutes: 15

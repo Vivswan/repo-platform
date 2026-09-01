@@ -68,10 +68,10 @@ describe("allGreenFailure", () => {
     expect(reason).toContain("concluded 'failure'");
   });
 
-  test("no verdict at all fails closed and names the dispatch unwedge path", () => {
+  test("no check at all fails closed and names the re-run unwedge path", () => {
     const reason = allGreenFailure("o/r", SHA, ghReturning([]), NO_WAIT);
     expect(reason).toContain("no all-green verdict check exists");
-    expect(reason).toContain("All Green");
+    expect(reason).toContain("re-run the sha's CI run");
   });
 
   test("an incomplete verdict is not green yet", () => {
@@ -101,16 +101,17 @@ describe("allGreenFailure", () => {
     }
   });
 
-  test("legacy job-created checks (opaque or empty external_id) keep vouching", () => {
-    // The retired aggregate JOB's checks predate the verdict's event
-    // record; the event filter is a blocklist so these stay green.
+  test("job-created checks (opaque or empty external_id) vouch - the current shape", () => {
+    // The all-green JOB's own check run carries an opaque external_id
+    // (so did the pre-inversion aggregate's); the event filter is a
+    // blocklist so these stay green.
     for (const externalId of [null, "", "7452900668-check-run"]) {
       const gh = ghReturning([{ external_id: externalId }]);
       expect(allGreenFailure("o/r", SHA, gh, NO_WAIT)).toBeNull();
     }
   });
 
-  test("a missing verdict is polled for under the deadline - the verdict workflow races the caller", () => {
+  test("a missing check is polled for under the deadline - a fresh run's check races the caller", () => {
     const responses = [ghReturning([]), ghReturning([]), ghReturning([{}])];
     let probes = 0;
     const gh = (command: string[]): RunResult => {

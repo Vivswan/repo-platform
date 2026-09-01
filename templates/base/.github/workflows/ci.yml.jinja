@@ -2,9 +2,9 @@
 # Local edits may be replaced during template updates.
 #
 # The gate jobs live in fleet-ci.yml@build: an edit there changes this
-# repository's CI with no PR here. Branch protection requires only the
-# `all-green` check run the verdict workflow creates; every job gates
-# unless named `info-*`, and a skipped job stands down.
+# repository's CI with no PR here. Branch protection requires the
+# `all-green` job's own check run: it needs every gating job and fails
+# unless each result is success or skipped, with at least one success.
 
 name: CI
 
@@ -58,3 +58,19 @@ jobs:
       tracking-labels: {{ (([fuzzer_label] if 'fuzzer' in modules else []) + ([nightly_label] if 'nightly' in modules else [])) | join(',') | tojson }}
 {%- endif %}
 {#- END GENERATED: tracking-labels #}
+
+  # THE gate: this job's own check run (named all-green, created by the
+  # GitHub Actions app) is the ruleset's required check. It needs both
+  # caller jobs and fails unless each result is success or skipped, with
+  # at least one success - so a failed job anywhere in either called
+  # workflow blocks the merge.
+  all-green:
+    needs: [checks, ci]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: {{ github_username }}/repo-platform/actions/all-green@build
+        with:
+          needs: {% raw %}${{ toJSON(needs) }}{% endraw %}
+{# compose:all-green-release #}

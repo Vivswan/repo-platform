@@ -123,7 +123,7 @@ The fleet and module settings layers (shared defaults, every label the module se
 
 ### 8. What runs on PRs
 
-CI gates on the `all-green` check (required once step 7's ruleset is applied - the sole required check the fleet override carries; the pr-title module requires its own `pr-title` check through its settings layer): a check run the managed `all-green.yml` verdict workflow creates after judging each completed CI run's jobs plus, on public repos, the expected Copilot review of the head (Copilot reviews are disabled on private repos, whose wrappers render `require-copilot-review: false`). Every non-`info-*` job gates; a skipped job stands down, and at least one gating job must actually succeed. The gate jobs themselves run centrally through repo-platform's fleet-ci.yml (typography, commit-names, actionlint, gitleaks, yamllint, release-freshness/release-health, validate-skills on skills repos, CodeQL on public repos) next to your checks.yml jobs. `validate-template` runs there too and BLOCKS on integrity (managed content changed outside a sync); its freshness report never blocks.
+CI gates on the `all-green` check (required once step 7's ruleset is applied - the sole required check the fleet override carries; the pr-title module requires its own `pr-title` check through its settings layer): the managed ci.yml's `all-green` job needs the `checks` and `ci` callers and fails unless each result is success or skipped, with at least one success. The gate jobs themselves run centrally through repo-platform's fleet-ci.yml (typography, commit-names, actionlint, gitleaks, yamllint, release-freshness/release-health, validate-skills on skills repos, CodeQL on public repos) next to your checks.yml jobs. `validate-template` runs there too and BLOCKS on integrity (managed content changed outside a sync); its freshness report never blocks.
 
 On private repositories the five base checks run as one combined `base-checks` job (billing: tiny jobs round up to a minute each).
 
@@ -144,5 +144,5 @@ Collect these for the human with admin rights:
 
 ## Verify
 
-- After step 7's settings apply: the first PR shows `all-green` as the required check; on a public repo it passes once Copilot's automatic review of the head posts (the verdict waits for it), and on a private repo it passes on the CI judgment alone (Copilot reviews are disabled there). (Before the apply, `all-green` runs but nothing marks it required - that is expected, not a platform failure.)
+- After step 7's settings apply: the first PR shows `all-green` as the required check, posted by the PR's own CI run (Copilot's review, where public repos request one, is advisory and blocks nothing). (Before the apply, `all-green` runs but nothing marks it required - that is expected, not a platform failure.)
 - `gh workflow run sync-repos.yml -R Vivswan/repo-platform -f repo=...` produces a run that ends with "already matches ... no sync PR needed" (or a no-op-level PR), proving the repo is enrolled and clean.

@@ -178,22 +178,16 @@ echo "Old fleet license (pre-relicense fixture)" > "$OLD_TREE/template/LICENSE"
 awk '{print} /^_skip_if_exists:/{print "  - LICENSE"}' "$OLD_TREE/copier.yml" \
   > "$OLD_TREE/copier.yml.tmp"
 mv "$OLD_TREE/copier.yml.tmp" "$OLD_TREE/copier.yml"
-# Model the pre-inversion fleet state: the old template shipped no
-# all-green.yml verdict workflow, no fleet-ci caller, and DID ship the
-# aggregate all-green job - so the update below is what must land the
-# single-call wiring and retire the aggregate (asserting either without
-# this replacement would be vacuous: the current template already carries
-# the caller). The manifest template's append line for the verdict path
-# goes with the file (or the stamped manifest would list a path that
-# never rendered). The legacy ci.yml is a plain non-jinja-expression
-# template: copier renders it verbatim, which is all the transition diff
-# needs.
-rm "$OLD_TREE/template/.github/workflows/all-green.yml.jinja"
-grep -vF "workflows/all-green.yml" \
-  "$OLD_TREE/template/.github/repo-platform-manifest.json.jinja" \
-  > "$OLD_TREE/manifest.jinja.tmp"
-mv "$OLD_TREE/manifest.jinja.tmp" \
-  "$OLD_TREE/template/.github/repo-platform-manifest.json.jinja"
+# Model the verdict-era fleet state: the old template shipped the
+# all-green.yml verdict wrapper (retired with the meta-check inversion),
+# no fleet-ci caller, and the legacy aggregate all-green job in ci.yml -
+# so the update below is what must land the in-run gate AND delete the
+# wrapper (asserting either without this fixture would be vacuous: the
+# current template ships neither). A plain non-jinja file: copier copies
+# it verbatim, which is all the retirement diff needs; it stays out of
+# the manifest template like the other synthetic retirees.
+printf 'name: All Green\non:\n  workflow_run:\n    workflows: [CI]\n    types: [completed]\n' \
+  > "$OLD_TREE/template/.github/workflows/all-green.yml"
 # Model the fleet state before pr-title became its own natively-required
 # workflow: the old build rendered no pr-title.yml (the check was a
 # fleet-ci job), so the update below is what must land it. Its manifest
@@ -261,8 +255,8 @@ test -f .github/workflows/rerun-copilot-gate.yml \
   || fail "synthetic fixture is missing the retired rerun-copilot-gate.yml"
 # ...and predate the files whose ARRIVAL is under test while carrying the
 # machinery whose RETIREMENT is under test.
-test ! -e .github/workflows/all-green.yml \
-  || fail "the synthetic old fixture must predate the all-green.yml verdict workflow"
+test -f .github/workflows/all-green.yml \
+  || fail "the synthetic old fixture must carry the retired verdict wrapper (or the deletion assertion below is vacuous)"
 test ! -e .github/workflows/pr-title.yml \
   || fail "the synthetic old fixture must predate the standalone pr-title.yml workflow"
 if grep -qF "fleet-ci.yml" .github/workflows/ci.yml; then
@@ -445,31 +439,38 @@ grep -qF "# local issue form note" .github/ISSUE_TEMPLATE/bug_report.yml \
   || fail "the repo-owned LICENSE was modified despite the custom-license opt-out"
 # Public-only community files must be in the updated render (they arrive
 # via the update when the old fixture predates them), and the single-call
-# ci.yml must keep its verdict wiring across the update.
+# ci.yml must land the in-run gate across the update.
 test -f CONTRIBUTING.md || fail "CONTRIBUTING.md is missing after the public update"
 test -f CODE_OF_CONDUCT.md || fail "CODE_OF_CONDUCT.md is missing after the public update"
 grep -qF -- "repo-platform/.github/workflows/fleet-ci.yml@build" .github/workflows/ci.yml \
   || fail "ci.yml does not call fleet-ci at the build ref after the update"
-test -f .github/workflows/all-green.yml \
-  || fail "the all-green.yml verdict workflow is missing after the update"
-if grep -qF -- "  all-green:" .github/workflows/ci.yml; then
-  fail "the updated ci.yml still carries the retired all-green aggregate job"
-fi
-# The release job's home move: the update must strip the in-ci
-# info-release job and land the verdict-gated release leg in the
-# all-green wrapper, passing the judged sha into a release.yml that
-# declares and reads the input - the release fires from its new home on
-# the first post-merge push.
+# The GATE REWORK: the update must DELETE the retired verdict wrapper and
+# land the all-green gate job in ci.yml - its own check run is the
+# required check now, judged through the shared action at the build ref.
+test ! -e .github/workflows/all-green.yml \
+  || fail "the retired all-green.yml verdict wrapper survived the update"
+grep -qxF -- "  all-green:" .github/workflows/ci.yml \
+  || fail "the updated ci.yml lacks the all-green gate job"
+grep -qxF -- "    needs: [checks, ci]" .github/workflows/ci.yml \
+  || fail "the updated all-green job does not need both caller jobs"
+grep -qxF -- "    if: always()" .github/workflows/ci.yml \
+  || fail "the updated all-green job is not unconditional over failures (if: always())"
+grep -qF -- "repo-platform/actions/all-green@build" .github/workflows/ci.yml \
+  || fail "the updated all-green job does not judge through the shared action at the build ref"
+# The release job's home: the update must strip the legacy in-ci
+# info-release job and land the gate-downstream release leg in ci.yml,
+# passing the judged sha into a release.yml that declares and reads the
+# input.
 if grep -qF -- "info-release" .github/workflows/ci.yml; then
   fail "the updated ci.yml still carries the retired info-release job"
 fi
-grep -qxF -- "  release:" .github/workflows/all-green.yml \
-  || fail "the updated all-green.yml lacks the release leg (release-please is selected)"
-grep -qxF -- "    needs: [verdict]" .github/workflows/all-green.yml \
-  || fail "the updated release leg does not run downstream of the verdict"
-grep -qxF -- "      needs.verdict.outputs.conclusion == 'success' &&" .github/workflows/all-green.yml \
-  || fail "the updated release leg is not gated on the verdict's posted conclusion"
-grep -qxF -- '      sha: ${{ github.event.workflow_run.head_sha }}' .github/workflows/all-green.yml \
+grep -qxF -- "  release:" .github/workflows/ci.yml \
+  || fail "the updated ci.yml lacks the release leg (release-please is selected)"
+grep -qxF -- "    needs: [all-green]" .github/workflows/ci.yml \
+  || fail "the updated release leg does not run downstream of the gate"
+grep -qxF -- "      needs.all-green.result == 'success' &&" .github/workflows/ci.yml \
+  || fail "the updated release leg is not gated on the all-green result"
+grep -qxF -- '      sha: ${{ github.sha }}' .github/workflows/ci.yml \
   || fail "the updated release leg does not pass the judged sha to release.yml"
 grep -qxF -- '          JUDGED: ${{ inputs.sha || github.sha }}' .github/workflows/release.yml \
   || fail "the updated release.yml head gate does not read the judged sha input"
@@ -485,30 +486,6 @@ test -f .github/workflows/pr-title.yml \
   || fail "the standalone pr-title.yml workflow did not arrive with the update"
 grep -qxF -- "    types: [opened, edited, reopened, synchronize]" .github/workflows/pr-title.yml \
   || fail "the updated pr-title.yml lacks the full trigger types list (the required check must exist at every pushed head)"
-# Rendered workflows pin the shared verdict at the green-gated build
-# branch - the templates carry the literal pin.
-grep -qF -- "repo-platform/.github/workflows/reusable-all-green.yml@build" .github/workflows/all-green.yml \
-  || fail "all-green.yml does not pin the shared verdict at the build branch"
-# The verdict-cutover wrapper shape must arrive with the update: the
-# verdict-owned Copilot expectation (the ruleset carries no separate
-# copilot context any more, so a wrapper without this line un-gates the
-# review; VISIBILITY-SPLIT - this fixture is public, so it renders true,
-# and the flip leg below proves the private rendering), the
-# review-submission wake that replaced the retired poll, the
-# manifest-derived conditional roster, and NO retired wait input (the
-# reusable no longer declares copilot-wait-minutes; a wrapper still
-# passing it would fail the workflow_call outright).
-grep -qxF -- "      require-copilot-review: true" .github/workflows/all-green.yml \
-  || fail "the updated all-green.yml does not pass require-copilot-review: true (the review gate's only home since the cutover)"
-grep -qxF -- "  pull_request_review:" .github/workflows/all-green.yml \
-  || fail "the updated all-green.yml lacks the pull_request_review trigger (the wake that replaced the copilot poll)"
-grep -qxF -- "    types: [submitted]" .github/workflows/all-green.yml \
-  || fail "the updated all-green.yml's pull_request_review trigger is not scoped to submitted reviews"
-grep -qxF -- "      conditional-workflows: '[]'" .github/workflows/all-green.yml \
-  || fail "the updated all-green.yml lacks the manifest-derived conditional-workflows input"
-if grep -qF -- "copilot-wait-minutes" .github/workflows/all-green.yml; then
-  fail "the updated all-green.yml still passes the retired copilot-wait-minutes input"
-fi
 test -f AGENTS.md || fail "AGENTS.md is missing"
 grep -qF "description: Upgraded description" .copier-answers.yml \
   || fail "the live description was not applied"
@@ -744,17 +721,13 @@ cd "$VIS"
 # SECURITY.md is visibility-independent since the ungating: it must
 # survive the flip.
 test -f SECURITY.md || fail "SECURITY.md did not survive the flip to private"
-# The wrapper's Copilot expectation is visibility-split: Copilot reviews
-# are disabled on private repositories, so the flipped render must pass
-# false - a true here would leave every PR's verdict pending on a
-# reviewer that can never come (the public fixture's `true` is asserted
-# in the main leg above).
-grep -qxF -- "      require-copilot-review: false" .github/workflows/all-green.yml \
-  || fail "the flipped all-green.yml does not render require-copilot-review: false (private repos get no Copilot reviews)"
-# The wrapper's release leg is release-please-gated; this fixture selects
-# no release-please, so no leg may render.
-if grep -qF -- "  release:" .github/workflows/all-green.yml; then
-  fail "the flipped all-green.yml carries a release leg without the release-please module"
+# No verdict wrapper on any visibility, and the release leg is
+# release-please-gated; this fixture selects no release-please, so no
+# leg may render next to the gate.
+test ! -e .github/workflows/all-green.yml \
+  || fail "the flipped render carries the retired all-green.yml verdict wrapper"
+if grep -qxF -- "  release:" .github/workflows/ci.yml; then
+  fail "the flipped ci.yml carries a release leg without the release-please module"
 fi
 # The public-only base files and gates must retire on the flip; the
 # license is visibility-independent and (without custom-license)
@@ -1157,15 +1130,22 @@ grep -qxF "  private: false" .github/settings.yml \
 if grep -qF "has_issues" .github/settings.yml; then
   fail "the transition kept a baseline policy key in the repo-owned starter"
 fi
-if grep -qF "incident" .github/settings.yml; then
-  fail "the transition kept the old labels section in the repo-owned starter"
+# The repo-only label is CARRIED into the starter (the apply would
+# otherwise delete it); fleet-supplied labels are not - the fleet entry
+# keeps them alive and a copy would only shadow it.
+grep -qxF "  - name: incident" .github/settings.yml \
+  || fail "the transition did not carry the repo-only label into the starter"
+if grep -qF "name: dependencies" .github/settings.yml; then
+  fail "the transition carried a fleet-supplied label into the repo-owned starter"
 fi
-# The PR-body section lists exactly the dropped overrides: the repo-only
-# label, never the baseline-equal keys or the carried identity keys.
+# The PR-body section names the carry (the file changed owner, so the PR
+# is held for review either way), never the baseline-equal keys.
 test -s "$SET_WORK/settings-layering.md" \
-  || fail "the transition dropped an override but wrote no settings-layering section"
+  || fail "the transition wrote no settings-layering section"
+grep -qF 'CARRIED into the new file' "$SET_WORK/settings-layering.md" \
+  || fail "the settings-layering section does not name the carry"
 grep -qF 'labels "incident"' "$SET_WORK/settings-layering.md" \
-  || fail "the settings-layering section does not name the dropped repo-only label"
+  || fail "the settings-layering section does not name the carried repo-only label"
 if grep -qF "repository.has_issues" "$SET_WORK/settings-layering.md"; then
   fail "the settings-layering section lists a baseline-equal key as dropped"
 fi

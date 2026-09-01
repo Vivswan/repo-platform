@@ -72,38 +72,22 @@ present_line "      vulnerability-alerts: read" "$wf/ci.yml"
 # The base checks merged into fleet-ci; none of their wiring (or the old
 # aggregate job's) may render here any more.
 absent "!cancelled()" "$wf/ci.yml"
-absent_line "  all-green:" "$wf/ci.yml"
 absent "base-checks" "$wf/ci.yml"
 absent "check-typography" "$wf/ci.yml"
 
-# The all-green verdict wrapper: the client-side workflow_run trigger for
-# the shared judgment (the check run branch protection requires), the
-# review-submission wake, the dispatch unwedge input, the grants the
-# judgment needs, the anchor job pin that makes a disarmed fleet-ci
-# caller fail the verdict, the verdict-owned Copilot review expectation
-# (the ruleset carries no separate context since the cutover; VISIBILITY
-# SPLIT - Copilot reviews are disabled on private repos, so only public
-# renders expect one), and the manifest-derived conditional roster
-# ('[]' - no module declares one). The retired copilot-wait-minutes
-# input must never render: the reusable no longer declares it, and a
-# workflow_call refuses unknown inputs.
-test -f "$wf/all-green.yml"
-present 'workflows: [CI]' "$wf/all-green.yml"
-present_line "    types: [completed]" "$wf/all-green.yml"
-present_line "  pull_request_review:" "$wf/all-green.yml"
-present_line "    types: [submitted]" "$wf/all-green.yml"
-present_line "  workflow_dispatch:" "$wf/all-green.yml"
-present "reusable-all-green.yml@build" "$wf/all-green.yml"
-present_line "      checks: write" "$wf/all-green.yml"
-present_line "      actions: read" "$wf/all-green.yml"
-present_line "      require-job: ci / validate-template" "$wf/all-green.yml"
-if [ "$PRIVATE" = "true" ]; then
-  present_line "      require-copilot-review: false" "$wf/all-green.yml"
-else
-  present_line "      require-copilot-review: true" "$wf/all-green.yml"
-fi
-present_line "      conditional-workflows: '[]'" "$wf/all-green.yml"
-absent "copilot-wait-minutes" "$wf/all-green.yml"
+# The all-green gate: the job whose own check run branch protection
+# requires. It must need BOTH caller jobs, run on always() (a failed
+# caller must FAIL the gate, not skip it), and judge through the shared
+# action with the needs context wired in. The retired verdict wrapper
+# must NOT render: the workflow_run machinery is gone, and a stray
+# wrapper would run a reusable that no longer exists.
+present_line "  all-green:" "$wf/ci.yml"
+present_line "    needs: [checks, ci]" "$wf/ci.yml"
+present_line "    if: always()" "$wf/ci.yml"
+present "repo-platform/actions/all-green@build" "$wf/ci.yml"
+present_line '          needs: ${{ toJSON(needs) }}' "$wf/ci.yml"
+test ! -e "$wf/all-green.yml"
+absent "reusable-all-green" "$wf/ci.yml"
 
 # pr-title is its own natively-required workflow: the module renders
 # pr-title.yml (the module's settings layer requires its job's check run),
@@ -141,9 +125,9 @@ if [ "$yamllint_pins" -ne 2 ]; then
   exit 1
 fi
 
-# The Copilot review expectation is the VERDICT's now (the wrapper's
-# require-copilot-review input, asserted above): no bridge job, no
-# re-arm workflow, nothing Copilot-shaped may render into CI.
+# Copilot reviews are ADVISORY (the copilot_code_review settings rule
+# requests them; nothing gates on them): no bridge job, no re-arm
+# workflow, nothing Copilot-shaped may render into CI.
 absent "copilot-review" "$wf/ci.yml"
 absent "copilot-rearm" "$wf/ci.yml"
 test ! -e "$wf/rerun-copilot-gate.yml"
@@ -421,14 +405,14 @@ if has settings-sync; then
   present_line "  - name: bug" "$merged_out"
   present_line "  - name: enhancement" "$merged_out"
   present_line "  - name: fix-lint" "$merged_out"
-  # The fleet rulesets, always, with the ONE required check - all-green,
-  # pinned to the GitHub Actions app (the verdict's check run is
-  # Actions-created; the pin stops any other app or a plain commit
+  # The fleet rulesets, always, with main's ONE required check -
+  # all-green, pinned to the GitHub Actions app (the gate job's check run
+  # is Actions-created; the pin stops any other app or a plain commit
   # status from satisfying the context) - plus the review-thread gate.
   # The retired copilot-pull-request-reviewer context must NOT render:
-  # the verdict owns the review expectation now (the wrapper's
-  # require-copilot-review input above), and a reappearing context here
-  # is the pre-cutover belt sneaking back.
+  # Copilot reviews are advisory now (the copilot_code_review rule below
+  # requests them; nothing blocks on them), and a reappearing context
+  # here is the retired belt sneaking back.
   present_line "  - name: main" "$merged_out"
   present_line "  - name: non-bypassable" "$merged_out"
   present "context: all-green" "$merged_out"
@@ -437,8 +421,8 @@ if has settings-sync; then
   present "required_review_thread_resolution: true" "$merged_out"
   # The copilot_code_review auto-request rule is PUBLIC-only (the fleet
   # public overlay carries it): Copilot reviews are disabled on private
-  # repos, so requesting one there is a request nothing can answer -
-  # matching the wrapper's visibility-split require-copilot-review.
+  # repos, so requesting one there is a request nothing can answer. The
+  # reviews are advisory - nothing gates on them.
   if [ "$PRIVATE" != "true" ]; then
     present "type: copilot_code_review" "$merged_out"
   else
@@ -505,20 +489,18 @@ if has release-please; then
   test -f "$wf/release.yml"
   test -f "$wf/update-release.yml"
   test -f "$wf/update-release-pr.yml"
-  # The release leg rides the all-green wrapper (it must call the
-  # repo-owned release.yml by local path), gated on the VERDICT's posted
-  # conclusion for a push-to-main run - never spliced into ci.yml, where
-  # it would need an info- opt-out and start before the verdict.
-  present "uses: ./.github/workflows/release.yml" "$wf/all-green.yml"
-  present_line "  release:" "$wf/all-green.yml"
-  present_line "    needs: [verdict]" "$wf/all-green.yml"
-  present_line "      needs.verdict.outputs.conclusion == 'success' &&" "$wf/all-green.yml"
-  present_line "      github.event.workflow_run.event == 'push' &&" "$wf/all-green.yml"
+  # The release leg splices into ci.yml downstream of the gate (it must
+  # call the repo-owned release.yml by local path), released only by a
+  # green all-green on a push to main.
+  present "uses: ./.github/workflows/release.yml" "$wf/ci.yml"
+  present_line "  release:" "$wf/ci.yml"
+  present_line "    needs: [all-green]" "$wf/ci.yml"
+  present_line "      needs.all-green.result == 'success' &&" "$wf/ci.yml"
+  present_line "      github.event_name == 'push' &&" "$wf/ci.yml"
   # The judged commit rides into release.yml; its head gate reads it.
-  present_line '      sha: ${{ github.event.workflow_run.head_sha }}' "$wf/all-green.yml"
+  present_line '      sha: ${{ github.sha }}' "$wf/ci.yml"
   present_line '          JUDGED: ${{ inputs.sha || github.sha }}' "$wf/release.yml"
   absent "info-release" "$wf/ci.yml"
-  absent "uses: ./.github/workflows/release.yml" "$wf/ci.yml"
   # The freshness and health gates live in fleet-ci; the render carries
   # the release-please membership that arms them.
   present '"release-please"' "$wf/ci.yml"
@@ -562,8 +544,7 @@ else
   test ! -e "$wf/update-release.yml"
   test ! -e "$wf/update-release-pr.yml"
   absent "uses: ./.github/workflows/release.yml" "$wf/ci.yml"
-  absent_line "  release:" "$wf/all-green.yml"
-  absent "uses: ./.github/workflows/release.yml" "$wf/all-green.yml"
+  absent_line "  release:" "$wf/ci.yml"
   absent '"release-please"' "$wf/ci.yml"
   test ! -e "$SMOKE/release-please-config.json"
   test ! -e "$SMOKE/.release-please-manifest.json"
@@ -664,7 +645,6 @@ expect_class() { # <path> <expected class, or "absent">
   fi
 }
 expect_class ".github/workflows/ci.yml" managed
-expect_class ".github/workflows/all-green.yml" managed
 expect_class ".github/workflows/checks.yml" starter
 expect_class "SECURITY.md" split
 expect_class ".gitignore" split

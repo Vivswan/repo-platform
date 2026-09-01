@@ -12,6 +12,7 @@ updates:
   - package-ecosystem: "github-actions"
     directories:
       - "/"
+      - "/actions/all-green"
       - "/actions/check-typography"
       - "/actions/dependency-review"
       - "/actions/fuzz-issue"

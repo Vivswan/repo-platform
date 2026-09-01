@@ -1,15 +1,14 @@
 // The guard registry: every guard against an ENVIRONMENTAL hazard
 // (hostile git config, leaked env vars, hung children) that a hermetic
 // test suite cannot reach by accident, bound to the hostile-fixture test
-// that forces its failure branch - plus the verdict engine's event-shape
-// guards (stand-down branches, refusal paths, pending-not-green), whose
-// forcing cases live in the bash harness verify_verdict_judgment.sh and
-// bind here through the bun wrapper tests/ci/verdict_guard_arming.test.ts
-// (the arming audit runs bun test files, so a bash-harness guard needs a
-// named bun test that goes red when the harness does). Such a guard can
-// be born decorative - deleting it changes nothing - unless the attack
-// it stops was STAGED once; this registry makes "was the attack ever
-// staged?" a CI question.
+// that forces its failure branch - plus the all-green action's judgment
+// guards (fail-closed refusals), whose forcing cases live in the bash
+// harness verify_allgreen_judgment.sh and bind here through the bun
+// wrapper tests/ci/allgreen_guard_arming.test.ts (the arming audit runs
+// bun test files, so a bash-harness guard needs a named bun test that
+// goes red when the harness does). Such a guard can be born decorative -
+// deleting it changes nothing - unless the attack it stops was STAGED
+// once; this registry makes "was the attack ever staged?" a CI question.
 //
 // Two consumers, two proof strengths:
 //   - scripts/check_guard_binding.ts (per commit, in `bun run check`)
@@ -118,91 +117,33 @@ export const GUARD_REGISTRY: readonly GuardEntry[] = [
     testFile: "tests/scripts/check_guard_binding.test.ts",
     testName: "an entry whose snippet vanished from its guard file is reported",
   },
-  // The verdict engine's event-shape guards (reusable-all-green.yml's
+  // The all-green action's judgment guards (actions/all-green/action.yml's
   // judge block). Their scenario-level forcing cases are
-  // verify_verdict_judgment.sh's; the wrapper test file runs that
-  // harness once and fails the named test on any harness red, so each
-  // mutation below reddens exactly the scenario its guard exists for
-  // and the wrapper carries the verdict to the audit's junit reader.
+  // verify_allgreen_judgment.sh's; the wrapper test file
+  // (tests/ci/allgreen_guard_arming.test.ts) runs that harness once and
+  // fails the named test on any harness red, so each mutation below
+  // reddens exactly the scenario its guard exists for and the wrapper
+  // carries the verdict to the audit's junit reader.
   {
-    id: "verdict-pending-not-green",
+    id: "allgreen-all-skipped-refusal",
     hazard:
-      "an incomplete expected set (the owed Copilot review, a pending conditional) minted as a completed green check instead of a visible in_progress hold - the merge box would open while members are outstanding",
-    guardFile: ".github/workflows/reusable-all-green.yml",
-    snippet: "status=in_progress",
-    mutated: "conclusion=success",
-    testFile: "tests/ci/verdict_guard_arming.test.ts",
-    testName:
-      "the pending path is ARMED: an incomplete expected set posts in_progress, never a green conclusion",
-  },
-  {
-    id: "verdict-author-unknown-armed",
-    hazard:
-      "a wake with no PR author in reach (every wake but pull_request_review) disarming the copilot expectation - unknown must never disarm, or any CI completion at a human PR's head waves the review off",
-    guardFile: ".github/workflows/reusable-all-green.yml",
-    snippet: "bot=0",
-    mutated: "bot=1",
-    testFile: "tests/ci/verdict_guard_arming.test.ts",
-    testName:
-      "the author stand-down is ARMED: an unknown PR author keeps the copilot expectation armed",
-  },
-  {
-    id: "verdict-fork-review-stand-down",
-    hazard:
-      "a fork-headed pull_request_review wake carries a read-only token: without the quiet stand-down, every outside-contributor review spawns a judgment whose check-run POST is refused - a red All Green run per review",
-    guardFile: ".github/workflows/reusable-all-green.yml",
-    snippet: 'if [ -n "$REVIEW_SHA" ] && [ "$REVIEW_HEAD_REPO" != "$GITHUB_REPOSITORY" ]; then',
+      "a run where every needed job skipped minted as green: nothing succeeded, so the gate would vouch for a run that verified nothing",
+    guardFile: "actions/all-green/action.yml",
+    snippet: 'if [ "$succeeded" -eq 0 ]; then',
     mutated: "if false; then",
-    testFile: "tests/ci/verdict_guard_arming.test.ts",
-    testName: "the fork stand-down is ARMED: a fork-headed review wake judges nothing",
+    testFile: "tests/ci/allgreen_guard_arming.test.ts",
+    testName: "the all-skipped refusal is ARMED: a run where nothing succeeded vouches for nothing",
   },
   {
-    id: "verdict-review-newest-pr-run",
+    id: "allgreen-empty-needs-refusal",
     hazard:
-      "a review wake judging the wrong run at the head: a same-sha push or dispatch run flips RUN_EVENT to CI-only semantics (no copilot, no conditionals owed), and a stale completed run behind a running retrigger mints green over an unknown outcome",
-    guardFile: ".github/workflows/reusable-all-green.yml",
-    snippet:
-      'run="$(jq \'[.[] | select(.event == "pull_request" or .event == "pull_request_target")] | max_by(.id) // empty\' <<<"$runs_at_head")"',
-    mutated: 'run="$(jq \'.[0] // empty\' <<<"$runs_at_head")"',
-    testFile: "tests/ci/verdict_guard_arming.test.ts",
+      "an EMPTY needs context read as green: a refactor that empties the all-green job's needs list would leave a required check that gates nothing (the named refusal is what keeps the failure diagnosable as that, not as an incidental all-skipped)",
+    guardFile: "actions/all-green/action.yml",
+    snippet: 'if [ "$total" -eq 0 ]; then',
+    mutated: "if false; then",
+    testFile: "tests/ci/allgreen_guard_arming.test.ts",
     testName:
-      "the review-wake run selection is ARMED: only the newest pull_request-event run is judged",
-  },
-  // The author env WIRING, distinct from the run-block guards above: the
-  // bash harness injects PR_AUTHOR_* itself and tests only the extracted
-  // run block, so the workflow-level env mapping needed its own pin
-  // (probe PB: rewiring PR_AUTHOR_LOGIN to github.actor survived every
-  // other gate). The forcing tests read the REAL workflow through the
-  // same ALL_GREEN_WIRING patterns the all-green-name rule runs.
-  {
-    id: "verdict-author-login-wiring",
-    hazard:
-      "PR_AUTHOR_LOGIN rewired from the pull request's author to an actor- or reviewer-shaped source: a bot-submitted review wake (Copilot's own submission) at a human PR's head then reads as bot-author, skips the copilot_state read, and can mint success over a FAILED copilot check",
-    guardFile: ".github/workflows/reusable-all-green.yml",
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal workflow env line under pin
-    snippet:
-      "PR_AUTHOR_LOGIN: ${{ github.event_name == 'pull_request_review' && github.event.pull_request.user.login || '' }}",
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: the probe-PB mutation, verbatim
-    mutated:
-      "PR_AUTHOR_LOGIN: ${{ github.event_name == 'pull_request_review' && github.actor || '' }}",
-    testFile: "tests/scripts/check_ssot.test.ts",
-    testName:
-      "the PR author LOGIN env wiring is ARMED: only the pull request's author may feed the bot stand-down",
-  },
-  {
-    id: "verdict-author-type-wiring",
-    hazard:
-      "PR_AUTHOR_TYPE rewired away from the pull request's author - the same disarm as the login half through the other field: a reviewer's Bot type stands the copilot expectation down on a human PR",
-    guardFile: ".github/workflows/reusable-all-green.yml",
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal workflow env line under pin
-    snippet:
-      "PR_AUTHOR_TYPE: ${{ github.event_name == 'pull_request_review' && github.event.pull_request.user.type || '' }}",
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: the reviewer-identity mutation
-    mutated:
-      "PR_AUTHOR_TYPE: ${{ github.event_name == 'pull_request_review' && github.event.review.user.type || '' }}",
-    testFile: "tests/scripts/check_ssot.test.ts",
-    testName:
-      "the PR author TYPE env wiring is ARMED: only the pull request's author may feed the bot stand-down",
+      "the empty-needs refusal is ARMED: a needs list emptied by refactor never reads green",
   },
   {
     id: "walk-commit-bound",
@@ -328,36 +269,36 @@ export const GUARD_REGISTRY: readonly GuardEntry[] = [
     testName:
       "the .husky/commit-msg wiring dispatches to the gate - a refused subject blocks the commit",
   },
-  // The fleet release leg (the release-please module's job in the managed
-  // all-green.yml wrapper): each pin below can rot alone, and every one
+  // The fleet release leg (the release-please module's job spliced into
+  // the managed ci.yml): each pin below can rot alone, and every one
   // fails open at run time - a weakened gate releases off red or unjudged
   // commits with GitHub reporting nothing wrong. The forcing tests run the
   // fleet-ci-render-roster ssot judgment on the REAL template sources.
   {
     id: "fleet-release-verdict-gate",
     hazard:
-      "the verdict-conclusion clause deleted from the release leg's if: GitHub still implies success() on the needs edge, so the leg releases on a POSTED-RED or pending verdict whose job result was success",
+      "the gate clause deleted from the release leg's if: GitHub still implies success() on the needs edge, but the remaining event clauses alone would release on a PR/dispatch/schedule shape the moment someone widens them - the spelled-out result clause is the belt the pinned block keeps honest",
     guardFile: "templates/release-please/fragments/all-green-release.jinja",
-    snippet: "      needs.verdict.outputs.conclusion == 'success' &&",
+    snippet: "      needs.all-green.result == 'success' &&",
     mutated: "",
     testFile: "tests/scripts/check_ssot.test.ts",
-    testName: "the release leg's verdict gate is ARMED: only a posted green verdict releases",
+    testName: "the release leg's gate is ARMED: only a green all-green on a main push releases",
   },
   {
     id: "fleet-release-judged-sha-pass",
     hazard:
-      "the sha input deleted from the release leg's call: release.yml falls back to github.sha, which on workflow_run events is main's CURRENT tip - a newer, possibly red commit whose own verdict is still pending",
+      "the sha input deleted from the release leg's call: release.yml falls back to its own github.sha - equal today because the leg runs in the judged commit's own run, but the EXPLICIT pass is what keeps a future caller from silently handing the pipeline a different commit",
     guardFile: "templates/release-please/fragments/all-green-release.jinja",
     // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal fragment line under pin
-    snippet: "      sha: {% raw %}${{ github.event.workflow_run.head_sha }}{% endraw %}",
+    snippet: "      sha: {% raw %}${{ github.sha }}{% endraw %}",
     mutated: "",
     testFile: "tests/scripts/check_ssot.test.ts",
-    testName: "the judged-sha pass is ARMED: the leg hands the verdict's commit to release.yml",
+    testName: "the judged-sha pass is ARMED: the leg hands the judged commit to release.yml",
   },
   {
     id: "fleet-release-judged-sha-read",
     hazard:
-      "release.yml's head gate rewired off the input back to github.sha: the leg still passes the judged commit but the gate compares the tip against itself, always-true, silently releasing unjudged pushes",
+      "release.yml's head gate rewired off the input: the sha input is the explicit judged-commit hand-off (inputs.sha, github.sha as the same-run fallback), and a gate reading anything else would silently release whatever a future caller's context holds",
     guardFile: "templates/release-please/.github/workflows/release.yml.jinja",
     // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal template line under pin
     snippet: "          JUDGED: {% raw %}${{ inputs.sha || github.sha }}{% endraw %}",
@@ -365,6 +306,41 @@ export const GUARD_REGISTRY: readonly GuardEntry[] = [
     mutated: "          JUDGED: {% raw %}${{ github.sha }}{% endraw %}",
     testFile: "tests/scripts/check_ssot.test.ts",
     testName: "the judged-sha read is ARMED: release.yml's head gate compares the judged commit",
+  },
+  // The meta-check gate's shape at both sources: each pin fails OPEN at
+  // run time (GitHub reports nothing wrong - the gate just stops seeing a
+  // caller, or skips itself on the first failure it exists to catch). The
+  // forcing tests run the fleet-ci-render-roster and all-green-roster
+  // ssot judgments on the REAL sources.
+  {
+    id: "fleet-gate-needs-roster",
+    hazard:
+      "a caller job dropped from the rendered all-green job's needs: the gate goes green on the remaining caller while every job of the dropped call stops gating, fleet-wide",
+    guardFile: "templates/base/.github/workflows/ci.yml.jinja",
+    snippet: "    needs: [checks, ci]",
+    mutated: "    needs: [checks]",
+    testFile: "tests/scripts/check_ssot.test.ts",
+    testName: "the fleet gate's needs edge is ARMED: all-green needs both caller jobs",
+  },
+  {
+    id: "fleet-gate-always",
+    hazard:
+      "if: always() deleted from the rendered all-green job: a failed caller then SKIPS the gate instead of failing it, and a skipped required check leaves the merge box waiting - or, with GitHub's implied success(), green paths only",
+    guardFile: "templates/base/.github/workflows/ci.yml.jinja",
+    snippet: "    if: always()",
+    mutated: "",
+    testFile: "tests/scripts/check_ssot.test.ts",
+    testName: "the fleet gate's always() is ARMED: a failed caller cannot skip the gate",
+  },
+  {
+    id: "repo-gate-needs-roster",
+    hazard:
+      "a gating job dropped from repo-platform's own all-green needs list: the job keeps running but stops gating merges, with every remaining gate green",
+    guardFile: ".github/workflows/ci.yml",
+    snippet: "      - rehearse-fleet",
+    mutated: "",
+    testFile: "tests/scripts/check_ssot.test.ts",
+    testName: "the repo gate's needs roster is ARMED: every ALL_GREEN_ROSTER job is needed",
   },
   // The pr-title module's natively-required check (the pr-title-workflow
   // ssot rule): each pin fails OPEN at run time - GitHub reports nothing

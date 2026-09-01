@@ -18,9 +18,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { capture } from "../../.github/scripts/shared/proc.ts";
 import {
-  ALL_GREEN_BOOTSTRAP_NAME,
+  GATE_REWORK_NAME,
   REFERENCED_LABELS_NAME,
-  RELEASE_LEG_MOVE_NAME,
 } from "../../.github/scripts/sync/section_files.ts";
 
 const SCRIPT = join(import.meta.dir, "../../.github/scripts/sync/commit_push.ts");
@@ -247,46 +246,29 @@ describe("commit_push failure diagnostics", () => {
 });
 
 describe("commit_push Workflows-scope withhold reconciliation", () => {
-  const NOTE = "> [!IMPORTANT]\n> FIRST VERDICT DELIVERY: merge once with admin bypass.\n";
-
-  test("withholding all-green.yml clears the bootstrap note (the PR no longer introduces it)", () => {
-    const result = runCommitPush("withhold-allgreen", "false", {
-      [ALL_GREEN_BOOTSTRAP_NAME]: NOTE,
-    });
-    expect(result.exitCode).toBe(0);
-    expect(readFileSync(join(result.runnerTemp, "withheld-workflows.txt"), "utf-8")).toContain(
-      ".github/workflows/all-green.yml",
-    );
-    expect(readFileSync(join(result.runnerTemp, ALL_GREEN_BOOTSTRAP_NAME), "utf-8")).toBe("");
-    expect(result.stdout).toContain("workflow-file changes were withheld");
-  });
-
-  test("withholding a different workflow leaves the bootstrap note intact", () => {
-    const result = runCommitPush("withhold-other", "false", {
-      [ALL_GREEN_BOOTSTRAP_NAME]: NOTE,
-    });
-    expect(result.exitCode).toBe(0);
-    expect(readFileSync(join(result.runnerTemp, "withheld-workflows.txt"), "utf-8")).toContain(
-      ".github/workflows/ci.yml",
-    );
-    expect(readFileSync(join(result.runnerTemp, ALL_GREEN_BOOTSTRAP_NAME), "utf-8")).toBe(NOTE);
-  });
-
-  test("withholding EITHER moved-file voids the release-leg-move note; an unrelated withhold leaves it", () => {
-    // The note claims ci.yml drops info-release AND all-green.yml gains
-    // the leg - a withhold of either file makes the claim false, so both
-    // arms clear it, and a withhold touching neither must not.
-    const MOVE_NOTE =
-      "> [!NOTE]\n> RELEASE HOME MOVE: the leg arms on the first post-merge push.\n";
+  // The explicit budget: three full commit_push spawns - bun-test's 5s
+  // default sits exactly on their combined runtime and kills the third
+  // mid-flight.
+  test("withholding EITHER gate file voids the gate-rework note; an unrelated withhold leaves it", () => {
+    // The note claims all-green.yml is deleted AND ci.yml gains the gate
+    // job - a withhold restoring either file makes the claim false, so
+    // both arms clear it, and a withhold touching neither must not.
+    const NOTE = "> [!NOTE]\n> GATE REWORK: ci.yml's all-green job carries the check now.\n";
     for (const [mode, expected] of [
       ["withhold-allgreen", ""],
       ["withhold-other", ""],
-      ["withhold-unrelated", MOVE_NOTE],
+      ["withhold-unrelated", NOTE],
     ] as const) {
-      const result = runCommitPush(mode, "false", { [RELEASE_LEG_MOVE_NAME]: MOVE_NOTE });
+      const result = runCommitPush(mode, "false", { [GATE_REWORK_NAME]: NOTE });
       expect(result.exitCode).toBe(0);
-      expect(readFileSync(join(result.runnerTemp, RELEASE_LEG_MOVE_NAME), "utf-8")).toBe(expected);
+      expect(readFileSync(join(result.runnerTemp, GATE_REWORK_NAME), "utf-8")).toBe(expected);
     }
+  }, 30_000);
+
+  test("an unrelated withhold still reports withheld workflow files", () => {
+    const result = runCommitPush("withhold-unrelated", "false", { [GATE_REWORK_NAME]: "" });
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("workflow-file changes were withheld");
   });
 
   test("the withhold overwrites a stale referenced-labels report (the recompute runs post-restore)", () => {

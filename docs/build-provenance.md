@@ -8,13 +8,13 @@ How the `build` branch gets published, how a sync verifies the tip before consum
 | How does a sync know the tip is fresh? | `.github/scripts/sync/wait_for_build.ts` |
 | How does a sync verify the tip's content before consuming it? | `.github/scripts/sync/verify_build_provenance.ts` |
 | Why do producer and verifier hash the same tree? | `.github/scripts/shared/stage_tree.ts` and `.github/scripts/shared/rebuild_tree.ts` |
-| Which workflows drive the flow? | `.github/workflows/build-branches.yml`, `.github/workflows/all-green.yml`, `.github/workflows/post-green.yml` |
+| Which workflows drive the flow? | `.github/workflows/build-branches.yml`, `.github/workflows/ci.yml` (the all-green gate + post-green jobs), `.github/workflows/post-green.yml` |
 
 ## Who can write `refs/heads/build`?
 
 | Writer | When | What gates the write |
 | --- | --- | --- |
-| post-green.yml's publish-build job | After a green `all-green` verdict on a push to main | The verdict releases the job, and publish.ts re-verifies the check at the source before any mutation. |
+| post-green.yml's publish-build job | After the `all-green` gate passes on a push to main | ci.yml's post-green job (needs-ordered behind the gate, same run) releases it, and publish.ts re-verifies the check at the source before any mutation. |
 | Build Branches' schedule and dispatch legs | Weekly cron, or manual dispatch (the self-heal) | publish.ts's all-green verification at the source is the SOLE green gate there. |
 | Anyone with push access, out of band | Any time | Nothing at write time: a user-repo ruleset blocks only force-pushes and deletion, so plain fast-forwards stay possible. Sync consumption is provenance-verified below; `uses:` execution trusts the ref (the residuals table). |
 
@@ -27,17 +27,17 @@ A template change merges to main as commit S. What happens, in order:
 | Step | Actor | What happens |
 | --- | --- | --- |
 | 1. Push to main | Build Branches' push leg (`build-branches.yml`) | Composes S's tree concurrently with CI and parks it, unpublished, at `refs/heads/build-pending/<S>` (`build_pending.ts`; `pending.ts` owns the ref grammar). |
-| 2. CI at S completes | All Green (`all-green.yml`) | Judges the run's jobs and posts the `all-green` check run (docs/all-green.md). |
-| 3. Verdict green on a main push | all-green.yml's post-green job | Calls `post-green.yml` with the judged sha. |
+| 2. The gating jobs finish | ci.yml's `all-green` job | Judges every needed result; its own check run IS the `all-green` check (docs/all-green.md). |
+| 3. Gate green on a main push | ci.yml's post-green job | Calls `post-green.yml` with `github.sha` (same run - the judged commit by construction). |
 | 4. Publish | post-green.yml's publish-build job | `publish.ts` promotes the parked tree (composing as the fallback when the pending ref is missing) and chains a stamped commit onto the branch tip. |
 
-The source composed and stamped is always SOURCE_SHA - the judged CI run's head_sha on the green path, the trigger commit on schedule/dispatch - never a read of origin/main, which can already be a newer, even red, commit whose own verdict is still pending (publish.ts's header owns this discipline).
+The source composed and stamped is always SOURCE_SHA - the judged run's own commit on the green path, the trigger commit on schedule/dispatch - never a read of origin/main, which can already be a newer, even red, commit (publish.ts's header owns this discipline).
 
-publish.ts hard-verifies the `all-green` check run at SOURCE_SHA before any mutation (`shared/all_green.ts`): defense in depth on the green path above, where the verdict already gated entry, and the sole green gate on the self-heal legs below.
+publish.ts hard-verifies the `all-green` check run at SOURCE_SHA before any mutation (`shared/all_green.ts`): defense in depth on the green path above, where the needs edge already gated entry, and the sole green gate on the self-heal legs below.
 
-Build Branches' schedule and dispatch legs are the self-heal publishers: they compose and publish in one run, covering a publish that went missing after a green verdict landed (a failed or evicted post-green run) and a stamp that needs recovery.
+Build Branches' schedule and dispatch legs are the self-heal publishers: they compose and publish in one run, covering a publish that went missing after a green gate (a failed or evicted post-green run) and a stamp that needs recovery.
 
-Anything without a green verdict at the source is not theirs to heal alone - dispatch All Green first (it posts the missing check), then Build Branches (`build-branches.yml`'s header).
+Anything without a green `all-green` check at the source is not theirs to heal alone - re-run that commit's CI first (the gate job posts the check), then Build Branches (`build-branches.yml`'s header).
 
 The branch itself is an orphan, append-only: each build commit parents the previous build commit, never a main commit. So a main history rewrite can never invalidate it, and old build commits - each fleet repo's recorded `_commit`, needed by copier update's three-way merge - stay reachable forever.
 
