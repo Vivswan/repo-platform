@@ -31,6 +31,7 @@ import {
   fragmentFilesFor,
   gatesOnModule,
   inlineFunctionCopies,
+  isOwnPagesOrigin,
   labelPreflightFileMismatches,
   labelPreflightJobMismatches,
   lockedTypesBunVersion,
@@ -3067,5 +3068,38 @@ describe("prTitleWorkflowMismatches", () => {
 
   test("the pr-title module activation is ARMED: the module layer flips the baseline's disabled ruleset active", () => {
     expect(livePrTitle()).toEqual([]);
+  });
+});
+
+describe("isOwnPagesOrigin", () => {
+  const at = (text: string) => text.indexOf("io/repo-platform");
+
+  test("accepts this owner's Pages origin, hostname-boundary anchored", () => {
+    const url = "see https://vivswan.github.io/repo-platform/ for the site";
+    expect(isOwnPagesOrigin(url, at(url), "io", "Vivswan")).toBe(true);
+    const bare = "vivswan.github.io/repo-platform";
+    expect(isOwnPagesOrigin(bare, at(bare), "io", "Vivswan")).toBe(true);
+    // Hostnames are case-insensitive; the answer casing must not matter.
+    const cased = "Vivswan.GitHub.io/repo-platform";
+    expect(isOwnPagesOrigin(cased, at(cased), "io", "vivswan")).toBe(true);
+    // ... the io segment's own casing included.
+    const casedIo = "vivswan.github.IO/repo-platform";
+    expect(isOwnPagesOrigin(casedIo, casedIo.indexOf("IO/"), "IO", "Vivswan")).toBe(true);
+  });
+
+  test("rejects every other owner, the username-suffixed near miss included", () => {
+    // A plain endsWith would exempt an owner whose name merely ENDS with
+    // the username; the boundary check exists for this case.
+    const nearMiss = "https://notvivswan.github.io/repo-platform/";
+    expect(isOwnPagesOrigin(nearMiss, at(nearMiss), "io", "Vivswan")).toBe(false);
+    const otherOwner = "https://someone.github.io/repo-platform/";
+    expect(isOwnPagesOrigin(otherOwner, at(otherOwner), "io", "Vivswan")).toBe(false);
+    // A subdomain of the origin is not the origin either.
+    const subdomain = "https://other.vivswan.github.io/repo-platform/";
+    expect(isOwnPagesOrigin(subdomain, at(subdomain), "io", "Vivswan")).toBe(false);
+    const bareIo = "evil.io/repo-platform";
+    expect(isOwnPagesOrigin(bareIo, at(bareIo), "io", "Vivswan")).toBe(false);
+    // Only the io segment is ever a Pages origin.
+    expect(isOwnPagesOrigin("x/repo-platform", 0, "x", "Vivswan")).toBe(false);
   });
 });

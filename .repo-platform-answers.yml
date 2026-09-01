@@ -32,7 +32,9 @@ private: false
 # feeding enable_codeql), skills (the hosted agent skills under skills/
 # and the validate-skills.yml discovery workflow; the .claude-plugin
 # manifests are generated-once starters this repo owns), pr-title (the
-# required pr-title.yml workflow), auto-assign (auto-assign.yml). release-please is
+# required pr-title.yml workflow), auto-assign (auto-assign.yml),
+# docs-site (docs-site.yml: this repo's docs/ deployed as its own
+# VitePress site through the central theme). release-please is
 # deliberately absent: repo-platform ships the module to clients but runs
 # no release pipeline of its own. The tracking-stream modules (fuzzer,
 # nightly) are deliberately absent too - their release-gating rode the
@@ -46,8 +48,15 @@ modules:
   - skills
   - pr-title
   - auto-assign
+  - docs-site
 
 # The skills module's directory answer (asked by copier only while skills
 # is selected); the validate-skills.yml pair bakes it into the action
 # input and the workflow's paths filter.
 skills_dir: skills
+
+# The docs-site module's tracking-label answer (asked by copier only while
+# docs-site is selected); the docs-site.yml pair bakes it into the deploy
+# call, and the settings apply manages the label on this repository from
+# the same value (factsFromOperatorAnswers).
+docs_site_label: docs-link-rot

@@ -65,6 +65,10 @@ function main(): number {
   expectRecorded("private", answers.private);
   // Asked (and recorded) only while the skills module is selected.
   if (answers.skills_dir !== undefined) expectRecorded("skills_dir", answers.skills_dir);
+  // Asked (and recorded) only while the docs-site module is selected.
+  if (answers.docs_site_label !== undefined) {
+    expectRecorded("docs_site_label", answers.docs_site_label);
+  }
   const recordedModules = Array.isArray(recorded.modules) ? recorded.modules.map(String) : [];
   if (
     recordedModules.length !== answers.modules.size ||

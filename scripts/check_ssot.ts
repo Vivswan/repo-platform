@@ -606,6 +606,30 @@ function jinjaVars(): JinjaVars {
   return { username, slug: String(pkg.name), copyrightHolder: holder };
 }
 
+/** Whether the owner-slug rule's match at `index` (its owner segment in
+ *  `segment`) sits inside this repository's OWN Pages origin,
+ *  `<username>.github.io/<slug>` (the dogfooded docs site's URL): the io
+ *  segment must be preceded by exactly `<username>.github.` at a hostname
+ *  boundary - start of text or a non-hostname character - so any other
+ *  owner's Pages URL still flags, a username-suffixed near miss like
+ *  `not<username>.github.io` included. */
+export function isOwnPagesOrigin(
+  text: string,
+  index: number,
+  segment: string,
+  username: string,
+): boolean {
+  if (segment.toLowerCase() !== "io") return false;
+  const before = text.slice(0, index).toLowerCase();
+  const origin = `${username.toLowerCase()}.github.`;
+  if (!before.endsWith(origin)) return false;
+  // The origin must be the WHOLE hostname: a preceding hostname character
+  // is another owner's name ending in the username, and a preceding dot
+  // makes it a subdomain - neither is this repository's Pages origin.
+  const boundary = before.charAt(before.length - origin.length - 1);
+  return boundary === "" || !/[a-z0-9.-]/.test(boundary);
+}
+
 function packageScripts(): Record<string, string> {
   const pkg = asRecord(JSON.parse(read("package.json")), "package.json");
   return asRecord(pkg.scripts, "package.json scripts") as Record<string, string>;
@@ -5147,6 +5171,9 @@ const rules: Rule[] = [
           if (/^\.[A-Za-z0-9]/.test(text.slice(match.index + match[0].length))) continue;
           // The sync branch name is not an owner slug either.
           if (match[1] === "automation") continue;
+          // <username>.github.io/<slug> is this repository's OWN Pages
+          // origin (the dogfooded docs site), not an owner slug.
+          if (isOwnPagesOrigin(text, match.index, match[1], username)) continue;
           if (match[1].toLowerCase() === username.toLowerCase()) {
             sawExpected = true;
             continue;

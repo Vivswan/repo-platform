@@ -12,10 +12,18 @@ export interface JinjaVars {
   username: string;
   slug: string;
   copyrightHolder: string;
+  /** The repo's project_name answer; only set by the dogfood renderer
+   *  (the parity comparisons never meet a project_name expression),
+   *  enabling the `{{ project_name | tojson }}` substitution below. */
+  projectName?: string;
   /** The repo's skills_dir answer; only set while the skills module is
    *  selected (copier asks the question only then), enabling the
    *  `{{ skills_dir | tojson }}` substitutions below. */
   skillsDir?: string;
+  /** The repo's docs_site_label answer; only set while the docs-site
+   *  module is selected (copier asks the question only then), enabling
+   *  the `{{ docs_site_label | tojson }}` substitution below. */
+  docsSiteLabel?: string;
 }
 
 /** Resolve one if-condition against `context`: a condition that is exactly
@@ -145,6 +153,15 @@ export function normalizeJinja(
   out = out.replace(/\{\{ github_username \| lower \}\}/g, vars.username.toLowerCase());
   out = out.replace(/\{\{ github_username \}\}/g, vars.username);
   out = out.replace(/\{\{ project_slug \}\}/g, vars.slug);
+  if (vars.projectName !== undefined) {
+    const name = vars.projectName;
+    // JSON.stringify matches jinja's tojson for plain strings.
+    out = out.replace(/\{\{ project_name \| tojson \}\}/g, () => JSON.stringify(name));
+  }
+  if (vars.docsSiteLabel !== undefined) {
+    const label = vars.docsSiteLabel;
+    out = out.replace(/\{\{ docs_site_label \| tojson \}\}/g, () => JSON.stringify(label));
+  }
   if (vars.skillsDir !== undefined) {
     const dir = vars.skillsDir;
     // The two shapes the skills templates use; JSON.stringify matches
@@ -209,9 +226,15 @@ export function renderJinjaFile(
   // in.
   const sentinel = String.fromCharCode(0);
   if (
-    [text, vars.username, vars.slug, vars.copyrightHolder, vars.skillsDir ?? ""].some((value) =>
-      value.includes(sentinel),
-    )
+    [
+      text,
+      vars.username,
+      vars.slug,
+      vars.copyrightHolder,
+      vars.projectName ?? "",
+      vars.skillsDir ?? "",
+      vars.docsSiteLabel ?? "",
+    ].some((value) => value.includes(sentinel))
   ) {
     throw new Error("renderJinjaFile: the template or a variable value contains a NUL byte");
   }

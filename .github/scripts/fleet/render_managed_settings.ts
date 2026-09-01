@@ -486,29 +486,22 @@ export function factsFromOperatorAnswers(
   answersPath: string,
   manifests: ModuleManifest[] = loadManifests(),
 ): RepoFacts {
-  const answers = parseAnswers(readFileSync(answersPath, "utf-8"), answersPath);
+  const answersText = readFileSync(answersPath, "utf-8");
+  const answers = parseAnswers(answersText, answersPath);
   // The operator repository is ALWAYS a settings target, so an unknown
   // name here is the same destructive path as one in a client repo's
   // .repo-platform.yml: no layer files are found, the roster comes out
   // short, and the apply deletes the missing labels off this repository.
   const modules = assertKnownModules([...answers.modules], answersPath, manifests);
-  const streams = manifests.filter(
-    (m) => m.tracking_label !== undefined && modules.includes(m.module),
-  );
-  if (streams.length > 0) {
-    // The dogfood answers schema records no tracking-label answers today;
-    // selecting a stream module here means teaching that schema (and this
-    // resolver) the answer first.
-    throw new Error(
-      `${answersPath}: selects the tracking-stream module(s) ` +
-        `${streams.map((m) => m.module).join(", ")} but records no tracking-label answers - ` +
-        "extend the answers schema before selecting a stream module",
-    );
-  }
   return {
     modules,
     private: answers.private,
-    trackingLabels: [],
+    // The answers file records a selected stream module's label under the
+    // same key copier asks for (docs_site_label today - the dogfood
+    // answers schema is strict, so selecting another stream module means
+    // teaching that schema its answer first), and an unrecorded answer
+    // for a selected stream fails here, never falls back to a guess.
+    trackingLabels: trackingLabelsFrom(answersText, modules, manifests, answersPath),
     prTitleWorkflowPresent: existsSync(join(dirname(resolve(answersPath)), PR_TITLE_WORKFLOW)),
   };
 }

@@ -1,6 +1,6 @@
 # The docs-site module
 
-Selecting the `docs-site` module publishes a repository's `docs/` markdown as a versioned VitePress site. The repository carries ONLY markdown: the VitePress config, theme, sidebar/nav derivation, and build pipeline all live in repo-platform's [pages-site action](https://github.com/Vivswan/repo-platform/blob/main/actions/pages-site/action.yml), and every fleet site picks up theme changes on its next deploy - the nightly rebuild makes that automatic.
+Selecting the `docs-site` module publishes a repository's `docs/` markdown as a versioned VitePress site. The repository carries ONLY markdown: the VitePress config, theme, sidebar/nav derivation, and build pipeline all live in repo-platform's [pages-site action](https://github.com/Vivswan/repo-platform/blob/main/actions/pages-site/action.yml), and every fleet site picks up theme changes on its next deploy - the nightly rebuild makes that automatic. repo-platform dogfoods the module itself: this guide and the rest of `docs/` are the site at <https://vivswan.github.io/repo-platform/> (no version tags, so the root redirects to `latest/`, the default branch's docs).
 
 | URL | Built from |
 |---|---|

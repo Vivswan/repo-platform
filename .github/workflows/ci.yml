@@ -450,7 +450,7 @@ jobs:
           # description stays the harness default - EXTRA_DATA cannot carry
           # whitespace and no generated pair renders it.
           - name: dogfood-oracle
-            modules: "[agents, bun, skills, pr-title, auto-assign]"
+            modules: "[agents, bun, skills, pr-title, auto-assign, docs-site]"
             private: "false"
             extra_data: "-d project_name=repo-platform"
     steps:
