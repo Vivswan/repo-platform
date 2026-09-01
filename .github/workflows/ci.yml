@@ -3,11 +3,7 @@ name: CI
 on:
   push:
     branches: [main]
-  # `edited` on top of the default three: a PR title edit must re-run the
-  # gate so the pr-title check stays honest. The cancel-in-progress
-  # concurrency below bounds the extra runs.
   pull_request:
-    types: [opened, edited, reopened, synchronize]
   workflow_dispatch:
   # Weekly CodeQL re-scan with refreshed query packs; every other gate job
   # is event-agnostic or skips its work cleanly on non-PR events.
@@ -414,8 +410,8 @@ jobs:
           # The only row where bun renders private: the bun fragments'
           # enable_codeql=false branches must emit no CodeQL wiring in
           # ci.yml, settings.yml must still declare `private: true`
-          # (uv-pages-private covers the uv side), and pr-title proves a
-          # fragment gate job renders beside the merged base-checks job.
+          # (uv-pages-private covers the uv side), and pr-title proves the
+          # module's own required workflow renders on a private row too.
           - name: bun-private
             modules: "[bun, settings-sync, pr-title]"
             private: "true"
@@ -559,22 +555,6 @@ jobs:
       - name: Note the tokenless skip
         if: env.HAS_FLEET_PAT != 'true'
         run: echo "::notice::rehearse-fleet skipped - this event's secrets carry no REPO_PLATFORM_TOKEN (a Dependabot-triggered run); the post-merge push run rehearses the same tree."
-
-  # Conventional Commit PR title, checked inside the gate so branch
-  # protection blocks on it. The skip lives on the STEP, not the job:
-  # a job-level skip would stand the gate down in the all-green verdict,
-  # and CI also runs on push/dispatch/schedule events.
-  pr-title:
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions:
-      pull-requests: read
-    steps:
-      - name: Validate PR title is a Conventional Commit
-        if: github.event_name == 'pull_request'
-        uses: amannn/action-semantic-pull-request@v6
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   # CodeQL runs inside the gate: this thin job calls the analysis workflow,
   # and a caller job's permissions are the ceiling for every job in the

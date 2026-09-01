@@ -50,6 +50,10 @@ export const PAIRS: { repo: string; tpl: string }[] = [
     tpl: "templates/bun/.github/workflows/dependabot-bun-lockfile.yml.jinja",
   },
   {
+    repo: ".github/workflows/pr-title.yml",
+    tpl: "templates/pr-title/.github/workflows/pr-title.yml.jinja",
+  },
+  {
     repo: ".github/workflows/validate-skills.yml",
     tpl: "templates/skills/.github/workflows/validate-skills.yml.jinja",
   },

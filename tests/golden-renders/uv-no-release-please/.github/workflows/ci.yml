@@ -11,9 +11,7 @@ name: CI
 on:
   push:
     branches: [main]
-  # `edited` too: a PR title edit must re-run title-sensitive checks.
   pull_request:
-    types: [opened, edited, reopened, synchronize]
   workflow_dispatch:
   # Weekly CodeQL re-scan with refreshed query packs.
   schedule:

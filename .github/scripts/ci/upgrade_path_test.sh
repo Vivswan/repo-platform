@@ -194,6 +194,16 @@ grep -vF "workflows/all-green.yml" \
   > "$OLD_TREE/manifest.jinja.tmp"
 mv "$OLD_TREE/manifest.jinja.tmp" \
   "$OLD_TREE/template/.github/repo-platform-manifest.json.jinja"
+# Model the fleet state before pr-title became its own natively-required
+# workflow: the old build rendered no pr-title.yml (the check was a
+# fleet-ci job), so the update below is what must land it. Its manifest
+# append line goes with the file, like the verdict path above.
+rm "$OLD_TREE/template/.github/workflows/pr-title.yml.jinja"
+grep -vF "workflows/pr-title.yml" \
+  "$OLD_TREE/template/.github/repo-platform-manifest.json.jinja" \
+  > "$OLD_TREE/manifest.jinja.tmp"
+mv "$OLD_TREE/manifest.jinja.tmp" \
+  "$OLD_TREE/template/.github/repo-platform-manifest.json.jinja"
 cat > "$OLD_TREE/template/.github/workflows/ci.yml.jinja" <<'LEGACY_CI'
 name: CI
 
@@ -253,6 +263,8 @@ test -f .github/workflows/rerun-copilot-gate.yml \
 # machinery whose RETIREMENT is under test.
 test ! -e .github/workflows/all-green.yml \
   || fail "the synthetic old fixture must predate the all-green.yml verdict workflow"
+test ! -e .github/workflows/pr-title.yml \
+  || fail "the synthetic old fixture must predate the standalone pr-title.yml workflow"
 if grep -qF "fleet-ci.yml" .github/workflows/ci.yml; then
   fail "the synthetic old fixture must predate the fleet-ci caller (or the single-call arrival assertion below is vacuous)"
 fi
@@ -467,6 +479,12 @@ grep -qF -- 'package-ecosystem: "uv"' .github/dependabot.yml \
   || fail "dependabot.yml lost the uv module entry"
 grep -qF -- '"pr-title"' .github/workflows/ci.yml \
   || fail "ci.yml's fleet-ci modules input lost pr-title"
+# pr-title's own natively-required workflow must ARRIVE with the update
+# (the old fixture predates it - the check was a fleet-ci job).
+test -f .github/workflows/pr-title.yml \
+  || fail "the standalone pr-title.yml workflow did not arrive with the update"
+grep -qxF -- "    types: [opened, edited, reopened, synchronize]" .github/workflows/pr-title.yml \
+  || fail "the updated pr-title.yml lacks the full trigger types list (the required check must exist at every pushed head)"
 # Rendered workflows pin the shared verdict at the green-gated build
 # branch - the templates carry the literal pin.
 grep -qF -- "repo-platform/.github/workflows/reusable-all-green.yml@build" .github/workflows/all-green.yml \

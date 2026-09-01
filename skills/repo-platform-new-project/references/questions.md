@@ -28,7 +28,7 @@ One line each, from the choices descriptions:
 - `release-please`: release job on top of all-green + autorelease labels
 - `issue-templates`: bug/feature issue forms
 - `skills`: agent skills hosting (plugin manifests, skill validation)
-- `pr-title`: Conventional Commit PR title check in the all-green gate
+- `pr-title`: Conventional Commit PR title check, its own required workflow
 - `auto-assign`: auto-assign issues/PRs/alerts to owner
 - `fuzzer`: nightly fuzz starter with issue filing, replay inputs, auto-close
 - `nightly`: nightly CI starter with failure issue filing and auto-close

@@ -31,8 +31,8 @@ private: false
 # agent-file symlinks), bun (dependabot-bun-lockfile.yml; the toolchain
 # feeding enable_codeql), skills (the hosted agent skills under skills/
 # and the validate-skills.yml discovery workflow; the .claude-plugin
-# manifests are generated-once starters this repo owns), pr-title (ci.yml's
-# pr-title gate job), auto-assign (auto-assign.yml). release-please is
+# manifests are generated-once starters this repo owns), pr-title (the
+# required pr-title.yml workflow), auto-assign (auto-assign.yml). release-please is
 # deliberately absent: repo-platform ships the module to clients but runs
 # no release pipeline of its own. The tracking-stream modules (fuzzer,
 # nightly) are deliberately absent too - their release-gating rode the

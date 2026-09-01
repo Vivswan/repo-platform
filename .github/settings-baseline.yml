@@ -45,3 +45,37 @@ labels:
   - name: fix-lint
     color: "fbca04"
     description: Lint / formatting fixes
+
+rulesets:
+  # The pr-title module's required-check ruleset, DISABLED here so the
+  # apply can heal a module deselection: the apply never deletes a whole
+  # undeclared ruleset, so without this baseline entry a repo dropping the
+  # module would keep a live ruleset requiring a check its render no
+  # longer creates - every PR wedged. The module's settings.yml flips
+  # enforcement to active (a same-name ruleset merges key by key), so
+  # selection and deselection both land through the ordinary apply. The
+  # full shape lives here once; the module layer carries only the flip.
+  - name: pr-title
+    target: branch
+    enforcement: disabled
+    conditions:
+      ref_name:
+        include:
+          - "~DEFAULT_BRANCH"
+        exclude: []
+    rules:
+      - type: required_status_checks
+        parameters:
+          strict_required_status_checks_policy: false
+          do_not_enforce_on_create: true
+          required_status_checks:
+            # The managed pr-title.yml workflow's job check run, pinned to
+            # the GitHub Actions app (integration_id 15368) like the main
+            # ruleset's all-green context: no other app and no plain
+            # commit status can satisfy the context by name.
+            - context: pr-title
+              integration_id: 15368
+    bypass_actors:
+      - actor_id: 5
+        actor_type: RepositoryRole
+        bypass_mode: always

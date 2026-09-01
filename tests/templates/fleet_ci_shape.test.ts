@@ -113,8 +113,6 @@ describe("fleet-ci.yml", () => {
 
   test("each module job is armed by ITS OWN module (a swapped guard would arm the wrong gate)", () => {
     const GUARDS = {
-      "pr-title":
-        "contains(fromJSON(inputs.modules), 'pr-title') && github.event_name == 'pull_request'",
       "validate-skills": "contains(fromJSON(inputs.modules), 'skills')",
       "release-freshness":
         "contains(fromJSON(inputs.modules), 'release-please') && github.event_name == 'pull_request' && startsWith(github.head_ref, 'release-please--')",

@@ -40,7 +40,13 @@ const releaseLabels = (loadLayer("templates/release-please/settings.yml").labels
 }[];
 
 function facts(overrides: Partial<RepoFacts> = {}): RepoFacts {
-  return { modules: [], private: false, trackingLabels: [], ...overrides };
+  return {
+    modules: [],
+    private: false,
+    trackingLabels: [],
+    prTitleWorkflowPresent: true,
+    ...overrides,
+  };
 }
 
 function labelNames(f: RepoFacts): string[] {
@@ -120,10 +126,35 @@ describe("managedRulesets", () => {
     // main ENTRY, but it carries only the code_quality rule and the
     // public-only copilot_code_review auto-request (Copilot reviews are
     // disabled on private repos); the private side contributes no
-    // ruleset at all.
-    expect(rulesetNames(facts())).toEqual(["main"]);
+    // ruleset at all. The baseline's pr-title ruleset IS here - repos may
+    // beat module policy - and renders on every visibility (the disabled
+    // deselection heal must reach every managed repo).
+    expect(rulesetNames(facts())).toEqual(["pr-title", "main"]);
     expect(mainRuleTypes(facts())).toEqual(["code_quality", "copilot_code_review"]);
-    expect(rulesetNames(facts({ private: true }))).toEqual([]);
+    expect(rulesetNames(facts({ private: true }))).toEqual(["pr-title"]);
+  });
+
+  test("the pr-title module flips the baseline's disabled required-check ruleset active", () => {
+    const enforcement = (f: RepoFacts) =>
+      managedRulesets(f, manifests).find((r) => r.name === "pr-title")?.enforcement;
+    expect(enforcement(facts())).toBe("disabled");
+    expect(enforcement(facts({ modules: ["pr-title"] }))).toBe("active");
+    // Visibility-independent: pr-title checks run on private repos too.
+    expect(enforcement(facts({ modules: ["pr-title"], private: true }))).toBe("active");
+    // The presence gate: selection alone must not activate a required
+    // check the pinned revision has no workflow to create (the sync
+    // delivering pr-title.yml and the apply run in either order).
+    expect(enforcement(facts({ modules: ["pr-title"], prTitleWorkflowPresent: false }))).toBe(
+      "disabled",
+    );
+    // The flip must not lose the baseline's shape: the merged entry still
+    // carries the pinned required check.
+    const merged = managedRulesets(facts({ modules: ["pr-title"] }), manifests).find(
+      (r) => r.name === "pr-title",
+    ) as { rules?: { type: string; parameters?: Record<string, unknown> }[] };
+    const checks = merged.rules?.find((r) => r.type === "required_status_checks")?.parameters
+      ?.required_status_checks as { context: string; integration_id: number }[];
+    expect(checks).toEqual([{ context: "pr-title", integration_id: 15368 }]);
   });
 
   test("code_quality renders for every public repo, toolchain or not", () => {

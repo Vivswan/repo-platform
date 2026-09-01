@@ -67,7 +67,7 @@ Twin nightly issue streams backed by the same `fuzz-issue` action; `fuzzer` adds
 
 ## pr-title / auto-assign
 
-- pr-title: a managed job in ci.yml, nothing else. Removal deletes it.
+- pr-title: a managed `pr-title.yml` workflow whose `pr-title` check the module's settings layer requires by ruleset (the baseline carries the ruleset disabled; the module flips it active). Removal deletes the workflow and the next settings apply disables the requirement.
 - auto-assign: a managed `auto-assign.yml` caller. Removal deletes it.
 
 ## settings-sync

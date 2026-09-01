@@ -2371,7 +2371,6 @@ export const ALL_GREEN_ROSTER = [
   "smoke-generate",
   "upgrade-path",
   "rehearse-fleet",
-  "pr-title",
   "codeql-javascript",
 ];
 
@@ -2446,7 +2445,6 @@ export const FLEET_CI_ROSTER = [
   "gitleaks",
   "dependency-review",
   "codeql",
-  "pr-title",
   "validate-skills",
   "release-freshness",
   "release-health",
@@ -3016,6 +3014,174 @@ export function fleetCiRenderMismatches(
       expected:
         "no 'post-green-release' concurrency group inside the called workflow, any casing (the calling leg holds that lane; a job here waiting for it would self-deadlock)",
       got: "a post-green-release mention",
+    });
+  }
+  return mismatches;
+}
+
+/** The pr-title module's natively-required check, pinned at its three
+ *  sources. The managed workflow template must run on every event that
+ *  changes what the check judges PLUS synchronize (a required check must
+ *  exist at the PR's NEWEST head commit - a types list without it leaves
+ *  the merge box waiting on a check nothing creates), its job id must be
+ *  the exact check-run name the ruleset requires, and the semantic-title
+ *  action must be the one unconditional step (a replaced step is a green
+ *  no-op check). The BASELINE carries the ruleset's full shape DISABLED
+ *  (so deselection heals through the ordinary apply - whole undeclared
+ *  rulesets are never deleted), with the context pinned to the GitHub
+ *  Actions app (integration_id 15368, the app that creates job check
+ *  runs); the MODULE layer carries exactly the enforcement flip, and
+ *  nothing else - a rules list there would REPLACE the baseline's
+ *  same-type rule, not merge into it. Its own ruleset, not a rule in
+ *  `main`: the override layer's same-type rule would replace a
+ *  required_status_checks rule merged into `main`. Pure over the three
+ *  texts for the suite's forcing cases. */
+export function prTitleWorkflowMismatches(
+  workflowText: string,
+  baselineText: string,
+  moduleLayerText: string,
+): Mismatch[] {
+  const wfRel = "templates/pr-title/.github/workflows/pr-title.yml.jinja";
+  const baselineRel = ".github/settings-baseline.yml";
+  const moduleRel = "templates/pr-title/settings.yml";
+  const mismatches: Mismatch[] = [];
+  const lines = workflowText.split("\n");
+  const pins: readonly [string, string][] = [
+    ["on:", "the trigger block"],
+    ["  pull_request:", "the check judges pull requests"],
+    [
+      "    types: [opened, edited, reopened, synchronize]",
+      "opened/edited/reopened re-judge the title; synchronize keeps the required check present at every pushed head",
+    ],
+    ["  pr-title:", "the job id IS the check-run name the ruleset requires"],
+  ];
+  for (const [line, why] of pins) {
+    const count = lines.filter((candidate) => candidate === line).length;
+    if (count !== 1) {
+      mismatches.push({
+        file: wfRel,
+        expected: `the line ${JSON.stringify(line)} exactly once (${why})`,
+        got: count === 0 ? "missing" : `${count} occurrences`,
+      });
+    }
+  }
+  // A display name would rename the check run away from the required
+  // context, and a job- or step-level condition (or a swapped-out step)
+  // would leave a required check that judges nothing; the job census
+  // above pins the id, these pin the body.
+  if (lines.some((line) => /^ {4}name:/.test(line))) {
+    mismatches.push({
+      file: wfRel,
+      expected: "no job-level name: (the check-run name must stay the job id the ruleset requires)",
+      got: "a job-level name override",
+    });
+  }
+  if (lines.some((line) => /^ {4,}if:/.test(line))) {
+    mismatches.push({
+      file: wfRel,
+      expected:
+        "no job- or step-level if: (a skipped required check reads green while judging nothing)",
+      got: "a condition",
+    });
+  }
+  if (lines.some((line) => line.trimStart().startsWith("continue-on-error:"))) {
+    mismatches.push({
+      file: wfRel,
+      expected:
+        "no continue-on-error anywhere (a softened judgment step is a green check over a failed validation)",
+      got: "a continue-on-error key",
+    });
+  }
+  const actionUses = "      - uses: amannn/action-semantic-pull-request@";
+  const actionCount = lines.filter((line) => line.startsWith(actionUses)).length;
+  if (actionCount !== 1) {
+    mismatches.push({
+      file: wfRel,
+      expected: `exactly one step whose uses: starts ${JSON.stringify(actionUses.trim())} (the judgment itself - without it the required check is a green no-op)`,
+      got: `${actionCount} occurrences`,
+    });
+  }
+  // The baseline's disabled full shape.
+  const baseline = asRecord(parseYaml(baselineText), baselineRel);
+  const baselineRulesets = (baseline.rulesets ?? []) as Record<string, unknown>[];
+  const ruleset = baselineRulesets.find((entry) => entry.name === "pr-title");
+  if (ruleset === undefined) {
+    mismatches.push({
+      file: baselineRel,
+      expected:
+        "a 'pr-title' ruleset carrying the full shape disabled (the deselection heal: the apply never deletes a whole undeclared ruleset)",
+      got: `rulesets: ${baselineRulesets.map((entry) => String(entry.name)).join(", ") || "none"}`,
+    });
+    return mismatches;
+  }
+  if (ruleset.enforcement !== "disabled") {
+    mismatches.push({
+      file: baselineRel,
+      expected:
+        "enforcement: disabled on the baseline's pr-title ruleset (active here would require the check on every managed repo, module or not)",
+      got: String(ruleset.enforcement ?? "missing"),
+    });
+  }
+  // Applicability: an active ruleset requiring the right context still
+  // gates nothing if it targets tags or the wrong ref.
+  if (ruleset.target !== "branch") {
+    mismatches.push({
+      file: baselineRel,
+      expected: "target: branch on the pr-title ruleset (a tag ruleset gates no merges)",
+      got: String(ruleset.target ?? "missing"),
+    });
+  }
+  const refName = asRecord(
+    asRecord(ruleset.conditions ?? {}, `${baselineRel} conditions`).ref_name ?? {},
+    `${baselineRel} ref_name`,
+  );
+  if (canonical(refName.include ?? null) !== canonical(["~DEFAULT_BRANCH"])) {
+    mismatches.push({
+      file: baselineRel,
+      expected:
+        'conditions.ref_name.include exactly ["~DEFAULT_BRANCH"] (anywhere else the required check gates no default-branch merges)',
+      got: canonical(refName.include ?? null),
+    });
+  }
+  if (canonical(refName.exclude ?? null) !== canonical([])) {
+    mismatches.push({
+      file: baselineRel,
+      expected:
+        "conditions.ref_name.exclude exactly [] (an exclude entry can carve the default branch back out of the include)",
+      got: canonical(refName.exclude ?? null),
+    });
+  }
+  const checksRule = ((ruleset.rules ?? []) as Record<string, unknown>[]).find(
+    (rule) => rule.type === "required_status_checks",
+  );
+  const contexts = (
+    (asRecord(checksRule?.parameters ?? {}, `${baselineRel} parameters`).required_status_checks ??
+      []) as Record<string, unknown>[]
+  ).map((check) => `${String(check.context)}@${String(check.integration_id)}`);
+  if (canonical(contexts) !== canonical(["pr-title@15368"])) {
+    mismatches.push({
+      file: baselineRel,
+      expected:
+        "exactly one required check, context 'pr-title' pinned to integration_id 15368 (the GitHub Actions app that creates the job's check run)",
+      got: contexts.join(", ") || "no required_status_checks rule",
+    });
+  }
+  // The module layer: exactly the enforcement flip. Any other key on the
+  // entry could shadow the baseline's shape (a rules list of the same
+  // type REPLACES the baseline's rule in the merge).
+  const moduleLayer = asRecord(parseYaml(moduleLayerText), moduleRel);
+  const moduleEntries = (moduleLayer.rulesets ?? []) as Record<string, unknown>[];
+  const flip = moduleEntries.find((entry) => entry.name === "pr-title");
+  if (
+    moduleEntries.length !== 1 ||
+    flip === undefined ||
+    canonical(flip) !== canonical({ name: "pr-title", enforcement: "active" })
+  ) {
+    mismatches.push({
+      file: moduleRel,
+      expected:
+        "exactly one ruleset entry, {name: pr-title, enforcement: active} and nothing else (the shape lives disabled in the baseline; any other key here could shadow it in the merge)",
+      got: canonical(moduleLayer.rulesets ?? null),
     });
   }
   return mismatches;
@@ -3633,8 +3799,13 @@ const rules: Rule[] = [
       const template = templateCi();
       const on = (ci: Record<string, unknown>) => asRecord(ci.on, "on");
 
-      const pull = (ci: Record<string, unknown>) =>
-        asRecord(on(ci).pull_request, "pull_request").types;
+      // A bare `pull_request:` (the default types) is the expected shape
+      // since pr-title - the one `edited` consumer - moved to its own
+      // workflow; a types list on either side must still match the other.
+      const pull = (ci: Record<string, unknown>) => {
+        const trigger = on(ci).pull_request;
+        return trigger == null ? null : asRecord(trigger, "pull_request").types;
+      };
       if (canonical(pull(template)) !== canonical(pull(repo))) {
         mismatches.push({
           file: ".github/workflows/ci.yml on.pull_request.types",
@@ -4418,6 +4589,20 @@ const rules: Rule[] = [
         read("templates/base/.github/workflows/ci.yml.jinja"),
         read("templates/release-please/fragments/all-green-release.jinja"),
         read("templates/release-please/.github/workflows/release.yml.jinja"),
+      ),
+  },
+
+  {
+    // The pr-title module's natively-required check at its sources
+    // (prTitleWorkflowMismatches has the model): the workflow's trigger
+    // shape, the job id the ruleset requires, and the module settings
+    // layer's pinned context.
+    name: "pr-title-workflow",
+    run: () =>
+      prTitleWorkflowMismatches(
+        read("templates/pr-title/.github/workflows/pr-title.yml.jinja"),
+        read(".github/settings-baseline.yml"),
+        read("templates/pr-title/settings.yml"),
       ),
   },
 
@@ -5768,6 +5953,7 @@ export const RULE_ROSTER = [
   "all-green-name",
   "all-green-wrapper-template",
   "fleet-ci-render-roster",
+  "pr-title-workflow",
   "dependabot-label-tuples",
   "settings-read-pin",
   "self-apply-fact-source",

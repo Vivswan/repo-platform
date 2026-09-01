@@ -366,6 +366,41 @@ export const GUARD_REGISTRY: readonly GuardEntry[] = [
     testFile: "tests/scripts/check_ssot.test.ts",
     testName: "the judged-sha read is ARMED: release.yml's head gate compares the judged commit",
   },
+  // The pr-title module's natively-required check (the pr-title-workflow
+  // ssot rule): each pin fails OPEN at run time - GitHub reports nothing
+  // wrong, the merge box just waits forever or accepts a look-alike.
+  {
+    id: "pr-title-synchronize-trigger",
+    hazard:
+      "the trigger types list losing synchronize: a required check must exist at the PR's NEWEST head commit, so every push after open would leave the merge box waiting on a pr-title check nothing creates",
+    guardFile: "templates/pr-title/.github/workflows/pr-title.yml.jinja",
+    snippet: "    types: [opened, edited, reopened, synchronize]",
+    mutated: "    types: [opened, edited]",
+    testFile: "tests/scripts/check_ssot.test.ts",
+    testName: "the pr-title trigger shape is ARMED: a types list without synchronize is refused",
+  },
+  {
+    id: "pr-title-required-check-pin",
+    hazard:
+      "the required check's integration_id pin deleted from the baseline's pr-title ruleset: any app or plain commit status named pr-title would satisfy the ruleset context by name",
+    guardFile: ".github/settings-baseline.yml",
+    snippet: "            - context: pr-title\n              integration_id: 15368",
+    mutated: "            - context: pr-title",
+    testFile: "tests/scripts/check_ssot.test.ts",
+    testName:
+      "the pr-title required-check pin is ARMED: only the Actions app's job check satisfies the context",
+  },
+  {
+    id: "pr-title-module-activation",
+    hazard:
+      "the module layer's enforcement flip rewired to disabled (or lost): every pr-title-selecting repo silently stops requiring the check while the workflow keeps running - the merge gate evaporates with everything green",
+    guardFile: "templates/pr-title/settings.yml",
+    snippet: "    enforcement: active",
+    mutated: "    enforcement: disabled",
+    testFile: "tests/scripts/check_ssot.test.ts",
+    testName:
+      "the pr-title module activation is ARMED: the module layer flips the baseline's disabled ruleset active",
+  },
 ];
 
 /** Occurrences of `token` in `text` (exact bytes, no regex). */

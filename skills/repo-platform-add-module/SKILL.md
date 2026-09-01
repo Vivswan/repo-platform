@@ -41,7 +41,7 @@ One line each. The roster's source of truth is the module manifests (`templates/
 | `release-please` | release job on top of all-green + autorelease labels |
 | `issue-templates` | bug/feature issue forms |
 | `skills` | agent skills hosting (plugin manifests, skill validation) |
-| `pr-title` | Conventional Commit PR title check in the all-green gate |
+| `pr-title` | Conventional Commit PR title check, its own required workflow |
 | `auto-assign` | auto-assign issues/PRs/alerts to owner |
 | `fuzzer` | nightly fuzz starter with issue filing, replay inputs, auto-close |
 | `nightly` | nightly CI starter with failure issue filing and auto-close |
@@ -148,7 +148,7 @@ A module the TEMPLATE retired (rather than you deselecting it) is handled automa
 ## Verify
 
 - The sync run is green and the PR's diff is fully explained by the modules diff (step 3 above).
-- After merging: any managed CI jobs the module adds (CodeQL for a toolchain on a public repo, `release-freshness`/`release-health` for release-please, `validate-skills` for skills, `pr-title`) appear in the repo's `all-green` gate on the next PR - many modules add no gated job at all - and starters exist and are ready to fill in.
+- After merging: any managed CI jobs the module adds (CodeQL for a toolchain on a public repo, `release-freshness`/`release-health` for release-please, `validate-skills` for skills) appear in the repo's `all-green` gate on the next PR - many modules add no gated job at all (pr-title's check is its own required workflow, outside the gate) - and starters exist and are ready to fill in.
 - For label-carrying modules: the next settings apply is green (`gh workflow run settings-repos.yml -R Vivswan/repo-platform -f check_only=true -f repo=Vivswan/<repo>` for a dry run).
 
 Two end-to-end walkthroughs - adding `nightly` to a repo that already has `fuzzer`, and adding `skills` - are in [references/worked-examples.md](references/worked-examples.md).

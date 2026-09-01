@@ -105,12 +105,16 @@ fi
 present_line "      conditional-workflows: '[]'" "$wf/all-green.yml"
 absent "copilot-wait-minutes" "$wf/all-green.yml"
 
-# pr-title runs inside fleet-ci; its whole rendered footprint is gate
-# membership through the modules input.
-test ! -e "$wf/pr-title.yml"
+# pr-title is its own natively-required workflow: the module renders
+# pr-title.yml (the module's settings layer requires its job's check run),
+# and the modules input still records the selection.
 if has pr-title; then
+  test -f "$wf/pr-title.yml"
+  present_line "    types: [opened, edited, reopened, synchronize]" "$wf/pr-title.yml"
+  present_line "  pr-title:" "$wf/pr-title.yml"
   present '"pr-title"' "$wf/ci.yml"
 else
+  test ! -e "$wf/pr-title.yml"
   absent '"pr-title"' "$wf/ci.yml"
 fi
 if has auto-assign; then test -f "$wf/auto-assign.yml"; else test ! -e "$wf/auto-assign.yml"; fi

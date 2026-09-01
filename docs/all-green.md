@@ -192,9 +192,9 @@ Inside fleet-ci.yml, module- and visibility-conditioned jobs carry job-level `if
 - The five base checks fan out per job on public repositories and merge into one `base-checks` job on private ones (each tiny job would otherwise bill a rounded-up minute).
 - `dependency-review` is public-PR-only.
 - `codeql` runs a per-language matrix over the `codeql-languages` input.
-- The `pr-title`, `validate-skills`, `release-freshness`, and `release-health` module jobs condition on the `modules` input.
+- The `validate-skills`, `release-freshness`, and `release-health` module jobs condition on the `modules` input.
 
-Reusable workflows prefix job names ("ci / pr-title"), which is harmless: a job name carries no required-check meaning any more - the verdict reads names only for the `info-` opt-out prefix.
+Reusable workflows prefix job names ("ci / validate-skills"), which is harmless: a job name carries no required-check meaning any more - the verdict reads names only for the `info-` opt-out prefix.
 
 Repos that select release-please carry a `release` leg in the managed all-green.yml wrapper (it must call the repo-owned release.yml by local path): `needs: [verdict]`, released only when the verdict POSTED success for a push-to-main run, holding its own `post-green-release` concurrency lane (a name no job inside release.yml takes - the caller sharing its called job's group would self-deadlock). The leg passes the JUDGED commit into release.yml's `sha` input, because `github.sha` on a workflow_run event is main's current tip - possibly a newer commit whose own verdict is still pending - and release.yml's head gate compares that judged commit against the tip, skipping (not failing) when main moved on. Because the wrapper is workflow_run-triggered, it executes the default branch's copy: the leg goes live on the first push to main after the sync PR delivering it merges.
 

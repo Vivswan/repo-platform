@@ -78,6 +78,15 @@ export interface RepoFacts {
   private: boolean;
   /** Resolved tracking-label answers, one per SELECTED stream module. */
   trackingLabels: { module: string; label: string }[];
+  /** Whether the pinned revision carries the pr-title module's managed
+   *  workflow (PR_TITLE_WORKFLOW). Selecting the module activates its
+   *  required-check ruleset, and a check nothing creates wedges every PR,
+   *  so activation additionally waits for the workflow to be ON the
+   *  default branch - the sync delivering it can land in any order
+   *  relative to the apply. Deselection needs no such gate: the baseline
+   *  heals the ruleset back to disabled the moment the module leaves the
+   *  selection. */
+  prTitleWorkflowPresent: boolean;
 }
 
 // --- the settings layers ----------------------------------------------------
@@ -139,11 +148,17 @@ export function layerPaths(
   const selected = manifests.filter((m) => facts.modules.includes(m.module));
   const declares = (m: ModuleManifest, name: SettingsLayerName) =>
     (m.settings_layers ?? []).includes(name);
+  // pr-title's layer is the enforcement flip of the baseline's disabled
+  // required-check ruleset, so it additionally waits for the managed
+  // workflow to exist at the pinned revision (the RepoFacts field has the
+  // race): activating a required check nothing creates wedges every PR.
+  const activatable = (m: ModuleManifest) =>
+    m.module !== "pr-title" || facts.prTitleWorkflowPresent;
   return [
     BASELINE_LAYER,
     facts.private ? FLEET_PRIVATE_LAYER : FLEET_PUBLIC_LAYER,
     ...selected
-      .filter((m) => declares(m, MODULE_LAYER))
+      .filter((m) => declares(m, MODULE_LAYER) && activatable(m))
       .map((m) => moduleLayerPath(m.module, MODULE_LAYER)),
     ...selected
       .filter((m) => declares(m, visibility))
@@ -458,6 +473,10 @@ export function declaredPrivate(settingsText: string | null): boolean | null {
   return typeof value === "boolean" ? value : null;
 }
 
+/** The pr-title module's managed workflow, whose presence at the pinned
+ *  revision gates the required-check activation (RepoFacts has the race). */
+export const PR_TITLE_WORKFLOW = ".github/workflows/pr-title.yml";
+
 /** Facts for the operator repository itself: it is not generated from the
  *  template (no .repo-platform.yml, no .copier-answers.yml), so its module
  *  selection and visibility come from the recorded operator answers file -
@@ -486,7 +505,12 @@ export function factsFromOperatorAnswers(
         "extend the answers schema before selecting a stream module",
     );
   }
-  return { modules, private: answers.private, trackingLabels: [] };
+  return {
+    modules,
+    private: answers.private,
+    trackingLabels: [],
+    prTitleWorkflowPresent: existsSync(join(dirname(resolve(answersPath)), PR_TITLE_WORKFLOW)),
+  };
 }
 
 /** Facts fetched from the target repository's default branch (gh api).
@@ -526,7 +550,12 @@ export function factsFromFetch(
     }
     trackingLabels = trackingLabelsFrom(answers, modules, manifests, `${repo}/.copier-answers.yml`);
   }
-  return { modules, private: isPrivate, trackingLabels };
+  // Probed only where it can matter (the module selected): a 404 is a
+  // genuine absence (fetch returns null), any other failure throws - a
+  // presence misread must never silently flip the required check.
+  const prTitleWorkflowPresent =
+    modules.includes("pr-title") && fetch(repo, PR_TITLE_WORKFLOW, ref) !== null;
+  return { modules, private: isPrivate, trackingLabels, prTitleWorkflowPresent };
 }
 
 /** Facts read from a local checkout: the sync's transition path. The
@@ -562,6 +591,7 @@ export function factsFromTargetDir(dir: string, manifests: ModuleManifest[]): Re
       manifests,
       where(".copier-answers.yml"),
     ),
+    prTitleWorkflowPresent: existsSync(join(dir, PR_TITLE_WORKFLOW)),
   };
 }
 

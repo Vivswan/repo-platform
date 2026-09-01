@@ -306,6 +306,7 @@ const MODULE_OWNERSHIP: Record<string, OwnedFile[]> = {
   pages: [{ path: ".github/workflows/pages.yml", kind: "header" }],
   "release-please": [{ path: ".github/workflows/release.yml", kind: "header" }],
   skills: [{ path: ".github/workflows/validate-skills.yml", kind: "header" }],
+  "pr-title": [{ path: ".github/workflows/pr-title.yml", kind: "header" }],
   "auto-assign": [{ path: ".github/workflows/auto-assign.yml", kind: "header" }],
   "settings-sync": [{ path: ".github/workflows/settings-sync.yml", kind: "header" }],
 };
