@@ -7,8 +7,11 @@ repo-platform manages standards files, CI workflows, and repository settings acr
 | Goal | Read |
 |---|---|
 | Create a new managed repository | [New repo](new-repo.md) |
-| Find out why my PR is pending or red | [All-green](all-green.md) |
+| Find out why my PR is pending or red | [All-green: quick triage](all-green.md#quick-triage-why-is-my-pr-red-or-waiting) |
 | Change a repository's settings or labels | [Settings](settings.md) |
+| Understand the `pr-title` required check | [Settings: the pr-title ruleset](settings.md#the-pr-title-ruleset) |
+| Get a PR auto-formatted, or make bot fix commits re-run CI | [New repo: fix commits](new-repo.md#fix-commits-and-re-triggering-ci) |
+| Ship a release, or verify a release asset's provenance | [New repo: the release pipeline](new-repo.md#the-release-pipeline-release-please) |
 | Publish a site to GitHub Pages | [Pages](pages.md) |
 | Publish my repo's docs/ as a website | [Docs site](docs-site.md) |
 | Translate docs (zh-cn/, ja/, ...) | [Docs site: content conventions](docs-site.md#content-conventions) |
@@ -25,6 +28,7 @@ repo-platform manages standards files, CI workflows, and repository settings acr
 | Review a template change's rendered diff | [Golden renders](golden-renders.md) |
 | Check why the `build` branch can be trusted | [Build provenance](build-provenance.md) |
 | Keep a private repo's name out of fleet logs | [Private repos](private-repos.md) |
+| Find where a private repo's failure details land | [Private repos: seeing the full detail](private-repos.md#seeing-the-full-detail) |
 | Stop sync PRs without detaching | [Eject: pause](eject.md#pause-instead-of-eject) |
 | Detach a repository from management | [Eject](eject.md) |
 
