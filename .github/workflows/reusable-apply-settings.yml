@@ -1,0 +1,245 @@
+# Reusable settings apply for settings-sync module repos: a thin caller
+# runs this on pushes touching its .github/settings.yml. The apply is the
+# SAME two-layer merge the central settings-repos run computes - a partial
+# repo document alone would delete every baseline label (the action's
+# label sync removes undeclared ones), so this workflow checks out
+# repo-platform's scripts (two-hop: callers pin @build, whose tree carries
+# only workflow files, so the scripts land on the build tip's stamped
+# green source commit - the resolve step below), computes the managed
+# baseline from the caller's module selection, merges the caller's
+# settings.yml over it, and applies the merged document in single-repo
+# mode. The central home for the same merge is settings-repos.yml.
+#
+# Token model: settings mutation needs Administration (and Issues) write,
+# which GITHUB_TOKEN can never hold - the caller passes its own
+# REPO_PLATFORM_TOKEN (fine-grained PAT). Without it the run SKIPS with a
+# warning; repo-platform's central settings-repos run heals it either way.
+# Pinned to an immutable commit sha; switch to @v1 once
+# github-settings-as-code cuts its first release.
+
+name: Reusable Apply Settings
+
+on:
+  workflow_call:
+    inputs:
+      check_only:
+        description: Report drift without writing (exit 1 on drift)
+        required: false
+        type: boolean
+        default: false
+      on_missing_permission:
+        description: fail (default) or warn - partial success on missing permissions
+        required: false
+        type: string
+        default: fail
+      required_sections:
+        description: Sections that must apply even under warn
+        required: false
+        type: string
+        default: ""
+      sections:
+        description: Optional allowlist of sections to process
+        required: false
+        type: string
+        default: ""
+      api_version:
+        description: X-GitHub-Api-Version override
+        required: false
+        type: string
+        default: "2022-11-28"
+    secrets:
+      REPO_PLATFORM_TOKEN:
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: apply-settings-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Resolve token
+        id: token
+        env:
+          PAT: ${{ secrets.REPO_PLATFORM_TOKEN }}
+        run: |
+          if [ -n "$PAT" ]; then
+            echo "proceed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::settings apply skipped: the REPO_PLATFORM_TOKEN secret is not set, and GITHUB_TOKEN cannot mutate repo settings. To opt in to self-apply on push, add a fine-grained PAT with Administration (read and write) and Issues (read and write) on this repo as an Actions secret named REPO_PLATFORM_TOKEN. The central settings-repos run in repo-platform applies this repository's settings either way."
+            echo "proceed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check out repository
+        if: steps.token.outputs.proceed == 'true'
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+
+      # The baseline generator and merge dialect live in repo-platform, but
+      # callers pin this workflow @build - the green-gated delivery branch,
+      # whose tree carries only the composed template, the actions, and the
+      # workflow files, never the scripts. job.workflow_sha is the commit
+      # the caller's `uses:` ref resolved to (NOT github.workflow_sha: that
+      # is the CALLER's workflow file, a sha absent from this repository).
+      # On the build branch that commit's message carries the provenance
+      # stamp naming the exact green main commit the tree was composed from
+      # (.github/scripts/shared/commit_stamp.ts owns the line shape; the
+      # sed below mirrors its STAMP_RE - only a full 40-hex sha parses), so
+      # the second hop checks the scripts out THERE: the same commit CI
+      # vouched for, no version skew with the shipped workflow. A stampless
+      # sha is accepted only when it is provably main history (an @main or
+      # commit pin - the pre-@build caller shape); anything else fails
+      # CLOSED rather than running scripts from an unvouched commit. The
+      # GHES fallback (contexts that omit job.workflow_sha) stays main.
+      # tests/fleet/apply_settings_scripts_ref.test.ts runs this block
+      # against a stubbed gh and forces every branch, the refusal included.
+      - name: Resolve the repo-platform scripts commit
+        id: scripts
+        if: steps.token.outputs.proceed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          WORKFLOW_SHA: ${{ job.workflow_sha }}
+        run: |
+          if [ -z "$WORKFLOW_SHA" ]; then
+            echo "ref=main" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          message="$(gh api "repos/Vivswan/repo-platform/commits/$WORKFLOW_SHA" --jq '.commit.message')"
+          stamp="$(printf '%s\n' "$message" | sed -n -E 's|^source: .*/commit/([0-9a-f]{40})$|\1|p' | head -n 1)"
+          if [ -n "$stamp" ]; then
+            echo "ref=$stamp" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          status="$(gh api "repos/Vivswan/repo-platform/compare/main...$WORKFLOW_SHA" --jq '.status' || echo unreachable)"
+          case "$status" in
+            identical|behind)
+              echo "ref=$WORKFLOW_SHA" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "::error::refusing to run repo-platform scripts from $WORKFLOW_SHA: the commit carries no provenance stamp and is not main history (compare status: $status). Pin this workflow @build (the green-gated delivery branch) or to a main commit."
+              exit 1
+              ;;
+          esac
+
+      - name: Check out repo-platform
+        if: steps.token.outputs.proceed == 'true'
+        uses: actions/checkout@v7
+        with:
+          repository: Vivswan/repo-platform
+          ref: ${{ steps.scripts.outputs.ref }}
+          path: platform
+
+      - if: steps.token.outputs.proceed == 'true'
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: platform/.bun-version
+
+      - name: Install repo-platform script dependencies
+        if: steps.token.outputs.proceed == 'true'
+        working-directory: platform
+        run: bun install --frozen-lockfile --silent
+
+      # This repository's facts come from the CHECKOUT above, not from
+      # gh api: the self-apply grant documented for REPO_PLATFORM_TOKEN is
+      # Administration and Issues only, with no Contents scope, so
+      # fetching .repo-platform.yml and .copier-answers.yml over the API
+      # failed on every private repository before it rendered anything.
+      # The checkout already has contents: read, and --target-dir needs no
+      # network at all. The central run in settings-repos.yml is
+      # unaffected: it holds the fleet PAT, which does have Contents, and
+      # has no checkout of the target to read instead.
+      - name: Render this repository's settings layers
+        id: render
+        if: steps.token.outputs.proceed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
+        run: |
+          bun platform/.github/scripts/fleet/render_managed_settings.ts \
+            --repo "$GITHUB_REPOSITORY" --target-dir . \
+            --out "$RUNNER_TEMP/managed-settings.yml"
+
+      # Its own step so a repository that has DROPPED settings-sync ends
+      # in a clean warned skip: the render writes no baseline and reports
+      # skipped, and merging a file that was never written would turn a
+      # deliberate opt-out into a red workflow. The token gate is not
+      # repeated here - without it the render never ran, so its output is
+      # empty and this condition is already false.
+      - name: Merge this repository's settings.yml over them
+        id: merge
+        if: steps.render.outputs.skipped == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
+        run: |
+          bun platform/.github/scripts/fleet/merge_settings_layers.ts \
+            --managed "$RUNNER_TEMP/managed-settings.yml" \
+            --repo-file .github/settings.yml \
+            --out "$RUNNER_TEMP/merged-settings.yml"
+
+      # This checkout is a snapshot of the default branch, and the branch
+      # keeps moving while the merge runs: a push that drops settings-sync
+      # or rewrites settings.yml lands after the facts were read, and the
+      # apply would reconcile - and delete - labels from the stale
+      # document. GITHUB_TOKEN's contents: read is enough to re-resolve
+      # the head. Same narrowing as the central run, same gate.
+      - name: Check this repository has not moved
+        id: freshness
+        if: steps.render.outputs.skipped == 'false' && steps.merge.outputs.skipped == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET: ${{ github.repository }}
+          PINNED: ${{ steps.render.outputs.ref }}
+        run: bun platform/.github/scripts/fleet/check_target_fresh.ts
+
+      # Referenced-label invariant, FAIL-CLOSED side (same guard as the
+      # central run): the apply's reconciliation DELETES every live label
+      # the merged document does not declare (and renames away `new_name`
+      # sources), and removing one this repository's issue forms or
+      # workflows still reference breaks them silently. The reference
+      # files come from the checkout above - the self-apply token model
+      # grants no Contents scope for API reads - and the live-label
+      # listing rides the PAT's Issues grant. The caller's sections
+      # allowlist, check mode, and on-missing-permission choice are
+      # mirrored so the preflight is never stricter than the apply it
+      # guards. A referenced label scheduled for removal fails the apply,
+      # naming the label and its referencing file.
+      - name: Preflight labels this repository still references
+        if: steps.freshness.outputs.moved == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
+          SECTIONS: ${{ inputs.sections }}
+          REQUIRED_SECTIONS: ${{ inputs.required_sections }}
+          MODE: ${{ inputs.check_only && 'check' || 'apply' }}
+          ON_MISSING_PERMISSION: ${{ inputs.on_missing_permission }}
+        run: |
+          bun platform/.github/scripts/fleet/label_preflight.ts \
+            --merged "$RUNNER_TEMP/merged-settings.yml" \
+            --repo "$GITHUB_REPOSITORY" --target-dir . \
+            --sections "$SECTIONS" --required-sections "$REQUIRED_SECTIONS" \
+            --mode "$MODE" --on-missing-permission "$ON_MISSING_PERMISSION"
+
+      - name: Apply repository settings
+        # Positive equality, never `!= 'true'`: a step that did not RUN has
+        # an empty output, and a negative test would let the apply through
+        # with no merged document behind it.
+        if: steps.freshness.outputs.moved == 'false'
+        # Pinned to an immutable commit; bump to @v1 once the action cuts
+        # its first release. Bump together with settings-repos.yml.
+        uses: Vivswan/github-settings-as-code@ac83fb48219309e2249294ef37fb55310bd45fb3
+        with:
+          token: ${{ secrets.REPO_PLATFORM_TOKEN }}
+          mode: ${{ inputs.check_only && 'check' || 'apply' }}
+          # Single-repo mode, pinned explicitly to this repository (the
+          # action's default; stated so the contract is visible), reading
+          # the merged scratch document.
+          repository: ${{ github.repository }}
+          settings-file: ${{ runner.temp }}/merged-settings.yml
+          on-missing-permission: ${{ inputs.on_missing_permission }}
+          required-sections: ${{ inputs.required_sections }}
+          sections: ${{ inputs.sections }}
+          api-version: ${{ inputs.api_version }}

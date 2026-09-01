@@ -26,7 +26,7 @@ concurrency:
 
 jobs:
   deploy:
-    uses: {{ github_username }}/repo-platform/.github/workflows/reusable-pages.yml@main
+    uses: {{ github_username }}/repo-platform/.github/workflows/reusable-pages.yml@build
     with:
 {% if 'docs-site' in modules %}      mounts: '[{"path": "/", "source": "command", "versioned": false}, {"path": "/{{ docs_site_path }}/", "source": "vitepress", "versioned": true}]'
       site_title: {{ project_name | tojson }}

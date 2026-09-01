@@ -8,8 +8,8 @@ sources in `actions/`.
 `build` is rebuilt from each `main` commit whose CI run succeeds (the
 branch ships only green main commits). It carries the composed copier tree
 under `template/`, the composite actions under `actions/`, and the
-fleet-facing reusable workflows (fleet-ci.yml,
-reusable-codeql.yml) under `.github/workflows/` - every path is
+fleet-facing reusable workflows (fleet-ci.yml, reusable-apply-settings.yml, reusable-auto-assign-alerts.yml, reusable-auto-assign.yml, reusable-codeql.yml, reusable-pages.yml)
+under `.github/workflows/` - every path is
 extraction-safe (no jinja-expression filenames), so
 `uses: <owner>/repo-platform/actions/<name>@build` refs extract cleanly
 on the runner, and an @build pin runs only action and workflow code CI has

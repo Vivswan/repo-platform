@@ -1,0 +1,247 @@
+# Reusable GitHub Pages deploy: ONE versioned Pages site assembled by the
+# pages-site action (actions/pages-site@build) from a mount list.
+#   Per versioned mount: <mount>latest/ builds from the default branch head,
+#   <mount><tag>/ from each served version tag (vX.Y.Z, newest
+#   vars.PAGES_MAX_VERSIONS or 5; a tag that structurally cannot build is
+#   skipped with a notice), and the mount root serves the newest served
+#   version - or redirects to latest/ while none serve.
+#   An unversioned mount is one build of the default branch head.
+# Command mounts run the caller's build with PAGES_BASE_PATH, PAGES_ORIGIN,
+# and PAGES_VERSION exported; vitepress mounts render the caller's docs tree
+# under the central fleet theme (repo-platform's docs/pages.md and
+# docs/docs-site.md).
+# A custom domain needs DNS + Pages settings + the CUSTOM_DOMAIN repo
+# variable together (docs/pages.md); when the variable is set, the root
+# moves from /<repo>/ to /, and the artifact carries CNAME.
+# On scheduled runs with link_rot_label set, the assembled site's external
+# links are checked after the deploy and findings ride the fleet's
+# tracking-issue stream (fuzz-issue@build) under that label.
+# Callers own `concurrency: pages`; this workflow does not declare one.
+
+name: Reusable Pages
+
+on:
+  workflow_call:
+    inputs:
+      mounts:
+        description: 'JSON mount list for the pages-site action: [{"path", "source": command|vitepress, "versioned"}]'
+        required: true
+        type: string
+      setup:
+        description: Toolchain(s) installed on the build runner (comma-separated bun/node/deno/uv, or none)
+        required: false
+        type: string
+        default: none
+      install_command:
+        description: Dependency install command run before each command-mount build ("" skips)
+        required: false
+        type: string
+        default: ""
+      build_command:
+        description: Build command for command mounts; PAGES_BASE_PATH/PAGES_ORIGIN/PAGES_VERSION are exported
+        required: false
+        type: string
+        default: ""
+      dist_dir:
+        description: Command-mount build output directory, relative to the repo root
+        required: false
+        type: string
+        default: dist
+      site_title:
+        description: Site title for vitepress mounts (empty = the repository name)
+        required: false
+        type: string
+        default: ""
+      docs_dir:
+        description: The docs tree a vitepress mount renders
+        required: false
+        type: string
+        default: docs
+      custom_domain:
+        description: Custom domain ("" = <owner>.github.io/<repo>); pass vars.CUSTOM_DOMAIN
+        required: false
+        type: string
+        default: ""
+      link_rot_label:
+        description: Tracking label for the nightly external-link check ("" disables it)
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    steps:
+      # The setup grammar is validated here because the setup steps below
+      # consume it; the mount list, build command, dist dir, and docs dir
+      # are the pages-site action's inputs and it validates them itself.
+      - name: Validate inputs
+        env:
+          SETUP: ${{ inputs.setup }}
+        run: |
+          case "$SETUP" in
+            ''|*[!a-z,]*|,*|*,|*,,*)
+              echo "::error::invalid setup input '$SETUP': it must be a comma-separated list of bun/node/deno/uv, or none (no spaces or empty tokens). Fix the setup value in the workflow that calls reusable-pages.yml."; exit 1 ;;
+          esac
+          seen=,
+          IFS=','
+          for tool in $SETUP; do
+            case "$tool" in
+              bun|node|deno|uv|none) ;;
+              *) echo "::error::invalid setup token '$tool': setup selects the build toolchain(s) and each token must be bun, node, deno, uv, or none. Fix the setup value in the workflow that calls reusable-pages.yml."; exit 1 ;;
+            esac
+            case "$seen" in
+              *",$tool,"*) echo "::error::duplicate setup token '$tool'. Fix the setup value in the workflow that calls reusable-pages.yml."; exit 1 ;;
+            esac
+            seen="$seen$tool,"
+          done
+          unset IFS
+          case ",$SETUP," in
+            *,none,*)
+              if [ "$SETUP" != "none" ]; then
+                echo "::error::setup 'none' cannot be combined with toolchain tokens. Fix the setup value in the workflow that calls reusable-pages.yml."; exit 1
+              fi ;;
+          esac
+
+      # One full checkout serves every tier: the action reads version tags
+      # and per-ref trees from history (git archive), which needs
+      # fetch-depth 0. A push builds its own commit; schedule and dispatch
+      # pin to the default branch head.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'push' && github.sha || github.event.repository.default_branch }}
+
+      # Delimiter-aware token match, so future tokens sharing a prefix (e.g.
+      # a hypothetical bunx) cannot false-positive a plain contains().
+      # Every tier builds with the toolchain the checkout's version dotfile
+      # pins (historical tags build with today's pin, deliberately - one
+      # toolchain per run); without the dotfile the setup action's default
+      # floats.
+      - name: Setup bun
+        if: contains(format(',{0},', inputs.setup), ',bun,')
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: ${{ hashFiles('.bun-version') != '' && '.bun-version' || '' }}
+
+      - name: Cache bun dependencies
+        if: contains(format(',{0},', inputs.setup), ',bun,')
+        uses: actions/cache@v6
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('**/bun.lock') }}
+          restore-keys: bun-${{ runner.os }}-
+
+      # node and uv have no cache step, and setup-deno's built-in DENO_DIR
+      # cache (used by the template's own deno steps) is not enabled here.
+      # setup-node's own package-manager-cache is switched off: it defaults
+      # on, and when package.json declares a package manager it hard-fails
+      # unless the lockfile sits at the workspace root.
+      - name: Setup node
+        if: contains(format(',{0},', inputs.setup), ',node,')
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: ${{ hashFiles('.node-version') != '' && '.node-version' || '' }}
+          package-manager-cache: false
+
+      - name: Setup deno
+        if: contains(format(',{0},', inputs.setup), ',deno,')
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version-file: ${{ hashFiles('.dvmrc') != '' && '.dvmrc' || '' }}
+
+      - name: Setup uv
+        if: contains(format(',{0},', inputs.setup), ',uv,')
+        uses: astral-sh/setup-uv@v10.0.1
+
+      - name: Build and assemble the site
+        id: site
+        uses: Vivswan/repo-platform/actions/pages-site@build
+        with:
+          mounts: ${{ inputs.mounts }}
+          docs-dir: ${{ inputs.docs_dir }}
+          site-title: ${{ inputs.site_title }}
+          install-command: ${{ inputs.install_command }}
+          build-command: ${{ inputs.build_command }}
+          dist-dir: ${{ inputs.dist_dir }}
+          max-versions: ${{ vars.PAGES_MAX_VERSIONS || '5' }}
+          custom-domain: ${{ inputs.custom_domain }}
+
+      - uses: actions/configure-pages@v6
+
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: ${{ steps.site.outputs.site-dir }}
+
+      - id: deployment
+        uses: actions/deploy-pages@v5
+
+  # Nightly link rot, as its OWN job: the deploy job above executes
+  # caller-authored build commands, so its token never carries issues
+  # write - this job crawls the artifact that actually shipped (the
+  # github-pages artifact the deploy published) and files findings on the
+  # tracking-issue stream: open issue on rot, closed on a clean night.
+  link-rot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: deploy
+    if: github.event_name == 'schedule' && inputs.link_rot_label != ''
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Download the deployed artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: github-pages
+
+      - name: Extract the deployed artifact
+        run: mkdir -p _site && tar -xf artifact.tar -C _site
+
+      - name: Check external links
+        id: links
+        uses: Vivswan/repo-platform/actions/pages-site/check-links@build
+        with:
+          site-dir: _site
+
+      - name: Upload the link-rot report
+        if: steps.links.outputs.broken != '0'
+        uses: actions/upload-artifact@v7
+        with:
+          name: link-rot-${{ github.run_attempt }}
+          path: ${{ steps.links.outputs.report-dir }}
+          if-no-files-found: ignore
+
+      - name: File or update the link-rot issue
+        if: steps.links.outputs.broken != '0'
+        uses: Vivswan/repo-platform/actions/fuzz-issue@build
+        with:
+          mode: report
+          label: ${{ inputs.link_rot_label }}
+          title: Docs site link rot
+          artifacts-dir: ${{ steps.links.outputs.report-dir }}
+          artifact-name: link-rot-${{ github.run_attempt }}
+          # The stream's create tuple, anchored to templates/docs-site/
+          # module.yml tracking_label by check_ssot's issue-labels rule.
+          label-color: "D4A72C"
+          label-description: Automated docs-site link-rot report
+          stream: generic
+
+      - name: Close the link-rot issue on a clean night
+        if: steps.links.outputs.broken == '0'
+        uses: Vivswan/repo-platform/actions/fuzz-issue@build
+        with:
+          mode: resolve
+          label: ${{ inputs.link_rot_label }}
+          stream: generic
