@@ -144,7 +144,7 @@ modules:
     deno - Deno toolchain (deno fmt/lint, deno dependabot, CodeQL JS): deno
     uv - Python/uv toolchain (gitignore, dependabot, CodeQL Python): uv
     rust - Rust/cargo toolchain (cargo dependabot, Rust gitignore; no CodeQL): rust
-    pages - GitHub Pages deploy of the repo's own build (root = newest version tag, /latest/ = main): pages
+    pages - GitHub Pages deploy of the repo's own build (root = newest served version tag, /latest/ = main): pages
     docs-site - VitePress docs site from docs/ under the central fleet theme (repos carry only markdown): docs-site
     release-please - gate-downstream release job in ci.yml + autorelease labels: release-please
     issue-templates - bug/feature issue forms: issue-templates

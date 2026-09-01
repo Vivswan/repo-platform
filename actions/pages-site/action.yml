@@ -2,8 +2,10 @@ name: Pages Site
 description: >-
   Assembles the fleet's versioned GitHub Pages site artifact. Enumerates the
   repository's version tags (plain vX.Y.Z) and builds every mount's tiers -
-  /latest/ from HEAD, one directory per kept tag, and the mount root serving
-  the newest version (or redirecting to latest/ while no tags exist). A
+  /latest/ from HEAD, one directory per served tag (a tag that structurally
+  cannot build - docs tree missing, build script undeclared - is skipped
+  with a notice), and the mount root serving the newest served version (or
+  redirecting to latest/ while none serve). A
   mount's content comes from the bundled VitePress build over the caller's
   docs tree (source vitepress; the config and theme live in this action, the
   caller carries only markdown) or from the caller's own build command

@@ -43,7 +43,7 @@ repo-platform manages standards files, CI workflows, and repository settings acr
 
 ### Modules
 
-5. [Pages](pages.md) - the managed GitHub Pages deploy: a versioned site of the repo's own build (root = newest tag, latest/ = main).
+5. [Pages](pages.md) - the managed GitHub Pages deploy: a versioned site of the repo's own build (root = newest served tag, latest/ = main).
 6. [Docs site](docs-site.md) - the repo's docs/ markdown as a versioned VitePress site under the central fleet theme.
 7. [Skills](skills.md) - hosting agent skills with fleet-managed validation.
 8. [Fuzzer](fuzzer.md) - the nightly fuzz starter and its failure-report contract.

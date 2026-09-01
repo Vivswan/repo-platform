@@ -25,7 +25,7 @@ Managed: `ci.yml` and its standard jobs, `dependabot.yml` (github-actions ecosys
 
 ## pages
 
-- Managed: `pages.yml` caller (deploys through repo-platform's `reusable-pages.yml`): ONE versioned Pages site of the repo's own build - root = newest `vX.Y.Z` tag (redirect to `/latest/` before the first tag), `/latest/` = main, one directory per kept tag (`PAGES_MAX_VERSIONS` repo variable, default 5).
+- Managed: `pages.yml` caller (deploys through repo-platform's `reusable-pages.yml`): ONE versioned Pages site of the repo's own build - root = newest served `vX.Y.Z` tag (redirect to `/latest/` while none serve), `/latest/` = main, one directory per served tag (`PAGES_MAX_VERSIONS` repo variable, default 5; a tag that structurally cannot build is skipped with a notice - repo-platform's `docs/pages.md`).
 - Parameters (asked when selected; defaults derived from the selected toolchains): `pages_setup`, `pages_install_command`, `pages_build_command` (must be nonempty), `pages_dist_dir`. Details and the build contract (`PAGES_BASE_PATH`, `PAGES_ORIGIN`, `PAGES_VERSION`): repo-platform's `docs/pages.md`.
 - Companion step (one-time, needs repo settings access; automatic with `settings-sync` - the module's settings layer enables Pages): Settings -> Pages -> Source: GitHub Actions.
 - With `docs-site` also selected, the website turns unversioned at `/` and the docs mount versioned at `/<docs_site_path>/`, all in this one workflow.

@@ -24,7 +24,7 @@ One line each, from the choices descriptions:
 - `deno`: Deno toolchain (deno fmt/lint, deno dependabot, CodeQL JS)
 - `uv`: Python/uv toolchain (gitignore, dependabot, CodeQL Python)
 - `rust`: Rust/cargo toolchain (cargo dependabot, Rust gitignore; no CodeQL)
-- `pages`: GitHub Pages deploy of the repo's own build (root = newest version tag, /latest/ = main)
+- `pages`: GitHub Pages deploy of the repo's own build (root = newest served version tag, /latest/ = main)
 - `docs-site`: VitePress docs site from docs/ under the central fleet theme (repos carry only markdown)
 - `release-please`: release job on top of all-green + autorelease labels
 - `issue-templates`: bug/feature issue forms
@@ -58,7 +58,7 @@ Asked only when the module is selected.
 | `pages_build_command` | The build; must not be empty. `PAGES_BASE_PATH`, `PAGES_ORIGIN`, `PAGES_VERSION` are exported | per toolchain, e.g. `bun run build` |
 | `pages_dist_dir` | Build output directory (plain relative path) | `dist` |
 
-The site is versioned from the repo's `vX.Y.Z` tags: root = newest tag (a redirect to `/latest/` before the first one), `/latest/` = main, one directory per kept tag (the `PAGES_MAX_VERSIONS` repo variable caps it, default 5). One-time repo setup afterwards: Settings -> Pages -> Source: GitHub Actions - automatic when settings-sync is selected (the module's settings layer enables Pages).
+The site is versioned from the repo's `vX.Y.Z` tags: root = newest served tag (a redirect to `/latest/` while none serve), `/latest/` = main, one directory per served tag (the `PAGES_MAX_VERSIONS` repo variable caps it, default 5; a tag that structurally cannot build is skipped with a notice - repo-platform's docs/pages.md). One-time repo setup afterwards: Settings -> Pages -> Source: GitHub Actions - automatic when settings-sync is selected (the module's settings layer enables Pages).
 
 ### docs-site
 

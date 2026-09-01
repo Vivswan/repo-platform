@@ -37,7 +37,7 @@ One line each. The roster's source of truth is the module manifests (`templates/
 | `deno` | Deno toolchain (deno fmt/lint, deno dependabot, CodeQL JS) |
 | `uv` | Python/uv toolchain (gitignore, dependabot, CodeQL Python) |
 | `rust` | Rust/cargo toolchain (cargo dependabot, Rust gitignore; no CodeQL) |
-| `pages` | GitHub Pages deploy of the repo's own build (root = newest tag, /latest/ = main) |
+| `pages` | GitHub Pages deploy of the repo's own build (root = newest served tag, /latest/ = main) |
 | `docs-site` | docs/ markdown as a versioned VitePress site under the central fleet theme |
 | `release-please` | release job on top of all-green + autorelease labels |
 | `issue-templates` | bug/feature issue forms |

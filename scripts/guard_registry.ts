@@ -411,6 +411,16 @@ export const GUARD_REGISTRY: readonly GuardEntry[] = [
     testFile: "actions/pages-site/pages-site.test.ts",
     testName: "the dead-link strictness wiring is ARMED: HEAD tiers build strict, tags lenient",
   },
+  {
+    id: "pages-legacy-tag-skip-narrow",
+    hazard:
+      "the structural probe rewired to skip every tag: versioned tiers and their versions.json entries silently vanish from the deployed site on a green run, and the loud failure a broken-but-declared build owes the operator never fires because nothing builds at all",
+    guardFile: "actions/pages-site/lib.ts",
+    snippet: 'return typeof pkg.scripts[script] === "string";',
+    mutated: "return false;",
+    testFile: "actions/pages-site/pages-site.test.ts",
+    testName: "the legacy-tag skip is NARROW: a tag declaring the build script is never skipped",
+  },
 ];
 
 /** A guard retired ON PURPOSE: its id moved here from GUARD_REGISTRY

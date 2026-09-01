@@ -1,9 +1,10 @@
 # Reusable GitHub Pages deploy: ONE versioned Pages site assembled by the
 # pages-site action (actions/pages-site@build) from a mount list.
 #   Per versioned mount: <mount>latest/ builds from the default branch head,
-#   <mount><tag>/ from each kept version tag (vX.Y.Z, newest
-#   vars.PAGES_MAX_VERSIONS or 5), and the mount root serves the newest
-#   version - or redirects to latest/ while no version tags exist.
+#   <mount><tag>/ from each served version tag (vX.Y.Z, newest
+#   vars.PAGES_MAX_VERSIONS or 5; a tag that structurally cannot build is
+#   skipped with a notice), and the mount root serves the newest served
+#   version - or redirects to latest/ while none serve.
 #   An unversioned mount is one build of the default branch head.
 # Command mounts run the caller's build with PAGES_BASE_PATH, PAGES_ORIGIN,
 # and PAGES_VERSION exported; vitepress mounts render the caller's docs tree

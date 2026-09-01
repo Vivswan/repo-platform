@@ -35,8 +35,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   assemblyOrder,
+  judgeCommandTag,
   type Mount,
   mountRel,
+  parseCommandProbe,
   parseMounts,
   planMount,
   redirectHtml,
@@ -90,6 +92,28 @@ function capture(argv: string[], cwd?: string): string {
  *  "absent" the way a plain exit-code probe would. */
 function treeHas(cfg: Config, ref: string, path: string): boolean {
   return capture(["git", "-C", cfg.workspace, "ls-tree", ref, "--", path]).trim() !== "";
+}
+
+/** The file's content at `ref`, or null when the tree has no such path
+ *  or the entry is not a regular file - `git show` on a SYMLINK yields
+ *  its target path text, which must never be judged as content (a target
+ *  spelled like valid JSON would judge the link instead of the file it
+ *  reaches). Any other git failure still throws via capture. */
+function treeFile(cfg: Config, ref: string, path: string): string | null {
+  const entry = capture(["git", "-C", cfg.workspace, "ls-tree", ref, "--", path]).trim();
+  if (entry === "") return null;
+  const mode = entry.split(" ")[0];
+  if (mode !== "100644" && mode !== "100755") return null;
+  return capture(["git", "-C", cfg.workspace, "show", `${ref}:${path}`]);
+}
+
+/** Every path in `ref`'s tree. NUL-delimited on purpose: without -z git
+ *  C-quotes non-ASCII paths, and a quoted package.json would vanish from
+ *  the probe's candidate set. */
+function listTree(cfg: Config, ref: string): string[] {
+  return capture(["git", "-C", cfg.workspace, "ls-tree", "-r", "--name-only", "-z", ref])
+    .split("\0")
+    .filter((line) => line !== "");
 }
 
 /** A generated file the layout owns (versions.json, the redirect page,
@@ -379,9 +403,53 @@ function eligibleDocsTags(cfg: Config, kept: string[]): string[] {
   });
 }
 
+/** The version tags a command mount can serve: kept tags whose tree can
+ *  structurally run the build command - for a probeable `bun run <script>`
+ *  shape, some package.json the command can reach declares the script at
+ *  that tag (lib.ts's judgeCommandTag carries the proof rules and
+ *  the dependency-bin residual). A tag from before the site's build
+ *  script existed is guaranteed unbuildable forever and would fail every
+ *  deploy, so it is excluded with a notice (the vitepress mounts'
+ *  missing-docs rule, mirrored); a tag that declares the script but whose
+ *  build errors still fails the deploy loudly. An unprobeable command
+ *  keeps every tag - only the shell can judge it. */
+function eligibleCommandTags(cfg: Config, kept: string[]): string[] {
+  if (kept.length === 0) return kept;
+  const probe = parseCommandProbe(cfg.buildCommand);
+  if (probe === null) return kept;
+  const judgeAt = (ref: string) =>
+    judgeCommandTag(
+      probe,
+      (path) => treeFile(cfg, ref, path),
+      () => listTree(cfg, ref),
+    );
+  // Calibration: skipping is armed only by the AFFIRMATIVE verdict at
+  // HEAD - a scripts entry there proves the command resolves through the
+  // scripts table at all. A command that works some other way (a
+  // dependency bin, a PATH executable, a file named like the script)
+  // declares nothing at HEAD, and an inconclusive HEAD (a symlinked cwd,
+  // an unparseable package.json) proves nothing either; both keep every
+  // tag building. An install command that rewrites package.json at build
+  // time stays the documented residual (the probe reads committed trees
+  // only).
+  if (judgeAt("HEAD").kind !== "declared") return kept;
+  return kept.filter((tag) => {
+    const verdict = judgeAt(tag);
+    if (verdict.kind !== "skip") return true;
+    console.log(`::notice::site version ${tag} skipped: ${verdict.reason}`);
+    return false;
+  });
+}
+
 function assembleMount(cfg: Config, mount: Mount, kept: string[]): void {
-  const tags = mount.source === "vitepress" ? eligibleDocsTags(cfg, kept) : kept;
-  const plan = planMount(mount, mount.versioned ? tags : []);
+  // Eligibility only matters (and only prints its notices) where tags are
+  // served; an unversioned mount builds HEAD alone.
+  const tags = !mount.versioned
+    ? []
+    : mount.source === "vitepress"
+      ? eligibleDocsTags(cfg, kept)
+      : eligibleCommandTags(cfg, kept);
+  const plan = planMount(mount, tags);
   const links = mount.versioned ? versionLinks(cfg.rootBase, mount, tags) : [];
   const mountRoot = join(cfg.site, mountRel(mount.path));
   const reserved = reservedRootEntries(tags);
@@ -413,7 +481,9 @@ function assembleMount(cfg: Config, mount: Mount, kept: string[]): void {
         redirectHtml("./latest/"),
         `mount '${mount.path}' redirect page`,
       );
-      console.log(`::notice::no version tags yet: ${mount.path} redirects to ${mount.path}latest/`);
+      console.log(
+        `::notice::no version tags to serve: ${mount.path} redirects to ${mount.path}latest/`,
+      );
     }
   }
 }

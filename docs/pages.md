@@ -4,12 +4,12 @@ Selecting the `pages` module gives a repository a managed `pages.yml` workflow t
 
 | URL | Built from | Content changes when |
 |---|---|---|
-| `https://<owner>.github.io/<repo>/` | the newest version tag (before the first tag: a redirect to `latest/`) | a new version tag exists |
+| `https://<owner>.github.io/<repo>/` | the newest served version tag (none served - no tags yet, or all skipped: a redirect to `latest/`) | a new version tag exists |
 | `.../<repo>/latest/` | the default branch head | every deploy |
-| `.../<repo>/vX.Y.Z/` | that tag, one directory per kept tag | the pipeline or theme changes (every deploy rebuilds all tiers; the source tag itself is immutable) |
-| `.../<repo>/versions.json` | the version index (machine-readable) | the tag set changes |
+| `.../<repo>/vX.Y.Z/` | that tag, one directory per served tag | the pipeline or theme changes (every deploy rebuilds all tiers; the source tag itself is immutable) |
+| `.../<repo>/versions.json` | the version index (machine-readable) | the served tag set changes |
 
-Versions are the repository's plain `vX.Y.Z` git tags - exactly what the release-please module tags releases with - newest first, the newest `PAGES_MAX_VERSIONS` of them (a repo Actions variable; unset means 5). Every deploy rebuilds every tier from scratch, so a pipeline or content fix restyles the whole site on the next run; the cost bound is `PAGES_MAX_VERSIONS + 2` builds per deploy (the kept tags, `latest/`, and the root's own build of the newest tag).
+Versions are the repository's plain `vX.Y.Z` git tags - exactly what the release-please module tags releases with - newest first, the newest `PAGES_MAX_VERSIONS` of them (a repo Actions variable; unset means 5). Every deploy rebuilds every tier from scratch, so a pipeline or content fix restyles the whole site on the next run; the cost bound is `PAGES_MAX_VERSIONS + 2` builds per deploy (the served tags, `latest/`, and the root's own build of the newest served tag).
 
 The workflow deploys on every push to the default branch, nightly (04:23 UTC), and on manual dispatch. There is no tag trigger: a tag created without a push (release-please publishing, a manual tag) lands on the nightly rebuild, or immediately via dispatch.
 
@@ -36,7 +36,7 @@ The build command runs once per tier with three environment variables exported; 
 
 - `PAGES_BASE_PATH`: the base path this tier is served under (`/<repo>/`, `/<repo>/latest/`, `/<repo>/vX.Y.Z/`, or the `/`-rooted equivalents with a custom domain)
 - `PAGES_ORIGIN`: the absolute origin (`https://<owner>.github.io` or `https://<domain>`), for sitemaps/canonical/og URLs
-- `PAGES_VERSION`: what this tier is - `latest`, the tag (`vX.Y.Z`, also for the root tier, which builds the newest tag), or empty for an unversioned mount (see the composed layout below)
+- `PAGES_VERSION`: what this tier is - `latest`, the tag (`vX.Y.Z`, also for the root tier, which builds the newest served tag), or empty for an unversioned mount (see the composed layout below)
 
 Examples:
 
@@ -60,6 +60,6 @@ To go back, undo all three (in particular, remove the variable AND clear the cus
 
 ## Caveats
 
-- Historical tags build with TODAY'S build command and toolchain pins (the checkout's version dotfiles - see [toolchains.md](toolchains.md)). A kept tag whose tree no longer builds fails the whole deploy loudly; lower `PAGES_MAX_VERSIONS` below the broken tag's position, or fix the build command.
+- Historical tags build with TODAY'S build command and toolchain pins (the checkout's version dotfiles - see [toolchains.md](toolchains.md)). For a statically probeable command (`bun run <script>`, optionally with one plain-relative `--cwd` or one name-shaped `--filter` before the script), a tag is skipped with a notice and left out of `versions.json` when the package.json `bun run` resolves at that tag (the nearest one walking up from the command's cwd; for `--filter`: the workspace package of that name) does not declare the script, when the `--cwd` directory is absent, or when no package.json is reachable - and only when HEAD itself declares the script, so a command resolving through bun's other fallbacks (a dependency bin, a PATH executable) keeps building every kept tag; an install step that rewrites `package.json` at build time is not modeled. Any other command shape also builds every kept tag. A kept tag that declares the script but no longer builds still fails the whole deploy loudly; lower `PAGES_MAX_VERSIONS` below the broken tag's position, or fix the build command.
 - Serving Pages from a private repository requires a paid GitHub plan, and the served site is PUBLIC on non-Enterprise plans - selecting the module is the opt-in to that.
 - Prerelease-shaped tags (`v1.0.0-rc.1`) are not versions; only plain `vX.Y.Z` tags enter the version set.
