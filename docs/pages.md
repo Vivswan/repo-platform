@@ -1,13 +1,13 @@
 # The pages module
 
-Selecting the `pages` module gives a repository a managed `pages.yml` workflow that deploys GitHub Pages through repo-platform's `reusable-pages.yml`. One Pages deployment carries up to two environments:
+Selecting the `pages` module gives a repository a managed `pages.yml` workflow that deploys GitHub Pages through repo-platform's [reusable-pages.yml](../.github/workflows/reusable-pages.yml). One Pages deployment carries up to two environments:
 
 | Environment | URL | Built from | Content changes when |
 |---|---|---|---|
 | production root | `https://<owner>.github.io/<repo>/` | the latest release tag | a new release is published |
 | staging (optional) | `.../<repo>/staging/` | main HEAD | every push to main |
 
-The table shows the default `pages_production: release` mode; `pages_production: main` builds the root from main HEAD and disables staging (see caveats). The workflow itself runs on every push to main, on every published release, and on manual dispatch, and each run re-resolves the root from the latest release - so any run can pick up a release the `release:` trigger missed.
+The table shows the default `pages_production: release` mode; `pages_production: main` builds the root from main HEAD and disables staging (see [caveats](#caveats)). The workflow runs on every push to main, on every published release, and on manual dispatch, and each run re-resolves the root from the latest release - so any run can pick up a release the `release:` trigger missed.
 
 Before the first release there is no tag, so only staging publishes and the root returns GitHub's default 404. This is intended, not a failure. With `pages_staging: false` there is nothing to publish at all before the first release; those runs skip the deploy with a notice and stay green.
 
@@ -58,4 +58,4 @@ To go back, undo all three (in particular, remove the variable AND clear the cus
 - Releases published by the default `GITHUB_TOKEN` (e.g. [release-please](https://github.com/googleapis/release-please) without a PAT) do not fire `pages.yml`'s `release:` trigger. The next push to main or a manual `workflow_dispatch` picks the release up, since the root is re-resolved from the latest release on every run.
 - Serving Pages from a private repository requires a paid GitHub plan; the workflow is unchanged either way, the deploy step simply fails on a free private repo.
 - `pages_production: main` publishes main HEAD at the root and disables the staging path entirely.
-- The setup steps install the fleet-pinned toolchain version when the built source carries its version dotfile (`.bun-version` / `.node-version` / `.dvmrc` - see [docs/toolchains.md](toolchains.md)), preferring the production tree's pin over staging's; without the dotfile they float on the setup action's default.
+- The setup steps install the fleet-pinned toolchain version when the built source carries its version dotfile (`.bun-version` / `.node-version` / `.dvmrc` - see [toolchains.md](toolchains.md)), preferring the production tree's pin over staging's; without the dotfile they float on the setup action's default.

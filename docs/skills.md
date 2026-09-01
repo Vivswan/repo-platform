@@ -10,13 +10,16 @@ skills/             # the skills directory (skills_dir answer, default `skills`)
     ...             # whatever else the skill carries
 ```
 
-A skill folder is UNPUBLISHED until `plugin.json` lists it: installers and the discovery check both read the manifest, not the disk, so a folder you forgot to list validates green and silently never ships. Adding the skill means adding its path to `plugin.json`'s `skills` array, as `./skills/my-skill` (paths are checked against `skills_dir`, so a repo with `skills_dir=lib/skills` lists `./lib/skills/my-skill`).
+## Publishing a skill
+
+A skill folder is UNPUBLISHED until `plugin.json` lists it: installers and the [discovery check](#what-is-checked-and-where) both read the manifest, not the disk, so a folder you forgot to list validates green and silently never ships. Publishing means adding the folder's path to `plugin.json`'s `skills` array, as `./skills/my-skill` (paths are checked against `skills_dir`, so a repo with `skills_dir=lib/skills` lists `./lib/skills/my-skill`).
 
 ## What the module ships
 
 - `.claude-plugin/plugin.json` and `.claude-plugin/marketplace.json` starters, seeded from the repository's identity (plugin name `<project_slug>-skills`, description from the project name, the owner as author) with an empty `skills` catalog
-- a `validate-skills` structure job in repo-platform's fleet-ci gate (armed by the module selection the managed ci.yml passes), so the all-green verdict blocks merges on a broken catalog, plus a standalone advisory `.github/workflows/validate-skills.yml` for CLI discovery
-- the `validate-skills` composite action in this repository (`actions/validate-skills`), pinned at the green-gated `build` delivery branch by fleet-ci and the advisory workflow alike
+- a `validate-skills` structure job in repo-platform's fleet-ci gate, so the [all-green verdict](all-green.md) blocks merges on a broken catalog
+- a standalone advisory `.github/workflows/validate-skills.yml` for CLI discovery
+- both run the `validate-skills` composite action ([actions/validate-skills](../actions/validate-skills/validate_skills.ts)), pinned at the green-gated `build` delivery branch
 
 ## Module parameter (copier question)
 
@@ -33,28 +36,26 @@ The directory is a copier question, rather than an edit in the rendered files, b
 
 ## What is checked, and where
 
-Two checks, split by what a failure means. An empty catalog (`"skills": []`, the seeded state) passes both: a freshly adopted repo publishes nothing yet.
+Two checks, split by what a failure means. An empty catalog (`"skills": []`, the seeded state) passes both: a freshly adopted repo publishes nothing yet. `bun run validate:skills` runs the structure check locally.
 
-1. `validate-skills` - a fleet-ci job, gating merges through the all-green verdict; offline and cheap, so it runs on every PR:
-   - `plugin.json` parses with a kebab-case name, and its `skills` paths are real direct children of the skills directory
-   - every folder under the skills directory has a `SKILL.md` whose frontmatter `name` matches the kebab-case folder and whose `description` is nonempty (both within Claude Code's 64/1024-character limits)
-   - a skill's `.mcp.json` (when present) parses
-   - the skills directory carries an index `README.md` at its root (when the directory exists - a repo that publishes nothing yet has none; anything other than a directory at the path is an error)
-   - `marketplace.json` (when present) is well-formed and consistent with `plugin.json` (a plugin publishing the repository root must carry the same name)
-   - symlinks are rejected anywhere on a validated path - the skills directory (ancestor components included), skill folders, `SKILL.md`, `.mcp.json`, the index `README.md`, and the two manifests - because a link can point outside the checkout, so what ships would not be what was validated. The one exception is a marketplace plugin's `source`, which may pass through in-repo symlinks; its physical path must still stay inside the repository.
-2. `discovery` - the standalone validate-skills.yml, advisory, outside the gate: runs the real `npx -y skills add . --list` against the checkout (with bounded retries) and asserts every skill published in `plugin.json` appears in the CLI listing. It downloads the CLI from the npm registry, so it needs network and can flake on registry hiccups; an advisory red must never block merges, which is exactly why it does not live in the gate. The plugin-title group heading is only a notice: it mirrors the CLI's own formatting, which the manifest does not control.
+| Check | Where it runs | What a red means |
+|---|---|---|
+| `validate-skills` | fleet-ci job, gating merges through the all-green verdict; offline and cheap, so it runs on every PR | the catalog structure is broken |
+| `discovery` | the standalone validate-skills.yml, advisory, outside the gate | the real `npx -y skills add . --list` does not list every skill published in `plugin.json` |
 
-`bun run validate:skills` is the local structure check.
+The structure check's full rule set lives in [actions/validate-skills/validate_skills.ts](../actions/validate-skills/validate_skills.ts). Headlines: `plugin.json` parses with a kebab-case name and its `skills` paths are real direct children of the skills directory; every skill folder's `SKILL.md` frontmatter `name` matches the kebab-case folder and its `description` is nonempty (both within Claude Code's 64/1024-character limits); the skills directory carries an index `README.md` at its root; `marketplace.json` (when present) is well-formed and consistent with `plugin.json`; and symlinks are rejected anywhere on a validated path, because a link can point outside the checkout, so what ships would not be what was validated. The one exception is a marketplace plugin's `source`, which may pass through in-repo symlinks; its physical path must still stay inside the repository.
+
+Discovery downloads the CLI from the npm registry, so it needs network and can flake on registry hiccups; an advisory red must never block merges, which is exactly why it does not live in the gate.
 
 ## Dogfooding
 
 repo-platform selects `skills` in `.repo-platform-answers.yml` (its fleet-operations skills live under `skills/`, and its `.claude-plugin/` manifests are its own, repo-owned like any starter), carries the managed discovery workflow as a generated dogfood copy, and runs both modes from its hand-written ci.yml. There the discovery job gates through all-green too, per this repository's all-jobs-gate convention: a listing regression in the action it ships should block its own merges. A PR touching `skills/` therefore runs discovery twice - advisory via the dogfooded workflow, gating via ci.yml - an intended overlap.
 
-## Adopting in an existing skills repository (Vivswan/skills)
+## Adopting in an existing skills repository
 
 1. Add `skills` to the `modules` list in `.repo-platform.yml`; the next sync renders the module.
 2. The existing `.claude-plugin/` manifests survive untouched (`_skip_if_exists`), catalog included.
-3. The managed baseline coexists with the repo's richer checks: repo-specific assertions (its template-skill hiding, version-drift and catalog-coverage smoke tests, per-skill README/plugin files) stay in its own `checks.yml` machinery, exactly like any other repo-owned CI.
+3. The managed baseline coexists with the repo's richer checks: repo-specific assertions stay in its own `checks.yml` machinery, exactly like any other repo-owned CI.
 
 ## Consuming
 

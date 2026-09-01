@@ -5,7 +5,7 @@ Detaching is cheap by design: managed repos degrade to normal repos, not broken 
 | Reference | Pinned at |
 |---|---|
 | per-feature reusable-workflow calls (auto-assign, pages, settings-sync) | `@main` |
-| fleet CI, the all-green verdict, every composite-action step | `@build` (repo-platform's green-gated delivery branch) |
+| fleet CI, the [all-green verdict](all-green.md), every composite-action step | `@build` (repo-platform's green-gated delivery branch - [build-provenance.md](build-provenance.md)) |
 
 Management is push-based, so ejecting starts in repo-platform, not in the repo: stop the machinery here, then optionally strip the managed files there.
 
@@ -16,7 +16,7 @@ Either of these stops sync PRs:
 - add the repo to the `exclude:` list in `repos.yml`, or
 - revoke the fleet PAT's access to the repo (discovery only enrolls repos the token can write to).
 
-Settings stop being applied too: the nightly heal only manages enrolled repos whose `.repo-platform.yml` selects the settings-sync module.
+Settings stop being applied too: the nightly heal only manages enrolled repos whose `.repo-platform.yml` selects the settings-sync module ([settings.md](settings.md)).
 
 ## 2. (Optional) Strip the managed files in the repo
 
