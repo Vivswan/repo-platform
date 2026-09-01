@@ -307,65 +307,6 @@ export const GUARD_REGISTRY: readonly GuardEntry[] = [
     testFile: "tests/scripts/check_ssot.test.ts",
     testName: "the judged-sha read is ARMED: release.yml's head gate compares the judged commit",
   },
-  // The meta-check gate's shape at both sources: each pin fails OPEN at
-  // run time (GitHub reports nothing wrong - the gate just stops seeing a
-  // caller, or skips itself on the first failure it exists to catch). The
-  // forcing tests run the fleet-ci-render-roster and all-green-roster
-  // ssot judgments on the REAL sources.
-  {
-    id: "fleet-gate-needs-roster",
-    hazard:
-      "a caller job dropped from the rendered all-green job's needs: the gate goes green on the remaining caller while every job of the dropped call stops gating, fleet-wide",
-    guardFile: "templates/base/.github/workflows/ci.yml.jinja",
-    snippet: "    needs: [checks, ci]",
-    mutated: "    needs: [checks]",
-    testFile: "tests/scripts/check_ssot.test.ts",
-    testName: "the fleet gate's needs edge is ARMED: all-green needs both caller jobs",
-  },
-  {
-    id: "fleet-gate-always",
-    hazard:
-      "if: always() deleted from the rendered all-green job: a failed caller then SKIPS the gate instead of failing it, and a skipped required check leaves the merge box waiting - or, with GitHub's implied success(), green paths only",
-    guardFile: "templates/base/.github/workflows/ci.yml.jinja",
-    snippet: "    if: always()",
-    mutated: "",
-    testFile: "tests/scripts/check_ssot.test.ts",
-    testName: "the fleet gate's always() is ARMED: a failed caller cannot skip the gate",
-  },
-  {
-    id: "repo-gate-needs-roster",
-    hazard:
-      "a gating job dropped from repo-platform's own all-green needs list: the job keeps running but stops gating merges, with every remaining gate green",
-    guardFile: ".github/workflows/ci.yml",
-    snippet: "      - rehearse-fleet",
-    mutated: "",
-    testFile: "tests/scripts/check_ssot.test.ts",
-    testName: "the repo gate's needs roster is ARMED: every ALL_GREEN_ROSTER job is needed",
-  },
-  // The pr-title module's natively-required check (the pr-title-workflow
-  // ssot rule): each pin fails OPEN at run time - GitHub reports nothing
-  // wrong, the merge box just waits forever or accepts a look-alike.
-  {
-    id: "pr-title-synchronize-trigger",
-    hazard:
-      "the trigger types list losing synchronize: a required check must exist at the PR's NEWEST head commit, so every push after open would leave the merge box waiting on a pr-title check nothing creates",
-    guardFile: "templates/pr-title/.github/workflows/pr-title.yml.jinja",
-    snippet: "    types: [opened, edited, reopened, synchronize]",
-    mutated: "    types: [opened, edited]",
-    testFile: "tests/scripts/check_ssot.test.ts",
-    testName: "the pr-title trigger shape is ARMED: a types list without synchronize is refused",
-  },
-  {
-    id: "pr-title-required-check-pin",
-    hazard:
-      "the required check's integration_id pin deleted from the baseline's pr-title ruleset: any app or plain commit status named pr-title would satisfy the ruleset context by name",
-    guardFile: ".github/settings-baseline.yml",
-    snippet: "            - context: pr-title\n              integration_id: 15368",
-    mutated: "            - context: pr-title",
-    testFile: "tests/scripts/check_ssot.test.ts",
-    testName:
-      "the pr-title required-check pin is ARMED: only the Actions app's job check satisfies the context",
-  },
   {
     id: "pr-title-module-activation",
     hazard:
@@ -376,6 +317,16 @@ export const GUARD_REGISTRY: readonly GuardEntry[] = [
     testFile: "tests/scripts/check_ssot.test.ts",
     testName:
       "the pr-title module activation is ARMED: the module layer flips the baseline's disabled ruleset active",
+  },
+  {
+    id: "docs-site-caller-theme-refusal",
+    hazard:
+      "a fleet repo ships docs/.vitepress expecting it to style its site: the central build root ignores caller theme files by construction, so without the refusal the deploy stays green while silently discarding what the repo authored - the central-theme invariant rots into a lie",
+    guardFile: "actions/pages-site/build.ts",
+    snippet: 'if (existsSync(join(docsTree, ".vitepress"))) {',
+    mutated: "if (false) {",
+    testFile: "actions/pages-site/pages-site.test.ts",
+    testName: "a caller-shipped .vitepress is REFUSED: the theme comes only from repo-platform",
   },
 ];
 

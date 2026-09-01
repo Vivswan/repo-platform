@@ -16,6 +16,7 @@ updates:
       - "/actions/check-typography"
       - "/actions/dependency-review"
       - "/actions/fuzz-issue"
+      - "/actions/pages-site"
       - "/actions/release-health"
       - "/actions/validate-commit-names"
       - "/actions/validate-skills"
@@ -73,6 +74,19 @@ updates:
   # Dev-only manifest (@types/bun, typescript) for the fuzz-issue action.
   - package-ecosystem: "bun"
     directory: "/actions/fuzz-issue"
+    schedule:
+      interval: "monthly"
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: "build"
+      include: "scope"
+
+  # Runtime deps of the pages-site action (vitepress - pinned EXACT while
+  # 2.x is prerelease, so a bump is always a deliberate PR - plus the llms
+  # plugin, linkinator, vue) and its dev-only typing manifest.
+  - package-ecosystem: "bun"
+    directory: "/actions/pages-site"
     schedule:
       interval: "monthly"
     cooldown:
