@@ -1,6 +1,6 @@
 # yaml-language-server: $schema=../module.schema.json
 # Module manifest (schema and loader: scripts/module_manifests.ts).
-description: verdict-gated release job in the all-green wrapper + autorelease labels
+description: gate-downstream release job in ci.yml + autorelease labels
 ownership:
   - { path: .github/workflows/release.yml, class: managed }
   - { path: .github/workflows/update-release-pr.yml, class: starter }

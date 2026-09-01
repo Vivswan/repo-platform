@@ -2317,8 +2317,9 @@ export function stepCarriesWithKey(lines: string[], usesAt: number, key: string)
  *  gating with nothing to notice it; this roster is where that deletion
  *  becomes loud. Adding a gating job means adding it here AND to the
  *  needs list; removing one means removing both entries in the same
- *  change, deliberately. Jobs named `info-*` and jobs downstream of the
- *  gate (post-green) are the opt-outs and never appear here. */
+ *  change, deliberately. Jobs downstream of the gate (post-green) are
+ *  the one exemption and never appear here; the verdict era's info-*
+ *  opt-out died with the verdict - every other job gates. */
 export const ALL_GREEN_ROSTER = [
   "actionlint",
   "actionlint-binary",
@@ -2349,7 +2350,8 @@ export const ALL_GREEN_ROSTER = [
  *  roster is a gate the roster never vouched for, and a roster entry with
  *  no job is a REMOVED gate - the sneaky case, where deleting the job
  *  would otherwise change nothing the gate can see. Callers hand in the
- *  GATING job list (info-* and the gate's own jobs already excluded). */
+ *  GATING job list (the gate's own and downstream jobs already
+ *  excluded). */
 export function rosterMismatches(
   roster: string[],
   gating: string[],
@@ -2429,9 +2431,7 @@ export function allGreenGateMismatches(
       .filter(([name, job]) => name !== "all-green" && jobNeeds(job).includes("all-green"))
       .map(([name]) => name),
   );
-  const gating = Object.keys(jobs).filter(
-    (name) => name !== "all-green" && !downstream.has(name) && !name.startsWith("info-"),
-  );
+  const gating = Object.keys(jobs).filter((name) => name !== "all-green" && !downstream.has(name));
   mismatches.push(...rosterMismatches(roster, gating, site));
   const gateRecord = asRecord(gate, "all-green");
   const needs = jobNeeds(gateRecord);
@@ -4283,11 +4283,10 @@ const rules: Rule[] = [
     run: () => {
       const rel = ".github/workflows/fleet-ci.yml";
       const jobs = ciJobs(asRecord(parseYaml(read(rel)), rel), rel);
-      const mismatches = rosterMismatches(
-        FLEET_CI_ROSTER,
-        Object.keys(jobs).filter((name) => !name.startsWith("info-")),
-        { jobsFile: rel, rosterName: "FLEET_CI_ROSTER" },
-      );
+      const mismatches = rosterMismatches(FLEET_CI_ROSTER, Object.keys(jobs), {
+        jobsFile: rel,
+        rosterName: "FLEET_CI_ROSTER",
+      });
       for (const [name, raw] of Object.entries(jobs)) {
         const job = asRecord(raw ?? {}, name);
         if (name.startsWith("info-")) {

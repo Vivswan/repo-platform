@@ -160,7 +160,7 @@ describe("fleet-ci.yml", () => {
     expect(source).not.toContain("sleep ");
   });
 
-  test("no job is named all-green or info-* (the check name is the verdict's; info opts out)", () => {
+  test("no job is named all-green or info-* (the gate job owns the name; the info opt-out is retired)", () => {
     for (const name of Object.keys(fleetCi.jobs)) {
       expect(name).not.toBe("all-green");
       expect(name.startsWith("info-")).toBe(false);

@@ -860,10 +860,6 @@ jobs:
   b:
     runs-on: ubuntu-latest
     steps: [{ run: echo b }]
-  info-preview:
-    if: false
-    runs-on: ubuntu-latest
-    steps: [{ run: echo advisory }]
   all-green:
     needs: [a, b]
     if: always()
@@ -879,7 +875,7 @@ jobs:
     uses: ./.github/workflows/post-green.yml
 `;
 
-  test("the compliant shape passes (info-* and downstream jobs exempt from the roster)", () => {
+  test("the compliant shape passes (downstream jobs exempt from the roster)", () => {
     expect(allGreenGateMismatches(doc(valid), ["a", "b"])).toEqual([]);
   });
 
