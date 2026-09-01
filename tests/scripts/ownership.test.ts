@@ -874,9 +874,10 @@ describe("moduleOwnershipEntries", () => {
   });
 
   test("an enforceable filename-gated module file throws instead of silently dropping out", () => {
-    // The module tables carry no render conditions, so the old behavior -
-    // skipping gated files - exempted them from enforcement with nothing
-    // said. A gated STARTER stays fine: there is nothing to enforce.
+    // The module tables carry no render conditions (the composer refuses
+    // module filename gates outright), so the old behavior - skipping
+    // gated files - exempted them from enforcement with nothing said.
+    // A gated STARTER stays fine: there is nothing to enforce.
     const dir = writeTree({
       "bun/managed.yml.jinja": `${HEADER}name: M\n`,
       "bun/{% if not private %}gated.yml{% endif %}.jinja": `${HEADER}name: G\n`,

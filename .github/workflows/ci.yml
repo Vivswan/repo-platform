@@ -324,7 +324,7 @@ jobs:
           # opt-out (no fleet license rendered) is exercised; every other
           # row covers the default fleet-license render.
           - name: everything
-            modules: "[agents, bun, node, deno, uv, rust, pages, release-please, issue-templates, skills, pr-title, auto-assign, fuzzer, nightly, settings-sync, custom-license]"
+            modules: "[agents, bun, node, deno, uv, rust, pages, docs-site, release-please, issue-templates, skills, pr-title, auto-assign, fuzzer, nightly, settings-sync, custom-license]"
             private: "false"
             expect_in_pages: |
               setup: bun,node,deno,uv
@@ -405,8 +405,6 @@ jobs:
             expect_in_pages: |
               uv sync
               uv run mkdocs build --site-dir dist
-              production: release
-              staging: true
           # The only row where bun renders private: the bun fragments'
           # enable_codeql=false branches must emit no CodeQL wiring in
           # ci.yml, settings.yml must still declare `private: true`
@@ -418,11 +416,19 @@ jobs:
           - name: pages-bare
             modules: "[pages, auto-assign]"
             private: "false"
-            extra_data: "-d pages_setup=none -d pages_build_command=./build.sh -d pages_production=main"
+            extra_data: "-d pages_setup=none -d pages_build_command=./build.sh"
             expect_in_pages: |
               ./build.sh
-              production: main
-              staging: false
+              setup: none
+          # docs-site alone: docs-site.yml carries the PR check job AND the
+          # deploy (no pages module to ride); the composed shape - pages.yml
+          # carrying the docs mount while docs-site.yml renders down to the
+          # check job - is the everything row's leg. settings-sync rides
+          # along so the module's OWN Pages-enablement layer is asserted
+          # without the pages module's identical layer masking it.
+          - name: docs-only
+            modules: "[docs-site, settings-sync]"
+            private: "false"
           # Proves the declared _min_copier_version still supports the
           # multiselect + when features the template uses (serialized
           # multiselect answers landed in copier 9.8.0).

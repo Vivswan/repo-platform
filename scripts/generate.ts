@@ -597,6 +597,7 @@ function proseList(items: string[]): string {
  *  gets its guide listed here when the guide lands. */
 export const MODULE_PARAM_DOCS: Record<string, string> = {
   pages: "pages.md",
+  "docs-site": "docs-site.md",
   fuzzer: "fuzzer.md",
   nightly: "nightly.md",
   skills: "skills.md",

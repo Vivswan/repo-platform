@@ -75,6 +75,7 @@ export const MODULE_ORDER = [
   "uv",
   "rust",
   "pages",
+  "docs-site",
   "release-please",
   "issue-templates",
   "skills",

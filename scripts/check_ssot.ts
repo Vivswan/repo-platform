@@ -4161,6 +4161,31 @@ const rules: Rule[] = [
           got: `${starterColor} / ${starterDescription}`,
         });
       }
+
+      // The docs-site stream's create tuple is passed by the shared deploy
+      // (reusable-pages.yml files the link-rot issue for every caller).
+      const docsTracking = trackingManifests().find((m) => m.module === "docs-site")?.tracking;
+      if (!docsTracking) throw new Error("templates/docs-site/module.yml lost tracking_label");
+      const reusablePages = read(".github/workflows/reusable-pages.yml");
+      const rotColor = mustMatch(
+        reusablePages,
+        /label-color: "([^"]+)"/,
+        "reusable-pages.yml",
+        "label-color input",
+      )[1];
+      const rotDescription = mustMatch(
+        reusablePages,
+        /label-description: (.+)/,
+        "reusable-pages.yml",
+        "label-description input",
+      )[1];
+      if (rotColor !== docsTracking.color || rotDescription !== docsTracking.description) {
+        mismatches.push({
+          file: ".github/workflows/reusable-pages.yml label overrides",
+          expected: `${docsTracking.color} / ${docsTracking.description} (templates/docs-site/module.yml tracking_label)`,
+          got: `${rotColor} / ${rotDescription}`,
+        });
+      }
       return mismatches;
     },
   },
@@ -4878,6 +4903,23 @@ const rules: Rule[] = [
               got: "missing",
             });
           }
+        }
+      }
+      // Copier asks questions in FILE order, and each stream's generated
+      // validator references every earlier stream's answer, so the
+      // questions must physically follow the streams' MODULE_ORDER - out
+      // of order, the earlier validator reads a not-yet-answered question
+      // and every render fails at the prompt.
+      const questionKeys = Object.keys(copierConfig());
+      for (let index = 1; index < streams.length; index++) {
+        const prev = streams[index - 1].tracking.answer;
+        const next = streams[index].tracking.answer;
+        if (questionKeys.indexOf(next) < questionKeys.indexOf(prev)) {
+          mismatches.push({
+            file: "copier.yml",
+            expected: `the '${next}' question declared after '${prev}' (stream order; validators reference earlier answers)`,
+            got: "declared before it",
+          });
         }
       }
       return mismatches;

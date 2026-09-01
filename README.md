@@ -18,7 +18,7 @@ Which files the template owns, and how strongly, is declared as data rather than
 
 ## Modules<!-- BEGIN GENERATED: module-roster (scripts/generate.ts - edit module.yml manifests, not this block) -->
 
-- Modules (pick any combination): `agents`, `bun`, `node`, `deno`, `uv`, `rust`, `pages`, `release-please`, `issue-templates`, `skills`, `pr-title`, `auto-assign`, `fuzzer`, `nightly`, `settings-sync`, `custom-license`. Modules with parameters (like `pages`) ask follow-up questions only when selected. After generation, module selection lives in each repo's own `.repo-platform.yml`: edit its `modules:` list and the next sync applies the change.<!-- END GENERATED: module-roster -->
+- Modules (pick any combination): `agents`, `bun`, `node`, `deno`, `uv`, `rust`, `pages`, `docs-site`, `release-please`, `issue-templates`, `skills`, `pr-title`, `auto-assign`, `fuzzer`, `nightly`, `settings-sync`, `custom-license`. Modules with parameters (like `pages`) ask follow-up questions only when selected. After generation, module selection lives in each repo's own `.repo-platform.yml`: edit its `modules:` list and the next sync applies the change.<!-- END GENERATED: module-roster -->
 
 ## Onboarding a repo
 

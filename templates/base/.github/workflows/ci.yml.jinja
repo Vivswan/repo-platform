@@ -54,8 +54,8 @@ jobs:
 {%- endif %}
 {# compose:codeql-languages #}
 {#- BEGIN GENERATED: tracking-labels (scripts/generate.ts - edit module.yml manifests, not this block) #}
-{%- if 'fuzzer' in modules or 'nightly' in modules %}
-      tracking-labels: {{ (([fuzzer_label] if 'fuzzer' in modules else []) + ([nightly_label] if 'nightly' in modules else [])) | join(',') | tojson }}
+{%- if 'docs-site' in modules or 'fuzzer' in modules or 'nightly' in modules %}
+      tracking-labels: {{ (([docs_site_label] if 'docs-site' in modules else []) + ([fuzzer_label] if 'fuzzer' in modules else []) + ([nightly_label] if 'nightly' in modules else [])) | join(',') | tojson }}
 {%- endif %}
 {#- END GENERATED: tracking-labels #}
 

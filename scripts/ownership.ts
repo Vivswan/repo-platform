@@ -956,14 +956,16 @@ export function moduleOwnershipEntries(
       // the module-keyed tables carry no render conditions - an entry here
       // would false-positive on renders whose gate is off, while dropping
       // it silently (the old behavior) exempted the file from enforcement
-      // with nothing said. Loud until the tables can carry gates.
+      // with nothing said. The composer refuses module filename gates
+      // outright (custom gates live in module.yml, module-wide), so this
+      // only fires on a tree the composer would reject too.
       if (file.gates.length > 0) {
         throw new Error(
           `${where}: '${declaration.path}' is enforceable but filename-gated ` +
             `(${file.gates.join(" and ")}), and the validator's module tables carry no ` +
-            "render conditions, so it would silently fall out of enforcement - extend " +
-            "moduleOwnershipEntries with gate translation (see baseOwnershipTables) " +
-            "before gating enforceable module files",
+            "render conditions, so it would silently fall out of enforcement - module " +
+            "files must not carry filename gates (gate CONTENT with jinja instead, or " +
+            "set the module-wide gate in module.yml)",
         );
       }
       entries.push(entry);
