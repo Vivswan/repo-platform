@@ -168,7 +168,6 @@ const BASE_OWNERSHIP: BaseOwnedFile[] = [
     begin: "# BEGIN REPO-PLATFORM MANAGED",
     end: "# END REPO-PLATFORM MANAGED",
   },
-  { path: ".repo-platform.yml", kind: "header" },
   { path: ".typography-allow", kind: "header" },
   { path: ".yamllint", kind: "header" },
   { path: "CODE_OF_CONDUCT.md", kind: "header", when: { publicOnly: true } },
@@ -1334,6 +1333,29 @@ function main(): number {
                 "regenerate it",
             );
           }
+          continue;
+        }
+        // The known ownership flip: .repo-platform.yml (module selection,
+        // the repo's own `mirrors` declaration) was class managed until it
+        // became a repo-owned starter - repo edits are the file's PURPOSE,
+        // so a stale manifest's hash must not read them as drift. A manifest
+        // still classing it managed simply predates the flip (repos restamp
+        // on their next sync; client validators float ahead of the fleet),
+        // and the path left this validator's tables with the flip, so no
+        // roster cross-check covers it either. Standing parity down here is
+        // not a bypass: the genuine new-vintage entry is a starter, which
+        // never had byte parity (the file's own shape checks - existence,
+        // YAML parse, module roster, strict keys - all still run), so a
+        // hand edit claiming managed on this path gains nothing a hand
+        // flip to starter would not - parity is the only check standing
+        // down. Advisory for visibility; this path
+        // ONLY (every other managed entry keeps full hash parity).
+        if (rel === ".repo-platform.yml" && entry.class === "managed") {
+          advisories.push(
+            `${where} classes .repo-platform.yml as managed, which predates its flip ` +
+              "to a repo-owned starter - the file is repo-owned (edits to it are not " +
+              "drift), and the next template sync restamps the entry as a hash-free starter",
+          );
           continue;
         }
         if (entry.class === "starter") {

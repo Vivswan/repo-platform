@@ -91,7 +91,7 @@
 {%- if 'release-please' in modules -%}
 {%- set _ = entries.append('    ".release-please-manifest.json": {"class": "starter"}') -%}
 {%- endif -%}
-{%- set _ = entries.append('    ".repo-platform.yml": {"class": "managed", "hash": null}') -%}
+{%- set _ = entries.append('    ".repo-platform.yml": {"class": "starter"}') -%}
 {%- set _ = entries.append('    ".typography-allow": {"class": "managed", "hash": null}') -%}
 {%- set _ = entries.append('    ".yamllint": {"class": "managed", "hash": null}') -%}
 {%- if 'agents' in modules -%}

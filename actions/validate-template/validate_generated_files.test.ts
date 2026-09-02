@@ -15,7 +15,9 @@ const HB = "# BEGIN REPO-PLATFORM MANAGED";
 const HE = "# END REPO-PLATFORM MANAGED";
 const BASELINE: Record<string, string> = {
   ".copier-answers.yml": `${MANAGED_HEADER}_commit: 0.0.0.post5.dev0+abc1234\n_src_path: gh:Vivswan/repo-platform\ngithub_username: Vivswan\n`,
-  ".repo-platform.yml": `${MANAGED_HEADER}modules: [uv]\n`,
+  // A repo-owned starter (generated once, never rewritten): no managed
+  // header, no manifest hash.
+  ".repo-platform.yml": "# Generated once by Vivswan/repo-platform; repo-owned.\nmodules: [uv]\n",
   // The ungated base region files: their ABSENCE is strict (the template
   // always generates them), so the minimal accepted tree carries each.
   ".gitignore": `# local patterns go here\n\n${HB}\n${HE}\n`,
@@ -76,7 +78,6 @@ const MIRROR_BASE: MirrorEntry[] = [
   { path: ".github/dependabot.yml", kind: "header" },
   { path: ".github/workflows/ci.yml", kind: "header" },
   { path: ".gitignore", kind: "region", begin: HB, end: HE },
-  { path: ".repo-platform.yml", kind: "header" },
   { path: ".typography-allow", kind: "header" },
   { path: ".yamllint", kind: "header" },
   { path: "CODE_OF_CONDUCT.md", kind: "header", publicOnly: true },
@@ -141,6 +142,9 @@ function manifestForTree(tree: Record<string, string>): string {
     [MANIFEST]: `{"class": "managed", "hash": null, "commit": ${
       commit === null ? "null" : JSON.stringify(commit)
     }}`,
+    // The registration file is a repo-owned starter and every render's
+    // manifest lists it hash-free, like the real stamp.
+    ".repo-platform.yml": '{"class": "starter"}',
   };
   const expected = [
     ...MIRROR_BASE.filter(
@@ -1142,7 +1146,7 @@ describe("ownership-manifest byte parity", () => {
     ".copier-answers.yml": `{"class": "managed", "hash": "${sha(
       BASELINE[".copier-answers.yml"],
     )}"}`,
-    ".repo-platform.yml": `{"class": "managed", "hash": "${sha(BASELINE[".repo-platform.yml"])}"}`,
+    ".repo-platform.yml": '{"class": "starter"}',
     ".github/workflows/ci.yml": `{"class": "managed", "hash": "${sha(
       BASELINE[".github/workflows/ci.yml"],
     )}"}`,
@@ -1366,10 +1370,12 @@ describe("ownership-manifest byte parity", () => {
     // The custom-license module de-renders the fleet LICENSE.md; the repo
     // owns its license, so a manifest entry claiming it cannot come from
     // the template.
-    const registration = `${MANAGED_HEADER}modules: [uv, custom-license]\n`;
+    const registration = `${BASELINE[".repo-platform.yml"]}`.replace(
+      "modules: [uv]",
+      "modules: [uv, custom-license]",
+    );
     const entries = {
       ...stampedBaseline(),
-      ".repo-platform.yml": `{"class": "managed", "hash": "${sha(registration)}"}`,
       "LICENSE.md":
         `{"class": "split", "grammar": "managed-region", "begin": ${JSON.stringify(B)}, ` +
         `"end": ${JSON.stringify(E)}, "hash": "${"a".repeat(64)}"}`,
@@ -1388,7 +1394,10 @@ describe("ownership-manifest byte parity", () => {
     // AGENTS.md), all validated through the auto-stamped manifest - a
     // drifted mirror entry for any of them fails the roster cross-check
     // here instead of sitting inert.
-    const registration = `${MANAGED_HEADER}modules: [uv, agents]\n`;
+    const registration = BASELINE[".repo-platform.yml"].replace(
+      "modules: [uv]",
+      "modules: [uv, agents]",
+    );
     const { exitCode, stderr } = runValidator({
       ".repo-platform.yml": registration,
       ".editorconfig": `${HB}\n[*]\nindent_size = 2\n${HE}\n`,
@@ -1616,6 +1625,44 @@ describe("ownership-manifest byte parity", () => {
     expect(stderr).toContain("a starter carrying a hash");
   });
 
+  test("a stale managed .repo-platform.yml entry is the known ownership flip: advisory, no parity", () => {
+    // The file was managed (hash-pinned) before it became a repo-owned
+    // starter; a not-yet-resynced repo's manifest still says managed while
+    // the repo edits the file - which is now the file's PURPOSE (module
+    // selection, the mirrors declaration), so the stale hash must not read
+    // as drift. The next sync restamps the entry.
+    const edited = `${BASELINE[".repo-platform.yml"]}mirrors:\n  - source: SECURITY.md\n    targets: [copies/SECURITY.md]\n`;
+    const entries = {
+      ...stampedBaseline(),
+      // A hash stamped from a PREVIOUS state of the file, as a stale
+      // manifest carries: the edited file can no longer match it.
+      ".repo-platform.yml": `{"class": "managed", "hash": "${"d".repeat(64)}"}`,
+    };
+    const { exitCode, stdout, stderr } = runValidator({
+      ".repo-platform.yml": edited,
+      [MANIFEST]: manifestOf(entries),
+    });
+    expect(stderr).toBe("");
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain("predates its flip");
+  });
+
+  test("the flip exemption covers that one path only - other drifted managed entries still fail", () => {
+    // Negative control for the test above: the same drifted-hash shape on
+    // any OTHER unlisted path keeps full parity, so the exemption cannot
+    // quietly widen into a class-level bypass.
+    const entries = {
+      ...stampedBaseline(),
+      "docs/pinned.md": `{"class": "managed", "hash": "${"d".repeat(64)}"}`,
+    };
+    const { exitCode, stderr } = runValidator({
+      "docs/pinned.md": "drifted\n",
+      [MANIFEST]: manifestOf(entries),
+    });
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain("docs/pinned.md: content does");
+  });
+
   test("a legacy mergeable entry is an error naming the retirement", () => {
     // Old renders' manifests still class settings.yml mergeable; the class
     // is retired (the file is a starter now), and a manifest claiming it
@@ -1625,7 +1672,10 @@ describe("ownership-manifest byte parity", () => {
       ".github/settings.yml": '{"class": "mergeable"}',
     };
     const { exitCode, stderr } = runValidator({
-      ".repo-platform.yml": `${MANAGED_HEADER}modules: [uv, settings-sync]\n`,
+      ".repo-platform.yml": BASELINE[".repo-platform.yml"].replace(
+        "modules: [uv]",
+        "modules: [uv, settings-sync]",
+      ),
       [MANIFEST]: manifestOf(entries),
       ".github/settings.yml": "repository:\n  has_issues: true\n",
     });
@@ -1634,10 +1684,12 @@ describe("ownership-manifest byte parity", () => {
   });
 
   test("a settings.yml starter entry passes: the file is repo-owned", () => {
-    const registration = `${MANAGED_HEADER}modules: [uv, settings-sync]\n`;
+    const registration = BASELINE[".repo-platform.yml"].replace(
+      "modules: [uv]",
+      "modules: [uv, settings-sync]",
+    );
     const entries = {
       ...stampedBaseline(),
-      ".repo-platform.yml": `{"class": "managed", "hash": "${sha(registration)}"}`,
       ".github/settings.yml": '{"class": "starter"}',
     };
     const { exitCode, stdout, stderr } = runValidator({
@@ -1764,7 +1816,10 @@ describe("ownership-manifest byte parity", () => {
   const agentsLinkTree = (claudeEntry: string): string => {
     const root = mkdtempSync(join(tmpdir(), "validate-template-link-"));
     roots.push(root);
-    const registration = `${MANAGED_HEADER}modules: [uv, agents]\n`;
+    const registration = BASELINE[".repo-platform.yml"].replace(
+      "modules: [uv]",
+      "modules: [uv, agents]",
+    );
     const agentsMd = `${B}\n# AGENTS.md\n${E}\n`;
     const tree = { ...BASELINE, ".repo-platform.yml": registration, "AGENTS.md": agentsMd };
     for (const [rel, content] of Object.entries(tree)) {
@@ -1776,7 +1831,6 @@ describe("ownership-manifest byte parity", () => {
       join(root, MANIFEST),
       manifestOf({
         ...stampedBaseline(),
-        ".repo-platform.yml": `{"class": "managed", "hash": "${sha(registration)}"}`,
         "AGENTS.md":
           `{"class": "split", "grammar": "managed-region", "begin": ${JSON.stringify(B)}, ` +
           `"end": ${JSON.stringify(E)}, "hash": "${sha(agentsMd)}"}`,
@@ -1807,10 +1861,9 @@ describe("ownership-manifest byte parity", () => {
   test("a headerless pin dotfile hand-flipped to starter fails the roster cross-check", () => {
     // .bun-version carries no header; the class-only roster entry is what
     // keeps its manifest class honest.
-    const registration = `${MANAGED_HEADER}modules: [bun]\n`;
+    const registration = BASELINE[".repo-platform.yml"].replace("modules: [uv]", "modules: [bun]");
     const entries = {
       ...stampedBaseline(),
-      ".repo-platform.yml": `{"class": "managed", "hash": "${sha(registration)}"}`,
       ".bun-version": '{"class": "starter"}',
     };
     const { exitCode, stderr } = runValidator({
