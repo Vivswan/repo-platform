@@ -198,6 +198,32 @@ grep -vF "workflows/pr-title.yml" \
   > "$OLD_TREE/manifest.jinja.tmp"
 mv "$OLD_TREE/manifest.jinja.tmp" \
   "$OLD_TREE/template/.github/repo-platform-manifest.json.jinja"
+# Model the fleet state before .repo-platform.yml became a repo-owned
+# starter: the old template rendered it MANAGED - the managed header, a
+# hash-stamped manifest entry, and no _skip_if_exists protection - so the
+# update below is what must flip the manifest entry to a hash-free
+# starter, reword the stale header exactly once, and stop rewriting the
+# repo-edited file (asserted after the update).
+cat > "$OLD_TREE/template/.repo-platform.yml.jinja" <<'OLD_REG'
+# This file is managed by {{ github_username }}/repo-platform. Its presence
+# marks this repository as participating in push sync. `modules` is this
+# repo's module selection - edit it and the next sync applies the change.
+
+modules: {{ modules | tojson }}
+OLD_REG
+sed 's|"\.repo-platform\.yml": {"class": "starter"}|".repo-platform.yml": {"class": "managed", "hash": null}|' \
+  "$OLD_TREE/template/.github/repo-platform-manifest.json.jinja" \
+  > "$OLD_TREE/manifest.reg.tmp"
+mv "$OLD_TREE/manifest.reg.tmp" \
+  "$OLD_TREE/template/.github/repo-platform-manifest.json.jinja"
+grep -qF '".repo-platform.yml": {"class": "managed", "hash": null}' \
+  "$OLD_TREE/template/.github/repo-platform-manifest.json.jinja" \
+  || fail "could not model the pre-flip managed .repo-platform.yml manifest entry"
+grep -v '^  - \.repo-platform\.yml$' "$OLD_TREE/copier.yml" > "$OLD_TREE/copier.reg.tmp"
+mv "$OLD_TREE/copier.reg.tmp" "$OLD_TREE/copier.yml"
+if grep -q '\.repo-platform\.yml' "$OLD_TREE/copier.yml"; then
+  fail "could not strip .repo-platform.yml from the old fixture's _skip_if_exists"
+fi
 cat > "$OLD_TREE/template/.github/workflows/ci.yml.jinja" <<'LEGACY_CI'
 name: CI
 
@@ -303,6 +329,10 @@ if grep -qF "fleet-ci.yml" .github/workflows/ci.yml; then
 fi
 grep -qxF "  all-green:" .github/workflows/ci.yml \
   || fail "the synthetic old fixture must carry the legacy all-green aggregate job"
+grep -q '^# This file is managed by Vivswan/repo-platform\. Its presence$' .repo-platform.yml \
+  || fail "the synthetic old fixture must render the pre-flip managed registration header (or the ownership-flip assertions below are vacuous)"
+grep -qF '".repo-platform.yml": {"class": "managed"' .github/repo-platform-manifest.json \
+  || fail "the synthetic old fixture's manifest must class .repo-platform.yml managed (or the flip assertions below are vacuous)"
 grep -qxF "  info-release:" .github/workflows/ci.yml \
   || fail "the synthetic old fixture must carry the legacy in-ci info-release job (or the release-home-move assertions below are vacuous)"
 [ "$(cat LICENSE)" = "Old fleet license (pre-relicense fixture)" ] \
@@ -350,6 +380,9 @@ if grep -q 'settings-sync' .repo-platform.yml; then
 fi
 grep -q 'custom-license' .repo-platform.yml \
   || fail "could not add custom-license to .repo-platform.yml"
+# The edited registration file, for the ownership-flip byte assertions
+# after the update (the sync must stop rewriting it).
+cp .repo-platform.yml "$WORK/registration-edited.yml"
 git add --all
 git -c user.name=ci -c user.email=ci@localhost commit -q -m "chore: local modifications"
 
@@ -465,6 +498,32 @@ grep -q '^modules:' .repo-platform.yml \
 if grep -q 'settings-sync' .repo-platform.yml; then
   fail ".repo-platform.yml still lists settings-sync"
 fi
+# THE OWNERSHIP FLIP (managed -> repo-owned starter): the update must stop
+# rewriting the repo-edited registration file - the whole body from the
+# `modules:` line down rides byte-identical (the comparison anchors on
+# content, not header line counts) - reword the stale rendered header to
+# the starter wording, flip its manifest entry to a hash-free starter, and
+# land the one-run transition note for the PR body.
+sed -n '/^modules:/,$p' "$WORK/registration-edited.yml" > "$WORK/registration-body-expected.txt"
+sed -n '/^modules:/,$p' .repo-platform.yml > "$WORK/registration-body-actual.txt"
+test -s "$WORK/registration-body-expected.txt" \
+  || fail "the edited registration capture has no modules line (the byte assertion below would be vacuous)"
+cmp -s "$WORK/registration-body-expected.txt" "$WORK/registration-body-actual.txt" \
+  || fail "the repo-edited .repo-platform.yml body did not ride through the ownership flip byte-identical"
+if grep -q 'This file is managed by' .repo-platform.yml; then
+  fail ".repo-platform.yml still opens with the stale managed header after the flip"
+fi
+grep -q '^# Generated once by Vivswan/repo-platform' .repo-platform.yml \
+  || fail ".repo-platform.yml was not reworded to the starter header"
+grep -qF '".repo-platform.yml": {"class": "starter"}' .github/repo-platform-manifest.json \
+  || fail "the manifest entry for .repo-platform.yml did not flip to a hash-free starter"
+if grep -F '".repo-platform.yml"' .github/repo-platform-manifest.json | grep -q '"hash"'; then
+  fail "the .repo-platform.yml manifest entry still carries a hash after the flip"
+fi
+grep -qF 'repo-owned now' "$WORK/registration-flip.md" \
+  || fail "the ownership-flip transition note was not written for the PR body"
+grep -qF 'was reworded' "$WORK/registration-flip.md" \
+  || fail "the transition note does not name the header reword"
 # Repo-owned sentinels survive untouched.
 [ "$(cat src/keep_me.txt)" = "repo-owned sentinel" ] \
   || fail "repo-owned src/keep_me.txt was modified"
@@ -588,6 +647,13 @@ git -c user.name=ci -c user.email=ci@localhost commit -q -m "chore: template upd
 sed 's/^_commit: .*/_commit: deadbeef/' .copier-answers.yml > .copier-answers.yml.tmp
 mv .copier-answers.yml.tmp .copier-answers.yml
 echo "# local ci note" >> .github/workflows/ci.yml
+# The registration starter must hold under recopy --overwrite too: the
+# repo-owned `mirrors` declaration lives in it, and a recopy that
+# re-rendered the file would silently drop the key (the class the retired
+# restoreMirrorsKey restore path existed for - retired BECAUSE this holds).
+printf 'mirrors:\n  - source: SECURITY.md\n    targets:\n      - copies/SECURITY.md\n' \
+  >> .repo-platform.yml
+cp .repo-platform.yml "$WORK/registration-before-recopy.yml"
 # Sanctioned repository-owned content the local-content carry must bring
 # back over the re-render (unlike the ci.yml edit above, which must drop):
 # tails below the END markers of AGENTS.md, CONTRIBUTING.md,
@@ -624,6 +690,11 @@ grep -qF "# local checks note" .github/workflows/checks.yml \
   || fail "recovery overwrote the generated-once checks.yml (_skip_if_exists must hold under recopy --overwrite)"
 grep -qF "# local issue form note" .github/ISSUE_TEMPLATE/bug_report.yml \
   || fail "recovery overwrote the generated-once bug_report.yml (_skip_if_exists must hold under recopy --overwrite)"
+cmp -s "$WORK/registration-before-recopy.yml" .repo-platform.yml \
+  || fail "recovery rewrote the repo-owned .repo-platform.yml (_skip_if_exists must hold under recopy --overwrite, or the mirrors declaration is silently lost)"
+if [ -s "$WORK/registration-flip.md" ]; then
+  fail "the ownership-flip transition note re-fired although HEAD's manifest already classes .repo-platform.yml starter (the trigger must be one-run)"
+fi
 [ "$(cat LICENSE)" = "Repo-owned custom license" ] \
   || fail "recovery touched the repo-owned LICENSE (custom-license de-renders it; recopy deletes nothing)"
 [ "$(cat src/keep_me.txt)" = "repo-owned sentinel" ] \
@@ -1072,30 +1143,13 @@ fi
 grep -qF 'mirrors:' .repo-platform.yml \
   || fail "the repo-owned mirrors declaration did not survive the copier update"
 
-# The recopy shape: a recovery re-render rewrites .repo-platform.yml from
-# the template, dropping the repo-owned mirrors key from the working tree.
-# The declaration is read from HEAD (where the repo committed it), so the
-# mirrors must still materialize AND the key must be restored into the
-# delivered file, with the restoration named in the PR-body note.
-RECOPY_WORK="$RUN_DIR/upgrade-split-recopyshape"
-mkdir -p "$RECOPY_WORK"
-awk '/^mirrors:/ { exit } { print }' .repo-platform.yml > .repo-platform.yml.tmp
-mv .repo-platform.yml.tmp .repo-platform.yml
-if grep -q '^mirrors:' .repo-platform.yml; then
-  fail "could not strip the mirrors key for the recopy-shape re-run"
-fi
-rm -f template/LICENSE.md
-RUNNER_TEMP="$RECOPY_WORK" \
-  bun "$GITHUB_WORKSPACE/.github/scripts/sync/materialize_mirrors.ts" --root "$SPLIT"
-grep -q '^mirrors:' .repo-platform.yml \
-  || fail "the dropped mirrors key was not restored from HEAD's declaration"
-cmp -s LICENSE.md template/LICENSE.md \
-  || fail "mirrors did not materialize from HEAD's declaration after the key was dropped"
-grep -qF "restored from the previous commit's declaration" "$RECOPY_WORK/mirrors.md" \
-  || fail "the PR-body note does not name the restored mirrors key"
-if [ -s "$RECOPY_WORK/mirrors-review.md" ]; then
-  fail "the recopy-shape re-run refused something"
-fi
+# (The old "recopy shape" re-run - a recovery re-render dropping the
+# mirrors key from the working tree, restored from HEAD by
+# restoreMirrorsKey - is structurally impossible since the registration
+# file became a repo-owned starter: no sync leg rewrites an existing
+# .repo-platform.yml, which the recovery leg above asserts byte-for-byte.
+# The restore path was retired with it; declarationSource's HEAD preference
+# keeps its own unit tests.)
 
 # Hostile mirror declarations, committed the way a hostile repo would
 # carry them (the declaration is read from HEAD): a traversal target and a
@@ -1124,7 +1178,7 @@ cmp -s "$SPLIT_WORK/render-new/SECURITY.md" SECURITY.md \
 [ -s "$HOSTILE_WORK/mirrors-review.md" ] || fail "hostile mirror declarations were not refused"
 grep -qF 'SECURITY.md' "$HOSTILE_WORK/mirrors-review.md" \
   || fail "the refusal report does not name the template-owned target"
-echo "mirror materialization OK: byte-identical copies, glob-created skill copy, dropped key restored, hostile declarations refused"
+echo "mirror materialization OK: byte-identical copies, glob-created skill copy, hostile declarations refused"
 
 # --- Unselected-path preservation (conditional landing via _exclude) ------
 # The composed tree carries plain filenames; conditional landing happens

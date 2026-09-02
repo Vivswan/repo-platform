@@ -30,6 +30,7 @@ import {
   MIRRORS_NOTE_NAME,
   MIRRORS_REVIEW_NAME,
   REFERENCED_LABELS_NAME,
+  REGISTRATION_FLIP_NAME,
   REMOVED_SPLITS_NAME,
   SETTINGS_LAYERING_NAME,
   STARTER_PINS_NAME,
@@ -235,6 +236,11 @@ const sections: FlagSection[] = [
   // itself (its own CI run posts the check), so the note is informational
   // and never forces the manual path.
   { path: join(runnerTemp, GATE_REWORK_NAME), render: slurp, forcesReview: false },
+  // registration_flip.ts's transition note: the one-run .repo-platform.yml
+  // ownership flip (managed -> repo-owned starter). Informational - nothing
+  // the repo declared changes and enforcement only relaxes, so it never
+  // forces the manual path.
+  { path: join(runnerTemp, REGISTRATION_FLIP_NAME), render: slurp, forcesReview: false },
   {
     path: requireEnv("WITHHELD_FILE"),
     render: (path) => `> [!WARNING]

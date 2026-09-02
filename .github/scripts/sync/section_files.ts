@@ -23,6 +23,12 @@ export const REMOVED_SPLITS_NAME = "removed-splits.md";
  * it deliberately left alone. Informational, never forces review. */
 export const STARTER_PINS_NAME = "starter-pin-rollout.md";
 
+/** registration_flip.ts's transition note: the one-run .repo-platform.yml
+ * ownership flip (managed -> repo-owned starter; the stale header reworded
+ * when it was still the exact rendered block). Informational, never forces
+ * review - nothing the repo declared changes and enforcement only relaxes. */
+export const REGISTRATION_FLIP_NAME = "registration-flip.md";
+
 /** gate_rework.ts's transition note: this update deletes the retired
  * verdict wrapper (all-green.yml) and hands the required check to
  * ci.yml's own all-green job - the PR gates itself, so the note is

@@ -60,7 +60,12 @@ import {
 } from "../shared/proc.ts";
 import { type HeadSplit, headSplitEntries, repoOwnedText } from "./head_manifest.ts";
 import { clip, fenceFor } from "./preserve_local_content.ts";
-import { REMOVED_SPLITS_NAME, SETTINGS_LAYERING_NAME } from "./section_files.ts";
+import { transitionRegistrationStarter } from "./registration_flip.ts";
+import {
+  REGISTRATION_FLIP_NAME,
+  REMOVED_SPLITS_NAME,
+  SETTINGS_LAYERING_NAME,
+} from "./section_files.ts";
 import { transitionSettingsStarter } from "./settings_layering.ts";
 
 const targetDir = env("TARGET_DIR", "target");
@@ -155,6 +160,17 @@ function restoreRepoOwned(): void {
   transitionSettingsStarter(
     targetDir,
     join(requireEnv("RUNNER_TEMP"), SETTINGS_LAYERING_NAME),
+    label,
+  );
+
+  // The one-run .repo-platform.yml ownership flip (registration_flip.ts):
+  // when the target HEAD's manifest still classes the registration file
+  // managed, reword its stale rendered header to the starter wording and
+  // write the informational PR-body note. Self-retiring: the trigger dies
+  // when the repo merges its first post-flip sync.
+  transitionRegistrationStarter(
+    targetDir,
+    join(requireEnv("RUNNER_TEMP"), REGISTRATION_FLIP_NAME),
     label,
   );
 

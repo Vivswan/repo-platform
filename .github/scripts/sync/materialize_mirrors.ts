@@ -12,10 +12,11 @@
 // resync overwrote.
 //
 // THE DECLARATION lives in the repo's own .repo-platform.yml - the
-// repo-owned registration file the sync already reads for module
-// selection, whose repo-added keys ride through `copier update`'s
-// three-way merge (the template side never touches them) and through
-// validate-template (which checks only the `modules` key):
+// registration file the sync already reads for module selection. The file
+// is a repo-owned STARTER (_skip_if_exists): rendered once when a repo
+// onboards, never rewritten by any sync leg - copy, update, and the
+// recovery recopy all skip an existing file - so the declaration (and
+// every other repo-added key) rides through every sync untouched:
 //
 //   mirrors:
 //     - source: LICENSE.md
@@ -62,12 +63,15 @@
 //
 // THE DECLARATION IS READ FROM THE TARGET'S HEAD, not the post-update
 // working tree: mirrors are repo-owned config, repos change them only
-// through commits, and the recovery re-render (recover=recopy) rewrites
-// .repo-platform.yml from the template - which would silently drop the
-// key from the working tree. When the delivered file lost the key this
-// step also restores it (appended, re-serialized), so the repo's
-// configuration survives the merge; the restoration is named in the PR
-// body.
+// through commits, and the committed truth beats whatever intermediate
+// state the update legs leave. Historically HEAD also protected against
+// the recovery re-render (recover=recopy) rewriting the file from the
+// template, and a restore path patched the dropped key back into the
+// delivered file; the starter flip made both moot - no sync leg rewrites
+// an existing .repo-platform.yml anymore, and in the one case copier does
+// re-render it (the repo deleted the file at HEAD) there is no committed
+// declaration to restore either, so the restore path was removed as dead
+// weight rather than kept as an unreachable writer of a repo-owned file.
 //
 // MANIFEST STANCE: mirror targets get NO manifest entries - they are
 // repo-declared, not template-owned, and listing them would hand them to
@@ -101,7 +105,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
-import { parse, stringify } from "yaml";
+import { parse } from "yaml";
 import type { ManifestEntryShape } from "../../../actions/shared/manifest.ts";
 import { MANIFEST_NAME, parseManifestFiles } from "../../../actions/shared/manifest.ts";
 import { parseFlags } from "../shared/flags.ts";
@@ -128,23 +132,20 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
  * mirror nothing (the stale-copy class this feature exists to end), so
  * problems flow into the refusal section and hold the PR for review.
  * Well-formed sibling entries still materialize: one bad entry must not
- * stale every good one. `raw` is the key's parsed value verbatim
- * (undefined when absent), for the recovery restoration - repo content is
- * restored as declared, well-formed or not. */
+ * stale every good one. */
 export function readMirrors(
   data: unknown,
   label = REGISTRATION,
-): { mirrors: MirrorDecl[]; problems: string[]; raw: unknown } {
+): { mirrors: MirrorDecl[]; problems: string[] } {
   if (!isPlainObject(data)) {
-    return { mirrors: [], problems: [`${label}: top level must be a mapping`], raw: undefined };
+    return { mirrors: [], problems: [`${label}: top level must be a mapping`] };
   }
   const raw = data.mirrors;
-  if (raw === undefined) return { mirrors: [], problems: [], raw };
+  if (raw === undefined) return { mirrors: [], problems: [] };
   if (!Array.isArray(raw)) {
     return {
       mirrors: [],
       problems: [`${label}: \`mirrors\` must be a list of {source, targets} entries`],
-      raw,
     };
   }
   const mirrors: MirrorDecl[] = [];
@@ -177,7 +178,7 @@ export function readMirrors(
     }
     mirrors.push({ source, targets });
   });
-  return { mirrors, problems, raw };
+  return { mirrors, problems };
 }
 
 /** Why `path` cannot be trusted as a mirror path, or null when it is a
@@ -552,16 +553,15 @@ function boundedList(lines: string[]): string {
   return shown.join("\n") + (omitted > 0 ? `\n- (${omitted} more - see the diff)` : "");
 }
 
-/** The informational PR-body note: every materialized write, the patterns
- * that matched nothing, and the recovery restoration of the declaration
- * key. Empty when there is nothing to explain in the diff. */
+/** The informational PR-body note: every materialized write and the
+ * patterns that matched nothing. Empty when there is nothing to explain in
+ * the diff. */
 export function renderNote(
   written: MirrorWrite[],
   currentCount: number,
   unmatched: MirrorPlan["unmatched"],
-  restored = false,
 ): string {
-  if (written.length === 0 && unmatched.length === 0 && !restored) return "";
+  if (written.length === 0 && unmatched.length === 0) return "";
   const intro =
     "Mirror copies materialized from this repository's own `.repo-platform.yml` " +
     "`mirrors` declaration - each target below is a byte-identical copy of its " +
@@ -572,11 +572,6 @@ export function renderNote(
       ({ source, pattern }) =>
         `- \`${clip(pattern)}\` (mirror of \`${clip(source)}\`): matched nothing in this tree - nothing written`,
     ),
-    ...(restored
-      ? [
-          "- the update dropped the repo-owned `mirrors` key from `.repo-platform.yml` (a recovery re-render does); it was restored from the previous commit's declaration",
-        ]
-      : []),
   ];
   const tail =
     currentCount > 0
@@ -601,43 +596,16 @@ export function renderRefusals(refusals: string[]): string {
   ].join("\n");
 }
 
-/** Restore the repo-owned `mirrors` key into a delivered .repo-platform.yml
- * that lost it (the recovery re-render rewrites the file from the
- * template, which never carries the key). Appends the previous commit's
- * declaration re-serialized - content-faithful; comments inside the block
- * are not preserved - and only when the delivered file parses to a mapping
- * WITHOUT the key (anything else is not the clean re-render shape this
- * restoration exists for). Returns whether the file was rewritten. */
-export function restoreMirrorsKey(root: string, headRaw: unknown): boolean {
-  if (headRaw === undefined) return false;
-  const path = join(root, REGISTRATION);
-  let text: string;
-  let data: unknown;
-  try {
-    text = readFileSync(path, "utf-8");
-    data = parse(text);
-  } catch {
-    return false;
-  }
-  if (!isPlainObject(data) || data.mirrors !== undefined) return false;
-  writeFileSync(
-    path,
-    `${text.endsWith("\n") ? text : `${text}\n`}\n${stringify({ mirrors: headRaw })}`,
-    "utf-8",
-  );
-  return true;
-}
-
 /** Where the declaration text comes from - the target's HEAD, the
  * repo-owned truth: repos change mirrors only through commits, the
- * template contributes nothing to the key, and the recovery re-render
- * (recover=recopy) rewrites the working-tree file from the template, which
- * would silently drop the declaration. The working-tree copy is used ONLY
- * for a plain tree (local runs, fixtures - probed explicitly, never
- * inferred from a failed read); inside a git repository a HEAD that cannot
- * answer honestly (git failure, no committed copy, a non-file at the path)
- * REFUSES rather than falling back, because the fallback is exactly the
- * possibly-rewritten file this preference exists to avoid. */
+ * template contributes nothing to the key, and the committed copy beats
+ * whatever intermediate state the update legs leave in the working tree
+ * (the starter flip means no leg rewrites an existing file, but HEAD stays
+ * the principled source rather than an incidental one). The working-tree
+ * copy is used ONLY for a plain tree (local runs, fixtures - probed
+ * explicitly, never inferred from a failed read); inside a git repository
+ * a HEAD that cannot answer honestly (git failure, no committed copy, a
+ * non-file at the path) REFUSES rather than falling back. */
 export function declarationSource(root: string): { text: string | null; refusal: string | null } {
   // The probe's verdicts are discriminated, never inferred from a bare
   // nonzero exit: only git's definitive answers pick a path, and anything
@@ -701,7 +669,6 @@ function main(argv: string[]): number {
   // and a red would block the PR the fix belongs in.
   let mirrors: MirrorDecl[] = [];
   let problems: string[] = [];
-  let rawDecl: unknown;
   if (declText === null) {
     problems = [declRefusal ?? `${REGISTRATION}: cannot be read`];
   } else {
@@ -709,7 +676,6 @@ function main(argv: string[]): number {
       const read = readMirrors(parse(declText));
       mirrors = read.mirrors;
       problems = read.problems;
-      rawDecl = read.raw;
     } catch {
       problems = [
         `${REGISTRATION}: cannot be parsed, so any mirror declaration in it was not materialized`,
@@ -723,8 +689,6 @@ function main(argv: string[]): number {
     console.log("no mirror declarations; nothing to materialize");
     return 0;
   }
-
-  const restored = restoreMirrorsKey(root, rawDecl);
 
   let manifest: Record<string, ManifestEntryShape> | null = null;
   let manifestProblem = `${MANIFEST_NAME} is missing from the delivered tree`;
@@ -745,7 +709,7 @@ function main(argv: string[]): number {
     ...writeRefusals,
   ];
 
-  writeFileSync(notePath, renderNote(written, current.length, plan.unmatched, restored), "utf-8");
+  writeFileSync(notePath, renderNote(written, current.length, plan.unmatched), "utf-8");
   writeFileSync(reviewPath, renderRefusals(refusals), "utf-8");
 
   // Paths are target file data: a hide-details target gets counts here and
@@ -755,11 +719,6 @@ function main(argv: string[]): number {
     for (const { source, pattern } of plan.unmatched) {
       console.log(`mirror pattern matched nothing: ${pattern} (mirror of ${source})`);
     }
-  }
-  if (restored) {
-    console.log(
-      `restored the repo-owned mirrors key into ${REGISTRATION} (the update had dropped it)`,
-    );
   }
   console.log(
     `mirrors: ${written.length} written, ${current.length} already current, ` +

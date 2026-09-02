@@ -98,6 +98,11 @@ _skip_if_exists:
   # this file (.github/scripts/fleet/render_managed_settings.ts), so sync
   # never rewrites it.
   - .github/settings.yml
+  # The registration file: generated once when a repo onboards, repo-owned
+  # from then on. Module selection and the optional `mirrors` declaration
+  # live in it - the sync READS it (select_modules, materialize_mirrors)
+  # and must never rewrite what it reads its instructions from.
+  - .repo-platform.yml
 
 # The _migrations entry stamps the ownership manifest's per-repo hashes:
 # they are facts of the rendered tree, so stamping must run after copier

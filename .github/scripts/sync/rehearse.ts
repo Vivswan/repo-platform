@@ -732,6 +732,10 @@ export function rehearseRepo(slug: string, options: RehearsalOptions): Rehearsal
           "Gate rework (the verdict wrapper leaves; ci.yml's own all-green job carries the required check)",
         ],
         [
+          "registration-flip.md",
+          ".repo-platform.yml ownership flip (one-run transition note: managed -> repo-owned starter)",
+        ],
+        [
           "referenced-labels.md",
           "Labels referenced by issue forms/workflows but missing from the merged settings roster (the PR would stay manual-review)",
         ],

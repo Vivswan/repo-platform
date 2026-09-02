@@ -33,7 +33,11 @@ ownership:
     begin: "# BEGIN REPO-PLATFORM MANAGED"
     end: "# END REPO-PLATFORM MANAGED"
   - { path: .gitleaks.toml, class: starter }
-  - { path: .repo-platform.yml, class: managed }
+  # The registration file is generated once and repo-owned from then on:
+  # module selection and the optional `mirrors` declaration LIVE there, so
+  # repo-side edits are its purpose - a managed class (hash parity) would
+  # flag exactly those edits as drift. The sync reads it, never rewrites it.
+  - { path: .repo-platform.yml, class: starter }
   - { path: .typography-allow, class: managed }
   - { path: .yamllint, class: managed }
   - { path: CODE_OF_CONDUCT.md, class: managed }

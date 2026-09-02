@@ -693,6 +693,15 @@ expect_class() { # <path> <expected class, or "absent">
 }
 expect_class ".github/workflows/ci.yml" managed
 expect_class ".github/workflows/checks.yml" starter
+# The registration file is a repo-owned starter (generated once, the sync
+# reads it and never rewrites it), so its entry must carry NO hash key at
+# all - a hash would re-arm the drift check against the very edits (module
+# selection, the mirrors declaration) the file exists for.
+expect_class ".repo-platform.yml" starter
+if [ "$(mf ".repo-platform.yml" hash)" != "missing" ]; then
+  echo "::error::manifest check failed: the .repo-platform.yml starter entry in $manifest carries a hash key for modules=$MODULES private=$PRIVATE - starters make no byte-parity promise. Fix the manifest emission in scripts/compose_template.ts or stamp_manifest.ts (or this expectation in verify_smoke_gating.sh)."
+  exit 1
+fi
 expect_class "SECURITY.md" split
 expect_class ".gitignore" split
 expect_class ".github/repo-platform-manifest.json" managed

@@ -16,7 +16,6 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { parse as parseYaml } from "yaml";
 import {
   declarationSource,
   expandTargetPattern,
@@ -27,7 +26,6 @@ import {
   readMirrors,
   renderNote,
   renderRefusals,
-  restoreMirrorsKey,
 } from "../../.github/scripts/sync/materialize_mirrors.ts";
 import type { ManifestEntryShape } from "../../actions/shared/manifest.ts";
 import { boundedSpawnSync } from "../shared/bounded_spawn";
@@ -440,7 +438,7 @@ describe("declarationSource", () => {
     expect(declarationSource(root)).toEqual({ text: "modules: [uv]\n", refusal: null });
   });
 
-  test("inside a git repository HEAD's copy wins over a rewritten working tree (the recopy shape)", () => {
+  test("inside a git repository HEAD's copy wins over a rewritten working tree", () => {
     const root = makeTree({ ".repo-platform.yml": "modules: [uv]\nmirrors: []\n" });
     git(root, "init", "-q", "-b", "main");
     git(root, "add", "-A");
@@ -485,55 +483,17 @@ describe("declarationSource", () => {
   });
 });
 
-describe("restoreMirrorsKey", () => {
-  const HEAD_RAW = [{ source: "LICENSE.md", targets: ["template/LICENSE.md"] }];
-
-  test("re-seats the key into a delivered file that lost it (the recopy shape)", () => {
-    const root = makeTree({ ".repo-platform.yml": "# header\nmodules: [uv]\n" });
-    expect(restoreMirrorsKey(root, HEAD_RAW)).toBe(true);
-    const data = parseYaml(readFileSync(join(root, ".repo-platform.yml"), "utf-8")) as Record<
-      string,
-      unknown
-    >;
-    expect(data.modules).toEqual(["uv"]);
-    expect(data.mirrors).toEqual(HEAD_RAW);
-  });
-
-  test("leaves a file that still carries the key untouched", () => {
-    const text = "modules: [uv]\nmirrors: []\n";
-    const root = makeTree({ ".repo-platform.yml": text });
-    expect(restoreMirrorsKey(root, HEAD_RAW)).toBe(false);
-    expect(readFileSync(join(root, ".repo-platform.yml"), "utf-8")).toBe(text);
-  });
-
-  test("no HEAD declaration means nothing to restore", () => {
-    const root = makeTree({ ".repo-platform.yml": "modules: [uv]\n" });
-    expect(restoreMirrorsKey(root, undefined)).toBe(false);
-  });
-
-  test("an unparseable delivered file is never appended to", () => {
-    const text = "modules: [uv\n";
-    const root = makeTree({ ".repo-platform.yml": text });
-    expect(restoreMirrorsKey(root, HEAD_RAW)).toBe(false);
-    expect(readFileSync(join(root, ".repo-platform.yml"), "utf-8")).toBe(text);
-  });
-});
-
 describe("report rendering", () => {
-  test("nothing written, unmatched, or restored renders no note", () => {
+  test("nothing written or unmatched renders no note", () => {
     expect(renderNote([], 3, [])).toBe("");
   });
 
-  test("the note lists every write, every unmatched pattern, and the restoration", () => {
-    const note = renderNote(
-      [{ source: "LICENSE.md", target: "template/LICENSE.md" }],
-      2,
-      [{ source: "LICENSE.md", pattern: "skills/*/LICENSE.md" }],
-      true,
-    );
+  test("the note lists every write and every unmatched pattern", () => {
+    const note = renderNote([{ source: "LICENSE.md", target: "template/LICENSE.md" }], 2, [
+      { source: "LICENSE.md", pattern: "skills/*/LICENSE.md" },
+    ]);
     expect(note).toContain("`template/LICENSE.md` <- `LICENSE.md`");
     expect(note).toContain("matched nothing");
-    expect(note).toContain("restored from the previous commit's declaration");
     expect(note).toContain("2 declared target(s) already matched");
   });
 
