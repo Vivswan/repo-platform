@@ -101,20 +101,34 @@ afterAll(() => {
   }
 });
 
+/** Per-test bound for the tests that run full rebuilds: each rebuild is
+ * six sequential subprocesses (worktree add, bun install, builder,
+ * staging), and the hostile-config test nests two of them inside driver
+ * bun processes - under parallel machine load their aggregate exceeds
+ * bun's 5s default. This is load headroom only; hang detection lives in
+ * the child-side deadlines (capture's bound, the drivers' 10s,
+ * REBUILD_STEP_TIMEOUT_MS), which sync spawns keep out of bun's timer's
+ * reach anyway. The fast-failing tests keep the default. */
+const REBUILD_TEST_TIMEOUT_MS = 30_000;
+
 describe("rebuildBranchTree", () => {
-  test("the same source rebuilds to the same tree hash", () => {
-    const dirs = (name: string) => ({
-      srcDir: join(scratch, `work-${name}`, "src"),
-      treeDir: join(scratch, `work-${name}`, "tree"),
-    });
-    const first = rebuildBranchTree({ sourceSha, ...dirs("a") });
-    const second = rebuildBranchTree({ sourceSha, ...dirs("b") });
-    expect(first).toMatch(/^[0-9a-f]{40}$/);
-    expect(second).toBe(first);
-    for (const name of ["a", "b"]) {
-      git("worktree", "remove", "--force", join(scratch, `work-${name}`, "src"));
-    }
-  });
+  test(
+    "the same source rebuilds to the same tree hash",
+    () => {
+      const dirs = (name: string) => ({
+        srcDir: join(scratch, `work-${name}`, "src"),
+        treeDir: join(scratch, `work-${name}`, "tree"),
+      });
+      const first = rebuildBranchTree({ sourceSha, ...dirs("a") });
+      const second = rebuildBranchTree({ sourceSha, ...dirs("b") });
+      expect(first).toMatch(/^[0-9a-f]{40}$/);
+      expect(second).toBe(first);
+      for (const name of ["a", "b"]) {
+        git("worktree", "remove", "--force", join(scratch, `work-${name}`, "src"));
+      }
+    },
+    REBUILD_TEST_TIMEOUT_MS,
+  );
 
   test("an unresolvable source throws instead of returning a hash", () => {
     expect(() =>
@@ -126,70 +140,78 @@ describe("rebuildBranchTree", () => {
     ).toThrow(/command failed/);
   });
 
-  test("a hostile GIT_DIR mutation genuinely reaches the helper's children, and deleting it clears them", () => {
-    // beforeAll's scrub relies on process.env mutations reaching the
-    // helper's spawned children - the exact channel bun's default
-    // snapshot env silently severed. CONTROL first: a poison GIT_DIR
-    // must break the helper (the first step's git runs against the
-    // poison instead of the scratch repo). Then the deletion arm:
-    // removing the poison must clear the child again - beforeAll's scrub
-    // is this same delete. On a snapshot regression the control arm
-    // fails loudly instead of the scrub going quietly inert.
-    const saved = process.env.GIT_DIR;
-    process.env.GIT_DIR = join(scratch, "poison-not-a-git-dir");
-    try {
-      expect(() =>
-        rebuildBranchTree({
-          sourceSha,
-          srcDir: join(scratch, "work-poison", "src"),
-          treeDir: join(scratch, "work-poison", "tree"),
-        }),
-      ).toThrow(/command failed/);
-    } finally {
-      if (saved === undefined) delete process.env.GIT_DIR;
-      else process.env.GIT_DIR = saved;
-    }
-    const hash = rebuildBranchTree({
-      sourceSha,
-      srcDir: join(scratch, "work-unpoisoned", "src"),
-      treeDir: join(scratch, "work-unpoisoned", "tree"),
-    });
-    expect(hash).toMatch(/^[0-9a-f]{40}$/);
-    // The poison arm died at its FIRST step (git worktree add ran against
-    // the poison, not the scratch repo), so it registered nothing to
-    // remove - prune any half-registration; only the unpoisoned rebuild
-    // holds a real worktree.
-    git("worktree", "prune");
-    git("worktree", "remove", "--force", join(scratch, "work-unpoisoned", "src"));
-  });
-
-  test("every helper spawn is handed live process.env, never bun's startup snapshot", () => {
-    // The poison control above proves delivery end-to-end, but a partial
-    // regression - ONE spawn site dropping its env argument - could hide
-    // behind whichever site still fails loudly first. This pin inspects
-    // every spawn the helper makes: a marker set AFTER process start
-    // must ride each call's env argument (an absent env means bun's
-    // startup snapshot, which no caller scrub can touch).
-    process.env.REBUILD_ENV_CANARY = "live";
-    const spy = spyOn(Bun, "spawnSync");
-    try {
+  test(
+    "a hostile GIT_DIR mutation genuinely reaches the helper's children, and deleting it clears them",
+    () => {
+      // beforeAll's scrub relies on process.env mutations reaching the
+      // helper's spawned children - the exact channel bun's default
+      // snapshot env silently severed. CONTROL first: a poison GIT_DIR
+      // must break the helper (the first step's git runs against the
+      // poison instead of the scratch repo). Then the deletion arm:
+      // removing the poison must clear the child again - beforeAll's scrub
+      // is this same delete. On a snapshot regression the control arm
+      // fails loudly instead of the scrub going quietly inert.
+      const saved = process.env.GIT_DIR;
+      process.env.GIT_DIR = join(scratch, "poison-not-a-git-dir");
+      try {
+        expect(() =>
+          rebuildBranchTree({
+            sourceSha,
+            srcDir: join(scratch, "work-poison", "src"),
+            treeDir: join(scratch, "work-poison", "tree"),
+          }),
+        ).toThrow(/command failed/);
+      } finally {
+        if (saved === undefined) delete process.env.GIT_DIR;
+        else process.env.GIT_DIR = saved;
+      }
       const hash = rebuildBranchTree({
         sourceSha,
-        srcDir: join(scratch, "work-envpin", "src"),
-        treeDir: join(scratch, "work-envpin", "tree"),
+        srcDir: join(scratch, "work-unpoisoned", "src"),
+        treeDir: join(scratch, "work-unpoisoned", "tree"),
       });
       expect(hash).toMatch(/^[0-9a-f]{40}$/);
-      expect(spy.mock.calls.length).toBeGreaterThan(0);
-      for (const call of spy.mock.calls) {
-        const env = (call[1] as { env?: Record<string, string | undefined> } | undefined)?.env;
-        expect(env?.REBUILD_ENV_CANARY).toBe("live");
+      // The poison arm died at its FIRST step (git worktree add ran against
+      // the poison, not the scratch repo), so it registered nothing to
+      // remove - prune any half-registration; only the unpoisoned rebuild
+      // holds a real worktree.
+      git("worktree", "prune");
+      git("worktree", "remove", "--force", join(scratch, "work-unpoisoned", "src"));
+    },
+    REBUILD_TEST_TIMEOUT_MS,
+  );
+
+  test(
+    "every helper spawn is handed live process.env, never bun's startup snapshot",
+    () => {
+      // The poison control above proves delivery end-to-end, but a partial
+      // regression - ONE spawn site dropping its env argument - could hide
+      // behind whichever site still fails loudly first. This pin inspects
+      // every spawn the helper makes: a marker set AFTER process start
+      // must ride each call's env argument (an absent env means bun's
+      // startup snapshot, which no caller scrub can touch).
+      process.env.REBUILD_ENV_CANARY = "live";
+      const spy = spyOn(Bun, "spawnSync");
+      try {
+        const hash = rebuildBranchTree({
+          sourceSha,
+          srcDir: join(scratch, "work-envpin", "src"),
+          treeDir: join(scratch, "work-envpin", "tree"),
+        });
+        expect(hash).toMatch(/^[0-9a-f]{40}$/);
+        expect(spy.mock.calls.length).toBeGreaterThan(0);
+        for (const call of spy.mock.calls) {
+          const env = (call[1] as { env?: Record<string, string | undefined> } | undefined)?.env;
+          expect(env?.REBUILD_ENV_CANARY).toBe("live");
+        }
+      } finally {
+        spy.mockRestore();
+        delete process.env.REBUILD_ENV_CANARY;
       }
-    } finally {
-      spy.mockRestore();
-      delete process.env.REBUILD_ENV_CANARY;
-    }
-    git("worktree", "remove", "--force", join(scratch, "work-envpin", "src"));
-  });
+      git("worktree", "remove", "--force", join(scratch, "work-envpin", "src"));
+    },
+    REBUILD_TEST_TIMEOUT_MS,
+  );
 
   test("a step past REBUILD_STEP_TIMEOUT_MS throws the deadline instead of hanging", () => {
     // The knob is read at call time, so setting it here reaches the
@@ -255,109 +277,113 @@ describe("rebuildBranchTree", () => {
     expect(existsSync(join(scratch, "work-cred"))).toBe(false);
   });
 
-  test("hostile ignore and attribute config - in-tree AND machine-global - cannot skew the hash", () => {
-    // The scratch staging feeds both the provenance tree proof and
-    // wait_for_build's freshness compare, so a silent staging skew turns
-    // into a false tamper accusation or a burned 40-minute wait. Three
-    // measured skew vectors, all planted at once: a .gitignore INSIDE
-    // the composed tree hiding a sibling (only `add --force` covers it -
-    // an excludesFile override does not), a machine-global
-    // core.excludesFile hiding another file, and a machine-global
-    // core.attributesFile whose `* text` filter rewrites a CRLF blob at
-    // add time. The hash must not move, and the hidden files must be IN
-    // the tree.
-    const hostileBuilder = `${STUB_BUILDER}
+  test(
+    "hostile ignore and attribute config - in-tree AND machine-global - cannot skew the hash",
+    () => {
+      // The scratch staging feeds both the provenance tree proof and
+      // wait_for_build's freshness compare, so a silent staging skew turns
+      // into a false tamper accusation or a burned 40-minute wait. Three
+      // measured skew vectors, all planted at once: a .gitignore INSIDE
+      // the composed tree hiding a sibling (only `add --force` covers it -
+      // an excludesFile override does not), a machine-global
+      // core.excludesFile hiding another file, and a machine-global
+      // core.attributesFile whose `* text` filter rewrites a CRLF blob at
+      // add time. The hash must not move, and the hidden files must be IN
+      // the tree.
+      const hostileBuilder = `${STUB_BUILDER}
 writeFileSync(join(dest, "ignored.txt"), "must be staged\\n");
 writeFileSync(join(dest, "crlf.txt"), "windows line\\r\\n");
 writeFileSync(join(dest, ".gitignore"), "ignored.txt\\n");
 `;
-    writeFileSync(join(scratch, ".github/scripts/build-branches/branch_tree.ts"), hostileBuilder);
-    // Stage only the builder: earlier tests leave scratch tree repos
-    // (work-*/tree) lying around, and a bare add -A would trip over them.
-    git("add", ".github/scripts/build-branches/branch_tree.ts");
-    git("commit", "-qm", "hostile fixture");
-    const hostileSha = git("rev-parse", "HEAD");
-    const dirs = (name: string) => ({
-      srcDir: join(scratch, `work-${name}`, "src"),
-      treeDir: join(scratch, `work-${name}`, "tree"),
-    });
-    const cfg = mkdtempSync(join(tmpdir(), "hostile-git-"));
-    writeFileSync(join(cfg, "ignore"), "content.txt\n");
-    writeFileSync(join(cfg, "attributes"), "* text\n");
-    writeFileSync(
-      join(cfg, "config"),
-      `[core]\n\texcludesFile = ${join(cfg, "ignore")}\n\tattributesFile = ${join(cfg, "attributes")}\n`,
-    );
-    // BOTH arms run in DRIVER subprocesses with pinned startup
-    // environments - the shape that first made this arm genuinely
-    // hostile: as an in-process mutation the config never reached the
-    // helper's then-snapshot-env `git add`, the exact spawn the
-    // excludesFile must fail to skew. Drivers also keep the arms
-    // SYMMETRIC: both startup envs are pinned like stage_tree.test.ts's
-    // buildHermeticEnv and differ ONLY in which file the global scope
-    // reads, so a hash move is attributable to the hostile config alone
-    // - unpinned, the machine's real global config leaks into the clean
-    // arm asymmetrically (a developer core.autocrlf=input was measured
-    // doing exactly that).
-    writeFileSync(join(cfg, "empty-gitconfig"), "");
-    mkdirSync(join(cfg, "empty-xdg"));
-    const baseEnv = {
-      ...process.env,
-      ...gitFreeOverlay(),
-      GIT_CONFIG_GLOBAL: join(cfg, "empty-gitconfig"),
-      GIT_CONFIG_SYSTEM: join(cfg, "empty-gitconfig"),
-      XDG_CONFIG_HOME: join(cfg, "empty-xdg"),
-    };
-    const hostileEnv = { ...baseEnv, GIT_CONFIG_GLOBAL: join(cfg, "config") };
-    // Control: under the hostile env git genuinely ignores content.txt
-    // (exit 0) - without a live vector the agreement assertions pass
-    // vacuously. The overlay entries already ride hostileEnv, so capture's
-    // merge delivers exactly the pinned scopes.
-    expect(
-      capture(["git", "-C", scratch, "check-ignore", "-q", "content.txt"], {
-        env: hostileEnv,
-      }).exitCode,
-    ).toBe(0);
-    const driver = join(cfg, "driver.ts");
-    const helper = join(import.meta.dir, "../../.github/scripts/shared/rebuild_tree.ts");
-    writeFileSync(
-      driver,
-      [
-        `import { rebuildBranchTree } from ${JSON.stringify(helper)};`,
-        "const [sourceSha, srcDir, treeDir] = process.argv.slice(2);",
-        "console.log(rebuildBranchTree({ sourceSha, srcDir, treeDir }));",
-        "",
-      ].join("\n"),
-    );
-    const rebuildInDriver = (name: string, env: Record<string, string | undefined>): string => {
-      const { srcDir, treeDir } = dirs(name);
-      // Through capture(): the env carries a full process.env copy plus
-      // the pinned scopes, so the merge hands the driver exactly that
-      // startup environment - deadline-bounded with SIGKILL, so a hung
-      // rebuild dies loudly inside the test budget.
-      const run = capture([process.execPath, driver, hostileSha, srcDir, treeDir], {
-        cwd: scratch,
-        env,
-        timeoutMs: 10_000,
+      writeFileSync(join(scratch, ".github/scripts/build-branches/branch_tree.ts"), hostileBuilder);
+      // Stage only the builder: earlier tests leave scratch tree repos
+      // (work-*/tree) lying around, and a bare add -A would trip over them.
+      git("add", ".github/scripts/build-branches/branch_tree.ts");
+      git("commit", "-qm", "hostile fixture");
+      const hostileSha = git("rev-parse", "HEAD");
+      const dirs = (name: string) => ({
+        srcDir: join(scratch, `work-${name}`, "src"),
+        treeDir: join(scratch, `work-${name}`, "tree"),
       });
-      if (run.exitCode !== 0) throw new Error(`${name} driver failed: ${run.stderr}`);
-      return run.stdout.trim();
-    };
-    const clean = rebuildInDriver("clean", baseEnv);
-    const hostile = rebuildInDriver("hostile", hostileEnv);
-    expect(hostile).toBe(clean);
-    const listing = capture(
-      ["git", "-C", join(scratch, "work-hostile", "tree"), "ls-tree", "--name-only", hostile],
-      { env: gitFreeOverlay() },
-    );
-    expect(listing.exitCode).toBe(0);
-    const names = listing.stdout;
-    expect(names).toContain("ignored.txt");
-    expect(names).toContain("content.txt");
-    expect(names).toContain("crlf.txt");
-    for (const name of ["clean", "hostile"]) {
-      git("worktree", "remove", "--force", join(scratch, `work-${name}`, "src"));
-    }
-    rmSync(cfg, { recursive: true, force: true });
-  });
+      const cfg = mkdtempSync(join(tmpdir(), "hostile-git-"));
+      writeFileSync(join(cfg, "ignore"), "content.txt\n");
+      writeFileSync(join(cfg, "attributes"), "* text\n");
+      writeFileSync(
+        join(cfg, "config"),
+        `[core]\n\texcludesFile = ${join(cfg, "ignore")}\n\tattributesFile = ${join(cfg, "attributes")}\n`,
+      );
+      // BOTH arms run in DRIVER subprocesses with pinned startup
+      // environments - the shape that first made this arm genuinely
+      // hostile: as an in-process mutation the config never reached the
+      // helper's then-snapshot-env `git add`, the exact spawn the
+      // excludesFile must fail to skew. Drivers also keep the arms
+      // SYMMETRIC: both startup envs are pinned like stage_tree.test.ts's
+      // buildHermeticEnv and differ ONLY in which file the global scope
+      // reads, so a hash move is attributable to the hostile config alone
+      // - unpinned, the machine's real global config leaks into the clean
+      // arm asymmetrically (a developer core.autocrlf=input was measured
+      // doing exactly that).
+      writeFileSync(join(cfg, "empty-gitconfig"), "");
+      mkdirSync(join(cfg, "empty-xdg"));
+      const baseEnv = {
+        ...process.env,
+        ...gitFreeOverlay(),
+        GIT_CONFIG_GLOBAL: join(cfg, "empty-gitconfig"),
+        GIT_CONFIG_SYSTEM: join(cfg, "empty-gitconfig"),
+        XDG_CONFIG_HOME: join(cfg, "empty-xdg"),
+      };
+      const hostileEnv = { ...baseEnv, GIT_CONFIG_GLOBAL: join(cfg, "config") };
+      // Control: under the hostile env git genuinely ignores content.txt
+      // (exit 0) - without a live vector the agreement assertions pass
+      // vacuously. The overlay entries already ride hostileEnv, so capture's
+      // merge delivers exactly the pinned scopes.
+      expect(
+        capture(["git", "-C", scratch, "check-ignore", "-q", "content.txt"], {
+          env: hostileEnv,
+        }).exitCode,
+      ).toBe(0);
+      const driver = join(cfg, "driver.ts");
+      const helper = join(import.meta.dir, "../../.github/scripts/shared/rebuild_tree.ts");
+      writeFileSync(
+        driver,
+        [
+          `import { rebuildBranchTree } from ${JSON.stringify(helper)};`,
+          "const [sourceSha, srcDir, treeDir] = process.argv.slice(2);",
+          "console.log(rebuildBranchTree({ sourceSha, srcDir, treeDir }));",
+          "",
+        ].join("\n"),
+      );
+      const rebuildInDriver = (name: string, env: Record<string, string | undefined>): string => {
+        const { srcDir, treeDir } = dirs(name);
+        // Through capture(): the env carries a full process.env copy plus
+        // the pinned scopes, so the merge hands the driver exactly that
+        // startup environment - deadline-bounded with SIGKILL, so a hung
+        // rebuild dies loudly inside the test budget.
+        const run = capture([process.execPath, driver, hostileSha, srcDir, treeDir], {
+          cwd: scratch,
+          env,
+          timeoutMs: 10_000,
+        });
+        if (run.exitCode !== 0) throw new Error(`${name} driver failed: ${run.stderr}`);
+        return run.stdout.trim();
+      };
+      const clean = rebuildInDriver("clean", baseEnv);
+      const hostile = rebuildInDriver("hostile", hostileEnv);
+      expect(hostile).toBe(clean);
+      const listing = capture(
+        ["git", "-C", join(scratch, "work-hostile", "tree"), "ls-tree", "--name-only", hostile],
+        { env: gitFreeOverlay() },
+      );
+      expect(listing.exitCode).toBe(0);
+      const names = listing.stdout;
+      expect(names).toContain("ignored.txt");
+      expect(names).toContain("content.txt");
+      expect(names).toContain("crlf.txt");
+      for (const name of ["clean", "hostile"]) {
+        git("worktree", "remove", "--force", join(scratch, `work-${name}`, "src"));
+      }
+      rmSync(cfg, { recursive: true, force: true });
+    },
+    REBUILD_TEST_TIMEOUT_MS,
+  );
 });
