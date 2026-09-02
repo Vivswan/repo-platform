@@ -24,7 +24,7 @@ on:
 jobs:
   # Assign open, currently-unassigned code scanning alerts per the CODEOWNERS
   # policy. No Actions trigger exists for alert creation, so this polls after
-  # CI completes (workflow_run - CodeQL analyzes inside CI's gate) and weekly
+  # CI completes (workflow_run - CodeQL analyzes inside CI's gate) and nightly
   # (schedule). CI completes on every push, PR, and dispatch run, but only
   # default-branch pushes and scheduled re-scans produce new alerts, so other
   # workflow_run deliveries are filtered out. Idempotent: alerts that already
