@@ -1,5 +1,5 @@
 // Unit tests for the manifest stamper: in-place hash substitution on the
-// rendered one-entry-per-line layout, the split-half and symlink hashing
+// rendered one-entry-per-line layout, the split-region and symlink hashing
 // rules, the self-entry exclusion, conflict-block resolution toward the
 // template side, and the warn-don't-fail contract on unparseable input.
 
@@ -7,12 +7,11 @@ import { describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
+import { isMarkerLine, splitManagedRegion } from "../../actions/shared/grammar";
 import { parseManifestFiles, resolveConflictsTowardAfter } from "../../actions/shared/manifest";
 import {
   describeRewritten,
   entryHash,
-  isMarkerLine,
-  managedHalf,
   normalizeFromText,
   normalizeSymlinkTargets,
   recordedCommit,
@@ -51,26 +50,31 @@ describe("isMarkerLine", () => {
   });
 });
 
-describe("managedHalf", () => {
-  const content = "top\n# repo-platform:local-section\ntail\n";
-  test("above covers through the marker line's newline", () => {
-    expect(managedHalf(content, "# repo-platform:local-section", "above")).toBe(
-      "top\n# repo-platform:local-section\n",
-    );
-  });
-  test("below covers from the marker line to end of file", () => {
-    expect(managedHalf(content, "# repo-platform:local-section", "below")).toBe(
-      "# repo-platform:local-section\ntail\n",
-    );
+describe("splitManagedRegion", () => {
+  const markers = { begin: "# b", end: "# e" };
+  const content = "above\n# b\nmanaged\n# e\nbelow\n";
+  test("slices above, region (markers included), and below", () => {
+    expect(splitManagedRegion(content, markers)).toEqual({
+      above: "above\n",
+      region: "# b\nmanaged\n# e\n",
+      below: "below\n",
+    });
   });
   test("an indented marker line matches by trimmed content", () => {
-    expect(managedHalf("a\n  # m\nb", "# m", "above")).toBe("a\n  # m\n");
+    expect(splitManagedRegion("a\n  # b\nx\n# e\nz\n", markers)?.region).toBe("  # b\nx\n# e\n");
   });
-  test("a marker at end of file without a trailing newline stays in bounds", () => {
-    expect(managedHalf("a\n# m", "# m", "above")).toBe("a\n# m");
+  test("an END at end of file without a trailing newline stays in bounds", () => {
+    expect(splitManagedRegion("# b\nx\n# e", markers)).toEqual({
+      above: "",
+      region: "# b\nx\n# e",
+      below: "",
+    });
   });
   test("a missing marker returns null", () => {
-    expect(managedHalf(content, "# other", "above")).toBeNull();
+    expect(splitManagedRegion("# b\nx\n", markers)).toBeNull();
+    expect(splitManagedRegion("x\n# e\n", markers)).toBeNull();
+    // END must come AFTER BEGIN.
+    expect(splitManagedRegion("# e\nx\n# b\n", markers)).toBeNull();
   });
 });
 
@@ -169,12 +173,13 @@ describe("stampManifestText", () => {
   test("stamps managed, split, and symlink entries and leaves the rest", () => {
     const root = tree({
       "ci.yml": "managed content\n",
-      "SECURITY.md": "managed top\n<!-- repo-platform:local-section -->\nrepo tail\n",
+      "SECURITY.md":
+        "repo preamble\n<!-- BEGIN REPO-PLATFORM MANAGED -->\nmanaged\n<!-- END REPO-PLATFORM MANAGED -->\nrepo tail\n",
     });
     symlinkSync("AGENTS.md", join(root, "CLAUDE.md"));
     const text = manifestText([
       '    "CLAUDE.md": {"class": "managed", "hash": null}',
-      '    "SECURITY.md": {"class": "split", "marker": "<!-- repo-platform:local-section -->", "managed": "above", "hash": null}',
+      '    "SECURITY.md": {"class": "split", "grammar": "managed-region", "begin": "<!-- BEGIN REPO-PLATFORM MANAGED -->", "end": "<!-- END REPO-PLATFORM MANAGED -->", "hash": null}',
       '    "checks.yml": {"class": "starter"}',
       '    "ci.yml": {"class": "managed", "hash": null}',
       '    ".github/repo-platform-manifest.json": {"class": "managed", "hash": null}',
@@ -184,7 +189,7 @@ describe("stampManifestText", () => {
     const files = (JSON.parse(out) as { files: Record<string, { hash?: string | null }> }).files;
     expect(files["ci.yml"].hash).toBe(sha256("managed content\n"));
     expect(files["SECURITY.md"].hash).toBe(
-      sha256("managed top\n<!-- repo-platform:local-section -->\n"),
+      sha256("<!-- BEGIN REPO-PLATFORM MANAGED -->\nmanaged\n<!-- END REPO-PLATFORM MANAGED -->\n"),
     );
     expect(files["CLAUDE.md"].hash).toBe(sha256("AGENTS.md"));
     expect(files["checks.yml"].hash).toBeUndefined();
@@ -203,11 +208,11 @@ describe("stampManifestText", () => {
     expect(stampManifestText(once, root).out).toBe(once);
   });
 
-  test("a missing file or missing split marker stamps null", () => {
-    const root = tree({ "split.md": "no marker here\n" });
+  test("a missing file or missing split markers stamps null", () => {
+    const root = tree({ "split.md": "no markers here\n" });
     const text = manifestText([
       `    "gone.yml": {"class": "managed", "hash": "${"a".repeat(64)}"}`,
-      '    "split.md": {"class": "split", "marker": "# repo-platform:local-section", "managed": "above", "hash": null}',
+      '    "split.md": {"class": "split", "grammar": "managed-region", "begin": "# b", "end": "# e", "hash": null}',
     ]);
     const files = (
       JSON.parse(stampManifestText(text, root).out) as {
@@ -331,16 +336,28 @@ describe("stampManifestText", () => {
 });
 
 describe("entryHash", () => {
-  test("hashes whole content for managed and the half for split", () => {
-    const root = tree({ "f.md": "a\n# m\nb\n" });
-    expect(entryHash(root, "f.md", { class: "managed" })).toBe(sha256("a\n# m\nb\n"));
-    expect(entryHash(root, "f.md", { class: "split", marker: "# m", managed: "below" })).toBe(
-      sha256("# m\nb\n"),
+  test("hashes whole content for managed and the region for split", () => {
+    const root = tree({ "f.md": "a\n# b\nx\n# e\nz\n" });
+    expect(entryHash(root, "f.md", { class: "managed" })).toBe(sha256("a\n# b\nx\n# e\nz\n"));
+    expect(entryHash(root, "f.md", { class: "split", begin: "# b", end: "# e" })).toBe(
+      sha256("# b\nx\n# e\n"),
     );
   });
   test("malformed split metadata yields null rather than a wrong hash", () => {
     const root = tree({ "f.md": "a\n" });
-    expect(entryHash(root, "f.md", { class: "split", marker: 3, managed: "above" })).toBeNull();
+    expect(entryHash(root, "f.md", { class: "split", begin: 3, end: "# e" })).toBeNull();
+  });
+  test("duplicated or reordered markers stamp null, never an ambiguous first slice", () => {
+    // The strict slicer (cleanManagedRegion) is the stamper's own
+    // accept/reject: an ambiguous region has no honest hash, and the
+    // validator's parity check reports the unstamped entry.
+    const dup = tree({ "f.md": "# b\nx\n# e\n# b\ny\n# e\n" });
+    expect(entryHash(dup, "f.md", { class: "split", begin: "# b", end: "# e" })).toBeNull();
+    const reordered = tree({ "f.md": "# e\nx\n# b\n" });
+    expect(entryHash(reordered, "f.md", { class: "split", begin: "# b", end: "# e" })).toBeNull();
+    // A mid-line mention counts as a duplicate too (substring rule).
+    const buried = tree({ "f.md": "see # b here\n# b\nx\n# e\n" });
+    expect(entryHash(buried, "f.md", { class: "split", begin: "# b", end: "# e" })).toBeNull();
   });
 });
 

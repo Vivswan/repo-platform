@@ -4,14 +4,14 @@ Each pattern was seen in production; each entry carries the command that diagnos
 
 ## 1. Recovery PR gutted repository-local sections
 
-A `recover=recopy` re-render arrived with local content stripped: `copilot-env` PR #103 showed `AGENTS.md +0/-200`; `skills` PR #22 dropped 79 local AGENTS.md lines plus 7 lines from the `.gitignore` REPOSITORY LOCAL section. Diagnosed by the per-file stats pass:
+A `recover=recopy` re-render arrived with local content stripped: `copilot-env` PR #103 showed `AGENTS.md +0/-200`; `skills` PR #22 dropped 79 local AGENTS.md lines plus 7 lines from `.gitignore`'s repo-owned side. Diagnosed by the per-file stats pass:
 
 ```bash
 gh pr view <number> --json files --jq '.files[]|[.path,.additions,.deletions]|@tsv'
-# AGENTS.md  0  200   <- deletion-dominant on a local-section file
+# AGENTS.md  0  200   <- deletion-dominant on a split file
 ```
 
-Resolution: those PRs predate the recovery carry step; recoveries now splice local content back (kept-whole, tail-appended, or a marked recovery appendix) and list each carried file's disposition in the PR body's carry summary, so this diff shape should not recur. If it ever does, do not merge. Preferred fix: re-dispatch the recovery - the force-pushed branch heals the open PR in place. Manual fix: on the automation branch, read the base copy with `git show origin/main:AGENTS.md` and re-append ONLY the block below the `repo-platform:local-section` line (for `.gitignore`, the lines inside BEGIN/END REPOSITORY LOCAL). Never `git checkout origin/main -- AGENTS.md`: that reverts the managed half too, undoing the update the PR exists to deliver. Details: [recovery.md](recovery.md).
+Resolution: those PRs predate the recovery carry step; recoveries now splice local content back (kept-whole, tail-appended, or a marked recovery appendix) and list each carried file's disposition in the PR body's carry summary, so this diff shape should not recur. If it ever does, do not merge. Preferred fix: re-dispatch the recovery - the force-pushed branch heals the open PR in place. Manual fix: on the automation branch, read the base copy with `git show origin/main:AGENTS.md` and re-seat ONLY the repo-owned sides (the content outside the BEGIN/END managed-region markers; on pre-conversion copies, the block below the old `repo-platform:local-section` line). Never `git checkout origin/main -- AGENTS.md`: that reverts the managed region too, undoing the update the PR exists to deliver. Details: [recovery.md](recovery.md).
 
 ## 2. Hand-edits to fully-managed files reverted by sync
 
@@ -22,7 +22,7 @@ git fetch origin main automation/repo-platform
 git diff origin/main...origin/automation/repo-platform -- .github/workflows/ci.yml
 ```
 
-Resolution: expected - overlapping edits to template-owned files lose to the template. Move the content to where it is owned: below the `repo-platform:local-section` marker, into the `.gitignore` REPOSITORY LOCAL section, or into a repo-owned file (CI jobs go in checks.yml). If the change belongs to every repo, change the template in repo-platform instead.
+Resolution: expected - overlapping edits to template-owned files lose to the template. Move the content to where it is owned: outside the BEGIN/END managed region (above or below it), or into a repo-owned file (CI jobs go in checks.yml). If the change belongs to every repo, change the template in repo-platform instead.
 
 ## 3. True three-way conflicts in a normal sync PR
 
@@ -43,4 +43,4 @@ gh pr checks <number>
 gh run view <run-id> --log-failed
 ```
 
-Resolution: point such assertions at local-section or repo-owned content only; the managed half can change on any sync and is not the repo's to pin.
+Resolution: point such assertions at repo-owned content only; the managed region can change on any sync and is not the repo's to pin.

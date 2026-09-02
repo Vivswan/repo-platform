@@ -429,8 +429,8 @@ function run(checkMode: boolean): number {
       for (const line of ignored) console.error(`  ${line}`);
       console.error(
         "an ignored golden silently drops from future `git add` runs; fix the " +
-          "colliding pattern at its source (the repo .gitignore local section, " +
-          "or the template whose rendered .gitignore matches its own sibling)",
+          "colliding pattern at its source (the repo .gitignore's repo-owned " +
+          "side, or the template whose rendered .gitignore matches its own sibling)",
       );
       return 1;
     }

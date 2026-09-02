@@ -54,79 +54,37 @@
             "additionalProperties": false
           },
           {
-            "oneOf": [
-              {
-                "type": "object",
-                "properties": {
-                  "path": {
-                    "type": "string",
-                    "minLength": 1
-                  },
-                  "class": {
-                    "type": "string",
-                    "const": "split"
-                  },
-                  "grammar": {
-                    "type": "string",
-                    "const": "tail-marker"
-                  },
-                  "marker": {
-                    "type": "string",
-                    "minLength": 1
-                  }
-                },
-                "required": [
-                  "path",
-                  "class",
-                  "grammar",
-                  "marker"
-                ],
-                "additionalProperties": false
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string",
+                "minLength": 1
               },
-              {
-                "type": "object",
-                "properties": {
-                  "path": {
-                    "type": "string",
-                    "minLength": 1
-                  },
-                  "class": {
-                    "type": "string",
-                    "const": "split"
-                  },
-                  "grammar": {
-                    "type": "string",
-                    "const": "bounded-region"
-                  },
-                  "managed_begin": {
-                    "type": "string",
-                    "minLength": 1
-                  },
-                  "managed_end": {
-                    "type": "string",
-                    "minLength": 1
-                  },
-                  "local_begin": {
-                    "type": "string",
-                    "minLength": 1
-                  },
-                  "local_end": {
-                    "type": "string",
-                    "minLength": 1
-                  }
-                },
-                "required": [
-                  "path",
-                  "class",
-                  "grammar",
-                  "managed_begin",
-                  "managed_end",
-                  "local_begin",
-                  "local_end"
-                ],
-                "additionalProperties": false
+              "class": {
+                "type": "string",
+                "const": "split"
+              },
+              "grammar": {
+                "type": "string",
+                "const": "managed-region"
+              },
+              "begin": {
+                "type": "string",
+                "minLength": 1
+              },
+              "end": {
+                "type": "string",
+                "minLength": 1
               }
-            ]
+            },
+            "required": [
+              "path",
+              "class",
+              "grammar",
+              "begin",
+              "end"
+            ],
+            "additionalProperties": false
           }
         ]
       }

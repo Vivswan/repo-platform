@@ -19,7 +19,7 @@ Managed: `ci.yml` and its standard jobs, `dependabot.yml` (github-actions ecosys
 
 ## agents
 
-- Managed: the AGENTS.md managed half (repo-specific content goes below the `repo-platform:local-section` marker) and the agent-file symlinks (`CLAUDE.md`, `.github/copilot-instructions.md`, `.github/agents.md`), all pointing at AGENTS.md.
+- Managed: the AGENTS.md managed region (repo-specific content goes below the `<!-- END REPO-PLATFORM MANAGED -->` marker) and the agent-file symlinks (`CLAUDE.md`, `.github/copilot-instructions.md`, `.github/agents.md`), all pointing at AGENTS.md.
 - Starter: `copilot-setup-steps.yml` (Copilot coding agent environment setup), prefilled with installs for the toolchains selected at generation time; adding a toolchain later does not update an existing copy.
 - Removal: the managed half and symlinks leave the render and are deleted; the starter stays.
 
@@ -89,4 +89,4 @@ Twin nightly issue streams backed by the same `fuzz-issue` action; `fuzzer` adds
 
 - Effect: the fleet LICENSE.md is not rendered; the repo's LICENSE.md is its own license, repo-owned, and the `copyright_holder` question is skipped.
 - Adding it: the existing fleet LICENSE.md file is preserved in place (not deleted) - replace its content with the repo's own license.
-- Removing it is guarded: the sync fails with instructions while the repo's own license file exists. Delete the old license in the same commit that removes the module from `.repo-platform.yml`, then re-run the sync; the fleet LICENSE.md arrives in that PR (prior licensing stays in git history; third-party notices go below the local-section marker).
+- Removing it is guarded: the sync fails with instructions while the repo's own license file exists. Delete the old license in the same commit that removes the module from `.repo-platform.yml`, then re-run the sync; the fleet LICENSE.md arrives in that PR (prior licensing stays in git history; third-party notices go below the END marker).

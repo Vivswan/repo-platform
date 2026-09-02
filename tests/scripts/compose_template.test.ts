@@ -713,12 +713,13 @@ describe("manifestEntries", () => {
     gateDirs: [],
     entry: file(text),
   });
-  const SENTINEL = "<!-- repo-platform:local-section -->";
+  const B = "<!-- BEGIN REPO-PLATFORM MANAGED -->";
+  const E = "<!-- END REPO-PLATFORM MANAGED -->";
   const declarations = (over: Partial<DeclarationSources> = {}): DeclarationSources => ({
     base: [
       { path: ".github/workflows/ci.yml", class: "managed" },
       { path: ".github/workflows/checks.yml", class: "starter" },
-      { path: "CONTRIBUTING.md", class: "split", grammar: "tail-marker", marker: SENTINEL },
+      { path: "CONTRIBUTING.md", class: "split", grammar: "managed-region", begin: B, end: E },
     ],
     modules: new Map([
       ["agents", [{ path: "CLAUDE.md", class: "managed" }] as OwnershipDeclaration[]],
@@ -732,7 +733,7 @@ describe("manifestEntries", () => {
   const FILES = new Map<string, SourcedEntry>([
     [".github/workflows/ci.yml.jinja", base("# managed\n")],
     [".github/workflows/checks.yml.jinja", base("# starter\n")],
-    ["{% if not private %}CONTRIBUTING.md{% endif %}.jinja", base(`${SENTINEL}\n`)],
+    ["{% if not private %}CONTRIBUTING.md{% endif %}.jinja", base(`${B}\nbody\n${E}\n`)],
     [
       ".github/workflows/release.yml.jinja",
       mod("release-please", "# This file is managed by {{ github_username }}/repo-platform.\n"),
@@ -749,20 +750,18 @@ describe("manifestEntries", () => {
     ],
   ]);
 
-  // The scan used to derive its marker set from CURRENT declarations only.
-  // .gitignore is the tree's ONLY bounded-region declaration, so flipping it
-  // to managed emptied the set and disarmed the check on exactly the flip it
-  // exists to catch. The constant roster is what closes that.
-  test("flipping the only bounded-region declaration to managed is still caught", () => {
+  // The scan used to derive its marker set from CURRENT declarations only:
+  // flipping the tree's only split declaration to managed emptied the set
+  // and disarmed the check on exactly the flip it exists to catch. The
+  // constant roster is what closes that.
+  test("flipping the only split declaration to managed is still caught", () => {
     const REGION = ["# BEGIN REPO-PLATFORM MANAGED", "# END REPO-PLATFORM MANAGED", ""].join("\n");
     const files = new Map<string, SourcedEntry>([[".gitignore", base(REGION)]]);
     const flipped = manifestEntries(files, skip, {
       base: [{ path: ".gitignore", class: "managed" }],
       modules: new Map(),
     });
-    expect(
-      flipped.errors.some((e) => e.includes("bounded-region marker but is declared managed")),
-    ).toBe(true);
+    expect(flipped.errors.some((e) => e.includes("declared managed"))).toBe(true);
   });
 
   test("records each landed file's declared class with its render gates, sorted, self-listed", () => {
@@ -781,7 +780,7 @@ describe("manifestEntries", () => {
       {
         path: "CONTRIBUTING.md",
         gates: ["not private"],
-        ownership: { class: "split", grammar: "tail-marker", marker: SENTINEL },
+        ownership: { class: "split", grammar: "managed-region", begin: B, end: E },
       },
     ]);
   });
@@ -821,7 +820,7 @@ describe("manifestEntries", () => {
         base: [
           { path: ".github/workflows/ci.yml", class: "managed" },
           { path: ".github/workflows/checks.yml", class: "starter" },
-          { path: "CONTRIBUTING.md", class: "split", grammar: "tail-marker", marker: SENTINEL },
+          { path: "CONTRIBUTING.md", class: "split", grammar: "managed-region", begin: B, end: E },
           { path: "GHOST.md", class: "managed" },
         ],
       }),
@@ -845,10 +844,10 @@ describe("manifestEntries", () => {
 
   test("text contradicting the declared class is an error", () => {
     const decls = declarations();
-    // ci.yml declared managed but carrying a local-section marker line.
+    // ci.yml declared managed but carrying a region marker line.
     const files = new Map([
       ...FILES,
-      [".github/workflows/ci.yml.jinja", base(`# managed\n# repo-platform:local-section\n`)],
+      [".github/workflows/ci.yml.jinja", base(`# managed\n# BEGIN REPO-PLATFORM MANAGED\n`)],
     ]);
     const { errors } = manifestEntries(files, skip, decls);
     expect(errors.join("\n")).toContain("declared managed");
@@ -914,8 +913,9 @@ describe("manifestTemplate", () => {
         gates: ["'agents' in modules"],
         ownership: {
           class: "split",
-          grammar: "tail-marker",
-          marker: "<!-- repo-platform:local-section -->",
+          grammar: "managed-region",
+          begin: "<!-- BEGIN REPO-PLATFORM MANAGED -->",
+          end: "<!-- END REPO-PLATFORM MANAGED -->",
         },
       },
       {
@@ -923,11 +923,9 @@ describe("manifestTemplate", () => {
         gates: [],
         ownership: {
           class: "split",
-          grammar: "bounded-region",
-          managed_begin: "# BEGIN REPO-PLATFORM MANAGED",
-          managed_end: "# END REPO-PLATFORM MANAGED",
-          local_begin: "# BEGIN REPOSITORY LOCAL",
-          local_end: "# END REPOSITORY LOCAL",
+          grammar: "managed-region",
+          begin: "# BEGIN REPO-PLATFORM MANAGED",
+          end: "# END REPO-PLATFORM MANAGED",
         },
       },
       {
@@ -949,15 +947,15 @@ describe("manifestTemplate", () => {
       `'    ".github/repo-platform-manifest.json": {"class": "managed", "hash": null, "commit": null}'`,
     );
     expect(text).toContain("{%- if 'agents' in modules -%}");
-    // Split entries expose their grammar next to the stamper's legacy
-    // marker/managed pair, derived from it.
+    // Split entries expose their grammar and its begin/end marker pair.
     expect(text).toContain(
-      '"class": "split", "grammar": "tail-marker", "marker": "<!-- repo-platform:local-section -->", "managed": "above", "hash": null',
+      '"class": "split", "grammar": "managed-region", ' +
+        '"begin": "<!-- BEGIN REPO-PLATFORM MANAGED -->", ' +
+        '"end": "<!-- END REPO-PLATFORM MANAGED -->", "hash": null',
     );
     expect(text).toContain(
-      '"class": "split", "grammar": "bounded-region", "marker": "# BEGIN REPO-PLATFORM MANAGED", ' +
-        '"managed": "below", "managed_end": "# END REPO-PLATFORM MANAGED", ' +
-        '"local_begin": "# BEGIN REPOSITORY LOCAL", "local_end": "# END REPOSITORY LOCAL", "hash": null',
+      '"class": "split", "grammar": "managed-region", "begin": "# BEGIN REPO-PLATFORM MANAGED", ' +
+        '"end": "# END REPO-PLATFORM MANAGED", "hash": null',
     );
     expect(text).toContain("{%- if ('a' in modules) and (not private) -%}");
     // No-parity classes carry no hash token for the stamper to fill.

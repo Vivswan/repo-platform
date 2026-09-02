@@ -334,6 +334,24 @@ describe("preserve_repo_owned removed-splits hold", () => {
     expect(result.report).toContain("could not be located");
   });
 
+  test("a symlinked HEAD manifest is unusable, never parsed as manifest text", () => {
+    // `git show` answers a symlink with its TARGET TEXT, which could parse
+    // as JSON (a link target literally spelled '{"files":{}}'): reading it
+    // would fail OPEN with zero split declarations. headEntry's blob-only
+    // read routes the shape to the fail-closed deletion axis instead.
+    const result = runHold(
+      {
+        "manifest-real.json": manifest,
+        [MANIFEST_REL]: { symlinkTo: "../manifest-real.json" },
+        "AGENTS.md": agentsWithTail,
+      },
+      ["AGENTS.md"],
+    );
+    expect(result.exitCode).toBe(0);
+    expect(result.report).toContain("`AGENTS.md`");
+    expect(result.report).toContain("not a regular file");
+  });
+
   test("a deleted split path that was a symlink at HEAD is held as a non-blob", () => {
     // `git show HEAD:AGENTS.md` answers the TARGET PATH STRING for a
     // symlink; the old bytes probe fed that to the marker parser as if it

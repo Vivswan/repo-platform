@@ -1,12 +1,13 @@
 // tail_tripwire.ts: the post-stamp defense-in-depth check that no split
-// file's repository-owned half lost non-blank lines it held at the
-// target's HEAD, across both split grammars (tail-marker, bounded-region)
-// - plus the loud refusal of pre-grammar HEAD manifests, whose legacy
-// marker/managed fallback was retired after the fleet census. The
-// script-level tests build a real git repo whose HEAD carries both the
-// previous file copies and the previous manifest, then overwrite the
-// working tree with the "delivered" state - exactly the shape the sync
-// leg hands the tripwire.
+// file's repository-owned content lost non-blank lines it held at the
+// target's HEAD - each side split by its OWN manifest declaration, the
+// retired HEAD vintages (tail-marker, the old bounded-region shape)
+// included, so the designed one-grammar transition VERIFIES instead of
+// alarming - plus the loud refusal of pre-grammar and unknown-grammar
+// HEAD manifests. The script-level tests build a real git repo whose HEAD
+// carries both the previous file copies and the previous manifest, then
+// overwrite the working tree with the "delivered" state - exactly the
+// shape the sync leg hands the tripwire.
 
 import { describe, expect, test } from "bun:test";
 import {
@@ -27,67 +28,69 @@ import {
   headSplitEntries,
   missingLines,
   renderReport,
-  repoOwnedHalf,
 } from "../../.github/scripts/sync/tail_tripwire.ts";
 import { boundedSpawnSync } from "../shared/bounded_spawn";
 
 const script = join(import.meta.dir, "../../.github/scripts/sync/tail_tripwire.ts");
 
-const SENTINEL = "<!-- repo-platform:local-section -->";
 const MANIFEST_NAME = ".github/repo-platform-manifest.json";
-const LOCAL_BEGIN = "# BEGIN REPOSITORY LOCAL";
-const LOCAL_END = "# END REPOSITORY LOCAL";
-const MANAGED_BEGIN = "# BEGIN REPO-PLATFORM MANAGED";
-const MANAGED_END = "# END REPO-PLATFORM MANAGED";
+const B = "<!-- BEGIN REPO-PLATFORM MANAGED -->";
+const E = "<!-- END REPO-PLATFORM MANAGED -->";
+const HB = "# BEGIN REPO-PLATFORM MANAGED";
+const HE = "# END REPO-PLATFORM MANAGED";
+const OLD_SENTINEL = "<!-- repo-platform:local-section -->";
+const OLD_LOCAL_BEGIN = "# BEGIN REPOSITORY LOCAL";
+const OLD_LOCAL_END = "# END REPOSITORY LOCAL";
 
-const agentsHead = `# AGENTS.md\n\nold managed guidance\n\n${SENTINEL}\n\n## Project docs\n\nrepo-local instructions\n`;
-const agentsDelivered = `# AGENTS.md\n\nfresh managed guidance\n\n${SENTINEL}\n\n## Project docs\n\nrepo-local instructions\n`;
+const agentsHead = `${B}\n# AGENTS.md\n\nold managed guidance\n${E}\n\n## Project docs\n\nrepo-local instructions\n`;
+const agentsDelivered = `${B}\n# AGENTS.md\n\nfresh managed guidance\n${E}\n\n## Project docs\n\nrepo-local instructions\n`;
 
-/** A .gitignore-shaped file: local region, then the managed section. */
-function regionFile(bodyLines: string[], managedLines: string[]): string {
-  return `${LOCAL_BEGIN}\n${bodyLines.map((l) => `${l}\n`).join("")}${LOCAL_END}\n\n${MANAGED_BEGIN}\n${managedLines.map((l) => `${l}\n`).join("")}${MANAGED_END}\n`;
+/** A .gitignore-shaped file in the CURRENT grammar: repo-owned content
+ * above, then the managed region. */
+function regionFile(aboveLines: string[], managedLines: string[]): string {
+  return `${aboveLines.map((l) => `${l}\n`).join("")}${HB}\n${managedLines.map((l) => `${l}\n`).join("")}${HE}\n`;
 }
 
 /** SplitEntry builders (the parsed shape splitEntries produces). */
-function tailEntry(path = "AGENTS.md", marker: string = SENTINEL): SplitEntry {
-  return { path, grammar: "tail-marker", marker };
+function regionSplit(path = "AGENTS.md", begin: string = B, end: string = E): SplitEntry {
+  return { path, grammar: "managed-region", begin, end };
 }
-function regionEntry(
-  path = ".gitignore",
-  markers: {
-    local_begin: string;
-    local_end: string;
-    managed_begin: string;
-    managed_end: string;
-  } = {
-    local_begin: LOCAL_BEGIN,
-    local_end: LOCAL_END,
-    managed_begin: MANAGED_BEGIN,
-    managed_end: MANAGED_END,
-  },
-): SplitEntry {
-  return { path, grammar: "bounded-region", ...markers };
-}
+
+/** HeadSplit builders (head_manifest.ts's vintage union). */
+const headRegion = (path = "AGENTS.md", begin: string = B, end: string = E) =>
+  ({ vintage: "managed-region", path, begin, end }) as const;
+const headTail = (path = "AGENTS.md", marker: string = OLD_SENTINEL) =>
+  ({ vintage: "tail-marker", path, marker }) as const;
+const headBounded = (path = ".gitignore", managed_begin: string = HB) =>
+  ({ vintage: "bounded-region", path, managed_begin }) as const;
 
 /** Manifest JSON builders (the raw shape the manifest files carry). */
 type RawEntry = Record<string, unknown>;
 function manifestText(files: Record<string, RawEntry>): string {
   return `${JSON.stringify({ files }, null, 2)}\n`;
 }
-const rawTail = (marker: string = SENTINEL): RawEntry => ({
+const rawRegion = (begin: string = B, end: string = E): RawEntry => ({
+  class: "split",
+  grammar: "managed-region",
+  begin,
+  end,
+});
+/** The RETIRED vintages' wire shapes, exactly as the old compose emitted
+ * them - what fleet HEADs still carry on the transition sync. */
+const rawLegacyTail = (marker: string = OLD_SENTINEL): RawEntry => ({
   class: "split",
   grammar: "tail-marker",
   marker,
   managed: "above",
 });
-const rawRegion = (): RawEntry => ({
+const rawLegacyBounded = (): RawEntry => ({
   class: "split",
   grammar: "bounded-region",
-  marker: MANAGED_BEGIN,
+  marker: HB,
   managed: "below",
-  managed_end: MANAGED_END,
-  local_begin: LOCAL_BEGIN,
-  local_end: LOCAL_END,
+  managed_end: HE,
+  local_begin: OLD_LOCAL_BEGIN,
+  local_end: OLD_LOCAL_END,
 });
 /** The retired pre-grammar wire shape: split entries stamped before the
  * grammar field existed carried only a marker/managed pair. The sync no
@@ -164,40 +167,19 @@ function runScript(
   };
 }
 
-describe("repoOwnedHalf", () => {
-  test("tail-marker: the half below the marker line", () => {
-    expect(repoOwnedHalf(`managed\n${SENTINEL}\ntail\n`, tailEntry())).toBe("tail\n");
-  });
-
-  test("tail-marker: managed and repo-owned halves partition the content exactly", () => {
-    const content = `a\n${SENTINEL}\nb\n`;
-    expect(repoOwnedHalf(content, tailEntry())).toBe("b\n");
-    expect(`a\n${SENTINEL}\n${repoOwnedHalf(content, tailEntry())}`).toBe(content);
-  });
-
-  test("tail-marker: missing marker line means no honest split", () => {
-    expect(repoOwnedHalf("no marker here\n", tailEntry())).toBeNull();
-  });
-
-  test("bounded-region: the local region body, not everything above the managed marker", () => {
-    const content = regionFile(["keep-me"], ["*.new"]);
-    expect(repoOwnedHalf(content, regionEntry())).toBe("keep-me\n");
-  });
-
-  test("bounded-region: a duplicated region marker is unlocatable, never guessed", () => {
-    const content = `${LOCAL_BEGIN}\nbody\n${LOCAL_END}\n${LOCAL_BEGIN}\n${LOCAL_END}\n${MANAGED_BEGIN}\n${MANAGED_END}\n`;
-    expect(repoOwnedHalf(content, regionEntry())).toBeNull();
-  });
-});
-
-describe("headSplitEntries", () => {
-  test("parses a grammar-bearing manifest strictly", () => {
+describe("headSplitEntries (re-exported for the sync legs)", () => {
+  test("parses a current-vintage manifest strictly", () => {
     const map = headSplitEntries(
-      manifestText({ "AGENTS.md": rawTail(), ".gitignore": rawRegion() }),
+      manifestText({ "AGENTS.md": rawRegion(), ".gitignore": rawRegion(HB, HE) }),
       "t",
     );
-    expect(map.get("AGENTS.md")).toEqual(tailEntry());
-    expect(map.get(".gitignore")?.grammar).toBe("bounded-region");
+    expect(map.get("AGENTS.md")).toEqual({
+      vintage: "managed-region",
+      path: "AGENTS.md",
+      begin: B,
+      end: E,
+    });
+    expect(map.get(".gitignore")?.vintage).toBe("managed-region");
   });
 
   test("a pre-grammar manifest is refused with the recovery advice, never read", () => {
@@ -208,8 +190,8 @@ describe("headSplitEntries", () => {
     expect(() =>
       headSplitEntries(
         manifestText({
-          "AGENTS.md": rawPreGrammar(SENTINEL, "above"),
-          ".gitignore": rawPreGrammar(MANAGED_BEGIN, "below"),
+          "AGENTS.md": rawPreGrammar(OLD_SENTINEL, "above"),
+          ".gitignore": rawPreGrammar(HB, "below"),
         }),
         "t",
       ),
@@ -217,12 +199,9 @@ describe("headSplitEntries", () => {
   });
 
   test("a mixed manifest (grammar beside pre-grammar entries) is refused the same way", () => {
-    // A post-grammar stamp writes the field on EVERY split entry, so a
-    // mixed manifest is damage; the recovery restamp is the answer for it
-    // too.
     const files = {
-      "AGENTS.md": rawTail(),
-      "SECURITY.md": rawPreGrammar(SENTINEL, "above"),
+      "AGENTS.md": rawRegion(),
+      "SECURITY.md": rawPreGrammar(OLD_SENTINEL, "above"),
     };
     expect(() => headSplitEntries(manifestText(files), "t")).toThrow(
       /predates the stamped split grammar/,
@@ -230,26 +209,15 @@ describe("headSplitEntries", () => {
   });
 
   test("an unknown grammar is never guessed at - it throws (fail closed)", () => {
-    const files = { "AGENTS.md": { class: "split", grammar: "mystery", marker: SENTINEL } };
-    expect(() => headSplitEntries(manifestText(files), "t")).toThrow(/refuses to guess/);
-  });
-
-  test("a damaged grammar entry fails the strict parse, with no fallback to soften it", () => {
-    // One damaged grammar entry beside a healthy one: the retired
-    // undiscriminated fallback used to re-read the WHOLE manifest as
-    // legacy on any strict rejection; the strict parse's verdict is final.
-    const files = {
-      "AGENTS.md": rawTail(),
-      "SECURITY.md": { class: "split", grammar: "tail-marker", marker: SENTINEL, managed: "below" },
-    };
-    expect(() => headSplitEntries(manifestText(files), "t")).toThrow(/managed side/);
+    const files = { "AGENTS.md": { class: "split", grammar: "mystery", marker: OLD_SENTINEL } };
+    expect(() => headSplitEntries(manifestText(files), "t")).toThrow(/refusing to guess/);
   });
 
   test("an unclean split path throws instead of silently skipping the real file", () => {
     // A tampered key ("../AGENTS.md") could never match the post-sync
     // manifest's clean key, so accepting it would skip the real file's
     // check without a finding.
-    expect(() => headSplitEntries(manifestText({ "../AGENTS.md": rawTail() }), "t")).toThrow(
+    expect(() => headSplitEntries(manifestText({ "../AGENTS.md": rawRegion() }), "t")).toThrow(
       /clean relative path/,
     );
   });
@@ -258,8 +226,8 @@ describe("headSplitEntries", () => {
     // JSON.parse keeps only the LAST duplicate: a conflict-mangled
     // manifest declaring AGENTS.md split THEN managed would classify it
     // managed, drop it from the split candidates, and let a retirement
-    // delete its repository-owned half with no hold.
-    const dup = `{"files": {"AGENTS.md": ${JSON.stringify(rawTail())}, "AGENTS.md": {"class": "managed", "hash": null}}}`;
+    // delete its repo-owned content with no hold.
+    const dup = `{"files": {"AGENTS.md": ${JSON.stringify(rawRegion())}, "AGENTS.md": {"class": "managed", "hash": null}}}`;
     expect(() => headSplitEntries(dup, "t")).toThrow(/same key twice/);
   });
 
@@ -268,27 +236,20 @@ describe("headSplitEntries", () => {
     // byte-level raw-token compare would miss it, but JSON.parse still
     // collides the two keys last-wins.
     const escaped = String.raw`"AGENTS.m\u0064"`;
-    const dup = `{"files": {"AGENTS.md": ${JSON.stringify(rawTail())}, ${escaped}: {"class": "managed", "hash": null}}}`;
+    const dup = `{"files": {"AGENTS.md": ${JSON.stringify(rawRegion())}, ${escaped}: {"class": "managed", "hash": null}}}`;
     expect(() => headSplitEntries(dup, "t")).toThrow(/same key twice/);
-  });
-
-  test("the same key in DIFFERENT objects is not a duplicate (every entry carries class)", () => {
-    // Core tokenizer cases live in tests/shared/json.test.ts (the shared
-    // helper's twin); this pins the consumer accepting a normal manifest.
-    const map = headSplitEntries(manifestText({ "AGENTS.md": rawTail() }), "t");
-    expect(map.get("AGENTS.md")?.grammar).toBe("tail-marker");
   });
 
   test("an unknown or missing ownership class throws instead of reading as non-split", () => {
     // A damaged class ("spllt") read as merely non-split would drop the
-    // file from the candidates and let a retirement delete its
-    // repository-owned half with auto-merge armed.
+    // file from the candidates and let a retirement delete its repo-owned
+    // content with auto-merge armed.
     expect(() =>
-      headSplitEntries(manifestText({ "AGENTS.md": { class: "spllt", marker: SENTINEL } }), "t"),
+      headSplitEntries(manifestText({ "AGENTS.md": { class: "spllt", begin: B } }), "t"),
     ).toThrow(/ownership class/);
-    expect(() =>
-      headSplitEntries(manifestText({ "AGENTS.md": { marker: SENTINEL } }), "t"),
-    ).toThrow(/ownership class/);
+    expect(() => headSplitEntries(manifestText({ "AGENTS.md": { begin: B } }), "t")).toThrow(
+      /ownership class/,
+    );
   });
 
   test("a damaged (non-object) entry throws instead of silently skipping its file", () => {
@@ -297,18 +258,17 @@ describe("headSplitEntries", () => {
     );
   });
 
-  test("an empty or non-printable marker on a grammar entry fails the strict parse", () => {
-    // managedHalf matches line.trim() === marker, so an EMPTY marker
-    // selects the synthetic empty line at EOF: the previous repo-owned
-    // half reads as empty and a delivered file could lose every local
-    // line while the wire reports clear. splitEntries owns the constraint;
-    // this pins that HEAD manifests ride through it with no softer path.
-    expect(() => headSplitEntries(manifestText({ "AGENTS.md": rawTail("") }), "t")).toThrow(
-      /printable-ASCII marker/,
+  test("an empty or non-printable marker string fails the strict parse", () => {
+    // The marker-line predicate matches line.trim() === marker, so an
+    // EMPTY marker selects the synthetic empty line at EOF: the previous
+    // repo-owned content reads as empty and a delivered file could lose
+    // every local line while the wire reports clear.
+    expect(() => headSplitEntries(manifestText({ "AGENTS.md": rawRegion("", E) }), "t")).toThrow(
+      /printable-ASCII/,
     );
     expect(() =>
-      headSplitEntries(manifestText({ "AGENTS.md": rawTail(`# local §`) }), "t"),
-    ).toThrow(/printable-ASCII marker/);
+      headSplitEntries(manifestText({ "AGENTS.md": rawLegacyTail("# local §") }), "t"),
+    ).toThrow(/printable-ASCII/);
   });
 
   test("array-shaped files and entries fail loud, never open", () => {
@@ -345,13 +305,13 @@ describe("missingLines", () => {
 
   test("byte-exact: a latin1 byte and its utf-8 spelling are different lines", () => {
     const latin1Line = Buffer.from([0x63, 0x61, 0x66, 0xe9]).toString("latin1"); // caf\xe9
-    const utf8Line = Buffer.from("caf\u00e9", "utf-8").toString("latin1"); // caf\xc3\xa9
+    const utf8Line = Buffer.from("café", "utf-8").toString("latin1"); // caf\xc3\xa9
     expect(missingLines(`${latin1Line}\n`, `${utf8Line}\n`)).toEqual([latin1Line]);
     expect(missingLines(`${latin1Line}\n`, `${latin1Line}\n`)).toEqual([]);
   });
 
   test("byte-exact: CRLF and LF spellings of a line are different lines", () => {
-    // Split-file repo halves are carried byte-for-byte, so a line-ending
+    // Split-file repo sides are carried byte-for-byte, so a line-ending
     // flip IS a byte change worth a manual look (warn-cheap by design).
     expect(missingLines("one\r\ntwo\r\n", "one\ntwo\n")).toEqual(["one\r", "two\r"]);
     expect(missingLines("one\r\ntwo\r\n", "one\r\ntwo\r\n")).toEqual([]);
@@ -359,89 +319,107 @@ describe("missingLines", () => {
 });
 
 describe("compareHalves", () => {
-  test("null when the delivered half keeps every line", () => {
-    expect(compareHalves(tailEntry(), tailEntry(), agentsHead, agentsDelivered)).toBeNull();
+  test("null when the delivered repo-owned content keeps every line", () => {
+    expect(compareHalves(regionSplit(), headRegion(), agentsHead, agentsDelivered)).toBeNull();
   });
 
   test("shrank when a line vanished", () => {
-    const delivered = `# AGENTS.md\n\nfresh managed guidance\n\n${SENTINEL}\n\n## Project docs\n`;
-    expect(compareHalves(tailEntry(), tailEntry(), agentsHead, delivered)).toEqual({
+    const delivered = `${B}\nfresh managed guidance\n${E}\n\n## Project docs\n`;
+    expect(compareHalves(regionSplit(), headRegion(), agentsHead, delivered)).toEqual({
       path: "AGENTS.md",
       kind: "shrank",
       missing: ["repo-local instructions"],
     });
   });
 
-  test("each side splits with its OWN marker (marker-rename safety)", () => {
-    const oldMarker = "<!-- legacy-marker -->";
-    const head = `old managed\n${oldMarker}\nrepo tail\n`;
-    const delivered = `new managed\n${SENTINEL}\nrepo tail\n`;
+  test("each side splits with its OWN markers (marker-rename safety)", () => {
+    const oldB = "<!-- OLD BEGIN -->";
+    const oldE = "<!-- OLD END -->";
+    const head = `${oldB}\nold managed\n${oldE}\nrepo tail\n`;
+    const delivered = `${B}\nnew managed\n${E}\nrepo tail\n`;
     expect(
-      compareHalves(tailEntry(), tailEntry("AGENTS.md", oldMarker), head, delivered),
+      compareHalves(regionSplit(), headRegion("AGENTS.md", oldB, oldE), head, delivered),
     ).toBeNull();
-    // Splitting HEAD with the NEW marker instead would be the mis-split
-    // this design rules out: the old copy has no such line.
-    expect(compareHalves(tailEntry(), tailEntry(), head, delivered)?.kind).toBe("unverifiable");
+    // Splitting HEAD with the NEW markers instead would be the mis-split
+    // this design rules out: the old copy has no such lines.
+    expect(compareHalves(regionSplit(), headRegion(), head, delivered)?.kind).toBe("unverifiable");
   });
 
-  test("bounded-region: bodies compare, region scaffolding does not", () => {
+  test("THE TRANSITION: a tail-marker HEAD verifies against the converted copy", () => {
+    // The designed conversion moves the tail from "below the marker" to
+    // "below the END marker" - the multiset spans both sides, so the
+    // byte-preserving move verifies instead of alarming.
+    const head = `old managed\n${OLD_SENTINEL}\n\n## Project docs\n\nrepo-local instructions\n`;
+    const delivered = `${B}\nfresh managed\n${E}\n\n## Project docs\n\nrepo-local instructions\n`;
+    expect(compareHalves(regionSplit(), headTail(), head, delivered)).toBeNull();
+  });
+
+  test("THE TRANSITION: a converted tail that LOST a line still fires", () => {
+    const head = `old managed\n${OLD_SENTINEL}\nkeep-one\nkeep-two\n`;
+    const delivered = `${B}\nfresh managed\n${E}\nkeep-one\n`;
+    expect(compareHalves(regionSplit(), headTail(), head, delivered)).toEqual({
+      path: "AGENTS.md",
+      kind: "shrank",
+      missing: ["keep-two"],
+    });
+  });
+
+  test("THE TRANSITION: an old bounded-region HEAD verifies against the converted copy", () => {
+    const head = `${OLD_LOCAL_BEGIN}\n/repo-local-cache/\n${OLD_LOCAL_END}\n\n${HB}\n*.old\n${HE}\n`;
+    const delivered = `${OLD_LOCAL_BEGIN}\n/repo-local-cache/\n${OLD_LOCAL_END}\n\n${HB}\n*.new\n${HE}\n`;
+    expect(
+      compareHalves(regionSplit(".gitignore", HB, HE), headBounded(), head, delivered),
+    ).toBeNull();
+    const shrank = `${HB}\n*.new\n${HE}\n`;
+    expect(compareHalves(regionSplit(".gitignore", HB, HE), headBounded(), head, shrank)).toEqual({
+      path: ".gitignore",
+      kind: "shrank",
+      missing: [OLD_LOCAL_BEGIN, "/repo-local-cache/", OLD_LOCAL_END],
+    });
+  });
+
+  test("region content compares across BOTH sides as one multiset", () => {
     const head = regionFile(["local-one", "local-two"], ["*.old"]);
-    const kept = regionFile(["local-two", "local-one"], ["*.new"]);
-    expect(compareHalves(regionEntry(), regionEntry(), head, kept)).toBeNull();
+    // local-two moved BELOW the region: still not a loss.
+    const kept = `local-one\n${HB}\n*.new\n${HE}\nlocal-two\n`;
+    expect(
+      compareHalves(
+        regionSplit(".gitignore", HB, HE),
+        headRegion(".gitignore", HB, HE),
+        head,
+        kept,
+      ),
+    ).toBeNull();
     const shrank = regionFile(["local-one"], ["*.new"]);
-    expect(compareHalves(regionEntry(), regionEntry(), head, shrank)).toEqual({
+    expect(
+      compareHalves(
+        regionSplit(".gitignore", HB, HE),
+        headRegion(".gitignore", HB, HE),
+        head,
+        shrank,
+      ),
+    ).toEqual({
       path: ".gitignore",
       kind: "shrank",
       missing: ["local-two"],
     });
   });
 
-  test("bounded-region: HEAD splits by ITS declared region markers (rename safety)", () => {
-    const oldMarkers = {
-      local_begin: "# OLD LOCAL BEGIN",
-      local_end: "# OLD LOCAL END",
-      managed_begin: "# OLD MANAGED BEGIN",
-      managed_end: "# OLD MANAGED END",
-    };
-    const head = `${oldMarkers.local_begin}\nbody-line\n${oldMarkers.local_end}\n${oldMarkers.managed_begin}\n${oldMarkers.managed_end}\n`;
-    const delivered = regionFile(["body-line"], ["*.new"]);
-    expect(
-      compareHalves(regionEntry(), regionEntry(".gitignore", oldMarkers), head, delivered),
-    ).toBeNull();
-    // Splitting HEAD with the NEW region markers would find no region.
-    expect(compareHalves(regionEntry(), regionEntry(), head, delivered)?.kind).toBe("unverifiable");
-  });
-
-  test("a grammar change is unverifiable, even when the old copy looks region-shaped", () => {
-    // HEAD declared tail-marker at the managed-section marker over a
-    // region-shaped copy: under HEAD's OWN declaration the repo-owned
-    // half is everything below that marker (*.old included), and the
-    // retired re-split narrowing would have compared the region body
-    // instead - clearing a flip whose declared half lost lines. A grammar
-    // flip forces manual review, always.
-    const head = regionFile(["keep-line"], ["*.old"]);
-    const kept = regionFile(["keep-line"], ["*.new"]);
-    const tailHead = tailEntry(".gitignore", MANAGED_BEGIN);
-    const finding = compareHalves(regionEntry(".gitignore"), tailHead, head, kept);
+  test("a HEAD copy that does not split by its own declaration is unverifiable", () => {
+    const finding = compareHalves(regionSplit(), headTail(), "no marker here\n", agentsDelivered);
     expect(finding?.kind).toBe("unverifiable");
-    expect(finding?.kind === "unverifiable" && finding.reason).toContain("different split grammar");
+    expect(finding?.kind === "unverifiable" && finding.reason).toContain("previous commit's copy");
   });
 
   test("a delivered copy that does not split by the post-sync manifest is unverifiable", () => {
-    const finding = compareHalves(tailEntry(), tailEntry(), agentsHead, "render lost its marker\n");
+    const finding = compareHalves(
+      regionSplit(),
+      headRegion(),
+      agentsHead,
+      "render lost its markers\n",
+    );
     expect(finding?.kind).toBe("unverifiable");
     expect(finding?.kind === "unverifiable" && finding.reason).toContain("delivered copy");
-  });
-
-  test("a grammar change whose old copy has no region shape is unverifiable too", () => {
-    // HEAD declared tail-marker and carries NO region under the post-sync
-    // markers: same verdict as every other grammar flip - manual review,
-    // not a whole-file survival pass.
-    const head = `managed\n${SENTINEL}\nkeep-line\n`;
-    const kept = regionFile(["keep-line"], ["*.new"]);
-    const finding = compareHalves(regionEntry(".gitignore"), tailEntry(".gitignore"), head, kept);
-    expect(finding?.kind).toBe("unverifiable");
-    expect(finding?.kind === "unverifiable" && finding.reason).toContain("different split grammar");
   });
 });
 
@@ -505,9 +483,9 @@ describe("renderReport", () => {
 });
 
 describe("tail_tripwire script", () => {
-  const headManifest = manifestText({ "AGENTS.md": rawTail() });
+  const headManifest = manifestText({ "AGENTS.md": rawRegion() });
 
-  test("clear when the repository-owned half survives a managed-half change", () => {
+  test("clear when the repository-owned content survives a managed change", () => {
     const root = makeTarget(
       { "AGENTS.md": agentsHead, [MANIFEST_NAME]: headManifest },
       { "AGENTS.md": agentsDelivered, [MANIFEST_NAME]: headManifest },
@@ -519,8 +497,56 @@ describe("tail_tripwire script", () => {
     expect(result.stdout).not.toContain("::warning::");
   });
 
+  test("THE TRANSITION: a legacy HEAD manifest over a converted tree verifies CLEAR", () => {
+    // HEAD: old shapes + old-vintage manifest; delivered: converted shapes
+    // + new manifest. Every repo-owned byte moved to its designed side, so
+    // the wire stays silent - the transition sync is auto-merge eligible.
+    const legacyManifest = manifestText({
+      "AGENTS.md": rawLegacyTail(),
+      ".gitignore": rawLegacyBounded(),
+    });
+    const newManifest = manifestText({
+      "AGENTS.md": rawRegion(),
+      ".gitignore": rawRegion(HB, HE),
+    });
+    const agentsOldShape = `# AGENTS.md\n\nold managed\n\n${OLD_SENTINEL}\n\n## Project docs\n\nrepo-local instructions\n`;
+    const agentsConverted = `${B}\n# AGENTS.md\n\nfresh managed\n${E}\n\n## Project docs\n\nrepo-local instructions\n`;
+    const gitignoreOldShape = `${OLD_LOCAL_BEGIN}\n/repo-local-cache/\n${OLD_LOCAL_END}\n\n${HB}\n*.old\n${HE}\n`;
+    const gitignoreConverted = `${OLD_LOCAL_BEGIN}\n/repo-local-cache/\n${OLD_LOCAL_END}\n\n${HB}\n*.new\n${HE}\n`;
+    const root = makeTarget(
+      {
+        "AGENTS.md": agentsOldShape,
+        ".gitignore": gitignoreOldShape,
+        [MANIFEST_NAME]: legacyManifest,
+      },
+      {
+        "AGENTS.md": agentsConverted,
+        ".gitignore": gitignoreConverted,
+        [MANIFEST_NAME]: newManifest,
+      },
+    );
+    const result = runScript(root);
+    expect(result.exitCode).toBe(0);
+    expect(result.report).toBe("");
+    expect(result.stdout).toContain("tail tripwire clear");
+  });
+
+  test("THE TRANSITION: a conversion that dropped a tail line still fires", () => {
+    const legacyManifest = manifestText({ "AGENTS.md": rawLegacyTail() });
+    const oldShape = `old managed\n${OLD_SENTINEL}\nkeep-one\nkeep-two\n`;
+    const converted = `${B}\nfresh managed\n${E}\nkeep-one\n`;
+    const root = makeTarget(
+      { "AGENTS.md": oldShape, [MANIFEST_NAME]: legacyManifest },
+      { "AGENTS.md": converted, [MANIFEST_NAME]: headManifest },
+    );
+    const result = runScript(root);
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("::warning::");
+    expect(result.report).toContain("keep-two");
+  });
+
   test("fires on a vanished tail line: warns, reports, exits 0", () => {
-    const delivered = `# AGENTS.md\n\nfresh managed guidance\n\n${SENTINEL}\n\n## Project docs\n`;
+    const delivered = `${B}\n# AGENTS.md\n\nfresh managed guidance\n${E}\n\n## Project docs\n`;
     const root = makeTarget(
       { "AGENTS.md": agentsHead, [MANIFEST_NAME]: headManifest },
       { "AGENTS.md": delivered, [MANIFEST_NAME]: headManifest },
@@ -537,11 +563,11 @@ describe("tail_tripwire script", () => {
   });
 
   test("a duplicated tail line shrinking to one copy fires: the PR is forced manual", () => {
-    // The multiset regression: previous half holds the line TWICE, the
-    // delivered half keeps one - a Set-based check would call that clean
-    // and leave the shrink auto-merge eligible.
-    const head = `# AGENTS.md\n\nmanaged\n\n${SENTINEL}\n\ndup entry\ndup entry\n`;
-    const delivered = `# AGENTS.md\n\nmanaged\n\n${SENTINEL}\n\ndup entry\n`;
+    // The multiset regression: previous content holds the line TWICE, the
+    // delivered content keeps one - a Set-based check would call that
+    // clean and leave the shrink auto-merge eligible.
+    const head = `${B}\nmanaged\n${E}\n\ndup entry\ndup entry\n`;
+    const delivered = `${B}\nmanaged\n${E}\n\ndup entry\n`;
     const root = makeTarget(
       { "AGENTS.md": head, [MANIFEST_NAME]: headManifest },
       { "AGENTS.md": delivered, [MANIFEST_NAME]: headManifest },
@@ -558,8 +584,8 @@ describe("tail_tripwire script", () => {
     // ride into open_pr's --body argv, and OS argv cannot carry NUL - the
     // warn-only wire would become the thing that BLOCKS PR creation.
     const nulLine = "secret\x00control\x01line";
-    const head = `# AGENTS.md\n\nmanaged\n\n${SENTINEL}\n\n${nulLine}\n`;
-    const delivered = `# AGENTS.md\n\nmanaged\n\n${SENTINEL}\n`;
+    const head = `${B}\nmanaged\n${E}\n\n${nulLine}\n`;
+    const delivered = `${B}\nmanaged\n${E}\n`;
     const root = makeTarget(
       { "AGENTS.md": head, [MANIFEST_NAME]: headManifest },
       { "AGENTS.md": delivered, [MANIFEST_NAME]: headManifest },
@@ -576,36 +602,17 @@ describe("tail_tripwire script", () => {
   });
 
   test("a marker rename cannot mis-split HEAD's copy (HEAD manifest wins there)", () => {
-    const oldMarker = "<!-- legacy-marker -->";
-    const head = `old managed\n${oldMarker}\nrepo tail line\n`;
-    const delivered = `new managed\n${SENTINEL}\nrepo tail line\n`;
+    const oldB = "<!-- OLD BEGIN -->";
+    const oldE = "<!-- OLD END -->";
+    const head = `${oldB}\nold managed\n${oldE}\nrepo tail line\n`;
+    const delivered = `${B}\nnew managed\n${E}\nrepo tail line\n`;
     const root = makeTarget(
-      { "AGENTS.md": head, [MANIFEST_NAME]: manifestText({ "AGENTS.md": rawTail(oldMarker) }) },
-      { "AGENTS.md": delivered, [MANIFEST_NAME]: manifestText({ "AGENTS.md": rawTail() }) },
+      { "AGENTS.md": head, [MANIFEST_NAME]: manifestText({ "AGENTS.md": rawRegion(oldB, oldE) }) },
+      { "AGENTS.md": delivered, [MANIFEST_NAME]: headManifest },
     );
     const result = runScript(root);
     expect(result.exitCode).toBe(0);
     expect(result.report).toBe("");
-  });
-
-  test("bounded-region entries split by their region markers, not the managed marker alone", () => {
-    const regionManifest = manifestText({ ".gitignore": rawRegion() });
-    const head = regionFile(["local-one", "local-two"], ["*.old"]);
-    const kept = regionFile(["local-two", "local-one"], ["*.new"]);
-    const keptRoot = makeTarget(
-      { ".gitignore": head, [MANIFEST_NAME]: regionManifest },
-      { ".gitignore": kept, [MANIFEST_NAME]: regionManifest },
-    );
-    expect(runScript(keptRoot).report).toBe("");
-    const shrank = regionFile(["local-one"], ["*.new"]);
-    const shrankRoot = makeTarget(
-      { ".gitignore": head, [MANIFEST_NAME]: regionManifest },
-      { ".gitignore": shrank, [MANIFEST_NAME]: regionManifest },
-    );
-    const result = runScript(shrankRoot);
-    expect(result.exitCode).toBe(0);
-    expect(result.report).toContain("`.gitignore`");
-    expect(result.report).toContain("local-two");
   });
 
   test("a pre-grammar HEAD manifest fails loudly: unverifiable findings with the recovery advice", () => {
@@ -614,13 +621,19 @@ describe("tail_tripwire script", () => {
     // manual review, and the report names the fix - with NO loss claim
     // fabricated (the delivered copies kept every local line).
     const preGrammarManifest = manifestText({
-      "AGENTS.md": rawPreGrammar(SENTINEL, "above"),
-      ".gitignore": rawPreGrammar(MANAGED_BEGIN, "below"),
+      "AGENTS.md": rawPreGrammar(OLD_SENTINEL, "above"),
+      ".gitignore": rawPreGrammar(HB, "below"),
     });
-    const newManifest = manifestText({ "AGENTS.md": rawTail(), ".gitignore": rawRegion() });
-    const gitignoreHead = regionFile(["keep-me"], ["*.old"]);
+    const newManifest = manifestText({
+      "AGENTS.md": rawRegion(),
+      ".gitignore": rawRegion(HB, HE),
+    });
     const root = makeTarget(
-      { "AGENTS.md": agentsHead, ".gitignore": gitignoreHead, [MANIFEST_NAME]: preGrammarManifest },
+      {
+        "AGENTS.md": agentsHead,
+        ".gitignore": regionFile(["keep-me"], ["*.old"]),
+        [MANIFEST_NAME]: preGrammarManifest,
+      },
       {
         "AGENTS.md": agentsDelivered,
         ".gitignore": regionFile(["keep-me"], ["*.new"]),
@@ -641,9 +654,9 @@ describe("tail_tripwire script", () => {
 
   test("non-UTF-8 tail bytes compare byte-for-byte and never false-fire", () => {
     const tailBytes = Buffer.concat([Buffer.from("caf"), Buffer.from([0xe9])]);
-    const head = Buffer.concat([Buffer.from(`old\n${SENTINEL}\n`), tailBytes, Buffer.from("\n")]);
+    const head = Buffer.concat([Buffer.from(`${B}\nold\n${E}\n`), tailBytes, Buffer.from("\n")]);
     const delivered = Buffer.concat([
-      Buffer.from(`new\n${SENTINEL}\n`),
+      Buffer.from(`${B}\nnew\n${E}\n`),
       tailBytes,
       Buffer.from("\n"),
     ]);
@@ -657,16 +670,16 @@ describe("tail_tripwire script", () => {
     // never U+FFFD.
     const shrankRoot = makeTarget(
       { "AGENTS.md": head, [MANIFEST_NAME]: headManifest },
-      { "AGENTS.md": `new\n${SENTINEL}\n`, [MANIFEST_NAME]: headManifest },
+      { "AGENTS.md": `${B}\nnew\n${E}\n`, [MANIFEST_NAME]: headManifest },
     );
     const result = runScript(shrankRoot);
-    expect(result.report).toContain("caf\u00e9");
-    expect(result.report).not.toContain("\ufffd");
+    expect(result.report).toContain("café");
+    expect(result.report).not.toContain("�");
   });
 
   test("blank lines dropped from the previous tail never fire", () => {
-    const head = `old\n${SENTINEL}\n\nkeep me\n   \n\n`;
-    const delivered = `new\n${SENTINEL}\nkeep me\n`;
+    const head = `${B}\nold\n${E}\n\nkeep me\n   \n\n`;
+    const delivered = `${B}\nnew\n${E}\nkeep me\n`;
     const root = makeTarget(
       { "AGENTS.md": head, [MANIFEST_NAME]: headManifest },
       { "AGENTS.md": delivered, [MANIFEST_NAME]: headManifest },
@@ -686,10 +699,10 @@ describe("tail_tripwire script", () => {
 
   test("a path HEAD's own manifest did not class as split is skipped", () => {
     // Ownership flips have their own review machinery; HEAD claimed no
-    // repository-owned half here, so there is nothing this wire guards.
+    // repository-owned content here, so there is nothing this wire guards.
     const root = makeTarget(
       {
-        "AGENTS.md": "wholly managed before, no marker\n",
+        "AGENTS.md": "wholly managed before, no markers\n",
         [MANIFEST_NAME]: manifestText({ "AGENTS.md": { class: "managed" } }),
       },
       { "AGENTS.md": agentsDelivered, [MANIFEST_NAME]: headManifest },
@@ -782,7 +795,7 @@ describe("tail_tripwire script", () => {
 
   test("an unknown grammar in the HEAD manifest is unverifiable, not guessed", () => {
     const mystery = manifestText({
-      "AGENTS.md": { class: "split", grammar: "mystery", marker: SENTINEL },
+      "AGENTS.md": { class: "split", grammar: "mystery", marker: OLD_SENTINEL },
     });
     const root = makeTarget(
       { "AGENTS.md": agentsHead, [MANIFEST_NAME]: mystery },
@@ -791,6 +804,7 @@ describe("tail_tripwire script", () => {
     const result = runScript(root);
     expect(result.exitCode).toBe(0);
     expect(result.report).toContain("no usable ownership manifest");
+    expect(result.report).toContain('split grammar "mystery"');
   });
 
   test("a HEAD manifest with a damaged entry is unverifiable, not silently skipped", () => {
@@ -808,7 +822,7 @@ describe("tail_tripwire script", () => {
     // Our own render produced this manifest; refusing to guess matches
     // preserve_local_content's discipline.
     const mystery = manifestText({
-      "AGENTS.md": { class: "split", grammar: "mystery", marker: SENTINEL },
+      "AGENTS.md": { class: "split", grammar: "mystery", begin: B, end: E },
     });
     const root = makeTarget(
       { "AGENTS.md": agentsHead, [MANIFEST_NAME]: headManifest },
@@ -830,7 +844,7 @@ describe("tail_tripwire script", () => {
   });
 
   test("--hide-details prints the count warning but no paths", () => {
-    const delivered = `# AGENTS.md\n\nfresh managed guidance\n\n${SENTINEL}\n`;
+    const delivered = `${B}\n# AGENTS.md\n\nfresh managed guidance\n${E}\n`;
     const root = makeTarget(
       { "AGENTS.md": agentsHead, [MANIFEST_NAME]: headManifest },
       { "AGENTS.md": delivered, [MANIFEST_NAME]: headManifest },

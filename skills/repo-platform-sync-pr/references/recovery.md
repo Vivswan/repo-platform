@@ -50,38 +50,38 @@ One fleet run fans out to every repo in parallel, and failures stay isolated per
 
 `copier recopy --overwrite` - a full re-render with NO three-way merge - followed by a carry step that splices repository-local content back:
 
-- Managed-tail sentinel files (AGENTS.md, `.gitattributes`, `.editorconfig`, `.github/CODEOWNERS`, SECURITY.md, CONTRIBUTING.md, fleet LICENSE.md) all take ONE carry path with three possible dispositions, each reported in the PR body's carry summary:
-  - kept-whole: the repo's copy starts with the fresh render, so it is kept as-is.
-  - tail-appended: only when the render's final non-blank line is a recognized sentinel. The repo's copy is split at its FIRST `repo-platform:local-section` sentinel and everything after it - including any further sentinel lines - is re-appended below the fresh render's sentinel. When the previous copy carried more than one marker, the summary bullet adds "review the tail for stale duplicates" - do that review; a stale second managed half may be riding along in the tail. And when the managed half above the repo's marker differed from the fresh render (in-place edits there), the bullet adds "the managed half above the marker differed from the fresh render; those differences are not carried - review the diff": recovery legitimately resets the managed half, but the drop is loud, so check whether any of those edits deserve a home below the marker or in the template.
-  - appendix: anything unsplittable (no sentinel in the repo's copy - including legacy copies synced before the sentinels existed). The previous copy is preserved IN FULL below a recovery-appendix comment - `# repo-platform:recovery-appendix ...` in hash-comment files like `.gitattributes`, `<!-- repo-platform:recovery-appendix ... -->` otherwise - and needs manual deduplication. Loud over lossy: an appendix in AGENTS.md or `.gitattributes` is expected behavior, not a bug. `.editorconfig` and `.github/CODEOWNERS` carry the newest sentinels, so during the transition window (repos not yet synced past the sentinel's introduction) they are the most likely appendix producers. And unlike `.gitignore`'s appendix, which is commented out and inert, an `.editorconfig` or CODEOWNERS appendix is LIVE: both formats apply the LAST match, so the duplicated previous copy below the appendix comment governs until you dedupe it. That is the conservative-correct behavior (the repo's previous rules keep winning, exactly as before the recovery) - just do not expect the .gitignore-style "nothing applies until restored" promise here.
-- The `.gitignore` BEGIN/END REPOSITORY LOCAL section body is carried over. When the repo copy's LOCAL markers are mangled, duplicated, or missing, the WHOLE previous copy is preserved inside the fresh LOCAL section under a `# repo-platform:recovery-appendix` comment - fully commented out (marker text dash-joined so validation still passes), so none of its entries apply until a human moves the repository-local lines back up uncommented and deletes the block. The carry summary bullet says so - the same loud-over-lossy appendix expectations as above.
-- A file whose local tail is blank has nothing to carry: that is a no-op, not a loss.
+- Every split file (AGENTS.md, `.gitattributes`, `.editorconfig`, `.github/CODEOWNERS`, SECURITY.md, CONTRIBUTING.md, fleet LICENSE.md, `.gitignore`) takes ONE carry path with these dispositions, each reported in the PR body's carry summary:
+  - sides restored: the repo's copy is sliced at its BEGIN/END managed-region markers and everything outside the region (above and below) is re-seated around the fresh render's region byte-for-byte. A copy still in a RETIRED shape (the old `repo-platform:local-section` tail marker, or the old `.gitignore` LOCAL region) is CONVERTED the same way - the tail lands below the new END marker, the old above-content rides through above BEGIN - and the bullet names the conversion. When the managed content differed from the fresh render (in-place edits there), the bullet says the differences are not carried: recovery legitimately resets the managed region, but the drop is loud, so check whether any of those edits deserve a home outside the region or in the template.
+  - appendix: anything unsplittable (no known marker shape in the repo's copy). The previous copy is preserved IN FULL below the fresh render's END marker under a recovery-appendix comment - `# repo-platform:recovery-appendix ...` in hash-comment files, `<!-- repo-platform:recovery-appendix ... -->` in markdown - and needs manual deduplication. Loud over lossy: an appendix is expected behavior, not a bug. The appendix content is LIVE in override-by-position formats (`.editorconfig`, CODEOWNERS, `.gitignore` all apply later entries over earlier ones), so the duplicated previous copy below the comment governs until you dedupe it. That is the conservative-correct behavior: the repo's previous rules keep winning, exactly as before the recovery.
+- When the repo copy's markers are mangled, duplicated, or missing (and no retired shape matches either), the WHOLE previous copy is preserved below the fresh render's END marker under a `repo-platform:recovery-appendix` comment, with managed-region marker text dash-joined so validation still passes. Keep what is repository-owned, drop what the region above already covers, then delete the comment. The carry summary bullet says so - loud over lossy.
+- A file whose copy equals the fresh render carries nothing: that is a no-op, not a loss. Emptied sides are still the repo's choice and ride through (the render's seed content is not resurrected over a deliberate deletion).
 
 The carry summary lists only files the carry actually CHANGED - a file absent from the list was either untouched or never customized. Check every bullet against what you expect the repo's local content to be; the mandatory per-file review pass applies to recovery PRs doubly, never trust the carry blindly.
 
 Everything else about the re-render:
 
-- Edits to the MANAGED half of template-managed files are overwritten in the diff (that is the point of the recovery).
+- Edits to the MANAGED region of template-managed files are overwritten in the diff (that is the point of the recovery).
 - Generated-once (`_skip_if_exists`) files survive, and copier deletes nothing; `.github/settings.yml` is restored outright, and a custom-license repo's own license survives untouched.
 - Retired-file cleanup is skipped (no trustworthy old render to diff against), so stale template files may linger - remove them by hand if you spot them.
 - The PR always stays manual-review; merging it re-records a resolvable `_commit`, and the next sync is a normal three-way update again.
 
 ## Repairing a recovery PR that lost local content
 
-Recovery PRs generated BEFORE the carry step existed (and any future regression) show deletion-dominant diffs on the managed-tail sentinel files or `.gitignore`: `+0/-N` on AGENTS.md, SECURITY.md, CONTRIBUTING.md, LICENSE.md, `.gitattributes`, `.editorconfig`, `.github/CODEOWNERS`, or `.gitignore`. Do not merge one of those. Two fixes:
+Recovery PRs generated BEFORE the carry step existed (and any future regression) show deletion-dominant diffs on the split files: `+0/-N` on AGENTS.md, SECURITY.md, CONTRIBUTING.md, LICENSE.md, `.gitattributes`, `.editorconfig`, `.github/CODEOWNERS`, or `.gitignore`. Do not merge one of those. Two fixes:
 
 - Preferred: re-dispatch the recovery (same command as above). The branch is force-pushed fresh, so the new run - with the carry step - heals the open PR in place.
-- Manual: re-append the below-marker block on the automation branch. Read the base branch's copy and re-attach ONLY the local part:
+- Manual: re-seat the repo-owned sides on the automation branch. Read the base branch's copy and re-attach ONLY the content outside the managed region:
 
   ```bash
   git fetch origin
   git checkout -B automation/repo-platform origin/automation/repo-platform
-  git show origin/main:AGENTS.md   # copy everything BELOW the
-                                   # repo-platform:local-section line,
-                                   # paste it below the marker on the branch
+  git show origin/main:AGENTS.md   # copy everything OUTSIDE the
+                                   # BEGIN/END managed-region markers and
+                                   # re-seat it on the branch: above-content
+                                   # above BEGIN, tail content below END
   ```
 
-  The WRONG restore is `git checkout origin/main -- AGENTS.md`: that reverts the whole file, managed half included, undoing the template update the PR exists to deliver. The correct mechanic is always re-appending the below-marker block (for `.gitignore`, the lines inside the BEGIN/END REPOSITORY LOCAL section).
+  A base copy still in a RETIRED shape (not yet synced past the one-grammar change) splits differently: its repo-owned part is the block below the old `repo-platform:local-section` sentinel (or, for the old `.gitignore` shape, everything above the managed BEGIN marker) - re-seat that below the new END marker (tail) or above BEGIN (the old above-content). The WRONG restore is `git checkout origin/main -- AGENTS.md`: that reverts the whole file, managed region included, undoing the template update the PR exists to deliver. The correct mechanic is always re-seating the repo-owned content around the fresh managed region.
 
 ## Prevention
 

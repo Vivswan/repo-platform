@@ -51,6 +51,7 @@ import { capture } from "../.github/scripts/shared/proc.ts";
 import { stageComposedTreeArgv } from "../.github/scripts/shared/stage_tree.ts";
 import { captureName } from "../.github/scripts/sync/run_hidden.ts";
 import { PIN_FLIPS } from "../.github/scripts/sync/starter_pin_rollout.ts";
+import { cleanManagedRegion } from "../actions/shared/grammar.ts";
 import { TOOLCHAIN_SETUP_FRAGMENT, TOOLCHAIN_SETUP_TARGETS } from "./compose_template.ts";
 import {
   actionSetsUpBun,
@@ -3968,24 +3969,24 @@ const rules: Rule[] = [
         context?: Record<string, boolean>;
       }[] = [
         {
-          // The template ends with a repo-specific-docs marker; everything a
-          // repo appends after it is its own, hence prefix semantics.
+          // The template's render is the managed region (BEGIN through END
+          // markers); everything a repo appends after the END marker is its
+          // own, hence prefix semantics.
           repo: "SECURITY.md",
           tpl: "templates/base/SECURITY.md.jinja",
           mode: "prefix",
         },
         {
-          // The template ends with a repo-specific-notices marker
-          // (third-party components, differently licensed paths);
-          // everything a repo appends after it is its own, hence prefix
-          // semantics.
+          // Same region semantics: repo-specific license notices
+          // (third-party components, differently licensed paths) live
+          // below the END marker, hence prefix semantics.
           repo: "LICENSE.md",
           tpl: "templates/base/{% if 'custom-license' not in modules %}LICENSE.md{% endif %}.jinja",
           mode: "prefix",
         },
         {
-          // Same marker semantics as SECURITY.md: repo-specific contributing
-          // docs live below the marker.
+          // Same region semantics as SECURITY.md: repo-specific contributing
+          // docs live below the END marker.
           repo: "CONTRIBUTING.md",
           tpl: "templates/base/{% if not private %}CONTRIBUTING.md{% endif %}.jinja",
           mode: "prefix",
@@ -4011,31 +4012,40 @@ const rules: Rule[] = [
   },
 
   {
-    name: "gitattributes-subset",
+    // The repo copy's managed region must byte-match the rendered template's
+    // (region semantics make this checkable: the repo's own attributes live
+    // outside the BEGIN/END markers, so the regions must be identical).
+    // Slicing failure on either side reports as a mismatch too, which
+    // covers lost or duplicated markers.
+    name: "gitattributes-region",
     run: () => {
-      const expected = semanticLines(
+      const markers = {
+        begin: "# BEGIN REPO-PLATFORM MANAGED",
+        end: "# END REPO-PLATFORM MANAGED",
+      };
+      const expected = cleanManagedRegion(
         normalizeJinja(read("templates/base/.gitattributes.jinja"), jinjaVars()),
+        markers,
       );
-      if (expected.length === 0)
-        throw new Error(".gitattributes.jinja: no shared lines found - anchor lost");
-      const got = new Set(semanticLines(read(".gitattributes")));
-      const mismatches = expected
-        .filter((line) => !got.has(line))
-        .map((line) => ({
-          file: ".gitattributes",
-          expected: `line ${JSON.stringify(line)} (from templates/base/.gitattributes.jinja)`,
-          got: "missing",
-        }));
-      // semanticLines drops # lines, so the repo-local-section marker needs
-      // its own presence check or its loss would go unnoticed.
-      if (!read(".gitattributes").split("\n").includes("# repo-platform:local-section")) {
-        mismatches.push({
-          file: ".gitattributes",
-          expected: "the '# repo-platform:local-section' marker line",
-          got: "missing",
-        });
+      if (expected === null)
+        throw new Error(".gitattributes.jinja: no clean managed region - anchor lost");
+      const got = cleanManagedRegion(read(".gitattributes"), markers);
+      if (got === null) {
+        return [
+          {
+            file: ".gitattributes",
+            expected: "one clean BEGIN/END REPO-PLATFORM MANAGED region",
+            got: "markers missing, duplicated, or out of order",
+          },
+        ];
       }
-      return mismatches;
+      if (got.region === expected.region) return [];
+      return lineDiffMismatch(
+        ".gitattributes",
+        "templates/base/.gitattributes.jinja",
+        expected.region.split("\n"),
+        got.region.split("\n"),
+      );
     },
   },
 
@@ -6078,7 +6088,7 @@ export const RULE_ROSTER = [
   "toolchain-version-files",
   "local-gates",
   "dogfood-parity",
-  "gitattributes-subset",
+  "gitattributes-region",
   "dependabot-actions-block",
   "dependabot-action-dirs",
   "ci-skeleton",

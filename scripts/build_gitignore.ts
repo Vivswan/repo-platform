@@ -16,9 +16,9 @@
 //   a repo selecting both gets the section once and a suppressed chunk
 //   renders as nothing.
 // - .gitignore (this repo's own): same OS templates plus ALL toolchain
-//   templates, each once (downstream repos may carry any combination). The
-//   REPOSITORY LOCAL section's existing content is preserved across
-//   regenerations.
+//   templates, each once (downstream repos may carry any combination).
+//   Existing content OUTSIDE the managed region (above BEGIN and below
+//   END) is preserved across regenerations.
 //
 // The template and self outputs open their managed block with one section
 // that has no upstream source: agent local state.
@@ -43,8 +43,8 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
+import { cleanManagedRegion, HASH_REGION_MARKERS } from "../actions/shared/grammar.ts";
 import { gateExpression } from "./compose_template.ts";
-import { cleanLocalRegion, GITIGNORE_REGION, LOCAL_BEGIN, LOCAL_END } from "./gitignore_local.ts";
 import { loadManifests, type ModuleManifest } from "./module_manifests.ts";
 
 const REPO_ROOT = resolve(import.meta.dir, "..");
@@ -71,7 +71,10 @@ function byModule(manifests: ModuleManifest[]): {
 
 const ANCHOR = "gitignore";
 
-const DEFAULT_LOCAL_BODY = "# Add repository-specific ignore patterns in this section only.\n";
+const DEFAULT_LOCAL_BODY =
+  "# Repository-specific ignore patterns go outside the managed region:\n" +
+  "# here (above BEGIN), or below the END marker where last-match-wins\n" +
+  "# can override managed patterns.\n";
 
 // Not from github/gitignore: agent local state (worktree directories and
 // the machine-local settings file). Both .claude spellings are deliberate:
@@ -158,45 +161,60 @@ async function section(sha: string, path: string): Promise<string> {
     .replaceAll("[\r]", "?")
     .replace(/[ \t]+$/gm, "")
     .trim();
+  // Enforced, not just claimed: the outputs are written latin1 so the self
+  // file's byte-owned sides round-trip exactly, and that encoding is only
+  // identity for ASCII generated text - a non-ASCII upstream section must
+  // fail here, named, rather than corrupt silently on write.
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: the ASCII range check is this regex's whole job
+  if (!/^[\x00-\x7f]*$/.test(body)) {
+    throw new Error(
+      `github/gitignore ${path} contains non-ASCII content after normalization - ` +
+        "extend section()'s normalization (the outputs must stay ASCII)",
+    );
+  }
   return `## ${name} (github/gitignore ${path})\n${body}\n`;
 }
 
-function localSection(body: string): string {
-  return `${LOCAL_BEGIN}\n${body}${LOCAL_END}\n\n`;
+function localSeed(body: string): string {
+  return `${body}\n`;
 }
 
 function managedHeader(): string {
   return (
-    "# BEGIN REPO-PLATFORM MANAGED\n" +
-    "# Generated from github/gitignore - do not edit; local patterns go in\n" +
-    "# the REPOSITORY LOCAL section above. Managed patterns deliberately\n" +
-    "# come last: last-match-wins makes them non-overridable.\n" +
+    `${HASH_REGION_MARKERS.begin}\n` +
+    "# Generated from github/gitignore - do not edit between the BEGIN/END\n" +
+    "# markers; repository-local patterns live outside the managed region\n" +
+    "# (above BEGIN, or below END where last-match-wins can override).\n" +
     "\n"
   );
 }
 
-/** Current content between the LOCAL markers, the default when the file
- *  does not exist yet, or a loud error when the file exists but has no
- *  exactly-once clean region (cleanLocalRegion - the same accept/reject
- *  the sync carry applies, so the two writers can never slice the same
- *  malformed file differently). Regenerating around a malformed region
- *  would silently drop local content or duplicate markers; the fix is a
- *  hand edit, not a guess. Exported for the writers-agree test. */
-export function existingLocalBody(output: string): string {
-  if (!existsSync(output)) return DEFAULT_LOCAL_BODY;
-  const region = cleanLocalRegion(readFileSync(output).toString("utf-8"), GITIGNORE_REGION);
-  if (region === null) {
+/** Current content outside the managed region (above BEGIN and below END),
+ *  the default seed when the file does not exist yet, or a loud error when
+ *  the file exists but has no exactly-once clean region
+ *  (cleanManagedRegion - the same accept/reject the sync carry applies, so
+ *  the two writers can never slice the same malformed file differently).
+ *  Regenerating around a malformed region would silently drop local
+ *  content or duplicate markers; the fix is a hand edit, not a guess.
+ *  Exported for the writers-agree test. */
+export function existingLocalSides(output: string): { above: string; below: string } {
+  if (!existsSync(output)) return { above: localSeed(DEFAULT_LOCAL_BODY), below: "" };
+  // latin1, not utf-8: the sides are repo-owned bytes (the sync carries
+  // them byte-for-byte under the same decoding), and a utf-8 decode would
+  // fold invalid sequences onto U+FFFD - silent corruption on rewrite.
+  const slice = cleanManagedRegion(readFileSync(output).toString("latin1"), HASH_REGION_MARKERS);
+  if (slice === null) {
     throw new Error(
-      `${output} has no single clean REPOSITORY LOCAL region (markers missing, duplicated, out of order, or marker text inside the body); fix its markers by hand, then rerun`,
+      `${output} has no single clean REPO-PLATFORM MANAGED region (markers missing, duplicated, out of order, or marker text outside the region); fix its markers by hand, then rerun`,
     );
   }
-  return region.body;
+  return { above: slice.above, below: slice.below };
 }
 
 function buildTemplate(sections: Record<string, string>): string {
   const parts = [
     "{# Generated by scripts/build_gitignore.ts - edit the script, not this file. #}\n",
-    localSection(`${DEFAULT_LOCAL_BODY}\n`),
+    localSeed(DEFAULT_LOCAL_BODY),
     managedHeader(),
     AGENT_SECTION,
     "\n",
@@ -204,7 +222,7 @@ function buildTemplate(sections: Record<string, string>): string {
   for (const path of ALWAYS) {
     parts.push(sections[path], "\n");
   }
-  parts.push(`{# compose:${ANCHOR} #}\n`, "# END REPO-PLATFORM MANAGED\n");
+  parts.push(`{# compose:${ANCHOR} #}\n`, `${HASH_REGION_MARKERS.end}\n`);
   return parts.join("");
 }
 
@@ -273,18 +291,20 @@ export function buildFragment(
     .join("");
 }
 
-function buildSelf(sections: Record<string, string>, sources: string[], localBody: string): string {
-  const parts = [
-    "# Generated by scripts/build_gitignore.ts - only edit the LOCAL section.\n",
-    localSection(localBody),
-    managedHeader(),
-    AGENT_SECTION,
-    "\n",
-  ];
+/** The self output: everything outside the managed region rides through
+ *  verbatim from the existing file (both sides are repo-owned - the
+ *  "Generated by" note lives inside the region so it stays script-owned),
+ *  and the region itself is regenerated. */
+function buildSelf(
+  sections: Record<string, string>,
+  sources: string[],
+  sides: { above: string; below: string },
+): string {
+  const parts = [sides.above, managedHeader(), AGENT_SECTION, "\n"];
   for (const path of [...ALWAYS, ...sources]) {
     parts.push(sections[path], "\n");
   }
-  parts.push("# END REPO-PLATFORM MANAGED\n");
+  parts.push(`${HASH_REGION_MARKERS.end}\n`, sides.below);
   return parts.join("");
 }
 
@@ -379,7 +399,7 @@ async function run(topology = false): Promise<number> {
   // Before any fetch: a malformed self output must abort while every
   // output still stands as committed, rather than behind a half-written
   // set.
-  const selfLocalBody = existingLocalBody(OUTPUT_SELF);
+  const selfSides = existingLocalSides(OUTPUT_SELF);
 
   // One resolved SHA for the whole run: fetching each file from "main"
   // could straddle an upstream push and mix two commits' content.
@@ -394,7 +414,7 @@ async function run(topology = false): Promise<number> {
       fragmentOutput(module),
       buildFragment(sections, parts, gates),
     ]),
-    [OUTPUT_SELF, buildSelf(sections, sources, selfLocalBody)],
+    [OUTPUT_SELF, buildSelf(sections, sources, selfSides)],
   ];
 
   for (const [out, content] of outputs) {
@@ -402,7 +422,10 @@ async function run(topology = false): Promise<number> {
     // fragments/ directory yet (newly-declared sources are exactly the
     // path the topology check routes here); create it rather than ENOENT.
     mkdirSync(dirname(out), { recursive: true });
-    writeFileSync(out, Buffer.from(content, "utf-8"));
+    // latin1, the read decoding's inverse: the self output's repo-owned
+    // sides are byte-owned, and a utf-8 encode would widen any non-ASCII
+    // byte (generated content is ASCII, so this is identity for it).
+    writeFileSync(out, Buffer.from(content, "latin1"));
     console.log(`wrote ${relative(REPO_ROOT, out)}`);
   }
   return 0;

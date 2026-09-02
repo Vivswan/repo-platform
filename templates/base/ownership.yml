@@ -9,28 +9,29 @@ ownership:
   - { path: .copier-answers.yml, class: managed }
   - path: .editorconfig
     class: split
-    grammar: tail-marker
-    marker: "# repo-platform:local-section"
+    grammar: managed-region
+    begin: "# BEGIN REPO-PLATFORM MANAGED"
+    end: "# END REPO-PLATFORM MANAGED"
   - path: .gitattributes
     class: split
-    grammar: tail-marker
-    marker: "# repo-platform:local-section"
+    grammar: managed-region
+    begin: "# BEGIN REPO-PLATFORM MANAGED"
+    end: "# END REPO-PLATFORM MANAGED"
   - { path: .github/actionlint.yaml, class: starter }
   - path: .github/CODEOWNERS
     class: split
-    grammar: tail-marker
-    marker: "# repo-platform:local-section"
+    grammar: managed-region
+    begin: "# BEGIN REPO-PLATFORM MANAGED"
+    end: "# END REPO-PLATFORM MANAGED"
   - { path: .github/dependabot.yml, class: managed }
   - { path: .github/workflows/auto-format.yml, class: starter }
   - { path: .github/workflows/checks.yml, class: starter }
   - { path: .github/workflows/ci.yml, class: managed }
   - path: .gitignore
     class: split
-    grammar: bounded-region
-    managed_begin: "# BEGIN REPO-PLATFORM MANAGED"
-    managed_end: "# END REPO-PLATFORM MANAGED"
-    local_begin: "# BEGIN REPOSITORY LOCAL"
-    local_end: "# END REPOSITORY LOCAL"
+    grammar: managed-region
+    begin: "# BEGIN REPO-PLATFORM MANAGED"
+    end: "# END REPO-PLATFORM MANAGED"
   - { path: .gitleaks.toml, class: starter }
   - { path: .repo-platform.yml, class: managed }
   - { path: .typography-allow, class: managed }
@@ -38,13 +39,16 @@ ownership:
   - { path: CODE_OF_CONDUCT.md, class: managed }
   - path: CONTRIBUTING.md
     class: split
-    grammar: tail-marker
-    marker: "<!-- repo-platform:local-section -->"
+    grammar: managed-region
+    begin: "<!-- BEGIN REPO-PLATFORM MANAGED -->"
+    end: "<!-- END REPO-PLATFORM MANAGED -->"
   - path: LICENSE.md
     class: split
-    grammar: tail-marker
-    marker: "<!-- repo-platform:local-section -->"
+    grammar: managed-region
+    begin: "<!-- BEGIN REPO-PLATFORM MANAGED -->"
+    end: "<!-- END REPO-PLATFORM MANAGED -->"
   - path: SECURITY.md
     class: split
-    grammar: tail-marker
-    marker: "<!-- repo-platform:local-section -->"
+    grammar: managed-region
+    begin: "<!-- BEGIN REPO-PLATFORM MANAGED -->"
+    end: "<!-- END REPO-PLATFORM MANAGED -->"

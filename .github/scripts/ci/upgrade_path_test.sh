@@ -588,22 +588,22 @@ git -c user.name=ci -c user.email=ci@localhost commit -q -m "chore: template upd
 sed 's/^_commit: .*/_commit: deadbeef/' .copier-answers.yml > .copier-answers.yml.tmp
 mv .copier-answers.yml.tmp .copier-answers.yml
 echo "# local ci note" >> .github/workflows/ci.yml
-# Sanctioned repository-local content the local-content carry must bring
+# Sanctioned repository-owned content the local-content carry must bring
 # back over the re-render (unlike the ci.yml edit above, which must drop):
-# a tail below AGENTS.md's local-section marker, a CONTRIBUTING.md
-# repository tail, a .gitignore REPOSITORY LOCAL entry, and tails below
-# the hash-comment sentinels of .editorconfig and .github/CODEOWNERS.
+# tails below the END markers of AGENTS.md, CONTRIBUTING.md,
+# .editorconfig, and .github/CODEOWNERS, plus a .gitignore entry ABOVE the
+# managed BEGIN marker (the repo owns both sides of the region).
 echo "recovery-local agents note" >> AGENTS.md
 echo "recovery-local contributing note" >> CONTRIBUTING.md
 printf '[recovery-local/**.js]\nindent_size = 3\n' >> .editorconfig
 echo "/recovery-local/ @recovery-local-owner" >> .github/CODEOWNERS
-awk '/^# END REPOSITORY LOCAL$/ { print "recovery-local-cache/" } { print }' .gitignore > .gitignore.tmp
+awk '/^# BEGIN REPO-PLATFORM MANAGED$/ && !done { print "recovery-local-cache/"; done = 1 } { print }' .gitignore > .gitignore.tmp
 mv .gitignore.tmp .gitignore
-# ... and the appendix path: strip .gitattributes' sentinel (a legacy copy
-# that predates the marker), so the carry cannot split it and must keep
-# the whole previous copy below a marked recovery-appendix comment.
+# ... and the appendix path: strip .gitattributes' marker pair (a copy
+# hand-edited past recognition), so the carry cannot split it and must
+# keep the whole previous copy below a marked recovery-appendix comment.
 echo "recovery-local-attr binary" >> .gitattributes
-sed '/^# repo-platform:local-section$/d' .gitattributes > .gitattributes.tmp
+sed '/^# BEGIN REPO-PLATFORM MANAGED$/d; /^# END REPO-PLATFORM MANAGED$/d' .gitattributes > .gitattributes.tmp
 mv .gitattributes.tmp .gitattributes
 git add --all
 git -c user.name=ci -c user.email=ci@localhost commit -q -m "chore: corrupt the base"
@@ -638,7 +638,7 @@ grep -qF "recovery-local agents note" AGENTS.md \
 grep -qF "recovery-local contributing note" CONTRIBUTING.md \
   || fail "recovery lost CONTRIBUTING.md's repository tail (local-content carry)"
 grep -qF "recovery-local-cache/" .gitignore \
-  || fail "recovery lost .gitignore's REPOSITORY LOCAL entry (local-content carry)"
+  || fail "recovery lost .gitignore's repo-owned entry above the managed region (local-content carry)"
 grep -qF "[recovery-local/**.js]" .editorconfig \
   || fail "recovery lost .editorconfig's local section (local-content carry)"
 grep -qF "/recovery-local/ @recovery-local-owner" .github/CODEOWNERS \
@@ -866,16 +866,16 @@ echo "license deletion OK: fleet license re-seeded"
 # --- Split-file structural rebuild (regenerate-and-splice) ----------------
 # The primary sync path discards copier's merged result for every
 # split-class file and rebuilds it structurally: the managed half from the
-# clean render at the new ref, the repository-local half byte-for-byte
+# clean render at the new ref, the repository-owned sides byte-for-byte
 # from HEAD (preserve_local_content.ts --render-dir, files and markers
 # from the new render's ownership manifest). This leg plants a local
-# AGENTS.md tail, a local .gitignore LOCAL entry, and a hand edit INSIDE
-# SECURITY.md's managed half, then updates to a build whose template
-# changed each file's managed half - the overlap that used to end in merge
-# conflicts or merge luck. Tails must ride through byte-preserved, managed
-# halves must equal render-new byte-for-byte, the managed-half edit must
-# be reset and flagged for review, and no split file may appear in the
-# dropped-hunks summary. Self-contained: fresh fixture, its own build tag
+# AGENTS.md tail, a local .gitignore entry above the managed BEGIN, and a
+# hand edit INSIDE SECURITY.md's managed region, then updates to a build
+# whose template changed each file's managed region - the overlap that
+# used to end in merge conflicts or merge luck. Sides must ride through
+# byte-preserved, managed regions must equal render-new byte-for-byte,
+# the managed-region edit must be reset and flagged for review, and no
+# split file may appear in the dropped-hunks summary. Self-contained: fresh fixture, its own build tag
 # (the run namespace's split tag, chained on its new tag). No trap layer of
 # its own any more - the one cleanup already owns every tag in the
 # namespace, and nothing of a previous run can be in the way.
@@ -886,15 +886,15 @@ mkdir -p "$SPLIT_WORK"
 
 cd "$GITHUB_WORKSPACE"
 cp -R "$NEXT_TREE" "$NEXT_SPLIT"
-# Perturb the managed half of each split grammar in the new build: a line
-# above AGENTS.md's and SECURITY.md's local-section sentinel, a pattern
-# inside .gitignore's managed section.
+# Perturb the managed region of each split file in the new build: a line
+# above AGENTS.md's and SECURITY.md's END marker, a pattern inside
+# .gitignore's managed region.
 insert_above_sentinel() { # <file> <line>
   awk -v insert="$2" \
-    '{ if ($0 == "<!-- repo-platform:local-section -->" && !done) { print insert; done = 1 } print }' \
+    '{ if ($0 == "<!-- END REPO-PLATFORM MANAGED -->" && !done) { print insert; done = 1 } print }' \
     "$1" > "$1.tmp"
   mv "$1.tmp" "$1"
-  grep -qF "$2" "$1" || fail "could not perturb the managed half of $1"
+  grep -qF "$2" "$1" || fail "could not perturb the managed region of $1"
 }
 agents_tpl="$(find "$NEXT_SPLIT/template" -maxdepth 1 -name "*AGENTS.md*.jinja" | head -n 1)"
 test -n "$agents_tpl" || fail "no AGENTS.md template in the assembled build tree"
@@ -920,20 +920,21 @@ git add --all
 git -c user.name=ci -c user.email=ci@localhost commit -q -m "chore: init"
 
 # The local state a real repo carries into the sync: a tail below
-# AGENTS.md's sentinel, a .gitignore LOCAL entry, and - the deliberate
-# ownership violation - a hand edit inside SECURITY.md's managed half.
+# AGENTS.md's END marker, a .gitignore entry above the managed BEGIN, and
+# - the deliberate ownership violation - a hand edit inside SECURITY.md's
+# managed region.
 split_tail_body='## Local agent docs
 
 split-local agents tail'
 printf '\n%s\n' "$split_tail_body" >> AGENTS.md
-awk '/^# END REPOSITORY LOCAL$/ { print "split-local-cache/" } { print }' .gitignore > .gitignore.tmp
+awk '/^# BEGIN REPO-PLATFORM MANAGED$/ && !done { print "split-local-cache/"; done = 1 } { print }' .gitignore > .gitignore.tmp
 mv .gitignore.tmp .gitignore
-# The expected post-update LOCAL region: the rebuild must carry this body
-# byte-for-byte (markers included).
-awk '/^# BEGIN REPOSITORY LOCAL$/, /^# END REPOSITORY LOCAL$/' .gitignore > "$SPLIT_WORK/local-expected.txt"
-awk 'NR == 2 { print "split-local hand edit inside the managed half" } { print }' SECURITY.md > SECURITY.md.tmp
+# The expected post-update above-side: the rebuild must carry everything
+# above the managed BEGIN byte-for-byte.
+awk '/^# BEGIN REPO-PLATFORM MANAGED$/ { exit } { print }' .gitignore > "$SPLIT_WORK/local-expected.txt"
+awk 'NR == 2 { print "split-local hand edit inside the managed region" } { print }' SECURITY.md > SECURITY.md.tmp
 mv SECURITY.md.tmp SECURITY.md
-grep -qF "split-local hand edit" SECURITY.md || fail "could not plant the managed-half edit"
+grep -qF "split-local hand edit" SECURITY.md || fail "could not plant the managed-region edit"
 git add --all
 git -c user.name=ci -c user.email=ci@localhost commit -q -m "chore: local modifications"
 
@@ -971,42 +972,42 @@ TARGET_DIR="$SPLIT" bun actions/shared/stamp_manifest.ts
 bun "$GITHUB_WORKSPACE/actions/validate-template/validate_generated_files.ts" "$SPLIT"
 
 cd "$SPLIT"
-# AGENTS.md: managed half byte-equal to render-new, the local tail
+# AGENTS.md: managed region byte-equal to render-new, the local tail
 # byte-preserved below it - the whole file is exactly render-new + tail.
 { cat "$SPLIT_WORK/render-new/AGENTS.md"; printf '\n%s\n' "$split_tail_body"; } \
   | cmp -s - AGENTS.md \
   || fail "AGENTS.md is not byte-equal to render-new plus the preserved local tail"
 grep -qF "Split-rebuild fixture managed line (agents)." AGENTS.md \
-  || fail "AGENTS.md did not receive the template's managed-half change"
-# SECURITY.md: the hand edit inside the managed half is RESET - the file
+  || fail "AGENTS.md did not receive the template's managed-region change"
+# SECURITY.md: the hand edit inside the managed region is RESET - the file
 # is byte-equal to render-new, and the reset is flagged for review.
 cmp -s "$SPLIT_WORK/render-new/SECURITY.md" SECURITY.md \
-  || fail "SECURITY.md is not byte-equal to render-new after the managed-half reset"
+  || fail "SECURITY.md is not byte-equal to render-new after the managed-region reset"
 if grep -qF "split-local hand edit" SECURITY.md; then
-  fail "the hand edit inside SECURITY.md's managed half survived the rebuild"
+  fail "the hand edit inside SECURITY.md's managed region survived the rebuild"
 fi
-grep -q '^SECURITY\.md: managed-half edits reset' "$SPLIT_WORK/carry-review.txt" \
-  || fail "the managed-half reset was not flagged in the carry-review file"
+grep -q '^SECURITY\.md: managed-region edits reset' "$SPLIT_WORK/carry-review.txt" \
+  || fail "the managed-region reset was not flagged in the carry-review file"
 grep -qF 'RESET to the fresh render' "$SPLIT_WORK/local-carryover.md" \
-  || fail "the carry summary does not state the managed-half reset loudly"
+  || fail "the carry summary does not state the managed-region reset loudly"
 # The clean carries stay auto-merge-eligible: neither AGENTS.md nor
 # .gitignore may appear in the review flag.
 if grep -qE '^(AGENTS\.md|\.gitignore):' "$SPLIT_WORK/carry-review.txt"; then
   fail "a clean split-file carry was flagged for review"
 fi
-# .gitignore: the whole LOCAL region (markers included) byte-preserved,
-# the managed half (from the BEGIN marker to end of file) byte-equal to
-# render-new's.
-awk '/^# BEGIN REPOSITORY LOCAL$/, /^# END REPOSITORY LOCAL$/' .gitignore > "$SPLIT_WORK/local-actual.txt"
+# .gitignore: the whole above-side byte-preserved, the managed region
+# (BEGIN marker to end of file - nothing sits below END here) byte-equal
+# to render-new's.
+awk '/^# BEGIN REPO-PLATFORM MANAGED$/ { exit } { print }' .gitignore > "$SPLIT_WORK/local-actual.txt"
 cmp -s "$SPLIT_WORK/local-expected.txt" "$SPLIT_WORK/local-actual.txt" \
-  || fail ".gitignore's REPOSITORY LOCAL region is not byte-preserved"
+  || fail ".gitignore's repo-owned above-side is not byte-preserved"
 awk '/^# BEGIN REPO-PLATFORM MANAGED$/, 0' .gitignore > "$SPLIT_WORK/managed-actual.txt"
 awk '/^# BEGIN REPO-PLATFORM MANAGED$/, 0' "$SPLIT_WORK/render-new/.gitignore" \
   > "$SPLIT_WORK/managed-expected.txt"
 cmp -s "$SPLIT_WORK/managed-expected.txt" "$SPLIT_WORK/managed-actual.txt" \
-  || fail ".gitignore's managed half is not byte-equal to render-new"
+  || fail ".gitignore's managed region is not byte-equal to render-new"
 grep -qxF "split-rebuild-fixture.tmp" .gitignore \
-  || fail ".gitignore did not receive the template's managed-section change"
+  || fail ".gitignore did not receive the template's managed-region change"
 # The split files never reach the conflict resolver: no split-file section
 # in the dropped-hunks summary, no leftover markers. The marker is built
 # here (not reused from an earlier leg) so this block stays self-contained.
@@ -1021,7 +1022,7 @@ fi
 if grep -rIqF "$split_marker" . --exclude-dir=.git; then
   fail "the split-file rebuild left unresolved copier conflict markers"
 fi
-echo "split-file rebuild OK: tails byte-preserved, managed halves byte-equal to render-new, managed-half edit reset and flagged"
+echo "split-file rebuild OK: sides byte-preserved, managed regions byte-equal to render-new, managed-region edit reset and flagged"
 
 # --- Unselected-path preservation (conditional landing via _exclude) ------
 # The composed tree carries plain filenames; conditional landing happens
@@ -1378,6 +1379,158 @@ fi
 grep -qF "::warning::" "$PREG_WORK/tripwire.out" \
   || fail "the pre-grammar refusal did not warn (silent misbehavior)"
 echo "pre-grammar manifest OK: loud unverifiable refusal, recovery advice named, no fabricated loss"
+
+# --- One-grammar transition (tail-marker / old bounded-region -> managed-region)
+# The tail-marker and four-marker bounded-region grammars were retired into
+# ONE (managed-region: repo-owned content above BEGIN and below END). The
+# transition rides the sync pipeline: a fleet repo whose HEAD still carries
+# the old shapes and an old-vintage manifest must CONVERT on the next sync
+# - the AGENTS.md repo tail lands byte-identical BELOW the new END marker
+# with nothing above, the .gitignore content above the old managed BEGIN
+# (its now-inert LOCAL marker lines included) rides through byte-identical
+# ABOVE the new region - with the conversion named in the carry summary
+# (the PR-body transition note), no review hold (the designed transition is
+# verified), a clear tail tripwire, and a tree the validator accepts.
+TRANS="$RUN_DIR/upgrade-transition"
+TRANS_WORK="$RUN_DIR/upgrade-transition-work"
+mkdir -p "$TRANS_WORK"
+cd "$GITHUB_WORKSPACE"
+copier copy "$GITHUB_WORKSPACE" "$TRANS" \
+  --vcs-ref "$NEW_TAG" --defaults --trust \
+  -d project_name="Transition" \
+  -d description="Transition project" \
+  -d 'modules=[agents]' \
+  -d private="false"
+# The fresh render doubles as render-new; render-old holds the OLD-shaped
+# renders the old template would have produced (managed content identical,
+# shape retired), so the managed-part comparison reads the conversion as a
+# routine template change, not a local edit.
+cp -R "$TRANS" "$TRANS_WORK/render-new"
+cp -R "$TRANS" "$TRANS_WORK/render-old"
+cd "$TRANS"
+# Rewrite AGENTS.md and .gitignore to the retired shapes, byte-controlled,
+# and the manifest's two entries to the retired wire vintages. Standalone
+# python: the harness must stay independent of the code it verifies.
+python3 - <<'PY'
+import json
+
+B = "<!-- BEGIN REPO-PLATFORM MANAGED -->"
+E = "<!-- END REPO-PLATFORM MANAGED -->"
+HB = "# BEGIN REPO-PLATFORM MANAGED"
+OLD_SENTINEL = "<!-- repo-platform:local-section -->"
+
+# AGENTS.md: old shape = the new render's managed content with the marker
+# pair replaced by one terminal tail marker; the repo's tail sits below it
+# (with a non-UTF-8 byte, so byte-fidelity is really proven).
+with open("AGENTS.md", "rb") as f:
+    fresh = f.read().decode("latin-1")
+region = fresh[fresh.index(B) : fresh.index(E) + len(E) + 1]
+body = region.replace(f"{B}\n", "").replace(f"{E}\n", "")
+old_managed = f"{body}\n{OLD_SENTINEL}\n"
+tail = "\n## Project docs\n\ncaf\xe9 repo-local instructions\n"
+with open("AGENTS.md", "wb") as f:
+    f.write((old_managed + tail).encode("latin-1"))
+with open("../upgrade-transition-work/render-old/AGENTS.md", "wb") as f:
+    f.write(old_managed.encode("latin-1"))
+with open("../upgrade-transition-work/agents-tail.bin", "wb") as f:
+    f.write(tail.encode("latin-1"))
+
+# .gitignore: old shape = a LOCAL region (retired markers, one repo entry)
+# above the managed half, which ran from the BEGIN line to end of file.
+with open(".gitignore", "rb") as f:
+    gi = f.read().decode("latin-1")
+managed_half = gi[gi.index(HB) :]
+above = (
+    "# BEGIN REPOSITORY LOCAL\n"
+    "transition-local-cache/\n"
+    "# END REPOSITORY LOCAL\n"
+    "\n"
+)
+with open(".gitignore", "wb") as f:
+    f.write((above + managed_half).encode("latin-1"))
+with open("../upgrade-transition-work/render-old/.gitignore", "wb") as f:
+    f.write((
+        "# BEGIN REPOSITORY LOCAL\n"
+        "# Add repository-specific ignore patterns in this section only.\n"
+        "# END REPOSITORY LOCAL\n"
+        "\n" + managed_half
+    ).encode("latin-1"))
+with open("../upgrade-transition-work/gitignore-above.bin", "wb") as f:
+    f.write(above.encode("latin-1"))
+
+# The manifest: the two entries in their retired wire vintages.
+path = ".github/repo-platform-manifest.json"
+with open(path) as f:
+    manifest = json.load(f)
+manifest["files"]["AGENTS.md"] = {
+    "class": "split",
+    "grammar": "tail-marker",
+    "marker": OLD_SENTINEL,
+    "managed": "above",
+    "hash": None,
+}
+manifest["files"][".gitignore"] = {
+    "class": "split",
+    "grammar": "bounded-region",
+    "marker": HB,
+    "managed": "below",
+    "managed_end": "# END REPO-PLATFORM MANAGED",
+    "local_begin": "# BEGIN REPOSITORY LOCAL",
+    "local_end": "# END REPOSITORY LOCAL",
+    "hash": None,
+}
+with open(path, "w") as f:
+    json.dump(manifest, f, indent=4)
+    f.write("\n")
+PY
+git init -q -b main
+git add --all
+git -c user.name=ci -c user.email=ci@localhost commit -q -m "chore: init in the retired shapes"
+# The working tree holds copier's merged junk the rebuild must discard.
+echo "merged result to discard" > AGENTS.md
+echo "merged result to discard" > .gitignore
+# Restore the post-sync manifest (the new render's own copy).
+cp "$TRANS_WORK/render-new/.github/repo-platform-manifest.json" .github/repo-platform-manifest.json
+cd "$GITHUB_WORKSPACE"
+bun .github/scripts/sync/preserve_local_content.ts \
+  --summary "$TRANS_WORK/local-carryover.md" --root "$TRANS" \
+  --needs-review "$TRANS_WORK/carry-review.txt" \
+  --rebuilt-paths "$TRANS_WORK/rebuilt-paths.txt" \
+  --render-dir "$TRANS_WORK/render-new" --old-render-dir "$TRANS_WORK/render-old"
+# AGENTS.md: exactly render-new + the previous tail, byte-identical
+# (non-UTF-8 byte included), below the new END marker.
+cat "$TRANS_WORK/render-new/AGENTS.md" "$TRANS_WORK/agents-tail.bin" \
+  | cmp -s - "$TRANS/AGENTS.md" \
+  || fail "the tail-marker conversion did not deliver render-new + the byte-identical tail"
+# .gitignore: the old above-side (inert LOCAL markers and the repo entry
+# included) byte-identical above render-new's managed region.
+awk '/^# BEGIN REPO-PLATFORM MANAGED$/, 0' "$TRANS_WORK/render-new/.gitignore" \
+  > "$TRANS_WORK/gitignore-region.txt"
+cat "$TRANS_WORK/gitignore-above.bin" "$TRANS_WORK/gitignore-region.txt" \
+  | cmp -s - "$TRANS/.gitignore" \
+  || fail "the bounded-region conversion did not preserve the above-side byte-identically"
+# The PR body carries the transition notes; the designed conversion is
+# verified, so nothing is held for review.
+grep -qF "converted from the retired tail-marker split shape" "$TRANS_WORK/local-carryover.md" \
+  || fail "the carry summary does not name the tail-marker conversion"
+grep -qF "converted from the retired LOCAL-region split shape" "$TRANS_WORK/local-carryover.md" \
+  || fail "the carry summary does not name the LOCAL-region conversion"
+if [ -s "$TRANS_WORK/carry-review.txt" ]; then
+  fail "the designed transition was held for review: $(cat "$TRANS_WORK/carry-review.txt")"
+fi
+# The stamp, the tripwire (which must VERIFY the designed transition:
+# HEAD's repo-owned bytes all survive, just on their new sides), and the
+# validator all accept the converted tree.
+TARGET_DIR="$TRANS" bun actions/shared/stamp_manifest.ts
+RUNNER_TEMP="$TRANS_WORK" bun .github/scripts/sync/tail_tripwire.ts --root "$TRANS" \
+  > "$TRANS_WORK/tripwire.out"
+if [ -s "$TRANS_WORK/tail-shrank.md" ]; then
+  fail "the tail tripwire flagged the designed transition: $(cat "$TRANS_WORK/tail-shrank.md")"
+fi
+grep -qF "tail tripwire clear" "$TRANS_WORK/tripwire.out" \
+  || fail "the tripwire did not report clear on the converted tree"
+bun "$GITHUB_WORKSPACE/actions/validate-template/validate_generated_files.ts" "$TRANS"
+echo "one-grammar transition OK: tail below END and above-side preserved byte-identically, conversion noted, tripwire clear"
 
 # --- Split-file retirement (module deselection) ----------------------------
 # Deselecting a module retires its files from the render, and a retired

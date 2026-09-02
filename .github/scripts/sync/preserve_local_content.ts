@@ -1,74 +1,62 @@
 #!/usr/bin/env bun
-// Rebuilds the sanctioned repository-local regions of split-class files,
-// in one of two modes. In BOTH modes the file list and each file's split
-// GRAMMAR come from an ownership manifest's class "split" entries
-// (.github/repo-platform-manifest.json) - nothing here hardcodes marker
-// lines or file names, so a future module with a different marker or
-// grammar rides the same carries instead of silently degrading:
+// Rebuilds split-class files structurally, in one of two modes. In BOTH
+// modes the file list and each file's split markers come from an ownership
+// manifest's class "split" entries (.github/repo-platform-manifest.json) -
+// nothing here hardcodes marker lines or file names, so a future file with
+// different markers rides the same carry instead of silently degrading.
 //
-// - tail-marker grammar: one marker line ends the sync-owned top; the
-//   repository owns everything below it (carryManagedTail).
-// - bounded-region grammar: a BEGIN/END-bounded repository-local region
-//   sits above the sync-owned half (.gitignore's shape; carryLocalRegion
-//   via the shared slicer in scripts/gitignore_local.ts).
+// ONE grammar (managed-region): every split file is [optional repo-owned
+// content above] BEGIN marker line, managed content, END marker line,
+// [optional repo-owned content below]. The rebuild delivers the target's
+// own sides byte-for-byte around the fresh render's managed region.
+// TRANSITION: a previous copy still in a RETIRED shape (tail-marker:
+// managed top above one marker line; the old four-marker bounded-region
+// .gitignore shape) is CONVERTED - its repo-owned bytes located by the
+// previous commit's OWN manifest declaration (head_manifest.ts) and
+// re-seated around the new region (a tail lands below END, the old LOCAL
+// area lands above BEGIN), byte-for-byte.
 //
 // RENDER MODE (--render-dir; the PRIMARY path, run on every normal sync):
 // after `copier update`, the merged result for every split-class file is
-// DISCARDED and the file is rebuilt structurally - the managed half from
-// the clean render at the new template ref, the repository-local half
+// DISCARDED and the file is rebuilt structurally - the managed region from
+// the clean render at the new template ref, the repository-owned sides
 // byte-for-byte from the pre-update HEAD. The split entries come from the
 // new render's own manifest, so the rebuild can never miss a file the
 // template splits. The merge never touches mixed-ownership content: a
-// template retraction cannot eat a local tail, and a local tail cannot
+// template retraction cannot eat a local side, and a local side cannot
 // resurrect retracted managed lines. The deliberate flip side: local
-// edits INSIDE a managed half no longer survive by merge luck - they are
-// RESET to the fresh render on every sync, loudly (a reset note in the
+// edits INSIDE the managed region no longer survive by merge luck - they
+// are RESET to the fresh render on every sync, loudly (a reset note in the
 // summary plus the needs-review flag). Edits are detected against the OLD
 // ref's clean render (--old-render-dir), so a routine template change to
-// the managed half does not read as a local edit.
+// the managed region does not read as a local edit.
 //
 // RECOPY MODE (no --render-dir; the recovery path): a recovery re-render
 // (recover=recopy) has no usable old ref, so there are no clean renders to
 // consume - the recopy result in the working tree IS the fresh render,
 // manifest included. The split entries come from that manifest, the
-// pre-recovery content from HEAD, and the same carries splice the
-// repository-local content back over the re-render.
+// pre-recovery content from HEAD, and the same carry splices the
+// repository-owned content back over the re-render.
 //
-// Both modes share the same carries. All file content is handled as
+// Both modes share the same carry. All file content is handled as
 // latin1 text (one code unit per byte, the stamp_manifest.ts convention):
-// the repo-owned half is promised byte-for-byte, and a utf-8 decode would
+// the repo-owned sides are promised byte-for-byte, and a utf-8 decode would
 // fold any non-UTF-8 byte onto U+FFFD - silent corruption. The markers are
 // ASCII, so matching is unaffected. Loud beats lossy: NO shape of
 // previous copy may lose content without a disposition in the summary -
-// when a previous copy cannot be split into managed content and local
-// tail (it predates the marker, or was hand-edited past recognition),
-// the WHOLE previous copy is appended below a marked recovery-appendix
-// comment instead of being dropped. Rules:
-//
-// - Tail-marker files: a target that startsWith the render is kept whole;
-//   else the target's content after its FIRST marker line is re-appended
-//   below the render (which must end at the marker to be used as the
-//   managed half - splitting at the first target marker keeps everything
-//   after it, so a stale duplicate marker can only ever ADD reviewable
-//   lines, never drop them); else keep BOTH (render, then the marked
-//   appendix). A marker-bearing target with an EMPTY tail was never
-//   customized and keeps the render; a whitespace-only tail is carried
-//   like any other (byte-owned).
-// - Bounded-region files: the target's local region body replaces the
-//   render's. A previous copy without a single cleanly-locatable region
-//   (markers missing, duplicated - even as mid-line text - or reversed)
-//   is preserved INSIDE the fresh local region below a recovery-appendix
-//   comment, every carried line commented out (the carry must not
-//   silently activate or rewrite ignore patterns) and marker text
-//   dash-joined so the validator's exactly-once rule holds; a render
-//   without the region keeps the render (the mechanism left the template).
+// when a previous copy cannot be split (its declared markers are missing,
+// duplicated - even as mid-line text - or reversed, and it predates every
+// declaration this sync can read), the WHOLE previous copy is appended
+// below the managed region's END marker under a marked recovery-appendix
+// comment, marker text dash-joined so the validator's exactly-once rule
+// holds, instead of being dropped.
 //
 // The carried files land in --summary as markdown for the PR body; for a
 // hide-details target the log prints counts only (paths and dispositions
 // are target data). Carries that need human review - an appendix, reset
-// managed-half edits, duplicate markers - are listed in the
+// managed-region edits, duplicate markers - are listed in the
 // --needs-review flag file, which open_pr.ts turns into the manual-review
-// path; kept-whole, clean tail-appends, and clean region splices stay
+// path; clean side-restores and the designed shape conversions stay
 // auto-merge-eligible.
 //
 // Usage:
@@ -79,130 +67,95 @@
 import { existsSync, lstatSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import {
+  cleanManagedRegion,
   GRAMMAR,
   type GrammarId,
-  grammarSpec,
-  grammarWireMarker,
   knownGrammar,
-  type RegionSplit,
   type SplitShapes,
+  substringCount,
 } from "../../../actions/shared/grammar.ts";
 import {
   MANIFEST_NAME,
   type ManifestEntryShape,
   parseManifestFiles,
 } from "../../../actions/shared/manifest.ts";
-import { isMarkerLine, managedHalf } from "../../../actions/shared/stamp_manifest.ts";
-import {
-  allRegionMarkers,
-  cleanLocalRegion,
-  localRegion,
-  splitLines,
-  stripCr,
-  substringCount,
-} from "../../../scripts/gitignore_local.ts";
-import { isCommentMarker, isHashMarker } from "../../../scripts/ownership.ts";
+import { isCommentMarker } from "../../../scripts/ownership.ts";
 import { parseFlags } from "../shared/flags.ts";
 import { type HeadNonBlobKind, headEntry } from "../shared/git_head.ts";
 import { capture } from "../shared/proc.ts";
-
-function lastLineIndex(
-  lines: ReturnType<typeof splitLines>,
-  match: (text: string) => boolean,
-): number {
-  for (let i = lines.length - 1; i >= 0; i--) {
-    if (match(stripCr(lines[i].text))) return i;
-  }
-  return -1;
-}
-
-/** Content split at the FIRST marker line: head runs through the marker
- * (newline included), tail is everything below it. Marker lines match via
- * the shared isMarkerLine predicate (stamp_manifest.ts) - the stamper, the
- * validator's twin, and this carry must agree on what a marker line IS, or
- * a line only some of them count (one with a stray trailing space, say)
- * splits the file differently at each site. Splitting at the first keeps
- * every later line - including any further marker, so a stale duplicate
- * adds reviewable lines instead of dropping the content between the
- * markers; extraMarkers flags that for the summary. */
-function splitAtFirstMarker(
-  content: string,
-  marker: string,
-): { head: string; tail: string; extraMarkers: boolean } | null {
-  const lines = splitLines(content);
-  const first = lines.findIndex((line) => isMarkerLine(line.text, marker));
-  if (first === -1) return null;
-  const extraMarkers = lines.some(
-    (line, index) => index > first && isMarkerLine(line.text, marker),
-  );
-  return {
-    head: content.slice(0, lines[first].end),
-    tail: content.slice(lines[first].end),
-    extraMarkers,
-  };
-}
+import {
+  type HeadSplit,
+  headSplitEntries,
+  isCleanRelativePath,
+  managedPart,
+  repoOwnedSides,
+} from "./head_manifest.ts";
 
 function withTrailingNewline(content: string): string {
   return content.endsWith("\n") ? content : `${content}\n`;
 }
 
-/** The declared marker text made inert for an appendix carry: spaces
- * dash-joined; a space-free marker gets a dash right after its comment
- * opener ("<!--" or the leading "#"), so the inert form still reads as a
- * comment in the marker's own syntax but no longer counts as a marker line
- * anywhere - the stamper, the validator, and this module's own splitter
- * all match markers per isMarkerLine, and a verbatim re-appended marker
- * line would double the validator's exactly-once count. */
-function inertTailMarker(marker: string): string {
+/** A declared marker made inert for an appendix carry: spaces dash-joined;
+ * a space-free marker gets a dash right after its comment opener ("<!--"
+ * or the leading "#"), so the inert form still reads as a comment in the
+ * marker's own syntax but no longer counts as the marker anywhere - the
+ * validator and the region slicers count substrings, and a verbatim
+ * re-appended marker would double the exactly-once count. */
+function inertMarker(marker: string): string {
   const inert = marker.replaceAll(" ", "-");
   if (inert !== marker) return inert;
   const opener = marker.startsWith("<!--") ? "<!--" : marker.slice(0, 1);
   return `${opener}-${marker.slice(opener.length)}`;
 }
 
-/** Whether a latin1-decoded line is a marker line to ANY pipeline reader:
- * this module and the stamper match the latin1 view, but the validator
- * decodes UTF-8 - a marker line carrying, say, a UTF-8 NBSP (0xC2 0xA0)
- * beside the marker trims clean only under the UTF-8 view, so a carry
- * that left it verbatim would deliver a tree the validator counts two
- * markers in. Neutralization must cover the union. */
-function isMarkerLineAnyView(latin1Line: string, marker: string): boolean {
-  if (isMarkerLine(latin1Line, marker)) return true;
-  return isMarkerLine(Buffer.from(latin1Line, "latin1").toString("utf-8"), marker);
-}
-
-/** The previous copy with its marker LINES neutralized (mid-line mentions
- * are not marker lines to any consumer and stay verbatim). */
-function neutralizeMarkerLines(content: string, marker: string): string {
-  const inert = inertTailMarker(marker);
-  return splitLines(content)
-    .map((line) =>
-      isMarkerLineAnyView(line.text, marker) ? line.text.replaceAll(marker, inert) : line.text,
-    )
-    .join("\n");
-}
-
-/** The keep-both fallback: render, then the previous copy below a marked
- * comment - with any marker line in the previous copy neutralized (the
- * fresh render's marker must stay the file's ONLY marker line, or the
- * recovery output itself fails validation with advice pointing away from
- * the real cause). The comment spelling follows the entry's marker form:
- * an HTML comment for HTML-comment markers, hash comments otherwise
- * (.gitattributes, .editorconfig, .github/CODEOWNERS - an HTML comment
- * there would parse as file content). */
-function withAppendix(renderNl: string, target: string, marker: string): string {
-  const htmlStyle = marker.startsWith("<!--");
+/** The keep-both fallback: render, then the previous copy below the
+ * managed region's END marker (repository-owned space) under a marked
+ * comment - with every occurrence of the entry's markers in the previous
+ * copy neutralized (the fresh render's pair must stay the file's ONLY
+ * marker occurrences, or the recovery output itself fails validation with
+ * advice pointing away from the real cause). The comment spelling follows
+ * the entry's marker syntax: an HTML comment for HTML-comment markers,
+ * hash comments otherwise (.gitattributes, .editorconfig,
+ * .github/CODEOWNERS - an HTML comment there would parse as file
+ * content). */
+function withRegionAppendix(
+  render: string,
+  target: string,
+  markers: { begin: string; end: string },
+): string {
+  const htmlStyle = markers.begin.startsWith("<!--");
   const explanation = [
     "The template sync's re-render could not tell this file's",
-    "repository-local tail apart from its managed content, so the previous",
-    "copy is preserved in full below (any marker line in it is dash-joined",
-    "to stay inert). Keep what is repository-local, drop what the content",
-    "above already covers, then delete this comment.",
+    "repository-owned content apart from its managed region, so the",
+    "previous copy is preserved in full below (any managed-region marker",
+    "text in it is dash-joined to stay inert). Keep what is",
+    "repository-owned, drop what the managed region above already covers,",
+    "then delete this comment.",
   ];
   const appendix = htmlStyle
     ? ["<!-- repo-platform:recovery-appendix", `${explanation.join("\n")} -->`].join("\n")
     : ["# repo-platform:recovery-appendix", ...explanation.map((line) => `# ${line}`)].join("\n");
-  return `${renderNl}\n${appendix}\n\n${withTrailingNewline(neutralizeMarkerLines(target, marker))}`;
+  let neutralized = target;
+  for (const marker of [markers.begin, markers.end]) {
+    neutralized = neutralized.replaceAll(marker, inertMarker(marker));
+  }
+  const content = `${withTrailingNewline(render)}\n${appendix}\n\n${withTrailingNewline(neutralized)}`;
+  // Postcondition: neutralization must not have re-created any marker (a
+  // replacement product could collide with the sibling marker). The
+  // declared markers are schema-constrained against containing each other,
+  // so a violation here means adversarially colliding markers - fail
+  // loudly rather than deliver a file the validator's exactly-once rule
+  // rejects.
+  for (const marker of [markers.begin, markers.end]) {
+    if (substringCount(content, marker) !== substringCount(render, marker)) {
+      throw new Error(
+        `appendix neutralization would change the '${marker}' marker's occurrence ` +
+          "count - the declared region markers collide under neutralization; " +
+          "declare markers whose neutralized forms cannot recreate each other",
+      );
+    }
+  }
+  return content;
 }
 
 /** Previous non-blank lines the delivered text no longer holds, counted
@@ -226,203 +179,136 @@ export function missingLines(previous: string, delivered: string): string[] {
   });
 }
 
-export type TailCarry =
+export type RegionCarry =
   | {
-      kind: "kept-whole";
+      kind: "sides-restored";
       content: string;
-      /** The target carried more than one marker line; everything after
-       * the first was kept, so the tail may hold a stale duplicate to
-       * review. */
-      extraMarkers: boolean;
     }
   | {
-      kind: "tail-appended";
+      kind: "converted";
       content: string;
+      /** The retired vintage the previous copy was still shaped as. */
+      from: "tail-marker" | "bounded-region";
+      /** The previous copy carried more than one tail marker line;
+       * everything after the first was kept, so the carried side may hold
+       * a stale duplicate to review. */
       extraMarkers: boolean;
-      /** The target's managed half (above its marker) differed from the
-       * fresh render's, so in-place edits there were NOT carried. In
-       * recopy mode this is the loudness signal; render mode recomputes
-       * the signal against the OLD render instead (a template change to
-       * the managed half is not a local edit). */
-      managedHalfDiffers: boolean;
     }
   | { kind: "appendix"; content: string };
 
-/** Tail-marker carry: the render is the managed content, the target's
- * local tail is re-appended below it. Null means keep the render (the
- * target never diverged below the managed content). */
-export function carryManagedTail(render: string, target: string, marker: string): TailCarry | null {
-  const renderNl = withTrailingNewline(render);
-  if (target === render || target === renderNl) return null;
-  // Unchanged managed content: the target IS render + tail; keep it whole.
-  if (target.startsWith(renderNl)) {
-    return {
-      kind: "kept-whole",
-      content: target,
-      extraMarkers: splitAtFirstMarker(target, marker)?.extraMarkers ?? false,
-    };
-  }
-  // The render is usable as the managed half only when it ENDS at the
-  // declared marker line; anchoring a split on an arbitrary final line
-  // would guess. Then the target's content after its FIRST marker is the
-  // repository tail.
-  const renderLines = splitLines(render);
-  const finalIndex = lastLineIndex(renderLines, (text) => text.trim() !== "");
-  if (finalIndex !== -1 && isMarkerLine(renderLines[finalIndex].text, marker)) {
-    const split = splitAtFirstMarker(target, marker);
-    if (split !== null) {
-      // Empty tail below the target's marker: never customized. A
-      // whitespace-only tail is still carried - the tail is byte-owned by
-      // the repository, and nothing may drop silently, not even blanks.
-      if (split.tail === "") return null;
-      return {
-        kind: "tail-appended",
-        content: renderNl + split.tail,
-        extraMarkers: split.extraMarkers,
-        managedHalfDiffers: splitAtFirstMarker(renderNl, marker)?.head !== split.head,
-      };
-    }
-  }
-  // No recognizable split (the previous copy predates the marker, or
-  // was hand-edited past recognition). Keep BOTH: silently losing the
-  // repository's content is the defect this script exists to fix, and an
-  // appendix carry forces manual review, so a marked duplicate is
-  // acceptable.
-  return { kind: "appendix", content: withAppendix(renderNl, target, marker) };
-}
-
-export interface RegionCarry {
-  content: string;
-  disposition: "spliced" | "appendix";
-}
-
-/** Previous-copy lines carried into the appendix are commented out (the
- * carry must not silently activate or rewrite ignore patterns - inert and
- * loud, like the .md appendices) and the grammar's marker text inside them
- * is dash-joined so validate_generated_files' exactly-once substring rule
- * holds on the result. */
-function inertPreviousCopy(content: string, markers: RegionSplit): string {
-  let neutralized = content;
-  for (const marker of allRegionMarkers(markers)) {
-    let inert = (marker.startsWith("# ") ? marker.slice(2) : marker).replaceAll(" ", "-");
-    // A space-free marker dash-joins to itself; break the substring anyway.
-    if (inert.includes(marker)) inert = `${inert.slice(0, 1)}-${inert.slice(1)}`;
-    neutralized = neutralized.replaceAll(marker, inert);
-  }
-  return splitLines(neutralized)
-    .map((line) => (stripCr(line.text) === "" ? line.text : `# ${line.text}`))
-    .join("\n");
-}
-
-/** Bounded-region carry: the target's local region body inside the
- * render's markers. The target's region must be exactly-once clean per
- * cleanLocalRegion (scripts/gitignore_local.ts - the shared definition, so
- * this carry and the self-output regenerator can never slice the same
- * malformed file differently). Any other shape with non-blank previous
- * content is preserved, commented out, inside the fresh local region -
- * dropping it would silently lose whatever local entries it held. Null
- * means keep the render: the render has no region (the mechanism left the
- * template), the bodies already match, or an unsplittable previous copy is
- * blank. */
-export function carryLocalRegion(
+/** The managed-region carry: the fresh render's managed region, the
+ * previous copy's repository-owned sides byte-for-byte around it. The
+ * previous copy is split by `headDecl` - its OWN manifest's declaration,
+ * retired vintages included (that is what converts a tail-marker or
+ * old-bounded file with zero byte loss) - falling back to the new entry's
+ * markers when no HEAD declaration is usable or the declared legacy shape
+ * is not present. Null means keep the render: the previous copy never
+ * diverged (delivered content would equal the render), or an unsplittable
+ * previous copy is blank. Throws when the RENDER has no clean region -
+ * manifest and render are generated together, so that is damage, and
+ * keeping the merged result would hand the file back to the merge this
+ * rebuild exists to discard. */
+export function carryManagedRegion(
   render: string,
   target: string,
-  markers: RegionSplit,
+  entry: SplitEntry,
+  headDecl: HeadSplit | undefined,
 ): RegionCarry | null {
-  const renderRegion = localRegion(render, markers);
-  if (renderRegion === null) return null;
-  const targetRegion = cleanLocalRegion(target, markers);
-  if (targetRegion !== null) {
-    if (renderRegion.body === targetRegion.body) return null;
-    return {
-      content: renderRegion.before + targetRegion.body + renderRegion.after,
-      disposition: "spliced",
-    };
+  const renderSlice = cleanManagedRegion(render, entry);
+  if (renderSlice === null) {
+    throw new Error(
+      `the manifest declares a managed-region split for ${entry.path}, but the ` +
+        "render carries no clean BEGIN/END region - manifest and render disagree",
+    );
   }
-  if (target.trim() === "") return null;
-  const explanation = [
-    "# repo-platform:recovery-appendix",
-    "# The template sync's re-render could not locate a single",
-    "# repository-local region in this file's previous copy, so the",
-    "# previous copy is preserved below, commented out, with marker text",
-    "# neutralized. Move what is repository-local up into this section",
-    "# (uncommented), drop the rest, then delete this block.",
-  ].join("\n");
-  const content =
-    renderRegion.before +
-    renderRegion.body +
-    `${explanation}\n${withTrailingNewline(inertPreviousCopy(target, markers))}` +
-    renderRegion.after;
-  // Postcondition: neutralization must not have re-created any marker (a
-  // replacement product could collide with a sibling marker). The declared
-  // markers are schema-constrained against containing each other, so a
-  // violation here means adversarially colliding markers - fail loudly
-  // rather than deliver a file the validator's exactly-once rule rejects.
-  for (const marker of allRegionMarkers(markers)) {
-    if (substringCount(content, marker) !== substringCount(render, marker)) {
-      throw new Error(
-        `appendix neutralization would change the '${marker}' marker's occurrence ` +
-          "count - the declared region markers collide under neutralization; " +
-          "declare markers whose neutralized forms cannot recreate each other",
-      );
-    }
+  const entryDecl: HeadSplit = {
+    vintage: "managed-region",
+    path: entry.path,
+    begin: entry.begin,
+    end: entry.end,
+  };
+  let decl = headDecl ?? entryDecl;
+  let sides = repoOwnedSides(target, decl);
+  if (sides === null && decl.vintage !== "managed-region") {
+    // The previous commit's manifest declares a retired shape the file no
+    // longer has (an out-of-band conversion, a hand edit); before going to
+    // the appendix, try the CURRENT markers - a copy already in the new
+    // shape splits honestly there.
+    decl = entryDecl;
+    sides = repoOwnedSides(target, decl);
   }
-  return { content, disposition: "appendix" };
+  if (sides === null) {
+    // No recognizable split (the previous copy was hand-edited past
+    // recognition). Keep BOTH unless the previous copy is blank: silently
+    // losing the repository's content is the defect this script exists to
+    // fix, and an appendix carry forces manual review, so a marked
+    // duplicate is acceptable.
+    if (target.trim() === "") return null;
+    return { kind: "appendix", content: withRegionAppendix(render, target, entry) };
+  }
+  // A render whose END line has no trailing newline still joins cleanly:
+  // the seam newline belongs to the join, not to the byte-owned side.
+  const region = sides.below !== "" ? withTrailingNewline(renderSlice.region) : renderSlice.region;
+  const content = sides.above + region + sides.below;
+  if (content === render) return null;
+  if (decl.vintage !== "managed-region") {
+    return { kind: "converted", content, from: decl.vintage, extraMarkers: sides.extraMarkers };
+  }
+  return { kind: "sides-restored", content };
 }
 
-const TAIL_NOTES: Record<TailCarry["kind"], string> = {
-  "kept-whole": "repository copy kept whole (its managed content matches the render)",
-  "tail-appended": "repository tail re-appended below the fresh managed content",
+const CARRY_NOTES: Record<RegionCarry["kind"] | "converted-bounded", string> = {
+  "sides-restored":
+    "repository-owned content outside the managed region restored from the repository's copy",
+  converted:
+    "converted from the retired tail-marker split shape: the repository-owned tail " +
+    "now sits below the managed region's END marker, byte-for-byte",
+  "converted-bounded":
+    "converted from the retired LOCAL-region split shape: the repository-owned " +
+    "content above the managed region rides through byte-for-byte",
   appendix:
-    "managed content not recognized in the repository's previous copy; the previous " +
-    "copy is preserved in full below a repo-platform:recovery-appendix comment - " +
-    "reconcile manually",
+    "managed region not recognized in the repository's previous copy; the previous " +
+    "copy is preserved in full below the END marker under a " +
+    "repo-platform:recovery-appendix comment - reconcile manually",
 };
 
 const EXTRA_MARKERS_NOTE =
-  "; the previous copy carried more than one split marker line, and everything " +
-  "after its first marker was kept - review the tail for stale duplicates";
+  "; the previous copy carried more than one retired split marker line, and " +
+  "everything after its first marker was kept - review the carried content for " +
+  "stale duplicates";
 
-const MANAGED_HALF_NOTE =
-  "; the managed half above the marker differed from the fresh render; those " +
-  "differences are not carried - review the diff";
+const MANAGED_REGION_DIFFERS_NOTE =
+  "; the managed content differed from the fresh render; those differences are " +
+  "not carried - review the diff";
 
 const MANAGED_RESET_NOTE =
-  "local edits INSIDE the managed half were RESET to the fresh render - managed " +
-  "halves are template-owned and rebuilt on every sync; content that must survive " +
-  "belongs in the repository-local half (below the marker, or inside the " +
-  "repository-local region)";
+  "local edits INSIDE the managed region were RESET to the fresh render - managed " +
+  "regions are template-owned and rebuilt on every sync; content that must survive " +
+  "belongs outside the BEGIN/END markers (above the region, or below it)";
 
 const MANAGED_UNVERIFIABLE_NOTE =
-  "the previous copy's managed half could not be located (its marker line is " +
+  "the previous copy's managed content could not be located (its marker lines are " +
   "missing there, or the file has no old-render baseline), so local edits inside " +
   "it cannot be ruled out - the fresh render stands; review the diff for content " +
-  "that belongs in the repository-local half";
+  "that belongs outside the managed region";
 
-const REGION_NOTES: Record<RegionCarry["disposition"], string> = {
-  spliced: "repository-local region restored from the repository's copy",
-  appendix:
-    "no single repository-local region in the repository's previous copy; the " +
-    "previous copy is preserved, commented out, inside the fresh local region " +
-    "below a repo-platform:recovery-appendix comment (its entries do not apply " +
-    "until restored) - reconcile manually",
-};
-
-function tailNote(carry: TailCarry, mode: "recopy" | "render"): string {
+function carryNote(carry: RegionCarry, mode: "recopy" | "render", managedDiffers: boolean): string {
   switch (carry.kind) {
-    case "kept-whole":
-      return TAIL_NOTES[carry.kind] + (carry.extraMarkers ? EXTRA_MARKERS_NOTE : "");
-    case "tail-appended":
-      // Render mode reports managed-half drift against the OLD render (the
-      // reset note, appended by the caller); against the NEW render every
-      // routine template change would read as dropped local edits.
+    case "sides-restored":
+      // Render mode reports managed-region drift against the OLD render
+      // (the reset note, appended by the caller); against the NEW render
+      // every routine template change would read as dropped local edits.
       return (
-        TAIL_NOTES[carry.kind] +
-        (carry.extraMarkers ? EXTRA_MARKERS_NOTE : "") +
-        (mode === "recopy" && carry.managedHalfDiffers ? MANAGED_HALF_NOTE : "")
+        CARRY_NOTES["sides-restored"] +
+        (mode === "recopy" && managedDiffers ? MANAGED_REGION_DIFFERS_NOTE : "")
+      );
+    case "converted":
+      return (
+        CARRY_NOTES[carry.from === "bounded-region" ? "converted-bounded" : "converted"] +
+        (carry.extraMarkers ? EXTRA_MARKERS_NOTE : "")
       );
     case "appendix":
-      return TAIL_NOTES[carry.kind];
+      return CARRY_NOTES.appendix;
   }
 }
 
@@ -430,114 +316,79 @@ function tailNote(carry: TailCarry, mode: "recopy" | "render"): string {
  * declaration fields, DERIVED from the GRAMMAR table's SplitShapes - so
  * the entry union's grammar arm set IS GrammarId by construction. The sync
  * leg cannot know a grammar the table lacks, nor silently miss one it has:
- * a new table row makes this union grow, and every exhaustive dispatch
- * below (the per-grammar parsers, the carries) goes red at tsc until it
- * answers for the new arm. */
+ * a new table row makes this union grow, and every dispatch below goes red
+ * at tsc until it answers for the new arm. */
 export type SplitEntry = { [K in GrammarId]: { path: string } & SplitShapes[K] }[GrammarId];
 
 /** Markers are matched against latin1-decoded file bytes, so a non-ASCII
  * marker (utf-8 in the manifest, one code unit per byte in the file) could
  * never match and the carry would silently degrade; the declaration schema
  * forbids it, and this boundary re-checks what it consumes. NON-EMPTY is
- * load-bearing too: managedHalf matches line.trim() === marker, so an
- * empty marker selects the synthetic empty line at EOF and reads a whole
- * file as one half. */
+ * load-bearing too: the marker-line predicate matches line.trim() ===
+ * marker, so an empty marker selects the synthetic empty line at EOF. */
 const ASCII_MARKER_RE = /^[\x20-\x7e]+$/;
 
-/** Manifest keys become filesystem paths under the target root, so a key
- * that could escape it (absolute, or carrying .. segments) is refused at
- * this boundary - the declaration schema upstream never emits one, but the
- * manifest text rides through a checkout this script must not trust.
- * Exported for starter_pin_rollout.ts, which walks manifest keys at the
- * same trust boundary and must refuse the same escapes. */
-export function isCleanRelativePath(path: string): boolean {
-  return (
-    path !== "" &&
-    !/[\r\n]/.test(path) &&
-    !path.startsWith("/") &&
-    path.split("/").every((part) => part !== "" && part !== "." && part !== "..")
-  );
-}
+// isCleanRelativePath moved to head_manifest.ts (the shared manifest-key
+// trust boundary); re-exported for starter_pin_rollout.ts and the tests.
+export { isCleanRelativePath };
 
 /** The per-grammar split-entry parsers, total over GrammarId BY TYPE: a
  * GRAMMAR table row with no parser here is a tsc error, never a runtime
- * fallthrough. Each parser re-checks what the manifest text claims for
- * its grammar (the declaration schema upstream never emits a violation,
- * but the text rides through a checkout this script must not trust):
- * the managed side must equal the GRAMMAR row's side column, every
- * marker string must be printable ASCII, and every marker must open in
- * the comment syntax the recovery appendix writes - a tail marker as a
- * hash or complete HTML comment, bounded-region markers as hash comments
- * (the appendix comments carried lines with #). The wireExtras column
- * names the extra marker-string fields, so the field list is stated once
- * (the validator's manifest check reads the same column). */
+ * fallthrough. The parser re-checks what the manifest text claims (the
+ * declaration schema upstream never emits a violation, but the text rides
+ * through a checkout this script must not trust): every marker string must
+ * be printable ASCII, open in a comment syntax the recovery appendix can
+ * write (a hash or complete HTML comment), and the pair must be mutually
+ * substring-free (the exactly-once counting and the appendix
+ * neutralization count substrings). The wireFields column names the
+ * fields, so the field list is stated once (the validator's manifest
+ * check reads the same column). */
 const SPLIT_PARSERS: {
   [K in GrammarId]: (
     where: string,
     path: string,
-    marker: string,
     shaped: ManifestEntryShape,
   ) => { path: string } & SplitShapes[K];
 } = {
-  "tail-marker": (where, path, marker, shaped) => {
-    if (shaped.managed !== GRAMMAR["tail-marker"].side) {
+  "managed-region": (where, path, shaped) => {
+    const spec = GRAMMAR["managed-region"];
+    const strings = spec.wireFields.map((field) => shaped[field]);
+    if (!strings.every((value) => typeof value === "string" && ASCII_MARKER_RE.test(value))) {
       throw new Error(
-        `${where}: split entry for ${path} declares the tail-marker grammar with a ` +
-          `managed side other than '${GRAMMAR["tail-marker"].side}' - the manifest is inconsistent`,
+        `${where}: split entry for ${path} lacks printable-ASCII begin/end marker ` +
+          "strings (markers are matched against latin1-decoded file bytes) - the " +
+          "manifest is damaged",
       );
     }
-    if (!isCommentMarker(marker)) {
-      throw new Error(
-        `${where}: split entry for ${path} declares tail marker ` +
-          `'${marker}', which is not a hash comment or a complete HTML ` +
-          "comment line - the recovery appendix writes comments in the marker's " +
-          "syntax; the manifest is damaged",
-      );
-    }
-    return { path, grammar: "tail-marker", marker };
-  },
-  "bounded-region": (where, path, marker, shaped) => {
-    const spec = GRAMMAR["bounded-region"];
-    const regionStrings = spec.wireExtras.map((field) => shaped[field]);
-    if (
-      shaped.managed !== spec.side ||
-      !regionStrings.every((value) => typeof value === "string" && ASCII_MARKER_RE.test(value))
-    ) {
-      throw new Error(
-        `${where}: split entry for ${path} declares the bounded-region grammar ` +
-          `without a '${spec.side}' managed side and its printable-ASCII region marker ` +
-          "strings - the manifest is inconsistent",
-      );
-    }
-    for (const value of [marker, ...(regionStrings as string[])]) {
-      if (!isHashMarker(value)) {
+    const [begin, end] = strings as [string, string];
+    for (const value of [begin, end]) {
+      if (!isCommentMarker(value)) {
         throw new Error(
-          `${where}: split entry for ${path} declares bounded-region marker ` +
-            `'${value}', which does not open as a hash comment - the appendix ` +
-            "comments carried lines with #; the manifest is damaged",
+          `${where}: split entry for ${path} declares region marker '${value}', ` +
+            "which is not a hash comment or a complete HTML comment line - the " +
+            "recovery appendix writes comments in the markers' syntax; the manifest is damaged",
         );
       }
     }
-    return {
-      path,
-      grammar: "bounded-region",
-      managed_begin: marker,
-      managed_end: shaped.managed_end as string,
-      local_begin: shaped.local_begin as string,
-      local_end: shaped.local_end as string,
-    };
+    if (begin === end || begin.includes(end) || end.includes(begin)) {
+      throw new Error(
+        `${where}: split entry for ${path} declares region markers that contain ` +
+          "each other - exactly-once counting and appendix neutralization count " +
+          "substrings, so the pair must be substring-free; the manifest is damaged",
+      );
+    }
+    return { path, grammar: "managed-region", begin, end };
   },
 };
 
 /** The class "split" entries of a render's ownership manifest - the single
- * source of which files the template splits and each file's grammar and
- * marker lines. Malformed data throws, an unknown or missing grammar
- * included: silently skipping an entry (or guessing its grammar) would
- * hand that file back to the merge result this mode exists to discard.
- * Read through the shared parser (actions/shared/manifest.ts), which also
- * rejects duplicated keys - raw JSON.parse would last-win them, and a
- * duplicated class field could silently declassify a split entry out of
- * every carry. */
+ * source of which files the template splits and each file's marker lines.
+ * Malformed data throws, an unknown or missing grammar included: silently
+ * skipping an entry (or guessing its grammar) would hand that file back to
+ * the merge result this mode exists to discard. Read through the shared
+ * parser (actions/shared/manifest.ts), which also rejects duplicated keys
+ * - raw JSON.parse would last-win them, and a duplicated class field could
+ * silently declassify a split entry out of every carry. */
 export function splitEntries(manifestText: string, where: string): SplitEntry[] {
   const parsed = parseManifestFiles(manifestText);
   if (parsed.problem !== null) {
@@ -552,12 +403,6 @@ export function splitEntries(manifestText: string, where: string): SplitEntry[] 
           "could escape the target root at the rebuild's write; the manifest is damaged",
       );
     }
-    if (typeof shaped.marker !== "string" || !ASCII_MARKER_RE.test(shaped.marker)) {
-      throw new Error(
-        `${where}: split entry for ${path} lacks a printable-ASCII marker line ` +
-          "(markers are matched against latin1-decoded file bytes)",
-      );
-    }
     const grammar = knownGrammar(shaped.grammar);
     if (grammar === null) {
       // Reachable on purpose (the manifest text is untrusted): the typed
@@ -570,7 +415,7 @@ export function splitEntries(manifestText: string, where: string): SplitEntry[] 
         } - this carry refuses to guess (a new grammar needs its own carry here)`,
       );
     }
-    out.push(SPLIT_PARSERS[grammar](where, path, shaped.marker, shaped));
+    out.push(SPLIT_PARSERS[grammar](where, path, shaped));
   }
   return out;
 }
@@ -584,12 +429,28 @@ function requireHead(root: string): void {
   }
 }
 
+/** HEAD's split declarations for splitting HEAD's copies with HEAD's own
+ * manifest (retired vintages included - that is what carries the shape
+ * conversion). null when the previous commit has no usable manifest: the
+ * carry then splits previous copies by the NEW entries' markers and routes
+ * everything else to the appendix, and the tail tripwire independently
+ * reports the unusable manifest. */
+function readHeadDecls(root: string): Map<string, HeadSplit> | null {
+  const headManifest = headEntry(root, MANIFEST_NAME);
+  if (headManifest.kind !== "blob") return null;
+  try {
+    return headSplitEntries(headManifest.bytes.toString("utf-8"), `HEAD:${MANIFEST_NAME}`);
+  } catch {
+    return null;
+  }
+}
+
 /** The file's pre-render state at the target's HEAD (headEntry owns the
  * probe semantics): decoded content for a regular file, the bare non-blob
  * kind for a directory/symlink/submodule (which has NO file content to
  * carry - `git show`'s answer for those is a tree listing or the link
  * target, never a previous copy), or absent. latin1, not utf-8: the
- * pre-render copy is the byte-owned repo half. */
+ * pre-render copy carries the byte-owned repo sides. */
 type HeadContent =
   | { kind: "blob"; content: string }
   | { kind: "non-blob"; object: HeadNonBlobKind }
@@ -606,7 +467,7 @@ function headContent(root: string, rel: string): HeadContent {
 function nonBlobNote(object: HeadNonBlobKind): string {
   return (
     `the previous commit carries a ${object} at this path, not a regular file - no ` +
-    "repository-local content could be split out or carried, and the fresh render " +
+    "repository-owned content could be split out or carried, and the fresh render " +
     "replaces it; reconcile against the previous copy in git history manually"
   );
 }
@@ -654,8 +515,8 @@ interface FileOutcome {
   note: string;
   /** Reasons this carry needs human review (empty = auto-merge-eligible). */
   reviewReasons: string[];
-  /** For a managed-half reset: the local-edit lines the rebuild dropped
-   * (in HEAD's managed half, in neither the old render's half nor the
+  /** For a managed-region reset: the local-edit lines the rebuild dropped
+   * (in HEAD's managed content, in neither the old render's nor the
    * delivered one), itemized in the summary the way the conflict resolver
    * itemizes dropped hunks - a reviewer restoring an edit needs the lines,
    * not just the fact of the reset. */
@@ -663,78 +524,52 @@ interface FileOutcome {
 }
 
 /** One split entry's carry over (render, target): the delivered content
- * plus its summary note and review reasons, dispatched on the entry's
- * grammar. Null content change (carry === null) keeps the render.
- * Exhaustive: a new grammar member must fail compilation here, not
- * silently ride an existing carry. */
+ * plus its summary note and review reasons. Null note keeps the render. */
 function carrySplitEntry(
   entry: SplitEntry,
   render: string,
   target: string,
+  headDecl: HeadSplit | undefined,
   mode: "recopy" | "render",
 ): { content: string; note: string | null; appendixCarry: boolean; reviewReasons: string[] } {
   const reviewReasons: string[] = [];
-  switch (entry.grammar) {
-    case "bounded-region": {
-      // The manifest and the render are generated together: a declared
-      // region the render does not carry means one of them is damaged, and
-      // keeping the render here would silently drop HEAD's local body.
-      if (localRegion(render, entry) === null) {
-        throw new Error(
-          `the manifest declares a bounded-region split for ${entry.path}, but the ` +
-            "render carries no such local region - manifest and render disagree",
-        );
-      }
-      const carry = carryLocalRegion(render, target, entry);
-      if (carry === null) {
-        return { content: render, note: null, appendixCarry: false, reviewReasons };
-      }
-      if (carry.disposition === "appendix") reviewReasons.push("recovery-appendix");
-      return {
-        content: carry.content,
-        note: REGION_NOTES[carry.disposition],
-        appendixCarry: carry.disposition === "appendix",
-        reviewReasons,
-      };
-    }
-    case "tail-marker": {
-      const carry = carryManagedTail(render, target, entry.marker);
-      if (carry === null) {
-        return { content: render, note: null, appendixCarry: false, reviewReasons };
-      }
-      if (carry.kind === "appendix") {
-        reviewReasons.push("recovery-appendix");
-      } else if (carry.extraMarkers) {
-        reviewReasons.push("duplicate split markers");
-      }
-      return {
-        content: carry.content,
-        note: tailNote(carry, mode),
-        appendixCarry: carry.kind === "appendix",
-        reviewReasons,
-      };
-    }
-    default: {
-      // Unreachable by construction: SplitEntry derives from the GRAMMAR
-      // table's SplitShapes, so a new grammar makes `entry` non-never here
-      // and this switch a tsc error until it carries its own arm. The
-      // throw only backstops data smuggled past the type system.
-      const unhandled: never = entry;
-      throw new Error(`unhandled split grammar: ${JSON.stringify(unhandled)}`);
-    }
+  const carry = carryManagedRegion(render, target, entry, headDecl);
+  if (carry === null) {
+    return { content: render, note: null, appendixCarry: false, reviewReasons };
   }
+  if (carry.kind === "appendix") {
+    reviewReasons.push("recovery-appendix");
+  } else if (carry.kind === "converted" && carry.extraMarkers) {
+    reviewReasons.push("duplicate split markers");
+  }
+  const entryDecl: HeadSplit = {
+    vintage: "managed-region",
+    path: entry.path,
+    begin: entry.begin,
+    end: entry.end,
+  };
+  const managedDiffers =
+    managedPart(target, headDecl ?? entryDecl) !== managedPart(carry.content, entryDecl);
+  return {
+    content: carry.content,
+    note: carryNote(carry, mode, managedDiffers),
+    appendixCarry: carry.kind === "appendix",
+    reviewReasons,
+  };
 }
 
 /** Render mode, per split entry: DISCARD the working tree's merged copy
- * and rebuild from (clean new render, HEAD copy); detect managed-half
+ * and rebuild from (clean new render, HEAD copy); detect managed-region
  * edits against the OLD render. Returns the outcome when the file carried
  * content or needs review; null when the clean rebuild needs no human
- * attention (that includes every routine template change). */
+ * attention (that includes every routine template change and the designed
+ * shape conversion of an unedited file). */
 function rebuildSplitFile(
   root: string,
   renderDir: string,
   oldRenderDir: string,
   entry: SplitEntry,
+  headDecl: HeadSplit | undefined,
 ): FileOutcome | null {
   const rel = entry.path;
   const renderPath = join(renderDir, rel);
@@ -759,52 +594,58 @@ function rebuildSplitFile(
     note = nonBlobNote(target.object);
     reviewReasons.push("previous copy not a regular file");
   } else if (target.kind === "blob") {
-    const carried = carrySplitEntry(entry, render, target.content, "render");
+    const carried = carrySplitEntry(entry, render, target.content, headDecl, "render");
     content = carried.content;
     note = carried.note;
     appendixCarry = carried.appendixCarry;
     reviewReasons.push(...carried.reviewReasons);
-    // Did the rebuild drop bytes from the previous managed half? Compare
-    // HEAD's half against the DELIVERED content's half (byte-equal means
-    // nothing was dropped, however the carry got there), then classify a
-    // drop against the OLD render's half: equal means the drop IS the
-    // template update (routine, silent), different means local edits were
-    // reset (loud, manual review). A half that cannot be located on any
-    // side is UNVERIFIABLE, not clean - a mangled marker must not slip a
-    // content drop past review. An appendix carry skips all of this: it
-    // preserves the full previous copy below the render and is already
-    // manual.
+    // Did the rebuild drop bytes from the previous managed content? Each
+    // copy is split by ITS OWN declaration - HEAD's copy and the OLD
+    // render by the previous commit's manifest declaration (the retired
+    // vintages included, so the shape conversion verifies instead of
+    // alarming), the delivered copy by the new entry. Byte-equal parts
+    // mean nothing was dropped; a drop that equals the template update
+    // (HEAD's part == the old render's part) is routine and silent; a
+    // drop past that means local edits were reset (loud, manual review).
+    // A part that cannot be located on any side is UNVERIFIABLE, not
+    // clean - a mangled marker must not slip a content drop past review.
+    // An appendix carry skips all of this: it preserves the full previous
+    // copy below the render and is already manual.
     if (!appendixCarry) {
-      // The GRAMMAR row's side column: which half managedHalf calls
-      // managed for this entry's grammar.
-      const side = grammarSpec(entry.grammar).side;
-      const marker = grammarWireMarker(entry.grammar, entry);
-      const targetHalf = managedHalf(target.content, marker, side);
-      const deliveredHalf = managedHalf(content, marker, side);
-      if (targetHalf !== null && deliveredHalf !== null && targetHalf === deliveredHalf) {
-        // Nothing from the previous managed half was dropped.
+      const entryDecl: HeadSplit = {
+        vintage: "managed-region",
+        path: rel,
+        begin: entry.begin,
+        end: entry.end,
+      };
+      const previousDecl = headDecl ?? entryDecl;
+      const targetPart = managedPart(target.content, previousDecl);
+      const deliveredPart = managedPart(content, entryDecl);
+      if (targetPart !== null && deliveredPart !== null && targetPart === deliveredPart) {
+        // Nothing from the previous managed content was dropped.
       } else {
         const oldRenderPath = join(oldRenderDir, rel);
-        const oldHalf = existsSync(oldRenderPath)
-          ? managedHalf(readFileSync(oldRenderPath).toString("latin1"), marker, side)
+        const oldPart = existsSync(oldRenderPath)
+          ? managedPart(readFileSync(oldRenderPath).toString("latin1"), previousDecl)
           : null;
-        if (targetHalf === null || deliveredHalf === null || oldHalf === null) {
+        if (targetPart === null || deliveredPart === null || oldPart === null) {
           note =
             note === null ? MANAGED_UNVERIFIABLE_NOTE : `${note}; ${MANAGED_UNVERIFIABLE_NOTE}`;
-          reviewReasons.push("managed half unverifiable");
-        } else if (targetHalf !== oldHalf) {
+          reviewReasons.push("managed region unverifiable");
+        } else if (targetPart !== oldPart) {
           note = note === null ? MANAGED_RESET_NOTE : `${note}; ${MANAGED_RESET_NOTE}`;
-          reviewReasons.push("managed-half edits reset");
+          reviewReasons.push("managed-region edits reset");
           // The reviewer restores from lines, not from the fact of a
-          // reset: itemize the local ADDITIONS (in HEAD's half beyond the
-          // old render's) the delivered half no longer carries. Both
-          // sides are taken relative to the OLD render so multiset counts
-          // stay honest - comparing HEAD's additions against the whole
-          // delivered half would let a baseline occurrence of a line
-          // absorb the dropped local duplicate of the same line.
+          // reset: itemize the local ADDITIONS (in HEAD's managed content
+          // beyond the old render's) the delivered copy no longer
+          // carries. Both sides are taken relative to the OLD render so
+          // multiset counts stay honest - comparing HEAD's additions
+          // against the whole delivered region would let a baseline
+          // occurrence of a line absorb the dropped local duplicate of
+          // the same line.
           resetLines = missingLines(
-            missingLines(targetHalf, oldHalf).join("\n"),
-            missingLines(deliveredHalf, oldHalf).join("\n"),
+            missingLines(targetPart, oldPart).join("\n"),
+            missingLines(deliveredPart, oldPart).join("\n"),
           );
         }
       }
@@ -819,19 +660,22 @@ function rebuildSplitFile(
 
 const RENDER_INTRO = [
   "Split-class files were rebuilt structurally over this update: the managed",
-  "half comes from a clean render at the new template ref, the",
-  "repository-local half byte-for-byte from the previous commit, and",
-  "copier's merged result for these files was discarded. Local edits inside",
-  "a managed half do NOT survive this rebuild (managed halves are",
+  "region comes from a clean render at the new template ref, the",
+  "repository-owned content outside it byte-for-byte from the previous",
+  "commit, and copier's merged result for these files was discarded. A file",
+  "still in a retired split shape (tail-marker, the old LOCAL-region",
+  ".gitignore shape) was CONVERTED to the BEGIN/END managed-region shape",
+  "with its repository-owned bytes preserved exactly. Local edits inside a",
+  "managed region do NOT survive this rebuild (managed regions are",
   "template-owned); such edits are reset and flagged below. Each bullet",
   "names its file's actual disposition (not every file has previous content",
   "to carry); verify each file's diff before merging:",
 ];
 
 const RECOPY_INTRO = [
-  "Repo-local content carried over the recovery re-render - the re-render",
-  "has no three-way merge and had reset these sanctioned repository-local",
-  "regions. Each bullet names its file's actual disposition (not every file",
+  "Repo-owned content carried over the recovery re-render - the re-render",
+  "has no three-way merge and had reset these sanctioned repository-owned",
+  "sides. Each bullet names its file's actual disposition (not every file",
   "has previous content to carry); verify each file's diff before merging:",
 ];
 
@@ -938,14 +782,15 @@ function main(argv: string[]): number {
   const oldRenderDir = flags["--old-render-dir"];
   if ((renderDir === undefined) !== (oldRenderDir === undefined)) {
     throw new Error(
-      "--render-dir and --old-render-dir come together: the rebuild takes the managed half from the new render and detects managed-half edits against the old one",
+      "--render-dir and --old-render-dir come together: the rebuild takes the managed region from the new render and detects managed-region edits against the old one",
     );
   }
   requireHead(root);
+  const headDecls = readHeadDecls(root);
 
   const outcomes: FileOutcome[] = [];
   // Every file this script WROTE, for the conflict resolver's --skip list:
-  // a carried repository half may legitimately contain conflict-marker-shaped
+  // a carried repository side may legitimately contain conflict-marker-shaped
   // text, and the resolver must not rewrite what the rebuild just delivered.
   const rebuiltRels: string[] = [];
   if (renderDir !== undefined && oldRenderDir !== undefined) {
@@ -957,7 +802,13 @@ function main(argv: string[]): number {
     }
     const entries = splitEntries(readFileSync(manifestPath, "utf-8"), manifestPath);
     for (const entry of entries) {
-      const outcome = rebuildSplitFile(root, renderDir, oldRenderDir, entry);
+      const outcome = rebuildSplitFile(
+        root,
+        renderDir,
+        oldRenderDir,
+        entry,
+        headDecls?.get(entry.path),
+      );
       rebuiltRels.push(entry.path);
       if (outcome !== null) outcomes.push(outcome);
     }
@@ -990,7 +841,13 @@ function main(argv: string[]): number {
         outcomes.push({ rel: entry.path, note: nonBlobNote(target.object), reviewReasons: [] });
         continue;
       }
-      const carried = carrySplitEntry(entry, render, target.content, "recopy");
+      const carried = carrySplitEntry(
+        entry,
+        render,
+        target.content,
+        headDecls?.get(entry.path),
+        "recopy",
+      );
       if (carried.note === null) continue;
       writeRegularFile(root, entry.path, carried.content);
       rebuiltRels.push(entry.path);

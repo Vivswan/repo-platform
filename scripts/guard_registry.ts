@@ -255,6 +255,23 @@ export const GUARD_REGISTRY: readonly GuardEntry[] = [
     testFile: "tests/sync/preserve_local_content.test.ts",
     testName: "throws on an unknown grammar instead of degrading",
   },
+  // The HEAD-manifest transition reader's own refusal: HEAD manifests can
+  // legitimately carry the two RETIRED grammars (the one-grammar
+  // transition converts them), so its vocabulary is wider than the GRAMMAR
+  // table's - and a grammar outside even THAT roster must refuse, or the
+  // conversion would silently skip the entry and the rebuild would treat
+  // the whole previous copy as unsplittable.
+  {
+    id: "head-split-unknown-grammar-refusal",
+    hazard:
+      "a HEAD manifest declares a split grammar that is neither current nor a retired vintage the transition converts; without the refusal the entry is silently skipped, the tripwire never compares the file, and a retirement could delete its repo-owned content unheld",
+    guardFile: ".github/scripts/sync/head_manifest.ts",
+    snippet: "    throw new Error(\n      `${where}: a split entry declares split grammar",
+    mutated:
+      "    continue;\n    throw new Error(\n      `${where}: a split entry declares split grammar",
+    testFile: "tests/sync/head_manifest.test.ts",
+    testName: "a grammar this sync does not read is refused, never skipped",
+  },
   // The commit-msg gate (scripts/check_commit_subject.ts, dispatched by
   // .husky/commit-msg): the pre-commit gates run before the message
   // exists, so a subject CI's commit-names job refuses - the comma-scope

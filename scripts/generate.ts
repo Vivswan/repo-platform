@@ -73,7 +73,6 @@ import { parse as parseYaml } from "yaml";
 import { z } from "zod";
 import { EXCLUDED_DIRS } from "../.github/scripts/build-branches/branch_tree.ts";
 import { managedLabelNames } from "../.github/scripts/fleet/render_managed_settings.ts";
-import type { RegionSplit } from "../actions/shared/grammar.ts";
 import { compose, dependabotLabels, excludePatterns } from "./compose_template.ts";
 import {
   loadManifests,
@@ -491,7 +490,9 @@ function objectLiteralLines(fields: string[], indent: string, suffix: string): s
 /** An ownership table entry's property list, in the emitted field order. */
 function ownedFileFields(entry: BaseOwnershipEntry): string[] {
   const fields = [`path: ${JSON.stringify(entry.path)}`, `kind: "${entry.kind}"`];
-  if (entry.kind === "marker") fields.push(`marker: ${JSON.stringify(entry.marker)}`);
+  if (entry.kind === "region") {
+    fields.push(`begin: ${JSON.stringify(entry.begin)}`, `end: ${JSON.stringify(entry.end)}`);
+  }
   if (entry.when !== undefined) {
     const when: string[] = [];
     if (entry.when.publicOnly) when.push("publicOnly: true");
@@ -529,38 +530,16 @@ export function moduleOwnershipRegion(ownership: Record<string, OwnershipEntry[]
   return lines;
 }
 
-/** validate_generated_files.ts BASE_OWNERSHIP + BASE_REGION_SPLITS
- *  literals, sourced from templates/base/ownership.yml
- *  (baseOwnershipTables): the enforced base files with their render
- *  conditions, and the bounded-region split grammars the marker-section
- *  checks read. */
-export function baseOwnershipRegion(tables: {
-  enforced: BaseOwnershipEntry[];
-  regionSplits: Record<string, RegionSplit>;
-}): string[] {
+/** validate_generated_files.ts BASE_OWNERSHIP literal, sourced from
+ *  templates/base/ownership.yml (baseOwnershipTables): the enforced base
+ *  files - header, class-only, and region-split entries - with their
+ *  render conditions. */
+export function baseOwnershipRegion(tables: { enforced: BaseOwnershipEntry[] }): string[] {
   const lines = ["const BASE_OWNERSHIP: BaseOwnedFile[] = ["];
   for (const entry of tables.enforced) {
     lines.push(...objectLiteralLines(ownedFileFields(entry), "  ", ","));
   }
-  lines.push("];", "", "const BASE_REGION_SPLITS: Record<string, RegionSplit> = {");
-  for (const [path, grammar] of Object.entries(tables.regionSplits)) {
-    const fields = [
-      `managed_begin: ${JSON.stringify(grammar.managed_begin)}`,
-      `managed_end: ${JSON.stringify(grammar.managed_end)}`,
-      `local_begin: ${JSON.stringify(grammar.local_begin)}`,
-      `local_end: ${JSON.stringify(grammar.local_end)}`,
-    ];
-    const key = JSON.stringify(path);
-    const inline = `  ${key}: { ${fields.join(", ")} },`;
-    if (inline.length <= 100) {
-      lines.push(inline);
-      continue;
-    }
-    lines.push(`  ${key}: {`);
-    for (const field of fields) lines.push(`    ${field},`);
-    lines.push("  },");
-  }
-  lines.push("};");
+  lines.push("];");
   return lines;
 }
 
@@ -872,7 +851,6 @@ interface RegionInputs {
   moduleOwnership: Record<string, OwnershipEntry[]>;
   baseOwnership: {
     enforced: BaseOwnershipEntry[];
-    regionSplits: Record<string, RegionSplit>;
   };
 }
 

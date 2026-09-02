@@ -1,3 +1,4 @@
+<!-- BEGIN REPO-PLATFORM MANAGED -->
 # Individual and Small Organization License 1.0.0
 
 <https://github.com/Vivswan/licenses/blob/main/individual-small-organization-license/1.0.0.md>
@@ -534,6 +535,6 @@ expression.
 licenses.
 
 <!-- Repository-specific license notices (third-party components,
-     differently licensed paths) go below this line. They survive
-     template updates via three-way merge. -->
-<!-- repo-platform:local-section -->
+     differently licensed paths) go below the END marker. They are this
+     repository's own and survive template updates. -->
+<!-- END REPO-PLATFORM MANAGED -->

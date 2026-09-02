@@ -58,10 +58,10 @@ import {
   must,
   timeoutExitCode,
 } from "../shared/proc.ts";
-import { clip, fenceFor, type SplitEntry } from "./preserve_local_content.ts";
+import { type HeadSplit, headSplitEntries, repoOwnedText } from "./head_manifest.ts";
+import { clip, fenceFor } from "./preserve_local_content.ts";
 import { REMOVED_SPLITS_NAME, SETTINGS_LAYERING_NAME } from "./section_files.ts";
 import { transitionSettingsStarter } from "./settings_layering.ts";
-import { headSplitEntries, repoOwnedHalf } from "./tail_tripwire.ts";
 
 const targetDir = env("TARGET_DIR", "target");
 const label = env("TARGET_DISPLAY") || env("TARGET") || targetDir;
@@ -522,32 +522,39 @@ export function deletedTrackedPaths(
 
 /** The removed-splits hold: HEAD's split declarations, split with HEAD's
  * OWN manifest (a marker rename in the update cannot mis-split the
- * previous copy). headSplits is null when the manifest is missing,
- * damaged past parsing, or still pre-grammar (headSplitEntries refuses
- * that retired shape loudly) - all target-state anomalies the
- * fully-migrated fleet manifest should never present, all handled fail
- * closed below with the refusal's message in the PR body. */
+ * previous copy; the retired vintages the transition converts are read
+ * too - head_manifest.ts). headSplits is null when the manifest is
+ * missing, damaged past parsing, or of a vintage headSplitEntries refuses
+ * loudly (pre-grammar, or a grammar neither current nor retired) - all
+ * target-state anomalies the fully-migrated fleet manifest should never
+ * present, all handled fail closed below with the refusal's message in
+ * the PR body. */
 function holdRemovedSplits(): void {
-  let headSplits: Map<string, SplitEntry> | null = null;
+  let headSplits: Map<string, HeadSplit> | null = null;
   // WHY the manifest was rejected, for the PR body only (the message can
   // name manifest paths, so it never reaches a log line). Clipped: the
   // rejection message embeds decoded manifest keys, which are
   // target-controlled - unbounded text would blow the section budget and a
   // NUL would kill gh's --body argv (clip escapes control bytes).
   let manifestProblem: string | null = null;
-  const headManifest = git(["show", `HEAD:${MANIFEST_NAME}`]);
-  if (headManifest.exitCode !== 0) {
+  // headEntry, not a bare `git show`: `git show` answers a symlinked
+  // manifest with its TARGET TEXT (which could parse as JSON) and a
+  // directory with a tree listing - only a real blob is ever parsed.
+  const headManifest = headEntry(targetDir, MANIFEST_NAME);
+  if (headManifest.kind === "absent") {
     manifestProblem = "it could not be read from the previous commit";
+  } else if (headManifest.kind === "non-blob") {
+    manifestProblem = `the previous commit carries a ${headManifest.object} at the manifest path, not a regular file`;
   } else {
     try {
-      headSplits = headSplitEntries(headManifest.stdout, `HEAD:${MANIFEST_NAME}`);
+      headSplits = headSplitEntries(headManifest.bytes.toString("utf-8"), `HEAD:${MANIFEST_NAME}`);
     } catch (err) {
       manifestProblem = clip(err instanceof Error ? err.message : String(err));
     }
   }
 
   const removals: RemovedSplit[] = [];
-  const candidates = new Map<string, SplitEntry | undefined>();
+  const candidates = new Map<string, HeadSplit | undefined>();
   let scanUnavailable = false;
   if (headSplits !== null) {
     for (const [path, split] of headSplits) candidates.set(path, split);
@@ -590,7 +597,7 @@ function holdRemovedSplits(): void {
       path,
       previous: "content",
       half:
-        split === undefined ? undefined : repoOwnedHalf(headCopy.bytes.toString("latin1"), split),
+        split === undefined ? undefined : repoOwnedText(headCopy.bytes.toString("latin1"), split),
     });
   }
 

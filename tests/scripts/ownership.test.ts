@@ -7,11 +7,11 @@ import { describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { GRAMMAR } from "../../actions/shared/grammar";
 import type { ModuleManifest } from "../../scripts/module_manifests";
 import {
   baseOwnershipTables,
   declarationTextErrors,
+  declaredMarkerTexts,
   landedPathAndGates,
   loadBaseOwnership,
   moduleOwnershipEntries,
@@ -19,14 +19,18 @@ import {
   ownershipEntrySchema,
   ownershipListSchema,
   ownershipOf,
-  rosterTexts,
   skipIfExistsPatterns,
   translateGates,
 } from "../../scripts/ownership";
 
 const HEADER = "# This file is managed by {{ github_username }}/repo-platform.\n";
-const HTML_SENTINEL = "<!-- repo-platform:local-section -->";
-const HASH_SENTINEL = "# repo-platform:local-section";
+const B = "<!-- BEGIN REPO-PLATFORM MANAGED -->";
+const E = "<!-- END REPO-PLATFORM MANAGED -->";
+const HB = "# BEGIN REPO-PLATFORM MANAGED";
+const HE = "# END REPO-PLATFORM MANAGED";
+// Retired grammar spellings: the scan refuses them in every template source.
+const OLD_HTML_SENTINEL = "<!-- repo-platform:local-section -->";
+const OLD_HASH_SENTINEL = "# repo-platform:local-section";
 
 const managed = (path: string): OwnershipDeclaration => ({ path, class: "managed" });
 const headerless = (path: string): OwnershipDeclaration => ({
@@ -35,21 +39,14 @@ const headerless = (path: string): OwnershipDeclaration => ({
   headerless: true,
 });
 const starter = (path: string): OwnershipDeclaration => ({ path, class: "starter" });
-const tail = (path: string, marker: string): OwnershipDeclaration => ({
+const split = (path: string, begin = B, end = E): OwnershipDeclaration => ({
   path,
   class: "split",
-  grammar: "tail-marker",
-  marker,
+  grammar: "managed-region",
+  begin,
+  end,
 });
-const bounded = (path: string): OwnershipDeclaration => ({
-  path,
-  class: "split",
-  grammar: "bounded-region",
-  managed_begin: "# BEGIN REPO-PLATFORM MANAGED",
-  managed_end: "# END REPO-PLATFORM MANAGED",
-  local_begin: "# BEGIN REPOSITORY LOCAL",
-  local_end: "# END REPOSITORY LOCAL",
-});
+const hashSplit = (path: string): OwnershipDeclaration => split(path, HB, HE);
 
 describe("landedPathAndGates", () => {
   test("passes ungated paths through with no gates", () => {
@@ -78,42 +75,39 @@ describe("ownershipEntrySchema", () => {
     for (const entry of [
       managed("AGENTS.md"),
       starter(".github/workflows/checks.yml"),
-      tail("SECURITY.md", HTML_SENTINEL),
-      bounded(".gitignore"),
+      split("SECURITY.md"),
+      hashSplit(".gitignore"),
     ]) {
       expect(ownershipEntrySchema.parse(entry)).toEqual(entry);
     }
   });
 
-  test("the managed side is GRAMMAR table data, never declared separately", () => {
-    // A side that disagreed with its grammar is unrepresentable: the
-    // declaration carries no side field, consumers read the table column.
-    expect(GRAMMAR["tail-marker"].side).toBe("above");
-    expect(GRAMMAR["bounded-region"].side).toBe("below");
+  test("rejects a split without a grammar and a RETIRED or unknown grammar", () => {
+    expect(
+      ownershipEntrySchema.safeParse({ path: "X.md", class: "split", begin: "# b", end: "# e" })
+        .success,
+    ).toBe(false);
+    for (const grammar of ["prefix", "tail-marker", "bounded-region"]) {
+      expect(
+        ownershipEntrySchema.safeParse({
+          path: "X.md",
+          class: "split",
+          grammar,
+          begin: "# b",
+          end: "# e",
+        }).success,
+      ).toBe(false);
+    }
   });
 
-  test("rejects a split without a grammar and an unknown grammar", () => {
-    expect(
-      ownershipEntrySchema.safeParse({ path: "X.md", class: "split", marker: "# m" }).success,
-    ).toBe(false);
+  test("rejects extra fields per class (a retired marker field on a split entry)", () => {
     expect(
       ownershipEntrySchema.safeParse({
-        path: "X.md",
-        class: "split",
-        grammar: "prefix",
+        ...split("X.md"),
         marker: "# m",
       }).success,
     ).toBe(false);
-  });
-
-  test("rejects extra fields per class (a bounded marker on a tail entry)", () => {
-    expect(
-      ownershipEntrySchema.safeParse({
-        ...tail("X.md", "# m"),
-        local_begin: "# BEGIN",
-      }).success,
-    ).toBe(false);
-    expect(ownershipEntrySchema.safeParse({ ...managed("X.md"), marker: "# m" }).success).toBe(
+    expect(ownershipEntrySchema.safeParse({ ...managed("X.md"), begin: "# b" }).success).toBe(
       false,
     );
   });
@@ -130,9 +124,9 @@ describe("ownershipEntrySchema", () => {
     expect(ownershipEntrySchema.safeParse({ ...starter("X.md"), headerless: true }).success).toBe(
       false,
     );
-    expect(
-      ownershipEntrySchema.safeParse({ ...tail("X.md", "# m"), headerless: true }).success,
-    ).toBe(false);
+    expect(ownershipEntrySchema.safeParse({ ...split("X.md"), headerless: true }).success).toBe(
+      false,
+    );
   });
 
   test("headerless steers the tables but stays out of the manifest entry", () => {
@@ -153,8 +147,8 @@ describe("ownershipEntrySchema", () => {
   });
 
   test("rejects markers that are not trim-stable single quote-free lines", () => {
-    for (const marker of ["# m\nx", " # m", "# it's a marker"]) {
-      expect(ownershipEntrySchema.safeParse(tail("X.md", marker)).success).toBe(false);
+    for (const begin of ["# m\nx", " # m", "# it's a marker"]) {
+      expect(ownershipEntrySchema.safeParse(split("X.md", begin, "# e")).success).toBe(false);
     }
   });
 
@@ -172,8 +166,10 @@ describe("ownershipEntrySchema", () => {
     if (!quoted.success) {
       expect(quoted.error.issues.map((issue) => issue.message).join("; ")).toContain('"\\""');
     }
-    expect(ownershipEntrySchema.safeParse(tail("X.md", '# say "hi"')).success).toBe(false);
-    expect(ownershipEntrySchema.safeParse(tail("X.md", "# back\\slash")).success).toBe(false);
+    expect(ownershipEntrySchema.safeParse(split("X.md", '# say "hi"', "# e")).success).toBe(false);
+    expect(ownershipEntrySchema.safeParse(split("X.md", "# back\\slash", "# e")).success).toBe(
+      false,
+    );
     // A lone surrogate is JSON-escaped too; a well-formed astral character
     // is not and stays a legal path (markers are ASCII-restricted anyway).
     expect(ownershipEntrySchema.safeParse(managed("a\ud800b.md")).success).toBe(false);
@@ -181,60 +177,39 @@ describe("ownershipEntrySchema", () => {
   });
 
   test("rejects non-ASCII markers (latin1 file bytes would never match them)", () => {
-    expect(ownershipEntrySchema.safeParse(tail("X.md", "# local § section")).success).toBe(false);
+    expect(ownershipEntrySchema.safeParse(split("X.md", "# local § begin", "# e")).success).toBe(
+      false,
+    );
   });
 
   test("rejects markers outside the hash/HTML comment forms the appendix can write", () => {
-    expect(ownershipEntrySchema.safeParse(tail("X.md", "// local section")).success).toBe(false);
+    expect(ownershipEntrySchema.safeParse(split("X.md", "// begin", "// end")).success).toBe(false);
     // An unclosed HTML comment would swallow appended repository content.
-    expect(ownershipEntrySchema.safeParse(tail("X.md", "<!-- broken")).success).toBe(false);
-    expect(
-      ownershipEntrySchema.safeParse({
-        ...bounded(".conf"),
-        local_begin: "// BEGIN LOCAL",
-      }).success,
-    ).toBe(false);
+    expect(ownershipEntrySchema.safeParse(split("X.md", "<!-- broken", E)).success).toBe(false);
   });
 
   // Opens-and-closes accepted two DIFFERENT comments with live text between
   // them, and the degenerate form whose delimiters overlap. Either would let
   // the recovery appendix emit a line that is not one comment.
   test("rejects HTML markers that are not exactly one comment", () => {
-    const rejects = (marker: string) =>
-      expect(ownershipEntrySchema.safeParse(tail("X.md", marker)).success).toBe(false);
+    const rejects = (begin: string) =>
+      expect(ownershipEntrySchema.safeParse(split("X.md", begin, E)).success).toBe(false);
     // Opener and closer belong to different comments; "active" is live text.
     rejects("<!-- closed --> active <!-- final -->");
     // Delimiters overlap: the closer IS part of the opener.
     rejects("<!-->");
     // The shape a real declaration uses still passes.
-    expect(
-      ownershipEntrySchema.safeParse(tail("X.md", "<!-- repo-platform:local-section -->")).success,
-    ).toBe(true);
+    expect(ownershipEntrySchema.safeParse(split("X.md")).success).toBe(true);
   });
 
-  test("rejects bounded-region markers that contain each other", () => {
+  test("rejects markers that contain each other or mix comment families", () => {
     expect(
-      ownershipEntrySchema.safeParse({
-        path: ".conf",
-        class: "split",
-        grammar: "bounded-region",
-        managed_begin: "# BEGIN MANAGED",
-        managed_end: "# BEGIN MANAGED END",
-        local_begin: "# BEGIN LOCAL",
-        local_end: "# END LOCAL",
-      }).success,
+      ownershipEntrySchema.safeParse(split("X.md", "# BEGIN M", "# BEGIN M END")).success,
     ).toBe(false);
-    expect(
-      ownershipEntrySchema.safeParse({
-        path: ".conf",
-        class: "split",
-        grammar: "bounded-region",
-        managed_begin: "# SAME",
-        managed_end: "# SAME",
-        local_begin: "# BEGIN LOCAL",
-        local_end: "# END LOCAL",
-      }).success,
-    ).toBe(false);
+    expect(ownershipEntrySchema.safeParse(split("X.md", "# SAME", "# SAME")).success).toBe(false);
+    // One hash marker beside one HTML marker: the appendix comment has no
+    // single syntax to write in.
+    expect(ownershipEntrySchema.safeParse(split("X.md", HB, E)).success).toBe(false);
   });
 
   test("the list schema rejects a path declared twice", () => {
@@ -263,15 +238,13 @@ describe("loadBaseOwnership", () => {
         "  - { path: .yamllint, class: managed }",
         "  - path: .gitignore",
         "    class: split",
-        "    grammar: bounded-region",
-        '    managed_begin: "# BEGIN REPO-PLATFORM MANAGED"',
-        '    managed_end: "# END REPO-PLATFORM MANAGED"',
-        '    local_begin: "# BEGIN REPOSITORY LOCAL"',
-        '    local_end: "# END REPOSITORY LOCAL"',
+        "    grammar: managed-region",
+        `    begin: "${HB}"`,
+        `    end: "${HE}"`,
         "",
       ].join("\n"),
     );
-    expect(loadBaseOwnership(dir)).toEqual([managed(".yamllint"), bounded(".gitignore")]);
+    expect(loadBaseOwnership(dir)).toEqual([managed(".yamllint"), hashSplit(".gitignore")]);
   });
 
   test("a missing file throws (base files need a declaration home)", () => {
@@ -291,29 +264,27 @@ describe("loadBaseOwnership", () => {
 
 describe("declarationTextErrors", () => {
   // The contradiction scan's marker set derives from every declared
-  // bounded-region grammar: the canonical .gitignore instance plus a
-  // hypothetical module-declared grammar with its own marker lines.
-  const otherBounded: OwnershipDeclaration = {
+  // grammar: the canonical instances plus a hypothetical module-declared
+  // grammar with its own marker lines.
+  const otherSplit: OwnershipDeclaration = {
     path: "notes/.notesignore",
     class: "split",
-    grammar: "bounded-region",
-    managed_begin: "# NOTES MANAGED OPEN",
-    managed_end: "# NOTES MANAGED CLOSE",
-    local_begin: "# NOTES LOCAL OPEN",
-    local_end: "# NOTES LOCAL CLOSE",
+    grammar: "managed-region",
+    begin: "# NOTES MANAGED OPEN",
+    end: "# NOTES MANAGED CLOSE",
   };
-  const DECLARED_MARKERS = rosterTexts([bounded(".gitignore"), otherBounded]);
+  const DECLARED_MARKERS = declaredMarkerTexts([hashSplit(".gitignore"), otherSplit]);
   const errorsOf = (
     declaration: OwnershipDeclaration,
     source: string,
     skipMatched: boolean,
-    tailMarkers: readonly string[] = [],
+    extraMarkers: readonly string[] = [],
   ): string[] =>
     declarationTextErrors(
       declaration,
       source,
       skipMatched,
-      { tail: tailMarkers, region: DECLARED_MARKERS.region },
+      [...DECLARED_MARKERS, ...extraMarkers],
       "templates/t/x.jinja",
     );
 
@@ -335,9 +306,9 @@ describe("declarationTextErrors", () => {
     expect(errors[0]).toContain("managed header but is declared a starter");
   });
 
-  test("a starter carrying a split marker line contradicts", () => {
-    const errors = errorsOf(starter("checks.yml"), `x\n${HASH_SENTINEL}\n`, true);
-    expect(errors.join("\n")).toContain("declared a starter - the marker promises");
+  test("a starter carrying a region marker line contradicts", () => {
+    const errors = errorsOf(starter("checks.yml"), `x\n${HB}\n`, true);
+    expect(errors.join("\n")).toContain("declared a starter");
   });
 
   test("a managed or split file matched by _skip_if_exists contradicts", () => {
@@ -346,8 +317,26 @@ describe("declarationTextErrors", () => {
     expect(errors[0]).toContain("declared managed but copier.yml's _skip_if_exists");
   });
 
-  test("a managed file carrying a local-section marker line contradicts", () => {
-    for (const marker of [HTML_SENTINEL, HASH_SENTINEL]) {
+  test("a RETIRED grammar's marker spelling is refused in EVERY template source", () => {
+    // No code splits at the retired lines anymore: shipping one plants a
+    // dead ownership promise, and the scan is what stops the retired
+    // grammars from quietly growing back.
+    for (const retired of [
+      OLD_HTML_SENTINEL,
+      OLD_HASH_SENTINEL,
+      "# BEGIN REPOSITORY LOCAL",
+      "# END REPOSITORY LOCAL",
+    ]) {
+      for (const declaration of [managed("X.md"), starter("X.md"), split("X.md")]) {
+        const errors = errorsOf(declaration, `top\n${retired}\ntail\n`, false);
+        expect(errors).toHaveLength(1);
+        expect(errors[0]).toContain("retired split marker");
+      }
+    }
+  });
+
+  test("a managed file carrying a region marker line contradicts", () => {
+    for (const marker of [B, HB]) {
       const errors = errorsOf(managed("X.md"), `top\n${marker}\ntail\n`, false);
       expect(errors).toHaveLength(1);
       expect(errors[0]).toContain("declared managed");
@@ -358,25 +347,25 @@ describe("declarationTextErrors", () => {
     // Prose that does not reproduce the FULL marker string (the comment
     // prefix included) carries no marker text, so it is no claim.
     expect(
-      errorsOf(managed("GUIDE.md"), "see the repo-platform:local-section marker\n", false),
+      errorsOf(managed("GUIDE.md"), "content stays between the BEGIN/END markers\n", false),
     ).toEqual([]);
   });
 
-  // Foreign tail markers match by TEXT PRESENCE, exactly like region
-  // markers: any occurrence of the full marker string in a source that
-  // does not own it is a claim - glued to jinja tags, inside a tag or a
-  // comment, or a prose mention reproducing the marker text. An over-claim
-  // surfaces at compose time and costs a reword; an under-claim ships a
-  // live marker in a managed file - a silent ownership bypass.
-  test("foreign tail-marker text anywhere in a managed source contradicts", () => {
+  // Foreign markers match by TEXT PRESENCE: any occurrence of the full
+  // marker string in a source that does not own it is a claim - glued to
+  // jinja tags, inside a tag or a comment, or a prose mention reproducing
+  // the marker text. An over-claim surfaces at compose time and costs a
+  // reword; an under-claim ships a live marker in a managed file - a
+  // silent ownership bypass.
+  test("foreign region-marker text anywhere in a managed source contradicts", () => {
     for (const line of [
-      HASH_SENTINEL,
-      `{% if 'agents' in modules %}${HASH_SENTINEL}{% endif %}`,
-      `{# reminder: ${HASH_SENTINEL} #}`,
-      `{% set note = "${HASH_SENTINEL}" %}`,
-      `{% raw %}${HASH_SENTINEL}{% endraw %}`,
-      `see ${HASH_SENTINEL} mid-line`,
-      `{{ "" }}${HTML_SENTINEL}`,
+      HB,
+      `{% if 'agents' in modules %}${HB}{% endif %}`,
+      `{# reminder: ${HB} #}`,
+      `{% set note = "${HB}" %}`,
+      `{% raw %}${HB}{% endraw %}`,
+      `see ${HB} mid-line`,
+      `{{ "" }}${B}`,
     ]) {
       const errors = errorsOf(managed("X.md"), `top\n${line}\ntail\n`, false);
       expect(errors).toHaveLength(1);
@@ -387,9 +376,9 @@ describe("declarationTextErrors", () => {
   test("text that is not the full marker string stays legal", () => {
     for (const source of [
       // No comment prefix, so the marker string never appears.
-      "rules go below the repo-platform:local-section marker\n",
+      "rules go below the END marker\n",
       // A truncation is not the marker.
-      "# repo-platform:local\n",
+      "# BEGIN REPO-PLATFORM\n",
     ]) {
       expect(errorsOf(managed("GUIDE.md"), source, false)).toEqual([]);
     }
@@ -401,308 +390,108 @@ describe("declarationTextErrors", () => {
     ).toEqual([]);
   });
 
-  test("a tail-marker split must END at its exact marker line", () => {
-    expect(errorsOf(tail("X.md", HTML_SENTINEL), `top\n${HTML_SENTINEL}\n`, false)).toEqual([]);
-    // Trailing blank lines below the marker are fine; content is not.
-    expect(errorsOf(tail("X.md", HTML_SENTINEL), `top\n${HTML_SENTINEL}\n\n`, false)).toEqual([]);
-    const missing = errorsOf(tail("X.md", HTML_SENTINEL), "top\nno marker\n", false);
+  test("a managed-region split needs both markers exactly once, in order", () => {
+    expect(errorsOf(split("X.md"), `${B}\nbody\n${E}\n`, false)).toEqual([]);
+    // Seed content outside the region is legal: it renders repo-owned.
+    expect(errorsOf(split("X.md"), `above\n${B}\nbody\n${E}\nbelow\n`, false)).toEqual([]);
+    const missing = errorsOf(split("X.md"), `${B}\nbody\n`, false);
     expect(missing).toHaveLength(1);
-    expect(missing[0]).toContain("marker line 0 times");
-    const midLine = errorsOf(tail("X.md", HTML_SENTINEL), `see ${HTML_SENTINEL} here\n`, false);
-    expect(midLine).toHaveLength(1);
-    const contentBelow = errorsOf(
-      tail("X.md", HTML_SENTINEL),
-      `top\n${HTML_SENTINEL}\nmanaged trailing line\n`,
-      false,
-    );
-    expect(contentBelow).toHaveLength(1);
-    expect(contentBelow[0]).toContain("does not END at");
-  });
-
-  test("a duplicated tail marker line is an error, not a pass", () => {
-    // Two marker lines split ambiguously: the rebuild splits at the first,
-    // the second would ride into repositories where the validator's
-    // exactly-once rule flags every render.
-    const doubled = errorsOf(
-      tail("X.md", HTML_SENTINEL),
-      `top\n${HTML_SENTINEL}\nmiddle\n${HTML_SENTINEL}\n`,
-      false,
-    );
+    expect(missing[0]).toContain(`'${E}' marker line`);
+    const doubled = errorsOf(split("X.md"), `${B}\n${B}\nbody\n${E}\n`, false);
     expect(doubled).toHaveLength(1);
-    expect(doubled[0]).toContain("marker line 2 times");
+    expect(doubled[0]).toContain("appears 2 times");
+    const reordered = errorsOf(split("X.md"), `${E}\nbody\n${B}\n`, false);
+    expect(reordered.join("\n")).toContain("out of order");
   });
 
-  test("a managed declaration over bounded-region marker text is an error", () => {
-    // The one guarantee the old BASE_SPLIT_FILES table gave: .gitignore
-    // declared managed would let sync overwrite every repo's LOCAL region.
-    const regionText = [
-      "# BEGIN REPOSITORY LOCAL",
-      "# END REPOSITORY LOCAL",
-      "# BEGIN REPO-PLATFORM MANAGED",
-      "# END REPO-PLATFORM MANAGED",
-      "",
-    ].join("\n");
-    const errors = errorsOf(managed(".gitignore"), regionText, false);
-    expect(errors).toHaveLength(1);
-    expect(errors[0]).toContain("bounded-region marker but is declared managed");
-    // A single marker's text is enough - the promise is already there.
-    const single = errorsOf(managed("X.md"), "# BEGIN REPOSITORY LOCAL\n", false);
-    expect(single).toHaveLength(1);
+  test("glued jinja on a marker line is tolerated (substring counting)", () => {
+    const glued = [B, "{% if g %}x{% endif %}{% if g %}", `{% endif %}${E}`, ""].join("\n");
+    expect(errorsOf(split("X.md"), glued, false)).toEqual([]);
   });
 
-  // The schema accepts ARBITRARY tail markers, so the shipped constants
-  // alone leave a custom declared marker invisible when it is copied into a
+  // The schema accepts ARBITRARY markers, so the shipped constants alone
+  // leave a custom declared marker invisible when it is copied into a
   // managed source.
-  test("a declared CUSTOM tail marker in a managed source is an error", () => {
-    const custom = "# acme:local-tail";
+  test("a declared CUSTOM marker in a managed source is an error", () => {
+    const custom = "# acme:managed-open";
     const errors = errorsOf(managed("X.md"), `top\n${custom}\nlocal\n`, false, [custom]);
     expect(errors).toHaveLength(1);
-    expect(errors[0]).toContain("split marker but is declared managed");
+    expect(errors[0]).toContain("declared managed");
     // Unknown markers stay invisible - only DECLARED ones are enforced.
     expect(errorsOf(managed("X.md"), `top\n${custom}\nlocal\n`, false)).toHaveLength(0);
-  });
-
-  test("a mid-line mention of a declared tail marker is presence, so it claims", () => {
-    const custom = "# acme:local-tail";
-    const mention = `see ${custom} for details\n`;
-    const errors = errorsOf(managed("X.md"), mention, false, [custom]);
-    expect(errors).toHaveLength(1);
-    expect(errors[0]).toContain("declared managed");
   });
 
   test("a foreign marker that is a substring of the own marker claims only outside it", () => {
     // Exemption is positional, so the own line's text never triggers a
     // claim for a foreign marker it contains, while a separate occurrence
     // of that foreign marker still does.
-    const own = "# acme:local-tail extended";
-    const foreignMarker = "# acme:local-tail";
-    const roster = [own, foreignMarker];
-    const ownOnly = `body\n${own}\n`;
-    expect(errorsOf(tail("X.md", own), ownOnly, false, roster)).toEqual([]);
-    const carrying = `body\n${foreignMarker}\nmore\n${own}\n`;
-    const errors = errorsOf(tail("X.md", own), carrying, false, roster);
+    const ownBegin = "# acme:begin extended";
+    const ownEnd = "# acme:end extended";
+    const foreignMarker = "# acme:begin";
+    const roster = [ownBegin, ownEnd, foreignMarker];
+    const ownOnly = `${ownBegin}\nbody\n${ownEnd}\n`;
+    expect(errorsOf(split("X.md", ownBegin, ownEnd), ownOnly, false, roster)).toEqual([]);
+    const carrying = `${foreignMarker}\n${ownBegin}\nbody\n${ownEnd}\n`;
+    const errors = errorsOf(split("X.md", ownBegin, ownEnd), carrying, false, roster);
     expect(errors).toHaveLength(1);
-    expect(errors[0]).toContain("tail marker as well as its own");
+    expect(errors[0]).toContain("not one of this declaration's own pair");
   });
 
-  test("a foreign marker overlapping the own marker's edge still claims", () => {
-    // The shared '#' belongs to both, but the foreign occurrence extends
-    // OUTSIDE the own marker's span, so it is not the own marker's text.
-    const own = "# acme:tail#";
-    const foreignMarker = "#x";
-    const source = `body\n${own}x\n${own}\n`;
-    const errors = errorsOf(tail("X.md", own), source, false, [own, foreignMarker]);
-    expect(errors).toHaveLength(1);
-    expect(errors[0]).toContain("tail marker as well as its own");
-  });
-
-  // The tail-marker arm must reject foreign region markers like every other
-  // arm: flipping .gitignore to tail-marker with a terminal marker would
-  // pass composition, and the rebuild would then treat the LOCAL region as
-  // managed and overwrite repository edits inside it.
-  test("a tail-marker declaration over bounded-region marker text is an error", () => {
+  test("a split declaration carrying ANOTHER declaration's markers is an error", () => {
     const source = [
-      "# BEGIN REPOSITORY LOCAL",
-      "local-cache/",
-      "# END REPOSITORY LOCAL",
-      "# BEGIN REPO-PLATFORM MANAGED",
+      "# NOTES MANAGED OPEN",
+      "# NOTES MANAGED CLOSE",
+      HB,
       "node_modules/",
-      "# END REPO-PLATFORM MANAGED",
-      HTML_SENTINEL,
+      HE,
       "",
     ].join("\n");
-    const errors = errorsOf(tail(".gitignore", HTML_SENTINEL), source, false);
+    const errors = errorsOf(hashSplit(".gitignore"), source, false);
     expect(errors).toHaveLength(1);
-    expect(errors[0]).toContain("bounded-region marker but is declared split (tail-marker)");
+    expect(errors[0]).toContain("not one of this declaration's own pair");
   });
 
-  test("a legitimate tail-marker source with no region markers passes", () => {
-    const source = ["# managed body", HTML_SENTINEL, ""].join("\n");
-    expect(errorsOf(tail("X.md", HTML_SENTINEL), source, false)).toEqual([]);
+  test("the legitimate .gitignore, carrying only its own pair, passes", () => {
+    const source = ["# local seed", "", HB, "node_modules/", HE, ""].join("\n");
+    expect(errorsOf(hashSplit(".gitignore"), source, false)).toEqual([]);
   });
 
-  // The last direction: a bounded declaration validated only its OWN four
-  // markers, so a source could smuggle a second split grammar past
-  // composition. Sync dispatches on the DECLARED grammar, so it rebuilds the
-  // file as this region and overwrites whatever the other grammar promised.
-  // The same-grammar mirror: this declaration's marker sits once at EOF, so
-  // the count and EOF checks both pass, but a FOREIGN declared tail marker
-  // earlier in the file means everything between them rebuilds as managed.
-  test("a tail declaration carrying ANOTHER declaration's tail marker is an error", () => {
-    const source = ["managed body", HASH_SENTINEL, "someone else's tail", HTML_SENTINEL, ""].join(
-      "\n",
-    );
-    const errors = errorsOf(tail("X.md", HTML_SENTINEL), source, false);
+  test("a starter declaration over region marker text is an error", () => {
+    const errors = errorsOf(starter(".gitignore"), `${HB}\n`, true);
     expect(errors).toHaveLength(1);
-    expect(errors[0]).toContain("tail marker as well as its own");
-  });
-
-  test("a tail declaration with only its own marker still passes", () => {
-    const source = ["managed body", HTML_SENTINEL, ""].join("\n");
-    expect(errorsOf(tail("X.md", HTML_SENTINEL), source, false)).toEqual([]);
-  });
-
-  test("a bounded declaration carrying a tail sentinel is an error", () => {
-    const source = [
-      "# BEGIN REPOSITORY LOCAL",
-      "# END REPOSITORY LOCAL",
-      "# BEGIN REPO-PLATFORM MANAGED",
-      "# END REPO-PLATFORM MANAGED",
-      HASH_SENTINEL,
-      "",
-    ].join("\n");
-    const errors = errorsOf(bounded(".gitignore"), source, false);
-    expect(errors).toHaveLength(1);
-    expect(errors[0]).toContain("tail-marker line but is declared split (bounded-region)");
-  });
-
-  test("a bounded declaration carrying ANOTHER declaration's region markers is an error", () => {
-    const source = [
-      "# BEGIN REPOSITORY LOCAL",
-      "# END REPOSITORY LOCAL",
-      "# BEGIN REPO-PLATFORM MANAGED",
-      "# END REPO-PLATFORM MANAGED",
-      "# BEGIN ACME LOCAL",
-      "# END ACME LOCAL",
-      "",
-    ].join("\n");
-    const errors = declarationTextErrors(
-      bounded(".gitignore"),
-      source,
-      false,
-      {
-        tail: [],
-        region: [...DECLARED_MARKERS.region, "# BEGIN ACME LOCAL", "# END ACME LOCAL"],
-      },
-      "templates/t/x.jinja",
-    );
-    expect(errors).toHaveLength(1);
-    expect(errors[0]).toContain("which is not one of this declaration's four");
-  });
-
-  test("the legitimate .gitignore, carrying only its own four, passes", () => {
-    const source = [
-      "# BEGIN REPOSITORY LOCAL",
-      "# END REPOSITORY LOCAL",
-      "# BEGIN REPO-PLATFORM MANAGED",
-      "node_modules/",
-      "# END REPO-PLATFORM MANAGED",
-      "",
-    ].join("\n");
-    expect(errorsOf(bounded(".gitignore"), source, false)).toEqual([]);
-  });
-
-  test("a starter declaration over bounded-region marker text is an error", () => {
-    const errors = errorsOf(starter(".gitignore"), "# BEGIN REPOSITORY LOCAL\n", true);
-    expect(errors).toHaveLength(1);
-    expect(errors[0]).toContain("bounded-region marker but is declared a starter");
+    expect(errors[0]).toContain("declared a starter");
   });
 
   test("ANOTHER declared grammar's markers contradict managed too - the set is derived, not canonical", () => {
-    const errors = errorsOf(managed("X.md"), "# NOTES LOCAL OPEN\n", false);
+    const errors = errorsOf(managed("X.md"), "# NOTES MANAGED OPEN\n", false);
     expect(errors).toHaveLength(1);
-    expect(errors[0]).toContain("bounded-region marker but is declared managed");
-  });
-
-  test("a duplicated bounded-region marker is an error", () => {
-    const doubled = [
-      "# BEGIN REPOSITORY LOCAL",
-      "# END REPOSITORY LOCAL",
-      "# BEGIN REPO-PLATFORM MANAGED",
-      "# END REPO-PLATFORM MANAGED",
-      "# END REPO-PLATFORM MANAGED",
-      "",
-    ].join("\n");
-    const errors = errorsOf(bounded(".gitignore"), doubled, false);
-    expect(errors.join("\n")).toContain("appears 2 times");
-  });
-
-  test("bounded-region markers out of grammar order are an error", () => {
-    const reordered = [
-      "# BEGIN REPO-PLATFORM MANAGED",
-      "# END REPO-PLATFORM MANAGED",
-      "# BEGIN REPOSITORY LOCAL",
-      "# END REPOSITORY LOCAL",
-      "",
-    ].join("\n");
-    const errors = errorsOf(bounded(".gitignore"), reordered, false);
-    expect(errors.length).toBeGreaterThan(0);
-    expect(errors.join("\n")).toContain("out of the bounded-region order");
+    expect(errors[0]).toContain("declared managed");
   });
 
   test("a split file may also open with the managed header", () => {
     expect(
       errorsOf(
-        tail("AGENTS.md", HTML_SENTINEL),
-        `<!-- This file is managed by {{ github_username }}/repo-platform. -->\n${HTML_SENTINEL}\n`,
+        split("AGENTS.md"),
+        `<!-- This file is managed by {{ github_username }}/repo-platform. -->\n${B}\nbody\n${E}\n`,
         false,
       ),
     ).toEqual([]);
   });
-
-  test("a bounded-region split needs all four markers, glued jinja tolerated", () => {
-    const glued = [
-      "# BEGIN REPOSITORY LOCAL",
-      "# END REPOSITORY LOCAL",
-      "# BEGIN REPO-PLATFORM MANAGED",
-      "{% if g %}x{% endif %}{% if g %}",
-      "{% endif %}# END REPO-PLATFORM MANAGED",
-      "",
-    ].join("\n");
-    expect(errorsOf(bounded(".gitignore"), glued, false)).toEqual([]);
-    const missing = errorsOf(
-      bounded(".gitignore"),
-      "# BEGIN REPOSITORY LOCAL\n# END REPOSITORY LOCAL\n# BEGIN REPO-PLATFORM MANAGED\n",
-      false,
-    );
-    expect(missing).toHaveLength(1);
-    expect(missing[0]).toContain("'# END REPO-PLATFORM MANAGED'");
-  });
-
-  // The foreign-marker rule is stated ONCE, before any arm runs, and every
-  // grammar reaches it through its GRAMMAR table row. A grammar cannot be
-  // added to the schema without a row (the Expect<Equal<...>> bridge in
-  // scripts/ownership.ts makes that a compile error), so the only way a
-  // rowless shape arrives here is past the type system - a cast, the way a
-  // half-finished new grammar once did - and that must THROW, never scan
-  // with an empty marker set: written per arm, every arm that was added
-  // arrived unarmed and needed its own fix round.
-  test("a grammar with no GRAMMAR row throws loudly instead of scanning unarmed", () => {
-    const novel = {
-      path: "X.md",
-      class: "split",
-      grammar: "ledger-block",
-      marker: "# LEDGER",
-    } as unknown as OwnershipDeclaration;
-
-    expect(() => errorsOf(novel, `body\n${HASH_SENTINEL}\n`, false)).toThrow(
-      "unknown split grammar 'ledger-block'",
-    );
-    expect(() => errorsOf(novel, `body\n${HASH_SENTINEL}\n`, false)).toThrow("GRAMMAR");
-  });
 });
 
-describe("rosterTexts", () => {
-  test("keys every declared grammar's markers by its GRAMMAR roster column", () => {
-    const texts = rosterTexts([
+describe("declaredMarkerTexts", () => {
+  test("collects every declared grammar's markers", () => {
+    const texts = declaredMarkerTexts([
       managed("Y.md"),
-      tail("X.md", "# acme:custom-tail"),
-      bounded(".gitignore"),
+      split("X.md", "# acme:open", "# acme:close"),
+      hashSplit(".gitignore"),
       starter("Z.md"),
     ]);
-    expect(texts.tail).toEqual(["# acme:custom-tail"]);
-    expect(new Set(texts.region)).toEqual(
-      new Set([
-        "# BEGIN REPO-PLATFORM MANAGED",
-        "# END REPO-PLATFORM MANAGED",
-        "# BEGIN REPOSITORY LOCAL",
-        "# END REPOSITORY LOCAL",
-      ]),
-    );
+    expect(new Set(texts)).toEqual(new Set(["# acme:open", "# acme:close", HB, HE]));
   });
 
-  test("no split declarations means empty rosters (the shipped constants keep the scan armed)", () => {
-    expect(rosterTexts([managed("Y.md")])).toEqual({ tail: [], region: [] });
+  test("no split declarations means an empty list (the shipped constants keep the scan armed)", () => {
+    expect(declaredMarkerTexts([managed("Y.md")])).toEqual([]);
   });
 });
 
@@ -755,7 +544,7 @@ describe("moduleOwnershipEntries", () => {
     const dir = writeTree({
       "bun/.github/workflows/managed.yml.jinja": `${HEADER}name: Managed\n`,
       "bun/.github/workflows/starter.yml.jinja": "name: S\n",
-      "bun/SPLIT.md.jinja": `body\n${HTML_SENTINEL}\n`,
+      "bun/SPLIT.md.jinja": `${B}\nbody\n${E}\n`,
       "bun/.bun-version": "1.3.14\n",
       "bun/LINK.md": { symlink: "SPLIT.md.jinja" },
       "bun/fragments/agents-toolchain.jinja": "- x\n",
@@ -768,7 +557,7 @@ describe("moduleOwnershipEntries", () => {
           managed(".github/workflows/managed.yml"),
           starter(".github/workflows/starter.yml"),
           headerless("LINK.md"),
-          tail("SPLIT.md", HTML_SENTINEL),
+          split("SPLIT.md"),
         ]),
       ];
       // The pin dotfile and the symlink have no comment channel, but they
@@ -779,7 +568,7 @@ describe("moduleOwnershipEntries", () => {
           { path: ".bun-version", kind: "class-only" },
           { path: ".github/workflows/managed.yml", kind: "header" },
           { path: "LINK.md", kind: "class-only" },
-          { path: "SPLIT.md", kind: "marker", marker: HTML_SENTINEL },
+          { path: "SPLIT.md", kind: "region", begin: B, end: E },
         ],
       });
     } finally {
@@ -908,20 +697,6 @@ describe("moduleOwnershipEntries", () => {
     }
   });
 
-  test("a module bounded-region declaration throws until the tables carry it", () => {
-    const dir = writeTree({
-      "bun/region.conf.jinja":
-        "# BEGIN REPOSITORY LOCAL\n# END REPOSITORY LOCAL\n# BEGIN REPO-PLATFORM MANAGED\n# END REPO-PLATFORM MANAGED\n",
-    });
-    try {
-      expect(() =>
-        moduleOwnershipEntries([moduleManifest([{ ...bounded("region.conf") }])], dir),
-      ).toThrow("bounded-region split");
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
-
   test("an empty table throws - the managed module workflows must enrol", () => {
     const dir = writeTree({ "bun/starter.yml.jinja": "name: S\n" });
     try {
@@ -937,27 +712,24 @@ describe("moduleOwnershipEntries", () => {
 describe("baseOwnershipTables", () => {
   const BASE_FILES: Record<string, string> = {
     "base/.yamllint.jinja": `${HEADER}rules: {}\n`,
-    "base/SECURITY.md.jinja": `top\n${HTML_SENTINEL}\n`,
+    "base/SECURITY.md.jinja": `${B}\ntop\n${E}\n`,
     "base/{% if not private %}CODE_OF_CONDUCT.md{% endif %}.jinja": `${HEADER}covenant\n`,
-    "base/{% if 'custom-license' not in modules %}LICENSE.md{% endif %}.jinja": `MIT\n${HTML_SENTINEL}\n`,
-    "base/.gitignore.jinja":
-      "# BEGIN REPOSITORY LOCAL\n# END REPOSITORY LOCAL\n# BEGIN REPO-PLATFORM MANAGED\n# END REPO-PLATFORM MANAGED\n",
+    "base/{% if 'custom-license' not in modules %}LICENSE.md{% endif %}.jinja": `${B}\nMIT\n${E}\n`,
+    "base/.gitignore.jinja": `# seed\n\n${HB}\nnode_modules/\n${HE}\n`,
     "base/.gitleaks.toml.jinja": "[allowlist]\n",
     "base/.pin": "1.0.0\n",
   };
   const BASE_DECLS = [
     "ownership:",
     "  - { path: .yamllint, class: managed }",
-    "  - { path: SECURITY.md, class: split, grammar: tail-marker, marker: '<-- never used -->' }",
+    `  - { path: SECURITY.md, class: split, grammar: managed-region, begin: "${B}", end: "${E}" }`,
     "  - { path: CODE_OF_CONDUCT.md, class: managed }",
-    "  - { path: LICENSE.md, class: split, grammar: tail-marker, marker: '<-- never used -->' }",
+    `  - { path: LICENSE.md, class: split, grammar: managed-region, begin: "${B}", end: "${E}" }`,
     "  - path: .gitignore",
     "    class: split",
-    "    grammar: bounded-region",
-    '    managed_begin: "# BEGIN REPO-PLATFORM MANAGED"',
-    '    managed_end: "# END REPO-PLATFORM MANAGED"',
-    '    local_begin: "# BEGIN REPOSITORY LOCAL"',
-    '    local_end: "# END REPOSITORY LOCAL"',
+    "    grammar: managed-region",
+    `    begin: "${HB}"`,
+    `    end: "${HE}"`,
     "  - { path: .pin, class: managed, headerless: true }",
     "  - { path: .gitleaks.toml, class: starter }",
     "",
@@ -969,42 +741,33 @@ describe("baseOwnershipTables", () => {
     return dir;
   };
 
-  test("derives the enforced entries with translated gates and the region splits", () => {
-    // The split markers must be the DECLARED ones; use the real sentinel.
-    const decls = BASE_DECLS.map((line) => line.replaceAll("<-- never used -->", HTML_SENTINEL));
-    const dir = withBase(decls, BASE_FILES);
+  test("derives the enforced entries with translated gates, region splits included", () => {
+    const dir = withBase(BASE_DECLS, BASE_FILES);
     try {
       const tables = baseOwnershipTables(dir);
       expect(tables.enforced).toEqual([
         { path: ".yamllint", kind: "header" },
-        { path: "SECURITY.md", kind: "marker", marker: HTML_SENTINEL },
+        { path: "SECURITY.md", kind: "region", begin: B, end: E },
         { path: "CODE_OF_CONDUCT.md", kind: "header", when: { publicOnly: true } },
         {
           path: "LICENSE.md",
-          kind: "marker",
-          marker: HTML_SENTINEL,
+          kind: "region",
+          begin: B,
+          end: E,
           when: { withoutModule: "custom-license" },
         },
+        { path: ".gitignore", kind: "region", begin: HB, end: HE },
         // Headerless managed files enter as class-only so the manifest
         // cross-check still covers them.
         { path: ".pin", kind: "class-only" },
       ]);
-      expect(tables.regionSplits).toEqual({
-        ".gitignore": {
-          managed_begin: "# BEGIN REPO-PLATFORM MANAGED",
-          managed_end: "# END REPO-PLATFORM MANAGED",
-          local_begin: "# BEGIN REPOSITORY LOCAL",
-          local_end: "# END REPOSITORY LOCAL",
-        },
-      });
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
   });
 
   test("an undeclared base file throws", () => {
-    const decls = BASE_DECLS.map((line) => line.replaceAll("<-- never used -->", HTML_SENTINEL));
-    const dir = withBase(decls, { ...BASE_FILES, "base/extra.md.jinja": "extra\n" });
+    const dir = withBase(BASE_DECLS, { ...BASE_FILES, "base/extra.md.jinja": "extra\n" });
     try {
       expect(() => baseOwnershipTables(dir)).toThrow("no ownership declaration");
     } finally {
@@ -1014,9 +777,7 @@ describe("baseOwnershipTables", () => {
 
   test("a declared path with no base file throws", () => {
     const decls = [
-      ...BASE_DECLS.slice(0, -1).map((line) =>
-        line.replaceAll("<-- never used -->", HTML_SENTINEL),
-      ),
+      ...BASE_DECLS.slice(0, -1),
       "  - { path: ghost.md, class: managed, headerless: true }",
       "",
     ];
@@ -1032,13 +793,7 @@ describe("baseOwnershipTables", () => {
     // The base derivation shares the declared header-mode rule: deleting
     // the header from a managed base template fails regeneration instead
     // of silently downgrading enforcement to class-only.
-    const decls = [
-      ...BASE_DECLS.slice(0, -1).map((line) =>
-        line.replaceAll("<-- never used -->", HTML_SENTINEL),
-      ),
-      "  - { path: bare.yml, class: managed }",
-      "",
-    ];
+    const decls = [...BASE_DECLS.slice(0, -1), "  - { path: bare.yml, class: managed }", ""];
     const dir = withBase(decls, { ...BASE_FILES, "base/bare.yml.jinja": "name: bare\n" });
     try {
       expect(() => baseOwnershipTables(dir)).toThrow("does not open with the managed header");
@@ -1048,11 +803,8 @@ describe("baseOwnershipTables", () => {
   });
 
   test("an enforced file behind an untranslatable gate throws; a starter is fine", () => {
-    const decls = [
-      ...BASE_DECLS.map((line) => line.replaceAll("<-- never used -->", HTML_SENTINEL)),
-    ];
     const gatedStarter = withBase(
-      [...decls.slice(0, -1), "  - { path: auto.yml, class: starter }", ""],
+      [...BASE_DECLS.slice(0, -1), "  - { path: auto.yml, class: starter }", ""],
       { ...BASE_FILES, "base/{% if has_toolchain %}auto.yml{% endif %}.jinja": "name: A\n" },
     );
     try {
@@ -1061,7 +813,7 @@ describe("baseOwnershipTables", () => {
       rmSync(gatedStarter, { recursive: true, force: true });
     }
     const gatedManaged = withBase(
-      [...decls.slice(0, -1), "  - { path: auto.yml, class: managed }", ""],
+      [...BASE_DECLS.slice(0, -1), "  - { path: auto.yml, class: managed }", ""],
       {
         ...BASE_FILES,
         "base/{% if has_toolchain %}auto.yml{% endif %}.jinja": `${HEADER}name: A\n`,
@@ -1071,6 +823,24 @@ describe("baseOwnershipTables", () => {
       expect(() => baseOwnershipTables(gatedManaged)).toThrow("no client-side translation");
     } finally {
       rmSync(gatedManaged, { recursive: true, force: true });
+    }
+  });
+
+  test("a base tree with no region split throws (the derived tables must stay armed)", () => {
+    const decls = [
+      "ownership:",
+      "  - { path: .yamllint, class: managed }",
+      "  - { path: .gitleaks.toml, class: starter }",
+      "",
+    ];
+    const dir = withBase(decls, {
+      "base/.yamllint.jinja": `${HEADER}rules: {}\n`,
+      "base/.gitleaks.toml.jinja": "[allowlist]\n",
+    });
+    try {
+      expect(() => baseOwnershipTables(dir)).toThrow("miss a whole enforcement kind");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
     }
   });
 });

@@ -68,7 +68,7 @@ copier copy gh:Vivswan/repo-platform . --vcs-ref build --defaults --overwrite --
   -d project_name=X -d description=Y -d 'modules=[uv]' -d private=false
 ```
 
-The template's `.gitignore` is generated and managed: after the copy, move any scaffolder-added entries the template does not already cover into its BEGIN/END REPOSITORY LOCAL section (check `git diff` of the overwrite).
+The template's `.gitignore` is generated and managed: after the copy, move any scaffolder-added entries the template does not already cover outside its BEGIN/END REPO-PLATFORM MANAGED region - above BEGIN, or below END (check `git diff` of the overwrite).
 
 ### 4. Answer the questions
 

@@ -59,28 +59,26 @@ describe("entryLine", () => {
     expect(
       entryLine("AGENTS.md", {
         class: "split",
-        grammar: "tail-marker",
-        marker: "<!-- repo-platform:local-section -->",
+        grammar: "managed-region",
+        begin: "<!-- BEGIN REPO-PLATFORM MANAGED -->",
+        end: "<!-- END REPO-PLATFORM MANAGED -->",
       }),
     ).toBe(
-      '    "AGENTS.md": {"class": "split", "grammar": "tail-marker", ' +
-        '"marker": "<!-- repo-platform:local-section -->", "managed": "above", "hash": null}',
+      '    "AGENTS.md": {"class": "split", "grammar": "managed-region", ' +
+        '"begin": "<!-- BEGIN REPO-PLATFORM MANAGED -->", ' +
+        '"end": "<!-- END REPO-PLATFORM MANAGED -->", "hash": null}',
     );
     expect(
       entryLine(".gitignore", {
         class: "split",
-        grammar: "bounded-region",
-        managed_begin: "# BEGIN REPO-PLATFORM MANAGED",
-        managed_end: "# END REPO-PLATFORM MANAGED",
-        local_begin: "# BEGIN REPOSITORY LOCAL",
-        local_end: "# END REPOSITORY LOCAL",
+        grammar: "managed-region",
+        begin: "# BEGIN REPO-PLATFORM MANAGED",
+        end: "# END REPO-PLATFORM MANAGED",
       }),
     ).toBe(
-      '    ".gitignore": {"class": "split", "grammar": "bounded-region", ' +
-        '"marker": "# BEGIN REPO-PLATFORM MANAGED", "managed": "below", ' +
-        '"managed_end": "# END REPO-PLATFORM MANAGED", ' +
-        '"local_begin": "# BEGIN REPOSITORY LOCAL", ' +
-        '"local_end": "# END REPOSITORY LOCAL", "hash": null}',
+      '    ".gitignore": {"class": "split", "grammar": "managed-region", ' +
+        '"begin": "# BEGIN REPO-PLATFORM MANAGED", ' +
+        '"end": "# END REPO-PLATFORM MANAGED", "hash": null}',
     );
   });
 
@@ -94,7 +92,7 @@ describe("entryLine", () => {
     const shapes: [string, OwnershipShape][] = [
       ["a.md", { class: "managed" }],
       ["b.md", { class: "starter" }],
-      ["c.md", { class: "split", grammar: "tail-marker", marker: "# m" }],
+      ["c.md", { class: "split", grammar: "managed-region", begin: "# b", end: "# e" }],
     ];
     for (const [path, ownership] of shapes) {
       expect(() => JSON.parse(`{${entryLine(path, ownership)}}`)).not.toThrow();
@@ -103,20 +101,17 @@ describe("entryLine", () => {
 
   test("every grammar's wire round-trips: splitEntries reads back what entryLine wrote", () => {
     // The runtime weld on the GRAMMAR row's wire columns: the emitter
-    // writes the wireMarker/wireExtras fields and the sync parse
+    // writes the wireFields and the sync parse
     // reconstructs the declaration from them, so a row whose columns and
     // parser disagree (a field emitted but not parsed, or parsed but
     // never emitted) fails HERE, not at fleet sync time. One case per
     // GrammarId, enforced by the Record type: a new grammar cannot land
     // without joining this round-trip.
     const declarations: { [K in GrammarId]: SplitShapes[K] } = {
-      "tail-marker": { grammar: "tail-marker", marker: "<!-- repo-platform:local-section -->" },
-      "bounded-region": {
-        grammar: "bounded-region",
-        managed_begin: "# BEGIN REPO-PLATFORM MANAGED",
-        managed_end: "# END REPO-PLATFORM MANAGED",
-        local_begin: "# BEGIN REPOSITORY LOCAL",
-        local_end: "# END REPOSITORY LOCAL",
+      "managed-region": {
+        grammar: "managed-region",
+        begin: "# BEGIN REPO-PLATFORM MANAGED",
+        end: "# END REPO-PLATFORM MANAGED",
       },
     };
     for (const declaration of Object.values(declarations)) {

@@ -13,37 +13,54 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import {
-  carryLocalRegion,
-  carryManagedTail,
+  carryManagedRegion,
   fencedResetExcerpt,
   splitEntries,
 } from "../../.github/scripts/sync/preserve_local_content.ts";
-import { GITIGNORE_REGION } from "../../scripts/gitignore_local.ts";
 import { boundedSpawnSync } from "../shared/bounded_spawn";
 
 const script = join(import.meta.dir, "../../.github/scripts/sync/preserve_local_content.ts");
 const repoRoot = join(import.meta.dir, "..", "..");
 
-const SENTINEL = "<!-- repo-platform:local-section -->";
-const HASH_SENTINEL = "# repo-platform:local-section";
-const LOCAL_BEGIN = "# BEGIN REPOSITORY LOCAL";
-const LOCAL_END = "# END REPOSITORY LOCAL";
-const MANAGED_BEGIN = "# BEGIN REPO-PLATFORM MANAGED";
-const MANAGED_END = "# END REPO-PLATFORM MANAGED";
-const ALL_GITIGNORE_MARKERS = [LOCAL_BEGIN, LOCAL_END, MANAGED_BEGIN, MANAGED_END];
+// The one marker vocabulary (actions/shared/grammar.ts).
+const B = "<!-- BEGIN REPO-PLATFORM MANAGED -->";
+const E = "<!-- END REPO-PLATFORM MANAGED -->";
+const HB = "# BEGIN REPO-PLATFORM MANAGED";
+const HE = "# END REPO-PLATFORM MANAGED";
+
+// The RETIRED grammars' spellings, for the transition fixtures: fleet
+// repos still carry these shapes until their first post-change sync.
+const OLD_SENTINEL = "<!-- repo-platform:local-section -->";
+const OLD_LOCAL_BEGIN = "# BEGIN REPOSITORY LOCAL";
+const OLD_LOCAL_END = "# END REPOSITORY LOCAL";
 
 const MANIFEST_REL = ".github/repo-platform-manifest.json";
 
 interface SplitSpec {
   path: string;
-  grammar: "tail-marker" | "bounded-region";
-  marker: string;
+  begin: string;
+  end: string;
 }
 
 /** A manifest carrying the given split entries, in the shape
- * compose_template.ts emits (grammar next to the legacy marker/managed
- * pair; bounded-region entries carry the region marker strings). */
+ * compose_template.ts emits (one grammar: managed-region, begin/end). */
 function manifestJson(entries: SplitSpec[]): string {
+  return JSON.stringify({
+    files: Object.fromEntries(
+      entries.map((e) => [
+        e.path,
+        { class: "split", grammar: "managed-region", begin: e.begin, end: e.end, hash: null },
+      ]),
+    ),
+  });
+}
+
+/** A manifest of the RETIRED vintages, exactly as the old compose emitted
+ * them (the legacy marker/managed wire pair) - what a fleet repo's HEAD
+ * still carries on the transition sync. */
+function legacyManifestJson(
+  entries: { path: string; grammar: "tail-marker" | "bounded-region"; marker: string }[],
+): string {
   return JSON.stringify({
     files: Object.fromEntries(
       entries.map((e) => [
@@ -55,9 +72,9 @@ function manifestJson(entries: SplitSpec[]): string {
               grammar: e.grammar,
               marker: e.marker,
               managed: "below",
-              managed_end: MANAGED_END,
-              local_begin: LOCAL_BEGIN,
-              local_end: LOCAL_END,
+              managed_end: HE,
+              local_begin: OLD_LOCAL_BEGIN,
+              local_end: OLD_LOCAL_END,
               hash: null,
             },
       ]),
@@ -65,392 +82,297 @@ function manifestJson(entries: SplitSpec[]): string {
   });
 }
 
-const agentsRender = `# AGENTS.md\n\nfresh managed guidance\n\n${SENTINEL}\n`;
-const agentsTarget = `# AGENTS.md\n\nold managed guidance\n\n${SENTINEL}\n\n## Project docs\n\nrepo-local instructions\n`;
+const AGENTS_MARKERS: SplitSpec = { path: "AGENTS.md", begin: B, end: E };
+const agentsRender = `${B}\n# AGENTS.md\n\nfresh managed guidance\n${E}\n`;
+const agentsTarget = `${B}\n# AGENTS.md\n\nold managed guidance\n${E}\n\n## Project docs\n\nrepo-local instructions\n`;
 
-const gitignoreManagedNew = `${MANAGED_BEGIN}\n*.new\n${MANAGED_END}\n`;
-const gitignoreRender = `${LOCAL_BEGIN}\n# Add repository-specific ignore patterns in this section only.\n\n${LOCAL_END}\n\n${gitignoreManagedNew}`;
-const gitignoreTarget = `${LOCAL_BEGIN}\n/repo-local-cache/\nsecret.env\n\n${LOCAL_END}\n\n${MANAGED_BEGIN}\n*.old\n${MANAGED_END}\n`;
+const gitignoreManagedNew = `${HB}\n*.new\n${HE}\n`;
+const gitignoreRender = `# local patterns go above the managed region\n\n${gitignoreManagedNew}`;
+const gitignoreTarget = `# local patterns go above the managed region\n/repo-local-cache/\nsecret.env\n\n${HB}\n*.old\n${HE}\n`;
 
-const contributingRender = `# Contributing\n\nfresh managed prefix\n\n${SENTINEL}\n`;
-const contributingTarget = `# Contributing\n\nold managed prefix\n\n${SENTINEL}\n\n## Local dev setup\n\nrun the local thing\n`;
+const contributingRender = `${B}\n# Contributing\n\nfresh managed prefix\n${E}\n`;
+const contributingTarget = `${B}\n# Contributing\n\nold managed prefix\n${E}\n\n## Local dev setup\n\nrun the local thing\n`;
 
-const editorconfigRender = `root = true\n\n[*]\ncharset = utf-8\n\n${HASH_SENTINEL}\n`;
-const editorconfigTarget = `root = true\n\n[*]\nend_of_line = lf\n\n${HASH_SENTINEL}\n\n[legacy/**.js]\nindent_size = 3\n`;
+const editorconfigRender = `${HB}\nroot = true\n\n[*]\ncharset = utf-8\n${HE}\n`;
+const editorconfigTarget = `${HB}\nroot = true\n\n[*]\nend_of_line = lf\n${HE}\n\n[legacy/**.js]\nindent_size = 3\n`;
 
-const codeownersRender = `* @vivswan\n\n${HASH_SENTINEL}\n`;
-const codeownersTarget = `* @oldname\n\n${HASH_SENTINEL}\n\n/security/ @security-team\n`;
+const codeownersRender = `${HB}\n* @vivswan\n${HE}\n`;
+const codeownersTarget = `${HB}\n* @oldname\n${HE}\n\n/security/ @security-team\n`;
 
-describe("carryManagedTail", () => {
-  test("unchanged managed content keeps the target whole", () => {
-    const target = `${contributingRender}\n## Local dev setup\n\nrepo tail\n`;
-    expect(carryManagedTail(contributingRender, target, SENTINEL)).toEqual({
-      kind: "kept-whole",
-      content: target,
-      extraMarkers: false,
-    });
+const asEntry = (spec: SplitSpec) =>
+  ({ path: spec.path, grammar: "managed-region", begin: spec.begin, end: spec.end }) as const;
+
+const headOf = (spec: SplitSpec) =>
+  ({ vintage: "managed-region", path: spec.path, begin: spec.begin, end: spec.end }) as const;
+
+describe("carryManagedRegion", () => {
+  test("unchanged managed region keeps the target byte-identical (both sides)", () => {
+    const target = `above notes\n${contributingRender}\n## Local dev setup\n\nrepo tail\n`;
+    const carry = carryManagedRegion(
+      contributingRender,
+      target,
+      asEntry({ path: "CONTRIBUTING.md", begin: B, end: E }),
+      headOf({ path: "CONTRIBUTING.md", begin: B, end: E }),
+    );
+    expect(carry).toEqual({ kind: "sides-restored", content: target });
   });
 
-  test("diverged managed content re-appends the target's tail", () => {
-    expect(carryManagedTail(contributingRender, contributingTarget, SENTINEL)).toEqual({
+  test("diverged managed region restores the target's sides around the fresh render", () => {
+    const carry = carryManagedRegion(
+      contributingRender,
+      contributingTarget,
+      asEntry({ path: "CONTRIBUTING.md", begin: B, end: E }),
+      undefined,
+    );
+    expect(carry).toEqual({
+      kind: "sides-restored",
       content: `${contributingRender}\n## Local dev setup\n\nrun the local thing\n`,
-      kind: "tail-appended",
-      extraMarkers: false,
-      managedHalfDiffers: true,
     });
   });
 
-  test("never-customized target (empty tail below its marker) keeps the render", () => {
-    expect(carryManagedTail(agentsRender, `old stuff\n${SENTINEL}\n`, SENTINEL)).toBeNull();
-  });
-
-  test("a whitespace-only tail is carried, not silently dropped", () => {
-    // The tail is byte-owned by the repository: even blanks below the
-    // marker ride through rather than vanish without a disposition.
-    expect(carryManagedTail(agentsRender, `old stuff\n${SENTINEL}\n\n`, SENTINEL)).toEqual({
-      content: `${agentsRender}\n`,
-      kind: "tail-appended",
-      extraMarkers: false,
-      managedHalfDiffers: true,
+  test("content ABOVE the region round-trips (the both-sides capability)", () => {
+    const target = `repo-owned preamble\n\n${B}\nold managed\n${E}\nrepo tail\n`;
+    const render = `${B}\nnew managed\n${E}\n`;
+    const carry = carryManagedRegion(render, target, asEntry(AGENTS_MARKERS), undefined);
+    expect(carry).toEqual({
+      kind: "sides-restored",
+      content: `repo-owned preamble\n\n${B}\nnew managed\n${E}\nrepo tail\n`,
     });
   });
 
   test("identical target keeps the render", () => {
-    expect(carryManagedTail(contributingRender, contributingRender, SENTINEL)).toBeNull();
+    expect(
+      carryManagedRegion(
+        contributingRender,
+        contributingRender,
+        asEntry({ path: "CONTRIBUTING.md", begin: B, end: E }),
+        undefined,
+      ),
+    ).toBeNull();
   });
 
-  test("legacy target WITHOUT the marker is kept whole below a marked appendix", () => {
-    // The marker is newer than many fleet repos' last successful sync;
-    // a legacy copy with real guidance below a plain heading must not
-    // lose it silently.
-    const target = "# AGENTS.md\n\nold managed guidance\n\n## Project docs\n\nrepo-local notes\n";
-    const carry = carryManagedTail(agentsRender, target, SENTINEL);
+  test("a target with empty sides delivers exactly the render", () => {
+    const target = `${B}\nold managed\n${E}\n`;
+    expect(carryManagedRegion(agentsRender, target, asEntry(AGENTS_MARKERS), undefined)).toBeNull();
+  });
+
+  test("a whitespace-only side is carried, not silently dropped", () => {
+    // The sides are byte-owned by the repository: even blanks outside the
+    // region ride through rather than vanish without a disposition.
+    const target = `${B}\nold managed\n${E}\n\n`;
+    expect(carryManagedRegion(agentsRender, target, asEntry(AGENTS_MARKERS), undefined)).toEqual({
+      kind: "sides-restored",
+      content: `${agentsRender}\n`,
+    });
+  });
+
+  test("the tail-marker transition: the repo tail lands below END, byte-identical", () => {
+    const oldShape = `# AGENTS.md\n\nold managed guidance\n\n${OLD_SENTINEL}\n\n## Project docs\n\nrepo-local instructions\n`;
+    const carry = carryManagedRegion(agentsRender, oldShape, asEntry(AGENTS_MARKERS), {
+      vintage: "tail-marker",
+      path: "AGENTS.md",
+      marker: OLD_SENTINEL,
+    });
+    expect(carry).toEqual({
+      kind: "converted",
+      content: `${agentsRender}\n## Project docs\n\nrepo-local instructions\n`,
+      from: "tail-marker",
+      extraMarkers: false,
+    });
+  });
+
+  test("the tail-marker transition with an EMPTY tail keeps the render", () => {
+    const oldShape = `# AGENTS.md\n\nold managed guidance\n\n${OLD_SENTINEL}\n`;
+    expect(
+      carryManagedRegion(agentsRender, oldShape, asEntry(AGENTS_MARKERS), {
+        vintage: "tail-marker",
+        path: "AGENTS.md",
+        marker: OLD_SENTINEL,
+      }),
+    ).toBeNull();
+  });
+
+  test("the old bounded-region transition: everything above the BEGIN line rides through", () => {
+    const oldShape = `${OLD_LOCAL_BEGIN}\n/repo-local-cache/\n${OLD_LOCAL_END}\n\n${HB}\n*.old\n${HE}\n`;
+    const carry = carryManagedRegion(
+      gitignoreRender,
+      oldShape,
+      asEntry({ path: ".gitignore", begin: HB, end: HE }),
+      { vintage: "bounded-region", path: ".gitignore", managed_begin: HB },
+    );
+    expect(carry).toEqual({
+      kind: "converted",
+      content: `${OLD_LOCAL_BEGIN}\n/repo-local-cache/\n${OLD_LOCAL_END}\n\n${gitignoreManagedNew}`,
+      from: "bounded-region",
+      extraMarkers: false,
+    });
+  });
+
+  test("an old bounded-region copy passes through byte-identical when the managed content is unchanged", () => {
+    // The conversion's no-op case: the target's managed half (BEGIN line to
+    // EOF) already equals the render's region, so only the manifest shape
+    // changes and the FILE does not.
+    const above = `${OLD_LOCAL_BEGIN}\n/repo-local-cache/\n${OLD_LOCAL_END}\n\n`;
+    const target = `${above}${gitignoreManagedNew}`;
+    const carry = carryManagedRegion(
+      gitignoreRender,
+      target,
+      asEntry({ path: ".gitignore", begin: HB, end: HE }),
+      { vintage: "bounded-region", path: ".gitignore", managed_begin: HB },
+    );
+    expect(carry?.kind).toBe("converted");
+    expect(carry?.content).toBe(target);
+  });
+
+  test("duplicate tail markers in the previous copy: split at the FIRST, flag the extras", () => {
+    const oldShape = `${OLD_SENTINEL}\nbetween the markers\n${OLD_SENTINEL}\nafter the last\n`;
+    const carry = carryManagedRegion(agentsRender, oldShape, asEntry(AGENTS_MARKERS), {
+      vintage: "tail-marker",
+      path: "AGENTS.md",
+      marker: OLD_SENTINEL,
+    });
+    expect(carry).toEqual({
+      kind: "converted",
+      content: `${agentsRender}between the markers\n${OLD_SENTINEL}\nafter the last\n`,
+      from: "tail-marker",
+      extraMarkers: true,
+    });
+  });
+
+  test("a HEAD declaration whose legacy shape is gone falls back to the new markers", () => {
+    // The previous copy was already converted out-of-band: the legacy
+    // declaration does not match, but the copy splits honestly at the new
+    // markers - no appendix needed.
+    const carry = carryManagedRegion(agentsRender, agentsTarget, asEntry(AGENTS_MARKERS), {
+      vintage: "tail-marker",
+      path: "AGENTS.md",
+      marker: OLD_SENTINEL,
+    });
+    expect(carry).toEqual({
+      kind: "sides-restored",
+      content: `${agentsRender}\n## Project docs\n\nrepo-local instructions\n`,
+    });
+  });
+
+  test("an unsplittable previous copy is kept whole below a marked appendix", () => {
+    const legacy = "# AGENTS.md\n\nold managed guidance\n\n## Project docs\n\nrepo-local notes\n";
+    const carry = carryManagedRegion(agentsRender, legacy, asEntry(AGENTS_MARKERS), undefined);
     expect(carry?.kind).toBe("appendix");
     expect(carry?.content).toStartWith(agentsRender);
     expect(carry?.content).toContain("repo-platform:recovery-appendix");
-    expect(carry?.content).toEndWith(target);
+    expect(carry?.content).toEndWith(legacy);
   });
 
-  test("render not ending at the marker is never used as a split anchor", () => {
-    const render = `docs\n${SENTINEL}\ntrailing managed line\n`;
-    const carry = carryManagedTail(render, `docs\n${SENTINEL}\nrepo tail\n`, SENTINEL);
+  test("a blank previous copy has nothing to preserve and keeps the render", () => {
+    expect(carryManagedRegion(agentsRender, "\n\n", asEntry(AGENTS_MARKERS), undefined)).toBeNull();
+  });
+
+  test("a render without a clean region throws (manifest and render disagree)", () => {
+    expect(() =>
+      carryManagedRegion("no markers here\n", agentsTarget, asEntry(AGENTS_MARKERS), undefined),
+    ).toThrow("manifest and render disagree");
+  });
+
+  test("duplicated NEW markers in the previous copy take the appendix, never a guess", () => {
+    // A second BEGIN line would make any slice a guess about which region
+    // is the managed one; exactly-once or appendix.
+    const target = `${B}\nfirst\n${E}\n${B}\nsecond\n${E}\n`;
+    const carry = carryManagedRegion(agentsRender, target, asEntry(AGENTS_MARKERS), undefined);
     expect(carry?.kind).toBe("appendix");
   });
 
-  test("only the DECLARED marker anchors the split (another spelling does not)", () => {
-    // The target carries the hash spelling; the entry declares the HTML
-    // one. Nothing anchors, so the loud appendix carries the whole copy.
-    const carry = carryManagedTail(agentsRender, `old\n${HASH_SENTINEL}\nrepo tail\n`, SENTINEL);
+  test("marker text buried mid-line counts as a duplicate (substring semantics)", () => {
+    const target = `mention: ${B}\n${B}\nold\n${E}\nrepo tail\n`;
+    const carry = carryManagedRegion(agentsRender, target, asEntry(AGENTS_MARKERS), undefined);
     expect(carry?.kind).toBe("appendix");
   });
 
-  test("duplicate markers in the target: split at the FIRST, flag the extras", () => {
-    const target = `${SENTINEL}\nbetween the markers\n${SENTINEL}\nafter the last\n`;
-    expect(carryManagedTail(agentsRender, target, SENTINEL)).toEqual({
-      content: `${agentsRender}between the markers\n${SENTINEL}\nafter the last\n`,
-      kind: "tail-appended",
-      extraMarkers: true,
-      managedHalfDiffers: true,
-    });
+  test("an appendix neutralizes every occurrence of the entry's markers", () => {
+    const target = `${B}\nold managed\nmention: ${E} mid-line\n`;
+    const carry = carryManagedRegion(agentsRender, target, asEntry(AGENTS_MARKERS), undefined);
+    expect(carry?.kind).toBe("appendix");
+    // The delivered file must keep exactly ONE occurrence of each marker
+    // (the render's), or the validator's exactly-once rule rejects the
+    // recovery output with advice pointing away from the real cause.
+    expect(carry?.content.split(B).length).toBe(2);
+    expect(carry?.content.split(E).length).toBe(2);
+    expect(carry?.content).toContain("<!---BEGIN-REPO-PLATFORM-MANAGED--->");
   });
 
-  test("hash-comment marker works (.gitattributes spelling)", () => {
-    const render = `*.png binary\n${HASH_SENTINEL}\n`;
-    const target = `*.jpg binary\n${HASH_SENTINEL}\n*.dat binary\n`;
-    expect(carryManagedTail(render, target, HASH_SENTINEL)).toEqual({
-      content: `${render}*.dat binary\n`,
-      kind: "tail-appended",
-      extraMarkers: false,
-      managedHalfDiffers: true,
-    });
-  });
-
-  test("appendix in a hash-marker file uses hash comments, not an HTML comment", () => {
-    const render = `*.png binary\n${HASH_SENTINEL}\n`;
-    const carry = carryManagedTail(render, "legacy attributes, no marker\n", HASH_SENTINEL);
+  test("hash-marker appendixes use hash comments, not an HTML comment", () => {
+    const carry = carryManagedRegion(
+      gitignoreRender,
+      "legacy patterns, no markers\n",
+      asEntry({ path: ".gitignore", begin: HB, end: HE }),
+      undefined,
+    );
     expect(carry?.kind).toBe("appendix");
     expect(carry?.content).toContain("# repo-platform:recovery-appendix");
     expect(carry?.content).not.toContain("<!--");
   });
 
-  test("render without a trailing newline still joins cleanly", () => {
-    const render = `docs\n${SENTINEL}`;
-    expect(carryManagedTail(render, `old\n${SENTINEL}\nrepo tail\n`, SENTINEL)).toEqual({
-      content: `docs\n${SENTINEL}\nrepo tail\n`,
-      kind: "tail-appended",
-      extraMarkers: false,
-      managedHalfDiffers: true,
-    });
-  });
-
-  test("target marker as the very last line (no trailing newline) means no tail", () => {
-    expect(carryManagedTail(agentsRender, `old stuff\n${SENTINEL}`, SENTINEL)).toBeNull();
-  });
-
-  test("kept-whole still flags duplicate markers in the tail", () => {
-    const target = `${agentsRender}\nrepo tail\n${SENTINEL}\nstale duplicate\n`;
-    expect(carryManagedTail(agentsRender, target, SENTINEL)).toEqual({
-      kind: "kept-whole",
-      content: target,
-      extraMarkers: true,
-    });
-  });
-
-  test("a second recovery over an appendix result keeps it whole (same template)", () => {
-    const legacy = "old copy without a marker\nrepo-local notes\n";
-    const first = carryManagedTail(agentsRender, legacy, SENTINEL);
-    expect(first?.kind).toBe("appendix");
-    expect(carryManagedTail(agentsRender, first?.content ?? "", SENTINEL)?.kind).toBe("kept-whole");
-  });
-
-  test("a second recovery after the template moved keeps a single appendix", () => {
-    const legacy = "old copy without a marker\nrepo-local notes\n";
-    const first = carryManagedTail(agentsRender, legacy, SENTINEL);
-    const newerRender = `# AGENTS.md\n\nnewer managed guidance\n\n${SENTINEL}\n`;
-    const second = carryManagedTail(newerRender, first?.content ?? "", SENTINEL);
-    expect(second?.kind).toBe("tail-appended");
-    expect(second?.content.split("repo-platform:recovery-appendix").length).toBe(2);
-    expect(second?.content).toStartWith(newerRender);
-    expect(second?.content).toEndWith(legacy);
-  });
-
-  test("a marker line with a stray trailing space still anchors the split", () => {
-    // The shared isMarkerLine predicate (stamp_manifest.ts) trims: the
-    // stamper and the validator already counted this line as the marker,
-    // and the old exact-match split sent the file down the appendix path -
-    // delivering a two-marker tree the validator rejected.
-    const target = `# AGENTS.md\n\nold managed guidance\n\n${SENTINEL} \n\nrepo tail\n`;
-    const carry = carryManagedTail(agentsRender, target, SENTINEL);
-    expect(carry?.kind).toBe("tail-appended");
-    expect(carry?.content).toBe(`${agentsRender}\nrepo tail\n`);
-  });
-
-  test("an indented marker line anchors the split too (trim semantics)", () => {
-    const target = `old\n  ${SENTINEL}\nrepo tail\n`;
-    const carry = carryManagedTail(agentsRender, target, SENTINEL);
-    expect(carry?.kind).toBe("tail-appended");
-    expect(carry?.content).toBe(`${agentsRender}repo tail\n`);
-  });
-
-  test("an appendix carry neutralizes the previous copy's marker lines", () => {
-    // Render not ending at the marker: the whole previous copy - marker
-    // line included - lands below the appendix comment. Verbatim, the
-    // delivered file would carry TWO marker lines and fail the
-    // validator's exactly-once rule with advice pointing away from the
-    // real cause; the neutralized line stays for the human, inert.
-    const render = `docs\n${SENTINEL}\ntrailing managed line\n`;
-    const target = `docs\n${SENTINEL}\nrepo tail\n`;
-    const carry = carryManagedTail(render, target, SENTINEL);
-    expect(carry?.kind).toBe("appendix");
-    const markerLines = (carry?.content ?? "")
-      .split("\n")
-      .filter((line) => line.trim() === SENTINEL);
-    expect(markerLines).toHaveLength(1);
-    // The neutralized spelling and the tail content both survive.
-    expect(carry?.content).toContain("<!---repo-platform:local-section--->");
-    expect(carry?.content).toContain("repo tail");
-  });
-
-  test("hash-marker appendixes neutralize to a still-commented line", () => {
-    const render = `top\n${HASH_SENTINEL}\ntrailing\n`;
-    const target = `top\n${HASH_SENTINEL}\nlocal attr\n`;
-    const carry = carryManagedTail(render, target, HASH_SENTINEL);
-    expect(carry?.kind).toBe("appendix");
-    const markerLines = (carry?.content ?? "")
-      .split("\n")
-      .filter((line) => line.trim() === HASH_SENTINEL);
-    expect(markerLines).toHaveLength(1);
-    expect(carry?.content).toContain("#-repo-platform:local-section");
-  });
-
-  test("a space-free HTML marker neutralizes to a still-valid HTML comment", () => {
-    const marker = "<!--local-->";
-    const render = `docs\n${marker}\ntrailing managed line\n`;
-    const carry = carryManagedTail(render, `docs\n${marker}\nrepo tail\n`, marker);
-    expect(carry?.kind).toBe("appendix");
-    expect(carry?.content).toContain("<!---local-->");
-    const markerLines = (carry?.content ?? "").split("\n").filter((l) => l.trim() === marker);
-    expect(markerLines).toHaveLength(1);
-  });
-
-  test("a marker line only the UTF-8 view trims clean is neutralized too", () => {
-    // The carry reads latin1, the validator decodes UTF-8: a UTF-8 NBSP
-    // (0xC2 0xA0) beside the marker trims clean only under UTF-8, so a
-    // verbatim append would deliver a tree the validator counts two
-    // markers in while this module counted one.
-    const utf8Nbsp = String.fromCharCode(0xc2, 0xa0); // the NBSP's UTF-8 bytes as latin1 code units
-    const render = `docs\n${SENTINEL}\ntrailing managed line\n`;
-    const target = `docs\n${utf8Nbsp}${SENTINEL}\nrepo tail\n`;
-    const carry = carryManagedTail(render, target, SENTINEL);
-    expect(carry?.kind).toBe("appendix");
-    const utf8View = Buffer.from(carry?.content ?? "", "latin1").toString("utf-8");
-    const markerLines = utf8View.split("\n").filter((line) => line.trim() === SENTINEL);
-    expect(markerLines).toHaveLength(1);
-  });
-
-  test("CRLF marker lines are recognized and the tail keeps its bytes", () => {
-    const render = `docs\r\n${SENTINEL}\r\n`;
-    const target = `old\r\n${SENTINEL}\r\nrepo tail\r\n`;
-    expect(carryManagedTail(render, target, SENTINEL)).toEqual({
-      content: `${render}repo tail\r\n`,
-      kind: "tail-appended",
-      extraMarkers: false,
-      managedHalfDiffers: true,
-    });
-  });
-
-  test("a pristine managed half above the marker is not flagged", () => {
-    // Blank lines below the render's marker keep the target from being a
-    // plain prefix match, but the halves above the marker are identical.
-    const render = `docs\n${SENTINEL}\n\n`;
-    expect(carryManagedTail(render, `docs\n${SENTINEL}\nrepo tail\n`, SENTINEL)).toEqual({
-      content: `${render}repo tail\n`,
-      kind: "tail-appended",
-      extraMarkers: false,
-      managedHalfDiffers: false,
-    });
-  });
-});
-
-describe("carryLocalRegion", () => {
-  test("carries the target's local region body into the fresh render", () => {
-    expect(carryLocalRegion(gitignoreRender, gitignoreTarget, GITIGNORE_REGION)).toEqual({
-      content: `${LOCAL_BEGIN}\n/repo-local-cache/\nsecret.env\n\n${LOCAL_END}\n\n${gitignoreManagedNew}`,
-      disposition: "spliced",
-    });
-  });
-
-  test("an emptied local body carries too (the repo removed the placeholder)", () => {
-    const target = `${LOCAL_BEGIN}\n${LOCAL_END}\n`;
-    expect(carryLocalRegion(gitignoreRender, target, GITIGNORE_REGION)).toEqual({
-      content: `${LOCAL_BEGIN}\n${LOCAL_END}\n\n${gitignoreManagedNew}`,
-      disposition: "spliced",
-    });
-  });
-
-  test("identical bodies keep the render", () => {
-    expect(carryLocalRegion(gitignoreRender, gitignoreRender, GITIGNORE_REGION)).toBeNull();
-  });
-
-  test("render without the markers keeps the render", () => {
-    expect(carryLocalRegion("*.new\n", gitignoreTarget, GITIGNORE_REGION)).toBeNull();
-  });
-
-  test("a blank previous copy has nothing to preserve and keeps the render", () => {
-    expect(carryLocalRegion(gitignoreRender, "\n\n", GITIGNORE_REGION)).toBeNull();
-  });
-
   test("a second recovery over an appendix result is stable (single appendix)", () => {
-    const first = carryLocalRegion(
-      gitignoreRender,
-      "/repo-local-cache/\n*.old\n",
-      GITIGNORE_REGION,
+    const legacy = "old copy without markers\nrepo-local notes\n";
+    const first = carryManagedRegion(agentsRender, legacy, asEntry(AGENTS_MARKERS), undefined);
+    expect(first?.kind).toBe("appendix");
+    const second = carryManagedRegion(
+      agentsRender,
+      first?.content ?? "",
+      asEntry(AGENTS_MARKERS),
+      undefined,
     );
-    expect(first?.disposition).toBe("appendix");
-    const second = carryLocalRegion(gitignoreRender, first?.content ?? "", GITIGNORE_REGION);
-    expect(second?.disposition).toBe("spliced");
+    expect(second?.kind).toBe("sides-restored");
     expect(second?.content).toBe(first?.content ?? "");
     expect(second?.content.split("repo-platform:recovery-appendix").length).toBe(2);
   });
 
-  test("a different declared marker set slices the same way (grammar as data)", () => {
-    // A future bounded-region file with its own marker lines: the carry
-    // takes the grammar from the entry, so nothing degrades to appendix.
-    const markers = {
-      local_begin: "// BEGIN LOCAL",
-      local_end: "// END LOCAL",
-      managed_begin: "// BEGIN MANAGED",
-      managed_end: "// END MANAGED",
-    };
-    const render = `// BEGIN LOCAL\n// default\n// END LOCAL\n// BEGIN MANAGED\nnew\n// END MANAGED\n`;
-    const target = `// BEGIN LOCAL\nlocal-entry\n// END LOCAL\n// BEGIN MANAGED\nold\n// END MANAGED\n`;
-    expect(carryLocalRegion(render, target, markers)).toEqual({
-      content: `// BEGIN LOCAL\nlocal-entry\n// END LOCAL\n// BEGIN MANAGED\nnew\n// END MANAGED\n`,
-      disposition: "spliced",
-    });
-  });
-
-  // No shape of previous copy may lose local entries silently: every
-  // mangled-marker form lands inside the fresh local region below the
-  // appendix comment, commented out, with marker text neutralized so the
-  // validator's exactly-once rule holds for ALL FOUR markers.
-  const oldManaged = `${MANAGED_BEGIN}\n*.old\n${MANAGED_END}\n`;
-  const mangledShapes: Record<string, string> = {
-    "markers absent (target differs from the render)": `/repo-local-cache/\n${oldManaged}`,
-    "duplicate BEGIN": `${LOCAL_BEGIN}\n/repo-local-cache/\n${LOCAL_BEGIN}\n${LOCAL_END}\n${oldManaged}`,
-    "missing END": `${LOCAL_BEGIN}\n/repo-local-cache/\n${oldManaged}`,
-    "reversed markers": `${LOCAL_END}\n/repo-local-cache/\n${LOCAL_BEGIN}\n${oldManaged}`,
-    // The validator counts SUBSTRINGS: a second BEGIN with trailing
-    // whitespace is not an exact marker line, but classifying this clean
-    // would silently discard the content between the two BEGINs.
-    "duplicate BEGIN with trailing whitespace": `${LOCAL_BEGIN} \n/repo-local-cache/\n${LOCAL_BEGIN}\n${LOCAL_END}\n${oldManaged}`,
-  };
-  for (const [shape, target] of Object.entries(mangledShapes)) {
-    test(`${shape} preserves the previous copy in the local region`, () => {
-      const carry = carryLocalRegion(gitignoreRender, target, GITIGNORE_REGION);
-      expect(carry?.disposition).toBe("appendix");
-      expect(carry?.content).toContain("# repo-platform:recovery-appendix");
-      // Carried entries are inert: commented out, never silently active.
-      expect(carry?.content).toContain("# /repo-local-cache/");
-      // The appendix sits INSIDE the region: content still ends with the
-      // render's END marker and managed section.
-      expect(carry?.content).toEndWith(`${LOCAL_END}\n\n${gitignoreManagedNew}`);
-      // validate_generated_files' exactly-once rule (substring-counted)
-      // must hold for all four markers on the result.
-      for (const marker of ALL_GITIGNORE_MARKERS) {
-        expect(carry?.content.split(marker).length).toBe(2);
-      }
-    });
-  }
-
-  test("marker text buried mid-line in the previous copy is neutralized", () => {
-    const target = `dir/${LOCAL_BEGIN}\n/repo-local-cache/\n`;
-    const carry = carryLocalRegion(gitignoreRender, target, GITIGNORE_REGION);
-    expect(carry?.disposition).toBe("appendix");
-    expect(carry?.content).toContain("# dir/BEGIN-REPOSITORY-LOCAL");
-    for (const marker of ALL_GITIGNORE_MARKERS) {
-      expect(carry?.content.split(marker).length).toBe(2);
-    }
-  });
-
-  test("marker text inside a clean-looking local body still takes the appendix", () => {
-    // Splicing a body that carries MANAGED marker text would duplicate it
-    // next to the render's own managed section and fail validation.
-    const target = `${LOCAL_BEGIN}\npath/${MANAGED_BEGIN}\n${LOCAL_END}\n`;
-    const carry = carryLocalRegion(gitignoreRender, target, GITIGNORE_REGION);
-    expect(carry?.disposition).toBe("appendix");
-    for (const marker of ALL_GITIGNORE_MARKERS) {
-      expect(carry?.content.split(marker).length).toBe(2);
-    }
-  });
-
-  test("a space-free marker is still neutralized in the appendix", () => {
-    const markers = {
-      local_begin: "#LOCAL-BEGIN",
-      local_end: "#LOCAL-END",
-      managed_begin: "#MANAGED-BEGIN",
-      managed_end: "#MANAGED-END",
-    };
-    const render = "#LOCAL-BEGIN\n# default\n#LOCAL-END\nmanaged\n";
-    const carry = carryLocalRegion(render, "#LOCAL-BEGIN\n/entry/\n", markers);
-    expect(carry?.disposition).toBe("appendix");
-    expect(carry?.content.split("#LOCAL-BEGIN").length).toBe(2);
-  });
-
   test("markers whose neutralized forms collide fail loudly, never invalidly", () => {
-    // "# X Y" neutralizes to "X-Y", which the line-commenting then turns
-    // into "# X-Y" - recreating the OTHER marker. The postcondition must
-    // refuse to deliver a file the validator's exactly-once rule rejects.
-    const markers = {
-      local_begin: "# X-Y",
-      local_end: "# X Y",
-      managed_begin: "# M-BEGIN",
-      managed_end: "# M-END",
-    };
-    const render = "# X-Y\n# default\n# X Y\nmanaged\n";
-    expect(() => carryLocalRegion(render, "# X Y\n/entry/\n", markers)).toThrow(
-      "collide under neutralization",
-    );
+    // "# A-B" dash-joins to "#-A-B" - recreating the BEGIN marker after
+    // BEGIN was already neutralized: the postcondition must refuse to
+    // deliver a file the validator's exactly-once rule rejects. The
+    // declaration schema forbids such pairs; this is the backstop for
+    // hostile manifest text.
+    const entry = { path: "x", grammar: "managed-region", begin: "#-A-B", end: "# A-B" } as const;
+    const render = "#-A-B\nmanaged\n# A-B\n";
+    expect(() =>
+      carryManagedRegion(render, "no clean split, has # A-B text\n", entry, undefined),
+    ).toThrow("collide under neutralization");
+  });
+
+  test("a marker line with a stray trailing space still anchors the split", () => {
+    // isMarkerLine trims; the stamper and the validator already counted
+    // this line as the marker line... but the SUBSTRING exactly-once rule
+    // still holds, so the region slices cleanly.
+    const target = `${B} \nold managed\n${E}\nrepo tail\n`;
+    const carry = carryManagedRegion(agentsRender, target, asEntry(AGENTS_MARKERS), undefined);
+    expect(carry).toEqual({ kind: "sides-restored", content: `${agentsRender}repo tail\n` });
+  });
+
+  test("an indented marker line anchors too (trim semantics)", () => {
+    const target = `above\n  ${B}\nold\n${E}\nrepo tail\n`;
+    const carry = carryManagedRegion(agentsRender, target, asEntry(AGENTS_MARKERS), undefined);
+    expect(carry).toEqual({
+      kind: "sides-restored",
+      content: `above\n${agentsRender}repo tail\n`,
+    });
+  });
+
+  test("CRLF marker lines are recognized and the sides keep their bytes", () => {
+    const render = `${B}\r\ndocs\r\n${E}\r\n`;
+    const target = `${B}\r\nold\r\n${E}\r\nrepo tail\r\n`;
+    expect(carryManagedRegion(render, target, asEntry(AGENTS_MARKERS), undefined)).toEqual({
+      kind: "sides-restored",
+      content: `${render}repo tail\r\n`,
+    });
+  });
+
+  test("a render whose END line has no trailing newline still joins cleanly", () => {
+    const render = `${B}\ndocs\n${E}`;
+    const target = `${B}\nold\n${E}\nrepo tail\n`;
+    expect(carryManagedRegion(render, target, asEntry(AGENTS_MARKERS), undefined)).toEqual({
+      kind: "sides-restored",
+      content: `${B}\ndocs\n${E}\nrepo tail\n`,
+    });
   });
 });
 
@@ -519,22 +441,24 @@ function writeRecopy(root: string, entries: SplitSpec[], renders: Record<string,
 }
 
 const RECOPY_ENTRIES: SplitSpec[] = [
-  { path: "AGENTS.md", grammar: "tail-marker", marker: SENTINEL },
-  { path: ".gitignore", grammar: "bounded-region", marker: MANAGED_BEGIN },
-  { path: "CONTRIBUTING.md", grammar: "tail-marker", marker: SENTINEL },
-  { path: "SECURITY.md", grammar: "tail-marker", marker: SENTINEL },
-  { path: ".editorconfig", grammar: "tail-marker", marker: HASH_SENTINEL },
-  { path: ".github/CODEOWNERS", grammar: "tail-marker", marker: HASH_SENTINEL },
+  AGENTS_MARKERS,
+  { path: ".gitignore", begin: HB, end: HE },
+  { path: "CONTRIBUTING.md", begin: B, end: E },
+  { path: "SECURITY.md", begin: B, end: E },
+  { path: ".editorconfig", begin: HB, end: HE },
+  { path: ".github/CODEOWNERS", begin: HB, end: HE },
 ];
 
 describe("preserve_local_content script (recopy mode)", () => {
-  test("carries all repo-local regions over a simulated recopy", () => {
+  test("carries every repository-owned side over a simulated recopy", () => {
     const root = makeTarget({
-      // Pre-render target state, committed as HEAD below.
+      // Pre-render target state, committed as HEAD below - already in the
+      // managed-region shape, with a current-vintage HEAD manifest.
+      [MANIFEST_REL]: manifestJson(RECOPY_ENTRIES),
       "AGENTS.md": agentsTarget,
       ".gitignore": gitignoreTarget,
       "CONTRIBUTING.md": contributingTarget,
-      "SECURITY.md": `old security prefix\n${SENTINEL}\n`,
+      "SECURITY.md": `${B}\nold security prefix\n${E}\n`,
       ".editorconfig": editorconfigTarget,
       ".github/CODEOWNERS": codeownersTarget,
       ".typography-allow.local": "docs/legacy/\n",
@@ -546,7 +470,7 @@ describe("preserve_local_content script (recopy mode)", () => {
       "AGENTS.md": agentsRender,
       ".gitignore": gitignoreRender,
       "CONTRIBUTING.md": contributingRender,
-      "SECURITY.md": `fresh security prefix\n${SENTINEL}\n`,
+      "SECURITY.md": `${B}\nfresh security prefix\n${E}\n`,
       ".editorconfig": editorconfigRender,
       ".github/CODEOWNERS": codeownersRender,
     });
@@ -556,8 +480,9 @@ describe("preserve_local_content script (recopy mode)", () => {
     expect(readFileSync(join(root, "AGENTS.md"), "utf-8")).toBe(
       `${agentsRender}\n## Project docs\n\nrepo-local instructions\n`,
     );
-    expect(readFileSync(join(root, ".gitignore"), "utf-8")).toContain("/repo-local-cache/");
-    expect(readFileSync(join(root, ".gitignore"), "utf-8")).toContain(gitignoreManagedNew);
+    const gitignore = readFileSync(join(root, ".gitignore"), "utf-8");
+    expect(gitignore).toContain("/repo-local-cache/");
+    expect(gitignore).toEndWith(gitignoreManagedNew);
     expect(readFileSync(join(root, "CONTRIBUTING.md"), "utf-8")).toBe(
       `${contributingRender}\n## Local dev setup\n\nrun the local thing\n`,
     );
@@ -569,9 +494,9 @@ describe("preserve_local_content script (recopy mode)", () => {
     expect(readFileSync(join(root, ".github/CODEOWNERS"), "utf-8")).toBe(
       `${codeownersRender}\n/security/ @security-team\n`,
     );
-    // Never customized below the marker: the fresh render stands.
+    // Never customized outside the region: the fresh render stands.
     expect(readFileSync(join(root, "SECURITY.md"), "utf-8")).toBe(
-      `fresh security prefix\n${SENTINEL}\n`,
+      `${B}\nfresh security prefix\n${E}\n`,
     );
     // Separate repo-owned file, never rendered: untouched.
     expect(readFileSync(join(root, ".typography-allow.local"), "utf-8")).toBe("docs/legacy/\n");
@@ -583,29 +508,42 @@ describe("preserve_local_content script (recopy mode)", () => {
     expect(result.summary).not.toContain("SECURITY.md");
   });
 
+  test("a recopy over a tail-marker-shaped repo converts it (HEAD manifest vintage)", () => {
+    const oldShape = `# AGENTS.md\n\nold managed guidance\n\n${OLD_SENTINEL}\n\n## Project docs\n\nrepo-local instructions\n`;
+    const root = makeTarget({
+      [MANIFEST_REL]: legacyManifestJson([
+        { path: "AGENTS.md", grammar: "tail-marker", marker: OLD_SENTINEL },
+      ]),
+      "AGENTS.md": oldShape,
+    });
+    initGitRepo(root);
+    writeRecopy(root, [AGENTS_MARKERS], { "AGENTS.md": agentsRender });
+    const result = runScript(root);
+    expect(result.exitCode).toBe(0);
+    expect(readFileSync(join(root, "AGENTS.md"), "utf-8")).toBe(
+      `${agentsRender}\n## Project docs\n\nrepo-local instructions\n`,
+    );
+    expect(result.summary).toContain("converted from the retired tail-marker split shape");
+  });
+
   test("non-UTF-8 bytes survive the recopy carry byte-for-byte", () => {
-    const agentsOld = `# AGENTS.md\n\nold managed guidance\n\n${SENTINEL}\n`;
     const tailBytes = Buffer.concat([Buffer.from("\ncaf"), Buffer.from([0xe9]), Buffer.from("\n")]);
     const root = makeTarget({});
-    writeFileSync(join(root, "AGENTS.md"), Buffer.concat([Buffer.from(agentsOld), tailBytes]));
+    writeFileSync(join(root, "AGENTS.md"), Buffer.concat([Buffer.from(agentsRender), tailBytes]));
     initGitRepo(root);
     // The recopy overwrites the file with the fresh render.
-    writeRecopy(root, [{ path: "AGENTS.md", grammar: "tail-marker", marker: SENTINEL }], {
-      "AGENTS.md": agentsRender,
-    });
+    writeRecopy(root, [AGENTS_MARKERS], { "AGENTS.md": agentsRender });
     const result = runScript(root);
     expect(result.exitCode).toBe(0);
     const carried = readFileSync(join(root, "AGENTS.md"));
     expect(carried.equals(Buffer.concat([Buffer.from(agentsRender), tailBytes]))).toBe(true);
   });
 
-  test("legacy marker-less AGENTS.md flows through to a marked appendix", () => {
+  test("a marker-less previous copy flows through to a marked appendix", () => {
     const legacy = "# AGENTS.md\n\nold guidance\n\n## Project docs\n\nrepo-local notes\n";
     const root = makeTarget({ "AGENTS.md": legacy });
     initGitRepo(root);
-    writeRecopy(root, [{ path: "AGENTS.md", grammar: "tail-marker", marker: SENTINEL }], {
-      "AGENTS.md": agentsRender,
-    });
+    writeRecopy(root, [AGENTS_MARKERS], { "AGENTS.md": agentsRender });
     const result = runScript(root);
     expect(result.exitCode).toBe(0);
     const agents = readFileSync(join(root, "AGENTS.md"), "utf-8");
@@ -618,9 +556,7 @@ describe("preserve_local_content script (recopy mode)", () => {
   test("a split file new in the render (absent from HEAD) is left as rendered", () => {
     const root = makeTarget({ "README.md": "readme\n" });
     initGitRepo(root);
-    writeRecopy(root, [{ path: "AGENTS.md", grammar: "tail-marker", marker: SENTINEL }], {
-      "AGENTS.md": agentsRender,
-    });
+    writeRecopy(root, [AGENTS_MARKERS], { "AGENTS.md": agentsRender });
     const result = runScript(root);
     expect(result.exitCode).toBe(0);
     expect(readFileSync(join(root, "AGENTS.md"), "utf-8")).toBe(agentsRender);
@@ -636,9 +572,7 @@ describe("preserve_local_content script (recopy mode)", () => {
     symlinkSync("REAL.md", join(root, "AGENTS.md"));
     initGitRepo(root);
     unlinkSync(join(root, "AGENTS.md"));
-    writeRecopy(root, [{ path: "AGENTS.md", grammar: "tail-marker", marker: SENTINEL }], {
-      "AGENTS.md": agentsRender,
-    });
+    writeRecopy(root, [AGENTS_MARKERS], { "AGENTS.md": agentsRender });
     const result = runScript(root);
     expect(result.exitCode).toBe(0);
     const delivered = readFileSync(join(root, "AGENTS.md"), "utf-8");
@@ -649,12 +583,12 @@ describe("preserve_local_content script (recopy mode)", () => {
 
   test("a marker-bearing file not declared split in the manifest is untouched", () => {
     // The manifest, not a marker scan, drives the file list.
-    const root = makeTarget({ "NOTES.md": `note\n${SENTINEL}\nlocal tail\n` });
+    const root = makeTarget({ "NOTES.md": `${B}\nnote\n${E}\nlocal tail\n` });
     initGitRepo(root);
-    writeRecopy(root, [], { "NOTES.md": `fresh note\n${SENTINEL}\n` });
+    writeRecopy(root, [], { "NOTES.md": `${B}\nfresh note\n${E}\n` });
     const result = runScript(root);
     expect(result.exitCode).toBe(0);
-    expect(readFileSync(join(root, "NOTES.md"), "utf-8")).toBe(`fresh note\n${SENTINEL}\n`);
+    expect(readFileSync(join(root, "NOTES.md"), "utf-8")).toBe(`${B}\nfresh note\n${E}\n`);
     expect(result.summary).toBe("");
   });
 
@@ -669,7 +603,7 @@ describe("preserve_local_content script (recopy mode)", () => {
   test("a split entry whose file is missing from the recopied tree fails loudly", () => {
     const root = makeTarget({ "AGENTS.md": agentsTarget });
     initGitRepo(root);
-    writeRecopy(root, [{ path: "GHOST.md", grammar: "tail-marker", marker: SENTINEL }], {});
+    writeRecopy(root, [{ path: "GHOST.md", begin: B, end: E }], {});
     const result = runScript(root);
     expect(result.exitCode).not.toBe(0);
     expect(result.stderr).toContain("manifest and render disagree");
@@ -678,9 +612,7 @@ describe("preserve_local_content script (recopy mode)", () => {
   test("--hide-details prints a count, not paths", () => {
     const root = makeTarget({ "AGENTS.md": agentsTarget });
     initGitRepo(root);
-    writeRecopy(root, [{ path: "AGENTS.md", grammar: "tail-marker", marker: SENTINEL }], {
-      "AGENTS.md": agentsRender,
-    });
+    writeRecopy(root, [AGENTS_MARKERS], { "AGENTS.md": agentsRender });
     const result = runScript(root, ["--hide-details", "true"]);
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain("1 split file(s) carry a disposition note");
@@ -698,9 +630,7 @@ describe("preserve_local_content script (recopy mode)", () => {
   test("writes an empty summary when nothing needed carrying", () => {
     const root = makeTarget({ "AGENTS.md": agentsRender });
     initGitRepo(root);
-    writeRecopy(root, [{ path: "AGENTS.md", grammar: "tail-marker", marker: SENTINEL }], {
-      "AGENTS.md": agentsRender,
-    });
+    writeRecopy(root, [AGENTS_MARKERS], { "AGENTS.md": agentsRender });
     const result = runScript(root);
     expect(result.exitCode).toBe(0);
     expect(result.summary).toBe("");
@@ -741,90 +671,70 @@ describe("fencedResetExcerpt", () => {
 });
 
 describe("splitEntries", () => {
-  const tailEntry = (over: Record<string, unknown> = {}) => ({
+  const regionEntry = (over: Record<string, unknown> = {}) => ({
     class: "split",
-    grammar: "tail-marker",
-    marker: SENTINEL,
-    managed: "above",
+    grammar: "managed-region",
+    begin: B,
+    end: E,
     hash: null,
     ...over,
   });
 
-  test("returns the split entries with their grammar union shapes", () => {
+  test("returns the split entries with the grammar's declaration shape", () => {
     const manifest = JSON.stringify({
       files: {
-        "AGENTS.md": tailEntry(),
-        ".gitignore": {
-          class: "split",
-          grammar: "bounded-region",
-          marker: MANAGED_BEGIN,
-          managed: "below",
-          managed_end: MANAGED_END,
-          local_begin: LOCAL_BEGIN,
-          local_end: LOCAL_END,
-          hash: null,
-        },
+        "AGENTS.md": regionEntry(),
+        ".gitignore": regionEntry({ begin: HB, end: HE }),
         ".github/workflows/ci.yml": { class: "managed", hash: null },
         ".github/workflows/checks.yml": { class: "starter" },
       },
     });
     expect(splitEntries(manifest, "m")).toEqual([
-      { path: "AGENTS.md", grammar: "tail-marker", marker: SENTINEL },
-      {
-        path: ".gitignore",
-        grammar: "bounded-region",
-        managed_begin: MANAGED_BEGIN,
-        managed_end: MANAGED_END,
-        local_begin: LOCAL_BEGIN,
-        local_end: LOCAL_END,
-      },
+      { path: "AGENTS.md", grammar: "managed-region", begin: B, end: E },
+      { path: ".gitignore", grammar: "managed-region", begin: HB, end: HE },
     ]);
   });
 
   test("throws on a split entry with no grammar (a pre-grammar manifest)", () => {
     const manifest = JSON.stringify({
-      files: { "AGENTS.md": { class: "split", marker: SENTINEL, managed: "above", hash: null } },
+      files: { "AGENTS.md": { class: "split", begin: B, end: E, hash: null } },
     });
     expect(() => splitEntries(manifest, "m")).toThrow("declares no grammar");
   });
 
   test("throws on an unknown grammar instead of degrading", () => {
     const manifest = JSON.stringify({
-      files: { "AGENTS.md": tailEntry({ grammar: "prefix" }) },
+      files: { "AGENTS.md": regionEntry({ grammar: "prefix" }) },
     });
     expect(() => splitEntries(manifest, "m")).toThrow('unknown grammar "prefix"');
   });
 
-  test("throws when the grammar and the managed side disagree", () => {
-    const manifest = JSON.stringify({ files: { "AGENTS.md": tailEntry({ managed: "below" }) } });
-    expect(() => splitEntries(manifest, "m")).toThrow("manifest is inconsistent");
+  test("throws on the RETIRED grammars: the post-sync manifest never carries them", () => {
+    // HEAD manifests ride head_manifest.ts's transition reader; the fresh
+    // render's manifest is generated by this change's own compose, so a
+    // retired grammar here is damage, never a shape to convert.
+    for (const grammar of ["tail-marker", "bounded-region"]) {
+      const manifest = JSON.stringify({
+        files: { "AGENTS.md": regionEntry({ grammar }) },
+      });
+      expect(() => splitEntries(manifest, "m")).toThrow("unknown grammar");
+    }
   });
 
-  test("throws on a bounded-region entry missing its region marker strings", () => {
-    const manifest = JSON.stringify({
-      files: {
-        ".gitignore": {
-          class: "split",
-          grammar: "bounded-region",
-          marker: MANAGED_BEGIN,
-          managed: "below",
-          hash: null,
-        },
-      },
+  test("throws on a missing or non-ASCII marker string", () => {
+    const missing = JSON.stringify({
+      files: { "AGENTS.md": { class: "split", grammar: "managed-region", begin: B, hash: null } },
     });
-    expect(() => splitEntries(manifest, "m")).toThrow("region marker strings");
-  });
-
-  test("throws on a non-ASCII marker (latin1 file bytes could never match it)", () => {
-    const manifest = JSON.stringify({
-      files: { "AGENTS.md": tailEntry({ marker: "# local § section" }) },
+    expect(() => splitEntries(missing, "m")).toThrow("printable-ASCII");
+    const nonAscii = JSON.stringify({
+      files: { "AGENTS.md": regionEntry({ begin: "# local § begin" }) },
     });
-    expect(() => splitEntries(manifest, "m")).toThrow("printable-ASCII");
+    expect(() => splitEntries(nonAscii, "m")).toThrow("printable-ASCII");
   });
 
   test("throws on a split path that could escape the target root", () => {
     for (const path of ["../victim", "a/../../victim", "/etc/victim", "a//b"]) {
-      const manifest = JSON.stringify({ files: { [path]: tailEntry() } });
+      const manifest = JSON.stringify({ files: { [path]: regionEntry() } });
       expect(() => splitEntries(manifest, "m")).toThrow("not a clean relative path");
     }
   });
@@ -851,9 +761,9 @@ describe("splitEntries", () => {
     expect(() => splitEntries(arrayEntry, "m")).toThrow("is not an object");
   });
 
-  test("throws on a non-comment tail marker (the appendix writes comments)", () => {
+  test("throws on a non-comment marker (the appendix writes comments)", () => {
     const manifest = JSON.stringify({
-      files: { "AGENTS.md": tailEntry({ marker: "// local section" }) },
+      files: { "AGENTS.md": regionEntry({ begin: "// begin managed" }) },
     });
     expect(() => splitEntries(manifest, "m")).toThrow(
       "not a hash comment or a complete HTML comment",
@@ -863,64 +773,53 @@ describe("splitEntries", () => {
   // The manifest text is attacker-adjacent at this boundary: it is whatever
   // the target repo's stamped file claims, so the same one-comment rule has
   // to hold here and not just at declaration time.
-  test("throws on an HTML tail marker that is not exactly one comment", () => {
-    for (const marker of ["<!-- closed --> active <!-- final -->", "<!-->"]) {
-      const manifest = JSON.stringify({ files: { "AGENTS.md": tailEntry({ marker }) } });
+  test("throws on an HTML marker that is not exactly one comment", () => {
+    for (const begin of ["<!-- closed --> active <!-- final -->", "<!-->"]) {
+      const manifest = JSON.stringify({ files: { "AGENTS.md": regionEntry({ begin }) } });
       expect(() => splitEntries(manifest, "m")).toThrow(
         "not a hash comment or a complete HTML comment",
       );
     }
   });
 
-  test("throws on a bounded-region marker that is not a hash comment", () => {
+  test("throws on markers that contain each other (substring counting)", () => {
     const manifest = JSON.stringify({
-      files: {
-        ".gitignore": {
-          class: "split",
-          grammar: "bounded-region",
-          marker: MANAGED_BEGIN,
-          managed: "below",
-          managed_end: MANAGED_END,
-          local_begin: "<!-- BEGIN LOCAL -->",
-          local_end: LOCAL_END,
-          hash: null,
-        },
-      },
+      files: { "AGENTS.md": regionEntry({ begin: "# MANAGED", end: "# MANAGED END" }) },
     });
-    expect(() => splitEntries(manifest, "m")).toThrow("does not open as a hash comment");
+    expect(() => splitEntries(manifest, "m")).toThrow("substring-free");
   });
 });
 
-// The managed-tail carry anchors its split on the render ENDING at the
-// declared marker line, so every tail-marker template source must keep the
-// marker as its last non-empty line - managed content below it would be
-// carried into repositories' local tails as if it were repo-owned.
-describe("split-above templates end at the marker", () => {
-  test("the templates with repository-owned tails end with the exact marker line", () => {
+// Every split template source must carry its declared BEGIN/END markers
+// exactly once, in order - the composer enforces this via
+// declarationTextErrors; this is the fast regression net for the template
+// files themselves.
+describe("split templates carry one ordered marker pair", () => {
+  test("each split source has BEGIN before END, each exactly once", () => {
     const templatesDir = join(repoRoot, "templates");
-    const templated: [string, string][] = [
-      [
-        join(templatesDir, "base", "{% if not private %}CONTRIBUTING.md{% endif %}.jinja"),
-        SENTINEL,
-      ],
-      [join(templatesDir, "base", "SECURITY.md.jinja"), SENTINEL],
+    const templated: [string, string, string][] = [
+      [join(templatesDir, "base", "{% if not private %}CONTRIBUTING.md{% endif %}.jinja"), B, E],
+      [join(templatesDir, "base", "SECURITY.md.jinja"), B, E],
       [
         join(
           templatesDir,
           "base",
           "{% if 'custom-license' not in modules %}LICENSE.md{% endif %}.jinja",
         ),
-        SENTINEL,
+        B,
+        E,
       ],
-      [join(templatesDir, "base", ".gitattributes.jinja"), HASH_SENTINEL],
-      [join(templatesDir, "base", ".editorconfig.jinja"), HASH_SENTINEL],
-      [join(templatesDir, "base", ".github", "CODEOWNERS.jinja"), HASH_SENTINEL],
-      [join(templatesDir, "agents", "AGENTS.md.jinja"), SENTINEL],
+      [join(templatesDir, "base", ".gitattributes.jinja"), HB, HE],
+      [join(templatesDir, "base", ".editorconfig.jinja"), HB, HE],
+      [join(templatesDir, "base", ".github", "CODEOWNERS.jinja"), HB, HE],
+      [join(templatesDir, "base", ".gitignore.jinja"), HB, HE],
+      [join(templatesDir, "agents", "AGENTS.md.jinja"), B, E],
     ];
-    for (const [path, sentinel] of templated) {
-      const lines = readFileSync(path, "utf-8").split("\n");
-      const lastNonEmpty = lines.filter((line) => line.trim().length > 0).at(-1);
-      expect(lastNonEmpty).toBe(sentinel);
+    for (const [path, begin, end] of templated) {
+      const source = readFileSync(path, "utf-8");
+      expect(source.split(begin).length).toBe(2);
+      expect(source.split(end).length).toBe(2);
+      expect(source.indexOf(begin)).toBeLessThan(source.indexOf(end));
     }
   });
 });
@@ -931,22 +830,13 @@ describe("split-above templates end at the marker", () => {
 // only. HEAD is the committed pre-update state; render-old/render-new are
 // clean renders at the old and new template refs.
 describe("preserve_local_content render mode", () => {
-  const agentsOld = `# AGENTS.md\n\nold managed guidance\n\n${SENTINEL}\n`;
-  const securityOld = `old security prefix\n${SENTINEL}\n`;
-  const securityNew = `fresh security prefix\n${SENTINEL}\n`;
-  const gitignoreOldRender = `${LOCAL_BEGIN}\n# Add repository-specific ignore patterns in this section only.\n\n${LOCAL_END}\n\n${MANAGED_BEGIN}\n*.old\n${MANAGED_END}\n`;
+  const agentsOld = `${B}\n# AGENTS.md\n\nold managed guidance\n${E}\n`;
+  const securityOld = `${B}\nold security prefix\n${E}\n`;
+  const securityNew = `${B}\nfresh security prefix\n${E}\n`;
+  const gitignoreOldRender = `# local patterns go above the managed region\n\n${HB}\n*.old\n${HE}\n`;
   const MERGE_JUNK = "merged result to discard\n";
-  const AGENTS_ENTRY: SplitSpec = { path: "AGENTS.md", grammar: "tail-marker", marker: SENTINEL };
-  const SECURITY_ENTRY: SplitSpec = {
-    path: "SECURITY.md",
-    grammar: "tail-marker",
-    marker: SENTINEL,
-  };
-  const GITIGNORE_ENTRY: SplitSpec = {
-    path: ".gitignore",
-    grammar: "bounded-region",
-    marker: MANAGED_BEGIN,
-  };
+  const SECURITY_MARKERS: SplitSpec = { path: "SECURITY.md", begin: B, end: E };
+  const GITIGNORE_MARKERS: SplitSpec = { path: ".gitignore", begin: HB, end: HE };
 
   function makeRenderPair(
     entries: SplitSpec[],
@@ -990,24 +880,136 @@ describe("preserve_local_content render mode", () => {
   }
 
   test("rebuilds a split file from the clean render and HEAD, discarding the merge", () => {
-    const root = makeTarget({ "AGENTS.md": agentsTarget });
+    const root = makeTarget({
+      [MANIFEST_REL]: manifestJson([AGENTS_MARKERS]),
+      "AGENTS.md": agentsTarget,
+    });
     initGitRepo(root);
     writeFileSync(join(root, "AGENTS.md"), MERGE_JUNK);
     const { renderDir, oldRenderDir } = makeRenderPair(
-      [AGENTS_ENTRY],
+      [AGENTS_MARKERS],
       { "AGENTS.md": agentsRender },
       { "AGENTS.md": agentsOld },
     );
     const result = runRender(root, renderDir, oldRenderDir);
     expect(result.exitCode).toBe(0);
-    // Managed half byte-equal to render-new, tail byte-equal to HEAD's.
+    // Managed region byte-equal to render-new, tail byte-equal to HEAD's.
     expect(readFileSync(join(root, "AGENTS.md"), "utf-8")).toBe(
       `${agentsRender}\n## Project docs\n\nrepo-local instructions\n`,
     );
     expect(result.summary).toContain("- `AGENTS.md`:");
     expect(result.summary).toContain("rebuilt structurally");
-    // A template change to the managed half is routine, not a local edit:
-    // nothing to review, the PR stays auto-merge-eligible.
+    // A template change to the managed region is routine, not a local
+    // edit: nothing to review, the PR stays auto-merge-eligible.
+    expect(result.review).toBe("");
+  });
+
+  test("THE TRANSITION: a tail-marker repo converts with its tail byte-identical below END", () => {
+    // HEAD state: old-shape file + old-vintage manifest, exactly what
+    // every fleet repo presents on the first sync after the one-grammar
+    // change. The old render is old-shaped too.
+    const tailBytes = Buffer.concat([
+      Buffer.from("\n## Project docs\n\ncaf"),
+      Buffer.from([0xe9]),
+      Buffer.from(" repo-local instructions\n"),
+    ]);
+    const oldShapeHead = Buffer.concat([
+      Buffer.from(`# AGENTS.md\n\nold managed guidance\n\n${OLD_SENTINEL}\n`),
+      tailBytes,
+    ]);
+    const oldShapeRender = `# AGENTS.md\n\nold managed guidance\n\n${OLD_SENTINEL}\n`;
+    const root = makeTarget({
+      [MANIFEST_REL]: legacyManifestJson([
+        { path: "AGENTS.md", grammar: "tail-marker", marker: OLD_SENTINEL },
+      ]),
+    });
+    writeFileSync(join(root, "AGENTS.md"), oldShapeHead);
+    initGitRepo(root);
+    writeFileSync(join(root, "AGENTS.md"), MERGE_JUNK);
+    const { renderDir, oldRenderDir } = makeRenderPair(
+      [AGENTS_MARKERS],
+      { "AGENTS.md": agentsRender },
+      { "AGENTS.md": oldShapeRender },
+    );
+    const result = runRender(root, renderDir, oldRenderDir);
+    expect(result.exitCode).toBe(0);
+    // The converted shape: fresh managed region, nothing above, the
+    // previous repo tail BYTE-IDENTICAL below the END marker.
+    const delivered = readFileSync(join(root, "AGENTS.md"));
+    expect(delivered.equals(Buffer.concat([Buffer.from(agentsRender), tailBytes]))).toBe(true);
+    expect(result.summary).toContain("converted from the retired tail-marker split shape");
+    // The designed transition is verified (managed part matches the old
+    // render's), so it stays auto-merge-eligible.
+    expect(result.review).toBe("");
+  });
+
+  test("THE TRANSITION: an old bounded-region .gitignore converts, LOCAL area riding above", () => {
+    const above = `${OLD_LOCAL_BEGIN}\n/repo-local-cache/\nsecret.env\n${OLD_LOCAL_END}\n\n`;
+    const oldHead = `${above}${HB}\n*.old\n${HE}\n`;
+    const oldRender = `${OLD_LOCAL_BEGIN}\n# defaults\n${OLD_LOCAL_END}\n\n${HB}\n*.old\n${HE}\n`;
+    const root = makeTarget({
+      [MANIFEST_REL]: legacyManifestJson([
+        { path: ".gitignore", grammar: "bounded-region", marker: HB },
+      ]),
+      ".gitignore": oldHead,
+    });
+    initGitRepo(root);
+    writeFileSync(join(root, ".gitignore"), MERGE_JUNK);
+    const { renderDir, oldRenderDir } = makeRenderPair(
+      [GITIGNORE_MARKERS],
+      { ".gitignore": gitignoreRender },
+      { ".gitignore": oldRender },
+    );
+    const result = runRender(root, renderDir, oldRenderDir);
+    expect(result.exitCode).toBe(0);
+    // The old LOCAL area (its now-inert marker lines included) rides above
+    // the fresh managed region byte-for-byte; the render's above-seed is
+    // NOT resurrected over it.
+    expect(readFileSync(join(root, ".gitignore"), "utf-8")).toBe(`${above}${gitignoreManagedNew}`);
+    expect(result.summary).toContain("converted from the retired LOCAL-region split shape");
+    expect(result.review).toBe("");
+  });
+
+  test("THE TRANSITION: an old bounded-region file with unchanged managed content passes through byte-identical", () => {
+    const above = `${OLD_LOCAL_BEGIN}\n/repo-local-cache/\n${OLD_LOCAL_END}\n\n`;
+    const oldHead = `${above}${gitignoreManagedNew}`;
+    const root = makeTarget({
+      [MANIFEST_REL]: legacyManifestJson([
+        { path: ".gitignore", grammar: "bounded-region", marker: HB },
+      ]),
+      ".gitignore": oldHead,
+    });
+    initGitRepo(root);
+    writeFileSync(join(root, ".gitignore"), MERGE_JUNK);
+    const { renderDir, oldRenderDir } = makeRenderPair(
+      [GITIGNORE_MARKERS],
+      { ".gitignore": gitignoreRender },
+      { ".gitignore": oldHead },
+    );
+    const result = runRender(root, renderDir, oldRenderDir);
+    expect(result.exitCode).toBe(0);
+    expect(readFileSync(join(root, ".gitignore"), "utf-8")).toBe(oldHead);
+    expect(result.review).toBe("");
+  });
+
+  test("content ABOVE the region round-trips through a real render-mode run", () => {
+    const target = `repo-owned preamble\n\n${agentsOld}repo tail\n`;
+    const root = makeTarget({
+      [MANIFEST_REL]: manifestJson([AGENTS_MARKERS]),
+      "AGENTS.md": target,
+    });
+    initGitRepo(root);
+    writeFileSync(join(root, "AGENTS.md"), MERGE_JUNK);
+    const { renderDir, oldRenderDir } = makeRenderPair(
+      [AGENTS_MARKERS],
+      { "AGENTS.md": agentsRender },
+      { "AGENTS.md": agentsOld },
+    );
+    const result = runRender(root, renderDir, oldRenderDir);
+    expect(result.exitCode).toBe(0);
+    expect(readFileSync(join(root, "AGENTS.md"), "utf-8")).toBe(
+      `repo-owned preamble\n\n${agentsRender}repo tail\n`,
+    );
     expect(result.review).toBe("");
   });
 
@@ -1019,7 +1021,7 @@ describe("preserve_local_content render mode", () => {
     const outside = mkdtempSync(join(tmpdir(), "preserve-outside-"));
     symlinkSync(outside, join(root, "docs"));
     const { renderDir, oldRenderDir } = makeRenderPair(
-      [{ path: "docs/AGENTS.md", grammar: "tail-marker", marker: SENTINEL }],
+      [{ path: "docs/AGENTS.md", begin: B, end: E }],
       { "docs/AGENTS.md": agentsRender },
       {},
     );
@@ -1031,17 +1033,17 @@ describe("preserve_local_content render mode", () => {
 
   test("a symlink at HEAD at a split path keeps the clean render and routes to review", () => {
     // `git show HEAD:AGENTS.md` answers the TARGET PATH STRING for a
-    // symlink; the old bytes probe fed that to the carry as if it were the
-    // previous copy and "preserved" the link target in a recovery
-    // appendix. No file content exists at HEAD here: the render stands,
-    // and the note routes the PR to manual review.
+    // symlink; feeding that to the carry as if it were the previous copy
+    // would "preserve" the link target in a recovery appendix. No file
+    // content exists at HEAD here: the render stands, and the note routes
+    // the PR to manual review.
     const root = makeTarget({ "REAL.md": agentsTarget });
     symlinkSync("REAL.md", join(root, "AGENTS.md"));
     initGitRepo(root);
     unlinkSync(join(root, "AGENTS.md"));
     writeFileSync(join(root, "AGENTS.md"), MERGE_JUNK);
     const { renderDir, oldRenderDir } = makeRenderPair(
-      [AGENTS_ENTRY],
+      [AGENTS_MARKERS],
       { "AGENTS.md": agentsRender },
       { "AGENTS.md": agentsOld },
     );
@@ -1064,7 +1066,7 @@ describe("preserve_local_content render mode", () => {
     rmSync(join(root, "AGENTS.md"), { recursive: true });
     writeFileSync(join(root, "AGENTS.md"), MERGE_JUNK);
     const { renderDir, oldRenderDir } = makeRenderPair(
-      [AGENTS_ENTRY],
+      [AGENTS_MARKERS],
       { "AGENTS.md": agentsRender },
       { "AGENTS.md": agentsOld },
     );
@@ -1078,11 +1080,11 @@ describe("preserve_local_content render mode", () => {
   });
 
   test("a marker-bearing file not declared split in the manifest is untouched", () => {
-    const root = makeTarget({ "AGENTS.md": agentsTarget, "NOTES.md": `note\n${SENTINEL}\n` });
+    const root = makeTarget({ "AGENTS.md": agentsTarget, "NOTES.md": `${B}\nnote\n${E}\n` });
     initGitRepo(root);
     writeFileSync(join(root, "NOTES.md"), MERGE_JUNK);
     const { renderDir, oldRenderDir } = makeRenderPair(
-      [AGENTS_ENTRY],
+      [AGENTS_MARKERS],
       { "AGENTS.md": agentsRender },
       { "AGENTS.md": agentsOld },
     );
@@ -1092,18 +1094,20 @@ describe("preserve_local_content render mode", () => {
     expect(readFileSync(join(root, "NOTES.md"), "utf-8")).toBe(MERGE_JUNK);
   });
 
-  test("an edit inside the managed half is reset to the fresh render and flagged", () => {
-    const root = makeTarget({ "SECURITY.md": `old security prefix EDITED\n${SENTINEL}\n` });
+  test("an edit inside the managed region is reset to the fresh render and flagged", () => {
+    const root = makeTarget({
+      "SECURITY.md": `${B}\nold security prefix EDITED\n${E}\n`,
+    });
     initGitRepo(root);
     writeFileSync(join(root, "SECURITY.md"), MERGE_JUNK);
     const { renderDir, oldRenderDir } = makeRenderPair(
-      [SECURITY_ENTRY],
+      [SECURITY_MARKERS],
       { "SECURITY.md": securityNew },
       { "SECURITY.md": securityOld },
     );
     const result = runRender(root, renderDir, oldRenderDir);
     expect(result.exitCode).toBe(0);
-    // Managed halves are template-owned: byte-equal to render-new.
+    // Managed regions are template-owned: byte-equal to render-new.
     expect(readFileSync(join(root, "SECURITY.md"), "utf-8")).toBe(securityNew);
     expect(result.summary).toContain("RESET to the fresh render");
     // The reviewer restores from LINES, not from the fact of a reset: the
@@ -1111,28 +1115,57 @@ describe("preserve_local_content render mode", () => {
     // conflict resolver's dropped hunks.
     expect(result.summary).toContain("The reset dropped these line(s):");
     expect(result.summary).toContain("old security prefix EDITED");
-    expect(result.review).toContain("SECURITY.md: managed-half edits reset");
+    expect(result.review).toContain("SECURITY.md: managed-region edits reset");
+  });
+
+  test("a transition sync still resets and itemizes managed-half edits", () => {
+    // The conversion must not launder local edits inside the OLD managed
+    // half: HEAD's managed part (per ITS declaration) differs from the old
+    // render's, so the reset is loud and itemized even while the shape
+    // converts.
+    const oldShapeRender = `old security prefix\n${OLD_SENTINEL}\n`;
+    const oldShapeHead = `old security prefix EDITED\n${OLD_SENTINEL}\n\nrepo tail\n`;
+    const root = makeTarget({
+      [MANIFEST_REL]: legacyManifestJson([
+        { path: "SECURITY.md", grammar: "tail-marker", marker: OLD_SENTINEL },
+      ]),
+      "SECURITY.md": oldShapeHead,
+    });
+    initGitRepo(root);
+    writeFileSync(join(root, "SECURITY.md"), MERGE_JUNK);
+    const { renderDir, oldRenderDir } = makeRenderPair(
+      [SECURITY_MARKERS],
+      { "SECURITY.md": securityNew },
+      { "SECURITY.md": oldShapeRender },
+    );
+    const result = runRender(root, renderDir, oldRenderDir);
+    expect(result.exitCode).toBe(0);
+    expect(readFileSync(join(root, "SECURITY.md"), "utf-8")).toBe(`${securityNew}\nrepo tail\n`);
+    expect(result.summary).toContain("converted from the retired tail-marker split shape");
+    expect(result.summary).toContain("RESET to the fresh render");
+    expect(result.summary).toContain("old security prefix EDITED");
+    expect(result.review).toContain("SECURITY.md: managed-region edits reset");
   });
 
   test("a locally duplicated baseline line is itemized when the duplicate drops", () => {
     // Multiset honesty: HEAD carries "shared line" twice (the repo added
     // a duplicate), the old and new renders carry it once. Comparing
-    // HEAD's additions against the whole delivered half would let the
+    // HEAD's additions against the whole delivered region would let the
     // baseline occurrence absorb the dropped duplicate.
-    const oldHalf = `shared line\n${SENTINEL}\n`;
-    const newHalf = `shared line\n${SENTINEL}\n`;
-    const targetHalfDup = `shared line\nshared line\n${SENTINEL}\n`;
-    const root = makeTarget({ "SECURITY.md": targetHalfDup });
+    const oldRegion = `${B}\nshared line\n${E}\n`;
+    const newRegion = `${B}\nshared line\n${E}\n`;
+    const targetDup = `${B}\nshared line\nshared line\n${E}\n`;
+    const root = makeTarget({ "SECURITY.md": targetDup });
     initGitRepo(root);
     writeFileSync(join(root, "SECURITY.md"), MERGE_JUNK);
     const { renderDir, oldRenderDir } = makeRenderPair(
-      [SECURITY_ENTRY],
-      { "SECURITY.md": newHalf },
-      { "SECURITY.md": oldHalf },
+      [SECURITY_MARKERS],
+      { "SECURITY.md": newRegion },
+      { "SECURITY.md": oldRegion },
     );
     const result = runRender(root, renderDir, oldRenderDir);
     expect(result.exitCode).toBe(0);
-    expect(result.review).toContain("SECURITY.md: managed-half edits reset");
+    expect(result.review).toContain("SECURITY.md: managed-region edits reset");
     expect(result.summary).toContain("The reset dropped these line(s):");
     expect(result.summary).toContain("shared line");
   });
@@ -1148,15 +1181,15 @@ describe("preserve_local_content render mode", () => {
     const news: Record<string, string> = {};
     const olds: Record<string, string> = {};
     for (const rel of files) {
-      targets[rel] = `${longLines(rel)}\n${SENTINEL}\n`;
-      news[rel] = `fresh managed\n${SENTINEL}\n`;
-      olds[rel] = `old managed\n${SENTINEL}\n`;
+      targets[rel] = `${B}\n${longLines(rel)}\n${E}\n`;
+      news[rel] = `${B}\nfresh managed\n${E}\n`;
+      olds[rel] = `${B}\nold managed\n${E}\n`;
     }
     const root = makeTarget(targets);
     initGitRepo(root);
     for (const rel of files) writeFileSync(join(root, rel), MERGE_JUNK);
     const { renderDir, oldRenderDir } = makeRenderPair(
-      files.map((path) => ({ path, grammar: "tail-marker", marker: SENTINEL }) as SplitSpec),
+      files.map((path) => ({ path, begin: B, end: E })),
       news,
       olds,
     );
@@ -1168,12 +1201,12 @@ describe("preserve_local_content render mode", () => {
     expect(result.summary).toContain("excerpt omitted: report size limit");
   });
 
-  test("a routine template change to the managed half is not read as a local edit", () => {
+  test("a routine template change to the managed region is not read as a local edit", () => {
     const root = makeTarget({ "SECURITY.md": `${securityOld}\n## Scope\n\nrepo tail\n` });
     initGitRepo(root);
     writeFileSync(join(root, "SECURITY.md"), MERGE_JUNK);
     const { renderDir, oldRenderDir } = makeRenderPair(
-      [SECURITY_ENTRY],
+      [SECURITY_MARKERS],
       { "SECURITY.md": securityNew },
       { "SECURITY.md": securityOld },
     );
@@ -1186,31 +1219,13 @@ describe("preserve_local_content render mode", () => {
     expect(result.summary).not.toContain("RESET");
   });
 
-  test("a bounded-region entry routes to the local-region carry", () => {
-    const root = makeTarget({ ".gitignore": gitignoreTarget });
-    initGitRepo(root);
-    writeFileSync(join(root, ".gitignore"), MERGE_JUNK);
-    const { renderDir, oldRenderDir } = makeRenderPair(
-      [GITIGNORE_ENTRY],
-      { ".gitignore": gitignoreRender },
-      { ".gitignore": gitignoreOldRender },
-    );
-    const result = runRender(root, renderDir, oldRenderDir);
-    expect(result.exitCode).toBe(0);
-    const rebuilt = readFileSync(join(root, ".gitignore"), "utf-8");
-    expect(rebuilt).toContain("/repo-local-cache/");
-    expect(rebuilt).toEndWith(gitignoreManagedNew);
-    expect(result.summary).toContain("repository-local region restored");
-    expect(result.review).toBe("");
-  });
-
-  test("an edit inside .gitignore's managed section is reset and flagged", () => {
-    const target = `${LOCAL_BEGIN}\n# Add repository-specific ignore patterns in this section only.\n\n${LOCAL_END}\n\n${MANAGED_BEGIN}\n*.old\nhand-added-in-managed/\n${MANAGED_END}\n`;
+  test("an edit inside .gitignore's managed region is reset and flagged", () => {
+    const target = `# local patterns go above the managed region\n\n${HB}\n*.old\nhand-added-in-managed/\n${HE}\n`;
     const root = makeTarget({ ".gitignore": target });
     initGitRepo(root);
     writeFileSync(join(root, ".gitignore"), MERGE_JUNK);
     const { renderDir, oldRenderDir } = makeRenderPair(
-      [GITIGNORE_ENTRY],
+      [GITIGNORE_MARKERS],
       { ".gitignore": gitignoreRender },
       { ".gitignore": gitignoreOldRender },
     );
@@ -1219,8 +1234,8 @@ describe("preserve_local_content render mode", () => {
     const rebuilt = readFileSync(join(root, ".gitignore"), "utf-8");
     expect(rebuilt).toEndWith(gitignoreManagedNew);
     expect(rebuilt).not.toContain("hand-added-in-managed/");
-    expect(result.review).toContain(".gitignore: managed-half edits reset");
-    // The dropped managed-section edit is itemized for the reviewer.
+    expect(result.review).toContain(".gitignore: managed-region edits reset");
+    // The dropped managed-region edit is itemized for the reviewer.
     expect(result.summary).toContain("hand-added-in-managed/");
   });
 
@@ -1229,7 +1244,7 @@ describe("preserve_local_content render mode", () => {
     initGitRepo(root);
     writeFileSync(join(root, "AGENTS.md"), MERGE_JUNK);
     const { renderDir, oldRenderDir } = makeRenderPair(
-      [AGENTS_ENTRY],
+      [AGENTS_MARKERS],
       { "AGENTS.md": agentsRender },
       {},
     );
@@ -1246,7 +1261,7 @@ describe("preserve_local_content render mode", () => {
     initGitRepo(root);
     writeFileSync(join(root, "AGENTS.md"), MERGE_JUNK);
     const { renderDir, oldRenderDir } = makeRenderPair(
-      [AGENTS_ENTRY],
+      [AGENTS_MARKERS],
       { "AGENTS.md": agentsRender },
       { "AGENTS.md": agentsOld },
     );
@@ -1259,67 +1274,53 @@ describe("preserve_local_content render mode", () => {
     expect(result.review).toContain("AGENTS.md: recovery-appendix");
   });
 
-  test("duplicate markers in the previous copy flag review", () => {
-    const target = `${agentsOld}\ntail\n${SENTINEL}\nstale duplicate\n`;
-    const root = makeTarget({ "AGENTS.md": target });
+  test("duplicate retired markers in the previous copy flag review on conversion", () => {
+    const oldShape = `old managed\n${OLD_SENTINEL}\ntail\n${OLD_SENTINEL}\nstale duplicate\n`;
+    const root = makeTarget({
+      [MANIFEST_REL]: legacyManifestJson([
+        { path: "AGENTS.md", grammar: "tail-marker", marker: OLD_SENTINEL },
+      ]),
+      "AGENTS.md": oldShape,
+    });
     initGitRepo(root);
     writeFileSync(join(root, "AGENTS.md"), MERGE_JUNK);
     const { renderDir, oldRenderDir } = makeRenderPair(
-      [AGENTS_ENTRY],
+      [AGENTS_MARKERS],
       { "AGENTS.md": agentsRender },
-      { "AGENTS.md": agentsOld },
+      { "AGENTS.md": `old managed\n${OLD_SENTINEL}\n` },
     );
     const result = runRender(root, renderDir, oldRenderDir);
     expect(result.exitCode).toBe(0);
     expect(result.review).toContain("AGENTS.md: duplicate split markers");
   });
 
-  test("a previous copy whose managed marker is gone is unverifiable, not clean", () => {
-    // Clean LOCAL markers, but the managed BEGIN marker is missing: the
-    // LOCAL body splices fine, yet whatever sat where the managed section
-    // should be is dropped - that drop must reach review, not auto-merge.
-    const target = `${LOCAL_BEGIN}\n/repo-local-cache/\n${LOCAL_END}\n\nunmarked old managed content\n`;
-    const root = makeTarget({ ".gitignore": target });
-    initGitRepo(root);
-    writeFileSync(join(root, ".gitignore"), MERGE_JUNK);
-    const { renderDir, oldRenderDir } = makeRenderPair(
-      [GITIGNORE_ENTRY],
-      { ".gitignore": gitignoreRender },
-      { ".gitignore": gitignoreOldRender },
-    );
-    const result = runRender(root, renderDir, oldRenderDir);
-    expect(result.exitCode).toBe(0);
-    expect(result.review).toContain(".gitignore: managed half unverifiable");
-    expect(result.summary).toContain("could not be located");
-  });
-
   test("a HEAD file with no old-render baseline is unverifiable, not clean", () => {
     // The template starts splitting a path the repo already owned: the
-    // tail carries, but the pre-marker content is replaced with no old
-    // render to prove it was template content - review, not auto-merge.
+    // sides carry, but the managed region is replaced with no old render
+    // to prove it was template content - review, not auto-merge.
     const root = makeTarget({ "AGENTS.md": agentsTarget });
     initGitRepo(root);
     writeFileSync(join(root, "AGENTS.md"), MERGE_JUNK);
     const { renderDir, oldRenderDir } = makeRenderPair(
-      [AGENTS_ENTRY],
+      [AGENTS_MARKERS],
       { "AGENTS.md": agentsRender },
       {},
     );
     const result = runRender(root, renderDir, oldRenderDir);
     expect(result.exitCode).toBe(0);
-    expect(result.review).toContain("AGENTS.md: managed half unverifiable");
+    expect(result.review).toContain("AGENTS.md: managed region unverifiable");
   });
 
-  test("a repo that pre-applied the new managed half is kept whole without a reset flag", () => {
-    // Nothing is dropped (the delivered half equals HEAD's), so neither
+  test("a repo that pre-applied the new managed region is kept whole without a reset flag", () => {
+    // Nothing is dropped (the delivered region equals HEAD's), so neither
     // the reset nor the unverifiable flag may fire even though HEAD's
-    // half differs from the OLD render's.
+    // region differs from the OLD render's.
     const target = `${agentsRender}\nrepo tail\n`;
     const root = makeTarget({ "AGENTS.md": target });
     initGitRepo(root);
     writeFileSync(join(root, "AGENTS.md"), MERGE_JUNK);
     const { renderDir, oldRenderDir } = makeRenderPair(
-      [AGENTS_ENTRY],
+      [AGENTS_MARKERS],
       { "AGENTS.md": agentsRender },
       { "AGENTS.md": agentsOld },
     );
@@ -1329,10 +1330,10 @@ describe("preserve_local_content render mode", () => {
     expect(result.review).toBe("");
   });
 
-  test("non-UTF-8 bytes in the repo-owned half survive byte-for-byte", () => {
+  test("non-UTF-8 bytes in the repo-owned sides survive byte-for-byte", () => {
     // A Latin-1 0xe9 ("caf<e9>") is not valid UTF-8; a utf-8 decode would
     // fold it onto U+FFFD and grow the file - silent corruption of the
-    // byte-owned half.
+    // byte-owned sides.
     const tailBytes = Buffer.concat([
       Buffer.from("\n## Notes\n\ncaf"),
       Buffer.from([0xe9]),
@@ -1343,7 +1344,7 @@ describe("preserve_local_content render mode", () => {
     initGitRepo(root);
     writeFileSync(join(root, "AGENTS.md"), MERGE_JUNK);
     const { renderDir, oldRenderDir } = makeRenderPair(
-      [AGENTS_ENTRY],
+      [AGENTS_MARKERS],
       { "AGENTS.md": agentsRender },
       { "AGENTS.md": agentsOld },
     );
@@ -1363,7 +1364,7 @@ describe("preserve_local_content render mode", () => {
     initGitRepo(root);
     writeFileSync(join(root, "AGENTS.md"), MERGE_JUNK);
     const { renderDir, oldRenderDir } = makeRenderPair(
-      [AGENTS_ENTRY],
+      [AGENTS_MARKERS],
       { "AGENTS.md": agentsRender },
       { "AGENTS.md": agentsOld },
     );
@@ -1378,7 +1379,7 @@ describe("preserve_local_content render mode", () => {
     const root = makeTarget({ "AGENTS.md": agentsTarget, ".gitignore": gitignoreTarget });
     initGitRepo(root);
     const { renderDir, oldRenderDir } = makeRenderPair(
-      [AGENTS_ENTRY, GITIGNORE_ENTRY],
+      [AGENTS_MARKERS, GITIGNORE_MARKERS],
       { "AGENTS.md": agentsRender, ".gitignore": gitignoreRender },
       { "AGENTS.md": agentsOld, ".gitignore": gitignoreOldRender },
     );
@@ -1396,7 +1397,7 @@ describe("preserve_local_content render mode", () => {
     unlinkSync(join(root, "AGENTS.md"));
     symlinkSync("victim.txt", join(root, "AGENTS.md"));
     const { renderDir, oldRenderDir } = makeRenderPair(
-      [AGENTS_ENTRY],
+      [AGENTS_MARKERS],
       { "AGENTS.md": agentsRender },
       { "AGENTS.md": agentsOld },
     );
@@ -1412,26 +1413,26 @@ describe("preserve_local_content render mode", () => {
   test("a split entry whose file is missing from the render fails loudly", () => {
     const root = makeTarget({ "AGENTS.md": agentsTarget });
     initGitRepo(root);
-    const { renderDir, oldRenderDir } = makeRenderPair([AGENTS_ENTRY], {}, {});
+    const { renderDir, oldRenderDir } = makeRenderPair([AGENTS_MARKERS], {}, {});
     const result = runRender(root, renderDir, oldRenderDir);
     expect(result.exitCode).not.toBe(0);
     expect(result.stderr).toContain("manifest and render disagree");
   });
 
-  test("a bounded-region render without its declared local region fails loudly", () => {
+  test("a render without its declared region fails loudly", () => {
     // The manifest and the render are generated together: a render missing
     // its declared region means damage, and keeping it would silently drop
-    // HEAD's local body.
+    // HEAD's repo-owned sides.
     const root = makeTarget({ ".gitignore": gitignoreTarget });
     initGitRepo(root);
     const { renderDir, oldRenderDir } = makeRenderPair(
-      [GITIGNORE_ENTRY],
+      [GITIGNORE_MARKERS],
       { ".gitignore": "no region markers here\n" },
       { ".gitignore": gitignoreOldRender },
     );
     const result = runRender(root, renderDir, oldRenderDir);
     expect(result.exitCode).not.toBe(0);
-    expect(result.stderr).toContain("carries no such local region - manifest and render disagree");
+    expect(result.stderr).toContain("manifest and render disagree");
   });
 
   test("a render tree without the ownership manifest fails loudly", () => {
@@ -1445,7 +1446,7 @@ describe("preserve_local_content render mode", () => {
     expect(result.stderr).toContain("needs the new render's manifest");
   });
 
-  test("a pre-grammar manifest fails loudly instead of guessing the carry", () => {
+  test("a pre-grammar RENDER manifest fails loudly instead of guessing the carry", () => {
     const root = makeTarget({ "AGENTS.md": agentsTarget });
     initGitRepo(root);
     const base = mkdtempSync(join(tmpdir(), "preserve-render-"));
@@ -1456,13 +1457,38 @@ describe("preserve_local_content render mode", () => {
       join(renderDir, MANIFEST_REL),
       JSON.stringify({
         files: {
-          "AGENTS.md": { class: "split", marker: SENTINEL, managed: "above", hash: null },
+          "AGENTS.md": { class: "split", begin: B, end: E, hash: null },
         },
       }),
     );
     const result = runRender(root, renderDir, join(base, "render-old"));
     expect(result.exitCode).not.toBe(0);
     expect(result.stderr).toContain("declares no grammar");
+  });
+
+  test("an unreadable HEAD manifest degrades to the appendix, never a guessed conversion", () => {
+    // The HEAD manifest is damaged; the old-shape file cannot split at the
+    // new markers, and no legacy declaration is trusted from damage - the
+    // whole previous copy is preserved below the appendix, review forced.
+    const oldShape = `old managed\n${OLD_SENTINEL}\nrepo tail\n`;
+    const root = makeTarget({
+      [MANIFEST_REL]: "not json at all",
+      "AGENTS.md": oldShape,
+    });
+    initGitRepo(root);
+    writeFileSync(join(root, "AGENTS.md"), MERGE_JUNK);
+    const { renderDir, oldRenderDir } = makeRenderPair(
+      [AGENTS_MARKERS],
+      { "AGENTS.md": agentsRender },
+      { "AGENTS.md": `old managed\n${OLD_SENTINEL}\n` },
+    );
+    const result = runRender(root, renderDir, oldRenderDir);
+    expect(result.exitCode).toBe(0);
+    const rebuilt = readFileSync(join(root, "AGENTS.md"), "utf-8");
+    expect(rebuilt).toStartWith(agentsRender);
+    expect(rebuilt).toContain("repo-platform:recovery-appendix");
+    expect(rebuilt).toEndWith(oldShape);
+    expect(result.review).toContain("AGENTS.md: recovery-appendix");
   });
 
   test("--render-dir without --old-render-dir is rejected", () => {
@@ -1477,8 +1503,8 @@ describe("preserve_local_content render mode", () => {
 // End-to-end against a REAL template render and a REAL `copier recopy
 // --overwrite`, mirroring reusable-template-sync.yml's recovery path:
 // build a scratch template tree, generate a repo from it, customize the
-// sanctioned repo-local regions, commit, recopy (which resets them - the
-// live defect), then assert the carry restores every region. Requires
+// sanctioned repo-owned sides, commit, recopy (which resets them - the
+// live defect), then assert the carry restores every side. Requires
 // copier on PATH, so it runs where copier exists (locally and on the sync
 // runner); CI's script-tests job skips it, and the always-on CI coverage
 // is upgrade_path_test.sh's recovery leg, which drives the same carry
@@ -1487,7 +1513,7 @@ const hasCopier = Bun.which("copier") !== null;
 
 describe.skipIf(!hasCopier)("preserve_local_content end-to-end (copier recopy)", () => {
   test(
-    "restores the repo-local regions a recovery re-render wipes",
+    "restores the repo-owned sides a recovery re-render wipes",
     () => {
       const base = mkdtempSync(join(tmpdir(), "preserve-local-e2e-"));
       const tree = join(base, "bt");
@@ -1525,7 +1551,7 @@ describe.skipIf(!hasCopier)("preserve_local_content end-to-end (copier recopy)",
         COPIER_TIMEOUT_MS,
       );
 
-      // Customize every sanctioned repo-local region, plus the repo-owned
+      // Customize every sanctioned repo-owned side, plus the repo-owned
       // exemptions file, and commit: this is the pre-recovery repo state.
       const tails: Record<string, string> = {
         "AGENTS.md": "\n## Project docs\n\nrepo-local agent guidance\n",
@@ -1540,13 +1566,11 @@ describe.skipIf(!hasCopier)("preserve_local_content end-to-end (copier recopy)",
         const path = join(target, rel);
         writeFileSync(path, readFileSync(path, "utf-8") + tail);
       }
+      // .gitignore: local content lives ABOVE the managed BEGIN marker.
       const gitignorePath = join(target, ".gitignore");
       writeFileSync(
         gitignorePath,
-        readFileSync(gitignorePath, "utf-8").replace(
-          `\n${LOCAL_END}`,
-          `/repo-local-cache/\n\n${LOCAL_END}`,
-        ),
+        readFileSync(gitignorePath, "utf-8").replace(`${HB}\n`, `/repo-local-cache/\n\n${HB}\n`),
       );
       writeFileSync(join(target, ".typography-allow.local"), "docs/legacy/\n");
       initGitRepo(target);
@@ -1557,7 +1581,7 @@ describe.skipIf(!hasCopier)("preserve_local_content end-to-end (copier recopy)",
         target,
         COPIER_TIMEOUT_MS,
       );
-      // Defect reproduced: the re-render reset the local regions.
+      // Defect reproduced: the re-render reset the repo-owned sides.
       expect(readFileSync(join(target, "AGENTS.md"), "utf-8")).not.toContain(
         "repo-local agent guidance",
       );
@@ -1571,7 +1595,7 @@ describe.skipIf(!hasCopier)("preserve_local_content end-to-end (copier recopy)",
       for (const [rel, tail] of Object.entries(tails)) {
         expect(readFileSync(join(target, rel), "utf-8")).toEndWith(tail);
       }
-      expect(readFileSync(join(target, "AGENTS.md"), "utf-8")).toContain(SENTINEL);
+      expect(readFileSync(join(target, "AGENTS.md"), "utf-8")).toContain(E);
       expect(readFileSync(gitignorePath, "utf-8")).toContain("/repo-local-cache/");
       const summary = readFileSync(summaryPath, "utf-8");
       for (const rel of [...Object.keys(tails), ".gitignore"]) {

@@ -659,14 +659,12 @@ describe("module ownership files", () => {
   test("moduleOwnershipRegion renders the record with as-needed key quoting", () => {
     expect(
       moduleOwnershipRegion({
-        agents: [
-          { path: "AGENTS.md", kind: "marker", marker: "<!-- repo-platform:local-section -->" },
-        ],
+        agents: [{ path: "A.md", kind: "region", begin: "# BEGIN M", end: "# END M" }],
         "release-please": [{ path: ".github/workflows/release.yml", kind: "header" }],
       }),
     ).toEqual([
       "const MODULE_OWNERSHIP: Record<string, OwnedFile[]> = {",
-      '  agents: [{ path: "AGENTS.md", kind: "marker", marker: "<!-- repo-platform:local-section -->" }],',
+      '  agents: [{ path: "A.md", kind: "region", begin: "# BEGIN M", end: "# END M" }],',
       '  "release-please": [{ path: ".github/workflows/release.yml", kind: "header" }],',
       "};",
     ]);
@@ -697,14 +695,16 @@ describe("module ownership files", () => {
 
   test("an entry too long even inline expands one property per line, like biome", () => {
     const path = ".github/workflows/a-rather-long-managed-workflow-file-name.yml";
-    const marker = "<!-- repo-platform:local-section -->";
-    expect(moduleOwnershipRegion({ bun: [{ path, kind: "marker", marker }] })).toEqual([
+    const begin = "<!-- BEGIN REPO-PLATFORM MANAGED -->";
+    const end = "<!-- END REPO-PLATFORM MANAGED -->";
+    expect(moduleOwnershipRegion({ bun: [{ path, kind: "region", begin, end }] })).toEqual([
       "const MODULE_OWNERSHIP: Record<string, OwnedFile[]> = {",
       "  bun: [",
       "    {",
       `      path: "${path}",`,
-      '      kind: "marker",',
-      `      marker: "${marker}",`,
+      '      kind: "region",',
+      `      begin: "${begin}",`,
+      `      end: "${end}",`,
       "    },",
       "  ],",
       "};",
@@ -719,48 +719,33 @@ describe("module ownership files", () => {
     ).toThrow("exceeds the formatter's line width");
   });
 
-  test("baseOwnershipRegion emits the enforced table and the region splits", () => {
+  test("baseOwnershipRegion emits the enforced table, region entries included", () => {
     expect(
       baseOwnershipRegion({
         enforced: [
           { path: ".yamllint", kind: "header" },
           {
             path: "LICENSE.md",
-            kind: "marker",
-            marker: "<!-- repo-platform:local-section -->",
+            kind: "region",
+            begin: "<!-- BEGIN REPO-PLATFORM MANAGED -->",
+            end: "<!-- END REPO-PLATFORM MANAGED -->",
             when: { withoutModule: "custom-license" },
           },
           { path: "CODE_OF_CONDUCT.md", kind: "header", when: { publicOnly: true } },
         ],
-        regionSplits: {
-          ".gitignore": {
-            managed_begin: "# BEGIN REPO-PLATFORM MANAGED",
-            managed_end: "# END REPO-PLATFORM MANAGED",
-            local_begin: "# BEGIN REPOSITORY LOCAL",
-            local_end: "# END REPOSITORY LOCAL",
-          },
-        },
       }),
     ).toEqual([
       "const BASE_OWNERSHIP: BaseOwnedFile[] = [",
       '  { path: ".yamllint", kind: "header" },',
       "  {",
       '    path: "LICENSE.md",',
-      '    kind: "marker",',
-      '    marker: "<!-- repo-platform:local-section -->",',
+      '    kind: "region",',
+      '    begin: "<!-- BEGIN REPO-PLATFORM MANAGED -->",',
+      '    end: "<!-- END REPO-PLATFORM MANAGED -->",',
       '    when: { withoutModule: "custom-license" },',
       "  },",
       '  { path: "CODE_OF_CONDUCT.md", kind: "header", when: { publicOnly: true } },',
       "];",
-      "",
-      "const BASE_REGION_SPLITS: Record<string, RegionSplit> = {",
-      '  ".gitignore": {',
-      '    managed_begin: "# BEGIN REPO-PLATFORM MANAGED",',
-      '    managed_end: "# END REPO-PLATFORM MANAGED",',
-      '    local_begin: "# BEGIN REPOSITORY LOCAL",',
-      '    local_end: "# END REPOSITORY LOCAL",',
-      "  },",
-      "};",
     ]);
   });
 });

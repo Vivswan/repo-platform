@@ -108,7 +108,7 @@ describe("normalizeRenderedTree", () => {
   const writeFixture = (root: string) => {
     mkdirSync(join(root, ".github"), { recursive: true });
     writeFileSync(join(root, ".copier-answers.yml"), `_commit: ${SHORT}\n_src_path: ./tree\n`);
-    writeFileSync(join(root, "notes.md"), "notes\n<!-- m -->\nrepo half\n");
+    writeFileSync(join(root, "notes.md"), "<!-- b -->\nnotes\n<!-- e -->\nrepo half\n");
     symlinkSync("AGENTS.md", join(root, "link"));
     writeFileSync(
       join(root, MANIFEST),
@@ -117,7 +117,7 @@ describe("normalizeRenderedTree", () => {
         '  "files": {',
         `    ".copier-answers.yml": {"class": "managed", "hash": null},`,
         `    "${MANIFEST}": {"class": "managed", "hash": null, "commit": null},`,
-        `    "notes.md": {"class": "split", "marker": "<!-- m -->", "managed": "above", "hash": null},`,
+        `    "notes.md": {"class": "split", "grammar": "managed-region", "begin": "<!-- b -->", "end": "<!-- e -->", "hash": null},`,
         `    "link": {"class": "managed", "hash": null}`,
         "  }",
         "}",
@@ -144,7 +144,9 @@ describe("normalizeRenderedTree", () => {
       const answers = readFileSync(join(root, ".copier-answers.yml"), "utf-8");
       expect(answers).toBe(`_commit: ${SHA_SENTINEL}\n_src_path: ./tree\n`);
       // Content files and symlink targets are not provenance: verbatim.
-      expect(readFileSync(join(root, "notes.md"), "utf-8")).toBe("notes\n<!-- m -->\nrepo half\n");
+      expect(readFileSync(join(root, "notes.md"), "utf-8")).toBe(
+        "<!-- b -->\nnotes\n<!-- e -->\nrepo half\n",
+      );
       expect(readlinkSync(join(root, "link"))).toBe("AGENTS.md");
       const manifest = readFileSync(join(root, MANIFEST), "utf-8");
       // The answers hash covers the normalized file, the commit slot
@@ -156,7 +158,7 @@ describe("normalizeRenderedTree", () => {
       expect(manifest).toContain(
         `"${MANIFEST}": {"class": "managed", "hash": null, "commit": "${SHA_SENTINEL}"}`,
       );
-      expect(manifest).toContain(`"hash": "${sha256("notes\n<!-- m -->\n")}"`);
+      expect(manifest).toContain(`"hash": "${sha256("<!-- b -->\nnotes\n<!-- e -->\n")}"`);
       expect(manifest).toContain(`"link": {"class": "managed", "hash": "${sha256("AGENTS.md")}"}`);
     } finally {
       rmSync(root, { recursive: true, force: true });

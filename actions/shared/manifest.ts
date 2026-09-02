@@ -24,7 +24,7 @@
 // inside freshly rendered repositories - node builtins and zone-internal
 // imports only.
 
-import { GRAMMAR, type GrammarId, grammarWireMarker, type SplitShapes } from "./grammar.ts";
+import { GRAMMAR, type GrammarId, type SplitShapes } from "./grammar.ts";
 
 /** Where the ownership manifest lands in generated repositories. */
 export const MANIFEST_NAME = ".github/repo-platform-manifest.json";
@@ -38,20 +38,13 @@ export type OwnershipShape =
   | ({ class: "split" } & SplitShapes[GrammarId]);
 
 /** One split entry's wire body, read off the grammar's GRAMMAR row: the
- *  row's wireMarker lands in the legacy `marker`/`managed` pair (the
- *  stamper's managedHalf and older validators read those), then the row's
- *  wireExtras under their own names in the row's order - so no spelling
- *  of the split fields exists outside the table. */
+ *  row's wireFields under their own names in the row's order - so no
+ *  spelling of the split fields exists outside the table. */
 function splitBody<K extends GrammarId>(grammar: K, declaration: SplitShapes[K]): string {
-  const spec = GRAMMAR[grammar];
-  const extras = spec.wireExtras
-    .map((field) => `, ${JSON.stringify(field)}: ${JSON.stringify(declaration[field])}`)
+  const fields = GRAMMAR[grammar].wireFields
+    .map((field) => `${JSON.stringify(field)}: ${JSON.stringify(declaration[field])}, `)
     .join("");
-  return (
-    `{"class": "split", "grammar": ${JSON.stringify(grammar)}, ` +
-    `"marker": ${JSON.stringify(grammarWireMarker(grammar, declaration))}, ` +
-    `"managed": "${spec.side}"${extras}, "hash": null}`
-  );
+  return `{"class": "split", "grammar": ${JSON.stringify(grammar)}, ${fields}"hash": null}`;
 }
 
 /** One manifest entry line. Every hash renders null (hashes are per-repo
@@ -150,7 +143,6 @@ type SplitDeclarationField = {
  *  the wire-common set. */
 export type ManifestEntryShape = {
   class: string;
-  managed?: unknown;
   hash?: unknown;
   grammar?: unknown;
   commit?: unknown;

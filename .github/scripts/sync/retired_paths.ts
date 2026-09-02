@@ -86,7 +86,7 @@ export function customLicenseFlipError(
     "the custom-license era still exists in the repo; the fleet LICENSE.md would land beside " +
     "license terms the sync cannot reconcile. Delete the old license in the same commit that " +
     "removes the module from .repo-platform.yml (git history remains the record of prior " +
-    "licensing; third-party notices can move below LICENSE.md's local-section marker), then " +
+    "licensing; third-party notices can move below LICENSE.md's END marker), then " +
     "re-run the sync."
   );
 }
