@@ -708,21 +708,40 @@ if has settings-sync; then expect_class ".github/settings.yml" starter; else exp
 if has custom-license; then expect_class "LICENSE.md" absent; else expect_class "LICENSE.md" split; fi
 # Stamping: the managed ci.yml hash must equal the file's sha256 (computed
 # here with hashlib, not the code under test), the split SECURITY.md hash
-# must cover exactly the managed half through its marker line, and the
-# manifest's own entry stays null (a self-hash would be circular).
+# must cover exactly the managed region (the BEGIN marker line through the
+# END marker line, its newline included), and the manifest's own entry
+# stays null (a self-hash would be circular).
 want_ci="$(python3 -c 'import hashlib, sys
 print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$wf/ci.yml")"
 if [ "$(mf ".github/workflows/ci.yml" hash)" != "$want_ci" ]; then
   echo "::error::manifest check failed: the recorded hash for ci.yml in $manifest does not match the file's sha256 for modules=$MODULES private=$PRIVATE - the post-render stamp task did not stamp it. Fix stamp_manifest.ts or the copier.yml hook wiring (or this expectation in verify_smoke_gating.sh)."
   exit 1
 fi
+# The slice mirrors the stamper's contract independently: lines are split
+# on \n alone, a marker line matches by trimmed equality, and the region
+# runs from the start of the first BEGIN line through the first END line
+# after it (newline included when present). The strip set adds \xa0 to
+# ASCII whitespace to track JS trim() on latin1 bytes (a multi-byte
+# encoded NBSP leaves its lead byte behind on both sides, so the two
+# implementations agree there too).
 want_security="$(python3 -c 'import hashlib, sys
-lines = open(sys.argv[1], "rb").read().split(b"\n")
-idx = next(i for i, line in enumerate(lines) if line.strip() == sys.argv[2].encode())
-half = b"\n".join(lines[: idx + 1]) + (b"\n" if idx + 1 < len(lines) else b"")
-print(hashlib.sha256(half).hexdigest())' "$SMOKE/SECURITY.md" "$(mf SECURITY.md marker)")"
+data = open(sys.argv[1], "rb").read()
+begin, end = sys.argv[2].encode(), sys.argv[3].encode()
+ws = b" \t\n\r\v\f\xa0"
+bounds, start = [], 0
+while True:
+    nl = data.find(b"\n", start)
+    stop = len(data) if nl == -1 else nl + 1
+    bounds.append((start, stop))
+    if nl == -1:
+        break
+    start = stop
+bi = next(i for i, (s, e) in enumerate(bounds) if data[s:e].strip(ws) == begin)
+ei = next(i for i, (s, e) in enumerate(bounds) if i > bi and data[s:e].strip(ws) == end)
+print(hashlib.sha256(data[bounds[bi][0] : bounds[ei][1]]).hexdigest())' \
+  "$SMOKE/SECURITY.md" "$(mf SECURITY.md begin)" "$(mf SECURITY.md end)")"
 if [ "$(mf SECURITY.md hash)" != "$want_security" ]; then
-  echo "::error::manifest check failed: the recorded hash for SECURITY.md in $manifest does not cover its managed half (through the marker line) for modules=$MODULES private=$PRIVATE. Fix stamp_manifest.ts (or this expectation in verify_smoke_gating.sh)."
+  echo "::error::manifest check failed: the recorded hash for SECURITY.md in $manifest does not cover its managed region (BEGIN line through END line) for modules=$MODULES private=$PRIVATE. Fix stamp_manifest.ts (or this expectation in verify_smoke_gating.sh)."
   exit 1
 fi
 if [ "$(mf ".github/repo-platform-manifest.json" hash)" != "null" ]; then
