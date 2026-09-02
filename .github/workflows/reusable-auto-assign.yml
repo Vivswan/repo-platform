@@ -1,11 +1,15 @@
 # Reusable auto-assign. Callers trigger on issues/pull_request; the caller's
 # event context flows through. A workflow_dispatch with an `issue` input
 # assigns that one issue (or PR - PRs are issues), for items whose creation
-# event fired no workflow. Code scanning alert assignment lives in
-# reusable-auto-assign-alerts.yml: a reusable-workflow call is statically
-# validated against the permissions of every job in the called file
-# regardless of each job's `if:`, so keeping the alert job out of this file
-# is what lets callers grant security-events only to that call.
+# event fired no workflow. A schedule run, or a dispatch with the input left
+# empty, is a sweep instead: every open unassigned issue and PR gets the same
+# CODEOWNERS assignment. The sweep runs on the repo's own token, so it also
+# picks up bot-authored PRs whose event runs got a read-only GITHUB_TOKEN
+# (Dependabot's) - a feature, not a bug. Code scanning alert assignment
+# lives in reusable-auto-assign-alerts.yml: a reusable-workflow call is
+# statically validated against the permissions of every job in the called
+# file regardless of each job's `if:`, so keeping the alert job out of this
+# file is what lets callers grant security-events only to that call.
 #
 # Who gets assigned: the users on the last `*` entry of the repo's own
 # CODEOWNERS (teams cannot be assignees), falling back to the repo owner.
@@ -25,7 +29,7 @@ on:
   workflow_call:
     inputs:
       issue:
-        description: Issue or PR number to assign (dispatch only)
+        description: Issue or PR number to assign (dispatch only; empty means sweep)
         required: false
         type: string
         default: ""
@@ -33,12 +37,13 @@ on:
 jobs:
   assign:
     # Dependabot PR runs get a read-only GITHUB_TOKEN; the write calls below
-    # would fail, so skip them (Dependabot PRs are labeled by dependabot.yml).
-    # A dispatch without an issue number has nothing to assign.
+    # would fail, so skip them (the nightly sweep assigns those PRs with the
+    # repo's own token instead).
     if: >-
       ((github.event_name == 'issues' || github.event_name == 'pull_request') &&
       github.actor != 'dependabot[bot]') ||
-      (github.event_name == 'workflow_dispatch' && inputs.issue != '')
+      github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'schedule'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -134,31 +139,53 @@ jobs:
               reviewers
             });
 
-      # Assign one named issue or PR per the CODEOWNERS policy. GitHub fires
-      # no workflow for events created with a workflow's own GITHUB_TOKEN, so
-      # an issue or PR created by another workflow never triggers the paths
-      # above; the creating workflow dispatches this one with the number
-      # instead. Only the named item is touched, so unassigning yourself
-      # later sticks.
-      - name: Assign the dispatched issue to code owners
-        if: github.event_name == 'workflow_dispatch'
+      # A dispatch with a number assigns that one issue or PR per the
+      # CODEOWNERS policy. GitHub fires no workflow for events created with a
+      # workflow's own GITHUB_TOKEN, so an issue or PR created by another
+      # workflow never triggers the paths above; the creating workflow
+      # dispatches this one with the number instead. Only the named item is
+      # touched, so unassigning yourself later sticks. A schedule run, or a
+      # dispatch with the input left empty, sweeps instead: every open issue
+      # and PR still unassigned (filtered server-side; the issues list API
+      # covers PRs too) gets the same assignment, page-bounded so a
+      # pathological backlog cannot run away - the nightly cadence drains
+      # the remainder.
+      - name: Assign the dispatched item, or sweep open unassigned items
+        if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
         uses: actions/github-script@v9
         env:
           ISSUE: ${{ inputs.issue }}
           ASSIGNEES: ${{ steps.who.outputs.assignees }}
         with:
           script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
             const raw = process.env.ISSUE ?? "";
-            if (!/^\d+$/.test(raw) || !Number.isSafeInteger(Number(raw)) || Number(raw) <= 0) {
-              core.setFailed(`issue input is not a positive integer: ${raw}`);
-              return;
+            let numbers;
+            if (raw === "") {
+              numbers = [];
+              for (let page = 1; page <= 10; page++) {
+                const { data } = await github.rest.issues.listForRepo({
+                  owner, repo, state: 'open', assignee: 'none', per_page: 100, page,
+                });
+                numbers.push(...data.map((item) => item.number));
+                if (data.length < 100) break;
+              }
+            } else {
+              if (!/^\d+$/.test(raw) || !Number.isSafeInteger(Number(raw)) || Number(raw) <= 0) {
+                core.setFailed(`issue input is not a positive integer: ${raw}`);
+                return;
+              }
+              numbers = [Number(raw)];
             }
-            const issueNumber = Number(raw);
             const assignees = JSON.parse(process.env.ASSIGNEES);
-            await github.rest.issues.addAssignees({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: issueNumber,
-              assignees
-            });
-            core.info(`assigned #${issueNumber} to ${assignees.join(', ')}`);
+            for (const issueNumber of numbers) {
+              await github.rest.issues.addAssignees({
+                owner,
+                repo,
+                issue_number: issueNumber,
+                assignees
+              });
+              core.info(`assigned #${issueNumber} to ${assignees.join(', ')}`);
+            }
+            core.info(`assigned ${numbers.length} item(s)`);
