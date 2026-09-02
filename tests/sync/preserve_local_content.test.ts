@@ -33,6 +33,10 @@ const HE = "# END REPO-PLATFORM MANAGED";
 const OLD_SENTINEL = "<!-- repo-platform:local-section -->";
 const OLD_LOCAL_BEGIN = "# BEGIN REPOSITORY LOCAL";
 const OLD_LOCAL_END = "# END REPOSITORY LOCAL";
+// The retired .gitignore guidance line, verbatim: platform-authored text
+// the one grammar makes FALSE (there is no "this section" anymore), so
+// the conversion strips it with the retired markers.
+const OLD_GUIDANCE = "# Add repository-specific ignore patterns in this section only.";
 
 const MANIFEST_REL = ".github/repo-platform-manifest.json";
 
@@ -178,6 +182,8 @@ describe("carryManagedRegion", () => {
       content: `${agentsRender}\n## Project docs\n\nrepo-local instructions\n`,
       from: "tail-marker",
       extraMarkers: false,
+      stripped: [],
+      blanksCollapsed: 0,
     });
   });
 
@@ -200,19 +206,140 @@ describe("carryManagedRegion", () => {
       asEntry({ path: ".gitignore", begin: HB, end: HE }),
       { vintage: "bounded-region", path: ".gitignore", managed_begin: HB },
     );
+    // The repository's OWN line rides through; the retired LOCAL marker
+    // pair does not - it is platform-authored relic text the one grammar
+    // no longer splits at, subtracted by the conversion and named in the
+    // note.
     expect(carry).toEqual({
       kind: "converted",
-      content: `${OLD_LOCAL_BEGIN}\n/repo-local-cache/\n${OLD_LOCAL_END}\n\n${gitignoreManagedNew}`,
+      content: `/repo-local-cache/\n\n${gitignoreManagedNew}`,
       from: "bounded-region",
       extraMarkers: false,
+      stripped: [OLD_LOCAL_BEGIN, OLD_LOCAL_END],
+      blanksCollapsed: 0,
     });
   });
 
-  test("an old bounded-region copy passes through byte-identical when the managed content is unchanged", () => {
+  test("the conversion strips the retired guidance line, keeping a repo LOOKALIKE", () => {
+    // The relic set is exact full lines: the retired guidance goes, a line
+    // the repository wrote that merely resembles it survives byte-identical.
+    const lookalike = "# Add repository-specific ignore patterns here please";
+    const oldShape =
+      `${OLD_LOCAL_BEGIN}\n${OLD_GUIDANCE}\n${lookalike}\n/repo-local-cache/\n` +
+      `${OLD_LOCAL_END}\n\n${HB}\n*.old\n${HE}\n`;
+    const carry = carryManagedRegion(
+      gitignoreRender,
+      oldShape,
+      asEntry({ path: ".gitignore", begin: HB, end: HE }),
+      { vintage: "bounded-region", path: ".gitignore", managed_begin: HB },
+    );
+    expect(carry).toEqual({
+      kind: "converted",
+      content: `${lookalike}\n/repo-local-cache/\n\n${gitignoreManagedNew}`,
+      from: "bounded-region",
+      extraMarkers: false,
+      stripped: [OLD_LOCAL_BEGIN, OLD_GUIDANCE, OLD_LOCAL_END],
+      blanksCollapsed: 0,
+    });
+  });
+
+  test("a STEADY-STATE sync never strips a relic-shaped line the repo owns", () => {
+    // Scope: the strip belongs to the conversion alone. An
+    // already-converted file whose repo-owned side happens to hold a
+    // retired spelling keeps it byte-identical, forever.
+    const target = `${OLD_LOCAL_BEGIN}\n${OLD_GUIDANCE}\n/repo-local-cache/\n\n${HB}\n*.old\n${HE}\n`;
+    const carry = carryManagedRegion(
+      gitignoreRender,
+      target,
+      asEntry({ path: ".gitignore", begin: HB, end: HE }),
+      headOf({ path: ".gitignore", begin: HB, end: HE }),
+    );
+    expect(carry).toEqual({
+      kind: "sides-restored",
+      content: `${OLD_LOCAL_BEGIN}\n${OLD_GUIDANCE}\n/repo-local-cache/\n\n${gitignoreManagedNew}`,
+    });
+  });
+
+  test("a converted side of nothing but relics collapses without a leading blank", () => {
+    // The stock old .gitignore LOCAL block was ALL platform boilerplate:
+    // after the strip the file opens on its managed region, not on a blank.
+    const oldShape = `${OLD_LOCAL_BEGIN}\n${OLD_GUIDANCE}\n${OLD_LOCAL_END}\n\n${HB}\n*.old\n${HE}\n`;
+    const carry = carryManagedRegion(
+      gitignoreRender,
+      oldShape,
+      asEntry({ path: ".gitignore", begin: HB, end: HE }),
+      { vintage: "bounded-region", path: ".gitignore", managed_begin: HB },
+    );
+    expect(carry?.content).toBe(gitignoreManagedNew);
+  });
+
+  test("a strip that leaves the render's bytes still REPORTS - it never returns null", () => {
+    // The common fleet .gitignore: an all-boilerplate LOCAL block above a
+    // managed half already equal to the render. The delivered bytes equal
+    // the render, but lines DID disappear from the repository's copy -
+    // returning null here would drop the note that explains them, and the
+    // tripwire (which subtracts the same relics) would stay silent too.
+    const oldShape = `${OLD_LOCAL_BEGIN}\n${OLD_GUIDANCE}\n${OLD_LOCAL_END}\n\n${gitignoreManagedNew}`;
+    const carry = carryManagedRegion(
+      gitignoreManagedNew,
+      oldShape,
+      asEntry({ path: ".gitignore", begin: HB, end: HE }),
+      { vintage: "bounded-region", path: ".gitignore", managed_begin: HB },
+    );
+    expect(carry).toEqual({
+      kind: "converted",
+      content: gitignoreManagedNew,
+      from: "bounded-region",
+      extraMarkers: false,
+      stripped: [OLD_LOCAL_BEGIN, OLD_GUIDANCE, OLD_LOCAL_END],
+      blanksCollapsed: 1,
+    });
+  });
+
+  test("a stale duplicate marker stripped to nothing still raises the extras flag", () => {
+    // The tail carried ONLY a stale duplicate sentinel: the strip empties
+    // the carried side, so the delivered bytes equal the render - and the
+    // review hold must survive that, or a duplicate-marker copy would
+    // auto-merge unexamined.
+    const oldShape = `old managed\n${OLD_SENTINEL}\n${OLD_SENTINEL}\n`;
+    const carry = carryManagedRegion(agentsRender, oldShape, asEntry(AGENTS_MARKERS), {
+      vintage: "tail-marker",
+      path: "AGENTS.md",
+      marker: OLD_SENTINEL,
+    });
+    expect(carry).toEqual({
+      kind: "converted",
+      content: agentsRender,
+      from: "tail-marker",
+      extraMarkers: true,
+      stripped: [OLD_SENTINEL],
+      blanksCollapsed: 0,
+    });
+  });
+
+  test("a legacy declaration falling back to the new markers strips NOTHING", () => {
+    // Out-of-band conversion: HEAD's manifest still says tail-marker, the
+    // FILE is already the new shape (its sentinel gone), so the legacy
+    // split fails and the carry falls back to the current markers - a
+    // steady-state carry. A relic-shaped line the repository owns must
+    // survive that byte-identical.
+    const target = `${OLD_LOCAL_BEGIN}\nrepo above\n\n${B}\nold managed\n${E}\n${OLD_GUIDANCE}\n`;
+    const carry = carryManagedRegion(agentsRender, target, asEntry(AGENTS_MARKERS), {
+      vintage: "tail-marker",
+      path: "AGENTS.md",
+      marker: OLD_SENTINEL,
+    });
+    expect(carry).toEqual({
+      kind: "sides-restored",
+      content: `${OLD_LOCAL_BEGIN}\nrepo above\n\n${agentsRender}${OLD_GUIDANCE}\n`,
+    });
+  });
+
+  test("an old bounded-region copy with no relics passes through byte-identical", () => {
     // The conversion's no-op case: the target's managed half (BEGIN line to
-    // EOF) already equals the render's region, so only the manifest shape
-    // changes and the FILE does not.
-    const above = `${OLD_LOCAL_BEGIN}\n/repo-local-cache/\n${OLD_LOCAL_END}\n\n`;
+    // EOF) already equals the render's region and its above-side carries no
+    // relic line, so only the manifest shape changes and the FILE does not.
+    const above = "/repo-local-cache/\n\n";
     const target = `${above}${gitignoreManagedNew}`;
     const carry = carryManagedRegion(
       gitignoreRender,
@@ -224,6 +351,19 @@ describe("carryManagedRegion", () => {
     expect(carry?.content).toBe(target);
   });
 
+  test("an unchanged managed half still converts when relics are the only diff", () => {
+    const above = `${OLD_LOCAL_BEGIN}\n/repo-local-cache/\n${OLD_LOCAL_END}\n\n`;
+    const target = `${above}${gitignoreManagedNew}`;
+    const carry = carryManagedRegion(
+      gitignoreRender,
+      target,
+      asEntry({ path: ".gitignore", begin: HB, end: HE }),
+      { vintage: "bounded-region", path: ".gitignore", managed_begin: HB },
+    );
+    expect(carry?.kind).toBe("converted");
+    expect(carry?.content).toBe(`/repo-local-cache/\n\n${gitignoreManagedNew}`);
+  });
+
   test("duplicate tail markers in the previous copy: split at the FIRST, flag the extras", () => {
     const oldShape = `${OLD_SENTINEL}\nbetween the markers\n${OLD_SENTINEL}\nafter the last\n`;
     const carry = carryManagedRegion(agentsRender, oldShape, asEntry(AGENTS_MARKERS), {
@@ -231,11 +371,16 @@ describe("carryManagedRegion", () => {
       path: "AGENTS.md",
       marker: OLD_SENTINEL,
     });
+    // Everything after the FIRST marker is kept - minus the stale
+    // duplicate marker itself, which is relic text, not repo content. The
+    // extras flag still holds the PR for review.
     expect(carry).toEqual({
       kind: "converted",
-      content: `${agentsRender}between the markers\n${OLD_SENTINEL}\nafter the last\n`,
+      content: `${agentsRender}between the markers\nafter the last\n`,
       from: "tail-marker",
       extraMarkers: true,
+      stripped: [OLD_SENTINEL],
+      blanksCollapsed: 0,
     });
   });
 
@@ -944,9 +1089,9 @@ describe("preserve_local_content render mode", () => {
   });
 
   test("THE TRANSITION: an old bounded-region .gitignore converts, LOCAL area riding above", () => {
-    const above = `${OLD_LOCAL_BEGIN}\n/repo-local-cache/\nsecret.env\n${OLD_LOCAL_END}\n\n`;
+    const above = `${OLD_LOCAL_BEGIN}\n${OLD_GUIDANCE}\n/repo-local-cache/\nsecret.env\n${OLD_LOCAL_END}\n\n`;
     const oldHead = `${above}${HB}\n*.old\n${HE}\n`;
-    const oldRender = `${OLD_LOCAL_BEGIN}\n# defaults\n${OLD_LOCAL_END}\n\n${HB}\n*.old\n${HE}\n`;
+    const oldRender = `${OLD_LOCAL_BEGIN}\n${OLD_GUIDANCE}\n${OLD_LOCAL_END}\n\n${HB}\n*.old\n${HE}\n`;
     const root = makeTarget({
       [MANIFEST_REL]: legacyManifestJson([
         { path: ".gitignore", grammar: "bounded-region", marker: HB },
@@ -962,16 +1107,25 @@ describe("preserve_local_content render mode", () => {
     );
     const result = runRender(root, renderDir, oldRenderDir);
     expect(result.exitCode).toBe(0);
-    // The old LOCAL area (its now-inert marker lines included) rides above
-    // the fresh managed region byte-for-byte; the render's above-seed is
-    // NOT resurrected over it.
-    expect(readFileSync(join(root, ".gitignore"), "utf-8")).toBe(`${above}${gitignoreManagedNew}`);
+    // The repository's OWN patterns ride above the fresh managed region
+    // byte-for-byte (the render's above-seed is NOT resurrected over
+    // them); the retired markers and the now-false guidance line - all
+    // platform-authored - are subtracted by the conversion, and the note
+    // names each one so the PR body explains the disappearance.
+    expect(readFileSync(join(root, ".gitignore"), "utf-8")).toBe(
+      `/repo-local-cache/\nsecret.env\n\n${gitignoreManagedNew}`,
+    );
     expect(result.summary).toContain("converted from the retired LOCAL-region split shape");
+    expect(result.summary).toContain("platform-authored relic line(s)");
+    expect(result.summary).toContain(`'${OLD_GUIDANCE}'`);
+    expect(result.summary).toContain(`'${OLD_LOCAL_BEGIN}'`);
+    expect(result.summary).toContain(`'${OLD_LOCAL_END}'`);
+    // A designed, itemized subtraction - not a review hold.
     expect(result.review).toBe("");
   });
 
-  test("THE TRANSITION: an old bounded-region file with unchanged managed content passes through byte-identical", () => {
-    const above = `${OLD_LOCAL_BEGIN}\n/repo-local-cache/\n${OLD_LOCAL_END}\n\n`;
+  test("THE TRANSITION: an old bounded-region file with unchanged managed content and no relics passes through byte-identical", () => {
+    const above = "/repo-local-cache/\n\n";
     const oldHead = `${above}${gitignoreManagedNew}`;
     const root = makeTarget({
       [MANIFEST_REL]: legacyManifestJson([
@@ -989,7 +1143,118 @@ describe("preserve_local_content render mode", () => {
     const result = runRender(root, renderDir, oldRenderDir);
     expect(result.exitCode).toBe(0);
     expect(readFileSync(join(root, ".gitignore"), "utf-8")).toBe(oldHead);
+    expect(result.summary).not.toContain("platform-authored relic line(s)");
     expect(result.review).toBe("");
+  });
+
+  test("a STEADY-STATE sync of a converted .gitignore strips nothing, ever", () => {
+    // The relic set is frozen historical vocabulary and the strip is the
+    // conversion's alone: a repo-owned side that happens to hold a retired
+    // spelling after conversion keeps it byte-identical on every later sync.
+    const above = `${OLD_LOCAL_BEGIN}\n${OLD_GUIDANCE}\n/repo-local-cache/\n\n`;
+    const oldHead = `${above}${HB}\n*.old\n${HE}\n`;
+    const root = makeTarget({
+      [MANIFEST_REL]: manifestJson([GITIGNORE_MARKERS]),
+      ".gitignore": oldHead,
+    });
+    initGitRepo(root);
+    writeFileSync(join(root, ".gitignore"), MERGE_JUNK);
+    const { renderDir, oldRenderDir } = makeRenderPair(
+      [GITIGNORE_MARKERS],
+      { ".gitignore": gitignoreRender },
+      { ".gitignore": gitignoreOldRender },
+    );
+    const result = runRender(root, renderDir, oldRenderDir);
+    expect(result.exitCode).toBe(0);
+    expect(readFileSync(join(root, ".gitignore"), "utf-8")).toBe(`${above}${gitignoreManagedNew}`);
+    expect(result.summary).not.toContain("platform-authored relic line(s)");
+  });
+
+  test("IDEMPOTENT: a second sync over a converted .gitignore rewrites nothing", () => {
+    // The converted state is a fixed point of the carry: HEAD is already
+    // the new shape, so the steady-state path runs and the file keeps the
+    // bytes the conversion left.
+    const converted = `/repo-local-cache/\n\n${gitignoreManagedNew}`;
+    const root = makeTarget({
+      [MANIFEST_REL]: manifestJson([GITIGNORE_MARKERS]),
+      ".gitignore": converted,
+    });
+    initGitRepo(root);
+    writeFileSync(join(root, ".gitignore"), MERGE_JUNK);
+    const { renderDir, oldRenderDir } = makeRenderPair(
+      [GITIGNORE_MARKERS],
+      { ".gitignore": gitignoreRender },
+      { ".gitignore": gitignoreRender },
+    );
+    const result = runRender(root, renderDir, oldRenderDir);
+    expect(result.exitCode).toBe(0);
+    expect(readFileSync(join(root, ".gitignore"), "utf-8")).toBe(converted);
+    expect(result.review).toBe("");
+  });
+
+  test("a bytes-equal strip still reaches the PR body (the all-boilerplate fleet case)", () => {
+    // The most common fleet .gitignore: an all-boilerplate LOCAL block
+    // above a managed half already equal to the render. The delivered
+    // bytes equal the render, so nothing but the note tells the reviewer
+    // the lines went - and it must be there.
+    const oldHead = `${OLD_LOCAL_BEGIN}\n${OLD_GUIDANCE}\n${OLD_LOCAL_END}\n\n${gitignoreManagedNew}`;
+    const root = makeTarget({
+      [MANIFEST_REL]: legacyManifestJson([
+        { path: ".gitignore", grammar: "bounded-region", marker: HB },
+      ]),
+      ".gitignore": oldHead,
+    });
+    initGitRepo(root);
+    writeFileSync(join(root, ".gitignore"), MERGE_JUNK);
+    const { renderDir, oldRenderDir } = makeRenderPair(
+      [GITIGNORE_MARKERS],
+      { ".gitignore": gitignoreManagedNew },
+      { ".gitignore": oldHead },
+    );
+    const result = runRender(root, renderDir, oldRenderDir);
+    expect(result.exitCode).toBe(0);
+    expect(readFileSync(join(root, ".gitignore"), "utf-8")).toBe(gitignoreManagedNew);
+    expect(result.summary).toContain("- `.gitignore`:");
+    expect(result.summary).toContain("platform-authored relic line(s)");
+    expect(result.summary).toContain(`'${OLD_GUIDANCE}'`);
+    // The blank the removals left behind is counted too: the tripwire's
+    // multiset ignores blanks, so the note is the only place the whole
+    // difference between the previous side and the carried one is stated.
+    expect(result.summary).toContain("plus 1 blank line(s) the removals left behind");
+    // Loud, but not a hold: the strip is designed and itemized, so the
+    // common fleet conversion stays auto-merge eligible.
+    expect(result.review).toBe("");
+  });
+
+  test("the relic note is BOUNDED by the closed vocabulary, not by occurrences", () => {
+    // A previous copy carrying hundreds of stale relic lines must not push
+    // the carry section past the PR body's budget: the note itemizes by
+    // SPELLING with a count, so it stays a handful of entries.
+    const many = `${OLD_LOCAL_BEGIN}\n`.repeat(200);
+    const oldHead = `${many}/repo-local-cache/\n\n${HB}\n*.old\n${HE}\n`;
+    const root = makeTarget({
+      [MANIFEST_REL]: legacyManifestJson([
+        { path: ".gitignore", grammar: "bounded-region", marker: HB },
+      ]),
+      ".gitignore": oldHead,
+    });
+    initGitRepo(root);
+    writeFileSync(join(root, ".gitignore"), MERGE_JUNK);
+    const { renderDir, oldRenderDir } = makeRenderPair(
+      [GITIGNORE_MARKERS],
+      { ".gitignore": gitignoreRender },
+      { ".gitignore": oldHead },
+    );
+    const result = runRender(root, renderDir, oldRenderDir);
+    expect(result.exitCode).toBe(0);
+    expect(readFileSync(join(root, ".gitignore"), "utf-8")).toBe(
+      `/repo-local-cache/\n\n${gitignoreManagedNew}`,
+    );
+    expect(result.summary).toContain("dropped 200 platform-authored relic line(s)");
+    expect(result.summary).toContain(`'${OLD_LOCAL_BEGIN}' (x200)`);
+    // One spelling, one entry: the note cannot grow with the file.
+    expect(result.summary.split(OLD_LOCAL_BEGIN).length - 1).toBe(1);
+    expect(result.summary.length).toBeLessThan(2000);
   });
 
   test("content ABOVE the region round-trips through a real render-mode run", () => {

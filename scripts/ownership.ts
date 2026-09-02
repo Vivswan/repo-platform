@@ -80,8 +80,9 @@ export const REGION_MARKER_LINES = new Set([
  *  one ships a dead promise line readers would still believe - and keeping
  *  the scan armed is what stops the retired grammar from quietly growing
  *  back. Fleet repositories may carry these lines as ordinary repo-owned
- *  content (the transition preserves their bytes); only TEMPLATE sources
- *  are scanned. */
+ *  content until their conversion sync, which subtracts them as
+ *  platform-authored relics (.github/scripts/sync/head_manifest.ts's
+ *  CONVERSION_RELIC_LINES); only TEMPLATE sources are scanned here. */
 export const RETIRED_MARKER_LINES = new Set([
   "# repo-platform:local-section",
   "<!-- repo-platform:local-section -->",

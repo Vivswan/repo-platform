@@ -21,11 +21,16 @@
 // TRANSITION SHIM, deliberately scoped: reading the retired vintages out
 // of HEAD is what lets the sync CONVERT a tail-marker or old-bounded file
 // to the managed-region shape with its repo-owned bytes preserved exactly
-// - dropping them instead would be live-state destruction, the one thing
-// that justifies a shim. Once the fleet is censused all-converted, delete
+// - except for the itemized frozen relic set below - dropping them
+// instead would be live-state destruction, the one thing that justifies a
+// shim. The conversion's one deliberate subtraction lives
+// here too (CONVERSION_RELIC_LINES / stripConversionRelics below): the
+// platform-authored relic lines the retired shapes left sitting on the
+// repository's side. Once the fleet is censused all-converted, delete
 // the legacy arms here and let the unknown-grammar refusal below cover
-// them (the same lifecycle the pre-grammar manifest fallback followed:
-// carried for one transition, then retired with a loud refusal).
+// them - the relic set and its strip die in the same deletion (the same
+// lifecycle the pre-grammar manifest fallback followed: carried for one
+// transition, then retired with a loud refusal).
 //
 // Everything here fails CLOSED: a manifest this module cannot read in
 // full throws with an actionable message, and the callers route the throw
@@ -90,6 +95,86 @@ const KNOWN_HEAD_CLASSES = new Set(["managed", "split", "starter", "mergeable"])
 /** The RETIRED split grammars this reader still converts (see the shim
  * note above). */
 const LEGACY_GRAMMARS = new Set(["tail-marker", "bounded-region"]);
+
+/** PLATFORM-AUTHORED relic lines the one-time shape conversion strips from
+ * the carried repo-owned sides: the retired grammars' marker spellings
+ * (the tail-marker sentinel pair and the old LOCAL region's marker pair -
+ * the same historical vocabulary RETIRED_MARKER_LINES in
+ * scripts/ownership.ts scans template sources for) plus the old bounded
+ * .gitignore's guidance line, which is actively FALSE under the one
+ * grammar (no "this section" exists anymore). Left in place, every
+ * converted file would carry the wrong instructions forever - the
+ * conversion is the only moment the sync may subtract them.
+ *
+ * This list is CLOSED: frozen historical spellings, matched as whole
+ * trimmed lines only (never patterns - a repo-authored line that merely
+ * resembles the guidance must survive byte-identical). It never grows,
+ * and it dies with this module's legacy vintage arms when the fleet is
+ * censused all-converted (the documented shim deletion above). */
+export const CONVERSION_RELIC_LINES: ReadonlySet<string> = new Set([
+  "# repo-platform:local-section",
+  "<!-- repo-platform:local-section -->",
+  "# BEGIN REPOSITORY LOCAL",
+  "# END REPOSITORY LOCAL",
+  "# Add repository-specific ignore patterns in this section only.",
+]);
+
+/** A carried repo-owned side with the CONVERSION_RELIC_LINES removed
+ * (exact trimmed-line matches only) and the strip's blank-line WAKE
+ * collapsed conservatively: a blank directly after a removal is dropped
+ * only when keeping it would open the side with a blank or double an
+ * already-kept blank, and a side left holding nothing but blanks collapses
+ * to empty. Blanks the strip never disturbed ride through byte-identical,
+ * and a side containing no relic line is returned byte-identical.
+ *
+ * Both deletions are REPORTED, never silent: `stripped` names every relic
+ * line and `blanksCollapsed` counts the wake blanks, so the carry note can
+ * account for the whole difference between the previous side and the
+ * carried one. The tripwire's multiset ignores blank lines by design
+ * (blank movement is not content loss anywhere in this pipeline), so the
+ * count is the only place a wake blank is ever stated - which is why it is
+ * returned rather than left implicit. */
+export function stripConversionRelics(text: string): {
+  text: string;
+  stripped: string[];
+  blanksCollapsed: number;
+} {
+  const stripped: string[] = [];
+  let blanksCollapsed = 0;
+  const hadFinalNewline = text.endsWith("\n");
+  const lines = text.split("\n");
+  if (hadFinalNewline) lines.pop();
+  const out: string[] = [];
+  let seam = false;
+  for (const line of lines) {
+    if (CONVERSION_RELIC_LINES.has(line.trim())) {
+      stripped.push(line);
+      seam = true;
+      continue;
+    }
+    if (seam && line.trim() === "") {
+      const last = out.length === 0 ? null : out[out.length - 1];
+      if (last === null || last.trim() === "") {
+        blanksCollapsed += 1;
+        continue;
+      }
+      out.push(line);
+      seam = false;
+      continue;
+    }
+    out.push(line);
+    seam = false;
+  }
+  if (stripped.length === 0) return { text, stripped, blanksCollapsed: 0 };
+  if (out.every((line) => line.trim() === "")) {
+    return { text: "", stripped, blanksCollapsed: blanksCollapsed + out.length };
+  }
+  return {
+    text: out.join("\n") + (hadFinalNewline ? "\n" : ""),
+    stripped,
+    blanksCollapsed,
+  };
+}
 
 /** How HEAD's manifest declares its splits, strictly parsed per vintage.
  * Every entry's ownership class must be on the known roster - reading a
@@ -282,6 +367,51 @@ export function managedPart(content: string, decl: HeadSplit): string | null {
  * excerpts. Null when the copy does not split at its declaration. */
 export function repoOwnedText(content: string, decl: HeadSplit): string | null {
   const sides = repoOwnedSides(content, decl);
+  if (sides === null) return null;
+  if (sides.above === "") return sides.below;
+  if (sides.below === "") return sides.above;
+  return `${sides.above}\n${sides.below}`;
+}
+
+/** What a previous copy's repository-owned sides BECOME when this sync
+ * carries them: `repoOwnedSides` verbatim for the current vintage, and for
+ * a RETIRED one the same sides minus the platform-authored relic lines the
+ * old shape left sitting there (CONVERSION_RELIC_LINES above). THE single
+ * owner of "does this declaration's carry strip?" - the rebuild
+ * (preserve_local_content.ts) and the tripwire (tail_tripwire.ts) both ask
+ * here instead of testing the vintage discriminant themselves, so neither
+ * can strip a steady-state carry nor forget the subtraction the other
+ * made. Null when the copy does not split at its declaration. */
+export function carriedSides(
+  content: string,
+  decl: HeadSplit,
+): {
+  above: string;
+  below: string;
+  extraMarkers: boolean;
+  stripped: string[];
+  blanksCollapsed: number;
+} | null {
+  const sides = repoOwnedSides(content, decl);
+  if (sides === null) return null;
+  if (decl.vintage === "managed-region") return { ...sides, stripped: [], blanksCollapsed: 0 };
+  const above = stripConversionRelics(sides.above);
+  const below = stripConversionRelics(sides.below);
+  return {
+    above: above.text,
+    below: below.text,
+    extraMarkers: sides.extraMarkers,
+    stripped: [...above.stripped, ...below.stripped],
+    blanksCollapsed: above.blanksCollapsed + below.blanksCollapsed,
+  };
+}
+
+/** carriedSides as ONE text, joined like repoOwnedText: the repo-owned
+ * lines this sync PROMISES the delivered copy still holds. The tripwire's
+ * expected multiset, so the designed strip verifies while every other
+ * previous line stays guarded. */
+export function carriedRepoOwnedText(content: string, decl: HeadSplit): string | null {
+  const sides = carriedSides(content, decl);
   if (sides === null) return null;
   if (sides.above === "") return sides.below;
   if (sides.below === "") return sides.above;

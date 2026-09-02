@@ -14,7 +14,13 @@
 // .gitignore shape) is CONVERTED - its repo-owned bytes located by the
 // previous commit's OWN manifest declaration (head_manifest.ts) and
 // re-seated around the new region (a tail lands below END, the old LOCAL
-// area lands above BEGIN), byte-for-byte.
+// area lands above BEGIN), byte-for-byte, MINUS the platform-authored
+// relic lines the retired shape left on the repository's side (the
+// retired marker spellings and the old .gitignore guidance line that the
+// one grammar makes false - head_manifest.ts's CONVERSION_RELIC_LINES).
+// The strip belongs to the conversion alone; a steady-state sync of an
+// already-converted file subtracts nothing, and every dropped line is
+// named in the carry note.
 //
 // RENDER MODE (--render-dir; the PRIMARY path, run on every normal sync):
 // after `copier update`, the merged result for every split-class file is
@@ -84,11 +90,11 @@ import { parseFlags } from "../shared/flags.ts";
 import { type HeadNonBlobKind, headEntry } from "../shared/git_head.ts";
 import { capture } from "../shared/proc.ts";
 import {
+  carriedSides,
   type HeadSplit,
   headSplitEntries,
   isCleanRelativePath,
   managedPart,
-  repoOwnedSides,
 } from "./head_manifest.ts";
 
 function withTrailingNewline(content: string): string {
@@ -193,6 +199,15 @@ export type RegionCarry =
        * everything after the first was kept, so the carried side may hold
        * a stale duplicate to review. */
       extraMarkers: boolean;
+      /** PLATFORM-AUTHORED relic lines the conversion subtracted from the
+       * carried sides (CONVERSION_RELIC_LINES), in file order. Empty when
+       * the previous copy carried none. */
+      stripped: string[];
+      /** Blank lines the relic removals left behind and the strip
+       * collapsed (a leading blank, a doubled one, an all-blank
+       * remainder). Reported with `stripped` so the note accounts for the
+       * WHOLE difference between the previous side and the carried one. */
+      blanksCollapsed: number;
     }
   | { kind: "appendix"; content: string };
 
@@ -200,11 +215,13 @@ export type RegionCarry =
  * previous copy's repository-owned sides byte-for-byte around it. The
  * previous copy is split by `headDecl` - its OWN manifest's declaration,
  * retired vintages included (that is what converts a tail-marker or
- * old-bounded file with zero byte loss) - falling back to the new entry's
- * markers when no HEAD declaration is usable or the declared legacy shape
- * is not present. Null means keep the render: the previous copy never
- * diverged (delivered content would equal the render), or an unsplittable
- * previous copy is blank. Throws when the RENDER has no clean region -
+ * old-bounded file, byte-identical except for the itemized frozen relic
+ * set head_manifest.ts's carriedSides subtracts) - falling back to the new
+ * entry's markers when no HEAD declaration is usable or the declared
+ * legacy shape is not present. Null means keep the render with nothing to
+ * say: the previous copy never diverged (delivered content would equal the
+ * render) and the carry subtracted nothing, or an unsplittable previous
+ * copy is blank. Throws when the RENDER has no clean region -
  * manifest and render are generated together, so that is damage, and
  * keeping the merged result would hand the file back to the merge this
  * rebuild exists to discard. */
@@ -228,14 +245,19 @@ export function carryManagedRegion(
     end: entry.end,
   };
   let decl = headDecl ?? entryDecl;
-  let sides = repoOwnedSides(target, decl);
+  // carriedSides, never repoOwnedSides: head_manifest.ts is the single
+  // owner of what a declaration's sides BECOME under the carry, retired
+  // vintages' relic strip included, so this rebuild cannot strip a
+  // steady-state carry and the tripwire cannot miss what this one dropped.
+  let sides = carriedSides(target, decl);
   if (sides === null && decl.vintage !== "managed-region") {
     // The previous commit's manifest declares a retired shape the file no
     // longer has (an out-of-band conversion, a hand edit); before going to
     // the appendix, try the CURRENT markers - a copy already in the new
-    // shape splits honestly there.
+    // shape splits honestly there (and strips nothing: it is not a
+    // conversion any more).
     decl = entryDecl;
-    sides = repoOwnedSides(target, decl);
+    sides = carriedSides(target, decl);
   }
   if (sides === null) {
     // No recognizable split (the previous copy was hand-edited past
@@ -250,10 +272,25 @@ export function carryManagedRegion(
   // the seam newline belongs to the join, not to the byte-owned side.
   const region = sides.below !== "" ? withTrailingNewline(renderSlice.region) : renderSlice.region;
   const content = sides.above + region + sides.below;
-  if (content === render) return null;
   if (decl.vintage !== "managed-region") {
-    return { kind: "converted", content, from: decl.vintage, extraMarkers: sides.extraMarkers };
+    // A conversion states itself even when the delivered BYTES equal the
+    // render. The common fleet .gitignore is exactly that case: its old
+    // LOCAL block was all platform boilerplate, so the strip empties the
+    // carried side and the file lands as the render - lines DID disappear
+    // from the repository's copy, and returning null here would drop the
+    // note that explains them (and, with a lone stale duplicate marker
+    // stripped, the review hold too).
+    if (content === render && sides.stripped.length === 0 && !sides.extraMarkers) return null;
+    return {
+      kind: "converted",
+      content,
+      from: decl.vintage,
+      extraMarkers: sides.extraMarkers,
+      stripped: sides.stripped,
+      blanksCollapsed: sides.blanksCollapsed,
+    };
   }
+  if (content === render) return null;
   return { kind: "sides-restored", content };
 }
 
@@ -262,10 +299,12 @@ const CARRY_NOTES: Record<RegionCarry["kind"] | "converted-bounded", string> = {
     "repository-owned content outside the managed region restored from the repository's copy",
   converted:
     "converted from the retired tail-marker split shape: the repository-owned tail " +
-    "now sits below the managed region's END marker, byte-for-byte",
+    "now sits below the managed region's END marker with every repository-authored " +
+    "byte intact",
   "converted-bounded":
     "converted from the retired LOCAL-region split shape: the repository-owned " +
-    "content above the managed region rides through byte-for-byte",
+    "content above the managed region rides through with every repository-authored " +
+    "byte intact",
   appendix:
     "managed region not recognized in the repository's previous copy; the previous " +
     "copy is preserved in full below the END marker under a " +
@@ -276,6 +315,40 @@ const EXTRA_MARKERS_NOTE =
   "; the previous copy carried more than one retired split marker line, and " +
   "everything after its first marker was kept - review the carried content for " +
   "stale duplicates";
+
+/** The conversion's relic-strip note: the disappearing lines are named in
+ * the PR body, so a reviewer never has to guess why the converted file is
+ * shorter than the byte-for-byte promise implies. Platform-authored text
+ * only (the retired marker spellings, the old "in this section only"
+ * guidance that the one grammar makes false); anything the repository
+ * wrote rides through untouched.
+ *
+ * Itemized by SPELLING with an occurrence count, not one entry per
+ * occurrence: the relic vocabulary is a closed five-line set, so this note
+ * is bounded whatever the previous copy carried - listing occurrences
+ * would let a file with hundreds of stale markers push the whole carry
+ * section past the PR body's budget and out of the report. The blank lines
+ * the removals left behind are counted too: the tripwire's multiset
+ * ignores blanks by design, so this note is the only place they are
+ * stated, and the reviewer can account for every line the side lost. */
+function relicStripNote(stripped: string[], blanksCollapsed: number): string {
+  const counts = new Map<string, number>();
+  for (const line of stripped) {
+    const spelling = line.trim();
+    counts.set(spelling, (counts.get(spelling) ?? 0) + 1);
+  }
+  const quoted = [...counts]
+    .map(([spelling, count]) => `'${clip(spelling)}'${count > 1 ? ` (x${count})` : ""}`)
+    .join(", ");
+  const blanks =
+    blanksCollapsed > 0 ? `, plus ${blanksCollapsed} blank line(s) the removals left behind` : "";
+  return (
+    `; the conversion also dropped ${stripped.length} platform-authored relic line(s) ` +
+    `the retired shape carried on the repository's side (${quoted})${blanks} - the retired ` +
+    "markers no longer split anything and their guidance is false under the " +
+    "BEGIN/END managed region"
+  );
+}
 
 const MANAGED_REGION_DIFFERS_NOTE =
   "; the managed content differed from the fresh render; those differences are " +
@@ -305,7 +378,8 @@ function carryNote(carry: RegionCarry, mode: "recopy" | "render", managedDiffers
     case "converted":
       return (
         CARRY_NOTES[carry.from === "bounded-region" ? "converted-bounded" : "converted"] +
-        (carry.extraMarkers ? EXTRA_MARKERS_NOTE : "")
+        (carry.extraMarkers ? EXTRA_MARKERS_NOTE : "") +
+        (carry.stripped.length > 0 ? relicStripNote(carry.stripped, carry.blanksCollapsed) : "")
       );
     case "appendix":
       return CARRY_NOTES.appendix;
@@ -665,7 +739,10 @@ const RENDER_INTRO = [
   "commit, and copier's merged result for these files was discarded. A file",
   "still in a retired split shape (tail-marker, the old LOCAL-region",
   ".gitignore shape) was CONVERTED to the BEGIN/END managed-region shape",
-  "with its repository-owned bytes preserved exactly. Local edits inside a",
+  "with its repository-owned bytes preserved exactly, except for the",
+  "platform-authored relic lines the retired shape left on that side (the",
+  "retired markers and their now-false guidance), which its bullet",
+  "itemizes. Local edits inside a",
   "managed region do NOT survive this rebuild (managed regions are",
   "template-owned); such edits are reset and flagged below. Each bullet",
   "names its file's actual disposition (not every file has previous content",

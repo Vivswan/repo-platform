@@ -366,16 +366,69 @@ describe("compareHalves", () => {
 
   test("THE TRANSITION: an old bounded-region HEAD verifies against the converted copy", () => {
     const head = `${OLD_LOCAL_BEGIN}\n/repo-local-cache/\n${OLD_LOCAL_END}\n\n${HB}\n*.old\n${HE}\n`;
-    const delivered = `${OLD_LOCAL_BEGIN}\n/repo-local-cache/\n${OLD_LOCAL_END}\n\n${HB}\n*.new\n${HE}\n`;
+    // The conversion also SUBTRACTS the retired marker pair (and the old
+    // guidance line): platform-authored relics, not repo-owned content.
+    // The expected multiset drops them explicitly, so the designed strip
+    // reads as verified rather than as lost lines.
+    const delivered = `/repo-local-cache/\n\n${HB}\n*.new\n${HE}\n`;
     expect(
       compareHalves(regionSplit(".gitignore", HB, HE), headBounded(), head, delivered),
     ).toBeNull();
+    // A repo that had not been converted yet still verifies: subtracting
+    // from the EXPECTED side never invents a finding.
+    const unstripped = `${OLD_LOCAL_BEGIN}\n/repo-local-cache/\n${OLD_LOCAL_END}\n\n${HB}\n*.new\n${HE}\n`;
+    expect(
+      compareHalves(regionSplit(".gitignore", HB, HE), headBounded(), head, unstripped),
+    ).toBeNull();
+    // The repository's own line is NOT subtracted: losing it still fires,
+    // and the relic lines never pad the finding.
     const shrank = `${HB}\n*.new\n${HE}\n`;
     expect(compareHalves(regionSplit(".gitignore", HB, HE), headBounded(), head, shrank)).toEqual({
       path: ".gitignore",
       kind: "shrank",
-      missing: [OLD_LOCAL_BEGIN, "/repo-local-cache/", OLD_LOCAL_END],
+      missing: ["/repo-local-cache/"],
     });
+  });
+
+  test("THE TRANSITION: the retired guidance line is subtracted, a lookalike is not", () => {
+    const guidance = "# Add repository-specific ignore patterns in this section only.";
+    const lookalike = "# Add repository-specific ignore patterns here please";
+    const head = `${OLD_LOCAL_BEGIN}\n${guidance}\n${lookalike}\n${OLD_LOCAL_END}\n\n${HB}\n*.old\n${HE}\n`;
+    // The conversion keeps the lookalike (repo-authored) and drops the
+    // exact retired line: clear.
+    expect(
+      compareHalves(
+        regionSplit(".gitignore", HB, HE),
+        headBounded(),
+        head,
+        `${lookalike}\n\n${HB}\n*.new\n${HE}\n`,
+      ),
+    ).toBeNull();
+    // Dropping the lookalike too is a real loss and must still fire.
+    expect(
+      compareHalves(
+        regionSplit(".gitignore", HB, HE),
+        headBounded(),
+        head,
+        `${HB}\n*.new\n${HE}\n`,
+      ),
+    ).toEqual({ path: ".gitignore", kind: "shrank", missing: [lookalike] });
+  });
+
+  test("a STEADY-STATE comparison subtracts nothing (relic-shaped lines are repo content)", () => {
+    // Scope, mirrored from the carry: outside a retired vintage nothing is
+    // stripped, so a relic-shaped line the repo owns is guarded like any
+    // other repo-owned line.
+    const head = `${OLD_LOCAL_BEGIN}\n/repo-local-cache/\n\n${HB}\n*.old\n${HE}\n`;
+    const delivered = `/repo-local-cache/\n\n${HB}\n*.new\n${HE}\n`;
+    expect(
+      compareHalves(
+        regionSplit(".gitignore", HB, HE),
+        headRegion(".gitignore", HB, HE),
+        head,
+        delivered,
+      ),
+    ).toEqual({ path: ".gitignore", kind: "shrank", missing: [OLD_LOCAL_BEGIN] });
   });
 
   test("region content compares across BOTH sides as one multiset", () => {
@@ -512,7 +565,10 @@ describe("tail_tripwire script", () => {
     const agentsOldShape = `# AGENTS.md\n\nold managed\n\n${OLD_SENTINEL}\n\n## Project docs\n\nrepo-local instructions\n`;
     const agentsConverted = `${B}\n# AGENTS.md\n\nfresh managed\n${E}\n\n## Project docs\n\nrepo-local instructions\n`;
     const gitignoreOldShape = `${OLD_LOCAL_BEGIN}\n/repo-local-cache/\n${OLD_LOCAL_END}\n\n${HB}\n*.old\n${HE}\n`;
-    const gitignoreConverted = `${OLD_LOCAL_BEGIN}\n/repo-local-cache/\n${OLD_LOCAL_END}\n\n${HB}\n*.new\n${HE}\n`;
+    // What the carry actually delivers: the repo's own line above the
+    // fresh region, the retired markers subtracted as platform-authored
+    // relics. The wire must read that as verified, not as three lost lines.
+    const gitignoreConverted = `/repo-local-cache/\n\n${HB}\n*.new\n${HE}\n`;
     const root = makeTarget(
       {
         "AGENTS.md": agentsOldShape,

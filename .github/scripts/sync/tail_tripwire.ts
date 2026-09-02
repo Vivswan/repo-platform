@@ -14,6 +14,12 @@
 // BEGIN) VERIFIES here instead of alarming - each side is split by its own
 // declaration and the line check is side-agnostic (the multiset spans
 // above and below), so a byte-preserving move between sides is not a loss.
+// The conversion's one deliberate SUBTRACTION - the platform-authored
+// relic lines the retired shapes left on the repository's side
+// (head_manifest.ts's closed CONVERSION_RELIC_LINES) - is subtracted from
+// the expected multiset explicitly, on retired vintages only: the designed
+// strip stays verifiable rather than reading as lost repo-owned lines, and
+// any OTHER missing line still fires.
 // The manifest exists fleet-wide, so there is no pre-manifest splitting
 // fallback, and a HEAD manifest declaring a grammar this sync does not
 // read (neither current nor a retired vintage the transition converts) is
@@ -53,7 +59,12 @@ import { MANIFEST_NAME } from "../../../actions/shared/manifest.ts";
 import { parseFlags } from "../shared/flags.ts";
 import { requireEnv } from "../shared/gha.ts";
 import { headEntry } from "../shared/git_head.ts";
-import { type HeadSplit, headSplitEntries, repoOwnedText } from "./head_manifest.ts";
+import {
+  carriedRepoOwnedText,
+  type HeadSplit,
+  headSplitEntries,
+  repoOwnedText,
+} from "./head_manifest.ts";
 import {
   clip,
   fenceFor,
@@ -88,7 +99,15 @@ export function compareHalves(
   delivered: string,
 ): Finding | null {
   const path = entry.path;
-  const previousOwned = repoOwnedText(headCopy, head);
+  // carriedRepoOwnedText, not repoOwnedText: head_manifest.ts is the
+  // single owner of what a declaration's repo-owned side BECOMES under
+  // the carry, so the conversion's DESIGNED relic strip (its closed
+  // CONVERSION_RELIC_LINES, on retired vintages only) is subtracted from
+  // the expected multiset here by the same code that subtracted it in the
+  // rebuild - the strip stays verifiable instead of reading as lost
+  // repo-owned lines, every OTHER previous line stays guarded, and the
+  // two sites cannot drift on what "designed" means.
+  const previousOwned = carriedRepoOwnedText(headCopy, head);
   if (previousOwned === null) {
     return {
       path,
@@ -113,6 +132,9 @@ export function compareHalves(
         "marker lines, so its repository-owned content cannot be located",
     };
   }
+  // The conversion's DESIGNED relic strip is already subtracted above (by
+  // carriedRepoOwnedText, the shared owner); everything left in the
+  // expected text is content this sync promised to keep.
   const missing = missingLines(previousOwned, deliveredOwned);
   return missing.length === 0 ? null : { path, kind: "shrank", missing };
 }
