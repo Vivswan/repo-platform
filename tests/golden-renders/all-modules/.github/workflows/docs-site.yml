@@ -1,0 +1,33 @@
+# This file is managed by Vivswan/repo-platform.
+# Local edits may be replaced during template updates.
+#
+# The docs site: this repository's docs/ markdown rendered under the
+# central fleet theme (repo-platform's actions/pages-site) - layout,
+# versioning, locales, and conventions in repo-platform's docs/docs-site.md.
+# The check job builds docs/ strictly on every PR touching it (dead
+# internal links fail there instead of at deploy time); paths-filtered by
+# design, so it is never in the all-green roster and never a required
+# check. The deploy itself lives in
+# pages.yml: with the pages module selected, the website rides at / and
+# the docs mount at /docs/ in ONE Pages deployment.
+name: Docs Site
+
+on:
+  pull_request:
+    paths:
+      - docs/**
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: Vivswan/repo-platform/actions/pages-site@build
+        with:
+          check: "true"
+          site-title: "Golden Render"

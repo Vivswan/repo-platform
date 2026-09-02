@@ -84,6 +84,37 @@ describe("workflowLabelRefs", () => {
     expect(workflowLabelRefs(workflow)).toEqual([]);
   });
 
+  test("the litellm false-positive shapes are silent while a real label: still extracts", () => {
+    // The nightly fuzz-issue call: label-color/label-description CONFIGURE
+    // attributes of the label the sibling `label:` key names, and a docker
+    // matrix's `labels` shard selector is a job variable - only the one
+    // genuine name may reach the missing-label warning.
+    const workflow = [
+      "jobs:",
+      "  shards:",
+      "    strategy:",
+      "      matrix:",
+      "        labels: [shard-1, shard-2]",
+      "        include:",
+      "          - labels: shard-3",
+      "  file-issue:",
+      "    steps:",
+      "      - uses: viv/repo-platform/actions/fuzz-issue@build",
+      "        with:",
+      "          label: fuzz-failure",
+      '          label-color: "D93F0B"',
+      "          label-description: Automated nightly CI failure",
+    ].join("\n");
+    expect(workflowLabelRefs(workflow)).toEqual(["fuzz-failure"]);
+    const missing = missingFromRoster(
+      collectReferences([
+        { path: ".github/workflows/nightly.yml", kind: "workflow", text: workflow },
+      ]),
+      [],
+    );
+    expect(missing.map((reference) => reference.label)).toEqual(["fuzz-failure"]);
+  });
+
   test("expression shapes are extracted in both operand orders, plus contains()", () => {
     const workflow = [
       "jobs:",

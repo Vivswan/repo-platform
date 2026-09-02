@@ -55,7 +55,7 @@ present "uses: ./.github/workflows/checks.yml" "$wf/ci.yml"
 # JSON is rebuilt in MODULE_ORDER (a new module must join this list or the
 # everything row's exact-line assert fails loudly).
 ordered=""
-for m in agents bun node deno uv rust pages release-please issue-templates skills pr-title auto-assign fuzzer nightly settings-sync custom-license; do
+for m in agents bun node deno uv rust pages docs-site release-please issue-templates skills pr-title auto-assign fuzzer nightly settings-sync custom-license; do
   if has "$m"; then ordered="${ordered:+$ordered, }\"$m\""; fi
 done
 present_line "      modules: '[$ordered]'" "$wf/ci.yml"
@@ -135,7 +135,53 @@ test ! -e "$wf/rerun-copilot-gate.yml"
 # billed runner; no sleep may creep into the rendered workflow.
 absent "sleep " "$wf/ci.yml"
 if has issue-templates; then test -f "$SMOKE/.github/ISSUE_TEMPLATE/config.yml"; else test ! -e "$SMOKE/.github/ISSUE_TEMPLATE"; fi
-if has pages; then test -f "$wf/pages.yml"; else test ! -e "$wf/pages.yml"; fi
+if has pages; then
+  test -f "$wf/pages.yml"
+  # The deploy pipeline's shape: push + the nightly rebuild (theme and
+  # tag propagation) + dispatch, never pull_request (deploys are not
+  # checks), and the caller grants the called workflow's ceiling (issues
+  # write is the link-rot job's).
+  present_line "  push:" "$wf/pages.yml"
+  present_line '    - cron: "23 4 * * *"' "$wf/pages.yml"
+  present_line "  workflow_dispatch:" "$wf/pages.yml"
+  present_line "      issues: write" "$wf/pages.yml"
+  absent "pull_request" "$wf/pages.yml"
+else
+  test ! -e "$wf/pages.yml"
+fi
+
+# docs-site: the managed docs workflow always carries the strict PR check
+# job (paths-filtered, never a required check); the deploy trigger and job
+# render only when pages does not carry the site. Composed with pages, the
+# docs ride pages.yml as the versioned vitepress mount and the website
+# mount turns unversioned. The rows take the copier defaults, so the
+# tracking label renders exactly docs-link-rot.
+if has docs-site; then
+  test -f "$wf/docs-site.yml"
+  present "actions/pages-site@build" "$wf/docs-site.yml"
+  present 'check: "true"' "$wf/docs-site.yml"
+  if has pages; then
+    # No deploy call at ANY ref: pages.yml owns the deployment here.
+    absent "reusable-pages.yml@" "$wf/docs-site.yml"
+    absent "schedule:" "$wf/docs-site.yml"
+    present '{"path": "/docs/", "source": "vitepress", "versioned": true}' "$wf/pages.yml"
+    present '{"path": "/", "source": "command", "versioned": false}' "$wf/pages.yml"
+    present_line '      link_rot_label: "docs-link-rot"' "$wf/pages.yml"
+  else
+    present "reusable-pages.yml@build" "$wf/docs-site.yml"
+    present '{"path": "/", "source": "vitepress", "versioned": true}' "$wf/docs-site.yml"
+    present_line '      link_rot_label: "docs-link-rot"' "$wf/docs-site.yml"
+    present_line '    - cron: "41 4 * * *"' "$wf/docs-site.yml"
+    present_line "      issues: write" "$wf/docs-site.yml"
+  fi
+else
+  test ! -e "$wf/docs-site.yml"
+  if has pages; then
+    absent "vitepress" "$wf/pages.yml"
+    absent "link_rot_label" "$wf/pages.yml"
+    present '{"path": "/", "source": "command", "versioned": true}' "$wf/pages.yml"
+  fi
+fi
 
 
 # fuzzer: the repo-owned nightly-fuzz starter with the fuzz-issue action in
@@ -226,7 +272,7 @@ fi
 if has settings-sync; then
   test -f "$SMOKE/.github/settings.yml"
   test -f "$wf/settings-sync.yml"
-  present "reusable-apply-settings.yml@main" "$wf/settings-sync.yml"
+  present "reusable-apply-settings.yml@build" "$wf/settings-sync.yml"
   # The rendered settings.yml is the repo-owned IDENTITY STARTER: the four
   # identity keys and nothing else. description is the constant
   # smoke_generate.ts passes; visibility is declared even when public. The
@@ -468,19 +514,24 @@ if has settings-sync; then
   fi
   # The tracking streams render the recorded answers (the rows take the
   # copier defaults).
+  if has docs-site; then present_line "  - name: docs-link-rot" "$merged_out"; else absent "docs-link-rot" "$merged_out"; fi
   if has fuzzer; then present_line "  - name: fuzz-nightly" "$merged_out"; else absent "fuzz-nightly" "$merged_out"; fi
   if has nightly; then present_line "  - name: nightly-failure" "$merged_out"; else absent "nightly-failure" "$merged_out"; fi
+  # Pages enablement rides the pages/docs-site settings layers.
+  if has pages || has docs-site; then present_line "  build_type: workflow" "$merged_out"; else absent "build_type:" "$merged_out"; fi
 fi
 # The tracking-labels input follows the selected stream modules: it feeds
 # fleet-ci's release-health job (which only runs with release-please), and
 # the exact quoted default list (selected streams in module order) is
-# pinned so an unquoted, empty, or partial render fails.
-if has fuzzer && has nightly; then
-  present_line '      tracking-labels: "fuzz-nightly,nightly-failure"' "$wf/ci.yml"
-elif has fuzzer; then
-  present_line '      tracking-labels: "fuzz-nightly"' "$wf/ci.yml"
-elif has nightly; then
-  present_line '      tracking-labels: "nightly-failure"' "$wf/ci.yml"
+# pinned so an unquoted, empty, or partial render fails. Built the way the
+# generator builds it - streams in module order with their defaults - so
+# every stream combination is covered without an if-chain per subset.
+stream_labels=""
+if has docs-site; then stream_labels="docs-link-rot"; fi
+if has fuzzer; then stream_labels="${stream_labels:+$stream_labels,}fuzz-nightly"; fi
+if has nightly; then stream_labels="${stream_labels:+$stream_labels,}nightly-failure"; fi
+if [ -n "$stream_labels" ]; then
+  present_line "      tracking-labels: \"$stream_labels\"" "$wf/ci.yml"
 else
   absent "tracking-labels:" "$wf/ci.yml"
 fi
@@ -511,12 +562,8 @@ if has release-please; then
   present "release-health@build" "$wf/release.yml"
   present_line "          mode: release" "$wf/release.yml"
   absent "fuzz-label:" "$wf/release.yml"
-  if has fuzzer && has nightly; then
-    present_line '          tracking-labels: "fuzz-nightly,nightly-failure"' "$wf/release.yml"
-  elif has fuzzer; then
-    present_line '          tracking-labels: "fuzz-nightly"' "$wf/release.yml"
-  elif has nightly; then
-    present_line '          tracking-labels: "nightly-failure"' "$wf/release.yml"
+  if [ -n "$stream_labels" ]; then
+    present_line "          tracking-labels: \"$stream_labels\"" "$wf/release.yml"
   else
     absent "tracking-labels:" "$wf/release.yml"
   fi

@@ -7,7 +7,10 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  actionSetsUpBun,
   baseOwnershipRegion,
+  bunSetupActionDirs,
+  bunToolchainPin,
   dependabotLabelGroups,
   dependabotLabelsSpan,
   hasToolchainDefault,
@@ -31,6 +34,7 @@ import {
   reservedLabelNames,
   spliceInlineRegion,
   spliceRegion,
+  strayActionPinFiles,
   strayPinFiles,
   toolchainPinRows,
   toolchainPins,
@@ -523,6 +527,76 @@ describe("toolchain pins", () => {
         "templates/uv/.python-version",
       ]);
       expect(strayPinFiles([PINNED_BUN], dir)).toEqual(["templates/bun/.bunver"]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("bunToolchainPin returns the bun module's pin and refuses a pinless manifest set", () => {
+    expect(bunToolchainPin([PINNED_BUN, UV])).toEqual({
+      module: "bun",
+      file: ".bun-version",
+      version: "1.3.14",
+    });
+    expect(() => bunToolchainPin([UV, RUST])).toThrow("no toolchain.pin");
+    expect(() => bunToolchainPin([BUN])).toThrow("no toolchain.pin");
+  });
+
+  test("actionSetsUpBun judges the parsed steps: quoted uses counts, block-scalar text never", () => {
+    expect(actionSetsUpBun('runs:\n  steps:\n    - uses: "oven-sh/setup-bun@v2"\n')).toBe(true);
+    // GitHub action identifiers are case-insensitive.
+    expect(actionSetsUpBun("runs:\n  steps:\n    - uses: OVEN-SH/Setup-Bun@v2\n")).toBe(true);
+    // A uses-shaped line inside a run: body is script text, not a step.
+    expect(
+      actionSetsUpBun(
+        "runs:\n  steps:\n    - shell: bash\n      run: |\n        echo demo\n        - uses: oven-sh/setup-bun@v2\n",
+      ),
+    ).toBe(false);
+    // A commented example is invisible to the parser.
+    expect(actionSetsUpBun("runs:\n  steps:\n    # - uses: oven-sh/setup-bun@v2\n")).toBe(false);
+  });
+
+  test("bunSetupActionDirs finds setup-bun actions, nested ones included, commented uses excused", () => {
+    const dir = mkdtempSync(join(tmpdir(), "action-pins-"));
+    try {
+      const setup = "runs:\n  steps:\n    - uses: oven-sh/setup-bun@v2\n";
+      mkdirSync(join(dir, "typo"));
+      writeFileSync(join(dir, "typo", "action.yml"), setup);
+      // A nested action (the pages-site/check-links shape).
+      mkdirSync(join(dir, "pages", "links"), { recursive: true });
+      writeFileSync(join(dir, "pages", "action.yml"), setup);
+      writeFileSync(join(dir, "pages", "links", "action.yml"), setup);
+      // No setup-bun: a commented example does not count.
+      mkdirSync(join(dir, "gate"));
+      writeFileSync(
+        join(dir, "gate", "action.yml"),
+        "runs:\n  steps:\n    # - uses: oven-sh/setup-bun@v2\n    - run: echo ok\n",
+      );
+      // Never scanned: installed dependencies.
+      mkdirSync(join(dir, "typo", "node_modules", "dep"), { recursive: true });
+      writeFileSync(join(dir, "typo", "node_modules", "dep", "action.yml"), setup);
+      expect(bunSetupActionDirs(dir)).toEqual([
+        "actions/pages",
+        "actions/pages/links",
+        "actions/typo",
+      ]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("strayActionPinFiles flags a .bun-version whose action.yml sets up no bun", () => {
+    const dir = mkdtempSync(join(tmpdir(), "action-strays-"));
+    try {
+      const setup = "runs:\n  steps:\n    - uses: oven-sh/setup-bun@v2\n";
+      mkdirSync(join(dir, "typo"));
+      writeFileSync(join(dir, "typo", "action.yml"), setup);
+      writeFileSync(join(dir, "typo", ".bun-version"), "1.4.0\n");
+      // The setup step retired but the dotfile left behind: stray.
+      mkdirSync(join(dir, "gate"));
+      writeFileSync(join(dir, "gate", "action.yml"), "runs:\n  steps:\n    - run: echo ok\n");
+      writeFileSync(join(dir, "gate", ".bun-version"), "1.4.0\n");
+      expect(strayActionPinFiles(dir)).toEqual(["actions/gate/.bun-version"]);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

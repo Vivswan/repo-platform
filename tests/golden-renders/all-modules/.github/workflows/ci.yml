@@ -45,11 +45,11 @@ jobs:
       issues: read
       vulnerability-alerts: read
     with:
-      modules: '["agents", "bun", "node", "deno", "uv", "rust", "pages", "release-please", "issue-templates", "skills", "pr-title", "auto-assign", "fuzzer", "nightly", "settings-sync"]'
+      modules: '["agents", "bun", "node", "deno", "uv", "rust", "pages", "docs-site", "release-please", "issue-templates", "skills", "pr-title", "auto-assign", "fuzzer", "nightly", "settings-sync"]'
       private: false
       skills-dir: "skills"
       codeql-languages: '["javascript-typescript", "python"]'
-      tracking-labels: "fuzz-nightly,nightly-failure"
+      tracking-labels: "docs-link-rot,fuzz-nightly,nightly-failure"
 
   # THE gate: this job's own check run (named all-green, created by the
   # GitHub Actions app) is the ruleset's required check. It needs both

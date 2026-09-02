@@ -509,11 +509,14 @@ describe("fact resolvers", () => {
     // is deliberately absent from its dogfooded modules.
     expect(operatorFacts.modules).not.toContain("release-please");
     expect(operatorFacts.modules).toContain("bun");
-    expect(operatorFacts.trackingLabels).toEqual([]);
+    // The dogfooded docs-site module is a tracking-stream module, so the
+    // operator facts must resolve its label from the recorded answer.
+    expect(operatorFacts.trackingLabels).toEqual([{ module: "docs-site", label: "docs-link-rot" }]);
     // The operator baseline must carry the labels its own machinery
-    // recreates (dependabot) - the delete/recreate loop tripwire.
+    // recreates (dependabot, the docs-site link-rot stream) - the
+    // delete/recreate loop tripwire.
     const names = managedLabels(operatorFacts, manifests).map((label) => label.name);
-    for (const required of ["dependencies", "github_actions", "javascript"]) {
+    for (const required of ["dependencies", "github_actions", "javascript", "docs-link-rot"]) {
       expect(names).toContain(required);
     }
   });

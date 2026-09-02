@@ -1,6 +1,6 @@
 # The nightly module
 
-Selecting the `nightly` module gives a repository a `nightly.yml` starter workflow ([the template](../templates/nightly/.github/workflows/nightly.yml.jinja)): a nightly CI stream for the checks too slow (or too dependent on the outside world) to run on every PR, with automatic [tracking-issue](tracking-issues.md) filing. Like the fuzzer starter it is generated once and then repo-owned (`_skip_if_exists`): the checks are repo-specific, so the starter carries the shared machinery and leaves the check steps to you.
+Selecting the `nightly` module gives a repository a `nightly.yml` starter workflow ([the template](https://github.com/Vivswan/repo-platform/blob/main/templates/nightly/.github/workflows/nightly.yml.jinja)): a nightly CI stream for the checks too slow (or too dependent on the outside world) to run on every PR, with automatic [tracking-issue](tracking-issues.md) filing. Like the fuzzer starter it is generated once and then repo-owned (`_skip_if_exists`): the checks are repo-specific, so the starter carries the shared machinery and leaves the check steps to you.
 
 The starter is two jobs - `checks` (yours) and `report` (the machinery, `needs: [checks]` with `if: always()`). It runs on a nightly cron (06:59 UTC, offset from the fuzzer starter's 09:11 UTC) plus a bare `workflow_dispatch`; a red night files or updates the tracking issue - a generic nightly-failure report naming the workflow, the date, the failing commit, and the run - and a green night closes it.
 

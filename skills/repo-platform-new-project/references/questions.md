@@ -24,7 +24,8 @@ One line each, from the choices descriptions:
 - `deno`: Deno toolchain (deno fmt/lint, deno dependabot, CodeQL JS)
 - `uv`: Python/uv toolchain (gitignore, dependabot, CodeQL Python)
 - `rust`: Rust/cargo toolchain (cargo dependabot, Rust gitignore; no CodeQL)
-- `pages`: GitHub Pages deploy (root = latest release, /staging/ = main)
+- `pages`: GitHub Pages deploy of the repo's own build (root = newest served version tag, /latest/ = main)
+- `docs-site`: VitePress docs site from docs/ under the central fleet theme (repos carry only markdown)
 - `release-please`: release job on top of all-green + autorelease labels
 - `issue-templates`: bug/feature issue forms
 - `skills`: agent skills hosting (plugin manifests, skill validation)
@@ -54,12 +55,19 @@ Asked only when the module is selected.
 |---|---|---|
 | `pages_setup` | Toolchain(s) on the build runner (comma-separated bun/node/deno/uv, or none) | selected toolchain modules, else `none` |
 | `pages_install_command` | Install step before each build (empty skips) | per toolchain, e.g. `bun install --frozen-lockfile` |
-| `pages_build_command` | The build; must not be empty. `PAGES_BASE_PATH`, `PAGES_ORIGIN`, `PAGES_STAGING` are exported | per toolchain, e.g. `bun run build` |
+| `pages_build_command` | The build; must not be empty. `PAGES_BASE_PATH`, `PAGES_ORIGIN`, `PAGES_VERSION` are exported | per toolchain, e.g. `bun run build` |
 | `pages_dist_dir` | Build output directory (plain relative path) | `dist` |
-| `pages_production` | Root built from `release` (latest tag) or `main` | `release` |
-| `pages_staging` | Also publish main HEAD under `/staging/` | `true` |
 
-One-time repo setup afterwards: Settings -> Pages -> Source: GitHub Actions, and add a `v*` tag rule to the `github-pages` environment's deployment branches (release-triggered deploys run on the tag ref and are rejected without it).
+The site is versioned from the repo's `vX.Y.Z` tags: root = newest served tag (a redirect to `/latest/` while none serve), `/latest/` = main, one directory per served tag (the `PAGES_MAX_VERSIONS` repo variable caps it, default 5; a tag that structurally cannot build is skipped with a notice - repo-platform's docs/pages.md). One-time repo setup afterwards: Settings -> Pages -> Source: GitHub Actions - automatic when settings-sync is selected (the module's settings layer enables Pages).
+
+### docs-site
+
+| Question | Meaning | Default |
+|---|---|---|
+| `docs_site_path` | URL path the docs mount under when `pages` is also selected (alone, the docs sit at the site root) | `docs` |
+| `docs_site_label` | Label identifying the nightly link-rot tracking-issue stream (same shape rules as the other stream labels) | `docs-link-rot` |
+
+The repo carries only markdown under `docs/` (a `README.md` index at minimum); theme, config, and navigation all come from repo-platform. Same one-time Pages setup as the pages module. Details: repo-platform's `docs/docs-site.md`.
 
 ### fuzzer
 
@@ -83,7 +91,7 @@ To change a module parameter later, edit that question's VALUE key in `.copier-a
 
 ## Required settings labels
 
-Settings applies delete undeclared labels, but the merged settings layers declare every label the repo's module selection needs automatically (each module's `templates/<module>/settings.yml` supplies its own; the merged roster is what the delete-undeclared pass runs against). The table below is the reference for what each module brings:
+Settings applies delete undeclared labels, but the merged settings layers declare every label the repo's module selection needs automatically (each module's `templates/<module>/settings.yml` supplies its own, and the tracking-stream labels come from each module's `module.yml` tuple plus the repo's recorded answer; the merged roster is what the delete-undeclared pass runs against). The table below is the reference for what each module brings:
 
 | Needed by | Labels |
 |---|---|
@@ -95,6 +103,7 @@ Settings applies delete undeclared labels, but the merged settings layers declar
 | release-please | the `autorelease: *` pair, `release-blocker` (`B60205`), `release-override` (`FBCA04`) |
 | fuzzer | the `fuzzer_label` answer (default `fuzz-nightly`, `B60205`) |
 | nightly | the `nightly_label` answer (default `nightly-failure`, `D93F0B`) |
+| docs-site | the `docs_site_label` answer (default `docs-link-rot`, `D4A72C`) |
 | private repos declaring labels | `settings-as-code-report` (`0e2a47`) |
 
 Exact descriptions live in repo-platform's `templates/settings-sync/.github/settings.yml.jinja`.

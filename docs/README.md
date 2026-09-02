@@ -7,9 +7,14 @@ repo-platform manages standards files, CI workflows, and repository settings acr
 | Goal | Read |
 |---|---|
 | Create a new managed repository | [New repo](new-repo.md) |
-| Find out why my PR is pending or red | [All-green](all-green.md) |
+| Find out why my PR is pending or red | [All-green: quick triage](all-green.md#quick-triage-why-is-my-pr-red-or-waiting) |
 | Change a repository's settings or labels | [Settings](settings.md) |
+| Understand the `pr-title` required check | [Settings: the pr-title ruleset](settings.md#the-pr-title-ruleset) |
+| Get a PR auto-formatted, or make bot fix commits re-run CI | [New repo: fix commits](new-repo.md#fix-commits-and-re-triggering-ci) |
+| Ship a release, or verify a release asset's provenance | [New repo: the release pipeline](new-repo.md#the-release-pipeline-release-please) |
 | Publish a site to GitHub Pages | [Pages](pages.md) |
+| Publish my repo's docs/ as a website | [Docs site](docs-site.md) |
+| Translate docs (zh-cn/, ja/, ...) | [Docs site: content conventions](docs-site.md#content-conventions) |
 | Serve a Pages site from my own domain | [Pages: custom domain](pages.md#custom-domain) |
 | Write the fuzz step the nightly-fuzz starter needs | [Fuzzer: customizing the starter](fuzzer.md#customizing-the-starter) |
 | Move slow or flaky checks into a nightly run | [Nightly: customizing the starter](nightly.md#customizing-the-starter) |
@@ -23,6 +28,7 @@ repo-platform manages standards files, CI workflows, and repository settings acr
 | Review a template change's rendered diff | [Golden renders](golden-renders.md) |
 | Check why the `build` branch can be trusted | [Build provenance](build-provenance.md) |
 | Keep a private repo's name out of fleet logs | [Private repos](private-repos.md) |
+| Find where a private repo's failure details land | [Private repos: seeing the full detail](private-repos.md#seeing-the-full-detail) |
 | Stop sync PRs without detaching | [Eject: pause](eject.md#pause-instead-of-eject) |
 | Detach a repository from management | [Eject](eject.md) |
 
@@ -37,18 +43,19 @@ repo-platform manages standards files, CI workflows, and repository settings acr
 
 ### Modules
 
-5. [Pages](pages.md) - the managed GitHub Pages deploy: production from releases, staging from main.
-6. [Skills](skills.md) - hosting agent skills with fleet-managed validation.
-7. [Fuzzer](fuzzer.md) - the nightly fuzz starter and its failure-report contract.
-8. [Nightly](nightly.md) - a nightly CI stream for checks too slow for every PR.
-9. [Tracking issues](tracking-issues.md) - the issue stream the fuzzer and nightly modules share: lifecycle, release gating, renaming.
-10. [Toolchains](toolchains.md) - the fleet-wide toolchain version pins and how to override one.
+5. [Pages](pages.md) - the managed GitHub Pages deploy: a versioned site of the repo's own build (root = newest served tag, latest/ = main).
+6. [Docs site](docs-site.md) - the repo's docs/ markdown as a versioned VitePress site under the central fleet theme.
+7. [Skills](skills.md) - hosting agent skills with fleet-managed validation.
+8. [Fuzzer](fuzzer.md) - the nightly fuzz starter and its failure-report contract.
+9. [Nightly](nightly.md) - a nightly CI stream for checks too slow for every PR.
+10. [Tracking issues](tracking-issues.md) - the issue stream the fuzzer, nightly, and docs-site modules share: lifecycle, release gating, renaming.
+11. [Toolchains](toolchains.md) - the fleet-wide toolchain version pins and how to override one.
 
 ### Platform internals
 
-11. [Golden renders](golden-renders.md) - committed render snapshots of a canonical module matrix, showing a template change's rendered diff.
-12. [Build provenance](build-provenance.md) - why the `build` delivery branch is trustworthy, and what residual trust remains.
+12. [Golden renders](golden-renders.md) - committed render snapshots of a canonical module matrix, showing a template change's rendered diff.
+13. [Build provenance](build-provenance.md) - why the `build` delivery branch is trustworthy, and what residual trust remains.
 
 ### Leaving
 
-13. [Eject](eject.md) - pausing sync PRs, or detaching a repository entirely.
+14. [Eject](eject.md) - pausing sync PRs, or detaching a repository entirely.

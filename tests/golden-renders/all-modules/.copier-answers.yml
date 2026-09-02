@@ -4,6 +4,8 @@ _commit: xxxxxxx
 _src_path: ./tree
 copyright_holder: Vivswan Shah (https://github.com/Vivswan)
 description: Golden render fixture
+docs_site_label: docs-link-rot
+docs_site_path: docs
 fuzzer_label: fuzz-nightly
 github_username: Vivswan
 homepage: ''
@@ -15,6 +17,7 @@ modules:
 - uv
 - rust
 - pages
+- docs-site
 - release-please
 - issue-templates
 - skills
@@ -27,9 +30,7 @@ nightly_label: nightly-failure
 pages_build_command: bun run build
 pages_dist_dir: dist
 pages_install_command: bun install --frozen-lockfile
-pages_production: release
 pages_setup: bun,node,deno,uv
-pages_staging: true
 private: false
 project_name: Golden Render
 project_slug: golden-render

@@ -1,22 +1,23 @@
 # The pages module
 
-Selecting the `pages` module gives a repository a managed `pages.yml` workflow that deploys GitHub Pages through repo-platform's [reusable-pages.yml](../.github/workflows/reusable-pages.yml). One Pages deployment carries up to two environments:
+Selecting the `pages` module gives a repository a managed `pages.yml` workflow that deploys ONE versioned GitHub Pages site through repo-platform's [reusable-pages.yml](../.github/workflows/reusable-pages.yml) and the shared [pages-site action](../actions/pages-site/action.yml). The repository's own build command produces the content; the pipeline owns versioning and layout.
 
-| Environment | URL | Built from | Content changes when |
-|---|---|---|---|
-| production root | `https://<owner>.github.io/<repo>/` | the latest release tag | a new release is published |
-| staging (optional) | `.../<repo>/staging/` | main HEAD | every push to main |
+| URL | Built from | Content changes when |
+|---|---|---|
+| `https://<owner>.github.io/<repo>/` | the newest served version tag (none served - no tags yet, or all skipped: a redirect to `latest/`) | a new version tag exists |
+| `.../<repo>/latest/` | the default branch head | every deploy |
+| `.../<repo>/vX.Y.Z/` | that tag, one directory per served tag | the pipeline or theme changes (every deploy rebuilds all tiers; the source tag itself is immutable) |
+| `.../<repo>/versions.json` | the version index (machine-readable) | the served tag set changes |
 
-The table shows the default `pages_production: release` mode; `pages_production: main` builds the root from main HEAD and disables staging (see [caveats](#caveats)). The workflow runs on every push to main, on every published release, and on manual dispatch, and each run re-resolves the root from the latest release - so any run can pick up a release the `release:` trigger missed.
+Versions are the repository's plain `vX.Y.Z` git tags - exactly what the release-please module tags releases with - newest first, the newest `PAGES_MAX_VERSIONS` of them (a repo Actions variable; unset means 5). Every deploy rebuilds every tier from scratch, so a pipeline or content fix restyles the whole site on the next run; the cost bound is `PAGES_MAX_VERSIONS + 2` builds per deploy (the served tags, `latest/`, and the root's own build of the newest served tag).
 
-Before the first release there is no tag, so only staging publishes and the root returns GitHub's default 404. This is intended, not a failure. With `pages_staging: false` there is nothing to publish at all before the first release; those runs skip the deploy with a notice and stay green.
+The workflow deploys on every push to the default branch, nightly (04:23 UTC), and on manual dispatch. There is no tag trigger: a tag created without a push (release-please publishing, a manual tag) lands on the nightly rebuild, or immediately via dispatch.
 
 ## One-time setup
 
-In the repository:
+With the settings-sync module selected: nothing - the pages module's settings layer enables Pages with Actions-workflow builds on the next apply ([settings.md](settings.md)).
 
-1. Settings -> Pages -> Source: GitHub Actions.
-2. Settings -> Environments -> `github-pages` (created by the first deploy run) -> Deployment branches and tags -> add a tag rule `v*`. GitHub restricts the auto-created environment to the default branch, so without this rule the `release: published` trigger (which runs on the tag ref) is rejected with "not allowed to deploy to github-pages due to environment protection rules". Push-to-main and manual dispatch deploys work without it.
+Without it: Settings -> Pages -> Source: GitHub Actions. No `github-pages` environment tag rule is needed anymore - deploys never run on tag refs.
 
 ## Module parameters (copier questions)
 
@@ -26,16 +27,16 @@ In the repository:
 | `pages_install_command` | Install step before each build (empty skips) | <!-- BEGIN GENERATED: pages-install-default (scripts/generate.ts - edit module.yml manifests, not this block) -->`bun install --frozen-lockfile` / `npm ci` / `deno ci` / `uv sync` / empty<!-- END GENERATED: pages-install-default --> |
 | `pages_build_command` | The build; must not be empty | <!-- BEGIN GENERATED: pages-build-default (scripts/generate.ts - edit module.yml manifests, not this block) -->`bun run build` / `npm run build` / `deno task build` / `uv run mkdocs build --site-dir dist`<!-- END GENERATED: pages-build-default --> |
 | `pages_dist_dir` | Build output directory | `dist` |
-| `pages_production` | Root built from `release` (latest tag) or `main` (HEAD, no staging) | `release` |
-| `pages_staging` | Publish main HEAD under `/staging/` | `true` |
+
+The retired `pages_production` and `pages_staging` answers have no replacement: the tag rules above are the one behavior, and whether a repository has version tags decides what the root serves.
 
 ## The build contract
 
-The build command runs with three environment variables exported; map them onto whatever your tool expects:
+The build command runs once per tier with three environment variables exported; map them onto whatever your tool expects:
 
-- `PAGES_BASE_PATH`: the base path the site is served under (`/<repo>/`, `/<repo>/staging/`, or `/` with a custom domain)
+- `PAGES_BASE_PATH`: the base path this tier is served under (`/<repo>/`, `/<repo>/latest/`, `/<repo>/vX.Y.Z/`, or the `/`-rooted equivalents with a custom domain)
 - `PAGES_ORIGIN`: the absolute origin (`https://<owner>.github.io` or `https://<domain>`), for sitemaps/canonical/og URLs
-- `PAGES_STAGING`: `1` for the staging build, empty for production
+- `PAGES_VERSION`: what this tier is - `latest`, the tag (`vX.Y.Z`, also for the root tier, which builds the newest served tag), or empty for an unversioned mount (see the composed layout below)
 
 Examples:
 
@@ -43,19 +44,22 @@ Examples:
 - Vite: `bun x vite build --base "$PAGES_BASE_PATH"`
 - MkDocs (uv): `uv run mkdocs build --site-dir dist` (set `site_url` from `PAGES_ORIGIN`/`PAGES_BASE_PATH` in `mkdocs.yml` via an env plugin, or ignore them for path-relative sites)
 
+## With the docs-site module
+
+Selecting `docs-site` alongside `pages` renders ONE Pages workflow: the website stays at `/` but becomes UNVERSIONED (one build of the default branch head - version navigation belongs to the docs), and the docs mount at `/<docs_site_path>/` (default `docs`) with the full tag rules one level down. The docs side's conventions live in [docs-site.md](docs-site.md).
+
 ## Custom domain
 
 Three pieces have to agree; the repo variable only flips the build side:
 
 1. DNS: point the domain at [GitHub Pages](https://docs.github.com/en/pages/configuring-a-custom-domain-for-your-github-pages-site) (CNAME record to `<owner>.github.io` for a subdomain, or the Pages A/AAAA records for an apex domain).
 2. Pages settings: Settings -> Pages -> Custom domain -> enter the domain (GitHub verifies DNS and provisions TLS here; the `CNAME` file in the artifact alone does not configure this for Actions-based deploys).
-3. Repo variable: set `CUSTOM_DOMAIN` (Settings -> Secrets and variables -> Actions -> Variables), e.g. `example.com`. The next deploy then builds with the matching URLs: root moves from `/<repo>/` to `/`, staging to `/staging/`, `PAGES_ORIGIN` becomes `https://example.com`, and `_site/CNAME` is written.
+3. Repo variable: set `CUSTOM_DOMAIN` (Settings -> Secrets and variables -> Actions -> Variables), e.g. `example.com`. The next deploy then builds with the matching URLs: the root moves from `/<repo>/` to `/`, every tier follows, `PAGES_ORIGIN` becomes `https://example.com`, and the artifact carries `CNAME`.
 
 To go back, undo all three (in particular, remove the variable AND clear the custom domain in Pages settings together, or URLs and routing will disagree).
 
 ## Caveats
 
-- Releases published by the default `GITHUB_TOKEN` (e.g. [release-please](https://github.com/googleapis/release-please) without a PAT) do not fire `pages.yml`'s `release:` trigger. The next push to main or a manual `workflow_dispatch` picks the release up, since the root is re-resolved from the latest release on every run.
-- Serving Pages from a private repository requires a paid GitHub plan; the workflow is unchanged either way, the deploy step simply fails on a free private repo.
-- `pages_production: main` publishes main HEAD at the root and disables the staging path entirely.
-- The setup steps install the fleet-pinned toolchain version when the built source carries its version dotfile (`.bun-version` / `.node-version` / `.dvmrc` - see [toolchains.md](toolchains.md)), preferring the production tree's pin over staging's; without the dotfile they float on the setup action's default.
+- Historical tags build with TODAY'S build command and toolchain pins (the checkout's version dotfiles - see [toolchains.md](toolchains.md)). For a statically probeable command (`bun run <script>`, optionally with one plain-relative `--cwd` or one name-shaped `--filter` before the script), a tag is skipped with a notice and left out of `versions.json` when the package.json `bun run` resolves at that tag (the nearest one walking up from the command's cwd; for `--filter`: the workspace package of that name) does not declare the script, when the `--cwd` directory is absent, or when no package.json is reachable - and only when HEAD itself declares the script, so a command resolving through bun's other fallbacks (a dependency bin, a PATH executable) keeps building every kept tag; an install step that rewrites `package.json` at build time is not modeled. Any other command shape also builds every kept tag. A kept tag that declares the script but no longer builds still fails the whole deploy loudly; lower `PAGES_MAX_VERSIONS` below the broken tag's position, or fix the build command.
+- Serving Pages from a private repository requires a paid GitHub plan, and the served site is PUBLIC on non-Enterprise plans - selecting the module is the opt-in to that.
+- Prerelease-shaped tags (`v1.0.0-rc.1`) are not versions; only plain `vX.Y.Z` tags enter the version set.

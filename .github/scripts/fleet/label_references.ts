@@ -16,12 +16,16 @@
 //   not a form). A string value is comma-split (the front-matter
 //   convention); list elements are taken whole.
 // - Workflows: every .github/workflows/*.yml|yaml, two passes.
-//   1. A YAML walk collecting string values under any mapping key whose
-//      name contains `label`/`labels` as a `-`/`_`-separated segment
-//      (`labels`, `stale-issue-label`, `any-of-issue-labels`,
-//      `labels-to-remove-when-unstale`, ...), except under `runs-on`
-//      (runner labels, not issue labels). Same string/list value rule as
-//      forms.
+//   1. A YAML walk collecting string values under any mapping key SHAPED
+//      like a label name: `label`/`labels` as the FINAL `-`/`_`-separated
+//      segment (`labels`, `stale-issue-label`, `any-of-issue-labels`,
+//      `tracking-labels`) or a `labels-to` opening (the stale-style
+//      add/remove rosters, `labels-to-remove-when-unstale`). A key whose
+//      label segment modifies a later noun CONFIGURES a label attribute
+//      (`label-color`, `label-description`) and is skipped, as is
+//      everything under `runs-on` (runner labels) and `matrix` (job
+//      variables - a shard selector named `labels` is never a label
+//      roster). Same string/list value rule as forms.
 //   2. A regex pass over the raw text for the expression shapes
 //      `github.event.label.name ==/!= '<name>'` (either operand order)
 //      and `contains(github.event.<issue|pull_request>.labels.*.name,
@@ -30,13 +34,21 @@
 // KNOWN LIMITS, accepted over false completeness:
 // - Dynamic names are invisible: any extracted value containing `${{` is
 //   dropped, and names built in `run:`/`script:` code (gh CLI calls,
-//   github-script bodies) are not extracted at all.
+//   github-script bodies) are not extracted at all. The `matrix` skip is
+//   the same limit at the definition end: a genuine label name routed
+//   through a matrix variable is consumed as `${{ matrix.* }}` (already
+//   invisible), so its static definition is skipped with the shard
+//   selectors rather than kept as a lone echo of a reference this
+//   extraction cannot see.
 // - A comma inside a label name declared as a single string splits
 //   wrongly (list form is exact).
-// - A workflow key that merely looks label-shaped but is not an issue
-//   label can false-positive; on the warn path that is a spurious PR-body
-//   line, on the fail-closed path a blocked deletion whose message names
-//   the file to fix.
+// - A workflow key that ends in the label segment but is not an issue
+//   label can still false-positive; on the warn path that is a spurious
+//   PR-body line, on the fail-closed path a blocked deletion whose
+//   message names the file to fix. Conversely a naming key without the
+//   final segment or the `labels-to` opening (a hypothetical
+//   `label-name`) is not extracted - no fleet or observed action uses
+//   that shape.
 // - Markdown issue templates (front-matter `labels:`) and label
 //   references outside .github/ISSUE_TEMPLATE and .github/workflows are
 //   out of scope.
@@ -102,8 +114,14 @@ export function issueFormLabels(text: string): string[] {
   return isMapping(data) ? labelsFromValue(data.labels) : [];
 }
 
-/** `label`/`labels` as a dash/underscore-separated segment of a key. */
-const LABEL_KEY = /(^|[-_])labels?([-_]|$)/;
+/** A key SHAPED like a label name: `label`/`labels` as the FINAL
+ *  dash/underscore segment (`labels`, `stale-issue-label`,
+ *  `any-of-issue-labels`), or a `labels-to` opening
+ *  (`labels-to-remove-when-unstale`). Keys whose label segment modifies a
+ *  later noun configure label ATTRIBUTES, not names (`label-color`,
+ *  `label-description` - the litellm fuzz-issue false positives), and
+ *  carry no label reference. */
+const LABEL_NAME_KEY = /(^|[-_])labels?$|^labels[-_]to[-_]/;
 
 const EXPRESSION_PATTERNS = [
   /github\.event\.label\.name\s*[!=]=\s*'([^']+)'/g,
@@ -120,7 +138,10 @@ function walkWorkflowValue(value: unknown, found: string[]): void {
   for (const [key, child] of Object.entries(value)) {
     // Runner labels, not issue labels; nothing below runs-on can be one.
     if (key === "runs-on") continue;
-    if (LABEL_KEY.test(key.toLowerCase())) found.push(...labelsFromValue(child));
+    // Matrix contexts define job variables, never label rosters - a
+    // `labels` shard selector there is data (the litellm docker shape).
+    if (key === "matrix") continue;
+    if (LABEL_NAME_KEY.test(key.toLowerCase())) found.push(...labelsFromValue(child));
     walkWorkflowValue(child, found);
   }
 }

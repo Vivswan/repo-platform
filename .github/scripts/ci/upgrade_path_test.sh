@@ -236,6 +236,45 @@ jobs:
     uses: ./.github/workflows/release.yml
     secrets: inherit
 LEGACY_CI
+# Model the fleet state before the versioned-pages cutover: the old
+# template's pages.yml spoke reusable-pages' retired production/staging
+# interface. Plain content by design - the era's copier questions are gone,
+# so the retired values ride verbatim, which is all the managed re-render
+# (and the answers-file drop the leg below asserts) needs.
+cat > "$OLD_TREE/template/.github/workflows/pages.yml.jinja" <<'LEGACY_PAGES'
+# This file is managed by {{ github_username }}/repo-platform.
+# Local edits may be replaced during template updates.
+name: Pages
+
+on:
+  push:
+    branches: [main]
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    uses: {{ github_username }}/repo-platform/.github/workflows/reusable-pages.yml@main
+    with:
+      setup: {{ pages_setup }}
+      install_command: {{ pages_install_command | tojson }}
+      build_command: {{ pages_build_command | tojson }}
+      dist_dir: {{ pages_dist_dir | tojson }}
+      production: main
+      staging: false
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+LEGACY_PAGES
 commit_build_tree "$OLD_TREE" "$prev"
 echo "Testing upgrade path ${prev} -> fresh build"
 
@@ -1496,3 +1535,74 @@ grep -qF "One-run starter pin rollout" "$PIN_WORK/gh-calls.txt" \
 grep -q '^gh pr merge' "$PIN_WORK/gh-calls.txt" \
   || fail "open_pr did not arm auto-merge despite the rollout note being informational"
 echo "starter pin rollout OK: old pin ported byte-surgically, hand pin left alone, note in the PR body, auto-merge kept"
+
+# --- Pages answer retirement (pages_production / pages_staging) ---------
+# A repo rendered in the production/staging era carries that pages.yml
+# shape and records the two retired answers. The update must re-render the
+# managed pages.yml to the mounts interface and drop the retired answers
+# from .copier-answers.yml while the surviving pages answers ride through.
+PAGES_FIX="$RUN_DIR/upgrade-pages"
+PAGES_WORK="$RUN_DIR/upgrade-pages-work"
+mkdir -p "$PAGES_WORK"
+cd "$GITHUB_WORKSPACE"
+copier copy "$GITHUB_WORKSPACE" "$PAGES_FIX" \
+  --vcs-ref "$prev" --defaults --trust \
+  -d project_name="Pages Retirement" \
+  -d description="Pages-retirement project" \
+  -d 'modules=[pages, auto-assign]' \
+  -d pages_setup=none -d pages_build_command=./build.sh \
+  -d private="false"
+cd "$PAGES_FIX"
+grep -qE '^ +production: main$' .github/workflows/pages.yml \
+  || fail "old pages fixture does not carry the production/staging interface"
+# The era's recorded answers: current copier no longer asks the questions,
+# so the fleet state is modeled by recording the values directly.
+printf 'pages_production: main\npages_staging: false\n' >> .copier-answers.yml
+git init -q -b main
+git add --all
+git -c user.name=ci -c user.email=ci@localhost commit -q -m "chore: init in the production/staging era"
+
+cd "$GITHUB_WORKSPACE"
+git show "${prev}:copier.yml" > "$PAGES_WORK/copier-old.yml"
+git show "$NEW_TAG":copier.yml > "$PAGES_WORK/copier-new.yml"
+MODULES="$(select_modules \
+  --repo-file "$PAGES_FIX/.repo-platform.yml" \
+  --template-copier "$PAGES_WORK/copier-new.yml" \
+  --retired-summary "$PAGES_WORK/retired-modules.txt")"
+export MODULES
+export PRIVATE=false
+export DESCRIPTION="Pages-retirement project"
+export TARGET_DIR="$PAGES_FIX"
+export TARGET_REF="$NEW_TAG"
+RECOVER="" bun .github/scripts/sync/apply_update.ts
+bun .github/scripts/sync/resolve_copier_conflicts.ts \
+  --summary "$PAGES_WORK/dropped-local-hunks.md" --root "$PAGES_FIX"
+pages_rendered="$PAGES_FIX/.github/workflows/pages.yml"
+grep -qF "mounts:" "$pages_rendered" \
+  || fail "the update did not re-render pages.yml to the mounts interface"
+grep -qF '"versioned": true' "$pages_rendered" \
+  || fail "updated pages.yml lost the versioned command mount"
+if grep -qE '^ +(production|staging):' "$pages_rendered"; then
+  fail "updated pages.yml still carries the retired production/staging inputs"
+fi
+if grep -qE '^ +release:$' "$pages_rendered"; then
+  fail "updated pages.yml still carries the retired release trigger"
+fi
+if grep -qE '^pages_(production|staging):' "$PAGES_FIX/.copier-answers.yml"; then
+  fail "the update kept the retired pages answers recorded"
+fi
+grep -qE '^pages_build_command: ./build.sh$' "$PAGES_FIX/.copier-answers.yml" \
+  || fail "the surviving pages answers were lost by the update"
+# The delivery-channel pin flip rides the same managed re-render: a repo
+# rendered when the reusable-workflow calls pinned @main (the ungated
+# tip) must come out of the update calling them @build, the green-gated
+# delivery branch - for pages.yml and auto-assign.yml alike.
+grep -qF -- "repo-platform/.github/workflows/reusable-pages.yml@build" "$pages_rendered" \
+  || fail "updated pages.yml does not call reusable-pages at the build ref"
+if grep -qF -- "repo-platform/.github/workflows/reusable-pages.yml@main" "$pages_rendered"; then
+  fail "updated pages.yml still pins reusable-pages@main - the ungated tip"
+fi
+grep -qF -- "repo-platform/.github/workflows/reusable-auto-assign.yml@build" \
+  "$PAGES_FIX/.github/workflows/auto-assign.yml" \
+  || fail "updated auto-assign.yml does not call reusable-auto-assign at the build ref"
+echo "pages answer retirement OK: mounts interface rendered, retired answers dropped, surviving answers kept"

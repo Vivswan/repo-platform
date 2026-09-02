@@ -1,0 +1,60 @@
+# This file is managed by Vivswan/repo-platform.
+# Local edits may be replaced during template updates.
+#
+# The docs site: this repository's docs/ markdown rendered under the
+# central fleet theme (repo-platform's actions/pages-site) - layout,
+# versioning, locales, and conventions in repo-platform's docs/docs-site.md.
+# The check job builds docs/ strictly on every PR touching it (dead
+# internal links fail there instead of at deploy time); paths-filtered by
+# design, so it is never in the all-green roster and never a required
+# check. One-time setup without the settings-sync module: repo
+# Settings -> Pages -> Source: GitHub Actions (with it, the module's
+# settings layer enables Pages automatically).
+name: Docs Site
+
+on:
+  pull_request:
+    paths:
+      - docs/**
+  push:
+    branches: [main]
+    paths:
+      - docs/**
+  schedule:
+    # Nightly rebuild: central theme updates and version tags created
+    # without a docs push propagate, and the external-link check runs
+    # (docs/docs-site.md).
+    - cron: "41 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: Vivswan/repo-platform/actions/pages-site@build
+        with:
+          check: "true"
+          site-title: "repo-platform"
+
+  deploy:
+    if: github.event_name != 'pull_request'
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    uses: Vivswan/repo-platform/.github/workflows/reusable-pages.yml@build
+    with:
+      mounts: '[{"path": "/", "source": "vitepress", "versioned": true}]'
+      site_title: "repo-platform"
+      link_rot_label: "docs-link-rot"
+      custom_domain: ${{ vars.CUSTOM_DOMAIN }}
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+      issues: write

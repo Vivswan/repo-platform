@@ -12,6 +12,8 @@ import { PIN_FLIPS } from "../../.github/scripts/sync/starter_pin_rollout";
 import {
   ALL_GREEN_ROSTER,
   ASYNC_SPAWN_FILES,
+  actionManifestFiles,
+  actionsBunGuardMismatches,
   agentsStagingMismatches,
   allGreenGateMismatches,
   applyDivergences,
@@ -24,13 +26,16 @@ import {
   composeAnchorNames,
   DELIVERY_REF,
   declaredCheckName,
+  deliveryRefMismatches,
   expandCheckChain,
   extractUsesPins,
   firstDiff,
   fleetCiRenderMismatches,
+  fleetWorkflowPinMismatches,
   fragmentFilesFor,
   gatesOnModule,
   inlineFunctionCopies,
+  isOwnPagesOrigin,
   labelPreflightFileMismatches,
   labelPreflightJobMismatches,
   lockedTypesBunVersion,
@@ -48,6 +53,7 @@ import {
   preflightInvocation,
   prTitleWorkflowMismatches,
   RULE_ROSTER,
+  renderedSelfPins,
   rosterMismatches,
   ruleRosterMismatches,
   SETUP_VERSION_FILES,
@@ -63,13 +69,14 @@ import {
   starterTemplateFiles,
   stepCarriesWithKey,
   stripGeneratedRegions,
+  templateSelfPins,
   topLevelProperties,
   unsafeStepCondition,
   withToolchainSetup,
   zToDollar,
 } from "../../scripts/check_ssot";
 import { TOOLCHAIN_SETUP_FRAGMENT, TOOLCHAIN_SETUP_TARGETS } from "../../scripts/compose_template";
-import { MARKER_TOKENS, mdMarkers } from "../../scripts/generate";
+import { actionSetsUpBun, MARKER_TOKENS, mdMarkers } from "../../scripts/generate";
 import { templateCarries } from "../../scripts/ts_extract.ts";
 
 describe("applyDivergences", () => {
@@ -770,6 +777,128 @@ describe("stepCarriesWithKey", () => {
   });
 });
 
+describe("actionsBunGuardMismatches", () => {
+  // A minimal composite carrying the canonical pinned-bun setup block.
+  const canonical = `runs:
+  using: composite
+  steps:
+    - name: Check for a bun matching the action's pin
+      id: bun
+      shell: bash
+      run: |
+        pin="$(cat "\${{ github.action_path }}/.bun-version")"
+        have="$(command -v bun >/dev/null && bun --version || true)"
+        echo "pinned=$([ "$have" = "$pin" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+
+    # Free-form prose between the steps is excused by the semantic-line
+    # comparison; only the steps themselves are pinned.
+    - name: Set up bun
+      id: setup-bun
+      if: steps.bun.outputs.pinned != 'true'
+      continue-on-error: true
+      uses: oven-sh/setup-bun@v2
+      with:
+        bun-version-file: \${{ github.action_path }}/.bun-version
+
+    - name: Set up bun (retry)
+      if: steps.setup-bun.outcome == 'failure'
+      uses: oven-sh/setup-bun@v2
+      with:
+        bun-version-file: \${{ github.action_path }}/.bun-version
+
+    - name: Run
+      shell: bash
+      run: bun "\${{ github.action_path }}/x.ts"
+`;
+
+  test("the canonical pinned block passes", () => {
+    expect(actionsBunGuardMismatches("actions/x/action.yml", canonical)).toEqual([]);
+  });
+
+  test("a bare setup-bun (both with: blocks deleted) is refused - the pre-fix shape", () => {
+    const bare = canonical.replaceAll(
+      `      uses: oven-sh/setup-bun@v2
+      with:
+        bun-version-file: \${{ github.action_path }}/.bun-version`,
+      "      uses: oven-sh/setup-bun@v2",
+    );
+    const got = actionsBunGuardMismatches("actions/x/action.yml", bare);
+    // One canonical-block mismatch plus one per bare setup step.
+    expect(got.length).toBe(3);
+    expect(got[0].expected).toContain("action-local generated .bun-version");
+  });
+
+  test("a workspace-relative bun-version-file is refused - it reads the CALLER's dotfile", () => {
+    const relative = canonical.replaceAll(
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal action line under test
+      "bun-version-file: ${{ github.action_path }}/.bun-version",
+      "bun-version-file: .bun-version",
+    );
+    expect(actionsBunGuardMismatches("actions/x/action.yml", relative).length).toBe(3);
+  });
+
+  test("an EXTRA bare setup-bun beside an intact canonical block is refused", () => {
+    const extra = `${canonical}
+    - name: Set up bun again
+      uses: oven-sh/setup-bun@v2
+`;
+    const got = actionsBunGuardMismatches("actions/x/action.yml", extra);
+    expect(got.length).toBe(1);
+    expect(got[0].got).toContain("without the action-local pin");
+  });
+
+  test("a QUOTED bare setup-bun is still a setup-bun step - text look-alikes cannot dodge the pin", () => {
+    const extra = `${canonical}
+    - name: Set up bun again
+      uses: "oven-sh/setup-bun@v2"
+`;
+    expect(actionsBunGuardMismatches("actions/x/action.yml", extra).length).toBe(1);
+  });
+
+  test("a MIXED-CASE bare setup-bun is still a setup-bun step - GitHub action ids are case-insensitive", () => {
+    const extra = `${canonical}
+    - name: Set up bun again
+      uses: OVEN-SH/Setup-Bun@v2
+`;
+    expect(actionsBunGuardMismatches("actions/x/action.yml", extra).length).toBe(1);
+  });
+
+  test("an action that runs bun with no setup block at all is refused", () => {
+    const text =
+      'runs:\n  using: composite\n  steps:\n    - name: Run\n      shell: bash\n      run: bun "x.ts"\n';
+    expect(actionsBunGuardMismatches("actions/x/action.yml", text).length).toBe(1);
+  });
+
+  test("an action touching no bun needs no guard", () => {
+    const text =
+      "runs:\n  using: composite\n  steps:\n    - name: Run\n      shell: bash\n      run: echo ok\n";
+    expect(actionsBunGuardMismatches("actions/x/action.yml", text)).toEqual([]);
+  });
+
+  test("a commented setup-bun example alone demands nothing", () => {
+    const text =
+      "runs:\n  using: composite\n  steps:\n    # - uses: oven-sh/setup-bun@v2\n    - name: Run\n      shell: bash\n      run: echo ok\n";
+    expect(actionSetsUpBun(text)).toBe(false);
+    expect(actionsBunGuardMismatches("actions/x/action.yml", text)).toEqual([]);
+  });
+
+  test("the manifest walk sees nested actions", () => {
+    expect(actionManifestFiles()).toContain("actions/pages-site/check-links/action.yml");
+  });
+
+  test("the composite actions' bun pin is ARMED: every bun-touching action.yml carries the pinned setup block", () => {
+    // The live-file forcing test the guard registry names: unpinning any
+    // real action's setup-bun (the staged mutation strips the primary
+    // setup step's with: block in check-typography) goes red here.
+    const files = actionManifestFiles();
+    const setups = files.filter((file) => actionSetsUpBun(readFileSync(file, "utf-8")));
+    expect(setups.length).toBeGreaterThan(0);
+    expect(
+      files.flatMap((file) => actionsBunGuardMismatches(file, readFileSync(file, "utf-8"))),
+    ).toEqual([]);
+  });
+});
+
 describe("unsafeStepCondition", () => {
   // A step that did not run publishes an EMPTY output, so any test an
   // absent output can satisfy opens the gate exactly when the step it
@@ -1192,6 +1321,126 @@ describe("starterPinCoverage", () => {
     // whose starters pin @build satisfies both directions.
     const pins = PIN_FLIPS.map((entry) => pin(entry.to));
     expect(starterPinCoverage(pins, PIN_FLIPS, DELIVERY_REF)).toEqual([]);
+  });
+});
+
+describe("renderedSelfPins and deliveryRefMismatches (fleet-refs-ride-build)", () => {
+  test("extracts rendered delivery pins - actions and reusable workflows alike", () => {
+    const text = [
+      "      - uses: Vivswan/repo-platform/actions/fuzz-issue@build",
+      "    uses: Vivswan/repo-platform/.github/workflows/reusable-pages.yml@main",
+    ].join("\n");
+    expect(renderedSelfPins(text, "f", "Vivswan")).toEqual([
+      { file: "f", stem: "repo-platform/actions/fuzz-issue", ref: "build" },
+      { file: "f", stem: "repo-platform/.github/workflows/reusable-pages.yml", ref: "main" },
+    ]);
+  });
+
+  test("third-party, local, other-repo, and longer-owner refs are not self-pins", () => {
+    const text = [
+      "      - uses: actions/checkout@v7",
+      "      - uses: ./actions/local",
+      "      - uses: Vivswan/other-repo/actions/x@main",
+      "      - uses: EvilVivswan/repo-platform/actions/x@main",
+    ].join("\n");
+    expect(renderedSelfPins(text, "f", "Vivswan")).toEqual([]);
+  });
+
+  test("an owner that is not a plain username throws rather than riding the regex", () => {
+    expect(() => renderedSelfPins("", "f", "a.b|c")).toThrow("not a plain GitHub username");
+  });
+
+  test("a planted @main template ref reds, naming the file and the offending ref", () => {
+    const planted =
+      "    uses: {{ github_username }}/repo-platform/.github/workflows/reusable-pages.yml@main";
+    const file = "templates/pages/.github/workflows/pages.yml.jinja";
+    const mismatches = deliveryRefMismatches(starterSelfPins(planted, file), "build");
+    expect(mismatches).toHaveLength(1);
+    expect(mismatches[0].file).toBe(file);
+    expect(mismatches[0].expected).toContain(
+      "repo-platform/.github/workflows/reusable-pages.yml@build",
+    );
+    expect(mismatches[0].got).toBe("@main");
+    // Restored to the delivery ref, the same content is green.
+    const restored = planted.replace("@main", "@build");
+    expect(deliveryRefMismatches(starterSelfPins(restored, file), "build")).toEqual([]);
+  });
+
+  test("a planted @main golden-render ref reds the same way", () => {
+    const planted = "    uses: Vivswan/repo-platform/.github/workflows/reusable-pages.yml@main";
+    const file = "tests/golden-renders/all-modules/.github/workflows/pages.yml";
+    const mismatches = deliveryRefMismatches(renderedSelfPins(planted, file, "Vivswan"), "build");
+    expect(mismatches).toHaveLength(1);
+    expect(mismatches[0].file).toBe(file);
+    expect(mismatches[0].got).toBe("@main");
+    expect(
+      deliveryRefMismatches(
+        renderedSelfPins(planted.replace("@main", "@build"), file, "Vivswan"),
+        "build",
+      ),
+    ).toEqual([]);
+  });
+
+  test("any non-delivery ref reds, not just @main - a tag or sha forks the channel too", () => {
+    const pins = [{ file: "f", stem: "repo-platform/actions/x", ref: "v2" }];
+    expect(deliveryRefMismatches(pins, "build")[0].got).toBe("@v2");
+  });
+
+  test("the lowered-username spelling is scanned too - `| lower` renders a working owner", () => {
+    const planted =
+      "    uses: {{ github_username | lower }}/repo-platform/.github/workflows/reusable-pages.yml@main";
+    const pins = templateSelfPins(planted, "f");
+    expect(pins).toEqual([
+      { file: "f", stem: "repo-platform/.github/workflows/reusable-pages.yml", ref: "main" },
+    ]);
+    expect(deliveryRefMismatches(pins, "build")).toHaveLength(1);
+    // The expression slot is matched wholesale, not by enumerating
+    // spellings: filter-call and whitespace-control forms render the same
+    // working owner and must be caught too.
+    for (const expression of [
+      "{{ github_username }}",
+      "{{ github_username | lower() }}",
+      "{{- github_username -}}",
+    ]) {
+      expect(templateSelfPins(`uses: ${expression}/repo-platform/actions/x@main`, "f")).toEqual([
+        { file: "f", stem: "repo-platform/actions/x", ref: "main" },
+      ]);
+    }
+    // Another owner's expression is not a self-pin.
+    expect(templateSelfPins("uses: {{ other_owner }}/repo-platform/actions/x@main", "f")).toEqual(
+      [],
+    );
+  });
+
+  test("a rendered case-variant owner or repo is scanned and stem-normalized", () => {
+    const pins = renderedSelfPins("    uses: vivswan/Repo-Platform/actions/x@main", "f", "Vivswan");
+    // The stem's repo prefix comes back canonical, so the roster coupling
+    // below cannot be dodged by a case-variant repo name.
+    expect(pins).toEqual([{ file: "f", stem: "repo-platform/actions/x", ref: "main" }]);
+  });
+
+  test("a reusable-workflow pin off the FLEET_WORKFLOWS roster reds - right ref, still a 404", () => {
+    const offRoster = [
+      { file: "f", stem: "repo-platform/.github/workflows/reusable-ghost.yml", ref: "build" },
+    ];
+    const mismatches = fleetWorkflowPinMismatches(offRoster, ["fleet-ci.yml"]);
+    expect(mismatches).toHaveLength(1);
+    expect(mismatches[0].got).toBe("repo-platform/.github/workflows/reusable-ghost.yml");
+    expect(mismatches[0].expected).toContain("FLEET_WORKFLOWS");
+    // A rostered pin and an action pin both pass - actions ship whole.
+    expect(
+      fleetWorkflowPinMismatches(
+        [
+          { file: "f", stem: "repo-platform/.github/workflows/fleet-ci.yml", ref: "build" },
+          { file: "f", stem: "repo-platform/actions/fuzz-issue", ref: "build" },
+        ],
+        ["fleet-ci.yml"],
+      ),
+    ).toEqual([]);
+  });
+
+  test("an empty scan throws - anchor lost, never a silently green rule", () => {
+    expect(() => deliveryRefMismatches([], "build")).toThrow("anchor lost");
   });
 });
 
@@ -3067,5 +3316,38 @@ describe("prTitleWorkflowMismatches", () => {
 
   test("the pr-title module activation is ARMED: the module layer flips the baseline's disabled ruleset active", () => {
     expect(livePrTitle()).toEqual([]);
+  });
+});
+
+describe("isOwnPagesOrigin", () => {
+  const at = (text: string) => text.indexOf("io/repo-platform");
+
+  test("accepts this owner's Pages origin, hostname-boundary anchored", () => {
+    const url = "see https://vivswan.github.io/repo-platform/ for the site";
+    expect(isOwnPagesOrigin(url, at(url), "io", "Vivswan")).toBe(true);
+    const bare = "vivswan.github.io/repo-platform";
+    expect(isOwnPagesOrigin(bare, at(bare), "io", "Vivswan")).toBe(true);
+    // Hostnames are case-insensitive; the answer casing must not matter.
+    const cased = "Vivswan.GitHub.io/repo-platform";
+    expect(isOwnPagesOrigin(cased, at(cased), "io", "vivswan")).toBe(true);
+    // ... the io segment's own casing included.
+    const casedIo = "vivswan.github.IO/repo-platform";
+    expect(isOwnPagesOrigin(casedIo, casedIo.indexOf("IO/"), "IO", "Vivswan")).toBe(true);
+  });
+
+  test("rejects every other owner, the username-suffixed near miss included", () => {
+    // A plain endsWith would exempt an owner whose name merely ENDS with
+    // the username; the boundary check exists for this case.
+    const nearMiss = "https://notvivswan.github.io/repo-platform/";
+    expect(isOwnPagesOrigin(nearMiss, at(nearMiss), "io", "Vivswan")).toBe(false);
+    const otherOwner = "https://someone.github.io/repo-platform/";
+    expect(isOwnPagesOrigin(otherOwner, at(otherOwner), "io", "Vivswan")).toBe(false);
+    // A subdomain of the origin is not the origin either.
+    const subdomain = "https://other.vivswan.github.io/repo-platform/";
+    expect(isOwnPagesOrigin(subdomain, at(subdomain), "io", "Vivswan")).toBe(false);
+    const bareIo = "evil.io/repo-platform";
+    expect(isOwnPagesOrigin(bareIo, at(bareIo), "io", "Vivswan")).toBe(false);
+    // Only the io segment is ever a Pages origin.
+    expect(isOwnPagesOrigin("x/repo-platform", 0, "x", "Vivswan")).toBe(false);
   });
 });

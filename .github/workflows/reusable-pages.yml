@@ -1,16 +1,21 @@
-# Reusable GitHub Pages deploy: ONE Pages deployment composed of a production
-# root and an optional /staging/ path.
-#   production: release -> root built from the LATEST release tag (before the
-#     first release there is no tag: only staging publishes and the root
-#     returns GitHub's default 404 - intended); staging (main HEAD) refreshes
-#     on every call.
-#   production: main -> root built from main HEAD, no staging path.
-# The build command runs with PAGES_BASE_PATH, PAGES_ORIGIN, and PAGES_STAGING
-# exported; the command maps them onto its tool (e.g. Astro:
-# ASTRO_BASE="$PAGES_BASE_PATH" ASTRO_SITE="$PAGES_ORIGIN" bun run build).
+# Reusable GitHub Pages deploy: ONE versioned Pages site assembled by the
+# pages-site action (actions/pages-site@build) from a mount list.
+#   Per versioned mount: <mount>latest/ builds from the default branch head,
+#   <mount><tag>/ from each served version tag (vX.Y.Z, newest
+#   vars.PAGES_MAX_VERSIONS or 5; a tag that structurally cannot build is
+#   skipped with a notice), and the mount root serves the newest served
+#   version - or redirects to latest/ while none serve.
+#   An unversioned mount is one build of the default branch head.
+# Command mounts run the caller's build with PAGES_BASE_PATH, PAGES_ORIGIN,
+# and PAGES_VERSION exported; vitepress mounts render the caller's docs tree
+# under the central fleet theme (repo-platform's docs/pages.md and
+# docs/docs-site.md).
 # A custom domain needs DNS + Pages settings + the CUSTOM_DOMAIN repo
-# variable together (see repo-platform's docs/pages.md); when the variable is
-# set, the root moves from /<repo>/ to /, and _site/CNAME is written.
+# variable together (docs/pages.md); when the variable is set, the root
+# moves from /<repo>/ to /, and the artifact carries CNAME.
+# On scheduled runs with link_rot_label set, the assembled site's external
+# links are checked after the deploy and findings ride the fleet's
+# tracking-issue stream (fuzz-issue@build) under that label.
 # Callers own `concurrency: pages`; this workflow does not declare one.
 
 name: Reusable Pages
@@ -18,37 +23,47 @@ name: Reusable Pages
 on:
   workflow_call:
     inputs:
+      mounts:
+        description: 'JSON mount list for the pages-site action: [{"path", "source": command|vitepress, "versioned"}]'
+        required: true
+        type: string
       setup:
         description: Toolchain(s) installed on the build runner (comma-separated bun/node/deno/uv, or none)
         required: false
         type: string
         default: none
       install_command:
-        description: Dependency install command run before each build ("" skips)
+        description: Dependency install command run before each command-mount build ("" skips)
         required: false
         type: string
         default: ""
       build_command:
-        description: Build command; PAGES_BASE_PATH/PAGES_ORIGIN/PAGES_STAGING are exported
-        required: true
+        description: Build command for command mounts; PAGES_BASE_PATH/PAGES_ORIGIN/PAGES_VERSION are exported
+        required: false
         type: string
+        default: ""
       dist_dir:
-        description: Build output directory, relative to the repo root
+        description: Command-mount build output directory, relative to the repo root
         required: false
         type: string
         default: dist
-      production:
-        description: What the production root is built from (release or main)
+      site_title:
+        description: Site title for vitepress mounts (empty = the repository name)
         required: false
         type: string
-        default: release
-      staging:
-        description: Also publish main HEAD under /staging/ (production=release only)
+        default: ""
+      docs_dir:
+        description: The docs tree a vitepress mount renders
         required: false
-        type: boolean
-        default: true
+        type: string
+        default: docs
       custom_domain:
         description: Custom domain ("" = <owner>.github.io/<repo>); pass vars.CUSTOM_DOMAIN
+        required: false
+        type: string
+        default: ""
+      link_rot_label:
+        description: Tracking label for the nightly external-link check ("" disables it)
         required: false
         type: string
         default: ""
@@ -68,15 +83,12 @@ jobs:
       pages: write
       id-token: write
     steps:
-      # `required: true` only means the caller passed SOMETHING; an empty
-      # build command would otherwise fail late with a missing dist dir, and
-      # a bad dist_dir would publish the whole checkout (including .git).
+      # The setup grammar is validated here because the setup steps below
+      # consume it; the mount list, build command, dist dir, and docs dir
+      # are the pages-site action's inputs and it validates them itself.
       - name: Validate inputs
         env:
           SETUP: ${{ inputs.setup }}
-          BUILD_COMMAND: ${{ inputs.build_command }}
-          PRODUCTION: ${{ inputs.production }}
-          DIST_DIR: ${{ inputs.dist_dir }}
         run: |
           case "$SETUP" in
             ''|*[!a-z,]*|,*|*,|*,,*)
@@ -101,123 +113,30 @@ jobs:
                 echo "::error::setup 'none' cannot be combined with toolchain tokens. Fix the setup value in the workflow that calls reusable-pages.yml."; exit 1
               fi ;;
           esac
-          case "$PRODUCTION" in
-            release|main) ;;
-            *) echo "::error::invalid production input '$PRODUCTION': it selects what the production root builds from and must be release or main. Fix the production value in the workflow that calls reusable-pages.yml."; exit 1 ;;
-          esac
-          if [ -z "$BUILD_COMMAND" ]; then
-            echo "::error::build_command is empty, so there is no command to build the site with. Set build_command in the calling workflow to the command that writes dist_dir (e.g. bun run build)."; exit 1
-          fi
-          # Segment-wise: wrapping in slashes makes every "."/".."/empty
-          # segment (absolute, doubled, trailing slashes) match a pattern, so
-          # spellings like "./" or "a/../b" cannot resolve to the repo root.
-          if [ -z "$DIST_DIR" ]; then
-            echo "::error::dist_dir is empty, so the deploy cannot locate the build output. Set dist_dir in the calling workflow to the build output directory relative to the repo root (default: dist)."; exit 1
-          fi
-          case "/$DIST_DIR/" in
-            *//*|*/./*|*/../*)
-              echo "::error::invalid dist_dir '$DIST_DIR': it contains empty, '.', or '..' segments, which could resolve to the repo root and publish the whole checkout. Set dist_dir in the calling workflow to a plain relative path inside the repo (e.g. dist)."; exit 1 ;;
-          esac
 
-      # Resolve URLs and source refs before any checkout. main HEAD is the
-      # pushed commit only on a default-branch push; on release events
-      # github.sha is the TAG commit and on workflow_dispatch it is the chosen
-      # ref, so both pin to the default branch instead.
-      - name: Resolve URLs and refs
-        id: cfg
-        env:
-          GH_TOKEN: ${{ github.token }}
-          CUSTOM_DOMAIN: ${{ inputs.custom_domain }}
-          PRODUCTION: ${{ inputs.production }}
-          STAGING: ${{ inputs.staging }}
-          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-          EVENT_NAME: ${{ github.event_name }}
-          EVENT_REF: ${{ github.ref }}
-          EVENT_SHA: ${{ github.sha }}
-        run: |
-          owner="$(printf '%s' "${GITHUB_REPOSITORY%%/*}" | tr '[:upper:]' '[:lower:]')"
-          repo="${GITHUB_REPOSITORY#*/}"
-          if [ -n "$CUSTOM_DOMAIN" ]; then
-            origin="https://$CUSTOM_DOMAIN"
-            root_base="/"
-            staging_base="/staging/"
-          else
-            origin="https://${owner}.github.io"
-            root_base="/${repo}/"
-            staging_base="/${repo}/staging/"
-          fi
-
-          default_branch="${DEFAULT_BRANCH:-main}"
-          if [ "$EVENT_NAME" = "push" ] && [ "$EVENT_REF" = "refs/heads/${default_branch}" ]; then
-            main_ref="$EVENT_SHA"
-          else
-            main_ref="$default_branch"
-          fi
-
-          if [ "$PRODUCTION" = "release" ]; then
-            prod_ref="$(gh release list -R "$GITHUB_REPOSITORY" --limit 1 \
-              --exclude-drafts --exclude-pre-releases \
-              --json tagName -q '.[0].tagName // empty')"
-            if [ -n "$prod_ref" ]; then
-              echo "Production root builds from release tag: $prod_ref"
-            else
-              echo "No release yet; publishing staging only, the production root will 404."
-            fi
-          else
-            prod_ref="$main_ref"
-          fi
-
-          build_staging=false
-          if [ "$PRODUCTION" = "release" ] && [ "$STAGING" = "true" ]; then
-            build_staging=true
-          fi
-          # Nothing to publish (no release yet, staging disabled) is a normal
-          # pre-first-release state, not an error: skip the deploy quietly so
-          # pushes to main stay green until the first release exists.
-          publish=true
-          if [ -z "$prod_ref" ] && [ "$build_staging" = "false" ]; then
-            echo "::notice::deploy skipped: no release exists yet and the staging input is false, so there is nothing to publish. Publish a first release (or set staging to true) to make this workflow deploy."
-            publish=false
-          fi
-
-          {
-            echo "origin=$origin"
-            echo "root_base=$root_base"
-            echo "staging_base=$staging_base"
-            echo "prod_ref=$prod_ref"
-            echo "main_ref=$main_ref"
-            echo "build_staging=$build_staging"
-            echo "publish=$publish"
-          } >> "$GITHUB_OUTPUT"
-
-      - name: Checkout production source
-        if: steps.cfg.outputs.prod_ref != ''
-        uses: actions/checkout@v7
+      # One full checkout serves every tier: the action reads version tags
+      # and per-ref trees from history (git archive), which needs
+      # fetch-depth 0. A push builds its own commit; schedule and dispatch
+      # pin to the default branch head.
+      - uses: actions/checkout@v7
         with:
-          ref: ${{ steps.cfg.outputs.prod_ref }}
-          path: production
-
-      - name: Checkout staging source (main HEAD)
-        if: steps.cfg.outputs.build_staging == 'true'
-        uses: actions/checkout@v7
-        with:
-          ref: ${{ steps.cfg.outputs.main_ref }}
-          path: staging
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'push' && github.sha || github.event.repository.default_branch }}
 
       # Delimiter-aware token match, so future tokens sharing a prefix (e.g.
       # a hypothetical bunx) cannot false-positive a plain contains().
-      # The version-file expressions below prefer the production tree's pin,
-      # fall back to staging's, and pass '' when neither checkout carries the
-      # dotfile - each setup action treats an empty version-file input as
-      # unset and floats on its default, exactly today's behavior.
+      # Every tier builds with the toolchain the checkout's version dotfile
+      # pins (historical tags build with today's pin, deliberately - one
+      # toolchain per run); without the dotfile the setup action's default
+      # floats.
       - name: Setup bun
-        if: contains(format(',{0},', inputs.setup), ',bun,') && steps.cfg.outputs.publish == 'true'
+        if: contains(format(',{0},', inputs.setup), ',bun,')
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version-file: ${{ hashFiles('production/.bun-version') != '' && 'production/.bun-version' || (hashFiles('staging/.bun-version') != '' && 'staging/.bun-version' || '') }}
+          bun-version-file: ${{ hashFiles('.bun-version') != '' && '.bun-version' || '' }}
 
       - name: Cache bun dependencies
-        if: contains(format(',{0},', inputs.setup), ',bun,') && steps.cfg.outputs.publish == 'true'
+        if: contains(format(',{0},', inputs.setup), ',bun,')
         uses: actions/cache@v6
         with:
           path: ~/.bun/install/cache
@@ -230,85 +149,99 @@ jobs:
       # on, and when package.json declares a package manager it hard-fails
       # unless the lockfile sits at the workspace root.
       - name: Setup node
-        if: contains(format(',{0},', inputs.setup), ',node,') && steps.cfg.outputs.publish == 'true'
+        if: contains(format(',{0},', inputs.setup), ',node,')
         uses: actions/setup-node@v7
         with:
-          node-version-file: ${{ hashFiles('production/.node-version') != '' && 'production/.node-version' || (hashFiles('staging/.node-version') != '' && 'staging/.node-version' || '') }}
+          node-version-file: ${{ hashFiles('.node-version') != '' && '.node-version' || '' }}
           package-manager-cache: false
 
       - name: Setup deno
-        if: contains(format(',{0},', inputs.setup), ',deno,') && steps.cfg.outputs.publish == 'true'
+        if: contains(format(',{0},', inputs.setup), ',deno,')
         uses: denoland/setup-deno@v2
         with:
-          deno-version-file: ${{ hashFiles('production/.dvmrc') != '' && 'production/.dvmrc' || (hashFiles('staging/.dvmrc') != '' && 'staging/.dvmrc' || '') }}
+          deno-version-file: ${{ hashFiles('.dvmrc') != '' && '.dvmrc' || '' }}
 
       - name: Setup uv
-        if: contains(format(',{0},', inputs.setup), ',uv,') && steps.cfg.outputs.publish == 'true'
+        if: contains(format(',{0},', inputs.setup), ',uv,')
         uses: astral-sh/setup-uv@v10.0.1
 
-      - name: Build production root
-        if: steps.cfg.outputs.prod_ref != ''
-        working-directory: production
-        env:
-          INSTALL_COMMAND: ${{ inputs.install_command }}
-          BUILD_COMMAND: ${{ inputs.build_command }}
-          PAGES_BASE_PATH: ${{ steps.cfg.outputs.root_base }}
-          PAGES_ORIGIN: ${{ steps.cfg.outputs.origin }}
-          PAGES_STAGING: ""
-        run: |
-          if [ -n "$INSTALL_COMMAND" ]; then eval "$INSTALL_COMMAND"; fi
-          eval "$BUILD_COMMAND"
-
-      - name: Build staging (main HEAD)
-        if: steps.cfg.outputs.build_staging == 'true'
-        working-directory: staging
-        env:
-          INSTALL_COMMAND: ${{ inputs.install_command }}
-          BUILD_COMMAND: ${{ inputs.build_command }}
-          PAGES_BASE_PATH: ${{ steps.cfg.outputs.staging_base }}
-          PAGES_ORIGIN: ${{ steps.cfg.outputs.origin }}
-          PAGES_STAGING: "1"
-        run: |
-          if [ -n "$INSTALL_COMMAND" ]; then eval "$INSTALL_COMMAND"; fi
-          eval "$BUILD_COMMAND"
-
-      # A trailing `/.` copies directory CONTENTS, not the directory itself.
-      - name: Compose _site
-        if: steps.cfg.outputs.publish == 'true'
-        env:
-          DIST_DIR: ${{ inputs.dist_dir }}
-          CUSTOM_DOMAIN: ${{ inputs.custom_domain }}
-          PROD_REF: ${{ steps.cfg.outputs.prod_ref }}
-          BUILD_STAGING: ${{ steps.cfg.outputs.build_staging }}
-        run: |
-          rm -rf _site
-          mkdir -p _site
-          if [ -n "$PROD_REF" ]; then
-            if [ ! -d "production/$DIST_DIR" ]; then
-              echo "::error::cannot compose the site: the production build (ref '$PROD_REF') did not create '$DIST_DIR'. Point dist_dir at the directory build_command actually writes, or fix build_command to produce it."; exit 1
-            fi
-            cp -R "production/$DIST_DIR/." _site/
-          fi
-          if [ "$BUILD_STAGING" = "true" ]; then
-            if [ ! -d "staging/$DIST_DIR" ]; then
-              echo "::error::cannot compose the site: the staging build (main HEAD) did not create '$DIST_DIR'. Point dist_dir at the directory build_command actually writes, or fix build_command to produce it."; exit 1
-            fi
-            mkdir -p _site/staging
-            cp -R "staging/$DIST_DIR/." _site/staging/
-          fi
-          if [ -n "$CUSTOM_DOMAIN" ]; then
-            echo "$CUSTOM_DOMAIN" > _site/CNAME
-            echo "Wrote _site/CNAME -> $CUSTOM_DOMAIN"
-          fi
+      - name: Build and assemble the site
+        id: site
+        uses: Vivswan/repo-platform/actions/pages-site@build
+        with:
+          mounts: ${{ inputs.mounts }}
+          docs-dir: ${{ inputs.docs_dir }}
+          site-title: ${{ inputs.site_title }}
+          install-command: ${{ inputs.install_command }}
+          build-command: ${{ inputs.build_command }}
+          dist-dir: ${{ inputs.dist_dir }}
+          max-versions: ${{ vars.PAGES_MAX_VERSIONS || '5' }}
+          custom-domain: ${{ inputs.custom_domain }}
 
       - uses: actions/configure-pages@v6
-        if: steps.cfg.outputs.publish == 'true'
 
       - uses: actions/upload-pages-artifact@v5
-        if: steps.cfg.outputs.publish == 'true'
         with:
-          path: _site
+          path: ${{ steps.site.outputs.site-dir }}
 
       - id: deployment
-        if: steps.cfg.outputs.publish == 'true'
         uses: actions/deploy-pages@v5
+
+  # Nightly link rot, as its OWN job: the deploy job above executes
+  # caller-authored build commands, so its token never carries issues
+  # write - this job crawls the artifact that actually shipped (the
+  # github-pages artifact the deploy published) and files findings on the
+  # tracking-issue stream: open issue on rot, closed on a clean night.
+  link-rot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: deploy
+    if: github.event_name == 'schedule' && inputs.link_rot_label != ''
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Download the deployed artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: github-pages
+
+      - name: Extract the deployed artifact
+        run: mkdir -p _site && tar -xf artifact.tar -C _site
+
+      - name: Check external links
+        id: links
+        uses: Vivswan/repo-platform/actions/pages-site/check-links@build
+        with:
+          site-dir: _site
+
+      - name: Upload the link-rot report
+        if: steps.links.outputs.broken != '0'
+        uses: actions/upload-artifact@v7
+        with:
+          name: link-rot-${{ github.run_attempt }}
+          path: ${{ steps.links.outputs.report-dir }}
+          if-no-files-found: ignore
+
+      - name: File or update the link-rot issue
+        if: steps.links.outputs.broken != '0'
+        uses: Vivswan/repo-platform/actions/fuzz-issue@build
+        with:
+          mode: report
+          label: ${{ inputs.link_rot_label }}
+          title: Docs site link rot
+          artifacts-dir: ${{ steps.links.outputs.report-dir }}
+          artifact-name: link-rot-${{ github.run_attempt }}
+          # The stream's create tuple, anchored to templates/docs-site/
+          # module.yml tracking_label by check_ssot's issue-labels rule.
+          label-color: "D4A72C"
+          label-description: Automated docs-site link-rot report
+          stream: generic
+
+      - name: Close the link-rot issue on a clean night
+        if: steps.links.outputs.broken == '0'
+        uses: Vivswan/repo-platform/actions/fuzz-issue@build
+        with:
+          mode: resolve
+          label: ${{ inputs.link_rot_label }}
+          stream: generic

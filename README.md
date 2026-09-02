@@ -18,7 +18,7 @@ Which files the template owns, and how strongly, is declared as data rather than
 
 ## Modules<!-- BEGIN GENERATED: module-roster (scripts/generate.ts - edit module.yml manifests, not this block) -->
 
-- Modules (pick any combination): `agents`, `bun`, `node`, `deno`, `uv`, `rust`, `pages`, `release-please`, `issue-templates`, `skills`, `pr-title`, `auto-assign`, `fuzzer`, `nightly`, `settings-sync`, `custom-license`. Modules with parameters (like `pages`) ask follow-up questions only when selected. After generation, module selection lives in each repo's own `.repo-platform.yml`: edit its `modules:` list and the next sync applies the change.<!-- END GENERATED: module-roster -->
+- Modules (pick any combination): `agents`, `bun`, `node`, `deno`, `uv`, `rust`, `pages`, `docs-site`, `release-please`, `issue-templates`, `skills`, `pr-title`, `auto-assign`, `fuzzer`, `nightly`, `settings-sync`, `custom-license`. Modules with parameters (like `pages`) ask follow-up questions only when selected. After generation, module selection lives in each repo's own `.repo-platform.yml`: edit its `modules:` list and the next sync applies the change.<!-- END GENERATED: module-roster -->
 
 ## Onboarding a repo
 
@@ -40,7 +40,7 @@ Managed repos need no secret. Two optional features carry their own token: a `se
 
 ## Going deeper
 
-- Guides: [new repo](docs/new-repo.md), [settings](docs/settings.md), [all-green convention](docs/all-green.md), [build provenance](docs/build-provenance.md), [pages module](docs/pages.md), [fuzzer module](docs/fuzzer.md), [nightly module](docs/nightly.md), [skills module](docs/skills.md), [toolchain pins](docs/toolchains.md), [golden renders](docs/golden-renders.md), [private repos](docs/private-repos.md), [eject](docs/eject.md).
+- Guides: [new repo](docs/new-repo.md), [settings](docs/settings.md), [all-green convention](docs/all-green.md), [build provenance](docs/build-provenance.md), [pages module](docs/pages.md), [docs-site module](docs/docs-site.md), [fuzzer module](docs/fuzzer.md), [nightly module](docs/nightly.md), [skills module](docs/skills.md), [toolchain pins](docs/toolchains.md), [golden renders](docs/golden-renders.md), [private repos](docs/private-repos.md), [eject](docs/eject.md).
 - Composition and ownership: the header comment in [scripts/compose_template.ts](scripts/compose_template.ts), the `templates/<module>/module.yml` manifests (editor schema: `templates/module.schema.json`), and `templates/base/ownership.yml`.
 - Working in this repo - generators, editing rules, local gates: [AGENTS.md](AGENTS.md).
 - [`skills/`](skills/): portable agent skills for driving the platform from other repos - new project, sync-PR handling and sync recovery, module add/remove - installed with `npx skills`; never synced to managed repos.

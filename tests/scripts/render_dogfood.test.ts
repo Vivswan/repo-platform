@@ -32,8 +32,17 @@ const answers: Answers = {
   github_username: "Vivswan",
   copyright_holder: "Vivswan Shah",
   private: false,
-  modules: new Set(["agents", "bun", "release-please", "skills", "pr-title", "auto-assign"]),
+  modules: new Set([
+    "agents",
+    "bun",
+    "release-please",
+    "skills",
+    "pr-title",
+    "auto-assign",
+    "docs-site",
+  ]),
   skills_dir: "skills",
+  docs_site_label: "docs-link-rot",
 };
 
 const manifests: ModuleManifest[] = [
@@ -44,6 +53,7 @@ const manifests: ModuleManifest[] = [
   { module: "skills", description: "s" },
   { module: "pr-title", description: "p" },
   { module: "auto-assign", description: "aa" },
+  { module: "docs-site", description: "ds" },
 ];
 
 const sources: AnswerSources = {
@@ -51,6 +61,7 @@ const sources: AnswerSources = {
   usernameDefault: "Vivswan",
   copyrightDefault: "Vivswan Shah",
   skillsDirDefault: "skills",
+  docsSiteLabelDefault: "docs-link-rot",
   settingsDescription: "d",
   settingsPrivate: false,
   moduleNames: new Set(manifests.map((m) => m.module)),
@@ -231,5 +242,18 @@ describe("answerMismatches", () => {
   test("flags a skills_dir that drifted from the copier.yml default", () => {
     const drift = answerMismatches({ ...answers, skills_dir: "lib/skills" }, sources);
     expect(drift.some((p) => p.includes("copier.yml skills_dir default"))).toBe(true);
+  });
+
+  test("docs_site_label must exist exactly while the docs-site module is selected", () => {
+    const withoutLabel = answerMismatches({ ...answers, docs_site_label: undefined }, sources);
+    expect(withoutLabel.some((p) => p.includes("docs_site_label: missing"))).toBe(true);
+    const withoutDocsSite = new Set([...answers.modules].filter((m) => m !== "docs-site"));
+    const stale = answerMismatches({ ...answers, modules: withoutDocsSite }, sources);
+    expect(stale.some((p) => p.includes("docs_site_label: set but"))).toBe(true);
+  });
+
+  test("flags a docs_site_label that drifted from the copier.yml default", () => {
+    const drift = answerMismatches({ ...answers, docs_site_label: "other-label" }, sources);
+    expect(drift.some((p) => p.includes("copier.yml docs_site_label default"))).toBe(true);
   });
 });

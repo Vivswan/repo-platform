@@ -117,6 +117,20 @@ export const GUARD_REGISTRY: readonly GuardEntry[] = [
     testFile: "tests/scripts/check_guard_binding.test.ts",
     testName: "an entry whose snippet vanished from its guard file is reported",
   },
+  // The deletion tripwire is a guard too: the binding check validates
+  // the entries PRESENT both ways but is structurally blind to ABSENT
+  // ones - a rebase's conflict resolution once dropped 5 of main's
+  // entries with every gate green, caught only by a manual count.
+  {
+    id: "guard-registry-deletion-tripwire",
+    hazard:
+      "a merge-conflict resolution silently drops registry entries: the binding check proves every PRESENT entry resolves both ways but never asks what main had, so guards vanish wholesale with every gate green",
+    guardFile: "scripts/check_guard_binding.ts",
+    snippet: "if (!liveIds.has(baseId) && !retiredIds.has(baseId)) {",
+    mutated: "if (false) {",
+    testFile: "tests/scripts/check_guard_binding.test.ts",
+    testName: "a merge-base registry id missing at HEAD without a RETIRED_GUARDS entry is reported",
+  },
   // The all-green action's judgment guards (actions/all-green/action.yml's
   // judge block). Their scenario-level forcing cases are
   // verify_allgreen_judgment.sh's; the wrapper test file
@@ -377,7 +391,76 @@ export const GUARD_REGISTRY: readonly GuardEntry[] = [
     testName:
       "the pr-title module activation is ARMED: the module layer flips the baseline's disabled ruleset active",
   },
+  {
+    id: "docs-site-caller-theme-refusal",
+    hazard:
+      "a fleet repo ships docs/.vitepress expecting it to style its site: the central build root ignores caller theme files by construction, so without the refusal the deploy stays green while silently discarding what the repo authored - the central-theme invariant rots into a lie",
+    guardFile: "actions/pages-site/build.ts",
+    snippet: 'if (existsSync(join(docsTree, ".vitepress"))) {',
+    mutated: "if (false) {",
+    testFile: "actions/pages-site/pages-site.test.ts",
+    testName: "a caller-shipped .vitepress is REFUSED: the theme comes only from repo-platform",
+  },
+  {
+    id: "docs-site-strict-links-wiring",
+    hazard:
+      "the deploy's dead-link strictness rewired to always-lenient: every tier then builds with dead internal links ignored, so current docs rot ships on a green run and the PR check's promise (a dead link fails before merge, or at worst at deploy) quietly dies",
+    guardFile: "actions/pages-site/build.ts",
+    snippet: 'return tier.ref === "HEAD";',
+    mutated: "return false;",
+    testFile: "actions/pages-site/pages-site.test.ts",
+    testName: "the dead-link strictness wiring is ARMED: HEAD tiers build strict, tags lenient",
+  },
+  {
+    id: "pages-legacy-tag-skip-narrow",
+    hazard:
+      "the structural probe rewired to skip every tag: versioned tiers and their versions.json entries silently vanish from the deployed site on a green run, and the loud failure a broken-but-declared build owes the operator never fires because nothing builds at all",
+    guardFile: "actions/pages-site/lib.ts",
+    snippet: 'return typeof pkg.scripts[script] === "string";',
+    mutated: "return false;",
+    testFile: "actions/pages-site/pages-site.test.ts",
+    testName: "the legacy-tag skip is NARROW: a tag declaring the build script is never skipped",
+  },
+  // The composite actions' pinned-bun setup (the actions-bun-guard rule's
+  // canonical block). The attack was staged live, not hypothetically: the
+  // 1.4.0 bump rewrote the action lockfiles to lockfileVersion 2, and
+  // every consumer whose own pin resolved an older bun (cloud-speech at
+  // 1.3.9 first) died at the actions' install step - with the parse error
+  // swallowed by --silent and zero signal in repo-platform's CI, which
+  // pins 1.4.0 itself. The forcing test runs the rule's judgment on the
+  // REAL action manifests, so unpinning any one of them goes red.
+  {
+    id: "actions-bun-pin",
+    hazard:
+      "a composite action's bun floats on the CONSUMER repository's version resolution (a bare setup-bun reads the caller checkout's version files): a repo-platform bun bump that rewrites the action lockfiles then breaks arbitrary consumers' CI with no signal in repo-platform's own",
+    guardFile: "actions/check-typography/action.yml",
+    snippet:
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal action lines under pin
+      "      continue-on-error: true\n      uses: oven-sh/setup-bun@v2\n      with:\n        bun-version-file: ${{ github.action_path }}/.bun-version",
+    mutated: "      continue-on-error: true\n      uses: oven-sh/setup-bun@v2",
+    testFile: "tests/scripts/check_ssot.test.ts",
+    testName:
+      "the composite actions' bun pin is ARMED: every bun-touching action.yml carries the pinned setup block",
+  },
 ];
+
+/** A guard retired ON PURPOSE: its id moved here from GUARD_REGISTRY
+ *  when the guard left with its machinery (the sanctioned removal case).
+ *  The deletion tripwire in scripts/check_guard_binding.ts compares
+ *  HEAD's ids against the registry file at the merge-base with
+ *  origin/main and goes red on any id that is neither live nor listed
+ *  here - so a merge-conflict resolution can never drop entries
+ *  silently, while a deliberate retirement stays a one-line move.
+ *  Records are permanent: deleting one re-trips the wire, because the
+ *  merge-base extraction reads retired ids too. */
+export interface RetiredGuard {
+  /** The retired entry's id, verbatim. */
+  id: string;
+  /** Why the guard left, one line (usually: retired with its machinery). */
+  reason: string;
+}
+
+export const RETIRED_GUARDS: readonly RetiredGuard[] = [];
 
 /** Occurrences of `token` in `text` (exact bytes, no regex). */
 export function countOccurrences(text: string, token: string): number {

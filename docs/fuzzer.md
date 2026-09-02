@@ -1,6 +1,6 @@
 # The fuzzer module
 
-Selecting the `fuzzer` module gives a repository a `nightly-fuzz.yml` starter workflow ([the template](../templates/fuzzer/.github/workflows/nightly-fuzz.yml.jinja)): a nightly cron plus a `workflow_dispatch` with `seed` and `iterations` inputs, your fuzz step in the middle, and shared reporting machinery around it. On a red night it uploads the failure artifacts and files a [tracking issue](tracking-issues.md) built from your failure reports; on a green night it closes the stream's open issues.
+Selecting the `fuzzer` module gives a repository a `nightly-fuzz.yml` starter workflow ([the template](https://github.com/Vivswan/repo-platform/blob/main/templates/fuzzer/.github/workflows/nightly-fuzz.yml.jinja)): a nightly cron plus a `workflow_dispatch` with `seed` and `iterations` inputs, your fuzz step in the middle, and shared reporting machinery around it. On a red night it uploads the failure artifacts and files a [tracking issue](tracking-issues.md) built from your failure reports; on a green night it closes the stream's open issues.
 
 The starter is generated once and then repo-owned (`_skip_if_exists`): fuzzers and their toolchains differ too much across repos for the template to keep managing the file, so it carries the shared machinery and leaves the fuzz step itself to you. Issue lifecycle, release gating, label renaming, and the action pin's history are shared with the nightly module: [Tracking issues](tracking-issues.md).
 

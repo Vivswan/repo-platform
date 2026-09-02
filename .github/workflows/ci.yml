@@ -190,7 +190,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
+      # Full history: the guard-binding step's deletion tripwire compares
+      # the registry against the merge-base with origin/main, and a
+      # depth-1 checkout would make it stand down (fail open) on every PR.
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: .bun-version
@@ -324,7 +329,7 @@ jobs:
           # opt-out (no fleet license rendered) is exercised; every other
           # row covers the default fleet-license render.
           - name: everything
-            modules: "[agents, bun, node, deno, uv, rust, pages, release-please, issue-templates, skills, pr-title, auto-assign, fuzzer, nightly, settings-sync, custom-license]"
+            modules: "[agents, bun, node, deno, uv, rust, pages, docs-site, release-please, issue-templates, skills, pr-title, auto-assign, fuzzer, nightly, settings-sync, custom-license]"
             private: "false"
             expect_in_pages: |
               setup: bun,node,deno,uv
@@ -405,8 +410,6 @@ jobs:
             expect_in_pages: |
               uv sync
               uv run mkdocs build --site-dir dist
-              production: release
-              staging: true
           # The only row where bun renders private: the bun fragments'
           # enable_codeql=false branches must emit no CodeQL wiring in
           # ci.yml, settings.yml must still declare `private: true`
@@ -418,11 +421,19 @@ jobs:
           - name: pages-bare
             modules: "[pages, auto-assign]"
             private: "false"
-            extra_data: "-d pages_setup=none -d pages_build_command=./build.sh -d pages_production=main"
+            extra_data: "-d pages_setup=none -d pages_build_command=./build.sh"
             expect_in_pages: |
               ./build.sh
-              production: main
-              staging: false
+              setup: none
+          # docs-site alone: docs-site.yml carries the PR check job AND the
+          # deploy (no pages module to ride); the composed shape - pages.yml
+          # carrying the docs mount while docs-site.yml renders down to the
+          # check job - is the everything row's leg. settings-sync rides
+          # along so the module's OWN Pages-enablement layer is asserted
+          # without the pages module's identical layer masking it.
+          - name: docs-only
+            modules: "[docs-site, settings-sync]"
+            private: "false"
           # Proves the declared _min_copier_version still supports the
           # multiselect + when features the template uses (serialized
           # multiselect answers landed in copier 9.8.0).
@@ -439,7 +450,7 @@ jobs:
           # description stays the harness default - EXTRA_DATA cannot carry
           # whitespace and no generated pair renders it.
           - name: dogfood-oracle
-            modules: "[agents, bun, skills, pr-title, auto-assign]"
+            modules: "[agents, bun, skills, pr-title, auto-assign, docs-site]"
             private: "false"
             extra_data: "-d project_name=repo-platform"
     steps:
@@ -510,6 +521,24 @@ jobs:
         run: pipx install copier
       - name: Update from a previous build tree to a fresh build
         run: .github/scripts/ci/upgrade_path_test.sh
+
+  # The pages-site action's vitepress build, end to end in the runner's
+  # own directory topology (workspace, action tree, and RUNNER_TEMP apart):
+  # nothing else in the gate ever RUNS vitepress, and the build's module
+  # resolution only breaks under that separation - the class a laptop
+  # layout cannot reproduce (.github/scripts/ci/verify_pages_site_build.sh).
+  pages-site-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      - name: Install the action's pinned dependencies
+        run: bun install --frozen-lockfile --cwd actions/pages-site
+      - name: Build the fixture site and assert the artifact
+        run: .github/scripts/ci/verify_pages_site_build.sh
 
   # Dry-run sync against every fleet repo's REAL current state (render,
   # splice, resolve, validate - no push, no PR, private repos hard-skipped
@@ -600,6 +629,7 @@ jobs:
       - skills-discovery
       - smoke-generate
       - upgrade-path
+      - pages-site-build
       - rehearse-fleet
       - codeql-javascript
     if: always()

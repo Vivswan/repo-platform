@@ -25,6 +25,12 @@
 //   derived from the zod schema in scripts/module_manifests.ts.
 // - templates/<module>/<pin.file> for every manifest toolchain pin: WHOLE
 //   generated dotfiles carrying exactly the pinned version plus a newline.
+// - actions/<dir>/.bun-version for every composite action that sets up
+//   bun: WHOLE generated dotfiles carrying the manifests' bun pin, read by
+//   each action's own setup steps (bun-version-file against
+//   github.action_path) so the actions' runtime never rides the CALLING
+//   repository's bun resolution - a consumer pinning an older bun cannot
+//   parse the lockfiles repo-platform's bun writes.
 // - templates/base/.github/workflows/ci.yml.jinja and
 //   templates/release-please/.github/workflows/release.yml.jinja:
 //   the tracking-labels input both release-health call sites pass, built
@@ -63,7 +69,9 @@
 
 import { existsSync, lstatSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { parse as parseYaml } from "yaml";
 import { z } from "zod";
+import { EXCLUDED_DIRS } from "../.github/scripts/build-branches/branch_tree.ts";
 import { managedLabelNames } from "../.github/scripts/fleet/render_managed_settings.ts";
 import type { RegionSplit } from "../actions/shared/grammar.ts";
 import { compose, dependabotLabels, excludePatterns } from "./compose_template.ts";
@@ -576,6 +584,93 @@ export function strayPinFiles(manifests: ModuleManifest[], templatesDir: string)
   return strays;
 }
 
+/** The steps of a composite action manifest, parsed structurally the way
+ *  Actions itself reads them - so a quoted or flow-style `uses:` counts
+ *  and a `uses:`-shaped line inside a block-scalar `run:` body never
+ *  does, where a text scan gets both wrong. Non-mapping steps and a
+ *  missing runs.steps read as empty. */
+export function actionSteps(text: string): Record<string, unknown>[] {
+  const doc = parseYaml(text);
+  if (typeof doc !== "object" || doc === null) return [];
+  const runs = (doc as Record<string, unknown>).runs;
+  if (typeof runs !== "object" || runs === null) return [];
+  const steps = (runs as Record<string, unknown>).steps;
+  if (!Array.isArray(steps)) return [];
+  return steps.filter(
+    (step): step is Record<string, unknown> => typeof step === "object" && step !== null,
+  );
+}
+
+/** Whether one parsed step's `uses:` names oven-sh/setup-bun (at any
+ *  ref). GitHub action identifiers are case-insensitive, so the match
+ *  normalizes case - a mixed-case spelling is the same action and must
+ *  not dodge the pin. The single predicate both the generator and the
+ *  actions-bun-guard rule judge with. */
+export function usesSetupBun(step: Record<string, unknown>): boolean {
+  return typeof step.uses === "string" && step.uses.toLowerCase().startsWith("oven-sh/setup-bun@");
+}
+
+/** Whether an action manifest carries a setup-bun step. */
+export function actionSetsUpBun(text: string): boolean {
+  return actionSteps(text).some(usesSetupBun);
+}
+
+/** Every directory under actions/ (nested actions included) whose
+ *  action.yml carries a setup-bun step, repo-relative and sorted;
+ *  branch_tree.ts's EXCLUDED_DIRS bounds the walk, so generation sees
+ *  exactly the tree publication ships. Each directory gets a generated
+ *  action-local .bun-version: the composite's setup steps read it via
+ *  bun-version-file against github.action_path, so the action's bun is
+ *  the manifests' pin and never whatever the CALLING repository resolves
+ *  (setup-bun's default falls back to the consumer checkout's version
+ *  files, and a consumer pinning an older bun cannot parse the lockfiles
+ *  repo-platform's bun writes). */
+export function bunSetupActionDirs(actionsDir: string, prefix = "actions"): string[] {
+  const dirs: string[] = [];
+  const manifest = join(actionsDir, "action.yml");
+  if (existsSync(manifest) && actionSetsUpBun(readFileSync(manifest, "utf-8"))) {
+    dirs.push(prefix);
+  }
+  for (const entry of readdirSync(actionsDir, { withFileTypes: true })) {
+    if (!entry.isDirectory() || EXCLUDED_DIRS.has(entry.name)) continue;
+    dirs.push(...bunSetupActionDirs(join(actionsDir, entry.name), `${prefix}/${entry.name}`));
+  }
+  return dirs.sort();
+}
+
+/** .bun-version files under actions/ whose directory's action.yml no
+ *  longer sets up bun (or is gone): the generator would silently stop
+ *  refreshing them while the stale pin keeps shipping on the build
+ *  branch. Returned for the caller to throw on, like strayPinFiles. */
+export function strayActionPinFiles(actionsDir: string, prefix = "actions"): string[] {
+  const emitted = new Set(bunSetupActionDirs(actionsDir, prefix));
+  const strays: string[] = [];
+  const visit = (dir: string, rel: string) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (EXCLUDED_DIRS.has(entry.name)) continue;
+      if (entry.isDirectory()) visit(join(dir, entry.name), `${rel}/${entry.name}`);
+      else if (entry.name === ".bun-version" && !emitted.has(rel)) {
+        strays.push(`${rel}/.bun-version`);
+      }
+    }
+  };
+  visit(actionsDir, prefix);
+  return strays.sort();
+}
+
+/** The bun module's toolchain pin - the single source the action-local
+ *  .bun-version dotfiles are generated from. */
+export function bunToolchainPin(manifests: ModuleManifest[]): ToolchainPin {
+  const bun = manifests.find((m) => m.module === "bun");
+  if (bun?.toolchain?.pin === undefined) {
+    throw new Error(
+      "templates/bun/module.yml declares no toolchain.pin - the composite " +
+        "actions' .bun-version dotfiles have no source",
+    );
+  }
+  return { module: bun.module, ...bun.toolchain.pin };
+}
+
 // The docs regions below regenerate hand-written prose. Each region is a
 // whole sentence (or sentence run), so the hand prose around it always
 // reads on regardless of how the data rewraps.
@@ -597,6 +692,7 @@ function proseList(items: string[]): string {
  *  gets its guide listed here when the guide lands. */
 export const MODULE_PARAM_DOCS: Record<string, string> = {
   pages: "pages.md",
+  "docs-site": "docs-site.md",
   fuzzer: "fuzzer.md",
   nightly: "nightly.md",
   skills: "skills.md",
@@ -909,6 +1005,14 @@ function wholeFiles(
       () => pinFileContent(pin),
       `its content does not match the toolchain pin in templates/${pin.module}/module.yml`,
     ]),
+    ...bunSetupActionDirs(join(REPO_ROOT, "actions")).map(
+      (dir): [string, (inputs: RegionInputs) => string, string] => [
+        `${dir}/.bun-version`,
+        () => pinFileContent(bunToolchainPin(manifests)),
+        "its content does not match the bun toolchain pin in templates/bun/module.yml " +
+          "(the composite actions run on the manifests' bun pin, never the caller's)",
+      ],
+    ),
   ];
 }
 
@@ -932,6 +1036,15 @@ function main(): number {
         `stray toolchain version dotfile(s) not declared by any manifest pin: ` +
           `${strays.join(", ")} - a renamed or removed pin leaves the old file ` +
           "shipping to every render; delete it (or fix the manifest's pin.file)",
+      );
+    }
+    const actionStrays = strayActionPinFiles(join(REPO_ROOT, "actions"));
+    if (actionStrays.length > 0) {
+      throw new Error(
+        `stray action .bun-version dotfile(s) whose action.yml sets up no bun: ` +
+          `${actionStrays.join(", ")} - the generator would stop refreshing them ` +
+          "while the stale pin keeps shipping on the build branch; delete the " +
+          "file (or restore the action's setup-bun step)",
       );
     }
     const inputs: RegionInputs = {

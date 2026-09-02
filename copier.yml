@@ -34,6 +34,7 @@ _exclude:
   - "{% if not ('agents' in modules) %}.github/workflows/copilot-setup-steps.yml{% endif %}"
   - "{% if not ('deno' in modules) %}.github/workflows/deno-audit.yml{% endif %}"
   - "{% if not ('bun' in modules) %}.github/workflows/dependabot-bun-lockfile.yml{% endif %}"
+  - "{% if not ('docs-site' in modules) %}.github/workflows/docs-site.yml{% endif %}"
   - "{% if not ('fuzzer' in modules) %}.github/workflows/nightly-fuzz.yml{% endif %}"
   - "{% if not ('nightly' in modules) %}.github/workflows/nightly.yml{% endif %}"
   - "{% if not ('pages' in modules) %}.github/workflows/pages.yml{% endif %}"
@@ -143,7 +144,8 @@ modules:
     deno - Deno toolchain (deno fmt/lint, deno dependabot, CodeQL JS): deno
     uv - Python/uv toolchain (gitignore, dependabot, CodeQL Python): uv
     rust - Rust/cargo toolchain (cargo dependabot, Rust gitignore; no CodeQL): rust
-    pages - GitHub Pages deploy (root = latest release, /staging/ = main): pages
+    pages - GitHub Pages deploy of the repo's own build (root = newest served version tag, /latest/ = main): pages
+    docs-site - VitePress docs site from docs/ under the central fleet theme (repos carry only markdown): docs-site
     release-please - gate-downstream release job in ci.yml + autorelease labels: release-please
     issue-templates - bug/feature issue forms: issue-templates
     skills - agent skills hosting (plugin manifests, skill validation): skills
@@ -195,7 +197,7 @@ pages_install_command:
 
 pages_build_command:
   type: str
-  help: Build command; PAGES_BASE_PATH, PAGES_ORIGIN, PAGES_STAGING are exported
+  help: Build command; PAGES_BASE_PATH, PAGES_ORIGIN, PAGES_VERSION are exported
   # BEGIN GENERATED: pages-build-command (scripts/generate.ts - edit module.yml manifests, not this block)
   default: "{{ 'bun run build' if 'bun' in pages_setup.split(',') else ('npm run build' if 'node' in pages_setup.split(',') else ('deno task build' if 'deno' in pages_setup.split(',') else ('uv run mkdocs build --site-dir dist' if 'uv' in pages_setup.split(',') else ''))) }}"
   # END GENERATED: pages-build-command
@@ -213,20 +215,29 @@ pages_dist_dir:
   validator: "{% set parts = pages_dist_dir.split('/') %}{% if not pages_dist_dir or '' in parts or '.' in parts or '..' in parts %}pages_dist_dir must be a plain relative path inside the repo (no leading/trailing/doubled slashes, no '.' or '..' segments){% endif %}"
   when: "{{ 'pages' in modules }}"
 
-pages_production:
-  type: str
-  help: What the production Pages root is built from
-  choices:
-    latest release tag (staging preview from main): release
-    main HEAD (no separate staging): main
-  default: release
-  when: "{{ 'pages' in modules }}"
+# --- docs-site module parameters (asked only when it is selected) ---
 
-pages_staging:
-  type: bool
-  help: Also publish main HEAD under /staging/
-  default: true
-  when: "{{ 'pages' in modules and pages_production == 'release' }}"
+docs_site_path:
+  type: str
+  help: URL path the docs mount under when the pages module also renders a website (docs-site alone mounts at the site root)
+  default: docs
+  # One plain URL segment: the value lands inside pages.yml's mounts JSON
+  # and becomes a literal path prefix on the deployed site, so slashes,
+  # dots, or an empty value would change the mount topology instead of
+  # naming it.
+  validator: "{% if not (docs_site_path | regex_search('^[a-z0-9][a-z0-9_-]*\\Z')) %}docs_site_path must be one plain lowercase URL segment: letters, digits, dashes, or underscores (no slashes, dots, or spaces){% endif %}"
+  when: "{{ 'docs-site' in modules }}"
+
+# The nightly link-rot stream's identity, same story as fuzzer_label and
+# nightly_label below: the deploy's report and resolve steps both key on it.
+docs_site_label:
+  type: str
+  help: Label for the deduplicated docs-site link-rot tracking issue
+  default: docs-link-rot
+  # BEGIN GENERATED: docs-site-label-validator (scripts/generate.ts - edit module.yml manifests, not this block)
+  validator: "{% if not (docs_site_label | regex_search('^[A-Za-z0-9._][A-Za-z0-9._: -]{0,49}\\Z')) %}docs_site_label must be a plain label: letters, digits, ._:- and spaces, not starting with a dash, at most 50 characters{% elif docs_site_label | lower in ['dependencies', 'github_actions', 'bug', 'enhancement', 'fix-lint', 'settings-as-code-report', 'javascript', 'deno', 'python:uv', 'rust', 'autorelease: pending', 'autorelease: tagged', 'release-blocker', 'release-override'] %}docs_site_label must not reuse a label the template already manages (GitHub label names are case-insensitive): a green night would close whatever issues carry it and every settings apply would fight over it{% endif %}"
+  # END GENERATED: docs-site-label-validator
+  when: "{{ 'docs-site' in modules }}"
 
 # --- fuzzer module parameter (asked only when it is selected) ---
 # The label is the tracking-issue stream's identity: the report and resolve
@@ -245,7 +256,7 @@ fuzzer_label:
   # baseline, the release labels, the dependabot labels): reusing one would
   # corrupt label sync and let a green night close unrelated issues.
   # BEGIN GENERATED: fuzzer-label-validator (scripts/generate.ts - edit module.yml manifests, not this block)
-  validator: "{% if not (fuzzer_label | regex_search('^[A-Za-z0-9._][A-Za-z0-9._: -]{0,49}\\Z')) %}fuzzer_label must be a plain label: letters, digits, ._:- and spaces, not starting with a dash, at most 50 characters{% elif fuzzer_label | lower in ['dependencies', 'github_actions', 'bug', 'enhancement', 'fix-lint', 'settings-as-code-report', 'javascript', 'deno', 'python:uv', 'rust', 'autorelease: pending', 'autorelease: tagged', 'release-blocker', 'release-override'] %}fuzzer_label must not reuse a label the template already manages (GitHub label names are case-insensitive): a green night would close whatever issues carry it and every settings apply would fight over it{% endif %}"
+  validator: "{% if not (fuzzer_label | regex_search('^[A-Za-z0-9._][A-Za-z0-9._: -]{0,49}\\Z')) %}fuzzer_label must be a plain label: letters, digits, ._:- and spaces, not starting with a dash, at most 50 characters{% elif fuzzer_label | lower in ['dependencies', 'github_actions', 'bug', 'enhancement', 'fix-lint', 'settings-as-code-report', 'javascript', 'deno', 'python:uv', 'rust', 'autorelease: pending', 'autorelease: tagged', 'release-blocker', 'release-override'] %}fuzzer_label must not reuse a label the template already manages (GitHub label names are case-insensitive): a green night would close whatever issues carry it and every settings apply would fight over it{% elif 'docs-site' in modules and fuzzer_label | lower == docs_site_label | lower %}fuzzer_label must differ from docs_site_label (GitHub label names are case-insensitive): each stream needs its own tracking label or a green night in one closes the other's open issue{% endif %}"
   # END GENERATED: fuzzer-label-validator
   when: "{{ 'fuzzer' in modules }}"
 
@@ -263,7 +274,7 @@ nightly_label:
   # (and lift the release-health hold keyed on it), while settings.yml
   # would declare two same-name labels whose colors fight on every apply.
   # BEGIN GENERATED: nightly-label-validator (scripts/generate.ts - edit module.yml manifests, not this block)
-  validator: "{% if not (nightly_label | regex_search('^[A-Za-z0-9._][A-Za-z0-9._: -]{0,49}\\Z')) %}nightly_label must be a plain label: letters, digits, ._:- and spaces, not starting with a dash, at most 50 characters{% elif nightly_label | lower in ['dependencies', 'github_actions', 'bug', 'enhancement', 'fix-lint', 'settings-as-code-report', 'javascript', 'deno', 'python:uv', 'rust', 'autorelease: pending', 'autorelease: tagged', 'release-blocker', 'release-override'] %}nightly_label must not reuse a label the template already manages (GitHub label names are case-insensitive): a green night would close whatever issues carry it and every settings apply would fight over it{% elif 'fuzzer' in modules and nightly_label | lower == fuzzer_label | lower %}nightly_label must differ from fuzzer_label (GitHub label names are case-insensitive): each stream needs its own tracking label or a green night in one closes the other's open issue{% endif %}"
+  validator: "{% if not (nightly_label | regex_search('^[A-Za-z0-9._][A-Za-z0-9._: -]{0,49}\\Z')) %}nightly_label must be a plain label: letters, digits, ._:- and spaces, not starting with a dash, at most 50 characters{% elif nightly_label | lower in ['dependencies', 'github_actions', 'bug', 'enhancement', 'fix-lint', 'settings-as-code-report', 'javascript', 'deno', 'python:uv', 'rust', 'autorelease: pending', 'autorelease: tagged', 'release-blocker', 'release-override'] %}nightly_label must not reuse a label the template already manages (GitHub label names are case-insensitive): a green night would close whatever issues carry it and every settings apply would fight over it{% elif 'docs-site' in modules and nightly_label | lower == docs_site_label | lower %}nightly_label must differ from docs_site_label (GitHub label names are case-insensitive): each stream needs its own tracking label or a green night in one closes the other's open issue{% elif 'fuzzer' in modules and nightly_label | lower == fuzzer_label | lower %}nightly_label must differ from fuzzer_label (GitHub label names are case-insensitive): each stream needs its own tracking label or a green night in one closes the other's open issue{% endif %}"
   # END GENERATED: nightly-label-validator
   when: "{{ 'nightly' in modules }}"
 

@@ -1,0 +1,22 @@
+# yaml-language-server: $schema=../module.schema.json
+# Module manifest (schema and loader: scripts/module_manifests.ts).
+#
+# Sibling of the pages module, not an extension: pages deploys the repo's
+# OWN build (its command, its tree), docs-site deploys the repo's MARKDOWN
+# under the CENTRAL theme (actions/pages-site) - different content source
+# and build ownership, one shared pipeline (both call reusable-pages.yml).
+# Selected together they render ONE Pages deployment: pages.yml carries the
+# website at / (unversioned) plus the docs mount at /<docs_site_path>/
+# (versioned), while docs-site.yml renders down to just its PR check job
+# (the deploy trigger and job are content-gated on 'pages' not in modules).
+description: VitePress docs site from docs/ under the central fleet theme (repos carry only markdown)
+ownership:
+  - { path: .github/workflows/docs-site.yml, class: managed }
+settings_layers: [settings.yml]
+# The nightly link-rot stream's identity (docs/docs-site.md): the deploy
+# files findings under this label and closes the issue on a clean night.
+tracking_label:
+  answer: docs_site_label
+  default: docs-link-rot
+  color: D4A72C
+  description: Automated docs-site link-rot report

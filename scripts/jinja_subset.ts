@@ -12,10 +12,18 @@ export interface JinjaVars {
   username: string;
   slug: string;
   copyrightHolder: string;
+  /** The repo's project_name answer; only set by the dogfood renderer
+   *  (the parity comparisons never meet a project_name expression),
+   *  enabling the `{{ project_name | tojson }}` substitution below. */
+  projectName?: string;
   /** The repo's skills_dir answer; only set while the skills module is
    *  selected (copier asks the question only then), enabling the
    *  `{{ skills_dir | tojson }}` substitutions below. */
   skillsDir?: string;
+  /** The repo's docs_site_label answer; only set while the docs-site
+   *  module is selected (copier asks the question only then), enabling
+   *  the `{{ docs_site_label | tojson }}` substitution below. */
+  docsSiteLabel?: string;
 }
 
 /** Resolve one if-condition against `context`: a condition that is exactly
@@ -92,10 +100,13 @@ export function evaluateIfBranches(
 
 /**
  * Reduce a template file to the text this repo's own copy should carry:
- * strip raw markers, jinja comments and set/if/endif tags, substitute the
- * identity expressions, and map remote
- * `<owner>/repo-platform/<path>@main` references to their local
- * `./<path>` form. Without a `context`, every if/endif body is kept (fine
+ * strip raw markers, jinja comments and set/if/endif tags, and substitute
+ * the identity expressions. Remote `<owner>/repo-platform/<path>@build`
+ * references stay VERBATIM: the dogfooded copies consume the same
+ * green-gated delivery branch the fleet does (the fleet-refs-ride-build
+ * rule in check_ssot.ts forbids any other ref in a template, so there is
+ * nothing left to localize). Without a `context`, every if/endif body is
+ * kept (fine
  * while the kept bodies never contradict each other); with one, false
  * branches are dropped and only conditions the context cannot resolve keep
  * their bodies.
@@ -137,14 +148,19 @@ export function normalizeJinja(
     /\{%(?<lead>-?)\s*(?:if|endif)\b[^%]*?(?<trail>-?)%\}/g,
   );
   out = out.replace(/\{\{ '([^']*)' if [^}]*? else '[^']*' \}\}/g, "$1");
-  out = out.replace(
-    new RegExp(`\\{\\{ github_username \\}\\}/${vars.slug}/([^\\s@]+)@main`, "g"),
-    "./$1",
-  );
   out = out.replace(/\{\{ copyright_holder \}\}/g, () => vars.copyrightHolder);
   out = out.replace(/\{\{ github_username \| lower \}\}/g, vars.username.toLowerCase());
   out = out.replace(/\{\{ github_username \}\}/g, vars.username);
   out = out.replace(/\{\{ project_slug \}\}/g, vars.slug);
+  if (vars.projectName !== undefined) {
+    const name = vars.projectName;
+    // JSON.stringify matches jinja's tojson for plain strings.
+    out = out.replace(/\{\{ project_name \| tojson \}\}/g, () => JSON.stringify(name));
+  }
+  if (vars.docsSiteLabel !== undefined) {
+    const label = vars.docsSiteLabel;
+    out = out.replace(/\{\{ docs_site_label \| tojson \}\}/g, () => JSON.stringify(label));
+  }
   if (vars.skillsDir !== undefined) {
     const dir = vars.skillsDir;
     // The two shapes the skills templates use; JSON.stringify matches
@@ -209,9 +225,15 @@ export function renderJinjaFile(
   // in.
   const sentinel = String.fromCharCode(0);
   if (
-    [text, vars.username, vars.slug, vars.copyrightHolder, vars.skillsDir ?? ""].some((value) =>
-      value.includes(sentinel),
-    )
+    [
+      text,
+      vars.username,
+      vars.slug,
+      vars.copyrightHolder,
+      vars.projectName ?? "",
+      vars.skillsDir ?? "",
+      vars.docsSiteLabel ?? "",
+    ].some((value) => value.includes(sentinel))
   ) {
     throw new Error("renderJinjaFile: the template or a variable value contains a NUL byte");
   }

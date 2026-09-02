@@ -8,24 +8,35 @@ description: >-
 runs:
   using: composite
   steps:
-    - name: Check for a caller-installed bun
+    - name: Check for a bun matching the action's pin
       id: bun
       shell: bash
-      run: echo "present=$(command -v bun >/dev/null && echo true || echo false)" >> "$GITHUB_OUTPUT"
+      run: |
+        pin="$(cat "${{ github.action_path }}/.bun-version")"
+        have="$(command -v bun >/dev/null && bun --version || true)"
+        echo "pinned=$([ "$have" = "$pin" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
 
-    # Skipped when the calling job already installed bun: reusing it keeps
-    # the caller's version pin and avoids a second network fetch.
+    # Skipped only when the caller's bun already IS the pinned version
+    # (reuse then just skips a second network fetch): the action's scripts
+    # and lockfile run on the action-local .bun-version pin (generated
+    # from the manifests' bun pin), never on whatever the CALLER resolves
+    # - a caller pinning an older bun cannot parse the lockfiles
+    # repo-platform's bun writes.
     - name: Set up bun
       id: setup-bun
-      if: steps.bun.outputs.present != 'true'
+      if: steps.bun.outputs.pinned != 'true'
       continue-on-error: true
       uses: oven-sh/setup-bun@v2
+      with:
+        bun-version-file: ${{ github.action_path }}/.bun-version
 
     # One retry: the setup's network fetch is a known transient flake, and
     # on nightly reporting paths a flake here turns a green night red.
     - name: Set up bun (retry)
       if: steps.setup-bun.outcome == 'failure'
       uses: oven-sh/setup-bun@v2
+      with:
+        bun-version-file: ${{ github.action_path }}/.bun-version
 
     - name: Validate commit subjects
       shell: bash

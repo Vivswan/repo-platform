@@ -50,6 +50,10 @@ export const PAIRS: { repo: string; tpl: string }[] = [
     tpl: "templates/bun/.github/workflows/dependabot-bun-lockfile.yml.jinja",
   },
   {
+    repo: ".github/workflows/docs-site.yml",
+    tpl: "templates/docs-site/.github/workflows/docs-site.yml.jinja",
+  },
+  {
     repo: ".github/workflows/pr-title.yml",
     tpl: "templates/pr-title/.github/workflows/pr-title.yml.jinja",
   },
@@ -87,6 +91,18 @@ const answersSchema = z.strictObject({
     })
     .refine((value) => !value.split("/").some((part) => part === "." || part === ".."), {
       message: "must not contain . or .. segments (copier.yml's skills_dir validator)",
+    })
+    .optional(),
+  // Asked by copier only while the docs-site module is selected;
+  // answerMismatches enforces the same presence rule here. The shape
+  // mirrors copier.yml's docs_site_label validator (a plain label name),
+  // so a value copier would reject cannot render here.
+  docs_site_label: z
+    .string()
+    .regex(/^[A-Za-z0-9._][A-Za-z0-9._: -]{0,49}$/, {
+      message:
+        "must be a plain label: letters, digits, ._:- and spaces, not starting " +
+        "with a dash, at most 50 characters (copier.yml's docs_site_label validator)",
     })
     .optional(),
 });
@@ -192,6 +208,7 @@ export interface AnswerSources {
   usernameDefault: string;
   copyrightDefault: string;
   skillsDirDefault: string;
+  docsSiteLabelDefault: string;
   settingsDescription: string;
   settingsPrivate: boolean;
   moduleNames: Set<string>;
@@ -271,6 +288,33 @@ export function answerMismatches(answers: Answers, sources: AnswerSources): stri
       "copier.yml skills_dir default",
     );
   }
+  // Mirror copier.yml's `when` on the docs_site_label question the same
+  // way: present exactly while the docs-site module is selected, pinned to
+  // the copier.yml default this repository renders with. The settings
+  // apply reads the SAME answer for the operator's tracking label
+  // (factsFromOperatorAnswers), so a drifted value would loop the label on
+  // delete/recreate.
+  if (answers.modules.has("docs-site") && answers.docs_site_label === undefined) {
+    problems.push(
+      "docs_site_label: missing - the docs-site module is selected, so the " +
+        "docs-site pair (and the operator settings facts) need the label " +
+        "copier.yml asks for",
+    );
+  }
+  if (!answers.modules.has("docs-site") && answers.docs_site_label !== undefined) {
+    problems.push(
+      "docs_site_label: set but the docs-site module is not selected - copier " +
+        "never asks the question then; remove the stale answer",
+    );
+  }
+  if (answers.docs_site_label !== undefined) {
+    expect(
+      "docs_site_label",
+      sources.docsSiteLabelDefault,
+      answers.docs_site_label,
+      "copier.yml docs_site_label default",
+    );
+  }
   for (const pair of PAIRS) {
     const module = moduleOfPair(pair.tpl);
     if (module !== null && !answers.modules.has(module)) {
@@ -317,6 +361,7 @@ function loadSources(manifests: ModuleManifest[]): AnswerSources {
     usernameDefault: stringDefault(copier, "github_username"),
     copyrightDefault: stringDefault(copier, "copyright_holder"),
     skillsDirDefault: stringDefault(copier, "skills_dir"),
+    docsSiteLabelDefault: stringDefault(copier, "docs_site_label"),
     settingsDescription: settings.description,
     settingsPrivate: settings.private,
     moduleNames: new Set(manifests.map((m) => m.module)),
@@ -349,7 +394,9 @@ function main(): number {
       username: answers.github_username,
       slug: answers.project_slug,
       copyrightHolder: answers.copyright_holder,
+      projectName: answers.project_name,
       skillsDir: answers.skills_dir,
+      docsSiteLabel: answers.docs_site_label,
     };
     const context = renderContext(answers, manifests);
     stale = PAIRS.flatMap((pair): { path: string; repo: string; next: string | null }[] => {

@@ -71,9 +71,11 @@ describe("normalizeJinja", () => {
     expect(normalizeJinja(text, vars)).toBe("* @vivswan by Vivswan in repo-platform");
   });
 
-  test("maps remote uses references to the local workflow form", () => {
-    const text = "uses: {{ github_username }}/repo-platform/.github/workflows/reusable-x.yml@main";
-    expect(normalizeJinja(text, vars)).toBe("uses: ./.github/workflows/reusable-x.yml");
+  test("keeps remote @build uses references verbatim (the dogfooded copies ride the delivery branch like the fleet)", () => {
+    const text = "uses: {{ github_username }}/repo-platform/.github/workflows/reusable-x.yml@build";
+    expect(normalizeJinja(text, vars)).toBe(
+      "uses: Vivswan/repo-platform/.github/workflows/reusable-x.yml@build",
+    );
   });
 
   test("evaluates string conditionals on the true leg", () => {
