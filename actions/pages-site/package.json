@@ -3,7 +3,7 @@
   "private": true,
   "description": "Assembles the fleet's versioned GitHub Pages site artifact: enumerates version tags, builds each mount's tiers (VitePress over the caller's docs, or the caller's own build command), and lays out one deployable _site tree.",
   "dependencies": {
-    "linkinator": "^6.1.2",
+    "linkinator": "^8.1.0",
     "vitepress": "1.6.4",
     "vitepress-carbon": "1.6.0",
     "vitepress-plugin-llms": "^1.7.4",
@@ -11,7 +11,7 @@
   },
   "devDependencies": {
     "@types/bun": "^1.4.0",
-    "@types/node": "^26.1.2",
+    "@types/node": "^26.4.1",
     "typescript": "^7.0.2"
   }
 }
