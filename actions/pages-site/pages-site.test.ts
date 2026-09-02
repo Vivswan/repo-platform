@@ -511,4 +511,33 @@ describe("link-rot reporting", () => {
     expect(reportBody(broken)).toStartWith("# 1 broken external link\n");
     expect(reportBody(broken)).toContain("- https://gone.example/a (status 404)");
   });
+
+  test("linkinator's result shape still carries the fields check_links reads", async () => {
+    // Guards linkinator upgrades: check_links.ts consumes url/state/status/
+    // parent from result.links, and a major bump that reshapes them must
+    // fail here, not in the nightly. Offline by construction - the crawl
+    // stays on linkinator's local static server over this temp site.
+    const dir = mkdtempSync(join(tmpdir(), "crawl-"));
+    writeFileSync(join(dir, "index.html"), '<a href="/other.html">o</a>');
+    writeFileSync(join(dir, "other.html"), '<a href="/missing.html">m</a>');
+    const { LinkChecker } = await import("linkinator");
+    const result = await new LinkChecker().check({
+      path: ["index.html", "other.html"],
+      serverRoot: dir,
+      concurrency: 5,
+      timeout: 5_000,
+      retry: true,
+      linksToSkip: async () => false,
+    });
+    const judged = result.links.filter((link) => link.state !== "SKIPPED");
+    expect(judged.length).toBeGreaterThan(0);
+    const broken = result.links.filter((link) => link.state === "BROKEN");
+    expect(broken).toHaveLength(1);
+    // Suffix matches: check_links.ts never depends on linkinator's URL
+    // normalization (relative vs loopback-absolute), so this test must not
+    // false-alarm if a future version changes it.
+    expect(broken[0]?.url).toEndWith("missing.html");
+    expect(broken[0]?.status).toBe(404);
+    expect(broken[0]?.parent).toEndWith("other.html");
+  });
 });

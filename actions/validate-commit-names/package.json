@@ -3,7 +3,7 @@
   "private": true,
   "description": "Dev-only manifest for editor/typecheck support; the action itself has no runtime dependencies.",
   "devDependencies": {
-    "@types/node": "^26.3.0",
+    "@types/node": "^26.4.1",
     "typescript": "^7.0.2"
   }
 }
