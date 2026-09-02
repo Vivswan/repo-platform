@@ -6,25 +6,14 @@
 // non-blank line the repository-owned content held at the target's HEAD.
 // HEAD's copy is split with HEAD's OWN manifest declaration (git show
 // HEAD:.github/repo-platform-manifest.json), so a marker rename in the
-// update cannot mis-split the previous copy - and during the one-grammar
-// transition HEAD may still declare a RETIRED shape (tail-marker, the old
-// four-marker bounded-region): head_manifest.ts reads those vintages and
-// locates their repo-owned sides, so the DESIGNED conversion (a tail
-// re-seated below the new END marker, the old LOCAL area re-seated above
-// BEGIN) VERIFIES here instead of alarming - each side is split by its own
-// declaration and the line check is side-agnostic (the multiset spans
-// above and below), so a byte-preserving move between sides is not a loss.
-// The conversion's one deliberate SUBTRACTION - the platform-authored
-// relic lines the retired shapes left on the repository's side
-// (head_manifest.ts's closed CONVERSION_RELIC_LINES) - is subtracted from
-// the expected multiset explicitly, on retired vintages only: the designed
-// strip stays verifiable rather than reading as lost repo-owned lines, and
-// any OTHER missing line still fires.
-// The manifest exists fleet-wide, so there is no pre-manifest splitting
-// fallback, and a HEAD manifest declaring a grammar this sync does not
-// read (neither current nor a retired vintage the transition converts) is
-// REFUSED loudly by headSplitEntries - every split file goes unverifiable
-// (manual review) with the refusal's actionable message, never split by a
+// update cannot mis-split the previous copy.
+// The manifest exists fleet-wide and stamps the one grammar
+// (managed-region; the fleet is censused post-conversion), so there is no
+// pre-manifest splitting fallback and no retired-vintage conversion: a
+// HEAD manifest declaring a grammar this sync does not read (a retired
+// vintage, a pre-grammar entry, anything unknown) is REFUSED loudly by
+// headSplitEntries - every split file goes unverifiable (manual review)
+// with the refusal's actionable recover=recopy message, never split by a
 // guessed grammar.
 //
 // After preserve_local_content.ts's structural rebuild this should never
@@ -59,12 +48,7 @@ import { MANIFEST_NAME } from "../../../actions/shared/manifest.ts";
 import { parseFlags } from "../shared/flags.ts";
 import { requireEnv } from "../shared/gha.ts";
 import { headEntry } from "../shared/git_head.ts";
-import {
-  carriedRepoOwnedText,
-  type HeadSplit,
-  headSplitEntries,
-  repoOwnedText,
-} from "./head_manifest.ts";
+import { type HeadSplit, headSplitEntries, repoOwnedText } from "./head_manifest.ts";
 import {
   clip,
   fenceFor,
@@ -77,8 +61,8 @@ import { TAIL_SHRANK_NAME } from "./section_files.ts";
 // One definition each for the whole pipeline: preserve_local_content.ts
 // owns the missing-line multiset and the PR-body excerpt hygiene (clip's
 // control-byte escaping, fenceFor's unclosable fence), head_manifest.ts
-// owns the HEAD-manifest vintages and the repo-owned locator; this wire
-// re-exports the shared pieces for its own consumers.
+// owns the strict HEAD-manifest parse and the repo-owned locator; this
+// wire re-exports the shared pieces for its own consumers.
 export { clip, fenceFor, headSplitEntries, missingLines, repoOwnedText };
 
 export type Finding =
@@ -88,10 +72,10 @@ export type Finding =
 /** One path's verdict, each side split by its own declaration: null means
  * every non-blank line of HEAD's repository-owned content survives in the
  * delivered copy's repository-owned content. The comparison spans both
- * sides of the managed region as one multiset, so the designed transition
- * (a tail moving below the new END marker) verifies; a copy whose
- * repository-owned content cannot be honestly located on either side is
- * unverifiable (manual review), never guessed at. */
+ * sides of the managed region as one multiset, so a byte-preserving move
+ * between sides is not a loss; a copy whose repository-owned content
+ * cannot be honestly located on either side is unverifiable (manual
+ * review), never guessed at. */
 export function compareHalves(
   entry: SplitEntry,
   head: HeadSplit,
@@ -99,15 +83,7 @@ export function compareHalves(
   delivered: string,
 ): Finding | null {
   const path = entry.path;
-  // carriedRepoOwnedText, not repoOwnedText: head_manifest.ts is the
-  // single owner of what a declaration's repo-owned side BECOMES under
-  // the carry, so the conversion's DESIGNED relic strip (its closed
-  // CONVERSION_RELIC_LINES, on retired vintages only) is subtracted from
-  // the expected multiset here by the same code that subtracted it in the
-  // rebuild - the strip stays verifiable instead of reading as lost
-  // repo-owned lines, every OTHER previous line stays guarded, and the
-  // two sites cannot drift on what "designed" means.
-  const previousOwned = carriedRepoOwnedText(headCopy, head);
+  const previousOwned = repoOwnedText(headCopy, head);
   if (previousOwned === null) {
     return {
       path,
@@ -118,7 +94,6 @@ export function compareHalves(
     };
   }
   const deliveredOwned = repoOwnedText(delivered, {
-    vintage: "managed-region",
     path,
     begin: entry.begin,
     end: entry.end,
@@ -132,9 +107,6 @@ export function compareHalves(
         "marker lines, so its repository-owned content cannot be located",
     };
   }
-  // The conversion's DESIGNED relic strip is already subtracted above (by
-  // carriedRepoOwnedText, the shared owner); everything left in the
-  // expected text is content this sync promised to keep.
   const missing = missingLines(previousOwned, deliveredOwned);
   return missing.length === 0 ? null : { path, kind: "shrank", missing };
 }

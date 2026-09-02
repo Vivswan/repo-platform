@@ -8,19 +8,12 @@
 // ONE grammar (managed-region): every split file is [optional repo-owned
 // content above] BEGIN marker line, managed content, END marker line,
 // [optional repo-owned content below]. The rebuild delivers the target's
-// own sides byte-for-byte around the fresh render's managed region.
-// TRANSITION: a previous copy still in a RETIRED shape (tail-marker:
-// managed top above one marker line; the old four-marker bounded-region
-// .gitignore shape) is CONVERTED - its repo-owned bytes located by the
-// previous commit's OWN manifest declaration (head_manifest.ts) and
-// re-seated around the new region (a tail lands below END, the old LOCAL
-// area lands above BEGIN), byte-for-byte, MINUS the platform-authored
-// relic lines the retired shape left on the repository's side (the
-// retired marker spellings and the old .gitignore guidance line that the
-// one grammar makes false - head_manifest.ts's CONVERSION_RELIC_LINES).
-// The strip belongs to the conversion alone; a steady-state sync of an
-// already-converted file subtracts nothing, and every dropped line is
-// named in the carry note.
+// own sides byte-for-byte around the fresh render's managed region. The
+// retired split shapes (tail-marker, the old four-marker bounded-region
+// .gitignore shape) are no longer converted: the fleet is censused fully
+// post-conversion, head_manifest.ts refuses their manifests loudly with
+// recovery advice, and a straggler's old-shaped copy rides the recovery
+// appendix (manual review) instead of a conversion.
 //
 // RENDER MODE (--render-dir; the PRIMARY path, run on every normal sync):
 // after `copier update`, the merged result for every split-class file is
@@ -50,19 +43,19 @@
 // fold any non-UTF-8 byte onto U+FFFD - silent corruption. The markers are
 // ASCII, so matching is unaffected. Loud beats lossy: NO shape of
 // previous copy may lose content without a disposition in the summary -
-// when a previous copy cannot be split (its declared markers are missing,
-// duplicated - even as mid-line text - or reversed, and it predates every
-// declaration this sync can read), the WHOLE previous copy is appended
-// below the managed region's END marker under a marked recovery-appendix
-// comment, marker text dash-joined so the validator's exactly-once rule
-// holds, instead of being dropped.
+// when a previous copy cannot be trusted to split (its declared markers
+// are missing, duplicated - even as mid-line text - or reversed, or
+// HEAD's manifest exists but is unusable, so no declaration for it can be
+// read at all), the WHOLE previous copy is appended below the managed
+// region's END marker under a marked recovery-appendix comment, marker
+// text dash-joined so the validator's exactly-once rule holds, instead of
+// being dropped.
 //
 // The carried files land in --summary as markdown for the PR body; for a
 // hide-details target the log prints counts only (paths and dispositions
 // are target data). Carries that need human review - an appendix, reset
-// managed-region edits, duplicate markers - are listed in the
-// --needs-review flag file, which open_pr.ts turns into the manual-review
-// path; clean side-restores and the designed shape conversions stay
+// managed-region edits - are listed in the --needs-review flag file, which
+// open_pr.ts turns into the manual-review path; clean side-restores stay
 // auto-merge-eligible.
 //
 // Usage:
@@ -90,11 +83,11 @@ import { parseFlags } from "../shared/flags.ts";
 import { type HeadNonBlobKind, headEntry } from "../shared/git_head.ts";
 import { capture } from "../shared/proc.ts";
 import {
-  carriedSides,
   type HeadSplit,
   headSplitEntries,
   isCleanRelativePath,
   managedPart,
+  repoOwnedSides,
 } from "./head_manifest.ts";
 
 function withTrailingNewline(content: string): string {
@@ -190,46 +183,30 @@ export type RegionCarry =
       kind: "sides-restored";
       content: string;
     }
-  | {
-      kind: "converted";
-      content: string;
-      /** The retired vintage the previous copy was still shaped as. */
-      from: "tail-marker" | "bounded-region";
-      /** The previous copy carried more than one tail marker line;
-       * everything after the first was kept, so the carried side may hold
-       * a stale duplicate to review. */
-      extraMarkers: boolean;
-      /** PLATFORM-AUTHORED relic lines the conversion subtracted from the
-       * carried sides (CONVERSION_RELIC_LINES), in file order. Empty when
-       * the previous copy carried none. */
-      stripped: string[];
-      /** Blank lines the relic removals left behind and the strip
-       * collapsed (a leading blank, a doubled one, an all-blank
-       * remainder). Reported with `stripped` so the note accounts for the
-       * WHOLE difference between the previous side and the carried one. */
-      blanksCollapsed: number;
-    }
   | { kind: "appendix"; content: string };
 
 /** The managed-region carry: the fresh render's managed region, the
  * previous copy's repository-owned sides byte-for-byte around it. The
- * previous copy is split by `headDecl` - its OWN manifest's declaration,
- * retired vintages included (that is what converts a tail-marker or
- * old-bounded file, byte-identical except for the itemized frozen relic
- * set head_manifest.ts's carriedSides subtracts) - falling back to the new
- * entry's markers when no HEAD declaration is usable or the declared
- * legacy shape is not present. Null means keep the render with nothing to
- * say: the previous copy never diverged (delivered content would equal the
- * render) and the carry subtracted nothing, or an unsplittable previous
- * copy is blank. Throws when the RENDER has no clean region -
- * manifest and render are generated together, so that is damage, and
- * keeping the merged result would hand the file back to the merge this
- * rebuild exists to discard. */
+ * previous copy is split by `headDecl` - its OWN manifest's declaration -
+ * falling back to the new entry's markers only when HEAD's manifest is
+ * usable and simply does not declare the path (an ownership flip).
+ * "unusable" means HEAD's declarations exist but cannot be trusted (a
+ * refused manifest - retired-grammar, pre-grammar, damaged - or a non-blob
+ * at the manifest path): splitting such a copy by the NEW markers would be
+ * a guess - an old-shaped copy whose repo-owned content happens to carry
+ * one clean marker pair would hand the bytes between them to the managed
+ * discard - so the whole copy rides the appendix instead. Null means keep
+ * the render with nothing to say: the previous copy never diverged
+ * (delivered content would equal the render), or an unsplittable previous
+ * copy is blank. Throws when the RENDER has no clean region - manifest and
+ * render are generated together, so that is damage, and keeping the merged
+ * result would hand the file back to the merge this rebuild exists to
+ * discard. */
 export function carryManagedRegion(
   render: string,
   target: string,
   entry: SplitEntry,
-  headDecl: HeadSplit | undefined,
+  headDecl: HeadSplit | "unusable" | undefined,
 ): RegionCarry | null {
   const renderSlice = cleanManagedRegion(render, entry);
   if (renderSlice === null) {
@@ -238,30 +215,22 @@ export function carryManagedRegion(
         "render carries no clean BEGIN/END region - manifest and render disagree",
     );
   }
-  const entryDecl: HeadSplit = {
-    vintage: "managed-region",
-    path: entry.path,
-    begin: entry.begin,
-    end: entry.end,
-  };
-  let decl = headDecl ?? entryDecl;
-  // carriedSides, never repoOwnedSides: head_manifest.ts is the single
-  // owner of what a declaration's sides BECOME under the carry, retired
-  // vintages' relic strip included, so this rebuild cannot strip a
-  // steady-state carry and the tripwire cannot miss what this one dropped.
-  let sides = carriedSides(target, decl);
-  if (sides === null && decl.vintage !== "managed-region") {
-    // The previous commit's manifest declares a retired shape the file no
-    // longer has (an out-of-band conversion, a hand edit); before going to
-    // the appendix, try the CURRENT markers - a copy already in the new
-    // shape splits honestly there (and strips nothing: it is not a
-    // conversion any more).
-    decl = entryDecl;
-    sides = carriedSides(target, decl);
-  }
+  // A previous copy byte-identical to the fresh render has nothing to
+  // lose under ANY declaration state - keeping the render is exact even
+  // when HEAD's manifest is unusable, and skipping here keeps an unusable
+  // manifest from spraying appendixes over every unchanged split file.
+  if (target === render) return null;
+  const sides =
+    headDecl === "unusable"
+      ? null
+      : repoOwnedSides(
+          target,
+          headDecl ?? { path: entry.path, begin: entry.begin, end: entry.end },
+        );
   if (sides === null) {
-    // No recognizable split (the previous copy was hand-edited past
-    // recognition). Keep BOTH unless the previous copy is blank: silently
+    // No trustworthy split (the previous copy was hand-edited past
+    // recognition, or HEAD's manifest is unusable and no declaration can
+    // be trusted). Keep BOTH unless the previous copy is blank: silently
     // losing the repository's content is the defect this script exists to
     // fix, and an appendix carry forces manual review, so a marked
     // duplicate is acceptable.
@@ -272,83 +241,18 @@ export function carryManagedRegion(
   // the seam newline belongs to the join, not to the byte-owned side.
   const region = sides.below !== "" ? withTrailingNewline(renderSlice.region) : renderSlice.region;
   const content = sides.above + region + sides.below;
-  if (decl.vintage !== "managed-region") {
-    // A conversion states itself even when the delivered BYTES equal the
-    // render. The common fleet .gitignore is exactly that case: its old
-    // LOCAL block was all platform boilerplate, so the strip empties the
-    // carried side and the file lands as the render - lines DID disappear
-    // from the repository's copy, and returning null here would drop the
-    // note that explains them (and, with a lone stale duplicate marker
-    // stripped, the review hold too).
-    if (content === render && sides.stripped.length === 0 && !sides.extraMarkers) return null;
-    return {
-      kind: "converted",
-      content,
-      from: decl.vintage,
-      extraMarkers: sides.extraMarkers,
-      stripped: sides.stripped,
-      blanksCollapsed: sides.blanksCollapsed,
-    };
-  }
   if (content === render) return null;
   return { kind: "sides-restored", content };
 }
 
-const CARRY_NOTES: Record<RegionCarry["kind"] | "converted-bounded", string> = {
+const CARRY_NOTES: Record<RegionCarry["kind"], string> = {
   "sides-restored":
     "repository-owned content outside the managed region restored from the repository's copy",
-  converted:
-    "converted from the retired tail-marker split shape: the repository-owned tail " +
-    "now sits below the managed region's END marker with every repository-authored " +
-    "byte intact",
-  "converted-bounded":
-    "converted from the retired LOCAL-region split shape: the repository-owned " +
-    "content above the managed region rides through with every repository-authored " +
-    "byte intact",
   appendix:
     "managed region not recognized in the repository's previous copy; the previous " +
     "copy is preserved in full below the END marker under a " +
     "repo-platform:recovery-appendix comment - reconcile manually",
 };
-
-const EXTRA_MARKERS_NOTE =
-  "; the previous copy carried more than one retired split marker line, and " +
-  "everything after its first marker was kept - review the carried content for " +
-  "stale duplicates";
-
-/** The conversion's relic-strip note: the disappearing lines are named in
- * the PR body, so a reviewer never has to guess why the converted file is
- * shorter than the byte-for-byte promise implies. Platform-authored text
- * only (the retired marker spellings, the old "in this section only"
- * guidance that the one grammar makes false); anything the repository
- * wrote rides through untouched.
- *
- * Itemized by SPELLING with an occurrence count, not one entry per
- * occurrence: the relic vocabulary is a closed five-line set, so this note
- * is bounded whatever the previous copy carried - listing occurrences
- * would let a file with hundreds of stale markers push the whole carry
- * section past the PR body's budget and out of the report. The blank lines
- * the removals left behind are counted too: the tripwire's multiset
- * ignores blanks by design, so this note is the only place they are
- * stated, and the reviewer can account for every line the side lost. */
-function relicStripNote(stripped: string[], blanksCollapsed: number): string {
-  const counts = new Map<string, number>();
-  for (const line of stripped) {
-    const spelling = line.trim();
-    counts.set(spelling, (counts.get(spelling) ?? 0) + 1);
-  }
-  const quoted = [...counts]
-    .map(([spelling, count]) => `'${clip(spelling)}'${count > 1 ? ` (x${count})` : ""}`)
-    .join(", ");
-  const blanks =
-    blanksCollapsed > 0 ? `, plus ${blanksCollapsed} blank line(s) the removals left behind` : "";
-  return (
-    `; the conversion also dropped ${stripped.length} platform-authored relic line(s) ` +
-    `the retired shape carried on the repository's side (${quoted})${blanks} - the retired ` +
-    "markers no longer split anything and their guidance is false under the " +
-    "BEGIN/END managed region"
-  );
-}
 
 const MANAGED_REGION_DIFFERS_NOTE =
   "; the managed content differed from the fresh render; those differences are " +
@@ -374,12 +278,6 @@ function carryNote(carry: RegionCarry, mode: "recopy" | "render", managedDiffers
       return (
         CARRY_NOTES["sides-restored"] +
         (mode === "recopy" && managedDiffers ? MANAGED_REGION_DIFFERS_NOTE : "")
-      );
-    case "converted":
-      return (
-        CARRY_NOTES[carry.from === "bounded-region" ? "converted-bounded" : "converted"] +
-        (carry.extraMarkers ? EXTRA_MARKERS_NOTE : "") +
-        (carry.stripped.length > 0 ? relicStripNote(carry.stripped, carry.blanksCollapsed) : "")
       );
     case "appendix":
       return CARRY_NOTES.appendix;
@@ -504,19 +402,37 @@ function requireHead(root: string): void {
 }
 
 /** HEAD's split declarations for splitting HEAD's copies with HEAD's own
- * manifest (retired vintages included - that is what carries the shape
- * conversion). null when the previous commit has no usable manifest: the
- * carry then splits previous copies by the NEW entries' markers and routes
- * everything else to the appendix, and the tail tripwire independently
- * reports the unusable manifest. */
-function readHeadDecls(root: string): Map<string, HeadSplit> | null {
+ * manifest. Three states, because the two failure shapes must not blur:
+ * - a Map when the manifest is usable (a path absent from it falls back to
+ *   the new entry's markers - an ownership flip, with its own review
+ *   machinery);
+ * - "unusable" when a manifest EXISTS at HEAD but cannot be trusted (a
+ *   non-blob at the path, or headSplitEntries' loud refusal: pre-grammar,
+ *   retired-grammar, damaged) - declarations exist that the carry cannot
+ *   read, so every previous copy rides the appendix rather than a
+ *   guessed split, and the tail tripwire independently reports the
+ *   refusal with its recovery advice;
+ * - null when no manifest exists at HEAD at all (nothing ever declared a
+ *   split, so the new entries' markers are the only truth available and
+ *   the carry falls back to them). */
+type HeadDecls = Map<string, HeadSplit> | "unusable" | null;
+
+function readHeadDecls(root: string): HeadDecls {
   const headManifest = headEntry(root, MANIFEST_NAME);
-  if (headManifest.kind !== "blob") return null;
+  if (headManifest.kind === "absent") return null;
+  if (headManifest.kind !== "blob") return "unusable";
   try {
     return headSplitEntries(headManifest.bytes.toString("utf-8"), `HEAD:${MANIFEST_NAME}`);
   } catch {
-    return null;
+    return "unusable";
   }
+}
+
+/** One path's declaration under the three HeadDecls states. */
+function headDeclFor(headDecls: HeadDecls, path: string): HeadSplit | "unusable" | undefined {
+  if (headDecls === null) return undefined;
+  if (headDecls === "unusable") return "unusable";
+  return headDecls.get(path);
 }
 
 /** The file's pre-render state at the target's HEAD (headEntry owns the
@@ -603,7 +519,7 @@ function carrySplitEntry(
   entry: SplitEntry,
   render: string,
   target: string,
-  headDecl: HeadSplit | undefined,
+  headDecl: HeadSplit | "unusable" | undefined,
   mode: "recopy" | "render",
 ): { content: string; note: string | null; appendixCarry: boolean; reviewReasons: string[] } {
   const reviewReasons: string[] = [];
@@ -613,17 +529,11 @@ function carrySplitEntry(
   }
   if (carry.kind === "appendix") {
     reviewReasons.push("recovery-appendix");
-  } else if (carry.kind === "converted" && carry.extraMarkers) {
-    reviewReasons.push("duplicate split markers");
   }
-  const entryDecl: HeadSplit = {
-    vintage: "managed-region",
-    path: entry.path,
-    begin: entry.begin,
-    end: entry.end,
-  };
+  const entryDecl: HeadSplit = { path: entry.path, begin: entry.begin, end: entry.end };
+  const previousDecl = typeof headDecl === "object" ? headDecl : entryDecl;
   const managedDiffers =
-    managedPart(target, headDecl ?? entryDecl) !== managedPart(carry.content, entryDecl);
+    managedPart(target, previousDecl) !== managedPart(carry.content, entryDecl);
   return {
     content: carry.content,
     note: carryNote(carry, mode, managedDiffers),
@@ -636,14 +546,13 @@ function carrySplitEntry(
  * and rebuild from (clean new render, HEAD copy); detect managed-region
  * edits against the OLD render. Returns the outcome when the file carried
  * content or needs review; null when the clean rebuild needs no human
- * attention (that includes every routine template change and the designed
- * shape conversion of an unedited file). */
+ * attention (that includes every routine template change). */
 function rebuildSplitFile(
   root: string,
   renderDir: string,
   oldRenderDir: string,
   entry: SplitEntry,
-  headDecl: HeadSplit | undefined,
+  headDecl: HeadSplit | "unusable" | undefined,
 ): FileOutcome | null {
   const rel = entry.path;
   const renderPath = join(renderDir, rel);
@@ -675,24 +584,18 @@ function rebuildSplitFile(
     reviewReasons.push(...carried.reviewReasons);
     // Did the rebuild drop bytes from the previous managed content? Each
     // copy is split by ITS OWN declaration - HEAD's copy and the OLD
-    // render by the previous commit's manifest declaration (the retired
-    // vintages included, so the shape conversion verifies instead of
-    // alarming), the delivered copy by the new entry. Byte-equal parts
-    // mean nothing was dropped; a drop that equals the template update
-    // (HEAD's part == the old render's part) is routine and silent; a
-    // drop past that means local edits were reset (loud, manual review).
+    // render by the previous commit's manifest declaration, the delivered
+    // copy by the new entry. Byte-equal parts mean nothing was dropped; a
+    // drop that equals the template update (HEAD's part == the old
+    // render's part) is routine and silent; a drop past that means local
+    // edits were reset (loud, manual review).
     // A part that cannot be located on any side is UNVERIFIABLE, not
     // clean - a mangled marker must not slip a content drop past review.
     // An appendix carry skips all of this: it preserves the full previous
     // copy below the render and is already manual.
     if (!appendixCarry) {
-      const entryDecl: HeadSplit = {
-        vintage: "managed-region",
-        path: rel,
-        begin: entry.begin,
-        end: entry.end,
-      };
-      const previousDecl = headDecl ?? entryDecl;
+      const entryDecl: HeadSplit = { path: rel, begin: entry.begin, end: entry.end };
+      const previousDecl = typeof headDecl === "object" ? headDecl : entryDecl;
       const targetPart = managedPart(target.content, previousDecl);
       const deliveredPart = managedPart(content, entryDecl);
       if (targetPart !== null && deliveredPart !== null && targetPart === deliveredPart) {
@@ -736,17 +639,11 @@ const RENDER_INTRO = [
   "Split-class files were rebuilt structurally over this update: the managed",
   "region comes from a clean render at the new template ref, the",
   "repository-owned content outside it byte-for-byte from the previous",
-  "commit, and copier's merged result for these files was discarded. A file",
-  "still in a retired split shape (tail-marker, the old LOCAL-region",
-  ".gitignore shape) was CONVERTED to the BEGIN/END managed-region shape",
-  "with its repository-owned bytes preserved exactly, except for the",
-  "platform-authored relic lines the retired shape left on that side (the",
-  "retired markers and their now-false guidance), which its bullet",
-  "itemizes. Local edits inside a",
-  "managed region do NOT survive this rebuild (managed regions are",
-  "template-owned); such edits are reset and flagged below. Each bullet",
-  "names its file's actual disposition (not every file has previous content",
-  "to carry); verify each file's diff before merging:",
+  "commit, and copier's merged result for these files was discarded. Local",
+  "edits inside a managed region do NOT survive this rebuild (managed",
+  "regions are template-owned); such edits are reset and flagged below.",
+  "Each bullet names its file's actual disposition (not every file has",
+  "previous content to carry); verify each file's diff before merging:",
 ];
 
 const RECOPY_INTRO = [
@@ -884,7 +781,7 @@ function main(argv: string[]): number {
         renderDir,
         oldRenderDir,
         entry,
-        headDecls?.get(entry.path),
+        headDeclFor(headDecls, entry.path),
       );
       rebuiltRels.push(entry.path);
       if (outcome !== null) outcomes.push(outcome);
@@ -922,7 +819,7 @@ function main(argv: string[]): number {
         entry,
         render,
         target.content,
-        headDecls?.get(entry.path),
+        headDeclFor(headDecls, entry.path),
         "recopy",
       );
       if (carried.note === null) continue;

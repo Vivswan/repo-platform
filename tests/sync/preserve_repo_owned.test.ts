@@ -229,21 +229,22 @@ describe("preserve_repo_owned fleet-license re-seed", () => {
 });
 
 describe("preserve_repo_owned removed-splits hold", () => {
-  const SENTINEL = "<!-- repo-platform:local-section -->";
+  const B = "<!-- BEGIN REPO-PLATFORM MANAGED -->";
+  const E = "<!-- END REPO-PLATFORM MANAGED -->";
   const MANIFEST_REL = ".github/repo-platform-manifest.json";
   const manifest = JSON.stringify({
     files: {
       "AGENTS.md": {
         class: "split",
-        grammar: "tail-marker",
-        marker: SENTINEL,
-        managed: "above",
+        grammar: "managed-region",
+        begin: B,
+        end: E,
         hash: null,
       },
       "CLAUDE.md": { class: "managed", hash: null },
     },
   });
-  const agentsWithTail = `# AGENTS.md\n\nmanaged\n\n${SENTINEL}\n\n## Local agent docs\n\nlocal agents tail\n`;
+  const agentsWithTail = `${B}\nmanaged\n${E}\n\n## Local agent docs\n\nlocal agents tail\n`;
 
   /** Run the script against a prepared target and read the hold report. */
   function runOn(target: string): { exitCode: number; stdout: string; report: string } {
@@ -310,7 +311,7 @@ describe("preserve_repo_owned removed-splits hold", () => {
   });
 
   test("an empty repository-owned section still holds, saying nothing leaves", () => {
-    const noTail = `# AGENTS.md\n\nmanaged\n\n${SENTINEL}\n`;
+    const noTail = `${B}\nmanaged\n${E}\n`;
     const result = runHold({ [MANIFEST_REL]: manifest, "AGENTS.md": noTail }, ["AGENTS.md"]);
     expect(result.exitCode).toBe(0);
     expect(result.report).toContain("`AGENTS.md`");
@@ -326,7 +327,7 @@ describe("preserve_repo_owned removed-splits hold", () => {
     expect(result.report).toContain("does not class this file");
   });
 
-  test("a previous copy that does not split at its marker is held as unlocatable", () => {
+  test("a previous copy that does not split at its markers is held as unlocatable", () => {
     const markerless = "# AGENTS.md\n\nno marker here\n";
     const result = runHold({ [MANIFEST_REL]: manifest, "AGENTS.md": markerless }, ["AGENTS.md"]);
     expect(result.exitCode).toBe(0);
@@ -402,11 +403,36 @@ describe("preserve_repo_owned removed-splits hold", () => {
     expect(result.stdout).toContain("manual-review");
   });
 
+  test("a retired-grammar HEAD manifest fails closed with the refusal in the report", () => {
+    // The one-time conversion machinery is deleted: a straggler manifest
+    // still declaring a retired vintage is refused (never converted), the
+    // split map is unknown, and the deletion axis holds the PR with the
+    // refusal's recovery advice in the body.
+    const legacy = JSON.stringify({
+      files: {
+        "AGENTS.md": {
+          class: "split",
+          grammar: "tail-marker",
+          marker: "<!-- repo-platform:local-section -->",
+          managed: "above",
+          hash: null,
+        },
+      },
+    });
+    const result = runHold({ [MANIFEST_REL]: legacy, "AGENTS.md": agentsWithTail }, ["AGENTS.md"]);
+    expect(result.exitCode).toBe(0);
+    expect(result.report).toContain("`AGENTS.md`");
+    expect(result.report).toContain("ownership manifest was rejected");
+    expect(result.report).toContain('split grammar "tail-marker"');
+    expect(result.report).toContain("recover=recopy");
+    expect(result.stdout).toContain("manual-review");
+  });
+
   test("a duplicate-key HEAD manifest fails closed with the reason in the report", () => {
     // JSON.parse keeps the LAST duplicate: split-then-managed for the same
     // path would silently reclassify the file managed and drop it from the
     // candidates while a retirement deletes its repository-owned half.
-    const dup = `{"files": {"AGENTS.md": {"class": "split", "grammar": "tail-marker", "marker": ${JSON.stringify(SENTINEL)}, "managed": "above", "hash": null}, "AGENTS.md": {"class": "managed", "hash": null}}}`;
+    const dup = `{"files": {"AGENTS.md": {"class": "split", "grammar": "managed-region", "begin": ${JSON.stringify(B)}, "end": ${JSON.stringify(E)}, "hash": null}, "AGENTS.md": {"class": "managed", "hash": null}}}`;
     const result = runHold({ [MANIFEST_REL]: dup, "AGENTS.md": agentsWithTail }, ["AGENTS.md"]);
     expect(result.exitCode).toBe(0);
     expect(result.report).toContain("`AGENTS.md`");
@@ -419,7 +445,7 @@ describe("preserve_repo_owned removed-splits hold", () => {
     // A damaged class ("spllt") read as merely non-split would drop the
     // file from the candidates and let the retirement auto-merge.
     const damaged = JSON.stringify({
-      files: { "AGENTS.md": { class: "spllt", marker: SENTINEL, managed: "above", hash: null } },
+      files: { "AGENTS.md": { class: "spllt", begin: B, end: E, hash: null } },
     });
     const result = runHold({ [MANIFEST_REL]: damaged, "AGENTS.md": agentsWithTail }, ["AGENTS.md"]);
     expect(result.exitCode).toBe(0);
@@ -511,12 +537,12 @@ describe("preserve_repo_owned removed-splits hold", () => {
         { length: 50 },
         (_, j) => `local line ${i}-${j} ${"x".repeat(120)}`,
       ).join("\n");
-      files[rel] = `# managed\n\n${SENTINEL}\n\n${tail}\n`;
+      files[rel] = `${B}\nmanaged\n${E}\n\n${tail}\n`;
       manifestFiles[rel] = {
         class: "split",
-        grammar: "tail-marker",
-        marker: SENTINEL,
-        managed: "above",
+        grammar: "managed-region",
+        begin: B,
+        end: E,
         hash: null,
       };
       removed.push(rel);

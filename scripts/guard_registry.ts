@@ -255,20 +255,22 @@ export const GUARD_REGISTRY: readonly GuardEntry[] = [
     testFile: "tests/sync/preserve_local_content.test.ts",
     testName: "throws on an unknown grammar instead of degrading",
   },
-  // The HEAD-manifest transition reader's own refusal: HEAD manifests can
-  // legitimately carry the two RETIRED grammars (the one-grammar
-  // transition converts them), so its vocabulary is wider than the GRAMMAR
-  // table's - and a grammar outside even THAT roster must refuse, or the
-  // conversion would silently skip the entry and the rebuild would treat
-  // the whole previous copy as unsplittable.
+  // The HEAD-manifest reader's own refusal: the fleet is censused fully
+  // post-conversion, so a HEAD manifest declaring anything but the one
+  // grammar (a retired vintage the deleted transition shim once
+  // converted, or anything unknown) must refuse with recovery advice - or
+  // the entry would be silently skipped, the tripwire would never compare
+  // the file, and a retirement could delete its repo-owned content
+  // unheld.
   {
     id: "head-split-unknown-grammar-refusal",
     hazard:
-      "a HEAD manifest declares a split grammar that is neither current nor a retired vintage the transition converts; without the refusal the entry is silently skipped, the tripwire never compares the file, and a retirement could delete its repo-owned content unheld",
+      "a HEAD manifest declares a split grammar this sync does not read (a retired vintage the deleted conversion shim once served, or anything unknown); without the refusal the entry is silently skipped, the tripwire never compares the file, and a retirement could delete its repo-owned content unheld",
     guardFile: ".github/scripts/sync/head_manifest.ts",
-    snippet: "    throw new Error(\n      `${where}: a split entry declares split grammar",
+    snippet:
+      "    throw new Error(\n      `${where}: a split entry declares a grammar this sync does not read",
     mutated:
-      "    continue;\n    throw new Error(\n      `${where}: a split entry declares split grammar",
+      "    continue;\n    throw new Error(\n      `${where}: a split entry declares a grammar this sync does not read",
     testFile: "tests/sync/head_manifest.test.ts",
     testName: "a grammar this sync does not read is refused, never skipped",
   },

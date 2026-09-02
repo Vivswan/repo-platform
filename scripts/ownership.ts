@@ -79,10 +79,11 @@ export const REGION_MARKER_LINES = new Set([
  *  pair). No code splits at these anymore, so a template source carrying
  *  one ships a dead promise line readers would still believe - and keeping
  *  the scan armed is what stops the retired grammar from quietly growing
- *  back. Fleet repositories may carry these lines as ordinary repo-owned
- *  content until their conversion sync, which subtracts them as
- *  platform-authored relics (.github/scripts/sync/head_manifest.ts's
- *  CONVERSION_RELIC_LINES); only TEMPLATE sources are scanned here. */
+ *  back. Fleet repositories may still carry these spellings as ordinary
+ *  repo-owned content (the retired one-time conversion stripped the
+ *  platform-authored ones; anything left is the repository's and rides
+ *  through every carry byte-identical); only TEMPLATE sources are scanned
+ *  here. */
 export const RETIRED_MARKER_LINES = new Set([
   "# repo-platform:local-section",
   "<!-- repo-platform:local-section -->",

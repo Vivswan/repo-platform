@@ -396,8 +396,8 @@ body = capBody(body);
 // out-of-band settings drift, dropped settings-layering overrides, a
 // referenced-but-undeclared label (the apply deletes undeclared labels,
 // so the reference breaks) - stays
-// manual; a clean update (which includes kept-whole and clean
-// tail-appended carries) arms squash auto-merge below. The flag-file
+// manual; a clean update (clean side-restore carries included) arms
+// squash auto-merge below. The flag-file
 // reasons ride the section list above (forcesReview), so a new section
 // cannot forget the review question.
 const needsReview =

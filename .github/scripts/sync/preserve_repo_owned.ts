@@ -522,13 +522,12 @@ export function deletedTrackedPaths(
 
 /** The removed-splits hold: HEAD's split declarations, split with HEAD's
  * OWN manifest (a marker rename in the update cannot mis-split the
- * previous copy; the retired vintages the transition converts are read
- * too - head_manifest.ts). headSplits is null when the manifest is
- * missing, damaged past parsing, or of a vintage headSplitEntries refuses
- * loudly (pre-grammar, or a grammar neither current nor retired) - all
- * target-state anomalies the fully-migrated fleet manifest should never
- * present, all handled fail closed below with the refusal's message in
- * the PR body. */
+ * previous copy - head_manifest.ts). headSplits is null when the manifest
+ * is missing, damaged past parsing, or of a vintage headSplitEntries
+ * refuses loudly (pre-grammar, a retired grammar, anything unknown) - all
+ * target-state anomalies the fully-converted fleet manifest should never
+ * present, all handled fail closed below with the refusal's message (its
+ * recover=recopy advice included) in the PR body. */
 function holdRemovedSplits(): void {
   let headSplits: Map<string, HeadSplit> | null = null;
   // WHY the manifest was rejected, for the PR body only (the message can

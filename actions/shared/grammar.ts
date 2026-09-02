@@ -7,9 +7,10 @@
 // owns both sides, sync owns the bounded region. The two retired split
 // grammars (tail-marker: managed top above one marker line; the
 // four-marker bounded-region shape with a dedicated LOCAL region) were
-// collapsed into this one; the sync pipeline carries the fleet's
-// transition (.github/scripts/sync/head_manifest.ts reads the retired
-// vintages out of HEAD manifests until the fleet is censused converted).
+// collapsed into this one; the fleet's transition is complete (censused
+// 2026-09), and a HEAD manifest still declaring a retired vintage is
+// refused loudly with recovery advice
+// (.github/scripts/sync/head_manifest.ts).
 //
 // scripts/ownership.ts welds GrammarId to the zod schema's grammar union
 // at the type level, so adding a schema arm without a full table row (or a

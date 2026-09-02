@@ -1,13 +1,12 @@
 // tail_tripwire.ts: the post-stamp defense-in-depth check that no split
 // file's repository-owned content lost non-blank lines it held at the
-// target's HEAD - each side split by its OWN manifest declaration, the
-// retired HEAD vintages (tail-marker, the old bounded-region shape)
-// included, so the designed one-grammar transition VERIFIES instead of
-// alarming - plus the loud refusal of pre-grammar and unknown-grammar
-// HEAD manifests. The script-level tests build a real git repo whose HEAD
-// carries both the previous file copies and the previous manifest, then
-// overwrite the working tree with the "delivered" state - exactly the
-// shape the sync leg hands the tripwire.
+// target's HEAD - each side split by its OWN manifest declaration (one
+// grammar: managed-region) - plus the loud refusal of pre-grammar,
+// retired-grammar, and unknown-grammar HEAD manifests. The script-level
+// tests build a real git repo whose HEAD carries both the previous file
+// copies and the previous manifest, then overwrite the working tree with
+// the "delivered" state - exactly the shape the sync leg hands the
+// tripwire.
 
 import { describe, expect, test } from "bun:test";
 import {
@@ -56,13 +55,9 @@ function regionSplit(path = "AGENTS.md", begin: string = B, end: string = E): Sp
   return { path, grammar: "managed-region", begin, end };
 }
 
-/** HeadSplit builders (head_manifest.ts's vintage union). */
+/** HeadSplit builders (head_manifest.ts's parsed shape). */
 const headRegion = (path = "AGENTS.md", begin: string = B, end: string = E) =>
-  ({ vintage: "managed-region", path, begin, end }) as const;
-const headTail = (path = "AGENTS.md", marker: string = OLD_SENTINEL) =>
-  ({ vintage: "tail-marker", path, marker }) as const;
-const headBounded = (path = ".gitignore", managed_begin: string = HB) =>
-  ({ vintage: "bounded-region", path, managed_begin }) as const;
+  ({ path, begin, end }) as const;
 
 /** Manifest JSON builders (the raw shape the manifest files carry). */
 type RawEntry = Record<string, unknown>;
@@ -76,7 +71,8 @@ const rawRegion = (begin: string = B, end: string = E): RawEntry => ({
   end,
 });
 /** The RETIRED vintages' wire shapes, exactly as the old compose emitted
- * them - what fleet HEADs still carry on the transition sync. */
+ * them. The sync no longer reads them (the one-time conversion machinery
+ * is deleted) - these builders exist to prove the loud refusal. */
 const rawLegacyTail = (marker: string = OLD_SENTINEL): RawEntry => ({
   class: "split",
   grammar: "tail-marker",
@@ -168,18 +164,13 @@ function runScript(
 }
 
 describe("headSplitEntries (re-exported for the sync legs)", () => {
-  test("parses a current-vintage manifest strictly", () => {
+  test("parses a managed-region manifest strictly", () => {
     const map = headSplitEntries(
       manifestText({ "AGENTS.md": rawRegion(), ".gitignore": rawRegion(HB, HE) }),
       "t",
     );
-    expect(map.get("AGENTS.md")).toEqual({
-      vintage: "managed-region",
-      path: "AGENTS.md",
-      begin: B,
-      end: E,
-    });
-    expect(map.get(".gitignore")?.vintage).toBe("managed-region");
+    expect(map.get("AGENTS.md")).toEqual({ path: "AGENTS.md", begin: B, end: E });
+    expect(map.get(".gitignore")).toEqual({ path: ".gitignore", begin: HB, end: HE });
   });
 
   test("a pre-grammar manifest is refused with the recovery advice, never read", () => {
@@ -196,6 +187,19 @@ describe("headSplitEntries (re-exported for the sync legs)", () => {
         "t",
       ),
     ).toThrow(/predates the stamped split grammar.*recover=recopy/);
+  });
+
+  test("a RETIRED-vintage manifest is refused with the recovery advice, never converted", () => {
+    // The one-time conversion machinery is deleted (fleet censused
+    // post-conversion): both retired wire shapes now ride the
+    // unknown-grammar refusal - the ONLY behavior. The advice precedes the
+    // target-controlled values so it always survives the PR-body clip.
+    expect(() => headSplitEntries(manifestText({ "AGENTS.md": rawLegacyTail() }), "t")).toThrow(
+      /recover=recopy.*split grammar "tail-marker"/,
+    );
+    expect(() => headSplitEntries(manifestText({ ".gitignore": rawLegacyBounded() }), "t")).toThrow(
+      /recover=recopy.*split grammar "bounded-region"/,
+    );
   });
 
   test("a mixed manifest (grammar beside pre-grammar entries) is refused the same way", () => {
@@ -267,7 +271,7 @@ describe("headSplitEntries (re-exported for the sync legs)", () => {
       /printable-ASCII/,
     );
     expect(() =>
-      headSplitEntries(manifestText({ "AGENTS.md": rawLegacyTail("# local §") }), "t"),
+      headSplitEntries(manifestText({ "AGENTS.md": rawRegion("# local §", HE) }), "t"),
     ).toThrow(/printable-ASCII/);
   });
 
@@ -345,80 +349,10 @@ describe("compareHalves", () => {
     expect(compareHalves(regionSplit(), headRegion(), head, delivered)?.kind).toBe("unverifiable");
   });
 
-  test("THE TRANSITION: a tail-marker HEAD verifies against the converted copy", () => {
-    // The designed conversion moves the tail from "below the marker" to
-    // "below the END marker" - the multiset spans both sides, so the
-    // byte-preserving move verifies instead of alarming.
-    const head = `old managed\n${OLD_SENTINEL}\n\n## Project docs\n\nrepo-local instructions\n`;
-    const delivered = `${B}\nfresh managed\n${E}\n\n## Project docs\n\nrepo-local instructions\n`;
-    expect(compareHalves(regionSplit(), headTail(), head, delivered)).toBeNull();
-  });
-
-  test("THE TRANSITION: a converted tail that LOST a line still fires", () => {
-    const head = `old managed\n${OLD_SENTINEL}\nkeep-one\nkeep-two\n`;
-    const delivered = `${B}\nfresh managed\n${E}\nkeep-one\n`;
-    expect(compareHalves(regionSplit(), headTail(), head, delivered)).toEqual({
-      path: "AGENTS.md",
-      kind: "shrank",
-      missing: ["keep-two"],
-    });
-  });
-
-  test("THE TRANSITION: an old bounded-region HEAD verifies against the converted copy", () => {
-    const head = `${OLD_LOCAL_BEGIN}\n/repo-local-cache/\n${OLD_LOCAL_END}\n\n${HB}\n*.old\n${HE}\n`;
-    // The conversion also SUBTRACTS the retired marker pair (and the old
-    // guidance line): platform-authored relics, not repo-owned content.
-    // The expected multiset drops them explicitly, so the designed strip
-    // reads as verified rather than as lost lines.
-    const delivered = `/repo-local-cache/\n\n${HB}\n*.new\n${HE}\n`;
-    expect(
-      compareHalves(regionSplit(".gitignore", HB, HE), headBounded(), head, delivered),
-    ).toBeNull();
-    // A repo that had not been converted yet still verifies: subtracting
-    // from the EXPECTED side never invents a finding.
-    const unstripped = `${OLD_LOCAL_BEGIN}\n/repo-local-cache/\n${OLD_LOCAL_END}\n\n${HB}\n*.new\n${HE}\n`;
-    expect(
-      compareHalves(regionSplit(".gitignore", HB, HE), headBounded(), head, unstripped),
-    ).toBeNull();
-    // The repository's own line is NOT subtracted: losing it still fires,
-    // and the relic lines never pad the finding.
-    const shrank = `${HB}\n*.new\n${HE}\n`;
-    expect(compareHalves(regionSplit(".gitignore", HB, HE), headBounded(), head, shrank)).toEqual({
-      path: ".gitignore",
-      kind: "shrank",
-      missing: ["/repo-local-cache/"],
-    });
-  });
-
-  test("THE TRANSITION: the retired guidance line is subtracted, a lookalike is not", () => {
-    const guidance = "# Add repository-specific ignore patterns in this section only.";
-    const lookalike = "# Add repository-specific ignore patterns here please";
-    const head = `${OLD_LOCAL_BEGIN}\n${guidance}\n${lookalike}\n${OLD_LOCAL_END}\n\n${HB}\n*.old\n${HE}\n`;
-    // The conversion keeps the lookalike (repo-authored) and drops the
-    // exact retired line: clear.
-    expect(
-      compareHalves(
-        regionSplit(".gitignore", HB, HE),
-        headBounded(),
-        head,
-        `${lookalike}\n\n${HB}\n*.new\n${HE}\n`,
-      ),
-    ).toBeNull();
-    // Dropping the lookalike too is a real loss and must still fire.
-    expect(
-      compareHalves(
-        regionSplit(".gitignore", HB, HE),
-        headBounded(),
-        head,
-        `${HB}\n*.new\n${HE}\n`,
-      ),
-    ).toEqual({ path: ".gitignore", kind: "shrank", missing: [lookalike] });
-  });
-
-  test("a STEADY-STATE comparison subtracts nothing (relic-shaped lines are repo content)", () => {
-    // Scope, mirrored from the carry: outside a retired vintage nothing is
-    // stripped, so a relic-shaped line the repo owns is guarded like any
-    // other repo-owned line.
+  test("nothing is ever subtracted: a relic-shaped line the repo owns is guarded", () => {
+    // The conversion-era relic strip is deleted: a retired spelling in
+    // repo-owned space is the repository's content, and losing it fires
+    // like any other repo-owned line.
     const head = `${OLD_LOCAL_BEGIN}\n/repo-local-cache/\n\n${HB}\n*.old\n${HE}\n`;
     const delivered = `/repo-local-cache/\n\n${HB}\n*.new\n${HE}\n`;
     expect(
@@ -459,7 +393,7 @@ describe("compareHalves", () => {
   });
 
   test("a HEAD copy that does not split by its own declaration is unverifiable", () => {
-    const finding = compareHalves(regionSplit(), headTail(), "no marker here\n", agentsDelivered);
+    const finding = compareHalves(regionSplit(), headRegion(), "no marker here\n", agentsDelivered);
     expect(finding?.kind).toBe("unverifiable");
     expect(finding?.kind === "unverifiable" && finding.reason).toContain("previous commit's copy");
   });
@@ -550,10 +484,11 @@ describe("tail_tripwire script", () => {
     expect(result.stdout).not.toContain("::warning::");
   });
 
-  test("THE TRANSITION: a legacy HEAD manifest over a converted tree verifies CLEAR", () => {
-    // HEAD: old shapes + old-vintage manifest; delivered: converted shapes
-    // + new manifest. Every repo-owned byte moved to its designed side, so
-    // the wire stays silent - the transition sync is auto-merge eligible.
+  test("a RETIRED-vintage HEAD manifest fails loudly: unverifiable findings with the recovery advice", () => {
+    // The one-time conversion used to serve exactly this HEAD state; a
+    // straggler now trips the wire on every split file - warn, manual
+    // review, the report naming the refusal and the fix - with NO loss
+    // claim fabricated (the delivered copies kept every local line).
     const legacyManifest = manifestText({
       "AGENTS.md": rawLegacyTail(),
       ".gitignore": rawLegacyBounded(),
@@ -563,12 +498,11 @@ describe("tail_tripwire script", () => {
       ".gitignore": rawRegion(HB, HE),
     });
     const agentsOldShape = `# AGENTS.md\n\nold managed\n\n${OLD_SENTINEL}\n\n## Project docs\n\nrepo-local instructions\n`;
-    const agentsConverted = `${B}\n# AGENTS.md\n\nfresh managed\n${E}\n\n## Project docs\n\nrepo-local instructions\n`;
     const gitignoreOldShape = `${OLD_LOCAL_BEGIN}\n/repo-local-cache/\n${OLD_LOCAL_END}\n\n${HB}\n*.old\n${HE}\n`;
-    // What the carry actually delivers: the repo's own line above the
-    // fresh region, the retired markers subtracted as platform-authored
-    // relics. The wire must read that as verified, not as three lost lines.
-    const gitignoreConverted = `/repo-local-cache/\n\n${HB}\n*.new\n${HE}\n`;
+    // Delivered copies that keep every previous line, so any loss claim in
+    // the report would be fabricated.
+    const agentsDeliveredFull = `${B}\n# AGENTS.md\n\nold managed\n${E}\n\n${OLD_SENTINEL}\n\n## Project docs\n\nrepo-local instructions\n`;
+    const gitignoreDeliveredFull = `${OLD_LOCAL_BEGIN}\n/repo-local-cache/\n${OLD_LOCAL_END}\n\n${HB}\n*.old\n${HE}\n`;
     const root = makeTarget(
       {
         "AGENTS.md": agentsOldShape,
@@ -576,29 +510,21 @@ describe("tail_tripwire script", () => {
         [MANIFEST_NAME]: legacyManifest,
       },
       {
-        "AGENTS.md": agentsConverted,
-        ".gitignore": gitignoreConverted,
+        "AGENTS.md": agentsDeliveredFull,
+        ".gitignore": gitignoreDeliveredFull,
         [MANIFEST_NAME]: newManifest,
       },
     );
     const result = runScript(root);
-    expect(result.exitCode).toBe(0);
-    expect(result.report).toBe("");
-    expect(result.stdout).toContain("tail tripwire clear");
-  });
-
-  test("THE TRANSITION: a conversion that dropped a tail line still fires", () => {
-    const legacyManifest = manifestText({ "AGENTS.md": rawLegacyTail() });
-    const oldShape = `old managed\n${OLD_SENTINEL}\nkeep-one\nkeep-two\n`;
-    const converted = `${B}\nfresh managed\n${E}\nkeep-one\n`;
-    const root = makeTarget(
-      { "AGENTS.md": oldShape, [MANIFEST_NAME]: legacyManifest },
-      { "AGENTS.md": converted, [MANIFEST_NAME]: headManifest },
-    );
-    const result = runScript(root);
+    // Warn, not red: going red would block the very sync whose recovery
+    // follow-up heals the manifest.
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain("::warning::");
-    expect(result.report).toContain("keep-two");
+    expect(result.report).toContain("`AGENTS.md`");
+    expect(result.report).toContain("`.gitignore`");
+    expect(result.report).toContain('split grammar "tail-marker"');
+    expect(result.report).toContain("recover=recopy");
+    expect(result.report).not.toContain("missing from this update's copy");
   });
 
   test("fires on a vanished tail line: warns, reports, exits 0", () => {

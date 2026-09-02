@@ -1380,41 +1380,31 @@ grep -qF "::warning::" "$PREG_WORK/tripwire.out" \
   || fail "the pre-grammar refusal did not warn (silent misbehavior)"
 echo "pre-grammar manifest OK: loud unverifiable refusal, recovery advice named, no fabricated loss"
 
-# --- One-grammar transition (tail-marker / old bounded-region -> managed-region)
+# --- Retired-grammar straggler refusal (conversion machinery deleted) ------
 # The tail-marker and four-marker bounded-region grammars were retired into
-# ONE (managed-region: repo-owned content above BEGIN and below END). The
-# transition rides the sync pipeline: a fleet repo whose HEAD still carries
-# the old shapes and an old-vintage manifest must CONVERT on the next sync
-# - the AGENTS.md repo tail lands byte-identical BELOW the new END marker
-# with nothing above, the .gitignore content above the old managed BEGIN
-# rides through ABOVE the new region - MINUS the platform-authored relic
-# lines the retired shape left sitting on the repository's side: the
-# retired "# BEGIN/END REPOSITORY LOCAL" marker pair and the guidance line
-# "# Add repository-specific ignore patterns in this section only.", which
-# the one grammar makes actively FALSE (no such section exists anymore).
-# WHY the expectation is byte-identical-MINUS-relics rather than plain
-# byte-identical: without the strip every fleet repo would auto-merge a
-# converted .gitignore carrying wrong instructions forever, so the
-# conversion subtracts exactly those closed, historical spellings while a
-# repo-authored LOOKALIKE line (planted below) survives byte-identical.
-# The strip is named in the carry summary (the PR-body transition note),
-# raises no review hold (the transition stays designed and verified),
-# leaves the tail tripwire clear (it subtracts the same relic set from the
-# expected multiset), and produces a tree the validator accepts.
-TRANS="$RUN_DIR/upgrade-transition"
-TRANS_WORK="$RUN_DIR/upgrade-transition-work"
+# ONE (managed-region), the fleet census confirmed every managed repo
+# converted, and the one-time conversion machinery was deleted. A straggler
+# repo arriving NOW - old-shaped files plus an old-vintage manifest - gets
+# the loud refusal, not a conversion: headSplitEntries refuses the manifest,
+# so HEAD's declarations are UNUSABLE and every previous split copy is
+# preserved in full under a recovery appendix (never split by a guessed
+# boundary - the old .gitignore's managed half carries the current marker
+# pair, and splitting there could misattribute repo-owned bytes to the
+# managed discard), the PR is held for review, the retired relic lines ride
+# through as repo-owned bytes (NO strip exists anymore), and the tail
+# tripwire reports every split file unverifiable with the refusal naming
+# the fix (recover=recopy). The run itself stays green: a red tripwire
+# would block the very sync that heals.
+TRANS="$RUN_DIR/upgrade-straggler"
+TRANS_WORK="$RUN_DIR/upgrade-straggler-work"
 mkdir -p "$TRANS_WORK"
 cd "$GITHUB_WORKSPACE"
 copier copy "$GITHUB_WORKSPACE" "$TRANS" \
   --vcs-ref "$NEW_TAG" --defaults --trust \
-  -d project_name="Transition" \
-  -d description="Transition project" \
+  -d project_name="Straggler" \
+  -d description="Straggler project" \
   -d 'modules=[agents]' \
   -d private="false"
-# The fresh render doubles as render-new; render-old holds the OLD-shaped
-# renders the old template would have produced (managed content identical,
-# shape retired), so the managed-part comparison reads the conversion as a
-# routine template change, not a local edit.
 cp -R "$TRANS" "$TRANS_WORK/render-new"
 cp -R "$TRANS" "$TRANS_WORK/render-old"
 cd "$TRANS"
@@ -1428,10 +1418,7 @@ B = "<!-- BEGIN REPO-PLATFORM MANAGED -->"
 E = "<!-- END REPO-PLATFORM MANAGED -->"
 HB = "# BEGIN REPO-PLATFORM MANAGED"
 OLD_SENTINEL = "<!-- repo-platform:local-section -->"
-# The retired platform-authored lines, verbatim, and a repo-authored
-# lookalike that must survive the strip byte-identical.
 OLD_GUIDANCE = "# Add repository-specific ignore patterns in this section only."
-LOOKALIKE = "# Add repository-specific ignore patterns here please"
 
 # AGENTS.md: old shape = the new render's managed content with the marker
 # pair replaced by one terminal tail marker; the repo's tail sits below it
@@ -1444,15 +1431,12 @@ old_managed = f"{body}\n{OLD_SENTINEL}\n"
 tail = "\n## Project docs\n\ncaf\xe9 repo-local instructions\n"
 with open("AGENTS.md", "wb") as f:
     f.write((old_managed + tail).encode("latin-1"))
-with open("../upgrade-transition-work/render-old/AGENTS.md", "wb") as f:
-    f.write(old_managed.encode("latin-1"))
-with open("../upgrade-transition-work/agents-tail.bin", "wb") as f:
-    f.write(tail.encode("latin-1"))
+with open("../upgrade-straggler-work/agents-old-shape.bin", "wb") as f:
+    f.write((old_managed + tail).encode("latin-1"))
 
 # .gitignore: old shape = a LOCAL region (retired markers, the retired
-# guidance line, the blank line the old template put under it, a repo
-# entry, and the repo-authored lookalike) above the managed half, which
-# ran from the BEGIN line to end of file.
+# guidance line, a repo entry) above the managed half, which ran from the
+# BEGIN line to end of file.
 with open(".gitignore", "rb") as f:
     gi = f.read().decode("latin-1")
 managed_half = gi[gi.index(HB) :]
@@ -1460,26 +1444,12 @@ above = (
     "# BEGIN REPOSITORY LOCAL\n"
     f"{OLD_GUIDANCE}\n"
     "\n"
-    f"{LOOKALIKE}\n"
-    "transition-local-cache/\n"
+    "straggler-local-cache/\n"
     "# END REPOSITORY LOCAL\n"
     "\n"
 )
 with open(".gitignore", "wb") as f:
     f.write((above + managed_half).encode("latin-1"))
-with open("../upgrade-transition-work/render-old/.gitignore", "wb") as f:
-    f.write((
-        "# BEGIN REPOSITORY LOCAL\n"
-        f"{OLD_GUIDANCE}\n"
-        "\n"
-        "# END REPOSITORY LOCAL\n"
-        "\n" + managed_half
-    ).encode("latin-1"))
-# The expected carried above-side: the repo's own lines only, the relic
-# lines gone and no blank-line wake left behind (the blank the guidance
-# line sat above is collapsed rather than opening the file).
-with open("../upgrade-transition-work/gitignore-above.bin", "wb") as f:
-    f.write(f"{LOOKALIKE}\ntransition-local-cache/\n\n".encode("latin-1"))
 
 # The manifest: the two entries in their retired wire vintages.
 path = ".github/repo-platform-manifest.json"
@@ -1520,62 +1490,69 @@ bun .github/scripts/sync/preserve_local_content.ts \
   --needs-review "$TRANS_WORK/carry-review.txt" \
   --rebuilt-paths "$TRANS_WORK/rebuilt-paths.txt" \
   --render-dir "$TRANS_WORK/render-new" --old-render-dir "$TRANS_WORK/render-old"
-# AGENTS.md: exactly render-new + the previous tail, byte-identical
-# (non-UTF-8 byte included), below the new END marker.
-cat "$TRANS_WORK/render-new/AGENTS.md" "$TRANS_WORK/agents-tail.bin" \
-  | cmp -s - "$TRANS/AGENTS.md" \
-  || fail "the tail-marker conversion did not deliver render-new + the byte-identical tail"
-# .gitignore: the repo's own above-side lines byte-identical above
-# render-new's managed region - the relic lines subtracted, the
-# repo-authored lookalike kept.
-awk '/^# BEGIN REPO-PLATFORM MANAGED$/, 0' "$TRANS_WORK/render-new/.gitignore" \
-  > "$TRANS_WORK/gitignore-region.txt"
-cat "$TRANS_WORK/gitignore-above.bin" "$TRANS_WORK/gitignore-region.txt" \
-  | cmp -s - "$TRANS/.gitignore" \
-  || fail "the bounded-region conversion did not preserve the above-side minus the platform-authored relic lines"
-# Stated twice on purpose: the relics must be GONE and the lookalike must
-# be present, so neither direction can pass by a cmp fixture typo.
-if grep -qxF "# BEGIN REPOSITORY LOCAL" "$TRANS/.gitignore"; then
-  fail "the conversion left the retired REPOSITORY LOCAL marker in the repo-owned side"
+# AGENTS.md: NO conversion - the fresh render, then the whole old copy
+# byte-identical (non-UTF-8 byte included) under the recovery appendix.
+grep -qF "repo-platform:recovery-appendix" "$TRANS/AGENTS.md" \
+  || fail "the straggler AGENTS.md carries no recovery appendix (a conversion path is silently back?)"
+OLD_SIZE=$(wc -c < "$TRANS_WORK/agents-old-shape.bin")
+tail -c "$OLD_SIZE" "$TRANS/AGENTS.md" | cmp -s - "$TRANS_WORK/agents-old-shape.bin" \
+  || fail "the recovery appendix did not preserve the old-shaped copy byte-identical"
+# .gitignore: the appendix too, NEVER a guessed split at the current
+# markers (the old managed half carries the pair, so a guessed split would
+# hand old bytes to the managed discard) - the fresh render stands on top,
+# the whole old copy is preserved below the appendix comment, its retired
+# marker pair and the old guidance line INCLUDED (repo-owned bytes now,
+# with the one-time strip deleted; only the current markers are dash-joined
+# inert so the validator's exactly-once rule holds).
+grep -qF "# repo-platform:recovery-appendix" "$TRANS/.gitignore" \
+  || fail "the straggler .gitignore carries no recovery appendix (a guessed split is silently back?)"
+grep -qxF "# BEGIN REPOSITORY LOCAL" "$TRANS/.gitignore" \
+  || fail "the retired REPOSITORY LOCAL marker was stripped - the deleted conversion strip is back"
+grep -qxF "# Add repository-specific ignore patterns in this section only." "$TRANS/.gitignore" \
+  || fail "the retired guidance line was stripped - the deleted conversion strip is back"
+grep -qxF "straggler-local-cache/" "$TRANS/.gitignore" \
+  || fail "the straggler .gitignore lost the repository's own ignore pattern"
+# The summary must state dispositions without any conversion-era wording,
+# and the appendixes must hold the PR for review.
+if grep -qF "converted from the retired" "$TRANS_WORK/local-carryover.md"; then
+  fail "the carry summary still names a conversion (the retired machinery must be gone)"
 fi
-if grep -qxF "# Add repository-specific ignore patterns in this section only." "$TRANS/.gitignore"; then
-  fail "the conversion left the retired (and now false) guidance line in the repo-owned side"
+if grep -qF "platform-authored relic line(s)" "$TRANS_WORK/local-carryover.md"; then
+  fail "the carry summary still names a relic strip (the retired machinery must be gone)"
 fi
-grep -qxF "# Add repository-specific ignore patterns here please" "$TRANS/.gitignore" \
-  || fail "the conversion stripped a repo-authored LOOKALIKE line (only exact retired spellings may go)"
-grep -qxF "transition-local-cache/" "$TRANS/.gitignore" \
-  || fail "the conversion lost the repository's own ignore pattern"
-# The PR body carries the transition notes AND names every stripped line
-# (loud beats lossy: a reviewer must never have to guess why lines went);
-# the designed conversion is verified, so nothing is held for review.
-grep -qF "converted from the retired tail-marker split shape" "$TRANS_WORK/local-carryover.md" \
-  || fail "the carry summary does not name the tail-marker conversion"
-grep -qF "converted from the retired LOCAL-region split shape" "$TRANS_WORK/local-carryover.md" \
-  || fail "the carry summary does not name the LOCAL-region conversion"
-grep -qF "platform-authored relic line(s)" "$TRANS_WORK/local-carryover.md" \
-  || fail "the carry summary does not name the relic strip (the PR body must explain the disappearing lines)"
-grep -qF "# Add repository-specific ignore patterns in this section only." \
-  "$TRANS_WORK/local-carryover.md" \
-  || fail "the carry summary does not quote the stripped guidance line"
-grep -qF "blank line(s) the removals left behind" "$TRANS_WORK/local-carryover.md" \
-  || fail "the carry summary does not account for the blank the relic removals collapsed"
-if [ -s "$TRANS_WORK/carry-review.txt" ]; then
-  fail "the designed transition was held for review: $(cat "$TRANS_WORK/carry-review.txt")"
-fi
-# The stamp, the tripwire (which must VERIFY the designed transition:
-# HEAD's repo-owned bytes all survive on their new sides, minus the relic
-# lines it subtracts from the expected multiset for exactly this reason),
-# and the validator all accept the converted tree.
+grep -qF "recovery-appendix" "$TRANS_WORK/local-carryover.md" \
+  || fail "the carry summary does not name the recovery appendix"
+grep -qF "AGENTS.md: recovery-appendix" "$TRANS_WORK/carry-review.txt" \
+  || fail "the straggler AGENTS.md appendix did not hold the PR for review"
+grep -qF ".gitignore: recovery-appendix" "$TRANS_WORK/carry-review.txt" \
+  || fail "the straggler .gitignore appendix did not hold the PR for review"
+# The stamp, then the tripwire: the retired-grammar HEAD manifest must be
+# REFUSED - every split file unverifiable, the report naming the retired
+# grammar and the recovery fix, with no fabricated loss claim (the
+# appendixes kept every previous line). Warn-only: the run stays green so
+# the healing sync can deliver.
 TARGET_DIR="$TRANS" bun actions/shared/stamp_manifest.ts
 RUNNER_TEMP="$TRANS_WORK" bun .github/scripts/sync/tail_tripwire.ts --root "$TRANS" \
   > "$TRANS_WORK/tripwire.out"
-if [ -s "$TRANS_WORK/tail-shrank.md" ]; then
-  fail "the tail tripwire flagged the designed transition: $(cat "$TRANS_WORK/tail-shrank.md")"
+test -s "$TRANS_WORK/tail-shrank.md" \
+  || fail "a retired-grammar HEAD manifest produced no tripwire report (a conversion fallback must not be silently back)"
+# The refusal names whichever retired entry the manifest lists first -
+# either retired grammar proves the arm.
+grep -qE 'split grammar "(tail-marker|bounded-region)"' "$TRANS_WORK/tail-shrank.md" \
+  || fail "the tripwire report does not name the retired-grammar refusal"
+grep -qF "recover=recopy" "$TRANS_WORK/tail-shrank.md" \
+  || fail "the tripwire report does not name the recovery-sync fix"
+grep -qF '`AGENTS.md`' "$TRANS_WORK/tail-shrank.md" \
+  || fail "the tripwire report does not list AGENTS.md as unverifiable"
+grep -qF '`.gitignore`' "$TRANS_WORK/tail-shrank.md" \
+  || fail "the tripwire report does not list .gitignore as unverifiable"
+if grep -qF "missing from this update's copy" "$TRANS_WORK/tail-shrank.md"; then
+  fail "the retired-grammar refusal fabricated a loss claim for preserved content"
 fi
-grep -qF "tail tripwire clear" "$TRANS_WORK/tripwire.out" \
-  || fail "the tripwire did not report clear on the converted tree"
+grep -qF "::warning::" "$TRANS_WORK/tripwire.out" \
+  || fail "the retired-grammar refusal did not warn (silent misbehavior)"
 bun "$GITHUB_WORKSPACE/actions/validate-template/validate_generated_files.ts" "$TRANS"
-echo "one-grammar transition OK: tail below END and above-side preserved (relics stripped, lookalike kept), conversion noted, tripwire clear"
+echo "retired-grammar straggler OK: both old copies preserved under review-held appendixes, relic lines kept, loud unverifiable refusal with recovery advice, no conversion"
 
 # --- Split-file retirement (module deselection) ----------------------------
 # Deselecting a module retires its files from the render, and a retired

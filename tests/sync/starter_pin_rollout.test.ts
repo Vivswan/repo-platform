@@ -35,7 +35,12 @@ describe("starterPaths", () => {
       files: {
         ".github/workflows/ci.yml": { class: "managed", hash: null },
         ".github/workflows/nightly.yml": { class: "starter" },
-        "AGENTS.md": { class: "split", grammar: "tail-marker", marker: "<!-- m -->" },
+        "AGENTS.md": {
+          class: "split",
+          grammar: "managed-region",
+          begin: "<!-- b -->",
+          end: "<!-- e -->",
+        },
         ".github/workflows/nightly-fuzz.yml": { class: "starter" },
       },
     });
