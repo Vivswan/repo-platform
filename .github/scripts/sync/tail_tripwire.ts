@@ -21,18 +21,20 @@
 // from HEAD has no previous half to lose; a path HEAD's manifest did not
 // class as split claimed no repository-owned half there (ownership flips
 // have their own review machinery). Each side is split by its OWN
-// declaration: the post-sync manifest always carries the grammar union
-// (tail-marker or bounded-region; splitEntries fails closed on anything
-// else), while a HEAD manifest stamped by a pre-grammar template declares
-// only a marker/managed pair and is split by exactly that claim - never
-// by a guessed grammar. When the two sides claim the same shape the check
-// is half against half; when they differ (a legacy managed-below claim
-// covers region scaffolding the bounded-region body excludes), HEAD's
-// copy is re-split under the post-sync grammar when one exactly-once
-// clean region exists there - otherwise the file is UNVERIFIABLE (manual
-// review), never checked against a whole-file universe, which was blind
-// to a line duplicated across the local body and the managed scaffolding.
-// The line
+// declaration, and BOTH sides must carry the grammar union (tail-marker
+// or bounded-region; splitEntries fails closed on anything else): the
+// fleet is fully post-grammar (censused 2026-09, every manifest's split
+// entries stamped with the field), so the legacy fallback that re-read a
+// bare marker/managed pair is retired. A HEAD manifest still presenting
+// that shape is REFUSED loudly - every split file goes unverifiable
+// (manual review) with the refusal's actionable message (run a recovery
+// sync to restamp the manifest), never split by a guessed grammar. When
+// the two sides claim the same grammar the check is half against half;
+// when a template flips a file's grammar, the two declarations draw
+// different repository-owned boundaries, so the file is UNVERIFIABLE
+// (manual review) - never checked against a whole-file universe, which
+// was blind to a line duplicated across the local body and the managed
+// scaffolding. The line
 // check is multiset membership, not a positional diff: moved lines are not
 // lost content. All file content is read as latin1 (one code unit per
 // byte, the stamp_manifest.ts convention) - a utf-8 decode would fold
@@ -54,16 +56,13 @@ import { grammarSpec } from "../../../actions/shared/grammar.ts";
 import { MANIFEST_NAME } from "../../../actions/shared/manifest.ts";
 import { managedHalf } from "../../../actions/shared/stamp_manifest.ts";
 import { cleanLocalRegion } from "../../../scripts/gitignore_local.ts";
-import { isCommentMarker } from "../../../scripts/ownership.ts";
 import { parseFlags } from "../shared/flags.ts";
 import { requireEnv } from "../shared/gha.ts";
 import { headEntry } from "../shared/git_head.ts";
 import { hasDuplicateJsonKeys } from "../shared/json.ts";
 import {
-  ASCII_MARKER_RE,
   clip,
   fenceFor,
-  isCleanRelativePath,
   missingLines,
   type SplitEntry,
   splitEntries,
@@ -99,7 +98,9 @@ function markerComplement(
  * exactly-once rules - a copy whose region cannot be honestly located is
  * unverifiable, never guessed at). Exhaustive over GrammarId (SplitEntry
  * derives from the GRAMMAR table): a new grammar member must fail
- * compilation here, not silently ride an existing locator. */
+ * compilation here, not silently ride an existing locator. Exported for
+ * preserve_repo_owned.ts's removed-split-file hold, which names the
+ * repository-owned content a deletion takes with it. */
 export function repoOwnedHalf(content: string, entry: SplitEntry): string | null {
   switch (entry.grammar) {
     case "tail-marker":
@@ -122,26 +123,19 @@ export function repoOwnedHalf(content: string, entry: SplitEntry): string | null
  * rejected to the callers' fail-closed path. */
 const KNOWN_HEAD_CLASSES = new Set(["managed", "split", "starter", "mergeable"]);
 
-/** How HEAD's manifest declares a split: the grammar union (post-grammar
- * templates) or the bare marker/managed pair (manifests stamped before the
- * grammar field existed). */
-export type HeadSplit =
-  | { kind: "grammar"; entry: SplitEntry }
-  | { kind: "legacy"; path: string; marker: string; managed: "above" | "below" };
-
-/** HEAD's split declarations, keyed by path. The manifest's ERA is
- * decided first, from its own shape: any split entry carrying a grammar
- * field makes the manifest post-grammar, and the strict parse's verdict
- * on it is FINAL - its throw propagates to the caller, which routes every
- * split file to the unverifiable (manual-review) path. Only a manifest
- * whose split entries ALL predate the grammar field takes the legacy
- * branch, and that branch enforces the same path and marker hygiene the
- * strict parse does: an undiscriminated fallback used to catch every
- * strict rejection (unclean path, non-comment marker, bad managed side)
- * and re-read the manifest as legacy, where a tampered entry either threw
- * late or - for an unclean legacy path - produced a key the post-sync
- * lookup could never match, silently SKIPPING the file's check. */
-export function headSplitEntries(text: string, where: string): Map<string, HeadSplit> {
+/** How HEAD's manifest declares a split: the same strict grammar parse as
+ * the post-sync manifest (splitEntries), behind two HEAD-manifest-only
+ * checks the strict parse does not make. Every entry's ownership class
+ * must be on the known roster - reading a damaged class ("spllt") as
+ * merely non-split would drop that file from the candidates and let a
+ * retirement delete its repo-owned half. And every split entry must carry
+ * the grammar field: the fleet is fully post-grammar (censused 2026-09),
+ * the legacy fallback that re-read a bare marker/managed pair is retired,
+ * and a manifest still presenting that shape gets this loud, actionable
+ * refusal instead - the callers route the throw to their fail-closed
+ * paths (unverifiable findings here, the held-for-review deletion axis in
+ * preserve_repo_owned.ts), never to a guessed split. */
+export function headSplitEntries(text: string, where: string): Map<string, SplitEntry> {
   let parsed: unknown;
   try {
     parsed = JSON.parse(text);
@@ -163,7 +157,6 @@ export function headSplitEntries(text: string, where: string): Map<string, HeadS
   if (typeof files !== "object" || files === null || Array.isArray(files)) {
     throw new Error(`${where} has no top-level 'files' mapping`);
   }
-  const splitShapes: [string, Record<string, unknown>][] = [];
   for (const [path, entry] of Object.entries(files as Record<string, unknown>)) {
     if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
       // Fail closed like the strict parse: a damaged entry must route the
@@ -180,84 +173,37 @@ export function headSplitEntries(text: string, where: string): Map<string, HeadS
           "damage could be hiding a split declaration",
       );
     }
-    if (shaped.class === "split") splitShapes.push([path, shaped]);
-  }
-  if (splitShapes.some(([, shaped]) => "grammar" in shaped)) {
-    // Post-grammar manifest: the strict parse decides, damage included.
-    return new Map(
-      splitEntries(text, where).map((entry) => [entry.path, { kind: "grammar", entry }]),
-    );
-  }
-  const out = new Map<string, HeadSplit>();
-  for (const [path, shaped] of splitShapes) {
-    // The same key hygiene as the strict parse: an unclean legacy path
-    // (a tampered "../AGENTS.md", say) could never match a post-sync
-    // manifest's clean key, so accepting it would silently skip the real
-    // file's check instead of surfacing the damage.
-    if (!isCleanRelativePath(path)) {
-      throw new Error(`${where}: split entry path '${path}' is not a clean relative path`);
+    if (shaped.class === "split" && !("grammar" in shaped)) {
+      // The path rides LAST: callers clip this message into PR-body
+      // excerpts, and a long target-controlled path must truncate itself,
+      // never the diagnosis or the recovery advice.
+      throw new Error(
+        `${where}: a split entry declares no grammar - this manifest predates the ` +
+          "stamped split grammar, which this sync no longer reads; run a recovery " +
+          `sync (recover=recopy) against this repository to restamp its manifest. The entry is ${path}`,
+      );
     }
-    if (
-      typeof shaped.marker !== "string" ||
-      // splitEntries' own constraint: an EMPTY marker would match the
-      // synthetic empty line at EOF (managedHalf compares line.trim()),
-      // read the previous repo-owned half as empty, and report CLEAR
-      // while every local line vanished. Damaged legacy markers fail
-      // closed to the unverifiable path like every other damaged entry.
-      !ASCII_MARKER_RE.test(shaped.marker) ||
-      // The strict parser's comment-syntax hygiene applies to legacy
-      // markers too: every marker any template ever declared is a comment
-      // line, so a non-comment "marker" is a tampered manifest picking an
-      // ordinary content line as its split point - which could read the
-      // previous repository-owned half as (nearly) empty and let a loss
-      // report clear.
-      !isCommentMarker(shaped.marker) ||
-      (shaped.managed !== "above" && shaped.managed !== "below")
-    ) {
-      throw new Error(`${where}: split entry for ${path} lacks a valid marker/managed pair`);
-    }
-    out.set(path, { kind: "legacy", path, marker: shaped.marker, managed: shaped.managed });
   }
-  return out;
-}
-
-/** HEAD's repository-owned side, per HEAD's own declaration. Exported for
- * preserve_repo_owned.ts's removed-split-file hold, which names the
- * repository-owned content a deletion takes with it. */
-export function headRepoOwnedHalf(content: string, head: HeadSplit): string | null {
-  return head.kind === "grammar"
-    ? repoOwnedHalf(content, head.entry)
-    : markerComplement(content, head.marker, head.managed);
-}
-
-/** Whether HEAD's declaration and the post-sync entry claim the same
- * repository-owned shape, making half-against-half comparison honest. A
- * legacy "above" pair and the tail-marker grammar draw the same boundary;
- * a legacy "below" pair claims region scaffolding (marker lines, text
- * outside the region) that the bounded-region body excludes. */
-function sameShape(head: HeadSplit, entry: SplitEntry): boolean {
-  if (head.kind === "grammar") return head.entry.grammar === entry.grammar;
-  return head.managed === "above" && entry.grammar === "tail-marker";
+  return new Map(splitEntries(text, where).map((entry) => [entry.path, entry]));
 }
 
 export type Finding =
   | { path: string; kind: "shrank"; missing: string[] }
   | { path: string; kind: "unverifiable"; reason: string };
 
-/** One path's verdict, each side split by its own declaration: null means
- * every non-blank line of HEAD's repository-owned half survives in the
- * delivered repository-owned half. When the two sides claim DIFFERENT
- * shapes, the previous copy is re-split under the post-sync grammar when
- * that is honestly possible; otherwise the file is unverifiable (manual
- * review), never compared against a whole-file universe - see below. */
+/** One path's verdict, each side split by its own declared grammar: null
+ * means every non-blank line of HEAD's repository-owned half survives in
+ * the delivered repository-owned half. When the two sides claim DIFFERENT
+ * grammars the file is unverifiable (manual review), never compared
+ * across boundaries or against a whole-file universe - see below. */
 export function compareHalves(
   entry: SplitEntry,
-  head: HeadSplit,
+  head: SplitEntry,
   headCopy: string,
   delivered: string,
 ): Finding | null {
   const path = entry.path;
-  const previousHalf = headRepoOwnedHalf(headCopy, head);
+  const previousHalf = repoOwnedHalf(headCopy, head);
   if (previousHalf === null) {
     return {
       path,
@@ -277,34 +223,26 @@ export function compareHalves(
         "marker lines, so its repository-owned half cannot be located",
     };
   }
-  if (sameShape(head, entry)) {
+  if (head.grammar === entry.grammar) {
     const missing = missingLines(previousHalf, deliveredHalf);
     return missing.length === 0 ? null : { path, kind: "shrank", missing };
   }
-  // Shape mismatch (a legacy managed-below claim vs the bounded-region
-  // body, or a grammar change). The old whole-file fallback was BLIND to
-  // a colliding duplicate: a line living in both the local body and the
-  // managed scaffolding read as "present anywhere in the file" while its
-  // local copy vanished. Narrow honestly instead: when the post-sync
-  // grammar is bounded-region and HEAD's copy carries one
-  // exactly-once-clean region under the SAME markers, that body is the
-  // honest previous half; anything else is unverifiable (manual review).
-  // A genuine marker rename now reads unverifiable rather than silently
-  // passing - acceptable for a warn-only wire.
-  if (entry.grammar === "bounded-region") {
-    const headRegion = cleanLocalRegion(headCopy, entry);
-    if (headRegion !== null) {
-      const missing = missingLines(headRegion.body, deliveredHalf);
-      return missing.length === 0 ? null : { path, kind: "shrank", missing };
-    }
-  }
+  // Grammar change (a template flipped this file's split shape between the
+  // two refs): the two declarations draw different repository-owned
+  // boundaries, so no half-against-half comparison is honest - and a
+  // whole-file survival check is blind to a line duplicated across the
+  // local body and the managed scaffolding. Unverifiable, full stop: a
+  // grammar flip is a rare template event, and one round of manual review
+  // fleet-wide is the honest price on a warn-only wire. (The re-split
+  // narrowing that once served the legacy managed-below transition left
+  // with the legacy fallback: it could falsely clear a flip whose
+  // HEAD-declared half lost lines.)
   return {
     path,
     kind: "unverifiable",
     reason:
-      "the previous commit's manifest claims a different split shape than the " +
-      "post-sync manifest, and the previous copy cannot be honestly re-split " +
-      "under the new grammar",
+      "the previous commit's manifest claims a different split grammar than the " +
+      "post-sync manifest, so the two repository-owned halves are not comparable",
   };
 }
 
@@ -384,20 +322,26 @@ function main(argv: string[]): number {
   const entries = splitEntries(readFileSync(manifestPath, "utf-8"), manifestPath);
 
   // HEAD's manifest, for splitting HEAD's copies with HEAD's own
-  // declarations. A missing or unusable one is a target-state anomaly,
-  // not this run's: every previously-present split file becomes
-  // unverifiable (manual review) instead of failing the job - going red
-  // here would block the very sync that could deliver the fix. A non-blob
-  // at the manifest path (a symlinked manifest, say) is as unusable as a
-  // damaged one: `git show` would answer with the link target or a tree
-  // listing, not manifest text, so only a blob is ever parsed.
+  // declarations. A missing or unusable one - a pre-grammar manifest's
+  // loud refusal included - is a target-state anomaly, not this run's:
+  // every previously-present split file becomes unverifiable (manual
+  // review) instead of failing the job - going red here would block the
+  // very sync that could deliver the fix. The refusal's message rides
+  // into the finding's reason so the PR body names the fix (it can carry
+  // target paths, which is where such detail belongs - see
+  // docs/private-repos.md). A non-blob at the manifest path (a symlinked
+  // manifest, say) is as unusable as a damaged one: `git show` would
+  // answer with the link target or a tree listing, not manifest text, so
+  // only a blob is ever parsed.
   const headManifest = headEntry(root, MANIFEST_NAME);
-  let headEntries: Map<string, HeadSplit> | null = null;
+  let headEntries: Map<string, SplitEntry> | null = null;
+  let headManifestDetail = "";
   if (headManifest.kind === "blob") {
     try {
       headEntries = headSplitEntries(headManifest.bytes.toString("utf-8"), `HEAD:${MANIFEST_NAME}`);
-    } catch {
+    } catch (err) {
       headEntries = null;
+      headManifestDetail = ` (${clip(err instanceof Error ? err.message : String(err))})`;
     }
   }
 
@@ -416,7 +360,8 @@ function main(argv: string[]): number {
         path: entry.path,
         kind: "unverifiable",
         reason:
-          "the previous commit has no usable ownership manifest, so its repository-owned half cannot be located",
+          "the previous commit has no usable ownership manifest" +
+          `${headManifestDetail}, so its repository-owned half cannot be located`,
       });
       continue;
     }

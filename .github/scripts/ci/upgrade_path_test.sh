@@ -1313,6 +1313,72 @@ if grep -q '^gh pr merge' "$TRIP_WORK/gh-calls.txt"; then
 fi
 echo "tail tripwire OK: report produced, PR-body section present, manual review forced"
 
+# --- Pre-grammar manifest refusal (legacy tripwire fallback retired) -------
+# A HEAD manifest whose split entries lack the stamped grammar field was
+# once served by a legacy marker/managed fallback inside the tripwire;
+# that path is retired (the fleet censused all-post-grammar before the
+# removal). A straggler manifest arriving at the new sync must fail
+# LOUDLY: every split file unverifiable, the report naming the fix (a
+# recovery sync), the PR forced manual - and with NO fabricated loss
+# claim, because the delivered tree here keeps every local line. The run
+# itself stays green: a red tripwire would block the very sync that heals
+# the manifest.
+PREG="$RUN_DIR/upgrade-pregrammar"
+PREG_WORK="$RUN_DIR/upgrade-pregrammar-work"
+mkdir -p "$PREG_WORK"
+cd "$GITHUB_WORKSPACE"
+copier copy "$GITHUB_WORKSPACE" "$PREG" \
+  --vcs-ref "$NEW_TAG" --defaults --trust \
+  -d project_name="Pre-grammar" \
+  -d description="Pre-grammar project" \
+  -d 'modules=[agents]' \
+  -d private="false"
+cd "$PREG"
+printf '\n## Local agent docs\n\npregrammar-local tail line\n' >> AGENTS.md
+# HEAD's manifest in the retired pre-grammar shape: split entries carry
+# only the marker/managed pair. The stamped post-grammar copy is kept
+# aside and restored below as the delivered (post-sync) manifest.
+cp .github/repo-platform-manifest.json "$PREG_WORK/manifest-stamped.json"
+python3 - <<'PY'
+import json
+path = ".github/repo-platform-manifest.json"
+with open(path) as f:
+    manifest = json.load(f)
+stripped = 0
+for entry in manifest["files"].values():
+    if entry.get("class") == "split":
+        for key in ("grammar", "managed_end", "local_begin", "local_end"):
+            entry.pop(key, None)
+        stripped += 1
+assert stripped > 0, "fixture has no split entries to strip"
+with open(path, "w") as f:
+    json.dump(manifest, f, indent=4)
+    f.write("\n")
+PY
+git init -q -b main
+git add --all
+git -c user.name=ci -c user.email=ci@localhost commit -q -m "chore: init with pre-grammar manifest"
+# The delivered state: the post-grammar stamped manifest is back and the
+# local tail SURVIVED - nothing was lost, so any loss claim is fabricated.
+cp "$PREG_WORK/manifest-stamped.json" .github/repo-platform-manifest.json
+cd "$GITHUB_WORKSPACE"
+RUNNER_TEMP="$PREG_WORK" bun .github/scripts/sync/tail_tripwire.ts --root "$PREG" \
+  > "$PREG_WORK/tripwire.out"
+test -s "$PREG_WORK/tail-shrank.md" \
+  || fail "a pre-grammar HEAD manifest produced no tripwire report (the retired legacy fallback must not be silently back)"
+grep -qF "predates the stamped split grammar" "$PREG_WORK/tail-shrank.md" \
+  || fail "the tripwire report does not name the pre-grammar refusal"
+grep -qF "recover=recopy" "$PREG_WORK/tail-shrank.md" \
+  || fail "the tripwire report does not name the recovery-sync fix"
+grep -qF '`AGENTS.md`' "$PREG_WORK/tail-shrank.md" \
+  || fail "the tripwire report does not list AGENTS.md as unverifiable"
+if grep -qF "missing from this update's copy" "$PREG_WORK/tail-shrank.md"; then
+  fail "the pre-grammar refusal fabricated a loss claim for a preserved tail"
+fi
+grep -qF "::warning::" "$PREG_WORK/tripwire.out" \
+  || fail "the pre-grammar refusal did not warn (silent misbehavior)"
+echo "pre-grammar manifest OK: loud unverifiable refusal, recovery advice named, no fabricated loss"
+
 # --- Split-file retirement (module deselection) ----------------------------
 # Deselecting a module retires its files from the render, and a retired
 # file HEAD's manifest classes `split` carries a repository-owned half

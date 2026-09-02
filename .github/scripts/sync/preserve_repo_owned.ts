@@ -58,10 +58,10 @@ import {
   must,
   timeoutExitCode,
 } from "../shared/proc.ts";
-import { clip, fenceFor } from "./preserve_local_content.ts";
+import { clip, fenceFor, type SplitEntry } from "./preserve_local_content.ts";
 import { REMOVED_SPLITS_NAME, SETTINGS_LAYERING_NAME } from "./section_files.ts";
 import { transitionSettingsStarter } from "./settings_layering.ts";
-import { type HeadSplit, headRepoOwnedHalf, headSplitEntries } from "./tail_tripwire.ts";
+import { headSplitEntries, repoOwnedHalf } from "./tail_tripwire.ts";
 
 const targetDir = env("TARGET_DIR", "target");
 const label = env("TARGET_DISPLAY") || env("TARGET") || targetDir;
@@ -522,11 +522,13 @@ export function deletedTrackedPaths(
 
 /** The removed-splits hold: HEAD's split declarations, split with HEAD's
  * OWN manifest (a marker rename in the update cannot mis-split the
- * previous copy). headSplits is null when the manifest is missing or
- * damaged past parsing - both target-state anomalies the fully-migrated
- * fleet manifest should never present, both handled fail closed below. */
+ * previous copy). headSplits is null when the manifest is missing,
+ * damaged past parsing, or still pre-grammar (headSplitEntries refuses
+ * that retired shape loudly) - all target-state anomalies the
+ * fully-migrated fleet manifest should never present, all handled fail
+ * closed below with the refusal's message in the PR body. */
 function holdRemovedSplits(): void {
-  let headSplits: Map<string, HeadSplit> | null = null;
+  let headSplits: Map<string, SplitEntry> | null = null;
   // WHY the manifest was rejected, for the PR body only (the message can
   // name manifest paths, so it never reaches a log line). Clipped: the
   // rejection message embeds decoded manifest keys, which are
@@ -545,7 +547,7 @@ function holdRemovedSplits(): void {
   }
 
   const removals: RemovedSplit[] = [];
-  const candidates = new Map<string, HeadSplit | undefined>();
+  const candidates = new Map<string, SplitEntry | undefined>();
   let scanUnavailable = false;
   if (headSplits !== null) {
     for (const [path, split] of headSplits) candidates.set(path, split);
@@ -588,9 +590,7 @@ function holdRemovedSplits(): void {
       path,
       previous: "content",
       half:
-        split === undefined
-          ? undefined
-          : headRepoOwnedHalf(headCopy.bytes.toString("latin1"), split),
+        split === undefined ? undefined : repoOwnedHalf(headCopy.bytes.toString("latin1"), split),
     });
   }
 

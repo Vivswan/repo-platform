@@ -1,10 +1,12 @@
 // tail_tripwire.ts: the post-stamp defense-in-depth check that no split
 // file's repository-owned half lost non-blank lines it held at the
 // target's HEAD, across both split grammars (tail-marker, bounded-region)
-// and legacy pre-grammar HEAD manifests. The script-level tests build a
-// real git repo whose HEAD carries both the previous file copies and the
-// previous manifest, then overwrite the working tree with the "delivered"
-// state - exactly the shape the sync leg hands the tripwire.
+// - plus the loud refusal of pre-grammar HEAD manifests, whose legacy
+// marker/managed fallback was retired after the fleet census. The
+// script-level tests build a real git repo whose HEAD carries both the
+// previous file copies and the previous manifest, then overwrite the
+// working tree with the "delivered" state - exactly the shape the sync
+// leg hands the tripwire.
 
 import { describe, expect, test } from "bun:test";
 import {
@@ -66,7 +68,6 @@ function regionEntry(
 ): SplitEntry {
   return { path, grammar: "bounded-region", ...markers };
 }
-const asHead = (entry: SplitEntry) => ({ kind: "grammar", entry }) as const;
 
 /** Manifest JSON builders (the raw shape the manifest files carry). */
 type RawEntry = Record<string, unknown>;
@@ -88,7 +89,10 @@ const rawRegion = (): RawEntry => ({
   local_begin: LOCAL_BEGIN,
   local_end: LOCAL_END,
 });
-const rawLegacy = (marker: string, managed: "above" | "below"): RawEntry => ({
+/** The retired pre-grammar wire shape: split entries stamped before the
+ * grammar field existed carried only a marker/managed pair. The sync no
+ * longer reads it - these builders exist to prove the refusal. */
+const rawPreGrammar = (marker: string, managed: "above" | "below"): RawEntry => ({
   class: "split",
   marker,
   managed,
@@ -192,38 +196,48 @@ describe("headSplitEntries", () => {
       manifestText({ "AGENTS.md": rawTail(), ".gitignore": rawRegion() }),
       "t",
     );
-    expect(map.get("AGENTS.md")).toEqual({ kind: "grammar", entry: tailEntry() });
-    expect(map.get(".gitignore")?.kind).toBe("grammar");
+    expect(map.get("AGENTS.md")).toEqual(tailEntry());
+    expect(map.get(".gitignore")?.grammar).toBe("bounded-region");
   });
 
-  test("falls back to legacy marker/managed pairs on a pre-grammar manifest", () => {
-    const map = headSplitEntries(
-      manifestText({
-        "AGENTS.md": rawLegacy(SENTINEL, "above"),
-        ".gitignore": rawLegacy(MANAGED_BEGIN, "below"),
-      }),
-      "t",
+  test("a pre-grammar manifest is refused with the recovery advice, never read", () => {
+    // The retired legacy fallback served exactly this shape; after the
+    // fleet census (2026-09: every manifest post-grammar) a straggler is
+    // damage or a missed migration, and either way the loud, actionable
+    // refusal beats a guessed split.
+    expect(() =>
+      headSplitEntries(
+        manifestText({
+          "AGENTS.md": rawPreGrammar(SENTINEL, "above"),
+          ".gitignore": rawPreGrammar(MANAGED_BEGIN, "below"),
+        }),
+        "t",
+      ),
+    ).toThrow(/predates the stamped split grammar.*recover=recopy/);
+  });
+
+  test("a mixed manifest (grammar beside pre-grammar entries) is refused the same way", () => {
+    // A post-grammar stamp writes the field on EVERY split entry, so a
+    // mixed manifest is damage; the recovery restamp is the answer for it
+    // too.
+    const files = {
+      "AGENTS.md": rawTail(),
+      "SECURITY.md": rawPreGrammar(SENTINEL, "above"),
+    };
+    expect(() => headSplitEntries(manifestText(files), "t")).toThrow(
+      /predates the stamped split grammar/,
     );
-    expect(map.get("AGENTS.md")).toEqual({
-      kind: "legacy",
-      path: "AGENTS.md",
-      marker: SENTINEL,
-      managed: "above",
-    });
-    expect(map.get(".gitignore")?.kind).toBe("legacy");
   });
 
   test("an unknown grammar is never guessed at - it throws (fail closed)", () => {
-    // A grammar-bearing manifest is post-grammar: the strict parse
-    // decides, and its rejection is final (never re-read as legacy).
     const files = { "AGENTS.md": { class: "split", grammar: "mystery", marker: SENTINEL } };
     expect(() => headSplitEntries(manifestText(files), "t")).toThrow(/refuses to guess/);
   });
 
-  test("a strict-parse rejection never falls back to the legacy branch", () => {
-    // One damaged grammar entry beside a healthy one: the undiscriminated
-    // fallback used to re-read the WHOLE manifest as legacy on any strict
-    // rejection; the era is decided first now, so the damage surfaces.
+  test("a damaged grammar entry fails the strict parse, with no fallback to soften it", () => {
+    // One damaged grammar entry beside a healthy one: the retired
+    // undiscriminated fallback used to re-read the WHOLE manifest as
+    // legacy on any strict rejection; the strict parse's verdict is final.
     const files = {
       "AGENTS.md": rawTail(),
       "SECURITY.md": { class: "split", grammar: "tail-marker", marker: SENTINEL, managed: "below" },
@@ -231,21 +245,13 @@ describe("headSplitEntries", () => {
     expect(() => headSplitEntries(manifestText(files), "t")).toThrow(/managed side/);
   });
 
-  test("a mixed manifest (grammar beside pre-grammar entries) is post-grammar and fails strict", () => {
-    const files = {
-      "AGENTS.md": rawTail(),
-      "SECURITY.md": rawLegacy(SENTINEL, "above"),
-    };
-    expect(() => headSplitEntries(manifestText(files), "t")).toThrow(/no grammar/);
-  });
-
-  test("an unclean legacy path throws instead of silently skipping the real file", () => {
-    // A tampered legacy key ("../AGENTS.md") could never match the
-    // post-sync manifest's clean key, so accepting it would skip the real
-    // file's check without a finding.
-    expect(() =>
-      headSplitEntries(manifestText({ "../AGENTS.md": rawLegacy(SENTINEL, "above") }), "t"),
-    ).toThrow(/clean relative path/);
+  test("an unclean split path throws instead of silently skipping the real file", () => {
+    // A tampered key ("../AGENTS.md") could never match the post-sync
+    // manifest's clean key, so accepting it would skip the real file's
+    // check without a finding.
+    expect(() => headSplitEntries(manifestText({ "../AGENTS.md": rawTail() }), "t")).toThrow(
+      /clean relative path/,
+    );
   });
 
   test("a duplicated path key throws instead of last-wins reclassifying the file", () => {
@@ -270,7 +276,7 @@ describe("headSplitEntries", () => {
     // Core tokenizer cases live in tests/shared/json.test.ts (the shared
     // helper's twin); this pins the consumer accepting a normal manifest.
     const map = headSplitEntries(manifestText({ "AGENTS.md": rawTail() }), "t");
-    expect(map.get("AGENTS.md")?.kind).toBe("grammar");
+    expect(map.get("AGENTS.md")?.grammar).toBe("tail-marker");
   });
 
   test("an unknown or missing ownership class throws instead of reading as non-split", () => {
@@ -291,28 +297,18 @@ describe("headSplitEntries", () => {
     );
   });
 
-  test("an empty or non-printable legacy marker throws (fails closed to unverifiable)", () => {
+  test("an empty or non-printable marker on a grammar entry fails the strict parse", () => {
     // managedHalf matches line.trim() === marker, so an EMPTY marker
     // selects the synthetic empty line at EOF: the previous repo-owned
     // half reads as empty and a delivered file could lose every local
-    // line while the wire reports clear. Same constraint splitEntries
-    // applies to grammar entries.
+    // line while the wire reports clear. splitEntries owns the constraint;
+    // this pins that HEAD manifests ride through it with no softer path.
+    expect(() => headSplitEntries(manifestText({ "AGENTS.md": rawTail("") }), "t")).toThrow(
+      /printable-ASCII marker/,
+    );
     expect(() =>
-      headSplitEntries(manifestText({ "AGENTS.md": rawLegacy("", "above") }), "t"),
-    ).toThrow(/marker\/managed pair/);
-    expect(() =>
-      headSplitEntries(manifestText({ "AGENTS.md": rawLegacy(`# local §`, "above") }), "t"),
-    ).toThrow(/marker\/managed pair/);
-  });
-
-  test("a non-comment legacy marker throws (a content line cannot be a split point)", () => {
-    // Every marker any template ever declared is a comment line; a
-    // tampered manifest naming an ordinary content line could read the
-    // previous repository-owned half as (nearly) empty and let a loss
-    // report clear.
-    expect(() =>
-      headSplitEntries(manifestText({ "AGENTS.md": rawLegacy("just some text", "above") }), "t"),
-    ).toThrow(/marker\/managed pair/);
+      headSplitEntries(manifestText({ "AGENTS.md": rawTail(`# local §`) }), "t"),
+    ).toThrow(/printable-ASCII marker/);
   });
 
   test("array-shaped files and entries fail loud, never open", () => {
@@ -364,12 +360,12 @@ describe("missingLines", () => {
 
 describe("compareHalves", () => {
   test("null when the delivered half keeps every line", () => {
-    expect(compareHalves(tailEntry(), asHead(tailEntry()), agentsHead, agentsDelivered)).toBeNull();
+    expect(compareHalves(tailEntry(), tailEntry(), agentsHead, agentsDelivered)).toBeNull();
   });
 
   test("shrank when a line vanished", () => {
     const delivered = `# AGENTS.md\n\nfresh managed guidance\n\n${SENTINEL}\n\n## Project docs\n`;
-    expect(compareHalves(tailEntry(), asHead(tailEntry()), agentsHead, delivered)).toEqual({
+    expect(compareHalves(tailEntry(), tailEntry(), agentsHead, delivered)).toEqual({
       path: "AGENTS.md",
       kind: "shrank",
       missing: ["repo-local instructions"],
@@ -381,21 +377,19 @@ describe("compareHalves", () => {
     const head = `old managed\n${oldMarker}\nrepo tail\n`;
     const delivered = `new managed\n${SENTINEL}\nrepo tail\n`;
     expect(
-      compareHalves(tailEntry(), asHead(tailEntry("AGENTS.md", oldMarker)), head, delivered),
+      compareHalves(tailEntry(), tailEntry("AGENTS.md", oldMarker), head, delivered),
     ).toBeNull();
     // Splitting HEAD with the NEW marker instead would be the mis-split
     // this design rules out: the old copy has no such line.
-    expect(compareHalves(tailEntry(), asHead(tailEntry()), head, delivered)?.kind).toBe(
-      "unverifiable",
-    );
+    expect(compareHalves(tailEntry(), tailEntry(), head, delivered)?.kind).toBe("unverifiable");
   });
 
   test("bounded-region: bodies compare, region scaffolding does not", () => {
     const head = regionFile(["local-one", "local-two"], ["*.old"]);
     const kept = regionFile(["local-two", "local-one"], ["*.new"]);
-    expect(compareHalves(regionEntry(), asHead(regionEntry()), head, kept)).toBeNull();
+    expect(compareHalves(regionEntry(), regionEntry(), head, kept)).toBeNull();
     const shrank = regionFile(["local-one"], ["*.new"]);
-    expect(compareHalves(regionEntry(), asHead(regionEntry()), head, shrank)).toEqual({
+    expect(compareHalves(regionEntry(), regionEntry(), head, shrank)).toEqual({
       path: ".gitignore",
       kind: "shrank",
       missing: ["local-two"],
@@ -412,111 +406,42 @@ describe("compareHalves", () => {
     const head = `${oldMarkers.local_begin}\nbody-line\n${oldMarkers.local_end}\n${oldMarkers.managed_begin}\n${oldMarkers.managed_end}\n`;
     const delivered = regionFile(["body-line"], ["*.new"]);
     expect(
-      compareHalves(regionEntry(), asHead(regionEntry(".gitignore", oldMarkers)), head, delivered),
+      compareHalves(regionEntry(), regionEntry(".gitignore", oldMarkers), head, delivered),
     ).toBeNull();
     // Splitting HEAD with the NEW region markers would find no region.
-    expect(compareHalves(regionEntry(), asHead(regionEntry()), head, delivered)?.kind).toBe(
-      "unverifiable",
-    );
+    expect(compareHalves(regionEntry(), regionEntry(), head, delivered)?.kind).toBe("unverifiable");
   });
 
-  test("legacy 'above' pair draws the tail-marker boundary: half against half", () => {
-    const head: Parameters<typeof compareHalves>[1] = {
-      kind: "legacy",
-      path: "AGENTS.md",
-      marker: SENTINEL,
-      managed: "above",
-    };
-    expect(compareHalves(tailEntry(), head, agentsHead, agentsDelivered)).toBeNull();
-    const shrank = `# AGENTS.md\n\nfresh managed guidance\n\n${SENTINEL}\n`;
-    expect(compareHalves(tailEntry(), head, agentsHead, shrank)?.kind).toBe("shrank");
-  });
-
-  test("legacy 'below' vs bounded-region: scaffolding never false-fires, lost bodies still do", () => {
-    const head: Parameters<typeof compareHalves>[1] = {
-      kind: "legacy",
-      path: ".gitignore",
-      marker: MANAGED_BEGIN,
-      managed: "below",
-    };
-    // The legacy half (everything above MANAGED_BEGIN) includes the
-    // LOCAL_BEGIN/END marker lines; they survive in the delivered FILE
-    // even though the bounded-region body excludes them.
-    const headCopy = regionFile(["keep-me"], ["*.old"]);
-    const kept = regionFile(["keep-me"], ["*.new"]);
-    expect(compareHalves(regionEntry(), head, headCopy, kept)).toBeNull();
-    const dropped = regionFile([], ["*.new"]);
-    expect(compareHalves(regionEntry(), head, headCopy, dropped)).toEqual({
-      path: ".gitignore",
-      kind: "shrank",
-      missing: ["keep-me"],
-    });
+  test("a grammar change is unverifiable, even when the old copy looks region-shaped", () => {
+    // HEAD declared tail-marker at the managed-section marker over a
+    // region-shaped copy: under HEAD's OWN declaration the repo-owned
+    // half is everything below that marker (*.old included), and the
+    // retired re-split narrowing would have compared the region body
+    // instead - clearing a flip whose declared half lost lines. A grammar
+    // flip forces manual review, always.
+    const head = regionFile(["keep-line"], ["*.old"]);
+    const kept = regionFile(["keep-line"], ["*.new"]);
+    const tailHead = tailEntry(".gitignore", MANAGED_BEGIN);
+    const finding = compareHalves(regionEntry(".gitignore"), tailHead, head, kept);
+    expect(finding?.kind).toBe("unverifiable");
+    expect(finding?.kind === "unverifiable" && finding.reason).toContain("different split grammar");
   });
 
   test("a delivered copy that does not split by the post-sync manifest is unverifiable", () => {
-    const finding = compareHalves(
-      tailEntry(),
-      asHead(tailEntry()),
-      agentsHead,
-      "render lost its marker\n",
-    );
+    const finding = compareHalves(tailEntry(), tailEntry(), agentsHead, "render lost its marker\n");
     expect(finding?.kind).toBe("unverifiable");
     expect(finding?.kind === "unverifiable" && finding.reason).toContain("delivered copy");
   });
 
-  test("a grammar change re-splits HEAD under the new grammar when honestly possible", () => {
-    // HEAD declared legacy managed-below over a region-shaped file: its
-    // copy carries one exactly-once-clean region under the post-sync
-    // markers, so THAT body is the honest previous half.
-    const head = regionFile(["keep-line"], ["*.old"]);
-    const kept = regionFile(["keep-line"], ["*.new"]);
-    const legacyHead = {
-      kind: "legacy",
-      path: ".gitignore",
-      marker: MANAGED_BEGIN,
-      managed: "below",
-    } as const;
-    expect(compareHalves(regionEntry(".gitignore"), legacyHead, head, kept)).toBeNull();
-    const dropped = regionFile([], ["*.new"]);
-    expect(compareHalves(regionEntry(".gitignore"), legacyHead, head, dropped)).toEqual({
-      path: ".gitignore",
-      kind: "shrank",
-      missing: ["keep-line"],
-    });
-  });
-
-  test("a colliding duplicate across the local body and managed scaffolding still fires", () => {
-    // The whole-file fallback this replaced was BLIND here: node_modules/
-    // lives in the local body AND the managed half, so its vanished local
-    // copy still read as "present anywhere in the file".
-    const head = regionFile(["node_modules/", "keep-me"], ["node_modules/", "*.old"]);
-    const delivered = regionFile(["keep-me"], ["node_modules/", "*.new"]);
-    const legacyHead = {
-      kind: "legacy",
-      path: ".gitignore",
-      marker: MANAGED_BEGIN,
-      managed: "below",
-    } as const;
-    const finding = compareHalves(regionEntry(".gitignore"), legacyHead, head, delivered);
-    expect(finding).toEqual({ path: ".gitignore", kind: "shrank", missing: ["node_modules/"] });
-  });
-
-  test("a grammar change that cannot be honestly re-split is unverifiable, never silent", () => {
+  test("a grammar change whose old copy has no region shape is unverifiable too", () => {
     // HEAD declared tail-marker and carries NO region under the post-sync
-    // markers: there is no honest previous half - manual review, not a
-    // whole-file survival pass.
+    // markers: same verdict as every other grammar flip - manual review,
+    // not a whole-file survival pass.
     const head = `managed\n${SENTINEL}\nkeep-line\n`;
     const kept = regionFile(["keep-line"], ["*.new"]);
-    const finding = compareHalves(
-      regionEntry(".gitignore"),
-      asHead(tailEntry(".gitignore")),
-      head,
-      kept,
-    );
+    const finding = compareHalves(regionEntry(".gitignore"), tailEntry(".gitignore"), head, kept);
     expect(finding?.kind).toBe("unverifiable");
-    expect(finding?.kind === "unverifiable" && finding.reason).toContain(
-      "cannot be honestly re-split",
-    );
+    expect(finding?.kind === "unverifiable" && finding.reason).toContain("different split grammar");
   });
 });
 
@@ -683,17 +608,19 @@ describe("tail_tripwire script", () => {
     expect(result.report).toContain("local-two");
   });
 
-  test("a legacy pre-grammar HEAD manifest verifies without false fires", () => {
-    // The first post-grammar sync of every fleet repo hits exactly this
-    // shape: HEAD's manifest declares only marker/managed pairs.
-    const legacyManifest = manifestText({
-      "AGENTS.md": rawLegacy(SENTINEL, "above"),
-      ".gitignore": rawLegacy(MANAGED_BEGIN, "below"),
+  test("a pre-grammar HEAD manifest fails loudly: unverifiable findings with the recovery advice", () => {
+    // The retired legacy fallback used to serve this shape silently; a
+    // straggler manifest now trips the wire on every split file - warn,
+    // manual review, and the report names the fix - with NO loss claim
+    // fabricated (the delivered copies kept every local line).
+    const preGrammarManifest = manifestText({
+      "AGENTS.md": rawPreGrammar(SENTINEL, "above"),
+      ".gitignore": rawPreGrammar(MANAGED_BEGIN, "below"),
     });
     const newManifest = manifestText({ "AGENTS.md": rawTail(), ".gitignore": rawRegion() });
     const gitignoreHead = regionFile(["keep-me"], ["*.old"]);
     const root = makeTarget(
-      { "AGENTS.md": agentsHead, ".gitignore": gitignoreHead, [MANIFEST_NAME]: legacyManifest },
+      { "AGENTS.md": agentsHead, ".gitignore": gitignoreHead, [MANIFEST_NAME]: preGrammarManifest },
       {
         "AGENTS.md": agentsDelivered,
         ".gitignore": regionFile(["keep-me"], ["*.new"]),
@@ -701,15 +628,15 @@ describe("tail_tripwire script", () => {
       },
     );
     const result = runScript(root);
+    // Warn, not red: going red would block the very sync whose restamp
+    // (or whose recovery follow-up) heals the manifest.
     expect(result.exitCode).toBe(0);
-    expect(result.report).toBe("");
-    // And a genuinely dropped local body line still fires through the
-    // legacy path.
-    const shrankRoot = makeTarget(
-      { ".gitignore": gitignoreHead, [MANIFEST_NAME]: legacyManifest },
-      { ".gitignore": regionFile([], ["*.new"]), [MANIFEST_NAME]: newManifest },
-    );
-    expect(runScript(shrankRoot).report).toContain("keep-me");
+    expect(result.stdout).toContain("::warning::");
+    expect(result.report).toContain("`AGENTS.md`");
+    expect(result.report).toContain("`.gitignore`");
+    expect(result.report).toContain("predates the stamped split grammar");
+    expect(result.report).toContain("recover=recopy");
+    expect(result.report).not.toContain("missing from this update's copy");
   });
 
   test("non-UTF-8 tail bytes compare byte-for-byte and never false-fire", () => {

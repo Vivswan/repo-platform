@@ -441,17 +441,15 @@ export type SplitEntry = { [K in GrammarId]: { path: string } & SplitShapes[K] }
  * forbids it, and this boundary re-checks what it consumes. NON-EMPTY is
  * load-bearing too: managedHalf matches line.trim() === marker, so an
  * empty marker selects the synthetic empty line at EOF and reads a whole
- * file as one half. Exported for tail_tripwire's legacy fallback - the
- * two boundaries must reject the same damage. */
-export const ASCII_MARKER_RE = /^[\x20-\x7e]+$/;
+ * file as one half. */
+const ASCII_MARKER_RE = /^[\x20-\x7e]+$/;
 
 /** Manifest keys become filesystem paths under the target root, so a key
  * that could escape it (absolute, or carrying .. segments) is refused at
  * this boundary - the declaration schema upstream never emits one, but the
  * manifest text rides through a checkout this script must not trust.
- * Exported for tail_tripwire's legacy fallback: a tampered legacy key
- * could never match the post-sync lookup, and accepting it would turn the
- * mismatch into a silent skip. */
+ * Exported for starter_pin_rollout.ts, which walks manifest keys at the
+ * same trust boundary and must refuse the same escapes. */
 export function isCleanRelativePath(path: string): boolean {
   return (
     path !== "" &&
