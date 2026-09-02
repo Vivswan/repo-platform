@@ -11,6 +11,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   GATE_REWORK_NAME,
+  MIRRORS_NOTE_NAME,
+  MIRRORS_REVIEW_NAME,
   REFERENCED_LABELS_NAME,
   REMOVED_SPLITS_NAME,
   SETTINGS_LAYERING_NAME,
@@ -184,6 +186,25 @@ describe("open_pr sections and auto-merge", () => {
     expect(r.exitCode).toBe(0);
     expect(r.body).not.toContain("REFERENCED LABELS");
     expect(r.merged).toBe(true);
+  });
+
+  test("the mirror listing is an informational body section (auto-merge stays armed)", () => {
+    const note =
+      "Mirror copies materialized from this repository's own declaration:\n\n" +
+      "- `template/LICENSE.md` <- `LICENSE.md`\n";
+    const r = run({ temp: { [MIRRORS_NOTE_NAME]: note } });
+    expect(r.exitCode).toBe(0);
+    expect(r.body).toContain("`template/LICENSE.md` <- `LICENSE.md`");
+    expect(r.merged).toBe(true);
+  });
+
+  test("a mirror refusal report becomes a body section and forces review", () => {
+    const report = "> [!WARNING]\n> REFUSED mirror declaration(s)\n\n- `../x`: escapes\n";
+    const r = run({ temp: { [MIRRORS_REVIEW_NAME]: report } });
+    expect(r.exitCode).toBe(0);
+    expect(r.body).toContain("REFUSED mirror declaration(s)");
+    expect(r.merged).toBe(false);
+    expect(r.output).toContain("auto-merge left off");
   });
 
   test("the carry summary is a section WITHOUT forcing review", () => {

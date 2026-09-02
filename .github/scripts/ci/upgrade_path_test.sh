@@ -901,6 +901,12 @@ test -n "$agents_tpl" || fail "no AGENTS.md template in the assembled build tree
 insert_above_sentinel "$agents_tpl" "Split-rebuild fixture managed line (agents)."
 insert_above_sentinel "$NEXT_SPLIT/template/SECURITY.md.jinja" \
   "Split-rebuild fixture managed line (security)."
+# The mirror leg's template change: the fleet LICENSE's managed region
+# moves, so the materialized mirrors below must carry the NEW bytes (the
+# skills#82 class: the sync rewrote only the rendered source and every
+# LICENSE template change re-broke the byte-identical copies).
+insert_above_sentinel "$NEXT_SPLIT/template/LICENSE.md.jinja" \
+  "Split-rebuild fixture managed line (license)."
 awk '{ print } $0 == "# BEGIN REPO-PLATFORM MANAGED" && !done { print "split-rebuild-fixture.tmp"; done = 1 }' \
   "$NEXT_SPLIT/template/.gitignore.jinja" > "$NEXT_SPLIT/template/.gitignore.jinja.tmp"
 mv "$NEXT_SPLIT/template/.gitignore.jinja.tmp" "$NEXT_SPLIT/template/.gitignore.jinja"
@@ -935,6 +941,24 @@ awk '/^# BEGIN REPO-PLATFORM MANAGED$/ { exit } { print }' .gitignore > "$SPLIT_
 awk 'NR == 2 { print "split-local hand edit inside the managed region" } { print }' SECURITY.md > SECURITY.md.tmp
 mv SECURITY.md.tmp SECURITY.md
 grep -qF "split-local hand edit" SECURITY.md || fail "could not plant the managed-region edit"
+# The mirror fixture, shaped like the skills repo: a repo-owned tail below
+# LICENSE.md's END marker (the mirrors must copy the WHOLE delivered file,
+# repo-owned side included), a stale copy in template/ and in one skill
+# folder, a second skill folder with NO copy yet (the glob must create it
+# with no declaration edit), and the repo-owned `mirrors` declaration in
+# .repo-platform.yml - which must itself ride through the copier update.
+printf '\nsplit-local license tail\n' >> LICENSE.md
+mkdir -p skills/alpha skills/beta template
+printf 'stale mirror (must be overwritten)\n' > template/LICENSE.md
+printf 'stale mirror (must be overwritten)\n' > skills/alpha/LICENSE.md
+printf 'name: beta\n' > skills/beta/SKILL.md
+cat >> .repo-platform.yml <<'EOF'
+mirrors:
+  - source: LICENSE.md
+    targets:
+      - template/LICENSE.md
+      - skills/*/LICENSE.md
+EOF
 git add --all
 git -c user.name=ci -c user.email=ci@localhost commit -q -m "chore: local modifications"
 
@@ -968,6 +992,9 @@ RUNNER_TEMP="$SPLIT_WORK" SRC_PATH="$src_path_split" \
   OLD_SHA="$(git rev-parse "$NEW_TAG^{commit}")" \
   bun .github/scripts/sync/retired_cleanup.ts
 RECOVER="" RUNNER_TEMP="$SPLIT_WORK" bun .github/scripts/sync/preserve_repo_owned.ts
+# The workflow's mirror step: materialize the repo's own declared mirror
+# copies from the freshly delivered tree, before the final stamp.
+RUNNER_TEMP="$SPLIT_WORK" bun .github/scripts/sync/materialize_mirrors.ts --root "$SPLIT"
 TARGET_DIR="$SPLIT" bun actions/shared/stamp_manifest.ts
 bun "$GITHUB_WORKSPACE/actions/validate-template/validate_generated_files.ts" "$SPLIT"
 
@@ -990,9 +1017,10 @@ grep -q '^SECURITY\.md: managed-region edits reset' "$SPLIT_WORK/carry-review.tx
   || fail "the managed-region reset was not flagged in the carry-review file"
 grep -qF 'RESET to the fresh render' "$SPLIT_WORK/local-carryover.md" \
   || fail "the carry summary does not state the managed-region reset loudly"
-# The clean carries stay auto-merge-eligible: neither AGENTS.md nor
-# .gitignore may appear in the review flag.
-if grep -qE '^(AGENTS\.md|\.gitignore):' "$SPLIT_WORK/carry-review.txt"; then
+# The clean carries stay auto-merge-eligible: none of AGENTS.md,
+# .gitignore, or LICENSE.md (its tail is a clean side-restore) may appear
+# in the review flag.
+if grep -qE '^(AGENTS\.md|\.gitignore|LICENSE\.md):' "$SPLIT_WORK/carry-review.txt"; then
   fail "a clean split-file carry was flagged for review"
 fi
 # .gitignore: the whole above-side byte-preserved, the managed region
@@ -1023,6 +1051,80 @@ if grep -rIqF "$split_marker" . --exclude-dir=.git; then
   fail "the split-file rebuild left unresolved copier conflict markers"
 fi
 echo "split-file rebuild OK: sides byte-preserved, managed regions byte-equal to render-new, managed-region edit reset and flagged"
+
+# Mirror materialization (the skills#82 class): every declared mirror is
+# byte-identical to the DELIVERED LICENSE.md - the fresh managed-region
+# change AND the repo-owned tail included - and the glob created the copy
+# the new skill folder never had, with no declaration edit. The PR-body
+# note lists the writes; nothing is refused.
+for m in template/LICENSE.md skills/alpha/LICENSE.md skills/beta/LICENSE.md; do
+  cmp -s LICENSE.md "$m" || fail "mirror $m is not byte-identical to the delivered LICENSE.md"
+done
+grep -qF "Split-rebuild fixture managed line (license)." skills/alpha/LICENSE.md \
+  || fail "the mirror does not carry the template's fresh managed-region change"
+grep -qF "split-local license tail" skills/alpha/LICENSE.md \
+  || fail "the mirror does not carry the repository-owned tail"
+grep -qF '`template/LICENSE.md` <- `LICENSE.md`' "$SPLIT_WORK/mirrors.md" \
+  || fail "the PR-body mirror note does not list the materialized write"
+if [ -s "$SPLIT_WORK/mirrors-review.md" ]; then
+  fail "clean mirror declarations were refused (mirrors-review.md is non-empty)"
+fi
+grep -qF 'mirrors:' .repo-platform.yml \
+  || fail "the repo-owned mirrors declaration did not survive the copier update"
+
+# The recopy shape: a recovery re-render rewrites .repo-platform.yml from
+# the template, dropping the repo-owned mirrors key from the working tree.
+# The declaration is read from HEAD (where the repo committed it), so the
+# mirrors must still materialize AND the key must be restored into the
+# delivered file, with the restoration named in the PR-body note.
+RECOPY_WORK="$RUN_DIR/upgrade-split-recopyshape"
+mkdir -p "$RECOPY_WORK"
+awk '/^mirrors:/ { exit } { print }' .repo-platform.yml > .repo-platform.yml.tmp
+mv .repo-platform.yml.tmp .repo-platform.yml
+if grep -q '^mirrors:' .repo-platform.yml; then
+  fail "could not strip the mirrors key for the recopy-shape re-run"
+fi
+rm -f template/LICENSE.md
+RUNNER_TEMP="$RECOPY_WORK" \
+  bun "$GITHUB_WORKSPACE/.github/scripts/sync/materialize_mirrors.ts" --root "$SPLIT"
+grep -q '^mirrors:' .repo-platform.yml \
+  || fail "the dropped mirrors key was not restored from HEAD's declaration"
+cmp -s LICENSE.md template/LICENSE.md \
+  || fail "mirrors did not materialize from HEAD's declaration after the key was dropped"
+grep -qF "restored from the previous commit's declaration" "$RECOPY_WORK/mirrors.md" \
+  || fail "the PR-body note does not name the restored mirrors key"
+if [ -s "$RECOPY_WORK/mirrors-review.md" ]; then
+  fail "the recopy-shape re-run refused something"
+fi
+
+# Hostile mirror declarations, committed the way a hostile repo would
+# carry them (the declaration is read from HEAD): a traversal target and a
+# template-owned target must be REFUSED with no write (open_pr.ts holds
+# the PR for review on a non-empty mirrors-review.md).
+HOSTILE_WORK="$RUN_DIR/upgrade-split-hostile"
+mkdir -p "$HOSTILE_WORK"
+{
+  grep '^modules:' .repo-platform.yml
+  cat <<'EOF'
+mirrors:
+  - source: LICENSE.md
+    targets:
+      - ../mirror-escape.md
+      - SECURITY.md
+EOF
+} > .repo-platform.yml.tmp
+mv .repo-platform.yml.tmp .repo-platform.yml
+git add .repo-platform.yml
+git -c user.name=ci -c user.email=ci@localhost commit -q -m "chore: hostile mirror fixture"
+RUNNER_TEMP="$HOSTILE_WORK" \
+  bun "$GITHUB_WORKSPACE/.github/scripts/sync/materialize_mirrors.ts" --root "$SPLIT"
+test ! -e "$RUN_DIR/mirror-escape.md" || fail "a traversal mirror target escaped the repository"
+cmp -s "$SPLIT_WORK/render-new/SECURITY.md" SECURITY.md \
+  || fail "a template-owned mirror target was overwritten"
+[ -s "$HOSTILE_WORK/mirrors-review.md" ] || fail "hostile mirror declarations were not refused"
+grep -qF 'SECURITY.md' "$HOSTILE_WORK/mirrors-review.md" \
+  || fail "the refusal report does not name the template-owned target"
+echo "mirror materialization OK: byte-identical copies, glob-created skill copy, dropped key restored, hostile declarations refused"
 
 # --- Unselected-path preservation (conditional landing via _exclude) ------
 # The composed tree carries plain filenames; conditional landing happens

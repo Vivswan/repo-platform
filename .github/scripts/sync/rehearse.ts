@@ -628,6 +628,15 @@ export function rehearseRepo(slug: string, options: RehearsalOptions): Rehearsal
       cwd: REPO_ROOT,
       env: legEnv,
     });
+    // The workflow's mirror materialization (materialize_mirrors.ts): the
+    // target's own .repo-platform.yml `mirrors` declarations written as
+    // byte copies of the freshly delivered sources, before the final
+    // stamp. Its two reports (the write listing and the refusals) land
+    // under RUNNER_TEMP by the script's own defaults, printed below.
+    run(["bun", join(import.meta.dir, "materialize_mirrors.ts"), "--root", targetDir], {
+      cwd: REPO_ROOT,
+      env: legEnv,
+    });
     // Conflict resolution and the preserve steps can rewrite files after
     // copier's post-render stamp hook ran, so the manifest is stamped once
     // more when the tree is final - the same final stamping step
@@ -725,6 +734,11 @@ export function rehearseRepo(slug: string, options: RehearsalOptions): Rehearsal
         [
           "referenced-labels.md",
           "Labels referenced by issue forms/workflows but missing from the merged settings roster (the PR would stay manual-review)",
+        ],
+        ["mirrors.md", "Mirror copies materialized from the repo's own `mirrors` declaration"],
+        [
+          "mirrors-review.md",
+          "Refused mirror declarations - nothing written for them (the PR would stay manual-review)",
         ],
         ["local-carryover.md", "Split-file carry summary (rebuilt structurally)"],
         ["carry-review.txt", "Split-file carries needing review (the PR would stay manual-review)"],

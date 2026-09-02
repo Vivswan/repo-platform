@@ -309,6 +309,19 @@ jobs:
             bun .github/scripts/sync/referenced_labels.ts \
             --root target --hide-details "$HIDE_DETAILS"
 
+      # The repo's own mirror declarations (.repo-platform.yml `mirrors`):
+      # byte copies of rendered files at repo-declared paths (the skills
+      # repo's per-skill LICENSE.md copies), materialized after every step
+      # that rewrites files so each mirror matches the bytes this update
+      # delivers. Refused declarations write nothing and hold the PR for
+      # review; every write is listed in the PR body. run_hidden: paths
+      # are target data.
+      - name: Materialize declared mirror files
+        run: |
+          bun .github/scripts/sync/run_hidden.ts "mirror materialization" -- \
+            bun .github/scripts/sync/materialize_mirrors.ts \
+            --root target --hide-details "$HIDE_DETAILS"
+
       # Later steps rewrite files after copier's stamp hook ran, so the
       # manifest is stamped once more when the tree is final. The hashes
       # record the tree THIS SYNC delivers, so parity measures drift since

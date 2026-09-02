@@ -35,3 +35,16 @@ export const GATE_REWORK_NAME = "gate-rework.md";
  * declare - the apply deletes undeclared labels, so each reference is
  * broken or about to be. Forces the manual-review path. */
 export const REFERENCED_LABELS_NAME = "referenced-labels.md";
+
+/** materialize_mirrors.ts's listing: every mirror copy this update
+ * materialized from the repo's own .repo-platform.yml `mirrors`
+ * declaration (plus patterns that matched nothing). Informational - the
+ * declaration is repo-owned consent and the listing explains the diff -
+ * so it never forces review. */
+export const MIRRORS_NOTE_NAME = "mirrors.md";
+
+/** materialize_mirrors.ts's refusals: declared mirrors the sync would not
+ * write (unrendered source, escaping or template-owned target, two
+ * writers). The refused copies are stale in the delivered tree, so this
+ * forces the manual-review path. */
+export const MIRRORS_REVIEW_NAME = "mirrors-review.md";

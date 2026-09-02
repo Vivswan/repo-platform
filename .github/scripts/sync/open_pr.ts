@@ -27,6 +27,8 @@ import { capture, mustCapture, redactText } from "../shared/proc.ts";
 import { clip, escapeControlBytes } from "./preserve_local_content.ts";
 import {
   GATE_REWORK_NAME,
+  MIRRORS_NOTE_NAME,
+  MIRRORS_REVIEW_NAME,
   REFERENCED_LABELS_NAME,
   REMOVED_SPLITS_NAME,
   SETTINGS_LAYERING_NAME,
@@ -246,6 +248,15 @@ ${lines(path)
     forcesReview: true,
   },
   { path: requireEnv("MANIFEST_LICENSE_FILE"), render: slurp, forcesReview: false },
+  // materialize_mirrors.ts's listing: every mirror copy materialized from
+  // the repo's own .repo-platform.yml `mirrors` declaration. Informational
+  // (the declaration is repo-owned consent; the listing explains the diff)
+  // - forcing review here would defeat the auto-heal the step exists for.
+  { path: join(runnerTemp, MIRRORS_NOTE_NAME), render: slurp, forcesReview: false },
+  // materialize_mirrors.ts's refusals: declared mirrors the sync would not
+  // write, so their copies are stale in this update - a human fixes the
+  // declaration (or the files) before merging.
+  { path: join(runnerTemp, MIRRORS_REVIEW_NAME), render: slurp, forcesReview: true },
   { path: join(runnerTemp, SETTINGS_LAYERING_NAME), render: slurp, forcesReview: true },
   // referenced_labels.ts's report: label(s) the target's issue forms or
   // workflows reference that the merged settings label roster does not
@@ -395,7 +406,8 @@ body = capBody(body);
 // a deleted split-class file (its repository-owned half leaves with it),
 // out-of-band settings drift, dropped settings-layering overrides, a
 // referenced-but-undeclared label (the apply deletes undeclared labels,
-// so the reference breaks) - stays
+// so the reference breaks), a refused mirror declaration (its copies are
+// stale in this update) - stays
 // manual; a clean update (clean side-restore carries included) arms
 // squash auto-merge below. The flag-file
 // reasons ride the section list above (forcesReview), so a new section
@@ -485,6 +497,6 @@ if (!needsReview) {
   }
 } else {
   console.log(
-    "auto-merge left off: this PR needs review (conflicts, split-file carries needing review, a tripped tail tripwire, withheld files, failed validation, out-of-band settings drift, dropped settings-layering overrides, a referenced-but-undeclared label, a recovery re-render, a forced-manual dispatch, or a deleted split-class file whose repository-owned half leaves with it).",
+    "auto-merge left off: this PR needs review (conflicts, split-file carries needing review, a tripped tail tripwire, withheld files, failed validation, out-of-band settings drift, dropped settings-layering overrides, a referenced-but-undeclared label, a refused mirror declaration, a recovery re-render, a forced-manual dispatch, or a deleted split-class file whose repository-owned half leaves with it).",
   );
 }

@@ -57,6 +57,18 @@ repo-platform selects `skills` in `.repo-platform-answers.yml` (its fleet-operat
 2. The existing `.claude-plugin/` manifests survive untouched (`_skip_if_exists`), catalog included.
 3. The managed baseline coexists with the repo's richer checks: repo-specific assertions stay in its own `checks.yml` machinery, exactly like any other repo-owned CI.
 
+## Per-skill license copies
+
+A standalone skill install copies only the skill folder, so a repo whose skills must ship a license carries a byte-identical `LICENSE.md` in every published folder. Do not maintain those copies by hand - declare them as [mirrors](new-repo.md#mirror-copies-of-rendered-files) in `.repo-platform.yml`, and every sync refreshes each copy from the freshly rendered root license (a new skill folder is picked up by the glob with no declaration edit):
+
+```yaml
+mirrors:
+  - source: LICENSE.md
+    targets:
+      - template/LICENSE.md
+      - skills/*/LICENSE.md
+```
+
 ## Consuming
 
 `npx skills add <owner>/<repo>` reads `plugin.json`, offers the published skills grouped under the plugin's title, and installs the chosen skill folders. (npx resolves `node_modules/.bin` first, so a local dependency named `skills` would shadow the CLI.) The marketplace manifest makes the same catalog addressable as a Claude Code plugin marketplace (`/plugin marketplace add <owner>/<repo>`).

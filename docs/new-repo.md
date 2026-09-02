@@ -34,6 +34,24 @@ Two files the render plants matter later:
 | `.repo-platform.yml` | The module selection's home from then on: edit its `modules:` list and the next sync PR applies the change. Its presence is what marks the repo as managed. |
 | `.github/repo-platform-manifest.json` | The ownership manifest: each template-landed path's class (`managed`, `split`, or `starter`) plus sha256 hashes of the managed content, stamped after each render. validate-template's INTEGRITY check blocks on drift against it (managed content changed outside a sync); its freshness report never blocks. |
 
+### Mirror copies of rendered files
+
+Some repos must carry byte-identical copies of a rendered file at paths the template does not own - the skills repo copies `LICENSE.md` into `template/` and into every skill folder, because a standalone skill install copies only that folder. Declare the copies in `.repo-platform.yml` and every sync rewrites them from the freshly rendered source, in the same PR:
+
+```yaml
+mirrors:
+  - source: LICENSE.md
+    targets:
+      - template/LICENSE.md
+      - skills/*/LICENSE.md
+```
+
+- `source` names one template-rendered file (listed in the ownership manifest as class `managed` or `split`); mirroring repo-owned content is the repository's own job.
+- A `*` in a target matches within one path segment, resolved against the repo's tree at sync time: a literal final segment is written into every matched directory even when the file does not exist there yet, so a new skill folder gets its copy with no declaration edit. `**` is refused.
+- Targets must stay inside the repository, must not be template-owned paths themselves (one path, one writer), and neither side may sit under `.github/workflows/` (workflow files ride the token-scope withhold machinery, so a mirror there cannot be promised). A refused declaration writes nothing, is named in the PR body, and holds the PR for manual review; clean mirror writes are listed in the PR body too but stay auto-merge-eligible.
+- The declaration is read from the repo's latest commit, so it survives even a recovery re-render - and if an update drops the key from the file, the sync restores it and says so in the PR body.
+- Mirror targets get no manifest entries - they are repo-declared content, invisible to the retirement and parity machinery. The full contract lives in [materialize_mirrors.ts](../.github/scripts/sync/materialize_mirrors.ts).
+
 ## 3. Add checks to checks.yml
 
 CI is split so the template can keep improving its half while each repo keeps its own checks:

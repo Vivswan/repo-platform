@@ -255,6 +255,33 @@ export const GUARD_REGISTRY: readonly GuardEntry[] = [
     testFile: "tests/sync/preserve_local_content.test.ts",
     testName: "throws on an unknown grammar instead of degrading",
   },
+  // The mirror materializer's write boundary (materialize_mirrors.ts): the
+  // declaration is target-repo content, so each refusal below is what
+  // stands between a hostile .repo-platform.yml and a sync-credentialed
+  // write it must never make. Both fail OPEN if unarmed - the write just
+  // happens, with every local gate green.
+  {
+    id: "mirror-target-escape-refusal",
+    hazard:
+      "a target repo declares a mirror target with '..' (or '.'/empty) segments: without the refusal the sync writes the mirrored bytes OUTSIDE the target checkout on the runner, steered entirely by target-controlled config",
+    guardFile: ".github/scripts/sync/materialize_mirrors.ts",
+    snippet:
+      'if (segments.some((segment) => segment === "" || segment === "." || segment === "..")) {',
+    mutated: "if (false) {",
+    testFile: "tests/sync/materialize_mirrors.test.ts",
+    testName:
+      "a '..' mirror target is REFUSED and never written - the write would escape the repository",
+  },
+  {
+    id: "mirror-managed-target-refusal",
+    hazard:
+      "a target repo declares a manifest-listed path as a mirror target: without the refusal the sync gives one path two writers, and the mirror silently overwrites template-owned content after every step that renders it",
+    guardFile: ".github/scripts/sync/materialize_mirrors.ts",
+    snippet: "if (foldedManifest.has(target.toLowerCase())) {",
+    mutated: "if (false) {",
+    testFile: "tests/sync/materialize_mirrors.test.ts",
+    testName: "a manifest-listed mirror target is REFUSED - the template is that path's writer",
+  },
   // The HEAD-manifest reader's own refusal: the fleet is censused fully
   // post-conversion, so a HEAD manifest declaring anything but the one
   // grammar (a retired vintage the deleted transition shim once
