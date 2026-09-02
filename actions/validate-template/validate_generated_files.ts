@@ -5,8 +5,8 @@
 //   1. .copier-answers.yml and .repo-platform.yml exist, the latter records
 //      a valid top-level `modules` list, and the former pins a well-formed
 //      `github_username` (the owner whose composite actions ci.yml must use)
-//   2. .gitignore managed/local marker sections appear exactly once, in
-//      their declared order
+//   2. Every expected split file's managed-region BEGIN/END markers appear
+//      exactly once, in order (ungated base region files must exist)
 //   3. Every .yml/.yaml file parses; duplicate mapping keys are errors
 //      under .github/ and in the registration files, advisories elsewhere
 //   4. No unresolved merge-conflict markers in text files
@@ -27,9 +27,9 @@
 //   7. Every selected toolchain module with a version pin carries its
 //      managed version dotfile with exactly the pinned version
 //   8. Sync-managed files self-declare their ownership: files sync wholly
-//      overwrites open with the managed header naming the pinned owner, and
-//      split files (a managed top above a repo-owned tail) carry their
-//      declared split marker line exactly once. Existing files
+//      overwrites open with the managed header naming the pinned owner
+//      (split files self-declare through their BEGIN/END region markers,
+//      check 2). Existing files
 //      only - absence is damage the next sync heals - and _skip_if_exists
 //      starters are exempt (repo-owned after the first render)
 //   9. Ownership-manifest byte parity: .github/repo-platform-manifest.json
@@ -41,8 +41,9 @@
 //      for every path they cover (sync baselines local manifest edits, so
 //      a hand-flipped class would otherwise disable parity permanently),
 //      and every managed or split entry's recorded sha256 matches the file
-//      on disk (split files: the managed half alone, delimited by the
-//      entry's marker line). Drift means the file changed since the last
+//      on disk (split files: the managed region alone, from the entry's
+//      BEGIN marker line through its END marker line). Drift means the
+//      file changed since the last
 //      stamp; the next sync replaces it. Validation is STRICT: every build
 //      ships the manifest, so a missing manifest, a provenance stamp that
 //      differs from the recorded _commit (null included - the stamper
@@ -81,9 +82,13 @@ import { createHash } from "node:crypto";
 import { lstatSync, readdirSync, readFileSync, readlinkSync, writeFileSync } from "node:fs";
 import { extname, join, resolve } from "node:path";
 import { parseAllDocuments, parse as parseYaml } from "yaml";
-import { GRAMMAR, HEADER_WINDOW, knownGrammar, type RegionSplit } from "../shared/grammar.ts";
+import {
+  cleanManagedRegion,
+  HEADER_WINDOW,
+  knownGrammar,
+  substringCount,
+} from "../shared/grammar.ts";
 import { MANIFEST_NAME, type ManifestEntryShape, parseManifestFiles } from "../shared/manifest.ts";
-import { managedHalf } from "../shared/stamp_manifest.ts";
 
 const SKIP_DIRS = new Set([
   ".git",
@@ -108,18 +113,19 @@ function sha256(data: Buffer): string {
 }
 
 /** How a declared file's ownership is enforced in the rendered repo:
- *  "header" files open with the managed header, "marker" files carry their
- *  declared split marker line exactly once (a substring mention must not
- *  count), and "class-only" files are managed with no comment channel
- *  (pin dotfiles, JSON, symlinks) - nothing to check in-file, but check
- *  9's manifest cross-check still needs them on the roster, or a
+ *  "header" files open with the managed header, "region" files carry
+ *  their declared BEGIN/END managed-region marker lines exactly once each
+ *  and in order (substring-counted, so a buried mention counts as a
+ *  duplicate too), and "class-only" files are managed with no comment
+ *  channel (pin dotfiles, JSON, symlinks) - nothing to check in-file, but
+ *  check 9's manifest cross-check still needs them on the roster, or a
  *  hand-flipped class would silently exempt them from byte parity. (A
  *  fourth kind, "mergeable", was retired with the class - settings.yml,
  *  its only member, is a repo-owned starter now.) */
 type OwnedFile =
-  | { path: string; kind: "header"; marker?: undefined }
-  | { path: string; kind: "class-only"; marker?: undefined }
-  | { path: string; kind: "marker"; marker: string };
+  | { path: string; kind: "header"; begin?: undefined; end?: undefined }
+  | { path: string; kind: "class-only"; begin?: undefined; end?: undefined }
+  | { path: string; kind: "region"; begin: string; end: string };
 
 /** Render conditions translated from the templates' declared filename
  *  gates, evaluated against a render's answers and modules list. */
@@ -128,57 +134,66 @@ type RenderWhen = { publicOnly?: boolean; withoutModule?: string };
 type BaseOwnedFile = OwnedFile & { when?: RenderWhen };
 
 // The declared ownership of every enforceable base file (kind + marker
-// decoration, render conditions from the templates' filename gates) and
-// the bounded-region split grammars; module files come from the generated
-// MODULE_OWNERSHIP record below. Starters stay out (repo-owned; nothing
-// to enforce); headerless comment-free managed files ride as class-only
-// so the manifest cross-check covers them.
+// decoration, render conditions from the templates' filename gates);
+// module files come from the generated MODULE_OWNERSHIP record below.
+// Starters stay out (repo-owned; nothing to enforce); headerless
+// comment-free managed files ride as class-only so the manifest
+// cross-check covers them.
 // BEGIN GENERATED: base-ownership (scripts/generate.ts - edit templates/base/ownership.yml and the base templates, not this block)
 const BASE_OWNERSHIP: BaseOwnedFile[] = [
   { path: ".copier-answers.yml", kind: "header" },
-  { path: ".editorconfig", kind: "marker", marker: "# repo-platform:local-section" },
-  { path: ".gitattributes", kind: "marker", marker: "# repo-platform:local-section" },
-  { path: ".github/CODEOWNERS", kind: "marker", marker: "# repo-platform:local-section" },
+  {
+    path: ".editorconfig",
+    kind: "region",
+    begin: "# BEGIN REPO-PLATFORM MANAGED",
+    end: "# END REPO-PLATFORM MANAGED",
+  },
+  {
+    path: ".gitattributes",
+    kind: "region",
+    begin: "# BEGIN REPO-PLATFORM MANAGED",
+    end: "# END REPO-PLATFORM MANAGED",
+  },
+  {
+    path: ".github/CODEOWNERS",
+    kind: "region",
+    begin: "# BEGIN REPO-PLATFORM MANAGED",
+    end: "# END REPO-PLATFORM MANAGED",
+  },
   { path: ".github/dependabot.yml", kind: "header" },
   { path: ".github/workflows/ci.yml", kind: "header" },
+  {
+    path: ".gitignore",
+    kind: "region",
+    begin: "# BEGIN REPO-PLATFORM MANAGED",
+    end: "# END REPO-PLATFORM MANAGED",
+  },
   { path: ".repo-platform.yml", kind: "header" },
   { path: ".typography-allow", kind: "header" },
   { path: ".yamllint", kind: "header" },
   { path: "CODE_OF_CONDUCT.md", kind: "header", when: { publicOnly: true } },
   {
     path: "CONTRIBUTING.md",
-    kind: "marker",
-    marker: "<!-- repo-platform:local-section -->",
+    kind: "region",
+    begin: "<!-- BEGIN REPO-PLATFORM MANAGED -->",
+    end: "<!-- END REPO-PLATFORM MANAGED -->",
     when: { publicOnly: true },
   },
   {
     path: "LICENSE.md",
-    kind: "marker",
-    marker: "<!-- repo-platform:local-section -->",
+    kind: "region",
+    begin: "<!-- BEGIN REPO-PLATFORM MANAGED -->",
+    end: "<!-- END REPO-PLATFORM MANAGED -->",
     when: { withoutModule: "custom-license" },
   },
-  { path: "SECURITY.md", kind: "marker", marker: "<!-- repo-platform:local-section -->" },
-];
-
-const BASE_REGION_SPLITS: Record<string, RegionSplit> = {
-  ".gitignore": {
-    managed_begin: "# BEGIN REPO-PLATFORM MANAGED",
-    managed_end: "# END REPO-PLATFORM MANAGED",
-    local_begin: "# BEGIN REPOSITORY LOCAL",
-    local_end: "# END REPOSITORY LOCAL",
+  {
+    path: "SECURITY.md",
+    kind: "region",
+    begin: "<!-- BEGIN REPO-PLATFORM MANAGED -->",
+    end: "<!-- END REPO-PLATFORM MANAGED -->",
   },
-};
+];
 // END GENERATED: base-ownership
-
-/** Marker lines required exactly once per file (substring-counted, so a
- *  buried mention is a duplicate too), read from the declared
- *  bounded-region grammars' GRAMMAR row so the two can never drift apart. */
-const MARKER_FILES: Record<string, string[]> = Object.fromEntries(
-  Object.entries(BASE_REGION_SPLITS).map(([path, grammar]) => [
-    path,
-    [...GRAMMAR["bounded-region"].markers(grammar)],
-  ]),
-);
 
 const TEXT_SUFFIXES = new Set([
   ".ts",
@@ -268,17 +283,22 @@ const TOOLCHAIN_PINS: Record<string, { file: string; version: string }> = {
 // END GENERATED: toolchain-pins
 
 // How each rendered module file declares its ownership while its module is
-// selected: "header" files open with the managed header, "marker" files
-// split a managed top from a repo-owned tail at their declared marker line,
-// "class-only" files are managed with no comment channel (derived from the
-// module.yml ownership declarations by moduleOwnershipEntries in
-// scripts/ownership.ts - starters stay out).
+// selected: "header" files open with the managed header, "region" files
+// carry their declared BEGIN/END managed-region markers around the
+// sync-owned region, "class-only" files are managed with no comment
+// channel (derived from the module.yml ownership declarations by
+// moduleOwnershipEntries in scripts/ownership.ts - starters stay out).
 // BEGIN GENERATED: module-ownership (scripts/generate.ts - edit the module.yml ownership declarations and the module templates, not this block)
 const MODULE_OWNERSHIP: Record<string, OwnedFile[]> = {
   agents: [
     { path: ".github/agents.md", kind: "class-only" },
     { path: ".github/copilot-instructions.md", kind: "class-only" },
-    { path: "AGENTS.md", kind: "marker", marker: "<!-- repo-platform:local-section -->" },
+    {
+      path: "AGENTS.md",
+      kind: "region",
+      begin: "<!-- BEGIN REPO-PLATFORM MANAGED -->",
+      end: "<!-- END REPO-PLATFORM MANAGED -->",
+    },
     { path: "CLAUDE.md", kind: "class-only" },
   ],
   bun: [
@@ -581,50 +601,9 @@ function main(): number {
     }
   }
 
-  // 2. Marker sections exactly once and in grammar order (.gitignore is
-  // always generated by the template - absence means the repo is damaged,
-  // not unconfigured). MARKER_FILES lists each file's markers in the
-  // declared order (local BEGIN, local END, managed BEGIN, managed END);
-  // counting alone would pass a reordered file whose managed-half hash is
-  // unchanged (a swap above the managed BEGIN), so order is checked too.
-  for (const [rel, markers] of Object.entries(MARKER_FILES)) {
-    const path = join(root, rel);
-    if (!isRegularFile(path)) {
-      errors.push(
-        `${rel} is missing - the template always generates it, so the repo ` +
-          "is damaged; restore the file from git history or run a template sync",
-      );
-      continue;
-    }
-    // latin1 for byte fidelity, like the stamper and the sync rebuild: a
-    // UTF-8 decode folds invalid sequences onto the replacement character,
-    // which could mask or invent marker text. Counting stays SUBSTRING
-    // semantics on purpose (see MARKER_FILES): a buried mention of a
-    // region marker is a duplicate by the fleet-wide region convention.
-    const content = readFileSync(path).toString("latin1");
-    let exactlyOnce = true;
-    for (const marker of markers) {
-      const count = content.split(marker).length - 1;
-      if (count !== 1) {
-        exactlyOnce = false;
-        errors.push(
-          `${rel}: marker '${marker}' appears ${count} times (expected 1) - ` +
-            "a merge or manual edit broke the managed sections; restore one " +
-            "LOCAL section followed by one MANAGED section",
-        );
-      }
-    }
-    if (exactlyOnce) {
-      const positions = markers.map((marker) => content.indexOf(marker));
-      if (positions.some((at, index) => index > 0 && at <= positions[index - 1])) {
-        errors.push(
-          `${rel}: the managed/local markers appear out of order - the sections ` +
-            "must run local BEGIN, local END, managed BEGIN, managed END; restore " +
-            "the order via a template sync",
-        );
-      }
-    }
-  }
+  // 2 rides below with check 8: the managed-region marker checks are
+  // driven by the ownership tables (declaredOwnership), which need the
+  // registration answers parsed first.
 
   // 6. One license file. GitHub, registries, and the fleet sync all pick
   // a single license per repo: LICENSE next to LICENSE.md means a stale
@@ -645,7 +624,7 @@ function main(): number {
         "spellings; keep the current license (fleet repos: LICENSE.md) " +
         "and delete the other (git history remains the record of prior " +
         "licensing; third-party notices can move below the license's " +
-        "local-section marker)",
+        "END marker)",
     );
   } else if (licenseSpellings[0] === "LICENSE") {
     advisories.push(
@@ -1009,14 +988,67 @@ function main(): number {
     }
   }
 
+  // 2. Managed-region marker sections exactly once and in order, for every
+  // region-split file the tables expect on this render. Ungated BASE
+  // region files (.gitignore, .editorconfig, SECURITY.md, ...) are always
+  // generated by the template, so their ABSENCE is damage and errors;
+  // gated or module region files follow check 8's stance (absence is
+  // damage the next sync heals - and the withheld-workflows push path
+  // leaves files out legitimately). Counting is SUBSTRING semantics on
+  // purpose: a buried mention of a region marker is a duplicate by the
+  // fleet-wide region convention (the sync's appendix neutralization and
+  // the region slicer count the same way), and order is checked too -
+  // counting alone would pass a swapped BEGIN/END pair. Repo-owned
+  // content above BEGIN and below END is legal and unchecked.
+  const ungatedBase = new Set(
+    BASE_OWNERSHIP.filter((entry) => entry.kind === "region" && entry.when === undefined).map(
+      (entry) => entry.path,
+    ),
+  );
+  for (const { rel, kind, begin, end } of declaredOwnership) {
+    if (kind !== "region") continue;
+    const path = join(root, rel);
+    if (!isRegularFile(path)) {
+      if (ungatedBase.has(rel)) {
+        errors.push(
+          `${rel} is missing - the template always generates it, so the repo ` +
+            "is damaged; restore the file from git history or run a template sync",
+        );
+      }
+      continue;
+    }
+    // latin1 for byte fidelity, like the stamper and the sync rebuild: a
+    // UTF-8 decode folds invalid sequences onto the replacement character,
+    // which could mask or invent marker text.
+    const content = readFileSync(path).toString("latin1");
+    let exactlyOnce = true;
+    for (const marker of [begin, end]) {
+      const count = substringCount(content, marker);
+      if (count !== 1) {
+        exactlyOnce = false;
+        errors.push(
+          `${rel}: marker '${marker}' appears ${count} times (expected 1) - ` +
+            "a merge or manual edit broke the managed region; restore one " +
+            "BEGIN/END marker pair via a template sync",
+        );
+      }
+    }
+    if (exactlyOnce && content.indexOf(end) <= content.indexOf(begin)) {
+      errors.push(
+        `${rel}: the BEGIN/END managed-region markers appear out of order - ` +
+          "the region runs BEGIN through END; restore the order via a template sync",
+      );
+    }
+  }
+
   // 8. Ownership self-declarations: every sync-managed file that supports
   // comments tells its readers who owns it - the managed header on files
-  // sync wholly overwrites, the local-section marker splitting split files'
-  // managed top from the repo-owned tail. Existing files only: a missing
-  // managed file is damage the next sync heals (ci.yml and .gitignore
-  // absence already error above). Skipped in self mode - the template
-  // repo's files are sources, not renders - and while the owner pin is
-  // unhealed (its error is already recorded).
+  // sync wholly overwrites (split files carry their BEGIN/END region
+  // markers instead, checked above). Existing files only: a missing
+  // managed file is damage the next sync heals (ci.yml absence and
+  // ungated region files already error above). Skipped in self mode - the
+  // template repo's files are sources, not renders - and while the owner
+  // pin is unhealed (its error is already recorded).
   if (!selfMode && ownerPin !== null && ownerPin.kind === "pinned") {
     // Anchored on the header sentence's canonical trailing period with no
     // repo-name character (GitHub allows [A-Za-z0-9._-]) after it, so
@@ -1026,10 +1058,12 @@ function main(): number {
       `This file is managed by ${ownerPin.owner.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}` +
         "/repo-platform\\.(?![A-Za-z0-9._-])",
     );
-    for (const { rel, kind, marker } of declaredOwnership) {
+    for (const { rel, kind } of declaredOwnership) {
       // class-only files have no comment channel to self-declare in; their
-      // enforcement is check 9's manifest cross-check alone.
-      if (kind === "class-only") continue;
+      // enforcement is check 9's manifest cross-check alone. Region files
+      // self-declare through their marker pair, checked above for every
+      // render (the check needs no owner pin).
+      if (kind !== "header") continue;
       const path = join(root, rel);
       if (!isRegularFile(path)) continue;
       // latin1, matching the stamper's and sync rebuild's byte-level marker
@@ -1037,25 +1071,13 @@ function main(): number {
       // characters trim() strips, counting a line as the marker that the
       // byte-level matchers (and the stamped managed half) do not.
       const content = readFileSync(path).toString("latin1");
-      if (kind === "header") {
-        if (!headerRe.test(content.split("\n", HEADER_WINDOW).join("\n"))) {
-          errors.push(
-            `${rel}: does not open with the managed header ('This file is ` +
-              `managed by ${ownerPin.owner}/repo-platform.') - the file is ` +
-              "overwritten by template sync and the header is what warns readers " +
-              "their local edits get replaced; run a template sync to restore it",
-          );
-        }
-      } else {
-        const count = content.split("\n").filter((line) => line.trim() === marker).length;
-        if (count !== 1) {
-          errors.push(
-            `${rel}: the '${marker}' marker line appears ${count} ` +
-              "times (expected 1) - it splits the sync-managed top of the file " +
-              "from this repository's own tail; restore the single marker line " +
-              "via a template sync",
-          );
-        }
+      if (!headerRe.test(content.split("\n", HEADER_WINDOW).join("\n"))) {
+        errors.push(
+          `${rel}: does not open with the managed header ('This file is ` +
+            `managed by ${ownerPin.owner}/repo-platform.') - the file is ` +
+            "overwritten by template sync and the header is what warns readers " +
+            "their local edits get replaced; run a template sync to restore it",
+        );
       }
     }
   }
@@ -1243,73 +1265,42 @@ function main(): number {
             "which re-renders the manifest without a merge",
         );
       };
-      for (const { rel, kind, marker } of declaredOwnership) {
+      for (const { rel, kind, begin, end } of declaredOwnership) {
         const entry = manifestFiles[rel];
         if (entry === undefined) {
           reportUnlisted(rel, "this validator's ownership tables declare");
           continue;
         }
-        const declared = kind === "marker" ? "split" : "managed";
+        const declared = kind === "region" ? "split" : "managed";
         if (entry.class !== declared) {
           metadataError(rel, `claims class ${JSON.stringify(entry.class)}`, declared);
           continue;
         }
-        // A present grammar must name the declared one; a MISSING grammar
-        // field is a shape problem, reported once by the structural loop
-        // below (every render stamps the field), not doubled here.
+        // A present grammar must name the one grammar with the declared
+        // marker pair; a MISSING grammar field is a shape problem, reported
+        // once by the structural loop below (every render stamps the
+        // field), not doubled here.
         if (
-          kind === "marker" &&
-          (entry.managed !== GRAMMAR["tail-marker"].side ||
-            entry.marker !== marker ||
-            ("grammar" in entry && entry.grammar !== "tail-marker"))
+          kind === "region" &&
+          (entry.begin !== begin ||
+            entry.end !== end ||
+            ("grammar" in entry && entry.grammar !== "managed-region"))
         ) {
           metadataError(
             rel,
-            "carries split metadata outside its declared tail-marker grammar",
-            `split with the managed half above the '${marker}' marker line`,
-          );
-        }
-      }
-      // Bounded-region splits (.gitignore's grammar: the repo-owned LOCAL
-      // region sits above the managed half), from the declared grammars.
-      for (const [rel, grammar] of Object.entries(BASE_REGION_SPLITS)) {
-        const entry = manifestFiles[rel];
-        if (entry === undefined) {
-          reportUnlisted(rel, "the template always renders");
-          continue;
-        }
-        const markerPairOk =
-          entry.class === "split" &&
-          entry.marker === grammar.managed_begin &&
-          entry.managed === GRAMMAR["bounded-region"].side;
-        // A missing grammar field is the structural loop's single report;
-        // a present one must name the declared grammar and its strings
-        // (the GRAMMAR row's wireExtras column names the fields, so this
-        // check follows a new field automatically).
-        const grammarOk =
-          !("grammar" in entry) ||
-          (entry.grammar === "bounded-region" &&
-            GRAMMAR["bounded-region"].wireExtras.every((field) => entry[field] === grammar[field]));
-        if (!markerPairOk || !grammarOk) {
-          metadataError(
-            rel,
-            "does not match the managed-section grammar",
-            `split with the managed half below "${grammar.managed_begin}"`,
+            "carries split metadata outside its declared managed-region grammar",
+            `split with the managed region between '${begin}' and '${end}'`,
           );
         }
       }
       // An entry for a table-covered path whose render condition is off
       // (an unselected module's workflow, a public-only file on a private
       // render) cannot come from the template; it is manifest drift.
-      const expectedPaths = new Set([
-        ...declaredOwnership.map((f) => f.rel),
-        ...Object.keys(BASE_REGION_SPLITS),
-      ]);
+      const expectedPaths = new Set(declaredOwnership.map((f) => f.rel));
       const coveredEver = new Set<string>([
         ...BASE_OWNERSHIP.filter(
           (entry) => entry.when?.withoutModule === undefined || selectedModules !== null,
         ).map((entry) => entry.path),
-        ...Object.keys(BASE_REGION_SPLITS),
         ...(selectedModules !== null
           ? Object.values(MODULE_OWNERSHIP).flatMap((entries) => entries.map((f) => f.path))
           : []),
@@ -1382,21 +1373,14 @@ function main(): number {
           );
           continue;
         }
-        let split: { marker: string; managed: "above" | "below" } | null = null;
+        let split: { begin: string; end: string } | null = null;
         if (entry.class === "split") {
-          if (
-            typeof entry.marker !== "string" ||
-            (entry.managed !== "above" && entry.managed !== "below")
-          ) {
-            errors.push(
-              `${where} is split but lacks a marker line and a managed half of ` +
-                '"above" or "below"; run a template sync to regenerate the manifest',
-            );
-            continue;
-          }
-          // Every render stamps the grammar field; the derived
-          // marker/managed pair alone cannot say which grammar the sync
-          // rebuild uses, so a split entry without one is a hand edit.
+          // Every render stamps the grammar field; the marker strings alone
+          // cannot say which grammar the sync rebuild uses, so a split
+          // entry without one is a hand edit (or a manifest older than the
+          // stamped grammar itself). Checked BEFORE the marker-string
+          // shape: an older-vintage entry should draw the vintage
+          // diagnosis, not a field-shape complaint.
           if (!("grammar" in entry)) {
             errors.push(
               `${where} lacks the split grammar field every render stamps - a hand ` +
@@ -1406,28 +1390,29 @@ function main(): number {
             );
             continue;
           }
-          // A present grammar must agree with the managed side its GRAMMAR
-          // row declares (the one statement of each grammar's side) and
-          // carry the row's wireExtras marker strings (the one statement
-          // of each grammar's field set). knownGrammar is the table's own
-          // membership test for untyped manifest JSON.
+          // A present grammar must be one this validator knows. One grammar
+          // exists (managed-region); a manifest still declaring a RETIRED
+          // grammar (tail-marker, the four-marker bounded-region) is older
+          // than this validator, and reading it by guess would verify the
+          // wrong region - loud refusal, mirroring the sync's own
+          // grammar-vintage refusals.
           const grammarId = knownGrammar(entry.grammar);
-          const grammarProblem =
-            grammarId === null
-              ? `declares unknown split grammar ${JSON.stringify(entry.grammar)}`
-              : entry.managed !== GRAMMAR[grammarId].side
-                ? `declares the ${grammarId} grammar with a managed half not ` +
-                  JSON.stringify(GRAMMAR[grammarId].side)
-                : GRAMMAR[grammarId].wireExtras.some((field) => typeof entry[field] !== "string")
-                  ? `declares the ${grammarId} grammar without its region marker strings`
-                  : null;
-          if (grammarProblem !== null) {
+          if (grammarId === null) {
             errors.push(
-              `${where} ${grammarProblem}; run a template sync to regenerate the manifest`,
+              `${where} declares split grammar ${JSON.stringify(entry.grammar)}, which this ` +
+                "validator does not read (one grammar exists: managed-region) - the " +
+                "manifest predates this validator; run a template sync to restamp it",
             );
             continue;
           }
-          split = { marker: entry.marker, managed: entry.managed };
+          if (typeof entry.begin !== "string" || typeof entry.end !== "string") {
+            errors.push(
+              `${where} is split but lacks its begin/end marker-line strings; ` +
+                "run a template sync to regenerate the manifest",
+            );
+            continue;
+          }
+          split = { begin: entry.begin, end: entry.end };
         }
         let stat: ReturnType<typeof lstatSync> | null = null;
         try {
@@ -1469,33 +1454,35 @@ function main(): number {
         } else {
           const content = readFileSync(join(root, rel)).toString("latin1");
           if (split !== null) {
-            const half = managedHalf(content, split.marker, split.managed);
-            // Fail closed: without the marker line there is nothing to
-            // verify parity against, and a corrupted manifest reclassifying
-            // a file as split must not silently exempt it. For the known
-            // split files this doubles check 8's (or the .gitignore marker
-            // check's) missing-marker report, but that state is already
-            // broken and the two messages complement.
-            if (half === null) {
+            // The STRICT slice, shared with the stamper and the sync
+            // writers: duplicated, buried, or reordered markers make the
+            // region ambiguous, so there is nothing honest to verify
+            // parity against. Fail closed: a corrupted manifest
+            // reclassifying a file as split must not silently exempt it.
+            // For the known split files this doubles the region check's
+            // report, but that state is already broken and the two
+            // messages complement.
+            const slice = cleanManagedRegion(content, split);
+            if (slice === null) {
               errors.push(
-                `${rel}: the split marker line '${split.marker}' recorded in ` +
-                  `${MANIFEST_NAME} is missing from the file, so managed-half ` +
-                  "parity cannot be verified - restore the marker or run a " +
-                  "template sync",
+                `${rel}: the managed-region marker lines ('${split.begin}' ... ` +
+                  `'${split.end}') recorded in ${MANIFEST_NAME} are missing, duplicated, ` +
+                  "or out of order in the file, so managed-region parity cannot be " +
+                  "verified - restore the single marker pair or run a template sync",
               );
               continue;
             }
-            actual = sha256(Buffer.from(half, "latin1"));
+            actual = sha256(Buffer.from(slice.region, "latin1"));
           } else {
             actual = sha256(Buffer.from(content, "latin1"));
           }
         }
         if (actual !== hash) {
           errors.push(
-            `${rel}: ${split !== null ? "its managed half does" : "content does"} ` +
+            `${rel}: ${split !== null ? "its managed region does" : "content does"} ` +
               `not match the sha256 recorded in ${MANIFEST_NAME} - the file ` +
               "drifted from the last stamped sync state; local edits to " +
-              `${split !== null ? "the managed half" : "a managed file"} are ` +
+              `${split !== null ? "the managed region" : "a managed file"} are ` +
               "replaced by the next template sync (move them to a repo-owned " +
               "location), and intended template-side updates restamp on that sync",
           );

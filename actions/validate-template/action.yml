@@ -1,7 +1,7 @@
 name: Validate Template
 description: >-
   Runs repo-platform's validate_generated_files.ts against the repository:
-  managed/local markers appear exactly once, YAML parses, no unresolved
+  managed-region markers appear exactly once, YAML parses, no unresolved
   conflict markers, and ci.yml follows the all-green + typography convention.
 
 inputs:

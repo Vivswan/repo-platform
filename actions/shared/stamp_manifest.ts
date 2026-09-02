@@ -26,10 +26,9 @@
 // manifest.ts's entryLine emits and parseEntry reads back), so a stamped
 // manifest differs from the raw render in those token values alone and
 // copier's three-way update merge sees minimal local edits. Split entries
-// also carry declared-grammar fields ("grammar", the bounded-region marker
-// strings) for the sync's split-file rebuild; this stamper reads only the
-// legacy marker/managed pair (derived from the grammar at compose time)
-// and passes the rest through untouched. An update can still leave inline
+// carry their grammar and its begin/end marker lines; the stamper reads
+// the marker pair to hash the managed region and passes everything else
+// through untouched. An update can still leave inline
 // conflict blocks in the manifest (both sides touch the hash lines);
 // parseManifestFiles resolves those toward the template ("after updating")
 // side before parsing - the direction resolve_copier_conflicts.ts uses -
@@ -60,6 +59,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
+import { cleanManagedRegion } from "./grammar.ts";
 import {
   MANIFEST_NAME,
   type ManifestEntryShape,
@@ -100,39 +100,35 @@ export function recordedCommit(root: string): string | null {
   return value === "" ? null : value;
 }
 
-/** THE marker-line predicate: a line is a split entry's marker line when
- *  its trimmed text equals the marker exactly. One owner for every
- *  splitter in the pipeline (this stamper's managedHalf, which the
- *  validator's parity check imports too, and preserve_local_content's
- *  carries) - three sites once held three definitions, and the strictest
- *  (exact match after CR-strip) sent a marker line with one trailing
- *  space down the appendix path while the other two still counted it,
- *  delivering a tree the validator rejects. trim semantics on purpose:
- *  it is the most tolerant of the three. */
-export function isMarkerLine(line: string, marker: string): boolean {
-  return line.trim() === marker;
-}
-
-/** A split entry's managed half: through the first marker line's newline
- *  for managed "above", from the start of the marker line for "below".
- *  `content` is latin1 text (byte-faithful); null when the marker line is
- *  missing (parity reports that - there is no honest hash to stamp). */
-export function managedHalf(
-  content: string,
-  marker: string,
-  managed: "above" | "below",
-): string | null {
-  let offset = 0;
-  for (const line of content.split("\n")) {
-    const end = offset + line.length;
-    if (isMarkerLine(line, marker)) {
-      return managed === "above"
-        ? content.slice(0, Math.min(end + 1, content.length))
-        : content.slice(offset);
-    }
-    offset = end + 1;
+/** The hash a manifest entry should carry for the file as it sits on disk:
+ *  sha256 of the whole content (managed), of the managed region between
+ *  the entry's begin/end marker lines (split; the marker lines are part of
+ *  the hashed region), or of the symlink target. The region slice is the
+ *  STRICT one (cleanManagedRegion) - the same accept/reject every writer
+ *  applies - so a file with duplicated or reordered markers stamps null
+ *  rather than hashing an ambiguous first slice. null also when the file
+ *  is missing or its split markers are gone - the parity check reports
+ *  those; a stamp must not invent a value. */
+export function entryHash(root: string, path: string, entry: ManifestEntryShape): string | null {
+  const abs = join(root, path);
+  let stat: ReturnType<typeof lstatSync>;
+  try {
+    stat = lstatSync(abs);
+  } catch {
+    return null;
   }
-  return null;
+  // Raw link bytes: decoding a malformed-UTF-8 target would fold distinct
+  // targets onto the replacement character.
+  if (stat.isSymbolicLink()) return sha256(readlinkSync(abs, { encoding: "buffer" }));
+  if (!stat.isFile()) return null;
+  // latin1 round-trips every byte, so the hash covers the file verbatim.
+  const content = readFileSync(abs).toString("latin1");
+  if (entry.class === "split") {
+    if (typeof entry.begin !== "string" || typeof entry.end !== "string") return null;
+    const slice = cleanManagedRegion(content, { begin: entry.begin, end: entry.end });
+    return slice === null ? null : sha256(Buffer.from(slice.region, "latin1"));
+  }
+  return sha256(Buffer.from(content, "latin1"));
 }
 
 function sha256(data: Buffer): string {
@@ -198,38 +194,6 @@ export function normalizeSymlinkTargets(
     rewritten.push(path);
   }
   return rewritten;
-}
-
-/** The hash a manifest entry should carry for the file as it sits on disk:
- *  sha256 of the whole content (managed), of the managed half (split), or
- *  of the symlink target. null when the file is missing or its split
- *  marker is gone - the parity check reports those; a stamp must not
- *  invent a value. */
-export function entryHash(root: string, path: string, entry: ManifestEntryShape): string | null {
-  const abs = join(root, path);
-  let stat: ReturnType<typeof lstatSync>;
-  try {
-    stat = lstatSync(abs);
-  } catch {
-    return null;
-  }
-  // Raw link bytes: decoding a malformed-UTF-8 target would fold distinct
-  // targets onto the replacement character.
-  if (stat.isSymbolicLink()) return sha256(readlinkSync(abs, { encoding: "buffer" }));
-  if (!stat.isFile()) return null;
-  // latin1 round-trips every byte, so the hash covers the file verbatim.
-  const content = readFileSync(abs).toString("latin1");
-  if (entry.class === "split") {
-    if (
-      typeof entry.marker !== "string" ||
-      (entry.managed !== "above" && entry.managed !== "below")
-    ) {
-      return null;
-    }
-    const half = managedHalf(content, entry.marker, entry.managed);
-    return half === null ? null : sha256(Buffer.from(half, "latin1"));
-  }
-  return sha256(Buffer.from(content, "latin1"));
 }
 
 /** Stamp the manifest text against the tree at `root`: conflict blocks
