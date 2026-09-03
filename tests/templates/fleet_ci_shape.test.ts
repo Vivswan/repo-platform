@@ -61,14 +61,14 @@ describe("fleet-ci.yml", () => {
     expect(job?.permissions).toEqual({ "contents": "read", "pull-requests": "write" });
   });
 
-  test("yamllint is a thin caller of the yamllint action at @build (both shapes)", () => {
+  test("yamllint is a thin caller of the yamllint action at @build", () => {
+    // The merged (private) shape's yamllint step is pinned by the TOOLS loop
+    // below; this pins the fan-out job's EXACT two-step shape.
     const fanout = (fleetCi.jobs.yamllint?.steps ?? []).map((step) => step.uses ?? "");
     expect(fanout).toEqual([
       expect.stringContaining("actions/checkout@"),
       expect.stringContaining("repo-platform/actions/yamllint@build"),
     ]);
-    const merged = (fleetCi.jobs["base-checks"]?.steps ?? []).map((step) => step.uses ?? "");
-    expect(merged).toContainEqual(expect.stringContaining("repo-platform/actions/yamllint@build"));
   });
 
   test("the private/public base-check shapes are complementary job-level guards", () => {
