@@ -5132,6 +5132,66 @@ const rules: Rule[] = [
           got: schemaVersion,
         });
       }
+
+      // The answers-file path is spelled in three places that nothing
+      // binds behaviorally end to end: copier.yml's _answers_file (where
+      // copier WRITES; near-inert for reads, which honor only the CLI
+      // flag), apply_update.ts's standing --answers-file flag (the
+      // consequential one), and relocate_answers.ts's move destination.
+      // The template filename under templates/base/.github/ is the fourth
+      // spelling, anchored via the rendered-path derivation. One editor
+      // moving one of them alone must be named here, not discovered at a
+      // fleet sync.
+      const answersPath = mustMatch(
+        read("copier.yml"),
+        /^_answers_file: (\S+)$/m,
+        "copier.yml",
+        "_answers_file",
+      )[1];
+      const answersSites: Array<[string, string, () => string]> = [
+        [
+          ".github/scripts/sync/apply_update.ts",
+          "--answers-file flag value",
+          () =>
+            argvStringAfter(
+              read(".github/scripts/sync/apply_update.ts"),
+              "--answers-file",
+              ["--vcs-ref"],
+              {
+                where: ".github/scripts/sync/apply_update.ts",
+                what: "the copier --answers-file argv pair",
+              },
+            ),
+        ],
+        [
+          ".github/scripts/sync/relocate_answers.ts",
+          "ANSWERS_PATH",
+          () =>
+            constStringValue(read(".github/scripts/sync/relocate_answers.ts"), "ANSWERS_PATH", {
+              where: ".github/scripts/sync/relocate_answers.ts",
+              what: "the relocate destination const",
+              exported: true,
+            }),
+        ],
+      ];
+      for (const [rel, label, extract] of answersSites) {
+        const got = extract();
+        if (got !== answersPath) {
+          mismatches.push({
+            file: rel,
+            expected: `${label} ${answersPath} (copier.yml _answers_file)`,
+            got,
+          });
+        }
+      }
+      const answersTemplate = `templates/base/${answersPath}.jinja`;
+      if (!existsSync(answersTemplate)) {
+        mismatches.push({
+          file: "templates/base",
+          expected: `${answersTemplate} (the template rendering copier.yml's _answers_file path)`,
+          got: "no such template file",
+        });
+      }
       return mismatches;
     },
   },
