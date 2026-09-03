@@ -256,12 +256,35 @@ describe("duplicate mapping keys", () => {
     );
   });
 
-  test("a duplicate key in .github/settings.yml fails with the tailored message", () => {
-    const { exitCode, stderr } = runValidator({ ".github/settings.yml": DUP_KEY_YAML });
-    expect(exitCode).toBe(1);
-    expect(stderr).toContain(".github/settings.yml: duplicate mapping key");
-    expect(stderr).toContain("the later value silently wins");
-  });
+  // Strictness follows the .github/ prefix (plus the registration file),
+  // not template ownership: GitHub's own parsers reject duplicate keys in a
+  // workflow anyway, and a three-way merge can duplicate settings.yml's
+  // identity keys, where the later value silently wins at apply time.
+  test.each([
+    {
+      reason: "a template-owned settings.yml",
+      path: ".github/settings.yml",
+      content: DUP_KEY_YAML,
+    },
+    {
+      reason: "a repo-owned (_skip_if_exists) workflow, checks.yml",
+      path: ".github/workflows/checks.yml",
+      content: "name: Checks\nname: Checks again\non: [push]\n",
+    },
+    {
+      reason: "a document of a multi-document stream (itself a second error there)",
+      path: ".github/multi.yml",
+      content: "a: 1\na: 2\n---\nb: 3\n",
+    },
+  ])(
+    "a duplicate key under .github/ fails with the tailored message: $reason",
+    ({ path, content }) => {
+      const { exitCode, stderr } = runValidator({ [path]: content });
+      expect(exitCode).toBe(1);
+      expect(stderr).toContain(`${path}: duplicate mapping key`);
+      expect(stderr).toContain("the later value silently wins");
+    },
+  );
 
   test("a duplicate key in a registration file fails", () => {
     const { exitCode, stderr } = runValidator({
@@ -274,18 +297,6 @@ describe("duplicate mapping keys", () => {
     expect(stderr).not.toContain("`modules` is missing");
   });
 
-  test("a duplicate key in a repo-owned .github file is still an error", () => {
-    // checks.yml is generated once then owned by the repo (_skip_if_exists),
-    // so this pins the deliberate choice: strictness follows the .github/
-    // prefix, not template ownership, because GitHub's own parser rejects
-    // duplicate keys in a workflow anyway.
-    const { exitCode, stderr } = runValidator({
-      ".github/workflows/checks.yml": "name: Checks\nname: Checks again\non: [push]\n",
-    });
-    expect(exitCode).toBe(1);
-    expect(stderr).toContain(".github/workflows/checks.yml: duplicate mapping key");
-  });
-
   test("a duplicate key in ci.yml does not also claim the file defines no jobs", () => {
     const withDup = `${BASELINE[".github/workflows/ci.yml"]}\nname: CI again\n`;
     const { exitCode, stderr } = runValidator({ ".github/workflows/ci.yml": withDup });
@@ -296,25 +307,59 @@ describe("duplicate mapping keys", () => {
     expect(stderr).not.toContain("defines no jobs");
   });
 
-  test("a duplicate key in a repo-owned fixture is an advisory, not an error", () => {
-    const { exitCode, stdout, stderr } = runValidator({ "tests/fixtures/dup.yml": DUP_KEY_YAML });
-    expect(stderr).toBe("");
-    expect(exitCode).toBe(0);
-    expect(stdout).toContain("advisory: tests/fixtures/dup.yml: duplicate mapping key");
+  test.each([
+    { reason: "a single-document fixture", path: "tests/fixtures/dup.yml", content: DUP_KEY_YAML },
+    {
+      reason: "a multi-document file",
+      path: "deploy/manifests.yml",
+      content: "a: 1\na: 2\n---\nb: 3\n",
+    },
+  ])(
+    "a duplicate key outside the strict set is an advisory, not an error: $reason",
+    ({ path, content }) => {
+      const { exitCode, stdout, stderr } = runValidator({ [path]: content });
+      expect(stderr).toBe("");
+      expect(exitCode).toBe(0);
+      expect(stdout).toContain(`advisory: ${path}: duplicate mapping key`);
+    },
+  );
+});
+
+describe("YAML syntax errors", () => {
+  // Composer-stage errors (doc.errors), reported per document. Outside the
+  // strict set a duplicate key is only an advisory, so the masking row pins
+  // that a duplicate in the same document cannot hide the syntax error.
+  test.each([
+    {
+      reason: "an unterminated flow sequence in the first document",
+      path: "vendor/bad.yml",
+      content: "a: [1, 2\n",
+    },
+    {
+      reason: "an unterminated flow sequence in a later document",
+      path: "deploy/manifests.yml",
+      content: "a: 1\n---\nb: [1, 2\n",
+    },
+    {
+      reason: "a duplicate key cannot mask a syntax error",
+      path: "tests/fixtures/broken.yml",
+      content: "a: 1\na: 2\nb: [unclosed\n",
+    },
+  ])("broken YAML outside the managed set still fails: $reason", ({ path, content }) => {
+    const { exitCode, stderr } = runValidator({ [path]: content });
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain(`${path}: does not parse as YAML`);
   });
 
-  test("a repo-owned file with a duplicate key AND a syntax error still fails", () => {
+  test("a duplicate key cannot mask a resolution failure in the same file", () => {
+    // doc.errors carries only composer-stage problems; the unresolved
+    // alias surfaces at conversion (doc.toJS) and must still fail even
+    // though the duplicate key already reported (as an advisory here).
     const { exitCode, stderr } = runValidator({
-      "tests/fixtures/broken.yml": "a: 1\na: 2\nb: [unclosed\n",
+      "deploy/manifests.yml": "a: 1\na: 2\nb: *nope\n",
     });
     expect(exitCode).toBe(1);
-    expect(stderr).toContain("tests/fixtures/broken.yml: does not parse as YAML");
-  });
-
-  test("plain broken YAML outside the managed set still fails", () => {
-    const { exitCode, stderr } = runValidator({ "vendor/bad.yml": "a: [1, 2\n" });
-    expect(exitCode).toBe(1);
-    expect(stderr).toContain("vendor/bad.yml: does not parse as YAML");
+    expect(stderr).toContain("deploy/manifests.yml: does not parse as YAML");
   });
 });
 
@@ -327,48 +372,12 @@ describe("multi-document YAML", () => {
     expect(exitCode).toBe(0);
   });
 
-  test("a duplicate key inside a document of a .github/ file fails", () => {
-    const { exitCode, stderr } = runValidator({
-      ".github/multi.yml": "a: 1\na: 2\n---\nb: 3\n",
-    });
-    expect(exitCode).toBe(1);
-    expect(stderr).toContain(".github/multi.yml: duplicate mapping key");
-  });
-
   test("a VALID multi-document .github/ file still fails - GitHub reads one mapping", () => {
     const { exitCode, stderr } = runValidator({
       ".github/dependabot.yml": "version: 2\nupdates: []\n---\nversion: 2\n",
     });
     expect(exitCode).toBe(1);
     expect(stderr).toContain(".github/dependabot.yml: multi-document YAML stream");
-  });
-
-  test("a duplicate key inside a repo-owned multi-document file is an advisory", () => {
-    const { exitCode, stdout, stderr } = runValidator({
-      "deploy/manifests.yml": "a: 1\na: 2\n---\nb: 3\n",
-    });
-    expect(stderr).toBe("");
-    expect(exitCode).toBe(0);
-    expect(stdout).toContain("advisory: deploy/manifests.yml: duplicate mapping key");
-  });
-
-  test("a syntax error in a later document still fails", () => {
-    const { exitCode, stderr } = runValidator({
-      "deploy/manifests.yml": "a: 1\n---\nb: [1, 2\n",
-    });
-    expect(exitCode).toBe(1);
-    expect(stderr).toContain("deploy/manifests.yml: does not parse as YAML");
-  });
-
-  test("a duplicate key cannot mask a resolution failure in the same file", () => {
-    // doc.errors carries only composer-stage problems; the unresolved
-    // alias surfaces at conversion and must still fail even though the
-    // duplicate key already reported (as an advisory here).
-    const { exitCode, stderr } = runValidator({
-      "deploy/manifests.yml": "a: 1\na: 2\nb: *nope\n",
-    });
-    expect(exitCode).toBe(1);
-    expect(stderr).toContain("deploy/manifests.yml: does not parse as YAML");
   });
 });
 
@@ -440,74 +449,54 @@ describe("base checks shape", () => {
     expect(stdout).not.toContain("missing the commit-names check");
   });
 
-  test("a check-typography step disabled by if: false fails", () => {
-    const steps = [
-      "      - uses: Vivswan/repo-platform/actions/check-typography@main",
-      "        if: false",
-      ...MERGED_STEPS.slice(2),
-    ];
-    const { exitCode, stderr } = runValidator({
-      ".github/.copier-answers.yml": PRIVATE_ANSWERS,
-      ".github/workflows/ci.yml": mergedCi(steps),
-    });
-    expect(exitCode).toBe(1);
-    expect(stderr).toContain("no unconditional check-typography step");
-  });
+  // One predicate decides the merged typography step: a uses matcher
+  // anchored to the pinned owner's full action identity, AND the step must
+  // be unconditional. Each row substitutes the first step of MERGED_STEPS.
+  test.each([
+    {
+      reason: "the step is disabled by if: false",
+      stepLines: [
+        "      - uses: Vivswan/repo-platform/actions/check-typography@main",
+        "        if: false",
+      ],
+    },
+    {
+      reason: "a look-alike action name",
+      stepLines: ["      - uses: Vivswan/repo-platform/actions/check-typography-disabled@main"],
+    },
+    {
+      reason: "check-typography from another repository of the pinned owner",
+      stepLines: ["      - uses: Vivswan/repo/actions/check-typography@v1"],
+    },
+    {
+      reason: "check-typography from another owner",
+      stepLines: ["      - uses: attacker/repo-platform/actions/check-typography@v1"],
+    },
+  ])(
+    "a merged ci.yml lacking an owned, unconditional check-typography step fails: $reason",
+    ({ stepLines }) => {
+      const { exitCode, stderr } = runValidator({
+        ".github/.copier-answers.yml": PRIVATE_ANSWERS,
+        ".github/workflows/ci.yml": mergedCi([...stepLines, ...MERGED_STEPS.slice(2)]),
+      });
+      expect(exitCode).toBe(1);
+      expect(stderr).toContain("no unconditional check-typography step");
+    },
+  );
 
-  test("a look-alike action name does not satisfy the typography check", () => {
-    const steps = [
-      "      - uses: Vivswan/repo-platform/actions/check-typography-disabled@main",
-      ...MERGED_STEPS.slice(2),
-    ];
-    const { exitCode, stderr } = runValidator({
-      ".github/.copier-answers.yml": PRIVATE_ANSWERS,
-      ".github/workflows/ci.yml": mergedCi(steps),
-    });
-    expect(exitCode).toBe(1);
-    expect(stderr).toContain("no unconditional check-typography step");
-  });
-
-  test("check-typography from another repository does not count", () => {
-    const steps = [
-      "      - uses: attacker/repo/actions/check-typography@v1",
-      ...MERGED_STEPS.slice(2),
-    ];
-    const { exitCode, stderr } = runValidator({
-      ".github/.copier-answers.yml": PRIVATE_ANSWERS,
-      ".github/workflows/ci.yml": mergedCi(steps),
-    });
-    expect(exitCode).toBe(1);
-    expect(stderr).toContain("no unconditional check-typography step");
-  });
-
-  test("check-typography from another owner does not count", () => {
-    const steps = [
-      "      - uses: attacker/repo-platform/actions/check-typography@v1",
-      ...MERGED_STEPS.slice(2),
-    ];
-    const { exitCode, stderr } = runValidator({
-      ".github/.copier-answers.yml": PRIVATE_ANSWERS,
-      ".github/workflows/ci.yml": mergedCi(steps),
-    });
-    expect(exitCode).toBe(1);
-    expect(stderr).toContain("no unconditional check-typography step");
-  });
-
-  test("a managed render missing github_username in its answers fails", () => {
-    const { exitCode, stderr } = runValidator({
-      ".github/.copier-answers.yml":
-        "_commit: 0.0.0.post5.dev0+abc1234\n_src_path: gh:Vivswan/repo-platform\n",
-    });
-    expect(exitCode).toBe(1);
-    expect(stderr).toContain("`github_username` is missing or not a GitHub username");
-  });
-
-  test("a malformed github_username (regex metacharacters, slashes) fails", () => {
-    const { exitCode, stderr } = runValidator({
-      ".github/.copier-answers.yml":
+  test.each([
+    {
+      reason: "the key is absent",
+      answers: "_commit: 0.0.0.post5.dev0+abc1234\n_src_path: gh:Vivswan/repo-platform\n",
+    },
+    {
+      reason: "the value carries regex metacharacters and a slash",
+      answers:
         "_commit: 0.0.0.post5.dev0+abc1234\n_src_path: gh:Vivswan/repo-platform\n" +
         "github_username: attacker/repo.*\n",
-    });
+    },
+  ])("a managed render whose answers cannot pin an owner fails: $reason", ({ answers }) => {
+    const { exitCode, stderr } = runValidator({ ".github/.copier-answers.yml": answers });
     expect(exitCode).toBe(1);
     expect(stderr).toContain("`github_username` is missing or not a GitHub username");
   });
@@ -702,37 +691,23 @@ describe("the single-call gate shape", () => {
     expect(exitCode).toBe(0);
   });
 
-  test("a ci.yml without the fleet-ci caller fails (every fleet gate silently dropped)", () => {
-    const { exitCode, stderr } = runValidator({
-      ".github/workflows/ci.yml": gateCi(
-        ["  ci:", "    runs-on: ubuntu-latest", "    steps: [{ run: echo decoy }]"],
-        [
-          "  all-green:",
-          "    needs: [checks, ci]",
-          "    if: always()",
-          "    runs-on: ubuntu-latest",
-          "    steps:",
-          "      - uses: Vivswan/repo-platform/actions/all-green@build",
-          "        with:",
-          // biome-ignore lint/suspicious/noTemplateCurlyInString: raw workflow text, not a JS template
-          "          needs: ${{ toJSON(needs) }}",
-        ],
-      ),
-    });
-    expect(exitCode).toBe(1);
-    expect(stderr).toContain("no job calls repo-platform's fleet-ci.yml");
-  });
-
-  test("a fleet-ci look-alike under another owner never counts as the caller", () => {
-    const { exitCode, stderr } = runValidator({
-      ".github/workflows/ci.yml": gateCi([
-        "  ci:",
-        "    uses: evil/repo-platform/.github/workflows/fleet-ci.yml@build",
-      ]),
-    });
-    expect(exitCode).toBe(1);
-    expect(stderr).toContain("no job calls repo-platform's fleet-ci.yml");
-  });
+  test.each<{ reason: string; ciJob: string[] }>([
+    {
+      reason: "no job calls it at all (a decoy run job in its place)",
+      ciJob: ["  ci:", "    runs-on: ubuntu-latest", "    steps: [{ run: echo decoy }]"],
+    },
+    {
+      reason: "a look-alike under another owner",
+      ciJob: ["  ci:", "    uses: evil/repo-platform/.github/workflows/fleet-ci.yml@build"],
+    },
+  ])(
+    "a ci.yml without the owned fleet-ci caller fails (every fleet gate silently dropped): $reason",
+    ({ ciJob }) => {
+      const { exitCode, stderr } = runValidator({ ".github/workflows/ci.yml": gateCi(ciJob) });
+      expect(exitCode).toBe(1);
+      expect(stderr).toContain("no job calls repo-platform's fleet-ci.yml");
+    },
+  );
 
   test("a conditioned fleet-ci caller fails (a skipped caller stands down from the gate)", () => {
     const { exitCode, stderr } = runValidator({
@@ -754,60 +729,66 @@ describe("the single-call gate shape", () => {
     expect(stderr).toContain("no `all-green` job");
   });
 
-  test("the shared action satisfies the judgment requirement; a bare step does not", () => {
-    const bare = gateCi(
-      [],
-      [
-        "  all-green:",
-        "    needs: [checks, ci]",
-        "    if: always()",
-        "    runs-on: ubuntu-latest",
-        "    steps:",
-        "      - run: echo unjudged",
-      ],
-    );
-    const { exitCode, stderr } = runValidator({ ".github/workflows/ci.yml": bare });
-    expect(exitCode).toBe(1);
-    expect(stderr).toContain("no judgment step");
-  });
-
-  test("an all-green action look-alike under another owner never counts as the judgment", () => {
-    const decoy = GATE_CI.replace(
-      "Vivswan/repo-platform/actions/all-green@build",
-      "evil/other-repo/actions/all-green@main",
-    );
-    const { exitCode, stderr } = runValidator({ ".github/workflows/ci.yml": decoy });
-    expect(exitCode).toBe(1);
-    expect(stderr).toContain("no judgment step");
-  });
-
-  test("a conditioned or softened action step no longer counts as the judgment", () => {
-    const conditioned = GATE_CI.replace(
-      "      - uses: Vivswan/repo-platform/actions/all-green@build",
-      '      - "if": false\n        uses: Vivswan/repo-platform/actions/all-green@build',
-    );
-    const { exitCode, stderr } = runValidator({ ".github/workflows/ci.yml": conditioned });
-    expect(exitCode).toBe(1);
-    expect(stderr).toContain("no judgment step");
-    const softened = GATE_CI.replace(
-      "      - uses: Vivswan/repo-platform/actions/all-green@build",
-      "      - continue-on-error: true\n        uses: Vivswan/repo-platform/actions/all-green@build",
-    );
-    const second = runValidator({ ".github/workflows/ci.yml": softened });
-    expect(second.exitCode).toBe(1);
-    expect(second.stderr).toContain("no judgment step");
-  });
-
-  test("the action without the toJSON(needs) wiring fails - a canned input judges a fiction", () => {
-    const canned = GATE_CI.replace(
-      // biome-ignore lint/suspicious/noTemplateCurlyInString: the mutation under test
-      "          needs: ${{ toJSON(needs) }}",
-      '          needs: \'{"ci": {"result": "success"}}\'',
-    );
-    const { exitCode, stderr } = runValidator({ ".github/workflows/ci.yml": canned });
-    expect(exitCode).toBe(1);
-    expect(stderr).toContain("no judgment step");
-  });
+  // One predicate (judgesThroughAction) decides the judgment step: the
+  // repo-platform all-green action (any owner), unconditioned and
+  // unsoftened, with the live needs context wired in.
+  const ACTION_STEP = "      - uses: Vivswan/repo-platform/actions/all-green@build";
+  const mutateGate = (from: string, to: string): string => {
+    if (!GATE_CI.includes(from)) throw new Error(`GATE_CI fixture lost its ${from.trim()} line`);
+    return GATE_CI.replace(from, to);
+  };
+  test.each([
+    {
+      reason: "a bare run step",
+      ci: gateCi(
+        [],
+        [
+          "  all-green:",
+          "    needs: [checks, ci]",
+          "    if: always()",
+          "    runs-on: ubuntu-latest",
+          "    steps:",
+          "      - run: echo unjudged",
+        ],
+      ),
+    },
+    {
+      reason: "an all-green action from another repository",
+      ci: mutateGate(
+        "Vivswan/repo-platform/actions/all-green@build",
+        "Vivswan/other-repo/actions/all-green@main",
+      ),
+    },
+    {
+      reason: "a conditioned action step (the YAML parser normalizes a quoted if: key too)",
+      ci: mutateGate(
+        ACTION_STEP,
+        '      - "if": false\n        uses: Vivswan/repo-platform/actions/all-green@build',
+      ),
+    },
+    {
+      reason: "a softened action step (continue-on-error)",
+      ci: mutateGate(
+        ACTION_STEP,
+        "      - continue-on-error: true\n        uses: Vivswan/repo-platform/actions/all-green@build",
+      ),
+    },
+    {
+      reason: "a canned needs input (judges a fiction of the run)",
+      ci: mutateGate(
+        // biome-ignore lint/suspicious/noTemplateCurlyInString: the mutation under test
+        "          needs: ${{ toJSON(needs) }}",
+        '          needs: \'{"ci": {"result": "success"}}\'',
+      ),
+    },
+  ])(
+    "an all-green job without the owned, wired, unconditioned action has no judgment step: $reason",
+    ({ ci }) => {
+      const { exitCode, stderr } = runValidator({ ".github/workflows/ci.yml": ci });
+      expect(exitCode).toBe(1);
+      expect(stderr).toContain("no judgment step");
+    },
+  );
 
   test("a caller job missing from the gate's needs fails", () => {
     const unneeded = GATE_CI.replace("needs: [checks, ci]", "needs: [checks]");
@@ -925,8 +906,38 @@ describe("ownership self-declarations", () => {
     "# This file is managed by Vivswan/repo-platform.\n" +
     "# Local edits may be replaced during template updates.\n";
 
-  test("a sync-managed file without the managed header fails", () => {
-    const { exitCode, stderr } = runValidator({ ".yamllint": "extends: default\n" });
+  // One anchored regex over the file's opening HEADER_WINDOW lines decides
+  // the header: the pinned owner, then the canonical repo name and period
+  // with no repo-name character after it (GitHub allows [A-Za-z0-9._-], so
+  // every continuation character must fail the anchor).
+  test.each([
+    { reason: "no header at all", content: "extends: default\n" },
+    {
+      reason: "another owner's header",
+      content: "# This file is managed by attacker/repo-platform.\nextends: default\n",
+    },
+    {
+      reason: "a negated look-alike ('is not managed by')",
+      content: "# This file is not managed by Vivswan/repo-platform.\nextends: default\n",
+    },
+    {
+      reason: "a longer repo name continued with '-'",
+      content: "# This file is managed by Vivswan/repo-platform-fork.\nextends: default\n",
+    },
+    {
+      reason: "a longer repo name continued with '_'",
+      content: "# This file is managed by Vivswan/repo-platform_fork.\nextends: default\n",
+    },
+    {
+      reason: "a longer repo name continued with '.'",
+      content: "# This file is managed by Vivswan/repo-platform.fork.\nextends: default\n",
+    },
+    {
+      reason: "the header buried past the opening lines",
+      content: `${"# filler\n".repeat(10)}${C1}extends: default\n`,
+    },
+  ])("a sync-managed file not opening with the managed header fails: $reason", ({ content }) => {
+    const { exitCode, stderr } = runValidator({ ".yamllint": content });
     expect(exitCode).toBe(1);
     expect(stderr).toContain(".yamllint: does not open with the managed header");
   });
@@ -935,42 +946,6 @@ describe("ownership self-declarations", () => {
     const { exitCode, stderr } = runValidator({ ".yamllint": `${C1}extends: default\n` });
     expect(stderr).toBe("");
     expect(exitCode).toBe(0);
-  });
-
-  test("another owner's header does not satisfy the pinned owner", () => {
-    const { exitCode, stderr } = runValidator({
-      ".yamllint": "# This file is managed by attacker/repo-platform.\nextends: default\n",
-    });
-    expect(exitCode).toBe(1);
-    expect(stderr).toContain(".yamllint: does not open with the managed header");
-  });
-
-  test("a negated look-alike header does not count", () => {
-    const { exitCode, stderr } = runValidator({
-      ".yamllint": "# This file is not managed by Vivswan/repo-platform.\nextends: default\n",
-    });
-    expect(exitCode).toBe(1);
-    expect(stderr).toContain(".yamllint: does not open with the managed header");
-  });
-
-  test("a longer look-alike repo name does not count", () => {
-    // GitHub repo names allow [A-Za-z0-9._-], so every continuation
-    // character must fail the anchor.
-    for (const name of ["repo-platform-fork", "repo-platform_fork", "repo-platform.fork"]) {
-      const { exitCode, stderr } = runValidator({
-        ".yamllint": `# This file is managed by Vivswan/${name}.\nextends: default\n`,
-      });
-      expect(exitCode).toBe(1);
-      expect(stderr).toContain(".yamllint: does not open with the managed header");
-    }
-  });
-
-  test("a header buried past the opening lines does not count", () => {
-    const { exitCode, stderr } = runValidator({
-      ".yamllint": `${"# filler\n".repeat(10)}${C1}extends: default\n`,
-    });
-    expect(exitCode).toBe(1);
-    expect(stderr).toContain(".yamllint: does not open with the managed header");
   });
 
   test("a split file carries each region marker exactly once, in order", () => {
@@ -1141,6 +1116,9 @@ describe("ownership-manifest byte parity", () => {
   const regionEntry = (path: string, begin: string, end: string) =>
     `{"class": "split", "grammar": "managed-region", "begin": ${JSON.stringify(begin)}, ` +
     `"end": ${JSON.stringify(end)}, "hash": "${sha(regionOf(BASELINE[path] ?? "", begin, end) ?? "")}"}`;
+  const splitEntry = (grammar: string, begin: string, end: string, hash: string) =>
+    `{"class": "split", "grammar": ${JSON.stringify(grammar)}, "begin": ${JSON.stringify(begin)}, ` +
+    `"end": ${JSON.stringify(end)}, "hash": "${hash}"}`;
   const stampedBaseline = () => ({
     ...SELF_ENTRY,
     ".github/.copier-answers.yml": `{"class": "managed", "hash": "${sha(
@@ -1303,15 +1281,14 @@ describe("ownership-manifest byte parity", () => {
     // pattern needs a dot or signed exponent); the yaml core schema reads
     // digits-e-digits as Infinity. A typed read turned ~2% of build shas
     // into a false tampering report; the failsafe re-read keeps them
-    // strings, so a matching stamp passes with no missing-_commit text.
-    const exponentSha = runValidator({
+    // strings, so a render whose auto-stamped manifest carries the same
+    // sha as its self-entry commit passes clean (no "stamped provenance"
+    // mismatch, no missing-_commit text, nothing else).
+    const { exitCode, stderr } = runValidator({
       ".github/.copier-answers.yml": `${MANAGED_HEADER}_commit: 95e1875\n_src_path: gh:Vivswan/repo-platform\ngithub_username: Vivswan\n`,
-      [MANIFEST]: manifestOf({
-        [MANIFEST]: '{"class": "managed", "hash": null, "commit": "95e1875"}',
-      }),
     });
-    expect(exponentSha.stderr).not.toContain("stamped provenance");
-    expect(exponentSha.stderr).not.toContain("no _commit in .github/.copier-answers.yml");
+    expect(stderr).toBe("");
+    expect(exitCode).toBe(0);
   });
 
   test("the exponent-shaped sha still feeds the provenance check (positive oracle)", () => {
@@ -1345,48 +1322,58 @@ describe("ownership-manifest byte parity", () => {
     expect(keyDeleted.stderr).toContain("no _commit in .github/.copier-answers.yml");
   });
 
-  test("a public-only entry on a private render is manifest drift", () => {
-    // CONTRIBUTING.md renders only on public repos: a manifest entry for
-    // it on a private render cannot come from the template.
-    const privateAnswers =
-      `${MANAGED_HEADER}_commit: 0.0.0.post5.dev0+abc1234\n_src_path: gh:Vivswan/repo-platform\n` +
-      "github_username: Vivswan\nprivate: true\n";
-    const entries = {
-      ...stampedBaseline(),
-      ".github/.copier-answers.yml": `{"class": "managed", "hash": "${sha(privateAnswers)}"}`,
-      "CONTRIBUTING.md":
-        `{"class": "split", "grammar": "managed-region", "begin": ${JSON.stringify(B)}, ` +
-        `"end": ${JSON.stringify(E)}, "hash": "${"a".repeat(64)}"}`,
-    };
-    const { exitCode, stderr } = runValidator({
-      ".github/.copier-answers.yml": privateAnswers,
-      [MANIFEST]: manifestOf(entries),
-    });
-    expect(exitCode).toBe(1);
-    expect(stderr).toContain("entry 'CONTRIBUTING.md' should not exist for this render");
-  });
-
-  test("a LICENSE.md entry with custom-license selected is manifest drift", () => {
-    // The custom-license module de-renders the fleet LICENSE.md; the repo
-    // owns its license, so a manifest entry claiming it cannot come from
-    // the template.
-    const registration = `${BASELINE[".repo-platform.yml"]}`.replace(
-      "modules: [uv]",
-      "modules: [uv, custom-license]",
-    );
-    const entries = {
-      ...stampedBaseline(),
-      "LICENSE.md":
-        `{"class": "split", "grammar": "managed-region", "begin": ${JSON.stringify(B)}, ` +
-        `"end": ${JSON.stringify(E)}, "hash": "${"a".repeat(64)}"}`,
-    };
-    const { exitCode, stderr } = runValidator({
-      ".repo-platform.yml": registration,
-      [MANIFEST]: manifestOf(entries),
-    });
-    expect(exitCode).toBe(1);
-    expect(stderr).toContain("entry 'LICENSE.md' should not exist for this render");
-  });
+  // One condition judges a roster-covered entry whose render condition is
+  // off (the path is covered by SOME render, not this one): such an entry
+  // cannot come from the template, so it is manifest drift.
+  const PRIVATE_ANSWERS =
+    `${MANAGED_HEADER}_commit: 0.0.0.post5.dev0+abc1234\n_src_path: gh:Vivswan/repo-platform\n` +
+    "github_username: Vivswan\nprivate: true\n";
+  test.each<{ reason: string; path: string; tree: Record<string, string> }>([
+    {
+      reason: "a public-only file (CONTRIBUTING.md) listed on a private render",
+      path: "CONTRIBUTING.md",
+      tree: {
+        ".github/.copier-answers.yml": PRIVATE_ANSWERS,
+        [MANIFEST]: manifestOf({
+          ...stampedBaseline(),
+          ".github/.copier-answers.yml": `{"class": "managed", "hash": "${sha(PRIVATE_ANSWERS)}"}`,
+          "CONTRIBUTING.md": splitEntry("managed-region", B, E, "a".repeat(64)),
+        }),
+      },
+    },
+    {
+      reason:
+        "the fleet LICENSE.md listed with custom-license selected (the repo owns its license)",
+      path: "LICENSE.md",
+      tree: {
+        ".repo-platform.yml": BASELINE[".repo-platform.yml"].replace(
+          "modules: [uv]",
+          "modules: [uv, custom-license]",
+        ),
+        [MANIFEST]: manifestOf({
+          ...stampedBaseline(),
+          "LICENSE.md": splitEntry("managed-region", B, E, "a".repeat(64)),
+        }),
+      },
+    },
+    {
+      reason: "an unselected module's workflow (release.yml; the baseline selects only uv)",
+      path: ".github/workflows/release.yml",
+      tree: {
+        [MANIFEST]: manifestOf({
+          ...stampedBaseline(),
+          ".github/workflows/release.yml": '{"class": "managed", "hash": null}',
+        }),
+      },
+    },
+  ])(
+    "a roster entry whose render condition is off is manifest drift: $reason",
+    ({ path, tree }) => {
+      const { exitCode, stderr } = runValidator(tree);
+      expect(exitCode).toBe(1);
+      expect(stderr).toContain(`entry '${path}' should not exist for this render`);
+    },
+  );
 
   test("a tree carrying the base marker roster passes against the mirror-stamped manifest", () => {
     // The mirror-coverage claim's teeth: this fixture carries every base
@@ -1434,57 +1421,45 @@ describe("ownership-manifest byte parity", () => {
     expect(stderr).toContain("ownership tables declare it managed");
   });
 
-  test("tampered split metadata on a roster path fails the cross-check", () => {
-    // A drifted marker string would skew what parity covers; the tables
-    // carry the DECLARED pair.
-    const region = `${B}\n# Security\n# NOT THE END\n`;
-    const entries = {
-      ...stampedBaseline(),
-      "SECURITY.md":
-        `{"class": "split", "grammar": "managed-region", "begin": ${JSON.stringify(B)}, ` +
-        `"end": "# NOT THE END", "hash": "${sha(region)}"}`,
-    };
-    const { exitCode, stderr } = runValidator({
-      [MANIFEST]: manifestOf(entries),
-      "SECURITY.md": `${B}\n# Security\n# NOT THE END\n${E}\ntail\n`,
-    });
-    expect(exitCode).toBe(1);
-    expect(stderr).toContain("carries split metadata outside its declared managed-region grammar");
-  });
-
-  test("a wrong marker spelling on a roster path fails the cross-check", () => {
-    // The tables carry the DECLARED pair: SECURITY.md's is the HTML form,
-    // so the hash spelling is drift even though it is a real marker pair.
-    const region = `${HB}\n# Security\n${HE}\n`;
-    const entries = {
-      ...stampedBaseline(),
-      "SECURITY.md":
-        `{"class": "split", "grammar": "managed-region", "begin": ${JSON.stringify(HB)}, ` +
-        `"end": ${JSON.stringify(HE)}, "hash": "${sha(region)}"}`,
-    };
-    const { exitCode, stderr } = runValidator({
-      [MANIFEST]: manifestOf(entries),
-      "SECURITY.md": `${region}tail\n`,
-    });
-    expect(exitCode).toBe(1);
-    expect(stderr).toContain("carries split metadata outside its declared managed-region grammar");
-  });
-
-  test("a RETIRED grammar on a roster path fails the cross-check", () => {
-    const region = `${B}\n# Security\n${E}\n`;
-    const entries = {
-      ...stampedBaseline(),
-      "SECURITY.md":
-        `{"class": "split", "grammar": "tail-marker", "begin": ${JSON.stringify(B)}, ` +
-        `"end": ${JSON.stringify(E)}, "hash": "${sha(region)}"}`,
-    };
-    const { exitCode, stderr } = runValidator({
-      [MANIFEST]: manifestOf(entries),
-      "SECURITY.md": `${region}tail\n`,
-    });
-    expect(exitCode).toBe(1);
-    expect(stderr).toContain("carries split metadata outside its declared managed-region grammar");
-  });
+  // One roster cross-check condition judges a region entry's present
+  // metadata: begin, end, and grammar must each match the DECLARED pair
+  // (SECURITY.md's is the HTML form), or parity would cover a skewed
+  // region. Each row's hash matches the region ITS OWN pair slices, so
+  // parity is not what reports the disagreement.
+  test.each([
+    {
+      reason: "a drifted end string",
+      entry: splitEntry(
+        "managed-region",
+        B,
+        "# NOT THE END",
+        sha(`${B}\n# Security\n# NOT THE END\n`),
+      ),
+      body: `${B}\n# Security\n# NOT THE END\n${E}\ntail\n`,
+    },
+    {
+      reason: "the hash marker spelling (a real pair, not the declared one)",
+      entry: splitEntry("managed-region", HB, HE, sha(`${HB}\n# Security\n${HE}\n`)),
+      body: `${HB}\n# Security\n${HE}\ntail\n`,
+    },
+    {
+      reason: "a RETIRED grammar (tail-marker) on the declared pair",
+      entry: splitEntry("tail-marker", B, E, sha(`${B}\n# Security\n${E}\n`)),
+      body: `${B}\n# Security\n${E}\ntail\n`,
+    },
+  ])(
+    "split metadata disagreeing with the declared pair fails the cross-check: $reason",
+    ({ entry, body }) => {
+      const { exitCode, stderr } = runValidator({
+        [MANIFEST]: manifestOf({ ...stampedBaseline(), "SECURITY.md": entry }),
+        "SECURITY.md": body,
+      });
+      expect(exitCode).toBe(1);
+      expect(stderr).toContain(
+        "carries split metadata outside its declared managed-region grammar",
+      );
+    },
+  );
 
   test("a grammar-carrying region entry matching the declaration passes", () => {
     const region = `${B}\n# Security\n${E}\n`;
@@ -1513,41 +1488,44 @@ describe("ownership-manifest byte parity", () => {
     expect(stderr).toContain("ownership tables declare it split");
   });
 
-  test("an unknown split grammar on an uncovered path is a structural error", () => {
-    const entries = {
-      ...stampedBaseline(),
-      "docs/notes.md":
-        `{"class": "split", "grammar": "prefix", "begin": "# b", "end": "# e", ` +
-        `"hash": "${"d".repeat(64)}"}`,
-    };
-    const { exitCode, stderr } = runValidator({
-      [MANIFEST]: manifestOf(entries),
-      "docs/notes.md": "# b\n# e\n",
-    });
-    expect(exitCode).toBe(1);
-    expect(stderr).toContain('declares split grammar "prefix", which this validator does not read');
-  });
-
-  test("a RETIRED grammar is refused as an older-vintage manifest, never read by guess", () => {
-    // The one loud case the transition keeps: a validator NEWER than the
-    // target's manifest (a repo not yet synced past the one-grammar
-    // change) must refuse, mirroring the sync's own vintage refusals.
-    const entries = {
-      ...stampedBaseline(),
-      "docs/notes.md":
-        `{"class": "split", "grammar": "tail-marker", "marker": "# m", "managed": "above", ` +
-        `"hash": "${"d".repeat(64)}"}`,
-    };
-    const { exitCode, stderr } = runValidator({
-      [MANIFEST]: manifestOf(entries),
-      "docs/notes.md": "# m\n",
-    });
-    expect(exitCode).toBe(1);
-    expect(stderr).toContain(
-      'declares split grammar "tail-marker", which this validator does not read',
-    );
-    expect(stderr).toContain("run a template sync to restamp it");
-  });
+  // An uncovered path, so the structural loop's grammar check is probed
+  // alone. A grammar this validator does not read - one that never existed
+  // or a RETIRED one from an older-vintage manifest (a repo not yet synced
+  // past the one-grammar change) - is refused loudly and never read by
+  // guess, mirroring the sync's own vintage refusals.
+  test.each([
+    {
+      reason: "a grammar that never existed (prefix)",
+      grammar: "prefix",
+      entryFields: `"begin": "# b", "end": "# e"`,
+      body: "# b\n# e\n",
+    },
+    {
+      reason: "the RETIRED tail-marker grammar with its own fields",
+      grammar: "tail-marker",
+      entryFields: `"marker": "# m", "managed": "above"`,
+      body: "# m\n",
+    },
+  ])(
+    "a split grammar this validator does not read is refused, naming the restamp: $reason",
+    ({ grammar, entryFields, body }) => {
+      const entries = {
+        ...stampedBaseline(),
+        "docs/notes.md":
+          `{"class": "split", "grammar": ${JSON.stringify(grammar)}, ${entryFields}, ` +
+          `"hash": "${"d".repeat(64)}"}`,
+      };
+      const { exitCode, stderr } = runValidator({
+        [MANIFEST]: manifestOf(entries),
+        "docs/notes.md": body,
+      });
+      expect(exitCode).toBe(1);
+      expect(stderr).toContain(
+        `declares split grammar ${JSON.stringify(grammar)}, which this validator does not read`,
+      );
+      expect(stderr).toContain("run a template sync to restamp it");
+    },
+  );
 
   test("a split entry without its begin/end strings is a structural error", () => {
     const entries = {
@@ -1598,20 +1576,6 @@ describe("ownership-manifest byte parity", () => {
     expect(stderr).toContain("lacks the split grammar field every render stamps");
     expect(stderr).not.toContain(
       "carries split metadata outside its declared managed-region grammar",
-    );
-  });
-
-  test("an entry whose render condition is off is manifest drift", () => {
-    // release.yml belongs to the release-please module; the baseline
-    // selects only uv, so no template render can have listed it.
-    const entries = {
-      ...stampedBaseline(),
-      ".github/workflows/release.yml": '{"class": "managed", "hash": null}',
-    };
-    const { exitCode, stderr } = runValidator({ [MANIFEST]: manifestOf(entries) });
-    expect(exitCode).toBe(1);
-    expect(stderr).toContain(
-      "entry '.github/workflows/release.yml' should not exist for this render",
     );
   });
 
@@ -1714,18 +1678,21 @@ describe("ownership-manifest byte parity", () => {
     expect(stderr).toContain('has unknown class "bespoke" (expected managed, split, or starter)');
   });
 
-  test("the manifest's own entry must stay hash-null (self-hash is circular)", () => {
-    const entries = {
-      ...stampedBaseline(),
-      [MANIFEST]: `{"class": "managed", "hash": "${"b".repeat(64)}"}`,
-    };
-    const { exitCode, stderr } = runValidator({ [MANIFEST]: manifestOf(entries) });
-    expect(exitCode).toBe(1);
-    expect(stderr).toContain("self-hash would be circular");
-  });
-
-  test("a self entry reclassified as starter cannot slip past the invariant", () => {
-    const entries = { ...stampedBaseline(), [MANIFEST]: '{"class": "starter"}' };
+  // The self entry's one invariant, judged before any class dispatch:
+  // managed, hash null (its content includes every other hash), and a
+  // null-or-string provenance commit.
+  test.each([
+    {
+      reason: "a hash set (self-hash is circular)",
+      selfEntry: `{"class": "managed", "hash": "${"b".repeat(64)}"}`,
+    },
+    { reason: "reclassified as starter", selfEntry: '{"class": "starter"}' },
+    {
+      reason: "a non-string provenance commit",
+      selfEntry: '{"class": "managed", "hash": null, "commit": 42}',
+    },
+  ])("the manifest's own entry breaking its invariant is an error: $reason", ({ selfEntry }) => {
+    const entries = { ...stampedBaseline(), [MANIFEST]: selfEntry };
     const { exitCode, stderr } = runValidator({ [MANIFEST]: manifestOf(entries) });
     expect(exitCode).toBe(1);
     expect(stderr).toContain("self-hash would be circular");
@@ -1880,32 +1847,37 @@ describe("ownership-manifest byte parity", () => {
     expect(stderr).not.toContain(".bun-version: content");
   });
 
-  test("a duplicated manifest key is a hard error naming the path", () => {
-    // Two entries for one path: JSON.parse keeps the LAST one silently, so
-    // a conflicted resolution keeping a second, starter-classed ci.yml
-    // line would switch that file's parity off invisibly. The duplicate is
-    // refused before any consumer reads a last-win view.
-    const base = stampedBaseline();
-    const text = `{\n  "files": {\n${[
-      `    ${JSON.stringify(MANIFEST)}: ${base[MANIFEST]}`,
-      `    ".github/workflows/ci.yml": ${base[".github/workflows/ci.yml"]}`,
-      `    ".github/workflows/ci.yml": {"class": "starter"}`,
-    ].join(",\n")}\n  }\n}\n`;
-    const { exitCode, stderr } = runValidator({ [MANIFEST]: text });
-    expect(exitCode).toBe(1);
-    expect(stderr).toContain("binds a key more than once");
-    // The last-win starter view must not have reached the parity loop.
-    expect(stderr).not.toContain("a starter carrying a hash");
-  });
-
-  test("a duplicated key inside one entry object is refused too", () => {
-    const base = stampedBaseline();
-    const text = `{\n  "files": {\n${[
-      `    ${JSON.stringify(MANIFEST)}: ${base[MANIFEST]}`,
-      `    ".github/workflows/ci.yml": {"class": "managed", "class": "starter", "hash": null}`,
-    ].join(",\n")}\n  }\n}\n`;
-    const { exitCode, stderr } = runValidator({ [MANIFEST]: text });
-    expect(exitCode).toBe(1);
-    expect(stderr).toContain("binds a key more than once");
-  });
+  // JSON.parse keeps the LAST binding silently, so a conflicted resolution
+  // keeping a second, starter-classed ci.yml line (or a second class field
+  // inside the entry) would switch that file's parity off invisibly. The
+  // duplicate is refused before any consumer reads the last-win view.
+  test.each([
+    {
+      reason: "two entry lines for one path (the second starter-classed)",
+      entryLines: [
+        `    ".github/workflows/ci.yml": ${stampedBaseline()[".github/workflows/ci.yml"]}`,
+        `    ".github/workflows/ci.yml": {"class": "starter"}`,
+      ],
+    },
+    {
+      reason: "a duplicated class field inside one entry object",
+      entryLines: [
+        `    ".github/workflows/ci.yml": {"class": "managed", "class": "starter", "hash": null}`,
+      ],
+    },
+  ])(
+    "a duplicated manifest key is a hard error, refused before any last-win read: $reason",
+    ({ entryLines }) => {
+      const text = `{\n  "files": {\n${[
+        `    ${JSON.stringify(MANIFEST)}: ${SELF_ENTRY[MANIFEST]}`,
+        ...entryLines,
+      ].join(",\n")}\n  }\n}\n`;
+      const { exitCode, stderr } = runValidator({ [MANIFEST]: text });
+      expect(exitCode).toBe(1);
+      expect(stderr).toContain("binds a key more than once");
+      // The last-win view (ci.yml as a starter) must not have reached the
+      // roster cross-check: that is the report it would draw there.
+      expect(stderr).not.toContain('claims class "starter"');
+    },
+  );
 });
