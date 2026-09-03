@@ -108,6 +108,28 @@ export const GUARD_REGISTRY: readonly GuardEntry[] = [
     testFile: "tests/shared/proc.test.ts",
     testName: "a key added to process.env after start reaches capture's child",
   },
+  // The default hang bound is resolved once per piped wrapper, so each
+  // wrapper's site is its own entry; the forcing test asserts both.
+  {
+    id: "proc-default-hang-bound-capture",
+    hazard:
+      "a piped spawn whose caller passes no timeoutMs runs unbounded: a wedged child never reaches pipe EOF, so the run hangs until the job-level timeout kills the runner with no line naming the deadline",
+    guardFile: ".github/scripts/shared/proc.ts",
+    snippet: "): RunResult {\n  const timeoutMs = options.timeoutMs ?? DEFAULT_HANG_BOUND_MS;",
+    mutated: "): RunResult {\n  const timeoutMs = options.timeoutMs;",
+    testFile: "tests/shared/proc.test.ts",
+    testName: "absent: the hang bound is the deadline; a normal exit reports timedOut false",
+  },
+  {
+    id: "proc-default-hang-bound-must-capture",
+    hazard:
+      "mustCapture's twin of the capture hazard: an unbounded piped spawn whose caller passes no timeoutMs hangs the run until the job-level timeout kills the runner",
+    guardFile: ".github/scripts/shared/proc.ts",
+    snippet: "): string {\n  const timeoutMs = options.timeoutMs ?? DEFAULT_HANG_BOUND_MS;",
+    mutated: "): string {\n  const timeoutMs = options.timeoutMs;",
+    testFile: "tests/shared/proc.test.ts",
+    testName: "absent: the hang bound is the deadline; a normal exit reports timedOut false",
+  },
   // The binding check is itself a guard; unarming its vanished-snippet
   // branch would let any registered guard be deleted silently.
   {
@@ -206,7 +228,6 @@ export const GUARD_REGISTRY: readonly GuardEntry[] = [
     hazard:
       "the select job's sha output deleted: steps.gate's resolved commit never reaches the apply job, whose checkout ref reads empty and silently reverts to the trigger ref",
     guardFile: ".github/workflows/settings-repos.yml",
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal workflow line under pin
     snippet: "      sha: ${{ steps.gate.outputs.sha }}",
     mutated: "",
     testFile: "tests/scripts/check_ssot.test.ts",
@@ -230,7 +251,6 @@ export const GUARD_REGISTRY: readonly GuardEntry[] = [
     hazard:
       "the fallback re-checkout's ref deleted: actions/checkout lands on the trigger ref again, so the fallback run's selection scripts and registry come from the red tip while claiming the green commit",
     guardFile: ".github/workflows/settings-repos.yml",
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal workflow line under pin
     snippet: "          ref: ${{ steps.gate.outputs.sha }}",
     mutated: "",
     testFile: "tests/scripts/check_ssot.test.ts",
@@ -242,7 +262,6 @@ export const GUARD_REGISTRY: readonly GuardEntry[] = [
     hazard:
       "the apply job's checkout ref deleted (probe C, verbatim): the fleet-wide writer's layer files come from the trigger ref instead of the gate's vouched commit, green on every local gate",
     guardFile: ".github/workflows/settings-repos.yml",
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal workflow line under pin
     snippet: "          ref: ${{ needs.select.outputs.sha }}",
     mutated: "",
     testFile: "tests/scripts/check_ssot.test.ts",
@@ -354,7 +373,6 @@ export const GUARD_REGISTRY: readonly GuardEntry[] = [
     hazard:
       "the sha input deleted from the release leg's call: release.yml falls back to its own github.sha - equal today because the leg runs in the judged commit's own run, but the EXPLICIT pass is what keeps a future caller from silently handing the pipeline a different commit",
     guardFile: "templates/release-please/fragments/all-green-release.jinja",
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal fragment line under pin
     snippet: "      sha: {% raw %}${{ github.sha }}{% endraw %}",
     mutated: "",
     testFile: "tests/scripts/check_ssot.test.ts",
@@ -366,9 +384,7 @@ export const GUARD_REGISTRY: readonly GuardEntry[] = [
     hazard:
       "release.yml's head gate rewired off the input: the sha input is the explicit judged-commit hand-off (inputs.sha, github.sha as the same-run fallback), and a gate reading anything else would silently release whatever a future caller's context holds",
     guardFile: "templates/release-please/.github/workflows/release.yml.jinja",
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal template line under pin
     snippet: "          JUDGED: {% raw %}${{ inputs.sha || github.sha }}{% endraw %}",
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: the unarmed shape the audit stages
     mutated: "          JUDGED: {% raw %}${{ github.sha }}{% endraw %}",
     testFile: "tests/scripts/check_ssot.test.ts",
     testName:
@@ -488,7 +504,6 @@ export const GUARD_REGISTRY: readonly GuardEntry[] = [
       "a composite action's bun floats on the CONSUMER repository's version resolution (a bare setup-bun reads the caller checkout's version files): a repo-platform bun bump that rewrites the action lockfiles then breaks arbitrary consumers' CI with no signal in repo-platform's own",
     guardFile: "actions/check-typography/action.yml",
     snippet:
-      // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal action lines under pin
       "      continue-on-error: true\n      uses: oven-sh/setup-bun@v2\n      with:\n        bun-version-file: ${{ github.action_path }}/.bun-version",
     mutated: "      continue-on-error: true\n      uses: oven-sh/setup-bun@v2",
     testFile: "tests/scripts/check_ssot.test.ts",
