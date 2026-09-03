@@ -415,9 +415,15 @@ describe("wait_for_build.ts", () => {
     expect(r.output).toContain("::warning::the build branch is not yet built");
   });
 
-  test("keeps polling through a transient fetch failure, then warns green", () => {
+  test("keeps polling through failed fetches instead of ending the wait, then warns green", () => {
+    // The tip IS stamped fresh, but every fetch of it fails: a failed
+    // fetch is "no answer", so the loop must keep polling and exhaust ALL
+    // the attempts before warning - a warn-after-the-first-failure
+    // regression prints the same warning, so the counts are the proof.
     const r = run({ env: { GIT_FETCH_FAIL: "1" }, tipMessage: stampMessage(MAIN_SHA) });
     expect(r.exitCode).toBe(0);
+    expect(r.output.split("waiting for the build branch to be built").length - 1).toBe(3);
+    expect(buildFetches(r.calls)).toBe(3);
     expect(r.output).toContain("::warning::the build branch is not yet built");
   });
 

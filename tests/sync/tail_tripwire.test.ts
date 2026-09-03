@@ -164,161 +164,167 @@ function runScript(
 }
 
 describe("headSplitEntries (re-exported for the sync legs)", () => {
-  test("parses a managed-region manifest strictly", () => {
+  test("reads every managed-region entry, each with its own marker dialect", () => {
+    // head_manifest.test.ts pins one split entry beside a non-split one;
+    // this pins that several splits accumulate, keyed by path, markers
+    // per entry - the sync legs look entries up by `map.get(path)`.
     const map = headSplitEntries(
       manifestText({ "AGENTS.md": rawRegion(), ".gitignore": rawRegion(HB, HE) }),
       "t",
     );
-    expect(map.get("AGENTS.md")).toEqual({ path: "AGENTS.md", begin: B, end: E });
-    expect(map.get(".gitignore")).toEqual({ path: ".gitignore", begin: HB, end: HE });
-  });
-
-  test("a pre-grammar manifest is refused with the recovery advice, never read", () => {
-    // The retired legacy fallback served exactly this shape; after the
-    // fleet census (2026-09: every manifest post-grammar) a straggler is
-    // damage or a missed migration, and either way the loud, actionable
-    // refusal beats a guessed split.
-    expect(() =>
-      headSplitEntries(
-        manifestText({
-          "AGENTS.md": rawPreGrammar(OLD_SENTINEL, "above"),
-          ".gitignore": rawPreGrammar(HB, "below"),
-        }),
-        "t",
-      ),
-    ).toThrow(/predates the stamped split grammar.*recover=recopy/);
-  });
-
-  test("a RETIRED-vintage manifest is refused with the recovery advice, never converted", () => {
-    // The one-time conversion machinery is deleted (fleet censused
-    // post-conversion): both retired wire shapes now ride the
-    // unknown-grammar refusal - the ONLY behavior. The advice precedes the
-    // target-controlled values so it always survives the PR-body clip.
-    expect(() => headSplitEntries(manifestText({ "AGENTS.md": rawLegacyTail() }), "t")).toThrow(
-      /recover=recopy.*split grammar "tail-marker"/,
-    );
-    expect(() => headSplitEntries(manifestText({ ".gitignore": rawLegacyBounded() }), "t")).toThrow(
-      /recover=recopy.*split grammar "bounded-region"/,
+    expect(map).toEqual(
+      new Map([
+        ["AGENTS.md", { path: "AGENTS.md", begin: B, end: E }],
+        [".gitignore", { path: ".gitignore", begin: HB, end: HE }],
+      ]),
     );
   });
 
-  test("a mixed manifest (grammar beside pre-grammar entries) is refused the same way", () => {
-    const files = {
-      "AGENTS.md": rawRegion(),
-      "SECURITY.md": rawPreGrammar(OLD_SENTINEL, "above"),
-    };
-    expect(() => headSplitEntries(manifestText(files), "t")).toThrow(
-      /predates the stamped split grammar/,
-    );
-  });
-
-  test("an unknown grammar is never guessed at - it throws (fail closed)", () => {
-    const files = { "AGENTS.md": { class: "split", grammar: "mystery", marker: OLD_SENTINEL } };
-    expect(() => headSplitEntries(manifestText(files), "t")).toThrow(/refusing to guess/);
-  });
-
-  test("an unclean split path throws instead of silently skipping the real file", () => {
-    // A tampered key ("../AGENTS.md") could never match the post-sync
-    // manifest's clean key, so accepting it would skip the real file's
-    // check without a finding.
-    expect(() => headSplitEntries(manifestText({ "../AGENTS.md": rawRegion() }), "t")).toThrow(
-      /clean relative path/,
-    );
-  });
-
-  test("a duplicated path key throws instead of last-wins reclassifying the file", () => {
-    // JSON.parse keeps only the LAST duplicate: a conflict-mangled
-    // manifest declaring AGENTS.md split THEN managed would classify it
-    // managed, drop it from the split candidates, and let a retirement
-    // delete its repo-owned content with no hold.
-    const dup = `{"files": {"AGENTS.md": ${JSON.stringify(rawRegion())}, "AGENTS.md": {"class": "managed", "hash": null}}}`;
-    expect(() => headSplitEntries(dup, "t")).toThrow(/same key twice/);
-  });
-
-  test("an escape-variant duplicate key is caught too (JSON.parse collides decoded keys)", () => {
-    // The second spelling escapes the final "d" as backslash-u0064: a
-    // byte-level raw-token compare would miss it, but JSON.parse still
-    // collides the two keys last-wins.
-    const escaped = String.raw`"AGENTS.m\u0064"`;
-    const dup = `{"files": {"AGENTS.md": ${JSON.stringify(rawRegion())}, ${escaped}: {"class": "managed", "hash": null}}}`;
-    expect(() => headSplitEntries(dup, "t")).toThrow(/same key twice/);
-  });
-
-  test("an unknown or missing ownership class throws instead of reading as non-split", () => {
-    // A damaged class ("spllt") read as merely non-split would drop the
-    // file from the candidates and let a retirement delete its repo-owned
-    // content with auto-merge armed.
-    expect(() =>
-      headSplitEntries(manifestText({ "AGENTS.md": { class: "spllt", begin: B } }), "t"),
-    ).toThrow(/ownership class/);
-    expect(() => headSplitEntries(manifestText({ "AGENTS.md": { begin: B } }), "t")).toThrow(
-      /ownership class/,
-    );
-  });
-
-  test("a damaged (non-object) entry throws instead of silently skipping its file", () => {
-    expect(() => headSplitEntries(manifestText({ "AGENTS.md": null as never }), "t")).toThrow(
-      /not an object/,
-    );
-  });
-
-  test("an empty or non-printable marker string fails the strict parse", () => {
-    // The marker-line predicate matches line.trim() === marker, so an
-    // EMPTY marker selects the synthetic empty line at EOF: the previous
-    // repo-owned content reads as empty and a delivered file could lose
-    // every local line while the wire reports clear.
-    expect(() => headSplitEntries(manifestText({ "AGENTS.md": rawRegion("", E) }), "t")).toThrow(
-      /printable-ASCII/,
-    );
-    expect(() =>
-      headSplitEntries(manifestText({ "AGENTS.md": rawRegion("# local §", HE) }), "t"),
-    ).toThrow(/printable-ASCII/);
-  });
-
-  test("array-shaped files and entries fail loud, never open", () => {
-    // Arrays pass `typeof === "object"`: '"files": []' would declare zero
-    // splits (nothing checked), an array entry would silently skip its
-    // file - both must route to the unverifiable path via a throw.
-    expect(() => headSplitEntries('{"files": []}', "t")).toThrow(/no top-level 'files' mapping/);
-    expect(() => headSplitEntries(manifestText({ "AGENTS.md": [] as never }), "t")).toThrow(
-      /not an object/,
-    );
+  // head_manifest.test.ts pins the plain refusals (unknown grammar -
+  // registry-proven there - unknown class, non-JSON, files: [],
+  // entry-level duplicate keys, non-ASCII markers). These rows are the
+  // shapes it does not: the retired and pre-grammar vintages with the
+  // ADVICE ORDER pinned (the recovery advice precedes the target-controlled
+  // values, so it always survives the PR-body clip), and the damage shapes
+  // whose silent acceptance would skip a real file's check or reclassify
+  // it - every one must throw so the sync legs fail closed (unverifiable,
+  // manual review) instead of guessing a split.
+  const managedEntry = '{"class": "managed", "hash": null}';
+  // The second spelling escapes the final "d" as backslash-u0064: a
+  // byte-level raw-token compare would miss it, but JSON.parse still
+  // collides the two keys last-wins.
+  const escapedKey = String.raw`"AGENTS.m\u0064"`;
+  test.each([
+    {
+      reason: "a pre-grammar entry: the diagnosis, then the advice",
+      text: manifestText({ "AGENTS.md": rawPreGrammar(OLD_SENTINEL, "above") }),
+      error: /predates the stamped split grammar.*recover=recopy/,
+    },
+    {
+      reason: "a mixed manifest (grammar beside a pre-grammar entry) is refused the same way",
+      text: manifestText({
+        "AGENTS.md": rawRegion(),
+        "SECURITY.md": rawPreGrammar(OLD_SENTINEL, "above"),
+      }),
+      error: /predates the stamped split grammar/,
+    },
+    {
+      reason: "the RETIRED tail-marker vintage: advice before the target-controlled grammar",
+      text: manifestText({ "AGENTS.md": rawLegacyTail() }),
+      error: /recover=recopy.*split grammar "tail-marker"/,
+    },
+    {
+      reason: "the RETIRED bounded-region vintage: advice before the target-controlled grammar",
+      text: manifestText({ ".gitignore": rawLegacyBounded() }),
+      error: /recover=recopy.*split grammar "bounded-region"/,
+    },
+    {
+      reason: "an unclean split path ('../AGENTS.md') could never match the post-sync key",
+      text: manifestText({ "../AGENTS.md": rawRegion() }),
+      error: /clean relative path/,
+    },
+    {
+      reason: "a duplicated path key (split, then managed) must not last-wins reclassify the file",
+      text: `{"files": {"AGENTS.md": ${JSON.stringify(rawRegion())}, "AGENTS.md": ${managedEntry}}}`,
+      error: /same key twice/,
+    },
+    {
+      reason: "an escape-variant duplicate key collides after decoding and is caught too",
+      text: `{"files": {"AGENTS.md": ${JSON.stringify(rawRegion())}, ${escapedKey}: ${managedEntry}}}`,
+      error: /same key twice/,
+    },
+    {
+      reason: "a MISSING ownership class must not read as non-split",
+      text: manifestText({ "AGENTS.md": { begin: B } }),
+      error: /ownership class/,
+    },
+    {
+      reason: "a null entry must not silently skip its file",
+      text: manifestText({ "AGENTS.md": null as never }),
+      error: /not an object/,
+    },
+    {
+      reason: "an array entry passes typeof object and must fail the same way",
+      text: manifestText({ "AGENTS.md": [] as never }),
+      error: /not an object/,
+    },
+    {
+      reason:
+        "an EMPTY marker would select the synthetic empty line at EOF (every local line lost, wire clear)",
+      text: manifestText({ "AGENTS.md": rawRegion("", E) }),
+      error: /printable-ASCII/,
+    },
+  ])("refuses: $reason", ({ text, error }) => {
+    expect(() => headSplitEntries(text, "t")).toThrow(error);
   });
 });
 
 describe("missingLines", () => {
-  test("empty when every non-blank line survives, wherever it moved", () => {
-    expect(missingLines("one\ntwo\n", "two\nextra\none\n")).toEqual([]);
-  });
-
-  test("names each vanished non-blank line", () => {
-    expect(missingLines("one\ntwo\nthree\n", "one\n")).toEqual(["two", "three"]);
-  });
-
-  test("blank and whitespace-only lines never count as lost", () => {
-    expect(missingLines("one\n\n   \n\t\n", "one\n")).toEqual([]);
-  });
-
-  test("occurrence counts are a multiset: a line held twice and delivered once is missing", () => {
-    // A plain Set would see "kept" and pass exactly the shrink this wire
-    // exists to catch; each previous occurrence must consume one
-    // delivered occurrence.
-    expect(missingLines("dup\nother\ndup\n", "dup\nother\n")).toEqual(["dup"]);
-    expect(missingLines("dup\ndup\n", "dup\ndup\nextra\n")).toEqual([]);
-  });
-
-  test("byte-exact: a latin1 byte and its utf-8 spelling are different lines", () => {
-    const latin1Line = Buffer.from([0x63, 0x61, 0x66, 0xe9]).toString("latin1"); // caf\xe9
-    const utf8Line = Buffer.from("café", "utf-8").toString("latin1"); // caf\xc3\xa9
-    expect(missingLines(`${latin1Line}\n`, `${utf8Line}\n`)).toEqual([latin1Line]);
-    expect(missingLines(`${latin1Line}\n`, `${latin1Line}\n`)).toEqual([]);
-  });
-
-  test("byte-exact: CRLF and LF spellings of a line are different lines", () => {
-    // Split-file repo sides are carried byte-for-byte, so a line-ending
-    // flip IS a byte change worth a manual look (warn-cheap by design).
-    expect(missingLines("one\r\ntwo\r\n", "one\ntwo\n")).toEqual(["one\r", "two\r"]);
-    expect(missingLines("one\r\ntwo\r\n", "one\r\ntwo\r\n")).toEqual([]);
+  const latin1Line = Buffer.from([0x63, 0x61, 0x66, 0xe9]).toString("latin1"); // caf\xe9
+  const utf8Line = Buffer.from("café", "utf-8").toString("latin1"); // caf\xc3\xa9
+  // Previous repo-owned text vs delivered: the non-blank previous lines
+  // with no delivered occurrence left to consume - order-free (a moved
+  // line is not a lost one), a multiset (a plain Set would pass exactly
+  // the shrink this wire exists to catch), byte-exact (split-file repo
+  // sides are carried byte-for-byte, so a line-ending flip IS a byte
+  // change worth a manual look - warn-cheap by design).
+  test.each([
+    {
+      reason: "every non-blank line survives, wherever it moved",
+      previous: "one\ntwo\n",
+      delivered: "two\nextra\none\n",
+      missing: [],
+    },
+    {
+      reason: "each vanished non-blank line is named",
+      previous: "one\ntwo\nthree\n",
+      delivered: "one\n",
+      missing: ["two", "three"],
+    },
+    {
+      reason: "blank and whitespace-only lines never count as lost",
+      previous: "one\n\n   \n\t\n",
+      delivered: "one\n",
+      missing: [],
+    },
+    {
+      reason: "multiset: a line held twice and delivered once is missing",
+      previous: "dup\nother\ndup\n",
+      delivered: "dup\nother\n",
+      missing: ["dup"],
+    },
+    {
+      reason: "multiset: a surplus delivered copy is never a loss",
+      previous: "dup\ndup\n",
+      delivered: "dup\ndup\nextra\n",
+      missing: [],
+    },
+    {
+      reason: "byte-exact: a latin1 byte and its utf-8 spelling are different lines",
+      previous: `${latin1Line}\n`,
+      delivered: `${utf8Line}\n`,
+      missing: [latin1Line],
+    },
+    {
+      reason: "byte-exact: the same latin1 bytes on both sides survive",
+      previous: `${latin1Line}\n`,
+      delivered: `${latin1Line}\n`,
+      missing: [],
+    },
+    {
+      reason: "byte-exact: CRLF and LF spellings of a line are different lines",
+      previous: "one\r\ntwo\r\n",
+      delivered: "one\ntwo\n",
+      missing: ["one\r", "two\r"],
+    },
+    {
+      reason: "byte-exact: CRLF on both sides survives",
+      previous: "one\r\ntwo\r\n",
+      delivered: "one\r\ntwo\r\n",
+      missing: [],
+    },
+  ])("$reason", ({ previous, delivered, missing }) => {
+    expect(missingLines(previous, delivered)).toEqual(missing);
   });
 });
 
@@ -393,20 +399,27 @@ describe("compareHalves", () => {
   });
 
   test("a HEAD copy that does not split by its own declaration is unverifiable", () => {
-    const finding = compareHalves(regionSplit(), headRegion(), "no marker here\n", agentsDelivered);
-    expect(finding?.kind).toBe("unverifiable");
-    expect(finding?.kind === "unverifiable" && finding.reason).toContain("previous commit's copy");
+    expect(compareHalves(regionSplit(), headRegion(), "no marker here\n", agentsDelivered)).toEqual(
+      {
+        path: "AGENTS.md",
+        kind: "unverifiable",
+        reason:
+          "the previous commit's copy does not split at its own manifest's declared marker " +
+          "lines, so its repository-owned content cannot be located",
+      },
+    );
   });
 
   test("a delivered copy that does not split by the post-sync manifest is unverifiable", () => {
-    const finding = compareHalves(
-      regionSplit(),
-      headRegion(),
-      agentsHead,
-      "render lost its markers\n",
-    );
-    expect(finding?.kind).toBe("unverifiable");
-    expect(finding?.kind === "unverifiable" && finding.reason).toContain("delivered copy");
+    expect(
+      compareHalves(regionSplit(), headRegion(), agentsHead, "render lost its markers\n"),
+    ).toEqual({
+      path: "AGENTS.md",
+      kind: "unverifiable",
+      reason:
+        "the delivered copy does not split at the post-sync manifest's declared marker " +
+        "lines, so its repository-owned content cannot be located",
+    });
   });
 });
 
@@ -472,10 +485,24 @@ describe("renderReport", () => {
 describe("tail_tripwire script", () => {
   const headManifest = manifestText({ "AGENTS.md": rawRegion() });
 
-  test("clear when the repository-owned content survives a managed change", () => {
+  // The two clear shapes share one assertion set: no report, the clear
+  // line, no warning. Blank-line skipping itself is unit-pinned in the
+  // missingLines rows; this row proves the script's wiring honours it.
+  test.each([
+    {
+      reason: "the repository-owned content survives a managed change",
+      head: agentsHead,
+      delivered: agentsDelivered,
+    },
+    {
+      reason: "blank lines dropped from the previous tail never fire",
+      head: `${B}\nold\n${E}\n\nkeep me\n   \n\n`,
+      delivered: `${B}\nnew\n${E}\nkeep me\n`,
+    },
+  ])("clear: $reason", ({ head, delivered }) => {
     const root = makeTarget(
-      { "AGENTS.md": agentsHead, [MANIFEST_NAME]: headManifest },
-      { "AGENTS.md": agentsDelivered, [MANIFEST_NAME]: headManifest },
+      { "AGENTS.md": head, [MANIFEST_NAME]: headManifest },
+      { "AGENTS.md": delivered, [MANIFEST_NAME]: headManifest },
     );
     const result = runScript(root);
     expect(result.exitCode).toBe(0);
@@ -484,72 +511,26 @@ describe("tail_tripwire script", () => {
     expect(result.stdout).not.toContain("::warning::");
   });
 
-  test("a RETIRED-vintage HEAD manifest fails loudly: unverifiable findings with the recovery advice", () => {
-    // The one-time conversion used to serve exactly this HEAD state; a
-    // straggler now trips the wire on every split file - warn, manual
-    // review, the report naming the refusal and the fix - with NO loss
-    // claim fabricated (the delivered copies kept every local line).
-    const legacyManifest = manifestText({
-      "AGENTS.md": rawLegacyTail(),
-      ".gitignore": rawLegacyBounded(),
-    });
-    const newManifest = manifestText({
-      "AGENTS.md": rawRegion(),
-      ".gitignore": rawRegion(HB, HE),
-    });
-    const agentsOldShape = `# AGENTS.md\n\nold managed\n\n${OLD_SENTINEL}\n\n## Project docs\n\nrepo-local instructions\n`;
-    const gitignoreOldShape = `${OLD_LOCAL_BEGIN}\n/repo-local-cache/\n${OLD_LOCAL_END}\n\n${HB}\n*.old\n${HE}\n`;
-    // Delivered copies that keep every previous line, so any loss claim in
-    // the report would be fabricated.
-    const agentsDeliveredFull = `${B}\n# AGENTS.md\n\nold managed\n${E}\n\n${OLD_SENTINEL}\n\n## Project docs\n\nrepo-local instructions\n`;
-    const gitignoreDeliveredFull = `${OLD_LOCAL_BEGIN}\n/repo-local-cache/\n${OLD_LOCAL_END}\n\n${HB}\n*.old\n${HE}\n`;
-    const root = makeTarget(
-      {
-        "AGENTS.md": agentsOldShape,
-        ".gitignore": gitignoreOldShape,
-        [MANIFEST_NAME]: legacyManifest,
-      },
-      {
-        "AGENTS.md": agentsDeliveredFull,
-        ".gitignore": gitignoreDeliveredFull,
-        [MANIFEST_NAME]: newManifest,
-      },
-    );
-    const result = runScript(root);
-    // Warn, not red: going red would block the very sync whose recovery
-    // follow-up heals the manifest.
-    expect(result.exitCode).toBe(0);
-    expect(result.stdout).toContain("::warning::");
-    expect(result.report).toContain("`AGENTS.md`");
-    expect(result.report).toContain("`.gitignore`");
-    expect(result.report).toContain('split grammar "tail-marker"');
-    expect(result.report).toContain("recover=recopy");
-    expect(result.report).not.toContain("missing from this update's copy");
-  });
-
-  test("fires on a vanished tail line: warns, reports, exits 0", () => {
-    const delivered = `${B}\n# AGENTS.md\n\nfresh managed guidance\n${E}\n\n## Project docs\n`;
-    const root = makeTarget(
-      { "AGENTS.md": agentsHead, [MANIFEST_NAME]: headManifest },
-      { "AGENTS.md": delivered, [MANIFEST_NAME]: headManifest },
-    );
-    const result = runScript(root);
-    // Warn, not red: a blocked delivery would hide the diff the reviewer
-    // needs.
-    expect(result.exitCode).toBe(0);
-    expect(result.stdout).toContain("::warning::");
-    expect(result.stdout).toContain("AGENTS.md: 1 repository-owned line(s) missing");
-    expect(result.report).toContain("> [!WARNING]");
-    expect(result.report).toContain("`AGENTS.md`");
-    expect(result.report).toContain("repo-local instructions");
-  });
-
-  test("a duplicated tail line shrinking to one copy fires: the PR is forced manual", () => {
-    // The multiset regression: previous content holds the line TWICE, the
-    // delivered content keeps one - a Set-based check would call that
-    // clean and leave the shrink auto-merge eligible.
-    const head = `${B}\nmanaged\n${E}\n\ndup entry\ndup entry\n`;
-    const delivered = `${B}\nmanaged\n${E}\n\ndup entry\n`;
+  // Warn, not red: a blocked delivery would hide the diff the reviewer
+  // needs, so the wire warns, writes the report (which forces the PR
+  // manual), and exits 0. The multiset semantics are unit-pinned in the
+  // missingLines rows; the second row proves the script's wiring keeps
+  // them (a Set-based check would call the shrink clean and leave it
+  // auto-merge eligible).
+  test.each([
+    {
+      reason: "a vanished tail line",
+      head: agentsHead,
+      delivered: `${B}\n# AGENTS.md\n\nfresh managed guidance\n${E}\n\n## Project docs\n`,
+      missingLine: "repo-local instructions",
+    },
+    {
+      reason: "a duplicated tail line shrinking to one copy",
+      head: `${B}\nmanaged\n${E}\n\ndup entry\ndup entry\n`,
+      delivered: `${B}\nmanaged\n${E}\n\ndup entry\n`,
+      missingLine: "dup entry",
+    },
+  ])("fires on $reason: warns, reports, exits 0", ({ head, delivered, missingLine }) => {
     const root = makeTarget(
       { "AGENTS.md": head, [MANIFEST_NAME]: headManifest },
       { "AGENTS.md": delivered, [MANIFEST_NAME]: headManifest },
@@ -558,8 +539,109 @@ describe("tail_tripwire script", () => {
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain("::warning::");
     expect(result.stdout).toContain("AGENTS.md: 1 repository-owned line(s) missing");
-    expect(result.report).toContain("dup entry");
+    expect(result.report).toContain("> [!WARNING]");
+    expect(result.report).toContain("`AGENTS.md`");
+    expect(result.report).toContain(missingLine);
   });
+
+  // The retired conversion and the retired legacy fallback used to serve
+  // exactly these HEAD states silently; a straggler manifest now trips the
+  // wire on every split file - warn, manual review, the report naming the
+  // refusal and the fix - with NO loss claim fabricated: the delivered
+  // copies keep every previous line. The refusal messages themselves are
+  // unit-pinned (head_manifest.test.ts and the headSplitEntries rows
+  // above); these rows prove the script routes them into the findings.
+  // Warn, not red: going red would block the very sync whose recovery
+  // follow-up heals the manifest.
+  test.each([
+    {
+      vintage: "RETIRED-vintage (tail-marker/bounded-region)",
+      straggler: manifestText({ "AGENTS.md": rawLegacyTail(), ".gitignore": rawLegacyBounded() }),
+      phrase: 'split grammar "tail-marker"',
+    },
+    {
+      vintage: "pre-grammar",
+      straggler: manifestText({
+        "AGENTS.md": rawPreGrammar(OLD_SENTINEL, "above"),
+        ".gitignore": rawPreGrammar(HB, "below"),
+      }),
+      phrase: "predates the stamped split grammar",
+    },
+  ])(
+    "a $vintage HEAD manifest fails loudly: unverifiable findings with the recovery advice",
+    ({ straggler, phrase }) => {
+      const newManifest = manifestText({
+        "AGENTS.md": rawRegion(),
+        ".gitignore": rawRegion(HB, HE),
+      });
+      const agentsOldShape = `# AGENTS.md\n\nold managed\n\n${OLD_SENTINEL}\n\n## Project docs\n\nrepo-local instructions\n`;
+      const gitignoreOldShape = `${OLD_LOCAL_BEGIN}\n/repo-local-cache/\n${OLD_LOCAL_END}\n\n${HB}\n*.old\n${HE}\n`;
+      const agentsDeliveredFull = `${B}\n# AGENTS.md\n\nold managed\n${E}\n\n${OLD_SENTINEL}\n\n## Project docs\n\nrepo-local instructions\n`;
+      const root = makeTarget(
+        {
+          "AGENTS.md": agentsOldShape,
+          ".gitignore": gitignoreOldShape,
+          [MANIFEST_NAME]: straggler,
+        },
+        {
+          "AGENTS.md": agentsDeliveredFull,
+          ".gitignore": gitignoreOldShape,
+          [MANIFEST_NAME]: newManifest,
+        },
+      );
+      const result = runScript(root);
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain("::warning::");
+      expect(result.report).toContain("`AGENTS.md`");
+      expect(result.report).toContain("`.gitignore`");
+      expect(result.report).toContain(phrase);
+      expect(result.report).toContain("recover=recopy");
+      expect(result.report).not.toContain("missing from this update's copy");
+    },
+  );
+
+  // A HEAD without a usable manifest - absent, or one the reader refuses -
+  // makes every previously-present split file unverifiable (manual
+  // review), never red and never a guessed split: the refusal's message
+  // rides into the finding so the PR body names the fix. A symlinked
+  // manifest is the same outcome; its fixture lives in its own test below.
+  const unusableHeadManifests: { reason: string; head: Record<string, string>; extra?: string }[] =
+    [
+      { reason: "that is absent", head: {} },
+      {
+        reason: "that is unparseable (treated like a missing one)",
+        head: { [MANIFEST_NAME]: "{ not json" },
+      },
+      {
+        reason: "of an unknown grammar (never guessed)",
+        head: {
+          [MANIFEST_NAME]: manifestText({
+            "AGENTS.md": { class: "split", grammar: "mystery", marker: OLD_SENTINEL },
+          }),
+        },
+        extra: 'split grammar "mystery"',
+      },
+      {
+        reason: "carrying a damaged (null) entry (never silently skipped)",
+        head: { [MANIFEST_NAME]: manifestText({ "AGENTS.md": null as never }) },
+      },
+    ];
+  test.each(unusableHeadManifests)(
+    "a HEAD manifest $reason makes its split files unverifiable, not red",
+    ({ head, extra }) => {
+      const root = makeTarget(
+        { "AGENTS.md": agentsHead, ...head },
+        { "AGENTS.md": agentsDelivered, [MANIFEST_NAME]: headManifest },
+      );
+      const result = runScript(root);
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain("::warning::");
+      expect(result.report).toContain("no usable ownership manifest");
+      if (extra !== undefined) expect(result.report).toContain(extra);
+      // Unverifiable, not a loss claim: no fabricated shrank heading.
+      expect(result.report).not.toContain("missing from this update's copy");
+    },
+  );
 
   test("a NUL-carrying tail line reaches the report escaped, never as a raw control byte", () => {
     // latin1 preserves a NUL byte end to end; raw in the report it would
@@ -597,43 +679,6 @@ describe("tail_tripwire script", () => {
     expect(result.report).toBe("");
   });
 
-  test("a pre-grammar HEAD manifest fails loudly: unverifiable findings with the recovery advice", () => {
-    // The retired legacy fallback used to serve this shape silently; a
-    // straggler manifest now trips the wire on every split file - warn,
-    // manual review, and the report names the fix - with NO loss claim
-    // fabricated (the delivered copies kept every local line).
-    const preGrammarManifest = manifestText({
-      "AGENTS.md": rawPreGrammar(OLD_SENTINEL, "above"),
-      ".gitignore": rawPreGrammar(HB, "below"),
-    });
-    const newManifest = manifestText({
-      "AGENTS.md": rawRegion(),
-      ".gitignore": rawRegion(HB, HE),
-    });
-    const root = makeTarget(
-      {
-        "AGENTS.md": agentsHead,
-        ".gitignore": regionFile(["keep-me"], ["*.old"]),
-        [MANIFEST_NAME]: preGrammarManifest,
-      },
-      {
-        "AGENTS.md": agentsDelivered,
-        ".gitignore": regionFile(["keep-me"], ["*.new"]),
-        [MANIFEST_NAME]: newManifest,
-      },
-    );
-    const result = runScript(root);
-    // Warn, not red: going red would block the very sync whose restamp
-    // (or whose recovery follow-up) heals the manifest.
-    expect(result.exitCode).toBe(0);
-    expect(result.stdout).toContain("::warning::");
-    expect(result.report).toContain("`AGENTS.md`");
-    expect(result.report).toContain("`.gitignore`");
-    expect(result.report).toContain("predates the stamped split grammar");
-    expect(result.report).toContain("recover=recopy");
-    expect(result.report).not.toContain("missing from this update's copy");
-  });
-
   test("non-UTF-8 tail bytes compare byte-for-byte and never false-fire", () => {
     const tailBytes = Buffer.concat([Buffer.from("caf"), Buffer.from([0xe9])]);
     const head = Buffer.concat([Buffer.from(`${B}\nold\n${E}\n`), tailBytes, Buffer.from("\n")]);
@@ -659,16 +704,6 @@ describe("tail_tripwire script", () => {
     expect(result.report).not.toContain("�");
   });
 
-  test("blank lines dropped from the previous tail never fire", () => {
-    const head = `${B}\nold\n${E}\n\nkeep me\n   \n\n`;
-    const delivered = `${B}\nnew\n${E}\nkeep me\n`;
-    const root = makeTarget(
-      { "AGENTS.md": head, [MANIFEST_NAME]: headManifest },
-      { "AGENTS.md": delivered, [MANIFEST_NAME]: headManifest },
-    );
-    expect(runScript(root).report).toBe("");
-  });
-
   test("a path absent at HEAD is skipped (nothing to lose)", () => {
     const root = makeTarget(
       { "README.md": "readme\n", [MANIFEST_NAME]: headManifest },
@@ -692,27 +727,6 @@ describe("tail_tripwire script", () => {
     const result = runScript(root);
     expect(result.exitCode).toBe(0);
     expect(result.report).toBe("");
-  });
-
-  test("a HEAD without a usable manifest makes its split files unverifiable, not red", () => {
-    const root = makeTarget(
-      { "AGENTS.md": agentsHead },
-      { "AGENTS.md": agentsDelivered, [MANIFEST_NAME]: headManifest },
-    );
-    const result = runScript(root);
-    expect(result.exitCode).toBe(0);
-    expect(result.stdout).toContain("::warning::");
-    expect(result.report).toContain("no usable ownership manifest");
-  });
-
-  test("an unparseable HEAD manifest is treated like a missing one", () => {
-    const root = makeTarget(
-      { "AGENTS.md": agentsHead, [MANIFEST_NAME]: "{ not json" },
-      { "AGENTS.md": agentsDelivered, [MANIFEST_NAME]: headManifest },
-    );
-    const result = runScript(root);
-    expect(result.exitCode).toBe(0);
-    expect(result.report).toContain("no usable ownership manifest");
   });
 
   test("a symlink at HEAD at a split path is unverifiable, never parsed as content", () => {
@@ -770,31 +784,6 @@ describe("tail_tripwire script", () => {
     unlinkSync(join(root, MANIFEST_NAME));
     writeFileSync(join(root, MANIFEST_NAME), headManifest);
     writeFileSync(join(root, "AGENTS.md"), agentsDelivered);
-    const result = runScript(root);
-    expect(result.exitCode).toBe(0);
-    expect(result.report).toContain("no usable ownership manifest");
-  });
-
-  test("an unknown grammar in the HEAD manifest is unverifiable, not guessed", () => {
-    const mystery = manifestText({
-      "AGENTS.md": { class: "split", grammar: "mystery", marker: OLD_SENTINEL },
-    });
-    const root = makeTarget(
-      { "AGENTS.md": agentsHead, [MANIFEST_NAME]: mystery },
-      { "AGENTS.md": agentsDelivered, [MANIFEST_NAME]: headManifest },
-    );
-    const result = runScript(root);
-    expect(result.exitCode).toBe(0);
-    expect(result.report).toContain("no usable ownership manifest");
-    expect(result.report).toContain('split grammar "mystery"');
-  });
-
-  test("a HEAD manifest with a damaged entry is unverifiable, not silently skipped", () => {
-    const damaged = manifestText({ "AGENTS.md": null as never });
-    const root = makeTarget(
-      { "AGENTS.md": agentsHead, [MANIFEST_NAME]: damaged },
-      { "AGENTS.md": agentsDelivered, [MANIFEST_NAME]: headManifest },
-    );
     const result = runScript(root);
     expect(result.exitCode).toBe(0);
     expect(result.report).toContain("no usable ownership manifest");

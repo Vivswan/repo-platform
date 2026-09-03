@@ -119,7 +119,7 @@ describe("verify_build_provenance.ts", () => {
     expect(r.output).toContain("is not on main's history");
   });
 
-  test("rejects an unreachable stamped source", () => {
+  test("rejects an unreachable stamped source, hinting BOTH remedies: dispatch and admin reset", () => {
     // resolve_refs.ts pre-checks reachability, but the battery re-answers
     // it here at the single owner (shared/stamp_checks.ts) - a direct
     // invocation with a garbage SOURCE_SHA must not slip through to the
@@ -128,6 +128,16 @@ describe("verify_build_provenance.ts", () => {
     const r = run({ resolvable: [] });
     expect(r.exitCode).not.toBe(0);
     expect(r.output).toContain("is unreachable");
+    // The same run's rejection hint. A dispatch heals a broken stamp or a
+    // drifted tree, but not a hand-pushed tip whose tree already matches
+    // main's composition under a healthy stamp: publish.ts stages nothing
+    // and its skip guard reads the stamp as fine, so the dispatch is a
+    // no-op against that tip. The hint must name the remedy that always
+    // works too - an admin reset of refs/heads/build (or the next
+    // tree-moving landing).
+    expect(r.output).toContain("dispatch Build Branches to rebuild it from main");
+    expect(r.output).toContain("reset refs/heads/build");
+    expect(r.output).toContain("moves the composed tree");
   });
 
   test("rejects a tip whose ancestry stamped a NEWER source (rollback replay)", () => {
@@ -155,19 +165,5 @@ describe("verify_build_provenance.ts", () => {
     expect(r.exitCode).not.toBe(0);
     expect(r.output).toContain("could not answer");
     expect(r.calls.some((args) => args[1] === "worktree" && args[2] === "add")).toBe(false);
-  });
-
-  test("the rejection hint names BOTH remedies: the dispatch and the admin reset", () => {
-    // A dispatch heals a broken stamp or a drifted tree, but not a
-    // hand-pushed tip whose tree already matches main's composition under
-    // a healthy stamp: publish.ts stages nothing and its skip guard reads
-    // the stamp as fine, so the dispatch is a no-op against that tip. The
-    // hint must name the remedy that always works too - an admin reset of
-    // refs/heads/build (or the next tree-moving landing).
-    const r = run({ resolvable: [] });
-    expect(r.exitCode).not.toBe(0);
-    expect(r.output).toContain("dispatch Build Branches to rebuild it from main");
-    expect(r.output).toContain("reset refs/heads/build");
-    expect(r.output).toContain("moves the composed tree");
   });
 });

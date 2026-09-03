@@ -4,18 +4,24 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SKIP_DIRS, walkFiles } from "../../.github/scripts/sync/walk.ts";
 
+/** The conflict-recovery skip set, spelled out: every name is planted in
+ * the fixture below, so a member dropped from SKIP_DIRS surfaces as an
+ * extra walked path and a member added fails the set equality. */
+const SKIP_NAMES = [".git", ".repo-platform-src", "node_modules", ".venv", "__pycache__"];
+
 describe("walkFiles", () => {
-  test("returns regular files sorted, skipping SKIP_DIRS and symlinks", () => {
+  test("returns regular files sorted, skipping every SKIP_DIRS name and symlinks", () => {
     const root = mkdtempSync(join(tmpdir(), "walk-"));
     mkdirSync(join(root, "docs"));
-    mkdirSync(join(root, ".git"));
-    mkdirSync(join(root, "node_modules", "pkg"), { recursive: true });
     writeFileSync(join(root, "b.txt"), "b");
     writeFileSync(join(root, "docs", "a.md"), "a");
-    writeFileSync(join(root, ".git", "config"), "skip");
-    writeFileSync(join(root, "node_modules", "pkg", "index.js"), "skip");
+    for (const name of SKIP_NAMES) {
+      mkdirSync(join(root, name, "pkg"), { recursive: true });
+      writeFileSync(join(root, name, "pkg", "index.js"), "skip");
+    }
     symlinkSync("b.txt", join(root, "link.txt"));
     expect(walkFiles(root)).toEqual(["b.txt", "docs/a.md"]);
+    expect([...SKIP_DIRS].sort()).toEqual([...SKIP_NAMES].sort());
   });
 
   test("a SKIP_DIRS name is skipped as a FILE too, matching the legacy copies", () => {
@@ -26,11 +32,5 @@ describe("walkFiles", () => {
     writeFileSync(join(root, "node_modules"), "a file, not a directory");
     writeFileSync(join(root, "kept.txt"), "kept");
     expect(walkFiles(root)).toEqual(["kept.txt"]);
-  });
-
-  test("SKIP_DIRS carries the conflict-recovery skip set", () => {
-    expect([...SKIP_DIRS].sort()).toEqual(
-      [".git", ".repo-platform-src", "node_modules", ".venv", "__pycache__"].sort(),
-    );
   });
 });

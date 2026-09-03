@@ -10,20 +10,18 @@
 // because the guard exits the process by design.
 //
 // The static imports below are load-bearing: both scripts keep their main
-// bodies behind import.meta.main, and importing them here fails loudly if
-// that guard is ever removed.
+// bodies behind import.meta.main, and importing them here IS the proof
+// (preserve_repo_owned's is a bare side-effect import for exactly that).
+// If either guard is ever removed, the import itself runs a whole sync
+// step inside the test process and this file fails before any test runs;
+// no test needs to (or could) re-check that afterwards.
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { capture } from "../../.github/scripts/shared/proc.ts";
-import {
-  deletedTrackedPaths,
-  fleetLicenseAt,
-  git,
-  showFleetLicense,
-} from "../../.github/scripts/sync/preserve_repo_owned.ts";
+import "../../.github/scripts/sync/preserve_repo_owned.ts";
 import { licensePresentAtHead } from "../../.github/scripts/sync/retired_cleanup.ts";
 
 const preserveScript = join(import.meta.dir, "../../.github/scripts/sync/preserve_repo_owned.ts");
@@ -295,17 +293,5 @@ describe("probe timeouts fail closed (never read as absent)", () => {
     expect(preserve).toMatch(/const deleted = deletedTrackedPaths\(\);/);
     const cleanup = readFileSync(cleanupScript, "utf-8");
     expect(cleanup).toMatch(/licensePresentAtHead\(targetDir, name\)/);
-  });
-
-  test("importing the scripts leaves their main bodies unrun (import.meta.main guard)", () => {
-    // The static imports at the top already happened; the exported helpers
-    // being callable here means the modules loaded as libraries. If either
-    // guard is removed, the import itself runs a whole sync step inside
-    // the test process and this file fails long before this line.
-    expect(typeof git).toBe("function");
-    expect(typeof fleetLicenseAt).toBe("function");
-    expect(typeof showFleetLicense).toBe("function");
-    expect(typeof deletedTrackedPaths).toBe("function");
-    expect(typeof licensePresentAtHead).toBe("function");
   });
 });

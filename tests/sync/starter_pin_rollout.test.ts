@@ -71,88 +71,96 @@ describe("starterPaths", () => {
 });
 
 describe("rolloutContent", () => {
-  test("rewrites every exact old pin and nothing else", () => {
-    const before = starter(OLD_PIN);
-    const { content, rewrote, differing } = rolloutContent(before, USER);
-    expect(content).toBe(starter(NEW_PIN));
-    expect(rewrote).toEqual([{ from: OLD_PIN, to: NEW_PIN, count: 2 }]);
-    expect(differing).toEqual([]);
-  });
+  const ACTIONS_PIN = `${USER}/repo-platform/actions/fuzz-issue@actions`;
+  const ownPin = (ref: string) => `${USER}/repo-platform/actions/fuzz-issue@${ref}`;
 
-  test("the split-channel era's @actions pin is a retired ref too", () => {
-    // Repos synced during the template/actions era carry @actions; the
-    // unified rollout ports them to @build exactly like @main.
-    const actionsPin = `${USER}/repo-platform/actions/fuzz-issue@actions`;
-    const { content, rewrote, differing } = rolloutContent(starter(actionsPin), USER);
-    expect(content).toBe(starter(NEW_PIN));
-    expect(rewrote).toEqual([{ from: actionsPin, to: NEW_PIN, count: 2 }]);
-    expect(differing).toEqual([]);
+  // One starter carrying the pin twice (report and resolve steps). A
+  // retired ref ports every occurrence to NEW_PIN and reports the rewrite;
+  // a hand-set pin on this owner's action stays byte-identical and is
+  // listed with its ACTUAL ref (report and tree agree); a foreign owner's
+  // pin is neither ours to port nor ours to list.
+  test.each([
+    { reason: "the @main ref is retired: ported", pin: OLD_PIN, rewrote: true, listed: false },
+    {
+      reason: "the split-channel era's @actions ref is retired too: ported exactly like @main",
+      pin: ACTIONS_PIN,
+      rewrote: true,
+      listed: false,
+    },
+    {
+      reason: "a hand-set tag is left alone and listed",
+      pin: ownPin("v1.2.3"),
+      rewrote: false,
+      listed: true,
+    },
+    {
+      reason: "a ref that merely starts with the retired ref (dash) is a hand pin",
+      pin: ownPin("main-fork"),
+      rewrote: false,
+      listed: true,
+    },
+    {
+      reason: "a ref that merely starts with the retired ref (slash) is a hand pin",
+      pin: ownPin("main/topic"),
+      rewrote: false,
+      listed: true,
+    },
+    {
+      reason: "a ref that merely starts with the retired ref (longer word) is a hand pin",
+      pin: ownPin("maintenance"),
+      rewrote: false,
+      listed: true,
+    },
+    {
+      reason: "a pin rendered for a different owner never matches",
+      pin: "SomeoneElse/repo-platform/actions/fuzz-issue@main",
+      rewrote: false,
+      listed: false,
+    },
+    {
+      reason: "a LONGER owner name containing the username never matches",
+      pin: `Evil${USER}/repo-platform/actions/fuzz-issue@main`,
+      rewrote: false,
+      listed: false,
+    },
+  ])("$reason", ({ pin, rewrote, listed }) => {
+    const before = starter(pin);
+    expect(rolloutContent(before, USER)).toEqual({
+      content: rewrote ? starter(NEW_PIN) : before,
+      rewrote: rewrote ? [{ from: pin, to: NEW_PIN, count: 2 }] : [],
+      differing: listed ? [{ pin, count: 2 }] : [],
+    });
   });
 
   test("both retired refs in ONE file port in one pass, reported per retired ref", () => {
-    const actionsPin = `${USER}/repo-platform/actions/fuzz-issue@actions`;
-    const before = `${starter(OLD_PIN)}      - uses: ${actionsPin}\n`;
-    const { content, rewrote, differing } = rolloutContent(before, USER);
-    expect(content).toBe(`${starter(NEW_PIN)}      - uses: ${NEW_PIN}\n`);
-    expect(rewrote).toEqual([
-      { from: OLD_PIN, to: NEW_PIN, count: 2 },
-      { from: actionsPin, to: NEW_PIN, count: 1 },
-    ]);
-    expect(differing).toEqual([]);
+    const before = `${starter(OLD_PIN)}      - uses: ${ACTIONS_PIN}\n`;
+    expect(rolloutContent(before, USER)).toEqual({
+      content: `${starter(NEW_PIN)}      - uses: ${NEW_PIN}\n`,
+      rewrote: [
+        { from: OLD_PIN, to: NEW_PIN, count: 2 },
+        { from: ACTIONS_PIN, to: NEW_PIN, count: 1 },
+      ],
+      differing: [],
+    });
   });
 
   test("is idempotent: a rewritten file yields no further changes", () => {
     const first = rolloutContent(starter(OLD_PIN), USER);
-    const second = rolloutContent(first.content, USER);
-    expect(second.content).toBe(first.content);
-    expect(second.rewrote).toEqual([]);
-    expect(second.differing).toEqual([]);
-  });
-
-  test("leaves a hand-set pin byte-identical and reports it", () => {
-    const handPin = `${USER}/repo-platform/actions/fuzz-issue@v1.2.3`;
-    const before = starter(handPin);
-    const { content, rewrote, differing } = rolloutContent(before, USER);
-    expect(content).toBe(before);
-    expect(rewrote).toEqual([]);
-    expect(differing).toEqual([{ pin: handPin, count: 2 }]);
+    expect(rolloutContent(first.content, USER)).toEqual({
+      content: first.content,
+      rewrote: [],
+      differing: [],
+    });
   });
 
   test("a mixed file gets its old pins rewritten while the hand pin stays", () => {
-    const handPin = `${USER}/repo-platform/actions/fuzz-issue@deadbeef`;
+    const handPin = ownPin("deadbeef");
     const before = `${starter(OLD_PIN)}      - uses: ${handPin}\n`;
-    const { content, rewrote, differing } = rolloutContent(before, USER);
-    expect(content).toBe(`${starter(NEW_PIN)}      - uses: ${handPin}\n`);
-    expect(rewrote).toEqual([{ from: OLD_PIN, to: NEW_PIN, count: 2 }]);
-    expect(differing).toEqual([{ pin: handPin, count: 1 }]);
-  });
-
-  test("a pin rendered for a different owner never matches", () => {
-    const foreign = starter("SomeoneElse/repo-platform/actions/fuzz-issue@main");
-    const { content, rewrote, differing } = rolloutContent(foreign, USER);
-    expect(content).toBe(foreign);
-    expect(rewrote).toEqual([]);
-    expect(differing).toEqual([]);
-  });
-
-  test("a LONGER owner name containing the username never matches", () => {
-    const foreign = starter(`Evil${USER}/repo-platform/actions/fuzz-issue@main`);
-    const { content, rewrote, differing } = rolloutContent(foreign, USER);
-    expect(content).toBe(foreign);
-    expect(rewrote).toEqual([]);
-    expect(differing).toEqual([]);
-  });
-
-  test("refs that merely start with the old ref are hand pins, not matches", () => {
-    for (const ref of ["main-fork", "main/topic", "maintenance"]) {
-      const pin = `${USER}/repo-platform/actions/fuzz-issue@${ref}`;
-      const before = starter(pin);
-      const { content, rewrote, differing } = rolloutContent(before, USER);
-      expect(content).toBe(before);
-      expect(rewrote).toEqual([]);
-      // Report and tree agree: the pin is listed with its ACTUAL ref.
-      expect(differing).toEqual([{ pin, count: 2 }]);
-    }
+    expect(rolloutContent(before, USER)).toEqual({
+      content: `${starter(NEW_PIN)}      - uses: ${handPin}\n`,
+      rewrote: [{ from: OLD_PIN, to: NEW_PIN, count: 2 }],
+      differing: [{ pin: handPin, count: 1 }],
+    });
   });
 });
 
@@ -182,7 +190,8 @@ describe("renderRolloutReport", () => {
     expect(renderRolloutReport([])).toBe("");
   });
 
-  test("names the rewritten file and pins, and the skipped hand pin", () => {
+  test("the whole report shape: one intro paragraph, one bullet per rewrite and per hand pin, in order", () => {
+    const handPin = `${USER}/repo-platform/actions/fuzz-issue@v1`;
     const report = renderRolloutReport([
       {
         rel: ".github/workflows/nightly.yml",
@@ -192,13 +201,21 @@ describe("renderRolloutReport", () => {
       {
         rel: ".github/workflows/nightly-fuzz.yml",
         rewrote: [],
-        differing: [{ pin: `${USER}/repo-platform/actions/fuzz-issue@v1`, count: 2 }],
+        differing: [{ pin: handPin, count: 2 }],
       },
     ]);
-    expect(report).toContain("`.github/workflows/nightly.yml`: rewrote 2 occurrence(s)");
-    expect(report).toContain(`\`${OLD_PIN}\` to \`${NEW_PIN}\``);
-    expect(report).toContain("`.github/workflows/nightly-fuzz.yml`: left alone");
-    expect(report).toContain(`${USER}/repo-platform/actions/fuzz-issue@v1`);
+    // Every line pinned. The intro is pinned by shape only (one line,
+    // its opening words, the trailing colon) because its prose lives
+    // unexported in the script; the bullets are byte-exact and in outcome
+    // order, then the trailing newline - a duplicated bullet, a dropped
+    // intro, a wrong count, or a reordered bullet all break this.
+    expect(report.split("\n")).toEqual([
+      expect.stringMatching(/^One-run starter pin rollout: .*:$/),
+      "",
+      `- \`.github/workflows/nightly.yml\`: rewrote 2 occurrence(s) of \`${OLD_PIN}\` to \`${NEW_PIN}\``,
+      `- \`.github/workflows/nightly-fuzz.yml\`: left alone - carries 2 occurrence(s) of \`${handPin}\`, a hand-set pin on none of the retired \`@main\`/\`@actions\` refs; repoint it at \`@build\` for green-gated delivery, or keep your own pin`,
+      "",
+    ]);
   });
 });
 
