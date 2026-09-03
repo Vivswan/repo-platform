@@ -4,12 +4,13 @@ import {
   mkdirSync,
   mkdtempSync,
   readdirSync,
+  readFileSync,
   rmSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import {
   assembleBranchTree,
   canonicalize,
@@ -22,26 +23,40 @@ import {
 } from "../../.github/scripts/build-branches/branch_tree";
 
 const REPO = "/home/user/repo-platform";
+const REPO_ROOT = join(import.meta.dir, "../..");
+
+/** Every path under dir (directories included), symlinks not followed. */
+const walk = (dir: string): string[] =>
+  readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const path = join(dir, entry.name);
+    return entry.isDirectory() && !entry.isSymbolicLink() ? [path, ...walk(path)] : [path];
+  });
+
+/** The files under dir as sorted paths relative to it. */
+const listing = (dir: string): string[] => {
+  const files = (sub: string): string[] =>
+    readdirSync(sub, { withFileTypes: true }).flatMap((entry) =>
+      entry.isDirectory() ? files(join(sub, entry.name)) : [join(sub, entry.name)],
+    );
+  return files(dir)
+    .map((path) => relative(dir, path))
+    .sort();
+};
 
 describe("destOverlapsRepo", () => {
-  test("rejects the repository root itself", () => {
-    expect(destOverlapsRepo(REPO, REPO)).toBe(true);
-  });
-
-  test("rejects every ancestor of the repository, including the filesystem root", () => {
-    for (const dest of ["/", "/home", "/home/user"]) {
-      expect(destOverlapsRepo(dest, REPO)).toBe(true);
-    }
-  });
-
-  test("rejects paths inside the repository", () => {
-    expect(destOverlapsRepo(`${REPO}/template`, REPO)).toBe(true);
-  });
-
-  test("accepts unrelated paths, including siblings sharing a name prefix", () => {
-    for (const dest of ["/tmp/build-tree", "/home/user/repo-platform-scratch", "/home/other"]) {
-      expect(destOverlapsRepo(dest, REPO)).toBe(false);
-    }
+  // The three clauses of the guard - root, ancestor, descendant - each keep
+  // a row, and the false rows pin the edges a naive prefix test gets wrong.
+  test.each([
+    [REPO, true, "the repository root itself"],
+    ["/", true, "the filesystem root is an ancestor ('/' + '/' must not read as '//')"],
+    ["/home", true, "a distant ancestor"],
+    ["/home/user", true, "the immediate parent"],
+    [`${REPO}/template`, true, "a path inside the repository"],
+    ["/home/user/repo-platform-scratch", false, "a sibling sharing the name as a prefix"],
+    ["/tmp/build-tree", false, "an unrelated path"],
+    ["/home/other", false, "a sibling of an ancestor"],
+  ])("destOverlapsRepo(%p) is %p: %s", (dest, expected) => {
+    expect(destOverlapsRepo(dest, REPO)).toBe(expected);
   });
 });
 
@@ -65,13 +80,9 @@ describe("canonicalize", () => {
   });
 });
 
-// The actions/ subtree of the build branch is what lets a fleet repository
-// pin an action @build instead of @main. What ships is source and the
-// dependency manifests plus nothing else: node_modules is excluded (each
-// action installs at its own action_path when it runs), and publishing
-// FAILS LOUDLY when there is nothing to publish - a build branch missing
-// actions/ would 404 every fleet CI run, which is a far worse way to find
-// out.
+// actions/ on the build branch is what lets the fleet pin an action @build:
+// sources and dependency manifests ship, every EXCLUDED_DIRS name is cut, and
+// a tree with nothing to publish fails here rather than 404ing every fleet run.
 function actionsFixture(): string {
   const root = mkdtempSync(join(tmpdir(), "branch-actions-"));
   const action = join(root, "actions", "check-typography");
@@ -82,23 +93,30 @@ function actionsFixture(): string {
   writeFileSync(join(action, "bun.lock"), "\n");
   writeFileSync(join(action, "lib", "helper.ts"), "export {};\n");
   writeFileSync(join(action, "node_modules", "monaco-editor", "index.js"), "module.exports={};\n");
+  // One file under every excluded name, spelled here rather than read from
+  // EXCLUDED_DIRS so a name dropped from the set fails the listing below.
+  for (const excluded of ["dist", ".turbo"]) {
+    mkdirSync(join(action, excluded), { recursive: true });
+    writeFileSync(join(action, excluded, "artifact.js"), "module.exports={};\n");
+  }
   return root;
 }
 
 describe("copyActions", () => {
-  test("publishes source and manifests, never installed dependencies", () => {
+  test("publishes source and manifests, never installed dependencies or build output", () => {
     const root = actionsFixture();
     const dest = mkdtempSync(join(tmpdir(), "branch-actions-dest-"));
     const files = copyActions(root, dest);
 
-    const published = join(dest, "actions", "check-typography");
-    expect(existsSync(join(published, "action.yml"))).toBe(true);
-    // The manifests ship because the action installs from them when it runs.
-    expect(existsSync(join(published, "package.json"))).toBe(true);
-    expect(existsSync(join(published, "bun.lock"))).toBe(true);
-    // Nested source survives the filter; only the excluded names are cut.
-    expect(existsSync(join(published, "lib", "helper.ts"))).toBe(true);
-    expect(existsSync(join(published, "node_modules"))).toBe(false);
+    // The whole published tree: the manifests ship because the action
+    // installs from them when it runs, nested source survives the filter,
+    // and nothing under an EXCLUDED_DIRS name lands.
+    expect(listing(join(dest, "actions", "check-typography"))).toEqual([
+      "action.yml",
+      "bun.lock",
+      "lib/helper.ts",
+      "package.json",
+    ]);
     expect(files).toBe(4);
   });
 
@@ -158,10 +176,6 @@ describe("copyActions", () => {
     expect(copyActions(root, dest)).toBe(1);
     expect(existsSync(join(dest, "actions", "demo", "action.yml"))).toBe(true);
   });
-
-  test("node_modules is excluded by name, wherever it sits", () => {
-    expect(EXCLUDED_DIRS.has("node_modules")).toBe(true);
-  });
 });
 
 describe("assembleBranchTree", () => {
@@ -170,7 +184,7 @@ describe("assembleBranchTree", () => {
   const dest = mkdtempSync(join(tmpdir(), "branch-tree-real-"));
   assembleBranchTree(dest);
 
-  test("the branch root carries exactly the unified layout", () => {
+  test("the branch root carries exactly the unified layout, actions/ mirroring the checkout", () => {
     // The stamp hook is no root byte-copy any more: it ships inside
     // actions/shared/ at the same relative path copier.yml's hooks name.
     expect(readdirSync(dest).sort()).toEqual([
@@ -180,7 +194,31 @@ describe("assembleBranchTree", () => {
       "copier.yml",
       "template",
     ]);
-    expect(existsSync(join(dest, "actions", SHARED_DIR, "stamp_manifest.ts"))).toBe(true);
+    // Every action directory of this checkout ships (the shared zone
+    // included) and nothing else does.
+    const checkoutActions = readdirSync(join(REPO_ROOT, "actions"), { withFileTypes: true })
+      .filter((entry) => entry.isDirectory() && !EXCLUDED_DIRS.has(entry.name))
+      .map((entry) => entry.name)
+      .sort();
+    expect(readdirSync(join(dest, "actions")).sort()).toEqual(checkoutActions);
+    // No installed dependency or build output under any action.
+    const excluded = walk(join(dest, "actions")).filter((path) =>
+      relative(dest, path)
+        .split("/")
+        .some((segment) => EXCLUDED_DIRS.has(segment)),
+    );
+    expect(excluded).toEqual([]);
+    // The anchors the fleet resolves by path: the composed copier tree, an
+    // action manifest, and the shared zone the validator's relative imports
+    // and the stamp hook resolve against on the extracted branch.
+    for (const anchor of [
+      join("template", "AGENTS.md.jinja"),
+      join("actions", "check-typography", "action.yml"),
+      join("actions", SHARED_DIR, "grammar.ts"),
+      join("actions", SHARED_DIR, "stamp_manifest.ts"),
+    ]) {
+      expect(existsSync(join(dest, anchor))).toBe(true);
+    }
   });
 
   test("no assembled path carries a jinja expression (tarball extraction safety)", () => {
@@ -192,11 +230,6 @@ describe("assembleBranchTree", () => {
     // part the retired split-branch design existed to keep out. All
     // three jinja delimiters count: a {# comment #} or {{ var }} segment
     // is just as unextractable as a {% if %} gate.
-    const walk = (dir: string): string[] =>
-      readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
-        const path = join(dir, entry.name);
-        return entry.isDirectory() && !entry.isSymbolicLink() ? [path, ...walk(path)] : [path];
-      });
     const offenders = walk(dest).filter((path) =>
       ["{%", "{{", "{#"].some((delimiter) => path.includes(delimiter)),
     );
@@ -207,23 +240,14 @@ describe("assembleBranchTree", () => {
     // The runner's tarball staging dies on a DANGLING symlink anywhere in
     // the downloaded tree, so branch links keep their .jinja targets (the
     // rendered repo gets the stripped target from the stamp hook).
-    const walk = (dir: string): string[] =>
+    const links = (dir: string): string[] =>
       readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
         const path = join(dir, entry.name);
         if (entry.isSymbolicLink()) return [path];
-        return entry.isDirectory() ? walk(path) : [];
+        return entry.isDirectory() ? links(path) : [];
       });
-    const dangling = walk(dest).filter((path) => !existsSync(path));
+    const dangling = links(dest).filter((path) => !existsSync(path));
     expect(dangling).toEqual([]);
-  });
-
-  test("the composed copier tree and the actions both ship", () => {
-    expect(existsSync(join(dest, "template", "AGENTS.md.jinja"))).toBe(true);
-    expect(existsSync(join(dest, "actions", "check-typography", "action.yml"))).toBe(true);
-    expect(existsSync(join(dest, "actions", "check-typography", "node_modules"))).toBe(false);
-    // The shared zone rides along: the validator's relative imports and the
-    // stamp hook resolve against it on the extracted branch.
-    expect(existsSync(join(dest, "actions", SHARED_DIR, "grammar.ts"))).toBe(true);
   });
 
   test("the fleet-facing reusable workflows ship at .github/workflows", () => {
@@ -247,39 +271,49 @@ describe("copyFleetWorkflows", () => {
   // build branch" holds only while every shipped workflow is
   // workflow_call-only. A non-inert trigger must fail the compose loudly,
   // naming the file and the trigger.
-  function fixture(fleetCiContent: string): string {
+  /** A checkout whose rostered workflows each carry distinct content (so a
+   *  copy that swaps or rewrites one is visible), fleet-ci's given. */
+  function fixture(fleetCiContent: string): { root: string; contents: Record<string, string> } {
     const root = mkdtempSync(join(tmpdir(), "branch-workflows-"));
     const wf = join(root, ".github", "workflows");
     mkdirSync(wf, { recursive: true });
-    writeFileSync(join(wf, "fleet-ci.yml"), fleetCiContent);
+    const contents: Record<string, string> = {};
     for (const name of FLEET_WORKFLOWS) {
-      if (name === "fleet-ci.yml") continue;
-      writeFileSync(join(wf, name), "on:\n  workflow_call:\njobs: {}\n");
+      contents[name] =
+        name === "fleet-ci.yml" ? fleetCiContent : `# ${name}\non:\n  workflow_call:\njobs: {}\n`;
+      writeFileSync(join(wf, name), contents[name]);
     }
-    return root;
+    return { root, contents };
   }
 
-  test("ships workflow_call-only workflows", () => {
-    const root = fixture("on:\n  workflow_call:\n    inputs: {}\njobs: {}\n");
+  test("ships the whole roster of workflow_call-only workflows byte-for-byte", () => {
+    const { root, contents } = fixture("on:\n  workflow_call:\n    inputs: {}\njobs: {}\n");
     const dest = mkdtempSync(join(tmpdir(), "branch-workflows-dest-"));
     copyFleetWorkflows(root, dest);
-    expect(existsSync(join(dest, ".github", "workflows", "fleet-ci.yml"))).toBe(true);
+    // The whole shipped set, name to bytes: the fleet runs the file at the
+    // ref, so a dropped, swapped, or rewritten workflow is an unreviewed
+    // edit of fleet CI.
+    const shipped = join(dest, ".github", "workflows");
+    const published = Object.fromEntries(
+      readdirSync(shipped).map((name) => [name, readFileSync(join(shipped, name), "utf8")]),
+    );
+    expect(published).toEqual(contents);
   });
 
   test("refuses a workflow with any trigger beyond workflow_call, naming file and trigger", () => {
-    const root = fixture("on:\n  workflow_call:\n  push:\n    branches: [main]\njobs: {}\n");
+    const { root } = fixture("on:\n  workflow_call:\n  push:\n    branches: [main]\njobs: {}\n");
     const dest = mkdtempSync(join(tmpdir(), "branch-workflows-dest-"));
     expect(() => copyFleetWorkflows(root, dest)).toThrow(/fleet-ci\.yml.*'push'/);
   });
 
   test("refuses a workflow with no triggers at all (nothing provable is nothing shippable)", () => {
-    const root = fixture("jobs: {}\n");
+    const { root } = fixture("jobs: {}\n");
     const dest = mkdtempSync(join(tmpdir(), "branch-workflows-dest-"));
     expect(() => copyFleetWorkflows(root, dest)).toThrow("declares no triggers");
   });
 
   test("refuses a tree missing a rostered workflow, naming it", () => {
-    const root = fixture("on:\n  workflow_call:\njobs: {}\n");
+    const { root } = fixture("on:\n  workflow_call:\njobs: {}\n");
     rmSync(join(root, ".github", "workflows", "reusable-codeql.yml"));
     const dest = mkdtempSync(join(tmpdir(), "branch-workflows-dest-"));
     expect(() => copyFleetWorkflows(root, dest)).toThrow("reusable-codeql.yml is missing");

@@ -35,17 +35,17 @@ function steps(job: unknown): Mapping[] {
 }
 
 describe("audit-guards wiring", () => {
-  test("the workflow runs on a weekly schedule and manual dispatch", () => {
-    const triggers = asMapping(workflow.on);
-    const schedule = triggers.schedule as { cron?: unknown }[];
-    expect(Array.isArray(schedule)).toBe(true);
-    expect(typeof schedule[0].cron).toBe("string");
-    expect("workflow_dispatch" in triggers).toBe(true);
+  test("the trigger set is exactly one weekly cron (Monday 08:44 UTC) plus manual dispatch", () => {
+    // Pinned to the value: a widened cadence or an added trigger (a push,
+    // say) would each move the audit past its weekly arming-proof role.
+    expect(workflow.on).toEqual({ schedule: [{ cron: "44 8 * * 1" }], workflow_dispatch: null });
   });
 
-  test("the audit job runs the arming audit unconditionally and unsuppressed", () => {
+  test("the audit job runs the arming audit unconditionally and unsuppressed, under a 30-minute hang bound", () => {
     const audit = asMapping(jobs.audit);
-    expect(typeof audit["timeout-minutes"]).toBe("number");
+    // A hung arming loop is killed at this bound and the report reads the
+    // cancellation as red; pinned so a silent tightening or loosening is loud.
+    expect(audit["timeout-minutes"]).toBe(30);
     // Job-level suppression skips or ignores the audit as silently as
     // step-level suppression would.
     expect("if" in audit).toBe(false);

@@ -67,18 +67,16 @@ describe("post-green publish wiring", () => {
     }
   });
 
-  test("post-green.yml is workflow_call ONLY (the verdict is the sole way in)", () => {
+  test("post-green.yml is workflow_call ONLY, and its leg roster is pinned for per-leg green review", () => {
+    // The verdict is the sole way in: a second trigger would be a second,
+    // unguarded path into release-shaped work.
     const doc = parseYaml(postGreen) as Record<string, unknown>;
     expect(Object.keys(doc.on as Record<string, unknown>)).toEqual(["workflow_call"]);
-  });
-
-  test("post-green leg roster: every leg must be reviewed for its own green verification", () => {
     // The caller gates on the verdict's conclusion output, but a leg
     // that MUTATES shared state keeps its own verification (post-green
     // .yml's header): that requirement lives in review, so the roster is
     // pinned here - adding a leg fails this test until the new job's
     // verification story is written down and the roster updated.
-    const doc = parseYaml(postGreen) as Record<string, unknown>;
     const jobs = doc.jobs as Record<string, { steps?: { run?: string; env?: unknown }[] }>;
     expect(Object.keys(jobs)).toEqual(["publish-build"]);
     // The one current leg verifies green via publish.ts (its
