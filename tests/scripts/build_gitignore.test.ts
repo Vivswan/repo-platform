@@ -88,25 +88,22 @@ describe("buildFragment", () => {
     );
   });
 
-  test("the guard negates the earlier owner's actual gate expression", () => {
-    expect(buildFragment(SECTIONS, nodePlan.parts, GATES)).toStartWith(
-      "{% if not ('bun' in modules) %}",
-    );
-    const custom = new Map([...GATES, ["bun", "'bun' in modules or legacy"]]);
-    expect(buildFragment(SECTIONS, nodePlan.parts, custom)).toStartWith(
-      "{% if not ('bun' in modules or legacy) %}",
-    );
-  });
-
-  test("a true guard renders byte-identically to the unguarded fragment", () => {
+  test("a shared chunk is one inline guard block negating the earlier owner's actual gate: exact bytes, a true guard renders the unguarded bytes, a false guard renders nothing", () => {
+    // The whole chunk is pinned, not just its opening tag: a stray
+    // newline or a lost endif inside the block would survive a prefix check.
     const guarded = buildFragment(SECTIONS, nodePlan.parts, GATES);
+    expect(guarded).toBe(
+      `{% if not ('bun' in modules) %}\n${SECTIONS["Node.gitignore"]}{% endif %}`,
+    );
     const unguarded = buildFragment(SECTIONS, [{ path: "Node.gitignore", earlier: [] }], GATES);
     expect(render(guarded, true)).toBe(unguarded);
-  });
-
-  test("a false guard renders to nothing - zero bytes, not blank lines", () => {
-    const guarded = buildFragment(SECTIONS, nodePlan.parts, GATES);
     expect(render(guarded, false)).toBe("");
+    // The guard reads the owner's gate expression from the map, not a
+    // spelling of its own.
+    const custom = new Map([...GATES, ["bun", "'bun' in modules or legacy"]]);
+    expect(buildFragment(SECTIONS, nodePlan.parts, custom)).toBe(
+      `{% if not ('bun' in modules or legacy) %}\n${SECTIONS["Node.gitignore"]}{% endif %}`,
+    );
   });
 
   test("a missing gate expression fails loudly", () => {
@@ -173,16 +170,14 @@ describe("argument parsing", () => {
     }
   }
 
-  for (const flag of ["--locked", "--check"]) {
-    test(`the retired ${flag} mode is rejected, not silently ignored`, async () => {
-      const { code, message } = await reject([flag]);
-      expect(code).toBe(2);
-      expect(message).toContain(flag);
-    });
-  }
-
-  test("any other argument is rejected too", async () => {
-    expect((await reject(["--dry-run", "x"])).code).toBe(2);
+  test.each([
+    { argv: ["--locked"], reason: "the retired --locked pin mode" },
+    { argv: ["--check"], reason: "the retired --check pin mode" },
+    { argv: ["--dry-run", "x"], reason: "any other argument, several at once" },
+  ])("$reason is rejected naming the argument(s), not silently ignored", async ({ argv }) => {
+    const { code, message } = await reject(argv);
+    expect(code).toBe(2);
+    expect(message).toContain(argv.join(" "));
   });
 });
 
@@ -240,12 +235,16 @@ describe("fragment guard expressions match the manifests", () => {
   });
 
   test("a changed module gate makes the stale fragment's guards mismatch", () => {
+    // Both sides pinned positively: the mismatch is a consequence of two
+    // exact values, so a broken extractor (returning [] or garbage) cannot
+    // pass as "the gate changed".
     const oldGates = new Map([["bun", '"bun" in modules']]);
     const staleFragment = buildFragment(sections, parts, oldGates);
     const newGates = new Map([["bun", '"bun" in modules or "node" in modules']]);
-    expect(fragmentGuardExpressions(staleFragment)).not.toEqual([
-      guardExpressionFor(["bun"], newGates),
-    ]);
+    expect(fragmentGuardExpressions(staleFragment)).toEqual(['not ("bun" in modules)']);
+    expect(guardExpressionFor(["bun"], newGates)).toBe(
+      'not ("bun" in modules or "node" in modules)',
+    );
   });
 
   test("an unguarded fragment expects no guards", () => {

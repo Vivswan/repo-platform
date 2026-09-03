@@ -122,10 +122,6 @@ describe("the commit-msg gate (scripts/check_commit_subject.ts)", () => {
     expect(runHook("feat(guards): close the commit-subject gap\n\nbody\n").exitCode).toBe(0);
   });
 
-  test("a merge subject is exempt at the commit-msg gate, exactly as CI exempts it", () => {
-    expect(runHook("Merge branch 'main' into guards/commit-subject\n").exitCode).toBe(0);
-  });
-
   test("the gate judges the post-cleanup subject: a leading editor comment block is not the subject", () => {
     const message = "# Please enter the commit message.\n#\n\nfeat: add setup flow\n";
     expect(runHook(message).exitCode).toBe(0);

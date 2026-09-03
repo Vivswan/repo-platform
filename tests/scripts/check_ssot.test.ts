@@ -10,6 +10,7 @@ import { parse as parseYaml } from "yaml";
 import { stageComposedTreeArgv } from "../../.github/scripts/shared/stage_tree.ts";
 import { PIN_FLIPS } from "../../.github/scripts/sync/starter_pin_rollout";
 import {
+  ACTIONS_BUN_SETUP_GUARD,
   ALL_GREEN_ROSTER,
   ASYNC_SPAWN_FILES,
   actionManifestFiles,
@@ -431,19 +432,13 @@ describe("extractUsesPins", () => {
     "    uses: github/codeql-action/init@v4",
   ].join("\n");
 
-  test("extracts real pins, commented examples included", () => {
+  test("extracts real pins, commented examples included; local and jinja-ref lines are skipped", () => {
     const pins = extractUsesPins(text, "f");
     expect(pins.map((p) => `${p.action}@${p.ref}`)).toEqual([
       "actions/checkout@v7",
       "astral-sh/setup-uv@v7",
       "github/codeql-action@v4",
     ]);
-  });
-
-  test("skips local and jinja-ref uses lines", () => {
-    const actions = extractUsesPins(text, "f").map((p) => p.action);
-    expect(actions).not.toContain("./actions/check-typography");
-    expect(actions.every((a) => !a.includes("{{"))).toBe(true);
   });
 
   test("extracts quoted pins", () => {
@@ -463,24 +458,40 @@ describe("pinMismatches", () => {
   });
 
   test("flags an action pinned at two refs, naming the sites", () => {
-    const [mismatch] = pinMismatches(split, {});
-    expect(mismatch.file).toBe("x/y");
-    expect(mismatch.got).toContain("v1 (a.yml)");
-    expect(mismatch.got).toContain("v2 (b.yml)");
+    expect(pinMismatches(split, {})).toEqual([
+      { file: "x/y", expected: "a single pinned ref", got: "v1 (a.yml); v2 (b.yml)" },
+    ]);
   });
 
-  test("honors an allowlisted split only when the ref set matches exactly", () => {
+  test("honors an allowlisted split whose ref set matches exactly", () => {
     expect(pinMismatches(split, { "x/y": ["v1", "v2"] })).toEqual([]);
-    expect(pinMismatches(split, { "x/y": ["v1", "v3"] })).toHaveLength(1);
   });
 
-  test("flags a stale allowlist entry when the split collapsed to one ref", () => {
-    const single = [{ file: "a.yml", action: "x/y", ref: "v1" }];
-    expect(pinMismatches(single, { "x/y": ["v1", "v2"] })).toHaveLength(1);
-  });
-
-  test("flags a stale allowlist entry when the action has no pins at all", () => {
-    expect(pinMismatches([], { "x/y": ["v1", "v2"] })).toHaveLength(1);
+  test.each([
+    {
+      reason: "the allowlisted ref set differs from the pinned one",
+      pins: split,
+      expected: { file: "x/y", expected: "the allowlisted refs [v1, v3]", got: "v1, v2" },
+      allowed: { "x/y": ["v1", "v3"] },
+    },
+    {
+      reason: "a stale allowlist entry whose split collapsed to one ref",
+      pins: [{ file: "a.yml", action: "x/y", ref: "v1" }],
+      expected: { file: "x/y", expected: "the allowlisted refs [v1, v2]", got: "v1" },
+      allowed: { "x/y": ["v1", "v2"] },
+    },
+    {
+      reason: "a stale allowlist entry whose action has no pins at all",
+      pins: [],
+      expected: {
+        file: "x/y",
+        expected: "an action still pinned somewhere (allowlisted)",
+        got: "no uses: pins found (stale allowlist entry - remove it)",
+      },
+      allowed: { "x/y": ["v1", "v2"] },
+    },
+  ])("flags $reason, naming the drift", ({ pins, allowed, expected }) => {
+    expect(pinMismatches(pins, allowed)).toEqual([expected]);
   });
 });
 
@@ -517,31 +528,28 @@ describe("gatesOnModule", () => {
     "echo done # has pages would be a trailing-comment spoof",
   ].join("\n");
 
-  test("matches if and elif conditions", () => {
-    expect(gatesOnModule(script, "bun")).toBe(true);
-    expect(gatesOnModule(script, "pr-title")).toBe(true);
-  });
-
-  test("matches brace-group, ||, and negated forms", () => {
-    expect(gatesOnModule(script, "rust")).toBe(true);
-    expect(gatesOnModule(script, "uv")).toBe(true);
-    expect(gatesOnModule(script, "agents")).toBe(true);
-  });
-
-  test("a comment mention does not count", () => {
-    expect(gatesOnModule(script, "fuzzer")).toBe(false);
-  });
-
-  test("a trailing comment does not count", () => {
-    expect(gatesOnModule(script, "pages")).toBe(false);
-  });
-
-  test("an unrelated substring does not count", () => {
-    expect(gatesOnModule("uses: oven-sh/setup-bun@v2\nbun install", "bun")).toBe(false);
-  });
-
-  test("a longer module name is not satisfied by its prefix", () => {
-    expect(gatesOnModule("if has pr-title; then", "pr")).toBe(false);
+  test.each([
+    { script, module: "bun", gated: true, reason: "an if condition" },
+    { script, module: "pr-title", gated: true, reason: "an elif condition" },
+    { script, module: "rust", gated: true, reason: "a brace-group opener" },
+    { script, module: "uv", gated: true, reason: "an || operand" },
+    { script, module: "agents", gated: true, reason: "a negated form" },
+    { script, module: "fuzzer", gated: false, reason: "a comment-line mention" },
+    { script, module: "pages", gated: false, reason: "a trailing-comment mention" },
+    {
+      script: "uses: oven-sh/setup-bun@v2\nbun install",
+      module: "bun",
+      gated: false,
+      reason: "an unrelated substring",
+    },
+    {
+      script: "if has pr-title; then",
+      module: "pr",
+      gated: false,
+      reason: "a prefix of a longer module name",
+    },
+  ])("$reason gates on '$module': $gated", ({ script: text, module, gated }) => {
+    expect(gatesOnModule(text, module)).toBe(gated);
   });
 });
 
@@ -553,19 +561,51 @@ describe("settingsIdentityMismatches", () => {
     expect(settingsIdentityMismatches({ ...identity, private: true, topics: "a, b" })).toEqual([]);
   });
 
-  test("flags a missing or stringly-typed private key", () => {
-    const { private: _, ...rest } = identity;
-    expect(settingsIdentityMismatches(rest)).toHaveLength(1);
-    const [mismatch] = settingsIdentityMismatches({ ...identity, private: "false" });
-    expect(mismatch.file).toContain("repository.private");
-  });
-
-  test("flags a missing or empty description", () => {
-    const { description: _, ...rest } = identity;
-    expect(settingsIdentityMismatches(rest)).toHaveLength(1);
-    const [mismatch] = settingsIdentityMismatches({ ...identity, description: "" });
-    expect(mismatch.file).toContain("repository.description");
-  });
+  const { private: _noPrivate, ...withoutPrivate } = identity;
+  const { description: _noDescription, ...withoutDescription } = identity;
+  test.each([
+    {
+      reason: "a missing private key",
+      repository: withoutPrivate,
+      expected: {
+        file: ".github/settings.yml repository.private",
+        expected: "an explicit boolean, so the apply manages visibility",
+        got: "missing",
+      },
+    },
+    {
+      reason: "a stringly-typed private key",
+      repository: { ...identity, private: "false" },
+      expected: {
+        file: ".github/settings.yml repository.private",
+        expected: "an explicit boolean, so the apply manages visibility",
+        got: '"false"',
+      },
+    },
+    {
+      reason: "a missing description",
+      repository: withoutDescription,
+      expected: {
+        file: ".github/settings.yml repository.description",
+        expected: "a non-empty description string",
+        got: "missing",
+      },
+    },
+    {
+      reason: "an empty description",
+      repository: { ...identity, description: "" },
+      expected: {
+        file: ".github/settings.yml repository.description",
+        expected: "a non-empty description string",
+        got: '""',
+      },
+    },
+  ])(
+    "flags $reason as the one mismatch, naming the key and the value read",
+    ({ repository, expected }) => {
+      expect(settingsIdentityMismatches(repository)).toEqual([expected]);
+    },
+  );
 
   test("flags undeclared homepage and topics keys", () => {
     const mismatches = settingsIdentityMismatches({ description: "x", private: false });
@@ -640,25 +680,22 @@ describe("inlineFunctionCopies", () => {
       `${indent}}`,
     ].join("\n");
 
-  test("extracts every copy, closing at the declaration's own indent", () => {
-    const text = `head\n${copy("    ", "a();")}\ntail\n${copy("    ", "a();")}\n`;
-    const copies = inlineFunctionCopies(text, "resolve");
-    expect(copies).toHaveLength(2);
-    expect(copies[0]).toBe(copy("    ", "a();"));
-    expect(copies[0]).toBe(copies[1]);
-  });
-
-  test("a nested closing brace does not end the block early", () => {
-    const [only] = inlineFunctionCopies(copy("  ", "b();"), "resolve");
-    expect(only.endsWith("\n  }")).toBe(true);
-    expect(only).toContain("b();");
-  });
-
-  test("copies differing anywhere in their bytes compare unequal", () => {
-    const [a] = inlineFunctionCopies(copy("    ", "a();"), "resolve");
-    const [b] = inlineFunctionCopies(copy("    ", "b();"), "resolve");
-    expect(a).not.toBe(b);
-  });
+  test.each([
+    { indent: "    ", reason: "four-space indent" },
+    { indent: "  ", reason: "two-space indent - the nested close brace sits at indent+2" },
+  ])(
+    "extracts every copy byte-exactly, closing at the declaration's own indent ($reason)",
+    ({ indent }) => {
+      // Three copies, two of them identical, compared as an exact list: this
+      // covers the early-close path (a nested `}` would truncate a copy),
+      // body fidelity (a dropped byte would compare unequal), that each copy
+      // carries its own bytes rather than the first one's, and that
+      // identical copies are all kept (a deduplicating extractor fails).
+      const a = copy(indent, "a();");
+      const b = copy(indent, "b();");
+      expect(inlineFunctionCopies(`head\n${a}\ntail\n${b}\n${a}\n`, "resolve")).toEqual([a, b, a]);
+    },
+  );
 
   test("returns nothing when the function is absent, so rules can fail loudly", () => {
     expect(inlineFunctionCopies("const resolve = 1;", "resolve")).toEqual([]);
@@ -815,58 +852,76 @@ describe("actionsBunGuardMismatches", () => {
     expect(actionsBunGuardMismatches("actions/x/action.yml", canonical)).toEqual([]);
   });
 
-  test("a bare setup-bun (both with: blocks deleted) is refused - the pre-fix shape", () => {
-    const bare = canonical.replaceAll(
-      `      uses: oven-sh/setup-bun@v2
+  // The rule's two fixed-message mismatches, built from the same pin line
+  // the rule reads, so the expectations below can never demand different
+  // bytes from the judgment.
+  const pinLine = ACTIONS_BUN_SETUP_GUARD[ACTIONS_BUN_SETUP_GUARD.length - 1];
+  const canonicalBlockMismatch = {
+    file: "actions/x/action.yml",
+    expected:
+      "the canonical three-step bun setup guard (pin probe, pinned install, pinned retry - " +
+      "both setup steps reading the action-local generated .bun-version)",
+    got: "missing or drifted from the block this rule pins - a bare or caller-resolved setup-bun breaks every consumer whose own bun predates the action lockfiles' writer",
+  };
+  const perStepMismatch = {
+    file: "actions/x/action.yml",
+    expected: `every setup-bun step carrying '${pinLine}' in its with: block`,
+    got: "a setup-bun step without the action-local pin - it resolves the CALLER repository's bun version files",
+  };
+
+  test.each([
+    {
+      reason: "both with: blocks deleted (the pre-fix bare shape)",
+      text: canonical.replaceAll(
+        `      uses: oven-sh/setup-bun@v2
       with:
         bun-version-file: \${{ github.action_path }}/.bun-version`,
-      "      uses: oven-sh/setup-bun@v2",
-    );
-    const got = actionsBunGuardMismatches("actions/x/action.yml", bare);
-    // One canonical-block mismatch plus one per bare setup step.
-    expect(got.length).toBe(3);
-    expect(got[0].expected).toContain("action-local generated .bun-version");
-  });
+        "      uses: oven-sh/setup-bun@v2",
+      ),
+    },
+    {
+      reason: "a workspace-relative bun-version-file (it reads the CALLER's dotfile)",
+      text: canonical.replaceAll(
+        // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal action line under test
+        "bun-version-file: ${{ github.action_path }}/.bun-version",
+        "bun-version-file: .bun-version",
+      ),
+    },
+  ])(
+    "$reason is refused: the canonical-block mismatch plus one per unpinned setup step",
+    ({ text }) => {
+      expect(actionsBunGuardMismatches("actions/x/action.yml", text)).toEqual([
+        canonicalBlockMismatch,
+        perStepMismatch,
+        perStepMismatch,
+      ]);
+    },
+  );
 
-  test("a workspace-relative bun-version-file is refused - it reads the CALLER's dotfile", () => {
-    const relative = canonical.replaceAll(
-      // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal action line under test
-      "bun-version-file: ${{ github.action_path }}/.bun-version",
-      "bun-version-file: .bun-version",
-    );
-    expect(actionsBunGuardMismatches("actions/x/action.yml", relative).length).toBe(3);
-  });
-
-  test("an EXTRA bare setup-bun beside an intact canonical block is refused", () => {
-    const extra = `${canonical}
+  test.each([
+    { uses: "oven-sh/setup-bun@v2", reason: "a plain spelling" },
+    { uses: '"oven-sh/setup-bun@v2"', reason: "a quoted look-alike" },
+    {
+      uses: "OVEN-SH/Setup-Bun@v2",
+      reason: "a mixed-case id (GitHub action ids are case-insensitive)",
+    },
+  ])(
+    "an EXTRA bare setup-bun beside an intact canonical block is refused per step - $reason",
+    ({ uses }) => {
+      const extra = `${canonical}
     - name: Set up bun again
-      uses: oven-sh/setup-bun@v2
+      uses: ${uses}
 `;
-    const got = actionsBunGuardMismatches("actions/x/action.yml", extra);
-    expect(got.length).toBe(1);
-    expect(got[0].got).toContain("without the action-local pin");
-  });
+      expect(actionsBunGuardMismatches("actions/x/action.yml", extra)).toEqual([perStepMismatch]);
+    },
+  );
 
-  test("a QUOTED bare setup-bun is still a setup-bun step - text look-alikes cannot dodge the pin", () => {
-    const extra = `${canonical}
-    - name: Set up bun again
-      uses: "oven-sh/setup-bun@v2"
-`;
-    expect(actionsBunGuardMismatches("actions/x/action.yml", extra).length).toBe(1);
-  });
-
-  test("a MIXED-CASE bare setup-bun is still a setup-bun step - GitHub action ids are case-insensitive", () => {
-    const extra = `${canonical}
-    - name: Set up bun again
-      uses: OVEN-SH/Setup-Bun@v2
-`;
-    expect(actionsBunGuardMismatches("actions/x/action.yml", extra).length).toBe(1);
-  });
-
-  test("an action that runs bun with no setup block at all is refused", () => {
+  test("an action that runs bun with no setup block at all is refused for the missing block alone", () => {
     const text =
       'runs:\n  using: composite\n  steps:\n    - name: Run\n      shell: bash\n      run: bun "x.ts"\n';
-    expect(actionsBunGuardMismatches("actions/x/action.yml", text).length).toBe(1);
+    expect(actionsBunGuardMismatches("actions/x/action.yml", text)).toEqual([
+      canonicalBlockMismatch,
+    ]);
   });
 
   test("an action touching no bun needs no guard", () => {
@@ -905,26 +960,69 @@ describe("unsafeStepCondition", () => {
   // guards on never happened. Only equality against a non-empty literal
   // is admitted, so the list below is closed by construction rather than
   // by enumerating the unsafe spellings.
-  const unsafe = [
-    "steps.merge.outputs.skipped != 'true'",
-    "steps.render.outputs.skipped!='true'",
-    "'true' != steps.merge.outputs.skipped",
-    "!steps.merge.outputs.skipped",
-    "! steps.merge.outputs.skipped",
-    "!(steps.merge.outputs.skipped == 'true')",
-    "!(success() && steps.merge.outputs.skipped == 'true')",
+  // Each row pins WHICH term the check names: a regression that flags the
+  // safe first term of a compound and skips the unsafe one cannot pass.
+  test.each([
+    {
+      condition: "steps.merge.outputs.skipped != 'true'",
+      offending: "steps.merge.outputs.skipped != 'true'",
+      reason: "an inequality",
+    },
+    {
+      condition: "steps.render.outputs.skipped!='true'",
+      offending: "steps.render.outputs.skipped!='true'",
+      reason: "an unspaced inequality",
+    },
+    {
+      condition: "'true' != steps.merge.outputs.skipped",
+      offending: "'true' != steps.merge.outputs.skipped",
+      reason: "a reversed inequality",
+    },
+    {
+      condition: "!steps.merge.outputs.skipped",
+      offending: "!steps.merge.outputs.skipped",
+      reason: "a bare negation",
+    },
+    {
+      condition: "! steps.merge.outputs.skipped",
+      offending: "! steps.merge.outputs.skipped",
+      reason: "a spaced negation",
+    },
+    {
+      condition: "!(steps.merge.outputs.skipped == 'true')",
+      offending: "a negated group: !(steps.merge.outputs.skipped == 'true')",
+      reason: "a negated group around a safe equality",
+    },
+    {
+      condition: "!(success() && steps.merge.outputs.skipped == 'true')",
+      offending: "a negated group: !(success() && steps.merge.outputs.skipped == 'true')",
+      reason: "a negated group around a compound",
+    },
     // Actions coerces an absent output to the empty string, which equals
     // both '' and false.
-    "steps.merge.outputs.skipped == ''",
-    "steps.merge.outputs.skipped == false",
-    "steps.a.outputs.b == 'false' && steps.c.outputs.d != 'true'",
-    "steps.a.outputs.b == 'false' || !steps.c.outputs.d",
-  ];
-  for (const condition of unsafe) {
-    test(`rejects ${condition}`, () => {
-      expect(unsafeStepCondition(condition)).not.toBeNull();
-    });
-  }
+    {
+      condition: "steps.merge.outputs.skipped == ''",
+      offending: "steps.merge.outputs.skipped == ''",
+      reason: "equality against the empty string",
+    },
+    {
+      condition: "steps.merge.outputs.skipped == false",
+      offending: "steps.merge.outputs.skipped == false",
+      reason: "equality against false",
+    },
+    {
+      condition: "steps.a.outputs.b == 'false' && steps.c.outputs.d != 'true'",
+      offending: "steps.c.outputs.d != 'true'",
+      reason: "an unsafe second && operand behind a safe first one",
+    },
+    {
+      condition: "steps.a.outputs.b == 'false' || !steps.c.outputs.d",
+      offending: "!steps.c.outputs.d",
+      reason: "an unsafe second || operand behind a safe first one",
+    },
+  ])("rejects $reason, naming the offending term: $condition", ({ condition, offending }) => {
+    expect(unsafeStepCondition(condition)).toBe(offending);
+  });
 
   const safe = [
     "steps.merge.outputs.skipped == 'false'",
@@ -2335,8 +2433,10 @@ describe("spawnSyncHazard", () => {
     expect(spawnSyncHazard('{ stdio: ["ignore", ...streams], timeout: 5_000 }')).toBeNull();
   });
 
-  test("a timeoutMs-style key is not the timeout property", () => {
-    expect(spawnSyncHazard("{ timeoutMs: 5 }")).not.toBeNull();
+  test("a timeoutMs-style key is not the timeout property - the call reads as wholly unbounded", () => {
+    expect(spawnSyncHazard("{ timeoutMs: 5 }")).toBe(
+      "stdout and stderr left to the piped default with no timeout",
+    );
   });
 });
 
@@ -2412,14 +2512,25 @@ describe("agentsStagingMismatches", () => {
     expect(mismatch.got).toBe("'git -C /tmp/bt add -A'");
   });
 
-  test("dropping --force alone fails (the probe that passed every rule before this pin)", () => {
-    const forceless = hermetic.replace(" --force", "");
-    expect(agentsStagingMismatches(recipe(forceless))).toHaveLength(1);
-  });
-
-  test("dropping the attributesFile override alone fails too", () => {
-    const bareForce = hermetic.replace(" -c core.attributesFile=/dev/null", "");
-    expect(agentsStagingMismatches(recipe(bareForce))).toHaveLength(1);
+  test.each([
+    {
+      dropped: " --force",
+      reason: "dropping --force alone (the probe that passed every rule before this pin)",
+    },
+    {
+      dropped: " -c core.attributesFile=/dev/null",
+      reason: "dropping the attributesFile override alone",
+    },
+  ])("$reason fails, naming the drifted command read", ({ dropped }) => {
+    const drifted = hermetic.replace(dropped, "");
+    expect(drifted).not.toBe(hermetic);
+    expect(agentsStagingMismatches(recipe(drifted))).toEqual([
+      {
+        file: "AGENTS.md",
+        expected: `the staging command '${hermetic}' (stageComposedTreeArgv - the recipe must stage the same bytes the producers publish)`,
+        got: `'${drifted}'`,
+      },
+    ]);
   });
 
   test("a correct staging command quoted OFF the smoke bullet cannot mask a drifted recipe", () => {
@@ -2437,7 +2548,15 @@ describe("agentsStagingMismatches", () => {
       /\n$/,
       ` Also quoted: \`git -C /tmp/bt init -b build && ${hermetic} && git -C /tmp/bt commit -m build\`.\n`,
     );
-    expect(agentsStagingMismatches(doubled)).toHaveLength(1);
+    // The got is the FIRST leg: a greedy match capturing through to the
+    // second copy would also yield one mismatch, but with different bytes.
+    expect(agentsStagingMismatches(doubled)).toEqual([
+      {
+        file: "AGENTS.md",
+        expected: `the staging command '${hermetic}' (stageComposedTreeArgv - the recipe must stage the same bytes the producers publish)`,
+        got: "'git -C /tmp/bt add -A'",
+      },
+    ]);
   });
 
   test("a recipe whose staging leg vanished throws loudly instead of passing vacuously", () => {
@@ -2565,23 +2684,27 @@ describe("asyncStreamWriteMismatches", () => {
     expect(asyncStreamWriteMismatches("x/y.ts", source, false)).toEqual([]);
   });
 
-  test("a template INTERPOLATION's write is code and fires", () => {
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: literal source under test
-    const source = "const t = `${process.stdout.write(chunk)}`;\n";
-    expect(asyncStreamWriteMismatches("x/y.ts", source, false)).toHaveLength(1);
-  });
-
-  test("optional-chained and spaced spellings still fire", () => {
-    for (const spelling of [
-      "process?.stdout.write(out);",
-      "process.stderr?.write(err);",
-      "process.stdout.write?.(out);",
-      "process?.stdout.write?.(out);",
-      "process . stdout . write (out);",
-      "globalThis.process.stdout.write(out);",
-    ]) {
-      expect(asyncStreamWriteMismatches("x/y.ts", `${spelling}\n`, false)).toHaveLength(1);
-    }
+  test.each([
+    { source: "process?.stdout.write(out);", reason: "an optional receiver" },
+    { source: "process.stderr?.write(err);", reason: "an optional stream" },
+    { source: "process.stdout.write?.(out);", reason: "an optional call" },
+    { source: "process?.stdout.write?.(out);", reason: "optional receiver and call together" },
+    { source: "process . stdout . write (out);", reason: "spaced member access" },
+    { source: "globalThis.process.stdout.write(out);", reason: "a globalThis receiver" },
+    {
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: literal source under test
+      source: "const t = `${process.stdout.write(chunk)}`;",
+      reason: "a template interpolation (code, not string content)",
+    },
+  ])("$reason still fires at its line: $source", ({ source }) => {
+    expect(asyncStreamWriteMismatches("x/y.ts", `${source}\n`, false)).toEqual([
+      {
+        file: "x/y.ts:1",
+        expected:
+          "writeSync for stream writes (bun's async stream writes truncate at the pipe buffer when any later path exits), or a NATURAL_EXIT_WRITE_FILES entry whose reason holds",
+        got: "an async stream write",
+      },
+    ]);
   });
 
   test("a source the parser must recover throws instead of judging recovered shapes", () => {
