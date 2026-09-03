@@ -8,12 +8,12 @@
 {%- if 'skills' in modules -%}
 {%- set _ = entries.append('    ".claude-plugin/plugin.json": {"class": "starter"}') -%}
 {%- endif -%}
-{%- set _ = entries.append('    ".copier-answers.yml": {"class": "managed", "hash": null}') -%}
 {%- if 'deno' in modules -%}
 {%- set _ = entries.append('    ".dvmrc": {"class": "managed", "hash": null}') -%}
 {%- endif -%}
 {%- set _ = entries.append('    ".editorconfig": {"class": "split", "grammar": "managed-region", "begin": "# BEGIN REPO-PLATFORM MANAGED", "end": "# END REPO-PLATFORM MANAGED", "hash": null}') -%}
 {%- set _ = entries.append('    ".gitattributes": {"class": "split", "grammar": "managed-region", "begin": "# BEGIN REPO-PLATFORM MANAGED", "end": "# END REPO-PLATFORM MANAGED", "hash": null}') -%}
+{%- set _ = entries.append('    ".github/.copier-answers.yml": {"class": "managed", "hash": null}') -%}
 {%- set _ = entries.append('    ".github/CODEOWNERS": {"class": "split", "grammar": "managed-region", "begin": "# BEGIN REPO-PLATFORM MANAGED", "end": "# END REPO-PLATFORM MANAGED", "hash": null}') -%}
 {%- if 'issue-templates' in modules -%}
 {%- set _ = entries.append('    ".github/ISSUE_TEMPLATE/bug_report.yml": {"class": "starter"}') -%}

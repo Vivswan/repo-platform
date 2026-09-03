@@ -14,7 +14,7 @@ const E = "<!-- END REPO-PLATFORM MANAGED -->";
 const HB = "# BEGIN REPO-PLATFORM MANAGED";
 const HE = "# END REPO-PLATFORM MANAGED";
 const BASELINE: Record<string, string> = {
-  ".copier-answers.yml": `${MANAGED_HEADER}_commit: 0.0.0.post5.dev0+abc1234\n_src_path: gh:Vivswan/repo-platform\ngithub_username: Vivswan\n`,
+  ".github/.copier-answers.yml": `${MANAGED_HEADER}_commit: 0.0.0.post5.dev0+abc1234\n_src_path: gh:Vivswan/repo-platform\ngithub_username: Vivswan\n`,
   // A repo-owned starter (generated once, never rewritten): no managed
   // header, no manifest hash.
   ".repo-platform.yml": "# Generated once by Vivswan/repo-platform; repo-owned.\nmodules: [uv]\n",
@@ -71,7 +71,7 @@ type MirrorEntry = {
   withoutModule?: string;
 };
 const MIRROR_BASE: MirrorEntry[] = [
-  { path: ".copier-answers.yml", kind: "header" },
+  { path: ".github/.copier-answers.yml", kind: "header" },
   { path: ".editorconfig", kind: "region", begin: HB, end: HE },
   { path: ".gitattributes", kind: "region", begin: HB, end: HE },
   { path: ".github/CODEOWNERS", kind: "region", begin: HB, end: HE },
@@ -131,7 +131,7 @@ function regionOf(content: string, begin: string, end: string): string | null {
 }
 
 function manifestForTree(tree: Record<string, string>): string {
-  const answers = tree[".copier-answers.yml"] ?? "";
+  const answers = tree[".github/.copier-answers.yml"] ?? "";
   const isPrivate = /^private:\s*true\b/m.test(answers);
   const commit = /^_commit:[ \t]*(.+?)[ \t]*$/m.exec(answers)?.[1] ?? null;
   const modules = (/^modules:\s*\[([^\]]*)\]/m.exec(tree[".repo-platform.yml"] ?? "")?.[1] ?? "")
@@ -418,7 +418,7 @@ describe("base checks shape", () => {
 
   test("a full private merged ci.yml passes with no advisories", () => {
     const { exitCode, stdout, stderr } = runValidator({
-      ".copier-answers.yml": PRIVATE_ANSWERS,
+      ".github/.copier-answers.yml": PRIVATE_ANSWERS,
       ".github/workflows/ci.yml": mergedCi(MERGED_STEPS),
     });
     expect(stderr).toBe("");
@@ -429,7 +429,7 @@ describe("base checks shape", () => {
   test("each check missing from the merged job gets its own advisory", () => {
     // Steps 0-3: check-typography and validate-commit-names only.
     const { exitCode, stdout, stderr } = runValidator({
-      ".copier-answers.yml": PRIVATE_ANSWERS,
+      ".github/.copier-answers.yml": PRIVATE_ANSWERS,
       ".github/workflows/ci.yml": mergedCi(MERGED_STEPS.slice(0, 4)),
     });
     expect(stderr).toBe("");
@@ -447,7 +447,7 @@ describe("base checks shape", () => {
       ...MERGED_STEPS.slice(2),
     ];
     const { exitCode, stderr } = runValidator({
-      ".copier-answers.yml": PRIVATE_ANSWERS,
+      ".github/.copier-answers.yml": PRIVATE_ANSWERS,
       ".github/workflows/ci.yml": mergedCi(steps),
     });
     expect(exitCode).toBe(1);
@@ -460,7 +460,7 @@ describe("base checks shape", () => {
       ...MERGED_STEPS.slice(2),
     ];
     const { exitCode, stderr } = runValidator({
-      ".copier-answers.yml": PRIVATE_ANSWERS,
+      ".github/.copier-answers.yml": PRIVATE_ANSWERS,
       ".github/workflows/ci.yml": mergedCi(steps),
     });
     expect(exitCode).toBe(1);
@@ -473,7 +473,7 @@ describe("base checks shape", () => {
       ...MERGED_STEPS.slice(2),
     ];
     const { exitCode, stderr } = runValidator({
-      ".copier-answers.yml": PRIVATE_ANSWERS,
+      ".github/.copier-answers.yml": PRIVATE_ANSWERS,
       ".github/workflows/ci.yml": mergedCi(steps),
     });
     expect(exitCode).toBe(1);
@@ -486,7 +486,7 @@ describe("base checks shape", () => {
       ...MERGED_STEPS.slice(2),
     ];
     const { exitCode, stderr } = runValidator({
-      ".copier-answers.yml": PRIVATE_ANSWERS,
+      ".github/.copier-answers.yml": PRIVATE_ANSWERS,
       ".github/workflows/ci.yml": mergedCi(steps),
     });
     expect(exitCode).toBe(1);
@@ -495,7 +495,7 @@ describe("base checks shape", () => {
 
   test("a managed render missing github_username in its answers fails", () => {
     const { exitCode, stderr } = runValidator({
-      ".copier-answers.yml":
+      ".github/.copier-answers.yml":
         "_commit: 0.0.0.post5.dev0+abc1234\n_src_path: gh:Vivswan/repo-platform\n",
     });
     expect(exitCode).toBe(1);
@@ -504,7 +504,7 @@ describe("base checks shape", () => {
 
   test("a malformed github_username (regex metacharacters, slashes) fails", () => {
     const { exitCode, stderr } = runValidator({
-      ".copier-answers.yml":
+      ".github/.copier-answers.yml":
         "_commit: 0.0.0.post5.dev0+abc1234\n_src_path: gh:Vivswan/repo-platform\n" +
         "github_username: attacker/repo.*\n",
     });
@@ -514,7 +514,7 @@ describe("base checks shape", () => {
 
   test("a quoted github_username is read as its YAML value", () => {
     const { exitCode, stderr } = runValidator({
-      ".copier-answers.yml":
+      ".github/.copier-answers.yml":
         `${MANAGED_HEADER}_commit: 0.0.0.post5.dev0+abc1234\n_src_path: gh:Vivswan/repo-platform\n` +
         'github_username: "Vivswan"\nprivate: true\n',
       ".github/workflows/ci.yml": mergedCi(MERGED_STEPS),
@@ -531,7 +531,7 @@ describe("base checks shape", () => {
     ];
     const { exitCode, stderr } = runValidator(
       {
-        ".copier-answers.yml": "_commit: abc\n_src_path: /tmp/src\n",
+        ".github/.copier-answers.yml": "_commit: abc\n_src_path: /tmp/src\n",
         ".github/workflows/ci.yml": mergedCi(steps),
       },
       ["--self"],
@@ -547,7 +547,7 @@ describe("base checks shape", () => {
       "        if: ${{ !cancelled() }}",
     ];
     const { exitCode, stdout, stderr } = runValidator({
-      ".copier-answers.yml": PRIVATE_ANSWERS,
+      ".github/.copier-answers.yml": PRIVATE_ANSWERS,
       ".github/workflows/ci.yml": mergedCi(steps),
     });
     expect(stderr).toBe("");
@@ -569,7 +569,7 @@ describe("base checks shape", () => {
       "        if: false",
     ];
     const { exitCode, stdout, stderr } = runValidator({
-      ".copier-answers.yml": PRIVATE_ANSWERS,
+      ".github/.copier-answers.yml": PRIVATE_ANSWERS,
       ".github/workflows/ci.yml": mergedCi(steps),
     });
     expect(stderr).toBe("");
@@ -587,7 +587,7 @@ describe("base checks shape", () => {
       ...MERGED_STEPS.slice(8),
     ];
     const { exitCode, stdout, stderr } = runValidator({
-      ".copier-answers.yml": PRIVATE_ANSWERS,
+      ".github/.copier-answers.yml": PRIVATE_ANSWERS,
       ".github/workflows/ci.yml": mergedCi(steps),
     });
     expect(stderr).toBe("");
@@ -598,7 +598,7 @@ describe("base checks shape", () => {
 
   test("base-checks outside all-green's needs fails", () => {
     const { exitCode, stderr } = runValidator({
-      ".copier-answers.yml": PRIVATE_ANSWERS,
+      ".github/.copier-answers.yml": PRIVATE_ANSWERS,
       ".github/workflows/ci.yml": mergedCi(MERGED_STEPS, "[]"),
     });
     expect(exitCode).toBe(1);
@@ -1044,7 +1044,7 @@ describe("ownership self-declarations", () => {
     // is its own business.
     const privateRender = runValidator({
       ...coc,
-      ".copier-answers.yml": `${BASELINE[".copier-answers.yml"]}private: true\n`,
+      ".github/.copier-answers.yml": `${BASELINE[".github/.copier-answers.yml"]}private: true\n`,
       ".github/workflows/ci.yml": BASELINE[".github/workflows/ci.yml"]
         .replace("  typography:", "  base-checks:")
         .replace("needs: [typography]", "needs: [base-checks]")
@@ -1143,8 +1143,8 @@ describe("ownership-manifest byte parity", () => {
     `"end": ${JSON.stringify(end)}, "hash": "${sha(regionOf(BASELINE[path] ?? "", begin, end) ?? "")}"}`;
   const stampedBaseline = () => ({
     ...SELF_ENTRY,
-    ".copier-answers.yml": `{"class": "managed", "hash": "${sha(
-      BASELINE[".copier-answers.yml"],
+    ".github/.copier-answers.yml": `{"class": "managed", "hash": "${sha(
+      BASELINE[".github/.copier-answers.yml"],
     )}"}`,
     ".repo-platform.yml": '{"class": "starter"}',
     ".github/workflows/ci.yml": `{"class": "managed", "hash": "${sha(
@@ -1305,13 +1305,13 @@ describe("ownership-manifest byte parity", () => {
     // into a false tampering report; the failsafe re-read keeps them
     // strings, so a matching stamp passes with no missing-_commit text.
     const exponentSha = runValidator({
-      ".copier-answers.yml": `${MANAGED_HEADER}_commit: 95e1875\n_src_path: gh:Vivswan/repo-platform\ngithub_username: Vivswan\n`,
+      ".github/.copier-answers.yml": `${MANAGED_HEADER}_commit: 95e1875\n_src_path: gh:Vivswan/repo-platform\ngithub_username: Vivswan\n`,
       [MANIFEST]: manifestOf({
         [MANIFEST]: '{"class": "managed", "hash": null, "commit": "95e1875"}',
       }),
     });
     expect(exponentSha.stderr).not.toContain("stamped provenance");
-    expect(exponentSha.stderr).not.toContain("no _commit in .copier-answers.yml");
+    expect(exponentSha.stderr).not.toContain("no _commit in .github/.copier-answers.yml");
   });
 
   test("the exponent-shaped sha still feeds the provenance check (positive oracle)", () => {
@@ -1320,7 +1320,7 @@ describe("ownership-manifest byte parity", () => {
     // stamp: the error must fire AND quote 95e1875 as the recorded value,
     // proving the failsafe read returned the string and the check ran.
     const mismatched = runValidator({
-      ".copier-answers.yml": `${MANAGED_HEADER}_commit: 95e1875\n_src_path: gh:Vivswan/repo-platform\ngithub_username: Vivswan\n`,
+      ".github/.copier-answers.yml": `${MANAGED_HEADER}_commit: 95e1875\n_src_path: gh:Vivswan/repo-platform\ngithub_username: Vivswan\n`,
       [MANIFEST]: manifestOf({
         [MANIFEST]: '{"class": "managed", "hash": null, "commit": "zzz9999"}',
       }),
@@ -1336,13 +1336,13 @@ describe("ownership-manifest byte parity", () => {
     // The stamper always writes the recorded _commit, so a stamp with no
     // recorded counterpart is the same tamper as a differing value.
     const keyDeleted = runValidator({
-      ".copier-answers.yml": `${MANAGED_HEADER}_src_path: gh:Vivswan/repo-platform\ngithub_username: Vivswan\n`,
+      ".github/.copier-answers.yml": `${MANAGED_HEADER}_src_path: gh:Vivswan/repo-platform\ngithub_username: Vivswan\n`,
       [MANIFEST]: manifestOf({
         [MANIFEST]: '{"class": "managed", "hash": null, "commit": "0.0.0.post5.dev0+abc1234"}',
       }),
     });
     expect(keyDeleted.exitCode).toBe(1);
-    expect(keyDeleted.stderr).toContain("no _commit in .copier-answers.yml");
+    expect(keyDeleted.stderr).toContain("no _commit in .github/.copier-answers.yml");
   });
 
   test("a public-only entry on a private render is manifest drift", () => {
@@ -1353,13 +1353,13 @@ describe("ownership-manifest byte parity", () => {
       "github_username: Vivswan\nprivate: true\n";
     const entries = {
       ...stampedBaseline(),
-      ".copier-answers.yml": `{"class": "managed", "hash": "${sha(privateAnswers)}"}`,
+      ".github/.copier-answers.yml": `{"class": "managed", "hash": "${sha(privateAnswers)}"}`,
       "CONTRIBUTING.md":
         `{"class": "split", "grammar": "managed-region", "begin": ${JSON.stringify(B)}, ` +
         `"end": ${JSON.stringify(E)}, "hash": "${"a".repeat(64)}"}`,
     };
     const { exitCode, stderr } = runValidator({
-      ".copier-answers.yml": privateAnswers,
+      ".github/.copier-answers.yml": privateAnswers,
       [MANIFEST]: manifestOf(entries),
     });
     expect(exitCode).toBe(1);

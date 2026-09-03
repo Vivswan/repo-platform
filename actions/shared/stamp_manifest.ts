@@ -83,7 +83,8 @@ const HASH_RE = /"hash": (?:null|"[0-9a-f]{64}")/;
  *  _commit, letting the validator tell version skew from entry deletion. */
 const COMMIT_RE = /"commit": (?:null|"[^"]*")/;
 
-/** The `_commit` the render recorded in .copier-answers.yml, or null when
+/** The `_commit` the render recorded in .github/.copier-answers.yml, or
+ *  null when
  *  the file or key is missing. Read with a line regex, not a YAML parser:
  *  this script ships standalone (no node_modules downstream), copier
  *  writes the key as a plain one-line scalar, and a value the regex cannot
@@ -91,7 +92,7 @@ const COMMIT_RE = /"commit": (?:null|"[^"]*")/;
 export function recordedCommit(root: string): string | null {
   let text: string;
   try {
-    text = readFileSync(join(root, ".copier-answers.yml"), "utf-8");
+    text = readFileSync(join(root, ".github/.copier-answers.yml"), "utf-8");
   } catch {
     return null;
   }

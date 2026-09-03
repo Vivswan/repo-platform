@@ -148,7 +148,8 @@ jobs:
       # This repository's facts come from the CHECKOUT above, not from
       # gh api: the self-apply grant documented for REPO_PLATFORM_TOKEN is
       # Administration and Issues only, with no Contents scope, so
-      # fetching .repo-platform.yml and .copier-answers.yml over the API
+      # fetching .repo-platform.yml and .github/.copier-answers.yml over
+      # the API
       # failed on every private repository before it rendered anything.
       # The checkout already has contents: read, and --target-dir needs no
       # network at all. The central run in settings-repos.yml is
