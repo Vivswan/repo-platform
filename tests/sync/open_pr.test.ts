@@ -10,12 +10,15 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  ANSWERS_MOVE_NAME,
   GATE_REWORK_NAME,
   MIRRORS_NOTE_NAME,
   MIRRORS_REVIEW_NAME,
   REFERENCED_LABELS_NAME,
+  REGISTRATION_FLIP_NAME,
   REMOVED_SPLITS_NAME,
   SETTINGS_LAYERING_NAME,
+  STARTER_PINS_NAME,
   TAIL_SHRANK_NAME,
 } from "../../.github/scripts/sync/section_files.ts";
 import { boundedSpawnSync } from "../shared/bounded_spawn";
@@ -113,7 +116,7 @@ function run(opts: Options = {}) {
 }
 
 describe("open_pr sections and auto-merge", () => {
-  test("a clean update carries no sections and arms auto-merge", () => {
+  test("a clean update carries no sections, arms auto-merge, and re-emits the merge output redacted", () => {
     const r = run();
     expect(r.exitCode).toBe(0);
     expect(r.body).toContain("Automated template update");
@@ -121,10 +124,8 @@ describe("open_pr sections and auto-merge", () => {
     expect(r.body).not.toContain("TAIL TRIPWIRE");
     expect(r.merged).toBe(true);
     expect(r.output).toContain("auto-merge armed");
-  });
-
-  test("the merge output is re-emitted redacted for a public target", () => {
-    const r = run();
+    // gh's merge output quotes a credentialed URL: for a public target it
+    // is re-emitted redacted, never verbatim.
     expect(r.output).not.toContain("ghp_MERGESENTINEL");
     expect(r.output).toContain("auto-merge enabled via https://***@github.com/o/r.git");
   });
@@ -137,115 +138,206 @@ describe("open_pr sections and auto-merge", () => {
     expect(r.output).not.toContain("auto-merge enabled via");
   });
 
-  test("a tail-shrank report becomes a body section and forces review", () => {
-    const report = "> [!WARNING]\n> TAIL TRIPWIRE: lines missing\n";
-    const r = run({ temp: { [TAIL_SHRANK_NAME]: report } });
+  // open_pr.ts collects its flag-file sections from ONE declarative roster
+  // (FlagSection[]: file, render, forcesReview). This table is that roster
+  // row for row, in body order, so every section constant has a row and
+  // the review / informational split is asserted the same way on each: a
+  // roster entry whose forcesReview flips, or a renamed report file, fails
+  // here.
+  interface SectionRow {
+    reason: string;
+    /** A fixed RUNNER_TEMP name (section_files.ts) or an env-named file. */
+    where: "temp" | "files";
+    name: string;
+    content: string;
+    /** The exact section text the body must carry. Omitted: the roster's
+     * default slurp render (the content, trailing newline stripped). Null
+     * marks a review-only flag with no body section (its content must NOT
+     * appear). */
+    section?: string | null;
+    forcesReview: boolean;
+  }
+  /** The exact body chunk a row's section lands as: the two-newline seam
+   * plus the rendered section. */
+  function sectionText(row: SectionRow): string {
+    if (row.section === null) throw new Error(`${row.name} renders no section`);
+    return `\n\n${row.section ?? row.content.replace(/\n$/, "")}`;
+  }
+  const sectionRows: SectionRow[] = [
+    {
+      reason: "carry summary: the sync's own disposition notes, informational",
+      where: "files",
+      name: "CARRIED_FILE",
+      content: "- `AGENTS.md`: rebuilt structurally",
+      forcesReview: false,
+    },
+    {
+      reason: "tail tripwire: a trip is a sync bug",
+      where: "temp",
+      name: TAIL_SHRANK_NAME,
+      content: "> [!WARNING]\n> TAIL TRIPWIRE: lines missing\n",
+      forcesReview: true,
+    },
+    {
+      reason: "retired modules: the selection change is the repo's own",
+      where: "files",
+      name: "RETIRED_MODULES_FILE",
+      content: "fuzzer\n",
+      section: "Retired modules dropped from the selection: fuzzer",
+      forcesReview: false,
+    },
+    {
+      reason: "removed paths: template retirements are routine",
+      where: "files",
+      name: "REMOVED_PATHS_FILE",
+      content: ".github/old.yml\n",
+      section: "The template retired these files; this update deletes them:\n\n- .github/old.yml",
+      forcesReview: false,
+    },
+    {
+      reason: "starter pin rollout: byte-surgical, hand-set pins left alone",
+      where: "temp",
+      name: STARTER_PINS_NAME,
+      content: "### Starter workflow pins ported\n\n- `.github/workflows/checks.yml`\n",
+      forcesReview: false,
+    },
+    {
+      reason: "gate rework: the PR gates itself",
+      where: "temp",
+      name: GATE_REWORK_NAME,
+      content: "> [!NOTE]\n> GATE REWORK: ci.yml's all-green job carries the check now.\n",
+      forcesReview: false,
+    },
+    {
+      reason: "answers move: the bytes are untouched",
+      where: "temp",
+      name: ANSWERS_MOVE_NAME,
+      content:
+        "### Answers file relocated\n\n`.copier-answers.yml` -> `.github/.copier-answers.yml`\n",
+      forcesReview: false,
+    },
+    {
+      reason: "registration flip: enforcement only relaxes",
+      where: "temp",
+      name: REGISTRATION_FLIP_NAME,
+      content: "### .repo-platform.yml is repo-owned now\n",
+      forcesReview: false,
+    },
+    {
+      reason: "withheld workflow files: the update is incomplete",
+      where: "files",
+      name: "WITHHELD_FILE",
+      content: ".github/workflows/ci.yml\n",
+      section:
+        "> [!WARNING]\n> Workflow-file changes were WITHHELD from this update: the sync\n> token lacks the Workflows scope. Grant Workflows read/write to\n> the REPO_PLATFORM_TOKEN and re-run the sync to include them.\n\n- .github/workflows/ci.yml",
+      forcesReview: true,
+    },
+    {
+      reason: "manifest license note: metadata only",
+      where: "files",
+      name: "MANIFEST_LICENSE_FILE",
+      content: "license metadata note\n",
+      forcesReview: false,
+    },
+    {
+      reason: "mirror listing: the declaration is repo-owned consent",
+      where: "temp",
+      name: MIRRORS_NOTE_NAME,
+      content:
+        "Mirror copies materialized from this repository's own declaration:\n\n" +
+        "- `template/LICENSE.md` <- `LICENSE.md`\n",
+      forcesReview: false,
+    },
+    {
+      reason: "mirror refusal: the refused copies are stale",
+      where: "temp",
+      name: MIRRORS_REVIEW_NAME,
+      content: "> [!WARNING]\n> REFUSED mirror declaration(s)\n\n- `../x`: escapes\n",
+      forcesReview: true,
+    },
+    {
+      reason: "settings layering: dropped overrides need a human to re-add them",
+      where: "temp",
+      name: SETTINGS_LAYERING_NAME,
+      content: "### settings.yml layering\ndropped",
+      forcesReview: true,
+    },
+    {
+      reason: "referenced labels: the apply deletes undeclared labels",
+      where: "temp",
+      name: REFERENCED_LABELS_NAME,
+      content:
+        "> [!WARNING]\n> REFERENCED LABELS MISSING FROM THE SETTINGS ROSTER\n>\n" +
+        '> - "answered": referenced by `.github/workflows/close.yml`\n',
+      forcesReview: true,
+    },
+    {
+      reason: "removed splits: a repository-owned half leaves with the deletion",
+      where: "temp",
+      name: REMOVED_SPLITS_NAME,
+      content:
+        "> [!WARNING]\n> This update DELETES file(s) whose previous copy carries a\n> repository-owned half.\n\n- `AGENTS.md`: this repository-owned content leaves with the deletion:\n\n  ````text\n  local agents tail\n  ````\n",
+      forcesReview: true,
+    },
+    {
+      reason: "carry-review flag: review-only, the carried summary already names the files",
+      where: "files",
+      name: "CARRY_REVIEW_FILE",
+      content: "AGENTS.md: managed-half edits reset\n",
+      section: null,
+      forcesReview: true,
+    },
+  ];
+
+  test.each(sectionRows)("flag-file section: $reason", (row) => {
+    const { where, name, content, forcesReview } = row;
+    const r = run(
+      where === "temp" ? { temp: { [name]: content } } : { files: { [name]: content } },
+    );
     expect(r.exitCode).toBe(0);
-    expect(r.body).toContain("TAIL TRIPWIRE: lines missing");
-    expect(r.merged).toBe(false);
-    expect(r.output).toContain("auto-merge left off");
+    if (row.section === null) expect(r.body).not.toContain(content.trim());
+    else expect(r.body).toContain(sectionText(row));
+    expect(r.merged).toBe(!forcesReview);
+    expect(r.output).toContain(forcesReview ? "auto-merge left off" : "auto-merge armed");
   });
 
-  test("a settings-layering report becomes a body section and forces review", () => {
-    const r = run({ temp: { [SETTINGS_LAYERING_NAME]: "### settings.yml layering\ndropped" } });
+  test("informational sections accumulate in roster order and leave auto-merge armed", () => {
+    // Every informational flag at once: each section lands (none crowds
+    // another out), in the roster's body order, and none of them holds the
+    // PR.
+    const informational = sectionRows.filter((row) => !row.forcesReview);
+    const byWhere = (where: SectionRow["where"]) =>
+      Object.fromEntries(
+        informational.filter((row) => row.where === where).map((row) => [row.name, row.content]),
+      );
+    const r = run({ temp: byWhere("temp"), files: byWhere("files") });
     expect(r.exitCode).toBe(0);
-    expect(r.body).toContain("settings.yml layering");
-    expect(r.merged).toBe(false);
-  });
-
-  test("the gate-rework note becomes an informational body section (auto-merge stays armed)", () => {
-    const note = "> [!NOTE]\n> GATE REWORK: ci.yml's all-green job carries the check now.\n";
-    const r = run({ temp: { [GATE_REWORK_NAME]: note } });
-    expect(r.exitCode).toBe(0);
-    expect(r.body).toContain("GATE REWORK");
+    const positions = informational.map((row) => r.body.indexOf(sectionText(row)));
+    expect(positions.every((position) => position >= 0)).toBe(true);
+    expect(positions).toEqual([...positions].sort((a, b) => a - b));
     expect(r.merged).toBe(true);
+    expect(r.output).toContain("auto-merge armed");
   });
 
-  test("no gate-rework note (the target already crossed) leaves the body clean", () => {
-    // The detection writes an EMPTY report when the condition is false;
-    // an empty flag file is no section and must not hold the PR.
-    const r = run({ temp: { [GATE_REWORK_NAME]: "" } });
+  // The detections that write an EMPTY report when their condition is
+  // false: an empty flag file is no section and must not hold the PR.
+  test.each([
+    {
+      reason: "gate rework, the target already crossed",
+      name: GATE_REWORK_NAME,
+      fragment: "GATE REWORK",
+    },
+    {
+      reason: "referenced labels, every label declared",
+      name: REFERENCED_LABELS_NAME,
+      fragment: "REFERENCED LABELS",
+    },
+  ])("an empty report is no section: $reason", ({ name, fragment }) => {
+    const r = run({ temp: { [name]: "" } });
     expect(r.exitCode).toBe(0);
-    expect(r.body).not.toContain("GATE REWORK");
+    expect(r.body).not.toContain(fragment);
     expect(r.merged).toBe(true);
-  });
-
-  test("a referenced-labels report becomes a body section and forces review", () => {
-    const report =
-      "> [!WARNING]\n> REFERENCED LABELS MISSING FROM THE SETTINGS ROSTER\n>\n" +
-      '> - "answered": referenced by `.github/workflows/close.yml`\n';
-    const r = run({ temp: { [REFERENCED_LABELS_NAME]: report } });
-    expect(r.exitCode).toBe(0);
-    expect(r.body).toContain("REFERENCED LABELS MISSING FROM THE SETTINGS ROSTER");
-    expect(r.merged).toBe(false);
-    expect(r.output).toContain("auto-merge left off");
-  });
-
-  test("an empty referenced-labels report (every label declared) stays clean and armed", () => {
-    const r = run({ temp: { [REFERENCED_LABELS_NAME]: "" } });
-    expect(r.exitCode).toBe(0);
-    expect(r.body).not.toContain("REFERENCED LABELS");
-    expect(r.merged).toBe(true);
-  });
-
-  test("the mirror listing is an informational body section (auto-merge stays armed)", () => {
-    const note =
-      "Mirror copies materialized from this repository's own declaration:\n\n" +
-      "- `template/LICENSE.md` <- `LICENSE.md`\n";
-    const r = run({ temp: { [MIRRORS_NOTE_NAME]: note } });
-    expect(r.exitCode).toBe(0);
-    expect(r.body).toContain("`template/LICENSE.md` <- `LICENSE.md`");
-    expect(r.merged).toBe(true);
-  });
-
-  test("a mirror refusal report becomes a body section and forces review", () => {
-    const report = "> [!WARNING]\n> REFUSED mirror declaration(s)\n\n- `../x`: escapes\n";
-    const r = run({ temp: { [MIRRORS_REVIEW_NAME]: report } });
-    expect(r.exitCode).toBe(0);
-    expect(r.body).toContain("REFUSED mirror declaration(s)");
-    expect(r.merged).toBe(false);
-    expect(r.output).toContain("auto-merge left off");
-  });
-
-  test("the carry summary is a section WITHOUT forcing review", () => {
-    const r = run({ files: { CARRIED_FILE: "- `AGENTS.md`: rebuilt structurally" } });
-    expect(r.exitCode).toBe(0);
-    expect(r.body).toContain("rebuilt structurally");
-    expect(r.merged).toBe(true);
-  });
-
-  test("the carry-review flag forces review without a body section of its own", () => {
-    const r = run({ files: { CARRY_REVIEW_FILE: "AGENTS.md: managed-half edits reset\n" } });
-    expect(r.exitCode).toBe(0);
-    expect(r.body).not.toContain("managed-half edits reset");
-    expect(r.merged).toBe(false);
-    expect(r.output).toContain("auto-merge left off");
-  });
-
-  test("withheld workflow files and a removed-splits report both force review", () => {
-    const withheld = run({ files: { WITHHELD_FILE: ".github/workflows/ci.yml\n" } });
-    expect(withheld.body).toContain("WITHHELD");
-    expect(withheld.merged).toBe(false);
-    const report =
-      "> [!WARNING]\n> This update DELETES file(s) whose previous copy carries a\n> repository-owned half.\n\n- `AGENTS.md`: this repository-owned content leaves with the deletion:\n\n  ````text\n  local agents tail\n  ````\n";
-    const removed = run({ temp: { [REMOVED_SPLITS_NAME]: report } });
-    expect(removed.body).toContain("This update DELETES");
-    expect(removed.body).toContain("local agents tail");
-    expect(removed.merged).toBe(false);
-  });
-
-  test("informational sections (retired modules, removed paths, manifest license) stay auto-merge-eligible", () => {
-    const r = run({
-      files: {
-        RETIRED_MODULES_FILE: "fuzzer\n",
-        REMOVED_PATHS_FILE: ".github/old.yml\n",
-        MANIFEST_LICENSE_FILE: "license metadata note\n",
-      },
-    });
-    expect(r.body).toContain("Retired modules dropped from the selection: fuzzer");
-    expect(r.body).toContain("- .github/old.yml");
-    expect(r.body).toContain("license metadata note");
-    expect(r.merged).toBe(true);
+    expect(r.output).toContain("auto-merge armed");
   });
 
   test("out-of-band settings drift prepends to the top and forces review", () => {

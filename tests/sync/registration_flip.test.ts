@@ -9,6 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   flipSummary,
+  retrySummary,
   rewordedRegistration,
   starterHeaderFor,
   transitionRegistrationStarter,
@@ -69,21 +70,18 @@ describe("starterHeaderFor", () => {
 });
 
 describe("rewordedRegistration", () => {
-  test("replaces the exact old rendered header and nothing else", () => {
-    const body = 'modules: ["uv"]\nmirrors:\n  - source: LICENSE.md\n    targets: [a/LICENSE.md]\n';
-    const next = rewordedRegistration(`${OLD_HEADER}${body}`);
-    expect(next).not.toBeNull();
-    expect(next).toContain("Vivswan/repo-platform");
-    expect(next).not.toContain("This file is managed by");
-    // Everything after the header block is byte-preserved.
-    expect(next?.endsWith(`\n${body}`)).toBe(true);
-  });
-
-  test("captures the owner from the header line itself", () => {
-    const next = rewordedRegistration(
-      `${OLD_HEADER.replaceAll("Vivswan", "OtherOwner")}modules: []\n`,
+  test.each([
+    { reason: "the fleet owner", owner: "Vivswan" },
+    { reason: "an owner captured from the header line itself", owner: "OtherOwner" },
+  ])("replaces the exact old rendered header and nothing else: $reason", ({ owner }) => {
+    // Byte-exact: the new header for the captured owner, then everything
+    // after the old block untouched - the blank seam line the render puts
+    // between header and body included, no body edits.
+    const body =
+      '\nmodules: ["uv"]\nmirrors:\n  - source: LICENSE.md\n    targets: [a/LICENSE.md]\n';
+    expect(rewordedRegistration(`${OLD_HEADER.replaceAll("Vivswan", owner)}${body}`)).toBe(
+      `${starterHeaderFor(owner)}${body}`,
     );
-    expect(next).toContain("OtherOwner/repo-platform");
   });
 
   test("a hand-edited header is left alone (null)", () => {
@@ -94,16 +92,14 @@ describe("rewordedRegistration", () => {
 
 describe("transitionRegistrationStarter", () => {
   test("HEAD manifest managed: rewords the header, notes the flip", () => {
-    const body = 'modules: ["uv"]\n';
+    const body = '\nmodules: ["uv"]\n';
     const dir = target(`${OLD_HEADER}${body}`);
     const out = join(dir, "registration-flip.md");
     transitionRegistrationStarter(dir, out, "t");
-    const file = readFileSync(join(dir, ".repo-platform.yml"), "utf-8");
-    expect(file.startsWith(starterHeaderFor("Vivswan"))).toBe(true);
-    expect(file.endsWith(`\n${body}`)).toBe(true);
-    const note = readFileSync(out, "utf-8");
-    expect(note).toContain("repo-owned now");
-    expect(note).toContain("was reworded");
+    expect(readFileSync(join(dir, ".repo-platform.yml"), "utf-8")).toBe(
+      `${starterHeaderFor("Vivswan")}${body}`,
+    );
+    expect(readFileSync(out, "utf-8")).toBe(flipSummary(true));
   });
 
   test("HEAD manifest managed, repo-edited header: hands off, still notes the flip", () => {
@@ -112,23 +108,21 @@ describe("transitionRegistrationStarter", () => {
     const out = join(dir, "registration-flip.md");
     transitionRegistrationStarter(dir, out, "t");
     expect(readFileSync(join(dir, ".repo-platform.yml"), "utf-8")).toBe(text);
-    const note = readFileSync(out, "utf-8");
-    expect(note).toContain("repo-owned now");
-    expect(note).toContain("NOT rewritten");
+    expect(readFileSync(out, "utf-8")).toBe(flipSummary(false));
   });
 
   test("HEAD manifest already starter, old header still present: rewords with the retry note", () => {
     // The failed-then-merged shape: the flip landed (HEAD classes starter)
     // but an earlier sync's reword did not. The old header text is the
     // trigger, so the reword still lands - with the smaller note.
-    const dir = target(`${OLD_HEADER}modules: ["uv"]\n`, "starter");
+    const body = '\nmodules: ["uv"]\n';
+    const dir = target(`${OLD_HEADER}${body}`, "starter");
     const out = join(dir, "registration-flip.md");
     transitionRegistrationStarter(dir, out, "t");
-    const file = readFileSync(join(dir, ".repo-platform.yml"), "utf-8");
-    expect(file.startsWith(starterHeaderFor("Vivswan"))).toBe(true);
-    const note = readFileSync(out, "utf-8");
-    expect(note).toContain("header reworded");
-    expect(note).not.toContain("repo-owned now");
+    expect(readFileSync(join(dir, ".repo-platform.yml"), "utf-8")).toBe(
+      `${starterHeaderFor("Vivswan")}${body}`,
+    );
+    expect(readFileSync(out, "utf-8")).toBe(retrySummary());
   });
 
   test("converged state (reworded header, starter at HEAD): no note, file untouched", () => {
@@ -145,12 +139,14 @@ describe("transitionRegistrationStarter", () => {
     // pre-flip template rendered it, and the hash pinning enforced it), so
     // a damaged manifest must not park the reword forever - it only
     // downgrades the note (other machinery reports the manifest damage).
-    const dir = target(`${OLD_HEADER}modules: ["uv"]\n`, null);
+    const body = '\nmodules: ["uv"]\n';
+    const dir = target(`${OLD_HEADER}${body}`, null);
     const out = join(dir, "registration-flip.md");
     transitionRegistrationStarter(dir, out, "t");
-    const file = readFileSync(join(dir, ".repo-platform.yml"), "utf-8");
-    expect(file.startsWith(starterHeaderFor("Vivswan"))).toBe(true);
-    expect(readFileSync(out, "utf-8")).toContain("header reworded");
+    expect(readFileSync(join(dir, ".repo-platform.yml"), "utf-8")).toBe(
+      `${starterHeaderFor("Vivswan")}${body}`,
+    );
+    expect(readFileSync(out, "utf-8")).toBe(retrySummary());
   });
 
   test("fail-soft: a broken template source leaves the file alone and says so", () => {
@@ -163,12 +159,19 @@ describe("transitionRegistrationStarter", () => {
   });
 });
 
-describe("flipSummary", () => {
-  test("both outcomes name the flip; only one claims the reword", () => {
+describe("flipSummary and retrySummary", () => {
+  test("both flip outcomes name the flip; only one claims the reword", () => {
+    expect(flipSummary(true)).toContain("repo-owned now");
     expect(flipSummary(true)).toContain("was reworded");
+    expect(flipSummary(false)).toContain("repo-owned now");
     expect(flipSummary(false)).toContain("NOT rewritten");
     for (const summary of [flipSummary(true), flipSummary(false)]) {
       expect(summary).toContain("no longer drift");
     }
+  });
+
+  test("the retry note claims the reword alone, not the flip", () => {
+    expect(retrySummary()).toContain("header reworded");
+    expect(retrySummary()).not.toContain("repo-owned now");
   });
 });

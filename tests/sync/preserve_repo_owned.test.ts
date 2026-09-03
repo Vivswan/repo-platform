@@ -173,59 +173,65 @@ describe("preserve_repo_owned fleet-license re-seed", () => {
     expect(result.license).toBeNull();
   });
 
-  test("a missing answers file fails loudly instead of seeding template text", () => {
-    const workspace = makeWorkspace(licenseTemplateSource);
-    const target = makeTarget({});
-    const result = runPreserve(workspace, target);
-    expect(result.exitCode).toBe(1);
-    expect(result.stdout).toContain("records no copyright_holder");
-    expect(result.license).toBeNull();
-  });
-
-  test("an answers file that is not a YAML mapping fails as unreadable", () => {
-    const workspace = makeWorkspace(licenseTemplateSource);
-    const target = makeTarget({ ".github/.copier-answers.yml": "- not\n- a\n- mapping\n" });
-    const result = runPreserve(workspace, target);
-    expect(result.exitCode).toBe(1);
-    expect(result.stdout).toContain(".github/.copier-answers.yml is unreadable");
-    expect(result.license).toBeNull();
-  });
-
-  const badHolders: Record<string, string> = {
-    missing: "github_username: Vivswan\n",
-    empty: 'copyright_holder: ""\ngithub_username: Vivswan\n',
-    "non-string": "copyright_holder: 42\ngithub_username: Vivswan\n",
-  };
-  for (const [shape, answers] of Object.entries(badHolders)) {
-    test(`${shape} copyright_holder fails loudly`, () => {
-      const workspace = makeWorkspace(licenseTemplateSource);
-      const target = makeTarget({ ".github/.copier-answers.yml": answers });
-      const result = runPreserve(workspace, target);
-      expect(result.exitCode).toBe(1);
-      expect(result.stdout).toContain("records no copyright_holder");
-      expect(result.license).toBeNull();
-    });
-  }
-
-  const badUsernames: Record<string, string> = {
-    missing: `copyright_holder: "Vivswan Shah"\n`,
-    empty: `copyright_holder: "Vivswan Shah"\ngithub_username: ""\n`,
+  // Every bad-answers shape fails the same way: exit 1, the one message
+  // naming what is missing, no license seeded. `answers: null` is no
+  // answers file at all.
+  test.each([
+    { reason: "no answers file", answers: null, message: "records no copyright_holder" },
+    {
+      reason: "answers that are not a YAML mapping",
+      answers: "- not\n- a\n- mapping\n",
+      message: ".github/.copier-answers.yml is unreadable",
+    },
+    {
+      reason: "missing copyright_holder",
+      answers: "github_username: Vivswan\n",
+      message: "records no copyright_holder",
+    },
+    {
+      reason: "empty copyright_holder",
+      answers: 'copyright_holder: ""\ngithub_username: Vivswan\n',
+      message: "records no copyright_holder",
+    },
+    {
+      reason: "non-string copyright_holder",
+      answers: "copyright_holder: 42\ngithub_username: Vivswan\n",
+      message: "records no copyright_holder",
+    },
+    {
+      reason: "missing github_username",
+      answers: 'copyright_holder: "Vivswan Shah"\n',
+      message: "records no github_username",
+    },
+    {
+      reason: "empty github_username",
+      answers: 'copyright_holder: "Vivswan Shah"\ngithub_username: ""\n',
+      message: "records no github_username",
+    },
     // Malformed but NON-EMPTY values must trip the owner-pin shape guard
     // (/^[A-Za-z0-9-]+$/): each would pass the unrendered-expression check
     // yet seed a wrong owner into the managed-marker line.
-    "space-carrying": `copyright_holder: "Vivswan Shah"\ngithub_username: "Vivswan Shah"\n`,
-    "slug-shaped": `copyright_holder: "Vivswan Shah"\ngithub_username: "Vivswan/repo-platform"\n`,
-  };
-  for (const [shape, answers] of Object.entries(badUsernames)) {
-    test(`${shape} github_username fails loudly`, () => {
+    {
+      reason: "space-carrying github_username",
+      answers: 'copyright_holder: "Vivswan Shah"\ngithub_username: "Vivswan Shah"\n',
+      message: "records no github_username",
+    },
+    {
+      reason: "slug-shaped github_username",
+      answers: 'copyright_holder: "Vivswan Shah"\ngithub_username: "Vivswan/repo-platform"\n',
+      message: "records no github_username",
+    },
+  ])(
+    "bad recorded answers fail loudly instead of seeding template text: $reason",
+    ({ answers, message }) => {
       const workspace = makeWorkspace(licenseTemplateSource);
-      const target = makeTarget({ ".github/.copier-answers.yml": answers });
+      const target = makeTarget(answers === null ? {} : { ".github/.copier-answers.yml": answers });
       const result = runPreserve(workspace, target);
       expect(result.exitCode).toBe(1);
-      expect(result.stdout).toContain("records no github_username");
+      expect(result.stdout).toContain(message);
       expect(result.license).toBeNull();
-    });
-  }
+    },
+  );
 });
 
 describe("preserve_repo_owned removed-splits hold", () => {
@@ -353,107 +359,96 @@ describe("preserve_repo_owned removed-splits hold", () => {
     expect(result.report).toContain("not a regular file");
   });
 
-  test("a deleted split path that was a symlink at HEAD is held as a non-blob", () => {
-    // `git show HEAD:AGENTS.md` answers the TARGET PATH STRING for a
-    // symlink; the old bytes probe fed that to the marker parser as if it
-    // were the previous copy. There is no file content to split - the
-    // bullet must say that, not diagnose a marker mismatch.
-    const result = runHold(
-      {
-        [MANIFEST_REL]: manifest,
-        "REAL.md": agentsWithTail,
-        "AGENTS.md": { symlinkTo: "REAL.md" },
-      },
-      ["AGENTS.md"],
-    );
-    expect(result.exitCode).toBe(0);
-    expect(result.report).toContain("`AGENTS.md`");
-    expect(result.report).toContain("carries a symlink at this path, not a regular file");
-    expect(result.report).not.toContain("could not be located");
-    expect(result.stdout).toContain("manual-review");
-  });
+  test.each([
+    {
+      // The old bytes probe fed the answer to the marker parser as if it
+      // were the previous copy.
+      reason: "git show answers a symlink with its target path string",
+      object: "symlink",
+      head: { "REAL.md": agentsWithTail, "AGENTS.md": { symlinkTo: "REAL.md" } },
+    },
+    {
+      reason: "git show answers a directory with tree-listing prose",
+      object: "directory",
+      head: { "AGENTS.md/inner.md": agentsWithTail },
+    },
+  ])(
+    "a deleted split path that was a $object at HEAD is held as a non-blob: $reason",
+    ({ object, head }) => {
+      // There is no file content to split - the bullet must say that, not
+      // diagnose a marker mismatch.
+      const result = runHold({ [MANIFEST_REL]: manifest, ...head }, ["AGENTS.md"]);
+      expect(result.exitCode).toBe(0);
+      expect(result.report).toContain("`AGENTS.md`");
+      expect(result.report).toContain(`carries a ${object} at this path, not a regular file`);
+      expect(result.report).not.toContain("could not be located");
+      expect(result.stdout).toContain("manual-review");
+    },
+  );
 
-  test("a deleted split path that was a directory at HEAD is held as a non-blob", () => {
-    // `git show HEAD:AGENTS.md` answers tree-listing prose for a
-    // directory; same rule - no file content, its own bullet.
-    const result = runHold({ [MANIFEST_REL]: manifest, "AGENTS.md/inner.md": agentsWithTail }, [
-      "AGENTS.md",
-    ]);
-    expect(result.exitCode).toBe(0);
-    expect(result.report).toContain("`AGENTS.md`");
-    expect(result.report).toContain("carries a directory at this path, not a regular file");
-    expect(result.stdout).toContain("manual-review");
-  });
-
-  test("an unreadable HEAD manifest fails closed: a deleted split file still holds the PR", () => {
-    // HEAD's manifest is damaged past parsing, so the split map cannot be
-    // enumerated. Checking only the two license names would auto-merge a
-    // retired split file's repository-owned content away, and the tail
-    // tripwire cannot cover it (it skips post-sync split paths absent at
-    // HEAD before it consults HEAD's manifest). Fail closed: every deleted
-    // tracked path becomes an unclassifiable candidate that forces review.
-    const result = runHold({ [MANIFEST_REL]: "{ not valid json", "AGENTS.md": agentsWithTail }, [
-      "AGENTS.md",
-    ]);
-    expect(result.exitCode).toBe(0);
-    expect(result.report).not.toBe("");
-    expect(result.report).toContain("`AGENTS.md`");
-    expect(result.report).toContain("does not class this file");
-    expect(result.report).toContain("ownership manifest was rejected");
-    expect(result.stdout).toContain("manual-review");
-  });
-
-  test("a retired-grammar HEAD manifest fails closed with the refusal in the report", () => {
-    // The one-time conversion machinery is deleted: a straggler manifest
-    // still declaring a retired vintage is refused (never converted), the
-    // split map is unknown, and the deletion axis holds the PR with the
-    // refusal's recovery advice in the body.
-    const legacy = JSON.stringify({
-      files: {
-        "AGENTS.md": {
-          class: "split",
-          grammar: "tail-marker",
-          marker: "<!-- repo-platform:local-section -->",
-          managed: "above",
-          hash: null,
+  // HEAD's manifest is damaged past reading, so the split map cannot be
+  // enumerated. Checking only the two license names would auto-merge a
+  // retired split file's repository-owned content away, and the tail
+  // tripwire cannot cover it (it skips post-sync split paths absent at
+  // HEAD before it consults HEAD's manifest). Fail closed: every deleted
+  // tracked path becomes an unclassifiable candidate that forces review,
+  // with headSplitEntries' refusal quoted in the report (the refusal text
+  // per shape is head_manifest.test.ts's to pin).
+  test.each([
+    {
+      reason: "not JSON",
+      damaged: "{ not valid json",
+      fragments: ["does not class this file"],
+    },
+    {
+      // The one-time conversion machinery is deleted: a straggler manifest
+      // still declaring a retired vintage is refused, never converted, and
+      // the refusal's recovery advice rides into the body.
+      reason: "a retired tail-marker grammar",
+      damaged: JSON.stringify({
+        files: {
+          "AGENTS.md": {
+            class: "split",
+            grammar: "tail-marker",
+            marker: "<!-- repo-platform:local-section -->",
+            managed: "above",
+            hash: null,
+          },
         },
-      },
-    });
-    const result = runHold({ [MANIFEST_REL]: legacy, "AGENTS.md": agentsWithTail }, ["AGENTS.md"]);
-    expect(result.exitCode).toBe(0);
-    expect(result.report).toContain("`AGENTS.md`");
-    expect(result.report).toContain("ownership manifest was rejected");
-    expect(result.report).toContain('split grammar "tail-marker"');
-    expect(result.report).toContain("recover=recopy");
-    expect(result.stdout).toContain("manual-review");
-  });
-
-  test("a duplicate-key HEAD manifest fails closed with the reason in the report", () => {
-    // JSON.parse keeps the LAST duplicate: split-then-managed for the same
-    // path would silently reclassify the file managed and drop it from the
-    // candidates while a retirement deletes its repository-owned half.
-    const dup = `{"files": {"AGENTS.md": {"class": "split", "grammar": "managed-region", "begin": ${JSON.stringify(B)}, "end": ${JSON.stringify(E)}, "hash": null}, "AGENTS.md": {"class": "managed", "hash": null}}}`;
-    const result = runHold({ [MANIFEST_REL]: dup, "AGENTS.md": agentsWithTail }, ["AGENTS.md"]);
-    expect(result.exitCode).toBe(0);
-    expect(result.report).toContain("`AGENTS.md`");
-    expect(result.report).toContain("ownership manifest was rejected");
-    expect(result.report).toContain("same key twice");
-    expect(result.stdout).toContain("manual-review");
-  });
-
-  test("an unknown ownership class fails closed with the reason in the report", () => {
-    // A damaged class ("spllt") read as merely non-split would drop the
-    // file from the candidates and let the retirement auto-merge.
-    const damaged = JSON.stringify({
-      files: { "AGENTS.md": { class: "spllt", begin: B, end: E, hash: null } },
-    });
-    const result = runHold({ [MANIFEST_REL]: damaged, "AGENTS.md": agentsWithTail }, ["AGENTS.md"]);
-    expect(result.exitCode).toBe(0);
-    expect(result.report).toContain("`AGENTS.md`");
-    expect(result.report).toContain("ownership manifest was rejected");
-    expect(result.report).toContain("ownership class");
-    expect(result.stdout).toContain("manual-review");
-  });
+      }),
+      fragments: ['split grammar "tail-marker"', "recover=recopy"],
+    },
+    {
+      // JSON.parse keeps the LAST duplicate: split-then-managed for the
+      // same path would silently reclassify the file managed and drop it
+      // from the candidates while a retirement deletes its half.
+      reason: "a duplicated key",
+      damaged: `{"files": {"AGENTS.md": {"class": "split", "grammar": "managed-region", "begin": ${JSON.stringify(B)}, "end": ${JSON.stringify(E)}, "hash": null}, "AGENTS.md": {"class": "managed", "hash": null}}}`,
+      fragments: ["same key twice"],
+    },
+    {
+      // A damaged class ("spllt") read as merely non-split would drop the
+      // file from the candidates and let the retirement auto-merge.
+      reason: "an unknown ownership class",
+      damaged: JSON.stringify({
+        files: { "AGENTS.md": { class: "spllt", begin: B, end: E, hash: null } },
+      }),
+      fragments: ["ownership class"],
+    },
+  ])(
+    "a damaged HEAD manifest fails closed on a deleted split file: $reason",
+    ({ damaged, fragments }) => {
+      const result = runHold({ [MANIFEST_REL]: damaged, "AGENTS.md": agentsWithTail }, [
+        "AGENTS.md",
+      ]);
+      expect(result.exitCode).toBe(0);
+      expect(result.report).not.toBe("");
+      expect(result.report).toContain("`AGENTS.md`");
+      expect(result.report).toContain("ownership manifest was rejected");
+      for (const fragment of fragments) expect(result.report).toContain(fragment);
+      expect(result.stdout).toContain("manual-review");
+    },
+  );
 
   test("a hostile rejection reason is clipped and control-escaped in the report", () => {
     // The rejection message embeds decoded manifest keys, which are
@@ -566,50 +561,51 @@ describe("deleted-path decode boundary", () => {
   // exercised with synthetic `git diff -z`-shaped bytes here, and
   // end-to-end above via an index-only fixture that never touches disk.
   const REPLACEMENT = String.fromCharCode(0xfffd);
+  const nonUtf8 = Buffer.from([0x63, 0x61, 0x66, 0xe9, 0x2e, 0x74, 0x78, 0x74]); // caf\xe9.txt
+  const fffdName = `weird-${REPLACEMENT}.txt`;
+  const bomName = `${String.fromCharCode(0xfeff)}secret.txt`;
 
-  test("valid entries decode; a non-UTF-8 entry comes back as raw bytes, never mangled", () => {
-    const nonUtf8 = Buffer.from([0x63, 0x61, 0x66, 0xe9, 0x2e, 0x74, 0x78, 0x74]); // caf\xe9.txt
-    const stdout = Buffer.concat([
-      Buffer.from("good.txt\0", "utf-8"),
-      nonUtf8,
-      Buffer.from("\0", "utf-8"),
-      Buffer.from("dir/more.md\0", "utf-8"),
-    ]);
-    const result = decodeTrackedPathBytes(stdout);
-    expect(result.paths).toEqual(["good.txt", "dir/more.md"]);
-    expect(result.undecodable).toEqual([nonUtf8]);
-    for (const path of result.paths) expect(path).not.toContain(REPLACEMENT);
-  });
-
-  test("a name that genuinely CONTAINS U+FFFD is valid UTF-8 and stays a path", () => {
-    // The discriminant is UTF-8 validity, not the replacement character: a
-    // legal U+FFFD-carrying name must not be misreported as mangled.
-    const name = `weird-${REPLACEMENT}.txt`;
-    const result = decodeTrackedPathBytes(Buffer.from(`${name}\0`, "utf-8"));
-    expect(result.paths).toEqual([name]);
-    expect(result.undecodable).toEqual([]);
-  });
-
-  test("a leading U+FEFF survives the decode: a BOM-stripped name is a DIFFERENT path", () => {
-    // TextDecoder's default silently drops a leading BOM; the probe would
-    // then read the BOM-less spelling as absent and skip the hold.
-    const name = `${String.fromCharCode(0xfeff)}secret.txt`;
-    const result = decodeTrackedPathBytes(Buffer.from(`${name}\0`, "utf-8"));
-    expect(result.paths).toEqual([name]);
-    expect(result.paths[0]).toHaveLength(name.length);
-    expect(result.undecodable).toEqual([]);
-  });
-
-  test("empty output and bare NULs yield nothing", () => {
-    expect(decodeTrackedPathBytes(Buffer.alloc(0))).toEqual({ paths: [], undecodable: [] });
-    expect(decodeTrackedPathBytes(Buffer.from("\0\0", "utf-8"))).toEqual({
-      paths: [],
-      undecodable: [],
-    });
-  });
-
-  test("a final entry without a trailing NUL still decodes", () => {
-    const result = decodeTrackedPathBytes(Buffer.from("a.txt\0b.txt", "utf-8"));
-    expect(result.paths).toEqual(["a.txt", "b.txt"]);
+  test.each([
+    {
+      reason: "valid entries decode; a non-UTF-8 entry comes back as raw bytes, never mangled",
+      input: Buffer.concat([
+        Buffer.from("good.txt\0", "utf-8"),
+        nonUtf8,
+        Buffer.from("\0", "utf-8"),
+        Buffer.from("dir/more.md\0", "utf-8"),
+      ]),
+      expected: { paths: ["good.txt", "dir/more.md"], undecodable: [nonUtf8] },
+    },
+    {
+      // The discriminant is UTF-8 validity, not the replacement character:
+      // a legal U+FFFD-carrying name must not be misreported as mangled.
+      reason: "a name that genuinely CONTAINS U+FFFD is valid UTF-8 and stays a path",
+      input: Buffer.from(`${fffdName}\0`, "utf-8"),
+      expected: { paths: [fffdName], undecodable: [] },
+    },
+    {
+      // TextDecoder's default silently drops a leading BOM; the probe would
+      // then read the BOM-less spelling as absent and skip the hold.
+      reason: "a leading U+FEFF survives: a BOM-stripped name is a DIFFERENT path",
+      input: Buffer.from(`${bomName}\0`, "utf-8"),
+      expected: { paths: [bomName], undecodable: [] },
+    },
+    {
+      reason: "empty output yields nothing",
+      input: Buffer.alloc(0),
+      expected: { paths: [], undecodable: [] },
+    },
+    {
+      reason: "bare NULs yield nothing",
+      input: Buffer.from("\0\0", "utf-8"),
+      expected: { paths: [], undecodable: [] },
+    },
+    {
+      reason: "a final entry without a trailing NUL still decodes",
+      input: Buffer.from("a.txt\0b.txt", "utf-8"),
+      expected: { paths: ["a.txt", "b.txt"], undecodable: [] },
+    },
+  ])("decodeTrackedPathBytes: $reason", ({ input, expected }) => {
+    expect(decodeTrackedPathBytes(input)).toEqual(expected);
   });
 });
