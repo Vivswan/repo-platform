@@ -78,32 +78,34 @@ describe("parseFrontmatter", () => {
     expect(parseFrontmatter(path, "SKILL.md")).toEqual({ description: "first line second line" });
   });
 
-  test("fails without a frontmatter start marker", () => {
-    expect(() => parseFrontmatter(tempFile("# no frontmatter\n"), "SKILL.md")).toThrow(
-      CheckFailure,
-    );
-  });
-
-  test("fails without a frontmatter end marker", () => {
-    expect(() => parseFrontmatter(tempFile("---\nname: x\n"), "SKILL.md")).toThrow(CheckFailure);
-  });
-
-  test("fails on invalid YAML", () => {
-    expect(() => parseFrontmatter(tempFile("---\nname: [unclosed\n---\n"), "SKILL.md")).toThrow(
-      CheckFailure,
-    );
-  });
-
-  test("fails when frontmatter is not a mapping", () => {
-    expect(() => parseFrontmatter(tempFile("---\n- just\n- a list\n---\n"), "SKILL.md")).toThrow(
-      CheckFailure,
-    );
-  });
-
-  test("fails on a missing file, naming it", () => {
-    const run = () => parseFrontmatter("/nonexistent/SKILL.md", "nonexistent/SKILL.md");
+  // Every fail() raises the same CheckFailure class, so each row also pins
+  // the message that proves which branch of the loader fired.
+  test.each<[reason: string, fixture: () => string, message: RegExp]>([
+    [
+      "no start marker",
+      () => tempFile("# no frontmatter\n"),
+      /^fixture\/SKILL\.md: missing YAML frontmatter start/,
+    ],
+    [
+      "no end marker",
+      () => tempFile("---\nname: x\n"),
+      /^fixture\/SKILL\.md: missing YAML frontmatter end/,
+    ],
+    [
+      "invalid YAML",
+      () => tempFile("---\nname: [unclosed\n---\n"),
+      /^fixture\/SKILL\.md: invalid YAML frontmatter/,
+    ],
+    [
+      "a list instead of a mapping",
+      () => tempFile("---\n- just\n- a list\n---\n"),
+      /^fixture\/SKILL\.md: frontmatter must be a YAML mapping/,
+    ],
+    ["a missing file", () => "/nonexistent/SKILL.md", /^fixture\/SKILL\.md: cannot read file/],
+  ])("fails on %s, naming the file and the cause", (_reason, fixture, message) => {
+    const run = () => parseFrontmatter(fixture(), "fixture/SKILL.md");
     expect(run).toThrow(CheckFailure);
-    expect(run).toThrow(/nonexistent\/SKILL\.md: cannot read file/);
+    expect(run).toThrow(message);
   });
 });
 
@@ -112,12 +114,13 @@ describe("loadJson / loadJsonObject", () => {
     expect(loadJson(tempFile('{"a": 1}', "x.json"), "x.json")).toEqual({ a: 1 });
   });
 
-  test("fails on invalid JSON", () => {
-    expect(() => loadJson(tempFile("{oops", "x.json"), "x.json")).toThrow(CheckFailure);
-  });
-
-  test("fails on a missing file", () => {
-    expect(() => loadJson("/nonexistent/x.json", "x.json")).toThrow(CheckFailure);
+  test.each<[reason: string, fixture: () => string, message: RegExp]>([
+    ["invalid JSON", () => tempFile("{oops", "x.json"), /^fixture\/x\.json: invalid JSON/],
+    ["a missing file", () => "/nonexistent/x.json", /^fixture\/x\.json: cannot read file/],
+  ])("fails on %s, naming the file and the cause", (_reason, fixture, message) => {
+    const run = () => loadJson(fixture(), "fixture/x.json");
+    expect(run).toThrow(CheckFailure);
+    expect(run).toThrow(message);
   });
 
   test("fails when the root is not an object", () => {
@@ -163,12 +166,50 @@ describe("validateSkillDir", () => {
     return dir;
   }
 
-  test("passes a conforming skill", () => {
-    const dir = skillFixture(
+  const LONG_NAME = `x${"-x".repeat(40)}`; // 81 chars, kebab-case
+
+  // The whole error list per SKILL.md, so a spurious or duplicated message
+  // fails the row instead of hiding behind a substring match.
+  test.each<[reason: string, folder: string, frontmatter: string, errors: string[]]>([
+    [
+      "a conforming skill",
       "good-skill",
       "---\nname: good-skill\ndescription: Does things.\n---\n",
-    );
-    expect(validateSkillDir(dir, "skills/good-skill")).toEqual([]);
+      [],
+    ],
+    [
+      "name/folder mismatch and missing description, reported together",
+      "real-name",
+      "---\nname: other-name\n---\n",
+      [
+        "skills/real-name/SKILL.md: frontmatter name 'other-name' does not match folder 'real-name'",
+        "skills/real-name/SKILL.md: missing frontmatter description",
+      ],
+    ],
+    [
+      "a non-kebab-case name",
+      "Bad_Name",
+      "---\nname: Bad_Name\ndescription: d\n---\n",
+      ["skills/Bad_Name/SKILL.md: name 'Bad_Name' must be kebab-case"],
+    ],
+    [
+      "a whitespace-only description",
+      "blank-skill",
+      '---\nname: blank-skill\ndescription: "   "\n---\n',
+      ["skills/blank-skill/SKILL.md: missing frontmatter description"],
+    ],
+    [
+      "name and description over their length limits",
+      LONG_NAME,
+      `---\nname: ${LONG_NAME}\ndescription: ${"d".repeat(1025)}\n---\n`,
+      [
+        `skills/${LONG_NAME}/SKILL.md: name exceeds 64 characters`,
+        `skills/${LONG_NAME}/SKILL.md: description exceeds 1024 characters`,
+      ],
+    ],
+  ])("reports %s", (_reason, folder, frontmatter, errors) => {
+    const dir = skillFixture(folder, frontmatter);
+    expect(validateSkillDir(dir, `skills/${folder}`)).toEqual(errors);
   });
 
   test("reports a missing SKILL.md", () => {
@@ -179,27 +220,6 @@ describe("validateSkillDir", () => {
     expect(errors[0]).toMatch(/cannot read file/);
   });
 
-  test("reports name/folder mismatch and missing description together", () => {
-    const dir = skillFixture("real-name", "---\nname: other-name\n---\n");
-    const errors = validateSkillDir(dir, "skills/real-name");
-    expect(errors.some((e) => e.includes("does not match folder 'real-name'"))).toBe(true);
-    expect(errors.some((e) => e.includes("missing frontmatter description"))).toBe(true);
-  });
-
-  test("rejects non-kebab-case names", () => {
-    const dir = skillFixture("Bad_Name", "---\nname: Bad_Name\ndescription: d\n---\n");
-    expect(validateSkillDir(dir, "skills/Bad_Name").some((e) => e.includes("kebab-case"))).toBe(
-      true,
-    );
-  });
-
-  test("rejects a whitespace-only description", () => {
-    const dir = skillFixture("blank-skill", '---\nname: blank-skill\ndescription: "   "\n---\n');
-    const errors = validateSkillDir(dir, "skills/blank-skill");
-    expect(errors).toHaveLength(1);
-    expect(errors[0]).toMatch(/missing frontmatter description/);
-  });
-
   test("parses .mcp.json when the skill carries one", () => {
     const dir = skillFixture("mcp-skill", "---\nname: mcp-skill\ndescription: d\n---\n");
     writeFileSync(join(dir, ".mcp.json"), "{oops");
@@ -208,14 +228,6 @@ describe("validateSkillDir", () => {
     expect(errors[0]).toMatch(/\.mcp\.json: invalid JSON/);
     writeFileSync(join(dir, ".mcp.json"), '{"mcpServers": {}}');
     expect(validateSkillDir(dir, "skills/mcp-skill")).toEqual([]);
-  });
-
-  test("enforces the name and description length limits", () => {
-    const name = `x${"-x".repeat(40)}`; // 81 chars, kebab-case
-    const dir = skillFixture(name, `---\nname: ${name}\ndescription: ${"d".repeat(1025)}\n---\n`);
-    const errors = validateSkillDir(dir, `skills/${name}`);
-    expect(errors.some((e) => e.includes("name exceeds 64"))).toBe(true);
-    expect(errors.some((e) => e.includes("description exceeds 1024"))).toBe(true);
   });
 });
 
@@ -275,26 +287,32 @@ describe("validateStructure", () => {
     expect(errors[0]).toMatch(/plugin\.json: cannot read file/);
   });
 
-  test("rejects traversing and out-of-tree skill paths", () => {
-    for (const path of ["./skills/a/../../evil", "../outside", "./other/dir"]) {
-      const root = fixtureRepo({ skills: [path], skillNames: [] });
-      const errors = validateStructure(root, "skills", ".claude-plugin/plugin.json");
-      expect(errors.some((e) => e.includes("must be a direct child of skills/"))).toBe(true);
-    }
+  test.each<[reason: string, path: string]>([
+    ["a traversal that collapses out of the skills dir", "./skills/a/../../evil"],
+    ["a path above the repository", "../outside"],
+    ["a sibling directory outside skills/", "./other/dir"],
+  ])("rejects %s as a skill path", (_reason, path) => {
+    const root = fixtureRepo({ skills: [path], skillNames: [] });
+    expect(validateStructure(root, "skills", ".claude-plugin/plugin.json")).toEqual([
+      `.claude-plugin/plugin.json: skill path ${path} must be a direct child of skills/`,
+    ]);
   });
 
   test("rejects a referenced skill without SKILL.md", () => {
     const root = fixtureRepo({ skills: ["./skills/ghost"], skillNames: [] });
-    const errors = validateStructure(root, "skills", ".claude-plugin/plugin.json");
-    expect(errors.some((e) => e.includes("has no SKILL.md"))).toBe(true);
+    expect(validateStructure(root, "skills", ".claude-plugin/plugin.json")).toEqual([
+      ".claude-plugin/plugin.json: referenced skill ./skills/ghost has no SKILL.md",
+    ]);
   });
 
   test("validates unlisted folders under the skills dir too", () => {
     const root = fixtureRepo();
     mkdirSync(join(root, "skills", "stray-skill"));
     writeFileSync(join(root, "skills", "stray-skill", "SKILL.md"), "---\nname: wrong\n---\n");
-    const errors = validateStructure(root, "skills", ".claude-plugin/plugin.json");
-    expect(errors.some((e) => e.includes("does not match folder 'stray-skill'"))).toBe(true);
+    expect(validateStructure(root, "skills", ".claude-plugin/plugin.json")).toEqual([
+      "skills/stray-skill/SKILL.md: frontmatter name 'wrong' does not match folder 'stray-skill'",
+      "skills/stray-skill/SKILL.md: missing frontmatter description",
+    ]);
   });
 
   test("honors a custom skills dir", () => {
@@ -312,8 +330,9 @@ describe("validateStructure", () => {
     );
     expect(validateStructure(root, "lib/skills", ".claude-plugin/plugin.json")).toEqual([]);
     // The same manifest against the default dir fails containment.
-    const errors = validateStructure(root, "skills", ".claude-plugin/plugin.json");
-    expect(errors.some((e) => e.includes("must be a direct child of skills/"))).toBe(true);
+    expect(validateStructure(root, "skills", ".claude-plugin/plugin.json")).toEqual([
+      ".claude-plugin/plugin.json: skill path ./lib/skills/a-skill must be a direct child of skills/",
+    ]);
   });
 });
 
@@ -460,9 +479,12 @@ describe("symlink policy", () => {
   test("rejects a symlinked skill folder, listed or not", () => {
     const root = fixtureRepo({ skills: ["./skills/linked-skill"], skillNames: ["good-skill"] });
     symlinkSync(join(root, "skills", "good-skill"), join(root, "skills", "linked-skill"));
-    const errors = validateStructure(root, "skills", ".claude-plugin/plugin.json");
-    expect(errors.some((e) => e.includes("is a symlink; publish the real directory"))).toBe(true);
-    expect(errors.some((e) => e.includes("symlinked entries are not validated"))).toBe(true);
+    // The manifest side and the directory walk each name it once; nothing
+    // beneath the link is validated.
+    expect(validateStructure(root, "skills", ".claude-plugin/plugin.json")).toEqual([
+      ".claude-plugin/plugin.json: skill path ./skills/linked-skill is a symlink; publish the real directory",
+      "skills/linked-skill: symlinked entries are not validated and must not ship; publish a real directory",
+    ]);
   });
 
   test("rejects a symlinked SKILL.md", () => {
@@ -472,9 +494,10 @@ describe("symlink policy", () => {
       join(root, "skills", "good-skill", "SKILL.md"),
       join(root, "skills", "link-md", "SKILL.md"),
     );
-    const errors = validateStructure(root, "skills", ".claude-plugin/plugin.json");
-    expect(errors.some((e) => e.includes("SKILL.md is a symlink"))).toBe(true);
-    expect(errors.some((e) => e.includes("must be a real file, not a symlink"))).toBe(true);
+    expect(validateStructure(root, "skills", ".claude-plugin/plugin.json")).toEqual([
+      ".claude-plugin/plugin.json: ./skills/link-md/SKILL.md is a symlink; commit the real file",
+      "skills/link-md/SKILL.md: must be a real file, not a symlink (a link can point outside the checkout)",
+    ]);
   });
 
   test("rejects a symlinked .mcp.json", () => {
