@@ -125,6 +125,9 @@ export function entryHash(root: string, path: string, entry: ManifestEntryShape)
   // latin1 round-trips every byte, so the hash covers the file verbatim.
   const content = readFileSync(abs).toString("latin1");
   if (entry.class === "split") {
+    // Type narrowing over the untrusted JSON, not a behaviour fork: a
+    // non-string begin/end never matches a marker line, so the slicer
+    // would return this same null; the check only types its arguments.
     if (typeof entry.begin !== "string" || typeof entry.end !== "string") return null;
     const slice = cleanManagedRegion(content, { begin: entry.begin, end: entry.end });
     return slice === null ? null : sha256(Buffer.from(slice.region, "latin1"));
