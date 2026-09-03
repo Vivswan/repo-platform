@@ -31,8 +31,8 @@ function git(dir: string, ...args: string[]): string {
 function makeRoot(answers: string): string {
   const root = mkdtempSync(join(tmpdir(), "normalize-src-"));
   const target = join(root, "target");
-  mkdirSync(target);
-  writeFileSync(join(target, ".copier-answers.yml"), answers);
+  mkdirSync(join(target, ".github"), { recursive: true });
+  writeFileSync(join(target, ".github/.copier-answers.yml"), answers);
   git(target, "init", "-b", "main");
   git(target, "config", "user.name", "test");
   git(target, "config", "user.email", "test@example.com");
@@ -67,7 +67,7 @@ describe("normalize_src", () => {
     const root = makeRoot(`_commit: templates/v1.0.0\n_src_path: /home/user/repo-platform\n`);
     const result = runScript(root);
     expect(result.exitCode).toBe(0);
-    expect(readFileSync(join(root, "target/.copier-answers.yml"), "utf-8")).toContain(
+    expect(readFileSync(join(root, "target/.github/.copier-answers.yml"), "utf-8")).toContain(
       `_src_path: ${CANONICAL}`,
     );
     // copier update refuses a dirty tree: the rewrite must be committed.
@@ -93,7 +93,7 @@ describe("normalize_src", () => {
     const root = makeRoot(`_src_path:   ${CANONICAL}\n`);
     const result = runScript(root);
     expect(result.exitCode).toBe(0);
-    expect(readFileSync(join(root, "target/.copier-answers.yml"), "utf-8")).toBe(
+    expect(readFileSync(join(root, "target/.github/.copier-answers.yml"), "utf-8")).toBe(
       `_src_path: ${CANONICAL}\n`,
     );
     expect(git(join(root, "target"), "status", "--porcelain")).toBe("");

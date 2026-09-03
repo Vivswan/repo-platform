@@ -6,7 +6,7 @@ The authoritative roster is the `modules` question in repo-platform's `copier.ym
 
 ## Base (every managed repo, no module needed)
 
-Managed: `ci.yml` and its standard jobs, `dependabot.yml` (github-actions ecosystem always), `.gitignore` managed sections, `SECURITY.md`, `.copier-answers.yml`, `.repo-platform.yml` (shape). Starters: `checks.yml` (your CI jobs, called inside the all-green gate), `.gitleaks.toml`, `.github/actionlint.yaml`.
+Managed: `ci.yml` and its standard jobs, `dependabot.yml` (github-actions ecosystem always), `.gitignore` managed sections, `SECURITY.md`, `.github/.copier-answers.yml`, `.repo-platform.yml` (shape). Starters: `checks.yml` (your CI jobs, called inside the all-green gate), `.gitleaks.toml`, `.github/actionlint.yaml`.
 
 ## Toolchains: bun / node / deno / uv / rust
 
@@ -66,7 +66,7 @@ Twin nightly issue streams backed by the same `fuzz-issue` action; `fuzzer` adds
 
 - Starters: `nightly-fuzz.yml` (fuzzer, cron 09:11 UTC) / `nightly.yml` (nightly, cron 06:59 UTC). Placeholder step is a green no-op until customized. The action pin inside a starter is never updated by sync (it pins `main` and floats).
 - Parameters: `fuzzer_label` (default `fuzz-nightly`) / `nightly_label` (default `nightly-failure`). The two must differ (case-insensitive) when both modules are selected - both streams dedup AND auto-close by label, so a shared label lets one stream's green night close the other's open issue. The copier validator and the settings assembly both reject the collision.
-- Settings labels are automatic: the managed baseline declares the tracking label - `fuzz-nightly` (`B60205`) / `nightly-failure` (`D93F0B`) or the repo's recorded answer, read from `.copier-answers.yml` at apply time. A tracking issue stripped of its label is invisible to dedup and auto-close.
+- Settings labels are automatic: the managed baseline declares the tracking label - `fuzz-nightly` (`B60205`) / `nightly-failure` (`D93F0B`) or the repo's recorded answer, read from `.github/.copier-answers.yml` at apply time. A tracking issue stripped of its label is invisible to dedup and auto-close.
 - Renaming a label: update the recorded answer AND the starter's two `label:` inputs in the same PR (the starter is repo-owned; sync never fixes it). The managed baseline picks the renamed value up on the next apply.
 - Removal: the label leaves the managed baseline and the next apply deletes it. The starter workflow keeps running - delete it yourself, or declare its label in the repo's own `.github/settings.yml` first.
 - Depth: repo-platform's `docs/fuzzer.md` and `docs/nightly.md` (failure-report contract, sharding, issue lifecycle, release gating).

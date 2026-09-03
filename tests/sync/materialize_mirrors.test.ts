@@ -42,7 +42,7 @@ function makeTree(files: Record<string, string>): string {
 const MANIFEST: Record<string, ManifestEntryShape> = {
   "LICENSE.md": { class: "split" },
   "SECURITY.md": { class: "split" },
-  ".copier-answers.yml": { class: "managed" },
+  ".github/.copier-answers.yml": { class: "managed" },
   ".gitleaks.toml": { class: "starter" },
 };
 

@@ -57,8 +57,8 @@ describe("retired_cleanup retired-paths parse", () => {
     });
 
     const target = join(root, "target");
-    mkdirSync(target);
-    writeFileSync(join(target, ".copier-answers.yml"), "modules: [uv]\n");
+    mkdirSync(join(target, ".github"), { recursive: true });
+    writeFileSync(join(target, ".github/.copier-answers.yml"), "modules: [uv]\n");
     const git = (...args: string[]) => {
       const proc = boundedSpawnSync(["git", "-C", target, ...args], { env: gitFreeEnv() });
       if (proc.exitCode !== 0) {

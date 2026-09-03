@@ -201,7 +201,7 @@ function restoreRepoOwned(): void {
       const show = showFleetLicense(targetRef);
       // The template carries the Required Notice as a jinja variable; render
       // it from the repo's recorded answer rather than seeding template text.
-      const answersPath = join(targetDir, ".copier-answers.yml");
+      const answersPath = join(targetDir, ".github/.copier-answers.yml");
       let answers: Record<string, unknown> = {};
       if (existsSync(answersPath)) {
         let doc: unknown;
@@ -211,7 +211,9 @@ function restoreRepoOwned(): void {
           doc = undefined;
         }
         if (doc === undefined || doc === null || typeof doc !== "object" || Array.isArray(doc)) {
-          error(`${label}: cannot re-seed the fleet license; .copier-answers.yml is unreadable`);
+          error(
+            `${label}: cannot re-seed the fleet license; .github/.copier-answers.yml is unreadable`,
+          );
           process.exit(1);
         }
         answers = doc as Record<string, unknown>;
@@ -219,7 +221,7 @@ function restoreRepoOwned(): void {
       const holder = answers.copyright_holder;
       if (typeof holder !== "string" || holder === "") {
         error(
-          `${label}: cannot re-seed the fleet license; .copier-answers.yml records no copyright_holder`,
+          `${label}: cannot re-seed the fleet license; .github/.copier-answers.yml records no copyright_holder`,
         );
         process.exit(1);
       }
@@ -230,7 +232,7 @@ function restoreRepoOwned(): void {
       const username = answers.github_username;
       if (typeof username !== "string" || !/^[A-Za-z0-9-]+$/.test(username)) {
         error(
-          `${label}: cannot re-seed the fleet license; .copier-answers.yml records no github_username`,
+          `${label}: cannot re-seed the fleet license; .github/.copier-answers.yml records no github_username`,
         );
         process.exit(1);
       }

@@ -12,7 +12,7 @@ Module selection is repo-owned: the top-level `modules:` list in the repository'
 
 Work in this order, always:
 
-1. Edit `modules:` in `.repo-platform.yml` (and any module parameter in `.copier-answers.yml`, same PR) and merge.
+1. Edit `modules:` in `.repo-platform.yml` (and any module parameter in `.github/.copier-answers.yml`, same PR) and merge.
 2. Get the sync PR (wait for the weekly cron, or dispatch it now) and review every changed file before it merges.
 3. Finish the module's companion steps (labels, secrets, one-time setup, starter customization).
 
@@ -67,7 +67,7 @@ A typo is safe: a name the template does not know fails the sync run loudly inst
 
 Expected-red window when adding a toolchain module (bun/node/deno): after the step-1 merge, `validate-template` reports the missing toolchain pin dotfile (`.bun-version` / `.node-version` / `.dvmrc`) until the sync PR lands it. That failure gates the repo's PRs through the all-green job's `ci` edge, so dispatch the sync promptly rather than hand-creating the dotfile.
 
-If the module has a parameter and you do NOT want its default, record the answer in `.copier-answers.yml` in the same PR (see "Module parameters" below). With no recorded answer, the sync uses the default.
+If the module has a parameter and you do NOT want its default, record the answer in `.github/.copier-answers.yml` in the same PR (see "Module parameters" below). With no recorded answer, the sync uses the default.
 
 Merge the PR. Nothing renders yet - the render happens in the sync.
 
@@ -101,7 +101,7 @@ What the PR delivers, in two classes:
 
 The full checklist per module is in [references/modules.md](references/modules.md). The ones that bite when skipped:
 
-- Settings labels need no hand work, but they do need a home: put the new module's labels in its own `templates/<module>/settings.yml` layer (the dependabot label for a new toolchain, the `autorelease: *` pair plus `release-blocker`/`release-override` for `release-please`), declare that layer file in the module's own `module.yml` under `settings_layers` (the render selects layer files from that declaration, not from the tree, and the manifest loader refuses an undeclared or missing one), and the merge picks the labels up at apply time. Only the tracking labels for `fuzzer`/`nightly`/`docs-site` still come from the manifest, because their NAMES are per-repo answers. The one thing to record: a tracking-stream repo's label answer (`fuzzer_label`/`nightly_label`/`docs_site_label`) must be readable from its `.copier-answers.yml` - record it in the step-1 PR even when accepting the default, or the apply fails for that repo until the sync PR merges (the assembly refuses to guess a tracking label).
+- Settings labels need no hand work, but they do need a home: put the new module's labels in its own `templates/<module>/settings.yml` layer (the dependabot label for a new toolchain, the `autorelease: *` pair plus `release-blocker`/`release-override` for `release-please`), declare that layer file in the module's own `module.yml` under `settings_layers` (the render selects layer files from that declaration, not from the tree, and the manifest loader refuses an undeclared or missing one), and the merge picks the labels up at apply time. Only the tracking labels for `fuzzer`/`nightly`/`docs-site` still come from the manifest, because their NAMES are per-repo answers. The one thing to record: a tracking-stream repo's label answer (`fuzzer_label`/`nightly_label`/`docs_site_label`) must be readable from its `.github/.copier-answers.yml` - record it in the step-1 PR even when accepting the default, or the apply fails for that repo until the sync PR merges (the assembly refuses to guess a tracking label).
 - `bun`: register a repo-scoped Contents:RW PAT as a DEPENDABOT secret so the lockfile fixer's push re-runs CI (human-only - needs the token value): `gh secret set REPO_PLATFORM_TOKEN --app dependabot`.
 - `pages` / `docs-site`: one-time repo setup - Settings -> Pages -> Source: GitHub Actions; automatic with `settings-sync` (the modules' settings layers enable Pages on the next apply).
 - `skills`: the starter manifests are repo-owned - a skill folder is unpublished until `plugin.json`'s `skills` array lists it.
@@ -109,16 +109,16 @@ The full checklist per module is in [references/modules.md](references/modules.m
 
 ## Module parameters
 
-How the sync actually renders answers: it passes only `modules` (from `.repo-platform.yml`) and the live `private`/`description` as data. Every other answer - `nightly_label`, `fuzzer_label`, `docs_site_label`, `docs_site_path`, `skills_dir`, the `pages_*` set, `homepage`, `topics`, `copyright_holder` - is loaded from the repo's recorded `.copier-answers.yml`, and a question with no recorded answer (a module just added) takes its `copier.yml` default.
+How the sync actually renders answers: it passes only `modules` (from `.repo-platform.yml`) and the live `private`/`description` as data. Every other answer - `nightly_label`, `fuzzer_label`, `docs_site_label`, `docs_site_path`, `skills_dir`, the `pages_*` set, `homepage`, `topics`, `copyright_holder` - is loaded from the repo's recorded `.github/.copier-answers.yml`, and a question with no recorded answer (a module just added) takes its `copier.yml` default.
 
 So the parameter mechanism is the recorded answers file, edited by PR on the default branch:
 
 ```bash
 # Same PR as the modules edit (or its own PR later):
-# .copier-answers.yml - add or change the VALUE key:
+# .github/.copier-answers.yml - add or change the VALUE key:
 #   nightly_label: slow-suite-failure
 git checkout -b add-nightly
-# edit .repo-platform.yml (modules) and .copier-answers.yml (answer)
+# edit .repo-platform.yml (modules) and .github/.copier-answers.yml (answer)
 git commit -am "chore: add the nightly module with a custom label"
 gh pr create && gh pr merge --auto --squash
 gh workflow run sync-repos.yml -R Vivswan/repo-platform -f repo=Vivswan/<repo>
@@ -128,7 +128,7 @@ The answers file holds three classes of key - know which one you are touching:
 
 - `_`-prefixed keys (`_commit`, `_src_path`): never touch them, and never delete the file - `copier update` depends on them, and a broken `_commit` puts the repo on the recovery path.
 - `modules`, `private`, `description`: recorded here, but force-overridden by the sync every run - an edit here silently evaporates. Change them at their real source: `.repo-platform.yml` for modules, and the repo's own `.github/settings.yml` for visibility and description (the settings apply enforces that file; the sync then adopts the applied values).
-- Everything else (the module parameters above): editing the value key here IS the mechanism. The next sync re-renders everything derived from the answer and rewrites `.copier-answers.yml` itself consistently; an answer that violates its copier validator fails the sync run loudly. The settings assembly reads tracking labels from exactly this file on the default branch, so the recorded value is what the apply declares.
+- Everything else (the module parameters above): editing the value key here IS the mechanism. The next sync re-renders everything derived from the answer and rewrites `.github/.copier-answers.yml` itself consistently; an answer that violates its copier validator fails the sync run loudly. The settings assembly reads tracking labels from exactly this file on the default branch, so the recorded value is what the apply declares.
 
 When several tracking-stream modules are selected (`fuzzer`, `nightly`, `docs-site`), their labels must pairwise differ (case-insensitively - GitHub deduplicates label names that way): every stream dedups AND auto-closes by label, so a shared label lets one stream's green night close another's open issue. The copier validators and the settings assembly both reject the collision.
 

@@ -19,7 +19,7 @@ The question's validator (it runs on `copier update` too) enforces:
 
 - No label name the fleet layers already manage (the settings baseline, the release labels, the dependabot labels; GitHub label names are case-insensitive). Reusing one would let a green night close unrelated issues carrying it and make every settings apply fight over the label's color and description.
 - Every pair of selected stream labels must differ (`nightly_label` vs `fuzzer_label` vs `docs_site_label`): all streams dedup AND auto-close by label, so a shared label would let one stream's green night close another's active failure issue.
-- A repo whose recorded label later becomes reserved fails its next sync until the value in `.copier-answers.yml` changes (see [Renaming the label](#renaming-the-label)).
+- A repo whose recorded label later becomes reserved fails its next sync until the value in `.github/.copier-answers.yml` changes (see [Renaming the label](#renaming-the-label)).
 
 ## Issue lifecycle
 
@@ -41,7 +41,7 @@ To unblock:
 
 The fuzz and nightly starters are repo-owned while the label reaches settings from the recorded copier answer, read fresh on every apply. Renaming the answer therefore changes the label the NEXT settings apply declares (no sync needed) - but never the repo-owned workflow. The rename is one default-branch PR that:
 
-1. edits the answer's value key in `.copier-answers.yml` (the sync loads recorded values from there; the underscore keys stay untouched)
+1. edits the answer's value key in `.github/.copier-answers.yml` (the sync loads recorded values from there; the underscore keys stay untouched)
 2. updates the workflow's two `label:` inputs in the same change - or it keeps filing under the old name while the settings apply deletes it
 
 The docs-site stream is simpler: its workflow is MANAGED, and the label input renders from the answer, so step 1 alone renames it - the next sync PR carries the workflow's new input, and until it merges the nightly check files under the old, now-undeclared name.

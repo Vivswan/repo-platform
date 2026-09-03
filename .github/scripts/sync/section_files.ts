@@ -36,6 +36,13 @@ export const REGISTRATION_FLIP_NAME = "registration-flip.md";
  * crossed. */
 export const GATE_REWORK_NAME = "gate-rework.md";
 
+/** relocate_answers.ts's transition note: the one-time byte-for-byte move
+ * of the recorded answers file from the repository root to
+ * .github/.copier-answers.yml. Informational, never forces review (the
+ * bytes are untouched and copier's own render follows the same path);
+ * self-retires once the fleet has crossed. */
+export const ANSWERS_MOVE_NAME = "answers-move.md";
+
 /** referenced_labels.ts's report: label(s) the target's issue forms or
  * workflows reference that the merged settings label roster does not
  * declare - the apply deletes undeclared labels, so each reference is

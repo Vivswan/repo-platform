@@ -12,7 +12,8 @@
 // the same green-gated delivery branch the fleet does), so the oracle is
 // a raw byte comparison.
 //
-// The rendered .copier-answers.yml is checked against the answers file
+// The rendered .github/.copier-answers.yml is checked against the answers
+// file
 // first, so a dogfood-oracle matrix row that drifts from
 // .repo-platform-answers.yml fails here instead of comparing the wrong
 // render.
@@ -45,7 +46,7 @@ function main(): number {
 
   // The render must have used this repository's answers, or every
   // comparison below compares against the wrong project.
-  const recordedPath = join(renderRoot, ".copier-answers.yml");
+  const recordedPath = join(renderRoot, ".github/.copier-answers.yml");
   if (!existsSync(recordedPath)) {
     fail(`${recordedPath} not found - run the dogfood-oracle smoke render first`);
   }

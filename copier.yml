@@ -5,7 +5,7 @@
 
 _min_copier_version: "9.8.0"
 _subdirectory: template
-_answers_file: .copier-answers.yml
+_answers_file: .github/.copier-answers.yml
 _templates_suffix: .jinja
 _preserve_symlinks: true
 

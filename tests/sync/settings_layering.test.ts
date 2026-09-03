@@ -550,7 +550,7 @@ describe("transitionSettingsStarter", () => {
       writeFileSync(join(dir, ".repo-platform.yml"), options.modules);
     }
     if (options.answers !== undefined) {
-      writeFileSync(join(dir, ".copier-answers.yml"), options.answers);
+      writeFileSync(join(dir, ".github/.copier-answers.yml"), options.answers);
     }
     return { dir, out: join(dir, "settings-layering.md") };
   }

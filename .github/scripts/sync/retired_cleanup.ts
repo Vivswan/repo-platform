@@ -64,7 +64,7 @@ function main(): void {
   const recordedModules = (answersOld as Record<string, unknown> | null | undefined)?.modules;
   if (recordedModules !== undefined && !isStringList(recordedModules)) {
     fail(
-      "HEAD:.copier-answers.yml records a malformed modules list; cannot check the custom-license flip",
+      "HEAD:.github/.copier-answers.yml records a malformed modules list; cannot check the custom-license flip",
     );
   }
   const oldModules = isStringList(recordedModules) ? recordedModules : [];

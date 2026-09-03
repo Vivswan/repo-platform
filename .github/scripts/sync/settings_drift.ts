@@ -5,7 +5,7 @@
 // would ride a clean sync PR into the rendered files and auto-merge into
 // declared truth: exactly the drift the nightly settings heal exists to
 // revert. This script compares the live values against the answers
-// recorded in the target's .copier-answers.yml. On a mismatch it emits
+// recorded in the target's .github/.copier-answers.yml. On a mismatch it emits
 // one ::warning:: per drifted field and writes a PR-body section;
 // open_pr.ts prepends that section and keeps auto-merge off, so ratifying
 // the change stays a human decision. A field the answers file does not
@@ -145,7 +145,7 @@ ${revert}`
 ${revert}`;
   return `> [!WARNING]
 > OUT-OF-BAND SETTINGS CHANGE: ${repo}'s live settings no longer
-> match the answers recorded in its .copier-answers.yml:
+> match the answers recorded in its .github/.copier-answers.yml:
 >
 ${changes}
 >

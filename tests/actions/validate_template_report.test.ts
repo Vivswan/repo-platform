@@ -116,14 +116,17 @@ function runReport(opts: ReportOptions = {}) {
 }
 
 interface FreshnessOptions {
-  /** undefined = no .copier-answers.yml at all. */
+  /** undefined = no .github/.copier-answers.yml at all. */
   answers?: string;
   env?: Record<string, string>;
 }
 
 function runFreshness(opts: FreshnessOptions = {}) {
   const { root, bin } = scratch();
-  if (opts.answers !== undefined) writeFileSync(join(root, ".copier-answers.yml"), opts.answers);
+  if (opts.answers !== undefined) {
+    mkdirSync(join(root, ".github"), { recursive: true });
+    writeFileSync(join(root, ".github/.copier-answers.yml"), opts.answers);
+  }
   const fragment = join(root, "freshness.md");
   const outputs = join(root, "outputs.txt");
   writeFileSync(outputs, "");

@@ -15,7 +15,7 @@ Both streams dedup AND auto-close their tracking issue by label, so `nightly_lab
 ```bash
 git checkout -b add-nightly
 # .repo-platform.yml: add "nightly" to the top-level modules list.
-# .copier-answers.yml: record the label even when accepting the
+# .github/.copier-answers.yml: record the label even when accepting the
 # default (the central-settings preflight reads it from this file):
 #   nightly_label: nightly-failure     # or a custom label
 git commit -am "chore: add the nightly module"
@@ -28,7 +28,7 @@ gh workflow run sync-repos.yml -R Vivswan/repo-platform -f repo=Vivswan/<repo>
 Every file should be explained by the modules diff:
 
 - `.github/workflows/nightly.yml` - NEW, the starter (repo-owned from now on).
-- `.copier-answers.yml` - records `nightly` and `nightly_label`.
+- `.github/.copier-answers.yml` - records `nightly` and `nightly_label`.
 - No settings.yml diff: the managed baseline declares the `nightly-failure` label automatically at apply time, read from the recorded `nightly_label` answer (below).
 
 ### The starter, and moving real checks in
@@ -44,7 +44,7 @@ Unlike the fuzz stream, the nightly issue does NOT gate releases; add `release-b
 
 ### Companion step: record the answer
 
-The settings assembly reads the module list from the repo's `.repo-platform.yml` (live as soon as the step-1 PR merges) but the label value from `.copier-answers.yml` - so record `nightly_label` in the step-1 PR even when accepting the default, or the repo's settings apply fails (the assembly refuses to guess a tracking label) until the sync PR merges the recorded answer.
+The settings assembly reads the module list from the repo's `.repo-platform.yml` (live as soon as the step-1 PR merges) but the label value from `.github/.copier-answers.yml` - so record `nightly_label` in the step-1 PR even when accepting the default, or the repo's settings apply fails (the assembly refuses to guess a tracking label) until the sync PR merges the recorded answer.
 
 ## 2. Adding `skills`
 
@@ -52,12 +52,12 @@ Goal: the repo hosts installable agent skills with centrally-managed validation.
 
 ### The edit
 
-`skills_dir` defaults to `skills`. For a different directory, record it in the same PR (`.copier-answers.yml`: `skills_dir: lib/skills`) - the value is baked into the managed workflow's trigger paths and the gate job's input, which is why it is an answer, not a starter edit.
+`skills_dir` defaults to `skills`. For a different directory, record it in the same PR (`.github/.copier-answers.yml`: `skills_dir: lib/skills`) - the value is baked into the managed workflow's trigger paths and the gate job's input, which is why it is an answer, not a starter edit.
 
 ```bash
 git checkout -b add-skills
 # .repo-platform.yml: add "skills" to the top-level modules list.
-# Non-default directory? Also add to .copier-answers.yml:
+# Non-default directory? Also add to .github/.copier-answers.yml:
 #   skills_dir: lib/skills
 git commit -am "chore: add the skills module"
 gh pr create && gh pr merge --auto --squash

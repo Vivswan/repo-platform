@@ -68,6 +68,8 @@ import {
 } from "../shared/proc.ts";
 import { stageComposedTreeArgv } from "../shared/stage_tree.ts";
 import { AnswersFileError, readAnswersFile } from "./answers_file.ts";
+import { ANSWERS_PATH, answersMoveNote, relocateAnswers } from "./relocate_answers.ts";
+import { ANSWERS_MOVE_NAME } from "./section_files.ts";
 import { rewriteSrcPath } from "./src_path.ts";
 
 const REPO_ROOT = resolve(import.meta.dir, "..", "..", "..");
@@ -366,22 +368,40 @@ export function rehearseRepo(slug: string, options: RehearsalOptions): Rehearsal
     }
     // Adopted but broken is a failure, not a skip: production's selector
     // only gates on .repo-platform.yml, and the sync leg would fail here.
-    if (!existsSync(join(targetDir, ".copier-answers.yml"))) {
+    // The sync's own one-shot answers-file move (relocate_answers.ts) is
+    // replayed first: a pre-move clone gets the same byte-for-byte git mv
+    // plus commit the production leg makes, and the same PR-body note
+    // (written into the RUNNER_TEMP twin for the sections printer below).
+    const answersLocation = relocateAnswers(targetDir);
+    writeFileSync(join(temp, ANSWERS_MOVE_NAME), answersMoveNote(answersLocation), "utf-8");
+    if (answersLocation === "missing") {
       throw new RehearsalError(
-        `${slug} has .repo-platform.yml but no .copier-answers.yml; the sync cannot update it`,
+        `${slug} has .repo-platform.yml but no ${ANSWERS_PATH}; the sync cannot update it`,
+      );
+    }
+    if (answersLocation === "both") {
+      throw new RehearsalError(
+        `${slug} carries a copier answers file at both ${ANSWERS_PATH} and the retired root ` +
+          "path; the sync would refuse it - delete the stale root copy",
+      );
+    }
+    if (answersLocation === "not-a-file") {
+      throw new RehearsalError(
+        `${slug} carries something other than a regular file at ${ANSWERS_PATH} or the ` +
+          "retired root path; the sync would refuse it",
       );
     }
     let answers: ReturnType<typeof readAnswersFile>;
     try {
-      answers = readAnswersFile(join(targetDir, ".copier-answers.yml"));
+      answers = readAnswersFile(join(targetDir, ANSWERS_PATH));
     } catch (err) {
       if (!(err instanceof AnswersFileError)) throw err;
-      throw new RehearsalError(`${slug}'s .copier-answers.yml: ${err.message}`);
+      throw new RehearsalError(`${slug}'s ${ANSWERS_PATH}: ${err.message}`);
     }
     warnUnselected(slug);
     if (answers.commit === "") {
       throw new RehearsalError(
-        `${slug}'s .copier-answers.yml records no _commit; there is no base to update from`,
+        `${slug}'s ${ANSWERS_PATH} records no _commit; there is no base to update from`,
       );
     }
     // Recorded answers stand in for the workflow's live API read (parity gap
@@ -478,7 +498,7 @@ export function rehearseRepo(slug: string, options: RehearsalOptions): Rehearsal
     // the local build instead of the canonical source; committed because
     // copier update needs a clean tree (the real sync commits its
     // normalization too).
-    const answersPath = join(targetDir, ".copier-answers.yml");
+    const answersPath = join(targetDir, ANSWERS_PATH);
     const rewrite = rewriteSrcPath(readFileSync(answersPath, "utf-8"), platformDir);
     if (rewrite === null) {
       throw new RehearsalError(`no _src_path line in ${answersPath}`);
@@ -726,6 +746,10 @@ export function rehearseRepo(slug: string, options: RehearsalOptions): Rehearsal
       const prSections: [string, string][] = [
         ["retired-modules.txt", "Retired modules dropped from the selection"],
         ["removed-paths.txt", "The template retired these files; this update deletes them"],
+        [
+          "answers-move.md",
+          "Answers-file move (one-shot transition note: .copier-answers.yml -> .github/.copier-answers.yml)",
+        ],
         ["starter-pin-rollout.md", "Starter pin rollout (one-run transition note)"],
         [
           "gate-rework.md",

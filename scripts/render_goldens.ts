@@ -28,7 +28,7 @@
 //   fixed message, and git runs with GIT_CONFIG_GLOBAL/SYSTEM pointed at
 //   /dev/null (a user's autocrlf or gpg-signing config must not leak into
 //   blob or commit hashes). The commit sha - recorded as `_commit` in
-//   .copier-answers.yml and stamped into the ownership manifest's
+//   .github/.copier-answers.yml and stamped into the ownership manifest's
 //   provenance slot - is still a pure function of the WHOLE tree content,
 //   so every template edit would move it; normalizeRenderedTree therefore
 //   rewrites the `_commit` answer to the fixed sentinel "xxxxxxx" before
@@ -134,7 +134,7 @@ export const SHA_SENTINEL = "xxxxxxx";
 
 /** The answers file copier records the render provenance in; must match
  *  the name stamp_manifest.ts's recordedCommit reads. */
-const ANSWERS_NAME = ".copier-answers.yml";
+const ANSWERS_NAME = ".github/.copier-answers.yml";
 
 /** Rewrite the `_commit` answer's VALUE to SHA_SENTINEL when it records
  *  the scratch tree's commit sha (or any 7-plus-char prefix of it - copier

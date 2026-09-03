@@ -762,9 +762,9 @@ fi
 # would parse as a
 # number (an all-digit or exponent-form sha, ~4% of them), so strip the
 # optional surrounding quotes or the comparison fails on a sha lottery.
-answers_commit="$(sed -n "s/^_commit:[[:space:]]*//p" "$SMOKE/.copier-answers.yml" \
+answers_commit="$(sed -n "s/^_commit:[[:space:]]*//p" "$SMOKE/.github/.copier-answers.yml" \
   | sed -e "s/^'\(.*\)'\$/\1/" -e 's/^"\(.*\)"$/\1/')"
 if [ -z "$answers_commit" ] || [ "$(mf ".github/repo-platform-manifest.json" commit)" != "$answers_commit" ]; then
-  echo "::error::manifest check failed: the manifest's provenance commit in $manifest does not match the _commit recorded in .copier-answers.yml ('$answers_commit') for modules=$MODULES private=$PRIVATE. Fix this harness's _commit extraction first (quote stripping), then stamp_manifest.ts."
+  echo "::error::manifest check failed: the manifest's provenance commit in $manifest does not match the _commit recorded in .github/.copier-answers.yml ('$answers_commit') for modules=$MODULES private=$PRIVATE. Fix this harness's _commit extraction first (quote stripping), then stamp_manifest.ts."
   exit 1
 fi

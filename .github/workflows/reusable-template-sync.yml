@@ -123,7 +123,15 @@ jobs:
       - name: Require registration files
         run: |
           test -f target/.repo-platform.yml || { echo "::error::${TARGET_DISPLAY} is not registered with repo-platform: .repo-platform.yml is missing from its default branch. Restore the file from git history, or regenerate the repo with 'copier copy gh:${GITHUB_REPOSITORY} . --vcs-ref build'."; exit 1; }
-          test -f target/.copier-answers.yml || { echo "::error::${TARGET_DISPLAY} has no .copier-answers.yml on its default branch, so copier has no recorded answers to update from. Restore the file from git history, or regenerate the repo with 'copier copy gh:${GITHUB_REPOSITORY} . --vcs-ref build'."; exit 1; }
+
+      # One-shot fleet transition: the recorded answers file leaves the
+      # repository root for .github/.copier-answers.yml. A pre-move target
+      # is moved byte-for-byte and committed here, BEFORE any step reads
+      # the answers and before copier runs; the script is the single owner
+      # of the file's location and fails loudly when the answers sit at
+      # both paths or at neither. Self-retiring once the fleet has crossed.
+      - name: Move the answers file to .github/
+        run: bun .github/scripts/sync/relocate_answers.ts
 
       # Live visibility and description feed the render on purpose (the
       # visibility-gated renders must follow the repo's real state), so a
@@ -136,7 +144,7 @@ jobs:
           PRIVATE: ${{ steps.target.outputs.private }}
         run: |
           bun .github/scripts/sync/settings_drift.ts \
-            --answers target/.copier-answers.yml \
+            --answers target/.github/.copier-answers.yml \
             --repo "$TARGET" \
             --display "$TARGET_DISPLAY" \
             --hide-details "$HIDE_DETAILS" \
@@ -380,7 +388,8 @@ jobs:
           BASE_BRANCH: ${{ steps.target.outputs.default_branch }}
         run: |
           # Uncommitted copier output OR commits already on the branch (the
-          # _src_path normalization commits itself) both count as changes.
+          # answers-file move and the _src_path normalization commit
+          # themselves) both count as changes.
           ahead="$(git -C target rev-list --count "origin/${BASE_BRANCH}..HEAD")"
           if [ -z "$(git -C target status --porcelain)" ] && [ "$ahead" -eq 0 ]; then
             echo "::notice::${TARGET_DISPLAY}: already matches ${DISPLAY}; no sync PR needed."

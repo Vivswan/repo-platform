@@ -216,7 +216,7 @@ describe("script", () => {
       },
     });
     for (const [rel, content] of [
-      [".copier-answers.yml", `_commit: v0\ngithub_username: ${USER}\n`],
+      [".github/.copier-answers.yml", `_commit: v0\ngithub_username: ${USER}\n`],
       [".github/workflows/nightly.yml", starter(OLD_PIN)],
       [
         ".github/workflows/nightly-fuzz.yml",
@@ -311,7 +311,7 @@ describe("script", () => {
   test("fails loudly without a well-formed recorded github_username", () => {
     const { root, renderDir, report, outcomes } = makeTree();
     try {
-      writeFileSync(join(root, ".copier-answers.yml"), "_commit: v0\n");
+      writeFileSync(join(root, ".github/.copier-answers.yml"), "_commit: v0\n");
       const result = run(root, renderDir, report, outcomes);
       expect(result.exitCode).toBe(1);
       expect(result.stdout).toContain("github_username");

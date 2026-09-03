@@ -11,7 +11,7 @@ npx skills add https://github.com/Vivswan/repo-platform/tree/main/skills/repo-pl
 ## What It Does
 
 - Locates the selection (the repo-owned `modules:` list in `.repo-platform.yml`) and walks the add flow: edit, merge, get the sync PR (or dispatch it), review every changed file
-- Documents the module-parameter mechanism: recorded answers in `.copier-answers.yml`, edited by PR (value keys only), with the ripples a tracking-label rename has on repo-owned starters
+- Documents the module-parameter mechanism: recorded answers in `.github/.copier-answers.yml`, edited by PR (value keys only), with the ripples a tracking-label rename has on repo-owned starters
 - Carries the per-module companion checklist: recording tracking-label answers, the bun module's Dependabot secret, pages one-time setup, listing skills in the repo-owned plugin manifest
 - Covers removal: what the sync cleans up vs what stays (starters, settings.yml), label cleanup, and the custom-license flip guard
 

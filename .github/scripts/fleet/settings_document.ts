@@ -227,8 +227,8 @@ export function parseLayerFile(text: string, where: string): SettingsLayer {
 }
 
 /** A YAML mapping that is NOT a settings document (.repo-platform.yml,
- *  .copier-answers.yml): same location-carrying diagnostics, none of the
- *  layer schema, and the values stay `unknown` because each caller reads
+ *  .github/.copier-answers.yml): same location-carrying diagnostics, none of
+ *  the layer schema, and the values stay `unknown` because each caller reads
  *  one key and validates it for itself. */
 export function parseYamlMapping(text: string, where: string): Record<string, unknown> {
   const data = parseYamlText(text, where);

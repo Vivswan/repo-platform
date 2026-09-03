@@ -6,7 +6,6 @@
 # declaration here, when a declared path never lands, and when a source's
 # text (headers, marker lines) contradicts its declared class.
 ownership:
-  - { path: .copier-answers.yml, class: managed }
   - path: .editorconfig
     class: split
     grammar: managed-region
@@ -17,6 +16,7 @@ ownership:
     grammar: managed-region
     begin: "# BEGIN REPO-PLATFORM MANAGED"
     end: "# END REPO-PLATFORM MANAGED"
+  - { path: .github/.copier-answers.yml, class: managed }
   - { path: .github/actionlint.yaml, class: starter }
   - path: .github/CODEOWNERS
     class: split

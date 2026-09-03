@@ -27,7 +27,7 @@ A golden changes if and only if rendered content changes. The volatile inputs ar
 
 ## The sentinel
 
-One normalization exists: the scratch commit sha is a pure function of the whole template content, so every template edit would move it. The runner rewrites exactly the two fields that carry it - the `_commit` answer in `.copier-answers.yml` and the ownership manifest's provenance slot - to the sentinel `xxxxxxx`, and leaves every other byte verbatim.
+One normalization exists: the scratch commit sha is a pure function of the whole template content, so every template edit would move it. The runner rewrites exactly the two fields that carry it - the `_commit` answer in `.github/.copier-answers.yml` and the ownership manifest's provenance slot - to the sentinel `xxxxxxx`, and leaves every other byte verbatim.
 
 - The sentinel is deliberately non-hex, so no honest commit sha can ever read as it.
 - Only the true sha is rewritten: any other value surfaces as drift, and a pre-stamped sentinel is rejected outright (it would false-match the committed goldens).

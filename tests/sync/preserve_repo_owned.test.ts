@@ -127,7 +127,7 @@ function runPreserve(
 describe("preserve_repo_owned fleet-license re-seed", () => {
   test("re-seeds the CURRENT template with every variable rendered", () => {
     const workspace = makeWorkspace(licenseTemplateSource);
-    const target = makeTarget({ ".copier-answers.yml": goodAnswers });
+    const target = makeTarget({ ".github/.copier-answers.yml": goodAnswers });
     const result = runPreserve(workspace, target);
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain("re-seeded");
@@ -152,7 +152,7 @@ describe("preserve_repo_owned fleet-license re-seed", () => {
     const workspace = makeWorkspace(marked);
     const holder = "Vivswan \u0160ah \u7814"; // beyond latin1: S-caron and a CJK ideograph
     const target = makeTarget({
-      ".copier-answers.yml": `copyright_holder: "${holder}"\ngithub_username: Vivswan\n`,
+      ".github/.copier-answers.yml": `copyright_holder: "${holder}"\ngithub_username: Vivswan\n`,
     });
     const result = runPreserve(workspace, target);
     expect(result.exitCode).toBe(0);
@@ -166,7 +166,7 @@ describe("preserve_repo_owned fleet-license re-seed", () => {
     const workspace = makeWorkspace(
       `${licenseTemplateSource}\nGenerated for {{ project_name }}.\n`,
     );
-    const target = makeTarget({ ".copier-answers.yml": goodAnswers });
+    const target = makeTarget({ ".github/.copier-answers.yml": goodAnswers });
     const result = runPreserve(workspace, target);
     expect(result.exitCode).toBe(1);
     expect(result.stdout).toContain("unrendered template expressions remain");
@@ -184,10 +184,10 @@ describe("preserve_repo_owned fleet-license re-seed", () => {
 
   test("an answers file that is not a YAML mapping fails as unreadable", () => {
     const workspace = makeWorkspace(licenseTemplateSource);
-    const target = makeTarget({ ".copier-answers.yml": "- not\n- a\n- mapping\n" });
+    const target = makeTarget({ ".github/.copier-answers.yml": "- not\n- a\n- mapping\n" });
     const result = runPreserve(workspace, target);
     expect(result.exitCode).toBe(1);
-    expect(result.stdout).toContain(".copier-answers.yml is unreadable");
+    expect(result.stdout).toContain(".github/.copier-answers.yml is unreadable");
     expect(result.license).toBeNull();
   });
 
@@ -199,7 +199,7 @@ describe("preserve_repo_owned fleet-license re-seed", () => {
   for (const [shape, answers] of Object.entries(badHolders)) {
     test(`${shape} copyright_holder fails loudly`, () => {
       const workspace = makeWorkspace(licenseTemplateSource);
-      const target = makeTarget({ ".copier-answers.yml": answers });
+      const target = makeTarget({ ".github/.copier-answers.yml": answers });
       const result = runPreserve(workspace, target);
       expect(result.exitCode).toBe(1);
       expect(result.stdout).toContain("records no copyright_holder");
@@ -219,7 +219,7 @@ describe("preserve_repo_owned fleet-license re-seed", () => {
   for (const [shape, answers] of Object.entries(badUsernames)) {
     test(`${shape} github_username fails loudly`, () => {
       const workspace = makeWorkspace(licenseTemplateSource);
-      const target = makeTarget({ ".copier-answers.yml": answers });
+      const target = makeTarget({ ".github/.copier-answers.yml": answers });
       const result = runPreserve(workspace, target);
       expect(result.exitCode).toBe(1);
       expect(result.stdout).toContain("records no github_username");

@@ -721,8 +721,8 @@ export function transitionSettingsStarter(
         // document - parseYamlMapping carries the same diagnostics
         // without imposing the layer schema on copier's answer keys.
         const answers = parseYamlMapping(
-          readFileSync(join(targetDir, ".copier-answers.yml"), "utf-8"),
-          join(targetDir, ".copier-answers.yml"),
+          readFileSync(join(targetDir, ".github/.copier-answers.yml"), "utf-8"),
+          join(targetDir, ".github/.copier-answers.yml"),
         );
         const isTopics = (value: unknown): value is string | string[] =>
           typeof value === "string" ||
@@ -749,7 +749,7 @@ export function transitionSettingsStarter(
         const username = answers.github_username;
         if (typeof username !== "string" || !/^[A-Za-z0-9-]+$/.test(username)) {
           throw new Error(
-            ".copier-answers.yml records no github_username - the starter's header cannot be seeded",
+            ".github/.copier-answers.yml records no github_username - the starter's header cannot be seeded",
           );
         }
         const seed: IdentitySeed = repositoryOptedOut

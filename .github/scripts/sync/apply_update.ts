@@ -19,6 +19,14 @@ process.exit(
     [
       "copier",
       ...subcommand,
+      // Where copier READS the recorded answers as well as writes them:
+      // the subproject read honors only this flag or the hardcoded root
+      // default - never the template's _answers_file - so every update
+      // and recopy must name the landed path explicitly (measured on
+      // copier 9.17.0; relocate_answers.ts moved a pre-move target's file
+      // here before this runs).
+      "--answers-file",
+      ".github/.copier-answers.yml",
       "--vcs-ref",
       requireEnv("TARGET_REF"),
       "--defaults",

@@ -79,7 +79,7 @@ Full walkthrough in [references/questions.md](references/questions.md). The load
 
 Two files record the outcome:
 
-- `.copier-answers.yml`: never delete it - `copier update` depends on it. Its one sanctioned edit is changing a question's VALUE key via a default-branch PR to set a module parameter (`nightly_label`, `skills_dir`, `pages_*`, ...); never touch the underscore keys.
+- `.github/.copier-answers.yml`: never delete it - `copier update` depends on it. Its one sanctioned edit is changing a question's VALUE key via a default-branch PR to set a module parameter (`nightly_label`, `skills_dir`, `pages_*`, ...); never touch the underscore keys.
 - `.repo-platform.yml`: its presence marks the repo as managed, and its top-level `modules:` list is the selection's home from then on. Edit that list and the next sync PR applies the change.
 
 ### 5. Fill in the repo-owned starters

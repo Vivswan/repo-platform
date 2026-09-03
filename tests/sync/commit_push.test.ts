@@ -281,7 +281,11 @@ describe("commit_push Workflows-scope withhold reconciliation", () => {
     // applicable). The ordering pin is the next test.
     const staleNote = '> [!WARNING]\n> REFERENCED LABELS: "answered" is missing\n';
     writeFileSync(join(scratch, "work", "target", ".repo-platform.yml"), "modules: []\n");
-    writeFileSync(join(scratch, "work", "target", ".copier-answers.yml"), "private: false\n");
+    mkdirSync(join(scratch, "work", "target", ".github"), { recursive: true });
+    writeFileSync(
+      join(scratch, "work", "target", ".github/.copier-answers.yml"),
+      "private: false\n",
+    );
     const result = runCommitPush("withhold-other", "false", {
       [REFERENCED_LABELS_NAME]: staleNote,
     });
@@ -300,7 +304,7 @@ describe("commit_push Workflows-scope withhold reconciliation", () => {
     const targetDir = join(scratch, "work", "target");
     mkdirSync(join(targetDir, ".github", "workflows"), { recursive: true });
     writeFileSync(join(targetDir, ".repo-platform.yml"), "modules:\n  - settings-sync\n");
-    writeFileSync(join(targetDir, ".copier-answers.yml"), "private: false\n");
+    writeFileSync(join(targetDir, ".github/.copier-answers.yml"), "private: false\n");
     writeFileSync(join(targetDir, ".github", "settings.yml"), "repository:\n  private: false\n");
     writeFileSync(
       join(targetDir, ".github", "workflows", "ci.yml"),

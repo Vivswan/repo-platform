@@ -107,7 +107,10 @@ describe("normalizeRenderedTree", () => {
    *  the other hash classes the re-stamp recomputes). */
   const writeFixture = (root: string) => {
     mkdirSync(join(root, ".github"), { recursive: true });
-    writeFileSync(join(root, ".copier-answers.yml"), `_commit: ${SHORT}\n_src_path: ./tree\n`);
+    writeFileSync(
+      join(root, ".github/.copier-answers.yml"),
+      `_commit: ${SHORT}\n_src_path: ./tree\n`,
+    );
     writeFileSync(join(root, "notes.md"), "<!-- b -->\nnotes\n<!-- e -->\nrepo half\n");
     symlinkSync("AGENTS.md", join(root, "link"));
     writeFileSync(
@@ -115,7 +118,7 @@ describe("normalizeRenderedTree", () => {
       [
         "{",
         '  "files": {',
-        `    ".copier-answers.yml": {"class": "managed", "hash": null},`,
+        `    ".github/.copier-answers.yml": {"class": "managed", "hash": null},`,
         `    "${MANIFEST}": {"class": "managed", "hash": null, "commit": null},`,
         `    "notes.md": {"class": "split", "grammar": "managed-region", "begin": "<!-- b -->", "end": "<!-- e -->", "hash": null},`,
         `    "link": {"class": "managed", "hash": null}`,
@@ -141,7 +144,7 @@ describe("normalizeRenderedTree", () => {
       writeFixture(root);
       stampFixture(root);
       normalizeRenderedTree(root, SHA);
-      const answers = readFileSync(join(root, ".copier-answers.yml"), "utf-8");
+      const answers = readFileSync(join(root, ".github/.copier-answers.yml"), "utf-8");
       expect(answers).toBe(`_commit: ${SHA_SENTINEL}\n_src_path: ./tree\n`);
       // Content files and symlink targets are not provenance: verbatim.
       expect(readFileSync(join(root, "notes.md"), "utf-8")).toBe(
@@ -153,7 +156,7 @@ describe("normalizeRenderedTree", () => {
       // re-reads the sentinel, and the untouched files' hashes (split
       // half, symlink target) re-stamp to their unchanged values.
       expect(manifest).toContain(
-        `".copier-answers.yml": {"class": "managed", "hash": "${sha256(answers)}"}`,
+        `".github/.copier-answers.yml": {"class": "managed", "hash": "${sha256(answers)}"}`,
       );
       expect(manifest).toContain(
         `"${MANIFEST}": {"class": "managed", "hash": null, "commit": "${SHA_SENTINEL}"}`,
@@ -173,14 +176,14 @@ describe("normalizeRenderedTree", () => {
       const sha = `feedbac${"0123456789abcdef0123456789abcdef0"}`;
       const prose = "We welcome feedback; a feedback-driven process feeds back.\n";
       mkdirSync(join(root, ".github"), { recursive: true });
-      writeFileSync(join(root, ".copier-answers.yml"), `_commit: ${sha.slice(0, 7)}\n`);
+      writeFileSync(join(root, ".github/.copier-answers.yml"), `_commit: ${sha.slice(0, 7)}\n`);
       writeFileSync(join(root, "CODE_OF_CONDUCT.md"), prose);
       writeFileSync(
         join(root, MANIFEST),
         [
           "{",
           '  "files": {',
-          `    ".copier-answers.yml": {"class": "managed", "hash": null},`,
+          `    ".github/.copier-answers.yml": {"class": "managed", "hash": null},`,
           `    "${MANIFEST}": {"class": "managed", "hash": null, "commit": null},`,
           `    "CODE_OF_CONDUCT.md": {"class": "managed", "hash": null}`,
           "  }",
@@ -191,7 +194,7 @@ describe("normalizeRenderedTree", () => {
       stampFixture(root);
       normalizeRenderedTree(root, sha);
       expect(readFileSync(join(root, "CODE_OF_CONDUCT.md"), "utf-8")).toBe(prose);
-      expect(readFileSync(join(root, ".copier-answers.yml"), "utf-8")).toBe(
+      expect(readFileSync(join(root, ".github/.copier-answers.yml"), "utf-8")).toBe(
         `_commit: ${SHA_SENTINEL}\n`,
       );
       const manifest = readFileSync(join(root, MANIFEST), "utf-8");

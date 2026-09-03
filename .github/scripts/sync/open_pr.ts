@@ -26,6 +26,7 @@ import { env, hideDetails, requireEnv, setOutput } from "../shared/gha.ts";
 import { capture, mustCapture, redactText } from "../shared/proc.ts";
 import { clip, escapeControlBytes } from "./preserve_local_content.ts";
 import {
+  ANSWERS_MOVE_NAME,
   GATE_REWORK_NAME,
   MIRRORS_NOTE_NAME,
   MIRRORS_REVIEW_NAME,
@@ -236,6 +237,12 @@ const sections: FlagSection[] = [
   // itself (its own CI run posts the check), so the note is informational
   // and never forces the manual path.
   { path: join(runnerTemp, GATE_REWORK_NAME), render: slurp, forcesReview: false },
+  // relocate_answers.ts's transition note: the one-time byte-for-byte move
+  // of the recorded answers file from the repository root to
+  // .github/.copier-answers.yml. Informational - the bytes are untouched
+  // and copier's own render follows the same path - so it never forces
+  // the manual path.
+  { path: join(runnerTemp, ANSWERS_MOVE_NAME), render: slurp, forcesReview: false },
   // registration_flip.ts's transition note: the one-run .repo-platform.yml
   // ownership flip (managed -> repo-owned starter). Informational - nothing
   // the repo declared changes and enforcement only relaxes, so it never

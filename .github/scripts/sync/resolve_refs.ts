@@ -46,18 +46,18 @@ capture(["git", "fetch", "--quiet", "origin", "+refs/heads/build:refs/remotes/or
 
 let answers: CopierAnswers;
 try {
-  answers = readAnswersFile("target/.copier-answers.yml");
+  answers = readAnswersFile("target/.github/.copier-answers.yml");
 } catch (err) {
   if (!(err instanceof AnswersFileError)) throw err;
   // The parser's message can quote target file content; a hidden target
   // gets the detail-free version.
   if (hideDetails()) {
     console.log(
-      `::error::${targetDisplay}'s .copier-answers.yml cannot be read as a YAML mapping (detail hidden: private repository). Reproduce the sync locally - see docs/private-repos.md.`,
+      `::error::${targetDisplay}'s .github/.copier-answers.yml cannot be read as a YAML mapping (detail hidden: private repository). Reproduce the sync locally - see docs/private-repos.md.`,
     );
   } else {
     console.log(
-      `::error::${targetDisplay}'s .copier-answers.yml: ${err.message}. Fix the file, or regenerate the repo through Sync Repos with recover=recopy.`,
+      `::error::${targetDisplay}'s .github/.copier-answers.yml: ${err.message}. Fix the file, or regenerate the repo through Sync Repos with recover=recopy.`,
     );
   }
   process.exit(1);
@@ -137,7 +137,7 @@ if (oldShaProbe.exitCode !== 0) {
     oldSha = "";
   } else {
     console.log(
-      `::error::${targetDisplay}'s recorded _commit '${hideUnlessRefShaped(oldCommit)}' does not resolve on ${repository}'s build branch, so there is no base to update from. Fix the _commit in its .copier-answers.yml, or dispatch Sync Repos with repo=<the repository's real owner/name> (shown here as ${targetDisplay}) and recover=recopy to regenerate the repo through a manual-review PR.`,
+      `::error::${targetDisplay}'s recorded _commit '${hideUnlessRefShaped(oldCommit)}' does not resolve on ${repository}'s build branch, so there is no base to update from. Fix the _commit in its .github/.copier-answers.yml, or dispatch Sync Repos with repo=<the repository's real owner/name> (shown here as ${targetDisplay}) and recover=recopy to regenerate the repo through a manual-review PR.`,
     );
     process.exit(1);
   }

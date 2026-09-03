@@ -17,7 +17,7 @@ import { rewriteSrcPath } from "./src_path.ts";
 
 const canonical = `gh:${requireEnv("GITHUB_REPOSITORY")}`;
 const display = env("TARGET_DISPLAY");
-const answersPath = "target/.copier-answers.yml";
+const answersPath = "target/.github/.copier-answers.yml";
 const before = readFileSync(answersPath);
 
 // No print touches the recorded value here - it is target-derived, and the

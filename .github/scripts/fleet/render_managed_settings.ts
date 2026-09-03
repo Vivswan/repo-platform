@@ -20,7 +20,7 @@
 // .repo-platform.yml - selecting the settings-sync module there is the
 // opt-in), effective visibility (private repositories reject the
 // public-only layers with a 422), and the
-// tracking-label answers recorded in .copier-answers.yml (each stream
+// tracking-label answers recorded in .github/.copier-answers.yml (each stream
 // repo picks its own label name; the color/description tuples live in
 // the module manifests).
 //
@@ -357,7 +357,7 @@ export function assertKnownModules(
 }
 
 /** The selected stream modules' tracking-label answers from a
- *  .copier-answers.yml text. A tracking label is the module's issue-stream
+ *  .github/.copier-answers.yml text. A tracking label is the module's issue-stream
  *  identity: guessing a default could pass while the repo's real label
  *  loops on delete/recreate, so an unreadable answer for a SELECTED
  *  stream module throws, never falls back. */
@@ -478,7 +478,7 @@ export function declaredPrivate(settingsText: string | null): boolean | null {
 export const PR_TITLE_WORKFLOW = ".github/workflows/pr-title.yml";
 
 /** Facts for the operator repository itself: it is not generated from the
- *  template (no .repo-platform.yml, no .copier-answers.yml), so its module
+ *  template (no .repo-platform.yml, no .github/.copier-answers.yml), so its module
  *  selection and visibility come from the recorded operator answers file -
  *  the same answers the dogfood render uses (render_dogfood.ts pins its
  *  private answer to the in-repo settings.yml declaration). */
@@ -534,14 +534,19 @@ export function factsFromFetch(
   );
   let trackingLabels: { module: string; label: string }[] = [];
   if (streams.length > 0) {
-    const answers = fetch(repo, ".copier-answers.yml", ref);
+    const answers = fetch(repo, ".github/.copier-answers.yml", ref);
     if (answers === null) {
       throw new Error(
-        `${repo}: selects tracking-stream module(s) but has no .copier-answers.yml - ` +
+        `${repo}: selects tracking-stream module(s) but has no .github/.copier-answers.yml - ` +
           "the tracking labels cannot be resolved",
       );
     }
-    trackingLabels = trackingLabelsFrom(answers, modules, manifests, `${repo}/.copier-answers.yml`);
+    trackingLabels = trackingLabelsFrom(
+      answers,
+      modules,
+      manifests,
+      `${repo}/.github/.copier-answers.yml`,
+    );
   }
   // Probed only where it can matter (the module selected): a 404 is a
   // genuine absence (fetch returns null), any other failure throws - a
@@ -563,15 +568,15 @@ export function factsFromTargetDir(dir: string, manifests: ModuleManifest[]): Re
     where(".repo-platform.yml"),
     manifests,
   );
-  const answersText = readFileSync(join(dir, ".copier-answers.yml"), "utf-8");
+  const answersText = readFileSync(join(dir, ".github/.copier-answers.yml"), "utf-8");
   const settingsPath = join(dir, ".github/settings.yml");
   const declared = declaredPrivate(
     existsSync(settingsPath) ? readFileSync(settingsPath, "utf-8") : null,
   );
-  const recorded = parseYamlMapping(answersText, where(".copier-answers.yml")).private;
+  const recorded = parseYamlMapping(answersText, where(".github/.copier-answers.yml")).private;
   if (declared === null && typeof recorded !== "boolean") {
     throw new Error(
-      `${where(".copier-answers.yml")}: records no boolean private answer - ` +
+      `${where(".github/.copier-answers.yml")}: records no boolean private answer - ` +
         "the baseline's visibility-gated blocks cannot be computed",
     );
   }
@@ -582,7 +587,7 @@ export function factsFromTargetDir(dir: string, manifests: ModuleManifest[]): Re
       answersText,
       modules,
       manifests,
-      where(".copier-answers.yml"),
+      where(".github/.copier-answers.yml"),
     ),
     prTitleWorkflowPresent: existsSync(join(dir, PR_TITLE_WORKFLOW)),
   };

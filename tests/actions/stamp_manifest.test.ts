@@ -136,21 +136,27 @@ describe("resolveConflictsTowardAfter", () => {
 
 describe("recordedCommit", () => {
   test("reads the plain, double-quoted, and single-quoted forms", () => {
-    expect(recordedCommit(tree({ ".copier-answers.yml": "_commit: templates/v1.2.3\n" }))).toBe(
-      "templates/v1.2.3",
+    expect(
+      recordedCommit(tree({ ".github/.copier-answers.yml": "_commit: templates/v1.2.3\n" })),
+    ).toBe("templates/v1.2.3");
+    expect(recordedCommit(tree({ ".github/.copier-answers.yml": '_commit: "abc1234"\n' }))).toBe(
+      "abc1234",
     );
-    expect(recordedCommit(tree({ ".copier-answers.yml": '_commit: "abc1234"\n' }))).toBe("abc1234");
-    expect(recordedCommit(tree({ ".copier-answers.yml": "_commit: 'abc1234'\n" }))).toBe("abc1234");
+    expect(recordedCommit(tree({ ".github/.copier-answers.yml": "_commit: 'abc1234'\n" }))).toBe(
+      "abc1234",
+    );
   });
   test("a missing file or key yields null", () => {
     expect(recordedCommit(tree({}))).toBeNull();
-    expect(recordedCommit(tree({ ".copier-answers.yml": "_src_path: x\n" }))).toBeNull();
+    expect(recordedCommit(tree({ ".github/.copier-answers.yml": "_src_path: x\n" }))).toBeNull();
   });
 });
 
 describe("stampManifestText", () => {
   test("stamps the self entry's provenance commit from the answers file", () => {
-    const root = tree({ ".copier-answers.yml": "_commit: templates/v2.0.0\n_src_path: x\n" });
+    const root = tree({
+      ".github/.copier-answers.yml": "_commit: templates/v2.0.0\n_src_path: x\n",
+    });
     const text = manifestText([
       '    ".github/repo-platform-manifest.json": {"class": "managed", "hash": null, "commit": null}',
     ]);

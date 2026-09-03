@@ -159,6 +159,26 @@ echo "Building synthetic old fixture ${prev}"
 # deletion loop runs against a real file regardless of copier's own delete
 # behavior.
 bun .github/scripts/build-branches/branch_tree.ts --dest "$OLD_TREE"
+# Model the fleet state before the answers file left the repository root:
+# the old template pointed _answers_file at .copier-answers.yml, rendered
+# the file there, and classed the root path in the manifest. The update
+# below is what must MOVE the recorded answers to .github/ byte-for-byte
+# (relocate_answers.ts), which the move assertions after the render pin.
+mv "$OLD_TREE/template/.github/.copier-answers.yml.jinja" \
+  "$OLD_TREE/template/.copier-answers.yml.jinja"
+sed 's|^_answers_file: .github/.copier-answers.yml$|_answers_file: .copier-answers.yml|' \
+  "$OLD_TREE/copier.yml" > "$OLD_TREE/copier.ans.tmp"
+mv "$OLD_TREE/copier.ans.tmp" "$OLD_TREE/copier.yml"
+grep -qx '_answers_file: .copier-answers.yml' "$OLD_TREE/copier.yml" \
+  || fail "could not point the old fixture's _answers_file at the root path"
+sed 's|"\.github/\.copier-answers\.yml"|".copier-answers.yml"|' \
+  "$OLD_TREE/template/.github/repo-platform-manifest.json.jinja" \
+  > "$OLD_TREE/manifest.ans.tmp"
+mv "$OLD_TREE/manifest.ans.tmp" \
+  "$OLD_TREE/template/.github/repo-platform-manifest.json.jinja"
+grep -qF '".copier-answers.yml"' \
+  "$OLD_TREE/template/.github/repo-platform-manifest.json.jinja" \
+  || fail "could not model the pre-move manifest entry for the root answers path"
 echo "retired sentinel" > "$OLD_TREE/template/.github/retired-sentinel.txt"
 # Model the fleet state before the Copilot gate moved into the ruleset: the
 # old template shipped a managed rerun-copilot-gate.yml (the re-arm half of
@@ -418,6 +438,26 @@ export DESCRIPTION="Upgraded description"
 # re-renders.
 export TARGET_DIR="$PROJECT"
 export TARGET_REF="$NEW_TAG"
+# THE ANSWERS-FILE MOVE (one-shot transition): the old fixture recorded its
+# answers at the retired root path; replay the workflow's relocate step and
+# prove the move is byte-for-byte BEFORE the update runs - the recorded
+# answers are load-bearing (the old-render replay feeds them to copier
+# verbatim), so the bytes must ride the move untouched.
+test -f "$PROJECT/.copier-answers.yml" \
+  || fail "the synthetic old fixture must record its answers at the retired root path (or the move assertions below are vacuous)"
+test ! -e "$PROJECT/.github/.copier-answers.yml" \
+  || fail "the synthetic old fixture already carries .github/.copier-answers.yml"
+cp "$PROJECT/.copier-answers.yml" "$WORK/answers-before-move.yml"
+RUNNER_TEMP="$WORK" bun .github/scripts/sync/relocate_answers.ts \
+  || fail "relocate_answers.ts failed on a root-vintage answers file"
+test ! -e "$PROJECT/.copier-answers.yml" \
+  || fail "the answers-file move left the root copy behind"
+cmp -s "$WORK/answers-before-move.yml" "$PROJECT/.github/.copier-answers.yml" \
+  || fail "the answers-file move did not carry the recorded answers byte-for-byte"
+grep -qF "ANSWERS FILE MOVE" "$WORK/answers-move.md" \
+  || fail "the answers-file move did not write its PR-body note"
+[ -z "$(git -C "$PROJECT" status --porcelain)" ] \
+  || fail "the answers-file move left the tree dirty (copier update refuses a dirty tree)"
 RECOVER="" bun .github/scripts/sync/apply_update.ts
 bun .github/scripts/sync/resolve_copier_conflicts.ts \
   --summary "$WORK/dropped-local-hunks.md" --root "$PROJECT"
@@ -426,9 +466,9 @@ bun .github/scripts/sync/resolve_copier_conflicts.ts \
 # project through TARGET_DIR, with RUNNER_TEMP set to $WORK where the
 # copier.yml snapshots already sit (resolve_refs.ts writes them there in
 # the workflow).
-answers_old="$(git -C "$PROJECT" show HEAD:.copier-answers.yml)"
+answers_old="$(git -C "$PROJECT" show HEAD:.github/.copier-answers.yml)"
 src_path="$(sed -n 's/^_src_path: //p' <<<"$answers_old")"
-test -n "$src_path" || fail ".copier-answers.yml records no _src_path"
+test -n "$src_path" || fail ".github/.copier-answers.yml records no _src_path"
 old_commit="$(awk '$1 == "_commit:" { print $2 }' <<<"$answers_old")"
 [ "$old_commit" = "$prev" ] || fail "recorded _commit '${old_commit}' is not ${prev}"
 # Current copier already deletes the de-rendered sentinel during update, so
@@ -476,8 +516,8 @@ bun "$GITHUB_WORKSPACE/actions/validate-template/validate_generated_files.ts" "$
 
 cd "$PROJECT"
 # _commit must record the build tag (git describe lands exactly on it).
-grep -qF "_commit: $NEW_TAG" .copier-answers.yml \
-  || fail ".copier-answers.yml does not record $NEW_TAG"
+grep -qF "_commit: $NEW_TAG" .github/.copier-answers.yml \
+  || fail ".github/.copier-answers.yml does not record $NEW_TAG"
 # Files the template retired must be gone: settings-sync.yml left the
 # render with the module deselection, the synthetic sentinel left the
 # template between builds despite its local edit, and the managed
@@ -585,7 +625,7 @@ test -f .github/workflows/pr-title.yml \
 grep -qxF -- "    types: [opened, edited, reopened, synchronize]" .github/workflows/pr-title.yml \
   || fail "the updated pr-title.yml lacks the full trigger types list (the required check must exist at every pushed head)"
 test -f AGENTS.md || fail "AGENTS.md is missing"
-grep -qF "description: Upgraded description" .copier-answers.yml \
+grep -qF "description: Upgraded description" .github/.copier-answers.yml \
   || fail "the live description was not applied"
 # No copier leftovers: neither inline conflict markers nor .rej files.
 marker="$(printf '<%.0s' 1 2 3 4 5 6 7) before updating"
@@ -644,8 +684,8 @@ git -c user.name=ci -c user.email=ci@localhost commit -q -m "chore: template upd
 
 # Corrupt the recorded base the way a lost build branch would, and add a
 # local edit to a template-managed file (recovery legitimately drops it).
-sed 's/^_commit: .*/_commit: deadbeef/' .copier-answers.yml > .copier-answers.yml.tmp
-mv .copier-answers.yml.tmp .copier-answers.yml
+sed 's/^_commit: .*/_commit: deadbeef/' .github/.copier-answers.yml > .github/.copier-answers.yml.tmp
+mv .github/.copier-answers.yml.tmp .github/.copier-answers.yml
 echo "# local ci note" >> .github/workflows/ci.yml
 # The registration starter must hold under recopy --overwrite too: the
 # repo-owned `mirrors` declaration lives in it, and a recopy that
@@ -684,7 +724,7 @@ bun "$GITHUB_WORKSPACE/.github/scripts/sync/preserve_local_content.ts" \
 RECOVER=recopy RUNNER_TEMP="$WORK" bun "$GITHUB_WORKSPACE/.github/scripts/sync/preserve_repo_owned.ts"
 TARGET_DIR="$PROJECT" bun "$GITHUB_WORKSPACE/actions/shared/stamp_manifest.ts"
 
-grep -qF "_commit: $NEW_TAG" .copier-answers.yml \
+grep -qF "_commit: $NEW_TAG" .github/.copier-answers.yml \
   || fail "recovery did not re-record _commit as $NEW_TAG"
 grep -qF "# local checks note" .github/workflows/checks.yml \
   || fail "recovery overwrote the generated-once checks.yml (_skip_if_exists must hold under recopy --overwrite)"
@@ -791,6 +831,10 @@ export PRIVATE=true
 export DESCRIPTION="Visibility-flip project"
 export TARGET_DIR="$VIS"
 export TARGET_REF="$NEW_TAG"
+# The fixture rendered at the pre-move ref: replay the answers-file move
+# (asserted byte-for-byte in the main leg; here it just must not break the
+# rest of the pipeline).
+RUNNER_TEMP="$VIS_WORK" bun .github/scripts/sync/relocate_answers.ts
 RECOVER="" bun .github/scripts/sync/apply_update.ts
 bun .github/scripts/sync/resolve_copier_conflicts.ts \
   --summary "$VIS_WORK/dropped-local-hunks.md" --root "$VIS"
@@ -801,7 +845,7 @@ bun .github/scripts/sync/resolve_copier_conflicts.ts \
 # recorded answers, new render private=true from the live data - must
 # really flag and delete it.
 echo "# Contributing" > "$VIS/CONTRIBUTING.md"
-answers_vis="$(git -C "$VIS" show HEAD:.copier-answers.yml)"
+answers_vis="$(git -C "$VIS" show HEAD:.github/.copier-answers.yml)"
 src_path_vis="$(sed -n 's/^_src_path: //p' <<<"$answers_vis")"
 test -n "$src_path_vis" || fail "visibility fixture records no _src_path"
 RUNNER_TEMP="$VIS_WORK" SRC_PATH="$src_path_vis" \
@@ -1043,7 +1087,7 @@ export DESCRIPTION="Split-rebuild project"
 export TARGET_DIR="$SPLIT"
 export TARGET_REF="$SPLIT_TAG"
 RECOVER="" bun .github/scripts/sync/apply_update.ts
-answers_split="$(git -C "$SPLIT" show HEAD:.copier-answers.yml)"
+answers_split="$(git -C "$SPLIT" show HEAD:.github/.copier-answers.yml)"
 src_path_split="$(sed -n 's/^_src_path: //p' <<<"$answers_split")"
 test -n "$src_path_split" || fail "split fixture records no _src_path"
 RUNNER_TEMP="$SPLIT_WORK" SRC_PATH="$src_path_split" \
@@ -1220,7 +1264,7 @@ export TARGET_REF="$SPLIT_TAG"
 RECOVER="" bun .github/scripts/sync/apply_update.ts
 bun .github/scripts/sync/resolve_copier_conflicts.ts \
   --summary "$UNSEL_WORK/dropped-local-hunks.md" --root "$UNSEL"
-answers_unsel="$(git -C "$UNSEL" show HEAD:.copier-answers.yml)"
+answers_unsel="$(git -C "$UNSEL" show HEAD:.github/.copier-answers.yml)"
 src_path_unsel="$(sed -n 's/^_src_path: //p' <<<"$answers_unsel")"
 test -n "$src_path_unsel" || fail "unselected-path fixture records no _src_path"
 git show "$NEW_TAG:copier.yml" > "$UNSEL_WORK/copier-old.yml"
@@ -1746,7 +1790,7 @@ export DESCRIPTION="Module-deselection project"
 export TARGET_DIR="$DESEL"
 export TARGET_REF="$NEW_TAG"
 RECOVER="" bun .github/scripts/sync/apply_update.ts
-answers_desel="$(git -C "$DESEL" show HEAD:.copier-answers.yml)"
+answers_desel="$(git -C "$DESEL" show HEAD:.github/.copier-answers.yml)"
 src_path_desel="$(sed -n 's/^_src_path: //p' <<<"$answers_desel")"
 test -n "$src_path_desel" || fail "deselection fixture records no _src_path"
 RUNNER_TEMP="$DESEL_WORK" SRC_PATH="$src_path_desel" \
@@ -1859,7 +1903,7 @@ export DESCRIPTION="Starter-pin project"
 export TARGET_DIR="$PIN"
 export TARGET_REF="$NEW_TAG"
 RECOVER="" bun .github/scripts/sync/apply_update.ts
-answers_pin="$(git -C "$PIN" show HEAD:.copier-answers.yml)"
+answers_pin="$(git -C "$PIN" show HEAD:.github/.copier-answers.yml)"
 src_path_pin="$(sed -n 's/^_src_path: //p' <<<"$answers_pin")"
 test -n "$src_path_pin" || fail "pin fixture records no _src_path"
 RUNNER_TEMP="$PIN_WORK" SRC_PATH="$src_path_pin" \
@@ -1937,7 +1981,7 @@ echo "starter pin rollout OK: old pin ported byte-surgically, hand pin left alon
 # A repo rendered in the production/staging era carries that pages.yml
 # shape and records the two retired answers. The update must re-render the
 # managed pages.yml to the mounts interface and drop the retired answers
-# from .copier-answers.yml while the surviving pages answers ride through.
+# from the answers file while the surviving pages answers ride through.
 PAGES_FIX="$RUN_DIR/upgrade-pages"
 PAGES_WORK="$RUN_DIR/upgrade-pages-work"
 mkdir -p "$PAGES_WORK"
@@ -1954,7 +1998,7 @@ grep -qE '^ +production: main$' .github/workflows/pages.yml \
   || fail "old pages fixture does not carry the production/staging interface"
 # The era's recorded answers: current copier no longer asks the questions,
 # so the fleet state is modeled by recording the values directly.
-printf 'pages_production: main\npages_staging: false\n' >> .copier-answers.yml
+printf 'pages_production: main\npages_staging: false\n' >> .copier-answers.yml # root: pre-move era
 git init -q -b main
 git add --all
 git -c user.name=ci -c user.email=ci@localhost commit -q -m "chore: init in the production/staging era"
@@ -1971,6 +2015,9 @@ export PRIVATE=false
 export DESCRIPTION="Pages-retirement project"
 export TARGET_DIR="$PAGES_FIX"
 export TARGET_REF="$NEW_TAG"
+# The fixture rendered at the pre-move ref: replay the answers-file move
+# (the retro-recorded pages answers must ride the move verbatim).
+RUNNER_TEMP="$PAGES_WORK" bun .github/scripts/sync/relocate_answers.ts
 RECOVER="" bun .github/scripts/sync/apply_update.ts
 bun .github/scripts/sync/resolve_copier_conflicts.ts \
   --summary "$PAGES_WORK/dropped-local-hunks.md" --root "$PAGES_FIX"
@@ -1985,10 +2032,10 @@ fi
 if grep -qE '^ +release:$' "$pages_rendered"; then
   fail "updated pages.yml still carries the retired release trigger"
 fi
-if grep -qE '^pages_(production|staging):' "$PAGES_FIX/.copier-answers.yml"; then
+if grep -qE '^pages_(production|staging):' "$PAGES_FIX/.github/.copier-answers.yml"; then
   fail "the update kept the retired pages answers recorded"
 fi
-grep -qE '^pages_build_command: ./build.sh$' "$PAGES_FIX/.copier-answers.yml" \
+grep -qE '^pages_build_command: ./build.sh$' "$PAGES_FIX/.github/.copier-answers.yml" \
   || fail "the surviving pages answers were lost by the update"
 # The delivery-channel pin flip rides the same managed re-render: a repo
 # rendered when the reusable-workflow calls pinned @main (the ungated

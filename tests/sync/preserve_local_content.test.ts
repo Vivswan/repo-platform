@@ -1510,7 +1510,19 @@ describe.skipIf(!hasCopier)("preserve_local_content end-to-end (copier recopy)",
 
       // The recovery re-render, exactly as apply_update.ts issues it.
       run(
-        ["copier", "recopy", "--overwrite", "--vcs-ref", "HEAD", ...copierArgs],
+        [
+          "copier",
+          "recopy",
+          "--overwrite",
+          // Where copier reads the recorded answers: the CLI flag or the
+          // hardcoded root default, never the template's _answers_file -
+          // the same flag apply_update.ts passes.
+          "--answers-file",
+          ".github/.copier-answers.yml",
+          "--vcs-ref",
+          "HEAD",
+          ...copierArgs,
+        ],
         target,
         COPIER_TIMEOUT_MS,
       );

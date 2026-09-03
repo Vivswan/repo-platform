@@ -4,7 +4,7 @@
 
 The sync leg fails red with exactly this error (no PR arrives):
 
-> ::error::<repo>'s recorded _commit '<value>' does not resolve on Vivswan/repo-platform's build branch, so there is no base to update from. Fix the _commit in its .copier-answers.yml, or dispatch Sync Repos with repo=<the repository's real owner/name> (shown here as <repo>) and recover=recopy to regenerate the repo through a manual-review PR.
+> ::error::<repo>'s recorded _commit '<value>' does not resolve on Vivswan/repo-platform's build branch, so there is no base to update from. Fix the _commit in its .github/.copier-answers.yml, or dispatch Sync Repos with repo=<the repository's real owner/name> (shown here as <repo>) and recover=recopy to regenerate the repo through a manual-review PR.
 
 Where it surfaces depends on visibility:
 
@@ -23,7 +23,7 @@ Where it surfaces depends on visibility:
 
 - the build branch was recreated (its old commits are orphaned),
 - the repo was generated from a local repo-platform checkout whose commit never existed upstream,
-- `.copier-answers.yml`'s `_commit` was hand-edited, or
+- `.github/.copier-answers.yml`'s `_commit` was hand-edited, or
 - the repo predates the build-branch architecture and records a main-history commit that a main rewrite orphaned.
 
 ## The fix
@@ -85,5 +85,5 @@ Recovery PRs generated BEFORE the carry step existed (and any future regression)
 
 ## Prevention
 
-- Never hand-edit `_commit` in `.copier-answers.yml`, and never delete the file.
+- Never hand-edit `_commit` in `.github/.copier-answers.yml`, and never delete the file.
 - Generate new repos from `gh:Vivswan/repo-platform` build refs, not from a local checkout.

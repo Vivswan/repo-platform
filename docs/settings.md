@@ -15,7 +15,7 @@ Selecting the `settings-sync` module in a repo's `.repo-platform.yml` is the who
 
 Every layer is a plain settings-as-code YAML document a human can read on its own; no settings content derives from code. The mechanics:
 
-- Layers 1-4 are selected by the repo's facts and merged by [render_managed_settings.ts](../.github/scripts/fleet/render_managed_settings.ts): module selection from its `.repo-platform.yml`, effective visibility, tracking-label answers from its `.copier-answers.yml`. [merge_settings_layers.ts](../.github/scripts/fleet/merge_settings_layers.ts) owns the dialect and adds layers 5 and 6.
+- Layers 1-4 are selected by the repo's facts and merged by [render_managed_settings.ts](../.github/scripts/fleet/render_managed_settings.ts): module selection from its `.repo-platform.yml`, effective visibility, tracking-label answers from its `.github/.copier-answers.yml`. [merge_settings_layers.ts](../.github/scripts/fleet/merge_settings_layers.ts) owns the dialect and adds layers 5 and 6.
 - Which layer files a module ships is DECLARED (`settings_layers` in its `module.yml`), never discovered from the tree: the manifest loader checks each declaration against the tree in both directions, so a deleted layer file is a hard error instead of a silently shorter stack whose missing labels the apply would then delete fleet-wide.
 - None of these files is ever synced into a client repo; only the repo's own settings.yml lives there, rendered ONCE as an identity starter (`_skip_if_exists`), so a settings edit is an ordinary PR in the repo itself.
 - Layer 6 is the only layer a repository cannot beat. Fleet defaults a repo may tune belong in layer 1.

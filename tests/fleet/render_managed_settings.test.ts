@@ -345,7 +345,7 @@ describe("the render CLI acts on the recheck", () => {
     writeFileSync(join(root, ".repo-platform.yml"), `modules: [${modules}]\n`);
     mkdirSync(join(root, ".github"), { recursive: true });
     writeFileSync(join(root, ".github/settings.yml"), "repository:\n  private: false\n");
-    writeFileSync(join(root, ".copier-answers.yml"), "github_username: o\n");
+    writeFileSync(join(root, ".github/.copier-answers.yml"), "github_username: o\n");
     git(["git", "-C", root, "add", "-A"]);
     git(["git", "-C", root, "commit", "-qm", "facts"]);
     const head = git(["git", "-C", root, "rev-parse", "HEAD"]);
@@ -418,7 +418,7 @@ describe("factsFromFetch pins every read to one ref", () => {
       seen.push({ path, ref });
       if (path === ".repo-platform.yml") return "modules: [uv, fuzzer, settings-sync]\n";
       if (path === ".github/settings.yml") return "repository:\n  private: false\n";
-      if (path === ".copier-answers.yml") return "fuzzer_label: my-fuzz\n";
+      if (path === ".github/.copier-answers.yml") return "fuzzer_label: my-fuzz\n";
       return null;
     };
     const facts = factsFromFetch(
@@ -482,7 +482,7 @@ describe("fact resolvers", () => {
     const dir = mkdtempSync(join(tmpdir(), "facts-"));
     mkdirSync(join(dir, ".github"));
     writeFileSync(join(dir, ".repo-platform.yml"), "modules: [settings-sync]\n");
-    writeFileSync(join(dir, ".copier-answers.yml"), "private: false\n");
+    writeFileSync(join(dir, ".github/.copier-answers.yml"), "private: false\n");
     writeFileSync(join(dir, ".github/settings.yml"), "repository:\n  private: true\n");
     expect(factsFromTargetDir(dir, manifests).private).toBe(true);
     // Undeclared falls back to the recorded answer.

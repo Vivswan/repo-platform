@@ -87,7 +87,7 @@ The repo carries only markdown under `docs/` (a `README.md` index at minimum); t
 |---|---|---|
 | `skills_dir` | Directory holding the repository's agent skills (plain relative path; baked into the managed validation workflow's trigger paths and action input) | `skills` |
 
-To change a module parameter later, edit that question's VALUE key in `.copier-answers.yml` through a normal default-branch PR - the sync loads recorded values from there, so the edit sticks and the next sync re-renders consistently. Never touch the underscore keys (`_commit`, `_src_path`).
+To change a module parameter later, edit that question's VALUE key in `.github/.copier-answers.yml` through a normal default-branch PR - the sync loads recorded values from there, so the edit sticks and the next sync re-renders consistently. Never touch the underscore keys (`_commit`, `_src_path`).
 
 ## Required settings labels
 

@@ -4850,7 +4850,7 @@ const rules: Rule[] = [
     run: () => {
       // The self-apply's REPO_PLATFORM_TOKEN grant is Administration and
       // Issues only - no Contents - so reading the caller's
-      // .repo-platform.yml or .copier-answers.yml over gh api fails on
+      // .repo-platform.yml or .github/.copier-answers.yml over gh api fails on
       // every private repository before anything renders. The caller is
       // already checked out, so the render must take --target-dir and
       // touch no network. The central run is the opposite case: it holds

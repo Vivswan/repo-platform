@@ -251,7 +251,7 @@ export function renderRolloutReport(outcomes: FileOutcome[]): string {
  * updated always carries a well-formed answers file, so damage here is
  * a broken input, not a skippable nicety. */
 function recordedUsername(root: string): string {
-  const answersPath = join(root, ".copier-answers.yml");
+  const answersPath = join(root, ".github/.copier-answers.yml");
   let doc: unknown;
   try {
     doc = parse(readFileSync(answersPath, "utf-8"));
@@ -264,7 +264,7 @@ function recordedUsername(root: string): string {
   const username = (doc as Record<string, unknown>).github_username;
   if (typeof username !== "string" || !/^[A-Za-z0-9-]+$/.test(username)) {
     fail(
-      "starter pin rollout: .copier-answers.yml records no well-formed github_username, " +
+      "starter pin rollout: .github/.copier-answers.yml records no well-formed github_username, " +
         "so the rendered pin strings cannot be reconstructed",
     );
   }

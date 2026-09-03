@@ -35,7 +35,7 @@ const skip = (reason: string): never => {
 
 let answers = "";
 try {
-  answers = readFileSync(".copier-answers.yml", "utf8");
+  answers = readFileSync(".github/.copier-answers.yml", "utf8");
 } catch {
   // Fine: the empty string yields no recorded commit, which skips below.
 }
@@ -44,7 +44,7 @@ try {
 // exactly as the inline bash predecessor's tr did.
 const recordedLine = answers.split("\n").find((line) => line.startsWith("_commit:"));
 const recorded = (recordedLine ?? "").replace(/^_commit:/, "").replace(/["' ]/g, "");
-if (recorded === "") skip("No _commit is recorded in .copier-answers.yml.");
+if (recorded === "") skip("No _commit is recorded in .github/.copier-answers.yml.");
 
 const tipProbe = capture(
   ["gh", "api", `repos/${templateRepo}/branches/build`, "--jq", ".commit.sha"],

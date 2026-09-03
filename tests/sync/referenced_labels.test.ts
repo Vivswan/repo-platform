@@ -44,7 +44,7 @@ describe("referenced_labels", () => {
   test("a referenced label missing from the merged roster writes the warning section", () => {
     const root = makeTarget({
       ".repo-platform.yml": REGISTRATION,
-      ".copier-answers.yml": ANSWERS,
+      ".github/.copier-answers.yml": ANSWERS,
       ".github/settings.yml": SETTINGS,
       ".github/ISSUE_TEMPLATE/bug.yml": 'labels: ["definitely-not-declared-xyz"]\n',
       ".github/workflows/close.yml":
@@ -63,7 +63,7 @@ describe("referenced_labels", () => {
   test("a hidden target's log line carries no label names (the report keeps them)", () => {
     const root = makeTarget({
       ".repo-platform.yml": REGISTRATION,
-      ".copier-answers.yml": ANSWERS,
+      ".github/.copier-answers.yml": ANSWERS,
       ".github/settings.yml": SETTINGS,
       ".github/ISSUE_TEMPLATE/bug.yml": 'labels: ["definitely-not-declared-xyz"]\n',
     });
@@ -92,7 +92,7 @@ describe("referenced_labels", () => {
   test("labels covered by the roster (baseline or the repo's own layer) write no section", () => {
     const root = makeTarget({
       ".repo-platform.yml": REGISTRATION,
-      ".copier-answers.yml": ANSWERS,
+      ".github/.copier-answers.yml": ANSWERS,
       ".github/settings.yml": `${SETTINGS}labels:\n  - name: answered\n    color: aabbcc\n`,
       // "bug" comes from the fleet baseline, "ANSWERED" (case-folded) from
       // the repo layer.
@@ -111,7 +111,7 @@ describe("referenced_labels", () => {
     // warn - the rename removes the old name exactly like a deletion.
     const root = makeTarget({
       ".repo-platform.yml": REGISTRATION,
-      ".copier-answers.yml": ANSWERS,
+      ".github/.copier-answers.yml": ANSWERS,
       ".github/settings.yml": `${SETTINGS}labels:\n  - name: bug\n    new_name: defect\n    color: d73a4a\n`,
       ".github/ISSUE_TEMPLATE/bug.yml": 'labels: ["bug"]\n',
     });
@@ -123,7 +123,7 @@ describe("referenced_labels", () => {
     // The rename TARGET is the post-apply name: referencing it is clean.
     const covered = makeTarget({
       ".repo-platform.yml": REGISTRATION,
-      ".copier-answers.yml": ANSWERS,
+      ".github/.copier-answers.yml": ANSWERS,
       ".github/settings.yml": `${SETTINGS}labels:\n  - name: bug\n    new_name: defect\n    color: d73a4a\n`,
       ".github/ISSUE_TEMPLATE/bug.yml": 'labels: ["defect"]\n',
     });
@@ -135,7 +135,7 @@ describe("referenced_labels", () => {
   test("not applicable without the settings-sync module (nothing reconciles labels)", () => {
     const root = makeTarget({
       ".repo-platform.yml": "modules: []\n",
-      ".copier-answers.yml": ANSWERS,
+      ".github/.copier-answers.yml": ANSWERS,
       ".github/settings.yml": SETTINGS,
       ".github/ISSUE_TEMPLATE/bug.yml": 'labels: ["definitely-not-declared-xyz"]\n',
     });
@@ -148,7 +148,7 @@ describe("referenced_labels", () => {
   test("not applicable without a settings.yml (the apply skips, deleting nothing)", () => {
     const root = makeTarget({
       ".repo-platform.yml": REGISTRATION,
-      ".copier-answers.yml": ANSWERS,
+      ".github/.copier-answers.yml": ANSWERS,
       ".github/ISSUE_TEMPLATE/bug.yml": 'labels: ["definitely-not-declared-xyz"]\n',
     });
     const r = runScript(root);
@@ -163,7 +163,7 @@ describe("referenced_labels", () => {
     // reference can be deleted out from under a file.
     const root = makeTarget({
       ".repo-platform.yml": REGISTRATION,
-      ".copier-answers.yml": ANSWERS,
+      ".github/.copier-answers.yml": ANSWERS,
       ".github/settings.yml": `${SETTINGS}labels: null\n`,
       ".github/ISSUE_TEMPLATE/bug.yml": 'labels: ["definitely-not-declared-xyz"]\n',
     });
@@ -176,7 +176,7 @@ describe("referenced_labels", () => {
   test("unreadable facts write the could-not-verify section instead of failing or passing", () => {
     const root = makeTarget({
       ".repo-platform.yml": "modules: not-a-list\n",
-      ".copier-answers.yml": ANSWERS,
+      ".github/.copier-answers.yml": ANSWERS,
       ".github/settings.yml": SETTINGS,
     });
     const r = runScript(root);

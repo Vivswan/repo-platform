@@ -1,4 +1,5 @@
-// The target's .copier-answers.yml, parsed once at the trust boundary.
+// The target's .github/.copier-answers.yml, parsed once at the trust
+// boundary.
 // The file is target-controlled input; the sync's consumers read it
 // through this module instead of re-scanning lines with their own
 // semantics.

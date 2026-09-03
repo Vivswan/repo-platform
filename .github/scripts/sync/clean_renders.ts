@@ -56,8 +56,8 @@ export function run(command: string[], options: { stdout?: "pipe" } = {}): strin
 export interface CleanRenders {
   renderOld: string;
   renderNew: string;
-  /** The pre-update .copier-answers.yml capture (also on disk for the
-   * later steps that read it). */
+  /** The pre-update .github/.copier-answers.yml capture (also on disk for
+   * the later steps that read it). */
   answersOldText: string;
 }
 
@@ -71,14 +71,16 @@ export function ensureRenders(): CleanRenders {
   const renderNew = join(runnerTemp, "render-new");
 
   // The old render uses the answers recorded BEFORE this update (HEAD
-  // still points at the pre-update commit); captured even on the no-op
+  // still points at the pre-update commit - the answers-file move and the
+  // _src_path normalization rode earlier commits, bytes preserved);
+  // captured even on the no-op
   // path so consumers of answers-old.yml never depend on call order.
   // Caveat: the renders are NOT re-captured on that path, so if HEAD ever
   // moved between two calls in one RUNNER_TEMP, answers-old.yml could
   // disagree with render-old. No sync step moves HEAD between the
   // materialize and consume steps; if one ever did, the mismatch surfaces
   // as retired-paths noise and validation failures - loud, not lossy.
-  const answersOldText = run(["git", "-C", targetDir, "show", "HEAD:.copier-answers.yml"], {
+  const answersOldText = run(["git", "-C", targetDir, "show", "HEAD:.github/.copier-answers.yml"], {
     stdout: "pipe",
   });
   writeFileSync(join(runnerTemp, "answers-old.yml"), answersOldText);
