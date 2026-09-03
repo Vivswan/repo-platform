@@ -4,8 +4,8 @@
  * The real gh calls are not tested here (they need a live GitHub).
  */
 
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { afterAll, beforeAll, describe, expect, setSystemTime, test } from "bun:test";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -24,6 +24,7 @@ import {
   LABEL_RE,
   resolveIssue,
   runUrl,
+  type Stream,
 } from "./fuzz-issue";
 
 const env = {
@@ -31,6 +32,15 @@ const env = {
   GITHUB_REPOSITORY: "o/r",
   GITHUB_RUN_ID: "42",
 } as NodeJS.ProcessEnv;
+
+/**
+ * Every body under test stamps the UTC day at call time, so the clock is
+ * frozen for the whole file and the expected date is a literal (a date read
+ * once at module load would race midnight against the source's own read).
+ */
+const date = "2026-03-04";
+beforeAll(() => setSystemTime(new Date(`${date}T12:00:00Z`)));
+afterAll(() => setSystemTime());
 
 describe("head", () => {
   test("returns the text unchanged when under the limit", () => {
@@ -52,10 +62,11 @@ describe("capChars", () => {
     expect(capChars("short", 100)).toBe("short");
   });
 
-  test("truncates a long single line to at most `max` characters", () => {
-    const out = capChars("x".repeat(1000), 50);
-    expect(out.length).toBeLessThanOrEqual(50);
-    expect(out.endsWith("... (truncated)")).toBe(true);
+  test("keeps the head and counts the marker inside `max`", () => {
+    // 50 - 16 (the marker) = 34 kept characters; the return is exactly 50.
+    expect(capChars("abcdefghij".repeat(100), 50)).toBe(
+      `${"abcdefghij".repeat(3)}abcd\n... (truncated)`,
+    );
   });
 });
 
@@ -86,12 +97,11 @@ describe("failureDirs", () => {
 });
 
 describe("blockTitle", () => {
-  test("uses the report's first heading", () => {
-    expect(blockTitle("/x/target", "# fuzz: target crashed\n\nbody")).toBe("fuzz: target crashed");
-  });
-
-  test("strips every leading heading marker", () => {
-    expect(blockTitle("/x/target", "## fuzz: target crashed\n")).toBe("fuzz: target crashed");
+  test.each([
+    { report: "# fuzz: target crashed\n\nbody", reason: "an h1 first line" },
+    { report: "## fuzz: target crashed\n", reason: "every leading marker is stripped, not one" },
+  ])("uses the report's first heading ($reason)", ({ report }) => {
+    expect(blockTitle("/x/target", report)).toBe("fuzz: target crashed");
   });
 
   test("falls back to the directory name when the report is absent", () => {
@@ -124,35 +134,52 @@ describe("buildBody", () => {
       ].join("\n"),
     );
     // A failure dir the producer could not write a report for.
-    mkdirSync(join(root, "mcp_jsonrpc"), { recursive: true });
+    const orphan = join(root, "mcp_jsonrpc");
+    mkdirSync(orphan, { recursive: true });
+    // failureDirs orders by mtime; two mkdirs can tie, so pin nm_frame older.
+    utimesSync(crash, new Date(1_000_000), new Date(1_000_000));
+    utimesSync(orphan, new Date(2_000_000), new Date(2_000_000));
   });
 
   afterAll(() => {
     rmSync(root, { recursive: true, force: true });
   });
 
-  test("builds one block per failure with the report head and replay command", () => {
-    const body = buildBody(failureDirs(root), env, "fuzz-failures-1");
-    expect(body).toContain("2 failure report(s)");
-    expect(body).toContain("## fuzz: nm_frame crashed");
-    expect(body).toContain("cargo +nightly fuzz run nm_frame fuzz/artifacts/nm_frame/crash-abc");
-    expect(body).toContain("Run: https://github.com/o/r/actions/runs/42");
-  });
-
-  test("names the uploaded artifact when given", () => {
-    const body = buildBody(failureDirs(root), env, "fuzz-failures-1");
-    expect(body).toContain("`fuzz-failures-1`");
-  });
-
-  test("points at the run's artifact list when no artifact name is given", () => {
-    const body = buildBody(failureDirs(root), env, "");
-    expect(body).toContain("see its artifacts list");
-  });
-
-  test("a failure dir without report.md is titled by its directory name", () => {
-    const body = buildBody(failureDirs(root), env, "");
-    expect(body).toContain("## mcp_jsonrpc (no report.md)");
-  });
+  test.each([
+    {
+      artifactName: "fuzz-failures-1",
+      reason: "names the uploaded artifact",
+      artifactsLine:
+        "The full failure artifacts (crashing inputs, logs) are attached to the run as `fuzz-failures-1`.",
+    },
+    {
+      artifactName: "",
+      reason: "no artifact name points at the run's artifacts list",
+      artifactsLine: "The full failure artifacts are attached to the run; see its artifacts list.",
+    },
+  ])(
+    "one block per failure, oldest first, then the artifacts note and run ($reason)",
+    ({ artifactName, artifactsLine }) => {
+      expect(buildBody(failureDirs(root), env, artifactName)).toBe(
+        [
+          `Nightly fuzz run on ${date} produced 2 failure report(s).`,
+          "",
+          "## fuzz: nm_frame crashed",
+          "",
+          "Reproduce:",
+          "",
+          "```bash",
+          "cargo +nightly fuzz run nm_frame fuzz/artifacts/nm_frame/crash-abc",
+          "```",
+          "",
+          "## mcp_jsonrpc (no report.md)",
+          "",
+          artifactsLine,
+          "Run: https://github.com/o/r/actions/runs/42",
+        ].join("\n"),
+      );
+    },
+  );
 
   test("caps the body under the GitHub limit and says how many were omitted", () => {
     const bigRoot = mkdtempSync(join(tmpdir(), "big-"));
@@ -183,39 +210,47 @@ describe("buildBody", () => {
   });
 
   test("files a bare notice when there are no failure dirs", () => {
-    const body = buildBody([], env, "a");
-    expect(body).toContain("no failure report");
-    expect(body).toContain("Run: https://github.com/o/r/actions/runs/42");
+    expect(buildBody([], env, "a")).toBe(
+      [
+        `Nightly fuzz run on ${date} failed with no failure report.`,
+        "",
+        "Nothing wrote a report: the failure may sit outside the fuzz step",
+        "(setup, cache, artifact upload), or the fuzzer died before it could",
+        "write one. See the run log.",
+        "",
+        "Run: https://github.com/o/r/actions/runs/42",
+      ].join("\n"),
+    );
   });
 });
 
 describe("buildGenericBody", () => {
-  const genericEnv = {
-    ...env,
-    GITHUB_WORKFLOW: "Nightly",
-    GITHUB_SHA: "abc1234def",
-  } as NodeJS.ProcessEnv;
-
-  test("names the workflow, the date, the commit, and the run", () => {
-    const body = buildGenericBody(genericEnv);
-    expect(body).toContain("`Nightly` failed on");
-    expect(body).toMatch(/failed on \d{4}-\d{2}-\d{2}\./);
-    expect(body).toContain("Commit: abc1234def");
-    expect(body).toContain("Run: https://github.com/o/r/actions/runs/42");
-  });
-
-  test("points at the run log, never at artifacts", () => {
-    const body = buildGenericBody(genericEnv);
-    expect(body).toContain("run log");
-    expect(body).not.toContain("artifact");
-  });
-
-  test("missing context degrades to prose, not to broken markdown", () => {
-    const body = buildGenericBody({} as NodeJS.ProcessEnv);
-    expect(body).toContain("The nightly workflow failed on");
-    expect(body).not.toContain("Commit:");
-    expect(body).not.toContain("Run:");
-    expect(body).not.toContain("``");
+  test.each([
+    {
+      reason: "full context names the workflow, commit, and run",
+      bodyEnv: { ...env, GITHUB_WORKFLOW: "Nightly", GITHUB_SHA: "abc1234def" },
+      expected: [
+        `\`Nightly\` failed on ${date}.`,
+        "",
+        "This stream writes no failure reports; the run log names the failing",
+        "step(s). Repeat failures update this issue until a green night closes it.",
+        "",
+        "Commit: abc1234def",
+        "Run: https://github.com/o/r/actions/runs/42",
+      ],
+    },
+    {
+      reason: "missing context degrades to prose, not to empty backticks or a facts block",
+      bodyEnv: {},
+      expected: [
+        `The nightly workflow failed on ${date}.`,
+        "",
+        "This stream writes no failure reports; the run log names the failing",
+        "step(s). Repeat failures update this issue until a green night closes it.",
+      ],
+    },
+  ])("points at the run log, never at artifacts ($reason)", ({ bodyEnv, expected }) => {
+    expect(buildGenericBody(bodyEnv as NodeJS.ProcessEnv)).toBe(expected.join("\n"));
   });
 });
 
@@ -262,40 +297,86 @@ async function withCapturedLog(body: () => Promise<void>): Promise<string[]> {
   return lines;
 }
 
+/** The exact `gh label list` argv fileIssue issues for `label`. */
+const labelListCall = (label: string): string[] => [
+  "label",
+  "list",
+  "--repo",
+  "o/r",
+  "--search",
+  label,
+  "--limit",
+  "1000",
+  "--json",
+  "name",
+];
+
+/** The exact `gh issue list` argv for `label` at page size `limit`. */
+const issueListCall = (label: string, limit: string): string[] => [
+  "issue",
+  "list",
+  "--repo",
+  "o/r",
+  "--label",
+  label,
+  "--state",
+  "open",
+  "--limit",
+  limit,
+  "--json",
+  "number,assignees",
+];
+
 describe("fileIssue", () => {
-  test("create path opens a labeled issue with the body and title", async () => {
-    const { run, calls } = fakeGh(undefined);
-    await fileIssue(run, "o/r", "body", "fuzz-nightly", DEFAULT_TITLE);
-    const create = calls.find((c) => c[0] === "issue" && c[1] === "create");
-    expect(create).toBeDefined();
-    expect(create?.[create.indexOf("--label") + 1]).toBe("fuzz-nightly");
-    expect(create?.[create.indexOf("--title") + 1]).toBe(DEFAULT_TITLE);
-    expect(create?.[create.indexOf("--body") + 1]).toBe("body");
-  });
+  test.each([
+    {
+      reason: "the fuzz stream with the default title",
+      label: "fuzz-nightly",
+      title: DEFAULT_TITLE,
+      body: "body",
+    },
+    {
+      reason: "a no-artifacts stream passes its label, title, and generic body straight through",
+      label: "nightly-failure",
+      title: "Nightly CI failures",
+      body: buildGenericBody({ ...env, GITHUB_WORKFLOW: "Nightly" } as NodeJS.ProcessEnv),
+    },
+  ])(
+    "create path: creates the missing label, opens the labeled issue, assigns the owner ($reason)",
+    async ({ label, title, body }) => {
+      // A workflow-token issue fires no issues:opened event, so assignment
+      // must happen at creation - the filer itself owns it now.
+      const { run, calls } = fakeGh(undefined);
+      expect(await fileIssue(run, "o/r", body, label, title)).toBe(7);
+      expect(calls).toEqual([
+        labelListCall(label),
+        [
+          "label",
+          "create",
+          label,
+          "--repo",
+          "o/r",
+          "--color",
+          DEFAULT_LABEL_COLOR,
+          "--description",
+          DEFAULT_LABEL_DESCRIPTION,
+        ],
+        issueListCall(label, "1"),
+        ["issue", "create", "--repo", "o/r", "--label", label, "--title", title, "--body", body],
+        ["issue", "edit", "7", "--repo", "o/r", "--add-assignee", "o"],
+      ]);
+    },
+  );
 
-  test("comment path comments on the existing issue, does not create a new one", async () => {
-    const { run, calls } = fakeGh(3);
-    await fileIssue(run, "o/r", "body", "fuzz-nightly", "t");
-    expect(calls.some((c) => c[0] === "issue" && c[1] === "comment" && c[2] === "3")).toBe(true);
-    expect(calls.some((c) => c[0] === "issue" && c[1] === "create")).toBe(false);
-  });
-
-  test("the create path assigns the repository owner to the new issue", async () => {
-    // A workflow-token issue fires no issues:opened event, so assignment
-    // must happen at creation - the filer itself owns it now.
-    const { run, calls } = fakeGh(undefined);
-    await fileIssue(run, "o/r", "body", "fuzz-nightly", "t");
-    const edit = calls.find((c) => c[0] === "issue" && c[1] === "edit");
-    expect(edit?.[2]).toBe("7");
-    expect(edit?.[edit.indexOf("--add-assignee") + 1]).toBe("o");
-  });
-
-  test("an unassigned open issue picks up the owner on the comment path", async () => {
+  test("comment path: comments on the open unassigned issue and assigns the owner, no create", async () => {
     const { run, calls } = fakeGh(3, true);
-    await fileIssue(run, "o/r", "body", "fuzz-nightly", "t");
-    const edit = calls.find((c) => c[0] === "issue" && c[1] === "edit");
-    expect(edit?.[2]).toBe("3");
-    expect(edit?.[edit.indexOf("--add-assignee") + 1]).toBe("o");
+    expect(await fileIssue(run, "o/r", "body", "fuzz-nightly", "t")).toBe(3);
+    expect(calls).toEqual([
+      labelListCall("fuzz-nightly"),
+      issueListCall("fuzz-nightly", "1"),
+      ["issue", "comment", "3", "--repo", "o/r", "--body", "body"],
+      ["issue", "edit", "3", "--repo", "o/r", "--add-assignee", "o"],
+    ]);
   });
 
   test("an already-assigned open issue is left alone on the comment path", async () => {
@@ -342,32 +423,6 @@ describe("fileIssue", () => {
     expect(
       logs.some((line) => line.startsWith("::notice::could not parse the created issue's number")),
     ).toBe(true);
-  });
-
-  test("returns the created issue number (parsed from gh's create URL)", async () => {
-    const { run } = fakeGh(undefined); // fakeGh's create returns .../issues/7
-    expect(await fileIssue(run, "o/r", "body", "fuzz-nightly", "t")).toBe(7);
-  });
-
-  test("returns the existing issue number on the comment path", async () => {
-    const { run } = fakeGh(3);
-    expect(await fileIssue(run, "o/r", "body", "fuzz-nightly", "t")).toBe(3);
-  });
-
-  test("creates the label only when the list says it is missing", async () => {
-    const { run, calls } = fakeGh(undefined, false);
-    await fileIssue(run, "o/r", "body", "fuzz-nightly", "t");
-    const create = calls.find((c) => c[0] === "label" && c[1] === "create");
-    expect(create).toBeDefined();
-    expect(create).not.toContain("--force");
-  });
-
-  test("label creation defaults to the fuzz tuple when no override is given", async () => {
-    const { run, calls } = fakeGh(undefined, false);
-    await fileIssue(run, "o/r", "body", "fuzz-nightly", "t");
-    const create = calls.find((c) => c[0] === "label" && c[1] === "create");
-    expect(create?.[create.indexOf("--color") + 1]).toBe(DEFAULT_LABEL_COLOR);
-    expect(create?.[create.indexOf("--description") + 1]).toBe(DEFAULT_LABEL_DESCRIPTION);
   });
 
   test("a caller-supplied label tuple reaches the create call", async () => {
@@ -449,34 +504,67 @@ describe("LABEL_RE", () => {
   });
 });
 
+/**
+ * A recording gh runner whose issue listings come from a queue, one page per
+ * `issue list` call (empty once the queue drains), so a drain test sees the
+ * close it just made instead of a permanently stale page.
+ */
+function queuedGh(listings: number[][]): { run: GhRunner; calls: string[][] } {
+  const calls: string[][] = [];
+  const run: GhRunner = async (args) => {
+    calls.push(args);
+    if (args[0] === "issue" && args[1] === "list") {
+      return JSON.stringify((listings.shift() ?? []).map((number) => ({ number })));
+    }
+    return "";
+  };
+  return { run, calls };
+}
+
 describe("resolveIssue", () => {
-  test("comments then closes the open labeled issue", async () => {
-    const { run, calls } = fakeGh(5);
-    await resolveIssue(run, "o/r", "fuzz-nightly", env);
-    const commentIdx = calls.findIndex((c) => c[0] === "issue" && c[1] === "comment");
-    const closeIdx = calls.findIndex((c) => c[0] === "issue" && c[1] === "close");
-    expect(commentIdx).toBeGreaterThanOrEqual(0);
-    expect(closeIdx).toBeGreaterThan(commentIdx);
-    expect(calls[commentIdx]?.[2]).toBe("5");
-    expect(calls[closeIdx]?.[2]).toBe("5");
-    expect(calls[closeIdx]).toContain("--reason");
-    // The comment names the run and hedges on unpinned crashes.
-    const body = calls[commentIdx]?.[calls[commentIdx].indexOf("--body") + 1] ?? "";
-    expect(body).toContain("Run: https://github.com/o/r/actions/runs/42");
-    expect(body).toContain("regression");
-  });
+  test.each([
+    {
+      reason:
+        "the omitted stream is the pre-input default, pinned verbatim for fleet fuzzer starters",
+      stream: undefined,
+      label: "fuzz-nightly",
+      comment: [
+        `Nightly fuzz passed on ${date}. Run: https://github.com/o/r/actions/runs/42`,
+        "",
+        "Closing. If the crashing inputs reported here were pinned as regression",
+        "seeds, this pass replayed them; for anything not pinned, a green night is",
+        "weaker evidence, and the next red night opens a fresh issue.",
+      ],
+    },
+    {
+      reason: "the generic stream names the run and carries no fuzz notions",
+      stream: "generic" as Stream,
+      label: "nightly-failure",
+      comment: [
+        `Nightly run passed on ${date}. Run: https://github.com/o/r/actions/runs/42`,
+        "",
+        "Closing; the next failing night opens a fresh issue.",
+      ],
+    },
+  ])(
+    "comments then closes the open labeled issue, never assigns, and re-lists until empty ($reason)",
+    async ({ stream, label, comment }) => {
+      const { run, calls } = queuedGh([[5]]);
+      await resolveIssue(run, "o/r", label, env, stream);
+      expect(calls).toEqual([
+        issueListCall(label, "100"),
+        ["issue", "comment", "5", "--repo", "o/r", "--body", comment.join("\n")],
+        ["issue", "close", "5", "--repo", "o/r", "--reason", "completed"],
+        issueListCall(label, "100"),
+      ]);
+    },
+  );
 
   test("no open issue is a silent no-op", async () => {
     const { run, calls } = fakeGh(undefined);
     await resolveIssue(run, "o/r", "fuzz-nightly", env);
     expect(calls.some((c) => c[0] === "issue" && c[1] === "comment")).toBe(false);
     expect(calls.some((c) => c[0] === "issue" && c[1] === "close")).toBe(false);
-  });
-
-  test("resolve never touches assignees - closing is not a moment to assign", async () => {
-    const { run, calls } = fakeGh(5);
-    await resolveIssue(run, "o/r", "fuzz-nightly", env);
-    expect(calls.some((c) => c[0] === "issue" && c[1] === "edit")).toBe(false);
   });
 
   test("every open labeled issue is closed, not just the first", async () => {
@@ -535,62 +623,6 @@ describe("resolveIssue", () => {
     await resolveIssue(run, "o/r", "fuzz-nightly", env);
     expect(calls.filter((c) => c[0] === "issue" && c[1] === "close").length).toBe(1);
   });
-
-  test("the default (fuzz) close comment is pinned verbatim - fleet starters must see zero change", async () => {
-    const { run, calls } = fakeGh(5);
-    await resolveIssue(run, "o/r", "fuzz-nightly", env);
-    const comment = calls.find((c) => c[0] === "issue" && c[1] === "comment");
-    const date = new Date().toISOString().slice(0, 10);
-    expect(comment?.[comment.indexOf("--body") + 1]).toBe(
-      [
-        `Nightly fuzz passed on ${date}. Run: https://github.com/o/r/actions/runs/42`,
-        "",
-        "Closing. If the crashing inputs reported here were pinned as regression",
-        "seeds, this pass replayed them; for anything not pinned, a green night is",
-        "weaker evidence, and the next red night opens a fresh issue.",
-      ].join("\n"),
-    );
-  });
-
-  test("the generic close comment names the run and carries no fuzz notions", async () => {
-    const { run, calls } = fakeGh(5);
-    await resolveIssue(run, "o/r", "nightly-failure", env, "generic");
-    const comment = calls.find((c) => c[0] === "issue" && c[1] === "comment");
-    const body = comment?.[comment.indexOf("--body") + 1] ?? "";
-    expect(body).toContain("Nightly run passed on");
-    expect(body).toContain("Run: https://github.com/o/r/actions/runs/42");
-    expect(body).not.toContain("fuzz");
-    expect(body).not.toContain("regression");
-    expect(body).not.toContain("seeds");
-    expect(calls.some((c) => c[0] === "issue" && c[1] === "close" && c[2] === "5")).toBe(true);
-  });
-});
-
-describe("no-artifacts lifecycle", () => {
-  const body = buildGenericBody({ ...env, GITHUB_WORKFLOW: "Nightly" } as NodeJS.ProcessEnv);
-
-  test("a first red night creates the labeled issue with the generic body", async () => {
-    const { run, calls } = fakeGh(undefined);
-    expect(await fileIssue(run, "o/r", body, "nightly-failure", "Nightly CI failures")).toBe(7);
-    const create = calls.find((c) => c[0] === "issue" && c[1] === "create");
-    expect(create?.[create.indexOf("--label") + 1]).toBe("nightly-failure");
-    expect(create?.[create.indexOf("--title") + 1]).toBe("Nightly CI failures");
-    expect(create?.[create.indexOf("--body") + 1]).toContain("`Nightly` failed on");
-  });
-
-  test("a repeat red night dedups onto the open issue", async () => {
-    const { run, calls } = fakeGh(9, true);
-    expect(await fileIssue(run, "o/r", body, "nightly-failure", "Nightly CI failures")).toBe(9);
-    expect(calls.some((c) => c[0] === "issue" && c[1] === "comment" && c[2] === "9")).toBe(true);
-    expect(calls.some((c) => c[0] === "issue" && c[1] === "create")).toBe(false);
-  });
-
-  test("a green night resolves the stream with the generic wording", async () => {
-    const { run, calls } = fakeGh(9, true);
-    await resolveIssue(run, "o/r", "nightly-failure", env, "generic");
-    expect(calls.some((c) => c[0] === "issue" && c[1] === "comment" && c[2] === "9")).toBe(true);
-    expect(calls.some((c) => c[0] === "issue" && c[1] === "close" && c[2] === "9")).toBe(true);
-  });
 });
 
 describe("issueNumberFromUrl", () => {
@@ -603,28 +635,24 @@ describe("issueNumberFromUrl", () => {
   });
 });
 
-describe("DEFAULT_TITLE", () => {
-  test("matches the title input default declared in action.yml", () => {
-    // No yaml dependency in this package: the default is a plain one-line
-    // scalar, so line extraction is exact enough.
-    const actionYml = readFileSync(join(import.meta.dir, "action.yml"), "utf-8");
-    const match = actionYml.match(/^ {2}title:\n(?: {4}.+\n)*? {4}default: (.+)$/m);
-    expect(match?.[1]).toBe(DEFAULT_TITLE);
-  });
-});
-
-describe("label tuple defaults", () => {
+describe("action.yml input defaults", () => {
+  // No yaml dependency in this package: each default is a plain one-line
+  // scalar, so line extraction is exact enough.
   const inputDefault = (name: string): string | undefined => {
     const actionYml = readFileSync(join(import.meta.dir, "action.yml"), "utf-8");
     const re = new RegExp(`^ {2}${name}:\\n(?: {4}.+\\n)*? {4}default: (.+)$`, "m");
     return actionYml.match(re)?.[1];
   };
 
-  test("DEFAULT_LABEL_COLOR matches the label-color input default in action.yml", () => {
-    expect(inputDefault("label-color")).toBe(`"${DEFAULT_LABEL_COLOR}"`);
-  });
-
-  test("DEFAULT_LABEL_DESCRIPTION matches the label-description input default in action.yml", () => {
-    expect(inputDefault("label-description")).toBe(DEFAULT_LABEL_DESCRIPTION);
+  test.each([
+    { input: "title", expected: DEFAULT_TITLE, reason: "DEFAULT_TITLE" },
+    { input: "label-color", expected: `"${DEFAULT_LABEL_COLOR}"`, reason: "DEFAULT_LABEL_COLOR" },
+    {
+      input: "label-description",
+      expected: DEFAULT_LABEL_DESCRIPTION,
+      reason: "DEFAULT_LABEL_DESCRIPTION",
+    },
+  ])("the `$input` input default matches $reason", ({ input, expected }) => {
+    expect(inputDefault(input)).toBe(expected);
   });
 });

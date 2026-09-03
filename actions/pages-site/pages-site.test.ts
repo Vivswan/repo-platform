@@ -39,7 +39,10 @@ describe("parseMounts", () => {
         '[{"path": "/", "source": "command", "versioned": false},' +
           ' {"path": "/docs/", "source": "vitepress", "versioned": true}]',
       ),
-    ).toHaveLength(2);
+    ).toEqual([
+      { path: "/", source: "command", versioned: false },
+      { path: "/docs/", source: "vitepress", versioned: true },
+    ]);
   });
 
   test("refuses malformed input", () => {
@@ -136,11 +139,9 @@ describe("layout helpers", () => {
     ]);
   });
 
-  test("reserved root entries cover the layout's own names", () => {
-    const reserved = reservedRootEntries(["v1.0.0"]);
-    expect(reserved.has("latest")).toBe(true);
-    expect(reserved.has("versions.json")).toBe(true);
-    expect(reserved.has("v1.0.0")).toBe(true);
+  test("reserved root entries are exactly the layout's own names plus the served tags", () => {
+    // Exact set: a stray extra name would refuse legitimate root-tier output.
+    expect(reservedRootEntries(["v1.0.0"])).toEqual(new Set(["latest", "versions.json", "v1.0.0"]));
   });
 
   test("urlBase joins the Pages root base and the tier path", () => {
@@ -149,9 +150,21 @@ describe("layout helpers", () => {
   });
 
   test("the redirect page targets latest relatively", () => {
-    const html = redirectHtml("./latest/");
-    expect(html).toContain("url=./latest/");
-    expect(html).toContain('href="./latest/"');
+    expect(redirectHtml("./latest/")).toBe(
+      [
+        "<!DOCTYPE html>",
+        '<html lang="en">',
+        "<head>",
+        '<meta charset="utf-8">',
+        '<meta http-equiv="refresh" content="0; url=./latest/">',
+        '<link rel="canonical" href="./latest/">',
+        "<title>Redirecting</title>",
+        "</head>",
+        '<body><p>Redirecting to <a href="./latest/">./latest/</a>.</p></body>',
+        "</html>",
+        "",
+      ].join("\n"),
+    );
   });
 
   test("validateRelPath refuses traversal in any spelling", () => {
@@ -508,8 +521,19 @@ describe("link-rot reporting", () => {
         parents: ["/guide/intro.html", "/index.html"],
       },
     ]);
-    expect(reportBody(broken)).toStartWith("# 1 broken external link\n");
-    expect(reportBody(broken)).toContain("- https://gone.example/a (status 404)");
+    expect(reportBody(broken)).toBe(
+      [
+        "# 1 broken external link",
+        "",
+        "The nightly link check found external links in the deployed site that no longer resolve.",
+        "The site still deployed; fix or remove the links in the source markdown.",
+        "",
+        "- https://gone.example/a (status 404)",
+        "  - linked from /guide/intro.html",
+        "  - linked from /index.html",
+        "",
+      ].join("\n"),
+    );
   });
 
   test("linkinator's result shape still carries the fields check_links reads", async () => {
