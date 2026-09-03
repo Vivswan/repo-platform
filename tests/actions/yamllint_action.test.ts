@@ -20,7 +20,7 @@ interface Step {
 describe("the yamllint action", () => {
   const action = () => parseYaml(readFileSync(ACTION_YML, "utf8"));
 
-  test("a composite of exactly the install and the strict lint", () => {
+  test("a composite of exactly the install and the strict lint, with no inputs to loosen it", () => {
     const parsed = action();
     expect(parsed.runs.using).toBe("composite");
     const steps: Step[] = parsed.runs.steps;
@@ -29,9 +29,7 @@ describe("the yamllint action", () => {
       "yamllint -s .",
     ]);
     for (const step of steps) expect(step.shell).toBe("bash");
-  });
-
-  test("no inputs to loosen: every fleet repo lints the same way", () => {
-    expect(action().inputs).toBeUndefined();
+    // No inputs: every fleet repo lints the same way.
+    expect(parsed.inputs).toBeUndefined();
   });
 });

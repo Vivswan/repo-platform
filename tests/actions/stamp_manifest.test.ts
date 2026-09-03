@@ -7,8 +7,12 @@ import { describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
-import { isMarkerLine, splitManagedRegion } from "../../actions/shared/grammar";
-import { parseManifestFiles, resolveConflictsTowardAfter } from "../../actions/shared/manifest";
+import { isMarkerLine, type RegionSlice, splitManagedRegion } from "../../actions/shared/grammar";
+import {
+  type ManifestEntryShape,
+  parseManifestFiles,
+  resolveConflictsTowardAfter,
+} from "../../actions/shared/manifest";
 import {
   describeRewritten,
   entryHash,
@@ -52,24 +56,32 @@ describe("isMarkerLine", () => {
 
 describe("splitManagedRegion", () => {
   const markers = { begin: "# b", end: "# e" };
-  const content = "above\n# b\nmanaged\n# e\nbelow\n";
-  test("slices above, region (markers included), and below", () => {
-    expect(splitManagedRegion(content, markers)).toEqual({
-      above: "above\n",
-      region: "# b\nmanaged\n# e\n",
-      below: "below\n",
-    });
-  });
-  test("an indented marker line matches by trimmed content", () => {
-    expect(splitManagedRegion("a\n  # b\nx\n# e\nz\n", markers)?.region).toBe("  # b\nx\n# e\n");
-  });
-  test("an END at end of file without a trailing newline stays in bounds", () => {
-    expect(splitManagedRegion("# b\nx\n# e", markers)).toEqual({
-      above: "",
-      region: "# b\nx\n# e",
-      below: "",
-    });
-  });
+  // The whole slice is the contract: above and below are the repo-owned
+  // sides the sync writes back around the region, so each case pins all
+  // three parts.
+  const sliced: [string, string, RegionSlice][] = [
+    [
+      "plain marker lines",
+      "above\n# b\nmanaged\n# e\nbelow\n",
+      { above: "above\n", region: "# b\nmanaged\n# e\n", below: "below\n" },
+    ],
+    [
+      "an indented BEGIN line (matched by trimmed content, kept in the region)",
+      "a\n  # b\nx\n# e\nz\n",
+      { above: "a\n", region: "  # b\nx\n# e\n", below: "z\n" },
+    ],
+    [
+      "an END at end of file without a trailing newline (stays in bounds)",
+      "# b\nx\n# e",
+      { above: "", region: "# b\nx\n# e", below: "" },
+    ],
+  ];
+  test.each(sliced)(
+    "slices above, region (markers included), and below: %s",
+    (_reason, content, expected) => {
+      expect(splitManagedRegion(content, markers)).toEqual(expected);
+    },
+  );
   test("a missing marker returns null", () => {
     expect(splitManagedRegion("# b\nx\n", markers)).toBeNull();
     expect(splitManagedRegion("x\n# e\n", markers)).toBeNull();
@@ -91,46 +103,47 @@ describe("resolveConflictsTowardAfter", () => {
     ].join("\n");
     expect(resolveConflictsTowardAfter(text)).toBe("a\ntemplate\nb");
   });
-  test("passes marker-free text through unchanged", () => {
-    expect(resolveConflictsTowardAfter("a\nb\n")).toBe("a\nb\n");
-  });
-  test("a bare ======= outside a block is ordinary content", () => {
-    expect(resolveConflictsTowardAfter("a\n=======\nb")).toBe("a\n=======\nb");
-  });
-  test("malformed blocks return the text unchanged instead of guessing", () => {
-    // Unterminated block (no separator, no end).
-    const unterminated = "a\n<<<<<<< before updating\nlocal\nb";
-    expect(resolveConflictsTowardAfter(unterminated)).toBe(unterminated);
-    // Separator never arrives before the end marker.
-    const noSeparator = ["<<<<<<< before updating", "local", ">>>>>>> after updating"].join("\n");
-    expect(resolveConflictsTowardAfter(noSeparator)).toBe(noSeparator);
-    // An end marker outside any block.
-    const strayEnd = "a\n>>>>>>> after updating\nb";
-    expect(resolveConflictsTowardAfter(strayEnd)).toBe(strayEnd);
-    // A nested start inside a block.
-    const nested = [
-      "<<<<<<< before updating",
-      "<<<<<<< before updating",
-      "=======",
-      "x",
-      ">>>>>>> after updating",
-    ].join("\n");
-    expect(resolveConflictsTowardAfter(nested)).toBe(nested);
-    // A second separator inside the template side.
-    const doubleSep = [
-      "<<<<<<< before updating",
-      "local",
-      "=======",
-      "x",
-      "=======",
-      "y",
-      ">>>>>>> after updating",
-    ].join("\n");
-    expect(resolveConflictsTowardAfter(doubleSep)).toBe(doubleSep);
-  });
-  test("non-copier conflict labels are not treated as markers", () => {
-    const gitStyle = ["<<<<<<< HEAD", "local", "=======", "theirs", ">>>>>>> main"].join("\n");
-    expect(resolveConflictsTowardAfter(gitStyle)).toBe(gitStyle);
+  // Anything that is not a well-sequenced copier block passes through
+  // byte-identical: dropping lines on a guess could silently discard
+  // entries, and the parse step then reports the mess.
+  const unchanged: [string, string][] = [
+    ["marker-free text", "a\nb\n"],
+    ["a bare ======= outside a block (ordinary content)", "a\n=======\nb"],
+    ["an unterminated block (no separator, no end)", "a\n<<<<<<< before updating\nlocal\nb"],
+    [
+      "a block whose separator never arrives before the end marker",
+      ["<<<<<<< before updating", "local", ">>>>>>> after updating"].join("\n"),
+    ],
+    ["an end marker outside any block", "a\n>>>>>>> after updating\nb"],
+    [
+      "a nested start inside a block",
+      [
+        "<<<<<<< before updating",
+        "<<<<<<< before updating",
+        "=======",
+        "x",
+        ">>>>>>> after updating",
+      ].join("\n"),
+    ],
+    [
+      "a second separator inside the template side",
+      [
+        "<<<<<<< before updating",
+        "local",
+        "=======",
+        "x",
+        "=======",
+        "y",
+        ">>>>>>> after updating",
+      ].join("\n"),
+    ],
+    [
+      "git-style labels, which are not copier's markers",
+      ["<<<<<<< HEAD", "local", "=======", "theirs", ">>>>>>> main"].join("\n"),
+    ],
+  ];
+  test.each(unchanged)("returns the text unchanged for %s instead of guessing", (_reason, text) => {
+    expect(resolveConflictsTowardAfter(text)).toBe(text);
   });
 });
 
@@ -153,80 +166,91 @@ describe("recordedCommit", () => {
 });
 
 describe("stampManifestText", () => {
-  test("stamps the self entry's provenance commit from the answers file", () => {
-    const root = tree({
-      ".github/.copier-answers.yml": "_commit: templates/v2.0.0\n_src_path: x\n",
-    });
-    const text = manifestText([
-      '    ".github/repo-platform-manifest.json": {"class": "managed", "hash": null, "commit": null}',
-    ]);
-    const { out, problem } = stampManifestText(text, root);
-    expect(problem).toBeNull();
-    expect(out).toContain('"commit": "templates/v2.0.0"');
-    // Hash stays null (self-hash is circular) and the stamp is idempotent.
-    expect(out).toContain('"hash": null');
-    expect(stampManifestText(out, root).out).toBe(out);
-  });
+  const SELF = '".github/repo-platform-manifest.json"';
+  const selfLine = (hash: string, commit: string) =>
+    `    ${SELF}: {"class": "managed", "hash": ${hash}, "commit": ${commit}}`;
 
-  test("no readable _commit stamps the provenance null", () => {
-    const root = tree({});
-    const text = manifestText([
-      '    ".github/repo-platform-manifest.json": {"class": "managed", "hash": null, "commit": "stale"}',
-    ]);
-    expect(stampManifestText(text, root).out).toContain('"commit": null');
-  });
+  // The self entry's commit slot follows the answers file; its hash stays
+  // null (the manifest's content includes every other hash, so a
+  // self-hash would be circular) and the stamp is idempotent either way.
+  const commitCases: [string, Record<string, string>, string, string][] = [
+    [
+      "a recorded _commit is stamped in",
+      { ".github/.copier-answers.yml": "_commit: templates/v2.0.0\n_src_path: x\n" },
+      "null",
+      '"templates/v2.0.0"',
+    ],
+    ["no readable _commit stamps the provenance null", {}, '"stale"', "null"],
+  ];
+  test.each(commitCases)(
+    "the self entry's provenance commit: %s",
+    (_reason, files, inputCommit, expectedCommit) => {
+      const root = tree(files);
+      const text = manifestText([selfLine("null", inputCommit)]);
+      const expected = manifestText([selfLine("null", expectedCommit)]);
+      expect(stampManifestText(text, root)).toEqual({ out: expected, problem: null });
+      expect(stampManifestText(expected, root)).toEqual({ out: expected, problem: null });
+    },
+  );
 
   test("stamps managed, split, and symlink entries and leaves the rest", () => {
+    const region =
+      "<!-- BEGIN REPO-PLATFORM MANAGED -->\nmanaged\n<!-- END REPO-PLATFORM MANAGED -->\n";
+    const entries = (hashes: { claude: string; security: string; ci: string; self: string }) =>
+      manifestText([
+        `    "CLAUDE.md": {"class": "managed", "hash": ${hashes.claude}}`,
+        `    "SECURITY.md": {"class": "split", "grammar": "managed-region", "begin": "<!-- BEGIN REPO-PLATFORM MANAGED -->", "end": "<!-- END REPO-PLATFORM MANAGED -->", "hash": ${hashes.security}}`,
+        '    "checks.yml": {"class": "starter"}',
+        `    "ci.yml": {"class": "managed", "hash": ${hashes.ci}}`,
+        `    ${SELF}: {"class": "managed", "hash": ${hashes.self}}`,
+      ]);
+    // The self entry is seeded with a stale hash AND exists on disk, so
+    // the null it comes back with is the exclusion at work, not a
+    // missing file.
+    const text = entries({
+      claude: "null",
+      security: "null",
+      ci: "null",
+      self: `"${"a".repeat(64)}"`,
+    });
     const root = tree({
       "ci.yml": "managed content\n",
-      "SECURITY.md":
-        "repo preamble\n<!-- BEGIN REPO-PLATFORM MANAGED -->\nmanaged\n<!-- END REPO-PLATFORM MANAGED -->\nrepo tail\n",
+      "SECURITY.md": `repo preamble\n${region}repo tail\n`,
+      ".github/repo-platform-manifest.json": text,
     });
     symlinkSync("AGENTS.md", join(root, "CLAUDE.md"));
-    const text = manifestText([
-      '    "CLAUDE.md": {"class": "managed", "hash": null}',
-      '    "SECURITY.md": {"class": "split", "grammar": "managed-region", "begin": "<!-- BEGIN REPO-PLATFORM MANAGED -->", "end": "<!-- END REPO-PLATFORM MANAGED -->", "hash": null}',
-      '    "checks.yml": {"class": "starter"}',
-      '    "ci.yml": {"class": "managed", "hash": null}',
-      '    ".github/repo-platform-manifest.json": {"class": "managed", "hash": null}',
-    ]);
-    const { out, problem } = stampManifestText(text, root);
-    expect(problem).toBeNull();
-    const files = (JSON.parse(out) as { files: Record<string, { hash?: string | null }> }).files;
-    expect(files["ci.yml"].hash).toBe(sha256("managed content\n"));
-    expect(files["SECURITY.md"].hash).toBe(
-      sha256("<!-- BEGIN REPO-PLATFORM MANAGED -->\nmanaged\n<!-- END REPO-PLATFORM MANAGED -->\n"),
-    );
-    expect(files["CLAUDE.md"].hash).toBe(sha256("AGENTS.md"));
-    expect(files["checks.yml"].hash).toBeUndefined();
-    // The self entry stays null: the manifest's content includes every
-    // other hash, so a self-hash would be circular.
-    expect(files[".github/repo-platform-manifest.json"].hash).toBeNull();
-    // Only hash tokens change: nulling them back restores the input.
-    expect(out.replace(/"hash": "[0-9a-f]{64}"/g, '"hash": null')).toBe(text);
+    // Only the hash tokens move: the starter line and every other byte
+    // are in the expected text verbatim.
+    expect(stampManifestText(text, root)).toEqual({
+      out: entries({
+        claude: `"${sha256("AGENTS.md")}"`,
+        security: `"${sha256(region)}"`,
+        ci: `"${sha256("managed content\n")}"`,
+        self: "null",
+      }),
+      problem: null,
+    });
   });
 
   test("is idempotent and re-stamps a stale hash", () => {
     const root = tree({ "ci.yml": "new content\n" });
-    const stale = manifestText([`    "ci.yml": {"class": "managed", "hash": "${"0".repeat(64)}"}`]);
-    const once = stampManifestText(stale, root).out;
-    expect(once).toContain(`"hash": "${sha256("new content\n")}"`);
-    expect(stampManifestText(once, root).out).toBe(once);
+    const entry = (hash: string) =>
+      manifestText([`    "ci.yml": {"class": "managed", "hash": "${hash}"}`]);
+    const once = entry(sha256("new content\n"));
+    expect(stampManifestText(entry("0".repeat(64)), root)).toEqual({ out: once, problem: null });
+    expect(stampManifestText(once, root)).toEqual({ out: once, problem: null });
   });
 
   test("a missing file or missing split markers stamps null", () => {
     const root = tree({ "split.md": "no markers here\n" });
-    const text = manifestText([
-      `    "gone.yml": {"class": "managed", "hash": "${"a".repeat(64)}"}`,
-      '    "split.md": {"class": "split", "grammar": "managed-region", "begin": "# b", "end": "# e", "hash": null}',
-    ]);
-    const files = (
-      JSON.parse(stampManifestText(text, root).out) as {
-        files: Record<string, { hash?: string | null }>;
-      }
-    ).files;
-    expect(files["gone.yml"].hash).toBeNull();
-    expect(files["split.md"].hash).toBeNull();
+    const entries = (gone: string, split: string) =>
+      manifestText([
+        `    "gone.yml": {"class": "managed", "hash": ${gone}}`,
+        `    "split.md": {"class": "split", "grammar": "managed-region", "begin": "# b", "end": "# e", "hash": ${split}}`,
+      ]);
+    // Both seeded stale, so each null is a rewrite, not a pass-through.
+    const text = entries(`"${"a".repeat(64)}"`, `"${"c".repeat(64)}"`);
+    expect(stampManifestText(text, root)).toEqual({ out: entries("null", "null"), problem: null });
   });
 
   test("resolves update conflict blocks toward the template side, then stamps", () => {
@@ -245,61 +269,50 @@ describe("stampManifestText", () => {
       "}",
       "",
     ].join("\n");
-    const { out, problem } = stampManifestText(text, root);
-    expect(problem).toBeNull();
-    const files = (JSON.parse(out) as { files: Record<string, unknown> }).files;
-    expect(Object.keys(files)).toEqual(["ci.yml"]);
-    expect(out).toContain(`"hash": "${sha256("content\n")}"`);
+    // The template side alone survives (retired.yml and the markers are
+    // gone) and the stamp lands on it.
+    expect(stampManifestText(text, root)).toEqual({
+      out: manifestText([`    "ci.yml": {"class": "managed", "hash": "${sha256("content\n")}"}`]),
+      problem: null,
+    });
   });
 
-  test("unparseable input returns the text unchanged with a problem", () => {
-    const { out, problem } = stampManifestText("not json", tree({}));
-    expect(out).toBe("not json");
-    expect(problem).toMatch(/does not parse/);
-  });
-
-  test("invalid JSON reports a value-free problem (no SyntaxError echo)", () => {
+  // Rejected text comes back untouched with a value-free problem, so
+  // main() warns and exits 0 rather than aborting the render. The exact
+  // constants are the leak check: none carries manifest bytes.
+  const INVALID_JSON = "does not parse as a manifest (invalid JSON)";
+  const NO_FILES = "does not parse as a manifest (no top-level 'files' mapping)";
+  const rejected: [string, string, string][] = [
+    ["plain non-JSON", "not json", INVALID_JSON],
     // The bare identifier is the leaking form: a raw JSON.parse error
     // quotes it ('Unexpected identifier ...'), and the problem string
     // reaches the target repo's public sync log via main()'s warning.
-    const text = '{"files": hiddensecret}';
-    const { out, problem } = stampManifestText(text, tree({}));
-    expect(out).toBe(text);
-    expect(problem).toContain("invalid JSON");
-    expect(problem).not.toContain("hiddensecret");
-  });
-
-  test("a parseable document without a files mapping names that shape problem", () => {
-    const { out, problem } = stampManifestText('{"other": 1}', tree({}));
-    expect(out).toBe('{"other": 1}');
-    expect(problem).toContain("no top-level 'files' mapping");
-  });
-
-  test("a top-level JSON null stays a fail-open problem, never a crash", () => {
+    ["a bare identifier (the SyntaxError-echo shape)", '{"files": hiddensecret}', INVALID_JSON],
+    // An unterminated block is never resolved by guessing, so the marker
+    // stays and the parse fails: a problem, never a silent line drop.
+    [
+      "an unterminated conflict block",
+      [
+        "{",
+        '  "files": {',
+        "<<<<<<< before updating",
+        '    "ci.yml": {"class": "managed", "hash": null}',
+        "  }",
+        "}",
+      ].join("\n"),
+      INVALID_JSON,
+    ],
+    ["a parseable document without a files mapping", '{"other": 1}', NO_FILES],
     // JSON.parse("null") succeeds, so this shape reaches the mapping
     // check; dereferencing it would throw past the parse catch and turn
     // the warn-and-exit-0 contract into a hard failure.
-    const { out, problem } = stampManifestText("null", tree({}));
-    expect(out).toBe("null");
-    expect(problem).toContain("no top-level 'files' mapping");
+    ["a top-level JSON null", "null", NO_FILES],
+  ];
+  test.each(rejected)("%s returns the text unchanged with a problem", (_reason, text, problem) => {
+    expect(stampManifestText(text, tree({}))).toEqual({ out: text, problem });
   });
 
-  test("a malformed conflict block is a problem, never a silent line drop", () => {
-    const root = tree({ "ci.yml": "content\n" });
-    const text = [
-      "{",
-      '  "files": {',
-      "<<<<<<< before updating",
-      '    "ci.yml": {"class": "managed", "hash": null}',
-      "  }",
-      "}",
-    ].join("\n");
-    const { out, problem } = stampManifestText(text, root);
-    expect(out).toBe(text);
-    expect(problem).toMatch(/does not parse/);
-  });
-
-  test("a duplicated entry line for one path is a soft problem, never a throw", () => {
+  test("a duplicated entry line for one path is a soft, value-free problem, never a throw", () => {
     // Duplicate JSON keys last-win at parse time, so a duplicate line (a
     // bad conflict resolution) can flip a path's ownership class with no
     // parse error; stamping both lines would launder the flip. But this
@@ -307,37 +320,25 @@ describe("stampManifestText", () => {
     // MERGED tree, where a throw would fail the render and deliver no PR -
     // the validator's parity check reports it in a delivered PR instead.
     // The second line here has NO hash token - the starter-shaped flip.
-    const root = tree({ "CLAUDE.md": "content\n" });
-    const text = manifestText([
-      '    "CLAUDE.md": {"class": "managed", "hash": null}',
-      '    "CLAUDE.md": {"class": "starter"}',
-    ]);
-    let result: { out: string; problem: string | null } | undefined;
-    expect(() => {
-      result = stampManifestText(text, root);
-    }).not.toThrow();
-    expect(result?.problem).toContain("binds a key more than once");
-    // The untouched text is emitted (out === text), so main() warns and
-    // exits 0 rather than aborting the render.
-    expect(result?.out).toBe(text);
-  });
-
-  test("a duplicated key never reaches the problem string (value-free, no log leak)", () => {
-    // The merged manifest is target-controlled and manifest keys are
-    // target-repo paths: naming the duplicated key would print a PRIVATE
-    // repo's path (or inject control bytes) into the public sync log, so
-    // the problem states only that a duplicate exists.
+    // And the key is deliberately hostile: manifest keys are target-repo
+    // paths, so naming the duplicate would print a PRIVATE repo's path
+    // (or inject control bytes) into the public sync log.
     const key = String.raw`"SECRET-private/path\nleak.md"`;
     const root = tree({ "x.md": "content\n" });
     const text = manifestText([
       `    ${key}: {"class": "managed", "hash": null}`,
       `    ${key}: {"class": "starter"}`,
     ]);
-    const result = stampManifestText(text, root);
-    expect(result.problem).toContain("binds a key more than once");
-    expect(result.problem).not.toContain("SECRET");
-    expect(result.problem).not.toContain("\n");
-    expect(result.out).toBe(text);
+    let result: { out: string; problem: string | null } | undefined;
+    expect(() => {
+      result = stampManifestText(text, root);
+    }).not.toThrow();
+    expect(result?.problem).toContain("binds a key more than once");
+    expect(result?.problem).not.toContain("SECRET");
+    expect(result?.problem).not.toContain("\n");
+    // The untouched text is emitted (out === text), so main() warns and
+    // exits 0 rather than aborting the render.
+    expect(result?.out).toBe(text);
   });
 });
 
@@ -349,21 +350,29 @@ describe("entryHash", () => {
       sha256("# b\nx\n# e\n"),
     );
   });
-  test("malformed split metadata yields null rather than a wrong hash", () => {
-    const root = tree({ "f.md": "a\n" });
-    expect(entryHash(root, "f.md", { class: "split", begin: 3, end: "# e" })).toBeNull();
+  // The strict slicer (cleanManagedRegion) is the stamper's own
+  // accept/reject: a file with no honest region has no honest hash, and
+  // the validator's parity check reports the unstamped entry.
+  const split = (begin: unknown, end: unknown): ManifestEntryShape => ({
+    class: "split",
+    begin,
+    end,
   });
-  test("duplicated or reordered markers stamp null, never an ambiguous first slice", () => {
-    // The strict slicer (cleanManagedRegion) is the stamper's own
-    // accept/reject: an ambiguous region has no honest hash, and the
-    // validator's parity check reports the unstamped entry.
-    const dup = tree({ "f.md": "# b\nx\n# e\n# b\ny\n# e\n" });
-    expect(entryHash(dup, "f.md", { class: "split", begin: "# b", end: "# e" })).toBeNull();
-    const reordered = tree({ "f.md": "# e\nx\n# b\n" });
-    expect(entryHash(reordered, "f.md", { class: "split", begin: "# b", end: "# e" })).toBeNull();
+  const unstampable: [string, string, ManifestEntryShape][] = [
+    ["duplicated markers", "# b\nx\n# e\n# b\ny\n# e\n", split("# b", "# e")],
+    ["reordered markers", "# e\nx\n# b\n", split("# b", "# e")],
     // A mid-line mention counts as a duplicate too (substring rule).
-    const buried = tree({ "f.md": "see # b here\n# b\nx\n# e\n" });
-    expect(entryHash(buried, "f.md", { class: "split", begin: "# b", end: "# e" })).toBeNull();
+    ["a marker buried mid-line", "see # b here\n# b\nx\n# e\n", split("# b", "# e")],
+    // Marker fields are untrusted JSON. This row pins the contract that a
+    // non-string marker yields null (never a hash, never a throw); it does
+    // NOT prove the typeof check at stamp_manifest.ts:128 - deleting that
+    // check changes nothing here, because the strict marker comparison
+    // already matches no line against a number. The check is type
+    // narrowing, and only replacing its null with a hash turns this red.
+    ["metadata that is not strings", "a\n", split(3, "# e")],
+  ];
+  test.each(unstampable)("%s yields null, never an ambiguous slice", (_reason, content, entry) => {
+    expect(entryHash(tree({ "f.md": content }), "f.md", entry)).toBeNull();
   });
 });
 
@@ -449,23 +458,6 @@ describe("parseManifestFiles validation", () => {
     expect(stamped.problem).toContain("not an object with a string class");
   });
 
-  test("a duplicated manifest normalizes NOTHING (rejected before any mutation)", () => {
-    // Duplicate JSON keys last-win at parse, so a duplicate line can flip
-    // a path's class to managed; acting on the parsed value would then
-    // rewrite a link the honest manifest never managed. The parse gate
-    // must fire before the mutation, leaving the link untouched.
-    const root = mkdtempSync(join(tmpdir(), "normalize-dup-"));
-    symlinkSync("notes.md.jinja", join(root, "CLAUDE.md"));
-    const text = manifestOf(
-      '    "CLAUDE.md": {"class": "starter"},\n    "CLAUDE.md": {"class": "managed", "hash": null}',
-    );
-    const { rewritten, problem } = normalizeFromText(text, root);
-    expect(rewritten).toEqual([]);
-    expect(problem).toContain("more than once");
-    // The mutation never happened: the link still carries its suffix.
-    expect(readTarget(root, "CLAUDE.md")).toBe("notes.md.jinja");
-  });
-
   test("a path literally named files or $comment is not double-counted against the structural line", () => {
     // The top-level '"files": {' and '"$comment": ...' lines sit at
     // two-space indent; entries at four. A single honest entry for a path
@@ -480,46 +472,58 @@ describe("parseManifestFiles validation", () => {
       "}",
       "",
     ].join("\n");
-    const parsed = parseManifestFiles(text);
-    expect(parsed.problem).toBeNull();
-    expect(Object.keys(parsed.files ?? {}).sort()).toEqual(["$comment", "files"]);
+    expect(parseManifestFiles(text)).toEqual({
+      files: { files: { class: "managed", hash: null }, $comment: { class: "starter" } },
+      resolved: text,
+      problem: null,
+    });
   });
 
-  test("duplicates are found STRUCTURALLY: mixed value shapes and re-indented lines all count", () => {
+  // Duplicate JSON keys last-win at parse, so a duplicate line can flip a
+  // path's class to managed; acting on the parsed value would then
+  // rewrite a link the honest manifest never managed. The parse gate must
+  // fire before the mutation, leaving the link untouched - and it finds
+  // duplicates STRUCTURALLY, wherever and however they appear.
+  const duplicated: [string, string][] = [
+    [
+      "the canonical two-line duplicate",
+      manifestOf(
+        '    "CLAUDE.md": {"class": "starter"},\n    "CLAUDE.md": {"class": "managed", "hash": null}',
+      ),
+    ],
     // "x": null on one line plus a valid object on another: JSON.parse
     // last-wins to the valid object (so the shape check passes), and a
-    // scan reading only well-formed entry lines - or only canonically
-    // indented ones - would miss it. The structural walk counts the files
-    // object's direct child keys wherever and however they appear.
-    const root = mkdtempSync(join(tmpdir(), "normalize-dup-mixed-"));
-    symlinkSync("notes.md.jinja", join(root, "CLAUDE.md"));
-    for (const filesBody of [
-      // Mixed shapes at canonical indent.
-      '    "CLAUDE.md": null,\n    "CLAUDE.md": {"class": "managed", "hash": null}',
-      // A re-indented merge artifact (two spaces on the null line).
-      '  "CLAUDE.md": null,\n    "CLAUDE.md": {"class": "managed", "hash": null}',
-      // Both keys on ONE line.
-      '    "CLAUDE.md": null, "CLAUDE.md": {"class": "managed", "hash": null}',
-    ]) {
-      const { rewritten, problem } = normalizeFromText(manifestOf(filesBody), root);
-      expect(rewritten).toEqual([]);
-      expect(problem).toContain("more than once");
-      expect(readTarget(root, "CLAUDE.md")).toBe("notes.md.jinja");
-    }
-  });
-
-  test("a duplicated top-level files mapping is the same corruption one level up", () => {
+    // scan reading only well-formed entry lines would miss it.
+    [
+      "mixed value shapes at canonical indent",
+      manifestOf('    "CLAUDE.md": null,\n    "CLAUDE.md": {"class": "managed", "hash": null}'),
+    ],
+    // A re-indented merge artifact (two spaces on the null line), which a
+    // scan of canonically indented lines alone would miss.
+    [
+      "a re-indented duplicate line",
+      manifestOf('  "CLAUDE.md": null,\n    "CLAUDE.md": {"class": "managed", "hash": null}'),
+    ],
+    [
+      "both keys on ONE line",
+      manifestOf('    "CLAUDE.md": null, "CLAUDE.md": {"class": "managed", "hash": null}'),
+    ],
     // JSON.parse last-wins on the OUTER key too: two "files" objects would
     // let the second swap the whole entry set while a walk of the first
     // saw nothing wrong. Scopes are tracked per object, so the duplicate
-    // root-level binding is caught like any other - and nothing is mutated.
-    const root = mkdtempSync(join(tmpdir(), "normalize-dup-outer-"));
+    // root-level binding is caught like any other.
+    [
+      "a duplicated top-level files mapping",
+      '{"files":{"safe.md":{"class":"starter"}},"files":{"CLAUDE.md":{"class":"managed","hash":null}}}',
+    ],
+  ];
+  test.each(duplicated)("%s normalizes NOTHING (rejected before any mutation)", (_reason, text) => {
+    const root = mkdtempSync(join(tmpdir(), "normalize-dup-"));
     symlinkSync("notes.md.jinja", join(root, "CLAUDE.md"));
-    const text =
-      '{"files":{"safe.md":{"class":"starter"}},"files":{"CLAUDE.md":{"class":"managed","hash":null}}}';
     const { rewritten, problem } = normalizeFromText(text, root);
     expect(rewritten).toEqual([]);
     expect(problem).toContain("binds a key more than once");
+    // The mutation never happened: the link still carries its suffix.
     expect(readTarget(root, "CLAUDE.md")).toBe("notes.md.jinja");
   });
 
@@ -528,9 +532,8 @@ describe("parseManifestFiles validation", () => {
     // newline could forge workflow commands in the Actions log. The
     // describeRewritten line must keep every escape literal.
     const evil = "evil\n::error::forged.md";
-    const line = describeRewritten([evil, "plain.md"]);
-    expect(line).not.toContain("\n");
-    expect(line).toContain(String.raw`"evil\n::error::forged.md"`);
-    expect(line).toContain('"plain.md"');
+    expect(describeRewritten([evil, "plain.md"])).toBe(
+      String.raw`normalized 2 symlink target(s): "evil\n::error::forged.md", "plain.md"`,
+    );
   });
 });

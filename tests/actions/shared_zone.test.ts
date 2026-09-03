@@ -35,16 +35,15 @@ describe("actions/shared stays dependency-free", () => {
   const files = readdirSync(SHARED).sort();
   const sources = files.filter((name) => name.endsWith(".ts"));
 
-  test("the zone exists and this scan has sources to check (never vacuous)", () => {
-    expect(sources.length).toBeGreaterThan(0);
-  });
-
   test("no dependency manifests, installs, or shipped tests in the zone", () => {
     // package.json or bun.lock would make the zone install-shaped; a
     // *.test.ts would ship on the branch and import bun:test.
     expect(files.filter((name) => !name.endsWith(".ts"))).toEqual([]);
     expect(files.filter((name) => name.endsWith(".test.ts"))).toEqual([]);
     expect(existsSync(join(SHARED, "node_modules"))).toBe(false);
+    // The per-source scan below yields zero cases on an empty list, so
+    // this non-each test is what keeps it from passing vacuously.
+    expect(sources.length).toBeGreaterThan(0);
   });
 
   test.each(sources)("%s imports only node builtins and zone-internal modules", (name) => {

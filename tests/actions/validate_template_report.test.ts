@@ -168,6 +168,8 @@ describe("the action's reporting script", () => {
     expect(r.summary).toContain("Passed");
     expect(r.summary).toContain("behind the build branch");
     expect(r.summary).not.toContain("This FAILS the check.");
+    // The comment carries the stable marker so the next run finds it.
+    expect(r.summary).toContain(MARKER);
   });
 
   // Advisories are the validator's non-failing stream. Folding them into
@@ -193,16 +195,25 @@ describe("the action's reporting script", () => {
     expect(r.summary).toContain("Up to date with the build branch.");
   });
 
+  // The PATCH must aim at the comment the marker search found: the id is
+  // pinned up to the next argument, so a wrong or padded id is red.
+  const patchOf = (id: string) =>
+    new RegExp(
+      `^PATCH api --method PATCH repos/Vivswan/managed-repo/issues/comments/${id} -f body=`,
+      "m",
+    );
+
   test("clean and fresh still clears a comment a previous run left behind", () => {
     const r = runReport({ findings: "", freshness: "fresh", existing: "555" });
     expect(r.exitCode).toBe(0);
-    expect(r.calls).toContain("PATCH");
-    expect(r.calls).toContain("555");
+    expect(r.calls).toMatch(patchOf("555"));
+    expect(r.calls).not.toContain("POST");
   });
 
   test("an existing comment is updated, never duplicated", () => {
     const r = runReport({ findings: "#### Errors (1)\n\n- drift\n", existing: "77" });
-    expect(r.calls).toContain("PATCH");
+    expect(r.exitCode).toBe(0);
+    expect(r.calls).toMatch(patchOf("77"));
     expect(r.calls).not.toContain("POST");
   });
 
@@ -233,78 +244,75 @@ describe("the action's reporting script", () => {
     expect(r.output).toContain("::warning::");
     expect(r.summary).toContain("drift");
   });
-
-  test("the comment carries the stable marker so the next run finds it", () => {
-    const r = runReport({ findings: "", freshness: "behind" });
-    expect(r.summary).toContain(MARKER);
-  });
 });
 
 describe("the action's freshness script", () => {
-  test("a tip extending the recorded short sha is fresh, with nothing to splice", () => {
-    const r = runFreshness({
-      answers: "_commit: abc1234\n",
-      env: { GH_TIP: "abc1234def5678" },
-    });
-    expect(r.exitCode).toBe(0);
-    expect(r.state).toBe("state=fresh");
-    expect(r.fragment).toBe("");
+  // Every run is judged whole: exit code, the state handed to report.ts,
+  // the fragment it splices (only when behind), and the script's own
+  // output (a notice only when it skips). The fragment and notice texts
+  // are exact - they are what the PR comment shows.
+  const behind = (distance: string) =>
+    `#### Freshness\n\nThis repository is ${distance} (recorded \`abc1234\`, tip \`def5678\`). The next sync PR updates the managed files; nothing to do here.\n`;
+  const skipped = (reason: string) => ({
+    exitCode: 0,
+    state: "state=skipped",
+    fragment: "",
+    output: `::notice::${reason} Skipping the freshness check.\n`,
   });
-
-  test("a quoted recorded sha still matches (YAML quotes numeric-looking shas)", () => {
-    const r = runFreshness({
-      answers: '_commit: "1234567"\n',
-      env: { GH_TIP: "1234567890abcd" },
-    });
-    expect(r.state).toBe("state=fresh");
-  });
-
-  test("behind with a resolvable distance names the commit count", () => {
-    const r = runFreshness({
-      answers: "_commit: abc1234\n",
-      env: { GH_TIP: "def5678901234", GH_AHEAD: "3" },
-    });
-    expect(r.exitCode).toBe(0);
-    expect(r.state).toBe("state=behind");
-    expect(r.fragment).toContain("behind the build branch by 3 commit(s)");
-    expect(r.fragment).toContain("`abc1234`");
-    expect(r.fragment).toContain("`def5678`");
-  });
-
-  test("a failed compare still reports behind, just without the number", () => {
-    const r = runFreshness({
-      answers: "_commit: abc1234\n",
-      env: { GH_TIP: "def5678901234", GH_COMPARE_FAIL: "1" },
-    });
-    expect(r.state).toBe("state=behind");
-    expect(r.fragment).toContain("behind the build branch (");
-    expect(r.fragment).not.toContain("commit(s)");
-  });
-
-  test("no answers file skips with a notice, never failing", () => {
-    const r = runFreshness({});
-    expect(r.exitCode).toBe(0);
-    expect(r.state).toBe("state=skipped");
-    expect(r.output).toContain("::notice::");
-    expect(r.output).toContain("No _commit is recorded");
-  });
-
-  test("answers without a _commit line skip the same way", () => {
-    const r = runFreshness({ answers: "_src_path: gh:Vivswan/repo-platform\n" });
-    expect(r.state).toBe("state=skipped");
-  });
-
-  test("a failed branch read skips with a notice instead of going red", () => {
-    const r = runFreshness({ answers: "_commit: abc1234\n", env: { GH_FAIL: "1" } });
-    expect(r.exitCode).toBe(0);
-    expect(r.state).toBe("state=skipped");
-    expect(r.output).toContain("Could not read");
-  });
-
-  test("an empty tip answer skips rather than comparing against nothing", () => {
-    const r = runFreshness({ answers: "_commit: abc1234\n", env: { GH_TIP: "" } });
-    expect(r.state).toBe("state=skipped");
-    expect(r.output).toContain("reported no commit");
+  const fresh = { exitCode: 0, state: "state=fresh", fragment: "", output: "" };
+  const NO_COMMIT = "No _commit is recorded in .github/.copier-answers.yml.";
+  const runs: [string, FreshnessOptions, ReturnType<typeof runFreshness>][] = [
+    [
+      "a tip extending the recorded short sha is fresh, with nothing to splice",
+      { answers: "_commit: abc1234\n", env: { GH_TIP: "abc1234def5678" } },
+      fresh,
+    ],
+    [
+      "a quoted recorded sha still matches (YAML quotes numeric-looking shas)",
+      { answers: '_commit: "1234567"\n', env: { GH_TIP: "1234567890abcd" } },
+      fresh,
+    ],
+    [
+      "behind with a resolvable distance names the commit count",
+      { answers: "_commit: abc1234\n", env: { GH_TIP: "def5678901234", GH_AHEAD: "3" } },
+      {
+        exitCode: 0,
+        state: "state=behind",
+        fragment: behind("behind the build branch by 3 commit(s)"),
+        output: "",
+      },
+    ],
+    [
+      "a failed compare still reports behind, just without the number",
+      { answers: "_commit: abc1234\n", env: { GH_TIP: "def5678901234", GH_COMPARE_FAIL: "1" } },
+      {
+        exitCode: 0,
+        state: "state=behind",
+        fragment: behind("behind the build branch"),
+        output: "",
+      },
+    ],
+    ["no answers file skips with a notice, never failing", {}, skipped(NO_COMMIT)],
+    [
+      "answers without a _commit line skip the same way",
+      { answers: "_src_path: gh:Vivswan/repo-platform\n" },
+      skipped(NO_COMMIT),
+    ],
+    [
+      "a failed branch read skips with a notice instead of going red",
+      { answers: "_commit: abc1234\n", env: { GH_FAIL: "1" } },
+      skipped(
+        "Could not read Vivswan/repo-platform's build branch (network, or a private operator repo this token cannot read).",
+      ),
+    ],
+    [
+      "an empty tip answer skips rather than comparing against nothing",
+      { answers: "_commit: abc1234\n", env: { GH_TIP: "" } },
+      skipped("Vivswan/repo-platform's build branch reported no commit."),
+    ],
+  ];
+  test.each(runs)("%s", (_reason, opts, expected) => {
+    expect(runFreshness(opts)).toEqual(expected);
   });
 });
 

@@ -9,7 +9,7 @@ import type { GrammarId, SplitShapes } from "../../actions/shared/grammar";
 import {
   entryLine,
   MANIFEST_NAME,
-  type OwnershipShape,
+  type ParsedEntryLine,
   parseEntry,
   parseManifestFiles,
 } from "../../actions/shared/manifest";
@@ -39,9 +39,12 @@ describe("parseManifestFiles problem strings are value-free", () => {
   });
 
   test("a well-formed manifest still parses (the branches above are not always-erroring)", () => {
-    const parsed = parseManifestFiles('{"files": {"a.txt": {"class": "starter"}}}');
-    expect(parsed.problem).toBeNull();
-    expect(Object.keys(parsed.files ?? {})).toEqual(["a.txt"]);
+    const text = '{"files": {"a.txt": {"class": "starter"}}}';
+    expect(parseManifestFiles(text)).toEqual({
+      files: { "a.txt": { class: "starter" } },
+      resolved: text,
+      problem: null,
+    });
   });
 });
 
@@ -88,17 +91,6 @@ describe("entryLine", () => {
     );
   });
 
-  test("every emitted line is valid JSON when wrapped as a mapping entry", () => {
-    const shapes: [string, OwnershipShape][] = [
-      ["a.md", { class: "managed" }],
-      ["b.md", { class: "starter" }],
-      ["c.md", { class: "split", grammar: "managed-region", begin: "# b", end: "# e" }],
-    ];
-    for (const [path, ownership] of shapes) {
-      expect(() => JSON.parse(`{${entryLine(path, ownership)}}`)).not.toThrow();
-    }
-  });
-
   test("every grammar's wire round-trips: splitEntries reads back what entryLine wrote", () => {
     // The runtime weld on the GRAMMAR row's wire columns: the emitter
     // writes the wireFields and the sync parse
@@ -123,25 +115,39 @@ describe("entryLine", () => {
 });
 
 describe("parseEntry", () => {
-  test("reads an emitted line back, byte-faithfully decomposed", () => {
-    const line = entryLine("dir/file.md", { class: "managed" });
+  // The whole decomposition is the contract: the stamper rewrites the body
+  // and reassembles the pieces, so every field must come back exact,
+  // escape handling in the path included.
+  const lines: [string, string, ParsedEntryLine][] = [
+    [
+      "an emitted managed line, no comma",
+      entryLine("dir/file.md", { class: "managed" }),
+      {
+        indent: "    ",
+        path: "dir/file.md",
+        quotedPath: '"dir/file.md"',
+        body: '{"class": "managed", "hash": null}',
+        comma: "",
+      },
+    ],
+    [
+      "a trailing comma and an escaped quote in the path",
+      `${entryLine('we"ird.md', { class: "starter" })},`,
+      {
+        indent: "    ",
+        path: 'we"ird.md',
+        quotedPath: String.raw`"we\"ird.md"`,
+        body: '{"class": "starter"}',
+        comma: ",",
+      },
+    ],
+  ];
+  test.each(lines)("reads %s back, byte-faithfully decomposed", (_reason, line, expected) => {
     const parsed = parseEntry(line);
-    expect(parsed).not.toBeNull();
-    expect(parsed?.indent).toBe("    ");
-    expect(parsed?.path).toBe("dir/file.md");
-    expect(parsed?.quotedPath).toBe('"dir/file.md"');
-    expect(parsed?.body).toBe('{"class": "managed", "hash": null}');
-    expect(parsed?.comma).toBe("");
+    expect(parsed).toEqual(expected);
     // Reassembling the pieces reproduces the input byte for byte - the
     // property the stamper's in-place rewrite depends on.
     expect(`${parsed?.indent}${parsed?.quotedPath}: ${parsed?.body}${parsed?.comma}`).toBe(line);
-  });
-
-  test("keeps a trailing comma and an escaped path", () => {
-    const line = `${entryLine('we"ird.md', { class: "starter" })},`;
-    const parsed = parseEntry(line);
-    expect(parsed?.path).toBe('we"ird.md');
-    expect(parsed?.comma).toBe(",");
   });
 
   test("returns null for structural lines", () => {
