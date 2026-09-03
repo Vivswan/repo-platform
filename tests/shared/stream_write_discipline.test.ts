@@ -42,13 +42,12 @@ function scriptFiles(root: string): string[] {
 }
 
 describe("forwarded child streams are written synchronously", () => {
-  test("every root is really scanned (an empty walk would pass vacuously)", () => {
+  test("no stream-write violations across the executable trees", () => {
+    // Reach control first: an empty walk would make the assertion below
+    // pass vacuously.
     for (const root of ROOTS) {
       expect(scriptFiles(root).length).toBeGreaterThan(0);
     }
-  });
-
-  test("no stream-write violations across the executable trees", () => {
     const findings = ROOTS.flatMap(scriptFiles).flatMap((rel) =>
       asyncStreamWriteMismatches(
         rel,

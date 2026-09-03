@@ -43,7 +43,7 @@ describe("stampUnhealthyReason", () => {
       mainRef: MAIN,
       git: git([], []),
     });
-    expect(reason).toContain("no parseable source stamp");
+    expect(reason).toBe("the tip carries no parseable source stamp");
   });
 
   test("an unresolvable stamped source is unhealthy", () => {
@@ -53,7 +53,7 @@ describe("stampUnhealthyReason", () => {
       mainRef: MAIN,
       git: git([], []),
     });
-    expect(reason).toContain("is unreachable");
+    expect(reason).toBe(`stamped source ${SOURCE.slice(0, 12)} is unreachable`);
   });
 
   test("an off-main stamped source is unhealthy (check 1)", () => {
@@ -63,7 +63,7 @@ describe("stampUnhealthyReason", () => {
       mainRef: MAIN,
       git: git([OFFMAIN], []),
     });
-    expect(reason).toContain("is not on main's history");
+    expect(reason).toBe(`stamped source ${OFFMAIN.slice(0, 12)} is not on main's history`);
   });
 
   test("a newer on-main stamp in the ancestry is unhealthy (check 2, the rollback)", () => {
@@ -73,7 +73,9 @@ describe("stampUnhealthyReason", () => {
       mainRef: MAIN,
       git: git([OLDER, NEWER], [`${OLDER}:${MAIN}`, `${NEWER}:${MAIN}`, `${OLDER}:${NEWER}`]),
     });
-    expect(reason).toContain("replays an older build");
+    expect(reason).toBe(
+      `the history already stamped the newer source ${NEWER.slice(0, 12)} - the tip replays an older build`,
+    );
   });
 
   test("planted stamps that are unresolvable or off-main never order the rollback walk", () => {
