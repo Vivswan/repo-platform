@@ -47,7 +47,6 @@ describe("fleet-ci.yml", () => {
     // The action needs the token for the freshness read and the sticky
     // comment; the operator default (template-repo) is already this repo.
     expect(steps[1]?.id).toBe("template");
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: literal GitHub Actions expression
     expect(steps[1]?.with?.["github-token"]).toBe("${{ secrets.GITHUB_TOKEN }}");
     // The report action DEFERS the integrity verdict; the LAST step
     // re-raises it fail-closed, hence '!=': an output that resolved EMPTY
@@ -74,7 +73,6 @@ describe("fleet-ci.yml", () => {
   test("the private/public base-check shapes are complementary job-level guards", () => {
     expect(fleetCi.jobs["base-checks"]?.if).toBe("inputs.private");
     for (const job of ["typography", "commit-names", "actionlint", "yamllint", "gitleaks"]) {
-      // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal GitHub expression is the pinned value
       expect(fleetCi.jobs[job]?.if).toBe("${{ !inputs.private }}");
     }
     // Every merged check step keeps running when an earlier one fails.
@@ -104,7 +102,6 @@ describe("fleet-ci.yml", () => {
 
   test("dependency-review is public-PR-only and calls the wrapper at @build", () => {
     const job = fleetCi.jobs["dependency-review"];
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal GitHub expression is the pinned value
     expect(job?.if).toBe("${{ !inputs.private && github.event_name == 'pull_request' }}");
     expect((job?.steps ?? []).map((step) => step.uses ?? "")).toContainEqual(
       expect.stringContaining("repo-platform/actions/dependency-review@build"),
@@ -129,7 +126,6 @@ describe("fleet-ci.yml", () => {
     const action = steps.find((step) =>
       (step.uses ?? "").includes("repo-platform/actions/validate-skills@build"),
     );
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal GitHub expression is the pinned value
     expect(action?.with?.["skills-dir"]).toBe("${{ inputs.skills-dir }}");
   });
 
@@ -139,7 +135,6 @@ describe("fleet-ci.yml", () => {
       (step.uses ?? "").includes("repo-platform/actions/release-health@build"),
     );
     expect(action?.with?.mode).toBe("pull-request");
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal GitHub expression is the pinned value
     expect(action?.with?.["tracking-labels"]).toBe("${{ inputs.tracking-labels }}");
   });
 
@@ -149,9 +144,7 @@ describe("fleet-ci.yml", () => {
     expect(job?.uses).toBe("./.github/workflows/reusable-codeql.yml");
     // The matrix and the forwarding are the wiring the test name claims:
     // either expression breaking would silently scan nothing.
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal GitHub expression is the pinned value
     expect(job?.strategy?.matrix?.language).toBe("${{ fromJSON(inputs.codeql-languages) }}");
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal GitHub expression is the pinned value
     expect(job?.with?.language).toBe("${{ matrix.language }}");
     expect(job?.permissions?.["security-events"]).toBe("write");
   });

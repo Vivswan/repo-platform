@@ -36,6 +36,9 @@
         "noNonNullAssertion": "off",
         "useNodejsImportProtocol": "error",
         "useImportType": "error"
+      },
+      "suspicious": {
+        "noTemplateCurlyInString": "off"
       }
     }
   }

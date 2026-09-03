@@ -51,7 +51,6 @@ describe("retired_cleanup retired-paths parse", () => {
     // The copier stub creates its destination (the last argument) like the
     // real one: clean_renders renames the scratch renders into place after
     // both succeed, and a missing directory would fail that publish.
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: bash parameter expansion in the stub, not a JS template
     writeFileSync(join(bin, "copier"), '#!/usr/bin/env bash\nmkdir -p "${@: -1}"\nexit 0\n', {
       mode: 0o755,
     });

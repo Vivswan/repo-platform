@@ -120,9 +120,7 @@ describe("constRegexSource", () => {
 
 describe("templateCarries and literalMatches", () => {
   test("finds the needle in string and template literals only - comments are not references", () => {
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal template shape under test
     const needle = "contents/${path}?ref=${ref}";
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal template shape under test
     const active = "const url = `repos/${repo}/contents/${path}?ref=${ref}`;\n";
     expect(templateCarries(active, needle)).toBe(true);
     expect(templateCarries(`// ${active}`, needle)).toBe(false);
@@ -130,7 +128,6 @@ describe("templateCarries and literalMatches", () => {
   });
 
   test("cooked-escape decoys never match - the raw spelling is the pin", () => {
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal template shape under test
     const needle = "contents/${path}?ref=${ref}";
     // \u0024{path} COOKS to a $-brace sequence but interpolates nothing:
     // the raw token text carries the escape, so the needle cannot match.
@@ -154,15 +151,13 @@ describe("templateCarries and literalMatches", () => {
   });
 
   test("non-identifier interpolations cannot smuggle the needle", () => {
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal template shape under test
     const needle = "contents/${path}?ref=${ref}";
     // A plain STRING inside an interpolation carries the needle's
     // characters in its raw text; only identifier interpolations may
     // contribute to the canonical, so it never matches.
-    expect(
-      // biome-ignore lint/suspicious/noTemplateCurlyInString: the decoy under test
-      templateCarries('const doc = `${"contents/${path}?ref=${ref}"}`;\n', needle),
-    ).toBe(false);
+    expect(templateCarries('const doc = `${"contents/${path}?ref=${ref}"}`;\n', needle)).toBe(
+      false,
+    );
     // A property access is not the pinned identifier shape either.
     expect(templateCarries("const t = `x/contents/${a.path}?ref=${ref}`;\n", needle)).toBe(false);
     // A NESTED template inside a discarded interpolation is that

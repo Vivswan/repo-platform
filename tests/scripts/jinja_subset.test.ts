@@ -19,9 +19,7 @@ const vars = {
 
 describe("normalizeJinja", () => {
   test("strips raw/endraw markers but keeps the expression", () => {
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: literal GitHub Actions expression fixture
     expect(normalizeJinja("a: {% raw %}${{ github.ref }}{% endraw %}", vars)).toBe(
-      // biome-ignore lint/suspicious/noTemplateCurlyInString: literal GitHub Actions expression fixture
       "a: ${{ github.ref }}",
     );
   });
@@ -150,9 +148,7 @@ describe("resolveCondition", () => {
 
 describe("placeholderJinja", () => {
   test("replaces leftover jinja expressions but keeps GitHub expressions", () => {
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: literal GitHub Actions expression fixture
     expect(placeholderJinja("a: {{ description | tojson }} b: ${{ github.ref }}")).toBe(
-      // biome-ignore lint/suspicious/noTemplateCurlyInString: literal GitHub Actions expression fixture
       'a: "JINJA" b: ${{ github.ref }}',
     );
   });
@@ -212,9 +208,7 @@ describe("renderJinjaFile", () => {
   test("raw blocks are untouchable: substitution never rewrites their contents", () => {
     // Unprotected, {{ project_slug }} inside the GitHub expression would
     // become $repo-platform.
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: literal GitHub Actions expression fixture
     expect(renderJinjaFile("a: {% raw %}${{ project_slug }}{% endraw %}\n", vars, {})).toBe(
-      // biome-ignore lint/suspicious/noTemplateCurlyInString: literal GitHub Actions expression fixture
       "a: ${{ project_slug }}\n",
     );
     // A bare expression inside raw is literal output, not an unrendered

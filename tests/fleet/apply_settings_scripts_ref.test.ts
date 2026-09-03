@@ -168,10 +168,7 @@ describe("the two-hop stays wired", () => {
   test("the resolve step reads job.workflow_sha and queries this repository", () => {
     const step = applySteps().find((s) => s.id === "scripts");
     if (step === undefined) throw new Error("no scripts resolve step");
-    expect((step.env as Record<string, unknown>).WORKFLOW_SHA).toBe(
-      // biome-ignore lint/suspicious/noTemplateCurlyInString: a literal GitHub Actions expression, pinned byte-for-byte
-      "${{ job.workflow_sha }}",
-    );
+    expect((step.env as Record<string, unknown>).WORKFLOW_SHA).toBe("${{ job.workflow_sha }}");
     // The stub matches loosely on purpose, so the real endpoint spellings
     // are pinned here instead.
     const run = resolveRunBlock();
@@ -190,9 +187,6 @@ describe("the two-hop stays wired", () => {
         (s.with as Record<string, unknown> | undefined)?.repository === "Vivswan/repo-platform",
     );
     if (checkout === undefined) throw new Error("no repo-platform checkout step");
-    expect((checkout.with as Record<string, unknown>).ref).toBe(
-      // biome-ignore lint/suspicious/noTemplateCurlyInString: a literal GitHub Actions expression, pinned byte-for-byte
-      "${{ steps.scripts.outputs.ref }}",
-    );
+    expect((checkout.with as Record<string, unknown>).ref).toBe("${{ steps.scripts.outputs.ref }}");
   });
 });

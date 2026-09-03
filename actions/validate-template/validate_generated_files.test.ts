@@ -532,7 +532,6 @@ describe("base checks shape", () => {
   test("the wrapped expression form of the guard counts as unconditional", () => {
     const steps = [
       ...MERGED_STEPS.slice(0, MERGED_STEPS.length - 1),
-      // biome-ignore lint/suspicious/noTemplateCurlyInString: literal GitHub Actions expression fixture
       "        if: ${{ !cancelled() }}",
     ];
     const { exitCode, stdout, stderr } = runValidator({
@@ -676,7 +675,6 @@ describe("the single-call gate shape", () => {
             "    steps:",
             "      - uses: Vivswan/repo-platform/actions/all-green@build",
             "        with:",
-            // biome-ignore lint/suspicious/noTemplateCurlyInString: raw workflow text, not a JS template
             "          needs: ${{ toJSON(needs) }}",
           ]),
       "",
@@ -776,7 +774,6 @@ describe("the single-call gate shape", () => {
     {
       reason: "a canned needs input (judges a fiction of the run)",
       ci: mutateGate(
-        // biome-ignore lint/suspicious/noTemplateCurlyInString: the mutation under test
         "          needs: ${{ toJSON(needs) }}",
         '          needs: \'{"ci": {"result": "success"}}\'',
       ),

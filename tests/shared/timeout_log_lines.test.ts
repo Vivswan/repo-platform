@@ -105,7 +105,6 @@ describe("the expiry-line scan rejects its known evasions", () => {
     const leaks = [
       'if (proc.timedOut) console.error(`${command.join(" ")} timed out`);',
       'if (proc.timedOut) console.error("timed out", command.join(" "));',
-      // biome-ignore lint/suspicious/noTemplateCurlyInString: literal leaking source under test
       "if (proc.timedOut) console.error(`${command[0]} timed out: ${target}`);",
       'if (proc.timedOut) console.error("timed out: " + command.join(" "));',
     ];

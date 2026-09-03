@@ -261,9 +261,7 @@ export const CHECK_RUN_LOOKUP =
 // The two Actions expressions the heal's sha plumbing routes through,
 // pinned as data so the structural checks below and the workflow can
 // never drift apart silently.
-// biome-ignore lint/suspicious/noTemplateCurlyInString: the literal Actions expression under pin
 const GATE_SHA_EXPR = "${{ steps.gate.outputs.sha }}";
-// biome-ignore lint/suspicious/noTemplateCurlyInString: the literal Actions expression under pin
 const SELECT_SHA_EXPR = "${{ needs.select.outputs.sha }}";
 const FALLBACK_IF = "steps.gate.outputs.fallback == 'true'";
 
@@ -902,7 +900,6 @@ export const PREFLIGHT_EXPECTED_RUN: Record<string, string> = {
     '  bun .github/scripts/sync/run_hidden.ts "settings labels" -- \\\n' +
     "    bun .github/scripts/fleet/label_preflight.ts \\\n" +
     '    --merged "$RUNNER_TEMP/merged-settings.yml" \\\n' +
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: a literal GitHub Actions expression, pinned byte-for-byte
     '    --repo "$TARGET" --ref "${{ steps.render.outputs.ref }}" --mode "$MODE"\n' +
     "fi\n",
   ".github/workflows/reusable-apply-settings.yml":
@@ -923,7 +920,6 @@ export const PREFLIGHT_EXPECTED_RUN: Record<string, string> = {
 const PREFLIGHT_EXPECTED_ARGS: Record<string, string[]> = {
   ".github/workflows/settings-repos.yml": [
     '--merged "$RUNNER_TEMP/merged-settings.yml" --repo "$TARGET" --target-dir . --mode "$MODE"',
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: a literal GitHub Actions expression, pinned byte-for-byte
     '--merged "$RUNNER_TEMP/merged-settings.yml" --repo "$TARGET" --ref "${{ steps.render.outputs.ref }}" --mode "$MODE"',
   ],
   ".github/workflows/reusable-apply-settings.yml": [
@@ -961,11 +957,8 @@ export type ApplyWithExpectation =
 // suite's table equality, not just the live files' luck.
 export const PREFLIGHT_APPLY_WITH: Record<string, Record<string, ApplyWithExpectation>> = {
   ".github/workflows/settings-repos.yml": {
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: a literal GitHub Actions expression, pinned byte-for-byte
     token: { parity: "GH_TOKEN", value: "${{ secrets.REPO_PLATFORM_TOKEN }}" },
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: a literal GitHub Actions expression, pinned byte-for-byte
     mode: { parity: "MODE", value: "${{ inputs.check_only && 'check' || 'apply' }}" },
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: a literal GitHub Actions expression, pinned byte-for-byte
     repository: { parity: "TARGET", value: "${{ steps.resolve.outputs.repo }}" },
     "settings-file": { pinnedElsewhere: true },
     "private-repos": { literal: "redact" },
@@ -973,26 +966,19 @@ export const PREFLIGHT_APPLY_WITH: Record<string, Record<string, ApplyWithExpect
     "on-missing-permission": { literal: "fail" },
   },
   ".github/workflows/reusable-apply-settings.yml": {
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: a literal GitHub Actions expression, pinned byte-for-byte
     token: { parity: "GH_TOKEN", value: "${{ secrets.REPO_PLATFORM_TOKEN }}" },
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: a literal GitHub Actions expression, pinned byte-for-byte
     mode: { parity: "MODE", value: "${{ inputs.check_only && 'check' || 'apply' }}" },
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: a literal GitHub Actions expression, pinned byte-for-byte
     repository: { literal: "${{ github.repository }}" },
     "settings-file": { pinnedElsewhere: true },
     "on-missing-permission": {
       parity: "ON_MISSING_PERMISSION",
-      // biome-ignore lint/suspicious/noTemplateCurlyInString: a literal GitHub Actions expression, pinned byte-for-byte
       value: "${{ inputs.on_missing_permission }}",
     },
     "required-sections": {
       parity: "REQUIRED_SECTIONS",
-      // biome-ignore lint/suspicious/noTemplateCurlyInString: a literal GitHub Actions expression, pinned byte-for-byte
       value: "${{ inputs.required_sections }}",
     },
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: a literal GitHub Actions expression, pinned byte-for-byte
     sections: { parity: "SECTIONS", value: "${{ inputs.sections }}" },
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: a literal GitHub Actions expression, pinned byte-for-byte
     "api-version": { literal: "${{ inputs.api_version }}" },
   },
 };
@@ -1071,9 +1057,7 @@ const PREFLIGHT_GAP_STEPS: Record<string, { if: string; run: string }[]> = {
   ".github/workflows/settings-repos.yml": [
     {
       if: "steps.labels.outputs.not_applicable == 'true'",
-      run:
-        // biome-ignore lint/suspicious/noTemplateCurlyInString: a literal GitHub Actions expression, pinned byte-for-byte
-        'echo "::notice::label preflight stood down for ${{ matrix.repo }}: ${{ steps.labels.outputs.reason }}"\n',
+      run: 'echo "::notice::label preflight stood down for ${{ matrix.repo }}: ${{ steps.labels.outputs.reason }}"\n',
     },
   ],
   ".github/workflows/reusable-apply-settings.yml": [],
@@ -2453,7 +2437,6 @@ export const ACTIONS_BUN_SETUP_GUARD: readonly string[] = [
   "id: bun",
   "shell: bash",
   "run: |",
-  // biome-ignore lint/suspicious/noTemplateCurlyInString: literal workflow lines under pin
   'pin="$(cat "${{ github.action_path }}/.bun-version")"',
   'have="$(command -v bun >/dev/null && bun --version || true)"',
   'echo "pinned=$([ "$have" = "$pin" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"',
@@ -2463,13 +2446,11 @@ export const ACTIONS_BUN_SETUP_GUARD: readonly string[] = [
   "continue-on-error: true",
   "uses: oven-sh/setup-bun@v2",
   "with:",
-  // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal pin line
   "bun-version-file: ${{ github.action_path }}/.bun-version",
   "- name: Set up bun (retry)",
   "if: steps.setup-bun.outcome == 'failure'",
   "uses: oven-sh/setup-bun@v2",
   "with:",
-  // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal pin line
   "bun-version-file: ${{ github.action_path }}/.bun-version",
 ];
 
@@ -2735,7 +2716,6 @@ export function allGreenGateMismatches(
       got: "no such step",
     });
   } else if (
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal Actions expression under pin
     String(asRecord(judge.with ?? {}, "all-green with").needs ?? "") !== "${{ toJSON(needs) }}"
   ) {
     mismatches.push({
@@ -2981,7 +2961,6 @@ export function fleetCiRenderMismatches(
       true,
     ],
     [
-      // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal template line under pin
       "          needs: {% raw %}${{ toJSON(needs) }}{% endraw %}",
       "the needs context is what the action judges - anything else judges a fiction of the run",
       true,
@@ -3152,7 +3131,6 @@ export function fleetCiRenderMismatches(
       "the leg calls the managed release pipeline by local path",
     ],
     [
-      // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal fragment line under pin
       "      sha: {% raw %}${{ github.sha }}{% endraw %}",
       "the JUDGED commit, explicit - same-run today, and the explicit pass is what keeps a future caller honest",
     ],
@@ -3222,16 +3200,13 @@ export function fleetCiRenderMismatches(
         "      - name: Check this run judged the current head",
         "        id: head",
         "        env:",
-        // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal template lines under pin
         "          GH_TOKEN: {% raw %}${{ github.token }}{% endraw %}",
-        // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal template lines under pin
         "          JUDGED: {% raw %}${{ inputs.sha || github.sha }}{% endraw %}",
         "        run: |",
         '          head="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)"',
         '          if [ "$head" = "$JUDGED" ]; then',
         '            echo "current=true" >> "$GITHUB_OUTPUT"',
         "          else",
-        // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal template lines under pin
         '            echo "::notice::main moved to ${head:0:7} since ${JUDGED:0:7} was judged; the newer run releases"',
         '            echo "current=false" >> "$GITHUB_OUTPUT"',
         "          fi",
@@ -4805,7 +4780,6 @@ const rules: Rule[] = [
       // the API URL, and the fetch call has to carry the render's output.
       const mismatches: Mismatch[] = [];
       const render = read(".github/scripts/fleet/render_managed_settings.ts");
-      // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal template shape under pin
       if (!templateCarries(render, "contents/${path}?ref=${ref}")) {
         mismatches.push({
           file: ".github/scripts/fleet/render_managed_settings.ts",
@@ -4814,7 +4788,6 @@ const rules: Rule[] = [
         });
       }
       const merge = read(".github/scripts/fleet/merge_settings_layers.ts");
-      // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal template shape under pin
       if (!templateCarries(merge, "contents/.github/settings.yml?ref=${ref}")) {
         mismatches.push({
           file: ".github/scripts/fleet/merge_settings_layers.ts",
@@ -5518,7 +5491,6 @@ const rules: Rule[] = [
       const fleetCi = ".github/workflows/fleet-ci.yml";
       const pins: { line: string; files: string[] }[] = [
         {
-          // biome-ignore lint/suspicious/noTemplateCurlyInString: literal shell line pinned in both copies
           line: 'tip="$(git rev-parse "origin/${GITHUB_BASE_REF}")"',
           files: [script, fleetCi],
         },
@@ -5762,7 +5734,6 @@ const rules: Rule[] = [
     name: "settings-apply-merged-input",
     run: () => {
       const mismatches: Mismatch[] = [];
-      // biome-ignore lint/suspicious/noTemplateCurlyInString: a literal GitHub Actions expression, pinned byte-for-byte
       const wanted = "${{ runner.temp }}/merged-settings.yml";
       const mapping = (value: unknown): Record<string, unknown> =>
         typeof value === "object" && value !== null && !Array.isArray(value)

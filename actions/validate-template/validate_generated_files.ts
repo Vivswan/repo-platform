@@ -830,7 +830,6 @@ function main(): number {
             typeof step.with === "object" && step.with !== null && !Array.isArray(step.with)
               ? (step.with as Record<string, unknown>)
               : {};
-          // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal Actions expression under pin
           return String(withBlock.needs ?? "") === "${{ toJSON(needs) }}";
         };
         const steps = jobSteps(allGreen);

@@ -330,7 +330,6 @@ describe("the action's wiring", () => {
     const withBlock = integrity?.with as Record<string, string>;
     expect(withBlock["findings-file"]).toContain("validate-findings.md");
     expect(withBlock["advisories-file"]).toContain("validate-advisories.md");
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: literal GitHub Actions expression
     expect(action.outputs.integrity.value).toBe("${{ steps.integrity.outcome }}");
     // The freshness leg can never fail the job, and stays a ref compare
     // against the operator's build branch: a render here would cost
