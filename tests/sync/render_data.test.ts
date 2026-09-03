@@ -70,43 +70,63 @@ const ANSWERS = [
   .map((line) => `${line}\n`)
   .join("");
 
+// data-old replays the recorded answers byte-verbatim with the underscore
+// metadata dropped: PyYAML must read 1e3 / no / on / 0123 exactly as it
+// read them from the answers file (string, bool, bool, octal). It is the
+// same whatever the live values are.
+const DATA_OLD = [
+  "project_name: 1e3",
+  "copyright_holder: no",
+  "auto_merge: on",
+  "tracking_label: 0123",
+  "description: recorded description",
+  "private: false",
+  "modules:",
+  "  - agents",
+]
+  .map((line) => `${line}\n`)
+  .join("");
+
+// data-new carries the untouched keys verbatim and the live keys ONCE, in
+// PyYAML-safe quoted forms. The recorded values of the overridden keys
+// are GONE, not shadowed by a later duplicate key (PyYAML takes the last
+// duplicate, but a duplicate-key data file is a parse warning waiting to
+// differ).
+const VERBATIM_HEAD = [
+  "project_name: 1e3",
+  "copyright_holder: no",
+  "auto_merge: on",
+  "tracking_label: 0123",
+];
+
 describe("render_data script", () => {
-  test("data-old replays the recorded answers verbatim, metadata dropped", () => {
-    const result = runScript(ANSWERS, '["uv"]', "true", "live description");
+  test.each([
+    {
+      reason: "live keys override the recorded ones once, the rest rides verbatim",
+      modules: '["uv", "agents"]',
+      privateFlag: "true",
+      description: "live description",
+      expectedNew: [
+        ...VERBATIM_HEAD,
+        "modules:",
+        '  - "uv"',
+        '  - "agents"',
+        "private: true",
+        'description: "live description"',
+      ],
+    },
+    {
+      reason: "an empty selection writes an explicit empty list and an empty quoted description",
+      modules: "[]",
+      privateFlag: "false",
+      description: "",
+      expectedNew: [...VERBATIM_HEAD, "modules: []", "private: false", 'description: ""'],
+    },
+  ])("$reason", ({ modules, privateFlag, description, expectedNew }) => {
+    const result = runScript(ANSWERS, modules, privateFlag, description);
     expect(result.exitCode).toBe(0);
-    // Byte-verbatim scalars: PyYAML must read 1e3 / no / on / 0123 exactly
-    // as it read them from the answers file (string, bool, bool, octal).
-    expect(result.old).toContain("project_name: 1e3\n");
-    expect(result.old).toContain("copyright_holder: no\n");
-    expect(result.old).toContain("auto_merge: on\n");
-    expect(result.old).toContain("tracking_label: 0123\n");
-    expect(result.old).toContain("description: recorded description\n");
-    expect(result.old).toContain("private: false\n");
-    expect(result.old).toContain("modules:\n  - agents\n");
-    expect(result.old).not.toContain("_commit");
-    expect(result.old).not.toContain("_src_path");
-  });
-
-  test("data-new overrides the live keys once and carries the rest verbatim", () => {
-    const result = runScript(ANSWERS, '["uv", "agents"]', "true", "live description");
-    expect(result.exitCode).toBe(0);
-    expect(result.new).toContain("project_name: 1e3\n");
-    expect(result.new).toContain('modules:\n  - "uv"\n  - "agents"\n');
-    expect(result.new).toContain("private: true\n");
-    expect(result.new).toContain('description: "live description"\n');
-    // The recorded values of the overridden keys must be GONE, not merely
-    // shadowed by a later duplicate key (PyYAML takes the last duplicate,
-    // but a duplicate-key data file is a parse warning waiting to differ).
-    expect(result.new).not.toContain("recorded description");
-    expect(result.new).not.toContain("private: false");
-    expect(result.new).not.toContain("- agents\n"); // only the quoted live list remains
-  });
-
-  test("an empty selection writes an explicit empty list", () => {
-    const result = runScript(ANSWERS, "[]", "false", "");
-    expect(result.exitCode).toBe(0);
-    expect(result.new).toContain("modules: []\n");
-    expect(result.new).toContain('description: ""\n');
+    expect(result.old).toBe(DATA_OLD);
+    expect(result.new).toBe(expectedNew.map((line) => `${line}\n`).join(""));
   });
 
   test("a malformed answers file fails loudly", () => {

@@ -116,12 +116,11 @@ describe("manifestStatus", () => {
     expect(manifestStatus(tree(null))).toBe("missing");
   });
 
-  test("an unparseable manifest reports unparseable", () => {
-    expect(manifestStatus(tree("{ not json"))).toBe("unparseable");
-  });
-
-  test("a manifest without a files mapping reports unparseable", () => {
-    expect(manifestStatus(tree('{"other": 1}'))).toBe("unparseable");
+  test.each([
+    { reason: "not JSON", manifest: "{ not json" },
+    { reason: "JSON without a files mapping", manifest: '{"other": 1}' },
+  ])("a manifest that is $reason reports unparseable", ({ manifest }) => {
+    expect(manifestStatus(tree(manifest))).toBe("unparseable");
   });
 
   test("a manifest whose hashes match the tree reports stamped", () => {

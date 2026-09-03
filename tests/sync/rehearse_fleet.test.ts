@@ -63,23 +63,25 @@ describe("enumerateFleet", () => {
       { repo: "Vivswan/secret", private: true },
       { repo: "Vivswan/paused", private: false },
     ]);
-    expect(fleet.slugs).toEqual(["Other/extra", "Vivswan/app", "Vivswan/secret"]);
-    expect(fleet.excluded).toBe(1);
+    // Visibility is keyed by lowercased slug and covers the discovery
+    // slice only: the explicit Other/extra entry has no key.
+    expect(fleet).toEqual({
+      slugs: ["Other/extra", "Vivswan/app", "Vivswan/secret"],
+      visibility: new Map([
+        ["vivswan/app", false],
+        ["vivswan/secret", true],
+        ["vivswan/paused", false],
+      ]),
+      excluded: 1,
+    });
   });
 
   test("exclusion matches ignoring case, like GitHub repo identity", () => {
-    const fleet = enumerateFleet(registry, [{ repo: "vivswan/PAUSED", private: false }]);
-    expect(fleet.slugs).toEqual(["Other/extra"]);
-  });
-
-  test("visibility is keyed by lowercased slug and only covers the discovery slice", () => {
-    const fleet = enumerateFleet(registry, [
-      { repo: "Vivswan/app", private: false },
-      { repo: "Vivswan/secret", private: true },
-    ]);
-    expect(fleet.visibility.get("vivswan/app")).toBe(false);
-    expect(fleet.visibility.get("vivswan/secret")).toBe(true);
-    expect(fleet.visibility.has("other/extra")).toBe(false);
+    expect(enumerateFleet(registry, [{ repo: "vivswan/PAUSED", private: false }])).toEqual({
+      slugs: ["Other/extra"],
+      visibility: new Map([["vivswan/paused", false]]),
+      excluded: 1,
+    });
   });
 
   test("a wildcard registry without a discovery listing throws instead of guessing", () => {
@@ -121,19 +123,33 @@ describe("privateDisplayNames", () => {
     expect(JSON.stringify(annotations)).not.toContain("hidden-server");
   });
 
-  test("a committed registry entry keeps its raw name (hinting a public name is theater)", () => {
-    const display = privateDisplayNames(true, discovered, committed);
-    expect(display("Vivswan/committed-private")).toBe("Vivswan/committed-private");
-  });
-
-  test("the local CLI (no --gate) prints raw slugs to the operator's terminal", () => {
-    const display = privateDisplayNames(false, discovered, committed);
-    expect(display("Vivswan/hidden-server")).toBe("Vivswan/hidden-server");
-  });
-
-  test("a public repo prints raw even in gate mode - its name is public", () => {
-    const display = privateDisplayNames(true, discovered, committed);
-    expect(display("Vivswan/app")).toBe("Vivswan/app");
+  test.each([
+    {
+      reason: "a wildcard-discovered private slug is hinted under the gate",
+      gate: true,
+      slug: "Vivswan/hidden-server",
+      expected: "h**-s**r",
+    },
+    {
+      reason: "a committed registry entry keeps its raw name (hinting a public name is theater)",
+      gate: true,
+      slug: "Vivswan/committed-private",
+      expected: "Vivswan/committed-private",
+    },
+    {
+      reason: "the local CLI (no --gate) prints raw slugs to the operator's terminal",
+      gate: false,
+      slug: "Vivswan/hidden-server",
+      expected: "Vivswan/hidden-server",
+    },
+    {
+      reason: "a public repo prints raw even in gate mode - its name is public",
+      gate: true,
+      slug: "Vivswan/app",
+      expected: "Vivswan/app",
+    },
+  ])("$reason", ({ gate, slug, expected }) => {
+    expect(privateDisplayNames(gate, discovered, committed)(slug)).toBe(expected);
   });
 });
 
@@ -253,35 +269,39 @@ describe("rehearseFleet failure handling", () => {
     );
   });
 
-  test("a non-Error throw still becomes a failure row", () => {
-    expect(failureRow("o/r", "boom")).toEqual({
-      repo: "o/r",
-      status: "REHEARSAL FAILED",
-      detail: "boom",
-      severity: "error",
-    });
-  });
-
   test("a throwing visibility lookup becomes a lane-local failed row, siblings survive", async () => {
     // The isolation the loop promises must cover EVERY per-repo dep, not
     // just rehearse: a throw from isPrivate (or the enrollment probe's
     // curl) used to escape the worker, reject runPool's Promise.all, and
     // destroy the whole report. Now it is this lane's failed row, and the
-    // report continues.
+    // report continues. isPrivate threw before visibility was known, so
+    // the row carries the display name (redacted for a hidden repo),
+    // never the raw slug.
     const rows = await rehearseFleet(["o/a", "o/b"], {
       isPrivate: (slug) => {
         if (slug === "o/a") throw new Error("visibility probe curl not found");
         return false;
       },
-      display: (slug) => slug,
+      display: (slug) => (slug === "o/a" ? "h**-s**t" : slug),
       enrollment: () => "enrolled",
       rehearse: async () => outcome(),
       concurrency: 2,
       log: () => {},
     });
-    expect(rows[0].status).toBe("REHEARSAL FAILED");
-    expect(rows[0].detail).toContain("visibility probe curl not found");
-    expect(rows[1].status).toBe("clean");
+    expect(rows).toEqual([
+      {
+        repo: "h**-s**t",
+        status: "REHEARSAL FAILED",
+        detail: "visibility probe curl not found",
+        severity: "error",
+      },
+      {
+        repo: "o/b",
+        status: "clean",
+        detail: "retired 0; manifest stamped ok; validation ok",
+        severity: "ok",
+      },
+    ]);
   });
 
   test("a throwing enrollment probe becomes a lane-local failed row, not an abort", async () => {
@@ -296,44 +316,62 @@ describe("rehearseFleet failure handling", () => {
       concurrency: 2,
       log: () => {},
     });
-    expect(rows[0].status).toBe("clean");
-    expect(rows[1].status).toBe("REHEARSAL FAILED");
-    expect(rows[1].detail).toContain("gh auth token subprocess failed");
-  });
-
-  test("a failed row for an unclassifiable repo carries the redacted display name", async () => {
-    // isPrivate threw before visibility was known, so the row must use the
-    // display name (redacted for a hidden repo), never the raw slug.
-    const rows = await rehearseFleet(["o/maybe-secret"], {
-      isPrivate: () => {
-        throw new Error("network down");
+    expect(rows).toEqual([
+      {
+        repo: "o/a",
+        status: "clean",
+        detail: "retired 0; manifest stamped ok; validation ok",
+        severity: "ok",
       },
-      display: () => "h**-s**t",
-      enrollment: () => "enrolled",
-      rehearse: async () => outcome(),
-      concurrency: 1,
-      log: () => {},
-    });
-    expect(rows[0].repo).toBe("h**-s**t");
-    expect(rows[0].status).toBe("REHEARSAL FAILED");
+      {
+        repo: "o/b",
+        status: "REHEARSAL FAILED",
+        detail: "gh auth token subprocess failed",
+        severity: "error",
+      },
+    ]);
   });
+});
 
-  test("a known leg script's failure names its pipeline phase", () => {
-    const row = failureRow(
-      "o/r",
-      new RehearsalError("resolve_copier_conflicts.ts failed (exit 1): boom"),
-    );
-    expect(row.detail).toBe("[phase resolve] resolve_copier_conflicts.ts failed (exit 1): boom");
-    expect(row.severity).toBe("error");
-  });
-
-  test("a not-adopted repo files as a skip, matching production's selector", () => {
-    expect(failureRow("o/r", new NotManagedError("o/r is not managed by repo-platform"))).toEqual({
-      repo: "o/r",
-      status: "skipped (not adopted)",
-      detail: "o/r is not managed by repo-platform",
-      severity: "ok",
-    });
+describe("failureRow", () => {
+  test.each([
+    {
+      reason: "a non-Error throw still becomes a failure row",
+      err: "boom",
+      expected: { repo: "o/r", status: "REHEARSAL FAILED", detail: "boom", severity: "error" },
+    },
+    {
+      reason: "a known leg script's failure names its pipeline phase",
+      err: new RehearsalError("resolve_copier_conflicts.ts failed (exit 1): boom"),
+      expected: {
+        repo: "o/r",
+        status: "REHEARSAL FAILED",
+        detail: "[phase resolve] resolve_copier_conflicts.ts failed (exit 1): boom",
+        severity: "error",
+      },
+    },
+    {
+      reason: "a not-adopted repo files as a skip, matching production's selector",
+      err: new NotManagedError("o/r is not managed by repo-platform"),
+      expected: {
+        repo: "o/r",
+        status: "skipped (not adopted)",
+        detail: "o/r is not managed by repo-platform",
+        severity: "ok",
+      },
+    },
+    {
+      reason: "an unresolvable recorded _commit is a warning-severity recovery row",
+      err: new RecoveryNeededError("o/r's recorded _commit 'abc' does not resolve"),
+      expected: {
+        repo: "o/r",
+        status: "recovery needed",
+        detail: "o/r's recorded _commit 'abc' does not resolve",
+        severity: "warning",
+      },
+    },
+  ])("$reason", ({ err, expected }) => {
+    expect(failureRow("o/r", err)).toEqual(expected);
   });
 });
 
@@ -419,8 +457,20 @@ describe("rehearseFleet concurrency", () => {
       concurrency: 2,
       log: () => {},
     });
-    expect(rows[0].status).toBe("REHEARSAL FAILED");
-    expect(rows[1].status).toBe("clean");
+    expect(rows).toEqual([
+      {
+        repo: "o/fails",
+        status: "REHEARSAL FAILED",
+        detail: "[phase render] apply_update.ts failed (exit 1)",
+        severity: "error",
+      },
+      {
+        repo: "o/works",
+        status: "clean",
+        detail: "retired 0; manifest stamped ok; validation ok",
+        severity: "ok",
+      },
+    ]);
   });
 });
 
@@ -440,81 +490,93 @@ describe("runPool", () => {
 });
 
 describe("outcomeRow", () => {
-  test("a clean, unchanged rehearsal", () => {
-    expect(outcomeRow("o/r", outcome({ changed: false }))).toEqual({
-      repo: "o/r",
-      status: "clean",
-      detail: "no changes; retired 0; manifest stamped ok; validation ok",
-      severity: "ok",
-    });
-  });
-
-  test("a tripped tail tripwire is an error row (the script exits 0 by design)", () => {
-    const row = outcomeRow(
-      "o/r",
-      outcome({ tripwireReport: `> [!WARNING]\n- \`AGENTS.md\`: 1 ${SHRANK_PHRASE}\n` }),
-    );
-    expect(row.status).toBe("TRIPPED");
-    expect(row.detail).toContain("[phase tripwire] tail tripwire TRIPPED");
-    expect(row.detail).toContain("lines would be lost");
-    expect(row.severity).toBe("error");
-  });
-
-  test("an unverifiable-only report never asserts confirmed loss", () => {
-    // Unverifiable findings prove nothing was lost - the row must say
-    // integrity is unproven, not that lines vanished. Severity stays
-    // error either way (manual attention).
-    const row = outcomeRow(
-      "o/r",
-      outcome({
+  test.each<{ reason: string; overrides: Partial<RehearsalOutcome>; expected: FleetRow }>([
+    {
+      reason: "a clean, unchanged rehearsal",
+      overrides: { changed: false },
+      expected: {
+        repo: "o/r",
+        status: "clean",
+        detail: "no changes; retired 0; manifest stamped ok; validation ok",
+        severity: "ok",
+      },
+    },
+    {
+      reason: "a tripped tail tripwire is an error row (the script exits 0 by design)",
+      overrides: { tripwireReport: `> [!WARNING]\n- \`AGENTS.md\`: 1 ${SHRANK_PHRASE}\n` },
+      expected: {
+        repo: "o/r",
+        status: "TRIPPED",
+        detail:
+          "retired 0; manifest stamped ok; [phase tripwire] tail tripwire TRIPPED " +
+          "(repository-owned lines would be lost); validation ok",
+        severity: "error",
+      },
+    },
+    {
+      // Unverifiable findings prove nothing was lost - the row must say
+      // integrity is unproven, not that lines vanished. Severity stays
+      // error either way (manual attention).
+      reason: "an unverifiable-only report never asserts confirmed loss",
+      overrides: {
         tripwireReport:
           "> [!WARNING]\n- `AGENTS.md`: the previous commit has no usable ownership manifest - review this file's full diff against the previous commit before merging.\n",
-      }),
-    );
-    expect(row.status).toBe("TRIPPED");
-    expect(row.detail).toContain("integrity unproven");
-    expect(row.detail).not.toContain("lines would be lost");
-    expect(row.severity).toBe("error");
-  });
-
-  test("conflicted files carry their dropped-hunk counts and malformed files their state", () => {
-    const row = outcomeRow(
-      "o/r",
-      outcome({
+      },
+      expected: {
+        repo: "o/r",
+        status: "TRIPPED",
+        detail:
+          "retired 0; manifest stamped ok; [phase tripwire] tail tripwire TRIPPED " +
+          "(integrity unproven - manifest unusable; nothing proven lost); validation ok",
+        severity: "error",
+      },
+    },
+    {
+      reason: "conflicted files carry their dropped-hunk counts and malformed files their state",
+      overrides: {
         conflicts: [{ file: "README.md", hunks: 2 }],
         malformed: ["a.txt"],
         retired: 3,
         validationOk: false,
         manifest: "missing",
-      }),
-    );
-    expect(row.status).toBe("2 conflict(s)");
-    expect(row.detail).toBe(
-      "README.md (2 hunk(s) dropped); a.txt (malformed markers, left unresolved); " +
-        "retired 3; manifest missing; [phase validate] validation FAILED",
-    );
-    expect(row.severity).toBe("error");
-  });
-
-  test("a failed validation names the failing files' diagnostics", () => {
-    const row = outcomeRow(
-      "o/r",
-      outcome({
+      },
+      expected: {
+        repo: "o/r",
+        status: "2 conflict(s)",
+        detail:
+          "README.md (2 hunk(s) dropped); a.txt (malformed markers, left unresolved); " +
+          "retired 3; manifest missing; [phase validate] validation FAILED",
+        severity: "error",
+      },
+    },
+    {
+      reason: "a failed validation names the failing files' diagnostics",
+      overrides: {
         validationOk: false,
         validationErrors: [".github/workflows/ci.yml: gate drift", "... and 2 more"],
-      }),
-    );
-    expect(row.detail).toBe(
-      "retired 0; manifest stamped ok; [phase validate] validation FAILED: " +
-        ".github/workflows/ci.yml: gate drift | ... and 2 more",
-    );
-    expect(row.severity).toBe("error");
-  });
-
-  test("auto-resolved conflicts alone stay ok severity - production ships them for PR review", () => {
-    const row = outcomeRow("o/r", outcome({ conflicts: [{ file: "README.md", hunks: 1 }] }));
-    expect(row.status).toBe("1 conflict(s)");
-    expect(row.severity).toBe("ok");
+      },
+      expected: {
+        repo: "o/r",
+        status: "clean",
+        detail:
+          "retired 0; manifest stamped ok; [phase validate] validation FAILED: " +
+          ".github/workflows/ci.yml: gate drift | ... and 2 more",
+        severity: "error",
+      },
+    },
+    {
+      reason:
+        "auto-resolved conflicts alone stay ok severity - production ships them for PR review",
+      overrides: { conflicts: [{ file: "README.md", hunks: 1 }] },
+      expected: {
+        repo: "o/r",
+        status: "1 conflict(s)",
+        detail: "README.md (1 hunk(s) dropped); retired 0; manifest stamped ok; validation ok",
+        severity: "ok",
+      },
+    },
+  ])("$reason", ({ overrides, expected }) => {
+    expect(outcomeRow("o/r", outcome(overrides))).toEqual(expected);
   });
 });
 
@@ -562,23 +624,35 @@ describe("summary formatting", () => {
     },
   ];
 
-  test("summaryLine shapes per status", () => {
-    expect(summaryLine(rows[0])).toBe(
-      "o/app  clean - retired 0; manifest stamped ok; validation ok",
-    );
-    expect(summaryLine(rows[1])).toBe("o/secret  skipped (private)");
-    expect(summaryLine(rows[2])).toBe("o/broken  REHEARSAL FAILED: git clone failed (exit 128)");
-  });
-
-  test("a private skip prints the bare line even when the row carries a lookup-failure reason", () => {
-    expect(
-      summaryLine({
+  test.each<{ reason: string; row: FleetRow; expected: string }>([
+    {
+      reason: "a clean row carries its detail after a dash",
+      row: rows[0],
+      expected: "o/app  clean - retired 0; manifest stamped ok; validation ok",
+    },
+    {
+      reason: "a private skip is the bare required line",
+      row: rows[1],
+      expected: "o/secret  skipped (private)",
+    },
+    {
+      reason: "a failure carries its reason after a colon",
+      row: rows[2],
+      expected: "o/broken  REHEARSAL FAILED: git clone failed (exit 128)",
+    },
+    {
+      reason:
+        "a private skip prints the bare line even when the row carries a lookup-failure reason",
+      row: {
         repo: "o/x",
         status: "skipped (private)",
         detail: "visibility lookup failed; treated as private",
         severity: "ok",
-      }),
-    ).toBe("o/x  skipped (private)");
+      },
+      expected: "o/x  skipped (private)",
+    },
+  ])("summaryLine: $reason", ({ row, expected }) => {
+    expect(summaryLine(row)).toBe(expected);
   });
 
   test("statusTally buckets per-file conflict statuses together", () => {

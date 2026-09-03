@@ -11,75 +11,137 @@ const ANSWERS = {
   private: false,
 };
 
+const NOT_BOOLEAN = (recorded: string) =>
+  `the recorded private answer must be a boolean, got ${recorded} - ` +
+  "visibility drift cannot be detected until it is fixed";
+
 describe("detectDrift", () => {
-  test("no drift when live values match the recorded answers", () => {
-    expect(detectDrift(ANSWERS, "false", "One-line demo description.")).toEqual({
-      drifts: [],
-      errors: [],
-    });
-  });
-
-  test("flags a private flip", () => {
-    const { drifts, errors } = detectDrift(ANSWERS, "true", "One-line demo description.");
-    expect(errors).toEqual([]);
-    expect(drifts).toEqual([{ field: "private", recorded: "false", live: "true" }]);
-  });
-
-  test("flags a description change and keeps quotes intact", () => {
-    const answers = { ...ANSWERS, description: 'He said "hello" to the fleet' };
-    const { drifts } = detectDrift(answers, "false", 'She said "goodbye" to the fleet');
-    expect(drifts).toEqual([
-      {
-        field: "description",
-        recorded: 'He said "hello" to the fleet',
-        live: 'She said "goodbye" to the fleet',
+  test.each([
+    {
+      reason: "no drift when live values match the recorded answers",
+      answers: ANSWERS,
+      livePrivate: "false",
+      liveDescription: "One-line demo description.",
+      expected: { drifts: [], errors: [] },
+    },
+    {
+      reason: "flags a private flip",
+      answers: ANSWERS,
+      livePrivate: "true",
+      liveDescription: "One-line demo description.",
+      expected: { drifts: [{ field: "private", recorded: "false", live: "true" }], errors: [] },
+    },
+    {
+      reason: "flags a description change and keeps quotes intact",
+      answers: { ...ANSWERS, description: 'He said "hello" to the fleet' },
+      livePrivate: "false",
+      liveDescription: 'She said "goodbye" to the fleet',
+      expected: {
+        drifts: [
+          {
+            field: "description",
+            recorded: 'He said "hello" to the fleet',
+            live: 'She said "goodbye" to the fleet',
+          },
+        ],
+        errors: [],
       },
-    ]);
-  });
-
-  test("a trailing newline on the live description is transport noise, not drift", () => {
-    expect(detectDrift(ANSWERS, "false", "One-line demo description.\n").drifts).toEqual([]);
-  });
-
-  test("an interior newline in the live description is drift", () => {
-    const { drifts } = detectDrift(ANSWERS, "false", "line one\nline two");
-    expect(drifts).toEqual([
-      { field: "description", recorded: "One-line demo description.", live: "line one\nline two" },
-    ]);
-  });
-
-  test("both fields can drift at once", () => {
-    const { drifts } = detectDrift(ANSWERS, "true", "rewritten");
-    expect(drifts.map((d) => d.field)).toEqual(["private", "description"]);
-  });
-
-  test("adopts fields the answers file does not record", () => {
-    expect(detectDrift({ project_name: "Demo" }, "true", "anything")).toEqual({
-      drifts: [],
-      errors: [],
-    });
-  });
-
-  test("treats a null recorded description as empty", () => {
-    expect(detectDrift({ description: null }, "false", "").drifts).toEqual([]);
-    expect(detectDrift({ description: null }, "false", "added later").drifts).toEqual([
-      { field: "description", recorded: "", live: "added later" },
-    ]);
-  });
-
-  test("a recorded private that is not a boolean is an error, never a silent skip", () => {
-    for (const recorded of ["true", null, 1]) {
-      const { drifts, errors } = detectDrift({ private: recorded }, "true", "");
-      expect(drifts).toEqual([]);
-      expect(errors).toHaveLength(1);
-      expect(errors[0]).toContain("must be a boolean");
-    }
-  });
-
-  test("a live private value that is not true or false is an error", () => {
-    const { drifts, errors } = detectDrift(ANSWERS, "null", "One-line demo description.");
-    expect(drifts).toEqual([]);
-    expect(errors).toEqual(['--live-private must be "true" or "false", got "null"']);
+    },
+    {
+      reason: "a trailing newline on the live description is transport noise, not drift",
+      answers: ANSWERS,
+      livePrivate: "false",
+      liveDescription: "One-line demo description.\n",
+      expected: { drifts: [], errors: [] },
+    },
+    {
+      reason: "an interior newline in the live description is drift",
+      answers: ANSWERS,
+      livePrivate: "false",
+      liveDescription: "line one\nline two",
+      expected: {
+        drifts: [
+          {
+            field: "description",
+            recorded: "One-line demo description.",
+            live: "line one\nline two",
+          },
+        ],
+        errors: [],
+      },
+    },
+    {
+      reason: "both fields can drift at once, private first",
+      answers: ANSWERS,
+      livePrivate: "true",
+      liveDescription: "rewritten",
+      expected: {
+        drifts: [
+          { field: "private", recorded: "false", live: "true" },
+          { field: "description", recorded: "One-line demo description.", live: "rewritten" },
+        ],
+        errors: [],
+      },
+    },
+    {
+      reason: "adopts fields the answers file does not record",
+      answers: { project_name: "Demo" },
+      livePrivate: "true",
+      liveDescription: "anything",
+      expected: { drifts: [], errors: [] },
+    },
+    {
+      reason: "a null recorded description reads as empty: no drift against an empty live one",
+      answers: { description: null },
+      livePrivate: "false",
+      liveDescription: "",
+      expected: { drifts: [], errors: [] },
+    },
+    {
+      reason: "a null recorded description reads as empty: drift against a live one",
+      answers: { description: null },
+      livePrivate: "false",
+      liveDescription: "added later",
+      expected: {
+        drifts: [{ field: "description", recorded: "", live: "added later" }],
+        errors: [],
+      },
+    },
+    // A recorded private of the wrong type is an error, never a silent
+    // skip: comparing nothing is how the ratification bug worked.
+    {
+      reason: "a recorded private that is a string is an error",
+      answers: { private: "true" },
+      livePrivate: "true",
+      liveDescription: "",
+      expected: { drifts: [], errors: [NOT_BOOLEAN('"true"')] },
+    },
+    {
+      reason: "a recorded private that is null is an error",
+      answers: { private: null },
+      livePrivate: "true",
+      liveDescription: "",
+      expected: { drifts: [], errors: [NOT_BOOLEAN("null")] },
+    },
+    {
+      reason: "a recorded private that is a number is an error",
+      answers: { private: 1 },
+      livePrivate: "true",
+      liveDescription: "",
+      expected: { drifts: [], errors: [NOT_BOOLEAN("1")] },
+    },
+    {
+      reason: "a live private value that is not true or false is an error",
+      answers: ANSWERS,
+      livePrivate: "null",
+      liveDescription: "One-line demo description.",
+      expected: {
+        drifts: [],
+        errors: ['--live-private must be "true" or "false", got "null"'],
+      },
+    },
+  ])("$reason", ({ answers, livePrivate, liveDescription, expected }) => {
+    expect(detectDrift(answers, livePrivate, liveDescription)).toEqual(expected);
   });
 });
 
@@ -152,44 +214,47 @@ describe("driftSummary", () => {
 });
 
 describe("driftWarnings", () => {
-  test("one single-line warning per drifted field", () => {
-    const warnings = driftWarnings("Vivswan/demo", [
-      { field: "private", recorded: "false", live: "true" },
-      { field: "description", recorded: "old", live: "new" },
-    ]);
-    expect(warnings).toHaveLength(2);
-    for (const warning of warnings) {
-      expect(warning).toStartWith("::warning::Vivswan/demo: ");
-      expect(warning).not.toContain("\n");
-      // Home-dependent consequences live in the PR body alone.
-      expect(warning).not.toContain("ratifies");
-      expect(warning).toContain("the PR body explains what merging does");
-    }
-    expect(warnings[0]).toContain('private changed out of band: "false" -> "true"');
-  });
+  // The log line never says what merging ratifies - that depends on the
+  // opt-in and lives in the PR body alone.
+  const TAIL = "Auto-merge is disabled; the PR body explains what merging does and how to revert.";
 
-  test("escapes workflow-command data", () => {
-    const [warning] = driftWarnings("Vivswan/demo", [
-      { field: "description", recorded: "50% done", live: "done" },
-    ]);
-    expect(warning).toContain("50%25 done");
-  });
-
-  test("hideDetails names the field but never the values", () => {
-    const warnings = driftWarnings(
-      "h**-s**r",
-      [
-        { field: "private", recorded: "false", live: "true" },
-        { field: "description", recorded: "secret words", live: "other secret words" },
+  test.each([
+    {
+      reason: "one single-line warning per drifted field, values shown",
+      repo: "Vivswan/demo",
+      drifts: [
+        { field: "private" as const, recorded: "false", live: "true" },
+        { field: "description" as const, recorded: "old", live: "new" },
       ],
-      true,
-    );
-    expect(warnings).toHaveLength(2);
-    for (const warning of warnings) {
-      expect(warning).toStartWith("::warning::h**-s**r: ");
-      expect(warning).toContain("values hidden: private repository");
-      expect(warning).not.toContain("secret words");
-    }
-    expect(warnings[1]).toContain("description changed out of band");
+      hideDetails: false,
+      expected: [
+        `::warning::Vivswan/demo: private changed out of band: "false" -> "true". ${TAIL}`,
+        `::warning::Vivswan/demo: description changed out of band: "old" -> "new". ${TAIL}`,
+      ],
+    },
+    {
+      reason: "escapes workflow-command data",
+      repo: "Vivswan/demo",
+      drifts: [{ field: "description" as const, recorded: "50% done", live: "done" }],
+      hideDetails: false,
+      expected: [
+        `::warning::Vivswan/demo: description changed out of band: "50%25 done" -> "done". ${TAIL}`,
+      ],
+    },
+    {
+      reason: "hideDetails names the field but never the values",
+      repo: "h**-s**r",
+      drifts: [
+        { field: "private" as const, recorded: "false", live: "true" },
+        { field: "description" as const, recorded: "secret words", live: "other secret words" },
+      ],
+      hideDetails: true,
+      expected: [
+        `::warning::h**-s**r: private changed out of band (values hidden: private repository; details in the PR body). ${TAIL}`,
+        `::warning::h**-s**r: description changed out of band (values hidden: private repository; details in the PR body). ${TAIL}`,
+      ],
+    },
+  ])("$reason", ({ repo, drifts, hideDetails, expected }) => {
+    expect(driftWarnings(repo, drifts, hideDetails)).toEqual(expected);
   });
 });

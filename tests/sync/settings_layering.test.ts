@@ -13,6 +13,7 @@ import { capture } from "../../.github/scripts/shared/proc";
 import {
   classificationUncertain,
   droppedOverrides,
+  type HeadManifestClass,
   headManifestClass,
   type IdentitySeed,
   isLegacyBaseline,
@@ -119,74 +120,108 @@ describe("headManifestClass", () => {
 
   const entry = (value: string) => `{"files": {".github/settings.yml": ${value}}}\n`;
 
-  test("a known class reads", () => {
-    expect(headManifestClass(repoWithManifest(entry('{"class": "mergeable"}')))).toEqual({
-      kind: "read",
-      class: "mergeable",
-    });
+  const MANIFEST = "HEAD:.github/repo-platform-manifest.json";
+  const unreadable = (why: string): HeadManifestClass => ({
+    kind: "unreadable",
+    detail: `${MANIFEST} ${why}`,
   });
+  const DUPLICATE = "declares the same key twice (JSON.parse keeps only the last duplicate)";
+  // The second spelling escapes the final "l" as backslash-u006c;
+  // JSON.parse still collides the decoded keys last-wins.
+  const escapedKey = String.raw`".github/settings.ym\u006c"`;
 
-  test("no entry for the file reads as null - it was never rendered", () => {
-    expect(headManifestClass(repoWithManifest('{"files": {}}\n'))).toEqual({
-      kind: "read",
-      class: null,
-    });
-  });
-
-  test("an entry with an UNKNOWN class is unreadable, not a starter", () => {
-    // "mergable" is one keystroke from the retired class this transition
-    // triggers on; silently reading it as "some other class" is the whole
-    // failure mode.
-    const head = headManifestClass(repoWithManifest(entry('{"class": "mergable"}')));
-    expect(head.kind).toBe("unreadable");
-  });
-
-  test("an entry with NO class is unreadable", () => {
-    expect(headManifestClass(repoWithManifest(entry("{}"))).kind).toBe("unreadable");
-  });
-
-  test("a malformed container is unreadable, not an absent entry", () => {
+  test.each([
+    {
+      reason: "a known class reads",
+      manifest: entry('{"class": "mergeable"}'),
+      expected: { kind: "read", class: "mergeable" },
+    },
+    {
+      reason: "no entry for the file reads as null - it was never rendered",
+      manifest: '{"files": {}}\n',
+      expected: { kind: "read", class: null },
+    },
+    {
+      // "mergable" is one keystroke from the retired class this transition
+      // triggers on; silently reading it as "some other class" is the
+      // whole failure mode.
+      reason: "an entry with an UNKNOWN class is unreadable, not a starter",
+      manifest: entry('{"class": "mergable"}'),
+      expected: unreadable(
+        'classes .github/settings.yml as "mergable", which is not an ownership class this sync knows',
+      ),
+    },
+    {
+      reason: "an entry with NO class is unreadable",
+      manifest: entry("{}"),
+      expected: unreadable(
+        "classes .github/settings.yml as undefined, which is not an ownership class this sync knows",
+      ),
+    },
     // Valid JSON is not a valid manifest: reading "no entry, therefore
     // never rendered" out of a files list or a null entry skips the
     // transition on a marker-deleted legacy baseline.
-    expect(headManifestClass(repoWithManifest('{"files": []}\n')).kind).toBe("unreadable");
-    expect(headManifestClass(repoWithManifest('{"files": null}\n')).kind).toBe("unreadable");
-    expect(headManifestClass(repoWithManifest('{"generated": true}\n')).kind).toBe("unreadable");
-    expect(headManifestClass(repoWithManifest("[]\n")).kind).toBe("unreadable");
-    expect(headManifestClass(repoWithManifest(entry("null"))).kind).toBe("unreadable");
-    expect(headManifestClass(repoWithManifest(entry('"starter"'))).kind).toBe("unreadable");
-  });
-
-  test("unparseable JSON and a missing manifest are unreadable", () => {
-    expect(headManifestClass(repoWithManifest("{not json")).kind).toBe("unreadable");
-    expect(headManifestClass(repoWithManifest(null)).kind).toBe("unreadable");
-  });
-
-  test("a duplicated settings.yml entry is unreadable, never last-wins", () => {
-    // JSON.parse keeps only the LAST duplicate: mergeable-then-starter
-    // would read as an already-transitioned starter and silently skip the
-    // transition on a marker-deleted legacy baseline.
-    const dup =
-      '{"files": {".github/settings.yml": {"class": "mergeable"}, ".github/settings.yml": {"class": "starter"}}}\n';
-    const head = headManifestClass(repoWithManifest(dup));
-    expect(head.kind).toBe("unreadable");
+    {
+      reason: "a files list is a malformed container, not an absent entry",
+      manifest: '{"files": []}\n',
+      expected: unreadable("has no files map"),
+    },
+    {
+      reason: "a null files map is malformed",
+      manifest: '{"files": null}\n',
+      expected: unreadable("has no files map"),
+    },
+    {
+      reason: "a manifest without a files key is malformed",
+      manifest: '{"generated": true}\n',
+      expected: unreadable("has no files map"),
+    },
+    {
+      reason: "a top-level list is not a manifest",
+      manifest: "[]\n",
+      expected: unreadable("is not a JSON object"),
+    },
+    {
+      reason: "a null entry is malformed, not absent",
+      manifest: entry("null"),
+      expected: unreadable("entry for .github/settings.yml is not an object"),
+    },
+    {
+      reason: "a bare-string entry is malformed",
+      manifest: entry('"starter"'),
+      expected: unreadable("entry for .github/settings.yml is not an object"),
+    },
+    {
+      reason: "unparseable JSON is unreadable",
+      manifest: "{not json",
+      expected: unreadable("is not readable JSON"),
+    },
+    {
+      reason: "a missing manifest is unreadable",
+      manifest: null,
+      expected: { kind: "unreadable", detail: `git show ${MANIFEST} failed` },
+    },
+    {
+      // JSON.parse keeps only the LAST duplicate: mergeable-then-starter
+      // would read as an already-transitioned starter and silently skip
+      // the transition on a marker-deleted legacy baseline.
+      reason: "a duplicated settings.yml entry is unreadable, never last-wins",
+      manifest:
+        '{"files": {".github/settings.yml": {"class": "mergeable"}, ".github/settings.yml": {"class": "starter"}}}\n',
+      expected: unreadable(DUPLICATE),
+    },
+    {
+      reason: "an escape-variant duplicate entry is unreadable too",
+      manifest: `{"files": {".github/settings.yml": {"class": "mergeable"}, ${escapedKey}: {"class": "starter"}}}\n`,
+      expected: unreadable(DUPLICATE),
+    },
+  ])("$reason", ({ manifest, expected }) => {
+    const head = headManifestClass(repoWithManifest(manifest));
+    expect(head).toEqual(expected);
     // The conservative branch: with no marker to prove the legacy shape,
-    // the transition holds the PR instead of guessing.
-    expect(classificationUncertain("repository: {}\n", head)).toBe(true);
-  });
-
-  test("an escape-variant duplicate entry is unreadable too", () => {
-    // The second spelling escapes the final "l" as backslash-u006c;
-    // JSON.parse still collides the decoded keys last-wins.
-    const escaped = String.raw`".github/settings.ym\u006c"`;
-    const dup = `{"files": {".github/settings.yml": {"class": "mergeable"}, ${escaped}: {"class": "starter"}}}\n`;
-    const head = headManifestClass(repoWithManifest(dup));
-    expect(head.kind).toBe("unreadable");
-  });
-
-  test("an unknown class HOLDS the PR when the marker is gone", () => {
-    const head = headManifestClass(repoWithManifest(entry('{"class": "mergable"}')));
-    expect(classificationUncertain("repository: {}\n", head)).toBe(true);
+    // an unreadable manifest HOLDS the PR instead of guessing; a read one
+    // answers on its own.
+    expect(classificationUncertain("repository: {}\n", head)).toBe(expected.kind === "unreadable");
   });
 });
 
@@ -797,17 +832,42 @@ describe("transitionSettingsStarter", () => {
     expect(readFileSync(out, "utf-8")).toBe("");
   });
 
-  test("an undeclared description falls back to the recorded live answer", () => {
-    const { dir, out } = target({
+  test.each([
+    {
+      reason: "an undeclared description falls back to the recorded live answer",
       settings: legacySettings.replace("  description: Old declared description\n", ""),
-      modules: "modules: [settings-sync]\n",
       answers,
+      expected: {
+        description: "Live description",
+        homepage: "",
+        topics: "kept, custom, topics",
+        private: false,
+      },
+    },
+    {
+      reason: "an ABSENT identity key still falls back to the recorded answer",
+      settings: legacySettings.replace('  homepage: ""\n', ""),
+      answers: answers.replace('homepage: ""', 'homepage: "https://example.test"'),
+      expected: {
+        description: "Old declared description",
+        homepage: "https://example.test",
+        topics: "kept, custom, topics",
+        private: false,
+      },
+    },
+  ])("$reason", ({ settings, answers: answersText, expected }) => {
+    // The other three identity keys keep their declared values: the
+    // fallback is per key, never a whole-block reseed.
+    const { dir, out } = target({
+      settings,
+      modules: "modules: [settings-sync]\n",
+      answers: answersText,
     });
     transitionSettingsStarter(dir, out, "t");
     const doc = parseYaml(readFileSync(join(dir, ".github/settings.yml"), "utf-8")) as {
       repository: Record<string, unknown>;
     };
-    expect(doc.repository.description).toBe("Live description");
+    expect(doc.repository).toEqual(expected);
   });
 
   test("a description neither source declares is OMITTED, not cleared", () => {
@@ -1028,19 +1088,6 @@ describe("transitionSettingsStarter", () => {
     };
     expect("private" in doc.repository).toBe(true);
     expect(doc.repository.private).toBeNull();
-  });
-
-  test("an ABSENT identity key still falls back to the recorded answer", () => {
-    const { dir, out } = target({
-      settings: legacySettings.replace('  homepage: ""\n', ""),
-      modules: "modules: [settings-sync]\n",
-      answers: answers.replace('homepage: ""', 'homepage: "https://example.test"'),
-    });
-    transitionSettingsStarter(dir, out, "t");
-    const doc = parseYaml(readFileSync(join(dir, ".github/settings.yml"), "utf-8")) as {
-      repository: Record<string, unknown>;
-    };
-    expect(doc.repository.homepage).toBe("https://example.test");
   });
 
   test("a legacy 'repository: null' stays unmanaged, it is not re-seeded", () => {

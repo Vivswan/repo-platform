@@ -84,6 +84,10 @@ describe("select_modules", () => {
     // parse, so a leak here would print target file content unmediated.
     const { root, temp } = makeRoot("modules: !!secret-tag-name [uv]\n");
     const result = runScript(root, temp, { HIDE_DETAILS: "true" });
+    // Positive control: the tagged document was parsed and selected, so
+    // the absence below is a silenced warning, not a run that died first.
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("selected modules: 1 (names hidden: private repository)");
     for (const channel of [result.stdout, result.stderr]) {
       expect(channel).not.toContain("secret-tag-name");
     }
