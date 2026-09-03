@@ -67,14 +67,16 @@ describe("normalize_src", () => {
     const root = makeRoot(`_commit: templates/v1.0.0\n_src_path: /home/user/repo-platform\n`);
     const result = runScript(root);
     expect(result.exitCode).toBe(0);
-    expect(readFileSync(join(root, "target/.github/.copier-answers.yml"), "utf-8")).toContain(
-      `_src_path: ${CANONICAL}`,
+    // The whole file: copier update needs the _commit line intact, once.
+    expect(readFileSync(join(root, "target/.github/.copier-answers.yml"), "utf-8")).toBe(
+      `_commit: templates/v1.0.0\n_src_path: ${CANONICAL}\n`,
     );
     // copier update refuses a dirty tree: the rewrite must be committed.
     expect(git(join(root, "target"), "status", "--porcelain")).toBe("");
     expect(git(join(root, "target"), "rev-list", "--count", "HEAD").trim()).toBe("2");
-    expect(result.stdout).toContain("::notice::");
-    expect(result.stdout).toContain("/home/user/repo-platform");
+    expect(result.stdout).toContain(
+      `::notice::Vivswan/demo: _src_path was '/home/user/repo-platform'; rewritten to '${CANONICAL}' (the canonical template source) for this and future updates.`,
+    );
   });
 
   test("an already-canonical line leaves the tree and history untouched", () => {

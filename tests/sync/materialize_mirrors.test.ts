@@ -52,20 +52,27 @@ describe("readMirrors", () => {
   });
 
   test("a non-list mirrors key is a problem", () => {
-    const { mirrors, problems } = readMirrors({ mirrors: { source: "LICENSE.md" } });
-    expect(mirrors).toEqual([]);
-    expect(problems).toHaveLength(1);
+    expect(readMirrors({ mirrors: { source: "LICENSE.md" } }, "m")).toEqual({
+      mirrors: [],
+      problems: ["m: `mirrors` must be a list of {source, targets} entries"],
+    });
   });
 
   test("a malformed entry is refused while well-formed siblings survive", () => {
-    const { mirrors, problems } = readMirrors({
-      mirrors: [
-        { source: "LICENSE.md" },
-        { source: "LICENSE.md", targets: ["template/LICENSE.md"] },
-      ],
+    expect(
+      readMirrors(
+        {
+          mirrors: [
+            { source: "LICENSE.md" },
+            { source: "LICENSE.md", targets: ["template/LICENSE.md"] },
+          ],
+        },
+        "m",
+      ),
+    ).toEqual({
+      mirrors: [{ source: "LICENSE.md", targets: ["template/LICENSE.md"] }],
+      problems: ["m: mirrors[0]: `targets` must be a non-empty list of path strings"],
     });
-    expect(mirrors).toEqual([{ source: "LICENSE.md", targets: ["template/LICENSE.md"] }]);
-    expect(problems).toHaveLength(1);
   });
 
   test("an unknown key refuses the entry - a typo'd targets must not mirror nothing silently", () => {
@@ -76,38 +83,65 @@ describe("readMirrors", () => {
     expect(problems[0]).toContain("unknown key");
   });
 
-  test("empty and non-string targets are problems", () => {
-    expect(readMirrors({ mirrors: [{ source: "a", targets: [] }] }).problems).toHaveLength(1);
-    expect(readMirrors({ mirrors: [{ source: "a", targets: [7] }] }).problems).toHaveLength(1);
-    expect(readMirrors({ mirrors: [{ source: "", targets: ["b"] }] }).problems).toHaveLength(1);
+  // The source guard fires before the targets guard: the empty source's
+  // problem names `source`, not `targets`.
+  test.each([
+    {
+      reason: "an empty targets list",
+      entry: { source: "a", targets: [] },
+      message: "`targets` must be a non-empty list of path strings",
+    },
+    {
+      reason: "a non-string target",
+      entry: { source: "a", targets: [7] },
+      message: "`targets` must be a non-empty list of path strings",
+    },
+    {
+      reason: "an empty source",
+      entry: { source: "", targets: ["b"] },
+      message: "`source` must be a non-empty path string",
+    },
+  ])("$reason is a problem", ({ entry, message }) => {
+    expect(readMirrors({ mirrors: [entry] }, "m")).toEqual({
+      mirrors: [],
+      problems: [`m: mirrors[0]: ${message}`],
+    });
   });
 });
 
 describe("mirrorPathProblem", () => {
-  test("clean relative paths pass", () => {
-    expect(mirrorPathProblem("skills/alpha/LICENSE.md")).toBeNull();
-    expect(mirrorPathProblem("LICENSE.md")).toBeNull();
-  });
+  const ESCAPE = "carries an empty, '.', or '..' segment, so it could escape the repository";
+  const GIT = "carries a .git segment";
+  const WORKFLOWS =
+    "sits under .github/workflows/ - the push step withholds workflow files when the " +
+    "token lacks the Workflows scope, so a workflow-file mirror cannot be promised";
+  const CONTROL = "carries control characters";
 
-  test("escape shapes are named", () => {
-    expect(mirrorPathProblem("/etc/passwd")).toContain("absolute");
-    expect(mirrorPathProblem("../outside.md")).toContain("escape");
-    expect(mirrorPathProblem("a/./b")).toContain("escape");
-    expect(mirrorPathProblem("a//b")).toContain("escape");
-    expect(mirrorPathProblem("a\\b")).toContain("backslash");
-    expect(mirrorPathProblem(".git/hooks/pre-commit")).toContain(".git");
-    expect(mirrorPathProblem("vendor/.git/config")).toContain(".git");
-    expect(mirrorPathProblem(".github/workflows/ci.yml")).toContain("Workflows scope");
-  });
-
-  test("case aliases are refused too - a case-insensitive checkout resolves them", () => {
-    expect(mirrorPathProblem(".GIT/config")).toContain(".git");
-    expect(mirrorPathProblem(".GitHub/Workflows/ci.yml")).toContain("Workflows scope");
-  });
-
-  test("control bytes are refused before any filesystem API can throw on them", () => {
-    expect(mirrorPathProblem("bad\0name.md")).toContain("control characters");
-    expect(mirrorPathProblem("bad\nname.md")).toContain("control characters");
+  test.each([
+    { path: "skills/alpha/LICENSE.md", problem: null, reason: "a clean nested relative path" },
+    { path: "LICENSE.md", problem: null, reason: "a clean top-level path" },
+    { path: "/etc/passwd", problem: "is absolute", reason: "absolute paths leave the checkout" },
+    { path: "../outside.md", problem: ESCAPE, reason: "a '..' segment escapes" },
+    { path: "a/./b", problem: ESCAPE, reason: "a '.' segment is never legitimate" },
+    { path: "a//b", problem: ESCAPE, reason: "an empty segment is never legitimate" },
+    { path: "a\\b", problem: "contains a backslash", reason: "backslashes are not separators" },
+    { path: ".git/hooks/pre-commit", problem: GIT, reason: "a top-level .git segment" },
+    { path: "vendor/.git/config", problem: GIT, reason: "a nested .git segment" },
+    { path: ".GIT/config", problem: GIT, reason: "case alias of .git (case-insensitive checkout)" },
+    {
+      path: ".github/workflows/ci.yml",
+      problem: WORKFLOWS,
+      reason: "the withhold push can rewrite workflow files after mirrors",
+    },
+    {
+      path: ".GitHub/Workflows/ci.yml",
+      problem: WORKFLOWS,
+      reason: "case alias of .github/workflows (case-insensitive checkout)",
+    },
+    { path: "bad\0name.md", problem: CONTROL, reason: "a NUL byte would throw past the refusal" },
+    { path: "bad\nname.md", problem: CONTROL, reason: "a newline is a control byte too" },
+  ])("$reason", ({ path, problem }) => {
+    expect(mirrorPathProblem(path)).toBe(problem);
   });
 });
 
@@ -178,14 +212,20 @@ describe("planMirrors", () => {
 
   test("a glob in the source is refused - a source names exactly one file", () => {
     const root = makeTree({});
-    const plan = planMirrors(root, decl("skills/*/LICENSE.md", "copy.md"), MANIFEST, "");
-    expect(plan.refusals[0]).toContain("exactly one file");
+    expect(planMirrors(root, decl("skills/*/LICENSE.md", "copy.md"), MANIFEST, "")).toEqual({
+      writes: [],
+      unmatched: [],
+      refusals: [expect.stringContaining("exactly one file")],
+    });
   });
 
   test("a source missing from the delivered tree is refused", () => {
     const root = makeTree({});
-    const plan = planMirrors(root, decl("LICENSE.md", "copy.md"), MANIFEST, "");
-    expect(plan.refusals[0]).toContain("missing from the delivered tree");
+    expect(planMirrors(root, decl("LICENSE.md", "copy.md"), MANIFEST, "")).toEqual({
+      writes: [],
+      unmatched: [],
+      refusals: [expect.stringContaining("missing from the delivered tree")],
+    });
   });
 
   test("a null manifest refuses every entry with the stated problem", () => {
@@ -217,8 +257,11 @@ describe("planMirrors", () => {
 
   test("a '**' pattern is refused, never treated as a recursive glob", () => {
     const root = makeTree({ "LICENSE.md": "the license" });
-    const plan = planMirrors(root, decl("LICENSE.md", "skills/**/LICENSE.md"), MANIFEST, "");
-    expect(plan.refusals[0]).toContain("'**'");
+    expect(planMirrors(root, decl("LICENSE.md", "skills/**/LICENSE.md"), MANIFEST, "")).toEqual({
+      writes: [],
+      unmatched: [],
+      refusals: [expect.stringContaining("'**'")],
+    });
   });
 
   test("two sources claiming one target refuse EVERY claim - order never picks the winner", () => {
@@ -354,22 +397,23 @@ describe("planMirrors", () => {
 describe("materializeWrites", () => {
   test("writes byte copies, creating missing directories and files", () => {
     const root = makeTree({ "LICENSE.md": "the license\n" });
-    const { written, current, refusals } = materializeWrites(root, [
-      { source: "LICENSE.md", target: "template/LICENSE.md" },
-    ]);
-    expect(written).toHaveLength(1);
-    expect(current).toEqual([]);
-    expect(refusals).toEqual([]);
+    const write = { source: "LICENSE.md", target: "template/LICENSE.md" };
+    expect(materializeWrites(root, [write])).toEqual({
+      written: [write],
+      current: [],
+      refusals: [],
+    });
     expect(readFileSync(join(root, "template/LICENSE.md"), "utf-8")).toBe("the license\n");
   });
 
   test("a byte-equal target is current, not rewritten", () => {
     const root = makeTree({ "LICENSE.md": "same\n", "copy.md": "same\n" });
-    const { written, current } = materializeWrites(root, [
-      { source: "LICENSE.md", target: "copy.md" },
-    ]);
-    expect(written).toEqual([]);
-    expect(current).toHaveLength(1);
+    const write = { source: "LICENSE.md", target: "copy.md" };
+    expect(materializeWrites(root, [write])).toEqual({
+      written: [],
+      current: [write],
+      refusals: [],
+    });
   });
 
   test("a symlinked target is refused - the write would follow the link", () => {
@@ -455,9 +499,10 @@ describe("declarationSource", () => {
       "--no-verify",
     );
     writeFileSync(join(root, ".repo-platform.yml"), "modules: [uv]\n");
-    const { text, refusal } = declarationSource(root);
-    expect(refusal).toBeNull();
-    expect(text).toContain("mirrors:");
+    expect(declarationSource(root)).toEqual({
+      text: "modules: [uv]\nmirrors: []\n",
+      refusal: null,
+    });
   });
 
   test("a git repository whose HEAD lacks the file REFUSES - no silent fallback to the rewritten tree", () => {

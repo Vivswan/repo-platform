@@ -39,48 +39,42 @@ describe("headSplitEntries", () => {
 
   test("a grammar this sync does not read is refused, never skipped", () => {
     // Not the one grammar: a guessed boundary could overwrite repo-owned
-    // bytes, so the reader refuses and every caller fails closed.
-    const text = manifestOf({
-      "AGENTS.md": { class: "split", grammar: "prefix", marker: OLD_SENTINEL, hash: null },
-    });
-    expect(() => headSplitEntries(text, "m")).toThrow('split grammar "prefix"');
-    expect(() => headSplitEntries(text, "m")).toThrow("refusing to guess");
-    expect(() => headSplitEntries(text, "m")).toThrow("recover=recopy");
-  });
-
-  test("the RETIRED tail-marker grammar is refused with recovery advice, never converted", () => {
-    // The one-time conversion shim is deleted (fleet censused
-    // post-conversion): the retired wire shape, exactly as the old compose
-    // emitted it, now gets the loud refusal - the ONLY behavior.
-    const text = manifestOf({
-      "AGENTS.md": {
-        class: "split",
+    // bytes, so the reader refuses and every caller fails closed. The
+    // retired vintages land here too, exactly as the old compose emitted
+    // them: the one-time conversion shim is deleted (fleet censused
+    // post-conversion), so the loud refusal with recovery advice is the
+    // ONLY behavior.
+    for (const { grammar, path, entry } of [
+      {
+        grammar: "prefix",
+        path: "AGENTS.md",
+        entry: { marker: OLD_SENTINEL },
+        reason: "never a wire shape",
+      },
+      {
         grammar: "tail-marker",
-        marker: OLD_SENTINEL,
-        managed: "above",
-        hash: null,
+        path: "AGENTS.md",
+        entry: { marker: OLD_SENTINEL, managed: "above" },
+        reason: "retired vintage the deleted shim converted",
       },
-    });
-    expect(() => headSplitEntries(text, "m")).toThrow('split grammar "tail-marker"');
-    expect(() => headSplitEntries(text, "m")).toThrow("refusing to guess");
-    expect(() => headSplitEntries(text, "m")).toThrow("recover=recopy");
-  });
-
-  test("the RETIRED four-marker bounded-region grammar is refused the same way", () => {
-    const text = manifestOf({
-      ".gitignore": {
-        class: "split",
+      {
         grammar: "bounded-region",
-        marker: HB,
-        managed: "below",
-        managed_end: HE,
-        local_begin: OLD_LOCAL_BEGIN,
-        local_end: OLD_LOCAL_END,
-        hash: null,
+        path: ".gitignore",
+        entry: {
+          marker: HB,
+          managed: "below",
+          managed_end: HE,
+          local_begin: OLD_LOCAL_BEGIN,
+          local_end: OLD_LOCAL_END,
+        },
+        reason: "retired four-marker vintage, as the old compose stamped .gitignore",
       },
-    });
-    expect(() => headSplitEntries(text, "m")).toThrow('split grammar "bounded-region"');
-    expect(() => headSplitEntries(text, "m")).toThrow("recover=recopy");
+    ]) {
+      const text = manifestOf({ [path]: { class: "split", grammar, ...entry, hash: null } });
+      expect(() => headSplitEntries(text, "m")).toThrow(`split grammar "${grammar}"`);
+      expect(() => headSplitEntries(text, "m")).toThrow("refusing to guess");
+      expect(() => headSplitEntries(text, "m")).toThrow("recover=recopy");
+    }
   });
 
   test("an unknown ownership class is refused (damage could hide a split)", () => {

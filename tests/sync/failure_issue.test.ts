@@ -119,6 +119,21 @@ const oneFailure = [
   { label: "copier update", slug: "copier-update", rc: 3, output: "Traceback: secret target path" },
 ];
 
+/** The gh conversation as ordered "<method> <api path>" records (gh api
+ * defaults to GET). The stub logs one `gh ...` record per spawn; a record
+ * can span lines because the lookup's jq filter carries newlines. */
+function ghSequence(calls: string): string[] {
+  return calls
+    .split(/^(?=gh )/m)
+    .filter((record) => record !== "")
+    .map((record) => {
+      const argv = record.split(/\s+/);
+      const methodAt = argv.indexOf("--method");
+      return `${methodAt === -1 ? "GET" : argv[methodAt + 1]} ${argv[2]}`;
+    });
+}
+const WHOAMI_AND_LOOKUP = ["GET user", `GET repos/${SLUG}/issues`];
+
 describe("failure_issue.ts", () => {
   test("rejects a missing mode without touching the API", () => {
     const r = run(undefined);
@@ -141,33 +156,33 @@ describe("failure_issue.ts", () => {
     expect(r.calls).toBe("");
   });
 
-  test("deliver creates the issue when none exists", () => {
+  test("deliver creates the issue when none exists and assigns the target's owner", () => {
     const r = run("deliver", { failures: oneFailure });
     expect(r.exitCode).toBe(0);
-    expect(r.calls).toContain(`repos/${SLUG}/issues --method GET`);
+    // The whole conversation in order: the creation-time assignment
+    // guarantees the owner regardless of whether the target has automation
+    // listening for the PAT-fired issues:opened, and the create path makes
+    // no PATCH.
+    expect(ghSequence(r.calls)).toEqual([
+      ...WHOAMI_AND_LOOKUP,
+      `POST repos/${SLUG}/issues`,
+      `POST repos/${SLUG}/issues/31/assignees`,
+    ]);
     expect(r.calls).toContain("sort=created");
     expect(r.calls).toContain("direction=asc");
-    expect(r.calls).toContain(`repos/${SLUG}/issues --method POST`);
     expect(r.calls).toContain("title=[automated] repo-platform sync: private failure report");
-    expect(r.body).toContain("## copier update: exit 3");
-    expect(r.body).toContain("Traceback: secret target path");
-    expect(r.body).toContain("actions/runs/123");
-    expect(r.body).toContain("docs/private-repos.md");
-    expect(r.output).not.toContain("hidden-server");
-  });
-
-  test("deliver assigns the target's owner to the created issue", () => {
-    // Creation-time assignment guarantees the owner regardless of whether
-    // the target has automation listening for the PAT-fired issues:opened.
-    const r = run("deliver", { failures: oneFailure });
-    expect(r.exitCode).toBe(0);
     // The create must ask gh for the bare number (the stub answers 31) and
     // the lookup jq must extract the assignee count - both pinned via the
     // recorded argv, since the stub does not evaluate jq itself.
     expect(r.calls).toContain("--jq .number");
     expect(r.calls).toContain("assignees | length");
-    expect(r.calls).toContain(`repos/${SLUG}/issues/31/assignees --method POST`);
     expect(r.calls).toContain("assignees[]=Vivswan");
+    expect(r.body).toContain("## copier update: exit 3");
+    expect(r.body).toContain("Traceback: secret target path");
+    expect(r.body).toContain("actions/runs/123");
+    expect(r.body).toContain("docs/private-repos.md");
+    // The torn-row control: a well-formed manifest carries no skipped-row note.
+    expect(r.body).not.toContain("malformed failure-manifest row");
     // The number gh returned stays out of the public log, like the slug.
     expect(r.output).not.toContain("31");
     expect(r.output).not.toContain("issues/");
@@ -196,22 +211,19 @@ describe("failure_issue.ts", () => {
     expect(r.output).not.toContain("hidden-server");
   });
 
-  test("deliver replaces and reopens an existing issue", () => {
+  test("deliver reopens a reused unassigned issue and assigns the owner", () => {
     const r = run("deliver", { failures: oneFailure, lookup: "17 closed 0" });
     expect(r.exitCode).toBe(0);
-    expect(r.calls).toContain(`repos/${SLUG}/issues/17 --method PATCH`);
+    // No create: the reused issue is the delivery target, and the
+    // assignees POST is the only POST this path makes.
+    expect(ghSequence(r.calls)).toEqual([
+      ...WHOAMI_AND_LOOKUP,
+      `PATCH repos/${SLUG}/issues/17`,
+      `POST repos/${SLUG}/issues/17/assignees`,
+    ]);
     expect(r.calls).toContain("state=open");
-    // No create: the reused issue is the delivery target (the assignees
-    // POST below is the only POST this path may make).
-    expect(r.calls).not.toContain(`repos/${SLUG}/issues --method POST`);
-    expect(r.output).not.toContain("hidden-server");
-  });
-
-  test("deliver assigns the owner to a reused issue that is still unassigned", () => {
-    const r = run("deliver", { failures: oneFailure, lookup: "17 closed 0" });
-    expect(r.exitCode).toBe(0);
-    expect(r.calls).toContain(`repos/${SLUG}/issues/17/assignees --method POST`);
     expect(r.calls).toContain("assignees[]=Vivswan");
+    expect(r.output).not.toContain("hidden-server");
     expect(r.output).not.toContain("17");
     expect(r.output).not.toContain("issues/");
   });
@@ -240,26 +252,20 @@ describe("failure_issue.ts", () => {
     expect(r.body).not.toContain("undefined");
   });
 
-  test("an all-torn manifest still delivers the skipped-row note", () => {
-    const r = run("deliver", { rawRows: ["branch push\t1"] });
-    expect(r.exitCode).toBe(0);
-    expect(r.calls).toContain(`repos/${SLUG}/issues --method POST`);
-    expect(r.body).toContain("1 malformed failure-manifest row(s) were skipped");
-  });
-
-  test("a newline-only manifest delivers the skipped-row note, not an empty report", () => {
-    // "\n" passes the non-empty-file guard; the empty row must count as
-    // malformed or the report would claim completeness with no sections.
-    const r = run("deliver", { rawRows: [""] });
-    expect(r.exitCode).toBe(0);
-    expect(r.calls).toContain(`repos/${SLUG}/issues --method POST`);
-    expect(r.body).toContain("1 malformed failure-manifest row(s) were skipped");
-  });
-
-  test("torn-row control: a well-formed delivery carries no skipped-row note", () => {
-    const r = run("deliver", { failures: oneFailure });
-    expect(r.body).not.toContain("malformed failure-manifest row");
-  });
+  test.each([
+    { rawRows: ["branch push\t1"], reason: "a short row is the only row" },
+    { rawRows: [""], reason: "a newline-only file passes the non-empty-file guard" },
+  ])(
+    "an all-malformed manifest still delivers the skipped-row note, not an empty report ($reason)",
+    ({ rawRows }) => {
+      // The empty row must count as malformed too, or the report would
+      // claim completeness with no sections.
+      const r = run("deliver", { rawRows });
+      expect(r.exitCode).toBe(0);
+      expect(r.calls).toContain(`repos/${SLUG}/issues --method POST`);
+      expect(r.body).toContain("1 malformed failure-manifest row(s) were skipped");
+    },
+  );
 
   test("a three-field tail cut before its newline counts as torn", () => {
     // The dangerous torn shape: the crash landed mid-capture-path, so the
@@ -367,16 +373,13 @@ describe("failure_issue.ts", () => {
     expect(r.output).not.toContain("no such host");
   });
 
-  test("resolve is a silent no-op without an issue", () => {
-    const r = run("resolve");
+  test.each([
+    { lookup: "", reason: "no issue exists" },
+    { lookup: "9 closed 0", reason: "the issue is already closed" },
+  ])("resolve is a silent no-op when $reason - a read, never a write", ({ lookup }) => {
+    const r = run("resolve", { lookup });
     expect(r.exitCode).toBe(0);
-    expect(r.calls).not.toContain("PATCH");
-  });
-
-  test("resolve leaves a closed issue alone", () => {
-    const r = run("resolve", { lookup: "9 closed 0" });
-    expect(r.exitCode).toBe(0);
-    expect(r.calls).not.toContain("PATCH");
+    expect(ghSequence(r.calls)).toEqual(WHOAMI_AND_LOOKUP);
   });
 
   test("resolve closes an open issue with a healthy note", () => {

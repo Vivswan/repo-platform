@@ -17,24 +17,25 @@ function read(content: string) {
 
 describe("readAnswersFile", () => {
   test("parses commit and keeps every field for other consumers", () => {
-    const answers = read("_commit: abc1234\nprivate: true\n");
-    expect(answers.commit).toBe("abc1234");
-    expect(answers.fields.private).toBe(true);
+    expect(read("_commit: abc1234\nprivate: true\n")).toEqual({
+      commit: "abc1234",
+      fields: { _commit: "abc1234", private: true },
+    });
   });
 
-  test("undoes copier's to_nice_yaml quoting of a digit-only short sha", () => {
-    expect(read("_commit: '1234567'\n").commit).toBe("1234567");
-    expect(read("_commit: 1234567\n").commit).toBe("1234567");
-  });
-
-  test("bare short shas that are YAML 1.2 numbers come back verbatim", () => {
-    // PyYAML (copier's writer) leaves these bare; the default YAML 1.2
-    // schema would read them as numbers ("89012", "1.626e+56", "Infinity",
-    // "0") and the sync would resolve or reject a value that appears
-    // nowhere in the file.
-    for (const sha of ["0089012", "1626e53", "791e558", "0e50454"]) {
-      expect(read(`_commit: ${sha}\n`).commit).toBe(sha);
-    }
+  // PyYAML (copier's writer) leaves short shas bare unless to_nice_yaml
+  // quoted a digit-only one; the default YAML 1.2 schema would read the
+  // bare ones as numbers ("89012", "1.626e+56", "Infinity", "0") and the
+  // sync would resolve or reject a value that appears nowhere in the file.
+  test.each([
+    { text: "'1234567'", sha: "1234567", reason: "to_nice_yaml's quoting of a digit-only sha" },
+    { text: "1234567", sha: "1234567", reason: "bare digit-only sha reads as an int" },
+    { text: "0089012", sha: "0089012", reason: "an int read drops the leading zeros" },
+    { text: "1626e53", sha: "1626e53", reason: "float-looking: 1.626e+56 under YAML 1.2" },
+    { text: "791e558", sha: "791e558", reason: "float-looking: overflows to Infinity" },
+    { text: "0e50454", sha: "0e50454", reason: "float-looking: collapses to 0" },
+  ])("_commit $text comes back as the verbatim sha ($reason)", ({ text, sha }) => {
+    expect(read(`_commit: ${text}\n`).commit).toBe(sha);
   });
 
   test("an absent or non-scalar _commit is empty (the caller fails it loudly)", () => {
@@ -55,6 +56,9 @@ describe("readAnswersFile", () => {
 
 describe("dataFileYaml", () => {
   const LIVE = { modules: ["uv"], private: true, description: "live" } as const;
+  const NEL = String.fromCharCode(0x85);
+  const LS = String.fromCharCode(0x2028);
+  const DEL = String.fromCharCode(0x7f);
 
   // The hazard this passthrough exists for, proven on the real parser the
   // old code used: the yaml package's default YAML 1.2 schema re-types
@@ -85,15 +89,10 @@ describe("dataFileYaml", () => {
     // Plain stays plain: PyYAML must parse each value exactly as it parses
     // the answers file itself (1e3 a string, no/on the 1.1 booleans, 0123
     // the 1.1 octal) - quoting any of them would change copier's parse.
-    expect(out).toContain("project_name: 1e3\n");
-    expect(out).toContain("copyright_holder: no\n");
-    expect(out).toContain("auto_merge: on\n");
-    expect(out).toContain("tracking_label: 0123\n");
-    expect(out).toContain("description: plain text\n");
-    expect(out).toContain("private: false\n");
-    // Copier's own metadata never reaches a data file.
-    expect(out).not.toContain("_commit");
-    expect(out).not.toContain("_src_path");
+    // Copier's own metadata (_commit, _src_path) never reaches a data file.
+    expect(out).toBe(
+      "project_name: 1e3\ncopyright_holder: no\nauto_merge: on\ntracking_label: 0123\ndescription: plain text\nprivate: false\n",
+    );
   });
 
   test("quoting styles survive (a quoted string must stay a string to PyYAML)", () => {
@@ -103,16 +102,15 @@ describe("dataFileYaml", () => {
   });
 
   test("live keys drop from the carried document and re-emit exactly once", () => {
-    const out = dataFileYaml(
-      "description: recorded\nmodules:\n  - agents\nprivate: true\nkeep: me\n",
-      { modules: ["uv", "agents"], private: false, description: "live one" },
-    );
-    expect(out).toContain("keep: me\n");
-    expect(out).toContain('modules:\n  - "uv"\n  - "agents"\n');
-    expect(out).toContain("private: false\n");
-    expect(out).toContain('description: "live one"\n');
-    expect(out).not.toContain("recorded");
-    expect(out).not.toContain("- agents\n"); // only the quoted live list remains
+    // The recorded description, list, and flag are gone; the carried key
+    // stays first; the live values follow in one pass, quoted.
+    expect(
+      dataFileYaml("description: recorded\nmodules:\n  - agents\nprivate: true\nkeep: me\n", {
+        modules: ["uv", "agents"],
+        private: false,
+        description: "live one",
+      }),
+    ).toBe('keep: me\nmodules:\n  - "uv"\n  - "agents"\nprivate: false\ndescription: "live one"\n');
   });
 
   test("metadata-only answers yield an explicit empty mapping, never a null document", () => {
@@ -147,23 +145,41 @@ describe("dataFileYaml", () => {
     }
   });
 
-  test("PyYAML-special characters in live values are escaped, not emitted raw", () => {
-    // JSON.stringify leaves NEL/LS/PS and DEL raw; YAML 1.1 folds the
-    // breaks and rejects the non-printables, so they must leave as \uXXXX.
-    const nel = String.fromCharCode(0x85);
-    const ls = String.fromCharCode(0x2028);
-    const del = String.fromCharCode(0x7f);
-    const out = dataFileYaml("keep: x\n", {
-      modules: [`a${nel}b`],
-      private: false,
-      description: `line${nel}break${ls}and${del}del`,
-    });
-    expect(out).not.toContain(nel);
-    expect(out).not.toContain(ls);
-    expect(out).not.toContain(del);
-    expect(out).toContain("\\u0085");
-    expect(out).toContain("\\u2028");
-    expect(out).toContain("\\u007f");
+  // Live values leave as JSON-escaped double-quoted scalars. JSON.stringify
+  // leaves NEL/LS/PS, DEL, and the non-characters raw, and YAML 1.1 folds
+  // the breaks and rejects the non-printables, so those must leave as
+  // \uXXXX; PyYAML would re-type a bare `no`, so the quotes must stay.
+  // Whole-document equality also proves the raw characters are absent.
+  test.each([
+    {
+      reason: "NEL, LS, and DEL are escaped, not emitted raw",
+      modules: [`a${NEL}b`],
+      description: `line${NEL}break${LS}and${DEL}del`,
+      emitted:
+        'modules:\n  - "a\\u0085b"\nprivate: false\ndescription: "line\\u0085break\\u2028and\\u007fdel"\n',
+    },
+    {
+      reason: "the non-character U+FFFE is escaped",
+      modules: [],
+      description: `a${String.fromCharCode(0xfffe)}b`,
+      emitted: 'modules: []\nprivate: false\ndescription: "a\\ufffeb"\n',
+    },
+    {
+      reason: "quote and backslash stay JSON-escaped",
+      modules: [],
+      description: 'quote " and \\ back',
+      emitted: 'modules: []\nprivate: false\ndescription: "quote \\" and \\\\ back"\n',
+    },
+    {
+      reason: "a description PyYAML would re-type stays the exact string",
+      modules: [],
+      description: "no",
+      emitted: 'modules: []\nprivate: false\ndescription: "no"\n',
+    },
+  ])("live values are emitted escaped: $reason", ({ modules, description, emitted }) => {
+    expect(dataFileYaml("keep: x\n", { modules, private: false, description })).toBe(
+      `keep: x\n${emitted}`,
+    );
   });
 
   test("a carried scalar PyYAML wrote escaped refuses rather than re-emitting raw", () => {
@@ -220,30 +236,6 @@ describe("dataFileYaml", () => {
       description: `go ${emoji}`,
     });
     expect(out).toContain(emoji);
-  });
-
-  test("non-characters in live values are escaped, not emitted raw", () => {
-    const out = dataFileYaml("keep: x\n", {
-      modules: [],
-      private: false,
-      description: `a${String.fromCharCode(0xfffe)}b`,
-    });
-    expect(out).toContain("\\ufffe");
-    expect(out).not.toContain(String.fromCharCode(0xfffe));
-  });
-
-  test("quote and backslash in live values stay JSON-escaped", () => {
-    const out = dataFileYaml("keep: x\n", {
-      modules: [],
-      private: false,
-      description: 'quote " and \\ back',
-    });
-    expect(out).toContain('description: "quote \\" and \\\\ back"\n');
-  });
-
-  test("a description PyYAML would re-type stays the exact string", () => {
-    const out = dataFileYaml("keep: x\n", { modules: [], private: false, description: "no" });
-    expect(out).toContain('description: "no"\n');
   });
 
   test("a non-mapping top level throws AnswersFileError", () => {

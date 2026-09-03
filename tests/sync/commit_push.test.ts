@@ -129,8 +129,13 @@ function runCommitPush(mode: string, hideDetails: string, temp: Record<string, s
   return { ...result, runnerTemp };
 }
 
-describe("commit_push credential redaction", () => {
-  test("a failing lease probe re-emits git's error redacted", () => {
+// One spawn per (STUB_MODE, HIDE_DETAILS) input, each pinning that run's
+// whole public outcome: both streams, the ::error shape line, and the
+// hidden-failure manifest (present with a redacted capture for a hidden
+// target; absent for a public one, whose log already carries the redacted
+// output - a stray manifest would have the deliver step re-post it).
+describe("commit_push failure paths: redaction, diagnostics, hidden-failure manifest", () => {
+  test("a public target's failing lease probe re-emits git's error redacted and points at the log", () => {
     const result = runCommitPush("lease-fail", "false");
     expect(result.exitCode).toBe(128);
     expect(result.stdout + result.stderr).not.toContain(SENTINEL);
@@ -139,17 +144,30 @@ describe("commit_push credential redaction", () => {
     expect(result.stdout).toContain("::error::reading the branch lease");
     expect(result.stdout).toContain("exit 128");
     expect(result.stdout).toContain("git's output is in the log above");
+    expect(existsSync(join(result.runnerTemp, "hidden-failures.tsv"))).toBe(false);
   });
 
-  test("a hidden target's failing lease probe emits no git output at all", () => {
+  test("a hidden target's failing lease probe emits no git output and lands redacted in the failure-issue manifest", () => {
     const result = runCommitPush("lease-fail", "true");
     expect(result.exitCode).toBe(128);
     expect(result.stdout + result.stderr).not.toContain(SENTINEL);
     expect(result.stderr).not.toContain("o/r");
     expect(result.stdout).toContain("(ls-remote output hidden: private repository)");
+    // The public pointer replaces the false "see the log above": the log
+    // says only "output hidden", the issue carries the detail - and the
+    // promise is scoped to what the capture holds (the error stream).
+    expect(result.stdout).toContain(
+      "the redacted error output is delivered to the target's failure-report issue",
+    );
+    const manifest = readFileSync(join(result.runnerTemp, "hidden-failures.tsv"), "utf-8");
+    const [label, rc, capturePath] = manifest.trimEnd().split("\t");
+    expect([label, rc]).toEqual(["branch lease", "128"]);
+    const captured = readFileSync(capturePath, "utf-8");
+    expect(captured).not.toContain(SENTINEL);
+    expect(captured).toContain("unable to access 'https://***@github.com/o/r.git/'");
   });
 
-  test("a failing push redacts both re-emitted streams", () => {
+  test("a public target's failing push redacts both re-emitted streams and names the failure shape", () => {
     // The capture-file leg of the redaction property is asserted on the
     // hidden push failure below - the file only exists on that path.
     const result = runCommitPush("push-fail", "false");
@@ -157,9 +175,17 @@ describe("commit_push credential redaction", () => {
     expect(result.stdout + result.stderr).not.toContain(SENTINEL);
     expect(result.stderr).toContain("unable to access 'https://***@github.com/o/r.git/'");
     expect(result.stdout).toContain("https://***@github.com/o/r.git");
+    // The stub's git error carries a 403, so the shape line may OFFER the
+    // authorization lead - but keyed on evidence, alongside the exit code,
+    // instead of asserting one cause.
+    expect(result.stdout).toContain("::error::pushing to o/r#automation/repo-platform failed");
+    expect(result.stdout).toContain("exit 1");
+    expect(result.stdout).toContain("authorization-shaped");
+    expect(result.stdout).not.toContain("see the log above");
+    expect(existsSync(join(result.runnerTemp, "hidden-failures.tsv"))).toBe(false);
   });
 
-  test("a hidden target's failing push keeps its slug off both streams", () => {
+  test("a hidden target's failing push keeps its slug off both streams and lands redacted in the failure-issue manifest", () => {
     const result = runCommitPush("push-fail", "true");
     expect(result.exitCode).toBe(1);
     expect(result.stdout + result.stderr).not.toContain(SENTINEL);
@@ -167,26 +193,23 @@ describe("commit_push credential redaction", () => {
     // hidden path must withhold git's output on BOTH streams entirely.
     expect(result.stdout + result.stderr).not.toContain("o/r");
     expect(result.stdout).toContain("(push output hidden: private repository)");
+    expect(result.stdout).toContain("delivered to the target's failure-report issue");
+    const manifest = readFileSync(join(result.runnerTemp, "hidden-failures.tsv"), "utf-8");
+    const [label, rc, capturePath] = manifest.trimEnd().split("\t");
+    expect([label, rc]).toEqual(["branch push", "1"]);
+    const captured = readFileSync(capturePath, "utf-8");
+    expect(captured).not.toContain(SENTINEL);
+    expect(captured).toContain("unable to access 'https://***@github.com/o/r.git/'");
   });
 });
 
 describe("commit_push failure diagnostics", () => {
-  test("the push ::error names the failure shape instead of asserting one cause", () => {
-    // The stub's git error carries a 403, so the shape line may OFFER the
-    // authorization lead - but keyed on evidence, alongside the exit code.
-    const result = runCommitPush("push-fail", "false");
-    expect(result.stdout).toContain("::error::pushing to o/r#automation/repo-platform failed");
-    expect(result.stdout).toContain("exit 1");
-    expect(result.stdout).toContain("authorization-shaped");
-    expect(result.stdout).not.toContain("see the log above");
-  });
-
   test("stale-lease evidence outranks 403-shaped bytes in ordinary git output", () => {
     // The stub's stale failure carries "(403/403)" progress bytes, which
     // the authorization pattern's bare-number alternative matches (403
     // flanked by non-digits) - the exact stale-lease needle must win. The
-    // push-fail case above is the control: a real 403 error with no stale
-    // evidence still gets the authorization lead.
+    // public push-fail case above is the control: a real 403 error with no
+    // stale evidence still gets the authorization lead.
     const result = runCommitPush("stale-push-fail", "false");
     expect(result.exitCode).toBe(1);
     expect(result.stdout).toContain("the lease was stale");
@@ -204,72 +227,34 @@ describe("commit_push failure diagnostics", () => {
     expect(result.stdout).not.toContain("the lease was stale");
     expect(result.stdout).not.toContain("authorization-shaped");
   });
-
-  test("a hidden target's lease failure lands redacted in the failure-issue manifest", () => {
-    const result = runCommitPush("lease-fail", "true");
-    const manifest = readFileSync(join(result.runnerTemp, "hidden-failures.tsv"), "utf-8");
-    const [label, rc, capturePath] = manifest.trimEnd().split("\t");
-    expect(label).toBe("branch lease");
-    expect(rc).toBe("128");
-    const captured = readFileSync(capturePath, "utf-8");
-    expect(captured).not.toContain(SENTINEL);
-    expect(captured).toContain("unable to access 'https://***@github.com/o/r.git/'");
-    // The public pointer replaces the false "see the log above": the log
-    // says only "output hidden", the issue carries the detail - and the
-    // promise is scoped to what the capture holds (the error stream).
-    expect(result.stdout).toContain(
-      "the redacted error output is delivered to the target's failure-report issue",
-    );
-  });
-
-  test("a hidden target's push failure lands redacted in the failure-issue manifest", () => {
-    const result = runCommitPush("push-fail", "true");
-    const manifest = readFileSync(join(result.runnerTemp, "hidden-failures.tsv"), "utf-8");
-    const [label, rc, capturePath] = manifest.trimEnd().split("\t");
-    expect(label).toBe("branch push");
-    expect(rc).toBe("1");
-    const captured = readFileSync(capturePath, "utf-8");
-    expect(captured).not.toContain(SENTINEL);
-    expect(captured).toContain("unable to access 'https://***@github.com/o/r.git/'");
-    expect(result.stdout).toContain("delivered to the target's failure-report issue");
-  });
-
-  test("a public target's failures write no failure-issue manifest", () => {
-    // The channel is the hidden targets' compensation; a public log
-    // already carries the redacted output, and a stray manifest would
-    // have the deliver step re-post it.
-    for (const mode of ["lease-fail", "push-fail"]) {
-      const result = runCommitPush(mode, "false");
-      expect(existsSync(join(result.runnerTemp, "hidden-failures.tsv"))).toBe(false);
-    }
-  });
 });
 
 describe("commit_push Workflows-scope withhold reconciliation", () => {
-  // The explicit budget: three full commit_push spawns - bun-test's 5s
-  // default sits exactly on their combined runtime and kills the third
-  // mid-flight.
-  test("withholding EITHER gate file voids the gate-rework note; an unrelated withhold leaves it", () => {
-    // The note claims all-green.yml is deleted AND ci.yml gains the gate
-    // job - a withhold restoring either file makes the claim false, so
-    // both arms clear it, and a withhold touching neither must not.
-    const NOTE = "> [!NOTE]\n> GATE REWORK: ci.yml's all-green job carries the check now.\n";
-    for (const [mode, expected] of [
-      ["withhold-allgreen", ""],
-      ["withhold-other", ""],
-      ["withhold-unrelated", NOTE],
-    ] as const) {
+  // The note claims all-green.yml is deleted AND ci.yml gains the gate
+  // job - a withhold restoring either file makes the claim false, so both
+  // arms clear it, and a withhold touching neither must not. Every arm
+  // withheld a workflow file, so every arm reports the withhold. Each row
+  // is one full commit_push spawn, so each carries the explicit budget:
+  // bun-test's 5s default sits on a spawn's runtime under load.
+  const NOTE = "> [!NOTE]\n> GATE REWORK: ci.yml's all-green job carries the check now.\n";
+  test.each([
+    { mode: "withhold-allgreen", expected: "", reason: "all-green.yml restored voids the note" },
+    { mode: "withhold-other", expected: "", reason: "ci.yml restored voids the note" },
+    {
+      mode: "withhold-unrelated",
+      expected: NOTE,
+      reason: "a withhold touching neither gate file leaves the note",
+    },
+  ])(
+    "a withhold reconciles the gate-rework note and reports itself: $reason",
+    ({ mode, expected }) => {
       const result = runCommitPush(mode, "false", { [GATE_REWORK_NAME]: NOTE });
       expect(result.exitCode).toBe(0);
       expect(readFileSync(join(result.runnerTemp, GATE_REWORK_NAME), "utf-8")).toBe(expected);
-    }
-  }, 30_000);
-
-  test("an unrelated withhold still reports withheld workflow files", () => {
-    const result = runCommitPush("withhold-unrelated", "false", { [GATE_REWORK_NAME]: "" });
-    expect(result.exitCode).toBe(0);
-    expect(result.stdout).toContain("workflow-file changes were withheld");
-  });
+      expect(result.stdout).toContain("workflow-file changes were withheld");
+    },
+    30_000,
+  );
 
   test("the withhold overwrites a stale referenced-labels report (the recompute runs post-restore)", () => {
     // The workflow's check step ran BEFORE the restore rewrote
