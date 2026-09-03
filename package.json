@@ -29,7 +29,7 @@
     "compose": "bun scripts/compose_template.ts",
     "compose:check": "bun .github/scripts/build-branches/branch_tree.ts --dest /tmp/repo-platform-compose-check && rm -rf /tmp/repo-platform-compose-check",
     "rehearse:fleet": "bun .github/scripts/sync/rehearse_fleet.ts",
-    "test": "bun test ./tests ./actions",
+    "test": "bun scripts/run_tests.ts",
     "postinstall": "for pkg in actions/*/package.json; do bun install --frozen-lockfile --silent --cwd \"${pkg%/package.json}\" || exit 1; done",
     "prepare": "husky"
   },

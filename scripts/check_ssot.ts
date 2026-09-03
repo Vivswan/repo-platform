@@ -2199,6 +2199,8 @@ export const ASYNC_SPAWN_FILES: Record<string, string> = {
     "gh runner draining both pipes concurrently under Promise.all; bounded by the GitHub job timeout",
   "actions/release-health/release-health.ts":
     "gh runner draining both pipes concurrently under Promise.all; bounded by the GitHub job timeout",
+  "scripts/run_tests.ts":
+    "the test launcher forwards SIGINT/SIGTERM/SIGHUP to its bun test child and removes the per-run TMPDIR after the child exits; inherited stdio, so no pipe to drain, bounded by the child's own life",
 };
 
 /** The exact-set judgment for one file's async Bun.spawn mentions
@@ -3582,15 +3584,15 @@ const rules: Rule[] = [
         }
       }
 
-      const scriptTests = asRecord(ciJobs(repoCi(), "ci.yml")["script-tests"], "script-tests job");
-      const testRun = (scriptTests.steps as Record<string, unknown>[])
-        .map((step) => String(step.run ?? "").trim())
-        .find((run) => run.startsWith("bun test"));
-      if (testRun !== scripts.test) {
+      // CI reaches the suite only through `bun run test` (the local-gates
+      // rule pins that step), so the script itself must stay the launcher:
+      // a bare `bun test` here would leak fixtures with every gate green.
+      const TEST_LAUNCHER = "bun scripts/run_tests.ts";
+      if (scripts.test !== TEST_LAUNCHER) {
         mismatches.push({
-          file: "ci.yml script-tests",
-          expected: `the package.json test command (${scripts.test})`,
-          got: String(testRun),
+          file: "package.json",
+          expected: `test script '${TEST_LAUNCHER}' (scripts/run_tests.ts scopes TMPDIR per run)`,
+          got: String(scripts.test),
         });
       }
       return mismatches;
@@ -3896,6 +3898,11 @@ const rules: Rule[] = [
         // step: losing the step would leave the registry unenforced in CI
         // while the local chain stayed green.
         "bun run guards:binding",
+        // The test suite runs in CI only through this step, and only
+        // through the package.json script does it get the launcher's
+        // per-run TMPDIR (scripts/run_tests.ts): a bare `bun test` step
+        // would pass the forward pass and leak fixtures on the runner.
+        "bun run test",
         "bun run generate:check",
         "bun run dogfood:check",
         "bun run gitignore:topology",
