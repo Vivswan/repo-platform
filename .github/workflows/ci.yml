@@ -255,7 +255,7 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile --silent
       - name: Run .github/scripts and action tests
-        run: bun test ./tests ./actions
+        run: bun run test
 
   # Structural validation of this repository's own hosted agent skills
   # (skills/ plus the repo-owned .claude-plugin manifests), dogfooding the

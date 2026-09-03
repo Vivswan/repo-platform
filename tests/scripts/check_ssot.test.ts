@@ -2431,6 +2431,7 @@ describe("asyncSpawnMismatches", () => {
       ".github/scripts/sync/rehearse_fleet.ts",
       "actions/fuzz-issue/fuzz-issue.ts",
       "actions/release-health/release-health.ts",
+      "scripts/run_tests.ts",
     ]);
   });
 
