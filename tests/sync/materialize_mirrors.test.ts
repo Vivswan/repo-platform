@@ -30,8 +30,12 @@ import {
 import type { ManifestEntryShape } from "../../actions/shared/manifest.ts";
 import { boundedSpawnSync } from "../shared/bounded_spawn";
 
+/** The tree lives one level under its scratch dir so a `..` target the
+ *  escape tests refuse resolves to per-test scratch, never the shared
+ *  tmpdir (an unarmed write there would poison every later run). */
 function makeTree(files: Record<string, string>): string {
-  const root = mkdtempSync(join(tmpdir(), "mirrors-"));
+  const root = join(mkdtempSync(join(tmpdir(), "mirrors-")), "tree");
+  mkdirSync(root);
   for (const [rel, content] of Object.entries(files)) {
     mkdirSync(join(root, rel, ".."), { recursive: true });
     writeFileSync(join(root, rel), content);
