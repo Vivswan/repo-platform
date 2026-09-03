@@ -102,15 +102,24 @@ function spawnEnv(
   return { ...process.env, ...(env ?? {}) };
 }
 
+/** The hang bound every piped run carries: `timeoutMs` when given,
+ *  DEFAULT_HANG_BOUND_MS otherwise. One owner, so the default cannot be
+ *  applied at one wrapper and forgotten at its twin; each call site still
+ *  spells its spawn options as a literal (the spawn-sync-hang-bound rule
+ *  audits them structurally and a spread is opaque to it). */
+function hangBound(options: RunOptions): number {
+  return options.timeoutMs ?? DEFAULT_HANG_BOUND_MS;
+}
+
 /** Run with stdout/stderr captured. */
 export function capture(command: string[], options: RunOptions = {}): RunResult {
-  const timeoutMs = options.timeoutMs ?? DEFAULT_HANG_BOUND_MS;
+  const timeout = hangBound(options);
   const proc = Bun.spawnSync(command, {
     cwd: options.cwd,
     env: spawnEnv(options.env),
     stdout: "pipe",
     stderr: "pipe",
-    timeout: timeoutMs,
+    timeout,
     killSignal: "SIGKILL",
   });
   const timedOut = proc.exitedDueToTimeout === true;
@@ -151,17 +160,17 @@ export function must(command: string[], options: Omit<RunOptions, "timeoutMs"> =
  * failure like any other, except a line naming the deadline precedes the
  * exit - a SIGKILLed child usually dies without printing anything. */
 export function mustCapture(command: string[], options: RunOptions = {}): string {
-  const timeoutMs = options.timeoutMs ?? DEFAULT_HANG_BOUND_MS;
+  const timeout = hangBound(options);
   const proc = Bun.spawnSync(command, {
     cwd: options.cwd,
     env: spawnEnv(options.env),
     stdout: "pipe",
     stderr: "inherit",
-    timeout: timeoutMs,
+    timeout,
     killSignal: "SIGKILL",
   });
   if (proc.exitedDueToTimeout === true) {
-    console.error(`command timed out after ${timeoutMs}ms: ${redactCommand(command)}`);
+    console.error(`command timed out after ${timeout}ms: ${redactCommand(command)}`);
     process.exit(timeoutExitCode(proc));
   }
   if (proc.exitCode !== 0) process.exit(exitCodeOf(proc));

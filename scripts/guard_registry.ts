@@ -108,25 +108,15 @@ export const GUARD_REGISTRY: readonly GuardEntry[] = [
     testFile: "tests/shared/proc.test.ts",
     testName: "a key added to process.env after start reaches capture's child",
   },
-  // The default hang bound is resolved once per piped wrapper, so each
-  // wrapper's site is its own entry; the forcing test asserts both.
+  // The default hang bound has one owner (hangBound), so one entry arms
+  // it for capture and mustCapture alike.
   {
-    id: "proc-default-hang-bound-capture",
+    id: "proc-default-hang-bound",
     hazard:
       "a piped spawn whose caller passes no timeoutMs runs unbounded: a wedged child never reaches pipe EOF, so the run hangs until the job-level timeout kills the runner with no line naming the deadline",
     guardFile: ".github/scripts/shared/proc.ts",
-    snippet: "): RunResult {\n  const timeoutMs = options.timeoutMs ?? DEFAULT_HANG_BOUND_MS;",
-    mutated: "): RunResult {\n  const timeoutMs = options.timeoutMs;",
-    testFile: "tests/shared/proc.test.ts",
-    testName: "absent: the hang bound is the deadline; a normal exit reports timedOut false",
-  },
-  {
-    id: "proc-default-hang-bound-must-capture",
-    hazard:
-      "mustCapture's twin of the capture hazard: an unbounded piped spawn whose caller passes no timeoutMs hangs the run until the job-level timeout kills the runner",
-    guardFile: ".github/scripts/shared/proc.ts",
-    snippet: "): string {\n  const timeoutMs = options.timeoutMs ?? DEFAULT_HANG_BOUND_MS;",
-    mutated: "): string {\n  const timeoutMs = options.timeoutMs;",
+    snippet: "return options.timeoutMs ?? DEFAULT_HANG_BOUND_MS;",
+    mutated: "return options.timeoutMs as number;",
     testFile: "tests/shared/proc.test.ts",
     testName: "absent: the hang bound is the deadline; a normal exit reports timedOut false",
   },
