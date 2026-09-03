@@ -47,7 +47,10 @@ export interface GuardEntry {
   /** Repo-relative test file the arming audit runs. */
   testFile: string;
   /** The exact test name (verbatim, double-quoted in testFile) that must
-   *  go red under the mutation. */
+   *  go red under the mutation. Entries may share one: a single test
+   *  running the real judgment over the live files goes red under every
+   *  mutation of a link that judgment pins, and the audit still stages
+   *  each entry's mutation on its own. */
   testName: string;
 }
 
@@ -207,7 +210,8 @@ export const GUARD_REGISTRY: readonly GuardEntry[] = [
     snippet: "      sha: ${{ steps.gate.outputs.sha }}",
     mutated: "",
     testFile: "tests/scripts/check_ssot.test.ts",
-    testName: "the gate sha output is ARMED: the select job republishes the gate's resolved sha",
+    testName:
+      "the settings-repos sha plumbing is ARMED: every link the ssot rule pins holds on the live workflow",
   },
   {
     id: "settings-fallback-checkout-condition",
@@ -219,7 +223,7 @@ export const GUARD_REGISTRY: readonly GuardEntry[] = [
     mutated: "      - name: Check out the resolved green commit\n        if: false",
     testFile: "tests/scripts/check_ssot.test.ts",
     testName:
-      "the fallback checkout condition is ARMED: all three fallback steps gate on the resolved sha",
+      "the settings-repos sha plumbing is ARMED: every link the ssot rule pins holds on the live workflow",
   },
   {
     id: "settings-fallback-checkout-ref",
@@ -231,7 +235,7 @@ export const GUARD_REGISTRY: readonly GuardEntry[] = [
     mutated: "",
     testFile: "tests/scripts/check_ssot.test.ts",
     testName:
-      "the fallback checkout ref is ARMED: the re-checkout lands on the gate's resolved sha",
+      "the settings-repos sha plumbing is ARMED: every link the ssot rule pins holds on the live workflow",
   },
   {
     id: "settings-apply-checkout-pinned",
@@ -243,7 +247,7 @@ export const GUARD_REGISTRY: readonly GuardEntry[] = [
     mutated: "",
     testFile: "tests/scripts/check_ssot.test.ts",
     testName:
-      "the apply checkout pin is ARMED: the apply job checks out the select job's vouched sha",
+      "the settings-repos sha plumbing is ARMED: every link the ssot rule pins holds on the live workflow",
   },
   {
     id: "split-entries-unknown-grammar-refusal",
@@ -342,7 +346,8 @@ export const GUARD_REGISTRY: readonly GuardEntry[] = [
     snippet: "      needs.all-green.result == 'success' &&",
     mutated: "",
     testFile: "tests/scripts/check_ssot.test.ts",
-    testName: "the release leg's gate is ARMED: only a green all-green on a main push releases",
+    testName:
+      "the fleet-ci render is ARMED: every link the ssot rule pins holds on the live templates",
   },
   {
     id: "fleet-release-judged-sha-pass",
@@ -353,7 +358,8 @@ export const GUARD_REGISTRY: readonly GuardEntry[] = [
     snippet: "      sha: {% raw %}${{ github.sha }}{% endraw %}",
     mutated: "",
     testFile: "tests/scripts/check_ssot.test.ts",
-    testName: "the judged-sha pass is ARMED: the leg hands the judged commit to release.yml",
+    testName:
+      "the fleet-ci render is ARMED: every link the ssot rule pins holds on the live templates",
   },
   {
     id: "fleet-release-judged-sha-read",
@@ -365,7 +371,8 @@ export const GUARD_REGISTRY: readonly GuardEntry[] = [
     // biome-ignore lint/suspicious/noTemplateCurlyInString: the unarmed shape the audit stages
     mutated: "          JUDGED: {% raw %}${{ github.sha }}{% endraw %}",
     testFile: "tests/scripts/check_ssot.test.ts",
-    testName: "the judged-sha read is ARMED: release.yml's head gate compares the judged commit",
+    testName:
+      "the fleet-ci render is ARMED: every link the ssot rule pins holds on the live templates",
   },
   // The meta-check gate's shape at both sources: each pin fails OPEN at
   // run time (GitHub reports nothing wrong - the gate just stops seeing a
@@ -380,7 +387,8 @@ export const GUARD_REGISTRY: readonly GuardEntry[] = [
     snippet: "    needs: [checks, ci]",
     mutated: "    needs: [checks]",
     testFile: "tests/scripts/check_ssot.test.ts",
-    testName: "the fleet gate's needs edge is ARMED: all-green needs both caller jobs",
+    testName:
+      "the fleet-ci render is ARMED: every link the ssot rule pins holds on the live templates",
   },
   {
     id: "fleet-gate-always",
@@ -390,7 +398,8 @@ export const GUARD_REGISTRY: readonly GuardEntry[] = [
     snippet: "    if: always()",
     mutated: "",
     testFile: "tests/scripts/check_ssot.test.ts",
-    testName: "the fleet gate's always() is ARMED: a failed caller cannot skip the gate",
+    testName:
+      "the fleet-ci render is ARMED: every link the ssot rule pins holds on the live templates",
   },
   {
     id: "repo-gate-needs-roster",
@@ -413,7 +422,7 @@ export const GUARD_REGISTRY: readonly GuardEntry[] = [
     snippet: "    types: [opened, edited, reopened, synchronize]",
     mutated: "    types: [opened, edited]",
     testFile: "tests/scripts/check_ssot.test.ts",
-    testName: "the pr-title trigger shape is ARMED: a types list without synchronize is refused",
+    testName: "the pr-title workflow is ARMED: every link the rule pins holds on the live sources",
   },
   {
     id: "pr-title-required-check-pin",
@@ -423,8 +432,7 @@ export const GUARD_REGISTRY: readonly GuardEntry[] = [
     snippet: "            - context: pr-title\n              integration_id: 15368",
     mutated: "            - context: pr-title",
     testFile: "tests/scripts/check_ssot.test.ts",
-    testName:
-      "the pr-title required-check pin is ARMED: only the Actions app's job check satisfies the context",
+    testName: "the pr-title workflow is ARMED: every link the rule pins holds on the live sources",
   },
   {
     id: "pr-title-module-activation",
@@ -434,8 +442,7 @@ export const GUARD_REGISTRY: readonly GuardEntry[] = [
     snippet: "    enforcement: active",
     mutated: "    enforcement: disabled",
     testFile: "tests/scripts/check_ssot.test.ts",
-    testName:
-      "the pr-title module activation is ARMED: the module layer flips the baseline's disabled ruleset active",
+    testName: "the pr-title workflow is ARMED: every link the rule pins holds on the live sources",
   },
   {
     id: "docs-site-caller-theme-refusal",

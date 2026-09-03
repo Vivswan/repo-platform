@@ -233,7 +233,6 @@ describe("the all-green name pins", () => {
   });
 
   test("the lookup pin matches the active template literal and rejects commented or string-embedded copies", () => {
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal source line under test
     const line =
       "const url = `repos/${repository}/commits/${sha}/check-runs?check_name=${CHECK_NAME}&filter=latest`;";
     expect(templateCarries(line, CHECK_RUN_LOOKUP)).toBe(true);
@@ -401,24 +400,12 @@ jobs:
     expect(got.some((e) => e.includes("the fallback trio in order"))).toBe(true);
   });
 
-  test("the gate sha output is ARMED: the select job republishes the gate's resolved sha", () => {
-    // The live-file forcing tests the guard registry names: each runs
-    // the exact structural judgment the ssot rule runs on the REAL
-    // workflow, so deleting or rewiring any link goes red here - a
-    // missing link silently reverts a checkout to the trigger ref
-    // (actions/checkout treats an empty ref as the default).
-    expect(settingsHealShaPlumbingMismatches(live())).toEqual([]);
-  });
-
-  test("the fallback checkout condition is ARMED: all three fallback steps gate on the resolved sha", () => {
-    expect(settingsHealShaPlumbingMismatches(live())).toEqual([]);
-  });
-
-  test("the fallback checkout ref is ARMED: the re-checkout lands on the gate's resolved sha", () => {
-    expect(settingsHealShaPlumbingMismatches(live())).toEqual([]);
-  });
-
-  test("the apply checkout pin is ARMED: the apply job checks out the select job's vouched sha", () => {
+  // The live-file forcing test the guard registry's settings-* entries
+  // name: the exact structural judgment the ssot rule runs on the REAL
+  // workflow, so unarming any pinned link goes red here (a missing link
+  // silently reverts a checkout to the trigger ref - actions/checkout
+  // treats an empty ref as the default).
+  test("the settings-repos sha plumbing is ARMED: every link the ssot rule pins holds on the live workflow", () => {
     expect(settingsHealShaPlumbingMismatches(live())).toEqual([]);
   });
 });
@@ -882,7 +869,6 @@ describe("actionsBunGuardMismatches", () => {
     {
       reason: "a workspace-relative bun-version-file (it reads the CALLER's dotfile)",
       text: canonical.replaceAll(
-        // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal action line under test
         "bun-version-file: ${{ github.action_path }}/.bun-version",
         "bun-version-file: .bun-version",
       ),
@@ -1138,7 +1124,6 @@ jobs:
     );
     expect(stepless.some((m) => m.expected.includes("./actions/all-green"))).toBe(true);
     const unwired = allGreenGateMismatches(
-      // biome-ignore lint/suspicious/noTemplateCurlyInString: the mutation under test
       doc(valid.replace("needs: ${{ toJSON(needs) }}", "needs: '{}'")),
       ["a", "b"],
     );
@@ -2692,7 +2677,6 @@ describe("asyncStreamWriteMismatches", () => {
     { source: "process . stdout . write (out);", reason: "spaced member access" },
     { source: "globalThis.process.stdout.write(out);", reason: "a globalThis receiver" },
     {
-      // biome-ignore lint/suspicious/noTemplateCurlyInString: literal source under test
       source: "const t = `${process.stdout.write(chunk)}`;",
       reason: "a template interpolation (code, not string content)",
     },
@@ -2789,7 +2773,6 @@ describe("fleetCiRenderMismatches", () => {
     "    steps:",
     "      - uses: {{ github_username }}/repo-platform/actions/all-green@build",
     "        with:",
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal template line under test
     "          needs: {% raw %}${{ toJSON(needs) }}{% endraw %}",
     "{# compose:all-green-release #}",
     "",
@@ -2815,7 +2798,6 @@ describe("fleetCiRenderMismatches", () => {
     "      vulnerability-alerts: read",
     "    uses: ./.github/workflows/release.yml",
     "    with:",
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal fragment line under test
     "      sha: {% raw %}${{ github.sha }}{% endraw %}",
     "    secrets: inherit",
     "",
@@ -2832,16 +2814,13 @@ describe("fleetCiRenderMismatches", () => {
     "      - name: Check this run judged the current head",
     "        id: head",
     "        env:",
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal template lines under test
     "          GH_TOKEN: {% raw %}${{ github.token }}{% endraw %}",
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal template lines under test
     "          JUDGED: {% raw %}${{ inputs.sha || github.sha }}{% endraw %}",
     "        run: |",
     '          head="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)"',
     '          if [ "$head" = "$JUDGED" ]; then',
     '            echo "current=true" >> "$GITHUB_OUTPUT"',
     "          else",
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal template lines under test
     '            echo "::notice::main moved to ${head:0:7} since ${JUDGED:0:7} was judged; the newer run releases"',
     '            echo "current=false" >> "$GITHUB_OUTPUT"',
     "          fi",
@@ -2892,7 +2871,6 @@ describe("fleetCiRenderMismatches", () => {
       "    needs: [checks, ci]\n",
       "    if: always()\n",
       "      - uses: {{ github_username }}/repo-platform/actions/all-green@build\n",
-      // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal template line under test
       "          needs: {% raw %}${{ toJSON(needs) }}{% endraw %}\n",
     ]) {
       const found = fleetCiRenderMismatches(ciTemplate.replace(line, ""), leg, releaseWf);
@@ -3076,7 +3054,6 @@ describe("fleetCiRenderMismatches", () => {
   test("dropping the needs edge or the judged-sha pass goes red - each is an exact-line pin", () => {
     for (const line of [
       "    needs: [all-green]\n",
-      // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal fragment line under test
       "      sha: {% raw %}${{ github.sha }}{% endraw %}\n",
       "      group: post-green-release\n",
       "    secrets: inherit\n",
@@ -3097,9 +3074,7 @@ describe("fleetCiRenderMismatches", () => {
 
   test("a bare ${{ }} outside {% raw %} goes red - jinja eats it before GitHub ever sees it", () => {
     const mutated = leg.replace(
-      // biome-ignore lint/suspicious/noTemplateCurlyInString: the literal fragment line under test
       "      sha: {% raw %}${{ github.sha }}{% endraw %}",
-      // biome-ignore lint/suspicious/noTemplateCurlyInString: the mutation under test
       "      sha: ${{ github.sha }}",
     );
     const found = fleetCiRenderMismatches(ciTemplate, mutated, releaseWf);
@@ -3135,7 +3110,6 @@ describe("fleetCiRenderMismatches", () => {
     const unread = fleetCiRenderMismatches(
       ciTemplate,
       leg,
-      // biome-ignore lint/suspicious/noTemplateCurlyInString: the mutation under test
       releaseWf.replace(
         "{% raw %}${{ inputs.sha || github.sha }}{% endraw %}",
         "{% raw %}${{ github.sha }}{% endraw %}",
@@ -3185,7 +3159,6 @@ describe("fleetCiRenderMismatches", () => {
       .replace(
         "    steps:\n",
         "    steps:\n      - if: false\n        env:\n" +
-          // biome-ignore lint/suspicious/noTemplateCurlyInString: the decoy under test
           "          JUDGED: {% raw %}${{ inputs.sha || github.sha }}{% endraw %}\n" +
           "        run: echo decoy\n",
       );
@@ -3215,9 +3188,10 @@ describe("fleetCiRenderMismatches", () => {
     expect(() => fleetCiRenderMismatches("name: CI\n", leg, releaseWf)).toThrow("anchor lost");
   });
 
-  // The live-file forcing tests the guard registry names: each runs the
-  // exact structural judgment the ssot rule runs on the REAL sources, so
-  // the arming audit's mutation of any pinned link goes red here.
+  // The live-file forcing test the guard registry's fleet-ci render
+  // entries name: the exact structural judgment the ssot rule runs on the
+  // REAL sources, so the arming audit's mutation of any pinned link goes
+  // red here.
   const liveMismatches = () =>
     fleetCiRenderMismatches(
       readFileSync("templates/base/.github/workflows/ci.yml.jinja", "utf-8"),
@@ -3225,23 +3199,7 @@ describe("fleetCiRenderMismatches", () => {
       readFileSync("templates/release-please/.github/workflows/release.yml.jinja", "utf-8"),
     );
 
-  test("the fleet gate's needs edge is ARMED: all-green needs both caller jobs", () => {
-    expect(liveMismatches()).toEqual([]);
-  });
-
-  test("the fleet gate's always() is ARMED: a failed caller cannot skip the gate", () => {
-    expect(liveMismatches()).toEqual([]);
-  });
-
-  test("the release leg's gate is ARMED: only a green all-green on a main push releases", () => {
-    expect(liveMismatches()).toEqual([]);
-  });
-
-  test("the judged-sha pass is ARMED: the leg hands the judged commit to release.yml", () => {
-    expect(liveMismatches()).toEqual([]);
-  });
-
-  test("the judged-sha read is ARMED: release.yml's head gate compares the judged commit", () => {
+  test("the fleet-ci render is ARMED: every link the ssot rule pins holds on the live templates", () => {
     expect(liveMismatches()).toEqual([]);
   });
 });
@@ -3419,9 +3377,10 @@ describe("prTitleWorkflowMismatches", () => {
     expect(empty.some((m) => m.file.includes("templates/pr-title/settings.yml"))).toBe(true);
   });
 
-  // The live-file forcing tests the guard registry names: each runs the
-  // exact judgment the pr-title-workflow rule runs on the REAL sources,
-  // so the audit's mutation of any of the three files goes red here.
+  // The live-file forcing test the guard registry's pr-title-* entries
+  // name: the exact judgment the pr-title-workflow rule runs on the REAL
+  // sources, so the audit's mutation of any of the three files goes red
+  // here.
   const livePrTitle = () =>
     prTitleWorkflowMismatches(
       readFileSync("templates/pr-title/.github/workflows/pr-title.yml.jinja", "utf-8"),
@@ -3429,15 +3388,7 @@ describe("prTitleWorkflowMismatches", () => {
       readFileSync("templates/pr-title/settings.yml", "utf-8"),
     );
 
-  test("the pr-title trigger shape is ARMED: a types list without synchronize is refused", () => {
-    expect(livePrTitle()).toEqual([]);
-  });
-
-  test("the pr-title required-check pin is ARMED: only the Actions app's job check satisfies the context", () => {
-    expect(livePrTitle()).toEqual([]);
-  });
-
-  test("the pr-title module activation is ARMED: the module layer flips the baseline's disabled ruleset active", () => {
+  test("the pr-title workflow is ARMED: every link the rule pins holds on the live sources", () => {
     expect(livePrTitle()).toEqual([]);
   });
 });
