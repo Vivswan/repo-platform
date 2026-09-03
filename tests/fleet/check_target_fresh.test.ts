@@ -83,6 +83,9 @@ describe("check_target_fresh", () => {
   test("an unresolvable target publishes nothing, so the apply stays off", () => {
     const result = run({ TARGET: "o/r", PINNED: HEAD }, true);
     expect(result.exitCode).not.toBe(0);
-    expect(result.outputs).not.toContain("moved=false");
+    expect(result.outputs).toBe("");
+    // The RESOLVER's failure, naming the target - not an unrelated crash
+    // that happened to publish nothing.
+    expect(result.stderr).toContain("o/r: cannot read the default branch");
   });
 });

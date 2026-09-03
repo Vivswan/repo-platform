@@ -21,31 +21,42 @@ import {
 } from "../../.github/scripts/fleet/label_references.ts";
 
 describe("issueFormLabels", () => {
-  test("a list value is taken element-whole (the chromium-bridge shape)", () => {
-    const form = 'name: Bug report\nlabels: ["type:bug", "needs triage, maybe"]\nbody: []\n';
-    expect(issueFormLabels(form)).toEqual(["type:bug", "needs triage, maybe"]);
-  });
-
-  test("a scalar value is comma-split like front matter", () => {
-    expect(issueFormLabels("labels: bug, help wanted\n")).toEqual(["bug", "help wanted"]);
-  });
-
-  test("no labels key, a non-mapping document, and broken YAML all read as no references", () => {
-    expect(issueFormLabels("name: x\nbody: []\n")).toEqual([]);
-    expect(issueFormLabels("- just\n- a list\n")).toEqual([]);
-    expect(issueFormLabels("name: [unclosed\n")).toEqual([]);
-  });
-
-  test("only the TOP-LEVEL labels key counts - a body attribute's `label` is form text", () => {
-    const form = [
-      "name: Bug report",
-      "body:",
-      "  - type: textarea",
-      "    attributes:",
-      "      label: What happened",
-      "    labels: [not-a-real-key-but-nested]",
-    ].join("\n");
-    expect(issueFormLabels(form)).toEqual([]);
+  test.each([
+    {
+      reason: "a list value is taken element-whole (the chromium-bridge shape)",
+      text: 'name: Bug report\nlabels: ["type:bug", "needs triage, maybe"]\nbody: []\n',
+      names: ["type:bug", "needs triage, maybe"],
+    },
+    {
+      reason: "a scalar value is comma-split like front matter",
+      text: "labels: bug, help wanted\n",
+      names: ["bug", "help wanted"],
+    },
+    { reason: "no labels key reads as no references", text: "name: x\nbody: []\n", names: [] },
+    {
+      reason: "a non-mapping document reads as no references",
+      text: "- just\n- a list\n",
+      names: [],
+    },
+    {
+      reason: "broken YAML reads as no references (GitHub applies no labels either)",
+      text: "name: [unclosed\n",
+      names: [],
+    },
+    {
+      reason: "only the TOP-LEVEL labels key counts - a body attribute's label is form text",
+      text: [
+        "name: Bug report",
+        "body:",
+        "  - type: textarea",
+        "    attributes:",
+        "      label: What happened",
+        "    labels: [not-a-real-key-but-nested]",
+      ].join("\n"),
+      names: [],
+    },
+  ])("$reason", ({ text, names }) => {
+    expect(issueFormLabels(text)).toEqual(names);
   });
 });
 

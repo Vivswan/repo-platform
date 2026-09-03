@@ -62,6 +62,13 @@ describe("buildMatrix", () => {
   });
 
   test("a redacted row emits its display, never the slug", () => {
+    // Target keeps EnrichedRow's discriminated union instead of flattening
+    // it into three independent fields, so `redact_name: true,
+    // hide_details: false` - the combination the selector's schema exists
+    // to prevent (a repo whose NAME is hidden but whose label and ruleset
+    // names print to the public log) - is unrepresentable here too; tsc
+    // checks the construction sites, and this pins the redacted arm's
+    // runtime output whole.
     const row: EnrichedRow = {
       repo: "Vivswan/hidden-server",
       redact_name: true,
@@ -99,36 +106,6 @@ describe("buildMatrix", () => {
   test("no targets is an empty matrix, not an error", () => {
     expect(buildMatrix([], null)).toEqual([]);
   });
-
-  test("the redaction union rides through: redacted always means hidden details", () => {
-    // Target used to flatten EnrichedRow's discriminated union into three
-    // independent fields, re-admitting `redact_name: true, hide_details:
-    // false` - the combination the selector's schema exists to prevent
-    // (a repo whose NAME is hidden but whose label and ruleset names
-    // print to the public log). The union now carries through at the
-    // type level (tsc checks the construction sites); this pins the
-    // runtime outputs, which were already sound - no behavior change.
-    const rows: EnrichedRow[] = [
-      publicRow("Vivswan/open"),
-      {
-        repo: "Vivswan/hidden-server",
-        redact_name: true,
-        hide_details: true,
-        display: "h**-s**r",
-        verify: "deadbeef",
-      },
-      {
-        repo: "Vivswan/committed-private",
-        redact_name: false,
-        hide_details: true,
-        display: "Vivswan/committed-private",
-        verify: "",
-      },
-    ];
-    for (const entry of buildMatrix(rows, selfTarget("Vivswan/repo-platform"))) {
-      if (entry.redact_name) expect(entry.hide_details).toBe(true);
-    }
-  });
 });
 
 describe("applyOnly", () => {
@@ -150,21 +127,23 @@ describe("applyOnly", () => {
     },
   ];
 
-  test("keeps only the requested self target", () => {
-    const scoped = applyOnly(rows, self, "vivswan/REPO-PLATFORM");
-    expect(scoped.self).toEqual(self);
-    expect(scoped.rows).toHaveLength(0);
-  });
-
-  test("matches rows case-insensitively on the real slug", () => {
-    const scoped = applyOnly(rows, self, "vivswan/GAMMA");
-    expect(scoped.self).toBeNull();
-    expect(scoped.rows.map((r) => r.repo)).toEqual(["Vivswan/gamma"]);
-  });
-
-  test("an unknown repo scopes everything to empty", () => {
-    const scoped = applyOnly(rows, self, "Vivswan/nope");
-    expect(scoped.self).toBeNull();
-    expect(scoped.rows).toHaveLength(0);
+  test.each([
+    {
+      reason: "the self slug, case-folded, keeps only self",
+      only: "vivswan/REPO-PLATFORM",
+      expected: { rows: [], self },
+    },
+    {
+      reason: "a row's real slug, case-folded, keeps that row and drops self",
+      only: "vivswan/GAMMA",
+      expected: { rows: [rows[1]], self: null },
+    },
+    {
+      reason: "an unknown slug scopes everything to empty",
+      only: "Vivswan/nope",
+      expected: { rows: [], self: null },
+    },
+  ])("applyOnly: $reason", ({ only, expected }) => {
+    expect(applyOnly(rows, self, only)).toEqual(expected);
   });
 });

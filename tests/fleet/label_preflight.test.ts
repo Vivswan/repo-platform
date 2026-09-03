@@ -190,7 +190,11 @@ describe("label_preflight script", () => {
     expect(r.output).toContain("no referenced label is scheduled for removal");
   });
 
-  test("an unreferenced undeclared label stays deletable (no block)", () => {
+  test("an unreferenced undeclared label stays deletable, and the checked run publishes not_applicable=false", () => {
+    // Exit 0 alone would also hold on every stand-down path (no labels
+    // key, warn+403), so the ARMED-and-passed signature is what is pinned:
+    // the pass message with its counts, and the step output that keeps
+    // the workflow's stood-down notice quiet.
     const r = run({
       merged: MERGED_WITH_BUG,
       args: ["--target-dir", "TARGET_DIR"],
@@ -198,6 +202,11 @@ describe("label_preflight script", () => {
       env: { LIVE_LABELS: "stray\nbug\n" },
     });
     expect(r.exitCode).toBe(0);
+    expect(r.output).toContain(
+      "o/r: no referenced label is scheduled for removal (0 referenced, 1 in the post-apply roster)",
+    );
+    // The WHOLE step-output file: armed, with no stand-down reason.
+    expect(r.outputs).toBe("not_applicable=false\nreason=\n");
   });
 
   test("check mode reports the would-be blocks as warnings and exits 0", () => {
@@ -320,17 +329,6 @@ describe("label_preflight script", () => {
     expect(r.outputs).toContain("reason=the merged settings document declares no labels key");
   });
 
-  test("a checked run publishes not_applicable=false (the stood-down notice stays quiet)", () => {
-    const r = run({
-      merged: MERGED_WITH_BUG,
-      args: ["--target-dir", "TARGET_DIR"],
-      targetFiles: { ".github/workflows/ci.yml": "jobs: {}\n" },
-      env: { LIVE_LABELS: "bug\n" },
-    });
-    expect(r.exitCode).toBe(0);
-    expect(r.outputs).toContain("not_applicable=false");
-  });
-
   test("fetch mode reads the reference files at the pinned ref and blocks the same way", () => {
     const r = run({
       merged: MERGED_WITH_BUG,
@@ -353,6 +351,12 @@ describe("label_preflight script", () => {
       env: { LIVE_LABELS: "stray\n" },
     });
     expect(r.exitCode).toBe(0);
+    // Armed and passed - not stood down and not a skipped fetch: the pass
+    // message carries the counts, and the whole output file says so.
+    expect(r.output).toContain(
+      "o/r: no referenced label is scheduled for removal (0 referenced, 1 in the post-apply roster)",
+    );
+    expect(r.outputs).toBe("not_applicable=false\nreason=\n");
   });
 
   test("fetch mode: a listed file that fetches 404 fails CLOSED (damage, not a race)", () => {
@@ -373,15 +377,32 @@ describe("label_preflight script", () => {
     expect(r.output).toContain("listed but unreadable");
   });
 
-  test("the reference source is exactly one of --target-dir and --ref, and --ref must be a sha", () => {
-    expect(run({ merged: MERGED_WITH_BUG, args: [] }).exitCode).toBe(1);
-    expect(
-      run({ merged: MERGED_WITH_BUG, args: ["--target-dir", "TARGET_DIR", "--ref", SHA] }).exitCode,
-    ).toBe(1);
-    const short = run({ merged: MERGED_WITH_BUG, args: ["--ref", "main"] });
-    expect(short.exitCode).toBe(1);
-    expect(short.output).toContain("40-hex commit sha");
-  });
+  test.each([
+    {
+      reason: "no source at all",
+      args: [],
+      refusal: "pass a reference source: --target-dir <checkout>, or --ref <40-hex commit sha>",
+    },
+    {
+      reason: "both sources at once",
+      args: ["--target-dir", "TARGET_DIR", "--ref", SHA],
+      refusal: "--target-dir and --ref are mutually exclusive",
+    },
+    {
+      reason: "a branch name where the sha belongs",
+      args: ["--ref", "main"],
+      refusal: "40-hex commit sha",
+    },
+  ])(
+    "the reference source is exactly one of --target-dir and --ref: $reason",
+    ({ args, refusal }) => {
+      // Each refusal names ITS cause: a bare exit 1 is what any crash or
+      // fail() produces too.
+      const r = run({ merged: MERGED_WITH_BUG, args });
+      expect(r.exitCode).toBe(1);
+      expect(r.output).toContain(refusal);
+    },
+  );
 
   test("--mode and --on-missing-permission reject values the action does not define", () => {
     const mode = run({

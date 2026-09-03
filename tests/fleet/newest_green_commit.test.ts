@@ -142,30 +142,29 @@ describe("newestGreenCommit", () => {
     }
   });
 
-  test("a dateless commit refuses - an age the walk cannot establish fails closed", () => {
-    // NaN age: every comparison is false, and the acceptance-window guard
-    // reads that as unproven instead of waving the commit through.
-    const outcome = walk([
-      { sha: sha("a"), parents: [sha("b")], verdict: "red" },
-      { sha: sha("b"), date: null, verdict: "green" },
-    ]);
-    expect(outcome.sha).toBeNull();
-    if (outcome.sha === null) {
-      expect(outcome.refusal).toContain("not provably within");
-    }
-  });
-
-  test("a far-future committer date refuses - past the skew allowance the age is unprovable", () => {
-    // A forged or clock-broken date must not slip past a bound that only
-    // looked backwards; a day of ordinary clock skew still passes.
-    const outcome = walk([
-      { sha: sha("a"), parents: [sha("b")], verdict: "red" },
-      { sha: sha("b"), date: new Date(NOW + 3 * DAY_MS).toISOString(), verdict: "green" },
-    ]);
-    expect(outcome.sha).toBeNull();
-    if (outcome.sha === null) {
-      expect(outcome.refusal).toContain("not provably within");
-    }
+  test.each([
+    {
+      // NaN age: every comparison is false, and the acceptance-window
+      // guard reads that as unproven instead of waving the commit through.
+      reason: "dateless - an age the walk cannot establish fails closed",
+      date: null,
+    },
+    {
+      // A forged or clock-broken date must not slip past a bound that only
+      // looked backwards; a day of ordinary clock skew still passes.
+      reason: "three days in the future - past the one-day skew allowance",
+      date: new Date(NOW + 3 * DAY_MS).toISOString(),
+    },
+  ])("an unprovable committer date refuses: $reason", ({ date }) => {
+    expect(
+      walk([
+        { sha: sha("a"), parents: [sha("b")], verdict: "red" },
+        { sha: sha("b"), date, verdict: "green" },
+      ]),
+    ).toEqual({
+      sha: null,
+      refusal: `commit ${"b".repeat(12)} (1 behind the tip) is not provably within the 14-day walk bound - stale means a rollback, and a dateless or future-dated commit cannot vouch for its age at all`,
+    });
   });
 
   test("ordinary clock skew is tolerated - a commit dated minutes ahead still vouches", () => {

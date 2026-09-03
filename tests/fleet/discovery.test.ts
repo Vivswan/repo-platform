@@ -46,15 +46,30 @@ describe("captureNetwork", () => {
     // A bare capture/spawnSync around a gh or curl argv reintroduces the
     // unbounded-hang class this helper closed; new network calls must
     // carry the deadline too.
+    const BARE = /\b(?:capture|mustCapture|spawnSync)\(\s*\[\s*"(?:gh|curl)"/g;
+    // The sweep's own controls: an empty offender list is evidence only
+    // if the pattern catches the offender shapes and the scan reaches the
+    // real call sites.
+    const catches = (line: string) => new RegExp(BARE.source).test(line);
+    expect(catches('capture(["gh", "api", "user"])')).toBe(true);
+    expect(catches('mustCapture(["gh", "api"])')).toBe(true);
+    expect(catches('spawnSync([ "curl", "-sS"])')).toBe(true);
+    expect(catches('captureNetwork(["gh", "api"])')).toBe(false);
+
     const dir = join(import.meta.dir, "../../.github/scripts/fleet");
     const offenders: string[] = [];
+    let bounded = 0;
     for (const entry of readdirSync(dir)) {
       if (!entry.endsWith(".ts")) continue;
       const source = readFileSync(join(dir, entry), "utf-8");
-      const bare = source.match(/\b(?:capture|mustCapture|spawnSync)\(\s*\[\s*"(?:gh|curl)"/g);
+      bounded += source.match(/\bcaptureNetwork\(\s*\[\s*"(?:gh|curl)"/g)?.length ?? 0;
+      const bare = source.match(BARE);
       for (const match of bare ?? []) offenders.push(`${entry}: ${match.replace(/\s+/g, " ")}`);
     }
     expect(offenders).toEqual([]);
+    // The scan read the scripts that make network calls, not an empty or
+    // misaddressed directory.
+    expect(bounded).toBeGreaterThan(0);
   });
 });
 
@@ -65,65 +80,80 @@ describe("scrubSlug", () => {
   const SLUG = "Vivswan/hidden-server";
   const HINT = "h**-s**r";
 
-  test("a slug embedded in a URL is scrubbed to the hint", () => {
-    const detail = "fatal: repository 'https://github.com/Vivswan/hidden-server.git/' not found";
-    const scrubbed = scrubSlug(detail, SLUG, HINT);
-    expect(scrubbed).toBe("fatal: repository 'https://github.com/h**-s**r.git/' not found");
-    expect(scrubbed).not.toContain("hidden-server");
-  });
-
-  test("a bare name inside a git error is scrubbed", () => {
-    const scrubbed = scrubSlug("error: failed to push some refs to hidden-server", SLUG, HINT);
-    expect(scrubbed).toBe("error: failed to push some refs to h**-s**r");
-  });
-
-  test("every occurrence goes: repeated slugs and bare names alike", () => {
-    const detail =
-      "Vivswan/hidden-server: fetch of hidden-server failed; retrying hidden-server, then Vivswan/hidden-server again";
-    const scrubbed = scrubSlug(detail, SLUG, HINT);
-    expect(scrubbed).not.toContain("hidden-server");
-    expect(scrubbed.split(HINT)).toHaveLength(5);
-  });
-
-  test("a name embedded in a longer token is still masked (substring semantics)", () => {
-    expect(scrubSlug("branch hidden-server-backup rejected", SLUG, HINT)).toBe(
-      "branch h**-s**r-backup rejected",
-    );
-  });
-
-  test("every casing of the slug and bare name is scrubbed", () => {
-    // GitHub identity is case-insensitive: error text may echo a casing
-    // other than discovery's canonical full_name (a redirect, a tool that
-    // lowercases URLs), and each variant is as private as the original.
-    const scrubbed = scrubSlug(
-      "GET https://api.github.com/repos/other/shared-private: 502; SHARED-PRIVATE is unreachable, Shared-Private retried",
-      "Other/Shared-Private",
-      "S**-P**e",
-    );
-    expect(scrubbed).toBe(
-      "GET https://api.github.com/repos/S**-P**e: 502; S**-P**e is unreachable, S**-P**e retried",
-    );
-  });
-
-  test("regex metacharacters in a slug are treated literally", () => {
-    expect(
-      scrubSlug("cannot read Vivswan/dotted.repo today", "Vivswan/dotted.repo", "d**.r**"),
-    ).toBe("cannot read d**.r** today");
-    // The "." must not match arbitrary characters: an unrelated name one
-    // character apart stays untouched.
-    const near = "cannot read Vivswan/dottedXrepo today";
-    expect(scrubSlug(near, "Vivswan/dotted.repo", "d**.r**")).toBe(near);
-  });
-
-  test("a no-op when the display IS the slug: the bare name must not expand into the slug", () => {
-    const detail = "push to hidden-server rejected";
-    expect(scrubSlug(detail, SLUG, SLUG)).toBe(detail);
-  });
-
-  test("a slug without an owner segment scrubs as its own bare name", () => {
-    expect(scrubSlug("cloning monorepo into monorepo", "monorepo", "m**o")).toBe(
-      "cloning m**o into m**o",
-    );
+  test.each([
+    {
+      reason: "a slug embedded in a URL is scrubbed to the hint",
+      detail: "fatal: repository 'https://github.com/Vivswan/hidden-server.git/' not found",
+      slug: SLUG,
+      hint: HINT,
+      expected: "fatal: repository 'https://github.com/h**-s**r.git/' not found",
+    },
+    {
+      reason: "a bare name inside a git error is scrubbed",
+      detail: "error: failed to push some refs to hidden-server",
+      slug: SLUG,
+      hint: HINT,
+      expected: "error: failed to push some refs to h**-s**r",
+    },
+    {
+      reason: "every occurrence goes: repeated slugs and bare names alike",
+      detail:
+        "Vivswan/hidden-server: fetch of hidden-server failed; retrying hidden-server, then Vivswan/hidden-server again",
+      slug: SLUG,
+      hint: HINT,
+      expected: "h**-s**r: fetch of h**-s**r failed; retrying h**-s**r, then h**-s**r again",
+    },
+    {
+      reason: "a name embedded in a longer token is still masked (substring semantics)",
+      detail: "branch hidden-server-backup rejected",
+      slug: SLUG,
+      hint: HINT,
+      expected: "branch h**-s**r-backup rejected",
+    },
+    {
+      // GitHub identity is case-insensitive: error text may echo a casing
+      // other than discovery's canonical full_name (a redirect, a tool that
+      // lowercases URLs), and each variant is as private as the original.
+      reason: "every casing of the slug and bare name is scrubbed",
+      detail:
+        "GET https://api.github.com/repos/other/shared-private: 502; SHARED-PRIVATE is unreachable, Shared-Private retried",
+      slug: "Other/Shared-Private",
+      hint: "S**-P**e",
+      expected:
+        "GET https://api.github.com/repos/S**-P**e: 502; S**-P**e is unreachable, S**-P**e retried",
+    },
+    {
+      reason: "regex metacharacters in a slug are treated literally",
+      detail: "cannot read Vivswan/dotted.repo today",
+      slug: "Vivswan/dotted.repo",
+      hint: "d**.r**",
+      expected: "cannot read d**.r** today",
+    },
+    {
+      // The control for the row above: the "." must not match arbitrary
+      // characters, so an unrelated name one character apart stays untouched.
+      reason: "a near-miss of a metacharacter slug is left alone",
+      detail: "cannot read Vivswan/dottedXrepo today",
+      slug: "Vivswan/dotted.repo",
+      hint: "d**.r**",
+      expected: "cannot read Vivswan/dottedXrepo today",
+    },
+    {
+      reason: "a no-op when the display IS the slug: the bare name must not expand into the slug",
+      detail: "push to hidden-server rejected",
+      slug: SLUG,
+      hint: SLUG,
+      expected: "push to hidden-server rejected",
+    },
+    {
+      reason: "a slug without an owner segment scrubs as its own bare name",
+      detail: "cloning monorepo into monorepo",
+      slug: "monorepo",
+      hint: "m**o",
+      expected: "cloning m**o into m**o",
+    },
+  ])("$reason", ({ detail, slug, hint, expected }) => {
+    expect(scrubSlug(detail, slug, hint)).toBe(expected);
   });
 });
 
@@ -173,67 +203,85 @@ describe("readDispatchRepo", () => {
     }
   }
 
-  test("ONLY_REPO is trimmed and case-folded", () => {
-    withEnv({ ONLY_REPO: "  Vivswan/Steady  ", GITHUB_EVENT_PATH: "" }, () => {
-      expect(readDispatchRepo()).toBe("vivswan/steady");
-    });
-  });
-
-  test("a bare name gets the owner prefixed before folding", () => {
-    withEnv({ ONLY_REPO: "Central-Home", GITHUB_EVENT_PATH: "" }, () => {
-      expect(readDispatchRepo("Vivswan")).toBe("vivswan/central-home");
-    });
-  });
-
-  test("without an owner a bare name stays bare (the sync selector's contract)", () => {
-    withEnv({ ONLY_REPO: "Central-Home", GITHUB_EVENT_PATH: "" }, () => {
-      expect(readDispatchRepo()).toBe("central-home");
-    });
-  });
-
-  test("a slug input is never owner-prefixed", () => {
-    withEnv({ ONLY_REPO: "Other/Shared-Private", GITHUB_EVENT_PATH: "" }, () => {
-      expect(readDispatchRepo("Vivswan")).toBe("other/shared-private");
-    });
-  });
-
-  test("an empty ONLY_REPO falls back to the event payload's repo input", () => {
-    const eventFile = join(root, "event.json");
-    writeFileSync(eventFile, JSON.stringify({ inputs: { repo: "Vivswan/Hidden-Server" } }));
-    withEnv({ ONLY_REPO: "", GITHUB_EVENT_PATH: eventFile }, () => {
-      expect(readDispatchRepo()).toBe("vivswan/hidden-server");
-    });
-  });
-
-  test("a non-empty ONLY_REPO overrides the event payload", () => {
-    const eventFile = join(root, "event-overridden.json");
-    writeFileSync(eventFile, JSON.stringify({ inputs: { repo: "Vivswan/from-event" } }));
-    withEnv({ ONLY_REPO: "Vivswan/from-env", GITHUB_EVENT_PATH: eventFile }, () => {
-      expect(readDispatchRepo()).toBe("vivswan/from-env");
-    });
-  });
-
-  test("an event payload without a repo input reads as empty", () => {
-    const eventFile = join(root, "event-empty.json");
-    writeFileSync(eventFile, JSON.stringify({ inputs: {} }));
-    withEnv({ ONLY_REPO: "", GITHUB_EVENT_PATH: eventFile }, () => {
-      expect(readDispatchRepo()).toBe("");
-    });
-  });
-
-  test("a null inputs key reads as empty (an inputs-less API dispatch)", () => {
-    const eventFile = join(root, "event-null-inputs.json");
-    writeFileSync(eventFile, JSON.stringify({ inputs: null }));
-    withEnv({ ONLY_REPO: "", GITHUB_EVENT_PATH: eventFile }, () => {
-      expect(readDispatchRepo()).toBe("");
-    });
-  });
-
-  test("a payload without an inputs key reads as empty (schedule and release events)", () => {
-    const eventFile = join(root, "event-no-inputs.json");
-    writeFileSync(eventFile, JSON.stringify({ action: "published" }));
-    withEnv({ ONLY_REPO: "", GITHUB_EVENT_PATH: eventFile }, () => {
-      expect(readDispatchRepo()).toBe("");
+  test.each([
+    {
+      reason: "ONLY_REPO is trimmed and case-folded",
+      onlyRepo: "  Vivswan/Steady  ",
+      eventBody: undefined,
+      owner: undefined,
+      expected: "vivswan/steady",
+    },
+    {
+      reason: "a bare name gets the owner prefixed before folding",
+      onlyRepo: "Central-Home",
+      eventBody: undefined,
+      owner: "Vivswan",
+      expected: "vivswan/central-home",
+    },
+    {
+      reason: "without an owner a bare name stays bare (the sync selector's contract)",
+      onlyRepo: "Central-Home",
+      eventBody: undefined,
+      owner: undefined,
+      expected: "central-home",
+    },
+    {
+      reason: "a slug input is never owner-prefixed",
+      onlyRepo: "Other/Shared-Private",
+      eventBody: undefined,
+      owner: "Vivswan",
+      expected: "other/shared-private",
+    },
+    {
+      reason: "an empty ONLY_REPO falls back to the event payload's repo input",
+      onlyRepo: "",
+      eventBody: JSON.stringify({ inputs: { repo: "Vivswan/Hidden-Server" } }),
+      owner: undefined,
+      expected: "vivswan/hidden-server",
+    },
+    {
+      reason: "a non-empty ONLY_REPO overrides the event payload",
+      onlyRepo: "Vivswan/from-env",
+      eventBody: JSON.stringify({ inputs: { repo: "Vivswan/from-event" } }),
+      owner: undefined,
+      expected: "vivswan/from-env",
+    },
+    {
+      reason: "an event payload without a repo input reads as empty",
+      onlyRepo: "",
+      eventBody: JSON.stringify({ inputs: {} }),
+      owner: undefined,
+      expected: "",
+    },
+    {
+      reason: "a null inputs key reads as empty (an inputs-less API dispatch)",
+      onlyRepo: "",
+      eventBody: JSON.stringify({ inputs: null }),
+      owner: undefined,
+      expected: "",
+    },
+    {
+      reason: "a payload without an inputs key reads as empty (schedule and release events)",
+      onlyRepo: "",
+      eventBody: JSON.stringify({ action: "published" }),
+      owner: undefined,
+      expected: "",
+    },
+    {
+      reason: "nothing set reads as empty, and an owner never prefixes an empty input",
+      onlyRepo: "",
+      eventBody: undefined,
+      owner: "Vivswan",
+      expected: "",
+    },
+  ])("$reason", ({ onlyRepo, eventBody, owner, expected }) => {
+    let eventPath = "";
+    if (eventBody !== undefined) {
+      eventPath = join(root, `event-${Bun.hash(eventBody).toString(16)}.json`);
+      writeFileSync(eventPath, eventBody);
+    }
+    withEnv({ ONLY_REPO: onlyRepo, GITHUB_EVENT_PATH: eventPath }, () => {
+      expect(readDispatchRepo(owner)).toBe(expected);
     });
   });
 
@@ -287,12 +335,6 @@ describe("readDispatchRepo", () => {
     expect(r.exitCode).toBe(1);
     expect(r.stdout).toContain("::error::readDispatchRepo: event payload: not valid JSON");
     expect(r.stdout + r.stderr).not.toContain("hiddenserver");
-  });
-
-  test("nothing set reads as empty, and an owner never prefixes an empty input", () => {
-    withEnv({ ONLY_REPO: "", GITHUB_EVENT_PATH: "" }, () => {
-      expect(readDispatchRepo("Vivswan")).toBe("");
-    });
   });
 });
 

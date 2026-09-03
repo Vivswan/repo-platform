@@ -116,31 +116,44 @@ describe("the resolve step's stamp hop", () => {
     }
   });
 
-  test("a stampless NON-history sha refuses, publishing no ref at all", () => {
-    for (const status of ["ahead", "diverged"]) {
-      const result = run(BUILD_SHA, { message: "not a build commit", status });
-      expect(result.exitCode).not.toBe(0);
-      expect(result.outputs).toBe("");
-      expect(result.stdout).toContain("refusing to run repo-platform scripts");
-    }
-  });
-
-  test("a compare failure refuses too - unprovable is unrunnable", () => {
-    const result = run(BUILD_SHA, { message: "not a build commit", status: undefined });
+  // The refusal is the DELIBERATE `*)` branch: its ::error:: names the
+  // compare status it saw. A silent set -e death (the `|| echo unreachable`
+  // fallback dropped, say) would also exit nonzero with no output, so the
+  // refusal text is what tells the two apart.
+  test.each([
+    { reason: "ahead of main is not main history", status: "ahead", seen: "ahead" },
+    { reason: "diverged from main is not main history", status: "diverged", seen: "diverged" },
+    {
+      reason: "a compare failure reads as unreachable - unprovable is unrunnable",
+      status: undefined,
+      seen: "unreachable",
+    },
+  ])("a stampless NON-history sha refuses, publishing no ref: $reason", ({ status, seen }) => {
+    const result = run(BUILD_SHA, { message: "not a build commit", status });
     expect(result.exitCode).not.toBe(0);
     expect(result.outputs).toBe("");
+    expect(result.stdout).toContain("refusing to run repo-platform scripts");
+    expect(result.stdout).toContain(`compare status: ${seen}`);
   });
 
-  test("a malformed stamp is no stamp: only a full 40-hex sha parses, per commit_stamp.ts", () => {
-    for (const smuggled of [
-      `source: https://github.com/Vivswan/repo-platform/commit/${"e".repeat(39)}`,
-      "source: https://github.com/Vivswan/repo-platform/commit/refs/remotes/origin/main",
-    ]) {
-      expect(commitStampParse(smuggled)).toBe("");
-      const result = run(BUILD_SHA, { message: smuggled, status: "diverged" });
-      expect(result.exitCode).not.toBe(0);
-      expect(result.outputs).toBe("");
-    }
+  test.each([
+    {
+      reason: "a 39-hex sha",
+      smuggled: `source: https://github.com/Vivswan/repo-platform/commit/${"e".repeat(39)}`,
+    },
+    {
+      reason: "a ref path where the sha belongs",
+      smuggled: "source: https://github.com/Vivswan/repo-platform/commit/refs/remotes/origin/main",
+    },
+  ])("a malformed stamp is no stamp, per commit_stamp.ts: $reason", ({ smuggled }) => {
+    expect(commitStampParse(smuggled)).toBe("");
+    // With no stamp the sha falls through to the compare hop, where the
+    // diverged status refuses it - the same deliberate branch as above.
+    const result = run(BUILD_SHA, { message: smuggled, status: "diverged" });
+    expect(result.exitCode).not.toBe(0);
+    expect(result.outputs).toBe("");
+    expect(result.stdout).toContain("refusing to run repo-platform scripts");
+    expect(result.stdout).toContain("compare status: diverged");
   });
 
   test("an absent workflow sha (GHES) falls back to main without touching the API", () => {
