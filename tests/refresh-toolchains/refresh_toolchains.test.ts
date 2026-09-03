@@ -6,7 +6,6 @@
 import { describe, expect, test } from "bun:test";
 import {
   bumpPinVersion,
-  compareVersions,
   decideBump,
   fetchJson,
   latestBunVersion,
@@ -70,26 +69,21 @@ describe("fetchJson", () => {
 });
 
 describe("decideBump", () => {
-  test("a fetched version older than the pin is a downgrade, never applied", () => {
-    // The backport shape: 1.3.15 pinned, then a 1.2.22 backport release
-    // surfaces as GitHub's date-ordered "latest".
-    expect(decideBump("1.3.15", "1.2.22")).toBe("downgrade");
-    expect(decideBump("2.0.0", "1.99.99")).toBe("downgrade");
-  });
-
-  test("an equal fetched version is current (no-op)", () => {
-    expect(decideBump("1.3.14", "1.3.14")).toBe("current");
-  });
-
-  test("a newer fetched version is a bump", () => {
-    expect(decideBump("1.3.14", "1.3.15")).toBe("bump");
-    expect(decideBump("24.19.0", "26.0.0")).toBe("bump");
-  });
-
-  test("comparison is numeric per component, not lexicographic", () => {
-    expect(decideBump("1.9.0", "1.10.0")).toBe("bump");
-    expect(decideBump("1.10.0", "1.9.9")).toBe("downgrade");
-    expect(compareVersions("10.0.0", "9.99.99")).toBeGreaterThan(0);
+  // Three-way verdict on the fetched version relative to the pin; the
+  // comparison is numeric per component, never lexicographic. A
+  // "downgrade" is never applied: GitHub's date-ordered /releases/latest
+  // can surface a backport on an older line.
+  test.each([
+    ["1.3.15", "1.2.22", "downgrade", "backport on an older line surfaces as date-ordered latest"],
+    ["2.0.0", "1.99.99", "downgrade", "major below the pin"],
+    ["1.3.14", "1.3.14", "current", "equal is a no-op"],
+    ["1.3.14", "1.3.15", "bump", "patch ahead"],
+    ["24.19.0", "26.0.0", "bump", "LTS line jump"],
+    ["1.9.0", "1.10.0", "bump", "minor 10 > 9 numerically (lexicographic says 1.10 < 1.9)"],
+    ["1.10.0", "1.9.9", "downgrade", "minor 9 < 10 numerically (lexicographic says 1.9 > 1.10)"],
+    ["9.99.99", "10.0.0", "bump", "major 10 > 9 numerically (lexicographic says 10 < 9)"],
+  ] as const)("pin %s, fetched %s -> %s (%s)", (pinned, fetched, verdict) => {
+    expect(decideBump(pinned, fetched)).toBe(verdict);
   });
 });
 
@@ -99,8 +93,8 @@ describe("latestBunVersion", () => {
   });
 
   test("rejects prereleases, foreign tags, and missing fields", () => {
-    expect(() => latestBunVersion({ tag_name: "bun-v1.3.14-canary.1" })).toThrow("bun");
-    expect(() => latestBunVersion({ tag_name: "v1.3.14" })).toThrow("bun");
+    expect(() => latestBunVersion({ tag_name: "bun-v1.3.14-canary.1" })).toThrow("does not match");
+    expect(() => latestBunVersion({ tag_name: "v1.3.14" })).toThrow("does not match");
     expect(() => latestBunVersion({})).toThrow("expected a string");
     expect(() => latestBunVersion(null)).toThrow("expected a string");
   });
@@ -160,33 +154,42 @@ describe("bumpPinVersion", () => {
     "",
   ].join("\n");
 
-  test("rewrites only the pin's version line, preserving everything else", () => {
-    const next = bumpPinVersion(manifest, "1.3.0", "demo");
-    expect(next).toBe(manifest.replace("    version: 1.2.3", "    version: 1.3.0"));
-  });
-
-  test("is idempotent for the current version", () => {
-    expect(bumpPinVersion(manifest, "1.2.3", "demo")).toBe(manifest);
-  });
-
-  test("a manifest without a pin block (or without its version line) throws", () => {
-    expect(() => bumpPinVersion("description: x\n", "1.0.0", "demo")).toThrow("no pin block");
-    const truncated = manifest.replace("    version: 1.2.3\n", "");
-    expect(() => bumpPinVersion(truncated, "1.0.0", "demo")).toThrow("no version line");
-  });
-
-  test("a quoted version or a trailing comment fails loudly, naming the expected form", () => {
-    for (const line of ['    version: "1.2.3"', "    version: 1.2.3 # keep in step with CI"]) {
-      const decorated = manifest.replace("    version: 1.2.3", line);
-      expect(() => bumpPinVersion(decorated, "1.3.0", "demo")).toThrow("version: X.Y.Z");
-    }
-  });
-
-  test("a version line outside the pin block does not count", () => {
-    const outside = ["toolchain:", "  pin:", "    file: .demo-version", "version: 9.9.9", ""].join(
-      "\n",
+  test.each([
+    ["1.3.0", "a bump rewrites only the pin's version line"],
+    ["1.2.3", "the current version is idempotent (byte-identical output)"],
+  ])("to %s: %s, preserving every other byte", (version) => {
+    expect(bumpPinVersion(manifest, version, "demo")).toBe(
+      manifest.replace("    version: 1.2.3", `    version: ${version}`),
     );
-    expect(() => bumpPinVersion(outside, "1.0.0", "demo")).toThrow("no version line");
+  });
+
+  // Every reject path: absent pin block, pin block without a version line,
+  // a version line that sits outside the block, and the two decorated
+  // forms the line-targeted rewrite refuses rather than half-rewriting.
+  test.each([
+    ["there is no pin block at all", "description: x\n", "no pin block"],
+    [
+      "the pin block has no version line",
+      manifest.replace("    version: 1.2.3\n", ""),
+      "no version line",
+    ],
+    [
+      "the only version line sits at column 0, outside the pin block",
+      ["toolchain:", "  pin:", "    file: .demo-version", "version: 9.9.9", ""].join("\n"),
+      "no version line",
+    ],
+    [
+      "the version is quoted (must be exactly version: X.Y.Z)",
+      manifest.replace("    version: 1.2.3", '    version: "1.2.3"'),
+      "version: X.Y.Z",
+    ],
+    [
+      "the version line carries a trailing comment (must be exactly version: X.Y.Z)",
+      manifest.replace("    version: 1.2.3", "    version: 1.2.3 # keep in step with CI"),
+      "version: X.Y.Z",
+    ],
+  ])("throws when %s", (_reason, text, thrown) => {
+    expect(() => bumpPinVersion(text, "1.0.0", "demo")).toThrow(thrown);
   });
 });
 
