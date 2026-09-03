@@ -27,55 +27,70 @@ describe("validate", () => {
     expect(parsed?.exclude).toEqual(["Vivswan/scratch"]);
   });
 
-  test("rejects a bad slug", () => {
-    const { errors } = validateRegistry({ managed: ["not a slug!"] });
-    expect(errors).toHaveLength(1);
-    expect(errors[0]).toContain('"not a slug!"');
-  });
-
-  test("rejects a slug with a trailing-hyphen owner", () => {
-    const { errors } = validateRegistry({ managed: ["bad-/repo"] });
-    expect(errors).toHaveLength(1);
-  });
-
-  test("rejects a duplicate entry", () => {
-    const { errors } = validateRegistry({ managed: ["a/b", "a/b"] });
-    expect(errors).toHaveLength(1);
-    expect(errors[0]).toContain("duplicate managed entry");
-  });
-
-  test("rejects a case-variant duplicate managed entry", () => {
-    const { errors } = validateRegistry({ managed: ["a/b", "A/B"] });
-    expect(errors).toHaveLength(1);
-    expect(errors[0]).toContain("duplicate managed entry");
-  });
-
-  test("rejects a case-variant duplicate exclude entry", () => {
-    const { errors } = validateRegistry({ managed: ["*"], exclude: ["a/b", "A/B"] });
-    expect(errors).toHaveLength(1);
-    expect(errors[0]).toContain("duplicate exclude entry");
-  });
-
-  test("rejects two wildcards", () => {
-    const { errors } = validateRegistry({ managed: ["*", "*"] });
-    expect(errors.some((e) => e.includes('more than one "*"'))).toBe(true);
-  });
-
-  test("rejects exclude without a wildcard (dead config)", () => {
-    const { errors } = validateRegistry({ managed: ["a/b"], exclude: ["c/d"] });
-    expect(errors).toHaveLength(1);
-    expect(errors[0]).toContain("dead config");
-  });
-
-  test("accepts exclude alongside a wildcard", () => {
-    const { errors } = validateRegistry({ managed: ["*"], exclude: ["c/d"] });
-    expect(errors).toEqual([]);
-  });
-
-  test("rejects unknown top-level keys", () => {
-    const { errors } = validateRegistry({ managed: ["a/b"], channels: {} });
-    expect(errors).toHaveLength(1);
-    expect(errors[0]).toContain('unknown top-level key "channels"');
+  // Exact error lists: length-1-plus-substring would pass on a single
+  // unrelated error, and `.some` tolerates extras. Every fault gets its
+  // own row; the multi-fault row proves the validator reports them all.
+  test.each([
+    {
+      reason: "a bad slug",
+      data: { managed: ["not a slug!"] },
+      errors: ['repos.yml: managed entry "not a slug!" is not an owner/name slug or "*"'],
+    },
+    {
+      reason: "a slug with a trailing-hyphen owner",
+      data: { managed: ["bad-/repo"] },
+      errors: ['repos.yml: managed entry "bad-/repo" is not an owner/name slug or "*"'],
+    },
+    {
+      reason: "a duplicate entry",
+      data: { managed: ["a/b", "a/b"] },
+      errors: ['repos.yml: duplicate managed entry "a/b" (slugs match ignoring case)'],
+    },
+    {
+      reason: "a case-variant duplicate managed entry",
+      data: { managed: ["a/b", "A/B"] },
+      errors: ['repos.yml: duplicate managed entry "A/B" (slugs match ignoring case)'],
+    },
+    {
+      reason: "a case-variant duplicate exclude entry",
+      data: { managed: ["*"], exclude: ["a/b", "A/B"] },
+      errors: ['repos.yml: duplicate exclude entry "A/B" (slugs match ignoring case)'],
+    },
+    {
+      reason: "two wildcards",
+      data: { managed: ["*", "*"] },
+      errors: ['repos.yml: managed contains more than one "*" wildcard'],
+    },
+    {
+      reason: "exclude without a wildcard (dead config)",
+      data: { managed: ["a/b"], exclude: ["c/d"] },
+      errors: [
+        'repos.yml: exclude has entries but managed has no "*" wildcard - nothing is ' +
+          "auto-discovered, so exclusions are dead config; remove the entries from exclude " +
+          "(or just do not list them in managed)",
+      ],
+    },
+    {
+      reason: "exclude alongside a wildcard is fine",
+      data: { managed: ["*"], exclude: ["c/d"] },
+      errors: [],
+    },
+    {
+      reason: "unknown top-level keys",
+      data: { managed: ["a/b"], channels: {} },
+      errors: ['repos.yml: unknown top-level key "channels" - allowed keys are managed, exclude'],
+    },
+    {
+      reason: "every problem, not just the first",
+      data: { managed: ["bad slug", "a/b", "a/b"], unknown: {} },
+      errors: [
+        'repos.yml: unknown top-level key "unknown" - allowed keys are managed, exclude',
+        'repos.yml: managed entry "bad slug" is not an owner/name slug or "*"',
+        'repos.yml: duplicate managed entry "a/b" (slugs match ignoring case)',
+      ],
+    },
+  ])("reports $reason", ({ data, errors }) => {
+    expect(validateRegistry(data).errors).toEqual(errors);
   });
 
   test("rejects an unquoted * as a YAML parse failure", () => {
@@ -85,102 +100,95 @@ describe("validate", () => {
     expect(errors[0]).toContain("YAML parse error");
     expect(errors[0]).toContain('quoted ("*")');
   });
-
-  test("reports every problem, not just the first", () => {
-    const { errors } = validateRegistry({
-      managed: ["bad slug", "a/b", "a/b"],
-      unknown: {},
-    });
-    expect(errors.length).toBeGreaterThanOrEqual(3);
-  });
 });
 
 describe("select", () => {
-  test("wildcard without --discovered is an error", () => {
-    const { errors } = selectRepos(registry({ managed: { wildcard: true, repos: [] } }));
-    expect(errors).toHaveLength(1);
-    expect(errors[0]).toContain("--discovered");
+  // Every accept row pins the full {repo, owner, name} selection and an
+  // empty error list, so the owner/name split is proven on every case.
+  test.each([
+    {
+      reason: "explicit slugs work without --discovered",
+      registry: registry({ managed: { wildcard: false, repos: ["a/b", "c/d"] } }),
+      options: {},
+      expected: [
+        { repo: "a/b", owner: "a", name: "b" },
+        { repo: "c/d", owner: "c", name: "d" },
+      ],
+    },
+    {
+      reason: "wildcard unions discovered with explicit slugs, minus exclude",
+      registry: registry({
+        managed: { wildcard: true, repos: ["x/explicit"] },
+        exclude: ["a/skipped"],
+      }),
+      options: { discovered: ["a/skipped", "a/kept", "x/explicit"] },
+      expected: [
+        { repo: "a/kept", owner: "a", name: "kept" },
+        { repo: "x/explicit", owner: "x", name: "explicit" },
+      ],
+    },
+    {
+      reason: "exclude and dedupe match case-insensitively, keeping the listed casing",
+      registry: registry({
+        managed: { wildcard: true, repos: ["X/Explicit"] },
+        exclude: ["A/Skipped"],
+      }),
+      options: { discovered: ["a/skipped", "x/explicit", "a/kept"] },
+      expected: [
+        { repo: "X/Explicit", owner: "X", name: "Explicit" },
+        { repo: "a/kept", owner: "a", name: "kept" },
+      ],
+    },
+    {
+      reason: "--repo filters to one repo",
+      registry: registry({ managed: { wildcard: false, repos: ["a/b", "c/d"] } }),
+      options: { repo: "c/d" },
+      expected: [{ repo: "c/d", owner: "c", name: "d" }],
+    },
+    {
+      reason: "--repo matches case-insensitively",
+      registry: registry({ managed: { wildcard: false, repos: ["a/b", "C/Mixed-Case"] } }),
+      options: { repo: "c/mixed-case" },
+      expected: [{ repo: "C/Mixed-Case", owner: "C", name: "Mixed-Case" }],
+    },
+    {
+      reason: "an empty selection is [] not an error",
+      registry: registry({ managed: { wildcard: true, repos: [] } }),
+      options: { discovered: [] },
+      expected: [],
+    },
+  ])("selects: $reason", ({ registry: reg, options, expected }) => {
+    expect(selectRepos(reg, options)).toEqual({ selection: expected, errors: [] });
   });
 
-  test("explicit slugs work without --discovered", () => {
-    const { selection, errors } = selectRepos(
-      registry({ managed: { wildcard: false, repos: ["a/b", "c/d"] } }),
-    );
-    expect(errors).toEqual([]);
-    expect(selection.map((s) => s.repo)).toEqual(["a/b", "c/d"]);
-  });
-
-  test("wildcard unions discovered with explicit slugs, minus exclude", () => {
-    const { selection, errors } = selectRepos(
-      registry({ managed: { wildcard: true, repos: ["x/explicit"] }, exclude: ["a/skipped"] }),
-      { discovered: ["a/skipped", "a/kept", "x/explicit"] },
-    );
-    expect(errors).toEqual([]);
-    expect(selection.map((s) => s.repo)).toEqual(["a/kept", "x/explicit"]);
-  });
-
-  test("exclude and dedupe match case-insensitively, keeping the listed casing", () => {
-    const { selection, errors } = selectRepos(
-      registry({ managed: { wildcard: true, repos: ["X/Explicit"] }, exclude: ["A/Skipped"] }),
-      { discovered: ["a/skipped", "x/explicit", "a/kept"] },
-    );
-    expect(errors).toEqual([]);
-    expect(selection.map((s) => s.repo)).toEqual(["X/Explicit", "a/kept"]);
-  });
-
-  test("splits owner and name in the output", () => {
-    const { selection } = selectRepos(
-      registry({ managed: { wildcard: false, repos: ["Vivswan/dotfiles"] } }),
-    );
-    expect(selection).toEqual([{ repo: "Vivswan/dotfiles", owner: "Vivswan", name: "dotfiles" }]);
-  });
-
-  test("--repo filters to one repo", () => {
-    const { selection } = selectRepos(
-      registry({ managed: { wildcard: false, repos: ["a/b", "c/d"] } }),
-      { repo: "c/d" },
-    );
-    expect(selection.map((s) => s.repo)).toEqual(["c/d"]);
-  });
-
-  test("--repo matches case-insensitively", () => {
-    const { selection, errors } = selectRepos(
-      registry({ managed: { wildcard: false, repos: ["a/b", "C/Mixed-Case"] } }),
-      { repo: "c/mixed-case" },
-    );
-    expect(errors).toEqual([]);
-    expect(selection.map((s) => s.repo)).toEqual(["C/Mixed-Case"]);
-  });
-
-  test("--repo miss is an error mentioning exclude", () => {
-    const { errors } = selectRepos(
-      registry({ managed: { wildcard: true, repos: [] }, exclude: ["a/b"] }),
-      {
-        repo: "a/b",
-        discovered: ["a/b"],
-      },
-    );
-    expect(errors).toHaveLength(1);
-    expect(errors[0]).toContain("exclude");
-  });
-
-  test("empty selection is [] not an error", () => {
-    const { selection, errors } = selectRepos(
-      registry({ managed: { wildcard: true, repos: [] } }),
-      {
-        discovered: [],
-      },
-    );
-    expect(errors).toEqual([]);
-    expect(selection).toEqual([]);
-  });
-
-  test("garbage in the discovered list is an error", () => {
-    const { errors } = selectRepos(registry({ managed: { wildcard: true, repos: [] } }), {
-      discovered: ["not a slug"],
-    });
-    expect(errors).toHaveLength(1);
-    expect(errors[0]).toContain("discovered list entry");
+  // Each short-circuit path: the exact message, and an EMPTY selection
+  // riding with it.
+  test.each([
+    {
+      reason: "wildcard without --discovered",
+      registry: registry({ managed: { wildcard: true, repos: [] } }),
+      options: {},
+      error:
+        'repos.yml: managed contains "*" but no --discovered file was provided - pass the ' +
+        "caller's discovery output (a JSON array of owner/name strings)",
+    },
+    {
+      reason: "a --repo miss, mentioning exclude and withholding the value",
+      registry: registry({ managed: { wildcard: true, repos: [] }, exclude: ["a/b"] }),
+      options: { repo: "a/b", discovered: ["a/b"] },
+      error:
+        "--repo matched no selected repository (value withheld - it may be a private slug): " +
+        "the repo you dispatched with is not in managed (or the discovered list), or it is " +
+        "listed in exclude; check the spelling (matching ignores case)",
+    },
+    {
+      reason: "garbage in the discovered list, named by index only",
+      registry: registry({ managed: { wildcard: true, repos: [] } }),
+      options: { discovered: ["not a slug"] },
+      error: "discovered list entry at index 0 is not an owner/name slug",
+    },
+  ])("errors on $reason", ({ registry: reg, options, error }) => {
+    expect(selectRepos(reg, options)).toEqual({ selection: [], errors: [error] });
   });
 });
 
@@ -215,11 +223,14 @@ describe("CLI", () => {
   test("validate fails with ::error:: annotations on a broken file", async () => {
     const broken = join(tmpdir(), "repos-registry-test-broken.yml");
     await Bun.write(broken, "managed:\n  - bad slug\n  - a/b\n  - a/b\n");
-    // Annotations parse from stdout only; that is where fail() prints.
+    // Annotations parse from stdout only; that is where fail() prints -
+    // one ::error:: line per problem, exact text, nothing else.
     const { exitCode, stdout } = run(["validate", "--file", broken]);
     expect(exitCode).toBe(1);
-    expect(stdout).toContain("::error::");
-    expect(stdout.match(/::error::/g)?.length).toBe(2);
+    expect(stdout).toBe(
+      `::error::${broken}: managed entry "bad slug" is not an owner/name slug or "*"\n` +
+        `::error::${broken}: duplicate managed entry "a/b" (slugs match ignoring case)\n`,
+    );
   });
 
   test("select accepts discovered {repo, ...} objects with extra keys", async () => {

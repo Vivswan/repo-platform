@@ -2,7 +2,9 @@
 // files a repo's facts select, what the merged labels and rulesets come
 // out as, and the fact resolvers' fail-closed reads. Uses the REAL layer
 // files and module manifests - they are on-disk constants, and what they
-// merge to is exactly what the fleet's applies ship. The repo layer and
+// merge to is exactly what the fleet's applies ship, so the expectations
+// below are the rosters spelled out, never re-read from the files (a loop
+// over an emptied layer file would pass vacuously). The repo layer and
 // the fleet override (layers 5 and 6) are merge_settings_layers' tests.
 
 import { describe, expect, test } from "bun:test";
@@ -16,7 +18,6 @@ import {
   factsFromOperatorAnswers,
   factsFromTargetDir,
   layerPaths,
-  loadLayer,
   managedLabelNames,
   managedLabels,
   managedRulesets,
@@ -32,12 +33,10 @@ import { loadManifests } from "../../scripts/module_manifests";
 import { boundedSpawnSync } from "../shared/bounded_spawn";
 
 const manifests = loadManifests();
-const privateLayerLabels = (loadLayer(".github/settings-private.yml").labels ?? []) as {
-  name: string;
-}[];
-const releaseLabels = (loadLayer("templates/release-please/settings.yml").labels ?? []) as {
-  name: string;
-}[];
+
+// The baseline's unconditional roster: dependabot's base pair, then the
+// triage trio. Every selection starts from it.
+const BASELINE_LABELS = ["dependencies", "github_actions", "bug", "enhancement", "fix-lint"];
 
 function facts(overrides: Partial<RepoFacts> = {}): RepoFacts {
   return {
@@ -54,41 +53,40 @@ function labelNames(f: RepoFacts): string[] {
 }
 
 describe("managedLabels", () => {
-  test("a bare selection gets the baseline's unconditional roster alone", () => {
-    expect(labelNames(facts())).toEqual([
-      "dependencies",
-      "github_actions",
-      "bug",
-      "enhancement",
-      "fix-lint",
-    ]);
-  });
-
-  test("toolchain modules add their dependabot labels, shared ones once", () => {
-    expect(labelNames(facts({ modules: ["uv"] }))).toContain("python:uv");
-    const shared = labelNames(facts({ modules: ["bun", "node"] }));
-    expect(shared.filter((name) => name === "javascript")).toHaveLength(1);
-  });
-
-  test("a selected module contributes its own settings layer's labels", () => {
-    expect(releaseLabels.map((label) => label.name)).toEqual([
-      "autorelease: pending",
-      "autorelease: tagged",
-      "release-blocker",
-      "release-override",
-    ]);
-    const names = labelNames(facts({ modules: ["release-please"] }));
-    for (const label of releaseLabels) {
-      expect(names).toContain(label.name);
-    }
-    expect(labelNames(facts())).not.toContain("release-blocker");
-  });
-
-  test("a private repo carries the fleet private layer's labels", () => {
-    for (const label of privateLayerLabels) {
-      expect(labelNames(facts({ private: true }))).toContain(label.name);
-      expect(labelNames(facts())).not.toContain(label.name);
-    }
+  test.each([
+    {
+      reason: "a bare selection gets the baseline's unconditional roster alone",
+      facts: facts(),
+      labels: BASELINE_LABELS,
+    },
+    {
+      reason: "a private repo carries the fleet private layer's marker label; a public one not",
+      facts: facts({ private: true }),
+      labels: [...BASELINE_LABELS, "settings-as-code-report"],
+    },
+    {
+      reason: "a toolchain module adds its dependabot label",
+      facts: facts({ modules: ["uv"] }),
+      labels: [...BASELINE_LABELS, "python:uv"],
+    },
+    {
+      reason: "two toolchains sharing a dependabot label contribute it once",
+      facts: facts({ modules: ["bun", "node"] }),
+      labels: [...BASELINE_LABELS, "javascript"],
+    },
+    {
+      reason: "a selected module contributes its own settings layer's labels",
+      facts: facts({ modules: ["release-please"] }),
+      labels: [
+        ...BASELINE_LABELS,
+        "autorelease: pending",
+        "autorelease: tagged",
+        "release-blocker",
+        "release-override",
+      ],
+    },
+  ])("$reason", ({ facts: f, labels }) => {
+    expect(labelNames(f)).toEqual(labels);
   });
 
   test("tracking labels render the repo's answer with the manifest tuple", () => {
@@ -96,11 +94,13 @@ describe("managedLabels", () => {
       facts({ modules: ["fuzzer"], trackingLabels: [{ module: "fuzzer", label: "my-fuzz" }] }),
       manifests,
     );
-    const label = withFuzzer.find((l) => l.name === "my-fuzz");
-    expect(label).toBeDefined();
-    expect(label?.color).toBe(
-      manifests.find((m) => m.module === "fuzzer")?.tracking_label?.color ?? "",
-    );
+    const tuple = manifests.find((m) => m.module === "fuzzer")?.tracking_label;
+    if (tuple === undefined) throw new Error("the fuzzer manifest declares no tracking_label");
+    expect(withFuzzer.find((l) => l.name === "my-fuzz")).toEqual({
+      name: "my-fuzz",
+      color: tuple.color,
+      description: tuple.description,
+    });
   });
 
   test("a tracking label for a module without a tracking_label manifest throws", () => {
@@ -173,7 +173,27 @@ describe("managedRulesets", () => {
   });
 
   test("release-please adds the release-tags ruleset", () => {
-    expect(rulesetNames(facts({ modules: ["release-please"] }))).toContain("release-tags");
+    // The whole ruleset, not its name: the tag-protection rules, the v*
+    // condition, and the admin bypass are why it exists, and a stale or
+    // misspelled module layer would otherwise pass here and die
+    // fleet-wide at apply time.
+    expect(rulesetNames(facts({ modules: ["release-please"] }))).toEqual([
+      "pr-title",
+      "main",
+      "release-tags",
+    ]);
+    expect(
+      managedRulesets(facts({ modules: ["release-please"] }), manifests).find(
+        (r) => r.name === "release-tags",
+      ),
+    ).toEqual({
+      name: "release-tags",
+      target: "tag",
+      enforcement: "active",
+      conditions: { ref_name: { include: ["v*"], exclude: [] } },
+      rules: [{ type: "deletion" }, { type: "non_fast_forward" }, { type: "update" }],
+      bypass_actors: [{ actor_id: 5, actor_type: "RepositoryRole", bypass_mode: "always" }],
+    });
   });
 
   test("code_scanning renders exactly for a public repo with a toolchain", () => {
@@ -204,9 +224,13 @@ describe("managedRulesets", () => {
   });
 
   test("two analyzable toolchains contribute code_scanning once", () => {
-    expect(
-      mainRuleTypes(facts({ modules: ["bun", "uv"] })).filter((t) => t === "code_scanning"),
-    ).toHaveLength(1);
+    // The whole main rule list, not a count: the rule appears ONCE, and
+    // nothing else joins the ruleset.
+    expect(mainRuleTypes(facts({ modules: ["bun", "uv"] }))).toEqual([
+      "code_quality",
+      "copilot_code_review",
+      "code_scanning",
+    ]);
   });
 });
 
@@ -214,38 +238,38 @@ describe("layerPaths", () => {
   const names = (f: RepoFacts) =>
     layerPaths(f, manifests).map((p) => p.split("/").slice(-2).join("/"));
 
-  test("a bare public selection is the baseline plus the public overlay", () => {
-    expect(names(facts())).toEqual([
-      ".github/settings-baseline.yml",
-      ".github/settings-public.yml",
-    ]);
-  });
-
-  test("visibility picks exactly one fleet overlay", () => {
-    expect(names(facts({ private: true }))).toEqual([
-      ".github/settings-baseline.yml",
-      ".github/settings-private.yml",
-    ]);
-  });
-
-  test("all module base layers come before all module visibility layers", () => {
-    // Precedence: a module's visibility overlay must be able to win over
-    // any module's base layer, so the two groups cannot interleave.
-    expect(names(facts({ modules: ["bun", "release-please"] }))).toEqual([
-      ".github/settings-baseline.yml",
-      ".github/settings-public.yml",
-      "bun/settings.yml",
-      "release-please/settings.yml",
-      "bun/settings-public.yml",
-    ]);
-  });
-
-  test("a module with no layer files contributes none", () => {
-    // agents ships no settings layer at all, so it must not appear.
-    expect(names(facts({ modules: ["agents"] }))).toEqual([
-      ".github/settings-baseline.yml",
-      ".github/settings-public.yml",
-    ]);
+  test.each([
+    {
+      reason: "a bare public selection is the baseline plus the public overlay",
+      facts: facts(),
+      paths: [".github/settings-baseline.yml", ".github/settings-public.yml"],
+    },
+    {
+      reason: "visibility picks exactly one fleet overlay",
+      facts: facts({ private: true }),
+      paths: [".github/settings-baseline.yml", ".github/settings-private.yml"],
+    },
+    {
+      // Precedence: a module's visibility overlay must be able to win
+      // over any module's base layer, so the two groups cannot interleave.
+      reason: "all module base layers come before all module visibility layers",
+      facts: facts({ modules: ["bun", "release-please"] }),
+      paths: [
+        ".github/settings-baseline.yml",
+        ".github/settings-public.yml",
+        "bun/settings.yml",
+        "release-please/settings.yml",
+        "bun/settings-public.yml",
+      ],
+    },
+    {
+      // agents ships no settings layer at all, so it must not appear.
+      reason: "a module with no layer files contributes none",
+      facts: facts({ modules: ["agents"] }),
+      paths: [".github/settings-baseline.yml", ".github/settings-public.yml"],
+    },
+  ])("$reason", ({ facts: f, paths }) => {
+    expect(names(f)).toEqual(paths);
   });
 });
 
@@ -256,21 +280,23 @@ describe("the layer topology fails CLOSED", () => {
   // delete-undeclared pass removed the module's labels from live repos.
   // The module declaration now lives in each module.yml (settings_layers)
   // and the manifest LOADER holds it against the tree in both directions
-  // (assertSettingsLayerFiles, tests/scripts/module_manifests.test.ts);
+  // (assertSettingsLayerFiles, tests/scripts/module_manifests.test.ts),
+  // so a genuine drift fails at loadManifests - never as a shorter render;
   // what the render still owns is the fleet layer files and the
   // declaration-driven selection proven here.
 
   test("selection follows the manifest declaration, never the tree", () => {
     // templates/uv/settings.yml exists on disk, but a manifest that does
-    // not declare it must not select it - the tree is not the source.
+    // not declare it must not select it - the tree is not the source. The
+    // fleet layers still render: the undeclared module contributes
+    // nothing, nothing else goes missing.
     const undeclared = manifests.map((m) =>
       m.module === "uv" ? { ...m, settings_layers: undefined } : m,
     );
     const paths = layerPaths(facts({ modules: ["uv"] }), undeclared).map((p) =>
       p.split("/").slice(-2).join("/"),
     );
-    expect(paths).not.toContain("uv/settings.yml");
-    expect(paths).not.toContain("uv/settings-public.yml");
+    expect(paths).toEqual([".github/settings-baseline.yml", ".github/settings-public.yml"]);
   });
 
   test("a deleted FLEET layer is a hard error", () => {
@@ -278,34 +304,44 @@ describe("the layer topology fails CLOSED", () => {
       !path.endsWith(join(".github", "settings-baseline.yml")) && existsSync(path);
     expect(() => layerPaths(facts(), manifests, exists)).toThrow("fleet settings layer is missing");
   });
-
-  test("the real tree satisfies the manifests' declarations", () => {
-    // loadManifests already asserted every settings_layers entry against
-    // the tree; a genuine drift fails there - never as a shorter render.
-    expect(() => layerPaths(facts(), manifests)).not.toThrow();
-  });
 });
 
 describe("managedSettings", () => {
-  test("public repos get security_and_analysis; private ones must not (422)", () => {
-    const publicDoc = managedSettings(facts(), manifests).repository as Record<string, unknown>;
-    expect(publicDoc.security_and_analysis).toBeDefined();
-    const privateDoc = managedSettings(facts({ private: true }), manifests).repository as Record<
-      string,
-      unknown
-    >;
-    expect(privateDoc.security_and_analysis).toBeUndefined();
-  });
+  // The baseline's repository block. Identity keys (description, homepage,
+  // topics, private) are absent on purpose: they live in the repo's own
+  // settings.yml, and an exact block proves the absence.
+  const baselineRepository = {
+    has_issues: true,
+    has_wiki: false,
+    has_projects: false,
+    has_discussions: false,
+    default_branch: "main",
+    delete_branch_on_merge: true,
+    allow_update_branch: true,
+    enable_automated_security_fixes: true,
+  };
 
-  test("identity keys are absent on purpose: they live in the repo's own settings.yml", () => {
-    const repository = managedSettings(facts(), manifests).repository as Record<string, unknown>;
-    for (const key of ["description", "homepage", "topics", "private"]) {
-      expect(repository[key]).toBeUndefined();
-    }
-  });
-
-  test("the YAML render carries the generator's self-identifying header", () => {
-    expect(renderManagedYaml(facts(), manifests)).toContain("render_managed_settings.ts");
+  test.each([
+    {
+      // The overlay heals an out-of-band disable of BOTH keys.
+      reason: "public repos get security_and_analysis on top of the baseline block",
+      facts: facts(),
+      repository: {
+        ...baselineRepository,
+        security_and_analysis: {
+          secret_scanning: { status: "enabled" },
+          secret_scanning_push_protection: { status: "enabled" },
+        },
+      },
+    },
+    {
+      // Private repos without Advanced Security 422 on those keys.
+      reason: "private repos get the baseline block alone",
+      facts: facts({ private: true }),
+      repository: baselineRepository,
+    },
+  ])("$reason", ({ facts: f, repository }) => {
+    expect(managedSettings(f, manifests).repository).toEqual(repository);
   });
 });
 
@@ -320,13 +356,15 @@ describe("enableCodeql", () => {
 describe("the render CLI acts on the recheck", () => {
   // renderDecision being right proves nothing if main() stops calling it,
   // so these drive the script itself and assert what the workflow gates
-  // on: the output file, and whether a document was written at all.
+  // on: the output file's content, and whether a document was written at
+  // all.
   const script = resolve(import.meta.dir, "../../.github/scripts/fleet/render_managed_settings.ts");
 
   function runCli(modules: string): {
     exitCode: number | null;
     outputs: string;
-    wroteDocument: boolean;
+    document: string | null;
+    root: string;
     head: string;
   } {
     // A real checkout: a local fact source pins to its HEAD like a fetched
@@ -358,7 +396,8 @@ describe("the render CLI acts on the recheck", () => {
     return {
       exitCode: proc.exitCode,
       outputs: existsSync(outputPath) ? readFileSync(outputPath, "utf-8") : "",
-      wroteDocument: existsSync(outPath),
+      document: existsSync(outPath) ? readFileSync(outPath, "utf-8") : null,
+      root,
       head,
     };
   }
@@ -366,14 +405,20 @@ describe("the render CLI acts on the recheck", () => {
   test("dropping settings-sync writes NO document and publishes skipped=true", () => {
     const result = runCli("uv");
     expect(result.exitCode).toBe(0);
-    expect(result.wroteDocument).toBe(false);
+    expect(result.document).toBeNull();
     expect(result.outputs).toContain("skipped=true");
   });
 
   test("keeping it writes the document and publishes skipped=false", () => {
     const result = runCli("uv, settings-sync");
     expect(result.exitCode).toBe(0);
-    expect(result.wroteDocument).toBe(true);
+    // The written file IS the render for the checkout's facts - the
+    // document the workflow applies - and it carries the generator's
+    // self-identifying header.
+    expect(result.document).toBe(
+      renderManagedYaml(factsFromTargetDir(result.root, manifests), manifests),
+    );
+    expect(result.document).toContain("render_managed_settings.ts");
     expect(result.outputs).toContain("skipped=false");
     // The pin the freshness step compares against: without it that step
     // refuses, and the apply never runs.
@@ -382,29 +427,42 @@ describe("the render CLI acts on the recheck", () => {
 });
 
 describe("renderDecision rechecks the opt-in at the pinned commit", () => {
-  const withModules = (modules: string[]): RepoFacts => facts({ modules });
-
-  test("a target that dropped settings-sync is REFUSED", () => {
-    // Selection ran in the plan job against an older revision. Applying
-    // now would reconcile - and delete - labels on a repository that has
-    // turned central settings off.
-    const decision = renderDecision(withModules(["uv"]), "fetch", "owner/name");
-    expect(decision.kind).toBe("skip");
-    if (decision.kind !== "skip") throw new Error("expected a skip");
-    expect(decision.reason).toContain("owner/name");
-    expect(decision.reason).toContain("no longer managed");
-  });
-
-  test("a target that still selects it renders", () => {
-    expect(renderDecision(withModules(["uv", "settings-sync"]), "fetch", "r").kind).toBe("render");
-  });
-
-  test("the self-apply's local fact source is rechecked too", () => {
-    expect(renderDecision(withModules(["uv"]), "target-dir", "r").kind).toBe("skip");
-  });
-
-  test("the operator repository is exempt: it has no .repo-platform.yml", () => {
-    expect(renderDecision(withModules([]), "operator", "r").kind).toBe("render");
+  test.each([
+    {
+      // Selection ran in the plan job against an older revision. Applying
+      // now would reconcile - and delete - labels on a repository that
+      // has turned central settings off.
+      reason: "a fetched target that dropped settings-sync is REFUSED",
+      modules: ["uv"],
+      source: "fetch" as const,
+      expected: {
+        kind: "skip",
+        reason: expect.stringContaining(
+          "owner/name: the settings-sync module is not selected at the revision these facts " +
+            "were read from, so settings are no longer managed here",
+        ),
+      },
+    },
+    {
+      reason: "a fetched target that still selects it renders",
+      modules: ["uv", "settings-sync"],
+      source: "fetch" as const,
+      expected: { kind: "render" },
+    },
+    {
+      reason: "the self-apply's local fact source is rechecked too",
+      modules: ["uv"],
+      source: "target-dir" as const,
+      expected: { kind: "skip", reason: expect.stringContaining("no longer managed") },
+    },
+    {
+      reason: "the operator repository is exempt: it has no .repo-platform.yml",
+      modules: [],
+      source: "operator" as const,
+      expected: { kind: "render" },
+    },
+  ])("$reason", ({ modules, source, expected }) => {
+    expect(renderDecision(facts({ modules }), source, "owner/name")).toEqual(expected);
   });
 });
 
@@ -413,6 +471,7 @@ describe("factsFromFetch pins every read to one ref", () => {
     // A push between two reads would otherwise pair an old module
     // selection with a new repo layer, and the apply deletes the labels
     // of a module the repo had just selected.
+    const PIN = "000000000000000000000000000000000000000a";
     const seen: { path: string; ref: string }[] = [];
     const fetcher = (_repo: string, path: string, ref: string): string | null => {
       seen.push({ path, ref });
@@ -421,21 +480,20 @@ describe("factsFromFetch pins every read to one ref", () => {
       if (path === ".github/.copier-answers.yml") return "fuzzer_label: my-fuzz\n";
       return null;
     };
-    const facts = factsFromFetch(
-      "owner/name",
-      manifests,
-      "000000000000000000000000000000000000000a",
-      fetcher,
+    expect(factsFromFetch("owner/name", manifests, PIN, fetcher)).toEqual({
+      modules: ["uv", "fuzzer", "settings-sync"],
+      private: false,
+      trackingLabels: [{ module: "fuzzer", label: "my-fuzz" }],
+      prTitleWorkflowPresent: false,
+    });
+    // Exactly the files that matter, in read order, every one at the pin;
+    // pr-title.yml is not probed because the module is unselected.
+    expect(seen).toEqual(
+      [".repo-platform.yml", ".github/settings.yml", ".github/.copier-answers.yml"].map((path) => ({
+        path,
+        ref: PIN,
+      })),
     );
-    expect(facts.modules).toContain("uv");
-    expect(facts.trackingLabels).toEqual([{ module: "fuzzer", label: "my-fuzz" }]);
-    // Every read pinned, and the files that matter actually read.
-    expect(seen.length).toBeGreaterThan(1);
-    expect(new Set(seen.map((s) => s.ref))).toEqual(
-      new Set(["000000000000000000000000000000000000000a"]),
-    );
-    expect(seen.map((s) => s.path)).toContain(".repo-platform.yml");
-    expect(seen.map((s) => s.path)).toContain(".github/settings.yml");
   });
 });
 
@@ -524,14 +582,22 @@ describe("fact resolvers", () => {
 
 describe("managedLabelNames", () => {
   test("covers every emittable label for the reserved-roster consumers", () => {
-    const names = managedLabelNames(manifests);
-    const baselineLabels = (loadLayer(".github/settings-baseline.yml").labels ?? []) as {
-      name: string;
-    }[];
-    for (const label of [...baselineLabels, ...privateLayerLabels, ...releaseLabels]) {
-      expect(names).toContain(label.name);
-    }
-    // A toolchain module's own layer, reachable for ANY selection.
-    expect(names).toContain("javascript");
+    // The whole roster, spelled out: every fleet layer's labels, every
+    // toolchain module's dependabot label (reachable for ANY selection),
+    // and the release-please module's own. A pure function of on-disk
+    // constants, so the exact list is the claim - a loop re-reading the
+    // layer files would pass on an emptied one.
+    expect(managedLabelNames(manifests)).toEqual([
+      ...BASELINE_LABELS,
+      "settings-as-code-report",
+      "javascript",
+      "deno",
+      "python:uv",
+      "rust",
+      "autorelease: pending",
+      "autorelease: tagged",
+      "release-blocker",
+      "release-override",
+    ]);
   });
 });

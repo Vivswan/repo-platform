@@ -81,10 +81,11 @@ describe("resolve_private_repo.ts", () => {
       VERIFY: "",
     });
     expect(r.exitCode).toBe(0);
-    expect(r.env).toContain("TARGET=Vivswan/pub-repo");
-    expect(r.env).toContain("TARGET_DISPLAY=Vivswan/pub-repo");
-    expect(r.output).toContain("repo=Vivswan/pub-repo");
-    expect(r.stdout).not.toContain("::add-mask::");
+    // Exactly the two env lines and the one output, and nothing printed:
+    // a public slug needs no mask and gets no resolution line.
+    expect(r.env).toBe("TARGET=Vivswan/pub-repo\nTARGET_DISPLAY=Vivswan/pub-repo\n");
+    expect(r.output).toBe("repo=Vivswan/pub-repo\n");
+    expect(r.stdout).toBe("");
   });
 
   test("an empty PAT fails closed before any derivation", () => {
@@ -94,8 +95,10 @@ describe("resolve_private_repo.ts", () => {
       VERIFY: "deadbeef",
       PAT: "",
     });
-    expect(r.exitCode).not.toBe(0);
+    expect(r.exitCode).toBe(1);
     expect(r.stdout).toContain("PAT is empty or unset");
+    expect(r.env).toBe("");
+    expect(r.output).toBe("");
   });
 
   test("resolves a redacted row by tag and masks before anything else", () => {
@@ -105,9 +108,9 @@ describe("resolve_private_repo.ts", () => {
       VERIFY: verifyTag(PAT, RUN_ID, "Vivswan/hidden-server"),
     });
     expect(r.exitCode).toBe(0);
-    expect(r.env).toContain("TARGET=Vivswan/hidden-server");
-    expect(r.env).toContain("TARGET_DISPLAY=h**-s**r");
-    expect(r.output).toContain("repo=Vivswan/hidden-server");
+    // The resolved slug for the steps, the hint for the display.
+    expect(r.env).toBe("TARGET=Vivswan/hidden-server\nTARGET_DISPLAY=h**-s**r\n");
+    expect(r.output).toBe("repo=Vivswan/hidden-server\n");
     // The slug and bare name reach stdout only as masker registrations,
     // and those precede every other line mentioning the target.
     const lines = r.stdout.split("\n");
@@ -158,5 +161,6 @@ describe("resolve_private_repo.ts", () => {
     expect(r.exitCode).toBe(1);
     expect(r.stdout).toContain("without a resolution tag");
     expect(r.env).toBe("");
+    expect(r.output).toBe("");
   });
 });

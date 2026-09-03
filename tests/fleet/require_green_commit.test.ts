@@ -102,15 +102,20 @@ describe("waitForGreen", () => {
   });
 
   test("a missing verdict is retried (CI and its verdict land after the push), then green", () => {
-    const { gh } = ghAnswering([], [{}]);
+    // An EMPTY check_runs page must read as pending, not green: the probe
+    // count and the sleep prove the gate polled once before passing.
+    const { gh, calls } = ghAnswering([], [{}]);
+    const sleeps: number[] = [];
     const result = waitForGreen("o/r", SHA, {
       gh,
       deadlineMs: 60_000,
       pollMs: 5,
-      sleep: () => {},
+      sleep: (ms) => sleeps.push(ms),
       log: () => {},
     });
     expect(result).toBeNull();
+    expect(calls()).toBe(2);
+    expect(sleeps).toEqual([5]);
   });
 
   test("an API failure gets the deadline, then still fails closed", () => {
@@ -176,26 +181,14 @@ describe("decideGreenCommit", () => {
     }
   });
 
-  test("a red tip on a push run refuses tip-gated - applying THAT commit is the run's point", () => {
-    const { gh } = ghAnswering([{ conclusion: "failure" }]);
-    const spy = walkSpy({ sha: GREEN_BEHIND, behind: 1 });
-    const decision = decideGreenCommit("o/r", SHA, "push", {
-      gh,
-      sleep: () => {},
-      log: () => {},
-      walk: spy.walk,
-    });
-    expect(decision).toEqual({
-      refusal: expect.stringContaining("refusing the settings apply"),
-    });
-    expect(spy.calls()).toBe(0);
-  });
-
-  test("a red tip on a dispatch run refuses tip-gated too - only the schedule may fall back", () => {
-    // An unset event name (never the case on a real runner) lands on the
-    // same strict branch: anything that is not the schedule stays
-    // tip-gated, so an unknown trigger can never inherit the fallback.
-    for (const event of ["workflow_dispatch", ""]) {
+  // Push and dispatch stay tip-gated - applying THAT commit is the run's
+  // point, and only the schedule may fall back. An unset event name (never
+  // the case on a real runner) lands on the same strict branch: anything
+  // that is not the schedule stays tip-gated, so an unknown trigger can
+  // never inherit the fallback.
+  test.each(["push", "workflow_dispatch", ""])(
+    "a red tip on a %j run refuses tip-gated and never walks",
+    (event) => {
       const { gh } = ghAnswering([{ conclusion: "failure" }]);
       const spy = walkSpy({ sha: GREEN_BEHIND, behind: 1 });
       const decision = decideGreenCommit("o/r", SHA, event, {
@@ -204,10 +197,14 @@ describe("decideGreenCommit", () => {
         log: () => {},
         walk: spy.walk,
       });
-      expect("refusal" in decision).toBe(true);
+      expect(decision).toEqual({
+        refusal: expect.stringContaining(
+          "refusing the settings apply: commit 000000000000 is not green - ",
+        ),
+      });
       expect(spy.calls()).toBe(0);
-    }
-  });
+    },
+  );
 
   test("a red tip on the SCHEDULED heal falls back to the walk's green commit, evidence attached", () => {
     const { gh } = ghAnswering([{ conclusion: "failure" }]);

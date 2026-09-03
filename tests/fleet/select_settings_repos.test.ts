@@ -359,9 +359,17 @@ describe("select_settings_repos.ts", () => {
       for (const channel of [r.stdout, r.stderr, r.output, r.summary]) {
         expect(channel).not.toContain("hidden-server");
       }
-      const targets = targetsOf(r);
-      expect(targets).toHaveLength(1);
-      expect(targets[0].redact_name).toBe(true);
+      // The one row, whole: the hint in both name slots, both flags set,
+      // and a tag - never the slug.
+      expect(targetsOf(r)).toEqual([
+        {
+          repo: "h**-s**r",
+          name: "h**-s**r",
+          redact_name: true,
+          hide_details: true,
+          verify: expect.stringMatching(/^[0-9a-f]{32}$/),
+        },
+      ]);
     },
     TEST_TIMEOUT_MS,
   );
@@ -372,7 +380,13 @@ describe("select_settings_repos.ts", () => {
       const r = run("dispatch-self", { env: { ONLY_REPO: "repo-platform" } });
       expect(r.exitCode).toBe(0);
       expect(targetsOf(r)).toEqual([
-        expect.objectContaining({ repo: "Vivswan/repo-platform", redact_name: false }),
+        {
+          repo: "Vivswan/repo-platform",
+          name: "repo-platform",
+          redact_name: false,
+          hide_details: false,
+          verify: "",
+        },
       ]);
     },
     TEST_TIMEOUT_MS,
@@ -411,8 +425,12 @@ describe("select_settings_repos.ts", () => {
   test(
     "a failed discovery still fails the whole run",
     () => {
+      // Discovery exits with gh's own code and forwards its stderr, and no
+      // matrix is published - not just "some nonzero exit".
       const result = run("no-discovery", { env: { STUB_FAIL_DISCOVERY: "1" } });
-      expect(result.exitCode).not.toBe(0);
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain("HTTP 500 from stub");
+      expect(result.output).not.toContain("targets=");
     },
     TEST_TIMEOUT_MS,
   );

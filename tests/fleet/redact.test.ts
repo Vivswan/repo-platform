@@ -15,44 +15,45 @@ import {
 import { boundedSpawnSync } from "../shared/bounded_spawn";
 
 describe("hintName", () => {
-  test("keeps segment initials and the long final's last char", () => {
-    expect(hintName("hidden-server")).toBe("h**-s**r");
-    expect(hintName("chromium-bridge")).toBe("c**-b**e");
-    expect(hintName("myrepo")).toBe("m**o");
-  });
-
-  test("short finals keep no last char", () => {
+  test.each([
+    {
+      name: "hidden-server",
+      hint: "h**-s**r",
+      reason: "a final of five or more keeps its last char",
+    },
+    { name: "chromium-bridge", hint: "c**-b**e", reason: "same rule on a longer final" },
+    { name: "myrepo", hint: "m**o", reason: "a single long segment is its own final" },
     // A final under five chars would echo most of the name back.
-    expect(hintName("ab")).toBe("a**");
-    expect(hintName("api")).toBe("a**");
-    expect(hintName("home")).toBe("h**");
-    expect(hintName("a-b")).toBe("a**-b**");
-  });
-
-  test("separators render literally and empty segments become **", () => {
-    expect(hintName("a.b_c")).toBe("a**.b**_c**");
-    expect(hintName("a--b")).toBe("a**-**-b**");
-  });
-
-  test("case and digits pass through", () => {
-    expect(hintName("Repo2")).toBe("R**2");
-    expect(hintName("cloud-speech")).toBe("c**-s**h");
+    { name: "ab", hint: "a**", reason: "a two-char final echoes nothing" },
+    { name: "api", hint: "a**", reason: "a three-char final echoes nothing" },
+    { name: "home", hint: "h**", reason: "four chars is still under five" },
+    { name: "a-b", hint: "a**-b**", reason: "a short final after a separator echoes nothing" },
+    { name: "a.b_c", hint: "a**.b**_c**", reason: "every separator kind renders literally" },
+    { name: "a--b", hint: "a**-**-b**", reason: "an empty segment renders as ** alone" },
+    { name: "Repo2", hint: "R**2", reason: "case and digits pass through" },
+    { name: "cloud-speech", hint: "c**-s**h", reason: "the initial keeps the name's case" },
+  ])("$name -> $hint: $reason", ({ name, hint }) => {
+    expect(hintName(name)).toBe(hint);
   });
 });
 
 describe("assignHints", () => {
   test("collisions get deterministic #N suffixes in slug order", () => {
-    const hints = assignHints(["o/hidden-server", "o/hail-sooner", "o/skills"]);
     // "hail-sooner" and "hidden-server" share the base hint; slug order
     // decides who keeps it.
-    expect(hints.get("o/hail-sooner")).toBe("h**-s**r");
-    expect(hints.get("o/hidden-server")).toBe("h**-s**r#2");
-    expect(hints.get("o/skills")).toBe("s**s");
+    expect(assignHints(["o/hidden-server", "o/hail-sooner", "o/skills"])).toEqual(
+      new Map([
+        ["o/hail-sooner", "h**-s**r"],
+        ["o/hidden-server", "h**-s**r#2"],
+        ["o/skills", "s**s"],
+      ]),
+    );
   });
 
   test("duplicate slugs assign once", () => {
-    const hints = assignHints(["o/a-repo", "o/a-repo"]);
-    expect(hints.size).toBe(1);
+    // The value is the claim: a duplicate that consumed a collision slot
+    // would overwrite the same key with "#2" and still leave ONE entry.
+    expect(assignHints(["o/a-repo", "o/a-repo"])).toEqual(new Map([["o/a-repo", "a**-r**"]]));
   });
 });
 
@@ -172,23 +173,39 @@ describe("enrichedRowSchema", () => {
     expect(enrichedRowSchema.safeParse(plain).success).toBe(true);
   });
 
-  test("rejects a redacted row missing its verify tag or hide_details", () => {
-    expect(enrichedRowSchema.safeParse({ ...redacted, verify: "" }).success).toBe(false);
-    expect(enrichedRowSchema.safeParse({ ...redacted, hide_details: false }).success).toBe(false);
-  });
-
-  test("rejects a redacted row whose display is not a hint", () => {
-    expect(enrichedRowSchema.safeParse({ ...redacted, display: "o/hidden-one" }).success).toBe(
-      false,
-    );
-  });
-
-  test("rejects an unredacted row carrying a verify tag", () => {
-    expect(enrichedRowSchema.safeParse({ ...plain, verify: "deadbeef" }).success).toBe(false);
-  });
-
-  test("rejects an unredacted row whose display is not its slug", () => {
-    expect(enrichedRowSchema.safeParse({ ...plain, display: "p**" }).success).toBe(false);
+  // The issue path pins WHICH rule fired: success=false alone cannot tell
+  // the display refinement from a union arm failing for another reason.
+  test.each([
+    {
+      reason: "a redacted row missing its verify tag",
+      row: { ...redacted, verify: "" },
+      path: ["verify"],
+    },
+    {
+      reason: "a redacted row not hiding its details",
+      row: { ...redacted, hide_details: false },
+      path: ["hide_details"],
+    },
+    {
+      reason: "a redacted row whose display is the slug, not a hint",
+      row: { ...redacted, display: "o/hidden-one" },
+      path: ["display"],
+    },
+    {
+      reason: "an unredacted row carrying a verify tag",
+      row: { ...plain, verify: "deadbeef" },
+      path: ["verify"],
+    },
+    {
+      reason: "an unredacted row whose display is a hint, not its slug",
+      row: { ...plain, display: "p**" },
+      path: ["display"],
+    },
+  ])("rejects $reason", ({ row, path }) => {
+    const result = enrichedRowSchema.safeParse(row);
+    expect(result.success).toBe(false);
+    if (result.success) throw new Error("expected a rejection");
+    expect(result.error.issues.map((issue) => issue.path)).toEqual([path]);
   });
 });
 
@@ -196,24 +213,21 @@ describe("enrichedRowSchema", () => {
 // CLOSED (an entry without an explicit boolean `private` rejects the whole
 // list), the selection stays fail-open on everything but `repo`.
 describe("parseDiscoveredList", () => {
-  test("accepts {repo, private} entries and passes extra keys through", () => {
-    const parsed = parseDiscoveredList([
-      { repo: "o/a", private: true, archived: false, pushed_at: "now" },
-    ]);
-    expect(parsed).toEqual([{ repo: "o/a", private: true, archived: false, pushed_at: "now" }]);
-  });
-
-  test("an empty list is valid", () => {
-    expect(parseDiscoveredList([])).toEqual([]);
-  });
-
-  test("a wrong-typed EXTRA key survives unchanged (only repo and private are inspected)", () => {
-    // The legacy ladder checked exactly those two fields; everything else
-    // passed through untouched, whatever its type - pinned so a schema
-    // tightening cannot silently change it.
-    expect(parseDiscoveredList([{ repo: "o/a", private: true, extra: 42 }])).toEqual([
-      { repo: "o/a", private: true, extra: 42 },
-    ]);
+  // Identity on every accepted payload: the legacy ladder checked exactly
+  // repo and private; everything else passed through untouched, whatever
+  // its type - pinned so a schema tightening cannot silently change it.
+  test.each([
+    {
+      reason: "{repo, private} entries pass their extra keys through",
+      input: [{ repo: "o/a", private: true, archived: false, pushed_at: "now" }],
+    },
+    { reason: "an empty list is valid", input: [] },
+    {
+      reason: "a wrong-typed EXTRA key survives unchanged (only repo and private are inspected)",
+      input: [{ repo: "o/a", private: true, extra: 42 }],
+    },
+  ])("accepts: $reason", ({ input }) => {
+    expect(parseDiscoveredList(input)).toEqual(input);
   });
 
   test("rejects a missing or non-boolean private (fail closed, whole list)", () => {
@@ -230,22 +244,19 @@ describe("parseDiscoveredList", () => {
 });
 
 describe("parseSelectionList", () => {
-  test("only repo is validated; extras ride along untouched", () => {
-    const parsed = parseSelectionList([
-      { repo: "o/a", owner: "o", name: "a" },
-      { repo: "o/b" },
-      { repo: "o/c" },
-    ]);
-    expect(parsed).toEqual([
-      { repo: "o/a", owner: "o", name: "a" },
-      { repo: "o/b" },
-      { repo: "o/c" },
-    ]);
-  });
-
-  test("a wrong-typed EXTRA key survives unchanged (the ladder never inspected it)", () => {
-    // Pins the fail-open side of the parity claim: only repo is validated.
-    expect(parseSelectionList([{ repo: "o/a", extra: 42 }])).toEqual([{ repo: "o/a", extra: 42 }]);
+  // The fail-open side of the parity claim: only repo is validated, the
+  // rest rides along untouched.
+  test.each([
+    {
+      reason: "only repo is validated; extras ride along untouched",
+      input: [{ repo: "o/a", owner: "o", name: "a" }, { repo: "o/b" }, { repo: "o/c" }],
+    },
+    {
+      reason: "a wrong-typed EXTRA key survives unchanged (the ladder never inspected it)",
+      input: [{ repo: "o/a", extra: 42 }],
+    },
+  ])("accepts: $reason", ({ input }) => {
+    expect(parseSelectionList(input)).toEqual(input);
   });
 
   test("rejects a missing or non-string repo and a non-array payload", () => {
@@ -288,10 +299,26 @@ describe("enrich CLI", () => {
       { env: { ...process.env, PAT: "p", GITHUB_RUN_ID: "1" } },
     );
     expect(proc.exitCode).toBe(0);
-    const result = JSON.parse(proc.stdout);
-    expect(result.rows[0].display).toBe("Vivswan/pub");
-    expect(result.rows[1].display).toBe("h**-s**r");
-    expect(result.rows[1].verify).toHaveLength(VERIFY_HEX_LENGTH);
+    // The whole payload: the flags, the hint, and the tag keyed on THIS
+    // run's PAT, run id, and slug (verifyTag is deterministic over them).
+    expect(JSON.parse(proc.stdout)).toEqual({
+      rows: [
+        {
+          repo: "Vivswan/pub",
+          redact_name: false,
+          hide_details: false,
+          display: "Vivswan/pub",
+          verify: "",
+        },
+        {
+          repo: "Vivswan/hidden-server",
+          redact_name: true,
+          hide_details: true,
+          display: "h**-s**r",
+          verify: verifyTag("p", "1", "Vivswan/hidden-server"),
+        },
+      ],
+    });
   });
 
   test("hint subcommand prints the hint", () => {

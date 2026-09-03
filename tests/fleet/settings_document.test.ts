@@ -72,24 +72,29 @@ describe("the name-keyed sections must be lists of mappings", () => {
   // apply succeeded green with weaker protection than declared. The
   // refusal happens ONCE, here at the parse boundary, and names the
   // file, the section, and the received shape.
-  test("a mapping labels section is refused, naming file, section, and shape", () => {
-    const text = 'labels:\n  bug: "d73a4a"\n';
-    expect(() => parseSettingsDoc(text, "owner/name/.github/settings.yml")).toThrow(
-      /owner\/name\/\.github\/settings\.yml: labels: labels must be a list of mappings, got a mapping/,
-    );
-  });
-
-  test("a scalar labels section is refused with the value quoted", () => {
-    expect(() => parseSettingsDoc("labels: 5\n", "f")).toThrow(
-      /f: labels: labels must be a list of mappings, got a scalar \(5\)/,
-    );
-  });
-
-  test("a mapping rulesets section is refused", () => {
-    const text = "rulesets:\n  main:\n    rules:\n      - type: deletion\n";
-    expect(() => parseSettingsDoc(text, "owner/name/.github/settings.yml")).toThrow(
-      /owner\/name\/\.github\/settings\.yml: rulesets: rulesets must be a list of mappings, got a mapping/,
-    );
+  test.each([
+    {
+      reason: "a mapping labels section, naming file, section, and shape",
+      text: 'labels:\n  bug: "d73a4a"\n',
+      file: "owner/name/.github/settings.yml",
+      message:
+        "owner/name/.github/settings.yml: labels: labels must be a list of mappings, got a mapping",
+    },
+    {
+      reason: "a scalar labels section, with the value quoted",
+      text: "labels: 5\n",
+      file: "f",
+      message: "f: labels: labels must be a list of mappings, got a scalar (5)",
+    },
+    {
+      reason: "a mapping rulesets section",
+      text: "rulesets:\n  main:\n    rules:\n      - type: deletion\n",
+      file: "owner/name/.github/settings.yml",
+      message:
+        "owner/name/.github/settings.yml: rulesets: rulesets must be a list of mappings, got a mapping",
+    },
+  ])("refuses $reason", ({ text, file, message }) => {
+    expect(() => parseSettingsDoc(text, file)).toThrow(message);
   });
 
   test("a non-mapping ENTRY is refused with its position", () => {
