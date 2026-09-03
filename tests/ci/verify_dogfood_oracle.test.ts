@@ -17,20 +17,16 @@ function run(renderRoot: string): { exitCode: number; stderr: string } {
 // that is not a mapping must fail with the script's own diagnosis, never
 // a raw TypeError from indexing it.
 describe("verify_dogfood_oracle recorded answers boundary", () => {
-  test("a scalar payload fails with a shape error, not a crash", () => {
+  test.each([
+    { reason: "scalar", payload: '"just a string"\n' },
+    { reason: "null document", payload: "null\n" },
+    // A sequence indexes by string key without a TypeError, so it is the
+    // non-mapping shape a typeof-object check alone would let through.
+    { reason: "sequence", payload: "- a\n" },
+  ])("a $reason payload fails with a shape error, not a crash", ({ payload }) => {
     const root = mkdtempSync(join(tmpdir(), "dogfood-oracle-"));
     mkdirSync(join(root, ".github"));
-    writeFileSync(join(root, ".github/.copier-answers.yml"), '"just a string"\n');
-    const { exitCode, stderr } = run(root);
-    expect(exitCode).toBe(1);
-    expect(stderr).toContain("expected a YAML mapping");
-    expect(stderr).not.toContain("TypeError");
-  });
-
-  test("a null payload fails the same way", () => {
-    const root = mkdtempSync(join(tmpdir(), "dogfood-oracle-"));
-    mkdirSync(join(root, ".github"));
-    writeFileSync(join(root, ".github/.copier-answers.yml"), "null\n");
+    writeFileSync(join(root, ".github/.copier-answers.yml"), payload);
     const { exitCode, stderr } = run(root);
     expect(exitCode).toBe(1);
     expect(stderr).toContain("expected a YAML mapping");
