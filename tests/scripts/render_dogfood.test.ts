@@ -77,11 +77,17 @@ describe("parseAnswers", () => {
     "private: true",
   ];
 
-  test("parses a complete answers document into a module set", () => {
+  test("parses a complete answers document into the typed record, modules as a set", () => {
     const text = [...lines, "modules: [bun, uv]"].join("\n");
-    expect(parseAnswers(text, "f").project_slug).toBe("x-y");
-    expect(parseAnswers(text, "f").private).toBe(true);
-    expect([...parseAnswers(text, "f").modules].sort()).toEqual(["bun", "uv"]);
+    expect(parseAnswers(text, "f")).toEqual({
+      project_name: "X Y",
+      project_slug: "x-y",
+      description: "d",
+      github_username: "U",
+      copyright_holder: "C",
+      private: true,
+      modules: new Set(["bun", "uv"]),
+    });
   });
 
   test("throws loudly on a duplicated module name", () => {
@@ -109,16 +115,28 @@ describe("copier-computed context", () => {
     expect(enableCodeql(noToolchain, manifests)).toBe(false);
   });
 
-  test("renderContext carries the computed variables and both membership keys", () => {
-    const context = renderContext(answers, manifests);
-    expect(context.private).toBe(false);
-    expect(context.has_toolchain).toBe(true);
-    expect(context.enable_codeql).toBe(true);
-    expect(context["'bun' in modules"]).toBe(true);
-    expect(context["'bun' not in modules"]).toBe(false);
-    expect(context["'uv' in modules"]).toBe(false);
-    expect(context["'uv' not in modules"]).toBe(true);
-    expect(Object.keys(context)).toHaveLength(3 + 2 * manifests.length);
+  test("renderContext is exactly the three computed variables plus both membership keys per module", () => {
+    expect(renderContext(answers, manifests)).toEqual({
+      private: false,
+      has_toolchain: true,
+      enable_codeql: true,
+      "'agents' in modules": true,
+      "'agents' not in modules": false,
+      "'bun' in modules": true,
+      "'bun' not in modules": false,
+      "'uv' in modules": false,
+      "'uv' not in modules": true,
+      "'release-please' in modules": true,
+      "'release-please' not in modules": false,
+      "'skills' in modules": true,
+      "'skills' not in modules": false,
+      "'pr-title' in modules": true,
+      "'pr-title' not in modules": false,
+      "'auto-assign' in modules": true,
+      "'auto-assign' not in modules": false,
+      "'docs-site' in modules": true,
+      "'docs-site' not in modules": false,
+    });
   });
 });
 
@@ -204,56 +222,106 @@ describe("answerMismatches", () => {
     expect(answerMismatches(answers, sources)).toEqual([]);
   });
 
-  test("flags a slug that disagrees with package.json or project_name", () => {
-    const drift = answerMismatches({ ...answers, project_slug: "other" }, sources);
-    expect(drift.some((p) => p.includes("package.json name"))).toBe(true);
-    expect(drift.some((p) => p.includes("derivation from project_name"))).toBe(true);
-  });
+  const without = (module: string) => new Set([...answers.modules].filter((m) => m !== module));
+  /** The problem a deselected module's pair produces; the pair paths are
+   *  hand-listed so a misclassified pair fails the row instead of being
+   *  mirrored into it. */
+  const orphaned = (repo: string, module: string) =>
+    `modules: the generated pair ${repo} belongs to module '${module}', ` +
+    "which the answers do not select";
 
-  test("flags identity answers that drifted from copier.yml defaults", () => {
-    expect(answerMismatches({ ...answers, github_username: "X" }, sources)).toHaveLength(1);
-    expect(answerMismatches({ ...answers, copyright_holder: "X" }, sources)).toHaveLength(1);
-  });
-
-  test("flags description/private drift from the in-repo settings file", () => {
-    expect(answerMismatches({ ...answers, description: "X" }, sources)).toHaveLength(1);
-    expect(answerMismatches({ ...answers, private: true }, sources)).toHaveLength(1);
-  });
-
-  test("flags an unknown module and a deselected module a pair needs", () => {
-    const unknown = answerMismatches(
-      { ...answers, modules: new Set([...answers.modules, "no"]) },
-      sources,
-    );
-    expect(unknown.some((p) => p.includes("'no' has no templates/"))).toBe(true);
-    const withoutBun = new Set([...answers.modules].filter((m) => m !== "bun"));
-    const missing = answerMismatches({ ...answers, modules: withoutBun }, sources);
-    expect(missing.some((p) => p.includes("dependabot-bun-lockfile.yml"))).toBe(true);
-  });
-
-  test("skills_dir must exist exactly while the skills module is selected", () => {
-    const withoutDir = answerMismatches({ ...answers, skills_dir: undefined }, sources);
-    expect(withoutDir.some((p) => p.includes("skills_dir: missing"))).toBe(true);
-    const withoutSkills = new Set([...answers.modules].filter((m) => m !== "skills"));
-    const stale = answerMismatches({ ...answers, modules: withoutSkills }, sources);
-    expect(stale.some((p) => p.includes("skills_dir: set but"))).toBe(true);
-  });
-
-  test("flags a skills_dir that drifted from the copier.yml default", () => {
-    const drift = answerMismatches({ ...answers, skills_dir: "lib/skills" }, sources);
-    expect(drift.some((p) => p.includes("copier.yml skills_dir default"))).toBe(true);
-  });
-
-  test("docs_site_label must exist exactly while the docs-site module is selected", () => {
-    const withoutLabel = answerMismatches({ ...answers, docs_site_label: undefined }, sources);
-    expect(withoutLabel.some((p) => p.includes("docs_site_label: missing"))).toBe(true);
-    const withoutDocsSite = new Set([...answers.modules].filter((m) => m !== "docs-site"));
-    const stale = answerMismatches({ ...answers, modules: withoutDocsSite }, sources);
-    expect(stale.some((p) => p.includes("docs_site_label: set but"))).toBe(true);
-  });
-
-  test("flags a docs_site_label that drifted from the copier.yml default", () => {
-    const drift = answerMismatches({ ...answers, docs_site_label: "other-label" }, sources);
-    expect(drift.some((p) => p.includes("copier.yml docs_site_label default"))).toBe(true);
+  test.each([
+    {
+      reason: "a slug disagreeing with package.json AND the project_name derivation",
+      override: { project_slug: "other" },
+      expected: [
+        'project_slug: expected "repo-platform" (package.json name), got "other"',
+        'project_slug: expected "repo-platform" (copier.yml\'s derivation from project_name), got "other"',
+      ],
+    },
+    {
+      reason: "github_username drifted from the copier.yml default",
+      override: { github_username: "X" },
+      expected: [
+        'github_username: expected "Vivswan" (copier.yml github_username default), got "X"',
+      ],
+    },
+    {
+      reason: "copyright_holder drifted from the copier.yml default",
+      override: { copyright_holder: "X" },
+      expected: [
+        'copyright_holder: expected "Vivswan Shah" (copier.yml copyright_holder default), got "X"',
+      ],
+    },
+    {
+      reason: "description drifted from the in-repo settings file",
+      override: { description: "X" },
+      expected: [
+        'description: expected "d" (.github/settings.yml repository.description), got "X"',
+      ],
+    },
+    {
+      reason: "private drifted from the in-repo settings file",
+      override: { private: true },
+      expected: ["private: expected false (.github/settings.yml repository.private), got true"],
+    },
+    {
+      reason: "an unknown module",
+      override: { modules: new Set([...answers.modules, "no"]) },
+      expected: ["modules: 'no' has no templates/ module manifest"],
+    },
+    {
+      reason: "a deselected module a pair needs",
+      override: { modules: without("bun") },
+      expected: [
+        orphaned(".github/workflows/dependabot-bun-lockfile.yml", "bun"),
+        orphaned(".bun-version", "bun"),
+      ],
+    },
+    {
+      reason: "skills_dir missing while the skills module is selected",
+      override: { skills_dir: undefined },
+      expected: [
+        "skills_dir: missing - the skills module is selected, so the skills pairs need the directory copier.yml asks for",
+      ],
+    },
+    {
+      reason: "skills_dir set while the skills module is deselected (its pairs orphaned too)",
+      override: { modules: without("skills") },
+      expected: [
+        "skills_dir: set but the skills module is not selected - copier never asks the question then; remove the stale answer",
+        orphaned(".github/workflows/validate-skills.yml", "skills"),
+      ],
+    },
+    {
+      reason: "skills_dir drifted from the copier.yml default",
+      override: { skills_dir: "lib/skills" },
+      expected: ['skills_dir: expected "skills" (copier.yml skills_dir default), got "lib/skills"'],
+    },
+    {
+      reason: "docs_site_label missing while the docs-site module is selected",
+      override: { docs_site_label: undefined },
+      expected: [
+        "docs_site_label: missing - the docs-site module is selected, so the docs-site pair (and the operator settings facts) need the label copier.yml asks for",
+      ],
+    },
+    {
+      reason:
+        "docs_site_label set while the docs-site module is deselected (its pair orphaned too)",
+      override: { modules: without("docs-site") },
+      expected: [
+        "docs_site_label: set but the docs-site module is not selected - copier never asks the question then; remove the stale answer",
+        orphaned(".github/workflows/docs-site.yml", "docs-site"),
+      ],
+    },
+    {
+      reason: "docs_site_label drifted from the copier.yml default",
+      override: { docs_site_label: "other-label" },
+      expected: [
+        'docs_site_label: expected "docs-link-rot" (copier.yml docs_site_label default), got "other-label"',
+      ],
+    },
+  ])("flags $reason", ({ override, expected }) => {
+    expect(answerMismatches({ ...answers, ...override }, sources)).toEqual(expected);
   });
 });

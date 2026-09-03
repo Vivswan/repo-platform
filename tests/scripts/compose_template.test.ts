@@ -66,17 +66,27 @@ function gateOfFor(manifests: ModuleManifest[]): (module: string) => string {
 describe("orChain", () => {
   const gateOf = gateOfFor([BUN, NODE]);
 
-  test("a single module renders its own gate", () => {
-    expect(orChain(["bun"], gateOf)).toBe("'bun' in modules");
-  });
-
-  test("several modules chain their gates with 'or' in the given order", () => {
-    expect(orChain(["bun", "node"], gateOf)).toBe("'bun' in modules or 'node' in modules");
-  });
-
-  test("a custom manifest gate participates verbatim", () => {
-    const custom = gateOfFor([manifest("demo", ["gate: not private"]), manifest("other", [])]);
-    expect(orChain(["demo", "other"], custom)).toBe("not private or 'other' in modules");
+  test.each([
+    {
+      reason: "a single module renders its own gate",
+      modules: ["bun"],
+      gateOf,
+      expected: "'bun' in modules",
+    },
+    {
+      reason: "several modules chain their gates with 'or' in the given order",
+      modules: ["bun", "node"],
+      gateOf,
+      expected: "'bun' in modules or 'node' in modules",
+    },
+    {
+      reason: "a custom manifest gate participates verbatim",
+      modules: ["demo", "other"],
+      gateOf: gateOfFor([manifest("demo", ["gate: not private"]), manifest("other", [])]),
+      expected: "not private or 'other' in modules",
+    },
+  ])("$reason", ({ modules, gateOf: gates, expected }) => {
+    expect(orChain(modules, gates)).toBe(expected);
   });
 
   test("an unknown module fails loudly instead of guessing a gate", () => {
@@ -238,24 +248,29 @@ describe("agentsToolchainErrors", () => {
     expect(agentsToolchainErrors([AGENTS], new Set())).toEqual([]);
   });
 
-  test("a dependabot-only module without the fragment errors", () => {
-    const errors = agentsToolchainErrors([dependabotOnly], new Set());
-    expect(errors).toHaveLength(1);
-    expect(errors[0]).toContain("templates/cargo/module.yml declares dependabot but");
-    expect(errors[0]).toContain("fragments/agents-toolchain.jinja");
-  });
-
-  test("a toolchain-only module without the fragment errors too (codeql-only shape)", () => {
-    const errors = agentsToolchainErrors([codeqlOnly], new Set());
-    expect(errors).toHaveLength(1);
-    expect(errors[0]).toContain("templates/zig/module.yml declares a toolchain but");
-  });
-
-  test("a module declaring both names both in its error", () => {
-    const errors = agentsToolchainErrors([BUN], new Set());
-    expect(errors).toHaveLength(1);
-    expect(errors[0]).toContain("declares dependabot and a toolchain but");
-  });
+  test.each([
+    { reason: "a dependabot-only module", manifest: dependabotOnly, declares: "dependabot" },
+    {
+      reason: "a toolchain-only module (codeql-only shape)",
+      manifest: codeqlOnly,
+      declares: "a toolchain",
+    },
+    {
+      reason: "a module declaring both names both",
+      manifest: BUN,
+      declares: "dependabot and a toolchain",
+    },
+  ])(
+    "$reason without the fragment errors, naming what it declares",
+    ({ manifest: m, declares }) => {
+      expect(agentsToolchainErrors([m], new Set())).toEqual([
+        `templates/${m.module}/module.yml declares ${declares} but ` +
+          `templates/${m.module}/fragments/agents-toolchain.jinja is missing - AGENTS.md's ` +
+          "Toolchain section would silently skip the module; add the fragment with its " +
+          "toolchain bullets",
+      ]);
+    },
+  );
 });
 
 describe("renderedSeparationErrors", () => {
@@ -421,42 +436,27 @@ describe("spliceContributions", () => {
     );
   });
 
-  test("a contribution smuggling a well-formed anchor marker errors, naming the fragment", () => {
+  // The error quotes the offending spelling, opener through the colon, and
+  // fails closed: nothing is spliced, the skeleton keeps its own marker.
+  test.each([
+    { reason: "a well-formed marker", marker: "{# compose:other #}", hint: "{# compose:" },
+    { reason: "a malformed (unclosed) marker", marker: "  {# compose:bad", hint: "{# compose:" },
+    { reason: "a dashed opener", marker: "{#- compose:other #}", hint: "{#- compose:" },
+    { reason: "a double-spaced opener", marker: "{#  compose:other #}", hint: "{#  compose:" },
+    { reason: "a spaceless opener", marker: "{#compose:other #}", hint: "{#compose:" },
+  ])("a contribution smuggling $reason errors, naming the fragment", ({ marker, hint }) => {
     const files = skeleton("needs:\n{# compose:demo #}\n    runs-on: x\n");
     const errors = spliceContributions(
       files,
-      contribution("{% if g %}{# compose:other #}\n      - a\n{% endif %}", "g"),
+      contribution(`{% if g %}${marker}\n      - a\n{% endif %}`, "g"),
     );
-    expect(errors).toHaveLength(1);
-    expect(errors[0]).toContain("templates/a/fragments/demo.jinja");
-    expect(errors[0]).toContain("anchor marker");
-    // Fail closed: nothing spliced, the skeleton keeps its own marker.
+    expect(errors).toEqual([
+      `templates/a/fragments/demo.jinja: the contribution to anchor 'demo' contains an anchor ` +
+        `marker ('${hint}') - a marker inside a contribution is never scanned or filled ` +
+        "(anchors live in skeleton files only, each in exactly one); move the marker line " +
+        "to a skeleton file or remove it",
+    ]);
     expect(dataOf(files)).toContain("{# compose:demo #}");
-  });
-
-  test("a contribution smuggling a malformed anchor marker errors too", () => {
-    const files = skeleton("needs:\n{# compose:demo #}\n    runs-on: x\n");
-    const errors = spliceContributions(
-      files,
-      contribution("{% if g %}  {# compose:bad\n      - a\n{% endif %}", "g"),
-    );
-    expect(errors).toHaveLength(1);
-    expect(errors[0]).toContain("anchor marker");
-  });
-
-  test("smuggled markers with variant comment-opener spellings error too", () => {
-    for (const bad of ["{#- compose:other #}", "{#  compose:other #}", "{#compose:other #}"]) {
-      const files = skeleton("needs:\n{# compose:demo #}\n    runs-on: x\n");
-      const errors = spliceContributions(
-        files,
-        contribution(`{% if g %}${bad}\n      - a\n{% endif %}`, "g"),
-      );
-      expect(errors).toHaveLength(1);
-      expect(errors[0]).toContain("templates/a/fragments/demo.jinja");
-      expect(errors[0]).toContain("anchor marker");
-      // The error quotes the offending spelling, opener through the colon.
-      expect(errors[0]).toContain(`'${bad.slice(0, bad.indexOf(":") + 1)}'`);
-    }
   });
 
   test("the recognizer is same-line: a newline inside the opener matches neither scan", () => {
@@ -754,14 +754,20 @@ describe("manifestEntries", () => {
   // flipping the tree's only split declaration to managed emptied the set
   // and disarmed the check on exactly the flip it exists to catch. The
   // constant roster is what closes that.
-  test("flipping the only split declaration to managed is still caught", () => {
-    const REGION = ["# BEGIN REPO-PLATFORM MANAGED", "# END REPO-PLATFORM MANAGED", ""].join("\n");
-    const files = new Map<string, SourcedEntry>([[".gitignore", base(REGION)]]);
-    const flipped = manifestEntries(files, skip, {
+  test.each([
+    { reason: "the BEGIN line", marker: "# BEGIN REPO-PLATFORM MANAGED" },
+    { reason: "the END line", marker: "# END REPO-PLATFORM MANAGED" },
+  ])("flipping the only split declaration to managed is still caught ($reason)", ({ marker }) => {
+    const files = new Map<string, SourcedEntry>([[".gitignore", base(`${marker}\n`)]]);
+    const flipped = manifestEntries(files, [], {
       base: [{ path: ".gitignore", class: "managed" }],
       modules: new Map(),
     });
-    expect(flipped.errors.some((e) => e.includes("declared managed"))).toBe(true);
+    expect(flipped.errors).toEqual([
+      `templates/base/.gitignore: carries the '${marker}' region marker but is declared ` +
+        "managed - sync would overwrite the repo-owned content the markers promise to " +
+        "preserve; declare the file split (grammar managed-region) or drop the marker",
+    ]);
   });
 
   test("records each landed file's declared class with its render gates, sorted, self-listed", () => {
@@ -939,30 +945,34 @@ describe("manifestTemplate", () => {
         ownership: { class: "starter" },
       },
     ]).toString("utf-8");
-    expect(text).toContain(
+    // Entries in input order; the self entry alone carries the provenance
+    // slot the stamper fills; split entries expose their grammar and marker
+    // pair; no-parity classes carry no hash token; gated entries ride an
+    // allOf if/endif pair.
+    expect(text.split("\n")).toEqual([
+      "{%- set entries = [] -%}",
       `{%- set _ = entries.append('    ".github/workflows/ci.yml": {"class": "managed", "hash": null}') -%}`,
-    );
-    // The self entry alone carries the provenance slot the stamper fills.
-    expect(text).toContain(
-      `'    ".github/repo-platform-manifest.json": {"class": "managed", "hash": null, "commit": null}'`,
-    );
-    expect(text).toContain("{%- if 'agents' in modules -%}");
-    // Split entries expose their grammar and its begin/end marker pair.
-    expect(text).toContain(
-      '"class": "split", "grammar": "managed-region", ' +
-        '"begin": "<!-- BEGIN REPO-PLATFORM MANAGED -->", ' +
-        '"end": "<!-- END REPO-PLATFORM MANAGED -->", "hash": null',
-    );
-    expect(text).toContain(
-      '"class": "split", "grammar": "managed-region", "begin": "# BEGIN REPO-PLATFORM MANAGED", ' +
-        '"end": "# END REPO-PLATFORM MANAGED", "hash": null',
-    );
-    expect(text).toContain("{%- if ('a' in modules) and (not private) -%}");
-    // No-parity classes carry no hash token for the stamper to fill.
-    expect(text).toContain(`'    "checks.yml": {"class": "starter"}'`);
-    expect(text).toContain(`'    ".github/settings.yml": {"class": "starter"}'`);
-    expect(text).toContain("{{ entries | join(',\\n') }}");
-    expect(text.endsWith("}\n")).toBe(true);
+      `{%- set _ = entries.append('    ".github/repo-platform-manifest.json": {"class": "managed", "hash": null, "commit": null}') -%}`,
+      "{%- if 'agents' in modules -%}",
+      `{%- set _ = entries.append('    "AGENTS.md": {"class": "split", "grammar": "managed-region", "begin": "<!-- BEGIN REPO-PLATFORM MANAGED -->", "end": "<!-- END REPO-PLATFORM MANAGED -->", "hash": null}') -%}`,
+      "{%- endif -%}",
+      `{%- set _ = entries.append('    ".gitignore": {"class": "split", "grammar": "managed-region", "begin": "# BEGIN REPO-PLATFORM MANAGED", "end": "# END REPO-PLATFORM MANAGED", "hash": null}') -%}`,
+      "{%- if ('a' in modules) and (not private) -%}",
+      `{%- set _ = entries.append('    "checks.yml": {"class": "starter"}') -%}`,
+      "{%- endif -%}",
+      "{%- if 'settings-sync' in modules -%}",
+      `{%- set _ = entries.append('    ".github/settings.yml": {"class": "starter"}') -%}`,
+      "{%- endif -%}",
+      "{",
+      expect.stringMatching(
+        /^ {2}"\$comment": "Generated by \{\{ github_username \}\}\/repo-platform - do not edit\. .*",$/,
+      ),
+      '  "files": {',
+      "{{ entries | join(',\\n') }}",
+      "  }",
+      "}",
+      "",
+    ]);
   });
 });
 
@@ -971,23 +981,21 @@ describe("manifestTemplate", () => {
 // jinja-expression filenames (tarball extraction safety), so these are
 // what realizes the gates instead.
 describe("plainTemplatePath", () => {
-  test("strips a filename gate, keeping the .jinja suffix outside the landed name", () => {
-    expect(plainTemplatePath("{% if not private %}CONTRIBUTING.md{% endif %}.jinja")).toBe(
+  test.each([
+    [
+      "{% if not private %}CONTRIBUTING.md{% endif %}.jinja",
       "CONTRIBUTING.md.jinja",
-    );
-  });
-
-  test("strips a gated directory segment", () => {
-    expect(plainTemplatePath("{% if 'demo' in modules %}.demo{% endif %}/config.yml")).toBe(
+      "strips a filename gate, keeping the .jinja suffix outside the landed name",
+    ],
+    [
+      "{% if 'demo' in modules %}.demo{% endif %}/config.yml",
       ".demo/config.yml",
-    );
-  });
-
-  test("leaves plain paths untouched", () => {
-    expect(plainTemplatePath(".github/workflows/ci.yml.jinja")).toBe(
-      ".github/workflows/ci.yml.jinja",
-    );
-    expect(plainTemplatePath("CLAUDE.md")).toBe("CLAUDE.md");
+      "strips a gated directory segment",
+    ],
+    [".github/workflows/ci.yml.jinja", ".github/workflows/ci.yml.jinja", "a plain .jinja path"],
+    ["CLAUDE.md", "CLAUDE.md", "a plain symlink name"],
+  ])("%s -> %s (%s)", (logical, expected) => {
+    expect(plainTemplatePath(logical)).toBe(expected);
   });
 });
 

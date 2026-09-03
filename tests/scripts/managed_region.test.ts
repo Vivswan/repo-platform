@@ -63,20 +63,30 @@ describe("the two writers agree on the shared accept/reject", () => {
 
   test("a clean file: the regenerator and the sync carry keep the same sides", () => {
     const sides = existingLocalSides(onDisk(CLEAN));
-    expect(sides.above).toBe("# local patterns go here\n/repo-local-cache/\n\n");
-    expect(sides.below).toBe("below-side\n");
+    expect(sides).toEqual({
+      above: "# local patterns go here\n/repo-local-cache/\n\n",
+      below: "below-side\n",
+    });
     const carry = carryManagedRegion(RENDER, CLEAN, entry, undefined);
-    expect(carry?.kind).toBe("sides-restored");
-    expect(carry?.content).toContain("/repo-local-cache/\n");
-    expect(carry?.content).toContain("below-side\n");
+    expect(carry).toEqual({
+      kind: "sides-restored",
+      content: `# local patterns go here\n/repo-local-cache/\n\n${HB}\n*.new\n${HE}\nbelow-side\n`,
+    });
+    // The carry IS the regenerator's sides around the render's region.
+    expect(carry?.content).toBe(`${sides.above}${HB}\n*.new\n${HE}\n${sides.below}`);
   });
 
   test("a file that does not exist yet gets the regenerator's default seed", () => {
     const sides = existingLocalSides(
       join(mkdtempSync(join(tmpdir(), "gitignore-region-")), "none"),
     );
-    expect(sides.above).toContain("Repository-specific ignore patterns go outside");
-    expect(sides.below).toBe("");
+    expect(sides).toEqual({
+      above:
+        "# Repository-specific ignore patterns go outside the managed region:\n" +
+        "# here (above BEGIN), or below the END marker where last-match-wins\n" +
+        "# can override managed patterns.\n\n",
+      below: "",
+    });
   });
 
   for (const [shape, content] of Object.entries(MALFORMED)) {

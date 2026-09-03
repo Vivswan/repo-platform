@@ -22,12 +22,24 @@ import {
 
 const WHERE = "templates/demo/module.yml";
 
+/** The full message a parse rejection carries, so a row pins its OWN rule
+ *  (every parseManifest error is prefixed with WHERE, which alone proves
+ *  nothing about which rule fired). */
+function rejection(yaml: string): string {
+  try {
+    parseManifest("demo", yaml, WHERE);
+  } catch (error) {
+    return (error as Error).message;
+  }
+  throw new Error("parseManifest accepted the manifest");
+}
+
 describe("parseManifest", () => {
-  test("a description-only manifest parses", () => {
-    const manifest = parseManifest("demo", "description: a demo module\n", WHERE);
-    expect(manifest.module).toBe("demo");
-    expect(manifest.description).toBe("a demo module");
-    expect(manifest.toolchain).toBeUndefined();
+  test("a description-only manifest parses to exactly the two identity fields", () => {
+    expect(parseManifest("demo", "description: a demo module\n", WHERE)).toEqual({
+      module: "demo",
+      description: "a demo module",
+    });
   });
 
   test("a full toolchain manifest parses with every field typed", () => {
@@ -37,6 +49,9 @@ describe("parseManifest", () => {
         "description: demo toolchain",
         "toolchain:",
         "  codeql_language: python",
+        "  pin:",
+        "    file: .demo-version",
+        "    version: 1.2.3",
         "dependabot:",
         "  ecosystem: pip",
         "  label: python",
@@ -52,31 +67,22 @@ describe("parseManifest", () => {
       ].join("\n"),
       WHERE,
     );
-    expect(manifest.toolchain).toEqual({ codeql_language: "python" });
-    expect(manifest.dependabot).toEqual({ ecosystem: "pip", label: "python", color: "2b67c6" });
-    expect(manifest.lockfiles).toEqual(["demo\\.lock"]);
-    expect(manifest.pages).toEqual({ install: "demo install", build: "demo build" });
-    expect(manifest.gate).toBe("'demo' in modules");
+    expect(manifest).toEqual({
+      module: "demo",
+      description: "demo toolchain",
+      toolchain: { codeql_language: "python", pin: { file: ".demo-version", version: "1.2.3" } },
+      dependabot: { ecosystem: "pip", label: "python", color: "2b67c6" },
+      gitignore_sources: ["Python.gitignore"],
+      lockfiles: ["demo\\.lock"],
+      pages: { install: "demo install", build: "demo build" },
+      gate: "'demo' in modules",
+    });
   });
 
-  test("an unknown key fails loudly, naming the file", () => {
-    expect(() => parseManifest("demo", "description: x\ntoolchian: {}\n", WHERE)).toThrow(WHERE);
-  });
-
-  test("a toolchain pin parses with file and version typed", () => {
-    const manifest = parseManifest(
-      "demo",
-      [
-        "description: demo toolchain",
-        "toolchain:",
-        "  codeql_language: python",
-        "  pin:",
-        "    file: .demo-version",
-        "    version: 1.2.3",
-      ].join("\n"),
-      WHERE,
+  test("an unknown key fails loudly, naming the file and the key", () => {
+    expect(rejection("description: x\ntoolchian: {}\n")).toBe(
+      `${WHERE}: (top level): Unrecognized key: "toolchian"`,
     );
-    expect(manifest.toolchain?.pin).toEqual({ file: ".demo-version", version: "1.2.3" });
   });
 
   test("degenerate pin file names fail: no dot, uppercase, path separators", () => {
@@ -365,21 +371,31 @@ describe("ownership declarations", () => {
     ]);
   });
 
-  test("an unknown class, a missing grammar, and a duplicate path are rejected", () => {
-    const cases: [string, string[]][] = [
-      ["unknown class", ["ownership:", "  - { path: X.md, class: bespoke }"]],
-      ["split without grammar", ["ownership:", "  - { path: X.md, class: split, marker: '# m' }"]],
-      [
-        "duplicate path",
-        ["ownership:", "  - { path: X.md, class: managed }", "  - { path: X.md, class: starter }"],
-      ],
-      ["empty list", ["ownership: []"]],
-    ];
-    for (const [, lines] of cases) {
-      expect(() =>
-        parseManifest("demo", ["description: a demo module", ...lines, ""].join("\n"), WHERE),
-      ).toThrow(WHERE);
-    }
+  test.each([
+    {
+      reason: "an unknown class",
+      lines: ["  - { path: X.md, class: bespoke }"],
+      message:
+        "ownership.0.class: Invalid discriminator value. Expected 'managed' | 'starter' | 'split'",
+    },
+    {
+      reason: "a split without a grammar",
+      lines: ["  - { path: X.md, class: split, begin: '# b', end: '# e' }"],
+      message: 'ownership.0.grammar: Invalid input: expected "managed-region"',
+    },
+    {
+      reason: "a duplicate path",
+      lines: ["  - { path: X.md, class: managed }", "  - { path: X.md, class: starter }"],
+      message: "ownership: path 'X.md' is declared twice",
+    },
+    {
+      reason: "an empty list",
+      lines: [],
+      message: "ownership: Too small: expected array to have >=1 items",
+    },
+  ])("$reason is rejected by its own rule", ({ lines, message }) => {
+    const ownership = lines.length === 0 ? "ownership: []" : ["ownership:", ...lines].join("\n");
+    expect(rejection(`description: a demo module\n${ownership}\n`)).toBe(`${WHERE}: ${message}`);
   });
 });
 
@@ -393,21 +409,32 @@ describe("settings_layers", () => {
     expect(manifest.settings_layers).toEqual(["settings.yml", "settings-public.yml"]);
   });
 
-  test("an unknown layer filename is refused", () => {
-    expect(() =>
-      parseManifest("demo", "description: x\nsettings_layers:\n  - settings-extra.yml\n", WHERE),
-    ).toThrow(WHERE);
-  });
-
-  test("duplicates, wrong order, and an empty list are refused", () => {
-    const bad = [
-      "settings_layers:\n  - settings.yml\n  - settings.yml\n",
-      "settings_layers:\n  - settings-public.yml\n  - settings.yml\n",
-      "settings_layers: []\n",
-    ];
-    for (const lines of bad) {
-      expect(() => parseManifest("demo", `description: x\n${lines}`, WHERE)).toThrow(WHERE);
-    }
+  test.each([
+    {
+      reason: "an unknown layer filename",
+      yaml: "settings_layers:\n  - settings-extra.yml\n",
+      message:
+        'settings_layers.0: Invalid option: expected one of "settings.yml"|"settings-public.yml"|"settings-private.yml"',
+    },
+    {
+      reason: "a duplicated layer",
+      yaml: "settings_layers:\n  - settings.yml\n  - settings.yml\n",
+      message:
+        "settings_layers: settings_layers must list each layer file at most once, in stack order (settings.yml, settings-public.yml, settings-private.yml)",
+    },
+    {
+      reason: "layers out of stack order",
+      yaml: "settings_layers:\n  - settings-public.yml\n  - settings.yml\n",
+      message:
+        "settings_layers: settings_layers must list each layer file at most once, in stack order (settings.yml, settings-public.yml, settings-private.yml)",
+    },
+    {
+      reason: "an empty list",
+      yaml: "settings_layers: []\n",
+      message: "settings_layers: Too small: expected array to have >=1 items",
+    },
+  ])("$reason is refused by its own rule", ({ yaml, message }) => {
+    expect(rejection(`description: x\n${yaml}`)).toBe(`${WHERE}: ${message}`);
   });
 
   describe("assertSettingsLayerFiles holds the declaration and the tree together", () => {

@@ -206,19 +206,25 @@ describe("region builders", () => {
     expect(() => pagesManifests([RUST])).toThrow("pages: {install, build}");
   });
 
-  test("pagesSetup builds the default union and the validator token list", () => {
-    const [defaultLine, validatorLine] = pagesSetup([BUN, UV]);
-    expect(defaultLine).toBe(
-      "  default: \"{{ ((['bun'] if 'bun' in modules else []) + (['uv'] if 'uv' in modules else [])) | join(',') or 'none' }}\"",
-    );
-    expect(validatorLine).toContain("['bun', 'uv', 'none']");
-    expect(validatorLine).toContain("pages_setup tokens must be bun, uv, or none");
-  });
-
-  test("a single pages module keeps the prose grammatical", () => {
-    const [, validatorLine] = pagesSetup([BUN]);
-    expect(validatorLine).toContain("['bun', 'none']");
-    expect(validatorLine).toContain("pages_setup tokens must be bun or none");
+  test.each([
+    {
+      reason: "two pages modules: the default unions both, the prose takes a serial comma",
+      withPages: [BUN, UV],
+      defaultLine:
+        "  default: \"{{ ((['bun'] if 'bun' in modules else []) + (['uv'] if 'uv' in modules else [])) | join(',') or 'none' }}\"",
+      validatorLine:
+        "  validator: \"{% set ts = pages_setup.split(',') %}{% if '' in ts or ts | map('trim') | list != ts %}pages_setup must be comma-separated with no spaces or empty tokens{% elif ts | reject('in', ['bun', 'uv', 'none']) | list %}pages_setup tokens must be bun, uv, or none{% elif ts | unique | list | length != ts | length %}pages_setup tokens must be unique{% elif 'none' in ts and ts | length > 1 %}pages_setup 'none' cannot be combined with toolchains{% endif %}\"",
+    },
+    {
+      reason: "a single pages module keeps the prose grammatical",
+      withPages: [BUN],
+      defaultLine:
+        "  default: \"{{ ((['bun'] if 'bun' in modules else [])) | join(',') or 'none' }}\"",
+      validatorLine:
+        "  validator: \"{% set ts = pages_setup.split(',') %}{% if '' in ts or ts | map('trim') | list != ts %}pages_setup must be comma-separated with no spaces or empty tokens{% elif ts | reject('in', ['bun', 'none']) | list %}pages_setup tokens must be bun or none{% elif ts | unique | list | length != ts | length %}pages_setup tokens must be unique{% elif 'none' in ts and ts | length > 1 %}pages_setup 'none' cannot be combined with toolchains{% endif %}\"",
+    },
+  ])("pagesSetup: $reason", ({ withPages, defaultLine, validatorLine }) => {
+    expect(pagesSetup(withPages)).toEqual([defaultLine, validatorLine]);
   });
 
   test("pages command chains nest one parenthesized else per extra module", () => {
@@ -295,14 +301,22 @@ describe("tracking-label validators", () => {
     ]);
   });
 
-  test("a later stream also rejects each earlier stream's answer, module-gated", () => {
-    const [line] = trackingLabelValidator(STREAMS, 1, ["bug"]);
-    expect(line).toContain(
-      "{% elif 'fuzzer' in modules and nightly_label | lower == fuzzer_label | lower %}",
-    );
-    expect(line).toContain("nightly_label must differ from fuzzer_label");
-    // The reserved-roster clause precedes the cross-stream one.
-    expect(line.indexOf("must not reuse")).toBeLessThan(line.indexOf("must differ from"));
+  test("a later stream also rejects each earlier stream's answer, module-gated, after the roster clause", () => {
+    expect(trackingLabelValidator(STREAMS, 1, ["bug"])).toEqual([
+      '  validator: "' +
+        "{% if not (nightly_label | regex_search('^[A-Za-z0-9._][A-Za-z0-9._: -]{0,49}\\\\Z')) %}" +
+        "nightly_label must be a plain label: letters, digits, ._:- and spaces, " +
+        "not starting with a dash, at most 50 characters" +
+        "{% elif nightly_label | lower in ['bug'] %}" +
+        "nightly_label must not reuse a label the template already manages " +
+        "(GitHub label names are case-insensitive): a green night would close " +
+        "whatever issues carry it and every settings apply would fight over it" +
+        "{% elif 'fuzzer' in modules and nightly_label | lower == fuzzer_label | lower %}" +
+        "nightly_label must differ from fuzzer_label (GitHub label names are " +
+        "case-insensitive): each stream needs its own tracking label or a " +
+        "green night in one closes the other's open issue" +
+        '{% endif %}"',
+    ]);
   });
 
   test("a stream default colliding with the reserved roster throws", () => {
@@ -375,42 +389,36 @@ describe("spliceInlineRegion", () => {
 });
 
 describe("docs region builders", () => {
-  test("readmeModuleRoster keeps the module-list rule's sentence anchor", () => {
-    const text = readmeModuleRoster([BUN, UV, RUST]).join("\n");
+  test("readmeModuleRoster: the heading-separating blank line, then one unwrapped bullet keeping the module-list rule's sentence anchor", () => {
+    const lines = readmeModuleRoster([BUN, UV, RUST]);
+    expect(lines).toEqual([
+      "",
+      "- Modules (pick any combination): `bun`, `uv`, `rust`. Modules with parameters (like `pages`) ask follow-up questions only when selected. After generation, module selection lives in each repo's own `.repo-platform.yml`: edit its `modules:` list and the next sync applies the change.",
+    ]);
     // The same extraction check_ssot's module-list rule performs.
-    const region = text.match(/Modules \(pick any combination\):([\s\S]*?)\. /);
+    const region = lines[1].match(/Modules \(pick any combination\):([\s\S]*?)\. /);
     expect(region).not.toBeNull();
     expect([...(region as RegExpMatchArray)[1].matchAll(/`([a-z-]+)`/g)].map((m) => m[1])).toEqual([
       "bun",
       "uv",
       "rust",
     ]);
-    expect(text).toContain("ask follow-up questions only when selected.");
   });
 
-  test("readmeModuleRoster opens with the heading-separating blank line, then one unwrapped bullet", () => {
-    const lines = readmeModuleRoster([BUN, UV, RUST]);
-    expect(lines).toHaveLength(2);
-    expect(lines[0]).toBe("");
-    expect(lines[1]).toStartWith("- Modules (pick any combination): `bun`,");
-    expect(lines[1]).toEndWith("the next sync applies the change.");
-  });
-
-  test("newRepoModuleRoster keeps the module-list rule's paren anchor and ends its sentence", () => {
+  test("newRepoModuleRoster continues the marker's sentence in place, linking every MODULE_PARAM_DOCS guide", () => {
     const text = newRepoModuleRoster([BUN, RUST]);
+    // Single-line: the span opens with a separating space and ends the
+    // sentence itself.
+    expect(text).toBe(
+      " multiselect (any combination of `bun`, `rust`), follow-up parameters for modules that have them (see [docs/pages.md](pages.md), [docs/docs-site.md](docs-site.md), [docs/skills.md](skills.md), [docs/fuzzer.md](fuzzer.md), and [docs/nightly.md](nightly.md)), and visibility.",
+    );
+    // The same extraction check_ssot's module-list rule performs.
     const region = text.match(/any combination of([\s\S]*?)\)/);
     expect(region).not.toBeNull();
     expect([...(region as RegExpMatchArray)[1].matchAll(/`([a-z-]+)`/g)].map((m) => m[1])).toEqual([
       "bun",
       "rust",
     ]);
-    // Single-line: the span continues the BEGIN marker's sentence in place,
-    // so it opens with a separating space and ends the sentence itself.
-    expect(text).toStartWith(" multiselect");
-    expect(text).toEndWith("and visibility.");
-    // The parameter-doc links come from MODULE_PARAM_DOCS, not a hand list.
-    expect(text).toContain("[docs/skills.md](skills.md)");
-    expect(text).toContain("[docs/nightly.md](nightly.md)");
   });
 
   test("dependabotLabelGroups dedupes labels AND repeated ecosystems", () => {
@@ -427,24 +435,41 @@ describe("docs region builders", () => {
     expect(() => dependabotLabelGroups([manifest("agents")])).toThrow("dependabot");
   });
 
-  test("the label prose lists ecosystems with and/serial-comma grammar", () => {
+  // Single-line: the span opens with the marker-separating space and ends
+  // its own sentence; ecosystems sharing a label list with and/serial-comma
+  // grammar.
+  describe("dependabotLabelsSpan", () => {
     const node = manifest("node", {
       dependabot: { ecosystem: "npm", label: "javascript", color: "168700" },
     });
     const yarn = manifest("yarn", {
       dependabot: { ecosystem: "yarn", label: "javascript", color: "168700" },
     });
-    expect(dependabotLabelsSpan([BUN, UV])).toContain(
-      "`javascript` (`168700`) for bun, `python:uv` (`2b67c6`) for uv.",
-    );
-    expect(dependabotLabelsSpan([BUN, node, UV])).toContain("for bun and npm, `python:uv`");
-    expect(dependabotLabelsSpan([BUN, node, yarn])).toContain("for bun, npm, and yarn.");
-  });
-
-  test("dependabotLabelsSpan opens with the marker-separating space and ends its sentence", () => {
-    const span = dependabotLabelsSpan([BUN, UV, RUST]);
-    expect(span).toStartWith(" `javascript` (`168700`) for bun");
-    expect(span).toEndWith("for cargo.");
+    test.each([
+      {
+        reason: "one ecosystem per label",
+        manifests: [BUN, UV],
+        expected: " `javascript` (`168700`) for bun, `python:uv` (`2b67c6`) for uv.",
+      },
+      {
+        reason: "two ecosystems join with 'and'",
+        manifests: [BUN, node, UV],
+        expected: " `javascript` (`168700`) for bun and npm, `python:uv` (`2b67c6`) for uv.",
+      },
+      {
+        reason: "three ecosystems take the serial comma",
+        manifests: [BUN, node, yarn],
+        expected: " `javascript` (`168700`) for bun, npm, and yarn.",
+      },
+      {
+        reason: "three labels list in manifest order",
+        manifests: [BUN, UV, RUST],
+        expected:
+          " `javascript` (`168700`) for bun, `python:uv` (`2b67c6`) for uv, `rust` (`000000`) for cargo.",
+      },
+    ])("$reason", ({ manifests, expected }) => {
+      expect(dependabotLabelsSpan(manifests)).toBe(expected);
+    });
   });
 
   test("pages cells render token list, example, and command defaults", () => {

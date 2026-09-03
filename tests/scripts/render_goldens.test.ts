@@ -38,59 +38,89 @@ describe("normalizeAnswers", () => {
     expect(() => normalizeAnswers("_commit: x\n", `${SHA}ff`)).toThrow("not a full sha1");
   });
 
-  test("rewrites the short form copier records, the full sha, and prefixes between", () => {
-    expect(normalizeAnswers(`_commit: ${SHORT}\n`, SHA)).toBe(`_commit: ${SHA_SENTINEL}\n`);
-    expect(normalizeAnswers(`_commit: ${SHA}\n`, SHA)).toBe(`_commit: ${SHA_SENTINEL}\n`);
-    expect(normalizeAnswers(`_commit: ${SHA.slice(0, 12)}\n`, SHA)).toBe(
-      `_commit: ${SHA_SENTINEL}\n`,
-    );
+  const SENTINEL_LINE = `_commit: ${SHA_SENTINEL}\n`;
+  test.each([
+    {
+      reason: "the short form copier records",
+      text: `_commit: ${SHORT}\n`,
+      sha: SHA,
+      expected: SENTINEL_LINE,
+    },
+    { reason: "the full sha", text: `_commit: ${SHA}\n`, sha: SHA, expected: SENTINEL_LINE },
+    {
+      reason: "a prefix between short and full",
+      text: `_commit: ${SHA.slice(0, 12)}\n`,
+      sha: SHA,
+      expected: SENTINEL_LINE,
+    },
+    {
+      reason: "nothing but the _commit value (other keys verbatim)",
+      text: `_commit: ${SHORT}\n_src_path: ./tree\nproject_name: Golden Render\n`,
+      sha: SHA,
+      expected: `_commit: ${SHA_SENTINEL}\n_src_path: ./tree\nproject_name: Golden Render\n`,
+    },
+    {
+      reason: "a sub-7-char value: untouched",
+      text: `_commit: ${SHA.slice(0, 6)}\n`,
+      sha: SHA,
+      expected: `_commit: ${SHA.slice(0, 6)}\n`,
+    },
+    {
+      reason: "a wrong short sha: untouched, so a mis-stamped render shows as drift",
+      text: `_commit: ${"f".repeat(7)}\n`,
+      sha: SHA,
+      expected: `_commit: ${"f".repeat(7)}\n`,
+    },
+    {
+      reason: "a value continuing past the prefix wrongly: untouched",
+      text: `_commit: ${SHORT}ff\n`,
+      sha: SHA,
+      expected: `_commit: ${SHORT}ff\n`,
+    },
+    {
+      reason: "no _commit key at all: untouched",
+      text: "_src_path: ./tree\n",
+      sha: SHA,
+      expected: "_src_path: ./tree\n",
+    },
+    {
+      // A hex sentinel ("0000000") would make the already-sentinel guard
+      // reject this genuine commit; the sentinel being non-hex keeps the
+      // two disjoint.
+      reason: "an honest sha of seven zeros: the non-hex sentinel cannot collide",
+      text: "_commit: 0000000\n",
+      sha: `0000000${"a".repeat(33)}`,
+      expected: SENTINEL_LINE,
+    },
+    {
+      // ~4% of commits have an all-decimal 7-char prefix, which copier
+      // quotes to keep it a string; before the unwrap, exactly those
+      // renders drifted while every other commit passed.
+      reason: "a single-quoted all-decimal short sha: unwrapped",
+      text: "_commit: '2753404'\n",
+      sha: `2753404${"a".repeat(33)}`,
+      expected: SENTINEL_LINE,
+    },
+    {
+      reason: "a double-quoted all-decimal short sha: unwrapped",
+      text: '_commit: "2753404"\n',
+      sha: `2753404${"a".repeat(33)}`,
+      expected: SENTINEL_LINE,
+    },
+    {
+      reason: "a quoted WRONG sha: untouched",
+      text: "_commit: '9999999'\n",
+      sha: SHA,
+      expected: "_commit: '9999999'\n",
+    },
+  ])("$reason", ({ text, sha, expected }) => {
+    expect(normalizeAnswers(text, sha)).toBe(expected);
   });
 
-  test("touches nothing but the _commit value", () => {
-    const text = `_commit: ${SHORT}\n_src_path: ./tree\nproject_name: Golden Render\n`;
-    expect(normalizeAnswers(text, SHA)).toBe(
-      `_commit: ${SHA_SENTINEL}\n_src_path: ./tree\nproject_name: Golden Render\n`,
-    );
-  });
-
-  test("leaves a sub-7-char value untouched", () => {
-    const text = `_commit: ${SHA.slice(0, 6)}\n`;
-    expect(normalizeAnswers(text, SHA)).toBe(text);
-  });
-
-  test("leaves a wrong sha untouched, so a mis-stamped render shows as drift", () => {
-    const wrongShort = `_commit: ${"f".repeat(7)}\n`;
-    expect(normalizeAnswers(wrongShort, SHA)).toBe(wrongShort);
-    const diverging = `_commit: ${SHORT}ff\n`; // continues past the prefix wrongly
-    expect(normalizeAnswers(diverging, SHA)).toBe(diverging);
-    const missing = "_src_path: ./tree\n"; // no _commit key at all
-    expect(normalizeAnswers(missing, SHA)).toBe(missing);
-  });
-
-  test("throws on a value already reading as the sentinel", () => {
+  test("throws on a value already reading as the sentinel, quoted or not", () => {
     expect(() => normalizeAnswers(`_commit: ${SHA_SENTINEL}\n`, SHA)).toThrow(
       `already reads as the sentinel "${SHA_SENTINEL}"`,
     );
-  });
-
-  test("normalizes an honest sha of seven zeros - the non-hex sentinel cannot collide", () => {
-    // A hex sentinel ("0000000") would make the guard above reject this
-    // genuine commit; the sentinel being non-hex keeps the two disjoint.
-    const zeroSha = `0000000${"a".repeat(33)}`;
-    expect(normalizeAnswers("_commit: 0000000\n", zeroSha)).toBe(`_commit: ${SHA_SENTINEL}\n`);
-  });
-
-  test("unwraps a YAML-quoted short sha - copier quotes all-decimal ones to keep them strings", () => {
-    // ~4% of commits have an all-decimal 7-char prefix; before the unwrap,
-    // exactly those renders drifted while every other commit passed.
-    const decimalSha = `2753404${"a".repeat(33)}`;
-    expect(normalizeAnswers("_commit: '2753404'\n", decimalSha)).toBe(`_commit: ${SHA_SENTINEL}\n`);
-    expect(normalizeAnswers('_commit: "2753404"\n', decimalSha)).toBe(`_commit: ${SHA_SENTINEL}\n`);
-  });
-
-  test("a quoted WRONG sha stays untouched, and a quoted sentinel still throws", () => {
-    const wrong = "_commit: '9999999'\n";
-    expect(normalizeAnswers(wrong, SHA)).toBe(wrong);
     expect(() => normalizeAnswers(`_commit: '${SHA_SENTINEL}'\n`, SHA)).toThrow(
       `already reads as the sentinel "${SHA_SENTINEL}"`,
     );

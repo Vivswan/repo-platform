@@ -52,30 +52,34 @@ describe("normalizeJinja", () => {
     expect(normalizeJinja(text, vars)).toBe("ABC");
   });
 
-  test("substitutes the copyright holder", () => {
-    const text = "Required Notice: Copyright {{ copyright_holder }}";
-    expect(normalizeJinja(text, vars)).toBe(
-      "Required Notice: Copyright Vivswan Shah (https://github.com/Vivswan)",
-    );
-  });
-
-  test("substitutes a copyright holder containing $ sequences literally", () => {
-    const dollarVars = { ...vars, copyrightHolder: "Smith & Sons ($$ '$&' LLC)" };
-    expect(normalizeJinja("Copyright {{ copyright_holder }}", dollarVars)).toBe(
-      "Copyright Smith & Sons ($$ '$&' LLC)",
-    );
-  });
-
-  test("substitutes the identity expressions", () => {
-    const text = "* @{{ github_username | lower }} by {{ github_username }} in {{ project_slug }}";
-    expect(normalizeJinja(text, vars)).toBe("* @vivswan by Vivswan in repo-platform");
-  });
-
-  test("keeps remote @build uses references verbatim (the dogfooded copies ride the delivery branch like the fleet)", () => {
-    const text = "uses: {{ github_username }}/repo-platform/.github/workflows/reusable-x.yml@build";
-    expect(normalizeJinja(text, vars)).toBe(
-      "uses: Vivswan/repo-platform/.github/workflows/reusable-x.yml@build",
-    );
+  test.each([
+    {
+      reason: "the copyright holder",
+      text: "Required Notice: Copyright {{ copyright_holder }}",
+      vars,
+      expected: "Required Notice: Copyright Vivswan Shah (https://github.com/Vivswan)",
+    },
+    {
+      reason: "a copyright holder containing $ sequences, literally",
+      text: "Copyright {{ copyright_holder }}",
+      vars: { ...vars, copyrightHolder: "Smith & Sons ($$ '$&' LLC)" },
+      expected: "Copyright Smith & Sons ($$ '$&' LLC)",
+    },
+    {
+      reason: "the identity expressions",
+      text: "* @{{ github_username | lower }} by {{ github_username }} in {{ project_slug }}",
+      vars,
+      expected: "* @vivswan by Vivswan in repo-platform",
+    },
+    {
+      reason:
+        "remote @build uses references, kept verbatim (the dogfooded copies ride the delivery branch like the fleet)",
+      text: "uses: {{ github_username }}/repo-platform/.github/workflows/reusable-x.yml@build",
+      vars,
+      expected: "uses: Vivswan/repo-platform/.github/workflows/reusable-x.yml@build",
+    },
+  ])("substitutes $reason", ({ text, vars: substitutions, expected }) => {
+    expect(normalizeJinja(text, substitutions)).toBe(expected);
   });
 
   test("evaluates string conditionals on the true leg", () => {

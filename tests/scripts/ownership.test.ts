@@ -306,9 +306,11 @@ describe("declarationTextErrors", () => {
     expect(errors[0]).toContain("managed header but is declared a starter");
   });
 
-  test("a starter carrying a region marker line contradicts", () => {
-    const errors = errorsOf(starter("checks.yml"), `x\n${HB}\n`, true);
-    expect(errors.join("\n")).toContain("declared a starter");
+  test("a starter declaration over region marker text is an error", () => {
+    expect(errorsOf(starter(".gitignore"), `${HB}\n`, true)).toEqual([
+      `templates/t/x.jinja: carries the '${HB}' region marker but is declared a starter - the ` +
+        "marker promises a sync-maintained managed region that a starter never gets; drop one",
+    ]);
   });
 
   test("a managed or split file matched by _skip_if_exists contradicts", () => {
@@ -335,12 +337,34 @@ describe("declarationTextErrors", () => {
     }
   });
 
-  test("a managed file carrying a region marker line contradicts", () => {
-    for (const marker of [B, HB]) {
-      const errors = errorsOf(managed("X.md"), `top\n${marker}\ntail\n`, false);
-      expect(errors).toHaveLength(1);
-      expect(errors[0]).toContain("declared managed");
-    }
+  // Foreign markers match by TEXT PRESENCE: any occurrence of the full
+  // marker string in a source that does not own it is a claim - a bare
+  // line, glued to jinja tags, inside a tag or a comment, or a prose
+  // mention reproducing the marker text. An over-claim surfaces at compose
+  // time and costs a reword; an under-claim ships a live marker in a
+  // managed file - a silent ownership bypass. The roster unions the
+  // shipped constants with every DECLARED grammar's markers, so another
+  // declaration's spelling is as foreign as the constants.
+  test.each([
+    { reason: "the shipped hash BEGIN constant", line: HB, marker: HB },
+    { reason: "the shipped HTML BEGIN constant", line: B, marker: B },
+    { reason: "jinja-glued", line: `{% if 'agents' in modules %}${HB}{% endif %}`, marker: HB },
+    { reason: "inside a jinja comment", line: `{# reminder: ${HB} #}`, marker: HB },
+    { reason: "inside a set statement", line: `{% set note = "${HB}" %}`, marker: HB },
+    { reason: "inside a raw block", line: `{% raw %}${HB}{% endraw %}`, marker: HB },
+    { reason: "a mid-line prose mention", line: `see ${HB} mid-line`, marker: HB },
+    { reason: "expression-glued", line: `{{ "" }}${B}`, marker: B },
+    {
+      reason: "ANOTHER declared grammar's marker (derived, not a constant)",
+      line: "# NOTES MANAGED OPEN",
+      marker: "# NOTES MANAGED OPEN",
+    },
+  ])("foreign marker text in a managed source contradicts: $reason", ({ line, marker }) => {
+    expect(errorsOf(managed("X.md"), `top\n${line}\ntail\n`, false)).toEqual([
+      `templates/t/x.jinja: carries the '${marker}' region marker but is declared managed - ` +
+        "sync would overwrite the repo-owned content the markers promise to preserve; " +
+        "declare the file split (grammar managed-region) or drop the marker",
+    ]);
   });
 
   test("a mid-line marker mention does not contradict managed", () => {
@@ -349,28 +373,6 @@ describe("declarationTextErrors", () => {
     expect(
       errorsOf(managed("GUIDE.md"), "content stays between the BEGIN/END markers\n", false),
     ).toEqual([]);
-  });
-
-  // Foreign markers match by TEXT PRESENCE: any occurrence of the full
-  // marker string in a source that does not own it is a claim - glued to
-  // jinja tags, inside a tag or a comment, or a prose mention reproducing
-  // the marker text. An over-claim surfaces at compose time and costs a
-  // reword; an under-claim ships a live marker in a managed file - a
-  // silent ownership bypass.
-  test("foreign region-marker text anywhere in a managed source contradicts", () => {
-    for (const line of [
-      HB,
-      `{% if 'agents' in modules %}${HB}{% endif %}`,
-      `{# reminder: ${HB} #}`,
-      `{% set note = "${HB}" %}`,
-      `{% raw %}${HB}{% endraw %}`,
-      `see ${HB} mid-line`,
-      `{{ "" }}${B}`,
-    ]) {
-      const errors = errorsOf(managed("X.md"), `top\n${line}\ntail\n`, false);
-      expect(errors).toHaveLength(1);
-      expect(errors[0]).toContain("declared managed");
-    }
   });
 
   test("text that is not the full marker string stays legal", () => {
@@ -454,18 +456,6 @@ describe("declarationTextErrors", () => {
   test("the legitimate .gitignore, carrying only its own pair, passes", () => {
     const source = ["# local seed", "", HB, "node_modules/", HE, ""].join("\n");
     expect(errorsOf(hashSplit(".gitignore"), source, false)).toEqual([]);
-  });
-
-  test("a starter declaration over region marker text is an error", () => {
-    const errors = errorsOf(starter(".gitignore"), `${HB}\n`, true);
-    expect(errors).toHaveLength(1);
-    expect(errors[0]).toContain("declared a starter");
-  });
-
-  test("ANOTHER declared grammar's markers contradict managed too - the set is derived, not canonical", () => {
-    const errors = errorsOf(managed("X.md"), "# NOTES MANAGED OPEN\n", false);
-    expect(errors).toHaveLength(1);
-    expect(errors[0]).toContain("declared managed");
   });
 
   test("a split file may also open with the managed header", () => {
