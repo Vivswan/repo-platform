@@ -6,7 +6,11 @@
 // check run returns null.
 
 import { describe, expect, test } from "bun:test";
-import { allGreenFailure, verdictPending } from "../../.github/scripts/shared/all_green.ts";
+import {
+  allGreenFailure,
+  type GhRunner,
+  verdictPending,
+} from "../../.github/scripts/shared/all_green.ts";
 import type { RunResult } from "../../.github/scripts/shared/proc.ts";
 
 const SHA = "a".repeat(40);
@@ -34,6 +38,7 @@ function ghReturning(
       })),
     }),
     stderr: "",
+    pid: 0,
   });
 }
 
@@ -54,51 +59,77 @@ describe("allGreenFailure", () => {
     ]);
   });
 
-  test("a completed successful verdict is green", () => {
-    expect(allGreenFailure("o/r", SHA, ghReturning([{}]), NO_WAIT)).toBeNull();
+  // The only green: a completed success among the vouching checks. Rows
+  // are [reason, check rows].
+  test.each([
+    ["a completed successful verdict is green", [{}]],
+    [
+      "any success among several verdicts is green (a re-judged sha ran the same tree)",
+      [{ conclusion: "failure" }, {}],
+    ],
+  ])("%s", (_reason, checks) => {
+    expect(allGreenFailure("o/r", SHA, ghReturning(checks), NO_WAIT)).toBeNull();
   });
 
-  test("any success among several verdicts is green (a re-judged sha ran the same tree)", () => {
-    const gh = ghReturning([{ conclusion: "failure" }, { conclusion: "success" }]);
-    expect(allGreenFailure("o/r", SHA, gh, NO_WAIT)).toBeNull();
-  });
-
-  test("a failed verdict names its conclusion", () => {
-    const reason = allGreenFailure("o/r", SHA, ghReturning([{ conclusion: "failure" }]), NO_WAIT);
-    expect(reason).toContain("concluded 'failure'");
-  });
-
-  test("no check at all fails closed and names the re-run unwedge path", () => {
-    const reason = allGreenFailure("o/r", SHA, ghReturning([]), NO_WAIT);
-    expect(reason).toContain("no all-green verdict check exists");
-    expect(reason).toContain("re-run the sha's CI run");
-  });
-
-  test("an incomplete verdict is not green yet", () => {
-    const gh = ghReturning([{ status: "in_progress", conclusion: null }]);
-    expect(allGreenFailure("o/r", SHA, gh, NO_WAIT)).toContain("still 'in_progress'");
-  });
-
-  test("a look-alike check from another app never vouches", () => {
-    const gh = ghReturning([{ app: "some-other-app" }]);
-    expect(allGreenFailure("o/r", SHA, gh, NO_WAIT)).toContain("no all-green verdict check");
-  });
-
-  test("an app-less check never vouches", () => {
-    const gh = ghReturning([{ app: null }]);
-    expect(allGreenFailure("o/r", SHA, gh, NO_WAIT)).toContain("no all-green verdict check");
-  });
-
-  test("a differently named check never vouches even if the API returns it", () => {
-    const gh = ghReturning([{ name: "all-green-ish" }]);
-    expect(allGreenFailure("o/r", SHA, gh, NO_WAIT)).toContain("no all-green verdict check");
-  });
-
-  test("a pull_request verdict never vouches - a PR run tests the merge tree, not the sha", () => {
-    for (const event of ["pull_request", "pull_request_target"]) {
-      const gh = ghReturning([{ external_id: event }]);
-      expect(allGreenFailure("o/r", SHA, gh, NO_WAIT)).toContain("no all-green verdict check");
-    }
+  // Every refusal at a zeroed deadline, pinned as the WHOLE reason string:
+  // the prose is what verdictPending matches and what lands in the sync
+  // and publish logs, so a reworded fragment fails here rather than
+  // drifting. Rows are [reason, gh, expected reason].
+  const NO_CHECK =
+    "no all-green verdict check exists there (waited 0s) - CI has not vouched for the commit; re-run the sha's CI run (the all-green job posts the check) if one should exist";
+  const API_FAILURE = (detail: string) =>
+    `reading its all-green check runs failed (${detail}) - an API failure, not proof the commit is red, but the gate fails closed`;
+  const refusals: [string, GhRunner, string][] = [
+    [
+      "a failed verdict names its conclusion",
+      ghReturning([{ conclusion: "failure" }]),
+      "its all-green verdict concluded 'failure'",
+    ],
+    [
+      "at the deadline a stale failure with no success is the reported reason",
+      ghReturning([{ conclusion: "cancelled" }]),
+      "its all-green verdict concluded 'cancelled'",
+    ],
+    ["no check at all fails closed and names the re-run unwedge path", ghReturning([]), NO_CHECK],
+    [
+      "a look-alike check from another app never vouches",
+      ghReturning([{ app: "some-other-app" }]),
+      NO_CHECK,
+    ],
+    ["an app-less check never vouches", ghReturning([{ app: null }]), NO_CHECK],
+    [
+      "a differently named check never vouches even if the API returns it",
+      ghReturning([{ name: "all-green-ish" }]),
+      NO_CHECK,
+    ],
+    [
+      "a pull_request verdict never vouches - a PR run tests the merge tree, not the sha",
+      ghReturning([{ external_id: "pull_request" }]),
+      NO_CHECK,
+    ],
+    [
+      "a pull_request_target verdict never vouches either",
+      ghReturning([{ external_id: "pull_request_target" }]),
+      NO_CHECK,
+    ],
+    [
+      "an incomplete verdict is not green yet",
+      ghReturning([{ status: "in_progress", conclusion: null }]),
+      "its all-green verdict is still 'in_progress' after 0s",
+    ],
+    [
+      "an API failure fails closed with the error's tail, not a pass",
+      () => ({ exitCode: 1, stdout: "", stderr: "gh: HTTP 502\n", timedOut: false, pid: 0 }),
+      API_FAILURE("gh: HTTP 502"),
+    ],
+    [
+      "a silent API failure still reports the exit code",
+      () => ({ exitCode: 4, stdout: "", stderr: "", timedOut: false, pid: 0 }),
+      API_FAILURE("exit 4"),
+    ],
+  ];
+  test.each(refusals)("%s", (_reason, gh, expected) => {
+    expect(allGreenFailure("o/r", SHA, gh, NO_WAIT)).toBe(expected);
   });
 
   test("job-created checks (opaque or empty external_id) vouch - the current shape", () => {
@@ -150,28 +181,6 @@ describe("allGreenFailure", () => {
     expect(probes).toBe(2);
   });
 
-  test("at the deadline a stale failure with no success is the reported reason", () => {
-    const reason = allGreenFailure("o/r", SHA, ghReturning([{ conclusion: "cancelled" }]), NO_WAIT);
-    expect(reason).toContain("concluded 'cancelled'");
-  });
-
-  test("an API failure fails closed with the error's tail, not a pass", () => {
-    const gh = (): RunResult => ({
-      exitCode: 1,
-      stdout: "",
-      stderr: "gh: HTTP 502\n",
-      timedOut: false,
-    });
-    const reason = allGreenFailure("o/r", SHA, gh, NO_WAIT);
-    expect(reason).toContain("gh: HTTP 502");
-    expect(reason).toContain("fails closed");
-  });
-
-  test("a silent API failure still reports the exit code", () => {
-    const gh = (): RunResult => ({ exitCode: 4, stdout: "", stderr: "", timedOut: false });
-    expect(allGreenFailure("o/r", SHA, gh, NO_WAIT)).toContain("exit 4");
-  });
-
   test("verdictPending tells REAL pending reasons from final ones through the same strings", () => {
     // Pinned through allGreenFailure's actual output, not copied prose: a
     // reworded reason that desyncs retryability fails here.
@@ -181,7 +190,7 @@ describe("allGreenFailure", () => {
       allGreenFailure(
         "o/r",
         SHA,
-        () => ({ exitCode: 1, stdout: "", stderr: "gh: HTTP 502\n", timedOut: false }),
+        () => ({ exitCode: 1, stdout: "", stderr: "gh: HTTP 502\n", timedOut: false, pid: 0 }),
         NO_WAIT,
       ),
     ];

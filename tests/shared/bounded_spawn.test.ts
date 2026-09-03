@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { boundedSpawnSync, SPAWN_TIMEOUT_MS } from "./bounded_spawn";
+import { boundedSpawnSync } from "./bounded_spawn";
 
 // Fixtures run through process.execPath, never a PATH lookup: several
 // arms pass hermetic envs with no PATH at all.
@@ -12,11 +12,14 @@ const bunExe = process.execPath;
 const BACKSTOP_MS = 10_000;
 
 describe("boundedSpawnSync", () => {
-  test("a healthy child returns its own exit code and both streams", () => {
-    const ok = boundedSpawnSync([bunExe, "-e", "console.log('out'); console.error('err');"]);
-    expect(ok.exitCode).toBe(0);
-    expect(ok.stdout).toBe("out\n");
-    expect(ok.stderr).toBe("err\n");
+  test("a healthy child under the default bound returns its own exit code and both streams", () => {
+    // No timeoutMs: runs under SPAWN_TIMEOUT_MS, so the wrapper's bound
+    // guard below would throw here on a non-positive or non-finite default.
+    expect(boundedSpawnSync([bunExe, "-e", "console.log('out'); console.error('err');"])).toEqual({
+      exitCode: 0,
+      stdout: "out\n",
+      stderr: "err\n",
+    });
   });
 
   test("a nonzero exit is a result, not a throw", () => {
@@ -52,10 +55,6 @@ describe("boundedSpawnSync", () => {
         /timeoutMs must be a positive finite number/,
       );
     }
-  });
-
-  test("the default bound is itself a positive finite number", () => {
-    expect(Number.isFinite(SPAWN_TIMEOUT_MS) && SPAWN_TIMEOUT_MS > 0).toBe(true);
   });
 
   test("stdin bytes pass through", () => {

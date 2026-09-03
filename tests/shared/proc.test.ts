@@ -12,7 +12,7 @@
 // default is a process-start snapshot that silently ignores later
 // process.env mutations - see the "spawn env" describe below.
 
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import {
   capture,
   DEFAULT_HANG_BOUND_MS,
@@ -96,27 +96,33 @@ describe("spawn env is live process.env", () => {
     }
   });
 
-  test("an explicit options.env entry wins over the ambient value", () => {
+  // The merge's two properties over one ambient value. Rows are [reason,
+  // options.env, the child's echo].
+  test.each([
+    [
+      "an explicit options.env entry wins over the ambient value",
+      { PROC_ENV_PROBE_ADDED: "explicit" },
+      "explicit\n",
+    ],
+    [
+      "an undefined-valued options.env entry deletes the key for the child",
+      { PROC_ENV_PROBE_ADDED: undefined },
+      "unset\n",
+    ],
+  ])("%s", (_reason, env, expected) => {
     process.env.PROC_ENV_PROBE_ADDED = "ambient";
     try {
       const result = capture(["sh", "-c", 'echo "${PROC_ENV_PROBE_ADDED-unset}"'], {
-        env: { PROC_ENV_PROBE_ADDED: "explicit" },
+        env,
         timeoutMs: 2000,
       });
-      expect(result.stdout).toBe("explicit\n");
-    } finally {
-      delete process.env.PROC_ENV_PROBE_ADDED;
-    }
-  });
-
-  test("an undefined-valued options.env entry deletes the key for the child", () => {
-    process.env.PROC_ENV_PROBE_ADDED = "ambient";
-    try {
-      const result = capture(["sh", "-c", 'echo "${PROC_ENV_PROBE_ADDED-unset}"'], {
-        env: { PROC_ENV_PROBE_ADDED: undefined },
-        timeoutMs: 2000,
+      expect(result).toEqual({
+        exitCode: 0,
+        stdout: expected,
+        stderr: "",
+        timedOut: false,
+        pid: expect.any(Number),
       });
-      expect(result.stdout).toBe("unset\n");
     } finally {
       delete process.env.PROC_ENV_PROBE_ADDED;
     }
@@ -129,9 +135,31 @@ describe("capture timeoutMs", () => {
     // operation short - but small enough to fire before the job-level
     // timeout kills the runner.
     expect(DEFAULT_HANG_BOUND_MS).toBe(300_000);
-    const result = capture(["true"]);
-    expect(result.exitCode).toBe(0);
-    expect(result.timedOut).toBe(false);
+    // A clean exit cannot tell a bound from no bound (the unbounded-pipe
+    // hang the module exists for), so the wiring is read off the spawn
+    // itself: both piped wrappers must hand the default as `timeout` with
+    // the SIGKILL that makes the deadline final.
+    const spy = spyOn(Bun, "spawnSync");
+    try {
+      expect(capture(["true"])).toEqual({
+        exitCode: 0,
+        stdout: "",
+        stderr: "",
+        timedOut: false,
+        pid: expect.any(Number),
+      });
+      expect(mustCapture(["true"])).toBe("");
+      const bounds = spy.mock.calls.map((call) => {
+        const options = call[1] as { timeout?: number; killSignal?: string };
+        return [call[0], options.timeout, options.killSignal];
+      });
+      expect(bounds).toEqual([
+        [["true"], DEFAULT_HANG_BOUND_MS, "SIGKILL"],
+        [["true"], DEFAULT_HANG_BOUND_MS, "SIGKILL"],
+      ]);
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   test("an expiring deadline kills the child and reports timedOut", () => {
@@ -177,77 +205,81 @@ describe("capture timeoutMs", () => {
 });
 
 describe("timeoutExitCode", () => {
-  test("a child that exited 0 before the deadline still maps to failure (124)", () => {
-    expect(timeoutExitCode({ exitCode: 0, signalCode: null })).toBe(124);
-  });
-
-  test("a killed or failed child keeps its own code", () => {
-    expect(timeoutExitCode({ exitCode: null, signalCode: "SIGKILL" })).toBe(137);
-    expect(timeoutExitCode({ exitCode: 3, signalCode: null })).toBe(3);
+  // Rows are [reason, the child's exit tuple, the reported code].
+  test.each([
+    [
+      "a child that exited 0 before the deadline still maps to failure (124)",
+      { exitCode: 0, signalCode: null },
+      124,
+    ],
+    ["a killed child keeps 128+signal", { exitCode: null, signalCode: "SIGKILL" }, 137],
+    ["a failed child keeps its own code", { exitCode: 3, signalCode: null }, 3],
+  ])("%s", (_reason, proc, expected) => {
+    expect(timeoutExitCode(proc)).toBe(expected);
   });
 });
 
 describe("redactCommand", () => {
-  test("masks URL userinfo, keeping scheme and host", () => {
-    expect(
-      redactCommand(["git", "push", "https://x-access-token:ghp_secret@github.com/o/r.git"]),
-    ).toBe("git push https://***@github.com/o/r.git");
-  });
-
-  test("masks userinfo whose password itself contains an @", () => {
-    expect(redactCommand(["https://user:p@ss@example.com/x"])).toBe("https://***@example.com/x");
-  });
-
-  test("masks the bare x-access-token shape even without a scheme", () => {
-    expect(redactCommand(["x-access-token:ghp_secret@github.com/o/r.git"])).toBe(
+  // Rows are [reason, argv, the rendered log line].
+  test.each([
+    [
+      "masks URL userinfo, keeping scheme and host",
+      ["git", "push", "https://x-access-token:ghp_secret@github.com/o/r.git"],
+      "git push https://***@github.com/o/r.git",
+    ],
+    [
+      "masks userinfo whose password itself contains an @",
+      ["https://user:p@ss@example.com/x"],
+      "https://***@example.com/x",
+    ],
+    [
+      "masks the bare x-access-token shape even without a scheme",
+      ["x-access-token:ghp_secret@github.com/o/r.git"],
       "x-access-token:***@github.com/o/r.git",
-    );
-  });
-
-  test("masks a token that itself contains an @, leaving no fragment of it", () => {
-    expect(redactCommand(["x-access-token:abc@def@github.com/o/r.git"])).toBe(
+    ],
+    [
+      "masks a token that itself contains an @, leaving no fragment of it",
+      ["x-access-token:abc@def@github.com/o/r.git"],
       "x-access-token:***@github.com/o/r.git",
-    );
-  });
-
-  test("an @ in a query or fragment is not userinfo and stays verbatim", () => {
-    const argv = ["https://example.com?mail=a@b", "https://example.com#sec@ref"];
-    expect(redactCommand(argv)).toBe(argv.join(" "));
-  });
-
-  test("leaves credential-free argv verbatim", () => {
-    const argv = ["git", "ls-remote", "https://github.com/o/r.git", "refs/heads/main", "a@b"];
-    expect(redactCommand(argv)).toBe(argv.join(" "));
+    ],
+    [
+      "an @ in a query or fragment is not userinfo and stays verbatim",
+      ["https://example.com?mail=a@b", "https://example.com#sec@ref"],
+      "https://example.com?mail=a@b https://example.com#sec@ref",
+    ],
+    [
+      "leaves credential-free argv verbatim",
+      ["git", "ls-remote", "https://github.com/o/r.git", "refs/heads/main", "a@b"],
+      "git ls-remote https://github.com/o/r.git refs/heads/main a@b",
+    ],
+  ])("%s", (_reason, argv, expected) => {
+    expect(redactCommand(argv)).toBe(expected);
   });
 });
 
 describe("redactText", () => {
-  test("masks the credentialed URL git's own error text quotes back", () => {
-    // The shape commit_push re-emits: git 401/403 errors embed the push
-    // URL, credentials included - redactCommand covers our argv lines,
-    // this covers the child's output.
-    const gitError =
-      "fatal: unable to access 'https://x-access-token:ghp_SENTINEL@github.com/o/r.git/': The requested URL returned error: 403\n";
-    const redacted = redactText(gitError);
-    expect(redacted).not.toContain("ghp_SENTINEL");
-    expect(redacted).toBe(
+  // Child output re-emitted to a public log, whole: git 401/403 errors
+  // quote the push URL back, credentials included - redactCommand covers
+  // our argv lines, this covers the child's output. Rows are [reason,
+  // text, redacted text].
+  test.each([
+    [
+      "masks the credentialed URL git's own error text quotes back",
+      "fatal: unable to access 'https://x-access-token:ghp_SENTINEL@github.com/o/r.git/': The requested URL returned error: 403\n",
       "fatal: unable to access 'https://***@github.com/o/r.git/': The requested URL returned error: 403\n",
-    );
-  });
-
-  test("masks every credentialed URL in multi-line output", () => {
-    const text =
-      "remote: https://user:ghp_SENTINEL@github.com/o/r.git\nhint: x-access-token:ghp_SENTINEL@github.com/o/r.git\n";
-    const redacted = redactText(text);
-    expect(redacted).not.toContain("ghp_SENTINEL");
-    expect(redacted).toContain("https://***@github.com/o/r.git");
-    expect(redacted).toContain("x-access-token:***@github.com/o/r.git");
-  });
-
-  test("a URL without credentials survives verbatim", () => {
-    const text =
-      "To https://github.com/o/r.git\n ! [rejected] automation/repo-platform (stale info)\n";
-    expect(redactText(text)).toBe(text);
+    ],
+    [
+      "masks every credentialed URL in multi-line output",
+      "remote: https://user:ghp_SENTINEL@github.com/o/r.git\nhint: x-access-token:ghp_SENTINEL@github.com/o/r.git\n",
+      "remote: https://***@github.com/o/r.git\nhint: x-access-token:***@github.com/o/r.git\n",
+    ],
+    [
+      "a URL without credentials survives verbatim",
+      "To https://github.com/o/r.git\n ! [rejected] automation/repo-platform (stale info)\n",
+      "To https://github.com/o/r.git\n ! [rejected] automation/repo-platform (stale info)\n",
+    ],
+  ])("%s", (_reason, text, expected) => {
+    expect(redactText(text)).toBe(expected);
   });
 });
 

@@ -58,6 +58,28 @@ function withoutGitEnv<T>(fn: () => T): T {
   }
 }
 
+const WITHHELD =
+  "withheld to keep private-repo content out of the log - reproduce the sync locally to see them (docs/private-repos.md)";
+
+/** headEntry's two value-free failure lines, WHOLE: an exact match forbids
+ * every leak (path, root, git stderr) at once instead of enumerating them. */
+function unrecognized(detail: string): string {
+  return `git ls-tree against HEAD listed an entry this probe does not recognize (${detail}); the path, repository root, and full listing are ${WITHHELD}`;
+}
+function probeFailed(subcommand: string, exitCode: number): string {
+  return `git ${subcommand} against HEAD failed (exit ${exitCode}); the path, repository root, and git stderr are ${WITHHELD}`;
+}
+
+function thrownMessage(fn: () => unknown): string {
+  try {
+    fn();
+  } catch (err) {
+    if (err instanceof Error) return err.message;
+    throw new Error(`threw a non-Error: ${String(err)}`);
+  }
+  throw new Error("did not throw");
+}
+
 /** A scratch repository whose HEAD carries one of each object kind. */
 function makeFixtureRepo(): string {
   const root = mkdtempSync(join(tmpdir(), "head-entry-repo-"));
@@ -77,6 +99,11 @@ function makeFixtureRepo(): string {
   chmodSync(join(root, "tool.sh"), 0o755);
   mkdirSync(join(root, "dir", "nested"), { recursive: true });
   writeFileSync(join(root, "dir", "nested", "inner.txt"), "inner\n");
+  // A TWO-child directory: a trailing-slash probe of it lists two entries,
+  // the branch a single-child tree can never reach.
+  mkdirSync(join(root, "pair"));
+  writeFileSync(join(root, "pair", "a.txt"), "a");
+  writeFileSync(join(root, "pair", "b.txt"), "b");
   // The real managed-repo shape: CLAUDE.md and friends are symlinks to
   // AGENTS.md by design, so a link at HEAD is a first-class fixture.
   symlinkSync("present.txt", join(root, "link.md"));
@@ -167,61 +194,42 @@ describe("headEntry strict entry parse", () => {
       "100644 blob\\tpresent.txt",
       "100644 blob aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa junk\\tpresent.txt",
     ]) {
-      const out = probeWithStubGit(root, payload);
-      expect(out).toContain("THREW");
-      expect(out).toContain("a malformed entry line");
-      expect(out).not.toContain("NO-THROW");
-      expect(out).not.toContain("cat-file");
-      expect(out).not.toContain(root);
+      expect(probeWithStubGit(root, payload)).toBe(
+        `THREW ${unrecognized("a malformed entry line")}\n`,
+      );
     }
-  });
+    // Two driver runs, each granted probeWithStubGit's 10s bound: the cap
+    // must cover both, not bun-test's 5s default.
+  }, 25_000);
 });
 
 describe("headEntry value-free failure", () => {
   test("a git failure names the subcommand and exit code, never the path, root, or git stderr", () => {
     // A fresh non-repo directory forces `git ls-tree HEAD` to fail.
+    // The whole line: it names the probe, git's exit code, and where the
+    // withheld detail is - and nothing target-derived (the rel, the root,
+    // git's own "not a git repository" stderr) can fit inside it.
     const root = mkdtempSync(join(tmpdir(), "head-entry-not-a-repo-"));
-    const rel = "super/secret-private-path.txt";
-    let err: unknown;
-    try {
-      withoutGitEnv(() => headEntry(root, rel));
-    } catch (caught) {
-      err = caught;
-    }
-    expect(err).toBeInstanceOf(Error);
-    const message = (err as Error).message;
-
-    // Value-free: none of the target-derived detail may appear.
-    expect(message).not.toContain(rel);
-    expect(message).not.toContain("secret-private-path");
-    expect(message).not.toContain(root);
-    // git's own stderr (which quotes the root and paths) must not ride along.
-    expect(message.toLowerCase()).not.toContain("not a git repository");
-    expect(message.toLowerCase()).not.toContain("fatal");
-
-    // But it must still say ENOUGH to diagnose: which probe, that it was a
-    // git-level failure with an exit code, and where the withheld detail is.
-    expect(message).toContain("ls-tree");
-    expect(message).toMatch(/exit \d+/);
-    expect(message).toContain("docs/private-repos.md");
+    const message = thrownMessage(() =>
+      withoutGitEnv(() => headEntry(root, "super/secret-private-path.txt")),
+    );
+    expect(message).toBe(probeFailed("ls-tree", 128));
   });
 });
 
 describe("headEntry discrimination", () => {
   const root = makeFixtureRepo();
 
-  test("a regular file is a blob carrying its bytes", () => {
-    const entry = withoutGitEnv(() => headEntry(root, "present.txt"));
-    expect(entry.kind).toBe("blob");
-    if (entry.kind !== "blob") throw new Error("unreachable");
-    expect(entry.bytes.toString("latin1")).toBe("x");
-  });
-
-  test("an executable file (mode 100755) is a blob too", () => {
-    const entry = withoutGitEnv(() => headEntry(root, "tool.sh"));
-    expect(entry.kind).toBe("blob");
-    if (entry.kind !== "blob") throw new Error("unreachable");
-    expect(entry.bytes.toString("latin1")).toBe("#!/bin/sh\n");
+  // Both regular-file modes land in the blob arm with their bytes. Rows
+  // are [reason, rel, content].
+  test.each([
+    ["a regular file (mode 100644) is a blob carrying its bytes", "present.txt", "x"],
+    ["an executable file (mode 100755) is a blob too", "tool.sh", "#!/bin/sh\n"],
+  ])("%s", (_reason, rel, content) => {
+    expect(withoutGitEnv(() => headEntry(root, rel))).toEqual({
+      kind: "blob",
+      bytes: Buffer.from(content, "latin1"),
+    });
   });
 
   test("a genuinely absent path is absent, not a throw", () => {
@@ -302,22 +310,22 @@ describe("headEntry discrimination", () => {
     }
   });
 
-  test("a trailing-slash rel throws (value-free) instead of answering with a child entry", () => {
-    // `ls-tree HEAD -- dir/` lists dir's CHILDREN; a single-child tree
-    // would answer with that child's entry, which is not the probed path.
-    for (const rel of ["dir/", "dir/nested/"]) {
-      let err: unknown;
-      try {
-        withoutGitEnv(() => headEntry(root, rel));
-      } catch (caught) {
-        err = caught;
-      }
-      expect(err).toBeInstanceOf(Error);
-      const message = (err as Error).message;
-      expect(message).toContain("does not recognize");
-      expect(message).not.toContain(root);
-      expect(message).not.toContain("dir");
-    }
+  // `ls-tree HEAD -- dir/` lists dir's CHILDREN: a single-child tree would
+  // answer with that child's entry (not the probed path), a multi-child
+  // tree with a listing. Both refuse with the whole value-free line. Rows
+  // are [reason, rel, the detail the line carries].
+  test.each([
+    [
+      "a single-child tree's one entry is not the probed path",
+      "dir/",
+      "an entry for a different path",
+    ],
+    ["a nested single-child tree likewise", "dir/nested/", "an entry for a different path"],
+    ["a two-child tree lists two entries", "pair/", "2 entries"],
+  ])("a trailing-slash rel throws (value-free): %s", (_reason, rel, detail) => {
+    expect(thrownMessage(() => withoutGitEnv(() => headEntry(root, rel)))).toBe(
+      unrecognized(detail),
+    );
   });
 });
 

@@ -6,9 +6,12 @@ import {
 } from "../../.github/scripts/shared/commit_stamp.ts";
 
 describe("commit stamp", () => {
-  test("write then parse round-trips the sha", () => {
+  test("write emits the exact source line and parse round-trips the sha", () => {
     const sha = "62653b669d40d3c88b6a0c713942d7e80ac4032d";
     const line = commitStampWrite("https://github.com", "Vivswan/repo-platform", sha);
+    expect(line).toBe(
+      "source: https://github.com/Vivswan/repo-platform/commit/62653b669d40d3c88b6a0c713942d7e80ac4032d",
+    );
     expect(commitStampParse(line)).toBe(sha);
   });
 

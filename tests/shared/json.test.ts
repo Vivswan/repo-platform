@@ -59,37 +59,45 @@ describe("parseJsonWith", () => {
   test("valid JSON of the wrong shape names paths and codes, never the value", () => {
     const r = run('{"repo": ["hiddenserver"]}');
     expect(r.exitCode).toBe(1);
-    expect(r.stdout).toContain("::error::json.test: payload: unexpected shape");
+    expect(r.stdout).toContain(
+      "::error::json.test: payload: unexpected shape - repo: invalid_type",
+    );
     expect(r.stdout + r.stderr).not.toContain("hiddenserver");
   });
 });
 
 describe("hasDuplicateJsonKeys", () => {
-  test("a duplicated key in one object is caught (JSON.parse would keep only the last)", () => {
-    expect(
-      hasDuplicateJsonKeys(
-        '{"files": {"AGENTS.md": {"class": "split"}, "AGENTS.md": {"class": "managed"}}}',
-      ),
-    ).toBe(true);
-  });
-
-  test("an escape-variant duplicate is caught (decoded keys are what JSON.parse collides)", () => {
-    const escaped = String.raw`"AGENTS.m\u0064"`;
-    expect(hasDuplicateJsonKeys(`{"AGENTS.md": 1, ${escaped}: 2}`)).toBe(true);
-  });
-
-  test("the same key in DIFFERENT objects is not a duplicate", () => {
-    expect(hasDuplicateJsonKeys('{"a": {"class": "split"}, "b": {"class": "managed"}}')).toBe(
-      false,
-    );
-    expect(hasDuplicateJsonKeys('{"a": ["x", "x"], "b": {"a": 1}}')).toBe(false);
-  });
-
-  test("a duplicate inside a NESTED object is caught", () => {
-    expect(hasDuplicateJsonKeys('{"files": {"a": {"class": "split", "class": "managed"}}}')).toBe(
+  // Rows are [reason, text, expected verdict].
+  const cases: [string, string, boolean][] = [
+    [
+      "a duplicated key in one object is caught (JSON.parse would keep only the last)",
+      '{"files": {"AGENTS.md": {"class": "split"}, "AGENTS.md": {"class": "managed"}}}',
       true,
-    );
-    expect(hasDuplicateJsonKeys('[{"k": 1}, {"k": 2}]')).toBe(false);
+    ],
+    [
+      "an escape-variant duplicate is caught (decoded keys are what JSON.parse collides)",
+      `{"AGENTS.md": 1, ${String.raw`"AGENTS.m\u0064"`}: 2}`,
+      true,
+    ],
+    [
+      "the same key in DIFFERENT objects is not a duplicate",
+      '{"a": {"class": "split"}, "b": {"class": "managed"}}',
+      false,
+    ],
+    [
+      "repeated strings inside an array are values, never keys",
+      '{"a": ["x", "x"], "b": {"a": 1}}',
+      false,
+    ],
+    [
+      "a duplicate inside a NESTED object is caught",
+      '{"files": {"a": {"class": "split", "class": "managed"}}}',
+      true,
+    ],
+    ["objects in one array may share a key", '[{"k": 1}, {"k": 2}]', false],
+  ];
+  test.each(cases)("%s", (_reason, text, expected) => {
+    expect(hasDuplicateJsonKeys(text)).toBe(expected);
   });
 });
 
@@ -123,7 +131,7 @@ describe("parseJsonWithThrow", () => {
     } catch (err) {
       thrown = err;
     }
-    expect(String(thrown)).toContain("json.test: payload: unexpected shape");
+    expect(String(thrown)).toBe("Error: json.test: payload: unexpected shape - repo: invalid_type");
     expect(String(thrown)).not.toContain("hiddenserver");
   });
 
