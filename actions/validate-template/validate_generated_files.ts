@@ -87,14 +87,7 @@
 
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import {
-  existsSync,
-  lstatSync,
-  readdirSync,
-  readFileSync,
-  readlinkSync,
-  writeFileSync,
-} from "node:fs";
+import { lstatSync, readdirSync, readFileSync, readlinkSync, writeFileSync } from "node:fs";
 import { extname, join, resolve } from "node:path";
 import { parseAllDocuments, parse as parseYaml } from "yaml";
 import {
@@ -654,7 +647,7 @@ function main(): number {
   // Presence-gated, not module-gated: the file is a repo-owned starter,
   // so it is the file, not the module selection, that can carry the pin.
   const releaseConfigPath = join(root, "release-please-config.json");
-  if (existsSync(releaseConfigPath)) {
+  if (isRegularFile(releaseConfigPath)) {
     const configText = readFileSync(releaseConfigPath, "utf-8");
     let config: unknown;
     // A conflict-marked config is check 4's report; parsing it here would
@@ -664,7 +657,7 @@ function main(): number {
         config = JSON.parse(configText);
       } catch (exc) {
         errors.push(
-          `release-please-config.json: not valid JSON (${exc instanceof Error ? exc.message.split("\\n")[0] : String(exc)})`,
+          `release-please-config.json: not valid JSON (${exc instanceof Error ? exc.message.split("\n")[0] : String(exc)})`,
         );
       }
     }

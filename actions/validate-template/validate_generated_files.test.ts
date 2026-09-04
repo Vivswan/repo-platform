@@ -969,6 +969,12 @@ describe("release-please-config.json never pins a version", () => {
     expect(r.stderr).not.toContain("pins a version");
   });
 
+  test("a directory at the config path is left alone, not a crash", () => {
+    const r = runValidator({ "release-please-config.json/keep": "" });
+    expect(r.exitCode).toBe(0);
+    expect(r.stderr).toBe("");
+  });
+
   test("self mode checks the config too", () => {
     const r = runValidator({ "release-please-config.json": config({ "release-as": "4.0.0" }) }, [
       "--self",
