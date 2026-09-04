@@ -89,7 +89,7 @@ The `release` leg in the managed ci.yml - `needs: [all-green]`, released only by
 
 1. release-please cuts the release as a draft with its tag already forced.
 2. The repo-owned `update-release.yml` hook is called with the tag: packaging, asset uploads, and note edits go there, and publishing waits for every job in it.
-3. The managed publish stage attests build provenance for every asset on the draft - a single `attestation.jsonl` attached to the release, verifiable per asset with `gh attestation verify <asset> -R <owner>/<repo> --bundle attestation.jsonl` (skipped for releases with no assets and for non-public repositories, which need Enterprise Cloud for attestations) - and flips it live.
+3. The managed publish stage attests build provenance for every asset on the draft - a single `attestation.json` attached to the release, verifiable per asset with `gh attestation verify <asset> -R <owner>/<repo> --bundle attestation.json` (skipped for releases with no assets and for non-public repositories, which need Enterprise Cloud for attestations) - and flips it live.
 
 Around the cut itself:
 
