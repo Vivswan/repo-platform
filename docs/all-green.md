@@ -69,7 +69,7 @@ The PR body's LAST paragraph is a directives block: one bracketed directive per 
 
 - `[fleet-sync]` or `[fleet-sync: all]`: the whole fleet, the same run the weekly cron performs. `[fleet-sync: owner/a, owner/b]`: those repos only. Case does not matter.
 - Git trailers and footers GitHub or you append below the block (`Co-authored-by:`, `BREAKING CHANGE:`) are fine; anything else after it means there is no block.
-- A `[fleet-sync` anywhere else in the body, an unknown or repeated keyword, an empty scope, or a non-slug entry turns `read-directives` red and nothing syncs: a mistyped opt-in fails loudly instead of waiting for Tuesday. The merged commit cannot be edited, so dispatch the sync by hand (`gh workflow run sync-repos.yml -f repo=...`) or let the next merge carry a correct block.
+- A `[fleet-sync` in the PR title or anywhere else in the body (the squash subject is the title), an unknown or repeated keyword, an empty scope, or a non-slug entry turns `read-directives` red and nothing syncs: a mistyped opt-in fails loudly instead of waiting for Tuesday. The merged commit cannot be edited, so dispatch the sync by hand (`gh workflow run sync-repos.yml -f repo=...`) or let the next merge carry a correct block.
 - The block is public text on `main`. Naming an undisclosed private repository there discloses it; sync those by dispatch.
 - Lost only when the merge's whole CI run is evicted by two later pushes (one pending run per branch); the weekly cron heals that, as it heals every post-green leg.
 

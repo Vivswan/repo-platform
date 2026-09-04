@@ -169,5 +169,6 @@ jobs:
     uses: ./.github/workflows/sync-repos.yml
     with:
       repos: ${{ needs.read-directives.outputs.repos }}
+      sha: ${{ inputs.sha }}
     secrets:
       REPO_PLATFORM_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}

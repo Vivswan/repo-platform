@@ -140,7 +140,7 @@ function main(): number {
       return 0;
     case "fleet-sync": {
       const scope = parsed.repos.length === 0 ? "all" : parsed.repos.join(",");
-      notice(`[fleet-sync] on ${sha.slice(0, 12)}: syncing ${scope} now`);
+      notice(`fleet-sync directive on ${sha.slice(0, 12)}: syncing ${scope} now`);
       setOutput("armed", "true");
       setOutput("repos", scope);
       return 0;

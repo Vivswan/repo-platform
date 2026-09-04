@@ -120,7 +120,13 @@ describe("post-green publish wiring", () => {
     // below cannot tell which job holds it).
     expect(syncFleet.concurrency).toEqual({ group: "sync-repos", "cancel-in-progress": false });
     expect(syncFleet.uses).toBe("./.github/workflows/sync-repos.yml");
-    expect(syncFleet.with).toEqual({ repos: "${{ needs.read-directives.outputs.repos }}" });
+    // The sync waits for THIS commit's build, never main's live HEAD: a
+    // later merge queued behind this run would otherwise stall the wait
+    // for its whole budget.
+    expect(syncFleet.with).toEqual({
+      repos: "${{ needs.read-directives.outputs.repos }}",
+      sha: "${{ inputs.sha }}",
+    });
     expect(syncFleet.secrets).toEqual({
       REPO_PLATFORM_TOKEN: "${{ secrets.REPO_PLATFORM_TOKEN }}",
     });
@@ -137,7 +143,7 @@ describe("post-green publish wiring", () => {
       concurrency: { group: string; "cancel-in-progress": boolean };
     };
     expect(Object.keys(doc.on)).toEqual(["schedule", "workflow_dispatch", "workflow_call"]);
-    expect(Object.keys(doc.on.workflow_call.inputs ?? {})).toEqual(["repos"]);
+    expect(Object.keys(doc.on.workflow_call.inputs ?? {})).toEqual(["repos", "sha"]);
     expect(Object.keys(doc.on.workflow_call.secrets ?? {})).toEqual(["REPO_PLATFORM_TOKEN"]);
     expect(doc.concurrency).toEqual({
       group:
@@ -148,6 +154,7 @@ describe("post-green publish wiring", () => {
     // only - the dispatch input stays out of step env (private slugs).
     expect(syncRepos).toContain("ONLY_REPO: ${{ inputs.repos }}");
     expect(syncRepos).not.toContain("ONLY_REPO: ${{ inputs.repo }}");
+    expect(syncRepos).toContain("TARGET_SHA: ${{ inputs.sha }}");
   });
 
   test("ONE publisher lane: a literal group, shared by name across both workflows", () => {

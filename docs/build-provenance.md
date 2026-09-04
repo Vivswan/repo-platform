@@ -63,7 +63,7 @@ Stamp recovery is the one exception that commits an identical tree, and the only
 
 ## Freshness: two paths, neither trusting live state
 
-[sync/wait_for_build.ts](../.github/scripts/sync/wait_for_build.ts) bounds the wait between a merge and a consumable build tip:
+[sync/wait_for_build.ts](../.github/scripts/sync/wait_for_build.ts) bounds the wait between a merge and a consumable build tip. The target is main's live HEAD on cron and dispatch runs; a sync called from post-green ([all-green.md](all-green.md#after-the-gate)) passes the judged commit instead, since main may already hold a later merge whose own run is queued behind that one. "HEAD" below means whichever target applies:
 
 | Path | What ends the wait | When it decides |
 | --- | --- | --- |
