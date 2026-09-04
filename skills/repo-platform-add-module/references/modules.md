@@ -41,7 +41,7 @@ Managed: `ci.yml` and its standard jobs, `dependabot.yml` (github-actions ecosys
 
 ## release-please
 
-- Managed: `release.yml` (the full pipeline: draft cut -> repo-owned update hook -> attested publish with a single `attestation.jsonl` per release), the `release` job on top of all-green, and the `release-freshness` and `release-health` gate jobs in ci.yml.
+- Managed: `release.yml` (the full pipeline: draft cut -> repo-owned update hook -> attested publish with a single `attestation.json` per release), the `release` job on top of all-green, and the `release-freshness` and `release-health` gate jobs in ci.yml.
 - Starters: `update-release.yml` (the update hook release.yml calls between draft and publish), `update-release-pr.yml` (the hook release.yml calls on release-PR refreshes), `release-please-config.json`, `.release-please-manifest.json`.
 - Settings labels are automatic: the module's own `templates/release-please/settings.yml` layer (declared in the manifest's `settings_layers`, like every module layer file) declares `autorelease: pending`, `autorelease: tagged`, `release-blocker` (`B60205`), `release-override` (`FBCA04`), plus the `release-tags` tag-immutability ruleset.
 - With `fuzzer` also selected, the release-health gate ties releases to fuzz health (an open fuzz tracking issue blocks cuts).

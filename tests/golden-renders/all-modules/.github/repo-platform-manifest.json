@@ -30,7 +30,7 @@
     ".github/workflows/nightly.yml": {"class": "starter"},
     ".github/workflows/pages.yml": {"class": "managed", "hash": "735b5ed00a47c1ea7dd288b5369d2f27939b8735935f910dcf891e6995282ce7"},
     ".github/workflows/pr-title.yml": {"class": "managed", "hash": "aed03ff29ddf3f8f46d1b6d1d82c0d70a5c23c4a52b001ea12264e43f6461ac8"},
-    ".github/workflows/release.yml": {"class": "managed", "hash": "c0249f1d54680d65e1e64f312eabb29cd6813a3f92f78ec4ac8786076da1cc29"},
+    ".github/workflows/release.yml": {"class": "managed", "hash": "856bd3b0385f4012ae530ba1ac04ecfcbb06e38004361c69873db9bc831c171f"},
     ".github/workflows/settings-sync.yml": {"class": "managed", "hash": "907e462b23412c0a4ed0a863386ec3c188f804002c1c3a2afd6ca91e4ac4ad85"},
     ".github/workflows/update-release-pr.yml": {"class": "starter"},
     ".github/workflows/update-release.yml": {"class": "starter"},
