@@ -427,6 +427,29 @@ describe("wait_for_build.ts", () => {
     expect(r.output).toContain("::warning::the build branch is not yet built");
   });
 
+  test("TARGET_SHA replaces main HEAD as the freshness target: no HEAD read, stamp match ends the wait", () => {
+    // The called post-green sync waits for the JUDGED commit's build:
+    // main's live HEAD may already be a newer merge whose own run is
+    // queued behind this one, so a HEAD-targeted wait would stall out.
+    const judged = "c".repeat(40);
+    const r = run({
+      tipMessage: stampMessage(judged),
+      env: { TARGET_SHA: judged, GIT_TIP_TREE: TREE_A, GIT_REBUILT_TREE: TREE_B },
+    });
+    expect(r.exitCode).toBe(0);
+    expect(r.output).toContain(`the build branch tip is stamped with the judged commit ${judged}.`);
+    expect(r.output).not.toContain(MAIN_SHA);
+    expect(r.output).not.toContain("::warning::");
+    expect(r.calls.some((args) => args.includes("ls-remote"))).toBe(false);
+  });
+
+  test("a malformed TARGET_SHA fails loudly instead of falling back to HEAD", () => {
+    const r = run({ env: { TARGET_SHA: "main" } });
+    expect(r.exitCode).toBe(1);
+    expect(r.output).toContain("TARGET_SHA must be a full 40-hex commit sha");
+    expect(r.calls.some((args) => args.includes("ls-remote"))).toBe(false);
+  });
+
   test("fails loudly on an unreadable main HEAD", () => {
     const r = run({ env: { GIT_HEAD: "not-a-sha" } });
     expect(r.exitCode).toBe(1);

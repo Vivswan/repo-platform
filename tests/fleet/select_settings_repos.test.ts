@@ -521,4 +521,17 @@ describe("select_settings_repos.ts", () => {
     },
     TEST_TIMEOUT_MS,
   );
+
+  test(
+    "a comma list is rejected: one repo per settings dispatch, value withheld",
+    () => {
+      const r = run("list", { env: { ONLY_REPO: "Vivswan/steady,Vivswan/hidden-server" } });
+      expect(r.exitCode).not.toBe(0);
+      expect(r.stdout).toContain("::error::the settings sync takes one repo per dispatch");
+      for (const channel of [r.stdout, r.stderr, r.output]) {
+        expect(channel).not.toContain("hidden-server");
+      }
+    },
+    TEST_TIMEOUT_MS,
+  );
 });

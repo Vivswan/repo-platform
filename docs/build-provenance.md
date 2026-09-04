@@ -63,7 +63,7 @@ Stamp recovery is the one exception that commits an identical tree, and the only
 
 ## Freshness: two paths, neither trusting live state
 
-[sync/wait_for_build.ts](../.github/scripts/sync/wait_for_build.ts) bounds the wait between a merge and a consumable build tip:
+[sync/wait_for_build.ts](../.github/scripts/sync/wait_for_build.ts) bounds the wait between a merge and a consumable build tip. The target is main's live HEAD on cron and dispatch runs; a sync called from post-green ([all-green.md](all-green.md#after-the-gate)) passes the judged commit instead, since main may already hold a later merge whose own run is queued behind that one. "HEAD" below means whichever target applies:
 
 | Path | What ends the wait | When it decides |
 | --- | --- | --- |
@@ -123,4 +123,4 @@ Every fleet-rendered reference to this repository rides `@build` (the `fleet-ref
 | `uses: ...@build` execution trusts the ref. | A user-repo ruleset cannot restrict other writers - plain fast-forwards stay possible; only force-pushes and deletion are blocked. | Sync consumption is provenance-verified; repo-platform's own CI gates every builder-published change to the executable channel (an out-of-band push bypasses both, the ref-trust residual in full). |
 | Actor provenance is advisory. | The run-proof check was retired as live-state trust (above). | Checks 1-3 anchor the content; the `run:` line stays a breadcrumb. |
 | Parking a poisoned pending tree is as powerful as fast-forwarding `refs/heads/build`. | Pending refs cannot be ruleset-scoped to the publisher on user repositories (`pending.ts`'s header). | The sync's provenance rebuild bounds template consumption; publish.ts's shape guard bounds what a malformed pending tree can publish. |
-| A freshness timeout lets the sync proceed on the previous build tip. | The bounded wait is an aid, not the gate. | resolve_refs.ts still runs the green gate and provenance checks on that tip; the weekly cron heals the miss. |
+| A freshness timeout lets the sync proceed on the previous build tip. | The bounded wait is an aid, not the gate. | resolve_refs.ts still runs the green gate and provenance checks on that tip; the weekly cron heals the miss (or a `[fleet-sync]` directive on the next merge runs the sync at once - [all-green.md](all-green.md#after-the-gate)). |

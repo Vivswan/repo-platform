@@ -61,9 +61,13 @@
 // and lets the run continue (the sync's own guards fail loudly and the
 // weekly cron heals).
 //
-// Env: the WAIT_* / PROBE_TIMEOUT_MS knobs (tests shrink them);
-// RUNNER_TEMP optional (the rebuild scratch dir; the OS tmpdir
-// otherwise). The git ls-remote/fetch to origin authenticate through the
+// Env: TARGET_SHA optional - the commit to wait for instead of main's
+// live HEAD (post-green's called sync passes the judged commit: its
+// build was just published, and main may already hold a newer commit
+// whose own run is queued behind this one, so waiting on HEAD there
+// would stall for the whole budget); the WAIT_* / PROBE_TIMEOUT_MS knobs
+// (tests shrink them); RUNNER_TEMP optional (the rebuild scratch dir;
+// the OS tmpdir otherwise). The git ls-remote/fetch to origin authenticate through the
 // credentials actions/checkout persisted.
 
 import { mkdtempSync, rmSync } from "node:fs";
@@ -118,14 +122,24 @@ async function waitFor(
   warning(timeoutWarning);
 }
 
-const mainSha = mustCapture(["git", "-c", "credential.helper=", "ls-remote", "origin", "HEAD"], {
-  env: GIT_NO_PROMPT_ENV,
-  timeoutMs: PROBE_TIMEOUT_MS,
-}).split("\t")[0];
+const targetSha = env("TARGET_SHA");
+if (targetSha !== "" && !/^[0-9a-f]{40}$/.test(targetSha)) {
+  error(`wait_for_build: TARGET_SHA must be a full 40-hex commit sha (got "${targetSha}")`);
+  process.exit(1);
+}
+const mainSha =
+  targetSha !== ""
+    ? targetSha
+    : mustCapture(["git", "-c", "credential.helper=", "ls-remote", "origin", "HEAD"], {
+        env: GIT_NO_PROMPT_ENV,
+        timeoutMs: PROBE_TIMEOUT_MS,
+      }).split("\t")[0];
 if (!/^[0-9a-f]{40}$/.test(mainSha)) {
   error(`wait_for_build: could not read main's HEAD sha from origin (got "${mainSha}")`);
   process.exit(1);
 }
+/** How the messages name the freshness target. */
+const targetLabel = targetSha !== "" ? "the judged commit" : "main HEAD";
 
 /** The slow path's one rebuild: the composed tree's hash at main's HEAD,
  * or "" when ANY part failed - scratch allocation included - so every
@@ -156,7 +170,7 @@ function rebuiltTreeAtHead(): string {
     return rebuildBranchTree({ sourceSha: mainSha, srcDir, treeDir: join(workDir, "tree") });
   } catch (err) {
     console.log(
-      `could not rebuild the composed tree at main HEAD ${mainSha.slice(0, 12)} (${
+      `could not rebuild the composed tree at ${targetLabel} ${mainSha.slice(0, 12)} (${
         err instanceof Error ? err.message : String(err)
       }); freshness falls back to the stamp probe alone`,
     );
@@ -257,7 +271,7 @@ function tipStampHealthy(tipSha: string, sourceSha: string, budget: () => number
     });
     if (reason !== "") {
       console.log(
-        `the build branch tip's tree matches main HEAD's composition, but ${reason}: the sync would reject the tip, so the wait holds out for a recovery publish.`,
+        `the build branch tip's tree matches ${targetLabel}'s composition, but ${reason}: the sync would reject the tip, so the wait holds out for a recovery publish.`,
       );
     }
     stampVerdicts.set(tipSha, reason === "");
@@ -304,7 +318,7 @@ await waitFor(
       // free tree compare when rebuiltTree IS in hand was considered and
       // skipped: it could only log, never gate (see above), and the
       // verifier's tree proof already reports the mismatch precisely.
-      console.log(`the build branch tip is stamped with main HEAD ${mainSha}.`);
+      console.log(`the build branch tip is stamped with ${targetLabel} ${mainSha}.`);
       return true;
     }
     const tipTree = capture(["git", "rev-parse", "FETCH_HEAD^{tree}"], { timeoutMs: budget() });
@@ -319,14 +333,14 @@ await waitFor(
       if (tipProbe.exitCode !== 0 || !/^[0-9a-f]{40}$/.test(tipSha)) return false;
       if (!tipStampHealthy(tipSha, stampedSource, budget)) return false;
       console.log(
-        `the build branch tip's tree is byte-identical to the tree composed from main HEAD ${mainSha}; fresh (nothing to publish).`,
+        `the build branch tip's tree is byte-identical to the tree composed from ${targetLabel} ${mainSha}; fresh (nothing to publish).`,
       );
       return true;
     }
     return false;
   },
   `waiting for the build branch to be built from ${mainSha}...`,
-  `the build branch is not yet built from main HEAD ${mainSha} after ${Math.round(
+  `the build branch is not yet built from ${targetLabel} ${mainSha} after ${Math.round(
     DEADLINE_MS / 60000,
   )} minutes; syncs may apply the previous build tree. The weekly cron heals this on its next run.`,
 );

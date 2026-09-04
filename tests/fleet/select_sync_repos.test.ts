@@ -268,6 +268,44 @@ describe("select_sync_repos.ts", () => {
   );
 
   test(
+    "a comma list via ONLY_REPO (the called post-green path) selects exactly those repos",
+    () => {
+      const r = run("list", { ONLY_REPO: "Vivswan/steady,Vivswan/hidden-server" });
+      expect(r.exitCode).toBe(0);
+      expect(reposOf(r).map((row) => row.repo)).toEqual(["h**-s**r", "Vivswan/steady"]);
+      for (const channel of [r.stdout, r.stderr, r.output]) {
+        expect(channel).not.toContain("hidden-server");
+      }
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  test(
+    "a list with one miss fails the whole plan, counting only",
+    () => {
+      const r = run("list-miss", { ONLY_REPO: "Vivswan/steady,Vivswan/hidden-servr" });
+      expect(r.exitCode).not.toBe(0);
+      expect(r.stdout).toContain("1 of 2 requested repos matched no selected repository");
+      for (const channel of [r.stdout, r.stderr, r.output]) {
+        expect(channel).not.toContain("hidden-servr");
+      }
+      expect(r.output).not.toContain("repos=");
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  test(
+    "a lone comma in the scope fails the plan instead of fanning out",
+    () => {
+      const r = run("comma", { ONLY_REPO: "," });
+      expect(r.exitCode).not.toBe(0);
+      expect(r.stdout).toContain("--repo has an empty entry");
+      expect(r.output).not.toContain("repos=");
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  test(
     "repo=all without recover selects the same fleet as an empty repo",
     () => {
       const r = run("all-plain", { ONLY_REPO: "all" });
