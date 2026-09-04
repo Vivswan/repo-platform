@@ -4,7 +4,7 @@
 //
 // Usage:
 //   bun .github/scripts/fleet/repos_registry.ts validate [--file repos.yml]
-//   bun .github/scripts/fleet/repos_registry.ts select [--repo owner/name]
+//   bun .github/scripts/fleet/repos_registry.ts select [--repo owner/name[,owner/name...]]
 //     [--discovered discovered.json] [--file repos.yml]
 //   bun .github/scripts/fleet/repos_registry.ts excluded [--file repos.yml]
 //
@@ -42,7 +42,7 @@ export interface Selected {
   name: string;
 }
 
-function isSlug(value: unknown): value is string {
+export function isSlug(value: unknown): value is string {
   return typeof value === "string" && SLUG_RE.test(value);
 }
 
@@ -196,18 +196,32 @@ export function selectRepos(
 
   let repos = [...pool.values()].sort();
   if (options.repo !== undefined) {
-    const wanted = options.repo.toLowerCase();
-    repos = repos.filter((slug) => slug.toLowerCase() === wanted);
-    if (repos.length === 0) {
-      // The requested value is withheld: this print is publicly readable
-      // and the operator-typed slug may name a private repository.
+    // A comma-separated set; every entry must select, or the whole run
+    // fails - a partial match would silently narrow a recovery's scope,
+    // and a dropped empty entry ("a/b,," or a lone ",") would silently
+    // widen or narrow it.
+    const entries = options.repo.split(",").map((entry) => entry.trim().toLowerCase());
+    if (entries.includes("")) {
       errors.push(
-        "--repo matched no selected repository (value withheld - it may be a private " +
-          "slug): the repo you dispatched with is not in managed (or the discovered " +
-          "list), or it is listed in exclude; check the spelling (matching ignores case)",
+        "--repo has an empty entry: pass owner/name slugs separated by commas, with no stray or trailing comma",
       );
       return { selection: [], errors };
     }
+    const wanted = [...new Set(entries)];
+    const selectable = new Set(repos.map((slug) => slug.toLowerCase()));
+    const missing = wanted.filter((entry) => !selectable.has(entry)).length;
+    if (missing > 0) {
+      // The requested values are withheld: this print is publicly
+      // readable and an operator-typed slug may name a private repository.
+      errors.push(
+        `--repo: ${missing} of ${wanted.length} requested repos matched no selected repository ` +
+          "(values withheld - they may be private slugs): a repo you dispatched with is not in " +
+          "managed (or the discovered list), or it is listed in exclude; check the spelling " +
+          "(matching ignores case)",
+      );
+      return { selection: [], errors };
+    }
+    repos = repos.filter((slug) => wanted.includes(slug.toLowerCase()));
   }
 
   const selection = repos.map((slug): Selected => {
@@ -307,7 +321,7 @@ function main(args: string[]): void {
       fail([
         `unknown subcommand ${JSON.stringify(command ?? "")} - ` +
           `usage: repos_registry.ts validate|select|excluded [--file repos.yml] ` +
-          `[--repo owner/name] [--discovered discovered.json]`,
+          `[--repo owner/name[,owner/name...]] [--discovered discovered.json]`,
       ]);
   }
 }

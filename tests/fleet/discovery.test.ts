@@ -233,6 +233,28 @@ describe("readDispatchRepo", () => {
       expected: "other/shared-private",
     },
     {
+      reason:
+        "a comma list is trimmed and owner-prefixed per entry; empties survive for the registry to reject",
+      onlyRepo: " Central-Home, Other/Shared ,,Vivswan/Third, ",
+      eventBody: undefined,
+      owner: "Vivswan",
+      expected: "vivswan/central-home,other/shared,,vivswan/third,",
+    },
+    {
+      reason: "a lone comma is not an empty scope",
+      onlyRepo: ",",
+      eventBody: undefined,
+      owner: "Vivswan",
+      expected: ",",
+    },
+    {
+      reason: "a list from the event payload folds the same way",
+      onlyRepo: "",
+      eventBody: JSON.stringify({ inputs: { repo: "Vivswan/A,Vivswan/B" } }),
+      owner: undefined,
+      expected: "vivswan/a,vivswan/b",
+    },
+    {
       reason: "an empty ONLY_REPO falls back to the event payload's repo input",
       onlyRepo: "",
       eventBody: JSON.stringify({ inputs: { repo: "Vivswan/Hidden-Server" } }),

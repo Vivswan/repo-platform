@@ -111,3 +111,63 @@ jobs:
           SOURCE_SHA: ${{ inputs.sha }}
           PREBUILT_REF: refs/heads/build-pending/${{ inputs.sha }}
         run: bun .github/scripts/build-branches/publish.ts
+
+  # The merged PR's opt-in to an immediate fleet sync: reads the judged
+  # commit's directives block (fleet_sync_marker.ts's header has the
+  # grammar) and hands the scope to sync-fleet. State-shaped trivially -
+  # it mutates nothing. A malformed or misplaced directive fails this
+  # leg: loud, so a mistyped opt-in never degrades silently into "wait
+  # for Tuesday".
+  read-directives:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      armed: ${{ steps.directives.outputs.armed }}
+      repos: ${{ steps.directives.outputs.repos }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.sha }}
+
+      - name: Set up bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+
+      - name: Install script dependencies
+        run: bun install --frozen-lockfile --silent
+
+      - name: Read the directives block
+        id: directives
+        env:
+          SOURCE_SHA: ${{ inputs.sha }}
+        run: bun .github/scripts/fleet/fleet_sync_marker.ts
+
+  # The opted-in sync: sync-repos.yml called in this run, needs-ordered
+  # behind the publish so wait_for_build's fast path finds the fresh tip
+  # (a red publish skips it - a sync then would wait out the freshness
+  # budget and ship the previous build). State-shaped: each target's
+  # automation branch is regenerated under a lease, and the called sync
+  # re-verifies the build's green source and provenance itself; a
+  # swallowed run leaves a repo one sync behind, which the weekly cron
+  # heals. THIS job holds the fleet's single-writer lane: the same
+  # literal sync-repos.yml's cron and dispatch runs hold at workflow
+  # level, while a called run takes a per-run group there, so the called
+  # workflow never waits on the lane its caller holds (the deadlock law
+  # above).
+  sync-fleet:
+    needs: [publish-build, read-directives]
+    if: needs.read-directives.outputs.armed == 'true'
+    concurrency:
+      group: sync-repos
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      checks: read
+    uses: ./.github/workflows/sync-repos.yml
+    with:
+      repos: ${{ needs.read-directives.outputs.repos }}
+    secrets:
+      REPO_PLATFORM_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}

@@ -52,7 +52,26 @@ Anything that asks "is this commit green" reads the CHECK RUN, never the CI run'
 Post-gate work rides downstream in the same run, `needs: [all-green]` on a push to main, so `github.sha` IS the judged commit:
 
 - Repo-platform's `post-green` job calls [post-green.yml](../.github/workflows/post-green.yml) (workflow_call only), whose publish job advances the `build` branch - and re-verifies the check at the source commit before any mutation ([build-provenance.md](build-provenance.md)). The file's header has the coalescing contract every leg there must satisfy.
+- Its `read-directives` leg reads the merged commit's directives block, and when a PR opted in, `sync-fleet` calls sync-repos.yml in the same run, needs-ordered behind the publish, holding the `sync-repos` lane the weekly cron also holds. The opt-in grammar is below.
 - On release-please repos, the rendered ci.yml's `release` leg calls the managed release pipeline the same way ([new-repo.md](new-repo.md#the-release-pipeline-release-please)), holding the `post-green-release` lane; release.yml's head gate skips when main has moved on.
+
+### Opting a PR into an immediate fleet sync
+
+The PR body's LAST paragraph is a directives block: one bracketed directive per line, nothing else in that paragraph. Squash merges carry the body verbatim, so the merged commit carries the block and post-green reads it from git alone.
+
+```text
+## Proof
+
+- bun run check green
+
+[fleet-sync: Vivswan/copilot-env, Vivswan/litellm-vscode-chat]
+```
+
+- `[fleet-sync]` or `[fleet-sync: all]`: the whole fleet, the same run the weekly cron performs. `[fleet-sync: owner/a, owner/b]`: those repos only. Case does not matter.
+- Git trailers and footers GitHub or you append below the block (`Co-authored-by:`, `BREAKING CHANGE:`) are fine; anything else after it means there is no block.
+- A `[fleet-sync` anywhere else in the body, an unknown or repeated keyword, an empty scope, or a non-slug entry turns `read-directives` red and nothing syncs: a mistyped opt-in fails loudly instead of waiting for Tuesday. The merged commit cannot be edited, so dispatch the sync by hand (`gh workflow run sync-repos.yml -f repo=...`) or let the next merge carry a correct block.
+- The block is public text on `main`. Naming an undisclosed private repository there discloses it; sync those by dispatch.
+- Lost only when the merge's whole CI run is evicted by two later pushes (one pending run per branch); the weekly cron heals that, as it heals every post-green leg.
 
 ## Residuals, stated
 

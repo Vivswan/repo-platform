@@ -11,10 +11,11 @@
 # branch each run. GitHub keeps only ONE pending run per group and
 # cancels the rest ("a higher priority waiting request exists"), so
 # multi-repo work belongs in a single run - repo=all covers a
-# fleet-wide recover=recopy; a batch of distinct per-repo dispatches
-# must still run serially, waiting for each run to finish before the
-# next. The weekly cron is the catch-all: repos pick up main merges
-# through it, and it heals any sync run that was missed.
+# fleet-wide recover=recopy, and repo takes a comma list. The weekly cron
+# is the catch-all: repos pick up main merges through it, and it heals
+# any sync run that was missed. A merged PR opts into an immediate sync
+# with a [fleet-sync] directive (fleet_sync_marker.ts): post-green.yml's
+# sync-fleet leg then CALLS this workflow in the merge's own CI run.
 
 name: Sync Repos
 
@@ -25,9 +26,9 @@ on:
     inputs:
       repo:
         description: >-
-          Single owner/name to sync, or the literal "all" - same as
-          leaving it empty, every managed repo (recovery requires one of
-          the two)
+          owner/name to sync, a comma-separated list of them, or the
+          literal "all" - same as leaving it empty, every managed repo
+          (recovery requires an explicit value)
         required: false
         type: string
       recover:
@@ -47,12 +48,32 @@ on:
         required: false
         type: boolean
         default: false
+  # The opt-in path: post-green.yml's sync-fleet leg calls this workflow
+  # from the merge's CI run. Named `repos`, not `repo`, on purpose - the
+  # dispatch input may be a private slug and never rides in step env,
+  # while this value is text off a public main commit and is passed as
+  # ONLY_REPO below. The dispatch-only inputs are unset here, so recover
+  # and manual keep their defaults.
+  workflow_call:
+    inputs:
+      repos:
+        description: >-
+          "all", or a comma-separated list of owner/name slugs
+        required: true
+        type: string
+    secrets:
+      REPO_PLATFORM_TOKEN:
+        required: true
 
 permissions:
   contents: read
 
+# Cron and dispatch runs hold the sync-repos lane. A CALLED run takes a
+# per-run group instead: its caller (post-green.yml's sync-fleet job)
+# already holds sync-repos, and a called workflow must never wait on the
+# lane its caller holds (the deadlock law in post-green.yml's header).
 concurrency:
-  group: sync-repos
+  group: ${{ inputs.repos != '' && format('sync-repos-called-{0}', github.run_id) || 'sync-repos' }}
   cancel-in-progress: false
 
 jobs:
@@ -129,15 +150,18 @@ jobs:
           GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
         run: bun .github/scripts/fleet/discover_repos.ts
 
-      # No ONLY_REPO env on purpose: the typed dispatch input may be a
-      # private slug, and the runner prints step env values into this
-      # public log - the script reads it from the event payload instead.
-      # The script also re-runs the recovery scope guard fast-failed above.
+      # ONLY_REPO carries only the workflow_call scope (public text off a
+      # main commit; empty on cron and dispatch runs). The typed dispatch
+      # input never rides here: it may be a private slug, and the runner
+      # prints step env values into this public log - the script reads it
+      # from the event payload instead. The script also re-runs the
+      # recovery scope guard fast-failed above.
       - name: Select repos and check adoption
         id: select
         env:
           GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}
           PAT: ${{ secrets.REPO_PLATFORM_TOKEN }}
+          ONLY_REPO: ${{ inputs.repos }}
           # Scheduled runs have no inputs context: empty is
           # fine, only the literal "recopy" means recovery.
           RECOVER: ${{ inputs.recover }}

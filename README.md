@@ -28,7 +28,7 @@ Walkthrough: [docs/new-repo.md](docs/new-repo.md). The shape of it: scaffold wit
 
 ## Shipping a template change
 
-Merge to `main`; once CI's `all-green` gate passes, the `build` branch is rebuilt and the fleet picks it up on the next weekly sync. For one repo immediately: `gh workflow run sync-repos.yml -f repo=Vivswan/<repo>`. For the whole fleet: `gh workflow run sync-repos.yml`.
+Merge to `main`; once CI's `all-green` gate passes, the `build` branch is rebuilt and the fleet picks it up on the next weekly sync. To sync right after the merge instead, end the PR body with a directives block: `[fleet-sync]` for the whole fleet, or `[fleet-sync: Vivswan/a, Vivswan/b]` for some repos ([docs/all-green.md](docs/all-green.md#after-the-gate) has the grammar). By hand: `gh workflow run sync-repos.yml -f repo=Vivswan/<repo>` (a comma list works), or `gh workflow run sync-repos.yml` for the whole fleet.
 
 ## Credentials
 

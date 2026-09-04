@@ -152,6 +152,15 @@ describe("select", () => {
       expected: [{ repo: "C/Mixed-Case", owner: "C", name: "Mixed-Case" }],
     },
     {
+      reason: "--repo takes a comma list: trimmed, folded, deduped, in selection order",
+      registry: registry({ managed: { wildcard: false, repos: ["a/b", "C/Mixed-Case", "e/f"] } }),
+      options: { repo: " e/f , c/MIXED-case,E/F" },
+      expected: [
+        { repo: "C/Mixed-Case", owner: "C", name: "Mixed-Case" },
+        { repo: "e/f", owner: "e", name: "f" },
+      ],
+    },
+    {
       reason: "an empty selection is [] not an error",
       registry: registry({ managed: { wildcard: true, repos: [] } }),
       options: { discovered: [] },
@@ -177,9 +186,32 @@ describe("select", () => {
       registry: registry({ managed: { wildcard: true, repos: [] }, exclude: ["a/b"] }),
       options: { repo: "a/b", discovered: ["a/b"] },
       error:
-        "--repo matched no selected repository (value withheld - it may be a private slug): " +
-        "the repo you dispatched with is not in managed (or the discovered list), or it is " +
-        "listed in exclude; check the spelling (matching ignores case)",
+        "--repo: 1 of 1 requested repos matched no selected repository (values withheld - " +
+        "they may be private slugs): a repo you dispatched with is not in managed (or the " +
+        "discovered list), or it is listed in exclude; check the spelling (matching ignores case)",
+    },
+    {
+      reason: "one miss in a list fails the whole selection, counting only",
+      registry: registry({ managed: { wildcard: false, repos: ["a/b", "c/d"] } }),
+      options: { repo: "a/b,c/d,x/private-typo" },
+      error:
+        "--repo: 1 of 3 requested repos matched no selected repository (values withheld - " +
+        "they may be private slugs): a repo you dispatched with is not in managed (or the " +
+        "discovered list), or it is listed in exclude; check the spelling (matching ignores case)",
+    },
+    {
+      reason: "a lone comma is an empty entry, never the whole fleet",
+      registry: registry({ managed: { wildcard: false, repos: ["a/b"] } }),
+      options: { repo: " , " },
+      error:
+        "--repo has an empty entry: pass owner/name slugs separated by commas, with no stray or trailing comma",
+    },
+    {
+      reason: "a trailing comma is an empty entry, never a silently narrowed list",
+      registry: registry({ managed: { wildcard: false, repos: ["a/b", "c/d"] } }),
+      options: { repo: "a/b,c/d," },
+      error:
+        "--repo has an empty entry: pass owner/name slugs separated by commas, with no stray or trailing comma",
     },
     {
       reason: "garbage in the discovered list, named by index only",

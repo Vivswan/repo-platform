@@ -19,6 +19,17 @@ import { parse as parseYaml } from "yaml";
 const root = join(import.meta.dir, "../..");
 const read = (rel: string) => readFileSync(join(root, rel), "utf8");
 
+interface Job {
+  needs?: string[];
+  if?: string;
+  concurrency?: { group: string; "cancel-in-progress": boolean };
+  uses?: string;
+  with?: Record<string, string>;
+  secrets?: Record<string, string>;
+  outputs?: Record<string, string>;
+  steps?: { run?: string; env?: unknown }[];
+}
+
 describe("post-green publish wiring", () => {
   const ciYml = read(".github/workflows/ci.yml");
   const postGreen = read(".github/workflows/post-green.yml");
@@ -77,15 +88,66 @@ describe("post-green publish wiring", () => {
     // .yml's header): that requirement lives in review, so the roster is
     // pinned here - adding a leg fails this test until the new job's
     // verification story is written down and the roster updated.
-    const jobs = doc.jobs as Record<string, { steps?: { run?: string; env?: unknown }[] }>;
-    expect(Object.keys(jobs)).toEqual(["publish-build"]);
-    // The one current leg verifies green via publish.ts (its
-    // allGreenFailure gate), fed the judged sha input.
+    const jobs = doc.jobs as Record<string, Job>;
+    expect(Object.keys(jobs)).toEqual(["publish-build", "read-directives", "sync-fleet"]);
+    // publish-build verifies green via publish.ts (its allGreenFailure
+    // gate), fed the judged sha input.
     const publishStep = (jobs["publish-build"].steps ?? []).find((step) =>
       (step.run ?? "").includes("build-branches/publish.ts"),
     );
     if (publishStep === undefined) throw new Error("publish-build has no publish.ts step");
     expect((publishStep.env as Record<string, string>).SOURCE_SHA).toBe("${{ inputs.sha }}");
+    // read-directives mutates nothing; it reads the judged commit's
+    // directives block (never a re-derived ref) into the two outputs
+    // sync-fleet consumes.
+    const readStep = (jobs["read-directives"].steps ?? []).find((step) =>
+      (step.run ?? "").includes("fleet/fleet_sync_marker.ts"),
+    );
+    if (readStep === undefined) throw new Error("read-directives has no fleet_sync_marker.ts step");
+    expect((readStep.env as Record<string, string>).SOURCE_SHA).toBe("${{ inputs.sha }}");
+    expect(jobs["read-directives"].outputs).toEqual({
+      armed: "${{ steps.directives.outputs.armed }}",
+      repos: "${{ steps.directives.outputs.repos }}",
+    });
+    // sync-fleet's own verification is the called sync's (green source +
+    // provenance gates in resolve_refs.ts); its wiring is pinned: gated
+    // on the opt-in output, ordered behind the publish, fed the scope,
+    // and given the PAT the sync writes with.
+    const syncFleet = jobs["sync-fleet"];
+    expect(syncFleet.needs).toEqual(["publish-build", "read-directives"]);
+    expect(syncFleet.if).toBe("needs.read-directives.outputs.armed == 'true'");
+    // The fleet's single-writer lane is held HERE (the raw group census
+    // below cannot tell which job holds it).
+    expect(syncFleet.concurrency).toEqual({ group: "sync-repos", "cancel-in-progress": false });
+    expect(syncFleet.uses).toBe("./.github/workflows/sync-repos.yml");
+    expect(syncFleet.with).toEqual({ repos: "${{ needs.read-directives.outputs.repos }}" });
+    expect(syncFleet.secrets).toEqual({
+      REPO_PLATFORM_TOKEN: "${{ secrets.REPO_PLATFORM_TOKEN }}",
+    });
+  });
+
+  test("the called sync never waits on the lane its caller holds", () => {
+    // sync-fleet holds the fleet's single-writer lane by its literal
+    // name; sync-repos.yml's workflow-level group must therefore resolve
+    // to something ELSE on a called run (keyed on the call-only input,
+    // never github.workflow) while cron and dispatch runs keep the lane.
+    const syncRepos = read(".github/workflows/sync-repos.yml");
+    const doc = parseYaml(syncRepos) as {
+      on: Record<string, { inputs?: Record<string, unknown>; secrets?: Record<string, unknown> }>;
+      concurrency: { group: string; "cancel-in-progress": boolean };
+    };
+    expect(Object.keys(doc.on)).toEqual(["schedule", "workflow_dispatch", "workflow_call"]);
+    expect(Object.keys(doc.on.workflow_call.inputs ?? {})).toEqual(["repos"]);
+    expect(Object.keys(doc.on.workflow_call.secrets ?? {})).toEqual(["REPO_PLATFORM_TOKEN"]);
+    expect(doc.concurrency).toEqual({
+      group:
+        "${{ inputs.repos != '' && format('sync-repos-called-{0}', github.run_id) || 'sync-repos' }}",
+      "cancel-in-progress": false,
+    });
+    // The scope reaches the selector as ONLY_REPO from the call input
+    // only - the dispatch input stays out of step env (private slugs).
+    expect(syncRepos).toContain("ONLY_REPO: ${{ inputs.repos }}");
+    expect(syncRepos).not.toContain("ONLY_REPO: ${{ inputs.repo }}");
   });
 
   test("ONE publisher lane: a literal group, shared by name across both workflows", () => {
@@ -126,7 +188,7 @@ describe("post-green publish wiring", () => {
     expect(doc.jobs["post-green"]).toBeDefined();
     expect(doc.jobs["post-green"].concurrency).toBeUndefined();
     const groupsOf = (text: string) => [...text.matchAll(/^\s*group: (.*)$/gm)].map((m) => m[1]);
-    expect(groupsOf(postGreen)).toEqual(["build-branches-publish"]);
+    expect(groupsOf(postGreen)).toEqual(["build-branches-publish", "sync-repos"]);
   });
 
   test("no-change skips ONLY behind the stamp-health guard, then the commit segment is condition-free", () => {

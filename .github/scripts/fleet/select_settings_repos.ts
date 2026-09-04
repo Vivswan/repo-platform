@@ -52,8 +52,16 @@ const owner = requireEnv("OWNER");
 const selfRepo = requireEnv("GITHUB_REPOSITORY");
 
 // A bare name gets the fleet owner prefixed; the read-and-fold rationale
-// lives with readDispatchRepo.
+// lives with readDispatchRepo. One repo per dispatch here: the settings
+// heal has no list-scoped caller, and a comma would otherwise select
+// nothing while looking like a typo.
 const onlyRepo = readDispatchRepo(owner);
+if (onlyRepo.includes(",")) {
+  console.log(
+    "::error::the settings sync takes one repo per dispatch (value withheld - it may name private repos); dispatch once per repository or leave repo empty for the whole fleet",
+  );
+  process.exit(1);
+}
 
 // A drop that leaves a repo without settings management is announced: a
 // workflow warning, plus a step-summary bullet (under a heading written
