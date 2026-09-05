@@ -10,17 +10,15 @@
 // Writes state=fresh|behind|skipped to GITHUB_OUTPUT, and - only when
 // behind - a markdown fragment to $FRESHNESS for report.ts to splice.
 //
-// Env: GH_TOKEN, TEMPLATE_REPO (the operator repository), FRESHNESS,
-// GITHUB_OUTPUT. Runs from the caller's checkout, where copier recorded
+// Env: GH_TOKEN, FRESHNESS, GITHUB_OUTPUT. Runs from the caller's checkout, where copier recorded
 // its answers.
 
 import { appendFileSync, writeFileSync } from "node:fs";
-import { recordedBuildSha } from "./build_sha.ts";
+import { OPERATOR_REPO, recordedBuildSha } from "./build_sha.ts";
 import { capture, notice, requireEnv } from "./runtime.ts";
 
 const NETWORK_TIMEOUT_MS = 20_000;
 
-const templateRepo = requireEnv("TEMPLATE_REPO");
 const freshnessFile = requireEnv("FRESHNESS");
 const outputFile = requireEnv("GITHUB_OUTPUT");
 
@@ -41,16 +39,16 @@ if ("refusal" in recorded) skip(recorded.refusal);
 const { sha } = recorded;
 
 const tipProbe = capture(
-  ["gh", "api", `repos/${templateRepo}/branches/build`, "--jq", ".commit.sha"],
+  ["gh", "api", `repos/${OPERATOR_REPO}/branches/build`, "--jq", ".commit.sha"],
   { timeoutMs: NETWORK_TIMEOUT_MS },
 );
 if (tipProbe.exitCode !== 0) {
   skip(
-    `Could not read ${templateRepo}'s build branch (network, or a private operator repo this token cannot read).`,
+    `Could not read ${OPERATOR_REPO}'s build branch (network, or a private operator repo this token cannot read).`,
   );
 }
 const tip = tipProbe.stdout.trim();
-if (tip === "") skip(`${templateRepo}'s build branch reported no commit.`);
+if (tip === "") skip(`${OPERATOR_REPO}'s build branch reported no commit.`);
 
 if (tip === sha) {
   setState("fresh");
@@ -60,7 +58,7 @@ if (tip === sha) {
 // One more call for the distance. It is presentation only: a failed
 // compare still reports "behind", just without the number.
 const compare = capture(
-  ["gh", "api", `repos/${templateRepo}/compare/${sha}...${tip}`, "--jq", ".ahead_by"],
+  ["gh", "api", `repos/${OPERATOR_REPO}/compare/${sha}...${tip}`, "--jq", ".ahead_by"],
   { timeoutMs: NETWORK_TIMEOUT_MS },
 );
 const ahead = compare.exitCode === 0 ? compare.stdout.trim() : "";
