@@ -3,7 +3,9 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
+  rmSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -162,6 +164,45 @@ describe("relocate_security_policy", () => {
     expect(existsSync(join(root, "target/.github/SECURITY.md"))).toBe(false);
     expect(git(join(root, "target"), "rev-list", "--count", "HEAD").trim()).toBe("1");
   });
+
+  // The destination's parent is target-controlled too. `git mv` into a
+  // symlinked directory exits 0 and writes wherever the link points, so
+  // the refusal must come before the move; a file-shaped .github is the
+  // same broken parent.
+  test.each([
+    {
+      shape: "a symlink to a directory outside the checkout",
+      plant: (root: string) => {
+        mkdirSync(join(root, "outside"));
+        symlinkSync("../outside", join(root, "target/.github"));
+      },
+      // Where the link points: still empty after the refusal.
+      outside: [] as string[],
+    },
+    {
+      shape: "a regular file",
+      plant: (root: string) => writeFileSync(join(root, "target/.github"), "not a directory\n"),
+      outside: null,
+    },
+  ])(
+    ".github as $shape refuses the move: nothing moved, nothing written outside",
+    ({ plant, outside }) => {
+      const root = makeRoot({ "SECURITY.md": POLICY });
+      rmSync(join(root, "target/.github"), { recursive: true });
+      plant(root);
+      git(join(root, "target"), "add", "-A");
+      git(join(root, "target"), "commit", "-qm", "broken .github");
+      const result = runScript(root);
+      expect(result.exitCode).not.toBe(0);
+      expect(result.stdout).toContain("::error::");
+      expect(result.stdout).toContain(".github is not a real directory");
+      expect(readFileSync(join(root, "target/SECURITY.md"), "utf-8")).toBe(POLICY);
+      expect(git(join(root, "target"), "status", "--porcelain")).toBe("");
+      expect(git(join(root, "target"), "rev-list", "--count", "HEAD").trim()).toBe("2");
+      if (outside !== null) expect(readdirSync(join(root, "outside"))).toEqual(outside);
+      expect(readFileSync(join(root, "security-move.md"), "utf-8")).toBe("");
+    },
+  );
 
   test("a symlink at the destination path is refused, not read through", () => {
     // lstat, not stat: a symlink pointing at a perfectly good file is still

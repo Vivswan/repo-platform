@@ -53,7 +53,7 @@ import {
   writeFileSync,
   writeSync,
 } from "node:fs";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { z } from "zod";
 import { MANIFEST_NAME } from "../../../actions/shared/manifest.ts";
 import { stampManifestText } from "../../../actions/shared/stamp_manifest.ts";
@@ -444,6 +444,12 @@ export function rehearseRepo(slug: string, options: RehearsalOptions): Rehearsal
       throw new RehearsalError(
         `${slug} carries something other than a regular file at ${SECURITY_PATH} or the ` +
           "retired root path; the sync would refuse it",
+      );
+    }
+    if (securityLocation === "unsafe-parent") {
+      throw new RehearsalError(
+        `${slug}'s ${dirname(SECURITY_PATH)} is not a real directory (a symlink or a file); ` +
+          "the sync would refuse to move the security policy through it",
       );
     }
     // Adopted but broken (a missing or unreadable answers file included)
