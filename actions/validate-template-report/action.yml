@@ -3,37 +3,37 @@ description: >-
   The fleet's validate-template job body, three legs in one sticky PR
   comment plus the step summary. INTEGRITY judges the tree by the
   validator of the template it was rendered from (the operator's build
-  tree at the recorded `_commit`) and BLOCKS through the deferred
-  `integrity` output; the LATEST pass runs the build tip's validator and
-  only warns about the rules the next sync brings; FRESHNESS is a ref
-  compare against the build branch and only informs. The action never
-  fails on its own - the caller reads `integrity` and fails LAST, so the
-  comment is already posted when the gate goes red. The calling job needs
-  pull-requests: write for the comment (and nothing else beyond contents:
-  read).
+  tree at the recorded `_commit`, run on that tree's own bun) and BLOCKS
+  through the deferred `integrity` output; the LATEST pass runs the build
+  tip's validator and only warns about the rules the next sync brings;
+  FRESHNESS reads the integrity leg's build-branch compare and only
+  informs. The action never fails on its own - the caller reads
+  `integrity` and fails LAST, so the comment is already posted when the
+  gate goes red. The calling job needs pull-requests: write for the
+  comment (and nothing else beyond contents: read).
 
 inputs:
   github-token:
     description: >-
-      Token for the aligned tree fetch, the freshness read, and the sticky
-      comment (contents read and pull-requests write are enough).
+      Token for the aligned tree fetch and the sticky comment (contents
+      read and pull-requests write are enough).
     required: true
 
 outputs:
   integrity:
     description: >-
-      The aligned validator's outcome (success or failure; a refused or
-      unreachable `_commit` is a failure), deferred so the caller can fail
+      The judge step's outcome: success only for a clean verdict; failure
+      for findings or a run that could not be judged; skipped when the
+      aligned tree could not be fetched. Deferred so the caller can fail
       AFTER the findings are posted.
     value: ${{ steps.integrity.outcome }}
 
 runs:
   using: composite
   steps:
-    # Installed once up front: the aligned validator runs on this bun (see
-    # aligned.ts), the wrapped latest-pass action probes for a bun matching
-    # the same generated pin and finds this one, and the freshness and
-    # report scripts below need it too.
+    # Installed once up front: the fetch and report scripts run on it, the
+    # wrapped latest-pass action probes for a bun matching the same
+    # generated pin and finds this one.
     - name: Check for a bun matching the action's pin
       id: bun
       shell: bash
@@ -67,24 +67,59 @@ runs:
 
     # No install step for this action's own scripts: no runtime deps.
     #
-    # continue-on-error defers the verdict to the caller's last step; it
-    # does not discard it (the step's exit code is what `outcome` reports).
-    - name: Judge the tree by the validator at its recorded _commit
-      id: integrity
+    # The integrity leg is three steps. A failed fetch writes its own
+    # not-judged verdict and skips the two behind it, leaving the judge
+    # outcome `skipped`, which the caller reads as red.
+    - name: Fetch the validator at the recorded _commit
+      id: fetch
       continue-on-error: true
       shell: bash
       env:
         GH_TOKEN: ${{ inputs.github-token }}
         ALIGNED_DIR: ${{ runner.temp }}/aligned-validator
-        FINDINGS_FILE: ${{ runner.temp }}/aligned-findings.md
-        ADVISORIES_FILE: ${{ runner.temp }}/aligned-advisories.md
-      run: bun "${{ github.action_path }}/aligned.ts"
+        VERDICT_FILE: ${{ runner.temp }}/aligned-verdict.json
+      run: bun "${{ github.action_path }}/fetch_aligned.ts"
+
+    # The fetched tree runs on the bun ITS pin names (the fetch step
+    # refused any tree without one), not on this action's: an older tree's
+    # lockfile is read by the bun that wrote it. Same one-retry pattern as
+    # above.
+    - name: Set up the fetched tree's bun
+      id: aligned-bun
+      if: steps.fetch.outcome == 'success'
+      continue-on-error: true
+      uses: oven-sh/setup-bun@v2
+      with:
+        bun-version-file: ${{ runner.temp }}/aligned-validator/tree/actions/validate-template/.bun-version
+
+    - name: Set up the fetched tree's bun (retry)
+      if: steps.fetch.outcome == 'success' && steps.aligned-bun.outcome == 'failure'
+      uses: oven-sh/setup-bun@v2
+      with:
+        bun-version-file: ${{ runner.temp }}/aligned-validator/tree/actions/validate-template/.bun-version
+
+    # The judge script itself runs on the action's bun (the fetch step's
+    # `bun` output); only the fetched tree's install and validator run on
+    # the bun setup-bun just put on PATH. continue-on-error defers the
+    # verdict to the caller's last step; it does not discard it (the step's
+    # exit code follows the verdict).
+    - name: Judge the tree by the validator at its recorded _commit
+      id: integrity
+      if: steps.fetch.outcome == 'success'
+      continue-on-error: true
+      shell: bash
+      env:
+        ALIGNED_DIR: ${{ runner.temp }}/aligned-validator
+        VERDICT_FILE: ${{ runner.temp }}/aligned-verdict.json
+        ORCHESTRATOR_BUN: ${{ steps.fetch.outputs.bun }}
+      run: ALIGNED_BUN="$(command -v bun)" "$ORCHESTRATOR_BUN" "${{ github.action_path }}/judge_aligned.ts"
 
     # Advisory only: the build tip's validator knows the rules the next
     # sync PR brings, and report.ts shows them as warnings. Its outcome is
     # read by nothing. A composite step's `uses:` cannot take expressions,
     # which is why the operator repository is a constant (build_sha.ts)
-    # rather than an input: no input could reach this ref.
+    # rather than an input: no input could reach this ref. Its own bun
+    # guard puts this action's pinned bun back for the report step.
     - uses: Vivswan/repo-platform/actions/validate-template@build
       id: latest
       continue-on-error: true
@@ -92,26 +127,15 @@ runs:
         findings-file: ${{ runner.temp }}/latest-findings.md
         advisories-file: ${{ runner.temp }}/latest-advisories.md
 
-    - name: Check how far behind the template this repo is
-      id: freshness
-      continue-on-error: true
-      shell: bash
-      env:
-        GH_TOKEN: ${{ inputs.github-token }}
-        FRESHNESS: ${{ runner.temp }}/freshness.md
-      run: bun "${{ github.action_path }}/freshness.ts"
-
     - name: Report the findings
       shell: bash
       env:
         GH_TOKEN: ${{ inputs.github-token }}
-        FINDINGS: ${{ runner.temp }}/aligned-findings.md
-        ADVISORIES: ${{ runner.temp }}/aligned-advisories.md
-        ALIGNED_REASON: ${{ steps.integrity.outputs.reason }}
+        VERDICT: ${{ runner.temp }}/aligned-verdict.json
         LATEST_FINDINGS: ${{ runner.temp }}/latest-findings.md
         LATEST_ADVISORIES: ${{ runner.temp }}/latest-advisories.md
-        FRESHNESS: ${{ runner.temp }}/freshness.md
-        FRESHNESS_STATE: ${{ steps.freshness.outputs.state }}
+        COMPARE_STATUS: ${{ steps.fetch.outputs.compare }}
+        AHEAD_BY: ${{ steps.fetch.outputs.ahead-by }}
         EVENT_NAME: ${{ github.event_name }}
         PR_NUMBER: ${{ github.event.pull_request.number }}
         RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}

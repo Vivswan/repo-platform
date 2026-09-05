@@ -71,11 +71,13 @@ The `validate-template` job is three legs in one sticky PR comment plus the step
 |---|---|---|
 | Integrity | repo-platform's build tree at the `_commit` recorded in `.github/.copier-answers.yml` - the template this repository was rendered from | Blocks: that validator's errors (managed content changed outside a sync, malformed managed YAML, a conditioned `ci` caller, and the like) |
 | After your next sync | the build branch tip's validator (`validate-template@build`) | Warns: the rules the next sync PR brings, minus anything the integrity leg already said |
-| Freshness | none - a ref compare against the build branch | Informs: how many build commits behind |
+| Freshness | none - the integrity leg's one build-branch compare | Informs: how many build commits behind |
 
 - Judging by the repository's own template commit is what keeps a template change from turning every fleet repo red before its sync PR lands; the tip's new rules arrive as warnings first and become the verdict once the sync PR merges.
 - The integrity leg needs `_commit` to be the full 40-hex build sha the sync writes. A short or missing value fails the check with `merge this repository's pending template sync PR`; nothing resolves a short sha.
 - The sha must also be a commit the `build` branch already contains, or the check fails without fetching anything: the answers file is PR-editable, and this is the same trust the `@build` action refs already place in that branch ([build provenance](build-provenance.md)).
+- The fetched tree runs on the bun its own `.bun-version` names, not on the current action's, so an older tree's lockfile is read by the bun that wrote it.
+- Integrity is ONE verdict per run: clean, findings, or not judged. A validator that exits nonzero without a finding, exits zero with one, crashes before writing its report, times out, or dies on a signal is not judged, and not judged fails the check with the reason in the comment. Freshness reads the same compare that admitted the commit, so a refused commit shows the refusal there too rather than a distance.
 
 ### What each module adds
 

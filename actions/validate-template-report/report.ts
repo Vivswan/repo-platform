@@ -1,27 +1,29 @@
 #!/usr/bin/env bun
 // The validate-template job's reporting: one sticky PR comment plus the
-// step summary, assembled from the aligned validator's findings/advisories
-// files, the latest validator's pair, and the freshness step's verdict.
-// Ported from the inline bash the fleet ci.yml template used to carry; the
-// behaviour contract is pinned by tests/actions/validate_template_report.test.ts.
+// step summary, assembled from the integrity leg's verdict, the latest
+// validator's report pair, and the build-branch compare the fetch step
+// made. The behaviour contract is pinned by
+// tests/actions/validate_template_report.test.ts.
 //
-// The contract: INTEGRITY blocks (managed content changed out of band, as
-// judged by the validator at the repository's own `_commit`), the LATEST
-// pass only warns (rules the next sync brings), FRESHNESS only informs,
-// and this script itself NEVER fails the job - the caller's LAST step
-// re-raises the deferred integrity verdict, so the comment here is
-// already posted when the gate goes red. One comment is kept per PR
-// (found by MARKER) rather than one per push, a clean-and-fresh run
-// leaves no new comment but clears a stale one, and every reporting
-// failure degrades to a warning with the findings still in the job summary.
+// The contract: INTEGRITY blocks (the verdict of the validator at the
+// repository's own `_commit`; a run that produced no verdict is
+// `not-judged` and blocks too), the LATEST pass only warns (rules the next
+// sync brings), FRESHNESS only informs, and this script itself NEVER fails
+// the job - the caller's LAST step re-raises the deferred integrity
+// outcome, so the comment here is already posted when the gate goes red.
+// One comment is kept per PR (found by MARKER) rather than one per push, a
+// clean-and-fresh run leaves no new comment but clears a stale one, and
+// every reporting failure degrades to a warning with the findings still in
+// the job summary.
 //
-// Env: GH_TOKEN, GITHUB_REPOSITORY, GITHUB_STEP_SUMMARY, FINDINGS,
-// ADVISORIES, LATEST_FINDINGS, LATEST_ADVISORIES, FRESHNESS (the five
-// markdown files), ALIGNED_REASON (why the aligned validator never ran,
-// else empty), FRESHNESS_STATE, EVENT_NAME, PR_NUMBER, RUN_URL.
+// Env: GH_TOKEN, GITHUB_REPOSITORY, GITHUB_STEP_SUMMARY, VERDICT (the
+// integrity leg's verdict file), LATEST_FINDINGS, LATEST_ADVISORIES (the
+// build tip validator's pair), COMPARE_STATUS and AHEAD_BY (the fetch
+// step's compare outputs), EVENT_NAME, PR_NUMBER, RUN_URL.
 
 import { appendFileSync, readFileSync, statSync } from "node:fs";
 import { capture, env, requireEnv, warning } from "./runtime.ts";
+import { readVerdict } from "./verdict.ts";
 
 const NETWORK_TIMEOUT_MS = 20_000;
 /** The paginated comment listing fetches N sequential pages under ONE
@@ -32,93 +34,91 @@ const PAGINATED_TIMEOUT_MS = NETWORK_TIMEOUT_MS * 4;
 // strands every comment already posted under the old one.
 const MARKER = "<!-- repo-platform:validate-template -->";
 
-const findingsFile = requireEnv("FINDINGS");
-const advisoriesFile = requireEnv("ADVISORIES");
-const alignedReason = env("ALIGNED_REASON");
+const verdict = readVerdict(requireEnv("VERDICT"));
 const latestFindingsFile = requireEnv("LATEST_FINDINGS");
 const latestAdvisoriesFile = requireEnv("LATEST_ADVISORIES");
-const freshnessFile = requireEnv("FRESHNESS");
-const freshnessState = env("FRESHNESS_STATE");
+const compareStatus = env("COMPARE_STATUS");
+const aheadBy = env("AHEAD_BY");
 const eventName = requireEnv("EVENT_NAME");
 const prNumber = env("PR_NUMBER");
 const runUrl = requireEnv("RUN_URL");
 const repository = requireEnv("GITHUB_REPOSITORY");
 const summaryFile = requireEnv("GITHUB_STEP_SUMMARY");
 
-/** A regular file's size, or null when there is none ([ -f ] in the old
- *  bash: a directory or special file at the path counts as absent). */
-const sizeOfFile = (path: string): number | null => {
+/** A file's text with trailing newlines stripped, or null when there is
+ *  no regular file at the path. */
+const readReport = (path: string): string | null => {
   try {
-    const stat = statSync(path);
-    return stat.isFile() ? stat.size : null;
+    if (!statSync(path).isFile()) return null;
+    return readFileSync(path, "utf8").replace(/\n+$/, "");
   } catch {
     return null;
   }
 };
-/** A file's text with trailing newlines stripped ($(cat) in the old bash);
- *  the fallback stands in for a file that cannot be read. */
-const readTrimmed = (path: string, fallback = ""): string => {
-  try {
-    return readFileSync(path, "utf8").replace(/\n+$/, "");
-  } catch {
-    return fallback;
-  }
-};
 
-// An absent findings file means the validator never got far enough to
-// write one, which is a setup failure, not a clean tree. When aligned.ts
-// itself refused to run it, its reason says why.
-const findingsSize = sizeOfFile(findingsFile);
 let integrity: string;
-let blocking: boolean;
-if (alignedReason !== "") {
-  integrity = `#### Integrity\n\nNot judged: ${alignedReason} This FAILS the check.`;
-  blocking = true;
-} else if (findingsSize === null) {
-  integrity = `#### Integrity\n\nThe validator exited before reporting. See the [run log](${runUrl}).`;
-  blocking = true;
-} else if (findingsSize > 0) {
-  integrity = `#### Integrity\n\n${readTrimmed(findingsFile)}\nManaged content changed outside a sync. Restore the file from git history, or run a recovery sync. This FAILS the check.`;
-  blocking = true;
-} else {
-  integrity = "#### Integrity\n\nPassed - this repository matches the state it was stamped with.";
-  blocking = false;
+switch (verdict.kind) {
+  case "clean":
+    integrity = "#### Integrity\n\nPassed - this repository matches the state it was stamped with.";
+    break;
+  case "findings":
+    integrity = `#### Integrity\n\n${verdict.findings}\nManaged content changed outside a sync. Restore the file from git history, or run a recovery sync. This FAILS the check.`;
+    break;
+  case "not-judged":
+    integrity = `#### Integrity\n\nNot judged: ${verdict.reason}. See the [run log](${runUrl}). This FAILS the check.`;
+    break;
 }
+const blocking = verdict.kind !== "clean";
 
 // Advisories never gate - they are the validator's own non-failing stream,
 // and folding them into the integrity verdict would have a clean
 // repository reading as blocked.
-const advice = (sizeOfFile(advisoriesFile) ?? 0) > 0 ? `\n\n${readTrimmed(advisoriesFile)}` : "";
+const advisories = verdict.kind === "not-judged" ? "" : verdict.advisories;
+const advice = advisories === "" ? "" : `\n\n${advisories}`;
 
-/** The `- ` items of a findings or advisories file (its headings carry
- *  only counts). */
-const bullets = (path: string): string[] =>
-  readTrimmed(path)
-    .split("\n")
-    .filter((line) => line.startsWith("- "));
+/** The `- ` items of a report file (its headings carry only counts). */
+const bullets = (text: string | null): string[] =>
+  (text ?? "").split("\n").filter((line) => line.startsWith("- "));
 
 // The build tip's validator applies the rules the next sync PR brings, so
 // its findings are warnings, never a verdict, and anything the aligned
 // validator already reported is not said twice. A latest pass that never
 // wrote its findings is a setup failure worth a line, not silence.
 const LATEST_HEADING = "#### After your next sync";
-const alreadySaid = new Set([...bullets(findingsFile), ...bullets(advisoriesFile)]);
-const upcoming = [...bullets(latestFindingsFile), ...bullets(latestAdvisoriesFile)].filter(
+const alreadySaid = new Set([
+  ...bullets(verdict.kind === "findings" ? verdict.findings : ""),
+  ...bullets(advisories),
+]);
+const latestFindings = readReport(latestFindingsFile);
+const upcoming = [...bullets(latestFindings), ...bullets(readReport(latestAdvisoriesFile))].filter(
   (line) => !alreadySaid.has(line),
 );
 const latest =
-  sizeOfFile(latestFindingsFile) === null
+  latestFindings === null
     ? `\n\n${LATEST_HEADING}\n\nThe current template's validator exited before reporting. See the [run log](${runUrl}).`
     : upcoming.length > 0
       ? `\n\n${LATEST_HEADING}\n\nThe current template's validator also reports the following; the next sync PR brings these rules, and they do not fail this check.\n\n${upcoming.join("\n")}`
       : "";
 
-const freshness =
-  freshnessState === "behind"
-    ? readTrimmed(freshnessFile, "#### Freshness\n\nNot checked this run; see the run log for why.")
-    : freshnessState === "fresh"
-      ? "#### Freshness\n\nUp to date with the build branch."
-      : "#### Freshness\n\nNot checked this run; see the run log for why.";
+// Freshness reads the fetch step's compare: `ahead` is the build branch
+// ahead of the recorded commit, `identical` is up to date, and anything
+// else (a diverged or unknown sha, a failed call, no call at all) is a run
+// the integrity leg already refused, so the refusal is the reason.
+let freshness: string;
+let behind = false;
+if (compareStatus === "identical") {
+  freshness = "#### Freshness\n\nUp to date with the build branch.";
+} else if (compareStatus === "ahead") {
+  const distance = /^[0-9]+$/.test(aheadBy) ? ` by ${aheadBy} commit(s)` : "";
+  freshness = `#### Freshness\n\nThis repository is behind the build branch${distance}. The next sync PR updates the managed files; nothing to do here.`;
+  behind = true;
+} else {
+  const reason =
+    verdict.kind === "not-judged"
+      ? verdict.reason
+      : `the build branch compare reported \`${compareStatus || "nothing"}\``;
+  freshness = `#### Freshness\n\nNot checked this run: ${reason}.`;
+}
 
 const body = `${MARKER}\n### Template check\n\n${integrity}${advice}${latest}\n\n${freshness}`;
 appendFileSync(summaryFile, `${body}\n`);
@@ -126,7 +126,7 @@ appendFileSync(summaryFile, `${body}\n`);
 // A comment is worth making only when something needs saying. A clean,
 // fresh repository leaves no new comment - but it does clear one a
 // previous run left behind.
-const worthSaying = blocking || freshnessState === "behind" || advice !== "" || latest !== "";
+const worthSaying = blocking || behind || advice !== "" || latest !== "";
 
 if (eventName !== "pull_request") process.exit(0);
 

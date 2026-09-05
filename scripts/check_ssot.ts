@@ -2328,11 +2328,33 @@ export function actionManifestFiles(): string[] {
     );
 }
 
+/** The runner scratch root a setup-bun pin may sit under instead of the
+ *  action path. */
+export const FETCHED_TREE_PIN_ANCHOR = "${{ runner.temp }}/";
+
+/** A setup-bun pin under the runner scratch root, accepted only as a clean
+ *  path to a .bun-version dotfile there: every segment drawn from
+ *  [A-Za-z0-9._-], not a dot or dot-dot, and not ending in a period (a
+ *  traversal would reach the caller's checkout; Windows strips trailing
+ *  periods and spaces and reads a backslash as a separator, so the
+ *  whitelist is what closes the class, not a list of spellings). */
+export function fetchedTreePin(value: unknown): boolean {
+  if (typeof value !== "string" || !value.startsWith(FETCHED_TREE_PIN_ANCHOR)) return false;
+  const segments = value.slice(FETCHED_TREE_PIN_ANCHOR.length).split("/");
+  return (
+    segments[segments.length - 1] === ".bun-version" &&
+    segments.every(
+      (s) => /^[A-Za-z0-9._-]+$/.test(s) && s !== "." && s !== ".." && !s.endsWith("."),
+    )
+  );
+}
+
 /** How one action.yml violates the pinned-bun setup contract: any action
  *  that runs bun OR sets it up must carry ACTIONS_BUN_SETUP_GUARD
  *  verbatim, and EVERY setup-bun step (canonical or extra, quoted or
- *  plain) must read the action-local pin - so a bare setup added beside
- *  a canonical block is as loud as a drifted block. Triggers and the
+ *  plain) must read the action-local pin, or a clean .bun-version path
+ *  under the runner scratch root (fetchedTreePin) - so a bare setup added
+ *  beside a canonical block is as loud as a drifted block. Triggers and the
  *  per-step pin are judged on the PARSED steps (actionSteps), the way
  *  Actions itself reads the manifest; only the canonical block stays a
  *  byte comparison, because pinning exact bytes is its point. The
@@ -2366,20 +2388,25 @@ export function actionsBunGuardMismatches(file: string, text: string): Mismatch[
     });
   }
   // The canonical block's pin line doubles as the per-step requirement,
-  // so the two judgments can never demand different bytes.
+  // so the two judgments can never demand different bytes. A pin under
+  // the runner's scratch directory is the one other anchor accepted: a
+  // tree the action fetched there itself (validate-template-report runs
+  // an older validator on that tree's own bun) is no more the caller's
+  // than the action path is.
   const pinLine = ACTIONS_BUN_SETUP_GUARD[ACTIONS_BUN_SETUP_GUARD.length - 1];
   const pinValue = pinLine.slice("bun-version-file: ".length);
   for (const step of setupSteps) {
     const withBlock = step.with;
-    const pinned =
-      typeof withBlock === "object" &&
-      withBlock !== null &&
-      (withBlock as Record<string, unknown>)["bun-version-file"] === pinValue;
+    const value =
+      typeof withBlock === "object" && withBlock !== null
+        ? (withBlock as Record<string, unknown>)["bun-version-file"]
+        : undefined;
+    const pinned = value === pinValue || fetchedTreePin(value);
     if (pinned) continue;
     mismatches.push({
       file,
-      expected: `every setup-bun step carrying '${pinLine}' in its with: block`,
-      got: "a setup-bun step without the action-local pin - it resolves the CALLER repository's bun version files",
+      expected: `every setup-bun step carrying '${pinLine}' (or a clean .bun-version path under '${FETCHED_TREE_PIN_ANCHOR}', a tree the action fetched itself) in its with: block`,
+      got: "a setup-bun step pinned neither to the action-local dotfile nor to a clean path under the runner scratch root - anything else can resolve the CALLER repository's bun version files",
     });
   }
   return mismatches;
