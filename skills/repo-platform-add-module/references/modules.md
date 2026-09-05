@@ -6,7 +6,7 @@ The authoritative roster is the `modules` question in repo-platform's `copier.ym
 
 ## Base (every managed repo, no module needed)
 
-Managed: `ci.yml` and its standard jobs, `dependabot.yml` (github-actions ecosystem always), `.gitignore` managed sections, `SECURITY.md`, `.github/.copier-answers.yml`, `.repo-platform.yml` (shape). Starters: `checks.yml` (your CI jobs, called inside the all-green gate), `.gitleaks.toml`, `.github/actionlint.yaml`.
+Managed: `ci.yml` and its standard jobs, `dependabot.yml` (github-actions ecosystem always), `.gitignore` managed sections, `.github/SECURITY.md`, `.github/.copier-answers.yml`, `.repo-platform.yml` (shape). Starters: `checks.yml` (your CI jobs, called inside the all-green gate), `.gitleaks.toml`, `.github/actionlint.yaml`.
 
 ## Toolchains: bun / node / deno / uv / rust
 

@@ -24,7 +24,7 @@ const BASELINE: Record<string, string> = {
   ".editorconfig": `${HB}\nroot = true\n${HE}\n`,
   ".gitattributes": `${HB}\n* text=auto eol=lf\n${HE}\n`,
   ".github/CODEOWNERS": `${HB}\n* @vivswan\n${HE}\n`,
-  "SECURITY.md": `${B}\n# Security policy\n${E}\n`,
+  ".github/SECURITY.md": `${B}\n# Security policy\n${E}\n`,
   ".github/workflows/ci.yml": [
     "# This file is managed by Vivswan/repo-platform.",
     "name: CI",
@@ -80,10 +80,10 @@ const MIRROR_BASE: MirrorEntry[] = [
   { path: ".gitignore", kind: "region", begin: HB, end: HE },
   { path: ".typography-allow", kind: "header" },
   { path: ".yamllint", kind: "header" },
-  { path: "CODE_OF_CONDUCT.md", kind: "header", publicOnly: true },
+  { path: ".github/CODE_OF_CONDUCT.md", kind: "header", publicOnly: true },
   { path: "CONTRIBUTING.md", kind: "region", begin: B, end: E, publicOnly: true },
   { path: "LICENSE.md", kind: "region", begin: B, end: E, withoutModule: "custom-license" },
-  { path: "SECURITY.md", kind: "region", begin: B, end: E },
+  { path: ".github/SECURITY.md", kind: "region", begin: B, end: E },
 ];
 const MIRROR_MODULES: Record<string, MirrorEntry[]> = {
   agents: [
@@ -1100,11 +1100,11 @@ describe("ownership self-declarations", () => {
     expect(exitCode).toBe(0);
   });
 
-  test("CODE_OF_CONDUCT.md needs the header only on public renders", () => {
-    const coc = { "CODE_OF_CONDUCT.md": "# Contributor Covenant Code of Conduct\n" };
+  test(".github/CODE_OF_CONDUCT.md needs the header only on public renders", () => {
+    const coc = { ".github/CODE_OF_CONDUCT.md": "# Contributor Covenant Code of Conduct\n" };
     const publicRender = runValidator(coc);
     expect(publicRender.exitCode).toBe(1);
-    expect(publicRender.stderr).toContain("CODE_OF_CONDUCT.md: does not open");
+    expect(publicRender.stderr).toContain(".github/CODE_OF_CONDUCT.md: does not open");
     // A private render never gets the managed file, so a repo-authored one
     // is its own business.
     const privateRender = runValidator({
@@ -1222,7 +1222,7 @@ describe("ownership-manifest byte parity", () => {
     ".editorconfig": regionEntry(".editorconfig", HB, HE),
     ".gitattributes": regionEntry(".gitattributes", HB, HE),
     ".github/CODEOWNERS": regionEntry(".github/CODEOWNERS", HB, HE),
-    "SECURITY.md": regionEntry("SECURITY.md", B, E),
+    ".github/SECURITY.md": regionEntry(".github/SECURITY.md", B, E),
   });
 
   test("a missing manifest is an error", () => {
@@ -1251,22 +1251,22 @@ describe("ownership-manifest byte parity", () => {
     const region = `${B}\n# Security\n${E}\n`;
     const entries = {
       ...stampedBaseline(),
-      "SECURITY.md":
+      ".github/SECURITY.md":
         `{"class": "split", "grammar": "managed-region", "begin": ${JSON.stringify(B)}, ` +
         `"end": ${JSON.stringify(E)}, "hash": "${sha(region)}"}`,
     };
     const sidesEdited = runValidator({
       [MANIFEST]: manifestOf(entries),
-      "SECURITY.md": `repo-owned preamble, freely edited\n${region}repo-owned tail, freely edited\n`,
+      ".github/SECURITY.md": `repo-owned preamble, freely edited\n${region}repo-owned tail, freely edited\n`,
     });
     expect(sidesEdited.stderr).toBe("");
     expect(sidesEdited.exitCode).toBe(0);
     const regionEdited = runValidator({
       [MANIFEST]: manifestOf(entries),
-      "SECURITY.md": `${B}\n# Security, reworded\n${E}\ntail\n`,
+      ".github/SECURITY.md": `${B}\n# Security, reworded\n${E}\ntail\n`,
     });
     expect(regionEdited.exitCode).toBe(1);
-    expect(regionEdited.stderr).toContain("SECURITY.md: its managed region does");
+    expect(regionEdited.stderr).toContain(".github/SECURITY.md: its managed region does");
   });
 
   test("an unstamped managed entry is an error naming the stamp hook", () => {
@@ -1295,7 +1295,7 @@ describe("ownership-manifest byte parity", () => {
 
   test("an unlisted roster path whose file is absent too stays an advisory", () => {
     // The strict deletion error requires the missing entry's FILE to still
-    // exist: roster paths the baseline tree does not carry (SECURITY.md and
+    // exist: roster paths the baseline tree does not carry (.github/SECURITY.md and
     // friends) stay advisories - the version splits the fleet legitimately
     // produces (withheld workflow files; a main-floating client validator
     // ahead of the render) look exactly like this.
@@ -1483,10 +1483,10 @@ describe("ownership-manifest byte parity", () => {
       ".github/dependabot.yml": `${MANAGED_HEADER}version: 2\nupdates: []\n`,
       ".typography-allow": `${MANAGED_HEADER}`,
       ".yamllint": `${MANAGED_HEADER}extends: default\n`,
-      "CODE_OF_CONDUCT.md": `${MANAGED_HEADER}\n# Contributor Covenant Code of Conduct\n`,
+      ".github/CODE_OF_CONDUCT.md": `${MANAGED_HEADER}\n# Contributor Covenant Code of Conduct\n`,
       "CONTRIBUTING.md": `${B}\n# Contributing\n${E}\n`,
       "LICENSE.md": `${B}\n# License\n${E}\n`,
-      "SECURITY.md": `${B}\n# Security\n${E}\n`,
+      ".github/SECURITY.md": `${B}\n# Security\n${E}\n`,
       "AGENTS.md": `${B}\n# AGENTS.md\n${E}\n`,
       // Frontmatter must open the file for GitHub, so the managed header
       // rides an HTML comment inside the header window.
@@ -1517,7 +1517,7 @@ describe("ownership-manifest byte parity", () => {
 
   // One roster cross-check condition judges a region entry's present
   // metadata: begin, end, and grammar must each match the DECLARED pair
-  // (SECURITY.md's is the HTML form), or parity would cover a skewed
+  // (.github/SECURITY.md's is the HTML form), or parity would cover a skewed
   // region. Each row's hash matches the region ITS OWN pair slices, so
   // parity is not what reports the disagreement.
   test.each([
@@ -1545,8 +1545,8 @@ describe("ownership-manifest byte parity", () => {
     "split metadata disagreeing with the declared pair fails the cross-check: $reason",
     ({ entry, body }) => {
       const { exitCode, stderr } = runValidator({
-        [MANIFEST]: manifestOf({ ...stampedBaseline(), "SECURITY.md": entry }),
-        "SECURITY.md": body,
+        [MANIFEST]: manifestOf({ ...stampedBaseline(), ".github/SECURITY.md": entry }),
+        ".github/SECURITY.md": body,
       });
       expect(exitCode).toBe(1);
       expect(stderr).toContain(
@@ -1559,13 +1559,13 @@ describe("ownership-manifest byte parity", () => {
     const region = `${B}\n# Security\n${E}\n`;
     const entries = {
       ...stampedBaseline(),
-      "SECURITY.md":
+      ".github/SECURITY.md":
         `{"class": "split", "grammar": "managed-region", "begin": ${JSON.stringify(B)}, ` +
         `"end": ${JSON.stringify(E)}, "hash": "${sha(region)}"}`,
     };
     const { exitCode, stderr } = runValidator({
       [MANIFEST]: manifestOf(entries),
-      "SECURITY.md": `${region}repo tail\n`,
+      ".github/SECURITY.md": `${region}repo tail\n`,
     });
     expect(stderr).toBe("");
     expect(exitCode).toBe(0);
@@ -1658,13 +1658,13 @@ describe("ownership-manifest byte parity", () => {
     const region = `${B}\n# Security\n${E}\n`;
     const entries = {
       ...stampedBaseline(),
-      "SECURITY.md":
+      ".github/SECURITY.md":
         `{"class": "split", "begin": ${JSON.stringify(B)}, ` +
         `"end": ${JSON.stringify(E)}, "hash": "${sha(region)}"}`,
     };
     const { exitCode, stderr } = runValidator({
       [MANIFEST]: manifestOf(entries),
-      "SECURITY.md": `${region}tail\n`,
+      ".github/SECURITY.md": `${region}tail\n`,
     });
     expect(exitCode).toBe(1);
     expect(stderr).toContain("lacks the split grammar field every render stamps");
@@ -1689,7 +1689,7 @@ describe("ownership-manifest byte parity", () => {
     // the repo edits the file - which is now the file's PURPOSE (module
     // selection, the mirrors declaration), so the stale hash must not read
     // as drift. The next sync restamps the entry.
-    const edited = `${BASELINE[".repo-platform.yml"]}mirrors:\n  - source: SECURITY.md\n    targets: [copies/SECURITY.md]\n`;
+    const edited = `${BASELINE[".repo-platform.yml"]}mirrors:\n  - source: .github/SECURITY.md\n    targets: [copies/SECURITY.md]\n`;
     const entries = {
       ...stampedBaseline(),
       // A hash stamped from a PREVIOUS state of the file, as a stale

@@ -179,6 +179,26 @@ mv "$OLD_TREE/manifest.ans.tmp" \
 grep -qF '".copier-answers.yml"' \
   "$OLD_TREE/template/.github/repo-platform-manifest.json.jinja" \
   || fail "could not model the pre-move manifest entry for the root answers path"
+# Model the fleet state before the community health files left the root:
+# SECURITY.md and CODE_OF_CONDUCT.md rendered and manifest-classed there.
+mv "$OLD_TREE/template/.github/SECURITY.md.jinja" "$OLD_TREE/template/SECURITY.md.jinja"
+mv "$OLD_TREE/template/.github/CODE_OF_CONDUCT.md.jinja" \
+  "$OLD_TREE/template/CODE_OF_CONDUCT.md.jinja"
+sed 's|%}\.github/CODE_OF_CONDUCT\.md{%|%}/CODE_OF_CONDUCT.md{%|' "$OLD_TREE/copier.yml" \
+  > "$OLD_TREE/copier.coc.tmp"
+mv "$OLD_TREE/copier.coc.tmp" "$OLD_TREE/copier.yml"
+grep -qF '%}/CODE_OF_CONDUCT.md{%' "$OLD_TREE/copier.yml" \
+  || fail "could not point the old fixture's CODE_OF_CONDUCT.md exclude at the root path"
+sed -e 's|"\.github/SECURITY\.md"|"SECURITY.md"|' \
+  -e 's|"\.github/CODE_OF_CONDUCT\.md"|"CODE_OF_CONDUCT.md"|' \
+  "$OLD_TREE/template/.github/repo-platform-manifest.json.jinja" \
+  > "$OLD_TREE/manifest.community.tmp"
+mv "$OLD_TREE/manifest.community.tmp" \
+  "$OLD_TREE/template/.github/repo-platform-manifest.json.jinja"
+grep -qF '"SECURITY.md"' "$OLD_TREE/template/.github/repo-platform-manifest.json.jinja" \
+  || fail "could not model the pre-move manifest entry for the root SECURITY.md"
+grep -qF '"CODE_OF_CONDUCT.md"' "$OLD_TREE/template/.github/repo-platform-manifest.json.jinja" \
+  || fail "could not model the pre-move manifest entry for the root CODE_OF_CONDUCT.md"
 echo "retired sentinel" > "$OLD_TREE/template/.github/retired-sentinel.txt"
 # Model the fleet state before the Copilot gate moved into the ruleset: the
 # old template shipped a managed rerun-copilot-gate.yml (the re-arm half of
@@ -378,7 +398,14 @@ git -c user.name=ci -c user.email=ci@localhost commit -q -m "chore: init"
 # - src/keep_me.txt is repo-owned content the template never rendered
 # - .repo-platform.yml drops settings-sync (the module-deselection edit a
 #   repo merges before the sync)
+# - SECURITY.md carries a repository-owned tail below its END marker: the
+#   security-policy move must carry it byte-for-byte to .github/SECURITY.md
 echo "# local settings note" >> .github/settings.yml
+test -f SECURITY.md \
+  || fail "the synthetic old fixture must render SECURITY.md at the root (or the move assertions below are vacuous)"
+test ! -e .github/SECURITY.md \
+  || fail "the synthetic old fixture already carries .github/SECURITY.md"
+printf '\nScope note: upgrade-local security tail\n' >> SECURITY.md
 echo "# local checks note" >> .github/workflows/checks.yml
 echo "# local issue form note" >> .github/ISSUE_TEMPLATE/bug_report.yml
 echo "Repo-owned custom license" > LICENSE
@@ -458,19 +485,42 @@ grep -qF "ANSWERS FILE MOVE" "$WORK/answers-move.md" \
   || fail "the answers-file move did not write its PR-body note"
 [ -z "$(git -C "$PROJECT" status --porcelain)" ] \
   || fail "the answers-file move left the tree dirty (copier update refuses a dirty tree)"
+# THE SECURITY-POLICY MOVE (one-shot transition), replayed BEFORE the
+# update like the workflow: byte-for-byte, so the split-file rebuild finds
+# the previous copy (tail included) at the new path.
+cp "$PROJECT/SECURITY.md" "$WORK/security-before-move.md"
+RUNNER_TEMP="$WORK" bun .github/scripts/sync/relocate_security_policy.ts \
+  || fail "relocate_security_policy.ts failed on a root-vintage SECURITY.md"
+test ! -e "$PROJECT/SECURITY.md" \
+  || fail "the security-policy move left the root copy behind"
+cmp -s "$WORK/security-before-move.md" "$PROJECT/.github/SECURITY.md" \
+  || fail "the security-policy move did not carry SECURITY.md byte-for-byte"
+grep -qF "SECURITY POLICY MOVE" "$WORK/security-move.md" \
+  || fail "the security-policy move did not write its PR-body note"
+[ -z "$(git -C "$PROJECT" status --porcelain)" ] \
+  || fail "the security-policy move left the tree dirty (copier update refuses a dirty tree)"
 RECOVER="" bun .github/scripts/sync/apply_update.ts
-bun .github/scripts/sync/resolve_copier_conflicts.ts \
-  --summary "$WORK/dropped-local-hunks.md" --root "$PROJECT"
 
-# Retired-file cleanup runs the workflow's own script, pointed at the
-# project through TARGET_DIR, with RUNNER_TEMP set to $WORK where the
-# copier.yml snapshots already sit (resolve_refs.ts writes them there in
-# the workflow).
+# The workflow's post-update order: clean renders, split-file rebuild,
+# conflict resolution with the rebuilt paths skipped, then the cleanup and
+# preserve steps below. RUNNER_TEMP is $WORK, where the copier.yml
+# snapshots already sit.
 answers_old="$(git -C "$PROJECT" show HEAD:.github/.copier-answers.yml)"
 src_path="$(sed -n 's/^_src_path: //p' <<<"$answers_old")"
 test -n "$src_path" || fail ".github/.copier-answers.yml records no _src_path"
 old_commit="$(awk '$1 == "_commit:" { print $2 }' <<<"$answers_old")"
 [ "$old_commit" = "$prev" ] || fail "recorded _commit '${old_commit}' is not ${prev}"
+RUNNER_TEMP="$WORK" SRC_PATH="$src_path" \
+  OLD_SHA="$(git rev-parse "${prev}^{commit}")" \
+  bun .github/scripts/sync/clean_renders.ts
+bun .github/scripts/sync/preserve_local_content.ts \
+  --summary "$WORK/local-carryover.md" --root "$PROJECT" \
+  --needs-review "$WORK/carry-review.txt" \
+  --rebuilt-paths "$WORK/split-rebuilt-paths.txt" \
+  --render-dir "$WORK/render-new" --old-render-dir "$WORK/render-old"
+bun .github/scripts/sync/resolve_copier_conflicts.ts \
+  --summary "$WORK/dropped-local-hunks.md" --root "$PROJECT" \
+  --skip "$WORK/split-rebuilt-paths.txt"
 # Current copier already deletes the de-rendered sentinel during update, so
 # without help the rm loop below would run over an empty set and pass even
 # if it were broken. Resurrect the file the way an older copier (or a merge
@@ -579,7 +629,20 @@ grep -qF "# local issue form note" .github/ISSUE_TEMPLATE/bug_report.yml \
 # via the update when the old fixture predates them), and the single-call
 # ci.yml must land the in-run gate across the update.
 test -f CONTRIBUTING.md || fail "CONTRIBUTING.md is missing after the public update"
-test -f CODE_OF_CONDUCT.md || fail "CODE_OF_CONDUCT.md is missing after the public update"
+# THE COMMUNITY-FILE MOVE: both files land under .github/ and leave the
+# root; SECURITY.md's repository-owned tail rides along, and the rename
+# must not read as a split-file deletion (nothing left the repository).
+test -f .github/CODE_OF_CONDUCT.md \
+  || fail ".github/CODE_OF_CONDUCT.md is missing after the public update"
+test ! -e CODE_OF_CONDUCT.md \
+  || fail "the root CODE_OF_CONDUCT.md survived the move to .github/"
+test -f .github/SECURITY.md || fail ".github/SECURITY.md is missing after the update"
+test ! -e SECURITY.md || fail "the root SECURITY.md survived the move to .github/"
+grep -qF "upgrade-local security tail" .github/SECURITY.md \
+  || fail "the security policy's repository-owned tail did not ride the move into .github/SECURITY.md"
+if [ -s "$WORK/removed-splits.md" ] && grep -qF '`SECURITY.md`' "$WORK/removed-splits.md"; then
+  fail "the security-policy move still raised the removed-splits hold for SECURITY.md (the rename must be lossless, not held)"
+fi
 grep -qF -- "repo-platform/.github/workflows/fleet-ci.yml@build" .github/workflows/ci.yml \
   || fail "ci.yml does not call fleet-ci at the build ref after the update"
 # The GATE REWORK: the update must DELETE the retired verdict wrapper and
@@ -691,7 +754,7 @@ echo "# local ci note" >> .github/workflows/ci.yml
 # repo-owned `mirrors` declaration lives in it, and a recopy that
 # re-rendered the file would silently drop the key (the class the retired
 # restoreMirrorsKey restore path existed for - retired BECAUSE this holds).
-printf 'mirrors:\n  - source: SECURITY.md\n    targets:\n      - copies/SECURITY.md\n' \
+printf 'mirrors:\n  - source: .github/SECURITY.md\n    targets:\n      - copies/SECURITY.md\n' \
   >> .repo-platform.yml
 cp .repo-platform.yml "$WORK/registration-before-recopy.yml"
 # Sanctioned repository-owned content the local-content carry must bring
@@ -835,6 +898,7 @@ export TARGET_REF="$NEW_TAG"
 # (asserted byte-for-byte in the main leg; here it just must not break the
 # rest of the pipeline).
 RUNNER_TEMP="$VIS_WORK" bun .github/scripts/sync/relocate_answers.ts
+RUNNER_TEMP="$VIS_WORK" bun .github/scripts/sync/relocate_security_policy.ts
 RECOVER="" bun .github/scripts/sync/apply_update.ts
 bun .github/scripts/sync/resolve_copier_conflicts.ts \
   --summary "$VIS_WORK/dropped-local-hunks.md" --root "$VIS"
@@ -873,8 +937,9 @@ bun "$GITHUB_WORKSPACE/actions/validate-template/validate_generated_files.ts" "$
 
 cd "$VIS"
 # SECURITY.md is visibility-independent since the ungating: it must
-# survive the flip.
-test -f SECURITY.md || fail "SECURITY.md did not survive the flip to private"
+# survive the flip, at its new home.
+test -f .github/SECURITY.md || fail ".github/SECURITY.md did not survive the flip to private"
+test ! -e SECURITY.md || fail "the root SECURITY.md survived the flip (the move must have relocated it)"
 # No verdict wrapper on any visibility, and the release leg is
 # release-please-gated; this fixture selects no release-please, so no
 # leg may render next to the gate.
@@ -889,7 +954,8 @@ fi
 # this is the migration path a relicensing (and the LICENSE -> LICENSE.md
 # rename) takes through a real sync, deleting the old spelling.
 test ! -e CONTRIBUTING.md || fail "CONTRIBUTING.md survived the flip to private"
-test ! -e CODE_OF_CONDUCT.md || fail "CODE_OF_CONDUCT.md survived the flip to private"
+test ! -e CODE_OF_CONDUCT.md || fail "the root CODE_OF_CONDUCT.md survived the flip to private"
+test ! -e .github/CODE_OF_CONDUCT.md || fail ".github/CODE_OF_CONDUCT.md rendered on the flip to private"
 # The manifest's visibility-gated entries must retire with the flip (its
 # entries render under the same `not private` gates as the files).
 [ "$(mf "CONTRIBUTING.md" class)" = "absent" ] \
@@ -1014,7 +1080,7 @@ insert_above_sentinel() { # <file> <line>
 agents_tpl="$(find "$NEXT_SPLIT/template" -maxdepth 1 -name "*AGENTS.md*.jinja" | head -n 1)"
 test -n "$agents_tpl" || fail "no AGENTS.md template in the assembled build tree"
 insert_above_sentinel "$agents_tpl" "Split-rebuild fixture managed line (agents)."
-insert_above_sentinel "$NEXT_SPLIT/template/SECURITY.md.jinja" \
+insert_above_sentinel "$NEXT_SPLIT/template/.github/SECURITY.md.jinja" \
   "Split-rebuild fixture managed line (security)."
 # The mirror leg's template change: the fleet LICENSE's managed region
 # moves, so the materialized mirrors below must carry the NEW bytes (the
@@ -1053,9 +1119,9 @@ mv .gitignore.tmp .gitignore
 # The expected post-update above-side: the rebuild must carry everything
 # above the managed BEGIN byte-for-byte.
 awk '/^# BEGIN REPO-PLATFORM MANAGED$/ { exit } { print }' .gitignore > "$SPLIT_WORK/local-expected.txt"
-awk 'NR == 2 { print "split-local hand edit inside the managed region" } { print }' SECURITY.md > SECURITY.md.tmp
-mv SECURITY.md.tmp SECURITY.md
-grep -qF "split-local hand edit" SECURITY.md || fail "could not plant the managed-region edit"
+awk 'NR == 2 { print "split-local hand edit inside the managed region" } { print }' .github/SECURITY.md > .github/SECURITY.md.tmp
+mv .github/SECURITY.md.tmp .github/SECURITY.md
+grep -qF "split-local hand edit" .github/SECURITY.md || fail "could not plant the managed-region edit"
 # The mirror fixture, shaped like the skills repo: a repo-owned tail below
 # LICENSE.md's END marker (the mirrors must copy the WHOLE delivered file,
 # repo-owned side included), a stale copy in template/ and in one skill
@@ -1123,12 +1189,12 @@ grep -qF "Split-rebuild fixture managed line (agents)." AGENTS.md \
   || fail "AGENTS.md did not receive the template's managed-region change"
 # SECURITY.md: the hand edit inside the managed region is RESET - the file
 # is byte-equal to render-new, and the reset is flagged for review.
-cmp -s "$SPLIT_WORK/render-new/SECURITY.md" SECURITY.md \
-  || fail "SECURITY.md is not byte-equal to render-new after the managed-region reset"
-if grep -qF "split-local hand edit" SECURITY.md; then
+cmp -s "$SPLIT_WORK/render-new/.github/SECURITY.md" .github/SECURITY.md \
+  || fail ".github/SECURITY.md is not byte-equal to render-new after the managed-region reset"
+if grep -qF "split-local hand edit" .github/SECURITY.md; then
   fail "the hand edit inside SECURITY.md's managed region survived the rebuild"
 fi
-grep -q '^SECURITY\.md: managed-region edits reset' "$SPLIT_WORK/carry-review.txt" \
+grep -q '^\.github/SECURITY\.md: managed-region edits reset' "$SPLIT_WORK/carry-review.txt" \
   || fail "the managed-region reset was not flagged in the carry-review file"
 grep -qF 'RESET to the fresh render' "$SPLIT_WORK/local-carryover.md" \
   || fail "the carry summary does not state the managed-region reset loudly"
@@ -1156,7 +1222,7 @@ grep -qxF "split-rebuild-fixture.tmp" .gitignore \
 # here (not reused from an earlier leg) so this block stays self-contained.
 split_marker="$(printf '<%.0s' 1 2 3 4 5 6 7) before updating"
 if [ -s "$SPLIT_WORK/dropped-local-hunks.md" ]; then
-  for f in AGENTS.md SECURITY.md .gitignore; do
+  for f in AGENTS.md .github/SECURITY.md .gitignore; do
     if grep -qF "\`$f\`" "$SPLIT_WORK/dropped-local-hunks.md"; then
       fail "split file $f appeared in the dropped-hunks summary"
     fi
@@ -1208,7 +1274,7 @@ mirrors:
   - source: LICENSE.md
     targets:
       - ../mirror-escape.md
-      - SECURITY.md
+      - .github/SECURITY.md
 EOF
 } > .repo-platform.yml.tmp
 mv .repo-platform.yml.tmp .repo-platform.yml
@@ -1217,7 +1283,7 @@ git -c user.name=ci -c user.email=ci@localhost commit -q -m "chore: hostile mirr
 RUNNER_TEMP="$HOSTILE_WORK" \
   bun "$GITHUB_WORKSPACE/.github/scripts/sync/materialize_mirrors.ts" --root "$SPLIT"
 test ! -e "$RUN_DIR/mirror-escape.md" || fail "a traversal mirror target escaped the repository"
-cmp -s "$SPLIT_WORK/render-new/SECURITY.md" SECURITY.md \
+cmp -s "$SPLIT_WORK/render-new/.github/SECURITY.md" .github/SECURITY.md \
   || fail "a template-owned mirror target was overwritten"
 [ -s "$HOSTILE_WORK/mirrors-review.md" ] || fail "hostile mirror declarations were not refused"
 grep -qF 'SECURITY.md' "$HOSTILE_WORK/mirrors-review.md" \
@@ -2018,6 +2084,7 @@ export TARGET_REF="$NEW_TAG"
 # The fixture rendered at the pre-move ref: replay the answers-file move
 # (the retro-recorded pages answers must ride the move verbatim).
 RUNNER_TEMP="$PAGES_WORK" bun .github/scripts/sync/relocate_answers.ts
+RUNNER_TEMP="$PAGES_WORK" bun .github/scripts/sync/relocate_security_policy.ts
 RECOVER="" bun .github/scripts/sync/apply_update.ts
 bun .github/scripts/sync/resolve_copier_conflicts.ts \
   --summary "$PAGES_WORK/dropped-local-hunks.md" --root "$PAGES_FIX"

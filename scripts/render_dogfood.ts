@@ -37,8 +37,8 @@ export const ANSWERS_FILE = ".repo-platform-answers.yml";
 export const PAIRS: { repo: string; tpl: string }[] = [
   { repo: ".editorconfig", tpl: "templates/base/.editorconfig.jinja" },
   {
-    repo: "CODE_OF_CONDUCT.md",
-    tpl: "templates/base/{% if not private %}CODE_OF_CONDUCT.md{% endif %}.jinja",
+    repo: ".github/CODE_OF_CONDUCT.md",
+    tpl: "templates/base/.github/{% if not private %}CODE_OF_CONDUCT.md{% endif %}.jinja",
   },
   { repo: ".github/CODEOWNERS", tpl: "templates/base/.github/CODEOWNERS.jinja" },
   {

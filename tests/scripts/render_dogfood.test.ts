@@ -180,7 +180,7 @@ describe("filename gates", () => {
   });
 
   test("a filename if-gate is represented and follows its condition", () => {
-    const tpl = "templates/base/{% if not private %}CODE_OF_CONDUCT.md{% endif %}.jinja";
+    const tpl = "templates/base/.github/{% if not private %}CODE_OF_CONDUCT.md{% endif %}.jinja";
     expect(gateOfPair(tpl)).toEqual({ kind: "when", condition: "not private" });
     expect(pairIsRendered(tpl, { private: false })).toBe(true);
     expect(pairIsRendered(tpl, { private: true })).toBe(false);

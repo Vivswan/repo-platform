@@ -33,6 +33,7 @@ import {
   REFERENCED_LABELS_NAME,
   REGISTRATION_FLIP_NAME,
   REMOVED_SPLITS_NAME,
+  SECURITY_MOVE_NAME,
   SETTINGS_LAYERING_NAME,
   STARTER_PINS_NAME,
   TAIL_SHRANK_NAME,
@@ -243,6 +244,12 @@ const sections: FlagSection[] = [
   // and copier's own render follows the same path - so it never forces
   // the manual path.
   { path: join(runnerTemp, ANSWERS_MOVE_NAME), render: slurp, forcesReview: false },
+  // relocate_security_policy.ts's transition note: the one-time
+  // byte-for-byte move of SECURITY.md to .github/SECURITY.md ahead of
+  // copier, so the local-content carry finds the repository-owned half at
+  // the new path. Informational - nothing leaves the repository - so it
+  // never forces the manual path.
+  { path: join(runnerTemp, SECURITY_MOVE_NAME), render: slurp, forcesReview: false },
   // registration_flip.ts's transition note: the one-run .repo-platform.yml
   // ownership flip (managed -> repo-owned starter). Informational - nothing
   // the repo declared changes and enforcement only relaxes, so it never

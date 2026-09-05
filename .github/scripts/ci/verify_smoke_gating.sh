@@ -352,13 +352,15 @@ fi
 if has custom-license; then test ! -e "$SMOKE/LICENSE.md"; else test -f "$SMOKE/LICENSE.md"; fi
 # SECURITY.md is visibility-independent (private collaborators need the
 # reporting route too); the contributor-facing files stay public-only.
-test -f "$SMOKE/SECURITY.md"
+test -f "$SMOKE/.github/SECURITY.md"
+test ! -e "$SMOKE/SECURITY.md"
+test ! -e "$SMOKE/CODE_OF_CONDUCT.md"
 if [ "$PRIVATE" = "true" ]; then
   test ! -e "$SMOKE/CONTRIBUTING.md"
-  test ! -e "$SMOKE/CODE_OF_CONDUCT.md"
+  test ! -e "$SMOKE/.github/CODE_OF_CONDUCT.md"
 else
   test -f "$SMOKE/CONTRIBUTING.md"
-  test -f "$SMOKE/CODE_OF_CONDUCT.md"
+  test -f "$SMOKE/.github/CODE_OF_CONDUCT.md"
 fi
 
 # gitignore toolchain sections; the four markers are asserted by the validator.
@@ -702,7 +704,7 @@ if [ "$(mf ".repo-platform.yml" hash)" != "missing" ]; then
   echo "::error::manifest check failed: the .repo-platform.yml starter entry in $manifest carries a hash key for modules=$MODULES private=$PRIVATE - starters make no byte-parity promise. Fix the manifest emission in scripts/compose_template.ts or stamp_manifest.ts (or this expectation in verify_smoke_gating.sh)."
   exit 1
 fi
-expect_class "SECURITY.md" split
+expect_class ".github/SECURITY.md" split
 expect_class ".gitignore" split
 expect_class ".github/repo-platform-manifest.json" managed
 if has agents; then expect_class "AGENTS.md" split; else expect_class "AGENTS.md" absent; fi
@@ -716,7 +718,7 @@ fi
 if has settings-sync; then expect_class ".github/settings.yml" starter; else expect_class ".github/settings.yml" absent; fi
 if has custom-license; then expect_class "LICENSE.md" absent; else expect_class "LICENSE.md" split; fi
 # Stamping: the managed ci.yml hash must equal the file's sha256 (computed
-# here with hashlib, not the code under test), the split SECURITY.md hash
+# here with hashlib, not the code under test), the split .github/SECURITY.md hash
 # must cover exactly the managed region (the BEGIN marker line through the
 # END marker line, its newline included), and the manifest's own entry
 # stays null (a self-hash would be circular).
@@ -748,9 +750,9 @@ while True:
 bi = next(i for i, (s, e) in enumerate(bounds) if data[s:e].strip(ws) == begin)
 ei = next(i for i, (s, e) in enumerate(bounds) if i > bi and data[s:e].strip(ws) == end)
 print(hashlib.sha256(data[bounds[bi][0] : bounds[ei][1]]).hexdigest())' \
-  "$SMOKE/SECURITY.md" "$(mf SECURITY.md begin)" "$(mf SECURITY.md end)")"
-if [ "$(mf SECURITY.md hash)" != "$want_security" ]; then
-  echo "::error::manifest check failed: the recorded hash for SECURITY.md in $manifest does not cover its managed region (BEGIN line through END line) for modules=$MODULES private=$PRIVATE. Fix stamp_manifest.ts (or this expectation in verify_smoke_gating.sh)."
+  "$SMOKE/.github/SECURITY.md" "$(mf .github/SECURITY.md begin)" "$(mf .github/SECURITY.md end)")"
+if [ "$(mf .github/SECURITY.md hash)" != "$want_security" ]; then
+  echo "::error::manifest check failed: the recorded hash for .github/SECURITY.md in $manifest does not cover its managed region (BEGIN line through END line) for modules=$MODULES private=$PRIVATE. Fix stamp_manifest.ts (or this expectation in verify_smoke_gating.sh)."
   exit 1
 fi
 if [ "$(mf ".github/repo-platform-manifest.json" hash)" != "null" ]; then

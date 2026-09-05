@@ -777,7 +777,7 @@ describe("split templates carry one ordered marker pair", () => {
     const templatesDir = join(repoRoot, "templates");
     const templated: [string, string, string][] = [
       [join(templatesDir, "base", "{% if not private %}CONTRIBUTING.md{% endif %}.jinja"), B, E],
-      [join(templatesDir, "base", "SECURITY.md.jinja"), B, E],
+      [join(templatesDir, "base", ".github", "SECURITY.md.jinja"), B, E],
       [
         join(
           templatesDir,
@@ -1518,7 +1518,7 @@ describe.skipIf(!hasCopier)("preserve_local_content end-to-end (copier recopy)",
       const tails: Record<string, string> = {
         "AGENTS.md": "\n## Project docs\n\nrepo-local agent guidance\n",
         "CONTRIBUTING.md": "\n## Local dev setup\n\nbun install && bun test\n",
-        "SECURITY.md": "\n## Scope\n\nrepo-local threat model\n",
+        ".github/SECURITY.md": "\n## Scope\n\nrepo-local threat model\n",
         "LICENSE.md": "\nThird-party components: repo-local notice\n",
         ".gitattributes": "*.repo-local binary\n",
         ".editorconfig": "\n[legacy/**.js]\nindent_size = 3\n",
