@@ -18,7 +18,7 @@
 //   for client-side execution; only the constants' authorship is
 //   generated).
 // - README.md, docs/new-repo.md, docs/settings.md, docs/pages.md,
-//   docs/toolchains.md: the prose that enumerates manifest data (module
+//   docs/toolchains.md, the module rosters in skills/: the prose that enumerates manifest data (module
 //   roster, dependabot labels, pages toolchain defaults, toolchain pins).
 // - templates/module.schema.json: a WHOLE generated file (no markers), the
 //   JSON Schema the manifests' yaml-language-server directive points at,
@@ -730,6 +730,20 @@ export function newRepoModuleRoster(manifests: ModuleManifest[]): string {
   );
 }
 
+/** skills/repo-platform-add-module/SKILL.md "The module roster": one
+ *  table row per module, the manifest description verbatim (the BEGIN
+ *  marker ends the table's separator row). */
+export function skillModuleRosterRows(manifests: ModuleManifest[]): string[] {
+  return manifests.map((m) => `| \`${m.module}\` | ${m.description} |`);
+}
+
+/** skills/repo-platform-new-project/references/questions.md "Module
+ *  roster": the blank line after the marker's sentence, then one bullet
+ *  per module with the manifest description verbatim. */
+export function skillModuleRosterBullets(manifests: ModuleManifest[]): string[] {
+  return ["", ...manifests.map((m) => `- \`${m.module}\`: ${m.description}`)];
+}
+
 export interface DependabotLabelGroup {
   label: string;
   color: string;
@@ -960,6 +974,16 @@ function targets(manifests: ModuleManifest[]): Target[] {
       file: "docs/toolchains.md",
       syntax: "markdown",
       regions: [["toolchain-pins", ({ manifests }) => toolchainPinRows(manifests)]],
+    },
+    {
+      file: "skills/repo-platform-add-module/SKILL.md",
+      syntax: "markdown",
+      regions: [["module-roster", ({ manifests }) => skillModuleRosterRows(manifests)]],
+    },
+    {
+      file: "skills/repo-platform-new-project/references/questions.md",
+      syntax: "markdown",
+      regions: [["module-roster", ({ manifests }) => skillModuleRosterBullets(manifests)]],
     },
   ];
 }

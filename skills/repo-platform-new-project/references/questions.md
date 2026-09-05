@@ -16,9 +16,9 @@ The authoritative source is repo-platform's `copier.yml` (the interactive prompt
 
 ## Module roster
 
-One line each, from the choices descriptions:
+One line each, generated from the module manifests:<!-- BEGIN GENERATED: module-roster (scripts/generate.ts - edit module.yml manifests, not this block) -->
 
-- `agents`: AGENTS.md agent instructions, agent-file symlinks, Copilot setup
+- `agents`: AGENTS.md agent instructions, agent-file symlinks, Copilot setup and review style
 - `bun`: TypeScript/bun toolchain (gitignore, dependabot, CodeQL JS)
 - `node`: JavaScript/Node.js toolchain (gitignore, npm dependabot, CodeQL JS)
 - `deno`: Deno toolchain (deno fmt/lint, deno dependabot, CodeQL JS)
@@ -26,7 +26,7 @@ One line each, from the choices descriptions:
 - `rust`: Rust/cargo toolchain (cargo dependabot, Rust gitignore; no CodeQL)
 - `pages`: GitHub Pages deploy of the repo's own build (root = newest served version tag, /latest/ = main)
 - `docs-site`: VitePress docs site from docs/ under the central fleet theme (repos carry only markdown)
-- `release-please`: release job on top of all-green + autorelease labels
+- `release-please`: gate-downstream release job in ci.yml + autorelease labels
 - `issue-templates`: bug/feature issue forms
 - `skills`: agent skills hosting (plugin manifests, skill validation)
 - `pr-title`: Conventional Commit PR title check, its own required workflow
@@ -34,7 +34,7 @@ One line each, from the choices descriptions:
 - `fuzzer`: nightly fuzz starter with issue filing, replay inputs, auto-close
 - `nightly`: nightly CI starter with failure issue filing and auto-close
 - `settings-sync`: centrally managed repo settings + repo-owned settings.yml starter
-- `custom-license`: repo carries its own license in LICENSE.md; the fleet license is not rendered
+- `custom-license`: repo carries its own license in LICENSE.md; the fleet license is not rendered<!-- END GENERATED: module-roster -->
 
 `settings-sync` is deliberately not a default: selecting it is the opt-in to centrally managed settings (the assembled baseline plus the repo's own settings.yml - docs/settings.md).
 

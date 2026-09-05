@@ -32,6 +32,8 @@ import {
   pinFileContent,
   readmeModuleRoster,
   reservedLabelNames,
+  skillModuleRosterBullets,
+  skillModuleRosterRows,
   spliceInlineRegion,
   spliceRegion,
   strayActionPinFiles,
@@ -418,6 +420,19 @@ describe("docs region builders", () => {
     expect([...(region as RegExpMatchArray)[1].matchAll(/`([a-z-]+)`/g)].map((m) => m[1])).toEqual([
       "bun",
       "rust",
+    ]);
+  });
+
+  test("the skills rosters carry every manifest description verbatim, one row or bullet per module", () => {
+    expect(skillModuleRosterRows([BUN, UV, RUST])).toEqual([
+      "| `bun` | TypeScript/bun toolchain |",
+      "| `uv` | Python/uv toolchain |",
+      "| `rust` | Rust/cargo toolchain |",
+    ]);
+    expect(skillModuleRosterBullets([BUN, RUST])).toEqual([
+      "",
+      "- `bun`: TypeScript/bun toolchain",
+      "- `rust`: Rust/cargo toolchain",
     ]);
   });
 

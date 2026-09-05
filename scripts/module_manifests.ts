@@ -111,20 +111,24 @@ const mdCellSafe = <T extends z.ZodType<string>>(schema: T, what: string) =>
 
 // The copier choice text: generate.ts renders it as the YAML mapping line
 // `<module> - <description>: <module>`, where ": " would end the key early
-// and "#" would start a comment.
-const description = z
-  .string()
-  .min(1)
-  .refine((value) => value === value.trim(), {
-    message: "must not have leading or trailing whitespace",
-  })
-  .refine((value) => !/[\r\n]/.test(value), { message: "must be a single line" })
-  .refine((value) => !value.includes("#"), {
-    message: 'must not contain "#" (it would start a YAML comment in the copier choice line)',
-  })
-  .refine((value) => !value.includes(": "), {
-    message: 'must not contain ": " (it would end the copier choice key early)',
-  });
+// and "#" would start a comment. It also lands in the generated skill
+// roster table, hence mdCellSafe.
+const description = mdCellSafe(
+  z
+    .string()
+    .min(1)
+    .refine((value) => value === value.trim(), {
+      message: "must not have leading or trailing whitespace",
+    })
+    .refine((value) => !/[\r\n]/.test(value), { message: "must be a single line" })
+    .refine((value) => !value.includes("#"), {
+      message: 'must not contain "#" (it would start a YAML comment in the copier choice line)',
+    })
+    .refine((value) => !value.includes(": "), {
+      message: 'must not contain ": " (it would end the copier choice key early)',
+    }),
+  "the description",
+);
 
 /** Exported for scripts/generate.ts, which derives the editor-facing
  *  templates/module.schema.json from it. */

@@ -19,9 +19,9 @@ Managed: `ci.yml` and its standard jobs, `dependabot.yml` (github-actions ecosys
 
 ## agents
 
-- Managed: the AGENTS.md managed region (repo-specific content goes below the `<!-- END REPO-PLATFORM MANAGED -->` marker) and the agent-file symlinks (`CLAUDE.md`, `.github/copilot-instructions.md`, `.github/agents.md`), all pointing at AGENTS.md.
+- Managed: the AGENTS.md managed region (repo-specific content goes below the `<!-- END REPO-PLATFORM MANAGED -->` marker), the agent-file symlinks (`CLAUDE.md`, `.github/copilot-instructions.md`, `.github/agents.md`), all pointing at AGENTS.md, and `.github/instructions/review.instructions.md` (how Copilot code review words its comments: problem first, then an example, then the fix).
 - Starter: `copilot-setup-steps.yml` (Copilot coding agent environment setup), prefilled with installs for the toolchains selected at generation time; adding a toolchain later does not update an existing copy.
-- Removal: the managed half and symlinks leave the render and are deleted; the starter stays.
+- Removal: AGENTS.md is deleted whole (its repo-owned section included - move that content out first), and the symlinks and the review instructions go with it; the sync PR lists every removal for review. The starter stays.
 
 ## pages
 

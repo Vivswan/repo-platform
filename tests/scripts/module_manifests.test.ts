@@ -79,6 +79,26 @@ describe("parseManifest", () => {
     });
   });
 
+  test.each([
+    ["Python: uv toolchain", 'must not contain ": " (it would end the copier choice key early)'],
+    [
+      "Python #1 toolchain",
+      'must not contain "#" (it would start a YAML comment in the copier choice line)',
+    ],
+    [
+      "Python | uv toolchain",
+      'the description must not contain "|" or a backtick (it lands inside a markdown table cell in the generated docs)',
+    ],
+    [
+      "the `uv` toolchain",
+      'the description must not contain "|" or a backtick (it lands inside a markdown table cell in the generated docs)',
+    ],
+  ])("a description that would break a generated line is rejected: %s", (description, rule) => {
+    // Quoted: unquoted, ": " is a YAML nested mapping and "#" a YAML
+    // comment, so the schema rule would never see them.
+    expect(rejection(`description: "${description}"\n`)).toBe(`${WHERE}: description: ${rule}`);
+  });
+
   test("an unknown key fails loudly, naming the file and the key", () => {
     expect(rejection("description: x\ntoolchian: {}\n")).toBe(
       `${WHERE}: (top level): Unrecognized key: "toolchian"`,
