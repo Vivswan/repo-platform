@@ -57,6 +57,7 @@ import {
   ruleRosterMismatches,
   SETUP_VERSION_FILES,
   STAMP_COMMIT_ARG,
+  STAMP_ROOT_ARG,
   semanticLines,
   setMismatch,
   settingsHealShaPlumbingMismatches,
@@ -3307,13 +3308,24 @@ describe("hookCommandParts", () => {
   const stamp = 'bun "{{ _copier_conf.src_path }}/actions/shared/stamp_manifest.ts"';
   test.each([
     {
-      command: `${stamp} ${STAMP_COMMIT_ARG}`,
-      expected: { path: "actions/shared/stamp_manifest.ts", commitArg: true },
+      command: `${stamp} ${STAMP_ROOT_ARG} ${STAMP_COMMIT_ARG}`,
+      expected: { path: "actions/shared/stamp_manifest.ts", rootArg: true, commitArg: true },
     },
-    { command: stamp, expected: { path: "actions/shared/stamp_manifest.ts", commitArg: false } },
+    {
+      command: `${stamp} ${STAMP_COMMIT_ARG}`,
+      expected: { path: "actions/shared/stamp_manifest.ts", rootArg: false, commitArg: true },
+    },
+    {
+      command: `${stamp} ${STAMP_ROOT_ARG}`,
+      expected: { path: "actions/shared/stamp_manifest.ts", rootArg: true, commitArg: false },
+    },
+    {
+      command: stamp,
+      expected: { path: "actions/shared/stamp_manifest.ts", rootArg: false, commitArg: false },
+    },
     {
       command: 'bun "{{ _copier_conf.src_path }}/actions/other/task.ts"',
-      expected: { path: "actions/other/task.ts", commitArg: false },
+      expected: { path: "actions/other/task.ts", rootArg: false, commitArg: false },
     },
   ])("$command", ({ command, expected }) => {
     expect(hookCommandParts(command)).toEqual(expected);
@@ -3324,6 +3336,8 @@ describe("hookCommandParts", () => {
       "bun actions/shared/stamp_manifest.ts",
       `${stamp} --commit "{{ _commit }}"`,
       `${stamp} --commit`,
+      `${stamp} ${STAMP_COMMIT_ARG} ${STAMP_ROOT_ARG}`,
+      `${stamp} --root "{{ _copier_conf.dst_path }}"`,
       `python "{{ _copier_conf.src_path }}/x.py"`,
     ]) {
       expect(() => hookCommandParts(command)).toThrow(

@@ -378,8 +378,12 @@ RECOVER="" bun .github/scripts/sync/apply_update.ts
 answers_old="$(git -C "$PROJECT" show HEAD:.github/.copier-answers.yml)"
 src_path="$(sed -n 's/^_src_path: //p' <<<"$answers_old")"
 test -n "$src_path" || fail ".github/.copier-answers.yml records no _src_path"
-old_commit="$(awk '$1 == "_commit:" { print $2 }' <<<"$answers_old")"
-[ "$old_commit" = "$prev" ] || fail "recorded _commit '${old_commit}' is not ${prev}"
+# The stamp hook quotes an all-digit sha (PyYAML would read it as an
+# integer), so strip optional quotes before comparing.
+old_commit="$(sed -n 's/^_commit:[[:space:]]*//p' <<<"$answers_old" \
+  | sed -e "s/^'\(.*\)'\$/\1/" -e 's/^"\(.*\)"$/\1/')"
+[ "$old_commit" = "$(git -C "$GITHUB_WORKSPACE" rev-parse --verify "${prev}^{commit}" || echo unresolvable)" ] \
+  || fail "recorded _commit '${old_commit}' is not the commit ${prev} names"
 RUNNER_TEMP="$WORK" SRC_PATH="$src_path" \
   OLD_SHA="$(git rev-parse "${prev}^{commit}")" \
   bun .github/scripts/sync/clean_renders.ts
@@ -429,15 +433,18 @@ RECOVER="" RUNNER_TEMP="$WORK" bun .github/scripts/sync/preserve_repo_owned.ts
 # The workflow's final stamping step: conflict resolution and the preserve
 # steps can rewrite files after copier's own post-render hook stamped the
 # ownership manifest, so the sync stamps once more when the tree is final.
-TARGET_DIR="$PROJECT" bun actions/shared/stamp_manifest.ts
+bun actions/shared/stamp_manifest.ts --root "$PROJECT"
 
 bun install --frozen-lockfile --cwd "$GITHUB_WORKSPACE/actions/validate-template"
 bun "$GITHUB_WORKSPACE/actions/validate-template/validate_generated_files.ts" "$PROJECT"
 
 cd "$PROJECT"
-# _commit must record the build tag (git describe lands exactly on it).
-grep -qF "_commit: $NEW_TAG" .github/.copier-answers.yml \
-  || fail ".github/.copier-answers.yml does not record $NEW_TAG"
+# _commit must record the build commit's full sha (the stamp hook rewrites
+# copier's describe output from vcs_ref_hash).
+[ "$(sed -n 's/^_commit:[[:space:]]*//p' .github/.copier-answers.yml \
+  | sed -e "s/^'\(.*\)'\$/\1/" -e 's/^"\(.*\)"$/\1/')" \
+  = "$(git -C "$GITHUB_WORKSPACE" rev-parse --verify "$NEW_TAG^{commit}" || echo unresolvable)" ] \
+  || fail ".github/.copier-answers.yml does not record the commit $NEW_TAG names"
 # Files the template retired must be gone: settings-sync.yml left the
 # render with the module deselection, the synthetic sentinel left the
 # template between builds despite its local edit, and the managed
@@ -568,7 +575,7 @@ print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$1"
   || fail "the manifest's own hash entry must stay null (self-hash is circular)"
 # Provenance rides the self entry: the stamper writes the render's recorded
 # _commit, which is what lets the validator tell skew from deletion.
-[ "$(mf ".github/repo-platform-manifest.json" commit)" = "$NEW_TAG" ] \
+[ "$(mf ".github/repo-platform-manifest.json" commit)" = "$(git -C "$GITHUB_WORKSPACE" rev-parse --verify "$NEW_TAG^{commit}" || echo unresolvable)" ] \
   || fail "the manifest's provenance commit was not stamped with the updated render's _commit"
 echo "upgrade path OK: retired files deleted, sentinels preserved, configuration kept"
 
@@ -621,10 +628,12 @@ RECOVER=recopy bun "$GITHUB_WORKSPACE/.github/scripts/sync/apply_update.ts"
 bun "$GITHUB_WORKSPACE/.github/scripts/sync/preserve_local_content.ts" \
   --summary "$WORK/local-carryover.md" --root .
 RECOVER=recopy RUNNER_TEMP="$WORK" bun "$GITHUB_WORKSPACE/.github/scripts/sync/preserve_repo_owned.ts"
-TARGET_DIR="$PROJECT" bun "$GITHUB_WORKSPACE/actions/shared/stamp_manifest.ts"
+bun "$GITHUB_WORKSPACE/actions/shared/stamp_manifest.ts" --root "$PROJECT"
 
-grep -qF "_commit: $NEW_TAG" .github/.copier-answers.yml \
-  || fail "recovery did not re-record _commit as $NEW_TAG"
+[ "$(sed -n 's/^_commit:[[:space:]]*//p' .github/.copier-answers.yml \
+  | sed -e "s/^'\(.*\)'\$/\1/" -e 's/^"\(.*\)"$/\1/')" \
+  = "$(git -C "$GITHUB_WORKSPACE" rev-parse --verify "$NEW_TAG^{commit}" || echo unresolvable)" ] \
+  || fail "recovery did not re-record _commit as the commit $NEW_TAG names"
 grep -qF "# local checks note" .github/workflows/checks.yml \
   || fail "recovery overwrote the generated-once checks.yml (_skip_if_exists must hold under recopy --overwrite)"
 grep -qF "# local issue form note" .github/ISSUE_TEMPLATE/bug_report.yml \
@@ -749,7 +758,7 @@ grep -qF '"CONTRIBUTING.md"' "$VIS_WORK/retired-paths.json" \
 grep -qxF "CONTRIBUTING.md" "$VIS_WORK/removed-paths.txt" \
   || fail "retired_cleanup's rm loop did not delete the resurrected CONTRIBUTING.md"
 RECOVER="" RUNNER_TEMP="$VIS_WORK" bun .github/scripts/sync/preserve_repo_owned.ts
-TARGET_DIR="$VIS" bun actions/shared/stamp_manifest.ts
+bun actions/shared/stamp_manifest.ts --root "$VIS"
 # Deleting a split-classed file takes its repository-owned half with it,
 # so the removals must raise the removed-splits hold that keeps the PR
 # manual: the old extensionless LICENSE (no manifest entry classes it -
@@ -1002,7 +1011,7 @@ RECOVER="" RUNNER_TEMP="$SPLIT_WORK" bun .github/scripts/sync/preserve_repo_owne
 # The workflow's mirror step: materialize the repo's own declared mirror
 # copies from the freshly delivered tree, before the final stamp.
 RUNNER_TEMP="$SPLIT_WORK" bun .github/scripts/sync/materialize_mirrors.ts --root "$SPLIT"
-TARGET_DIR="$SPLIT" bun actions/shared/stamp_manifest.ts
+bun actions/shared/stamp_manifest.ts --root "$SPLIT"
 bun "$GITHUB_WORKSPACE/actions/validate-template/validate_generated_files.ts" "$SPLIT"
 
 cd "$SPLIT"
@@ -1165,7 +1174,7 @@ RUNNER_TEMP="$UNSEL_WORK" SRC_PATH="$src_path_unsel" \
   OLD_SHA="$(git rev-parse "$NEW_TAG^{commit}")" \
   bun .github/scripts/sync/retired_cleanup.ts
 RECOVER="" RUNNER_TEMP="$UNSEL_WORK" bun .github/scripts/sync/preserve_repo_owned.ts
-TARGET_DIR="$UNSEL" bun actions/shared/stamp_manifest.ts
+bun actions/shared/stamp_manifest.ts --root "$UNSEL"
 bun "$GITHUB_WORKSPACE/actions/validate-template/validate_generated_files.ts" "$UNSEL"
 cd "$UNSEL"
 cmp -s "$UNSEL_WORK/license-before.md" LICENSE.md \
@@ -1476,7 +1485,7 @@ grep -qF ".gitignore: recovery-appendix" "$TRANS_WORK/carry-review.txt" \
 # grammar and the recovery fix, with no fabricated loss claim (the
 # appendixes kept every previous line). Warn-only: the run stays green so
 # the healing sync can deliver.
-TARGET_DIR="$TRANS" bun actions/shared/stamp_manifest.ts
+bun actions/shared/stamp_manifest.ts --root "$TRANS"
 RUNNER_TEMP="$TRANS_WORK" bun .github/scripts/sync/tail_tripwire.ts --root "$TRANS" \
   > "$TRANS_WORK/tripwire.out"
 test -s "$TRANS_WORK/tail-shrank.md" \
@@ -1557,7 +1566,7 @@ RUNNER_TEMP="$DESEL_WORK" SRC_PATH="$src_path_desel" \
 test ! -e "$DESEL/AGENTS.md" \
   || fail "the deselected agents module's AGENTS.md survived retirement"
 RECOVER="" RUNNER_TEMP="$DESEL_WORK" bun .github/scripts/sync/preserve_repo_owned.ts
-TARGET_DIR="$DESEL" bun actions/shared/stamp_manifest.ts
+bun actions/shared/stamp_manifest.ts --root "$DESEL"
 RUNNER_TEMP="$DESEL_WORK" bun .github/scripts/sync/tail_tripwire.ts --root "$DESEL"
 if [ -s "$DESEL_WORK/tail-shrank.md" ]; then
   fail "the tail tripwire fired on a clean module deselection (the hold must come from the removal rule alone)"
