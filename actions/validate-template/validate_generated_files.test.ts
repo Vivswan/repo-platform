@@ -89,6 +89,7 @@ const MIRROR_MODULES: Record<string, MirrorEntry[]> = {
   agents: [
     { path: ".github/agents.md", kind: "class-only" },
     { path: ".github/copilot-instructions.md", kind: "class-only" },
+    { path: ".github/instructions/review.instructions.md", kind: "header" },
     { path: "AGENTS.md", kind: "region", begin: B, end: E },
     { path: "CLAUDE.md", kind: "class-only" },
   ],
@@ -898,6 +899,98 @@ describe("one license file", () => {
   });
 });
 
+describe("release-please-config.json never pins a version", () => {
+  const config = (pkg: Record<string, unknown>, top: Record<string, unknown> = {}) =>
+    JSON.stringify({ ...top, packages: { ".": { "release-type": "simple", ...pkg } } });
+
+  test.each([
+    {
+      reason: "a pin-free config passes",
+      file: config({ "force-tag-creation": true }),
+      exitCode: 0,
+      stderr: "",
+    },
+    {
+      reason: "a package-level release-as fails, naming the package and the footer",
+      file: config({ "release-as": "4.0.0" }),
+      exitCode: 1,
+      stderr: 'release-please-config.json pins a version with release-as at package ".": ',
+    },
+    {
+      reason: "a top-level release-as fails too",
+      file: config({}, { "release-as": "4.0.0" }),
+      exitCode: 1,
+      stderr: "release-please-config.json pins a version with release-as at the top level: ",
+    },
+    {
+      reason: "both spots are named at once",
+      file: config({ "release-as": "4.0.0" }, { "release-as": "4.0.0" }),
+      exitCode: 1,
+      stderr: 'pins a version with release-as at the top level and package ".": ',
+    },
+    {
+      reason: "a null value is still a pin (release-please reads key presence)",
+      file: config({ "release-as": null }),
+      exitCode: 1,
+      stderr: 'release-please-config.json pins a version with release-as at package ".": ',
+    },
+    {
+      reason: "an empty string is still a pin",
+      file: config({ "release-as": "" }),
+      exitCode: 1,
+      stderr: 'release-please-config.json pins a version with release-as at package ".": ',
+    },
+    {
+      reason: "a malformed config is an error, not a silent pass",
+      file: "{ not json",
+      exitCode: 1,
+      stderr: "release-please-config.json: not valid JSON",
+    },
+  ])("$reason", ({ file, exitCode, stderr }) => {
+    const r = runValidator({ "release-please-config.json": file });
+    expect(r.exitCode).toBe(exitCode);
+    if (stderr === "") expect(r.stderr).toBe("");
+    else {
+      expect(r.stderr).toContain(stderr);
+      expect(r.stderr).toContain("1 error(s).");
+      // Every pin report carries the footer recipe; a parse failure has
+      // nothing to recommend yet.
+      expect(r.stderr.includes('-m "Release-As: 5.0.0"')).toBe(stderr.includes("pins a version"));
+    }
+  });
+
+  test("a conflict-marked config gets check 4's report alone, not a JSON error on top", () => {
+    const r = runValidator({
+      "release-please-config.json": `<<<<<<< HEAD\n${config({})}\n=======\n${config({ "release-as": "4.0.0" })}\n>>>>>>> theirs\n`,
+    });
+    expect(r.exitCode).toBe(1);
+    expect(r.stderr).toContain("release-please-config.json");
+    expect(r.stderr).toContain("conflict");
+    expect(r.stderr).not.toContain("not valid JSON");
+    expect(r.stderr).not.toContain("pins a version");
+  });
+
+  test("a directory at the config path is left alone, not a crash", () => {
+    const r = runValidator({ "release-please-config.json/keep": "" });
+    expect(r.exitCode).toBe(0);
+    expect(r.stderr).toBe("");
+  });
+
+  test("self mode checks the config too", () => {
+    const r = runValidator({ "release-please-config.json": config({ "release-as": "4.0.0" }) }, [
+      "--self",
+    ]);
+    expect(r.exitCode).toBe(1);
+    expect(r.stderr).toContain("pins a version with release-as at package");
+  });
+
+  test("no config file means nothing to check", () => {
+    const r = runValidator();
+    expect(r.exitCode).toBe(0);
+    expect(r.stderr).toBe("");
+  });
+});
+
 describe("ownership self-declarations", () => {
   const C1 =
     "# This file is managed by Vivswan/repo-platform.\n" +
@@ -1375,7 +1468,7 @@ describe("ownership-manifest byte parity", () => {
   test("a tree carrying the base marker roster passes against the mirror-stamped manifest", () => {
     // The mirror-coverage claim's teeth: this fixture carries every base
     // marker/header path the mirror declares (plus the agents module's
-    // AGENTS.md), all validated through the auto-stamped manifest - a
+    // AGENTS.md and review instructions), all validated through the auto-stamped manifest - a
     // drifted mirror entry for any of them fails the roster cross-check
     // here instead of sitting inert.
     const registration = BASELINE[".repo-platform.yml"].replace(
@@ -1395,6 +1488,10 @@ describe("ownership-manifest byte parity", () => {
       "LICENSE.md": `${B}\n# License\n${E}\n`,
       "SECURITY.md": `${B}\n# Security\n${E}\n`,
       "AGENTS.md": `${B}\n# AGENTS.md\n${E}\n`,
+      // Frontmatter must open the file for GitHub, so the managed header
+      // rides an HTML comment inside the header window.
+      ".github/instructions/review.instructions.md":
+        '---\napplyTo: "**"\n---\n<!-- This file is managed by Vivswan/repo-platform. -->\n# Review\n',
     });
     expect(stderr).toBe("");
     expect(exitCode).toBe(0);

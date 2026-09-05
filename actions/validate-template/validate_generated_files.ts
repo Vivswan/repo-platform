@@ -53,6 +53,13 @@
 //      repo stays an advisory (check 8's absence stance - the
 //      withheld-workflows push path leaves those legitimately); a
 //      conflict-marked manifest is left to check 4's report.
+//  10. release-please-config.json (when present) carries no `release-as`
+//      key, at the top level or in any package: release-please never
+//      strips the pin after the pinned release ships, so the NEXT release
+//      PR proposes the same version again (and with force-tag-creation
+//      would move the published tag). A version is forced once with a
+//      `Release-As: x.y.z` commit footer instead, which leaves nothing
+//      behind.
 //
 // Advisories (printed, never fail): missing actionlint / yamllint /
 // commit-names / gitleaks checks in ci.yml (older renders predate the newer
@@ -108,6 +115,10 @@ const SKIP_DIRS = new Set([
   ".ruff_cache",
   ".mypy_cache",
 ]);
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
 
 function sha256(data: Buffer): string {
   return createHash("sha256").update(data).digest("hex");
@@ -293,6 +304,7 @@ const MODULE_OWNERSHIP: Record<string, OwnedFile[]> = {
   agents: [
     { path: ".github/agents.md", kind: "class-only" },
     { path: ".github/copilot-instructions.md", kind: "class-only" },
+    { path: ".github/instructions/review.instructions.md", kind: "header" },
     {
       path: "AGENTS.md",
       kind: "region",
@@ -630,6 +642,45 @@ function main(): number {
       "LICENSE: the fleet convention is LICENSE.md for every repo, custom " +
         "licenses included - rename it (GitHub detects both spellings)",
     );
+  }
+
+  // 10. No release-as pin in release-please-config.json (header, check 10).
+  // Presence-gated, not module-gated: the file is a repo-owned starter,
+  // so it is the file, not the module selection, that can carry the pin.
+  const releaseConfigPath = join(root, "release-please-config.json");
+  if (isRegularFile(releaseConfigPath)) {
+    const configText = readFileSync(releaseConfigPath, "utf-8");
+    let config: unknown;
+    // A conflict-marked config is check 4's report; parsing it here would
+    // only add a second, noisier diagnostic for the same damage.
+    if (!hasConflictMarker(configText)) {
+      try {
+        config = JSON.parse(configText);
+      } catch (exc) {
+        errors.push(
+          `release-please-config.json: not valid JSON (${exc instanceof Error ? exc.message.split("\n")[0] : String(exc)})`,
+        );
+      }
+    }
+    if (isRecord(config)) {
+      const pinned: string[] = [];
+      if ("release-as" in config) pinned.push("the top level");
+      const packages = config.packages;
+      if (isRecord(packages)) {
+        for (const [name, pkg] of Object.entries(packages)) {
+          if (isRecord(pkg) && "release-as" in pkg) pinned.push(`package "${name}"`);
+        }
+      }
+      if (pinned.length > 0) {
+        errors.push(
+          `release-please-config.json pins a version with release-as at ${pinned.join(" and ")}: ` +
+            "release-please never removes the pin after that release ships, so the next release PR " +
+            "proposes the same version again (and force-tag-creation would move the published tag). " +
+            "Delete the key; to force a version once, merge an empty commit carrying a footer: " +
+            'git commit --allow-empty -m "chore: release 5.0.0" -m "Release-As: 5.0.0"',
+        );
+      }
+    }
   }
 
   // 3 + 4. YAML parses; no conflict markers

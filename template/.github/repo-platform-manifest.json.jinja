@@ -32,6 +32,9 @@
 {%- set _ = entries.append('    ".github/copilot-instructions.md": {"class": "managed", "hash": null}') -%}
 {%- endif -%}
 {%- set _ = entries.append('    ".github/dependabot.yml": {"class": "managed", "hash": null}') -%}
+{%- if 'agents' in modules -%}
+{%- set _ = entries.append('    ".github/instructions/review.instructions.md": {"class": "managed", "hash": null}') -%}
+{%- endif -%}
 {%- set _ = entries.append('    ".github/repo-platform-manifest.json": {"class": "managed", "hash": null, "commit": null}') -%}
 {%- if 'settings-sync' in modules -%}
 {%- set _ = entries.append('    ".github/settings.yml": {"class": "starter"}') -%}
