@@ -1,6 +1,5 @@
 ---
 applyTo: "**"
-excludeAgent: "cloud-agent"
 ---
 <!-- This file is managed by Vivswan/repo-platform.
      Local edits may be replaced during template updates. -->

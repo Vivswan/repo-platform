@@ -27,8 +27,8 @@ copyright_holder: Vivswan Shah (https://github.com/Vivswan)
 # toolchain module makes enable_codeql true.
 private: false
 
-# The modules this repository actually dogfoods: agents (AGENTS.md and the
-# agent-file symlinks), bun (dependabot-bun-lockfile.yml; the toolchain
+# The modules this repository actually dogfoods: agents (AGENTS.md, the
+# agent-file symlinks, and the Copilot review instructions), bun (dependabot-bun-lockfile.yml; the toolchain
 # feeding enable_codeql), skills (the hosted agent skills under skills/
 # and the validate-skills.yml discovery workflow; the .claude-plugin
 # manifests are generated-once starters this repo owns), pr-title (the
