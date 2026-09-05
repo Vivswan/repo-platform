@@ -15,6 +15,9 @@
 {%- set _ = entries.append('    ".gitattributes": {"class": "split", "grammar": "managed-region", "begin": "# BEGIN REPO-PLATFORM MANAGED", "end": "# END REPO-PLATFORM MANAGED", "hash": null}') -%}
 {%- set _ = entries.append('    ".github/.copier-answers.yml": {"class": "managed", "hash": null}') -%}
 {%- set _ = entries.append('    ".github/CODEOWNERS": {"class": "split", "grammar": "managed-region", "begin": "# BEGIN REPO-PLATFORM MANAGED", "end": "# END REPO-PLATFORM MANAGED", "hash": null}') -%}
+{%- if not private -%}
+{%- set _ = entries.append('    ".github/CODE_OF_CONDUCT.md": {"class": "managed", "hash": null}') -%}
+{%- endif -%}
 {%- if 'issue-templates' in modules -%}
 {%- set _ = entries.append('    ".github/ISSUE_TEMPLATE/bug_report.yml": {"class": "starter"}') -%}
 {%- endif -%}
@@ -24,6 +27,7 @@
 {%- if 'issue-templates' in modules -%}
 {%- set _ = entries.append('    ".github/ISSUE_TEMPLATE/feature_request.yml": {"class": "starter"}') -%}
 {%- endif -%}
+{%- set _ = entries.append('    ".github/SECURITY.md": {"class": "split", "grammar": "managed-region", "begin": "<!-- BEGIN REPO-PLATFORM MANAGED -->", "end": "<!-- END REPO-PLATFORM MANAGED -->", "hash": null}') -%}
 {%- set _ = entries.append('    ".github/actionlint.yaml": {"class": "starter"}') -%}
 {%- if 'agents' in modules -%}
 {%- set _ = entries.append('    ".github/agents.md": {"class": "managed", "hash": null}') -%}
@@ -104,15 +108,11 @@
 {%- set _ = entries.append('    "CLAUDE.md": {"class": "managed", "hash": null}') -%}
 {%- endif -%}
 {%- if not private -%}
-{%- set _ = entries.append('    "CODE_OF_CONDUCT.md": {"class": "managed", "hash": null}') -%}
-{%- endif -%}
-{%- if not private -%}
 {%- set _ = entries.append('    "CONTRIBUTING.md": {"class": "split", "grammar": "managed-region", "begin": "<!-- BEGIN REPO-PLATFORM MANAGED -->", "end": "<!-- END REPO-PLATFORM MANAGED -->", "hash": null}') -%}
 {%- endif -%}
 {%- if 'custom-license' not in modules -%}
 {%- set _ = entries.append('    "LICENSE.md": {"class": "split", "grammar": "managed-region", "begin": "<!-- BEGIN REPO-PLATFORM MANAGED -->", "end": "<!-- END REPO-PLATFORM MANAGED -->", "hash": null}') -%}
 {%- endif -%}
-{%- set _ = entries.append('    "SECURITY.md": {"class": "split", "grammar": "managed-region", "begin": "<!-- BEGIN REPO-PLATFORM MANAGED -->", "end": "<!-- END REPO-PLATFORM MANAGED -->", "hash": null}') -%}
 {%- if 'release-please' in modules -%}
 {%- set _ = entries.append('    "release-please-config.json": {"class": "starter"}') -%}
 {%- endif -%}

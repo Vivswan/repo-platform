@@ -166,6 +166,7 @@ const BASE_OWNERSHIP: BaseOwnedFile[] = [
     end: "# END REPO-PLATFORM MANAGED",
   },
   { path: ".github/.copier-answers.yml", kind: "header" },
+  { path: ".github/CODE_OF_CONDUCT.md", kind: "header", when: { publicOnly: true } },
   {
     path: ".github/CODEOWNERS",
     kind: "region",
@@ -173,6 +174,12 @@ const BASE_OWNERSHIP: BaseOwnedFile[] = [
     end: "# END REPO-PLATFORM MANAGED",
   },
   { path: ".github/dependabot.yml", kind: "header" },
+  {
+    path: ".github/SECURITY.md",
+    kind: "region",
+    begin: "<!-- BEGIN REPO-PLATFORM MANAGED -->",
+    end: "<!-- END REPO-PLATFORM MANAGED -->",
+  },
   { path: ".github/workflows/ci.yml", kind: "header" },
   {
     path: ".gitignore",
@@ -182,7 +189,6 @@ const BASE_OWNERSHIP: BaseOwnedFile[] = [
   },
   { path: ".typography-allow", kind: "header" },
   { path: ".yamllint", kind: "header" },
-  { path: "CODE_OF_CONDUCT.md", kind: "header", when: { publicOnly: true } },
   {
     path: "CONTRIBUTING.md",
     kind: "region",
@@ -196,12 +202,6 @@ const BASE_OWNERSHIP: BaseOwnedFile[] = [
     begin: "<!-- BEGIN REPO-PLATFORM MANAGED -->",
     end: "<!-- END REPO-PLATFORM MANAGED -->",
     when: { withoutModule: "custom-license" },
-  },
-  {
-    path: "SECURITY.md",
-    kind: "region",
-    begin: "<!-- BEGIN REPO-PLATFORM MANAGED -->",
-    end: "<!-- END REPO-PLATFORM MANAGED -->",
   },
 ];
 // END GENERATED: base-ownership
