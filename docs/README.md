@@ -8,6 +8,7 @@ repo-platform manages standards files, CI workflows, and repository settings acr
 |---|---|
 | Create a new managed repository | [New repo](new-repo.md) |
 | Find out why my PR is pending or red | [All-green: quick triage](all-green.md#quick-triage-why-is-my-pr-red-or-waiting) |
+| Read a `validate-template` result: what blocks, what only warns | [New repo: the template check](new-repo.md#the-template-check) |
 | Change a repository's settings or labels | [Settings](settings.md) |
 | Understand the `pr-title` required check | [Settings: the pr-title ruleset](settings.md#the-pr-title-ruleset) |
 | Get a PR auto-formatted, or make bot fix commits re-run CI | [New repo: fix commits](new-repo.md#fix-commits-and-re-triggering-ci) |

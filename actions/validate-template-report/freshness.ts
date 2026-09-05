@@ -14,7 +14,8 @@
 // GITHUB_OUTPUT. Runs from the caller's checkout, where copier recorded
 // its answers.
 
-import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, writeFileSync } from "node:fs";
+import { recordedBuildSha } from "./build_sha.ts";
 import { capture, notice, requireEnv } from "./runtime.ts";
 
 const NETWORK_TIMEOUT_MS = 20_000;
@@ -27,24 +28,17 @@ writeFileSync(freshnessFile, "");
 const setState = (state: "fresh" | "behind" | "skipped"): void => {
   appendFileSync(outputFile, `state=${state}\n`);
 };
-const skip = (reason: string): never => {
+const skip: (reason: string) => never = (reason) => {
   notice(`${reason} Skipping the freshness check.`);
   setState("skipped");
   process.exit(0);
 };
 
-let answers = "";
-try {
-  answers = readFileSync(".github/.copier-answers.yml", "utf8");
-} catch {
-  // Fine: the empty string yields no recorded commit, which skips below.
-}
-// copier's recorded template commit. YAML quotes the sha whenever it would
-// parse as a number, so quotes (and stray spaces) are stripped anywhere,
-// exactly as the inline bash predecessor's tr did.
-const recordedLine = answers.split("\n").find((line) => line.startsWith("_commit:"));
-const recorded = (recordedLine ?? "").replace(/^_commit:/, "").replace(/["' ]/g, "");
-if (recorded === "") skip("No _commit is recorded in .github/.copier-answers.yml.");
+// The same read the integrity leg refused on, so a refused `_commit` is
+// reported once, there, and only skipped here.
+const recorded = recordedBuildSha(".");
+if ("refusal" in recorded) skip(recorded.refusal);
+const { sha } = recorded;
 
 const tipProbe = capture(
   ["gh", "api", `repos/${templateRepo}/branches/build`, "--jq", ".commit.sha"],
@@ -58,8 +52,7 @@ if (tipProbe.exitCode !== 0) {
 const tip = tipProbe.stdout.trim();
 if (tip === "") skip(`${templateRepo}'s build branch reported no commit.`);
 
-// The recorded value is copier's short sha, so match on prefix.
-if (tip.startsWith(recorded)) {
+if (tip === sha) {
   setState("fresh");
   process.exit(0);
 }
@@ -67,7 +60,7 @@ if (tip.startsWith(recorded)) {
 // One more call for the distance. It is presentation only: a failed
 // compare still reports "behind", just without the number.
 const compare = capture(
-  ["gh", "api", `repos/${templateRepo}/compare/${recorded}...${tip}`, "--jq", ".ahead_by"],
+  ["gh", "api", `repos/${templateRepo}/compare/${sha}...${tip}`, "--jq", ".ahead_by"],
   { timeoutMs: NETWORK_TIMEOUT_MS },
 );
 const ahead = compare.exitCode === 0 ? compare.stdout.trim() : "";
@@ -76,6 +69,6 @@ const distance = /^[0-9]+$/.test(ahead)
   : "behind the build branch";
 writeFileSync(
   freshnessFile,
-  `#### Freshness\n\nThis repository is ${distance} (recorded \`${recorded}\`, tip \`${tip.slice(0, 7)}\`). The next sync PR updates the managed files; nothing to do here.\n`,
+  `#### Freshness\n\nThis repository is ${distance} (recorded \`${sha.slice(0, 7)}\`, tip \`${tip.slice(0, 7)}\`). The next sync PR updates the managed files; nothing to do here.\n`,
 );
 setState("behind");

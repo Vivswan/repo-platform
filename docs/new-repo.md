@@ -32,7 +32,7 @@ Two files the render plants matter later:
 | File | Role |
 |---|---|
 | `.repo-platform.yml` | The module selection's home from then on: edit its `modules:` list and the next sync PR applies the change. Its presence is what marks the repo as managed. Generated once and repo-owned (ownership class `starter`) - the sync reads it and never rewrites it. |
-| `.github/repo-platform-manifest.json` | The ownership manifest: each template-landed path's class (`managed`, `split`, or `starter`) plus sha256 hashes of the managed content, stamped after each render. validate-template's INTEGRITY check blocks on drift against it (managed content changed outside a sync); its freshness report never blocks. |
+| `.github/repo-platform-manifest.json` | The ownership manifest: each template-landed path's class (`managed`, `split`, or `starter`) plus sha256 hashes of the managed content, stamped after each render. validate-template's INTEGRITY check blocks on drift against it (managed content changed outside a sync), judged by the validator of the template commit the repo was rendered from ([the template check](#the-template-check)); its freshness report never blocks. |
 
 ### Mirror copies of rendered files
 
@@ -62,6 +62,20 @@ CI is split so the template can keep improving its half while each repo keeps it
 | `.github/workflows/checks.yml` | repo-owned (`_skip_if_exists`) | the repository's own test and lint jobs (multiple jobs, matrices, and further local reusable workflows all work); they run inside the gate through the `checks` job |
 
 The `ci` job runs the standard checks (typography, commit-names, actionlint, gitleaks, yamllint; merged into one `base-checks` job on private repositories), `validate-template`, and the module checks (`dependency-review` and a per-language CodeQL matrix on public repos - CodeQL also needs a toolchain). The managed `all-green` job in the same ci.yml needs both callers and its own check run is the required `all-green` check - the [all-green convention](all-green.md).
+
+### The template check
+
+The `validate-template` job is three legs in one sticky PR comment plus the step summary, run by the [validate-template-report](../actions/validate-template-report/action.yml) action:
+
+| Leg | Validator | Verdict |
+|---|---|---|
+| Integrity | repo-platform's build tree at the `_commit` recorded in `.github/.copier-answers.yml` - the template this repository was rendered from | Blocks: that validator's errors (managed content changed outside a sync, malformed managed YAML, a conditioned `ci` caller, and the like) |
+| After your next sync | the build branch tip's validator (`validate-template@build`) | Warns: the rules the next sync PR brings, minus anything the integrity leg already said |
+| Freshness | none - a ref compare against the build branch | Informs: how many build commits behind |
+
+- Judging by the repository's own template commit is what keeps a template change from turning every fleet repo red before its sync PR lands; the tip's new rules arrive as warnings first and become the verdict once the sync PR merges.
+- The integrity leg needs `_commit` to be the full 40-hex build sha the sync writes. A short or missing value fails the check with `merge this repository's pending template sync PR`; nothing resolves a short sha.
+- The sha must also be a commit the `build` branch already contains, or the check fails without fetching anything: the answers file is PR-editable, and this is the same trust the `@build` action refs already place in that branch ([build provenance](build-provenance.md)).
 
 ### What each module adds
 

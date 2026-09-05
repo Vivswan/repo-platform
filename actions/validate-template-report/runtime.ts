@@ -2,10 +2,11 @@
 // kept LOCAL on purpose. A composite action is published on a build output
 // branch of this repository and runs from its own directory, so it cannot
 // import out of the repository tree - not from .github/scripts/shared/,
-// and not from a sibling action either. That is a property of how actions
-// are published, not drift: the predicates themselves (freshness.ts,
-// report.ts) exist exactly once, and callers use the action rather than
-// keeping a second copy of them.
+// and not from a sibling action either (actions/shared/, the dependency-free
+// zone the branch ships beside every action, is the one importable
+// neighbour). That is a property of how actions are published, not drift:
+// the predicates themselves (freshness.ts, report.ts) exist exactly once,
+// and callers use the action rather than keeping a second copy of them.
 //
 // This is currently the only action carrying this file (the Copilot
 // actions that shared it byte-identically were retired with the
@@ -15,6 +16,8 @@
 //
 // Keep these behaviour-compatible with .github/scripts/shared/ - they are
 // the same functions, narrowed to what the action uses.
+
+import { closeSync, openSync } from "node:fs";
 
 export function env(name: string, fallback = ""): string {
   return process.env[name] ?? fallback;
@@ -82,4 +85,42 @@ export function capture(command: string[], options: RunOptions): RunResult {
     stderr: proc.stderr.toString(),
     timedOut: proc.exitedDueToTimeout === true,
   };
+}
+
+/** capture() with stdout streamed to a file instead of a string: for
+ *  binary payloads (a tarball) that a string round trip would corrupt. */
+export function download(command: string[], toFile: string, options: RunOptions): RunResult {
+  const fd = openSync(toFile, "w");
+  try {
+    const proc = Bun.spawnSync(command, {
+      cwd: options.cwd,
+      env: options.env ? { ...process.env, ...options.env } : undefined,
+      stdout: fd,
+      stderr: "pipe",
+      timeout: options.timeoutMs,
+      killSignal: "SIGKILL",
+    });
+    return {
+      exitCode: proc.exitCode ?? 1,
+      stdout: "",
+      stderr: proc.stderr.toString(),
+      timedOut: proc.exitedDueToTimeout === true,
+    };
+  } finally {
+    closeSync(fd);
+  }
+}
+
+/** A child whose output belongs in the job log as it happens (stdio
+ *  inherited); only the exit code comes back. */
+export function run(command: string[], options: RunOptions): number {
+  const proc = Bun.spawnSync(command, {
+    cwd: options.cwd,
+    env: options.env ? { ...process.env, ...options.env } : undefined,
+    stdout: "inherit",
+    stderr: "inherit",
+    timeout: options.timeoutMs,
+    killSignal: "SIGKILL",
+  });
+  return proc.exitCode ?? 1;
 }
