@@ -1,7 +1,6 @@
 #!/usr/bin/env bun
-// The integrity leg's FETCH: the build tree at the recorded `_commit`, laid
-// out for the judge step. Its one compare call admits the sha (the build
-// branch must contain it) and is freshness's input; a refusal is a verdict.
+// The integrity leg's FETCH of the build tree at the recorded `_commit`. Its
+// one compare call both admits the sha and feeds freshness.
 //
 // Env: GH_TOKEN, ALIGNED_DIR (cleared here), VERDICT_FILE (cleared here),
 // GITHUB_OUTPUT. Runs from the caller's checkout.
