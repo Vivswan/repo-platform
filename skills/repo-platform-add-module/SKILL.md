@@ -27,19 +27,19 @@ For enrolling a repo that is not managed yet, use the `repo-platform-new-project
 
 ## The module roster
 
-One line each. The roster's source of truth is the module manifests (`templates/<module>/module.yml` in repo-platform), which generate the `modules` question's `choices` in `copier.yml` - that choices list is the practical reference from a managed repo; when this table and it disagree, it wins.
+One line each, generated from the module manifests (`templates/<module>/module.yml` in repo-platform), the same source as the `modules` question's `choices` in `copier.yml`.
 
 | Module | What it gives the repo |
-|---|---|
-| `agents` | AGENTS.md agent instructions, agent-file symlinks, Copilot setup |
+|---|---|<!-- BEGIN GENERATED: module-roster (scripts/generate.ts - edit module.yml manifests, not this block) -->
+| `agents` | AGENTS.md agent instructions, agent-file symlinks, Copilot setup and review style |
 | `bun` | TypeScript/bun toolchain (gitignore, dependabot, CodeQL JS) |
 | `node` | JavaScript/Node.js toolchain (gitignore, npm dependabot, CodeQL JS) |
 | `deno` | Deno toolchain (deno fmt/lint, deno dependabot, CodeQL JS) |
 | `uv` | Python/uv toolchain (gitignore, dependabot, CodeQL Python) |
 | `rust` | Rust/cargo toolchain (cargo dependabot, Rust gitignore; no CodeQL) |
-| `pages` | GitHub Pages deploy of the repo's own build (root = newest served tag, /latest/ = main) |
-| `docs-site` | docs/ markdown as a versioned VitePress site under the central fleet theme |
-| `release-please` | release job on top of all-green + autorelease labels |
+| `pages` | GitHub Pages deploy of the repo's own build (root = newest served version tag, /latest/ = main) |
+| `docs-site` | VitePress docs site from docs/ under the central fleet theme (repos carry only markdown) |
+| `release-please` | gate-downstream release job in ci.yml + autorelease labels |
 | `issue-templates` | bug/feature issue forms |
 | `skills` | agent skills hosting (plugin manifests, skill validation) |
 | `pr-title` | Conventional Commit PR title check, its own required workflow |
@@ -47,7 +47,7 @@ One line each. The roster's source of truth is the module manifests (`templates/
 | `fuzzer` | nightly fuzz starter with issue filing, replay inputs, auto-close |
 | `nightly` | nightly CI starter with failure issue filing and auto-close |
 | `settings-sync` | centrally managed repo settings + repo-owned settings.yml starter |
-| `custom-license` | repo carries its own license in LICENSE.md; the fleet license is not rendered |
+| `custom-license` | repo carries its own license in LICENSE.md; the fleet license is not rendered |<!-- END GENERATED: module-roster -->
 
 Per-module details - what is managed vs starter, parameters, companion steps, removal notes - are in [references/modules.md](references/modules.md).
 
