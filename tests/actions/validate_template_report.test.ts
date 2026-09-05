@@ -43,7 +43,7 @@ import {
   validatorOf,
 } from "../../actions/validate-template-report/aligned_tree";
 import { recordedBuildSha } from "../../actions/validate-template-report/build_sha";
-import { type ChildExit, run } from "../../actions/validate-template-report/runtime";
+import { type ChildExit, failureDetail, run } from "../../actions/validate-template-report/runtime";
 import {
   classify,
   type Integrity,
@@ -620,6 +620,34 @@ describe("the integrity verdict", () => {
   });
 });
 
+// failureDetail's formatting, pinned on known input so the end-to-end fetch
+// and judge cases below need not name a platform-specific tool.
+describe("a failed child's one-line detail", () => {
+  const failed = (stderr: string, timedOut = false) => ({
+    exitCode: 2,
+    stdout: "",
+    stderr,
+    timedOut,
+  });
+  test.each([
+    [
+      "the first non-empty stderr line, trimmed",
+      failed("\n  gzip: stdin: not in gzip format \ntar: Child returned status 1\n"),
+      "gzip: stdin: not in gzip format",
+    ],
+    [
+      "a single line as is",
+      failed("tar: Error opening archive: Unrecognized archive format"),
+      "tar: Error opening archive: Unrecognized archive format",
+    ],
+    ["the exit code when stderr is empty", failed(""), "exit 2"],
+    ["the exit code when stderr is only whitespace", failed(" \n\t\n"), "exit 2"],
+    ["the deadline over any stderr", failed("tar: something", true), "timed out"],
+  ])("%s", (_name, result, expected) => {
+    expect(failureDetail(result)).toBe(expected);
+  });
+});
+
 // --- build_sha.ts ------------------------------------------------------------
 
 describe("the recorded build sha", () => {
@@ -889,9 +917,11 @@ describe("the action's fetch script", () => {
       { answers: `_commit: ${SHA}\n`, symlinked: true },
       laidOut("compare=ahead\nahead-by=3\n"),
     ],
-    // tar's complaint is two lines; the reason stays one.
+    // The unpacker's complaint runs several lines and its wording differs
+    // per platform (bsdtar, GNU tar behind gzip); the reason is the fixed
+    // prefix plus ONE non-empty line of it, whatever the tool prints.
     [
-      "bytes that are not a tarball fail closed with tar's first line",
+      "bytes that are not a tarball fail closed with the unpacker's first line",
       { answers: `_commit: ${SHA}\n`, corrupt: true },
       {
         exitCode: 1,
@@ -900,7 +930,7 @@ describe("the action's fetch script", () => {
         verdict: {
           kind: "not-judged",
           reason: expect.stringMatching(
-            new RegExp(`^could not unpack ${OPERATOR} at ${SHA}: tar: [^\\n]+$`),
+            new RegExp(`^could not unpack ${OPERATOR} at ${SHA}: \\S[^\\n]*$`),
           ),
         },
         tree: false,
