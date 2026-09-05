@@ -120,7 +120,29 @@ function scratch(): { root: string; bin: string } {
   const bin = join(root, "bin");
   mkdirSync(bin);
   writeFileSync(join(bin, "gh"), ghStub, { mode: 0o755 });
+  // A poisoned `bun` sits first on PATH in every harness: a step block that
+  // ran bun by name instead of its recorded absolute path would exit 97.
+  writeFileSync(join(bin, "bun"), '#!/usr/bin/env bash\necho "bun by name: $*" >&2\nexit 97\n', {
+    mode: 0o755,
+  });
   return { root, bin };
+}
+
+const RUNNER_BASH = ["bash", "--noprofile", "--norc", "-e", "-o", "pipefail", "-c"];
+
+/** A step's run block from action.yml as the runner would execute it: the
+ *  action-path expression resolved, any other expression refused (env is
+ *  the only other channel, and each harness supplies it). */
+function stepRun(id: string): string {
+  const steps = parseYaml(readFileSync(join(ACTION, "action.yml"), "utf8")).runs.steps as Record<
+    string,
+    unknown
+  >[];
+  const step = steps.find((s) => s.id === id);
+  if (step === undefined) throw new Error(`no step ${id}`);
+  const run = String(step.run).replaceAll("${{ github.action_path }}", ACTION);
+  if (run.includes("${{")) throw new Error(`step ${id} run block carries an expression: ${run}`);
+  return run;
 }
 
 /** Every file under `dir` with its content, as one comparable string. */
@@ -169,17 +191,6 @@ interface ReportOptions {
   env?: Record<string, string>;
 }
 
-// The report step's own run block, executed as the runner would (its bash
-// flags included): the one place `integrity` is set, on the bun path and on
-// the no-bun fallback. A poisoned `bun` sits first on PATH, so the block
-// passes only by running the recorded ACTION_BUN path, never bun by name.
-const REPORT_STEP = (
-  parseYaml(readFileSync(join(ACTION, "action.yml"), "utf8")).runs.steps as Record<
-    string,
-    unknown
-  >[]
-).find((step) => step.id === "report") as { run: string };
-
 function runReport(opts: ReportOptions = {}) {
   const { root, bin } = scratch();
   const verdictPath = join(root, "verdict.json");
@@ -197,35 +208,31 @@ function runReport(opts: ReportOptions = {}) {
   writeFileSync(listing, opts.existing === undefined ? "" : `${opts.existing}\n`);
   const outputs = join(root, "outputs.txt");
   writeFileSync(outputs, "");
-  writeFileSync(join(bin, "bun"), '#!/usr/bin/env bash\necho "bun by name: $*" >&2\nexit 97\n', {
-    mode: 0o755,
-  });
-  const proc = boundedSpawnSync(
-    ["bash", "--noprofile", "--norc", "-e", "-o", "pipefail", "-c", REPORT_STEP.run],
-    {
-      env: {
-        ...process.env,
-        PATH: `${bin}:${process.env.PATH}`,
-        ACTION_BUN: opts.noBun ? "" : process.execPath,
-        ACTION_PATH: ACTION,
-        GITHUB_REPOSITORY: "Vivswan/managed-repo",
-        GITHUB_STEP_SUMMARY: summary,
-        GITHUB_OUTPUT: outputs,
-        GH_TOKEN: "x",
-        VERDICT: verdictPath,
-        LATEST_FINDINGS: latestFindingsPath,
-        LATEST_ADVISORIES: latestAdvisoriesPath,
-        COMPARE_STATUS: opts.compare ?? "identical",
-        AHEAD_BY: opts.aheadBy ?? "",
-        EVENT_NAME: opts.event ?? "pull_request",
-        PR_NUMBER: "12",
-        RUN_URL,
-        CALLS: calls,
-        GH_COMMENTS_ID: listing,
-        ...opts.env,
-      },
+  // The report step's own run block: the one place `integrity` is set, on
+  // the bun path and on the no-bun fallback.
+  const proc = boundedSpawnSync([...RUNNER_BASH, stepRun("report")], {
+    env: {
+      ...process.env,
+      PATH: `${bin}:${process.env.PATH}`,
+      ACTION_BUN: opts.noBun ? "" : process.execPath,
+      ACTION_PATH: ACTION,
+      GITHUB_REPOSITORY: "Vivswan/managed-repo",
+      GITHUB_STEP_SUMMARY: summary,
+      GITHUB_OUTPUT: outputs,
+      GH_TOKEN: "x",
+      VERDICT: verdictPath,
+      LATEST_FINDINGS: latestFindingsPath,
+      LATEST_ADVISORIES: latestAdvisoriesPath,
+      COMPARE_STATUS: opts.compare ?? "identical",
+      AHEAD_BY: opts.aheadBy ?? "",
+      EVENT_NAME: opts.event ?? "pull_request",
+      PR_NUMBER: "12",
+      RUN_URL,
+      CALLS: calls,
+      GH_COMMENTS_ID: listing,
+      ...opts.env,
     },
-  );
+  });
   return {
     exitCode: proc.exitCode,
     output: proc.stdout + proc.stderr,
@@ -832,12 +839,13 @@ function runFetch(opts: FetchOptions = {}) {
   const outputs = join(root, "outputs.txt");
   writeFileSync(outputs, "");
   const calls = join(root, "calls.txt");
-  const proc = boundedSpawnSync(["bun", join(ACTION, "fetch_aligned.ts")], {
+  const proc = boundedSpawnSync([...RUNNER_BASH, stepRun("fetch")], {
     cwd: repo,
     timeoutMs: 60_000,
     env: {
       ...process.env,
       PATH: `${bin}:${process.env.PATH}`,
+      ACTION_BUN: process.execPath,
       GH_TOKEN: "x",
       GH_TARBALL: tarball,
       ALIGNED_DIR: alignedDir,
@@ -1025,17 +1033,19 @@ interface JudgeOptions {
 }
 
 function runJudge(opts: JudgeOptions = {}) {
-  const { root } = scratch();
+  const { root, bin } = scratch();
   const repo = join(root, "repo");
   mkdirSync(repo);
   const alignedDir = join(root, "aligned");
   layValidator(validatorOf(alignedDir), { lockfile: opts.lockfile });
   const verdict = join(root, "verdict.json");
-  const proc = boundedSpawnSync(["bun", join(ACTION, "judge_aligned.ts")], {
+  const proc = boundedSpawnSync([...RUNNER_BASH, stepRun("integrity")], {
     cwd: repo,
     timeoutMs: 60_000,
     env: {
       ...process.env,
+      PATH: `${bin}:${process.env.PATH}`,
+      ORCHESTRATOR_BUN: process.execPath,
       ALIGNED_DIR: alignedDir,
       VERDICT_FILE: verdict,
       ALIGNED_BUN: opts.alignedBun ?? process.execPath,
@@ -1332,10 +1342,10 @@ describe("the action's wiring", () => {
     writeFileSync(pinFile, pinned === "" ? "" : `${pinned}\n`);
     const outputs = join(root, "outputs.txt");
     writeFileSync(outputs, "");
-    const proc = boundedSpawnSync(
-      ["bash", "--noprofile", "--norc", "-e", "-o", "pipefail", "-c", String(step?.run)],
-      { cwd, env: { PATH: path, PIN_FILE: pinFile, GITHUB_OUTPUT: outputs } },
-    );
+    const proc = boundedSpawnSync([...RUNNER_BASH, String(step?.run)], {
+      cwd,
+      env: { PATH: path, PIN_FILE: pinFile, GITHUB_OUTPUT: outputs },
+    });
     expect([proc.exitCode, read(outputs)]).toEqual([0, expected]);
   });
 });
