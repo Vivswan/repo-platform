@@ -54,10 +54,11 @@ describe.skipIf(!hasCopier)("stamp hook invocations per render (real copier)", (
     const realpath = (p: string) => require("node:fs").realpathSync(p);
     // The value as the production readers see it: the hook quotes an
     // all-digit sha so PyYAML keeps it a string, so strip optional quotes.
-    const commitOf = () =>
+    const commitIn = (root: string) =>
       /^_commit:[ \t]*(\S+)/m
-        .exec(readFileSync(join(dest, ".github/.copier-answers.yml"), "utf-8"))?.[1]
+        .exec(readFileSync(join(root, ".github/.copier-answers.yml"), "utf-8"))?.[1]
         ?.replace(/^(['"])(.*)\1$/, "$2");
+    const commitOf = () => commitIn(dest);
     try {
       run(["bun", join(repoRoot, ".github/scripts/build-branches/branch_tree.ts"), "--dest", tree]);
       // The scratch tree's hook copy logs "<cwd>\t<argv>" per invocation.
@@ -222,8 +223,7 @@ describe.skipIf(!hasCopier)("stamp hook invocations per render (real copier)", (
       expect(proc.exitCode).not.toBe(0);
       expect(proc.stderr + proc.stdout).toContain("--answers names 'other.yml'");
       expect(existsSync(join(alt, "other.yml"))).toBe(false);
-      const defaultAnswers = readFileSync(join(alt, ".github/.copier-answers.yml"), "utf-8");
-      expect(/^_commit:[ \t]*(\S+)/m.exec(defaultAnswers)?.[1]).toBe(b3.slice(0, 7));
+      expect(commitIn(alt)).toBe(b3.slice(0, 7));
       expect(readFileSync(join(alt, ".github/repo-platform-manifest.json"), "utf-8")).toContain(
         '"commit": null',
       );
