@@ -1,20 +1,10 @@
 // The slice of the repository's shared helpers this composite action needs,
-// kept LOCAL on purpose. A composite action is published on a build output
-// branch of this repository and runs from its own directory, so it cannot
-// import out of the repository tree - not from .github/scripts/shared/,
-// and not from a sibling action either. That is a property of how actions
-// are published, not drift: the predicates themselves (freshness.ts,
-// report.ts) exist exactly once, and callers use the action rather than
-// keeping a second copy of them.
-//
-// This is currently the only action carrying this file (the Copilot
-// actions that shared it byte-identically were retired with the
-// ruleset-owned review gate). If another composite action ever copies it,
-// bring back the byte-equality test that policed the copies: edit one,
-// copy it to the others, never re-type.
-//
-// Keep these behaviour-compatible with .github/scripts/shared/ - they are
-// the same functions, narrowed to what the action uses.
+// kept LOCAL on purpose: a composite action is published on the build
+// branch and runs from its own directory, so it can import from
+// actions/shared/ (the dependency-free zone shipped beside it) and from
+// nothing else in the repository tree.
+
+import { closeSync, openSync } from "node:fs";
 
 export function env(name: string, fallback = ""): string {
   return process.env[name] ?? fallback;
@@ -33,10 +23,6 @@ export function requireEnv(name: string): string {
  *  multi-line message would terminate the command at the first break. */
 function escapeData(message: string): string {
   return message.replaceAll("%", "%25").replaceAll("\r", "%0D").replaceAll("\n", "%0A");
-}
-
-export function notice(message: string): void {
-  console.log(`::notice::${escapeData(message)}`);
 }
 
 export function warning(message: string): void {
@@ -82,4 +68,62 @@ export function capture(command: string[], options: RunOptions): RunResult {
     stderr: proc.stderr.toString(),
     timedOut: proc.exitedDueToTimeout === true,
   };
+}
+
+/** One line saying why a captured child failed: the deadline, its first
+ *  stderr line, or its exit code. */
+export function failureDetail(result: RunResult): string {
+  if (result.timedOut) return "timed out";
+  const line = result.stderr
+    .split("\n")
+    .find((l) => l.trim() !== "")
+    ?.trim();
+  return line || `exit ${result.exitCode}`;
+}
+
+/** capture() with stdout streamed to a file instead of a string: for
+ *  binary payloads (a tarball) that a string round trip would corrupt. */
+export function download(command: string[], toFile: string, options: RunOptions): RunResult {
+  const fd = openSync(toFile, "w");
+  try {
+    const proc = Bun.spawnSync(command, {
+      cwd: options.cwd,
+      env: options.env ? { ...process.env, ...options.env } : undefined,
+      stdout: fd,
+      stderr: "pipe",
+      timeout: options.timeoutMs,
+      killSignal: "SIGKILL",
+    });
+    return {
+      exitCode: proc.exitCode ?? 1,
+      stdout: "",
+      stderr: proc.stderr.toString(),
+      timedOut: proc.exitedDueToTimeout === true,
+    };
+  } finally {
+    closeSync(fd);
+  }
+}
+
+/** How a child ended: a normal exit, a signal death, or our deadline (the
+ *  SIGKILL is ours, so it is not reported as a signal). */
+export type ChildExit =
+  | { kind: "exited"; code: number }
+  | { kind: "signaled"; signal: string }
+  | { kind: "timed-out" };
+
+/** A child whose output belongs in the job log as it happens (stdio
+ *  inherited); only how it ended comes back. */
+export function run(command: string[], options: RunOptions): ChildExit {
+  const proc = Bun.spawnSync(command, {
+    cwd: options.cwd,
+    env: options.env ? { ...process.env, ...options.env } : undefined,
+    stdout: "inherit",
+    stderr: "inherit",
+    timeout: options.timeoutMs,
+    killSignal: "SIGKILL",
+  });
+  if (proc.exitedDueToTimeout === true) return { kind: "timed-out" };
+  if (proc.exitCode !== null) return { kind: "exited", code: proc.exitCode };
+  return { kind: "signaled", signal: proc.signalCode ?? "an unknown signal" };
 }

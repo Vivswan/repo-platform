@@ -44,8 +44,8 @@ describe("fleet-ci.yml", () => {
       expect.stringContaining("repo-platform/actions/validate-template-report@build"),
       "run",
     ]);
-    // The action needs the token for the freshness read and the sticky
-    // comment; the operator default (template-repo) is already this repo.
+    // The token serves the aligned tree fetch, the freshness read, and the
+    // sticky comment; the action takes no other input.
     expect(steps[1]?.id).toBe("template");
     expect(steps[1]?.with?.["github-token"]).toBe("${{ secrets.GITHUB_TOKEN }}");
     // The report action DEFERS the integrity verdict; the LAST step
