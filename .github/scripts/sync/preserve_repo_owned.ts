@@ -6,11 +6,7 @@
 // sync must never delete a repo's settings file - repo-platform's
 // settings-repos run merges it over the centrally computed managed
 // baseline and applies the result. A recovery re-render can de-render the
-// file too, so it is restored outright there. This step also runs the
-// one-time layering transition (settings_layering.ts): a settings.yml
-// still carrying the retired mergeable marker holds the old full
-// baseline, and is replaced with the identity starter - the PR body
-// lists the dropped overrides and open_pr.ts holds the PR for review.
+// file too, so it is restored outright there.
 //
 // The license (LICENSE.md, or a custom repo's own spelling) leaves the
 // render when a repo selects the custom-license module;
@@ -40,13 +36,12 @@
 // and by ci/upgrade_path_test.sh.
 //
 // Env: RECOVER; TARGET_DIR (default target); TARGET_REF and MODULES (for
-// the fleet-license re-seed); RUNNER_TEMP (the settings-layering and
-// removed-splits report files); HIDE_DETAILS; TARGET_DISPLAY / TARGET
+// the fleet-license re-seed); RUNNER_TEMP (the removed-splits report
+// file); HIDE_DETAILS; TARGET_DISPLAY / TARGET
 // (log label, in that order; defaults to TARGET_DIR).
 
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { parse } from "yaml";
 import { MANIFEST_NAME } from "../../../actions/shared/manifest.ts";
 import { env, error, hideDetails, notice, requireEnv } from "../shared/gha.ts";
 import { type HeadNonBlobKind, headEntry } from "../shared/git_head.ts";
@@ -58,15 +53,10 @@ import {
   must,
   timeoutExitCode,
 } from "../shared/proc.ts";
+import { ANSWERS_PATH, AnswersFileError, readAnswersFile } from "./answers_file.ts";
 import { type HeadSplit, headSplitEntries, repoOwnedText } from "./head_manifest.ts";
 import { clip, fenceFor } from "./preserve_local_content.ts";
-import { transitionRegistrationStarter } from "./registration_flip.ts";
-import {
-  REGISTRATION_FLIP_NAME,
-  REMOVED_SPLITS_NAME,
-  SETTINGS_LAYERING_NAME,
-} from "./section_files.ts";
-import { transitionSettingsStarter } from "./settings_layering.ts";
+import { REMOVED_SPLITS_NAME } from "./section_files.ts";
 
 const targetDir = env("TARGET_DIR", "target");
 const label = env("TARGET_DISPLAY") || env("TARGET") || targetDir;
@@ -137,8 +127,8 @@ export function showFleetLicense(ref: string, timeoutMs = DEFAULT_HANG_BOUND_MS)
   return Buffer.from(show.stdout);
 }
 
-/** The restore/re-seed half: repo-owned settings.yml, the layering
- * transition, custom-license restores, and the fleet-license re-seed. */
+/** The restore/re-seed half: repo-owned settings.yml, custom-license
+ * restores, and the fleet-license re-seed. */
 function restoreRepoOwned(): void {
   if (inHead(".github/settings.yml")) {
     if (recover) {
@@ -153,26 +143,6 @@ function restoreRepoOwned(): void {
       );
     }
   }
-
-  // The one-time layering transition (see the header): after the restore
-  // above, so a de-rendered-then-restored legacy file transitions in the
-  // same sync instead of waiting a round.
-  transitionSettingsStarter(
-    targetDir,
-    join(requireEnv("RUNNER_TEMP"), SETTINGS_LAYERING_NAME),
-    label,
-  );
-
-  // The one-run .repo-platform.yml ownership flip (registration_flip.ts):
-  // when the target HEAD's manifest still classes the registration file
-  // managed, reword its stale rendered header to the starter wording and
-  // write the informational PR-body note. Self-retiring: the trigger dies
-  // when the repo merges its first post-flip sync.
-  transitionRegistrationStarter(
-    targetDir,
-    join(requireEnv("RUNNER_TEMP"), REGISTRATION_FLIP_NAME),
-    label,
-  );
 
   // Only on the custom-license module: there the repo's own license is
   // repo-owned - LICENSE.md by convention, with the extensionless spelling
@@ -201,22 +171,18 @@ function restoreRepoOwned(): void {
       const show = showFleetLicense(targetRef);
       // The template carries the Required Notice as a jinja variable; render
       // it from the repo's recorded answer rather than seeding template text.
-      const answersPath = join(targetDir, ".github/.copier-answers.yml");
-      let answers: Record<string, unknown> = {};
-      if (existsSync(answersPath)) {
-        let doc: unknown;
-        try {
-          doc = parse(readFileSync(answersPath, "utf-8"));
-        } catch {
-          doc = undefined;
-        }
-        if (doc === undefined || doc === null || typeof doc !== "object" || Array.isArray(doc)) {
-          error(
-            `${label}: cannot re-seed the fleet license; .github/.copier-answers.yml is unreadable`,
-          );
-          process.exit(1);
-        }
-        answers = doc as Record<string, unknown>;
+      let answers: Record<string, unknown>;
+      try {
+        answers = readAnswersFile(targetDir).fields;
+      } catch (err) {
+        if (!(err instanceof AnswersFileError)) throw err;
+        // The parser's message can quote target file content; a hidden
+        // target gets the detail-free version.
+        const detail = hideDetails()
+          ? "unreadable (detail hidden: private repository)"
+          : err.message;
+        error(`${label}: cannot re-seed the fleet license; ${ANSWERS_PATH}: ${detail}`);
+        process.exit(1);
       }
       const holder = answers.copyright_holder;
       if (typeof holder !== "string" || holder === "") {

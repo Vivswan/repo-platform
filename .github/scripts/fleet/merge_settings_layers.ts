@@ -62,12 +62,6 @@ import {
   type SettingsLayer,
 } from "./settings_document.ts";
 
-// Re-exported ONLY for .github/scripts/sync/settings_layering.ts, which
-// still imports the boundary through this module; every other consumer
-// imports settings_document.ts (the owner) directly. Drop this line when
-// that import moves.
-export { parseSettingsDoc } from "./settings_document.ts";
-
 const REPO_ROOT = resolve(import.meta.dir, "..", "..", "..");
 export const OVERRIDE_PATH = join(REPO_ROOT, ".github/settings-override.yml");
 

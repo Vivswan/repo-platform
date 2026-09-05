@@ -13,10 +13,10 @@
 // Single owner of the file's location: BOTH paths or a non-file fails
 // loudly; NEITHER is fine (the update renders it fresh). Self-retiring once
 // the fleet has crossed. Invoked by reusable-template-sync.yml right after
-// the answers-file move and replayed by rehearse.ts in the same slot.
+// the registration check and replayed by rehearse.ts in the same slot.
 
 import { writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { parse } from "yaml";
 import { env, error, notice, requireEnv } from "../shared/gha.ts";
 import { declarationSource, readMirrors } from "./materialize_mirrors.ts";
@@ -126,6 +126,13 @@ function main(): number {
         `${display} carries something other than a regular file at ${SECURITY_PATH} or ` +
           `${LEGACY_SECURITY_PATH} (a directory or a symlink). The sync refuses to guess: fix ` +
           "the default branch by hand, then re-run the sync.",
+      );
+      return 1;
+    case "unsafe-parent":
+      error(
+        `${display}'s ${dirname(SECURITY_PATH)} is not a real directory (a symlink or a file), so ` +
+          `${LEGACY_SECURITY_PATH} cannot be moved beneath it. The sync refuses to write through ` +
+          "it: fix the default branch by hand, then re-run the sync.",
       );
       return 1;
   }

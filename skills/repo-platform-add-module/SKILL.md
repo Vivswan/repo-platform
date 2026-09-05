@@ -60,9 +60,8 @@ Per-module details - what is managed vs starter, parameters, companion steps, re
 modules: ["agents", "release-please", "issue-templates", "pr-title", "auto-assign", "nightly"]
 ```
 
-A typo is safe: a name the template does not know fails the sync run loudly instead of being dropped - and the safety net fires earlier than that: the `validate-template` job on the step-1 PR itself flags an unknown module name before merge. Two more caveats:
+A typo is safe: a name the template does not know fails the sync run loudly instead of being dropped - and the safety net fires earlier than that: the `validate-template` job on the step-1 PR itself flags an unknown module name before merge. One more caveat:
 
-- Older repos nest the selection under `template:`; add a top-level `modules:` list, which wins.
 - A brand-new module reaches a repo only through a template ref that ships it: the `build` branch must be rebuilt from the main merge that added it (build-branches runs on every push), and delivery still waits for the next sync run (weekly cron or dispatch); the rebuild alone syncs nothing.
 
 Expected-red window when adding a toolchain module (bun/node/deno): after the step-1 merge, `validate-template` reports the missing toolchain pin dotfile (`.bun-version` / `.node-version` / `.dvmrc`) until the sync PR lands it. That failure gates the repo's PRs through the all-green job's `ci` edge, so dispatch the sync promptly rather than hand-creating the dotfile.

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { boundedSpawnSync } from "../shared/bounded_spawn";
@@ -118,5 +118,44 @@ describe("normalize_src", () => {
     expect(result.exitCode).not.toBe(0);
     expect(result.stdout).toContain("detail hidden: private repository");
     expect(result.stdout).not.toContain("no _src_path line");
+  });
+
+  // The rewrite would otherwise follow the link and write wherever the
+  // target pointed it - outside its own checkout included - whether the
+  // link is the file itself or its .github parent.
+  test.each([
+    {
+      link: "the answers file",
+      plant: (target: string, outside: string) => {
+        rmSync(join(target, ".github/.copier-answers.yml"));
+        symlinkSync(
+          join(outside, ".copier-answers.yml"),
+          join(target, ".github/.copier-answers.yml"),
+        );
+      },
+      message: "not a regular file",
+    },
+    {
+      link: "the .github directory",
+      plant: (target: string, outside: string) => {
+        rmSync(join(target, ".github"), { recursive: true });
+        symlinkSync(outside, join(target, ".github"));
+      },
+      message: ".github is not a real directory",
+    },
+  ])("a symlink at $link is refused before any read or rewrite", ({ plant, message }) => {
+    const recorded = `_src_path: /home/user/repo-platform\n`;
+    const root = makeRoot(recorded);
+    const outside = join(root, "outside");
+    mkdirSync(outside);
+    writeFileSync(join(outside, ".copier-answers.yml"), recorded);
+    plant(join(root, "target"), outside);
+    git(join(root, "target"), "add", "-A");
+    git(join(root, "target"), "commit", "-qm", "symlinked answers");
+    const result = runScript(root, { HIDE_DETAILS: "true" });
+    expect(result.exitCode).not.toBe(0);
+    expect(result.stdout).toContain("::error::");
+    expect(result.stdout).toContain(message);
+    expect(readFileSync(join(outside, ".copier-answers.yml"), "utf-8")).toBe(recorded);
   });
 });

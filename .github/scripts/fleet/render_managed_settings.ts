@@ -12,9 +12,7 @@
 //
 // Consumers beyond the apply paths: scripts/generate.ts derives the
 // tracking-label validators' reserved-label roster from managedLabelNames,
-// scripts/check_ssot.ts anchors its label/ruleset rules here, and the
-// sync's settings_layering.ts transition renders each repo's managed
-// layers to diff the legacy settings.yml against.
+// and scripts/check_ssot.ts anchors its label/ruleset rules here.
 //
 // Inputs are repo facts: the module selection (the target repo's
 // .repo-platform.yml - selecting the settings-sync module there is the
@@ -50,6 +48,7 @@ import { parseAnswers } from "../../../scripts/render_dogfood.ts";
 import { parseFlags } from "../shared/flags.ts";
 import { fail, setOutput, warning } from "../shared/gha.ts";
 import { capture } from "../shared/proc.ts";
+import { ANSWERS_PATH, readAnswersBytes } from "../sync/answers_file.ts";
 import { RETIRED_MODULES } from "../sync/modules.ts";
 import { captureNetwork } from "./discovery.ts";
 import { mergeLayers } from "./merge_settings_layers.ts";
@@ -534,7 +533,7 @@ export function factsFromFetch(
   );
   let trackingLabels: { module: string; label: string }[] = [];
   if (streams.length > 0) {
-    const answers = fetch(repo, ".github/.copier-answers.yml", ref);
+    const answers = fetch(repo, ANSWERS_PATH, ref);
     if (answers === null) {
       throw new Error(
         `${repo}: selects tracking-stream module(s) but has no .github/.copier-answers.yml - ` +
@@ -556,7 +555,8 @@ export function factsFromFetch(
   return { modules, private: isPrivate, trackingLabels, prTitleWorkflowPresent };
 }
 
-/** Facts read from a local checkout: the sync's transition path. The
+/** Facts read from a local checkout: the sync's referenced-label check
+ *  (referenced_labels.ts) reads the target's post-update tree this way. The
  *  private fact prefers the checkout's DECLARED repository.private (the
  *  same precedence as the fetch path), falling back to the recorded
  *  answer - post-update the sync has already re-recorded the live value
@@ -568,27 +568,22 @@ export function factsFromTargetDir(dir: string, manifests: ModuleManifest[]): Re
     where(".repo-platform.yml"),
     manifests,
   );
-  const answersText = readFileSync(join(dir, ".github/.copier-answers.yml"), "utf-8");
+  const answersText = readAnswersBytes(dir).toString("utf-8");
   const settingsPath = join(dir, ".github/settings.yml");
   const declared = declaredPrivate(
     existsSync(settingsPath) ? readFileSync(settingsPath, "utf-8") : null,
   );
-  const recorded = parseYamlMapping(answersText, where(".github/.copier-answers.yml")).private;
+  const recorded = parseYamlMapping(answersText, where(ANSWERS_PATH)).private;
   if (declared === null && typeof recorded !== "boolean") {
     throw new Error(
-      `${where(".github/.copier-answers.yml")}: records no boolean private answer - ` +
+      `${where(ANSWERS_PATH)}: records no boolean private answer - ` +
         "the baseline's visibility-gated blocks cannot be computed",
     );
   }
   return {
     modules,
     private: declared ?? recorded === true,
-    trackingLabels: trackingLabelsFrom(
-      answersText,
-      modules,
-      manifests,
-      where(".github/.copier-answers.yml"),
-    ),
+    trackingLabels: trackingLabelsFrom(answersText, modules, manifests, where(ANSWERS_PATH)),
     prTitleWorkflowPresent: existsSync(join(dir, PR_TITLE_WORKFLOW)),
   };
 }

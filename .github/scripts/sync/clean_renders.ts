@@ -28,6 +28,7 @@ import { existsSync, renameSync, rmSync, writeFileSync, writeSync } from "node:f
 import { join } from "node:path";
 import { env, requireEnv } from "../shared/gha.ts";
 import { capture, must } from "../shared/proc.ts";
+import { ANSWERS_PATH } from "./answers_file.ts";
 
 /** Run a command; on failure forward a captured child's stdout (workflow
  * ::error:: commands parse from stdout, so swallowing it would silence the
@@ -71,8 +72,8 @@ export function ensureRenders(): CleanRenders {
   const renderNew = join(runnerTemp, "render-new");
 
   // The old render uses the answers recorded BEFORE this update (HEAD
-  // still points at the pre-update commit - the answers-file move and the
-  // _src_path normalization rode earlier commits, bytes preserved);
+  // still points at the pre-update commit - the security-policy move and
+  // the _src_path normalization rode earlier commits, bytes preserved);
   // captured even on the no-op
   // path so consumers of answers-old.yml never depend on call order.
   // Caveat: the renders are NOT re-captured on that path, so if HEAD ever
@@ -80,7 +81,7 @@ export function ensureRenders(): CleanRenders {
   // disagree with render-old. No sync step moves HEAD between the
   // materialize and consume steps; if one ever did, the mismatch surfaces
   // as retired-paths noise and validation failures - loud, not lossy.
-  const answersOldText = run(["git", "-C", targetDir, "show", "HEAD:.github/.copier-answers.yml"], {
+  const answersOldText = run(["git", "-C", targetDir, "show", `HEAD:${ANSWERS_PATH}`], {
     stdout: "pipe",
   });
   writeFileSync(join(runnerTemp, "answers-old.yml"), answersOldText);

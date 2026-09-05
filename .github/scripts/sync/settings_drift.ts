@@ -14,7 +14,7 @@
 // silently comparing nothing is how the ratification bug worked.
 //
 // Usage:
-//   bun .github/scripts/sync/settings_drift.ts --answers <file>
+//   bun .github/scripts/sync/settings_drift.ts --target-dir <checkout>
 //     --repo <owner/name>
 //     --in-repo-settings <target's .github/settings.yml path>
 //     --live-private <true|false> --live-description <text>
@@ -38,10 +38,15 @@ import { dirname, join } from "node:path";
 import { selectsSettingsSync } from "../fleet/build_settings_matrix.ts";
 import { parseFlags } from "../shared/flags.ts";
 import { escapeData, fail } from "../shared/gha.ts";
-import { AnswersFileError, type CopierAnswers, readAnswersFile } from "./answers_file.ts";
+import {
+  ANSWERS_PATH,
+  AnswersFileError,
+  type CopierAnswers,
+  readAnswersFile,
+} from "./answers_file.ts";
 
 const FLAGS = [
-  "--answers",
+  "--target-dir",
   "--repo",
   "--in-repo-settings",
   "--live-private",
@@ -178,21 +183,21 @@ function main(args: string[]): void {
   const display = flags["--display"] ?? repo;
   const hideDetails = flags["--hide-details"] === "true";
 
-  const answersPath = flags["--answers"];
+  const targetDir = flags["--target-dir"];
   let answers: CopierAnswers;
   try {
-    answers = readAnswersFile(answersPath);
+    answers = readAnswersFile(targetDir);
   } catch (err) {
     if (!(err instanceof AnswersFileError)) throw err;
     // The parser's message can quote target file content; a hidden
     // target gets the detail-free version.
     if (hideDetails) {
       fail(
-        `${display}: the recorded answers file cannot be read as a YAML mapping (detail ` +
+        `${display}: the recorded answers file cannot be read (detail ` +
           "hidden: private repository). Reproduce the sync locally - see docs/private-repos.md.",
       );
     }
-    fail(`${answersPath}: ${err.message}`);
+    fail(`${join(targetDir, ANSWERS_PATH)}: ${err.message}`);
   }
 
   const { drifts, errors } = detectDrift(

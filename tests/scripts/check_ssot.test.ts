@@ -8,7 +8,6 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { parse as parseYaml } from "yaml";
 import { stageComposedTreeArgv } from "../../.github/scripts/shared/stage_tree.ts";
-import { PIN_FLIPS } from "../../.github/scripts/sync/starter_pin_rollout";
 import {
   ACTIONS_BUN_SETUP_GUARD,
   ALL_GREEN_ROSTER,
@@ -24,16 +23,14 @@ import {
   bunTypesAheadMismatches,
   CHECK_RUN_LOOKUP,
   canonical,
-  composeAnchorNames,
-  DELIVERY_REF,
   declaredCheckName,
   deliveryRefMismatches,
+  deliveryRefTwinMismatches,
   expandCheckChain,
   extractUsesPins,
   firstDiff,
   fleetCiRenderMismatches,
   fleetWorkflowPinMismatches,
-  fragmentFilesFor,
   gatesOnModule,
   inlineFunctionCopies,
   isOwnPagesOrigin,
@@ -65,18 +62,13 @@ import {
   shellSegments,
   spawnSyncHazard,
   spawnSyncSites,
-  starterPinCoverage,
-  starterSelfPins,
-  starterTemplateFiles,
   stepCarriesWithKey,
   stripGeneratedRegions,
   templateSelfPins,
   topLevelProperties,
   unsafeStepCondition,
-  withToolchainSetup,
   zToDollar,
 } from "../../scripts/check_ssot";
-import { TOOLCHAIN_SETUP_FRAGMENT, TOOLCHAIN_SETUP_TARGETS } from "../../scripts/compose_template";
 import { actionSetsUpBun, MARKER_TOKENS, mdMarkers } from "../../scripts/generate";
 import { templateCarries } from "../../scripts/ts_extract.ts";
 
@@ -1273,141 +1265,23 @@ describe("ruleRosterMismatches", () => {
   });
 });
 
-describe("starterSelfPins", () => {
-  test("extracts jinja-username delivery pins, item and named shapes, quoted or not", () => {
-    const text = [
-      "      - uses: {{ github_username }}/repo-platform/actions/fuzz-issue@build",
-      "      - name: report",
-      '        uses: "{{ github_username }}/repo-platform/actions/fuzz-issue@main"',
-    ].join("\n");
-    expect(starterSelfPins(text, "f")).toEqual([
-      { file: "f", stem: "repo-platform/actions/fuzz-issue", ref: "build" },
-      { file: "f", stem: "repo-platform/actions/fuzz-issue", ref: "main" },
-    ]);
-  });
-
-  test("matches the token anywhere, like the rollout's rewriter: folded scalars and comments claim too", () => {
-    const folded = [
-      "        uses: >-",
-      "          {{ github_username }}/repo-platform/actions/x@v2",
-    ].join("\n");
-    expect(starterSelfPins(folded, "f")).toEqual([
-      { file: "f", stem: "repo-platform/actions/x", ref: "v2" },
-    ]);
-    expect(starterSelfPins("# {{ github_username }}/repo-platform/actions/x@v3", "f")).toEqual([
-      { file: "f", stem: "repo-platform/actions/x", ref: "v3" },
-    ]);
-  });
-
-  test("third-party, local, other-repo, and longer-owner pins are not delivery pins", () => {
-    const text = [
-      "      - uses: actions/checkout@v7",
-      "      - uses: ./actions/local",
-      "      - uses: {{ github_username }}/other-repo/actions/x@main",
-      "      - uses: Vivswan/repo-platform/actions/fuzz-issue@build",
-      // Renders as Evil<username>/... - a longer owner that merely ends
-      // in the username, which the rollout's owner boundary skips too.
-      "      - uses: Evil{{ github_username }}/repo-platform/actions/x@main",
-    ].join("\n");
-    expect(starterSelfPins(text, "f")).toEqual([]);
-  });
-});
-
-describe("composeAnchorNames and fragmentFilesFor", () => {
-  test("anchors name the fragments spliced into a starter, canonical or hint spellings", () => {
-    const names = composeAnchorNames("{# compose:auto-format #}\n{#- compose:checks-examples -#}");
-    expect(names).toEqual(["auto-format", "checks-examples"]);
-    const files = [
-      "templates/bun/fragments/auto-format.jinja",
-      "templates/bun/fragments/gitignore.jinja",
-      "templates/uv/fragments/checks-examples.jinja",
-      "templates/base/.github/workflows/ci.yml.jinja",
-    ];
-    expect(fragmentFilesFor(new Set(names), files)).toEqual([
-      "templates/bun/fragments/auto-format.jinja",
-      "templates/uv/fragments/checks-examples.jinja",
-    ]);
-  });
-
-  test("toolchain-setup rides its target anchors: the composer prepends it into their fragments", () => {
-    for (const target of TOOLCHAIN_SETUP_TARGETS) {
-      expect(withToolchainSetup(new Set([target]))).toEqual(
-        new Set([target, TOOLCHAIN_SETUP_FRAGMENT]),
-      );
-    }
-    expect(withToolchainSetup(new Set(["gitignore"]))).toEqual(new Set(["gitignore"]));
-  });
-});
-
-describe("starterTemplateFiles", () => {
-  const starters = new Set([".github/workflows/nightly.yml", ".github/workflows/auto-format.yml"]);
-
-  test("keeps starter-landed sources, filename gates stripped, and drops the rest", () => {
-    const files = [
-      "templates/nightly/.github/workflows/nightly.yml.jinja",
-      "templates/base/.github/workflows/{% if has_toolchain %}auto-format.yml{% endif %}.jinja",
-      "templates/base/.github/workflows/ci.yml.jinja",
-      "templates/module.schema.json",
-    ];
-    expect(starterTemplateFiles(files, starters)).toEqual([
-      "templates/nightly/.github/workflows/nightly.yml.jinja",
-      "templates/base/.github/workflows/{% if has_toolchain %}auto-format.yml{% endif %}.jinja",
-    ]);
-  });
-});
-
-describe("starterPinCoverage", () => {
-  const flip = { stem: "repo-platform/actions/fuzz-issue", from: ["main"], to: "build2" };
-  const pin = (ref: string) => ({
-    file: "templates/nightly/.github/workflows/nightly.yml.jinja",
-    stem: "repo-platform/actions/fuzz-issue",
-    ref,
-  });
-
-  test("a pin at the delivery ref needs no flip", () => {
-    expect(starterPinCoverage([pin("build")], [], "build")).toEqual([]);
-  });
-
-  test("a pin change without a rollout entry fails, naming the rollout", () => {
-    const mismatches = starterPinCoverage([pin("v2")], [], "build");
-    expect(mismatches).toHaveLength(1);
-    expect(mismatches[0].file).toBe("templates/nightly/.github/workflows/nightly.yml.jinja");
-    expect(mismatches[0].expected).toContain("PIN_FLIPS");
-    expect(mismatches[0].got).toContain("@v2");
-  });
-
-  test("a pin change covered by its flip's target passes", () => {
-    expect(starterPinCoverage([pin("build2")], [flip], "build")).toEqual([]);
-  });
-
-  test("a flip whose target no starter pins is stale and fails", () => {
-    const mismatches = starterPinCoverage([pin("build")], [flip], "build");
-    expect(mismatches).toHaveLength(1);
-    expect(mismatches[0].file).toBe(".github/scripts/sync/starter_pin_rollout.ts");
-    expect(mismatches[0].expected).toContain("@build2");
-  });
-
-  test("a flip with no retired refs, a self-targeting one, or a duplicate stem is malformed", () => {
-    const target = pin("build2");
-    expect(starterPinCoverage([target], [{ ...flip, from: [] }], "build")[0].got).toContain(
-      "ports nothing",
-    );
-    expect(
-      starterPinCoverage([target], [{ ...flip, from: ["main", "build2"] }], "build")[0].got,
-    ).toContain("both a retired ref and the target");
-    const doubled = starterPinCoverage([target], [flip, { ...flip, from: ["actions"] }], "build");
-    expect(doubled[0].expected).toContain("one PIN_FLIPS entry");
-  });
-
-  test("the shipped PIN_FLIPS cover their own targets at the delivery ref", () => {
-    // The live rollout's flips all port TO the delivery ref, so a tree
-    // whose starters pin @build satisfies both directions.
-    const pins = PIN_FLIPS.map((entry) => pin(entry.to));
-    expect(starterPinCoverage(pins, PIN_FLIPS, DELIVERY_REF)).toEqual([]);
-  });
-});
-
 describe("renderedSelfPins and deliveryRefMismatches (fleet-refs-ride-build)", () => {
+  test("DELIVERY_REF must equal the branch publish.ts advances, either rename alone reds", () => {
+    expect(deliveryRefTwinMismatches("build", "build")).toEqual([]);
+    for (const [published, deliveryRef] of [
+      ["build2", "build"],
+      ["build", "build2"],
+    ]) {
+      expect(deliveryRefTwinMismatches(published, deliveryRef)).toEqual([
+        {
+          file: "scripts/check_ssot.ts DELIVERY_REF",
+          expected: `'${published}' (publish.ts's BRANCH - the branch the fleet's pins execute from)`,
+          got: `'${deliveryRef}'`,
+        },
+      ]);
+    }
+  });
+
   test("extracts rendered delivery pins - actions and reusable workflows alike", () => {
     const text = [
       "      - uses: Vivswan/repo-platform/actions/fuzz-issue@build",
@@ -1437,7 +1311,7 @@ describe("renderedSelfPins and deliveryRefMismatches (fleet-refs-ride-build)", (
     const planted =
       "    uses: {{ github_username }}/repo-platform/.github/workflows/reusable-pages.yml@main";
     const file = "templates/pages/.github/workflows/pages.yml.jinja";
-    const mismatches = deliveryRefMismatches(starterSelfPins(planted, file), "build");
+    const mismatches = deliveryRefMismatches(templateSelfPins(planted, file), "build");
     expect(mismatches).toHaveLength(1);
     expect(mismatches[0].file).toBe(file);
     expect(mismatches[0].expected).toContain(
@@ -1446,7 +1320,7 @@ describe("renderedSelfPins and deliveryRefMismatches (fleet-refs-ride-build)", (
     expect(mismatches[0].got).toBe("@main");
     // Restored to the delivery ref, the same content is green.
     const restored = planted.replace("@main", "@build");
-    expect(deliveryRefMismatches(starterSelfPins(restored, file), "build")).toEqual([]);
+    expect(deliveryRefMismatches(templateSelfPins(restored, file), "build")).toEqual([]);
   });
 
   test("a planted @main golden-render ref reds the same way", () => {

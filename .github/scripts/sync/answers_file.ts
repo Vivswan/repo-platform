@@ -4,8 +4,10 @@
 // through this module instead of re-scanning lines with their own
 // semantics.
 
-import { readFileSync } from "node:fs";
+import { lstatSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { isMap, isScalar, parse, parseAllDocuments, parseDocument, visit } from "yaml";
+import { walkParents } from "./checkout_path.ts";
 
 export interface CopierAnswers {
   /** The recorded _commit VERBATIM, or "" when absent or not a string.
@@ -43,8 +45,47 @@ function commitOf(text: string): string {
   return typeof value === "string" ? value : "";
 }
 
-export function readAnswersFile(path: string): CopierAnswers {
-  const text = readFileSync(path, "utf-8");
+/** The recorded answers file's path inside a target checkout (copier.yml
+ * `_answers_file`). */
+export const ANSWERS_PATH = ".github/.copier-answers.yml";
+
+/** The raw bytes of the target's recorded answers. Every segment of
+ * ANSWERS_PATH beneath the checkout root is target-controlled, and a
+ * symlink at any of them - the file itself, or `.github` pointing
+ * elsewhere - would let a read (and every later rewrite: the _src_path
+ * normalization, copier's own) reach outside the checkout, so the parents
+ * must be real directories and the file a regular file. Every sync-side
+ * read of the file goes through here, so the refusal holds in whatever
+ * order the steps run. */
+export function readAnswersBytes(targetDir: string): Buffer {
+  const parents = walkParents(targetDir, ANSWERS_PATH);
+  if (parents.kind === "missing") throw new AnswersFileError("missing from the default branch");
+  if (parents.kind === "not-a-directory") {
+    throw new AnswersFileError(
+      `${parents.segment} is not a real directory (a symlink or a file); the sync refuses to read through it`,
+    );
+  }
+  const path = join(targetDir, ANSWERS_PATH);
+  let kind: ReturnType<typeof lstatSync>;
+  try {
+    kind = lstatSync(path);
+  } catch (err) {
+    // Only "nothing at this path" is absence; a failure to look (EACCES,
+    // EIO, ELOOP) is not, and propagates.
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code !== "ENOENT" && code !== "ENOTDIR") throw err;
+    throw new AnswersFileError("missing from the default branch");
+  }
+  if (!kind.isFile()) {
+    throw new AnswersFileError(
+      "not a regular file (a directory or a symlink); the sync refuses to read through it",
+    );
+  }
+  return readFileSync(path);
+}
+
+export function readAnswersFile(targetDir: string): CopierAnswers {
+  const text = readAnswersBytes(targetDir).toString("utf-8");
   let parsed: unknown;
   try {
     parsed = parse(text, { logLevel: "error" });

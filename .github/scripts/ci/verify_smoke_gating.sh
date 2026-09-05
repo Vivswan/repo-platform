@@ -289,7 +289,8 @@ if has settings-sync; then
   # assembled centrally at apply time and merged UNDER this file - none of
   # it may render into the starter again (a rendered copy would shadow
   # baseline evolution forever), and the retired mergeable marker must
-  # never come back (it is the one-time transition's trigger).
+  # never come back: the starter is repo-owned and the baseline is merged
+  # under it, so nothing may class the file as a merge target again.
   absent "type: code_scanning" "$SMOKE/.github/settings.yml"
   absent "security_and_analysis:" "$SMOKE/.github/settings.yml"
   absent_line "labels:" "$SMOKE/.github/settings.yml"

@@ -26,16 +26,11 @@ import { env, hideDetails, requireEnv, setOutput } from "../shared/gha.ts";
 import { capture, mustCapture, redactText } from "../shared/proc.ts";
 import { clip, escapeControlBytes } from "./preserve_local_content.ts";
 import {
-  ANSWERS_MOVE_NAME,
-  GATE_REWORK_NAME,
   MIRRORS_NOTE_NAME,
   MIRRORS_REVIEW_NAME,
   REFERENCED_LABELS_NAME,
-  REGISTRATION_FLIP_NAME,
   REMOVED_SPLITS_NAME,
   SECURITY_MOVE_NAME,
-  SETTINGS_LAYERING_NAME,
-  STARTER_PINS_NAME,
   TAIL_SHRANK_NAME,
 } from "./section_files.ts";
 
@@ -196,9 +191,6 @@ if (recover === "recopy") {
 // - tail-shrank: tail_tripwire.ts's post-stamp check - the structural
 //   rebuild should make a trip impossible, so a non-empty report is a
 //   sync bug and the PR waits for a human.
-// - settings-layering: the one-time settings.yml transition
-//   (settings_layering.ts) - dropped overrides need a human to re-add the
-//   wanted ones.
 // - CARRY_REVIEW_FILE: carries that need a human (an appendix, reset
 //   managed-half edits, duplicate markers) - review-only, the carried
 //   summary already names the files.
@@ -227,34 +219,12 @@ const sections: FlagSection[] = [
         .join("\n")}`,
     forcesReview: false,
   },
-  // starter_pin_rollout.ts's transition note: the one-run port of starter
-  // workflows' action pins onto the delivery branch. Informational, like
-  // the retired-file list above - the rewrite is byte-surgical and
-  // exact-match-only, and hand-set pins are listed but deliberately left
-  // alone - so it never forces the manual path by itself.
-  { path: join(runnerTemp, STARTER_PINS_NAME), render: slurp, forcesReview: false },
-  // gate_rework.ts's transition note: the verdict wrapper is deleted and
-  // the required check becomes ci.yml's own all-green job - the PR gates
-  // itself (its own CI run posts the check), so the note is informational
-  // and never forces the manual path.
-  { path: join(runnerTemp, GATE_REWORK_NAME), render: slurp, forcesReview: false },
-  // relocate_answers.ts's transition note: the one-time byte-for-byte move
-  // of the recorded answers file from the repository root to
-  // .github/.copier-answers.yml. Informational - the bytes are untouched
-  // and copier's own render follows the same path - so it never forces
-  // the manual path.
-  { path: join(runnerTemp, ANSWERS_MOVE_NAME), render: slurp, forcesReview: false },
   // relocate_security_policy.ts's transition note: the one-time
   // byte-for-byte move of SECURITY.md to .github/SECURITY.md ahead of
   // copier, so the local-content carry finds the repository-owned half at
   // the new path. Informational - nothing leaves the repository - so it
   // never forces the manual path.
   { path: join(runnerTemp, SECURITY_MOVE_NAME), render: slurp, forcesReview: false },
-  // registration_flip.ts's transition note: the one-run .repo-platform.yml
-  // ownership flip (managed -> repo-owned starter). Informational - nothing
-  // the repo declared changes and enforcement only relaxes, so it never
-  // forces the manual path.
-  { path: join(runnerTemp, REGISTRATION_FLIP_NAME), render: slurp, forcesReview: false },
   {
     path: requireEnv("WITHHELD_FILE"),
     render: (path) => `> [!WARNING]
@@ -277,7 +247,6 @@ ${lines(path)
   // write, so their copies are stale in this update - a human fixes the
   // declaration (or the files) before merging.
   { path: join(runnerTemp, MIRRORS_REVIEW_NAME), render: slurp, forcesReview: true },
-  { path: join(runnerTemp, SETTINGS_LAYERING_NAME), render: slurp, forcesReview: true },
   // referenced_labels.ts's report: label(s) the target's issue forms or
   // workflows reference that the merged settings label roster does not
   // declare - the apply deletes undeclared labels, so each reference is
@@ -424,7 +393,7 @@ body = capBody(body);
 // markers), a tripped tail tripwire, withheld workflow files, failed
 // validation, a recovery re-render, a dispatch that forced manual review,
 // a deleted split-class file (its repository-owned half leaves with it),
-// out-of-band settings drift, dropped settings-layering overrides, a
+// out-of-band settings drift, a
 // referenced-but-undeclared label (the apply deletes undeclared labels,
 // so the reference breaks), a refused mirror declaration (its copies are
 // stale in this update) - stays
@@ -517,6 +486,6 @@ if (!needsReview) {
   }
 } else {
   console.log(
-    "auto-merge left off: this PR needs review (conflicts, split-file carries needing review, a tripped tail tripwire, withheld files, failed validation, out-of-band settings drift, dropped settings-layering overrides, a referenced-but-undeclared label, a refused mirror declaration, a recovery re-render, a forced-manual dispatch, or a deleted split-class file whose repository-owned half leaves with it).",
+    "auto-merge left off: this PR needs review (conflicts, split-file carries needing review, a tripped tail tripwire, withheld files, failed validation, out-of-band settings drift, a referenced-but-undeclared label, a refused mirror declaration, a recovery re-render, a forced-manual dispatch, or a deleted split-class file whose repository-owned half leaves with it).",
   );
 }

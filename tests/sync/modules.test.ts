@@ -15,23 +15,16 @@ describe("readModules", () => {
       yaml: "modules: [agents, uv]",
       modules: ["agents", "uv"],
     },
-    {
-      reason: "the legacy nested template.modules shape is bridged",
-      yaml: "template:\n  repository: Vivswan/repo-platform\n  modules: [agents, bun]",
-      modules: ["agents", "bun"],
-    },
-    {
-      reason: "top-level modules wins over the legacy nested key",
-      yaml: "modules: [uv]\ntemplate:\n  modules: [agents]",
-      modules: ["uv"],
-    },
     { reason: "an explicit empty list is valid", yaml: "modules: []", modules: [] },
   ])("reads $reason", ({ yaml, modules }) => {
     expect(readModules(parse(yaml))).toEqual({ modules, errors: [] });
   });
 
-  test("fails when no module selection exists (never assumes [])", () => {
-    expect(readModules(parse("other: value"))).toEqual({
+  test.each([
+    { reason: "no modules key", yaml: "other: value" },
+    { reason: "only a nested template.modules key", yaml: "template:\n  modules: [agents]" },
+  ])("fails when no top-level module selection exists ($reason; never assumes [])", ({ yaml }) => {
+    expect(readModules(parse(yaml))).toEqual({
       modules: null,
       errors: [
         `${FILE}: no module selection found - add a top-level \`modules: [...]\` list (the sync never assumes an empty selection, which would strip every module from the repo)`,

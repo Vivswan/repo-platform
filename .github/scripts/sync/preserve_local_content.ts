@@ -300,10 +300,6 @@ export type SplitEntry = { [K in GrammarId]: { path: string } & SplitShapes[K] }
  * marker, so an empty marker selects the synthetic empty line at EOF. */
 const ASCII_MARKER_RE = /^[\x20-\x7e]+$/;
 
-// isCleanRelativePath moved to head_manifest.ts (the shared manifest-key
-// trust boundary); re-exported for starter_pin_rollout.ts and the tests.
-export { isCleanRelativePath };
-
 /** The per-grammar split-entry parsers, total over GrammarId BY TYPE: a
  * GRAMMAR table row with no parser here is a tsc error, never a runtime
  * fallthrough. The parser re-checks what the manifest text claims (the

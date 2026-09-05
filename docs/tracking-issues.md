@@ -6,7 +6,7 @@ The [fuzzer](fuzzer.md) and [nightly](nightly.md) modules each keep one open Git
 
 Filing and closing come from the `fuzz-issue` composite action ([actions/fuzz-issue](../actions/fuzz-issue/action.yml); it serves any nightly stream), pinned at the green-gated `build` delivery branch like every other managed action. It needs `gh` on the runner: GitHub-hosted runners preinstall it, self-hosted runners must provide it.
 
-Because the starters are repo-owned, template sync never re-renders them, so the `fuzz-issue` pin inside a starter stays whatever was last written. New renders pin `@build`; repos rendered when the pin was `@main` or the retired `@actions` had it ported in place by a one-run sync-side rewrite (`starter_pin_rollout.ts` - exact retired pins only; a hand-changed pin is left alone and listed as skipped). A breaking change to the action's inputs still needs a manual edit in each repo, announced loudly in the change's PR.
+Because the starters are repo-owned, template sync never re-renders them, so the `fuzz-issue` pin inside a starter stays whatever was last written. New renders pin `@build`. A pin move or a breaking change to the action's inputs still needs a manual edit in each repo, announced loudly in the change's PR.
 
 ## The label is the stream
 

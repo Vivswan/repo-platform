@@ -31,9 +31,6 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-// Read the module list from parsed .repo-platform.yml data: the top-level
-// `modules` key wins; deployed repos still carry the legacy nested
-// `template.modules` shape, so that bridges until their first push sync.
 export function readModules(
   data: unknown,
   label = ".repo-platform.yml",
@@ -41,12 +38,8 @@ export function readModules(
   if (!isPlainObject(data)) {
     return { modules: null, errors: [`${label}: top level must be a mapping`] };
   }
-  let raw: unknown = data.modules;
-  let key = "modules";
-  if (raw === undefined && isPlainObject(data.template)) {
-    raw = data.template.modules;
-    key = "template.modules";
-  }
+  const raw: unknown = data.modules;
+  const key = "modules";
   if (raw === undefined) {
     return {
       modules: null,

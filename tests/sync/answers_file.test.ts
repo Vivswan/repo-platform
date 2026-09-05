@@ -1,18 +1,26 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parse } from "yaml";
 import {
+  ANSWERS_PATH,
   AnswersFileError,
   dataFileYaml,
   readAnswersFile,
 } from "../../.github/scripts/sync/answers_file.ts";
 
+/** A checkout root with only its .github/ directory. */
+function checkout(): string {
+  const dir = mkdtempSync(join(tmpdir(), "answers-file-"));
+  mkdirSync(join(dir, ".github"));
+  return dir;
+}
+
 function read(content: string) {
-  const path = join(mkdtempSync(join(tmpdir(), "answers-file-")), "answers.yml");
-  writeFileSync(path, content);
-  return readAnswersFile(path);
+  const dir = checkout();
+  writeFileSync(join(dir, ANSWERS_PATH), content);
+  return readAnswersFile(dir);
 }
 
 describe("readAnswersFile", () => {
@@ -51,6 +59,69 @@ describe("readAnswersFile", () => {
   test("unparseable YAML throws AnswersFileError naming the parse failure", () => {
     expect(() => read("a: [\n")).toThrow(AnswersFileError);
     expect(() => read("a: [\n")).toThrow("cannot read as YAML");
+  });
+
+  // Every segment under the checkout is target-controlled: a symlink at
+  // the file OR at .github would let the read and copier's later write
+  // escape the checkout, so only a real directory holding a regular file
+  // is an answers file - even when the link resolves to valid answers.
+  const VALID = "_commit: abc1234\n";
+  test.each([
+    {
+      shape: "no .github directory",
+      plant: (dir: string) => rmSync(join(dir, ".github"), { recursive: true }),
+      message: "missing from the default branch",
+    },
+    { shape: "no file", plant: () => {}, message: "missing from the default branch" },
+    {
+      shape: ".github as a file",
+      plant: (dir: string) => {
+        rmSync(join(dir, ".github"), { recursive: true });
+        writeFileSync(join(dir, ".github"), VALID);
+      },
+      message: ".github is not a real directory",
+    },
+    {
+      shape: ".github as a symlink to a directory holding valid answers",
+      plant: (dir: string) => {
+        rmSync(join(dir, ".github"), { recursive: true });
+        mkdirSync(join(dir, "elsewhere"));
+        writeFileSync(join(dir, "elsewhere", ".copier-answers.yml"), VALID);
+        symlinkSync(join(dir, "elsewhere"), join(dir, ".github"));
+      },
+      message: ".github is not a real directory",
+    },
+    {
+      shape: "the file as a directory",
+      plant: (dir: string) => mkdirSync(join(dir, ANSWERS_PATH)),
+      message: "not a regular file",
+    },
+    {
+      shape: "the file as a symlink to valid answers",
+      plant: (dir: string) => {
+        writeFileSync(join(dir, "real.yml"), VALID);
+        symlinkSync(join(dir, "real.yml"), join(dir, ANSWERS_PATH));
+      },
+      message: "not a regular file",
+    },
+  ])("$shape throws AnswersFileError", ({ plant, message }) => {
+    const dir = checkout();
+    plant(dir);
+    expect(() => readAnswersFile(dir)).toThrow(AnswersFileError);
+    expect(() => readAnswersFile(dir)).toThrow(message);
+  });
+
+  test("a failure to look (ELOOP through a symlink loop) propagates, never reads as absence", () => {
+    const dir = mkdtempSync(join(tmpdir(), "answers-file-"));
+    symlinkSync(join(dir, "loop"), join(dir, "loop"));
+    let caught: unknown;
+    try {
+      readAnswersFile(join(dir, "loop"));
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).not.toBeInstanceOf(AnswersFileError);
+    expect((caught as NodeJS.ErrnoException).code).toBe("ELOOP");
   });
 });
 

@@ -1,7 +1,8 @@
 // Shared mechanics for the sync's one-shot file relocations (a rendered
-// path moving from the repository root under .github/): probe both
-// spellings without reading through symlinks, and `git mv` a legacy-path
-// file so the blob rides the rename with its bytes untouched. Each
+// path moving from the repository root under .github/): refuse a
+// destination whose parent is not a real directory, probe both spellings
+// without reading through symlinks, and `git mv` a legacy-path file so
+// the blob rides the rename with its bytes untouched. Each
 // transition script owns its own verdict policy (which locations are
 // errors) and its own PR-body note; this module owns only the probe and
 // the move, so the two can never disagree on what "a file at this path"
@@ -11,8 +12,9 @@ import { lstatSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { identityArgs, SYNC_IDENTITY } from "../shared/git_identity.ts";
 import { must } from "../shared/proc.ts";
+import { walkParents } from "./checkout_path.ts";
 
-export type Location = "in-place" | "moved" | "missing" | "both" | "not-a-file";
+export type Location = "in-place" | "moved" | "missing" | "both" | "not-a-file" | "unsafe-parent";
 
 /** What sits at `path`: a regular file, nothing, or something else -
  * probed with lstat so a symlink never reads as the file it points at.
@@ -35,9 +37,16 @@ export function entryKind(path: string): "file" | "absent" | "other" {
 
 /** Where the target keeps the file: at `current`, at `legacy` (then moved
  * to `current` with `git mv`, bytes untouched, left STAGED for the caller
- * to commit), at neither, at both, or as something other than a regular
- * file. The caller decides which of these are errors. */
+ * to commit), at neither, at both, as something other than a regular
+ * file, or beneath a parent that is not a real directory (a symlinked or
+ * file-shaped `.github`: probing through it would judge outside content,
+ * and `git mv` into it exits 0 and writes wherever the link points, so
+ * this is answered before either). A missing parent is created by the
+ * move. The caller decides which of these are errors. */
 export function relocateFile(targetDir: string, legacy: string, current: string): Location {
+  for (const rel of [legacy, current]) {
+    if (walkParents(targetDir, rel).kind === "not-a-directory") return "unsafe-parent";
+  }
   const legacyKind = entryKind(join(targetDir, legacy));
   const currentKind = entryKind(join(targetDir, current));
   if (legacyKind === "other" || currentKind === "other") return "not-a-file";

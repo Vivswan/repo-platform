@@ -101,12 +101,14 @@ function makeTarget(files: Record<string, string | { symlinkTo: string }>): stri
 function runPreserve(
   workspace: string,
   target: string,
+  hideDetails = false,
 ): { exitCode: number; stdout: string; license: string | null } {
   const runnerTemp = mkdtempSync(join(tmpdir(), "preserve-owned-rt-"));
   const proc = boundedSpawnSync(["bun", script], {
     cwd: workspace,
     env: {
       ...gitFreeEnv(),
+      HIDE_DETAILS: hideDetails ? "true" : "",
       TARGET_DIR: target,
       TARGET_REF,
       MODULES: '["uv"]',
@@ -175,13 +177,34 @@ describe("preserve_repo_owned fleet-license re-seed", () => {
 
   // Every bad-answers shape fails the same way: exit 1, the one message
   // naming what is missing, no license seeded. `answers: null` is no
-  // answers file at all.
+  // answers file at all. The answers file is read through the shared
+  // boundary (answers_file.ts), so a symlinked file or a symlinked .github
+  // is refused here exactly as every other sync-side reader refuses it.
+  const validAnswers = 'copyright_holder: "Vivswan Shah"\ngithub_username: Vivswan\n';
   test.each([
-    { reason: "no answers file", answers: null, message: "records no copyright_holder" },
+    { reason: "no answers file", answers: null, message: "missing from the default branch" },
     {
       reason: "answers that are not a YAML mapping",
       answers: "- not\n- a\n- mapping\n",
-      message: ".github/.copier-answers.yml is unreadable",
+      message: "top level must be a mapping",
+    },
+    {
+      reason: "the answers file as a symlink to valid answers",
+      answers: null,
+      files: {
+        "elsewhere.yml": validAnswers,
+        ".github/.copier-answers.yml": { symlinkTo: "../elsewhere.yml" },
+      },
+      message: "not a regular file",
+    },
+    {
+      reason: ".github as a symlink to a directory holding valid answers",
+      answers: null,
+      files: {
+        "elsewhere/.copier-answers.yml": validAnswers,
+        ".github": { symlinkTo: "elsewhere" },
+      },
+      message: ".github is not a real directory",
     },
     {
       reason: "missing copyright_holder",
@@ -223,15 +246,31 @@ describe("preserve_repo_owned fleet-license re-seed", () => {
     },
   ])(
     "bad recorded answers fail loudly instead of seeding template text: $reason",
-    ({ answers, message }) => {
+    ({ answers, files, message }) => {
       const workspace = makeWorkspace(licenseTemplateSource);
-      const target = makeTarget(answers === null ? {} : { ".github/.copier-answers.yml": answers });
+      const target = makeTarget(
+        files ?? (answers === null ? {} : { ".github/.copier-answers.yml": answers }),
+      );
       const result = runPreserve(workspace, target);
       expect(result.exitCode).toBe(1);
       expect(result.stdout).toContain(message);
       expect(result.license).toBeNull();
     },
   );
+
+  test("a hide-details target's unreadable answers file fails without quoting its content", () => {
+    // The parser's message quotes the offending source line, which is
+    // target content; the public log gets only the detail-free version.
+    const workspace = makeWorkspace(licenseTemplateSource);
+    const target = makeTarget({ ".github/.copier-answers.yml": "secret_token_line: [\n" });
+    const result = runPreserve(workspace, target, true);
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain(
+      "cannot re-seed the fleet license; .github/.copier-answers.yml: unreadable (detail hidden: private repository)",
+    );
+    expect(result.stdout).not.toContain("secret_token_line");
+    expect(result.license).toBeNull();
+  });
 });
 
 describe("preserve_repo_owned removed-splits hold", () => {
