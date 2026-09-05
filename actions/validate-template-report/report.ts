@@ -1,22 +1,24 @@
 #!/usr/bin/env bun
 // The validate-template job's reporting: one sticky PR comment plus the
-// step summary, assembled from the validator's findings/advisories files
-// and the freshness step's verdict. Ported line-for-line from the inline
-// bash the fleet ci.yml template used to carry; the behaviour contract is
-// pinned by tests/actions/validate_template_report.test.ts.
+// step summary, assembled from the aligned validator's findings/advisories
+// files, the latest validator's pair, and the freshness step's verdict.
+// Ported from the inline bash the fleet ci.yml template used to carry; the
+// behaviour contract is pinned by tests/actions/validate_template_report.test.ts.
 //
-// The contract: INTEGRITY blocks (managed content changed out of band)
-// while FRESHNESS only informs, and this script itself NEVER fails the
-// job - the caller's LAST step re-raises the deferred integrity verdict,
-// so the comment here is already posted when the gate goes red. One
-// comment is kept per PR (found by MARKER) rather than one per push, a
-// clean-and-fresh run leaves no new comment but clears a stale one, and
-// every reporting failure degrades to a warning with the findings still
-// in the job summary.
+// The contract: INTEGRITY blocks (managed content changed out of band, as
+// judged by the validator at the repository's own `_commit`), the LATEST
+// pass only warns (rules the next sync brings), FRESHNESS only informs,
+// and this script itself NEVER fails the job - the caller's LAST step
+// re-raises the deferred integrity verdict, so the comment here is
+// already posted when the gate goes red. One comment is kept per PR
+// (found by MARKER) rather than one per push, a clean-and-fresh run
+// leaves no new comment but clears a stale one, and every reporting
+// failure degrades to a warning with the findings still in the job summary.
 //
 // Env: GH_TOKEN, GITHUB_REPOSITORY, GITHUB_STEP_SUMMARY, FINDINGS,
-// ADVISORIES, FRESHNESS (the three markdown files), FRESHNESS_STATE,
-// EVENT_NAME, PR_NUMBER, RUN_URL.
+// ADVISORIES, LATEST_FINDINGS, LATEST_ADVISORIES, FRESHNESS (the five
+// markdown files), ALIGNED_REASON (why the aligned validator never ran,
+// else empty), FRESHNESS_STATE, EVENT_NAME, PR_NUMBER, RUN_URL.
 
 import { appendFileSync, readFileSync, statSync } from "node:fs";
 import { capture, env, requireEnv, warning } from "./runtime.ts";
@@ -32,6 +34,9 @@ const MARKER = "<!-- repo-platform:validate-template -->";
 
 const findingsFile = requireEnv("FINDINGS");
 const advisoriesFile = requireEnv("ADVISORIES");
+const alignedReason = env("ALIGNED_REASON");
+const latestFindingsFile = requireEnv("LATEST_FINDINGS");
+const latestAdvisoriesFile = requireEnv("LATEST_ADVISORIES");
 const freshnessFile = requireEnv("FRESHNESS");
 const freshnessState = env("FRESHNESS_STATE");
 const eventName = requireEnv("EVENT_NAME");
@@ -61,11 +66,15 @@ const readTrimmed = (path: string, fallback = ""): string => {
 };
 
 // An absent findings file means the validator never got far enough to
-// write one, which is a setup failure, not a clean tree.
+// write one, which is a setup failure, not a clean tree. When aligned.ts
+// itself refused to run it, its reason says why.
 const findingsSize = sizeOfFile(findingsFile);
 let integrity: string;
 let blocking: boolean;
-if (findingsSize === null) {
+if (alignedReason !== "") {
+  integrity = `#### Integrity\n\nNot judged: ${alignedReason} This FAILS the check.`;
+  blocking = true;
+} else if (findingsSize === null) {
   integrity = `#### Integrity\n\nThe validator exited before reporting. See the [run log](${runUrl}).`;
   blocking = true;
 } else if (findingsSize > 0) {
@@ -81,6 +90,29 @@ if (findingsSize === null) {
 // repository reading as blocked.
 const advice = (sizeOfFile(advisoriesFile) ?? 0) > 0 ? `\n\n${readTrimmed(advisoriesFile)}` : "";
 
+/** The `- ` items of a findings or advisories file (its headings carry
+ *  only counts). */
+const bullets = (path: string): string[] =>
+  readTrimmed(path)
+    .split("\n")
+    .filter((line) => line.startsWith("- "));
+
+// The build tip's validator applies the rules the next sync PR brings, so
+// its findings are warnings, never a verdict, and anything the aligned
+// validator already reported is not said twice. A latest pass that never
+// wrote its findings is a setup failure worth a line, not silence.
+const LATEST_HEADING = "#### After your next sync";
+const alreadySaid = new Set([...bullets(findingsFile), ...bullets(advisoriesFile)]);
+const upcoming = [...bullets(latestFindingsFile), ...bullets(latestAdvisoriesFile)].filter(
+  (line) => !alreadySaid.has(line),
+);
+const latest =
+  sizeOfFile(latestFindingsFile) === null
+    ? `\n\n${LATEST_HEADING}\n\nThe current template's validator exited before reporting. See the [run log](${runUrl}).`
+    : upcoming.length > 0
+      ? `\n\n${LATEST_HEADING}\n\nThe current template's validator also reports the following; the next sync PR brings these rules, and they do not fail this check.\n\n${upcoming.join("\n")}`
+      : "";
+
 const freshness =
   freshnessState === "behind"
     ? readTrimmed(freshnessFile, "#### Freshness\n\nNot checked this run; see the run log for why.")
@@ -88,13 +120,13 @@ const freshness =
       ? "#### Freshness\n\nUp to date with the build branch."
       : "#### Freshness\n\nNot checked this run; see the run log for why.";
 
-const body = `${MARKER}\n### Template check\n\n${integrity}${advice}\n\n${freshness}`;
+const body = `${MARKER}\n### Template check\n\n${integrity}${advice}${latest}\n\n${freshness}`;
 appendFileSync(summaryFile, `${body}\n`);
 
 // A comment is worth making only when something needs saying. A clean,
 // fresh repository leaves no new comment - but it does clear one a
 // previous run left behind.
-const worthSaying = blocking || freshnessState === "behind" || advice !== "";
+const worthSaying = blocking || freshnessState === "behind" || advice !== "" || latest !== "";
 
 if (eventName !== "pull_request") process.exit(0);
 

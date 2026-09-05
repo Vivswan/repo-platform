@@ -1,40 +1,47 @@
 name: Validate Template Report
 description: >-
-  The fleet's validate-template job body: runs the validate-template
-  integrity action with its verdict DEFERRED, adds the freshness ref
-  compare against the operator's build branch, and reports both through
-  one sticky PR comment and the step summary. It never fails on its own -
-  the caller reads the `integrity` output and fails LAST, so the comment
-  is already posted when the gate goes red. The calling job needs
+  The fleet's validate-template job body, three legs in one sticky PR
+  comment plus the step summary. INTEGRITY judges the tree by the
+  validator of the template it was rendered from (the operator's build
+  tree at the recorded `_commit`) and BLOCKS through the deferred
+  `integrity` output; the LATEST pass runs the build tip's validator and
+  only warns about the rules the next sync brings; FRESHNESS is a ref
+  compare against the build branch and only informs. The action never
+  fails on its own - the caller reads `integrity` and fails LAST, so the
+  comment is already posted when the gate goes red. The calling job needs
   pull-requests: write for the comment (and nothing else beyond contents:
   read).
 
 inputs:
   github-token:
     description: >-
-      Token for the freshness read and the sticky comment (contents read
-      and pull-requests write are enough).
+      Token for the aligned tree fetch, the freshness read, and the sticky
+      comment (contents read and pull-requests write are enough).
     required: true
   template-repo:
     description: >-
-      The operator repository whose build branch freshness is measured
-      against.
+      The operator repository whose build branch the aligned validator is
+      fetched from and freshness is measured against. The latest pass is
+      always Vivswan/repo-platform's build tip: a composite step's `uses:`
+      cannot take an input.
     required: false
     default: Vivswan/repo-platform
 
 outputs:
   integrity:
     description: >-
-      The wrapped validate-template action's outcome (success or failure),
-      deferred so the caller can fail AFTER the findings are posted.
+      The aligned validator's outcome (success or failure; a refused or
+      unreachable `_commit` is a failure), deferred so the caller can fail
+      AFTER the findings are posted.
     value: ${{ steps.integrity.outcome }}
 
 runs:
   using: composite
   steps:
-    # Installed once up front: the wrapped validate-template action probes
-    # for a bun matching the same generated pin and finds this one, and
-    # the freshness and report scripts below need it too.
+    # Installed once up front: the aligned validator runs on this bun (see
+    # aligned.ts), the wrapped latest-pass action probes for a bun matching
+    # the same generated pin and finds this one, and the freshness and
+    # report scripts below need it too.
     - name: Check for a bun matching the action's pin
       id: bun
       shell: bash
@@ -69,15 +76,29 @@ runs:
     # No install step for this action's own scripts: no runtime deps.
     #
     # continue-on-error defers the verdict to the caller's last step; it
-    # does not discard it (the wrapped action's own exit code is
-    # untouched). The ref is hardcoded because a composite step's `uses:`
-    # cannot take expressions.
-    - uses: Vivswan/repo-platform/actions/validate-template@build
+    # does not discard it (the step's exit code is what `outcome` reports).
+    - name: Judge the tree by the validator at its recorded _commit
       id: integrity
       continue-on-error: true
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        TEMPLATE_REPO: ${{ inputs.template-repo }}
+        ALIGNED_DIR: ${{ runner.temp }}/aligned-validator
+        FINDINGS_FILE: ${{ runner.temp }}/aligned-findings.md
+        ADVISORIES_FILE: ${{ runner.temp }}/aligned-advisories.md
+      run: bun "${{ github.action_path }}/aligned.ts"
+
+    # Advisory only: the build tip's validator knows the rules the next
+    # sync PR brings, and report.ts shows them as warnings. Its outcome is
+    # read by nothing. The ref is hardcoded because a composite step's
+    # `uses:` cannot take expressions.
+    - uses: Vivswan/repo-platform/actions/validate-template@build
+      id: latest
+      continue-on-error: true
       with:
-        findings-file: ${{ runner.temp }}/validate-findings.md
-        advisories-file: ${{ runner.temp }}/validate-advisories.md
+        findings-file: ${{ runner.temp }}/latest-findings.md
+        advisories-file: ${{ runner.temp }}/latest-advisories.md
 
     - name: Check how far behind the template this repo is
       id: freshness
@@ -93,8 +114,11 @@ runs:
       shell: bash
       env:
         GH_TOKEN: ${{ inputs.github-token }}
-        FINDINGS: ${{ runner.temp }}/validate-findings.md
-        ADVISORIES: ${{ runner.temp }}/validate-advisories.md
+        FINDINGS: ${{ runner.temp }}/aligned-findings.md
+        ADVISORIES: ${{ runner.temp }}/aligned-advisories.md
+        ALIGNED_REASON: ${{ steps.integrity.outputs.reason }}
+        LATEST_FINDINGS: ${{ runner.temp }}/latest-findings.md
+        LATEST_ADVISORIES: ${{ runner.temp }}/latest-advisories.md
         FRESHNESS: ${{ runner.temp }}/freshness.md
         FRESHNESS_STATE: ${{ steps.freshness.outputs.state }}
         EVENT_NAME: ${{ github.event_name }}
