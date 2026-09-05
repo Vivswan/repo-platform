@@ -18,14 +18,6 @@ inputs:
       Token for the aligned tree fetch, the freshness read, and the sticky
       comment (contents read and pull-requests write are enough).
     required: true
-  template-repo:
-    description: >-
-      The operator repository whose build branch the aligned validator is
-      fetched from and freshness is measured against. The latest pass is
-      always Vivswan/repo-platform's build tip: a composite step's `uses:`
-      cannot take an input.
-    required: false
-    default: Vivswan/repo-platform
 
 outputs:
   integrity:
@@ -83,7 +75,6 @@ runs:
       shell: bash
       env:
         GH_TOKEN: ${{ inputs.github-token }}
-        TEMPLATE_REPO: ${{ inputs.template-repo }}
         ALIGNED_DIR: ${{ runner.temp }}/aligned-validator
         FINDINGS_FILE: ${{ runner.temp }}/aligned-findings.md
         ADVISORIES_FILE: ${{ runner.temp }}/aligned-advisories.md
@@ -91,8 +82,9 @@ runs:
 
     # Advisory only: the build tip's validator knows the rules the next
     # sync PR brings, and report.ts shows them as warnings. Its outcome is
-    # read by nothing. The ref is hardcoded because a composite step's
-    # `uses:` cannot take expressions.
+    # read by nothing. A composite step's `uses:` cannot take expressions,
+    # which is why the operator repository is a constant (build_sha.ts)
+    # rather than an input: no input could reach this ref.
     - uses: Vivswan/repo-platform/actions/validate-template@build
       id: latest
       continue-on-error: true
@@ -106,7 +98,6 @@ runs:
       shell: bash
       env:
         GH_TOKEN: ${{ inputs.github-token }}
-        TEMPLATE_REPO: ${{ inputs.template-repo }}
         FRESHNESS: ${{ runner.temp }}/freshness.md
       run: bun "${{ github.action_path }}/freshness.ts"
 

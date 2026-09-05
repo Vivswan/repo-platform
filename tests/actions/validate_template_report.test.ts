@@ -185,7 +185,6 @@ function runFreshness(opts: FreshnessOptions = {}) {
       ...process.env,
       PATH: `${bin}:${process.env.PATH}`,
       GH_TOKEN: "x",
-      TEMPLATE_REPO: "Vivswan/repo-platform",
       FRESHNESS: fragment,
       GITHUB_OUTPUT: outputs,
       CALLS: join(root, "calls.txt"),
@@ -269,7 +268,6 @@ function runAligned(opts: AlignedOptions = {}) {
       PATH: `${bin}:${process.env.PATH}`,
       GH_TOKEN: "x",
       GH_TARBALL: tarball,
-      TEMPLATE_REPO: "Vivswan/repo-platform",
       ALIGNED_DIR: alignedDir,
       FINDINGS_FILE: findings,
       ADVISORIES_FILE: advisories,
@@ -724,7 +722,10 @@ describe("the action's wiring", () => {
     const alignedEnv = integrity?.env as Record<string, string>;
     expect(alignedEnv.FINDINGS_FILE).toContain("aligned-findings.md");
     expect(alignedEnv.ADVISORIES_FILE).toContain("aligned-advisories.md");
-    expect(alignedEnv.TEMPLATE_REPO).toBe("${{ inputs.template-repo }}");
+    // The operator repository is a constant, not an input: the latest
+    // leg's `uses:` could never follow one.
+    expect(Object.keys(action.inputs)).toEqual(["github-token"]);
+    expect(alignedEnv.TEMPLATE_REPO).toBeUndefined();
     expect(action.outputs.integrity.value).toBe("${{ steps.integrity.outcome }}");
 
     const latest = steps.find((step) => step.id === "latest");

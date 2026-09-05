@@ -7,6 +7,10 @@
 
 import { recordedCommit } from "../shared/stamp_manifest.ts";
 
+/** The operator repository whose build branch every leg reads: the same
+ *  repository the latest leg's `uses:` names, which no input can follow. */
+export const OPERATOR_REPO = "Vivswan/repo-platform";
+
 const BUILD_SHA_RE = /^[0-9a-f]{40}$/;
 const REMEDY = "merge this repository's pending template sync PR";
 
