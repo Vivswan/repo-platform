@@ -250,7 +250,7 @@ describe("post-green publish wiring", () => {
     const publish = read(".github/scripts/build-branches/publish.ts");
     expect(publish).toContain("carries no actions/ subtree");
     const body = publish.slice(publish.indexOf("function publish("));
-    const guardAt = body.indexOf('hasActionManifest("/tmp/tree/actions")');
+    const guardAt = body.indexOf('hasActionManifest(join(scratch.tree, "actions"))');
     expect(guardAt).toBeGreaterThan(-1);
     expect(guardAt).toBeLessThan(body.indexOf('"commit"'));
     expect(guardAt).toBeLessThan(body.indexOf('"push"'));

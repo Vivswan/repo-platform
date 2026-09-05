@@ -2057,6 +2057,8 @@ export const ASYNC_SPAWN_FILES: Record<string, string> = {
     "gh runner draining both pipes concurrently under Promise.all; bounded by the GitHub job timeout",
   "actions/release-health/release-health.ts":
     "gh runner draining both pipes concurrently under Promise.all; bounded by the GitHub job timeout",
+  "tests/build-branches/publish_behavior.test.ts":
+    "one publish.ts child runs in the background, parked inside a PATH-stubbed rsync while a second publish runs to completion in the foreground; a timer SIGKILLs the child at SPAWN_TIMEOUT_MS, the stub bounds its own wait, and a killed child throws instead of yielding an outcome",
   "scripts/run_tests.ts":
     "the test launcher forwards SIGINT/SIGTERM/SIGHUP to its bun test child and removes the per-run TMPDIR after the child exits; inherited stdio, so no pipe to drain, bounded by the child's own life",
 };

@@ -9,23 +9,30 @@
 //      the quiet-week case, the tip must not move;
 //   3. an unchanged tree under a BROKEN tip stamp publishes the recovery
 //      commit - freshly stamped, tree-identical - so dispatching Build
-//      Branches heals stamp damage instead of skipping forever.
+//      Branches heals stamp damage instead of skipping forever;
+//   4. the scratch worktrees live under the run's own root (RUNNER_TEMP
+//      here, as on the runner) and are gone when the process exits, on
+//      the success and failure routes alike, and a publish held
+//      mid-flight is untouched by another running start to finish.
 //
 // The harness feeds publish.ts through PREBUILT_REF (a parked pending
 // tree on the fixture origin), so no compose runs and no bun child is
-// spawned. publish.ts's scratch paths are the real /tmp/src,/tmp/tree,
-// /tmp/pub it hardcodes: bun test runs files in one process and these
-// tests serially, and publish.ts clears the paths on entry, so the
-// fixture repos stay isolated per test while the scratch space is
-// per-run.
+// spawned.
 
 import { describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  realpathSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pendingRefFor } from "../../.github/scripts/build-branches/pending.ts";
 import { commitRunWrite, commitStampWrite } from "../../.github/scripts/shared/commit_stamp.ts";
-import { boundedSpawnSync } from "../shared/bounded_spawn";
+import { boundedSpawnSync, SPAWN_TIMEOUT_MS } from "../shared/bounded_spawn";
 
 const script = join(import.meta.dir, "../../.github/scripts/build-branches/publish.ts");
 
@@ -39,6 +46,36 @@ const REPO = "o/r";
 const ghStub = `#!/usr/bin/env bash
 printf '%s' '{"check_runs":[{"name":"all-green","status":"completed","conclusion":"success","external_id":"workflow_run","app":{"slug":"github-actions"}}]}'
 `;
+
+/** The two marker files a held publish's rsync stub talks through. */
+interface Hold {
+  /** Created by the stub once it is parked. */
+  ready: string;
+  /** Created by the test to let the stub proceed. */
+  release: string;
+}
+
+/** An rsync that parks until released: rsync is the first command
+ * publish.ts runs after ALL its scratch worktrees exist, so a publish
+ * held here sits mid-flight with its worktrees populated. The wait is
+ * bounded by the harness bound so an unreleased hold ends loudly
+ * instead of pinning the pipes open. */
+function heldRsyncStub(hold: Hold): string {
+  const real = Bun.which("rsync");
+  if (real === null) throw new Error("rsync is not on PATH; publish.ts needs it");
+  const polls = Math.ceil(SPAWN_TIMEOUT_MS / 50);
+  return [
+    "#!/usr/bin/env bash",
+    `: > "${hold.ready}"`,
+    `for _ in $(seq 1 ${polls}); do`,
+    `  [ -e "${hold.release}" ] && exec "${real}" "$@"`,
+    "  sleep 0.05",
+    "done",
+    'echo "the rsync hold was never released" >&2',
+    "exit 70",
+    "",
+  ].join("\n");
+}
 
 function git(cwd: string, args: string[]): string {
   const proc = boundedSpawnSync(["git", "-C", cwd, ...args]);
@@ -58,17 +95,46 @@ interface Scenario {
   tipMessage: (m1: string) => string;
   /** Plants the two measured staging-skew vectors: a .gitignore INSIDE
    * the pending tree hiding a sibling, and an info/exclude in the
-   * fixture repo - which /tmp/pub, a worktree of it, inherits - hiding
+   * fixture repo - which the publish's branch worktree inherits - hiding
    * rendered.txt. The publish must stage both hidden files anyway
    * (shared/stage_tree.ts's hermetic argv). */
   hostileIgnores?: boolean;
+  /** Parks a pending tree WITHOUT actions/, the shape publish.ts's
+   * unified-tree guard refuses - a publish that exits 1 after its
+   * scratch worktrees exist. */
+  malformedPending?: boolean;
+  /** Puts heldRsyncStub on the publish's PATH. */
+  holdInRsync?: boolean;
+  /** The RUNNER_TEMP handed to the publish; absent = a private one under
+   * the fixture. Two publishes sharing one prove the per-run root is
+   * what keeps them apart, as on the runner where a job has one. */
+  runnerTemp?: string;
 }
 
-function runPublish(scenario: Scenario) {
+interface Fixture {
+  work: string;
+  pend: string;
+  env: Record<string, string | undefined>;
+  m1: string;
+  m2: string;
+  tip: string;
+  pendTree: string;
+  origin: string;
+  runnerTemp: string;
+  hold: Hold;
+}
+
+function prepareFixture(scenario: Scenario): Fixture {
   const root = mkdtempSync(join(tmpdir(), "publish-behavior-"));
   const bin = join(root, "bin");
   mkdirSync(bin);
   writeFileSync(join(bin, "gh"), ghStub, { mode: 0o755 });
+  const hold = { ready: join(root, "rsync-ready"), release: join(root, "rsync-release") };
+  if (scenario.holdInRsync === true) {
+    writeFileSync(join(bin, "rsync"), heldRsyncStub(hold), { mode: 0o755 });
+  }
+  const runnerTemp = scenario.runnerTemp ?? join(root, "runner-temp");
+  mkdirSync(runnerTemp, { recursive: true });
   const origin = join(root, "origin.git");
   git(root, ["init", "--quiet", "--bare", "-b", "main", "origin.git"]);
   const work = join(root, "work");
@@ -89,15 +155,18 @@ function runPublish(scenario: Scenario) {
   git(work, ["push", "--quiet", "origin", "main"]);
   git(work, ["fetch", "--quiet", "origin"]);
   // The parked pending tree for M2: the unified shape (actions/ with a
-  // manifest) publish.ts's shape guard requires.
+  // manifest) publish.ts's shape guard requires, unless the scenario
+  // parks the malformed one.
   const pend = join(root, "pend");
   git(work, ["worktree", "add", "--quiet", "--detach", pend, m2]);
   git(pend, ["switch", "--quiet", "--orphan", "pending"]);
-  mkdirSync(join(pend, "actions", "demo"), { recursive: true });
-  writeFileSync(
-    join(pend, "actions", "demo", "action.yml"),
-    "name: demo\nruns:\n  using: composite\n  steps: []\n",
-  );
+  if (scenario.malformedPending !== true) {
+    mkdirSync(join(pend, "actions", "demo"), { recursive: true });
+    writeFileSync(
+      join(pend, "actions", "demo", "action.yml"),
+      "name: demo\nruns:\n  using: composite\n  steps: []\n",
+    );
+  }
   writeFileSync(join(pend, "rendered.txt"), "composed content\n");
   if (scenario.hostileIgnores === true) {
     writeFileSync(join(pend, "hidden.txt"), "must ship\n");
@@ -118,13 +187,13 @@ function runPublish(scenario: Scenario) {
   const tipTree = scenario.tipTree === "same" ? pendTree : git(work, ["rev-parse", `${m2}^{tree}`]);
   const tip = git(work, ["commit-tree", tipTree, "-m", scenario.tipMessage(m1)]);
   git(work, ["push", "--quiet", "origin", `${tip}:refs/heads/build`]);
-  const proc = Bun.spawnSync([process.execPath, script], {
-    cwd: work,
-    timeout: 15000,
-    killSignal: "SIGKILL",
+  return {
+    work,
+    pend,
     env: {
       ...process.env,
       PATH: `${bin}:${process.env.PATH}`,
+      RUNNER_TEMP: runnerTemp,
       GITHUB_REPOSITORY: REPO,
       GITHUB_SERVER_URL: SERVER,
       RUN_URL: `${SERVER}/${REPO}/actions/runs/1`,
@@ -132,22 +201,109 @@ function runPublish(scenario: Scenario) {
       SOURCE_SHA: m2,
       PREBUILT_REF: pendingRefFor(m2),
     },
-  });
-  if (proc.exitedDueToTimeout === true) {
-    throw new Error(`publish.ts exceeded the harness bound\n${proc.stdout.toString()}`);
-  }
-  return {
-    exitCode: proc.exitCode,
-    output: proc.stdout.toString() + proc.stderr.toString(),
     m1,
     m2,
     tip,
     pendTree,
     origin,
-    originTip: () => git(origin, ["rev-parse", "refs/heads/build"]),
-    originTipMessage: () => git(origin, ["log", "-1", "--format=%B", "refs/heads/build"]),
-    originTipTree: () => git(origin, ["rev-parse", "refs/heads/build^{tree}"]),
+    runnerTemp,
+    hold,
   };
+}
+
+/** The publish's whole observable outcome: its exit and output, plus
+ * accessors read at assertion time for the fixture origin's build tip
+ * and the scratch residue - anything under the run's RUNNER_TEMP plus
+ * any worktree still registered in the checkout beyond the fixture's
+ * own two (git lists registered worktrees by real path). The residue
+ * must be empty once every publish sharing that RUNNER_TEMP has exited,
+ * however each ended. */
+function outcome(f: Fixture, proc: { exitCode: number; stdout: string; stderr: string }) {
+  const own = new Set([f.work, f.pend].map((path) => realpathSync(path)));
+  return {
+    exitCode: proc.exitCode,
+    output: proc.stdout + proc.stderr,
+    m1: f.m1,
+    m2: f.m2,
+    tip: f.tip,
+    pendTree: f.pendTree,
+    origin: f.origin,
+    scratchLeftovers: () => [
+      ...readdirSync(f.runnerTemp),
+      ...git(f.work, ["worktree", "list", "--porcelain"])
+        .split("\n")
+        .filter((line) => line.startsWith("worktree "))
+        .map((line) => line.slice("worktree ".length))
+        .filter((path) => !own.has(path)),
+    ],
+    originTip: () => git(f.origin, ["rev-parse", "refs/heads/build"]),
+    originTipMessage: () => git(f.origin, ["log", "-1", "--format=%B", "refs/heads/build"]),
+    originTipTree: () => git(f.origin, ["rev-parse", "refs/heads/build^{tree}"]),
+  };
+}
+
+type Outcome = ReturnType<typeof outcome>;
+
+function runPublish(scenario: Scenario): Outcome {
+  const f = prepareFixture(scenario);
+  return outcome(f, boundedSpawnSync([process.execPath, script], { cwd: f.work, env: f.env }));
+}
+
+/** Runs a holdInRsync publish in the background, runs `meanwhile` once
+ * the publish is parked in its rsync stub (every scratch worktree
+ * populated), releases it, and returns both results. The child is
+ * always released and reaped before this returns or throws - a
+ * `meanwhile` failure surfaces after the child has exited, not around a
+ * still-running one. One timer SIGKILLs the child at the harness bound;
+ * a child that dies on a signal or exits before reaching the hold throws
+ * (failed to look), never an outcome. */
+async function runPublishHeldAcross<T>(
+  f: Fixture,
+  meanwhile: () => T,
+): Promise<{ held: Outcome; meanwhile: T }> {
+  const child = Bun.spawn([process.execPath, script], {
+    cwd: f.work,
+    env: f.env,
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  const deadline = setTimeout(() => child.kill("SIGKILL"), SPAWN_TIMEOUT_MS);
+  const output = Promise.all([
+    new Response(child.stdout).text(),
+    new Response(child.stderr).text(),
+  ]);
+  const settle = async () => {
+    const [stdout, stderr] = await output;
+    return { exitCode: await child.exited, stdout, stderr };
+  };
+  try {
+    while (!existsSync(f.hold.ready) && child.exitCode === null && child.signalCode === null) {
+      await Bun.sleep(50);
+    }
+    if (!existsSync(f.hold.ready)) {
+      const early = await settle();
+      throw new Error(
+        `publish.ts exited ${early.exitCode} before reaching its rsync hold - failed to look, not a result\n${early.stdout}${early.stderr}`,
+      );
+    }
+    let ran: { result: T } | { error: unknown };
+    try {
+      ran = { result: meanwhile() };
+    } catch (error) {
+      ran = { error };
+    }
+    writeFileSync(f.hold.release, "");
+    const done = await settle();
+    if ("error" in ran) throw ran.error;
+    if (child.signalCode !== null) {
+      throw new Error(
+        `publish.ts died on ${child.signalCode} - failed to look, not a result\n${done.stdout}${done.stderr}`,
+      );
+    }
+    return { held: outcome(f, done), meanwhile: ran.result };
+  } finally {
+    clearTimeout(deadline);
+  }
 }
 
 const healthyStamp = (m1: string) =>
@@ -158,33 +314,35 @@ const healthyStamp = (m1: string) =>
     commitRunWrite(`${SERVER}/${REPO}/actions/runs/0`),
   ].join("\n");
 
+function expectContentChangePublished(r: Outcome): void {
+  expect(r.exitCode).toBe(0);
+  expect(r.output).toContain("(content change)");
+  const newTip = r.originTip();
+  expect(newTip).not.toBe(r.tip);
+  expect(git(r.origin, ["rev-parse", `${newTip}^`])).toBe(r.tip);
+  expect(r.originTipTree()).toBe(r.pendTree);
+  const message = r.originTipMessage();
+  expect(message).toContain(`build(build): main from ${r.m2.slice(0, 12)}`);
+  expect(message).toContain(commitStampWrite(SERVER, REPO, r.m2));
+  expect(message).toContain(commitRunWrite(`${SERVER}/${REPO}/actions/runs/1`));
+  expect(r.scratchLeftovers()).toEqual([]);
+}
+
 describe("publish.ts behavior (real git)", () => {
   test("a changed tree publishes a stamped commit chained onto the tip", () => {
-    const r = runPublish({ tipTree: "drift", tipMessage: healthyStamp });
-    expect(r.exitCode).toBe(0);
-    expect(r.output).toContain("(content change)");
-    const newTip = r.originTip();
-    expect(newTip).not.toBe(r.tip);
-    expect(git(r.origin, ["rev-parse", `${newTip}^`])).toBe(r.tip);
-    expect(r.originTipTree()).toBe(r.pendTree);
-    const message = r.originTipMessage();
-    expect(message).toContain(`build(build): main from ${r.m2.slice(0, 12)}`);
-    expect(message).toContain(commitStampWrite(SERVER, REPO, r.m2));
-    expect(message).toContain(commitRunWrite(`${SERVER}/${REPO}/actions/runs/1`));
+    expectContentChangePublished(runPublish({ tipTree: "drift", tipMessage: healthyStamp }));
   });
 
   test("a composed tree carrying its own .gitignore publishes VERBATIM - producer staging matches the verifier's", () => {
     // The staging-skew class end-to-end: the pending tree hides
     // hidden.txt behind an in-tree .gitignore and rendered.txt behind
-    // the repo's own info/exclude (which /tmp/pub, a worktree,
-    // inherits). The old plain `add -A` dropped both, publishing a tree
-    // the verifier's hermetic rebuild could never match - a fleet-wide
-    // false tamper accusation. The published tree must BE the parked
-    // tree, byte for byte.
+    // the repo's own info/exclude (which the branch worktree, a worktree
+    // of the checkout, inherits). The old plain `add -A` dropped both,
+    // publishing a tree the verifier's hermetic rebuild could never
+    // match - a fleet-wide false tamper accusation. The published tree
+    // must BE the parked tree, byte for byte.
     const r = runPublish({ tipTree: "drift", tipMessage: healthyStamp, hostileIgnores: true });
-    expect(r.exitCode).toBe(0);
-    expect(r.output).toContain("(content change)");
-    expect(r.originTipTree()).toBe(r.pendTree);
+    expectContentChangePublished(r);
     const names = git(r.origin, ["ls-tree", "-r", "--name-only", r.originTipTree()]);
     expect(names).toContain("hidden.txt");
     expect(names).toContain("rendered.txt");
@@ -198,6 +356,7 @@ describe("publish.ts behavior (real git)", () => {
     expect(r.exitCode).toBe(0);
     expect(r.output).toContain("nothing to publish");
     expect(r.originTip()).toBe(r.tip);
+    expect(r.scratchLeftovers()).toEqual([]);
   });
 
   test("an unchanged tree under a BROKEN stamp publishes the freshly-stamped recovery commit", () => {
@@ -220,5 +379,50 @@ describe("publish.ts behavior (real git)", () => {
     expect(message).toContain(`build(build): main from ${r.m2.slice(0, 12)}`);
     expect(message).toContain(commitStampWrite(SERVER, REPO, r.m2));
     expect(message).toContain(commitRunWrite(`${SERVER}/${REPO}/actions/runs/1`));
+    expect(r.scratchLeftovers()).toEqual([]);
   });
+
+  test("a refused publish leaves no scratch behind either - the exit hook runs on the failure route", () => {
+    // The shape guard fires after the pre-built tree's worktree exists,
+    // so this exit 1 is the failure route WITH scratch on disk: the tip
+    // must not move, and the worktree must be gone and unregistered.
+    const r = runPublish({ tipTree: "drift", tipMessage: healthyStamp, malformedPending: true });
+    expect(r.exitCode).toBe(1);
+    expect(r.output).toContain("carries no actions/ subtree");
+    expect(r.originTip()).toBe(r.tip);
+    expect(r.scratchLeftovers()).toEqual([]);
+  });
+
+  test(
+    "a publish held mid-flight is untouched by another running start to finish",
+    async () => {
+      // The collision the per-run root retires, under ONE RUNNER_TEMP as
+      // a runner job has: one publish is parked in rsync with every
+      // scratch worktree populated - visibly, as the sole root under
+      // that RUNNER_TEMP - while the other runs start to finish. Under
+      // one shared path the second would have replaced the first's
+      // branch worktree with its own, and the first's commit would have
+      // landed on the second's origin. Each fixture's outcome must be
+      // the single-publish outcome, scratch residue included.
+      const runnerTemp = mkdtempSync(join(tmpdir(), "publish-behavior-runner-temp-"));
+      const { held, meanwhile } = await runPublishHeldAcross(
+        prepareFixture({
+          tipTree: "drift",
+          tipMessage: healthyStamp,
+          holdInRsync: true,
+          runnerTemp,
+        }),
+        () => {
+          const parked = readdirSync(runnerTemp);
+          expect(parked).toHaveLength(1);
+          expect(parked[0]).toStartWith("build-branches-");
+          expect(readdirSync(join(runnerTemp, parked[0] ?? "")).sort()).toEqual(["out", "tree"]);
+          return runPublish({ tipTree: "drift", tipMessage: healthyStamp, runnerTemp });
+        },
+      );
+      expectContentChangePublished(held);
+      expectContentChangePublished(meanwhile);
+    },
+    2 * SPAWN_TIMEOUT_MS,
+  );
 });

@@ -2310,6 +2310,7 @@ describe("asyncSpawnMismatches", () => {
       "actions/fuzz-issue/fuzz-issue.ts",
       "actions/release-health/release-health.ts",
       "scripts/run_tests.ts",
+      "tests/build-branches/publish_behavior.test.ts",
     ]);
   });
 
