@@ -1,20 +1,10 @@
 #!/usr/bin/env bun
-// The integrity leg's FETCH: the operator's build tree at the `_commit`
-// the repository's answers record - the template it was rendered from -
-// laid out under ALIGNED_DIR for the judge step, so that the tree, not the
-// build tip, judges the repository. The one compare call made here does
-// double duty: it proves the protected build branch contains the sha
-// before anything is fetched, and its status and distance are the
-// freshness leg's whole input (the `compare` and `ahead-by` outputs). The
-// `bun` output names this bun for the judge step.
+// The integrity leg's FETCH: the build tree at the recorded `_commit`, laid
+// out for the judge step. Its one compare call admits the sha (the build
+// branch must contain it) and is freshness's input; a refusal is a verdict.
 //
-// Every refusal writes a `not-judged` verdict with its reason and exits 1,
-// which the caller reads as a red integrity result; the judge step is
-// skipped behind a failed fetch.
-//
-// Env: GH_TOKEN, ALIGNED_DIR (scratch, cleared here), VERDICT_FILE
-// (cleared here, written on refusal), GITHUB_OUTPUT. Runs from the
-// caller's checkout.
+// Env: GH_TOKEN, ALIGNED_DIR (cleared here), VERDICT_FILE (cleared here),
+// GITHUB_OUTPUT. Runs from the caller's checkout.
 
 import { appendFileSync, existsSync, mkdirSync, rmSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -105,7 +95,4 @@ for (const name of [VALIDATOR_SCRIPT, BUN_VERSION_FILE]) {
     refuse(`${OPERATOR_REPO} at ${sha} ships no ${VALIDATOR_DIR}/${name}`);
   }
 }
-// The judge step keeps running on THIS bun after setup-bun puts the
-// tree's on PATH; only the tree's install and validator run on that one.
-setOutput("bun", process.execPath);
 console.log(`Fetched ${OPERATOR_REPO}'s validator at ${sha}`);

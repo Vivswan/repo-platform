@@ -164,8 +164,21 @@ interface ReportOptions {
   event?: string;
   /** The id the marker search resolves to, or "" for no existing comment. */
   existing?: string;
+  /** true = the action's bun was never installed: the recorded path is empty. */
+  noBun?: boolean;
   env?: Record<string, string>;
 }
+
+// The report step's own run block, executed as the runner would (its bash
+// flags included): the one place `integrity` is set, on the bun path and on
+// the no-bun fallback. A poisoned `bun` sits first on PATH, so the block
+// passes only by running the recorded ACTION_BUN path, never bun by name.
+const REPORT_STEP = (
+  parseYaml(readFileSync(join(ACTION, "action.yml"), "utf8")).runs.steps as Record<
+    string,
+    unknown
+  >[]
+).find((step) => step.id === "report") as { run: string };
 
 function runReport(opts: ReportOptions = {}) {
   const { root, bin } = scratch();
@@ -182,29 +195,41 @@ function runReport(opts: ReportOptions = {}) {
   writeFileSync(summary, "");
   const listing = join(root, "comments.json");
   writeFileSync(listing, opts.existing === undefined ? "" : `${opts.existing}\n`);
-  const proc = boundedSpawnSync(["bun", join(ACTION, "report.ts")], {
-    env: {
-      ...process.env,
-      PATH: `${bin}:${process.env.PATH}`,
-      GITHUB_REPOSITORY: "Vivswan/managed-repo",
-      GITHUB_STEP_SUMMARY: summary,
-      GH_TOKEN: "x",
-      VERDICT: verdictPath,
-      LATEST_FINDINGS: latestFindingsPath,
-      LATEST_ADVISORIES: latestAdvisoriesPath,
-      COMPARE_STATUS: opts.compare ?? "identical",
-      AHEAD_BY: opts.aheadBy ?? "",
-      EVENT_NAME: opts.event ?? "pull_request",
-      PR_NUMBER: "12",
-      RUN_URL,
-      CALLS: calls,
-      GH_COMMENTS_ID: listing,
-      ...opts.env,
-    },
+  const outputs = join(root, "outputs.txt");
+  writeFileSync(outputs, "");
+  writeFileSync(join(bin, "bun"), '#!/usr/bin/env bash\necho "bun by name: $*" >&2\nexit 97\n', {
+    mode: 0o755,
   });
+  const proc = boundedSpawnSync(
+    ["bash", "--noprofile", "--norc", "-e", "-o", "pipefail", "-c", REPORT_STEP.run],
+    {
+      env: {
+        ...process.env,
+        PATH: `${bin}:${process.env.PATH}`,
+        ACTION_BUN: opts.noBun ? "" : process.execPath,
+        ACTION_PATH: ACTION,
+        GITHUB_REPOSITORY: "Vivswan/managed-repo",
+        GITHUB_STEP_SUMMARY: summary,
+        GITHUB_OUTPUT: outputs,
+        GH_TOKEN: "x",
+        VERDICT: verdictPath,
+        LATEST_FINDINGS: latestFindingsPath,
+        LATEST_ADVISORIES: latestAdvisoriesPath,
+        COMPARE_STATUS: opts.compare ?? "identical",
+        AHEAD_BY: opts.aheadBy ?? "",
+        EVENT_NAME: opts.event ?? "pull_request",
+        PR_NUMBER: "12",
+        RUN_URL,
+        CALLS: calls,
+        GH_COMMENTS_ID: listing,
+        ...opts.env,
+      },
+    },
+  );
   return {
     exitCode: proc.exitCode,
     output: proc.stdout + proc.stderr,
+    outputs: read(outputs),
     calls: read(calls),
     summary: read(summary),
   };
@@ -224,8 +249,8 @@ describe("the action's reporting script", () => {
   const notChecked = (reason: string) => `#### Freshness\n\nNot checked this run: ${reason}.`;
   const LATEST = "#### After your next sync";
   const upcoming = (lines: string) =>
-    `\n\n${LATEST}\n\nThe current template's validator also reports the following; the next sync PR brings these rules, and they do not fail this check.\n\n${lines}`;
-  const NO_VERDICT = "the aligned validator step wrote no verdict; see the run log";
+    `\n\n${LATEST}\n\n${lines}\n\nThese are warnings. The next sync brings these rules.`;
+  const NO_VERDICT = "the aligned validator step wrote no verdict";
 
   /** The rendered body: integrity, then the optional advisories and latest
    *  blocks, then freshness. */
@@ -240,16 +265,26 @@ describe("the action's reporting script", () => {
   const codeql = "#### Advisories (1)\n\n- consider a codeql job";
 
   interface Expected {
+    /** The exported `integrity` output, asserted beside the body it came from. */
+    integrity: "success" | "failure";
     body: string;
     calls: string;
     output?: string;
   }
   const scenarios: [string, ReportOptions, Expected][] = [
-    ["clean and fresh: no new comment at all", {}, { body: bodyOf(PASSED, FRESH), calls: LIST }],
+    [
+      "clean and fresh: no new comment at all",
+      {},
+      { integrity: "success", body: bodyOf(PASSED, FRESH), calls: LIST },
+    ],
     [
       "clean and fresh still clears a comment a previous run left behind",
       { existing: "555" },
-      { body: bodyOf(PASSED, FRESH), calls: patch("555", bodyOf(PASSED, FRESH)) },
+      {
+        integrity: "success",
+        body: bodyOf(PASSED, FRESH),
+        calls: patch("555", bodyOf(PASSED, FRESH)),
+      },
     ],
     [
       "findings post the findings and say they block; behind names the distance",
@@ -259,6 +294,7 @@ describe("the action's reporting script", () => {
         aheadBy: "3",
       },
       {
+        integrity: "failure",
         body: bodyOf(findingsOf(drift), behind(" by 3 commit(s)")),
         calls: post(bodyOf(findingsOf(drift), behind(" by 3 commit(s)"))),
       },
@@ -267,6 +303,7 @@ describe("the action's reporting script", () => {
       "an existing comment is updated, never duplicated",
       { verdict: { kind: "findings", findings: drift, advisories: "" }, existing: "77" },
       {
+        integrity: "failure",
         body: bodyOf(findingsOf(drift), FRESH),
         calls: patch("77", bodyOf(findingsOf(drift), FRESH)),
       },
@@ -275,6 +312,7 @@ describe("the action's reporting script", () => {
       "advisories are reported without ever claiming to block",
       { verdict: { kind: "clean", advisories: codeql } },
       {
+        integrity: "success",
         body: bodyOf(PASSED, FRESH, `\n\n${codeql}`),
         calls: post(bodyOf(PASSED, FRESH, `\n\n${codeql}`)),
       },
@@ -291,6 +329,7 @@ describe("the action's reporting script", () => {
         compare: "",
       },
       {
+        integrity: "failure",
         body: bodyOf(
           notJudged(`_commit 'abc1234' is not a full build sha; ${REMEDY}`),
           notChecked(`_commit 'abc1234' is not a full build sha; ${REMEDY}`),
@@ -314,6 +353,7 @@ describe("the action's reporting script", () => {
         aheadBy: "0",
       },
       {
+        integrity: "failure",
         body: bodyOf(
           notJudged(
             `_commit ${SHA} is not a published commit of ${OPERATOR}'s build branch (compare: diverged)`,
@@ -343,6 +383,7 @@ describe("the action's reporting script", () => {
         aheadBy: "3",
       },
       {
+        integrity: "failure",
         body: bodyOf(notJudged("the validator died on SIGKILL"), behind(" by 3 commit(s)")),
         calls: post(bodyOf(notJudged("the validator died on SIGKILL"), behind(" by 3 commit(s)"))),
       },
@@ -353,6 +394,7 @@ describe("the action's reporting script", () => {
       "an absent verdict file blocks as not judged",
       { verdict: "absent" },
       {
+        integrity: "failure",
         body: bodyOf(notJudged(NO_VERDICT), FRESH),
         calls: post(bodyOf(notJudged(NO_VERDICT), FRESH)),
       },
@@ -361,6 +403,7 @@ describe("the action's reporting script", () => {
       "a verdict file that is not a verdict blocks the same way",
       { verdict: "garbage" },
       {
+        integrity: "failure",
         body: bodyOf(notJudged(NO_VERDICT), FRESH),
         calls: post(bodyOf(notJudged(NO_VERDICT), FRESH)),
       },
@@ -368,12 +411,17 @@ describe("the action's reporting script", () => {
     [
       "behind without a distance still says behind",
       { compare: "ahead", aheadBy: "" },
-      { body: bodyOf(PASSED, behind("")), calls: post(bodyOf(PASSED, behind(""))) },
+      {
+        integrity: "success",
+        body: bodyOf(PASSED, behind("")),
+        calls: post(bodyOf(PASSED, behind(""))),
+      },
     ],
     [
       "a compare the fetch step could not make on a clean verdict is named, not guessed",
       { compare: "error" },
       {
+        integrity: "success",
         body: bodyOf(PASSED, notChecked("the build branch compare reported `error`")),
         calls: LIST,
       },
@@ -391,6 +439,7 @@ describe("the action's reporting script", () => {
           "#### Advisories (2)\n\n- consider a codeql job\n- pin actions/setup-node\n",
       },
       {
+        integrity: "failure",
         body: bodyOf(
           findingsOf(drift),
           FRESH,
@@ -409,6 +458,7 @@ describe("the action's reporting script", () => {
       "latest-only findings on a clean tree warn, comment, and still pass",
       { latestFindings: "#### Errors (1)\n\n- .github/SECURITY.md is missing\n" },
       {
+        integrity: "success",
         body: bodyOf(PASSED, FRESH, upcoming("- .github/SECURITY.md is missing")),
         calls: post(bodyOf(PASSED, FRESH, upcoming("- .github/SECURITY.md is missing"))),
       },
@@ -419,7 +469,11 @@ describe("the action's reporting script", () => {
         verdict: { kind: "findings", findings: drift, advisories: "" },
         latestFindings: `${drift}\n`,
       },
-      { body: bodyOf(findingsOf(drift), FRESH), calls: post(bodyOf(findingsOf(drift), FRESH)) },
+      {
+        integrity: "failure",
+        body: bodyOf(findingsOf(drift), FRESH),
+        calls: post(bodyOf(findingsOf(drift), FRESH)),
+      },
     ],
     // Absent is not empty: a latest step that never wrote its findings is a
     // setup failure, said as a warning on a check it cannot fail.
@@ -427,6 +481,7 @@ describe("the action's reporting script", () => {
       "a latest pass that never reported says so without blocking",
       { latestFindings: null },
       {
+        integrity: "success",
         body: bodyOf(
           PASSED,
           FRESH,
@@ -444,16 +499,29 @@ describe("the action's reporting script", () => {
     [
       "a push writes the summary and never touches the comments API",
       { compare: "ahead", aheadBy: "3", event: "push" },
-      { body: bodyOf(PASSED, behind(" by 3 commit(s)")), calls: "" },
+      { integrity: "success", body: bodyOf(PASSED, behind(" by 3 commit(s)")), calls: "" },
     ],
     [
       "a comments API failure degrades to a warning, never failing the step",
       { verdict: { kind: "findings", findings: drift, advisories: "" }, env: { GH_FAIL: "1" } },
       {
+        integrity: "failure",
         body: bodyOf(findingsOf(drift), FRESH),
         calls: "",
         output:
           "::warning::could not list PR comments; the findings are in the job summary instead.\n",
+      },
+    ],
+    // No bun at all (an empty recorded path): the step exports the failure
+    // itself and writes one summary line, with no comment to post.
+    [
+      "no bun to render with still exports failure and says why",
+      { noBun: true },
+      {
+        integrity: "failure",
+        body: `### Template check\n\n#### Integrity\n\nNot judged: the action's pinned bun is unavailable. See the [run log](${RUN_URL}). This FAILS the check.`,
+        calls: "",
+        output: "::error::the action's pinned bun is unavailable\n",
       },
     ],
   ];
@@ -461,6 +529,7 @@ describe("the action's reporting script", () => {
     expect(runReport(opts)).toEqual({
       exitCode: 0,
       output: expected.output ?? "",
+      outputs: `integrity=${expected.integrity}\n`,
       calls: expected.calls,
       summary: `${expected.body}\n`,
     });
@@ -563,7 +632,7 @@ describe("the integrity verdict", () => {
     const root = mkdtempSync(join(tmpdir(), "verdict-"));
     const none = {
       kind: "not-judged",
-      reason: "the aligned validator step wrote no verdict; see the run log",
+      reason: "the aligned validator step wrote no verdict",
     };
     const path = join(root, "v.json");
     expect(readVerdict(path)).toEqual(none);
@@ -812,7 +881,7 @@ describe("the action's fetch script", () => {
   });
   const laidOut = (outputs: string) => ({
     exitCode: 0,
-    outputs: `${outputs}bun=${process.execPath}\n`,
+    outputs,
     calls: fetched,
     verdict: null,
     tree: true,
@@ -1037,6 +1106,13 @@ describe("the action's judge script", () => {
       { env: { FAKE_SIGNAL: "SIGKILL" } },
       notJudged("the validator died on SIGKILL"),
     ],
+    // An empty tree-bun path (none matching its pin on PATH) is not judged
+    // at all: `bun` by name would be the action's.
+    [
+      "a tree with no bun matching its pin is not judged before anything runs",
+      { alignedBun: "" },
+      notJudged("no bun matching the fetched tree's .bun-version is available", false),
+    ],
     // The fetched tree runs on the bun ALIGNED_BUN names, never on the one
     // running this script: a non-bun there fails the install, not the judge.
     [
@@ -1074,38 +1150,59 @@ describe("the action's judge script", () => {
 // --- action.yml --------------------------------------------------------------
 
 describe("the action's wiring", () => {
-  // The deferred-verdict plumbing the behaviour tests cannot see: fetch,
-  // the tree's own bun, and judge share one scratch layout and one verdict
-  // file; a failed fetch skips what follows; the latest pass is deferred
-  // and read by nothing; the action hands the judge outcome to the
-  // caller's fail-last step and the fetch compare to the report.
-  test("action.yml: fetch, the tree's bun, judge as the verdict, latest as advice", () => {
+  // The plumbing the behaviour tests cannot see. Order is the contract, no
+  // setup failure ends the action before the report, every bun-running
+  // step reads the one resolved readiness output, and `integrity` has one
+  // writer: the report step, which always runs.
+  test("action.yml: every path ends in the report step, which alone sets integrity", () => {
     const action = parseYaml(readFileSync(join(ACTION, "action.yml"), "utf8"));
     const steps: Record<string, unknown>[] = action.runs.steps;
     const byId = (id: string) => steps.find((step) => step.id === id);
-    // Order is the contract: the tree's bun goes on PATH after the fetch
-    // and before the judge, the latest leg puts the action's back before
-    // the report.
-    expect(steps.map((step) => step.id ?? String(step.name))).toEqual([
-      "bun",
-      "setup-bun",
-      "Set up bun (retry)",
-      "fetch",
-      "aligned-bun",
-      "Set up the fetched tree's bun (retry)",
-      "integrity",
-      "latest",
-      "Report the findings",
-    ]);
     const envOf = (step: Record<string, unknown> | undefined) =>
       (step?.env ?? {}) as Record<string, string>;
+    expect(steps.map((step) => step.id)).toEqual([
+      "bun",
+      "setup-bun",
+      "setup-bun-retry",
+      "action-bun",
+      "fetch",
+      "aligned-bun",
+      "aligned-bun-retry",
+      "aligned-bun-path",
+      "integrity",
+      "latest",
+      "report",
+    ]);
     // The operator repository is a constant, not an input: the latest
     // leg's `uses:` could never follow one.
     expect(Object.keys(action.inputs)).toEqual(["github-token"]);
-    expect(action.outputs.integrity.value).toBe("${{ steps.integrity.outcome }}");
+    // ONE writer of integrity: the report step's output, never a step outcome.
+    expect(action.outputs.integrity.value).toBe("${{ steps.report.outputs.integrity }}");
+    expect(JSON.stringify(action.outputs)).not.toMatch(/steps\.(integrity|latest|fetch)\./);
 
+    // Neither bun setup can end the action: both retries continue, and the
+    // readiness of the action's bun is resolved once for every consumer.
+    for (const id of ["setup-bun", "setup-bun-retry", "aligned-bun", "aligned-bun-retry"]) {
+      expect(byId(id)?.["continue-on-error"]).toBe(true);
+    }
+    expect(byId("setup-bun-retry")?.if).toBe("steps.setup-bun.outcome == 'failure'");
+    const actionBun = byId("action-bun");
+    // Readiness has one truth, a bun on PATH at the pinned version, resolved
+    // by one block for both buns (executed below); `ready` derives from it.
+    expect(envOf(actionBun)).toEqual({ PIN_FILE: "${{ github.action_path }}/.bun-version" });
+    const alignedBunPath = byId("aligned-bun-path");
+    expect(alignedBunPath?.if).toBe("steps.fetch.outcome == 'success'");
+    expect(String(alignedBunPath?.run)).toBe(String(actionBun?.run));
+    const READY = "steps.action-bun.outputs.ready == 'true'";
+    expect(byId("fetch")?.if).toBe(READY);
+    expect(byId("latest")?.if).toBe(READY);
+
+    // Every action script runs by the recorded absolute path, never `bun`
+    // by name: later setups put other buns on PATH.
+    const BUN_PATH = "${{ steps.action-bun.outputs.path }}";
     const fetch = byId("fetch");
-    expect(String(fetch?.run)).toContain("fetch_aligned.ts");
+    expect(String(fetch?.run)).toBe('"$ACTION_BUN" "${{ github.action_path }}/fetch_aligned.ts"');
+    expect(envOf(fetch).ACTION_BUN).toBe(BUN_PATH);
     expect(fetch?.["continue-on-error"]).toBe(true);
     const alignedDir = envOf(fetch).ALIGNED_DIR;
     const verdictFile = envOf(fetch).VERDICT_FILE;
@@ -1113,19 +1210,19 @@ describe("the action's wiring", () => {
     expect(verdictFile).toMatch(/^\$\{\{ runner\.temp \}\}\//);
 
     // The tree's bun: both setup steps read the pin where fetch_aligned.ts
-    // lays it (the layout constants), and only behind a successful fetch.
+    // lays it (the layout constants), only behind a successful fetch, and
+    // the resolver behind them reads the same pin.
     const pin = `${alignedDir}/${TREE_DIR}/${VALIDATOR_DIR}/${BUN_VERSION_FILE}`;
     const setups = steps.filter(
       (step) =>
         String(step.uses ?? "").startsWith("oven-sh/setup-bun@") &&
         (step.with as Record<string, string>)["bun-version-file"] === pin,
     );
-    expect(setups.map((step) => step.if)).toEqual([
-      "steps.fetch.outcome == 'success'",
-      "steps.fetch.outcome == 'success' && steps.aligned-bun.outcome == 'failure'",
+    expect(setups.map((step) => [step.id, step.if])).toEqual([
+      ["aligned-bun", "steps.fetch.outcome == 'success'"],
+      ["aligned-bun-retry", "steps.aligned-bun.outcome == 'failure'"],
     ]);
-    expect(setups[0]?.id).toBe("aligned-bun");
-    expect(setups[0]?.["continue-on-error"]).toBe(true);
+    expect(envOf(byId("aligned-bun-path")).PIN_FILE).toBe(pin);
 
     const judge = byId("integrity");
     expect(String(judge?.run)).toContain("judge_aligned.ts");
@@ -1136,32 +1233,109 @@ describe("the action's wiring", () => {
     expect(envOf(judge)).toEqual({
       ALIGNED_DIR: alignedDir,
       VERDICT_FILE: verdictFile,
-      ORCHESTRATOR_BUN: "${{ steps.fetch.outputs.bun }}",
+      ORCHESTRATOR_BUN: BUN_PATH,
+      ALIGNED_BUN: "${{ steps.aligned-bun-path.outputs.path }}",
     });
-    expect(String(judge?.run)).toMatch(
-      /^ALIGNED_BUN="\$\(command -v bun\)" "\$ORCHESTRATOR_BUN" ".*\/judge_aligned\.ts"$/,
+    expect(String(judge?.run)).toBe(
+      '"$ORCHESTRATOR_BUN" "${{ github.action_path }}/judge_aligned.ts"',
     );
 
     const latest = byId("latest");
     expect(String(latest?.uses)).toBe("Vivswan/repo-platform/actions/validate-template@build");
     expect(latest?.["continue-on-error"]).toBe(true);
     const latestWith = latest?.with as Record<string, string>;
-    expect(JSON.stringify(action.outputs)).not.toContain("steps.latest");
 
-    // report.ts reads the verdict the integrity leg wrote, the latest pair
-    // where that leg wrote it, and the fetch step's compare outputs.
-    const report = steps.find((step) => String(step.run).includes("report.ts"));
-    expect(envOf(report).VERDICT).toBe(verdictFile);
-    expect(envOf(report).LATEST_FINDINGS).toBe(latestWith["findings-file"]);
-    expect(envOf(report).LATEST_ADVISORIES).toBe(latestWith["advisories-file"]);
-    expect(envOf(report).COMPARE_STATUS).toBe("${{ steps.fetch.outputs.compare }}");
-    expect(envOf(report).AHEAD_BY).toBe("${{ steps.fetch.outputs.ahead-by }}");
+    // The report runs whatever happened above, reads the verdict the
+    // integrity leg wrote, the latest pair where that leg wrote it, and
+    // the fetch step's compare outputs; its run block carries no
+    // expression, so the behaviour tests execute it as the runner would.
+    const report = byId("report");
+    expect(report?.if).toBe("always()");
     expect(report?.["continue-on-error"]).toBeUndefined();
+    expect(envOf(report)).toMatchObject({
+      ACTION_BUN: BUN_PATH,
+      ACTION_PATH: "${{ github.action_path }}",
+      VERDICT: verdictFile,
+      LATEST_FINDINGS: latestWith["findings-file"],
+      LATEST_ADVISORIES: latestWith["advisories-file"],
+      COMPARE_STATUS: "${{ steps.fetch.outputs.compare }}",
+      AHEAD_BY: "${{ steps.fetch.outputs.ahead-by }}",
+    });
+    expect(String(report?.run)).not.toContain("${{");
+    expect(envOf(report).BUN_READY).toBeUndefined();
+    expect(String(report?.run)).toContain(
+      'if [ -n "$ACTION_BUN" ]; then\n  exec "$ACTION_BUN" "$ACTION_PATH/report.ts"',
+    );
+    expect(String(report?.run)).not.toMatch(/^\s*(exec\s+)?bun\s/m);
 
     // No leg renders: a copier run here would cost every fleet repo a
     // render per push, and freshness is the fetch step's compare.
     for (const name of ["fetch_aligned.ts", "judge_aligned.ts", "report.ts"]) {
       expect(readFileSync(join(ACTION, name), "utf8")).not.toMatch(/^\s*copier\s/m);
     }
+  });
+
+  // The one resolver block (both steps carry it), executed as the runner
+  // would: a path is recorded exactly when an absolute executable on PATH
+  // prints the pinned version AND exits 0, and `ready` derives from the
+  // path. A bun that lies about its version, one found through a relative
+  // PATH entry, another version, or no bun at all all read as no path.
+  const BUN_DIR = realpathSync(join(process.execPath, ".."));
+  const cases: [string, string, (dir: string) => { path: string; cwd?: string }, string][] = [
+    [
+      "the pinned version",
+      Bun.version,
+      () => ({ path: `${BUN_DIR}:/usr/bin:/bin` }),
+      `path=${process.execPath}\nready=true\n`,
+    ],
+    [
+      "another version",
+      "0.0.1",
+      () => ({ path: `${BUN_DIR}:/usr/bin:/bin` }),
+      "path=\nready=false\n",
+    ],
+    ["no bun at all", Bun.version, () => ({ path: "/usr/bin:/bin" }), "path=\nready=false\n"],
+    [
+      "a bun printing the pinned version but exiting nonzero",
+      Bun.version,
+      (dir) => {
+        writeFileSync(join(dir, "bun"), `#!/usr/bin/env bash\necho "${Bun.version}"\nexit 97\n`, {
+          mode: 0o755,
+        });
+        return { path: `${dir}:/usr/bin:/bin` };
+      },
+      "path=\nready=false\n",
+    ],
+    [
+      "the pinned version reached through a relative PATH entry",
+      Bun.version,
+      (dir) => {
+        writeFileSync(join(dir, "bun"), `#!/usr/bin/env bash\necho "${Bun.version}"\n`, {
+          mode: 0o755,
+        });
+        return { path: ".:/usr/bin:/bin", cwd: dir };
+      },
+      "path=\nready=false\n",
+    ],
+    ["an empty pin file", "", () => ({ path: `${BUN_DIR}:/usr/bin:/bin` }), "path=\nready=false\n"],
+  ];
+  test.each(cases)("a resolver with %s records %j", (_name, pinned, arrange, expected) => {
+    const action = parseYaml(readFileSync(join(ACTION, "action.yml"), "utf8"));
+    const step = (action.runs.steps as Record<string, unknown>[]).find(
+      (s) => s.id === "action-bun",
+    );
+    const { root } = scratch();
+    const stage = join(root, "stage");
+    mkdirSync(stage);
+    const { path, cwd } = arrange(stage);
+    const pinFile = join(root, ".bun-version");
+    writeFileSync(pinFile, pinned === "" ? "" : `${pinned}\n`);
+    const outputs = join(root, "outputs.txt");
+    writeFileSync(outputs, "");
+    const proc = boundedSpawnSync(
+      ["bash", "--noprofile", "--norc", "-e", "-o", "pipefail", "-c", String(step?.run)],
+      { cwd, env: { PATH: path, PIN_FILE: pinFile, GITHUB_OUTPUT: outputs } },
+    );
+    expect([proc.exitCode, read(outputs)]).toEqual([0, expected]);
   });
 });
