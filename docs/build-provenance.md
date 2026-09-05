@@ -39,6 +39,8 @@ Build Branches' schedule and dispatch legs are the self-heal publishers: they co
 
 The branch itself is an orphan, append-only: each build commit parents the previous build commit, never a main commit. So a main history rewrite can never invalidate it, and old build commits - each fleet repo's recorded `_commit`, needed by copier update's three-way merge - stay reachable forever.
 
+The recorded `_commit` is the full 40-hex build commit sha, never git's 7-char abbreviation or a tag name: copier's own value is `git describe --tags --always`, so copier.yml's two hook lines pass `--commit {{ _copier_conf.vcs_ref_hash }}` (the template clone's `git rev-parse HEAD`) to [actions/shared/stamp_manifest.ts](../actions/shared/stamp_manifest.ts), which rewrites the `_commit:` line before stamping the manifest's provenance slot from it. The template owns the shape, so every producer records it - the sync, a plain `copier copy` at onboarding, the goldens, the harnesses - and the sync's apply step checks the written value against the commit it pinned copier to (apply_update.ts). A repo rendered before the hook rewrite carries the abbreviation until its next sync PR rewrites the file.
+
 ## One publisher at a time
 
 Both workflow publishers of `refs/heads/build` serialize in one repo-scoped concurrency lane, `build-branches-publish`, shared as a literal string between post-green.yml's publish job and Build Branches' self-heal leg (a group derived from `github.workflow` would silently split the lane inside a `workflow_call`'d workflow - post-green.yml's header).

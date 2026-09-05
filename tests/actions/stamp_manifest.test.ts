@@ -14,11 +14,13 @@ import {
   resolveConflictsTowardAfter,
 } from "../../actions/shared/manifest";
 import {
+  commitArg,
   describeRewritten,
   entryHash,
   normalizeFromText,
   normalizeSymlinkTargets,
   recordedCommit,
+  rewriteRecordedCommit,
   stampManifestText,
 } from "../../actions/shared/stamp_manifest";
 import { boundedSpawnSync } from "../shared/bounded_spawn";
@@ -162,6 +164,141 @@ describe("recordedCommit", () => {
   test("a missing file or key yields null", () => {
     expect(recordedCommit(tree({}))).toBeNull();
     expect(recordedCommit(tree({ ".github/.copier-answers.yml": "_src_path: x\n" }))).toBeNull();
+  });
+});
+
+describe("rewriteRecordedCommit", () => {
+  const SHA = "31beeca7cfa33c8b7271e31d16d6517902131ac8";
+  const REST = "_src_path: gh:Vivswan/repo-platform\nproject_name: X\n";
+  test.each([
+    {
+      reason: "copier's plain abbreviation",
+      before: "_commit: 31beeca\n",
+      after: `_commit: ${SHA}\n`,
+    },
+    { reason: "a double-quoted value", before: '_commit: "2753404"\n', after: `_commit: ${SHA}\n` },
+    { reason: "a single-quoted value", before: "_commit: '2753404'\n", after: `_commit: ${SHA}\n` },
+    {
+      reason: "an exponent-shaped bare value copier leaves unquoted",
+      before: "_commit: 1626e53\n",
+      after: `_commit: ${SHA}\n`,
+    },
+    {
+      reason: "a tag name from describe",
+      before: "_commit: v1.0-rc-1\n",
+      after: `_commit: ${SHA}\n`,
+    },
+    {
+      reason: "an already-full sha (idempotent)",
+      before: `_commit: ${SHA}\n`,
+      after: `_commit: ${SHA}\n`,
+    },
+    {
+      reason: "odd spacing after the key survives, the value does not",
+      before: "_commit:   abc1234   \n",
+      after: `_commit:   ${SHA}\n`,
+    },
+  ])("$reason", ({ before, after }) => {
+    // Only the _commit line moves; the header comment and other keys are
+    // byte-identical.
+    const header = "# managed by repo-platform\n";
+    expect(rewriteRecordedCommit(header + before + REST, SHA)).toBe(header + after + REST);
+  });
+
+  test("an all-digit sha is written quoted so PyYAML keeps it a string", () => {
+    const digits = "1234567890".repeat(4);
+    expect(rewriteRecordedCommit("_commit: abc1234\n", digits)).toBe(`_commit: "${digits}"\n`);
+    // Round trip through the hook's own reader: the quotes are transparent.
+    expect(recordedCommit(tree({ ".github/.copier-answers.yml": `_commit: "${digits}"\n` }))).toBe(
+      digits,
+    );
+  });
+
+  test("a text without exactly one _commit line, or a bad sha, is refused", () => {
+    expect(() => rewriteRecordedCommit(REST, SHA)).toThrow("carries 0 _commit lines");
+    expect(() => rewriteRecordedCommit("", SHA)).toThrow("carries 0 _commit lines");
+    expect(() => rewriteRecordedCommit("_commit: a\n_commit: b\n", SHA)).toThrow(
+      "carries 2 _commit lines",
+    );
+    for (const bad of ["31beeca", SHA.toUpperCase(), `${SHA}f`, "v1.0", ""]) {
+      expect(() => rewriteRecordedCommit("_commit: x\n", bad)).toThrow("must be a full 40-hex sha");
+    }
+  });
+});
+
+describe("commitArg", () => {
+  const SHA = "31beeca7cfa33c8b7271e31d16d6517902131ac8";
+  test("absent, present, and malformed invocations", () => {
+    expect(commitArg([])).toBeNull();
+    expect(commitArg(["--commit", SHA])).toBe(SHA);
+    expect(() => commitArg(["--commit"])).toThrow("usage:");
+    expect(() => commitArg(["--other", SHA])).toThrow("usage:");
+    expect(() => commitArg(["--commit", SHA, "extra"])).toThrow("usage:");
+    expect(() => commitArg(["--commit", "31beeca"])).toThrow("must be a full 40-hex sha");
+    // An unrendered template expression (copier without vcs_ref_hash
+    // support, or a hand-run outside a git clone) is the loud case.
+    expect(() => commitArg(["--commit", "{{ _copier_conf.vcs_ref_hash }}"])).toThrow(
+      "must be a full 40-hex sha",
+    );
+    expect(() => commitArg(["--commit", "None"])).toThrow("must be a full 40-hex sha");
+  });
+});
+
+describe("the hook as copier runs it", () => {
+  const SHA = "31beeca7cfa33c8b7271e31d16d6517902131ac8";
+  const hook = join(import.meta.dir, "../../actions/shared/stamp_manifest.ts");
+  const run = (root: string, args: string[]) =>
+    boundedSpawnSync(["bun", hook, ...args], { env: { ...process.env, TARGET_DIR: root } });
+
+  test("--commit rewrites the answers line and the manifest's provenance slot follows", () => {
+    const answers = "# managed\n_commit: 31beeca\n_src_path: ./tree\n";
+    const root = tree({
+      ".github/.copier-answers.yml": answers,
+      ".github/repo-platform-manifest.json": manifestText([
+        `    ".github/.copier-answers.yml": {"class": "managed", "hash": null}`,
+        `    ".github/repo-platform-manifest.json": {"class": "managed", "hash": null, "commit": null}`,
+      ]),
+    });
+    const proc = run(root, ["--commit", SHA]);
+    expect(proc.exitCode).toBe(0);
+    const rewritten = `# managed\n_commit: ${SHA}\n_src_path: ./tree\n`;
+    expect(Bun.file(join(root, ".github/.copier-answers.yml")).text()).resolves.toBe(rewritten);
+    const manifest = require("node:fs").readFileSync(
+      join(root, ".github/repo-platform-manifest.json"),
+      "utf-8",
+    );
+    expect(manifest).toContain(`"commit": "${SHA}"`);
+    expect(manifest).toContain(`"hash": "${sha256(rewritten)}"`);
+    // The sync's final re-stamp (no argument) keeps the recorded value.
+    expect(run(root, []).exitCode).toBe(0);
+    expect(recordedCommit(root)).toBe(SHA);
+  });
+
+  test("--commit against a tree without an answers file fails instead of stamping blind", () => {
+    const root = tree({
+      ".github/repo-platform-manifest.json": manifestText([
+        `    ".github/repo-platform-manifest.json": {"class": "managed", "hash": null, "commit": null}`,
+      ]),
+    });
+    const proc = run(root, ["--commit", SHA]);
+    expect(proc.exitCode).not.toBe(0);
+    expect(proc.stderr).toContain("ENOENT");
+    expect(
+      require("node:fs").readFileSync(join(root, ".github/repo-platform-manifest.json"), "utf-8"),
+    ).toContain('"commit": null');
+  });
+
+  test("a malformed --commit fails the render loudly instead of stamping", () => {
+    const root = tree({
+      ".github/.copier-answers.yml": "_commit: 31beeca\n",
+      ".github/repo-platform-manifest.json": manifestText([
+        `    ".github/repo-platform-manifest.json": {"class": "managed", "hash": null, "commit": null}`,
+      ]),
+    });
+    const proc = run(root, ["--commit", "31beeca"]);
+    expect(proc.exitCode).not.toBe(0);
+    expect(proc.stderr).toContain("must be a full 40-hex sha");
+    expect(recordedCommit(root)).toBe("31beeca");
   });
 });
 

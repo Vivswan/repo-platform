@@ -5491,20 +5491,27 @@ const rules: Rule[] = [
         ["_tasks", commandsOf(doc._tasks)],
         ["_migrations", commandsOf(doc._migrations)],
       ];
-      const pathOf = (command: string): string =>
-        mustMatch(
-          command,
-          /^bun "\{\{ _copier_conf\.src_path \}\}\/(.+)"$/,
-          "copier.yml",
-          "a src_path-anchored bun hook command",
-        )[1];
+      const pathOf = (command: string): string => hookCommandParts(command).path;
       for (const [site, commands] of sites) {
-        if (!commands.some((command) => pathOf(command) === stampHook)) {
+        const stampCommands = commands.filter((command) => pathOf(command) === stampHook);
+        if (stampCommands.length === 0) {
           mismatches.push({
             file: "copier.yml",
             expected: `a ${site} hook running ${stampHook} (copier runs _tasks only on copy/recopy and _migrations only on update, so each site needs its own)`,
             got: "none - renders on that path would ship an unstamped manifest",
           });
+        }
+        // The stamp hook rewrites `_commit` from the full hash it is
+        // handed; a stamp line without the argument would record copier's
+        // abbreviated (or tag-named) describe output on that path.
+        for (const command of stampCommands) {
+          if (!hookCommandParts(command).commitArg) {
+            mismatches.push({
+              file: "copier.yml",
+              expected: `the ${site} stamp hook carrying ${STAMP_COMMIT_ARG}`,
+              got: command,
+            });
+          }
         }
         for (const command of commands) {
           const path = pathOf(command);
@@ -6026,6 +6033,23 @@ export function ruleRosterMismatches(
     }
   }
   return mismatches;
+}
+
+/** The argument copier.yml's stamp-hook lines hand the hook: the template
+ *  clone's full commit hash, which the hook records as `_commit`. */
+export const STAMP_COMMIT_ARG = '--commit "{{ _copier_conf.vcs_ref_hash }}"';
+
+/** A copier.yml hook command split into the src_path-relative script it
+ *  runs and whether it carries STAMP_COMMIT_ARG; any other shape is a
+ *  lost anchor. */
+export function hookCommandParts(command: string): { path: string; commitArg: boolean } {
+  const match = mustMatch(
+    command,
+    /^bun "\{\{ _copier_conf\.src_path \}\}\/([^"]+)"( --commit "\{\{ _copier_conf\.vcs_ref_hash \}\}")?$/,
+    "copier.yml",
+    "a src_path-anchored bun hook command",
+  );
+  return { path: match[1], commitArg: match[2] !== undefined };
 }
 
 /** Normalize python-style \Z end anchors to $, for regex-pair comparison. */

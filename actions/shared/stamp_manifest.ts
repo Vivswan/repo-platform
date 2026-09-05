@@ -20,6 +20,15 @@
 // node_modules exist - node builtins and zone-internal imports only, no
 // argv subprocesses.
 //
+// The hook also OWNS the shape of the recorded provenance: copier writes
+// `_commit` from `git describe --tags --always` (an abbreviation, or a
+// tag name), so copier.yml passes `--commit {{ _copier_conf.vcs_ref_hash }}`
+// - the template clone's full commit hash - and the hook rewrites the
+// `_commit:` line to it before stamping. Every producer (the sync,
+// onboarding's plain `copier copy`, the goldens, the harnesses) thereby
+// records the same 40-hex value with no environment to carry, and the
+// manifest's provenance slot follows from the rewritten file.
+//
 // Only the "hash" tokens - plus the self entry's "commit" provenance slot,
 // filled with the render's recorded _commit - are rewritten, in place,
 // line by line: the rendered manifest keeps one entry per line (the layout
@@ -46,7 +55,8 @@
 //
 // Env: TARGET_DIR (the rendered repository; default "." - the copier
 // hooks run with cwd at the destination, the sync workflow passes
-// TARGET_DIR=target).
+// TARGET_DIR=target). Args: `--commit <40-hex sha>` (the copier hooks;
+// the sync's final re-stamp passes none and keeps the recorded value).
 
 import { createHash } from "node:crypto";
 import {
@@ -83,6 +93,34 @@ const HASH_RE = /"hash": (?:null|"[0-9a-f]{64}")/;
  *  _commit, letting the validator tell version skew from entry deletion. */
 const COMMIT_RE = /"commit": (?:null|"[^"]*")/;
 
+/** The answers file copier records the render provenance in. */
+export const ANSWERS_FILE = ".github/.copier-answers.yml";
+
+/** The hex width of a full sha1 - the only `_commit` shape the hook
+ *  records and every downstream reader (the sync's update base, the
+ *  validator, the freshness report) resolves. */
+export const FULL_SHA_HEX = 40;
+const FULL_SHA_RE = new RegExp(`^[0-9a-f]{${FULL_SHA_HEX}}$`);
+
+/** The answers text with its `_commit:` line's value replaced by `sha`,
+ *  whatever copier wrote there (plain, quoted, an abbreviation, a tag
+ *  name). copier writes the key on every render before its hooks run, so
+ *  a text without exactly one `_commit:` line is not a render's answers
+ *  file and throws. An all-digit sha is written quoted: PyYAML (YAML 1.1,
+ *  what copier reads the file back with) would otherwise resolve it as an
+ *  integer on the next update. */
+export function rewriteRecordedCommit(text: string, sha: string): string {
+  if (!FULL_SHA_RE.test(sha)) throw new Error(`--commit must be a full 40-hex sha, got '${sha}'`);
+  const lines = text.match(/^_commit:[^\n]*$/gm) ?? [];
+  if (lines.length !== 1) {
+    throw new Error(
+      `${ANSWERS_FILE} carries ${lines.length} _commit lines, expected exactly one to rewrite`,
+    );
+  }
+  const value = /^[0-9]+$/.test(sha) ? `"${sha}"` : sha;
+  return text.replace(/^(_commit:[ \t]*)[^\n]*$/m, `$1${value}`);
+}
+
 /** The `_commit` the render recorded in .github/.copier-answers.yml, or
  *  null when
  *  the file or key is missing. Read with a line regex, not a YAML parser:
@@ -92,7 +130,7 @@ const COMMIT_RE = /"commit": (?:null|"[^"]*")/;
 export function recordedCommit(root: string): string | null {
   let text: string;
   try {
-    text = readFileSync(join(root, ".github/.copier-answers.yml"), "utf-8");
+    text = readFileSync(join(root, ANSWERS_FILE), "utf-8");
   } catch {
     return null;
   }
@@ -266,8 +304,35 @@ export function describeRewritten(rewritten: string[]): string {
     .join(", ")}`;
 }
 
+/** The `--commit` argument, or null when absent. Anything else on argv is
+ *  a wiring error in copier.yml and fails loudly - the hook's soft
+ *  contract covers DATA problems, not a broken invocation. */
+export function commitArg(argv: string[]): string | null {
+  if (argv.length === 0) return null;
+  if (argv.length !== 2 || argv[0] !== "--commit") {
+    throw new Error(`usage: stamp_manifest.ts [--commit <40-hex sha>], got: ${argv.join(" ")}`);
+  }
+  if (!FULL_SHA_RE.test(argv[1])) {
+    throw new Error(`--commit must be a full 40-hex sha, got '${argv[1]}'`);
+  }
+  return argv[1];
+}
+
 function main(): number {
   const root = resolve(process.env.TARGET_DIR || ".");
+  const commit = commitArg(process.argv.slice(2));
+  if (commit !== null) {
+    // --commit is the copier hooks' form, and copier writes the answers
+    // file before running them: a missing file or line here means the
+    // hook is aimed at the wrong tree, which must fail the render.
+    const answersPath = join(root, ANSWERS_FILE);
+    const answers = readFileSync(answersPath, "utf-8");
+    const rewritten = rewriteRecordedCommit(answers, commit);
+    if (rewritten !== answers) {
+      writeFileSync(answersPath, rewritten);
+      console.log(`recorded _commit ${commit} in ${ANSWERS_FILE}`);
+    }
+  }
   const manifestPath = join(root, MANIFEST_NAME);
   let text: string;
   try {

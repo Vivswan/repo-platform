@@ -111,13 +111,16 @@ _skip_if_exists:
 # writes it. Copier runs _migrations only on update and _tasks only on
 # copy/recopy, hence the same stamper (shipped inside the build branch's
 # actions/shared/ zone, the same relative path it has on main - check_ssot's
-# stamp-hook-path rule pins the tie) is wired into both.
+# stamp-hook-path rule pins the tie) is wired into both. --commit hands it
+# the template clone's FULL commit hash: copier's own `_commit` is `git
+# describe` (an abbreviation, or a tag name), and the hook rewrites it so
+# every render records the exact build commit.
 _migrations:
-  - command: bun "{{ _copier_conf.src_path }}/actions/shared/stamp_manifest.ts"
+  - command: bun "{{ _copier_conf.src_path }}/actions/shared/stamp_manifest.ts" --commit "{{ _copier_conf.vcs_ref_hash }}"
     when: "{{ _stage == 'after' }}"
 
 _tasks:
-  - command: bun "{{ _copier_conf.src_path }}/actions/shared/stamp_manifest.ts"
+  - command: bun "{{ _copier_conf.src_path }}/actions/shared/stamp_manifest.ts" --commit "{{ _copier_conf.vcs_ref_hash }}"
 
 project_name:
   type: str
