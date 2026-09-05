@@ -17,10 +17,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { capture } from "../../.github/scripts/shared/proc.ts";
-import {
-  GATE_REWORK_NAME,
-  REFERENCED_LABELS_NAME,
-} from "../../.github/scripts/sync/section_files.ts";
+import { REFERENCED_LABELS_NAME } from "../../.github/scripts/sync/section_files.ts";
 
 const SCRIPT = join(import.meta.dir, "../../.github/scripts/sync/commit_push.ts");
 const SENTINEL = "ghp_SENTINEL";
@@ -70,10 +67,8 @@ case "$*" in
     # restore path rmSync the very file the checkout case just restored.
     exit 0 ;;
   *"diff --name-only"*)
-    if [ "$STUB_MODE" = "withhold-allgreen" ]; then echo ".github/workflows/all-green.yml"; fi
     if [ "$STUB_MODE" = "withhold-other" ]; then echo ".github/workflows/ci.yml"; fi
     if [ "$STUB_MODE" = "withhold-restore" ]; then echo ".github/workflows/ci.yml"; fi
-    if [ "$STUB_MODE" = "withhold-unrelated" ]; then echo ".github/workflows/checks.yml"; fi
     exit 0 ;;
   *" checkout "*)
     # The withhold-restore mode makes the workflow-dir restore OBSERVABLE:
@@ -230,32 +225,6 @@ describe("commit_push failure diagnostics", () => {
 });
 
 describe("commit_push Workflows-scope withhold reconciliation", () => {
-  // The note claims all-green.yml is deleted AND ci.yml gains the gate
-  // job - a withhold restoring either file makes the claim false, so both
-  // arms clear it, and a withhold touching neither must not. Every arm
-  // withheld a workflow file, so every arm reports the withhold. Each row
-  // is one full commit_push spawn, so each carries the explicit budget:
-  // bun-test's 5s default sits on a spawn's runtime under load.
-  const NOTE = "> [!NOTE]\n> GATE REWORK: ci.yml's all-green job carries the check now.\n";
-  test.each([
-    { mode: "withhold-allgreen", expected: "", reason: "all-green.yml restored voids the note" },
-    { mode: "withhold-other", expected: "", reason: "ci.yml restored voids the note" },
-    {
-      mode: "withhold-unrelated",
-      expected: NOTE,
-      reason: "a withhold touching neither gate file leaves the note",
-    },
-  ])(
-    "a withhold reconciles the gate-rework note and reports itself: $reason",
-    ({ mode, expected }) => {
-      const result = runCommitPush(mode, "false", { [GATE_REWORK_NAME]: NOTE });
-      expect(result.exitCode).toBe(0);
-      expect(readFileSync(join(result.runnerTemp, GATE_REWORK_NAME), "utf-8")).toBe(expected);
-      expect(result.stdout).toContain("workflow-file changes were withheld");
-    },
-    30_000,
-  );
-
   test("the withhold overwrites a stale referenced-labels report (the recompute runs post-restore)", () => {
     // The workflow's check step ran BEFORE the restore rewrote
     // .github/workflows, so its report may claim label references the

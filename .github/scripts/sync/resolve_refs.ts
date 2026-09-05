@@ -46,14 +46,14 @@ capture(["git", "fetch", "--quiet", "origin", "+refs/heads/build:refs/remotes/or
 
 let answers: CopierAnswers;
 try {
-  answers = readAnswersFile("target/.github/.copier-answers.yml");
+  answers = readAnswersFile("target");
 } catch (err) {
   if (!(err instanceof AnswersFileError)) throw err;
   // The parser's message can quote target file content; a hidden target
   // gets the detail-free version.
   if (hideDetails()) {
     console.log(
-      `::error::${targetDisplay}'s .github/.copier-answers.yml cannot be read as a YAML mapping (detail hidden: private repository). Reproduce the sync locally - see docs/private-repos.md.`,
+      `::error::${targetDisplay}'s .github/.copier-answers.yml cannot be read as a recorded answers file (detail hidden: private repository). Reproduce the sync locally - see docs/private-repos.md.`,
     );
   } else {
     console.log(

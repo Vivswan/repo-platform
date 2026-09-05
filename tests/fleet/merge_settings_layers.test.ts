@@ -749,11 +749,10 @@ describe("what the six layers emit for a rule the fleet stopped declaring", () =
   // What this pins is the emitted document; the PUT itself is the
   // action's contract (docs/settings.md's apply semantics).
   //
-  // Both halves matter because the fleet's private repos still carry a
-  // live copilot_code_review rule: not an apply that failed to remove it,
-  // but their own settings.yml (layer 5) still declaring it - the legacy
-  // full baseline the settings-layering transition replaces. The starter
-  // that replaces it declares no ruleset, so the rule leaves the payload.
+  // Both halves matter because a private repo's own settings.yml (layer
+  // 5) can still declare a copilot_code_review rule: the identity starter
+  // declares no ruleset, so the rule leaves the payload only once the
+  // repo file stops carrying it.
   const manifests = loadManifests();
   const privateFleet = managedSettings(
     { modules: ["settings-sync"], private: true, trackingLabels: [] },
@@ -775,12 +774,12 @@ describe("what the six layers emit for a rule the fleet stopped declaring", () =
 
   const STARTER =
     'repository:\n  description: "x"\n  homepage: ""\n  topics: ""\n  private: true\n';
-  const LEGACY = `${STARTER}rulesets:\n  - name: main\n    rules:\n      - type: copilot_code_review\n        parameters:\n          review_on_push: true\n`;
+  const REPO_RULE = `${STARTER}rulesets:\n  - name: main\n    rules:\n      - type: copilot_code_review\n        parameters:\n          review_on_push: true\n`;
 
-  test("the starter leaves it out of the emitted main ruleset; a legacy layer declaring it keeps it, BELOW the override", () => {
+  test("the starter leaves it out of the emitted main ruleset; a repo layer declaring it keeps it, BELOW the override", () => {
     // Both full lists: the negative half alone would also pass for an
     // EMPTY rules list, which is the silent-unprotect outcome this block
-    // is about. The legacy rule's leading position pins that the repo
+    // is about. The repo rule's leading position pins that the repo
     // layer's rule sits below the override's, which append after it.
     const OVERRIDE_MAIN = [
       "deletion",
@@ -790,8 +789,7 @@ describe("what the six layers emit for a rule the fleet stopped declaring", () =
       "pull_request",
     ];
     expect(mainRuleTypes(STARTER)).toEqual(OVERRIDE_MAIN);
-    // Which is why the live private rulesets still carry it.
-    expect(mainRuleTypes(LEGACY)).toEqual(["copilot_code_review", ...OVERRIDE_MAIN]);
+    expect(mainRuleTypes(REPO_RULE)).toEqual(["copilot_code_review", ...OVERRIDE_MAIN]);
   });
 });
 

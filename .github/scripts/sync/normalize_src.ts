@@ -10,15 +10,26 @@
 // RUNNER_TEMP.
 
 import { readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { env, error, hideDetails, notice, requireEnv, setOutput } from "../shared/gha.ts";
 import { identityArgs, SYNC_IDENTITY } from "../shared/git_identity.ts";
 import { must } from "../shared/proc.ts";
+import { ANSWERS_PATH, AnswersFileError, readAnswersBytes } from "./answers_file.ts";
 import { rewriteSrcPath } from "./src_path.ts";
 
 const canonical = `gh:${requireEnv("GITHUB_REPOSITORY")}`;
 const display = env("TARGET_DISPLAY");
-const answersPath = "target/.github/.copier-answers.yml";
-const before = readFileSync(answersPath);
+const answersPath = join("target", ANSWERS_PATH);
+let before: Buffer;
+try {
+  before = readAnswersBytes("target");
+} catch (err) {
+  if (!(err instanceof AnswersFileError)) throw err;
+  // The boundary's messages name only the path's shape, never its
+  // content, so they are safe for a hide-details target's public log.
+  error(`${display}'s ${ANSWERS_PATH}: ${err.message}`);
+  process.exit(1);
+}
 
 // No print touches the recorded value here - it is target-derived, and the
 // hide-details discipline below decides what may reach the public log.

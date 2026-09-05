@@ -14,16 +14,9 @@ import { stampManifestText } from "../../../actions/shared/stamp_manifest.ts";
 import { env, hideDetails, requireEnv, setOutput } from "../shared/gha.ts";
 import { SYNC_IDENTITY } from "../shared/git_identity.ts";
 import { capture, must, mustCapture, passthrough, redactText } from "../shared/proc.ts";
-import { CI_WORKFLOW_PATH, WRAPPER_WORKFLOW_PATH } from "./gate_rework.ts";
 import { writeReferencedLabelsReport } from "./referenced_labels.ts";
 import { appendHiddenFailure, captureName } from "./run_hidden.ts";
-import { GATE_REWORK_NAME, REFERENCED_LABELS_NAME, STARTER_PINS_NAME } from "./section_files.ts";
-import {
-  type FileOutcome,
-  renderRolloutReport,
-  STARTER_PINS_OUTCOMES_NAME,
-  withholdWorkflowRewrites,
-} from "./starter_pin_rollout.ts";
+import { REFERENCED_LABELS_NAME } from "./section_files.ts";
 
 const target = requireEnv("TARGET");
 const targetDisplay = env("TARGET_DISPLAY") || target;
@@ -204,28 +197,6 @@ if (existsSync(removedPaths) && readFileSync(removedPaths, "utf-8") !== "") {
     .split("\n")
     .filter((line) => line !== "" && !line.startsWith(".github/workflows/"));
   writeFileSync(removedPaths, kept.length > 0 ? `${kept.join("\n")}\n` : "");
-}
-// The starter pin rollout's rewrites live in .github/workflows files, so
-// the restore undid them: re-render its transition note without those
-// claims (withholdWorkflowRewrites) so the PR body describes the pushed
-// tree. The outcomes file is this run's own output, written by
-// starter_pin_rollout.ts moments ago - trusted as-is.
-const pinOutcomesPath = join(runnerTemp, STARTER_PINS_OUTCOMES_NAME);
-if (existsSync(pinOutcomesPath)) {
-  const outcomes = withholdWorkflowRewrites(
-    JSON.parse(readFileSync(pinOutcomesPath, "utf-8")) as FileOutcome[],
-  );
-  writeFileSync(pinOutcomesPath, `${JSON.stringify(outcomes, null, 2)}\n`, "utf-8");
-  writeFileSync(join(runnerTemp, STARTER_PINS_NAME), renderRolloutReport(outcomes), "utf-8");
-}
-// The gate-rework note claims this PR deletes all-green.yml AND ships a
-// ci.yml carrying the gate job; the restore just withheld workflow-file
-// changes, so either path restored voids the claim - clear the note (the
-// withheld-workflows section already lists the files, and the next sync
-// with a scoped token re-detects the transition).
-const withheldPaths = new Set(withheld.split("\n"));
-if (withheldPaths.has(WRAPPER_WORKFLOW_PATH) || withheldPaths.has(CI_WORKFLOW_PATH)) {
-  writeFileSync(join(runnerTemp, GATE_REWORK_NAME), "");
 }
 // The referenced-labels report was computed against the PRE-restore tree;
 // the restore just rewrote .github/workflows, whose label references are

@@ -50,9 +50,7 @@ import { CHECK_NAME } from "../.github/scripts/shared/all_green.ts";
 import { capture } from "../.github/scripts/shared/proc.ts";
 import { stageComposedTreeArgv } from "../.github/scripts/shared/stage_tree.ts";
 import { captureName } from "../.github/scripts/sync/run_hidden.ts";
-import { PIN_FLIPS } from "../.github/scripts/sync/starter_pin_rollout.ts";
 import { cleanManagedRegion } from "../actions/shared/grammar.ts";
-import { TOOLCHAIN_SETUP_FRAGMENT, TOOLCHAIN_SETUP_TARGETS } from "./compose_template.ts";
 import {
   actionSetsUpBun,
   actionSteps,
@@ -62,7 +60,6 @@ import {
 } from "./generate.ts";
 import { type JinjaVars, normalizeJinja, placeholderJinja } from "./jinja_subset.ts";
 import { loadManifests as loadManifestsFresh, type ModuleManifest } from "./module_manifests.ts";
-import { landedPathAndGates, loadBaseOwnership } from "./ownership.ts";
 import { ANSWERS_FILE, parseAnswers } from "./render_dogfood.ts";
 import {
   argvFlagLeads,
@@ -1554,44 +1551,21 @@ export function pinMismatches(pins: Pin[], allowed: Record<string, string[]>): M
   return mismatches;
 }
 
-// --- starter delivery pins ----------------------------------------------------
+// --- fleet delivery pins -----------------------------------------------------
 
 /** The green-gated branch every rendered self-pin executes from. A twin of
  *  publish.ts's BRANCH constant (build-branches.yml's one delivery
- *  channel), pinned against it by the starter-pin-rollout rule; a
- *  delivery-branch rename updates both, plus a PIN_FLIPS rollout entry for
- *  every starter pin the rename moves (the reverse coverage direction is
- *  what makes forgetting the entry loud). */
+ *  channel), pinned against it by the fleet-refs-ride-build rule, so a
+ *  delivery-branch rename updates both. Starters render once
+ *  (_skip_if_exists): a rename reaches fresh renders only, never a pin an
+ *  already-rendered starter carries. */
 export const DELIVERY_REF = "build";
 
-export interface StarterPin {
+export interface SelfPin {
   file: string;
   /** The rendered pin's stem after the username: repo-platform/<path>. */
   stem: string;
   ref: string;
-}
-
-/** The self-delivery pins in one template source, matched the way the
- *  rollout's own rewriter matches them (rolloutContent in
- *  sync/starter_pin_rollout.ts): every
- *  `{{ github_username }}/repo-platform/<path>@<ref>` token anywhere in
- *  the text - uses: lines, folded scalars, comments alike - so this rule
- *  and the rewrite can never disagree about what is a pin. The rewriter's
- *  owner boundary is mirrored too: a token glued to a preceding owner-name
- *  character renders as a LONGER owner that merely ends in the username -
- *  someone else's pin. Third-party pins (actions/checkout@vN) are each
- *  rendered repo's own dependabot's to bump and are not delivery pins. The
- *  ref token is taken verbatim (up to whitespace or a quote, the rollout's
- *  own ref grammar), so a non-literal ref fails coverage rather than
- *  escaping the check. */
-export function starterSelfPins(text: string, file: string): StarterPin[] {
-  const token =
-    /(?<![A-Za-z0-9-])\{\{\s*github_username\s*\}\}\/(repo-platform\/[A-Za-z0-9_./-]+)@([^\s"']*)/g;
-  return [...text.matchAll(token)].map((match) => ({
-    file,
-    stem: match[1],
-    ref: match[2],
-  }));
 }
 
 /** Self-delivery pins for the categorical delivery-channel rule: any
@@ -1607,18 +1581,15 @@ export function starterSelfPins(text: string, file: string): StarterPin[] {
  *  code in a reviewed file, outside any textual rule's reach, and stays
  *  review's - and the rendered-side scan (renderedSelfPins over the
  *  golden snapshots, where jinja is already evaluated) still reds every
- *  obfuscated pin that lands in a branch the golden matrix renders.
- *  Deliberately NOT folded into starterSelfPins: that matcher is pinned
- *  to the rollout rewriter's own grammar, and the two must not drift
- *  apart silently. */
-export function templateSelfPins(text: string, file: string): StarterPin[] {
+ *  obfuscated pin that lands in a branch the golden matrix renders. */
+export function templateSelfPins(text: string, file: string): SelfPin[] {
   const token =
     /(?<![A-Za-z0-9-])\{\{[^{}]*\bgithub_username\b[^{}]*\}\}\/(repo-platform\/[A-Za-z0-9_./-]+)@([^\s"']*)/g;
   return [...text.matchAll(token)].map((match) => ({ file, stem: match[1], ref: match[2] }));
 }
 
 /** Self-delivery pins in RENDERED text (the golden snapshots), where the
- *  username expression is already substituted: starterSelfPins' token
+ *  username expression is already substituted: templateSelfPins' token
  *  grammar with the literal `owner` in the username slot, owner-boundary
  *  guard included and matched case-insensitively (the `| lower` template
  *  spelling renders a lowercased owner, and GitHub resolves owner and
@@ -1629,7 +1600,7 @@ export function templateSelfPins(text: string, file: string): StarterPin[] {
  *  case-sensitive, so a case-variant filename must mismatch the roster
  *  and go loud. The owner must be a plain GitHub username so it can ride
  *  the regex verbatim. */
-export function renderedSelfPins(text: string, file: string, owner: string): StarterPin[] {
+export function renderedSelfPins(text: string, file: string, owner: string): SelfPin[] {
   if (!/^[A-Za-z0-9-]+$/.test(owner)) {
     throw new Error(`renderedSelfPins: owner '${owner}' is not a plain GitHub username`);
   }
@@ -1644,6 +1615,20 @@ export function renderedSelfPins(text: string, file: string, owner: string): Sta
   }));
 }
 
+/** DELIVERY_REF against the branch publish.ts actually advances: the
+ *  pins below are only right while both name the same branch, so a
+ *  rename of either alone mismatches, naming the twin to update. */
+export function deliveryRefTwinMismatches(published: string, deliveryRef: string): Mismatch[] {
+  if (published === deliveryRef) return [];
+  return [
+    {
+      file: "scripts/check_ssot.ts DELIVERY_REF",
+      expected: `'${published}' (publish.ts's BRANCH - the branch the fleet's pins execute from)`,
+      got: `'${deliveryRef}'`,
+    },
+  ];
+}
+
 /** The categorical delivery-channel law over fleet-rendered content:
  *  every `<owner>/repo-platform/<path>@<ref>` token - composite action
  *  and reusable workflow alike - must ride the green-gated delivery
@@ -1652,7 +1637,7 @@ export function renderedSelfPins(text: string, file: string, owner: string): Sta
  *  its file and offending ref. Throws when no pin is found at all: the
  *  templates always carry self-references, so an empty scan means the
  *  extraction grammar rotted, not a clean fleet. */
-export function deliveryRefMismatches(pins: StarterPin[], deliveryRef: string): Mismatch[] {
+export function deliveryRefMismatches(pins: SelfPin[], deliveryRef: string): Mismatch[] {
   if (pins.length === 0) {
     throw new Error(
       "no repo-platform self-reference found in the scanned content - anchor lost " +
@@ -1678,7 +1663,7 @@ export function deliveryRefMismatches(pins: StarterPin[], deliveryRef: string): 
  *  actions/ tree, so an action pin can only 404 by pointing at a
  *  directory that does not exist - the compose smoke catches that. */
 export function fleetWorkflowPinMismatches(
-  pins: StarterPin[],
+  pins: SelfPin[],
   shipped: readonly string[],
 ): Mismatch[] {
   const prefix = "repo-platform/.github/workflows/";
@@ -1691,133 +1676,6 @@ export function fleetWorkflowPinMismatches(
       expected: `a reusable workflow on branch_tree.ts's FLEET_WORKFLOWS roster [${shipped.join(", ")}] (the build branch ships only the roster, so any other pin 404s at call time)`,
       got: pin.stem,
     }));
-}
-
-/** The compose-anchor names a shared template carries, in the composer's
- *  lenient hint spelling (compose_template.ts's ANCHOR_HINT_RE; the
- *  composer itself then rejects non-canonical variants, so lenient here is
- *  over-coverage, never under). */
-export function composeAnchorNames(text: string): string[] {
-  return [...text.matchAll(/\{#-?[ \t]*compose:([a-z0-9][a-z0-9-]*)/g)].map((match) => match[1]);
-}
-
-/** Anchor names expanded with the composer's generator-input fragment:
- *  toolchain-setup.jinja is no anchor's fragment, but the composer
- *  prepends its bytes into each module's contributions to the
- *  TOOLCHAIN_SETUP_TARGETS anchors (applyToolchainSetup), so it reaches
- *  every starter those anchors feed. */
-export function withToolchainSetup(anchors: ReadonlySet<string>): Set<string> {
-  const out = new Set(anchors);
-  if (TOOLCHAIN_SETUP_TARGETS.some((target) => out.has(target))) {
-    out.add(TOOLCHAIN_SETUP_FRAGMENT);
-  }
-  return out;
-}
-
-/** The fragment sources spliced into the given anchors:
- *  templates/<module>/fragments/<name>.jinja. A free-form anchor in a
- *  starter splices these into the rendered starter, so a pin in one is a
- *  starter pin - the rollout rule scans them alongside the starter's own
- *  source. */
-export function fragmentFilesFor(
-  anchorNames: ReadonlySet<string>,
-  templateFiles: string[],
-): string[] {
-  return templateFiles.filter((rel) => {
-    const match = /^templates\/[^/]+\/fragments\/([^/]+)\.jinja$/.exec(rel);
-    return match !== null && anchorNames.has(match[1]);
-  });
-}
-
-/** The template sources that land starter-classed paths: repo-relative
- *  `templates/<source>/...` paths filtered by their LANDED path (the
- *  .jinja suffix and filename gates stripped), so a gated starter counts
- *  and a managed or split template never does. */
-export function starterTemplateFiles(
-  templateFiles: string[],
-  starterPaths: ReadonlySet<string>,
-): string[] {
-  return templateFiles.filter((rel) => {
-    const inner = rel.split("/").slice(2).join("/");
-    if (inner === "") return false;
-    return starterPaths.has(landedPathAndGates(inner.replace(/\.jinja$/, "")).path);
-  });
-}
-
-interface PinFlip {
-  stem: string;
-  from: readonly string[];
-  to: string;
-}
-
-/** Both directions of the starter-pin/rollout coupling, plus the flip
- *  list's own shape. Forward: every starter self-pin must be the delivery
- *  ref or the `to` of a PIN_FLIPS entry for its stem - starters render
- *  ONCE (_skip_if_exists), so a template pin edit alone never reaches a
- *  repo that already rendered, and the one-run rollout
- *  (sync/starter_pin_rollout.ts) is the only carrier; a pin change without
- *  its rollout entry goes loud here. Reverse: every flip's `to` must be
- *  some starter's actual pin - a flip porting the fleet to a ref fresh
- *  renders do not get is the same fork in the other direction, and a stale
- *  flip left after the template moved on surfaces the same way. Shape:
- *  a flip with no retired refs, one whose `from` carries its own target,
- *  or a second entry for a stem ports nothing or double-reports
- *  (PIN_FLIPS' own contract), so those mismatch outright. The residual is
- *  history: a change that retires PIN_FLIPS and renames the delivery ref
- *  in the same commit satisfies a point-in-time check by construction. */
-export function starterPinCoverage(
-  pins: StarterPin[],
-  flips: readonly PinFlip[],
-  deliveryRef: string,
-): Mismatch[] {
-  const mismatches: Mismatch[] = [];
-  for (const [index, flip] of flips.entries()) {
-    if (flips.findIndex((other) => other.stem === flip.stem) !== index) {
-      mismatches.push({
-        file: ".github/scripts/sync/starter_pin_rollout.ts",
-        expected: `one PIN_FLIPS entry for stem ${flip.stem} (two would double-report hand pins)`,
-        got: "a second entry for the stem",
-      });
-    }
-    if (flip.from.length === 0) {
-      mismatches.push({
-        file: ".github/scripts/sync/starter_pin_rollout.ts",
-        expected: `retired refs in the ${flip.stem} flip's from list`,
-        got: "an empty from list - the flip ports nothing",
-      });
-    }
-    if (flip.from.includes(flip.to)) {
-      mismatches.push({
-        file: ".github/scripts/sync/starter_pin_rollout.ts",
-        expected: `the ${flip.stem} flip's target outside its own from list`,
-        got: `'${flip.to}' as both a retired ref and the target`,
-      });
-    }
-  }
-  for (const pin of pins) {
-    const covered =
-      pin.ref === deliveryRef ||
-      flips.some((flip) => flip.stem === pin.stem && flip.to === pin.ref);
-    if (!covered) {
-      mismatches.push({
-        file: pin.file,
-        expected:
-          `${pin.stem}@${deliveryRef}, or a sync/starter_pin_rollout.ts PIN_FLIPS entry ` +
-          `with to: '${pin.ref}' (starters render once, so only the rollout can carry a pin change to the fleet)`,
-        got: `@${pin.ref} with no rollout entry`,
-      });
-    }
-  }
-  for (const flip of flips) {
-    if (!pins.some((pin) => pin.stem === flip.stem && pin.ref === flip.to)) {
-      mismatches.push({
-        file: ".github/scripts/sync/starter_pin_rollout.ts",
-        expected: `a starter template pinning ${flip.stem}@${flip.to} (a flip's target is what a fresh render gets)`,
-        got: "no starter carries that pin - the flip ports the fleet to a ref the template does not ship",
-      });
-    }
-  }
-  return mismatches;
 }
 
 // --- bun types/runtime coupling -----------------------------------------------
@@ -3620,58 +3478,6 @@ const rules: Rule[] = [
   },
 
   {
-    // Starter-classed templates and the sync-side rollout, coupled in both
-    // directions (starterPinCoverage has the full statement). The starter
-    // roster comes from the ownership declarations - the same single
-    // source the composed manifest and _skip_if_exists are generated from
-    // - and DELIVERY_REF is pinned against publish.ts's BRANCH (AST
-    // extraction of the declaration: importing the publisher would run
-    // its top-level git wiring).
-    name: "starter-pin-rollout",
-    run: () => {
-      const mismatches: Mismatch[] = [];
-      const published = constStringValue(
-        read(".github/scripts/build-branches/publish.ts"),
-        "BRANCH",
-        { where: "publish.ts", what: "the delivery branch" },
-      );
-      if (published !== DELIVERY_REF) {
-        mismatches.push({
-          file: "scripts/check_ssot.ts DELIVERY_REF",
-          expected: `'${published}' (publish.ts's BRANCH - the branch the fleet's pins execute from)`,
-          got: `'${DELIVERY_REF}'`,
-        });
-      }
-      const declarations = [
-        ...loadBaseOwnership(join(REPO_ROOT, "templates")),
-        ...loadManifests().flatMap((m) => m.ownership ?? []),
-      ];
-      const starters = new Set(
-        declarations.filter((d) => d.class === "starter").map((d) => d.path),
-      );
-      const templateFiles = walkFiles("templates")
-        .filter((f) => !f.symlink)
-        .map((f) => f.path);
-      const files = starterTemplateFiles(templateFiles, starters);
-      // Free-form compose anchors splice module fragments into shared
-      // files, so a fragment feeding a starter renders INTO the starter -
-      // a pin there needs the same rollout coverage as one in the
-      // starter's own source. withToolchainSetup covers the composer's
-      // one generator-input fragment the same way.
-      const anchors = withToolchainSetup(
-        new Set(files.flatMap((rel) => composeAnchorNames(read(rel)))),
-      );
-      const sources = [...files, ...fragmentFilesFor(anchors, templateFiles)];
-      const pins = sources.flatMap((rel) => starterSelfPins(read(rel), rel));
-      if (pins.length === 0) {
-        throw new Error("no starter template carries a self-delivery pin - anchor lost");
-      }
-      mismatches.push(...starterPinCoverage(pins, PIN_FLIPS, DELIVERY_REF));
-      return mismatches;
-    },
-  },
-
-  {
     // The categorical delivery-channel law: EVERY self-reference in
     // fleet-rendered content - composite action or reusable workflow,
     // template source or golden snapshot - rides the green-gated build
@@ -3680,14 +3486,19 @@ const rules: Rule[] = [
     // ref. The scope boundary is structural, not a whitelist:
     // templates/ and tests/golden-renders/ are exactly what the fleet
     // renders and executes, while repo-platform's own workflows (./
-    // locals, @main on itself) live outside both trees.
-    // starter-pin-rollout above stays the narrower starter/rollout
-    // coupling; this rule is what makes an off-channel pin loud even
-    // where that rule does not look (managed templates, the snapshots).
-    // The shipping side rides along: a reusable-workflow pin must also
-    // name a FLEET_WORKFLOWS entry, or the right ref still 404s.
+    // locals, @main on itself) live outside both trees. DELIVERY_REF
+    // itself is pinned against publish.ts's BRANCH (AST extraction of the
+    // declaration: importing the publisher would run its top-level git
+    // wiring). The shipping side rides along: a reusable-workflow pin
+    // must also name a FLEET_WORKFLOWS entry, or the right ref still
+    // 404s.
     name: "fleet-refs-ride-build",
     run: () => {
+      const published = constStringValue(
+        read(".github/scripts/build-branches/publish.ts"),
+        "BRANCH",
+        { where: "publish.ts", what: "the delivery branch" },
+      );
       const templatePins = walkFiles("templates")
         .filter((f) => !f.symlink)
         .flatMap((f) => templateSelfPins(read(f.path), f.path));
@@ -3696,6 +3507,7 @@ const rules: Rule[] = [
         .flatMap((f) => renderedSelfPins(read(f.path), f.path, jinjaVars().username));
       const pins = [...templatePins, ...goldenPins];
       return [
+        ...deliveryRefTwinMismatches(published, DELIVERY_REF),
         ...deliveryRefMismatches(pins, DELIVERY_REF),
         ...fleetWorkflowPinMismatches(pins, FLEET_WORKFLOWS),
       ];
@@ -5117,7 +4929,9 @@ const rules: Rule[] = [
       // binds behaviorally end to end: copier.yml's _answers_file (where
       // copier WRITES; near-inert for reads, which honor only the CLI
       // flag), apply_update.ts's standing --answers-file flag (the
-      // consequential one), and relocate_answers.ts's move destination.
+      // consequential one), and answers_file.ts's ANSWERS_PATH (the
+      // boundary the sync's filesystem reads share; clean_renders.ts's
+      // HEAD read spells the path through the same constant).
       // The template filename under templates/base/.github/ is the fourth
       // spelling, anchored via the rendered-path derivation. One editor
       // moving one of them alone must be named here, not discovered at a
@@ -5144,13 +4958,12 @@ const rules: Rule[] = [
             ),
         ],
         [
-          ".github/scripts/sync/relocate_answers.ts",
+          ".github/scripts/sync/answers_file.ts",
           "ANSWERS_PATH",
           () =>
-            constStringValue(read(".github/scripts/sync/relocate_answers.ts"), "ANSWERS_PATH", {
-              where: ".github/scripts/sync/relocate_answers.ts",
-              what: "the relocate destination const",
-              exported: true,
+            constStringValue(read(".github/scripts/sync/answers_file.ts"), "ANSWERS_PATH", {
+              where: ".github/scripts/sync/answers_file.ts",
+              what: "the answers boundary's path",
             }),
         ],
       ];
@@ -6120,7 +5933,6 @@ export const RULE_ROSTER = [
   "dogfood-oracle-row",
   "bun-dirs",
   "action-pins",
-  "starter-pin-rollout",
   "fleet-refs-ride-build",
   "bun-types-pin",
   "toolchain-version-files",

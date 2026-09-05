@@ -67,18 +67,30 @@ import {
   type RunResult,
 } from "../shared/proc.ts";
 import { stageComposedTreeArgv } from "../shared/stage_tree.ts";
-import { AnswersFileError, readAnswersFile } from "./answers_file.ts";
-import { ANSWERS_PATH, answersMoveNote, relocateAnswers } from "./relocate_answers.ts";
+import {
+  ANSWERS_PATH,
+  AnswersFileError,
+  readAnswersBytes,
+  readAnswersFile,
+} from "./answers_file.ts";
 import {
   declaresLegacyMirrorSource,
   relocateSecurityPolicy,
   SECURITY_PATH,
   securityMoveNote,
 } from "./relocate_security_policy.ts";
-import { ANSWERS_MOVE_NAME, SECURITY_MOVE_NAME } from "./section_files.ts";
+import {
+  MIRRORS_NOTE_NAME,
+  MIRRORS_REVIEW_NAME,
+  REFERENCED_LABELS_NAME,
+  REMOVED_SPLITS_NAME,
+  SECURITY_MOVE_NAME,
+  TAIL_SHRANK_NAME,
+} from "./section_files.ts";
 import { rewriteSrcPath } from "./src_path.ts";
 
 const REPO_ROOT = resolve(import.meta.dir, "..", "..", "..");
+
 const REHEARSAL_TAG = "rehearsal-build";
 // Fresh clones have no committer identity configured.
 const GIT_IDENT = ["-c", "user.name=rehearsal", "-c", "user.email=rehearsal@localhost"];
@@ -245,6 +257,46 @@ export function parseConflictReport(stdout: string): {
   return { conflicts, malformed };
 }
 
+/** The would-be PR-body sections in open_pr.ts's body order: its flag
+ * sections, then the conflict summary. Each row is a RUNNER_TEMP-twin
+ * report file a replayed step writes, with the title printed above its
+ * content; the fixed-name reports ride the section_files.ts constants
+ * open_pr.ts reads them by, the rest are the workflow-provided env paths
+ * under the workflow's own names. Review-only flags with no body section
+ * (CARRY_REVIEW_FILE) are not rows, as in the PR. tests/sync/rehearse.test.ts
+ * pins the fixed-name rows' presence and order against open_pr.ts. */
+export const PR_BODY_SECTIONS: readonly (readonly [string, string])[] = [
+  ["local-carryover.md", "Split-file carry summary (rebuilt structurally)"],
+  [
+    TAIL_SHRANK_NAME,
+    "TAIL TRIPWIRE report (the PR would stay manual-review; a trip is a sync bug)",
+  ],
+  ["retired-modules.txt", "Retired modules dropped from the selection"],
+  ["removed-paths.txt", "The template retired these files; this update deletes them"],
+  [
+    SECURITY_MOVE_NAME,
+    "Security policy move (one-time transition note: SECURITY.md -> .github/SECURITY.md)",
+  ],
+  ["manifest-license-warnings.md", "Registry metadata conflicting with the fleet license"],
+  [MIRRORS_NOTE_NAME, "Mirror copies materialized from the repo's own `mirrors` declaration"],
+  [
+    MIRRORS_REVIEW_NAME,
+    "Refused mirror declarations - nothing written for them (the PR would stay manual-review)",
+  ],
+  [
+    REFERENCED_LABELS_NAME,
+    "Labels referenced by issue forms/workflows but missing from the merged settings roster (the PR would stay manual-review)",
+  ],
+  [
+    REMOVED_SPLITS_NAME,
+    "Files this update deletes with a repository-owned half (split-classed at HEAD, or a license file the manifest cannot class); the PR would stay manual-review",
+  ],
+  [
+    "dropped-local-hunks.md",
+    "Merge conflicts resolved toward the template (review the dropped local lines)",
+  ],
+];
+
 /** The per-file diagnostics of a failed validate_generated_files.ts run,
  * for a quiet-mode fleet report: its "error: <file>: ..." lines (prefix
  * stripped, first VALIDATION_ERROR_CAP kept, a counted marker for the
@@ -372,35 +424,10 @@ export function rehearseRepo(slug: string, options: RehearsalOptions): Rehearsal
         `${slug} is not managed by repo-platform: .repo-platform.yml is missing from its default branch`,
       );
     }
-    // Adopted but broken is a failure, not a skip: production's selector
-    // only gates on .repo-platform.yml, and the sync leg would fail here.
-    // The sync's own one-shot answers-file move (relocate_answers.ts) is
-    // replayed first: a pre-move clone gets the same byte-for-byte git mv
-    // plus commit the production leg makes, and the same PR-body note
-    // (written into the RUNNER_TEMP twin for the sections printer below).
-    const answersLocation = relocateAnswers(targetDir);
-    writeFileSync(join(temp, ANSWERS_MOVE_NAME), answersMoveNote(answersLocation), "utf-8");
-    if (answersLocation === "missing") {
-      throw new RehearsalError(
-        `${slug} has .repo-platform.yml but no ${ANSWERS_PATH}; the sync cannot update it`,
-      );
-    }
-    if (answersLocation === "both") {
-      throw new RehearsalError(
-        `${slug} carries a copier answers file at both ${ANSWERS_PATH} and the retired root ` +
-          "path; the sync would refuse it - delete the stale root copy",
-      );
-    }
-    if (answersLocation === "not-a-file") {
-      throw new RehearsalError(
-        `${slug} carries something other than a regular file at ${ANSWERS_PATH} or the ` +
-          "retired root path; the sync would refuse it",
-      );
-    }
-    // The security-policy move (relocate_security_policy.ts) replays in the
-    // same slot: a pre-move clone gets the same git mv plus commit and the
-    // same PR-body note; the two refusals the production leg fails on fail
-    // the rehearsal too.
+    // The security-policy move (relocate_security_policy.ts) replays
+    // here: a pre-move clone gets the same git mv plus commit and the same
+    // PR-body note; the two refusals the production leg fails on fail the
+    // rehearsal too.
     const securityLocation = relocateSecurityPolicy(targetDir);
     writeFileSync(
       join(temp, SECURITY_MOVE_NAME),
@@ -419,9 +446,12 @@ export function rehearseRepo(slug: string, options: RehearsalOptions): Rehearsal
           "retired root path; the sync would refuse it",
       );
     }
+    // Adopted but broken (a missing or unreadable answers file included)
+    // is a failure, not a skip: production's selector only gates on
+    // .repo-platform.yml, and the sync leg would fail here.
     let answers: ReturnType<typeof readAnswersFile>;
     try {
-      answers = readAnswersFile(join(targetDir, ANSWERS_PATH));
+      answers = readAnswersFile(targetDir);
     } catch (err) {
       if (!(err instanceof AnswersFileError)) throw err;
       throw new RehearsalError(`${slug}'s ${ANSWERS_PATH}: ${err.message}`);
@@ -527,7 +557,7 @@ export function rehearseRepo(slug: string, options: RehearsalOptions): Rehearsal
     // copier update needs a clean tree (the real sync commits its
     // normalization too).
     const answersPath = join(targetDir, ANSWERS_PATH);
-    const rewrite = rewriteSrcPath(readFileSync(answersPath, "utf-8"), platformDir);
+    const rewrite = rewriteSrcPath(readAnswersBytes(targetDir).toString("utf-8"), platformDir);
     if (rewrite === null) {
       throw new RehearsalError(`no _src_path line in ${answersPath}`);
     }
@@ -644,29 +674,6 @@ export function rehearseRepo(slug: string, options: RehearsalOptions): Rehearsal
       cwd: platformDir,
       env: legEnv,
     });
-    // The workflow's one-run starter pin rollout (starter_pin_rollout.ts):
-    // ports repo-owned starters' action pins onto the delivery branch. Its
-    // report and outcomes land under RUNNER_TEMP by the script's own
-    // defaults; the report is a would-be PR-body section, printed below.
-    run(
-      [
-        "bun",
-        join(import.meta.dir, "starter_pin_rollout.ts"),
-        "--root",
-        targetDir,
-        "--render-dir",
-        join(temp, "render-new"),
-      ],
-      { cwd: REPO_ROOT, env: legEnv },
-    );
-    // The workflow's gate-rework detection (gate_rework.ts): a sync PR
-    // that deletes the verdict wrapper and hands the required check to
-    // ci.yml's own all-green job gets the transition note. The report
-    // lands under RUNNER_TEMP by the script's own default, printed below.
-    run(["bun", join(import.meta.dir, "gate_rework.ts"), "--root", targetDir], {
-      cwd: REPO_ROOT,
-      env: legEnv,
-    });
     // The workflow's referenced-label check (referenced_labels.ts): every
     // label the target's issue forms and workflows reference must exist in
     // the merged settings label roster (the apply deletes undeclared
@@ -702,7 +709,7 @@ export function rehearseRepo(slug: string, options: RehearsalOptions): Rehearsal
     // Written under the RUNNER_TEMP twin by the workflow's fixed name, so
     // the PR-sections printer below surfaces the report body itself - the
     // subprocess only prints path/count warnings.
-    const tripwireReportPath = join(temp, "tail-shrank.md");
+    const tripwireReportPath = join(temp, TAIL_SHRANK_NAME);
     run(
       [
         "bun",
@@ -771,49 +778,8 @@ export function rehearseRepo(slug: string, options: RehearsalOptions): Rehearsal
       }
 
       section("would-be PR-body sections");
-      const prSections: [string, string][] = [
-        ["retired-modules.txt", "Retired modules dropped from the selection"],
-        ["removed-paths.txt", "The template retired these files; this update deletes them"],
-        [
-          "answers-move.md",
-          "Answers-file move (one-shot transition note: .copier-answers.yml -> .github/.copier-answers.yml)",
-        ],
-        ["starter-pin-rollout.md", "Starter pin rollout (one-run transition note)"],
-        [
-          "gate-rework.md",
-          "Gate rework (the verdict wrapper leaves; ci.yml's own all-green job carries the required check)",
-        ],
-        [
-          "registration-flip.md",
-          ".repo-platform.yml ownership flip (one-run transition note: managed -> repo-owned starter)",
-        ],
-        [
-          "referenced-labels.md",
-          "Labels referenced by issue forms/workflows but missing from the merged settings roster (the PR would stay manual-review)",
-        ],
-        ["mirrors.md", "Mirror copies materialized from the repo's own `mirrors` declaration"],
-        [
-          "mirrors-review.md",
-          "Refused mirror declarations - nothing written for them (the PR would stay manual-review)",
-        ],
-        ["local-carryover.md", "Split-file carry summary (rebuilt structurally)"],
-        ["carry-review.txt", "Split-file carries needing review (the PR would stay manual-review)"],
-        [
-          "dropped-local-hunks.md",
-          "Merge conflicts resolved toward the template (review the dropped local lines)",
-        ],
-        [
-          "removed-splits.md",
-          "Files this update deletes with a repository-owned half (split-classed at HEAD, or a license file the manifest cannot class); the PR would stay manual-review",
-        ],
-        ["manifest-license-warnings.md", "Registry metadata conflicting with the fleet license"],
-        [
-          "tail-shrank.md",
-          "TAIL TRIPWIRE report (the PR would stay manual-review; a trip is a sync bug)",
-        ],
-      ];
       let anySection = false;
-      for (const [file, title] of prSections) {
+      for (const [file, title] of PR_BODY_SECTIONS) {
         const path = join(temp, file);
         if (existsSync(path) && statSync(path).size > 0) {
           anySection = true;

@@ -48,7 +48,7 @@ function requireAsciiMarker(where: string, path: string, value: unknown, field: 
  * this trust boundary - and a tampered key could never match the
  * post-sync manifest's clean key, so accepting one would silently skip
  * the real file's check. One definition for every manifest-key walker:
- * preserve_local_content.ts and starter_pin_rollout.ts re-use it. */
+ * preserve_local_content.ts re-uses it. */
 export function isCleanRelativePath(path: string): boolean {
   return (
     path !== "" &&

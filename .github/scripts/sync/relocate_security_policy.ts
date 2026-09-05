@@ -13,7 +13,7 @@
 // Single owner of the file's location: BOTH paths or a non-file fails
 // loudly; NEITHER is fine (the update renders it fresh). Self-retiring once
 // the fleet has crossed. Invoked by reusable-template-sync.yml right after
-// the answers-file move and replayed by rehearse.ts in the same slot.
+// the registration check and replayed by rehearse.ts in the same slot.
 
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";

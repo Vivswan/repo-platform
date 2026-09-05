@@ -10,16 +10,11 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  ANSWERS_MOVE_NAME,
-  GATE_REWORK_NAME,
   MIRRORS_NOTE_NAME,
   MIRRORS_REVIEW_NAME,
   REFERENCED_LABELS_NAME,
-  REGISTRATION_FLIP_NAME,
   REMOVED_SPLITS_NAME,
   SECURITY_MOVE_NAME,
-  SETTINGS_LAYERING_NAME,
-  STARTER_PINS_NAME,
   TAIL_SHRANK_NAME,
 } from "../../.github/scripts/sync/section_files.ts";
 import { boundedSpawnSync } from "../shared/bounded_spawn";
@@ -196,39 +191,10 @@ describe("open_pr sections and auto-merge", () => {
       forcesReview: false,
     },
     {
-      reason: "starter pin rollout: byte-surgical, hand-set pins left alone",
-      where: "temp",
-      name: STARTER_PINS_NAME,
-      content: "### Starter workflow pins ported\n\n- `.github/workflows/checks.yml`\n",
-      forcesReview: false,
-    },
-    {
-      reason: "gate rework: the PR gates itself",
-      where: "temp",
-      name: GATE_REWORK_NAME,
-      content: "> [!NOTE]\n> GATE REWORK: ci.yml's all-green job carries the check now.\n",
-      forcesReview: false,
-    },
-    {
-      reason: "answers move: the bytes are untouched",
-      where: "temp",
-      name: ANSWERS_MOVE_NAME,
-      content:
-        "### Answers file relocated\n\n`.copier-answers.yml` -> `.github/.copier-answers.yml`\n",
-      forcesReview: false,
-    },
-    {
       reason: "security policy move: nothing leaves the repository",
       where: "temp",
       name: SECURITY_MOVE_NAME,
       content: "> [!NOTE]\n> SECURITY POLICY MOVE: `SECURITY.md` -> `.github/SECURITY.md`\n",
-      forcesReview: false,
-    },
-    {
-      reason: "registration flip: enforcement only relaxes",
-      where: "temp",
-      name: REGISTRATION_FLIP_NAME,
-      content: "### .repo-platform.yml is repo-owned now\n",
       forcesReview: false,
     },
     {
@@ -261,13 +227,6 @@ describe("open_pr sections and auto-merge", () => {
       where: "temp",
       name: MIRRORS_REVIEW_NAME,
       content: "> [!WARNING]\n> REFUSED mirror declaration(s)\n\n- `../x`: escapes\n",
-      forcesReview: true,
-    },
-    {
-      reason: "settings layering: dropped overrides need a human to re-add them",
-      where: "temp",
-      name: SETTINGS_LAYERING_NAME,
-      content: "### settings.yml layering\ndropped",
       forcesReview: true,
     },
     {
@@ -330,11 +289,6 @@ describe("open_pr sections and auto-merge", () => {
   // The detections that write an EMPTY report when their condition is
   // false: an empty flag file is no section and must not hold the PR.
   test.each([
-    {
-      reason: "gate rework, the target already crossed",
-      name: GATE_REWORK_NAME,
-      fragment: "GATE REWORK",
-    },
     {
       reason: "referenced labels, every label declared",
       name: REFERENCED_LABELS_NAME,

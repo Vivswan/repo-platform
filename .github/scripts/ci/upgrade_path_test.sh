@@ -159,26 +159,6 @@ echo "Building synthetic old fixture ${prev}"
 # deletion loop runs against a real file regardless of copier's own delete
 # behavior.
 bun .github/scripts/build-branches/branch_tree.ts --dest "$OLD_TREE"
-# Model the fleet state before the answers file left the repository root:
-# the old template pointed _answers_file at .copier-answers.yml, rendered
-# the file there, and classed the root path in the manifest. The update
-# below is what must MOVE the recorded answers to .github/ byte-for-byte
-# (relocate_answers.ts), which the move assertions after the render pin.
-mv "$OLD_TREE/template/.github/.copier-answers.yml.jinja" \
-  "$OLD_TREE/template/.copier-answers.yml.jinja"
-sed 's|^_answers_file: .github/.copier-answers.yml$|_answers_file: .copier-answers.yml|' \
-  "$OLD_TREE/copier.yml" > "$OLD_TREE/copier.ans.tmp"
-mv "$OLD_TREE/copier.ans.tmp" "$OLD_TREE/copier.yml"
-grep -qx '_answers_file: .copier-answers.yml' "$OLD_TREE/copier.yml" \
-  || fail "could not point the old fixture's _answers_file at the root path"
-sed 's|"\.github/\.copier-answers\.yml"|".copier-answers.yml"|' \
-  "$OLD_TREE/template/.github/repo-platform-manifest.json.jinja" \
-  > "$OLD_TREE/manifest.ans.tmp"
-mv "$OLD_TREE/manifest.ans.tmp" \
-  "$OLD_TREE/template/.github/repo-platform-manifest.json.jinja"
-grep -qF '".copier-answers.yml"' \
-  "$OLD_TREE/template/.github/repo-platform-manifest.json.jinja" \
-  || fail "could not model the pre-move manifest entry for the root answers path"
 # Model the fleet state before the community health files left the root:
 # SECURITY.md and CODE_OF_CONDUCT.md rendered and manifest-classed there.
 mv "$OLD_TREE/template/.github/SECURITY.md.jinja" "$OLD_TREE/template/SECURITY.md.jinja"
@@ -218,90 +198,16 @@ echo "Old fleet license (pre-relicense fixture)" > "$OLD_TREE/template/LICENSE"
 awk '{print} /^_skip_if_exists:/{print "  - LICENSE"}' "$OLD_TREE/copier.yml" \
   > "$OLD_TREE/copier.yml.tmp"
 mv "$OLD_TREE/copier.yml.tmp" "$OLD_TREE/copier.yml"
-# Model the verdict-era fleet state: the old template shipped the
-# all-green.yml verdict wrapper (retired with the meta-check inversion),
-# no fleet-ci caller, and the legacy aggregate all-green job in ci.yml -
-# so the update below is what must land the in-run gate AND delete the
-# wrapper (asserting either without this fixture would be vacuous: the
-# current template ships neither). A plain non-jinja file: copier copies
-# it verbatim, which is all the retirement diff needs; it stays out of
-# the manifest template like the other synthetic retirees.
-printf 'name: All Green\non:\n  workflow_run:\n    workflows: [CI]\n    types: [completed]\n' \
-  > "$OLD_TREE/template/.github/workflows/all-green.yml"
 # Model the fleet state before pr-title became its own natively-required
 # workflow: the old build rendered no pr-title.yml (the check was a
 # fleet-ci job), so the update below is what must land it. Its manifest
-# append line goes with the file, like the verdict path above.
+# append line goes with the file.
 rm "$OLD_TREE/template/.github/workflows/pr-title.yml.jinja"
 grep -vF "workflows/pr-title.yml" \
   "$OLD_TREE/template/.github/repo-platform-manifest.json.jinja" \
   > "$OLD_TREE/manifest.jinja.tmp"
 mv "$OLD_TREE/manifest.jinja.tmp" \
   "$OLD_TREE/template/.github/repo-platform-manifest.json.jinja"
-# Model the fleet state before .repo-platform.yml became a repo-owned
-# starter: the old template rendered it MANAGED - the managed header, a
-# hash-stamped manifest entry, and no _skip_if_exists protection - so the
-# update below is what must flip the manifest entry to a hash-free
-# starter, reword the stale header exactly once, and stop rewriting the
-# repo-edited file (asserted after the update).
-cat > "$OLD_TREE/template/.repo-platform.yml.jinja" <<'OLD_REG'
-# This file is managed by {{ github_username }}/repo-platform. Its presence
-# marks this repository as participating in push sync. `modules` is this
-# repo's module selection - edit it and the next sync applies the change.
-
-modules: {{ modules | tojson }}
-OLD_REG
-sed 's|"\.repo-platform\.yml": {"class": "starter"}|".repo-platform.yml": {"class": "managed", "hash": null}|' \
-  "$OLD_TREE/template/.github/repo-platform-manifest.json.jinja" \
-  > "$OLD_TREE/manifest.reg.tmp"
-mv "$OLD_TREE/manifest.reg.tmp" \
-  "$OLD_TREE/template/.github/repo-platform-manifest.json.jinja"
-grep -qF '".repo-platform.yml": {"class": "managed", "hash": null}' \
-  "$OLD_TREE/template/.github/repo-platform-manifest.json.jinja" \
-  || fail "could not model the pre-flip managed .repo-platform.yml manifest entry"
-grep -v '^  - \.repo-platform\.yml$' "$OLD_TREE/copier.yml" > "$OLD_TREE/copier.reg.tmp"
-mv "$OLD_TREE/copier.reg.tmp" "$OLD_TREE/copier.yml"
-if grep -q '\.repo-platform\.yml' "$OLD_TREE/copier.yml"; then
-  fail "could not strip .repo-platform.yml from the old fixture's _skip_if_exists"
-fi
-cat > "$OLD_TREE/template/.github/workflows/ci.yml.jinja" <<'LEGACY_CI'
-name: CI
-
-on:
-  push:
-    branches: [main]
-  pull_request:
-  workflow_dispatch:
-
-permissions:
-  contents: read
-
-jobs:
-  checks:
-    uses: ./.github/workflows/checks.yml
-  legacy-gate:
-    runs-on: ubuntu-latest
-    steps:
-      - run: echo legacy inline gate job
-{%- if enable_codeql %}
-  # The pre-inversion public-only machinery the visibility-flip leg
-  # watches: rendered only while enable_codeql held, stripped by the flip.
-  codeql-javascript:
-    runs-on: ubuntu-latest
-    steps:
-      - run: echo legacy codeql analysis
-{%- endif %}
-  all-green:
-    if: always()
-    runs-on: ubuntu-latest
-    needs: [checks, legacy-gate]
-    steps:
-      - run: echo legacy aggregate gate
-  info-release:
-    needs: [checks, legacy-gate]
-    uses: ./.github/workflows/release.yml
-    secrets: inherit
-LEGACY_CI
 # Model the fleet state before the versioned-pages cutover: the old
 # template's pages.yml spoke reusable-pages' retired production/staging
 # interface. Plain content by design - the era's copier questions are gone,
@@ -360,21 +266,8 @@ test -f .github/workflows/rerun-copilot-gate.yml \
   || fail "synthetic fixture is missing the retired rerun-copilot-gate.yml"
 # ...and predate the files whose ARRIVAL is under test while carrying the
 # machinery whose RETIREMENT is under test.
-test -f .github/workflows/all-green.yml \
-  || fail "the synthetic old fixture must carry the retired verdict wrapper (or the deletion assertion below is vacuous)"
 test ! -e .github/workflows/pr-title.yml \
   || fail "the synthetic old fixture must predate the standalone pr-title.yml workflow"
-if grep -qF "fleet-ci.yml" .github/workflows/ci.yml; then
-  fail "the synthetic old fixture must predate the fleet-ci caller (or the single-call arrival assertion below is vacuous)"
-fi
-grep -qxF "  all-green:" .github/workflows/ci.yml \
-  || fail "the synthetic old fixture must carry the legacy all-green aggregate job"
-grep -q '^# This file is managed by Vivswan/repo-platform\. Its presence$' .repo-platform.yml \
-  || fail "the synthetic old fixture must render the pre-flip managed registration header (or the ownership-flip assertions below are vacuous)"
-grep -qF '".repo-platform.yml": {"class": "managed"' .github/repo-platform-manifest.json \
-  || fail "the synthetic old fixture's manifest must class .repo-platform.yml managed (or the flip assertions below are vacuous)"
-grep -qxF "  info-release:" .github/workflows/ci.yml \
-  || fail "the synthetic old fixture must carry the legacy in-ci info-release job (or the release-home-move assertions below are vacuous)"
 [ "$(cat LICENSE)" = "Old fleet license (pre-relicense fixture)" ] \
   || fail "synthetic fixture did not render the old fleet license"
 git init -q -b main
@@ -427,9 +320,6 @@ if grep -q 'settings-sync' .repo-platform.yml; then
 fi
 grep -q 'custom-license' .repo-platform.yml \
   || fail "could not add custom-license to .repo-platform.yml"
-# The edited registration file, for the ownership-flip byte assertions
-# after the update (the sync must stop rewriting it).
-cp .repo-platform.yml "$WORK/registration-edited.yml"
 git add --all
 git -c user.name=ci -c user.email=ci@localhost commit -q -m "chore: local modifications"
 
@@ -465,26 +355,6 @@ export DESCRIPTION="Upgraded description"
 # re-renders.
 export TARGET_DIR="$PROJECT"
 export TARGET_REF="$NEW_TAG"
-# THE ANSWERS-FILE MOVE (one-shot transition): the old fixture recorded its
-# answers at the retired root path; replay the workflow's relocate step and
-# prove the move is byte-for-byte BEFORE the update runs - the recorded
-# answers are load-bearing (the old-render replay feeds them to copier
-# verbatim), so the bytes must ride the move untouched.
-test -f "$PROJECT/.copier-answers.yml" \
-  || fail "the synthetic old fixture must record its answers at the retired root path (or the move assertions below are vacuous)"
-test ! -e "$PROJECT/.github/.copier-answers.yml" \
-  || fail "the synthetic old fixture already carries .github/.copier-answers.yml"
-cp "$PROJECT/.copier-answers.yml" "$WORK/answers-before-move.yml"
-RUNNER_TEMP="$WORK" bun .github/scripts/sync/relocate_answers.ts \
-  || fail "relocate_answers.ts failed on a root-vintage answers file"
-test ! -e "$PROJECT/.copier-answers.yml" \
-  || fail "the answers-file move left the root copy behind"
-cmp -s "$WORK/answers-before-move.yml" "$PROJECT/.github/.copier-answers.yml" \
-  || fail "the answers-file move did not carry the recorded answers byte-for-byte"
-grep -qF "ANSWERS FILE MOVE" "$WORK/answers-move.md" \
-  || fail "the answers-file move did not write its PR-body note"
-[ -z "$(git -C "$PROJECT" status --porcelain)" ] \
-  || fail "the answers-file move left the tree dirty (copier update refuses a dirty tree)"
 # THE SECURITY-POLICY MOVE (one-shot transition), replayed BEFORE the
 # update like the workflow: byte-for-byte, so the split-file rebuild finds
 # the previous copy (tail included) at the new path.
@@ -588,32 +458,6 @@ grep -q '^modules:' .repo-platform.yml \
 if grep -q 'settings-sync' .repo-platform.yml; then
   fail ".repo-platform.yml still lists settings-sync"
 fi
-# THE OWNERSHIP FLIP (managed -> repo-owned starter): the update must stop
-# rewriting the repo-edited registration file - the whole body from the
-# `modules:` line down rides byte-identical (the comparison anchors on
-# content, not header line counts) - reword the stale rendered header to
-# the starter wording, flip its manifest entry to a hash-free starter, and
-# land the one-run transition note for the PR body.
-sed -n '/^modules:/,$p' "$WORK/registration-edited.yml" > "$WORK/registration-body-expected.txt"
-sed -n '/^modules:/,$p' .repo-platform.yml > "$WORK/registration-body-actual.txt"
-test -s "$WORK/registration-body-expected.txt" \
-  || fail "the edited registration capture has no modules line (the byte assertion below would be vacuous)"
-cmp -s "$WORK/registration-body-expected.txt" "$WORK/registration-body-actual.txt" \
-  || fail "the repo-edited .repo-platform.yml body did not ride through the ownership flip byte-identical"
-if grep -q 'This file is managed by' .repo-platform.yml; then
-  fail ".repo-platform.yml still opens with the stale managed header after the flip"
-fi
-grep -q '^# Generated once by Vivswan/repo-platform' .repo-platform.yml \
-  || fail ".repo-platform.yml was not reworded to the starter header"
-grep -qF '".repo-platform.yml": {"class": "starter"}' .github/repo-platform-manifest.json \
-  || fail "the manifest entry for .repo-platform.yml did not flip to a hash-free starter"
-if grep -F '".repo-platform.yml"' .github/repo-platform-manifest.json | grep -q '"hash"'; then
-  fail "the .repo-platform.yml manifest entry still carries a hash after the flip"
-fi
-grep -qF 'repo-owned now' "$WORK/registration-flip.md" \
-  || fail "the ownership-flip transition note was not written for the PR body"
-grep -qF 'was reworded' "$WORK/registration-flip.md" \
-  || fail "the transition note does not name the header reword"
 # Repo-owned sentinels survive untouched.
 [ "$(cat src/keep_me.txt)" = "repo-owned sentinel" ] \
   || fail "repo-owned src/keep_me.txt was modified"
@@ -626,8 +470,8 @@ grep -qF "# local issue form note" .github/ISSUE_TEMPLATE/bug_report.yml \
 [ "$(cat LICENSE)" = "Repo-owned custom license" ] \
   || fail "the repo-owned LICENSE was modified despite the custom-license opt-out"
 # Public-only community files must be in the updated render (they arrive
-# via the update when the old fixture predates them), and the single-call
-# ci.yml must land the in-run gate across the update.
+# via the update when the old fixture predates them), and ci.yml must
+# carry the in-run gate after the update.
 test -f CONTRIBUTING.md || fail "CONTRIBUTING.md is missing after the public update"
 # THE COMMUNITY-FILE MOVE: both files land under .github/ and leave the
 # root; SECURITY.md's repository-owned tail rides along, and the rename
@@ -645,11 +489,8 @@ if [ -s "$WORK/removed-splits.md" ] && grep -qF '`SECURITY.md`' "$WORK/removed-s
 fi
 grep -qF -- "repo-platform/.github/workflows/fleet-ci.yml@build" .github/workflows/ci.yml \
   || fail "ci.yml does not call fleet-ci at the build ref after the update"
-# The GATE REWORK: the update must DELETE the retired verdict wrapper and
-# land the all-green gate job in ci.yml - its own check run is the
-# required check now, judged through the shared action at the build ref.
-test ! -e .github/workflows/all-green.yml \
-  || fail "the retired all-green.yml verdict wrapper survived the update"
+# The gate: ci.yml's own all-green job is the required check, judged
+# through the shared action at the build ref.
 grep -qxF -- "  all-green:" .github/workflows/ci.yml \
   || fail "the updated ci.yml lacks the all-green gate job"
 grep -qxF -- "    needs: [checks, ci]" .github/workflows/ci.yml \
@@ -658,13 +499,8 @@ grep -qxF -- "    if: always()" .github/workflows/ci.yml \
   || fail "the updated all-green job is not unconditional over failures (if: always())"
 grep -qF -- "repo-platform/actions/all-green@build" .github/workflows/ci.yml \
   || fail "the updated all-green job does not judge through the shared action at the build ref"
-# The release job's home: the update must strip the legacy in-ci
-# info-release job and land the gate-downstream release leg in ci.yml,
-# passing the judged sha into a release.yml that declares and reads the
-# input.
-if grep -qF -- "info-release" .github/workflows/ci.yml; then
-  fail "the updated ci.yml still carries the retired info-release job"
-fi
+# The release leg rides downstream of the gate in ci.yml, passing the
+# judged sha into a release.yml that declares and reads the input.
 grep -qxF -- "  release:" .github/workflows/ci.yml \
   || fail "the updated ci.yml lacks the release leg (release-please is selected)"
 grep -qxF -- "    needs: [all-green]" .github/workflows/ci.yml \
@@ -795,9 +631,6 @@ grep -qF "# local issue form note" .github/ISSUE_TEMPLATE/bug_report.yml \
   || fail "recovery overwrote the generated-once bug_report.yml (_skip_if_exists must hold under recopy --overwrite)"
 cmp -s "$WORK/registration-before-recopy.yml" .repo-platform.yml \
   || fail "recovery rewrote the repo-owned .repo-platform.yml (_skip_if_exists must hold under recopy --overwrite, or the mirrors declaration is silently lost)"
-if [ -s "$WORK/registration-flip.md" ]; then
-  fail "the ownership-flip transition note re-fired although HEAD's manifest already classes .repo-platform.yml starter (the trigger must be one-run)"
-fi
 [ "$(cat LICENSE)" = "Repo-owned custom license" ] \
   || fail "recovery touched the repo-owned LICENSE (custom-license de-renders it; recopy deletes nothing)"
 [ "$(cat src/keep_me.txt)" = "repo-owned sentinel" ] \
@@ -864,10 +697,10 @@ test -f CODE_OF_CONDUCT.md || fail "public fixture render is missing CODE_OF_CON
 # computed centrally, so no rulesets or labels render here).
 grep -qxF "  private: false" .github/settings.yml \
   || fail "public fixture settings.yml does not declare private: false"
-# The pre-inversion public bun fixture carries the legacy codeql job (the
-# public-only machinery whose removal-through-the-update is under test).
-grep -qxF "  codeql-javascript:" .github/workflows/ci.yml \
-  || fail "public fixture ci.yml is missing the legacy codeql machinery"
+# The CodeQL matrix is armed while public (the disarm assertion after the
+# flip would be vacuous otherwise).
+grep -qxF "      codeql-languages: '[\"javascript-typescript\"]'" .github/workflows/ci.yml \
+  || fail "public fixture ci.yml does not arm the CodeQL matrix for javascript-typescript"
 git init -q -b main
 git add --all
 git -c user.name=ci -c user.email=ci@localhost commit -q -m "chore: init"
@@ -894,10 +727,6 @@ export PRIVATE=true
 export DESCRIPTION="Visibility-flip project"
 export TARGET_DIR="$VIS"
 export TARGET_REF="$NEW_TAG"
-# The fixture rendered at the pre-move ref: replay the answers-file move
-# (asserted byte-for-byte in the main leg; here it just must not break the
-# rest of the pipeline).
-RUNNER_TEMP="$VIS_WORK" bun .github/scripts/sync/relocate_answers.ts
 RUNNER_TEMP="$VIS_WORK" bun .github/scripts/sync/relocate_security_policy.ts
 RECOVER="" bun .github/scripts/sync/apply_update.ts
 bun .github/scripts/sync/resolve_copier_conflicts.ts \
@@ -940,11 +769,8 @@ cd "$VIS"
 # survive the flip, at its new home.
 test -f .github/SECURITY.md || fail ".github/SECURITY.md did not survive the flip to private"
 test ! -e SECURITY.md || fail "the root SECURITY.md survived the flip (the move must have relocated it)"
-# No verdict wrapper on any visibility, and the release leg is
-# release-please-gated; this fixture selects no release-please, so no
-# leg may render next to the gate.
-test ! -e .github/workflows/all-green.yml \
-  || fail "the flipped render carries the retired all-green.yml verdict wrapper"
+# The release leg is release-please-gated; this fixture selects no
+# release-please, so no leg may render next to the gate.
 if grep -qxF -- "  release:" .github/workflows/ci.yml; then
   fail "the flipped ci.yml carries a release leg without the release-please module"
 fi
@@ -1145,7 +971,7 @@ git -c user.name=ci -c user.email=ci@localhost commit -q -m "chore: local modifi
 
 # The workflow's leg order: apply update, materialize the clean renders,
 # rebuild split files, resolve conflicts, retired cleanup, preserve,
-# stamp, validate.
+# materialize mirrors, stamp, validate.
 cd "$GITHUB_WORKSPACE"
 export MODULES='["agents"]'
 export PRIVATE=false
@@ -1353,153 +1179,6 @@ if grep -qF 'nightly.yml' "$UNSEL_WORK/retired-paths.json"; then
   fail "retired_paths listed the repo-owned nightly.yml (unselected in both renders)"
 fi
 echo "unselected-path preservation OK: repo-owned files at unselected template paths survive byte-identical"
-
-# --- settings.yml layering transition (customized client) ----------------
-# A repo generated before the two-layer settings model carries the full
-# old baseline in a settings.yml still marked with the retired mergeable
-# class, customized with its own topics and one extra label. The sync must
-# REPLACE the file with the identity starter - custom topics carried over,
-# and the description seeded from the freshly recorded answers, because
-# this fixture deliberately declares none (the FALLBACK leg; the
-# declared-wins leg is exercised below) - and list the
-# extra label (the only declaration differing from the computed managed
-# baseline) in the PR-body section that holds the PR for review. Fixture
-# on the NEW build: the legacy file shape is planted by hand, because no
-# current template renders it.
-SET="$RUN_DIR/upgrade-settings"
-SET_WORK="$RUN_DIR/upgrade-settings-work"
-mkdir -p "$SET_WORK"
-cd "$GITHUB_WORKSPACE"
-copier copy "$GITHUB_WORKSPACE" "$SET" \
-  --vcs-ref "$NEW_TAG" --defaults --trust \
-  -d project_name="Settings Transition" \
-  -d description="Settings-transition project" \
-  -d 'modules=[uv, settings-sync]' \
-  -d private="false"
-cd "$SET"
-# The freshly rendered starter must NOT carry the retired marker (the
-# transition would otherwise re-fire on every sync).
-if grep -qxF "# repo-platform:mergeable" .github/settings.yml; then
-  fail "the settings-sync starter still renders the retired mergeable marker"
-fi
-# Plant the legacy baseline file: the retired marker, the identity keys
-# with custom topics, one baseline-equal policy key, and the labels the
-# old template rendered plus one deliberate extra.
-cat > .github/settings.yml <<'LEGACY'
----
-# Rendered by the settings-sync module (legacy baseline shape).
-# repo-platform:mergeable
-repository:
-  homepage: ""
-  topics: kept, custom, topics
-  private: false
-  has_issues: true
-labels:
-  - name: dependencies
-    color: "0366d6"
-    description: Dependency updates
-  - name: incident
-    color: "b60205"
-    description: A deliberate repo-only label
-LEGACY
-git init -q -b main
-git add --all
-git -c user.name=ci -c user.email=ci@localhost commit -q -m "chore: init with legacy settings"
-
-cd "$GITHUB_WORKSPACE"
-export MODULES='["uv", "settings-sync"]'
-export PRIVATE=false
-export DESCRIPTION="Live transition description"
-export TARGET_DIR="$SET"
-export TARGET_REF="$NEW_TAG"
-RECOVER="" bun .github/scripts/sync/apply_update.ts
-bun .github/scripts/sync/resolve_copier_conflicts.ts \
-  --summary "$SET_WORK/dropped-local-hunks.md" --root "$SET"
-RECOVER="" RUNNER_TEMP="$SET_WORK" bun .github/scripts/sync/preserve_repo_owned.ts
-TARGET_DIR="$SET" bun actions/shared/stamp_manifest.ts
-bun "$GITHUB_WORKSPACE/actions/validate-template/validate_generated_files.ts" "$SET"
-
-cd "$SET"
-# The legacy file was replaced with the identity starter: the retired
-# marker and the baseline copies are gone, the identity keys survive -
-# custom topics from the old file, and the description from the
-# post-update recorded answers because the old file declared none.
-if grep -qxF "# repo-platform:mergeable" .github/settings.yml; then
-  fail "the layering transition left the retired mergeable marker in settings.yml"
-fi
-grep -qxF '  topics: "kept, custom, topics"' .github/settings.yml \
-  || fail "the transition dropped the repo's custom topics from the new starter"
-grep -qxF '  description: "Live transition description"' .github/settings.yml \
-  || fail "the transition did not fall back to the recorded description"
-grep -qxF "  private: false" .github/settings.yml \
-  || fail "the transition did not seed private into the new starter"
-if grep -qF "has_issues" .github/settings.yml; then
-  fail "the transition kept a baseline policy key in the repo-owned starter"
-fi
-# The repo-only label is CARRIED into the starter (the apply would
-# otherwise delete it); fleet-supplied labels are not - the fleet entry
-# keeps them alive and a copy would only shadow it.
-grep -qxF "  - name: incident" .github/settings.yml \
-  || fail "the transition did not carry the repo-only label into the starter"
-if grep -qF "name: dependencies" .github/settings.yml; then
-  fail "the transition carried a fleet-supplied label into the repo-owned starter"
-fi
-# The PR-body section names the carry (the file changed owner, so the PR
-# is held for review either way), never the baseline-equal keys.
-test -s "$SET_WORK/settings-layering.md" \
-  || fail "the transition wrote no settings-layering section"
-grep -qF 'CARRIED into the new file' "$SET_WORK/settings-layering.md" \
-  || fail "the settings-layering section does not name the carry"
-grep -qF 'labels "incident"' "$SET_WORK/settings-layering.md" \
-  || fail "the settings-layering section does not name the carried repo-only label"
-if grep -qF "repository.has_issues" "$SET_WORK/settings-layering.md"; then
-  fail "the settings-layering section lists a baseline-equal key as dropped"
-fi
-if grep -qF "repository.topics" "$SET_WORK/settings-layering.md"; then
-  fail "the settings-layering section lists a carried identity key as dropped"
-fi
-# The manifest classes settings.yml as a starter now (no hash).
-[ "$(TARGET_DIR="$SET" python3 -c 'import json, os
-entry = json.load(open(os.path.join(os.environ["TARGET_DIR"], ".github/repo-platform-manifest.json")))["files"].get(".github/settings.yml")
-print("absent" if entry is None else entry.get("class", "missing"))')" = "starter" ] \
-  || fail "the manifest does not class settings.yml as a starter after the transition"
-# One-time: a second preserve pass over the transitioned tree must leave
-# the file byte-identical and report nothing.
-cp .github/settings.yml "$SET_WORK/settings-after-first-pass.yml"
-cd "$GITHUB_WORKSPACE"
-RECOVER="" RUNNER_TEMP="$SET_WORK" bun .github/scripts/sync/preserve_repo_owned.ts
-cmp -s "$SET/.github/settings.yml" "$SET_WORK/settings-after-first-pass.yml" \
-  || fail "the layering transition re-fired on an already-transitioned starter"
-if [ -s "$SET_WORK/settings-layering.md" ]; then
-  fail "the second pass wrote a settings-layering section for nothing"
-fi
-# The other precedence leg: a legacy file that DOES declare a description
-# must keep its own, not the recorded answer. Declared-wins is the point
-# of the seeding rule (the heal was enforcing that declaration), so both
-# legs are pinned. Re-plant a legacy file in the transitioned tree - the
-# retired marker is what re-arms the one-time transition.
-cd "$SET"
-cat > .github/settings.yml <<'LEGACY2'
----
-# Rendered by the settings-sync module (legacy baseline shape).
-# repo-platform:mergeable
-repository:
-  description: Declared beats the answer
-  homepage: ""
-  topics: kept, custom, topics
-  private: false
-LEGACY2
-cd "$GITHUB_WORKSPACE"
-RECOVER="" RUNNER_TEMP="$SET_WORK" bun .github/scripts/sync/preserve_repo_owned.ts
-cd "$SET"
-grep -qxF '  description: "Declared beats the answer"' .github/settings.yml \
-  || fail "the transition did not prefer the old file's declared description"
-if grep -qF "Live transition description" .github/settings.yml; then
-  fail "the transition used the recorded answer over a declared description"
-fi
-echo "settings layering precedence OK: declared description wins, recorded answer is the fallback"
-
-echo "settings layering transition OK: starter replaced once, custom topics carried, dropped override listed"
 
 # --- Tail tripwire end-to-end (workflow step -> report -> open_pr) --------
 # The post-stamp tripwire chain runs nowhere else end-to-end: a repo-owned
@@ -1916,133 +1595,6 @@ if grep -q '^gh pr merge' "$DESEL_WORK/gh-calls.txt"; then
 fi
 echo "module deselection OK: retired split file deleted, hold raised, leaving content named, manual review forced"
 
-# --- Starter pin rollout (fuzz-issue @main/@actions -> @build) -------------
-# Starter workflows are rendered once and repo-owned (_skip_if_exists), so
-# the template's own re-pin of the fuzz-issue action (main, or the
-# retired actions branch, -> the green-gated unified build branch) never
-# reaches an already-rendered
-# repo; the one-run sync-side rollout (starter_pin_rollout.ts) ports it.
-# Fixture: a fresh render with nightly.yml set back to the pre-flip @main
-# pin (the fleet state before the flip) and nightly-fuzz.yml hand-pinned at
-# its own ref. Post-sync, nightly.yml must be byte-equal to its previous
-# copy with ONLY the pin substring rewritten, the hand-pinned file must be
-# byte-identical, a second run must rewrite nothing, and open_pr must carry
-# the transition note while still arming auto-merge (the note is
-# informational, never a review hold).
-PIN="$RUN_DIR/upgrade-pin"
-PIN_WORK="$RUN_DIR/upgrade-pin-work"
-mkdir -p "$PIN_WORK"
-cd "$GITHUB_WORKSPACE"
-copier copy "$GITHUB_WORKSPACE" "$PIN" \
-  --vcs-ref "$NEW_TAG" --defaults --trust \
-  -d project_name="Starter Pin Rollout" \
-  -d description="Starter-pin project" \
-  -d 'modules=[nightly, fuzzer]' \
-  -d private="false"
-cd "$PIN"
-# The fresh render pins the delivery branch; model the fleet state by
-# setting the rendered starters back to the old pin / a hand pin.
-grep -q "repo-platform/actions/fuzz-issue@build" .github/workflows/nightly.yml \
-  || fail "fixture render does not pin fuzz-issue at the build branch"
-sed 's|/repo-platform/actions/fuzz-issue@build|/repo-platform/actions/fuzz-issue@main|g' \
-  .github/workflows/nightly.yml > .github/workflows/nightly.yml.tmp
-mv .github/workflows/nightly.yml.tmp .github/workflows/nightly.yml
-sed 's|/repo-platform/actions/fuzz-issue@build|/repo-platform/actions/fuzz-issue@v9.9.9|g' \
-  .github/workflows/nightly-fuzz.yml > .github/workflows/nightly-fuzz.yml.tmp
-mv .github/workflows/nightly-fuzz.yml.tmp .github/workflows/nightly-fuzz.yml
-git init -q -b main
-git add --all
-git -c user.name=ci -c user.email=ci@localhost commit -q -m "chore: init with pre-flip pins"
-# The oracle for byte-surgery: the old copy with only the pin substring
-# swapped, and the hand-pinned copy exactly as committed.
-sed 's|/repo-platform/actions/fuzz-issue@main|/repo-platform/actions/fuzz-issue@build|g' \
-  .github/workflows/nightly.yml > "$PIN_WORK/nightly-expected.yml"
-cp .github/workflows/nightly-fuzz.yml "$PIN_WORK/nightly-fuzz-before.yml"
-
-# The workflow's leg order around the rollout step: apply update,
-# materialize renders, rebuild split files, resolve conflicts, retired
-# cleanup, preserve, ROLL OUT PINS, stamp, validate.
-cd "$GITHUB_WORKSPACE"
-export MODULES='["nightly", "fuzzer"]'
-export PRIVATE=false
-export DESCRIPTION="Starter-pin project"
-export TARGET_DIR="$PIN"
-export TARGET_REF="$NEW_TAG"
-RECOVER="" bun .github/scripts/sync/apply_update.ts
-answers_pin="$(git -C "$PIN" show HEAD:.github/.copier-answers.yml)"
-src_path_pin="$(sed -n 's/^_src_path: //p' <<<"$answers_pin")"
-test -n "$src_path_pin" || fail "pin fixture records no _src_path"
-RUNNER_TEMP="$PIN_WORK" SRC_PATH="$src_path_pin" \
-  OLD_SHA="$(git rev-parse "$NEW_TAG^{commit}")" \
-  bun .github/scripts/sync/clean_renders.ts
-bun .github/scripts/sync/preserve_local_content.ts \
-  --summary "$PIN_WORK/local-carryover.md" --root "$PIN" \
-  --needs-review "$PIN_WORK/carry-review.txt" \
-  --rebuilt-paths "$PIN_WORK/split-rebuilt-paths.txt" \
-  --render-dir "$PIN_WORK/render-new" --old-render-dir "$PIN_WORK/render-old"
-bun .github/scripts/sync/resolve_copier_conflicts.ts \
-  --summary "$PIN_WORK/dropped-local-hunks.md" --root "$PIN" \
-  --skip "$PIN_WORK/split-rebuilt-paths.txt"
-git show "$NEW_TAG:copier.yml" > "$PIN_WORK/copier-old.yml"
-git show "$NEW_TAG:copier.yml" > "$PIN_WORK/copier-new.yml"
-RUNNER_TEMP="$PIN_WORK" SRC_PATH="$src_path_pin" \
-  OLD_SHA="$(git rev-parse "$NEW_TAG^{commit}")" \
-  bun .github/scripts/sync/retired_cleanup.ts
-RECOVER="" RUNNER_TEMP="$PIN_WORK" bun .github/scripts/sync/preserve_repo_owned.ts
-RUNNER_TEMP="$PIN_WORK" bun .github/scripts/sync/starter_pin_rollout.ts \
-  --root "$PIN" --render-dir "$PIN_WORK/render-new"
-TARGET_DIR="$PIN" bun actions/shared/stamp_manifest.ts
-bun "$GITHUB_WORKSPACE/actions/validate-template/validate_generated_files.ts" "$PIN"
-
-cmp -s "$PIN_WORK/nightly-expected.yml" "$PIN/.github/workflows/nightly.yml" \
-  || fail "the rollout did not deliver nightly.yml byte-equal to its previous copy with only the pin rewritten"
-cmp -s "$PIN_WORK/nightly-fuzz-before.yml" "$PIN/.github/workflows/nightly-fuzz.yml" \
-  || fail "the rollout touched the hand-pinned nightly-fuzz.yml"
-test -s "$PIN_WORK/starter-pin-rollout.md" \
-  || fail "the rollout wrote no transition note"
-grep -qF 'nightly.yml`: rewrote 2 occurrence(s)' "$PIN_WORK/starter-pin-rollout.md" \
-  || fail "the transition note does not name nightly.yml's rewritten pins"
-grep -qF "repo-platform/actions/fuzz-issue@build" "$PIN_WORK/starter-pin-rollout.md" \
-  || fail "the transition note does not show the new delivery-branch pin"
-grep -qF 'nightly-fuzz.yml`: left alone' "$PIN_WORK/starter-pin-rollout.md" \
-  || fail "the transition note does not list the hand-pinned nightly-fuzz.yml as skipped"
-
-# Idempotent: a second run rewrites nothing (the file stays byte-identical
-# and the refreshed note reports no rewrite, only the standing hand pin).
-cp "$PIN/.github/workflows/nightly.yml" "$PIN_WORK/nightly-after-first.yml"
-RUNNER_TEMP="$PIN_WORK" bun .github/scripts/sync/starter_pin_rollout.ts \
-  --root "$PIN" --render-dir "$PIN_WORK/render-new"
-cmp -s "$PIN_WORK/nightly-after-first.yml" "$PIN/.github/workflows/nightly.yml" \
-  || fail "the second rollout run changed nightly.yml (the rewrite must be idempotent)"
-# The bullet form, not the bare word: the note's intro legitimately says
-# "a rewrote line below is a byte-surgical port".
-if grep -qF '`: rewrote' "$PIN_WORK/starter-pin-rollout.md"; then
-  fail "the second rollout run reported a rewrite (it must find nothing to rewrite)"
-fi
-grep -qF 'nightly-fuzz.yml`: left alone' "$PIN_WORK/starter-pin-rollout.md" \
-  || fail "the second rollout run dropped the standing hand-pin listing"
-
-# The chain's tail: open_pr.ts must append the transition note and, since
-# the note is informational, still arm auto-merge (gh stub from the
-# tripwire leg records the body and the merge call).
-echo "build@old" > "$PIN_WORK/old_commit.txt"
-: > "$PIN_WORK/empty.txt"
-GH_CALLS="$PIN_WORK/gh-calls.txt" PATH="$TRIP_BIN:$PATH" \
-  TARGET="Vivswan/starter-pins" RUNNER_TEMP="$PIN_WORK" \
-  GITHUB_REPOSITORY="Vivswan/repo-platform" GITHUB_OUTPUT="$PIN_WORK/gh-output.txt" \
-  BRANCH=automation/repo-platform BASE_BRANCH=main DISPLAY="build@new" \
-  RECOVER="" RESOLVED="" VALIDATION=passed HIDE_DETAILS="" \
-  DRIFT_FILE="$PIN_WORK/empty.txt" CARRIED_FILE="$PIN_WORK/empty.txt" \
-  CARRY_REVIEW_FILE="$PIN_WORK/empty.txt" RETIRED_MODULES_FILE="$PIN_WORK/empty.txt" \
-  REMOVED_PATHS_FILE="$PIN_WORK/empty.txt" WITHHELD_FILE="$PIN_WORK/empty.txt" \
-  MANIFEST_LICENSE_FILE="$PIN_WORK/empty.txt" \
-  bun .github/scripts/sync/open_pr.ts > "$PIN_WORK/open-pr.out"
-grep -qF "One-run starter pin rollout" "$PIN_WORK/gh-calls.txt" \
-  || fail "the PR body lacks the starter pin rollout transition note"
-grep -q '^gh pr merge' "$PIN_WORK/gh-calls.txt" \
-  || fail "open_pr did not arm auto-merge despite the rollout note being informational"
-echo "starter pin rollout OK: old pin ported byte-surgically, hand pin left alone, note in the PR body, auto-merge kept"
-
 # --- Pages answer retirement (pages_production / pages_staging) ---------
 # A repo rendered in the production/staging era carries that pages.yml
 # shape and records the two retired answers. The update must re-render the
@@ -2064,7 +1616,7 @@ grep -qE '^ +production: main$' .github/workflows/pages.yml \
   || fail "old pages fixture does not carry the production/staging interface"
 # The era's recorded answers: current copier no longer asks the questions,
 # so the fleet state is modeled by recording the values directly.
-printf 'pages_production: main\npages_staging: false\n' >> .copier-answers.yml # root: pre-move era
+printf 'pages_production: main\npages_staging: false\n' >> .github/.copier-answers.yml
 git init -q -b main
 git add --all
 git -c user.name=ci -c user.email=ci@localhost commit -q -m "chore: init in the production/staging era"
@@ -2081,9 +1633,6 @@ export PRIVATE=false
 export DESCRIPTION="Pages-retirement project"
 export TARGET_DIR="$PAGES_FIX"
 export TARGET_REF="$NEW_TAG"
-# The fixture rendered at the pre-move ref: replay the answers-file move
-# (the retro-recorded pages answers must ride the move verbatim).
-RUNNER_TEMP="$PAGES_WORK" bun .github/scripts/sync/relocate_answers.ts
 RUNNER_TEMP="$PAGES_WORK" bun .github/scripts/sync/relocate_security_policy.ts
 RECOVER="" bun .github/scripts/sync/apply_update.ts
 bun .github/scripts/sync/resolve_copier_conflicts.ts \
