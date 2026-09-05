@@ -378,6 +378,159 @@ describe("stampManifestText", () => {
     expect(stampManifestText(once, root)).toEqual({ out: once, problem: null });
   });
 
+  // The withheld marker's lifecycle, one row per entry state. commit_push.ts
+  // names the added workflow files it removed before pushing (`named`); a
+  // stamp with no set is copier's hook or the sync's final stamp. `before`
+  // is the entry as stamped, `after` what one stamp (with the set, then
+  // idempotently without) must print. Only kept.yml and old.md exist on
+  // disk.
+  const MARKER_ROWS: {
+    path: string;
+    named: boolean;
+    before: string;
+    after: string;
+    why: string;
+  }[] = [
+    {
+      path: ".github/workflows/added.yml",
+      named: true,
+      before: '{"class": "managed", "hash": null, "withheld": false}',
+      after: '{"class": "managed", "hash": null, "withheld": true}',
+      why: "a named absent workflow gains the marker; a stale false is replaced, never doubled",
+    },
+    {
+      path: ".github/workflows/kept.yml",
+      named: true,
+      before: '{"class": "managed", "hash": null}',
+      after: `{"class": "managed", "hash": "${sha256("kept\n")}"}`,
+      why: "a named path whose file exists was not withheld",
+    },
+    {
+      path: "docs/old.md",
+      named: false,
+      before: `{"class": "managed", "hash": "${sha256("stale")}", "withheld": true}`,
+      after: `{"class": "managed", "hash": "${sha256("delivered\n")}"}`,
+      why: "a marker on a delivered file is stale and goes",
+    },
+    {
+      path: ".github/workflows/stray.yml",
+      named: false,
+      before: '{"class": "managed", "withheld": true, "hash": null}',
+      after: '{"class": "managed", "hash": null, "withheld": true}',
+      why: "a valid marker on a still-absent workflow survives a set-less stamp, in canonical position",
+    },
+    {
+      path: ".github/workflows/front.yml",
+      named: false,
+      before: '{"withheld": true, "class": "managed", "hash": null}',
+      after: '{"class": "managed", "hash": null, "withheld": true}',
+      why: "same, from the front of the object",
+    },
+    {
+      path: "docs/flagged.md",
+      named: true,
+      before: '{"class": "managed", "hash": null, "withheld": true}',
+      after: '{"class": "managed", "hash": null}',
+      why: "outside .github/workflows/ no marker is valid, named or not",
+    },
+    {
+      path: ".github/workflows/../../docs/alias.md",
+      named: true,
+      before: '{"class": "managed", "hash": null, "withheld": true}',
+      after: '{"class": "managed", "hash": null}',
+      why: "a lexical prefix with a .. segment is not under the directory",
+    },
+    {
+      path: ".github/workflows/./dot.yml",
+      named: true,
+      before: '{"class": "managed", "hash": null}',
+      after: '{"class": "managed", "hash": null}',
+      why: "a . segment is not a clean path",
+    },
+    {
+      path: ".github/workflows//empty.yml",
+      named: true,
+      before: '{"class": "managed", "hash": null}',
+      after: '{"class": "managed", "hash": null}',
+      why: "an empty segment is not a clean path",
+    },
+    {
+      path: ".github/workflows/split.yml",
+      named: true,
+      before:
+        '{"class": "split", "grammar": "managed-region", "begin": "# b", "end": "# e", "hash": null}',
+      after:
+        '{"class": "split", "grammar": "managed-region", "begin": "# b", "end": "# e", "hash": null, "withheld": true}',
+      why: "a named absent split entry gains the marker like a managed one",
+    },
+    {
+      path: ".github/workflows/nested.yml",
+      named: false,
+      before: '{"class": "managed", "hash": null, "withheld": {"withheld": true}}',
+      after: '{"class": "managed", "hash": null}',
+      why: "a nested object is not the marker",
+    },
+    {
+      path: ".github/workflows/laundered.yml",
+      named: false,
+      before: `{"class": "managed", "hash": "${sha256("was here")}", "withheld": true}`,
+      after: '{"class": "managed", "hash": null}',
+      why: "a marker decorating a deleted, once-hashed entry does not mature into the valid shape",
+    },
+    {
+      path: ".github/workflows/bespoke.yml",
+      named: true,
+      before: '{"class": "bespoke", "hash": null}',
+      after: '{"class": "bespoke", "hash": null}',
+      why: "an unknown class gains no marker even when named",
+    },
+    {
+      path: ".github/workflows/checks.yml",
+      named: true,
+      before: '{"class": "starter", "withheld": true}',
+      after: '{"class": "starter"}',
+      why: "a starter has no hash field: never marked, and a stray marker is stripped",
+    },
+  ];
+
+  test("the withheld marker lifecycle: every MARKER_ROWS row in one manifest", () => {
+    // The rows ride one manifest asserted whole, so a row cannot pass by
+    // another row's stamp and the failure diff names the row. The self
+    // entry (hash field, excluded by path) is named too and stays
+    // unmarked.
+    const root = tree({ ".github/workflows/kept.yml": "kept\n", "docs/old.md": "delivered\n" });
+    const text = (column: "before" | "after") =>
+      manifestText([
+        selfLine("null", "null"),
+        ...MARKER_ROWS.map((row) => `    ${JSON.stringify(row.path)}: ${row[column]}`),
+      ]);
+    const named = new Set([
+      ".github/repo-platform-manifest.json",
+      ...MARKER_ROWS.filter((row) => row.named).map((row) => row.path),
+    ]);
+    expect(stampManifestText(text("before"), root, named)).toEqual({
+      out: text("after"),
+      problem: null,
+    });
+    expect(stampManifestText(text("after"), root, named)).toEqual({
+      out: text("after"),
+      problem: null,
+    });
+    expect(stampManifestText(text("after"), root)).toEqual({ out: text("after"), problem: null });
+    expect(parseManifestFiles(text("after")).problem).toBeNull();
+  });
+
+  test("delivery clears the withheld marker: the next set-less stamp hashes the file", () => {
+    const root = tree({ ".github/workflows/added.yml": "added\n" });
+    const line = (body: string) => manifestText([`    ".github/workflows/added.yml": ${body}`]);
+    expect(
+      stampManifestText(line('{"class": "managed", "hash": null, "withheld": true}'), root),
+    ).toEqual({
+      out: line(`{"class": "managed", "hash": "${sha256("added\n")}"}`),
+      problem: null,
+    });
+  });
+
   test("a missing file or missing split markers stamps null", () => {
     const root = tree({ "split.md": "no markers here\n" });
     const entries = (gone: string, split: string) =>

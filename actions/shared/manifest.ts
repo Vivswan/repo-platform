@@ -29,6 +29,20 @@ import { GRAMMAR, type GrammarId, type SplitShapes } from "./grammar.ts";
 /** Where the ownership manifest lands in generated repositories. */
 export const MANIFEST_NAME = ".github/repo-platform-manifest.json";
 
+/** The one directory a push token without the Workflows scope cannot
+ *  write, so the only paths the sync ever withholds: a withheld marker
+ *  (ManifestEntryShape.withheld) is valid on a clean relative path under
+ *  it alone (no empty, `.`, or `..` segment - a lexical prefix could
+ *  otherwise alias a path outside the directory). The stamper writes and
+ *  keeps markers there only; the validator rejects one anywhere else as a
+ *  hand edit. */
+export function withholdable(path: string): boolean {
+  return (
+    path.startsWith(".github/workflows/") &&
+    path.split("/").every((segment) => segment !== "" && segment !== "." && segment !== "..")
+  );
+}
+
 /** What an entry needs to be emitted: the declared class, with the
  *  grammar fields for splits (structural twins of the ownership schema's
  *  arms - scripts/ownership.ts's ManifestOwnership is assignable). */
@@ -37,14 +51,37 @@ export type OwnershipShape =
   | { class: "managed" }
   | ({ class: "split" } & SplitShapes[GrammarId]);
 
+/** What JSON.parse returns and JSON.stringify prints without loss. */
+export type JsonValue =
+  | null
+  | boolean
+  | number
+  | string
+  | JsonValue[]
+  | { [key: string]: JsonValue };
+
+/** One entry object in the manifest's one-line layout: fields in the given
+ *  order, `"key": value` pairs joined by `, `. The emitter below and the
+ *  stamper's in-place rewrite both print through this, so the stamped
+ *  manifest and the raw render share one byte layout. */
+export function entryBody(fields: Record<string, JsonValue>): string {
+  return `{${Object.entries(fields)
+    .map(([key, value]) => `${JSON.stringify(key)}: ${JSON.stringify(value)}`)
+    .join(", ")}}`;
+}
+
 /** One split entry's wire body, read off the grammar's GRAMMAR row: the
  *  row's wireFields under their own names in the row's order - so no
  *  spelling of the split fields exists outside the table. */
 function splitBody<K extends GrammarId>(grammar: K, declaration: SplitShapes[K]): string {
-  const fields = GRAMMAR[grammar].wireFields
-    .map((field) => `${JSON.stringify(field)}: ${JSON.stringify(declaration[field])}, `)
-    .join("");
-  return `{"class": "split", "grammar": ${JSON.stringify(grammar)}, ${fields}"hash": null}`;
+  const fields: Record<string, JsonValue> = { class: "split", grammar };
+  // Declaration fields are the grammar's marker strings, JSON values by
+  // construction; the generic index loses that.
+  for (const field of GRAMMAR[grammar].wireFields) {
+    fields[String(field)] = declaration[field] as JsonValue;
+  }
+  fields.hash = null;
+  return entryBody(fields);
 }
 
 /** One manifest entry line. Every hash renders null (hashes are per-repo
@@ -54,12 +91,13 @@ function splitBody<K extends GrammarId>(grammar: K, declaration: SplitShapes[K])
 export function entryLine(path: string, ownership: OwnershipShape): string {
   let body: string;
   if (ownership.class === "starter") {
-    body = '{"class": "starter"}';
+    body = entryBody({ class: "starter" });
   } else if (ownership.class === "managed") {
-    body =
+    body = entryBody(
       path === MANIFEST_NAME
-        ? '{"class": "managed", "hash": null, "commit": null}'
-        : '{"class": "managed", "hash": null}';
+        ? { class: "managed", hash: null, commit: null }
+        : { class: "managed", hash: null },
+    );
   } else {
     body = splitBody(ownership.grammar, ownership);
   }
@@ -146,7 +184,29 @@ export type ManifestEntryShape = {
   hash?: unknown;
   grammar?: unknown;
   commit?: unknown;
+  /** `true` on a hash-null entry of a withholdable path whose file the
+   *  sync could not deliver (the push token lacked the Workflows scope, so
+   *  the added workflow was withheld and removed from the pushed tree).
+   *  Written and cleared only by the stamper (stamp_manifest.ts), never
+   *  rendered by the template. */
+  withheld?: unknown;
 } & { [F in SplitDeclarationField]?: unknown };
+
+/** Whether an entry's withheld marker has its one valid shape: `true` on a
+ *  hash-null managed or split entry of a withholdable path other than the
+ *  manifest's own. The stamper writes nothing else and keeps an existing
+ *  marker only in this shape; the validator rejects any other withheld
+ *  field as a hand edit - one predicate, so the two cannot disagree. */
+export function withheldMarkerValid(path: string, entry: ManifestEntryShape): boolean {
+  return (
+    entry.withheld === true &&
+    path !== MANIFEST_NAME &&
+    withholdable(path) &&
+    (entry.class === "managed" || entry.class === "split") &&
+    "hash" in entry &&
+    entry.hash === null
+  );
+}
 
 /** The manifest's files mapping parsed from `text` (conflict blocks
  *  resolved toward the template side first), or a problem string when the

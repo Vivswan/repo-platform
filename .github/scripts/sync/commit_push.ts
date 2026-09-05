@@ -186,7 +186,8 @@ const added = mustCapture(
     ".github/workflows",
   ),
 );
-for (const file of added.split("\n").filter((line) => line !== "")) {
+const addedPaths = added.split("\n").filter((line) => line !== "");
+for (const file of addedPaths) {
   rmSync(join("target", file), { force: true });
 }
 // Retired workflow files were restored too - drop them from the PR body's
@@ -207,11 +208,16 @@ writeReferencedLabelsReport("target", join(runnerTemp, REFERENCED_LABELS_NAME), 
 // The restore rewrote workflow files after the workflow's stamping step, so
 // the ownership manifest must follow the tree that is actually pushed:
 // restamp in place (idempotent) so withheld modifications hash the restored
-// base content and a withheld added workflow stamps null (its absence is
-// the parity check's advisory, matching check 8's absence stance).
+// base content, and the removed added workflows stamp hash-null with the
+// withheld marker - the one listed-but-missing state validate-template
+// reports as an advisory instead of a deleted managed file.
 const manifestPath = join("target", MANIFEST_NAME);
 if (existsSync(manifestPath)) {
-  const stamped = stampManifestText(readFileSync(manifestPath, "utf-8"), "target");
+  const stamped = stampManifestText(
+    readFileSync(manifestPath, "utf-8"),
+    "target",
+    new Set(addedPaths),
+  );
   if (stamped.problem === null) writeFileSync(manifestPath, stamped.out);
 }
 must(git("add", "--all"));
