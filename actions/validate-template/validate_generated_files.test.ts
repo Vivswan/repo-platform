@@ -589,9 +589,9 @@ describe("base checks shape", () => {
   // describe output on a tagged or short-abbrev checkout, a hand edit)
   // cannot name the template commit the render must be judged at.
   const COMMIT_ERROR = (shape: string) =>
-    `.github/.copier-answers.yml: _commit ${shape} - the sync records the build commit's ` +
-    "full sha, which the pending template sync writes; until it lands the render cannot be " +
-    "judged at its own template commit";
+    `.github/.copier-answers.yml: _commit ${shape} - every render's stamp hook records the ` +
+    "build commit's full sha; run a template sync to rewrite it, since the render cannot be " +
+    "judged at its own template commit until then";
   test.each([
     { reason: "a short sha", value: "abc1234" },
     { reason: "a tag name", value: "ci-build-42/new" },
