@@ -6,18 +6,18 @@
 // plain directory beside it.
 
 import { describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { boundedSpawnSync } from "../shared/bounded_spawn";
 
 const script = join(import.meta.dir, "../../.github/scripts/sync/apply_update.ts");
 
-function fixture(written: (sha: string) => string) {
+function fixture(written: (sha: string) => string, srcPath = "gh:o/r", srcPathEnv?: string) {
   const root = mkdtempSync(join(tmpdir(), "apply-update-"));
   try {
     return {
-      ...build(root, written),
+      ...build(root, written, srcPath, srcPathEnv),
       cleanup: () => rmSync(root, { recursive: true, force: true }),
     };
   } catch (error) {
@@ -26,7 +26,12 @@ function fixture(written: (sha: string) => string) {
   }
 }
 
-function build(root: string, written: (sha: string) => string) {
+function build(
+  root: string,
+  written: (sha: string) => string,
+  srcPath: string,
+  srcPathEnv: string | undefined,
+) {
   const platform = join(root, "platform");
   mkdirSync(platform);
   const target = join(root, "target");
@@ -49,7 +54,7 @@ function build(root: string, written: (sha: string) => string) {
     [
       "#!/usr/bin/env bash",
       `printf '%s\\n' "$@" > "${root}/copier-argv"`,
-      `printf '_commit: %s\\n_src_path: gh:o/r\\n' '${written(sha)}' > .github/.copier-answers.yml`,
+      `printf '_commit: %s\\n_src_path: %s\\n' '${written(sha)}' '${srcPath}' > .github/.copier-answers.yml`,
     ].join("\n"),
     { mode: 0o755 },
   );
@@ -58,8 +63,8 @@ function build(root: string, written: (sha: string) => string) {
     env: {
       ...process.env,
       PATH: `${bin}:${process.env.PATH}`,
-      // The cwd resolution arm is the one under test.
-      SRC_PATH: undefined,
+      // Absent by default so the cwd resolution arm is the one exercised.
+      SRC_PATH: srcPathEnv,
       TARGET_DIR: target,
       TARGET_REF: sha,
       MODULES: "[uv]",
@@ -112,6 +117,48 @@ describe("apply_update.ts postcondition (subprocess)", () => {
       expect(r.proc.stdout).toContain("stamp hook rewrites that line");
     } finally {
       r.cleanup();
+    }
+  });
+
+  test("a recorded _src_path the process cannot look at aborts instead of falling through to cwd", () => {
+    // A control on "absent vs failed to look": the value is a real path
+    // whose stat fails with EACCES (a parent without search permission),
+    // not ENOENT. Silently skipping it would resolve TARGET_REF in cwd
+    // and pass a render whose source was never examined.
+    if (process.getuid?.() === 0) return; // root ignores mode bits
+    const locked = mkdtempSync(join(tmpdir(), "apply-update-locked-"));
+    const inner = join(locked, "src");
+    mkdirSync(inner);
+    chmodSync(locked, 0o000);
+    try {
+      const r = fixture((sha) => sha, inner);
+      try {
+        expect(r.proc.exitCode).not.toBe(0);
+        expect(r.proc.stderr).toContain("EACCES");
+      } finally {
+        r.cleanup();
+      }
+    } finally {
+      chmodSync(locked, 0o700);
+      rmSync(locked, { recursive: true, force: true });
+    }
+  });
+
+  test("a SRC_PATH git cannot answer for aborts instead of falling through to cwd", () => {
+    // rev-parse exits 1 for an absent ref (fall through) but 128 for a
+    // directory that is not a repository: a failure to look, which must
+    // never let the cwd candidate vouch for a source nobody examined.
+    const notARepo = mkdtempSync(join(tmpdir(), "apply-update-norepo-"));
+    try {
+      const r = fixture((sha) => sha, "gh:o/r", notARepo);
+      try {
+        expect(r.proc.exitCode).toBe(1);
+        expect(r.proc.stdout).toContain(`::error::git rev-parse failed in ${notARepo} (exit 128)`);
+      } finally {
+        r.cleanup();
+      }
+    } finally {
+      rmSync(notARepo, { recursive: true, force: true });
     }
   });
 });
