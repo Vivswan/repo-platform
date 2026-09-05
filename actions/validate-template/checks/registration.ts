@@ -26,16 +26,18 @@ export function checkRegistration(ctx: Context): Finding[] {
         ),
       );
     }
-    // The sync records the build commit's full sha: the fleet's checks
-    // judge a render at exactly that template commit, and a short or
-    // tag-shaped value cannot name one without a template checkout.
+    // The stamp hook records the build commit's full sha on every render:
+    // the fleet's checks judge a render at exactly that template commit,
+    // and a short or tag-shaped value cannot name one without a template
+    // checkout.
     const commit = ctx.answers.commit;
     if (commit === null || !/^[0-9a-f]{40}$/.test(commit)) {
       findings.push(
         error(
           `${ANSWERS_PATH}: _commit ${commit === null ? "is missing" : `'${commit}' is not a full 40-hex commit sha`} - ` +
-            "the sync records the build commit's full sha, which the pending template sync " +
-            "writes; until it lands the render cannot be judged at its own template commit",
+            "every render's stamp hook records the build commit's full sha; run a template " +
+            "sync to rewrite it, since the render cannot be judged at its own template commit " +
+            "until then",
         ),
       );
     }
