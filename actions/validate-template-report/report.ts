@@ -1,25 +1,11 @@
 #!/usr/bin/env bun
-// The validate-template job's reporting: one sticky PR comment plus the
-// step summary, assembled from the integrity leg's verdict, the latest
-// validator's report pair, and the build-branch compare the fetch step
-// made. The behaviour contract is pinned by
-// tests/actions/validate_template_report.test.ts.
+// The validate-template job's reporting and the ONE reader of the verdict:
+// the `integrity` output and the rendered body come from the same parsed
+// value. Never fails the job; the caller re-raises `integrity` last.
 //
-// The contract: INTEGRITY blocks (the verdict of the validator at the
-// repository's own `_commit`; a run that produced no verdict is
-// `not-judged` and blocks too), the LATEST pass only warns (rules the next
-// sync brings), FRESHNESS only informs, and this script itself NEVER fails
-// the job - the caller's LAST step re-raises the deferred integrity
-// outcome, so the comment here is already posted when the gate goes red.
-// One comment is kept per PR (found by MARKER) rather than one per push, a
-// clean-and-fresh run leaves no new comment but clears a stale one, and
-// every reporting failure degrades to a warning with the findings still in
-// the job summary.
-//
-// Env: GH_TOKEN, GITHUB_REPOSITORY, GITHUB_STEP_SUMMARY, VERDICT (the
-// integrity leg's verdict file), LATEST_FINDINGS, LATEST_ADVISORIES (the
-// build tip validator's pair), COMPARE_STATUS and AHEAD_BY (the fetch
-// step's compare outputs), EVENT_NAME, PR_NUMBER, RUN_URL.
+// Env: GH_TOKEN, GITHUB_REPOSITORY, GITHUB_STEP_SUMMARY, GITHUB_OUTPUT,
+// VERDICT, LATEST_FINDINGS, LATEST_ADVISORIES, COMPARE_STATUS, AHEAD_BY,
+// EVENT_NAME, PR_NUMBER, RUN_URL.
 
 import { appendFileSync, readFileSync, statSync } from "node:fs";
 import { capture, env, requireEnv, warning } from "./runtime.ts";
@@ -35,6 +21,11 @@ const PAGINATED_TIMEOUT_MS = NETWORK_TIMEOUT_MS * 4;
 const MARKER = "<!-- repo-platform:validate-template -->";
 
 const verdict = readVerdict(requireEnv("VERDICT"));
+// Exported before anything else can go wrong: this line IS the gate.
+appendFileSync(
+  requireEnv("GITHUB_OUTPUT"),
+  `integrity=${verdict.kind === "clean" ? "success" : "failure"}\n`,
+);
 const latestFindingsFile = requireEnv("LATEST_FINDINGS");
 const latestAdvisoriesFile = requireEnv("LATEST_ADVISORIES");
 const compareStatus = env("COMPARE_STATUS");
@@ -97,7 +88,7 @@ const latest =
   latestFindings === null
     ? `\n\n${LATEST_HEADING}\n\nThe current template's validator exited before reporting. See the [run log](${runUrl}).`
     : upcoming.length > 0
-      ? `\n\n${LATEST_HEADING}\n\nThe current template's validator also reports the following; the next sync PR brings these rules, and they do not fail this check.\n\n${upcoming.join("\n")}`
+      ? `\n\n${LATEST_HEADING}\n\n${upcoming.join("\n")}\n\nThese are warnings. The next sync brings these rules.`
       : "";
 
 // Freshness reads the fetch step's compare: `ahead` is the build branch

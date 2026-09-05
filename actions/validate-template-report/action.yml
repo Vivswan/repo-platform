@@ -4,13 +4,14 @@ description: >-
   comment plus the step summary. INTEGRITY judges the tree by the
   validator of the template it was rendered from (the operator's build
   tree at the recorded `_commit`, run on that tree's own bun) and BLOCKS
-  through the deferred `integrity` output; the LATEST pass runs the build
-  tip's validator and only warns about the rules the next sync brings;
-  FRESHNESS reads the integrity leg's build-branch compare and only
-  informs. The action never fails on its own - the caller reads
-  `integrity` and fails LAST, so the comment is already posted when the
-  gate goes red. The calling job needs pull-requests: write for the
-  comment (and nothing else beyond contents: read).
+  through the `integrity` output; the LATEST pass runs the build tip's
+  validator and only warns about the rules the next sync brings; FRESHNESS
+  reads the integrity leg's build-branch compare and only informs. The
+  action never fails on its own - the report step ALWAYS runs, exports the
+  verdict as `integrity`, and the caller fails LAST, so the comment is
+  already posted when the gate goes red. The calling job needs
+  pull-requests: write for the comment (and nothing else beyond contents:
+  read).
 
 inputs:
   github-token:
@@ -22,11 +23,10 @@ inputs:
 outputs:
   integrity:
     description: >-
-      The judge step's outcome: success only for a clean verdict; failure
-      for findings or a run that could not be judged; skipped when the
-      aligned tree could not be fetched. Deferred so the caller can fail
-      AFTER the findings are posted.
-    value: ${{ steps.integrity.outcome }}
+      The report step's reading of the one verdict: success only for a
+      clean verdict, failure for findings, for a run that could not be
+      judged, and for a missing or malformed verdict. Nothing else sets it.
+    value: ${{ steps.report.outputs.integrity }}
 
 runs:
   using: composite
@@ -56,34 +56,57 @@ runs:
       with:
         bun-version-file: ${{ github.action_path }}/.bun-version
 
-    # One retry: the setup's network fetch is a known transient flake, and
-    # a flake here would block a gate that has nothing to say about the
-    # tree under test.
+    # One retry for the setup's known network flake. Its last two keys sit
+    # after the byte window the actions-bun-guard rule matches: a second
+    # failure must not end the action before the report step.
     - name: Set up bun (retry)
       if: steps.setup-bun.outcome == 'failure'
       uses: oven-sh/setup-bun@v2
       with:
         bun-version-file: ${{ github.action_path }}/.bun-version
+      id: setup-bun-retry
+      continue-on-error: true
+
+    # ONE readiness truth for a bun: an absolute executable on PATH that
+    # prints the pinned version and exits 0, in which case its path is
+    # recorded (empty otherwise). Every script runs by that path, never by
+    # name: later setups put other buns on PATH. The fetched tree's
+    # resolver below is this same block with the tree's pin.
+    - name: Resolve the action's bun
+      id: action-bun
+      shell: bash
+      env:
+        PIN_FILE: ${{ github.action_path }}/.bun-version
+      run: |
+        pin="$(cat "$PIN_FILE")"
+        path="$(command -v bun || true)"
+        case "$path" in /*) ;; *) path="" ;; esac
+        have=""
+        if [ -n "$path" ]; then have="$("$path" --version 2>/dev/null)" || have=""; fi
+        if [ -z "$pin" ] || [ "$have" != "$pin" ]; then path=""; fi
+        echo "path=$path" >> "$GITHUB_OUTPUT"
+        echo "ready=$([ -n "$path" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
 
     # No install step for this action's own scripts: no runtime deps.
     #
-    # The integrity leg is three steps. A failed fetch writes its own
-    # not-judged verdict and skips the two behind it, leaving the judge
-    # outcome `skipped`, which the caller reads as red.
+    # The integrity leg: fetch, the tree's bun, judge. A failed fetch writes
+    # its own not-judged verdict and skips the steps behind it.
     - name: Fetch the validator at the recorded _commit
       id: fetch
+      if: steps.action-bun.outputs.ready == 'true'
       continue-on-error: true
       shell: bash
       env:
+        ACTION_BUN: ${{ steps.action-bun.outputs.path }}
         GH_TOKEN: ${{ inputs.github-token }}
         ALIGNED_DIR: ${{ runner.temp }}/aligned-validator
         VERDICT_FILE: ${{ runner.temp }}/aligned-verdict.json
-      run: bun "${{ github.action_path }}/fetch_aligned.ts"
+      run: '"$ACTION_BUN" "${{ github.action_path }}/fetch_aligned.ts"'
 
     # The fetched tree runs on the bun ITS pin names (the fetch step
     # refused any tree without one), not on this action's: an older tree's
     # lockfile is read by the bun that wrote it. Same one-retry pattern as
-    # above.
+    # above; a double failure leaves the resolver's path empty.
     - name: Set up the fetched tree's bun
       id: aligned-bun
       if: steps.fetch.outcome == 'success'
@@ -93,16 +116,33 @@ runs:
         bun-version-file: ${{ runner.temp }}/aligned-validator/tree/actions/validate-template/.bun-version
 
     - name: Set up the fetched tree's bun (retry)
-      if: steps.fetch.outcome == 'success' && steps.aligned-bun.outcome == 'failure'
+      id: aligned-bun-retry
+      if: steps.aligned-bun.outcome == 'failure'
+      continue-on-error: true
       uses: oven-sh/setup-bun@v2
       with:
         bun-version-file: ${{ runner.temp }}/aligned-validator/tree/actions/validate-template/.bun-version
 
-    # The judge script itself runs on the action's bun (the fetch step's
-    # `bun` output); only the fetched tree's install and validator run on
-    # the bun setup-bun just put on PATH. continue-on-error defers the
-    # verdict to the caller's last step; it does not discard it (the step's
-    # exit code follows the verdict).
+    - name: Resolve the fetched tree's bun
+      id: aligned-bun-path
+      if: steps.fetch.outcome == 'success'
+      shell: bash
+      env:
+        PIN_FILE: ${{ runner.temp }}/aligned-validator/tree/actions/validate-template/.bun-version
+      run: |
+        pin="$(cat "$PIN_FILE")"
+        path="$(command -v bun || true)"
+        case "$path" in /*) ;; *) path="" ;; esac
+        have=""
+        if [ -n "$path" ]; then have="$("$path" --version 2>/dev/null)" || have=""; fi
+        if [ -z "$pin" ] || [ "$have" != "$pin" ]; then path=""; fi
+        echo "path=$path" >> "$GITHUB_OUTPUT"
+        echo "ready=$([ -n "$path" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+
+    # The judge script runs on the action's bun; only the fetched tree's
+    # install and validator run on the tree's (an empty path is a
+    # not-judged verdict). Its exit code follows the verdict for the step's
+    # colour; the gate reads the report step's output.
     - name: Judge the tree by the validator at its recorded _commit
       id: integrity
       if: steps.fetch.outcome == 'success'
@@ -111,25 +151,33 @@ runs:
       env:
         ALIGNED_DIR: ${{ runner.temp }}/aligned-validator
         VERDICT_FILE: ${{ runner.temp }}/aligned-verdict.json
-        ORCHESTRATOR_BUN: ${{ steps.fetch.outputs.bun }}
-      run: ALIGNED_BUN="$(command -v bun)" "$ORCHESTRATOR_BUN" "${{ github.action_path }}/judge_aligned.ts"
+        ORCHESTRATOR_BUN: ${{ steps.action-bun.outputs.path }}
+        ALIGNED_BUN: ${{ steps.aligned-bun-path.outputs.path }}
+      run: '"$ORCHESTRATOR_BUN" "${{ github.action_path }}/judge_aligned.ts"'
 
     # Advisory only: the build tip's validator knows the rules the next
     # sync PR brings, and report.ts shows them as warnings. Its outcome is
     # read by nothing. A composite step's `uses:` cannot take expressions,
     # which is why the operator repository is a constant (build_sha.ts)
-    # rather than an input: no input could reach this ref. Its own bun
-    # guard puts this action's pinned bun back for the report step.
+    # rather than an input: no input could reach this ref.
     - uses: Vivswan/repo-platform/actions/validate-template@build
       id: latest
+      if: steps.action-bun.outputs.ready == 'true'
       continue-on-error: true
       with:
         findings-file: ${{ runner.temp }}/latest-findings.md
         advisories-file: ${{ runner.temp }}/latest-advisories.md
 
+    # The ONE place the verdict is read and `integrity` is set, whatever
+    # happened above. Bash so that the no-bun path can still export the
+    # failure and one summary line.
     - name: Report the findings
+      id: report
+      if: always()
       shell: bash
       env:
+        ACTION_BUN: ${{ steps.action-bun.outputs.path }}
+        ACTION_PATH: ${{ github.action_path }}
         GH_TOKEN: ${{ inputs.github-token }}
         VERDICT: ${{ runner.temp }}/aligned-verdict.json
         LATEST_FINDINGS: ${{ runner.temp }}/latest-findings.md
@@ -139,4 +187,11 @@ runs:
         EVENT_NAME: ${{ github.event_name }}
         PR_NUMBER: ${{ github.event.pull_request.number }}
         RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-      run: bun "${{ github.action_path }}/report.ts"
+      run: |
+        if [ -n "$ACTION_BUN" ]; then
+          exec "$ACTION_BUN" "$ACTION_PATH/report.ts"
+        fi
+        reason="the action's pinned bun is unavailable"
+        echo "integrity=failure" >> "$GITHUB_OUTPUT"
+        echo "::error::$reason"
+        printf '### Template check\n\n#### Integrity\n\nNot judged: %s. See the [run log](%s). This FAILS the check.\n' "$reason" "$RUN_URL" >> "$GITHUB_STEP_SUMMARY"

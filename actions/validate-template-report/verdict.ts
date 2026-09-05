@@ -1,10 +1,6 @@
-// The integrity leg's ONE verdict per run, decided where the validator's
-// child result and its two report files meet (the judge step) and rendered
-// by report.ts from nothing else. The child's exit status and the files it
-// wrote are two witnesses to one event; letting them disagree - a nonzero
-// exit beside an empty findings file rendering "Passed", a crash before
-// writing rendering nothing - is what this type forbids: every inconsistent
-// pair is `not-judged` with a reason, and only `clean` opens the gate.
+// The integrity leg's ONE verdict per run: the child's exit and the report
+// files it wrote are two witnesses to one event, and a pair that disagrees
+// is `not-judged`, never a pass.
 
 import { lstatSync, readFileSync, writeFileSync } from "node:fs";
 import type { ChildExit } from "./runtime.ts";
@@ -87,16 +83,14 @@ export function writeVerdict(path: string, verdict: Integrity): void {
   writeFileSync(path, serialized(verdict));
 }
 
-/** The verdict a step wrote, or `not-judged` when there is none to read:
- *  a step that crashed before writing, or a file that is not a verdict,
- *  must fail the gate rather than default to anything. Only writeVerdict's
- *  own serialization is a verdict: the parsed value must print back to the
- *  file byte for byte, so a duplicate key or a stray field (which
+/** The verdict a step wrote, or `not-judged` when there is none to read.
+ *  Only writeVerdict's own bytes are a verdict: the parsed value must print
+ *  back to the file exactly, so a duplicate key or a stray field (which
  *  JSON.parse would quietly resolve) is not one. */
 export function readVerdict(path: string): Integrity {
   const none: Integrity = {
     kind: "not-judged",
-    reason: "the aligned validator step wrote no verdict; see the run log",
+    reason: "the aligned validator step wrote no verdict",
   };
   let text: string;
   let parsed: unknown;
@@ -108,8 +102,6 @@ export function readVerdict(path: string): Integrity {
   }
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return none;
   const record = parsed as Record<string, unknown>;
-  // Exactly the variant's keys, so a contradiction (a clean verdict
-  // carrying findings) is not read as whichever half suits.
   const shape = (...keys: string[]): boolean =>
     Object.keys(record).sort().join(",") === ["kind", ...keys].sort().join(",") &&
     keys.every((key) => typeof record[key] === "string");

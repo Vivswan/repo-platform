@@ -1,18 +1,15 @@
 #!/usr/bin/env bun
-// The integrity leg's JUDGE: installs and runs the validator the fetch step
-// laid out, on the bun the setup-bun step between them installed from that
-// tree's own pin (ALIGNED_BUN; this script itself keeps running on the
-// action's bun, so an old pin can never break the judging), and turns how the run ended into the one verdict
-// report.ts renders (verdict.ts). The exit code follows the verdict - 0
-// only for `clean` - so the step's outcome, the caller's `integrity`
-// output, can never disagree with what the comment says.
+// The integrity leg's JUDGE: runs the fetched validator on the fetched
+// tree's own bun (ALIGNED_BUN) and writes the one verdict. The exit code
+// follows the verdict for the step's colour only; the gate reads report.ts.
 //
-// Env: ALIGNED_DIR (the fetch step's layout), VERDICT_FILE, ALIGNED_BUN
-// (the fetched tree's bun). Runs from the caller's checkout.
+// Env: ALIGNED_DIR, VERDICT_FILE, ALIGNED_BUN (the fetched tree's bun, or
+// empty when none matching its pin is on PATH). Runs from the caller's
+// checkout.
 
 import { join, resolve } from "node:path";
 import { reportFilesOf, VALIDATOR_SCRIPT, validatorOf } from "./aligned_tree.ts";
-import { capture, error, failureDetail, requireEnv, run } from "./runtime.ts";
+import { capture, env, error, failureDetail, requireEnv, run } from "./runtime.ts";
 import { classify, type Integrity, writeVerdict } from "./verdict.ts";
 
 const INSTALL_TIMEOUT_MS = 180_000;
@@ -20,7 +17,7 @@ const VALIDATE_TIMEOUT_MS = 300_000;
 
 const alignedDir = requireEnv("ALIGNED_DIR");
 const verdictFile = requireEnv("VERDICT_FILE");
-const alignedBun = requireEnv("ALIGNED_BUN");
+const alignedBun = env("ALIGNED_BUN");
 const root = resolve(".");
 const validator = validatorOf(alignedDir);
 
@@ -29,6 +26,15 @@ const conclude: (verdict: Integrity) => never = (verdict) => {
   if (verdict.kind === "not-judged") error(verdict.reason);
   process.exit(verdict.kind === "clean" ? 0 : 1);
 };
+
+// Without the tree's bun, `bun` on PATH is the action's; running the tree
+// on it is what the setup step exists to prevent.
+if (alignedBun === "") {
+  conclude({
+    kind: "not-judged",
+    reason: "no bun matching the fetched tree's .bun-version is available",
+  });
+}
 
 const installed = capture([alignedBun, "install", "--frozen-lockfile", "--production"], {
   cwd: validator,
