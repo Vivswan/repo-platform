@@ -1,9 +1,7 @@
-import { join } from "node:path";
 import { MANIFEST_NAME } from "../../shared/manifest.ts";
-import { ANSWERS_PATH, type Context } from "../context.ts";
+import type { Context } from "../context.ts";
 import { advisory, error, type Finding } from "../findings.ts";
 import { coveredPaths } from "../ownership.ts";
-import { pathExists } from "../readers.ts";
 
 const RECOVERY = "run a recovery sync (recover=recopy)";
 
@@ -20,7 +18,8 @@ const RECOVERY = "run a recovery sync (recover=recopy)";
  *  (managed -> starter) would otherwise disable parity for that path
  *  permanently and invisibly. A class or split-metadata mismatch, an entry
  *  whose render condition is off, and a roster path the manifest does not
- *  list while its file still exists are errors. No in-repo signal
+ *  list are all errors: the roster and the manifest come from the same
+ *  template commit, so any disagreement is a hand edit. No in-repo signal
  *  can be tamper-proof against the repo's own owner; the guarantee is
  *  VISIBILITY, and a tampered _commit both self-heals on the next sync and
  *  breaks the repo's own update base loudly. */
@@ -66,15 +65,20 @@ export function checkManifestShape(ctx: Context): Finding[] {
     );
   }
   // Provenance: the stamped commit on the self entry must EQUAL the
-  // recorded answers _commit (null exactly when the answers record none).
-  // Once a provenance error is reported, a missing roster entry is an
-  // advisory naming that error instead of a second error per path on the
-  // same cause; `absenceCaveat` (null = strict) carries the name.
+  // recorded answers _commit. Once a provenance error is reported, a
+  // missing roster entry is an advisory naming that error instead of a
+  // second error per path on the same cause; `absenceCaveat` (null =
+  // strict) carries the name. A render recording no _commit is the
+  // registration check's error, and nothing can be compared against it:
+  // the stamp is left unjudged and absence takes the same caveat.
   const answersCommit = ctx.answers?.commit ?? null;
   const rawSelfCommit = files[MANIFEST_NAME]?.commit;
   const manifestCommit = typeof rawSelfCommit === "string" ? rawSelfCommit : null;
   let absenceCaveat: string | null = null;
-  if (manifestCommit === null && answersCommit !== null) {
+  if (answersCommit === null) {
+    absenceCaveat =
+      "the render records no _commit to compare against (the registration check's error)";
+  } else if (manifestCommit === null) {
     findings.push(
       error(
         `${MANIFEST_NAME}: its provenance stamp is null but the render ` +
@@ -83,12 +87,11 @@ export function checkManifestShape(ctx: Context): Finding[] {
       ),
     );
     absenceCaveat = "its provenance stamp is unusable (error above)";
-  } else if (manifestCommit !== null && manifestCommit !== answersCommit) {
+  } else if (manifestCommit !== answersCommit) {
     findings.push(
       error(
         `${MANIFEST_NAME}: its stamped provenance (self-entry commit ` +
-          `'${manifestCommit}') does not match the recorded render ` +
-          `${answersCommit === null ? `(no _commit in ${ANSWERS_PATH})` : answersCommit} - ` +
+          `'${manifestCommit}') does not match the recorded render ${answersCommit} - ` +
           "the stamper always writes the recorded value, so this is " +
           `tampering or a failed stamp; revert the edit or ${RECOVERY}`,
       ),
@@ -112,15 +115,8 @@ export function checkManifestShape(ctx: Context): Finding[] {
     const entry = files[path];
     if (entry === undefined) {
       const declaredBy = "this validator's ownership tables declare";
-      // The strict deletion error requires the FILE to still exist: the
-      // stealth attack parity guards against is an unlisted path whose
-      // file lives on for quiet editing. An absent file is a version split
-      // the fleet legitimately produces (withheld workflow files pin an
-      // older ci.yml; client validators float at main, ahead of the
-      // render), where a retired or not-yet-delivered table path has no
-      // file - erroring there would be false.
       findings.push(
-        absenceCaveat === null && pathExists(join(ctx.root, path))
+        absenceCaveat === null
           ? error(
               `${MANIFEST_NAME} does not list '${path}', which ${declaredBy} - the ` +
                 `stamper writes every entry of its render (${answersCommit}), so ` +
@@ -129,12 +125,7 @@ export function checkManifestShape(ctx: Context): Finding[] {
             )
           : advisory(
               `${MANIFEST_NAME} does not list '${path}', which ${declaredBy} - ` +
-                `${
-                  absenceCaveat ??
-                  "the path is absent from the repo too, so this is a retired " +
-                    "or not-yet-delivered path seen by a validator of a " +
-                    "different vintage, not stealth drift"
-                } (a hand-deleted entry needs reverting; sync baselines manifest edits)`,
+                `${absenceCaveat} (a hand-deleted entry needs reverting; sync baselines manifest edits)`,
             ),
       );
       continue;

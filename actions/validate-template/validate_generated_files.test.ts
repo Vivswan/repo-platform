@@ -10,6 +10,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { BASE_OWNERSHIP, type BaseOwnedFile, MODULE_OWNERSHIP } from "./ownership.ts";
 
 const VALIDATOR = join(import.meta.dir, "validate_generated_files.ts");
 
@@ -21,18 +22,29 @@ const B = "<!-- BEGIN REPO-PLATFORM MANAGED -->";
 const E = "<!-- END REPO-PLATFORM MANAGED -->";
 const HB = "# BEGIN REPO-PLATFORM MANAGED";
 const HE = "# END REPO-PLATFORM MANAGED";
+// The build commit a render records: the sync writes the full sha.
+const COMMIT = "a3f9c2e17b4d6c8f0a2e4b6d8c0f1a3b5d7e9f01";
+const ANSWERS = (extra = "") =>
+  `${MANAGED_HEADER}_commit: ${COMMIT}\n_src_path: gh:Vivswan/repo-platform\ngithub_username: Vivswan\n${extra}`;
+// A public render of the base alone (modules: [uv] adds no owned file):
+// every roster path the tables expect is present, because the manifest
+// cross-check errors on any roster path the manifest does not list.
 const BASELINE: Record<string, string> = {
-  ".github/.copier-answers.yml": `${MANAGED_HEADER}_commit: 0.0.0.post5.dev0+abc1234\n_src_path: gh:Vivswan/repo-platform\ngithub_username: Vivswan\n`,
+  ".github/.copier-answers.yml": ANSWERS(),
   // A repo-owned starter (generated once, never rewritten): no managed
   // header, no manifest hash.
   ".repo-platform.yml": "# Generated once by Vivswan/repo-platform; repo-owned.\nmodules: [uv]\n",
-  // The ungated base region files: their ABSENCE is strict (the template
-  // always generates them), so the minimal accepted tree carries each.
   ".gitignore": `# local patterns go here\n\n${HB}\n${HE}\n`,
   ".editorconfig": `${HB}\nroot = true\n${HE}\n`,
   ".gitattributes": `${HB}\n* text=auto eol=lf\n${HE}\n`,
   ".github/CODEOWNERS": `${HB}\n* @vivswan\n${HE}\n`,
   ".github/SECURITY.md": `${B}\n# Security policy\n${E}\n`,
+  ".github/CODE_OF_CONDUCT.md": `${MANAGED_HEADER}\n# Contributor Covenant Code of Conduct\n`,
+  ".github/dependabot.yml": `${MANAGED_HEADER}version: 2\nupdates: []\n`,
+  ".typography-allow": MANAGED_HEADER,
+  ".yamllint": `${MANAGED_HEADER}extends: default\n`,
+  "CONTRIBUTING.md": `${B}\n# Contributing\n${E}\n`,
+  "LICENSE.md": `${B}\n# License\n${E}\n`,
   ".github/workflows/ci.yml": [
     "# This file is managed by Vivswan/repo-platform.",
     "name: CI",
@@ -60,16 +72,13 @@ afterAll(() => {
 const MANIFEST = ".github/repo-platform-manifest.json";
 
 // Absence and provenance checks are STRICT (every build ships the
-// manifest), so every client-render fixture must carry a manifest listing
-// each expected path whose file exists. This mirror of the validator's
-// ownership tables stamps one from the fixture's final tree. Coverage is
-// honest, not total: mirror drift on a path a fixture CARRIES fails
-// loudly through the roster cross-check (the mirror-coverage test below
-// carries the whole base marker roster plus the agents entry for exactly
-// that reason), while entries for paths no fixture ever carries - the
-// remaining MIRROR_MODULES workflow files - are inert until a fixture
-// carries them. Tests probing manifest behavior itself pass their own
-// manifest (which wins) or opt out via `noManifest`.
+// manifest, and the roster cross-check errors on any roster path the
+// manifest does not list), so every client-render fixture carries each
+// roster path it selects and a manifest listing them. This mirror of the
+// validator's ownership tables stamps that manifest from the fixture's
+// final tree; the mirror test below pins it equal to the generated tables.
+// Tests probing manifest behavior itself pass their own manifest (which
+// wins) or opt out via `noManifest`.
 type MirrorEntry = {
   path: string;
   kind: "header" | "region" | "class-only";
@@ -111,8 +120,10 @@ const MIRROR_MODULES: Record<string, MirrorEntry[]> = {
     { path: ".github/workflows/deno-audit.yml", kind: "header" },
   ],
   pages: [{ path: ".github/workflows/pages.yml", kind: "header" }],
+  "docs-site": [{ path: ".github/workflows/docs-site.yml", kind: "header" }],
   "release-please": [{ path: ".github/workflows/release.yml", kind: "header" }],
   skills: [{ path: ".github/workflows/validate-skills.yml", kind: "header" }],
+  "pr-title": [{ path: ".github/workflows/pr-title.yml", kind: "header" }],
   "auto-assign": [{ path: ".github/workflows/auto-assign.yml", kind: "header" }],
   "settings-sync": [{ path: ".github/workflows/settings-sync.yml", kind: "header" }],
 };
@@ -139,7 +150,18 @@ function regionOf(content: string, begin: string, end: string): string | null {
   return null;
 }
 
-function manifestForTree(tree: Record<string, string>): string {
+const managedEntry = (content: string) => `{"class": "managed", "hash": "${shaLatin1(content)}"}`;
+
+function manifestOf(entries: Record<string, string>): string {
+  return `{\n  "$comment": "test-stamped", "files": {\n${Object.entries(entries)
+    .map(([path, body]) => `    ${JSON.stringify(path)}: ${body}`)
+    .join(",\n")}\n  }\n}\n`;
+}
+
+/** The entries the stamper would write for `tree`: the self entry carrying
+ *  the recorded _commit, the starter registration file, and one entry per
+ *  mirror-roster path the tree carries. */
+function stampedEntries(tree: Record<string, string>): Record<string, string> {
   const answers = tree[".github/.copier-answers.yml"] ?? "";
   const isPrivate = /^private:\s*true\b/m.test(answers);
   const commit = /^_commit:[ \t]*(.+?)[ \t]*$/m.exec(answers)?.[1] ?? null;
@@ -167,7 +189,7 @@ function manifestForTree(tree: Record<string, string>): string {
     const content = tree[path];
     if (content === undefined) continue;
     if (kind === "header" || kind === "class-only") {
-      entries[path] = `{"class": "managed", "hash": "${shaLatin1(content)}"}`;
+      entries[path] = managedEntry(content);
     } else {
       // A missing or duplicated marker is that check's own report; the
       // manifest still lists the first region the marker pair delimits.
@@ -178,16 +200,17 @@ function manifestForTree(tree: Record<string, string>): string {
         `"end": ${JSON.stringify(end)}, "hash": "${shaLatin1(region)}"}`;
     }
   }
-  return `{\n  "$comment": "test-stamped", "files": {\n${Object.entries(entries)
-    .map(([path, body]) => `    ${JSON.stringify(path)}: ${body}`)
-    .join(",\n")}\n  }\n}\n`;
+  return entries;
 }
+
+const manifestForTree = (tree: Record<string, string>) => manifestOf(stampedEntries(tree));
 
 /** Writes BASELINE plus `extra` into a fresh temp repo and runs the
  *  validator against it, with any extra CLI `args` (e.g. --self).
  *  `opts.gitInit` makes the tree a real git checkout first, so the --self
  *  gitignore skip has ignore rules to consult; `opts.gitAddForce`
- *  force-tracks paths despite matching an ignore pattern. */
+ *  force-tracks paths despite matching an ignore pattern; `opts.omit`
+ *  drops BASELINE files from the tree. */
 function gitFreeEnv(): Record<string, string> {
   // Hook-driven runs (husky pre-commit) export GIT_DIR/GIT_INDEX_FILE, which
   // would make the spawned validator's git calls resolve the enclosing repo
@@ -207,6 +230,7 @@ function runValidator(
     gitAddForce?: string[];
     env?: Record<string, string>;
     noManifest?: boolean;
+    omit?: string[];
   } = {},
 ): {
   exitCode: number;
@@ -216,6 +240,7 @@ function runValidator(
   const root = mkdtempSync(join(tmpdir(), "validate-template-"));
   roots.push(root);
   const tree: Record<string, string> = { ...BASELINE, ...extra };
+  for (const rel of opts.omit ?? []) delete tree[rel];
   // Client renders need a stamped manifest (absence is strict); self mode
   // must NOT have one, and manifest-behavior tests bring their own.
   if (!opts.noManifest && !args.includes("--self") && !Object.hasOwn(tree, MANIFEST)) {
@@ -246,6 +271,34 @@ function runValidator(
 }
 
 const DUP_KEY_YAML = "homepage: https://a.example\nhomepage: https://b.example\n";
+
+describe("the ownership mirror", () => {
+  test("the fixture mirror equals the generated ownership tables", () => {
+    // The mirror stamps every fixture's manifest, so a table change it
+    // misses would turn into a confusing cross-check error in unrelated
+    // tests; pin the whole twin instead.
+    const asMirror = (entry: BaseOwnedFile): MirrorEntry => ({
+      path: entry.path,
+      kind: entry.kind,
+      ...(entry.kind === "region" ? { begin: entry.begin, end: entry.end } : {}),
+      ...(entry.when?.publicOnly ? { publicOnly: true } : {}),
+      ...(entry.when?.withoutModule !== undefined
+        ? { withoutModule: entry.when.withoutModule }
+        : {}),
+    });
+    const sortByPath = (entries: MirrorEntry[]) =>
+      [...entries].sort((a, b) => a.path.localeCompare(b.path));
+    expect(sortByPath(MIRROR_BASE)).toEqual(sortByPath(BASE_OWNERSHIP.map(asMirror)));
+    expect(MIRROR_MODULES).toEqual(
+      Object.fromEntries(
+        Object.entries(MODULE_OWNERSHIP).map(([module, entries]) => [
+          module,
+          (entries ?? []).map(asMirror),
+        ]),
+      ),
+    );
+  });
+});
 
 describe("the check roster", () => {
   test("every checks/ module is imported by the entry and runs from CHECKS", () => {
@@ -420,9 +473,7 @@ describe("base checks shape", () => {
   // private: true in the answers also silences the dependency-review
   // advisory, like a real private render's answers do; github_username pins
   // the owner the fleet's composite actions must come from.
-  const PRIVATE_ANSWERS =
-    `${MANAGED_HEADER}_commit: 0.0.0.post5.dev0+abc1234\n_src_path: gh:Vivswan/repo-platform\n` +
-    "github_username: Vivswan\nprivate: true\n";
+  const PRIVATE_ANSWERS = ANSWERS("private: true\n");
 
   /** A private merged render: base-checks carries the base checks as
    *  guarded steps, and all-green gates on it (unless `needs` says
@@ -522,13 +573,11 @@ describe("base checks shape", () => {
   test.each([
     {
       reason: "the key is absent",
-      answers: "_commit: 0.0.0.post5.dev0+abc1234\n_src_path: gh:Vivswan/repo-platform\n",
+      answers: `_commit: ${COMMIT}\n_src_path: gh:Vivswan/repo-platform\n`,
     },
     {
       reason: "the value carries regex metacharacters and a slash",
-      answers:
-        "_commit: 0.0.0.post5.dev0+abc1234\n_src_path: gh:Vivswan/repo-platform\n" +
-        "github_username: attacker/repo.*\n",
+      answers: `_commit: ${COMMIT}\n_src_path: gh:Vivswan/repo-platform\ngithub_username: attacker/repo.*\n`,
     },
   ])("a managed render whose answers cannot pin an owner fails: $reason", ({ answers }) => {
     const { exitCode, stderr } = runValidator({ ".github/.copier-answers.yml": answers });
@@ -536,10 +585,52 @@ describe("base checks shape", () => {
     expect(stderr).toContain("`github_username` is missing or not a GitHub username");
   });
 
+  // The sync records the build commit's full sha; anything else (copier's
+  // describe output on a tagged or short-abbrev checkout, a hand edit)
+  // cannot name the template commit the render must be judged at.
+  const COMMIT_ERROR = (shape: string) =>
+    `.github/.copier-answers.yml: _commit ${shape} - the sync records the build commit's ` +
+    "full sha, which the pending template sync writes; until it lands the render cannot be " +
+    "judged at its own template commit";
+  test.each([
+    { reason: "a short sha", value: "abc1234" },
+    { reason: "a tag name", value: "ci-build-42/new" },
+    { reason: "a PEP 440 version", value: "0.0.0.post5.dev0+abc1234" },
+    { reason: "uppercase hex", value: COMMIT.toUpperCase() },
+    { reason: "39 hex digits", value: COMMIT.slice(1) },
+    { reason: "41 hex digits", value: `${COMMIT}0` },
+  ])("a _commit that is not a full 40-hex sha is the run's one error: $reason", ({ value }) => {
+    // The auto-stamped manifest carries the same value, so nothing else
+    // is wrong with the render: the shape error stands alone.
+    const { exitCode, stderr } = runValidator({
+      ".github/.copier-answers.yml": ANSWERS().replace(COMMIT, value),
+    });
+    expect(exitCode).toBe(1);
+    expect(stderr).toBe(
+      `error: ${COMMIT_ERROR(`'${value}' is not a full 40-hex commit sha`)}\n\n1 error(s).\n`,
+    );
+  });
+
+  test("a missing _commit is one error, owned here: provenance has nothing to compare and defers", () => {
+    // The manifest's stamp still carries the render's commit; without the
+    // recorded value the provenance check cannot judge it, and a second
+    // error for the same deleted key would only pile on.
+    const { exitCode, stderr } = runValidator({
+      ".github/.copier-answers.yml": ANSWERS().replace(`_commit: ${COMMIT}\n`, ""),
+      [MANIFEST]: manifestOf({
+        ...stampedEntries(BASELINE),
+        [MANIFEST]: `{"class": "managed", "hash": null, "commit": "${COMMIT}"}`,
+        ".github/.copier-answers.yml": managedEntry(ANSWERS().replace(`_commit: ${COMMIT}\n`, "")),
+      }),
+    });
+    expect(exitCode).toBe(1);
+    expect(stderr).toBe(`error: ${COMMIT_ERROR("is missing")}\n\n1 error(s).\n`);
+  });
+
   test("a quoted github_username is read as its YAML value", () => {
     const { exitCode, stderr } = runValidator({
       ".github/.copier-answers.yml":
-        `${MANAGED_HEADER}_commit: 0.0.0.post5.dev0+abc1234\n_src_path: gh:Vivswan/repo-platform\n` +
+        `${MANAGED_HEADER}_commit: ${COMMIT}\n_src_path: gh:Vivswan/repo-platform\n` +
         'github_username: "Vivswan"\nprivate: true\n',
       ".github/workflows/ci.yml": mergedCi(MERGED_STEPS),
     });
@@ -917,7 +1008,20 @@ describe("one license file", () => {
   });
 
   test("LICENSE alone passes with a rename advisory (custom-license repos)", () => {
-    const { exitCode, stdout, stderr } = runValidator({ LICENSE: "MIT License\n" });
+    // The custom-license module is what lets a render skip the fleet
+    // LICENSE.md, so it is the one selection where a lone LICENSE is a
+    // complete render.
+    const { exitCode, stdout, stderr } = runValidator(
+      {
+        LICENSE: "MIT License\n",
+        ".repo-platform.yml": BASELINE[".repo-platform.yml"].replace(
+          "modules: [uv]",
+          "modules: [uv, custom-license]",
+        ),
+      },
+      [],
+      { omit: ["LICENSE.md"] },
+    );
     expect(stderr).toBe("");
     expect(exitCode).toBe(0);
     expect(stdout).toContain("advisory: LICENSE: the fleet convention is LICENSE.md");
@@ -1025,6 +1129,17 @@ describe("release-please-config.json never pins a version", () => {
   });
 });
 
+// The agents module's roster besides AGENTS.md: the two class-only copies
+// (symlinks in a real render; content-hashed regular files here) and the
+// headed review instructions, so an agents fixture lists every roster path.
+const AGENTS_SIDE_FILES: Record<string, string> = {
+  ".github/agents.md": "AGENTS.md\n",
+  ".github/copilot-instructions.md": "AGENTS.md\n",
+  "CLAUDE.md": "AGENTS.md\n",
+  ".github/instructions/review.instructions.md":
+    '---\napplyTo: "**"\n---\n<!-- This file is managed by Vivswan/repo-platform. -->\n# Review\n',
+};
+
 describe("ownership self-declarations", () => {
   const C1 =
     "# This file is managed by Vivswan/repo-platform.\n" +
@@ -1087,9 +1202,10 @@ describe("ownership self-declarations", () => {
   test("an ungated base region file's ABSENCE is an error (the template always lands it)", () => {
     const root = mkdtempSync(join(tmpdir(), "validate-template-"));
     roots.push(root);
-    const tree: Record<string, string> = { ...BASELINE };
+    // The manifest is the render's (it lists .editorconfig); the file was
+    // deleted afterwards.
+    const tree: Record<string, string> = { ...BASELINE, [MANIFEST]: manifestForTree(BASELINE) };
     delete tree[".editorconfig"];
-    tree[MANIFEST] = manifestForTree(tree);
     for (const [rel, content] of Object.entries(tree)) {
       mkdirSync(join(root, dirname(rel)), { recursive: true });
       writeFileSync(join(root, rel), content);
@@ -1207,6 +1323,7 @@ describe("ownership self-declarations", () => {
         "modules: [uv]",
         "modules: [uv, agents]",
       ),
+      ...AGENTS_SIDE_FILES,
     };
     const bare = runValidator({ ...agentsRender, "AGENTS.md": "# AGENTS.md\n" });
     expect(bare.exitCode).toBe(1);
@@ -1228,36 +1345,16 @@ describe("ownership self-declarations", () => {
 
 describe("ownership-manifest byte parity", () => {
   const sha = shaLatin1;
-  const manifestOf = (entries: Record<string, string>) =>
-    `{\n  "$comment": "test",\n  "files": {\n${Object.entries(entries)
-      .map(([path, body]) => `    ${JSON.stringify(path)}: ${body}`)
-      .join(",\n")}\n  }\n}\n`;
   const SELF_ENTRY = {
-    [MANIFEST]: '{"class": "managed", "hash": null, "commit": "0.0.0.post5.dev0+abc1234"}',
+    [MANIFEST]: `{"class": "managed", "hash": null, "commit": "${COMMIT}"}`,
   };
-  // The full roster for the BASELINE tree: absence checks are strict, so a
-  // passing fixture must list every table-covered path whose file exists.
-  const regionEntry = (path: string, begin: string, end: string) =>
-    `{"class": "split", "grammar": "managed-region", "begin": ${JSON.stringify(begin)}, ` +
-    `"end": ${JSON.stringify(end)}, "hash": "${sha(regionOf(BASELINE[path] ?? "", begin, end) ?? "")}"}`;
   const splitEntry = (grammar: string, begin: string, end: string, hash: string) =>
     `{"class": "split", "grammar": ${JSON.stringify(grammar)}, "begin": ${JSON.stringify(begin)}, ` +
     `"end": ${JSON.stringify(end)}, "hash": "${hash}"}`;
-  const stampedBaseline = () => ({
-    ...SELF_ENTRY,
-    ".github/.copier-answers.yml": `{"class": "managed", "hash": "${sha(
-      BASELINE[".github/.copier-answers.yml"],
-    )}"}`,
-    ".repo-platform.yml": '{"class": "starter"}',
-    ".github/workflows/ci.yml": `{"class": "managed", "hash": "${sha(
-      BASELINE[".github/workflows/ci.yml"],
-    )}"}`,
-    ".gitignore": regionEntry(".gitignore", HB, HE),
-    ".editorconfig": regionEntry(".editorconfig", HB, HE),
-    ".gitattributes": regionEntry(".gitattributes", HB, HE),
-    ".github/CODEOWNERS": regionEntry(".github/CODEOWNERS", HB, HE),
-    ".github/SECURITY.md": regionEntry(".github/SECURITY.md", B, E),
-  });
+  // The full roster for the BASELINE tree: the cross-check errors on any
+  // roster path the manifest does not list, so a passing fixture lists
+  // every one.
+  const stampedBaseline = () => stampedEntries(BASELINE);
 
   test("a missing manifest is an error", () => {
     const { exitCode, stderr } = runValidator({}, [], { noManifest: true });
@@ -1313,41 +1410,83 @@ describe("ownership-manifest byte parity", () => {
     expect(stderr).toContain(".yamllint: .github/repo-platform-manifest.json records no hash");
   });
 
-  test("a listed managed file missing from the repo is an advisory", () => {
-    // Check 8's absence stance, and the warn-and-withhold push path leaves
-    // exactly this state for an added workflow the token cannot deliver.
-    // The path sits outside the ownership tables so only absence is probed.
-    const entries = {
-      ...stampedBaseline(),
-      "docs/handbook.md": '{"class": "managed", "hash": null}',
-    };
-    const { exitCode, stdout, stderr } = runValidator({ [MANIFEST]: manifestOf(entries) });
-    expect(stderr).toBe("");
-    expect(exitCode).toBe(0);
-    expect(stdout).toContain("advisory: docs/handbook.md: listed as managed");
+  // One state the sync itself produces is not damage: a workflow file the
+  // push token could not deliver, whose entry the withhold restamps
+  // hash-null while the file stays absent. Every other listed-but-missing
+  // file is a managed file deleted outside a sync. The stamper nulls the
+  // hash of ANY absent file, so a hand-deleted workflow the template did
+  // not change between syncs reaches the same state once the sync
+  // restamps: an accepted residual, confined to .github/workflows/ by the
+  // path key. The workflow rows select release-please, whose managed
+  // release.yml the roster then expects (the tree the withhold pushes for a
+  // repo that just selected the module); the docs row is the plain
+  // baseline with one extra entry the roster does not cover.
+  const RELEASE_PLEASE = BASELINE[".repo-platform.yml"].replace(
+    "modules: [uv]",
+    "modules: [uv, release-please]",
+  );
+  test.each([
+    {
+      reason: "a hash-null workflow entry with no file is the withheld-workflow advisory",
+      path: ".github/workflows/release.yml",
+      registration: RELEASE_PLEASE,
+      entry: '{"class": "managed", "hash": null}',
+      verdict: {
+        exitCode: 0,
+        stream: "stdout",
+        text: "the state a withheld added workflow leaves",
+      },
+    },
+    {
+      reason: "a hash-null entry outside .github/workflows is a deleted managed file",
+      path: "docs/handbook.md",
+      registration: BASELINE[".repo-platform.yml"],
+      entry: '{"class": "managed", "hash": null}',
+      verdict: { exitCode: 1, stream: "stderr", text: "a managed file deleted outside a sync" },
+    },
+    {
+      reason: "a stamped workflow entry with no file is a deleted managed file",
+      path: ".github/workflows/release.yml",
+      registration: RELEASE_PLEASE,
+      entry: `{"class": "managed", "hash": "${"a".repeat(64)}"}`,
+      verdict: { exitCode: 1, stream: "stderr", text: "a managed file deleted outside a sync" },
+    },
+  ])("a listed file missing from the repo: $reason", ({ path, registration, entry, verdict }) => {
+    const result = runValidator({
+      ".repo-platform.yml": registration,
+      [MANIFEST]: manifestOf({ ...stampedBaseline(), [path]: entry }),
+    });
+    const other = verdict.stream === "stdout" ? result.stderr : result.stdout;
+    expect(result.exitCode).toBe(verdict.exitCode);
+    expect(result[verdict.stream]).toContain(
+      `${path}: listed as managed in ${MANIFEST} ${verdict.exitCode === 0 ? "with no hash and missing" : "but missing"} from the repo - ${verdict.text}`,
+    );
+    expect(other).not.toContain(path);
+    // One verdict per path: the BASELINE ci.yml's legacy-shape advisories
+    // ride along on stdout, so the count is of findings naming the path.
+    expect(result[verdict.stream].split("\n").filter((line) => line.includes(path))).toHaveLength(
+      1,
+    );
   });
 
-  test("an unlisted roster path whose file is absent too stays an advisory", () => {
-    // The strict deletion error requires the missing entry's FILE to still
-    // exist: roster paths the baseline tree does not carry (.github/SECURITY.md and
-    // friends) stay advisories - the version splits the fleet legitimately
-    // produces (withheld workflow files; a main-floating client validator
-    // ahead of the render) look exactly like this.
-    const { exitCode, stdout, stderr } = runValidator({
-      [MANIFEST]: manifestOf(stampedBaseline()),
+  test("an unlisted roster path is an error even when its file is absent too", () => {
+    // The roster and the manifest come from the same template commit, so a
+    // roster path the manifest omits is a hand-deleted entry whether or not
+    // the file survived; the deletion attack below is the file-present case.
+    const entries = { ...stampedBaseline() } as Record<string, string>;
+    delete entries[".yamllint"];
+    const { exitCode, stderr } = runValidator({ [MANIFEST]: manifestOf(entries) }, [], {
+      omit: [".yamllint"],
     });
-    expect(stderr).toBe("");
-    expect(exitCode).toBe(0);
-    expect(stdout).toContain(
-      "advisory: .github/repo-platform-manifest.json does not list 'CONTRIBUTING.md'",
-    );
-    expect(stdout).toContain("the path is absent from the repo too");
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain(`${MANIFEST} does not list '.yamllint'`);
+    expect(stderr).toContain("the entry was deleted by hand");
   });
 
   // Absence and provenance are STRICT: every build ships the manifest and
   // the stamper always writes the recorded _commit, so a missing manifest,
   // a stamp differing from the recorded value, and a deleted roster entry
-  // whose file still exists are errors on every render.
+  // (file present or not) are errors on every render.
   test("a deleted roster entry whose file still exists is an error", () => {
     // THE deletion attack: drop ci.yml's entry, edit the file under its
     // header - without strict absence this would ride an advisory.
@@ -1400,16 +1539,17 @@ describe("ownership-manifest byte parity", () => {
     expect(stdout).toContain("its provenance stamp is unusable (error above)");
   });
 
+  // PyYAML (copier's writer) dumps shas shaped digits-e-digits UNQUOTED
+  // (its float pattern needs a dot or signed exponent); the yaml core schema
+  // reads them as a float. A typed read turned such build shas into a false
+  // tampering report; the failsafe re-read keeps them strings.
+  const EXPONENT_COMMIT = `95e1875${"0".repeat(33)}`;
   test("an exponent-shaped build sha reads as a string, not a YAML float", () => {
-    // PyYAML (copier's writer) dumps shas like 95e1875 UNQUOTED (its float
-    // pattern needs a dot or signed exponent); the yaml core schema reads
-    // digits-e-digits as Infinity. A typed read turned ~2% of build shas
-    // into a false tampering report; the failsafe re-read keeps them
-    // strings, so a render whose auto-stamped manifest carries the same
-    // sha as its self-entry commit passes clean (no "stamped provenance"
-    // mismatch, no missing-_commit text, nothing else).
+    // A render whose auto-stamped manifest carries the same sha as its
+    // self-entry commit passes clean (no "stamped provenance" mismatch, no
+    // missing-_commit text, nothing else).
     const { exitCode, stderr } = runValidator({
-      ".github/.copier-answers.yml": `${MANAGED_HEADER}_commit: 95e1875\n_src_path: gh:Vivswan/repo-platform\ngithub_username: Vivswan\n`,
+      ".github/.copier-answers.yml": `${MANAGED_HEADER}_commit: ${EXPONENT_COMMIT}\n_src_path: gh:Vivswan/repo-platform\ngithub_username: Vivswan\n`,
     });
     expect(stderr).toBe("");
     expect(exitCode).toBe(0);
@@ -1418,10 +1558,10 @@ describe("ownership-manifest byte parity", () => {
   test("the exponent-shaped sha still feeds the provenance check (positive oracle)", () => {
     // The absence assertions above would also pass if provenance checking
     // silently stopped running. Same bare-exponent _commit, mismatched
-    // stamp: the error must fire AND quote 95e1875 as the recorded value,
+    // stamp: the error must fire AND quote the sha as the recorded value,
     // proving the failsafe read returned the string and the check ran.
     const mismatched = runValidator({
-      ".github/.copier-answers.yml": `${MANAGED_HEADER}_commit: 95e1875\n_src_path: gh:Vivswan/repo-platform\ngithub_username: Vivswan\n`,
+      ".github/.copier-answers.yml": `${MANAGED_HEADER}_commit: ${EXPONENT_COMMIT}\n_src_path: gh:Vivswan/repo-platform\ngithub_username: Vivswan\n`,
       [MANIFEST]: manifestOf({
         [MANIFEST]: '{"class": "managed", "hash": null, "commit": "zzz9999"}',
       }),
@@ -1429,29 +1569,32 @@ describe("ownership-manifest byte parity", () => {
     expect(mismatched.exitCode).toBe(1);
     expect(mismatched.stderr).toContain("stamped provenance");
     expect(mismatched.stderr).toContain(
-      "(self-entry commit 'zzz9999') does not match the recorded render 95e1875",
+      `(self-entry commit 'zzz9999') does not match the recorded render ${EXPONENT_COMMIT}`,
     );
   });
 
-  test("a key-deleted _commit against a non-null stamp is an error", () => {
-    // The stamper always writes the recorded _commit, so a stamp with no
-    // recorded counterpart is the same tamper as a differing value.
-    const keyDeleted = runValidator({
-      ".github/.copier-answers.yml": `${MANAGED_HEADER}_src_path: gh:Vivswan/repo-platform\ngithub_username: Vivswan\n`,
-      [MANIFEST]: manifestOf({
-        [MANIFEST]: '{"class": "managed", "hash": null, "commit": "0.0.0.post5.dev0+abc1234"}',
-      }),
+  test("with no recorded _commit, unlisted roster paths are advisories naming that gap", () => {
+    // The registration check owns the missing-_commit error; here nothing
+    // can be compared, so absence takes the caveat instead of a second
+    // error per path.
+    const entries = { ...stampedBaseline() } as Record<string, string>;
+    delete entries[".yamllint"];
+    const { exitCode, stdout, stderr } = runValidator({
+      ".github/.copier-answers.yml": ANSWERS().replace(`_commit: ${COMMIT}\n`, ""),
+      [MANIFEST]: manifestOf(entries),
     });
-    expect(keyDeleted.exitCode).toBe(1);
-    expect(keyDeleted.stderr).toContain("no _commit in .github/.copier-answers.yml");
+    expect(exitCode).toBe(1);
+    expect(stderr).not.toContain("stamped provenance");
+    expect(stderr).not.toContain("does not list '.yamllint'");
+    expect(stdout).toContain(
+      `advisory: ${MANIFEST} does not list '.yamllint', which this validator's ownership tables declare - the render records no _commit to compare against (the registration check's error)`,
+    );
   });
 
   // One condition judges a roster-covered entry whose render condition is
   // off (the path is covered by SOME render, not this one): such an entry
   // cannot come from the template, so it is manifest drift.
-  const PRIVATE_ANSWERS =
-    `${MANAGED_HEADER}_commit: 0.0.0.post5.dev0+abc1234\n_src_path: gh:Vivswan/repo-platform\n` +
-    "github_username: Vivswan\nprivate: true\n";
+  const PRIVATE_ANSWERS = ANSWERS("private: true\n");
   test.each<{ reason: string; path: string; tree: Record<string, string> }>([
     {
       reason: "a public-only file (CONTRIBUTING.md) listed on a private render",
@@ -1522,10 +1665,7 @@ describe("ownership-manifest byte parity", () => {
       "LICENSE.md": `${B}\n# License\n${E}\n`,
       ".github/SECURITY.md": `${B}\n# Security\n${E}\n`,
       "AGENTS.md": `${B}\n# AGENTS.md\n${E}\n`,
-      // Frontmatter must open the file for GitHub, so the managed header
-      // rides an HTML comment inside the header window.
-      ".github/instructions/review.instructions.md":
-        '---\napplyTo: "**"\n---\n<!-- This file is managed by Vivswan/repo-platform. -->\n# Review\n',
+      ...AGENTS_SIDE_FILES,
     });
     expect(stderr).toBe("");
     expect(exitCode).toBe(0);
@@ -1755,6 +1895,16 @@ describe("ownership-manifest byte parity", () => {
     expect(stderr).toContain("docs/pinned.md: content does");
   });
 
+  // The settings-sync module's one roster path, so a settings-sync fixture
+  // lists every roster path.
+  const SETTINGS_SYNC_WORKFLOW = {
+    ".github/workflows/settings-sync.yml": `${MANAGED_HEADER}name: settings\non: [push]\n`,
+  };
+  const SETTINGS_SYNC_ENTRY = {
+    ".github/workflows/settings-sync.yml": managedEntry(
+      SETTINGS_SYNC_WORKFLOW[".github/workflows/settings-sync.yml"],
+    ),
+  };
   test("a legacy mergeable entry is an error naming the retirement", () => {
     // Old renders' manifests still class settings.yml mergeable; the class
     // is retired (the file is a starter now), and a manifest claiming it
@@ -1768,7 +1918,8 @@ describe("ownership-manifest byte parity", () => {
         "modules: [uv]",
         "modules: [uv, settings-sync]",
       ),
-      [MANIFEST]: manifestOf(entries),
+      ...SETTINGS_SYNC_WORKFLOW,
+      [MANIFEST]: manifestOf({ ...entries, ...SETTINGS_SYNC_ENTRY }),
       ".github/settings.yml": "repository:\n  has_issues: true\n",
     });
     expect(exitCode).toBe(1);
@@ -1786,7 +1937,8 @@ describe("ownership-manifest byte parity", () => {
     };
     const { exitCode, stdout, stderr } = runValidator({
       ".repo-platform.yml": registration,
-      [MANIFEST]: manifestOf(entries),
+      ...SETTINGS_SYNC_WORKFLOW,
+      [MANIFEST]: manifestOf({ ...entries, ...SETTINGS_SYNC_ENTRY }),
       ".github/settings.yml": "repository:\n  has_issues: true\n  custom_addition: true\n",
     });
     expect(stderr).toBe("");
@@ -1916,12 +2068,20 @@ describe("ownership-manifest byte parity", () => {
       "modules: [uv, agents]",
     );
     const agentsMd = `${B}\n# AGENTS.md\n${E}\n`;
-    const tree = { ...BASELINE, ".repo-platform.yml": registration, "AGENTS.md": agentsMd };
+    const review = AGENTS_SIDE_FILES[".github/instructions/review.instructions.md"];
+    const tree = {
+      ...BASELINE,
+      ".repo-platform.yml": registration,
+      "AGENTS.md": agentsMd,
+      ".github/instructions/review.instructions.md": review,
+    };
     for (const [rel, content] of Object.entries(tree)) {
       mkdirSync(join(root, dirname(rel)), { recursive: true });
       writeFileSync(join(root, rel), content);
     }
     symlinkSync("AGENTS.md", join(root, "CLAUDE.md"));
+    symlinkSync("../AGENTS.md", join(root, ".github/agents.md"));
+    symlinkSync("../AGENTS.md", join(root, ".github/copilot-instructions.md"));
     writeFileSync(
       join(root, MANIFEST),
       manifestOf({
@@ -1929,6 +2089,9 @@ describe("ownership-manifest byte parity", () => {
         "AGENTS.md":
           `{"class": "split", "grammar": "managed-region", "begin": ${JSON.stringify(B)}, ` +
           `"end": ${JSON.stringify(E)}, "hash": "${sha(agentsMd)}"}`,
+        ".github/instructions/review.instructions.md": managedEntry(review),
+        ".github/agents.md": managedEntry("../AGENTS.md"),
+        ".github/copilot-instructions.md": managedEntry("../AGENTS.md"),
         "CLAUDE.md": claudeEntry,
       }),
     );
@@ -1957,13 +2120,16 @@ describe("ownership-manifest byte parity", () => {
     // .bun-version carries no header; the class-only roster entry is what
     // keeps its manifest class honest.
     const registration = BASELINE[".repo-platform.yml"].replace("modules: [uv]", "modules: [bun]");
+    const lockfileWorkflow = `${MANAGED_HEADER}name: x\non: [push]\n`;
     const entries = {
       ...stampedBaseline(),
       ".bun-version": '{"class": "starter"}',
+      ".github/workflows/dependabot-bun-lockfile.yml": managedEntry(lockfileWorkflow),
     };
     const { exitCode, stderr } = runValidator({
       ".repo-platform.yml": registration,
       ".bun-version": "1.4.0\n",
+      ".github/workflows/dependabot-bun-lockfile.yml": lockfileWorkflow,
       [MANIFEST]: manifestOf(entries),
     });
     expect(exitCode).toBe(1);

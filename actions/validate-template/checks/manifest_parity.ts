@@ -14,9 +14,17 @@ function sha256(data: Buffer): string {
  *  entry's recorded sha256 matches the file on disk (split files: the
  *  managed region alone, from the entry's BEGIN marker line through its
  *  END marker line). Drift means the file changed since the last stamp;
- *  the next sync replaces it. A listed file missing from the repo is an
- *  advisory (the withheld-workflows push path leaves those legitimately;
- *  the next sync restores the rest). The roster cross-check
+ *  the next sync replaces it. A listed file missing from the repo is
+ *  deletion damage and errors, with one exception the sync itself
+ *  produces: a workflow file it could not deliver (the push token lacks
+ *  the Workflows scope), whose entry it restamps hash-null while the file
+ *  stays absent. That state - a hash-null .github/workflows entry with no
+ *  file - is an advisory naming the withheld cause; the same state on any
+ *  other path is a deleted managed file. The stamper nulls the hash of
+ *  ANY absent file, so a hand-deleted workflow the template did not change
+ *  between syncs reaches the advisory too once the sync restamps: a
+ *  residual the path key confines to .github/workflows/, until the sync
+ *  records withheld paths explicitly. The roster cross-check
  *  (manifest_shape) has already judged the class metadata of every roster
  *  path; this check reads each entry's fields as they stand. */
 export function checkManifestParity(ctx: Context): Finding[] {
@@ -156,16 +164,26 @@ export function checkManifestParity(ctx: Context): Finding[] {
       stat = null;
     }
     if (stat === null) {
-      // A missing managed file is damage the next sync heals - and the
-      // warn-and-withhold push path legitimately delivers a manifest listing
-      // a workflow file the token could not create. Advisory, not error.
-      findings.push(
-        advisory(
-          `${rel}: listed as ${entry.class} in ${MANIFEST_NAME} but missing ` +
-            "from the repo - the next template sync restores it (workflow " +
-            "files may have been withheld by a token without the Workflows scope)",
-        ),
-      );
+      if (hash === null && rel.startsWith(".github/workflows/")) {
+        findings.push(
+          advisory(
+            `${rel}: listed as ${entry.class} in ${MANIFEST_NAME} with no hash and missing ` +
+              "from the repo - the state a withheld added workflow leaves (the push token " +
+              "lacked the Workflows scope), or a hand-deleted workflow the template did not " +
+              "change; grant Workflows read/write to the sync token and re-run the sync to " +
+              "deliver a withheld workflow, or restore a deleted one from git history (or run " +
+              "a recovery sync, recover=recopy)",
+          ),
+        );
+      } else {
+        findings.push(
+          error(
+            `${rel}: listed as ${entry.class} in ${MANIFEST_NAME} but missing from the ` +
+              "repo - a managed file deleted outside a sync; restore it from git history " +
+              "or run a recovery sync (recover=recopy)",
+          ),
+        );
+      }
       continue;
     }
     if (hash === null) {

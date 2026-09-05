@@ -1484,8 +1484,17 @@ describe.skipIf(!hasCopier)("preserve_local_content end-to-end (copier recopy)",
       // the wrapper's default, and both stay under the test's 300s cap
       // so a wedge dies named.
       const COPIER_TIMEOUT_MS = 270_000;
+      // copier records `_commit` from `git describe --always` on its clone
+      // of the template; the validator requires the full sha, so the
+      // renders run with the sync's core.abbrev=40.
+      const FULL_SHA_ENV = {
+        GIT_CONFIG_COUNT: "1",
+        GIT_CONFIG_KEY_0: "core.abbrev",
+        GIT_CONFIG_VALUE_0: "40",
+      };
       const run = (cmd: string[], cwd?: string, timeoutMs?: number) => {
-        const proc = boundedSpawnSync(cmd, { cwd, env: gitFreeEnv(), timeoutMs });
+        const env = cmd[0] === "copier" ? { ...gitFreeEnv(), ...FULL_SHA_ENV } : gitFreeEnv();
+        const proc = boundedSpawnSync(cmd, { cwd, env, timeoutMs });
         if (proc.exitCode !== 0) {
           throw new Error(`${cmd.join(" ")} failed:\n${proc.stdout}\n${proc.stderr}`);
         }
