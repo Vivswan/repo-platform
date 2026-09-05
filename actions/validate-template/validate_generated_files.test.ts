@@ -89,6 +89,7 @@ const MIRROR_MODULES: Record<string, MirrorEntry[]> = {
   agents: [
     { path: ".github/agents.md", kind: "class-only" },
     { path: ".github/copilot-instructions.md", kind: "class-only" },
+    { path: ".github/instructions/review.instructions.md", kind: "header" },
     { path: "AGENTS.md", kind: "region", begin: B, end: E },
     { path: "CLAUDE.md", kind: "class-only" },
   ],
@@ -1467,7 +1468,7 @@ describe("ownership-manifest byte parity", () => {
   test("a tree carrying the base marker roster passes against the mirror-stamped manifest", () => {
     // The mirror-coverage claim's teeth: this fixture carries every base
     // marker/header path the mirror declares (plus the agents module's
-    // AGENTS.md), all validated through the auto-stamped manifest - a
+    // AGENTS.md and review instructions), all validated through the auto-stamped manifest - a
     // drifted mirror entry for any of them fails the roster cross-check
     // here instead of sitting inert.
     const registration = BASELINE[".repo-platform.yml"].replace(
@@ -1487,6 +1488,10 @@ describe("ownership-manifest byte parity", () => {
       "LICENSE.md": `${B}\n# License\n${E}\n`,
       "SECURITY.md": `${B}\n# Security\n${E}\n`,
       "AGENTS.md": `${B}\n# AGENTS.md\n${E}\n`,
+      // Frontmatter must open the file for GitHub, so the managed header
+      // rides an HTML comment inside the header window.
+      ".github/instructions/review.instructions.md":
+        '---\napplyTo: "**"\n---\n<!-- This file is managed by Vivswan/repo-platform. -->\n# Review\n',
     });
     expect(stderr).toBe("");
     expect(exitCode).toBe(0);

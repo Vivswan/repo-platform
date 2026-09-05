@@ -28,6 +28,7 @@ _exclude:
   - "{% if not ('issue-templates' in modules) %}.github/ISSUE_TEMPLATE/feature_request.yml{% endif %}"
   - "{% if not ('agents' in modules) %}.github/agents.md{% endif %}"
   - "{% if not ('agents' in modules) %}.github/copilot-instructions.md{% endif %}"
+  - "{% if not ('agents' in modules) %}.github/instructions/review.instructions.md{% endif %}"
   - "{% if not ('settings-sync' in modules) %}.github/settings.yml{% endif %}"
   - "{% if not ('auto-assign' in modules) %}.github/workflows/auto-assign.yml{% endif %}"
   - "{% if not (has_toolchain) %}.github/workflows/auto-format.yml{% endif %}"
@@ -54,6 +55,7 @@ _exclude:
   - "{% if not ('release-please' in modules) %}/release-please-config.json{% endif %}"
   - "{% if not ('skills' in modules) %}/.claude-plugin{% endif %}"
   - "{% if not ('issue-templates' in modules) %}.github/ISSUE_TEMPLATE{% endif %}"
+  - "{% if not ('agents' in modules) %}.github/instructions{% endif %}"
   # END GENERATED: conditional-excludes
 
 # Repo-owned starters: generated when absent, never overwritten by template
@@ -143,7 +145,7 @@ modules:
   multiselect: true
   # BEGIN GENERATED: module-choices (scripts/generate.ts - edit module.yml manifests, not this block)
   choices:
-    agents - AGENTS.md agent instructions, agent-file symlinks, Copilot setup: agents
+    agents - AGENTS.md agent instructions, agent-file symlinks, Copilot setup and review style: agents
     bun - TypeScript/bun toolchain (gitignore, dependabot, CodeQL JS): bun
     node - JavaScript/Node.js toolchain (gitignore, npm dependabot, CodeQL JS): node
     deno - Deno toolchain (deno fmt/lint, deno dependabot, CodeQL JS): deno

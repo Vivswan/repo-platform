@@ -17,8 +17,8 @@
 //   bun scripts/render_dogfood.ts           # rewrite every generated copy
 //   bun scripts/render_dogfood.ts --check   # exit 1 listing stale copies
 
-import { lstatSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { lstatSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
 import { type JinjaVars, renderJinjaFile, resolveCondition } from "./jinja_subset.ts";
@@ -41,6 +41,10 @@ export const PAIRS: { repo: string; tpl: string }[] = [
     tpl: "templates/base/{% if not private %}CODE_OF_CONDUCT.md{% endif %}.jinja",
   },
   { repo: ".github/CODEOWNERS", tpl: "templates/base/.github/CODEOWNERS.jinja" },
+  {
+    repo: ".github/instructions/review.instructions.md",
+    tpl: "templates/agents/.github/instructions/review.instructions.md.jinja",
+  },
   {
     repo: ".github/workflows/auto-assign.yml",
     tpl: "templates/auto-assign/.github/workflows/auto-assign.yml.jinja",
@@ -436,6 +440,7 @@ function main(): number {
       unlinkSync(path);
       console.log(`removed ${repo} (its template's filename gate is false)`);
     } else {
+      mkdirSync(dirname(path), { recursive: true });
       writeFileSync(path, next);
       console.log(`rewrote ${repo} from its template twin`);
     }

@@ -304,6 +304,7 @@ const MODULE_OWNERSHIP: Record<string, OwnedFile[]> = {
   agents: [
     { path: ".github/agents.md", kind: "class-only" },
     { path: ".github/copilot-instructions.md", kind: "class-only" },
+    { path: ".github/instructions/review.instructions.md", kind: "header" },
     {
       path: "AGENTS.md",
       kind: "region",
