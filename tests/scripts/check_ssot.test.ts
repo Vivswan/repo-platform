@@ -28,6 +28,7 @@ import {
   deliveryRefTwinMismatches,
   expandCheckChain,
   extractUsesPins,
+  FETCHED_TREE_PIN_ANCHOR,
   firstDiff,
   fleetCiRenderMismatches,
   fleetWorkflowPinMismatches,
@@ -844,8 +845,8 @@ describe("actionsBunGuardMismatches", () => {
   };
   const perStepMismatch = {
     file: "actions/x/action.yml",
-    expected: `every setup-bun step carrying '${pinLine}' in its with: block`,
-    got: "a setup-bun step without the action-local pin - it resolves the CALLER repository's bun version files",
+    expected: `every setup-bun step carrying '${pinLine}' (or a clean .bun-version path under '${FETCHED_TREE_PIN_ANCHOR}', a tree the action fetched itself) in its with: block`,
+    got: "a setup-bun step pinned neither to the action-local dotfile nor to a clean path under the runner scratch root - anything else can resolve the CALLER repository's bun version files",
   };
 
   test.each([
@@ -893,6 +894,39 @@ describe("actionsBunGuardMismatches", () => {
       expect(actionsBunGuardMismatches("actions/x/action.yml", extra)).toEqual([perStepMismatch]);
     },
   );
+
+  test("an EXTRA setup-bun pinned under the runner scratch root (a tree the action fetched) is accepted", () => {
+    const fetched = `${canonical}
+    - name: Set up the fetched tree's bun
+      uses: oven-sh/setup-bun@v2
+      with:
+        bun-version-file: \${{ runner.temp }}/aligned-validator/tree/actions/validate-template/.bun-version
+`;
+    expect(actionsBunGuardMismatches("actions/x/action.yml", fetched)).toEqual([]);
+  });
+
+  // The scratch-root anchor admits only a clean dotfile path: a traversal
+  // or a nested expression could reach the caller's checkout again.
+  test.each([
+    "${{ runner.temp }}/../work/repo/.bun-version",
+    "${{ runner.temp }}/safe\\..\\..\\work\\repo/.bun-version",
+    "${{ runner.temp }}/.. /work/repo/.bun-version",
+    "${{ runner.temp }}/..../.bun-version",
+    "${{ runner.temp }}/aligned validator/.bun-version",
+    "${{ runner.temp }}/aligned/./.bun-version",
+    "${{ runner.temp }}/${{ github.workspace }}/.bun-version",
+    "${{ runner.temp }}//.bun-version",
+    "${{ runner.temp }}/aligned/package.json",
+    "${{ runner.temp }}/.bun-version-extra",
+  ])("an EXTRA setup-bun pinned at %s is refused per step", (pin) => {
+    const extra = `${canonical}
+    - name: Set up the fetched tree's bun
+      uses: oven-sh/setup-bun@v2
+      with:
+        bun-version-file: ${pin}
+`;
+    expect(actionsBunGuardMismatches("actions/x/action.yml", extra)).toEqual([perStepMismatch]);
+  });
 
   test("an action that runs bun with no setup block at all is refused for the missing block alone", () => {
     const text =

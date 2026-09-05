@@ -16,15 +16,15 @@ const REMEDY = "merge this repository's pending template sync PR";
 
 export type BuildSha = { sha: string } | { refusal: string };
 
-/** The full build sha recorded under `root`, or the one-line refusal the
- *  caller reports verbatim. */
+/** The full build sha recorded under `root`, or the one-line refusal
+ *  (no trailing period; the renderer punctuates). */
 export function recordedBuildSha(root: string): BuildSha {
   const recorded = recordedCommit(root);
   if (recorded === null) {
-    return { refusal: `.github/.copier-answers.yml records no _commit; ${REMEDY}.` };
+    return { refusal: `.github/.copier-answers.yml records no _commit; ${REMEDY}` };
   }
   if (!BUILD_SHA_RE.test(recorded)) {
-    return { refusal: `_commit '${recorded}' is not a full build sha; ${REMEDY}.` };
+    return { refusal: `_commit '${recorded}' is not a full build sha; ${REMEDY}` };
   }
   return { sha: recorded };
 }

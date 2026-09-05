@@ -3,44 +3,68 @@
 // rendered job's remaining shape (thin caller, fail-last re-raise) is
 // pinned by tests/templates/fleet_ci_shape.test.ts and the smoke harness.
 //
-// The contract under test is the three-leg split: INTEGRITY blocks
-// (managed content changed out of band, judged by the validator of the
-// template the repository was rendered from - fetched at the FULL build
-// sha its `_commit` records, never resolved from a short one), the LATEST
-// pass only warns (rules the next sync brings, never said twice), and
-// FRESHNESS only informs (behind the template is never the repo's fault).
-// The comment is posted BEFORE the job fails so a blocking verdict is
-// readable in the conversation, one comment is kept per PR rather than
-// one per push, a clean-and-fresh run leaves no new comment but does
-// clear a stale one, and every reporting or freshness failure degrades to
-// a notice instead of taking the job down.
+// The contract under test is the three-leg split: INTEGRITY blocks (one
+// verdict per run from the validator of the template the repository was
+// rendered from - fetched at the FULL build sha its `_commit` records,
+// never resolved from a short one, run on that tree's own bun; every
+// inconsistent, crashed, timed-out, or signal-killed run is `not-judged`
+// and blocks), the LATEST pass only warns (rules the next sync brings,
+// never said twice), and FRESHNESS only informs, read from the ONE
+// build-branch compare the fetch step makes. The comment is posted BEFORE
+// the job fails so a blocking verdict is readable in the conversation, one
+// comment is kept per PR rather than one per push, a clean-and-fresh run
+// leaves no new comment but does clear a stale one, and every reporting
+// failure degrades to a warning instead of taking the job down.
+//
+// Every scenario is judged WHOLE: the full rendered summary, the recorded
+// API calls, the outputs file, the verdict file. A test that ignored a
+// column could not catch a regression in it.
 
 import { describe, expect, test } from "bun:test";
 import {
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   realpathSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
+import {
+  BUN_VERSION_FILE,
+  TREE_DIR,
+  VALIDATOR_DIR,
+  VALIDATOR_SCRIPT,
+  validatorOf,
+} from "../../actions/validate-template-report/aligned_tree";
 import { recordedBuildSha } from "../../actions/validate-template-report/build_sha";
+import { type ChildExit, run } from "../../actions/validate-template-report/runtime";
+import {
+  classify,
+  type Integrity,
+  readVerdict,
+  writeVerdict,
+} from "../../actions/validate-template-report/verdict";
 import { boundedSpawnSync } from "../shared/bounded_spawn";
 
 const ACTION = join(import.meta.dir, "../../actions/validate-template-report");
 const MARKER = "<!-- repo-platform:validate-template -->";
 const SHA = "6bf545284a2f8e32d82fdc663d4b3333f8fb37bf";
-const TIP = "def5678901234def5678901234def5678901234d";
-const REMEDY = "merge this repository's pending template sync PR.";
+const REMEDY = "merge this repository's pending template sync PR";
+const RUN_URL = "https://example.invalid/run/1";
+const OPERATOR = "Vivswan/repo-platform";
 
-// Serves the gate's gh calls and records writes so a test can assert which
-// API call happened. GH_FAIL fails every call. The stub stands in for
-// `gh api --jq`, so the comment-listing fixture is already the filter's
-// OUTPUT: the bare comment id, or nothing when the marker matched none.
-// The tarball endpoint streams the fixture GH_TARBALL names.
+// Serves the gate's gh calls and records every call so a scenario can
+// assert the exact sequence. GH_FAIL fails every call before recording.
+// The stub stands in for `gh api --jq`, so each fixture is already the
+// filter's OUTPUT: the compare prints "<status> <ahead_by>", the comment
+// listing the bare comment id (or nothing when the marker matched none),
+// and the tarball endpoint streams the file GH_TARBALL names.
 const ghStub = `#!/usr/bin/env bash
 set -euo pipefail
 if [ -n "\${GH_FAIL:-}" ]; then
@@ -56,14 +80,10 @@ case "$*" in
     cat "$GH_TARBALL"
     exit 0
     ;;
-  *branches/build*) printf '%s\\n' "\${GH_TIP:-}"; exit 0 ;;
   *compare/*)
     echo "COMPARE $*" >> "$CALLS"
     if [ -n "\${GH_COMPARE_FAIL:-}" ]; then exit 1; fi
-    case "$*" in
-      *.status*) printf '%s\\n' "\${GH_COMPARE_STATUS:-ahead}" ;;
-      *) printf '%s\\n' "\${GH_AHEAD:-}" ;;
-    esac
+    printf '%s %s\\n' "\${GH_COMPARE_STATUS:-ahead}" "\${GH_AHEAD:-3}"
     exit 0
     ;;
 esac
@@ -71,13 +91,16 @@ echo "LIST" >> "$CALLS"
 cat "$GH_COMMENTS_ID"
 `;
 
-// Stands in for the build tree's validate_generated_files.ts: writes the
-// findings the test dictates and exits as told, so the aligned leg's
-// routing and verdict propagation are what the test sees.
+// Stands in for a build tree's validate_generated_files.ts: writes the
+// report pair (unless told to skip), then exits or dies as told,
+// so the judge's classification is what the test sees.
 const fakeValidator = `import { writeFileSync } from "node:fs";
-writeFileSync(process.env.FINDINGS_FILE, process.env.FAKE_FINDINGS ?? "");
-writeFileSync(process.env.ADVISORIES_FILE, "");
+if (!process.env.FAKE_SKIP_REPORT) {
+  writeFileSync(process.env.FINDINGS_FILE, process.env.FAKE_FINDINGS ?? "");
+  writeFileSync(process.env.ADVISORIES_FILE, process.env.FAKE_ADVISORIES ?? "");
+}
 console.log("validated " + process.argv[2]);
+if (process.env.FAKE_SIGNAL) process.kill(process.pid, process.env.FAKE_SIGNAL);
 process.exit(Number(process.env.FAKE_EXIT ?? "0"));
 `;
 
@@ -88,6 +111,9 @@ const read = (path: string): string => {
     return "";
   }
 };
+/** The verdict file as written, or null when the step wrote none. */
+const verdictIn = (path: string): Integrity | null =>
+  existsSync(path) ? (JSON.parse(read(path)) as Integrity) : null;
 
 function scratch(): { root: string; bin: string } {
   const root = mkdtempSync(join(tmpdir(), "validate-template-report-"));
@@ -97,41 +123,60 @@ function scratch(): { root: string; bin: string } {
   return { root, bin };
 }
 
+/** Every file under `dir` with its content, as one comparable string. */
+function snapshot(dir: string): string {
+  return readdirSync(dir, { recursive: true, withFileTypes: true })
+    .filter((entry) => entry.isFile())
+    .map((entry) => {
+      const path = join(entry.parentPath, entry.name);
+      return `${path.slice(dir.length)}\n${read(path)}`;
+    })
+    .sort()
+    .join("\n---\n");
+}
+
 function writeAnswers(root: string, answers: string | undefined): void {
   if (answers === undefined) return;
   mkdirSync(join(root, ".github"), { recursive: true });
   writeFileSync(join(root, ".github/.copier-answers.yml"), answers);
 }
 
+/** A fake validate-template action directory at `dir`. */
+function layValidator(dir: string, opts: { lockfile?: string; bunVersion?: boolean }): void {
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, VALIDATOR_SCRIPT), fakeValidator);
+  writeFileSync(join(dir, "package.json"), '{"name":"validate-template","private":true}\n');
+  if (opts.bunVersion ?? true) writeFileSync(join(dir, BUN_VERSION_FILE), "1.3.0\n");
+  if (opts.lockfile !== undefined) writeFileSync(join(dir, "bun.lock"), opts.lockfile);
+}
+
+// --- report.ts ---------------------------------------------------------------
+
 interface ReportOptions {
-  /** undefined = the validator never wrote one; "" = clean tree; else findings. */
-  findings?: string;
-  event?: string;
-  /** The id the marker search resolves to, or "" for no existing comment. */
-  existing?: string;
-  freshness?: "fresh" | "behind" | "skipped" | "";
-  /** The validator's NON-blocking stream, written to its own file. */
-  advisories?: string;
-  /** Why aligned.ts never ran the validator (its `reason` output). */
-  reason?: string;
+  /** The integrity leg's verdict; "absent" = no file, "garbage" = not a verdict. */
+  verdict?: Integrity | "absent" | "garbage";
+  /** The fetch step's compare outputs (empty = the step never got there). */
+  compare?: string;
+  aheadBy?: string;
   /** The build tip validator's pair; null = that step never wrote its findings. */
   latestFindings?: string | null;
   latestAdvisories?: string;
+  event?: string;
+  /** The id the marker search resolves to, or "" for no existing comment. */
+  existing?: string;
   env?: Record<string, string>;
 }
 
 function runReport(opts: ReportOptions = {}) {
   const { root, bin } = scratch();
-  const findingsPath = join(root, "findings.md");
-  if (opts.findings !== undefined) writeFileSync(findingsPath, opts.findings);
-  const advisoriesPath = join(root, "advisories.md");
-  writeFileSync(advisoriesPath, opts.advisories ?? "");
+  const verdictPath = join(root, "verdict.json");
+  const verdict = opts.verdict ?? { kind: "clean", advisories: "" };
+  if (verdict === "garbage") writeFileSync(verdictPath, '{"kind":"clean"}\n');
+  else if (verdict !== "absent") writeFileSync(verdictPath, `${JSON.stringify(verdict)}\n`);
   const latestFindingsPath = join(root, "latest-findings.md");
   if (opts.latestFindings !== null) writeFileSync(latestFindingsPath, opts.latestFindings ?? "");
   const latestAdvisoriesPath = join(root, "latest-advisories.md");
   writeFileSync(latestAdvisoriesPath, opts.latestAdvisories ?? "");
-  const freshnessPath = join(root, "freshness.md");
-  writeFileSync(freshnessPath, "#### Freshness\n\nbehind the build branch by 3 commit(s).\n");
   const calls = join(root, "calls.txt");
   const summary = join(root, "summary.md");
   writeFileSync(summary, "");
@@ -144,16 +189,14 @@ function runReport(opts: ReportOptions = {}) {
       GITHUB_REPOSITORY: "Vivswan/managed-repo",
       GITHUB_STEP_SUMMARY: summary,
       GH_TOKEN: "x",
-      FINDINGS: findingsPath,
-      ADVISORIES: advisoriesPath,
-      ALIGNED_REASON: opts.reason ?? "",
+      VERDICT: verdictPath,
       LATEST_FINDINGS: latestFindingsPath,
       LATEST_ADVISORIES: latestAdvisoriesPath,
+      COMPARE_STATUS: opts.compare ?? "identical",
+      AHEAD_BY: opts.aheadBy ?? "",
       EVENT_NAME: opts.event ?? "pull_request",
-      FRESHNESS: freshnessPath,
-      FRESHNESS_STATE: opts.freshness ?? "fresh",
       PR_NUMBER: "12",
-      RUN_URL: "https://example.invalid/run/1",
+      RUN_URL,
       CALLS: calls,
       GH_COMMENTS_ID: listing,
       ...opts.env,
@@ -167,288 +210,417 @@ function runReport(opts: ReportOptions = {}) {
   };
 }
 
-interface FreshnessOptions {
-  /** undefined = no .github/.copier-answers.yml at all. */
-  answers?: string;
-  env?: Record<string, string>;
-}
-
-function runFreshness(opts: FreshnessOptions = {}) {
-  const { root, bin } = scratch();
-  writeAnswers(root, opts.answers);
-  const fragment = join(root, "freshness.md");
-  const outputs = join(root, "outputs.txt");
-  writeFileSync(outputs, "");
-  const proc = boundedSpawnSync(["bun", join(ACTION, "freshness.ts")], {
-    cwd: root,
-    env: {
-      ...process.env,
-      PATH: `${bin}:${process.env.PATH}`,
-      GH_TOKEN: "x",
-      FRESHNESS: fragment,
-      GITHUB_OUTPUT: outputs,
-      CALLS: join(root, "calls.txt"),
-      GH_COMMENTS_ID: join(root, "comments.json"),
-      ...opts.env,
-    },
-  });
-  return {
-    exitCode: proc.exitCode,
-    output: proc.stdout + proc.stderr,
-    state: read(outputs).trim(),
-    fragment: read(fragment),
-  };
-}
-
-interface AlignedOptions {
-  /** undefined = no .github/.copier-answers.yml at all. */
-  answers?: string;
-  /** false = the served build tree ships no validate-template action. */
-  validator?: boolean;
-  /** A bun.lock to ship beside the fake validator (none by default). */
-  lockfile?: string;
-  /** true = gh serves bytes that are not a tarball. */
-  corrupt?: boolean;
-  /** true = a validator from an earlier run already sits in ALIGNED_DIR. */
-  stale?: boolean;
-  env?: Record<string, string>;
-}
-
-/** A build-tree tarball the gh stub serves: GitHub's shape (one top-level
- *  directory) around the fake validator. */
-function buildTarball(root: string, opts: AlignedOptions): string {
-  const TOP = "Vivswan-repo-platform-6bf5452";
-  const top = join(root, "served", TOP);
-  mkdirSync(join(top, "actions", "shared"), { recursive: true });
-  writeFileSync(join(top, "copier.yml"), "_subdirectory: template\n");
-  if (opts.validator ?? true) {
-    const dir = join(top, "actions", "validate-template");
-    mkdirSync(dir);
-    writeFileSync(join(dir, "validate_generated_files.ts"), fakeValidator);
-    writeFileSync(join(dir, "package.json"), '{"name":"validate-template","private":true}\n');
-    if (opts.lockfile !== undefined) writeFileSync(join(dir, "bun.lock"), opts.lockfile);
-  }
-  const tarball = join(root, "tree.tgz");
-  if (opts.corrupt) {
-    writeFileSync(tarball, "not a tarball\n");
-    return tarball;
-  }
-  const tar = boundedSpawnSync(["tar", "-czf", tarball, "-C", join(root, "served"), TOP]);
-  expect(tar.exitCode).toBe(0);
-  return tarball;
-}
-
-function runAligned(opts: AlignedOptions = {}) {
-  const { root, bin } = scratch();
-  const repo = join(root, "repo");
-  mkdirSync(repo);
-  writeAnswers(repo, opts.answers);
-  const tarball = buildTarball(root, opts);
-  const outputs = join(root, "outputs.txt");
-  writeFileSync(outputs, "");
-  // Pre-seeded leftovers: a run that never reaches the validator must
-  // leave no findings file, and a stale tree must not be judged by.
-  const alignedDir = join(root, "aligned");
-  const findings = join(root, "aligned-findings.md");
-  const advisories = join(root, "aligned-advisories.md");
-  writeFileSync(findings, "#### Errors (1)\n\n- stale finding from an earlier run\n");
-  writeFileSync(advisories, "#### Advisories (1)\n\n- stale advisory from an earlier run\n");
-  if (opts.stale) {
-    const staleValidator = join(alignedDir, "tree", "actions", "validate-template");
-    mkdirSync(staleValidator, { recursive: true });
-    writeFileSync(join(staleValidator, "validate_generated_files.ts"), fakeValidator);
-    writeFileSync(join(staleValidator, "package.json"), '{"name":"stale","private":true}\n');
-  }
-  const calls = join(root, "calls.txt");
-  const proc = boundedSpawnSync(["bun", join(ACTION, "aligned.ts")], {
-    cwd: repo,
-    timeoutMs: 60_000,
-    env: {
-      ...process.env,
-      PATH: `${bin}:${process.env.PATH}`,
-      GH_TOKEN: "x",
-      GH_TARBALL: tarball,
-      ALIGNED_DIR: alignedDir,
-      FINDINGS_FILE: findings,
-      ADVISORIES_FILE: advisories,
-      GITHUB_OUTPUT: outputs,
-      CALLS: calls,
-      ...opts.env,
-    },
-  });
-  return {
-    exitCode: proc.exitCode,
-    reason: read(outputs).trim(),
-    /** The gh calls made, in order: the build-branch compare, then the fetch. */
-    calls: read(calls).trim(),
-    /** null = the validator never wrote them. */
-    findings: existsSync(findings) ? read(findings) : null,
-    advisories: existsSync(advisories) ? read(advisories) : null,
-    // realpath: the script resolves its cwd, and tmpdir may be a symlink.
-    judged: (proc.stdout + proc.stderr).includes(`validated ${realpathSync(repo)}`),
-    errors: (proc.stdout + proc.stderr).match(/^::error::.*$/gm) ?? [],
-  };
-}
-
 describe("the action's reporting script", () => {
-  test("an integrity finding posts the findings and says it blocks", () => {
-    const r = runReport({ findings: "#### Errors (1)\n\n- ci.yml drifted\n" });
-    expect(r.exitCode).toBe(0);
-    expect(r.calls).toContain("POST");
-    expect(r.summary).toContain("ci.yml drifted");
-    expect(r.summary).toContain("This FAILS the check.");
-  });
+  const HEAD = `${MARKER}\n### Template check\n\n`;
+  const PASSED =
+    "#### Integrity\n\nPassed - this repository matches the state it was stamped with.";
+  const notJudged = (reason: string) =>
+    `#### Integrity\n\nNot judged: ${reason}. See the [run log](${RUN_URL}). This FAILS the check.`;
+  const findingsOf = (findings: string) =>
+    `#### Integrity\n\n${findings}\nManaged content changed outside a sync. Restore the file from git history, or run a recovery sync. This FAILS the check.`;
+  const FRESH = "#### Freshness\n\nUp to date with the build branch.";
+  const behind = (distance: string) =>
+    `#### Freshness\n\nThis repository is behind the build branch${distance}. The next sync PR updates the managed files; nothing to do here.`;
+  const notChecked = (reason: string) => `#### Freshness\n\nNot checked this run: ${reason}.`;
+  const LATEST = "#### After your next sync";
+  const upcoming = (lines: string) =>
+    `\n\n${LATEST}\n\nThe current template's validator also reports the following; the next sync PR brings these rules, and they do not fail this check.\n\n${lines}`;
+  const NO_VERDICT = "the aligned validator step wrote no verdict; see the run log";
 
-  test("a refused _commit is reported as not judged, and blocks", () => {
-    const reason = `_commit 'abc1234' is not a full build sha; ${REMEDY}`;
-    const r = runReport({ reason });
-    expect(r.exitCode).toBe(0);
-    expect(r.calls).toContain("POST");
-    expect(r.summary).toContain(`#### Integrity\n\nNot judged: ${reason} This FAILS the check.`);
-    expect(r.summary).not.toContain("exited before reporting");
-  });
+  /** The rendered body: integrity, then the optional advisories and latest
+   *  blocks, then freshness. */
+  const bodyOf = (integrity: string, freshness: string, extra = "") =>
+    `${HEAD}${integrity}${extra}\n\n${freshness}`;
+  const LIST = "LIST\n";
+  const post = (body: string) =>
+    `${LIST}POST api --method POST repos/Vivswan/managed-repo/issues/12/comments -f body=${body} --silent\n`;
+  const patch = (id: string, body: string) =>
+    `${LIST}PATCH api --method PATCH repos/Vivswan/managed-repo/issues/comments/${id} -f body=${body} --silent\n`;
+  const drift = "#### Errors (1)\n\n- ci.yml drifted";
+  const codeql = "#### Advisories (1)\n\n- consider a codeql job";
 
-  test("a clean tree that is BEHIND comments about freshness without blocking", () => {
-    const r = runReport({ findings: "", freshness: "behind" });
-    expect(r.exitCode).toBe(0);
-    expect(r.calls).toContain("POST");
-    expect(r.summary).toContain("Passed");
-    expect(r.summary).toContain("behind the build branch");
-    expect(r.summary).not.toContain("This FAILS the check.");
-    // The comment carries the stable marker so the next run finds it.
-    expect(r.summary).toContain(MARKER);
-  });
-
-  // Advisories are the validator's non-failing stream. Folding them into
-  // the integrity verdict had a clean repository reading as blocked.
-  test("advisories are reported without ever claiming to block", () => {
-    const r = runReport({
-      findings: "",
-      advisories: "#### Advisories (1)\n\n- consider a codeql job\n",
+  interface Expected {
+    body: string;
+    calls: string;
+    output?: string;
+  }
+  const scenarios: [string, ReportOptions, Expected][] = [
+    ["clean and fresh: no new comment at all", {}, { body: bodyOf(PASSED, FRESH), calls: LIST }],
+    [
+      "clean and fresh still clears a comment a previous run left behind",
+      { existing: "555" },
+      { body: bodyOf(PASSED, FRESH), calls: patch("555", bodyOf(PASSED, FRESH)) },
+    ],
+    [
+      "findings post the findings and say they block; behind names the distance",
+      {
+        verdict: { kind: "findings", findings: drift, advisories: "" },
+        compare: "ahead",
+        aheadBy: "3",
+      },
+      {
+        body: bodyOf(findingsOf(drift), behind(" by 3 commit(s)")),
+        calls: post(bodyOf(findingsOf(drift), behind(" by 3 commit(s)"))),
+      },
+    ],
+    [
+      "an existing comment is updated, never duplicated",
+      { verdict: { kind: "findings", findings: drift, advisories: "" }, existing: "77" },
+      {
+        body: bodyOf(findingsOf(drift), FRESH),
+        calls: patch("77", bodyOf(findingsOf(drift), FRESH)),
+      },
+    ],
+    [
+      "advisories are reported without ever claiming to block",
+      { verdict: { kind: "clean", advisories: codeql } },
+      {
+        body: bodyOf(PASSED, FRESH, `\n\n${codeql}`),
+        calls: post(bodyOf(PASSED, FRESH, `\n\n${codeql}`)),
+      },
+    ],
+    // A refused `_commit` never reached the compare, so freshness names
+    // the same refusal instead of claiming anything.
+    [
+      "a not-judged verdict blocks, and a compare that never ran names the refusal",
+      {
+        verdict: {
+          kind: "not-judged",
+          reason: `_commit 'abc1234' is not a full build sha; ${REMEDY}`,
+        },
+        compare: "",
+      },
+      {
+        body: bodyOf(
+          notJudged(`_commit 'abc1234' is not a full build sha; ${REMEDY}`),
+          notChecked(`_commit 'abc1234' is not a full build sha; ${REMEDY}`),
+        ),
+        calls: post(
+          bodyOf(
+            notJudged(`_commit 'abc1234' is not a full build sha; ${REMEDY}`),
+            notChecked(`_commit 'abc1234' is not a full build sha; ${REMEDY}`),
+          ),
+        ),
+      },
+    ],
+    [
+      "a diverged compare is a refusal too; freshness never renders behind from it",
+      {
+        verdict: {
+          kind: "not-judged",
+          reason: `_commit ${SHA} is not a published commit of ${OPERATOR}'s build branch (compare: diverged)`,
+        },
+        compare: "diverged",
+        aheadBy: "0",
+      },
+      {
+        body: bodyOf(
+          notJudged(
+            `_commit ${SHA} is not a published commit of ${OPERATOR}'s build branch (compare: diverged)`,
+          ),
+          notChecked(
+            `_commit ${SHA} is not a published commit of ${OPERATOR}'s build branch (compare: diverged)`,
+          ),
+        ),
+        calls: post(
+          bodyOf(
+            notJudged(
+              `_commit ${SHA} is not a published commit of ${OPERATOR}'s build branch (compare: diverged)`,
+            ),
+            notChecked(
+              `_commit ${SHA} is not a published commit of ${OPERATOR}'s build branch (compare: diverged)`,
+            ),
+          ),
+        ),
+      },
+    ],
+    // The compare passed, the judge did not: freshness still has its answer.
+    [
+      "a not-judged verdict after a good compare still reports freshness",
+      {
+        verdict: { kind: "not-judged", reason: "the validator died on SIGKILL" },
+        compare: "ahead",
+        aheadBy: "3",
+      },
+      {
+        body: bodyOf(notJudged("the validator died on SIGKILL"), behind(" by 3 commit(s)")),
+        calls: post(bodyOf(notJudged("the validator died on SIGKILL"), behind(" by 3 commit(s)"))),
+      },
+    ],
+    // No verdict is never a pass: a judge step that crashed before writing
+    // (or a file that is not a verdict) blocks with a reason.
+    [
+      "an absent verdict file blocks as not judged",
+      { verdict: "absent" },
+      {
+        body: bodyOf(notJudged(NO_VERDICT), FRESH),
+        calls: post(bodyOf(notJudged(NO_VERDICT), FRESH)),
+      },
+    ],
+    [
+      "a verdict file that is not a verdict blocks the same way",
+      { verdict: "garbage" },
+      {
+        body: bodyOf(notJudged(NO_VERDICT), FRESH),
+        calls: post(bodyOf(notJudged(NO_VERDICT), FRESH)),
+      },
+    ],
+    [
+      "behind without a distance still says behind",
+      { compare: "ahead", aheadBy: "" },
+      { body: bodyOf(PASSED, behind("")), calls: post(bodyOf(PASSED, behind(""))) },
+    ],
+    [
+      "a compare the fetch step could not make on a clean verdict is named, not guessed",
+      { compare: "error" },
+      {
+        body: bodyOf(PASSED, notChecked("the build branch compare reported `error`")),
+        calls: LIST,
+      },
+    ],
+    // The build tip's validator knows rules the repository's pending sync
+    // has not delivered; they are warnings on a passing check, and a line
+    // the aligned validator already reported is not repeated under them.
+    [
+      "the latest validator's findings warn under their own heading, deduplicated",
+      {
+        verdict: { kind: "findings", findings: drift, advisories: codeql },
+        latestFindings:
+          "#### Errors (2)\n\n- ci.yml drifted\n- .github/SECURITY.md is missing - the template always generates it\n",
+        latestAdvisories:
+          "#### Advisories (2)\n\n- consider a codeql job\n- pin actions/setup-node\n",
+      },
+      {
+        body: bodyOf(
+          findingsOf(drift),
+          FRESH,
+          `\n\n${codeql}${upcoming("- .github/SECURITY.md is missing - the template always generates it\n- pin actions/setup-node")}`,
+        ),
+        calls: post(
+          bodyOf(
+            findingsOf(drift),
+            FRESH,
+            `\n\n${codeql}${upcoming("- .github/SECURITY.md is missing - the template always generates it\n- pin actions/setup-node")}`,
+          ),
+        ),
+      },
+    ],
+    [
+      "latest-only findings on a clean tree warn, comment, and still pass",
+      { latestFindings: "#### Errors (1)\n\n- .github/SECURITY.md is missing\n" },
+      {
+        body: bodyOf(PASSED, FRESH, upcoming("- .github/SECURITY.md is missing")),
+        calls: post(bodyOf(PASSED, FRESH, upcoming("- .github/SECURITY.md is missing"))),
+      },
+    ],
+    [
+      "a latest pass that only echoes the aligned findings adds no section",
+      {
+        verdict: { kind: "findings", findings: drift, advisories: "" },
+        latestFindings: `${drift}\n`,
+      },
+      { body: bodyOf(findingsOf(drift), FRESH), calls: post(bodyOf(findingsOf(drift), FRESH)) },
+    ],
+    // Absent is not empty: a latest step that never wrote its findings is a
+    // setup failure, said as a warning on a check it cannot fail.
+    [
+      "a latest pass that never reported says so without blocking",
+      { latestFindings: null },
+      {
+        body: bodyOf(
+          PASSED,
+          FRESH,
+          `\n\n${LATEST}\n\nThe current template's validator exited before reporting. See the [run log](${RUN_URL}).`,
+        ),
+        calls: post(
+          bodyOf(
+            PASSED,
+            FRESH,
+            `\n\n${LATEST}\n\nThe current template's validator exited before reporting. See the [run log](${RUN_URL}).`,
+          ),
+        ),
+      },
+    ],
+    [
+      "a push writes the summary and never touches the comments API",
+      { compare: "ahead", aheadBy: "3", event: "push" },
+      { body: bodyOf(PASSED, behind(" by 3 commit(s)")), calls: "" },
+    ],
+    [
+      "a comments API failure degrades to a warning, never failing the step",
+      { verdict: { kind: "findings", findings: drift, advisories: "" }, env: { GH_FAIL: "1" } },
+      {
+        body: bodyOf(findingsOf(drift), FRESH),
+        calls: "",
+        output:
+          "::warning::could not list PR comments; the findings are in the job summary instead.\n",
+      },
+    ],
+  ];
+  test.each(scenarios)("%s", (_name, opts, expected) => {
+    expect(runReport(opts)).toEqual({
+      exitCode: 0,
+      output: expected.output ?? "",
+      calls: expected.calls,
+      summary: `${expected.body}\n`,
     });
-    expect(r.exitCode).toBe(0);
-    expect(r.summary).toContain("consider a codeql job");
-    expect(r.summary).toContain("Passed");
-    expect(r.summary).not.toContain("This FAILS the check.");
-    // Worth a comment, since there is something to say.
-    expect(r.calls).toContain("POST");
-  });
-
-  // The build tip's validator knows rules the repository's pending sync
-  // has not delivered; they are warnings on a passing check, and a line
-  // the aligned validator already reported is not repeated under them.
-  test("the latest validator's findings warn under their own heading, deduplicated", () => {
-    const r = runReport({
-      findings: "#### Errors (1)\n\n- ci.yml drifted\n",
-      advisories: "#### Advisories (1)\n\n- consider a codeql job\n",
-      latestFindings:
-        "#### Errors (2)\n\n- ci.yml drifted\n- .github/SECURITY.md is missing - the template always generates it\n",
-      latestAdvisories:
-        "#### Advisories (2)\n\n- consider a codeql job\n- pin actions/setup-node\n",
-    });
-    expect(r.exitCode).toBe(0);
-    expect(r.summary).toContain(
-      "#### After your next sync\n\nThe current template's validator also reports the following; the next sync PR brings these rules, and they do not fail this check.\n\n- .github/SECURITY.md is missing - the template always generates it\n- pin actions/setup-node\n\n#### Freshness",
-    );
-    // Said once, in the integrity section, not again below.
-    expect(r.summary.match(/ci\.yml drifted/g)).toHaveLength(1);
-    expect(r.summary.match(/consider a codeql job/g)).toHaveLength(1);
-  });
-
-  test("latest-only findings on a clean tree warn, comment, and still pass", () => {
-    const r = runReport({
-      findings: "",
-      latestFindings: "#### Errors (1)\n\n- .github/SECURITY.md is missing\n",
-    });
-    expect(r.exitCode).toBe(0);
-    expect(r.summary).toContain("Passed");
-    expect(r.summary).toContain("#### After your next sync");
-    expect(r.summary).toContain("- .github/SECURITY.md is missing");
-    expect(r.summary).not.toContain("This FAILS the check.");
-    expect(r.calls).toContain("POST");
-  });
-
-  test("a latest pass with nothing new adds no section and no comment", () => {
-    const echoed = "#### Errors (1)\n\n- ci.yml drifted\n";
-    const same = runReport({ findings: echoed, latestFindings: echoed });
-    expect(same.summary).not.toContain("After your next sync");
-    const clean = runReport({ findings: "", latestFindings: "" });
-    expect(clean.exitCode).toBe(0);
-    expect(clean.summary).not.toContain("After your next sync");
-    expect(clean.calls).not.toContain("POST");
-  });
-
-  // Absent is not empty: a latest step that never wrote its findings is a
-  // setup failure, said as a warning on a check it cannot fail.
-  test("a latest pass that never reported says so without blocking", () => {
-    const r = runReport({ findings: "", latestFindings: null });
-    expect(r.exitCode).toBe(0);
-    expect(r.summary).toContain(
-      "#### After your next sync\n\nThe current template's validator exited before reporting. See the [run log](https://example.invalid/run/1).",
-    );
-    expect(r.summary).toContain("Passed");
-    expect(r.summary).not.toContain("This FAILS the check.");
-    expect(r.calls).toContain("POST");
-  });
-
-  test("clean and fresh: no new comment at all", () => {
-    const r = runReport({ findings: "", freshness: "fresh" });
-    expect(r.exitCode).toBe(0);
-    expect(r.calls).not.toContain("POST");
-    expect(r.calls).not.toContain("PATCH");
-    expect(r.summary).toContain("Up to date with the build branch.");
-  });
-
-  // The PATCH must aim at the comment the marker search found: the id is
-  // pinned up to the next argument, so a wrong or padded id is red.
-  const patchOf = (id: string) =>
-    new RegExp(
-      `^PATCH api --method PATCH repos/Vivswan/managed-repo/issues/comments/${id} -f body=`,
-      "m",
-    );
-
-  test("clean and fresh still clears a comment a previous run left behind", () => {
-    const r = runReport({ findings: "", freshness: "fresh", existing: "555" });
-    expect(r.exitCode).toBe(0);
-    expect(r.calls).toMatch(patchOf("555"));
-    expect(r.calls).not.toContain("POST");
-  });
-
-  test("an existing comment is updated, never duplicated", () => {
-    const r = runReport({ findings: "#### Errors (1)\n\n- drift\n", existing: "77" });
-    expect(r.exitCode).toBe(0);
-    expect(r.calls).toMatch(patchOf("77"));
-    expect(r.calls).not.toContain("POST");
-  });
-
-  test("a skipped freshness check says so instead of claiming up to date", () => {
-    const r = runReport({ findings: "", freshness: "skipped" });
-    expect(r.exitCode).toBe(0);
-    expect(r.summary).toContain("Not checked this run");
-    expect(r.summary).not.toContain("Up to date");
-  });
-
-  test("a push writes the summary and never touches the comments API", () => {
-    const r = runReport({ findings: "", freshness: "behind", event: "push" });
-    expect(r.exitCode).toBe(0);
-    expect(r.calls).toBe("");
-    expect(r.summary).toContain("behind the build branch");
-  });
-
-  test("a missing findings file reports that the validator never ran", () => {
-    const r = runReport({});
-    expect(r.exitCode).toBe(0);
-    expect(r.summary).toContain("exited before reporting");
-    expect(r.summary).not.toContain("Passed");
-  });
-
-  test("a comments API failure degrades to a warning, never failing the step", () => {
-    const r = runReport({ findings: "#### Errors (1)\n\n- drift\n", env: { GH_FAIL: "1" } });
-    expect(r.exitCode).toBe(0);
-    expect(r.output).toContain("::warning::");
-    expect(r.summary).toContain("drift");
   });
 });
+
+// --- verdict.ts and runtime.run ------------------------------------------------
+
+describe("the integrity verdict", () => {
+  // A "/dev/null" entry points the report path at the device itself; a
+  // "@link" entry makes it a symlink to an empty regular file elsewhere.
+  const files = (root: string, findings?: string, advisories?: string) => {
+    const pathOf = (name: string, content?: string): string => {
+      if (content === "/dev/null") return content;
+      const path = join(root, name);
+      if (content === "@link") {
+        writeFileSync(`${path}.target`, "");
+        symlinkSync(`${path}.target`, path);
+      } else if (content !== undefined) {
+        writeFileSync(path, content);
+      }
+      return path;
+    };
+    return { findings: pathOf("f.md", findings), advisories: pathOf("a.md", advisories) };
+  };
+  const exited = (code: number): ChildExit => ({ kind: "exited", code });
+  // Every way the child's exit and its report pair can disagree is
+  // not-judged; only the two consistent pairs are verdicts.
+  const cases: [string, ChildExit, [string?, string?], Integrity][] = [
+    [
+      "exit 0 with an empty findings file is clean",
+      exited(0),
+      ["", ""],
+      { kind: "clean", advisories: "" },
+    ],
+    [
+      "exit 0 carries the advisories along",
+      exited(0),
+      ["", "#### Advisories (1)\n\n- x\n"],
+      { kind: "clean", advisories: "#### Advisories (1)\n\n- x" },
+    ],
+    [
+      "exit 1 with findings is the findings verdict",
+      exited(1),
+      ["#### Errors (1)\n\n- drift\n", ""],
+      { kind: "findings", findings: "#### Errors (1)\n\n- drift", advisories: "" },
+    ],
+    [
+      "exit 1 with an EMPTY findings file is not a pass",
+      exited(1),
+      ["", ""],
+      { kind: "not-judged", reason: "the validator exited 1 without reporting a finding" },
+    ],
+    [
+      "exit 0 with findings is not a pass either",
+      exited(0),
+      ["#### Errors (1)\n\n- drift\n", ""],
+      { kind: "not-judged", reason: "the validator exited 0 yet reported findings" },
+    ],
+    [
+      "exit 0 with no report files is a crash before reporting",
+      exited(0),
+      [undefined, undefined],
+      { kind: "not-judged", reason: "the validator exited 0 before reporting" },
+    ],
+    [
+      "exit 2 with only the findings file written is still before reporting",
+      exited(2),
+      ["", undefined],
+      { kind: "not-judged", reason: "the validator exited 2 before reporting" },
+    ],
+    // Not a regular file: a device or a planted link is no report at all.
+    ...(["/dev/null", "@link"] as const).map(
+      (shape): [string, ChildExit, [string?, string?], Integrity] => [
+        `exit 0 with report paths that are ${shape} is before reporting`,
+        exited(0),
+        [shape, shape],
+        { kind: "not-judged", reason: "the validator exited 0 before reporting" },
+      ],
+    ),
+    [
+      "a timeout names the deadline, whatever the files say",
+      { kind: "timed-out" },
+      ["", ""],
+      { kind: "not-judged", reason: "the validator ran past its 300s deadline" },
+    ],
+    [
+      "a signal death names the signal, whatever the files say",
+      { kind: "signaled", signal: "SIGKILL" },
+      ["", ""],
+      { kind: "not-judged", reason: "the validator died on SIGKILL" },
+    ],
+  ];
+  test.each(cases)("%s", (_name, exit, [findings, advisories], expected) => {
+    const root = mkdtempSync(join(tmpdir(), "verdict-"));
+    expect(classify(exit, 300_000, files(root, findings, advisories))).toEqual(expected);
+  });
+
+  test("readVerdict rejects anything that is not a whole verdict", () => {
+    const root = mkdtempSync(join(tmpdir(), "verdict-"));
+    const none = {
+      kind: "not-judged",
+      reason: "the aligned validator step wrote no verdict; see the run log",
+    };
+    const path = join(root, "v.json");
+    expect(readVerdict(path)).toEqual(none);
+    for (const text of [
+      "",
+      "nope",
+      "[]",
+      '{"kind":"clean"}',
+      '{"kind":"findings","findings":"x"}',
+      '{"kind":"not-judged"}',
+      '{"kind":"passed","advisories":""}',
+      // Contradictions: a clean verdict carrying findings, a findings
+      // verdict without any, a not-judged one without a reason.
+      '{"kind":"clean","advisories":"","findings":"drift"}',
+      '{"kind":"findings","findings":"","advisories":""}',
+      '{"kind":"not-judged","reason":""}',
+      '{"kind":"not-judged","reason":"x","advisories":""}',
+      // Not writeVerdict's own bytes: JSON.parse resolves a duplicate key
+      // to the last one, reorders nothing, and ignores a missing newline.
+      '{"kind":"not-judged","kind":"clean","advisories":""}\n',
+      '{"advisories":"","kind":"clean"}\n',
+      '{"kind":"clean","advisories":""}',
+    ]) {
+      writeFileSync(path, text);
+      expect(readVerdict(path)).toEqual(none);
+    }
+    writeFileSync(path, '{"kind":"findings","findings":"f","advisories":"a"}\n');
+    expect(readVerdict(path)).toEqual({ kind: "findings", findings: "f", advisories: "a" });
+    // A writer's construction order never leaks into the bytes.
+    for (const verdict of [
+      { advisories: "a", findings: "f", kind: "findings" },
+      { advisories: "", kind: "clean" },
+      { reason: "r", kind: "not-judged" },
+    ] as Integrity[]) {
+      writeVerdict(path, verdict);
+      expect(readVerdict(path)).toEqual(verdict);
+    }
+  });
+
+  // run() must keep the three ways a child ends apart: the classifier
+  // above reads them, and a timeout folded into "exit 1" would render as
+  // an exit the validator never made.
+  test.each([
+    ["a normal exit", ["sh", "-c", "exit 3"], 5_000, { kind: "exited", code: 3 }],
+    ["a deadline", ["sleep", "5"], 200, { kind: "timed-out" }],
+    [
+      "a signal death",
+      ["bun", "-e", "process.kill(process.pid, 'SIGKILL')"],
+      5_000,
+      { kind: "signaled", signal: "SIGKILL" },
+    ],
+  ])("run() reports %s as itself", (_name, command, timeoutMs, expected) => {
+    expect(run(command, { timeoutMs })).toEqual(expected);
+  });
+});
+
+// --- build_sha.ts ------------------------------------------------------------
 
 describe("the recorded build sha", () => {
   // Read the way the stamp hook reads it (quoted or bare), then accepted
@@ -499,65 +671,138 @@ describe("the recorded build sha", () => {
   });
 });
 
-describe("the action's aligned validator script", () => {
-  // Judged whole: exit code, the `reason` output (only when the validator
-  // never ran), the gh calls made (the exact build-branch compare, then
-  // the fetch at the recorded sha), the findings file the validator wrote
-  // (null when it never ran - the harness pre-seeds a stale one, so null
-  // also proves the clearing), and whether the fake validator judged the
-  // repository at all.
-  const compared = `COMPARE api repos/Vivswan/repo-platform/compare/${SHA}...build --jq .status`;
-  const fetched = `${compared}\nTARBALL api repos/Vivswan/repo-platform/tarball/${SHA}`;
-  const refused = (reason: string, calls = "") => ({
+// --- fetch_aligned.ts --------------------------------------------------------
+
+interface FetchOptions {
+  /** undefined = no .github/.copier-answers.yml at all. */
+  answers?: string;
+  /** false = the served build tree ships no validate-template action. */
+  validator?: boolean;
+  /** false = the served validator ships no .bun-version. */
+  bunVersion?: boolean;
+  /** true = gh serves bytes that are not a tarball. */
+  corrupt?: boolean;
+  /** true = a tree and a verdict from an earlier run already sit in place. */
+  stale?: boolean;
+  /** true = ALIGNED_DIR is a symlink into another directory (a planted
+   *  link must be replaced, never written through). */
+  symlinked?: boolean;
+  env?: Record<string, string>;
+}
+
+/** A build-tree tarball the gh stub serves: GitHub's shape (one top-level
+ *  directory) around the fake validator. */
+function buildTarball(root: string, opts: FetchOptions): string {
+  const TOP = "Vivswan-repo-platform-6bf5452";
+  const top = join(root, "served", TOP);
+  mkdirSync(join(top, "actions", "shared"), { recursive: true });
+  writeFileSync(join(top, "copier.yml"), "_subdirectory: template\n");
+  if (opts.validator ?? true) {
+    layValidator(join(top, VALIDATOR_DIR), { bunVersion: opts.bunVersion });
+  }
+  const tarball = join(root, "tree.tgz");
+  if (opts.corrupt) {
+    writeFileSync(tarball, "not a tarball\n");
+    return tarball;
+  }
+  const tar = boundedSpawnSync(["tar", "-czf", tarball, "-C", join(root, "served"), TOP]);
+  expect(tar.exitCode).toBe(0);
+  return tarball;
+}
+
+function runFetch(opts: FetchOptions = {}) {
+  const { root, bin } = scratch();
+  const repo = join(root, "repo");
+  mkdirSync(repo);
+  writeAnswers(repo, opts.answers);
+  const tarball = buildTarball(root, opts);
+  const alignedDir = join(root, "aligned");
+  const verdict = join(root, "verdict.json");
+  if (opts.stale) {
+    layValidator(validatorOf(alignedDir), {});
+    writeFileSync(verdict, '{"kind":"clean","advisories":""}\n');
+  }
+  // A planted link's target: a validator tree with content of its own, so
+  // a write through the link would change what snapshot() sees.
+  const elsewhere = join(root, "elsewhere");
+  let planted = "";
+  if (opts.symlinked) {
+    layValidator(validatorOf(elsewhere), {});
+    writeFileSync(join(validatorOf(elsewhere), VALIDATOR_SCRIPT), "// planted, not fetched\n");
+    planted = snapshot(elsewhere);
+    symlinkSync(elsewhere, alignedDir);
+  }
+  const outputs = join(root, "outputs.txt");
+  writeFileSync(outputs, "");
+  const calls = join(root, "calls.txt");
+  const proc = boundedSpawnSync(["bun", join(ACTION, "fetch_aligned.ts")], {
+    cwd: repo,
+    timeoutMs: 60_000,
+    env: {
+      ...process.env,
+      PATH: `${bin}:${process.env.PATH}`,
+      GH_TOKEN: "x",
+      GH_TARBALL: tarball,
+      ALIGNED_DIR: alignedDir,
+      VERDICT_FILE: verdict,
+      GITHUB_OUTPUT: outputs,
+      CALLS: calls,
+      ...opts.env,
+    },
+  });
+  return {
+    exitCode: proc.exitCode,
+    outputs: read(outputs),
+    /** The gh calls made, in order: the build-branch compare, then the fetch. */
+    calls: read(calls).trim(),
+    /** null = no refusal was written (the judge step decides). */
+    verdict: verdictIn(verdict),
+    /** The tree the judge step would run: its script and bun pin in place. */
+    tree: [VALIDATOR_SCRIPT, BUN_VERSION_FILE].every((name) =>
+      existsSync(join(validatorOf(alignedDir), name)),
+    ),
+    /** The scratch root is gone or a real directory of ours (never a link),
+     *  and a planted link's target was left alone. */
+    ownDir: !existsSync(alignedDir) || !lstatSync(alignedDir).isSymbolicLink(),
+    elsewhereIntact: !opts.symlinked || snapshot(elsewhere) === planted,
+    errors: (proc.stdout + proc.stderr).match(/^::error::.*$/gm) ?? [],
+  };
+}
+
+describe("the action's fetch script", () => {
+  const compared = `COMPARE api repos/${OPERATOR}/compare/${SHA}...build --jq "\\(.status) \\(.ahead_by)"`;
+  const fetched = `${compared}\nTARBALL api repos/${OPERATOR}/tarball/${SHA}`;
+  const refused = (reason: string, calls = "", outputs = "") => ({
     exitCode: 1,
-    reason: `reason=${reason}`,
+    outputs,
     calls,
-    findings: null,
-    advisories: null,
-    judged: false,
+    verdict: { kind: "not-judged", reason },
+    tree: false,
+    ownDir: true,
+    elsewhereIntact: true,
     errors: [`::error::${reason}`],
   });
-  const notJudged = (reasonPrefix: string) => ({
-    exitCode: 1,
-    reason: expect.stringMatching(new RegExp(`^reason=${reasonPrefix}: .+$`)),
+  const laidOut = (outputs: string) => ({
+    exitCode: 0,
+    outputs: `${outputs}bun=${process.execPath}\n`,
     calls: fetched,
-    findings: null,
-    advisories: null,
-    judged: false,
-    errors: [expect.stringMatching(new RegExp(`^::error::${reasonPrefix}: `))],
+    verdict: null,
+    tree: true,
+    ownDir: true,
+    elsewhereIntact: true,
+    errors: [],
   });
-  const runs: [string, AlignedOptions, ReturnType<typeof runAligned>][] = [
+  const runs: [string, FetchOptions, ReturnType<typeof runFetch>][] = [
     // Both statuses under which the build branch contains the sha.
-    ...(["ahead", "identical"] as const).map(
-      (status): [string, AlignedOptions, ReturnType<typeof runAligned>] => [
-        `a full sha the build branch contains (compare: ${status}) fetches that tree; clean is the validator's exit 0`,
-        { answers: `_commit: ${SHA}\n`, env: { GH_COMPARE_STATUS: status } },
-        {
-          exitCode: 0,
-          reason: "",
-          calls: fetched,
-          findings: "",
-          advisories: "",
-          judged: true,
-          errors: [],
-        },
-      ],
-    ),
     [
-      "a quoted full sha is judged the same, and findings ride the validator's exit 1",
-      {
-        answers: `_commit: "${SHA}"\n`,
-        env: { FAKE_FINDINGS: "#### Errors (1)\n\n- ci.yml drifted\n", FAKE_EXIT: "1" },
-      },
-      {
-        exitCode: 1,
-        reason: "",
-        calls: fetched,
-        findings: "#### Errors (1)\n\n- ci.yml drifted\n",
-        advisories: "",
-        judged: true,
-        errors: [],
-      },
+      "a full sha the build branch is ahead of lays the tree out and reports the distance",
+      { answers: `_commit: ${SHA}\n` },
+      laidOut("compare=ahead\nahead-by=3\n"),
+    ],
+    [
+      "a quoted full sha at the build tip lays the tree out and reports identical",
+      { answers: `_commit: "${SHA}"\n`, env: { GH_COMPARE_STATUS: "identical", GH_AHEAD: "0" } },
+      laidOut("compare=identical\nahead-by=0\n"),
     ],
     [
       "a short sha is refused before gh is asked anything",
@@ -572,190 +817,321 @@ describe("the action's aligned validator script", () => {
     [
       "a gh outage fails closed before anything is fetched, with gh's own words",
       { answers: `_commit: ${SHA}\n`, env: { GH_FAIL: "1" } },
-      refused(`could not confirm ${SHA} is on Vivswan/repo-platform's build branch: gh: boom`),
+      refused(
+        `could not confirm ${SHA} is on ${OPERATOR}'s build branch: gh: boom`,
+        "",
+        "compare=error\n",
+      ),
     ],
     [
       "a compare that fails without a message still names the step that failed",
       { answers: `_commit: ${SHA}\n`, env: { GH_COMPARE_FAIL: "1" } },
       refused(
-        `could not confirm ${SHA} is on Vivswan/repo-platform's build branch: exit 1`,
+        `could not confirm ${SHA} is on ${OPERATOR}'s build branch: exit 1`,
         compared,
+        "compare=error\n",
       ),
     ],
     // The tarball endpoint would serve any commit in the repository's
     // network, and the answers file is PR-editable: only a commit the
     // protected build branch already contains may run.
     ...(["diverged", "behind"] as const).map(
-      (status): [string, AlignedOptions, ReturnType<typeof runAligned>] => [
+      (status): [string, FetchOptions, ReturnType<typeof runFetch>] => [
         `a sha the build branch does not contain (compare: ${status}) is refused unfetched`,
-        { answers: `_commit: ${SHA}\n`, env: { GH_COMPARE_STATUS: status } },
+        { answers: `_commit: ${SHA}\n`, env: { GH_COMPARE_STATUS: status, GH_AHEAD: "0" } },
         refused(
-          `_commit ${SHA} is not a published commit of Vivswan/repo-platform's build branch (compare: ${status})`,
+          `_commit ${SHA} is not a published commit of ${OPERATOR}'s build branch (compare: ${status})`,
           compared,
+          `compare=${status}\nahead-by=0\n`,
         ),
       ],
     ),
     [
       "a fetch that fails after the compare passed fails closed with gh's own words",
       { answers: `_commit: ${SHA}\n`, env: { GH_TARBALL_FAIL: "1" } },
-      refused(`could not fetch Vivswan/repo-platform at ${SHA}: gh: HTTP 404: Not Found`, fetched),
+      refused(
+        `could not fetch ${OPERATOR} at ${SHA}: gh: HTTP 404: Not Found`,
+        fetched,
+        "compare=ahead\nahead-by=3\n",
+      ),
     ],
     [
       "a build tree without the validator fails closed",
       { answers: `_commit: ${SHA}\n`, validator: false },
       refused(
-        `Vivswan/repo-platform at ${SHA} ships no actions/validate-template/validate_generated_files.ts`,
+        `${OPERATOR} at ${SHA} ships no ${VALIDATOR_DIR}/${VALIDATOR_SCRIPT}`,
         fetched,
+        "compare=ahead\nahead-by=3\n",
+      ),
+    ],
+    // The setup-bun step behind this one reads the tree's pin; a tree
+    // without one would make that step fail hard instead of the gate.
+    [
+      "a validator without its bun pin fails closed",
+      { answers: `_commit: ${SHA}\n`, bunVersion: false },
+      refused(
+        `${OPERATOR} at ${SHA} ships no ${VALIDATOR_DIR}/${BUN_VERSION_FILE}`,
+        fetched,
+        "compare=ahead\nahead-by=3\n",
       ),
     ],
     [
-      "a validator left by an earlier run is cleared, never judged by",
+      "a tree and verdict left by an earlier run are cleared, never judged by",
       { answers: `_commit: ${SHA}\n`, validator: false, stale: true },
       refused(
-        `Vivswan/repo-platform at ${SHA} ships no actions/validate-template/validate_generated_files.ts`,
+        `${OPERATOR} at ${SHA} ships no ${VALIDATOR_DIR}/${VALIDATOR_SCRIPT}`,
         fetched,
+        "compare=ahead\nahead-by=3\n",
       ),
     ],
-    // tar's complaint is two lines; the reason output stays one.
+    [
+      "a scratch root planted as a symlink is replaced, never written through",
+      { answers: `_commit: ${SHA}\n`, symlinked: true },
+      laidOut("compare=ahead\nahead-by=3\n"),
+    ],
+    // tar's complaint is two lines; the reason stays one.
     [
       "bytes that are not a tarball fail closed with tar's first line",
       { answers: `_commit: ${SHA}\n`, corrupt: true },
-      notJudged(`could not unpack Vivswan/repo-platform at ${SHA}`),
-    ],
-    [
-      "a lockfile the frozen install rejects fails closed before the validator runs",
-      { answers: `_commit: ${SHA}\n`, lockfile: "not a lockfile {\n" },
-      notJudged(`could not install the validator's dependencies at ${SHA}`),
+      {
+        exitCode: 1,
+        outputs: "compare=ahead\nahead-by=3\n",
+        calls: fetched,
+        verdict: {
+          kind: "not-judged",
+          reason: expect.stringMatching(
+            new RegExp(`^could not unpack ${OPERATOR} at ${SHA}: tar: [^\\n]+$`),
+          ),
+        },
+        tree: false,
+        ownDir: true,
+        elsewhereIntact: true,
+        errors: [expect.stringMatching(/^::error::could not unpack /)],
+      },
     ],
   ];
   test.each(runs)("%s", (_name, opts, expected) => {
-    expect(runAligned(opts)).toEqual(expected);
+    expect(runFetch(opts)).toEqual(expected);
   });
 });
 
-describe("the action's freshness script", () => {
-  // Every run is judged whole: exit code, the state handed to report.ts,
-  // the fragment it splices (only when behind), and the script's own
-  // output (a notice only when it skips). The fragment and notice texts
-  // are exact - they are what the PR comment shows.
-  const behind = (distance: string) =>
-    `#### Freshness\n\nThis repository is ${distance} (recorded \`6bf5452\`, tip \`def5678\`). The next sync PR updates the managed files; nothing to do here.\n`;
-  const skipped = (reason: string) => ({
-    exitCode: 0,
-    state: "state=skipped",
-    fragment: "",
-    output: `::notice::${reason} Skipping the freshness check.\n`,
+// --- judge_aligned.ts --------------------------------------------------------
+
+interface JudgeOptions {
+  /** A bun.lock to ship beside the fake validator (none by default). */
+  lockfile?: string;
+  /** The fetched tree's bun; the test runner's own by default. */
+  alignedBun?: string;
+  env?: Record<string, string>;
+}
+
+function runJudge(opts: JudgeOptions = {}) {
+  const { root } = scratch();
+  const repo = join(root, "repo");
+  mkdirSync(repo);
+  const alignedDir = join(root, "aligned");
+  layValidator(validatorOf(alignedDir), { lockfile: opts.lockfile });
+  const verdict = join(root, "verdict.json");
+  const proc = boundedSpawnSync(["bun", join(ACTION, "judge_aligned.ts")], {
+    cwd: repo,
+    timeoutMs: 60_000,
+    env: {
+      ...process.env,
+      ALIGNED_DIR: alignedDir,
+      VERDICT_FILE: verdict,
+      ALIGNED_BUN: opts.alignedBun ?? process.execPath,
+      ...opts.env,
+    },
   });
-  const fresh = { exitCode: 0, state: "state=fresh", fragment: "", output: "" };
-  const runs: [string, FreshnessOptions, ReturnType<typeof runFreshness>][] = [
+  return {
+    exitCode: proc.exitCode,
+    verdict: verdictIn(verdict),
+    // realpath: the script resolves its cwd, and tmpdir may be a symlink.
+    judged: (proc.stdout + proc.stderr).includes(`validated ${realpathSync(repo)}`),
+    errors: (proc.stdout + proc.stderr).match(/^::error::.*$/gm) ?? [],
+  };
+}
+
+describe("the action's judge script", () => {
+  // Judged whole: exit code (0 only for clean), the verdict written,
+  // whether the validator judged the repository, and the error lines.
+  const notJudged = (reason: string, judged = true) => ({
+    exitCode: 1,
+    verdict: { kind: "not-judged", reason },
+    judged,
+    errors: [`::error::${reason}`],
+  });
+  const runs: [string, JudgeOptions, ReturnType<typeof runJudge>][] = [
     [
-      "a tip equal to the recorded sha is fresh, with nothing to splice",
-      { answers: `_commit: ${SHA}\n`, env: { GH_TIP: SHA } },
-      fresh,
-    ],
-    [
-      "a quoted recorded sha still matches (YAML quotes numeric-looking shas)",
-      { answers: `_commit: "${SHA}"\n`, env: { GH_TIP: SHA } },
-      fresh,
-    ],
-    [
-      "behind with a resolvable distance names the commit count",
-      { answers: `_commit: ${SHA}\n`, env: { GH_TIP: TIP, GH_AHEAD: "3" } },
-      {
-        exitCode: 0,
-        state: "state=behind",
-        fragment: behind("behind the build branch by 3 commit(s)"),
-        output: "",
-      },
-    ],
-    [
-      "a failed compare still reports behind, just without the number",
-      { answers: `_commit: ${SHA}\n`, env: { GH_TIP: TIP, GH_COMPARE_FAIL: "1" } },
-      {
-        exitCode: 0,
-        state: "state=behind",
-        fragment: behind("behind the build branch"),
-        output: "",
-      },
-    ],
-    // The integrity leg already failed the check on these; freshness only
-    // steps aside so the refusal is not said twice.
-    [
-      "no answers file skips with the refusal, never failing",
+      "a clean run is exit 0 with a clean verdict",
       {},
-      skipped(`.github/.copier-answers.yml records no _commit; ${REMEDY}`),
+      { exitCode: 0, verdict: { kind: "clean", advisories: "" }, judged: true, errors: [] },
     ],
     [
-      "a short recorded sha skips rather than prefix-matching the tip",
-      { answers: "_commit: 6bf5452\n", env: { GH_TIP: SHA } },
-      skipped(`_commit '6bf5452' is not a full build sha; ${REMEDY}`),
+      "findings ride the validator's exit 1 into the findings verdict",
+      {
+        env: {
+          FAKE_FINDINGS: "#### Errors (1)\n\n- ci.yml drifted\n",
+          FAKE_ADVISORIES: "#### Advisories (1)\n\n- consider a codeql job\n",
+          FAKE_EXIT: "1",
+        },
+      },
+      {
+        exitCode: 1,
+        verdict: {
+          kind: "findings",
+          findings: "#### Errors (1)\n\n- ci.yml drifted",
+          advisories: "#### Advisories (1)\n\n- consider a codeql job",
+        },
+        judged: true,
+        errors: [],
+      },
     ],
     [
-      "a failed branch read skips with a notice instead of going red",
-      { answers: `_commit: ${SHA}\n`, env: { GH_FAIL: "1" } },
-      skipped(
-        "Could not read Vivswan/repo-platform's build branch (network, or a private operator repo this token cannot read).",
-      ),
+      "a nonzero exit with an empty findings file is not judged, never passed",
+      { env: { FAKE_EXIT: "1" } },
+      notJudged("the validator exited 1 without reporting a finding"),
     ],
     [
-      "an empty tip answer skips rather than comparing against nothing",
-      { answers: `_commit: ${SHA}\n`, env: { GH_TIP: "" } },
-      skipped("Vivswan/repo-platform's build branch reported no commit."),
+      "exit 0 beside findings is not judged either",
+      { env: { FAKE_FINDINGS: "#### Errors (1)\n\n- drift\n" } },
+      notJudged("the validator exited 0 yet reported findings"),
+    ],
+    [
+      "exit 0 with no report files is a crash before reporting",
+      { env: { FAKE_SKIP_REPORT: "1" } },
+      notJudged("the validator exited 0 before reporting"),
+    ],
+    [
+      "a validator killed by a signal is not judged",
+      { env: { FAKE_SIGNAL: "SIGKILL" } },
+      notJudged("the validator died on SIGKILL"),
+    ],
+    // The fetched tree runs on the bun ALIGNED_BUN names, never on the one
+    // running this script: a non-bun there fails the install, not the judge.
+    [
+      "a tree bun that is not bun is not judged before the validator runs",
+      { alignedBun: "/usr/bin/false" },
+      {
+        exitCode: 1,
+        verdict: {
+          kind: "not-judged",
+          reason: "could not install the validator's dependencies: exit 1",
+        },
+        judged: false,
+        errors: ["::error::could not install the validator's dependencies: exit 1"],
+      },
+    ],
+    [
+      "a lockfile the frozen install rejects is not judged before the validator runs",
+      { lockfile: "not a lockfile {\n" },
+      {
+        exitCode: 1,
+        verdict: {
+          kind: "not-judged",
+          reason: expect.stringMatching(/^could not install the validator's dependencies: .+$/),
+        },
+        judged: false,
+        errors: [expect.stringMatching(/^::error::could not install /)],
+      },
     ],
   ];
-  test.each(runs)("%s", (_reason, opts, expected) => {
-    expect(runFreshness(opts)).toEqual(expected);
+  test.each(runs)("%s", (_name, opts, expected) => {
+    expect(runJudge(opts)).toEqual(expected);
   });
 });
 
+// --- action.yml --------------------------------------------------------------
+
 describe("the action's wiring", () => {
-  // The deferred-verdict plumbing the behaviour tests cannot see: the
-  // aligned step keeps its own exit code but defers it, the latest pass
-  // is deferred too and read by nothing, and the action's output hands
-  // the aligned outcome to the caller's fail-last step.
-  test("action.yml runs the aligned validator as the verdict and the latest one as advice", () => {
+  // The deferred-verdict plumbing the behaviour tests cannot see: fetch,
+  // the tree's own bun, and judge share one scratch layout and one verdict
+  // file; a failed fetch skips what follows; the latest pass is deferred
+  // and read by nothing; the action hands the judge outcome to the
+  // caller's fail-last step and the fetch compare to the report.
+  test("action.yml: fetch, the tree's bun, judge as the verdict, latest as advice", () => {
     const action = parseYaml(readFileSync(join(ACTION, "action.yml"), "utf8"));
     const steps: Record<string, unknown>[] = action.runs.steps;
-    const integrity = steps.find((step) => step.id === "integrity");
-    expect(String(integrity?.run)).toContain("aligned.ts");
-    expect(integrity?.["continue-on-error"]).toBe(true);
-    const alignedEnv = integrity?.env as Record<string, string>;
-    expect(alignedEnv.FINDINGS_FILE).toContain("aligned-findings.md");
-    expect(alignedEnv.ADVISORIES_FILE).toContain("aligned-advisories.md");
+    const byId = (id: string) => steps.find((step) => step.id === id);
+    // Order is the contract: the tree's bun goes on PATH after the fetch
+    // and before the judge, the latest leg puts the action's back before
+    // the report.
+    expect(steps.map((step) => step.id ?? String(step.name))).toEqual([
+      "bun",
+      "setup-bun",
+      "Set up bun (retry)",
+      "fetch",
+      "aligned-bun",
+      "Set up the fetched tree's bun (retry)",
+      "integrity",
+      "latest",
+      "Report the findings",
+    ]);
+    const envOf = (step: Record<string, unknown> | undefined) =>
+      (step?.env ?? {}) as Record<string, string>;
     // The operator repository is a constant, not an input: the latest
     // leg's `uses:` could never follow one.
     expect(Object.keys(action.inputs)).toEqual(["github-token"]);
-    expect(alignedEnv.TEMPLATE_REPO).toBeUndefined();
     expect(action.outputs.integrity.value).toBe("${{ steps.integrity.outcome }}");
 
-    const latest = steps.find((step) => step.id === "latest");
+    const fetch = byId("fetch");
+    expect(String(fetch?.run)).toContain("fetch_aligned.ts");
+    expect(fetch?.["continue-on-error"]).toBe(true);
+    const alignedDir = envOf(fetch).ALIGNED_DIR;
+    const verdictFile = envOf(fetch).VERDICT_FILE;
+    expect(alignedDir).toMatch(/^\$\{\{ runner\.temp \}\}\//);
+    expect(verdictFile).toMatch(/^\$\{\{ runner\.temp \}\}\//);
+
+    // The tree's bun: both setup steps read the pin where fetch_aligned.ts
+    // lays it (the layout constants), and only behind a successful fetch.
+    const pin = `${alignedDir}/${TREE_DIR}/${VALIDATOR_DIR}/${BUN_VERSION_FILE}`;
+    const setups = steps.filter(
+      (step) =>
+        String(step.uses ?? "").startsWith("oven-sh/setup-bun@") &&
+        (step.with as Record<string, string>)["bun-version-file"] === pin,
+    );
+    expect(setups.map((step) => step.if)).toEqual([
+      "steps.fetch.outcome == 'success'",
+      "steps.fetch.outcome == 'success' && steps.aligned-bun.outcome == 'failure'",
+    ]);
+    expect(setups[0]?.id).toBe("aligned-bun");
+    expect(setups[0]?.["continue-on-error"]).toBe(true);
+
+    const judge = byId("integrity");
+    expect(String(judge?.run)).toContain("judge_aligned.ts");
+    expect(judge?.if).toBe("steps.fetch.outcome == 'success'");
+    expect(judge?.["continue-on-error"]).toBe(true);
+    // The judge runs on the bun the fetch step recorded, and hands the
+    // tree's bun (the one setup-bun put on PATH) to the install and run.
+    expect(envOf(judge)).toEqual({
+      ALIGNED_DIR: alignedDir,
+      VERDICT_FILE: verdictFile,
+      ORCHESTRATOR_BUN: "${{ steps.fetch.outputs.bun }}",
+    });
+    expect(String(judge?.run)).toMatch(
+      /^ALIGNED_BUN="\$\(command -v bun\)" "\$ORCHESTRATOR_BUN" ".*\/judge_aligned\.ts"$/,
+    );
+
+    const latest = byId("latest");
     expect(String(latest?.uses)).toBe("Vivswan/repo-platform/actions/validate-template@build");
     expect(latest?.["continue-on-error"]).toBe(true);
     const latestWith = latest?.with as Record<string, string>;
-    expect(latestWith["findings-file"]).toContain("latest-findings.md");
-    expect(latestWith["advisories-file"]).toContain("latest-advisories.md");
     expect(JSON.stringify(action.outputs)).not.toContain("steps.latest");
 
-    // report.ts reads the two pairs from the same paths the legs wrote,
-    // and the aligned refusal reason from the deferred step's output.
+    // report.ts reads the verdict the integrity leg wrote, the latest pair
+    // where that leg wrote it, and the fetch step's compare outputs.
     const report = steps.find((step) => String(step.run).includes("report.ts"));
-    const reportEnv = report?.env as Record<string, string>;
-    expect(reportEnv.FINDINGS).toBe(alignedEnv.FINDINGS_FILE);
-    expect(reportEnv.ADVISORIES).toBe(alignedEnv.ADVISORIES_FILE);
-    expect(reportEnv.LATEST_FINDINGS).toBe(latestWith["findings-file"]);
-    expect(reportEnv.LATEST_ADVISORIES).toBe(latestWith["advisories-file"]);
-    expect(reportEnv.ALIGNED_REASON).toBe("${{ steps.integrity.outputs.reason }}");
+    expect(envOf(report).VERDICT).toBe(verdictFile);
+    expect(envOf(report).LATEST_FINDINGS).toBe(latestWith["findings-file"]);
+    expect(envOf(report).LATEST_ADVISORIES).toBe(latestWith["advisories-file"]);
+    expect(envOf(report).COMPARE_STATUS).toBe("${{ steps.fetch.outputs.compare }}");
+    expect(envOf(report).AHEAD_BY).toBe("${{ steps.fetch.outputs.ahead-by }}");
+    expect(report?.["continue-on-error"]).toBeUndefined();
 
-    // The freshness leg can never fail the job, and stays a ref compare
-    // against the operator's build branch: a render here would cost
-    // every fleet repo a copier run per push.
-    const freshness = steps.find((step) => step.id === "freshness");
-    expect(freshness?.["continue-on-error"]).toBe(true);
-    expect(String(freshness?.run)).toContain("freshness.ts");
-    const sources = ["aligned.ts", "freshness.ts", "report.ts"].map((name) =>
-      readFileSync(join(ACTION, name), "utf8"),
-    );
-    for (const source of sources) expect(source).not.toMatch(/^\s*copier\s/m);
-    expect(sources[1]).toContain("/branches/build");
+    // No leg renders: a copier run here would cost every fleet repo a
+    // render per push, and freshness is the fetch step's compare.
+    for (const name of ["fetch_aligned.ts", "judge_aligned.ts", "report.ts"]) {
+      expect(readFileSync(join(ACTION, name), "utf8")).not.toMatch(/^\s*copier\s/m);
+    }
   });
 });
