@@ -1,5 +1,13 @@
 import { afterAll, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -238,6 +246,32 @@ function runValidator(
 }
 
 const DUP_KEY_YAML = "homepage: https://a.example\nhomepage: https://b.example\n";
+
+describe("the check roster", () => {
+  test("every checks/ module is imported by the entry and runs from CHECKS", () => {
+    // A new check module typechecks on its own, so only the entry's roster
+    // decides whether it ever runs: a module left out of CHECKS would be a
+    // silently inert check.
+    const entry = readFileSync(VALIDATOR, "utf-8");
+    const roster = /const CHECKS[\s\S]*?= \[\n([\s\S]*?)\n\];/.exec(entry)?.[1] ?? "";
+    const modules = readdirSync(join(import.meta.dir, "checks"))
+      .filter((name) => name.endsWith(".ts") && !name.endsWith(".test.ts"))
+      .sort();
+    const listed = modules.map((file) => {
+      const imported = new RegExp(
+        `import \\{ (check\\w+) \\} from "\\./checks/${file.replace(".", "\\.")}";`,
+      ).exec(entry)?.[1];
+      return {
+        file,
+        imported: imported ?? null,
+        run: imported !== undefined && roster.includes(`${imported},`),
+      };
+    });
+    expect(listed).toEqual(
+      modules.map((file) => ({ file, imported: expect.stringMatching(/^check\w+$/), run: true })),
+    );
+  });
+});
 
 describe("duplicate mapping keys", () => {
   test("the baseline tree passes", () => {
@@ -1836,7 +1870,7 @@ describe("ownership-manifest byte parity", () => {
     const { exitCode, stderr } = runValidator({ [MANIFEST]: conflicted });
     expect(exitCode).toBe(1);
     expect(stderr).toContain(`${MANIFEST}: contains unresolved merge-conflict markers`);
-    expect(stderr).not.toContain("does not parse as an ownership manifest");
+    expect(stderr).not.toContain("does not parse as a manifest");
   });
 
   test("self mode inverts: a present manifest is the error", () => {

@@ -246,7 +246,7 @@ describe("region builders", () => {
 
   test("knownModules renders the biome-shaped set literal", () => {
     expect(knownModules([BUN, RUST])).toEqual([
-      "const KNOWN_MODULES = new Set([",
+      "export const KNOWN_MODULES: ReadonlySet<string> = new Set([",
       '  "bun",',
       '  "rust",',
       "]);",
@@ -534,7 +534,7 @@ describe("toolchain pins", () => {
 
   test("toolchainPinsRegion renders the record literal and refuses emptiness", () => {
     expect(toolchainPinsRegion([PINNED_BUN, UV])).toEqual([
-      "const TOOLCHAIN_PINS: Record<string, { file: string; version: string }> = {",
+      "export const TOOLCHAIN_PINS: Readonly<Partial<Record<string, ToolchainPin>>> = {",
       '  bun: { file: ".bun-version", version: "1.3.14" },',
       "};",
     ]);
@@ -703,7 +703,7 @@ describe("module ownership files", () => {
         "release-please": [{ path: ".github/workflows/release.yml", kind: "header" }],
       }),
     ).toEqual([
-      "const MODULE_OWNERSHIP: Record<string, OwnedFile[]> = {",
+      "export const MODULE_OWNERSHIP: Readonly<Partial<Record<string, readonly OwnedFile[]>>> = {",
       '  agents: [{ path: "A.md", kind: "region", begin: "# BEGIN M", end: "# END M" }],',
       '  "release-please": [{ path: ".github/workflows/release.yml", kind: "header" }],',
       "};",
@@ -724,7 +724,7 @@ describe("module ownership files", () => {
         ],
       }),
     ).toEqual([
-      "const MODULE_OWNERSHIP: Record<string, OwnedFile[]> = {",
+      "export const MODULE_OWNERSHIP: Readonly<Partial<Record<string, readonly OwnedFile[]>>> = {",
       "  bun: [",
       `    { path: "${first}", kind: "header" },`,
       `    { path: "${second}", kind: "header" },`,
@@ -738,7 +738,7 @@ describe("module ownership files", () => {
     const begin = "<!-- BEGIN REPO-PLATFORM MANAGED -->";
     const end = "<!-- END REPO-PLATFORM MANAGED -->";
     expect(moduleOwnershipRegion({ bun: [{ path, kind: "region", begin, end }] })).toEqual([
-      "const MODULE_OWNERSHIP: Record<string, OwnedFile[]> = {",
+      "export const MODULE_OWNERSHIP: Readonly<Partial<Record<string, readonly OwnedFile[]>>> = {",
       "  bun: [",
       "    {",
       `      path: "${path}",`,
@@ -775,7 +775,7 @@ describe("module ownership files", () => {
         ],
       }),
     ).toEqual([
-      "const BASE_OWNERSHIP: BaseOwnedFile[] = [",
+      "export const BASE_OWNERSHIP: readonly BaseOwnedFile[] = [",
       '  { path: ".yamllint", kind: "header" },',
       "  {",
       '    path: "LICENSE.md",',
