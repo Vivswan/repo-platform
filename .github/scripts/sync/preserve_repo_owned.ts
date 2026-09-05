@@ -40,9 +40,8 @@
 // file); HIDE_DETAILS; TARGET_DISPLAY / TARGET
 // (log label, in that order; defaults to TARGET_DIR).
 
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { parse } from "yaml";
 import { MANIFEST_NAME } from "../../../actions/shared/manifest.ts";
 import { env, error, hideDetails, notice, requireEnv } from "../shared/gha.ts";
 import { type HeadNonBlobKind, headEntry } from "../shared/git_head.ts";
@@ -54,6 +53,7 @@ import {
   must,
   timeoutExitCode,
 } from "../shared/proc.ts";
+import { ANSWERS_PATH, AnswersFileError, readAnswersFile } from "./answers_file.ts";
 import { type HeadSplit, headSplitEntries, repoOwnedText } from "./head_manifest.ts";
 import { clip, fenceFor } from "./preserve_local_content.ts";
 import { REMOVED_SPLITS_NAME } from "./section_files.ts";
@@ -171,22 +171,18 @@ function restoreRepoOwned(): void {
       const show = showFleetLicense(targetRef);
       // The template carries the Required Notice as a jinja variable; render
       // it from the repo's recorded answer rather than seeding template text.
-      const answersPath = join(targetDir, ".github/.copier-answers.yml");
-      let answers: Record<string, unknown> = {};
-      if (existsSync(answersPath)) {
-        let doc: unknown;
-        try {
-          doc = parse(readFileSync(answersPath, "utf-8"));
-        } catch {
-          doc = undefined;
-        }
-        if (doc === undefined || doc === null || typeof doc !== "object" || Array.isArray(doc)) {
-          error(
-            `${label}: cannot re-seed the fleet license; .github/.copier-answers.yml is unreadable`,
-          );
-          process.exit(1);
-        }
-        answers = doc as Record<string, unknown>;
+      let answers: Record<string, unknown>;
+      try {
+        answers = readAnswersFile(targetDir).fields;
+      } catch (err) {
+        if (!(err instanceof AnswersFileError)) throw err;
+        // The parser's message can quote target file content; a hidden
+        // target gets the detail-free version.
+        const detail = hideDetails()
+          ? "unreadable (detail hidden: private repository)"
+          : err.message;
+        error(`${label}: cannot re-seed the fleet license; ${ANSWERS_PATH}: ${detail}`);
+        process.exit(1);
       }
       const holder = answers.copyright_holder;
       if (typeof holder !== "string" || holder === "") {
