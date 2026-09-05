@@ -8,6 +8,7 @@ import {
   AnswersFileError,
   dataFileYaml,
   readAnswersFile,
+  recordedCommitMismatch,
 } from "../../.github/scripts/sync/answers_file.ts";
 
 /** A checkout root with only its .github/ directory. */
@@ -322,5 +323,30 @@ describe("dataFileYaml", () => {
     expect(() => dataFileYaml("[a, b]: value\n", null)).toThrow(
       "top-level keys must be plain scalars",
     );
+  });
+});
+
+describe("recordedCommitMismatch", () => {
+  const SHA = "31beeca7cfa33c8b7271e31d16d6517902131ac8";
+  test.each([
+    { reason: "the pinned commit, recorded whole", recorded: SHA, expected: null },
+    {
+      reason: "copier's own abbreviation: the hook rewrite did not run",
+      recorded: SHA.slice(0, 7),
+      expected: `copier recorded _commit '${SHA.slice(0, 7)}'`,
+    },
+    {
+      reason: "a tag name copier's describe printed",
+      recorded: "v1.0",
+      expected: "copier recorded _commit 'v1.0'",
+    },
+    { reason: "nothing readable", recorded: "", expected: "copier recorded no readable _commit" },
+  ])("$reason", ({ recorded, expected }) => {
+    const reason = recordedCommitMismatch(recorded, SHA);
+    if (expected === null) expect(reason).toBeNull();
+    else {
+      expect(reason).toContain(expected);
+      expect(reason).toContain(`pinned it to commit ${SHA}`);
+    }
   });
 });

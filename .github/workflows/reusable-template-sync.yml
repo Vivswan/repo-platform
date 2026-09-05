@@ -309,9 +309,7 @@ jobs:
       # record the tree THIS SYNC delivers, so parity measures drift since
       # the last sync, never re-litigates the merge.
       - name: Stamp the ownership manifest
-        env:
-          TARGET_DIR: target
-        run: bun actions/shared/stamp_manifest.ts
+        run: bun actions/shared/stamp_manifest.ts --root target
 
       # Defense-in-depth on the final tree: every repository-owned half
       # must still hold each non-blank line it held at HEAD. A trip is a

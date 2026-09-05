@@ -5483,30 +5483,24 @@ const rules: Rule[] = [
       const mismatches: Mismatch[] = [];
       const stampHook = "actions/shared/stamp_manifest.ts";
       const doc = asRecord(parseYaml(read("copier.yml")), "copier.yml");
-      const commandsOf = (list: unknown): string[] =>
-        (Array.isArray(list) ? list : []).map((hook) =>
-          String(asRecord(hook, "copier.yml hook").command ?? ""),
-        );
-      const sites: [string, string[]][] = [
-        ["_tasks", commandsOf(doc._tasks)],
-        ["_migrations", commandsOf(doc._migrations)],
-      ];
-      const pathOf = (command: string): string =>
-        mustMatch(
-          command,
-          /^bun "\{\{ _copier_conf\.src_path \}\}\/(.+)"$/,
-          "copier.yml",
-          "a src_path-anchored bun hook command",
-        )[1];
-      for (const [site, commands] of sites) {
-        if (!commands.some((command) => pathOf(command) === stampHook)) {
-          mismatches.push({
-            file: "copier.yml",
-            expected: `a ${site} hook running ${stampHook} (copier runs _tasks only on copy/recopy and _migrations only on update, so each site needs its own)`,
-            got: "none - renders on that path would ship an unstamped manifest",
-          });
-        }
-        for (const command of commands) {
+      const hooksOf = (list: unknown): CopierHook[] =>
+        (Array.isArray(list) ? list : []).map((hook) => {
+          const record = asRecord(hook, "copier.yml hook");
+          const command = record.command;
+          return {
+            command: Array.isArray(command) ? command.map(String) : String(command ?? ""),
+            when: String(record.when ?? ""),
+          };
+        });
+      const sites = [
+        ["_tasks", hooksOf(doc._tasks)],
+        ["_migrations", hooksOf(doc._migrations)],
+      ] as const;
+      const pathOf = (command: string | readonly string[]): string =>
+        hookCommandParts(command).path;
+      for (const [site, hooks] of sites) {
+        mismatches.push(...stampHookSiteMismatches(site, hooks, stampHook));
+        for (const { command } of hooks) {
           const path = pathOf(command);
           // Judged on the path the BRANCH serves, not what this checkout
           // can lexically reach: traversal ("actions/../scripts/x.ts") and
@@ -6022,6 +6016,120 @@ export function ruleRosterMismatches(
         file: "scripts/check_ssot.ts RULE_ROSTER",
         expected: `a rule named '${name}'`,
         got: "no such rule - a dropped rule is a silently retired gate; remove the entry in the same change, deliberately",
+      });
+    }
+  }
+  return mismatches;
+}
+
+/** The stamp hook's argument vector after the script path, as copier.yml
+ *  spells it: the destination (".", where copier runs hooks), the template
+ *  clone's full commit hash, and copier's active answers file (which the
+ *  hook refuses unless it is the template's declared path). */
+export const STAMP_HOOK_ARGV = [
+  "--root",
+  ".",
+  "--commit",
+  "{{ _copier_conf.vcs_ref_hash }}",
+  "--answers",
+  "{{ _copier_conf.answers_file }}",
+] as const;
+
+/** The `when` each stamp hook must carry so the destination is stamped
+ *  ONCE per render: copier runs _tasks on the destination pass of an
+ *  update too (measured on 9.17.0), where the 'after' migration already
+ *  stamps, so the task stands down for updates. */
+export const STAMP_HOOK_WHEN: Record<"_tasks" | "_migrations", string> = {
+  _tasks: "{{ _copier_operation != 'update' }}",
+  _migrations: "{{ _stage == 'after' }}",
+};
+
+/** A copier.yml hook command split into the src_path-relative script it
+ *  runs, its argument vector, and its form: copier runs a STRING command
+ *  through a shell (so a caller-controlled value in it is an injection
+ *  vector) and a LIST as argv. Any other shape is a lost anchor. */
+export function hookCommandParts(command: string | readonly string[]): {
+  path: string;
+  args: readonly string[];
+  form: "shell" | "argv";
+} {
+  const anchor = /^\{\{ _copier_conf\.src_path \}\}\/([^"]+)$/;
+  if (typeof command === "string") {
+    const match = mustMatch(
+      command,
+      /^bun "\{\{ _copier_conf\.src_path \}\}\/([^"]+)"(?: (.*))?$/,
+      "copier.yml",
+      "a src_path-anchored bun hook command",
+    );
+    return {
+      path: match[1],
+      args: match[2] === undefined ? [] : match[2].split(" "),
+      form: "shell",
+    };
+  }
+  const [bun, script, ...args] = command;
+  const match = bun === "bun" && script !== undefined ? anchor.exec(script) : null;
+  if (match === null) {
+    throw new Error(
+      `copier.yml: anchor for a src_path-anchored bun hook command not found (list form: ${JSON.stringify(command)})`,
+    );
+  }
+  return { path: match[1], args, form: "argv" };
+}
+
+/** A copier.yml hook as the rule judges it. */
+export interface CopierHook {
+  command: string | readonly string[];
+  when: string;
+}
+
+/** The stamp-hook-path rule's judgment of one hook site: exactly one stamp
+ *  hook (a second would stamp the destination twice), in the argv-list form
+ *  (a shell string would interpolate the caller-controlled answers path),
+ *  carrying exactly STAMP_HOOK_ARGV and the site's `when` (STAMP_HOOK_WHEN),
+ *  so the destination is stamped once per render with everything the hook
+ *  needs and nothing inferred. */
+export function stampHookSiteMismatches(
+  site: keyof typeof STAMP_HOOK_WHEN,
+  hooks: readonly CopierHook[],
+  stampHook: string,
+): Mismatch[] {
+  const mismatches: Mismatch[] = [];
+  const stampHooks = hooks.filter((hook) => hookCommandParts(hook.command).path === stampHook);
+  if (stampHooks.length !== 1) {
+    mismatches.push({
+      file: "copier.yml",
+      expected: `exactly one ${site} hook running ${stampHook} (copier runs _migrations only on update and _tasks on every other render, so each site needs its own, and a second would stamp the destination twice)`,
+      got:
+        stampHooks.length === 0
+          ? "none - renders on that path would ship an unstamped manifest"
+          : `${stampHooks.length} stamp hooks`,
+    });
+  }
+  for (const hook of stampHooks) {
+    const { args, form } = hookCommandParts(hook.command);
+    if (form !== "argv") {
+      mismatches.push({
+        file: "copier.yml",
+        expected: `the ${site} stamp hook in copier's list form (a string command runs through a shell with the caller-controlled answers path interpolated)`,
+        got: "a shell string",
+      });
+    }
+    if (canonical(args) !== canonical(STAMP_HOOK_ARGV)) {
+      mismatches.push({
+        file: "copier.yml",
+        expected: `the ${site} stamp hook carrying ${JSON.stringify(STAMP_HOOK_ARGV)}`,
+        got: args.length === 0 ? "no arguments" : JSON.stringify(args),
+      });
+    }
+    if (hook.when !== STAMP_HOOK_WHEN[site]) {
+      mismatches.push({
+        file: "copier.yml",
+        expected: `the ${site} stamp hook gated by when: "${STAMP_HOOK_WHEN[site]}"`,
+        got:
+          hook.when === ""
+            ? "no when (the destination would be stamped twice on update)"
+            : `when: "${hook.when}"`,
       });
     }
   }

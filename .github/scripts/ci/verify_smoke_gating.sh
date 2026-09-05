@@ -760,14 +760,20 @@ if [ "$(mf ".github/repo-platform-manifest.json" hash)" != "null" ]; then
   echo "::error::manifest check failed: the manifest's own hash entry in $manifest must stay null (a self-hash would be circular) for modules=$MODULES private=$PRIVATE. Fix stamp_manifest.ts (or this expectation in verify_smoke_gating.sh)."
   exit 1
 fi
-# Provenance: the self entry's commit must equal the _commit copier
-# recorded (a bare build-tree sha here). YAML quotes the sha whenever it
-# would parse as a
-# number (an all-digit or exponent-form sha, ~4% of them), so strip the
-# optional surrounding quotes or the comparison fails on a sha lottery.
+# Provenance: the self entry's commit must equal the _commit the stamp
+# hook recorded (a bare build-tree sha here). An all-digit sha is written
+# quoted (PyYAML would read it as an integer - vanishingly rare at 40 hex,
+# but possible), so strip the optional surrounding quotes or the
+# comparison fails on a sha lottery.
 answers_commit="$(sed -n "s/^_commit:[[:space:]]*//p" "$SMOKE/.github/.copier-answers.yml" \
   | sed -e "s/^'\(.*\)'\$/\1/" -e 's/^"\(.*\)"$/\1/')"
-if [ -z "$answers_commit" ] || [ "$(mf ".github/repo-platform-manifest.json" commit)" != "$answers_commit" ]; then
+# The full sha, never git's 7-char abbreviation or a tag name: the stamp
+# hook rewrites the line from copier's vcs_ref_hash on every render.
+if ! printf '%s' "$answers_commit" | grep -Eq '^[0-9a-f]{40}$'; then
+  echo "::error::manifest check failed: the _commit recorded in .github/.copier-answers.yml ('$answers_commit') is not a full 40-hex sha for modules=$MODULES private=$PRIVATE. copier.yml's hooks must pass --commit {{ _copier_conf.vcs_ref_hash }} to stamp_manifest.ts, which rewrites the line."
+  exit 1
+fi
+if [ "$(mf ".github/repo-platform-manifest.json" commit)" != "$answers_commit" ]; then
   echo "::error::manifest check failed: the manifest's provenance commit in $manifest does not match the _commit recorded in .github/.copier-answers.yml ('$answers_commit') for modules=$MODULES private=$PRIVATE. Fix this harness's _commit extraction first (quote stripping), then stamp_manifest.ts."
   exit 1
 fi

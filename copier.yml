@@ -106,18 +106,35 @@ _skip_if_exists:
   # and must never rewrite what it reads its instructions from.
   - .repo-platform.yml
 
-# The _migrations entry stamps the ownership manifest's per-repo hashes:
-# they are facts of the rendered tree, so stamping must run after copier
-# writes it. Copier runs _migrations only on update and _tasks only on
-# copy/recopy, hence the same stamper (shipped inside the build branch's
-# actions/shared/ zone, the same relative path it has on main - check_ssot's
-# stamp-hook-path rule pins the tie) is wired into both.
+# The stamp hook runs once per render on the destination: _tasks for copy
+# and recopy, the 'after' migration for update (copier runs _tasks on an
+# update's destination pass too, hence the operation gate). The arguments
+# and both gates are pinned by check_ssot's stamp-hook-path rule; the
+# reasoning lives in docs/build-provenance.md. The argv-list form: a string
+# command runs through a shell, and the answers path is caller-controlled.
 _migrations:
-  - command: bun "{{ _copier_conf.src_path }}/actions/shared/stamp_manifest.ts"
+  - command:
+      - bun
+      - "{{ _copier_conf.src_path }}/actions/shared/stamp_manifest.ts"
+      - --root
+      - .
+      - --commit
+      - "{{ _copier_conf.vcs_ref_hash }}"
+      - --answers
+      - "{{ _copier_conf.answers_file }}"
     when: "{{ _stage == 'after' }}"
 
 _tasks:
-  - command: bun "{{ _copier_conf.src_path }}/actions/shared/stamp_manifest.ts"
+  - command:
+      - bun
+      - "{{ _copier_conf.src_path }}/actions/shared/stamp_manifest.ts"
+      - --root
+      - .
+      - --commit
+      - "{{ _copier_conf.vcs_ref_hash }}"
+      - --answers
+      - "{{ _copier_conf.answers_file }}"
+    when: "{{ _copier_operation != 'update' }}"
 
 project_name:
   type: str

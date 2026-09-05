@@ -702,7 +702,7 @@ export function rehearseRepo(slug: string, options: RehearsalOptions): Rehearsal
     // copier's post-render stamp hook ran, so the manifest is stamped once
     // more when the tree is final - the same final stamping step
     // reusable-template-sync.yml runs (idempotent; see stamp_manifest.ts).
-    run(["bun", join(REPO_ROOT, "actions", "shared", "stamp_manifest.ts")], {
+    run(["bun", join(REPO_ROOT, "actions", "shared", "stamp_manifest.ts"), "--root", targetDir], {
       cwd: REPO_ROOT,
       env: legEnv,
     });

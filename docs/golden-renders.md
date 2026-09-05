@@ -27,10 +27,10 @@ A golden changes if and only if rendered content changes. The volatile inputs ar
 
 ## The sentinel
 
-One normalization exists: the scratch commit sha is a pure function of the whole template content, so every template edit would move it. The runner rewrites exactly the two fields that carry it - the `_commit` answer in `.github/.copier-answers.yml` and the ownership manifest's provenance slot - to the sentinel `xxxxxxx`, and leaves every other byte verbatim.
+One normalization exists: the scratch commit sha is a pure function of the whole template content, so every template edit would move it. The runner rewrites exactly the two fields that carry it - the `_commit` answer in `.github/.copier-answers.yml` and the ownership manifest's provenance slot - to the sentinel (forty `x` characters, the width of the full sha the stamp hook records), and leaves every other byte verbatim.
 
 - The sentinel is deliberately non-hex, so no honest commit sha can ever read as it.
-- Only the true sha is rewritten: any other value surfaces as drift, and a pre-stamped sentinel is rejected outright (it would false-match the committed goldens).
+- Only the true full sha is rewritten: any other value surfaces as drift - copier's 7-char abbreviation included, so a render whose hook rewrite did not run fails here - and a pre-stamped sentinel is rejected outright (it would false-match the committed goldens).
 - The manifest is re-stamped against the normalized tree by the stamp hook itself - the manifest's only writer - after an idempotency check proves the hook stamped honestly, so a hook that stamped a lying provenance fails loudly instead of being silently healed.
 - Both `bun run renders` and `renders:check` normalize in the same code path, so CI's fresh render agrees with the committed sentinel.
 
