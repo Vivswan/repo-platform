@@ -29,15 +29,18 @@
 // records the same 40-hex value with no environment to carry, and the
 // manifest's provenance slot follows from the rewritten file.
 //
-// Only the "hash" tokens - plus the self entry's "commit" provenance slot,
-// filled with the render's recorded _commit - are rewritten, in place,
-// line by line: the rendered manifest keeps one entry per line (the layout
-// manifest.ts's entryLine emits and parseEntry reads back), so a stamped
-// manifest differs from the raw render in those token values alone and
-// copier's three-way update merge sees minimal local edits. Split entries
-// carry their grammar and its begin/end marker lines; the stamper reads
-// the marker pair to hash the managed region and passes everything else
-// through untouched. An update can still leave inline
+// Only the "hash" field - plus the self entry's "commit" provenance slot,
+// filled with the render's recorded _commit, and the "withheld" marker the
+// sync's withhold path asks for - is rewritten, in place, line by line:
+// the rendered manifest keeps one entry per line (the layout
+// manifest.ts's entryLine emits and parseEntry reads back), each entry's
+// object is parsed, its fields edited, and the object re-emitted through
+// the same layout (entryBody), so a stamped manifest differs from the raw
+// render in those field values alone and copier's three-way update merge
+// sees minimal local edits. Split entries carry their grammar and its
+// begin/end marker lines; the stamper reads the marker pair to hash the
+// managed region and passes every other field through untouched. An
+// update can still leave inline
 // conflict blocks in the manifest (both sides touch the hash lines);
 // parseManifestFiles resolves those toward the template ("after updating")
 // side before parsing - the direction resolve_copier_conflicts.ts uses -
@@ -60,6 +63,7 @@
 
 import { createHash } from "node:crypto";
 import {
+  existsSync,
   lstatSync,
   readFileSync,
   readlinkSync,
@@ -71,10 +75,13 @@ import {
 import { basename, dirname, join, resolve } from "node:path";
 import { cleanManagedRegion } from "./grammar.ts";
 import {
+  entryBody,
+  type JsonValue,
   MANIFEST_NAME,
   type ManifestEntryShape,
   parseEntry,
   parseManifestFiles,
+  withheldMarkerValid,
 } from "./manifest.ts";
 
 /** The template suffix the build branch's symlink targets keep: links on
@@ -83,15 +90,6 @@ import {
  *  strings without stripping the suffix - so this hook normalizes the
  *  rendered targets instead (normalizeSymlinkTargets below). */
 const JINJA_SUFFIX = ".jinja";
-
-/** The hash token inside an entry object; entries without one (starters,
- *  and legacy "mergeable" entries from renders that predate the class's
- *  retirement) are left alone. */
-const HASH_RE = /"hash": (?:null|"[0-9a-f]{64}")/;
-
-/** The provenance token on the manifest's own entry: the render's recorded
- *  _commit, letting the validator tell version skew from entry deletion. */
-const COMMIT_RE = /"commit": (?:null|"[^"]*")/;
 
 /** The answers file copier records the render provenance in. */
 export const ANSWERS_FILE = ".github/.copier-answers.yml";
@@ -242,7 +240,17 @@ export function normalizeSymlinkTargets(
  *  resolve toward the template side, then every entry line's hash token is
  *  replaced with the honest value, and the self entry's commit token with
  *  the render's recorded _commit (its hash stays null - see the manifest's
- *  $comment). Returns the input unchanged with a problem message when
+ *  $comment). `withheld` names the paths the sync could not deliver (its
+ *  push token lacked the Workflows scope, so it removed the added workflow
+ *  files before pushing): each of those whose file is indeed absent gets
+ *  `"withheld": true`, which validate-template reads as the one legitimate
+ *  listed-but-missing state. The marker then stays for as long as the
+ *  file stays undelivered (copier update honours the committed absence, so
+ *  the entry is still withheld after every later stamp) and is stripped
+ *  the moment a stamp can hash the file. Only withholdable paths (the
+ *  directory the Workflows scope gates) ever carry it; any other withheld
+ *  field - elsewhere, on a hashed entry, or with another value - is a hand
+ *  edit and goes. Returns the input unchanged with a problem message when
  *  parseManifestFiles rejects the text (unparseable, malformed entries,
  *  duplicated entry lines). Reported soft, never thrown: this function's
  *  contract (see the file header) is that a stamping gap warns and lets
@@ -255,6 +263,7 @@ export function normalizeSymlinkTargets(
 export function stampManifestText(
   text: string,
   root: string,
+  withheld: ReadonlySet<string> = new Set(),
 ): { out: string; problem: string | null } {
   const parsed = parseManifestFiles(text);
   if (parsed.problem !== null) return { out: text, problem: parsed.problem };
@@ -265,16 +274,36 @@ export function stampManifestText(
     if (parsedLine === null) return line;
     const { indent, path, quotedPath, comma } = parsedLine;
     const entry = files[path];
-    if (entry === undefined || !HASH_RE.test(parsedLine.body)) return line;
-    const hash = path === MANIFEST_NAME ? null : entryHash(root, path, entry);
-    let body = parsedLine.body.replace(HASH_RE, `"hash": ${hash === null ? "null" : `"${hash}"`}`);
-    if (path === MANIFEST_NAME) {
-      body = body.replace(
-        COMMIT_RE,
-        `"commit": ${commit === null ? "null" : JSON.stringify(commit)}`,
-      );
+    if (entry === undefined) return line;
+    // The body is the one-line object parseManifestFiles already accepted,
+    // so it parses; its field order is kept. Entries without a hash field
+    // (starters, and legacy "mergeable" entries from renders that predate
+    // the class's retirement) are left alone apart from a stray marker,
+    // which no hash-less entry may carry.
+    const fields = JSON.parse(parsedLine.body) as Record<string, JsonValue>;
+    if (!("hash" in fields)) {
+      if (!("withheld" in fields)) return line;
+      delete fields.withheld;
+      return `${indent}${quotedPath}: ${entryBody(fields)}${comma}`;
     }
-    return `${indent}${quotedPath}: ${body}${comma}`;
+    const hash = path === MANIFEST_NAME ? null : entryHash(root, path, entry);
+    // A marker is written for a named path when the entry it would produce
+    // has the one valid shape, or kept when the ENTRY AS STAMPED already
+    // carried a valid one and the file is still absent; judging the
+    // original entry (not the recomputed hash) keeps a hand edit that
+    // decorates a deleted, once-hashed entry from maturing into the valid
+    // shape on the next stamp. The same predicate the validator applies
+    // decides both, so the stamper cannot emit a marker it rejects.
+    const stillWithheld =
+      hash === null &&
+      (withheld.has(path)
+        ? withheldMarkerValid(path, { ...entry, hash: null, withheld: true })
+        : withheldMarkerValid(path, entry) && !existsSync(join(root, path)));
+    fields.hash = hash;
+    delete fields.withheld;
+    if (stillWithheld) fields.withheld = true;
+    if (path === MANIFEST_NAME && "commit" in fields) fields.commit = commit;
+    return `${indent}${quotedPath}: ${entryBody(fields)}${comma}`;
   });
   return { out: lines.join("\n"), problem: null };
 }

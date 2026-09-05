@@ -9,5 +9,5 @@
     "allowImportingTsExtensions": true,
     "types": ["bun"]
   },
-  "include": ["*.ts", "../shared/*.ts"]
+  "include": ["*.ts", "checks/*.ts", "../shared/*.ts"]
 }
