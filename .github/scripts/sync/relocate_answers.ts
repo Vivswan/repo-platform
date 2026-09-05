@@ -28,11 +28,10 @@
 // check (TARGET_DIR default "target"; RUNNER_TEMP for the PR-body note)
 // and replayed by rehearse.ts in the same slot.
 
-import { lstatSync, mkdirSync, writeFileSync } from "node:fs";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { env, error, notice, requireEnv } from "../shared/gha.ts";
-import { identityArgs, SYNC_IDENTITY } from "../shared/git_identity.ts";
-import { must } from "../shared/proc.ts";
+import { commitRelocation, type Location, relocateFile } from "./relocate.ts";
 import { ANSWERS_MOVE_NAME } from "./section_files.ts";
 
 /** The answers file's canonical landed path (copier.yml `_answers_file`). */
@@ -41,61 +40,22 @@ export const ANSWERS_PATH = ".github/.copier-answers.yml";
 /** The retired pre-move path (answers at the repository root). */
 export const LEGACY_ANSWERS_PATH = ".copier-answers.yml";
 
-export type AnswersLocation = "in-place" | "moved" | "missing" | "both" | "not-a-file";
-
-/** What sits at `path`: a regular file, nothing, or something else -
- * probed with lstat so a symlink never reads as the file it points at.
- * ENOENT is genuine absence; ENOTDIR means a parent segment is itself a
- * file (a `.github` FILE, say), which is the same broken shape as a
- * non-file entry; anything else (EACCES, EIO) throws - a permission
- * failure must never read as "absent". */
-function entryKind(path: string): "file" | "absent" | "other" {
-  let stat: ReturnType<typeof lstatSync>;
-  try {
-    stat = lstatSync(path);
-  } catch (err) {
-    const code = (err as NodeJS.ErrnoException).code;
-    if (code === "ENOENT") return "absent";
-    if (code === "ENOTDIR") return "other";
-    throw err;
-  }
-  return stat.isFile() ? "file" : "other";
-}
-
 /** Where the target keeps its recorded answers, moving a legacy-path file
  * to ANSWERS_PATH (bytes untouched - `git mv` renames the blob) and
  * committing the move so copier sees a clean tree. Pure probe otherwise. */
-export function relocateAnswers(targetDir: string): AnswersLocation {
-  const legacy = entryKind(join(targetDir, LEGACY_ANSWERS_PATH));
-  const current = entryKind(join(targetDir, ANSWERS_PATH));
-  if (legacy === "other" || current === "other") return "not-a-file";
-  if (legacy === "file" && current === "file") return "both";
-  if (legacy === "absent" && current === "absent") return "missing";
-  if (current === "file") return "in-place";
-  // Every fleet repo carries .github/ (its workflows live there), but a
-  // bare mkdir keeps the move total rather than order-dependent.
-  mkdirSync(join(targetDir, ".github"), { recursive: true });
-  must(["git", "-C", targetDir, "mv", LEGACY_ANSWERS_PATH, ANSWERS_PATH]);
-  // Pathspec-limited: ONLY the rename rides this commit, whatever else the
-  // index happens to hold - anything unrelated stays behind and fails
-  // loudly at copier's own dirty-tree check instead of smuggling through.
-  must([
-    "git",
-    "-C",
-    targetDir,
-    ...identityArgs(SYNC_IDENTITY),
-    "commit",
-    "-qm",
-    `chore: move the copier answers file to ${ANSWERS_PATH}`,
-    "--",
-    LEGACY_ANSWERS_PATH,
-    ANSWERS_PATH,
-  ]);
-  return "moved";
+export function relocateAnswers(targetDir: string): Location {
+  const location = relocateFile(targetDir, LEGACY_ANSWERS_PATH, ANSWERS_PATH);
+  if (location === "moved") {
+    commitRelocation(targetDir, `chore: move the copier answers file to ${ANSWERS_PATH}`, [
+      LEGACY_ANSWERS_PATH,
+      ANSWERS_PATH,
+    ]);
+  }
+  return location;
 }
 
 /** The PR-body note for the one-time move; "" when nothing moved. */
-export function answersMoveNote(location: AnswersLocation): string {
+export function answersMoveNote(location: Location): string {
   if (location !== "moved") return "";
   return [
     "> [!NOTE]",

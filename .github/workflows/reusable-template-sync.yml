@@ -133,6 +133,15 @@ jobs:
       - name: Move the answers file to .github/
         run: bun .github/scripts/sync/relocate_answers.ts
 
+      # One-shot fleet transition: SECURITY.md leaves the repository root
+      # for .github/SECURITY.md. Moved byte-for-byte and committed BEFORE
+      # copier runs so the local-content carry finds the repository-owned
+      # half at the new path instead of retired-file cleanup deleting it;
+      # fails loudly when the policy sits at both paths or is not a regular
+      # file. Self-retiring once the fleet has crossed.
+      - name: Move the security policy to .github/
+        run: bun .github/scripts/sync/relocate_security_policy.ts
+
       # Live visibility and description feed the render on purpose (the
       # visibility-gated renders must follow the repo's real state), so a
       # value changed out-of-band would auto-merge into declared truth.

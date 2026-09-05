@@ -17,6 +17,7 @@ import {
   REFERENCED_LABELS_NAME,
   REGISTRATION_FLIP_NAME,
   REMOVED_SPLITS_NAME,
+  SECURITY_MOVE_NAME,
   SETTINGS_LAYERING_NAME,
   STARTER_PINS_NAME,
   TAIL_SHRANK_NAME,
@@ -214,6 +215,13 @@ describe("open_pr sections and auto-merge", () => {
       name: ANSWERS_MOVE_NAME,
       content:
         "### Answers file relocated\n\n`.copier-answers.yml` -> `.github/.copier-answers.yml`\n",
+      forcesReview: false,
+    },
+    {
+      reason: "security policy move: nothing leaves the repository",
+      where: "temp",
+      name: SECURITY_MOVE_NAME,
+      content: "> [!NOTE]\n> SECURITY POLICY MOVE: `SECURITY.md` -> `.github/SECURITY.md`\n",
       forcesReview: false,
     },
     {

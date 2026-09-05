@@ -69,7 +69,13 @@ import {
 import { stageComposedTreeArgv } from "../shared/stage_tree.ts";
 import { AnswersFileError, readAnswersFile } from "./answers_file.ts";
 import { ANSWERS_PATH, answersMoveNote, relocateAnswers } from "./relocate_answers.ts";
-import { ANSWERS_MOVE_NAME } from "./section_files.ts";
+import {
+  declaresLegacyMirrorSource,
+  relocateSecurityPolicy,
+  SECURITY_PATH,
+  securityMoveNote,
+} from "./relocate_security_policy.ts";
+import { ANSWERS_MOVE_NAME, SECURITY_MOVE_NAME } from "./section_files.ts";
 import { rewriteSrcPath } from "./src_path.ts";
 
 const REPO_ROOT = resolve(import.meta.dir, "..", "..", "..");
@@ -388,6 +394,28 @@ export function rehearseRepo(slug: string, options: RehearsalOptions): Rehearsal
     if (answersLocation === "not-a-file") {
       throw new RehearsalError(
         `${slug} carries something other than a regular file at ${ANSWERS_PATH} or the ` +
+          "retired root path; the sync would refuse it",
+      );
+    }
+    // The security-policy move (relocate_security_policy.ts) replays in the
+    // same slot: a pre-move clone gets the same git mv plus commit and the
+    // same PR-body note; the two refusals the production leg fails on fail
+    // the rehearsal too.
+    const securityLocation = relocateSecurityPolicy(targetDir);
+    writeFileSync(
+      join(temp, SECURITY_MOVE_NAME),
+      securityMoveNote(securityLocation, declaresLegacyMirrorSource(targetDir)),
+      "utf-8",
+    );
+    if (securityLocation === "both") {
+      throw new RehearsalError(
+        `${slug} carries a security policy at both ${SECURITY_PATH} and the retired root ` +
+          "path; the sync would refuse it - merge and delete the root copy",
+      );
+    }
+    if (securityLocation === "not-a-file") {
+      throw new RehearsalError(
+        `${slug} carries something other than a regular file at ${SECURITY_PATH} or the ` +
           "retired root path; the sync would refuse it",
       );
     }

@@ -3931,7 +3931,7 @@ const rules: Rule[] = [
 
   {
     // Most dogfooded copies (.editorconfig,
-    // CODE_OF_CONDUCT.md, CODEOWNERS, auto-assign.yml,
+    // .github/CODE_OF_CONDUCT.md, CODEOWNERS, auto-assign.yml,
     // dependabot-bun-lockfile.yml, validate-skills.yml) are GENERATED from
     // their templates by
     // scripts/render_dogfood.ts, byte-checked by `bun run dogfood:check`,
@@ -3954,8 +3954,8 @@ const rules: Rule[] = [
           // The template's render is the managed region (BEGIN through END
           // markers); everything a repo appends after the END marker is its
           // own, hence prefix semantics.
-          repo: "SECURITY.md",
-          tpl: "templates/base/SECURITY.md.jinja",
+          repo: ".github/SECURITY.md",
+          tpl: "templates/base/.github/SECURITY.md.jinja",
           mode: "prefix",
         },
         {

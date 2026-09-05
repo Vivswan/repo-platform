@@ -9,9 +9,11 @@
     ".gitattributes": {"class": "split", "grammar": "managed-region", "begin": "# BEGIN REPO-PLATFORM MANAGED", "end": "# END REPO-PLATFORM MANAGED", "hash": "92725e53e7a53a282e02b075a56e2bf59424be384c53d7bf7d1116f1f8a9141e"},
     ".github/.copier-answers.yml": {"class": "managed", "hash": "c738a06cf3022f0bb43a94cacf5665e155e7776112f57559e5d0455cb96a664a"},
     ".github/CODEOWNERS": {"class": "split", "grammar": "managed-region", "begin": "# BEGIN REPO-PLATFORM MANAGED", "end": "# END REPO-PLATFORM MANAGED", "hash": "331b950ff34c80af626de9342204f19c460a6fa0ae94a646d6618be66934b302"},
+    ".github/CODE_OF_CONDUCT.md": {"class": "managed", "hash": "1635b6fddff1a322424fddf12ac0d8e269541976d40b5b6bf0dbebc9c7afcf68"},
     ".github/ISSUE_TEMPLATE/bug_report.yml": {"class": "starter"},
     ".github/ISSUE_TEMPLATE/config.yml": {"class": "starter"},
     ".github/ISSUE_TEMPLATE/feature_request.yml": {"class": "starter"},
+    ".github/SECURITY.md": {"class": "split", "grammar": "managed-region", "begin": "<!-- BEGIN REPO-PLATFORM MANAGED -->", "end": "<!-- END REPO-PLATFORM MANAGED -->", "hash": "fd896f287eeca0e7c328ec0a23021dbf6db268e1fb0198828d26e388407080ba"},
     ".github/actionlint.yaml": {"class": "starter"},
     ".github/agents.md": {"class": "managed", "hash": "79909577a70fc4971a7fcfd3cbec6a1af7182ca2dadc87f2979dce5e28f93ca0"},
     ".github/copilot-instructions.md": {"class": "managed", "hash": "79909577a70fc4971a7fcfd3cbec6a1af7182ca2dadc87f2979dce5e28f93ca0"},
@@ -45,10 +47,8 @@
     ".yamllint": {"class": "managed", "hash": "1e533293401ff3d0ee4662292995fd932d2998142ce594fb14e65a8d3a3140fb"},
     "AGENTS.md": {"class": "split", "grammar": "managed-region", "begin": "<!-- BEGIN REPO-PLATFORM MANAGED -->", "end": "<!-- END REPO-PLATFORM MANAGED -->", "hash": "ab04e5183d44e356434b991809037645968d780ec744bb239429408429952f60"},
     "CLAUDE.md": {"class": "managed", "hash": "a54ff182c7e8acf56acfd6e4b9c3ff41e2c41a31c9b211b2deb9df75d9a478f9"},
-    "CODE_OF_CONDUCT.md": {"class": "managed", "hash": "1635b6fddff1a322424fddf12ac0d8e269541976d40b5b6bf0dbebc9c7afcf68"},
-    "CONTRIBUTING.md": {"class": "split", "grammar": "managed-region", "begin": "<!-- BEGIN REPO-PLATFORM MANAGED -->", "end": "<!-- END REPO-PLATFORM MANAGED -->", "hash": "c6c884b6a056371827f407d53af3d4df179c39b7210345b77f1c2c05ac6e6069"},
+    "CONTRIBUTING.md": {"class": "split", "grammar": "managed-region", "begin": "<!-- BEGIN REPO-PLATFORM MANAGED -->", "end": "<!-- END REPO-PLATFORM MANAGED -->", "hash": "9b9c271a190bcf64b6be1feef9466dd81e976a1edcf3fd996c1d50e5c416781b"},
     "LICENSE.md": {"class": "split", "grammar": "managed-region", "begin": "<!-- BEGIN REPO-PLATFORM MANAGED -->", "end": "<!-- END REPO-PLATFORM MANAGED -->", "hash": "80508c708b5873e08288a7888ed987674af16ed087ee7e349d98e57def3a274b"},
-    "SECURITY.md": {"class": "split", "grammar": "managed-region", "begin": "<!-- BEGIN REPO-PLATFORM MANAGED -->", "end": "<!-- END REPO-PLATFORM MANAGED -->", "hash": "fd896f287eeca0e7c328ec0a23021dbf6db268e1fb0198828d26e388407080ba"},
     "release-please-config.json": {"class": "starter"}
   }
 }

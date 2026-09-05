@@ -43,6 +43,13 @@ export const GATE_REWORK_NAME = "gate-rework.md";
  * self-retires once the fleet has crossed. */
 export const ANSWERS_MOVE_NAME = "answers-move.md";
 
+/** relocate_security_policy.ts's transition note: the one-time
+ * byte-for-byte move of SECURITY.md from the repository root to
+ * .github/SECURITY.md, its repository-owned half riding the rename.
+ * Informational, never forces review (nothing leaves the repository);
+ * self-retires once the fleet has crossed. */
+export const SECURITY_MOVE_NAME = "security-move.md";
+
 /** referenced_labels.ts's report: label(s) the target's issue forms or
  * workflows reference that the merged settings label roster does not
  * declare - the apply deletes undeclared labels, so each reference is
