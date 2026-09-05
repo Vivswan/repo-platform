@@ -4,7 +4,15 @@
 // template side, and the warn-don't-fail contract on unparseable input.
 
 import { describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readlinkSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { isMarkerLine, type RegionSlice, splitManagedRegion } from "../../actions/shared/grammar";
@@ -16,9 +24,12 @@ import {
 import {
   describeRewritten,
   entryHash,
+  hookArgs,
   normalizeFromText,
   normalizeSymlinkTargets,
+  provenanceSlotProblem,
   recordedCommit,
+  rewriteRecordedCommit,
   stampManifestText,
 } from "../../actions/shared/stamp_manifest";
 import { boundedSpawnSync } from "../shared/bounded_spawn";
@@ -162,6 +173,554 @@ describe("recordedCommit", () => {
   test("a missing file or key yields null", () => {
     expect(recordedCommit(tree({}))).toBeNull();
     expect(recordedCommit(tree({ ".github/.copier-answers.yml": "_src_path: x\n" }))).toBeNull();
+  });
+});
+
+describe("rewriteRecordedCommit", () => {
+  const SHA = "31beeca7cfa33c8b7271e31d16d6517902131ac8";
+  const REST = "_src_path: gh:Vivswan/repo-platform\nproject_name: X\n";
+  test.each([
+    {
+      reason: "copier's plain abbreviation",
+      before: "_commit: 31beeca\n",
+      after: `_commit: ${SHA}\n`,
+    },
+    { reason: "a double-quoted value", before: '_commit: "2753404"\n', after: `_commit: ${SHA}\n` },
+    { reason: "a single-quoted value", before: "_commit: '2753404'\n", after: `_commit: ${SHA}\n` },
+    {
+      reason: "an exponent-shaped bare value copier leaves unquoted",
+      before: "_commit: 1626e53\n",
+      after: `_commit: ${SHA}\n`,
+    },
+    {
+      reason: "a tag name from describe",
+      before: "_commit: v1.0-rc-1\n",
+      after: `_commit: ${SHA}\n`,
+    },
+    {
+      reason: "an already-full sha (idempotent)",
+      before: `_commit: ${SHA}\n`,
+      after: `_commit: ${SHA}\n`,
+    },
+    {
+      reason: "odd spacing after the key survives, the value does not",
+      before: "_commit:   abc1234   \n",
+      after: `_commit:   ${SHA}\n`,
+    },
+  ])("$reason", ({ before, after }) => {
+    // Only the _commit line moves; the header comment and other keys are
+    // byte-identical.
+    const header = "# managed by repo-platform\n";
+    expect(rewriteRecordedCommit(header + before + REST, SHA)).toBe(header + after + REST);
+  });
+
+  test("an all-digit sha is written quoted so PyYAML keeps it a string", () => {
+    const digits = "1234567890".repeat(4);
+    expect(rewriteRecordedCommit("_commit: abc1234\n", digits)).toBe(`_commit: "${digits}"\n`);
+    // Round trip through the hook's own reader: the quotes are transparent.
+    expect(recordedCommit(tree({ ".github/.copier-answers.yml": `_commit: "${digits}"\n` }))).toBe(
+      digits,
+    );
+  });
+
+  test("a text without exactly one _commit line, or a bad sha, is refused", () => {
+    expect(() => rewriteRecordedCommit(REST, SHA)).toThrow("carries 0 _commit lines");
+    expect(() => rewriteRecordedCommit("", SHA)).toThrow("carries 0 _commit lines");
+    expect(() => rewriteRecordedCommit("_commit: a\n_commit: b\n", SHA)).toThrow(
+      "carries 2 _commit lines",
+    );
+    for (const bad of ["31beeca", SHA.toUpperCase(), `${SHA}f`, "v1.0", ""]) {
+      expect(() => rewriteRecordedCommit("_commit: x\n", bad)).toThrow("must be a full 40-hex sha");
+    }
+  });
+});
+
+describe("provenanceSlotProblem", () => {
+  const SELF_OK = `    ".github/repo-platform-manifest.json": {"class": "managed", "hash": null, "commit": null}`;
+  test.each([
+    { reason: "the rendered self entry", text: manifestText([SELF_OK]), expected: null },
+    {
+      reason: "a stamped self entry (idempotent re-stamp)",
+      text: manifestText([
+        `    ".github/repo-platform-manifest.json": {"class": "managed", "hash": null, "commit": "abc"}`,
+      ]),
+      expected: null,
+    },
+    { reason: "unparseable text", text: "nope", expected: "does not parse" },
+    {
+      reason: "no self entry",
+      text: manifestText([`    "a.md": {"class": "managed", "hash": null}`]),
+      expected: "has no .github/repo-platform-manifest.json entry under files",
+    },
+    {
+      reason:
+        "a canonical top-level decoy beside a slot-less files entry is judged on the files entry",
+      text: [
+        "{",
+        '  ".github/repo-platform-manifest.json": {"class": "managed", "hash": null, "commit": null},',
+        '  "files": {',
+        `    ".github/repo-platform-manifest.json": {"class": "starter"}`,
+        "  }",
+        "}",
+        "",
+      ].join("\n"),
+      expected: 'keys are ["class"], expected exactly ["class","hash","commit"]',
+    },
+    {
+      reason: "a files entry spread over several lines",
+      text: [
+        "{",
+        '  "files": {',
+        `    ".github/repo-platform-manifest.json": {`,
+        '      "class": "managed", "hash": null, "commit": null',
+        "    }",
+        "  }",
+        "}",
+        "",
+      ].join("\n"),
+      expected: "not on one line",
+    },
+    {
+      reason: "a decoy line differing from the files entry",
+      text: [
+        "{",
+        '  ".github/repo-platform-manifest.json": {"class": "managed", "hash": null, "commit": "x"},',
+        '  "files": {',
+        `    ".github/repo-platform-manifest.json": {"class": "managed", "hash": null, "commit": null}`,
+        "  }",
+        "}",
+        "",
+      ].join("\n"),
+      expected: "not in the rendered layout",
+    },
+    {
+      reason: "a self entry missing the commit slot",
+      text: manifestText([
+        `    ".github/repo-platform-manifest.json": {"class": "managed", "hash": null}`,
+      ]),
+      expected: 'keys are ["class","hash"], expected exactly ["class","hash","commit"]',
+    },
+    {
+      reason: "nested look-alike slots are not the slot",
+      text: manifestText([
+        `    ".github/repo-platform-manifest.json": {"class": "managed", "meta": {"hash": null, "commit": null}}`,
+      ]),
+      expected: 'expected exactly ["class","hash","commit"]',
+    },
+    {
+      reason: "escaped-quote keys spelling the tokens before the real slots",
+      text: manifestText([
+        `    ".github/repo-platform-manifest.json": {"class":"managed","foo\\"hash": null,"foo\\"commit": null,"hash":null,"commit":null}`,
+      ]),
+      expected: 'expected exactly ["class","hash","commit"]',
+    },
+    {
+      reason: "the right keys in another order",
+      text: manifestText([
+        `    ".github/repo-platform-manifest.json": {"hash": null, "class": "managed", "commit": null}`,
+      ]),
+      expected: 'expected exactly ["class","hash","commit"]',
+    },
+    {
+      reason: "a compact spelling the stamper's line rewrite would not match",
+      text: manifestText([
+        `    ".github/repo-platform-manifest.json": {"class":"managed","hash":null,"commit":null}`,
+      ]),
+      expected: "not in the rendered layout",
+    },
+    {
+      reason: "a hash value that is not 64 hex: the token match skips it",
+      text: manifestText([
+        `    ".github/repo-platform-manifest.json": {"class": "managed", "hash": "zz", "commit": null}`,
+      ]),
+      expected: "a form the stamper cannot rewrite",
+    },
+  ])("$reason", ({ text, expected }) => {
+    const problem = provenanceSlotProblem(text);
+    if (expected === null) expect(problem).toBeNull();
+    else expect(problem).toContain(expected);
+  });
+});
+
+describe("hookArgs", () => {
+  const SHA = "31beeca7cfa33c8b7271e31d16d6517902131ac8";
+  test.each([
+    { argv: [], expected: { root: null, commit: null } },
+    { argv: ["--commit", SHA], expected: { root: null, commit: SHA } },
+    { argv: ["--root", "/x"], expected: { root: "/x", commit: null } },
+    { argv: ["--root", "/x", "--commit", SHA], expected: { root: "/x", commit: SHA } },
+    { argv: ["--commit", SHA, "--root", "/x"], expected: { root: "/x", commit: SHA } },
+  ])("$argv", ({ argv, expected }) => {
+    expect(hookArgs(argv)).toEqual(expected);
+  });
+
+  test("malformed invocations fail loudly", () => {
+    for (const argv of [
+      ["--commit"],
+      ["--root"],
+      ["--other", SHA],
+      ["--commit", SHA, "extra"],
+      ["--root", "/x", "--root", "/y"],
+      ["--commit", SHA, "--commit", SHA],
+      ["--root", "--commit"],
+      ["--root", "--commit", SHA],
+    ]) {
+      expect(() => hookArgs(argv)).toThrow("usage:");
+    }
+    expect(() => hookArgs(["--commit", "31beeca"])).toThrow("must be a full 40-hex sha");
+    // An unrendered template expression (copier without vcs_ref_hash
+    // support, or a hand-run outside a git clone) is the loud case.
+    expect(() => hookArgs(["--commit", "{{ _copier_conf.vcs_ref_hash }}"])).toThrow(
+      "must be a full 40-hex sha",
+    );
+    expect(() => hookArgs(["--commit", "None"])).toThrow("must be a full 40-hex sha");
+  });
+});
+
+describe("the root the hook stamps", () => {
+  const SHA = "31beeca7cfa33c8b7271e31d16d6517902131ac8";
+  const hook = join(import.meta.dir, "../../actions/shared/stamp_manifest.ts");
+  const ANSWERS = "_commit: 31beeca\n_src_path: ./tree\n";
+  const manifest = () =>
+    manifestText([
+      `    ".github/repo-platform-manifest.json": {"class": "managed", "hash": null, "commit": null}`,
+    ]);
+  const pair = () =>
+    tree({
+      ".github/.copier-answers.yml": ANSWERS,
+      ".github/repo-platform-manifest.json": manifest(),
+    });
+
+  test("an inherited TARGET_DIR never chooses the tree: --root wins, else cwd", () => {
+    // The class this guards: a harness exported TARGET_DIR for one leg and
+    // a later render's hook stamped THAT tree instead of its own.
+    const other = pair();
+    const viaRoot = pair();
+    const viaCwd = pair();
+    const env = { ...process.env, TARGET_DIR: other };
+    expect(
+      boundedSpawnSync(["bun", hook, "--root", viaRoot, "--commit", SHA], { env }).exitCode,
+    ).toBe(0);
+    expect(boundedSpawnSync(["bun", hook, "--commit", SHA], { cwd: viaCwd, env }).exitCode).toBe(0);
+    expect(recordedCommit(viaRoot)).toBe(SHA);
+    expect(recordedCommit(viaCwd)).toBe(SHA);
+    expect(readFileSync(join(other, ".github/.copier-answers.yml"), "utf-8")).toBe(ANSWERS);
+    expect(readFileSync(join(other, ".github/repo-platform-manifest.json"), "utf-8")).toBe(
+      manifest(),
+    );
+  });
+});
+
+describe("the hook as copier runs it", () => {
+  const SHA = "31beeca7cfa33c8b7271e31d16d6517902131ac8";
+  const hook = join(import.meta.dir, "../../actions/shared/stamp_manifest.ts");
+  const run = (root: string, args: string[]) =>
+    boundedSpawnSync(["bun", hook, "--root", root, ...args], { env: process.env });
+
+  test("--commit rewrites the answers line and the manifest's provenance slot follows", () => {
+    const answers = "# managed\n_commit: 31beeca\n_src_path: ./tree\n";
+    const root = tree({
+      ".github/.copier-answers.yml": answers,
+      ".github/repo-platform-manifest.json": manifestText([
+        `    ".github/.copier-answers.yml": {"class": "managed", "hash": null}`,
+        `    ".github/repo-platform-manifest.json": {"class": "managed", "hash": null, "commit": null}`,
+      ]),
+    });
+    const proc = run(root, ["--commit", SHA]);
+    expect(proc.exitCode).toBe(0);
+    const rewritten = `# managed\n_commit: ${SHA}\n_src_path: ./tree\n`;
+    expect(Bun.file(join(root, ".github/.copier-answers.yml")).text()).resolves.toBe(rewritten);
+    const manifest = readFileSync(join(root, ".github/repo-platform-manifest.json"), "utf-8");
+    expect(manifest).toContain(`"commit": "${SHA}"`);
+    expect(manifest).toContain(`"hash": "${sha256(rewritten)}"`);
+    // The sync's final re-stamp (no argument) keeps the recorded value.
+    expect(run(root, []).exitCode).toBe(0);
+    expect(recordedCommit(root)).toBe(SHA);
+  });
+
+  test("--commit against a tree without an answers file fails instead of stamping blind", () => {
+    const manifest = manifestText([
+      `    ".github/repo-platform-manifest.json": {"class": "managed", "hash": null, "commit": null}`,
+    ]);
+    const root = tree({ ".github/repo-platform-manifest.json": manifest });
+    const proc = run(root, ["--commit", SHA]);
+    expect(proc.exitCode).not.toBe(0);
+    expect(proc.stderr).toContain("ENOENT");
+    expect(readFileSync(join(root, ".github/repo-platform-manifest.json"), "utf-8")).toBe(manifest);
+  });
+
+  const ANSWERS = "# managed\n_commit: 31beeca\n_src_path: ./tree\n";
+  const SELF = `    ".github/repo-platform-manifest.json": {"class": "managed", "hash": null, "commit": null}`;
+  test.each([
+    { reason: "a missing manifest", manifest: null, stderr: "not found" },
+    { reason: "a malformed manifest", manifest: "not json\n", stderr: "does not parse" },
+    {
+      reason: "a manifest without a self entry",
+      manifest: manifestText([`    "x.md": {"class": "managed", "hash": null}`]),
+      stderr: "has no .github/repo-platform-manifest.json entry under files",
+    },
+    {
+      reason: "a canonical top-level decoy beside a files entry without slots",
+      manifest: [
+        "{",
+        '  ".github/repo-platform-manifest.json": {"class": "managed", "hash": null, "commit": null},',
+        '  "files": {',
+        `    ".github/repo-platform-manifest.json": {"class": "starter"}`,
+        "  }",
+        "}",
+        "",
+      ].join("\n"),
+      stderr: 'expected exactly ["class","hash","commit"]',
+    },
+    {
+      reason: "a files entry spread over several lines (the line stamper never reaches it)",
+      manifest: [
+        "{",
+        '  "files": {',
+        `    ".github/repo-platform-manifest.json": {`,
+        '      "class": "managed", "hash": null, "commit": null',
+        "    }",
+        "  }",
+        "}",
+        "",
+      ].join("\n"),
+      stderr: "not on one line",
+    },
+    {
+      reason: "a self entry without a commit slot",
+      manifest: manifestText([
+        `    ".github/repo-platform-manifest.json": {"class": "managed", "hash": null}`,
+      ]),
+      stderr: 'expected exactly ["class","hash","commit"]',
+    },
+    {
+      reason: "a self entry whose slots are nested look-alikes",
+      manifest: manifestText([
+        `    ".github/repo-platform-manifest.json": {"class": "managed", "meta": {"hash": null, "commit": null}}`,
+      ]),
+      stderr: 'expected exactly ["class","hash","commit"]',
+    },
+    {
+      reason: "escaped-quote keys that spell the tokens before the real slots",
+      manifest: manifestText([
+        `    ".github/repo-platform-manifest.json": {"class":"managed","foo\\"hash": null,"foo\\"commit": null,"hash":null,"commit":null}`,
+      ]),
+      stderr: 'expected exactly ["class","hash","commit"]',
+    },
+    {
+      reason: "the right keys spelled compactly (parses, but the stamper would never rewrite it)",
+      manifest: manifestText([
+        `    ".github/repo-platform-manifest.json": {"class":"managed","hash":null,"commit":null}`,
+      ]),
+      stderr: "not in the rendered layout",
+    },
+    {
+      reason: "a hash value the stamper's token match skips",
+      manifest: manifestText([
+        `    ".github/repo-platform-manifest.json": {"class": "managed", "hash": "zz", "commit": null}`,
+      ]),
+      stderr: "a form the stamper cannot rewrite",
+    },
+  ])(
+    "--commit under $reason fails before touching either file (the pair never disagrees)",
+    ({ manifest, stderr }) => {
+      const files: Record<string, string> = { ".github/.copier-answers.yml": ANSWERS };
+      if (manifest !== null) files[".github/repo-platform-manifest.json"] = manifest;
+      const root = tree(files);
+      const proc = run(root, ["--commit", SHA]);
+      expect(proc.exitCode).not.toBe(0);
+      expect(proc.stderr).toContain(stderr);
+      expect(proc.stderr).toContain("nothing was written");
+      // The answers file is byte-identical: the abbreviation is still there.
+      expect(readFileSync(join(root, ".github/.copier-answers.yml"), "utf-8")).toBe(ANSWERS);
+      if (manifest !== null) {
+        expect(readFileSync(join(root, ".github/repo-platform-manifest.json"), "utf-8")).toBe(
+          manifest,
+        );
+      }
+    },
+  );
+
+  test.each([
+    { reason: "the answers write itself fails half way", target: ".github/.copier-answers.yml" },
+    {
+      reason: "the manifest write itself fails half way",
+      target: ".github/repo-platform-manifest.json",
+    },
+  ])("$reason: both files read back byte-identical", ({ target }) => {
+    // A write that truncates and then fails (fault_write.preload.ts
+    // injects EIO after the truncate) is the half-written state; each
+    // write is marked attempted BEFORE it starts, so the rollback covers
+    // it. Under the old order the truncated file would have been left.
+    const manifest = manifestText([SELF]);
+    const root = tree({
+      ".github/.copier-answers.yml": ANSWERS,
+      ".github/repo-platform-manifest.json": manifest,
+    });
+    const proc = boundedSpawnSync(
+      [
+        "bun",
+        "--preload",
+        join(import.meta.dir, "fault_write.preload.ts"),
+        hook,
+        "--root",
+        root,
+        "--commit",
+        SHA,
+      ],
+      { env: { ...process.env, FAULT_WRITE_PATH: join(root, target) } },
+    );
+    expect(proc.exitCode).not.toBe(0);
+    expect(proc.stderr).toContain("EIO: injected write failure");
+    expect(readFileSync(join(root, ".github/.copier-answers.yml"), "utf-8")).toBe(ANSWERS);
+    expect(readFileSync(join(root, ".github/repo-platform-manifest.json"), "utf-8")).toBe(manifest);
+  });
+
+  test("a failure AFTER the answers write rolls it back: the pair is never half-written", () => {
+    // Validation passes (stampable manifest, one _commit line), the answers
+    // file is written, then hashing a managed file the process cannot
+    // read throws (EACCES) before the manifest write: both files must read
+    // back byte-identical to their pre-run state.
+    if (process.getuid?.() === 0) return; // root ignores mode bits
+    const manifest = manifestText([SELF, `    "secret.md": {"class": "managed", "hash": null}`]);
+    const root = tree({
+      ".github/.copier-answers.yml": ANSWERS,
+      ".github/repo-platform-manifest.json": manifest,
+      "secret.md": "unreadable\n",
+    });
+    chmodSync(join(root, "secret.md"), 0o000);
+    try {
+      const proc = run(root, ["--commit", SHA]);
+      expect(proc.exitCode).not.toBe(0);
+      expect(proc.stderr).toContain("EACCES");
+      expect(readFileSync(join(root, ".github/.copier-answers.yml"), "utf-8")).toBe(ANSWERS);
+      expect(readFileSync(join(root, ".github/repo-platform-manifest.json"), "utf-8")).toBe(
+        manifest,
+      );
+    } finally {
+      chmodSync(join(root, "secret.md"), 0o600);
+    }
+  });
+
+  test("what the preflight cannot see, the structural read-back catches and rolls back BOTH files", () => {
+    // A canonical decoy line at the top level passes every line check; the
+    // real files entry spans lines, so the stamper rewrites only the decoy.
+    // The read-back reads files[MANIFEST_NAME] structurally, sees the null
+    // commit, throws, and restores the answers file AND the written
+    // manifest byte for byte.
+    const manifest = [
+      "{",
+      '  ".github/repo-platform-manifest.json": {"class": "managed", "hash": null, "commit": null},',
+      '  "files": {',
+      '    ".github/.copier-answers.yml": {"class": "managed", "hash": null},',
+      `    ".github/repo-platform-manifest.json": {`,
+      '      "class": "managed", "hash": null, "commit": null',
+      "    }",
+      "  }",
+      "}",
+      "",
+    ].join("\n");
+    const root = tree({
+      ".github/.copier-answers.yml": ANSWERS,
+      ".github/repo-platform-manifest.json": manifest,
+    });
+    const proc = run(root, ["--commit", SHA]);
+    expect(proc.exitCode).not.toBe(0);
+    expect(proc.stderr).toContain("provenance disagrees after stamping");
+    expect(readFileSync(join(root, ".github/.copier-answers.yml"), "utf-8")).toBe(ANSWERS);
+    expect(readFileSync(join(root, ".github/repo-platform-manifest.json"), "utf-8")).toBe(manifest);
+  });
+
+  test("a decoy hiding a multi-line entry whose commit already matches still fails on the self-hash", () => {
+    // The real files entry already records the sha but carries a non-null
+    // self-hash (which the stamper resets only on the lines it rewrites).
+    // A byte-identical decoy passes the preflight and gets reset; the real
+    // entry keeps its hash. The read-back verifies the WHOLE self entry -
+    // commit AND a null hash - so this rolls back too.
+    const hash = "a".repeat(64);
+    const manifest = [
+      "{",
+      `  ".github/repo-platform-manifest.json": {"class": "managed", "hash": "${hash}", "commit": "${SHA}"},`,
+      '  "files": {',
+      '    ".github/.copier-answers.yml": {"class": "managed", "hash": null},',
+      `    ".github/repo-platform-manifest.json": {`,
+      `      "class": "managed", "hash": "${hash}", "commit": "${SHA}"`,
+      "    }",
+      "  }",
+      "}",
+      "",
+    ].join("\n");
+    const root = tree({
+      ".github/.copier-answers.yml": ANSWERS,
+      ".github/repo-platform-manifest.json": manifest,
+    });
+    const proc = run(root, ["--commit", SHA]);
+    expect(proc.exitCode).not.toBe(0);
+    expect(proc.stderr).toContain("provenance disagrees after stamping");
+    expect(readFileSync(join(root, ".github/.copier-answers.yml"), "utf-8")).toBe(ANSWERS);
+    expect(readFileSync(join(root, ".github/repo-platform-manifest.json"), "utf-8")).toBe(manifest);
+  });
+
+  test("a recorded commit value carrying an escaped quote is replaced whole", () => {
+    // The commit token consumes a complete JSON string: a value like
+    // "foo\"bar" used to be cut at the escaped quote, leaving invalid JSON.
+    const root = tree({
+      ".github/.copier-answers.yml": ANSWERS,
+      ".github/repo-platform-manifest.json": manifestText([
+        `    ".github/repo-platform-manifest.json": {"class": "managed", "hash": null, "commit": "foo\\"bar"}`,
+      ]),
+    });
+    expect(run(root, ["--commit", SHA]).exitCode).toBe(0);
+    const stamped = readFileSync(join(root, ".github/repo-platform-manifest.json"), "utf-8");
+    expect(JSON.parse(stamped).files[".github/repo-platform-manifest.json"].commit).toBe(SHA);
+    expect(recordedCommit(root)).toBe(SHA);
+  });
+
+  test("a refused render mutates nothing, symlink normalization included", () => {
+    // Every check runs before the first mutation: with a manifest-listed
+    // link still pointing at its .jinja twin and an answers file with no
+    // _commit line, the refusal must leave the link target untouched (a
+    // normalization that ran first would have rewritten it).
+    const root = tree({
+      ".github/.copier-answers.yml": "_src_path: ./tree\n",
+      ".github/repo-platform-manifest.json": manifestText([
+        SELF,
+        `    "AGENTS.md": {"class": "managed", "hash": null}`,
+      ]),
+    });
+    symlinkSync("CLAUDE.md.jinja", join(root, "AGENTS.md"));
+    const proc = run(root, ["--commit", SHA]);
+    expect(proc.exitCode).not.toBe(0);
+    expect(proc.stderr).toContain("carries 0 _commit lines");
+    expect(readlinkSync(join(root, "AGENTS.md"))).toBe("CLAUDE.md.jinja");
+    expect(readFileSync(join(root, ".github/.copier-answers.yml"), "utf-8")).toBe(
+      "_src_path: ./tree\n",
+    );
+  });
+
+  test("the positive control: the same answers with a stampable manifest write both halves", () => {
+    const root = tree({
+      ".github/.copier-answers.yml": ANSWERS,
+      ".github/repo-platform-manifest.json": manifestText([SELF]),
+    });
+    expect(run(root, ["--commit", SHA]).exitCode).toBe(0);
+    expect(recordedCommit(root)).toBe(SHA);
+    expect(readFileSync(join(root, ".github/repo-platform-manifest.json"), "utf-8")).toContain(
+      `"commit": "${SHA}"`,
+    );
+  });
+
+  test("a malformed --commit fails the render loudly instead of stamping", () => {
+    const root = tree({
+      ".github/.copier-answers.yml": "_commit: 31beeca\n",
+      ".github/repo-platform-manifest.json": manifestText([
+        `    ".github/repo-platform-manifest.json": {"class": "managed", "hash": null, "commit": null}`,
+      ]),
+    });
+    const proc = run(root, ["--commit", "31beeca"]);
+    expect(proc.exitCode).not.toBe(0);
+    expect(proc.stderr).toContain("must be a full 40-hex sha");
+    expect(recordedCommit(root)).toBe("31beeca");
   });
 });
 

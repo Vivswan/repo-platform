@@ -521,6 +521,11 @@ jobs:
         run: pipx install copier
       - name: Update from a previous build tree to a fresh build
         run: .github/scripts/ci/upgrade_path_test.sh
+      # The one bun test that needs real copier: the stamp hook runs on the
+      # destination exactly once per copy, update, and recopy (the
+      # script-tests job has no copier and skips it).
+      - name: Count stamp hook invocations per render
+        run: bun run test tests/actions/stamp_hook_invocations.test.ts
 
   # The pages-site action's vitepress build, end to end in the runner's
   # own directory topology (workspace, action tree, and RUNNER_TEMP apart):

@@ -32,6 +32,7 @@ import {
   fleetCiRenderMismatches,
   fleetWorkflowPinMismatches,
   gatesOnModule,
+  hookCommandParts,
   inlineFunctionCopies,
   isOwnPagesOrigin,
   labelPreflightFileMismatches,
@@ -55,6 +56,8 @@ import {
   rosterMismatches,
   ruleRosterMismatches,
   SETUP_VERSION_FILES,
+  STAMP_COMMIT_ARG,
+  STAMP_ROOT_ARG,
   semanticLines,
   setMismatch,
   settingsHealShaPlumbingMismatches,
@@ -3298,5 +3301,48 @@ describe("isOwnPagesOrigin", () => {
     expect(isOwnPagesOrigin(bareIo, at(bareIo), "io", "Vivswan")).toBe(false);
     // Only the io segment is ever a Pages origin.
     expect(isOwnPagesOrigin("x/repo-platform", 0, "x", "Vivswan")).toBe(false);
+  });
+});
+
+describe("hookCommandParts", () => {
+  const stamp = 'bun "{{ _copier_conf.src_path }}/actions/shared/stamp_manifest.ts"';
+  test.each([
+    {
+      command: `${stamp} ${STAMP_ROOT_ARG} ${STAMP_COMMIT_ARG}`,
+      expected: { path: "actions/shared/stamp_manifest.ts", rootArg: true, commitArg: true },
+    },
+    {
+      command: `${stamp} ${STAMP_COMMIT_ARG}`,
+      expected: { path: "actions/shared/stamp_manifest.ts", rootArg: false, commitArg: true },
+    },
+    {
+      command: `${stamp} ${STAMP_ROOT_ARG}`,
+      expected: { path: "actions/shared/stamp_manifest.ts", rootArg: true, commitArg: false },
+    },
+    {
+      command: stamp,
+      expected: { path: "actions/shared/stamp_manifest.ts", rootArg: false, commitArg: false },
+    },
+    {
+      command: 'bun "{{ _copier_conf.src_path }}/actions/other/task.ts"',
+      expected: { path: "actions/other/task.ts", rootArg: false, commitArg: false },
+    },
+  ])("$command", ({ command, expected }) => {
+    expect(hookCommandParts(command)).toEqual(expected);
+  });
+
+  test("a hook that is not the src_path-anchored bun shape is a lost anchor", () => {
+    for (const command of [
+      "bun actions/shared/stamp_manifest.ts",
+      `${stamp} --commit "{{ _commit }}"`,
+      `${stamp} --commit`,
+      `${stamp} ${STAMP_COMMIT_ARG} ${STAMP_ROOT_ARG}`,
+      `${stamp} --root "{{ _copier_conf.dst_path }}"`,
+      `python "{{ _copier_conf.src_path }}/x.py"`,
+    ]) {
+      expect(() => hookCommandParts(command)).toThrow(
+        "anchor for a src_path-anchored bun hook command",
+      );
+    }
   });
 });

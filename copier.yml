@@ -106,18 +106,28 @@ _skip_if_exists:
   # and must never rewrite what it reads its instructions from.
   - .repo-platform.yml
 
-# The _migrations entry stamps the ownership manifest's per-repo hashes:
-# they are facts of the rendered tree, so stamping must run after copier
-# writes it. Copier runs _migrations only on update and _tasks only on
-# copy/recopy, hence the same stamper (shipped inside the build branch's
-# actions/shared/ zone, the same relative path it has on main - check_ssot's
-# stamp-hook-path rule pins the tie) is wired into both.
+# Both hooks stamp the ownership manifest's per-repo hashes: they are facts
+# of the rendered tree, so stamping must run after copier writes it. The
+# same stamper (shipped inside the build branch's actions/shared/ zone, the
+# same relative path it has on main - check_ssot's stamp-hook-path rule
+# pins the tie and both conditions) is wired into both hooks, each gated to
+# run ONCE per render on the destination: copier runs _tasks on copy and
+# recopy AND on the destination pass of an update (measured on 9.17.0), and
+# _migrations only on update, so the task stands down for updates and the
+# 'after' migration stamps those. --commit hands the stamper the template
+# clone's FULL commit hash: copier's own `_commit` is `git describe` (an
+# abbreviation, or a tag name), and the hook rewrites it so every render
+# records the exact build commit; --root names the destination explicitly
+# (the hook never infers its tree from the environment): copier runs hooks
+# with the destination as cwd, so "." is it, where _copier_conf.dst_path may
+# be relative to the caller's cwd and would resolve inside the destination.
 _migrations:
-  - command: bun "{{ _copier_conf.src_path }}/actions/shared/stamp_manifest.ts"
+  - command: bun "{{ _copier_conf.src_path }}/actions/shared/stamp_manifest.ts" --root "." --commit "{{ _copier_conf.vcs_ref_hash }}"
     when: "{{ _stage == 'after' }}"
 
 _tasks:
-  - command: bun "{{ _copier_conf.src_path }}/actions/shared/stamp_manifest.ts"
+  - command: bun "{{ _copier_conf.src_path }}/actions/shared/stamp_manifest.ts" --root "." --commit "{{ _copier_conf.vcs_ref_hash }}"
+    when: "{{ _copier_operation != 'update' }}"
 
 project_name:
   type: str
