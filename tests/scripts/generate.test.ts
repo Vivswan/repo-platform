@@ -45,7 +45,7 @@ import {
   trackingLabelValidator,
   trackingStreams,
 } from "../../scripts/generate";
-import { loadManifests, type ModuleManifest } from "../../scripts/module_manifests";
+import { loadManifests, type ModuleManifest } from "../../scripts/lib/module_manifests";
 import { skipIfExistsMatchers } from "../../scripts/ownership";
 import { tempDirs } from "../shared/temp_dir";
 

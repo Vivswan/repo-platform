@@ -7,7 +7,7 @@ bun run renders          # rewrite tests/golden-renders/ (also part of bun run r
 bun run renders:check    # render to temp and diff against the committed snapshots
 ```
 
-CI's `golden-renders` job (and `bun run check` locally, via `renders:check`) fails when the committed snapshots drift from a fresh render. The runner is [scripts/render_goldens.ts](../scripts/render_goldens.ts); it needs `copier` and `bun` on PATH, builds one scratch build tree per run, and renders each selection with `--defaults` plus fixed answers.
+CI's `golden-renders` job (and `bun run check` locally, via `renders:check`) fails when the committed snapshots drift from a fresh render. The runner is [scripts/generate/render_goldens.ts](../scripts/generate/render_goldens.ts); it needs `copier` and `bun` on PATH, builds one scratch build tree per run, and renders each selection with `--defaults` plus fixed answers.
 
 ## The matrix
 
@@ -19,7 +19,7 @@ CI's `golden-renders` job (and `bun run check` locally, via `renders:check`) fai
 
 ## Determinism contract
 
-A golden changes if and only if rendered content changes. The volatile inputs are pinned at their sources; the full inventory lives in [scripts/render_goldens.ts](../scripts/render_goldens.ts)'s header. The essentials:
+A golden changes if and only if rendered content changes. The volatile inputs are pinned at their sources; the full inventory lives in [scripts/generate/render_goldens.ts](../scripts/generate/render_goldens.ts)'s header. The essentials:
 
 - The scratch build tree is content-deterministic by design (no timestamps or source SHAs in-tree), and its git commit uses a pinned identity, pinned dates, a fixed message, and neutralized global/system git config, so a user's autocrlf or gpg-signing setup cannot leak into blob hashes.
 - copier runs from the scratch directory with a relative source path, so the recorded `_src_path` is the fixed string `./tree`, never a machine-specific temp path; `COPIER_SETTINGS_PATH` is pointed away from any user settings file so its answer defaults cannot leak into the render.

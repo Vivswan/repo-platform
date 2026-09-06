@@ -8,7 +8,7 @@
 // composer's gate expression.
 //
 // scripts/generate.ts derives the marker-fenced GENERATED regions from
-// these; scripts/compose/compose.ts, scripts/build_gitignore.ts, and the
+// these; scripts/compose/compose.ts, scripts/generate/build_gitignore.ts, and the
 // fleet scripts read them at runtime. Every function throws (never exits)
 // on missing folders/manifests, unknown keys, or invalid values, so a typo
 // in a manifest fails whichever consumer touches it first.
@@ -23,9 +23,9 @@ import { existsSync, lstatSync, readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
-import { ownershipListSchema, SETTINGS_LAYER_NAMES } from "./ownership.ts";
+import { ownershipListSchema, SETTINGS_LAYER_NAMES } from "../ownership.ts";
 
-const TEMPLATES_DIR = resolve(import.meta.dir, "..", "templates");
+const TEMPLATES_DIR = resolve(import.meta.dir, "..", "..", "templates");
 
 /** The settings layer FILES a module may ship next to its module.yml,
  *  keyed by ROLE so no consumer ever assigns meaning by list position:
@@ -56,7 +56,7 @@ if (
   SETTINGS_LAYER_ORDER.some((name) => !SETTINGS_LAYER_NAMES.has(name))
 ) {
   throw new Error(
-    "SETTINGS_LAYER_ORDER (scripts/module_manifests.ts) and SETTINGS_LAYER_NAMES " +
+    "SETTINGS_LAYER_ORDER (scripts/lib/module_manifests.ts) and SETTINGS_LAYER_NAMES " +
       "(scripts/ownership.ts) disagree - the manifests' declarable layer files and " +
       "the composer's skip list must name the same files, or a new layer name would " +
       "be skipped by one side and treated as a landed file (or rejected) by the other",
@@ -436,7 +436,7 @@ export function assertModuleOrderIntegrity(order: string[], templatesDir: string
     if (!lstatSync(join(templatesDir, name)).isDirectory()) continue;
     throw new Error(
       `templates/${name}/ is not a known module; add it to MODULE_ORDER ` +
-        "in scripts/module_manifests.ts",
+        "in scripts/lib/module_manifests.ts",
     );
   }
 }

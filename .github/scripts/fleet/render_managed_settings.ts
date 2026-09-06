@@ -38,13 +38,13 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
+import { parseAnswers } from "../../../scripts/generate/render_dogfood.ts";
 import {
   loadManifests,
   type ModuleManifest,
   SETTINGS_LAYER_FILES,
   type SettingsLayerName,
-} from "../../../scripts/module_manifests.ts";
-import { parseAnswers } from "../../../scripts/render_dogfood.ts";
+} from "../../../scripts/lib/module_manifests.ts";
 import { parseFlags } from "../shared/flags.ts";
 import { fail, setOutput, warning } from "../shared/gha.ts";
 import { capture } from "../shared/proc.ts";

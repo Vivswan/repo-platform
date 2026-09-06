@@ -16,7 +16,7 @@
 // templates/base/ownership.yml covers every base file (loadBaseOwnership)
 // and each templates/<module>/module.yml carries an `ownership:` list
 // covering every file the module lands (ownershipListSchema, consumed by
-// scripts/module_manifests.ts). Headers and marker lines in template
+// scripts/lib/module_manifests.ts). Headers and marker lines in template
 // sources are validated DECORATION: declarationTextErrors reports a
 // source whose text contradicts its declared class, and the composer
 // (scripts/compose/manifest.ts) errors on a landed file with no
@@ -47,7 +47,7 @@ import {
   HEADER_WINDOW,
   HTML_REGION_MARKERS,
 } from "../actions/shared/grammar.ts";
-import type { ModuleManifest } from "./module_manifests.ts";
+import type { ModuleManifest } from "./lib/module_manifests.ts";
 
 /** The managed ownership header in template sources, anchored on the
  *  header sentence's canonical trailing period with no repo-name character
@@ -194,7 +194,7 @@ const hashOrHtmlMarker = (what: string) =>
     message: `${what} must be a hash comment or a complete HTML comment line (the recovery appendix writes comments in the markers' syntax)`,
   });
 
-/** One declared file. Exported for scripts/module_manifests.ts (module
+/** One declared file. Exported for scripts/lib/module_manifests.ts (module
  *  `ownership:` lists) and loadBaseOwnership below - one schema, so the
  *  two declaration homes can never diverge in shape.
  *

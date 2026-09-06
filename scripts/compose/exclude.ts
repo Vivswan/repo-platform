@@ -3,7 +3,7 @@
 // generated _exclude patterns (the conjunction helper allOf is shared with
 // the manifest template so selection and exclusion cannot drift apart).
 
-import type { ModuleManifest } from "../module_manifests.ts";
+import type { ModuleManifest } from "../lib/module_manifests.ts";
 import { landedPathAndGates } from "../ownership.ts";
 import { GeneratorValidationError } from "./data_anchors.ts";
 import { JINJA_SUFFIX } from "./entries.ts";

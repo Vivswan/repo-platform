@@ -4,7 +4,7 @@
 // the commits listing and the per-sha verdict probes), the clock, and the
 // bounds are injected so nothing here touches the network or sleeps.
 //
-// Three of these are FORCING tests for scripts/guard_registry.ts entries
+// Three of these are FORCING tests for scripts/check/guard_registry.ts entries
 // (walk-commit-bound, walk-age-bound, walk-vouches-candidates): the
 // weekly arming audit mutates the guard and requires the named test red,
 // so their fixtures deliberately stage the exact attack each bound stops.

@@ -1,4 +1,4 @@
-# Weekly arming proof for the guard registry (scripts/guard_registry.ts):
+# Weekly arming proof for the guard registry (scripts/check/guard_registry.ts):
 # for every registered environmental-hazard guard, unarm it in a scratch
 # clone, require its forcing test red, restore, and require it green -
 # per-commit CI only proves the guard and its test EXIST (bun run

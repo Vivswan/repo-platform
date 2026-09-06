@@ -15,20 +15,20 @@ import {
   registryBindingMismatches,
   registryDeletionMismatches,
   retiredGuardMismatches,
-} from "../../scripts/check_guard_binding.ts";
+} from "../../../scripts/check/check_guard_binding.ts";
 import {
   applyMutation,
   countOccurrences,
   GUARD_REGISTRY,
   type GuardEntry,
   RETIRED_GUARDS,
-} from "../../scripts/guard_registry.ts";
-import { boundedSpawnSync } from "../shared/bounded_spawn";
-import { tempDirs } from "../shared/temp_dir";
+} from "../../../scripts/check/guard_registry.ts";
+import { boundedSpawnSync } from "../../shared/bounded_spawn";
+import { tempDirs } from "../../shared/temp_dir";
 
 const temp = tempDirs();
 
-const root = join(import.meta.dir, "../..");
+const root = join(import.meta.dir, "../../..");
 
 function readOrNull(rel: string): string | null {
   try {
@@ -221,7 +221,7 @@ describe("extractRegistryIds", () => {
   });
 
   test("tracks the landed registry file's format: extraction matches the imported ids", () => {
-    const source = readOrNull("scripts/guard_registry.ts");
+    const source = readOrNull("scripts/check/guard_registry.ts");
     expect(source).not.toBeNull();
     const expected = [
       ...GUARD_REGISTRY.map((guard) => guard.id),
@@ -273,8 +273,11 @@ describe("deletionTripwire (real git plumbing)", () => {
   function baseRepo(): string {
     const dir = temp.dir("guard-tripwire-");
     git(dir, ["init", "--quiet", "-b", "main"]);
-    mkdirSync(join(dir, "scripts"));
-    writeFileSync(join(dir, "scripts/guard_registry.ts"), registrySource(["kept", "dropped"]));
+    mkdirSync(join(dir, "scripts/check"), { recursive: true });
+    writeFileSync(
+      join(dir, "scripts/check/guard_registry.ts"),
+      registrySource(["kept", "dropped"]),
+    );
     git(dir, ["add", "-A"]);
     git(dir, ["commit", "--quiet", "-m", "base"]);
     git(dir, ["update-ref", "refs/remotes/origin/main", "HEAD"]);
@@ -284,7 +287,7 @@ describe("deletionTripwire (real git plumbing)", () => {
   /** baseRepo advanced one commit: HEAD's registry drops "dropped". */
   function scratchRepo(): string {
     const dir = baseRepo();
-    writeFileSync(join(dir, "scripts/guard_registry.ts"), registrySource(["kept"]));
+    writeFileSync(join(dir, "scripts/check/guard_registry.ts"), registrySource(["kept"]));
     git(dir, ["add", "-A"]);
     git(dir, ["commit", "--quiet", "-m", "drops one"]);
     return dir;
@@ -353,14 +356,14 @@ describe("mutation primitives", () => {
 
 describe("check_guard_binding CLI", () => {
   test("exits 0 on the landed tree and 2 on unrecognized arguments", () => {
-    const green = boundedSpawnSync([process.execPath, "scripts/check_guard_binding.ts"], {
+    const green = boundedSpawnSync([process.execPath, "scripts/check/check_guard_binding.ts"], {
       cwd: root,
       timeoutMs: 30_000,
     });
     expect(green.exitCode).toBe(0);
     expect(green.stdout).toContain("resolve both ways");
     const usage = boundedSpawnSync(
-      [process.execPath, "scripts/check_guard_binding.ts", "--bogus"],
+      [process.execPath, "scripts/check/check_guard_binding.ts", "--bogus"],
       {
         cwd: root,
         timeoutMs: 30_000,

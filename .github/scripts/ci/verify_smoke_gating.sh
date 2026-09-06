@@ -391,7 +391,7 @@ fi
 if has bun || has node || has deno; then
   node_sections="$(grep -cxF -- "## Node (github/gitignore Node.gitignore)" "$SMOKE/.gitignore" || true)"
   if [ "$node_sections" -ne 1 ]; then
-    echo "::error::gating check failed: expected exactly 1 line '## Node (github/gitignore Node.gitignore)' in $SMOKE/.gitignore but found $node_sections for modules=$MODULES private=$PRIVATE - the shared Node.gitignore source must render once, never per-module duplicates. Fix the fragment guards emitted by scripts/build_gitignore.ts (or this expectation in verify_smoke_gating.sh)."
+    echo "::error::gating check failed: expected exactly 1 line '## Node (github/gitignore Node.gitignore)' in $SMOKE/.gitignore but found $node_sections for modules=$MODULES private=$PRIVATE - the shared Node.gitignore source must render once, never per-module duplicates. Fix the fragment guards emitted by scripts/generate/build_gitignore.ts (or this expectation in verify_smoke_gating.sh)."
     exit 1
   fi
 else

@@ -3,7 +3,7 @@
 // - a comma in the scope - reached main and went red there, because the
 // pre-commit gates run before the message exists and nothing local ever
 // judged the subject. Two registered guards bind here
-// (scripts/guard_registry.ts: commit-subject-refusal,
+// (scripts/check/guard_registry.ts: commit-subject-refusal,
 // commit-subject-hook-wiring); the weekly arming audit unarms each in a
 // scratch clone and requires its named test red.
 //
@@ -16,13 +16,13 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { candidateSubjects } from "../../scripts/check_commit_subject.ts";
-import { boundedSpawnSync } from "../shared/bounded_spawn";
-import { tempDirs } from "../shared/temp_dir";
+import { candidateSubjects } from "../../../scripts/check/check_commit_subject.ts";
+import { boundedSpawnSync } from "../../shared/bounded_spawn";
+import { tempDirs } from "../../shared/temp_dir";
 
 const temp = tempDirs();
 
-const root = join(import.meta.dir, "../..");
+const root = join(import.meta.dir, "../../..");
 const bunExe = process.execPath;
 const scratch = temp.dir("commit-subject-");
 let serial = 0;
@@ -51,7 +51,7 @@ function runHook(
   const messagePath = join(scratch, `msg-${serial++}.txt`);
   writeFileSync(messagePath, message);
   const { exitCode, stderr } = boundedSpawnSync(
-    [bunExe, "scripts/check_commit_subject.ts", messagePath],
+    [bunExe, "scripts/check/check_commit_subject.ts", messagePath],
     { cwd: root, env },
   );
   return { exitCode, stderr };
@@ -113,7 +113,7 @@ const TABLE: { subject: string; verdict: "pass" | "refuse" }[] = [
   { subject: "Merge remote-tracking branch 'origin/main'", verdict: "pass" },
 ];
 
-describe("the commit-msg gate (scripts/check_commit_subject.ts)", () => {
+describe("the commit-msg gate (scripts/check/check_commit_subject.ts)", () => {
   test("a comma-scoped subject is REFUSED by the commit-msg gate, naming the subject", () => {
     const { exitCode, stderr } = runHook(`${COMMA_SCOPE_SUBJECT}\n\nbody text\n`);
     expect(exitCode).not.toBe(0);
@@ -144,7 +144,7 @@ describe("the commit-msg gate (scripts/check_commit_subject.ts)", () => {
   });
 
   test("a missing message-file argument is a usage error, never a pass", () => {
-    const { exitCode } = boundedSpawnSync([bunExe, "scripts/check_commit_subject.ts"], {
+    const { exitCode } = boundedSpawnSync([bunExe, "scripts/check/check_commit_subject.ts"], {
       cwd: root,
     });
     expect(exitCode).toBe(2);
@@ -175,13 +175,13 @@ describe("candidateSubjects", () => {
 describe("single source: the hook and the CI validator judge identically", () => {
   test("the grammar's bytes live ONLY in subject.ts - both consumers import it, neither redefines it", () => {
     const shared = readFileSync(join(root, "actions/validate-commit-names/subject.ts"), "utf-8");
-    const hook = readFileSync(join(root, "scripts/check_commit_subject.ts"), "utf-8");
+    const hook = readFileSync(join(root, "scripts/check/check_commit_subject.ts"), "utf-8");
     const ci = readFileSync(
       join(root, "actions/validate-commit-names/validate-commit-names.ts"),
       "utf-8",
     );
     expect(shared).toContain("A-Za-z0-9._/-");
-    expect(hook).toContain('from "../actions/validate-commit-names/subject.ts"');
+    expect(hook).toContain('from "../../actions/validate-commit-names/subject.ts"');
     expect(ci).toContain('from "./subject.ts"');
     for (const consumer of [hook, ci]) {
       // No character class, type list, merge-subject prefix, or fresh

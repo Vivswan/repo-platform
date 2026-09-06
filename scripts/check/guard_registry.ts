@@ -11,7 +11,7 @@
 // once; this registry makes "was the attack ever staged?" a CI question.
 //
 // Two consumers, two proof strengths:
-//   - scripts/check_guard_binding.ts (per commit, in `bun run check`)
+//   - scripts/check/check_guard_binding.ts (per commit, in `bun run check`)
 //     proves BINDING: the snippet is in the guard file, the forcing test
 //     is in the test file. Deleting a guard, renaming its test, or
 //     deleting the test is an immediate red naming the entry.
@@ -126,10 +126,10 @@ export const GUARD_REGISTRY: readonly GuardEntry[] = [
     id: "guard-binding-vanished-snippet-branch",
     hazard:
       "the harness rots from within: with the vanished-snippet branch unarmed, deleting a registered guard passes the binding check green",
-    guardFile: "scripts/check_guard_binding.ts",
+    guardFile: "scripts/check/check_guard_binding.ts",
     snippet: "if (snippetCount !== 1) {",
     mutated: "if (false) {",
-    testFile: "tests/scripts/check_guard_binding.test.ts",
+    testFile: "tests/scripts/check/check_guard_binding.test.ts",
     testName: "an entry whose snippet vanished from its guard file is reported",
   },
   // The deletion tripwire is a guard too: the binding check validates
@@ -140,10 +140,10 @@ export const GUARD_REGISTRY: readonly GuardEntry[] = [
     id: "guard-registry-deletion-tripwire",
     hazard:
       "a merge-conflict resolution silently drops registry entries: the binding check proves every PRESENT entry resolves both ways but never asks what main had, so guards vanish wholesale with every gate green",
-    guardFile: "scripts/check_guard_binding.ts",
+    guardFile: "scripts/check/check_guard_binding.ts",
     snippet: "if (!liveIds.has(baseId) && !retiredIds.has(baseId)) {",
     mutated: "if (false) {",
-    testFile: "tests/scripts/check_guard_binding.test.ts",
+    testFile: "tests/scripts/check/check_guard_binding.test.ts",
     testName: "a merge-base registry id missing at HEAD without a RETIRED_GUARDS entry is reported",
   },
   // The all-green action's judgment guards (actions/all-green/action.yml's
@@ -314,7 +314,7 @@ export const GUARD_REGISTRY: readonly GuardEntry[] = [
     testFile: "tests/sync/head_manifest.test.ts",
     testName: "a grammar this sync does not read is refused, never skipped",
   },
-  // The commit-msg gate (scripts/check_commit_subject.ts, dispatched by
+  // The commit-msg gate (scripts/check/check_commit_subject.ts, dispatched by
   // .husky/commit-msg): the pre-commit gates run before the message
   // exists, so a subject CI's commit-names job refuses - the comma-scope
   // class, `docs(all-green,build-provenance): ...` - reached main and
@@ -325,10 +325,10 @@ export const GUARD_REGISTRY: readonly GuardEntry[] = [
     id: "commit-subject-refusal",
     hazard:
       "a subject CI's commit-names job will refuse (a comma in the scope, a bad type) sails through every local gate - pre-commit runs before the message exists, so the class reddens main on every occurrence",
-    guardFile: "scripts/check_commit_subject.ts",
+    guardFile: "scripts/check/check_commit_subject.ts",
     snippet: "if (!candidates.some(acceptable)) {",
     mutated: "if (false) {",
-    testFile: "tests/scripts/check_commit_subject.test.ts",
+    testFile: "tests/scripts/check/check_commit_subject.test.ts",
     testName: "a comma-scoped subject is REFUSED by the commit-msg gate, naming the subject",
   },
   {
@@ -336,9 +336,9 @@ export const GUARD_REGISTRY: readonly GuardEntry[] = [
     hazard:
       "the gate script exists but nothing runs it at commit time: the husky dispatch line deleted or stubbed leaves every subject unjudged while the script and its own tests stay green",
     guardFile: ".husky/commit-msg",
-    snippet: 'bun scripts/check_commit_subject.ts "$1"',
+    snippet: 'bun scripts/check/check_commit_subject.ts "$1"',
     mutated: ': "$1"',
-    testFile: "tests/scripts/check_commit_subject.test.ts",
+    testFile: "tests/scripts/check/check_commit_subject.test.ts",
     testName:
       "the .husky/commit-msg wiring dispatches to the gate - a refused subject blocks the commit",
   },
@@ -527,7 +527,7 @@ export const GUARD_REGISTRY: readonly GuardEntry[] = [
 
 /** A guard retired ON PURPOSE: its id moved here from GUARD_REGISTRY
  *  when the guard left with its machinery (the sanctioned removal case).
- *  The deletion tripwire in scripts/check_guard_binding.ts compares
+ *  The deletion tripwire in scripts/check/check_guard_binding.ts compares
  *  HEAD's ids against the registry file at the merge-base with
  *  origin/main and goes red on any id that is neither live nor listed
  *  here - so a merge-conflict resolution can never drop entries
