@@ -62,20 +62,36 @@ jobs:
 
       # A no-change run with an OPEN refresh PR means upstream moved back
       # (or the outputs caught up some other way) since that PR was cut:
-      # its branch keeps proposing stale content forever. Close it and
-      # delete the rolling branch - the next real change recreates both
-      # (open_automation_pr.ts force-pushes the same branch name).
-      - name: Close a stale refresh PR on no change
+      # its branch keeps proposing stale content forever. Say why, close
+      # it, and delete the rolling branch - the next real change recreates
+      # both (open_automation_pr.ts force-pushes the same branch name).
+      - name: Find a stale refresh PR on no change
+        id: stale
         if: steps.changes.outputs.changed == 'false'
         env:
           GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN || github.token }}
           BRANCH: automation/gitignore-refresh
         run: |
           pr="$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number // empty')"
-          if [ -n "$pr" ]; then
-            gh pr close "$pr" --delete-branch --comment \
-              "The latest refresh run produces no change against main, so this PR's content is stale; closing. The next run with a real change reopens it."
-          fi
+          echo "pr=$pr" >> "$GITHUB_OUTPUT"
+
+      - name: Explain why the stale PR is closed
+        if: steps.stale.outputs.pr != ''
+        uses: marocchino/sticky-pull-request-comment@5770ad5eb8f42dd2c4f34da00c94c5381e49af88 # v3.0.5
+        with:
+          GITHUB_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN || github.token }}
+          header: repo-platform/refresh-gitignore
+          number: ${{ steps.stale.outputs.pr }}
+          message: >-
+            The latest refresh run produces no change against main, so this PR's content is stale; closing.
+            The next run with a real change reopens it.
+
+      - name: Close the stale refresh PR
+        if: steps.stale.outputs.pr != ''
+        env:
+          GH_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN || github.token }}
+          PR: ${{ steps.stale.outputs.pr }}
+        run: gh pr close "$PR" --delete-branch
 
       # Nothing generated records the upstream SHA, so the commit subject
       # and PR body are fixed text - what moved is the diff itself.

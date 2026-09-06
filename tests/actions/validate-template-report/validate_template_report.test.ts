@@ -13,15 +13,15 @@
 // build-branch compare the fetch step makes and publishes only once the
 // whole admission (build-branch membership, then the vintage floor) has
 // passed, so a refused run has no distance to contradict its refusal. The
-// comment is posted BEFORE
-// the job fails so a blocking verdict is readable in the conversation, one
-// comment is kept per PR rather than one per push, a clean-and-fresh run
-// leaves no new comment but does clear a stale one, and every reporting
-// failure degrades to a warning instead of taking the job down.
+// report step writes one body to the step summary and to the comment file
+// the sticky steps post (one comment per PR, upserted by the action's
+// header, deleted when a clean-and-fresh run has nothing to say) and never
+// fails, so a blocking verdict is readable in the conversation before the
+// caller fails the job.
 //
-// Every scenario is judged WHOLE: the full rendered summary, the recorded
-// API calls, the outputs file, the verdict file. A test that ignored a
-// column could not catch a regression in it.
+// Every scenario is judged WHOLE: the full rendered summary, the comment
+// body, the outputs file, the verdict file. A test that ignored a column
+// could not catch a regression in it.
 
 import { describe, expect, test } from "bun:test";
 import {
@@ -65,15 +65,16 @@ import { tempDirs } from "../../shared/temp_dir";
 const temp = tempDirs();
 
 const ACTION = join(import.meta.dir, "../../../actions/validate-template-report");
-const MARKER = "<!-- repo-platform:validate-template -->";
 const SHA = "6bf545284a2f8e32d82fdc663d4b3333f8fb37bf";
 const REMEDY = "merge this repository's pending template sync PR";
 const RUN_URL = "https://example.invalid/run/1";
 const OPERATOR = "Vivswan/repo-platform";
 
-// Serves the gate's gh calls and records every call so a scenario can
+// Serves the fetch step's gh calls and records every call so a scenario can
 // assert the exact sequence; GH_FAIL fails every call before recording. It
 // stands in for `gh api --jq`, so each fixture is already the filter's output.
+// Any other call is a regression (the report step makes none): recorded
+// and failed.
 const ghStub = `#!/usr/bin/env bash
 set -euo pipefail
 if [ -n "\${GH_FAIL:-}" ]; then
@@ -81,8 +82,6 @@ if [ -n "\${GH_FAIL:-}" ]; then
   exit 1
 fi
 case "$*" in
-  *--method\\ PATCH*) echo "PATCH $*" >> "$CALLS"; exit 0 ;;
-  *--method\\ POST*) echo "POST $*" >> "$CALLS"; exit 0 ;;
   *tarball/*)
     echo "TARBALL $*" >> "$CALLS"
     if [ -n "\${GH_TARBALL_FAIL:-}" ]; then echo "gh: HTTP 404: Not Found" >&2; exit 1; fi
@@ -110,8 +109,8 @@ case "$*" in
     exit 0
     ;;
 esac
-echo "LIST" >> "$CALLS"
-cat "$GH_COMMENTS_ID"
+echo "UNEXPECTED $*" >> "$CALLS"
+exit 1
 `;
 
 // Stands in for a build tree's validate_generated_files.ts: writes the
@@ -209,9 +208,6 @@ interface ReportOptions {
   /** The build tip validator's pair; null = that step never wrote its findings. */
   latestFindings?: string | null;
   latestAdvisories?: string;
-  event?: string;
-  /** The id the marker search resolves to, or "" for no existing comment. */
-  existing?: string;
   /** true = the action's bun was never installed: the recorded path is empty. */
   noBun?: boolean;
   env?: Record<string, string>;
@@ -227,11 +223,11 @@ function runReport(opts: ReportOptions = {}) {
   if (opts.latestFindings !== null) writeFileSync(latestFindingsPath, opts.latestFindings ?? "");
   const latestAdvisoriesPath = join(root, "latest-advisories.md");
   writeFileSync(latestAdvisoriesPath, opts.latestAdvisories ?? "");
-  const calls = join(root, "calls.txt");
   const summary = join(root, "summary.md");
   writeFileSync(summary, "");
-  const listing = join(root, "comments.json");
-  writeFileSync(listing, opts.existing === undefined ? "" : `${opts.existing}\n`);
+  // A planted stale body: a run that leaves it behind shows.
+  const comment = join(root, "comment.md");
+  writeFileSync(comment, "stale\n");
   const outputs = join(root, "outputs.txt");
   writeFileSync(outputs, "");
   // The report step's own run block: the one place `integrity` is set, on
@@ -242,21 +238,16 @@ function runReport(opts: ReportOptions = {}) {
       PATH: `${bin}:${process.env.PATH}`,
       ACTION_BUN: opts.noBun ? "" : process.execPath,
       ACTION_PATH: ACTION,
-      GITHUB_REPOSITORY: "Vivswan/managed-repo",
       GITHUB_STEP_SUMMARY: summary,
       GITHUB_OUTPUT: outputs,
-      GH_TOKEN: "x",
       VERDICT: verdictPath,
       CLEAR_OUTCOME: "success",
       LATEST_FINDINGS: latestFindingsPath,
       LATEST_ADVISORIES: latestAdvisoriesPath,
       COMPARE_STATUS: opts.compare ?? "identical",
       AHEAD_BY: opts.aheadBy ?? "",
-      EVENT_NAME: opts.event ?? "pull_request",
-      PR_NUMBER: "12",
+      COMMENT_FILE: comment,
       RUN_URL,
-      CALLS: calls,
-      GH_COMMENTS_ID: listing,
       ...opts.env,
     },
   });
@@ -264,13 +255,13 @@ function runReport(opts: ReportOptions = {}) {
     exitCode: proc.exitCode,
     output: proc.stdout + proc.stderr,
     outputs: read(outputs),
-    calls: read(calls),
+    comment: read(comment),
     summary: read(summary),
   };
 }
 
 describe("the action's reporting script", () => {
-  const HEAD = `${MARKER}\n### Template check\n\n`;
+  const HEAD = "### Template check\n\n";
   const PASSED =
     "#### Integrity\n\nPassed - this repository matches the state it was stamped with.";
   const notJudged = (reason: string) =>
@@ -290,35 +281,23 @@ describe("the action's reporting script", () => {
    *  blocks, then freshness. */
   const bodyOf = (integrity: string, freshness: string, extra = "") =>
     `${HEAD}${integrity}${extra}\n\n${freshness}`;
-  const LIST = "LIST\n";
-  const post = (body: string) =>
-    `${LIST}POST api --method POST repos/Vivswan/managed-repo/issues/12/comments -f body=${body} --silent\n`;
-  const patch = (id: string, body: string) =>
-    `${LIST}PATCH api --method PATCH repos/Vivswan/managed-repo/issues/comments/${id} -f body=${body} --silent\n`;
   const drift = "#### Errors (1)\n\n- ci.yml drifted";
   const codeql = "#### Advisories (1)\n\n- consider a codeql job";
 
   interface Expected {
     /** The exported `integrity` output, asserted beside the body it came from. */
     integrity: "success" | "failure";
+    /** The exported `report` output: findings posts the body as the sticky
+     *  comment, clean deletes the comment an earlier run left. */
+    report: "findings" | "clean";
     body: string;
-    calls: string;
     output?: string;
   }
   const scenarios: [string, ReportOptions, Expected][] = [
     [
-      "clean and fresh: no new comment at all",
+      "clean and fresh: nothing worth a comment",
       {},
-      { integrity: "success", body: bodyOf(PASSED, FRESH), calls: LIST },
-    ],
-    [
-      "clean and fresh still clears a comment a previous run left behind",
-      { existing: "555" },
-      {
-        integrity: "success",
-        body: bodyOf(PASSED, FRESH),
-        calls: patch("555", bodyOf(PASSED, FRESH)),
-      },
+      { integrity: "success", report: "clean", body: bodyOf(PASSED, FRESH) },
     ],
     [
       "findings post the findings and say they block; behind names the distance",
@@ -329,17 +308,8 @@ describe("the action's reporting script", () => {
       },
       {
         integrity: "failure",
+        report: "findings",
         body: bodyOf(findingsOf(drift), behind(" by 3 commit(s)")),
-        calls: post(bodyOf(findingsOf(drift), behind(" by 3 commit(s)"))),
-      },
-    ],
-    [
-      "an existing comment is updated, never duplicated",
-      { verdict: { kind: "findings", findings: drift, advisories: "" }, existing: "77" },
-      {
-        integrity: "failure",
-        body: bodyOf(findingsOf(drift), FRESH),
-        calls: patch("77", bodyOf(findingsOf(drift), FRESH)),
       },
     ],
     [
@@ -347,8 +317,8 @@ describe("the action's reporting script", () => {
       { verdict: { kind: "clean", advisories: codeql } },
       {
         integrity: "success",
+        report: "findings",
         body: bodyOf(PASSED, FRESH, `\n\n${codeql}`),
-        calls: post(bodyOf(PASSED, FRESH, `\n\n${codeql}`)),
       },
     ],
     // A refused `_commit` never reached the compare, so freshness names
@@ -364,15 +334,10 @@ describe("the action's reporting script", () => {
       },
       {
         integrity: "failure",
+        report: "findings",
         body: bodyOf(
           notJudged(`_commit 'abc1234' is not a full build sha; ${REMEDY}`),
           notChecked(`_commit 'abc1234' is not a full build sha; ${REMEDY}`),
-        ),
-        calls: post(
-          bodyOf(
-            notJudged(`_commit 'abc1234' is not a full build sha; ${REMEDY}`),
-            notChecked(`_commit 'abc1234' is not a full build sha; ${REMEDY}`),
-          ),
         ),
       },
     ],
@@ -388,22 +353,13 @@ describe("the action's reporting script", () => {
       },
       {
         integrity: "failure",
+        report: "findings",
         body: bodyOf(
           notJudged(
             `_commit ${SHA} is not a published commit of ${OPERATOR}'s build branch (compare: diverged)`,
           ),
           notChecked(
             `_commit ${SHA} is not a published commit of ${OPERATOR}'s build branch (compare: diverged)`,
-          ),
-        ),
-        calls: post(
-          bodyOf(
-            notJudged(
-              `_commit ${SHA} is not a published commit of ${OPERATOR}'s build branch (compare: diverged)`,
-            ),
-            notChecked(
-              `_commit ${SHA} is not a published commit of ${OPERATOR}'s build branch (compare: diverged)`,
-            ),
           ),
         ),
       },
@@ -418,8 +374,8 @@ describe("the action's reporting script", () => {
       },
       {
         integrity: "failure",
+        report: "findings",
         body: bodyOf(notJudged("the validator died on SIGKILL"), behind(" by 3 commit(s)")),
-        calls: post(bodyOf(notJudged("the validator died on SIGKILL"), behind(" by 3 commit(s)"))),
       },
     ],
     // No verdict is never a pass: a judge step that crashed before writing
@@ -427,20 +383,12 @@ describe("the action's reporting script", () => {
     [
       "an absent verdict file blocks as not judged",
       { verdict: "absent" },
-      {
-        integrity: "failure",
-        body: bodyOf(notJudged(NO_VERDICT), FRESH),
-        calls: post(bodyOf(notJudged(NO_VERDICT), FRESH)),
-      },
+      { integrity: "failure", report: "findings", body: bodyOf(notJudged(NO_VERDICT), FRESH) },
     ],
     [
       "a verdict file that is not a verdict blocks the same way",
       { verdict: "garbage" },
-      {
-        integrity: "failure",
-        body: bodyOf(notJudged(NO_VERDICT), FRESH),
-        calls: post(bodyOf(notJudged(NO_VERDICT), FRESH)),
-      },
+      { integrity: "failure", report: "findings", body: bodyOf(notJudged(NO_VERDICT), FRESH) },
     ],
     // With the clear step failed, fetch never ran: a clean verdict on disk is
     // stale (or planted) and must not be read, no compare exists either, and
@@ -454,26 +402,17 @@ describe("the action's reporting script", () => {
       },
       {
         integrity: "failure",
+        report: "findings",
         body: bodyOf(
           notJudged("the scratch root could not be cleared (clear step outcome: failure)"),
           notChecked("the scratch root could not be cleared (clear step outcome: failure)"),
-        ),
-        calls: post(
-          bodyOf(
-            notJudged("the scratch root could not be cleared (clear step outcome: failure)"),
-            notChecked("the scratch root could not be cleared (clear step outcome: failure)"),
-          ),
         ),
       },
     ],
     [
       "behind without a distance still says behind",
       { compare: "ahead", aheadBy: "" },
-      {
-        integrity: "success",
-        body: bodyOf(PASSED, behind("")),
-        calls: post(bodyOf(PASSED, behind(""))),
-      },
+      { integrity: "success", report: "findings", body: bodyOf(PASSED, behind("")) },
     ],
     // The fetch step publishes no such value; the fallback still names
     // whatever an unrecognised compare said rather than guessing.
@@ -482,8 +421,8 @@ describe("the action's reporting script", () => {
       { compare: "error" },
       {
         integrity: "success",
+        report: "clean",
         body: bodyOf(PASSED, notChecked("the build branch compare reported `error`")),
-        calls: LIST,
       },
     ],
     // The build tip's validator knows rules the repository's pending sync
@@ -500,17 +439,11 @@ describe("the action's reporting script", () => {
       },
       {
         integrity: "failure",
+        report: "findings",
         body: bodyOf(
           findingsOf(drift),
           FRESH,
           `\n\n${codeql}${upcoming("- .github/SECURITY.md is missing - the template always generates it\n- pin actions/setup-node")}`,
-        ),
-        calls: post(
-          bodyOf(
-            findingsOf(drift),
-            FRESH,
-            `\n\n${codeql}${upcoming("- .github/SECURITY.md is missing - the template always generates it\n- pin actions/setup-node")}`,
-          ),
         ),
       },
     ],
@@ -519,8 +452,8 @@ describe("the action's reporting script", () => {
       { latestFindings: "#### Errors (1)\n\n- .github/SECURITY.md is missing\n" },
       {
         integrity: "success",
+        report: "findings",
         body: bodyOf(PASSED, FRESH, upcoming("- .github/SECURITY.md is missing")),
-        calls: post(bodyOf(PASSED, FRESH, upcoming("- .github/SECURITY.md is missing"))),
       },
     ],
     [
@@ -529,11 +462,7 @@ describe("the action's reporting script", () => {
         verdict: { kind: "findings", findings: drift, advisories: "" },
         latestFindings: `${drift}\n`,
       },
-      {
-        integrity: "failure",
-        body: bodyOf(findingsOf(drift), FRESH),
-        calls: post(bodyOf(findingsOf(drift), FRESH)),
-      },
+      { integrity: "failure", report: "findings", body: bodyOf(findingsOf(drift), FRESH) },
     ],
     // Absent is not empty: a latest step that never wrote its findings is a
     // setup failure, said as a warning on a check it cannot fail.
@@ -542,45 +471,23 @@ describe("the action's reporting script", () => {
       { latestFindings: null },
       {
         integrity: "success",
+        report: "findings",
         body: bodyOf(
           PASSED,
           FRESH,
           `\n\n${LATEST}\n\nThe current template's validator exited before reporting. See the [run log](${RUN_URL}).`,
         ),
-        calls: post(
-          bodyOf(
-            PASSED,
-            FRESH,
-            `\n\n${LATEST}\n\nThe current template's validator exited before reporting. See the [run log](${RUN_URL}).`,
-          ),
-        ),
-      },
-    ],
-    [
-      "a push writes the summary and never touches the comments API",
-      { compare: "ahead", aheadBy: "3", event: "push" },
-      { integrity: "success", body: bodyOf(PASSED, behind(" by 3 commit(s)")), calls: "" },
-    ],
-    [
-      "a comments API failure degrades to a warning, never failing the step",
-      { verdict: { kind: "findings", findings: drift, advisories: "" }, env: { GH_FAIL: "1" } },
-      {
-        integrity: "failure",
-        body: bodyOf(findingsOf(drift), FRESH),
-        calls: "",
-        output:
-          "::warning::could not list PR comments; the findings are in the job summary instead.\n",
       },
     ],
     // No bun at all (an empty recorded path): the step exports the failure
-    // itself and writes one summary line, with no comment to post.
+    // itself and writes the same one-line body to both sinks.
     [
       "no bun to render with still exports failure and says why",
       { noBun: true },
       {
         integrity: "failure",
-        body: `### Template check\n\n#### Integrity\n\nNot judged: the action's pinned bun is unavailable. See the [run log](${RUN_URL}). This FAILS the check.`,
-        calls: "",
+        report: "findings",
+        body: `${HEAD}${notJudged("the action's pinned bun is unavailable")}`,
         output: "::error::the action's pinned bun is unavailable\n",
       },
     ],
@@ -589,8 +496,8 @@ describe("the action's reporting script", () => {
     expect(runReport(opts)).toEqual({
       exitCode: 0,
       output: expected.output ?? "",
-      outputs: `integrity=${expected.integrity}\n`,
-      calls: expected.calls,
+      outputs: `integrity=${expected.integrity}\nreport=${expected.report}\n`,
+      comment: `${expected.body}\n`,
       summary: `${expected.body}\n`,
     });
   });
@@ -622,8 +529,8 @@ describe("the action's reporting script", () => {
     expect(reported).toEqual({
       exitCode: 0,
       output: "",
-      outputs: "integrity=failure\n",
-      calls: post(body),
+      outputs: "integrity=failure\nreport=findings\n",
+      comment: `${body}\n`,
       summary: `${body}\n`,
     });
   });
@@ -1523,6 +1430,8 @@ describe("the action's wiring", () => {
       "integrity",
       "latest",
       "report",
+      "post-comment",
+      "delete-comment",
     ]);
     // One input, the token: the build tip's validator ships inside this
     // action, not at a ref an input could move.
@@ -1564,9 +1473,10 @@ describe("the action's wiring", () => {
     // literal paths with BASH_ENV emptied (no variable or PATH entry a
     // caller could poison; one rm fails when any removal did): the aligned
     // tree and verdict, which both aligned setups require (the
-    // actions-bun-guard rule reads it), and the latest leg's report pair,
-    // so an aborted latest validator leaves nothing stale.
+    // actions-bun-guard rule reads it), the latest leg's report pair, and
+    // the report's comment body, so an aborted step leaves nothing stale.
     const latest = byId("latest");
+    const report = byId("report");
     expect(byId("clear")).toEqual({
       name: "Clear the scratch root",
       id: "clear",
@@ -1578,6 +1488,7 @@ describe("the action's wiring", () => {
         envOf(fetch).VERDICT_FILE,
         envOf(latest).FINDINGS_FILE,
         envOf(latest).ADVISORIES_FILE,
+        envOf(report).COMMENT_FILE,
       ]
         .map((path) => `"${path}"`)
         .join(" ")}`,
@@ -1664,9 +1575,9 @@ describe("the action's wiring", () => {
 
     // The report runs whatever happened above, reads the verdict the
     // integrity leg wrote, the latest pair where that leg wrote it, and
-    // the fetch step's compare outputs; its run block carries no
-    // expression, so the behaviour tests execute it as the runner would.
-    const report = byId("report");
+    // the fetch step's compare outputs, and writes the comment body where
+    // the sticky steps read it; its run block carries no expression, so
+    // the behaviour tests execute it as the runner would.
     expect(report?.if).toBe("always()");
     expect(report?.["continue-on-error"]).toBeUndefined();
     expect(envOf(report)).toMatchObject({
@@ -1678,6 +1589,7 @@ describe("the action's wiring", () => {
       LATEST_ADVISORIES: envOf(latest).ADVISORIES_FILE,
       COMPARE_STATUS: "${{ steps.fetch.outputs.compare }}",
       AHEAD_BY: "${{ steps.fetch.outputs.ahead-by }}",
+      COMMENT_FILE: "${{ runner.temp }}/validate-template-report.md",
     });
     expect(String(report?.run)).not.toContain("${{");
     expect(envOf(report).BUN_READY).toBeUndefined();
@@ -1691,6 +1603,39 @@ describe("the action's wiring", () => {
     for (const name of ["src/aligned/fetch.ts", "src/aligned/judge.ts", "src/report.ts"]) {
       expect(readFileSync(join(ACTION, name), "utf8")).not.toMatch(/^\s*copier\s/m);
     }
+  });
+
+  // The comment is the sticky action's, behind the report step (the id list
+  // above): one comment per PR under this action's header, posted from the
+  // body file on findings and deleted on clean, only on pull_request events,
+  // and never failing the action - the caller's token may lack the write,
+  // and the summary carries the same body.
+  test("action.yml posts the body file through the sticky action on findings and deletes it on clean", () => {
+    const action = parseYaml(readFileSync(join(ACTION, "action.yml"), "utf8"));
+    const steps: Record<string, unknown>[] = action.runs.steps;
+    const report = steps.find((step) => step.id === "report") ?? {};
+    const commentFile = (report.env as Record<string, string>).COMMENT_FILE;
+    const PIN = "marocchino/sticky-pull-request-comment@5770ad5eb8f42dd2c4f34da00c94c5381e49af88";
+    const HEADER = "repo-platform/validate-template-report";
+    const sticky = steps.filter((step) => String(step.uses ?? "").startsWith("marocchino/"));
+    expect(sticky).toEqual([
+      {
+        name: "Post the findings as a sticky PR comment",
+        id: "post-comment",
+        if: "github.event_name == 'pull_request' && steps.report.outputs.report == 'findings'",
+        "continue-on-error": true,
+        uses: PIN,
+        with: { GITHUB_TOKEN: "${{ inputs.github-token }}", header: HEADER, path: commentFile },
+      },
+      {
+        name: "Remove a stale sticky comment",
+        id: "delete-comment",
+        if: "github.event_name == 'pull_request' && steps.report.outputs.report == 'clean'",
+        "continue-on-error": true,
+        uses: PIN,
+        with: { GITHUB_TOKEN: "${{ inputs.github-token }}", header: HEADER, delete: true },
+      },
+    ]);
   });
 
   test("nothing resolves validate-template as an action any more: this action runs the script", () => {

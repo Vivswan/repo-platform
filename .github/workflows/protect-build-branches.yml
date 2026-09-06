@@ -21,12 +21,20 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Comment and close
+      # One comment per PR, edited in place when the PR is reopened or
+      # retargeted again; a failed post fails the step, so the PR is not
+      # closed without its explanation.
+      - name: Explain why the PR is closed
+        uses: marocchino/sticky-pull-request-comment@5770ad5eb8f42dd2c4f34da00c94c5381e49af88 # v3.0.5
+        with:
+          header: repo-platform/protect-build-branches
+          message: >-
+            `build` is a generated build branch (append-only output of the post-green publish);
+            nothing merges into it. Template changes go to `templates/` on `main`, action changes
+            to `actions/` on `main`. Closing.
+
+      - name: Close the PR
         env:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ github.event.pull_request.number }}
-          BASE: ${{ github.event.pull_request.base.ref }}
-        run: |
-          gh pr comment "$PR" -R "$GITHUB_REPOSITORY" --body \
-            "\`$BASE\` is a generated build branch (append-only output of the post-green publish); nothing merges into it. Template changes go to \`templates/\` on \`main\`, action changes to \`actions/\` on \`main\`. Closing."
-          gh pr close "$PR" -R "$GITHUB_REPOSITORY"
+        run: gh pr close "$PR" -R "$GITHUB_REPOSITORY"
