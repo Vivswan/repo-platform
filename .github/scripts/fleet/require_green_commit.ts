@@ -7,15 +7,22 @@
 // apply ran from the raw pushed commit CONCURRENTLY with the CI run that
 // would have caught a broken or deleted layer file.
 //
-// Same predicate, one difference: a push-triggered settings run races its
-// OWN commit's CI run (both fire on the push), so an instant verdict is
-// almost always "still in progress". This waits, bounded, and then gates
-// hard - a red conclusion fails immediately, a verdict that never arrives
-// fails at the deadline. Fail-closed throughout, like the predicate.
+// Same predicate, one difference: a dispatched settings run can race the
+// tip's CI run, so an instant verdict may be "still in progress". This
+// waits, bounded, and then gates hard - a red conclusion fails
+// immediately, a verdict that never arrives fails at the deadline.
+// Fail-closed throughout, like the predicate.
 //
-// The three triggers split on what an ungreen tip MEANS:
-//   - push and workflow_dispatch runs exist to apply the checked-out
-//     commit - so an ungreen tip is a hard refusal, exactly as before;
+// The three triggers split on what the commit MEANS:
+//   - a CALLED run (post-green.yml's settings-fleet leg, SOURCE_SHA set)
+//     rides the judged commit's own CI run, needs-ordered behind the
+//     all-green job: the verdict is final by construction, so there is
+//     no wait - one instant read, refused on anything but a completed
+//     success - and the sha must be the run's own GITHUB_SHA, since the
+//     workflow's checkouts read that commit (a caller handing a
+//     different sha is refused, never silently applied);
+//   - workflow_dispatch runs exist to apply the checked-out commit - so
+//     an ungreen tip is a hard refusal after the bounded wait;
 //   - the SCHEDULED nightly heal exists to re-assert known-good state -
 //     so an ungreen tip falls back to the newest GREEN commit behind it
 //     (newest_green_commit.ts, a bounded first-parent walk probing the
@@ -28,20 +35,15 @@
 //     commits), and a walk that exhausts its bounds refuses - the halt
 //     is the floor.
 //
-// The workflow keeps its push trigger (with the load-bearing paths
-// filter) instead of riding inside ci.yml the way the build publish
-// does (its post-green job): a needs edge cannot filter on paths, so
-// every green push -
-// docs-only included - would re-apply the whole fleet.
-//
 // Env: GH_TOKEN (needs checks: read - the workflow's own GITHUB_TOKEN,
 // not the fleet PAT, whose grant carries no Checks read),
 // GITHUB_REPOSITORY, GITHUB_SHA, GITHUB_REF (required, and refused off
 // main - a dispatched CI run vouches for its own branch tip, which must
-// never reach the fleet), GITHUB_EVENT_NAME (only "schedule" may fall
-// back; unset degrades to the tip-gated refusal), GITHUB_OUTPUT (the
-// resolved sha for the workflow's later checkouts). GREEN_WAIT_MS /
-// GREEN_POLL_MS bound the wait.
+// never reach the fleet), SOURCE_SHA (the called path's judged commit;
+// empty on schedule and dispatch runs), GITHUB_EVENT_NAME (only
+// "schedule" may fall back; unset degrades to the tip-gated refusal),
+// GITHUB_OUTPUT (the resolved sha for the workflow's later checkouts).
+// GREEN_WAIT_MS / GREEN_POLL_MS bound the wait.
 
 import { appendFileSync } from "node:fs";
 import { allGreenFailure, type GhRunner, verdictPending } from "../shared/all_green.ts";
@@ -127,9 +129,15 @@ function main(): void {
   // exit belongs to this CLI wrapper, not the library function. Read with
   // a fallback, not required: the event name only matters on the ungreen
   // path, and an unset one degrades to the STRICTER tip-gated refusal.
+  // SOURCE_SHA set is the called path; empty is a schedule or dispatch
+  // run, whose inputs context has no sha.
+  const sourceSha = env("SOURCE_SHA", "");
   let decision: GateDecision;
   try {
-    decision = decideGreenCommit(repository, sha, env("GITHUB_EVENT_NAME", ""));
+    decision =
+      sourceSha === ""
+        ? decideGreenCommit(repository, sha, env("GITHUB_EVENT_NAME", ""))
+        : decideCalledCommit(repository, sha, sourceSha);
   } catch (error) {
     fail(error instanceof Error ? error.message : String(error));
   }
@@ -208,6 +216,44 @@ export function decideGreenCommit(
     };
   }
   return { sha: outcome.sha, fallback: true, behind: outcome.behind, tipReason: notGreen };
+}
+
+/** The called path's verdict: `sourceSha` (the caller's judged commit)
+ *  must be the run's own `sha` - the workflow's checkouts read GITHUB_SHA,
+ *  so any other value would apply a tree the gate never vouched for - and
+ *  must carry a completed all-green success NOW. No wait: the caller is
+ *  needs-ordered behind the gate in the same run, so a pending verdict is
+ *  a broken caller, not a race worth a deadline. */
+export function decideCalledCommit(
+  repository: string,
+  sha: string,
+  sourceSha: string,
+  options: Pick<GreenWaitOptions, "gh"> = {},
+): GateDecision {
+  if (!/^[0-9a-f]{40}$/.test(sourceSha)) {
+    return { refusal: `SOURCE_SHA is not a full commit sha (got '${sourceSha}')` };
+  }
+  if (sourceSha !== sha) {
+    return {
+      refusal:
+        `refusing the called settings apply: the sha input ${sourceSha.slice(0, 12)} is not this ` +
+        `run's own commit ${sha.slice(0, 12)}. A called run applies the judged commit of the CI run ` +
+        "that called it (post-green.yml), whose checkouts read that commit; nothing else is vouched for.",
+    };
+  }
+  const notGreen =
+    options.gh === undefined
+      ? allGreenFailure(repository, sha, undefined, { deadlineMs: 0 })
+      : allGreenFailure(repository, sha, options.gh, { deadlineMs: 0 });
+  if (notGreen !== null) {
+    return {
+      refusal:
+        `refusing the called settings apply: commit ${sha.slice(0, 12)} is not green - ${notGreen}. ` +
+        "The caller must be needs-ordered behind the all-green job of the same run, so a missing " +
+        "or pending verdict here means the call arrived from somewhere else.",
+    };
+  }
+  return { sha, fallback: false };
 }
 
 if (import.meta.main) {

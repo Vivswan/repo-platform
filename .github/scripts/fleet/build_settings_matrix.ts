@@ -6,7 +6,7 @@
 //
 // Usage:
 //   bun .github/scripts/fleet/build_settings_matrix.ts
-//     --targets targets.json [--self owner/name] [--only owner/name]
+//     --targets targets.json [--self owner/name] [--only owner/name[,owner/name...]]
 //
 // Targets come from --targets, a JSON array of the selector's enriched
 // rows ({repo, redact_name, hide_details, display, verify, ...}) - the
@@ -108,19 +108,20 @@ export function buildMatrix(rows: EnrichedRow[], self: Target | null): Target[] 
   return targets.sort((a, b) => (a.repo < b.repo ? -1 : a.repo > b.repo ? 1 : 0));
 }
 
-/** Scope to one repository (real owner/name slug, case-insensitive) for
- *  single-repo dispatch runs. Redaction has not happened yet - rows still
- *  carry the real slug - so a private target is matchable here and
- *  redacted as usual afterwards; the self target matches on its slug. */
+/** Scope to the listed repositories (real owner/name slugs, comma
+ *  separated, case-insensitive) for a dispatched or called run. Redaction
+ *  has not happened yet - rows still carry the real slug - so a private
+ *  target is matchable here and redacted as usual afterwards; the self
+ *  target matches on its slug. */
 export function applyOnly(
   rows: EnrichedRow[],
   self: Target | null,
   only: string,
 ): { rows: EnrichedRow[]; self: Target | null } {
-  const wanted = only.toLowerCase();
+  const wanted = new Set(only.split(",").map((entry) => entry.trim().toLowerCase()));
   return {
-    rows: rows.filter((r) => r.repo.toLowerCase() === wanted),
-    self: self !== null && self.repo.toLowerCase() === wanted ? self : null,
+    rows: rows.filter((r) => wanted.has(r.repo.toLowerCase())),
+    self: self !== null && wanted.has(self.repo.toLowerCase()) ? self : null,
   };
 }
 

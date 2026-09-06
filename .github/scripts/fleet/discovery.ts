@@ -113,10 +113,11 @@ const dispatchEvent = z.object({
  * event payload's dispatch input - post-green's called sync passes its
  * scope that way (public text off a main commit), and so do the test
  * harnesses and local runs. When `owner` is given, a bare name gets it
- * prefixed. The typed dispatch input may be a private slug, so IT must
- * never ride in as step env: the runner prints step env values into the
- * public log group; the event payload on the runner's disk is not
- * logged. */
+ * prefixed - except the literal "all", the explicit whole-fleet scope,
+ * which is never a repo name. The typed dispatch input may be a private
+ * slug, so IT must never ride in as step env: the runner prints step env
+ * values into the public log group; the event payload on the runner's
+ * disk is not logged. */
 export function readDispatchRepo(owner?: string): string {
   let repo = env("ONLY_REPO");
   if (repo === "" && env("GITHUB_EVENT_PATH") !== "") {
@@ -134,7 +135,9 @@ export function readDispatchRepo(owner?: string): string {
     .split(",")
     .map((entry) => entry.trim())
     .map((entry) =>
-      owner !== undefined && entry !== "" && !entry.includes("/") ? `${owner}/${entry}` : entry,
+      owner !== undefined && entry !== "" && entry.toLowerCase() !== "all" && !entry.includes("/")
+        ? `${owner}/${entry}`
+        : entry,
     )
     .join(",")
     .toLowerCase();

@@ -35,24 +35,24 @@ One implementation ([merge_settings_layers.ts](../.github/scripts/fleet/merge_se
 
 ## When it runs
 
-[settings-repos.yml](../.github/workflows/settings-repos.yml) runs on three triggers:
+[settings-repos.yml](../.github/workflows/settings-repos.yml) has three ways in, none of them a push:
 
-| Trigger | Effect |
+| Entry | Effect |
 |---|---|
-| Push to main touching the merged documents' inputs (the workflow's `paths:` block is the authoritative list) | merging a policy change applies it fleet-wide |
+| The post-green call, in a green main push's own CI run ([all-green.md](all-green.md#after-the-gate)) | when a settings input changed since the last published green main, every target is applied - [fleet/settings_inputs_changed.ts](../.github/scripts/fleet/settings_inputs_changed.ts) owns the path list; after a `[fleet-sync]` opt-in synced repos, those repos are applied in the same run |
 | Nightly cron | heals out-of-band drift |
-| Manual dispatch | plain dispatch applies; `-f check_only=true` reports drift without writes; `-f repo=owner/name` (or a bare name, same owner) heals one target and fails loudly when that repo is not a settings target |
+| Manual dispatch | plain dispatch applies; `-f check_only=true` reports drift without writes; `-f repo=` scopes it to owner/name slugs (a bare name takes the same owner), a comma list of them, or `all` - an entry naming no managed repo fails the run, a managed repo that does not select the module is skipped with a notice |
 
 Targets are the enrolled, adopted repos whose `.repo-platform.yml` selects the settings-sync module, plus repo-platform itself. A private target's report issue is delivered even under `check_only`, and the very first check on a private target can flag the report's marker label itself as drift - the label does not exist until that same run's delivery creates it, so the next run is clean.
 
 ### The green-commit gate
 
-Every run, on all three triggers, applies only from a GREEN commit ([fleet/require_green_commit.ts](../.github/scripts/fleet/require_green_commit.ts), the same [all-green predicate](all-green.md#consuming-the-gate) the template publisher and the sync enforce): this workflow is the one fleet-wide settings writer, so it never writes from a commit CI has not vouched for. What an ungreen tip means differs by trigger:
+Every run, on all three entries, applies only from a GREEN commit ([fleet/require_green_commit.ts](../.github/scripts/fleet/require_green_commit.ts), the same [all-green predicate](all-green.md#consuming-the-gate) the template publisher and the sync enforce): this workflow is the one fleet-wide settings writer, so it never writes from a commit CI has not vouched for. What the gate does differs by entry:
 
-| Trigger | On an ungreen tip |
+| Entry | The gate |
 | --- | --- |
-| Push | Waits (bounded) for its own commit's all-green check and fails closed on red or none, instead of applying a broken layer change fleet-wide concurrently with the CI run that would have caught it. |
-| Dispatch | Gated the same way - applying the checked-out commit is the run's point. `check_only` reports are dispatch runs too, so the drift diagnostic is unavailable exactly while main is red. |
+| Post-green call | The sha input must be the run's own judged commit (the workflow's checkouts read that commit, so any other value is refused), and its all-green check is read once, no wait: the caller is needs-ordered behind the gate in the same run, so a pending or missing verdict means the call came from somewhere else and is refused. |
+| Dispatch | Waits (bounded) for the tip's all-green check and fails closed on red or none - applying the checked-out commit is the run's point. `check_only` reports are dispatch runs too, so the drift diagnostic is unavailable exactly while main is red. |
 | Scheduled heal | Falls back: [fleet/newest_green_commit.ts](../.github/scripts/fleet/newest_green_commit.ts) walks main's first-parent history for the newest commit passing the same predicate, and the run re-checks out there, so scripts, dependencies, and layer files are one vouched revision - the heal keeps re-asserting the last vouched state through a red-main window instead of halting. |
 
 The walk is bounded (50 commits and 14 days; exhausting either bound refuses and the heal stays halted), and an apply-from-behind is always loud: a warning plus a step-summary line naming the commit healed from and the red tip it stands in for. One residual: the workflow FILE always executes from the tip (GitHub loads a scheduled workflow from the default branch head), so the fallback pins scripts and data, not the orchestration around them - CI gating every workflow change is the counterweight.

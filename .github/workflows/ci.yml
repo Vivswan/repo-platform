@@ -664,5 +664,6 @@ jobs:
     uses: ./.github/workflows/post-green.yml
     with:
       sha: ${{ github.sha }}
+      before: ${{ github.event.before }}
     secrets:
       REPO_PLATFORM_TOKEN: ${{ secrets.REPO_PLATFORM_TOKEN }}

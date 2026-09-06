@@ -143,6 +143,11 @@ describe("applyOnly", () => {
       only: "Vivswan/nope",
       expected: { rows: [], self: null },
     },
+    {
+      reason: "a comma list keeps every listed target, self included, trimmed and case-folded",
+      only: "vivswan/GAMMA, Vivswan/repo-platform ,Vivswan/nope",
+      expected: { rows: [rows[1]], self },
+    },
   ])("applyOnly: $reason", ({ only, expected }) => {
     expect(applyOnly(rows, self, only)).toEqual(expected);
   });
