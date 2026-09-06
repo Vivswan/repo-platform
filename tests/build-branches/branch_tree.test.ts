@@ -19,7 +19,6 @@ import {
   EXCLUDED_DIRS,
   FLEET_WORKFLOWS,
   MIGRATIONS_SRC_REL,
-  PINNED_SCRIPT_DIRS,
   parseArgs,
   SHARED_DIR,
   TEST_FILE_SUFFIX,
@@ -310,6 +309,8 @@ describe("assembleBranchTree", () => {
     for (const name of shipped) {
       expect(readFileSync(join(dest, "migrations", name))).toEqual(readFileSync(join(src, name)));
     }
+  });
+
   test("actions/ holds only actions: every directory but the shared zone carries an action.yml, and the validator ships nested in the report action", () => {
     const actions = actionDirNames(REPO_ROOT);
     const manifestFree = actions.filter(
