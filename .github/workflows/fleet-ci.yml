@@ -66,9 +66,8 @@ jobs:
           exit 1
 
   # The six base checks in one job for every visibility (a standalone job
-  # bills a rounded-up minute per push). Every check step runs under
-  # if: always() so one failure never hides another; the judge step last
-  # fails the job naming each failed check in the log and step summary.
+  # bills a rounded-up minute per push); !cancelled() keeps later checks
+  # running past a failure, and the judge last names every failed check.
   base-checks:
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -84,27 +83,27 @@ jobs:
           fetch-depth: 0
       # Step ids are the check names the judge reports.
       - id: typography
-        if: always()
+        if: ${{ !cancelled() }}
         uses: Vivswan/repo-platform/actions/check-typography@build
       # Advisory: continue-on-error keeps a finding from turning the PR
       # red; the sticky comment and step summary still land.
       - id: file-size
-        if: always()
+        if: ${{ !cancelled() }}
         continue-on-error: true
         uses: Vivswan/repo-platform/actions/check-file-size@build
       - id: commit-names
-        if: always()
+        if: ${{ !cancelled() }}
         uses: Vivswan/repo-platform/actions/validate-commit-names@build
       - id: actionlint
-        if: always()
+        if: ${{ !cancelled() }}
         uses: raven-actions/actionlint@v2
       - id: yamllint
-        if: always()
+        if: ${{ !cancelled() }}
         uses: Vivswan/repo-platform/actions/yamllint@build
       # Allowlist false positives in the repo-owned .gitleaks.toml;
       # comments off: findings land in the log and summary, not PR comments.
       - id: gitleaks
-        if: always()
+        if: ${{ !cancelled() }}
         uses: gitleaks/gitleaks-action@v3
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

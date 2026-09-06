@@ -3470,14 +3470,9 @@ export function allGreenGateMismatches(
   return mismatches;
 }
 
-/** Every gating job in fleet-ci.yml, by job id - the fleet counterpart
- *  of ALL_GREEN_ROSTER. The rendered all-green job needs the `ci` caller,
- *  whose result aggregates every job here; fleet-ci's jobs legitimately
- *  carry module/visibility conditions (a skipped job leaves the called
- *  run green), so a job DELETED here would stop gating the entire fleet
- *  with no per-repo diff to see it; this roster is where that deletion
- *  becomes loud. The six base checks are STEPS of base-checks, pinned by
- *  tests/templates/fleet_ci_shape.test.ts. */
+/** Every gating job in fleet-ci.yml, by job id (ALL_GREEN_ROSTER's fleet
+ *  counterpart): a job deleted there stops gating the whole fleet with no
+ *  per-repo diff. The six base checks are STEPS of base-checks (shape test). */
 export const FLEET_CI_ROSTER = [
   "validate-template",
   "base-checks",
@@ -5938,18 +5933,9 @@ const rules: Rule[] = [
   },
 
   {
-    // The fleet counterpart: fleet-ci.yml's gating jobs against
-    // FLEET_CI_ROSTER, both directions - deleting dependency-review or
-    // codeql there would silently drop the gate for every managed
-    // repository at once. Unlike the operator rule, job-level `if:` is the
-    // DESIGN here (module/visibility conditions; a skipped job leaves the
-    // caller's aggregated result green), but info-* job ids, a job named
-    // all-green, display-name renames, and job-level continue-on-error
-    // are banned outright: this is the fleet's shared gate home, where
-    // ids are the roster's identity, a look-alike gate job would only
-    // confuse the required-check story, and a softened job would wave
-    // its failures through for every managed repository (advisory checks
-    // soften at STEP level, inside base-checks).
+    // fleet-ci.yml's jobs against FLEET_CI_ROSTER, both directions. Job-level
+    // `if:` is the design here (a skipped job leaves the caller green); info-*
+    // ids, an all-green job, name:, and job-level continue-on-error are banned.
     name: "fleet-ci-roster",
     run: () => {
       const rel = ".github/workflows/fleet-ci.yml";

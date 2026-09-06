@@ -66,10 +66,9 @@ describe("fleet-ci.yml", () => {
     expect(job?.permissions).toEqual({ "contents": "read", "pull-requests": "write" });
   });
 
-  // The base checks are the steps of ONE unconditional job for every
-  // visibility. The check is its action: losing a step drops the check
-  // for the whole fleet with nothing else noticing, and a step without
-  // `if: always()` would be skipped by an earlier failure, hiding it.
+  // One unconditional job for every visibility. The check is its action:
+  // a lost step drops the check fleet-wide; a step without `!cancelled()`
+  // would be skipped by an earlier failure, hiding it.
   const BASE_CHECKS: { id: string; tool: string; advisory?: true }[] = [
     { id: "typography", tool: "repo-platform/actions/check-typography@build" },
     { id: "file-size", tool: "repo-platform/actions/check-file-size@build", advisory: true },
@@ -79,7 +78,7 @@ describe("fleet-ci.yml", () => {
     { id: "gitleaks", tool: "gitleaks/gitleaks-action@" },
   ];
 
-  test("base-checks is one unconditional job: checkout, six always() check steps, the judge last", () => {
+  test("base-checks is one unconditional job: checkout, six !cancelled() check steps, the judge last", () => {
     const job = fleetCi.jobs["base-checks"];
     expect(job?.if).toBeUndefined();
     const steps = job?.steps ?? [];
@@ -96,7 +95,7 @@ describe("fleet-ci.yml", () => {
       BASE_CHECKS.map((check) => ({
         id: check.id,
         uses: expect.stringContaining(check.tool),
-        if: "always()",
+        if: "${{ !cancelled() }}",
         advisory: check.advisory,
       })),
     );
@@ -116,10 +115,12 @@ describe("fleet-ci.yml", () => {
   test("a failing check step still runs every later step and the judge; no other job carries a base tool", () => {
     const steps = fleetCi.jobs["base-checks"]?.steps ?? [];
     // Actions' step-run rule: a step runs after an earlier failure only
-    // when its condition is always() (a bare step implies success()).
+    // when its condition is !cancelled() or always() (a bare step implies
+    // success()); !cancelled() also stops the checks on a cancelled run.
+    const survivesFailure = new Set(["${{ !cancelled() }}", "always()"]);
     const runsAfterFailure = (failing: number) =>
-      steps.map((step, index) => index <= failing || step.if === "always()");
-    for (let failing = 1; failing < steps.length - 1; failing++) {
+      steps.map((step, index) => index <= failing || survivesFailure.has(step.if ?? ""));
+    for (let failing = 0; failing < steps.length - 1; failing++) {
       expect(runsAfterFailure(failing)).toEqual(steps.map(() => true));
     }
     // Each base tool is pinned exactly once in the whole workflow: the
@@ -132,10 +133,9 @@ describe("fleet-ci.yml", () => {
     }
   });
 
-  // The judge's bash EXECUTED as the runner runs it (bash, the STEPS env
-  // var, a summary file): each row is one whole verdict - exit code, log
-  // lines, summary rows - so a flipped test or a broken jq program reads
-  // as the wrong verdict, not as a missing substring.
+  // The judge's bash EXECUTED as the runner runs it; each row is one whole
+  // verdict (exit code, log lines, summary rows), so a flipped test or a
+  // broken jq program reads as the wrong verdict, not a missing substring.
   type StepResult = { outcome: string; conclusion: string };
   const judge = (steps: Record<string, StepResult>) => {
     const run = (fleetCi.jobs["base-checks"]?.steps ?? []).at(-1)?.run ?? "";
