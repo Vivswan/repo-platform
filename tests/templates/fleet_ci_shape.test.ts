@@ -4,16 +4,20 @@
 // per-render validate-template/yamllint job-shape suite - the reporting
 // bash itself lives in the validate-template-report action, pinned by
 // tests/actions/validate-template-report/validate_template_report.test.ts). The validate-template
-// and yamllint jobs are THIN callers of their @build actions (the
-// predicates live in the actions and are their suites' job to police);
-// module- and visibility-conditioned jobs carry job-level guards (a
-// skipped job stands down in the all-green verdict); and no job may sleep
-// - the gate waits by failing fast, never on a billed runner.
+// job and the base-checks steps are THIN callers of their @build actions
+// (the predicates live in the actions and are their suites' job to
+// police); module- and visibility-conditioned jobs carry job-level guards
+// (a skipped job stands down in the all-green verdict); and no job may
+// sleep - the gate waits by failing fast, never on a billed runner.
 
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
+import { tempDirs } from "../shared/temp_dir";
+
+const temp = tempDirs();
 
 interface Step {
   uses?: string;
@@ -21,6 +25,8 @@ interface Step {
   if?: string;
   id?: string;
   with?: Record<string, string>;
+  env?: Record<string, string>;
+  "continue-on-error"?: boolean;
 }
 interface Job {
   if?: string;
@@ -60,53 +66,165 @@ describe("fleet-ci.yml", () => {
     expect(job?.permissions).toEqual({ "contents": "read", "pull-requests": "write" });
   });
 
-  test("yamllint is a thin caller of the yamllint action at @build", () => {
-    // The merged (private) shape's yamllint step is pinned by the TOOLS loop
-    // below; this pins the fan-out job's EXACT two-step shape.
-    const fanout = (fleetCi.jobs.yamllint?.steps ?? []).map((step) => step.uses ?? "");
-    expect(fanout).toEqual([
-      expect.stringContaining("actions/checkout@"),
-      expect.stringContaining("repo-platform/actions/yamllint@build"),
-    ]);
+  // One unconditional job for every visibility. The check is its action:
+  // a lost step drops the check fleet-wide; a step without `!cancelled()`
+  // would be skipped by an earlier failure, hiding it.
+  const BASE_CHECKS: { id: string; tool: string; advisory?: true }[] = [
+    { id: "typography", tool: "repo-platform/actions/check-typography@build" },
+    { id: "file-size", tool: "repo-platform/actions/check-file-size@build", advisory: true },
+    { id: "commit-names", tool: "repo-platform/actions/validate-commit-names@build" },
+    { id: "actionlint", tool: "raven-actions/actionlint@" },
+    { id: "yamllint", tool: "repo-platform/actions/yamllint@build" },
+    { id: "gitleaks", tool: "gitleaks/gitleaks-action@" },
+  ];
+
+  test("base-checks is one unconditional job: checkout, six !cancelled() check steps, the judge last", () => {
+    const job = fleetCi.jobs["base-checks"];
+    expect(job?.if).toBeUndefined();
+    const steps = job?.steps ?? [];
+    // commit-names walks history and gitleaks scans the event's range.
+    expect(steps[0]?.uses).toContain("actions/checkout@");
+    expect(steps[0]?.with).toEqual({ "fetch-depth": 0 });
+    const checks = steps.slice(1, -1).map((step) => ({
+      id: step.id,
+      uses: step.uses,
+      if: step.if,
+      advisory: step["continue-on-error"],
+    }));
+    expect(checks).toEqual(
+      BASE_CHECKS.map((check) => ({
+        id: check.id,
+        uses: expect.stringContaining(check.tool),
+        if: "${{ !cancelled() }}",
+        advisory: check.advisory,
+      })),
+    );
+    // The judge reads every check's conclusion and fails the job naming
+    // each failed check; its own `always()` is what makes it the verdict.
+    const judge = steps[steps.length - 1];
+    expect(judge?.if).toBe("always()");
+    expect(judge?.env).toEqual({ STEPS: "${{ toJSON(steps) }}" });
+    expect(judge?.run).toContain('select(.value.conclusion != "success")');
+    expect(judge?.run).toContain("::error::base check failed: ");
+    expect(judge?.run).toContain("$GITHUB_STEP_SUMMARY");
+    expect(judge?.run?.trimEnd().endsWith("exit 1")).toBe(true);
+    // Only for check-file-size's sticky comment.
+    expect(job?.permissions).toEqual({ "contents": "read", "pull-requests": "write" });
   });
 
-  test("the private/public base-check shapes are complementary job-level guards", () => {
-    expect(fleetCi.jobs["base-checks"]?.if).toBe("inputs.private");
-    for (const job of [
-      "typography",
-      "file-size",
-      "commit-names",
-      "actionlint",
-      "yamllint",
-      "gitleaks",
-    ]) {
-      expect(fleetCi.jobs[job]?.if).toBe("${{ !inputs.private }}");
+  test("a failing check step still runs every later step and the judge; no other job carries a base tool", () => {
+    const steps = fleetCi.jobs["base-checks"]?.steps ?? [];
+    // Actions' step-run rule: a step runs after an earlier failure only
+    // when its condition is !cancelled() or always() (a bare step implies
+    // success()); !cancelled() also stops the checks on a cancelled run.
+    const survivesFailure = new Set(["${{ !cancelled() }}", "always()"]);
+    const runsAfterFailure = (failing: number) =>
+      steps.map((step, index) => index <= failing || survivesFailure.has(step.if ?? ""));
+    for (let failing = 0; failing < steps.length - 1; failing++) {
+      expect(runsAfterFailure(failing)).toEqual(steps.map(() => true));
     }
-    // Every merged check step keeps running when an earlier one fails.
-    const guarded = (fleetCi.jobs["base-checks"]?.steps ?? []).slice(1);
-    expect(guarded.length).toBeGreaterThanOrEqual(6);
-    for (const step of guarded) expect(step.if).toBe("!cancelled()");
+    // Each base tool is pinned exactly once in the whole workflow: the
+    // per-visibility fan-out jobs are gone, and none may come back.
+    const everyUses = Object.values(fleetCi.jobs).flatMap((job) =>
+      (job.steps ?? []).map((step) => step.uses ?? ""),
+    );
+    for (const check of BASE_CHECKS) {
+      expect(everyUses.filter((uses) => uses.includes(check.tool))).toHaveLength(1);
+    }
   });
 
-  test("every base check's tool step survives in BOTH billing shapes", () => {
-    // The check is its action; losing a step from either shape would drop
-    // the check for one visibility with nothing else noticing (the retired
-    // per-render assertions covered this per repo).
-    const TOOLS = {
-      "typography": "repo-platform/actions/check-typography@build",
-      "file-size": "repo-platform/actions/check-file-size@build",
-      "commit-names": "repo-platform/actions/validate-commit-names@build",
-      "actionlint": "raven-actions/actionlint@",
-      "yamllint": "repo-platform/actions/yamllint@build",
-      "gitleaks": "gitleaks/gitleaks-action@",
+  // The judge's bash EXECUTED as the runner runs it; each row is one whole
+  // verdict (exit code, log lines, summary rows), so a flipped test or a
+  // broken jq program reads as the wrong verdict, not a missing substring.
+  type StepResult = { outcome: string; conclusion: string };
+  const judge = (steps: Record<string, StepResult>) => {
+    const run = (fleetCi.jobs["base-checks"]?.steps ?? []).at(-1)?.run ?? "";
+    const summary = join(temp.dir("fleet-ci-judge-"), "summary.md");
+    writeFileSync(summary, "");
+    const result = spawnSync("bash", ["--noprofile", "--norc", "-eo", "pipefail", "-c", run], {
+      encoding: "utf8",
+      env: {
+        PATH: process.env.PATH ?? "",
+        STEPS: JSON.stringify(steps),
+        GITHUB_STEP_SUMMARY: summary,
+      },
+    });
+    return {
+      status: result.status,
+      stdout: result.stdout.trimEnd().split("\n"),
+      stderr: result.stderr,
+      summary: readFileSync(summary, "utf8"),
     };
-    const merged = (fleetCi.jobs["base-checks"]?.steps ?? []).map((step) => step.uses ?? "");
-    for (const [job, tool] of Object.entries(TOOLS)) {
-      expect(merged).toContainEqual(expect.stringContaining(tool));
-      const fanout = (fleetCi.jobs[job]?.steps ?? []).map((step) => step.uses ?? "");
-      expect(fanout).toContainEqual(expect.stringContaining(tool));
-    }
-  });
+  };
+  const HEADER = "## Base checks\n\n| check | outcome | verdict |\n| --- | --- | --- |\n";
+  const ok: StepResult = { outcome: "success", conclusion: "success" };
+  const failed: StepResult = { outcome: "failure", conclusion: "failure" };
+  const advisory: StepResult = { outcome: "failure", conclusion: "success" };
+  const cancelled: StepResult = { outcome: "cancelled", conclusion: "cancelled" };
+  const skipped: StepResult = { outcome: "skipped", conclusion: "skipped" };
+  const JUDGE_CASES: {
+    reason: string;
+    steps: Record<string, StepResult>;
+    verdict: { status: number; stdout: string[]; rows: string[] };
+  }[] = [
+    {
+      reason: "every check green passes",
+      steps: { "typography": ok, "file-size": ok, "gitleaks": ok },
+      verdict: {
+        status: 0,
+        stdout: ["all base checks passed"],
+        rows: [
+          "| typography | success | ok |",
+          "| file-size | success | ok |",
+          "| gitleaks | success | ok |",
+        ],
+      },
+    },
+    {
+      reason: "an advisory finding (continue-on-error) is reported and does not fail",
+      steps: { "typography": ok, "file-size": advisory },
+      verdict: {
+        status: 0,
+        stdout: ["all base checks passed"],
+        rows: ["| typography | success | ok |", "| file-size | failure | advisory |"],
+      },
+    },
+    {
+      reason: "every failed, cancelled, or skipped check is named; green ones are not",
+      steps: {
+        "typography": ok,
+        "file-size": advisory,
+        "commit-names": failed,
+        "yamllint": cancelled,
+        "gitleaks": skipped,
+      },
+      verdict: {
+        status: 1,
+        stdout: [
+          "::error::base check failed: commit-names",
+          "::error::base check failed: yamllint",
+          "::error::base check failed: gitleaks",
+        ],
+        rows: [
+          "| typography | success | ok |",
+          "| file-size | failure | advisory |",
+          "| commit-names | failure | FAILED |",
+          "| yamllint | cancelled | FAILED |",
+          "| gitleaks | skipped | FAILED |",
+        ],
+      },
+    },
+  ];
+  for (const { reason, steps, verdict } of JUDGE_CASES) {
+    test(`the judge, executed: ${reason}`, () => {
+      expect(judge(steps)).toEqual({
+        status: verdict.status,
+        stdout: verdict.stdout,
+        stderr: "",
+        summary: `${HEADER}${verdict.rows.join("\n")}\n`,
+      });
+    });
+  }
 
   test("dependency-review is public-PR-only and calls the wrapper at @build", () => {
     const job = fleetCi.jobs["dependency-review"];
