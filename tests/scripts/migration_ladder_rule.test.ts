@@ -428,7 +428,10 @@ describe("selfContainedMismatches", () => {
   test("node: and bun: imports, static or dynamic, are the whole allowance (the control)", () => {
     const source = rungSource(
       "m0001_a",
-      'import { readFileSync } from "node:fs";\nimport { test } from "bun:test";\nimport path = require("node:path");\ntype Stats = import("node:fs").Stats;\nconst ffi = await import("bun:ffi");\nconst os = await import(`node:os`);\nconst fs = require("node:path");\n',
+      'import { readFileSync } from "node:fs";\nimport { test } from "bun:test";\n' +
+        'import path = require("node:path");\ntype Stats = import("node:fs").Stats;\n' +
+        'const ffi = await import("bun:ffi");\nconst os = await import(`node:os`);\n' +
+        'const fs = require("node:path");\n',
     );
     expect(selfContainedMismatches({ "m0001_a.ts": source })).toEqual([]);
   });

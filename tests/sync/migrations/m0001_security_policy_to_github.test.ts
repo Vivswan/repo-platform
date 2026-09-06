@@ -43,7 +43,12 @@ const POLICY = `${REGION}\nScope note: repo-owned tail  \n`;
 const apply = (dir: string) => typed.apply({ dir, oldSha: "old", newSha: "new" });
 
 const MOVE_NOTE =
-  "> [!NOTE]\n> SECURITY POLICY MOVE: this update moves `SECURITY.md` to\n> `.github/SECURITY.md`, byte-for-byte - the repository's own content outside\n> the managed region rides the move verbatim, and GitHub reads the policy\n> from `.github/` exactly as it did from the root. One-time transition:\n> the repository root keeps only repo content plus `.repo-platform.yml`;\n> community health files live under `.github/`.";
+  "> [!NOTE]\n> SECURITY POLICY MOVE: this update moves `SECURITY.md` to\n" +
+  "> `.github/SECURITY.md`, byte-for-byte - the repository's own content outside\n" +
+  "> the managed region rides the move verbatim, and GitHub reads the policy\n" +
+  "> from `.github/` exactly as it did from the root. One-time transition:\n" +
+  "> the repository root keeps only repo content plus `.repo-platform.yml`;\n" +
+  "> community health files live under `.github/`.";
 const MIRROR_ADVICE =
   "> This repository's `.repo-platform.yml` declares a `mirrors` source at the\n> retired path: change `source: SECURITY.md` to\n> `source: .github/SECURITY.md`. Until then the mirror step refuses that entry\n> and holds the PR.";
 const STALE_MIRROR =
