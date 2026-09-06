@@ -16,6 +16,7 @@ import {
 import { commitStampWrite } from "../../.github/scripts/shared/commit_stamp.ts";
 import { SETTINGS_LAYER_ORDER } from "../../scripts/lib/module_manifests.ts";
 import { boundedSpawnSync } from "../shared/bounded_spawn";
+import { fixtureGit } from "../shared/fixture_git";
 import { tempDirs } from "../shared/temp_dir";
 
 const temp = tempDirs();
@@ -180,18 +181,7 @@ describe("main", () => {
   const root = temp.dir("settings-inputs-changed-");
 
   function git(cwd: string, args: string[]): string {
-    const proc = boundedSpawnSync([
-      "git",
-      "-C",
-      cwd,
-      "-c",
-      "user.name=t",
-      "-c",
-      "user.email=t@x.test",
-      ...args,
-    ]);
-    if (proc.exitCode !== 0) throw new Error(`git ${args.join(" ")} failed: ${proc.stderr}`);
-    return proc.stdout.trimEnd();
+    return fixtureGit(cwd, ["-c", "user.name=t", "-c", "user.email=t@x.test", ...args]);
   }
 
   function commit(cwd: string, files: Record<string, string>, message: string): string {
@@ -439,16 +429,7 @@ describe("main", () => {
     // A depth-1 checkout lacks the push base; diffing against a missing
     // commit must fail loudly rather than degrade either way.
     const shallow = join(root, "shallow");
-    const clone = boundedSpawnSync([
-      "git",
-      "clone",
-      "-q",
-      "--depth",
-      "1",
-      `file://${source}`,
-      shallow,
-    ]);
-    if (clone.exitCode !== 0) throw new Error(`clone failed: ${clone.stderr}`);
+    git(root, ["clone", "-q", "--depth", "1", `file://${source}`, shallow]);
     const result = run(shallow, mergeCommit, renameCommit);
     expect(result.exitCode).toBe(1);
     expect(result.output).toBe("");

@@ -14,6 +14,7 @@ import {
 import { join } from "node:path";
 import { commitRunWrite, commitStampWrite } from "../../.github/scripts/shared/commit_stamp.ts";
 import { boundedSpawnSync, SPAWN_TIMEOUT_MS } from "../shared/bounded_spawn";
+import { fixtureGit, fixtureGitEnv } from "../shared/fixture_git";
 import { tempDirs } from "../shared/temp_dir";
 
 const temp = tempDirs();
@@ -78,14 +79,6 @@ function heldRsyncStub(hold: Hold): string {
   ].join("\n");
 }
 
-function git(cwd: string, args: string[]): string {
-  const proc = boundedSpawnSync(["git", "-C", cwd, ...args]);
-  if (proc.exitCode !== 0) {
-    throw new Error(`git ${args.join(" ")} failed: ${proc.stderr}`);
-  }
-  return proc.stdout.trimEnd();
-}
-
 interface Scenario {
   /** "same" gives the build tip a tree byte-identical to the composed
    * one; "drift" makes the tip carry a different tree (the source
@@ -147,20 +140,20 @@ function prepareFixture(scenario: Scenario): Fixture {
   const runnerTemp = scenario.runnerTemp ?? join(root, "runner-temp");
   mkdirSync(runnerTemp, { recursive: true });
   const origin = join(root, "origin.git");
-  git(root, ["init", "--quiet", "--bare", "-b", "main", "origin.git"]);
+  fixtureGit(root, ["init", "--quiet", "--bare", "-b", "main", "origin.git"]);
   const work = join(root, "work");
-  git(root, ["init", "--quiet", "-b", "main", "work"]);
-  git(work, ["remote", "add", "origin", origin]);
-  git(work, ["config", "user.name", "t"]);
-  git(work, ["config", "user.email", "t@t.test"]);
+  fixtureGit(root, ["init", "--quiet", "-b", "main", "work"]);
+  fixtureGit(work, ["remote", "add", "origin", origin]);
+  fixtureGit(work, ["config", "user.name", "t"]);
+  fixtureGit(work, ["config", "user.email", "t@t.test"]);
   // Two main commits: M1 (an older landing with NO builder, so a publish
   // that composes it fails - which is how the stale test proves the
   // preflight runs first) and M2 (main's HEAD: the builder, its lockfile,
   // and the composed/ tree the builder ships).
   writeFileSync(join(work, "base.txt"), "one\n");
-  git(work, ["add", "-A"]);
-  git(work, ["commit", "--quiet", "-m", "one"]);
-  const m1 = git(work, ["rev-parse", "HEAD"]);
+  fixtureGit(work, ["add", "-A"]);
+  fixtureGit(work, ["commit", "--quiet", "-m", "one"]);
+  const m1 = fixtureGit(work, ["rev-parse", "HEAD"]);
   mkdirSync(join(work, ".github/scripts/build-branches"), { recursive: true });
   writeFileSync(join(work, ".github/scripts/build-branches/branch_tree.ts"), STUB_BUILDER);
   writeFileSync(join(work, "package.json"), '{ "name": "fixture", "private": true }\n');
@@ -186,24 +179,24 @@ function prepareFixture(scenario: Scenario): Fixture {
   // --force: the composed tree's own .gitignore must not keep the planted
   // sibling out of the SOURCE commit (the builder copies whatever the
   // commit carries).
-  git(work, ["add", "-A", "--force"]);
-  git(work, ["commit", "--quiet", "-m", "two"]);
-  const m2 = git(work, ["rev-parse", "HEAD"]);
-  git(work, ["push", "--quiet", "origin", "main"]);
+  fixtureGit(work, ["add", "-A", "--force"]);
+  fixtureGit(work, ["commit", "--quiet", "-m", "two"]);
+  const m2 = fixtureGit(work, ["rev-parse", "HEAD"]);
+  fixtureGit(work, ["push", "--quiet", "origin", "main"]);
   // A commit off main (a PR head shape): green by the gh stub, never a
   // publishable source.
-  git(work, ["switch", "--quiet", "-c", "side"]);
+  fixtureGit(work, ["switch", "--quiet", "-c", "side"]);
   writeFileSync(join(work, "side.txt"), "off main\n");
-  git(work, ["add", "-A"]);
-  git(work, ["commit", "--quiet", "-m", "side"]);
-  const side = git(work, ["rev-parse", "HEAD"]);
-  git(work, ["push", "--quiet", "origin", "side"]);
-  git(work, ["switch", "--quiet", "main"]);
-  git(work, ["fetch", "--quiet", "origin"]);
+  fixtureGit(work, ["add", "-A"]);
+  fixtureGit(work, ["commit", "--quiet", "-m", "side"]);
+  const side = fixtureGit(work, ["rev-parse", "HEAD"]);
+  fixtureGit(work, ["push", "--quiet", "origin", "side"]);
+  fixtureGit(work, ["switch", "--quiet", "main"]);
+  fixtureGit(work, ["fetch", "--quiet", "origin"]);
   // The tree hash publish.ts must publish: M2's composed/ subtree as git
   // already holds it (the builder copies it verbatim and the hermetic
   // staging keeps every file).
-  const composedTree = git(work, ["rev-parse", `${m2}:composed`]);
+  const composedTree = fixtureGit(work, ["rev-parse", `${m2}:composed`]);
   if (scenario.hostileIgnores === true) {
     // Planted AFTER the source commit: this exclude hides rendered.txt
     // from every worktree of the checkout, the publish's branch worktree
@@ -215,14 +208,15 @@ function prepareFixture(scenario: Scenario): Fixture {
   // commit's own tree ("drift" - anything but the composed tree),
   // carrying the scenario's stamp state.
   const tipTree =
-    scenario.tipTree === "same" ? composedTree : git(work, ["rev-parse", `${m2}^{tree}`]);
-  const tip = git(work, ["commit-tree", tipTree, "-m", scenario.tipMessage({ m1, m2 })]);
-  git(work, ["push", "--quiet", "origin", `${tip}:refs/heads/build`]);
+    scenario.tipTree === "same" ? composedTree : fixtureGit(work, ["rev-parse", `${m2}^{tree}`]);
+  const tip = fixtureGit(work, ["commit-tree", tipTree, "-m", scenario.tipMessage({ m1, m2 })]);
+  fixtureGit(work, ["push", "--quiet", "origin", `${tip}:refs/heads/build`]);
   const sources = { m1, m2, side };
   return {
     work,
+    // The publisher runs git against these fixtures itself: same pins.
     env: {
-      ...process.env,
+      ...fixtureGitEnv(),
       PATH: `${bin}:${process.env.PATH}`,
       RUNNER_TEMP: runnerTemp,
       GITHUB_REPOSITORY: REPO,
@@ -260,15 +254,15 @@ function outcome(f: Fixture, proc: { exitCode: number; stdout: string; stderr: s
     origin: f.origin,
     scratchLeftovers: () => [
       ...readdirSync(f.runnerTemp),
-      ...git(f.work, ["worktree", "list", "--porcelain"])
+      ...fixtureGit(f.work, ["worktree", "list", "--porcelain"])
         .split("\n")
         .filter((line) => line.startsWith("worktree "))
         .map((line) => line.slice("worktree ".length))
         .filter((path) => path !== own),
     ],
-    originTip: () => git(f.origin, ["rev-parse", "refs/heads/build"]),
-    originTipMessage: () => git(f.origin, ["log", "-1", "--format=%B", "refs/heads/build"]),
-    originTipTree: () => git(f.origin, ["rev-parse", "refs/heads/build^{tree}"]),
+    originTip: () => fixtureGit(f.origin, ["rev-parse", "refs/heads/build"]),
+    originTipMessage: () => fixtureGit(f.origin, ["log", "-1", "--format=%B", "refs/heads/build"]),
+    originTipTree: () => fixtureGit(f.origin, ["rev-parse", "refs/heads/build^{tree}"]),
   };
 }
 
@@ -370,7 +364,7 @@ function expectContentChangePublished(r: Outcome): void {
   expect(r.output).toContain("(content change)");
   const newTip = r.originTip();
   expect(newTip).not.toBe(r.tip);
-  expect(git(r.origin, ["rev-parse", `${newTip}^`])).toBe(r.tip);
+  expect(fixtureGit(r.origin, ["rev-parse", `${newTip}^`])).toBe(r.tip);
   expect(r.originTipTree()).toBe(r.composedTree);
   const message = r.originTipMessage();
   expect(message).toContain(`build(build): main from ${r.m2.slice(0, 12)}`);
@@ -394,7 +388,7 @@ describe("publish.ts behavior (real git)", () => {
     // must BE the composed tree, byte for byte.
     const r = runPublish({ tipTree: "drift", tipMessage: healthyStamp, hostileIgnores: true });
     expectContentChangePublished(r);
-    const names = git(r.origin, ["ls-tree", "-r", "--name-only", r.originTipTree()]);
+    const names = fixtureGit(r.origin, ["ls-tree", "-r", "--name-only", r.originTipTree()]);
     expect(names).toContain("hidden.txt");
     expect(names).toContain("rendered.txt");
     expect(names).toContain(".gitignore");
@@ -424,7 +418,7 @@ describe("publish.ts behavior (real git)", () => {
     expect(r.output).toContain("stamp recovery");
     const newTip = r.originTip();
     expect(newTip).not.toBe(r.tip);
-    expect(git(r.origin, ["rev-parse", `${newTip}^`])).toBe(r.tip);
+    expect(fixtureGit(r.origin, ["rev-parse", `${newTip}^`])).toBe(r.tip);
     expect(r.originTipTree()).toBe(r.composedTree);
     const message = r.originTipMessage();
     expect(message).toContain(`build(build): main from ${r.m2.slice(0, 12)}`);
@@ -535,7 +529,7 @@ describe("publish.ts behavior (real git)", () => {
       for (let i = 0; i < 40 && alive(stub); i++) await Bun.sleep(50);
       expect(alive(stub)).toBe(false);
       expect(existsSync(f.hold.expired)).toBe(false);
-      expect(git(f.origin, ["rev-parse", "refs/heads/build"])).toBe(f.tip);
+      expect(fixtureGit(f.origin, ["rev-parse", "refs/heads/build"])).toBe(f.tip);
     },
     2 * SPAWN_TIMEOUT_MS,
   );
