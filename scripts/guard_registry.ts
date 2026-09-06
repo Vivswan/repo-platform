@@ -120,6 +120,16 @@ export const GUARD_REGISTRY: readonly GuardEntry[] = [
     testFile: "tests/shared/proc.test.ts",
     testName: "absent: the hang bound is the deadline; a normal exit reports timedOut false",
   },
+  {
+    id: "open-automation-pr-gh-deadline",
+    hazard:
+      "a hung gh call (stalled network) in the automation-PR step runs to proc.ts's 300s hang bound - a third of the job's budget per call - instead of this step's 120s deadline, and the expiry path leaves the suite's reach",
+    guardFile: ".github/scripts/shared/open_automation_pr.ts",
+    snippet: "{ timeoutMs: GH_TIMEOUT_MS }",
+    mutated: "{}",
+    testFile: "tests/shared/open_automation_pr.test.ts",
+    testName: "FORCED RED: a hung gh call hits the deadline and exits with the named refusal",
+  },
   // The binding check is itself a guard; unarming its vanished-snippet
   // branch would let any registered guard be deleted silently.
   {
