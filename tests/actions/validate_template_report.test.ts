@@ -10,7 +10,10 @@
 // inconsistent, crashed, timed-out, or signal-killed run is `not-judged`
 // and blocks), the LATEST pass only warns (rules the next sync brings,
 // never said twice), and FRESHNESS only informs, read from the ONE
-// build-branch compare the fetch step makes. The comment is posted BEFORE
+// build-branch compare the fetch step makes and publishes only once the
+// whole admission (build-branch membership, then the vintage floor) has
+// passed, so a refused run has no distance to contradict its refusal. The
+// comment is posted BEFORE
 // the job fails so a blocking verdict is readable in the conversation, one
 // comment is kept per PR rather than one per push, a clean-and-fresh run
 // leaves no new comment but does clear a stale one, and every reporting
@@ -437,10 +440,15 @@ describe("the action's reporting script", () => {
       },
     ],
     // With the clear step failed, fetch never ran: a clean verdict on disk is
-    // stale (or planted) and must not be read, and no compare exists either.
+    // stale (or planted) and must not be read, no compare exists either, and
+    // a latest pair at its paths is as untrusted as the verdict.
     [
-      "a failed clear ignores a planted clean verdict and blocks",
-      { env: { CLEAR_OUTCOME: "failure" }, compare: "" },
+      "a failed clear ignores a planted clean verdict and planted latest findings, and blocks",
+      {
+        env: { CLEAR_OUTCOME: "failure" },
+        compare: "",
+        latestFindings: "#### Errors (1)\n\n- a stale finding from an earlier run\n",
+      },
       {
         integrity: "failure",
         body: bodyOf(
@@ -464,8 +472,10 @@ describe("the action's reporting script", () => {
         calls: post(bodyOf(PASSED, behind(""))),
       },
     ],
+    // The fetch step publishes no such value; the fallback still names
+    // whatever an unrecognised compare said rather than guessing.
     [
-      "a compare the fetch step could not make on a clean verdict is named, not guessed",
+      "an unrecognised compare beside a judged verdict is named, not guessed",
       { compare: "error" },
       {
         integrity: "success",
@@ -579,6 +589,41 @@ describe("the action's reporting script", () => {
       outputs: `integrity=${expected.integrity}\n`,
       calls: expected.calls,
       summary: `${expected.body}\n`,
+    });
+  });
+
+  // The two steps wired as action.yml wires them: the report reads the
+  // verdict the fetch wrote and the outputs it published (an unpublished
+  // output reads as empty). A vintage-floor refusal comes AFTER the
+  // build-branch compare said `ahead 3`; the report must still tell one
+  // story, not a blocking refusal beside "behind by 3, nothing to do here".
+  test("a vintage-floor refusal renders one story: not judged, freshness not checked", () => {
+    const BASE = "1111111111111111111111111111111111111111";
+    const reason = `_commit moves backwards from main's ${BASE} to ${SHA} (compare: behind)`;
+    const fetched = runFetch({
+      answers: `_commit: ${SHA}\n`,
+      base: `_commit: ${BASE}\n`,
+      env: { GH_VINTAGE_STATUS: "behind" },
+    });
+    expect(fetched.verdict).toEqual({ kind: "not-judged", reason });
+    const published = Object.fromEntries(
+      fetched.outputs
+        .split("\n")
+        .filter((line) => line !== "")
+        .map((line) => line.split("=", 2) as [string, string]),
+    );
+    const reported = runReport({
+      verdict: fetched.verdict as Integrity,
+      compare: published.compare ?? "",
+      aheadBy: published["ahead-by"] ?? "",
+    });
+    const body = bodyOf(notJudged(reason), notChecked(reason));
+    expect(reported).toEqual({
+      exitCode: 0,
+      output: "",
+      outputs: "integrity=failure\n",
+      calls: post(body),
+      summary: `${body}\n`,
     });
   });
 });
@@ -977,6 +1022,9 @@ describe("the action's fetch script", () => {
   const admitted = `${compared}\n${contents}`;
   const fetched = `${admitted}\nTARBALL api repos/${OPERATOR}/tarball/${SHA}`;
   const AHEAD = "compare=ahead\nahead-by=3\n";
+  // A refusal publishes no compare, whatever the build-branch compare
+  // said: freshness is the admission's outcome, not one leg of it. Only a
+  // refusal PAST the admission (fetch, unpack, layout) leaves it published.
   const refused = (reason: string, calls = "", outputs = "") => ({
     exitCode: 1,
     outputs,
@@ -1034,7 +1082,6 @@ describe("the action's fetch script", () => {
         refused(
           `_commit moves backwards from main's ${BASE} to ${SHA} (compare: ${relation})`,
           `${admitted}\n${floor}`,
-          AHEAD,
         ),
       ],
     ),
@@ -1044,7 +1091,6 @@ describe("the action's fetch script", () => {
       refused(
         `could not compare main's _commit ${BASE} with ${SHA}: gh: HTTP 500`,
         `${admitted}\n${floor}`,
-        AHEAD,
       ),
     ],
     [
@@ -1053,7 +1099,6 @@ describe("the action's fetch script", () => {
       refused(
         "could not read main's .github/.copier-answers.yml on Vivswan/managed-repo: gh: HTTP 500",
         admitted,
-        AHEAD,
       ),
     ],
     [
@@ -1062,13 +1107,12 @@ describe("the action's fetch script", () => {
       refused(
         "could not read main's .github/.copier-answers.yml on Vivswan/managed-repo: died on SIGKILL",
         admitted,
-        AHEAD,
       ),
     ],
     [
       "a base ref recording a short sha is refused as the floor",
       { answers: `_commit: ${SHA}\n`, base: "_commit: abc1234\n" },
-      refused(`on main, _commit 'abc1234' is not a full build sha; ${REMEDY}`, admitted, AHEAD),
+      refused(`on main, _commit 'abc1234' is not a full build sha; ${REMEDY}`, admitted),
     ],
     [
       "no base ref at all is refused before anything else",
@@ -1093,20 +1137,12 @@ describe("the action's fetch script", () => {
     [
       "a gh outage fails closed before anything is fetched, with gh's own words",
       { answers: `_commit: ${SHA}\n`, env: { GH_FAIL: "1" } },
-      refused(
-        `could not confirm ${SHA} is on ${OPERATOR}'s build branch: gh: boom`,
-        "",
-        "compare=error\n",
-      ),
+      refused(`could not confirm ${SHA} is on ${OPERATOR}'s build branch: gh: boom`),
     ],
     [
       "a compare that fails without a message still names the step that failed",
       { answers: `_commit: ${SHA}\n`, env: { GH_COMPARE_FAIL: "1" } },
-      refused(
-        `could not confirm ${SHA} is on ${OPERATOR}'s build branch: exit 1`,
-        compared,
-        "compare=error\n",
-      ),
+      refused(`could not confirm ${SHA} is on ${OPERATOR}'s build branch: exit 1`, compared),
     ],
     // The tarball endpoint would serve any commit in the repository's
     // network, and the answers file is PR-editable: only a commit the
@@ -1118,18 +1154,13 @@ describe("the action's fetch script", () => {
         refused(
           `_commit ${SHA} is not a published commit of ${OPERATOR}'s build branch (compare: ${status})`,
           compared,
-          `compare=${status}\nahead-by=0\n`,
         ),
       ],
     ),
     [
       "a fetch that fails after the compare passed fails closed with gh's own words",
       { answers: `_commit: ${SHA}\n`, env: { GH_TARBALL_FAIL: "1" } },
-      refused(
-        `could not fetch ${OPERATOR} at ${SHA}: gh: HTTP 404: Not Found`,
-        fetched,
-        "compare=ahead\nahead-by=3\n",
-      ),
+      refused(`could not fetch ${OPERATOR} at ${SHA}: gh: HTTP 404: Not Found`, fetched, AHEAD),
     ],
     [
       "a build tree without the validator fails closed",
@@ -1137,7 +1168,7 @@ describe("the action's fetch script", () => {
       refused(
         `${OPERATOR} at ${SHA} ships no ${VALIDATOR_DIR}/${VALIDATOR_SCRIPT}`,
         fetched,
-        "compare=ahead\nahead-by=3\n",
+        AHEAD,
       ),
     ],
     // The setup-bun step behind this one reads the tree's pin; a tree
@@ -1148,7 +1179,7 @@ describe("the action's fetch script", () => {
       refused(
         `${OPERATOR} at ${SHA} ships no ${VALIDATOR_DIR}/${BUN_VERSION_FILE}`,
         fetched,
-        "compare=ahead\nahead-by=3\n",
+        AHEAD,
       ),
     ],
     [
@@ -1157,13 +1188,13 @@ describe("the action's fetch script", () => {
       refused(
         `${OPERATOR} at ${SHA} ships no ${VALIDATOR_DIR}/${VALIDATOR_SCRIPT}`,
         fetched,
-        "compare=ahead\nahead-by=3\n",
+        AHEAD,
       ),
     ],
     [
       "a scratch root planted as a symlink is replaced, never written through",
       { answers: `_commit: ${SHA}\n`, symlinked: true },
-      laidOut("compare=ahead\nahead-by=3\n"),
+      laidOut(AHEAD),
     ],
     // The unpacker's complaint runs several lines and its wording differs
     // per platform (bsdtar, GNU tar behind gzip); the reason is the fixed
@@ -1173,7 +1204,7 @@ describe("the action's fetch script", () => {
       { answers: `_commit: ${SHA}\n`, corrupt: true },
       {
         exitCode: 1,
-        outputs: "compare=ahead\nahead-by=3\n",
+        outputs: AHEAD,
         calls: fetched,
         verdict: {
           kind: "not-judged",
@@ -1333,16 +1364,22 @@ describe("the action's judge script", () => {
 // --- the clear step ------------------------------------------------------------
 
 describe("the action's clear step", () => {
-  // Executed as the runner would, with a planted scratch tree and a planted
-  // clean verdict where the action expects them: both must be gone after,
-  // whatever the inherited PATH, BASH_ENV, or SHELLOPTS say.
-  test("removes a planted scratch tree and verdict under a hostile environment", () => {
+  // Executed as the runner would, with a planted scratch tree, a planted
+  // clean verdict, and a planted latest-leg report pair where the action
+  // expects them: all must be gone after, whatever the inherited PATH,
+  // BASH_ENV, or SHELLOPTS say. (A latest validator that aborts before
+  // writing would otherwise leave an earlier run's pair for the report.)
+  test("removes a planted scratch tree, verdict, and latest reports under a hostile environment", () => {
     const { root, bin } = scratch();
     const runnerTemp = join(root, "runner-temp");
     const alignedDir = join(runnerTemp, "aligned-validator");
     const verdict = join(runnerTemp, "aligned-verdict.json");
+    const latestFindings = join(runnerTemp, "latest-findings.md");
+    const latestAdvisories = join(runnerTemp, "latest-advisories.md");
     layValidator(validatorOf(alignedDir), {});
     writeFileSync(verdict, '{"kind":"clean","advisories":""}\n');
+    writeFileSync(latestFindings, "#### Errors (1)\n\n- stale finding\n");
+    writeFileSync(latestAdvisories, "#### Advisories (1)\n\n- stale advisory\n");
     // A poisoned rm first on PATH, a BASH_ENV that redefines rm, and
     // SHELLOPTS=noexec: the step's own env must defeat all three.
     writeFileSync(join(bin, "rm"), "#!/usr/bin/env bash\nexit 0\n", { mode: 0o755 });
@@ -1361,7 +1398,13 @@ describe("the action's clear step", () => {
         ...clear.env,
       },
     });
-    expect([proc.exitCode, existsSync(alignedDir), existsSync(verdict)]).toEqual([0, false, false]);
+    expect([
+      proc.exitCode,
+      existsSync(alignedDir),
+      existsSync(verdict),
+      existsSync(latestFindings),
+      existsSync(latestAdvisories),
+    ]).toEqual([0, false, false, false, false]);
   });
 });
 
@@ -1428,16 +1471,26 @@ describe("the action's wiring", () => {
     const BUN_PATH = "${{ steps.action-bun.outputs.path }}";
     const fetch = byId("fetch");
     expect(String(fetch?.run)).toBe('"$ACTION_BUN" "${{ github.action_path }}/fetch_aligned.ts"');
-    // The scratch root is cleared by a fixed rm on the literal path with
-    // BASH_ENV emptied (no variable or PATH entry a caller could poison);
-    // both aligned setups require it, and the actions-bun-guard rule reads it.
+    // Every predictable scratch path is cleared by a fixed rm on the literal
+    // path with BASH_ENV emptied (no variable or PATH entry a caller could
+    // poison): the aligned tree and verdict, which both aligned setups
+    // require (the actions-bun-guard rule reads it), and the latest leg's
+    // report pair, so an aborted latest validator leaves nothing stale.
+    const latestWith = byId("latest")?.with as Record<string, string>;
     expect(byId("clear")).toEqual({
       name: "Clear the scratch root",
       id: "clear",
       "continue-on-error": true,
       shell: "bash",
       env: { BASH_ENV: "", SHELLOPTS: "" },
-      run: `/bin/rm -rf "${envOf(fetch).ALIGNED_DIR}"\n/bin/rm -rf "${envOf(fetch).VERDICT_FILE}"\n`,
+      run: [
+        envOf(fetch).ALIGNED_DIR,
+        envOf(fetch).VERDICT_FILE,
+        latestWith["findings-file"],
+        latestWith["advisories-file"],
+      ]
+        .map((path) => `/bin/rm -rf "${path}"\n`)
+        .join(""),
     });
     expect(envOf(fetch).ACTION_BUN).toBe(BUN_PATH);
     // The vintage floor reads the PR's base ref, or the default branch off a PR.
@@ -1487,7 +1540,6 @@ describe("the action's wiring", () => {
     const latest = byId("latest");
     expect(String(latest?.uses)).toBe("Vivswan/repo-platform/actions/validate-template@build");
     expect(latest?.["continue-on-error"]).toBe(true);
-    const latestWith = latest?.with as Record<string, string>;
 
     // The report runs whatever happened above, reads the verdict the
     // integrity leg wrote, the latest pair where that leg wrote it, and
