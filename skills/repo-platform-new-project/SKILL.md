@@ -120,7 +120,7 @@ The `--public`/`--private` flag must match the `private` copier answer, or the f
 
 Then one grant: give the fleet `REPO_PLATFORM_TOKEN` PAT access to the new repository (see "Owner actions"). Discovery only enrolls repos the token can WRITE to; that grant is the enrollment.
 
-- No entry in repo-platform's `repos.yml` is needed (the wildcard discovers it); `exclude:` is only for opting a repo out.
+- Nothing in repo-platform names the repo: the fleet PAT's grant is the only membership fact, and revoking it is the only opt-out.
 - Sync PRs arrive on the weekly cron. To sync immediately:
 
 ```bash
@@ -148,8 +148,7 @@ Collect these for the human with admin rights:
 ## Private repositories
 
 - No CodeQL or dependency-review jobs; CONTRIBUTING.md is not rendered.
-- Fleet run logs are public, so a wildcard-discovered private repo appears only as a name hint (`hidden-server` -> `h**-s**r`) and its details (paths, module lists, conflict content) stay out of public logs; the full detail lands in the repo's own sync PRs and report issues.
-- Naming a private repo in repos.yml publishes the name (details stay hidden); wildcard discovery keeps it hinted.
+- Fleet run logs are public, so a private repo appears only as a name hint (`hidden-server` -> `h**-s**r`) and its details (paths, module lists, conflict content) stay out of public logs; the full detail lands in the repo's own sync PRs and report issues.
 
 ## Verify
 

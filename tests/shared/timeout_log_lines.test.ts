@@ -1,4 +1,4 @@
-// Four call sites hand-roll a deadline-expiry log line: they route
+// Three call sites hand-roll a deadline-expiry log line: they route
 // through capture() and re-emit its streams themselves, so proc.ts cannot
 // print the expiry for them, and their argv tails can carry values a
 // public log must not show (a private slug behind --only or -R, a
@@ -24,7 +24,6 @@ import { parseTs } from "../../scripts/lib/ts_extract.ts";
 const SITES = [
   ".github/scripts/sync/clean_renders.ts",
   ".github/scripts/sync/disarm_pr.ts",
-  ".github/scripts/fleet/discovery.ts",
   ".github/scripts/fleet/select_settings_repos.ts",
 ];
 

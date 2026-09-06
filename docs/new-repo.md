@@ -135,9 +135,9 @@ Around the cut itself:
 gh repo create Vivswan/my-project --public --source . --push
 ```
 
-That is the whole repo-side setup, plus one grant: give the fleet PAT access to the new repository (its repository access list) - discovery only enrolls repos the token can write to. The `repos.yml` wildcard then picks it up, `.repo-platform.yml` opts it into push sync, and update PRs start arriving on the weekly cron (`gh workflow run sync-repos.yml -f repo=Vivswan/my-project -R Vivswan/repo-platform` syncs it immediately).
+That is the whole repo-side setup, plus one grant: give the fleet PAT access to the new repository (its repository access list) - the PAT's grant is the only fleet-membership fact, so that access IS the enrollment. `.repo-platform.yml` opts it into push sync, and update PRs start arriving on the weekly cron (`gh workflow run sync-repos.yml -f repo=Vivswan/my-project -R Vivswan/repo-platform` syncs it immediately).
 
-The `exclude:` list in `repos.yml` is only for opting a discovered repo OUT of management; a new managed repo touches nothing in repo-platform.
+A new managed repo touches nothing in repo-platform: there is no fleet list to edit.
 
 ## 5. Settings management
 

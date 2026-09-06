@@ -1,8 +1,7 @@
 import { beforeAll, describe, expect, test } from "bun:test";
-import { mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { notAdoptedNotice, pushProbeSkipNotice } from "../../.github/scripts/fleet/discovery.ts";
-import { undiscoveredWarning } from "../../.github/scripts/fleet/sync_scope.ts";
 import { tempDirs } from "../shared/temp_dir";
 
 const SHA = "8096c4920f84ec4122d14c5bd884703dd0d382ba";
@@ -10,17 +9,25 @@ const SHA = "8096c4920f84ec4122d14c5bd884703dd0d382ba";
 const temp = tempDirs();
 
 // End-to-end harness for the sync fan-out selector, stub-gh/curl style
-// (see select_settings_repos.test.ts). Personas:
-//   steady        - explicit in repos.yml, public in discovery, adopted
-//   unadopted     - explicit, public, no .repo-platform.yml (skip notice)
-//   hidden-server - PRIVATE, wildcard-discovered, adopted: every public
-//                   surface (log, matrix, roster) must carry its hint
-//   hidden-locked - PRIVATE, wildcard-discovered, push probe 403s: the
-//                   skip notice must carry its hint
-// The matrix rows are this job's output contract: a redacted row holds
-// {repo: <hint>, verify} and never the slug.
+// (see select_settings_repos.test.ts). Personas, all discovered:
+//   steady        - public, adopted
+//   unadopted     - public, no .repo-platform.yml (skip notice)
+//   hidden-server - PRIVATE, adopted: every public surface (log, matrix,
+//                   roster) must carry its hint
+//   hidden-locked - PRIVATE, push probe 403s (the token cannot push, so it
+//                   is not a fleet member): the notice must carry its hint
+//   locked        - public, push probe 403s: a public repo whose write
+//                   access was revoked stays discovered; every plan whose
+//                   scope selects that repository prints one notice that the
+//                   token cannot push to it (the private-scoped cases below
+//                   do not select it, so they print none)
+//   hidden-gone   - PRIVATE, NOT discovered: a private repo whose write
+//                   access was revoked vanishes from GET /user/repos; the
+//                   stubs would admit it (adopted, probe 200), so the
+//                   control run below discovers it and it selects
+// The matrix rows are this job's output contract: a private row holds
+// {repo: <hint>, private: true, verify} and never the slug.
 describe("select_sync_repos.ts", () => {
-  const repoRoot = join(import.meta.dir, "..", "..");
   const script = join(import.meta.dir, "../../.github/scripts/fleet/select_sync_repos.ts");
   const root = temp.dir("select-sync-");
   const bin = join(root, "bin");
@@ -31,7 +38,9 @@ describe("select_sync_repos.ts", () => {
     { repo: "Vivswan/unadopted", private: false },
     { repo: "Vivswan/hidden-server", private: true },
     { repo: "Vivswan/hidden-locked", private: true },
+    { repo: "Vivswan/locked", private: false },
   ];
+  const HIDDEN_GONE = { repo: "Vivswan/hidden-gone", private: true };
 
   beforeAll(() => {
     mkdirSync(bin);
@@ -67,7 +76,7 @@ describe("select_sync_repos.ts", () => {
         "#!/usr/bin/env bash",
         'while [ "$#" -gt 1 ]; do shift; done',
         'case "$1" in',
-        '  *"/Vivswan/hidden-locked.git/"*) printf 403 ;;',
+        '  *"/Vivswan/hidden-locked.git/"*|*"/Vivswan/locked.git/"*) printf 403 ;;',
         "  *) printf 200 ;;",
         "esac",
         "",
@@ -75,12 +84,9 @@ describe("select_sync_repos.ts", () => {
       { mode: 0o755 },
     );
 
-    mkdirSync(join(fixture, "settings", "repos"), { recursive: true });
-    symlinkSync(join(repoRoot, ".github"), join(fixture, ".github"));
-    writeFileSync(
-      join(fixture, "repos.yml"),
-      ["managed:", '  - "*"', "  - Vivswan/steady", "  - Vivswan/unadopted", ""].join("\n"),
-    );
+    // The fixture root stands in for the checked-out repo (the script's
+    // cwd); nothing in it is read.
+    mkdirSync(fixture, { recursive: true });
   });
 
   interface Run {
@@ -117,6 +123,7 @@ describe("select_sync_repos.ts", () => {
         PAT: "stub-token",
         GH_TOKEN: "stub-token",
         GITHUB_RUN_ID: "8675309",
+        OWNER: "Vivswan",
         ONLY_REPO: "",
         RECOVER: "",
         // Neutralize the real event payload CI runs carry; the dispatch
@@ -163,20 +170,14 @@ describe("select_sync_repos.ts", () => {
     expect(main.exitCode).toBe(0);
   });
 
-  test("matrix rows carry redaction fields; redacted rows carry the hint", () => {
+  test("matrix rows carry the private flag; private rows carry the hint", () => {
     expect(reposOf(main)).toEqual([
       {
         repo: "h**-s**r",
-        redact_name: true,
-        hide_details: true,
+        private: true,
         verify: expect.stringMatching(/^[0-9a-f]{32}$/),
       },
-      {
-        repo: "Vivswan/steady",
-        redact_name: false,
-        hide_details: false,
-        verify: "",
-      },
+      { repo: "Vivswan/steady", private: false, verify: "" },
     ]);
   });
 
@@ -187,10 +188,31 @@ describe("select_sync_repos.ts", () => {
     }
   });
 
-  test("skip notices print hints for redacted repos and slugs for public ones", () => {
-    expect(main.stdout).toContain("::notice::h**-l**d: skipped - the fleet token has no write");
+  test("skip notices print hints for private repos and slugs for public ones", () => {
+    expect(main.stdout).toContain(`::notice::${pushProbeSkipNotice("h**-l**d")}`);
+    expect(main.stdout).toContain(`::notice::${pushProbeSkipNotice("Vivswan/locked")}`);
     expect(main.stdout).toContain("::notice::Vivswan/unadopted: skipped - no .repo-platform.yml");
   });
+
+  test(
+    "a private repo the token can no longer see leaves without a trace; discovered, it would select",
+    () => {
+      // Control first: with the persona in the discovered list the same
+      // stubs select it, so its absence from the main run's exact rows and
+      // every channel is discovery's doing, not a stub that never admitted it.
+      const control = run("gone-present", { ONLY_REPO: "private", TARGET_SHA: SHA }, [
+        ...discovered,
+        HIDDEN_GONE,
+      ]);
+      expect(control.exitCode).toBe(0);
+      expect(reposOf(control).map((row) => row.repo)).toEqual(["h**-g**", "h**-s**r"]);
+      for (const channel of [main.stdout, main.stderr, main.output]) {
+        expect(channel).not.toContain("hidden-gone");
+        expect(channel).not.toContain("h**-g**");
+      }
+    },
+    TEST_TIMEOUT_MS,
+  );
 
   test("the roster line lists hints, not slugs", () => {
     expect(main.stdout).toContain("syncing: h**-s**r, Vivswan/steady");
@@ -220,9 +242,7 @@ describe("select_sync_repos.ts", () => {
       writeFileSync(eventFile, JSON.stringify({ inputs: { repo: "Vivswan/hidden-servr" } }));
       const r = run("dispatch-miss", { ONLY_REPO: "", GITHUB_EVENT_PATH: eventFile });
       expect(r.exitCode).not.toBe(0);
-      // The registry stage's ::error:: rides its captured stdout, which
-      // runStage forwards on failure.
-      expect(r.stdout).toContain("matched no managed repository (values withheld");
+      expect(r.stdout).toContain("matched no fleet repository (values withheld");
       for (const channel of [r.stdout, r.stderr, r.output]) {
         expect(channel).not.toContain("hidden-servr");
       }
@@ -278,19 +298,19 @@ describe("select_sync_repos.ts", () => {
   // token. Whole outcome per row: every log line, the matrix, exit code.
   const HIDDEN_SERVER_ROW = {
     repo: "h**-s**r",
-    redact_name: true,
-    hide_details: true,
+    private: true,
     verify: expect.stringMatching(/^[0-9a-f]{32}$/),
   };
-  const STEADY_ROW = {
-    repo: "Vivswan/steady",
-    redact_name: false,
-    hide_details: false,
-    verify: "",
-  };
+  const STEADY_ROW = { repo: "Vivswan/steady", private: false, verify: "" };
   const lines = (...notices: string[]) => notices.map((text) => `${text}\n`).join("");
   const UNADOPTED = `::notice::${notAdoptedNotice("Vivswan/unadopted")}`;
-  const LOCKED = `::notice::${pushProbeSkipNotice("h**-l**d", 403)}`;
+  const LOCKED = `::notice::${pushProbeSkipNotice("h**-l**d")}`;
+  const LOCKED_PUBLIC = `::notice::${pushProbeSkipNotice("Vivswan/locked")}`;
+  const NO_FLEET_REPO = (missing: number, total: number) =>
+    `::error::${missing} of ${total} scoped repos matched no fleet repository (values withheld - ` +
+    "they may be private slugs): not among the fleet token's pushable repositories under Vivswan - " +
+    "the grant was revoked, the repository is archived or owned by someone else, or the slug is " +
+    "misspelled (matching ignores case)\n";
   test.each([
     {
       reason: "a public slug list selects exactly those (the unadopted one drops with its notice)",
@@ -300,11 +320,11 @@ describe("select_sync_repos.ts", () => {
       stdout: lines(UNADOPTED, "syncing: Vivswan/steady"),
     },
     {
-      reason: "public selects the public repos",
+      reason: "public selects the public repos (the revoked public one drops with its notice)",
       scope: "public",
       discoveredList: discovered,
       repos: [STEADY_ROW],
-      stdout: lines(UNADOPTED, "syncing: Vivswan/steady"),
+      stdout: lines(LOCKED_PUBLIC, UNADOPTED, "syncing: Vivswan/steady"),
     },
     {
       reason: "private selects the private repos, by hint (the locked one drops on its probe)",
@@ -322,12 +342,12 @@ describe("select_sync_repos.ts", () => {
     },
     {
       reason:
-        "a targeted repo discovery missed counts as private: public skips it, and the plan says so, counting only",
+        "a repo discovery did not list is not in the fleet: public simply never sees it, no warning",
       scope: "public",
       discoveredList: discovered.filter((entry) => entry.repo !== "Vivswan/steady"),
       repos: [],
       stdout: lines(
-        `::warning::${undiscoveredWarning(1)}`,
+        LOCKED_PUBLIC,
         UNADOPTED,
         "::notice::no adopted repos selected; nothing to sync.",
       ),
@@ -366,8 +386,7 @@ describe("select_sync_repos.ts", () => {
     {
       reason: "a list with one miss fails the whole plan",
       scope: "Vivswan/steady,Vivswan/hidden-servr",
-      stdout:
-        "::error::1 of 2 scoped repos matched no managed repository (values withheld - they may be private slugs): a repo you scoped to is not in managed (or the discovered list), or it is listed in exclude; check the spelling (matching ignores case)\n",
+      stdout: NO_FLEET_REPO(1, 2),
       withheld: "hidden-servr",
     },
     {
@@ -379,13 +398,10 @@ describe("select_sync_repos.ts", () => {
     },
     {
       reason:
-        "a slug-only scope whose own slug discovery missed warns about that one repo, then is refused as private",
+        "a slug-only scope whose own slug discovery missed is refused as unknown: not in the fleet is not a skip",
       scope: "Vivswan/steady",
       discoveredList: discovered.filter((entry) => entry.repo !== "Vivswan/steady"),
-      stdout: lines(
-        `::warning::${undiscoveredWarning(1)}`,
-        `::error::1 of 1 scoped repos are private: name private repositories with the \`private\` token, never by slug - a directive is public text on main (the range judged at ${SHA.slice(0, 12)})`,
-      ),
+      stdout: NO_FLEET_REPO(1, 1),
       withheld: null,
     },
   ])(

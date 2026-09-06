@@ -7,33 +7,20 @@ import {
 } from "../../.github/scripts/fleet/build_settings_matrix";
 import type { EnrichedRow } from "../../.github/scripts/fleet/redact";
 
-function target(repo: string, hideDetails = false): Target {
-  return {
-    repo,
-    name: repo.split("/").pop() ?? repo,
-    redact_name: false,
-    hide_details: hideDetails,
-    verify: "",
-  };
+function target(repo: string): Target {
+  return { repo, name: repo.split("/").pop() ?? repo, private: false, verify: "" };
 }
 
 function publicRow(repo: string): EnrichedRow {
-  return {
-    repo,
-    redact_name: false,
-    hide_details: false,
-    display: repo,
-    verify: "",
-  };
+  return { repo, private: false, display: repo, verify: "" };
 }
 
 describe("selfTarget", () => {
-  test("the operator repo becomes a plain unredacted row", () => {
+  test("the operator repo becomes a plain public row", () => {
     expect(selfTarget("Vivswan/repo-platform")).toEqual({
       repo: "Vivswan/repo-platform",
       name: "repo-platform",
-      redact_name: false,
-      hide_details: false,
+      private: false,
       verify: "",
     });
   });
@@ -61,46 +48,23 @@ describe("buildMatrix", () => {
     ]);
   });
 
-  test("a redacted row emits its display, never the slug", () => {
+  test("a private row emits its display in both name slots, never the slug", () => {
     // Target keeps EnrichedRow's discriminated union instead of flattening
-    // it into three independent fields, so `redact_name: true,
-    // hide_details: false` - the combination the selector's schema exists
-    // to prevent (a repo whose NAME is hidden but whose label and ruleset
-    // names print to the public log) - is unrepresentable here too; tsc
-    // checks the construction sites, and this pins the redacted arm's
+    // it into independent fields, so a tagless private row - the shape the
+    // selector's schema exists to prevent - is unrepresentable here too;
+    // tsc checks the construction sites, and this pins the private arm's
     // runtime output whole.
     const row: EnrichedRow = {
       repo: "Vivswan/hidden-server",
-      redact_name: true,
-      hide_details: true,
+      private: true,
       display: "h**-s**r",
       verify: "deadbeef",
     };
     const matrix = buildMatrix([row], null);
     expect(matrix).toEqual([
-      {
-        repo: "h**-s**r",
-        name: "h**-s**r",
-        redact_name: true,
-        hide_details: true,
-        verify: "deadbeef",
-      },
+      { repo: "h**-s**r", name: "h**-s**r", private: true, verify: "deadbeef" },
     ]);
     expect(JSON.stringify(matrix)).not.toContain("hidden-server");
-  });
-
-  test("a self-disclosed private row keeps its committed name", () => {
-    const row: EnrichedRow = {
-      repo: "Vivswan/committed-private",
-      redact_name: false,
-      hide_details: true,
-      display: "Vivswan/committed-private",
-      verify: "",
-    };
-    // The NAME is disclosed but the content is not: hide_details must
-    // survive the matrix, or the pre-action render and merge steps print
-    // this repo's own label and ruleset names into a public log.
-    expect(buildMatrix([row], null)).toEqual([target("Vivswan/committed-private", true)]);
   });
 
   test("no targets is an empty matrix, not an error", () => {
@@ -111,20 +75,8 @@ describe("buildMatrix", () => {
 describe("applyOnly", () => {
   const self = selfTarget("Vivswan/repo-platform");
   const rows: EnrichedRow[] = [
-    {
-      repo: "Vivswan/beta",
-      redact_name: false,
-      hide_details: false,
-      display: "Vivswan/beta",
-      verify: "",
-    },
-    {
-      repo: "Vivswan/gamma",
-      redact_name: true,
-      hide_details: true,
-      display: "g**a",
-      verify: "v",
-    },
+    { repo: "Vivswan/beta", private: false, display: "Vivswan/beta", verify: "" },
+    { repo: "Vivswan/gamma", private: true, display: "g**a", verify: "v" },
   ];
 
   test.each([

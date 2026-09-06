@@ -58,7 +58,6 @@ import { join, resolve } from "node:path";
 import { z } from "zod";
 import { MANIFEST_NAME } from "../../../actions/shared/manifest.ts";
 import { stampManifestText } from "../../../actions/shared/stamp_manifest.ts";
-import { loadRegistry } from "../fleet/repos_registry.ts";
 import { lastLine } from "../shared/lines.ts";
 import {
   capture,
@@ -285,25 +284,6 @@ export function manifestStatus(root: string): ManifestStatus {
   return stamped.out === text ? "stamped" : "stale";
 }
 
-// Warns when repos.yml would never sync this repo (production's full
-// selection needs the fleet PAT's repo discovery - the managed wildcard -
-// which does not exist locally, so a repo production would skip is warned
-// about and rehearsed anyway: a read-only what-if against an excluded repo
-// is a legitimate rehearsal).
-function warnUnselected(slug: string): void {
-  const { registry, errors } = loadRegistry(readFileSync(join(REPO_ROOT, "repos.yml"), "utf-8"));
-  if (registry === null) throw new RehearsalError(`repos.yml: ${errors.join("; ")}`);
-  const lower = slug.toLowerCase();
-  if (registry.exclude.some((entry) => entry.toLowerCase() === lower)) {
-    console.warn(`warning: ${slug} is in repos.yml's exclude list; production never syncs it`);
-  } else if (
-    !registry.managed.wildcard &&
-    !registry.managed.repos.some((entry) => entry.toLowerCase() === lower)
-  ) {
-    console.warn(`warning: ${slug} is not in repos.yml's managed list; production never syncs it`);
-  }
-}
-
 /** Rehearse one repo's sync end to end (see the file header for the legs
  * and the read-only guarantees). Throws RehearsalError on any condition
  * that stops the rehearsal - RecoveryNeededError for the unresolvable
@@ -386,7 +366,6 @@ export function rehearseRepo(slug: string, options: RehearsalOptions): Rehearsal
       if (!(err instanceof AnswersFileError)) throw err;
       throw new RehearsalError(`${slug}'s ${ANSWERS_PATH}: ${err.message}`);
     }
-    warnUnselected(slug);
     if (answers.commit === "") {
       throw new RehearsalError(
         `${slug}'s ${ANSWERS_PATH} records no _commit; there is no base to update from`,

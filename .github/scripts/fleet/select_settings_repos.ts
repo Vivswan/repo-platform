@@ -11,15 +11,14 @@
 // fleet: every probe is retried, and a repo whose probes still return no
 // answer is skipped with a warning - the nightly cron retries it. exit 1
 // stays reserved for failures that invalidate the whole selection
-// (unreadable registry, discovery, or exclusion list).
+// (discovery, or the matrix builder).
 //
 // This job's log, step summary, and matrix are publicly readable, so
-// private repos appear only by their redaction display (redact.ts):
-// probes print the display, captured error text is scrubbed of the slug,
-// and a redacted matrix row carries the hint plus an HMAC tag instead of
-// the slug. No ::add-mask:: here - the runner drops a job output holding
-// a masked substring, which would kill the matrix. repos.yml-excluded
-// repos keep their committed (self-disclosed) names.
+// private repos appear only by their redaction hint (redact.ts): probes
+// print the display, captured error text is scrubbed of the slug, and a
+// private matrix row carries the hint plus an HMAC tag instead of the
+// slug. No ::add-mask:: here - the runner drops a job output holding a
+// masked substring, which would kill the matrix.
 //
 // Env: PAT, GH_TOKEN, GITHUB_RUN_ID, GITHUB_REPOSITORY, OWNER,
 // RUNNER_TEMP, GITHUB_OUTPUT; GITHUB_STEP_SUMMARY (optional) receives a
@@ -29,7 +28,7 @@
 // runs). The scope grammar is the sync's (sync_scope.ts): owner/name slugs
 // (a bare name takes the fleet owner), public, private, or "all".
 
-import { appendFileSync, readFileSync, writeFileSync, writeSync } from "node:fs";
+import { appendFileSync, writeFileSync, writeSync } from "node:fs";
 import { join } from "node:path";
 import { env, notice, requireEnv, setOutput } from "../shared/gha.ts";
 import { parseJson } from "../shared/json.ts";
@@ -41,22 +40,16 @@ import {
   notAdoptedNotice,
   pushProbeSkipNotice,
   readDispatchRepo,
-  runStage,
   scopeSource,
   scrubSlug,
 } from "./discovery.ts";
 import { pushProbeStatus } from "./push_probe.ts";
-import { type EnrichedRow, parseEnriched } from "./redact.ts";
-import {
-  parseScope,
-  scopeRefusal,
-  scopeSelects,
-  undiscoveredCount,
-  undiscoveredWarning,
-} from "./sync_scope.ts";
+import { type EnrichedRow, enrich, verifyTag } from "./redact.ts";
+import { parseScope, scopeRefusal, scopeSelects } from "./sync_scope.ts";
 
 const runnerTemp = requireEnv("RUNNER_TEMP");
 const pat = requireEnv("PAT");
+const runId = requireEnv("GITHUB_RUN_ID");
 const owner = requireEnv("OWNER");
 const selfRepo = requireEnv("GITHUB_REPOSITORY");
 
@@ -99,7 +92,7 @@ function probePush(slug: string, display: string): ProbeResult {
   const code = pushProbeStatus(slug, pat);
   if (code === 200) return "pass";
   if (code === 401 || code === 403 || code === 404) {
-    notice(pushProbeSkipNotice(display, code));
+    notice(pushProbeSkipNotice(display));
     return "drop";
   }
   return { detail: `HTTP ${String(code).padStart(3, "0")}` };
@@ -171,67 +164,26 @@ async function probe(
 // grant is probed per repo below. Visibility rides along fail-closed:
 // anything but private: false counts as private.
 const discovered = discoverOwnerRepos(owner, "select_settings_repos: user/repos response");
-writeFileSync(join(runnerTemp, "discovered.json"), JSON.stringify(discovered));
-
-runStage(
-  [
-    "bun",
-    ".github/scripts/fleet/repos_registry.ts",
-    "select",
-    "--discovered",
-    join(runnerTemp, "discovered.json"),
-  ],
-  join(runnerTemp, "selected.json"),
-);
-runStage(
-  [
-    "bun",
-    ".github/scripts/fleet/redact.ts",
-    "enrich",
-    "--selection",
-    join(runnerTemp, "selected.json"),
-    "--discovered",
-    join(runnerTemp, "discovered.json"),
-  ],
-  join(runnerTemp, "enriched.json"),
-);
-
-// parseJson, not a raw JSON.parse: enriched.json carries real slugs, and
-// a SyntaxError echoing them would leak into this public log.
-const enriched = parseEnriched(
-  parseJson(
-    readFileSync(join(runnerTemp, "enriched.json"), "utf-8"),
-    "select_settings_repos: enriched rows",
-  ),
-  "select_settings_repos: enriched rows",
-);
+const rows = enrich(discovered, (slug) => verifyTag(pat, runId, slug));
 
 // The scope's refusals (sync_scope.ts, counts only): every slug must name
-// a repo the fleet knows - a selected row or the operator repo itself -
+// a repo the fleet knows - a discovered row or the operator repo itself -
 // and a called scope may not name a private one. A known repo the probes
-// then DROP (not enrolled, not adopted) is a routine
-// notice, so a called scope may legitimately select nothing. Visibility
-// is discovery's, fail-closed; the operator repo is this very repository,
-// disclosed by every log line, so it never counts as private here.
-const visibility = new Map(discovered.map((entry) => [entry.repo.toLowerCase(), entry.private]));
-visibility.set(selfRepo.toLowerCase(), false);
-const isPrivate = (slug: string) => visibility.get(slug.toLowerCase()) ?? true;
-const undiscovered = undiscoveredCount(
-  scope,
-  enriched.rows.map((row) => row.repo),
-  new Set(visibility.keys()),
-);
-if (undiscovered > 0) warn(undiscoveredWarning(undiscovered));
-const known = new Map(enriched.rows.map((row) => [row.repo.toLowerCase(), isPrivate(row.repo)]));
+// then DROP (not enrolled, not adopted) is a routine notice, so a called
+// scope may legitimately select nothing. Visibility is discovery's,
+// fail-closed; the operator repo is this very repository, disclosed by
+// every log line, so it never counts as private here.
+const known = new Map(rows.map((row) => [row.repo.toLowerCase(), row.private]));
 known.set(selfRepo.toLowerCase(), false);
-const refusal = scopeRefusal(scope, known, scopeSource("SOURCE_SHA"));
+const isPrivate = (slug: string) => known.get(slug.toLowerCase()) ?? true;
+const refusal = scopeRefusal(scope, known, scopeSource("SOURCE_SHA"), owner);
 if (refusal !== null) {
   console.log(`::error::${refusal}`);
   process.exit(1);
 }
 
 const targets: EnrichedRow[] = [];
-for (const row of enriched.rows) {
+for (const row of rows) {
   if (!scopeSelects(scope, row.repo, isPrivate(row.repo))) continue;
   const { repo, display } = row;
   // The operator repo rides in as the matrix builder's --self row (it is
@@ -242,60 +194,6 @@ for (const row of enriched.rows) {
   targets.push(row);
 }
 writeFileSync(join(runnerTemp, "settings_targets.json"), JSON.stringify(targets));
-
-// repos.yml's exclude: pauses the sync AND this heal - the registry drops
-// excluded repos before the loop above ever sees them. When such a repo
-// still opts in via its .repo-platform.yml, say that the heal stopped
-// instead of going quiet. Materialized first so a registry failure fails
-// the run instead of silently skipping every exclusion warning. Excluded
-// slugs are committed in repos.yml - self-disclosed, so they print
-// plainly.
-runStage(
-  ["bun", ".github/scripts/fleet/repos_registry.ts", "excluded"],
-  join(runnerTemp, "excluded.json"),
-);
-const excluded = parseJson(
-  readFileSync(join(runnerTemp, "excluded.json"), "utf-8"),
-  "select_settings_repos: excluded list",
-) as string[];
-// A scoped run is a scoped heal; the fleet-wide exclusion reminders
-// belong to the full runs.
-const sweepable = scope.kind === "all" ? excluded : [];
-for (const repo of sweepable) {
-  const probeResult = captureNetwork([
-    "gh",
-    "api",
-    `repos/${repo}/contents/.repo-platform.yml`,
-    "-H",
-    "Accept: application/vnd.github.raw",
-  ]);
-  if (probeResult.exitCode === 0) {
-    warn(
-      `${repo} is excluded in repos.yml but still carries a .repo-platform.yml - the ` +
-        "exclusion also pauses the central nightly settings heal, so its settings can " +
-        "drift. If the pause is deliberate, this is the reminder that healing is off; " +
-        "otherwise remove the exclusion.",
-    );
-  } else if (!/HTTP 404/.test(probeResult.stderr)) {
-    // A 404 also covers repos the token cannot read; those skip
-    // silently. Anything else: this check is purely informational, so
-    // report it without killing the apply for the selected repos. The
-    // NAME is self-disclosed (committed in repos.yml), but an excluded
-    // repo's error detail may not be - unless discovery proves the repo
-    // public, only the HTTP code prints.
-    let detail = probeResult.stderr.replace(/\n+$/, "");
-    const isPublic = discovered.some(
-      (entry) => entry.repo.toLowerCase() === repo.toLowerCase() && entry.private === false,
-    );
-    if (!isPublic) {
-      const code = detail.match(/HTTP [0-9]+/)?.[0];
-      detail = `${code ?? "no status"} (detail hidden: private repository)`;
-    }
-    console.log(
-      `::warning::settings adoption check for excluded repo ${repo} failed: ${detail} - cannot tell whether its pause left managed settings behind; continuing.`,
-    );
-  }
-}
 
 // The matrix joins the probed opt-in list (already scoped above) with the
 // operator repo's own row when the scope selects it; a builder failure

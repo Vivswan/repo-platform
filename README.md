@@ -24,7 +24,7 @@ Which files the template owns, and how strongly, is declared as data rather than
 
 Walkthrough: [docs/new-repo.md](docs/new-repo.md). The shape of it: scaffold with the native tool (`uv init`, `bun init`), render the template from the build branch (`copier copy gh:Vivswan/repo-platform . --vcs-ref build --trust`), commit, and grant the fleet PAT access to the repo.
 
-`repos.yml` decides the fleet: a quoted `"*"` wildcard auto-discovers every owned, non-archived repo the PAT can write to, and `exclude:` opts repos out. A discovered repo is synced only once it carries `.repo-platform.yml`, so granting the PAT and committing that file is what enrolls a repo.
+The fleet PAT's grant decides the fleet: every owned, non-archived repo the REPO_PLATFORM_TOKEN can push to is a member, and nothing in this repository lists them. A member is synced only once it carries `.repo-platform.yml`, so granting the PAT and committing that file is what enrolls a repo; revoking the grant is what removes it.
 
 ## Shipping a template change
 

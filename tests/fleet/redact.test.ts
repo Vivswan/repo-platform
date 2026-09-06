@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test";
-import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   assignHints,
@@ -7,14 +6,10 @@ import {
   enrichedRowSchema,
   hintName,
   parseDiscoveredList,
-  parseSelectionList,
   VERIFY_HEX_LENGTH,
   verifyTag,
 } from "../../.github/scripts/fleet/redact.ts";
 import { boundedSpawnSync } from "../shared/bounded_spawn";
-import { tempDirs } from "../shared/temp_dir";
-
-const temp = tempDirs();
 
 describe("hintName", () => {
   test.each([
@@ -78,100 +73,48 @@ describe("verifyTag", () => {
 
 describe("enrich", () => {
   const tagFor = (slug: string) => `tag(${slug})`;
-  const discovered = [
-    { repo: "o/pub", private: false },
-    { repo: "o/hidden-one", private: true },
-    { repo: "o/committed-private", private: true },
-    { repo: "o/skipped-private", private: true },
-  ];
-  const selfDisclosed = (slug: string) => slug === "o/committed-private";
 
-  test("classifies public, hinted, and self-disclosed rows", () => {
-    const { rows } = enrich(
-      [{ repo: "o/pub" }, { repo: "o/hidden-one" }, { repo: "o/committed-private" }],
-      discovered,
-      selfDisclosed,
+  test("one row per discovered repo, sorted by slug: private rows hinted and tagged, public rows plain", () => {
+    // The whole output for a small fleet, discovery order scrambled: the
+    // rows come back sorted, and the shape of each is the contract.
+    expect(
+      enrich(
+        [
+          { repo: "o/pub", private: false },
+          { repo: "o/hidden-one", private: true },
+        ],
+        tagFor,
+      ),
+    ).toEqual([
+      { repo: "o/hidden-one", private: true, display: "h**-o**", verify: "tag(o/hidden-one)" },
+      { repo: "o/pub", private: false, display: "o/pub", verify: "" },
+    ]);
+  });
+
+  test("hints number collisions over the whole discovered fleet", () => {
+    // A scope narrows AFTER enrichment, so a single-repo dispatch numbers
+    // collision suffixes the same way a full run does.
+    const rows = enrich(
+      [
+        { repo: "o/hidden-server", private: true },
+        { repo: "o/hail-sooner", private: true },
+      ],
       tagFor,
     );
-    expect(rows[0]).toEqual({
-      repo: "o/pub",
-      redact_name: false,
-      hide_details: false,
-      display: "o/pub",
-      verify: "",
-    });
-    expect(rows[1]).toEqual({
-      repo: "o/hidden-one",
-      redact_name: true,
-      hide_details: true,
-      display: "h**-o**",
-      verify: "tag(o/hidden-one)",
-    });
-    // Committed name stays visible; details still hide.
-    expect(rows[2]).toEqual({
-      repo: "o/committed-private",
-      redact_name: false,
-      hide_details: true,
-      display: "o/committed-private",
-      verify: "",
-    });
+    expect(rows.map((row) => row.display)).toEqual(["h**-s**r", "h**-s**r#2"]);
   });
 
-  test("fails closed: absent from discovery asks the probe, defaulting private", () => {
-    const { rows } = enrich([{ repo: "o/undiscovered" }], discovered, () => false, tagFor);
-    expect(rows[0].redact_name).toBe(true);
-    expect(rows[0].hide_details).toBe(true);
-    expect(rows[0].display).toBe("u**d");
-    expect(rows[0].verify).toBe("tag(o/undiscovered)");
-  });
-
-  test("a probe that proves an undiscovered repo public keeps it plain", () => {
-    const { rows } = enrich(
-      [{ repo: "other/cross-owner" }],
-      discovered,
-      () => false,
-      tagFor,
-      () => false,
-    );
-    expect(rows[0]).toEqual({
-      repo: "other/cross-owner",
-      redact_name: false,
-      hide_details: false,
-      display: "other/cross-owner",
-      verify: "",
-    });
-  });
-
-  test("hints stay stable when the selection narrows", () => {
-    // A single-repo dispatch must number collision suffixes the same way
-    // a full run does: the hint table spans all discovered privates.
-    const colliding = [
-      { repo: "o/hail-sooner", private: true },
-      { repo: "o/hidden-server", private: true },
-    ];
-    const { rows } = enrich([{ repo: "o/hidden-server" }], colliding, () => false, tagFor);
-    expect(rows[0].display).toBe("h**-s**r#2");
+  test("an empty fleet is an empty row list", () => {
+    expect(enrich([], tagFor)).toEqual([]);
   });
 });
 
 describe("enrichedRowSchema", () => {
-  const redacted = {
-    repo: "o/hidden-one",
-    redact_name: true,
-    hide_details: true,
-    display: "h**-o**",
-    verify: "deadbeef",
-  };
-  const plain = {
-    repo: "o/pub",
-    redact_name: false,
-    hide_details: false,
-    display: "o/pub",
-    verify: "",
-  };
+  const hidden = { repo: "o/hidden-one", private: true, display: "h**-o**", verify: "deadbeef" };
+  const plain = { repo: "o/pub", private: false, display: "o/pub", verify: "" };
 
   test("accepts both row kinds", () => {
-    expect(enrichedRowSchema.safeParse(redacted).success).toBe(true);
+    expect(enrichedRowSchema.safeParse(hidden).success).toBe(true);
     expect(enrichedRowSchema.safeParse(plain).success).toBe(true);
   });
 
@@ -179,27 +122,22 @@ describe("enrichedRowSchema", () => {
   // the display refinement from a union arm failing for another reason.
   test.each([
     {
-      reason: "a redacted row missing its verify tag",
-      row: { ...redacted, verify: "" },
+      reason: "a private row missing its verify tag",
+      row: { ...hidden, verify: "" },
       path: ["verify"],
     },
     {
-      reason: "a redacted row not hiding its details",
-      row: { ...redacted, hide_details: false },
-      path: ["hide_details"],
-    },
-    {
-      reason: "a redacted row whose display is the slug, not a hint",
-      row: { ...redacted, display: "o/hidden-one" },
+      reason: "a private row whose display is the slug, not a hint",
+      row: { ...hidden, display: "o/hidden-one" },
       path: ["display"],
     },
     {
-      reason: "an unredacted row carrying a verify tag",
+      reason: "a public row carrying a verify tag",
       row: { ...plain, verify: "deadbeef" },
       path: ["verify"],
     },
     {
-      reason: "an unredacted row whose display is a hint, not its slug",
+      reason: "a public row whose display is a hint, not its slug",
       row: { ...plain, display: "p**" },
       path: ["display"],
     },
@@ -209,15 +147,18 @@ describe("enrichedRowSchema", () => {
     if (result.success) throw new Error("expected a rejection");
     expect(result.error.issues.map((issue) => issue.path)).toEqual([path]);
   });
+
+  test("rejects a row with neither flag shape (a non-boolean private)", () => {
+    expect(enrichedRowSchema.safeParse({ ...plain, private: "false" }).success).toBe(false);
+  });
 });
 
-// Parity with the pre-zod hand-rolled ladders: the discovered list fails
-// CLOSED (an entry without an explicit boolean `private` rejects the whole
-// list), the selection stays fail-open on everything but `repo`.
+// The discovered list fails CLOSED: an entry without an explicit boolean
+// `private` rejects the whole list.
 describe("parseDiscoveredList", () => {
-  // Identity on every accepted payload: the legacy ladder checked exactly
-  // repo and private; everything else passed through untouched, whatever
-  // its type - pinned so a schema tightening cannot silently change it.
+  // Identity on every accepted payload: only repo and private are
+  // inspected; everything else passes through untouched, whatever its
+  // type - pinned so a schema tightening cannot silently change it.
   test.each([
     {
       reason: "{repo, private} entries pass their extra keys through",
@@ -245,119 +186,18 @@ describe("parseDiscoveredList", () => {
   });
 });
 
-describe("parseSelectionList", () => {
-  // The fail-open side of the parity claim: only repo is validated, the
-  // rest rides along untouched.
-  test.each([
-    {
-      reason: "only repo is validated; extras ride along untouched",
-      input: [{ repo: "o/a", owner: "o", name: "a" }, { repo: "o/b" }, { repo: "o/c" }],
-    },
-    {
-      reason: "a wrong-typed EXTRA key survives unchanged (the ladder never inspected it)",
-      input: [{ repo: "o/a", extra: 42 }],
-    },
-  ])("accepts: $reason", ({ input }) => {
-    expect(parseSelectionList(input)).toEqual(input);
-  });
-
-  test("rejects a missing or non-string repo and a non-array payload", () => {
-    expect(parseSelectionList([{ owner: "o" }])).toBeNull();
-    expect(parseSelectionList([{ repo: 7 }])).toBeNull();
-    expect(parseSelectionList("o/a")).toBeNull();
-  });
-});
-
-describe("enrich CLI", () => {
-  test("end to end over fixture files", () => {
-    const dir = temp.dir("redact-");
-    writeFileSync(
-      join(dir, "selection.json"),
-      JSON.stringify([
-        { repo: "Vivswan/pub", owner: "Vivswan", name: "pub" },
-        { repo: "Vivswan/hidden-server", owner: "Vivswan", name: "hidden-server" },
-      ]),
-    );
-    writeFileSync(
-      join(dir, "discovered.json"),
-      JSON.stringify([
-        { repo: "Vivswan/pub", private: false },
-        { repo: "Vivswan/hidden-server", private: true },
-      ]),
-    );
-    writeFileSync(join(dir, "repos.yml"), 'managed:\n  - "*"\n');
-    const proc = boundedSpawnSync(
-      [
-        "bun",
-        join(import.meta.dir, "../../.github/scripts/fleet/redact.ts"),
-        "enrich",
-        "--selection",
-        join(dir, "selection.json"),
-        "--discovered",
-        join(dir, "discovered.json"),
-        "--registry",
-        join(dir, "repos.yml"),
-      ],
-      { env: { ...process.env, PAT: "p", GITHUB_RUN_ID: "1" } },
-    );
-    expect(proc.exitCode).toBe(0);
-    // The whole payload: the flags, the hint, and the tag keyed on THIS
-    // run's PAT, run id, and slug (verifyTag is deterministic over them).
-    expect(JSON.parse(proc.stdout)).toEqual({
-      rows: [
-        {
-          repo: "Vivswan/pub",
-          redact_name: false,
-          hide_details: false,
-          display: "Vivswan/pub",
-          verify: "",
-        },
-        {
-          repo: "Vivswan/hidden-server",
-          redact_name: true,
-          hide_details: true,
-          display: "h**-s**r",
-          verify: verifyTag("p", "1", "Vivswan/hidden-server"),
-        },
-      ],
-    });
-  });
+describe("redact CLI", () => {
+  const script = join(import.meta.dir, "../../.github/scripts/fleet/redact.ts");
 
   test("hint subcommand prints the hint", () => {
-    const proc = boundedSpawnSync([
-      "bun",
-      join(import.meta.dir, "../../.github/scripts/fleet/redact.ts"),
-      "hint",
-      "hidden-server",
-    ]);
+    const proc = boundedSpawnSync(["bun", script, "hint", "hidden-server"]);
     expect(proc.exitCode).toBe(0);
     expect(proc.stdout.trim()).toBe("h**-s**r");
   });
 
-  test("a malformed input file fails value-free (no SyntaxError echo)", () => {
-    // The bare identifier is the leaking form: a raw JSON.parse error
-    // quotes it ('Unexpected identifier "hiddenserver"') into this public
-    // log, and both readJson inputs carry private slugs.
-    const dir = temp.dir("redact-unparseable-");
-    writeFileSync(join(dir, "selection.json"), '[{"repo": hiddenserver}]');
-    writeFileSync(join(dir, "discovered.json"), "[]");
-    writeFileSync(join(dir, "repos.yml"), 'managed:\n  - "*"\n');
-    const proc = boundedSpawnSync(
-      [
-        "bun",
-        join(import.meta.dir, "../../.github/scripts/fleet/redact.ts"),
-        "enrich",
-        "--selection",
-        join(dir, "selection.json"),
-        "--discovered",
-        join(dir, "discovered.json"),
-        "--registry",
-        join(dir, "repos.yml"),
-      ],
-      { env: { ...process.env, PAT: "p", GITHUB_RUN_ID: "1" } },
-    );
+  test("any other subcommand fails with the usage line", () => {
+    const proc = boundedSpawnSync(["bun", script, "enrich"]);
     expect(proc.exitCode).toBe(1);
-    expect(proc.stdout).toContain("not valid JSON");
-    expect(proc.stdout + proc.stderr).not.toContain("hiddenserver");
+    expect(proc.stdout).toContain("usage: redact.ts hint <name>");
   });
 });

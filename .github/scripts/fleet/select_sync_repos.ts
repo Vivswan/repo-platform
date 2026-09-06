@@ -1,18 +1,19 @@
 #!/usr/bin/env bun
-// Selects the push-sync fan-out: applies repos.yml to the discovered
-// fleet, probes the token's ACTUAL write grant per repo, and checks
-// adoption. Invoked by sync-repos.yml's plan job after the discovery step
-// wrote $RUNNER_TEMP/discovered.json ({repo, private} objects).
+// Selects the push-sync fan-out: the fleet is every discovered repo the
+// token can ACTUALLY push to (probed per repo - the PAT's grant is the
+// only membership fact) that has adopted the template. Invoked by
+// sync-repos.yml's plan job after the discovery step wrote
+// $RUNNER_TEMP/discovered.json ({repo, private} objects).
 //
 // This job's log and the matrix it emits are publicly readable, so private
-// repos appear only by their redaction display (a hint, or the committed
-// name when it is self-disclosed - see redact.ts): notices print the
-// display, captured API error text is scrubbed of the slug, and a
-// redacted matrix row carries {repo: <hint>, verify} instead of the slug.
-// No ::add-mask:: here: the runner silently drops a job output containing
-// a masked substring, which would kill the matrix.
+// repos appear only by their redaction hint (redact.ts): notices print the
+// display, captured API error text is scrubbed of the slug, and a private
+// matrix row carries {repo: <hint>, verify} instead of the slug. No
+// ::add-mask:: here: the runner silently drops a job output containing a
+// masked substring, which would kill the matrix.
 //
-// Env: PAT, GH_TOKEN, GITHUB_RUN_ID, RUNNER_TEMP, GITHUB_OUTPUT, RECOVER;
+// Env: PAT, GH_TOKEN, GITHUB_RUN_ID, OWNER (the fleet owner, named in the
+// unknown-slug refusal), RUNNER_TEMP, GITHUB_OUTPUT, RECOVER;
 // GITHUB_EVENT_PATH supplies the repo dispatch input (a non-empty
 // ONLY_REPO env overrides it - the test harness and local runs use that).
 //
@@ -30,29 +31,24 @@
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { env, error, notice, requireEnv, setOutput, warning } from "../shared/gha.ts";
+import { env, error, notice, requireEnv, setOutput } from "../shared/gha.ts";
 import { parseJson } from "../shared/json.ts";
 import {
   captureNetwork,
   notAdoptedNotice,
   pushProbeSkipNotice,
   readDispatchRepo,
-  runStage,
   scopeSource,
   scrubSlug,
 } from "./discovery.ts";
 import { pushProbeStatus } from "./push_probe.ts";
-import { parseDiscoveredList, parseEnriched } from "./redact.ts";
-import {
-  parseScope,
-  scopeRefusal,
-  scopeSelects,
-  undiscoveredCount,
-  undiscoveredWarning,
-} from "./sync_scope.ts";
+import { enrich, parseDiscoveredList, verifyTag } from "./redact.ts";
+import { parseScope, scopeRefusal, scopeSelects } from "./sync_scope.ts";
 
 const runnerTemp = requireEnv("RUNNER_TEMP");
 const pat = requireEnv("PAT");
+const runId = requireEnv("GITHUB_RUN_ID");
+const owner = requireEnv("OWNER");
 
 const scopeInput = readDispatchRepo();
 
@@ -71,44 +67,12 @@ if (scope.kind === "error") {
   process.exit(1);
 }
 
-// The whole selected fleet, then the scope applied to the enriched rows:
-// the visibility tokens need every row, and a slug must name a selected
-// repo or the run fails (below).
-runStage(
-  [
-    "bun",
-    ".github/scripts/fleet/repos_registry.ts",
-    "select",
-    "--discovered",
-    join(runnerTemp, "discovered.json"),
-  ],
-  join(runnerTemp, "selection.json"),
-);
-runStage(
-  [
-    "bun",
-    ".github/scripts/fleet/redact.ts",
-    "enrich",
-    "--selection",
-    join(runnerTemp, "selection.json"),
-    "--discovered",
-    join(runnerTemp, "discovered.json"),
-  ],
-  join(runnerTemp, "enriched.json"),
-);
-
-// parseJson, not a raw JSON.parse: enriched.json carries real slugs, and
+// The whole discovered fleet becomes rows, then the scope applies to them:
+// the visibility tokens need every row, and a slug must name a discovered
+// repo or the run fails (below). Visibility is discovery's, fail-closed
+// (parseDiscoveredList rejects an entry without an explicit private flag).
+// parseJson, not a raw JSON.parse: discovered.json carries real slugs, and
 // a SyntaxError echoing them would leak into this public log.
-const enriched = parseEnriched(
-  parseJson(
-    readFileSync(join(runnerTemp, "enriched.json"), "utf-8"),
-    "select_sync_repos: enriched rows",
-  ),
-  "select_sync_repos: enriched rows",
-);
-
-// Visibility as discovery reported it, fail-closed like the enricher: a
-// selected repo discovery did not list counts as private.
 const discovered = parseDiscoveredList(
   parseJson(
     readFileSync(join(runnerTemp, "discovered.json"), "utf-8"),
@@ -119,31 +83,21 @@ if (discovered === null) {
   error("select_sync_repos: the discovered list must be a JSON array of {repo, private} objects");
   process.exit(1);
 }
-const visibility = new Map(discovered.map((entry) => [entry.repo.toLowerCase(), entry.private]));
-const isPrivate = (slug: string) => visibility.get(slug.toLowerCase()) ?? true;
-const undiscovered = undiscoveredCount(
-  scope,
-  enriched.rows.map((row) => row.repo),
-  new Set(visibility.keys()),
-);
-if (undiscovered > 0) warning(undiscoveredWarning(undiscovered));
-const refusal = scopeRefusal(
-  scope,
-  new Map(enriched.rows.map((row) => [row.repo.toLowerCase(), isPrivate(row.repo)])),
-  scopeSource("TARGET_SHA"),
-);
+const rows = enrich(discovered, (slug) => verifyTag(pat, runId, slug));
+const known = new Map(rows.map((row) => [row.repo.toLowerCase(), row.private]));
+const refusal = scopeRefusal(scope, known, scopeSource("TARGET_SHA"), owner);
 if (refusal !== null) {
   error(refusal);
   process.exit(1);
 }
 
 const repos: Record<string, unknown>[] = [];
-for (const row of enriched.rows) {
+for (const row of rows) {
   const { repo: slug, display } = row;
-  if (!scopeSelects(scope, slug, isPrivate(slug))) continue;
+  if (!scopeSelects(scope, slug, row.private)) continue;
   const probeCode = pushProbeStatus(slug, pat);
   if (probeCode === 401 || probeCode === 403 || probeCode === 404) {
-    notice(pushProbeSkipNotice(display, probeCode));
+    notice(pushProbeSkipNotice(display));
     continue;
   }
   if (probeCode !== 200) {
@@ -161,14 +115,9 @@ for (const row of enriched.rows) {
     "--silent",
   ]);
   if (adoption.exitCode === 0) {
-    // The display IS the slug for unredacted rows (parseEnriched holds
+    // The display IS the slug for public rows (enrichedRowSchema holds
     // that invariant), so every matrix row can emit it as its repo.
-    repos.push({
-      repo: row.display,
-      redact_name: row.redact_name,
-      hide_details: row.hide_details,
-      verify: row.verify,
-    });
+    repos.push({ repo: row.display, private: row.private, verify: row.verify });
   } else {
     const probe = adoption.stdout + adoption.stderr;
     if (/HTTP 404/.test(probe)) {

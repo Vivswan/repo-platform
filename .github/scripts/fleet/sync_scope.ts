@@ -2,7 +2,12 @@
 // tokens `public` and `private`, or owner/name slugs. Only the plans know visibility (fail-closed:
 // not discovered as public counts as private), so they expand the tokens the leg passes through.
 
-import { isSlug } from "./repos_registry.ts";
+const SLUG_RE = /^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?\/[A-Za-z0-9._-]+$/;
+
+/** An owner/name repository slug (GitHub's login and repo-name grammars). */
+export function isSlug(value: unknown): value is string {
+  return typeof value === "string" && SLUG_RE.test(value);
+}
 
 export type Visibility = "public" | "private";
 export type ScopeEntryKind = "all" | Visibility | "slug" | "invalid";
@@ -60,28 +65,6 @@ export function parseScope(raw: string): Scope | { kind: "error"; message: strin
  *  main commit) or the typed dispatch input (may be a private slug). */
 export type ScopeSource = { kind: "call"; sha: string } | { kind: "dispatch" };
 
-/** The targeted repos discovery missed, as the scope sees them: every target when the scope
- *  reads visibility (`all` or a token), only the scope's own slugs otherwise. `discovered` holds
- *  folded slugs. */
-export function undiscoveredCount(
-  scope: Scope,
-  targets: Iterable<string>,
-  discovered: ReadonlySet<string>,
-): number {
-  const folded = [...targets].map((target) => target.toLowerCase());
-  const seen =
-    scope.kind === "list" && scope.visibility.size === 0
-      ? folded.filter((target) => scope.slugs.has(target))
-      : folded;
-  return seen.filter((target) => !discovered.has(target)).length;
-}
-
-/** The counts-only warning when the fail-closed default hid targeted repos from a `public`
- *  scope: discovery did not list them this run. */
-export function undiscoveredWarning(count: number): string {
-  return `${count} targeted ${count === 1 ? "repository was not discovered this run and counts" : "repositories were not discovered this run and count"} as private; a \`public\` scope skips them until the next run`;
-}
-
 export function scopeSelects(scope: Scope, repo: string, isPrivate: boolean): boolean {
   if (scope.kind === "all") return true;
   return (
@@ -91,20 +74,22 @@ export function scopeSelects(scope: Scope, repo: string, isPrivate: boolean): bo
 
 /** Why a list scope cannot run, counts only: a slug naming no known repo, or on the called path
  *  a slug naming a private one (private repos ride under the token). `known`: folded slug ->
- *  private. Null when it can run. */
+ *  private; `owner` names the discovery scope in the unknown-slug diagnosis. Null when it can run. */
 export function scopeRefusal(
   scope: Scope,
   known: ReadonlyMap<string, boolean>,
   source: ScopeSource,
+  owner: string,
 ): string | null {
   if (scope.kind === "all") return null;
   const slugs = [...scope.slugs];
   const missing = slugs.filter((slug) => !known.has(slug)).length;
   if (missing > 0) {
     return (
-      `${missing} of ${slugs.length} scoped repos matched no managed repository (values withheld - ` +
-      "they may be private slugs): a repo you scoped to is not in managed (or the discovered list), " +
-      "or it is listed in exclude; check the spelling (matching ignores case)"
+      `${missing} of ${slugs.length} scoped repos matched no fleet repository (values withheld - ` +
+      `they may be private slugs): not among the fleet token's pushable repositories under ${owner} - ` +
+      "the grant was revoked, the repository is archived or owned by someone else, or the slug is " +
+      "misspelled (matching ignores case)"
     );
   }
   if (source.kind === "call") {
