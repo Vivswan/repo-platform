@@ -20,12 +20,9 @@
 //     --live-private <true|false> --live-description <text>
 //     --summary <out-file>
 //
-// Merging ratifies nothing by itself: every managed repo's nightly heal
-// enforces the centrally assembled baseline with its own settings.yml
-// merged over it, so the PR body (driftSummary) points at that file. The
-// heal is offered as the way back only while the repo has a settings.yml
-// to apply from (--in-repo-settings); a repo not yet onboarded is skipped
-// by the apply, so the UI is its only revert.
+// Merging ratifies nothing: the nightly heal enforces the baseline with the
+// repo's settings.yml merged over it, so driftSummary points there; the heal is
+// offered as the way back only while that file exists (--in-repo-settings).
 //
 // The summary file is written empty when nothing drifted, and its size is
 // the single source of truth for "this PR needs review" (open_pr.ts tests

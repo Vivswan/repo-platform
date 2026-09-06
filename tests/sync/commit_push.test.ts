@@ -408,11 +408,9 @@ describe("commit_push Workflows-scope withhold reconciliation", () => {
   test("the withhold overwrites a stale referenced-labels report (the recompute runs post-restore)", () => {
     // The workflow's check step ran BEFORE the restore rewrote
     // .github/workflows, so its report may claim label references the
-    // pushed tree no longer carries. This fixture has no settings.yml
-    // (the shared scratch target is not a full checkout), so it pins that
-    // the recompute RUNS and overwrites - the stale note is replaced with
-    // that tree's honest verdict (empty: not applicable). The ordering pin
-    // is the next test.
+    // pushed tree no longer carries. With no settings.yml here, this pins
+    // that the recompute RUNS and overwrites the stale note with the tree's
+    // honest verdict (empty: not applicable); the ordering pin is the next test.
     const staleNote = '> [!WARNING]\n> REFERENCED LABELS: "answered" is missing\n';
     writeFileSync(join(scratch, "work", "target", ".repo-platform.yml"), "modules: []\n");
     mkdirSync(join(scratch, "work", "target", ".github"), { recursive: true });

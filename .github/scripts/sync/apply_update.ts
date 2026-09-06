@@ -7,12 +7,9 @@
 // manual-review path). Invoked by reusable-template-sync.yml's "Apply
 // copier update" step.
 //
-// Env: TARGET_DIR (default target), TARGET_REF, MODULES, PRIVATE,
-// DESCRIPTION, RECOVER; HOMEPAGE and TOPICS, the live values that seed the
-// settings starter's answers where the recorded file lacks them
-// (answers_file.ts's unrecordedSeeds); SRC_PATH optional (where TARGET_REF
-// resolves when the template source is a local clone other than the cwd -
-// the rehearsal's).
+// Env: TARGET_DIR (default target), TARGET_REF, MODULES, PRIVATE, DESCRIPTION,
+// RECOVER, HOMEPAGE and TOPICS (live seeds for unrecorded answers); SRC_PATH
+// optional (where TARGET_REF resolves for a local template clone, the rehearsal's).
 
 import { statSync } from "node:fs";
 import { env, fail, requireEnv } from "../shared/gha.ts";

@@ -144,10 +144,8 @@ describe("render_data script", () => {
     expect(result.new).toBe(expectedNew.map((line) => `${line}\n`).join(""));
   });
 
-  // The seeded answers: a recorded homepage/topics rides verbatim and the
-  // live value is ignored; an unrecorded one is seeded from the live value
-  // (quoted), so the clean render agrees with `copier update`'s seed. The
-  // whole data-new document is pinned either way.
+  // A recorded homepage/topics rides verbatim (live ignored); an unrecorded
+  // one is seeded from the live value, quoted. Whole data-new pinned either way.
   test.each([
     {
       reason: "neither recorded: both seeded from the live values, after the live keys",

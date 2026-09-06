@@ -121,10 +121,9 @@ export interface LiveRenderData {
 
 const LIVE_KEYS = ["modules", "private", "description"] as const;
 
-/** The settings starter's identity answers. A repository rendered before they
- * were asked has none recorded, and a starter from the empty defaults would
- * clear the live values, so unrecorded ones seed from the live repository once;
- * a recorded answer wins, an empty one included. */
+/** The settings starter's identity answers: unrecorded ones (a render from before
+ * they were asked) seed from the live repository once, or the starter's empty
+ * defaults would clear the live values; a recorded answer wins, empty included. */
 export const SEEDED_ANSWERS = ["homepage", "topics"] as const;
 export type SeededAnswer = (typeof SEEDED_ANSWERS)[number];
 

@@ -7,11 +7,9 @@
 //   bun .github/scripts/sync/modules.ts --repo-file <.repo-platform.yml>
 //     --template-copier <copier.yml>
 //
-// Prints the selection as a JSON array on stdout. An unknown name is an
-// error - silently dropping a typo would strip that module's files from
-// the repo, and a name the template retired is a migration ladder rung's
-// job (docs/migrations.md), never a tolerance here. Malformed input never
-// degrades to an empty list for the same reason. Errors print as ::error:: workflow commands (on stdout,
+// Prints the selection as a JSON array on stdout. An unknown name is an error
+// (dropping a typo would strip a module's files; a retired name is a ladder
+// rung's job, docs/migrations.md), and malformed input never reads as empty. Errors print as ::error:: workflow commands (on stdout,
 // where the runner parses them) and the exit code is nonzero. The CLI
 // stays for ci/upgrade_path_test.sh; the sync itself imports the pure
 // functions (sync/select_modules.ts).

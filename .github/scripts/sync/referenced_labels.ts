@@ -19,11 +19,9 @@
 // and re-invoked by commit_push.ts's Workflows-scope withhold path, whose
 // restore rewrites .github/workflows after this check first ran.
 //
-// Not applicable (empty report) when no apply would reconcile labels:
-// the target has no .repo-platform.yml (it is not a settings target), no
-// settings.yml to merge (mergeOutcome skips the apply), or the merged
-// document declares no labels key. A repo in those states keeps its live
-// labels, so nothing removes what the files reference.
+// Not applicable (empty report) when no apply would reconcile labels: no
+// .repo-platform.yml, no settings.yml to merge, or no labels key in the merged
+// document - the repo keeps its live labels, so nothing removes a reference.
 //
 // A computation failure (unreadable facts, a malformed layer) writes a
 // COULD-NOT-VERIFY section instead - still forcing review, still exit 0:

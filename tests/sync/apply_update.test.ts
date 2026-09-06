@@ -302,10 +302,8 @@ describe("apply_update.ts outcomes (subprocess)", () => {
   });
 
   test("an unreadable answers file seeds nothing: unknown is not unrecorded", () => {
-    // A list appended below the mapping keys is a YAML parse error, one of
-    // the AnswersFileError shapes: the file records nothing KNOWN, and
-    // seeding both live values here would override whatever it did record
-    // once copier (or a human) reads it.
+    // A list line below the mapping keys is a YAML parse error (an
+    // AnswersFileError shape): the file records nothing KNOWN, so no seed.
     const r = run({
       reason: "unreadable answers",
       recorded: "- a list line where a mapping key belongs\n",

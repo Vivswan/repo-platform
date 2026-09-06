@@ -1,10 +1,7 @@
 // Builds the copier --data-file inputs for the sync's two clean renders:
-// the OLD render replays the answers recorded before the update
-// (non-underscore keys only), and the NEW render applies the live
-// module/private/description data on top of them, plus the live homepage
-// and topics where the recorded answers lack them (answers_file.ts's
-// unrecordedSeeds - the same seed `copier update` gets, so the two renders
-// agree byte for byte).
+// the OLD render replays the recorded answers (non-underscore keys), the NEW
+// render applies the live module/private/description data plus the homepage
+// and topics seeds for unrecorded keys (the same seed `copier update` gets).
 //
 // The recorded answers ride through VERBATIM (answers_file.ts's
 // dataFileYaml): copier re-parses the data file with PyYAML (YAML 1.1),

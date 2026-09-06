@@ -1,10 +1,8 @@
 #!/usr/bin/env bun
-// Reads the target's live repo data for the sync: default branch and
-// private flag to GITHUB_OUTPUT; description, homepage, and the
-// comma-joined topics to RUNNER_TEMP files (step outputs ride into later
-// steps' env-group prints, and a hidden target's values must not). For
-// hide-details targets those values and any non-default branch name are
-// registered with the masker BEFORE anything is written.
+// Reads the target's live data: default branch and private flag to
+// GITHUB_OUTPUT; description, homepage, and comma-joined topics to RUNNER_TEMP
+// files (step outputs leak into env-group prints). Hidden targets' values are
+// masked BEFORE anything is written.
 //
 // Env: TARGET, TARGET_DISPLAY, HIDE_DETAILS, GH_TOKEN, RUNNER_TEMP,
 // GITHUB_OUTPUT.

@@ -5,7 +5,7 @@
 // ownership manifest) is folded into AGENTS.md first, or copier would
 // overwrite it with the managed symlink. Self-contained (docs/migrations.md).
 
-import { lstatSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { lstatSync, readFileSync, readlinkSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 interface Target {
@@ -226,6 +226,18 @@ function git(dir: string, ...args: string[]): { exitCode: number; stdout: string
   };
 }
 
+/** Whether the symlink at `rel` is the one the template renders: its target
+ * is AGENTS.md at the repository root (`AGENTS.md` or `../AGENTS.md`). */
+function isTemplateAlias(dir: string, rel: string): boolean {
+  let target: string;
+  try {
+    target = readlinkSync(join(dir, rel));
+  } catch {
+    return false;
+  }
+  return target === (rel.includes("/") ? `../${AGENTS}` : AGENTS);
+}
+
 /** The paths HEAD's ownership manifest lists, or null when the manifest is
  * absent or not the shape the stamper writes (nothing can then be told
  * about a file's origin, and the caller refuses to guess). */
@@ -286,11 +298,27 @@ export default {
       };
     }
     // Judged before anything is written, so an error arm leaves the tree
-    // untouched. A file HEAD's manifest lists was template-rendered (copier's
-    // to update); an unlisted one is the repository's own.
-    const presentFiles = [...ALIASES, ...MANAGED_ARRIVALS].filter(
-      (rel) => entryKind(join(target.dir, rel)) === "file",
+    // untouched. Every arrival is a regular file or absent, or (for an alias)
+    // the symlink the template renders; anything else is the error arm.
+    const arrivals = [...ALIASES, ...MANAGED_ARRIVALS].map(
+      (rel) => [rel, entryKind(join(target.dir, rel))] as const,
     );
+    const odd = arrivals.find(
+      ([rel, kind]) =>
+        kind === "dir" ||
+        (kind === "other" && !(ALIASES.includes(rel) && isTemplateAlias(target.dir, rel))),
+    );
+    if (odd !== undefined) {
+      return {
+        kind: "error",
+        message:
+          `carries something other than a regular file at ${odd[0]} (a directory, or a symlink ` +
+          "that is not the template's own alias to AGENTS.md), a path this template now manages " +
+          "for every repository. The sync refuses to guess: fix the default branch by hand, then " +
+          "re-run the sync.",
+      };
+    }
+    const presentFiles = arrivals.filter(([, kind]) => kind === "file").map(([rel]) => rel);
     const listed = presentFiles.length === 0 ? new Set<string>() : manifestPaths(target.dir);
     if (listed === null) {
       return {
@@ -316,13 +344,13 @@ export default {
     }
     const ownAliases = own.filter((rel) => ALIASES.includes(rel));
     const agentsKind = entryKind(join(target.dir, AGENTS));
-    if (ownAliases.length > 0 && agentsKind !== "file" && agentsKind !== "absent") {
+    if (agentsKind !== "file" && agentsKind !== "absent") {
       return {
         kind: "error",
         message:
-          `carries its own regular file at ${ownAliases[0]} and something other than a regular ` +
-          `file at ${AGENTS} (a symlink or a directory), so the alias content cannot be folded ` +
-          "into it. Fix the default branch by hand, then re-run the sync.",
+          `carries something other than a regular file at ${AGENTS} (a symlink or a directory), ` +
+          "a path this template renders for every repository. Fix the default branch by hand, " +
+          "then re-run the sync.",
       };
     }
     const path = join(target.dir, REGISTRATION);
