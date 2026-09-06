@@ -6,7 +6,7 @@
 import { join } from "node:path";
 
 export const TREE_DIR = "tree";
-export const VALIDATOR_DIR = "actions/validate-template";
+export const VALIDATOR_DIR = "actions/validate-template-report/validator";
 export const VALIDATOR_SCRIPT = "validate_generated_files.ts";
 export const BUN_VERSION_FILE = ".bun-version";
 

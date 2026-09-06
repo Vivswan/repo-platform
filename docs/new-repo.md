@@ -71,7 +71,7 @@ The `validate-template` job is three legs in one sticky PR comment plus the step
 | Leg | Validator | Verdict |
 |---|---|---|
 | Integrity | repo-platform's build tree at the `_commit` recorded in `.github/.copier-answers.yml` - the template this repository was rendered from | Blocks: that validator's errors (managed content changed outside a sync, malformed managed YAML, a conditioned `ci` caller, and the like) |
-| After your next sync | the build branch tip's validator (run by the report action from the sibling `validate-template` script directory on the build branch) | Warns: the rules the next sync PR brings, minus anything the integrity leg already said |
+| After your next sync | the build branch tip's validator (run by the report action from its own `validator/` script directory on the build branch) | Warns: the rules the next sync PR brings, minus anything the integrity leg already said |
 | Freshness | none - the integrity leg's one build-branch compare | Informs: how many build commits behind |
 
 - Judging by the repository's own template commit is what keeps a template change from turning every fleet repo red before its sync PR lands; the tip's new rules arrive as warnings first and become the verdict once the sync PR merges.

@@ -139,7 +139,7 @@ function revalidate(): void {
     "post-withhold re-validation",
     "--",
     "bun",
-    "validator/actions/validate-template/validate_generated_files.ts",
+    "validator/actions/validate-template-report/validator/validate_generated_files.ts",
     "target",
   ]);
   setOutput("validation", ok === 0 ? "ok" : "failed");

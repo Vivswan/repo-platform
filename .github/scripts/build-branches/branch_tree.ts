@@ -11,7 +11,8 @@
 //                     copier.yml excludes are stale)
 // - actions/         (the composite actions' sources + dependency manifests,
 //                     node_modules and build output excluded - each action
-//                     installs at its own action_path when it runs; the
+//                     installs at its own action_path when it runs, the
+//                     report action's nested validator package included; the
 //                     actions/shared/ library zone ships with them,
 //                     dependency-free so the tarball stays install-free -
 //                     copier.yml's _tasks and _migrations run the manifest
@@ -151,16 +152,6 @@ export const EXCLUDED_DIRS = new Set(["node_modules", "dist", ".turbo"]);
  *  action of its own, so it ships with no action.yml. */
 export const SHARED_DIR = "shared";
 
-/** Script directories under actions/: programs run by path (never resolved
- *  as a `uses:` action, so no action.yml) on a pinned bun, so each carries
- *  the generated .bun-version the actions carry (generate.ts emits it). */
-export const PINNED_SCRIPT_DIRS: ReadonlySet<string> = new Set(["validate-template"]);
-
-/** Whether an actions/ directory ships without an action.yml by design. */
-export function isManifestFree(name: string): boolean {
-  return name === SHARED_DIR || PINNED_SCRIPT_DIRS.has(name);
-}
-
 /** Copies every action directory (the shared zone included) to
  *  `<dest>/actions`, returning the number of files written. Throws when
  *  the source has no actions at all: the rendered workflows reference them
@@ -179,17 +170,17 @@ export function copyActions(repoRoot: string, dest: string): number {
     .filter((entry) => entry.isDirectory() && !EXCLUDED_DIRS.has(entry.name))
     .map((entry) => entry.name)
     .sort();
-  if (!names.some((name) => !isManifestFree(name))) {
+  if (!names.some((name) => name !== SHARED_DIR)) {
     throw new Error(`actions/ at ${repoRoot} holds no action directories`);
   }
   // A directory with sources but no action.yml is a BROKEN state, never an
   // intentional retirement - retiring an action deletes its whole
   // directory. Publishing it anyway would succeed here and then fail every
   // fleet `uses: .../<name>@build` at resolve time, so refuse loudly
-  // before anything is copied. The declared manifest-free directories are
-  // reached by path, never resolved as an action.
+  // before anything is copied. The shared zone is reached by path, never
+  // resolved as an action.
   for (const name of names) {
-    if (isManifestFree(name)) continue;
+    if (name === SHARED_DIR) continue;
     if (!existsSync(join(source, name, "action.yml"))) {
       throw new Error(
         `actions/${name} at ${repoRoot} has no action.yml - sources without a ` +

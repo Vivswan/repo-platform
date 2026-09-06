@@ -20,7 +20,6 @@ updates:
       - "/actions/release-health"
       - "/actions/validate-commit-names"
       - "/actions/validate-skills"
-      - "/actions/validate-template"
       - "/actions/validate-template-report"
       - "/actions/yamllint"
     groups:
@@ -117,11 +116,11 @@ updates:
       prefix: "build"
       include: "scope"
 
-  # yaml runtime dependency of the validate-template validator script
-  # directory. It commits bun.lock, so the bun ecosystem keeps both manifest
-  # and lockfile current.
+  # yaml runtime dependency of the validator script directory nested in the
+  # validate-template-report action. It commits bun.lock, so the bun
+  # ecosystem keeps both manifest and lockfile current.
   - package-ecosystem: "bun"
-    directory: "/actions/validate-template"
+    directory: "/actions/validate-template-report/validator"
     schedule:
       interval: "monthly"
     cooldown:

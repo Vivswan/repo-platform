@@ -1340,7 +1340,8 @@ describe("actionsBunGuardMismatches", () => {
   // A runner-scratch pin needs an earlier bash step that removes the pin's
   // root by a fixed rm on the literal path, shell knobs emptied, and that the
   // setup's condition requires; anything less lets a caller plant the pin.
-  const PIN = "${{ runner.temp }}/aligned-validator/tree/actions/validate-template/.bun-version";
+  const PIN =
+    "${{ runner.temp }}/aligned-validator/tree/actions/validate-template-report/validator/.bun-version";
   const REQUIRED = "      if: steps.clear.outcome == 'success'\n";
   const fetchedSetup = (condition = REQUIRED) => `    - name: Set up the fetched tree's bun
 ${condition}      uses: oven-sh/setup-bun@v2

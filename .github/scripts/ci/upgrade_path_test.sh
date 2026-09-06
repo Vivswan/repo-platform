@@ -488,8 +488,8 @@ RECOVER="" RUNNER_TEMP="$WORK" bun .github/scripts/sync/preserve_repo_owned.ts
 # ownership manifest, so the sync stamps once more when the tree is final.
 bun actions/shared/stamp_manifest.ts --root "$PROJECT"
 
-bun install --frozen-lockfile --cwd "$GITHUB_WORKSPACE/actions/validate-template"
-bun "$GITHUB_WORKSPACE/actions/validate-template/validate_generated_files.ts" "$PROJECT"
+bun install --frozen-lockfile --cwd "$GITHUB_WORKSPACE/actions/validate-template-report/validator"
+bun "$GITHUB_WORKSPACE/actions/validate-template-report/validator/validate_generated_files.ts" "$PROJECT"
 
 cd "$PROJECT"
 # _commit must record the build commit's full sha (the stamp hook rewrites
@@ -764,7 +764,7 @@ for carried in AGENTS.md CONTRIBUTING.md .gitignore .gitattributes .editorconfig
   grep -qF "$carried" "$WORK/local-carryover.md" \
     || fail "the local-content carry summary does not list $carried"
 done
-bun "$GITHUB_WORKSPACE/actions/validate-template/validate_generated_files.ts" "$PROJECT"
+bun "$GITHUB_WORKSPACE/actions/validate-template-report/validator/validate_generated_files.ts" "$PROJECT"
 # The recopy carry steps run after copier's own stamp hook, so the final
 # stamp must leave the managed ci.yml hash matching the re-rendered file.
 [ "$(mf ".github/workflows/ci.yml" hash)" = "$(file_sha .github/workflows/ci.yml)" ] \
@@ -858,7 +858,7 @@ fi
 grep -qF '`CONTRIBUTING.md`' "$VIS_WORK/removed-splits.md" \
   || fail "the removed-splits hold does not name the deleted split-classed CONTRIBUTING.md"
 
-bun "$GITHUB_WORKSPACE/actions/validate-template/validate_generated_files.ts" "$VIS"
+bun "$GITHUB_WORKSPACE/actions/validate-template-report/validator/validate_generated_files.ts" "$VIS"
 
 cd "$VIS"
 # SECURITY.md is visibility-independent since the ungating: it must
@@ -1084,7 +1084,7 @@ RECOVER="" RUNNER_TEMP="$SPLIT_WORK" bun .github/scripts/sync/preserve_repo_owne
 # copies from the freshly delivered tree, before the final stamp.
 RUNNER_TEMP="$SPLIT_WORK" bun .github/scripts/sync/materialize_mirrors.ts --root "$SPLIT"
 bun actions/shared/stamp_manifest.ts --root "$SPLIT"
-bun "$GITHUB_WORKSPACE/actions/validate-template/validate_generated_files.ts" "$SPLIT"
+bun "$GITHUB_WORKSPACE/actions/validate-template-report/validator/validate_generated_files.ts" "$SPLIT"
 
 cd "$SPLIT"
 # AGENTS.md: managed region byte-equal to render-new, the local tail
@@ -1247,7 +1247,7 @@ RUNNER_TEMP="$UNSEL_WORK" SRC_PATH="$src_path_unsel" \
   bun .github/scripts/sync/retired_cleanup.ts
 RECOVER="" RUNNER_TEMP="$UNSEL_WORK" bun .github/scripts/sync/preserve_repo_owned.ts
 bun actions/shared/stamp_manifest.ts --root "$UNSEL"
-bun "$GITHUB_WORKSPACE/actions/validate-template/validate_generated_files.ts" "$UNSEL"
+bun "$GITHUB_WORKSPACE/actions/validate-template-report/validator/validate_generated_files.ts" "$UNSEL"
 cd "$UNSEL"
 cmp -s "$UNSEL_WORK/license-before.md" LICENSE.md \
   || fail "the repo-owned LICENSE.md at the unselected path was not byte-identical after the update"
@@ -1340,6 +1340,240 @@ if grep -q '^gh pr merge' "$TRIP_WORK/gh-calls.txt"; then
 fi
 echo "tail tripwire OK: report produced, PR-body section present, manual review forced"
 
+# --- Pre-grammar manifest refusal (legacy tripwire fallback retired) -------
+# A HEAD manifest whose split entries lack the stamped grammar field was
+# once served by a legacy marker/managed fallback inside the tripwire;
+# that path is retired (the fleet censused all-post-grammar before the
+# removal). A straggler manifest arriving at the new sync must fail
+# LOUDLY: every split file unverifiable, the report naming the fix (a
+# recovery sync), the PR forced manual - and with NO fabricated loss
+# claim, because the delivered tree here keeps every local line. The run
+# itself stays green: a red tripwire would block the very sync that heals
+# the manifest.
+PREG="$RUN_DIR/upgrade-pregrammar"
+PREG_WORK="$RUN_DIR/upgrade-pregrammar-work"
+mkdir -p "$PREG_WORK"
+cd "$GITHUB_WORKSPACE"
+copier copy "$GITHUB_WORKSPACE" "$PREG" \
+  --vcs-ref "$NEW_TAG" --defaults --trust \
+  -d project_name="Pre-grammar" \
+  -d description="Pre-grammar project" \
+  -d 'modules=[agents]' \
+  -d private="false"
+cd "$PREG"
+printf '\n## Local agent docs\n\npregrammar-local tail line\n' >> AGENTS.md
+# HEAD's manifest in the retired pre-grammar shape: split entries carry
+# only the marker/managed pair. The stamped post-grammar copy is kept
+# aside and restored below as the delivered (post-sync) manifest.
+cp .github/repo-platform-manifest.json "$PREG_WORK/manifest-stamped.json"
+python3 - <<'PY'
+import json
+path = ".github/repo-platform-manifest.json"
+with open(path) as f:
+    manifest = json.load(f)
+stripped = 0
+for entry in manifest["files"].values():
+    if entry.get("class") == "split":
+        for key in ("grammar", "managed_end", "local_begin", "local_end"):
+            entry.pop(key, None)
+        stripped += 1
+assert stripped > 0, "fixture has no split entries to strip"
+with open(path, "w") as f:
+    json.dump(manifest, f, indent=4)
+    f.write("\n")
+PY
+git init -q -b main
+git add --all
+git -c user.name=ci -c user.email=ci@localhost commit -q -m "chore: init with pre-grammar manifest"
+# The delivered state: the post-grammar stamped manifest is back and the
+# local tail SURVIVED - nothing was lost, so any loss claim is fabricated.
+cp "$PREG_WORK/manifest-stamped.json" .github/repo-platform-manifest.json
+cd "$GITHUB_WORKSPACE"
+RUNNER_TEMP="$PREG_WORK" bun .github/scripts/sync/tail_tripwire.ts --root "$PREG" \
+  > "$PREG_WORK/tripwire.out"
+test -s "$PREG_WORK/tail-shrank.md" \
+  || fail "a pre-grammar HEAD manifest produced no tripwire report (the retired legacy fallback must not be silently back)"
+grep -qF "predates the stamped split grammar" "$PREG_WORK/tail-shrank.md" \
+  || fail "the tripwire report does not name the pre-grammar refusal"
+grep -qF "recover=recopy" "$PREG_WORK/tail-shrank.md" \
+  || fail "the tripwire report does not name the recovery-sync fix"
+grep -qF '`AGENTS.md`' "$PREG_WORK/tail-shrank.md" \
+  || fail "the tripwire report does not list AGENTS.md as unverifiable"
+if grep -qF "missing from this update's copy" "$PREG_WORK/tail-shrank.md"; then
+  fail "the pre-grammar refusal fabricated a loss claim for a preserved tail"
+fi
+grep -qF "::warning::" "$PREG_WORK/tripwire.out" \
+  || fail "the pre-grammar refusal did not warn (silent misbehavior)"
+echo "pre-grammar manifest OK: loud unverifiable refusal, recovery advice named, no fabricated loss"
+# --- Retired-grammar straggler refusal (conversion machinery deleted) ------
+# The tail-marker and four-marker bounded-region grammars were retired into
+# ONE (managed-region), the fleet census confirmed every managed repo
+# converted, and the one-time conversion machinery was deleted. A straggler
+# repo arriving NOW - old-shaped files plus an old-vintage manifest - gets
+# the loud refusal, not a conversion: headSplitEntries refuses the manifest,
+# so HEAD's declarations are UNUSABLE and every previous split copy is
+# preserved in full under a recovery appendix (never split by a guessed
+# boundary - the old .gitignore's managed half carries the current marker
+# pair, and splitting there could misattribute repo-owned bytes to the
+# managed discard), the PR is held for review, the retired relic lines ride
+# through as repo-owned bytes (NO strip exists anymore), and the tail
+# tripwire reports every split file unverifiable with the refusal naming
+# the fix (recover=recopy). The run itself stays green: a red tripwire
+# would block the very sync that heals.
+TRANS="$RUN_DIR/upgrade-straggler"
+TRANS_WORK="$RUN_DIR/upgrade-straggler-work"
+mkdir -p "$TRANS_WORK"
+cd "$GITHUB_WORKSPACE"
+copier copy "$GITHUB_WORKSPACE" "$TRANS" \
+  --vcs-ref "$NEW_TAG" --defaults --trust \
+  -d project_name="Straggler" \
+  -d description="Straggler project" \
+  -d 'modules=[agents]' \
+  -d private="false"
+cp -R "$TRANS" "$TRANS_WORK/render-new"
+cp -R "$TRANS" "$TRANS_WORK/render-old"
+cd "$TRANS"
+# Rewrite AGENTS.md and .gitignore to the retired shapes, byte-controlled,
+# and the manifest's two entries to the retired wire vintages. Standalone
+# python: the harness must stay independent of the code it verifies.
+python3 - <<'PY'
+import json
+B = "<!-- BEGIN REPO-PLATFORM MANAGED -->"
+E = "<!-- END REPO-PLATFORM MANAGED -->"
+HB = "# BEGIN REPO-PLATFORM MANAGED"
+OLD_SENTINEL = "<!-- repo-platform:local-section -->"
+OLD_GUIDANCE = "# Add repository-specific ignore patterns in this section only."
+# AGENTS.md: old shape = the new render's managed content with the marker
+# pair replaced by one terminal tail marker; the repo's tail sits below it
+# (with a non-UTF-8 byte, so byte-fidelity is really proven).
+with open("AGENTS.md", "rb") as f:
+    fresh = f.read().decode("latin-1")
+region = fresh[fresh.index(B) : fresh.index(E) + len(E) + 1]
+body = region.replace(f"{B}\n", "").replace(f"{E}\n", "")
+old_managed = f"{body}\n{OLD_SENTINEL}\n"
+tail = "\n## Project docs\n\ncaf\xe9 repo-local instructions\n"
+with open("AGENTS.md", "wb") as f:
+    f.write((old_managed + tail).encode("latin-1"))
+with open("../upgrade-straggler-work/agents-old-shape.bin", "wb") as f:
+    f.write((old_managed + tail).encode("latin-1"))
+# .gitignore: old shape = a LOCAL region (retired markers, the retired
+# guidance line, a repo entry) above the managed half, which ran from the
+# BEGIN line to end of file.
+with open(".gitignore", "rb") as f:
+    gi = f.read().decode("latin-1")
+managed_half = gi[gi.index(HB) :]
+above = (
+    "# BEGIN REPOSITORY LOCAL\n"
+    f"{OLD_GUIDANCE}\n"
+    "\n"
+    "straggler-local-cache/\n"
+    "# END REPOSITORY LOCAL\n"
+    "\n"
+)
+with open(".gitignore", "wb") as f:
+    f.write((above + managed_half).encode("latin-1"))
+# The manifest: the two entries in their retired wire vintages.
+path = ".github/repo-platform-manifest.json"
+with open(path) as f:
+    manifest = json.load(f)
+manifest["files"]["AGENTS.md"] = {
+    "class": "split",
+    "grammar": "tail-marker",
+    "marker": OLD_SENTINEL,
+    "managed": "above",
+    "hash": None,
+}
+manifest["files"][".gitignore"] = {
+    "class": "split",
+    "grammar": "bounded-region",
+    "marker": HB,
+    "managed": "below",
+    "managed_end": "# END REPO-PLATFORM MANAGED",
+    "local_begin": "# BEGIN REPOSITORY LOCAL",
+    "local_end": "# END REPOSITORY LOCAL",
+    "hash": None,
+}
+with open(path, "w") as f:
+    json.dump(manifest, f, indent=4)
+    f.write("\n")
+PY
+git init -q -b main
+git add --all
+git -c user.name=ci -c user.email=ci@localhost commit -q -m "chore: init in the retired shapes"
+# The working tree holds copier's merged junk the rebuild must discard.
+echo "merged result to discard" > AGENTS.md
+echo "merged result to discard" > .gitignore
+# Restore the post-sync manifest (the new render's own copy).
+cp "$TRANS_WORK/render-new/.github/repo-platform-manifest.json" .github/repo-platform-manifest.json
+cd "$GITHUB_WORKSPACE"
+bun .github/scripts/sync/preserve_local_content.ts \
+  --summary "$TRANS_WORK/local-carryover.md" --root "$TRANS" \
+  --needs-review "$TRANS_WORK/carry-review.txt" \
+  --rebuilt-paths "$TRANS_WORK/rebuilt-paths.txt" \
+  --render-dir "$TRANS_WORK/render-new" --old-render-dir "$TRANS_WORK/render-old"
+# AGENTS.md: NO conversion - the fresh render, then the whole old copy
+# byte-identical (non-UTF-8 byte included) under the recovery appendix.
+grep -qF "repo-platform:recovery-appendix" "$TRANS/AGENTS.md" \
+  || fail "the straggler AGENTS.md carries no recovery appendix (a conversion path is silently back?)"
+OLD_SIZE=$(wc -c < "$TRANS_WORK/agents-old-shape.bin")
+tail -c "$OLD_SIZE" "$TRANS/AGENTS.md" | cmp -s - "$TRANS_WORK/agents-old-shape.bin" \
+  || fail "the recovery appendix did not preserve the old-shaped copy byte-identical"
+# .gitignore: the appendix too, NEVER a guessed split at the current
+# markers (the old managed half carries the pair, so a guessed split would
+# hand old bytes to the managed discard) - the fresh render stands on top,
+# the whole old copy is preserved below the appendix comment, its retired
+# marker pair and the old guidance line INCLUDED (repo-owned bytes now,
+# with the one-time strip deleted; only the current markers are dash-joined
+# inert so the validator's exactly-once rule holds).
+grep -qF "# repo-platform:recovery-appendix" "$TRANS/.gitignore" \
+  || fail "the straggler .gitignore carries no recovery appendix (a guessed split is silently back?)"
+grep -qxF "# BEGIN REPOSITORY LOCAL" "$TRANS/.gitignore" \
+  || fail "the retired REPOSITORY LOCAL marker was stripped - the deleted conversion strip is back"
+grep -qxF "# Add repository-specific ignore patterns in this section only." "$TRANS/.gitignore" \
+  || fail "the retired guidance line was stripped - the deleted conversion strip is back"
+grep -qxF "straggler-local-cache/" "$TRANS/.gitignore" \
+  || fail "the straggler .gitignore lost the repository's own ignore pattern"
+# The summary must state dispositions without any conversion-era wording,
+# and the appendixes must hold the PR for review.
+if grep -qF "converted from the retired" "$TRANS_WORK/local-carryover.md"; then
+  fail "the carry summary still names a conversion (the retired machinery must be gone)"
+fi
+if grep -qF "platform-authored relic line(s)" "$TRANS_WORK/local-carryover.md"; then
+  fail "the carry summary still names a relic strip (the retired machinery must be gone)"
+fi
+grep -qF "recovery-appendix" "$TRANS_WORK/local-carryover.md" \
+  || fail "the carry summary does not name the recovery appendix"
+grep -qF "AGENTS.md: recovery-appendix" "$TRANS_WORK/carry-review.txt" \
+  || fail "the straggler AGENTS.md appendix did not hold the PR for review"
+grep -qF ".gitignore: recovery-appendix" "$TRANS_WORK/carry-review.txt" \
+  || fail "the straggler .gitignore appendix did not hold the PR for review"
+# The stamp, then the tripwire: the retired-grammar HEAD manifest must be
+# REFUSED - every split file unverifiable, the report naming the retired
+# grammar and the recovery fix, with no fabricated loss claim (the
+# appendixes kept every previous line). Warn-only: the run stays green so
+# the healing sync can deliver.
+bun actions/shared/stamp_manifest.ts --root "$TRANS"
+RUNNER_TEMP="$TRANS_WORK" bun .github/scripts/sync/tail_tripwire.ts --root "$TRANS" \
+  > "$TRANS_WORK/tripwire.out"
+test -s "$TRANS_WORK/tail-shrank.md" \
+  || fail "a retired-grammar HEAD manifest produced no tripwire report (a conversion fallback must not be silently back)"
+# The refusal names whichever retired entry the manifest lists first -
+# either retired grammar proves the arm.
+grep -qE 'split grammar "(tail-marker|bounded-region)"' "$TRANS_WORK/tail-shrank.md" \
+  || fail "the tripwire report does not name the retired-grammar refusal"
+grep -qF "recover=recopy" "$TRANS_WORK/tail-shrank.md" \
+  || fail "the tripwire report does not name the recovery-sync fix"
+grep -qF '`AGENTS.md`' "$TRANS_WORK/tail-shrank.md" \
+  || fail "the tripwire report does not list AGENTS.md as unverifiable"
+grep -qF '`.gitignore`' "$TRANS_WORK/tail-shrank.md" \
+  || fail "the tripwire report does not list .gitignore as unverifiable"
+if grep -qF "missing from this update's copy" "$TRANS_WORK/tail-shrank.md"; then
+  fail "the retired-grammar refusal fabricated a loss claim for preserved content"
+fi
+grep -qF "::warning::" "$TRANS_WORK/tripwire.out" \
+  || fail "the retired-grammar refusal did not warn (silent misbehavior)"
+bun "$GITHUB_WORKSPACE/actions/validate-template-report/validator/validate_generated_files.ts" "$TRANS"
+echo "retired-grammar straggler OK: both old copies preserved under review-held appendixes, relic lines kept, loud unverifiable refusal with recovery advice, no conversion"
 # --- Split-file retirement (module deselection) ----------------------------
 # Deselecting a module retires its files from the render, and a retired
 # file HEAD's manifest classes `split` carries a repository-owned half
