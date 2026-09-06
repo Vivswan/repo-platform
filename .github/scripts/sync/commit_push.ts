@@ -229,6 +229,9 @@ if (existsSync(manifestPath)) {
       writeFileSync(manifestPath, stamped.partialOut);
       break;
     case "rejected":
+      console.log(
+        `::warning::${targetDisplay}: ${MANIFEST_NAME} ${stamped.problem}; left unstamped for validate-template's parity check to report`,
+      );
       break;
     default: {
       const unhandled: never = stamped;

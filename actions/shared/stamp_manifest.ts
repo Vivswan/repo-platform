@@ -344,6 +344,10 @@ export type StampResult =
   | { status: "partial"; partialOut: string; problem: string }
   | { status: "rejected"; problem: string };
 
+/** The manifest is LF by contract (the generator writes LF), so a CR anywhere is a foreign edit: the
+ *  line walk would misread every line as unreached, a diagnosis that names the wrong fault. */
+const CRLF_PROBLEM = "uses CRLF line endings; the generator writes LF";
+
 /** `text` with every reachable entry line restamped from the tree at `root`: the hash token,
  *  the self entry's commit slot, and `"withheld": true` on the hash-null entries of `withheld`.
  *  Soft on purpose: this runs inside copier's hooks, where a throw would fail the render. */
@@ -352,6 +356,7 @@ export function stampManifestText(
   root: string,
   withheld: ReadonlySet<string> = new Set(),
 ): StampResult {
+  if (text.includes("\r")) return { status: "rejected", problem: CRLF_PROBLEM };
   const parsed = parseManifestFiles(text);
   if (parsed.problem !== null) return { status: "rejected", problem: parsed.problem };
   const { files, resolved } = parsed;
@@ -414,6 +419,7 @@ export function normalizeFromText(
   text: string,
   root: string,
 ): { rewritten: string[]; problem: string | null } {
+  if (text.includes("\r")) return { rewritten: [], problem: CRLF_PROBLEM };
   const parsed = parseManifestFiles(text);
   if (parsed.problem !== null) return { rewritten: [], problem: parsed.problem };
   return { rewritten: normalizeSymlinkTargets(root, parsed.files), problem: null };
@@ -486,6 +492,7 @@ function canonicalSelfBody(entry: Record<string, unknown>): string {
  *  read (`files[MANIFEST_NAME]`, exactly SELF_ENTRY_KEYS) and on the lines the stamper rewrites:
  *  every self line byte-equal to that entry's canonical rendering, and no files entry unreached. */
 export function provenanceSlotProblem(text: string): string | null {
+  if (text.includes("\r")) return CRLF_PROBLEM;
   const parsed = parseManifestFiles(text);
   if (parsed.problem !== null) return parsed.problem;
   const entry = parsed.files[MANIFEST_NAME] as Record<string, unknown> | undefined;

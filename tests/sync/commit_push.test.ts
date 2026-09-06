@@ -309,12 +309,38 @@ const manifestOf = (entries: Record<string, string>) =>
 describe("commit_push Workflows-scope withhold reconciliation", () => {
   const WITHHELD_WARNING =
     "::warning::o/r: workflow-file changes were withheld because the REPO_PLATFORM_TOKEN lacks the Workflows scope (listed in the PR body). Grant Workflows read/write to include them; this is otherwise working as configured.";
+  const WITHHELD_ADVISORY = `advisory: ${WITHHELD_WORKFLOW}: listed as managed in ${MANIFEST_NAME} but withheld from the repo - the sync's push token lacked the Workflows scope, so it could not create the workflow file; grant Workflows read/write to the sync token and run a recovery sync (recover=recopy), which re-renders it`;
   test.each([
-    { layout: "one line", selfEntry: RENDER_ENTRIES[MANIFEST_NAME], warnings: [WITHHELD_WARNING] },
+    {
+      layout: "one line",
+      selfEntry: RENDER_ENTRIES[MANIFEST_NAME],
+      crlf: false,
+      warnings: [WITHHELD_WARNING],
+      validation: "ok",
+      diagnostics: [WITHHELD_ADVISORY],
+    },
+    {
+      // The stamper refuses a CRLF manifest by name and writes nothing, so the pushed tree's parity
+      // check sees the withheld workflow as a deleted managed file: validation fails, loudly.
+      layout: "one line, CRLF endings",
+      selfEntry: RENDER_ENTRIES[MANIFEST_NAME],
+      crlf: true,
+      warnings: [
+        `::warning::o/r: ${MANIFEST_NAME} uses CRLF line endings; the generator writes LF; left unstamped for validate-template's parity check to report`,
+        WITHHELD_WARNING,
+      ],
+      validation: "failed",
+      diagnostics: [
+        `error: ${WITHHELD_WORKFLOW}: listed as managed in ${MANIFEST_NAME} but missing from the repo - a managed file deleted outside a sync; restore it from git history or run a recovery sync (recover=recopy)`,
+      ],
+    },
     {
       // The stamper cannot reach a spread entry: the restamp is partial, still written (the
       // withheld marker must land), and the sync log says so.
       layout: "spread over lines",
+      crlf: false,
+      validation: "ok",
+      diagnostics: [WITHHELD_ADVISORY],
       selfEntry: `{\n      "class": "managed", "hash": null, "commit": "${COMMIT}"\n    }`,
       warnings: [
         `::warning::o/r: ${MANIFEST_NAME} has 1 files entry not on a one-object line of its own, which the stamper cannot rewrite; validate-template's parity check reports the unstamped entries`,
@@ -322,15 +348,11 @@ describe("commit_push Workflows-scope withhold reconciliation", () => {
       ],
     },
   ])(
-    "a withheld ADDED workflow is removed, its entry restamped hash-null with the marker, and the pushed tree validates (self entry $layout)",
-    ({ selfEntry, warnings }) => {
-      // The manifest must describe the tree that is pushed: the added
-      // workflow the token could not create is gone, so its stamped hash
-      // gives way to null plus the marker validate-template reads as the one
-      // legitimate listed-but-missing state, every other entry keeps its
-      // on-disk hash, and the post-withhold re-validation of that tree
-      // passes with the withheld advisory as its only finding. The validator
-      // checkout the workflow places at validator/ is this repository.
+    "a withheld ADDED workflow is removed and the manifest restamped to describe the pushed tree (self entry $layout)",
+    ({ selfEntry, crlf, warnings, validation, diagnostics }) => {
+      // The manifest must describe the tree that is pushed: where the stamper reaches the withheld
+      // entry, it goes hash-null with the marker and the re-validation passes with the withheld
+      // advisory alone; each row pins that run's whole outcome. validator/ is this repository.
       const entries = { ...RENDER_ENTRIES, [MANIFEST_NAME]: selfEntry };
       const work = fixtures.dir("work-");
       const targetDir = join(work, "target");
@@ -338,7 +360,8 @@ describe("commit_push Workflows-scope withhold reconciliation", () => {
         mkdirSync(join(targetDir, dirname(rel)), { recursive: true });
         writeFileSync(join(targetDir, rel), content);
       }
-      writeFileSync(join(targetDir, MANIFEST_NAME), manifestOf(entries));
+      const written = crlf ? manifestOf(entries).replace(/\n/g, "\r\n") : manifestOf(entries);
+      writeFileSync(join(targetDir, MANIFEST_NAME), written);
       symlinkSync(REPO_ROOT, join(work, "validator"));
       const result = runCommitPush("withhold-added", "false", {}, work);
       expect({
@@ -351,21 +374,21 @@ describe("commit_push Workflows-scope withhold reconciliation", () => {
       }).toEqual({
         exitCode: 0,
         withheldFileExists: false,
-        manifest: manifestOf({
-          ...entries,
-          [WITHHELD_WORKFLOW]: '{"class": "managed", "hash": null, "withheld": true}',
-        }),
-        outputs: "pushed=true\nvalidation=ok\n",
+        manifest: crlf
+          ? written
+          : manifestOf({
+              ...entries,
+              [WITHHELD_WORKFLOW]: '{"class": "managed", "hash": null, "withheld": true}',
+            }),
+        outputs: `pushed=true\nvalidation=${validation}\n`,
         withheld: `${WITHHELD_WORKFLOW}\n`,
         warnings,
       });
-      const diagnostics = result.stdout
-        .split("\n")
-        .filter((line) => /^(advisory|error): /.test(line));
-      expect(diagnostics).toEqual([
-        `advisory: ${WITHHELD_WORKFLOW}: listed as managed in ${MANIFEST_NAME} but withheld from the repo - the sync's push token lacked the Workflows scope, so it could not create the workflow file; grant Workflows read/write to the sync token and run a recovery sync (recover=recopy), which re-renders it`,
-      ]);
-      expect(result.stdout).toContain("Validation passed.");
+      expect(
+        (result.stdout + result.stderr)
+          .split("\n")
+          .filter((line) => /^(advisory|error): /.test(line)),
+      ).toEqual(diagnostics);
     },
   );
 

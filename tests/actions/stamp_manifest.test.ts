@@ -525,6 +525,11 @@ describe("the hook as copier runs it", () => {
       stderr: 'expected exactly ["class","hash","commit"]',
     },
     {
+      reason: "CRLF line endings (a foreign edit: the generator writes LF)",
+      manifest: manifestText([SELF]).replace(/\n/g, "\r\n"),
+      stderr: "uses CRLF line endings",
+    },
+    {
       reason: "a hash value the stamper's token match skips",
       manifest: manifestText([
         `    ".github/repo-platform-manifest.json": {"class": "managed", "hash": "zz", "commit": null}`,
@@ -733,6 +738,29 @@ describe("the hook as copier runs it", () => {
     expect(readFileSync(join(root, ".github/.copier-answers.yml"), "utf-8")).toBe(
       "_src_path: ./tree\n",
     );
+  });
+
+  test("a CRLF manifest on the argument-free stamp: warned by name, nothing stamped, no symlink normalized", () => {
+    // normalizeFromText refuses CRLF with the stamp, so the warning's "normalization skipped too"
+    // stays true: the .jinja link target is untouched.
+    const manifest = manifestText([
+      SELF,
+      `    "AGENTS.md": {"class": "managed", "hash": null}`,
+    ]).replace(/\n/g, "\r\n");
+    const root = tree({
+      ".github/.copier-answers.yml": ANSWERS,
+      ".github/repo-platform-manifest.json": manifest,
+    });
+    symlinkSync("CLAUDE.md.jinja", join(root, "AGENTS.md"));
+    const proc = run(root, []);
+    expect({ exitCode: proc.exitCode, stdout: proc.stdout, stderr: proc.stderr }).toEqual({
+      exitCode: 0,
+      stdout: "",
+      stderr:
+        "warning: .github/repo-platform-manifest.json uses CRLF line endings; the generator writes LF; left unstamped (symlink target normalization skipped too) for validate-template's parity check to report\n",
+    });
+    expect(readlinkSync(join(root, "AGENTS.md"))).toBe("CLAUDE.md.jinja");
+    expect(readFileSync(join(root, ".github/repo-platform-manifest.json"), "utf-8")).toBe(manifest);
   });
 
   test("the positive control: the same answers with a stampable manifest write both halves", () => {
@@ -1122,6 +1150,21 @@ describe("stampManifestText", () => {
   ];
   test.each(rejected)("%s is rejected with a problem", (_reason, text, problem) => {
     expect(stampManifestText(text, tree({}))).toEqual({ status: "rejected", problem });
+  });
+
+  test("a CRLF manifest is rejected by name, not misread as unreached entries", () => {
+    // The manifest is LF by contract; a CR on every line would leave every entry unreached and
+    // the diagnosis would name the wrong fault. The LF twin is the control.
+    const root = tree({ "ci.yml": "content\n" });
+    const lf = manifestText([`    "ci.yml": {"class": "managed", "hash": null}`]);
+    expect(stampManifestText(lf.replace(/\n/g, "\r\n"), root)).toEqual({
+      status: "rejected",
+      problem: "uses CRLF line endings; the generator writes LF",
+    });
+    expect(stampManifestText(lf, root)).toEqual({
+      status: "stamped",
+      out: manifestText([`    "ci.yml": {"class": "managed", "hash": "${sha256("content\n")}"}`]),
+    });
   });
 
   test("a duplicated entry line for one path is a soft, value-free problem, never a throw", () => {
