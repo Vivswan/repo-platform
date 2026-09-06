@@ -29,9 +29,11 @@ import {
   CHECK_RUN_LOOKUP,
   callersOf,
   canonical,
+  type DogfoodPair,
   declaredCheckName,
   deliveryRefMismatches,
   deliveryRefTwinMismatches,
+  dogfoodPairMismatches,
   duplicateJobKeys,
   escapeRegExp,
   expandCheckChain,
@@ -49,8 +51,10 @@ import {
   hookCommandParts,
   inlineFunctionCopies,
   isOwnPagesOrigin,
+  LICENSE_TEMPLATE,
   labelPreflightFileMismatches,
   labelPreflightJobMismatches,
+  licenseCopies,
   lockedTypesBunVersion,
   type Mismatch,
   majorMinor,
@@ -5011,5 +5015,78 @@ describe("sticky-pr-comments", () => {
     expect(() => stickyTreeMismatches([[FRAGMENT, step(HEADER)]])).toThrow(
       /no template workflow sources found - anchor lost/,
     );
+  });
+});
+
+describe("dogfood-parity (licenseCopies and dogfoodPairMismatches)", () => {
+  const SKILL_COPIES = [
+    "skills/repo-platform-add-module/LICENSE.md",
+    "skills/repo-platform-new-project/LICENSE.md",
+    "skills/repo-platform-sync-pr/LICENSE.md",
+  ];
+  const TRACKED = [
+    "tests/golden-renders/minimal/LICENSE.md",
+    ...SKILL_COPIES,
+    LICENSE_TEMPLATE,
+    "LICENSE.md",
+    "docs/LICENSE.md.txt",
+    "package.json",
+  ];
+
+  test("licenseCopies keeps the root and every skill copy, sorted, and drops the template and golden renders", () => {
+    expect(licenseCopies(TRACKED)).toEqual(["LICENSE.md", ...SKILL_COPIES]);
+  });
+
+  test("a fifth copy anywhere in the tracked tree is discovered without a roster edit", () => {
+    expect(licenseCopies([...TRACKED, "actions/new-action/LICENSE.md"])).toContain(
+      "actions/new-action/LICENSE.md",
+    );
+  });
+
+  test("a tracked tree without the root LICENSE.md is a lost anchor", () => {
+    expect(() => licenseCopies(SKILL_COPIES)).toThrow(/no tracked root LICENSE.md - anchor lost/);
+  });
+
+  const rendered = [
+    "<!-- BEGIN REPO-PLATFORM MANAGED -->",
+    "# Individual and Small Organization License 1.1.0",
+    "",
+    "Required Notice: Copyright Vivswan Shah",
+    "<!-- END REPO-PLATFORM MANAGED -->",
+    "",
+  ].join("\n");
+  const pair: DogfoodPair = { repo: SKILL_COPIES[2], tpl: LICENSE_TEMPLATE, mode: "prefix" };
+
+  test("a prefix copy passes when it starts with the render, with or without a repo-owned tail", () => {
+    expect(dogfoodPairMismatches(pair, rendered, rendered)).toEqual([]);
+    expect(dogfoodPairMismatches(pair, rendered, `${rendered}\nThird-party notices.\n`)).toEqual(
+      [],
+    );
+  });
+
+  test("planted control: a skill copy left on the previous license version is red at its heading line", () => {
+    const stale = rendered.replace("License 1.1.0", "License 1.0.0");
+    expect(dogfoodPairMismatches(pair, rendered, stale)).toEqual([
+      {
+        file: SKILL_COPIES[2],
+        expected: `"# Individual and Small Organization License 1.1.0" (line 2 vs ${LICENSE_TEMPLATE})`,
+        got: '"# Individual and Small Organization License 1.0.0"',
+      },
+    ]);
+  });
+
+  test("a prefix copy missing its managed region's last line is red at end of file", () => {
+    const truncated = rendered.split("\n").slice(0, 3).join("\n");
+    expect(dogfoodPairMismatches(pair, rendered, truncated).map((m) => m.got)).toEqual([
+      '"<end of file>"',
+    ]);
+  });
+
+  test("a semantic pair ignores comments and blanks but flags a changed line", () => {
+    const semantic: DogfoodPair = { repo: "x.yml", tpl: "x.yml.jinja", mode: "semantic" };
+    expect(dogfoodPairMismatches(semantic, "a: 1\n# note\nb: 2\n", "a: 1\n\nb: 2\n")).toEqual([]);
+    expect(
+      dogfoodPairMismatches(semantic, "a: 1\nb: 2\n", "a: 1\nb: 3\n").map((m) => m.got),
+    ).toEqual(['"b: 3"']);
   });
 });
