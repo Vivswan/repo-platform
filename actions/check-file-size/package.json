@@ -1,0 +1,9 @@
+{
+  "name": "check-file-size",
+  "private": true,
+  "description": "Dependency manifest for the check-file-size action (dev-only: the script carries no runtime dependencies).",
+  "devDependencies": {
+    "@types/bun": "^1.4.0",
+    "typescript": "^7.0.2"
+  }
+}

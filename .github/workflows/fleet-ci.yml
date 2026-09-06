@@ -65,7 +65,7 @@ jobs:
           echo "::error::validate-template's integrity check failed; see the findings on this PR (or the job summary) and the step log above."
           exit 1
 
-  # The five base checks, merged into one job on private repositories (a
+  # The six base checks, merged into one job on private repositories (a
   # standalone job bills a rounded-up minute per push there); !cancelled()
   # keeps later checks running when an earlier one fails. Public repos
   # keep the per-check fan-out below.
@@ -75,7 +75,8 @@ jobs:
     timeout-minutes: 20
     permissions:
       contents: read
-      pull-requests: read
+      # Write only for check-file-size's sticky comment.
+      pull-requests: write
     steps:
       # One checkout serves every check: fetch-depth 0 because
       # commit-names walks history and gitleaks scans the event's range.
@@ -84,6 +85,11 @@ jobs:
           fetch-depth: 0
       - uses: Vivswan/repo-platform/actions/check-typography@build
         if: '!cancelled()'
+      # Advisory: continue-on-error keeps a finding from turning the PR
+      # red; the sticky comment and step summary still land.
+      - uses: Vivswan/repo-platform/actions/check-file-size@build
+        if: '!cancelled()'
+        continue-on-error: true
       - uses: Vivswan/repo-platform/actions/validate-commit-names@build
         if: '!cancelled()'
       - uses: raven-actions/actionlint@v2
@@ -108,6 +114,21 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: Vivswan/repo-platform/actions/check-typography@build
+
+  # Advisory: continue-on-error keeps a finding from turning the PR red;
+  # the sticky comment and step summary still land.
+  file-size:
+    if: ${{ !inputs.private }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    continue-on-error: true
+    permissions:
+      contents: read
+      # Only for the sticky comment.
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: Vivswan/repo-platform/actions/check-file-size@build
 
   commit-names:
     if: ${{ !inputs.private }}

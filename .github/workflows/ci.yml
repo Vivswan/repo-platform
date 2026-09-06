@@ -120,6 +120,21 @@ jobs:
       - uses: actions/checkout@v7
       - uses: ./actions/check-typography
 
+  file-size:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      # Only for the sticky comment.
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v7
+      # The rendered goldens are judged too, managed-file skip off: an
+      # oversize render fails here, at its source.
+      - uses: ./actions/check-file-size
+        with:
+          rendered-dir: tests/golden-renders/all-modules
+
   commit-names:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -623,6 +638,7 @@ jobs:
       - yamllint
       - biome
       - typography
+      - file-size
       - commit-names
       - typecheck
       - action-refs

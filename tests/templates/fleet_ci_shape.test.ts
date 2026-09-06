@@ -72,12 +72,19 @@ describe("fleet-ci.yml", () => {
 
   test("the private/public base-check shapes are complementary job-level guards", () => {
     expect(fleetCi.jobs["base-checks"]?.if).toBe("inputs.private");
-    for (const job of ["typography", "commit-names", "actionlint", "yamllint", "gitleaks"]) {
+    for (const job of [
+      "typography",
+      "file-size",
+      "commit-names",
+      "actionlint",
+      "yamllint",
+      "gitleaks",
+    ]) {
       expect(fleetCi.jobs[job]?.if).toBe("${{ !inputs.private }}");
     }
     // Every merged check step keeps running when an earlier one fails.
     const guarded = (fleetCi.jobs["base-checks"]?.steps ?? []).slice(1);
-    expect(guarded.length).toBeGreaterThanOrEqual(5);
+    expect(guarded.length).toBeGreaterThanOrEqual(6);
     for (const step of guarded) expect(step.if).toBe("!cancelled()");
   });
 
@@ -87,6 +94,7 @@ describe("fleet-ci.yml", () => {
     // per-render assertions covered this per repo).
     const TOOLS = {
       "typography": "repo-platform/actions/check-typography@build",
+      "file-size": "repo-platform/actions/check-file-size@build",
       "commit-names": "repo-platform/actions/validate-commit-names@build",
       "actionlint": "raven-actions/actionlint@",
       "yamllint": "repo-platform/actions/yamllint@build",
