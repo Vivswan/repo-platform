@@ -6,11 +6,12 @@
 // selection and copier. The answers file is not touched: copier update
 // takes the filtered selection as data and records it itself.
 //
-// The edit is line-level - only the three list items change, so the
-// file's comments and its `mirrors` declaration ride through untouched
-// (Bun.YAML has no comment-preserving emitter) - and the result is
-// re-parsed and checked against the declared list minus the folded names
-// before anything is written. Self-contained: node builtins and bun only
+// The edit is a byte splice - each folded item leaves with its own
+// separator and every other byte stays, comments, spacing, line endings,
+// and the `mirrors` declaration included (Bun.YAML has no
+// comment-preserving emitter) - and the result is re-parsed and checked
+// against the declared list minus the folded names before anything is
+// written. Self-contained: node builtins and bun only
 // (docs/migrations.md).
 
 import { lstatSync, readFileSync, writeFileSync } from "node:fs";
@@ -113,9 +114,40 @@ function splitComment(line: string): [body: string, comment: string] {
   return [line, ""];
 }
 
+/** A one-line flow list's inner text with the folded items spliced out:
+ * each dropped item leaves with the separator that joined it to its
+ * predecessor (the first item takes the separator after it), so the kept
+ * items keep their own spacing and quoting byte for byte. Null when an item
+ * is not a plain or quoted scalar. */
+function spliceFlowItems(inner: string): string | null {
+  if (inner.trim() === "") return inner;
+  const items: { start: number; end: number; name: string; index: number }[] = [];
+  let cursor = 0;
+  for (const [index, segment] of inner.split(",").entries()) {
+    const name = itemName(segment);
+    if (name === null) return null;
+    const start = cursor + segment.indexOf(segment.trim());
+    items.push({ start, end: start + segment.trim().length, name, index });
+    cursor += segment.length + 1;
+  }
+  const kept = items.filter((item) => !FOLDED.includes(item.name));
+  const first = items[0];
+  const last = items[items.length - 1];
+  let out = inner.slice(0, first.start);
+  kept.forEach((item, j) => {
+    // A kept item keeps the separator to its OWN predecessor in the original
+    // list; the first kept item keeps none (a dropped first item took the
+    // separator after it).
+    if (j > 0) out += inner.slice(items[item.index - 1].end, item.start);
+    out += inner.slice(item.start, item.end);
+  });
+  return out + inner.slice(last.end);
+}
+
 /** `text` with the folded names removed from its top-level `modules` list,
- * every other byte kept. Null when the list's shape is not one the edit
- * understands (a flow list spanning lines, an item that is not a scalar). */
+ * every other byte kept (the line's own ending included). Null when the
+ * list's shape is not one the edit understands (a flow list spanning lines,
+ * an item that is not a scalar). */
 function dropFolded(text: string): string | null {
   const lines = text.split("\n");
   const keyAt = lines.findIndex((line) => /^modules\s*:/.test(line));
@@ -123,18 +155,17 @@ function dropFolded(text: string): string | null {
   const keyLine = lines[keyAt];
   const colon = keyLine.indexOf(":");
   const [value, comment] = splitComment(keyLine.slice(colon + 1));
+  // A CR belongs to the line, never to a rewritten value.
+  const eol = comment === "" && value.endsWith("\r") ? "\r" : "";
   if (value.trim() !== "") {
     // Flow style on one line: `modules: ["a", "b"] # comment`.
     const open = value.indexOf("[");
     const close = value.lastIndexOf("]");
     if (open === -1 || close === -1 || value.slice(close + 1).trim() !== "") return null;
-    const inner = value.slice(open + 1, close);
-    const items = inner.trim() === "" ? [] : inner.split(",");
-    const names = items.map(itemName);
-    if (names.some((name) => name === null)) return null;
-    const kept = items.filter((_, i) => !FOLDED.includes(names[i] as string));
+    const spliced = spliceFlowItems(value.slice(open + 1, close));
+    if (spliced === null) return null;
     lines[keyAt] =
-      `${keyLine.slice(0, colon + 1)}${value.slice(0, open + 1)}${kept.map((item) => item.trim()).join(", ")}]${comment}`;
+      `${keyLine.slice(0, colon + 1)}${value.slice(0, open + 1)}${spliced}${value.slice(close)}${comment}`;
     return lines.join("\n");
   }
   // Block style: item lines follow the key, comments and blank lines allowed
@@ -145,7 +176,8 @@ function dropFolded(text: string): string | null {
   for (; end < lines.length; end++) {
     const line = lines[end];
     if (line.trim() === "" || /^\s*#/.test(line)) continue;
-    const item = /^(\s+)-(\s.*|)$/.exec(line);
+    // [\s\S], not `.`: a CR is a line terminator `.` never matches.
+    const item = /^(\s+)-(\s[\s\S]*|)$/.exec(line);
     if (item === null) break;
     if (indent === null) indent = item[1];
     else if (item[1] !== indent) return null;
@@ -159,7 +191,7 @@ function dropFolded(text: string): string | null {
   const remaining = lines.slice(keyAt + 1, end).filter((_line, i) => !dropped.has(keyAt + 1 + i));
   const emptied = !remaining.some((line) => /^\s+-/.test(line));
   const replacement = emptied
-    ? [`${keyLine.slice(0, colon + 1)} []${comment}`, ...remaining]
+    ? [`${keyLine.slice(0, colon + 1)} []${comment}${eol}`, ...remaining]
     : [keyLine, ...remaining];
   return [...lines.slice(0, keyAt), ...replacement, ...lines.slice(end)].join("\n");
 }

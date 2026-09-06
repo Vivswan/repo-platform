@@ -1,7 +1,9 @@
-// m0002: the agents/auto-assign/settings-sync fold - the rung's
-// line-level rewrite of .repo-platform.yml's modules list against scratch
-// checkouts (the edit left staged for the runner's commit; comments,
-// mirrors, and list style untouched), its idempotency, the shapes it
+// m0002: the agents/auto-assign/settings-sync fold - the rung's byte
+// splice of .repo-platform.yml's modules list against scratch checkouts
+// (the edit left staged for the runner's commit; every byte outside the
+// dropped items and their separators kept - the expected strings below are
+// whole-file bytes, so spacing, quoting, and line endings are pinned, not
+// only the parse), its idempotency, the shapes it
 // leaves to module selection, the error arms, and the runner CLI over a
 // build history in which the rung appears.
 
@@ -67,6 +69,42 @@ describe("m0002_fold_base_modules", () => {
       before: "modules: ['agents', uv, \"settings-sync\"] # keep me\nmirrors: []\n",
       after: "modules: [uv] # keep me\nmirrors: []\n",
       note: "`agents`, `settings-sync`",
+    },
+    {
+      // The splice keeps the kept items' own spacing and the line's CRLF;
+      // a rebuilt line would normalize both.
+      label: "a CRLF flow list with irregular spacing: only the items and their separators leave",
+      before: "modules: [agents,   uv ,pages,settings-sync]\r\nmirrors: []\r\n",
+      after: "modules: [uv ,pages]\r\nmirrors: []\r\n",
+      note: "`agents`, `settings-sync`",
+    },
+    {
+      // A folded item between two kept ones: the kept successor keeps the
+      // separator to its own predecessor, so the dropped item cannot ride
+      // back in with an inter-item slice.
+      label: "folded items between kept ones leave with one separator each",
+      before: "modules: [uv,  agents, pages , auto-assign,\tnightly]\n",
+      after: "modules: [uv, pages,\tnightly]\n",
+      note: "`agents`, `auto-assign`",
+    },
+    {
+      label: "a padded flow list keeps its padding",
+      before: 'modules: [ "agents" , "uv" ]\n',
+      after: 'modules: [ "uv" ]\n',
+      note: "`agents`",
+    },
+    {
+      label: "a CRLF block list with item comments keeps every other line byte for byte",
+      before:
+        "# head\r\nmodules:\r\n  - agents # a\r\n  - uv # keep\r\n  - auto-assign\r\nmirrors: []\r\n",
+      after: "# head\r\nmodules:\r\n  - uv # keep\r\nmirrors: []\r\n",
+      note: "`agents`, `auto-assign`",
+    },
+    {
+      label: "an emptied CRLF block list keeps the line ending",
+      before: "modules:\r\n  - agents\r\nmirrors: []\r\n",
+      after: "modules: []\r\nmirrors: []\r\n",
+      note: "`agents`",
     },
     {
       label: "a block list with item comments, a comment line, and a mirrors block",

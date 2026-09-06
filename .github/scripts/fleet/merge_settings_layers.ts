@@ -31,8 +31,8 @@
 // the action's delete-undeclared label reconciliation wipe every label
 // the repository declared for itself. Absence therefore SKIPS the apply
 // (loudly, and `skipped=true` on the step) instead of producing a
-// document. The settings-sync starter seeds settings.yml on the next
-// template sync, and the apply after that picks it up.
+// document. The settings.yml starter (base content of every render) seeds
+// the file on the next template sync, and the apply after that picks it up.
 //
 // CLI:
 //   bun .github/scripts/fleet/merge_settings_layers.ts --managed <file>
@@ -433,7 +433,7 @@ export interface IdentityIssue {
 }
 
 /** Shape hygiene for the identity keys a repo layer declares (the
- *  settings-sync starter seeds all four; the apply never touches an
+ *  settings.yml starter seeds all four; the apply never touches an
  *  undeclared key, so drift in a missing one is never healed).
  *  check_ssot.ts applies this to repo-platform's own .github/settings.yml;
  *  missingIdentityKeys above is the merge path's presence warning. */
@@ -587,11 +587,11 @@ export function mergeOutcome(
     return {
       kind: "skip",
       message:
-        `no repository settings layer at ${source} - the repository selected settings-sync ` +
-        "but is not onboarded yet, so this apply is SKIPPED. Applying the managed baseline " +
-        "alone would delete every label the repository declares for itself, because the " +
-        "apply deletes undeclared labels. The settings-sync starter seeds the file on the " +
-        "next template sync and the apply after that picks it up.",
+        `no repository settings layer at ${source} - the repository is managed but not ` +
+        "onboarded yet, so this apply is SKIPPED. Applying the managed baseline alone would " +
+        "delete every label the repository declares for itself, because the apply deletes " +
+        "undeclared labels. The settings.yml starter (base content of every render) seeds the " +
+        "file on the next template sync and the apply after that picks it up.",
     };
   }
   const repo = parseSettingsDoc(repoLayer.text, repoLayer.where);
