@@ -1,32 +1,25 @@
 // Module selection for the push sync: reads a managed repo's module list
-// from its .repo-platform.yml and filters it against the module choices of
+// from its .repo-platform.yml and checks it against the module choices of
 // the template ref being applied, so `copier update` never receives a name
 // the selected template version does not know.
 //
 // Usage:
 //   bun .github/scripts/sync/modules.ts --repo-file <.repo-platform.yml>
-//     --template-copier <copier.yml> [--retired-summary <file>]
+//     --template-copier <copier.yml>
 //
-// Prints the filtered selection as a JSON array on stdout. Retired module
-// names (the RETIRED_MODULES allowlist) are dropped and written one per
-// line to --retired-summary for the workflow to surface; any other unknown
-// name is an error - silently dropping a typo would strip that module's
-// files from the repo. Malformed input never degrades to an empty list for
-// the same reason. Errors print as ::error:: workflow commands (on stdout,
+// Prints the selection as a JSON array on stdout. An unknown name is an
+// error - silently dropping a typo would strip that module's files from
+// the repo, and a name the template retired is a migration ladder rung's
+// job (docs/migrations.md), never a tolerance here. Malformed input never
+// degrades to an empty list for the same reason. Errors print as ::error:: workflow commands (on stdout,
 // where the runner parses them) and the exit code is nonzero. The CLI
 // stays for ci/upgrade_path_test.sh; the sync itself imports the pure
 // functions (sync/select_modules.ts).
 
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { parse } from "yaml";
 import { parseFlags } from "../shared/flags.ts";
 import { fail } from "../shared/gha.ts";
-
-// Module names the selection drops with a notice instead of a hard
-// failure. Empty by policy: a module retirement is a migration ladder
-// rung that rewrites `.repo-platform.yml` before this selection runs
-// (docs/migrations.md), not an allowlist entry here.
-export const RETIRED_MODULES: ReadonlySet<string> = new Set();
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -94,30 +87,22 @@ export function readModuleChoices(
   return { choices: new Set(values), errors: [] };
 }
 
-// Split the selection into kept (known to the template ref) and retired
-// (dropped with a notice); any other name is an error.
+// The selection checked against the template ref's choices: every name
+// must be one, or it is an error.
 export function filterModules(
   modules: string[],
   choices: ReadonlySet<string>,
-  retired: ReadonlySet<string> = RETIRED_MODULES,
-): { kept: string[]; dropped: string[]; errors: string[] } {
-  const kept: string[] = [];
-  const dropped: string[] = [];
-  const errors: string[] = [];
-  for (const name of modules) {
-    if (choices.has(name)) {
-      kept.push(name);
-    } else if (retired.has(name)) {
-      dropped.push(name);
-    } else {
-      errors.push(
-        `module "${name}" is not a choice of the selected template version and is ` +
-          `not a retired module - fix the \`modules\` list in .repo-platform.yml ` +
-          `(silently dropping it would remove that module's files from the repo)`,
-      );
-    }
-  }
-  return { kept, dropped, errors };
+): { kept: string[]; errors: string[] } {
+  const errors = modules
+    .filter((name) => !choices.has(name))
+    .map(
+      (name) =>
+        `module "${name}" is not a choice of the selected template version - fix the ` +
+        `\`modules\` list in .repo-platform.yml (silently dropping it would remove that ` +
+        `module's files from the repo; a name the template retired is dropped by its ` +
+        `migration rung on the next sync)`,
+    );
+  return { kept: errors.length === 0 ? modules : [], errors };
 }
 
 function parseYamlFile(path: string): unknown {
@@ -136,7 +121,7 @@ function parseYamlFile(path: string): unknown {
 }
 
 function main(args: string[]): void {
-  const flags = parseFlags(args, ["--repo-file", "--template-copier"], ["--retired-summary"]);
+  const flags = parseFlags(args, ["--repo-file", "--template-copier"]);
   const repoFile = flags["--repo-file"];
   const copierFile = flags["--template-copier"];
 
@@ -152,13 +137,9 @@ function main(args: string[]): void {
     fail(choiceErrors);
   }
 
-  const { kept, dropped, errors } = filterModules(modules, choices);
+  const { kept, errors } = filterModules(modules, choices);
   if (errors.length > 0) {
     fail(errors.map((message) => `${repoFile}: ${message}`));
-  }
-  const summaryPath = flags["--retired-summary"];
-  if (summaryPath !== undefined) {
-    writeFileSync(summaryPath, dropped.map((name) => `${name}\n`).join(""));
   }
   console.log(JSON.stringify(kept));
 }

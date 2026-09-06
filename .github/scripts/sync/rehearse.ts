@@ -544,8 +544,6 @@ export function rehearseRepo(slug: string, options: RehearsalOptions): Rehearsal
         join(targetDir, ".repo-platform.yml"),
         "--template-copier",
         join(buildDir, "copier.yml"),
-        "--retired-summary",
-        join(temp, "retired-modules.txt"),
       ],
       { cwd: REPO_ROOT },
     );

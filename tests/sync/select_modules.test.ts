@@ -50,7 +50,6 @@ describe("select_modules", () => {
     const result = runScript(root, temp);
     expect(result.exitCode).toBe(0);
     expect(readFileSync(join(temp, "modules.json"), "utf-8")).toBe('["uv"]');
-    expect(readFileSync(join(temp, "retired-modules.txt"), "utf-8")).toBe("");
     expect(result.stdout).toContain('selected modules: ["uv"]');
   });
 

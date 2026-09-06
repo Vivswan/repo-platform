@@ -524,8 +524,7 @@ grep -qF "SECURITY POLICY MOVE" "$WORK/migrations.md" \
 # target's .repo-platform.yml filtered against the new template's choices.
 MODULES="$(select_modules \
   --repo-file "$PROJECT/.repo-platform.yml" \
-  --template-copier "$WORK/copier-new.yml" \
-  --retired-summary "$WORK/retired-modules.txt")"
+  --template-copier "$WORK/copier-new.yml")"
 echo "selected modules: ${MODULES}"
 case "$MODULES" in
   *agents* | *auto-assign* | *settings-sync*) fail "sync/modules.ts kept a folded module name after the m0002 rung: $MODULES" ;;
@@ -954,8 +953,7 @@ export TARGET_REF="$NEW_TAG"
 RUNNER_TEMP="$VIS_WORK" OLD_SHA="$OLD_SHA_RESOLVED" bun .github/scripts/sync/run_migrations.ts
 MODULES="$(select_modules \
   --repo-file "$VIS/.repo-platform.yml" \
-  --template-copier "$VIS_WORK/copier-new.yml" \
-  --retired-summary "$VIS_WORK/retired-modules.txt")"
+  --template-copier "$VIS_WORK/copier-new.yml")"
 export MODULES
 export PRIVATE=true
 export DESCRIPTION="Visibility-flip project"
@@ -1460,7 +1458,7 @@ GH_CALLS="$TRIP_WORK/gh-calls.txt" PATH="$TRIP_BIN:$PATH" \
   BRANCH=automation/repo-platform BASE_BRANCH=main DISPLAY="build@new" \
   RECOVER="" VALIDATION=passed HIDE_DETAILS="" \
   DRIFT_FILE="$TRIP_WORK/empty.txt" CARRIED_FILE="$TRIP_WORK/empty.txt" \
-  CARRY_REVIEW_FILE="$TRIP_WORK/empty.txt" RETIRED_MODULES_FILE="$TRIP_WORK/empty.txt" \
+  CARRY_REVIEW_FILE="$TRIP_WORK/empty.txt" \
   REMOVED_PATHS_FILE="$TRIP_WORK/empty.txt" WITHHELD_FILE="$TRIP_WORK/empty.txt" \
   MANIFEST_LICENSE_FILE="$TRIP_WORK/empty.txt" SUMMARY_FILE="$TRIP_WORK/empty.txt" \
   bun .github/scripts/sync/open_pr.ts > "$TRIP_WORK/open-pr.out"
@@ -1559,7 +1557,7 @@ GH_CALLS="$DESEL_WORK/gh-calls.txt" PATH="$TRIP_BIN:$PATH" \
   BRANCH=automation/repo-platform BASE_BRANCH=main DISPLAY="build@new" \
   RECOVER="" VALIDATION=passed HIDE_DETAILS="" \
   DRIFT_FILE="$DESEL_WORK/empty.txt" CARRIED_FILE="$DESEL_WORK/local-carryover.md" \
-  CARRY_REVIEW_FILE="$DESEL_WORK/carry-review.txt" RETIRED_MODULES_FILE="$DESEL_WORK/empty.txt" \
+  CARRY_REVIEW_FILE="$DESEL_WORK/carry-review.txt" \
   REMOVED_PATHS_FILE="$DESEL_WORK/removed-paths.txt" WITHHELD_FILE="$DESEL_WORK/empty.txt" \
   MANIFEST_LICENSE_FILE="$DESEL_WORK/empty.txt" SUMMARY_FILE="$DESEL_WORK/empty.txt" \
   bun .github/scripts/sync/open_pr.ts > "$DESEL_WORK/open-pr.out"
@@ -1609,8 +1607,7 @@ if grep -qF '"auto-assign"' "$PAGES_FIX/.repo-platform.yml"; then
 fi
 MODULES="$(select_modules \
   --repo-file "$PAGES_FIX/.repo-platform.yml" \
-  --template-copier "$PAGES_WORK/copier-new.yml" \
-  --retired-summary "$PAGES_WORK/retired-modules.txt")"
+  --template-copier "$PAGES_WORK/copier-new.yml")"
 export MODULES
 export PRIVATE=false
 export DESCRIPTION="Pages-retirement project"
@@ -1711,8 +1708,7 @@ cmp -s "$ARR_WORK/registration-before.yml" "$ARR/.repo-platform.yml" \
   || fail "the fold rung rewrote a .repo-platform.yml naming none of the three"
 MODULES="$(select_modules \
   --repo-file "$ARR/.repo-platform.yml" \
-  --template-copier "$ARR_WORK/copier-new.yml" \
-  --retired-summary "$ARR_WORK/retired-modules.txt")"
+  --template-copier "$ARR_WORK/copier-new.yml")"
 export MODULES
 export PRIVATE=false
 export DESCRIPTION="Fold-arrival project"

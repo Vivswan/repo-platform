@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { parse } from "yaml";
 import { filterModules, readModuleChoices, readModules } from "../../.github/scripts/sync/modules";
 
-const CHOICES: ReadonlySet<string> = new Set(["agents", "bun", "uv", "settings-sync"]);
+const CHOICES: ReadonlySet<string> = new Set(["bun", "uv", "pages"]);
 const FILE = ".repo-platform.yml";
 
 // Every case pins the whole {modules, errors} result: the builders emit
@@ -93,37 +93,16 @@ describe("readModuleChoices", () => {
 
 describe("filterModules", () => {
   test("passes through an all-known selection in order", () => {
-    expect(filterModules(["uv", "agents"], CHOICES)).toEqual({
-      kept: ["uv", "agents"],
-      dropped: [],
-      errors: [],
-    });
+    expect(filterModules(["uv", "pages"], CHOICES)).toEqual({ kept: ["uv", "pages"], errors: [] });
   });
 
-  test("drops a retired module with a notice entry", () => {
-    const retired = new Set(["old-module"]);
-    expect(filterModules(["agents", "old-module"], CHOICES, retired)).toEqual({
-      kept: ["agents"],
-      dropped: ["old-module"],
-      errors: [],
-    });
-  });
-
-  test("a retired name that is still a valid choice is kept, not dropped", () => {
-    const retired = new Set(["settings-sync"]);
-    expect(filterModules(["settings-sync"], CHOICES, retired)).toEqual({
-      kept: ["settings-sync"],
-      dropped: [],
-      errors: [],
-    });
-  });
-
-  test("fails on an unknown, non-retired name", () => {
-    expect(filterModules(["agents", "tpyo"], CHOICES)).toEqual({
-      kept: ["agents"],
-      dropped: [],
+  test("fails on an unknown name, keeping nothing (no tolerance: a retired name is a rung's job)", () => {
+    expect(filterModules(["uv", "settings-sync"], CHOICES)).toEqual({
+      kept: [],
       errors: [
-        'module "tpyo" is not a choice of the selected template version and is not a retired module - fix the `modules` list in .repo-platform.yml (silently dropping it would remove that module\'s files from the repo)',
+        'module "settings-sync" is not a choice of the selected template version - fix the `modules` list in .repo-platform.yml ' +
+          "(silently dropping it would remove that module's files from the repo; a name the template retired is dropped by its " +
+          "migration rung on the next sync)",
       ],
     });
   });

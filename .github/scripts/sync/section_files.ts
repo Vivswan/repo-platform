@@ -88,13 +88,6 @@ export const PR_BODY_SECTIONS: readonly PrBodySection[] = [
     forcesReview: true,
   },
   {
-    env: "RETIRED_MODULES_FILE",
-    file: "retired-modules.txt",
-    title: "Retired modules dropped from the selection",
-    render: (text) => `Retired modules dropped from the selection: ${lines(text).join(", ")}`,
-    forcesReview: false,
-  },
-  {
     env: "REMOVED_PATHS_FILE",
     file: "removed-paths.txt",
     title: "Retired template files this update deletes",

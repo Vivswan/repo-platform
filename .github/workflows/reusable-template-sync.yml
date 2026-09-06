@@ -421,7 +421,6 @@ jobs:
           SUMMARY_FILE: ${{ runner.temp }}/dropped-local-hunks.md
           CARRIED_FILE: ${{ runner.temp }}/local-carryover.md
           CARRY_REVIEW_FILE: ${{ runner.temp }}/carry-review.txt
-          RETIRED_MODULES_FILE: ${{ runner.temp }}/retired-modules.txt
           REMOVED_PATHS_FILE: ${{ runner.temp }}/removed-paths.txt
           WITHHELD_FILE: ${{ runner.temp }}/withheld-workflows.txt
           MANIFEST_LICENSE_FILE: ${{ runner.temp }}/manifest-license-warnings.md

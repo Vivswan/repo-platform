@@ -67,7 +67,6 @@ function run(opts: Options = {}) {
     "DRIFT_FILE",
     "CARRIED_FILE",
     "CARRY_REVIEW_FILE",
-    "RETIRED_MODULES_FILE",
     "REMOVED_PATHS_FILE",
     "WITHHELD_FILE",
     "MANIFEST_LICENSE_FILE",
@@ -178,14 +177,6 @@ describe("open_pr sections and auto-merge", () => {
       name: TAIL_SHRANK_NAME,
       content: "> [!WARNING]\n> TAIL TRIPWIRE: lines missing\n",
       forcesReview: true,
-    },
-    {
-      reason: "retired modules: the selection change is the repo's own",
-      where: "files",
-      name: "RETIRED_MODULES_FILE",
-      content: "fuzzer\n",
-      section: "Retired modules dropped from the selection: fuzzer",
-      forcesReview: false,
     },
     {
       reason: "removed paths: template retirements are routine",
