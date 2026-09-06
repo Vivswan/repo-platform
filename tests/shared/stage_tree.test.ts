@@ -1,5 +1,5 @@
 // The staging-agreement contract stage_tree.ts owns: the producers
-// (build_pending.ts, publish.ts) and the verifier (rebuild_tree.ts) must
+// (publish.ts and the other composed-tree sites below) and the verifier (rebuild_tree.ts) must
 // stage a composed tree to the SAME tree hash, or the sync's provenance
 // proof reads the skew as tampering and the freshness slow path reads
 // "not fresh" forever. Proven against real git with the two measured
@@ -87,7 +87,7 @@ function verifierHash(name: string, hostile: boolean): string {
   return run(["git", "-C", dir, "write-tree"]);
 }
 
-/** The PRODUCERS' environment (build_pending.ts, publish.ts): an orphan
+/** The PRODUCER's environment (publish.ts): an orphan
  * worktree of a parent repo, inheriting the parent's .git/info/exclude -
  * planted here (hostile arm) to hide a composed file, the axis a fresh
  * scratch repo can never reproduce. Stages with `argv` and returns the
@@ -280,7 +280,6 @@ describe("stageComposedTreeArgv", () => {
     // commit_push.ts's rendered target repo.
     const rawAdd = /"add",\s*"(?:-A|--all)"/g;
     const sites: { rel: string; composed: boolean; allowedPlainAdds?: string[] }[] = [
-      { rel: ".github/scripts/build-branches/build_pending.ts", composed: true },
       { rel: ".github/scripts/build-branches/publish.ts", composed: true },
       { rel: ".github/scripts/shared/rebuild_tree.ts", composed: true },
       { rel: ".github/scripts/ci/smoke_generate.ts", composed: true },

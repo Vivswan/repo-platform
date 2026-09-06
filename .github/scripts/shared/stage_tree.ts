@@ -1,7 +1,6 @@
 // The ONE staging form for a composed build tree, shared by every site
-// that turns the composed tree into git content: the two PRODUCERS
-// (build-branches/build_pending.ts parks the pending tree,
-// build-branches/publish.ts commits the branch tip) and the VERIFIER
+// that turns the composed tree into git content: the PRODUCER
+// (build-branches/publish.ts commits the branch tip) and the VERIFIER
 // (shared/rebuild_tree.ts hashes a scratch rebuild for the sync's
 // provenance tree proof and its freshness slow path). Producer and
 // verifier must stage IDENTICALLY - the same function of the composed

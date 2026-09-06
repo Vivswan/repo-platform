@@ -1,15 +1,15 @@
 // The build-publish wiring the provenance path depends on, pinned where a
-// silent edit would reintroduce the regression: the green-path publisher's
-// SOURCE_SHA must track the judged commit (github.sha in ci.yml's
-// post-green caller - same run, so it IS the judged commit - passed as an
-// explicit input so a future caller cannot silently hand a leg the wrong
-// commit), the single publisher lane must survive the post-green split
-// (one repo-scoped concurrency group, literal, and NO lane on the
-// caller), and a publish must COMMIT exactly when the composed tree
-// changed or the tip's stamp needs recovery - never an empty commit in
-// normal operation (no content-free fleet _commit bumps), never a silent
-// skip that strands a broken stamp (the stamp-health guard keeps
-// dispatch as a real escape hatch).
+// silent edit would reintroduce the regression: the publisher's
+// SOURCE_SHA must track the sha input on both ways in (github.sha in
+// ci.yml's post-green caller - same run, so it IS the judged commit - and
+// the operator's sha on a dispatch, never a re-derived ref), a dispatch
+// must run the publish leg ALONE, the single publisher lane must stay one
+// literal repo-scoped group (and NO lane on the caller), and a publish
+// must COMMIT exactly when the composed tree changed or the tip's stamp
+// needs recovery - never an empty commit in normal operation (no
+// content-free fleet _commit bumps), never a silent skip that strands a
+// broken stamp (the stamp-health guard keeps dispatch as a real escape
+// hatch).
 
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
@@ -30,45 +30,158 @@ interface Job {
   steps?: { run?: string; uses?: string; with?: Record<string, unknown>; env?: unknown }[];
 }
 
+/** Evaluates the subset of the Actions expression grammar post-green.yml's
+ * job conditions use - string literals, `==`/`!=`, `&&`/`||`, parentheses,
+ * `!cancelled()`, and dotted context reads - against `context` (a missing
+ * context read is the empty string, as an unrun job's output is). */
+function evaluateCondition(expression: string, context: Record<string, string>): boolean {
+  const tokens = expression.match(/'[^']*'|[A-Za-z_][\w.-]*(?:\(\))?|==|!=|&&|\|\||[()!]/g) ?? [];
+  if (tokens.join("").replace(/\s/g, "") !== expression.replace(/\s/g, "")) {
+    throw new Error(`unsupported expression: ${expression}`);
+  }
+  let at = 0;
+  const peek = () => tokens[at];
+  const next = () => tokens[at++];
+  const value = (): string | boolean => {
+    const token = next();
+    if (token === undefined) throw new Error(`unexpected end of ${expression}`);
+    if (token === "!") return !value();
+    if (token === "(") {
+      const inner = or();
+      if (next() !== ")") throw new Error(`unbalanced parentheses in ${expression}`);
+      return inner;
+    }
+    if (token.startsWith("'")) return token.slice(1, -1);
+    if (token === "cancelled()") return false;
+    return context[token] ?? "";
+  };
+  const comparison = (): string | boolean => {
+    const left = value();
+    if (peek() === "==" || peek() === "!=") {
+      const op = next();
+      const right = value();
+      return op === "==" ? left === right : left !== right;
+    }
+    return left;
+  };
+  const and = (): boolean => {
+    let result = Boolean(comparison());
+    while (peek() === "&&") {
+      next();
+      result = Boolean(comparison()) && result;
+    }
+    return result;
+  };
+  const or = (): boolean => {
+    let result = and();
+    while (peek() === "||") {
+      next();
+      result = and() || result;
+    }
+    return result;
+  };
+  const result = or();
+  if (at !== tokens.length) throw new Error(`trailing tokens in ${expression}`);
+  return result;
+}
+
+/** The jobs that run under `event`, by GitHub's rules: a job's condition
+ * is evaluated against its needs' results (an unrun need is `skipped`
+ * with empty outputs), and a condition without a status function carries
+ * the implicit success() - every need must have run. `outputs` stands in
+ * for the step outputs of every job that ran. */
+function jobsRunning(
+  jobs: Record<string, Job>,
+  event: string,
+  outputs: Record<string, string>,
+): string[] {
+  const ran = new Set<string>();
+  const pending = Object.keys(jobs);
+  while (pending.length > 0) {
+    const id = pending.shift() as string;
+    const job = jobs[id];
+    const needs = job.needs ?? [];
+    if (needs.some((need) => pending.includes(need))) {
+      pending.push(id);
+      continue;
+    }
+    const context: Record<string, string> = { "github.event_name": event };
+    for (const need of needs) {
+      context[`needs.${need}.result`] = ran.has(need) ? "success" : "skipped";
+      for (const [name, value] of Object.entries(outputs)) {
+        context[`needs.${need}.outputs.${name}`] = ran.has(need) ? value : "";
+      }
+    }
+    const condition = job.if ?? "";
+    const statusFunction = /\b(always|cancelled|success|failure)\(\)/.test(condition);
+    const needsRan = needs.every((need) => ran.has(need));
+    const passes = condition === "" || evaluateCondition(condition, context);
+    if (passes && (statusFunction || needsRan)) ran.add(id);
+  }
+  return [...ran];
+}
+
 describe("post-green publish wiring", () => {
   const ciYml = read(".github/workflows/ci.yml");
   const postGreen = read(".github/workflows/post-green.yml");
-  const buildBranches = read(".github/workflows/build-branches.yml");
+  const postGreenDoc = parseYaml(postGreen) as {
+    on: Record<string, { inputs?: Record<string, { required?: boolean; type?: string }> }>;
+    jobs: Record<string, Job>;
+  };
 
-  test("the green path publishes the judged commit through the explicit sha input", () => {
+  test("both ways in hand the publisher the sha input, and nothing else names a source", () => {
     // The caller is needs-ordered behind the gate in the SAME run, so
     // github.sha is the judged commit by construction - and it must still
     // flow caller -> input -> publish env explicitly (a leg re-deriving
     // it from context could be handed the wrong commit by a future
-    // caller), with the pending-ref promotion keyed off the same input.
+    // caller). A dispatch declares the SAME input, required, so the one
+    // SOURCE_SHA line serves both.
     expect(ciYml).toContain("sha: ${{ github.sha }}");
     // The push base rides the same explicit-input discipline: declared on
     // the call, passed by the caller, never read off context inside a
     // leg (post-green.yml's header).
     expect(ciYml).toContain("before: ${{ github.event.before }}");
-    const postGreenOn = (parseYaml(postGreen) as { on: { workflow_call: { inputs: object } } }).on;
-    expect(Object.keys(postGreenOn.workflow_call.inputs)).toEqual(["sha", "before"]);
-    expect(postGreen).not.toContain("github.event.before");
-    expect(postGreen).toContain("SOURCE_SHA: ${{ inputs.sha }}");
-    expect(postGreen).toContain("PREBUILT_REF: refs/heads/build-pending/${{ inputs.sha }}");
-    // The retired workflow_run machinery must stay gone from ci.yml.
+    expect(Object.keys(postGreenDoc.on)).toEqual(["workflow_call", "workflow_dispatch"]);
+    expect(Object.keys(postGreenDoc.on.workflow_call.inputs ?? {})).toEqual(["sha", "before"]);
+    expect(postGreenDoc.on.workflow_dispatch.inputs).toEqual({
+      sha: expect.objectContaining({ required: true, type: "string" }),
+    });
+    // No leg re-derives a commit from context (the parsed jobs, so the
+    // header may NAME github.sha while explaining this rule).
+    for (const derived of ["github.sha", "github.event.before"]) {
+      expect(JSON.stringify(postGreenDoc.jobs)).not.toContain(derived);
+    }
+    const publishSteps = (postGreenDoc.jobs["publish-build"].steps ?? []).filter((step) =>
+      (step.run ?? "").includes("build-branches/publish.ts"),
+    );
+    expect(publishSteps).toHaveLength(1);
+    expect((publishSteps[0].env as Record<string, string>).SOURCE_SHA).toBe("${{ inputs.sha }}");
+    // The retired workflow_run machinery and the retired pending-tree
+    // handoff must stay gone.
     expect(ciYml).not.toContain("workflow_run");
-    // The self-heal leg is the one place github.sha is correct: on
-    // schedule/dispatch the trigger commit IS the tip, and no pending
-    // ref is promoted (publish.ts composes).
-    expect(buildBranches).toContain("SOURCE_SHA: ${{ github.sha }}");
-    // No PREBUILT_REF env here (the header may still NAME it): the
-    // self-heal composes rather than promoting a parked tree.
-    expect(buildBranches).not.toMatch(/^\s*PREBUILT_REF:/m);
-    // The workflow_run publisher leg is GONE from Build Branches: its
-    // triggers are exactly the pending build plus the two self-heal
-    // publishers.
-    const doc = parseYaml(buildBranches) as Record<string, unknown>;
-    expect(Object.keys(doc.on as Record<string, unknown>)).toEqual([
-      "push",
-      "schedule",
-      "workflow_dispatch",
+    for (const retired of ["PREBUILT_REF", "build-pending", "refs/build-meta", "noop_claim"]) {
+      expect(postGreen).not.toContain(retired);
+      expect(read(".github/scripts/build-branches/publish.ts")).not.toContain(retired);
+    }
+  });
+
+  test("a dispatch runs the publish leg ALONE; the call runs every leg", () => {
+    // Evaluated by GitHub's own rules on the parsed job graph (a
+    // condition without a status function implies success() over the
+    // needs; an unrun need is skipped with empty outputs), so a reworded
+    // condition that lets a call-only leg fire on a dispatch fails here
+    // whatever its spelling. The call arm is the moved control: with the
+    // caller's push event and every output armed, every leg runs.
+    const jobs = postGreenDoc.jobs;
+    expect(jobsRunning(jobs, "workflow_dispatch", { armed: "true", changed: "true" })).toEqual([
+      "publish-build",
     ]);
+    expect(jobsRunning(jobs, "push", { armed: "true", changed: "true" }).sort()).toEqual(
+      Object.keys(jobs).sort(),
+    );
+    // And the publisher itself has no condition to get wrong.
+    expect(jobs["publish-build"].if).toBeUndefined();
+    expect(jobs["publish-build"].needs).toBeUndefined();
   });
 
   test("post-green releases only on the gate's OWN green result, on a push to main", () => {
@@ -85,17 +198,12 @@ describe("post-green publish wiring", () => {
     }
   });
 
-  test("post-green.yml is workflow_call ONLY, and its leg roster is pinned for per-leg green review", () => {
-    // The verdict is the sole way in: a second trigger would be a second,
-    // unguarded path into release-shaped work.
-    const doc = parseYaml(postGreen) as Record<string, unknown>;
-    expect(Object.keys(doc.on as Record<string, unknown>)).toEqual(["workflow_call"]);
-    // The caller gates on the verdict's conclusion output, but a leg
-    // that MUTATES shared state keeps its own verification (post-green
-    // .yml's header): that requirement lives in review, so the roster is
-    // pinned here - adding a leg fails this test until the new job's
-    // verification story is written down and the roster updated.
-    const jobs = doc.jobs as Record<string, Job>;
+  test("post-green.yml's leg roster is pinned for per-leg green review", () => {
+    // A leg that MUTATES shared state keeps its own verification
+    // (post-green.yml's header): that requirement lives in review, so the
+    // roster is pinned here - adding a leg fails this test until the new
+    // job's verification story is written down and the roster updated.
+    const jobs = postGreenDoc.jobs;
     expect(Object.keys(jobs)).toEqual([
       "publish-build",
       "read-directives",
@@ -103,13 +211,6 @@ describe("post-green publish wiring", () => {
       "settings-inputs",
       "settings-fleet",
     ]);
-    // publish-build verifies green via publish.ts (its allGreenFailure
-    // gate), fed the judged sha input.
-    const publishStep = (jobs["publish-build"].steps ?? []).find((step) =>
-      (step.run ?? "").includes("build-branches/publish.ts"),
-    );
-    if (publishStep === undefined) throw new Error("publish-build has no publish.ts step");
-    expect((publishStep.env as Record<string, string>).SOURCE_SHA).toBe("${{ inputs.sha }}");
     // read-directives mutates nothing; it reads the judged commit's
     // directives block (never a re-derived ref) into the two outputs
     // sync-fleet consumes.
@@ -242,45 +343,33 @@ describe("post-green publish wiring", () => {
     expect(syncRepos).toContain("TARGET_SHA: ${{ inputs.sha }}");
   });
 
-  test("ONE publisher lane: a literal group, shared by name across both workflows", () => {
-    // The group must be a literal (or an explicit input) - NEVER derived
-    // from github.workflow, which inside a workflow_call'd workflow
-    // resolves to the CALLER's name and silently splits the lane. The
-    // called job's literal and the self-heal leg's ternary arm must
-    // spell the same string.
-    const lane = "build-branches-publish";
-    expect(postGreen).toContain(`group: ${lane}\n`);
-    expect(buildBranches).toContain(
-      "group: build-branches-${{ github.event_name == 'push' && 'pending' || 'publish' }}",
-    );
-    // The ban is scoped to the two publisher-lane holders: ci.yml
-    // legitimately keys its RUN-level serialization on github.workflow
-    // (it is a trigger workflow, never workflow_call'd).
-    for (const text of [postGreen, buildBranches]) {
-      const groups = [...text.matchAll(/^\s*group: (.*)$/gm)].map((m) => m[1]);
-      expect(groups.length).toBeGreaterThan(0);
-      for (const group of groups) {
-        expect(group).not.toContain("github.workflow");
-      }
+  test("ONE publisher lane: a literal group on the publish job, and no lane on the caller", () => {
+    // The group must be a literal - NEVER derived from github.workflow,
+    // which inside a workflow_call'd workflow resolves to the CALLER's
+    // name and would split the lane between called and dispatched runs.
+    // ci.yml legitimately keys its RUN-level serialization on
+    // github.workflow (a trigger workflow, never workflow_call'd).
+    expect(postGreenDoc.jobs["publish-build"].concurrency).toEqual({
+      group: "build-branches-publish",
+      "cancel-in-progress": false,
+    });
+    const groupsOf = (text: string) => [...text.matchAll(/^\s*group: (.*)$/gm)].map((m) => m[1]);
+    expect(groupsOf(postGreen)).toEqual(["build-branches-publish", "sync-repos", "settings-repos"]);
+    for (const group of groupsOf(postGreen)) {
+      expect(group).not.toContain("github.workflow");
     }
     // Publishers never cancel a running publish: an interrupted publish
     // between commit and push is exactly the wedge the CAS exists for.
     expect(postGreen).not.toContain("cancel-in-progress: true");
-    expect(buildBranches).not.toContain("cancel-in-progress: true");
-  });
-
-  test("no self-deadlock: the caller holds NO lane while the called publisher takes its group", () => {
-    // ci.yml's post-green job must hold no job-level concurrency at all
-    // (a caller must never hold the resource its called workflow
-    // requires; ci.yml's run-level lane already serializes main runs) -
-    // and above all never the publisher lane the called job waits for.
-    // Asserted structurally on the parsed job (comments may NAME the
-    // lane while explaining this very rule).
+    // No self-deadlock: ci.yml's post-green job must hold no job-level
+    // concurrency at all (a caller must never hold the resource its
+    // called workflow requires; ci.yml's run-level lane already
+    // serializes main runs) - and above all never the publisher lane the
+    // called job waits for. Asserted structurally on the parsed job
+    // (comments may NAME the lane while explaining this very rule).
     const doc = parseYaml(ciYml) as { jobs: Record<string, Record<string, unknown>> };
     expect(doc.jobs["post-green"]).toBeDefined();
     expect(doc.jobs["post-green"].concurrency).toBeUndefined();
-    const groupsOf = (text: string) => [...text.matchAll(/^\s*group: (.*)$/gm)].map((m) => m[1]);
-    expect(groupsOf(postGreen)).toEqual(["build-branches-publish", "sync-repos", "settings-repos"]);
   });
 
   test("no-change skips ONLY behind the stamp-health guard, then the commit segment is condition-free", () => {
@@ -289,8 +378,8 @@ describe("post-green publish wiring", () => {
     // same behaviorally against real git):
     //   - the skip fires on an existing branch with an unchanged tree
     //     AND a healthy tip stamp (shared/stamp_checks.ts) - health
-    //     gating is what keeps "dispatch Build Branches" able to heal a
-    //     tampered or unparseable stamp instead of skipping forever;
+    //     gating is what keeps a dispatch able to heal a tampered or
+    //     unparseable stamp instead of skipping forever;
     //   - after the skip, nothing between the note and the push is an
     //     `if` or a `return` (an `if (staged)` wrapped around the commit
     //     would silently bring a diff-gate back);
@@ -301,7 +390,7 @@ describe("post-green publish wiring", () => {
     expect(publish).toContain('if (branchExists && !staged && stampProblem === "") {');
     const body = publish.slice(
       publish.indexOf("function publish("),
-      publish.indexOf("function sweepPendingRefs("),
+      publish.indexOf('const sourceSha = requireEnv("SOURCE_SHA")'),
     );
     const returns = body.match(/return[;\s]/g) ?? [];
     expect(returns).toHaveLength(2);
@@ -313,25 +402,15 @@ describe("post-green publish wiring", () => {
     expect(commitSegment).not.toContain("return");
     expect(body.match(/"--allow-empty"/g) ?? []).toHaveLength(1);
     expect(commitSegment).toContain('...(staged ? [] : ["--allow-empty"])');
-    // The retired refs/build-meta no-op marker system must stay gone.
-    for (const rel of [
-      ".github/scripts/build-branches/publish.ts",
-      ".github/workflows/build-branches.yml",
-      ".github/workflows/post-green.yml",
-    ]) {
-      expect(read(rel)).not.toContain("refs/build-meta");
-      expect(read(rel)).not.toContain("noop_claim");
-    }
   });
 
   test("no tree without actions/ ever publishes (the bootstrap shape guard)", () => {
-    // A queued CI completion for a PRE-unification main commit runs the
-    // new publisher with an old SOURCE_SHA whose own branch_tree.ts
-    // composes the retired template-only tree; minting `build` from it
-    // would 404 every fleet @build ref. The guard must check the tree on
-    // EVERY path (pre-built included), and it must run BEFORE the first
-    // commit or push inside publish() - moving it later would leave the
-    // window open while this test stayed green on presence alone.
+    // A dispatch naming a PRE-unification main commit composes the
+    // retired template-only tree with that commit's own branch_tree.ts;
+    // minting `build` from it would 404 every fleet @build ref. The guard
+    // must run BEFORE the first commit or push inside publish() - moving
+    // it later would leave the window open while this test stayed green
+    // on presence alone.
     const publish = read(".github/scripts/build-branches/publish.ts");
     expect(publish).toContain("carries no actions/ subtree");
     const body = publish.slice(publish.indexOf("function publish("));

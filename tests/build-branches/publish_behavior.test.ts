@@ -6,18 +6,22 @@
 //      the tip (also the moved-control for the skip case: the same
 //      harness demonstrably CAN move the branch);
 //   2. an unchanged tree under a HEALTHY tip stamp publishes NOTHING -
-//      the quiet-week case, the tip must not move;
+//      the quiet case, the tip must not move;
 //   3. an unchanged tree under a BROKEN tip stamp publishes the recovery
-//      commit - freshly stamped, tree-identical - so dispatching Build
-//      Branches heals stamp damage instead of skipping forever;
-//   4. the scratch worktrees live under the run's own root (RUNNER_TEMP
+//      commit - freshly stamped, tree-identical - so a dispatch heals
+//      stamp damage instead of skipping forever;
+//   4. a STALE source - the tip already ships a descendant - is skipped
+//      before anything is composed (newest-green wins), and a source
+//      that is not main history is refused before any probe;
+//   5. the scratch worktrees live under the run's own root (RUNNER_TEMP
 //      here, as on the runner) and are gone when the process exits, on
 //      the success and failure routes alike, and a publish held
 //      mid-flight is untouched by another running start to finish.
 //
-// The harness feeds publish.ts through PREBUILT_REF (a parked pending
-// tree on the fixture origin), so no compose runs and no bun child is
-// spawned.
+// The compose is real: the source commit carries a stub branch_tree.ts
+// that copies its committed composed/ directory to --dest, so publish.ts
+// runs its worktree + frozen install + builder path exactly as on the
+// runner, against a fixture the test controls.
 
 import { describe, expect, test } from "bun:test";
 import {
@@ -29,7 +33,6 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
-import { pendingRefFor } from "../../.github/scripts/build-branches/pending.ts";
 import { commitRunWrite, commitStampWrite } from "../../.github/scripts/shared/commit_stamp.ts";
 import { boundedSpawnSync, SPAWN_TIMEOUT_MS } from "../shared/bounded_spawn";
 import { tempDirs } from "../shared/temp_dir";
@@ -47,6 +50,20 @@ const REPO = "o/r";
 // tests/shared/all_green.test.ts).
 const ghStub = `#!/usr/bin/env bash
 printf '%s' '{"check_runs":[{"name":"all-green","status":"completed","conclusion":"success","external_id":"workflow_run","app":{"slug":"github-actions"}}]}'
+`;
+
+/** The source commit's builder: publish.ts runs the SOURCE's own
+ * .github/scripts/build-branches/branch_tree.ts after a frozen install
+ * there, so the fixture commits this stub, which copies the committed
+ * composed/ directory to --dest (the real builder needs the whole
+ * template tree). */
+const STUB_BUILDER = `
+import { cpSync } from "node:fs";
+import { join } from "node:path";
+const args = process.argv.slice(2);
+const dest = args[args.indexOf("--dest") + 1];
+if (!dest) process.exit(2);
+cpSync(join(import.meta.dir, "../../../composed"), dest, { recursive: true });
 `;
 
 /** The marker files a held publish's rsync stub talks through. */
@@ -91,23 +108,26 @@ function git(cwd: string, args: string[]): string {
 }
 
 interface Scenario {
-  /** "same" parks a pending tree byte-identical to the build tip's;
-   * "drift" makes the tip carry a different tree (the source commit's),
-   * so the pending tree is a content change. */
+  /** "same" gives the build tip a tree byte-identical to the composed
+   * one; "drift" makes the tip carry a different tree (the source
+   * commit's), so the composed tree is a content change. */
   tipTree: "same" | "drift";
-  /** The build tip's commit message; healthy scenarios stamp a real
-   * on-main ancestor with the REAL writer shape. */
-  tipMessage: (m1: string) => string;
+  /** The build tip's commit message, handed both main commits; healthy
+   * scenarios stamp a real on-main commit with the REAL writer shape. */
+  tipMessage: (main: { m1: string; m2: string }) => string;
+  /** The SOURCE_SHA under publish: M2 (main's HEAD, which carries the
+   * builder) unless a scenario names M1 or the side-branch commit. */
+  source?: "m1" | "m2" | "side";
   /** Plants the two measured staging-skew vectors: a .gitignore INSIDE
-   * the pending tree hiding a sibling, and an info/exclude in the
+   * the composed tree hiding a sibling, and an info/exclude in the
    * fixture repo - which the publish's branch worktree inherits - hiding
    * rendered.txt. The publish must stage both hidden files anyway
    * (shared/stage_tree.ts's hermetic argv). */
   hostileIgnores?: boolean;
-  /** Parks a pending tree WITHOUT actions/, the shape publish.ts's
+  /** Composes a tree WITHOUT actions/, the shape publish.ts's
    * unified-tree guard refuses - a publish that exits 1 after its
    * scratch worktrees exist. */
-  malformedPending?: boolean;
+  malformedTree?: boolean;
   /** Puts heldRsyncStub on the publish's PATH. */
   holdInRsync?: boolean;
   /** Parks the release marker under a missing directory, so the harness's
@@ -121,12 +141,11 @@ interface Scenario {
 
 interface Fixture {
   work: string;
-  pend: string;
   env: Record<string, string | undefined>;
   m1: string;
   m2: string;
   tip: string;
-  pendTree: string;
+  composedTree: string;
   origin: string;
   runnerTemp: string;
   hold: Hold;
@@ -155,54 +174,74 @@ function prepareFixture(scenario: Scenario): Fixture {
   git(work, ["remote", "add", "origin", origin]);
   git(work, ["config", "user.name", "t"]);
   git(work, ["config", "user.email", "t@t.test"]);
-  // Two main commits: M1 (an older landing, healthy tips stamp it) and
-  // M2 (main's HEAD, the SOURCE_SHA under publish).
+  // Two main commits: M1 (an older landing with NO builder, so a publish
+  // that composes it fails - which is how the stale test proves the
+  // preflight runs first) and M2 (main's HEAD: the builder, its lockfile,
+  // and the composed/ tree the builder ships).
   writeFileSync(join(work, "base.txt"), "one\n");
   git(work, ["add", "-A"]);
   git(work, ["commit", "--quiet", "-m", "one"]);
   const m1 = git(work, ["rev-parse", "HEAD"]);
-  writeFileSync(join(work, "base.txt"), "one\ntwo\n");
-  git(work, ["add", "-A"]);
-  git(work, ["commit", "--quiet", "-m", "two"]);
-  const m2 = git(work, ["rev-parse", "HEAD"]);
-  git(work, ["push", "--quiet", "origin", "main"]);
-  git(work, ["fetch", "--quiet", "origin"]);
-  // The parked pending tree for M2: the unified shape (actions/ with a
-  // manifest) publish.ts's shape guard requires, unless the scenario
-  // parks the malformed one.
-  const pend = join(root, "pend");
-  git(work, ["worktree", "add", "--quiet", "--detach", pend, m2]);
-  git(pend, ["switch", "--quiet", "--orphan", "pending"]);
-  if (scenario.malformedPending !== true) {
-    mkdirSync(join(pend, "actions", "demo"), { recursive: true });
+  mkdirSync(join(work, ".github/scripts/build-branches"), { recursive: true });
+  writeFileSync(join(work, ".github/scripts/build-branches/branch_tree.ts"), STUB_BUILDER);
+  writeFileSync(join(work, "package.json"), '{ "name": "fixture", "private": true }\n');
+  // A committed lockfile so publish.ts's --frozen-lockfile install passes.
+  boundedSpawnSync(["bun", "install", "--silent"], { cwd: work });
+  writeFileSync(join(work, ".gitignore"), "node_modules/\n");
+  // The composed tree: the unified shape (actions/ with a manifest)
+  // publish.ts's shape guard requires, unless the scenario drops it.
+  const composed = join(work, "composed");
+  mkdirSync(composed);
+  if (scenario.malformedTree !== true) {
+    mkdirSync(join(composed, "actions", "demo"), { recursive: true });
     writeFileSync(
-      join(pend, "actions", "demo", "action.yml"),
+      join(composed, "actions", "demo", "action.yml"),
       "name: demo\nruns:\n  using: composite\n  steps: []\n",
     );
   }
-  writeFileSync(join(pend, "rendered.txt"), "composed content\n");
+  writeFileSync(join(composed, "rendered.txt"), "composed content\n");
   if (scenario.hostileIgnores === true) {
-    writeFileSync(join(pend, "hidden.txt"), "must ship\n");
-    writeFileSync(join(pend, ".gitignore"), "hidden.txt\n");
+    writeFileSync(join(composed, "hidden.txt"), "must ship\n");
+    writeFileSync(join(composed, ".gitignore"), "hidden.txt\n");
+  }
+  // --force: the composed tree's own .gitignore must not keep the planted
+  // sibling out of the SOURCE commit (the builder copies whatever the
+  // commit carries).
+  git(work, ["add", "-A", "--force"]);
+  git(work, ["commit", "--quiet", "-m", "two"]);
+  const m2 = git(work, ["rev-parse", "HEAD"]);
+  git(work, ["push", "--quiet", "origin", "main"]);
+  // A commit off main (a PR head shape): green by the gh stub, never a
+  // publishable source.
+  git(work, ["switch", "--quiet", "-c", "side"]);
+  writeFileSync(join(work, "side.txt"), "off main\n");
+  git(work, ["add", "-A"]);
+  git(work, ["commit", "--quiet", "-m", "side"]);
+  const side = git(work, ["rev-parse", "HEAD"]);
+  git(work, ["push", "--quiet", "origin", "side"]);
+  git(work, ["switch", "--quiet", "main"]);
+  git(work, ["fetch", "--quiet", "origin"]);
+  // The tree hash publish.ts must publish: M2's composed/ subtree as git
+  // already holds it (the builder copies it verbatim and the hermetic
+  // staging keeps every file).
+  const composedTree = git(work, ["rev-parse", `${m2}:composed`]);
+  if (scenario.hostileIgnores === true) {
+    // Planted AFTER the source commit: this exclude hides rendered.txt
+    // from every worktree of the checkout, the publish's branch worktree
+    // included, and must not hide it from the published tree.
     mkdirSync(join(work, ".git/info"), { recursive: true });
     writeFileSync(join(work, ".git/info/exclude"), "rendered.txt\n");
   }
-  // --force mirrors build_pending.ts's staging (the shared hermetic
-  // argv): without it the hostile fixture's own park would drop the
-  // very files the scenario plants.
-  git(pend, ["add", "-A", "--force"]);
-  git(pend, ["commit", "--quiet", "-m", "pending"]);
-  const pendTree = git(pend, ["rev-parse", "HEAD^{tree}"]);
-  git(pend, ["push", "--quiet", "origin", `HEAD:${pendingRefFor(m2)}`]);
-  // The pre-existing build tip: same tree as the pending build ("same")
-  // or the source commit's own tree ("drift" - anything but the pending
-  // tree), carrying the scenario's stamp state.
-  const tipTree = scenario.tipTree === "same" ? pendTree : git(work, ["rev-parse", `${m2}^{tree}`]);
-  const tip = git(work, ["commit-tree", tipTree, "-m", scenario.tipMessage(m1)]);
+  // The pre-existing build tip: the composed tree ("same") or the source
+  // commit's own tree ("drift" - anything but the composed tree),
+  // carrying the scenario's stamp state.
+  const tipTree =
+    scenario.tipTree === "same" ? composedTree : git(work, ["rev-parse", `${m2}^{tree}`]);
+  const tip = git(work, ["commit-tree", tipTree, "-m", scenario.tipMessage({ m1, m2 })]);
   git(work, ["push", "--quiet", "origin", `${tip}:refs/heads/build`]);
+  const sources = { m1, m2, side };
   return {
     work,
-    pend,
     env: {
       ...process.env,
       PATH: `${bin}:${process.env.PATH}`,
@@ -211,13 +250,12 @@ function prepareFixture(scenario: Scenario): Fixture {
       GITHUB_SERVER_URL: SERVER,
       RUN_URL: `${SERVER}/${REPO}/actions/runs/1`,
       GITHUB_REF: "refs/heads/main",
-      SOURCE_SHA: m2,
-      PREBUILT_REF: pendingRefFor(m2),
+      SOURCE_SHA: sources[scenario.source ?? "m2"],
     },
     m1,
     m2,
     tip,
-    pendTree,
+    composedTree,
     origin,
     runnerTemp,
     hold,
@@ -227,19 +265,19 @@ function prepareFixture(scenario: Scenario): Fixture {
 /** The publish's whole observable outcome: its exit and output, plus
  * accessors read at assertion time for the fixture origin's build tip
  * and the scratch residue - anything under the run's RUNNER_TEMP plus
- * any worktree still registered in the checkout beyond the fixture's
- * own two (git lists registered worktrees by real path). The residue
+ * any worktree still registered in the checkout beyond the checkout
+ * itself (git lists registered worktrees by real path). The residue
  * must be empty once every publish sharing that RUNNER_TEMP has exited,
  * however each ended. */
 function outcome(f: Fixture, proc: { exitCode: number; stdout: string; stderr: string }) {
-  const own = new Set([f.work, f.pend].map((path) => realpathSync(path)));
+  const own = realpathSync(f.work);
   return {
     exitCode: proc.exitCode,
     output: proc.stdout + proc.stderr,
     m1: f.m1,
     m2: f.m2,
     tip: f.tip,
-    pendTree: f.pendTree,
+    composedTree: f.composedTree,
     origin: f.origin,
     scratchLeftovers: () => [
       ...readdirSync(f.runnerTemp),
@@ -247,7 +285,7 @@ function outcome(f: Fixture, proc: { exitCode: number; stdout: string; stderr: s
         .split("\n")
         .filter((line) => line.startsWith("worktree "))
         .map((line) => line.slice("worktree ".length))
-        .filter((path) => !own.has(path)),
+        .filter((path) => path !== own),
     ],
     originTip: () => git(f.origin, ["rev-parse", "refs/heads/build"]),
     originTipMessage: () => git(f.origin, ["log", "-1", "--format=%B", "refs/heads/build"]),
@@ -337,13 +375,16 @@ function alive(pid: number): boolean {
   }
 }
 
-const healthyStamp = (m1: string) =>
+const stampOf = (source: string) =>
   [
-    `build(build): main from ${m1.slice(0, 12)}`,
+    `build(build): main from ${source.slice(0, 12)}`,
     "",
-    commitStampWrite(SERVER, REPO, m1),
+    commitStampWrite(SERVER, REPO, source),
     commitRunWrite(`${SERVER}/${REPO}/actions/runs/0`),
   ].join("\n");
+
+/** The common tip: stamped with the OLDER landing, so M2 is a step forward. */
+const healthyStamp = ({ m1 }: { m1: string }) => stampOf(m1);
 
 function expectContentChangePublished(r: Outcome): void {
   expect(r.exitCode).toBe(0);
@@ -351,7 +392,7 @@ function expectContentChangePublished(r: Outcome): void {
   const newTip = r.originTip();
   expect(newTip).not.toBe(r.tip);
   expect(git(r.origin, ["rev-parse", `${newTip}^`])).toBe(r.tip);
-  expect(r.originTipTree()).toBe(r.pendTree);
+  expect(r.originTipTree()).toBe(r.composedTree);
   const message = r.originTipMessage();
   expect(message).toContain(`build(build): main from ${r.m2.slice(0, 12)}`);
   expect(message).toContain(commitStampWrite(SERVER, REPO, r.m2));
@@ -365,13 +406,13 @@ describe("publish.ts behavior (real git)", () => {
   });
 
   test("a composed tree carrying its own .gitignore publishes VERBATIM - producer staging matches the verifier's", () => {
-    // The staging-skew class end-to-end: the pending tree hides
+    // The staging-skew class end-to-end: the composed tree hides
     // hidden.txt behind an in-tree .gitignore and rendered.txt behind
     // the repo's own info/exclude (which the branch worktree, a worktree
     // of the checkout, inherits). The old plain `add -A` dropped both,
     // publishing a tree the verifier's hermetic rebuild could never
     // match - a fleet-wide false tamper accusation. The published tree
-    // must BE the parked tree, byte for byte.
+    // must BE the composed tree, byte for byte.
     const r = runPublish({ tipTree: "drift", tipMessage: healthyStamp, hostileIgnores: true });
     expectContentChangePublished(r);
     const names = git(r.origin, ["ls-tree", "-r", "--name-only", r.originTipTree()]);
@@ -405,7 +446,7 @@ describe("publish.ts behavior (real git)", () => {
     const newTip = r.originTip();
     expect(newTip).not.toBe(r.tip);
     expect(git(r.origin, ["rev-parse", `${newTip}^`])).toBe(r.tip);
-    expect(r.originTipTree()).toBe(r.pendTree);
+    expect(r.originTipTree()).toBe(r.composedTree);
     const message = r.originTipMessage();
     expect(message).toContain(`build(build): main from ${r.m2.slice(0, 12)}`);
     expect(message).toContain(commitStampWrite(SERVER, REPO, r.m2));
@@ -413,11 +454,46 @@ describe("publish.ts behavior (real git)", () => {
     expect(r.scratchLeftovers()).toEqual([]);
   });
 
+  test("a STALE source is skipped green before anything is composed - newest-green wins", () => {
+    // The tip already ships M2, a descendant of the M1 this run would
+    // publish (a queued publisher running after a newer main published).
+    // M1 carries no builder, so a publish that composed before the
+    // preflight would exit red here: the green exit plus the untouched
+    // tip prove the preflight decided first.
+    const r = runPublish({ tipTree: "drift", tipMessage: ({ m2 }) => stampOf(m2), source: "m1" });
+    expect(r.exitCode).toBe(0);
+    expect(r.output).toContain("newest-green wins");
+    expect(r.output).toContain(r.m2.slice(0, 12));
+    expect(r.originTip()).toBe(r.tip);
+    expect(r.scratchLeftovers()).toEqual([]);
+  });
+
+  test("a REPLAY of the tip's own source is not stale - a drifted tree republishes", () => {
+    // The equal-source arm of newest-green-wins: a re-run of the commit
+    // the tip already stamps proceeds to the tree diff, so a tip whose
+    // tree drifted from that commit's composition (a hand edit under a
+    // healthy stamp) is repaired instead of being skipped as stale.
+    expectContentChangePublished(
+      runPublish({ tipTree: "drift", tipMessage: ({ m2 }) => stampOf(m2) }),
+    );
+  });
+
+  test("a source off main is refused before any mutation - the stamp must name main history", () => {
+    // The dispatch hazard: a PR head's own CI run posts an all-green
+    // check (the gh stub greens every sha), but stamping it would fail
+    // the sync's stamp check 1 and wedge every sync on the tip.
+    const r = runPublish({ tipTree: "drift", tipMessage: healthyStamp, source: "side" });
+    expect(r.exitCode).toBe(1);
+    expect(r.output).toContain("is not a commit on main");
+    expect(r.originTip()).toBe(r.tip);
+    expect(r.scratchLeftovers()).toEqual([]);
+  });
+
   test("a refused publish leaves no scratch behind either - the exit hook runs on the failure route", () => {
-    // The shape guard fires after the pre-built tree's worktree exists,
-    // so this exit 1 is the failure route WITH scratch on disk: the tip
-    // must not move, and the worktree must be gone and unregistered.
-    const r = runPublish({ tipTree: "drift", tipMessage: healthyStamp, malformedPending: true });
+    // The shape guard fires after every scratch worktree exists, so this
+    // exit 1 is the failure route WITH scratch on disk: the tip must not
+    // move, and the worktrees must be gone and unregistered.
+    const r = runPublish({ tipTree: "drift", tipMessage: healthyStamp, malformedTree: true });
     expect(r.exitCode).toBe(1);
     expect(r.output).toContain("carries no actions/ subtree");
     expect(r.originTip()).toBe(r.tip);
@@ -447,7 +523,11 @@ describe("publish.ts behavior (real git)", () => {
           const parked = readdirSync(runnerTemp);
           expect(parked).toHaveLength(1);
           expect(parked[0]).toStartWith("build-branches-");
-          expect(readdirSync(join(runnerTemp, parked[0] ?? "")).sort()).toEqual(["out", "tree"]);
+          expect(readdirSync(join(runnerTemp, parked[0] ?? "")).sort()).toEqual([
+            "out",
+            "src",
+            "tree",
+          ]);
           return runPublish({ tipTree: "drift", tipMessage: healthyStamp, runnerTemp });
         },
       );

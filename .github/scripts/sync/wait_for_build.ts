@@ -1,20 +1,17 @@
 #!/usr/bin/env bun
 // Bounded wait for the build output sync-repos.yml's plan job consumes:
-// the build branch is published asynchronously (each main push parks a
-// pending tree during CI; ci.yml's post-green job promotes it -
-// composing as the fallback - once the verdict lands green, and in
-// normal operation commits only on a content change), so a sync
-// dispatched right after a merge could consume the previous build
+// the build branch is published asynchronously (ci.yml's post-green job
+// composes and publishes the judged commit's tree once the verdict lands
+// green, and in normal operation commits only on a content change), so a
+// sync dispatched right after a merge could consume the previous build
 // tree. Freshness has two paths, neither trusting any live state:
 //
 //   1. FAST: the build tip's SOURCE STAMP names main's HEAD - publish.ts
 //      stamps the commit it actually published (the judged CI run's
-//      head_sha on the green path), so the stamp is the
-//      artifact's direct provenance. A "successful build-branches run at
-//      main's HEAD" is deliberately NOT trusted: the push leg only PARKS
-//      a pending tree (publishing happens post-green, or at the trigger
-//      commit on the schedule/dispatch self-heal), so a green run at
-//      HEAD B proves nothing about what the branch tip carries.
+//      head_sha on the green path, the operator's sha on a dispatch), so
+//      the stamp is the artifact's direct provenance. A "successful
+//      post-green run at main's HEAD" is deliberately NOT trusted: a run
+//      proves nothing about what the branch tip carries.
 //   2. SLOW: rebuild the composed tree at main's HEAD right here
 //      (shared/rebuild_tree.ts - the same rebuild the sync's provenance
 //      verifier runs) and compare tree hashes with the tip. Equal, under
@@ -43,23 +40,20 @@
 // Three waiting cases end in the warning path, all benign: a green main
 // whose CI is still running (the publish waits for the all-green
 // verdict, which lands only after that run completes, so nothing has
-// published yet), a red main tip, whose pending tree is parked but
-// never published (publish.ts refuses ungreen sources), and a green
-// push whose post-green publish failed or was evicted - the miss the
-// Build Branches schedule/dispatch self-heal exists to repair
-// (build-branches.yml's header). In every case the sync ships
-// the PREVIOUS green build - its scripts and templates may lag main
-// (script/template skew), which is exactly the state a pre-gate sync
-// always ran in - and resolve_refs.ts re-checks the shipped build's own
-// source is green (shared/all_green.ts); this bounded wait stays a
+// published yet), a red main tip, which is never published (publish.ts
+// refuses ungreen sources), and a green push whose post-green publish
+// failed or was evicted - the miss the next push, or a dispatch of
+// post-green.yml with that commit's sha, repairs. In every case the sync
+// ships the PREVIOUS green build - its scripts and templates may lag
+// main (script/template skew), which is exactly the state a pre-gate
+// sync always ran in - and resolve_refs.ts re-checks the shipped build's
+// own source is green (shared/all_green.ts); this bounded wait stays a
 // freshness aid, not the gate. Polls every 30 seconds, 80 attempts (40
-// minutes): the tree is pre-built DURING the main CI run
-// (build_pending.ts), so the post-green publisher only promotes it - the
-// wait covers a full main CI run (~30 minutes worst case with
-// rehearse-fleet) plus the promotion (~3 minutes; ~8 on the compose
-// fallback when the pending ref is missing) and queue slack, then warns
-// and lets the run continue (the sync's own guards fail loudly and the
-// weekly cron heals).
+// minutes): the wait covers a full main CI run (~30 minutes worst case
+// with rehearse-fleet) plus the post-green publish, which composes the
+// tree in its own run (~8 minutes), and queue slack, then warns and lets
+// the run continue (the sync's own guards fail loudly, and the next sync
+// run consumes the publish once it lands).
 //
 // Env: TARGET_SHA optional - the commit to wait for instead of main's
 // live HEAD (post-green's called sync passes the judged commit: its
@@ -310,8 +304,8 @@ await waitFor(
       // naming main's HEAD passes the on-main check by definition).
       // Holding the wait instead would buy nothing: this state triggers
       // no publish of its own (the green path publishes on main pushes'
-      // verdicts, and main is unmoved), so recovery waits for the weekly
-      // cron, a manual dispatch, or the next landing - none due within a
+      // verdicts, and main is unmoved), so recovery waits for a manual
+      // dispatch or the next landing - neither due within a
       // 40-minute hold - and the same red sync would just arrive 40
       // minutes later. This arm must also stay decisive when the rebuild
       // degraded (rebuiltTree ""), the state it exists to backstop. A
@@ -342,5 +336,5 @@ await waitFor(
   `waiting for the build branch to be built from ${mainSha}...`,
   `the build branch is not yet built from ${targetLabel} ${mainSha} after ${Math.round(
     DEADLINE_MS / 60000,
-  )} minutes; syncs may apply the previous build tree. The weekly cron heals this on its next run.`,
+  )} minutes; syncs may apply the previous build tree until the next main push publishes a newer one (or post-green.yml is dispatched with the green commit's sha), and the next sync run consumes it.`,
 );
