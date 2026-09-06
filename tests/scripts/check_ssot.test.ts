@@ -1231,47 +1231,27 @@ describe("stepCarriesWithKey", () => {
 
 describe("actionsBunGuardMismatches", () => {
   const FILE = "actions/x/action.yml";
+  const SETUP_STEP = `    - name: Set up the action's bun
+      id: action-bun
+      uses: ${BUN_SETUP_USES}
+      with:
+        pin: \${{ github.action_path }}/.bun-version
+`;
   const RUN_STEP = `    - name: Run
       shell: bash
       env:
         ACTION_BUN: \${{ steps.action-bun.outputs.path }}
       run: '"$ACTION_BUN" "\${{ github.action_path }}/x.ts"'
 `;
-  // A minimal composite: pinned probe, setup, retry, the recorded path,
-  // then one step running the recorded bun.
+  // A minimal composite: the shared bun-setup step, then one step running
+  // the recorded bun.
   const canonical = `runs:
   using: composite
   steps:
-    - name: Check for a bun matching the action's pin
-      id: bun
-      shell: bash
-      run: |
-        pin="$(cat "\${{ github.action_path }}/.bun-version")"
-        have="$(command -v bun >/dev/null && bun --version || true)"
-        echo "pinned=$([ "$have" = "$pin" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
-
-    - name: Set up bun
-      id: setup-bun
-      if: steps.bun.outputs.pinned != 'true'
-      continue-on-error: true
-      uses: oven-sh/setup-bun@v2
-      with:
-        bun-version-file: \${{ github.action_path }}/.bun-version
-
-    - name: Set up bun (retry)
-      if: steps.setup-bun.outcome == 'failure'
-      uses: oven-sh/setup-bun@v2
-      with:
-        bun-version-file: \${{ github.action_path }}/.bun-version
-
-    - name: Resolve the action's bun
-      id: action-bun
-      shell: bash
-      run: echo "path=$(command -v bun)" >> "$GITHUB_OUTPUT"
-
+${SETUP_STEP}
 ${RUN_STEP}`;
 
-  test("pinned setup steps plus a step running the recorded bun pass", () => {
+  test("the shared bun-setup step plus a step running the recorded bun passes", () => {
     expect(actionsBunGuardMismatches(FILE, canonical)).toEqual([]);
   });
 
@@ -1282,7 +1262,7 @@ ${RUN_STEP}`;
     file: FILE,
     expected:
       `exactly one bun setup step with id 'action-bun' ('uses: ${BUN_SETUP_USES}' with ` +
-      `'pin: ${ACTION_BUN_PIN}', or a run step recording the path behind this action's own setup-bun steps), ahead of any other step that uses an action or touches bun`,
+      `'pin: ${ACTION_BUN_PIN}'), ahead of any other step that uses an action or touches bun`,
     got: `${got} - the setup is what pins the bun to this action's own .bun-version, never the CALLER repository's`,
   });
   const danglingMismatch = (id: string, got = `no step with id '${id}'`) => ({
@@ -1300,71 +1280,38 @@ ${RUN_STEP}`;
     expected: `step '${step}' running bun by the recorded absolute path ("$ACTION_BUN" ..., bound in env to steps.action-bun.outputs.path), never \`bun\` by name`,
     got: line,
   });
-  const SHARED_STEP = `    - name: Set up the action's bun
-      id: action-bun
-      uses: ${BUN_SETUP_USES}
-      with:
-        pin: \${{ github.action_path }}/.bun-version
-`;
-  const RESOLVER = `    - name: Resolve the action's bun
-      id: action-bun
-      shell: bash
-      run: echo "path=$(command -v bun)" >> "$GITHUB_OUTPUT"
-`;
-  const withShared = `runs:\n  using: composite\n  steps:\n${SHARED_STEP}\n${RUN_STEP}`;
 
-  test("the shared bun-setup step plus a step running the recorded bun passes", () => {
-    expect(canonical).toContain(RESOLVER);
-    expect(actionsBunGuardMismatches(FILE, withShared)).toEqual([]);
-  });
-
-  // Exactly one setup, either form, ahead of everything else: each row is
-  // one deviation and the whole mismatch list it earns.
+  // Exactly one shared step, spelled one way, ahead of everything else: each
+  // row is one deviation and the whole mismatch list it earns.
   test.each<{ reason: string; text: string; expected: ReturnType<typeof shapeMismatch>[] }>([
     {
       reason: "no setup at all while a step binds the recorded path",
-      text: `runs:\n  using: composite\n  steps:\n${RUN_STEP}`,
+      text: canonical.replace(`${SETUP_STEP}\n`, ""),
       expected: [shapeMismatch("0 steps with id 'action-bun'"), danglingMismatch("action-bun")],
     },
     {
-      reason: "two resolvers",
-      text: canonical.replace(RUN_STEP, `${RESOLVER}\n${RUN_STEP}`),
-      expected: [shapeMismatch("2 steps with id 'action-bun'")],
+      reason: "a second copy of the step",
+      text: canonical.replace(SETUP_STEP, `${SETUP_STEP}${SETUP_STEP}`),
+      expected: [shapeMismatch("2 shared bun-setup steps")],
     },
     {
-      reason: "a resolver with no setup-bun ahead of it",
-      text: `runs:\n  using: composite\n  steps:\n${RESOLVER}\n${RUN_STEP}`,
-      expected: [shapeMismatch("no setup-bun step ahead of the 'action-bun' step")],
-    },
-    {
-      reason: "another action used between the setup and the resolver",
-      text: canonical.replace(RESOLVER, `    - uses: actions/checkout@v7\n${RESOLVER}`),
-      expected: [
-        shapeMismatch(
-          "step 'actions/checkout@v7' sits among the bun setup steps ahead of the 'action-bun' step",
-        ),
-      ],
-    },
-    {
-      reason: "a resolver that is neither a run step nor the shared action",
-      text: canonical.replace(RESOLVER, "    - id: action-bun\n      uses: actions/checkout@v7\n"),
-      expected: [
-        shapeMismatch(
-          "the 'action-bun' step is neither the shared bun-setup action nor a run step",
-        ),
-        danglingMismatch("action-bun", "step 'action-bun' sets no path output"),
-      ],
+      reason: "an inline resolver (the pre-adoption shape)",
+      text: canonical.replace(
+        SETUP_STEP,
+        `    - uses: oven-sh/setup-bun@v2\n      with:\n        bun-version-file: \${{ github.action_path }}/.bun-version\n    - id: action-bun\n      shell: bash\n      run: echo "path=$(command -v bun)" >> "$GITHUB_OUTPUT"\n`,
+      ),
+      expected: [shapeMismatch("the 'action-bun' step is not the shared bun-setup action")],
     },
     {
       reason: "a second shared step under another id, the recorded path bound to it",
-      text: withShared
-        .replace(SHARED_STEP, `${SHARED_STEP}${SHARED_STEP.replace("id: action-bun", "id: other")}`)
+      text: canonical
+        .replace(SETUP_STEP, `${SETUP_STEP}${SETUP_STEP.replace("id: action-bun", "id: other")}`)
         .replace("steps.action-bun.outputs.path", "steps.other.outputs.path"),
       expected: [shapeMismatch("2 shared bun-setup steps")],
     },
     {
       reason: "the shared step at @main under another id, the recorded path bound to it",
-      text: withShared
+      text: canonical
         .replace("id: action-bun", "id: other")
         .replace("@build", "@main")
         .replace("steps.action-bun.outputs.path", "steps.other.outputs.path"),
@@ -1380,102 +1327,55 @@ ${RUN_STEP}`;
       expected: [danglingMismatch("local", "step 'local' sets no path output")],
     },
     {
-      reason: "the recorded path bound to the probe, which sets no path output",
-      text: canonical.replace("steps.action-bun.outputs.path", "steps.bun.outputs.path"),
-      expected: [danglingMismatch("bun", "step 'bun' sets no path output")],
-    },
-    {
-      reason: "the shared step at another ref",
-      text: withShared.replace("@build", "@main"),
+      reason: "the step at another ref",
+      text: canonical.replace("@build", "@main"),
       expected: [shapeMismatch(`uses '${BUN_SETUP_USES.replace("@build", "@main")}'`)],
     },
     {
-      reason: "the shared step handed the CALLER's pin",
-      text: withShared.replace("pin: ${{ github.action_path }}/.bun-version", "pin: .bun-version"),
+      reason: "the step by a relative path",
+      text: canonical.replace(BUN_SETUP_USES, "./actions/bun-setup"),
+      expected: [shapeMismatch("uses './actions/bun-setup'")],
+    },
+    {
+      reason: "the step handed the CALLER's pin",
+      text: canonical.replace("pin: ${{ github.action_path }}/.bun-version", "pin: .bun-version"),
       expected: [shapeMismatch("pin '.bun-version'")],
     },
     {
-      reason: "a step using an action ahead of the shared step",
-      text: withShared.replace(SHARED_STEP, `    - uses: actions/checkout@v7\n${SHARED_STEP}`),
+      reason: "the step handed no pin",
+      text: canonical.replace(
+        "      with:\n        pin: ${{ github.action_path }}/.bun-version\n",
+        "",
+      ),
+      expected: [shapeMismatch("pin 'undefined'")],
+    },
+    {
+      reason: "a step using an action ahead of it",
+      text: canonical.replace(SETUP_STEP, `    - uses: actions/checkout@v7\n${SETUP_STEP}`),
       expected: [
         shapeMismatch("step 'actions/checkout@v7' uses an action or touches bun before it"),
       ],
     },
     {
-      reason: "a step touching bun ahead of the shared step",
-      text: withShared.replace(
-        SHARED_STEP,
-        `    - name: Warm\n      shell: bash\n      run: echo "$ACTION_BUN"\n${SHARED_STEP}`,
+      reason: "a step touching bun ahead of it",
+      text: canonical.replace(
+        SETUP_STEP,
+        `    - name: Warm\n      shell: bash\n      env:\n        BUN: bun\n      run: '"$BUN" x.ts'\n${SETUP_STEP}`,
       ),
       expected: [shapeMismatch("step 'Warm' uses an action or touches bun before it")],
-    },
-    {
-      reason: "a run step touching bun ahead of the inline setup-bun steps",
-      text: canonical.replace(
-        "  steps:\n",
-        `  steps:\n    - name: Warm\n      shell: bash\n      env:\n        BUN: bun\n      run: '"$BUN" x.ts'\n`,
-      ),
-      expected: [
-        shapeMismatch("step 'Warm' sits among the bun setup steps ahead of the 'action-bun' step"),
-      ],
-    },
-    {
-      reason: "a bun-running step between the setup-bun step and its retry",
-      text: canonical.replace(
-        "    - name: Set up bun (retry)\n",
-        `    - name: Eager\n      shell: bash\n      env:\n        BUN: bun\n      run: '"$BUN" x.ts'\n\n    - name: Set up bun (retry)\n`,
-      ),
-      expected: [
-        shapeMismatch("step 'Eager' sits among the bun setup steps ahead of the 'action-bun' step"),
-      ],
-    },
-    {
-      reason: "a harmless run step between the probe and the setup-bun step",
-      text: canonical.replace(
-        "    - name: Set up bun\n",
-        `    - name: Note\n      shell: bash\n      run: echo ok\n\n    - name: Set up bun\n`,
-      ),
-      expected: [
-        shapeMismatch("step 'Note' sits among the bun setup steps ahead of the 'action-bun' step"),
-      ],
-    },
-    {
-      reason: "an action carrying the probe's id (the setup-bun if: reads it) in the probe's place",
-      text: canonical.replace(
-        `    - name: Check for a bun matching the action's pin
-      id: bun
-      shell: bash
-      run: |
-        pin="$(cat "\${{ github.action_path }}/.bun-version")"
-        have="$(command -v bun >/dev/null && bun --version || true)"
-        echo "pinned=$([ "$have" = "$pin" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
-`,
-        "    - id: bun\n      uses: actions/checkout@v7\n",
-      ),
-      expected: [
-        shapeMismatch("step 'bun' sits among the bun setup steps ahead of the 'action-bun' step"),
-      ],
-    },
-    {
-      reason:
-        "a lone action-bun step using the shared action by a relative path (nothing else names bun)",
-      text: "runs:\n  using: composite\n  steps:\n    - id: action-bun\n      uses: ./actions/bun-setup\n",
-      expected: [shapeMismatch("uses './actions/bun-setup', pin 'undefined'")],
-    },
-    {
-      reason: "the shared action by a relative path under another id (nothing else names bun)",
-      text: "runs:\n  using: composite\n  steps:\n    - id: runtime\n      uses: ./actions/bun-setup\n",
-      expected: [shapeMismatch("0 steps with id 'action-bun'")],
-    },
-    {
-      reason: "a steps.undefined.outputs.path reference beside id-less steps",
-      text: canonical.replace("steps.action-bun.outputs.path", "steps.undefined.outputs.path"),
-      expected: [danglingMismatch("undefined")],
     },
     {
       reason: "a dangling steps.<id>.outputs.path reference",
       text: canonical.replace("steps.action-bun.outputs.path", "steps.gone.outputs.path"),
       expected: [danglingMismatch("gone")],
+    },
+    {
+      reason: "a steps.undefined.outputs.path reference beside an id-less step",
+      text: canonical.replace(
+        RUN_STEP,
+        `${RUN_STEP.replace("steps.action-bun.outputs.path", "steps.undefined.outputs.path")}    - name: Tail\n      shell: bash\n      run: echo ok\n`,
+      ),
+      expected: [danglingMismatch("undefined")],
     },
   ])("$reason is refused", ({ text, expected }) => {
     expect(text).not.toBe(canonical);
@@ -1483,18 +1383,12 @@ ${RUN_STEP}`;
   });
 
   // pages-site records the caller's PATH ahead of its setup, by design.
-  test.each([
-    ["inline", canonical],
-    ["shared", withShared],
-  ])(
-    "a run step neither using an action nor touching bun may precede the %s setup",
-    (_form, text) => {
-      const record = `    - name: Record the caller's toolchain PATH\n      id: caller\n      shell: bash\n      run: echo "path=$PATH" >> "$GITHUB_OUTPUT"\n`;
-      const preceded = text.replace("  steps:\n", `  steps:\n${record}`);
-      expect(preceded).not.toBe(text);
-      expect(actionsBunGuardMismatches(FILE, preceded)).toEqual([]);
-    },
-  );
+  test("a run step neither using an action nor touching bun may precede the setup", () => {
+    const record = `    - name: Record the caller's toolchain PATH\n      id: caller\n      shell: bash\n      run: echo "path=$PATH" >> "$GITHUB_OUTPUT"\n`;
+    const preceded = canonical.replace("  steps:\n", `  steps:\n${record}`);
+    expect(preceded).not.toBe(canonical);
+    expect(actionsBunGuardMismatches(FILE, preceded)).toEqual([]);
+  });
 
   // An action whose only bun is an env binding of its own is still a bun
   // runner: with no setup, the rule names the missing step.
@@ -1506,17 +1400,25 @@ ${RUN_STEP}`;
   });
 
   // The shared setup action reads the caller's pin through its input and
-  // carries no resolver of its own; any other action shaped like it is
-  // unpinned on both counts.
-  test("actions/bun-setup's setup steps read the pin input; another action shaped like it is refused", () => {
-    const shared = canonical
-      .replaceAll(
-        "bun-version-file: ${{ github.action_path }}/.bun-version",
-        "bun-version-file: ${{ inputs.pin }}",
-      )
-      .replace(RESOLVER, "")
-      .replace(RUN_STEP, "");
-    expect(shared).not.toBe(canonical);
+  // carries no bun-setup step; any other action shaped like it is unpinned
+  // on both counts.
+  test("actions/bun-setup's own setup steps read the pin input; another action shaped like it is refused", () => {
+    const shared = `runs:
+  using: composite
+  steps:
+    - name: Set up bun
+      id: setup-bun
+      continue-on-error: true
+      uses: oven-sh/setup-bun@v2
+      with:
+        bun-version-file: \${{ inputs.pin }}
+    - name: Set up bun (retry)
+      if: steps.setup-bun.outcome == 'failure'
+      continue-on-error: true
+      uses: oven-sh/setup-bun@v2
+      with:
+        bun-version-file: \${{ inputs.pin }}
+`;
     expect(actionsBunGuardMismatches("actions/bun-setup/action.yml", shared)).toEqual([]);
     expect(actionsBunGuardMismatches(FILE, shared)).toEqual([
       shapeMismatch("0 steps with id 'action-bun'"),
@@ -1532,7 +1434,7 @@ ${RUN_STEP}`;
     ['bun "${{ github.action_path }}/x.ts"', ['bun "${{ github.action_path }}/x.ts"']],
     ["bun install --frozen-lockfile --production", ["bun install --frozen-lockfile --production"]],
     ['|\n        "$ACTION_BUN" install\n        bun "x.ts"', ['bun "x.ts"']],
-  ])("a step running %s beside an intact region is refused for bun by name", (run, lines) => {
+  ])("a step running %s beside the shared step is refused for bun by name", (run, lines) => {
     const text = canonical.replace(
       `      run: '"$ACTION_BUN" "\${{ github.action_path }}/x.ts"'\n`,
       () => `      run: ${run}\n`,
@@ -1543,31 +1445,6 @@ ${RUN_STEP}`;
     );
   });
 
-  // Inside the region generate:check owns the bytes; the per-step pin
-  // judgment still names each unpinned setup, so the guard registry's
-  // staged mutation (the with: block stripped) is loud in both gates.
-  test.each([
-    {
-      reason: "both with: blocks deleted (the pre-fix bare shape)",
-      text: canonical.replaceAll(
-        `      uses: oven-sh/setup-bun@v2
-      with:
-        bun-version-file: \${{ github.action_path }}/.bun-version`,
-        "      uses: oven-sh/setup-bun@v2",
-      ),
-    },
-    {
-      reason: "a workspace-relative bun-version-file (it reads the CALLER's dotfile)",
-      text: canonical.replaceAll(
-        "bun-version-file: ${{ github.action_path }}/.bun-version",
-        "bun-version-file: .bun-version",
-      ),
-    },
-  ])("$reason inside the region is refused once per unpinned setup step", ({ text }) => {
-    expect(text).not.toBe(canonical);
-    expect(actionsBunGuardMismatches(FILE, text)).toEqual([perStepMismatch, perStepMismatch]);
-  });
-
   test.each([
     { uses: "oven-sh/setup-bun@v2", reason: "a plain spelling" },
     { uses: '"oven-sh/setup-bun@v2"', reason: "a quoted look-alike" },
@@ -1575,16 +1452,13 @@ ${RUN_STEP}`;
       uses: "OVEN-SH/Setup-Bun@v2",
       reason: "a mixed-case id (GitHub action ids are case-insensitive)",
     },
-  ])(
-    "an EXTRA bare setup-bun beside an intact region is refused per step - $reason",
-    ({ uses }) => {
-      const extra = `${canonical}
+  ])("an EXTRA bare setup-bun beside the shared step is refused per step - $reason", ({ uses }) => {
+    const extra = `${canonical}
     - name: Set up bun again
       uses: ${uses}
 `;
-      expect(actionsBunGuardMismatches(FILE, extra)).toEqual([perStepMismatch]);
-    },
-  );
+    expect(actionsBunGuardMismatches(FILE, extra)).toEqual([perStepMismatch]);
+  });
 
   // A runner-scratch pin needs an earlier bash step that removes the pin's
   // root by a fixed rm on the literal path, shell knobs emptied, and that the
@@ -1831,9 +1705,8 @@ ${extra}      shell: ${shell}
   });
 
   test("the composite actions' bun pin is ARMED: every bun-touching action.yml carries one pinned bun setup", () => {
-    // The live-file forcing test the guard registry names: unpinning any
-    // real action's setup-bun (the staged mutation strips the primary
-    // setup step's with: block in check-typography) goes red here.
+    // The live-file forcing test the guard registry names: its mutation
+    // hands check-typography's shared step the CALLER's pin, red here.
     const files = actionManifestFiles();
     const setups = files.filter((file) => actionSetsUpBun(readFileSync(file, "utf-8")));
     expect(setups.length).toBeGreaterThan(0);

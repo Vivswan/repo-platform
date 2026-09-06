@@ -1514,9 +1514,6 @@ describe("the action's wiring", () => {
     const envOf = (step: Record<string, unknown> | undefined) =>
       (step?.env ?? {}) as Record<string, string>;
     expect(steps.map((step) => step.id)).toEqual([
-      "bun",
-      "setup-bun",
-      "setup-bun-retry",
       "action-bun",
       "clear",
       "fetch",
@@ -1534,28 +1531,24 @@ describe("the action's wiring", () => {
     expect(action.outputs.integrity.value).toBe("${{ steps.report.outputs.integrity }}");
     expect(JSON.stringify(action.outputs)).not.toMatch(/steps\.(integrity|latest|fetch)\./);
 
-    // No setup-bun step, primary or retry, can end the action: a double
-    // failure must reach the report step as a rendered not-judged reason.
+    // No setup-bun step can end the action: the shared bun-setup step is
+    // told not to fail, and the fetched tree's two may fail, so a double
+    // failure reaches the report step as a rendered not-judged reason.
+    expect(byId("action-bun")).toEqual({
+      name: "Set up the action's bun",
+      id: "action-bun",
+      uses: "Vivswan/repo-platform/actions/bun-setup@build",
+      with: { pin: "${{ github.action_path }}/.bun-version", required: "false" },
+    });
     const setupBunSteps = steps.filter((step) =>
       String(step.uses ?? "")
         .toLowerCase()
         .startsWith("oven-sh/setup-bun@"),
     );
-    expect(setupBunSteps.map((step) => step.id)).toEqual([
-      "setup-bun",
-      "setup-bun-retry",
-      "aligned-bun",
-      "aligned-bun-retry",
-    ]);
+    expect(setupBunSteps.map((step) => step.id)).toEqual(["aligned-bun", "aligned-bun-retry"]);
     for (const step of setupBunSteps) expect(step["continue-on-error"]).toBe(true);
-    expect(byId("setup-bun-retry")?.if).toBe("steps.setup-bun.outcome == 'failure'");
-    const actionBun = byId("action-bun");
-    // Readiness has one truth, a bun on PATH at the pinned version, resolved
-    // by one block for both buns (executed below); `ready` derives from it.
-    expect(envOf(actionBun)).toEqual({ PIN_FILE: "${{ github.action_path }}/.bun-version" });
     const alignedBunPath = byId("aligned-bun-path");
     expect(alignedBunPath?.if).toBe("steps.fetch.outcome == 'success'");
-    expect(String(alignedBunPath?.run)).toBe(String(actionBun?.run));
     const READY = "steps.action-bun.outputs.ready == 'true'";
     expect(byId("fetch")?.if).toBe(`${READY} && steps.clear.outcome == 'success'`);
     expect(byId("latest")?.if).toBe(`${READY} && steps.clear.outcome == 'success'`);
@@ -1749,11 +1742,9 @@ describe("the action's wiring", () => {
     );
   });
 
-  // The one resolver block (both steps carry it), executed as the runner
-  // would: a path is recorded exactly when an absolute executable on PATH
-  // prints the pinned version AND exits 0, and `ready` derives from the
-  // path. A bun that lies about its version, one found through a relative
-  // PATH entry, another version, or no bun at all all read as no path.
+  // The fetched tree's resolver, run as the runner would: a path is recorded
+  // only for an absolute executable on PATH printing the pin and exiting 0;
+  // a lying, relative, other-version, or absent bun reads as no path.
   const BUN_DIR = realpathSync(join(process.execPath, ".."));
   const cases: [string, string, (dir: string) => { path: string; cwd?: string }, string][] = [
     [
@@ -1796,7 +1787,7 @@ describe("the action's wiring", () => {
   test.each(cases)("a resolver with %s records %j", (_name, pinned, arrange, expected) => {
     const action = parseYaml(readFileSync(join(ACTION, "action.yml"), "utf8"));
     const step = (action.runs.steps as Record<string, unknown>[]).find(
-      (s) => s.id === "action-bun",
+      (s) => s.id === "aligned-bun-path",
     );
     const { root } = scratch();
     const stage = join(root, "stage");

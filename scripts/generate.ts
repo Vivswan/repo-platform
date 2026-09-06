@@ -25,9 +25,9 @@
 //   derived from the zod schema in scripts/lib/module_manifests.ts.
 // - templates/<module>/<pin.file> for every manifest toolchain pin: WHOLE
 //   generated dotfiles carrying exactly the pinned version plus a newline.
-// - actions/<dir>/.bun-version for every action that sets up bun: WHOLE
-//   dotfiles carrying the manifests' bun pin, so the actions never ride the
-//   CALLER's bun resolution.
+// - actions/<dir>/.bun-version for every action calling the shared
+//   bun-setup action: WHOLE dotfiles carrying the manifests' bun pin, so
+//   the actions never ride the CALLER's bun resolution.
 // - templates/base/.github/workflows/ci.yml.jinja and
 //   templates/release-please/.github/workflows/release.yml.jinja:
 //   the tracking-labels input both release-health call sites pass, built
@@ -638,14 +638,11 @@ export function usesBunSetup(step: Record<string, unknown>): boolean {
 }
 
 /** Every directory under actions/ carrying a generated .bun-version, sorted:
- *  each whose action.yml sets up bun itself or through the shared bun-setup
- *  action (EXCLUDED_DIRS bounds the walk), the shared action excepted. */
+ *  each whose action.yml calls the shared bun-setup action, which reads that
+ *  pin (EXCLUDED_DIRS bounds the walk), the shared action itself excepted. */
 export function bunPinnedActionDirs(actionsDir: string): string[] {
   return actionManifests(actionsDir)
-    .filter(
-      ({ dir, text }) =>
-        dir !== BUN_SETUP_ACTION && (actionSetsUpBun(text) || actionSteps(text).some(usesBunSetup)),
-    )
+    .filter(({ dir, text }) => dir !== BUN_SETUP_ACTION && actionSteps(text).some(usesBunSetup))
     .map(({ dir }) => dir)
     .sort();
 }
@@ -1075,10 +1072,10 @@ function main(): number {
     const actionStrays = strayActionPinFiles(join(REPO_ROOT, "actions"));
     if (actionStrays.length > 0) {
       throw new Error(
-        `stray action .bun-version dotfile(s) whose directory sets up no bun in an action.yml: ` +
+        `stray action .bun-version dotfile(s) whose action.yml calls no bun-setup step: ` +
           `${actionStrays.join(", ")} - the generator would stop refreshing them ` +
           "while the stale pin keeps shipping on the build branch; delete the " +
-          "file (or restore the action's setup-bun step)",
+          "file (or restore the action's bun-setup step)",
       );
     }
     const inputs: RegionInputs = {

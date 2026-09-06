@@ -606,59 +606,62 @@ describe("toolchain pins", () => {
     expect(actionSetsUpBun("runs:\n  steps:\n    # - uses: oven-sh/setup-bun@v2\n")).toBe(false);
   });
 
-  test("bunPinnedActionDirs finds the actions setting up bun themselves or through bun-setup (nested ones included, commented uses excused); the shared action and manifest-free directories never count", () => {
+  const SHARED = `runs:\n  steps:\n    - id: action-bun\n      uses: Vivswan/repo-platform/${BUN_SETUP_ACTION}@build\n      with:\n        pin: \${{ github.action_path }}/.bun-version\n`;
+  const OWN_SETUP =
+    "runs:\n  steps:\n    - uses: oven-sh/setup-bun@v2\n      with:\n        bun-version-file: ${{ inputs.pin }}\n";
+
+  test("bunPinnedActionDirs finds the actions calling bun-setup (nested ones included, commented uses excused); the shared action, an inline setup-bun, and manifest-free directories never count", () => {
     const dir = temp.dir("action-pins-");
-    const setup = "runs:\n  steps:\n    - uses: oven-sh/setup-bun@v2\n";
-    // The shared form: a pin the shared action reads through its input.
-    mkdirSync(join(dir, "shared"));
-    writeFileSync(
-      join(dir, "shared", "action.yml"),
-      `runs:\n  steps:\n    - id: action-bun\n      uses: Vivswan/repo-platform/${BUN_SETUP_ACTION}@build\n`,
-    );
     mkdirSync(join(dir, "typo"));
-    writeFileSync(join(dir, "typo", "action.yml"), setup);
+    writeFileSync(join(dir, "typo", "action.yml"), SHARED);
     // A nested action (the pages-site/check-links shape).
     mkdirSync(join(dir, "pages", "links"), { recursive: true });
-    writeFileSync(join(dir, "pages", "action.yml"), setup);
-    writeFileSync(join(dir, "pages", "links", "action.yml"), setup);
-    // No setup-bun: a commented example does not count.
+    writeFileSync(join(dir, "pages", "action.yml"), SHARED);
+    writeFileSync(join(dir, "pages", "links", "action.yml"), SHARED);
+    // No bun-setup: a commented example does not count.
     mkdirSync(join(dir, "gate"));
     writeFileSync(
       join(dir, "gate", "action.yml"),
-      "runs:\n  steps:\n    # - uses: oven-sh/setup-bun@v2\n    - run: echo ok\n",
+      "runs:\n  steps:\n    # - uses: Vivswan/repo-platform/actions/bun-setup@build\n    - run: echo ok\n",
     );
+    // The shared setup action sets up bun for its callers' pins: no pin of
+    // its own; an action with an inline setup-bun of its own is the same
+    // shape and equally unpinned by the generator.
+    mkdirSync(join(dir, "bun-setup"));
+    writeFileSync(join(dir, "bun-setup", "action.yml"), OWN_SETUP);
+    mkdirSync(join(dir, "inline"));
+    writeFileSync(join(dir, "inline", "action.yml"), OWN_SETUP);
     // Never scanned: installed dependencies.
     mkdirSync(join(dir, "typo", "node_modules", "dep"), { recursive: true });
-    writeFileSync(join(dir, "typo", "node_modules", "dep", "action.yml"), setup);
-    // The shared setup action sets up bun for its callers' pins: no pin of
-    // its own.
-    mkdirSync(join(dir, BUN_SETUP_ACTION.slice("actions/".length)));
-    writeFileSync(join(dir, BUN_SETUP_ACTION.slice("actions/".length), "action.yml"), setup);
+    writeFileSync(join(dir, "typo", "node_modules", "dep", "action.yml"), SHARED);
     // A script directory with no manifest: not an action, so not pinned.
     mkdirSync(join(dir, "scripts"));
     writeFileSync(join(dir, "scripts", "run.ts"), "export {};\n");
     expect(bunPinnedActionDirs(dir)).toEqual([
       "actions/pages",
       "actions/pages/links",
-      "actions/shared",
       "actions/typo",
     ]);
   });
 
-  test("strayActionPinFiles flags a .bun-version whose directory sets up no bun", () => {
+  test("strayActionPinFiles flags a .bun-version whose directory calls no bun-setup", () => {
     const dir = temp.dir("action-strays-");
-    const setup = "runs:\n  steps:\n    - uses: oven-sh/setup-bun@v2\n";
     mkdirSync(join(dir, "typo"));
-    writeFileSync(join(dir, "typo", "action.yml"), setup);
+    writeFileSync(join(dir, "typo", "action.yml"), SHARED);
     writeFileSync(join(dir, "typo", ".bun-version"), "1.4.0\n");
-    // The setup step retired but the dotfile left behind: stray.
+    // The bun-setup step retired but the dotfile left behind: stray.
     mkdirSync(join(dir, "gate"));
     writeFileSync(join(dir, "gate", "action.yml"), "runs:\n  steps:\n    - run: echo ok\n");
     writeFileSync(join(dir, "gate", ".bun-version"), "1.4.0\n");
+    // The shared action reads its callers' pins: a dotfile there is stray.
+    mkdirSync(join(dir, "bun-setup"));
+    writeFileSync(join(dir, "bun-setup", "action.yml"), OWN_SETUP);
+    writeFileSync(join(dir, "bun-setup", ".bun-version"), "1.4.0\n");
     // A manifest-free directory: stray, whatever it holds.
     mkdirSync(join(dir, "scripts"));
     writeFileSync(join(dir, "scripts", ".bun-version"), "1.4.0\n");
     expect(strayActionPinFiles(dir)).toEqual([
+      "actions/bun-setup/.bun-version",
       "actions/gate/.bun-version",
       "actions/scripts/.bun-version",
     ]);

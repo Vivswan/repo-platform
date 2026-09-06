@@ -3042,49 +3042,27 @@ function touchesBun(step: Record<string, unknown>): boolean {
 }
 
 /** Why `steps` lack exactly one bun setup (the `action-bun` step: the shared
- *  action with the action-local pin, or a run step behind this action's own
- *  setup-bun steps) ahead of every other action-using or bun-touching step. */
+ *  action with the action-local pin) ahead of every other action-using or
+ *  bun-touching step, or null. Every step naming the shared action counts. */
 export function bunSetupShapeProblem(steps: Record<string, unknown>[]): string | null {
   const shared = steps.filter(usesBunSetup);
   if (shared.length > 1) return `${shared.length} shared bun-setup steps`;
   const resolvers = steps.filter((step) => step.id === RESOLVER_STEP_ID);
   if (resolvers.length !== 1) return `${resolvers.length} steps with id '${RESOLVER_STEP_ID}'`;
-  const resolver = resolvers[0];
-  const at = steps.indexOf(resolver);
+  if (shared.length === 0)
+    return `the '${RESOLVER_STEP_ID}' step is not the shared bun-setup action`;
+  const problems: string[] = [];
+  if (shared[0] !== resolvers[0]) {
+    problems.push(`the shared bun-setup step has id '${String(shared[0].id)}'`);
+  }
+  if (shared[0].uses !== BUN_SETUP_USES) problems.push(`uses '${String(shared[0].uses)}'`);
+  const pin = (shared[0].with as Record<string, unknown> | undefined)?.pin;
+  if (pin !== ACTION_BUN_PIN) problems.push(`pin '${String(pin)}'`);
   const first = steps.findIndex(touchesBun);
-  if (shared.length === 1) {
-    const problems: string[] = [];
-    if (shared[0] !== resolver)
-      problems.push(`the shared bun-setup step has id '${String(shared[0].id)}'`);
-    if (shared[0].uses !== BUN_SETUP_USES) problems.push(`uses '${String(shared[0].uses)}'`);
-    const pin = (shared[0].with as Record<string, unknown> | undefined)?.pin;
-    if (pin !== ACTION_BUN_PIN) problems.push(`pin '${String(pin)}'`);
-    if (first !== steps.indexOf(shared[0])) {
-      problems.push(`step '${stepName(steps[first])}' uses an action or touches bun before it`);
-    }
-    return problems.length === 0 ? null : problems.join(", ");
+  if (first !== steps.indexOf(shared[0])) {
+    problems.push(`step '${stepName(steps[first])}' uses an action or touches bun before it`);
   }
-  if (typeof resolver.run !== "string") {
-    return `the '${RESOLVER_STEP_ID}' step is neither the shared bun-setup action nor a run step`;
-  }
-  const block = steps.slice(first, at);
-  if (!block.some(usesSetupBun)) return `no setup-bun step ahead of the '${RESOLVER_STEP_ID}' step`;
-  // Nothing but the setup belongs between its first step and the resolver:
-  // the setup-bun steps and their probe (the run step whose output a
-  // setup-bun's `if:` reads).
-  const probeIds = new Set(
-    block
-      .filter(usesSetupBun)
-      .flatMap((step) => [...String(step.if ?? "").matchAll(/steps\.([A-Za-z0-9_-]+)\.outputs\./g)])
-      .map((match) => match[1]),
-  );
-  const isProbe = (step: Record<string, unknown>) =>
-    typeof step.run === "string" && probeIds.has(String(step.id));
-  const stranger = block.find((step) => !usesSetupBun(step) && !isProbe(step));
-  if (stranger !== undefined) {
-    return `step '${stepName(stranger)}' sits among the bun setup steps ahead of the '${RESOLVER_STEP_ID}' step`;
-  }
-  return null;
+  return problems.length === 0 ? null : problems.join(", ");
 }
 
 /** Whether a step sets a `path` output: the shared bun-setup action, or a
@@ -3134,7 +3112,7 @@ export function actionsBunGuardMismatches(file: string, text: string): Mismatch[
       file,
       expected:
         `exactly one bun setup step with id '${RESOLVER_STEP_ID}' ('uses: ${BUN_SETUP_USES}' with ` +
-        `'pin: ${ACTION_BUN_PIN}', or a run step recording the path behind this action's own setup-bun steps), ahead of any other step that uses an action or touches bun`,
+        `'pin: ${ACTION_BUN_PIN}'), ahead of any other step that uses an action or touches bun`,
       got: `${shape} - the setup is what pins the bun to this action's own .bun-version, never the CALLER repository's`,
     });
   }
