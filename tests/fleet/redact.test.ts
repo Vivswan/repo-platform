@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { join } from "node:path";
 import {
   assignHints,
+  type DiscoveredRepo,
   enrich,
   enrichedRowSchema,
   hintName,
@@ -120,7 +121,7 @@ describe("enrichedRowSchema", () => {
 
   // The issue path pins WHICH rule fired: success=false alone cannot tell
   // the display refinement from a union arm failing for another reason.
-  test.each([
+  test.each<{ reason: string; row: Record<string, unknown>; path: PropertyKey[] }>([
     {
       reason: "a private row missing its verify tag",
       row: { ...hidden, verify: "" },
@@ -159,7 +160,7 @@ describe("parseDiscoveredList", () => {
   // Identity on every accepted payload: only repo and private are
   // inspected; everything else passes through untouched, whatever its
   // type - pinned so a schema tightening cannot silently change it.
-  test.each([
+  test.each<{ reason: string; input: (DiscoveredRepo & Record<string, unknown>)[] }>([
     {
       reason: "{repo, private} entries pass their extra keys through",
       input: [{ repo: "o/a", private: true, archived: false, pushed_at: "now" }],

@@ -79,7 +79,7 @@ describe("applyOnly", () => {
     { repo: "Vivswan/gamma", private: true, display: "g**a", verify: "v" },
   ];
 
-  test.each([
+  test.each<{ reason: string; only: string; expected: ReturnType<typeof applyOnly> }>([
     {
       reason: "the self slug, case-folded, keeps only self",
       only: "vivswan/REPO-PLATFORM",
