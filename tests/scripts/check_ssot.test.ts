@@ -79,7 +79,7 @@ import {
   scratchScopedScriptMismatches,
   semanticLines,
   setMismatch,
-  settingsHealShaPlumbingMismatches,
+  settingsGreenGateMismatches,
   settingsIdentityMismatches,
   shellSegments,
   spawnSyncHazard,
@@ -359,165 +359,97 @@ describe("the all-green name pins", () => {
   });
 });
 
-describe("settingsHealShaPlumbingMismatches", () => {
+describe("settingsGreenGateMismatches", () => {
   const live = () => readFileSync(".github/workflows/settings-repos.yml", "utf-8");
 
-  // A minimal well-plumbed workflow, mutated per red test below: the
+  // A minimal well-gated workflow, mutated per red case below: the
   // negative controls proving the judgment can fail through the same
-  // path its green runs through, decoy shapes included.
+  // path its green run takes.
+  const GATE =
+    "      - name: Require a green commit\n" +
+    "        run: bun .github/scripts/fleet/require_green_commit.ts\n";
+  const SELECT = "      - run: bun .github/scripts/fleet/select_settings_repos.ts\n";
+  const CHECKOUT = "      - uses: actions/checkout@v7\n";
   const valid = `
 jobs:
   select:
-    outputs:
-      sha: \${{ steps.gate.outputs.sha }}
     steps:
-      - uses: actions/checkout@v7
-      - name: Require a green commit
-        id: gate
-        run: bun .github/scripts/fleet/require_green_commit.ts
-      - name: Check out the resolved green commit
-        if: steps.gate.outputs.fallback == 'true'
-        uses: actions/checkout@v7
-        with:
-          ref: \${{ steps.gate.outputs.sha }}
-      - uses: oven-sh/setup-bun@v2
-        if: steps.gate.outputs.fallback == 'true'
-      - name: Reinstall dependencies at the resolved commit
-        if: steps.gate.outputs.fallback == 'true'
-        run: bun install --frozen-lockfile
-      - run: bun .github/scripts/fleet/select_settings_repos.ts
-  apply:
+${CHECKOUT}${GATE}${SELECT}  apply:
     steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: \${{ needs.select.outputs.sha }}
-`;
+${CHECKOUT}`;
 
   test("the synthetic fixture is judged clean - the control for every red case below", () => {
-    expect(settingsHealShaPlumbingMismatches(valid)).toEqual([]);
+    expect(settingsGreenGateMismatches(valid)).toEqual([]);
   });
 
-  test("a decoy checkout carrying the pinned ref never vouches for a rewired fallback checkout", () => {
-    // The ref is validated on the OWNING step (the fallback-conditioned
-    // checkout), so a dead if-false decoy with the right ref cannot
-    // stand in while the real re-checkout lands elsewhere.
-    const rewired = valid
-      .replace("ref: ${{ steps.gate.outputs.sha }}", "ref: ${{ github.sha }}")
-      .replace(
-        "      - run: bun .github/scripts/fleet/select_settings_repos.ts",
-        `      - name: decoy
-        if: false
-        uses: actions/checkout@v7
-        with:
-          ref: \${{ steps.gate.outputs.sha }}
-      - run: bun .github/scripts/fleet/select_settings_repos.ts`,
-      );
-    const got = settingsHealShaPlumbingMismatches(rewired).map((m) => m.expected);
-    expect(got.some((e) => e.includes("fallback re-checkout pinned"))).toBe(true);
+  const REL = ".github/workflows/settings-repos.yml";
+  const GATE_MISSING = {
+    file: REL,
+    expected: "a select-job step running fleet/require_green_commit.ts",
+    got: "missing - the fleet-wide settings writer would run ungated from raw pushes",
+  };
+  test.each([
+    { reason: "a deleted gate", text: valid.replace(GATE, ""), mismatch: GATE_MISSING },
+    {
+      reason: "a gate commented out - a mention in a comment runs nothing",
+      text: valid.replace(GATE, "      # run: bun .github/scripts/fleet/require_green_commit.ts\n"),
+      mismatch: GATE_MISSING,
+    },
+    {
+      reason: "a gate-shaped echo decoy - it carries the command without running it",
+      text: valid.replace(
+        "        run: bun .github/scripts/fleet/require_green_commit.ts\n",
+        "        run: echo bun .github/scripts/fleet/require_green_commit.ts\n",
+      ),
+      mismatch: GATE_MISSING,
+    },
+    {
+      reason: "a gate moved behind the selection",
+      text: valid.replace(GATE, "").replace(SELECT, SELECT + GATE),
+      mismatch: {
+        file: REL,
+        expected: "the green gate BEFORE the target selection",
+        got: "the gate runs after targets are computed",
+      },
+    },
+    {
+      reason: "a conditioned gate",
+      text: valid.replace(GATE, `${GATE}        if: github.event_name != 'schedule'\n`),
+      mismatch: {
+        file: REL,
+        expected: "an unconditional green gate (every trigger reads main's tip)",
+        got: "if: github.event_name != 'schedule'",
+      },
+    },
+    {
+      reason: "an apply checkout pinned to a ref - a tree the gate never judged",
+      text: valid.replace(
+        `  apply:\n    steps:\n${CHECKOUT}`,
+        `  apply:\n    steps:\n${CHECKOUT}        with:\n          ref: \${{ github.event.before }}\n`,
+      ),
+      mismatch: {
+        file: REL,
+        expected:
+          "the apply job's checkout without a ref - it lands on the trigger commit the gate judged",
+        got: "ref: ${{ github.event.before }}",
+      },
+    },
+    {
+      reason: "a second select checkout - it could replace the judged tree",
+      text: valid.replace(SELECT, CHECKOUT + SELECT),
+      mismatch: {
+        file: REL,
+        expected:
+          "exactly one checkout in the select job (a second one could replace the judged tree)",
+        got: "2 checkout step(s)",
+      },
+    },
+  ])("$reason is the one mismatch", ({ text, mismatch }) => {
+    expect(settingsGreenGateMismatches(text)).toEqual([mismatch]);
   });
 
-  test("a trio condition migrated to an unrelated step is a shape mismatch, not a satisfied count", () => {
-    const migrated = valid
-      .replace(
-        "      - uses: oven-sh/setup-bun@v2\n        if: steps.gate.outputs.fallback == 'true'",
-        "      - uses: oven-sh/setup-bun@v2",
-      )
-      .replace(
-        "      - run: bun .github/scripts/fleet/select_settings_repos.ts",
-        `      - run: echo unrelated
-        if: steps.gate.outputs.fallback == 'true'
-      - run: bun .github/scripts/fleet/select_settings_repos.ts`,
-      );
-    const got = settingsHealShaPlumbingMismatches(migrated).map((m) => m.expected);
-    expect(got.some((e) => e.includes("fallback trio"))).toBe(true);
-  });
-
-  test("a second apply-job checkout is refused - a later checkout could replace the pinned tree", () => {
-    const doubled = valid.replace(
-      `  apply:
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: \${{ needs.select.outputs.sha }}`,
-      `  apply:
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: \${{ needs.select.outputs.sha }}
-      - uses: actions/checkout@v7`,
-    );
-    const got = settingsHealShaPlumbingMismatches(doubled).map((m) => m.expected);
-    expect(got.some((e) => e.includes("exactly one apply-job checkout"))).toBe(true);
-  });
-
-  test("a select-job checkout added after the fallback re-checkout is refused for the same reason", () => {
-    const trailing = valid.replace(
-      "      - run: bun .github/scripts/fleet/select_settings_repos.ts",
-      `      - uses: actions/checkout@v7
-      - run: bun .github/scripts/fleet/select_settings_repos.ts`,
-    );
-    const got = settingsHealShaPlumbingMismatches(trailing).map((m) => m.expected);
-    expect(got.some((e) => e.includes("fallback re-checkout LAST"))).toBe(true);
-  });
-
-  test("a renamed gate step id is refused - every steps.gate.* read would silently empty", () => {
-    const renamed = valid.replace("        id: gate", "        id: green-gate");
-    const got = settingsHealShaPlumbingMismatches(renamed).map((m) => m.expected);
-    expect(got.some((e) => e.includes("id: gate"))).toBe(true);
-  });
-
-  test("an echo-shaped reinstall never counts - the fallback must actually install dependencies", () => {
-    // Trim-equal like the gate match: a run CONTAINING the command
-    // without running it must not satisfy the trio.
-    const echoed = valid.replace(
-      "        run: bun install --frozen-lockfile",
-      "        run: echo bun install --frozen-lockfile",
-    );
-    const got = settingsHealShaPlumbingMismatches(echoed).map((m) => m.expected);
-    expect(got.some((e) => e.includes("fallback trio conditioned"))).toBe(true);
-  });
-
-  test("a gate-shaped echo decoy never satisfies the id pin for a renamed real gate", () => {
-    // Trim-equal command matching: the decoy's run CONTAINS the command
-    // but is not it, so the renamed real gate is still the step judged.
-    const spoofed = valid.replace("        id: gate", "        id: renamed").replace(
-      "      - uses: actions/checkout@v7\n      - name: Require a green commit",
-      `      - uses: actions/checkout@v7
-      - name: decoy
-        id: gate
-        run: echo "bun .github/scripts/fleet/require_green_commit.ts"
-      - name: Require a green commit`,
-    );
-    const got = settingsHealShaPlumbingMismatches(spoofed).map((m) => m.expected);
-    expect(got.some((e) => e.includes("id: gate"))).toBe(true);
-  });
-
-  test("a trio reordered to install before the re-checkout is refused - red-tip deps over green files", () => {
-    const reordered = valid
-      .replace(
-        "      - name: Check out the resolved green commit\n        if: steps.gate.outputs.fallback == 'true'\n        uses: actions/checkout@v7\n        with:\n          ref: ${{ steps.gate.outputs.sha }}\n",
-        "",
-      )
-      .replace(
-        "      - run: bun .github/scripts/fleet/select_settings_repos.ts",
-        `      - name: Check out the resolved green commit
-        if: steps.gate.outputs.fallback == 'true'
-        uses: actions/checkout@v7
-        with:
-          ref: \${{ steps.gate.outputs.sha }}
-      - run: bun .github/scripts/fleet/select_settings_repos.ts`,
-      );
-    const got = settingsHealShaPlumbingMismatches(reordered).map((m) => m.expected);
-    expect(got.some((e) => e.includes("the fallback trio in order"))).toBe(true);
-  });
-
-  // The live-file forcing test the guard registry's settings-* entries
-  // name: the exact structural judgment the ssot rule runs on the REAL
-  // workflow, so unarming any pinned link goes red here (a missing link
-  // silently reverts a checkout to the trigger ref - actions/checkout
-  // treats an empty ref as the default).
-  test("the settings-repos sha plumbing is ARMED: every link the ssot rule pins holds on the live workflow", () => {
-    expect(settingsHealShaPlumbingMismatches(live())).toEqual([]);
+  test("the settings-repos green gate is ARMED: the live workflow passes the rule's judgment", () => {
+    expect(settingsGreenGateMismatches(live())).toEqual([]);
   });
 });
 

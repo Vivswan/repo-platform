@@ -15,12 +15,11 @@
 # reusable-apply-settings.yml, which computes the same merge.
 #
 # Three ways in, one apply: post-green.yml's settings-fleet leg CALLS
-# this workflow in a green main push's own CI run (when the merge touched
-# a settings input - fleet/settings_inputs_changed.ts owns that path
-# list - or after its fleet sync, for the synced repos), the nightly cron
-# heals out-of-band drift, and a dispatch applies or checks by hand. No
-# push trigger: the apply reaches the fleet only behind the all-green
-# gate, and the post-green call is that gate's one exit.
+# this workflow in every green main push's own CI run (every target,
+# after the run's fleet sync when one ran), the nightly cron heals
+# out-of-band drift, and a dispatch applies or checks by hand. No push
+# trigger: the apply reaches the fleet only behind the all-green gate,
+# and the post-green call is that gate's one exit.
 
 name: Settings Repos
 
@@ -90,16 +89,10 @@ jobs:
   select:
     runs-on: ubuntu-latest
     # Room for the green gate's bounded wait (up to 20 minutes on a
-    # dispatch) plus, on the scheduled fallback path, the bounded
-    # green-commit walk (up to 50 verdict probes) on top of selection
-    # itself.
-    timeout-minutes: 45
+    # dispatch) on top of selection itself.
+    timeout-minutes: 30
     outputs:
       targets: ${{ steps.targets.outputs.targets }}
-      # The commit the gate vouched for: the tip (the judged commit on a
-      # called run), or on the scheduled heal's fallback path the newest
-      # green commit behind a red tip. Every later checkout pins to it.
-      sha: ${{ steps.gate.outputs.sha }}
     steps:
       # A missing token is a misconfiguration of this repo: fail loudly.
       # So is a narrowed one here: settings need Administration + Issues
@@ -127,60 +120,16 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      # THE FLEET-WIDE WRITER'S GREEN GATE. This workflow mutates every
-      # managed repository's settings from a checkout's layer files,
-      # and the apply's label reconciliation deletes undeclared labels -
-      # so it must never run from a commit CI has not vouched for, or a
-      # broken layer change reaches the fleet concurrently with the CI
-      # run that would have caught it. Same predicate the template
-      # publisher and the sync enforce (shared/all_green.ts), and the
-      # same ref guard as the publisher: a dispatch aimed at a branch is
-      # refused outright, since a branch CI run vouches only for that
-      # branch. A CALLED run (SOURCE_SHA set) rides the judged commit's
-      # own CI run behind the all-green job: the gate requires the input
-      # to be this run's commit and reads the verdict through the
-      # publisher's bounded poll (the Checks API can trail the gate job
-      # by a moment). A
-      # dispatch waits out the race with the tip's CI run, then gates
-      # hard - except on the SCHEDULED heal, where a red tip falls back
-      # to the newest green commit behind it (itself vouched by the same
-      # predicate; the bounded walk's exhaustion still halts). The
-      # resolved sha is this step's output, and every later checkout
-      # pins to it.
+      # THE FLEET-WIDE WRITER'S GREEN GATE: the apply's label reconciliation
+      # deletes undeclared labels, so no commit CI has not vouched for may
+      # reach the fleet. Per-trigger behavior and the red-tip halt:
+      # docs/settings.md. The halt is this step's failure - the job stops
+      # here, so no target is selected and no apply runs.
       - name: Require a green commit
-        id: gate
         env:
           GH_TOKEN: ${{ github.token }}
           SOURCE_SHA: ${{ inputs.sha }}
         run: bun .github/scripts/fleet/require_green_commit.ts
-
-      # The scheduled fallback path re-checks THIS job out at the
-      # resolved green commit before anything reads the tree: the
-      # selection scripts, the registry, and later the apply job's layer
-      # files must all come from the one revision CI vouched for - tip
-      # scripts reading green-commit data would be an unvouched hybrid
-      # no CI run ever saw. Toolchain and dependencies are re-pinned
-      # from that commit for the same reason. The residual this cannot
-      # reach: the workflow FILE itself (this orchestration, its step
-      # conditions, the settings action's pin) always executes from the
-      # tip - a scheduled run loads the default branch's workflow - so a
-      # broken-but-parseable workflow edit still steers a fallback run.
-      # CI gating every workflow change is the counterweight, the same
-      # trade the build channel documents.
-      - name: Check out the resolved green commit
-        if: steps.gate.outputs.fallback == 'true'
-        uses: actions/checkout@v7
-        with:
-          ref: ${{ steps.gate.outputs.sha }}
-
-      - uses: oven-sh/setup-bun@v2
-        if: steps.gate.outputs.fallback == 'true'
-        with:
-          bun-version-file: .bun-version
-
-      - name: Reinstall dependencies at the resolved commit
-        if: steps.gate.outputs.fallback == 'true'
-        run: bun install --frozen-lockfile
 
       # One matrix entry per target repo. Probes retry and then
       # warn-and-skip a repo they cannot answer for; only
@@ -233,14 +182,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      # Pinned to the commit the select job's green gate vouched for: the
-      # tip on called and dispatch runs (where it equals the trigger sha),
-      # the newest green commit behind a red tip on the scheduled heal's
-      # fallback path - scripts and layer files from one vouched revision.
+      # The trigger commit, the one the select job's green gate vouched
+      # for: github.sha is fixed for the run, so both jobs read scripts
+      # and layer files from one vouched revision (no ref override here -
+      # the settings-green-gate ssot rule pins that).
       - name: Check out repository
         uses: actions/checkout@v7
-        with:
-          ref: ${{ needs.select.outputs.sha }}
 
       - uses: oven-sh/setup-bun@v2
         with:

@@ -1,17 +1,16 @@
 #!/usr/bin/env bun
 // settings-repos.yml's green gate: the one fleet-wide settings writer applies only from a commit
-// with a green all-green check (shared/all_green.ts). Per trigger - the called run's own sha, a
-// dispatch's tip, the nightly heal's newest green commit behind a red tip - see docs/settings.md.
+// with a green all-green check (shared/all_green.ts). A red tip halts the run on every trigger,
+// the nightly heal included - fix main, then the next nightly or a manual dispatch applies
+// (docs/settings.md).
 
-import { appendFileSync } from "node:fs";
 import {
   allGreenFailure,
   type GhRunner,
   type VerdictWait,
   verdictPending,
 } from "../shared/all_green.ts";
-import { env, fail, requireEnv, setOutput, warning } from "../shared/gha.ts";
-import { type GreenWalkOutcome, newestGreenCommit } from "./newest_green_commit.ts";
+import { env, fail, requireEnv } from "../shared/gha.ts";
 
 export interface GreenWaitOptions {
   deadlineMs?: number;
@@ -88,133 +87,67 @@ function main(): void {
         "alone. Dispatch this workflow on the default branch.",
     );
   }
-  // decideGreenCommit throws for a malformed wait bound (boundedMs); the
-  // exit belongs to this CLI wrapper, not the library function. Read with
-  // a fallback, not required: the event name only matters on the ungreen
-  // path, and an unset one degrades to the STRICTER tip-gated refusal.
-  // SOURCE_SHA set is the called path; empty is a schedule or dispatch
-  // run, whose inputs context has no sha.
+  // tipRefusal throws for a malformed wait bound (boundedMs); the exit
+  // belongs to this CLI wrapper, not the library function. SOURCE_SHA set
+  // is the called path; empty is a schedule or dispatch run, whose inputs
+  // context has no sha.
   const sourceSha = env("SOURCE_SHA", "");
-  let decision: GateDecision;
+  let refusal: string | null;
   try {
-    decision =
-      sourceSha === ""
-        ? decideGreenCommit(repository, sha, env("GITHUB_EVENT_NAME", ""))
-        : decideCalledCommit(repository, sha, sourceSha);
+    refusal =
+      sourceSha === "" ? tipRefusal(repository, sha) : calledRefusal(repository, sha, sourceSha);
   } catch (error) {
     fail(error instanceof Error ? error.message : String(error));
   }
-  if ("refusal" in decision) {
-    fail(decision.refusal);
-  }
-  // The workflow's later checkouts pin to this output on every path, so
-  // the sha the apply reads is always the one this gate vouched for.
-  setOutput("sha", decision.sha);
-  setOutput("fallback", String(decision.fallback));
-  if (!decision.fallback) {
-    console.log(`commit ${sha.slice(0, 12)} is green; the settings apply may proceed`);
-    return;
-  }
-  // An apply-from-behind is a visible event, never silent: a warning
-  // annotation on the run plus a step-summary line, both naming the
-  // commit applied from AND the red tip it stands in for.
-  const applied = `healing from ${decision.sha} (${decision.behind} commit(s) behind), tip ${sha} is not green - ${decision.tipReason}`;
-  warning(`scheduled settings heal falling back: ${applied}`);
-  const summary = env("GITHUB_STEP_SUMMARY");
-  if (summary !== "") {
-    appendFileSync(summary, `### Scheduled heal fell back to a green commit\n- ${applied}\n`);
-  }
+  if (refusal !== null) fail(refusal);
+  console.log(`commit ${sha.slice(0, 12)} is green; the settings apply may proceed`);
 }
 
-/** The gate's whole verdict, workflow-facing: the commit to apply from
- *  (the tip, or on the scheduled fallback path a green ancestor with the
- *  evidence for the report), or the refusal that fails the run. */
-export type GateDecision =
-  | { sha: string; fallback: false }
-  | { sha: string; fallback: true; behind: number; tipReason: string }
-  | { refusal: string };
-
-export interface GateOptions extends GreenWaitOptions {
-  /** Injectable walk for tests; the default is the real bounded one,
-   *  handed this gate's gh runner when one was injected. */
-  walk?: (repository: string, tip: string) => GreenWalkOutcome;
-}
-
-/** Tip green: apply from the tip. Tip ungreen on push/dispatch: refuse -
- *  applying THAT commit is those runs' point. Tip ungreen on schedule:
- *  the heal re-asserts known-good state, so fall back to the newest green
- *  commit behind the tip - itself vouched by the same predicate - and
- *  refuse only when the bounded walk finds none (the halt as the floor). */
-export function decideGreenCommit(
+/** Null when the tip may be applied from, else the halt. Every trigger
+ *  halts alike on a red tip: the nightly heal never applies from an older
+ *  green commit, so a red nightly is the signal that drift goes unhealed. */
+export function tipRefusal(
   repository: string,
   sha: string,
-  eventName: string,
-  options: GateOptions = {},
-): GateDecision {
+  options: GreenWaitOptions = {},
+): string | null {
   const notGreen = waitForGreen(repository, sha, options);
-  if (notGreen === null) return { sha, fallback: false };
-  if (eventName !== "schedule") {
-    return {
-      refusal:
-        `refusing the settings apply: commit ${sha.slice(0, 12)} is not green - ${notGreen}. ` +
-        "This workflow writes settings fleet-wide from this checkout's layer files, and its " +
-        "label reconciliation deletes undeclared labels, so it only runs from commits CI has " +
-        "vouched for. Get CI green at this commit (or push a fix), then re-run.",
-    };
-  }
-  const walk =
-    options.walk ??
-    ((repo: string, tip: string) =>
-      options.gh === undefined
-        ? newestGreenCommit(repo, tip)
-        : newestGreenCommit(repo, tip, { gh: options.gh }));
-  const outcome = walk(repository, sha);
-  if (outcome.sha === null) {
-    return {
-      refusal:
-        `refusing the scheduled settings heal: tip ${sha.slice(0, 12)} is not green - ${notGreen} - ` +
-        `and no green fallback commit exists behind it (${outcome.refusal}). ` +
-        "The heal stays halted until main has a green commit inside the walk's bounds: " +
-        "get CI green at the tip, or push a fix.",
-    };
-  }
-  return { sha: outcome.sha, fallback: true, behind: outcome.behind, tipReason: notGreen };
+  if (notGreen === null) return null;
+  return (
+    `refusing the settings apply: commit ${sha.slice(0, 12)} is not green - ${notGreen}. ` +
+    "This workflow writes settings fleet-wide from this checkout's layer files, and its " +
+    "label reconciliation deletes undeclared labels, so it only runs from commits CI has " +
+    "vouched for. Fix main (get CI green at this commit, or push a fix): the next nightly " +
+    "heal or a manual dispatch then applies."
+  );
 }
 
-/** The called path's verdict: `sourceSha` (the caller's judged commit)
- *  must be the run's own `sha` - the workflow's checkouts read GITHUB_SHA,
- *  so any other value would apply a tree the gate never vouched for - and
- *  must carry a completed all-green success. The read is the shared
- *  predicate's default bounded poll, the template publisher's: the Checks
- *  API can still show the gate job's check run in progress moments after
- *  that job released this leg. Fail-closed past the bound. */
-export function decideCalledCommit(
+/** The called path: `sourceSha` must be the run's own `sha` (the checkouts
+ *  read GITHUB_SHA) and carry a completed all-green success, read through
+ *  the publisher's bounded poll - the Checks API can trail the gate job. */
+export function calledRefusal(
   repository: string,
   sha: string,
   sourceSha: string,
   options: { gh?: GhRunner; wait?: VerdictWait } = {},
-): GateDecision {
+): string | null {
   if (!/^[0-9a-f]{40}$/.test(sourceSha)) {
-    return { refusal: `SOURCE_SHA is not a full commit sha (got '${sourceSha}')` };
+    return `SOURCE_SHA is not a full commit sha (got '${sourceSha}')`;
   }
   if (sourceSha !== sha) {
-    return {
-      refusal:
-        `refusing the called settings apply: the sha input ${sourceSha.slice(0, 12)} is not this ` +
-        `run's own commit ${sha.slice(0, 12)}. A called run applies the judged commit of the CI run ` +
-        "that called it (post-green.yml), whose checkouts read that commit; nothing else is vouched for.",
-    };
+    return (
+      `refusing the called settings apply: the sha input ${sourceSha.slice(0, 12)} is not this ` +
+      `run's own commit ${sha.slice(0, 12)}. A called run applies the judged commit of the CI run ` +
+      "that called it (post-green.yml), whose checkouts read that commit; nothing else is vouched for."
+    );
   }
   const notGreen = allGreenFailure(repository, sha, options.gh, options.wait);
-  if (notGreen !== null) {
-    return {
-      refusal:
-        `refusing the called settings apply: commit ${sha.slice(0, 12)} is not green - ${notGreen}. ` +
-        "The caller must be needs-ordered behind the all-green job of the same run, so a verdict " +
-        "still missing or pending after the wait means the call arrived from somewhere else.",
-    };
-  }
-  return { sha, fallback: false };
+  if (notGreen === null) return null;
+  return (
+    `refusing the called settings apply: commit ${sha.slice(0, 12)} is not green - ${notGreen}. ` +
+    "The caller must be needs-ordered behind the all-green job of the same run, so a verdict " +
+    "still missing or pending after the wait means the call arrived from somewhere else."
+  );
 }
 
 if (import.meta.main) {

@@ -288,32 +288,10 @@ export function mustMatch(text: string, re: RegExp, where: string, what: string)
 export const CHECK_RUN_LOOKUP =
   "`repos/${repository}/commits/${sha}/check-runs?check_name=${CHECK_NAME}";
 
-// The two Actions expressions the heal's sha plumbing routes through,
-// pinned as data so the structural checks below and the workflow can
-// never drift apart silently.
-const GATE_SHA_EXPR = "${{ steps.gate.outputs.sha }}";
-const SELECT_SHA_EXPR = "${{ needs.select.outputs.sha }}";
-const FALLBACK_IF = "steps.gate.outputs.fallback == 'true'";
-
-/** The settings heal's sha plumbing, judged STRUCTURALLY on the parsed
- *  workflow (exported so the forcing tests run the exact judgment the
- *  rule runs): the green gate resolves the one commit the run may write
- *  from, and every link that carries it to a checkout is validated on
- *  the owning YAML node, never by a floating text match - a matching
- *  line on a decoy step must not stand in for the real wiring. Links:
- *  the gate step carries `id: gate` (the outputs' key - renamed, every
- *  reference silently reads empty; found by its exact command, exactly
- *  once), the select job's `sha` output republishes it, the fallback
- *  trio (re-checkout + setup-bun + reinstall, each conditioned on the
- *  fallback output, in that order) lands the SELECT job on it with the
- *  re-checkout as the job's LAST checkout, and the apply job's ONLY
- *  checkout pins to the select output - "only" and
- *  "last" because a later unpinned checkout would silently replace the
- *  vouched tree with the trigger ref, which is also why every absent
- *  link fails: actions/checkout treats a missing or empty ref as the
- *  default (probe C: deleting the apply ref line was invisible to every
- *  local gate). */
-export function settingsHealShaPlumbingMismatches(text: string): Mismatch[] {
+/** settings-repos.yml's green gate, judged on the parsed workflow (exported
+ *  for the forcing tests). A ref-free actions/checkout lands on the trigger
+ *  commit the gate judged, which is why every job gets exactly one. */
+export function settingsGreenGateMismatches(text: string): Mismatch[] {
   const rel = ".github/workflows/settings-repos.yml";
   const mismatches: Mismatch[] = [];
   const mapping = (value: unknown): Record<string, unknown> =>
@@ -322,129 +300,49 @@ export function settingsHealShaPlumbingMismatches(text: string): Mismatch[] {
       : {};
   const steps = (job: Record<string, unknown>): Record<string, unknown>[] =>
     Array.isArray(job.steps) ? (job.steps as unknown[]).map(mapping) : [];
-  const isCheckout = (step: Record<string, unknown>): boolean =>
-    String(step.uses ?? "").startsWith("actions/checkout@");
   const jobs = mapping(mapping(parseYaml(text)).jobs);
-  const select = mapping(jobs.select);
-  const selectSteps = steps(select);
+  const selectSteps = steps(mapping(jobs.select));
   if (selectSteps.length === 0) throw new Error(`${rel}: no select job steps - anchor lost`);
-
-  // The gate step by its EXACT command (trim-equal, never a substring:
-  // an echo decoy carrying the command in its text must not be the step
-  // found while the real gate, renamed, keeps running), and exactly one
-  // of it - two would make "the" gate ambiguous.
-  const gates = selectSteps.filter(
-    (step) => String(step.run ?? "").trim() === "bun .github/scripts/fleet/require_green_commit.ts",
-  );
-  if (gates.length !== 1) {
-    throw new Error(
-      `${rel}: expected exactly one green-gate step (run: bun .github/scripts/fleet/require_green_commit.ts), found ${gates.length} - anchor lost`,
+  // Trim-equal, never a substring: an `echo bun ...` decoy carries the
+  // command in its text without running it.
+  const runs = selectSteps.map((step) => String(step.run ?? "").trim());
+  const gateAt = runs.indexOf("bun .github/scripts/fleet/require_green_commit.ts");
+  const selectAt = runs.indexOf("bun .github/scripts/fleet/select_settings_repos.ts");
+  if (selectAt === -1) throw new Error(`${rel}: no target-selection step - anchor lost`);
+  if (gateAt === -1) {
+    mismatches.push({
+      file: rel,
+      expected: "a select-job step running fleet/require_green_commit.ts",
+      got: "missing - the fleet-wide settings writer would run ungated from raw pushes",
+    });
+  } else if (gateAt > selectAt) {
+    mismatches.push({
+      file: rel,
+      expected: "the green gate BEFORE the target selection",
+      got: "the gate runs after targets are computed",
+    });
+  } else if (String(selectSteps[gateAt].if ?? "") !== "") {
+    mismatches.push({
+      file: rel,
+      expected: "an unconditional green gate (every trigger reads main's tip)",
+      got: `if: ${String(selectSteps[gateAt].if)}`,
+    });
+  }
+  for (const [name, job] of Object.entries(jobs)) {
+    const checkouts = steps(mapping(job)).filter((step) =>
+      String(step.uses ?? "").startsWith("actions/checkout@"),
     );
-  }
-  const gate = gates[0];
-  if (String(gate.id ?? "") !== "gate") {
-    mismatches.push({
-      file: rel,
-      expected: "the green-gate step carrying `id: gate` (the sha/fallback outputs' key)",
-      got:
-        gate.id === undefined
-          ? "no id - every steps.gate.* read is silently empty"
-          : `id: ${String(gate.id)}`,
-    });
-  }
-
-  const outputSha = String(mapping(select.outputs).sha ?? "");
-  if (outputSha !== GATE_SHA_EXPR) {
-    mismatches.push({
-      file: rel,
-      expected: `the select job output sha: ${GATE_SHA_EXPR}`,
-      got:
-        outputSha === "" ? "no sha output - the apply job's checkout ref reads empty" : outputSha,
-    });
-  }
-
-  const trio = selectSteps.filter((step) => String(step.if ?? "") === FALLBACK_IF);
-  const trioCheckouts = trio.filter(isCheckout);
-  const trioSetups = trio.filter((step) =>
-    String(step.uses ?? "").startsWith("oven-sh/setup-bun@"),
-  );
-  // Trim-equal like the gate match: an `echo bun install ...` shaped run
-  // contains the command without running it, so a substring read would
-  // pass a fallback that never reinstalls.
-  const trioInstalls = trio.filter(
-    (step) => String(step.run ?? "").trim() === "bun install --frozen-lockfile",
-  );
-  if (
-    trio.length !== 3 ||
-    trioCheckouts.length !== 1 ||
-    trioSetups.length !== 1 ||
-    trioInstalls.length !== 1
-  ) {
-    mismatches.push({
-      file: rel,
-      expected: `a fallback trio conditioned on ${FALLBACK_IF}: one re-checkout, one setup-bun, one dependency reinstall`,
-      got: `${trio.length} conditioned step(s) (${trioCheckouts.length} checkout, ${trioSetups.length} setup-bun, ${trioInstalls.length} reinstall)`,
-    });
-  } else if (
-    // The trio in STRICT order: checkout, then setup-bun, then
-    // reinstall (>= so one step matching two roles can never satisfy
-    // "precedes" by being itself). Membership alone would pass a
-    // reordering that pins the toolchain or installs dependencies
-    // BEFORE the green tree lands - red-tip toolchain and deps running
-    // over green-commit files, the exact hybrid the re-checkout exists
-    // to prevent.
-    selectSteps.indexOf(trioCheckouts[0]) >= selectSteps.indexOf(trioSetups[0]) ||
-    selectSteps.indexOf(trioSetups[0]) >= selectSteps.indexOf(trioInstalls[0])
-  ) {
-    mismatches.push({
-      file: rel,
-      expected:
-        "the fallback trio in order - re-checkout, then setup-bun, then reinstall - so toolchain and dependencies are pinned FROM the green tree",
-      got: "a trio step runs before the tree it must read from lands",
-    });
-  } else if (String(mapping(trioCheckouts[0].with).ref ?? "") !== GATE_SHA_EXPR) {
-    // Validated on the OWNING step: a decoy checkout elsewhere carrying
-    // the right ref must never vouch for a rewired fallback checkout.
-    mismatches.push({
-      file: rel,
-      expected: `the fallback re-checkout pinned to ref: ${GATE_SHA_EXPR}`,
-      got:
-        String(mapping(trioCheckouts[0].with).ref ?? "") === ""
-          ? "no ref - the re-checkout lands on the trigger ref again, a silent no-op fallback"
-          : `ref: ${String(mapping(trioCheckouts[0].with).ref)}`,
-    });
-  } else {
-    const selectCheckouts = selectSteps.filter(isCheckout);
-    if (selectCheckouts.length !== 2 || selectCheckouts[1] !== trioCheckouts[0]) {
+    if (checkouts.length !== 1) {
       mismatches.push({
         file: rel,
-        expected:
-          "exactly two select-job checkouts, the fallback re-checkout LAST (a later checkout would silently replace the vouched tree)",
-        got: `${selectCheckouts.length} checkout step(s)`,
+        expected: `exactly one checkout in the ${name} job (a second one could replace the judged tree)`,
+        got: `${checkouts.length} checkout step(s)`,
       });
-    }
-  }
-
-  const applySteps = steps(mapping(jobs.apply));
-  if (applySteps.length === 0) throw new Error(`${rel}: no apply job steps - anchor lost`);
-  const applyCheckouts = applySteps.filter(isCheckout);
-  if (applyCheckouts.length !== 1) {
-    mismatches.push({
-      file: rel,
-      expected:
-        "exactly one apply-job checkout (a second one could silently replace the pinned tree)",
-      got: `${applyCheckouts.length} checkout step(s)`,
-    });
-  } else {
-    const applyRef = String(mapping(applyCheckouts[0].with).ref ?? "");
-    if (applyRef !== SELECT_SHA_EXPR) {
+    } else if ("ref" in mapping(checkouts[0].with)) {
       mismatches.push({
         file: rel,
-        expected: `the apply job's checkout pinned to ref: ${SELECT_SHA_EXPR}`,
-        got:
-          applyRef === ""
-            ? "no ref - the apply silently checks out the trigger ref, unpinning the fallback path"
-            : `ref: ${applyRef}`,
+        expected: `the ${name} job's checkout without a ref - it lands on the trigger commit the gate judged`,
+        got: `ref: ${String(mapping(checkouts[0].with).ref)}`,
       });
     }
   }
@@ -7167,66 +7065,10 @@ const rules: Rule[] = [
   },
 
   {
-    // settings-repos.yml is the one fleet-wide settings WRITER, and its
-    // green gate is a plain step of the select job - trimming it would
-    // leave the workflow applying from raw pushed commits again, with
-    // every other gate green. Pinned on the parsed steps (a mention in a
-    // comment cannot satisfy it), before the target selection so an
-    // ungreen commit never even computes a matrix. Self-contained like
-    // the rule above.
+    // The one fleet-wide settings WRITER's gate: trimming it would leave the
+    // workflow applying from raw pushed commits with every other gate green.
     name: "settings-green-gate",
-    run: () => {
-      const mismatches: Mismatch[] = [];
-      const rel = ".github/workflows/settings-repos.yml";
-      const mapping = (value: unknown): Record<string, unknown> =>
-        typeof value === "object" && value !== null && !Array.isArray(value)
-          ? (value as Record<string, unknown>)
-          : {};
-      const select = mapping(mapping(mapping(parseYaml(read(rel))).jobs).select);
-      const steps = Array.isArray(select.steps) ? select.steps.map(mapping) : [];
-      if (steps.length === 0) throw new Error(`${rel}: no select job steps - anchor lost`);
-      const runs = steps.map((step) => String(step.run ?? ""));
-      const gateAt = runs.findIndex((run) =>
-        run.includes("bun .github/scripts/fleet/require_green_commit.ts"),
-      );
-      const selectAt = runs.findIndex((run) =>
-        run.includes("bun .github/scripts/fleet/select_settings_repos.ts"),
-      );
-      if (selectAt === -1) throw new Error(`${rel}: no target-selection step - anchor lost`);
-      if (gateAt === -1) {
-        mismatches.push({
-          file: rel,
-          expected: "a select-job step running fleet/require_green_commit.ts",
-          got: "missing - the fleet-wide settings writer would run ungated from raw pushes",
-        });
-      } else if (gateAt > selectAt) {
-        mismatches.push({
-          file: rel,
-          expected: "the green gate BEFORE the target selection",
-          got: "the gate runs after targets are computed",
-        });
-      } else if (String(steps[gateAt].if ?? "") !== "") {
-        mismatches.push({
-          file: rel,
-          expected: "an unconditional green gate (every trigger reads main's tip)",
-          got: `if: ${String(steps[gateAt].if)}`,
-        });
-      }
-      return mismatches;
-    },
-  },
-
-  {
-    // The heal's SHA PLUMBING: the green gate resolves the one commit
-    // the run may write from (the tip, or the scheduled fallback's green
-    // ancestor) and every checkout must consume it. Judged structurally
-    // on the parsed workflow by settingsHealShaPlumbingMismatches (whose
-    // header records the links and the decoy shapes it exists to catch);
-    // probe C proved the gap: deleting the apply checkout's ref was
-    // invisible to every local gate while the job silently reverted to
-    // the trigger ref. Self-contained like the rule above.
-    name: "settings-heal-sha-plumbing",
-    run: () => settingsHealShaPlumbingMismatches(read(".github/workflows/settings-repos.yml")),
+    run: () => settingsGreenGateMismatches(read(".github/workflows/settings-repos.yml")),
   },
 
   {
@@ -7597,7 +7439,6 @@ export const RULE_ROSTER = [
   "stamp-hook-path",
   "settings-apply-merged-input",
   "settings-green-gate",
-  "settings-heal-sha-plumbing",
   "fleet-writers-ride-post-green",
   "settings-hidden-step-notices",
   "settings-label-preflight",

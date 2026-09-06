@@ -175,90 +175,6 @@ export const GUARD_REGISTRY: readonly GuardEntry[] = [
       "the empty-needs refusal is ARMED: a needs list emptied by refactor never reads green",
   },
   {
-    id: "walk-commit-bound",
-    hazard:
-      "a long-red main turns the scheduled heal's green-commit walk into an unbounded probe loop, and a green commit arbitrarily far behind the tip is applied as if it were current state",
-    guardFile: ".github/scripts/fleet/newest_green_commit.ts",
-    snippet: "if (behind > maxCommits) {",
-    mutated: "if (false) {",
-    testFile: "tests/fleet/newest_green_commit.test.ts",
-    testName: "a green commit beyond the walk's commit bound is NOT vouched - the heal refuses",
-  },
-  {
-    id: "walk-age-bound",
-    hazard:
-      "a main red for weeks lets the scheduled heal quietly roll the fleet's settings back to a weeks-old green commit instead of halting where a human must look",
-    guardFile: ".github/scripts/fleet/newest_green_commit.ts",
-    snippet: "if (!(ageMs >= -DAY_MS && ageMs <= maxAgeMs)) {",
-    mutated: "if (false) {",
-    testFile: "tests/fleet/newest_green_commit.test.ts",
-    testName: "a green commit older than the walk's age bound is NOT vouched - the heal refuses",
-  },
-  {
-    id: "walk-vouches-candidates",
-    hazard:
-      "an unprobed fallback commit reaches the fleet-wide settings writer: without the per-candidate all-green vouch the walk returns the first ancestor regardless of its CI verdict",
-    guardFile: ".github/scripts/fleet/newest_green_commit.ts",
-    snippet: "allGreenFailure(repository, candidate.sha, gh, { deadlineMs: 0 })",
-    mutated: "null",
-    testFile: "tests/fleet/newest_green_commit.test.ts",
-    testName:
-      "a red ancestor is never chosen: the walk vouches each candidate and picks the green one behind it",
-  },
-  // The heal's sha plumbing (settings-repos.yml): four links between the
-  // green gate's resolved commit and the checkouts that must consume it.
-  // Probe C staged the attack: deleting the apply checkout's ref was
-  // invisible to every local gate - actions/checkout treats a missing or
-  // empty ref as the trigger ref, so the run stays green while the
-  // fallback path silently applies unvouched tip state. The forcing
-  // tests run the settings-heal-sha-plumbing ssot rule's structural
-  // judgment (settingsHealShaPlumbingMismatches) on the REAL workflow.
-  {
-    id: "settings-gate-sha-output",
-    hazard:
-      "the select job's sha output deleted: steps.gate's resolved commit never reaches the apply job, whose checkout ref reads empty and silently reverts to the trigger ref",
-    guardFile: ".github/workflows/settings-repos.yml",
-    snippet: "      sha: ${{ steps.gate.outputs.sha }}",
-    mutated: "",
-    testFile: "tests/scripts/check_ssot.test.ts",
-    testName:
-      "the settings-repos sha plumbing is ARMED: every link the ssot rule pins holds on the live workflow",
-  },
-  {
-    id: "settings-fallback-checkout-condition",
-    hazard:
-      "the fallback re-checkout's condition rewired to never fire: the scheduled heal's select job keeps reading the RED tip's scripts and registry while the apply job reads the green commit - the unvouched hybrid no CI run ever saw",
-    guardFile: ".github/workflows/settings-repos.yml",
-    snippet:
-      "      - name: Check out the resolved green commit\n        if: steps.gate.outputs.fallback == 'true'",
-    mutated: "      - name: Check out the resolved green commit\n        if: false",
-    testFile: "tests/scripts/check_ssot.test.ts",
-    testName:
-      "the settings-repos sha plumbing is ARMED: every link the ssot rule pins holds on the live workflow",
-  },
-  {
-    id: "settings-fallback-checkout-ref",
-    hazard:
-      "the fallback re-checkout's ref deleted: actions/checkout lands on the trigger ref again, so the fallback run's selection scripts and registry come from the red tip while claiming the green commit",
-    guardFile: ".github/workflows/settings-repos.yml",
-    snippet: "          ref: ${{ steps.gate.outputs.sha }}",
-    mutated: "",
-    testFile: "tests/scripts/check_ssot.test.ts",
-    testName:
-      "the settings-repos sha plumbing is ARMED: every link the ssot rule pins holds on the live workflow",
-  },
-  {
-    id: "settings-apply-checkout-pinned",
-    hazard:
-      "the apply job's checkout ref deleted (probe C, verbatim): the fleet-wide writer's layer files come from the trigger ref instead of the gate's vouched commit, green on every local gate",
-    guardFile: ".github/workflows/settings-repos.yml",
-    snippet: "          ref: ${{ needs.select.outputs.sha }}",
-    mutated: "",
-    testFile: "tests/scripts/check_ssot.test.ts",
-    testName:
-      "the settings-repos sha plumbing is ARMED: every link the ssot rule pins holds on the live workflow",
-  },
-  {
     id: "split-entries-unknown-grammar-refusal",
     hazard:
       "a target checkout's manifest declares a grammar the GRAMMAR table has no row for; without the refusal the typed parser dispatch is fed a null key and the carry's failure mode stops being the deliberate refuses-to-guess error",
@@ -562,7 +478,19 @@ export interface RetiredGuard {
   reason: string;
 }
 
-export const RETIRED_GUARDS: readonly RetiredGuard[] = [];
+export const RETIRED_GUARDS: readonly RetiredGuard[] = [
+  // The scheduled settings heal's fallback to the newest green commit
+  // behind a red tip left with its machinery: the heal now halts on a red
+  // main, and every checkout lands on the trigger commit (the
+  // settings-green-gate ssot rule pins that wiring).
+  { id: "walk-commit-bound", reason: "retired with fleet/newest_green_commit.ts" },
+  { id: "walk-age-bound", reason: "retired with fleet/newest_green_commit.ts" },
+  { id: "walk-vouches-candidates", reason: "retired with fleet/newest_green_commit.ts" },
+  { id: "settings-gate-sha-output", reason: "retired with the heal's sha plumbing" },
+  { id: "settings-fallback-checkout-condition", reason: "retired with the heal's sha plumbing" },
+  { id: "settings-fallback-checkout-ref", reason: "retired with the heal's sha plumbing" },
+  { id: "settings-apply-checkout-pinned", reason: "retired with the heal's sha plumbing" },
+];
 
 /** Occurrences of `token` in `text` (exact bytes, no regex). */
 export function countOccurrences(text: string, token: string): number {
